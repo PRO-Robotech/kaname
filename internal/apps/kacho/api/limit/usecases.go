@@ -312,10 +312,25 @@ func (uc *DeleteUseCase) Execute(ctx context.Context, id string) (*operationpb.O
 type ResolveUseCase struct {
 	repo    limitRepo
 	checker authzguard.RelationChecker
+	// logger — ЧИТАТЕЛЬ причины отказа. Заполняется умолчанием в конструкторе, а
+	// не оставляется пустым: несобранный журнал вернул бы ровно то состояние,
+	// ради которого он заводится, — отказ без единой строки о причине (#666).
+	logger *slog.Logger
 }
 
 // NewResolveUseCase — constructor.
-func NewResolveUseCase(r limitRepo) *ResolveUseCase { return &ResolveUseCase{repo: r} }
+func NewResolveUseCase(r limitRepo) *ResolveUseCase {
+	return &ResolveUseCase{repo: r, logger: slog.Default()}
+}
+
+// WithLogger заменяет журнал по умолчанию. Пустой не принимается: молчание — не
+// настройка, а потеря причины.
+func (uc *ResolveUseCase) WithLogger(l *slog.Logger) *ResolveUseCase {
+	if l != nil {
+		uc.logger = l
+	}
+	return uc
+}
 
 // WithQuotaReaderChecker wires the narrow ReBAC gate (defense-in-depth behind the
 // edge's catalog entry). nil-safe: an unwired checker fails CLOSED — an
@@ -350,7 +365,10 @@ func (uc *ResolveUseCase) Execute(ctx context.Context, scopeID, service string) 
 
 	stated, ok, err := uc.repo.StatedFor(ctx, scopeID)
 	if err != nil {
-		return nil, shared.MapRepoErr(err)
+		// Перевод СТИРАЕТ причину (текст INTERNAL фиксирован, текст недоступности
+		// опаковый), поэтому она называется журналу здесь — в том единственном
+		// месте, где ещё цела.
+		return nil, shared.LogRepoErr(ctx, uc.logger, "Resolve", err)
 	}
 	if !ok {
 		// Direct-read lane: accounts and projects are iam's OWN rows.
@@ -368,11 +386,21 @@ type ListChangedUseCase struct {
 	repo    limitRepo
 	cursors deltaCursorCodec
 	checker authzguard.RelationChecker
+	// logger — ЧИТАТЕЛЬ причины отказа; см. одноимённое поле резолва.
+	logger *slog.Logger
 }
 
 // NewListChangedUseCase — constructor.
 func NewListChangedUseCase(r limitRepo, c deltaCursorCodec) *ListChangedUseCase {
-	return &ListChangedUseCase{repo: r, cursors: c}
+	return &ListChangedUseCase{repo: r, cursors: c, logger: slog.Default()}
+}
+
+// WithLogger заменяет журнал по умолчанию. Пустой не принимается.
+func (uc *ListChangedUseCase) WithLogger(l *slog.Logger) *ListChangedUseCase {
+	if l != nil {
+		uc.logger = l
+	}
+	return uc
 }
 
 // WithQuotaReaderChecker wires the narrow ReBAC gate. nil-safe, fail-closed.
@@ -409,7 +437,10 @@ func (uc *ListChangedUseCase) Execute(ctx context.Context, cursor string, pageSi
 
 	rows, next, err := uc.repo.ChangedSince(ctx, after, int(size))
 	if err != nil {
-		return ChangedResult{}, shared.MapRepoErr(err)
+		// Единственная полоса, на которой тянущий узнаёт об отказе. Без строки
+		// здесь причину назвать нечем: клиенту достаётся фиксированный текст, а
+		// журнала доступа у сервиса нет.
+		return ChangedResult{}, shared.LogRepoErr(ctx, uc.logger, "ListChangedSince", err)
 	}
 	return ChangedResult{Changes: rows, NextCursor: uc.cursors.Encode(next)}, nil
 }
@@ -431,9 +462,33 @@ func moduleSubject(ctx context.Context) string {
 
 // requireQuotaReader — the narrow gate, shared by both service-facing reads.
 //
-// Returns PermissionDenied (verbatim, non-leaking) on every failure mode:
-// anonymous principal, unwired checker, checker backend error, explicit deny. A
-// checker that cannot answer is not an answer of "yes".
+// ИСХОДОВ ТРИ, И ОНИ РАЗНЫЕ (#665).
+//
+//   - право есть → nil;
+//   - модель ответила «нет» → PermissionDenied. Отказ говорит вызывающему
+//     «повтор бессмыслен»: решение зависит от тройки (субъект, отношение,
+//     объект), и одинаковый повтор не меняет ни одного из трёх;
+//   - вопрос остался БЕЗ ОТВЕТА (хранилище отношений не отвечает, срок вызова
+//     истёк, движок не сконфигурирован) → AuthzBackendUnavailable. О правах это
+//     не говорит ничего, и тот же вопрос мгновением позже получает ответ.
+//
+// Fail-closed не меняется ни в одном из двух отказов: запрос отвергнут, доступа
+// никто не получил. Различается КОД — и код здесь весь сигнал. Схлопнув их, гейт
+// выдаёт терминальный вердикт на мигание: тянущий пределы перестаёт повторять
+// (`retry.OnUnavailable` повторяет ТОЛЬКО недоступность), а на полосе мутации
+// арендатор получает терминальный 403 на создании ресурса вместо повторяемого
+// отказа.
+//
+// Прежняя редакция объявляла ровно обратное — «PermissionDenied на каждом
+// исходе» — при том что сосед по пакету
+// (`authzguard.AuthzBackendUnavailable`) объявляет различие смыслом своего
+// существования, и три соседних стража его соблюдают. Два места об одном
+// предмете, из которых верно было одно.
+//
+// Незаряженный проверяющий (`checker == nil`) остаётся ОТКАЗОМ, а не
+// недоступностью, и это не непоследовательность: несобранный гейт повтором не
+// чинится, поэтому «повтори позже» было бы обещанием, которого никто не
+// исполнит.
 func requireQuotaReader(ctx context.Context, checker authzguard.RelationChecker) error {
 	if checker == nil {
 		return authzguard.PermissionDenied()
@@ -456,17 +511,41 @@ func requireQuotaReader(ctx context.Context, checker authzguard.RelationChecker)
 	// работает от имени арендатора, тот читателем не является, и резолв отказывал
 	// каждой мутации домена. Потом — ТОЛЬКО сертификат: администратор через край
 	// потерял доступ, которым пользуется. Обе проверки нужны вместе.
+	object := "cluster:" + domain.ClusterSingletonID
+
+	// unanswered — неполадка на ЛЮБОМ из заданных вопросов. Хранится, а не
+	// возвращается сразу: разрешению второе мнение не нужно, поэтому «да» второй
+	// личности сильнее неполадки на первой.
+	var unanswered error
+
 	if subject := moduleSubject(ctx); subject != "" {
-		if allowed, err := checker.Check(ctx, subject, quotaReaderRelation, "cluster:"+domain.ClusterSingletonID); err == nil && allowed {
+		allowed, err := checker.Check(ctx, subject, quotaReaderRelation, object)
+		switch {
+		case err != nil:
+			unanswered = err
+		case allowed:
 			return nil
 		}
 	}
 	if subject, ok := authzguard.PrincipalSubject(ctx); ok {
-		// Ошибка хранилища ответом «да» не является: она просто не даёт
-		// разрешения, а разрешения не дала ни одна личность — значит отказ.
-		if allowed, err := checker.Check(ctx, subject, quotaReaderRelation, "cluster:"+domain.ClusterSingletonID); err == nil && allowed {
+		allowed, err := checker.Check(ctx, subject, quotaReaderRelation, object)
+		switch {
+		case err != nil:
+			unanswered = err
+		case allowed:
 			return nil
 		}
+	}
+
+	// Отказ — решение ТОЛЬКО когда каждый заданный вопрос получил ответ. Иначе
+	// «нет» одной личности и молчание другой были бы неотличимы от полного
+	// отказа, а неотличимость и есть предмет. Та же форма — у соседнего гейта
+	// пакета (`authzguard.AllowsVerb`).
+	//
+	// Сырая ошибка наружу не идёт (`security.md` §Hardening #1): текст
+	// хранилища отношений может нести адрес и диагностику движка.
+	if unanswered != nil {
+		return authzguard.AuthzBackendUnavailable()
 	}
 	return authzguard.PermissionDenied()
 }

@@ -396,8 +396,8 @@ func (c Config) validateProductionAuthNSecrets() error {
 		errs = multierr.Append(errs, fmt.Errorf(
 			"production mode: authn.hook-shared-secret is empty (set authn.hook-shared-secret-env / KACHO_IAM_HOOK_TOKEN)"))
 	}
-	if _, err := c.AuthN.ResolveJWKSEncryptionKey(); err != nil {
-		// ResolveJWKSEncryptionKey already reports WHICH setting / what shape is
+	if _, err := c.AuthN.ResolveJWKSEncryptionKeys(); err != nil {
+		// ResolveJWKSEncryptionKeys already reports WHICH setting / what shape is
 		// wrong (empty, bad hex, wrong length) without echoing the value.
 		errs = multierr.Append(errs, fmt.Errorf(
 			"production mode: authn.jwks-encryption-key-hex invalid: %w", err))

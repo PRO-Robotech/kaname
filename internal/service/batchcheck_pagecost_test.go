@@ -10,42 +10,79 @@ import (
 	"time"
 )
 
-// latencyRelations — an Authorizer that records how many store round-trips a pass
-// makes AND how many of them were ever in flight at the same time.
+// latencyRelations — дверь решения, которая ТРАТИТ ВРЕМЯ на каждый вопрос и
+// помнит, сколько вопросов было в полёте одновременно.
 //
-// The second number is the one that matters here and the one a call counter cannot
-// see: a batch resolved one item after another and a batch resolved in parallel
-// issue the SAME number of questions, and differ only in how long the caller waits.
-// A test that counts calls is green on both.
+// Второе число — предмет этого файла, и счётчик вызовов его не видит: проход,
+// разобранный последовательно, и проход, разобранный параллельно, задают ОДНО И
+// ТО ЖЕ число вопросов и различаются лишь тем, сколько ждёт вызывающий.
+//
+// Полосы считаются РАЗДЕЛЬНО — пообъектная и пакетная, — потому что они отвечают
+// на разные вопросы. Общая величина не отличила бы «однородная партия отвечена
+// одним вопросом» от «партия не спросила вовсе», а именно это различие здесь и
+// стало предметом: единица работы сменилась с пункта на ПРОГОН.
 type latencyRelations struct {
 	perCheck time.Duration
 
-	mu       sync.Mutex
-	calls    int
-	inFlight int
-	maxInFly int
+	mu        sync.Mutex
+	perObject int
+	batched   int
+	inFlight  int
+	maxInFly  int
 }
 
-func (m *latencyRelations) CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error) {
+// wait — одна задержка хранилища. Один вопрос — одна задержка, независимо от
+// того, о скольких объектах он спрашивает: в этом и состоит разница полос.
+func (m *latencyRelations) wait(ctx context.Context) {
+	if m.perCheck <= 0 {
+		return
+	}
+	select {
+	case <-time.After(m.perCheck):
+	case <-ctx.Done():
+	}
+}
+
+func (m *latencyRelations) enter() {
 	m.mu.Lock()
-	m.calls++
 	m.inFlight++
 	if m.inFlight > m.maxInFly {
 		m.maxInFly = m.inFlight
 	}
 	m.mu.Unlock()
+}
 
-	if m.perCheck > 0 {
-		select {
-		case <-time.After(m.perCheck):
-		case <-ctx.Done():
-		}
-	}
-
+func (m *latencyRelations) leave() {
 	m.mu.Lock()
 	m.inFlight--
 	m.mu.Unlock()
+}
+
+func (m *latencyRelations) CheckWithContext(ctx context.Context, _, _, _ string,
+	_ map[string]any) (bool, error) {
+	m.mu.Lock()
+	m.perObject++
+	m.mu.Unlock()
+	m.enter()
+	m.wait(ctx)
+	m.leave()
 	return false, nil // every per-object resolve denies: the worst case, and the shape a page filter hits
+}
+
+// BatchCheckWithContext — ПАКЕТНАЯ ДВЕРЬ К ТОМУ ЖЕ ОРАКУЛУ: отказ каждому.
+//
+// Задержка платится ОДИН раз на вопрос, а не на объект: в этом и состоит
+// измеряемая разница. Дублёр, спавший бы по разу на объект, показал бы, что
+// партия ничего не сберегла, — и был бы дублёром другого хранилища, не нашего.
+func (m *latencyRelations) BatchCheckWithContext(ctx context.Context, _, _ string,
+	objects []string, _ map[string]any) ([]bool, error) {
+	m.mu.Lock()
+	m.batched++
+	m.mu.Unlock()
+	m.enter()
+	m.wait(ctx)
+	m.leave()
+	return make([]bool, len(objects)), nil
 }
 
 func (m *latencyRelations) ListSubjects(ctx context.Context, objectType, objectID, relation string, pageSize int, pageToken string) ([]string, string, error) {
@@ -61,14 +98,28 @@ func (m *latencyRelations) Sources(ctx context.Context, objectType, objectID, re
 // пачка задаёт одновременно, а не сколько всего обращений к хранилищу делает
 // ответ. Считать её здесь значило бы смешать две величины и получить число,
 // которого никто не измерял.
-func (m *latencyRelations) DirectRelations(ctx context.Context, subject, objectType, objectID string, limit int) ([]string, error) {
+func (m *latencyRelations) DirectRelations(context.Context, string, string, string, int) ([]string, error) {
 	return nil, nil
 }
 
+// DirectRelationsMany — та же диагностика о странице, и так же вне счёта.
+func (m *latencyRelations) DirectRelationsMany(context.Context, string, string, []string, int) (
+	map[string][]string, error) {
+	return nil, nil
+}
+
+// snapshot — сколько вопросов о вердикте задано ВСЕГО и сколько их было в полёте
+// одновременно. Полосы отдельно отдаёт `lanes`.
 func (m *latencyRelations) snapshot() (calls, maxInFly int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.calls, m.maxInFly
+	return m.perObject + m.batched, m.maxInFly
+}
+
+func (m *latencyRelations) lanes() (perObject, batched int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.perObject, m.batched
 }
 
 // batchOfSameSubject builds the shape a sibling's page filter actually sends: one
@@ -86,62 +137,36 @@ func batchOfSameSubject(n int) []CheckRequest {
 	return reqs
 }
 
-// TestBatchCheck_ResolvesItsItemsConcurrently — AuthorizeService.BatchCheck is the
-// door every sibling service's List filter walks through: vpc/compute/nlb/storage
-// each cut their page into slices of at most 100 ids and hand each slice here.
+// TestBatchCheck_AUniformSliceIsOneQuestion — партия, какой её присылает фильтр
+// списка соседа, стоит ОДИН вопрос хранилищу.
 //
-// The number of store questions is not what this asserts — it is the same either
-// way, one per item, and that is inherent to a per-object predicate. What it
-// asserts is that those questions are not made to WAIT ON EACH OTHER inside one
-// request, because the caller's deadline is per REQUEST: a sibling gives this call
-// one second (authzfilter.DefaultConfig().Timeout) for the whole slice of 100. If
-// the slice is resolved one item after another, its wall time is 100 × the store's
-// answer time, so a store answering in 10ms consumes the entire budget and anything
-// slower fails the caller's whole POSITIVE List closed with UNAVAILABLE — the
-// failure mode the sibling's own bounded fan-out was written to remove, sitting one
-// hop further in than that fan-out can see.
+// Здесь стояло обратное утверждение — «один вопрос на пункт присущ предикату,
+// и это НЕ то, что изменилось», — и рядом с ним арифметика ожидания, выведенная
+// из той же посылки. Посылка была неверна: предикат пообъектен, а обращение к
+// хранилищу пообъектным быть не обязано. Однородная партия (один субъект, одно
+// отношение, один тип — форма страницы by construction) отвечается одним
+// вопросом, и стенное время партии перестаёт зависеть от её длины.
 //
-// The property is therefore "a slice is not a queue", expressed as observed
-// concurrency, and the wall-time arithmetic is printed so the number is auditable
-// rather than asserted as a timing (which would be flaky).
-func TestBatchCheck_ResolvesItsItemsConcurrently(t *testing.T) {
+// Арифметика печатается, а не утверждается как время: время зависит от машины, а
+// предмет здесь — ЧИСЛО ВОПРОСОВ.
+func TestBatchCheck_AUniformSliceIsOneQuestion(t *testing.T) {
 	const (
 		slice        = 100                     // the published cap siblings partition against
 		perCheck     = 5 * time.Millisecond    // a deliberately OPTIMISTIC store latency
 		callerBudget = 1000 * time.Millisecond // authzfilter.DefaultConfig().Timeout in vpc/compute/nlb/storage
 	)
 
-	// The premise. The arithmetic above is derived from ONE number that is not
-	// this package's to choose: the published batch cap the siblings partition
-	// against. It cannot be imported (a service must not import a sibling), so it
-	// is re-established here against the enforcement below — if iam ever changes
-	// the cap, this fails and the wall-time reasoning in BatchCheck's doc, and in
-	// each sibling's partitioning, has to be re-derived rather than silently
-	// inherited.
+	// Предпосылка. Арифметика выведена из ОДНОГО числа, которое этому пакету не
+	// принадлежит: контрактного предела партии, по которому режут соседи. Ввозить
+	// его импортом нельзя (сервис не импортирует соседа), поэтому он
+	// восстанавливается против самой проверки ниже — сменится предел, и разбор
+	// придётся переделать, а не унаследовать молча.
 	if _, err := (&AuthorizeService{}).BatchCheck(context.Background(), make([]CheckRequest, slice+1)); err == nil {
-		t.Fatalf("premise broken: a %d-item batch is no longer refused, so %d is not the cap "+
-			"siblings partition against and this probe's arithmetic no longer describes a real slice",
+		t.Fatalf("предпосылка нарушена: партия из %d больше не отвергается, значит %d не тот "+
+			"предел, по которому режут соседи, и арифметика этой пробы описывает не ту партию",
 			slice+1, slice)
 	}
-	if batchCheckParallelism <= 1 {
-		t.Fatalf("premise broken: batchCheckParallelism=%d cannot express concurrency",
-			batchCheckParallelism)
-	}
 
-	// What this double is, and what its number therefore means.
-	//
-	// It answers ONE store question per item and nothing else: no structural
-	// facts, no contextual re-ask, no deny-reason enrichment. Production pays
-	// MORE than that per item on the deny path. The wall time printed below is
-	// therefore a LOWER bound on what the sequential version cost, not an
-	// estimate of it — the double understates the problem, which is the safe
-	// direction for a number that argues a fix was needed.
-	//
-	// It is deliberately minimal for that same reason: the property asserted here
-	// is "the items do not wait on each other", and every extra store interaction
-	// would add cost that is not this property, making the observed concurrency
-	// harder to attribute. The MAGNITUDE of the win belongs to a measurement
-	// against a real store; the PROPERTY belongs here.
 	store := &latencyRelations{perCheck: perCheck}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: store})
 
@@ -155,61 +180,123 @@ func TestBatchCheck_ResolvesItsItemsConcurrently(t *testing.T) {
 		t.Fatalf("results: got %d want %d", len(results), slice)
 	}
 
-	calls, maxInFly := store.snapshot()
-	t.Logf("slice=%d items | store round-trips=%d | max in flight=%d | per-check=%v | wall=%v | caller budget=%v",
-		slice, calls, maxInFly, perCheck, wall.Round(time.Millisecond), callerBudget)
-	t.Logf("sequential wall would be %v; a contract page (1000 ids = 10 slices) at this latency costs %v of store time",
+	perObject, batched := store.lanes()
+	t.Logf("партия=%d | вопросов пообъектных=%d, пакетных=%d | задержка хранилища=%v | "+
+		"стенное время=%v | бюджет вызывающего=%v",
+		slice, perObject, batched, perCheck, wall.Round(time.Millisecond), callerBudget)
+	t.Logf("пообъектная полоса стоила бы %v на партию и %v на страницу договора "+
+		"(1000 идентификаторов = 10 партий)",
 		time.Duration(slice)*perCheck, time.Duration(slice*10)*perCheck)
 
-	// Volume examined. A pass that never reached the store observes no concurrency
-	// either, so every assertion below would hold vacuously — "nothing ran" must be
-	// a failure, not a silent pass.
-	if calls != slice {
-		t.Fatalf("the probe asked the store %d times for a %d-item slice: it is not measuring the "+
-			"fan-out it claims to measure (every item must reach the store on the all-denied path)",
-			calls, slice)
+	// Объём осмотренного: проход, не дошедший до хранилища, удовлетворил бы любое
+	// «не больше» тождественно.
+	if batched+perObject == 0 {
+		t.Fatalf("хранилище не спрошено ни разу: предмета замера нет")
 	}
-
-	if maxInFly <= 1 {
-		t.Fatalf("BatchCheck resolves its %d items SEQUENTIALLY (max in flight=%d): "+
-			"wall time is items × store latency (%v here), and the caller's deadline for the whole "+
-			"slice is %v, so a store slower than %v fails the caller's entire positive List closed. "+
-			"A slice must not be a queue.",
-			slice, maxInFly, wall.Round(time.Millisecond), callerBudget, callerBudget/slice)
+	if perObject != 0 {
+		t.Fatalf("однородная партия задала %d ПООБЪЕКТНЫХ вопросов: партия существует по форме "+
+			"и отсутствует по существу — каждый идентификатор уезжает отдельным вопросом",
+			perObject)
+	}
+	if batched != 1 {
+		t.Fatalf("однородная партия из %d задала %d пакетных вопросов вместо одного: набор "+
+			"однороден by construction (один субъект, тип, отношение), и делить его не на чем",
+			slice, batched)
 	}
 }
 
-// TestBatchCheck_ConcurrencyIsBounded — the paired POSITIVE control for the
-// assertion above, and the reason that assertion cannot be satisfied by the wrong
-// fix. "Not a queue" must not become "a goroutine per item": an unbounded fan-out
-// would put a whole slice on the store at once, and several concurrent Lists would
-// multiply against each other.
+// batchOfRunsFromDistinctSubjects — партия, дающая МНОГО прогонов.
 //
-// Without this pair the sibling test above is a one-way ratchet that reads as
-// "more concurrency is always better", which is how a bounded fan-out gets removed
-// by the next person trying to make a page faster.
-func TestBatchCheck_ConcurrencyIsBounded(t *testing.T) {
+// Прогон — однородная часть партии, и разные субъекты дают разные прогоны. Это
+// не гипотетическая форма: метод поддерживает смешанную партию явно, и ровно на
+// ней предел одновременности имеет предмет.
+func batchOfRunsFromDistinctSubjects(n int) []CheckRequest {
+	return batchOfDistinctSubjects(n)
+}
+
+// TestBatchCheck_ResolvesItsRunsConcurrently — прогоны одного прохода не ждут
+// друг друга.
+//
+// Единица сменилась (прогон вместо пункта), а довод — нет: бюджет вызывающего
+// принадлежит ЗАПРОСУ. Смешанная партия даёт столько прогонов, сколько субъектов,
+// и последовательный проход по ним стоил бы прогоны × время ответа хранилища —
+// то самое ожидание, которое роняло ПОЛОЖИТЕЛЬНЫЙ список вызывающего в
+// UNAVAILABLE.
+//
+// Свойство выражено наблюдаемой одновременностью, а не временем: время — величина
+// машины, и утверждать её значило бы завести дрожащую пробу.
+func TestBatchCheck_ResolvesItsRunsConcurrently(t *testing.T) {
+	const (
+		slice    = 100
+		perCheck = 5 * time.Millisecond
+	)
+	if batchCheckParallelism <= 1 {
+		t.Fatalf("предпосылка нарушена: batchCheckParallelism=%d одновременности не выражает",
+			batchCheckParallelism)
+	}
+
+	store := &latencyRelations{perCheck: perCheck}
+	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: store})
+
+	start := time.Now()
+	if _, err := svc.BatchCheck(context.Background(), batchOfRunsFromDistinctSubjects(slice)); err != nil {
+		t.Fatalf("BatchCheck: %v", err)
+	}
+	wall := time.Since(start)
+
+	calls, maxInFly := store.snapshot()
+	perObject, batched := store.lanes()
+	t.Logf("партия=%d различных субъектов | вопросов всего=%d (пообъектных %d, пакетных %d) | "+
+		"в полёте одновременно=%d | стенное время=%v",
+		slice, calls, perObject, batched, maxInFly, wall.Round(time.Millisecond))
+
+	// Объём осмотренного: проход, не дошедший до хранилища, одновременности тоже
+	// не покажет, и всё ниже выполнялось бы тождественно.
+	if calls < 2 {
+		t.Fatalf("хранилище спрошено %d раз(а) на %d различных субъектов — прогонов, чью "+
+			"одновременность можно наблюдать, нет вовсе", calls, slice)
+	}
+	if maxInFly <= 1 {
+		t.Fatalf("прогоны разбираются ПОСЛЕДОВАТЕЛЬНО (в полёте одновременно=%d): стенное время "+
+			"прохода равно прогоны × задержка хранилища (%v здесь), а бюджет вызывающего на всю "+
+			"партию — одна секунда. Партия не должна быть очередью.",
+			maxInFly, wall.Round(time.Millisecond))
+	}
+}
+
+// TestBatchCheck_RunConcurrencyIsBounded — ПАРНЫЙ ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ к
+// утверждению выше, и причина, по которой то утверждение нельзя удовлетворить
+// неверной правкой.
+//
+// «Не очередь» не должно стать «горутина на прогон»: неограниченный веер выложил
+// бы на хранилище всю страницу разом, а одновременные списки других вызывающих
+// умножились бы друг на друга.
+//
+// Без этой пары соседнее утверждение читается как «чем больше одновременности,
+// тем лучше» — и именно так ограниченный веер снимает следующий, кто захочет
+// ускорить страницу.
+func TestBatchCheck_RunConcurrencyIsBounded(t *testing.T) {
 	const slice = 100
 
 	store := &latencyRelations{perCheck: 2 * time.Millisecond}
 	svc := NewAuthorizeService(AuthorizeServiceConfig{Relations: store})
 
-	if _, err := svc.BatchCheck(context.Background(), batchOfSameSubject(slice)); err != nil {
+	if _, err := svc.BatchCheck(context.Background(), batchOfRunsFromDistinctSubjects(slice)); err != nil {
 		t.Fatalf("BatchCheck: %v", err)
 	}
 
 	_, maxInFly := store.snapshot()
-	t.Logf("slice=%d | max in flight=%d | declared bound=%d", slice, maxInFly, batchCheckParallelism)
+	t.Logf("партия=%d | в полёте одновременно=%d | объявленный предел=%d",
+		slice, maxInFly, batchCheckParallelism)
 
 	if maxInFly > batchCheckParallelism {
-		t.Fatalf("BatchCheck put %d questions on the store at once; the declared bound is %d. "+
-			"A slice resolved with a goroutine per item hands the whole page to the store in one "+
-			"burst, and concurrent Lists multiply against that.",
-			maxInFly, batchCheckParallelism)
+		t.Fatalf("BatchCheck выложил на хранилище %d вопросов разом при объявленном пределе %d. "+
+			"Проход с горутиной на прогон отдаёт всю страницу одним всплеском, и одновременные "+
+			"списки умножаются на него.", maxInFly, batchCheckParallelism)
 	}
 	if maxInFly <= 1 {
-		t.Fatalf("max in flight=%d — the bound cannot be observed because nothing ran concurrently; "+
-			"this control is vacuous unless the sibling property holds", maxInFly)
+		t.Fatalf("в полёте одновременно=%d — предел ненаблюдаем, потому что одновременно ничего "+
+			"не шло; этот контроль пуст, пока не держится соседнее свойство", maxInFly)
 	}
 }
 
@@ -243,14 +330,19 @@ func TestBatchCheck_ClusterAdminMemoStaysDedupedUnderConcurrency(t *testing.T) {
 		}
 	}
 	storeCalls, _ := store.snapshot()
-	t.Logf("slice=%d | store round-trips=%d | super-gate questions=%d (memoized; one per subject, not per item)",
-		slice, storeCalls, cl.calls)
-	// Volume examined: the super-gate is only reached on the DENY path, so a pass
-	// that never asked the store never reached it either and "≤1" would hold for
-	// the wrong reason.
-	if storeCalls != slice {
-		t.Fatalf("the probe asked the store %d times for a %d-item slice; the super-gate is only "+
-			"reached after a per-object deny, so this measurement would be vacuous", storeCalls, slice)
+	t.Logf("партия=%d | вопросов о вердикте=%d | вопросов надзора=%d (мемоизирован: один на "+
+		"СУБЪЕКТА, а не на пункт)", slice, storeCalls, cl.calls)
+	// Объём осмотренного: надзор достижим ТОЛЬКО после отказа по объекту, поэтому
+	// проход, не спросивший хранилище, не дошёл бы и до него — и «≤1» держалось бы
+	// по неверной причине.
+	//
+	// Здесь стояло `storeCalls != slice`: величина была верна, пока однородная
+	// партия стоила вопрос на пункт. Теперь она стоит ОДИН вопрос, и требование
+	// ста сделало бы предпосылку невыполнимой — то есть проба падала бы на
+	// достижении собственной цели.
+	if storeCalls < 1 {
+		t.Fatalf("хранилище не спрошено ни разу на партию из %d: надзор достижим только после "+
+			"отказа по объекту, поэтому замер ниже был бы пуст", slice)
 	}
 	if cl.calls < 1 {
 		t.Fatalf("super-gate was never asked (%d): the memo cannot be shown to dedupe a question "+

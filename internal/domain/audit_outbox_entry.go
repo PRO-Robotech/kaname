@@ -17,20 +17,20 @@ import (
 //
 // # Что происходит на самом деле
 //
-// Строка ложится в ТУ ЖЕ транзакцию, что и мутация домена, — и на этом всё
-// заканчивается. Дренажа у журнала нет, приёмника аудита в продукте не
-// существует ни одного, поэтому из четырёх объявленных состояний ([Status])
-// достижимо ровно одно: `pending`, в котором строка и остаётся навсегда.
+// Строка ложится в ТУ ЖЕ транзакцию, что и мутация домена, и оттуда вывозится в
+// приёмник журнала — поток структурных записей службы
+// (`services/iam/cmd/kacho-iam/audit_shipper_wiring.go`, механизм — `pkg/audit`).
+// Состояние строки после этого помечено доставленным, а состояние очереди
+// целиком снимает периодический сканер
+// (`services/iam/cmd/kacho-iam/outbox_metrics_wiring.go`).
 //
-// Отсутствие доставки — не забывчивость и не «пока»: это записанное решение с
-// предикатом пересмотра, и оно объясняет, почему дренаж сегодня неконструируем
-// и почему журнал при этом не снят —
-// `services/iam/docs/engineering/architecture/audit-outbox-has-no-receiver.md`.
-// Чтобы «ноль доставленных строк за всю жизнь очереди» было ЗАМЕТНО
-// (`data-integrity.md`), состояние журнала снимает периодический сканер
-// (`services/iam/cmd/kacho-iam/outbox_metrics_wiring.go`), а гейт дерева
-// `internal/repohygiene` требует, чтобы у объявленных колонок доставки был либо
-// движитель, либо названная запись о его отсутствии.
+// # Здесь было описано ОТСУТСТВИЕ доставки — у него больше нет предмета
+//
+// Прежняя редакция объясняла, почему дренаж неконструируем: приёмника аудита не
+// существовало ни одного, и из четырёх объявленных состояний достижимо было
+// ровно одно. Оба утверждения были верны на день записи и перестали быть
+// верными вместе с приёмником (#812): состояний теперь ДВА и оба достижимы,
+// потому что словарь сужен до того, что продукт производит.
 //
 // # Здесь стояло описание, неверное ЧЕТЫРЕЖДЫ
 //
@@ -104,21 +104,27 @@ func (n EventTypeName) Validate() error {
 	return nil
 }
 
-// AuditOutboxStatus — enum.
+// AuditOutboxStatus — состояние ДОСТАВКИ строки журнала.
+//
+// Значений ровно два, и столько же допускает ограничение таблицы (миграция
+// `20260823001500_audit_journal_gets_its_receiver.sql`). Прежде их объявлялось четыре:
+// «в полёте» и «отказ» не писал никто и никогда — полёта не существует, потому
+// что строка держится блокировкой своей транзакции от клейма до пометки, а
+// терминального отказа не существует, потому что у приёмника нет класса «не
+// приму никогда». Значение, которого продукт произвести не умеет, обещает
+// подсистему, которой нет.
 type AuditOutboxStatus string
 
 const (
-	AuditOutboxStatusPending  AuditOutboxStatus = "pending"
-	AuditOutboxStatusInFlight AuditOutboxStatus = "in_flight"
-	AuditOutboxStatusSent     AuditOutboxStatus = "sent"
-	AuditOutboxStatusFailed   AuditOutboxStatus = "failed"
+	AuditOutboxStatusPending AuditOutboxStatus = "pending"
+	AuditOutboxStatusSent    AuditOutboxStatus = "sent"
 )
 
 func (s AuditOutboxStatus) Validate() error {
 	switch s {
-	case AuditOutboxStatusPending, AuditOutboxStatusInFlight, AuditOutboxStatusSent, AuditOutboxStatusFailed:
+	case AuditOutboxStatusPending, AuditOutboxStatusSent:
 		return nil
 	default:
-		return fmt.Errorf("Illegal argument status %q (allowed: pending|in_flight|sent|failed)", string(s))
+		return fmt.Errorf("Illegal argument status %q (allowed: pending|sent)", string(s))
 	}
 }

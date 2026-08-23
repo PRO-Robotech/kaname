@@ -265,6 +265,10 @@ func (u *ListSubjectPrivilegesUseCase) hasAccountViewAuthority(ctx context.Conte
 	}
 
 	// Path 2 — delegated admin: principal holds `admin` on account:<id> in FGA
-	// (shared predicate — the single fgaHoldsAdmin used by every authority gate).
-	return fgaHoldsAdmin(ctx, u.relations, "account", string(accountID)), nil
+	// (shared predicate — the single authority gate used by every site).
+	//
+	// E-форма обязательна: этот путь строит СТРАНИЦУ видимого. Проглотив
+	// неполадку хранилища прав, он вернул бы well-formed `200` с молча суженным
+	// набором, который вызывающий не отличит от отзыва прав.
+	return fgaHoldsAdminE(ctx, u.relations, "account", string(accountID))
 }

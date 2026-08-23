@@ -41,6 +41,8 @@ package access_binding
 import (
 	"context"
 	stderrors "errors"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -329,6 +331,19 @@ type abFakeRepo struct {
 	// get_error_mapping_test.go to simulate a transient (non-not-found) Reader
 	// failure on the Update/Delete existence-check Get.
 	forceGetErr error
+	// membersOfGroupsErr — отказ чтения состава групп. Ручка нужна, потому что
+	// «полнота перечисления» держится ТОЛЬКО тем, что отказ соседа отказывает
+	// запросу: проглоченный отказ даёт тихо усечённый ответ, неотличимый от
+	// честного «в группах никого» (#914).
+	membersOfGroupsErr error
+	// groupsReaderNil — непровязанный читатель групп. Отдельная полоса от
+	// отказа: «мне нечем ответить» и «ответ пуст» — разные факты, и второй не
+	// вправе производиться первым.
+	groupsReaderNil bool
+	// incompleteGroups — перечень групп, чей состав дублёр объявляет неполным.
+	// Настоящий читатель объявляет это, упершись в предел выборки; дублёру
+	// предел ни к чему, а признак нужен — иначе путь его переноса не проверен.
+	incompleteGroups []domain.GroupID
 	// emittedTuples — persisted exact emitted-set per binding
 	// (access_binding_emitted_tuples), keyed by binding id. Co-committing
 	// the grant tuples here lets revoke/Role.Update use the stored set
@@ -521,11 +536,19 @@ func (rd *abFakeReader) Accounts() acct_repo.ReaderIface      { return &fakeAcct
 func (rd *abFakeReader) Projects() proj_repo.ReaderIface      { return &fakeProjRdr{repo: rd.repo} }
 func (rd *abFakeReader) Users() user_repo.ReaderIface         { return &fakeUserRdr{repo: rd.repo} }
 func (rd *abFakeReader) ServiceAccounts() sa_repo.ReaderIface { return &fakeSARdr{repo: rd.repo} }
-func (rd *abFakeReader) Groups() group.ReaderIface            { return &fakeGroupRdr{repo: rd.repo} }
-func (rd *abFakeReader) Roles() role_repo.ReaderIface         { return &fakeRoleRdr{repo: rd.repo} }
-func (rd *abFakeReader) AccessBindings() ab_repo.ReaderIface  { return &fakeABRdr{repo: rd.repo} }
-func (rd *abFakeReader) Commit(_ context.Context) error       { return nil }
-func (rd *abFakeReader) Rollback(_ context.Context) error     { return nil }
+func (rd *abFakeReader) Groups() group.ReaderIface {
+	rd.repo.mu.Lock()
+	nilReader := rd.repo.groupsReaderNil
+	rd.repo.mu.Unlock()
+	if nilReader {
+		return nil
+	}
+	return &fakeGroupRdr{repo: rd.repo}
+}
+func (rd *abFakeReader) Roles() role_repo.ReaderIface        { return &fakeRoleRdr{repo: rd.repo} }
+func (rd *abFakeReader) AccessBindings() ab_repo.ReaderIface { return &fakeABRdr{repo: rd.repo} }
+func (rd *abFakeReader) Commit(_ context.Context) error      { return nil }
+func (rd *abFakeReader) Rollback(_ context.Context) error    { return nil }
 
 // abFakeWriter implements kachorepo.Writer.
 type abFakeWriter struct {
@@ -799,6 +822,45 @@ func (g *fakeGroupRdr) List(_ context.Context, _ group.ListFilter) ([]domain.Gro
 }
 func (g *fakeGroupRdr) ListMembers(_ context.Context, _ domain.GroupID, _ group.MemberPage) ([]domain.GroupMember, string, error) {
 	return nil, "", nil
+}
+
+// MembersOfGroups — дублёр отвечает ИЗ ТОГО ЖЕ хранилища, что и IsMember.
+// Дублёр, отвечающий пусто там, где настоящий отвечает составом, сделал бы
+// невидимым ровно тот недоответ, ради которого пробу и пишут.
+func (g *fakeGroupRdr) MembersOfGroups(_ context.Context, groupIDs []domain.GroupID) ([]domain.GroupMember, []domain.GroupID, error) {
+	g.repo.mu.Lock()
+	defer g.repo.mu.Unlock()
+	if g.repo.membersOfGroupsErr != nil {
+		return nil, nil, g.repo.membersOfGroupsErr
+	}
+	want := make(map[string]struct{}, len(groupIDs))
+	for _, id := range groupIDs {
+		want[string(id)] = struct{}{}
+	}
+	keys := make([]string, 0, len(g.repo.groupMembers))
+	for k := range g.repo.groupMembers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var out []domain.GroupMember
+	for _, k := range keys {
+		parts := strings.SplitN(k, "|", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		if _, ok := want[parts[0]]; !ok {
+			continue
+		}
+		out = append(out, domain.GroupMember{
+			GroupID:    domain.GroupID(parts[0]),
+			MemberType: domain.SubjectType(parts[1]),
+			MemberID:   domain.SubjectID(parts[2]),
+		})
+	}
+	// Дублёр отдаёт состав целиком и говорит об этом пустым перечнем неполных:
+	// снисходительнее настоящего он быть не вправе, но и усечения, которого не
+	// было, объявлять не должен.
+	return out, g.repo.incompleteGroups, nil
 }
 func (g *fakeGroupRdr) IsMember(_ context.Context, groupID domain.GroupID, memberType domain.SubjectType, memberID domain.SubjectID) (bool, error) {
 	g.repo.mu.Lock()

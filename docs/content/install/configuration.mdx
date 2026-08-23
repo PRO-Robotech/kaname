@@ -56,7 +56,7 @@ Kachō IAM конфигурируется через переменные окр
     <tr><td><code>KACHO_IAM_HYDRA_ADMIN_URL</code> / <code>KACHO_IAM_HYDRA_ADMIN_TOKEN</code></td><td>Admin-API Hydra (регистрация OAuth-клиентов)</td></tr>
     <tr><td><code>KACHO_IAM_HYDRA_ISSUER</code> / <code>KACHO_IAM_HYDRA_TOKEN_URL</code></td><td>Issuer и token-endpoint Hydra</td></tr>
     <tr><td><code>KACHO_IAM_BOOTSTRAP_ROOT_EMAIL</code></td><td>Email первого cluster-admin (bootstrap)</td></tr>
-    <tr><td><code>KACHO_IAM_JWKS_ENC_KEY</code></td><td>Ключ шифрования JWKS. Соседней ручки срока ротации <b>не существует</b> — прежняя редакция называла её рядом, а в дереве ноль вхождений; ротацию сервис не планирует по расписанию</td></tr>
+    <tr><td><code>KACHO_IAM_JWKS_ENC_KEY</code></td><td>Ключ <b>обёртки</b> приватной половины подписного ключа: 32 байта в <b>hex</b> (64 знака). Принимает <b>перечень через запятую</b> — первый ключ оборачивает, все открывают; так ключ обёртки и меняется, без простоя и без переписывания хранилища. Соседней ручки срока ротации <b>не существует</b> — прежняя редакция называла её рядом, а в дереве ноль вхождений; ротацию сервис не планирует по расписанию</td></tr>
     <tr><td><code>KACHO_IAM_SAKEY_REDACT_GRACE</code> / <code>KACHO_IAM_USERTOKEN_REDACT_GRACE</code></td><td>Grace-период редактирования секретов</td></tr>
   </tbody>
 </table>

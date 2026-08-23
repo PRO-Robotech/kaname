@@ -85,13 +85,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccCrud'",
+                  "const __t = pm.environment.get('jwtHumanAccCrud') || pm.variables.get('jwtHumanAccCrud') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccCrud is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccCrud is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -186,13 +186,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccCrud'",
+                  "const __t = pm.environment.get('jwtHumanAccCrud') || pm.variables.get('jwtHumanAccCrud') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccCrud is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccCrud is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -274,13 +274,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccCrud'",
+                  "const __t = pm.environment.get('jwtHumanAccCrud') || pm.variables.get('jwtHumanAccCrud') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccCrud is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccCrud is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -340,8 +340,8 @@
                   "});",
                   "pm.test('Account.ownerUserId == the human who created it', () => {",
                   "  const j = pm.response.json();",
-                  "  const expected = pm.environment.get('ceremonyUserId');",
-                  "  pm.expect(expected, 'ceremonyUserId must be seeded by the ceremony wave').to.be.a('string').and.to.match(/^usr[a-z0-9]+$/);",
+                  "  const expected = pm.environment.get('humanAccCrudUserId');",
+                  "  pm.expect(expected, 'humanAccCrudUserId must be seeded by the ceremony wave').to.be.a('string').and.to.match(/^usr[a-z0-9]+$/);",
                   "  pm.expect(j.ownerUserId, 'ownerUserId must be the creating human').to.eql(expected);",
                   "});",
                   "pm.test('Account.description matches', () => {",
@@ -897,1234 +897,6 @@
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
                   "});",
                   "pm.test('derived-from-caller reject text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument ownerUserId (derived from caller)'));"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-ACC-CR-BVA-NAME-MIN — Create с name len=3 (min) → 200 OK",
-      "description": "class:BVA | priority:P2",
-      "item": [
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MIN :: cr-name-min",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/accounts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "accounts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"name\": \"{{bvaMinName}}\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "const _rid = String(pm.environment.get('runId') || '').toLowerCase().replace(/[^a-z0-9]/g, '');",
-                  "const _A = 'abcdefghijklmnopqrstuvwxyz';",
-                  "const _B = 'abcdefghijklmnopqrstuvwxyz0123456789';",
-                  "let _h = 0; for (const _c of _rid) { _h = (_h * 33 + _c.charCodeAt(0)) >>> 0; }",
-                  "const _len = 3;",
-                  "let _n = _A[_h % 26];",
-                  "const _tail = _rid.slice(-(_len - 1));",
-                  "for (let _i = 1; _i < _len - _tail.length; _i++) { _n += _B[(_h >>> (_i % 24)) % 36]; }",
-                  "_n += _tail;",
-                  "_n = _n.slice(0, _len);",
-                  "pm.environment.set('bvaMinName', _n);",
-                  "const _bvaOk = _rid.length > 0 && _n.length === _len && /^[a-z][-a-z0-9]{2,62}$/.test(_n);",
-                  "if (!_bvaOk) {",
-                  "  pm.test('fixture: runId is seeded (name entropy source for bvaMinName)', () => pm.expect(_rid.length, 'runId').to.be.above(0));",
-                  "  pm.test('fixture: BVA name is exactly 3 chars', () => pm.expect(_n.length, _n).to.eql(_len));",
-                  "  pm.test('fixture: BVA name matches the product regex (bvaMinName)', () => pm.expect(_n).to.match(/^[a-z][-a-z0-9]{2,62}$/));",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('IAM Operation envelope returned', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
-                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
-                  "});",
-                  "pm.environment.unset('opId');",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.accountId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('bvaMinAccId', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-                  "  if (_pv.indexOf('bvaMinAccId') === -1) _pv.push('bvaMinAccId');",
-                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.defaultProjectId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('bvaMinPrjId', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-                  "  if (_pv.indexOf('bvaMinPrjId') === -1) _pv.push('bvaMinPrjId');",
-                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
-                  "} catch (e) {}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MIN :: poll-op",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{opId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{opId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
-                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
-                  "// leaves no trace at all) and skip, rather than polling a literal template.",
-                  "if (!pm.environment.get('opId')) {",
-                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
-                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// poll-counter reset on first entry (request-name-scoped flag);",
-                  "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
-                  "  pm.environment.set('_pollCount', '0');",
-                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "const j = pm.response.json();",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 50) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
-                  "else pm.environment.unset('lastOpError');",
-                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
-                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
-                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
-                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
-                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
-                  "(function () {",
-                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
-                  "  if (_po.error) {",
-                  "    pm.environment.unset('bvaMinAccId');",
-                  "    pm.environment.unset('bvaMinPrjId');",
-                  "  }",
-                  "  pm.test('operation succeeded (no phantom bvaMinAccId, bvaMinPrjId)', function () {",
-                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MIN :: teardown-bva-min-project",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/projects/{{bvaMinPrjId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "projects",
-                "{{bvaMinPrjId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
-                  "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_poll200_started_teardown_bva_min_project') !== pm.info.requestName) {",
-                  "  pm.environment.set('_poll200_teardown_bva_min_project', '0');",
-                  "  pm.environment.set('_poll200_started_teardown_bva_min_project', pm.info.requestName);",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_bva_min_project') || '0', 10);",
-                  "const _p200retryCode = [403].includes(pm.response.code);",
-                  "const _p200retryPred = false;",
-                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
-                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
-                  "  pm.environment.set('_poll200_teardown_bva_min_project', String(_p200c + 1));",
-                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_poll200_teardown_bva_min_project');",
-                  "pm.environment.unset('_poll200_started_teardown_bva_min_project');",
-                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.environment.unset('_bvaMinPrjRevOp');",
-                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
-                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_bvaMinPrjRevOp', j.id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MIN :: teardown-bva-min-project-await",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{_bvaMinPrjRevOp}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{_bvaMinPrjRevOp}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "if (pm.environment.get('__bvaMinPrjRevOpStarted') !== pm.info.requestName) { pm.environment.set('__bvaMinPrjRevOpCount', '0'); pm.environment.set('__bvaMinPrjRevOpStarted', pm.info.requestName); }",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (!pm.environment.get('_bvaMinPrjRevOp')) { return; }",
-                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "const c = parseInt(pm.environment.get('__bvaMinPrjRevOpCount') || '0', 10);",
-                  "if (j && !j.done && c < 50) {",
-                  "  pm.environment.set('__bvaMinPrjRevOpCount', String(c + 1));",
-                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('__bvaMinPrjRevOpCount'); pm.environment.unset('__bvaMinPrjRevOpStarted');",
-                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
-                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
-                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
-                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
-                  "(function () {",
-                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
-                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
-                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MIN :: teardown-bva-min-account",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/accounts/{{bvaMinAccId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "accounts",
-                "{{bvaMinAccId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
-                  "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_poll200_started_teardown_bva_min_account') !== pm.info.requestName) {",
-                  "  pm.environment.set('_poll200_teardown_bva_min_account', '0');",
-                  "  pm.environment.set('_poll200_started_teardown_bva_min_account', pm.info.requestName);",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_bva_min_account') || '0', 10);",
-                  "const _p200retryCode = [403].includes(pm.response.code);",
-                  "const _p200retryPred = false;",
-                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
-                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
-                  "  pm.environment.set('_poll200_teardown_bva_min_account', String(_p200c + 1));",
-                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_poll200_teardown_bva_min_account');",
-                  "pm.environment.unset('_poll200_started_teardown_bva_min_account');",
-                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.environment.unset('_bvaMinAccRevOp');",
-                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
-                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_bvaMinAccRevOp', j.id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MIN :: teardown-bva-min-account-await",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{_bvaMinAccRevOp}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{_bvaMinAccRevOp}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "if (pm.environment.get('__bvaMinAccRevOpStarted') !== pm.info.requestName) { pm.environment.set('__bvaMinAccRevOpCount', '0'); pm.environment.set('__bvaMinAccRevOpStarted', pm.info.requestName); }",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (!pm.environment.get('_bvaMinAccRevOp')) { return; }",
-                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "const c = parseInt(pm.environment.get('__bvaMinAccRevOpCount') || '0', 10);",
-                  "if (j && !j.done && c < 50) {",
-                  "  pm.environment.set('__bvaMinAccRevOpCount', String(c + 1));",
-                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('__bvaMinAccRevOpCount'); pm.environment.unset('__bvaMinAccRevOpStarted');",
-                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
-                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
-                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
-                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
-                  "(function () {",
-                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
-                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
-                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "IAM-ACC-CR-BVA-NAME-MAX — Create с name len=63 (max) → 200 OK",
-      "description": "class:BVA | priority:P2",
-      "item": [
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MAX :: cr-name-max",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/accounts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "accounts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\"name\": \"{{bvaMaxName}}\"}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "const _rid = String(pm.environment.get('runId') || '').toLowerCase().replace(/[^a-z0-9]/g, '');",
-                  "const _A = 'abcdefghijklmnopqrstuvwxyz';",
-                  "const _B = 'abcdefghijklmnopqrstuvwxyz0123456789';",
-                  "let _h = 0; for (const _c of _rid) { _h = (_h * 33 + _c.charCodeAt(0)) >>> 0; }",
-                  "const _len = 63;",
-                  "let _n = _A[_h % 26];",
-                  "const _tail = _rid.slice(-(_len - 1));",
-                  "for (let _i = 1; _i < _len - _tail.length; _i++) { _n += _B[(_h >>> (_i % 24)) % 36]; }",
-                  "_n += _tail;",
-                  "_n = _n.slice(0, _len);",
-                  "pm.environment.set('bvaMaxName', _n);",
-                  "const _bvaOk = _rid.length > 0 && _n.length === _len && /^[a-z][-a-z0-9]{2,62}$/.test(_n);",
-                  "if (!_bvaOk) {",
-                  "  pm.test('fixture: runId is seeded (name entropy source for bvaMaxName)', () => pm.expect(_rid.length, 'runId').to.be.above(0));",
-                  "  pm.test('fixture: BVA name is exactly 63 chars', () => pm.expect(_n.length, _n).to.eql(_len));",
-                  "  pm.test('fixture: BVA name matches the product regex (bvaMaxName)', () => pm.expect(_n).to.match(/^[a-z][-a-z0-9]{2,62}$/));",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "pm.test('IAM Operation envelope returned', () => {",
-                  "  const j = pm.response.json();",
-                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
-                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
-                  "});",
-                  "pm.environment.unset('opId');",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.id);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.accountId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('bvaMaxAccId', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-                  "  if (_pv.indexOf('bvaMaxAccId') === -1) _pv.push('bvaMaxAccId');",
-                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const j = pm.response.json();",
-                  "  const v = (j.metadata && j.metadata.defaultProjectId);",
-                  "  if (v !== undefined && v !== null) pm.environment.set('bvaMaxPrjId', String(v));",
-                  "} catch (e) {}",
-                  "try {",
-                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-                  "  if (_pv.indexOf('bvaMaxPrjId') === -1) _pv.push('bvaMaxPrjId');",
-                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
-                  "} catch (e) {}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MAX :: poll-op",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{opId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{opId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
-                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
-                  "// leaves no trace at all) and skip, rather than polling a literal template.",
-                  "if (!pm.environment.get('opId')) {",
-                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
-                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// poll-counter reset on first entry (request-name-scoped flag);",
-                  "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
-                  "  pm.environment.set('_pollCount', '0');",
-                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
-                  "const j = pm.response.json();",
-                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
-                  "if (!j.done && pc < 50) {",
-                  "  pm.environment.set('_pollCount', String(pc + 1));",
-                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_pollCount');",
-                  "pm.environment.unset('_pollStarted');",
-                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
-                  "else pm.environment.unset('lastOpError');",
-                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
-                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
-                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
-                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
-                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
-                  "(function () {",
-                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
-                  "  if (_po.error) {",
-                  "    pm.environment.unset('bvaMaxAccId');",
-                  "    pm.environment.unset('bvaMaxPrjId');",
-                  "  }",
-                  "  pm.test('operation succeeded (no phantom bvaMaxAccId, bvaMaxPrjId)', function () {",
-                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MAX :: teardown-bva-max-project",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/projects/{{bvaMaxPrjId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "projects",
-                "{{bvaMaxPrjId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
-                  "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_poll200_started_teardown_bva_max_project') !== pm.info.requestName) {",
-                  "  pm.environment.set('_poll200_teardown_bva_max_project', '0');",
-                  "  pm.environment.set('_poll200_started_teardown_bva_max_project', pm.info.requestName);",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_bva_max_project') || '0', 10);",
-                  "const _p200retryCode = [403].includes(pm.response.code);",
-                  "const _p200retryPred = false;",
-                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
-                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
-                  "  pm.environment.set('_poll200_teardown_bva_max_project', String(_p200c + 1));",
-                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_poll200_teardown_bva_max_project');",
-                  "pm.environment.unset('_poll200_started_teardown_bva_max_project');",
-                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.environment.unset('_bvaMaxPrjRevOp');",
-                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
-                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_bvaMaxPrjRevOp', j.id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MAX :: teardown-bva-max-project-await",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{_bvaMaxPrjRevOp}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{_bvaMaxPrjRevOp}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "if (pm.environment.get('__bvaMaxPrjRevOpStarted') !== pm.info.requestName) { pm.environment.set('__bvaMaxPrjRevOpCount', '0'); pm.environment.set('__bvaMaxPrjRevOpStarted', pm.info.requestName); }",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (!pm.environment.get('_bvaMaxPrjRevOp')) { return; }",
-                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "const c = parseInt(pm.environment.get('__bvaMaxPrjRevOpCount') || '0', 10);",
-                  "if (j && !j.done && c < 50) {",
-                  "  pm.environment.set('__bvaMaxPrjRevOpCount', String(c + 1));",
-                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('__bvaMaxPrjRevOpCount'); pm.environment.unset('__bvaMaxPrjRevOpStarted');",
-                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
-                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
-                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
-                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
-                  "(function () {",
-                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
-                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
-                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MAX :: teardown-bva-max-account",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/iam/v1/accounts/{{bvaMaxAccId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "iam",
-                "v1",
-                "accounts",
-                "{{bvaMaxAccId}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
-                  "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_poll200_started_teardown_bva_max_account') !== pm.info.requestName) {",
-                  "  pm.environment.set('_poll200_teardown_bva_max_account', '0');",
-                  "  pm.environment.set('_poll200_started_teardown_bva_max_account', pm.info.requestName);",
-                  "}",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_bva_max_account') || '0', 10);",
-                  "const _p200retryCode = [403].includes(pm.response.code);",
-                  "const _p200retryPred = false;",
-                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
-                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
-                  "  pm.environment.set('_poll200_teardown_bva_max_account', String(_p200c + 1));",
-                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('_poll200_teardown_bva_max_account');",
-                  "pm.environment.unset('_poll200_started_teardown_bva_max_account');",
-                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "pm.environment.unset('_bvaMaxAccRevOp');",
-                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
-                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_bvaMaxAccRevOp', j.id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "IAM-ACC-CR-BVA-NAME-MAX :: teardown-bva-max-account-await",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/operations/{{_bvaMaxAccRevOp}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "operations",
-                "{{_bvaMaxAccRevOp}}"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
-                  "if (__t) {",
-                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
-                  "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "}",
-                  "if (pm.environment.get('__bvaMaxAccRevOpStarted') !== pm.info.requestName) { pm.environment.set('__bvaMaxAccRevOpCount', '0'); pm.environment.set('__bvaMaxAccRevOpStarted', pm.info.requestName); }",
-                  "(function () {",
-                  "  var _u = '';",
-                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
-                  "  try {",
-                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
-                  "  } catch (e) { /* тела может не быть — это не находка */ }",
-                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
-                  "  if (!_all) { return; }",
-                  "  var _n = null;",
-                  "  for (var _i = 0; _i < _all.length; _i++) {",
-                  "    var _c = _all[_i].slice(2, -2);",
-                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
-                  "  }",
-                  "  if (_n === null) { return; }",
-                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
-                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
-                  "  });",
-                  "  pm.execution.skipRequest();",
-                  "})();"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (!pm.environment.get('_bvaMaxAccRevOp')) { return; }",
-                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                  "const c = parseInt(pm.environment.get('__bvaMaxAccRevOpCount') || '0', 10);",
-                  "if (j && !j.done && c < 50) {",
-                  "  pm.environment.set('__bvaMaxAccRevOpCount', String(c + 1));",
-                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
-                  "  pm.execution.setNextRequest(pm.info.requestName);",
-                  "  return;",
-                  "}",
-                  "pm.environment.unset('__bvaMaxAccRevOpCount'); pm.environment.unset('__bvaMaxAccRevOpStarted');",
-                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
-                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
-                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
-                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
-                  "(function () {",
-                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
-                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
-                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
-                  "  });",
-                  "})();"
                 ]
               }
             }
@@ -3554,13 +2326,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccCrud'",
+                  "const __t = pm.environment.get('jwtHumanAccCrud') || pm.variables.get('jwtHumanAccCrud') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccCrud is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccCrud is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -3635,13 +2407,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccCrud'",
+                  "const __t = pm.environment.get('jwtHumanAccCrud') || pm.variables.get('jwtHumanAccCrud') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccCrud is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccCrud is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -3736,13 +2508,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccCrud'",
+                  "const __t = pm.environment.get('jwtHumanAccCrud') || pm.variables.get('jwtHumanAccCrud') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccCrud is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccCrud is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -4265,13 +3037,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccCrudStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccCrudStepUp') || pm.variables.get('jwtHumanAccCrudStepUp') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccCrudStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccCrudStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -4341,13 +3113,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccCrudStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccCrudStepUp') || pm.variables.get('jwtHumanAccCrudStepUp') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccCrudStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccCrudStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -4451,13 +3223,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccCrudStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccCrudStepUp') || pm.variables.get('jwtHumanAccCrudStepUp') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccCrudStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccCrudStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -4532,13 +3304,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccCrudStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccCrudStepUp') || pm.variables.get('jwtHumanAccCrudStepUp') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccCrudStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccCrudStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -4696,6 +3468,1234 @@
                   "pm.environment.unset('_goneCount');",
                   "pm.environment.unset('_goneStarted');",
                   "pm.test(\"Account: gone after delete \\u2014 404 or 403\", () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ACC-CR-BVA-NAME-MIN — Create с name len=3 (min) → 200 OK",
+      "description": "class:BVA | priority:P2",
+      "item": [
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MIN :: cr-name-min",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"{{bvaMinName}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMin'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMin') || pm.variables.get('jwtHumanAccBvaMin') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMin is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMin is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const _rid = String(pm.environment.get('runId') || '').toLowerCase().replace(/[^a-z0-9]/g, '');",
+                  "const _A = 'abcdefghijklmnopqrstuvwxyz';",
+                  "const _B = 'abcdefghijklmnopqrstuvwxyz0123456789';",
+                  "let _h = 0; for (const _c of _rid) { _h = (_h * 33 + _c.charCodeAt(0)) >>> 0; }",
+                  "const _len = 3;",
+                  "let _n = _A[_h % 26];",
+                  "const _tail = _rid.slice(-(_len - 1));",
+                  "for (let _i = 1; _i < _len - _tail.length; _i++) { _n += _B[(_h >>> (_i % 24)) % 36]; }",
+                  "_n += _tail;",
+                  "_n = _n.slice(0, _len);",
+                  "pm.environment.set('bvaMinName', _n);",
+                  "const _bvaOk = _rid.length > 0 && _n.length === _len && /^[a-z][-a-z0-9]{2,62}$/.test(_n);",
+                  "if (!_bvaOk) {",
+                  "  pm.test('fixture: runId is seeded (name entropy source for bvaMinName)', () => pm.expect(_rid.length, 'runId').to.be.above(0));",
+                  "  pm.test('fixture: BVA name is exactly 3 chars', () => pm.expect(_n.length, _n).to.eql(_len));",
+                  "  pm.test('fixture: BVA name matches the product regex (bvaMinName)', () => pm.expect(_n).to.match(/^[a-z][-a-z0-9]{2,62}$/));",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.accountId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('bvaMinAccId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('bvaMinAccId') === -1) _pv.push('bvaMinAccId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.defaultProjectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('bvaMinPrjId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('bvaMinPrjId') === -1) _pv.push('bvaMinPrjId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MIN :: poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMin'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMin') || pm.variables.get('jwtHumanAccBvaMin') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMin is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMin is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
+                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+                  "(function () {",
+                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+                  "  if (_po.error) {",
+                  "    pm.environment.unset('bvaMinAccId');",
+                  "    pm.environment.unset('bvaMinPrjId');",
+                  "  }",
+                  "  pm.test('operation succeeded (no phantom bvaMinAccId, bvaMinPrjId)', function () {",
+                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MIN :: teardown-bva-min-project",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects/{{bvaMinPrjId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects",
+                "{{bvaMinPrjId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMinStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMinStepUp') || pm.variables.get('jwtHumanAccBvaMinStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMinStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMinStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_bva_min_project') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_bva_min_project', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_bva_min_project', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_bva_min_project') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_bva_min_project', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_bva_min_project');",
+                  "pm.environment.unset('_poll200_started_teardown_bva_min_project');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_bvaMinPrjRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_bvaMinPrjRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MIN :: teardown-bva-min-project-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_bvaMinPrjRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_bvaMinPrjRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMinStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMinStepUp') || pm.variables.get('jwtHumanAccBvaMinStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMinStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMinStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__bvaMinPrjRevOpStarted') !== pm.info.requestName) { pm.environment.set('__bvaMinPrjRevOpCount', '0'); pm.environment.set('__bvaMinPrjRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_bvaMinPrjRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__bvaMinPrjRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__bvaMinPrjRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__bvaMinPrjRevOpCount'); pm.environment.unset('__bvaMinPrjRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MIN :: teardown-bva-min-account",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{bvaMinAccId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{bvaMinAccId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMinStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMinStepUp') || pm.variables.get('jwtHumanAccBvaMinStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMinStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMinStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_bva_min_account') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_bva_min_account', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_bva_min_account', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_bva_min_account') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_bva_min_account', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_bva_min_account');",
+                  "pm.environment.unset('_poll200_started_teardown_bva_min_account');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_bvaMinAccRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_bvaMinAccRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MIN :: teardown-bva-min-account-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_bvaMinAccRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_bvaMinAccRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMinStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMinStepUp') || pm.variables.get('jwtHumanAccBvaMinStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMinStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMinStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__bvaMinAccRevOpStarted') !== pm.info.requestName) { pm.environment.set('__bvaMinAccRevOpCount', '0'); pm.environment.set('__bvaMinAccRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_bvaMinAccRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__bvaMinAccRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__bvaMinAccRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__bvaMinAccRevOpCount'); pm.environment.unset('__bvaMinAccRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "IAM-ACC-CR-BVA-NAME-MAX — Create с name len=63 (max) → 200 OK",
+      "description": "class:BVA | priority:P2",
+      "item": [
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MAX :: cr-name-max",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"name\": \"{{bvaMaxName}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMax'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMax') || pm.variables.get('jwtHumanAccBvaMax') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMax is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMax is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const _rid = String(pm.environment.get('runId') || '').toLowerCase().replace(/[^a-z0-9]/g, '');",
+                  "const _A = 'abcdefghijklmnopqrstuvwxyz';",
+                  "const _B = 'abcdefghijklmnopqrstuvwxyz0123456789';",
+                  "let _h = 0; for (const _c of _rid) { _h = (_h * 33 + _c.charCodeAt(0)) >>> 0; }",
+                  "const _len = 63;",
+                  "let _n = _A[_h % 26];",
+                  "const _tail = _rid.slice(-(_len - 1));",
+                  "for (let _i = 1; _i < _len - _tail.length; _i++) { _n += _B[(_h >>> (_i % 24)) % 36]; }",
+                  "_n += _tail;",
+                  "_n = _n.slice(0, _len);",
+                  "pm.environment.set('bvaMaxName', _n);",
+                  "const _bvaOk = _rid.length > 0 && _n.length === _len && /^[a-z][-a-z0-9]{2,62}$/.test(_n);",
+                  "if (!_bvaOk) {",
+                  "  pm.test('fixture: runId is seeded (name entropy source for bvaMaxName)', () => pm.expect(_rid.length, 'runId').to.be.above(0));",
+                  "  pm.test('fixture: BVA name is exactly 63 chars', () => pm.expect(_n.length, _n).to.eql(_len));",
+                  "  pm.test('fixture: BVA name matches the product regex (bvaMaxName)', () => pm.expect(_n).to.match(/^[a-z][-a-z0-9]{2,62}$/));",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('IAM Operation envelope returned', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.id, 'operation.id must start with iop').to.match(/^iop[a-z0-9]+$/);",
+                  "  pm.expect(j.done, 'operation.done present').to.be.a('boolean');",
+                  "});",
+                  "pm.environment.unset('opId');",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.id);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('opId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.accountId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('bvaMaxAccId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('bvaMaxAccId') === -1) _pv.push('bvaMaxAccId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const j = pm.response.json();",
+                  "  const v = (j.metadata && j.metadata.defaultProjectId);",
+                  "  if (v !== undefined && v !== null) pm.environment.set('bvaMaxPrjId', String(v));",
+                  "} catch (e) {}",
+                  "try {",
+                  "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
+                  "  if (_pv.indexOf('bvaMaxPrjId') === -1) _pv.push('bvaMaxPrjId');",
+                  "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
+                  "} catch (e) {}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MAX :: poll-op",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{opId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{opId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMax'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMax') || pm.variables.get('jwtHumanAccBvaMax') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMax is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMax is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// OPERATION GUARD — 'opId' is captured by the mutation this poll follows.",
+                  "// Empty = that mutation returned no Operation. Report it (a skipped request",
+                  "// leaves no trace at all) and skip, rather than polling a literal template.",
+                  "if (!pm.environment.get('opId')) {",
+                  "  pm.test('operation id opId was captured (the mutation returned an Operation)', () => {",
+                  "    pm.expect.fail('opId is empty — the mutation this poll belongs to did not return an Operation (it was rejected, or its capture failed). Polling would hit an unresolved template; a previous case\\'s operation is NOT a substitute.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-counter reset on first entry (request-name-scoped flag);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_pollStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_pollCount', '0');",
+                  "  pm.environment.set('_pollStarted', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('poll status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "const j = pm.response.json();",
+                  "const pc = parseInt(pm.environment.get('_pollCount') || '0', 10);",
+                  "if (!j.done && pc < 50) {",
+                  "  pm.environment.set('_pollCount', String(pc + 1));",
+                  "  const _pd = Date.now(); while (Date.now() - _pd < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_pollCount');",
+                  "pm.environment.unset('_pollStarted');",
+                  "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
+                  "if (j.error) pm.environment.set('lastOpError', JSON.stringify(j.error));",
+                  "else pm.environment.unset('lastOpError');",
+                  "if (j.response) pm.environment.set('lastOpResponse', JSON.stringify(j.response));",
+                  "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
+                  "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
+                  "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
+                  "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
+                  "(function () {",
+                  "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
+                  "  if (_po.error) {",
+                  "    pm.environment.unset('bvaMaxAccId');",
+                  "    pm.environment.unset('bvaMaxPrjId');",
+                  "  }",
+                  "  pm.test('operation succeeded (no phantom bvaMaxAccId, bvaMaxPrjId)', function () {",
+                  "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MAX :: teardown-bva-max-project",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/projects/{{bvaMaxPrjId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "projects",
+                "{{bvaMaxPrjId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMaxStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMaxStepUp') || pm.variables.get('jwtHumanAccBvaMaxStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMaxStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMaxStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_bva_max_project') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_bva_max_project', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_bva_max_project', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_bva_max_project') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_bva_max_project', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_bva_max_project');",
+                  "pm.environment.unset('_poll200_started_teardown_bva_max_project');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_bvaMaxPrjRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_bvaMaxPrjRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MAX :: teardown-bva-max-project-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_bvaMaxPrjRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_bvaMaxPrjRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMaxStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMaxStepUp') || pm.variables.get('jwtHumanAccBvaMaxStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMaxStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMaxStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__bvaMaxPrjRevOpStarted') !== pm.info.requestName) { pm.environment.set('__bvaMaxPrjRevOpCount', '0'); pm.environment.set('__bvaMaxPrjRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_bvaMaxPrjRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__bvaMaxPrjRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__bvaMaxPrjRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__bvaMaxPrjRevOpCount'); pm.environment.unset('__bvaMaxPrjRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MAX :: teardown-bva-max-account",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accounts/{{bvaMaxAccId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accounts",
+                "{{bvaMaxAccId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMaxStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMaxStepUp') || pm.variables.get('jwtHumanAccBvaMaxStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMaxStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMaxStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "// poll-for-propagation counter reset on first entry (request-name-scoped);",
+                  "// re-invocations via setNextRequest skip the reset.",
+                  "if (pm.environment.get('_poll200_started_teardown_bva_max_account') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_bva_max_account', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_bva_max_account', pm.info.requestName);",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_bva_max_account') || '0', 10);",
+                  "const _p200retryCode = [403].includes(pm.response.code);",
+                  "const _p200retryPred = false;",
+                  "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
+                  "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
+                  "  pm.environment.set('_poll200_teardown_bva_max_account', String(_p200c + 1));",
+                  "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_poll200_teardown_bva_max_account');",
+                  "pm.environment.unset('_poll200_started_teardown_bva_max_account');",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "pm.environment.unset('_bvaMaxAccRevOp');",
+                  "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200, 404]));",
+                  "if (pm.response.code === 200 && j && j.id) pm.environment.set('_bvaMaxAccRevOp', j.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-ACC-CR-BVA-NAME-MAX :: teardown-bva-max-account-await",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{_bvaMaxAccRevOp}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{_bvaMaxAccRevOp}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtHumanAccBvaMaxStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccBvaMaxStepUp') || pm.variables.get('jwtHumanAccBvaMaxStepUp') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtHumanAccBvaMaxStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccBvaMaxStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "if (pm.environment.get('__bvaMaxAccRevOpStarted') !== pm.info.requestName) { pm.environment.set('__bvaMaxAccRevOpCount', '0'); pm.environment.set('__bvaMaxAccRevOpStarted', pm.info.requestName); }",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get('_bvaMaxAccRevOp')) { return; }",
+                  "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
+                  "const c = parseInt(pm.environment.get('__bvaMaxAccRevOpCount') || '0', 10);",
+                  "if (j && !j.done && c < 50) {",
+                  "  pm.environment.set('__bvaMaxAccRevOpCount', String(c + 1));",
+                  "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('__bvaMaxAccRevOpCount'); pm.environment.unset('__bvaMaxAccRevOpStarted');",
+                  "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
+                  "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
+                  "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
+                  "// успех, ресурс остаётся жить, а вердикт не меняется.",
+                  "(function () {",
+                  "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
+                  "  pm.test('delete operation succeeded (no operation.error)', function () {",
+                  "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error').to.eql(undefined);",
+                  "  });",
+                  "})();"
                 ]
               }
             }
@@ -5152,13 +5152,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccLsop'",
+                  "const __t = pm.environment.get('jwtHumanAccLsop') || pm.variables.get('jwtHumanAccLsop') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccLsop is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccLsop is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -5253,13 +5253,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccLsop'",
+                  "const __t = pm.environment.get('jwtHumanAccLsop') || pm.variables.get('jwtHumanAccLsop') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccLsop is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccLsop is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -5356,13 +5356,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremony'",
-                  "const __t = pm.environment.get('jwtHumanCeremony') || pm.variables.get('jwtHumanCeremony') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccLsop'",
+                  "const __t = pm.environment.get('jwtHumanAccLsop') || pm.variables.get('jwtHumanAccLsop') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremony is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremony is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccLsop is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccLsop is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -5451,13 +5451,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccLsopStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccLsopStepUp') || pm.variables.get('jwtHumanAccLsopStepUp') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccLsopStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccLsopStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -5542,13 +5542,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccLsopStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccLsopStepUp') || pm.variables.get('jwtHumanAccLsopStepUp') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccLsopStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccLsopStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -5634,13 +5634,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccLsopStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccLsopStepUp') || pm.variables.get('jwtHumanAccLsopStepUp') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccLsopStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccLsopStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",
@@ -5725,13 +5725,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// per-step auth: bearer from env 'jwtHumanCeremonyStepUp'",
-                  "const __t = pm.environment.get('jwtHumanCeremonyStepUp') || pm.variables.get('jwtHumanCeremonyStepUp') || '';",
+                  "// per-step auth: bearer from env 'jwtHumanAccLsopStepUp'",
+                  "const __t = pm.environment.get('jwtHumanAccLsopStepUp') || pm.variables.get('jwtHumanAccLsopStepUp') || '';",
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtHumanCeremonyStepUp is set (subject under test)', () => {",
-                  "    pm.expect.fail('jwtHumanCeremonyStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  pm.test('harness config: jwtHumanAccLsopStepUp is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtHumanAccLsopStepUp is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
                   "}",

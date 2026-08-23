@@ -53,6 +53,11 @@ func TestAccountQuota_CommitTime_ResourceExhaustedSentinel(t *testing.T) {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
+	// Предмет этой пробы — потолок ОБЪЁМА. Потолок ТЕМПА (задача #618) по умолчанию
+	// бьёт раньше — три заведения в час против пяти аккаунтов, — поэтому он
+	// поднимается из-под ног: иначе проба судила бы не свою полосу.
+	liftRateCeilingOutOfTheWay(t, ctx, pool)
+
 	_, userID := accountQuotaFixture(t, ctx, pool, "commit")
 	// Фикстура завела первый; добираем до пяти — предела умолчания.
 	for i := 2; i <= 5; i++ {

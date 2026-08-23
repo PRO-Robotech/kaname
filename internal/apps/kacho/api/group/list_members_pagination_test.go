@@ -159,3 +159,9 @@ func TestListMembers_UnsetPageSizeBecomesTheDefault(t *testing.T) {
 // «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
 // ненаречённое.
 func (r *memberPageReader) Visibility() visibility.ReaderIface { return nil }
+
+// MembersOfGroups — предмет этой пробы не касается состава нескольких групп;
+// дублёр отвечает пусто и говорит об этом, а не притворяется источником.
+func (r *memberPageRdr) MembersOfGroups(context.Context, []domain.GroupID) ([]domain.GroupMember, []domain.GroupID, error) {
+	return nil, nil, nil
+}

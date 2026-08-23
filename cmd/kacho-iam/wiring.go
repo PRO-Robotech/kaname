@@ -448,9 +448,16 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// super-gate (RelationStore), without which a cluster-admin — who holds no
 	// per-object tuple on iam_access_binding — would get an empty page here while
 	// every sibling read returns the full set.
+	// Соседняя поверхность верхнего яруса супер-доступа читается ОТСЮДА ЖЕ
+	// (#914, решение 2): выдают и отзывают кластерного администратора своим
+	// глаголом, но спрашивающий «кто имеет доступ» обязан получать полный ответ
+	// из ОДНОЙ точки чтения — иначе две поверхности об одном предмете расходятся
+	// молча. Читатель тот же, что обслуживает `InternalClusterService.ListAdmins`:
+	// второй завёл бы второй способ ответить на один вопрос.
 	abList := accessbindingapp.NewListUseCase(kachoRepo).
 		WithRelationStore(relationStore).
 		WithRelationQueries(relationStore).
+		WithClusterAdmins(kachopg.NewClusterAdminGrantReader(pool)).
 		WithListScanRecorder(listScanRec)
 	abListBySub := accessbindingapp.NewListBySubjectUseCase(kachoRepo)
 	abListByAcc := accessbindingapp.NewListByAccountUseCase(kachoRepo).
@@ -501,7 +508,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// SEC-C — FGA-proxy: RegisterResource / UnregisterResource enqueue the
 	// owner-hierarchy tuple into kacho_iam.fga_outbox in one writer-tx, out of which
 	// a trigger folds the direct fact in the same commit. Least-priv enforced via the
-	// ReBAC gate (cert-cert→SA → fga_writer@iam_fgaproxy:system); the gate's
+	// ReBAC gate (cert-cert→SA → fga_writer@cluster:cluster_kacho_root); the gate's
 	// RelationChecker is the same Check surface (relationStore).
 	// β (epic «Resource-scoped AccessBinding»): the same writer-tx also UPSERTs
 	// /DELETEs the kacho_iam.resource_mirror row (labels + parent-scope of the

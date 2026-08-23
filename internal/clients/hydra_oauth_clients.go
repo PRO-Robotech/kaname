@@ -235,35 +235,6 @@ func (c *HydraAdminClient) DeleteOAuthClient(ctx context.Context, clientID strin
 	return nil
 }
 
-// GetOAuthClient fetches an OAuth2 client (without secret).
-func (c *HydraAdminClient) GetOAuthClient(ctx context.Context, clientID string) (HydraOAuthClient, error) {
-	url := c.BaseURL + "/admin/clients/" + clientID
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return HydraOAuthClient{}, err
-	}
-	if c.BearerToken != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.BearerToken)
-	}
-	resp, err := c.HTTPClient.Do(httpReq)
-	if err != nil {
-		return HydraOAuthClient{}, fmt.Errorf("hydra get-client: %w", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-	if resp.StatusCode == http.StatusNotFound {
-		return HydraOAuthClient{}, ErrHydraClientNotFound
-	}
-	if resp.StatusCode/100 != 2 {
-		return HydraOAuthClient{}, hydraAPIError(resp.StatusCode, body)
-	}
-	var out HydraOAuthClient
-	if err := json.Unmarshal(body, &out); err != nil {
-		return HydraOAuthClient{}, fmt.Errorf("unmarshal hydra response: %w", err)
-	}
-	return out, nil
-}
-
 // HydraAPIError — Hydra Admin returned non-2xx.
 type HydraAPIError struct {
 	StatusCode int
@@ -273,9 +244,6 @@ type HydraAPIError struct {
 func (e *HydraAPIError) Error() string {
 	return fmt.Sprintf("hydra admin api: status %d: %s", e.StatusCode, e.Body)
 }
-
-// ErrHydraClientNotFound — Hydra Admin 404 for GET / DELETE.
-var ErrHydraClientNotFound = errors.New("hydra: oauth client not found")
 
 // IsConflict reports whether err is a Hydra Admin 409 Conflict (e.g. a
 // CreateOAuthClient for an already-registered client_id). Callers with a

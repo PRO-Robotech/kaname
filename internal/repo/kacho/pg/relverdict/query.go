@@ -414,25 +414,7 @@ SELECT src.cond_name, src.cond_params, src.arm FROM (
   )
   UNION ALL
   (
-    -- (1) прямой факт. Условие берётся С САМОЙ ЗАПИСИ: она самоописательна, и
-    -- читателю не нужно знать модель, чтобы соблюсти ограничение.
-    --
-    -- Отбор различных стоит ВНУТРИ этой ветви, а не над союзом: здесь он
-    -- обязателен (один и тот же условный источник приходит по нескольким
-    -- говорящим и нескольким областям), а над союзом он блокировал бы и ветвь
-    -- выдач, у которой дублирования нет — все её строки безусловны и
-    -- неразличимы, поэтому читателю довольно первой.
-    SELECT DISTINCT f.condition_name AS cond_name, f.condition_params AS cond_params,
-           ''::text AS arm
-      FROM kacho_iam.relation_fact f
-      JOIN speaker sp ON sp.subject = f.subject
-      JOIN scope_distinct sc ON sc.s_type = f.object_type AND sc.s_id = f.object_id
-      JOIN fact_atom fa
-        ON fa.relation = f.relation
-       AND CASE WHEN fa.parent_type = ''
-                THEN sc.depth = 0
-                ELSE fa.parent_type = sc.s_type
-           END
+{{fact_arm}}
   )
 ) src
 LIMIT $8::int`
@@ -525,7 +507,7 @@ const grantArmSQL = `
     -- и каждое возвращает выдачи ровно этого субъекта ровно в этой области.
     SELECT ''::text AS cond_name, '{}'::jsonb AS cond_params, rs.arm AS arm
       FROM speaker_pair sp
-      CROSS JOIN scope_distinct sc
+      {{scope_join}}
       JOIN kacho_iam.access_binding_subjects bs
         ON bs.subject_type  = sp.s_type AND bs.subject_id  = sp.s_id
        AND bs.resource_type = sc.s_type AND bs.resource_id = sc.s_id
@@ -557,14 +539,80 @@ const grantArmSQL = `
 // вердикт становятся 929 при меточной ветви впереди и 10032 по оси B при ней же
 // позади. То есть цена наблюдаемости здесь — сама константа, ради которой
 // стадия и делается.
-const grantArmPredicate = `rs.arm = 'anchor'
-          OR (rs.arm = 'names'  AND $3::text = ANY (rs.resource_names))
+//
+// ФУНКЦИЯ, А НЕ КОНСТАНТА, и это не оформление. Ветвь имён сравнивает
+// идентификатор объекта, а он назван по-разному у двух форм вопроса: у прямого
+// — параметром запроса, у страничного — колонкой внешней стороны соединения
+// вбок. Написать предикат дважды значило бы завести два места, знающие, что
+// такое «выдача достаёт до объекта», и разойтись им молча — в сторону лишнего
+// доступа. Текст остаётся ОДИН, различается только подставленное выражение.
+func grantArmPredicate(objectIDExpr string) string {
+	return `rs.arm = 'anchor'
+          OR (rs.arm = 'names'  AND ` + objectIDExpr + ` = ANY (rs.resource_names))
           OR (rs.arm = 'labels' AND m.labels IS NOT NULL
                                 AND m.labels @> rs.match_labels)`
+}
+
+// factArmSQL — ТЕЛО ВЕТВИ ПРЯМЫХ ФАКТОВ, единственное в дереве.
+//
+// Стоит в двух запросах — прямом вопросе и страничном — и различается ровно
+// соединением с областями: прямой вопрос спрашивает про один объект, страничный
+// обязан сузить области ТЕМ объектом, о котором идёт строка. Довод тот же, что у
+// ветви выдач: скопировать текст значило бы завести два места об одном предмете.
+const factArmSQL = `
+    -- (1) прямой факт. Условие берётся С САМОЙ ЗАПИСИ: она самоописательна, и
+    -- читателю не нужно знать модель, чтобы соблюсти ограничение.
+    --
+    -- Отбор различных стоит ВНУТРИ этой ветви, а не над союзом: здесь он
+    -- обязателен (один и тот же условный источник приходит по нескольким
+    -- говорящим и нескольким областям), а над союзом он блокировал бы и ветвь
+    -- выдач, у которой дублирования нет — все её строки безусловны и
+    -- неразличимы, поэтому читателю довольно первой.
+    SELECT DISTINCT f.condition_name AS cond_name, f.condition_params AS cond_params,
+           ''::text AS arm
+      FROM kacho_iam.relation_fact f
+      JOIN speaker sp ON sp.subject = f.subject
+      {{scope_join}}
+      JOIN fact_atom fa
+        ON fa.relation = f.relation
+       AND CASE WHEN fa.parent_type = ''
+                THEN sc.depth = 0
+                ELSE fa.parent_type = sc.s_type
+           END
+`
+
+// Соединения ветвей с областями. Четыре текста, по одному на пару
+// «ветвь × форма вопроса»: у прямого вопроса область объекта одна на весь
+// запрос, у страничного она принадлежит СТРОКЕ и обязана быть сужена по ней —
+// иначе выдача, достающая до одного объекта страницы, разрешила бы всю страницу.
+const (
+	scopeJoinMark = "{{scope_join}}"
+
+	scopeJoinGrantOne  = "CROSS JOIN scope_distinct sc"
+	scopeJoinGrantMany = "JOIN scope_distinct sc ON sc.object_id = o.object_id"
+
+	scopeJoinFactOne  = "JOIN scope_distinct sc ON sc.s_type = f.object_type AND sc.s_id = f.object_id"
+	scopeJoinFactMany = "JOIN scope_distinct sc ON sc.object_id = o.object_id\n" +
+		"       AND sc.s_type = f.object_type AND sc.s_id = f.object_id"
+)
+
+// armsFor собирает обе ветви под ОДНУ форму вопроса.
+//
+// Одна функция на обе формы, потому что перепутать их местами — это не опечатка,
+// а расширение доступа: ветвь, соединённая с областями без сужения по строке,
+// отвечает «да» о каждом объекте страницы, до которого достаёт выдача на любой
+// один из них.
+func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string) (grant, fact string) {
+	grant = strings.Replace(grantArmSQL, "{{arm_predicate}}", grantArmPredicate(objectIDExpr), 1)
+	grant = strings.Replace(grant, scopeJoinMark, scopeJoinGrant, 1)
+	fact = strings.Replace(factArmSQL, scopeJoinMark, scopeJoinFact, 1)
+	return grant, fact
+}
 
 func verdictQuerySQL(labelTable string) string {
-	arm := strings.Replace(grantArmSQL, "{{arm_predicate}}", grantArmPredicate, 1)
-	sql := strings.Replace(verdictSQL, "{{grant_arm}}", arm, 1)
+	grant, fact := armsFor("$3::text", scopeJoinGrantOne, scopeJoinFactOne)
+	sql := strings.Replace(verdictSQL, "{{grant_arm}}", grant, 1)
+	sql = strings.Replace(sql, "{{fact_arm}}", fact, 1)
 	return strings.ReplaceAll(sql, labelsJoinMark,
 		labelsJoinPinned(labelTable, "$9", "$3"))
 }
@@ -687,6 +735,343 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 		return Unknown, g, notUnderstood
 	}
 	return Deny, g, nil
+}
+
+// ── ВОПРОС О СТРАНИЦЕ ────────────────────────────────────────────────────────
+
+// QueryMany — вопрос о МНОГИХ объектах ОДНОГО типа.
+//
+// Ровно та форма, в какой его задаёт фильтр списка соседа: субъект, тип,
+// отношение и доводы условий общие, различаются ТОЛЬКО идентификаторы. Другой
+// формы у страницы не бывает by construction — страница списка однородна.
+type QueryMany struct {
+	// Subject — целиком, как у прямого вопроса.
+	Subject string
+	// ObjectType — тип в словаре МОДЕЛИ, один на всю партию.
+	ObjectType string
+	// ObjectIDs — идентификаторы объектов. Порядок значим: ответ приходит той же
+	// длины и в том же порядке, потому что вызывающий сверяет его ПОЗИЦИОННО.
+	// Повторы законны — каждая позиция отвечается отдельно.
+	ObjectIDs []string
+	// Relation — отношение в том виде, в каком его называет МОДЕЛЬ.
+	Relation string
+	// Context — доводы запроса для условий на записях, общие на партию.
+	Context map[string]any
+}
+
+// verdictManySQL — тот же вердикт, но о СТРАНИЦЕ объектов, ОДНИМ запросом.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ЧТО ЭТО ЧИНИТ
+//
+// Предикат пообъектен — это свойство вопроса. Число ОБРАЩЕНИЙ К БАЗЕ пообъектным
+// быть не обязано, и до этого запроса оно им было: партия из ста разбиралась ста
+// вопросами внутри одной читающей транзакции, то есть «партия» существовала по
+// форме и отсутствовала по существу.
+//
+// Цена этого не в средней задержке, а в ЗАПАСЕ ДО ОТКАЗА: бюджет вызывающего
+// принадлежит ЗАПРОСУ, а не пункту (сосед даёт партии одну секунду), поэтому
+// деградация базы превращала здоровый положительный список в отказ во столько же
+// раз раньше, во сколько партия длиннее единицы.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ЧЕМ ОН ОТЛИЧАЕТСЯ ОТ ПРЯМОГО, И ЧЕМ НЕ ОТЛИЧАЕТСЯ
+//
+// НЕ отличается источниками права: обе ветви — тот же единственный в дереве
+// текст (`grantArmSQL`, `factArmSQL`), та же раскладка модели, тот же предел
+// обхода цепи, тот же предел ветви выдач в одну строку. Разойтись им негде: они
+// подставляются из одних и тех же констант.
+//
+// Отличается тремя вещами, и каждая названа:
+//
+//	(1) ЦЕПЬ ОБЛАСТЕЙ СТРОИТСЯ ДЛЯ КАЖДОГО объекта и несёт его идентификатор,
+//	    поэтому обе ветви сужают области ПО СТРОКЕ. Без этого сужения выдача,
+//	    достающая до одного объекта страницы, разрешила бы всю страницу;
+//	(2) СТОИМОСТЬ ПРИНАДЛЕЖИТ ЗАПРОСУ: набор объектов приходит доводом
+//	    (`unnest($3)`), а не читается из таблицы, поэтому цепь раскручивается на
+//	    странице и никогда на типе;
+//	(3) РАННЕГО ВЫХОДА ЧИТАТЕЛЯ ЗДЕСЬ НЕТ. У прямого вопроса чтение прекращалось
+//	    на первом безусловном основании; здесь строки всех объектов идут одним
+//	    потоком, и остановиться на первом основании ОДНОГО объекта нельзя — за ним
+//	    идут другие. Замыкание НА СЕРВЕРЕ сохранено целиком (ветвь выдач
+//	    ограничена одной строкой НА ОБЪЕКТ, соединением вбок), а ветвь фактов
+//	    объекта дочитывается всегда; её вклад ограничен пределом $8 на объект.
+//	    Читатель по-прежнему прекращает РАЗБОР объекта на первом безусловном
+//	    основании — от этого зависит смысл признаков `Grounds`.
+//
+// Соединение вбок с внешней стороной `ids` — не оформление: у страницы внешняя
+// сторона это целый набор, и обычное соединение дало бы планировщику право
+// строить хеш по всей таблице выдач. Тот же довод, что у цепи областей в
+// перечислении объектов.
+//
+// $1 subject · $2 object_type в словаре МОДЕЛИ · $3 МАССИВ object_id ·
+// $4 типы предков атомов-фактов · $5 отношения атомов-фактов ·
+// $6 глаголы атомов-выдачи · $7 max_depth · $8 предел источников НА ОБЪЕКТ ·
+// $9 object_type в словаре КАТАЛОГА (см. довод у verdictSQL: двух словарей в
+// одном соединении быть не должно).
+const verdictManySQL = `
+WITH RECURSIVE
+-- ids — объекты партии С ПОРЯДКОВЫМ НОМЕРОМ.
+--
+-- Номер, а не сам идентификатор, связывает строку ответа с позицией вопроса:
+-- повтор идентификатора в партии законен, и по идентификатору две его позиции
+-- были бы неразличимы.
+ids(object_id, ord) AS (
+    SELECT * FROM unnest($3::text[]) WITH ORDINALITY
+),
+-- scope — ОБЛАСТИ КАЖДОГО объекта партии: сам объект и вся его цепь предков.
+--
+-- Обход, а не одно чтение, и соединение вбок с пределом внутри — по тем же
+-- доводам, что у прямого вопроса (см. verdictSQL) и у перечисления (см. listSQL):
+-- таблица рёбер хранит присланную цепь, а не её замыкание, поэтому верхние
+-- уровни супер-доступа достижимы только обходом; а на целой странице обычное
+-- соединение дало бы планировщику право прочитать таблицу рёбер целиком.
+--
+-- Заход посеян ДОВОДОМ ЗАПРОСА, а не таблицей: набор объектов приносит
+-- вызывающий, и он же ограничен контрактом партии. Цепь поэтому раскручивается
+-- на странице и никогда на типе.
+scope(object_id, s_type, s_id, depth) AS (
+    SELECT i.object_id, $2::text, i.object_id, 0 FROM ids i
+  UNION
+    SELECT s.object_id, e.parent_type, e.parent_id, s.depth + 1
+      FROM scope s
+      CROSS JOIN LATERAL (
+             SELECT pe.parent_type, pe.parent_id
+               FROM kacho_iam.resource_scope_edge pe
+              WHERE pe.object_type = s.s_type AND pe.object_id = s.s_id
+              ORDER BY pe.depth
+              LIMIT $7::int
+           ) e
+     WHERE s.depth < $7::int
+),
+-- scope_distinct — области без повторов, ПО КАЖДОМУ объекту отдельно.
+--
+-- Повтор области умножает обе ветви (довод — у verdictSQL). Группировка идёт с
+-- идентификатором объекта: свести области разных объектов в одно множество
+-- значило бы разрешить странице то, что выдано одному её объекту.
+scope_distinct(object_id, s_type, s_id, depth) AS (
+    SELECT object_id, s_type, s_id, min(depth) FROM scope GROUP BY object_id, s_type, s_id
+),
+speaker_pair(s_type, s_id, via) AS (
+    -- СУБЪЕКТ ВЫДАЧИ — ПАРОЙ КОЛОНОК, а не склейкой: склейка выводит колонки
+    -- из-под индекса и превращает сужение в фильтр (довод — у verdictSQL).
+    SELECT split_part($1::text, ':', 1),
+           substr($1::text, length(split_part($1::text, ':', 1)) + 2),
+           'self'
+  UNION ALL
+    SELECT 'group', gm.group_id, 'member'
+      FROM kacho_iam.group_members gm
+     WHERE gm.member_type = split_part($1::text, ':', 1)
+       AND gm.member_id   = substr($1::text, length(split_part($1::text, ':', 1)) + 2)
+  UNION ALL
+    -- Подстановка объявлена НАМЕРЕННО (глобальный справочник читает всякий
+    -- аутентифицированный) и потому перечислена явно.
+    SELECT 'user', '*', 'wildcard'
+),
+speaker(subject) AS (
+    -- ТЕКСТОВАЯ форма — для прямых фактов. Обе формы имени группы: канонический
+    -- производитель пишет group:<id>#member, голой формой адресуется сама группа.
+    SELECT $1::text
+  UNION
+    SELECT 'group:' || sp.s_id FROM speaker_pair sp WHERE sp.via = 'member'
+  UNION
+    SELECT 'group:' || sp.s_id || '#member' FROM speaker_pair sp WHERE sp.via = 'member'
+  UNION
+    SELECT 'user:*'
+),
+fact_atom(parent_type, relation) AS (
+    SELECT * FROM unnest($4::text[], $5::text[])
+)
+-- Порядок ветвей тот же, что у прямого вопроса, и по той же причине: каждая
+-- строка ветви выдач безусловна by construction, поэтому она отвечает на вопрос
+-- первой же строкой и ограничена одной строкой НА ОБЪЕКТ.
+--
+-- ORDER BY здесь НЕТ намеренно: сортировка блокирует выдачу строк, а связывать
+-- строку с позицией вопроса нечем, кроме номера, — он и приходит колонкой.
+SELECT o.ord, src.cond_name, src.cond_params, src.arm
+  FROM ids o
+  CROSS JOIN LATERAL (
+    SELECT s.cond_name, s.cond_params, s.arm FROM (
+      (
+{{grant_arm}}
+        LIMIT 1
+      )
+      UNION ALL
+      (
+{{fact_arm}}
+      )
+    ) s
+    LIMIT $8::int
+  ) src`
+
+// verdictManyQuerySQL — ГОТОВЫЙ запрос вердикта о странице для выбранной оси
+// меток (довод — у verdictQuerySQL: собранный запрос читает не только продукт,
+// но и гейт словарей, и собирать его гейт не вправе).
+func verdictManyQuerySQL(labelTable string) string {
+	grant, fact := armsFor("o.object_id", scopeJoinGrantMany, scopeJoinFactMany)
+	sql := strings.Replace(verdictManySQL, "{{grant_arm}}", grant, 1)
+	sql = strings.Replace(sql, "{{fact_arm}}", fact, 1)
+	// Метки объекта присоединяются К СТРОКЕ партии, а не к параметру запроса:
+	// объект у каждой строки свой. Строитель — тот же самый; расходиться двум
+	// представлениям о том, где лежат метки, негде.
+	return strings.ReplaceAll(sql, labelsJoinMark,
+		labelsJoinPinned(labelTable, "$9", "o.object_id"))
+}
+
+// AskMany задаёт форме вопрос о СТРАНИЦЕ объектов одного типа — одним запросом.
+//
+// Отдаёт вердикт на КАЖДУЮ позицию вопроса, в том же порядке и той же длины:
+// верный, но переставленный ответ отфильтровал бы страницу чужим вердиктом.
+// Второй результат — основания по тем же позициям, для наблюдателя.
+//
+// Первая же позиция, о которой ответа получить не удалось, прекращает разбор и
+// возвращается ОШИБКОЙ: частичный ответ означал бы вердикт, которого никто не
+// выносил. Основания при этом отдаются за уже разобранные позиции — наблюдение
+// засчитывается по тому, что было прочитано, а не по тому, чем кончился вопрос.
+func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds, error) {
+	if in.Subject == "" || in.ObjectType == "" || in.Relation == "" {
+		return nil, nil, fmt.Errorf("relverdict: неполный вопрос о странице %+v — пустая часть "+
+			"делает ответ бессмысленным, и отдавать за него Deny значит выдавать незнание за отказ",
+			QueryMany{Subject: in.Subject, ObjectType: in.ObjectType, Relation: in.Relation})
+	}
+	if len(in.ObjectIDs) == 0 {
+		return nil, nil, nil
+	}
+	for i, id := range in.ObjectIDs {
+		if id == "" {
+			return nil, nil, fmt.Errorf("relverdict: позиция %d партии не называет объекта — "+
+				"пустой идентификатор ответился бы отказом, неотличимым от честного", i)
+		}
+	}
+
+	factParents, factRelations, bindVerbs, err := sourcesOf(in.ObjectType, in.Relation)
+	if err != nil {
+		// Тип, не объявленный моделью, — ОТКАЗ по ВСЕЙ партии, а не ошибка: тип
+		// один на партию, и «объектов такого типа не существует» есть ответ на
+		// вопрос. Разбор — тот же, что у прямого вопроса.
+		if errors.Is(err, authzplan.ErrTypeNotDeclared) {
+			verdicts := make([]Verdict, len(in.ObjectIDs))
+			grounds := make([]Grounds, len(in.ObjectIDs))
+			for i := range grounds {
+				verdicts[i] = Deny
+				grounds[i].TypeNotDeclared = true
+			}
+			return verdicts, grounds, nil
+		}
+		return nil, nil, err
+	}
+	labelTable, err := labelAxisOf(in.ObjectType)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	rows, err := q.Query(ctx, verdictManyQuerySQL(labelTable),
+		in.Subject, in.ObjectType, in.ObjectIDs,
+		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
+		authzmap.CatalogTypeName(in.ObjectType),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("relverdict: запрос о странице: %w", err)
+	}
+
+	// Основания и источники накапливаются ПО ПОЗИЦИИ: строки объектов приходят
+	// одним потоком, и порядок между объектами запрос не обещает.
+	type source struct {
+		name   string
+		params map[string]any
+	}
+	n := len(in.ObjectIDs)
+	grounds := make([]Grounds, n)
+	for i := range grounds {
+		grounds[i].LabelAxisTable = labelTable
+		// Набор источников считается дочитанным, пока не доказано обратное:
+		// безусловное основание ниже прекращает разбор позиции и снимает признак,
+		// ровно как ранний выход у прямого вопроса.
+		grounds[i].SetExhausted = true
+	}
+	sources := make([][]source, n)
+	rowsRead := make([]int, n)
+	settled := make([]bool, n) // позиция уже отвечена безусловным основанием
+
+	for rows.Next() {
+		var (
+			ord  int64
+			s    source
+			arm  string
+			slot int
+		)
+		if err := rows.Scan(&ord, &s.name, &s.params, &arm); err != nil {
+			rows.Close()
+			return nil, nil, fmt.Errorf("relverdict: разбор источника страницы: %w", err)
+		}
+		slot = int(ord) - 1
+		if slot < 0 || slot >= n {
+			rows.Close()
+			return nil, nil, fmt.Errorf("relverdict: запрос вернул позицию %d при партии из %d — "+
+				"связь строки с вопросом потеряна, и вердикт по ней был бы вердиктом о чужом объекте",
+				ord, n)
+		}
+		if settled[slot] {
+			// Разбор позиции прекращён её безусловным основанием. Дочитывать её
+			// строки не нужно и не было нужно: остальные источники ответа не
+			// меняют.
+			continue
+		}
+		rowsRead[slot]++
+		if arm == "labels" {
+			grounds[slot].LabelArm = true
+		}
+		if s.name == "" {
+			settled[slot] = true
+			grounds[slot].SetExhausted = false
+			continue
+		}
+		sources[slot] = append(sources[slot], s)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("relverdict: чтение источников страницы: %w", err)
+	}
+
+	verdicts := make([]Verdict, n)
+	for i := range verdicts {
+		if settled[i] {
+			verdicts[i] = Allow
+			continue
+		}
+		// Усечение определяется ПРИЧИНОЙ остановки, а не длиной среза: позиция,
+		// отвеченная основанием, сюда не доходит, поэтому достигнутый предел —
+		// это и есть усечение, и ничто другое (довод — у Ask).
+		if rowsRead[i] >= maxConditionRows {
+			return verdicts[:i], grounds[:i], fmt.Errorf(
+				"relverdict: различных условий на объект %q %d и более — набор усечён, и вердикт "+
+					"по нему давать нельзя", in.ObjectIDs[i], maxConditionRows)
+		}
+		var notUnderstood error
+		allowed := false
+		for _, s := range sources[i] {
+			ok, cerr := evalCondition(s.name, s.params, in.Context)
+			if cerr != nil {
+				// Не понято — запоминаем, но продолжаем: другой источник может
+				// дать право, и тогда незнание про этот ничего не меняет.
+				notUnderstood = cerr
+				continue
+			}
+			if ok {
+				allowed = true
+				break
+			}
+		}
+		switch {
+		case allowed:
+			verdicts[i] = Allow
+		case notUnderstood != nil:
+			return verdicts[:i], grounds[:i], notUnderstood
+		default:
+			verdicts[i] = Deny
+		}
+	}
+	return verdicts, grounds, nil
 }
 
 // sourcesOf раскладывает вопрос на источники, которые запрос обязан спросить.

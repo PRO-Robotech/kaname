@@ -228,3 +228,22 @@ func TestDerivableTypesStayTheOwnersList(t *testing.T) {
 		require.Contains(t, authzcascade.DerivableTypes, want)
 	}
 }
+
+// DirectRelationsMany — та же диагностика о СТРАНИЦЕ объектов, тем же оракулом,
+// из которого отвечает пообъектная: подставная форма, отвечающая странице не то,
+// что отвечает по одному, скрыла бы ровно то расхождение, ради которого её и
+// подставляют.
+func (f *formStub) DirectRelationsMany(ctx context.Context, subject, objectType string,
+	objectIDs []string, limit int) (map[string][]string, error) {
+	out := make(map[string][]string, len(objectIDs))
+	for _, objectID := range objectIDs {
+		rels, err := f.DirectRelations(ctx, subject, objectType, objectID, limit)
+		if err != nil {
+			return nil, err
+		}
+		if len(rels) > 0 {
+			out[objectID] = rels
+		}
+	}
+	return out, nil
+}

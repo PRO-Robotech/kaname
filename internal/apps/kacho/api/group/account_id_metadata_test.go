@@ -265,3 +265,9 @@ func (r *fakeGrpReader) Visibility() visibility.ReaderIface { return nil }
 // «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
 // ненаречённое.
 func (r *fakeGrpWriter) Visibility() visibility.ReaderIface { return nil }
+
+// MembersOfGroups — предмет этой пробы не касается состава нескольких групп;
+// дублёр отвечает пусто и говорит об этом, а не притворяется источником.
+func (r *fakeGrpRdr) MembersOfGroups(context.Context, []domain.GroupID) ([]domain.GroupMember, []domain.GroupID, error) {
+	return nil, nil, nil
+}

@@ -33,8 +33,9 @@ package service
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -103,6 +104,18 @@ func buildCondContext(ctx context.Context, reqContext map[string]any, now time.T
 type Authorizer interface {
 	// CheckWithContext — вердикт об объекте с условным контекстом запроса.
 	CheckWithContext(ctx context.Context, subject, relation, object string, condCtx map[string]any) (bool, error)
+	// BatchCheckWithContext — вердикт о СТРАНИЦЕ объектов ОДНИМ вопросом.
+	//
+	// Объявлен ОБЯЗАТЕЛЬНЫМ методом порта, а не «способностью, если она есть».
+	// Необязательность здесь была бы запасным путём с тихой деградацией: дверь без
+	// этого метода молча возвращала бы партию к пообъектной полосе, и свойство
+	// «партия стоит один вопрос» держалось бы тем, какую реализацию провязал
+	// композиционный корень, — то есть не держалось бы ничем.
+	//
+	// Ответ — той же длины и в порядке заданных объектов: верный, но
+	// переставленный вердикт отфильтровал бы страницу чужим ответом.
+	BatchCheckWithContext(ctx context.Context, subject, relation string, objects []string,
+		condCtx map[string]any) ([]bool, error)
 	// ListSubjects — кто держит отношение на объекте, страницей С КУРСОРОМ.
 	ListSubjects(ctx context.Context, objectType, objectID, relation string, pageSize int, pageToken string) ([]string, string, error)
 	// Sources — кого называют основания права на объекте (разбор «почему»).
@@ -113,6 +126,18 @@ type Authorizer interface {
 	// Прежде на это отвечало чтение кортежей у движка; читатель и единица те же,
 	// источник — своя таблица.
 	DirectRelations(ctx context.Context, subject, objectType, objectID string, limit int) ([]string, error)
+	// DirectRelationsMany — то же о СТРАНИЦЕ объектов одного типа, одним вопросом.
+	//
+	// Хвост текста отказа платится на КАЖДОМ отказанном объекте, а страница
+	// списка отказами и состоит — она ими и сужается. Пообъектная диагностика
+	// поэтому возвращала стоимость набора ровно там, где вердикт её уже перестал
+	// платить: партия из ста отказов стоила ста вопросов диагностики.
+	//
+	// Ключ ответа — идентификатор объекта; объект без прямых отношений в ответе
+	// отсутствует (пустой срез и отсутствие ключа означают одно и то же — «хвоста
+	// не будет»).
+	DirectRelationsMany(ctx context.Context, subject, objectType string, objectIDs []string,
+		limit int) (map[string][]string, error)
 }
 
 type AuthorizeService struct {
@@ -177,53 +202,39 @@ type CheckResult struct {
 	CheckedAt   time.Time
 }
 
-// batchCheckParallelism bounds how many items of ONE BatchCheck pass are resolved
-// against the relation store at the same time.
+// batchCheckParallelism — сколько ПРОГОНОВ одного прохода `BatchCheck`
+// разрешается держать на хранилище одновременно.
 //
-// # Why a bound is needed at all, and why it is not "as many as the batch"
+// # Единица — прогон, и она сменилась вместе с предметом
 //
-// BatchCheck is the door every sibling service's List filter walks through:
-// vpc/compute/nlb/storage each read a page from their own database, cut it into
-// slices of at most 100 ids (the published cap enforced below) and hand each slice
-// to this method.
+// Здесь стояло «сколько ПУНКТОВ», и рядом было сказано, что один вопрос на пункт
+// присущ пообъектному предикату, а остаток («партия отвечается парой обращений, а
+// стоит сотни») назван ОТКРЫТЫМ. Остаток закрыт: однородная часть партии —
+// прогон — отвечается ОДНИМ вопросом, поэтому связывать пункты этим пределом
+// больше нечем, и абзац про открытый остаток снят вместе с самим остатком (иначе
+// он пережил бы свой предмет и звал закрывать закрытое).
 //
-// The predicate is per-object, so there is one store QUESTION per item. The number
-// of store ROUND-TRIPS is a different quantity and is NOT inherent: the store
-// answers one relation about many objects in a single request (cap
-// MaxBatchChecksPerRequest), and authzfilter already uses that to turn a
-// contract-sized page into tens of requests instead of a thousand. A sibling's
-// slice is uniform by construction — same subject, resource type, action and
-// relation, only the id varies — so a 100-item slice is answerable here in a
-// couple of round-trips rather than a hundred. That it still costs a hundred is an
-// OPEN REMAINDER, not physics; whoever closes it starts from
-// authzcascade.Client.BatchCheckWithContext, which already carries the cascade.
-// This bound does not close that remainder and is not meant to: the bound is about
-// WAITING, the remainder is about round-trips.
+// # Почему предел вообще нужен, и почему он не «сколько прогонов есть»
 //
-// What the bound is about is that the caller's deadline is per REQUEST: a sibling gives
-// one slice one second (their authzfilter.DefaultConfig().Timeout). Resolving the
-// slice one item after another makes its wall time 100 × the store's answer time,
-// so a store answering in 10ms consumes that entire budget and anything slower
-// fails the caller's whole POSITIVE List closed with UNAVAILABLE. Each sibling
-// already bounds ITS fan-out over slices for exactly this reason; that bound
-// cannot see inside this hop, which is where the waiting actually was.
+// Довод не изменился, изменилась только единица: бюджет вызывающего принадлежит
+// ЗАПРОСУ. Партия, чьи пункты называют РАЗНЫЕ субъекты (форму метод поддерживает
+// явно), даёт столько прогонов, сколько субъектов, и последовательный проход по
+// ним стоил бы прогоны × время ответа хранилища — то самое ожидание, которое
+// съедало секунду вызывающего и роняло его ПОЛОЖИТЕЛЬНЫЙ список в UNAVAILABLE.
 //
-// 8 rather than "one goroutine per item": in-flight questions multiply against the
-// store's own internal concurrency and against concurrent Lists from other
-// callers, so an unbounded burst trades one caller's latency for everyone's. At 8
-// a full 100-item slice is 13 waves instead of 100, which is the difference between
-// "fits in the caller's budget with room" and "is the caller's budget".
+// Восемь, а не «горутина на прогон»: вопросы в полёте умножаются на собственную
+// одновременность хранилища и на одновременные списки других вызывающих, поэтому
+// неограниченный всплеск меняет задержку одного вызывающего на задержку всех.
 //
-// The numeral 8 is also authzfilter.BatchParallelism, and the two are NOT the same
-// quantity — do not "unify" them on the strength of the digit. There, 8 bounds
-// in-flight PARTITIONS, each already carrying MaxBatchChecksPerRequest questions,
-// which its own godoc counts as hundreds of questions the store may be resolving
-// at once. Here, 8 bounds in-flight single questions. Same numeral, units apart by
-// the batch cap; an earlier revision of this comment claimed the two "bound the
-// same pressure", which was wrong by that factor.
+// Число совпадает с `authzfilter.BatchParallelism`, и это НЕ одна и та же
+// величина — не «унифицировать» их по совпадению цифры: там восьмёркой
+// ограничены разделы, каждый из которых уже несёт целую страницу вопросов.
 //
-// Locked, with both directions, by TestBatchCheck_ResolvesItsItemsConcurrently and
-// TestBatchCheck_ConcurrencyIsBounded.
+// Обе стороны — что прогоны не ждут друг друга и что их одновременность
+// ограничена — держат `TestBatchCheck_ResolvesItsRunsConcurrently` и
+// `TestBatchCheck_RunConcurrencyIsBounded`; что однородная партия стоит ОДИН
+// вопрос — `TestBatchCheck_AUniformSliceIsOneQuestion` и
+// `TestBatchCheck_AHundredCostsWhatOneCosts`.
 const batchCheckParallelism = 8
 
 // clusterAdminMemo memoizes the cluster-admin short-circuit verdict for a single
@@ -308,15 +319,81 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 	now := time.Now().UTC().Truncate(time.Second)
 	result = &CheckResult{CheckedAt: now}
 
+	p := planCheck(ctx, req, now)
+	if p.invalid != nil {
+		return result, p.invalid
+	}
+	if p.superGateDecides {
+		// Вопроса об объекте нет — спросить форму «наугад» значило бы получить
+		// честное «нет» о том, чего не спрашивали. Но решение принято, и оно
+		// обязано попасть в знаменатель: надзор администратора облака —
+		// авторитет на всём, и платит за него только отказ.
+		if s.isClusterAdmin(ctx, caMemo, p.subject) {
+			result.Allowed = true
+			return result, nil
+		}
+		result.DenyReasons = []string{p.denyReason}
+		return result, nil
+	}
+
+	allowed, err := s.verdict(ctx, p.subject, caMemo, p.relation, p.object, p.condCtx)
+	if err != nil {
+		return result, err
+	}
+	result.Allowed = allowed
+	if !allowed {
+		result.DenyReasons = []string{denyReasonText(p.subject, p.relation, p.object, p.action,
+			s.readSubjectRelations(ctx, p.subject, p.object))}
+	}
+	return result, nil
+}
+
+// checkPlan — всё, что решено о пункте ДО обращения к хранилищу.
+//
+// Существует ради ОДНОГО свойства: разбор пункта — валидация входа, разрешение
+// отношения, подстановка синглтона кластера, неадресуемый объект — у одиночного
+// вопроса и у партии обязан быть ОДИН. Второй разбор «для партии» был бы вторым
+// местом об одном предмете, и разошлись бы они молча — в сторону, где партия
+// отвечает не то же, что тот же вопрос, заданный по одному.
+type checkPlan struct {
+	subject    string
+	relation   string
+	objectType string
+	objectID   string
+	object     string
+	action     string
+	condCtx    map[string]any
+
+	// invalid — вход не назван. Это ОШИБКА пункта, а не отказ: вызывающий обязан
+	// отличать «спросил не то» от «доступа нет».
+	invalid error
+	// superGateDecides — вопроса к форме нет (отношение не разрешается либо объект
+	// не адресуем), и решение принимает надзор администратора облака.
+	superGateDecides bool
+	// denyReason — текст отказа, когда надзор права не даёт.
+	denyReason string
+}
+
+// planCheck разбирает пункт, не обращаясь к хранилищу.
+//
+// Часы — параметром: у партии они ОДНИ на весь проход, иначе пункты одной
+// страницы получили бы разное «сейчас» при вычислении условий, и страница
+// описывала бы состояние, которого не было ни в один момент.
+func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
+	p := checkPlan{subject: req.Subject, action: req.Action}
+
 	// Input validation.
 	if req.Subject == "" {
-		return result, fmt.Errorf("Illegal argument subject: required")
+		p.invalid = fmt.Errorf("Illegal argument subject: required")
+		return p
 	}
 	if req.Resource.Type == "" || req.Resource.ID == "" {
-		return result, fmt.Errorf("Illegal argument resource: required")
+		p.invalid = fmt.Errorf("Illegal argument resource: required")
+		return p
 	}
 	if req.Action == "" {
-		return result, fmt.Errorf("Illegal argument action: required")
+		p.invalid = fmt.Errorf("Illegal argument action: required")
+		return p
 	}
 	// Explicit relation override. When the api-gateway
 	// passes `required_relation` from the catalog, we honor it verbatim
@@ -332,15 +409,9 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 		// Cluster-admin fallback: even an unresolvable relation is allowed for a
 		// cluster-admin (the flat super-gate is authority on everything). Checked on
 		// the deny path only — the common allow case never pays this round-trip.
-		// Отношения нет — вопроса форме E тоже нет: спросить её «наугад» значило бы
-		// получить честное «нет» о том, чего не спрашивали. Но решение принято, и оно
-		// обязано попасть в знаменатель.
-		if s.isClusterAdmin(ctx, caMemo, req.Subject) {
-			result.Allowed = true
-			return result, nil
-		}
-		result.DenyReasons = []string{fmt.Sprintf("action %q does not resolve to a known relation", req.Action)}
-		return result, nil
+		p.superGateDecides = true
+		p.denyReason = fmt.Sprintf("action %q does not resolve to a known relation", req.Action)
+		return p
 	}
 	// Cluster is a singleton (`cluster_kacho_root` — см. domain/cluster.go::
 	// ClusterSingletonID). Per-RPC catalog entries для reference data
@@ -366,28 +437,19 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 		// Объекта нет — вопроса форме E нет; решение всё равно названо (знаменатель).
 		// Cluster-admin fallback: an unscopable resource has no per-object path,
 		// but a cluster-admin is authority on everything. Deny path only.
-		if s.isClusterAdmin(ctx, caMemo, req.Subject) {
-			result.Allowed = true
-			return result, nil
-		}
-		result.DenyReasons = []string{"no path: unscoped resource"}
-		return result, nil
+		p.superGateDecides = true
+		p.denyReason = "no path: unscoped resource"
+		return p
 	}
-	object := fmt.Sprintf("%s:%s", req.Resource.Type, req.Resource.ID)
 
+	p.relation = relation
+	p.objectType = req.Resource.Type
+	p.objectID = req.Resource.ID
+	p.object = fmt.Sprintf("%s:%s", req.Resource.Type, req.Resource.ID)
 	// Build the CEL condition-context: principal/connection attributes are
 	// server-derived (forged client values stripped); see buildCondContext.
-	condCtx := buildCondContext(ctx, req.Context, now)
-
-	allowed, err := s.verdict(ctx, req.Subject, caMemo, relation, object, condCtx)
-	if err != nil {
-		return result, err
-	}
-	result.Allowed = allowed
-	if !allowed {
-		result.DenyReasons = []string{s.formatDenyReason(ctx, req.Subject, relation, object, req.Action)}
-	}
-	return result, nil
+	p.condCtx = buildCondContext(ctx, req.Context, now)
+	return p
 }
 
 // verdict — ОКОНЧАТЕЛЬНЫЙ вердикт края.
@@ -440,7 +502,18 @@ func (s *AuthorizeService) verdict(
 // disclosure. (deny_reasons remains repeated string for wire-format
 // compat — we use the first slot.)
 func (s *AuthorizeService) formatDenyReason(ctx context.Context, subject, relation, object, action string) string {
-	relations := s.readSubjectRelations(ctx, subject, object)
+	return denyReasonText(subject, relation, object, action,
+		s.readSubjectRelations(ctx, subject, object))
+}
+
+// denyReasonText собирает текст отказа из УЖЕ ПРОЧИТАННОЙ диагностики.
+//
+// Отделено от чтения намеренно: диагностику для страницы читают ОДНИМ вопросом
+// на всю партию, а текст собирают на каждый отказ. Слитые вместе, они заставляли
+// бы партию платить по вопросу за пункт — то есть возвращать стоимость набора
+// туда, откуда её только что убрали. Текст при этом остаётся ОДИН на обе полосы:
+// разойтись им негде.
+func denyReasonText(subject, relation, object, action string, relations []string) string {
 	tail := "no direct relations granted"
 	if len(relations) > 0 {
 		tail = fmt.Sprintf("current direct relations: [%s]", strings.Join(relations, ", "))
@@ -451,6 +524,24 @@ func (s *AuthorizeService) formatDenyReason(ctx context.Context, subject, relati
 	}
 	return fmt.Sprintf("subject %s lacks relation %q on %s%s; %s",
 		subject, relation, object, actionPart, tail)
+}
+
+// readSubjectRelationsMany — та же диагностика о СТРАНИЦЕ объектов одного типа,
+// одним вопросом.
+//
+// Best-effort ровно в той же мере, что и пообъектная: отказ уже принят, и
+// недоступная диагностика просто не добавит хвоста. Пустая карта означает «хвоста
+// не будет ни у одного», и это НЕ отказ — тот уже вынесен.
+func (s *AuthorizeService) readSubjectRelationsMany(ctx context.Context, subject, objectType string,
+	objectIDs []string) map[string][]string {
+	if s.relations == nil || subject == "" || objectType == "" || len(objectIDs) == 0 {
+		return nil
+	}
+	relations, err := s.relations.DirectRelationsMany(ctx, subject, objectType, objectIDs, 16)
+	if err != nil {
+		return nil
+	}
+	return relations
 }
 
 // readSubjectRelations best-effort enumerates the (subject, *, object)
@@ -579,36 +670,63 @@ func (s *AuthorizeService) verdictForRelation(
 	return authzguard.SubjectIsClusterAdmin(ctx, s.clusterAdmin, req.Subject), nil
 }
 
-// BatchCheck — fan-out over a bounded worker pool, results in request-order.
+// BatchCheck — партия разбирается ПРОГОНАМИ, результаты — в порядке запроса.
 //
-// # Why the items do not wait on each other
+// # Что такое прогон и почему единица именно он
 //
-// This is the door every sibling service's List filter walks through: vpc, compute,
-// nlb and storage each read a page from their OWN database, cut it into slices of at
-// most 100 ids (the cap enforced below) and hand each slice here. The predicate is
-// per-object, so one store question per item is inherent and is NOT what changed.
+// Это дверь, в которую входит фильтр списка КАЖДОГО сервиса-соседа: vpc, compute,
+// nlb, storage и registry читают страницу из СВОЕЙ базы, режут её на партии не
+// более чем по сто идентификаторов (предел проверяется ниже) и отдают их сюда.
+// Такая партия ОДНОРОДНА by construction — один субъект, один тип, одно отношение,
+// одни доводы условий, различаются только идентификаторы.
 //
-// What changed is that the items are no longer a queue. The caller's deadline is per
-// REQUEST — a sibling gives one slice one second — while a sequential pass costs
-// items × the store's answer time, so an optimistic 5ms store already spent half that
-// budget and a 10ms one spent all of it. The result was not a slow page but a failed
-// one: the caller's whole POSITIVE List returning UNAVAILABLE, on the path that
-// exists to make Lists correct. Each sibling already bounds its fan-out over slices
-// for exactly this reason; that bound stops at this hop, and the waiting was inside
-// it. Measured, with both counts, in TestBatchCheck_ResolvesItsItemsConcurrently.
+// Предикат пообъектен, и это свойство вопроса. Число ОБРАЩЕНИЙ к хранилищу
+// пообъектным быть не обязано — и до этой правки было им: партия из ста стоила
+// ста вопросов о вердикте и до ста вопросов за хвостом текста отказа. Здесь
+// стояло, что «один вопрос на пункт присущ предикату»; это было неверно, и
+// собственный комментарий рядом называл остаток открытым.
 //
-// # What must not change, and is asserted
+// Теперь пункты партии сводятся в ПРОГОНЫ по ключу «субъект · отношение · тип ·
+// доводы условий», и каждый прогон стоит:
 //
-//   - REQUEST ORDER. Results are written to their own index, never appended: a
-//     batched answer that is right but shuffled filters a page by another row's
-//     verdict, and no caller can detect it.
-//   - FAIL-CLOSED, WHOLE-BATCH, on ErrUnavailable — a transient backend outage is not
-//     a per-item deny (it would leak the raw transport error onto a user-facing
-//     surface AND turn an outage into a permanent 403). The first such error wins and
-//     cancels the rest; per-item validation failures still degrade to a deny reason
-//     without failing the batch.
-//   - The cluster-admin super-gate stays deduped to one question per subject; the memo
-//     is single-flight for that reason (see clusterAdminMemo).
+//	один вопрос о вердикте всей своей страницы  +
+//	один вопрос надзора администратора облака на СУБЪЕКТА (мемоизирован) +
+//	один вопрос диагностики на все отказы прогона.
+//
+// Однородная партия любой длины — это ОДИН прогон, то есть постоянная цена.
+// Разнородная партия платит по прогону на группу; групп не больше, чем пунктов,
+// поэтому хуже прежнего не становится никогда.
+//
+// # Почему пул остался, хотя однородная партия — один вопрос
+//
+// Единица работы сменилась (прогон вместо пункта), а довод — нет: бюджет
+// вызывающего принадлежит ЗАПРОСУ. Партия, чьи пункты называют РАЗНЫЕ субъекты
+// (форма, которую метод поддерживает явно), даёт столько прогонов, сколько
+// субъектов, и последовательный проход по ним стоил бы прогоны × время ответа
+// хранилища. Предел `batchCheckParallelism` держит их одновременность
+// ограниченной: неограниченный веер выложил бы всю страницу на хранилище разом, а
+// одновременные списки других вызывающих умножились бы друг на друга.
+//
+// # Что НЕ изменилось, и это утверждается пробами
+//
+//   - ПОРЯДОК ЗАПРОСА. Ответ пишется в СВОЙ индекс, никогда не дописывается:
+//     верный, но переставленный вердикт фильтрует страницу чужим ответом, и
+//     заметить это вызывающий не может.
+//   - ОТКАЗ ЦЕЛИКОМ на недоступности хранилища. Временный сбой — не пообъектный
+//     запрет: он утёк бы сырым текстом транспорта на пользовательскую поверхность
+//     и превратил бы перебой в постоянный 403. Первая такая ошибка прекращает
+//     проход и отменяет остальные; пообъектная ошибка входа по-прежнему
+//     вырождается в отказ с причиной и партию не роняет.
+//   - ОДИН вопрос надзора НА СУБЪЕКТА (мемо — единая попытка, см. clusterAdminMemo).
+//   - СОСТАВ ОТВЕТА, включая ТЕКСТ отказа: он собирается тем же
+//     `denyReasonText` из той же диагностики, спрошенной иначе.
+//
+// # Часы — ОДНИ на проход
+//
+// Прежде каждый пункт брал своё «сейчас». Условия на записях вычисляются от него,
+// поэтому пункты одной страницы могли получить разные доводы, а страница —
+// описывать состояние, которого не было ни в один момент. Часы снимаются один раз
+// и раздаются разбору всех пунктов.
 func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) ([]*CheckResult, error) {
 	if len(reqs) > 100 {
 		return nil, fmt.Errorf("Illegal argument checks: batch size %d > 100", len(reqs))
@@ -617,12 +735,54 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 	if len(reqs) == 0 {
 		return out, nil
 	}
+	now := time.Now().UTC().Truncate(time.Second)
 	// Share ONE cluster-admin memo across the batch: a same-subject batch (the
-	// common shape) resolves the cluster:…#system_admin Check at most once on the
-	// deny path instead of once per item. The memo re-resolves when the subject
-	// changes, so a mixed-subject batch stays correct.
+	// common shape) resolves the cluster:…#system_admin question at most once on
+	// the deny path instead of once per item. The memo re-resolves when the
+	// subject changes, so a mixed-subject batch stays correct.
 	caMemo := &clusterAdminMemo{}
 
+	// ── Фаза 1: разбор БЕЗ единого обращения к хранилищу.
+	//
+	// Здесь решается всё, что решается без вопроса: негодный вход, неразрешимое
+	// отношение, неадресуемый объект. Остальное сводится в прогоны.
+	plans := make([]checkPlan, len(reqs))
+	runs := make(map[string]*batchRun, len(reqs))
+	order := make([]*batchRun, 0, len(reqs))
+	for i, req := range reqs {
+		p := planCheck(ctx, req, now)
+		plans[i] = p
+		if p.invalid != nil {
+			// Genuine per-item validation failure (e.g. "Illegal argument …",
+			// deterministic + leak-free) surfaces as allowed=false + deny=[err];
+			// the whole batch does NOT fail.
+			out[i] = &CheckResult{Allowed: false, DenyReasons: []string{p.invalid.Error()}, CheckedAt: now}
+			continue
+		}
+		key := runKeyOf(p)
+		run := runs[key]
+		if run == nil {
+			run = &batchRun{
+				subject:    p.subject,
+				relation:   p.relation,
+				objectType: p.objectType,
+				condCtx:    p.condCtx,
+				superGate:  p.superGateDecides,
+			}
+			runs[key] = run
+			order = append(order, run)
+		}
+		run.items = append(run.items, i)
+		if !p.superGateDecides {
+			run.objects = append(run.objects, p.object)
+		}
+	}
+	if len(order) == 0 {
+		return out, nil
+	}
+
+	// ── Фаза 2: по вопросу на прогон, прогоны — параллельно с объявленным пределом.
+	//
 	// The first unavailable-class error aborts the pass; cancelling stops the
 	// workers that have not asked yet rather than paying for answers already known
 	// to be discarded.
@@ -630,15 +790,10 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 	defer cancel()
 
 	workers := batchCheckParallelism
-	if len(reqs) < workers {
-		workers = len(reqs)
+	if len(order) < workers {
+		workers = len(order)
 	}
-
-	type item struct {
-		idx int
-		req CheckRequest
-	}
-	queue := make(chan item)
+	queue := make(chan *batchRun)
 
 	var (
 		mu      sync.Mutex
@@ -649,46 +804,30 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 	for w := 0; w < workers; w++ {
 		go func() {
 			defer wg.Done()
-			for it := range queue {
-				res, err := s.check(cctx, it.req, caMemo)
-				if err != nil {
-					// An FGA-backend-unavailable failure is NOT a per-item deny:
-					// mirror the standalone Check sibling and fail the WHOLE batch
-					// with the ErrUnavailable sentinel (handler → retryable gRPC
-					// Unavailable with a fixed redacted message). Collapsing it into
-					// a deny_reason would leak the raw resolver error onto a
-					// user-facing surface AND
-					// mis-signal a transient outage as a permanent 403
-					// (security.md hardening-invariant #1).
-					if errors.Is(err, iamerr.ErrUnavailable) {
-						mu.Lock()
-						if firstEr == nil {
-							firstEr = err
-							cancel()
-						}
-						mu.Unlock()
-						return
+			for run := range queue {
+				if err := s.resolveRun(cctx, run, caMemo, now, plans, out); err != nil {
+					// An unavailable backend is NOT a per-item deny: mirror the
+					// standalone Check sibling and fail the WHOLE batch with the
+					// ErrUnavailable sentinel (handler → retryable gRPC Unavailable
+					// with a fixed redacted message). Collapsing it into a
+					// deny_reason would leak the raw resolver error onto a
+					// user-facing surface AND mis-signal a transient outage as a
+					// permanent 403 (security.md hardening-invariant #1).
+					mu.Lock()
+					if firstEr == nil {
+						firstEr = err
+						cancel()
 					}
-					// Genuine per-item validation failure (e.g. "Illegal argument …",
-					// deterministic + leak-free) surfaces as allowed=false +
-					// deny=[err]; the whole batch does NOT fail.
-					out[it.idx] = &CheckResult{
-						Allowed:     false,
-						DenyReasons: []string{err.Error()},
-						CheckedAt:   time.Now().UTC().Truncate(time.Second),
-					}
-					continue
+					mu.Unlock()
+					return
 				}
-				// Written to its OWN index, so workers touch disjoint slots and the
-				// answer keeps the caller's order without a lock.
-				out[it.idx] = res
 			}
 		}()
 	}
 feed:
-	for i, r := range reqs {
+	for _, run := range order {
 		select {
-		case queue <- item{idx: i, req: r}:
+		case queue <- run:
 		case <-cctx.Done():
 			break feed // a worker already failed the batch closed; stop feeding
 		}
@@ -706,6 +845,176 @@ feed:
 		return nil, err
 	}
 	return out, nil
+}
+
+// batchRun — ОДНОРОДНАЯ часть партии: один субъект, одно отношение, один тип,
+// одни доводы условий. Ровно та форма, в какой хранилище отвечает одним вопросом.
+//
+// superGate помечает прогон, у которого вопроса к форме нет вовсе (отношение не
+// разрешается либо объект не адресуем): решение по нему принимает надзор
+// администратора облака, и оно одно на весь прогон, потому что субъект один.
+type batchRun struct {
+	subject    string
+	relation   string
+	objectType string
+	condCtx    map[string]any
+	superGate  bool
+
+	items   []int    // позиции пунктов в исходной партии
+	objects []string // «тип:идентификатор» тех же позиций, в том же порядке
+}
+
+// runKeyOf — ключ прогона.
+//
+// # Что входит в ключ и почему
+//
+// Прогон отвечается ОДНИМ вопросом, поэтому в него можно сводить только пункты,
+// у которых вопрос и вправду один: субъект, отношение, тип объекта — и ДОВОДЫ
+// УСЛОВИЙ. Последние не перестраховка: они вычисляются вместе с вердиктом, и
+// ответ, полученный при одних доводах, не является ответом при других.
+//
+// Имена доводов сортируются: карта порядка обхода не обещает, и без сортировки
+// одинаковые доводы давали бы разные ключи — то есть лишние прогоны, молча и
+// по-разному от прохода к проходу.
+//
+// # Однозначными обязаны быть ДВЕ вещи, и это разные вещи
+//
+// Часть доводов приходит из тела запроса, то есть от арендатора
+// (`structpb.Struct.AsMap()` отдаёт в том числе списки и отображения — см.
+// разбор запроса в обработчике). Столкновение ключа означает здесь не неудобство,
+// а подмену: два пункта сливаются в прогон, и второй отвечается доводами первого
+// (`resolveRun` берёт доводы ПЕРВОГО пункта прогона).
+//
+// Столкнуть можно на двух разных уровнях, и закрывать их нужно порознь:
+//
+//  1. СКЛЕЙКА частей. Разделитель — какой угодно — арендатор кладёт внутрь
+//     значения, и «имя=значение\0имя=значение» становится неотличимо от одного
+//     значения, проглотившего соседа. Закрыто ДЛИНОЙ перед каждой частью:
+//     кодировка становится однозначной by construction.
+//  2. САМО ЗНАЧЕНИЕ. Здесь стояло, что длины достаточно и «подобрать
+//     столкновение нечем». Это было неверно, и неверно ровно на том, что
+//     контракт допускает явно: `%v` у составных величин неоднозначен, поэтому
+//     `["prod","eu"]` и `["prod eu"]` печатаются ОДИНАКОВО, как и
+//     `{"a":"b","c":"d"}` против `{"a":"b c:d"}`. Длина внешней склейки об этом
+//     ничего не знает — она честно кодирует одну и ту же строку.
+//
+// Второе закрыто КАНОНИЧЕСКОЙ кодировкой значения (`json.Marshal`): у списка
+// сохраняются границы элементов, у отображения — границы пар, а имена полей
+// сортируются самой библиотекой, поэтому одинаковые отображения дают одинаковый
+// текст независимо от порядка обхода карты.
+//
+// Тип значения пишется рядом со значением: `json.Marshal` печатает `int(1)` и
+// `float64(1)` одинаково, а условие вправе их различать.
+//
+// Значение, которое канонически не кодируется (величина, не выразимая в JSON),
+// получает ключ, УНИКАЛЬНЫЙ для своего пункта: пункт уезжает собственным
+// прогоном. Это дороже и это верно — сливать можно лишь то, о чём доказано, что
+// оно одно и то же.
+func runKeyOf(p checkPlan) string {
+	var b strings.Builder
+	writePart := func(s string) { fmt.Fprintf(&b, "%d:%s", len(s), s) }
+
+	if p.superGateDecides {
+		// Прогон надзора: объект в решении не участвует, но ТЕКСТ отказа зависит
+		// от причины, и смешивать причины в одном прогоне нельзя.
+		writePart("super")
+		writePart(p.subject)
+		writePart(p.denyReason)
+		return b.String()
+	}
+	writePart("ask")
+	writePart(p.subject)
+	writePart(p.relation)
+	writePart(p.objectType)
+	keys := make([]string, 0, len(p.condCtx))
+	for k := range p.condCtx {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := p.condCtx[k]
+		enc, err := json.Marshal(v)
+		if err != nil {
+			// Канонически не кодируется — значит доказать, что довод совпадает с
+			// чужим, нечем. Пункт уезжает СВОИМ прогоном: ключ уникален по его
+			// объекту. Fail-closed в сторону дороже-но-верно.
+			writePart("uncanonical")
+			writePart(p.object)
+			return b.String()
+		}
+		writePart(k)
+		writePart(fmt.Sprintf("%T", v))
+		writePart(string(enc))
+	}
+	return b.String()
+}
+
+// resolveRun отвечает на один прогон и заполняет его позиции.
+//
+// Ошибка означает ТОЛЬКО недоступность хранилища и роняет партию целиком; всё
+// остальное — вердикт, а вердикт всегда попадает в свою позицию.
+func (s *AuthorizeService) resolveRun(ctx context.Context, run *batchRun, caMemo *clusterAdminMemo,
+	now time.Time, plans []checkPlan, out []*CheckResult) error {
+	if run.superGate {
+		// Вопроса к форме нет; решение принимает надзор — один вопрос на прогон,
+		// потому что субъект в прогоне один (и он же мемоизирован на весь проход).
+		admin := s.isClusterAdmin(ctx, caMemo, run.subject)
+		for _, i := range run.items {
+			if admin {
+				out[i] = &CheckResult{Allowed: true, CheckedAt: now}
+				continue
+			}
+			out[i] = &CheckResult{Allowed: false, DenyReasons: []string{plans[i].denyReason}, CheckedAt: now}
+		}
+		return nil
+	}
+
+	if s.relations == nil {
+		return fmt.Errorf("%w: authz unavailable", iamerr.ErrUnavailable)
+	}
+	verdicts, err := s.relations.BatchCheckWithContext(ctx, run.subject, run.relation, run.objects, run.condCtx)
+	if err != nil {
+		return fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
+	}
+	if len(verdicts) != len(run.objects) {
+		// Ответ не позиционен — сверять его со страницей не по тем местам значило
+		// бы отфильтровать её чужим вердиктом. Это недоступность ответа, а не
+		// пообъектный запрет.
+		return fmt.Errorf("%w: authz unavailable: verdicts %d for %d objects",
+			iamerr.ErrUnavailable, len(verdicts), len(run.objects))
+	}
+
+	// Отказы собираются, а не оформляются на месте: хвост текста берётся из
+	// диагностики, которую прогон спрашивает ОДНИМ вопросом на все свои отказы.
+	denied := make([]int, 0, len(run.items))
+	deniedIDs := make([]string, 0, len(run.items))
+	for k, i := range run.items {
+		if verdicts[k] {
+			out[i] = &CheckResult{Allowed: true, CheckedAt: now}
+			continue
+		}
+		// Надзор администратора облака — авторитет на всём, и спрашивается ТОЛЬКО
+		// на отказе: общий разрешающий случай лишнего вопроса не делает.
+		if s.isClusterAdmin(ctx, caMemo, run.subject) {
+			out[i] = &CheckResult{Allowed: true, CheckedAt: now}
+			continue
+		}
+		denied = append(denied, i)
+		deniedIDs = append(deniedIDs, plans[i].objectID)
+	}
+	if len(denied) == 0 {
+		return nil
+	}
+	tails := s.readSubjectRelationsMany(ctx, run.subject, run.objectType, deniedIDs)
+	for _, i := range denied {
+		p := plans[i]
+		out[i] = &CheckResult{
+			Allowed:     false,
+			DenyReasons: []string{denyReasonText(p.subject, p.relation, p.object, p.action, tails[p.objectID])},
+			CheckedAt:   now,
+		}
+	}
+	return nil
 }
 
 // ПЕРЕЧИСЛЕНИЯ ОБЪЕКТОВ ЗДЕСЬ БОЛЬШЕ НЕТ — снято с контракта (решение Р1, R7-3).
