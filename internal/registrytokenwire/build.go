@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	registrytokenuc "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/registry_token"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/registrytokenhttp"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/tokensigner"
@@ -76,16 +75,14 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 
 	validator := registrytokenuc.NewSAKeyValidator(NewSAClientLookup(saRepo))
 	signer := registrytokenuc.ES256AssertionSigner{}
-	// The hop to the provider's token endpoint carries a signed client assertion
-	// out and the minted bearer back. When the profile pins an anchor, that bundle
-	// becomes the only trust for the hop; an anchor that cannot be used is an ERROR
-	// here rather than a silent fall-back to the system roots, and the caller
-	// refuses to start on it.
-	tokenClient, err := clients.NewHydraTokenClientWithCA(cfg.HydraTokenURL, cfg.HydraTokenCAFile)
+	// Полоса обмена выбирается по тому, ПЕРЕВЕДЁН ли контур на свою чеканку:
+	// переведённый к прежнему издателю не ходит ни одним путём, поэтому дорога к
+	// нему не строится и её пригодность ничего не решает. Непереведённый требует
+	// её ровно как прежде. Разбор — provider_hop.go.
+	exchanger, err := providerExchangeFor(cfg)
 	if err != nil {
 		return nil, err
 	}
-	exchanger := NewHydraExchange(tokenClient)
 
 	useCase := registrytokenuc.NewIssueRegistryTokenUseCase(registrytokenuc.Config{
 		AssertionAudience: cfg.AssertionAudience,
