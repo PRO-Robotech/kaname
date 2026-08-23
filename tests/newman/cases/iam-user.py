@@ -1252,8 +1252,20 @@ CASES.append(Case(
 # IAM-USR-UP-CRUD-OK-LABELS — UpdateUser sets labels (updateMask=labels) →
 # Operation done, Get confirms labels round-trip.
 # The public UpdateUser RPC: labels are the only mutable field.
-# jwtAccountAdminA is the owner of accountAId and of userAAAId's home account, so
-# the owner-matches-principal authz passes.
+#
+# ДЕЙСТВУЮЩЕЕ ЛИЦО — АДМИНИСТРАТОР ОБЛАКА, и это изменение #1102, а не выбор
+# удобной учётки. Строка `iam_user` — ГЛОБАЛЬНАЯ личность, одна на все аккаунты
+# человека, поэтому её метки решают состав селекторных выдач в КАЖДОМ его
+# аккаунте. Правка записи перестала быть правом уровня аккаунта: край гейтит её
+# отношением `record_writer`, у которого нет ни пообъектной выдачи, ни
+# администратора аккаунта, ни его владельца.
+#
+# Прежде здесь стоял `jwtAccountAdminA`, и кейс пиннил ровно то поведение,
+# которое директива владельца запрещает. Он не удалён, а ПЕРЕНАЦЕЛЕН: путь
+# правки обязан остаться проверенным — иначе «отказано всем» стало бы
+# неотличимо от «работает у того, кому положено». Отказ распорядителю аккаунта
+# утверждается отдельно — IAM-USR-GOV-NEG-ACCOUNT-ADMIN ниже.
+#
 # verifies: labels set via update_mask round-trip through users.labels.
 # ---------------------------------------------------------------------------
 
@@ -1268,19 +1280,19 @@ CASES.append(Case(
             method="PATCH",
             path="/iam/v1/users/{{userAAAId}}",
             body={"labels": {"tier": "gold-{{runId}}"}, "updateMask": "labels"},
-            auth="jwtAccountAdminA",
+            auth="jwtBootstrap",
             test_script=[
                 *assert_status(200),
                 *assert_iam_operation_envelope(),
                 *save_from_response("j.id", "opId"),
             ],
         ),
-        poll_operation_until_done(),
+        poll_operation_until_done(auth="jwtBootstrap"),
         Step(
             name="get-confirms-labels",
             method="GET",
             path="/iam/v1/users/{{userAAAId}}",
-            auth="jwtAccountAdminA",
+            auth="jwtBootstrap",
             test_script=[
                 *assert_status(200),
                 "pm.test('User.labels.tier updated', () => {",
@@ -1311,7 +1323,7 @@ CASES.append(Case(
             method="PATCH",
             path="/iam/v1/users/{{userAAAId}}",
             body={"updateMask": "external_id"},
-            auth="jwtAccountAdminA",
+            auth="jwtBootstrap",
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
@@ -1579,6 +1591,101 @@ CASES.append(Case(
                 "pm.test('the neighbour could not touch it: state unchanged', () => {",
                 "  const j = pm.response.json();",
                 "  pm.expect(j.inviteStatus, JSON.stringify(j)).to.eql('PENDING');",
+                "});",
+            ],
+        ),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-GOV-NEG-ACCOUNT-ADMIN — пригласивший распоряжается ПРАВАМИ, но не
+# СТРОКОЙ ЛИЧНОСТИ (#1102, вторая половина директивы владельца 2026-08-23).
+#
+# Директива дословно: «тот кто пригласил может только удалить/добавить права».
+#
+# ПОЧЕМУ ПОЛОЖИТЕЛЬНОЕ ИДЁТ ПЕРВЫМ, А НЕ ДЛЯ ПОЛНОТЫ. Отказ, снятый в одиночку,
+# зеленеет одинаково и на верном дереве, и на дереве, где у распорядителя аккаунта
+# отняли всё. Поэтому кейс начинается с того, что директива ему ОСТАВЛЯЕТ:
+# приглашение с ролью — это выдача прав, создаваемая атомарно со строкой
+# приглашения, то есть ровно «добавить права» в своём аккаунте. Шаг несёт
+# `assert_op_success`, поэтому «права выданы» утверждается ИСХОДОМ операции, а не
+# фактом вызова.
+#
+# ЧТО ИМЕННО ОТКАЗЫВАЕТСЯ. Правка записи и запрет личности. Обе — распоряжение
+# ГЛОБАЛЬНОЙ строкой: у человека она одна на все его аккаунты, поэтому метки
+# решают состав селекторных выдач в каждом из них, а состояние решает вход на
+# платформу целиком. Распорядитель ОДНОГО аккаунта, получив это право, решал бы
+# за аккаунты, к которым отношения не имеет.
+#
+# ЖЕРТВА НЕ ТРОНУТА — отдельным шагом. Отказ, у которого остался эффект, не
+# отказ; и тот же шаг несёт второй положительный контроль: ЧИТАТЬ своих людей
+# распорядитель аккаунта по-прежнему вправе (`v_get` источники уровня аккаунта
+# сохраняет намеренно). Если бы сужение задело чтение, кейс покраснел бы здесь.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-GOV-NEG-ACCOUNT-ADMIN",
+    title="Пригласивший добавляет права в своём аккаунте — успех; правит запись "
+          "человека и запрещает его — отказ",
+    classes=["AUTHZ", "NEG"],
+    priority="P0",
+    steps=[
+        # ПОЛОЖИТЕЛЬНОЕ: «добавить права» — приглашение с ролью.
+        *_invite_probe("govVictimId", "govprobe"),
+        # ОТРИЦАНИЕ 1 — правка записи.
+        Step(
+            name="record-edit-denied",
+            method="PATCH",
+            path="/iam/v1/users/{{govVictimId}}",
+            body={"labels": {"tier": "gold-{{runId}}"}, "updateMask": "labels"},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("record-edit-denied"),
+                *assert_scoped_authz_deny(
+                    "iam.users.update",
+                    "'iam_user:' + pm.environment.get('govVictimId')",
+                ),
+            ],
+        ),
+        # ОТРИЦАНИЕ 2 — запрет личности. Ступень доверия здесь ни при чём:
+        # предъявитель несёт её (`jwtAccountAdminAStepUp`), поэтому отказ приходит
+        # от модели прав, а не от порога acr — иначе кейс утверждал бы о пороге.
+        Step(
+            name="identity-block-denied",
+            method="POST",
+            path="/iam/v1/users/{{govVictimId}}:block",
+            body={},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("identity-block-denied"),
+                *assert_scoped_authz_deny(
+                    "iam.users.block",
+                    "'iam_user:' + pm.environment.get('govVictimId')",
+                ),
+            ],
+        ),
+        # ЖЕРТВА НЕ ТРОНУТА + чтение своих людей осталось.
+        Step(
+            name="victim-untouched-and-still-readable",
+            method="GET",
+            path="/iam/v1/users/{{govVictimId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("victim-untouched-and-still-readable"),
+                *assert_status(200),
+                "pm.test('читать своих людей распорядитель аккаунта по-прежнему вправе', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.id, JSON.stringify(j)).to.eql(pm.environment.get('govVictimId'));",
+                "});",
+                "pm.test('состояние не изменилось: запрет не доехал', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.inviteStatus, JSON.stringify(j)).to.eql('PENDING');",
+                "});",
+                "pm.test('метки не изменились: правка не доехала', () => {",
+                "  const j = pm.response.json();",
+                "  const labels = j.labels || {};",
+                "  pm.expect(labels.tier, JSON.stringify(j)).to.be.undefined;",
                 "});",
             ],
         ),
