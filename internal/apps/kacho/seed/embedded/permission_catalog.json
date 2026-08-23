@@ -1544,7 +1544,7 @@
   {
     "fqn": "kacho.cloud.iam.v1.UserTokenService/List",
     "permission": "iam.user_tokens.list",
-    "required_relation": "v_list",
+    "required_relation": "token_reader",
     "scope_extractor": {
       "object_type": "iam_user",
       "from_request_field": "user_id"

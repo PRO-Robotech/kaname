@@ -171,12 +171,27 @@ func TestIssuingAPersonalTokenIsNotReachableFromInsideTheAccount(t *testing.T) {
 		"уровень 1 (администратор облака) обязан сохранить выпуск: его надзор — плоское "+
 			"короткое замыкание службы, а не источник в модели")
 
+	// ПЕРЕЧЕНЬ СВОИХ УДОСТОВЕРЕНИЙ. Отзыв, недостижимый владельцу, отзывом не
+	// является: идентификатор выдаётся один раз, и потерявший его без перечня
+	// снять удостоверение не может. Поэтому чтение — надмножество прежнего:
+	// сам человек ДОБАВЛЕН, держатель перечисления на личности НЕ снят.
+	listRel, listType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserTokenService/List")
+	require.Equalf(t, "iam_user", listType, "перечень токенов гейтится не на объекте личности (%s)", listType)
+	require.True(t, w.allowed(t, "user:"+invitee, listRel, obj),
+		"сам человек обязан видеть перечень СВОИХ удостоверений — иначе потерянный "+
+			"идентификатор делает отзыв недостижимым для владельца")
+	require.True(t, w.allowed(t, "user:"+inviter, listRel, obj),
+		"КОНТРОЛЬ надмножества: держатель перечисления на личности не потерял чтение — "+
+			"изменение обязано было только ДОБАВИТЬ источник")
+	require.False(t, w.allowed(t, "user:"+stranger, listRel, obj),
+		"посторонний член аккаунта перечня чужих удостоверений не видит")
+
 	// Чужой человек своим отношением до ЧУЖОЙ строки не достаёт.
 	require.False(t, w.allowed(t, "user:"+invitee, issueRel, "iam_user:"+stranger),
 		"собственное право не переносится на строку другого человека")
 
-	t.Logf("перепись: гейт выпуска %s.%s · гейт отзыва %s.%s · субъектов спрошено 6",
-		issueType, issueRel, revokeType, revokeRel)
+	t.Logf("перепись: гейт выпуска %s.%s · гейт отзыва %s.%s · гейт перечня %s.%s · "+
+		"субъектов спрошено 6", issueType, issueRel, revokeType, revokeRel, listType, listRel)
 }
 
 // seedRoleGrantingUserEdit кладёт роль, дающую ПРАВКУ ЛИЧНОСТИ, и выдачу этой
