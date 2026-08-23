@@ -160,8 +160,18 @@ func requireGrantAuthority(ctx context.Context, repo Repo, relations clients.Rel
 	// cluster-admin able to grant on ANY scope (D-06 — foreign account) and to manage
 	// the binding objects themselves (D-07 — iam_access_binding). Additive: it runs
 	// ALONGSIDE the existing paths, not instead of them. nil-safe via the guard inside
-	// IsClusterAdmin (unwired relations → false → fall through).
-	if relations != nil && authzguard.IsClusterAdmin(ctx, relations) {
+	// IsClusterAdminE (unwired relations → (false, nil) → fall through).
+	//
+	// E-форма, а не булева: у надзора ТРИ исхода. Прежде «хранилище прав не
+	// ответило» терялось внутри обёртки и сходилось с «не положено» — вызывающий
+	// получал отказ в правах и повтор считал бессмысленным. Полагаться на то, что
+	// неполадку заметит Путь 2 ниже, нельзя: он спрашивает про ДРУГОЙ кортеж и на
+	// свой вопрос ответ получить может.
+	admin, aerr := authzguard.IsClusterAdminE(ctx, relations)
+	if aerr != nil {
+		return authzguard.AuthzBackendUnavailable()
+	}
+	if admin {
 		return nil
 	}
 

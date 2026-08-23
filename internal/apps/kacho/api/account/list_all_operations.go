@@ -118,8 +118,16 @@ func (u *ListAllOperationsUseCase) requireAccountViewAuthority(ctx context.Conte
 
 	// Path 0 — cluster-admin short-circuit: a cluster-admin may audit ANY
 	// account's operations even without a per-account admin-tuple. nil-safe inside
-	// IsClusterAdmin (unwired relations → false → fall through to owner/FGA paths).
-	if u.relations != nil && authzguard.IsClusterAdmin(ctx, u.relations) {
+	// IsClusterAdminE (unwired relations → (false, nil) → fall through).
+	//
+	// E-форма: исходов у надзора три. Путь 2 ниже свой отказ уже разводит, но он
+	// спрашивает про ДРУГОЙ кортеж — ответив на него «нет», хранилище оставило бы
+	// неполадку надзора невидимой, и аудитор прочитал бы её как «не положено».
+	admin, aerr := authzguard.IsClusterAdminE(ctx, u.relations)
+	if aerr != nil {
+		return authzguard.AuthzBackendUnavailable()
+	}
+	if admin {
 		return nil
 	}
 

@@ -269,18 +269,34 @@ type clusterAdminMemo struct {
 }
 
 // clusterAdminVerdict — the single-flight slot for ONE subject.
+//
+// Хранит ИСХОД, а не булев ответ. Мемоизировать «нет» там, где хранилище не
+// ответило, значило бы разослать неполадку по всей партии вердиктом «не
+// положено» — и ровно один раз, зато всем её пунктам сразу.
 type clusterAdminVerdict struct {
 	once    sync.Once
 	allowed bool
+	err     error
 }
 
 // isClusterAdmin returns the (memoized) cluster-admin verdict for subject. The
 // first call for a subject performs the flat super-gate Check; concurrent and
 // subsequent calls for the SAME subject reuse it. Different subjects resolve
 // independently and in parallel.
-func (s *AuthorizeService) isClusterAdmin(ctx context.Context, m *clusterAdminMemo, subject string) bool {
+//
+// ВОЗВРАЩАЕТ ТРИ ИСХОДА, А НЕ ДВА (задача #1045). `(false, nil)` — хранилище
+// ответило «не администратор»; `(false, err)` — хранилище не ответило вовсе.
+// Прежде булева обёртка сводила второе к первому, и это была ОБЩАЯ ДВЕРЬ: сюда
+// приходит интерсептор каждой службы платформы и фильтр списка каждого соседа.
+// Мигание хранилища прав приезжало к ним отказом в правах, а отказ в правах их
+// дренаж классифицирует как ТЕРМИНАЛЬНЫЙ.
+//
+// Ошибка мемоизируется вместе с ответом намеренно: вопрос на проход один, и
+// повторять его по пунктам партии значило бы платить за неполадку столько раз,
+// сколько в ней позиций.
+func (s *AuthorizeService) isClusterAdmin(ctx context.Context, m *clusterAdminMemo, subject string) (bool, error) {
 	if m == nil {
-		return authzguard.SubjectIsClusterAdmin(ctx, s.clusterAdmin, subject)
+		return authzguard.SubjectIsClusterAdminPlainE(ctx, s.clusterAdmin, subject)
 	}
 	m.mu.Lock()
 	if m.by == nil {
@@ -296,9 +312,15 @@ func (s *AuthorizeService) isClusterAdmin(ctx context.Context, m *clusterAdminMe
 	// Only the map lookup is under the shared lock; the question itself is under
 	// this subject's own slot, so subjects do not block one another.
 	slot.once.Do(func() {
-		slot.allowed = authzguard.SubjectIsClusterAdmin(ctx, s.clusterAdmin, subject)
+		slot.allowed, slot.err = authzguard.SubjectIsClusterAdminPlainE(ctx, s.clusterAdmin, subject)
 	})
-	return slot.allowed
+	return slot.allowed, slot.err
+}
+
+// superGateUnavailable — неполадка надзора в тоне этой двери: соседи ветвятся по
+// `iamerr.ErrUnavailable`, и повтор для них осмыслен.
+func superGateUnavailable(err error) error {
+	return fmt.Errorf("%w: authz unavailable: %w", iamerr.ErrUnavailable, err)
 }
 
 // Check — single-tuple authorization check (with Conditions + OPA overlay).
@@ -328,7 +350,13 @@ func (s *AuthorizeService) check(ctx context.Context, req CheckRequest, caMemo *
 		// честное «нет» о том, чего не спрашивали. Но решение принято, и оно
 		// обязано попасть в знаменатель: надзор администратора облака —
 		// авторитет на всём, и платит за него только отказ.
-		if s.isClusterAdmin(ctx, caMemo, p.subject) {
+		admin, aerr := s.isClusterAdmin(ctx, caMemo, p.subject)
+		if aerr != nil {
+			// Вопрос остался без ответа. Отказом это не является: вернуть здесь
+			// отказ значило бы объявить вердикт, которого никто не выносил.
+			return result, superGateUnavailable(aerr)
+		}
+		if admin {
 			result.Allowed = true
 			return result, nil
 		}
@@ -479,7 +507,11 @@ func (s *AuthorizeService) verdict(
 	if allowed {
 		return true, nil
 	}
-	return s.isClusterAdmin(ctx, caMemo, subject), nil
+	admin, aerr := s.isClusterAdmin(ctx, caMemo, subject)
+	if aerr != nil {
+		return false, superGateUnavailable(aerr)
+	}
+	return admin, nil
 }
 
 // formatDenyReason composes a human-readable deny reason for a Check that
@@ -667,7 +699,11 @@ func (s *AuthorizeService) verdictForRelation(
 	if allowed {
 		return true, nil
 	}
-	return authzguard.SubjectIsClusterAdmin(ctx, s.clusterAdmin, req.Subject), nil
+	admin, aerr := authzguard.SubjectIsClusterAdminPlainE(ctx, s.clusterAdmin, req.Subject)
+	if aerr != nil {
+		return false, superGateUnavailable(aerr)
+	}
+	return admin, nil
 }
 
 // BatchCheck — партия разбирается ПРОГОНАМИ, результаты — в порядке запроса.
@@ -958,7 +994,12 @@ func (s *AuthorizeService) resolveRun(ctx context.Context, run *batchRun, caMemo
 	if run.superGate {
 		// Вопроса к форме нет; решение принимает надзор — один вопрос на прогон,
 		// потому что субъект в прогоне один (и он же мемоизирован на весь проход).
-		admin := s.isClusterAdmin(ctx, caMemo, run.subject)
+		admin, aerr := s.isClusterAdmin(ctx, caMemo, run.subject)
+		if aerr != nil {
+			// Партия роняется ЦЕЛИКОМ: молча суженный набор разрешений — это
+			// страница видимого, отданная соседу как истина.
+			return superGateUnavailable(aerr)
+		}
 		for _, i := range run.items {
 			if admin {
 				out[i] = &CheckResult{Allowed: true, CheckedAt: now}
@@ -995,7 +1036,11 @@ func (s *AuthorizeService) resolveRun(ctx context.Context, run *batchRun, caMemo
 		}
 		// Надзор администратора облака — авторитет на всём, и спрашивается ТОЛЬКО
 		// на отказе: общий разрешающий случай лишнего вопроса не делает.
-		if s.isClusterAdmin(ctx, caMemo, run.subject) {
+		admin, aerr := s.isClusterAdmin(ctx, caMemo, run.subject)
+		if aerr != nil {
+			return superGateUnavailable(aerr)
+		}
+		if admin {
 			out[i] = &CheckResult{Allowed: true, CheckedAt: now}
 			continue
 		}
