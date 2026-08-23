@@ -135,7 +135,7 @@ func TestBootstrapTokenIsMintedByUsAndLooksLikeWhatTheEdgeAccepts(t *testing.T) 
 	dsn := dsnWithSearchPath(pgtest.NewDB(t))
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
-	t.Cleanup(pool.Close)
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	keys := newMemKeys(t)
 	signer, err := tokensigner.New(tokensigner.Config{
