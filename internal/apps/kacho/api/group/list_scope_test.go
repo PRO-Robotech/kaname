@@ -377,3 +377,9 @@ type grpUnrestrictedVisibility struct{}
 func (grpUnrestrictedVisibility) ScopeOf(_ context.Context, _ visibility.Subject) (visibility.Scope, error) {
 	return visibility.Scope{Unrestricted: true, GrantedObjects: map[string][]string{}}, nil
 }
+
+// MembersOfGroups — предмет этой пробы не касается состава нескольких групп;
+// дублёр отвечает пусто и говорит об этом, а не притворяется источником.
+func (r *scopeGroupRdr) MembersOfGroups(context.Context, []domain.GroupID) ([]domain.GroupMember, []domain.GroupID, error) {
+	return nil, nil, nil
+}

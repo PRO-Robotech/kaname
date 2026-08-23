@@ -88,15 +88,20 @@ func countFacts(t *testing.T, ctx context.Context, tx pgx.Tx, objectType, relati
 }
 
 // Право служебной учётки модуля живёт ТОЛЬКО кортежем: его не выводит ни одна
-// выдача, и посев его делает миграция прямой строкой журнала.
+// роль, и в проекцию оно попадает прямой строкой журнала.
+//
+// Объект вопроса — платформенный синглтон кластера: с #914 право писать кортежи
+// объявлено кластерным отношением, а якорь вне иерархии, на котором оно висело
+// прежде, снят вместе со своим типом. Предмет пробы от переезда не изменился —
+// изменился объект, на котором он спрашивается.
 func TestAsk_RightThatLivesOnlyAsARelationTupleIsAnswered(t *testing.T) {
 	withTx(t, func(ctx context.Context, tx pgx.Tx) {
 		enqueueTuple(t, ctx, tx, "fga.tuple.write",
-			"service_account:sva-mod", "fga_writer", "iam_fgaproxy:system")
+			"service_account:sva-mod", "fga_writer", "cluster:cluster_kacho_root")
 
 		got, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "service_account:sva-mod", ObjectType: "iam_fgaproxy",
-			ObjectID: "system", Relation: "fga_writer",
+			Subject: "service_account:sva-mod", ObjectType: "cluster",
+			ObjectID: "cluster_kacho_root", Relation: "fga_writer",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)
@@ -110,8 +115,8 @@ func TestAsk_RightThatLivesOnlyAsARelationTupleIsAnswered(t *testing.T) {
 		// Отрицание рядом: чужая учётка права не получает. Без него «да» выше
 		// зеленело бы и на проекции, разрешающей всем.
 		other, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
-			Subject: "service_account:sva-other", ObjectType: "iam_fgaproxy",
-			ObjectID: "system", Relation: "fga_writer",
+			Subject: "service_account:sva-other", ObjectType: "cluster",
+			ObjectID: "cluster_kacho_root", Relation: "fga_writer",
 		})
 		if err != nil {
 			t.Fatalf("запрос: %v", err)

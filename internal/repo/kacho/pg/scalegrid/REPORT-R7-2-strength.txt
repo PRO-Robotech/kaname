@@ -1,22 +1,19 @@
 R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляционный вердикт)
 Сетка пяти новых осей; КАЖДАЯ точка снята ТРЕМЯ вопросами на одном посеве.
-ПРОМЕЖУТОЧНЫЙ СРЕЗ: прогон не окончен, оси ниже ещё не сняты.
-=======================================================================================================================================================================================================
+=========================================================================================================================================
 
 ПРОВЕНАНС
-  снято               2026-08-22 11:29:02 MSK
-  ревизия дерева      0e3df9fb1c0fb76b9e6427010b492d2241b2d4c6
-  состояние дерева    ГРЯЗНОЕ: путей с несохранёнными правками 4.
-                      Ревизия выше НЕ описывает исполнявшееся дерево целиком —
-                      повторение по ней даст другой код. Отчёт остаётся годным
-                      как наблюдение и НЕ годится как воспроизводимый замер.
+  снято               2026-08-23 02:50:40 MSK
+  ревизия дерева      abff23f93b822ff2ff17cb1006f34a7f9716512d
+  состояние дерева    чистое (несохранённых правок нет) — ревизия описывает
+                      исполнявшееся дерево целиком
   машина              AMD Ryzen 5 5600X 6-Core Processor, ядер 12
-  Postgres            
+  Postgres            16.15
 
 ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА (гейт свежести сверяет его с текущим деревом)
-  отпечаток состава     4db508c2021cfa4d
-  отпечаток содержимого ad3d7ccb7ff97eb6
-  файлов под отпечатком 67, таблиц выведено 17 (kacho_iam.access_binding_subjects, kacho_iam.access_bindings, kacho_iam.accounts, kacho_iam.clusters, kacho_iam.group_members, kacho_iam.groups, kacho_iam.memberships, kacho_iam.projects, kacho_iam.relation_fact, kacho_iam.resource_mirror, kacho_iam.resource_parent_edge, kacho_iam.resource_scope_edge, kacho_iam.role_rule_selectors, kacho_iam.role_verb, kacho_iam.roles, kacho_iam.service_accounts, kacho_iam.users)
+  отпечаток состава     aabb2849fab0e841
+  отпечаток содержимого 0bb19e77fd885e9d
+  файлов под отпечатком 70, таблиц выведено 17 (kacho_iam.access_binding_subjects, kacho_iam.access_bindings, kacho_iam.accounts, kacho_iam.clusters, kacho_iam.group_members, kacho_iam.groups, kacho_iam.memberships, kacho_iam.projects, kacho_iam.relation_fact, kacho_iam.resource_mirror, kacho_iam.resource_parent_edge, kacho_iam.resource_scope_edge, kacho_iam.role_rule_selectors, kacho_iam.role_verb, kacho_iam.roles, kacho_iam.service_accounts, kacho_iam.users)
   предикат отпечатка    все не-тестовые .go каталогов services/iam/internal/repo/kacho/pg/relverdict и services/iam/internal/repo/kacho/pg/scalegrid; те .sql каталога services/iam/internal/migrations, что МЕНЯЮТ СТРУКТУРУ (CREATE/ALTER/DROP вне комментариев) хотя бы одной таблицы, которую читает запрос вердикта (имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kacho_iam.", а не выписаны); БЕЗ файлов, объявленных оснасткой отпечатка (они не касаются базы — проверяется разбором, а не перечнем)
   ФАЙЛЫ ПОД ОТПЕЧАТКОМ (пофайлово, чтобы гейт назвал ВИНОВНИКА, а не только факт)
     c758aac510e28d60  services/iam/internal/migrations/0001_initial.sql
@@ -60,6 +57,9 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
     3f7426f21b0d3332  services/iam/internal/migrations/0086_relation_fact_condition.sql
     10f43160376a80c8  services/iam/internal/migrations/0091_type_dictionary_of_the_scope_chain.sql
     6c72633aaecd4d18  services/iam/internal/migrations/0092_resource_count_limits.sql
+    cca158ba6a8bc6b1  services/iam/internal/migrations/20260822231500_identity_growth_ledger.sql
+    ba71410c39d57337  services/iam/internal/migrations/20260822231600_account_admission_rate.sql
+    215c32e687a2fe48  services/iam/internal/migrations/20260822234500_identity_rows_merge_and_rights_travel.sql
     3b077c2ffcd40a1b  services/iam/internal/migrations/470001_memberships_expand.sql
     02dbbf5091d79374  services/iam/internal/migrations/472002_membership_carries_rights.sql
     d246bbd4221b87e0  services/iam/internal/migrations/484002_account_quota_identity_carrier.sql
@@ -71,14 +71,14 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
     1bf1f86cb161d282  services/iam/internal/migrations/893001_grant_surface_admits_the_relation_form.sql
     f6f5854b322258b9  services/iam/internal/migrations/898002_client_revocation_reaches_presentation.sql
     0f36e1cc4f65d12d  services/iam/internal/migrations/944001_identity_scope_comes_from_membership.sql
-    75d8453d798afd9a  services/iam/internal/repo/kacho/pg/relverdict/asker.go
-    3c04a220f203f8ed  services/iam/internal/repo/kacho/pg/relverdict/asker_gate.go
+    7be4558ae1cd80de  services/iam/internal/repo/kacho/pg/relverdict/asker.go
+    41ae4c0d65a7441c  services/iam/internal/repo/kacho/pg/relverdict/asker_gate.go
     7690dd1ed78f4b14  services/iam/internal/repo/kacho/pg/relverdict/condition.go
     f82f716fca329c06  services/iam/internal/repo/kacho/pg/relverdict/expand.go
     34e69e5b51a980e6  services/iam/internal/repo/kacho/pg/relverdict/labelaxis.go
     33dee95ae5add420  services/iam/internal/repo/kacho/pg/relverdict/list.go
     0663db0e37577931  services/iam/internal/repo/kacho/pg/relverdict/membership.go
-    0d16f5710a2695d4  services/iam/internal/repo/kacho/pg/relverdict/query.go
+    f0ddc408234aaf84  services/iam/internal/repo/kacho/pg/relverdict/query.go
     58d619c49f38051b  services/iam/internal/repo/kacho/pg/relverdict/subjects.go
     6dd100ec78c176ec  services/iam/internal/repo/kacho/pg/scalegrid/census.go
     813a7da914ee5057  services/iam/internal/repo/kacho/pg/scalegrid/dictionary.go
@@ -135,60 +135,60 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  100             54        57       111       41        104      2    1.134ms    4.019ms allow   
-  1000            54        55       109       41        102      2    1.096ms    1.303ms allow   
-  10000           54        55       109       41        102      2    1.067ms    1.179ms allow   
-  100000          54        55       109       41        102      2      782µs      951µs allow   
+  100             53        61       114       41        110      2      833µs    3.763ms allow   
+  1000            53        59       112       41        108      2      964µs    1.513ms allow   
+  10000           53        59       112       41        108      2      965µs    1.122ms allow   
+  100000          53        59       112       41        108      2      803µs    1.079ms allow   
     отношение верхней к нижней: тронуто 0.98× · сканов 1.00×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  100             63        66       129       43        103      2      891µs     1.03ms deny    
-  1000            63        63       126       43        100      2      863µs    1.112ms deny    
-  10000           63        63       126       43        100      2      795µs    1.103ms deny    
-  100000          63        63       126       43        100      2      723µs      790µs deny    
+  100             59        69       128       43        108      2      774µs      923µs deny    
+  1000            59        66       125       43        105      2    1.151ms    1.486ms deny    
+  10000           59        66       125       43        105      2      770µs      911µs deny    
+  100000          59        66       125       43        105      2      816µs      906µs deny    
     отношение верхней к нижней: тронуто 0.98× · сканов 1.00×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  100             55        59       114       43         94      2      873µs    1.263ms deny    
-  1000            55        59       114       43         94      2      943µs    1.026ms deny    
-  10000           55        59       114       43         94      2      766µs      970µs deny    
-  100000          55        59       114       43         94      2      744µs      807µs deny    
+  100             57        66       123       43        104      2      775µs      981µs deny    
+  1000            57        66       123       43        104      2      883µs      922µs deny    
+  10000           57        66       123       43        104      2      890µs      906µs deny    
+  100000          57        66       123       43        104      2      800µs      822µs deny    
     отношение верхней к нижней: тронуто 1.00× · сканов 1.00×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
   значение         allow deny(правило)       дельта во сколько раз
-  100                111          129          +18          1.16×
-  1000               109          126          +17          1.16×
-  10000              109          126          +17          1.16×
-  100000             109          126          +17          1.16×
+  100                114          128          +14          1.12×
+  1000               112          125          +13          1.12×
+  10000              112          125          +13          1.12×
+  100000             112          125          +13          1.12×
 
   КОНТРОЛЬ ДЕШЁВОГО ОТКАЗА: ddeny(глагол) обязан быть ДЕШЕВЛЕ deny(правило).
   Без него отчёт сказал бы «отказ дёшев» — и это была бы правда про фикстуру.
   значение    deny(глагол)  deny(правило)
-  100                  114            129
-  1000                 114            126
-  10000                114            126
-  100000               114            126
+  100                  123            128
+  1000                 123            125
+  10000                123            125
+  100000               123            125
 
   план по точкам (отношение двух приборов читается ТОЛЬКО внутри одного плана):
-    100       allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→resource_mirror Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→resource_mirror Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-    1000      allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-    10000     allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-    100000    allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    100       allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→resource_mirror Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→resource_mirror Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    1000      allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    10000     allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    100000    allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
 
   ПЕРЕПИСЬ ПОСАЖЕННОГО в верхней точке (по каждой величине порознь, счётом по факту):
     объектов зеркала / рёбер родителя      100004 / 300009
-    членств СПРАШИВАЕМОГО / всего          0 / 5
-    строк (говорящий, область) / выдач     1 / 8
+    членств СПРАШИВАЕМОГО / всего          0 / 10
+    строк (говорящий, область) / выдач     1 / 9
     цепь областей: строк / различных       7 / 4
     правил роли / проекций глаголов        1 / 1
-    прямых фактов всего                    16
+    прямых фактов всего                    17
     вопросов задано                        33
 
 
@@ -197,74 +197,74 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  0               54        55       109       41        102      2      870µs    3.275ms allow   
-  1               55        55       110       41        103      2      744µs      858µs allow   
-  8               62        55       117       41        110      2      789µs      984µs allow   
-  64             118        55       173       41        166      2      927µs    1.105ms allow   
-  256*           310        48       358       41        353      2     1.11ms    1.154ms allow   
-  1024*         1078     10953     12031       41       1121      2    2.031ms    2.158ms allow   
-    отношение верхней к нижней: тронуто 110.38× · сканов 1.00×
+  0               53        59       112       41        108      2      805µs    3.861ms allow   
+  1               54        59       113       41        109      2      777µs      851µs allow   
+  8               61        59       120       41        116      2      808µs     1.04ms allow   
+  64             117        59       176       41        172      2      896µs    1.083ms allow   
+  256*           309        51       360       41        354      2    1.358ms    1.854ms allow   
+  1024*         1081     13010     14091       41       1122      2    1.856ms    1.913ms allow   
+    отношение верхней к нижней: тронуто 125.81× · сканов 1.00×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  0               63        63       126       43        100      2      746µs    1.131ms deny    
-  1               64        63       127       43        101      2      899µs    1.279ms deny    
-  8               71        63       134       43        108      2      847µs      989µs deny    
-  64             127        63       190       43        164      2      956µs    1.112ms deny    
-  256*           310        49       359       41        351      2    1.011ms    1.043ms deny    
-  1024*         1078     10954     12032       41       1119      2    1.791ms    2.277ms deny    
-    отношение верхней к нижней: тронуто 95.49× · сканов 0.95×
+  0               59        66       125       43        105      2      806µs      984µs deny    
+  1               60        66       126       43        106      2      828µs      947µs deny    
+  8               67        66       133       43        113      2      764µs      821µs deny    
+  64             123        66       189       43        169      2    1.048ms    1.547ms deny    
+  256*           309        52       361       41        351      2    1.478ms    1.813ms deny    
+  1024*         1081     13011     14092       41       1112      2    1.881ms    2.286ms deny    
+    отношение верхней к нижней: тронуто 112.74× · сканов 0.95×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  0               55        59       114       43         94      2      824µs      992µs deny    
-  1               56        59       115       43         95      2      692µs      713µs deny    
-  8               63        59       122       43        102      2      895µs      922µs deny    
-  64             119        59       178       43        158      2      792µs      850µs deny    
-  256*           289        45       334       41        345      2    1.002ms    1.035ms deny    
-  1024*         1057     10950     12007       41       1113      2    2.046ms    2.318ms deny    
-    отношение верхней к нижней: тронуто 105.32× · сканов 0.95×
+  0               57        66       123       43        104      2      783µs    1.129ms deny    
+  1               58        66       124       43        105      2      736µs    1.053ms deny    
+  8               65        66       131       43        112      2      815µs     1.24ms deny    
+  64             121        66       187       43        168      2      932µs    1.257ms deny    
+  256*           290        52       342       41        350      2    1.327ms    1.857ms deny    
+  1024*         1058     13007     14065       41       1092      2    1.742ms    2.074ms deny    
+    отношение верхней к нижней: тронуто 114.35× · сканов 0.95×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
   значение         allow deny(правило)       дельта во сколько раз
-  0                  109          126          +17          1.16×
-  1                  110          127          +17          1.15×
-  8                  117          134          +17          1.15×
-  64                 173          190          +17          1.10×
-  256                358          359           +1          1.00×
-  1024             12031        12032           +1          1.00×
+  0                  112          125          +13          1.12×
+  1                  113          126          +13          1.12×
+  8                  120          133          +13          1.11×
+  64                 176          189          +13          1.07×
+  256                360          361           +1          1.00×
+  1024             14091        14092           +1          1.00×
 
   КОНТРОЛЬ ДЕШЁВОГО ОТКАЗА: ddeny(глагол) обязан быть ДЕШЕВЛЕ deny(правило).
   Без него отчёт сказал бы «отказ дёшев» — и это была бы правда про фикстуру.
   значение    deny(глагол)  deny(правило)
-  0                    114            126
-  1                    115            127
-  8                    122            134
-  64                   178            190
-  256                  334            359
-  1024               12007          12032
+  0                    123            125
+  1                    124            126
+  8                    131            133
+  64                   187            189
+  256                  342            361
+  1024               14065          14092
 
   план по точкам (отношение двух приборов читается ТОЛЬКО внутри одного плана):
-    0         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-    1         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-    8         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-    64        allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-    256       allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    0         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    1         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    8         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    64        allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    256       allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
     1024      allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
               deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
 
   ПЕРЕПИСЬ ПОСАЖЕННОГО в верхней точке (по каждой величине порознь, счётом по факту):
     объектов зеркала / рёбер родителя      1004 / 3009
-    членств СПРАШИВАЕМОГО / всего          1024 / 1029
-    строк (говорящий, область) / выдач     1 / 8
+    членств СПРАШИВАЕМОГО / всего          1024 / 1034
+    строк (говорящий, область) / выдач     1 / 9
     цепь областей: строк / различных       7 / 4
     правил роли / проекций глаголов        1 / 1
-    прямых фактов всего                    16
+    прямых фактов всего                    17
     вопросов задано                        33
 
 
@@ -273,46 +273,46 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               54        55       109       41        102      2      923µs    3.336ms allow   
-  8               57        44       101       41         86      2      782µs      845µs allow   
-  64             169        44       213       41         86      2      853µs    1.274ms allow   
-  512*           547        44       591       42         78      2      810µs    1.076ms allow   
-    отношение верхней к нижней: тронуто 5.42× · сканов 1.02×
+  1               53        59       112       41        108      2    1.082ms    3.577ms allow   
+  8               59        51       110       41         95      2      835µs    1.317ms allow   
+  64             171        51       222       41         95      2      931µs     1.33ms allow   
+  512*           548        51       599       42         95      2      948µs    1.238ms allow   
+    отношение верхней к нижней: тронуто 5.35× · сканов 1.02×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               63        63       126       43        100      2      896µs    1.137ms deny    
-  8               87        52       139       71        124      2      898µs     1.13ms deny    
-  64             423       108       531      295        460      2    1.297ms    1.606ms deny    
-  512*          2593       556      3149     2088       2631      2     3.21ms    4.501ms deny    
-    отношение верхней к нижней: тронуто 24.99× · сканов 48.56×
+  1               59        66       125       43        105      2      772µs      802µs deny    
+  8               89        59       148       71        133      2    1.023ms    1.369ms deny    
+  64             425       115       540      295        469      2    1.144ms    1.605ms deny    
+  512*          2594       563      3157     2088       3157      2    3.968ms    4.987ms deny    
+    отношение верхней к нижней: тронуто 25.26× · сканов 48.56×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               55        59       114       43         94      2      965µs     1.06ms deny    
-  8               71        52       123       64        116      2      750µs      927µs deny    
-  64             295       108       403      232        396      2    1.131ms    1.184ms deny    
-  512*          1569       556      2125     1577       2119      2    2.249ms     2.99ms deny    
-    отношение верхней к нижней: тронуто 18.64× · сканов 36.67×
+  1               57        66       123       43        104      2      940µs    1.038ms deny    
+  8               73        59       132       64        125      2      802µs    1.129ms deny    
+  64             297       115       412      232        405      2    1.262ms     1.47ms deny    
+  512*          1570       563      2133     1577       2645      2     2.73ms    3.202ms deny    
+    отношение верхней к нижней: тронуто 17.34× · сканов 36.67×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
   значение         allow deny(правило)       дельта во сколько раз
-  1                  109          126          +17          1.16×
-  8                  101          139          +38          1.38×
-  64                 213          531         +318          2.49×
-  512                591         3149        +2558          5.33×
+  1                  112          125          +13          1.12×
+  8                  110          148          +38          1.35×
+  64                 222          540         +318          2.43×
+  512                599         3157        +2558          5.27×
 
   КОНТРОЛЬ ДЕШЁВОГО ОТКАЗА: ddeny(глагол) обязан быть ДЕШЕВЛЕ deny(правило).
   Без него отчёт сказал бы «отказ дёшев» — и это была бы правда про фикстуру.
   значение    deny(глагол)  deny(правило)
-  1                    114            126
-  8                    123            139
-  64                   403            531
-  512                 2125           3149
+  1                    123            125
+  8                    132            148
+  64                   412            540
+  512                 2133           3157
 
   план по точкам (отношение двух приборов читается ТОЛЬКО внутри одного плана):
-    1         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    1         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
     8         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→access_bindings Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
               deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→access_bindings Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
     64        allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Only Scan→role_verb Index Scan→access_bindings Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→roles Seq Scan→service_accounts]
@@ -322,11 +322,11 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   ПЕРЕПИСЬ ПОСАЖЕННОГО в верхней точке (по каждой величине порознь, счётом по факту):
     объектов зеркала / рёбер родителя      1004 / 3009
-    членств СПРАШИВАЕМОГО / всего          0 / 5
-    строк (говорящий, область) / выдач     512 / 519
+    членств СПРАШИВАЕМОГО / всего          0 / 10
+    строк (говорящий, область) / выдач     512 / 520
     цепь областей: строк / различных       7 / 4
     правил роли / проекций глаголов        1 / 1
-    прямых фактов всего                    16
+    прямых фактов всего                    17
     вопросов задано                        33
 
 
@@ -335,60 +335,60 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               38        17        55       26         47      2      814µs    3.139ms allow   
-  7               49        19        68       32         58      2      797µs    1.027ms allow   
-  11              44         9        53       35         57      2      953µs    1.114ms allow   
-  341*           376       264       640      110        379      2    1.826ms    2.398ms allow   
-    отношение верхней к нижней: тронуто 11.64× · сканов 4.23×
+  1               41        23        64       26         55      2      878µs     3.94ms allow   
+  7               41        14        55       32         55      2      899µs    1.171ms allow   
+  11              46        14        60       35         53      2      943µs    1.221ms allow   
+  341*           378       269       647      110        392      2    1.692ms    2.023ms allow   
+    отношение верхней к нижней: тронуто 10.11× · сканов 4.23×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               39        19        58       26         44      2      637µs      765µs deny    
-  7               50        21        71       32         55      2      785µs    1.056ms deny    
-  11              44        10        54       35         53      2      861µs    1.238ms deny    
-  341*           376       265       641      110        381      2     1.65ms    1.786ms deny    
-    отношение верхней к нижней: тронуто 11.05× · сканов 4.23×
+  1               42        25        67       26         52      2      652µs      709µs deny    
+  7               41        15        56       32         51      2      953µs     1.02ms deny    
+  11              46        15        61       35         60      2      692µs      744µs deny    
+  341*           378       270       648      110        388      2    1.726ms    2.428ms deny    
+    отношение верхней к нижней: тронуто 9.67× · сканов 4.23×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               36        18        54       26         42      2      688µs    1.049ms deny    
-  7               47        20        67       32         53      2      641µs      704µs deny    
-  11              42        10        52       35         52      2      887µs      1.1ms deny    
-  341*           374       265       639      110        380      2    1.583ms    2.148ms deny    
-    отношение верхней к нижней: тронуто 11.83× · сканов 4.23×
+  1               39        24        63       26         50      2      654µs      667µs deny    
+  7               39        15        54       32         50      2      877µs    1.172ms deny    
+  11              44        15        59       35         59      2      699µs      751µs deny    
+  341*           376       270       646      110        387      2    1.644ms    2.025ms deny    
+    отношение верхней к нижней: тронуто 10.25× · сканов 4.23×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
   значение         allow deny(правило)       дельта во сколько раз
-  1                   55           58           +3          1.05×
-  7                   68           71           +3          1.04×
-  11                  53           54           +1          1.02×
-  341                640          641           +1          1.00×
+  1                   64           67           +3          1.05×
+  7                   55           56           +1          1.02×
+  11                  60           61           +1          1.02×
+  341                647          648           +1          1.00×
 
   КОНТРОЛЬ ДЕШЁВОГО ОТКАЗА: ddeny(глагол) обязан быть ДЕШЕВЛЕ deny(правило).
   Без него отчёт сказал бы «отказ дёшев» — и это была бы правда про фикстуру.
   значение    deny(глагол)  deny(правило)
-  1                     54             58
-  7                     67             71
-  11                    52             54
-  341                  639            641
+  1                     63             67
+  7                     54             56
+  11                    59             61
+  341                  646            648
 
   план по точкам (отношение двух приборов читается ТОЛЬКО внутри одного плана):
     1         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
               deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-    7         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    7         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→access_bindings Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→access_bindings Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
     11        allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→access_bindings Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
               deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→access_bindings Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-    341       allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→access_bindings Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→access_bindings Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    341       allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Only Scan→role_verb Index Scan→access_bindings Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Only Scan→role_verb Index Scan→access_bindings Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→roles Seq Scan→service_accounts]
 
   ПЕРЕПИСЬ ПОСАЖЕННОГО в верхней точке (по каждой величине порознь, счётом по факту):
     объектов зеркала / рёбер родителя      1012 / 3376
-    членств СПРАШИВАЕМОГО / всего          0 / 5
-    строк (говорящий, область) / выдач     1 / 16
+    членств СПРАШИВАЕМОГО / всего          0 / 10
+    строк (говорящий, область) / выдач     1 / 17
     цепь областей: строк / различных       341 / 341
     правил роли / проекций глаголов        1 / 1
-    прямых фактов всего                    16
+    прямых фактов всего                    17
     вопросов задано                        33
 
 
@@ -397,46 +397,46 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               54        55       109       41        102      2      864µs    3.799ms allow   
-  8               50        51       101       41         98      2      792µs    1.014ms allow   
-  32              50        51       101       41         98      2      978µs    1.107ms allow   
-  64              50        51       101       41         98      2      834µs    1.033ms allow   
-    отношение верхней к нижней: тронуто 0.93× · сканов 1.00×
+  1               53        59       112       41        108      2      763µs     3.82ms allow   
+  8               53        59       112       41        108      2      791µs     1.07ms allow   
+  32              53        59       112       41        108      2      748µs      992µs allow   
+  64              53        59       112       41        108      2      761µs    1.334ms allow   
+    отношение верхней к нижней: тронуто 1.00× · сканов 1.00×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               63        63       126       43        100      2      719µs      915µs deny    
-  8               72        65       137       50        116      2      981µs    1.248ms deny    
-  32              89        89       178       43        188      2      917µs    1.154ms deny    
-  64             121       121       242       43        284      2      881µs    1.114ms deny    
-    отношение верхней к нижней: тронуто 1.92× · сканов 1.00×
+  1               59        66       125       43        105      2      788µs      818µs deny    
+  8               74        73       147       50        126      2      876µs    1.003ms deny    
+  32              91        97       188       43        160      2      930µs    1.069ms deny    
+  64             123       129       252       43        294      2    1.137ms     1.35ms deny    
+    отношение верхней к нижней: тронуто 2.02× · сканов 1.00×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               55        59       114       43         94      2      824µs    1.072ms deny    
-  8               63        65       128       50        108      2      826µs      910µs deny    
-  32              31        45        76       41        156      2      856µs    1.104ms deny    
-  64              31        45        76       41        220      2      781µs      979µs deny    
-    отношение верхней к нижней: тронуто 0.67× · сканов 0.95×
+  1               57        66       123       43        104      2      921µs    1.091ms deny    
+  8               65        73       138       50        118      2      808µs    1.133ms deny    
+  32              32        52        84       41         78      2      884µs    1.023ms deny    
+  64              32        52        84       41        230      2      803µs    1.095ms deny    
+    отношение верхней к нижней: тронуто 0.68× · сканов 0.95×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
   значение         allow deny(правило)       дельта во сколько раз
-  1                  109          126          +17          1.16×
-  8                  101          137          +36          1.36×
-  32                 101          178          +77          1.76×
-  64                 101          242         +141          2.40×
+  1                  112          125          +13          1.12×
+  8                  112          147          +35          1.31×
+  32                 112          188          +76          1.68×
+  64                 112          252         +140          2.25×
 
   КОНТРОЛЬ ДЕШЁВОГО ОТКАЗА: ddeny(глагол) обязан быть ДЕШЕВЛЕ deny(правило).
   Без него отчёт сказал бы «отказ дёшев» — и это была бы правда про фикстуру.
   значение    deny(глагол)  deny(правило)
-  1                    114            126
-  8                    128            137
-  32                    76            178
-  64                    76            242
+  1                    123            125
+  8                    138            147
+  32                    84            188
+  64                    84            252
 
   план по точкам (отношение двух приборов читается ТОЛЬКО внутри одного плана):
-    1         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
-              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_rule_selectors Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+    1         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
+              deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
     8         allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
               deny  [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
     32        allow [Bitmap Heap Scan→memberships Bitmap Index Scan→memberships Index Only Scan→resource_parent_edge Index Scan→groups Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→access_binding_subjects Seq Scan→access_bindings Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→relation_fact Seq Scan→role_verb Seq Scan→roles Seq Scan→service_accounts]
@@ -446,17 +446,53 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   ПЕРЕПИСЬ ПОСАЖЕННОГО в верхней точке (по каждой величине порознь, счётом по факту):
     объектов зеркала / рёбер родителя      1004 / 3009
-    членств СПРАШИВАЕМОГО / всего          0 / 5
-    строк (говорящий, область) / выдач     1 / 8
+    членств СПРАШИВАЕМОГО / всего          0 / 10
+    строк (говорящий, область) / выдач     1 / 9
     цепь областей: строк / различных       7 / 4
     правил роли / проекций глаголов        64 / 1
-    прямых фактов всего                    16
+    прямых фактов всего                    17
     вопросов задано                        33
 
 
-ОБЪЁМ ОСМОТРЕННОГО
-  осей исполнено 5 из 6, точек 22, вопросов задано 66 (по 11 повторов на вопрос),
-  настенное время 27s
+ОСЬ Pg — СТРАНИЦА ПЕРЕЧИСЛЕНИЯ × доля доступных
+------------------------------------------------------------------------------
 
-  ПРОГОН НЕ ОКОНЧЕН: оси ниже исполненных не сняты. Это ТРЕТИЙ исход по ним,
-  а не «величина не выросла».
+  ЗАХОД — НЕ ВЫЗОВ. `List` повторяет заход, пока страница не наполнится ЛИБО
+  кандидаты типа не кончатся. При доле доступных 0 % страница не наполняется
+  никогда, и ОДИН вызов просматривает ВЕСЬ тип. Колонка «заходов» — несущая.
+
+  стр.    доступно   заходов   отдано осмотрено<=    строк*  тронуто*  сверочная время вызова
+  50      100%             1       50         50      1817     22731       3587        247ms
+  500     100%             1      500        500     20017   1954531      37537       1.119s
+  1000    100%             1     1000       1000     40017   7528031      75037       1.411s
+  5000*   100%             1     5000       5000    200017 187610031     375037      12.295s
+  50      50%              1       50         50      1817     22731       3587         84ms
+  500     50%              2      500       1000     19517   2252531      75064       2.292s
+  1000    50%              2     1000       2000     39017   8850031     150054       3.006s
+  5000*   50%              2     5000      10000    195017 219100031     750054      28.609s
+  50      0%            2001        1     100050      1767     29531    7174189    2m40.063s
+  500     0%             201        1     100500     19517   2549031    7507587    3m44.964s
+  1000    0%             101        1     101000     39017  10098031    7503887    2m34.291s
+  5000*   0%              21        1     105000    195017 250490031    7501072     5m1.316s
+
+  «строк*» и «тронуто*» сняты с ПЕРВОГО захода: суммировать планы разных заходов
+  нельзя — это разные исполнения. Стоимость ВЫЗОВА читается по «заходов» × «строк*».
+  Колонка «осмотрено<=» — ВЕРХНЯЯ ОЦЕНКА (заходов × страница): последний заход
+  бывает неполон, а числа осмотренных кандидатов `List` наружу не отдаёт вовсе.
+  Точка 5000 помечена «*» и как СВЕРХ КОНТРАКТА: у `List` верхнего предела нет
+  вовсе, а контрактный потолок 1000 живёт в другом месте — то есть край сегодня
+  этот размер страницы не отвергает.
+
+  ПЕРЕПИСЬ ПОСАЖЕННОГО в верхней точке (по каждой величине порознь, счётом по факту):
+    объектов зеркала / рёбер родителя      100004 / 300009
+    членств СПРАШИВАЕМОГО / всего          0 / 10
+    строк (говорящий, область) / выдач     1 / 9
+    цепь областей: строк / различных       7 / 4
+    правил роли / проекций глаголов        1 / 1
+    прямых фактов всего                    17
+    вопросов задано                        11
+
+
+ОБЪЁМ ОСМОТРЕННОГО
+  осей исполнено 6 из 6, точек 34, вопросов задано 78 (по 11 повторов на вопрос),
+  настенное время 16m32s

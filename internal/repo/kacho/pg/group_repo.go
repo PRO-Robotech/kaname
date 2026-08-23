@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -219,6 +220,95 @@ func (r *groupReader) ListMembers(ctx context.Context, groupID domain.GroupID, p
 		out = out[:limit]
 	}
 	return out, next, nil
+}
+
+// maxMembersInGrantSurface — верхняя граница состава, возвращаемого ОДНИМ
+// перечислением выдач.
+//
+// Величина та же, что у страницы платформы: сумма составов не вправе быть
+// больше того, что этот контракт и так согласен отдать одним ответом. Число
+// намеренно совпадает с пределом страницы, а не выбрано отдельно, — иначе у
+// одного ответа было бы две несогласованные границы.
+const maxMembersInGrantSurface = maxListPageSize
+
+// membersOfGroupsSQL — оператор состава, вынесенный КОНСТАНТОЙ ради того, чтобы
+// проба замеряла ИМЕННО ЕГО.
+//
+// Предел выборки держит не форму ответа (её держит срез в Go), а СТОИМОСТЬ
+// чтения: без него запрос читает весь состав названных групп, чтобы отдать
+// первую тысячу. Утверждать это можно только по плану настоящего оператора —
+// проба, переписавшая текст своей рукой, замеряла бы ДРУГОЙ запрос и осталась бы
+// зелёной при снятом пределе.
+const membersOfGroupsSQL = `
+		SELECT group_id, member_type, member_id, added_at
+		  FROM group_members
+		 WHERE group_id = ANY($1)
+		 ORDER BY group_id ASC, added_at ASC, member_id ASC
+		 LIMIT $2`
+
+// MembersOfGroups — состав нескольких групп одним обращением, ограниченный
+// сверху, с честным признаком усечения.
+//
+// Ключ `group_members_pkey (group_id, member_type, member_id)` ведущей колонкой
+// обслуживает сравнение `group_id = ANY(...)` НАПРЯМУЮ: колонка идёт голой, без
+// вычисления вокруг неё, поэтому строки чужих групп не читаются вовсе. Порядок
+// задан явно и совпадает с порядком предела: без него «первые N» означало бы
+// «какие достались».
+//
+// Читается на одну строку больше предела. Эта строка НЕ отдаётся — она отвечает
+// на единственный вопрос, на который иначе ответить нечем: усечён ли ответ, и с
+// какой группы. Группы строго ДО неё возвращены целиком; её собственная группа и
+// все запрошенные после неё — неполны либо не читались вовсе, и именно они
+// называются вторым возвратом.
+func (r *groupReader) MembersOfGroups(ctx context.Context, groupIDs []domain.GroupID) ([]domain.GroupMember, []domain.GroupID, error) {
+	if len(groupIDs) == 0 {
+		// Пустой вход — пустой ответ. Ни в коем случае не «все группы»: тот же
+		// запрос без предиката вернул бы состав всего кластера.
+		return nil, nil, nil
+	}
+	ids := make([]string, 0, len(groupIDs))
+	for _, id := range groupIDs {
+		if id == "" {
+			continue
+		}
+		ids = append(ids, string(id))
+	}
+	if len(ids) == 0 {
+		return nil, nil, nil
+	}
+	sort.Strings(ids)
+
+	rows, err := r.tx.Query(ctx, membersOfGroupsSQL, ids, maxMembersInGrantSurface+1)
+	if err != nil {
+		return nil, nil, mapErr(err, "", "")
+	}
+	defer rows.Close()
+	out := make([]domain.GroupMember, 0, len(ids))
+	for rows.Next() {
+		var m domain.GroupMember
+		if err := rows.Scan((*string)(&m.GroupID), (*string)(&m.MemberType), (*string)(&m.MemberID), &m.AddedAt); err != nil {
+			return nil, nil, mapErr(err, "", "")
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, mapErr(err, "", "")
+	}
+	if int64(len(out)) <= maxMembersInGrantSurface {
+		return out, nil, nil
+	}
+
+	// Опережающая строка прочитана — значит предел достигнут. Её группа и есть
+	// первая, чей состав отдать целиком не удалось.
+	boundary := string(out[maxMembersInGrantSurface].GroupID)
+	out = out[:maxMembersInGrantSurface]
+	incomplete := make([]domain.GroupID, 0, len(ids))
+	for _, id := range ids {
+		if id >= boundary {
+			incomplete = append(incomplete, domain.GroupID(id))
+		}
+	}
+	return out, incomplete, nil
 }
 
 type groupWriter struct {

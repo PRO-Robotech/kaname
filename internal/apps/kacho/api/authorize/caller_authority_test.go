@@ -5,6 +5,7 @@ package authorize
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -266,4 +267,76 @@ func TestCallerAuthority_BatchCheck_OneForeign_DeniesBatch(t *testing.T) {
 		},
 	})
 	requireDenied(t, err)
+}
+
+// ── #665: тот же класс на внутреннем страже AuthorizeService ─────────────────
+
+// TestCallerAuthority_StoreOutage_IsUnavailableNotDenied — «хранилище отношений
+// не ответило» обязано приезжать НЕДОСТУПНОСТЬЮ, а не отказом в правах.
+//
+// Утверждается наблюдаемое: код, который получает вызывающий, на трёх исходах
+// одного и того же вопроса. Разница между двумя отказами — обещание вызывающему:
+// отказ в правах говорит «повтор бессмыслен» (решение зависит от тройки субъект
+// / отношение / объект, и одинаковый повтор не меняет ни одного из трёх),
+// недоступность о правах не говорит ничего.
+//
+// Fail-closed не ослабляется ни на йоту: во всех трёх случаях, кроме
+// разрешающего, вызов отвергнут.
+func TestCallerAuthority_StoreOutage_IsUnavailableNotDenied(t *testing.T) {
+	req := func() *iamv1.AuthorizeCheckRequest {
+		return &iamv1.AuthorizeCheckRequest{
+			Subject:  "user:usr_bob",
+			Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_x"},
+			Action:   "iam.accounts.get",
+		}
+	}
+
+	t.Run("хранилище не ответило", func(t *testing.T) {
+		auth := &authorityStub{err: errors.New("relation store unreachable")}
+		h := newHandlerWithAuthorityProd(true, auth)
+		_, err := h.Check(userCtx("usr_alice"), req())
+		if status.Code(err) != codes.Unavailable {
+			t.Fatalf("want Unavailable, got %v", err)
+		}
+	})
+
+	// Отрицание: хранилище ОТВЕТИЛО «нет» — это решение, и повтор его не изменит.
+	t.Run("явный отказ", func(t *testing.T) {
+		auth := &authorityStub{allow: map[string]bool{}}
+		h := newHandlerWithAuthorityProd(true, auth)
+		_, err := h.Check(userCtx("usr_alice"), req())
+		requireDenied(t, err)
+	})
+
+	// Положительный контроль: право есть → проходит. Без него оба отрицания выше
+	// зеленели бы и на страже, который отвергает всё.
+	t.Run("право есть", func(t *testing.T) {
+		auth := &authorityStub{allow: map[string]bool{"admin|account:acc_x": true}}
+		h := newHandlerWithAuthorityProd(true, auth)
+		if _, err := h.Check(userCtx("usr_alice"), req()); err != nil {
+			t.Fatalf("вызывающий с правом обязан пройти, получено %v", err)
+		}
+	})
+}
+
+// TestCallerAuthority_StoreOutageOnTheSuperGateAlone_IsUnavailable — вопрос об
+// администраторе кластера задаётся ПЕРВЫМ, и его неполадка тоже не отказ.
+//
+// Проба стоит отдельно, потому что путь другой: подстановочный идентификатор
+// ресурса выводит запрос из полосы «право на этот объект» (спрашивать не о чем),
+// и неполадка сверх-гейта остаётся ЕДИНСТВЕННЫМ вопросом, оставшимся без ответа.
+// Без этой пробы починка закрыла бы только ту половину, где объект назван, а
+// вторая продолжала бы отвечать терминальным отказом на мигание хранилища.
+func TestCallerAuthority_StoreOutageOnTheSuperGateAlone_IsUnavailable(t *testing.T) {
+	auth := &authorityStub{err: errors.New("relation store unreachable")}
+	h := newHandlerWithAuthorityProd(true, auth)
+
+	_, err := h.Check(userCtx("usr_alice"), &iamv1.AuthorizeCheckRequest{
+		Subject:  "user:usr_bob",
+		Resource: &iamv1.ResourceRef{Type: "account", Id: "*"},
+		Action:   "iam.accounts.get",
+	})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("want Unavailable, got %v", err)
+	}
 }

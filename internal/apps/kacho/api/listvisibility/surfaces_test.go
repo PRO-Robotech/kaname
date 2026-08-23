@@ -468,12 +468,12 @@ func accessBindingSurface() surface {
 			uc := abapp.NewListUseCase(e.repo).
 				WithRelationQueries(queriesOr(e, a)).
 				WithRelationStore(storeOr(e, a))
-			rows, next, err := uc.Execute(ctx, repoab.ListFilter{PageSize: a.pageSize, PageToken: a.pageToken})
-			ids := make([]string, 0, len(rows))
-			for _, r := range rows {
+			page, err := uc.Execute(ctx, repoab.ListFilter{PageSize: a.pageSize, PageToken: a.pageToken})
+			ids := make([]string, 0, len(page.Bindings))
+			for _, r := range page.Bindings {
 				ids = append(ids, string(r.ID))
 			}
-			return ids, next, err
+			return ids, page.NextPageToken, err
 		},
 		get: func(t *testing.T, e *env, ctx context.Context, id string) error {
 			uc := abapp.NewGetAccessBindingUseCase(e.repo).WithRelationQueries(e.gates)

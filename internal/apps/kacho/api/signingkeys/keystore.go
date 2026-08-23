@@ -42,6 +42,14 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/tokensigner"
 )
 
+// ErrWrappingKeyMismatch — предъявленный ключ обёртки не разворачивает то, что
+// в ключнице уже записано.
+//
+// Отдельный сентинел, а не общий отказ: вызывающий обязан отличать «ключ
+// обёртки не тот» от «хранилище недоступно». Первое повтором не лечится и
+// означает потерю материала; второе — временно.
+var ErrWrappingKeyMismatch = errors.New("signingkeys: the wrapping key does not open the stored signing keys")
+
 // Clock — источник времени ключницы. Вход, а не окружение.
 type Clock func() time.Time
 
@@ -303,9 +311,31 @@ func (k *Keystore) SweepRemovable(ctx context.Context) (int, error) {
 // Идемпотентна: при уже существующем подписывающем не делает ничего. Отказ
 // хранилища НЕ подменяется порождением — иначе недоступная база на старте
 // давала бы новый ключ на каждой реплике.
+//
+// ПОРЯДОК ЗДЕСЬ НЕСУЩИЙ, а не оформление (задача #1062): ключница читается
+// ПЕРВОЙ, и предъявленный ключ обёртки обязан открыть уже записанное — прежде
+// чем что бы то ни было порождается. Обратный порядок давал класс, в котором
+// «пересоздали стенд» и «потеряли все подписи» неотличимы: приватная половина
+// перестаёт разворачиваться, подписывающего «нет», ключница молча заводит
+// новый, служба поднимается, набор отвечает — а каждый ранее выданный токен
+// уже непроверяем, и ни одного сообщения о потере нет.
 func (k *Keystore) EnsureSigningKey(ctx context.Context) error {
-	rec, err := k.reader.Active(ctx)
-	if err == nil {
+	set, err := k.reader.KeySet(ctx)
+	if err != nil {
+		k.failures.Add(1)
+		// Недоступное хранилище — НЕ «ключница пуста»: порождение здесь дало бы
+		// новый ключ на каждой реплике при первом же сбое сети.
+		return fmt.Errorf("signingkeys: read the key set: %w", err)
+	}
+	if err := k.assertWrappingKeyOpens(set); err != nil {
+		return err
+	}
+	// Величина печатается ВСЕГДА, включая ноль: «ключ обёртки проверен на нуле
+	// ключей» обязано быть отличимо от «проверка не исполнялась».
+	k.logger.Info("wrapping key opens the stored key set", "keys_in_set", len(set))
+
+	rec, aerr := k.reader.Active(ctx)
+	if aerr == nil {
 		k.logger.Info("signing key already present", "kid", string(rec.KID))
 		return nil
 	}
@@ -315,6 +345,40 @@ func (k *Keystore) EnsureSigningKey(ctx context.Context) error {
 	}
 	k.logger.Info("signing key bootstrapped", "kid", string(pub.KID))
 	return nil
+}
+
+// assertWrappingKeyOpens доказывает, что предъявленный ключ обёртки
+// разворачивает КАЖДЫЙ ключ набора.
+//
+// Почему весь набор, а не один подписывающий: опубликованный ключ вступает в
+// подпись позже, и отложенный отказ пришёлся бы на ротацию — то есть на момент,
+// который выбирает платформа, а не оператор. Выведенный ключ остаётся в наборе
+// на отсрочку, и его нечитаемость есть тот же признак смены ключа обёртки.
+// Снятые и объявленные утёкшими в набор не входят и здесь не рассматриваются:
+// их приватная половина не нужна никогда, и требовать её читаемости значило бы
+// сделать отказ невылечимым.
+//
+// Отказ называет ВСЕ нечитаемые ключи и их долю: одно имя из десяти читается
+// как единичная поломка, тогда как предмет — смена ключа обёртки целиком.
+func (k *Keystore) assertWrappingKeyOpens(set []domain.SigningKeyRecord) error {
+	var unreadable []string
+	for _, rec := range set {
+		if _, err := k.wrapper.Unwrap(rec.PrivateKeyWrapped); err != nil {
+			unreadable = append(unreadable, string(rec.KID))
+		}
+	}
+	if len(unreadable) == 0 {
+		return nil
+	}
+	k.failures.Add(1)
+	// Текст отказа — рантайм-диагностика оператору, поднимающему стенд: он
+	// обязан назвать предмет прямо. Материала здесь нет и быть не может —
+	// названы только идентификаторы ключей, публикуемые в наборе.
+	return fmt.Errorf(
+		"%w: %d of %d keys in the key set do not open (%s); the store outlived the wrapping key that wrapped them. "+
+			"Restore that wrapping key — a different one cannot be substituted, and generating a fresh signing key over "+
+			"unreadable ones would void every token already issued without saying so",
+		ErrWrappingKeyMismatch, len(unreadable), len(set), strings.Join(unreadable, ", "))
 }
 
 // PublishedSet возвращает набор в ПУБЛИКУЕМОЙ форме.

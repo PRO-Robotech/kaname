@@ -216,7 +216,13 @@ func requireGrantAuthority(ctx context.Context, repo Repo, relations clients.Rel
 	// the cluster-admin short-circuit (IsClusterAdmin) and missed, so re-checking it
 	// inside fgaHoldsAdmin would be a redundant identical FGA round-trip (#9). The
 	// scope-only variant performs just the per-scope admin-tuple Check.
-	if fgaHoldsScopeAdmin(ctx, relations, resourceType, resourceID) {
+	scopeAdmin, scopeErr := fgaHoldsScopeAdminE(ctx, relations, resourceType, resourceID)
+	if scopeErr != nil {
+		// «Спросить не удалось» ≠ «не положено»: вызывающий обязан узнать, что
+		// повтор осмыслен.
+		return authzguard.AuthzBackendUnavailable()
+	}
+	if scopeAdmin {
 		return nil
 	}
 
@@ -230,7 +236,7 @@ func fgaAdminObject(resourceType, resourceID string) string {
 	return fmt.Sprintf("%s:%s", strings.ToLower(resourceType), resourceID)
 }
 
-// fgaHoldsAdmin reports whether the ctx principal holds delegated-admin authority
+// fgaHoldsAdminE reports whether the ctx principal holds delegated-admin authority
 // on the scope object: EITHER it is a cluster-admin (flat super-gate) OR it holds
 // the FGA `admin` relation on the scope object. This is the entry-point for the
 // DIRECT call-sites (ListSubjectPrivileges, D-07) that have NOT already run the
@@ -240,36 +246,58 @@ func fgaAdminObject(resourceType, resourceID string) string {
 //
 // Fail-closed: false when the FGA client is unwired (unit tests / degraded mode),
 // the caller is anonymous, or the principal id is empty.
-func fgaHoldsAdmin(ctx context.Context, relations clients.RelationStore, resourceType, resourceID string) bool {
+func fgaHoldsAdminE(ctx context.Context, relations clients.RelationStore, resourceType, resourceID string) (bool, error) {
 	if relations == nil || authzguard.IsAnonymous(ctx) {
-		return false
+		return false, nil
 	}
 	// Cluster-admin short-circuit (RBAC explicit-model 2026 P5, D-9 / КФ-2): the
-	// flat super-gate covers the direct fgaHoldsAdmin call-sites (ListSubjectPrivileges,
-	// D-07) so a cluster-admin retains delegated-admin visibility after the
+	// flat super-gate covers the direct call-sites (ListSubjectPrivileges, D-07)
+	// so a cluster-admin retains delegated-admin visibility after the
 	// access-cascade is contracted. Checked before the per-scope admin tuple.
-	if authzguard.IsClusterAdmin(ctx, relations) {
-		return true
+	//
+	// E-форма и здесь: вызывающий у этой функции — списочный, и неполадка на
+	// супер-гейте меняет ЕГО ответ, а не просто «не срабатывает».
+	admin, aerr := authzguard.IsClusterAdminE(ctx, relations)
+	if aerr != nil {
+		return false, aerr
 	}
-	return fgaHoldsScopeAdmin(ctx, relations, resourceType, resourceID)
+	if admin {
+		return true, nil
+	}
+	return fgaHoldsScopeAdminE(ctx, relations, resourceType, resourceID)
 }
 
-// fgaHoldsScopeAdmin reports whether the ctx principal holds the FGA `admin`
+// fgaHoldsScopeAdminE reports whether the ctx principal holds the FGA `admin`
 // relation on the scope object — the per-scope admin-tuple Check ONLY (no
 // cluster-admin short-circuit). Used by requireGrantAuthority's Path 2, which has
 // already evaluated the cluster-admin super-gate in Path 0 (#9 — avoids a duplicate
-// cluster-admin round-trip). Fail-closed: false when FGA is unwired, the caller is
-// anonymous / unknown-type, or the Check errors.
-func fgaHoldsScopeAdmin(ctx context.Context, relations clients.RelationStore, resourceType, resourceID string) bool {
+// cluster-admin round-trip).
+//
+// Возвращает ТРИ исхода, а не два: `(true, nil)` — держит; `(false, nil)` —
+// хранилище ответило «нет»; `(false, err)` — хранилище не ответило. Последнее
+// отказом в правах не является и обязано доехать до вызывающего: на списочном
+// пути проглоченная неполадка даёт молча суженную страницу.
+//
+// Fail-closed по вырожденным входам остаётся: FGA не провязан, вызывающий
+// анонимен либо неизвестного вида → `(false, nil)`.
+func fgaHoldsScopeAdminE(ctx context.Context, relations clients.RelationStore, resourceType, resourceID string) (bool, error) {
 	if relations == nil {
-		return false
+		return false, nil
 	}
 	subject, ok := authzguard.PrincipalSubject(ctx) // fail-closed: anon / empty / unknown → ""
 	if !ok {
-		return false
+		return false, nil
 	}
 	allowed, err := relations.Check(ctx, subject, "admin", fgaAdminObject(resourceType, resourceID))
-	return err == nil && allowed
+	if err != nil {
+		// Неполадка хранилища прав — НЕ отказ в правах. Прежде эта функция
+		// заканчивалась `return err == nil && allowed`, то есть исход у обоих
+		// ответов был один: `false`. Шесть списочных путей строили по нему
+		// страницу и отдавали well-formed `200` с молча суженным набором,
+		// неотличимым от настоящего отзыва прав.
+		return false, err
+	}
+	return allowed, nil
 }
 
 // requireGrantAuthorityViaCreate — shim allowing CreateAccessBindingUseCase to

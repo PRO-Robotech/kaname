@@ -32,12 +32,18 @@ cleanup; {{runId}}-уникальные имена (UNIQUE(name) — колли�
 — для проектных кейсов и чтения посеянного аккаунта), accountAId (owned by userAAAId),
 accountBId, jwtAccountAdminB.
 
-СВЕЖИЙ АККАУНТ САГА-СОЗДАЁТСЯ ЧЕЛОВЕКОМ ЦЕРЕМОНИИ (`jwtHumanCeremony`), и иначе нельзя:
-`owner_user_id` ссылается на `users(id)`, владелец выводится из принципала, поэтому
-служебная учётка получает синхронный отказ первым стейтментом. Ожидаемый владелец —
-`ceremonyUserId`. Условие создаёт волна церемонии (`scripts/run-ceremony.sh`).
-Необратимое удаление дополнительно требует ПОДНЯТОГО уровня входа
-(`jwtHumanCeremonyStepUp`, см. `_HUMAN_STEPUP`).
+СВЕЖИЙ АККАУНТ САГА-СОЗДАЁТСЯ ЧЕЛОВЕКОМ, и иначе нельзя: `owner_user_id` ссылается на
+`users(id)`, владелец выводится из принципала, поэтому служебная учётка получает
+синхронный отказ первым стейтментом. Условие создаёт волна церемонии
+(`scripts/run-ceremony.sh`); необратимое удаление дополнительно требует ПОДНЯТОГО
+уровня входа.
+
+У КАЖДОГО ЗАВОДЯЩЕГО КЕЙСА ЧЕЛОВЕК СВОЙ, а не общий человек церемонии: заведение
+аккаунта списывается с темпа личности (три в час), и восемь заведений волны под одним
+человеком давали десять списаний при потолке три. Слоты объявлены в
+`ceremony_credentials.ADMISSION_SLOTS`, ожидаемый владелец — `human<Слот>UserId`.
+Кейсы, чей предмет — синхронный ОТКАЗ заведения, остаются на человеке церемонии:
+отвергнутое заведение не списывает ничего.
 
 Grounded в landed-коде (services/iam/internal/apps/kacho/api/{account,project}):
   create.go:167 owner-in-body reject · update.go:57 owner immutable · create.go:255
@@ -50,7 +56,31 @@ CASES = []
 # Поднятый уровень входа: `AccountService/Delete` объявлен чувствительным
 # (`required_acr_min = "2"`). Машинный предъявитель от порога освобождён, поэтому под
 # ним этот порог не проверялся ни разу.
-_HUMAN_STEPUP = "jwtHumanCeremonyStepUp"
+#
+# ЧЕЛОВЕК У КАЖДОГО ЗАВОДЯЩЕГО КЕЙСА СВОЙ, И ЭТО НЕ УКРАШЕНИЕ. Заведение аккаунта
+# списывается с ТЕМПА личности (#618, умолчание — три в час на внешний идентификатор
+# входа). Три заводящих кейса этого набора плюс пять соседних шли под ОДНИМ человеком
+# церемонии, у которого посев уже занял два места, — десять списаний при потолке три.
+# Отказ был верен; неверна была форма пробы: человек заводит СЕБЕ аккаунт, а не восемь
+# подряд. Личности слотов объявлены в `ceremony_credentials.ADMISSION_SLOTS`, выдаёт их
+# волна церемонии, и каждая заводит РОВНО ОДИН аккаунт.
+#
+# Пара на слот: обычный вход заводит и читает, поднятый — убирает за собой.
+_HUMAN_DERIVE = "jwtHumanAccRdDerive"
+_HUMAN_DERIVE_STEPUP = "jwtHumanAccRdDeriveStepUp"
+_HUMAN_DERIVE_USER_ID = "humanAccRdDeriveUserId"
+
+_HUMAN_SAGA = "jwtHumanAccRdSaga"
+_HUMAN_SAGA_STEPUP = "jwtHumanAccRdSagaStepUp"
+_HUMAN_SAGA_USER_ID = "humanAccRdSagaUserId"
+
+_HUMAN_RESTRICT = "jwtHumanAccRdRestrict"
+_HUMAN_RESTRICT_STEPUP = "jwtHumanAccRdRestrictStepUp"
+
+# Кейсы, которые аккаунт НЕ заводят (их предмет — синхронный отказ формы запроса),
+# остаются на человеке церемонии: отказанное заведение ничего не списывает, потому
+# что транзакция не доходит до фиксации.
+_HUMAN = "jwtHumanCeremony"
 
 # ---------------------------------------------------------------------------
 # Helpers: IAM Operation envelope (prefix `iop`, gen.py's assert_operation_envelope
@@ -85,9 +115,12 @@ CASES.append(Case(
             # NB: NO ownerUserId in body — owner° is derived from the authenticated caller.
             body={"name": "rdown{{runId}}", "description": "iam-1 owner-derive probe"},
             # Владельцем аккаунта может быть только ПОЛЬЗОВАТЕЛЬ (`owner_user_id` →
-            # `users(id)`), поэтому вызывающий — человек церемонии, а не служебная
-            # учётка матрицы: у неё запрос отвергается первым стейтментом.
-            auth="jwtHumanCeremony",
+            # `users(id)`), поэтому вызывающий — человек, а не служебная учётка
+            # матрицы: у неё запрос отвергается первым стейтментом. Человек — СВОЙ
+            # у этого кейса: заведение списывается с темпа личности, и складывать
+            # заведения разных кейсов в одного человека значит воспроизводить
+            # сценарий, который продукт отвергает.
+            auth=_HUMAN_DERIVE,
             test_script=[
                 *assert_status(200),
                 *assert_iam_op(),
@@ -106,14 +139,15 @@ CASES.append(Case(
             name="get-owner-derived",
             method="GET",
             path="/iam/v1/accounts/{{rdAccId}}",
-            auth="jwtHumanCeremony",
+            auth=_HUMAN_DERIVE,
             test_script=[
                 *assert_status(200),
-                "pm.test('ownerUserId° derived from caller (== the ceremony human)', () => {",
+                "pm.test('ownerUserId° derived from caller (== the human who created it)', () => {",
                 "  const j = pm.response.json();",
-                "  const expected = pm.environment.get('ceremonyUserId');",
+                f"  const expected = pm.environment.get('{_HUMAN_DERIVE_USER_ID}');",
                 # Пустое ожидаемое превратило бы сверку в тождество — проверяем его форму.
-                "  pm.expect(expected, 'ceremonyUserId must be seeded by the ceremony wave').to.be.a('string').and.to.match(/^usr[a-z0-9]+$/);",
+                f"  pm.expect(expected, '{_HUMAN_DERIVE_USER_ID} must be seeded by the ceremony wave')"
+                ".to.be.a('string').and.to.match(/^usr[a-z0-9]+$/);",
                 "  pm.expect(j.ownerUserId, JSON.stringify(j)).to.eql(expected);",
                 "});",
                 *assert_created_at_seconds(),
@@ -121,14 +155,15 @@ CASES.append(Case(
         )),
         # Уборка: сперва дочерний проект (FK RESTRICT), затем аккаунт — тем же
         # `reliable_delete`, каким её делают IAM-ACC-CR-BVA-NAME-MIN/MAX и
-        # IAM-ACC-LSOP-CRUD-OK. Аккаунт занимает слот потолка своей ЛИЧНОСТИ
-        # (`iam.account`, умолчание 5 на внешний идентификатор входа), а вся волна
-        # церемонии идёт под одним человеком: несобранный слот доживает до конца
-        # прогона и отказ достаётся кейсу, который создаёт аккаунт последним.
+        # IAM-ACC-LSOP-CRUD-OK. Аккаунт занимает слот потолка ОБЪЁМА своей личности
+        # (`iam.account`, умолчание 5 на внешний идентификатор входа); несобранный
+        # слот доживает до конца прогона и сужает запас, который считает гейт
+        # `deploy/scripts/assert-identity-account-peak-under-ceiling.py`. Потолок
+        # ТЕМПА уборка не возвращает вовсе — его держит одна личность на кейс.
         *reliable_delete("teardown-rdown-project", "/iam/v1/projects/{{rdDefPrjId}}",
-                         auth=_HUMAN_STEPUP, op_key="rdownPrj"),
+                         auth=_HUMAN_DERIVE_STEPUP, op_key="rdownPrj"),
         *reliable_delete("teardown-rdown-account", "/iam/v1/accounts/{{rdAccId}}",
-                         auth=_HUMAN_STEPUP, op_key="rdownAcc"),
+                         auth=_HUMAN_DERIVE_STEPUP, op_key="rdownAcc"),
     ],
 ))
 
@@ -147,7 +182,7 @@ CASES.append(Case(
             body={"name": "rdatk{{runId}}", "ownerUserId": "usr00000000000000bad"},
             # Вызывающий обязан быть способен создать аккаунт — иначе отказ придёт про
             # род принципала, и кейс останется зелёным даже если проверку поля снимут.
-            auth="jwtHumanCeremony",
+            auth=_HUMAN,
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
@@ -177,7 +212,7 @@ CASES.append(Case(
             # «Своим» это значение стало только теперь: прежде здесь стоял userAAAId при
             # вызывающем-служебной-учётке, то есть кейс никогда не проверял то, что называл.
             body={"name": "rdself{{runId}}", "ownerUserId": "{{ceremonyUserId}}"},
-            auth="jwtHumanCeremony",
+            auth=_HUMAN,
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
@@ -245,7 +280,7 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/accounts",
             body={"name": "rdsaga{{runId}}", "description": "iam-1 saga two-id metadata"},
-            auth="jwtHumanCeremony",
+            auth=_HUMAN_SAGA,
             test_script=[
                 *assert_status(200),
                 *assert_iam_op(),
@@ -264,7 +299,7 @@ CASES.append(Case(
             name="get-default-project",
             method="GET",
             path="/iam/v1/projects/{{sagaDefProjId}}",
-            auth="jwtHumanCeremony",
+            auth=_HUMAN_SAGA,
             test_script=[
                 *assert_status(200),
                 "pm.test('default project name==default', () => pm.expect(pm.response.json().name).to.eql('default'));",
@@ -277,9 +312,9 @@ CASES.append(Case(
             name="list-owner-binding",
             method="GET",
             # Владельческая привязка заводится сагой на СОЗДАТЕЛЯ аккаунта, значит
-            # искать её надо по человеку церемонии, а не по владельцу посеянного acctA.
-            path="/iam/v1/accessBindings?filter=subject%3D%22{{ceremonyUserId}}%22&pageSize=1000",
-            auth="jwtHumanCeremony",
+            # искать её надо по человеку ЭТОГО кейса, а не по владельцу посеянного acctA.
+            path="/iam/v1/accessBindings?filter=subject%3D%22{{" + _HUMAN_SAGA_USER_ID + "}}%22&pageSize=1000",
+            auth=_HUMAN_SAGA,
             retry_predicate="(() => { const j = pm.response.json(); const acc = pm.environment.get('sagaAccId'); "
                             "return !((j.accessBindings)||[]).some(b => b.scopeId === acc); })()",
             test_script=[
@@ -300,9 +335,9 @@ CASES.append(Case(
         # Владельческая привязка снятию не мешает — `Account.Delete` вычищает
         # выдачи аккаунта сам (так же снимаются аккаунты BVA/LSOP).
         *reliable_delete("teardown-saga-project", "/iam/v1/projects/{{sagaDefProjId}}",
-                         auth=_HUMAN_STEPUP, op_key="sagaPrj"),
+                         auth=_HUMAN_SAGA_STEPUP, op_key="sagaPrj"),
         *reliable_delete("teardown-saga-account", "/iam/v1/accounts/{{sagaAccId}}",
-                         auth=_HUMAN_STEPUP, op_key="sagaAcc"),
+                         auth=_HUMAN_SAGA_STEPUP, op_key="sagaAcc"),
     ],
 ))
 
@@ -321,7 +356,7 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/accounts",
             body={"name": "rdrst{{runId}}", "description": "iam-1 delete-restrict probe"},
-            auth="jwtHumanCeremony",
+            auth=_HUMAN_RESTRICT,
             test_script=[
                 *assert_status(200), *assert_iam_op(),
                 *save_from_response("j.id", "opId"),
@@ -341,7 +376,7 @@ CASES.append(Case(
             method="DELETE",
             path="/iam/v1/accounts/{{rstAccId}}",
             # Необратимое удаление → поднятый уровень входа (acr>=2).
-            auth=_HUMAN_STEPUP,
+            auth=_HUMAN_RESTRICT_STEPUP,
             test_script=[
                 *assert_status(200), *assert_iam_op(),
                 *save_from_response("j.id", "opId"),
@@ -351,11 +386,11 @@ CASES.append(Case(
         # Уборка идёт ПОСЛЕ утверждения об отказе и ничего в нём не меняет: отказ
         # уже зафиксирован на непустом аккаунте. Сняв потомка, снимаем и родителя —
         # иначе аккаунт, чьё удаление кейс проверяет, переживает прогон и держит
-        # слот потолка личности, под которой идёт вся волна церемонии.
+        # слот потолка объёма своей личности до конца прогона.
         *reliable_delete("teardown-rst-project", "/iam/v1/projects/{{rstDefPrjId}}",
-                         auth=_HUMAN_STEPUP, op_key="rstPrj"),
+                         auth=_HUMAN_RESTRICT_STEPUP, op_key="rstPrj"),
         *reliable_delete("teardown-rst-account", "/iam/v1/accounts/{{rstAccId}}",
-                         auth=_HUMAN_STEPUP, op_key="rstAcc"),
+                         auth=_HUMAN_RESTRICT_STEPUP, op_key="rstAcc"),
     ],
 ))
 

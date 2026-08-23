@@ -11,8 +11,10 @@
 //     spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>, extracted by SEC-B's
 //     grpcsrv.CertIdentityFromContext) is mapped to a deterministic
 //     ServiceAccount id (`'sva' || substr(md5('kacho-<svc>'),1,17)`).
-//  2. A ReBAC Check `service_account:<sva>#fga_writer@iam_fgaproxy:system` is
-//     issued. ALLOW → the RPC proceeds; DENY → PermissionDenied.
+//  2. A ReBAC Check `service_account:<sva>#fga_writer@cluster:cluster_kacho_root`
+//     is issued. ALLOW → the RPC proceeds; DENY → PermissionDenied. Право
+//     выдаётся системной выдачей на кластере (#914) — оно видно перечислением
+//     выдач и закрывается отзывом.
 //
 // Fail-closed: an unverified peer, a malformed / foreign-trust-domain SAN, an
 // unknown SA, or a denied relation all collapse to PermissionDenied. The
@@ -34,10 +36,22 @@ import (
 )
 
 const (
-	// fgaProxyRelation — ReBAC relation a module SA must hold to use the proxy.
-	fgaProxyRelation = "fga_writer"
-	// fgaProxyObject — the system object the relation is checked against.
-	fgaProxyObject = "iam_fgaproxy:system"
+	// RelationWriteRelation — отношение, которое обязана держать служебная учётка
+	// модуля, чтобы писать кортежи через iam. Экспортировано намеренно: пробы и
+	// перепись обязаны спрашивать ТО ЖЕ имя, которое спрашивает гейт, — имя,
+	// выписанное на стороне пробы, остаётся зелёным, когда гейт спрашивает другое.
+	RelationWriteRelation = "fga_writer"
+	// relationWriteObject — объект, на котором спрашивается право писать
+	// кортежи. Это ПЛАТФОРМЕННЫЙ СИНГЛТОН кластера — тот же, на котором стоят
+	// кластерные выдачи (`clusterRootObject`, system_viewer_floor.go).
+	//
+	// Прежде здесь стоял якорь вне иерархии `cluster → account → project`.
+	// У такого якоря нет ни яруса, ни владельца: право не выражалось выдачей,
+	// не было видно перечислением выдач и не отзывалось (#914, решение 1 в
+	// `services/iam/docs/engineering/architecture/grant-surface-boundaries.md`).
+	// Фактический доступ переезд не расширяет: модуль и прежде писал кортежи по
+	// всему кластеру — честнее стало ОБЪЯВЛЕНИЕ этого права.
+	relationWriteObject = clusterRootObject
 
 	// sanTrustPrefix — the only accepted SPIFFE trust domain (SEC-B extractor
 	// already filters foreign domains; this is a defensive re-check).
@@ -73,10 +87,10 @@ func (g *RelationWriteGate) WithProductionMode(prod bool) *RelationWriteGate {
 }
 
 // Authorize returns nil iff the verified mTLS client-cert resolves to a module
-// ServiceAccount holding `fga_writer` on `iam_fgaproxy:system`. Every other
+// ServiceAccount holding `fga_writer` on `cluster:cluster_kacho_root`. Every other
 // outcome is PermissionDenied (fail-closed). Message text is the fixed,
 // non-leaking `"permission denied"`.
-// Authorize проверяет, что caller — модульная SA с `fga_writer@iam_fgaproxy:system`,
+// Authorize проверяет, что caller — модульная SA с `fga_writer@cluster:cluster_kacho_root`,
 // и возвращает ее домен (vpc/compute/nlb) для object-type binding на write-path.
 // Dev-mode без cert → ("", nil): домен неизвестен, domain-binding в ValidateProxyTuple
 // отключается, но relation-allowlist и forbidden-object-type там действуют всегда.
@@ -100,7 +114,7 @@ func (g *RelationWriteGate) Authorize(ctx context.Context) (string, error) {
 		// ReBAC backend not wired → fail-closed (never silently allow).
 		return "", status.Error(codes.PermissionDenied, "permission denied")
 	}
-	allowed, err := g.checker.Check(ctx, "service_account:"+ServiceAccountIDForService(domain), fgaProxyRelation, fgaProxyObject)
+	allowed, err := g.checker.Check(ctx, "service_account:"+ServiceAccountIDForService(domain), RelationWriteRelation, relationWriteObject)
 	if err != nil {
 		// Backend failure (FGA 5xx / network drop / ErrNotConfigured) is NOT an
 		// authorization decision — it is a transient outage. Surfacing it as

@@ -117,7 +117,13 @@ POLL_CAP = 50
 # Имя вынесено в константу, потому что оно называется здесь в тринадцати местах
 # одного кейса, и разъехавшаяся половина означала бы отказ в правах посреди
 # фикстуры — симптом, неотличимый на вид от продуктового дефекта видимости.
-_HUMAN = "jwtHumanCeremony"
+# ЧЕЛОВЕК У КЕЙСА СВОЙ, А НЕ ОБЩИЙ ЧЕЛОВЕК ЦЕРЕМОНИИ. Кейс ЗАВОДИТ аккаунт, а
+# заведение списывается с темпа личности (#618, умолчание — три в час на внешний
+# идентификатор входа). Восемь заведений волны под одним человеком давали десять
+# списаний при потолке три: отказ был верен, а падало не то место, которое полку
+# исчерпало. Личность слота заводит РОВНО ОДИН аккаунт — свой; её выдаёт волна
+# церемонии по объявлению `ceremony_credentials.ADMISSION_SLOTS`.
+_HUMAN = "jwtHumanRbacVisSet"
 
 # ПОДНЯТЫЙ УРОВЕНЬ ВХОДА — ТОТ ЖЕ ЧЕЛОВЕК, ДРУГОЙ УРОВЕНЬ АУТЕНТИФИКАЦИИ.
 # Часть ручек объявлена чувствительной (`required_acr_min = "2"`): необратимое
@@ -126,7 +132,7 @@ _HUMAN = "jwtHumanCeremony"
 # впервые начал действовать вместе с человеческим вызывающим.
 # Уровень берётся у КАТАЛОГА, а не по догадке: сверка шагов с
 # `gateway/internal/middleware/embed/permission_catalog.json` — часть приёмки этой правки.
-_HUMAN_STEPUP = "jwtHumanCeremonyStepUp"
+_HUMAN_STEPUP = "jwtHumanRbacVisSetStepUp"
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +310,7 @@ def preclean_account_loop(tag, next_step):
     ]
 
 
-def create_suite_account(acc_var, op_var, auth="jwtHumanCeremony", def_prj_var=None):
+def create_suite_account(acc_var, op_var, auth=_HUMAN, def_prj_var=None):
     """Create a FRESH, suite-private account per run so the by-label PROJECT exact-set reads
     an account in which the reading subject (svaInviteeId) is NOT a member.
 

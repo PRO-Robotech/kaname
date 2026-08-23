@@ -1193,7 +1193,7 @@ func (w *abWriter) emitFGAOutbox(ctx context.Context, eventType string, tuples [
 // The event_payload jsonb carries the compliance dimensions (actor / subject /
 // resource / role_id / binding_id) so the "who granted which role to whom on
 // which resource, and when" question is queryable; created_at supplies the
-// "when". The row starts status='pending' for the audit drainer.
+// "when". The row starts status='pending' for the audit shipper (pkg/audit).
 func (w *abWriter) EmitAuditEvent(ctx context.Context, ev access_binding.AuditEvent) error {
 	if ev.EventType == "" {
 		return fmt.Errorf("emit audit_outbox: event_type required")

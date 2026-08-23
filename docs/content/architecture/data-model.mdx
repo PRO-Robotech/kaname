@@ -40,7 +40,7 @@ erDiagram
     <tr><td><code>service_account_oauth_clients</code></td><td>Маппинг SA → Hydra-клиент (ключ)</td><td>UNIQUE <code>sva_id</code>; FK <code>ON DELETE RESTRICT</code></td></tr>
     <tr><td><code>user_oauth_clients</code></td><td>Маппинг User → Hydra-клиент (токен)</td><td>N:1; FK <code>ON DELETE CASCADE</code></td></tr>
     <tr><td><code>operations</code></td><td>LRO-журнал (async-мутации)</td><td>corelib operations-таблица; denormalized <code>account_id</code></td></tr>
-    <tr><td><code>audit_outbox</code></td><td>Audit-журнал мутаций (в одной TX)</td><td>эмитится атомарно с мутацией</td></tr>
+    <tr><td><code>audit_outbox</code></td><td>Audit-журнал мутаций (в одной TX)</td><td>эмитится атомарно с мутацией, вывозится в поток записей службы</td></tr>
     <tr><td><code>fga_outbox</code></td><td>Журнал намерений об отношениях</td><td>триггер журнала складывает из строки прямой факт в той же TX</td></tr>
     <tr><td><code>relation_fact</code></td><td>Проекция журнала: прямые отношения на объектах</td><td>источник прямого факта для вердикта</td></tr>
     <tr><td><code>resource_mirror</code></td><td>Зеркало иерархии ресурсов для authz-реконсиляции</td><td><code>parent_project_id</code> / labels</td></tr>

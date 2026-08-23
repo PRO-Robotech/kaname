@@ -22,6 +22,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/keywrap"
 )
 
 // ResolveHookSharedSecret returns the current shared-secret for Hydra hooks.
@@ -39,12 +41,53 @@ func (c AuthNConfig) ResolveHookSharedSecret() string {
 	return os.Getenv(envName)
 }
 
-// ResolveJWKSEncryptionKey возвращает 32-байтовый ключ ОБЁРТКИ приватной
-// половины подписного ключа, декодированный из hex.
+// JWKSEncryptionKeyEnvName — имя переменной окружения, из которой берётся ключ
+// ОБЁРТКИ приватной половины, когда ручка не задана значением напрямую.
+//
+// Объявлено ОДНИМ местом: имя переменной называют текст отказа резолва, текст
+// отказа старта при смене ключа и сам резолв. Три копии разошлись бы молча — на
+// той, которую забыли поправить, и оператор искал бы не ту переменную.
+func (c AuthNConfig) JWKSEncryptionKeyEnvName() string {
+	if n := strings.TrimSpace(c.JWKSEncryptionKeyHexEnv); n != "" {
+		return n
+	}
+	return "KACHO_IAM_JWKS_ENC_KEY"
+}
+
+// ResolveJWKSEncryptionKeys возвращает ПЕРЕЧЕНЬ ключей ОБЁРТКИ приватной
+// половины подписного ключа, декодированный из hex: ПЕРВЫЙ оборачивает, ВСЕ
+// открывают.
 //
 // Источник: authn.jwks-encryption-key-hex напрямую либо переменная окружения,
 // названная authn.jwks-encryption-key-hex-env (по умолчанию
-// KACHO_IAM_JWKS_ENC_KEY). Ключ обязан быть ровно 32 байта.
+// KACHO_IAM_JWKS_ENC_KEY). Каждая запись обязана быть ровно ключом объявленного
+// размера.
+//
+// # Почему перечень, а не вторая ручка (задача #1065)
+//
+// У ключа обёртки обязан быть путь смены. Одно значение его не даёт вовсе:
+// новое не открывает ни одной уже записанной приватной половины. Перечень даёт
+// смену без простоя и без переписывания хранилища — новый ключ встаёт первым,
+// прежний остаётся для чтения.
+//
+// Второй ручки не заводится по той же причине, по какой её не завели прежде:
+// одна из двух неизбежно оказалась бы необязательной, и профиль развёртывания,
+// задавший «не ту», выглядел бы настроенным. Перечень из одного — сегодняшнее
+// значение всякого профиля, и ни один из них не меняется.
+//
+// # Разделитель и вырожденное значение
+//
+// Читается общим предикатом перечней настройки (ParseCommaList): считаются
+// ЭЛЕМЕНТЫ, а не длина строки. Свой предикат разошёлся бы с общим ровно на
+// вырожденном значении — одинокая запятая даёт длину 1 и ноль элементов, — и
+// служба поднялась бы без ключа обёртки вовсе.
+//
+// # Повтор значения отвергается
+//
+// Повтор означает смену, которой не было: оператор считает ключ сменённым, а
+// обёрнуто и открывается всё тем же. Приняв его молча, мы получили бы число
+// названных ключей, не равное числу ключей, которыми что-то можно открыть, —
+// и печатаемая при старте величина начала бы лгать.
 //
 // # У этой ручки снова есть потребитель — и он ЕДИНСТВЕННЫЙ
 //
@@ -61,26 +104,40 @@ func (c AuthNConfig) ResolveHookSharedSecret() string {
 // Имя ручки НЕ переименовано осознанно: переименование стоило бы правки каждого
 // профиля развёртывания и дало бы окно, в котором старое имя молча
 // игнорируется. Сменился смысл, и он записан здесь.
-func (c AuthNConfig) ResolveJWKSEncryptionKey() ([]byte, error) {
+func (c AuthNConfig) ResolveJWKSEncryptionKeys() ([][]byte, error) {
 	raw := c.JWKSEncryptionKeyHex
 	if raw == "" {
-		envName := c.JWKSEncryptionKeyHexEnv
-		if envName == "" {
-			envName = "KACHO_IAM_JWKS_ENC_KEY"
+		raw = os.Getenv(c.JWKSEncryptionKeyEnvName())
+	}
+	entries := ParseCommaList(raw)
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("authn.jwks-encryption-key-hex is empty (set ENV %s)", c.JWKSEncryptionKeyEnvName())
+	}
+	// Размер ключа берётся у обёртки, а не из своей копии: два числа об одном
+	// предмете разошлись бы так, что страж пропускал бы то, чем обернуть нельзя.
+	keys := make([][]byte, 0, len(entries))
+	seen := make(map[string]int, len(entries))
+	for i, entry := range entries {
+		key, err := hex.DecodeString(entry)
+		if err != nil {
+			return nil, fmt.Errorf("authn.jwks-encryption-key-hex: entry #%d of %d: invalid hex: %w",
+				i+1, len(entries), err)
 		}
-		raw = os.Getenv(envName)
+		if len(key) != keywrap.KeySize {
+			return nil, fmt.Errorf("authn.jwks-encryption-key-hex: entry #%d of %d must decode to %d bytes (got %d)",
+				i+1, len(entries), keywrap.KeySize, len(key))
+		}
+		// Значение НЕ попадает в текст отказа ни при каком исходе — оператору
+		// называется позиция, предъявителю не называется ничего.
+		if first, dup := seen[string(key)]; dup {
+			return nil, fmt.Errorf(
+				"authn.jwks-encryption-key-hex: entry #%d of %d repeats entry #%d — a repeated wrapping key is a change that did not happen",
+				i+1, len(entries), first)
+		}
+		seen[string(key)] = i + 1
+		keys = append(keys, key)
 	}
-	if raw == "" {
-		return nil, fmt.Errorf("authn.jwks-encryption-key-hex is empty (set ENV KACHO_IAM_JWKS_ENC_KEY)")
-	}
-	key, err := hex.DecodeString(raw)
-	if err != nil {
-		return nil, fmt.Errorf("authn.jwks-encryption-key-hex: invalid hex: %w", err)
-	}
-	if len(key) != 32 {
-		return nil, fmt.Errorf("authn.jwks-encryption-key-hex: must decode to 32 bytes (got %d)", len(key))
-	}
-	return key, nil
+	return keys, nil
 }
 
 // ResolveDomain returns the public Kachō domain. Default `api.kacho.cloud`.

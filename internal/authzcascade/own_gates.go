@@ -53,6 +53,11 @@ type Asker interface {
 	// DirectRelations — какие отношения субъект уже держит на объекте (текст отказа).
 	DirectRelations(ctx context.Context, subject, objectType, objectID string,
 		limit int) ([]string, error)
+	// DirectRelationsMany — то же о СТРАНИЦЕ объектов одного типа, одним вопросом:
+	// хвост текста отказа платится на каждом отказанном объекте, а страница
+	// списка отказами и состоит.
+	DirectRelationsMany(ctx context.Context, subject, objectType string, objectIDs []string,
+		limit int) (map[string][]string, error)
 }
 
 // Client — дверь решения поверх формы.
@@ -232,6 +237,20 @@ func (c *Client) DirectRelations(
 		return nil, ErrFormNotWired
 	}
 	return c.form.DirectRelations(ctx, subject, objectType, objectID, limit)
+}
+
+// DirectRelationsMany — те же прямые отношения о СТРАНИЦЕ объектов одного типа.
+//
+// Дверь остаётся переходником: она не собирает страницу из одиночных ответов, а
+// передаёт вопрос форме целиком. Собирать её здесь значило бы завести второе
+// место, знающее, во что обходится страница, — и оно бы разошлось с формой молча.
+func (c *Client) DirectRelationsMany(
+	ctx context.Context, subject, objectType string, objectIDs []string, limit int,
+) (map[string][]string, error) {
+	if c == nil || c.form == nil {
+		return nil, ErrFormNotWired
+	}
+	return c.form.DirectRelationsMany(ctx, subject, objectType, objectIDs, limit)
 }
 
 // Compile-time guards: дверь обязана быть подставима на каждом порту, который

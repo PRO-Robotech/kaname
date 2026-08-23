@@ -110,11 +110,21 @@ func TestMigration0010_SECL_Idempotent_DownReverts(t *testing.T) {
 			    AND payload->>'user'     = `+operatorSysViewerSubjectSQL, eventType).Scan(&c))
 		return c
 	}
+	// Считаются РАЗНЫЕ СУБЪЕКТЫ намерения ВЫДАЧИ, а не строки журнала.
+	//
+	// Утверждение здесь одно: посев 0009/0044/0057 никакой поздней миграцией не
+	// отредактирован (ban #5). Журнал при этом append-only, и по одному ключу
+	// кортежа в нём законно лежит НЕСКОЛЬКО строк: выдача, отзыв, восстановление
+	// на откате. Счёт строк без события смешал бы их в одно число — тот же
+	// промах, который соседнее утверждение об операторе уже называет вслух
+	// («счёт без event_type не отличил бы одно от другого»), — и покраснел бы от
+	// переезда права на кластер (#914), к посеву 0009 отношения не имеющего.
 	fgaWriterCount := func() int {
 		var c int
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT count(*) FROM kacho_iam.fga_outbox
-			  WHERE payload->>'relation' = 'fga_writer'
+			`SELECT count(DISTINCT payload->>'user') FROM kacho_iam.fga_outbox
+			  WHERE event_type = 'fga.tuple.write'
+			    AND payload->>'relation' = 'fga_writer'
 			    AND payload->>'object'   = 'iam_fgaproxy:system'`).Scan(&c))
 		return c
 	}
