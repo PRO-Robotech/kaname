@@ -66,10 +66,12 @@ const gatewayServiceName = "api-gateway"
 //     service→service RPCs.
 //   - InternalSessionRevocationsService/IsRevoked — заведено под собственный
 //     запрос края, идущий до того, как может пойти пер-пользовательская
-//     проверка (курица и яйцо). ВНИМАНИЕ: этого вызывающего в дереве СЕГОДНЯ
-//     НЕТ (#797) — у края нет метода чтения в клиенте. То есть послаблению
-//     нечего исключать; оно оставлено до решения по #797, а не потому, что
-//     предмет есть. Исчезнет метод — снимать и эту строку.
+//     проверка (курица и яйцо). ПРЕДМЕТ У ПОСЛАБЛЕНИЯ ЕСТЬ: клиент края
+//     экспонирует `IsSessionRevoked`, и он провязан в слой аутентификации
+//     (`middleware.NewLocalThenProviderRevocation`, #1122) — то есть край
+//     спрашивает эту полосу на каждом предъявлении удостоверения. Здесь стояло
+//     «этого вызывающего в дереве СЕГОДНЯ НЕТ (#797)»: утверждение пережило
+//     свой предмет (#1156). Исчезнет метод у края — снимать и эту строку.
 //   - InternalUserService/Get — service→service lookup.
 //   - Hydra hook callbacks are not in this set and cannot be: they are served
 //     over HTTP by internal/handler/iamhooks, not as gRPC methods. The gRPC
