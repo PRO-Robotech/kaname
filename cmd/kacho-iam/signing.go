@@ -47,15 +47,26 @@ func buildTokenSigning(
 	}
 
 	// Ключ обёртки приватной половины — та же ручка, что требует страж старта.
-	// Второй ручки об этом предмете в дереве нет.
-	wrapKey, err := cfg.AuthN.ResolveJWKSEncryptionKey()
+	// Второй ручки об этом предмете в дереве нет; ручка принимает ПЕРЕЧЕНЬ —
+	// первый ключ оборачивает, все открывают (задача #1065), поэтому смена
+	// ключа не требует ни простоя, ни переписывания хранилища.
+	wrapKeys, err := cfg.AuthN.ResolveJWKSEncryptionKeys()
 	if err != nil {
 		return nil, nil, fmt.Errorf("ключ обёртки приватной половины: %w", err)
 	}
-	wrapper, err := keywrap.New(wrapKey)
+	wrapper, err := keywrap.New(wrapKeys...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("обёртка приватной половины: %w", err)
 	}
+	// Число названных ключей печатается ВСЕГДА, включая единицу: перечень
+	// растёт с каждой сменой и сам не убывает, а «названо шесть ключей» иначе
+	// невидимо ниоткуда — то есть работу по выводу прежних некому начать. Оно
+	// же и первое, что нужно оператору, если старт откажет на нечитаемом
+	// наборе: перечень мог приехать без прежнего ключа.
+	logger.Info("private-half wrapping keys declared",
+		slog.Int("keys", wrapper.KeyCount()),
+		slog.String("knob", "authn.jwks-encryption-key-hex"),
+		slog.String("env", cfg.AuthN.JWKSEncryptionKeyEnvName()))
 
 	alg, err := domain.ParseSigningAlgorithm(ts.Algorithm)
 	if err != nil {

@@ -40,7 +40,7 @@ func TestF1_09_WrappingKeyGuardRefusesAndAdmits(t *testing.T) {
 		"длиннее нормы": goodHex + "00",
 	} {
 		cfg := AuthNConfig{JWKSEncryptionKeyHex: val, JWKSEncryptionKeyHexEnv: "KACHO_IAM_JWKS_ENC_KEY_ABSENT_FOR_TEST"}
-		_, err := cfg.ResolveJWKSEncryptionKey()
+		_, err := cfg.ResolveJWKSEncryptionKeys()
 		if err == nil {
 			t.Fatalf("%s: негодная ручка принята — старт обязан отвергаться", name)
 		}
@@ -57,11 +57,14 @@ func TestF1_09_WrappingKeyGuardRefusesAndAdmits(t *testing.T) {
 	// Положительный контроль — с годной по длине ручкой резолв проходит. Без
 	// него отрицания выше зелены на страже, не пускающем никого.
 	cfg := AuthNConfig{JWKSEncryptionKeyHex: goodHex}
-	key, err := cfg.ResolveJWKSEncryptionKey()
+	keys, err := cfg.ResolveJWKSEncryptionKeys()
 	if err != nil {
 		t.Fatalf("годная ручка отвергнута: %v", err)
 	}
-	if len(key) != keywrap.KeySize {
-		t.Fatalf("резолв вернул %d байт вместо %d", len(key), keywrap.KeySize)
+	if len(keys) != 1 {
+		t.Fatalf("одиночная ручка дала %d ключей вместо одного", len(keys))
+	}
+	if len(keys[0]) != keywrap.KeySize {
+		t.Fatalf("резолв вернул %d байт вместо %d", len(keys[0]), keywrap.KeySize)
 	}
 }
