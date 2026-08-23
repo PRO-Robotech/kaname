@@ -81,6 +81,18 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// действие администратора одно и то же — назначить величину, — а какую
 		// именно, говорит текст производителя, который доезжает дословно.
 		return iamerr.Wrapf(iamerr.ErrQuotaNotProvisioned, "%s", pgErr.Message)
+	case "23000": // integrity_constraint_violation — поднято ЯВНО триггером схемы
+		// Единственный производитель в дереве — отложенный триггер
+		// `membership_carrying_rights_is_kept` (миграция 472002): членство,
+		// несущее живую выдачу в своём аккаунте, снять нельзя. Предикат:
+		// `git grep -n integrity_constraint_violation -- '*.sql'` → одно попадание.
+		//
+		// Класс отображается в FAILED_PRECONDITION целиком, а не одной этой
+		// связью: `integrity_constraint_violation` по определению есть
+		// «состояние ресурса не позволяет», а не поломка сервиса. Текст при этом
+		// берётся НЕ из сообщения сервера — оно диагностика хранилища, — а из
+		// таблицы связей ниже, и незнакомая связь получает общий текст без утечки.
+		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "%s", integrityText(pgErr, kindHint, idHint))
 	case "23505": // unique_violation
 		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "%s", uniqueText(pgErr, kindHint, idHint))
 	case "23503": // foreign_key_violation
@@ -297,6 +309,25 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	// Unmapped FK — generic text; never leak pgErr.Detail/Message (they embed
 	// the referenced table/column/value → schema reconnaissance).
 	return "referenced resource not found or still in use"
+}
+
+// integrityText — client-facing текст для 23000 (integrity_constraint_violation),
+// поднятого явным RAISE триггера схемы.
+//
+// Подсказка приходит из `writeTx.Commit`: отложенный триггер срабатывает НА
+// КОММИТЕ, и назвать человека с аккаунтом можно только тем, что писатель оставил
+// в подсказке (`userWriter.RemoveMembership`).
+func integrityText(pgErr *pgconn.PgError, kindHint, idHint string) string {
+	if pgErr.ConstraintName == "membership_carrying_rights_is_kept" || kindHint == "Membership.Remove" {
+		user, account, _ := splitBindingHint(idHint)
+		if user != "" && account != "" {
+			return fmt.Sprintf("User %s still has active access bindings in Account %s and cannot be removed from it", user, account)
+		}
+		return "user still has active access bindings in this account and cannot be removed from it"
+	}
+	// Незнакомая связь — общий текст; сообщение сервера НИКОГДА не эхается
+	// (в нём имя ограничения и значения → разведка схемы).
+	return "resource state does not permit this operation"
 }
 
 func checkText(pgErr *pgconn.PgError) string {

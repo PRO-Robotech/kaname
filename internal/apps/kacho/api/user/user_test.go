@@ -621,3 +621,15 @@ func (_ fakeURdr) Visibility() visibility.ReaderIface { return nil }
 // «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
 // ненаречённое.
 func (r *fakeUWtr) Visibility() visibility.ReaderIface { return nil }
+
+// MembershipExists — дублёр не отвечает на вопрос о членстве: предмет этих проб
+// другой, и подставной ответ был бы утверждением, которого никто не делал.
+func (fakeUserUR) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
+	return false, nil
+}
+
+// RemoveMembership — дублёр исключения из аккаунта не делает: снятие членства
+// проверяется своими пробами (#1127).
+func (*fakeUserUW) RemoveMembership(context.Context, domain.UserID, domain.AccountID) (bool, error) {
+	return false, nil
+}

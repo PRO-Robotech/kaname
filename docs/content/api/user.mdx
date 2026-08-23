@@ -59,15 +59,33 @@ email.
   <tbody>
     <tr><td><code>PENDING</code></td><td>Приглашён, ещё ни разу не входил (<code>externalId</code> пуст)</td></tr>
     <tr><td><code>ACTIVE</code></td><td>Вошёл через Kratos, <code>externalId</code> заполнен</td></tr>
-    <tr><td><code>BLOCKED</code></td><td>Доступ отключён администратором</td></tr>
+    <tr><td><code>BLOCKED</code></td><td>Вход на платформу запрещён администратором облака — во всех аккаунтах человека сразу</td></tr>
   </tbody>
 </table>
 
 ## Методы
 
-`UserService` — чтение (`Get`/`List`), приглашение (`Invite`), обновление меток (`Update`),
-удаление (`Delete`) и журнал операций. Классического `Create` нет — пользователи появляются
-только через `Invite`.
+`UserService` — чтение (`Get`/`List`), приглашение (`Invite`), исключение из аккаунта
+(`RemoveFromAccount`), обновление меток (`Update`), удаление личности (`Delete`) и журнал
+операций. Классического `Create` нет — пользователи появляются только через `Invite`.
+
+:::info Что чьё
+
+Человек — **глобальная личность**: одна строка на все его аккаунты. Отсюда разные адресаты
+у похожих на вид действий:
+
+| действие | чьё | что затрагивает |
+|---|---|---|
+| `Invite` / `RemoveFromAccount` | **аккаунта** (`editor` / `member_remover`) | участие человека в **этом** аккаунте |
+| `Update` (метки) | **облака** (`record_writer`) | запись личности — во всех её аккаунтах |
+| `Block` / `Unblock` | **облака** (`identity_suspender`) | вход на платформу целиком |
+| `Delete` | **самого человека либо облака** (`identity_remover`) | личность целиком, необратимо |
+
+Распорядителю аккаунта остаётся то, что названо первой строкой, плюс выдача и отзыв прав
+(`AccessBinding`). Вывести человека **у себя** — это `RemoveFromAccount`, а не `Block` и не
+`Delete`.
+
+:::
 
 ### Get — получить пользователя
 
@@ -161,11 +179,33 @@ account/project). Identity-поля (`externalId` и прочие, проеци�
 
 </ApiOperation>
 
-### Delete — удалить пользователя
+### RemoveFromAccount — исключить человека из аккаунта
+
+<ApiOperation method="POST" endpoint="/iam/v1/users/{user_id}:removeFromAccount" async>
+
+Снимает **участие** человека в названном аккаунте. Личность не затрагивается: в остальных
+своих аккаунтах человек продолжает работать с той же записью — тот же `id`, та же почта, то
+же состояние, те же метки.
+
+Требует `member_remover` на **аккаунте** — по определению тот же круг, что у `Invite`.
+Тело обязано называть `accountId`: членство есть пара, и вывести вторую половину из первой
+нельзя. Асинхронно.
+
+Идемпотентно: исключение того, кого в аккаунте нет, проходит.
+
+**Сперва снимите права.** Пока у человека в этом аккаунте есть действующая привязка,
+исключение отвергается `FAILED_PRECONDITION` — это ограничение базы, а не порядок вызовов.
+
+</ApiOperation>
+
+### Delete — удалить личность
 
 <ApiOperation method="DELETE" endpoint="/iam/v1/users/{user_id}" async>
 
-Удаляет пользователя. Требует `v_delete`. Асинхронно.
+Стирает **строку личности**, а значит человека во всех его аккаунтах сразу. Требует
+`identity_remover`: это сам человек (самоудаление) либо администратор облака. Распорядителю
+аккаунта здесь приходит `PERMISSION_DENIED` — ему служит `RemoveFromAccount` выше.
+Асинхронно.
 
 </ApiOperation>
 
@@ -186,6 +226,9 @@ account/project). Identity-поля (`externalId` и прочие, проеци�
     <tr><td>Identity-поле в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"&lt;field&gt; is immutable after User.Create"</code></td></tr>
     <tr><td>Invite без <code>editor</code> на аккаунте</td><td><code>PERMISSION_DENIED</code></td><td>Приглашать может только editor/admin аккаунта</td></tr>
     <tr><td>List без <code>accountId</code> (обычный пользователь)</td><td><code>INVALID_ARGUMENT</code></td><td>Scope-фильтр требует аккаунт</td></tr>
+    <tr><td><code>Delete</code> чужой личности распорядителем аккаунта</td><td><code>PERMISSION_DENIED</code></td><td>Строка личности глобальна; используйте <code>RemoveFromAccount</code></td></tr>
+    <tr><td><code>RemoveFromAccount</code>, пока у человека есть права в этом аккаунте</td><td><code>FAILED_PRECONDITION</code></td><td><code>"User &lt;id&gt; still has active access bindings in Account &lt;id&gt; and cannot be removed from it"</code></td></tr>
+    <tr><td><code>RemoveFromAccount</code> в чужой аккаунт</td><td><code>PERMISSION_DENIED</code></td><td>Область решения — названный аккаунт</td></tr>
   </tbody>
 </table>
 
