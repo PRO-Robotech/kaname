@@ -924,6 +924,12 @@ def poll_operation_until_done(auth: str = AUTH_INHERIT_OP, required: bool = True
     )
 
 
+# Текст утверждения о снятии — ОДИН ИСТОЧНИК. Его же читает страж класса
+# `audit_gone_principal`; выписанная там копия разошлась бы с этой молча, и страж
+# перестал бы опознавать шаги, продолжая печатать «чисто».
+_GONE_ASSERT_SUFFIX = ": gone after delete — 404 or 403"
+
+
 def get_until_gone(path: str, label: str, auth: str = "jwtAccountAdminA") -> Step:
     """Reusable get-after-delete step: poll the GET until the resource is GONE.
 
@@ -970,7 +976,7 @@ def get_until_gone(path: str, label: str, auth: str = "jwtAccountAdminA") -> Ste
             "}",
             "pm.environment.unset('_goneCount');",
             "pm.environment.unset('_goneStarted');",
-            f"pm.test({json.dumps(f'{label}: gone after delete — 404 or 403')}, () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));",
+            f"pm.test({json.dumps(label + _GONE_ASSERT_SUFFIX)}, () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([404, 403]));",
         ],
     )
 
@@ -2387,6 +2393,138 @@ def assert_phantom_drop(collections_dir: Path, out=sys.stderr) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# СТРАЖ КЛАССА: «ресурса нет» под предъявителем, который его НЕ ВИДЕЛ
+# ---------------------------------------------------------------------------
+#
+# ЧТО ЗАПРЕЩАЕТСЯ. Пообъектные чтения `/Get` в iam СКРЫВАЮТ СУЩЕСТВОВАНИЕ:
+# отказ в доступе отдаётся не как 403, а как `404 "<Resource> <id> not found"`,
+# байт-в-байт равный настоящему промаху владельца (край:
+# `CatalogEntry.HidesExistenceOnDeny` — `/Get` + `v_get` + пообъектная область;
+# текст сверен с текстом владельца, иначе получился бы оракул существования).
+#
+# Следствие для пробы: шаг «ресурс исчез после удаления», заданный
+# предъявителю, у которого доступа к ЭТОМУ объекту не было НИКОГДА, получает
+# 404 и на ЖИВОМ объекте. Утверждение зеленеет независимо от того, сработало
+# удаление или нет — форма проверки есть, содержания нет. Хуже отсутствующего
+# кейса: слот занят, вердикт зелёный, уверенность ложная.
+#
+# ЧТО ТРЕБУЕТСЯ. Предъявитель шага «ушёл» обязан быть тем, кто РАНЬШЕ В ТОМ ЖЕ
+# КЕЙСЕ получил 200 на ТОМ ЖЕ адресе. Тогда 404 после снятия отличим от 404 по
+# скрытию существования: между двумя ответами менялось только состояние
+# продукта, а не субъект.
+#
+# Две законные формы «видел», обе принимаются:
+#   — чтение с 200 (сильнейшая: тот же глагол, что и после снятия);
+#   — успешная мутация с 200 на том же адресе — удаление, отвергнутое авторизацией,
+#     вернуло бы 403/404 и не дошло бы до конверта операции, поэтому 200 на нём
+#     доказывает, что объект для этого предъявителя резолвился.
+# `oneOf([200, 404])` формой «видел» НЕ является и не принимается by construction:
+# такое утверждение проходит и на невидимом объекте.
+#
+# ПОЧЕМУ СТРАЖ ЖИВЁТ В ГЕНЕРАЦИИ, А НЕ В ОТДЕЛЬНОЙ ПРОБЕ. Генерация предшествует
+# КАЖДОМУ прогону, значит мимо неё пройти нельзя (тот же довод, что у
+# `assert_phantom_drop`). Отказ роняет генерацию: коллекция с вакуумным
+# утверждением о снятии в прогон не попадает.
+#
+# Способность стража краснеть и молчать доказана инъекцией в обе стороны —
+# `scripts/gone_principal_test.py`.
+
+
+# Маркер выводится ИЗ ТОГО ЖЕ текста, что печатает helper, и в ТОЙ ЖЕ кодировке, в
+# какой он попадает в коллекцию: `json.dumps` по умолчанию экранирует не-ASCII, поэтому
+# тире уезжает в `\u2014`, и дословная копия строки в коде стража не нашла бы НИ ОДНОГО
+# шага. Первая редакция стража так и сделала — и его собственная проверка предпосылки
+# («опознано 0 утверждений») это поймала. Здесь копии нет by construction.
+_GONE_MARK = json.dumps(_GONE_ASSERT_SUFFIX)[1:-1]
+
+# Утверждение, ТРЕБУЮЩЕЕ ровно 200. `oneOf([...])` сюда не подходит намеренно:
+# допуск, включающий 404, проходит и на объекте, которого предъявитель не видит.
+_ASSERTS_200 = re.compile(r"to\.eql\(200\)|to\.equal\(200\)|to\.have\.status\(200\)")
+
+_STEP_AUTH = re.compile(r"// per-step auth: bearer from env '([^']+)'")
+
+
+def _step_principal(item: Dict) -> str:
+    """Имя бэрера шага так, как его видит newman: env-переменная либо anonymous."""
+    code = ""
+    for ev in item.get("event", []) or []:
+        if ev.get("listen") == "prerequest":
+            code = "\n".join(ev["script"]["exec"])
+            break
+    m = _STEP_AUTH.search(code)
+    if m:
+        return m.group(1)
+    if "per-step auth: anonymous step" in code:
+        return "anonymous"
+    return "<collection-default>"
+
+
+def audit_gone_principal(collections_dir: Path) -> Dict:
+    """Перепись + находки класса «утверждение о снятии под предъявителем без доступа».
+
+    Ничего не печатает: решение и печать — за вызывающим (как у audit_phantom_drop).
+    """
+    findings: List[str] = []
+    census = {"collections": 0, "folders": 0, "steps": 0, "gone_steps": 0, "with_witness": 0}
+    for path in sorted(collections_dir.glob("*.json")):
+        col = json.loads(path.read_text())
+        census["collections"] += 1
+        for folder in col.get("item", []) or []:
+            if "item" not in folder:
+                continue
+            census["folders"] += 1
+            steps = _leaf_steps(folder)
+            census["steps"] += len(steps)
+            for i, st in enumerate(steps):
+                if _GONE_MARK not in _test_code(st):
+                    continue
+                census["gone_steps"] += 1
+                url, who = _url_raw(st), _step_principal(st)
+                witnesses = [
+                    prev["name"] for prev in steps[:i]
+                    if _url_raw(prev) == url
+                    and _step_principal(prev) == who
+                    and _ASSERTS_200.search(_test_code(prev))
+                ]
+                if witnesses:
+                    census["with_witness"] += 1
+                else:
+                    findings.append(f"{path.name} :: {st['name']} — предъявитель "
+                                    f"{who} нигде раньше в этом кейсе не получил 200 на {url}")
+    return {"census": census, "findings": findings}
+
+
+def assert_gone_principal(collections_dir: Path, out=sys.stderr) -> int:
+    """Печатает перепись и находки; 0 — чисто, 1 — есть находки либо ПРЕДПОСЫЛКА ЛОЖНА."""
+    res = audit_gone_principal(collections_dir)
+    c, f = res["census"], res["findings"]
+    print(f"[gone-principal] осмотрено: коллекций {c['collections']}, папок {c['folders']}, "
+          f"шагов {c['steps']}; утверждений о снятии {c['gone_steps']}, "
+          f"из них с доказанным доступом до снятия {c['with_witness']}", file=out)
+    if c["collections"] == 0 or c["steps"] == 0:
+        print("[gone-principal] FAIL — нечего было читать: ноль находок здесь означает "
+              "ноль прочитанного, а не чистоту.", file=out)
+        return 1
+    if c["gone_steps"] == 0:
+        print("[gone-principal] FAIL — ПРЕДПОСЫЛКА СТРАЖА ЛОЖНА: ни один шаг не опознан как "
+              "утверждение о снятии. Либо утверждений больше нет вовсе, либо изменился их "
+              "текст — и тогда страж молчит не потому, что чисто. Сверь `_GONE_MARK` с "
+              "`get_until_gone`.", file=out)
+        return 1
+    if f:
+        print(f"[gone-principal] FAIL — {len(f)} утверждени(е/я) о снятии заданы предъявителю, "
+              f"который этого объекта НЕ ВИДЕЛ (скрытие существования отдаёт ему 404 и на "
+              f"живом объекте, поэтому упасть они не могут):", file=out)
+        for name in f[:40]:
+            print(f"    {name}", file=out)
+        if len(f) > 40:
+            print(f"    … ещё {len(f) - 40}", file=out)
+        return 1
+    print("[gone-principal] OK", file=out)
+    return 0
+
+
 def reliable_delete(name: str, path: str, auth: str = "jwtAccountAdminA",
                     op_key: Optional[str] = None,
                     terminal_codes=(200, 404),
@@ -2573,6 +2711,10 @@ def main(argv: List[str]) -> int:
     # это единственное место, мимо которого нельзя пройти. Отказ роняет генерацию —
     # коллекция с непокрытым классом не должна попадать в прогон.
     if assert_phantom_drop(OUT_DIR) != 0:
+        rc = 1
+    # Тот же довод, что у стража выше: генерация предшествует каждому прогону, поэтому
+    # вакуумное утверждение о снятии не доедет до прогона незамеченным.
+    if assert_gone_principal(OUT_DIR) != 0:
         rc = 1
     return rc
 
