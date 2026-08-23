@@ -120,7 +120,16 @@ func (u *ListSubjectPrivilegesUseCase) Execute(ctx context.Context, subjectType 
 			// super-gate. Everyone else is refused with the SAME answer they would
 			// get for a subject in a foreign account — that identity of answers is
 			// what closes the oracle.
-			authorized = authzguard.IsClusterAdmin(ctx, u.relations)
+			//
+			// E-форма обязательна: за этой ветвью НЕТ пообъектной полосы, которая
+			// сообщила бы о неполадке сама. Проглоченный отказ хранилища прав стал
+			// бы здесь отказом В ПРАВАХ — то есть тем же ответом, что и настоящий
+			// deny, и вызывающий не узнал бы, что повтор осмыслен.
+			ok, aerr := authzguard.IsClusterAdminE(ctx, u.relations)
+			if aerr != nil {
+				return nil, "", authzguard.AuthzBackendUnavailable()
+			}
+			authorized = ok
 		}
 		if !authorized {
 			return nil, "", authzguard.PermissionDenied()
