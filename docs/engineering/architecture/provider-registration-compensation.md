@@ -8,10 +8,15 @@
 
 | Сага | Точка захвата | Что коммитится после |
 |---|---|---|
-| `SAKeyService.Issue` (private_key_jwt) | `CreateOAuthClient` | `service_account_oauth_clients` |
+| `SAKeyService.Issue` (private_key_jwt) | `CreateOAuthClient` — **только на непереведённом контуре**, см. ниже | `service_account_oauth_clients` |
 | `SAKeyService.Issue` (federated) | `CreateOAuthClient` + trust-grant'ы | то же |
 | `UserTokenService.Issue` | `CreateOAuthClient` | `user_oauth_clients` |
 | `InternalInteractiveClientService.Create` | `provider.Register` | `interactive_clients` |
+
+> **Первая строка условна с задачи #1120.** Контур, у которого объявлен свой
+> токен-эндпоинт, зеркала у провайдера не заводит вовсе — значит захватывать
+> нечего, и компенсирующее намерение не эмитируется. Остальные три саги окна не
+> теряли. Разбор — `sa-key-issuance-leaves-the-provider.md`.
 
 Между «создано у провайдера» и «закоммичено у нас» есть окно. Провал коммита в
 нём означает объект у **чужого** владельца, о котором в нашей БД нет ни одной

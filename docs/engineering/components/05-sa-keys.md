@@ -42,7 +42,10 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 
 **Ограничения:**
 
-- Только Hydra-backed (production без Hydra → Issue падает Unavailable).
+- Обмен ключа идёт **у одного издателя**, и какого — решает посадка: на
+  переведённом контуре наш `POST /iam/v1/token`, иначе прежний (и тогда без
+  него `Issue` падает `Unavailable`). Федеративный ключ остаётся у прежнего —
+  см. врезку ниже.
 - `private_key_pem` не восстановим после первого ответа (no "show key again").
 - `enabled=false` SA → Issue блокируется (снять состояние — действием
   `ServiceAccountService.Disable`/`Enable`, см. [`04-service-account.md`](04-service-account.md)).
@@ -54,7 +57,7 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 |-----------------------|----------------------|--------------|-----------|-------------------------------------------|
 | `id`                  | TEXT (`soc_...`)     | да           | да        | id записи (не Hydra-client-id).           |
 | `sva_id`              | `ServiceAccountID`   | да           | да        | FK → `service_accounts(id)`.              |
-| `hydra_client_id`     | TEXT                 | да           | да        | client_id в Hydra. UNIQUE.                |
+| `hydra_client_id`     | TEXT                 | да           | да        | имя, которым клиент себя называет. UNIQUE. См. врезку ниже. |
 | `description`         | TEXT                 | нет          | —         | Free-form, ≤256 chars.                    |
 | `created_by_user_id`  | TEXT                 | да           | да        | Admin, выпустивший ключ (audit).          |
 | `created_at`          | TIMESTAMPTZ          | да (server)  | да        | UTC.                                      |
@@ -63,8 +66,16 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 | `public_key_pem`      | TEXT (SPKI PEM)      | да           | да        | SPKI ECDSA P-256 public key.              |
 | `key_algorithm`       | TEXT                 | да           | да        | `ES256` (`RS256`/`EdDSA` future).         |
 
-**ID prefix:** `soc` (запись в БД, формат `soc_[crockford-17]`); Hydra сам
-генерирует `hydra_client_id`.
+**ID prefix:** `soc` (запись в БД, формат `soc_[crockford-17]`).
+
+> **Кто назначает `hydra_client_id` — зависит от посадки (задача #1120).**
+> Пока контур не переведён на свою чеканку, имя назначает прежний издатель, и
+> колонка несёт его зеркало. На переведённом контуре (объявлен токен-эндпоинт
+> платформы, `authn.client-token.enabled`) зеркала у него **не заводится вовсе**,
+> имя назначаем мы, и оно совпадает с `id` записи — то есть в ответе выдачи
+> `clientId` равен `keyId`. Разбор, граница федеративной полосы и окно двух
+> издателей числом —
+> [`../architecture/sa-key-issuance-leaves-the-provider.md`](../architecture/sa-key-issuance-leaves-the-provider.md).
 
 **DB table:** `kacho_iam.service_account_oauth_clients` (squashed baseline
 `internal/migrations/0001_initial.sql`).
@@ -118,8 +129,12 @@ sequenceDiagram
         IAM-->>GW: FailedPrecondition "ServiceAccount <id> is disabled and cannot be issued a key"
     end
     IAM->>IAM: ecdsa.GenerateKey(P-256) → {priv_pem, pub_pem, jwk(kid=soc_…)}
-    IAM->>Hydra: POST /admin/clients<br/>{grant_types:["client_credentials"],<br/> token_endpoint_auth_method:"private_key_jwt",<br/> jwks:{keys:[pub_jwk]}, scope, audience}
-    Hydra-->>IAM: 201 {client_id}  (NO client_secret)
+    alt контур переведён на свою чеканку (#1120)
+        IAM->>IAM: имя клиента := id записи; к прежнему издателю обращения нет
+    else контур не переведён
+        IAM->>Hydra: POST /admin/clients<br/>{grant_types:["client_credentials"],<br/> token_endpoint_auth_method:"private_key_jwt",<br/> jwks:{keys:[pub_jwk]}, scope, audience}
+        Hydra-->>IAM: 201 {client_id}  (NO client_secret)
+    end
     IAM->>DB: BEGIN
     IAM->>DB: INSERT service_account_oauth_clients<br/>(soc_id, sva_id, hydra_client_id, public_key_pem, key_algorithm)
     IAM->>DB: COMMIT

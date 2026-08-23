@@ -2,17 +2,22 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 // Package sa_keys — SAKeyService use-cases (Class A static SA-keys via
-// Hydra OAuth2 client_credentials + private_key_jwt).
+// OAuth2 client_credentials + private_key_jwt).
 //
 // On Issue (private_key_jwt mode):
 //
 //  1. Generate an ECDSA P-256 keypair locally; the private half NEVER
 //     leaves kacho-iam's response and is NEVER stored in DB.
-//  2. Register an OAuth2 client with Hydra Admin with
-//     `token_endpoint_auth_method=private_key_jwt`,
+//  2. Name the client. НА ПЕРЕВЕДЁННОМ КОНТУРЕ имя назначаем МЫ и оно совпадает
+//     с идентификатором нашей строки; к прежнему издателю обращения нет вовсе
+//     (задача #1120, разбор — `nameClient` ниже и
+//     `docs/engineering/architecture/sa-key-issuance-leaves-the-provider.md`).
+//     Пока контур не переведён — регистрируется OAuth2-клиент у прежнего
+//     издателя с `token_endpoint_auth_method=private_key_jwt`,
 //     `grant_types=[client_credentials]`, `jwks={keys:[<public JWK>]}`,
-//     `owner=<sva_id>`. Hydra returns NO `client_secret` — none exists.
-//  3. Persist `service_account_oauth_clients` row (hydra_client_id mapping
+//     `owner=<sva_id>`; `client_secret` не возвращается — его не существует.
+//  3. Persist `service_account_oauth_clients` row (`hydra_client_id` carries the
+//     name the client answers to — ours or the previous issuer's, see step 2 —
 //     + public PEM + algorithm).
 //  4. Return IssueSAKeyResponse with the plaintext PRIVATE PEM + kid
 //     in `Operation.response` (one-shot delivery; redacted post-completion
@@ -21,7 +26,10 @@
 // On Revoke:
 //
 //  1. Fetch row by id, scoped by sva_id (Authorization Cross-Tenant check).
-//  2. Delete row + DELETE Hydra OAuth2 client (idempotent — Hydra 404 is OK).
+//  2. Delete row + DELETE the provider's OAuth2 client (idempotent — 404 is OK).
+//     Обращение остаётся безусловным намеренно: строки, заведённые ДО перевода
+//     контура, своё зеркало сохраняют и снимать его надо, а отказ этого вызова
+//     и без того не мешает отзыву состояться.
 //
 // On List: paged read of own SA's clients (no Hydra round-trip).
 package sa_keys
@@ -131,6 +139,8 @@ type IssueSAKeyUseCase struct {
 	// composition root wires it so a federated key's `(issuer, subject)` binding
 	// actually lands in Hydra.
 	trustGrants TrustGrantAdmin
+	// ownIssuance — контур переведён на свою чеканку (задача #1120).
+	ownIssuance bool
 	// Redactor for post-MarkDone client_secret redaction. Nil → redaction
 	// skipped (test / legacy wiring). Production main.go wires the pg
 	// adapter so the secret is CLEARED (the field is reset to empty — there is no
@@ -220,6 +230,16 @@ func (u *IssueSAKeyUseCase) WithAuditEmitter(a auditEmitter) *IssueSAKeyUseCase 
 // trust-grant registration.
 func (u *IssueSAKeyUseCase) WithTrustGrantAdmin(t TrustGrantAdmin) *IssueSAKeyUseCase {
 	u.trustGrants = t
+	return u
+}
+
+// WithOwnIssuance объявляет контур выдачи ПЕРЕВЕДЁННЫМ на свою чеканку
+// (задача #1120).
+//
+// Composition-root only: «переведён ли контур» — свойство ПОСАДКИ, а не запроса,
+// и вызывающий его не выбирает.
+func (u *IssueSAKeyUseCase) WithOwnIssuance() *IssueSAKeyUseCase {
+	u.ownIssuance = true
 	return u
 }
 
@@ -577,9 +597,10 @@ func (u *IssueSAKeyUseCase) hydraUnavailable(ctx context.Context, action string,
 	return status.Error(codes.Unavailable, "hydra admin unavailable")
 }
 
-// doIssuePrivateKeyJWT — mint ECDSA P-256 keypair, register
-// Hydra client with private_key_jwt + embedded JWK, persist mapping with
-// PublicKeyPEM + KeyAlgorithm, return PrivateKeyPEM exactly once.
+// doIssuePrivateKeyJWT — mint ECDSA P-256 keypair, name the client (registering it
+// with the previous issuer only while the contour is not translated — see
+// nameClient), persist mapping with PublicKeyPEM + KeyAlgorithm, return
+// PrivateKeyPEM exactly once.
 func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID domain.SAOAuthClientID, in IssueInput, actor string) (*anypb.Any, error) {
 	// 1. Mint ECDSA P-256 keypair locally. The JWK `kid` is the kacho-iam
 	//    SA-OAuth-client id (`soc_*`) so caller→Hydra assertions are
@@ -589,8 +610,13 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		return nil, fmt.Errorf("generate sa keypair: %w", err)
 	}
 
-	// 2. Register OAuth2 client with Hydra using private_key_jwt + the
-	//    public JWK. Hydra returns NO client_secret.
+	// 2. Собрать регистрацию клиента: private_key_jwt + публичный JWK.
+	//
+	//    ЗАПРОС СТРОИТСЯ ВСЕГДА, А ОТПРАВЛЯЕТСЯ НЕ ВСЕГДА. Перечень адресатов
+	//    из него уезжает в ответ выдачи и на непереведённом контуре — в саму
+	//    регистрацию; отправлять ли её, решает nameClient. Строить перечень
+	//    внутри ветки значило бы завести ВТОРОЕ место, вычисляющее адресатов, и
+	//    ответ переведённого контура разошёлся бы с ответом прежнего молча.
 	clientName := u.HydraClientNamePrefix + string(in.ServiceAccountID)
 	// #nosec G101 -- "client_credentials" is the OAuth2 grant-type identifier (RFC 6749 section 4.4),
 	// not a credential. Same applies to "private_key_jwt" (RFC 7521 client_assertion_type).
@@ -614,16 +640,16 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 	// ordinary bearer: whoever holds the bytes can replay it, and the asymmetric
 	// key that authenticated the client is irrelevant to that replay.
 	hydraReq.DPoPBoundAccessTokens = u.BindDPoP
-	hydraClient, err := u.hydra.CreateOAuthClient(ctx, hydraReq)
+	identity, err := u.nameClient(ctx, keyID, hydraReq)
 	if err != nil {
-		return nil, u.hydraUnavailable(ctx, "create-client", err)
+		return nil, err
 	}
 
 	// 3. Persist mapping row in TX.
 	row := domain.ServiceAccountOAuthClient{
 		ID:              keyID,
 		SvaID:           in.ServiceAccountID,
-		OAuthClientID:   domain.OAuthClientID(hydraClient.ClientID),
+		OAuthClientID:   domain.OAuthClientID(identity.ClientID),
 		Description:     domain.Description(in.Description),
 		CreatedByUserID: domain.UserID(in.CreatedByUserID),
 		PublicKeyPEM:    key.PublicPEM,
@@ -634,7 +660,7 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 	if exp := u.resolveExpiry(in); exp != nil {
 		row.ExpiresAt = exp
 	}
-	persisted, err := u.commitMapping(ctx, row, hydraClient.ClientID, actor, key.Algorithm)
+	persisted, err := u.commitMapping(ctx, row, identity.ProviderCoordinate, actor, key.Algorithm)
 	if err != nil {
 		return nil, err
 	}
@@ -647,7 +673,7 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 	}
 	resp := &iamv1.IssueSAKeyResponse{
 		Key:           pbKey,
-		ClientId:      hydraClient.ClientID,
+		ClientId:      identity.ClientID,
 		ClientSecret:  "", // private_key_jwt: no shared secret exists.
 		PrivateKeyPem: key.PrivatePEM,
 		PublicKeyPem:  key.PublicPEM,
@@ -658,6 +684,55 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		Audiences: hydraReq.Audience,
 	}
 	return anypb.New(resp)
+}
+
+// clientNaming — идентификатор, которым выданный клиент себя называет, и
+// координата его записи у прежнего издателя.
+//
+// ПОЧЕМУ ДВЕ ВЕЛИЧИНЫ, А НЕ ОДНА. Пока чеканил прежний издатель, они совпадали —
+// он и заводил запись, и назначал имя. На переведённом контуре имя назначаем мы,
+// а записи у него нет вовсе, и «нечего снимать» обязано быть выражено ОТСУТСТВИЕМ
+// координаты, а не выводом «имя похоже на наше». Вывод по форме имени пережил бы
+// первую же смену формата идентификатора, и пережил бы молча: компенсация
+// уехала бы к постороннему с просьбой снять то, чего он не заводил.
+type clientNaming struct {
+	// ClientID — то, чем клиент себя называет. Он же уходит в строку реестра,
+	// в ответ выдачи и в подписанное утверждение (`iss`/`sub`).
+	ClientID string
+	// ProviderCoordinate — координата записи у прежнего издателя. Пусто, когда
+	// записи нет: снимать тогда нечего.
+	ProviderCoordinate string
+}
+
+// nameClient называет клиента и, если контур не переведён, заводит его зеркало.
+//
+// ПЕРЕВЕДЁННЫЙ КОНТУР К ПРЕЖНЕМУ ИЗДАТЕЛЮ НЕ ХОДИТ. Клиента резолвит НАШ реестр
+// утверждений, и резолвит он по нашему идентификатору — зеркальная колонка на
+// том пути не участвует ни как второй ключ поиска, ни как запасной
+// (`repo/kacho/pg/assertion_client_repo.go`). Значит зеркало на переведённом
+// контуре — запись у постороннего, которую никто не читает, при живой
+// административной дороге к нему.
+//
+// ГРАНИЦА НАЗВАНА: ЗЕРКАЛО СНИМАЕТСЯ ТОЛЬКО У ПЕРЕВЕДЁННОГО КОНТУРА. Пока
+// подписант не подключён, прежний издатель — ЕДИНСТВЕННЫЙ производитель токена
+// на этом ключе, и ключ без зеркала обменять было бы негде ни одним путём.
+//
+// ПОЧЕМУ НАШ ИДЕНТИФИКАТОР, А НЕ ПУСТО. У клиента ровно одно имя, и именно им он
+// себя называет: докерная полоса ищет строку по имени клиента, состав утверждений
+// кладёт его значением, а снятие ключа адресует им же. Пустое имя оставило бы
+// каждого из этих читателей без величины — то есть сняло бы не зеркало, а
+// возможность.
+func (u *IssueSAKeyUseCase) nameClient(
+	ctx context.Context, keyID domain.SAOAuthClientID, req clients.CreateOAuthClientRequest,
+) (clientNaming, error) {
+	if u.ownIssuance {
+		return clientNaming{ClientID: string(keyID)}, nil
+	}
+	mirrored, err := u.hydra.CreateOAuthClient(ctx, req)
+	if err != nil {
+		return clientNaming{}, u.hydraUnavailable(ctx, "create-client", err)
+	}
+	return clientNaming{ClientID: mirrored.ClientID, ProviderCoordinate: mirrored.ClientID}, nil
 }
 
 // resolveAudience derives the Hydra `audience` whitelist for a new SA client.
