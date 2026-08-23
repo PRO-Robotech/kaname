@@ -130,7 +130,7 @@ var tierOnlyObjectTypes = map[string]bool{}
 //     `member`.
 //   - cluster — the platform singleton (`cluster:cluster_kacho_root`). Its
 //     relations are the platform-role ladder (system_admin/system_viewer/
-//     billing_admin/console); the cluster itself is not a per-project grantable
+//     console); the cluster itself is not a per-project grantable
 //     resource, it is the D-9 super-admin short-circuit anchor. С #914 он несёт и
 //     `fga_writer` — право модуля писать кортежи, переехавшее сюда с якоря вне
 //     иерархии: там оно не выражалось выдачей и не поддавалось отзыву.

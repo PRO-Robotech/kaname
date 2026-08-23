@@ -181,7 +181,6 @@ type group
 # tuples with any other object id (P3-D17).
 #   - system_admin  — standing cluster administrator.
 #   - system_viewer — read-only cluster catalog viewer.
-#   - billing_admin — cluster-wide billing.
 #   - console       — cluster console access, MFA-gated.
 #   - any_admin     — alias for system_admin (kept as a relation name so
 #                     hierarchy `any_admin from cluster` references stay
@@ -192,7 +191,29 @@ type cluster
   relations
     define system_admin: [user, service_account]
     define system_viewer: [user, service_account]
-    define billing_admin: [user, service_account]
+    # ЗДЕСЬ СТОЯЛО `billing_admin`, И ОНО СНЯТО (#1114). Отношение объявлялось на
+    # кластере и на аккаунте, и его не требовала ни одна запись каталога, не читало
+    # ни одно объявление модели и не называл ни один прод-файл: это была бронь под
+    # домен биллинга, которого в продукте НЕТ — доменов семь (IAM, VPC, Compute,
+    # Storage, Geo, NLB, Registry), и ни у одного нет ни RPC, ни таблицы биллинга.
+    #
+    # ПОЧЕМУ СНЯТО, А НЕ ОСТАВЛЕНО БРОНЬЮ. Бронь была НЕИСПОЛНИМА: выдать это
+    # отношение нечем. Роль отображается в ярусы `viewer`/`editor`/`admin`
+    # (`authzmap.PermissionsToRelations`), правило роли даёт только глаголы `v_*`
+    # (`authzmap.GrantedVerbs`) — пути, которым кортеж с `billing_admin` попал бы в
+    # хранилище, не существует ни одного. Проверка против такого отношения отвечала
+    # бы «нет» всем и всегда, оставаясь на вид полноценным гейтом.
+    #
+    # ПОЧЕМУ БРОНЬ НЕ СЭКОНОМИЛА БЫ РАБОТУ. Все семь доменов выражают доступ СВОИМИ
+    # типами с набором `v_*`; ярус на кластере и аккаунте — не та форма, какую взял
+    # бы восьмой. Возврат — обычная аддитивная правка модели, а не восстановление
+    # утраченного.
+    #
+    # ЧТО СНЯТИЕ МЕНЯЕТ В ПОВЕДЕНИИ — ничего, и это сказано прямо: отношение не
+    # требовалось, не материализовалось и не спрашивалось вердиктом ни разу за свою
+    # жизнь. Снятие убирает ВИД защиты там, где защиты не было.
+    #
+    # Решение и его цена — services/iam/docs/engineering/architecture/relations-without-readers-withdrawn.md
     define console: [user with mfa_fresh, service_account with mfa_fresh]
     define any_admin: system_admin
     # KAC-178 §3: viewer — общий read-relation для глобальных reference-данных
@@ -295,7 +316,14 @@ type account
     # Contract-B: the `... from organization` disjuncts and the `organization`
     # parent-pointer are REMOVED — B2B Organization is fully gone (D-12).
     define viewer: [user, service_account, group#member] or editor
-    define billing_admin: [user, service_account] or admin
+    # ЗДЕСЬ СТОЯЛО `billing_admin`, И ОНО СНЯТО (#1114) — вместе с одноимённым
+    # объявлением на кластере, где записана причина; здесь она не пересказывается,
+    # иначе заведутся два места об одном предмете.
+    #
+    # Что относилось ИМЕННО к этой стороне: объявление читало `admin`, то есть
+    # распорядитель аккаунта получал бы биллинг молча, как побочный эффект своего
+    # яруса. Такого решения никто не принимал — и это второй, самостоятельный довод
+    # за снятие.
     # rbac-2026 P2 (D-6): account is a verb-bearing resource. These v_* relations
     # are object-level read/write on the account OBJECT ITSELF; a grant of e.g.
     # `iam.account.get` materializes `account:<id> # v_get @ subj` → "see the
@@ -528,7 +556,29 @@ type iam_service_account
     define admin: [user, service_account, group#member] or super_admin
     define editor: [user, service_account, group#member] or admin
     define viewer: [user, service_account, group#member] or editor
-    define user: [user, service_account] or editor
+    # ЗДЕСЬ СТОЯЛО `user` — «право пользоваться этой служебной учёткой», — И ОНО
+    # СНЯТО (#1115) вместе со всем семейством: `use` у `vpc_subnet` и `vpc_address`
+    # выражали тот же замысел — «взять чужой ресурс в работу, не правя его». Ни
+    # одного из трёх не требовала ни одна запись каталога, не читало ни одно
+    # объявление модели и не называл ни один прод-файл.
+    #
+    # ПОЧЕМУ СНЯТО ЦЕЛИКОМ, А НЕ НАЧАЛО ТРЕБОВАТЬСЯ. Отделение «пользоваться» от
+    # «править» было невыразимо с ОБЕИХ сторон. Со стороны выдачи: ярусов три —
+    # `viewer`/`editor`/`admin` (`authzmap.PermissionsToRelations`), и `use` среди
+    # них нет, то есть выдать «только пользоваться» нельзя никому. Со стороны
+    # проверки: `use: … or editor` означает, что редактор проходит и так, поэтому
+    # требование `use` не сузило бы НИЧЕГО — форма гейта без содержания.
+    #
+    # ЧТО ДЕЙСТВУЕТ ВМЕСТО. «Пользоваться» остаётся при `editor` на проекте
+    # владельца, а чужой ресурс проверяется у владельца на СУЩЕСТВОВАНИЕ (полоса
+    # peer-validate), а не на право им пользоваться.
+    #
+    # ЕСЛИ ОТДЕЛЕНИЕ ПОНАДОБИТСЯ. Это работа целиком, и она в трёх местах сразу:
+    # тип объявляет отношение, ярус выдачи учится его выдавать, каталог начинает
+    # его требовать. Сегодняшние объявления в ней не переиспользовались бы — они
+    # несли только первую треть, и без остальных двух она ничего не значит.
+    #
+    # Решение и его цена — services/iam/docs/engineering/architecture/relations-without-readers-withdrawn.md
     # ЗДЕСЬ СТОЯЛО `token_creator`, И ОНО СНЯТО (#1101). Отношение объявлялось,
     # но его не требовала ни одна запись каталога, не читало ни одно объявление
     # модели и не называл ни один прод-файл: выпуск и отзыв ключа служебной
@@ -654,7 +704,9 @@ type vpc_subnet
     define admin: [user, service_account, group#member] or super_admin
     define editor: [user, service_account, group#member] or admin
     define viewer: [user, service_account, group#member] or editor
-    define use: [user, service_account] or editor
+    # ЗДЕСЬ СТОЯЛО `use` — «взять подсеть в работу, не правя её», — И ОНО СНЯТО
+    # (#1115) вместе со всем семейством. Причина записана один раз, у
+    # `iam_service_account`, где снято третье объявление того же замысла.
     define v_get: [user, service_account, group#member] or super_admin
     define v_list: [user, service_account, group#member] or super_admin
     define v_update: [user, service_account, group#member] or super_admin
@@ -691,7 +743,9 @@ type vpc_address
     define admin: [user, service_account, group#member] or super_admin
     define editor: [user, service_account, group#member] or admin
     define viewer: [user, service_account, group#member] or editor
-    define use: [user, service_account] or editor
+    # ЗДЕСЬ СТОЯЛО `use` — «взять адрес в работу, не правя его», — И ОНО СНЯТО
+    # (#1115) вместе со всем семейством. Причина записана один раз, у
+    # `iam_service_account`, где снято третье объявление того же замысла.
     define v_get: [user, service_account, group#member] or super_admin
     define v_list: [user, service_account, group#member] or super_admin
     define v_update: [user, service_account, group#member] or super_admin

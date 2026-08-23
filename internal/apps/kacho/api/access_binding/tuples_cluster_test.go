@@ -59,9 +59,19 @@ func TestMapClusterRelations_AdminEditorDedupToOne(t *testing.T) {
 		"admin AND editor both map to system_admin — must dedup to a single tuple")
 }
 
+// TestMapClusterRelations_UnknownPassesThrough — отношение вне трёх ярусов
+// проходит неизменным.
+//
+// Фикстура СИНТЕТИЧЕСКАЯ, и это не небрежность. Здесь стояло `billing_admin` —
+// настоящее тогда отношение кластера, снятое как бронь под несуществующий домен
+// (#1114). Проба пережила бы своё имя молча: она утверждает про ЛЮБОЕ отношение
+// вне ярусов, а привязка к конкретному живому делала её заложницей чужого
+// решения. Имя, которого в модели нет by construction, «неизвестно» ровно в том
+// смысле, который проба и проверяет, и устареть не может.
 func TestMapClusterRelations_UnknownPassesThrough(t *testing.T) {
-	got := mapClusterRelations([]authzmap.Relation{"billing_admin"})
-	assert.Equal(t, []authzmap.Relation{"billing_admin"}, got)
+	const notATier = authzmap.Relation("relation_outside_the_three_tiers")
+	got := mapClusterRelations([]authzmap.Relation{notATier})
+	assert.Equal(t, []authzmap.Relation{notATier}, got)
 }
 
 func TestTuplesForBinding_ClusterScope_EmitsSystemAdmin(t *testing.T) {
