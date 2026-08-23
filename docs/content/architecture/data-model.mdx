@@ -16,7 +16,8 @@ software-проверками. Наружу утечки SQL нет: SQLSTATE м
 ```mermaid
 erDiagram
   accounts ||--o{ projects : "accountId"
-  accounts ||--o{ users : "accountId"
+  accounts ||--o{ memberships : "accountId"
+  users ||--o{ memberships : "userId"
   accounts ||--o{ service_accounts : "accountId"
   accounts ||--o{ groups : "accountId"
   accounts ||--o{ roles : "accountId (custom)"
@@ -32,7 +33,8 @@ erDiagram
   <tbody>
     <tr><td><code>accounts</code></td><td>Аккаунты (tenant-контейнеры)</td><td>UNIQUE <code>name</code>; <code>owner_user_id</code></td></tr>
     <tr><td><code>projects</code></td><td>Проекты внутри аккаунта</td><td>UNIQUE <code>(account_id, name)</code></td></tr>
-    <tr><td><code>users</code></td><td>Пользователи (проекция Kratos-identity, per-Account)</td><td>UNIQUE email per-Account; <code>invite_status</code></td></tr>
+    <tr><td><code>users</code></td><td>Люди — одна строка на человека, независимо от числа его аккаунтов</td><td>UNIQUE <code>lower(email)</code> и <code>external_id</code> — ГЛОБАЛЬНО; <code>invite_status</code></td></tr>
+    <tr><td><code>memberships</code></td><td>Принадлежность человека аккаунту; их у него может быть несколько</td><td>UNIQUE <code>(user_id, account_id)</code>; <code>state</code> ∈ PENDING/ACTIVE</td></tr>
     <tr><td><code>service_accounts</code></td><td>Машинные субъекты</td><td>UNIQUE имя per-Account; <code>enabled</code></td></tr>
     <tr><td><code>groups</code> · <code>group_members</code></td><td>Группы и их члены</td><td>UNIQUE имя per-Account; членство (type, id)</td></tr>
     <tr><td><code>roles</code> · <code>role_rule_selectors</code></td><td>Роли и правила (rules)</td><td>partial-UNIQUE имя per-scope; CHECK <code>roles_scope_xor</code>; OCC <code>xmin</code></td></tr>

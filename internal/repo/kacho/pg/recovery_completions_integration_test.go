@@ -15,7 +15,8 @@ package pg_test
 //   - TestOnRecoveryCompleted_S05_DuplicateJTI_IdempotentNoop (concurrent goroutines)
 //   - sync-validation → covered by use-case unit tests (internal_on_recovery_test.go)
 //   - TestOnRecoveryCompleted_S07_MidTxFailure_FullRollback (fault-injection)
-//   - TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll
+//   - TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll (личность в N
+//     аккаунтах — членствами, а не строками)
 //
 // Восстановление возвращает учётные данные, но не право пользоваться ими:
 // заблокированная строка остаётся заблокированной (снимает запрет
@@ -360,29 +361,57 @@ func TestOnRecoveryCompleted_S07_MidTxFailure_FullRollback(t *testing.T) {
 	assert.Equal(t, 0, ledgerN, "no stuck idempotency key — flow can be reprocessed")
 }
 
-// ── S09 — one Kratos identity across N accounts ───────────────────────────
+// addMembership — членство человека в аккаунте, написанное сырым SQL.
 //
-// SPEC-vs-SCHEMA clarification (resolved).
+// Сырым намеренно: предмет S09 — многоаккаунтная личность, и она обязана быть
+// СОБРАНА пробой, а не получиться побочно от пути приглашения. Идентификатор
+// чеканит та же функция, что и зеркало (`membership_mirror_id`), поэтому
+// повторный вызов не заводит второго членства в том же аккаунте.
+func addMembership(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
+	userID domain.UserID, accID domain.AccountID, state string,
+) {
+	t.Helper()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO kacho_iam.memberships (id, user_id, account_id, state)
+		VALUES (kacho_iam.membership_mirror_id($1, $2), $1, $2, $3)
+		ON CONFLICT (user_id, account_id) DO UPDATE SET state = EXCLUDED.state`,
+		string(userID), string(accID), state)
+	require.NoError(t, err, "посев членства")
+}
+
+// ── S09 — одна личность Kratos, состоящая в НЕСКОЛЬКИХ аккаунтах ──────────
 //
-// Two UNIQUE guards interact on external_id: the per-Account
-// `users_account_external_id_unique` and migration 0011's stricter GLOBAL partial
-// UNIQUE `users_active_external_id_uniq` (ON external_id WHERE invite_status='ACTIVE'
-// AND external_id<>”). The two interact as follows:
-//   - TWO ACTIVE rows per external_id is IMPOSSIBLE (the global guard forbids it).
-//   - But a BLOCKED row in one Account + an ACTIVE row in ANOTHER Account, both
-//     sharing external_id, IS a reachable stored state (BLOCKED rows are
-//     unrestricted by the partial index). Re-enabling that BLOCKED row →
-//     ACTIVE would collide with the ACTIVE sibling on the global guard (23505).
-//     So a "both rows ACTIVE" form stays unreachable; the
-//     BLOCKED+ACTIVE-across-accounts form (handled by the SAVEPOINT-bounded skip
-//     in internal_on_recovery.go) is the real multi-account case. See
-//     docs/architecture/recovery-completion-multi-account.md.
+// # Что здесь стояло раньше и почему фикстура переписана
 //
-// This test pins the canonical single-non-PENDING multi-account shape: a single
-// non-PENDING (here BLOCKED, the canonical identity row) matched by external_id
-// plus a PENDING sibling in another Account (external_id=” → NOT matched by
-// external_id). Recovery revokes the canonical row's sessions and leaves its
-// state alone; the PENDING sibling is untouched.
+// Многоаккаунтность собиралась ДВУМЯ строками пользователя на одну почту:
+// заблокированная в аккаунте A и приглашённая в аккаунте B. Такого состояния
+// больше не бывает — `users_identity_email_uniq`
+// (20260823050000_users_identity_uniqueness_goes_global) держит одну строку на
+// человека, и посев второй падал на 23505 ещё до того, как сценарий начинался.
+//
+// СВОЙСТВО при этом никуда не делось и осталось ровно тем же: человек
+// по-прежнему может состоять в нескольких аккаунтах — теперь это выражено
+// ЧЛЕНСТВАМИ, а не строками. Поэтому переписана фикстура, а утверждения
+// сохранены дословно по смыслу:
+//
+//   - восстановление НЕ снимает административный запрет: заблокированная строка
+//     остаётся заблокированной;
+//   - отсечка сессий ставится и на ней — учётные данные только что сменили,
+//     и живые сессии обрубаются независимо от того, разрешено ли входить;
+//   - отсечка ставится НА ЧЕЛОВЕКА, а не на членство, поэтому одна её строка
+//     накрывает все аккаунты, в которых он состоит; членства при этом не
+//     трогаются вовсе — восстановление не есть операция над принадлежностью;
+//   - посторонний, оказавшийся в том же аккаунте, не задет ничем.
+//
+// # Почему посторонний, а не «приглашённый близнец»
+//
+// Прежний отрицательный контроль опирался на вторую строку той же почты с
+// пустым внешним субъектом. Строка была неотличима от личности, и контроль
+// заодно утверждал, что резолв по внешнему субъекту не хватает лишнего.
+// Личность теперь одна, и тот же вопрос задаётся честнее: в аккаунте сидит
+// ДРУГОЙ человек со своей почтой, и он обязан остаться нетронутым. Без этого
+// контроля «строка заблокирована и отсечена» зеленело бы и у обработчика,
+// который отсекает всех подряд.
 func TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -395,9 +424,19 @@ func TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll(t *testing.T) {
 	repo := kachopg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kacho_iam")
 
-	// Canonical identity row (BLOCKED) + a PENDING sibling in another Account.
-	u1, _ := seedAccountAndUser(t, ctx, pool, "krt_eve", "eve@example.com", "BLOCKED")
-	uPending, _ := seedAccountAndUser(t, ctx, pool, "", "eve@example.com", "PENDING")
+	// Личность: одна строка, заблокирована, домашний аккаунт — accA.
+	u1, accA := seedAccountAndUser(t, ctx, pool, "krt_eve", "eve@example.com", "BLOCKED")
+	// Посторонний в аккаунте accB: своя почта, ждёт первого входа.
+	uBystander, accB := seedAccountAndUser(t, ctx, pool, "", "bystander-eve@example.com", "PENDING")
+	// Личность состоит и в accB тоже — вот она, многоаккаунтность.
+	addMembership(t, ctx, pool, u1, accB, "ACTIVE")
+
+	before := membershipsOf(t, ctx, pool, u1)
+	require.Len(t, before, 2,
+		"ПРЕДПОСЫЛКА сценария: личность обязана состоять в ДВУХ аккаунтах — "+
+			"на одноаккаунтной фикстуре проба проверяла бы не то, что называет")
+	require.ElementsMatch(t, []string{string(accA), string(accB)},
+		[]string{before[0].AccountID, before[1].AccountID})
 
 	uc := userapp.NewOnRecoveryCompletedUseCase(repo, opsRepo)
 	op, err := uc.Execute(ctx, userapp.OnRecoveryCompletedInput{
@@ -407,35 +446,51 @@ func TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll(t *testing.T) {
 	done := awaitOp(t, ctx, opsRepo, op.ID)
 	require.Nil(t, done.Error)
 
-	// Каноническая строка остаётся заблокированной — восстановление запрет не снимает.
+	// Строка личности остаётся заблокированной — восстановление запрет не снимает.
 	var s1 string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT invite_status FROM users WHERE id = $1`, string(u1)).Scan(&s1))
-	assert.Equal(t, "BLOCKED", s1, "canonical row stays BLOCKED")
+	assert.Equal(t, "BLOCKED", s1, "восстановление не отменяет административный запрет")
 
-	// Canonical row got a revoke-all cutoff (reason password-change).
+	// Отсечка ставится на ЧЕЛОВЕКА: одна строка на все его аккаунты.
+	var cutoffN int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM user_token_revocations WHERE user_id = $1`, string(u1)).Scan(&cutoffN))
+	assert.Equal(t, 1, cutoffN,
+		"отсечка принадлежит личности, а не членству: двух её быть не должно, "+
+			"сколько бы аккаунтов человек ни назвал своими")
 	var reason string
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT reason FROM user_token_revocations WHERE user_id = $1`, string(u1)).Scan(&reason))
 	assert.Equal(t, "password-change", reason)
 
-	// PENDING sibling untouched (not matched by external_id; no cutoff, still PENDING).
-	var sPending string
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT invite_status FROM users WHERE id = $1`, string(uPending)).Scan(&sPending))
-	assert.Equal(t, "PENDING", sPending, "PENDING sibling (external_id='') is not part of the recovery")
-	var pendingCutoffN int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM user_token_revocations WHERE user_id = $1`, string(uPending)).Scan(&pendingCutoffN))
-	assert.Equal(t, 0, pendingCutoffN, "PENDING sibling gets no cutoff")
+	// Членства не тронуты: восстановление — не операция над принадлежностью.
+	after := membershipsOf(t, ctx, pool, u1)
+	require.Len(t, after, 2, "восстановление не вправе ни завести, ни снять членство")
+	assert.ElementsMatch(t,
+		[]string{before[0].ID, before[1].ID},
+		[]string{after[0].ID, after[1].ID},
+		"те же самые членства, а не пересозданные")
 
-	// metadata: user_id = canonical row, count = 1 (single matched non-PENDING row).
+	// Отрицательный контроль: посторонний в том же аккаунте не задет.
+	var sBystander string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT invite_status FROM users WHERE id = $1`, string(uBystander)).Scan(&sBystander))
+	assert.Equal(t, "PENDING", sBystander,
+		"чужая строка не участвует в восстановлении: её почта и субъект другие")
+	var bystanderCutoffN int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM user_token_revocations WHERE user_id = $1`,
+		string(uBystander)).Scan(&bystanderCutoffN))
+	assert.Equal(t, 0, bystanderCutoffN, "постороннему отсечка не ставится")
+
+	// metadata: user_id = строка личности, count = 1 (затронута ровно она).
 	meta, err := operations.MetadataFor[*iamv1.OnRecoveryCompletedMetadata](done)
 	require.NoError(t, err)
-	assert.Equal(t, string(u1), meta.GetUserId(), "metadata.user_id = canonical identity row")
+	assert.Equal(t, string(u1), meta.GetUserId(), "metadata.user_id — строка личности")
 	assert.Equal(t, int32(1), meta.GetRevokedSessionCount())
 
-	// one audit row for the identity recovery.
+	// Одна запись журнала на одно восстановление личности.
 	assert.Equal(t, 1, auditRowCount(t, ctx, pool, "rec_flow_009"))
 }
 

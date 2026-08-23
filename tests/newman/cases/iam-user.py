@@ -1584,3 +1584,167 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IAM-ID-1-01 / -02 / -06 — один человек есть ОДНА строка, в скольких бы
+# аккаунтах он ни состоял (задачи kacho#470 / #981).
+#
+# ПОЧЕМУ ЭТОТ КЕЙС СУЩЕСТВУЕТ. До отрыва приглашение известной почты во второй
+# аккаунт заводило ВТОРУЮ строку: второй идентификатор, второй набор прав, и
+# активировать из них можно было только одну — вторая оставалась неактивируемой
+# навсегда, а выданное на неё право осиротевшим. Снаружи это выглядело
+# исправным: обе операции завершались успехом.
+#
+# ЧЕМ ЧЛЕНСТВО НАБЛЮДАЕТСЯ ЧЕРЕЗ КРАЙ, ПОКА У НЕГО НЕТ СВОЕГО РЕСУРСА. Публичного
+# списка членств ещё нет (он приезжает вместе с переездом глагола приглашения).
+# Но список пользователей сужается ИМЕННО ЧЛЕНСТВАМИ, поэтому «человек состоит в
+# обоих аккаунтах» наблюдаемо так: ОДИН И ТОТ ЖЕ идентификатор приходит в списке
+# аккаунта A и в списке аккаунта B. Двум строкам это дало бы два разных
+# идентификатора, и утверждение равенства покраснело бы.
+#
+# ОТРИЦАНИЕ — СОСТАВОМ, А НЕ ФАКТОМ ВЫЗОВА. Отдельно утверждается, что строк с
+# этой почтой в списке аккаунта РОВНО ОДНА: без этого «идентификаторы совпали»
+# прошло бы и на дереве, которое завело вторую строку и вернуло первую.
+#
+# ПОВТОР СТОИТ ТОЛЬКО НА ПОЛОЖИТЕЛЬНЫХ ПЛЕЧАХ. Список — первый доступ к своему
+# свежему ресурсу, и окно материализации прав к нему относится; отрицание
+# («второй строки нет») повтором НЕ оборачивается — там повтор пережидал бы ровно
+# то, ради чего кейс написан.
+_DUAL_EMAIL = "dual-{{runId}}@kacho.local"
+
+CASES.append(Case(
+    id="IAM-USR-IDENTITY-GLOBAL-TWO-ACCOUNTS",
+    title="Один человек, приглашённый в ДВА аккаунта, — одна строка и один "
+          "идентификатор; он виден в списках обоих аккаунтов",
+    classes=["CRUD", "IDEM", "NEG"],
+    priority="P0",
+    steps=[
+        # ── 1. приглашение в аккаунт A ───────────────────────────────────────
+        Step(
+            name="dual-invite-account-a",
+            method="POST",
+            path="/iam/v1/users:invite",
+            body={"accountId": "{{accountAId}}", "email": _DUAL_EMAIL},
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        Step(
+            name="dual-capture-user-from-a",
+            method="GET",
+            path="/operations/{{opId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('[dual] приглашение в A завершилось без отказа', () => "
+                "pm.expect(j.error, JSON.stringify(j)).to.eql(undefined));",
+                "pm.test('[dual] ответ несёт строку человека', () => {",
+                "  pm.expect(j.response && j.response.id, JSON.stringify(j)).to.match(/^usr[a-z0-9]+$/);",
+                "});",
+                *save_from_response("j.response && j.response.id", "dualUserFromA"),
+            ],
+        ),
+        # ── 2. та же почта в аккаунт B, ДРУГИМ администратором ───────────────
+        Step(
+            name="dual-invite-account-b",
+            method="POST",
+            path="/iam/v1/users:invite",
+            body={"accountId": "{{accountBId}}", "email": _DUAL_EMAIL},
+            auth="jwtAccountAdminB",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        Step(
+            name="dual-second-account-reuses-the-same-row",
+            method="GET",
+            path="/operations/{{opId}}",
+            auth="jwtAccountAdminB",
+            test_script=[
+                *assert_status(200),
+                "const j = pm.response.json();",
+                "pm.test('[dual] приглашение во ВТОРОЙ аккаунт завершилось без отказа', () => "
+                "pm.expect(j.error, JSON.stringify(j)).to.eql(undefined));",
+                "const fromA = pm.environment.get('dualUserFromA');",
+                # Страж фикстуры: без первого идентификатора сравнение ниже
+                # выродилось бы в сравнение с undefined и зеленело бы всегда.
+                "pm.test('[dual] фикстура принесла идентификатор из первого приглашения', () => "
+                "pm.expect(Boolean(fromA), 'dualUserFromA пуст').to.eql(true));",
+                "pm.test('[dual] IAM-ID-1-01: идентификатор человека ТОТ ЖЕ в обоих аккаунтах', () => {",
+                "  pm.expect(j.response && j.response.id, 'второе приглашение вернуло ДРУГУЮ строку: "
+                "человек задвоился, и активировать можно будет только одну из них. Ответ: ' "
+                "+ JSON.stringify(j)).to.eql(fromA);",
+                "});",
+            ],
+        ),
+        # ── 3. он виден в списке аккаунта A ──────────────────────────────────
+        poll_request_until_status(
+            name="dual-visible-in-account-a",
+            method="GET",
+            path="/iam/v1/users?accountId={{accountAId}}&pageSize=1000",
+            auth="jwtAccountAdminA",
+            retry_predicate="!(pm.response.json().users || []).some("
+                            "r => r.id === pm.environment.get('dualUserFromA'))",
+            test_script=[
+                *assert_status(200),
+                "const rows = pm.response.json().users || [];",
+                "const want = pm.environment.get('dualUserFromA');",
+                "pm.test('[dual] человек виден в списке аккаунта A', () => "
+                "pm.expect(rows.some(r => r.id === want), JSON.stringify(rows.map(r => r.id)))"
+                ".to.eql(true));",
+                # ОТРИЦАНИЕ СОСТАВОМ — без повтора. Строка с этой почтой обязана
+                # быть ровно одна: две означали бы, что отрыв не состоялся, а
+                # равенство идентификаторов выше это скрыло бы.
+                "pm.test('[dual] IAM-ID-1-06: строк с этой почтой ровно одна', () => {",
+                "  const same = rows.filter(r => (r.email || '').toLowerCase() "
+                "=== pm.environment.get('dualEmailLower'));",
+                "  pm.expect(same.map(r => r.id), 'строк с почтой приглашённого больше одной: "
+                "глобальный ключ идентичности не держит').to.have.lengthOf(1);",
+                "});",
+            ],
+            pre_script=[
+                "pm.environment.set('dualEmailLower', "
+                "('dual-' + pm.environment.get('runId') + '@kacho.local').toLowerCase());",
+            ],
+        ),
+        # ── 4. и в списке аккаунта B — то есть членств ДВА ───────────────────
+        poll_request_until_status(
+            name="dual-visible-in-account-b",
+            method="GET",
+            path="/iam/v1/users?accountId={{accountBId}}&pageSize=1000",
+            auth="jwtAccountAdminB",
+            retry_predicate="!(pm.response.json().users || []).some("
+                            "r => r.id === pm.environment.get('dualUserFromA'))",
+            test_script=[
+                *assert_status(200),
+                "const rows = pm.response.json().users || [];",
+                "const want = pm.environment.get('dualUserFromA');",
+                "pm.test('[dual] IAM-ID-1-01: ТОТ ЖЕ человек виден и в списке аккаунта B — "
+                "значит членств у него два', () => "
+                "pm.expect(rows.some(r => r.id === want), JSON.stringify(rows.map(r => r.id)))"
+                ".to.eql(true));",
+            ],
+        ),
+        # ── 5. уборка за собой ───────────────────────────────────────────────
+        Step(
+            name="dual-cleanup",
+            method="DELETE",
+            path="/iam/v1/users/{{dualUserFromA}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+    ],
+))

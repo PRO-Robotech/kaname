@@ -351,8 +351,17 @@ func (uc *InviteUserUseCase) doInvite(
 				// Idempotent: row already exists (ACTIVE / PENDING / BLOCKED).
 				out.user = existing
 			} else {
-				// Insert new PENDING.
-				ins, _, err := w.UsersW().InsertPending(ctx, domain.User{
+				// «Человек существует и приглашён СЮДА». Признак заведения —
+				// несущий, и отбрасывать его больше нельзя: с глобальным ключом
+				// идентичности конфликт означает не «эта строка уже есть в этом
+				// аккаунте» (такую ловит быстрый путь выше), а «человек уже есть
+				// в платформе» — его приглашают во ВТОРОЙ аккаунт. Приняв это за
+				// заведение, вызывающий эмитировал бы указатель на предка и
+				// материализацию для строки, которая не заводилась, и объявил бы
+				// её аккаунтом тот, что назван приглашением, — тогда как её
+				// аккаунтов теперь несколько, а звено цепи областей берётся из
+				// членств.
+				ins, insertedNow, err := w.UsersW().InsertPending(ctx, domain.User{
 					ID:           candidateID,
 					AccountID:    in.AccountID,
 					Email:        in.Email,
@@ -364,7 +373,7 @@ func (uc *InviteUserUseCase) doInvite(
 					return inviteTxResult{}, err
 				}
 				out.user = ins
-				out.userIsNew = true
+				out.userIsNew = insertedNow
 			}
 
 			// Optional bind-to-Project. The insert is STRICT create, NOT idempotent:

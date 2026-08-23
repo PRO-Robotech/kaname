@@ -9,13 +9,14 @@ package pg
 // {account_id, invite_status, invited_by} живут в users.
 //
 // Within-service refs — DB-level invariants:
-//   - UNIQUE (account_id, lower(email))                      → 23505 / iamerr.ErrAlreadyExists
-//   - UNIQUE (account_id, external_id) WHERE external_id<>'' → 23505 / iamerr.ErrAlreadyExists
+//   - UNIQUE (lower(email))                                  → 23505 / iamerr.ErrAlreadyExists
+//   - UNIQUE (external_id) WHERE external_id<>''             → 23505 / iamerr.ErrAlreadyExists
 //   - DEFERRABLE FK users.account_id → accounts(id)          → 23503 на COMMIT
 //   - DEFERRABLE FK accounts.owner_user_id → users(id)       → 23503 на COMMIT
 //   - CHECK users_invite_status_consistency (PENDING ⇔ external_id='')
-//   - InsertPending: атомарный ON CONFLICT (account_id, lower(email)) DO NOTHING +
-//                    SELECT existing — race-safe.
+//   - InsertPending: атомарный ON CONFLICT (lower(email)) DO UPDATE — строка
+//                    возвращается и на конфликте, поэтому конкурентное первое
+//                    появление сериализуется, а не отказывает.
 //   - ActivateInvite: атомарный UPDATE … WHERE invite_status='PENDING' RETURNING — 0 rows ⇒ NotFound.
 
 import (
@@ -59,10 +60,15 @@ func (r *userReader) Get(ctx context.Context, id domain.UserID) (domain.User, er
 // (любого invite_status). Caller должен знать target Account — используй
 // GetByAccountEmail.
 //
-// `ORDER BY created_at ASC, id ASC` — тот же детерминизм, что у остальных
-// резолвов по адресу: один адрес принадлежит N строкам по построению
-// (уникальность внутри аккаунта, не глобальная), и без упорядочивания выбор
-// оставался за физическим порядком строк.
+// `ORDER BY created_at ASC, id ASC` СОХРАНЁН, хотя строк по адресу теперь не
+// больше одной: ключ `users_identity_email_uniq` (миграция 20260823050000)
+// сделал адрес глобально уникальным, и спора о выборе не бывает.
+//
+// Упорядочивание остаётся защитой для данных, заведённых ДО ключа, и стоит
+// ровно поэтому — не потому, что «один адрес принадлежит N строкам»: это было
+// верно, пока уникальность была парной с аккаунтом, и перестало быть верным.
+// Снять его значило бы вернуть выбор физическому порядку строк на любой базе,
+// которую ключ ещё не прошёл.
 func (r *userReader) GetByEmail(ctx context.Context, email domain.Email) (domain.User, error) {
 	row := r.tx.QueryRow(ctx,
 		fmt.Sprintf(`SELECT %s FROM users WHERE lower(email) = lower($1) ORDER BY created_at ASC, id ASC LIMIT 1`, userCols),
@@ -105,7 +111,14 @@ func (r *userReader) GetByAccountEmail(ctx context.Context, accountID domain.Acc
 	return u, nil
 }
 
-// FindPendingByEmail — все PENDING-row'ы по email через все Account'ы.
+// FindPendingByEmail — приглашённые строки по адресу.
+//
+// Строк по адресу больше не бывает больше одной (`users_identity_email_uniq`,
+// миграция 20260823050000), поэтому «все через все аккаунты» — снятая посылка:
+// у человека одна строка, а аккаунтов столько, сколько членств. Возвращаемый
+// срез остаётся срезом намеренно — сигнатура порта принадлежит вызывающим, и
+// сужать её здесь значило бы менять контракт ради формы.
+//
 // Использует partial index `users_email_pending_idx`.
 func (r *userReader) FindPendingByEmail(ctx context.Context, email domain.Email) ([]domain.User, error) {
 	rows, err := r.tx.Query(ctx,
@@ -480,9 +493,10 @@ type userWriter struct {
 // Upsert — legacy path retained for backward-compat with integration tests
 // that call Upsert directly (TestUser_2_0_15a/15b).
 //
-// The unique-индекс на external_id — per-Account (partial WHERE external_id<>”).
-// Upsert делает INSERT с {AccountID + invite_status='ACTIVE'}; при дубле
-// (account_id, external_id) → UPDATE email/display_name.
+// Ключ по external_id — ГЛОБАЛЬНЫЙ (partial WHERE external_id<>”): один внешний
+// субъект есть одна строка. Upsert делает INSERT с {AccountID +
+// invite_status='ACTIVE'}; при дубле по external_id → UPDATE email/display_name
+// и добавление членства в названном аккаунте.
 //
 // Production paths use InsertPending / ActivateInvite / InsertActive directly
 // — not Upsert.
@@ -495,17 +509,37 @@ func (w *userWriter) Upsert(ctx context.Context, u domain.User) (domain.User, bo
 	}
 	invitedBy := nullableInvitedBy(u.InvitedBy)
 
-	// AccountID требуется: подцепляем UPSERT по external_id уникальному в
-	// Account'е (без account_id это невозможно). Тесты должны сами создать
-	// Account перед Upsert. Используется partial UNIQUE
-	// (account_id, external_id) WHERE external_id<>''.
+	// Арбитр — ГЛОБАЛЬНЫЙ ключ внешнего субъекта
+	// (`users_identity_external_id_uniq`, миграция 20260823050000), а не пара с
+	// аккаунтом: человек есть одна строка, в скольких бы аккаунтах он ни
+	// состоял. Пер-аккаунтный арбитр заводил бы ему вторую строку — второй
+	// идентификатор, второй набор прав, из которых действует один.
+	//
+	// Предикат `WHERE external_id <> ''` выбирает ИМЕННО этот индекс: предикат
+	// пер-состоянийного `users_active_external_id_uniq` им не подразумевается,
+	// поэтому вывод индекса однозначен.
+	//
+	// Членство пишется ЯВНО и в той же транзакции: при попадании в конфликт
+	// строка не переписывается, зеркалящий триггер не срабатывает, и членство в
+	// названном аккаунте не появилось бы вовсе.
 	q := fmt.Sprintf(`
-		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, invited_by, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (account_id, external_id) WHERE external_id <> '' DO UPDATE
-		   SET email = EXCLUDED.email,
-		       display_name = EXCLUDED.display_name
-		RETURNING %s, (xmax = 0) AS created`, userCols)
+		WITH ins AS (
+			INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, invited_by, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (external_id) WHERE external_id <> '' DO UPDATE
+			   SET email = EXCLUDED.email,
+			       display_name = EXCLUDED.display_name
+			RETURNING %s, (xmax = 0) AS created
+		), membership AS (
+			INSERT INTO memberships (id, user_id, account_id, state, invited_by, created_at, updated_at)
+			SELECT membership_mirror_id(i.id, $2), i.id, $2,
+			       CASE WHEN i.invite_status = 'PENDING' THEN 'PENDING' ELSE 'ACTIVE' END,
+			       $7, $8, $8
+			  FROM ins i
+			 WHERE $2 IS NOT NULL AND $2 <> ''
+			ON CONFLICT (user_id, account_id) DO NOTHING
+		)
+		SELECT %s, created FROM ins`, userCols, userCols)
 	row := w.tx.QueryRow(ctx, q,
 		string(u.ID), accountID, string(u.ExternalID), string(u.Email), string(u.DisplayName),
 		inviteStatus, invitedBy, now,
@@ -521,37 +555,58 @@ func (w *userWriter) Upsert(ctx context.Context, u domain.User) (domain.User, bo
 	return out, created, nil
 }
 
-// InsertPending — атомарный idempotent INSERT PENDING-row.
+// InsertPending — «человек существует и приглашён в ЭТОТ аккаунт», атомарно и
+// идемпотентно.
 //
-// SQL:
+// Возвращает строку человека и признак того, что она ЗАВЕДЕНА этим вызовом.
+// Признак несущий: после отрыва принадлежности приглашение известной почты во
+// второй аккаунт строки НЕ заводит, и отличить «завёл» от «нашёл» вызывающему
+// больше нечем — прежде это следовало из самого факта конфликта.
 //
-//	INSERT INTO users (..., invite_status='PENDING', external_id='') VALUES (...)
-//	ON CONFLICT (account_id, lower(email)) DO NOTHING
-//	RETURNING ... ;
-//
-// Если CONFLICT — DO NOTHING не возвращает row. Делаем backstop SELECT по
-// (account_id, lower(email)). Возвращаем (existing, inserted=false).
-// Race-safe: оба пути атомарны на DB-уровне.
+// Одним стейтментом делаются обе половины операции: строка человека (глобальный
+// арбитр по почте) и его членство в названном аккаунте. Разнести их на два
+// стейтмента нельзя — между ними встала бы точка, в которой человек есть, а
+// приглашение потерялось.
 func (w *userWriter) InsertPending(ctx context.Context, u domain.User) (domain.User, bool, error) {
 	now := time.Now().UTC()
 	invitedBy := nullableInvitedBy(u.InvitedBy)
 
-	// INSERT … ON CONFLICT … DO NOTHING RETURNING + UNION SELECT existing.
-	// CTE-форма обеспечивает атомарность и единый result set вне зависимости от
-	// того, был ли INSERT или конфликт.
+	// Арбитр — ГЛОБАЛЬНЫЙ ключ почты (`users_identity_email_uniq`, миграция
+	// 20260823050000), а не пара с аккаунтом: приглашение человека во второй
+	// аккаунт обязано найти его СТРОКУ, а не завести вторую.
+	//
+	// `DO UPDATE`, а не `DO NOTHING`, и это несущее различие, а не стиль.
+	// `DO NOTHING` строку не возвращает и не берёт на неё замок: конкурирующий
+	// вызов не видит ещё не закоммиченную чужую вставку, добирающий SELECT
+	// возвращает пусто, и вызывающий получает отказ на вводе, который заведомо
+	// законен. `DO UPDATE` ждёт чужой транзакции и возвращает строку — то есть
+	// СЕРИАЛИЗУЕТ конкурентное первое появление (IAM-ID-1-07).
+	//
+	// Присваивается СВОЁ ЖЕ значение: приглашающий не вправе переписать имя
+	// человеку, который в платформе уже есть. Колонки `account_id`,
+	// `invite_status` и `invited_by` в списке SET не названы — иначе сработал бы
+	// зеркалящий триггер, объявленный `UPDATE OF` этих трёх, и переписал бы
+	// членство по колонке строки вместо названного аккаунта.
+	//
+	// Членство пишется ЯВНО: при попадании в конфликт триггер не срабатывает
+	// вовсе, и выразить «этот человек приглашён СЮДА» больше нечем.
 	q := fmt.Sprintf(`
 		WITH ins AS (
 			INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, invited_by, created_at)
 			VALUES ($1, $2, '', $3, $4, 'PENDING', $5, $6)
-			ON CONFLICT (account_id, lower(email)) DO NOTHING
-			RETURNING %s
+			ON CONFLICT (lower(email)) DO UPDATE
+			   SET display_name = users.display_name
+			RETURNING %s, (xmax = 0) AS inserted
+		), membership AS (
+			INSERT INTO memberships (id, user_id, account_id, state, invited_by, created_at, updated_at)
+			SELECT membership_mirror_id(i.id, $2), i.id, $2,
+			       CASE WHEN i.invite_status = 'PENDING' THEN 'PENDING' ELSE 'ACTIVE' END,
+			       $5, $6, $6
+			  FROM ins i
+			 WHERE $2 IS NOT NULL AND $2 <> ''
+			ON CONFLICT (user_id, account_id) DO NOTHING
 		)
-		SELECT %s, true AS inserted FROM ins
-		UNION ALL
-		SELECT %s, false AS inserted FROM users
-		WHERE account_id = $2 AND lower(email) = lower($3)
-		  AND NOT EXISTS (SELECT 1 FROM ins)
-		LIMIT 1`, userCols, userCols, userCols)
+		SELECT %s, inserted FROM ins`, userCols, userCols)
 
 	row := w.tx.QueryRow(ctx, q,
 		string(u.ID), string(u.AccountID), string(u.Email), string(u.DisplayName),

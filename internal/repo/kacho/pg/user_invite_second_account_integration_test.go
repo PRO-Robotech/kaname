@@ -3,21 +3,33 @@
 
 package pg_test
 
-// user_invite_second_account_integration_test.go — regression tests for the
-// user-per-account invite/bootstrap uniqueness model (migration 0011).
+// user_invite_second_account_integration_test.go — приглашение человека,
+// который в платформе УЖЕ ЕСТЬ, во второй аккаунт.
 //
-// Root-cause (live, kind 2026-06-14): migration 0002 added GLOBAL
-// UNIQUE(email) + partial UNIQUE(external_id) which contradict the user-per-
-// account model (one identity → N rows, one per Account, same email). Inviting
-// an existing-email user into a SECOND Account died on `users_email_uniq`
-// (23505), rolling back the whole invite TX → invitee never got the grant.
+// # Что здесь стояло раньше и почему переписано
 //
-// Migration 0011 drops the over-broad globals and replaces the external_id one
-// with a partial UNIQUE on ACTIVE rows only (closing the concurrent-bootstrap
-// race the global previously guarded).
+// Файл заводился под миграцию `0011`, снявшую ГЛОБАЛЬНУЮ уникальность почты:
+// пока действовала модель «один человек = N строк, по одной на аккаунт»,
+// глобальный ключ ломал приглашение известной почты во второй аккаунт — вставка
+// падала на 23505, и вся транзакция приглашения откатывалась.
 //
-// These tests assert the post-0011 invariant directly at the repo layer with
-// testcontainers (goose.Up applies ALL migrations including 0011).
+// Модель снята. Миграция
+// `20260823050000_users_identity_uniqueness_goes_global` возвращает глобальные
+// ключи — но НЕ ту же вещь: тогда ключ запрещал приглашать человека во второй
+// аккаунт (модель этого требовала), теперь он запрещает ЗАВОДИТЬ ему вторую
+// строку, потому что второй аккаунт выражается ЧЛЕНСТВОМ, а не строкой.
+//
+// Значит посылка «после 0011 вторая строка обязана вставиться» пережила свой
+// предмет и читалась бы как действующая. Утверждение переписано под НОВЫЙ
+// наблюдаемый исход того же пути, а не снято: путь приглашения во второй
+// аккаунт обязан работать, и проба по-прежнему стережёт именно это.
+//
+// # Что утверждают пробы этого файла
+//
+//   - приглашение УЖЕ ВОШЕДШЕГО человека во второй аккаунт даёт ту же строку и
+//     ЕЩЁ ОДНО членство, сразу действующее: второго входа платформа не просит;
+//   - конкурентное первое появление одного внешнего субъекта разрешается базой,
+//     а не удачей: ровно один участник заводит строку.
 
 import (
 	"context"
@@ -37,13 +49,20 @@ import (
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
-// ── 0011-A — invite existing-email user into a SECOND account ───────────────
+// ── известный человек, приглашённый во ВТОРОЙ аккаунт ──────────────────────
 //
-// An identity is ACTIVE in account A (its bootstrap home). A second admin
-// invites the SAME email into account B → a fresh PENDING row in account B must
-// INSERT cleanly. Pre-0011 this failed with `users_email_uniq` (global email
-// UNIQUE), rolling back the invite TX.
-func TestUserInvite_0011A_InviteExistingEmail_SecondAccount(t *testing.T) {
+// Человек ДЕЙСТВУЮЩИЙ в аккаунте A (он там завёлся и вошёл). Администратор
+// второго аккаунта приглашает ТУ ЖЕ почту к себе.
+//
+// Прежняя редакция требовала здесь «свежую строку PENDING в аккаунте B». Такого
+// исхода больше не бывает: строка у человека одна. Новый исход — та же строка и
+// ВТОРОЕ членство, причём сразу в состоянии «действует»: человек уже
+// подтвердил, что владеет этой почтой, и просить его войти второй раз не за чем.
+//
+// Утверждается СОСТОЯНИЕ таблиц после вызова, а не факт вызова: «писатель не
+// отказал» зеленеет и тогда, когда членство во втором аккаунте не появилось
+// вовсе, — а это ровно та поломка, ради которой файл и существует.
+func TestUserInvite_ExistingActiveEmail_SecondAccount(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -56,7 +75,7 @@ func TestUserInvite_0011A_InviteExistingEmail_SecondAccount(t *testing.T) {
 
 	const email = domain.Email("multi-account@example.com")
 
-	// Identity is ACTIVE in account A (bootstrap home).
+	// Человек действует в аккаунте A (там его домашний аккаунт).
 	adminA, accA := bootstrapAdmin(t, ctx, repo, "i11aA")
 	w0, err := repo.Writer(ctx)
 	require.NoError(t, err)
@@ -69,58 +88,104 @@ func TestUserInvite_0011A_InviteExistingEmail_SecondAccount(t *testing.T) {
 		DisplayName:  domain.DisplayName("Multi Account"),
 		InviteStatus: domain.InviteStatusActive,
 	})
-	require.NoError(t, err, "seed ACTIVE row in account A")
+	require.NoError(t, err, "посев действующей строки в аккаунте A")
 	require.NoError(t, w0.Commit(ctx))
 
-	// A separate account B with its own admin.
+	// Второй аккаунт со своим администратором — и третий, куда человека НИКТО
+	// не звал: он нужен контролем к чтению по аккаунту ниже.
 	_, accB := bootstrapAdmin(t, ctx, repo, "i11aB")
+	_, accC := bootstrapAdmin(t, ctx, repo, "i11aC")
 
-	// Invite the SAME email into account B — fresh PENDING row.
+	// Приглашение ТОЙ ЖЕ почты в аккаунт B.
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	pendingID := domain.UserID(ids.NewID(domain.PrefixUser))
 	out, inserted, err := w.UsersW().InsertPending(ctx, domain.User{
-		ID:           pendingID,
-		AccountID:    accB,
-		Email:        email, // same email, different account
+		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
+		AccountID:    accB, // та же почта, другой аккаунт
+		Email:        email,
 		DisplayName:  domain.DisplayName("Multi Account (invited)"),
 		InviteStatus: domain.InviteStatusPending,
 		InvitedBy:    adminA,
 	})
 	require.NoError(t, err,
-		"invite of existing-email user into a second account must NOT violate a global email UNIQUE")
+		"приглашение известной почты во второй аккаунт обязано пройти: отказ здесь означал бы, "+
+			"что глобальный ключ сломал путь, ради которого он вводился")
 	require.NoError(t, w.Commit(ctx))
 
-	assert.True(t, inserted, "second-account invite inserts a fresh PENDING row")
-	assert.Equal(t, pendingID, out.ID)
-	assert.Equal(t, accB, out.AccountID)
-	assert.Equal(t, domain.InviteStatusPending, out.InviteStatus)
+	assert.False(t, inserted,
+		"вторая строка заводиться не вправе — человек в платформе уже есть")
+	assert.Equal(t, activeID, out.ID,
+		"писатель обязан вернуть СТРОКУ ЧЕЛОВЕКА, а не идентификатор, который ему предложили")
+	assert.Equal(t, domain.InviteStatusActive, out.InviteStatus,
+		"приглашение не возвращает вошедшего человека в состояние «приглашён»")
+	assert.Equal(t, domain.DisplayName("Multi Account"), out.DisplayName,
+		"приглашающий не вправе переписать имя человеку, который в платформе уже есть")
 
-	// Both rows coexist: one ACTIVE in A, one PENDING in B, same email.
+	var rowsWithThatEmail int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.users WHERE lower(email) = lower($1)`,
+		string(email)).Scan(&rowsWithThatEmail))
+	assert.Equal(t, 1, rowsWithThatEmail, "строк с этой почтой обязана остаться одна")
+
+	// Принадлежность двум аккаунтам выражена ЧЛЕНСТВАМИ — и оба действуют.
+	mems := membershipsOf(t, ctx, pool, activeID)
+	require.Len(t, mems, 2,
+		"у человека обязано стать два членства: без этого «строка одна» означало бы, "+
+			"что приглашение потерялось целиком")
+	state := map[string]string{}
+	for _, m := range mems {
+		state[m.AccountID] = m.State
+	}
+	assert.Equal(t, "ACTIVE", state[string(accA)])
+	assert.Equal(t, "ACTIVE", state[string(accB)],
+		"членство вошедшего человека действует сразу — второго входа платформа не просит")
+
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
+
+	// Приглашения, ждущего входа, не появилось: ждать нечего.
 	pendings, err := rd.Users().FindPendingByEmail(ctx, email)
 	require.NoError(t, err)
-	assert.Len(t, pendings, 1, "exactly the account-B PENDING row")
+	assert.Empty(t, pendings,
+		"вошедший человек не становится приглашённым оттого, что его позвали ещё куда-то")
+
+	// Чтение «есть ли такой человек ЗДЕСЬ» отвечает по членству — и отвечает
+	// одинаково про оба аккаунта, потому что строка одна.
 	gotA, err := rd.Users().GetByAccountEmail(ctx, accA, email)
 	require.NoError(t, err)
-	assert.Equal(t, activeID, gotA.ID, "account-A ACTIVE row still present")
+	assert.Equal(t, activeID, gotA.ID)
 	gotB, err := rd.Users().GetByAccountEmail(ctx, accB, email)
-	require.NoError(t, err)
-	assert.Equal(t, pendingID, gotB.ID, "account-B PENDING row present")
+	require.NoError(t, err, "в аккаунте B человек состоит — членство заведено приглашением")
+	assert.Equal(t, activeID, gotB.ID)
+
+	// Контроль к обоим чтениям выше: в аккаунте, куда человека не звали, тот же
+	// вопрос обязан получить отказ. Без него «нашлось в A и в B» означало бы
+	// лишь то, что читатель находит кого угодно где угодно.
+	_, err = rd.Users().GetByAccountEmail(ctx, accC, email)
+	require.Error(t, err, "в чужом аккаунте человека нет — членства туда никто не заводил")
+	assert.True(t, stderrors.Is(err, iamerr.ErrNotFound),
+		"отказ обязан приезжать сентинелом ErrNotFound, получено %v", err)
 }
 
-// ── 0011-B — concurrent first-login bootstrap is race-safe ──────────────────
+// ── конкурентное первое появление одного человека ──────────────────────────
 //
-// N concurrent first-logins for the SAME external_id each try to bootstrap a
-// fresh personal account (InsertActive into a DIFFERENT new account_id). The
-// per-account index does NOT serialize them (distinct account_ids). The 0011
-// partial UNIQUE on ACTIVE external_id is the DB guard that lets exactly one
-// win; the rest get ErrAlreadyExists (23505). Without 0011's replacement guard
-// (i.e. if step-2 drop left no global ACTIVE-external_id constraint) ALL would
-// commit → duplicate ACTIVE identity rows (the bug 0002 originally fixed).
-func TestUserInvite_0011B_ConcurrentBootstrap_RaceSafe(t *testing.T) {
+// N параллельных первых входов ОДНОГО внешнего субъекта, и каждый заводит себе
+// личный аккаунт — то есть свой, ОТЛИЧНЫЙ `account_id`. Пер-аккаунтные ключи
+// такую гонку не сериализуют by construction: аккаунты разные, пары не
+// совпадают. Разрешить её обязан ключ, аккаунта НЕ содержащий.
+//
+// Такой ключ здесь не один, и это надо назвать прямо, иначе проба выглядит
+// утверждением про конкретное имя: глобальные `users_identity_email_uniq` и
+// `users_identity_external_id_uniq` (20260823050000) плюс переживший их
+// `users_active_external_id_uniq` (0011, только ACTIVE). Проба не спрашивает,
+// КАКОЙ из них сработал, — она спрашивает ИСХОД: ровно один участник заводит
+// строку, остальные получают отказ сентинелом. Утверждение об имени ограничения
+// было бы утверждением о реализации и краснело бы на всякой её перестановке.
+//
+// Без ключа без аккаунта прошли бы ВСЕ: у человека завелось бы N действующих
+// строк — ровно тот дефект, ради которого глобальная уникальность и заведена.
+func TestUserInvite_ConcurrentBootstrap_RaceSafe(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -188,27 +253,33 @@ func TestUserInvite_0011B_ConcurrentBootstrap_RaceSafe(t *testing.T) {
 	wg.Wait()
 
 	assert.Equal(t, int64(1), atomic.LoadInt64(&successes),
-		"exactly one concurrent first-login bootstraps the ACTIVE identity row")
+		"ровно один участник заводит действующую строку человека")
 	assert.Equal(t, int64(N-1), atomic.LoadInt64(&failures),
-		"the rest lose the race on the ACTIVE-external_id UNIQUE guard")
+		"остальные обязаны проиграть гонку НА КЛЮЧЕ, а не на удаче")
 
-	// Losers map to the ErrAlreadyExists sentinel with the canonical Kachō
-	// message — the raw pgx constraint name must NEVER leak (data-integrity.md;
-	// migration 0011 added users_active_external_id_uniq to errors.uniqueText).
+	// Проигравшие обязаны получить сентинел ErrAlreadyExists с каноническим
+	// текстом: сырое имя ограничения наружу не течёт НИКОГДА
+	// (`data-integrity.md` §SQLSTATE-маппинг) — по нему восстанавливается схема.
+	// Имена перечислены в отрицаниях затем, что каждое из них и есть та строка,
+	// которая потекла бы, окажись маппинг неполным.
 	for _, e := range loserErrs {
 		assert.True(t, stderrors.Is(e, iamerr.ErrAlreadyExists),
 			"loser error maps to ErrAlreadyExists, got %v", e)
 		assert.NotContains(t, e.Error(), "users_active_external_id_uniq",
-			"canonical message must not leak the pgx constraint name")
+			"канонический текст не вправе нести имя ограничения")
+		assert.NotContains(t, e.Error(), "users_identity_external_id_uniq",
+			"канонический текст не вправе нести имя ограничения")
+		assert.NotContains(t, e.Error(), "users_identity_email_uniq",
+			"канонический текст не вправе нести имя ограничения")
 		assert.NotContains(t, e.Error(), "duplicate key value",
-			"canonical message must not leak raw pgx text")
+			"канонический текст не вправе нести сырой текст драйвера")
 	}
 
-	// Exactly one ACTIVE row for the identity globally.
+	// Действующая строка у человека ровно одна — глобально, а не в аккаунте.
 	rd, err := repo.Reader(ctx)
 	require.NoError(t, err)
 	defer func() { _ = rd.Rollback(ctx) }()
 	actives, err := rd.Users().FindActiveByExternalID(ctx, ext)
 	require.NoError(t, err)
-	assert.Len(t, actives, 1, "one ACTIVE identity row globally (no duplicates)")
+	assert.Len(t, actives, 1, "действующая строка личности одна — дублей не завелось")
 }

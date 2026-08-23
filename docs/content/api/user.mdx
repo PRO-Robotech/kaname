@@ -29,13 +29,28 @@ email.
     <tr><td><code>externalId</code></td><td>string</td><td>immutable (identity-поле)</td><td>Kratos <code>sub</code>. Пусто для <code>PENDING</code> (ещё не входил)</td></tr>
     <tr><td><code>email</code></td><td>string</td><td>output-only</td><td>Email (case-insensitive lookup)</td></tr>
     <tr><td><code>displayName</code></td><td>string</td><td>output-only</td><td>Отображаемое имя (снимок из Kratos identity traits)</td></tr>
-    <tr><td><code>accountId</code></td><td>string</td><td>immutable</td><td>Аккаунт-scope: каждая User-строка принадлежит ровно одному аккаунту</td></tr>
     <tr><td><code>inviteStatus</code></td><td>enum</td><td>lifecycle</td><td><code>PENDING</code> / <code>ACTIVE</code> / <code>BLOCKED</code></td></tr>
     <tr><td><code>invitedBy</code></td><td>string</td><td>output-only</td><td>User.id пригласившего (пусто для self-signup bootstrap)</td></tr>
     <tr><td><code>labels</code></td><td>map&lt;string,string&gt;</td><td>mutable</td><td>Метки <code>key:value</code>, до 64; User label-selectable для scoped-грантов</td></tr>
     <tr><td><code>createdAt</code></td><td>timestamp</td><td>output-only</td><td>Момент создания (RFC 3339, усечён до секунд)</td></tr>
   </tbody>
 </table>
+
+:::note Аккаунта у пользователя нет — и это не пропуск в таблице
+
+Поле `accountId` снято с ресурса. Оно объявляло, что у человека ровно один аккаунт, —
+так было, пока человек был строкой **в** аккаунте. Теперь пользователь есть идентичность
+платформы: одна строка на человека, а принадлежность аккаунтам выражается **членствами**,
+которых у него может быть несколько. Одно значение из этого множества, отданное в ответе,
+читалось бы как факт о человеке и лгало бы, не признаваясь в этом.
+
+Номер поля и его имя зарезервированы в контракте: следующее поле не займёт их, и клиент
+прежней версии не прочитает чужое значение как аккаунт.
+
+Вопрос «кто состоит в этом аккаунте» отвечает список пользователей, суженный аккаунтом
+(`GET /iam/v1/users?accountId=…`) — он читает членства, а не снятое поле.
+
+:::
 
 ### Значения inviteStatus
 
@@ -67,7 +82,6 @@ email.
       "externalId": "ory:kratos:9f2c…",
       "email": "dev@acme.example",
       "displayName": "Dev One",
-      "accountId": "acc2bkd71802av7dywa8",
       "inviteStatus": "ACTIVE",
       "createdAt": "2026-06-24T10:00:00Z"
     }

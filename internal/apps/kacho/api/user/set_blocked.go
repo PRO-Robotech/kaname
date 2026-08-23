@@ -6,17 +6,38 @@ package user
 // set_blocked.go — Block / Unblock: the two explicit actions over the state that
 // decides whether a person still participates in an Account.
 //
-// WHAT THIS IS SCOPED TO, because getting it wrong is a cross-tenant outage.
-// A `users` row is a MEMBERSHIP — one pair of (identity, Account) — and one
-// identity holds one row per Account it belongs to. These actions write ONE such
-// row. The identity keeps working wherever else it is active: token issuance
-// walks the membership set and serves the first row that may authenticate
-// (`internal/service/token_enrichment_service.go`, `internal/handler/iamhooks`),
-// refusing only when NONE can. So a block belongs to the Account that issued it,
-// and the admin of Account A cannot switch a person off in Account B. Anything
-// that made the refusal identity-wide would be a different — and much larger —
-// product decision, and it would break the two probes that pin this today
-// (`internal_upsert_blocked_test.go`).
+// ЧЕГО ЭТО КАСАЕТСЯ — ЛИЧНОСТИ ЦЕЛИКОМ, а не одного аккаунта (kacho#470/#981).
+//
+// Строка `users` БОЛЬШЕ НЕ ЕСТЬ ЧЛЕНСТВО. У человека одна строка на всю
+// платформу — это держат глобальные ключи `users_identity_email_uniq` и
+// `users_identity_external_id_uniq` (миграция 20260823050000), — а
+// принадлежность аккаунтам выражается строками `memberships`, которых у него
+// может быть несколько. Значит запрет, записанный в состояние строки, достаёт
+// до КАЖДОГО аккаунта человека, и администратор одного аккаунта отключает его
+// везде.
+//
+// Это следствие решения владельца «блокировка есть свойство личности»
+// (вопрос В-8 приёмки IAM-ID-1), а не побочный эффект: членства при запрете НЕ
+// трогаются, и снятие запрета их тоже не трогает.
+//
+// > [!warning] Здесь стояло обратное, и оно пережило свой предмет
+// > Прежняя редакция объявляла запрет пер-аккаунтным: «a block belongs to the
+// > Account that issued it, and the admin of Account A cannot switch a person
+// > off in Account B». Это было верно ровно до того, как строка перестала быть
+// > членством. Утверждение опасно не само по себе, а тем, что читается как
+// > действующее ограничение безопасности: следующий, кто придёт сюда за
+// > радиусом запрета, принял бы его за факт.
+// >
+// > Пробы, которые прежняя редакция называла «пиннящими» это свойство
+// > (`internal_upsert_blocked_test.go`), идут на подставных портах и потому
+// > глобального ключа не видят — зелёными они останутся при любой модели.
+// > Радиус запрета утверждается там, где его видно: на настоящей базе
+// > (`internal/apps/kacho/api/audit`).
+//
+// Выдача токена по-прежнему перебирает набор членств и обслуживает первое, что
+// может аутентифицироваться (`internal/service/token_enrichment_service.go`,
+// `internal/handler/iamhooks`), отказывая, когда не может ни одно, — но теперь
+// «не может ни одно» наступает разом, потому что состояние одно на человека.
 //
 // WHY NOT A FIELD ON Update. Three reasons, each on its own sufficient:
 //
