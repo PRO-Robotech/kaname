@@ -12,15 +12,27 @@ package session_revocations
 // per-object one, not the page-filtered one that resources with individual
 // owners need.
 //
-// The relation is the READ TIER on that user (`viewer`), not a `v_*` verb: `v_*`
-// is object-level access to the USER RECORD ITSELF, whereas a session history is
-// that user's CONTENTS — the distinction the platform already draws between a
-// project's own `v_list` and the listing of what is inside it. `iam_user.viewer`
-// admits the user themselves structurally (`subject`) and anyone holding
-// editor/admin over them, and no wildcard tuple satisfies it, so it narrows for
-// real. It is the SAME relation the catalog record for this RPC declares —
-// the record and the code must not be able to drift into describing different
-// lanes.
+// The relation is `session_reader` — the person themselves plus cloud oversight,
+// and nobody else (#1140). It is the SAME relation the catalog record for this
+// RPC declares; the record and the code must not be able to drift into
+// describing different lanes.
+//
+// It used to be the READ TIER `viewer`, and that was too wide by five: the model
+// compiler expands `iam_user.viewer` into SEVEN sources (the person, the three
+// directly-assignable tiers viewer/editor/admin, the delegated account steward,
+// the account owner, cloud oversight) against `session_reader`'s two. A session
+// history is information ABOUT A PERSON, not a right over an account — identity
+// is global in this tree, one `iam_user` row across all of a person's accounts,
+// with the identity→account link taken from membership, so a right held inside
+// ONE account disclosed the person's whole history, sessions in unrelated
+// accounts included. Fourth side of the owner's directive of 2026-08-23 that
+// #1086, #1102 and #1133 closed on their own subjects.
+//
+// Narrowing the READ takes nothing away from TERMINATION, and that is measured
+// rather than assumed: `Revoke` and `ForceLogout` sit in the catalog as
+// `<exempt>`/`INTERNAL_LISTENER` with no relation on the identity row at all,
+// so they were never gated by this one. A rights-holder inside the account did
+// not lose the ability to end someone's session — they never had it.
 //
 // The listener in front of this RPC does not answer it. Its two gates narrow the
 // CALLING MODULE — a verified mTLS certificate, and `system_viewer@cluster` held
@@ -57,10 +69,12 @@ import (
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
-// listByUserRelation — the read tier on `iam_user`. Kept next to the decision so
-// the one place that asks and the catalog record that declares it stay legible as
-// one statement.
-const listByUserRelation = "viewer"
+// listByUserRelation — the narrow read relation on `iam_user`. Kept next to the
+// decision so the one place that asks and the catalog record that declares it
+// stay legible as one statement; that the two agree is asserted by
+// `authzmap/reading_a_persons_session_history_test.go`, which reads the relation
+// out of the catalog rather than out of this literal.
+const listByUserRelation = "session_reader"
 
 // errModelNotConfigured — the refusal for a deployment that wired no rights
 // model. It names the missing piece because the only reader of this text is an

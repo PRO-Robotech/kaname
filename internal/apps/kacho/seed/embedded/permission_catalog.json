@@ -1113,7 +1113,7 @@
   {
     "fqn": "kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
     "permission": "iam.session_revocations.listByUser",
-    "required_relation": "viewer",
+    "required_relation": "session_reader",
     "scope_extractor": {
       "object_type": "iam_user",
       "from_request_field": "user_id"

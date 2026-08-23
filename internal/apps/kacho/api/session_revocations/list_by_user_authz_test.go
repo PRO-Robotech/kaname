@@ -129,7 +129,8 @@ func TestListByUser_ForeignSubject_IsRefusedAndStoreIsNotRead(t *testing.T) {
 	// question was. A gate asking about the wrong object refuses just as
 	// convincingly and narrows nothing: the object has to be the user the
 	// request named, and the subject the caller who asked.
-	assert.Contains(t, checker.asked, "user:"+neighbourID+"|viewer|iam_user:"+victimID,
+	assert.Contains(t, checker.asked,
+		"user:"+neighbourID+"|"+listByUserRelation+"|iam_user:"+victimID,
 		"the model was never asked whether this caller may read THIS user")
 }
 
@@ -162,17 +163,54 @@ func TestListByUser_Self_IsServedWithNoRelationPortAtAll(t *testing.T) {
 	require.Len(t, resp.GetRevocations(), 1)
 }
 
-// A delegate explicitly granted the read on that user is served. Without this the
-// refusal above would be satisfied by a gate that denies everyone.
-func TestListByUser_GrantedDelegate_IsServed(t *testing.T) {
+// Holding the READ TIER on that user no longer opens the session history.
+//
+// This assertion is INVERTED, not removed. It used to read "a delegate granted
+// the read on that user is served", and under #797 that was correct: this RPC
+// was gated by `iam_user.viewer`, so the tier was the grant. #1140 narrowed the
+// gate to `session_reader` — a session history is information ABOUT A PERSON,
+// not a right over their account, and identity is global here, so a tier held
+// inside one account disclosed the person's history across all of them. From
+// that moment the old assertion pinned behaviour the owner's decision had
+// overturned: it went green on the wrong answer and red on the right one.
+//
+// Removing it would have guarded nothing — putting the tier back is one line of
+// the model, and it would pass in silence. So it now states the opposite, with
+// both controls that keep the refusal from being vacuous:
+//
+//   - the model WAS consulted, and about the narrowed relation — so the refusal
+//     is a decision, not a request cut short somewhere earlier;
+//   - the tier this caller genuinely holds is never even ASKED about, which is
+//     what "the gate moved off the tier" means observably.
+//
+// That the gate is not simply "deny everyone" is held by its neighbours:
+// TestListByUser_ClusterAdmin_IsServed goes through the model and is served,
+// TestListByUser_Self_IsServed is served ahead of it.
+func TestListByUser_ReadTierHolderOnThatUser_IsRefused(t *testing.T) {
 	store := victimHistory()
-	h := newHandler(&fakeRevoker{}, store).WithRelationStore(
-		grants("user:" + neighbourID + "|viewer|iam_user:" + victimID))
+	// Exactly what a delegated account steward ends up holding on a member's
+	// identity row, and exactly what used to gate this RPC.
+	checker := grants("user:" + neighbourID + "|viewer|iam_user:" + victimID)
+	h := newHandler(&fakeRevoker{}, store).WithRelationStore(checker)
 
 	resp, err := listByUser(t, h, asUser(neighbourID), victimID)
 
-	require.NoError(t, err)
-	require.Len(t, resp.GetRevocations(), 1)
+	require.Error(t, err,
+		"the read tier on a user still hands over that user's session history: "+
+			"whoever administers one of their accounts reads sessions from all of them")
+	assert.Nil(t, resp.GetRevocations())
+	assert.Equal(t, codes.NotFound, status.Code(err))
+	assert.Equal(t, "User "+victimID+" not found", status.Convert(err).Message(),
+		"the refusal must read exactly like the owner's own miss")
+	assert.Zero(t, store.reads,
+		"the revocation store was read for a caller who may not read it")
+
+	assert.Contains(t, checker.asked,
+		"user:"+neighbourID+"|"+listByUserRelation+"|iam_user:"+victimID,
+		"the model was not asked about the narrowed relation — then the refusal above is "+
+			"not a decision and this probe is vacuous")
+	assert.NotContains(t, checker.asked, "user:"+neighbourID+"|viewer|iam_user:"+victimID,
+		"the read tier was still put to the model: the gate has not actually moved off it")
 }
 
 // The cloud administrator reads anything — the emergency path must not depend on

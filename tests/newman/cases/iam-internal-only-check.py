@@ -23,7 +23,7 @@ Coverage:
   IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT    — InternalIAMService.LookupSubject → 404 mux-miss на external
   IAM-INT-NEG-EXT-IAM-CHECK            — InternalIAMService.Check → 404 mux-miss на external
   IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS
-                                       — ReadTuples / SessionRevocations.{Revoke,IsRevoked} /
+                                       — ReadTuples / SessionRevocations.{Revoke,IsRevoked,ListByUser} /
                                          ForceLogout / InternalUserService.Get: НИКОГДА не 2xx на
                                          external + пин к absent-path контролю. НЕ доказывает
                                          route-изоляцию (см. «TWO FAMILIES» ниже) и прямо это заявляет
@@ -209,6 +209,7 @@ CASES = []
 # упасть», ради отличия от которого весь этот блок и написан.
 _UNBOUND_SR_REVOKE = "/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke"
 _UNBOUND_SR_ISREVOKED = "/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked"
+_UNBOUND_SR_LISTBYUSER = "/kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser"
 _UNBOUND_FORCE_LOGOUT = "/kacho.cloud.iam.v1.InternalIAMService/ForceLogout"
 
 # ---------------------------------------------------------------------------
@@ -406,6 +407,18 @@ _UNBOUND_PROBES = [
      {"userId": "usr00000000000000abc", "tokenJti": "leak-jti", "reason": "x"}),
     ("EXT-SR-ISREVOKED", "InternalSessionRevocationsService.IsRevoked", _UNBOUND_SR_ISREVOKED,
      {"tokenJti": "leak-jti"}),
+    # ListByUser — единственный глагол этой службы, чей ОТВЕТ несёт сведения о
+    # человеке (какие его сессии сняли, когда и почему), и до #1140 он один из
+    # трёх здесь отсутствовал. Наблюдаемая арендатором поверхность у него ровно
+    # одна — «снаружи недостижим», и утверждать надо именно её: REST-привязки у
+    # службы нет by construction (`google.api.http` в её proto — ноль), поэтому
+    # положительной чёрноящичной полосы для «человек видит свою историю» здесь
+    # не существует, и подделывать её нельзя. Сужение круга держателей #1140
+    # утверждается там, где оно происходит: гейтом модели
+    # (authzmap/reading_a_persons_session_history_test.go) и вердиктом по
+    # закоммиченным строкам (service/reading_a_persons_session_history_*).
+    ("EXT-SR-LISTBYUSER", "InternalSessionRevocationsService.ListByUser", _UNBOUND_SR_LISTBYUSER,
+     {"userId": "usr00000000000000abc", "pageSize": 10}),
     ("EXT-FORCELOGOUT", "InternalIAMService.ForceLogout", _UNBOUND_FORCE_LOGOUT,
      {"userId": "usr00000000000000abc", "reason": "x"}),
 ]
