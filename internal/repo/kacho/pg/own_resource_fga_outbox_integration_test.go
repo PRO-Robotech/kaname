@@ -12,14 +12,22 @@ package pg_test
 //   - positive: an own-resource Create (Project/Group/SA/Role + the
 //     account-owner self-grant) co-commits its FGA hierarchy/owner-tuple INTENT
 //     into kacho_iam.fga_outbox in the SAME writer-tx as the resource INSERT
-//     (event_type='fga.tuple.write', sent_at IS NULL), next to the audit row.
+//     (event_type='fga.tuple.write'), next to the audit row.
+//
+//     Прежде здесь утверждалось ещё и `sent_at IS NULL` — «строка пока не
+//     доставлена». Утверждение снято вместе со своим предметом: дренажа у этого
+//     журнала нет (стадия S6 эпика #747, `a4b6cfba9`), колонки доставки сняла
+//     миграция 20260822160000 (kacho#917), и строка действует С КОММИТА.
 //   - atomicity (запрет #10): if the writer-tx rolls back, NEITHER the
 //     resource row NOR the fga_outbox intent row remain — all-or-nothing, no
 //     window "resource exists, tuple intent lost".
-//   - idempotent double-delivery: a re-delivered already-applied tuple
-//     → FGA 409 → applier ErrAlreadyApplied → drainer marks success (covered at
-//     the applier level by clients/fga_applier_integration_test.go; this file
-//     asserts the EMIT side that feeds it).
+//
+// Третьим пунктом здесь стояла повторная доставка уже применённого кортежа со
+// ссылкой на пробу применителя. Ни применителя, ни дренажа, ни той пробы в
+// дереве нет — они сняты вместе с внешним движком отношений (стадия S6 эпика
+// #747). Единственный потребитель журнала сегодня — триггер свёртки прямого
+// факта (миграция 0098), и он читает строку в той же транзакции, что её
+// породила.
 
 import (
 	"context"
@@ -82,17 +90,15 @@ func TestOwnResource_FGAOutbox_ProjectCreateEmitsHierarchyIntent(t *testing.T) {
 	require.NoError(t, w.EmitFGARelationWrite(ctx, []service.RelationTuple{tup}))
 	require.NoError(t, w.Commit(ctx))
 
-	// fga_outbox row present, pending (sent_at NULL), correct payload.
+	// fga_outbox row present with the right kind and payload.
 	var et, payloadRaw string
-	var sentAtNull bool
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT event_type, payload::text, sent_at IS NULL
+		`SELECT event_type, payload::text
 		   FROM kacho_iam.fga_outbox
 		  WHERE payload->>'object' = $1
 		  ORDER BY id DESC LIMIT 1`,
-		"project:"+string(projID)).Scan(&et, &payloadRaw, &sentAtNull))
+		"project:"+string(projID)).Scan(&et, &payloadRaw))
 	require.Equal(t, "fga.tuple.write", et)
-	require.True(t, sentAtNull, "intent must be pending (sent_at IS NULL) until drainer applies")
 	var payload map[string]string
 	require.NoError(t, json.Unmarshal([]byte(payloadRaw), &payload))
 	require.Equal(t, "account:"+string(acc.ID), payload["user"])
@@ -102,8 +108,8 @@ func TestOwnResource_FGAOutbox_ProjectCreateEmitsHierarchyIntent(t *testing.T) {
 
 // TestOwnResource_FGAOutbox_RollbackDiscardsBothRowAndIntent — запрет
 // #10. Rolling back the writer-tx MUST discard BOTH the resource row AND the
-// fga_outbox intent row — atomic all-or-nothing, no orphan intent visible to
-// the drainer and no resource row without a tuple intent.
+// fga_outbox intent row — atomic all-or-nothing, no orphan intent and no
+// resource row without a tuple intent.
 func TestOwnResource_FGAOutbox_RollbackDiscardsBothRowAndIntent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

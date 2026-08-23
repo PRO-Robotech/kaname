@@ -32,7 +32,6 @@ package fga_outbox_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -45,69 +44,23 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 )
 
-// TestOutboxPartitionKeyCoversTheWholeGrantSet — ключ строки рендерит БАЗА, и рендерит
-// его по паре (субъект, объект), а не по тройке.
+// Здесь стояла проба TestOutboxPartitionKeyCoversTheWholeGrantSet — она
+// закрепляла КЛЮЧ УПОРЯДОЧИВАНИЯ строки: что его рендерит база триггером и что
+// рендерит по паре (субъект, объект).
 //
-// Ключ заполняет триггер `kacho_iam.fga_outbox_tuple_key()` (миграция 0099), а не
-// пишущая сторона: второй рендер того же имени в коде разошёлся бы с этим молча.
-// Полезная нагрузка, из которой ключ не собирается, отвергается на INSERT — то есть
-// строка, которую нельзя спроецировать, в таблицу не попадает вовсе.
+// Она снята вместе со своим предметом (kacho#1033). Ключ существовал ради клейма
+// дренажа «только голова партиции»; дренажа не стало вместе с внешним движком
+// прав (стадия S6 эпика #747), а колонку сняла миграция 20260822160000. Писатель
+// ключа — триггер `fga_outbox_tuple_key_trigger` — пережил обоих и после снятия
+// колонки отвергал каждую вставку в журнал; он снят миграцией 20260823001000.
 //
-// Положительный контроль — вторая половина: два РАЗНЫХ субъекта на одном объекте
-// обязаны получить РАЗНЫЕ ключи. Без него проба зеленела бы и на вырожденном ключе
-// (одно значение на всю таблицу), который «покрывает набор» тождественно.
-func TestOutboxPartitionKeyCoversTheWholeGrantSet(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
-	require.NoError(t, err)
-	pgtest.ClosePoolAtEnd(t, pool)
-
-	const (
-		alice  = "user:usr_partition_alice"
-		bob    = "user:usr_partition_bob"
-		object = "vpc_address:vaddr_partition"
-	)
-	tx, err := pool.Begin(ctx)
-	require.NoError(t, err)
-	require.NoError(t, fga_outbox.EmitWriteTx(ctx, tx, []clients.RelationTuple{
-		{User: alice, Relation: "v_get", Object: object},
-		{User: alice, Relation: "v_update", Object: object},
-	}))
-	// Отзыв набора alice — другая форма строки, ключ обязан быть тот же.
-	require.NoError(t, fga_outbox.EmitDeleteTx(ctx, tx, []clients.RelationTuple{
-		{User: alice, Relation: "v_get", Object: object},
-	}))
-	require.NoError(t, fga_outbox.EmitWriteTx(ctx, tx, []clients.RelationTuple{
-		{User: bob, Relation: "v_get", Object: object},
-	}))
-	require.NoError(t, tx.Commit(ctx))
-
-	keys := map[string][]string{} // ключ → субъекты, которых он несёт
-	rows, err := pool.Query(ctx, `
-		SELECT `+fga_outbox.PartitionColumn+`, payload->>'user'
-		  FROM kacho_iam.fga_outbox
-		 WHERE payload->>'object' = $1
-		 ORDER BY id ASC`, object)
-	require.NoError(t, err)
-	for rows.Next() {
-		var key, user string
-		require.NoError(t, rows.Scan(&key, &user))
-		keys[key] = append(keys[key], user)
-	}
-	rows.Close()
-	require.NoError(t, rows.Err())
-
-	require.Len(t, keys, 2, "один ключ на пару (субъект, объект), получено %v", keys)
-	for key, subjects := range keys {
-		for _, s := range subjects {
-			require.Equal(t, subjects[0], s,
-				fmt.Sprintf("ключ %q обязан нести ровно одного субъекта, получено %v", key, subjects))
-		}
-	}
-}
+// Проба, пережившая свой предмет, — не «лишняя», а находка: она либо утверждает
+// о механизме, которого нет, либо не может упасть. Здесь было первое.
+//
+// Что журнал по-прежнему ПРИНИМАЕТ строку тем же набором колонок, каким её
+// вставляет EmitWriteTx, утверждает TestJournalAcceptsAWriteAfterEveryMigration
+// в пакете pg; что ни один триггер схемы не называет полей, которых у строки
+// нет, — TestTriggerBodyMatchesRowShape там же.
 
 // TestSetRowCarriesTheEchoOnlyForGrants — асимметрия эха, закреплённая на СТРОКЕ.
 //
