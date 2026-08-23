@@ -138,6 +138,46 @@ func TestNonVerbReaderGate_EverySourceIsLoadBearing(t *testing.T) {
 	require.Containsf(t, deadPairNames(blindCode), codeTwin.String(),
 		"источник «прод-код» не несущий: он ослеплён, а %q всё равно числится читаемым", codeTwin)
 
+	// ОХРАНИТЕЛЬ ИМЁН ТИПОВ — не источник: он не добавляет
+	// читателей, а отнимает у источника «прод-код» право засчитывать литерал,
+	// равный имени типа модели. Без него `"user"`, стоящий в прод-коде сотнями
+	// вхождений как ТИП СУБЪЕКТА, объявлял бы читателем любое отношение с таким
+	// именем.
+	//
+	// Опыт ставится возвращением снятого: `iam_service_account#user` — отношение
+	// «пользоваться служебной учёткой», снятое задачей #1115. Фикстура устойчива
+	// именно потому, что предмет СНЯТ: снятое не возвращается само, в отличие от
+	// живого отношения, которое завтра может уехать (тем и рассыпалась прежняя
+	// фикстура пробы `mapClusterRelations`, привязанная к `billing_admin`).
+	//
+	// СТОИТ ПЕРЕД ОСЬЮ «МОДЕЛЬ» НАМЕРЕННО. Близнец той оси — указатель `account`,
+	// и его имя тоже совпадает с именем типа: сняв охранитель, роняешь её первой, а
+	// сообщение назовёт «источник модель не несущий» — то есть укажет не на то, что
+	// сломано. Порядок здесь и есть то, что делает вердикт читаемым.
+	//
+	// Доказательство состоит из ДВУХ половин, и порознь ни одна ничего не значит:
+	// литерал в прод-коде ЕСТЬ (иначе тишина шла бы от его отсутствия), и
+	// отношение при этом ВСЁ РАВНО находка — значит разницу делает охранитель.
+	guardTwin := relPair{Type: "iam_service_account", Relation: "user"}
+	require.Truef(t, codeLits[guardTwin.Relation],
+		"половина опыта отсутствует: литерала %q в прод-коде нет, поэтому находка ниже "+
+			"объяснялась бы его отсутствием, а не охранителем имён типов", guardTwin.Relation)
+	require.Truef(t, model.Type(guardTwin.Relation) != nil,
+		"половина опыта отсутствует: %q не является именем ТИПА модели, поэтому охранитель "+
+			"на него не смотрит и опыт измеряет не его", guardTwin.Relation)
+	require.Nilf(t, model.Type(guardTwin.Type).Rel(guardTwin.Relation),
+		"предпосылка опыта: %q обязано быть снято с дерева, иначе инъекция ничего не вносит", guardTwin)
+
+	guarded := injectRelationIntoType(t, canonicalDSL(t), guardTwin.Type,
+		"define "+guardTwin.Relation+": [user, service_account] or editor")
+	guardedModel, err := authzplan.ParseModel(guarded)
+	require.NoError(t, err, "инъекция обязана оставаться разбираемой моделью")
+	guardedDead, _ := nonVerbDeadRelations(guardedModel, catalog, codeLits)
+	require.Containsf(t, deadPairNames(guardedDead), guardTwin.String(),
+		"охранитель имён типов не несущий: литерал %q в прод-коде есть, и отношение "+
+			"засчитано читаемым — то есть источник «прод-код» объявляет читателя там, где "+
+			"стоит имя ТИПА СУБЪЕКТА, а не отношения", guardTwin.Relation)
+
 	// Источник «модель»: ослепить его подменой входа нельзя — он вычисляется из
 	// той же модели, — поэтому опыт ставится с другой стороны: у отношения
 	// отбирается ЕГО ЧИТАТЕЛЬ, и оно обязано стать находкой.
@@ -167,7 +207,9 @@ func TestNonVerbReaderGate_EverySourceIsLoadBearing(t *testing.T) {
 		require.NotContainsf(t, names, twin.String(),
 			"близнец %q мёртв и без ослепления — опыт выше ничего не доказывает", twin)
 	}
-	t.Logf("опыт: несущими подтверждены 3 источника из 3; на нетронутом дереве все три близнеца немы")
+	t.Logf("опыт: несущими подтверждены 3 источника из 3 и охранитель имён типов "+
+		"(на возвращённом %s: литерал в прод-коде есть, находка всё равно названа); "+
+		"на нетронутом дереве все три близнеца немы", guardTwin)
 }
 
 // canonicalDSL — текст канонической модели.
@@ -224,48 +266,116 @@ func relationsBlockStart(t *testing.T, dsl, typeName string) int {
 	return j + k + len(rel)
 }
 
-// TestNonVerbReaderGate_LedgerExpiresItself — перечень исключений истекает сам.
+// TestNonVerbReaderGate_LedgerExpiresItself — сверка с перечнем исключений
+// различает ЧЕТЫРЕ состояния, и ни одно из них не требует, чтобы перечень был
+// непуст.
 //
-// Половина смысла гейта — в том, что запись, которой больше нечего исключать,
-// становится находкой. Эта половина не проверяется ни одним из опытов выше: там
-// перечень совпадает с находками, и обе стороны сверки молчат по одной причине.
+// # Почему опыт СИНТЕТИЧЕСКИЙ, хотя соседние — на настоящем дереве
+//
+// Прежняя редакция брала входы у дерева и начиналась с `require.NotEmpty(dead)`:
+// «на дереве ноль мёртвых пар — опыту не с чем сверяться». Она молча зависела от
+// того, что перечень НЕПУСТ, — то есть от наличия незакрытой находки. Пока
+// находки были, опыт работал; в тот день, когда последние пять были закрыты
+// (#1114, #1115) и перечень опустел, опыт покраснел — на ДОСТИЖЕНИИ своей цели.
+//
+// Соблазн в такой ситуации — вернуть запись ради зелёного, то есть воскресить
+// послабление без предмета: ровно тот класс, который этот гейт и стережёт.
+// Поэтому чинится опыт, а не ведомость, и чинится он сменой входа: предмет здесь
+// — КОМПАРАТОР `diffAgainstLedger`, чистая функция двух аргументов, и его
+// свойства не зависят от того, что сегодня лежит в дереве.
+//
+// Тие к дереву при этом не потеряна и стоит первой: перечень и находки обязаны
+// сходиться в обе стороны на НАСТОЯЩИХ входах — но это утверждение о равенстве,
+// а не о непустоте, и на пустом дереве оно выполняется, а не ломается.
+//
+// # Четвёртое состояние — и честно о том, ЧТО оно закрывает
+//
+// Прежняя редакция проверяла три состояния: запись без предмета → находка,
+// находка вне перечня → находка и — на стороне дерева — действующий перечень →
+// тишина. Третье держалось на том, что в перечне лежали пять живых записей: с
+// опустевшим перечнем `stale` пуст при ЛЮБОМ компараторе, и утверждение стало бы
+// вакуумным. Здесь оно возвращено синтетикой и названо прямо: запись, у которой
+// предмет ЕЩЁ ЕСТЬ, обязана МОЛЧАТЬ (ось A).
+//
+// ЧЕМ ОСЬ A ЯВЛЯЕТСЯ НА САМОМ ДЕЛЕ — намеренным дублированием, а не единственным
+// сторожем. Здесь стояло «без неё сверка, объявляющая устаревшей вообще всякую
+// запись, прошла бы оба оставшихся опыта». Это ОПРОВЕРГНУТО опытом, а не вычитано
+// из кода: поломку `if !got[p]` → `if true` ловят ТРИ независимых утверждения —
+// ось A, отрицательная половина оси B (`NotContains(stale, withSubject)`) и
+// пустота `stale` в оси C. Сняв ось A, получаешь красное от B; сняв обе — красное
+// от C; и только сняв все три, получаешь ЗЕЛЁНОЕ на сломанном компараторе.
+//
+// Брешь при опустевшем перечне закрывают, стало быть, ОТРИЦАТЕЛЬНЫЕ ПОЛОВИНЫ осей
+// B и C, добавленные здесь же, — а не ось A. Ось A остаётся намеренно: она
+// называет состояние прямо, и её сообщение об отказе единственное говорит про
+// запись с ЖИВЫМ предметом, а не про «неожиданную устаревшую запись». Избыточность
+// в проверках законна; неверный довод в комментарии У ГЕЙТА — нет: по нему
+// следующий читатель либо снимет ось A, сочтя её несущей в одиночку, либо примет
+// непроверенное рассуждение за проверенное.
 func TestNonVerbReaderGate_LedgerExpiresItself(t *testing.T) {
+	// ── сторона дерева: перечень и находки сходятся в ОБЕ стороны ──────────────
 	root := monorepoRoot(t)
-	catalog, _ := iamCatalogRequiredRelations(t, root)
-	codeLits, _ := prodCodeStringLiterals(t, root)
-	dead, _ := nonVerbDeadRelations(canonicalModel(t), catalog, codeLits)
-	require.NotEmpty(t, dead, "на дереве ноль мёртвых пар — опыту не с чем сверяться")
+	catalog, catalogEntries := iamCatalogRequiredRelations(t, root)
+	codeLits, filesParsed := prodCodeStringLiterals(t, root)
+	require.Positive(t, catalogEntries, "каталог пуст — опыт ставится не над тем")
+	require.Positive(t, filesParsed, "прод-код не разобран — опыт ставится не над тем")
 
-	// Действующий перечень: расхождений нет ни в одну сторону.
+	dead, _ := nonVerbDeadRelations(canonicalModel(t), catalog, codeLits)
 	unknown, stale := diffAgainstLedger(dead, nonVerbWithoutReader)
 	require.Emptyf(t, unknown, "перечень не покрывает найденное: %v", deadPairNames(unknown))
 	require.Emptyf(t, stale, "перечень несёт записи без предмета: %v", deadPairNames(stale))
 
-	// Запись без предмета — находка.
-	ghost := relPair{Type: "iam_role", Relation: "viewer"}
-	require.NotContainsf(t, deadPairNames(dead), ghost.String(),
-		"близнец %q обязан быть ЖИВЫМ: иначе опыт про устаревшую запись ничего не измеряет", ghost)
-	withGhost := map[relPair]string{ghost: "запись, которой нечего исключать"}
-	for p, why := range nonVerbWithoutReader {
-		withGhost[p] = why
+	// ── синтетика: четыре состояния компаратора, каждое отдельной осью ─────────
+	//
+	// Пары намеренно не существуют в модели: предмет опыта — компаратор, и вход
+	// ему подаётся прямо, чтобы «краснеет» не зависело ни от одной живой находки.
+	withSubject := relPair{Type: "synthetic_type_a", Relation: "synthetic_relation_a"}
+	ghost := relPair{Type: "synthetic_type_b", Relation: "synthetic_relation_b"}
+	unlisted := relPair{Type: "synthetic_type_c", Relation: "synthetic_relation_c"}
+
+	model := canonicalModel(t)
+	for _, p := range []relPair{withSubject, ghost, unlisted} {
+		require.Nilf(t, model.Type(p.Type), "пара %q обязана быть синтетической — иначе опыт зависит от дерева", p)
 	}
-	_, stale = diffAgainstLedger(dead, withGhost)
+
+	// A. запись, у которой предмет ЕЩЁ ЕСТЬ, — молчит в обе стороны.
+	synthDead := []relPair{withSubject}
+	synthLedger := map[relPair]string{withSubject: "предмет на месте"}
+	unknown, stale = diffAgainstLedger(synthDead, synthLedger)
+	require.Emptyf(t, unknown, "действующая запись названа находкой вне перечня: %v", deadPairNames(unknown))
+	require.Emptyf(t, stale, "действующая запись названа устаревшей: %v — сверка не различает "+
+		"«предмет ещё есть» и «предмета не осталось». Ту же поломку ловят ещё два утверждения "+
+		"ниже (отрицательная половина оси B и пустота stale в оси C); здесь она названа прямо",
+		deadPairNames(stale))
+
+	// B. запись, которой нечего исключать, — находка.
+	unknown, stale = diffAgainstLedger(synthDead, map[relPair]string{
+		withSubject: "предмет на месте",
+		ghost:       "запись, которой нечего исключать",
+	})
+	require.Emptyf(t, unknown, "неожиданная находка вне перечня: %v", deadPairNames(unknown))
 	require.Containsf(t, deadPairNames(stale), ghost.String(),
 		"перечень не истекает сам: запись %q ничего не исключает, а сверка её не назвала", ghost)
+	require.NotContainsf(t, deadPairNames(stale), withSubject.String(),
+		"устаревшей названа и запись с предметом — сверка не различает два состояния")
 
-	// Находка вне перечня — тоже находка (контроль в обратную сторону).
-	shortened := map[relPair]string{}
-	var dropped relPair
-	for p, why := range nonVerbWithoutReader {
-		if dropped == (relPair{}) {
-			dropped = p
-			continue
-		}
-		shortened[p] = why
-	}
-	unknown, _ = diffAgainstLedger(dead, shortened)
-	require.Containsf(t, deadPairNames(unknown), dropped.String(),
-		"сверка не видит находку вне перечня: %q мертва и в перечне её нет", dropped)
+	// C. находка вне перечня — тоже находка (контроль в обратную сторону).
+	unknown, stale = diffAgainstLedger([]relPair{withSubject, unlisted}, synthLedger)
+	require.Containsf(t, deadPairNames(unknown), unlisted.String(),
+		"сверка не видит находку вне перечня: %q мертва и в перечне её нет", unlisted)
+	require.NotContainsf(t, deadPairNames(unknown), withSubject.String(),
+		"находкой названа и перечисленная пара — сверка не читает перечень")
+	require.Emptyf(t, stale, "неожиданная устаревшая запись: %v", deadPairNames(stale))
 
-	t.Logf("опыт: мёртвых на дереве %d; запись без предмета названа; находка вне перечня названа", len(dead))
+	// D. ИДЕАЛ НЕ ЕСТЬ ПОЛОМКА: пустой перечень при нуле находок молчит.
+	// Это и есть то состояние, на котором прежняя редакция краснела.
+	unknown, stale = diffAgainstLedger(nil, map[relPair]string{})
+	require.Emptyf(t, unknown, "пустая сверка выдумала находку: %v", deadPairNames(unknown))
+	require.Emptyf(t, stale, "пустая сверка выдумала устаревшую запись: %v", deadPairNames(stale))
+
+	t.Logf("опыт: на дереве мёртвых %d, записей перечня %d (расхождений нет ни в одну сторону); "+
+		"состояний компаратора проверено 4 из 4 — действующая запись молчит, запись без предмета "+
+		"названа, находка вне перечня названа, пустая сверка молчит; осмотрено записей каталога %d, "+
+		"прод-файлов %d",
+		len(dead), len(nonVerbWithoutReader), catalogEntries, filesParsed)
 }
