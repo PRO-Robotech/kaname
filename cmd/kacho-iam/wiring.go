@@ -623,7 +623,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	sessionRevocationsHandler := sessionrevapp.NewHandler(
 		sessionrevapp.NewRevokeUseCase(sessionRevAdapter, opsRepo),
 		sessionRevAdapter,
-	).WithRelationStore(relationStore)
+	).WithRelationStore(relationStore).
+		// SessionCutoffOf — отсечка субъекта на полосу БРАУЗЕРНОЙ сессии края.
+		// Читатель ТОТ ЖЕ, которым пользуются хуки выдачи: два ответа об одной
+		// отсечке разошлись бы молча, и разошлись бы там, где расхождение
+		// означает «выведен по одной полосе и работает по другой».
+		WithCutoffReader(kachopg.NewUserTokenRevocationRepo(pool))
 
 	// ── SAKey wiring (Class A static SA keys via Hydra) ───────────────────
 	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, metricsReg.CompensationRecorder(), logger)
