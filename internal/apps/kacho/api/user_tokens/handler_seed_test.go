@@ -25,7 +25,7 @@ import (
 func TestHandlerIssue_SAPrincipal_CreatedByIsTargetUser(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	issue := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	issue := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
 	h := NewHandler(issue, nil, nil)
 
 	// Caller is the bootstrap-admin SA (service_account principal).
@@ -44,7 +44,7 @@ func TestHandlerIssue_SAPrincipal_CreatedByIsTargetUser(t *testing.T) {
 func TestHandlerIssue_UserPrincipal_CreatedByIsPrincipal(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	issue := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	issue := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
 	h := NewHandler(issue, nil, nil)
 
 	ctx := operations.WithPrincipal(context.Background(),
@@ -59,7 +59,7 @@ func TestHandlerIssue_UserPrincipal_CreatedByIsPrincipal(t *testing.T) {
 }
 
 func TestHandlerIssue_UserPrincipal_SpoofedCreatedBy_Rejected(t *testing.T) {
-	issue := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubHydra{}, &stubOpsRepo{})
+	issue := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{})
 	h := NewHandler(issue, nil, nil)
 
 	ctx := operations.WithPrincipal(context.Background(),

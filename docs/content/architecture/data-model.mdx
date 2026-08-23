@@ -40,7 +40,7 @@ erDiagram
     <tr><td><code>roles</code> · <code>role_rule_selectors</code></td><td>Роли и правила (rules)</td><td>partial-UNIQUE имя per-scope; CHECK <code>roles_scope_xor</code>; OCC <code>xmin</code></td></tr>
     <tr><td><code>access_bindings</code> · <code>access_binding_subjects</code></td><td>Привязки доступа + мульти-субъекты</td><td>UNIQUE активного гранта; <code>status</code>; <code>deletion_protection</code></td></tr>
     <tr><td><code>service_account_oauth_clients</code></td><td>Маппинг SA → Hydra-клиент (ключ)</td><td>UNIQUE <code>sva_id</code>; FK <code>ON DELETE RESTRICT</code></td></tr>
-    <tr><td><code>user_oauth_clients</code></td><td>Маппинг User → Hydra-клиент (токен)</td><td>N:1; FK <code>ON DELETE CASCADE</code></td></tr>
+    <tr><td><code>user_oauth_clients</code></td><td>Персональные токены User (открытая половина ключа; <code>hydraClientId</code> пуст у нового выпуска)</td><td>N:1; FK <code>ON DELETE CASCADE</code></td></tr>
     <tr><td><code>operations</code></td><td>LRO-журнал (async-мутации)</td><td>corelib operations-таблица; denormalized <code>account_id</code></td></tr>
     <tr><td><code>audit_outbox</code></td><td>Audit-журнал мутаций (в одной TX)</td><td>эмитится атомарно с мутацией, вывозится в поток записей службы</td></tr>
     <tr><td><code>fga_outbox</code></td><td>Журнал намерений об отношениях</td><td>триггер журнала складывает из строки прямой факт в той же TX</td></tr>

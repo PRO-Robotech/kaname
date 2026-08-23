@@ -22,7 +22,6 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
@@ -70,20 +69,6 @@ func (s *stubUserClientRepo) DeleteByID(ctx context.Context, tx service.Tx, id d
 }
 func (s *stubUserClientRepo) List(ctx context.Context, userID domain.UserID, pageToken string, pageSize int32) ([]domain.UserOAuthClient, string, error) {
 	return s.listRows, "", nil
-}
-
-type stubHydra struct {
-	gotReq  clients.CreateOAuthClientRequest
-	deleted string
-}
-
-func (s *stubHydra) CreateOAuthClient(ctx context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
-	s.gotReq = req
-	return clients.HydraOAuthClient{ClientID: "hydra-usr-fake"}, nil
-}
-func (s *stubHydra) DeleteOAuthClient(ctx context.Context, clientID string) error {
-	s.deleted = clientID
-	return nil
 }
 
 type stubTx struct{}
@@ -181,13 +166,15 @@ func (e errRedactor) RedactResponseField(context.Context, string, []string) erro
 // ---- Tests ----
 
 // TestIssue_HappyPath (USR-01): Execute → Operation; response несёт одноразовый
-// private_key_pem + client_id + key_id + algorithm=ES256 + token{uoc…}. Hydra
-// зарегистрирован private_key_jwt с owner=user_id.
+// private_key_pem + client_id + key_id + algorithm=ES256 + token{uoc…}.
+//
+// Форма регистрации у внешнего поставщика здесь больше не утверждается: её нет
+// (#1121). Что удостоверение годно к предъявлению НАШЕМУ издателю, утверждают
+// пробы `usecase_provider_mirror_test.go` и интеграционная проба реестра.
 func TestIssue_HappyPath(t *testing.T) {
 	repo := &stubUserClientRepo{}
-	hydra := &stubHydra{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, hydra, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -232,15 +219,10 @@ func TestIssue_HappyPath(t *testing.T) {
 	if tok.GetKeyAlgorithm() != "ES256" {
 		t.Errorf("token.key_algorithm = %q", tok.GetKeyAlgorithm())
 	}
-	// Hydra registration shape.
-	if hydra.gotReq.TokenEndpointAuthMethod != "private_key_jwt" {
-		t.Errorf("hydra auth method = %q, want private_key_jwt", hydra.gotReq.TokenEndpointAuthMethod)
-	}
-	if hydra.gotReq.Owner != "usr00000000000000001" {
-		t.Errorf("hydra owner = %q, want user id (principal maps to user:<id>)", hydra.gotReq.Owner)
-	}
-	if hydra.gotReq.JWKS == nil || len(hydra.gotReq.JWKS.Keys) != 1 {
-		t.Error("hydra request must carry the public JWK")
+	// Открытая половина ключа осталась у нас — по ней проверяется подпись
+	// утверждения на пути выдачи токена.
+	if repo.inserted.PublicKeyPEM == "" {
+		t.Error("строка удостоверения обязана нести открытый ключ")
 	}
 }
 
@@ -257,7 +239,7 @@ func TestIssue_ValidationErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubHydra{}, &stubOpsRepo{})
+			uc := NewIssueUserTokenUseCase(&stubUserClientRepo{}, &stubTx{}, &stubOpsRepo{})
 			_, err := uc.Execute(context.Background(), tc.in)
 			if grpcstatus.Code(err) != codes.InvalidArgument {
 				t.Fatalf("code = %v, want InvalidArgument", grpcstatus.Code(err))
@@ -272,7 +254,7 @@ func TestIssue_AuditNoSecret(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
 	audit := &stubAudit{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubHydra{}, ops).WithAuditEmitter(audit)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops).WithAuditEmitter(audit)
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID: "usr00000000000000001", CreatedByUserID: "usr00000000000000001", Description: "cli",
@@ -312,7 +294,7 @@ func TestRevoke_CrossUserIsolation(t *testing.T) {
 		},
 	}
 	ops := &stubOpsRepo{}
-	uc := NewRevokeUserTokenUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewRevokeUserTokenUseCase(repo, &stubTx{}, ops)
 
 	_, err := uc.Execute(context.Background(), RevokeInput{
 		UserID: "usr00000000000000001", TokenID: "uoc00000000000000001",
@@ -329,7 +311,7 @@ func TestRevoke_CrossUserIsolation(t *testing.T) {
 	}
 }
 
-// TestRevoke_HappyPath (USR-04): удаляет строку + Hydra-клиента, response несёт
+// TestRevoke_HappyPath (USR-04): удаляет строку, response несёт
 // token_id + revoked_at.
 func TestRevoke_HappyPath(t *testing.T) {
 	repo := &stubUserClientRepo{
@@ -339,9 +321,8 @@ func TestRevoke_HappyPath(t *testing.T) {
 			OAuthClientID: "hydra-usr-9",
 		},
 	}
-	hydra := &stubHydra{}
 	ops := &stubOpsRepo{}
-	uc := NewRevokeUserTokenUseCase(repo, &stubTx{}, hydra, ops)
+	uc := NewRevokeUserTokenUseCase(repo, &stubTx{}, ops)
 
 	_, err := uc.Execute(context.Background(), RevokeInput{
 		UserID: "usr00000000000000001", TokenID: "uoc00000000000000009",
@@ -355,9 +336,6 @@ func TestRevoke_HappyPath(t *testing.T) {
 	}
 	if !repo.deleted {
 		t.Error("row must be deleted")
-	}
-	if hydra.deleted != "hydra-usr-9" {
-		t.Errorf("hydra client must be deleted, got %q", hydra.deleted)
 	}
 	var resp iamv1.RevokeUserTokenResponse
 	if err := ops.lastResp.UnmarshalTo(&resp); err != nil {

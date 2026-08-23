@@ -19,7 +19,7 @@ red is carried here, as a number and a case list, never as a deduction in the ga
 |---|---|
 | читать свою запись разрешает отношение, принимающее ТОЛЬКО тип `user` | `awk '/^type iam_user/,/^type [^i]/' proto/kacho/cloud/iam/v1/fga_model.fga \| grep 'define subject'` → `[user]` |
 | каждый предъявитель матрицы — служебная учётка | `tests/authz-fixtures/principal_pairings.py`, раздел про то, что `userNOBId` / `userINVId` / `userPureNoBindingsId` — ТОЛЬКО цели привязки |
-| пользовательский токен край не принимает | `tests/authz-fixtures/mint_rs256.py`, раздел `user_rs256`: `aud` жёстко kacho-внутренний, и `acr` не несётся |
+| человеческий предъявитель не проходит порог повышения | `tests/authz-fixtures/mint_rs256.py`, раздел `user_platform_token`: `acr` не несётся, а от порога освобождена только машина. Прежняя редакция называла второй причиной жёсткий kacho-внутренний `aud` — этой причины больше нет: выпуск персонального токена не объявляет адресата у внешнего поставщика (#1121) |
 
 Значит служебная учётка не удовлетворяет это отношение НИ ПРИ КАКОЙ выдаче. Клетка
 стояла ALLOW с 2026-07-26 (`c4960673`, раздел ниже): тогда цель переставили вслед за

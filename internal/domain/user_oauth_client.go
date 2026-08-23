@@ -11,19 +11,30 @@ import (
 	"go.uber.org/multierr"
 )
 
-// UserOAuthClient — персональный access-токен пользователя (Hydra static
-// client).
+// UserOAuthClient — персональный access-токен пользователя.
 //
 // private_key_jwt: kacho-iam генерирует пару ключей ECDSA P-256 на каждый токен,
-// регистрирует публичный JWK в Hydra (`token_endpoint_auth_method =
-// private_key_jwt`) и возвращает приватный PEM вызывающему ровно один раз. Hydra
-// хранит только JWK; kacho-iam держит SPKI public PEM (для диагностики) плюс
-// алгоритм. Секрет не существует at-rest.
+// держит SPKI public PEM плюс алгоритм и возвращает приватный PEM вызывающему
+// ровно один раз. Секрет не существует at-rest.
+//
+// Клиентом это удостоверение называется по идентификатору ЭТОЙ строки: им
+// подписывается `client_assertion`, и по нему же разрешает клиента наш реестр
+// утверждений. Второго имени у него нет.
 //
 // N:1 — у одного User может быть несколько токенов.
 type UserOAuthClient struct {
-	ID              UserOAuthClientID
-	UserID          UserID
+	ID     UserOAuthClientID
+	UserID UserID
+	// OAuthClientID — идентификатор клиента у ВНЕШНЕГО поставщика.
+	//
+	// У строк нового выпуска ПУСТ и обязан быть пуст: выдача больше не заводит
+	// клиента у поставщика, а пустое значение здесь означает ровно это —
+	// регистрации нет. Непустое значение принадлежит строке прежнего выпуска и
+	// держит окно двух издателей: отчеканенные поставщиком токены таких строк
+	// действительны до своего истечения.
+	//
+	// На пути разрешения клиента эта колонка НЕ участвует (см.
+	// repo/kacho/pg.AssertionClientRepo).
 	OAuthClientID   OAuthClientID
 	Description     Description
 	CreatedByUserID UserID
@@ -31,8 +42,8 @@ type UserOAuthClient struct {
 	ExpiresAt       *time.Time
 	LastUsedAt      *time.Time
 
-	// PublicKeyPEM — SPKI-encoded ECDSA P-256 публичный ключ, зарегистрированный
-	// в Hydra как JWK.
+	// PublicKeyPEM — SPKI-encoded ECDSA P-256 публичный ключ удостоверения.
+	// По нему проверяется подпись `client_assertion` на пути выдачи токена.
 	PublicKeyPEM string
 	// KeyAlgorithm — JOSE alg зарегистрированного ключа. Всегда "ES256" для новых
 	// токенов.
@@ -50,7 +61,13 @@ type UserOAuthClient struct {
 func (c UserOAuthClient) Validate() error {
 	var errs error
 	errs = multierr.Append(errs, c.ID.Validate())
-	errs = multierr.Append(errs, c.OAuthClientID.Validate())
+	// Зеркало поставщика проверяется, только когда оно ЕСТЬ. Пустое — законный
+	// вход: у строки нового выпуска регистрации у поставщика нет вовсе, и
+	// требовать от неё годного чужого идентификатора значило бы требовать
+	// назвать то, чего не существует.
+	if c.OAuthClientID != "" {
+		errs = multierr.Append(errs, c.OAuthClientID.Validate())
+	}
 	errs = multierr.Append(errs, c.Description.Validate())
 	if c.UserID == "" {
 		errs = multierr.Append(errs, fmt.Errorf("Illegal argument user_id: required"))

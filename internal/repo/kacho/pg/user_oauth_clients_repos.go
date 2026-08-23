@@ -2,8 +2,20 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 // user_oauth_clients_repos.go — репозиторий персональных access-токенов
-// пользователя (UserTokenService — private_key_jwt через Hydra), зеркало
-// SAOAuthClientRepo без federation-полей.
+// пользователя (UserTokenService — private_key_jwt), зеркало SAOAuthClientRepo
+// без federation-полей.
+//
+// # Колонка зеркала читается и пишется как ОТСУТСТВУЮЩАЯ величина
+//
+// `hydra_client_id` хранит идентификатор клиента у внешнего поставщика. У строк
+// нового выпуска его НЕТ (`NULL`): выдача больше не заводит там клиента. Пустая
+// доменная строка означает «нет», и обратно она читается тем же «нет».
+//
+// Пустая СТРОКА в колонку не пишется намеренно. Колонка несёт уникальный индекс,
+// и пустая строка — обычное значение: второй токен того же пользователя упёрся
+// бы в 23505. Отсутствие значения уникальный индекс различает, поэтому таких
+// строк может быть сколько угодно (миграция
+// 20260823180500_user_token_credential_needs_no_provider_mirror).
 package pg
 
 import (
@@ -53,10 +65,22 @@ func (r *UserOAuthClientRepo) Get(ctx context.Context, id domain.UserOAuthClient
 	return out, nil
 }
 
-// GetByOAuthClientID — обратный lookup для token-hook claim enrichment: Hydra
-// отдаёт kacho-iam `client_id` (== hydra_client_id) выпустившего токен клиента,
-// а нам нужен принципал — владеющий User.
+// GetByOAuthClientID — обратный lookup обратного вызова внешнего поставщика: он
+// отдаёт `client_id` выпустившего токен клиента, а нам нужен принципал —
+// владеющий User.
+//
+// Путь обслуживает ТОЛЬКО строки прежнего выпуска — те, у которых зеркало есть.
+// Строку нового выпуска он не разрешает и не должен: клиента с таким именем у
+// поставщика не существует, поэтому и обратного вызова о нём не бывает.
+//
+// Пустой идентификатор отсекается ДО запроса. Иначе сравнение колонки с пустой
+// строкой на дереве с частично заполненной колонкой стало бы способом спросить
+// «дай любую строку без зеркала» — а спрашивающий здесь всегда называет
+// конкретного клиента.
 func (r *UserOAuthClientRepo) GetByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.UserOAuthClient, error) {
+	if hydraClientID == "" {
+		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "UserOAuthClient with hydra_client_id %s not found", hydraClientID)
+	}
 	row := r.pool.QueryRow(ctx,
 		fmt.Sprintf(`SELECT %s FROM user_oauth_clients WHERE hydra_client_id = $1`, uocCols),
 		string(hydraClientID))
@@ -87,7 +111,7 @@ func (r *UserOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c doma
 		return domain.UserOAuthClient{}, mapErr(err, "", string(c.ID))
 	}
 	row := tx.QueryRow(ctx, q,
-		string(c.ID), string(c.UserID), string(c.OAuthClientID),
+		string(c.ID), string(c.UserID), nullableProviderMirror(c.OAuthClientID),
 		string(c.Description), string(c.CreatedByUserID),
 		nullableTime(c.CreatedAt), nullableTimePtr(c.ExpiresAt), nullableTimePtr(c.LastUsedAt),
 		c.PublicKeyPEM, c.KeyAlgorithm, string(c.Name), labelsJSON,
@@ -199,17 +223,21 @@ func (r *UserOAuthClientRepo) TouchLastUsed(ctx context.Context, tx pgx.Tx, id d
 func scanUserOAuthClient(row pgx.Row) (domain.UserOAuthClient, error) {
 	var (
 		c          domain.UserOAuthClient
+		mirror     sql.NullString
 		expiresAt  sql.NullTime
 		lastUsedAt sql.NullTime
 		labelsBody []byte
 	)
 	if err := row.Scan(
-		(*string)(&c.ID), (*string)(&c.UserID), (*string)(&c.OAuthClientID),
+		(*string)(&c.ID), (*string)(&c.UserID), &mirror,
 		(*string)(&c.Description), (*string)(&c.CreatedByUserID),
 		&c.CreatedAt, &expiresAt, &lastUsedAt,
 		&c.PublicKeyPEM, &c.KeyAlgorithm, (*string)(&c.Name), &labelsBody,
 	); err != nil {
 		return domain.UserOAuthClient{}, err
+	}
+	if mirror.Valid {
+		c.OAuthClientID = domain.OAuthClientID(mirror.String)
 	}
 	if expiresAt.Valid {
 		t := expiresAt.Time
@@ -225,4 +253,17 @@ func scanUserOAuthClient(row pgx.Row) (domain.UserOAuthClient, error) {
 	}
 	c.Labels = labels
 	return c, nil
+}
+
+// nullableProviderMirror — доменное «зеркала нет» в отсутствие значения колонки.
+//
+// Пустая доменная строка и `NULL` здесь одно и то же состояние, названное на
+// двух языках. Писать вместо `NULL` пустую строку нельзя: уникальный индекс
+// зеркала считает её обычным значением, и вторая такая строка не легла бы вовсе.
+func nullableProviderMirror(id domain.OAuthClientID) *string {
+	if id == "" {
+		return nil
+	}
+	s := string(id)
+	return &s
 }

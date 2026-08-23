@@ -28,7 +28,7 @@ import (
 func TestIssue_BlockedUser_Refused(t *testing.T) {
 	repo := &stubUserClientRepo{blocked: true}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -54,7 +54,7 @@ func TestIssue_BlockedUser_Refused(t *testing.T) {
 func TestIssue_ActiveUser_StillIssues(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
 
 	if _, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -73,7 +73,7 @@ func TestIssue_BlockedTargetNamedByAnotherCaller_Refused(t *testing.T) {
 		"usr00000000000000002": true,
 	}}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000002",

@@ -2,28 +2,46 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 // Package user_tokens — use-cases UserTokenService (персональные access-токены
-// пользователя через Hydra OAuth2 client_credentials + private_key_jwt).
+// пользователя, поток private_key_jwt).
+//
+// # Зеркала у внешнего поставщика здесь НЕТ (задача #1121, подфаза Ф4б-3)
+//
+// Выдача не заводит клиента у внешнего поставщика, а отзыв его не снимает.
+// Клиентом это удостоверение называется по идентификатору СВОЕЙ строки
+// (`uoc…`): им подписывается `client_assertion`, и по нему же разрешает клиента
+// наш реестр утверждений — зеркальная колонка на этом пути не участвует вовсе
+// (см. repo/kacho/pg.AssertionClientRepo). Второе имя, которое прежде приезжало
+// от поставщика, вызывающему выдавалось в поле `client_id` ответа и нашим
+// издателем не разрешалось НИ ПРИ КАКОМ входе.
+//
+// ОКНО ДВУХ ИЗДАТЕЛЕЙ НАЗВАНО СРОКОМ УЖЕ ВЫДАННЫХ ТОКЕНОВ. Строки прежнего
+// выпуска своё зеркало сохраняют, и токены, отчеканенные для них поставщиком,
+// действительны до собственного истечения — платформа их не отзывает и отозвать
+// не может. Остаток окна СЧИТАЕТСЯ, а не оценивается:
+//
+//	SELECT count(*) FROM kacho_iam.user_oauth_clients WHERE hydra_client_id IS NOT NULL;
 //
 // На Issue:
 //
 //  1. Генерируем пару ключей ECDSA P-256 локально; приватная половина НИКОГДА не
 //     покидает response kacho-iam и НИКОГДА не хранится в БД.
-//  2. Регистрируем OAuth2-клиент в Hydra Admin с
-//     `token_endpoint_auth_method=private_key_jwt`,
-//     `grant_types=[client_credentials]`, `jwks={keys:[<public JWK>]}`,
-//     `owner=<user_id>`. Hydra не возвращает `client_secret` — его нет.
-//  3. Персистим строку `user_oauth_clients` (hydra_client_id-маппинг + public PEM
-//     + algorithm).
-//  4. Возвращаем IssueUserTokenResponse с plaintext приватным PEM + kid в
+//  2. Персистим строку `user_oauth_clients` (public PEM + algorithm; зеркало
+//     поставщика пусто).
+//  3. Возвращаем IssueUserTokenResponse с plaintext приватным PEM + kid в
 //     `Operation.response` (одноразовая выдача; затирается post-completion
 //     OpsResponseRedactor'ом, так что re-poll Operation.Get секрета не отдаёт).
+//     `client_id` и `key_id` в ответе — ОДНО И ТО ЖЕ значение, идентификатор
+//     строки реестра.
 //
 // На Revoke:
 //
 //  1. Fetch строки по id, scoped по user_id (cross-user isolation).
-//  2. Delete строки + DELETE Hydra OAuth2-клиента (idempotent — Hydra 404 OK).
+//  2. Delete строки. Отзыв доходит до ПРЕДЪЯВЛЕНИЯ схемой, а не вызовом наружу:
+//     снятие строки порождает отсечку отчеканенного, ключуемую идентификатором
+//     этой же строки (миграция 898002). Поэтому отзыв остаётся отзывом и при
+//     недоступном, и при снятом поставщике.
 //
-// На List: paged read токенов своего User (без round-trip в Hydra).
+// На List: paged read токенов своего User.
 package user_tokens
 
 import (
@@ -45,7 +63,6 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -74,12 +91,6 @@ type UserClientRepo interface {
 	AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, bool, error)
 }
 
-// OAuthClientAdmin абстрагирует hydra-admin операции, нужные Issue/Revoke.
-type OAuthClientAdmin interface {
-	CreateOAuthClient(ctx context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error)
-	DeleteOAuthClient(ctx context.Context, clientID string) error
-}
-
 // OpsResponseRedactor затирает именованное поле в proto-marshalled success-response
 // строки `operations`. Идемпотентно: повторный прогон на уже-затёртом поле — no-op.
 type OpsResponseRedactor interface {
@@ -88,19 +99,10 @@ type OpsResponseRedactor interface {
 
 // ───────────────── Issue use-case ─────────────────
 
-// providerCompensationEmitter — durable-приёмник компенсирующего намерения для
-// клиента, уже созданного у провайдера, когда своя строка не закоммичена.
-// Порт объявлен здесь, у потребителя (dependency rule); реализация и разбор,
-// почему намерение обязано быть durable, — clients.ProviderCompensationOutbox.
-type providerCompensationEmitter interface {
-	EmitHydraClientDelete(ctx context.Context, clientID, origin, reason string) error
-}
-
-// IssueUserTokenUseCase выпускает новый Hydra OAuth2-клиент + персистит маппинг.
+// IssueUserTokenUseCase чеканит удостоверение и персистит его строку.
 type IssueUserTokenUseCase struct {
 	repo    UserClientRepo
 	tx      service.TxBeginner
-	hydra   OAuthClientAdmin
 	opsRepo operations.Repo
 	// redactor для post-MarkDone private_key_pem-редакции. nil → редакция
 	// пропускается (тест/legacy wiring). Прод main.go проводит pg-adapter, так что
@@ -108,24 +110,12 @@ type IssueUserTokenUseCase struct {
 	redactor OpsResponseRedactor
 	// audit — durable audit_outbox emitter. nil → без audit-строки.
 	audit auditEmitter
-	// compensation — durable-приёмник компенсирующих намерений для клиента,
-	// зарегистрированного у провайдера до коммита своей строки. nil →
-	// компенсация деградирует в прямой (best-effort) вызов снятия.
-	compensation providerCompensationEmitter
-	now          func() time.Time
+	now   func() time.Time
 	// logger — поверхность для сбоев detached redaction-goroutine.
 	logger *slog.Logger
 	// redactGrace — задержка между тем как Operation стал Done, и затиранием
 	// одноразового private_key_pem. Даёт поллящему клиенту окно. 0 → без окна.
 	redactGrace time.Duration
-
-	// HydraClientNamePrefix — используется для сборки Hydra `client_name`
-	// (default "kacho-usr-<userID>"). Конфигурируется через env на wire-time.
-	HydraClientNamePrefix string
-	// DefaultScope — scope, выдаваемый выпущенным токенам (default пусто).
-	DefaultScope string
-	// AudiencePrefix — добавляется с `/<userID>` как Hydra audience.
-	AudiencePrefix string
 }
 
 // WithResponseRedactor проводит post-Issue секрет-редактор.
@@ -137,14 +127,6 @@ func (u *IssueUserTokenUseCase) WithResponseRedactor(r OpsResponseRedactor) *Iss
 // WithAuditEmitter проводит durable audit_outbox emitter. Composition-root only.
 func (u *IssueUserTokenUseCase) WithAuditEmitter(a auditEmitter) *IssueUserTokenUseCase {
 	u.audit = a
-	return u
-}
-
-// WithCompensationEmitter проводит durable-приёмник компенсирующих намерений.
-// Composition-root only. nil → полусделанная регистрация компенсируется только
-// прямым (best-effort) снятием (см. clients.ProviderCompensationOutbox).
-func (u *IssueUserTokenUseCase) WithCompensationEmitter(c providerCompensationEmitter) *IssueUserTokenUseCase {
-	u.compensation = c
 	return u
 }
 
@@ -163,14 +145,12 @@ func (u *IssueUserTokenUseCase) WithRedactGrace(d time.Duration) *IssueUserToken
 }
 
 // NewIssueUserTokenUseCase конструирует.
-func NewIssueUserTokenUseCase(r UserClientRepo, tx service.TxBeginner, h OAuthClientAdmin, ops operations.Repo) *IssueUserTokenUseCase {
+func NewIssueUserTokenUseCase(r UserClientRepo, tx service.TxBeginner, ops operations.Repo) *IssueUserTokenUseCase {
 	return &IssueUserTokenUseCase{
-		repo:                  r,
-		tx:                    tx,
-		hydra:                 h,
-		opsRepo:               ops,
-		now:                   time.Now,
-		HydraClientNamePrefix: "kacho-usr-",
+		repo:    r,
+		tx:      tx,
+		opsRepo: ops,
+		now:     time.Now,
 	}
 }
 
@@ -374,46 +354,27 @@ func (u *IssueUserTokenUseCase) redactSecretFields(ctx context.Context, opID str
 	}
 }
 
-// doIssue — mint ECDSA P-256 keypair, регистрирует Hydra-клиент с private_key_jwt +
-// embedded JWK, персистит маппинг с PublicKeyPEM + KeyAlgorithm, возвращает
-// PrivateKeyPEM ровно один раз.
+// doIssue — чеканит пару ключей ECDSA P-256, персистит строку удостоверения с
+// PublicKeyPEM + KeyAlgorithm, возвращает PrivateKeyPEM ровно один раз.
+//
+// Клиента у внешнего поставщика здесь НЕ заводится (#1121): удостоверение
+// предъявляется НАШЕМУ издателю, а он разрешает клиента по идентификатору этой
+// строки. Отсюда же следует, что у выдачи больше нет полусделанного состояния,
+// компенсировать которое было бы нечем: единственный след — своя строка, и она
+// либо закоммичена, либо откачена.
 func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.UserOAuthClientID, in IssueInput, actor string) (*anypb.Any, error) {
-	// 1. Mint ECDSA P-256 keypair локально. JWK `kid` — id kacho-iam
-	//    UserOAuthClient'а (`uoc_*`), так что caller→Hydra assertion'ы
-	//    self-describing.
+	// 1. Mint ECDSA P-256 keypair локально. JWK `kid` — id строки реестра
+	//    (`uoc…`), так что утверждения вызывающего self-describing.
 	key, err := generateES256Key(string(tokenID))
 	if err != nil {
 		return nil, fmt.Errorf("generate user token keypair: %w", err)
 	}
 
-	// 2. Регистрируем OAuth2-клиент в Hydra с private_key_jwt + публичным JWK.
-	//    Hydra не возвращает client_secret. `owner=<user_id>` — так token-hook
-	//    маппит минтованный токен на принципал `user:<user_id>`.
-	clientName := u.HydraClientNamePrefix + string(in.UserID)
-	// #nosec G101 -- "client_credentials" — OAuth2 grant-type идентификатор (RFC 6749 §4.4),
-	// не credential. То же для "private_key_jwt" (RFC 7521 client_assertion_type).
-	hydraReq := clients.CreateOAuthClientRequest{
-		ClientName:              clientName,
-		Owner:                   string(in.UserID),
-		Scope:                   u.DefaultScope,
-		GrantTypes:              []string{"client_credentials"},
-		TokenEndpointAuthMethod: "private_key_jwt",
-		// Hydra обязан проверять client_assertion тем же alg, что несёт ключ (ES256);
-		// без этого Hydra дефолтит на RS256 → invalid_client на ES256-assertion.
-		TokenEndpointAuthSigningAlg: key.JWK.Alg,
-		JWKS:                        &clients.JWKS{Keys: []clients.JWK{key.JWK}},
-	}
-	hydraReq.Audience = u.resolveAudience(in)
-	hydraClient, err := u.hydra.CreateOAuthClient(ctx, hydraReq)
-	if err != nil {
-		return nil, fmt.Errorf("%w: hydra create-client: %w", iamerr.ErrUnavailable, err)
-	}
-
-	// 3. Персистим маппинг-строку в TX.
+	// 2. Персистим строку удостоверения в TX. Зеркало поставщика ПУСТО, и
+	//    пустое здесь означает ровно «регистрации у него нет».
 	row := domain.UserOAuthClient{
 		ID:              tokenID,
 		UserID:          in.UserID,
-		OAuthClientID:   domain.OAuthClientID(hydraClient.ClientID),
 		Description:     domain.Description(in.Description),
 		CreatedByUserID: domain.UserID(in.CreatedByUserID),
 		PublicKeyPEM:    key.PublicPEM,
@@ -425,19 +386,23 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 		t := u.now().Add(time.Duration(in.TTLSeconds) * time.Second)
 		row.ExpiresAt = &t
 	}
-	persisted, err := u.commitMapping(ctx, row, hydraClient.ClientID, actor, key.Algorithm)
+	persisted, err := u.commitMapping(ctx, row, actor, key.Algorithm)
 	if err != nil {
 		return nil, err
 	}
 
-	// 4. Строим response — возвращаем ПРИВАТНЫЙ PEM + kid ОДИН РАЗ.
+	// 3. Строим response — возвращаем ПРИВАТНЫЙ PEM + kid ОДИН РАЗ.
+	//
+	//    `client_id` и `key_id` несут ОДНО значение — идентификатор строки
+	//    реестра. Это не избыточность ответа, а его смысл: этим именем
+	//    подписывается `client_assertion`, и только его разрешает наш издатель.
 	pbToken, err := userTokenToProto(persisted)
 	if err != nil {
 		return nil, err
 	}
 	resp := &iamv1.IssueUserTokenResponse{
 		Token:         pbToken,
-		ClientId:      hydraClient.ClientID,
+		ClientId:      string(tokenID),
 		PrivateKeyPem: key.PrivatePEM,
 		PublicKeyPem:  key.PublicPEM,
 		Algorithm:     key.Algorithm,
@@ -446,67 +411,18 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 	return anypb.New(resp)
 }
 
-// resolveAudience выводит Hydra `audience` для нового токена. Пусто → kacho-internal
-// audience `<prefix>/user/<userID>` (если AudiencePrefix задан), иначе nil.
-func (u *IssueUserTokenUseCase) resolveAudience(in IssueInput) []string {
-	if u.AudiencePrefix != "" {
-		return []string{strings.TrimRight(u.AudiencePrefix, "/") + "/user/" + string(in.UserID)}
-	}
-	return nil
-}
-
-// compensationOriginUserToken — атрибуция саги в компенсирующем намерении.
-const compensationOriginUserToken = "user_token"
-
-// providerReleaseTimeout — верхняя граница на снятие уже созданного клиента
-// (запись намерения ИЛИ прямой вызов). Отвязан от отмены вызывающего.
-const providerReleaseTimeout = 5 * time.Second
-
-// releaseProviderClient снимает OAuth-клиента, созданного у провайдера до того,
-// как своя строка была закоммичена. Первичный путь — DURABLE намерение
-// (переживает смерть процесса и провал самого снятия); прямой вызов — ЗАПАСНОЙ,
-// на случай, если намерение записать не удалось. Оба идемпотентны.
-// См. clients.ProviderCompensationOutbox.
-func (u *IssueUserTokenUseCase) releaseProviderClient(ctx context.Context, clientID, reason string) {
-	if clientID == "" {
-		return
-	}
-	relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerReleaseTimeout)
-	defer cancel()
-
-	if u.compensation != nil {
-		if err := u.compensation.EmitHydraClientDelete(relCtx, clientID, compensationOriginUserToken, reason); err == nil {
-			return
-		} else if u.logger != nil {
-			u.logger.ErrorContext(relCtx,
-				"user token: durable compensation intent could not be recorded, falling back to a direct release",
-				"provider_client_id", clientID, "reason", reason, "err", err.Error())
-		}
-	}
-	if err := u.hydra.DeleteOAuthClient(relCtx, clientID); err != nil && u.logger != nil {
-		u.logger.ErrorContext(relCtx,
-			"user token: provider registration left behind after a failed issue",
-			"provider_client_id", clientID, "reason", reason, "err", err.Error())
-	}
-}
-
-// commitMapping персистит маппинг-строку в свежей tx, откатывает + снимает
-// Hydra-клиент на сбое. Durable iam.user_token.issued audit_outbox-строка эмитится в
-// ТОЙ ЖЕ tx, что Insert (атомарно, запрет #10): audit-строка коммитится iff маппинг
-// коммитится. Hydra-клиент создан ДО этой tx (external side-effect); на сбое он
-// снимается через releaseProviderClient — компенсирующее намерение НЕ может ехать
-// в этой tx, потому что именно она и откатывается.
-func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.UserOAuthClient, hydraClientID, actor, keyAlgorithm string) (domain.UserOAuthClient, error) {
+// commitMapping персистит строку удостоверения в свежей tx. Durable
+// iam.user_token.issued audit_outbox-строка эмитится в ТОЙ ЖЕ tx, что Insert
+// (атомарно, запрет #10): audit-строка коммитится iff строка коммитится.
+func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.UserOAuthClient, actor, keyAlgorithm string) (domain.UserOAuthClient, error) {
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
-		u.releaseProviderClient(ctx, hydraClientID, "mapping tx could not be started")
 		return domain.UserOAuthClient{}, mapPGErr(err)
 	}
 	committed := false
 	defer func() {
 		if !committed {
 			_ = tx.Rollback(ctx)
-			u.releaseProviderClient(ctx, hydraClientID, "mapping row was not committed")
 		}
 	}()
 	persisted, err := u.repo.Insert(ctx, tx, row)
@@ -534,33 +450,27 @@ func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.Us
 
 // ───────────────── Revoke use-case ─────────────────
 
-// RevokeUserTokenUseCase удаляет и kacho-iam маппинг-строку, и Hydra OAuth2-клиента.
+// RevokeUserTokenUseCase снимает строку удостоверения.
+//
+// Наружу отзыв не ходит, и это не упрощение: отзыв доходит до ПРЕДЪЯВЛЕНИЯ
+// схемой. Снятие строки порождает отсечку отчеканенного, ключуемую
+// идентификатором этой же строки (миграция 898002), поэтому отозванное перестаёт
+// проходить независимо от доступности — и от существования — внешнего поставщика.
 type RevokeUserTokenUseCase struct {
 	repo    UserClientRepo
 	tx      service.TxBeginner
-	hydra   OAuthClientAdmin
 	opsRepo operations.Repo
 	audit   auditEmitter
-	// logger — surfaces the post-commit Hydra orphan-cleanup warning.
-	// nil → skipped (degraded wiring).
-	logger *slog.Logger
 }
 
 // NewRevokeUserTokenUseCase конструирует.
-func NewRevokeUserTokenUseCase(r UserClientRepo, tx service.TxBeginner, h OAuthClientAdmin, ops operations.Repo) *RevokeUserTokenUseCase {
-	return &RevokeUserTokenUseCase{repo: r, tx: tx, hydra: h, opsRepo: ops}
+func NewRevokeUserTokenUseCase(r UserClientRepo, tx service.TxBeginner, ops operations.Repo) *RevokeUserTokenUseCase {
+	return &RevokeUserTokenUseCase{repo: r, tx: tx, opsRepo: ops}
 }
 
 // WithAuditEmitter проводит durable audit_outbox emitter. Composition-root only.
 func (u *RevokeUserTokenUseCase) WithAuditEmitter(a auditEmitter) *RevokeUserTokenUseCase {
 	u.audit = a
-	return u
-}
-
-// WithLogger wires the logger used to surface the post-commit Hydra
-// orphan-cleanup warning. Composition-root only; returns the receiver.
-func (u *RevokeUserTokenUseCase) WithLogger(l *slog.Logger) *RevokeUserTokenUseCase {
-	u.logger = l
 	return u
 }
 
@@ -649,42 +559,24 @@ func (u *RevokeUserTokenUseCase) doRevoke(ctx context.Context, in RevokeInput, a
 		return nil, mapPGErr(err)
 	}
 	committed = true
-	// Delete из Hydra (idempotent — 404 OK).
-	if err := u.hydra.DeleteOAuthClient(ctx, string(cur.OAuthClientID)); err != nil {
-		// DB-delete уже закоммичен, поэтому регистрация у провайдера переживает
-		// свою строку. Уборщика здесь нет и он намеренно не заводится: отзыв
-		// считается состоявшимся потому, что учётные данные перестали работать,
-		// а это больше не зависит от успеха данного вызова.
-		//
-		// Строка маппинга — источник истины о том, является ли клиент учётными
-		// данными kacho, и token hook сверяется с ней на КАЖДОЙ выдаче. Строки
-		// нет ⇒ уцелевший клиент не резолвится ни в один принципал ⇒ hook
-		// отказывает (`invalid_client`, 403) и пишет `authn.token.denied` с
-		// причиной `principal_not_found` на каждую попытку (см.
-		// handler/iamhooks/token_hook_handler.go). То есть с момента коммита
-		// эти учётные данные не получат НИЧЕГО НОВОГО, и это больше не зависит
-		// от доступности провайдера.
-		//
-		// Чего отзыв не делает — не отзывает уже выданное. Access token,
-		// отчеканенный до коммита, самодостаточен и живёт до своего истечения:
-		// отзыв ограничивает учётные данные, а не токены, которые уже в руках.
-		// Поэтому окно — это время жизни access token'а (в проде минуты, на
-		// локальном стенде намеренно шире); именно это свойство и следует
-		// называть, когда спрашивают, как быстро отзыв вступает в силу.
-		//
-		// Компенсация через outbox / sweeper рассмотрена и отклонена: обе
-		// EVENTUAL — окно, которое hook закрывает начисто, они бы не закрыли, а
-		// удаление регистрации, которая уже не может получить токен, — это
-		// гигиена инвентаря, а не безопасность. Этот WARN и есть сигнал о
-		// таком остатке; оператор удаляет его вручную.
-		if u.logger != nil {
-			u.logger.WarnContext(ctx, "user-token hydra oauth-client delete failed after DB commit — the registration outlives its row (it can no longer mint; delete it by hand)",
-				slog.String("oauth_client_id", string(cur.OAuthClientID)),
-				slog.String("token_id", string(in.TokenID)),
-				slog.String("err", err.Error()),
-			)
-		}
-	}
+	// Наружу отсюда не ходят. Отзыв состоялся тем, что учётные данные перестали
+	// работать, и держится это ДВУМЯ следствиями снятия строки, ни одно из
+	// которых не зависит от внешнего поставщика:
+	//
+	//   - новое этим удостоверением не выпустить: реестр утверждений разрешает
+	//     клиента по строке, а строки больше нет;
+	//   - уже отчеканенное отсечено: снятие строки порождает отсечку с ключом
+	//     `id` этой строки, и авторитет отзыва читает её НА ПРЕДЪЯВЛЕНИИ
+	//     (миграция 898002).
+	//
+	// Строка ПРЕЖНЕГО выпуска несёт зеркало, и его регистрация у поставщика эту
+	// строку переживает. Снимать её отсюда больше не пытаемся: клиент, чьей
+	// строки нет, не резолвится ни в один принципал, поэтому получить у
+	// поставщика новый токен им нельзя — остаётся гигиена инвентаря, а не
+	// безопасность, и уходит она вместе с самим поставщиком (подфазы #1123/#1125).
+	// Чего отзыв не делает — не отзывает уже выданное ПОСТАВЩИКОМ: такой токен
+	// самодостаточен и живёт до своего истечения. Это и есть окно двух издателей,
+	// и величина у него одна — срок уже выданных токенов.
 	resp := &iamv1.RevokeUserTokenResponse{
 		TokenId:   string(in.TokenID),
 		RevokedAt: timestamppb.Now(),

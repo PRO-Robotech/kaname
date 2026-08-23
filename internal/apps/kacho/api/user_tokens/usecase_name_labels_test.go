@@ -21,7 +21,7 @@ import (
 func TestIssue_NameLabels_MapThrough(t *testing.T) {
 	repo := &stubUserClientRepo{}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
 
 	_, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -65,7 +65,7 @@ func TestIssue_NameLabels_MapThrough(t *testing.T) {
 func TestIssue_AccountIDStampedOnMetadata(t *testing.T) {
 	repo := &stubUserClientRepo{accountID: "acc00000000000000042"}
 	ops := &stubOpsRepo{}
-	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewIssueUserTokenUseCase(repo, &stubTx{}, ops)
 
 	op, err := uc.Execute(context.Background(), IssueInput{
 		UserID:          "usr00000000000000001",
@@ -101,7 +101,7 @@ func TestRevoke_AccountIDStampedOnMetadata(t *testing.T) {
 		},
 	}
 	ops := &stubOpsRepo{}
-	uc := NewRevokeUserTokenUseCase(repo, &stubTx{}, &stubHydra{}, ops)
+	uc := NewRevokeUserTokenUseCase(repo, &stubTx{}, ops)
 
 	op, err := uc.Execute(context.Background(), RevokeInput{
 		UserID:  "usr00000000000000001",

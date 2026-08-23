@@ -112,6 +112,12 @@ RevokeSAKeyResponse` с `revokedAt`).
 (`response: IssueUserTokenResponse` с одноразовым `privateKeyPem`, `keyId`, `algorithm: "ES256"`,
 `clientId`).
 
+Клиента у внешнего поставщика выпуск НЕ заводит: `clientId` и `keyId` в ответе — одно и то же
+значение, идентификатор выпущенного токена (`uoc…`). Им заполняются `iss` и `sub` подписанного
+`client_assertion` при обмене на access-токен. У токенов прежнего выпуска поле
+`hydraClientId` непусто — это идентификатор их клиента у поставщика; у новых оно пусто, и
+пустое здесь означает, что регистрации нет.
+
 <CodeBlock language="bash">
   {dedent`
     curl -X POST 'http://localhost:18080/iam/v1/users/usrbr69ze0ftz3jf7396/tokens' \\
@@ -136,9 +142,14 @@ RevokeSAKeyResponse` с `revokedAt`).
 
 <ApiOperation method="DELETE" endpoint="/iam/v1/users/{user_id}/tokens/{token_id}" async>
 
-Отзывает токен (снимает OAuth-клиента в Hydra). Требует `v_update` на `iam_user` из `user_id`
+Отзывает токен: снимает его строку. Требует `v_update` на `iam_user` из `user_id`
 и step-up (`required_acr_min=2`). Асинхронно (`response:
 RevokeUserTokenResponse` с `revokedAt`).
+
+Отзыв действует и на ПРЕДЪЯВЛЕНИИ, а не только на выпуске: снятие строки порождает отсечку,
+которую авторитет отзыва читает на каждом запросе. Токен, отчеканенный до отзыва издателем
+платформы, перестаёт приниматься. Токен, отчеканенный внешним поставщиком для клиента прежнего
+выпуска, платформа отозвать не может — он действителен до собственного истечения.
 
 </ApiOperation>
 
