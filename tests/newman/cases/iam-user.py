@@ -1987,3 +1987,240 @@ CASES.append(Case(
         assert_op_success(),
     ],
 ))
+
+
+# ---------------------------------------------------------------------------
+# IAM-USR-TOK-READ-* — ВИДЕТЬ перечень удостоверений человека вправе он сам, а не
+# распорядитель его аккаунта (задача kacho#1133).
+#
+# ПРЕДМЕТ. Третья сторона той же директивы владельца (2026-08-23), что закрыли
+# #1086 (выпуск и отзыв) и #1102 (правка строки личности): «тот кто пригласил
+# может только удалить/добавить права». Перечень персональных токенов — не право
+# на аккаунт, а СВЕДЕНИЯ О ЛИЧНОСТИ: сколько удостоверений живо, когда выпущены,
+# когда истекают, чем названы. Раскрытие сведений — тоже действие за человека.
+#
+# Личность здесь ГЛОБАЛЬНА: одна строка на все аккаунты человека, а звено
+# «личность → аккаунт» вердикт берёт из членства, которых у него может быть
+# несколько. Значит право уровня ОДНОГО аккаунта раскрывало бы удостоверения
+# человека целиком — включая те, которыми он действует там, куда держатель этого
+# права не вхож.
+#
+# ЧТО ЗДЕСЬ ЧЕМУ КОНТРОЛЬ, СКАЗАНО ПРЯМО. Отрицание, снятое в одиночку, зеленеет
+# и на сломанном чтении: «никто не видит» неотличимо от «никому и не положено».
+# Поэтому:
+#   * IAM-USR-TOK-READ-POS-SELF — положительная половина обоих отрицаний: чтение
+#     ПРОДОЛЖАЕТ работать у того, кому оно принадлежит, и возвращает именно тот
+#     токен, который человек только что выпустил;
+#   * у каждого отрицания СВОЙ контроль внутри кейса — шаг, доказывающий, что
+#     отказанный предъявитель имеет к этому человеку и этому аккаунту настоящий
+#     доступ. Без него «403» неотличимо от «у него вообще ничего нет».
+#
+# ПОЧЕМУ У ЦЕЛИ ОТРИЦАНИЙ НЕТ СВОИХ ТОКЕНОВ, И ПОЧЕМУ ЭТО НИЧЕГО НЕ ОСЛАБЛЯЕТ.
+# Цель — свежеприглашённый человек, у которого предъявителя нет by construction:
+# приглашение это не учётные данные. Решение о доступе принимает КРАЙ, по объекту
+# личности из адреса, ДО того как служба увидит запрос, — поэтому наличие или
+# отсутствие строк в перечне на исход не влияет. Ровно тем же рассуждением
+# пользуется соседний IAM-USR-TOK-ACTAS-NEG-INVITER с вымышленным токеном.
+#
+# ЧЕГО ЭТИ КЕЙСЫ НЕ УТВЕРЖДАЮТ. Чтение ЗАПИСИ приглашённого (`UserService.Get`) и
+# перечень людей аккаунта распорядитель по-прежнему держит — видеть своих людей
+# законное дело аккаунта. Это не забыто, а намеренно: контроль первого отрицания
+# на этом и стоит.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-TOK-READ-POS-SELF",
+    title="Человек видит СВОЙ перечень персональных токенов и находит в нём только что "
+          "выпущенный (положительная половина запретов ниже)",
+    classes=["AUTHZ", "CRUD"],
+    priority="P0",
+    steps=[
+        Step(
+            name="read-self-issues-own-token",
+            method="POST",
+            path="/iam/v1/users/{{ceremonyUserId}}/tokens",
+            auth="jwtHumanCeremonyStepUp",
+            body={
+                "userId": "{{ceremonyUserId}}",
+                "createdByUserId": "{{ceremonyUserId}}",
+                "description": "read probe {{runId}}",
+                "name": "read-self-{{runId}}",
+            },
+            test_script=[
+                *assert_answered("UserTokenService.Issue самому себе (фикстура чтения)"),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                # Идентификатор берётся из metadata, где он предвыделен ДО
+                # асинхронного исхода, — поэтому следующим шагом стоит проверка
+                # самого исхода, а не только `done`.
+                *save_from_response("j.metadata && j.metadata.keyId", "readSelfTokenId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        # Первое чтение СВОЕГО свежего ресурса — законное место ограниченного
+        # ожидания: строка токена коммитится своей операцией, и её появление
+        # гарантировано. На отрицания ниже ожидание НЕ ставится: там оно было бы
+        # маскировкой отказа.
+        poll_request_until_status(
+            name="read-self-lists-own-tokens",
+            method="GET",
+            path="/iam/v1/users/{{ceremonyUserId}}/tokens?pageSize=1000",
+            auth="jwtHumanCeremony",
+            retry_predicate="(() => { const j = pm.response.json();"
+                            " const id = pm.environment.get('readSelfTokenId');"
+                            " return !!id && !(j.tokens || []).some(t => t.id === id); })()",
+            test_script=[
+                *assert_answered("UserTokenService.List своего перечня"),
+                *assert_status(200),
+                "pm.test('человек ВИДИТ свой перечень удостоверений: сужение чтения не имеет "
+                "права отнимать у владельца обзор собственных ключей — идентификатор выданного "
+                "существует ровно один раз, в ответе на выпуск, и без перечня отзыв стал бы "
+                "недостижим', () => {",
+                "  const j = pm.response.json();",
+                "  const id = pm.environment.get('readSelfTokenId');",
+                "  pm.expect(id, 'фикстура не захватила идентификатор выпущенного токена')"
+                ".to.be.a('string').with.length.greaterThan(0);",
+                "  pm.expect((j.tokens || []).map(t => t.id), JSON.stringify(j)).to.include(id);",
+                "});",
+                "pm.test('перечень отдаёт только метаданные — приватной части в нём нет', () => {",
+                "  const raw = pm.response.text();",
+                "  pm.expect(raw).to.not.include('PRIVATE KEY');",
+                "  pm.expect(raw).to.not.include('privateKeyPem');",
+                "});",
+            ],
+        ),
+        Step(
+            name="read-self-revokes-own-token",
+            method="DELETE",
+            path="/iam/v1/users/{{ceremonyUserId}}/tokens/{{readSelfTokenId}}",
+            auth="jwtHumanCeremonyStepUp",
+            test_script=[
+                *assert_answered("UserTokenService.Revoke своего токена (уборка за собой)"),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-USR-TOK-READ-NEG-ACCOUNT-ADMIN",
+    title="Распорядитель аккаунта видит своих людей, но перечень персональных токенов "
+          "приглашённого им человека НЕ получает",
+    classes=["AUTHZ", "NEG"],
+    priority="P0",
+    steps=[
+        *_invite_probe("readInvitedUserId", "read-invitee"),
+        # КОНТРОЛЬ. Доказывает сразу два условия, без которых отказ ниже ничего не
+        # значит: предъявитель распорядителя жив, и человек, чей перечень у него
+        # запрашивается, ДЕЙСТВИТЕЛЬНО состоит в аккаунте, которым тот
+        # распоряжается. Именно это членство и давало прежде право читать его
+        # удостоверения — через каскад распорядителя аккаунта.
+        poll_request_until_status(
+            name="read-admin-sees-the-person-in-his-account",
+            method="GET",
+            path="/iam/v1/users?accountId={{accountAId}}&pageSize=1000",
+            auth="jwtAccountAdminA",
+            retry_predicate="(() => { const j = pm.response.json();"
+                            " const id = pm.environment.get('readInvitedUserId');"
+                            " return !!id && !(j.users || []).some(u => u.id === id); })()",
+            test_script=[
+                *assert_answered("UserService.List людей своего аккаунта"),
+                *assert_status(200),
+                "pm.test('КОНТРОЛЬ: распорядитель ВИДИТ этого человека среди людей своего "
+                "аккаунта — значит отказ ниже про перечень удостоверений, а не про отсутствие "
+                "доступа вообще', () => {",
+                "  const j = pm.response.json();",
+                "  const id = pm.environment.get('readInvitedUserId');",
+                "  pm.expect((j.users || []).map(u => u.id), JSON.stringify(j)).to.include(id);",
+                "});",
+            ],
+        ),
+        Step(
+            name="read-admin-lists-tokens-of-the-invited-person",
+            method="GET",
+            path="/iam/v1/users/{{readInvitedUserId}}/tokens",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("UserTokenService.List от распорядителя аккаунта"),
+                # Утверждается ПАРА, а не один статус: HTTP-код — механическое
+                # следствие отображения края, смысл несёт код модели. Полоса здесь
+                # ОДНА и она выводится, а не угадывается: скрытие существования край
+                # применяет к чтению по идентификатору (`/Get` + `v_get`), а этот RPC
+                # ни тем, ни другим не является и явного признака в каталоге не несёт,
+                # — значит отказ приходит как PERMISSION_DENIED. Толерантность
+                # `403|404` здесь перечисляла бы исход без производителя.
+                "pm.test('распорядитель аккаунта НЕ получает перечень персональных удостоверений "
+                "приглашённого: удостоверение действует всюду, где действует человек, включая "
+                "аккаунты, к которым распорядитель отношения не имеет, а сколько их и когда они "
+                "истекают — сведения о личности, а не право на аккаунт', "
+                # `.to.eql`, а не `.to.equal`: генератор ЧИТАЕТ объявленный исход шага
+                # именно в этой форме и по нему решает, оборачивать ли шаг ожиданием
+                # видимости. Объявленный 403 отключает ожидание by construction —
+                # ретрай на отрицании был бы маскировкой отказа, а не терпимостью к
+                # окну.
+                "() => pm.expect(pm.response.code, pm.response.text()).to.eql(403));",
+                *assert_grpc_code(7, "PERMISSION_DENIED"),
+                "pm.test('в ответе нет ни одного удостоверения — отказ не отдал перечень частично', "
+                "() => {",
+                "  let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                "  pm.expect(j && j.tokens, JSON.stringify(j)).to.be.oneOf([undefined, null]);",
+                "});",
+            ],
+        ),
+    ],
+))
+
+
+CASES.append(Case(
+    id="IAM-USR-TOK-READ-NEG-TENANT",
+    title="Другой арендатор того же аккаунта перечень персональных токенов человека "
+          "НЕ получает",
+    classes=["AUTHZ", "NEG"],
+    priority="P0",
+    steps=[
+        *_invite_probe("readTenantTargetUserId", "read-tenant-target"),
+        # КОНТРОЛЬ. Предъявитель арендатора жив и имеет настоящий доступ ВНУТРИ
+        # того же аккаунта — он редактор проекта A1. Без этого шага отказ ниже
+        # неотличим от «этому предъявителю вообще ничего не выдано», а такое
+        # отрицание зеленеет на любом сломанном доступе.
+        Step(
+            name="read-tenant-control-reads-his-project",
+            method="GET",
+            path="/iam/v1/projects/{{projectA1Id}}",
+            auth="jwtInvitee",
+            test_script=[
+                *assert_answered("ProjectService.Get проекта, где арендатор — редактор"),
+                *assert_status(200),
+                "pm.test('КОНТРОЛЬ: арендатор имеет настоящий доступ внутри этого аккаунта — "
+                "значит отказ ниже про сведения о чужой личности, а не про пустую выдачу', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.id).to.eql(pm.environment.get('projectA1Id'));",
+                "});",
+            ],
+        ),
+        Step(
+            name="read-tenant-lists-tokens-of-another-person",
+            method="GET",
+            path="/iam/v1/users/{{readTenantTargetUserId}}/tokens",
+            auth="jwtInvitee",
+            test_script=[
+                *assert_answered("UserTokenService.List от другого арендатора аккаунта"),
+                "pm.test('арендатор НЕ получает перечень удостоверений другого человека того же "
+                "аккаунта: круг читателей — сам человек и надзор облака, и соседство по аккаунту "
+                "в него не входит', "
+                # `.to.eql` — по той же причине, что у соседнего кейса: объявленный
+                # исход отключает ожидание видимости, и отрицание остаётся
+                # одноразовым.
+                "() => pm.expect(pm.response.code, pm.response.text()).to.eql(403));",
+                *assert_grpc_code(7, "PERMISSION_DENIED"),
+            ],
+        ),
+    ],
+))
