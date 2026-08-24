@@ -35,7 +35,8 @@ func TestRegistryTokenListenAddress_Default(t *testing.T) {
 }
 
 // TestRegistryTokenPolicy_Defaults — the minted identity-JWT policy defaults
-// (issuer + audience/service + TTL) match the data-plane's advertised realm.
+// (issuer + TTL) match the data-plane's advertised realm. The addressee
+// (`service`) has NO default — see the note at the assertion below.
 func TestRegistryTokenPolicy_Defaults(t *testing.T) {
 	t.Parallel()
 	cfg, err := config.Load("")
@@ -46,8 +47,13 @@ func TestRegistryTokenPolicy_Defaults(t *testing.T) {
 	if got := tok.TokenIssuer(); got != "https://api.kacho.local/iam/token" {
 		t.Errorf("TokenIssuer() = %q, want https://api.kacho.local/iam/token", got)
 	}
-	if got := tok.TokenService(); got != "registry.kacho.local" {
-		t.Errorf("TokenService() = %q, want registry.kacho.local", got)
+	// АДРЕСАТ УМОЛЧАНИЯ НЕ ИМЕЕТ (задача #1184): имя службы реестра объявляет
+	// посадка ОДИН раз на обе стороны полосы. Встроенное умолчание здесь было
+	// вторым объявлением того же предмета и молча расходилось с тем, что реестр
+	// называет докер-клиенту. Незаданный адресат при поднятом слушателе
+	// отвергается стражем старта — см. registry_token_audience_guard_test.go.
+	if got := tok.TokenService(); got != "" {
+		t.Errorf("TokenService() = %q, want empty (адресат объявляет посадка, а не код)", got)
 	}
 	if got := tok.TokenTTL(); got != 5*time.Minute {
 		t.Errorf("TokenTTL() = %s, want 5m", got)
@@ -63,8 +69,8 @@ func TestRegistryTokenConfig_AccessorFallbacks(t *testing.T) {
 	if got := empty.TokenIssuer(); got != "https://api.kacho.local/iam/token" {
 		t.Errorf("empty TokenIssuer() = %q, want default issuer", got)
 	}
-	if got := empty.TokenService(); got != "registry.kacho.local" {
-		t.Errorf("empty TokenService() = %q, want default service", got)
+	if got := empty.TokenService(); got != "" {
+		t.Errorf("empty TokenService() = %q, want empty (у адресата умолчания нет)", got)
 	}
 	if got := empty.TokenTTL(); got != 5*time.Minute {
 		t.Errorf("empty TokenTTL() = %s, want 5m", got)
