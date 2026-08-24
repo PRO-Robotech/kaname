@@ -3,7 +3,8 @@
 
 """Case-set для UserService.
 
-Covered RPCs:  Get, List, Invite, Delete (public UserService).
+Covered RPCs:  Get, List, Invite, Delete + глаголы-действия :block / :unblock /
+  :removeFromAccount (public UserService).
 Not covered here: InternalUserService.UpsertFromIdentity, InternalUserService.Get —
   those are internal-port-only RPCs covered in iam-internal-only-check.py.
 
@@ -96,18 +97,38 @@ def assert_iam_operation_envelope():
 # Определение стоит ЗДЕСЬ, а не рядом с первым потребителем: потребителей теперь
 # двое — кейсы `:block`/`:unblock` ниже и IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS
 # выше, — а python читает файл сверху вниз.
-def _invite_probe(var: str, email_tag: str):
+#
+# `with_grant` — НЕСУЩИЙ параметр, а не удобство вызывающего. Пара «проект +
+# роль» заводит членство И ЖИВУЮ ВЫДАЧУ на него, а членство, несущее живую
+# выдачу, НЕ СНИМАЕТСЯ: отложенный триггер `membership_carrying_rights_is_kept`
+# (миграция 472002) отвергает снятие НА КОММИТЕ, потому что порядок «сперва
+# права, потом участие» — конструкция базы, а не дисциплина вызывающего (#1127).
+#
+# Поэтому кейсу, чей предмет — само ИСКЛЮЧЕНИЕ, нужна жертва БЕЗ выдачи: иначе
+# он падает на страже, к его предмету отношения не имеющем, и называет виновником
+# невиновного. Тот же приём и по той же причине стоит у IAM-USR-DL-CRUD-OK — там
+# строку личности держит RESTRICT по тем же самым выдачам.
+#
+# Умолчание оставлено ПРЕЖНИМ (`True`) намеренно: прочие потребители приглашают
+# РАДИ доступа, и снятие роли сменило бы предмет их кейсов. Сам страж при этом
+# покрытия не теряет — он утверждается через край отдельным кейсом
+# IAM-USR-EXCL-NEG-LIVE-GRANT, где живая выдача и есть предмет.
+def _invite_probe(var: str, email_tag: str, with_grant: bool = True):
+    body = {
+        "accountId": "{{accountAId}}",
+        "email": f"{email_tag}-{{{{runId}}}}@kacho.local",
+    }
+    if with_grant:
+        # `role_id` обязателен ТОГДА И ТОЛЬКО ТОГДА, когда назван `project_id`
+        # (см. InviteUserInput): половина пары — синхронный INVALID_ARGUMENT.
+        body["projectId"] = "{{projectA1Id}}"
+        body["roleId"] = ROLE_VIEW
     return [
         Step(
             name=f"invite-{email_tag}",
             method="POST",
             path="/iam/v1/users:invite",
-            body={
-                "accountId": "{{accountAId}}",
-                "projectId": "{{projectA1Id}}",
-                "email": f"{email_tag}-{{{{runId}}}}@kacho.local",
-                "roleId": ROLE_VIEW,
-            },
+            body=body,
             auth="jwtAccountAdminAStepUp",
             test_script=[
                 *assert_answered(f"invite-{email_tag}"),
@@ -1764,7 +1785,15 @@ CASES.append(Case(
     steps=[
         # Свой расходуемый приглашённый: чужая фикстура сделала бы порядок кейсов
         # контрактом.
-        *_invite_probe("exclVictimId", "exclprobe"),
+        #
+        # БЕЗ ВЫДАЧИ, и это предмет, а не мелочь фикстуры. Предмет кейса —
+        # ИСКЛЮЧЕНИЕ; приглашение с ролью завело бы вдобавок живую выдачу, а
+        # членство, её несущее, страж `membership_carrying_rights_is_kept`
+        # (миграция 472002) снять не даёт — кейс падал бы на порядке «сперва
+        # права, потом участие», к его предмету отношения не имеющем. Сам
+        # порядок утверждается там, где он и есть предмет:
+        # IAM-USR-EXCL-NEG-LIVE-GRANT.
+        *_invite_probe("exclVictimId", "exclprobe", with_grant=False),
         # ПРЕДПОСЫЛКА: он ДЕЙСТВИТЕЛЬНО в списке аккаунта. Без неё «его нет»
         # ниже истинно и на дереве, где список сломан целиком.
         Step(
@@ -1893,6 +1922,182 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
+# IAM-USR-EXCL-NEG-LIVE-GRANT — членство, несущее ЖИВУЮ ВЫДАЧУ, не снимается:
+# порядок «сперва права, потом участие» (#1127, миграция 472002).
+#
+# ПОЧЕМУ ЭТОТ КЕЙС ЗАВЕДЁН. До него это поведение через край не проверялось
+# НИЧЕМ. Оно закрыто пробой репозитория
+# (`TestIntegration_MembershipCarryingRightsIsRefusedWithContractTone`), но она
+# судит СНЯТИЕ СТРОКИ, а не то, что видит вызывающий: между стражем и ответом
+# лежат два слоя, каждый со своим способом разъехаться молча, —
+# отображение 23000 → FAILED_PRECONDITION с контракт-тоном
+# (`repo/kacho/pg/pgmaperr.go`) и доставка отказа ИСХОДОМ ОПЕРАЦИИ, а не
+# синхронным кодом (страж отложенный, он срабатывает на КОММИТЕ). Проба
+# репозитория остаётся зелёной при любом расхождении в обоих.
+#
+# ПОЧЕМУ ОН ПОЯВЛЯЕТСЯ ВМЕСТЕ С ПРАВКОЙ ФИКСТУР. Положительные плечи
+# IAM-USR-EXCL-CRUD-OK и IAM-USR-RMID-NEG-ACCOUNT-ADMIN переведены на жертву БЕЗ
+# выдачи — иначе они падают на страже, к их предмету отношения не имеющем.
+# Перенос без этого кейса просто СНЯЛ БЫ покрытие: страж перестал бы
+# срабатывать хоть где-нибудь на пути через край.
+#
+# ПАРА НА ОДНОЙ ПЕРЕМЕННОЙ. Плечи различаются РОВНО ОДНИМ — наличием живой
+# выдачи; аккаунт, предъявитель, глагол и предикат наблюдения у них общие.
+# Поэтому «отказано» здесь не может пройти на дереве, где исключение сломано
+# для всех: второе плечо тем же вызовом проходит. Обратное тоже верно — успех
+# второго плеча не зачитывается за работоспособность стража, его утверждает
+# первое.
+#
+# УЧАСТИЕ СОХРАНЕНО — ОТДЕЛЬНОЕ УТВЕРЖДЕНИЕ. Отказ, у которого остался эффект,
+# отказом не является; страж отложенный, поэтому строка членства успевает быть
+# удалённой ВНУТРИ транзакции и возвращается только откатом. Наблюдается тем же
+# предикатом, что и в положительном кейсе: `UserService.List` сужается
+# ЧЛЕНСТВАМИ, значит «он всё ещё в списке аккаунта» есть следствие уцелевшей
+# строки, а не пересказ того же вызова.
+#
+# ОТКАЗ НАЗЫВАЕТ ИМЕННО ЭТОГО ЧЕЛОВЕКА И ИМЕННО ЭТОТ АККАУНТ. Страж — триггер:
+# он срабатывает на коммите, и назвать пару в тексте можно только тем, что
+# писатель оставил в подсказке (`userWriter.RemoveMembership` →
+# `splitBindingHint`). Утверждение формы текста этого не ловит: пустая подсказка
+# даёт ЗАКОННЫЙ обобщённый текст той же ветви, и он прошёл бы. Поэтому пара
+# идентификаторов сверяется с переменными окружения.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-USR-EXCL-NEG-LIVE-GRANT",
+    title="Исключение из аккаунта человека с живой выдачей — отказ FAILED_PRECONDITION (9) "
+          "с контракт-тоном, участие сохранено; без выдачи то же исключение проходит",
+    classes=["NEG", "CRUD"],
+    priority="P0",
+    steps=[
+        # ── ПЛЕЧО ОТКАЗА: жертва С живой выдачей ─────────────────────────────
+        # `with_grant=True` (умолчание) — приглашение с парой «проект + роль»
+        # заводит членство И выдачу на проект аккаунта A, то есть ровно то
+        # состояние, которое страж охраняет.
+        *_invite_probe("holdVictimId", "holdprobe"),
+        # ПРЕДПОСЫЛКА: он ДЕЙСТВИТЕЛЬНО в аккаунте. Без неё «участие сохранено»
+        # ниже истинно и на дереве, где приглашение членства не завело вовсе.
+        Step(
+            name="granted-victim-is-listed-before",
+            method="GET",
+            path="/iam/v1/users?accountId={{accountAId}}&pageSize=1000",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("granted-victim-is-listed-before"),
+                *assert_status(200),
+                "pm.test('ПРЕДПОСЫЛКА: приглашённый с выдачей есть в списке аккаунта', () => {",
+                "  const j = pm.response.json();",
+                "  const ids = (j.users || []).map(u => u.id);",
+                "  pm.expect(ids, JSON.stringify(j)).to.include(pm.environment.get('holdVictimId'));",
+                "});",
+            ],
+        ),
+        Step(
+            name="exclude-while-grant-is-live",
+            method="POST",
+            path="/iam/v1/users/{{holdVictimId}}:removeFromAccount",
+            body={"accountId": "{{accountAId}}"},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("exclude-while-grant-is-live"),
+                # Отказ приходит ИСХОДОМ ОПЕРАЦИИ, а не синхронным кодом: страж
+                # отложенный и срабатывает на коммите — то есть уже внутри
+                # асинхронного шага. Синхронный ответ здесь обязан быть 200 с
+                # конвертом операции, и это утверждается, чтобы «отказ» не
+                # зачёлся за отказ КРАЯ.
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        # Код И текст. Текст прибит целиком, а не подстрокой: обобщённая ветвь
+        # той же карты («user still has active access bindings in this account…»)
+        # подстроку содержит, поэтому подстрока прошла бы на потерянной подсказке.
+        assert_op_error(
+            9, "FAILED_PRECONDITION",
+            msg_regex=r"^User usr[a-z0-9]+ still has active access bindings in "
+                      r"Account acc[a-z0-9]+ and cannot be removed from it$",
+        ),
+        # Пара идентификаторов — ТА САМАЯ. Операция уже `done` (шаг выше довёл
+        # её поллингом), поэтому чтение одиночное.
+        Step(
+            name="refusal-names-this-user-and-this-account",
+            method="GET",
+            path="/operations/{{opId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("refusal-names-this-user-and-this-account"),
+                *assert_status(200),
+                "pm.test('отказ называет ЭТОГО человека и ЭТОТ аккаунт', () => {",
+                "  const j = pm.response.json();",
+                "  const m = (j.error && j.error.message) || '';",
+                "  pm.expect(m, JSON.stringify(j)).to.include(pm.environment.get('holdVictimId'));",
+                "  pm.expect(m, JSON.stringify(j)).to.include(pm.environment.get('accountAId'));",
+                "});",
+            ],
+        ),
+        # УЧАСТИЕ СОХРАНЕНО: отказ, у которого остался эффект, не отказ.
+        Step(
+            name="membership-survived-the-refusal",
+            method="GET",
+            path="/iam/v1/users?accountId={{accountAId}}&pageSize=1000",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("membership-survived-the-refusal"),
+                *assert_status(200),
+                "pm.test('отвергнутое исключение участия не сняло', () => {",
+                "  const j = pm.response.json();",
+                "  const ids = (j.users || []).map(u => u.id);",
+                "  pm.expect(ids, JSON.stringify(j)).to.include(pm.environment.get('holdVictimId'));",
+                "});",
+            ],
+        ),
+        # ── ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: та же полоса, жертва БЕЗ выдачи ──────────
+        # Тот же аккаунт, тот же предъявитель, тот же глагол. Единственное
+        # отличие — отсутствие живой выдачи, и его достаточно, чтобы исключение
+        # прошло. Без этого плеча отказ выше был бы неотличим от дерева, где
+        # исключение не работает ни для кого.
+        *_invite_probe("freeVictimId", "freeprobe", with_grant=False),
+        Step(
+            name="exclude-without-a-grant",
+            method="POST",
+            path="/iam/v1/users/{{freeVictimId}}:removeFromAccount",
+            body={"accountId": "{{accountAId}}"},
+            auth="jwtAccountAdminAStepUp",
+            test_script=[
+                *assert_answered("exclude-without-a-grant"),
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(auth="jwtAccountAdminA"),
+        assert_op_success(auth="jwtAccountAdminA"),
+        Step(
+            name="ungranted-victim-is-not-listed-after",
+            method="GET",
+            path="/iam/v1/users?accountId={{accountAId}}&pageSize=1000",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_answered("ungranted-victim-is-not-listed-after"),
+                *assert_status(200),
+                "pm.test('КОНТРОЛЬ: без выдачи исключение состоялось', () => {",
+                "  const j = pm.response.json();",
+                "  const ids = (j.users || []).map(u => u.id);",
+                "  pm.expect(ids, JSON.stringify(j)).to.not.include(pm.environment.get('freeVictimId'));",
+                "});",
+                "pm.test('КОНТРОЛЬ: снято одно членство, а не все — держатель выдачи на месте', () => {",
+                "  const j = pm.response.json();",
+                "  const ids = (j.users || []).map(u => u.id);",
+                "  pm.expect(ids, JSON.stringify(j)).to.include(pm.environment.get('holdVictimId'));",
+                "});",
+            ],
+        ),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
 # IAM-USR-RMID-NEG-ACCOUNT-ADMIN — распорядитель аккаунта НЕ стирает строку
 # личности, а выводит человека из своего аккаунта (#1131).
 #
@@ -1929,7 +2134,11 @@ CASES.append(Case(
     classes=["AUTHZ", "NEG"],
     priority="P0",
     steps=[
-        *_invite_probe("rmidVictimId", "rmidprobe"),
+        # БЕЗ ВЫДАЧИ: положительное плечо ниже ИСКЛЮЧАЕТ этого человека из
+        # аккаунта, а членство с живой выдачей не снимается (страж
+        # `membership_carrying_rights_is_kept`, миграция 472002). Отрицательное
+        # плечо от роли не зависит вовсе — оно про право снять ЛИЧНОСТЬ.
+        *_invite_probe("rmidVictimId", "rmidprobe", with_grant=False),
         # ОТРИЦАНИЕ — снятие ЛИЧНОСТИ.
         Step(
             name="identity-delete-denied",
