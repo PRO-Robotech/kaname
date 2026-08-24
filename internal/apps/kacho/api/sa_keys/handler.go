@@ -78,6 +78,14 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 	// Phase 3b: federated trusted-subjects passthrough. nil/empty slice keeps
 	// Phase 3a private_key_jwt behaviour intact (no schema change for
 	// existing callers).
+	//
+	// ВСЕ ЧЕТЫРЕ поля переносятся, и это не полнота ради полноты. Перечень
+	// доверенных издателей — наша таблица (#1124), и подпись внешнего утверждения
+	// сверяется с записанным здесь ключом. Ключ и его алгоритм объявлены
+	// обязательными и на проводе, и в домене; транспорт, переносивший только пару
+	// (issuer, subject_pattern), делал федеративную выдачу неисполнимой ни при
+	// каком входе: домен отвергал КАЖДЫЙ запрос, называя негодными ровно те поля,
+	// которые вызывающий прислал.
 	var ts []domain.TrustedSubject
 	if raw := req.GetTrustedSubjects(); len(raw) > 0 {
 		ts = make([]domain.TrustedSubject, 0, len(raw))
@@ -88,6 +96,8 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 			ts = append(ts, domain.TrustedSubject{
 				Issuer:         r.GetIssuer(),
 				SubjectPattern: r.GetSubjectPattern(),
+				PublicKeyPEM:   r.GetPublicKeyPem(),
+				KeyAlgorithm:   r.GetKeyAlgorithm(),
 			})
 		}
 	}
