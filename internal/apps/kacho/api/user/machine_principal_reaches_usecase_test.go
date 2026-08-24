@@ -13,9 +13,11 @@ package user
 // owning account's `owner_user_id`, which no machine principal can satisfy and
 // which voided owner-granted delegation.
 //
-// NOTE — Delete keeps its `IsSelf` short-circuit and its account-less refusal.
-// Those are separate hand-rolled decisions, not part of the owner-equality
-// guard; they are reported, not removed here.
+// NOTE — обе оставшиеся здесь самодельные развилки Delete с тех пор сняты.
+// Гейт RPC ушёл с `v_delete` на `identity_remover` (#1131), а вслед за ним
+// снята и «безаккаунтный удаляет только сам себя» (#1174): у неё не осталось
+// предмета, а работала она отказом надзору облака. Предмет и пара утверждений —
+// `account_less_delete_test.go`.
 
 import (
 	"context"
