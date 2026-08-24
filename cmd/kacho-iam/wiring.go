@@ -838,7 +838,11 @@ func mustProviderAdminClient(cfg config.Config) *clients.HydraAdminClient {
 // как посадка выдаёт удостоверение, и его надо уметь спросить, не собирая контур
 // целиком (тот же довод, что у выбора полосы обмена докер-токена).
 func saKeyIssuanceIsOurs(cfg config.Config) bool {
-	return cfg.AuthN.ClientToken.Enabled
+	// Само условие живёт в настройке (`Config.SAKeyIssuanceIsOurs`), а не здесь:
+	// читателей у него два — эта сборка и страж старта над требованием
+	// связанного токена (задача #1137), — и две копии одного условия разошлись
+	// бы молча. Функция остаётся точкой, которую спрашивают, не собирая контур.
+	return cfg.SAKeyIssuanceIsOurs()
 }
 
 // buildSAKeysHandler wires the SAKeyService handler — Class A static SA-keys
