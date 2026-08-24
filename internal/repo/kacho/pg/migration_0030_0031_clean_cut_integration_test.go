@@ -75,14 +75,21 @@ func TestMigration_F51_LegacyTablesDropped(t *testing.T) {
 // system_viewer@cluster tuples of 0014, and the requesting tenant's own identity,
 // propagated on every peer call.
 //
-// 66 − 9 − 7 = 50.
+// MINUS `iam.user.edit`, выведенной 20260824002317: её единственный глагол
+// `update` снят с типа `iam_user` (#1128, читателя у него не было с #1102),
+// поэтому набор глаголов правила разрешался в ПУСТОЙ — роль не материализовала
+// ни одного кортежа, а её имя обещало правку. Смысла, который обещает имя, у неё
+// быть не может: правку записи личности выражает `record_writer`, отношение
+// ВЫЧИСЛЯЕМОЕ, и выдать его нельзя ни кортежем, ни привязкой.
+//
+// 66 − 9 − 7 − 1 = 49.
 //
 // The number is asserted EXACTLY, not as a floor, so a re-seed that quietly brings
 // a retired role back fails here — that is the guard, and it is worth the upkeep.
 // It lives in ONE place because it was previously written out twice and a
 // deliberate retire then had to find both; the second copy is a precondition in
 // TestMigration_F53_AccessNotSevered.
-const wantSystemRoles = 50
+const wantSystemRoles = 49
 
 // TestMigration_F53_SystemRolesReseededWithRules — every system role has
 // non-empty rules after re-seed; the count is exact.

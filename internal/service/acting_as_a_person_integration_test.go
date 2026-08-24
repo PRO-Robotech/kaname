@@ -117,7 +117,7 @@ func TestIssuingAPersonalTokenIsNotReachableFromInsideTheAccount(t *testing.T) {
 	// Путь 1 — ВЫДАЧА внутри аккаунта, чья роль даёт правку личности. Это тот
 	// самый пообъектный доступ, который реконсайлер материализует на строке
 	// приглашённого сразу после коммита приглашения.
-	seedRoleGrantingUserEdit(t, w, "rol-actas1", "acb-actas1", inviter, acc)
+	seedRoleGrantingUserRead(t, w, "rol-actas1", "acb-actas1", inviter, acc)
 	// Путь 2 — делегированный администратор аккаунта.
 	w.factThroughJournal(t, "user:"+inviter, "admin", "account", acc)
 	// Путь 3 — владелец аккаунта.
@@ -133,13 +133,18 @@ func TestIssuingAPersonalTokenIsNotReachableFromInsideTheAccount(t *testing.T) {
 	require.Equalf(t, "iam_user", revokeType, "отзыв токена гейтится не на объекте личности (%s)", revokeType)
 
 	// ── КОНТРОЛЬ ФИКСТУРЫ ────────────────────────────────────────────────────
-	// Пригласивший ДЕЙСТВИТЕЛЬНО что-то держит на этой строке: правку записи.
+	// Пригласивший ДЕЙСТВИТЕЛЬНО что-то держит на этой строке: чтение записи.
 	// Без этого утверждения отрицания ниже были бы истинны и на пустом посеве.
-	require.True(t, w.allowed(t, "user:"+inviter, "v_update", obj),
-		"КОНТРОЛЬ: пригласивший обязан держать правку записи — иначе фикстура ничего не посеяла "+
+	//
+	// Контроль СТОЯЛ НА ПРАВКЕ и переведён на чтение (#1128): `v_update` снят с
+	// типа `iam_user`, поэтому вопрос о нём стал неразрешимым by construction —
+	// дверь отвечает не «нет», а отказом. Чтение — то, что директива аккаунту
+	// оставляет, и потому годится контролем живого посева.
+	require.True(t, w.allowed(t, "user:"+inviter, "v_get", obj),
+		"КОНТРОЛЬ: пригласивший обязан держать чтение записи — иначе фикстура ничего не посеяла "+
 			"и все отрицания ниже вакуумны")
-	require.True(t, w.allowed(t, "user:"+owner, "v_update", obj),
-		"КОНТРОЛЬ: владелец аккаунта обязан держать правку записи на строке своего члена")
+	require.True(t, w.allowed(t, "user:"+owner, "v_get", obj),
+		"КОНТРОЛЬ: владелец аккаунта обязан держать чтение записи на строке своего члена")
 
 	// ── ОТРИЦАНИЕ — предмет пробы ────────────────────────────────────────────
 	for _, c := range []struct {
@@ -242,26 +247,34 @@ func TestIssuingAPersonalTokenIsNotReachableFromInsideTheAccount(t *testing.T) {
 		issueType, issueRel, revokeType, revokeRel, listType, listRel, len(subjectsAsked))
 }
 
-// seedRoleGrantingUserEdit кладёт роль, дающую ПРАВКУ ЛИЧНОСТИ, и выдачу этой
-// роли субъекту на весь аккаунт — тот самый путь, которым пообъектный доступ
+// seedRoleGrantingUserRead кладёт роль, дающую ЧТЕНИЕ ЗАПИСИ личности, и выдачу
+// этой роли субъекту на весь аккаунт: тот самый путь, которым пообъектный доступ
 // приезжает пригласившему.
 //
-// Три строки, и ни одна не лишняя: без проекции глаголов роль не даёт ничего, без
-// селектора она не адресует ни одного объекта, без строки субъекта выдачи её не
-// видит вопрос о доступе. Фикстура, кладущая меньше, доказывала бы запрет на
-// пустоте.
-func seedRoleGrantingUserEdit(t *testing.T, w *ciWorld, roleID, bindingID, subjectID, accountID string) {
+// ЗДЕСЬ СТОЯЛА ПРАВКА (`update`), и глагол сменён не ради удобства. `v_update`
+// снят с типа `iam_user` (#1128): правку записи спрашивает `record_writer`,
+// запрет — `identity_suspender`, и читателя у глагола не осталось. Роль,
+// называющая `update` на `iam.user`, теперь разрешается в ПУСТОЙ набор —
+// материализация сверяется с набором типа и отбрасывает чужой глагол. Значит
+// прежняя фикстура клала строку проекции, которой продукт больше не производит,
+// то есть была СНИСХОДИТЕЛЬНЕЕ продукта — ровно тот класс, ради которого
+// дублёров и разбирают.
+//
+// Чтение выбрано потому, что это и есть то, что директива аккаунту ОСТАВЛЯЕТ:
+// читать своих людей. Роль `iam.user.view` живёт, глагол `v_get` тип объявляет,
+// и контроль на нём утверждает живой посев, а не выдуманный.
+func seedRoleGrantingUserRead(t *testing.T, w *ciWorld, roleID, bindingID, subjectID, accountID string) {
 	t.Helper()
 	w.exec(t, `INSERT INTO kacho_iam.roles (id, name, permissions, rules, cluster_id)
-	           VALUES ($1, 'test.useredit', '[]'::jsonb,
+	           VALUES ($1, 'test.userread', '[]'::jsonb,
 	                   jsonb_build_array(jsonb_build_object(
 	                       'module', 'iam', 'resources', jsonb_build_array('user'),
-	                       'verbs',  jsonb_build_array('update'))),
+	                       'verbs',  jsonb_build_array('get'))),
 	                   'cluster_kacho_root')`, roleID)
 	// Тип — в ТОЧЕЧНОЙ форме каталога: именно так его кладёт прод, и именно так
 	// его читает вопрос о доступе.
 	w.exec(t, `INSERT INTO kacho_iam.role_verb (role_id, object_type, verb)
-	           VALUES ($1, 'iam.user', 'update')`, roleID)
+	           VALUES ($1, 'iam.user', 'get')`, roleID)
 	w.exec(t, `INSERT INTO kacho_iam.role_rule_selectors
 	             (role_id, rule_fp, arm, object_types, match_labels)
 	           VALUES ($1, 'fp-actas', 'anchor', ARRAY['iam.user'::text], '{}'::jsonb)`, roleID)
