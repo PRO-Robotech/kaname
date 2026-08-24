@@ -36,17 +36,19 @@ named here so the rule is not read as three-quarters covered:
 Three lanes and the negatives that make each of them mean something:
 
   verification  IBT-04 — the Bearer the edge accepts is verified by key material the
-                         FACADE serves (its `kid` is in iam's JWKS), and the edge
-                         answers 200 — neither 401 nor 403.
-                IBT-12 — that JWKS is a faithful MIRROR of the provider's public one
-                         (same kids, same moduli): iam proxies, iam mints nothing.
+                         FACADE serves (its `kid` is published by exactly one of the
+                         facade's key-set records), and the edge answers 200 — neither
+                         401 nor 403.
+                IBT-12 — the MIRROR record is faithful to the provider's public keyset
+                         (same kids, same moduli): on that record iam proxies, iam
+                         mints nothing.
   issuance      IBT-05 — a credential is issued AND revoked through iam's own RPCs
                          (SAKeyService.Issue/Revoke, UserTokenService.Issue/Revoke),
                          and the acr-exempt service principal is not step-up-challenged.
   enrichment    IBT-13 — the platform principal the edge reports for a machine token
-                         is the one iam's token-hook stamped into its claims. Without
-                         the hook the `sub` is a raw OAuth client id and resolves to
-                         nothing.
+                         is the one the FACADE's claim composition named. Without the
+                         composition the credential carries no `kacho_*` claim at all
+                         and names nobody on this platform.
   negatives     IBT-06 — the bootstrap mint has no REST door on any api-gateway listener.
                 IBT-15 — the provider's own surfaces (admin client registration, token
                          endpoint, JWKS) are not reachable through the platform edge,
@@ -101,6 +103,24 @@ here rather than papered over:
      provisioned without the api audience, so that exchange cannot authenticate the
      edge (issue #59, comment of 2026-07-22). That limit is #59's remaining open item
      (the interactive principal), not something this file can assert around.
+  4. THE ACCEPTANCE HAS ONE ISSUING LANE; THE PLATFORM NOW HAS TWO. The acceptance
+     was written when every Bearer on this platform came from the external provider,
+     and its scenario names carry that world: IBT-10 says "RS256", IBT-13 says "the
+     FACADE hook". The platform since grew its own signer, and the bootstrap
+     credential these cases present is minted by it — asymmetric still, but ES256,
+     issued by iam, with the composed claims placed FLAT rather than nested, and with
+     the principal itself as `sub`.
+     The case IDS ARE KEPT, because they are the acceptance's scenario numbers and
+     renaming them would silently break the traceability rows that cite them. What
+     changed is what the cases assert: every lane-specific literal (one algorithm,
+     one key-set record, one claim placement, `sub` is not the principal) is replaced
+     by the property that holds across BOTH lanes, and each case comment says which
+     literal it replaced and why the replacement is not a relaxation.
+     This is not hypothetical tidiness. Written for one lane, this file went red
+     against a correct platform in FIVE of its seven cases at once — two on the key
+     material (the algorithm, and the record the kid is looked up in), one on the
+     claim form, and two more purely as a cascade, where the step that failed was
+     doing exactly the right thing with a value the suite had failed to capture.
 
 WHAT IS DELIBERATELY *NOT* ASSERTED, SO NOBODY LOOKS FOR IT HERE
 ================================================================
@@ -108,9 +128,14 @@ The legitimate direct path — the final OAuth2 `client_assertion` → token exc
 the provider — is not exercised as a black-box case: signing an ES256 assertion needs
 the private key handed out once by Issue, and a Postman script signing JOSE would be a
 second implementation of `tests/authz-fixtures/mint_rs256.py` that could drift from it
-silently. It is exercised on EVERY run of this suite anyway, one level down: the
-Bearer these cases carry was produced by exactly that exchange. IBT-04 asserting that
-Bearer is accepted therefore already witnesses the exception working.
+silently.
+
+It used to be exercised on every run anyway, one level down — the Bearer these cases
+carry was produced by exactly that exchange. That is no longer true on a stand where
+the bootstrap credential is minted by the platform's own signer, and saying otherwise
+would be claiming a lane is covered when nothing here reaches it. What IBT-04 witnesses
+is what it says: the credential this suite presents is accepted, and the key that
+verifies it is published by the facade — whichever of its records published it.
 
 HOW THE PROBES REACH WHAT THEY PROBE
 ====================================
@@ -180,57 +205,192 @@ _JOSE_HELPERS = [
 ]
 
 
-def _jwks_step(name, why):
-    """A GET of the FACADE's JWKS, addressed at its own listener.
+# ---------------------------------------------------------------------------
+# THE COMPOSED CLAIMS ARE READ IN BOTH FORMS, AND THE READER IS EXTENDED — NOT
+# REPLACED.
+#
+# The claim SET is produced by ONE declaration for every issuing lane
+# (`saClaims` / `userTokenClaims` in the enrichment service), so the NAMES are
+# the same everywhere. What differs is WHERE the set is placed in the payload,
+# and that is a property of the signer, not of the composition:
+#
+#   top level            our own issuer signs the composed claims flat, as
+#                        ordinary claims of the token (the platform's own
+#                        signer merges them into the claim set before iss/sub/
+#                        aud/exp are stamped).
+#   ext.ext_claims       the external provider nests them; its access token
+#                        carries the map under `ext`, and additionally mirrors
+#                        it at the top-level key `ext_claims`.
+#   ext_claims           that same mirror, read on its own.
+#
+# BOTH lanes are live on this platform, so this suite reads BOTH. Reading only
+# the nested form is how this file went red against a correct platform: the
+# lookup resolved to `{}`, the presence assertions failed, and the two ids the
+# suite publishes for later steps were never captured — turning one form
+# mismatch into a cascade of "precondition not captured" in three other cases.
+#
+# `_claimForm` exists so a failure can NAME what was searched: "none" is then
+# distinguishable from "found, but empty", and a message that says which form
+# answered tells the reader which lane produced the credential.
+# ---------------------------------------------------------------------------
+
+_CLAIM_READER = [
+    "function _claimForm(pl) {",
+    "  if (!pl || typeof pl !== 'object') { return 'none'; }",
+    "  if (pl.kacho_principal_id) { return 'top-level'; }",
+    "  if (pl.ext && pl.ext.ext_claims && pl.ext.ext_claims.kacho_principal_id) { return 'ext.ext_claims'; }",
+    "  if (pl.ext_claims && pl.ext_claims.kacho_principal_id) { return 'ext_claims'; }",
+    "  return 'none';",
+    "}",
+    "function _claim(pl, k) {",
+    "  if (pl && pl[k] !== undefined && pl[k] !== null && pl[k] !== '') { return pl[k]; }",
+    "  const _nested = (pl && pl.ext && pl.ext.ext_claims) || (pl && pl.ext_claims) || {};",
+    "  return _nested[k];",
+    "}",
+]
+
+
+# ---------------------------------------------------------------------------
+# WHAT THE FACADE PUBLISHES, AND WHERE.
+#
+# The publisher on the facade listener carries one record PER ACCEPTED ISSUER,
+# each on its own DECLARED path — the union of the two is "the key material this
+# facade serves". Merging them into one document is what the platform refuses to
+# do, and for the reason this suite exists to keep true: a key of one issuer
+# would then verify a token declaring another.
+#
+#   `_MIRROR_JWKS_PATH`  the byte-faithful mirror of the external provider's
+#                        public keyset. IBT-12 compares it against the provider.
+#   `_OWN_JWKS_PATH`     the platform's OWN record — a projection of its keyring.
+#                        Declared by the deployment profile
+#                        (`config.authn.tokenSigning.keySetPath`) and defaulted
+#                        by the service itself; both name this value.
+#
+# A hard-coded path is a second place about one subject, so it is written so that
+# disagreement CANNOT be silent: the step asserts 200 on it. Move the record and
+# this suite goes red naming the path it asked for — never green having measured
+# a keyset that is not there.
+# ---------------------------------------------------------------------------
+
+_MIRROR_JWKS_PATH = "/.well-known/jwks.json"
+_OWN_JWKS_PATH = "/.well-known/kacho/jwks.json"
+
+
+def _jwks_step(name, why, path=_MIRROR_JWKS_PATH, record="mirror",
+               kids_var="_facadeKids", by_kid_var="_facadeByKid"):
+    """A GET of ONE record of the FACADE's key publisher, at its own listener.
 
     Every case that needs the served key material fetches it ITSELF instead of
     reading a variable another case left behind: a case whose precondition is
     produced by a different case cannot be run alone (`--folder`), and when it is
     run alone it does not fail — it passes on a stale value or skips. Fetching is
     two hundred bytes; depending on a neighbour is a silent hole.
+
+    WHY THE PER-KEY ASSERTIONS ARE KEY-TYPE-AWARE AND NOT "RSA/RS256"
+    ----------------------------------------------------------------
+    They used to demand `kty=RSA` + `alg=RS256` of every key of every record.
+    That was a statement about ONE issuer's key choice, and it stopped being a
+    statement about the FACADE the moment the publisher grew a second record:
+    the platform's own keyring is EC/ES256, so the old form was red on correct
+    key material.
+
+    What replaces it is not looser — it is a different, stronger axis. Each key
+    must declare a key type this platform publishes, its `alg` must be the one
+    that key type implies, and the public half must be COMPLETE for that type.
+    A symmetric key (`oct`) fails on the first clause: publishing one would mean
+    publishing a SIGNING SECRET, which is the same defect the private-member
+    check below is written for, arriving by another door. A key whose header
+    algorithm and key type disagree fails on the second — that is the shape an
+    alg-confusion forgery needs, seen from the publishing side.
+
+    What the mirror record ALSO holds — that it is byte-faithful to the provider,
+    keyset for keyset — is asserted by IBT-12, which is the case whose subject
+    that is.
     """
-    from_gen = require_env_url("iamJwksBaseUrl", "/.well-known/jwks.json", why)
+    from_gen = require_env_url("iamJwksBaseUrl", path, why)
     return Step(
         name=name,
         method="GET",
-        path="/.well-known/jwks.json",
+        path=path,
         auth="anonymous",
         insecure_tls=True,
         pre_script=from_gen,
         test_script=[
             *assert_answered(name),
+            # 200 IS the guard on the declared path. A record that moved answers
+            # 404 here and this suite says which address it asked for — the one
+            # outcome a hard-coded path must never have is a silent green.
             *assert_status(200),
             *_JOSE_HELPERS,
+            f"const _record = {json.dumps(record)};",
             "const _jwks = pm.response.json();",
-            "pm.test('facade JWKS: keys is a non-empty array', () => {",
+            "pm.test('facade JWKS [' + _record + ']: keys is a non-empty array', () => {",
             "  pm.expect(_jwks.keys, JSON.stringify(_jwks)).to.be.an('array');",
-            "  pm.expect(_jwks.keys.length, 'a facade serving zero keys verifies nothing')",
+            "  pm.expect(_jwks.keys.length, 'a facade record serving zero keys verifies nothing')",
             "    .to.be.greaterThan(0);",
             "});",
-            "pm.test('facade JWKS: every key is an RS256 verification key with kid/n/e', () => {",
+            # The closed table of what this platform publishes. `oct` is absent by
+            # construction, and that absence is the point.
+            "const _KTY_ALG = {RSA: 'RS256', EC: 'ES256', OKP: 'EdDSA'};",
+            "const _KTY_MEMBERS = {RSA: ['n', 'e'], EC: ['crv', 'x', 'y'], OKP: ['crv', 'x']};",
+            "pm.test('facade JWKS [' + _record + ']: every key is ASYMMETRIC verification material — "
+            "kty and alg agree, and the public half is complete', () => {",
             "  (_jwks.keys || []).forEach(k => {",
-            "    pm.expect(k.kty, JSON.stringify(k)).to.eql('RSA');",
-            "    pm.expect(k.alg, JSON.stringify(k)).to.eql('RS256');",
+            "    pm.expect(Object.keys(_KTY_ALG), 'kty ' + k.kty + ' of ' + k.kid +",
+            "      ' — a facade publishing a symmetric key is publishing a SIGNING SECRET')",
+            "      .to.include(k.kty);",
+            "    pm.expect(k.alg, 'alg of ' + k.kid + ' against its key type ' + k.kty +",
+            "      ' — a key whose header algorithm its material cannot support is the "
+            "alg-confusion shape seen from the publishing side').to.eql(_KTY_ALG[k.kty]);",
             "    pm.expect(k.kid, JSON.stringify(k)).to.be.a('string').with.length.greaterThan(0);",
-            "    pm.expect(k.n, JSON.stringify(k)).to.be.a('string').with.length.greaterThan(0);",
-            "    pm.expect(k.e, JSON.stringify(k)).to.be.a('string').with.length.greaterThan(0);",
+            "    (_KTY_MEMBERS[k.kty] || []).forEach(m => pm.expect(k[m], 'member ' + m + ' of ' + k.kid +",
+            "      ' — an incomplete public half verifies nothing').to.be.a('string').with.length.greaterThan(0));",
             "  });",
             "});",
-            # The facade PROXIES; it holds no keyset of its own. Private JWK members
-            # on this surface would mean iam had started signing — the exact thing
-            # the rule says it must not do — and would leak the signing key besides.
-            "pm.test('facade JWKS: carries PUBLIC material only (no d/p/q/dp/dq/qi)', () => {",
+            # Private JWK members on this surface would leak the signing key —
+            # of the provider on the mirror record, of the platform on its own.
+            "pm.test('facade JWKS [' + _record + ']: carries PUBLIC material only (no d/p/q/dp/dq/qi)', () => {",
             "  const priv = ['d', 'p', 'q', 'dp', 'dq', 'qi'];",
             "  (_jwks.keys || []).forEach(k => {",
             "    priv.forEach(m => pm.expect(k[m], 'private JWK member ' + m +",
-            "      ' on the proxy: the facade must mirror, never mint').to.be.undefined);",
+            "      ' on the facade: what is published is what VERIFIES, never what signs').to.be.undefined);",
             "  });",
             "});",
-            "pm.environment.set('_facadeKids', JSON.stringify((_jwks.keys || []).map(k => k.kid)));",
-            "pm.environment.set('_facadeByKid', JSON.stringify((_jwks.keys || []).reduce((a, k) => {",
-            "  a[k.kid] = {kty: k.kty, alg: k.alg, n: k.n, e: k.e}; return a;", "}, {})));",
+            f"pm.environment.set({json.dumps(kids_var)}, "
+            "JSON.stringify((_jwks.keys || []).map(k => k.kid)));",
+            f"pm.environment.set({json.dumps(by_kid_var)}, "
+            "JSON.stringify((_jwks.keys || []).reduce((a, k) => {",
+            "  a[k.kid] = {kty: k.kty, alg: k.alg, n: k.n, e: k.e, crv: k.crv, x: k.x, y: k.y};",
+            "  return a;", "}, {})));",
         ],
     )
+
+
+def _own_record_step(name, why):
+    """The facade's OWN key-set record — the platform's keyring, published."""
+    return _jwks_step(name, why, path=_OWN_JWKS_PATH, record="own",
+                      kids_var="_facadeOwnKids", by_kid_var="_facadeOwnByKid")
+
+
+# Reading the public half of a published key, whatever its type. The RSA
+# modulus is the textbook alg-confusion key (CWE-347); for an EC key the
+# analogous public material is the point, for OKP the encoded public key. What
+# matters for the forgery below is that the HMAC key is material the FACADE
+# ITSELF publishes — an invented secret would prove nothing about pinning.
+_PUBLIC_MATERIAL_JS = [
+    "function _publicMaterial(k) {",
+    "  if (!k) { return ''; }",
+    "  if (k.n) { return k.n; }",
+    "  if (k.x && k.y) { return k.x + k.y; }",
+    "  if (k.x) { return k.x; }",
+    "  return '';",
+    "}",
+    "function _facadeKeyByKid(kid) {",
+    "  const _m = JSON.parse(pm.environment.get('_facadeByKid') || '{}');",
+    "  const _o = JSON.parse(pm.environment.get('_facadeOwnByKid') || '{}');",
+    "  return _m[kid] || _o[kid] || null;",
+    "}",
+]
 
 
 # ===========================================================================
@@ -238,21 +398,43 @@ def _jwks_step(name, why):
 #          it is served BY THE FACADE.
 #
 # Two halves, and neither alone is the property. "The edge answered 200" says the
-# token was good; it does not say WHOSE key material proved it. "The proxy serves
-# keys" says material exists; it does not say anything verifies with it. Together
-# they close the verification lane: this exact credential's `kid` is one the facade
-# publishes, and the edge admits it.
+# token was good; it does not say WHOSE key material proved it. "The publisher
+# serves keys" says material exists; it does not say anything verifies with it.
+# Together they close the verification lane: this exact credential's `kid` is one
+# the facade publishes, and the edge admits it.
+#
+# BOTH RECORDS ARE READ, AND THAT IS THE PROPERTY — NOT A CONVENIENCE.
+# The publisher carries one record per accepted issuer. Asking only the mirror
+# was the same mistake as reading only the nested claim form: it asserted a
+# property of ONE lane while the platform runs two, and it was red on correct key
+# material the moment the bootstrap credential moved to the platform's own signer.
+# Reading both lets the case say something the single-record form could not: the
+# kid is served by EXACTLY ONE record. A kid appearing in both would mean one
+# issuer's key verifies another issuer's token — the very thing the publisher
+# refuses to do by keeping the records apart.
+#
+# The algorithm assertion moved from "RS256" to "asymmetric, and the same
+# algorithm the publishing record declares for that kid". It is not weaker: the
+# literal named one issuer's key choice, while the pair names the two things that
+# make a signature mean anything — that the presenter could not have produced it
+# with a shared secret, and that the header did not choose an algorithm the key
+# material does not support.
 # ===========================================================================
 
 CASES.append(Case(
     id="IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS",
-    title="Facade JWKS-proxy serves the RS256 kid that signs the accepted Bearer; edge answers 200 (not 401, not 403)",
+    title="The facade publishes — in exactly one of its key-set records — the kid that signs the accepted Bearer, under the algorithm its header names; edge answers 200 (not 401, not 403)",
     classes=["SEC", "CONF"],
     priority="P0",
     steps=[
         _jwks_step(
             "facade-jwks",
             "verification lane — the key material the edge verifies with is served by iam",
+        ),
+        _own_record_step(
+            "facade-own-key-set",
+            "verification lane — the OWN record of the facade; the platform signs with its own "
+            "keyring and publishes the verifying half here",
         ),
         Step(
             name="bearer-accepted-at-edge",
@@ -277,18 +459,40 @@ CASES.append(Case(
                 "pm.test('a Bearer was actually presented (an unauthenticated 200 would prove nothing)',",
                 "  () => pm.expect(_sent, 'Authorization header').to.be.a('string').with.length.greaterThan(0));",
                 "const _hdr = JSON.parse(_b64urlToText(_sent.split('.')[0]));",
-                "pm.test('presented Bearer is RS256 (asymmetric, provider-signed)',",
-                "  () => pm.expect(_hdr.alg, JSON.stringify(_hdr)).to.eql('RS256'));",
+                "pm.test('presented Bearer is signed with an ASYMMETRIC algorithm (never HS*, never none)',",
+                "  () => pm.expect(['RS256', 'ES256', 'EdDSA'], JSON.stringify(_hdr) +",
+                "    ' — a symmetric or unsigned header means the presenter could have made this'",
+                "    + ' credential itself, and \"the edge answered 200\" would say nothing about the facade')",
+                "    .to.include(_hdr.alg));",
                 "pm.test('presented Bearer names a kid', () => {",
                 "  pm.expect(_hdr.kid, JSON.stringify(_hdr)).to.be.a('string').with.length.greaterThan(0);",
                 "});",
                 # THE SUBSTANCE OF THE LANE.
-                "pm.test('the kid that signed the accepted Bearer is SERVED BY THE FACADE proxy', () => {",
-                "  const kids = JSON.parse(pm.environment.get('_facadeKids') || '[]');",
-                "  pm.expect(kids, 'facade kids captured by the previous step').to.be.an('array')",
-                "    .with.length.greaterThan(0);",
-                "  pm.expect(kids, 'kid ' + _hdr.kid + ' is not among the kids iam publishes — the edge is'",
-                "    + ' verifying against key material this facade does not serve').to.include(_hdr.kid);",
+                "const _mirrorByKid = JSON.parse(pm.environment.get('_facadeByKid') || '{}');",
+                "const _ownByKid = JSON.parse(pm.environment.get('_facadeOwnByKid') || '{}');",
+                "pm.test('BOTH facade records were captured (an empty keyset is satisfied by nothing)', () => {",
+                "  pm.expect(Object.keys(_mirrorByKid).length, 'mirror record, captured by the jwks step')",
+                "    .to.be.greaterThan(0);",
+                "  pm.expect(Object.keys(_ownByKid).length, 'own record, captured by the jwks step')",
+                "    .to.be.greaterThan(0);",
+                "});",
+                "pm.test('the kid that signed the accepted Bearer is SERVED BY THE FACADE — by EXACTLY "
+                "ONE of its records', () => {",
+                "  const _serving = [];",
+                "  if (_mirrorByKid[_hdr.kid]) { _serving.push('mirror'); }",
+                "  if (_ownByKid[_hdr.kid]) { _serving.push('own'); }",
+                "  pm.expect(_serving, 'kid ' + _hdr.kid + ' — served by [' + _serving.join(',') + '];'",
+                "    + ' none means the edge verifies against key material this facade does not publish,'",
+                "    + ' both means the key of one issuer would verify the token of another'",
+                "    + ' (records read: mirror=' + Object.keys(_mirrorByKid).length"
+                " + ', own=' + Object.keys(_ownByKid).length + ')').to.have.lengthOf(1);",
+                "});",
+                "pm.test('the publishing record declares the SAME algorithm the Bearer header names', () => {",
+                "  const _k = _mirrorByKid[_hdr.kid] || _ownByKid[_hdr.kid];",
+                "  pm.expect(_k, 'no facade key published for kid ' + _hdr.kid).to.be.an('object');",
+                "  pm.expect(_k.alg, 'header alg ' + _hdr.alg + ' against the alg the facade publishes for '",
+                "    + _hdr.kid + ' — a header naming an algorithm the key material does not support is'",
+                "    + ' the alg-confusion shape').to.eql(_hdr.alg);",
                 "});",
                 "const _pl = JSON.parse(_b64urlToText(_sent.split('.')[1]));",
                 "pm.test('presented Bearer carries an issuer and an audience', () => {",
@@ -434,19 +638,29 @@ CASES.append(Case(
 
 _ACCOUNT_FROM_CALLER = [
     # The account and the caller's own principal id are read out of the presented
-    # Bearer's enrichment claims rather than an environment variable: they are
+    # Bearer's composed claims rather than an environment variable: they are
     # properties OF THE CREDENTIAL under test, and taking them from anywhere else
     # would let the case pass while describing a different principal.
+    #
+    # Read in BOTH forms (`_CLAIM_READER`). A reader that knows only the nested
+    # one resolves to `{}` on a credential of the platform's own lane, publishes
+    # nothing, and turns a form mismatch into "precondition not captured" three
+    # cases later — where the step that fails is the one doing exactly what it
+    # should when its subject does not exist.
+    *_CLAIM_READER,
     "const _b = (pm.environment.get('jwtBootstrap') || '').split('.');",
     "if (_b.length === 3) {",
     "  try {",
     "    var _t = _b[1].replace(/-/g, '+').replace(/_/g, '/');",
     "    while (_t.length % 4 !== 0) { _t += '='; }",
     "    const _c = JSON.parse(CryptoJS.enc.Base64.parse(_t).toString(CryptoJS.enc.Utf8));",
-    "    const _x = (_c.ext && _c.ext.ext_claims) || _c.ext_claims || {};",
-    "    if (_x.kacho_account_id) pm.environment.set('ibtAccountId', _x.kacho_account_id);",
-    "    if (_x.kacho_principal_id) pm.environment.set('ibtCallerPrincipalId', _x.kacho_principal_id);",
-    "    if (_x.kacho_principal_type) pm.environment.set('ibtCallerPrincipalType', _x.kacho_principal_type);",
+    "    pm.environment.set('ibtCallerClaimForm', _claimForm(_c));",
+    "    const _acct = _claim(_c, 'kacho_account_id');",
+    "    const _pid = _claim(_c, 'kacho_principal_id');",
+    "    const _ptype = _claim(_c, 'kacho_principal_type');",
+    "    if (_acct) pm.environment.set('ibtAccountId', _acct);",
+    "    if (_pid) pm.environment.set('ibtCallerPrincipalId', _pid);",
+    "    if (_ptype) pm.environment.set('ibtCallerPrincipalType', _ptype);",
     "  } catch (e) { /* asserted in the test script, not swallowed */ }",
     "}",
 ]
@@ -467,8 +681,22 @@ CASES.append(Case(
                   "description": "IBT-05 facade-conformance fixture"},
             test_script=[
                 *assert_answered("create SA fixture"),
-                "pm.test('the caller Bearer carried the enrichment claims this case reads', () => {",
-                "  pm.expect(pm.environment.get('ibtAccountId'), 'kacho_account_id claim')",
+                # THE PRODUCER ASSERTS EVERYTHING IT PUBLISHES. Two of these three
+                # values are read by IBT-06, and when only the account was asserted
+                # the other two went missing silently — the failure then surfaced in
+                # a different case, on a step that was behaving correctly for an
+                # input nobody had captured.
+                "pm.test('the caller Bearer carried the composed claims this suite reads', () => {",
+                "  const _form = pm.environment.get('ibtCallerClaimForm') || 'none';",
+                "  pm.expect(_form, 'no kacho_* claims in ANY of the three declared forms"
+                " (top-level / ext.ext_claims / ext_claims)').to.not.eql('none');",
+                "  pm.expect(pm.environment.get('ibtAccountId'), 'kacho_account_id claim (form: ' + _form + ')')",
+                "    .to.be.a('string').with.length.greaterThan(0);",
+                "  pm.expect(pm.environment.get('ibtCallerPrincipalId'),",
+                "    'kacho_principal_id claim (form: ' + _form + ') — read by IBT-06')",
+                "    .to.be.a('string').with.length.greaterThan(0);",
+                "  pm.expect(pm.environment.get('ibtCallerPrincipalType'),",
+                "    'kacho_principal_type claim (form: ' + _form + ')')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
                 "});",
                 *assert_status(200),
@@ -652,25 +880,51 @@ CASES.append(Case(
 
 
 # ===========================================================================
-# IBT-13 — the principal the platform reports is the one the FACADE's hook stamped.
+# IBT-13 — the principal the platform reports is the one the FACADE's composition
+#          named.
 #
-# A machine token out of the client-credentials exchange has `sub` = the OAuth
-# client id and, on its own, names nobody on this platform. It becomes a Kachō
-# principal only because the provider calls iam's token hook and iam stamps
-# `kacho_principal_type` / `kacho_principal_id` into the claims. So: read those two
-# claims out of the credential actually presented, then ask the platform who it
-# thinks the caller is, and require the two to be THE SAME SUBJECT.
+# WHAT THE COMPOSITION IS, AND WHY THE OLD NAME NO LONGER DESCRIBES IT.
+# The claim set is assembled by ONE declaration in iam for every issuing lane.
+# On the external provider's lane iam is reached through the token hook, and the
+# provider nests the result in the token. On the platform's own lane there is no
+# call back at all: the same declaration composes the set, and iam's own signer
+# puts it in the token it signs. The mechanism named in this case's id — "the
+# FACADE hook" — is therefore one lane's transport, not the property. The
+# property is that a credential names a Kachō principal only because the FACADE
+# composed the claims that say so. The id is kept because it is the acceptance's
+# scenario number (see divergence 4 in the module docstring); the title and this
+# comment say what is actually asserted.
 #
-# What makes this falsifiable rather than tautological: `/iam/v1/me` resolves the
-# principal from the token's claims through iam's own subject lookup. If the hook
-# stopped enriching, the claims would be absent and this case fails on the claims;
-# if the hook enriched with something the platform cannot resolve, it fails on the
-# comparison. Either way the enrichment lane is what breaks the case.
+# WHAT REPLACED THE ANTI-TAUTOLOGY CONTROL, AND WHY IT IS NOT A RELAXATION.
+# The case used to require `sub !== kacho_principal_id`, reasoning that if they
+# were equal the case could not tell an enriched token from a bare one. That
+# control was a property of the provider's lane, where `sub` is an OAuth client
+# id. The platform's own signer makes the principal the subject BY CONSTRUCTION,
+# so on that lane the old control is false about a correct world — and a control
+# that must be false to pass is not a control.
+#
+# The replacement asserts the same thing the old one was reaching for, on an
+# axis both lanes share: the composition put values in this token that the
+# SUBJECT cannot supply. `kacho_sa_key_id` is the id of the credential-registry
+# row; `kacho_account_id` is the owning account. A bare client-credentials token
+# — the artefact of the exchange without the composition — carries neither, and
+# neither is a restatement of `sub`. The case asserts they are present, and that
+# `kacho_sa_key_id` differs from BOTH `sub` and `kacho_principal_id`: a
+# composition that merely echoed the subject back would fail there.
+#
+# WHAT IS NO LONGER WITNESSABLE HERE, SAID PLAINLY SO "GREEN" IS NOT READ WIDER.
+# On the platform's own lane `sub` and `kacho_principal_id` are the same string,
+# so no black-box case can prove the platform resolved the caller FROM THE CLAIMS
+# rather than from `sub` — the two inputs are indistinguishable in the answer.
+# That half is held one level down, by the probes over the claim composer and the
+# signer in the service itself. What this case still witnesses end-to-end: the
+# credential carries the full composed set, the set is internally consistent, and
+# the platform reports exactly the principal that set names.
 # ===========================================================================
 
 CASES.append(Case(
     id="IBT-13-PRINCIPAL-CLAIMS-STAMPED-BY-THE-FACADE-HOOK",
-    title="The machine Bearer's kacho_principal_* enrichment claims resolve to exactly the subject the platform reports for the caller",
+    title="The machine Bearer carries the facade-composed kacho_* claims — in either lane's form — and they resolve to exactly the subject the platform reports for the caller",
     classes=["SEC", "CONF"],
     priority="P0",
     steps=[
@@ -683,26 +937,44 @@ CASES.append(Case(
                 *assert_answered("WhoAmI with the facade-issued token"),
                 *assert_status(200),
                 *_JOSE_HELPERS,
+                *_CLAIM_READER,
                 "const _sent = _sentBearer();",
                 "const _pl = JSON.parse(_b64urlToText(_sent.split('.')[1]));",
-                "const _x = (_pl.ext && _pl.ext.ext_claims) || _pl.ext_claims || {};",
-                "pm.test('the presented token carries the facade hook enrichment claims', () => {",
-                "  pm.expect(_x.kacho_principal_type, 'kacho_principal_type — absent means the '",
-                "    + 'provider issued this token WITHOUT calling the facade token-hook')",
+                "const _form = _claimForm(_pl);",
+                "pm.test('the presented token carries the facade-composed platform claims', () => {",
+                "  pm.expect(_form, 'no kacho_* claim in ANY of the three declared forms"
+                " (top-level / ext.ext_claims / ext_claims) — this credential was signed without the'",
+                "    + ' facade composition, and on its own it names nobody on this platform')",
+                "    .to.not.eql('none');",
+                "  pm.expect(_claim(_pl, 'kacho_principal_type'), 'kacho_principal_type (form: ' + _form + ')')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
-                "  pm.expect(_x.kacho_principal_id, 'kacho_principal_id')",
+                "  pm.expect(_claim(_pl, 'kacho_principal_id'), 'kacho_principal_id (form: ' + _form + ')')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
                 "});",
-                "pm.test('the raw OAuth subject is NOT a platform principal id (so the claims are '",
-                "  + 'what makes this token addressable)', () => {",
-                "  pm.expect(_pl.sub, JSON.stringify(_pl)).to.be.a('string');",
-                "  pm.expect(_pl.sub, 'sub happens to equal kacho_principal_id — then this case '",
-                "    + 'cannot tell an enriched token from a bare one; re-seed with a machine token')",
-                "    .to.not.eql(_x.kacho_principal_id);",
+                # THE ANTI-TAUTOLOGY CONTROL. Read the case comment before touching it:
+                # it replaced `sub !== kacho_principal_id`, which the platform's own
+                # signer makes false by construction, with the axis both lanes share.
+                "pm.test('the composition carried values the SUBJECT cannot supply — this is what "
+                "tells an enriched credential from a bare one', () => {",
+                "  pm.expect(_pl.sub, JSON.stringify(_pl)).to.be.a('string').with.length.greaterThan(0);",
+                "  const _keyId = _claim(_pl, 'kacho_sa_key_id');",
+                "  const _acct = _claim(_pl, 'kacho_account_id');",
+                "  const _pid = _claim(_pl, 'kacho_principal_id');",
+                "  pm.expect(_keyId, 'kacho_sa_key_id (form: ' + _form + ') — the credential-registry"
+                " row this token was issued against; a bare client-credentials token has no such claim')",
+                "    .to.be.a('string').with.length.greaterThan(0);",
+                "  pm.expect(_acct, 'kacho_account_id (form: ' + _form + ') — the owning account;"
+                " it is resolved by the composition, not carried by the exchange')",
+                "    .to.be.a('string').with.length.greaterThan(0);",
+                "  pm.expect(_keyId, 'kacho_sa_key_id equals kacho_principal_id — the composition"
+                " restated the principal and added nothing, so this case could no longer tell an"
+                " enriched credential from a bare one').to.not.eql(_pid);",
+                "  pm.expect(_keyId, 'kacho_sa_key_id equals sub — same reason, on the other side:"
+                " the composition would be a restatement of the subject').to.not.eql(_pl.sub);",
                 "});",
                 "const _j = pm.response.json();",
-                "pm.test('the platform reports EXACTLY the principal the hook stamped', () => {",
-                "  const want = _x.kacho_principal_type + ':' + _x.kacho_principal_id;",
+                "pm.test('the platform reports EXACTLY the principal the composition names', () => {",
+                "  const want = _claim(_pl, 'kacho_principal_type') + ':' + _claim(_pl, 'kacho_principal_id');",
                 "  pm.expect(_j.subject, JSON.stringify(_j) + ' vs claims ' + want).to.eql(want);",
                 "});",
                 "pm.test('the reported subject is a platform id, not an OAuth client id', () => {",
@@ -1030,7 +1302,7 @@ CASES.append(Case(
 
 
 # ===========================================================================
-# IBT-10 — ONLY a facade-issued RS256 Bearer is accepted (regression lock).
+# IBT-10 — ONLY a facade-published asymmetric Bearer is accepted (regression lock).
 #
 # The negatives here are built FROM the accepted credential rather than invented:
 # same payload, same kid, only the algorithm changed. That is deliberate. An
@@ -1039,10 +1311,24 @@ CASES.append(Case(
 # algorithm confusion. Re-signing the ACCEPTED payload leaves exactly one difference
 # between the 200 and the 401: which algorithm the edge was willing to verify with.
 #
-# The HMAC key is the public modulus from the facade's own JWKS — the textbook
-# RS256→HS256 confusion (CWE-347). If the edge ever verified `alg` from the token
-# header instead of pinning RS256, this forgery would be indistinguishable from the
-# real Bearer and would authenticate as a cluster system-admin.
+# The HMAC key is the PUBLIC material the facade itself publishes for that kid —
+# the textbook alg-confusion attack (CWE-347). If the edge ever took `alg` from the
+# token header instead of pinning it to the key, this forgery would be
+# indistinguishable from the real Bearer and would authenticate as a cluster
+# system-admin.
+#
+# WHY THE MATERIAL IS READ BY KEY TYPE AND NOT AS "the modulus".
+# The publisher carries a record per accepted issuer, and their key types differ —
+# the mirror is RSA, the platform's own keyring is EC. Reading `n` alone found
+# nothing for an EC key, so the forgery could not be built at all: the case then
+# failed on its own precondition, which is the correct behaviour of a probe that
+# refuses to report a passing refusal for a forgery it never made — and exactly
+# why that guard is kept below. What was wrong was the lookup, not the guard.
+# `_publicMaterial` reads the public half of whichever key type published the kid,
+# so the HMAC key stays "material the facade itself serves" on both lanes.
+#
+# The case id keeps the acceptance's scenario number even though "RS256" in it now
+# names one lane of two; see divergence 4 in the module docstring.
 #
 # The positive control in the first step is not ceremony: without it, all three
 # refusals below are satisfied by an edge that refuses everything.
@@ -1050,13 +1336,19 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IBT-10-ONLY-FACADE-ISSUED-RS256-IS-ACCEPTED",
-    title="Anonymous, alg=none and an HS256 alg-confusion forgery of the SAME payload are all 401; the untouched facade Bearer is 200",
+    title="Anonymous, alg=none and an HS256 alg-confusion forgery of the SAME payload keyed with the facade's own published material are all 401; the untouched facade Bearer is 200",
     classes=["SEC", "NEG", "CONF"],
     priority="P0",
     steps=[
         _jwks_step(
             "facade-jwks-for-forgery",
-            "IBT-10 — the public modulus used as the HMAC key of the alg-confusion forgery",
+            "IBT-10 — the public material used as the HMAC key of the alg-confusion forgery, "
+            "mirror record",
+        ),
+        _own_record_step(
+            "facade-own-key-set-for-forgery",
+            "IBT-10 — the same, for the OWN record of the facade: the kid that signed the "
+            "accepted Bearer may be published by either",
         ),
         Step(
             name="positive-control-real-bearer",
@@ -1120,21 +1412,24 @@ CASES.append(Case(
             auth="anonymous",
             pre_script=[
                 *_JOSE_HELPERS,
+                *_PUBLIC_MATERIAL_JS,
                 "const _real = pm.environment.get('_ibtRealBearer') || '';",
-                "const _by = JSON.parse(pm.environment.get('_facadeByKid') || '{}');",
                 "const _p = _real.split('.');",
                 "const _kid = _p.length === 3 ? JSON.parse(_b64urlToText(_p[0])).kid : '';",
-                "const _mod = (_by[_kid] || {}).n || '';",
-                "if (_p.length === 3 && _mod) {",
+                "const _key = _facadeKeyByKid(_kid);",
+                "const _mat = _publicMaterial(_key);",
+                "if (_p.length === 3 && _mat) {",
                 "  const h2 = _b64urlFromText(JSON.stringify({alg: 'HS256', kid: _kid, typ: 'JWT'}));",
                 "  const signing = h2 + '.' + _p[1];",
-                "  const mac = CryptoJS.HmacSHA256(signing, _mod).toString(CryptoJS.enc.Base64)",
+                "  const mac = CryptoJS.HmacSHA256(signing, _mat).toString(CryptoJS.enc.Base64)",
                 "    .replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');",
                 "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + signing + '.' + mac});",
                 "} else {",
-                "  pm.test('precondition: real Bearer and its facade modulus are both available', () => {",
+                "  pm.test('precondition: real Bearer and the facade material for its kid are both "
+                "available', () => {",
                 "    pm.expect.fail('cannot build the alg-confusion forgery (bearer parts=' + _p.length +",
-                "      ', kid=' + _kid + ', modulus=' + (_mod ? 'present' : 'MISSING') +",
+                "      ', kid=' + _kid + ', key published by the facade=' + (_key ? _key.kty : 'NONE') +",
+                "      ', public material=' + (_mat ? 'present' : 'MISSING') +",
                 "      '). A forgery that was not built must not report a passing refusal.');",
                 "  });",
                 "  pm.execution.skipRequest();",
