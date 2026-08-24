@@ -8507,7 +8507,7 @@
       ]
     },
     {
-      "name": "IAM-USR-RMID-NEG-ACCOUNT-ADMIN — Пригласивший не стирает строку личности; исключение из своего аккаунта ему остаётся",
+      "name": "IAM-USR-RMID-NEG-ACCOUNT-ADMIN — Пригласивший не стирает строку личности — отказ; исключение из своего аккаунта проходит",
       "description": "class:AUTHZ | class:NEG | priority:P0",
       "item": [
         {
