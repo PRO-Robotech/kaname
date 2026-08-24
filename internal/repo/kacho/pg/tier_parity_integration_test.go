@@ -90,6 +90,67 @@ func classifySystemRole(name string) (family, tier string, tiered bool) {
 	return "", "", false
 }
 
+// tiersTheTypeCanServe — тиры, у которых на этом типе ЕСТЬ содержимое, и признак
+// того, что ось у семейства СУЖЕНА относительно полной.
+//
+// # Зачем это, если ось была полной у всех
+//
+// Полная ось (`admin`/`edit`/`view`) была верным ожиданием, пока набор глаголов
+// был платформенной константой: у каждого типа находился глагол любого тира. С
+// набором, ставшим атрибутом ТИПА, это перестало быть верным — у `iam_user` снят
+// `update` (#1128), и тир `edit` на нём стал НЕВЫРАЗИМ: роль `iam.user.edit`
+// материализовала бы ноль кортежей, а её имя обещало бы правку.
+//
+// Ожидание поэтому ВЫВОДИТСЯ из набора типа, а не выписывается послаблением:
+// перечень исключений устаревал бы молча, а вывод следует за моделью сам.
+// Классификация глагола — тем же предикатом, каким её делает соседнее
+// утверждение файла (`legacyVerbTier`), чтобы двух вокабуляров не завелось.
+//
+// Семейство, чей тип не резолвится (префикс-менее `(global)`, имена посева,
+// расходящиеся с токеном каталога, — например `iam.service_account` против
+// `iam.serviceAccount`), получает ПОЛНУЮ ось: сузить ожидание на непонятом имени
+// значило бы выдать незнание за решение.
+func tiersTheTypeCanServe(family string) (tiers []string, narrowed bool) {
+	module, resource, ok := strings.Cut(family, ".")
+	if !ok {
+		return catalogTiers, false
+	}
+	fgaType, known := authzmap.ObjectType(module, resource)
+	if !known {
+		return catalogTiers, false
+	}
+	verbs := authzmap.VerbsOfType(fgaType)
+	if len(verbs) == 0 {
+		return catalogTiers, false
+	}
+	served := map[string]bool{}
+	for _, v := range verbs {
+		switch legacyVerbTier(v) {
+		case "viewer":
+			served["view"] = true
+		case "editor":
+			served["edit"] = true
+		case "admin":
+			served["admin"] = true
+		}
+	}
+	for _, t := range catalogTiers {
+		if served[t] {
+			tiers = append(tiers, t)
+		}
+	}
+	return tiers, len(tiers) < len(catalogTiers)
+}
+
+func containsTier(in []string, t string) bool {
+	for _, x := range in {
+		if x == t {
+			return true
+		}
+	}
+	return false
+}
+
 func isCatalogTier(s string) bool {
 	for _, t := range catalogTiers {
 		if s == t {
@@ -247,21 +308,41 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 	// here and names the tier — a resource whose catalog offers `admin` and `view`
 	// but no `edit` is a grantable surface with a hole in it.
 	var tierGaps []string
+	narrowedFamilies := 0
 	familyNames := make([]string, 0, len(families))
 	for f := range families {
 		familyNames = append(familyNames, f)
 	}
 	sort.Strings(familyNames)
 	for _, f := range familyNames {
-		for _, tier := range catalogTiers {
+		want, narrowed := tiersTheTypeCanServe(f)
+		if narrowed {
+			narrowedFamilies++
+		}
+		for _, tier := range want {
 			if _, ok := families[f][tier]; !ok {
 				tierGaps = append(tierGaps, fmt.Sprintf(
 					"%s: tier %q missing (family has %s)", f, tier, presentTiers(families[f])))
 			}
 		}
+		// Обратная сторона: тир, которому НЕЧЕМ быть, не должен существовать.
+		// Без неё сужение оси превратилось бы в послабление: роль, обещающая
+		// правку там, где тип правки не объявляет, не даёт ничего.
+		for _, tier := range catalogTiers {
+			if _, present := families[f][tier]; !present {
+				continue
+			}
+			if !containsTier(want, tier) {
+				tierGaps = append(tierGaps, fmt.Sprintf(
+					"%s: tier %q посеян, но тип не объявляет ни одного глагола этого тира — "+
+						"роль обещает то, чего материализация не даст", f, tier))
+			}
+		}
 	}
-	assert.Empty(t, tierGaps, "catalog tier parity: every seeded family must carry the complete %v axis; gaps:\n%s",
-		catalogTiers, strings.Join(tierGaps, "\n"))
+	t.Logf("census: families with a NARROWED tier axis (the type declares no verb of some tier): %d of %d",
+		narrowedFamilies, len(familyNames))
+	assert.Empty(t, tierGaps, "catalog tier parity: every seeded family must carry the tier axis its TYPE can serve; gaps:\n%s",
+		strings.Join(tierGaps, "\n"))
 
 	var mismatches []string
 	for _, r := range roles {

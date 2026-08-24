@@ -282,6 +282,19 @@ var registryNamespaceVerbRelations = []string{
 	"v_create", "v_delete", "v_get", "v_list", "v_update",
 }
 
+// identityVerbRelations — набор `iam_user`: операции над объектом БЕЗ правки.
+//
+// Правку содержимого строки личности спрашивает `record_writer`, а запрет и его
+// снятие — `identity_suspender` (#1102); снятие самой строки — `identity_remover`
+// (#1131). После этих трёх у `iam_user#v_update` не осталось читателя ни одного,
+// и глагол снят (#1128) — первое СУЖЕНИЕ набора в этом дереве.
+//
+// Оно стало возможно ровно тогда, когда словарь глаголов стал ПО РЕСУРСУ
+// (`CatalogResource.verbs`): пока публичное поле каталога было ПЕРЕСЕЧЕНИЕМ
+// наборов всех типов, сужение у одного типа вынимало глагол из выпадающего
+// списка редактора ролей у всех остальных.
+var identityVerbRelations = []string{"v_delete", "v_get", "v_list"}
+
 // targetGroupVerbRelations — набор `nlb_target_group`: операции над объектом ПЛЮС
 // два отношения управления составом группы (NLB-TGT-1).
 //
@@ -343,7 +356,7 @@ var typeVerbRelations = map[string][]string{
 	"storage_volume":      objectVerbRelations,
 	"storage_snapshot":    objectVerbRelations,
 	"storage_image":       objectVerbRelations,
-	"iam_user":            objectVerbRelations,
+	"iam_user":            identityVerbRelations,
 	"iam_service_account": objectVerbRelations,
 	"iam_group":           objectVerbRelations,
 	"iam_role":            objectVerbRelations,

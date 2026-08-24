@@ -55,21 +55,37 @@ func (uc *DeleteUserUseCase) Execute(ctx context.Context, id domain.UserID) (*op
 		_ = rd.Rollback(ctx)
 		return nil, shared.MapRepoErr(err)
 	}
-	// Deleting SOMEONE ELSE is decided by the MODEL: the api-gateway Checks
-	// `v_delete@iam_user:<user_id>` before iam is dialed. The former in-service
-	// owner-equality check against the owning account's owner_user_id re-decided
-	// that from a DB column — denying owner-granted delegates and every machine
-	// principal (security.md «Авторизация живёт в МОДЕЛИ, а не в самодельных
-	// проверках»).
+	// КТО ВПРАВЕ СНЯТЬ СТРОКУ ЛИЧНОСТИ, РЕШАЕТ МОДЕЛЬ, а не этот use-case: край
+	// спрашивает `identity_remover@iam_user:<user_id>` до того, как наберёт iam
+	// (#1131). Отношение вычисляемое — `subject or super_admin from account`, —
+	// то есть выдачей оно не резолвится НИ У КОГО: сюда доходит либо сам
+	// человек, либо надзор облака.
 	//
-	// Two decisions deliberately kept, both narrower than the removed guard and
-	// both pre-existing: self-delete is always permitted, and an ACCOUNT-LESS
-	// user is self-delete-only — it sits in no account, so there is no scope an
-	// AccessBinding could be written against and no per-object grant to resolve.
-	if !authzguard.IsSelf(ctx, string(target.ID)) && target.AccountID == "" {
-		_ = rd.Rollback(ctx)
-		return nil, authzguard.PermissionDenied()
-	}
+	// ЗДЕСЬ СТОЯЛА ПРОВЕРКА «не сам и без аккаунта → отказ», и она была снята
+	// (#1174). Её довод — «у безаккаунтного нет области, против которой можно
+	// написать выдачу» — потерял предмет вместе с уходом гейта с `v_delete`:
+	// выдачи здесь не бывает ни при каком аккаунте. Что она делала вместо
+	// заявленного: отказывала НАДЗОРУ ОБЛАКА в снятии осиротевшей личности,
+	// оставляя её неудаляемой никем, — а человек, потерявший доступ, себя не
+	// удалит. Класс — security.md §«Авторизация живёт в МОДЕЛИ, а не в
+	// самодельных проверках»; тем же классом #1102 снял двенадцать мест.
+	//
+	// ЦЕНА ИЗМЕРЕНА, А НЕ ПРЕДПОЛОЖЕНА, и она в БУДУЩЕМ ВРЕМЕНИ. Ветка была
+	// НЕДОСТИЖИМА на этом дереве: `users.account_id` объявлена NOT NULL и несёт
+	// внешний ключ на `accounts(id)`, аккаунта с пустым идентификатором нет ни
+	// одного, поэтому вставка с пустым аккаунтом отвергается (23503) — проверено
+	// прогоном против настоящей базы, а не выведено. Осиротевшая личность
+	// сегодня выражается СНЯТЫМ ЧЛЕНСТВОМ (#1127), а колонка остаётся легаси.
+	// Значит проверка была не действующим отказом, а ВЗВЕДЁННЫМ: она сработала
+	// бы в день снятия колонки — то самое направление, которое объявляет
+	// миграция 944001, — и сработала бы молча, на каждой осиротевшей строке.
+	//
+	// СНЯТИЕ НИЧЕГО НЕ РАСШИРЯЕТ, и это утверждается вердиктом, а не доводом: у
+	// строки БЕЗ ЗВЕНА ЦЕПИ к аккаунту (осиротевшей — той, у которой снято
+	// членство) вывод даёт только `subject`, поэтому посторонний и владелец
+	// прежнего аккаунта по-прежнему получают отказ на крае. Проба —
+	// `internal/service/removing_the_identity_integration_test.go`
+	// (TestRemovingAnIdentityWithNoAccountScopeReachesOnlyTheCloud).
 	_ = rd.Rollback(ctx)
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,

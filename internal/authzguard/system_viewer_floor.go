@@ -44,10 +44,15 @@
 //   - InternalSessionRevocationsService.IsRevoked — курица и яйцо (шло бы до
 //     того, как может пойти пер-пользовательская проверка); пер-вызовный поход
 //     в движок добавил бы задержку, а его недоступность массово роняла бы
-//     обновление токенов. Остаётся на полу mTLS-модуля. ВНИМАНИЕ: refresh-хук
-//     эту проверку НЕ зовёт и пер-jti гейта не несёт вовсе — он прямо это
-//     оговаривает (в его теле нет claims предъявленного токена). Вызывающего у
-//     метода в дереве нет ни одного (#797).
+//     обновление токенов. Остаётся на полу mTLS-модуля. ВЫЗЫВАЮЩИЙ У ЭТОГО
+//     ПОСЛАБЛЕНИЯ ЕСТЬ, и он ровно тот, ради которого оно заведено: клиент края
+//     (`IsSessionRevoked`) спрашивает полосу на КАЖДОМ предъявлении
+//     удостоверения, до того как может пойти проверка доступа (#1122). Здесь
+//     стояло «вызывающего у метода в дереве нет ни одного (#797)» — утверждение
+//     пережило свой предмет и читалось как «послаблению нечего исключать»
+//     (#1156). refresh-хук эту проверку по-прежнему НЕ зовёт и пер-jti гейта не
+//     несёт вовсе — он прямо это оговаривает (в его теле нет claims
+//     предъявленного токена).
 //   - все мутации (Register/Unregister) остаются за fga_writer-//     gated; ForceLogout/GrantAdmin/… stay system_admin / gateway-only) — this
 //     is a READ floor; the mutation surface is unchanged.
 package authzguard
@@ -81,8 +86,9 @@ const (
 // NOT in this set (exempt — see the package doc-comment for the rationale):
 //   - InternalIAMService/Check — PDP, never floor-gated.
 //   - InternalUserService/OnRecoveryCompleted — Kratos secret-authed hook.
-//   - InternalSessionRevocationsService/IsRevoked — курица и яйцо; вызывающего
-//     в дереве нет (#797).
+//   - InternalSessionRevocationsService/IsRevoked — курица и яйцо: клиент края
+//     (`IsSessionRevoked`) спрашивает её до того, как может пойти проверка
+//     доступа (#1122).
 //   - InternalIAMService/{RegisterResource,UnregisterResource}
 //     — fga_writer-gated mutations.
 //   - ForceLogout / Cluster GrantAdmin/RevokeAdmin / Authorize

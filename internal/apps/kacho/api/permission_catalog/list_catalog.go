@@ -65,6 +65,15 @@ type Resource struct {
 	// fail-closed-rejects such a rule (e.g. vpc.addressPool is grantable+
 	// verb-bearing but NOT label-selectable). ARM_NAMES is NOT feed-gated.
 	LabelSelectable bool
+	// Verbs — глаголы, которые правило роли вправе назвать НА ЭТОМ ресурсе, в
+	// каноническом порядке показа. Зеркало `authzmap.VerbsOfType(objectType)`;
+	// пусто ровно тогда, когда HasVerbRelations = false.
+	//
+	// ЭТО источник выпадающего списка редактора ролей, а не ClosedVerbs (#1128):
+	// набор принадлежит ТИПУ, и пересечение не выражает ни расширения (глагол
+	// энфорсится, но не предлагается), ни сужения (снятие у одного ресурса
+	// отнимает глагол у всех).
+	Verbs []string
 }
 
 // WildcardPolicy — the catalog's wildcard policy flags, in parity with the
@@ -111,6 +120,10 @@ func (u *ListPermissionCatalogUseCase) Execute(ctx context.Context) (Catalog, er
 			// LabelSelectable — the ARM_LABELS feed-gate, projected straight from
 			// the domain source of truth (the dotted key matches authzmap's form).
 			LabelSelectable: domain.IsLabelSelectableType(e.Module + "." + e.Resource),
+			// Verbs — набор ЭТОГО типа, приведённый к каноническому порядку той же
+			// точкой, что и превью роли: порядок поверхности — часть контракта, и
+			// второй его источник разошёлся бы с первым молча.
+			Verbs: domain.OrderVerbsForDisplay(authzmap.VerbsOfType(fgaType)),
 		}
 		i, ok := idxByModule[e.Module]
 		if !ok {

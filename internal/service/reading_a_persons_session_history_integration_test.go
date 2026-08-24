@@ -65,7 +65,7 @@ func TestReadingSessionHistoryIsNotReachableFromInsideTheAccount(t *testing.T) {
 	obj := "iam_user:" + invitee
 
 	// Путь 1 — ВЫДАЧА внутри аккаунта, чья роль даёт правку личности.
-	seedRoleGrantingUserEdit(t, w, "rol-sessh1", "acb-sessh1", inviter, acc)
+	seedRoleGrantingUserRead(t, w, "rol-sessh1", "acb-sessh1", inviter, acc)
 	// Путь 2 — делегированный распорядитель аккаунта.
 	w.factThroughJournal(t, "user:"+inviter, "admin", "account", acc)
 	// Путь 3 — владелец аккаунта.
