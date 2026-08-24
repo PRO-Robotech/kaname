@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/audiencepolicy"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clientassertion"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -219,97 +220,30 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 
 // resolveAudience выбирает адресат выпускаемого токена.
 //
-// # Границы ДВЕ, и они не равноправны
-//
-// ВНЕШНЯЯ — перечень, объявленный посадкой: он говорит, каким поверхностям
-// платформа вообще чеканит удостоверения, и страж построения требует его
-// непустым. ВНУТРЕННЯЯ — перечень, объявленный заказчиком при выдаче ключа: он
-// говорит, для чего заведён ЭТОТ ключ.
-//
-// Сужение действует ВНУТРИ внешней границы и никогда её не расширяет. Иначе
-// заказчик ключа сам решал бы, кому платформа выдаёт токен: он назвал бы в поле
-// выдачи произвольный адресат, и подписант выпустил бы удостоверение,
-// адресованное поверхности, которую посадка не объявляла.
+// Решение принимает ОДИН предикат на все полосы выдачи (`audiencepolicy`), а не
+// копия здесь: полос две, и пока предикат жил копией у одной, вторая чеканила
+// адресату из запроса. Две копии разошлись бы снова и разошлись бы молча —
+// неверна не полоса, неверна их РАЗНИЦА (задача #1184).
 //
 // Отказы двух границ РАЗЛИЧАЮТСЯ ТЕКСТОМ — не наружу (там ответ единый), а в
 // журнале: «посадка такого адресата не объявляла» и «ключ выдавался не под этот
 // адресат» чинятся в разных местах и разными людьми.
 func (u *UseCase) resolveAudience(client domain.AssertionClient, requested []string) ([]string, error) {
-	effective, fallback, err := u.audienceScope(client)
+	out, err := audiencepolicy.Resolve(audiencepolicy.Scope{
+		Landing:  u.cfg.AllowedAudiences,
+		Default:  u.cfg.DefaultAudience,
+		Declared: client.DeclaredAudiences,
+		Subject:  client.ID,
+	}, requested)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("client_token: %w", err)
 	}
-	if len(requested) == 0 {
-		return []string{fallback}, nil
-	}
-	for _, a := range requested {
-		if !allowed(u.cfg.AllowedAudiences, a) {
-			return nil, fmt.Errorf("client_token: requested audience %q is not in the declared list", a)
-		}
-		if !allowed(effective, a) {
-			return nil, fmt.Errorf(
-				"client_token: requested audience %q is outside the audiences declared for client %s "+
-					"at issuance (%v)", a, client.ID, client.DeclaredAudiences)
-		}
-	}
-	return requested, nil
+	return out, nil
 }
 
-// audienceScope — множество, из которого выпуск вправе выбрать, и адресат для
-// запроса, не назвавшего ни одного.
-//
-// # Пустое сужение означает «не объявлено», и это РЕШЕНИЕ, а не умолчание
-//
-// Ключ, выданный без перечня, ведёт себя ровно как прежде: внешняя граница
-// остаётся единственной. Требовать перечень от каждого ключа значило бы сломать
-// всякого, кто его не слал, ради величины, которой у него нет, — и сломать на
-// пути, где отказ увидит машина, а не человек.
-//
-// # Умолчание посадки уступает объявленному ключом, а не наоборот
-//
-// Умолчание — величина для ключа, о своём назначении не заявившего. Пока сужение
-// его допускает, оно действует без изменений (наименьший радиус для уже выданных
-// ключей); когда не допускает — берётся первый объявленный ключом адресат из
-// числа допущенных посадкой. Порядок здесь не произволен: перечень заказчика
-// сохраняет порядок по контракту выдачи, поэтому «первый» есть его собственный
-// выбор, а не наш.
-//
-// # Непересекающееся сужение отвергается ЗДЕСЬ, а не на выдаче ключа
-//
-// Состояние законное: ключ выдан под внешнюю федерацию, а посадка такого
-// адресата не объявляла. Отвергать его на выдаче нельзя — перечень посадки
-// меняет оператор и после неё, — а молча откатываться на перечень посадки
-// нельзя тем более: это ровно то «сужение, переставшее сужать», которое задача
-// #1136 и снимает.
-func (u *UseCase) audienceScope(client domain.AssertionClient) ([]string, string, error) {
-	if len(client.DeclaredAudiences) == 0 {
-		return u.cfg.AllowedAudiences, u.cfg.DefaultAudience, nil
-	}
-	effective := make([]string, 0, len(client.DeclaredAudiences))
-	for _, a := range client.DeclaredAudiences {
-		if allowed(u.cfg.AllowedAudiences, a) && !allowed(effective, a) {
-			effective = append(effective, a)
-		}
-	}
-	if len(effective) == 0 {
-		return nil, "", fmt.Errorf(
-			"client_token: client %s declared audiences %v at issuance and this deployment declares none of them",
-			client.ID, client.DeclaredAudiences)
-	}
-	if allowed(effective, u.cfg.DefaultAudience) {
-		return effective, u.cfg.DefaultAudience, nil
-	}
-	return effective, effective[0], nil
-}
-
-func allowed(list []string, want string) bool {
-	for _, a := range list {
-		if a == want {
-			return true
-		}
-	}
-	return false
-}
+// allowed — членство в перечне. Тем же предикатом, что исполняет выбор
+// адресата: два сравнения одного предмета разошлись бы на вырожденном значении.
+func allowed(list []string, want string) bool { return audiencepolicy.Contains(list, want) }
 
 func confirmationJKT(c *tokensigner.Confirmation) string {
 	if c == nil {

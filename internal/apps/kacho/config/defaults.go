@@ -33,7 +33,10 @@ func RegisterDefaults(v *viper.Viper) {
 	// realm. Override via KACHO_IAM_API_SERVER__REGISTRY_TOKEN__{ENDPOINT,ISSUER,SERVICE,TTL}.
 	v.SetDefault("api-server.registry-token.endpoint", "tcp://0.0.0.0:9096")
 	v.SetDefault("api-server.registry-token.issuer", "https://api.kacho.local/iam/token")
-	v.SetDefault("api-server.registry-token.service", "registry.kacho.local")
+	// `api-server.registry-token.service` УМОЛЧАНИЯ НЕ ИМЕЕТ намеренно — имя
+	// службы реестра объявляет посадка ОДИН раз на обе стороны полосы
+	// (`global.kacho.registry.serviceAud`), см. registry_token.go. Незаданное
+	// при поднятом слушателе отвергается стражем старта.
 	v.SetDefault("api-server.registry-token.ttl", 5*time.Minute)
 	// Cluster-INTERNAL Hydra-JWKS proxy HTTP listener (`GET /.well-known/jwks.json`)
 	// — a SEPARATE cluster-internal port (default `tcp://0.0.0.0:9097`), served ONLY

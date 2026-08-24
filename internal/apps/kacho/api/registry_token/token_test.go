@@ -59,7 +59,8 @@ func TestExecute_HappyPath_BrokersHydraToken(t *testing.T) {
 	ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "hydra-jwt", ExpiresIn: 3600}}
 
 	uc := NewIssueRegistryTokenUseCase(
-		Config{AssertionAudience: "https://hydra.api.kacho.cloud/oauth2/token", DefaultService: "registry.kacho.local"},
+		Config{AssertionAudience: "https://hydra.api.kacho.cloud/oauth2/token",
+			AllowedAudiences: []string{"registry.kacho.local"}, DefaultService: "registry.kacho.local"},
 		val, sig, ex,
 	).WithClock(func() time.Time { return fixedNow }).
 		WithJTIFunc(func() (string, error) { return "jti-fixed", nil })
@@ -105,7 +106,8 @@ func TestExecute_HappyPath_BrokersHydraToken(t *testing.T) {
 func TestExecute_ServiceFallsBackToDefault(t *testing.T) {
 	ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "t", ExpiresIn: 60}}
 	uc := NewIssueRegistryTokenUseCase(
-		Config{AssertionAudience: "aud", DefaultService: "registry.kacho.local"},
+		Config{AssertionAudience: "aud",
+			AllowedAudiences: []string{"registry.kacho.local"}, DefaultService: "registry.kacho.local"},
 		&fakeValidator{cred: Credential{ClientID: "cid", KeyID: "soc_1"}}, &fakeSigner{}, ex,
 	)
 	if _, err := uc.Execute(context.Background(), IssueInput{Username: "cid", Password: "x"}); err != nil {
@@ -130,7 +132,7 @@ func TestExecute_AnonymousOrInvalid_Unauthenticated(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "should-not-happen"}}
-			uc := NewIssueRegistryTokenUseCase(Config{AssertionAudience: "aud", DefaultService: "svc"},
+			uc := NewIssueRegistryTokenUseCase(Config{AssertionAudience: "aud", AllowedAudiences: []string{"svc"}, DefaultService: "svc"},
 				&fakeValidator{err: tc.vErr}, &fakeSigner{}, ex)
 			out, err := uc.Execute(context.Background(), tc.in)
 			if !errors.Is(err, ErrUnauthenticated) {
@@ -146,7 +148,7 @@ func TestExecute_AnonymousOrInvalid_Unauthenticated(t *testing.T) {
 // TestExecute_HydraUnavailable_FailClosed — the issuer being unreachable surfaces
 // as ErrIssuerUnavailable (→ 503 at the handler), never a token.
 func TestExecute_HydraUnavailable_FailClosed(t *testing.T) {
-	uc := NewIssueRegistryTokenUseCase(Config{AssertionAudience: "aud", DefaultService: "svc"},
+	uc := NewIssueRegistryTokenUseCase(Config{AssertionAudience: "aud", AllowedAudiences: []string{"svc"}, DefaultService: "svc"},
 		&fakeValidator{cred: Credential{ClientID: "cid", KeyID: "soc_1"}}, &fakeSigner{},
 		&fakeExchanger{err: ErrIssuerUnavailable})
 	out, err := uc.Execute(context.Background(), IssueInput{Username: "cid", Password: "x"})
@@ -161,7 +163,7 @@ func TestExecute_HydraUnavailable_FailClosed(t *testing.T) {
 // TestExecute_HydraRejected_Unauthenticated — a Hydra rejection (bad/revoked key)
 // collapses to ErrUnauthenticated (→ 401 challenge), not a 503.
 func TestExecute_HydraRejected_Unauthenticated(t *testing.T) {
-	uc := NewIssueRegistryTokenUseCase(Config{AssertionAudience: "aud", DefaultService: "svc"},
+	uc := NewIssueRegistryTokenUseCase(Config{AssertionAudience: "aud", AllowedAudiences: []string{"svc"}, DefaultService: "svc"},
 		&fakeValidator{cred: Credential{ClientID: "cid", KeyID: "soc_1"}}, &fakeSigner{},
 		&fakeExchanger{err: errors.New("rejected")})
 	_, err := uc.Execute(context.Background(), IssueInput{Username: "cid", Password: "x"})

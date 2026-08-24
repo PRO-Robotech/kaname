@@ -42,8 +42,13 @@ func TestRegistryTokenListener_ConfiguredSeparatePort(t *testing.T) {
 	if got := tok.TokenIssuer(); got != "https://api.kacho.local/iam/token" {
 		t.Errorf("TokenIssuer() = %q, want https://api.kacho.local/iam/token", got)
 	}
-	if got := tok.TokenService(); got != "registry.kacho.local" {
-		t.Errorf("TokenService() = %q, want registry.kacho.local", got)
+	// АДРЕСАТ УМОЛЧАНИЯ НЕ ИМЕЕТ (задача #1184): имя службы реестра объявляет
+	// посадка ОДИН раз на обе стороны полосы (`global.kacho.registry.serviceAud`),
+	// и здесь оно не задано. Прежде проба закрепляла встроенное умолчание — то
+	// самое второе объявление предмета, которое молча расходилось с именем,
+	// объявленным реестром.
+	if got := tok.TokenService(); got != "" {
+		t.Errorf("TokenService() = %q, want empty (адресат объявляет посадка, а не код)", got)
 	}
 	if got := tok.TokenTTL(); got != 5*time.Minute {
 		t.Errorf("TokenTTL() = %s, want 5m", got)
@@ -84,7 +89,7 @@ func TestServeWiresRegistryTokenListener(t *testing.T) {
 // TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm — end-to-end proof
 // that the config policy flows into the minted challenge: the mux serve.go builds
 // answers an anonymous /iam/token with 401 + a WWW-Authenticate carrying the
-// CONFIGURED issuer-realm and default service. No DB is required — the challenge
+// CONFIGURED issuer-realm and the DECLARED lane addressee (умолчания у него нет). No DB is required — the challenge
 // precedes any DB-backed validator/signer call, so a nil pool is safe here.
 func TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm(t *testing.T) {
 	cfg, err := config.Load("")
@@ -93,9 +98,14 @@ func TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm(t *testing.T) {
 	}
 	tok := cfg.APIServer.RegistryToken
 
+	// Адресат ОБЪЯВЛЯЕТСЯ здесь, а не берётся из умолчания: умолчания у него нет,
+	// и сборка полосы на пустом отказывает (это её собственный страж). Значение
+	// произвольно — проба утверждает про вызов на аутентификацию, а не про имя.
+	const laneService = "registry.probe.local"
+
 	mux, err := registrytokenwire.Build(nil, registrytokenwire.BuildConfig{
 		Realm:             tok.TokenIssuer(),
-		Service:           tok.TokenService(),
+		Service:           laneService,
 		HydraTokenURL:     cfg.AuthN.ResolveHydraTokenURL(),
 		AssertionAudience: cfg.AuthN.ResolveHydraTokenEndpoint(),
 	})
@@ -116,7 +126,7 @@ func TestRegistryTokenMux_ChallengesAnonymousWithConfiguredRealm(t *testing.T) {
 	if !strings.Contains(ch, `realm="https://api.kacho.local/iam/token"`) {
 		t.Errorf("WWW-Authenticate = %q, want realm from the configured issuer", ch)
 	}
-	if !strings.Contains(ch, `service="registry.kacho.local"`) {
-		t.Errorf("WWW-Authenticate = %q, want service from the configured default", ch)
+	if !strings.Contains(ch, `service="`+laneService+`"`) {
+		t.Errorf("WWW-Authenticate = %q, want service from the declared lane addressee %q", ch, laneService)
 	}
 }

@@ -72,6 +72,10 @@ func (a *SAClientLookupAdapter) KeyByClientID(ctx context.Context, clientID stri
 		KeyAlgorithm:   row.KeyAlgorithm,
 		ExpiresAt:      row.ExpiresAt,
 		SubjectEnabled: sa.MayAuthenticate(),
+		// Сужение адресатов, объявленное при выдаче ключа (#1136). Читается ЗДЕСЬ
+		// и уезжает в выдачу: колонка, которую пишут и не читают, невидима
+		// отовсюду — её нет ни в ответе, ни в решении.
+		DeclaredAudiences: row.DeclaredAudiences,
 	}, nil
 }
 

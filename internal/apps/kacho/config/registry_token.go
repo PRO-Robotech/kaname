@@ -16,17 +16,27 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"time"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/audiencepolicy"
 )
 
 // Built-in policy defaults. viper also registers them (defaults.go); the
 // accessors carry the same fallbacks so an unset struct (tests / partial config)
 // still resolves to a valid policy.
+//
+// АДРЕСАТА (`service`) СРЕДИ НИХ НЕТ, И ЭТО РЕШЕНИЕ, А НЕ ПРОПУСК (задача #1184).
+// Имя службы реестра — тенант-фейсинг DNS, оно СВОЁ у каждого кластера, и у
+// докерной полосы это имя общее с реестром: он называет его докер-клиенту, мы
+// чеканим его в `aud`. Встроенное умолчание здесь было ВТОРЫМ объявлением того
+// же предмета, живущим в другом дереве, — и оно молча расходилось с тем, что
+// объявляет посадка реестра. Умолчания у величины, которую нельзя выбрать за
+// оператора, быть не может: незаданный адресат отвергается стражем старта.
 const (
-	defaultRegistryTokenIssuer  = "https://api.kacho.local/iam/token" // #nosec G101 -- OIDC issuer URL default (iss claim), not a credential
-	defaultRegistryTokenService = "registry.kacho.local"              // #nosec G101 -- registry service-name default (aud claim), not a credential
-	defaultRegistryTokenTTL     = 5 * time.Minute
+	defaultRegistryTokenIssuer = "https://api.kacho.local/iam/token" // #nosec G101 -- OIDC issuer URL default (iss claim), not a credential
+	defaultRegistryTokenTTL    = 5 * time.Minute
 )
 
 // RegistryTokenConfig — api-server.registry-token section.
@@ -57,13 +67,13 @@ func (c RegistryTokenConfig) TokenIssuer() string {
 	return defaultRegistryTokenIssuer
 }
 
-// TokenService — the default registry service name (`aud`). Falls back to the
-// built-in default when unset.
+// TokenService — объявленное имя службы реестра (`aud` + `service=` в вызове на
+// аутентификацию). ВСТРОЕННОЙ ПОДМЕНЫ НЕТ: незаданное возвращается пустым, и
+// полоса с пустым адресатом до старта не доживает (см. Validate). Подставлять
+// здесь «какое-нибудь» имя значило бы выбирать за оператора величину, которая у
+// каждого кластера своя, и делать это молча.
 func (c RegistryTokenConfig) TokenService() string {
-	if s := strings.TrimSpace(c.Service); s != "" {
-		return s
-	}
-	return defaultRegistryTokenService
+	return strings.TrimSpace(c.Service)
 }
 
 // TokenTTL — the minted-token lifetime. Non-positive values fall back to the
@@ -73,4 +83,69 @@ func (c RegistryTokenConfig) TokenTTL() time.Duration {
 		return defaultRegistryTokenTTL
 	}
 	return c.TTL
+}
+
+// Validate — страж старта докерной полосы выдачи (задача #1184).
+//
+// # Что здесь проверяется и почему именно здесь
+//
+// Полос выдачи по ключу служебной учётки ДВЕ, и обе чеканят удостоверения от
+// имени одной платформы. Перечень адресатов платформы объявляет посадка
+// (`authn.client-token.allowed-audiences`); адресат докерной полосы объявляет
+// `api-server.registry-token.service`. Пока эти две величины не сверены, наш
+// подписант вправе выпустить удостоверение, адресованное поверхности, которую
+// посадка не объявляла, — и не проявится это ничем: запрос проходит, токен
+// выдаётся, докер-клиент доволен.
+//
+// Сверка живёт на СТАРТЕ, а не на выдаче: перечень платформы — величина
+// оператора, и расхождение двух его объявлений есть настройка, а не запрос.
+// Отказ здесь виден оператору сразу и называет обе настройки; отказ на выдаче
+// виден клиенту и выглядит неисправностью реестра.
+//
+// Принимает настройку токен-эндпоинта ПАРАМЕТРОМ, а не читает её из корня: две
+// величины связаны по существу, и связь обязана проверяться там, где она есть,
+// а не там, где о ней помнят.
+func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig) error {
+	if c.ListenAddress() == "" {
+		// Слушателя нет — полосы нет, и сверять нечего. Страж, требующий того,
+		// чем не пользуются, есть отказ в старте без предмета.
+		return nil
+	}
+	// НЕСВЯЗАННОСТЬ СТОРОН. Полоса поднята, а её адресат не объявлен ничем:
+	// сторона реестра приезжает из посадки, наша — ниоткуда. Прежде дыру
+	// затыкало встроенное умолчание, и результат зависел от того, совпало ли
+	// оно с именем, которое реестр называет докер-клиенту; совпадения не
+	// выбирал никто. Отказ называет ОБЕ величины: свою настройку и ту сторону,
+	// из которой она выводится, — иначе оператор ищет вслепую.
+	if c.TokenService() == "" {
+		return fmt.Errorf(
+			"api-server.registry-token.service is not declared while the docker lane listener is up (%s) — "+
+				"this addressee is not ours to default: it is the registry's own service name, declared once "+
+				"by the deployment as global.kacho.registry.serviceAud and read by BOTH sides of the lane "+
+				"(the registry ships it as KACHO_REGISTRY_SERVICE_AUD and advertises it to the docker client; "+
+				"we mint it into aud). Declare global.kacho.registry.serviceAud, or set this key directly "+
+				"when running iam on its own",
+			c.ListenAddress())
+	}
+	if !clientToken.Enabled {
+		// Перечень платформы не объявлен вовсе. Внешняя граница этой полосы при
+		// этом остаётся — ею служит собственный объявленный адресат, — поэтому
+		// сверять здесь не с чем, и отказывать не за что.
+		return nil
+	}
+	landing := clientToken.AudienceList()
+	if len(landing) == 0 {
+		// Пустой перечень при включённом эндпоинте — предмет стража токен-
+		// эндпоинта, и он о нём уже сказал. Второе сообщение о том же предмете
+		// разошлось бы с первым.
+		return nil
+	}
+	if !audiencepolicy.Contains(landing, c.TokenService()) {
+		return fmt.Errorf(
+			"api-server.registry-token.service %q is outside authn.client-token.allowed-audiences %q — "+
+				"the docker lane would mint a credential addressed to a surface this deployment never "+
+				"declared, and the platform's own token endpoint would refuse that same audience",
+			c.TokenService(), clientToken.AllowedAudiences)
+	}
+	return nil
 }

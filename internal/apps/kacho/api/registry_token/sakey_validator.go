@@ -34,6 +34,10 @@ type RegisteredKey struct {
 	// owner's state; a validator fetching it separately could be handed a key
 	// by any lookup that never asked.
 	SubjectEnabled bool
+	// DeclaredAudiences — сужение адресатов, объявленное заказчиком при выдаче
+	// ключа (#1136). Приезжает ТОЙ ЖЕ строкой реестра, что и ключевой материал:
+	// сужение, добранное отдельным чтением, отвечало бы за другой ключ.
+	DeclaredAudiences []string
 }
 
 // SAClientLookup — reverse lookup of the SA-key registered for a Hydra client_id.
@@ -108,7 +112,13 @@ func (v *SAKeyValidator) Validate(ctx context.Context, clientID, privateKeyPEM s
 	if !bytes.Equal(presented, registered) {
 		return Credential{}, ErrInvalidCredentials
 	}
-	return Credential{ClientID: clientID, KeyID: key.KeyID, Subject: key.Subject}, nil
+	return Credential{
+		ClientID: clientID, KeyID: key.KeyID, Subject: key.Subject,
+		// Сужение переносится ВМЕСТЕ с личностью: выдача решает по нему, и
+		// личность без него означала бы «сужения не объявлено» — то есть
+		// тихое снятие объявленного заказчиком.
+		DeclaredAudiences: key.DeclaredAudiences,
+	}, nil
 }
 
 // publicDERFromPrivatePEM parses a PKCS#8 private-key PEM and returns the PKIX

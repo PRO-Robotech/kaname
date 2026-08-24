@@ -116,7 +116,19 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
-	service := r.URL.Query().Get("service")
+	// Два РАЗНЫХ значения, и смешивать их нельзя.
+	//
+	// `requested` — то, что назвал ЗАПРОС; пустое означает «не назвал», и решает
+	// это выдача: ключ, объявивший при выдаче своё назначение, обязан получить
+	// адресат из СВОЕГО объявления, а не умолчание посадки. Подставив умолчание
+	// здесь, транспорт принял бы за выдачу решение, которого не знает, — и такой
+	// ключ отвергался бы собственной проверкой (задача #1184).
+	//
+	// `service` — то, что показывают КЛИЕНТУ в вызове на аутентификацию. Здесь
+	// умолчание уместно: вызов обязан назвать службу, даже когда запрос её не
+	// назвал.
+	requested := r.URL.Query().Get("service")
+	service := requested
 	if service == "" {
 		service = h.cfg.DefaultService
 	}
@@ -130,7 +142,7 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.challenge(w, service)
 			return
 		}
-		out, err := h.issuer.ExecuteAnonymous(r.Context(), service)
+		out, err := h.issuer.ExecuteAnonymous(r.Context(), requested)
 		if err != nil {
 			h.writeError(w, service, err)
 			return
@@ -142,7 +154,7 @@ func (h *TokenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	out, err := h.issuer.Execute(r.Context(), registrytokenuc.IssueInput{
 		Username: user,
 		Password: pass,
-		Service:  service,
+		Service:  requested,
 		// Материал привязки токена к ключу владельца (Ф1б #926) — из
 		// ПРОВЕРЕННОЙ цепочки, а не из того, что пир прислал.
 		ConfirmationX5TS256: verifiedClientCertThumbprint(r),
@@ -167,6 +179,20 @@ func (h *TokenHandler) writeError(w http.ResponseWriter, service string, err err
 			h.logger.Error("docker token: issuer unavailable", "err", err, "service", service)
 		}
 		http.Error(w, `{"error":"unavailable"}`, http.StatusServiceUnavailable)
+	case errors.Is(err, registrytokenuc.ErrAudienceNotAllowed):
+		// Наружу — тот же 401-вызов, что на всяком отказе аутентификации:
+		// различимость снаружи сказала бы предъявителю, ЧТО именно объявлено
+		// посадкой и подо что выдан ключ, — то есть была бы оракулом.
+		//
+		// В журнал — причина: «посадка такого адресата не объявляла» и «ключ
+		// выдавался не под этот адресат» чинятся в разных местах и разными
+		// людьми, а без этой строки они выглядят одинаково. Отдельная ветка от
+		// ErrUnauthenticated ровно за этим и заведена: слив их, мы отдали бы
+		// оператору отказ учётных данных на исправных учётных данных.
+		if h.logger != nil {
+			h.logger.Warn("docker token: requested audience refused", "err", err, "service", service)
+		}
+		h.challenge(w, service)
 	case errors.Is(err, registrytokenuc.ErrUnauthenticated):
 		h.challenge(w, service)
 	default:
