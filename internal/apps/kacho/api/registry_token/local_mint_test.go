@@ -65,6 +65,7 @@ func newUseCase(t *testing.T, minter registrytokenuc.LocalMinter, ex registrytok
 	t.Helper()
 	uc := registrytokenuc.NewIssueRegistryTokenUseCase(registrytokenuc.Config{
 		AssertionAudience: "https://provider/oauth2/token",
+		AllowedAudiences:  []string{"registry.kacho.local"},
 		DefaultService:    "registry.kacho.local",
 		Anonymous: registrytokenuc.AnonymousIdentity{
 			ClientID: "anon-client", KeyID: "anon-kid", PrivateKeyPEM: "anon-pem",

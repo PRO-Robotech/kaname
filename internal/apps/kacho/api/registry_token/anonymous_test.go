@@ -18,6 +18,7 @@ import (
 func anonConfig() Config {
 	return Config{
 		AssertionAudience: "https://hydra.api.kacho.cloud/oauth2/token",
+		AllowedAudiences:  []string{"registry.kacho.local"},
 		DefaultService:    "registry.kacho.local",
 		Anonymous: AnonymousIdentity{
 			ClientID:      "registry-anonymous",
@@ -113,7 +114,7 @@ func TestExecuteAnonymous_ReadOnlyScope_NoWriteVerb(t *testing.T) {
 func TestExecuteAnonymous_Disabled_FailClosed(t *testing.T) {
 	ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "should-not-happen"}}
 	uc := NewIssueRegistryTokenUseCase(
-		Config{AssertionAudience: "aud", DefaultService: "svc"}, // no Anonymous identity.
+		Config{AssertionAudience: "aud", AllowedAudiences: []string{"svc"}, DefaultService: "svc"}, // no Anonymous identity.
 		&fakeValidator{}, &fakeSigner{}, ex)
 
 	if uc.AnonymousEnabled() {

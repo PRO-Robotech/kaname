@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/audiencepolicy"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/registrytoken"
 )
 
@@ -36,6 +37,14 @@ type Credential struct {
 	KeyID string
 	// Subject — the owning ServiceAccount id (informational / audit).
 	Subject string
+	// DeclaredAudiences — сужение адресатов, ОБЪЯВЛЕННОЕ заказчиком при выдаче
+	// ключа (`IssueSAKeyRequest.audience`, задача #1136). Внутренняя граница
+	// выдачи: она говорит, для чего заведён ЭТОТ ключ.
+	//
+	// Пустой перечень означает «сужения не объявлено», а НЕ «любой адресат»:
+	// внешняя граница (`Config.AllowedAudiences`) остаётся и требуется
+	// непустой при сборке полосы.
+	DeclaredAudiences []string
 }
 
 // ErrInvalidCredentials — a validator's rejection (bad/unknown/expired/
@@ -48,6 +57,17 @@ var ErrInvalidCredentials = errors.New("registry token: invalid credentials")
 // malformed and rejected credentials, and no distinction between a Hydra
 // client/grant rejection and a local reject).
 var ErrUnauthenticated = errors.New("registry token: unauthenticated")
+
+// ErrAudienceNotAllowed — заказанный `?service=` вне того, чему эта полоса
+// вправе чеканить: либо посадка такого адресата не объявляла, либо ключ
+// выдавался не под него (задача #1184).
+//
+// Отдельный от ErrUnauthenticated исход, потому что чинится в другом месте, и
+// отдельный от ErrIssuerUnavailable, потому что повтор его не исправит: издатель
+// исправен, а вход валидным не станет никогда. Наружу обработчик отдаёт тот же
+// 401-вызов, что и на всяком отказе аутентификации — различимость снаружи была
+// бы оракулом; различимость нужна ЖУРНАЛУ, и она здесь.
+var ErrAudienceNotAllowed = errors.New("registry token: requested audience is not allowed")
 
 // ErrIssuerUnavailable — Hydra (the token issuer, a hard mint-path dependency)
 // is unreachable / misbehaving. The handler maps it to 503 (fail-closed): peer
@@ -104,6 +124,12 @@ type Config struct {
 	// AssertionAudience — the `aud` of the client_assertion: the Hydra token
 	// endpoint URL Hydra recognises (its external issuer's token endpoint).
 	AssertionAudience string
+	// AllowedAudiences — адресаты, которым ЭТА полоса вправе чеканить, —
+	// внешняя граница выдачи, объявленная посадкой (задача #1184).
+	//
+	// Пустой перечень означал бы «любой адресат», поэтому сборка полосы его
+	// отвергает: предъявитель называл бы себе аудиторию сам.
+	AllowedAudiences []string
 	// DefaultService — requested token `aud` fallback when ?service= is omitted.
 	DefaultService string
 	// AssertionTTL — client_assertion lifetime. <=0 or > MaxAssertionTTL is
@@ -233,9 +259,16 @@ func (u *IssueRegistryTokenUseCase) Execute(ctx context.Context, in IssueInput) 
 		return IssueOutput{}, ErrUnauthenticated
 	}
 
-	service := in.Service
-	if service == "" {
-		service = u.cfg.DefaultService
+	// Адресат — ИЗ ЗАПРОСА, в пределах объявленного ПОСАДКОЙ перечня,
+	// сужённого тем, что объявил при выдаче сам КЛЮЧ. Тем же предикатом, что и
+	// на соседней полосе выдачи: свойство, обязательное для одной, держится
+	// общим источником, а не одинаковой проверкой в двух местах.
+	//
+	// Решается ПОСЛЕ проверки учётных данных: перечень адресатов — сведение о
+	// посадке, и отвечать им неаутентифицированному незачем.
+	service, err := u.resolveAudience(cred, in.Service)
+	if err != nil {
+		return IssueOutput{}, err
 	}
 	now := u.now()
 
@@ -331,8 +364,12 @@ func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, servic
 		return IssueOutput{}, ErrUnauthenticated
 	}
 
-	if service == "" {
-		service = u.cfg.DefaultService
+	// Сужения ключа здесь нет ПО ПОСТРОЕНИЮ — учётных данных не предъявляли, —
+	// поэтому остаётся внешняя граница. Она действует и тут: анонимный поток
+	// той же полосы адресата себе не назначает.
+	service, err := u.resolveAudience(Credential{ClientID: u.cfg.Anonymous.ClientID}, service)
+	if err != nil {
+		return IssueOutput{}, err
 	}
 	now := u.now()
 
@@ -389,4 +426,46 @@ func (u *IssueRegistryTokenUseCase) ExecuteAnonymous(ctx context.Context, servic
 		ExpiresIn: out.ExpiresIn,
 		IssuedAt:  now.Unix(),
 	}, nil
+}
+
+// resolveAudience выбирает адресат выпускаемого токена докерной полосы.
+//
+// # Почему предикат общий, а не свой
+//
+// Полос выдачи по ключу служебной учётки ДВЕ, и до задачи #1184 сверка
+// действовала на одной: эта писалась под фиксированный адресат реестра, и
+// значение `?service=` уезжало в адресат токена как есть — то есть предъявитель
+// называл себе аудиторию сам. Расхождение никто не решал.
+//
+// Копия предиката здесь разошлась бы с соседней снова и разошлась бы молча:
+// обе полосы по отдельности выглядят исправными, неверна их РАЗНИЦА. Поэтому
+// решение принимает `audiencepolicy`, а здесь остаётся перевод входа и исхода.
+//
+// # Почему пустой `?service=` — законный вход
+//
+// Докер-клиент шлёт то, что назвал ему реестр в вызове на аутентификацию, но
+// параметр по протоколу необязателен. Пустое значение означает «не назвал», и
+// адресат берётся из сужения ключа, а при его отсутствии — из умолчания
+// посадки. Подставлять умолчание ДО этого места нельзя: тогда ключ, объявивший
+// своё назначение, получал бы чужой адресат и отвергался собственной проверкой.
+func (u *IssueRegistryTokenUseCase) resolveAudience(cred Credential, requested string) (string, error) {
+	var want []string
+	if requested != "" {
+		want = []string{requested}
+	}
+	out, err := audiencepolicy.Resolve(audiencepolicy.Scope{
+		Landing:  u.cfg.AllowedAudiences,
+		Default:  u.cfg.DefaultService,
+		Declared: cred.DeclaredAudiences,
+		Subject:  cred.ClientID,
+	}, want)
+	if err != nil {
+		// Причина ОБОРАЧИВАЕТСЯ: наружу уйдёт единый 401-вызов, а в журнал —
+		// то, какая из двух границ отвергла. Голый sentinel здесь означал бы
+		// пересказ собственного решения об отказе.
+		return "", fmt.Errorf("%w: %w", ErrAudienceNotAllowed, err)
+	}
+	// Заказан был один адресат либо ни одного, поэтому и вернулся ровно один:
+	// перечень выдачи докерной полосы одноэлементен по форме запроса.
+	return out[0], nil
 }

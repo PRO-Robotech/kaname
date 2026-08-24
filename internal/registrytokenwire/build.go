@@ -4,8 +4,10 @@
 package registrytokenwire
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -71,6 +73,18 @@ type BuildConfig struct {
 // cluster-internal jwks-proxy mirror (internal/handler/jwksproxyhttp) — not by this
 // `/iam/token` shim.
 func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
+	// Страж построения полосы: без объявленного адресата выдача чеканит тому,
+	// кого назовёт вызывающий (задача #1184).
+	//
+	// Отказ ЗДЕСЬ — отказ в старте, видимый оператору сразу и называющий
+	// настройку. Пропустив пустое, мы получили бы полосу, выдающую
+	// удостоверение поверхности, которую посадка не объявляла, — и это не
+	// проявилось бы ничем: запрос проходит, токен выдаётся, клиент доволен.
+	if strings.TrimSpace(cfg.Service) == "" {
+		return nil, fmt.Errorf(
+			"registrytokenwire: api-server.registry-token.service is empty — it is the audience this " +
+				"lane is declared to mint for, and an unset one means «mint for whatever the caller names»")
+	}
 	saRepo := kachopg.NewSAOAuthClientRepo(pool)
 
 	validator := registrytokenuc.NewSAKeyValidator(NewSAClientLookup(saRepo))
@@ -86,8 +100,14 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 
 	useCase := registrytokenuc.NewIssueRegistryTokenUseCase(registrytokenuc.Config{
 		AssertionAudience: cfg.AssertionAudience,
-		DefaultService:    cfg.Service,
-		Scope:             cfg.Scope,
+		// Внешняя граница ЭТОЙ полосы — служба реестра, объявленная посадкой.
+		// Ровно её реестр называет докер-клиенту в вызове на аутентификацию, и
+		// ровно её клиент возвращает в `?service=`; всё прочее эта полоса не
+		// обслуживает by construction. Перечнем, а не строкой: расширить его
+		// станет правкой настройки, а не правкой кода.
+		AllowedAudiences: []string{cfg.Service},
+		DefaultService:   cfg.Service,
+		Scope:            cfg.Scope,
 		// Anonymous-pull identity (RG-1 D-7). Empty → anonymous pull disabled; the
 		// shim then serves the SA-key path only (no-Basic-creds → 401 challenge).
 		Anonymous: registrytokenuc.AnonymousIdentity{

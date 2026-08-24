@@ -16,8 +16,11 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"time"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/audiencepolicy"
 )
 
 // Built-in policy defaults. viper also registers them (defaults.go); the
@@ -73,4 +76,53 @@ func (c RegistryTokenConfig) TokenTTL() time.Duration {
 		return defaultRegistryTokenTTL
 	}
 	return c.TTL
+}
+
+// Validate — страж старта докерной полосы выдачи (задача #1184).
+//
+// # Что здесь проверяется и почему именно здесь
+//
+// Полос выдачи по ключу служебной учётки ДВЕ, и обе чеканят удостоверения от
+// имени одной платформы. Перечень адресатов платформы объявляет посадка
+// (`authn.client-token.allowed-audiences`); адресат докерной полосы объявляет
+// `api-server.registry-token.service`. Пока эти две величины не сверены, наш
+// подписант вправе выпустить удостоверение, адресованное поверхности, которую
+// посадка не объявляла, — и не проявится это ничем: запрос проходит, токен
+// выдаётся, докер-клиент доволен.
+//
+// Сверка живёт на СТАРТЕ, а не на выдаче: перечень платформы — величина
+// оператора, и расхождение двух его объявлений есть настройка, а не запрос.
+// Отказ здесь виден оператору сразу и называет обе настройки; отказ на выдаче
+// виден клиенту и выглядит неисправностью реестра.
+//
+// Принимает настройку токен-эндпоинта ПАРАМЕТРОМ, а не читает её из корня: две
+// величины связаны по существу, и связь обязана проверяться там, где она есть,
+// а не там, где о ней помнят.
+func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig) error {
+	if c.ListenAddress() == "" {
+		// Слушателя нет — полосы нет, и сверять нечего. Страж, требующий того,
+		// чем не пользуются, есть отказ в старте без предмета.
+		return nil
+	}
+	if !clientToken.Enabled {
+		// Перечень платформы не объявлен вовсе. Внешняя граница этой полосы при
+		// этом остаётся — ею служит собственный объявленный адресат, — поэтому
+		// сверять здесь не с чем, и отказывать не за что.
+		return nil
+	}
+	landing := clientToken.AudienceList()
+	if len(landing) == 0 {
+		// Пустой перечень при включённом эндпоинте — предмет стража токен-
+		// эндпоинта, и он о нём уже сказал. Второе сообщение о том же предмете
+		// разошлось бы с первым.
+		return nil
+	}
+	if !audiencepolicy.Contains(landing, c.TokenService()) {
+		return fmt.Errorf(
+			"api-server.registry-token.service %q is outside authn.client-token.allowed-audiences %q — "+
+				"the docker lane would mint a credential addressed to a surface this deployment never "+
+				"declared, and the platform's own token endpoint would refuse that same audience",
+			c.TokenService(), clientToken.AllowedAudiences)
+	}
+	return nil
 }

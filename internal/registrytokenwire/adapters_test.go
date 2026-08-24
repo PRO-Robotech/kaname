@@ -6,6 +6,7 @@ package registrytokenwire
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -46,6 +47,11 @@ func TestSAClientLookup_MapsRegisteredKey(t *testing.T) {
 		PublicKeyPEM:  "PEM-A",
 		KeyAlgorithm:  "ES256",
 		ExpiresAt:     &exp,
+		// Сужение адресатов, объявленное при выдаче ключа (#1136). В фикстуре
+		// оно НЕПУСТО намеренно: с пустым перечнем проба зеленела бы и на
+		// адаптере, который поле не переносит вовсе, — а именно этот перенос и
+		// делает сужение действующим на докерной полосе (#1184).
+		DeclaredAudiences: []string{"registry.kacho.local"},
 	}
 	look := NewSAClientLookup(fakeSAByID{row: row})
 	got, err := look.KeyByClientID(context.Background(), "cid-ci")
@@ -62,8 +68,11 @@ func TestSAClientLookup_MapsRegisteredKey(t *testing.T) {
 		// The owner's state travels with the key: the docker path decides on it,
 		// and a lookup that did not answer for it would refuse every login.
 		SubjectEnabled: true,
+		// Сужение доезжает до выдачи: колонка, которую пишут и не читают,
+		// невидима отовсюду.
+		DeclaredAudiences: []string{"registry.kacho.local"},
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("RegisteredKey = %+v; want %+v", got, want)
 	}
 }
