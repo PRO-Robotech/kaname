@@ -202,12 +202,14 @@ Page size ≤ 1000. Опциональный `subjectTypeFilter`.
         {
           "module": "vpc",
           "resources": [
-            { "resource": "networks", "hasVerbRelations": true, "hasListEndpoint": true, "labelSelectable": true },
-            { "resource": "securityGroup", "hasVerbRelations": true, "hasListEndpoint": true, "labelSelectable": true }
+            { "resource": "networks", "hasVerbRelations": true, "hasListEndpoint": true, "labelSelectable": true,
+              "verbs": ["get", "list", "update", "delete"] },
+            { "resource": "securityGroup", "hasVerbRelations": true, "hasListEndpoint": true, "labelSelectable": true,
+              "verbs": ["get", "list", "update", "delete"] }
           ]
         }
       ],
-      "closedVerbs": ["get", "list", "create", "update", "delete"],
+      "closedVerbs": ["get", "list", "delete"],
       "wildcardPolicy": {
         "verbWildcardAllowedCustom": true,
         "moduleResourceWildcardSystemOnly": true
@@ -219,7 +221,16 @@ Page size ≤ 1000. Опциональный `subjectTypeFilter`.
 Каждый `CatalogResource` несёт editor-флаги: `hasVerbRelations` (verb-bearing leaf vs
 tier-only ancestor), `hasListEndpoint` (есть ли публичный filtered `List` — тогда пикер id
 рендерит Select видимых экземпляров, иначе — free-text), `labelSelectable` (можно ли применять
-`matchLabels`).
+`matchLabels`) — и **`verbs`: глаголы, которые правило роли вправе назвать на ЭТОМ ресурсе.**
+
+`verbs` — это источник выпадающего списка глаголов, а не `closedVerbs`. Набор глаголов
+принадлежит ТИПУ: `loadbalancer.targetGroups` несёт сверх обычного `addTargets` и
+`removeTargets`, `registry.registries` — `create`, а у `iam.user` `update` снят (правку
+записи личности спрашивает другое отношение). `closedVerbs` — ПЕРЕСЕЧЕНИЕ наборов всех
+типов: оно отвечает на вопрос «что даёт любой ресурс» и по мере расхождения наборов
+сужается, поэтому строить из него список нельзя ни в одну сторону. Правило, назвавшее
+глагол вне набора своего типа, не даёт на нём ничего — материализация сверяется с тем же
+набором.
 
 </ApiOperation>
 

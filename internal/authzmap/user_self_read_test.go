@@ -6,6 +6,7 @@ package authzmap_test
 import (
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -43,14 +44,29 @@ func TestUserSelfRead_VGetConsumesTheSelfTuple(t *testing.T) {
 			"эмитируется на заведении пользователя именно ради самочтения, и глагол, "+
 			"который его не читает, оставляет этот кортеж без потребителя")
 
-	// Положительный контроль: правка и удаление себя `subject` НЕ дают.
-	for _, verb := range []string{"v_update", "v_delete"} {
-		def, ok := defs[verb]
-		require.True(t, ok, "у iam_user нет глагола %s", verb)
-		require.NotContains(t, def, "subject",
+	// Положительный контроль: НИ ОДИН распоряжающийся глагол себя `subject` не даёт.
+	//
+	// Набор берётся ИЗ МОДЕЛИ, а не выписывается: `v_update` был снят с этого типа
+	// (#1128), и литеральный перечень покраснел бы на его отсутствии — то есть
+	// контроль ломался бы от правки, которой он не про что. Невырожденность
+	// перечня утверждается отдельно, иначе «ни один» было бы истинно на пустоте.
+	var others []string
+	for verb := range defs {
+		if strings.HasPrefix(verb, "v_") && verb != "v_get" {
+			others = append(others, verb)
+		}
+	}
+	sort.Strings(others)
+	require.NotEmpty(t, others,
+		"кроме `v_get`, у iam_user не объявлено ни одного глагола — положительный контроль "+
+			"ниже был бы истинным даром")
+	for _, verb := range others {
+		require.NotContains(t, defs[verb], "subject",
 			"%s не должен выводиться из факта «я — это я»: право читать свою запись и "+
 				"право её менять — разные вопросы с разными источниками", verb)
 	}
+	t.Logf("перепись: глаголов у iam_user %d, из них проверено на `subject` %d",
+		len(others)+1, len(others))
 }
 
 var reRelationDef = regexp.MustCompile(`^\s*define\s+([a-z_0-9]+)\s*:\s*(.+?)\s*$`)

@@ -50,6 +50,7 @@ func catalogToProto(c Catalog) *iamv1.ListPermissionCatalogResponse {
 				HasVerbRelations: r.HasVerbRelations,
 				HasListEndpoint:  r.HasListEndpoint,
 				LabelSelectable:  r.LabelSelectable,
+				Verbs:            r.Verbs,
 			})
 		}
 		modules = append(modules, &iamv1.CatalogModule{
