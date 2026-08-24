@@ -7,10 +7,10 @@
 ПРЕДМЕТ
 =======
 Помощник генератора принимает от автора кейса человеческую фразу — пояснение,
-фрагмент контракт-тона, подпись шага — и подставляет её внутрь строкового
-литерала порождаемого скрипта. Апостроф закрывает литерал, перевод строки
-разрывает строку, `</script>` закрывает элемент: ломается не текст, а СИНТАКСИС
-файла, которого автор фразы не видит.
+фрагмент контракт-тона, подпись шага, имя переменной — и подставляет её внутрь
+строкового литерала порождаемого скрипта. Апостроф закрывает литерал, перевод
+строки разрывает строку, `</script>` закрывает элемент: ломается не текст, а
+СИНТАКСИС файла, которого автор фразы не видит.
 
 ПОЧЕМУ ЭТО НЕ ВИДНО В ВЕРДИКТЕ
 ==============================
@@ -19,28 +19,39 @@ newman записывает исключение скрипта в `testScripts`
 проверять что бы то ни было и продолжает отчитываться зелёным по этой величине.
 Это третья категория исхода («не выполнилось»), зачтённая в «прошло».
 
-ЧТО УТВЕРЖДАЕТ ЭТА ПРОБА
-========================
-1. Отрицание: помощник, которому дали ВРАЖДЕБНУЮ фразу, всё равно порождает
-   разбираемый JavaScript. Разбор — в обёртке-функции (`new Function`), потому
-   что postman исполняет скрипт шага как ТЕЛО ФУНКЦИИ: `return` верхнего уровня
-   там законен, и разбор без обёртки дал бы тысячи ложных находок.
-2. Положительный контроль: обычная фраза по-прежнему читается в скрипте
+ЧТО УТВЕРЖДАЕТ ЭТА ПРОБА — ЧЕТЫРЕ РАЗНЫХ ВОПРОСА
+================================================
+1. ФОРМА, по всему дереву: ни одна подстановка не садится внутрь литерала или
+   комментария порождаемого скрипта иначе как через `js_str` / `js_comment`.
+   Перепись обходит генераторы ОБХОДОМ ДЕРЕВА и печатает объём осмотренного,
+   поэтому новый генератор попадает под неё по построению.
+2. СУЩЕСТВО, по швам: помощник, которому дали ВРАЖДЕБНУЮ фразу, всё равно
+   порождает разбираемый JavaScript. Форма без существа зеленела бы на
+   сериализаторе, который ничего не кодирует.
+3. ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: обычная фраза по-прежнему читается в скрипте
    ДОСЛОВНО. Без него зелёное давал бы и помощник, выбрасывающий текст.
-3. Свойство сериализатора: `js_str` — обратимая функция, `json.loads` возвращает
-   исходную строку. Без него «экранирование» могло бы быть искажением.
-4. Контроль самого разборщика: законный близнец (скрипт с `return` верхнего
-   уровня и подстановкой `{{var}}`) обязан МОЛЧАТЬ.
+4. ОБРАТИМОСТЬ — НАСТОЯЩИМ ДВИЖКОМ. Литерал вычисляется node и обязан дать
+   исходную строку. Судить надо тем языком, который литерал и будет исполнять:
+   `json.loads` не знает ни `\\'`, ни `<\\/`, то есть проверял бы другой язык.
 
-ПОЧЕМУ ПРОБА ОДНА НА ВСЕ ГЕНЕРАТОРЫ
-===================================
-Шов один и тот же у семи наборов, а тело пробы — одно. Семь копий этого файла
-разошлись бы между собой ровно так же, как разошлись сами помощники: у geo
-экранирование было РУКОПИСНЫМ и неполным (`\\` и `'`, но не перевод строки), у
-registry подпись вклеивалась, тогда как одноимённый помощник iam её кодировал.
-Перечень генераторов ВЫВОДИТСЯ из дерева: новый набор без записи в таблице швов
-роняет пробу, а не проходит незамеченным.
+ПОЧЕМУ ПРОБА ОДНА НА ВСЕ ГЕНЕРАТОРЫ И ПОЧЕМУ ОНА ЛЕЖИТ ЗДЕСЬ
+============================================================
+Шов один и тот же у восьми наборов, а тело пробы — одно; восемь копий разошлись
+бы между собой ровно так же, как разошлись сами помощники. Каталог выбран не по
+принадлежности предмета, а по тому, кто пробу ИСПОЛНЯЕТ: прогонщик
+`.github/scripts/run-python-probes.py` собирает состав по образцу
+`services/*/tests/newman/scripts/*_test.py`. Проба, положенная «правильнее» — в
+`deploy/` или в `gateway/`, — не исполнялась бы вовсе, а это ровно тот класс,
+который она и стережёт.
+
+ГРАНИЦА, НАЗВАННАЯ ЧЕСТНО
+=========================
+Перепись судит подстановку в строковый литерал и в комментарий. Подстановка в
+литерал РЕГУЛЯРНОГО ВЫРАЖЕНИЯ (`to.match(/{msg_regex}/)`, 3 места) под неё не
+подпадает и оставлена как есть: там вызывающий передаёт не текст, а КОД, и
+кодирование его строкой сменило бы смысл. Это отдельный предмет, а не пропуск.
 """
+import ast
 import importlib.util
 import json
 import subprocess
@@ -49,34 +60,44 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
+GEN_GLOBS = ("services/*/tests/newman/scripts/gen.py",
+             "gateway/tests/newman/scripts/gen.py")
 
 # Враждебная фраза: каждый знак закрывает свой контекст. Апостроф — литерал в
 # одинарных кавычках, кавычка — в двойных, обратный слэш — начало экранирующей
-# последовательности, перевод строки — саму строку, `</script>` — элемент
-# документа, U+2028/U+2029 — литерал у сборок до ES2019, обратная кавычка и `${`
-# — шаблонный литерал.
-HOSTILE = (
-    "the facade's OWN record \" \\ конец\nстроки </script> "
-    "    ` ${payload}"
-)
+# последовательности, перевод строки — саму строку и комментарий, `</script>` —
+# элемент документа, U+2028/U+2029 — литерал у сборок до ES2019, обратная кавычка
+# и `${` — шаблонный литерал.
+HOSTILE = ("the facade's OWN record \" \\ конец\nстроки </script> "
+           "\u2028\u2029 ` ${payload}")   # разделители строк — экранированы,
+# иначе они невидимы в исходнике и первый же редактор молча их съест
 
 BENIGN = "IBT-06 control: how the internal listener answers"
 
 
 def _generators() -> dict:
-    """Генераторы сюит — обходом дерева, а не перечнем."""
+    """Генераторы сюит — ОБХОДОМ ДЕРЕВА, а не перечнем.
+
+    Перечень, выписанный руками, разошёлся бы с деревом молча — и разошёлся:
+    первая редакция этого файла обходила только `services/*`, поэтому восьмой
+    генератор (`gateway/`), несущий ТРЕТЬЮ копию `require_env_url`, был невидим
+    для всех её утверждений сразу.
+    """
     mods = {}
-    for path in sorted(REPO_ROOT.glob("services/*/tests/newman/scripts/gen.py")):
-        svc = path.parts[len(REPO_ROOT.parts) + 1]
-        spec = importlib.util.spec_from_file_location(f"kacho_gen_{svc}", path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        sys.path.insert(0, str(path.parent))
-        try:
-            spec.loader.exec_module(module)
-        finally:
-            sys.path.pop(0)
-        mods[svc] = module
+    for glob in GEN_GLOBS:
+        for path in sorted(REPO_ROOT.glob(glob)):
+            name = path.parts[len(REPO_ROOT.parts)]
+            if name == "services":
+                name = path.parts[len(REPO_ROOT.parts) + 1]
+            spec = importlib.util.spec_from_file_location(f"kacho_gen_{name}", path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            sys.path.insert(0, str(path.parent))
+            try:
+                spec.loader.exec_module(module)
+            finally:
+                sys.path.pop(0)
+            mods[name] = module
     assert mods, "генераторов в дереве НЕ НАЙДЕНО — проба беспредметна, а не зелена"
     return mods
 
@@ -84,23 +105,14 @@ def _generators() -> dict:
 GENERATORS = _generators()
 
 
-def _lines(produced) -> list:
-    """Строки скриптов из того, что вернул помощник: список строк, Step или Case."""
-    if isinstance(produced, list) and all(isinstance(x, str) for x in produced):
-        return [produced]
-    steps = getattr(produced, "steps", None)
-    if steps is not None:
-        out = []
-        for step in steps:
-            out += _lines(step)
-        return out
-    pre = list(getattr(produced, "pre_script", []) or [])
-    test = list(getattr(produced, "test_script", []) or [])
-    return [block for block in (pre, test) if block]
-
+# ----------------------------------------------------------------- разборщик
 
 def _parse_as_function_body(source: str):
-    """(разобралось?, сообщение). Обёртка-функция — как исполняет postman."""
+    """(разобралось?, сообщение). Обёртка-функция — как исполняет postman.
+
+    postman исполняет скрипт шага как ТЕЛО ФУНКЦИИ: `return` верхнего уровня там
+    законен, и разбор без обёртки дал бы тысячи ложных находок.
+    """
     driver = ("const fs=require('fs');"
               "try{new Function(fs.readFileSync(process.argv[1],'utf8'));"
               "process.stdout.write('OK');}"
@@ -124,8 +136,100 @@ def _parse_as_function_body(source: str):
     return out == "OK", out
 
 
-# Швы: (сервис, подпись, вызов). Вызов получает модуль генератора и текст,
-# который подставляется в проверяемый параметр.
+def _eval_literals(literals):
+    """Значения литералов, вычисленные НАСТОЯЩИМ движком JS."""
+    driver = ("const L=JSON.parse(process.argv[1]);"
+              "process.stdout.write(JSON.stringify(L.map(l=>eval('('+l+')'))));")
+    proc = subprocess.run(["node", "-e", driver, json.dumps(literals)],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, f"движок отверг литерал: {proc.stderr[:400]}"
+    return json.loads(proc.stdout)
+
+
+# ------------------------------------------------------- перепись по дереву
+
+_JS_MARKERS = ("pm.", "console.", "=>", "const ", "let ", "var ", "if (", "//",
+               "function", "return ", "postman.", "JSON.")
+_SANITISERS = ("js_str(", "js_comment(")
+_OUT, _SQ, _DQ, _TPL, _CMT = "code", "'…'", '"…"', "`…`", "//…"
+_DECODE = {"'": "'", '"': '"', "\\": "\\", "n": "\n", "t": "\t", "r": "\r"}
+
+
+def _lexical_state_at_each_interpolation(path: Path):
+    """(перепись, находки) — где подстановка садится внутрь литерала/комментария.
+
+    Предикат — МЕХАНИЗМ подстановки, а не имя функции: поле замены, чьё
+    лексическое состояние JS есть «внутри литерала» либо «внутри комментария».
+    """
+    src = path.read_text(encoding="utf-8")
+    seen = {"fstrings": 0, "js_fstrings": 0, "interpolations": 0}
+    findings = []
+    for node in ast.walk(ast.parse(src, filename=str(path))):
+        if not isinstance(node, ast.JoinedStr):
+            continue
+        seen["fstrings"] += 1
+        static = "".join(v.value for v in node.values if isinstance(v, ast.Constant))
+        if not any(m in static for m in _JS_MARKERS):
+            continue
+        seen["js_fstrings"] += 1
+        state = _OUT
+        for part in node.values:
+            if isinstance(part, ast.Constant):
+                text, i = str(part.value), 0
+                while i < len(text):
+                    c, step = text[i], 1
+                    if state in (_SQ, _DQ, _TPL) and c == "\\" and i + 1 < len(text):
+                        c, step = _DECODE.get(text[i + 1], text[i + 1]), 2
+                        i += step
+                        continue
+                    if state in (_SQ, _DQ, _TPL):
+                        if (state == _SQ and c == "'") or (state == _DQ and c == '"') \
+                                or (state == _TPL and c == "`"):
+                            state = _OUT
+                    elif state == _CMT:
+                        if c == "\n":
+                            state = _OUT
+                    elif c in "'\"`":
+                        state = {"'": _SQ, '"': _DQ, "`": _TPL}[c]
+                    elif c == "/" and i + 1 < len(text) and text[i + 1] == "/":
+                        state, step = _CMT, 2
+                    i += step
+            else:
+                seen["interpolations"] += 1
+                if state == _OUT:
+                    continue
+                expr = ast.get_source_segment(src, part.value) or "?"
+                if not expr.startswith(_SANITISERS):
+                    findings.append(f"{path}:{part.lineno} состояние {state}: {{{expr}}}")
+    return seen, findings
+
+
+def test_no_caller_text_is_pasted_between_quotes_anywhere_in_the_tree():
+    """ФОРМА. Ни одной подстановки в литерал/комментарий помимо сериализатора."""
+    paths = [p for g in GEN_GLOBS for p in sorted(REPO_ROOT.glob(g))]
+    assert paths, "генераторов не найдено — перепись беспредметна, а не пуста"
+    total = {"fstrings": 0, "js_fstrings": 0, "interpolations": 0}
+    findings = []
+    for path in paths:
+        seen, found = _lexical_state_at_each_interpolation(path)
+        for k in total:
+            total[k] += seen[k]
+        findings += found
+    assert total["js_fstrings"], (
+        "f-строк, порождающих JavaScript, не найдено НИ ОДНОЙ — предикат "
+        "переписи перестал узнавать свой предмет, и её молчание ничего не значит")
+    print(f"осмотрено: генераторов {len(paths)}, f-строк {total['fstrings']}, "
+          f"из них порождающих JS {total['js_fstrings']}, подстановок в них "
+          f"{total['interpolations']}")
+    assert not findings, (
+        f"подстановок, вклеенных между кавычками помимо js_str/js_comment: "
+        f"{len(findings)}\n  " + "\n  ".join(findings))
+
+
+# ------------------------------------------------------------------- швы
+
+# (сервис, подпись, вызов). Вызов получает модуль генератора и текст, который
+# подставляется в проверяемый параметр.
 SEAMS = [
     ("iam", "require_env_url/why",
      lambda g, t: g.require_env_url("internalBaseUrl", "/iam/v1/internal/x", t)),
@@ -143,6 +247,12 @@ SEAMS = [
     ("registry", "require_env_url/path",
      lambda g, t: g.require_env_url("internalBaseUrl", t, "why")),
     ("registry", "assert_answered/label", lambda g, t: g.assert_answered(t)),
+    ("gateway", "require_env_url/why",
+     lambda g, t: g.require_env_url("internalBaseUrl", "/v1/x", t)),
+    ("gateway", "require_env_url/var",
+     lambda g, t: g.require_env_url(t, "/v1/x", "why")),
+    ("gateway", "require_env_url/path",
+     lambda g, t: g.require_env_url("internalBaseUrl", t, "why")),
     ("compute", "assert_op_error/msg_substr",
      lambda g, t: g.assert_op_error(3, "INVALID_ARGUMENT", msg_substr=t)),
     ("compute", "assert_op_error_oneof/msg_substr",
@@ -164,13 +274,28 @@ SEAMS = [
     ("vpc", "assert_cleanup_delete/refusal",
      lambda g, t: g.assert_cleanup_delete("адрес A", t)),
     ("vpc", "assert_empty_page/why", lambda g, t: g.assert_empty_page(t)),
-    # Уже кодирующие помощники — положительный контроль: они обязаны
-    # ОСТАТЬСЯ кодирующими (форма выведена разбором 2026-08-03, см. их godoc).
+    # Помощники, кодировавшие текст ещё до #1181, — положительный контроль: они
+    # обязаны ОСТАТЬСЯ кодирующими.
     ("nlb", "assert_refused_sync_or_async/what",
      lambda g, t: g.assert_refused_sync_or_async(t)),
     ("vpc", "assert_refused_sync_or_async/what",
      lambda g, t: g.assert_refused_sync_or_async(t)),
 ]
+
+
+def _lines(produced) -> list:
+    """Строки скриптов из того, что вернул помощник: список строк, Step или Case."""
+    if isinstance(produced, list) and all(isinstance(x, str) for x in produced):
+        return [produced]
+    steps = getattr(produced, "steps", None)
+    if steps is not None:
+        out = []
+        for step in steps:
+            out += _lines(step)
+        return out
+    pre = list(getattr(produced, "pre_script", []) or [])
+    test = list(getattr(produced, "test_script", []) or [])
+    return [block for block in (pre, test) if block]
 
 
 def _render(svc: str, call, text: str) -> str:
@@ -191,7 +316,7 @@ def test_every_generator_of_the_tree_is_covered_by_the_seam_table():
 
 
 def test_hostile_caller_text_still_yields_parsable_script():
-    """Отрицание: враждебная фраза не ломает СИНТАКСИС порождаемого скрипта."""
+    """СУЩЕСТВО. Враждебная фраза не ломает СИНТАКСИС порождаемого скрипта."""
     broken = []
     for svc, label, call in SEAMS:
         ok, message = _parse_as_function_body(_render(svc, call, HOSTILE))
@@ -203,7 +328,7 @@ def test_hostile_caller_text_still_yields_parsable_script():
 
 
 def test_benign_caller_text_survives_verbatim():
-    """Положительный контроль: обычная фраза остаётся в скрипте ДОСЛОВНО."""
+    """ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: обычная фраза остаётся в скрипте ДОСЛОВНО."""
     lost = []
     for svc, label, call in SEAMS:
         source = _render(svc, call, BENIGN)
@@ -215,20 +340,34 @@ def test_benign_caller_text_survives_verbatim():
     assert not lost, "\n  ".join(lost)
 
 
-def test_js_str_is_reversible_in_every_generator():
-    """Свойство сериализатора: кодирование обратимо, значит текст не искажён."""
-    samples = [HOSTILE, BENIGN, "", "'", '"', "\\", "\n\r\t", "</script>",
-               "  ", "тон отказа: network is not empty"]
-    absent = [svc for svc, m in GENERATORS.items() if not hasattr(m, "js_str")]
+def test_js_str_is_reversible_under_a_real_engine():
+    """ОБРАТИМОСТЬ. Литерал, вычисленный node, даёт исходную строку.
+
+    Судит движок, а не `json.loads`: одинарно-кавычечный литерал с `\\'` и `<\\/`
+    — законный JavaScript и НЕ законный JSON, поэтому проверка через json
+    отвечала бы про другой язык.
+    """
+    samples = [HOSTILE, BENIGN, "", "'", '"', "\\", "\n\r\t", "</script>", "  ",
+               "тон отказа: network is not empty", "'; process.exit(1); //",
+               "".join(chr(c) for c in range(1, 128))]
+    absent = [svc for svc, m in GENERATORS.items()
+              if not (hasattr(m, "js_str") and hasattr(m, "js_comment"))]
     assert not absent, (
-        f"генераторы без сериализатора js_str: {absent} — значит текст "
+        f"генераторы без сериализатора js_str/js_comment: {absent} — значит текст "
         f"вызывающего всё ещё вклеивается между кавычками")
     for svc, module in GENERATORS.items():
+        literals = [module.js_str(s) for s in samples]
+        for lit in literals:
+            assert lit.startswith("'") and lit.endswith("'"), (
+                f"{svc}: js_str вернул не одинарно-кавычечный литерал: {lit!r}; "
+                f"двойная кавычка сменила бы байты закоммиченных коллекций")
+        for want, got in zip(samples, _eval_literals(literals)):
+            assert want == got, f"{svc}: js_str({want!r}) не обратим → {got!r}"
+        # комментарий: значение вставляют в текст, конец строки обязан исчезнуть
         for sample in samples:
-            literal = module.js_str(sample)
-            assert literal[0] in "\"'", f"{svc}: js_str не вернул литерал: {literal!r}"
-            assert json.loads(literal) == sample, (
-                f"{svc}: js_str({sample!r}) не обратим: {literal!r}")
+            assert "\n" not in module.js_comment(sample), (
+                f"{svc}: js_comment оставил конец строки — остаток значения "
+                f"станет КОДОМ, а не комментарием")
 
 
 def test_the_parser_stays_silent_on_a_legal_twin():

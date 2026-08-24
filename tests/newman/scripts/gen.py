@@ -31,34 +31,73 @@ from typing import List, Dict, Optional
 
 
 def js_str(value: str) -> str:
-    """JS-литерал строки — СЕРИАЛИЗАЦИЕЙ, а не вклейкой между кавычками (#1181).
+    r"""Строковый литерал JavaScript, произведённый СЕРИАЛИЗАТОРОМ (#1181).
 
-    Текст вызывающего (пояснение, фрагмент контракт-тона, подпись шага) уезжает в
-    ПОРОЖДАЕМЫЙ скрипт шага. Апостроф закрывает литерал, перевод строки рвёт
-    строку: ломается не текст, а СИНТАКСИС файла, которого автор фразы не видит.
-    Отказ при этом не виден в вердикте — newman пишет исключение скрипта в
-    `testScripts`, а НЕ в `assertions.failed`, поэтому шаг с неразобранным
-    скриптом даёт НОЛЬ упавших утверждений: кейс перестаёт проверять что бы то ни
-    было и продолжает отчитываться зелёным по этой величине.
+    Текст вызывающего — пояснение, фрагмент контракт-тона, подпись шага, имя
+    переменной — уезжает в ПОРОЖДАЕМЫЙ скрипт шага. Апостроф закрывает литерал,
+    перевод строки рвёт строку, `</script>` закрывает элемент: ломается не
+    текст, а СИНТАКСИС файла, которого автор фразы не видит.
 
-    Кодирует СЕРИАЛИЗАТОР, а не рукописная замена знаков: рукописная всегда
-    неполна — geo экранировал `\\` и `\'`, но не перевод строки, и потому
-    закрывал ровно тот случай, который однажды заметили. Синтаксис строки JSON —
-    подмножество синтаксиса строки JS, поэтому результат вставляется литералом
-    как есть. Сверх JSON закрыты два случая, которых JSON не знает:
+    ПОЧЕМУ ЭТО НЕ ВИДНО В ВЕРДИКТЕ. newman пишет исключение скрипта в
+    `testScripts`, а НЕ в `assertions.failed`. Шаг, чей скрипт не разобрался,
+    даёт НОЛЬ упавших утверждений: кейс перестаёт проверять что бы то ни было и
+    продолжает отчитываться зелёным по этой величине. Это третья категория
+    исхода («не выполнилось»), зачтённая в «прошло».
+
+    ПОЧЕМУ СЕРИАЛИЗАТОР, А НЕ ЗАМЕНА ЗНАКОВ. Рукописная замена всегда неполна:
+    geo экранировал обратный слэш и апостроф, но не перевод строки, и потому
+    закрывал ровно тот случай, который однажды заметили. Полный набор — обратный
+    слэш, управляющие знаки, кавычка — делает `json.dumps`. Сверх него закрыты
+    три случая, которых JSON не знает, и каждый ЗНАЧЕНИЯ литерала не меняет:
 
       * U+2028/U+2029 — законный JSON, но до ES2019 рвали литерал JS;
-      * `</` — закрыл бы элемент `script`, если коллекцию встроят в документ;
-        `\/` в JS тождественно `/`, поэтому ЗНАЧЕНИЕ литерала не меняется.
+      * `</` → `<\/` — иначе закрылся бы элемент `script`, если текст шага
+        встроят в отчёт-документ; `\/` в JS тождественно `/`;
+      * апостроф → `\'` — литерал одинарно-кавычечный (ниже о том, почему).
+        Правило применяется ПОСЛЕ сериализатора, когда каждый обратный слэш уже
+        удвоен, поэтому оно не может ни пропустить случай, ни съесть чужой
+        экранирующий знак.
 
-    Обратимость (`json.loads(js_str(s)) == s` для любого `s`) закреплена пробой
-    `services/iam/tests/newman/scripts/js_literal_escape_test.py`; там же — швы,
-    через которые текст вызывающего попадает в скрипт, и враждебный вход по
-    каждому из них.
+    ПОЧЕМУ ОДИНАРНАЯ КАВЫЧКА, А НЕ ДВОЙНАЯ ИЗ `json.dumps`. Порождаемый скрипт
+    цитирует одинарной; двойная кавычка сменила бы БАЙТЫ 91 закоммиченной
+    коллекции, которые читают два десятка гейтов, ничего не изменив по существу.
+    Одинарная форма даёт байт-в-байт то же, что вклейка, на всяком входе, где
+    вклейка была законна, — поэтому перегенерация после этой правки обязана дать
+    ПУСТОЙ diff, и это единственное, что доказывает: экранирование ничего не
+    исказило.
+
+    ЧЕМ ДЕРЖИТСЯ. Проба
+    `services/iam/tests/newman/scripts/js_literal_escape_test.py` — одна на все
+    восемь генераторов, потому что шов один, а восемь копий разошлись бы. Она
+    утверждает четыре разных вещи: ФОРМУ по всему дереву (ни одной подстановки
+    в литерал помимо этих двух помощников), СУЩЕСТВО по швам (враждебный вход
+    даёт РАЗБИРАЕМЫЙ скрипт), положительный контроль (безобидная фраза читается
+    дословно) и ОБРАТИМОСТЬ настоящим движком — node, а не `json.loads`: судить
+    надо тем языком, который литерал и будет исполнять.
     """
-    literal = json.dumps(str(value), ensure_ascii=False)
-    literal = literal.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
-    return literal.replace("</", "<\\/")
+    body = json.dumps(str(value), ensure_ascii=False)[1:-1]
+    body = body.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    body = body.replace("</", "<\\/")
+    body = body.replace('\\"', '"').replace("'", "\\'")
+    return "'" + body + "'"
+
+
+def js_comment(value: str) -> str:
+    r"""Текст вызывающего ВНУТРИ комментария порождаемого скрипта (#1181).
+
+    У комментария опасен ровно один класс знаков — КОНЕЦ СТРОКИ: он закрывает
+    комментарий, и остаток значения становится КОДОМ. Кавычки внутри комментария
+    безвредны, поэтому литерала тут не строят — строку вставляют в текст, и
+    внешние кавычки сериализатора снимаются.
+
+    Концов строки у JavaScript ЧЕТЫРЕ, а у JSON два: сверх `\n` и `\r` строку
+    завершают U+2028 и U+2029, и `json.dumps` их не трогает — они законный JSON.
+    Именно на этом правило и ловилось: враждебное имя с U+2028 закрывало
+    комментарий, и `${...}` за ним разбирался как выражение. Поэтому два знака
+    дописываются к набору сериализатора явно — не вместо него, а поверх.
+    """
+    text = json.dumps(str(value), ensure_ascii=False)[1:-1]
+    return text.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES_DIR = ROOT / "cases"
@@ -313,7 +352,7 @@ POLL_CAP = 50
 
 def assert_status(code: int) -> List[str]:
     return [
-        f"pm.test('status {code}', () => pm.expect(pm.response.code).to.eql({code}));",
+        f"pm.test({js_str(f'status {code}')}, () => pm.expect(pm.response.code).to.eql({code}));",
     ]
 
 
@@ -364,7 +403,7 @@ def assert_answered(label: str) -> List[str]:
 
 def assert_grpc_code(code: int, code_name: str) -> List[str]:
     return [
-        f"pm.test('grpc code {code} ({code_name})', () => {{",
+        f"pm.test({js_str(f'grpc code {code} ({code_name})')}, () => {{",
         "  const j = pm.response.json();",
         f"  pm.expect(j.code, JSON.stringify(j)).to.eql({code});",
         "});",
@@ -405,11 +444,11 @@ def assert_unscoped_rejected(action: Optional[str] = None,
     if action is None:
         return out
     res_line = (
-        f"    pm.expect(md.resource, JSON.stringify(j)).to.eql('{unscoped_resource}');"
+        f"    pm.expect(md.resource, JSON.stringify(j)).to.eql({js_str(unscoped_resource)});"
         if unscoped_resource else "    // resource anchor not pinned for this RPC"
     )
     out += [
-        f"pm.test('the refusal is about the MISSING SCOPE on {action}, not some other rejection', () => {{",
+        f"pm.test({js_str(f'the refusal is about the MISSING SCOPE on {action}, not some other rejection')}, () => {{",
         "  const j = pm.response.json();",
         "  if (pm.response.code === 403) {",
         "    const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
@@ -417,7 +456,7 @@ def assert_unscoped_rejected(action: Optional[str] = None,
         "    pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
         "    const md = info.metadata || {};",
         f"    pm.expect(md.action, 'empty action = permission-catalog miss, not a scope refusal: ' "
-        f"+ JSON.stringify(j)).to.eql('{action}');",
+        f"+ JSON.stringify(j)).to.eql({js_str(action)});",
         res_line,
         "  } else {",
         "    pm.expect((j.message || '').toLowerCase(), JSON.stringify(j))",
@@ -463,13 +502,13 @@ def assert_scoped_authz_deny(action: str,
         "  pm.expect(pm.response.code).to.eql(403);",
         "  pm.expect(pm.response.json().code, pm.response.text()).to.eql(7);",
         "});",
-        f"pm.test('deny is the scoped authz deny on {action}, not a permission-catalog miss', () => {{",
+        f"pm.test({js_str(f'deny is the scoped authz deny on {action}, not a permission-catalog miss')}, () => {{",
         "  const j = pm.response.json();",
         "  const info = (j.details || []).find(d => (d['@type'] || '').includes('ErrorInfo'));",
         "  pm.expect(info, 'ErrorInfo detail: ' + JSON.stringify(j)).to.be.an('object');",
         "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
         "  const md = info.metadata || {};",
-        f"  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('{action}');",
+        f"  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql({js_str(action)});",
     ]
     if resource_expr:
         out.append(f"  pm.expect(md.resource, JSON.stringify(j)).to.eql({resource_expr});")
@@ -479,12 +518,12 @@ def assert_scoped_authz_deny(action: str,
 
 def assert_field_violation(field_name: str) -> List[str]:
     return [
-        f"pm.test('field violation on \"{field_name}\"', () => {{",
+        f"pm.test({js_str(f'field violation on \"{field_name}\"')}, () => {{",
         "  const j = pm.response.json();",
         "  const det = (j.details || []).find(d => (d['@type']||'').includes('BadRequest'));",
         "  pm.expect(det, 'BadRequest detail').to.be.an('object');",
-        f"  const fv = (det.fieldViolations || []).find(v => v.field === '{field_name}');",
-        f"  pm.expect(fv, 'fieldViolation for {field_name}').to.be.an('object');",
+        f"  const fv = (det.fieldViolations || []).find(v => v.field === {js_str(field_name)});",
+        f"  pm.expect(fv, {js_str(f'fieldViolation for {field_name}')}).to.be.an('object');",
         "});",
     ]
 
@@ -531,7 +570,7 @@ def save_from_response(jsonpath: str, env_var: str) -> List[str]:
     Non-operation captures (resource ids) are deliberately NOT cleared — several cases
     save a resource id once and read it many steps later, across requests that do not
     return it; the stale-poll class is specific to ids consumed immediately."""
-    reset = [f"pm.environment.unset('{env_var}');"] if _is_operation_id_var(env_var) else []
+    reset = [f"pm.environment.unset({js_str(env_var)});"] if _is_operation_id_var(env_var) else []
     # ЗАХВАТ ИЗ МЕТАДАННЫХ ОПЕРАЦИИ — ПРОВИЗОРНЫЙ, И ЭТО ОТМЕЧАЕТСЯ ЗДЕСЬ.
     #
     # `metadata.<res>Id` доступен СРАЗУ, до `done`, и другого источника id до завершения
@@ -551,7 +590,7 @@ def save_from_response(jsonpath: str, env_var: str) -> List[str]:
         provisional = [
             "try {",
             "  const _pv = JSON.parse(pm.environment.get('_provisionalIds') || '[]');",
-            f"  if (_pv.indexOf('{env_var}') === -1) _pv.push('{env_var}');",
+            f"  if (_pv.indexOf({js_str(env_var)}) === -1) _pv.push({js_str(env_var)});",
             "  pm.environment.set('_provisionalIds', JSON.stringify(_pv));",
             "} catch (e) {}",
         ]
@@ -560,7 +599,7 @@ def save_from_response(jsonpath: str, env_var: str) -> List[str]:
         "try {",
         "  const j = pm.response.json();",
         f"  const v = ({jsonpath});",
-        f"  if (v !== undefined && v !== null) pm.environment.set('{env_var}', String(v));",
+        f"  if (v !== undefined && v !== null) pm.environment.set({js_str(env_var)}, String(v));",
         "} catch (e) {}",
         *provisional,
     ]
@@ -657,17 +696,18 @@ def require_env_url(var: str, path: str, why: str = "") -> List[str]:
     """
     reason = f" — {why}" if why else ""
     return [
-        f"// HARNESS-CONFIG GUARD — {var} is injected by the newman runner (--env-var).",
+        f"// HARNESS-CONFIG GUARD — {js_comment(var)} is injected by the newman runner (--env-var).",
         "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
-        f"const __cfgUrl = pm.environment.get('{var}') || pm.variables.get('{var}') || '';",
+        f"const __cfgUrl = pm.environment.get({js_str(var)}) || pm.variables.get({js_str(var)}) || '';",
         "if (__cfgUrl) {",
         # replaceIn is identity on a template-free path; see the docstring above.
-        f"  pm.request.url = __cfgUrl + pm.variables.replaceIn('{path}');",
+        f"  pm.request.url = __cfgUrl + pm.variables.replaceIn({js_str(path)});",
         "} else {",
-        f"  pm.test('harness config: {var} is set{reason}', () => {{",
-        f"    pm.expect.fail('{var} is not set — the newman runner "
-        "(deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. "
-        "This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",
+        f"  pm.test({js_str(f'harness config: {var} is set{reason}')}, () => {{",
+        "    pm.expect.fail(" + js_str(
+            f"{var} is not set — the newman runner "
+            "(deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. "
+            "This step cannot run, and a check that cannot run MUST NOT be silently dropped.") + ");",
         "  });",
         "  pm.execution.skipRequest();",
         "}",
@@ -864,17 +904,18 @@ def _op_id_guard(op_var: str, required: bool) -> List[str]:
     if not required:
         return [
             f"// best-effort teardown: no Operation to poll when the cleanup was refused.",
-            f"if (!pm.environment.get('{op_var}')) {{ pm.execution.skipRequest(); }}",
+            f"if (!pm.environment.get({js_str(op_var)})) {{ pm.execution.skipRequest(); }}",
         ]
     return [
-        f"// OPERATION GUARD — '{op_var}' is captured by the mutation this poll follows.",
+        f"// OPERATION GUARD — '{js_comment(op_var)}' is captured by the mutation this poll follows.",
         "// Empty = that mutation returned no Operation. Report it (a skipped request",
         "// leaves no trace at all) and skip, rather than polling a literal template.",
-        f"if (!pm.environment.get('{op_var}')) {{",
-        f"  pm.test('operation id {op_var} was captured (the mutation returned an Operation)', () => {{",
-        f"    pm.expect.fail('{op_var} is empty — the mutation this poll belongs to did not "
-        "return an Operation (it was rejected, or its capture failed). Polling would hit an "
-        "unresolved template; a previous case\\'s operation is NOT a substitute.');",
+        f"if (!pm.environment.get({js_str(op_var)})) {{",
+        f"  pm.test({js_str(f'operation id {op_var} was captured (the mutation returned an Operation)')}, () => {{",
+        "    pm.expect.fail(" + js_str(
+            f"{op_var} is empty — the mutation this poll belongs to did not "
+            "return an Operation (it was rejected, or its capture failed). Polling would hit an "
+            "unresolved template; a previous case's operation is NOT a substitute.") + ");",
         "  });",
         "  pm.execution.skipRequest();",
         "}",
@@ -1079,19 +1120,19 @@ def poll_request_until_status(name: str, method: str, path: str, test_script: Li
             *(pre_script or []),
             "// poll-for-propagation counter reset on first entry (request-name-scoped);",
             "// re-invocations via setNextRequest skip the reset.",
-            f"if (pm.environment.get('{started_var}') !== pm.info.requestName) {{",
-            f"  pm.environment.set('{counter_var}', '0');",
-            f"  pm.environment.set('{started_var}', pm.info.requestName);",
+            f"if (pm.environment.get({js_str(started_var)}) !== pm.info.requestName) {{",
+            f"  pm.environment.set({js_str(counter_var)}, '0');",
+            f"  pm.environment.set({js_str(started_var)}, pm.info.requestName);",
             "}",
         ],
         test_script=[
-            f"const _p200c = parseInt(pm.environment.get('{counter_var}') || '0', 10);",
+            f"const _p200c = parseInt(pm.environment.get({js_str(counter_var)}) || '0', 10);",
             f"const _p200retryCode = [{retry_set}].includes(pm.response.code);",
             (f"const _p200retryPred = (pm.response.code === {expect_code}) && ({retry_predicate});"
              if retry_predicate is not None else "const _p200retryPred = false;"),
             f"if ((_p200retryCode || _p200retryPred) && _p200c < {POLL_CAP}) {{",
             "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
-            f"  pm.environment.set('{counter_var}', String(_p200c + 1));",
+            f"  pm.environment.set({js_str(counter_var)}, String(_p200c + 1));",
             # Real inter-poll delay (~500ms) between retries (Koren #1). newman fires
             # setNextRequest before any setTimeout, so a busy-wait is the only way to
             # actually space out the retries; without it POLL_CAP retries fire
@@ -1102,8 +1143,8 @@ def poll_request_until_status(name: str, method: str, path: str, test_script: Li
             "  pm.execution.setNextRequest(pm.info.requestName);",
             "  return;",
             "}",
-            f"pm.environment.unset('{counter_var}');",
-            f"pm.environment.unset('{started_var}');",
+            f"pm.environment.unset({js_str(counter_var)});",
+            f"pm.environment.unset({js_str(started_var)});",
             # Terminal response: the case's real assertions run exactly once.
             *test_script,
         ],
@@ -1149,12 +1190,12 @@ def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
         "pm.environment.unset('_opErrCount');",
         "pm.environment.unset('_opErrStarted');",
         "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
-        f"pm.test('error code {code} ({code_name})', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql({code}));",
+        f"pm.test({js_str(f'error code {code} ({code_name})')}, () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql({code}));",
     ]
     if msg_substr is not None:
-        body.append(f"pm.test('error text includes \"{msg_substr}\"', () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include('{msg_substr.lower()}'));")
+        body.append(f"pm.test({js_str(f'error text includes \"{msg_substr}\"')}, () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include({js_str(msg_substr.lower())}));")
     if msg_regex is not None:
-        body.append(f"pm.test('error text matches /{msg_regex}/', () => pm.expect(j.error && j.error.message || '', JSON.stringify(j)).to.match(/{msg_regex}/));")
+        body.append(f"pm.test({js_str(f'error text matches /{msg_regex}/')}, () => pm.expect(j.error && j.error.message || '', JSON.stringify(j)).to.match(/{msg_regex}/));")
     return Step(name="assert-op-error", method="GET", path="/operations/{{" + op_var + "}}",
                 auth=auth, op_var=op_var, pre_script=_op_id_guard(op_var, True), test_script=body)
 
@@ -1474,8 +1515,8 @@ def _auth_pre_script(auth: str) -> List[str]:
             "pm.request.headers.remove('Authorization');",
         ]
     return [
-        f"// per-step auth: bearer from env '{auth}'",
-        f"const __t = pm.environment.get('{auth}') || pm.variables.get('{auth}') || '';",
+        f"// per-step auth: bearer from env '{js_comment(auth)}'",
+        f"const __t = pm.environment.get({js_str(auth)}) || pm.variables.get({js_str(auth)}) || '';",
         "if (__t) {",
         "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
         "} else {",
@@ -1495,10 +1536,11 @@ def _auth_pre_script(auth: str) -> List[str]:
         # pre-request assertion above has ALREADY run and keeps the skip RECORDED as
         # a failure naming the variable, never a mute one. (`auth="anonymous"` is the
         # DELIBERATE anonymous case and takes the branch above — never affected.)
-        f"  pm.test('harness config: {auth} is set (subject under test)', () => {{",
-        f"    pm.expect.fail('{auth} is not set — the authz-fixture seed "
-        "(tests/authz-fixtures/setup.sh) did not provide this subject. Running the step "
-        "anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+        f"  pm.test({js_str(f'harness config: {auth} is set (subject under test)')}, () => {{",
+        "    pm.expect.fail(" + js_str(
+            f"{auth} is not set — the authz-fixture seed "
+            "(tests/authz-fixtures/setup.sh) did not provide this subject. Running the step "
+            "anonymously would test a DIFFERENT principal and pass for the wrong reason.") + ");",
         "  });",
         "  pm.execution.skipRequest();",
         "}",
@@ -2609,7 +2651,7 @@ def reliable_delete(name: str, path: str, auth: str = "jwtAccountAdminA",
             retry_on=(403,),
             test_script=[
                 "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                f"pm.environment.unset('{op_var}');",
+                f"pm.environment.unset({js_str(op_var)});",
                 "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', "
                 f"() => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([{', '.join(str(c) for c in terminal_codes)}]));",
             ] + ([
@@ -2617,7 +2659,7 @@ def reliable_delete(name: str, path: str, auth: str = "jwtAccountAdminA",
                 "и отсутствие отзыва прочиталось бы как отзыв)', "
                 "() => pm.expect(j && j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
             ] if require_operation else []) + [
-                f"if (pm.response.code === 200 && j && j.id) pm.environment.set('{op_var}', j.id);",
+                f"if (pm.response.code === 200 && j && j.id) pm.environment.set({js_str(op_var)}, j.id);",
             ],
         ),
         Step(
@@ -2626,20 +2668,20 @@ def reliable_delete(name: str, path: str, auth: str = "jwtAccountAdminA",
             path="/operations/{{" + op_var + "}}",
             auth=auth,
             pre_script=[
-                f"if (pm.environment.get('_{op_var}Started') !== pm.info.requestName) {{ pm.environment.set('_{op_var}Count', '0'); pm.environment.set('_{op_var}Started', pm.info.requestName); }}",
+                f"if (pm.environment.get({js_str(f'_{op_var}Started')}) !== pm.info.requestName) {{ pm.environment.set({js_str(f'_{op_var}Count')}, '0'); pm.environment.set({js_str(f'_{op_var}Started')}, pm.info.requestName); }}",
             ],
             test_script=[
                 # Nothing to await when the DELETE reported 404 (already revoked).
-                f"if (!pm.environment.get('{op_var}')) {{ return; }}",
+                f"if (!pm.environment.get({js_str(op_var)})) {{ return; }}",
                 "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
-                f"const c = parseInt(pm.environment.get('_{op_var}Count') || '0', 10);",
+                f"const c = parseInt(pm.environment.get({js_str(f'_{op_var}Count')}) || '0', 10);",
                 f"if (j && !j.done && c < {POLL_CAP}) {{",
-                f"  pm.environment.set('_{op_var}Count', String(c + 1));",
+                f"  pm.environment.set({js_str(f'_{op_var}Count')}, String(c + 1));",
                 "  const _rd = Date.now(); while (Date.now() - _rd < 500) { /* inter-poll delay ~500ms */ }",
                 "  pm.execution.setNextRequest(pm.info.requestName);",
                 "  return;",
                 "}",
-                f"pm.environment.unset('_{op_var}Count'); pm.environment.unset('_{op_var}Started');",
+                f"pm.environment.unset({js_str(f'_{op_var}Count')}); pm.environment.unset({js_str(f'_{op_var}Started')});",
                 "pm.test('teardown: revoke operation committed', () => pm.expect(j && j.done, JSON.stringify(j)).to.eql(true));",
             ],
         ),
