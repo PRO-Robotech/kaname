@@ -32,6 +32,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 )
 
@@ -44,7 +45,10 @@ func TestRoleIamUserEdit_RetiredWhileItsNeighboursRemain(t *testing.T) {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, setupTestDB(t))
 	require.NoError(t, err)
-	defer pool.Close()
+	// Закрытие С ПРЕДЕЛОМ, а не `defer pool.Close()`: отложенное закрытие ждёт
+	// соединение, которого проба, упавшая внутри открытой транзакции, не вернёт
+	// никогда, — и уносит с собой вердикт всего пакета.
+	pgtest.ClosePoolAtEnd(t, pool)
 
 	// Селекторы системных ролей проецируются самолечащим посевом. Зовём его явно:
 	// иначе «ноль селекторов у снятой роли» был бы получен из того, что их не
