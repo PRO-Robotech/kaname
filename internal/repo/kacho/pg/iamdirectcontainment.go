@@ -55,10 +55,25 @@ type IAMDirectContainment struct {
 	// Table — таблица состояния, несущая строку объекта.
 	Table string
 	// ParentAccountExpr / ParentProjectExpr — выражения над псевдонимом `o`
-	// (и `p`, если задан Join), дающие аккаунт и проект объекта. Оба пусты —
-	// материализация считает, что объект не лежит ни в одной области.
+	// (и `p`, если задан Join), дающие аккаунт и проект объекта. Пустой набор
+	// аккаунтов вместе с пустым проектом означает, что материализация считает
+	// объект не лежащим ни в одной области.
+	//
+	// ParentAccountExpr СКАЛЯРНО и пусто там, где принадлежность аккаунту не
+	// является свойством собственной строки объекта: у ЛИЧНОСТИ она выражена
+	// связью `kacho_iam.memberships`, и аккаунтов бывает несколько (#1172).
+	// Читателю, спрашивающему «в каких аккаунтах объект», нужен
+	// ParentAccountsExpr; ParentAccountExpr отвечает на более узкий вопрос —
+	// «какая КОЛОНКА собственной строки на это указывает», и его читает гейт
+	// согласия источников цепи областей.
 	ParentAccountExpr string
-	ParentProjectExpr string
+	// ParentAccountsExpr — каноническая форма источника аккаунтов: выражение
+	// типа text[], непустое ВСЕГДА. Ровно её читают проекция реконсайлера,
+	// сужение по области и полоса «якорь» обратного подбора, поэтому читателю
+	// снаружи она и отдаётся: второе выражение того же предмета разошлось бы с
+	// нею молча — на вырожденном наборе обе формы дают одно и то же.
+	ParentAccountsExpr string
+	ParentProjectExpr  string
 	// Join — необязательное соединение, без которого выражения не вычислить.
 	Join string
 }
@@ -73,11 +88,12 @@ func IAMDirectContainments() []IAMDirectContainment {
 	out := make([]IAMDirectContainment, 0, len(iamDirectScanSpecs))
 	for _, spec := range iamDirectScanSpecs {
 		out = append(out, IAMDirectContainment{
-			ObjectType:        spec.objectType,
-			Table:             spec.table,
-			ParentAccountExpr: spec.parentAccountExpr,
-			ParentProjectExpr: spec.parentProjectExpr,
-			Join:              spec.join,
+			ObjectType:         spec.objectType,
+			Table:              spec.table,
+			ParentAccountExpr:  spec.parentAccountExpr,
+			ParentAccountsExpr: spec.accountsExpr(),
+			ParentProjectExpr:  spec.parentProjectExpr,
+			Join:               spec.join,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ObjectType < out[j].ObjectType })

@@ -385,22 +385,55 @@ func (s *reconcileStore) MatchByIDsIAMDirect(ctx context.Context, types, ids []s
 //   - iam.project  → parent_account = projects.account_id, parent_project = own id.
 //   - iam.account  → parent_account = own id, parent_project = ” (account is contained
 //     in account:<self> + cluster only).
-//   - iam.role / iam.group / iam.serviceAccount / iam.user — account-scoped content;
+//   - iam.role / iam.group / iam.serviceAccount — account-scoped content;
 //     parent_account = account_id (COALESCED through the owning project for a
 //     project-scoped role/SA so the account-scoped owner binding still contains it),
 //     parent_project = project_id (NULL → ”).
+//   - iam.user — аккаунты берутся из kacho_iam.memberships, а НЕ из колонки строки
+//     (#1172); их бывает несколько, поэтому источник назван parentAccountsExpr.
 //   - iam.accessBinding — scoped by (resource_type, resource_id): account-scoped →
 //     parent_account; project-scoped → parent_project (+ its account via the projects
 //     join); cluster-scoped → neither (contained only in cluster scope).
 type iamDirectScanSpec struct {
 	objectType string
 	table      string
-	// parentAccountExpr / parentProjectExpr are SQL expressions over the table alias
-	// `o` (and, for project-scoped rows, the LEFT JOINed projects alias `p`).
+	// parentAccountExpr — СКАЛЯРНОЕ выражение над псевдонимом `o` (и `p`, если
+	// задан join), дающее ЕДИНСТВЕННЫЙ аккаунт объекта из его СОБСТВЕННОЙ строки.
+	// Пусто ровно тогда, когда принадлежность аккаунту не является свойством
+	// строки (iam.user — она выражена связью, см. parentAccountsExpr).
+	//
+	// Поле остаётся отдельным от plural-формы, потому что у него есть свой
+	// читатель: гейт согласия источников цепи областей сверяет ИМЕННО
+	// колонку-указатель собственной строки (scopeedgesource_gate_test.go), и
+	// каноническая форма ниже эту колонку в себе прячет.
 	parentAccountExpr string
-	parentProjectExpr string
+	// parentAccountsExpr — выражение, дающее ВЕСЬ набор аккаунтов объекта как
+	// text[]. Задаётся там, где аккаунтов бывает больше одного и скалярная форма
+	// их не выражает by construction. Ровно одно из двух полей непусто; инвариант
+	// держит проба TestIAMDirectSpec_AccountSourceIsDeclaredExactlyOnce.
+	parentAccountsExpr string
+	parentProjectExpr  string
 	// join is an optional LEFT JOIN clause (e.g. resolve a project's account_id).
 	join string
+}
+
+// accountsExpr — КАНОНИЧЕСКАЯ форма источника аккаунтов: SQL-выражение типа
+// text[] над псевдонимом `o` (+ `p`, если задан join).
+//
+// Единственная точка, где две формы объявления сводятся к одной: проекция
+// SELECT, сужение по области и полоса «якорь» обратного подбора обязаны читать
+// ОДНО выражение, иначе сужение перестанет быть доказанным надмножеством
+// повторной проверки IsContainedIn — и разойдутся они молча, потому что на
+// вырожденном наборе (один аккаунт) обе формы дают одно и то же.
+//
+// Пустые строки из набора вычищаются здесь же: «аккаунта нет» обязано быть
+// ОТСУТСТВИЕМ элемента, иначе область с пустым идентификатором совпала бы с
+// объектом, у которого аккаунта нет вовсе.
+func (s iamDirectScanSpec) accountsExpr() string {
+	if s.parentAccountsExpr != "" {
+		return s.parentAccountsExpr
+	}
+	return "ARRAY_REMOVE(ARRAY[COALESCE(" + s.parentAccountExpr + ", '')], '')"
 }
 
 // iamDirectScanSpecs — the closed, per-type read plan. All identifiers are literals.
@@ -431,9 +464,30 @@ var iamDirectScanSpecs = map[string]iamDirectScanSpec{
 		objectType: "iam.serviceAccount", table: "kacho_iam.service_accounts",
 		parentAccountExpr: "o.account_id", parentProjectExpr: "''",
 	},
+	// ЛИЧНОСТЬ — аккаунты из СВЯЗИ, а не из колонки строки (#1172).
+	//
+	// `kacho_iam.users.account_id` называет ОДИН аккаунт человека из многих:
+	// принадлежность стала отдельной связью (#470/#471), и цепь областей читает
+	// её из `kacho_iam.memberships` с #944. Колонка при этом осталась
+	// легаси-полем перехода — её не правит ни исключение из аккаунта (#1127), ни
+	// приглашение во второй, — поэтому опора на неё давала выдаче ДВА неверных
+	// исхода сразу: второй аккаунт не находил своего человека, а первый
+	// продолжал накрывать исключённого.
+	//
+	// Полнота источника — та же, что у ветви (4a) цепи: строка И ЕСТЬ связь
+	// (`memberships.id` первичный ключ, пара уникальна, 470001), поэтому обойти
+	// строку и получить членство нельзя ни через API, ни через посев.
+	//
+	// Состояние членства НЕ ЧИТАЕТСЯ — дословно то же решение, что в ветви (4a):
+	// звено есть указатель ВВЕРХ, а не выдача. Приглашённый обязан быть достижим
+	// распорядителю аккаунта, куда его пригласили, иначе приглашение нельзя ни
+	// прочитать, ни отозвать до первого входа приглашённого.
 	"iam.user": {
 		objectType: "iam.user", table: "kacho_iam.users",
-		parentAccountExpr: "o.account_id", parentProjectExpr: "''",
+		parentAccountsExpr: "ARRAY(SELECT m.account_id FROM kacho_iam.memberships m" +
+			" WHERE m.user_id = o.id AND COALESCE(m.account_id, '') <> ''" +
+			" ORDER BY m.account_id)",
+		parentProjectExpr: "''",
 	},
 	// access_binding is scoped by (resource_type, resource_id): map the scope anchor
 	// onto the containment parents so the owner binding contains the bindings of its
@@ -448,13 +502,18 @@ var iamDirectScanSpecs = map[string]iamDirectScanSpec{
 
 // iamDirectScopePredicate builds the ANCHOR-arm scope narrowing for one iam-direct type as a
 // PROVEN SUPERSET of the domain IsContainedIn re-verify. It reuses the SAME per-type
-// parent-scope expressions the SELECT projects into ParentAccountID/ParentProjectID, so the
+// parent-scope expressions the SELECT projects into ParentAccountIDs/ParentProjectID, so the
 // WHERE selects EXACTLY the rows IsContainedIn(scope) accepts — never fewer (no under-grant):
 //
 //   - project scope → parentProjectExpr = $1   (IsContainedIn: ParentProjectID == scope.ID)
-//   - account scope → parentAccountExpr = $1   (IsContainedIn: ParentAccountID == scope.ID)
+//   - account scope → $1 = ANY(accountsExpr) (IsContainedIn: scope.ID ∈ ParentAccountIDs)
 //   - cluster / unknown → "" (no narrowing; IsContainedIn cluster=true, unknown handled by
 //     the Go re-verify — over-broad is safe, under-broad is not).
+//
+// Аккаунт спрашивается ВХОЖДЕНИЕМ В НАБОР, потому что набор и есть то, что
+// проецирует SELECT: у личности аккаунтов столько, сколько членств (#1172), и
+// равенство скаляру отбросило бы человека, чьё членство в спрашиваемом аккаунте
+// НЕ ПЕРВОЕ, — то есть дало бы недостачу, а не избыток.
 //
 // The expressions are fixed literals from the closed spec map (never user input) → the single
 // bound $1 carries the caller-supplied scope id, so the interpolation is injection-safe.
@@ -463,7 +522,7 @@ func iamDirectScopePredicate(spec iamDirectScanSpec, scope domain.ScopeAnchor) (
 	case "project":
 		return spec.parentProjectExpr + " = $1", scope.ID
 	case "account":
-		return spec.parentAccountExpr + " = $1", scope.ID
+		return "$1 = ANY(" + spec.accountsExpr() + ")", scope.ID
 	default:
 		return "", nil
 	}
@@ -496,7 +555,7 @@ func (s *reconcileStore) iamDirectQuery(ctx context.Context, types []string, mod
 		}
 		// All identifiers below are fixed literals from the closed spec map (never
 		// user input), so the interpolation is injection-safe.
-		q := "SELECT o.id, " + spec.parentAccountExpr + ", " + spec.parentProjectExpr +
+		q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr +
 			" FROM " + spec.table + " o"
 		if spec.join != "" {
 			q += " " + spec.join
@@ -570,7 +629,7 @@ func (s *reconcileStore) MatchIAMDirect(ctx context.Context, types []string, mat
 		// All identifiers below are fixed literals from the closed spec map (never
 		// user input), so the interpolation is injection-safe. The own-table
 		// `labels @> $1` probe is served by the per-table GIN index (migration 0041).
-		q := "SELECT o.id, " + spec.parentAccountExpr + ", " + spec.parentProjectExpr +
+		q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr +
 			" FROM " + spec.table + " o"
 		if spec.join != "" {
 			q += " " + spec.join
@@ -589,26 +648,32 @@ func (s *reconcileStore) MatchIAMDirect(ctx context.Context, types []string, mat
 	return out, nil
 }
 
-// scanIAMDirect scans (object_id, parent_account_id, parent_project_id) rows into
+// scanIAMDirect scans (object_id, parent_account_ids, parent_project_id) rows into
 // MirrorObjects for an iam-direct object type. The three columns are produced by
-// iamDirectQuery's per-type SELECT (parentAccountExpr / parentProjectExpr), so the
+// iamDirectQuery's per-type SELECT (accountsExpr / parentProjectExpr), so the
 // SAME IsContainedIn predicate decides account/project/cluster containment uniformly
 // across every iam-native type (project/account/role/group/serviceAccount/user/
-// accessBinding). Empty-string parents (e.g. a cluster-scoped binding) leave the
+// accessBinding). An EMPTY account set (e.g. a cluster-scoped binding) leaves the
 // object contained only in a cluster-scope binding (IsContainedIn cluster=true).
+//
+// Строка на объект остаётся ОДНА и при нескольких аккаунтах: набор приезжает
+// массивом, а не соединением. Соединение размножило бы строки, и один объект дал
+// бы ДВА желаемых участника с одним ключом — накрытый и отвергнутый, — из которых
+// последний записанный отобрал бы кортеж у первого.
 func scanIAMDirect(rows pgx.Rows, objectType string) ([]domain.MirrorObject, error) {
 	defer rows.Close()
 	var out []domain.MirrorObject
 	for rows.Next() {
-		var id, parentAccount, parentProject string
-		if err := rows.Scan(&id, &parentAccount, &parentProject); err != nil {
+		var id, parentProject string
+		var parentAccounts []string
+		if err := rows.Scan(&id, &parentAccounts, &parentProject); err != nil {
 			return nil, fmt.Errorf("reconcile: scan iam-direct %s row: %w", objectType, err)
 		}
 		out = append(out, domain.MirrorObject{
-			ObjectType:      objectType,
-			ObjectID:        id,
-			ParentAccountID: parentAccount,
-			ParentProjectID: parentProject,
+			ObjectType:       objectType,
+			ObjectID:         id,
+			ParentAccountIDs: parentAccounts,
+			ParentProjectID:  parentProject,
 		})
 	}
 	return out, rows.Err()
@@ -650,27 +715,28 @@ func (s *reconcileStore) GetIAMDirectObject(ctx context.Context, objectType, obj
 		// forward path only routes iam-direct types here).
 		return domain.MirrorObject{}, false, nil
 	}
-	q := "SELECT o.id, " + spec.parentAccountExpr + ", " + spec.parentProjectExpr + ", o.labels" +
+	q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", o.labels" +
 		" FROM " + spec.table + " o"
 	if spec.join != "" {
 		q += " " + spec.join
 	}
 	q += " WHERE o.id = $1"
 	var (
-		id, parentAccount, parentProject string
-		labelsJSON                       []byte
+		id, parentProject string
+		parentAccounts    []string
+		labelsJSON        []byte
 	)
-	if err := s.tx.QueryRow(ctx, q, objectID).Scan(&id, &parentAccount, &parentProject, &labelsJSON); err != nil {
+	if err := s.tx.QueryRow(ctx, q, objectID).Scan(&id, &parentAccounts, &parentProject, &labelsJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.MirrorObject{}, false, nil
 		}
 		return domain.MirrorObject{}, false, fmt.Errorf("reconcile: get iam-direct object %s:%s: %w", spec.objectType, objectID, err)
 	}
 	obj := domain.MirrorObject{
-		ObjectType:      spec.objectType,
-		ObjectID:        id,
-		ParentAccountID: parentAccount,
-		ParentProjectID: parentProject,
+		ObjectType:       spec.objectType,
+		ObjectID:         id,
+		ParentAccountIDs: parentAccounts,
+		ParentProjectID:  parentProject,
 	}
 	if len(labelsJSON) > 0 {
 		if err := json.Unmarshal(labelsJSON, &obj.Labels); err != nil {
@@ -835,11 +901,11 @@ func (s *reconcileStore) SelectorBindingsMatchingObject(ctx context.Context, obj
 //
 // The predicate below is the SAME one the mirror-fed branch pushes into its JOIN,
 // written with the per-type parent-scope expressions of iamDirectScanSpecs — i.e. the
-// expressions GetIAMDirectObject projects into ParentAccountID / ParentProjectID, the
+// expressions GetIAMDirectObject projects into ParentAccountIDs / ParentProjectID, the
 // very fields IsContainedIn compares. It is therefore a PROVEN SUPERSET of the
 // re-verify, never narrower:
 //
-//   - account scope → parentAccountExpr = b.resource_id  (IsContainedIn: ParentAccountID == scope.ID)
+//   - account scope → b.resource_id = ANY(accountsExpr) (IsContainedIn: scope.ID ∈ ParentAccountIDs)
 //   - project scope → parentProjectExpr = b.resource_id  (IsContainedIn: ParentProjectID == scope.ID)
 //   - cluster AND ANY UNKNOWN scope type → kept UNFILTERED. `cluster` contains
 //     everything (IsContainedIn returns true), and an unrecognised scope type must
@@ -878,7 +944,7 @@ func (s *reconcileStore) IAMDirectSelectorBindingsMatchingObject(ctx context.Con
 	}
 	anchorBranch := `(rrs.arm = 'anchor' AND (
 	                       b.resource_type NOT IN ('account','project')
-	                    OR (b.resource_type = 'account' AND b.resource_id = ` + spec.parentAccountExpr + `)
+	                    OR (b.resource_type = 'account' AND b.resource_id = ANY(` + spec.accountsExpr() + `))
 	                    OR (b.resource_type = 'project' AND b.resource_id = ` + spec.parentProjectExpr + `)))`
 	q := `SELECT b.id
 	        FROM kacho_iam.role_rule_selectors rrs
@@ -1246,12 +1312,23 @@ func membershipTuplesToClients(tuples []domain.MembershipTuple) []clients.Relati
 
 func mirrorRowToDomain(r resource_mirror.MirrorRow) domain.MirrorObject {
 	return domain.MirrorObject{
-		ObjectType:      r.ObjectType,
-		ObjectID:        r.ObjectID,
-		ParentProjectID: r.ParentProjectID,
-		ParentAccountID: r.ParentAccountID,
-		Labels:          r.Labels,
+		ObjectType:       r.ObjectType,
+		ObjectID:         r.ObjectID,
+		ParentProjectID:  r.ParentProjectID,
+		ParentAccountIDs: singletonAccount(r.ParentAccountID),
+		Labels:           r.Labels,
 	}
+}
+
+// singletonAccount — вырожденный набор аккаунтов зеркального объекта: у него
+// аккаунт ровно один (его разрешает читатель зеркала через иерархию
+// проект→аккаунт), а «аккаунта нет» выражается ПУСТЫМ набором, а не
+// элементом-пустышкой.
+func singletonAccount(accountID string) []string {
+	if accountID == "" {
+		return nil
+	}
+	return []string{accountID}
 }
 
 // scopeAnchorFor maps a binding's (resource_type, resource_id) onto the

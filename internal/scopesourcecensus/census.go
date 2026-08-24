@@ -147,7 +147,12 @@ func Plans() ([]TypePlan, error) {
 			missing = append(missing, modelType+" ("+catalogType+")")
 			continue
 		}
-		parentExpr := "(COALESCE(" + c.ParentAccountExpr + ", '') <> '' OR COALESCE(" +
+		// Аккаунт спрашивается НЕПУСТОТОЙ НАБОРА, а не непустотой скаляра: у
+		// личности он не свойство строки, а связь, и скалярной формы у неё нет
+		// вовсе (#1172). Спрашивать «колонка непуста» значило бы для личности
+		// подставить в SQL пустую строку и получить синтаксический отказ, а до
+		// #1172 — числа, снятые с колонки, которую цепь областей уже не читает.
+		parentExpr := "(COALESCE(array_length(" + c.ParentAccountsExpr + ", 1), 0) > 0 OR COALESCE(" +
 			c.ParentProjectExpr + ", '') <> '')"
 		if override, ok := parentExprOverride(catalogType); ok {
 			parentExpr = override

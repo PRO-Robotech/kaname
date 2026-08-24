@@ -71,34 +71,63 @@ type MirrorObject struct {
 	ObjectType      string
 	ObjectID        string
 	ParentProjectID string
-	ParentAccountID string
-	Labels          map[string]string
+	// ParentAccountIDs — АККАУНТЫ, под которыми лежит объект. Множественное
+	// число здесь не запас на будущее: у ЛИЧНОСТИ принадлежность аккаунту
+	// перестала быть свойством её строки и стала отдельной связью, которых у
+	// человека бывает несколько (#470/#471), поэтому скалярное поле называло бы
+	// ОДИН аккаунт из многих — и выдача второго аккаунта не находила бы своего
+	// человека by construction (#1172).
+	//
+	// У всех прочих типов набор вырожден: ноль элементов (объект не лежит ни в
+	// одном аккаунте) либо один. Пустые строки в набор НЕ КЛАДУТСЯ — «аккаунта
+	// нет» выражается отсутствием элемента, а не элементом-пустышкой, иначе
+	// область с пустым идентификатором совпала бы с ним.
+	ParentAccountIDs []string
+	Labels           map[string]string
 }
 
 // IsContainedIn reports whether a mirror object lies UNDER the given scope-anchor
 // (the single containment predicate for byName AND byLabel — parity).
 //
 //	project:P ⊑ project:P                         (same project)
-//	project:P ⊑ account:A  if mirror.parent_account_id == A
+//	project:P ⊑ account:A  if A ∈ mirror.ParentAccountIDs
 //	any       ⊑ cluster:*                          (cluster contains everything)
 //
 // A cluster-scoped binding contains every registered object. The cluster id is
 // not compared (there is a single cluster root in the FGA model).
 //
-// This predicate is PURE (no DB): it trusts ParentAccountID to already carry the
-// object's FULL account. For a mirror-fed object registered with only its owning
+// This predicate is PURE (no DB): it trusts ParentAccountIDs to already carry the
+// object's FULL account set. For a mirror-fed object registered with only its owning
 // PROJECT, the reader adapter resolves the account through the project→account
-// hierarchy same-DB (resource_mirror reader COALESCE) BEFORE filling ParentAccountID,
+// hierarchy same-DB (resource_mirror reader COALESCE) BEFORE filling ParentAccountIDs,
 // so an account-scoped binding transitively contains an object nested in a project of
 // its account even when the stored parent_account_id column was empty. The resolution
 // is account-bounded (one project → one account), so this predicate never leaks across
 // the account boundary.
+//
+// ЧЛЕНСТВО ЗДЕСЬ — «хотя бы одно», и это не послабление. У личности аккаунтов
+// столько, сколько у человека членств (#1172): выдача аккаунта B накрывает его
+// потому, что он состоит в B, и НИ ОДИН чужой аккаунт от этого его не накрывает
+// — набор перечисляет ровно те аккаунты, связь с которыми существует строкой
+// `kacho_iam.memberships`.
+//
+// Пустая область (scope.ID == "") не совпадает ни с чем: набор пустых строк не
+// содержит by construction (см. комментарий поля), но проверка стоит здесь же —
+// сравнение «пусто с пусто» иначе давало бы истину на объекте без аккаунта.
 func (m MirrorObject) IsContainedIn(scope ScopeAnchor) bool {
 	switch scope.Type {
 	case "project":
 		return m.ParentProjectID != "" && m.ParentProjectID == scope.ID
 	case "account":
-		return m.ParentAccountID != "" && m.ParentAccountID == scope.ID
+		if scope.ID == "" {
+			return false
+		}
+		for _, acc := range m.ParentAccountIDs {
+			if acc == scope.ID {
+				return true
+			}
+		}
+		return false
 	case "cluster":
 		return true
 	default:
