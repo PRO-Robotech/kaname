@@ -315,10 +315,12 @@ func TestVerbRelation_CreateIsDeclaredOnlyWhereEnforced(t *testing.T) {
 // снятие требования:
 //
 //   - `api/permission_catalog/resource_verbs_test.go`
-//     (TestCatalogResourceVerbs_WiderTypesNowOfferTheirOwn) — глагол вне общего
-//     словаря обязан предлагаться СВОИМ ресурсом; проба падает на пустом предмете;
-//   - там же TestCatalogResourceVerbs_NobodyLostWhatTheEditorUsedToOffer — сужение
-//     набора у одного типа не отнимает глагол у остальных;
+//     (TestCatalogResourceVerbs_DescribeTheTypesOwnSets) — три оси разом: состав
+//     поля равен набору типа; глагол вне общего словаря обязан предлагаться СВОИМ
+//     ресурсом; сужение набора у одного типа не отнимает глагол у остальных, а
+//     всякое сужение записано с причиной. Гейт падает на пустом предмете, и его
+//     способность упасть доказана инъекцией ПО КЛЮЧУ ТИПА
+//     (`resource_verbs_injection_test.go`, шесть осей плюс контроль);
 //   - `ui-future/shared/src/api/usePermissionCatalog.verb-options.test.ts` — сам
 //     редактор берёт список у ресурса, а не у пересечения.
 
