@@ -61,7 +61,7 @@ func ownerAccessBindingStore(sameCreateMembers []domain.AccessBindingID) *fakeSt
 		}},
 		iamDirect: map[string][]domain.MirrorObject{
 			"iam.accessBinding": {
-				{ObjectType: "iam.accessBinding", ObjectID: "acb-new", ParentAccountID: "acc-1"},
+				{ObjectType: "iam.accessBinding", ObjectID: "acb-new", ParentAccountIDs: []string{"acc-1"}},
 			},
 		},
 		iamDirectSelectorBindings: []domain.AccessBindingID{"acb-owner"},

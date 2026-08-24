@@ -128,10 +128,15 @@ func actingScopeEdgeMigration(t *testing.T) (name, body string) {
 // scopeEdgeBranch — одна ветвь представления, разобранная из SQL.
 type scopeEdgeBranch struct {
 	ObjectType string // тип объекта в словаре МОДЕЛИ
-	Table      string // из какой таблицы читается
-	ParentType string // тип предка: литерал либо выражение над колонкой
-	ParentCol  string // колонка-указатель (без псевдонима)
-	ScopeSet   string // закрытый набор областей из отбора ветви, если он там есть
+	Table      string // из какой таблицы читается ПОД ПСЕВДОНИМОМ `o` (форма «колонка своей строки»)
+	// SourceTable — таблица ветви ПРИ ЛЮБОМ псевдониме. Отдельно от Table
+	// потому, что ветвь личности выбирает из таблицы СВЯЗИ под псевдонимом `m`
+	// (#944): для посвойственной сверки колонки она не годится, а для вопроса
+	// «из какой таблицы взят предок» — единственно годится.
+	SourceTable string
+	ParentType  string // тип предка: литерал либо выражение над колонкой
+	ParentCol   string // колонка-указатель (без псевдонима)
+	ScopeSet    string // закрытый набор областей из отбора ветви, если он там есть
 }
 
 // legalDifference — законное различие цепи с containment'ом материализации.
@@ -160,15 +165,16 @@ var legalDifferences = []legalDifference{
 		"оговаривает), а цепь даёт. Эталон здесь — ЗАПАСНОЙ СТРУКТУРНЫЙ ПУТЬ " +
 		"(domain.StructuralParent), и модель на его стороне: у типа объявлены все три " +
 		"области"},
-	{"iam_user", "звено ЛИЧНОСТИ берётся из kacho_iam.memberships (#944), а containment " +
-		"материализации — из колонки kacho_iam.users.account_id. Различие НАМЕРЕННОЕ и есть " +
-		"предмет отрыва (#471): принадлежность человека аккаунту перестала быть свойством его " +
-		"строки, а parentAccountExpr — выражение СКАЛЯРНОЕ, одна строка → один предок, и N " +
-		"членств оно не выражает by construction. Пока членство у каждого одно, оба источника " +
-		"дают одну и ту же пару — это держат обратное заполнение и зеркалящий триггер 470001. " +
-		"Эталон здесь — ЦЕПЬ: она умеет назвать столько предков, сколько у человека членств; " +
-		"привести к согласию правкой материализации нельзя, не сменив объект, про который " +
-		"спрашивает гейт (приёмка IAM-ID-1 §2.3а)"},
+	{"iam_user", "обе стороны читают kacho_iam.memberships (#944 — цепь, #1172 — " +
+		"материализация), и это ПРОВЕРЯЕТСЯ отдельным утверждением ниже (источник 4), а не " +
+		"пропускается. Здесь пропущена только ПОСВОЙСТВЕННАЯ сверка колонки-указателя: у " +
+		"личности аккаунт не является свойством её собственной строки, поэтому ветвь цепи " +
+		"выбирает не из `o`, а из `m` (таблицы связи), и разбор ветвей этого гейта, " +
+		"написанный под форму «колонка своей строки», такую ветвь не разбирает by " +
+		"construction. Сверять её здесь дословно было бы нечем: у материализации на этом " +
+		"месте стоит выражение-НАБОР (аккаунтов у человека столько, сколько членств), а не " +
+		"колонка. Что набор действительно читается связью — держит поведенческая проба " +
+		"reconcile_person_membership_scope_integration_test.go, а не эта запись"},
 	{"iam_role", "у роли с областью «проект» containment добирает аккаунт СОЕДИНЕНИЕМ с " +
 		"таблицей проектов, а цепь берёт колонку самой роли и поднимается к аккаунту " +
 		"ОБХОДОМ. Величина та же, путь разный: требовать тождества значило бы требовать " +
@@ -225,6 +231,10 @@ func upBlock(body string) (string, error) {
 var (
 	reObjectType = regexp.MustCompile(`SELECT\s+'([a-z_]+)'::text`)
 	reFrom       = regexp.MustCompile(`FROM\s+(kacho_iam\.[a-z_]+)\s+o\b`)
+	// reFromAny — та же таблица при ЛЮБОМ псевдониме. Первое совпадение в ветви
+	// и есть её источник: вложенные `NOT EXISTS (SELECT 1 FROM …)` стоят ниже
+	// собственного FROM ветви.
+	reFromAny    = regexp.MustCompile(`FROM\s+(kacho_iam\.[a-z_]+)\s+[a-z]\b`)
 	reSelectList = regexp.MustCompile(`SELECT\s+'[a-z_]+'::text,\s*o\.id,\s*([^,]+),\s*([^,]+),\s*1`)
 	// reScopeSet — ЗАКРЫТЫЙ НАБОР областей берётся из отбора ветви, а не из
 	// списка выборки: в списке стоит `lower(o.resource_type)` — ВЫРАЖЕНИЕ,
@@ -255,6 +265,9 @@ func parseBranches(sqlText string) []scopeEdgeBranch {
 		br := scopeEdgeBranch{ObjectType: ot[1]}
 		if from := reFrom.FindStringSubmatch(arm); from != nil {
 			br.Table = from[1]
+		}
+		if from := reFromAny.FindStringSubmatch(arm); from != nil {
+			br.SourceTable = from[1]
 		}
 		if set := reScopeSet.FindStringSubmatch(arm); set != nil {
 			br.ScopeSet = set[1]
@@ -297,7 +310,30 @@ func readScopeEdgeMigration(t *testing.T) (name, body string) {
 	return actingScopeEdgeMigration(t)
 }
 
+// currentContainments — план чтения материализации, каким он лежит в дереве,
+// перекодированный в словарь МОДЕЛИ (гейт сверяет типы одним написанием).
+func currentContainments() map[string]pg.IAMDirectContainment {
+	out := map[string]pg.IAMDirectContainment{}
+	for _, c := range pg.IAMDirectContainments() {
+		out[authzmap.ModelTypeName(c.ObjectType)] = c
+	}
+	return out
+}
+
 func auditScopeEdgeSources(migration, body string) (report, findings []string) {
+	return auditScopeEdgeSourcesWith(migration, body, currentContainments())
+}
+
+// auditScopeEdgeSourcesWith — тот же аудит при ЯВНО переданном плане чтения.
+//
+// План — параметр, а не чтение изнутри, потому что инъекция обязана уметь
+// вернуть дефект с ОБЕИХ сторон сверки. Дефект со стороны цепи вносится правкой
+// текста миграции; дефект со стороны материализации вносить было НЕЧЕМ, пока
+// план читался внутри, — и утверждение «стороны согласны» проверялось бы ровно
+// наполовину.
+func auditScopeEdgeSourcesWith(
+	migration, body string, containment map[string]pg.IAMDirectContainment,
+) (report, findings []string) {
 	up, err := upBlock(body)
 	if err != nil {
 		return nil, []string{err.Error()}
@@ -311,10 +347,6 @@ func auditScopeEdgeSources(migration, body string) (report, findings []string) {
 	}
 
 	// ── источник 1: containment материализации ──────────────────────────────
-	containment := map[string]pg.IAMDirectContainment{}
-	for _, c := range pg.IAMDirectContainments() {
-		containment[authzmap.ModelTypeName(c.ObjectType)] = c
-	}
 	if len(containment) == 0 {
 		return report, append(findings,
 			"план чтения материализации ПУСТ: сверять не с чем, и это ОТКАЗ, а не согласие")
@@ -419,6 +451,59 @@ func auditScopeEdgeSources(migration, body string) (report, findings []string) {
 		}
 	}
 
+	// ── источник 4: звено, чей предок НЕ является свойством своей строки ────
+	//
+	// Посвойственная сверка колонки такому звену не годится (разбор ветвей
+	// написан под форму «колонка своей строки»), но БЕЗ ВСЯКОЙ сверки тип вышел
+	// бы из-под гейта молча — то есть завёл бы ровно ту слепую зону, ради
+	// закрытия которой гейт написан. Поэтому сверяется то, что сверить можно и
+	// что и есть предмет: обе стороны обязаны читать ОДНУ И ТУ ЖЕ таблицу.
+	//
+	// Личность — единственный такой тип сегодня, и перечень выводится из ПЛАНА
+	// ЧТЕНИЯ (у кого нет колонки собственной строки), а не выписывается: второй
+	// такой тип попадёт под сверку сам, а не будет ждать, пока о нём вспомнят.
+	linked := 0
+	linkedTypes := make([]string, 0, len(containment))
+	for ty, c := range containment {
+		if c.ParentAccountExpr != "" {
+			continue // аккаунт — колонка своей строки; сверен выше либо законно пропущен
+		}
+		linkedTypes = append(linkedTypes, ty)
+	}
+	sort.Strings(linkedTypes)
+	for _, ty := range linkedTypes {
+		c := containment[ty]
+		brs := byType[ty]
+		if len(brs) == 0 {
+			findings = append(findings, fmt.Sprintf(
+				"тип %q берёт аккаунт СВЯЗЬЮ (колонки своей строки у него нет), а ветви в "+
+					"цепи областей у него НЕТ: администратор аккаунта не достаёт до объекта "+
+					"вовсе, и отказ неотличим от честного.\n  материализация: %s",
+				ty, c.ParentAccountsExpr))
+			continue
+		}
+		for _, b := range brs {
+			linked++
+			if b.SourceTable == "" {
+				findings = append(findings, fmt.Sprintf(
+					"тип %q: у ветви цепи не разобрана таблица-источник — сверять не с чем, "+
+						"и молчание здесь означало бы «не прочитано», а не «стороны согласны».\n"+
+						"  Миграция: %s", ty, migration))
+				continue
+			}
+			if !strings.Contains(c.ParentAccountsExpr, b.SourceTable) {
+				findings = append(findings, fmt.Sprintf(
+					"тип %q: цепь берёт предка из %s, а план чтения материализации его не "+
+						"называет.\n"+
+						"  цепь:           %s (%s)\n"+
+						"  материализация: %s (pg.IAMDirectContainments()[%q].ParentAccountsExpr)\n"+
+						"Две записи об одном предмете — «через какой аккаунт достаётся объект» — "+
+						"и они разошлись: выдача накрывает не тех, кого накрывает каскад.",
+					ty, b.SourceTable, migration, b.SourceTable, c.ParentAccountsExpr, c.ObjectType))
+			}
+		}
+	}
+
 	// ── источник 3: модель прав — типы, чей предок объявлен выводимым ───────
 	declared := len(authzcascade.DerivableTypes)
 	if declared == 0 {
@@ -432,7 +517,15 @@ func auditScopeEdgeSources(migration, body string) (report, findings []string) {
 			"структурный путь (%d областей опрошено), перечень выводимых типов (%d)",
 		len(containment), setChecked, declared))
 	report = append(report, fmt.Sprintf(
-		"сверено типов: %d, законных различий пропущено: %d", compared, skipped))
+		"сверено типов: %d, законных различий пропущено: %d, "+
+			"звеньев «предок берётся связью» сверено по таблице-источнику: %d",
+		compared, skipped, linked))
+	if len(linkedTypes) > 0 && linked == 0 {
+		findings = append(findings, fmt.Sprintf(
+			"типов, берущих аккаунт связью, %d, а сверено по таблице-источнику НОЛЬ: "+
+				"гейт читает не то, и его молчание об этих типах ничего не означает",
+			len(linkedTypes)))
+	}
 
 	if compared == 0 {
 		findings = append(findings, fmt.Sprintf(
@@ -478,11 +571,12 @@ func injectedFindings(t *testing.T, migration, body string) []string {
 // другой (в плане чтения материализации) — ровно тот дрейф, ради которого гейт
 // существует: удержать две записи «одним источником» невозможно, значит
 // расхождение обязано краснеть, а не обнаруживаться прогоном на стенде.
-// ЦЕЛЬ ИНЪЕКЦИИ — ГРУППА, а не личность, и это не безразличный выбор. У личности
-// звено с #944 берётся из таблицы членств и объявлено ЗАКОННЫМ РАЗЛИЧИЕМ, то есть
-// гейт на ней молчит НАМЕРЕННО: инъекция по ней доказывала бы обратное тому, что
-// должна. Ветвь группы осталась в exactSourceTypes и имеет ту же форму — значит
-// инъекция по-прежнему меряет способность гейта найти ДРЕЙФ, а не конкретный тип.
+// ЦЕЛЬ ИНЪЕКЦИИ — ГРУППА, а не личность, и это не безразличный выбор. Личность
+// выведена из ПОСВОЙСТВЕННОЙ сверки колонки (её предок — не колонка своей строки),
+// и меряется она другим утверждением — согласием таблицы-источника (источник 4,
+// своя пара инъекций ниже). Ветвь группы осталась в exactSourceTypes и имеет ту же
+// форму — значит эта инъекция по-прежнему меряет способность гейта найти ДРЕЙФ
+// КОЛОНКИ, а не конкретный тип.
 func TestG2_InjectionPointerColumnDivergedIsFound(t *testing.T) {
 	migration, body := readScopeEdgeMigration(t)
 	// Точечная правка НАСТОЯЩЕГО текста: у группы указатель уводится с
@@ -571,8 +665,9 @@ UNION ALL
 // молчать: у привязки с областью «кластер» containment предка не даёт, а цепь
 // даёт; у проектной роли containment добирает аккаунт соединением, а цепь
 // поднимается обходом; предок проекта взят из журнала; предок аккаунта — из
-// синглтона кластера; предок ЛИЧНОСТИ взят из таблицы членств, тогда как
-// containment остался на колонке строки (#944 — предмет отрыва, а не дрейф).
+// синглтона кластера; предок ЛИЧНОСТИ взят из таблицы членств — оттуда же, откуда
+// его берёт план чтения материализации (#944 / #1172), и посвойственная сверка
+// колонки ему не годится, потому что колонки у него нет.
 //
 // Красное здесь означало бы гейт, красный НА ВЕРНОЙ РЕАЛИЗАЦИИ, — и худший его
 // исход не краснота, а то, что читатель «приведёт стороны в согласие», правя
@@ -584,6 +679,102 @@ func TestG2_InjectionLegalDifferencesStaySilent(t *testing.T) {
 			"Он сверяет цепь с ОДНИМ эталоном вместо посвойственного, и следующий читатель "+
 			"начнёт «приводить стороны в согласие», правя материализацию — то есть поведение "+
 			"авторизации.", strings.Join(found, "\n"))
+	}
+}
+
+// TestG2_InjectionLinkedParentTableDivergedInTheChainIsFound — (а) ОБЯЗАН ПОКРАСНЕТЬ.
+//
+// СТОРОНА ЦЕПИ. Звено личности уводится обратно на колонку строки — то есть в то
+// состояние, из которого его вывели #944 и #1172. Наблюдаемо это разъезд двух
+// записей об одном предмете: материализация накрывает человека по членствам, а
+// каскад достаёт до него через аккаунт, названный колонкой, — и второй аккаунт
+// человека перестаёт быть для каскада его аккаунтом.
+func TestG2_InjectionLinkedParentTableDivergedInTheChainIsFound(t *testing.T) {
+	migration, body := readScopeEdgeMigration(t)
+	broken := strings.Replace(body,
+		"SELECT 'iam_user'::text, m.user_id, 'account'::text, m.account_id, 1\n"+
+			"    FROM kacho_iam.memberships m",
+		"SELECT 'iam_user'::text, o.id, 'account'::text, o.account_id, 1\n"+
+			"    FROM kacho_iam.users o", 1)
+	if broken == body {
+		t.Fatalf("инъекция ничего не изменила: ветвь личности в миграции не найдена в "+
+			"ожидаемой форме, и «гейт покраснел» ничего не доказывало бы.\nМиграция: %s",
+			migration)
+	}
+	found := injectedFindings(t, migration, broken)
+	if len(found) == 0 {
+		t.Fatalf("гейт ПРОМОЛЧАЛ на звене личности, уведённом с таблицы связи на колонку " +
+			"строки: обе записи о предке разошлись, а сторож этого не заметил")
+	}
+	joined := strings.Join(found, "\n")
+	for _, want := range []string{"iam_user", "kacho_iam.users", "kacho_iam.memberships"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("находка не называет %q:\n%s", want, joined)
+		}
+	}
+}
+
+// TestG2_InjectionLinkedParentTableDivergedInThePlanIsFound — (а) ОБЯЗАН ПОКРАСНЕТЬ.
+//
+// СТОРОНА МАТЕРИАЛИЗАЦИИ, и без неё утверждение «стороны согласны» проверялось бы
+// ровно наполовину: инъекция по тексту миграции ничего не говорит о том, заметит
+// ли гейт дрейф ПЛАНА ЧТЕНИЯ. Здесь план возвращают на колонку строки — ровно тот
+// дефект, который чинит #1172, — при нетронутой цепи.
+func TestG2_InjectionLinkedParentTableDivergedInThePlanIsFound(t *testing.T) {
+	migration, body := readScopeEdgeMigration(t)
+	plan := currentContainments()
+	c, ok := plan["iam_user"]
+	if !ok {
+		t.Fatal("в плане чтения нет записи о личности: инъекция беспредметна, и её " +
+			"«покраснел» ничего не доказывало бы")
+	}
+	c.ParentAccountsExpr = "ARRAY_REMOVE(ARRAY[COALESCE(o.account_id, '')], '')"
+	plan["iam_user"] = c
+	_, found := auditScopeEdgeSourcesWith(migration, body, plan)
+	if len(found) == 0 {
+		t.Fatalf("гейт ПРОМОЛЧАЛ на плане чтения, вернувшемся к колонке строки, при " +
+			"цепи, читающей таблицу связи: дрейф со стороны материализации невидим")
+	}
+	joined := strings.Join(found, "\n")
+	for _, want := range []string{"iam_user", "kacho_iam.memberships"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("находка не называет %q:\n%s", want, joined)
+		}
+	}
+}
+
+// TestG2_InjectionLinkedParentWithNoChainBranchIsFound — (а) ОБЯЗАН ПОКРАСНЕТЬ.
+//
+// Третий способ разъехаться: у типа, чей предок берётся связью, ветви в цепи не
+// стало вовсе. Материализация накрывает объект, а каскад до него не достаёт —
+// отказ, неотличимый от честного, поэтому молчание здесь недопустимо.
+func TestG2_InjectionLinkedParentWithNoChainBranchIsFound(t *testing.T) {
+	migration, body := readScopeEdgeMigration(t)
+	up, err := upBlock(body)
+	if err != nil {
+		t.Fatalf("блок Up не разобран: %v", err)
+	}
+	var kept []string
+	dropped := false
+	for _, arm := range strings.Split(up, "UNION ALL") {
+		if strings.Contains(arm, "'iam_user'::text") {
+			dropped = true
+			continue
+		}
+		kept = append(kept, arm)
+	}
+	if !dropped {
+		t.Fatalf("инъекция ничего не изменила: ветви личности в блоке Up нет.\nМиграция: %s",
+			migration)
+	}
+	broken := "-- +goose Up\n" + strings.Join(kept, "UNION ALL") + "\n-- +goose Down\n"
+	found := injectedFindings(t, migration, broken)
+	if len(found) == 0 {
+		t.Fatalf("гейт ПРОМОЛЧАЛ на типе, чей предок берётся связью, но ветви в цепи нет: " +
+			"каскад до объекта не достаёт, а сторож этого не заметил")
+	}
+	if joined := strings.Join(found, "\n"); !strings.Contains(joined, "iam_user") {
+		t.Errorf("находка не называет тип:\n%s", joined)
 	}
 }
 

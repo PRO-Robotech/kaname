@@ -117,7 +117,7 @@ func TestReconcileObjectForward_IAMDirect_MaterializesSingleObject_NoExclusiveLo
 		// contained in account acc-1 (parentAccount).
 		iamDirect: map[string][]domain.MirrorObject{
 			"iam.accessBinding": {
-				{ObjectType: "iam.accessBinding", ObjectID: "acb-new", ParentAccountID: "acc-1"},
+				{ObjectType: "iam.accessBinding", ObjectID: "acb-new", ParentAccountIDs: []string{"acc-1"}},
 			},
 		},
 		// The iam-direct fast-path source returns the owner binding.
@@ -172,7 +172,7 @@ func TestReconcileObjectForward_IAMDirect_ForeignScope_NoOverGrant(t *testing.T)
 		iamDirect: map[string][]domain.MirrorObject{
 			"iam.accessBinding": {
 				// contained in a DIFFERENT account → not under the owner's scope.
-				{ObjectType: "iam.accessBinding", ObjectID: "acb-foreign", ParentAccountID: "acc-OTHER"},
+				{ObjectType: "iam.accessBinding", ObjectID: "acb-foreign", ParentAccountIDs: []string{"acc-OTHER"}},
 			},
 		},
 		iamDirectSelectorBindings: []domain.AccessBindingID{"acb-owner"},
@@ -210,7 +210,7 @@ func TestReconcileObjectForward_IAMDirect_ReRegister_DelegatesToFull_DeleteStale
 		// p-flip's label has FLIPPED to team=b → no longer matches the team=a selector.
 		iamDirect: map[string][]domain.MirrorObject{
 			"iam.project": {
-				{ObjectType: "iam.project", ObjectID: "p-flip", ParentProjectID: "p-flip", ParentAccountID: "acc-1", Labels: map[string]string{"team": "b"}},
+				{ObjectType: "iam.project", ObjectID: "p-flip", ParentProjectID: "p-flip", ParentAccountIDs: []string{"acc-1"}, Labels: map[string]string{"team": "b"}},
 			},
 		},
 		// Already materialized ACTIVE (from when it was team=a) → a RE-REGISTER, not a create.

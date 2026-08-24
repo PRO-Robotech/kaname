@@ -47,7 +47,7 @@ func scopeWideBinding(n int) (*fakeStore, string) {
 		id := fmt.Sprintf("i-%04d", i)
 		objs = append(objs, domain.MirrorObject{
 			ObjectType: "compute.instance", ObjectID: id,
-			ParentProjectID: "prj-1", ParentAccountID: "acc-1",
+			ParentProjectID: "prj-1", ParentAccountIDs: []string{"acc-1"},
 			Labels: map[string]string{"tier": "gold"},
 		})
 		members = append(members, domain.TargetMember{
@@ -299,7 +299,7 @@ func TestReconcileObject_Narrow_ScopeSelfObjectStillMaterialized(t *testing.T) {
 			ObjectTypes: []string{"compute.instance"}, Verbs: []string{"get"},
 		}},
 		iamDirect: map[string][]domain.MirrorObject{"iam.project": {
-			{ObjectType: "iam.project", ObjectID: "prj-1", ParentAccountID: "acc-1"},
+			{ObjectType: "iam.project", ObjectID: "prj-1", ParentAccountIDs: []string{"acc-1"}},
 		}},
 		iamDirectSelectorBindings: []domain.AccessBindingID{"acb-1"},
 		bindingsForObject:         []domain.AccessBindingID{"acb-1"},
