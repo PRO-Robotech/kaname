@@ -81,8 +81,9 @@ func (uc *DeleteUserUseCase) Execute(ctx context.Context, id domain.UserID) (*op
 	// миграция 944001, — и сработала бы молча, на каждой осиротевшей строке.
 	//
 	// СНЯТИЕ НИЧЕГО НЕ РАСШИРЯЕТ, и это утверждается вердиктом, а не доводом: у
-	// безаккаунтной строки цепь областей даёт только `subject`, поэтому
-	// посторонний по-прежнему получает отказ на крае. Проба —
+	// строки БЕЗ ЗВЕНА ЦЕПИ к аккаунту (осиротевшей — той, у которой снято
+	// членство) вывод даёт только `subject`, поэтому посторонний и владелец
+	// прежнего аккаунта по-прежнему получают отказ на крае. Проба —
 	// `internal/service/removing_the_identity_integration_test.go`
 	// (TestRemovingAnIdentityWithNoAccountScopeReachesOnlyTheCloud).
 	_ = rd.Rollback(ctx)
