@@ -74,7 +74,7 @@ sequenceDiagram
     IAM->>DB: INSERT operations (done=false)
     IAM->>Hydra: POST /admin/clients<br/>{grant_types:["client_credentials"], scope:"kacho.api", audience:[...]}
     Hydra-->>IAM: 201 {client_id, client_secret}
-    IAM->>DB: INSERT service_account_oauth_clients (sa_id, client_id, audience, scope)
+    IAM->>DB: INSERT service_account_oauth_clients (sva_id, public_key_pem, declared_audiences)
     IAM->>DB: UPDATE operations done=true,<br/>response={client_id, client_secret}
     IAM->>DB: COMMIT
     IAM-->>GW: Operation (done=true, response=IssueSAKeyResponse)

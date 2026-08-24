@@ -63,15 +63,26 @@ func NewAssertionClientRepo(pool *pgxpool.Pool) *AssertionClientRepo {
 // внутреннее: строка клиента, чей владелец снят, обязана дать «владелец не
 // активен», а не исчезнуть — исчезновение было бы неотличимо от «клиента нет»,
 // и оба состояния получили бы один счётчик.
+// Сужение адресатов читается ЗДЕСЬ, тем же оператором, что и всё остальное:
+// выпуск принимает решение по строке реестра, и величина, приезжающая вторым
+// обращением, разошлась бы с ней ровно в окне между двумя чтениями.
+//
+// У ветки пользовательского токена на её месте стоит ПУСТОЙ МАССИВ, и это не
+// заглушка. Адресата такого токена проставляет сам сервис из своей настройки, а
+// заказчик не вправе назвать его вовсе (решение Р2, `interactive_client.proto`);
+// колонки нет, потому что нет автора значения. Пусто здесь означает «сужать
+// нечем», а внешняя граница — перечень посадки — действует на обеих ветках
+// одинаково. Появится у того ресурса поле адресатов — появится и колонка, и эта
+// строка станет её чтением.
 const resolveAssertionClientQuery = `
 SELECT c.id, 'user', c.user_id, c.public_key_pem, c.key_algorithm, c.expires_at,
-       COALESCE(u.invite_status = 'ACTIVE', FALSE)
+       COALESCE(u.invite_status = 'ACTIVE', FALSE), ARRAY[]::text[]
   FROM kacho_iam.user_oauth_clients c
   LEFT JOIN kacho_iam.users u ON u.id = c.user_id
  WHERE c.id = $1
 UNION ALL
 SELECT c.id, 'service_account', c.sva_id, c.public_key_pem, c.key_algorithm, c.expires_at,
-       COALESCE(s.enabled, FALSE)
+       COALESCE(s.enabled, FALSE), c.declared_audiences
   FROM kacho_iam.service_account_oauth_clients c
   LEFT JOIN kacho_iam.service_accounts s ON s.id = c.sva_id
  WHERE c.id = $1
@@ -91,9 +102,11 @@ func (r *AssertionClientRepo) ResolveAssertionClient(ctx context.Context, client
 		out       domain.AssertionClient
 		kind      string
 		expiresAt *time.Time
+		audiences []string
 	)
 	err := r.pool.QueryRow(ctx, resolveAssertionClientQuery, clientID).Scan(
 		&out.ID, &kind, &out.OwnerID, &out.PublicKeyPEM, &out.Algorithm, &expiresAt, &out.OwnerActive,
+		&audiences,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.AssertionClient{}, domain.ErrAssertionClientUnknown
@@ -105,6 +118,12 @@ func (r *AssertionClientRepo) ResolveAssertionClient(ctx context.Context, client
 		return domain.AssertionClient{}, wrapPgErr(err, "AssertionClient", clientID)
 	}
 	out.Kind = domain.AssertionClientKind(kind)
+	// Пустой массив читается как «сужения не объявлено» — состояние законное и
+	// для ключа служебной учётки, выданного без перечня, и для клиента
+	// пользовательского токена, у которого автора перечня нет вовсе.
+	if len(audiences) > 0 {
+		out.DeclaredAudiences = audiences
+	}
 	if expiresAt != nil {
 		// Незаданный срок означает «бессрочно», и это законное состояние схемы:
 		// колонка допускает NULL. Ноль здесь читается вызывающим именно так.

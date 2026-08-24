@@ -40,7 +40,8 @@ func NewSAOAuthClientRepo(pool *pgxpool.Pool) *SAOAuthClientRepo {
 
 const socCols = `id, sva_id, hydra_client_id, description, created_by_user_id,
                  created_at, expires_at, last_used_at,
-                 public_key_pem, key_algorithm, trusted_subjects, name, labels`
+                 public_key_pem, key_algorithm, trusted_subjects, name, labels,
+                 declared_audiences`
 
 func (r *SAOAuthClientRepo) Get(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	row := r.pool.QueryRow(ctx,
@@ -82,8 +83,10 @@ func (r *SAOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain
 		INSERT INTO service_account_oauth_clients (
 		    id, sva_id, hydra_client_id, description, created_by_user_id,
 		    created_at, expires_at, last_used_at,
-		    public_key_pem, key_algorithm, trusted_subjects, name, labels
-		) VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, $10, $11::jsonb, $12, $13::jsonb)
+		    public_key_pem, key_algorithm, trusted_subjects, name, labels,
+		    declared_audiences
+		) VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, $10, $11::jsonb, $12, $13::jsonb,
+		          $14::text[])
 		RETURNING ` + socCols
 	tsJSON, err := marshalTrustedSubjects(c.TrustedSubjects)
 	if err != nil {
@@ -98,6 +101,11 @@ func (r *SAOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain
 		string(c.Description), string(c.CreatedByUserID),
 		nullableTime(c.CreatedAt), nullableTimePtr(c.ExpiresAt), nullableTimePtr(c.LastUsedAt),
 		c.PublicKeyPEM, c.KeyAlgorithm, tsJSON, string(c.Name), labelsJSON,
+		// Пустой срез, а не nil: колонка объявлена NOT NULL, и «сужения не
+		// объявлено» выражается ПУСТЫМ массивом. nil уехал бы NULL-ом и
+		// отвергся ограничением — то есть выдача ключа без перечня перестала
+		// бы работать вовсе.
+		declaredAudiencesParam(c.DeclaredAudiences),
 	)
 	out, err := scanSAOAuthClient(row)
 	if err != nil {
@@ -335,12 +343,14 @@ func scanSAOAuthClient(row pgx.Row) (domain.ServiceAccountOAuthClient, error) {
 		lastUsedAt sql.NullTime
 		tsBody     []byte
 		labelsBody []byte
+		audiences  []string
 	)
 	if err := row.Scan(
 		(*string)(&c.ID), (*string)(&c.SvaID), (*string)(&c.OAuthClientID),
 		(*string)(&c.Description), (*string)(&c.CreatedByUserID),
 		&c.CreatedAt, &expiresAt, &lastUsedAt,
 		&c.PublicKeyPEM, &c.KeyAlgorithm, &tsBody, (*string)(&c.Name), &labelsBody,
+		&audiences,
 	); err != nil {
 		return domain.ServiceAccountOAuthClient{}, err
 	}
@@ -362,7 +372,26 @@ func scanSAOAuthClient(row pgx.Row) (domain.ServiceAccountOAuthClient, error) {
 		return domain.ServiceAccountOAuthClient{}, err
 	}
 	c.Labels = labels
+	// Пустой массив колонки читается как «сужения не объявлено». Отдельного
+	// состояния «неизвестно» у него нет: колонка NOT NULL, и строки без
+	// значения не бывает.
+	if len(audiences) > 0 {
+		c.DeclaredAudiences = audiences
+	}
 	return c, nil
+}
+
+// declaredAudiencesParam — параметр записи перечня.
+//
+// Существует ради одного различия, которое стоит строки: у среза Go есть nil, у
+// колонки NOT NULL его нет. Отсутствие перечня и пустой перечень означают ОДНО
+// И ТО ЖЕ («сужения не объявлено»), поэтому оба уезжают пустым массивом, а не
+// один из них — NULL-ом, который ограничение отвергло бы.
+func declaredAudiencesParam(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
 }
 
 // ───────────────────────────────────────────────────────────────────────────

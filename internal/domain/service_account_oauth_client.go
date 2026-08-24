@@ -58,6 +58,18 @@ type ServiceAccountOAuthClient struct {
 	// за этот ключ. Пустой перечень — обычный вид с ключевым материалом.
 	TrustedSubjects []TrustedSubject
 
+	// DeclaredAudiences — сужение адресатов, ОБЪЯВЛЕННОЕ заказчиком при выдаче
+	// (`IssueSAKeyRequest.audience`, задача #1136). Create-only, как и всё
+	// остальное на этом ресурсе: глагола правки у ключа нет.
+	//
+	// Перечней в тракте выдачи ДВА, и этот — внутренний: он говорит, для чего
+	// заведён ЭТОТ ключ, и действует ВНУТРИ перечня, объявленного посадкой.
+	// Расширить внешнюю границу он не может ничем.
+	//
+	// Пустой перечень означает «сужения не объявлено», а не «любой адресат»:
+	// внешняя граница остаётся и требуется непустой стражем старта выдачи.
+	DeclaredAudiences []string
+
 	// Name — человекочитаемое имя ключа, выставляется на Issue (create-only,
 	// immutable — ресурс несёт только Issue/List/Revoke). Пусто для legacy-строк.
 	Name OAuthClientName
@@ -227,6 +239,18 @@ func (c ServiceAccountOAuthClient) Validate() error {
 	}
 	errs = multierr.Append(errs, c.Name.Validate())
 	errs = multierr.Append(errs, c.Labels.Validate())
+	for i, a := range c.DeclaredAudiences {
+		switch {
+		case strings.TrimSpace(a) == "":
+			// Пустой элемент — адресат, которого нельзя заказать ничем: он не
+			// совпал бы ни с одним запросом и молча сузил бы ключ до
+			// недостижимого. Отказ здесь виден заказавшему выдачу; отказ на
+			// обмене виден машине и неотличим для неё от «прав нет».
+			errs = multierr.Append(errs, fmt.Errorf("Illegal argument audience[%d]: must not be empty", i))
+		case len(a) > 512:
+			errs = multierr.Append(errs, fmt.Errorf("Illegal argument audience[%d]: length must be <=512", i))
+		}
+	}
 	for i, ts := range c.TrustedSubjects {
 		if err := ts.Validate(); err != nil {
 			errs = multierr.Append(errs, fmt.Errorf("trusted_subjects[%d]: %w", i, err))

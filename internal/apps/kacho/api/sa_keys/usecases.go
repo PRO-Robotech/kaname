@@ -659,6 +659,8 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		KeyAlgorithm:    key.Algorithm,
 		Name:            domain.OAuthClientName(in.Name),
 		Labels:          in.Labels,
+		// Сужение адресатов — то, что назвал ЗАКАЗЧИК, и ничего сверх (#1136).
+		DeclaredAudiences: declaredAudiences(in),
 	}
 	if exp := u.resolveExpiry(in); exp != nil {
 		row.ExpiresAt = exp
@@ -682,11 +684,68 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 		PublicKeyPem:  key.PublicPEM,
 		Algorithm:     key.Algorithm,
 		KeyId:         string(keyID),
-		// Echo resolved audience list (informational; what Hydra
-		// will land in `aud` of minted tokens for this client).
-		Audiences: hydraReq.Audience,
+		// Перечень адресатов ключа. На переведённом контуре это ЗАПИСАННОЕ
+		// сужение, на непереведённом — перечень зеркала: см. responseAudiences.
+		Audiences: u.responseAudiences(hydraReq.Audience, persisted.DeclaredAudiences),
 	}
 	return anypb.New(resp)
+}
+
+// responseAudiences — что ответ выдачи называет перечнем адресатов ключа.
+//
+// # Почему величина зависит от контура, а не одна на оба
+//
+// Она отвечает на вопрос «что этот ключ сможет заказать», и ответ на него на
+// двух контурах даёт РАЗНАЯ величина. Пока зеркало заводится, решает его
+// перечень: обмен идёт у прежнего издателя, и он сверяет с ним. На переведённом
+// контуре зеркала нет — перечень зеркала не регистрируется нигде и не читается
+// ничем, — а решает записанное на строке сужение (задача #1136).
+//
+// Отдать одно вместо другого значило бы назвать адресатов, которых ключ заказать
+// не сможет, и не назвать тех, кого сможет. Поле объявлено справочным, но
+// справка, которая неверна, хуже её отсутствия: по ней принимают решение.
+//
+// Пустой перечень на переведённом контуре — утверждение, а не умолчание:
+// «сужения нет, действует перечень посадки».
+func (u *IssueSAKeyUseCase) responseAudiences(mirror, declared []string) []string {
+	if u.ownIssuance {
+		return declared
+	}
+	return mirror
+}
+
+// declaredAudiences — сужение адресатов в той форме, в какой его объявляет
+// контракт выдачи: порядок сохраняется, пустые элементы снимаются, повторы
+// схлопываются.
+//
+// ЗДЕСЬ НЕТ НИ ОДНОГО ЗНАЧЕНИЯ СВЕРХ НАЗВАННЫХ ЗАКАЗЧИКОМ, и это отличает его от
+// `resolveAudience`. Тот строит перечень ЗЕРКАЛА и добавляет к нему адресат
+// реестра и внутреннее умолчание — величины, нужные обмену у прежнего издателя.
+// Попади они в сужение, ключ получил бы доступ к адресатам, которых заказчик не
+// называл: расширение вместо сужения, молча и в сторону большего.
+//
+// Пустой элемент снимается потому, что заказать его нельзя ничем: он не совпал
+// бы ни с одним запросом и молча сузил бы ключ до недостижимого.
+func declaredAudiences(in IssueInput) []string {
+	if len(in.Audience) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in.Audience))
+	out := make([]string, 0, len(in.Audience))
+	for _, a := range in.Audience {
+		if a == "" {
+			continue
+		}
+		if _, dup := seen[a]; dup {
+			continue
+		}
+		seen[a] = struct{}{}
+		out = append(out, a)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // clientNaming — идентификатор, которым выданный клиент себя называет, и
@@ -858,6 +917,9 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		TrustedSubjects: append([]domain.TrustedSubject(nil), in.TrustedSubjects...),
 		Name:            domain.OAuthClientName(in.Name),
 		Labels:          in.Labels,
+		// Сужение записывается и здесь. Разойдись две полосы, федеративный ключ
+		// стал бы несужаемой дорогой внутрь — ровно та форма, которую ищут.
+		DeclaredAudiences: declaredAudiences(in),
 	}
 	if exp := u.resolveExpiry(in); exp != nil {
 		row.ExpiresAt = exp
@@ -885,9 +947,9 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		PublicKeyPem:  "",
 		Algorithm:     "",
 		KeyId:         string(keyID),
-		// Echo resolved audience list (informational; what Hydra
-		// will land in `aud` of tokens minted from federated assertions).
-		Audiences: hydraReq.Audience,
+		// Перечень адресатов ключа: записанное сужение на переведённом контуре,
+		// перечень зеркала на непереведённом (см. responseAudiences).
+		Audiences: u.responseAudiences(hydraReq.Audience, persisted.DeclaredAudiences),
 	}
 	return anypb.New(resp)
 }

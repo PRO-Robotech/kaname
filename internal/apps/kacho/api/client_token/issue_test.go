@@ -307,10 +307,13 @@ func TestF2_37_AssertionAudienceIsNotCarriedIntoTheIssuedToken(t *testing.T) {
 	require.Equal(t, []string{audRegistry}, audienceStrings(claims["aud"]))
 }
 
-// TestF2_38_RequestedAudienceMustBeInTheDeclaredPlatformList — сверка идёт с
-// перечнем ПЛАТФОРМЫ, а не с перечнем клиента: колонки адресатов у клиентов,
-// способных к утверждению, в схеме нет, и требовать состояния, которого схема
-// не допускает, нельзя.
+// TestF2_38_RequestedAudienceMustBeInTheDeclaredPlatformList — перечень
+// ПЛАТФОРМЫ есть ВНЕШНЯЯ граница выдачи, и расширить её нечем.
+//
+// Здесь стояло «а перечня у клиента нет, колонки в схеме не существует» — это
+// перестало быть верным с задачей #1136: сужение ключа есть, оно действует
+// (`issue_audience_narrowing_test.go`) и работает ВНУТРИ этой границы. Фикстура
+// клиента сужения не объявляет, поэтому проба измеряет ровно внешнюю границу.
 func TestF2_38_RequestedAudienceMustBeInTheDeclaredPlatformList(t *testing.T) {
 	uc, _ := newUseCase(t)
 

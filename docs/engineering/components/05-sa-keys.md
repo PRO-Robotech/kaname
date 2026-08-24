@@ -136,7 +136,7 @@ sequenceDiagram
         Hydra-->>IAM: 201 {client_id}  (NO client_secret)
     end
     IAM->>DB: BEGIN
-    IAM->>DB: INSERT service_account_oauth_clients<br/>(soc_id, sva_id, hydra_client_id, public_key_pem, key_algorithm)
+    IAM->>DB: INSERT service_account_oauth_clients<br/>(soc_id, sva_id, hydra_client_id, public_key_pem, key_algorithm, declared_audiences)
     IAM->>DB: COMMIT
     IAM->>DB: UPDATE operations<br/>SET done=true, response=IssueSAKeyResponse{client_id, private_key_pem, public_key_pem, algorithm:"ES256", key_id:soc_…}
     IAM-->>GW: Operation (done=true, response с private_key_pem)

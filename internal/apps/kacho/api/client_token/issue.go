@@ -59,10 +59,15 @@ type Config struct {
 	// AllowedAudiences — объявленный конфигурацией перечень адресатов
 	// платформы. Пустой означал бы «любой», поэтому он обязателен.
 	//
-	// Сверка идёт с ЭТИМ перечнем, а не с перечнем клиента: колонки адресатов у
-	// клиентов, способных к утверждению, в схеме НЕТ, и требовать состояния,
-	// которого схема не допускает, нельзя. Появится колонка — появится сужение
-	// поверх этого перечня, но не раньше.
+	// Это ВНЕШНЯЯ граница выдачи: перечень поверхностей, которым платформа
+	// вообще чеканит удостоверения. Он объявлен посадкой, и расширить его
+	// заказчик ключа не может ничем.
+	//
+	// Прежняя редакция этого комментария говорила, что сверка идёт с ЭТИМ
+	// перечнем «и ничем больше, потому что колонки адресатов у клиентов в схеме
+	// нет». Колонка теперь есть (задача #1136), и сужение поверх этого перечня
+	// действует — см. `resolveAudience`. Внешней границей перечень при этом
+	// быть не перестал: сужение работает внутри него.
 	AllowedAudiences []string
 	// DefaultAudience — адресат, когда запрос его не назвал.
 	DefaultAudience string
@@ -169,8 +174,9 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 		}
 	}
 
-	// (3) Адресат — ИЗ ЗАПРОСА, в пределах объявленного перечня.
-	audience, err := u.resolveAudience(in.RequestedAudience)
+	// (3) Адресат — ИЗ ЗАПРОСА, в пределах объявленного ПОСАДКОЙ перечня,
+	// сужённого тем, что объявил при выдаче сам КЛЮЧ (задача #1136).
+	audience, err := u.resolveAudience(in.Client, in.RequestedAudience)
 	if err != nil {
 		return Output{}, clientassertion.OutcomeAudienceNotAllowed, err
 	}
@@ -212,16 +218,88 @@ func (u *UseCase) Issue(ctx context.Context, in Input) (Output, clientassertion.
 }
 
 // resolveAudience выбирает адресат выпускаемого токена.
-func (u *UseCase) resolveAudience(requested []string) ([]string, error) {
+//
+// # Границы ДВЕ, и они не равноправны
+//
+// ВНЕШНЯЯ — перечень, объявленный посадкой: он говорит, каким поверхностям
+// платформа вообще чеканит удостоверения, и страж построения требует его
+// непустым. ВНУТРЕННЯЯ — перечень, объявленный заказчиком при выдаче ключа: он
+// говорит, для чего заведён ЭТОТ ключ.
+//
+// Сужение действует ВНУТРИ внешней границы и никогда её не расширяет. Иначе
+// заказчик ключа сам решал бы, кому платформа выдаёт токен: он назвал бы в поле
+// выдачи произвольный адресат, и подписант выпустил бы удостоверение,
+// адресованное поверхности, которую посадка не объявляла.
+//
+// Отказы двух границ РАЗЛИЧАЮТСЯ ТЕКСТОМ — не наружу (там ответ единый), а в
+// журнале: «посадка такого адресата не объявляла» и «ключ выдавался не под этот
+// адресат» чинятся в разных местах и разными людьми.
+func (u *UseCase) resolveAudience(client domain.AssertionClient, requested []string) ([]string, error) {
+	effective, fallback, err := u.audienceScope(client)
+	if err != nil {
+		return nil, err
+	}
 	if len(requested) == 0 {
-		return []string{u.cfg.DefaultAudience}, nil
+		return []string{fallback}, nil
 	}
 	for _, a := range requested {
 		if !allowed(u.cfg.AllowedAudiences, a) {
 			return nil, fmt.Errorf("client_token: requested audience %q is not in the declared list", a)
 		}
+		if !allowed(effective, a) {
+			return nil, fmt.Errorf(
+				"client_token: requested audience %q is outside the audiences declared for client %s "+
+					"at issuance (%v)", a, client.ID, client.DeclaredAudiences)
+		}
 	}
 	return requested, nil
+}
+
+// audienceScope — множество, из которого выпуск вправе выбрать, и адресат для
+// запроса, не назвавшего ни одного.
+//
+// # Пустое сужение означает «не объявлено», и это РЕШЕНИЕ, а не умолчание
+//
+// Ключ, выданный без перечня, ведёт себя ровно как прежде: внешняя граница
+// остаётся единственной. Требовать перечень от каждого ключа значило бы сломать
+// всякого, кто его не слал, ради величины, которой у него нет, — и сломать на
+// пути, где отказ увидит машина, а не человек.
+//
+// # Умолчание посадки уступает объявленному ключом, а не наоборот
+//
+// Умолчание — величина для ключа, о своём назначении не заявившего. Пока сужение
+// его допускает, оно действует без изменений (наименьший радиус для уже выданных
+// ключей); когда не допускает — берётся первый объявленный ключом адресат из
+// числа допущенных посадкой. Порядок здесь не произволен: перечень заказчика
+// сохраняет порядок по контракту выдачи, поэтому «первый» есть его собственный
+// выбор, а не наш.
+//
+// # Непересекающееся сужение отвергается ЗДЕСЬ, а не на выдаче ключа
+//
+// Состояние законное: ключ выдан под внешнюю федерацию, а посадка такого
+// адресата не объявляла. Отвергать его на выдаче нельзя — перечень посадки
+// меняет оператор и после неё, — а молча откатываться на перечень посадки
+// нельзя тем более: это ровно то «сужение, переставшее сужать», которое задача
+// #1136 и снимает.
+func (u *UseCase) audienceScope(client domain.AssertionClient) ([]string, string, error) {
+	if len(client.DeclaredAudiences) == 0 {
+		return u.cfg.AllowedAudiences, u.cfg.DefaultAudience, nil
+	}
+	effective := make([]string, 0, len(client.DeclaredAudiences))
+	for _, a := range client.DeclaredAudiences {
+		if allowed(u.cfg.AllowedAudiences, a) && !allowed(effective, a) {
+			effective = append(effective, a)
+		}
+	}
+	if len(effective) == 0 {
+		return nil, "", fmt.Errorf(
+			"client_token: client %s declared audiences %v at issuance and this deployment declares none of them",
+			client.ID, client.DeclaredAudiences)
+	}
+	if allowed(effective, u.cfg.DefaultAudience) {
+		return effective, u.cfg.DefaultAudience, nil
+	}
+	return effective, effective[0], nil
 }
 
 func allowed(list []string, want string) bool {
