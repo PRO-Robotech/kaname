@@ -76,6 +76,13 @@ type Registry struct {
 	outboxOnce sync.Once
 	outbox     *OutboxRecorder
 
+	// registryTokenKindOnce/registryTokenKind — единственный экземпляр счётчика
+	// исходов докерной полосы по виду предъявленного удостоверения (#1143).
+	// Серии у него общие и различаются лейблом `outcome`; второй конструктор
+	// уронил бы старт на duplicate-register.
+	registryTokenKindOnce sync.Once
+	registryTokenKind     *RegistryTokenCredentialKindRecorder
+
 	// inviteActivationOnce/inviteActivation — единственный экземпляр счётчика
 	// исходов активации приглашения. Потребителей два и собираются они в разных
 	// местах композиционного корня: gRPC-путь (buildServices) и ЖИВОЙ путь входа

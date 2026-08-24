@@ -19,11 +19,14 @@ func TestSAClientToProto_TruncatesTimestampsToSeconds(t *testing.T) {
 	used := time.Date(2026, 6, 16, 11, 22, 33, 999999999, time.UTC)
 
 	pb, err := saClientToProto(domain.ServiceAccountOAuthClient{
-		ID:         "sak_test_1234567890abcd",
-		SvaID:      "sva_test_1234567890abcd",
-		CreatedAt:  created,
-		ExpiresAt:  &expires,
-		LastUsedAt: &used,
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind: domain.CredentialKindKeypair,
+		ID:             "sak_test_1234567890abcd",
+		SvaID:          "sva_test_1234567890abcd",
+		CreatedAt:      created,
+		ExpiresAt:      &expires,
+		LastUsedAt:     &used,
 	})
 	if err != nil {
 		t.Fatalf("saClientToProto: %v", err)

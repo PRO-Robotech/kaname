@@ -38,33 +38,44 @@ type stubSAClientRepo struct {
 	accountID   domain.AccountID
 	ownerUserID domain.UserID
 	getRow      domain.ServiceAccountOAuthClient
-	getErr      error
+	// getErr — "the repo says: no such row". Kept apart from an empty getRow
+	// because an empty row and an absent row are different states, and the
+	// revoke probe tells them apart: absence is a legal removal outcome.
+	getErr error
+	// deleted — дублёр обязан ОТМЕЧАТЬ снятие: без этого проба скрытия
+	// существования не отличила бы «чужую строку не тронули» от «дублёр
+	// снисходительнее продукта и не трогает ничего никогда».
+	deleted bool
 	// disabled — the owning account may not authenticate.
 	disabled bool
 }
 
-func (s *stubSAClientRepo) Get(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
-	if s.getRow.ID != "" || s.getErr != nil {
-		return s.getRow, s.getErr
-	}
-	return domain.ServiceAccountOAuthClient{}, errors.New("not implemented")
-}
 func (s *stubSAClientRepo) Insert(ctx context.Context, tx service.Tx, c domain.ServiceAccountOAuthClient) (domain.ServiceAccountOAuthClient, error) {
 	s.inserted = c
 	s.insertOK = true
 	c.CreatedAt = time.Now().UTC()
 	return c, nil
 }
-func (s *stubSAClientRepo) DeleteByID(ctx context.Context, tx service.Tx, id domain.SAOAuthClientID) error {
-	return nil
+
+// DeleteOwnedByID — the double reproduces the REAL statement's predicate: the
+// row goes only when BOTH the id and the owner match. A double that removes on
+// the id alone would be more permissive than the product and would hide exactly
+// the defect the revoke probes are written for.
+func (s *stubSAClientRepo) DeleteOwnedByID(ctx context.Context, tx service.Tx, ownerID domain.ServiceAccountID, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, bool, error) {
+	if s.getErr != nil || s.getRow.ID != id || s.getRow.SvaID != ownerID {
+		return domain.ServiceAccountOAuthClient{}, false, nil
+	}
+	s.deleted = true
+	return s.getRow, true, nil
 }
 func (s *stubSAClientRepo) List(ctx context.Context, svaID domain.ServiceAccountID, pageToken string, pageSize int32) ([]domain.ServiceAccountOAuthClient, string, error) {
 	return nil, "", nil
 }
 
 type stubHydra struct {
-	gotReq  clients.CreateOAuthClientRequest
-	created bool
+	gotReq          clients.CreateOAuthClientRequest
+	created         bool
+	deletedClientID string
 }
 
 func (s *stubHydra) CreateOAuthClient(ctx context.Context, req clients.CreateOAuthClientRequest) (clients.HydraOAuthClient, error) {
@@ -72,7 +83,10 @@ func (s *stubHydra) CreateOAuthClient(ctx context.Context, req clients.CreateOAu
 	s.created = true
 	return clients.HydraOAuthClient{ClientID: "hydra-cli-fake"}, nil
 }
-func (s *stubHydra) DeleteOAuthClient(ctx context.Context, clientID string) error { return nil }
+func (s *stubHydra) DeleteOAuthClient(ctx context.Context, clientID string) error {
+	s.deletedClientID = clientID
+	return nil
+}
 
 type stubTx struct{}
 

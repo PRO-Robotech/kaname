@@ -232,9 +232,12 @@ func TestMintBootstrapToken_FirstCall_RecordsOurClientRow(t *testing.T) {
 
 func TestMintBootstrapToken_Idempotent_ReusesExistingMapping(t *testing.T) {
 	existing := domain.ServiceAccountOAuthClient{
-		ID:            domain.SAOAuthClientID(DeriveIdentity().SocID),
-		SvaID:         domain.ServiceAccountID(DeriveIdentity().SvaID),
-		OAuthClientID: domain.OAuthClientID(DeriveIdentity().ClientID),
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind: domain.CredentialKindKeypair,
+		ID:             domain.SAOAuthClientID(DeriveIdentity().SocID),
+		SvaID:          domain.ServiceAccountID(DeriveIdentity().SvaID),
+		OAuthClientID:  domain.OAuthClientID(DeriveIdentity().ClientID),
 	}
 	store := &fakeStore{existing: &existing}
 	uc := newUseCase(t, store, okMinter(), Config{})

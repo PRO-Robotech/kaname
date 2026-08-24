@@ -106,3 +106,62 @@ func TestHandlerWithoutALoggerStillAnswers(t *testing.T) {
 		t.Fatalf("без журнала обработчик ответил %d вместо 503", rec.Code)
 	}
 }
+
+// TestRemovedCredentialKindReachesTheLogButNotTheBody — снятый вид удостоверения
+// называется ЖУРНАЛУ и НЕ называется телу (задача #1143).
+//
+// # Зачем эта строка вообще нужна
+//
+// Снятие приёма ключевого материала — ЛОМАЮЩЕЕ изменение: клиент, настроенный
+// по-старому, начинает получать отказ. Снаружи он неотличим от неверного
+// секрета — и обязан быть неотличим. Значит единственное место, где оператор
+// может увидеть «арендаторы всё ещё шлют ключ», — журнал. Без него количество
+// таких входов равно нулю наблюдаемо и при тысяче их в час.
+//
+// # Проба ПАРНАЯ, и вторая половина здесь несущая
+//
+// Строка, печатаемая на ВСЯКОМ отказе, ничего не значит: она перестаёт отличать
+// старую настройку клиента от опечатки в секрете. Поэтому рядом — обычный отказ
+// аутентификации, на котором этой строки быть НЕ должно, и тело обоих ответов
+// сверяется на равенство.
+func TestRemovedCredentialKindReachesTheLogButNotTheBody(t *testing.T) {
+	const marker = "no longer accepted"
+
+	run := func(t *testing.T, err error) (string, string) {
+		t.Helper()
+		var log bytes.Buffer
+		h := registrytokenhttp.NewTokenHandler(registrytokenhttp.Config{
+			Realm:          "https://api.kacho.local/iam/token",
+			DefaultService: "registry.kacho.local",
+		}, issuerStub{err: err}).WithLogger(slog.New(slog.NewTextHandler(&log, nil)))
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/iam/token?service=registry.kacho.local", nil)
+		req.SetBasicAuth("sa", "presented")
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("код ответа %d, ожидался 401", rec.Code)
+		}
+		return rec.Body.String(), log.String()
+	}
+
+	kindBody, kindLog := run(t, errors.Join(
+		registrytokenuc.ErrUnauthenticated, registrytokenuc.ErrCredentialKindNotAccepted))
+	plainBody, plainLog := run(t, registrytokenuc.ErrUnauthenticated)
+
+	if !strings.Contains(kindLog, marker) {
+		t.Fatalf("снятый вид не назван журналу: оператор не узнает, что арендаторы всё ещё "+
+			"настроены на снятый вход.\nжурнал: %q", kindLog)
+	}
+	if strings.Contains(plainLog, marker) {
+		t.Fatalf("строка печатается и на обычном отказе — она перестаёт отличать старую "+
+			"настройку клиента от неверного секрета.\nжурнал: %q", plainLog)
+	}
+	if kindBody != plainBody {
+		t.Fatalf("тела отказов различаются — это оракул:\n  снятый вид: %q\n  прочий отказ: %q",
+			kindBody, plainBody)
+	}
+	if strings.Contains(kindBody, "presented") {
+		t.Fatalf("тело пересказывает предъявленное: %q", kindBody)
+	}
+}

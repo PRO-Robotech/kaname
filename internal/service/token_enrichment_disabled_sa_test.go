@@ -51,9 +51,12 @@ const (
 func saPortWithState(enabled bool) stubSAPort {
 	return stubSAPort{
 		soc: domain.ServiceAccountOAuthClient{
-			ID:            domain.SAOAuthClientID(disabledSocID),
-			SvaID:         domain.ServiceAccountID(disabledSAID),
-			OAuthClientID: domain.OAuthClientID(disabledSAClientID),
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             domain.SAOAuthClientID(disabledSocID),
+			SvaID:          domain.ServiceAccountID(disabledSAID),
+			OAuthClientID:  domain.OAuthClientID(disabledSAClientID),
 		},
 		sa: domain.ServiceAccount{
 			ID:        domain.ServiceAccountID(disabledSAID),

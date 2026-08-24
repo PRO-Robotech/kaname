@@ -5,6 +5,8 @@ package registry_token
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -14,6 +16,29 @@ import (
 	"strings"
 	"testing"
 )
+
+// ecKeyPEMs чеканит пару ECDSA P-256 и отдаёт (приватная PKCS#8 PEM, публичная
+// SPKI PEM). Жила рядом с проверяющим ключевой материал; тот снят вместе с
+// приёмом ключа в поле пароля (#1143), а подписант утверждения остался: им
+// пользуется АНОНИМНЫЙ поток на контуре, ещё не переведённом на нашу чеканку.
+func ecKeyPEMs(t *testing.T) (privPEM, pubPEM string) {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("gen ec: %v", err)
+	}
+	privDER, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatalf("marshal pkcs8: %v", err)
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		t.Fatalf("marshal spki: %v", err)
+	}
+	privPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privDER}))
+	pubPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}))
+	return privPEM, pubPEM
+}
 
 // TestES256AssertionSigner_ProducesVerifiableAssertion — the signer emits a
 // compact ES256 JWS with the kid header and RFC 7523 claims (iss=sub=client_id,

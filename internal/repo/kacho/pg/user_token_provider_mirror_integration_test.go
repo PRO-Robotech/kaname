@@ -176,7 +176,9 @@ func TestUserToken_RevocationReachesPresentationWithoutTheProvider(t *testing.T)
 
 	tx, err := txb.Begin(ctx)
 	require.NoError(t, err)
-	require.NoError(t, repo.DeleteByID(ctx, tx, row.ID))
+	_, deleted, err := repo.DeleteOwnedByID(ctx, tx, row.UserID, row.ID)
+	require.NoError(t, err)
+	require.True(t, deleted, "строка не снята — отрицания ниже были бы вакуумны")
 	require.NoError(t, tx.Commit(ctx))
 
 	// 1) удостоверение больше не разрешается — новое им не выпустить;

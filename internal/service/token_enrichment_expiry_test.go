@@ -11,14 +11,15 @@ package service
 // path — client → Hydra /oauth2/token (private_key_jwt client_assertion) →
 // this enricher via the token hook — never read it. Hydra authenticates the
 // assertion against the registered JWK, which does not expire, so a key past
-// its stated expiry kept minting tokens indefinitely. The docker path
-// (registry_token.SAKeyValidator) already refuses an expired key; these tests
-// hold the provider path to the same predicate.
+// its stated expiry kept minting tokens indefinitely. Докерная полоса отвергала
+// просроченный ключ своим проверяющим; тот снят вместе с приёмом ключевого
+// материала в поле пароля (задача #1143), и путь провайдера остался
+// ЕДИНСТВЕННЫМ, где срок ключа вообще проверяется. Эти пробы его и держат.
 //
 // Boundary and nil semantics are asserted explicitly because both are
 // load-bearing:
-//   - expires_at == now is EXPIRED (deny at the instant), byte-identical to
-//     SAKeyValidator's `!ExpiresAt.After(now)`;
+//   - expires_at == now is EXPIRED (deny at the instant): `!ExpiresAt.After(now)`,
+//     дословно тот предикат, которым отвергала снятая ныне докерная проверка;
 //   - expires_at IS NULL is NON-EXPIRING, not invalid — the bootstrap-admin
 //     mint (#58) inserts its mapping with a NULL expiry, as does every row
 //     predating the TTL knobs. Reading NULL as invalid would revoke the
@@ -69,10 +70,13 @@ func newExpirySAEnricher(t *testing.T, expiresAt *time.Time, now time.Time) *Tok
 	t.Helper()
 	sa := stubSAPort{
 		soc: domain.ServiceAccountOAuthClient{
-			ID:            domain.SAOAuthClientID(expirySocID),
-			SvaID:         domain.ServiceAccountID(expirySvaID),
-			OAuthClientID: domain.OAuthClientID(expiryClientID),
-			ExpiresAt:     expiresAt,
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             domain.SAOAuthClientID(expirySocID),
+			SvaID:          domain.ServiceAccountID(expirySvaID),
+			OAuthClientID:  domain.OAuthClientID(expiryClientID),
+			ExpiresAt:      expiresAt,
 		},
 		sa: domain.ServiceAccount{
 			ID:        domain.ServiceAccountID(expirySvaID),
@@ -174,10 +178,13 @@ func TestEnrichClaims_FederatedSAKey_Expired_Denied(t *testing.T) {
 	expired := now.Add(-time.Hour)
 	port := expiryFedSAPort{
 		soc: domain.ServiceAccountOAuthClient{
-			ID:            domain.SAOAuthClientID(expirySocID),
-			SvaID:         domain.ServiceAccountID(expirySvaID),
-			OAuthClientID: domain.OAuthClientID(expiryClientID),
-			ExpiresAt:     &expired,
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             domain.SAOAuthClientID(expirySocID),
+			SvaID:          domain.ServiceAccountID(expirySvaID),
+			OAuthClientID:  domain.OAuthClientID(expiryClientID),
+			ExpiresAt:      &expired,
 		},
 		sa: domain.ServiceAccount{
 			ID:        domain.ServiceAccountID(expirySvaID),
@@ -211,9 +218,12 @@ func TestEnrichClaims_UserToken_Expired_Denied(t *testing.T) {
 	expired := now.Add(-time.Minute)
 	ut := stubUserTokenPort{
 		uoc: domain.UserOAuthClient{
-			ID:        domain.UserOAuthClientID("uoc-123"),
-			UserID:    domain.UserID("usr-abc"),
-			ExpiresAt: &expired,
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             domain.UserOAuthClientID("uoc-123"),
+			UserID:         domain.UserID("usr-abc"),
+			ExpiresAt:      &expired,
 		},
 		user: domain.User{ID: domain.UserID("usr-abc"), AccountID: domain.AccountID("acc-xyz"),
 			// A personal token is its owner's authority: the owner's state is

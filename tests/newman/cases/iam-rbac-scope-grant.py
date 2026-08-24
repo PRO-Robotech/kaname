@@ -265,7 +265,14 @@ def revoke_binding_steps(bind_op_var, name_suffix):
     silently leave the grant standing. The custom ROLE this case creates is left in place: a
     role with no binding grants nothing, and role ids are runId-scoped.
     """
-    acb_var = f"{bind_op_var}Acb"
+    # Значение вызывающего становится ЧАСТЬЮ ИМЕНИ переменной прогона, а имя не
+    # экранируется: оно либо годно, либо порождаемый скрипт не разбирается — и
+    # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
+    # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
+    # вовсе, — экранировать одну сторону значит развести писателя и читателя
+    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    acb_var = js_name(f"{bind_op_var}Acb",
+                      where="iam/iam-rbac-scope-grant/revoke_binding_steps/bind_op_var")
     return [
         poll_request_until_status(
             name=f"revoke-{name_suffix}",

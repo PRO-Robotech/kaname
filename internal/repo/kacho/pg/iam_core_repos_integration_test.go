@@ -388,6 +388,9 @@ func TestIamExtRepos_6_6_6_SAOAuth_Insert_Happy(t *testing.T) {
 	repo := kachopg.NewSAOAuthClientRepo(pool)
 	tx := mustBeginTx(t, ctx, pool)
 	out, err := repo.Insert(ctx, tx, domain.ServiceAccountOAuthClient{
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
 		SvaID:           domain.ServiceAccountID(sid),
 		OAuthClientID:   domain.OAuthClientID("hydra-client-66-001"),
@@ -412,6 +415,9 @@ func TestIamExtRepos_6_6_7a_SAOAuth_DuplicateHydraID_Unique(t *testing.T) {
 	repo := kachopg.NewSAOAuthClientRepo(pool)
 	tx := mustBeginTx(t, ctx, pool)
 	_, err := repo.Insert(ctx, tx, domain.ServiceAccountOAuthClient{
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
 		SvaID:           domain.ServiceAccountID(sid1),
 		OAuthClientID:   domain.OAuthClientID("dup-hydra-id-7a"),
@@ -422,6 +428,9 @@ func TestIamExtRepos_6_6_7a_SAOAuth_DuplicateHydraID_Unique(t *testing.T) {
 
 	tx2 := mustBeginTx(t, ctx, pool)
 	_, err = repo.Insert(ctx, tx2, domain.ServiceAccountOAuthClient{
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
 		SvaID:           domain.ServiceAccountID(sid2),
 		OAuthClientID:   domain.OAuthClientID("dup-hydra-id-7a"),
@@ -442,6 +451,9 @@ func TestIamExtRepos_6_6_7b_SAOAuth_MissingSva_FK(t *testing.T) {
 	repo := kachopg.NewSAOAuthClientRepo(pool)
 	tx := mustBeginTx(t, ctx, pool)
 	_, err := repo.Insert(ctx, tx, domain.ServiceAccountOAuthClient{
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
 		SvaID:           domain.ServiceAccountID("sva_kac127nonexist01"),
 		OAuthClientID:   domain.OAuthClientID("hyd-7b"),

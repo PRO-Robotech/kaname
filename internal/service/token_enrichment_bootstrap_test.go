@@ -65,9 +65,12 @@ func TestEnrichClaims_BootstrapSA_ServiceAccountClaims(t *testing.T) {
 	fixed := time.Unix(1_700_000_000, 0).UTC()
 	sa := stubSAPort{
 		soc: domain.ServiceAccountOAuthClient{
-			ID:            domain.SAOAuthClientID(bootstrapSocID),
-			SvaID:         domain.ServiceAccountID(bootstrapSvaID),
-			OAuthClientID: domain.OAuthClientID(bootstrapClientID),
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             domain.SAOAuthClientID(bootstrapSocID),
+			SvaID:          domain.ServiceAccountID(bootstrapSvaID),
+			OAuthClientID:  domain.OAuthClientID(bootstrapClientID),
 		},
 		sa: domain.ServiceAccount{
 			ID:        domain.ServiceAccountID(bootstrapSvaID),

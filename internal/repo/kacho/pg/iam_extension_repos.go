@@ -41,7 +41,7 @@ func NewSAOAuthClientRepo(pool *pgxpool.Pool) *SAOAuthClientRepo {
 const socCols = `id, sva_id, hydra_client_id, description, created_by_user_id,
                  created_at, expires_at, last_used_at,
                  public_key_pem, key_algorithm, trusted_subjects, name, labels,
-                 declared_audiences`
+                 declared_audiences, credential_kind, secret_hash`
 
 func (r *SAOAuthClientRepo) Get(ctx context.Context, id domain.SAOAuthClientID) (domain.ServiceAccountOAuthClient, error) {
 	row := r.pool.QueryRow(ctx,
@@ -84,9 +84,9 @@ func (r *SAOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain
 		    id, sva_id, hydra_client_id, description, created_by_user_id,
 		    created_at, expires_at, last_used_at,
 		    public_key_pem, key_algorithm, trusted_subjects, name, labels,
-		    declared_audiences
+		    declared_audiences, credential_kind, secret_hash
 		) VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()), $7, $8, $9, $10, $11::jsonb, $12, $13::jsonb,
-		          $14::text[])
+		          $14::text[], $15, COALESCE($16, ''::bytea))
 		RETURNING ` + socCols
 	tsJSON, err := marshalTrustedSubjects(c.TrustedSubjects)
 	if err != nil {
@@ -97,7 +97,7 @@ func (r *SAOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain
 		return domain.ServiceAccountOAuthClient{}, mapErr(err, "", string(c.ID))
 	}
 	row := tx.QueryRow(ctx, q,
-		string(c.ID), string(c.SvaID), string(c.OAuthClientID),
+		string(c.ID), string(c.SvaID), nullableProviderMirror(c.OAuthClientID),
 		string(c.Description), string(c.CreatedByUserID),
 		nullableTime(c.CreatedAt), nullableTimePtr(c.ExpiresAt), nullableTimePtr(c.LastUsedAt),
 		c.PublicKeyPEM, c.KeyAlgorithm, tsJSON, string(c.Name), labelsJSON,
@@ -106,6 +106,8 @@ func (r *SAOAuthClientRepo) Insert(ctx context.Context, txh service.Tx, c domain
 		// отвергся ограничением — то есть выдача ключа без перечня перестала
 		// бы работать вовсе.
 		declaredAudiencesParam(c.DeclaredAudiences),
+		// Вид ЗАПИСЫВАЕТСЯ. Словарь закрыт ограничением таблицы.
+		string(c.CredentialKind), c.SecretHash,
 	)
 	out, err := scanSAOAuthClient(row)
 	if err != nil {
@@ -307,19 +309,36 @@ func (r *SAOAuthClientRepo) List(ctx context.Context, svaID domain.ServiceAccoun
 	return out, nextToken, nil
 }
 
-// DeleteByID removes a single SA OAuth client row. Idempotent — returns
-// ErrNotFound if missing. Accepts the opaque service.Tx (sa_keys use-case port)
-// and recovers the concrete pgx.Tx via txAsPgx.
-func (r *SAOAuthClientRepo) DeleteByID(ctx context.Context, txh service.Tx, id domain.SAOAuthClientID) error {
+// DeleteOwnedByID removes the credential row with ONE statement narrowed by its
+// owning service account, and returns the row it removed.
+//
+// The owner sits in the `WHERE`, not in a check ahead of it: read-then-check-then-
+// delete is the software check-then-act ban #10 forbids, and under concurrency both
+// revokes pass the check. Here one statement selects and removes under a row lock;
+// the second writer sees the row gone and gets zero rows.
+//
+// found=false is a LEGAL outcome, not an error. It covers three cases at once: the
+// row never existed, the row was already removed, the row belongs to another owner.
+// They cannot be told apart from here BY CONSTRUCTION — which is the requirement,
+// not an omission: a caller handed different outcomes would learn from the
+// difference whether SOMEONE ELSE'S credential exists (security.md §Hardening #6).
+// The branch on which they could diverge simply does not exist.
+func (r *SAOAuthClientRepo) DeleteOwnedByID(
+	ctx context.Context, txh service.Tx,
+	ownerID domain.ServiceAccountID, id domain.SAOAuthClientID,
+) (domain.ServiceAccountOAuthClient, bool, error) {
 	tx := txAsPgx(txh)
-	tag, err := tx.Exec(ctx, `DELETE FROM service_account_oauth_clients WHERE id = $1`, string(id))
+	row := tx.QueryRow(ctx,
+		fmt.Sprintf(`DELETE FROM service_account_oauth_clients WHERE id = $1 AND sva_id = $2 RETURNING %s`, socCols),
+		string(id), string(ownerID))
+	out, err := scanSAOAuthClient(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ServiceAccountOAuthClient{}, false, nil
+	}
 	if err != nil {
-		return mapErr(err, "SAOAuthClient.DeleteByID", string(id))
+		return domain.ServiceAccountOAuthClient{}, false, mapErr(err, "SAOAuthClient.DeleteOwnedByID", string(id))
 	}
-	if tag.RowsAffected() == 0 {
-		return iamerr.Wrapf(iamerr.ErrNotFound, "SAOAuthClient %s not found", id)
-	}
-	return nil
+	return out, true, nil
 }
 
 // TouchLastUsed — atomic update last_used_at (RETURNING для проверки exists).
@@ -344,15 +363,23 @@ func scanSAOAuthClient(row pgx.Row) (domain.ServiceAccountOAuthClient, error) {
 		tsBody     []byte
 		labelsBody []byte
 		audiences  []string
+		// Колонка зеркала стала NULL-абельной вместе с введением вида SECRET:
+		// регистрации у внешнего поставщика у него нет by construction.
+		// Скан в обычную строку упал бы на КАЖДОЙ такой строке — то есть вид
+		// был бы выпускаем и нечитаем.
+		mirror sql.NullString
 	)
 	if err := row.Scan(
-		(*string)(&c.ID), (*string)(&c.SvaID), (*string)(&c.OAuthClientID),
+		(*string)(&c.ID), (*string)(&c.SvaID), &mirror,
 		(*string)(&c.Description), (*string)(&c.CreatedByUserID),
 		&c.CreatedAt, &expiresAt, &lastUsedAt,
 		&c.PublicKeyPEM, &c.KeyAlgorithm, &tsBody, (*string)(&c.Name), &labelsBody,
-		&audiences,
+		&audiences, (*string)(&c.CredentialKind), &c.SecretHash,
 	); err != nil {
 		return domain.ServiceAccountOAuthClient{}, err
+	}
+	if mirror.Valid {
+		c.OAuthClientID = domain.OAuthClientID(mirror.String)
 	}
 	if expiresAt.Valid {
 		t := expiresAt.Time

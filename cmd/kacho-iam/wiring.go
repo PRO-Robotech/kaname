@@ -199,7 +199,34 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// закоммиченные только что — выдачу, сделанную этим же запросом, — а это ровно
 	// то, на чём отстаёт реплика: отзыв, действующий «с коммита», на реплике
 	// действовал бы «с момента, когда доехало».
-	relationStore := authzcascade.Wrap(relverdict.NewAsker(pool))
+	verdictAsker := relverdict.NewAsker(pool)
+	relationStore := authzcascade.Wrap(verdictAsker)
+	// Разбор оснований выходит НАРУЖУ, а не копится в никуда.
+	//
+	// Форма считает две вещи, у которых нет иного признака: сколько раз доступ
+	// выдан меточной ветвью (по каждой оси отдельно) и сколько отказов дано по
+	// основанию «типа нет в словаре модели». Оба состояния, при которых что-то
+	// сломано, снаружи выглядят как исправная работа: ось, переставшая
+	// спрашиваться, не выдаёт прав по меткам, а опечатка в имени типа отбирает
+	// доступ, — и то и другое арендатор читает как «прав не выдали».
+	//
+	// Провязка ЗДЕСЬ, у единственного места, где собран сам носитель. Величины
+	// копились с тех пор, когда их читало теневое сравнение форм; сравнения
+	// больше нет, а форма стала единственным источником вердикта — то есть
+	// считаются они теперь на живом пути решения о доступе, и читателя у них не
+	// было ни одного (#1224).
+	//
+	// Читается СНИМОК носителя, а не запомненное число: коллектор спрашивает
+	// источник на каждом сборе.
+	metricsReg.NewRelationVerdictGroundsCollector(func() metrics.RelationVerdictGrounds {
+		mirror, iamDirect, earlyStops := verdictAsker.LabelArmGrounds()
+		return metrics.RelationVerdictGrounds{
+			LabelArmMirror:        mirror,
+			LabelArmIAMDirect:     iamDirect,
+			EarlyStops:            earlyStops,
+			UndeclaredTypeDenials: verdictAsker.UndeclaredTypeDenials(),
+		}
+	})
 	// Отказ в старте, а не надежда: дверь без формы отвечала бы ошибкой на каждый
 	// вопрос о доступе, и служба была бы Ready, не решая ничего.
 	//
@@ -590,6 +617,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithSubjectChange(service.NewSubjectChangeService(kachopg.NewSubjectChangeRepo(pool))).
 		// SEC-C — FGA-proxy RPCs + ReBAC authz gate.
 		WithResourceRegistrar(registerResourceUC, regGate).
+		// #1142 — авторитет о предъявленном базовом секрете. Край зовёт его на
+		// промахе своего кэша вердикта; отзыв доходит до предъявления тем, что
+		// резолв не находит СНЯТОЙ строки.
+		WithBasicCredentialResolver(kachopg.NewBasicCredentialRepo(pool)).
+		WithLogger(logger).
 		// ForceLogout records a session revocation.
 		WithSessionRevoker(sessionRevAdapter).
 		// ...and ENDS the session at the provider. The cutoff alone stops tokens
@@ -815,7 +847,10 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 func mustProviderAdminClient(cfg config.Config) *clients.HydraAdminClient {
 	c, err := clients.NewHydraAdminClientWithCA(
 		cfg.AuthN.ResolveHydraAdminURL(),
-		os.Getenv("KACHO_IAM_HYDRA_ADMIN_TOKEN"),
+		// Читается ЧЕРЕЗ НАСТРОЙКУ, а не прямым обращением к окружению: ручка,
+		// прочитанная здесь напрямую, невидима проверке настройки при старте, и
+		// полосность посадки оказалась бы неполной ровно на неё (задача #1125).
+		cfg.AuthN.ResolveHydraAdminToken(),
 		cfg.AuthN.ResolveHydraAdminCAFile(),
 	)
 	if err != nil {

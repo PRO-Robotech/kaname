@@ -38,6 +38,8 @@ func NewHandler(issue *IssueSAKeyUseCase, revoke *RevokeSAKeyUseCase, list *List
 // Identity-spoofing guard: `created_by_user_id` MUST come from the
 // authenticated principal; request-body value is only accepted when it matches
 // the principal (strict reject per OQ-3 — silent-override hides client bugs).
+// The rule itself lives in ONE place for both credential-issuing lanes —
+// `shared.CreatedByLane`; only what makes THIS lane different is named here.
 func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*operationpb.Operation, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
@@ -55,25 +57,16 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 	// row, deterministic — never a request-body value, so no spoofing), while the
 	// REAL actor (the SA) is still captured in the durable audit_outbox event.
 	callerIsServiceAccount := operations.PrincipalFromContext(ctx).Type == "service_account"
-	if !callerIsServiceAccount {
-		// user/system caller — anti-spoofing: a request-body created_by must match
-		// the authenticated principal (or be empty).
-		if rv := req.GetCreatedByUserId(); rv != "" && rv != principal {
-			return nil, status.Error(codes.InvalidArgument,
-				"Illegal argument created_by_user_id: must match authenticated principal or be empty")
-		}
-	} else if req.GetCreatedByUserId() != "" {
-		// SA caller — the field is NOT honoured on this lane: created_by is resolved
-		// from the target SA's account owner (see the note above), never from the
-		// body. Accepting it in silence was the forbidden third outcome: the caller
-		// got 200 and believed its value had been applied, while the mismatch would
-		// surface only later, in someone else's audit trail, as a created_by nobody
-		// set. The lawful outcomes are implement / refuse explicitly / take off the
-		// contract — this is the second, refused synchronously so the caller sees it
-		// at once rather than in an async operation error.
-		return nil, status.Error(codes.InvalidArgument,
-			"Illegal argument created_by_user_id: must be empty for a service-account caller "+
-				"(created_by is resolved from the service account's account owner)")
+	// ОТЛИЧИЕ ЭТОЙ ПОЛОСЫ, названное решением, а не оставленное молчаливым: для
+	// вызывающей машины ответственный резолвится ВНУТРИ use-case из владельца
+	// аккаунта целевой учётки, и краю это значение недоступно — сверить
+	// присланное нечем, поэтому любое непустое отвергается. У полосы
+	// персонального токена записываемое значение названо самим запросом
+	// (`user_id`), поэтому совпавшее там принимается. Сверку полос между собой
+	// держит shared/created_by_lane_parity_test.go.
+	if err := shared.CreatedByLaneForSAKey(principal, callerIsServiceAccount).
+		ValidateRequested(req.GetCreatedByUserId()); err != nil {
+		return nil, err
 	}
 	// Phase 3b: federated trusted-subjects passthrough. nil/empty slice keeps
 	// Phase 3a private_key_jwt behaviour intact (no schema change for
@@ -112,6 +105,8 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 		// (the resource carries only Issue/List/Revoke — no Update).
 		Name:   req.GetName(),
 		Labels: labelsFromProto(req.GetLabels()),
+		// Вид удостоверения. Не назван — прежнее поведение дословно.
+		CredentialKind: CredentialKindFromProto(req.GetCredentialKind()),
 		// Federation OUT — caller-supplied external audience(s).
 		// Empty → use-case falls back to AudiencePrefix (kacho-internal).
 		Audience: req.GetAudience(),

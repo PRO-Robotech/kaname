@@ -190,13 +190,22 @@ flowchart LR
     <tr><td><code>INVALID_ARGUMENT</code></td><td>400</td><td>Нарушение формата / валидации; malformed id; immutable-поле в update_mask</td></tr>
     <tr><td><code>NOT_FOUND</code></td><td>404</td><td>Корректный по формату, но несуществующий ресурс</td></tr>
     <tr><td><code>ALREADY_EXISTS</code></td><td>409</td><td>Нарушение UNIQUE (например, дублирующее имя роли)</td></tr>
-    <tr><td><code>FAILED_PRECONDITION</code></td><td>409</td><td>Состояние не позволяет (удаление аккаунта с проектами; system-роль; deletion_protection)</td></tr>
+    <tr><td><code>FAILED_PRECONDITION</code></td><td>400</td><td>Состояние не позволяет (удаление аккаунта с проектами; system-роль; deletion_protection)</td></tr>
     <tr><td><code>UNAVAILABLE</code></td><td>503</td><td>База IAM или peer (Hydra) недоступны — fail-closed для мутаций</td></tr>
     <tr><td><code>UNAUTHENTICATED</code></td><td>401</td><td>Нет / невалиден JWT (или анонимный запрос)</td></tr>
     <tr><td><code>PERMISSION_DENIED</code></td><td>403</td><td>Нет нужного отношения в authz-Check</td></tr>
     <tr><td><code>INTERNAL</code></td><td>500</td><td>Внутренняя ошибка (фиксированный текст, без утечки SQL)</td></tr>
   </tbody>
 </table>
+
+:::note `FAILED_PRECONDITION` — это **400**, а не 409
+HTTP-статус выбирает край: своего отображения ошибок он не заводит, поэтому действует
+отображение grpc-gateway. В нём `FAILED_PRECONDITION` и `OUT_OF_RANGE` приходят тем же
+статусом **400**, что и `INVALID_ARGUMENT`, а 409 производят только `ALREADY_EXISTS` и
+`ABORTED`. Различать причины надо по полю `code` в теле `google.rpc.Status`, а не по
+HTTP-статусу: ветка `if status == 409` на предусловие не сработает ни разу.
+:::
+
 
 Тон сообщений стабилен и является частью контракта: `"<Resource> %s not found"`,
 `"<field> is immutable after <Resource>.Create"`, `"Illegal argument <thing>"`.

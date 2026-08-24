@@ -222,6 +222,14 @@ def preclean_account_loop(tag, next_step):
     the cap (observed: 17k+ list invocations, 35-min hang, CI timeout). Jumping forward on the
     terminal branch keeps the flag set across loop-backs, so the counter increments
     monotonically and the cap holds."""
+    # Значение вызывающего становится ЧАСТЬЮ ИМЕНИ переменной прогона, а имя не
+    # экранируется: оно либо годно, либо порождаемый скрипт не разбирается — и
+    # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
+    # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
+    # вовсе, — экранировать одну сторону значит развести писателя и читателя
+    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    tag = js_name(tag,
+                  where="iam/rbac-visibility-set/preclean_account_loop/tag")
     dup = f"{tag}Dup"
     delop = f"{tag}DelOp"
     list_step = f"{tag}-preclean-list"

@@ -377,6 +377,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chUserOp');",
                   "const j = pm.response.json();",
                   "pm.test('grant accepted (200 Operation)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
                   "pm.test('IAM Operation envelope (iop)', () => pm.expect(j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
@@ -1005,6 +1006,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgEquivGrpOp');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -1186,6 +1188,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgEquivAddOp');",
                   "const _mc = parseInt(pm.environment.get('_chgEquivAddOpMCount') || '0', 10);",
                   "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgEquivAddOpMCount', String(_mc + 1)); const _ipd7 = Date.now(); while (Date.now() - _ipd7 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgEquivAddOpMCount'); pm.environment.unset('_chgEquivAddOpMStarted');",
@@ -1358,6 +1361,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgEquivBindOp');",
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
                   "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
@@ -1995,6 +1999,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgFlipGrpOp');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -2174,6 +2179,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgFlipBindOp');",
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
                   "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
@@ -2374,6 +2380,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgFlipAddOp');",
                   "const _mc = parseInt(pm.environment.get('_chgFlipAddOpMCount') || '0', 10);",
                   "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgFlipAddOpMCount', String(_mc + 1)); const _ipd7 = Date.now(); while (Date.now() - _ipd7 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgFlipAddOpMCount'); pm.environment.unset('_chgFlipAddOpMStarted');",
@@ -2628,6 +2635,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgFlipRmOp');",
                   "const _mc = parseInt(pm.environment.get('_chgFlipRmOpMCount') || '0', 10);",
                   "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgFlipRmOpMCount', String(_mc + 1)); const _ipd7 = Date.now(); while (Date.now() - _ipd7 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgFlipRmOpMCount'); pm.environment.unset('_chgFlipRmOpMStarted');",
@@ -3094,6 +3102,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgNmGrpOp');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -3275,6 +3284,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgNmAddOp');",
                   "const _mc = parseInt(pm.environment.get('_chgNmAddOpMCount') || '0', 10);",
                   "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgNmAddOpMCount', String(_mc + 1)); const _ipd7 = Date.now(); while (Date.now() - _ipd7 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgNmAddOpMCount'); pm.environment.unset('_chgNmAddOpMStarted');",
@@ -3447,6 +3457,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgNmBindOp');",
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
                   "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
@@ -4079,6 +4090,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgRvGrpOp');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -4260,6 +4272,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgRvAddOp');",
                   "const _mc = parseInt(pm.environment.get('_chgRvAddOpMCount') || '0', 10);",
                   "if (pm.response.code === 403 && _mc < 300) { pm.environment.set('_chgRvAddOpMCount', String(_mc + 1)); const _ipd7 = Date.now(); while (Date.now() - _ipd7 < 100) void 0; /* real inter-poll delay: cap 300 x 100ms ~= 30s budget (testing.md) */ pm.execution.setNextRequest(pm.info.requestName); return; }",
                   "pm.environment.unset('_chgRvAddOpMCount'); pm.environment.unset('_chgRvAddOpMStarted');",
@@ -4432,6 +4445,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chgRvBindOp');",
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
                   "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
@@ -5245,6 +5259,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chSaOp');",
                   "const j = pm.response.json();",
                   "pm.test('grant accepted (200 Operation)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
                   "pm.test('IAM Operation envelope (iop)', () => pm.expect(j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
@@ -6128,6 +6143,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chSaIsoOp');",
                   "const j = pm.response.json();",
                   "pm.test('grant accepted (200 Operation)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
                   "pm.test('IAM Operation envelope (iop)', () => pm.expect(j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",
@@ -7006,6 +7022,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('chUsrIsoOp');",
                   "const j = pm.response.json();",
                   "pm.test('grant accepted (200 Operation)', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
                   "pm.test('IAM Operation envelope (iop)', () => pm.expect(j.id, JSON.stringify(j)).to.match(/^iop[a-z0-9]+$/));",

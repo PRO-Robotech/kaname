@@ -229,9 +229,12 @@ func TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID(t *testing
 	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{
 		found: true,
 		soc: domain.ServiceAccountOAuthClient{
-			ID:            "soc_01abcdefghjkmnpqr",
-			SvaID:         "sva_01abcdefghjkmnpqr",
-			OAuthClientID: "cc-client-uuid",
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             "soc_01abcdefghjkmnpqr",
+			SvaID:          "sva_01abcdefghjkmnpqr",
+			OAuthClientID:  "cc-client-uuid",
 		},
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",

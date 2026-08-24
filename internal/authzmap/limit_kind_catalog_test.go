@@ -75,7 +75,7 @@ func TestLimitKindsAreKnownObjectTypes(t *testing.T) {
 
 	nested := 0
 	for _, k := range kinds {
-		unknown := findUnknownKindParts(k, authzmapResolves)
+		unknown := findUnknownKindParts(k, resolvesKindPart)
 		require.Emptyf(t, unknown,
 			"вид %q называет часть(и) %v, которых нет в закрытой таблице типов модели прав —\n"+
 				"    потолок стоял бы на имени, которого в платформе нет, и не применился бы\n"+
@@ -124,7 +124,7 @@ func TestEveryCatalogKindDeclaresACarrier(t *testing.T) {
 		// с ним ровно на добавлении следующего. Слово, не являющееся объявленным
 		// корнем, сюда не попадает — оно уходит на резолв и краснеет там.
 		if !tenancyRoots[e.Carrier] {
-			require.Emptyf(t, findUnknownKindParts(domain.LimitKind(e.Carrier), authzmapResolves),
+			require.Emptyf(t, findUnknownKindParts(domain.LimitKind(e.Carrier), resolvesKindPart),
 				"носитель %q вида %q не найден в закрытой таблице типов модели прав", e.Carrier, e.Kind)
 		}
 
@@ -275,6 +275,27 @@ func findUnknownKindParts(k domain.LimitKind, resolves func(string) bool) []stri
 	}
 	sort.Strings(out)
 	return out
+}
+
+// resolvesKindPart — часть вида резолвится, если она называет ЛИБО тип модели
+// прав, ЛИБО объявленный подчинённый ресурс.
+//
+// Второй источник имён введён задачей #1191 и НЕ является ослаблением: множество
+// имён остаётся закрытым, а истинность второй таблицы анкерена в дереве
+// утверждениями G5/G6 (`services/iam/internal/migrations`) — таблицы строк
+// существуют, и на них стоит триггер списания, называющий вид. Ослаблением было
+// бы «часть, которая не резолвится, пропускается».
+//
+// Предмет расширения назван в приёмке §3.2: удостоверение адресуется арендатором,
+// но типа модели прав не имеет и иметь не должно — право на него вычисляется от
+// принципала, и объект, на который его можно было бы ВЫДАТЬ, расширил бы
+// поверхность выдачи ради учёта.
+func resolvesKindPart(dotted string) bool {
+	if authzmapResolves(dotted) {
+		return true
+	}
+	_, ok := domain.SubordinateResourceOf(domain.LimitKind(dotted))
+	return ok
 }
 
 // authzmapResolves — членство двухчастного токена в закрытой таблице типов.

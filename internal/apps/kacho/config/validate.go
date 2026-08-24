@@ -105,8 +105,17 @@ func (c Config) Validate() error {
 	if c.AuthN.Mode.IsProduction() {
 		errs = multierr.Append(errs, c.validateProductionAuthNSecrets())
 		errs = multierr.Append(errs, c.validateProductionBootstrapMint())
-		errs = multierr.Append(errs, c.validateProductionProviderAdminHop())
-		errs = multierr.Append(errs, c.validateProductionProviderPublicHops())
+
+		// ПОСАДКА ЛИЧНОСТИ и требования ЕЁ полосы (задача #1125). Три
+		// провайдерских стража, стоявшие здесь безусловно, стали строками
+		// таблицы LaneRequirements и предъявляются только под `external`: под
+		// `own` внешнего поставщика нет вовсе, и требовать его адресов значило
+		// бы не пускать в старт стенд, которому они не нужны ни для чего.
+		//
+		// Половина ПОЛНОТЫ ПРОВЯЗКИ (ValidateLaneWiring) остаётся в
+		// композиционном корне: настройка объектов не видит и выразить их
+		// отсутствие не может.
+		errs = multierr.Append(errs, c.validateIdentityProviderLane())
 
 		// DB-TLS gate — applies to EVERY production variant, not strict-only. All
 		// IAM data (user/SA records, session-revocation + token rows, the
@@ -323,8 +332,22 @@ type providerPublicHop struct {
 // Only the explicit sources count as declared — the YAML setting and its ENV
 // override — because those are the two an operator actually writes. dev keeps the
 // derivation and tolerates anything: an in-process fixture has no provider.
-func (c Config) validateProductionProviderPublicHops() error {
-	hops := []providerPublicHop{
+// providerPublicHopKind — какой из двух публичных контуров проверяется. Их
+// разделили, потому что таблица требований полос называет их РАЗНЫМИ
+// обязательными элементами: набор проверочных ключей решает, чьи подписи
+// принимает data-plane, а адрес обмена возит подписанное утверждение. Отказ по
+// одному не есть отказ по другому, и клетка произведения у каждого своя.
+type providerPublicHopKind int
+
+const (
+	providerHopJWKS providerPublicHopKind = iota
+	providerHopToken
+)
+
+// providerPublicHops — объявление обоих контуров. Одно место: тексты отказов
+// часть контракта оператора, и вторая копия разошлась бы с первой молча.
+func (c Config) providerPublicHops() []providerPublicHop {
+	return []providerPublicHop{
 		{
 			setting:   "authn.hydra-jwks-url",
 			env:       "KACHO_IAM_HYDRA_JWKS_URL",
@@ -346,6 +369,19 @@ func (c Config) validateProductionProviderPublicHops() error {
 				"minted bearer back out of the response body",
 		},
 	}
+}
+
+// validateProviderPublicHop проверяет ОДИН публичный контур поставщика.
+func (c Config) validateProviderPublicHop(kind providerPublicHopKind) error {
+	hops := c.providerPublicHops()
+	if int(kind) < 0 || int(kind) >= len(hops) {
+		return fmt.Errorf("internal: unknown provider public hop %d", int(kind))
+	}
+	return c.validateProviderPublicHops([]providerPublicHop{hops[kind]})
+}
+
+// validateProviderPublicHops — общее тело проверки перечня контуров.
+func (c Config) validateProviderPublicHops(hops []providerPublicHop) error {
 	var errs error
 	for _, h := range hops {
 		if h.declared == "" {

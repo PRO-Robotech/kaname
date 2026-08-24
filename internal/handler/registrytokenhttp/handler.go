@@ -5,8 +5,9 @@
 // auth-server: the `/iam/token` endpoint (Basic-auth → Hydra-brokered token).
 //
 // Transport only: parse the Docker token-auth request, delegate to the
-// registry_token use-case (which verifies the SA-key and brokers a token from
-// Ory Hydra), format the Docker-compatible JSON. No business logic.
+// registry_token use-case (which verifies the presented BASIC ACCESS TOKEN —
+// the only credential kind this lane accepts, задача #1143 — and issues the
+// registry token), format the Docker-compatible JSON. No business logic.
 //
 // Hydra remains the token issuer/signer; kacho-iam mints NOTHING. The data-plane
 // verifies the returned token against HYDRA's JWKS — which it now fetches from a
@@ -33,8 +34,33 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/PRO-Robotech/kacho/pkg/credsecret"
 	registrytokenuc "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/registry_token"
 )
+
+// unauthorizedBody — ЕДИНСТВЕННОЕ тело отказа этой полосы, одно на ВСЯКУЮ
+// причину: отсутствие удостоверения, чужое имя, неверный секрет, негодный вид,
+// отвергнутый адресат. Различимость снаружи сказала бы предъявителю, как именно
+// разобран его вход, — то есть была бы оракулом.
+//
+// Годный вид оно называет СТАТИЧЕСКИ — так же, как называет его страница
+// документации, — а не по разбору предъявленного. Из тела нельзя узнать ничего
+// о том, что прислали; можно узнать только, что прислать следовало. Без этого
+// арендатор, настроенный на снятый вход по ключевому материалу (#1143), видит
+// отказ и не знает, чем его заменить.
+//
+// Марка берётся из `credsecret` — ЕДИНСТВЕННОГО объявленного места, где живёт
+// форма базового удостоверения. Второй её копии здесь не заводится: копия
+// разошлась бы молча, и разошлась бы именно в подсказке, которую читают вместо
+// документации.
+// Формулировка НЕ утверждает, отвергнут ли прежний вид НА ЭТОМ контуре: пока
+// открыто окно перехода #1143, он принимается, и текст, объявивший обратное,
+// был бы ложью для одной посадки и оракулом ручки для другой (по нему
+// перебором узнают, объявлено ли окно). Поэтому тело говорит о ГОДНОМ виде и
+// только о нём — то же, что говорит страница документации.
+var unauthorizedBody = `{"error":"unauthorized","error_description":` +
+	`"this lane issues registry tokens for the Kacho basic access token: docker login -u <credential id> -p ` +
+	credsecret.Mark + `<credential id>_<secret>"}`
 
 // TokenPath — the token endpoint path. MUST equal the data-plane's Bearer realm
 // path (the WWW-Authenticate realm), so verifiers and docker clients resolve the
@@ -53,7 +79,7 @@ func NewMux(token http.Handler) *http.ServeMux {
 }
 
 // TokenIssuer — the registry_token use-case port the handler delegates to.
-// Execute brokers the SA-key (Basic-creds) path; ExecuteAnonymous brokers the
+// Execute serves the presented-credential (Basic) path; ExecuteAnonymous brokers the
 // public `user:*` anonymous-pull path (no Basic creds); AnonymousEnabled reports
 // whether that path is configured (else the handler fails closed to a challenge).
 type TokenIssuer interface {
@@ -194,6 +220,15 @@ func (h *TokenHandler) writeError(w http.ResponseWriter, service string, err err
 		}
 		h.challenge(w, service)
 	case errors.Is(err, registrytokenuc.ErrUnauthenticated):
+		if errors.Is(err, registrytokenuc.ErrCredentialKindNotAccepted) && h.logger != nil {
+			// Наружу — тот же отказ, что и на всяком другом; в журнал —
+			// причина: «клиент настроен на снятый вход» и «секрет неверен»
+			// чинятся в разных местах и разными людьми, а без этой строки
+			// они выглядят одинаково. Ни имени, ни предъявленного здесь нет
+			// — в журнал не уходит то, чего клиенту не отдают.
+			h.logger.Warn("docker token: presented credential kind is no longer accepted "+
+				"(the lane takes the Kacho basic access token)", "service", service)
+		}
 		h.challenge(w, service)
 	default:
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
@@ -221,7 +256,7 @@ func (h *TokenHandler) writeToken(w http.ResponseWriter, out registrytokenuc.Iss
 func (h *TokenHandler) challenge(w http.ResponseWriter, service string) {
 	w.Header().Set("WWW-Authenticate",
 		fmt.Sprintf(`Bearer realm=%q,service=%q`, h.cfg.Realm, service))
-	http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+	http.Error(w, unauthorizedBody, http.StatusUnauthorized)
 }
 
 // verifiedClientCertThumbprint — отпечаток клиентского сертификата хопа выдачи

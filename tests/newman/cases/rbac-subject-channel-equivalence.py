@@ -153,6 +153,14 @@ def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA", allow_already_exis
     grant a CONCURRENT suite issued between this pre-clean and this create is still
     ACTIVE, so the downstream read converges either way.
     """
+    # Значение вызывающего становится ЧАСТЬЮ ИМЕНИ переменной прогона, а имя не
+    # экранируется: оно либо годно, либо порождаемый скрипт не разбирается — и
+    # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
+    # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
+    # вовсе, — экранировать одну сторону значит развести писателя и читателя
+    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    op_var = js_name(op_var,
+                     where="iam/rbac-subject-channel-equivalence/poll_op/op_var")
     capture = ""
     if out_id_var:
         capture = (f"if (j.response && j.response.id && !pm.environment.get('{out_id_var}')) "
@@ -204,6 +212,14 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
     grant step when there is nothing to clean. AccessBinding.Delete is async → await it
     (revoked_at) before the fresh create, else the strict-create races the still-active
     grant → ALREADY_EXISTS (active-grant partial UNIQUE)."""
+    # Значение вызывающего становится ЧАСТЬЮ ИМЕНИ переменной прогона, а имя не
+    # экранируется: оно либо годно, либо порождаемый скрипт не разбирается — и
+    # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
+    # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
+    # вовсе, — экранировать одну сторону значит развести писателя и читателя
+    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    tag = js_name(tag,
+                  where="iam/rbac-subject-channel-equivalence/pre_clean/tag")
     dup_var = f"{tag}DupAcb"
     del_op_var = f"{tag}DelOp"
     # `{{var}}` подставляется краем в ПОЛЯХ ЗАПРОСА, но не в test-script'е, поэтому
@@ -427,6 +443,15 @@ def _revoke_phantom(grant_op_var):
     поэтому здесь она ТРЕБУЕТСЯ, а не допускается: 404 при успешном создании означает,
     что выдачу снёс кто-то посторонний, — и это обязано валить кейс, потому что тогда
     отзыв, который кейс объявляет своим предметом, не выполнен ничем."""
+    # Значение вызывающего становится ЧАСТЬЮ ИМЕНИ переменной прогона, а имя не
+    # экранируется: оно либо годно, либо порождаемый скрипт не разбирается — и
+    # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
+    # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
+    # вовсе, — экранировать одну сторону значит развести писателя и читателя
+    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    grant_op_var = js_name(
+        grant_op_var,
+        where="iam/rbac-subject-channel-equivalence/_revoke_phantom/grant_op_var")
     return [
         "pm.test('404 допустим ТОЛЬКО как фантом-id полосы ALREADY_EXISTS', () => {",
         "  pm.expect(pm.response.code, JSON.stringify(j)).to.eql(404);",
@@ -463,6 +488,15 @@ def revoke_await(name_prefix, acb_var, rev_op_var, grant_op_var=None):
     holds `system_admin @ cluster_kacho_root` (the cluster-admin short-circuit set up by
     authz-fixtures), which ALLOWs any Check without a per-object tuple — so the DELETE commits immediately
     and deterministically (no creator-tuple race). A small 403-retry remains as a belt."""
+    # Значение вызывающего становится ЧАСТЬЮ ИМЕНИ переменной прогона, а имя не
+    # экранируется: оно либо годно, либо порождаемый скрипт не разбирается — и
+    # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
+    # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
+    # вовсе, — экранировать одну сторону значит развести писателя и читателя
+    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    rev_op_var = js_name(
+        rev_op_var,
+        where="iam/rbac-subject-channel-equivalence/revoke_await/rev_op_var")
     return [
         Step(
             name=f"{name_prefix}-revoke",
@@ -550,6 +584,14 @@ def member_op(name, verb, group_var, member_id_tmpl, op_var):
     The POST is retried PAST a 403 — the group was just created by the admin, but the admin's
     `v_update` on the fresh group OBJECT (action iam.group_members.addMember) materializes via
     fga_outbox a beat after Create→done, so an immediate member op can race it and 403."""
+    # Значение вызывающего становится ЧАСТЬЮ ИМЕНИ переменной прогона, а имя не
+    # экранируется: оно либо годно, либо порождаемый скрипт не разбирается — и
+    # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
+    # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
+    # вовсе, — экранировать одну сторону значит развести писателя и читателя
+    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    op_var = js_name(op_var,
+                     where="iam/rbac-subject-channel-equivalence/member_op/op_var")
     return [
         Step(
             name=name,

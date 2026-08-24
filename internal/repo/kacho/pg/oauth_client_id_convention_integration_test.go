@@ -52,8 +52,9 @@ func TestOAuthClientIDConvention_SA_BothFormatsInsert(t *testing.T) {
 	insertSA := func(id string) error {
 		_, e := pool.Exec(ctx, `
 			INSERT INTO service_account_oauth_clients
-			  (id, sva_id, hydra_client_id, description, created_by_user_id, public_key_pem, key_algorithm)
-			VALUES ($1, $2, $3, '', $4, '', 'ES256')`,
+			  (id, sva_id, hydra_client_id, description, created_by_user_id, public_key_pem, key_algorithm,
+			   credential_kind)
+			VALUES ($1, $2, $3, '', $4, '', 'ES256', 'LEGACY')`,
 			id, string(svaID), "hydra-"+id, string(uid))
 		return e
 	}
@@ -89,8 +90,9 @@ func TestOAuthClientIDConvention_User_BothFormatsInsert(t *testing.T) {
 	insertUser := func(id string) error {
 		_, e := pool.Exec(ctx, `
 			INSERT INTO user_oauth_clients
-			  (id, user_id, hydra_client_id, description, created_by_user_id, public_key_pem, key_algorithm)
-			VALUES ($1, $2, $3, '', $4, '', 'ES256')`,
+			  (id, user_id, hydra_client_id, description, created_by_user_id, public_key_pem, key_algorithm,
+			   credential_kind)
+			VALUES ($1, $2, $3, '', $4, '', 'ES256', 'LEGACY')`,
 			id, string(uid), "hydra-"+id, string(uid))
 		return e
 	}

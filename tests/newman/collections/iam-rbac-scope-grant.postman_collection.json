@@ -122,6 +122,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('_op__sgRoleA');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -300,6 +301,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('_sgBindAOp');",
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
                   "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
@@ -1092,6 +1094,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('_op__sgRoleGC');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -1270,6 +1273,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('_sgBindGCOp');",
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
                   "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",

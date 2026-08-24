@@ -407,9 +407,11 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 // expired reports whether a credential with this stated expiry may no longer
 // mint tokens.
 //
-// Two decisions are load-bearing here, both matching
-// registry_token.SAKeyValidator so a key cannot be alive on the docker path and
-// dead on the provider path (or the reverse) at the same instant:
+// Two decisions are load-bearing here. Прежде они сверялись с проверяющим
+// ключевой материал докерной полосы — чтобы ключ не был жив на одной и мёртв на
+// другой в один и тот же миг; тот проверяющий снят вместе с приёмом ключевого
+// материала в поле пароля (задача #1143), и полосу ключа теперь несёт только
+// путь провайдера. Решения остаются, и вот почему:
 //
 //   - nil means NON-EXPIRING, not invalid. The bootstrap-admin mapping (#58) is
 //     inserted with no expiry, as is every row predating the SA-key TTL knobs;

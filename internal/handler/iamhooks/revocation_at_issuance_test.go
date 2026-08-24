@@ -320,7 +320,10 @@ func TestTokenHook_PersonalToken_IssuedBeforeCutoff_NoUsableToken(t *testing.T) 
 	revs.MarkUserRevokedBefore(cutoffUserID, issued.Add(time.Hour))
 	h := newIssuanceHook(t, users, revs, &fakeAudit{}, &fakeUserTokenPort{
 		client: domain.UserOAuthClient{
-			ID: "utk_01abcdefghjkmnpqx", UserID: cutoffUserID,
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             "utk_01abcdefghjkmnpqx", UserID: cutoffUserID,
 			OAuthClientID: capturedMachine, CreatedAt: issued,
 		},
 		user: users.users[0],
@@ -345,7 +348,10 @@ func TestTokenHook_PersonalToken_IssuedAfterCutoff_IsIssued(t *testing.T) {
 	revs.MarkUserRevokedBefore(cutoffUserID, cutoff)
 	h := newIssuanceHook(t, users, revs, &fakeAudit{}, &fakeUserTokenPort{
 		client: domain.UserOAuthClient{
-			ID: "utk_01abcdefghjkmnpqy", UserID: cutoffUserID,
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             "utk_01abcdefghjkmnpqy", UserID: cutoffUserID,
 			OAuthClientID: capturedMachine, CreatedAt: cutoff.Add(time.Hour),
 		},
 		user: users.users[0],

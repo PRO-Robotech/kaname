@@ -55,6 +55,9 @@ func TestOAuthClientNameLabels_SA_PersistOnInsert_RoundTrip(t *testing.T) {
 	txb := kachopg.NewPoolTxBeginner(pool)
 
 	row := domain.ServiceAccountOAuthClient{
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
 		SvaID:           svaID,
 		OAuthClientID:   domain.OAuthClientID("hydra-soc-nl"),
@@ -111,6 +114,9 @@ func TestOAuthClientNameLabels_SA_EmptyDefaults(t *testing.T) {
 
 	// name/labels omitted → DEFAULT '' / '{}' — round-trips as empty (not NULL).
 	row := domain.ServiceAccountOAuthClient{
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.SAOAuthClientID(domain.NewKac127ID(domain.PrefixSAOAuthClient)),
 		SvaID:           svaID,
 		OAuthClientID:   domain.OAuthClientID("hydra-soc-def"),
@@ -146,6 +152,9 @@ func TestOAuthClientNameLabels_User_PersistOnInsert_RoundTrip(t *testing.T) {
 	txb := kachopg.NewPoolTxBeginner(pool)
 
 	row := domain.UserOAuthClient{
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.UserOAuthClientID(domain.NewKac127ID(domain.PrefixUserOAuthClient)),
 		UserID:          uid,
 		OAuthClientID:   domain.OAuthClientID("hydra-uoc-nl"),
@@ -198,6 +207,9 @@ func TestOAuthClientNameLabels_User_InvalidLabels_CheckViolation(t *testing.T) {
 		tooMany[domain.LabelKey(fmt.Sprintf("k%d", i))] = domain.LabelVal("v")
 	}
 	row := domain.UserOAuthClient{
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.UserOAuthClientID(domain.NewKac127ID(domain.PrefixUserOAuthClient)),
 		UserID:          uid,
 		OAuthClientID:   domain.OAuthClientID("hydra-uoc-bad"),

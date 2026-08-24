@@ -51,18 +51,13 @@ func (m *stubMinter) MintToken(_ context.Context, in registrytokenuc.MintInput) 
 	return registrytokenuc.MintOutput{AccessToken: raw, ExpiresIn: 300}, nil
 }
 
-type stubValidator struct{ cred registrytokenuc.Credential }
-
-func (v stubValidator) Validate(context.Context, string, string) (registrytokenuc.Credential, error) {
-	return v.cred, nil
-}
-
 type nopSigner struct{}
 
 func (nopSigner) Sign(registrytokenuc.AssertionInput) (string, error) { return "assertion", nil }
 
-func newUseCase(t *testing.T, minter registrytokenuc.LocalMinter, ex registrytokenuc.TokenExchanger) *registrytokenuc.IssueRegistryTokenUseCase {
+func newUseCase(t *testing.T, minter registrytokenuc.LocalMinter, ex registrytokenuc.TokenExchanger) (*registrytokenuc.IssueRegistryTokenUseCase, string) {
 	t.Helper()
+	secret, authority := newBasicCredential(t)
 	uc := registrytokenuc.NewIssueRegistryTokenUseCase(registrytokenuc.Config{
 		AssertionAudience: "https://provider/oauth2/token",
 		AllowedAudiences:  []string{"registry.kacho.local"},
@@ -70,21 +65,22 @@ func newUseCase(t *testing.T, minter registrytokenuc.LocalMinter, ex registrytok
 		Anonymous: registrytokenuc.AnonymousIdentity{
 			ClientID: "anon-client", KeyID: "anon-kid", PrivateKeyPEM: "anon-pem",
 		},
-	}, stubValidator{cred: registrytokenuc.Credential{
-		ClientID: "hydra-client-1", KeyID: "key-1", Subject: "sva-42",
-	}}, nopSigner{}, ex)
-	return uc.WithLocalMinter(minter)
+	}, nopSigner{}, ex).WithBasicCredentialResolver(authority)
+	if minter != nil {
+		uc = uc.WithLocalMinter(minter)
+	}
+	return uc, secret
 }
 
 // TestExecute_MintsWithOurSignerAndStopsCallingThePreviousIssuer — приземление.
 func TestExecute_MintsWithOurSignerAndStopsCallingThePreviousIssuer(t *testing.T) {
 	ex := &recordingExchanger{}
 	minter := &stubMinter{}
-	uc := newUseCase(t, minter, ex)
+	uc, secret := newUseCase(t, minter, ex)
 
-	out, err := uc.Execute(context.Background(), registrytokenuc.IssueInput{
-		Username: "hydra-client-1", Password: "pem", Service: "registry.kacho.local",
-	})
+	in := dockerLogin(secret)
+	in.Service = "registry.kacho.local"
+	out, err := uc.Execute(context.Background(), in)
 	require.NoError(t, err)
 	require.NotEmpty(t, out.Token)
 	require.Equal(t, 0, ex.calls, "прежний издатель не должен звучать на переведённом контуре")
@@ -92,16 +88,17 @@ func TestExecute_MintsWithOurSignerAndStopsCallingThePreviousIssuer(t *testing.T
 	// Субъект токена — ТОТ ЖЕ, что приёмная сторона резолвила до перевода:
 	// иначе смена чеканки тихо сменила бы принципала, и запросы отвергались бы
 	// уже правами, а не подписью.
-	require.Equal(t, "sva-42", minter.in.Subject)
+	require.Equal(t, dockerSubject, minter.in.Subject)
 	require.Equal(t, "registry.kacho.local", minter.in.Audience)
 
-	// Положительный контроль обратной стороны: без нашего подписанта контур
-	// работает по-прежнему — прежний издатель зовётся. Без этой половины
-	// «не зовём» зелено и на сломанном контуре, который не зовёт никого.
-	legacy := newUseCase(t, nil, ex)
-	out, err = legacy.Execute(context.Background(), registrytokenuc.IssueInput{
-		Username: "hydra-client-1", Password: "pem",
-	})
+	// Положительный контроль обратной стороны переехал на АНОНИМНЫЙ поток, и
+	// это не послабление, а следствие #1143: полоса предъявленного
+	// удостоверения к прежнему издателю не ходит НИ ПРИ КАКОЙ настройке —
+	// подписывать утверждение нечем, ключевого материала у принимаемого вида
+	// не существует. Без этой половины «не зовём» зелено и на контуре, который
+	// не зовёт никого.
+	legacy, _ := newUseCase(t, nil, ex)
+	out, err = legacy.ExecuteAnonymous(context.Background(), "registry.kacho.local")
 	require.NoError(t, err)
 	require.Equal(t, 1, ex.calls)
 	require.Equal(t, "from-the-previous-issuer", out.Token)
@@ -113,7 +110,7 @@ func TestExecute_MintsWithOurSignerAndStopsCallingThePreviousIssuer(t *testing.T
 func TestExecuteAnonymous_MintsWithOurSigner(t *testing.T) {
 	ex := &recordingExchanger{}
 	minter := &stubMinter{}
-	uc := newUseCase(t, minter, ex)
+	uc, _ := newUseCase(t, minter, ex)
 
 	out, err := uc.ExecuteAnonymous(context.Background(), "registry.kacho.local")
 	require.NoError(t, err)
@@ -133,11 +130,9 @@ func TestExecuteAnonymous_MintsWithOurSigner(t *testing.T) {
 // перевод контура снимается сам собой при первой же неисправности.
 func TestExecute_MinterFailureIsFailClosed(t *testing.T) {
 	ex := &recordingExchanger{}
-	uc := newUseCase(t, &stubMinter{err: errors.New("no signing key")}, ex)
+	uc, secret := newUseCase(t, &stubMinter{err: errors.New("no signing key")}, ex)
 
-	_, err := uc.Execute(context.Background(), registrytokenuc.IssueInput{
-		Username: "hydra-client-1", Password: "pem",
-	})
+	_, err := uc.Execute(context.Background(), dockerLogin(secret))
 	require.Error(t, err)
 	require.ErrorIs(t, err, registrytokenuc.ErrIssuerUnavailable,
 		"неисправность своей чеканки — недоступность издателя, а не негодные учётные данные")

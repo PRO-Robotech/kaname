@@ -12,6 +12,8 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
+
+	"github.com/PRO-Robotech/kacho/pkg/identityposture"
 )
 
 // Load reads configuration from a YAML file (if path != "") + applies
@@ -40,6 +42,23 @@ func Load(path string) (Config, error) {
 	v.SetEnvPrefix("KACHO_IAM")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "__", "-", "_"))
 	v.AutomaticEnv()
+
+	// ПОСАДКА ЛИЧНОСТИ привязывается к окружению ЯВНО, и это не украшение.
+	//
+	// AutomaticEnv резолвит переменную только для ключа, который viper уже
+	// ЗНАЕТ, — то есть объявленного умолчанием либо привязкой. У этого ключа
+	// умолчания нет намеренно (см. defaults.go), поэтому без явной привязки
+	// документированная переменная не доезжала бы до поля ВООБЩЕ: оператор
+	// задаёт её, процесс принимает старт как «посадка не объявлена», и ручка
+	// выглядит настроенной, ничего не делая.
+	//
+	// Привязка регистрирует ключ, НЕ давая ему значения: незаданная переменная
+	// оставляет поле нулевым, то есть «не объявлено», и отказ старта наступает
+	// ровно так же. Свойство закреплено пробой documented-env-имени.
+	if err := v.BindEnv("authn."+identityposture.FieldName,
+		"KACHO_IAM_AUTHN__IDENTITY_PROVIDER"); err != nil {
+		return Config{}, fmt.Errorf("bind %s env: %w", IdentityProviderSetting, err)
+	}
 
 	// YAML file (optional).
 	if path != "" {
@@ -71,6 +90,7 @@ func Load(path string) (Config, error) {
 			mapstructure.StringToTimeDurationHookFunc(),
 			mapstructure.StringToSliceHookFunc(","),
 			modeDecodeHook(),
+			identityProviderDecodeHook(),
 		)
 	}
 	if err := v.Unmarshal(&cfg, decoderOpts); err != nil {
@@ -190,6 +210,34 @@ func modeDecodeHook() mapstructure.DecodeHookFunc {
 		default:
 			return data, nil
 		}
+	}
+}
+
+// identityProviderDecodeHook — DecodeHook для viper.Unmarshal: строка →
+// IdentityProvider (задача #1125).
+//
+// Разбор ТОТ ЖЕ, что у всех прочих читателей (ParseIdentityProvider): второй
+// разборщик разошёлся бы с первым на вырожденном значении, и разошёлся бы
+// молча. Числовая форма НЕ принимается намеренно: у поля есть ровно два
+// законных значения и оба именованы, а номер значения — деталь представления,
+// которую профиль писать не должен и по которой невозможно отличить «не
+// задано» от осознанного выбора.
+func identityProviderDecodeHook() mapstructure.DecodeHookFunc {
+	return func(from reflect.Type, to reflect.Type, data interface{}) (interface{}, error) {
+		if to != reflect.TypeOf(IdentityProvider(0)) {
+			return data, nil
+		}
+		v, ok := data.(string)
+		if !ok {
+			return data, nil
+		}
+		if strings.TrimSpace(v) == "" {
+			// Пустое значение — «профиль поля не объявил», а не негодный ввод.
+			// Отказ производит проверка настройки, называя поле и оба законных
+			// значения; отказ здесь назвал бы то же самое вторым текстом.
+			return IdentityProviderUnset, nil
+		}
+		return ParseIdentityProvider(v)
 	}
 }
 

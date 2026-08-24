@@ -224,7 +224,14 @@ def teardown_delete(acb_var, auth="jwtAccountAdminA"):
     the Operation — without it the case can end while the revoke is still in flight and the
     binding is still ACTIVE for the next suite.
     """
-    op_var = f"_{acb_var}RevOp"
+    # Значение вызывающего становится ЧАСТЬЮ ИМЕНИ переменной прогона, а имя не
+    # экранируется: оно либо годно, либо порождаемый скрипт не разбирается — и
+    # newman запишет это в testScripts, отчитавшись НУЛЁМ упавших утверждений.
+    # То же имя уезжает и в АДРЕС (`{{…}}`), который JavaScript'ом не является
+    # вовсе, — экранировать одну сторону значит развести писателя и читателя
+    # молча. Поэтому исход — проверка годности при генерации (#1220).
+    op_var = js_name(f"_{acb_var}RevOp",
+                     where="iam/iam-rbac-subjects/teardown_delete/acb_var")
     return [
         poll_request_until_status(
             name=f"teardown-{acb_var}",

@@ -35,11 +35,10 @@ func anonConfig() Config {
 // validated (anonymous = wildcard, not a specific user).
 func TestExecuteAnonymous_IssuesReadOnlyPublicBearer(t *testing.T) {
 	fixedNow := time.Unix(1_700_000_000, 0)
-	val := &fakeValidator{} // MUST NOT be invoked for an anonymous token.
 	sig := &fakeSigner{}
 	ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "hydra-anon-jwt", ExpiresIn: 120}}
 
-	uc := NewIssueRegistryTokenUseCase(anonConfig(), val, sig, ex).
+	uc := NewIssueRegistryTokenUseCase(anonConfig(), sig, ex).
 		WithClock(func() time.Time { return fixedNow }).
 		WithJTIFunc(func() (string, error) { return "jti-anon", nil })
 
@@ -53,10 +52,6 @@ func TestExecuteAnonymous_IssuesReadOnlyPublicBearer(t *testing.T) {
 	}
 	if out.Token != "hydra-anon-jwt" || out.ExpiresIn != 120 {
 		t.Fatalf("out = %+v; want the anon Hydra bearer relayed", out)
-	}
-	// No user/SA credential is presented or validated for an anon token.
-	if val.gotUser != "" || val.gotPass != "" {
-		t.Errorf("validator invoked for anon token (%q,%q); anon presents no credential", val.gotUser, val.gotPass)
 	}
 	// The assertion is signed AS the configured anon identity — the client_id the
 	// data-plane resolves to the public AnonymousSubject (`user:*`), NOT a user SA.
@@ -86,7 +81,7 @@ func TestExecuteAnonymous_IssuesReadOnlyPublicBearer(t *testing.T) {
 // grants `user:*` a read wildcard only, never write.
 func TestExecuteAnonymous_ReadOnlyScope_NoWriteVerb(t *testing.T) {
 	ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "t", ExpiresIn: 60}}
-	uc := NewIssueRegistryTokenUseCase(anonConfig(), &fakeValidator{}, &fakeSigner{}, ex)
+	uc := NewIssueRegistryTokenUseCase(anonConfig(), &fakeSigner{}, ex)
 
 	if _, err := uc.ExecuteAnonymous(context.Background(), "registry.kacho.local"); err != nil {
 		t.Fatalf("ExecuteAnonymous: %v", err)
@@ -115,7 +110,7 @@ func TestExecuteAnonymous_Disabled_FailClosed(t *testing.T) {
 	ex := &fakeExchanger{out: ExchangeOutput{AccessToken: "should-not-happen"}}
 	uc := NewIssueRegistryTokenUseCase(
 		Config{AssertionAudience: "aud", AllowedAudiences: []string{"svc"}, DefaultService: "svc"}, // no Anonymous identity.
-		&fakeValidator{}, &fakeSigner{}, ex)
+		&fakeSigner{}, ex)
 
 	if uc.AnonymousEnabled() {
 		t.Fatal("AnonymousEnabled() = true; want false when no anon identity is configured")
@@ -132,7 +127,7 @@ func TestExecuteAnonymous_Disabled_FailClosed(t *testing.T) {
 // TestExecuteAnonymous_IssuerUnavailable_FailClosed — Hydra unreachable during
 // the anon exchange surfaces as ErrIssuerUnavailable (→ 503), never a token.
 func TestExecuteAnonymous_IssuerUnavailable_FailClosed(t *testing.T) {
-	uc := NewIssueRegistryTokenUseCase(anonConfig(), &fakeValidator{}, &fakeSigner{},
+	uc := NewIssueRegistryTokenUseCase(anonConfig(), &fakeSigner{},
 		&fakeExchanger{err: ErrIssuerUnavailable})
 	out, err := uc.ExecuteAnonymous(context.Background(), "registry.kacho.local")
 	if !errors.Is(err, ErrIssuerUnavailable) {

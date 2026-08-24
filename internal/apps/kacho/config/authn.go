@@ -313,3 +313,28 @@ func (c AuthNConfig) ResolveHydraJWKSURL() string {
 func (c AuthNConfig) HooksHTTPListenAddress() string {
 	return listenAddress(c.HooksHTTPEndpoint)
 }
+
+// HydraAdminTokenEnvName — имя переменной окружения, из которой берётся
+// административный предъявитель внешнего поставщика.
+//
+// Объявлено ОДНИМ местом: его называют резолв, текст документации профиля и
+// перепись ручек разговора с поставщиком. Три копии разошлись бы молча — на
+// той, которую забыли поправить.
+func (c AuthNConfig) HydraAdminTokenEnvName() string {
+	if n := strings.TrimSpace(c.HydraAdminTokenEnv); n != "" {
+		return n
+	}
+	return "KACHO_IAM_HYDRA_ADMIN_TOKEN"
+}
+
+// ResolveHydraAdminToken возвращает административный предъявитель внешнего
+// поставщика.
+//
+// Пустая строка — законное значение: административный порт поставщика в этой
+// посадке не аутентифицирует никого, и требовать предъявителя значило бы не
+// пустить в старт каждый существующий стенд. Ценность резолва не в требовании,
+// а в ВИДИМОСТИ: ручка, читаемая здесь, видна проверке настройки; ручка,
+// читаемая в корне сборки, — нет.
+func (c AuthNConfig) ResolveHydraAdminToken() string {
+	return strings.TrimSpace(os.Getenv(c.HydraAdminTokenEnvName()))
+}

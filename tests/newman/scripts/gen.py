@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import uuid
 import importlib.util
@@ -98,6 +99,184 @@ def js_comment(value: str) -> str:
     """
     text = json.dumps(str(value), ensure_ascii=False)[1:-1]
     return text.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
+
+_NAME_OK = re.compile(r"\A[A-Za-z0-9_]+\Z")
+
+
+def js_name(value: str, *, where: str) -> str:
+    r"""ИМЯ вызывающего внутри порождаемого скрипта (#1220).
+
+    Здесь вызывающий даёт не текст и не код, а ИМЯ — идентификатор порождаемой
+    переменной либо ключ переменной прогона (`pm.environment.get('_ck_…')`).
+
+    ПОЧЕМУ ИСХОДА «ЭКРАНИРОВАТЬ» НЕТ. Литерал закрывается сериализатором:
+    значение остаётся значением, меняется лишь его запись. Имя так закрыть
+    нельзя — оно либо годно как имя, либо порождаемый файл не разбирается вовсе.
+    А там, где значение — лишь ЧАСТЬ имени, сериализатор хуже отказа: он вернёт
+    разбираемый скрипт с ДРУГИМ именем, и тот, кто имя пишет, разойдётся с тем,
+    кто его читает.
+
+    ТОТ ЖЕ КЛЮЧ ПИШЕТСЯ И ВНЕ JavaScript. Соседние шаги подставляют это же имя в
+    адрес (`/operations/{{_…RevOp}}`), а адрес — не JavaScript: сериализатор
+    строки там неприменим by construction. Экранировать одну сторону и не
+    экранировать другую значит развести писателя и читателя МОЛЧА.
+
+    ПОЧЕМУ ЭТО НЕ ВИДНО В ВЕРДИКТЕ. Негодное имя ломает не текст, а СИНТАКСИС
+    порождаемого файла, которого автор значения не видит. newman пишет отказ
+    разбора в `testScripts`, а НЕ в `assertions.failed`: шаг с неразобранным
+    скриптом даёт НОЛЬ упавших утверждений и отчитывается зелёным по этой
+    величине. Третья категория исхода, зачтённая в «прошло».
+
+    ВЫВОДИТЬ ИМЯ ИЗ ПРОЗЫ — не исход, и это измерено, а не предположено. Шов
+    storage собирал ключ из подписи шага, отображая `-` в `_`; отображение
+    неоднозначно, поэтому подписи `tuple-present-vol` и `tuple_present_vol`
+    давали ОДИН ключ, а скрипт при этом разбирался. Такую подстановку снимают, а
+    не чинят переводом: имя выводится из значения, которое именем УЖЕ является.
+
+    Годное имя возвращается ДОСЛОВНО: помощник ничего не переписывает, кроме
+    объявленного перевода, поэтому его появление на шве байт в байт сохраняет
+    порождаемую коллекцию.
+
+    ЧЕМ ДЕРЖИТСЯ. Проба
+    `services/iam/tests/newman/scripts/js_name_position_test.py` — одна на все
+    генераторы: перепись по дереву (каждая подстановка в позицию имени несёт
+    ЗАПИСАННЫЙ исход), инъекция негодным именем (обязана упасть, назвав место) и
+    положительный контроль законным (обязан пройти молча и остаться ДОСЛОВНЫМ).
+    """
+    if not isinstance(value, str) or value == "":
+        raise ValueError(
+            f"{where}: имя пусто. Пустое имя даёт ключ, склеенный с соседним"
+            f" текстом, — переменную, которую никто не читает, и молчаливый"
+            f" пропуск утверждения вместо отказа")
+    if not _NAME_OK.match(value):
+        bad = sorted({ch for ch in value if not _NAME_OK.match(ch)})
+        raise ValueError(
+            f"{where}: {value!r} именем быть не может — знаки {bad!r} вне"
+            f" [A-Za-z0-9_]. Экранировать имя нельзя: оно либо годно, либо"
+            f" порождаемый скрипт не разбирается, а newman запишет это в"
+            f" testScripts и отчитается НУЛЁМ упавших утверждений")
+    return value
+
+
+_REGEX_FLAGS = "dgimsuvy"
+_REGEX_PARSE_CACHE: Dict[tuple, str] = {}
+
+
+def js_regex_src(pattern: str, *, where: str, flags: str = "") -> str:
+    r"""ОБРАЗЕЦ вызывающего внутри литерала регулярного выражения (#1202).
+
+    Здесь вызывающий даёт КОД, а не текст: знаки выражения значимы, и
+    сериализатор строки (`js_str`) СМЕНИЛ БЫ СМЫСЛ — образец перестал бы
+    совпадать. Поэтому образец возвращается ДОСЛОВНО, а исход у него другой:
+    он проверяется ПРИ ГЕНЕРАЦИИ, и негодный роняет её С ИМЕНЕМ МЕСТА.
+
+    ПОЧЕМУ ЭТО НЕ ВИДНО В ВЕРДИКТЕ. Негодный образец ломает не текст, а
+    СИНТАКСИС порождаемого файла, которого автор значения не видит. newman
+    пишет отказ разбора в `testScripts`, а НЕ в `assertions.failed`: шаг с
+    неразобранным скриптом даёт НОЛЬ упавших утверждений и отчитывается зелёным
+    по этой величине. Третья категория исхода, зачтённая в «прошло».
+
+    ПРОВЕРОК ДВЕ, И ОДНОЙ НЕ ХВАТАЕТ — ЭТО ИЗМЕРЕНО, А НЕ ПРЕДПОЛОЖЕНО.
+    `new Function("return /" + образец + "/;")` на образце
+    `x/; process.exit(1); //` разбирается УСПЕШНО: литерал закрылся на первом же
+    разделителе, а хвост стал КОДОМ. То есть проверка «разбирается ли» пропускает
+    ровно ту подмену, ради которой заведена. Поэтому:
+
+      1. ОХВАТ — литерал обязан вобрать ВЕСЬ образец. Это лексический разбор
+         тела выражения, свой, без движка: спросить движок «где кончился
+         литерал» можно только исполнив собранную строку, а исполнять чужой код
+         в генераторе нельзя;
+      2. РАЗБИРАЕМОСТЬ — грамматику судит НАСТОЯЩИЙ движок, тот самый, который
+         будет исполнять литерал. Питонов `re` — другой язык: он не знает ни
+         `\p{L}`, ни именованных групп JavaScript, и отвергал бы законное.
+
+    Порядок именно такой: охват доказан ДО того, как строка попадает в node,
+    поэтому подмена туда не доезжает by construction.
+
+    ЧЕМ ДЕРЖИТСЯ. Проба
+    `services/iam/tests/newman/scripts/js_regex_literal_test.py` — одна на все
+    генераторы: перепись по дереву (каждая подстановка в литерал выражения несёт
+    ЗАПИСАННЫЙ исход), инъекция негодным образцом (обязан упасть, назвав место) и
+    положительный контроль законным (обязан пройти молча и остаться ДОСЛОВНЫМ).
+    """
+    if not isinstance(pattern, str) or pattern == "":
+        raise ValueError(
+            f"{where}: образец регулярного выражения пуст. Пустой литерал `//` —"
+            f" это КОММЕНТАРИЙ JavaScript, а не выражение: остаток строки станет"
+            f" прозой, и утверждение не исполнится вовсе")
+    unknown = sorted({f for f in flags if f not in _REGEX_FLAGS})
+    if unknown or len(set(flags)) != len(flags):
+        raise ValueError(
+            f"{where}: негодные флаги выражения {flags!r}"
+            + (f" — неизвестны: {unknown}" if unknown else " — флаг повторён"))
+    _regex_literal_must_contain_the_whole_pattern(pattern, where)
+    _regex_must_parse_in_javascript(pattern, flags, where)
+    return pattern
+
+
+def _regex_literal_must_contain_the_whole_pattern(pattern: str, where: str) -> None:
+    """Литерал `/…/` обязан кончиться ТАМ, где кончился образец, и не раньше."""
+    in_class, i = False, 0
+    while i < len(pattern):
+        ch = pattern[i]
+        # Разделители строк — экранированными: знаками они невидимы в
+        # исходнике, и первый же редактор молча их съест.
+        if ch in "\n\r\u2028\u2029":
+            raise ValueError(
+                f"{where}: образец несёт конец строки (U+{ord(ch):04X}) —"
+                f" литерал регулярного выражения его не переживёт, скрипт"
+                f" порвётся на этой строке")
+        if ch == "\\":
+            if i + 1 >= len(pattern):
+                raise ValueError(
+                    f"{where}: образец кончается одиноким обратным слэшем —"
+                    f" он экранирует закрывающий разделитель, и литерал не"
+                    f" закроется")
+            i += 2
+            continue
+        if in_class:
+            if ch == "]":
+                in_class = False
+        elif ch == "[":
+            in_class = True
+        elif ch == "/":
+            raise ValueError(
+                f"{where}: образец несёт НЕэкранированный разделитель `/` —"
+                f" литерал закроется на нём, а хвост образца станет КОДОМ."
+                f" Напишите `\\/`: в регулярном выражении это тот же знак")
+        i += 1
+    if in_class:
+        raise ValueError(
+            f"{where}: в образце незакрытый класс символов `[` — движок дочитает"
+            f" его до закрывающего разделителя и объявит литерал незавершённым")
+
+
+def _regex_must_parse_in_javascript(pattern: str, flags: str, where: str) -> None:
+    """Грамматику судит движок, который литерал и будет исполнять."""
+    key = (pattern, flags)
+    verdict = _REGEX_PARSE_CACHE.get(key)
+    if verdict is None:
+        driver = ("const a=JSON.parse(process.argv[1]);"
+                  "try{new Function('return /'+a.p+'/'+a.f+';');"
+                  "process.stdout.write('OK');}"
+                  "catch(e){process.stdout.write('ERR '+e.message);}")
+        payload = json.dumps({"p": pattern, "f": flags})
+        try:
+            proc = subprocess.run(["node", "-e", driver, payload],
+                                  capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValueError(
+                f"{where}: образец проверить НЕЧЕМ — node не запускается ({exc})."
+                f" Это «ноль прочитанного», а не «ноль находок»: генерация"
+                f" отказывает, а не пропускает непроверенный образец") from None
+        verdict = (proc.stdout.strip() if proc.returncode == 0
+                   else f"ERR node {proc.returncode}: {proc.stderr[:200]}")
+        _REGEX_PARSE_CACHE[key] = verdict
+    if verdict != "OK":
+        raise ValueError(
+            f"{where}: образец /{pattern}/{flags} не разбирается как регулярное"
+            f" выражение JavaScript — {verdict}")
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES_DIR = ROOT / "cases"
@@ -1195,7 +1374,7 @@ def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
     if msg_substr is not None:
         body.append(f"pm.test({js_str(f'error text includes \"{msg_substr}\"')}, () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include({js_str(msg_substr.lower())}));")
     if msg_regex is not None:
-        body.append(f"pm.test({js_str(f'error text matches /{msg_regex}/')}, () => pm.expect(j.error && j.error.message || '', JSON.stringify(j)).to.match(/{msg_regex}/));")
+        body.append(f"pm.test({js_str(f'error text matches /{msg_regex}/')}, () => pm.expect(j.error && j.error.message || '', JSON.stringify(j)).to.match(/{js_regex_src(msg_regex, where='iam/assert_op_error/msg_regex')}/));")
     return Step(name="assert-op-error", method="GET", path="/operations/{{" + op_var + "}}",
                 auth=auth, op_var=op_var, pre_script=_op_id_guard(op_var, True), test_script=body)
 
@@ -1759,6 +1938,83 @@ def _assert_delete_operation_outcome(steps: List[Step]) -> List[Step]:
     return out
 
 
+_ENV_WRITE_TPL = r"environment\.set\(\s*['\"]%s['\"]\s*,"
+_ENV_CLEAR_TPL = r"environment\.unset\(\s*['\"]%s['\"]\s*\)"
+_ENV_EMPTY_TPL = r"environment\.set\(\s*['\"]%s['\"]\s*,\s*(''|\"\")\s*\)"
+
+
+def _writes_env(code: str, var: str) -> bool:
+    return re.search(_ENV_WRITE_TPL % re.escape(var), code) is not None
+
+
+def _clears_env(code: str, var: str) -> bool:
+    """Снятие имени — либо `unset`, либо присвоение ПУСТОЙ строки.
+
+    Обе формы решают одну задачу: устаревшее значение не переживает шаг. Пустая
+    строка — законная запись помощника синхронного отказа: имя остаётся
+    ОПРЕДЕЛЁННЫМ, и страж неразрешённой подстановки не роняет опрос там, где
+    отсутствия операции и ждали.
+    """
+    return (re.search(_ENV_CLEAR_TPL % re.escape(var), code) is not None
+            or re.search(_ENV_EMPTY_TPL % re.escape(var), code) is not None)
+
+
+def _reset_captured_operation_id(steps: List[Step]) -> List[Step]:
+    """Захват идентификатора операции — ЗАМЕНА, а не дозапись: имя снимается первым.
+
+    ЧТО ИНАЧЕ ПРОИСХОДИТ. Имя, которое читает следующий опрос, пишется телом
+    ответа мутации. У ОТВЕРГНУТОЙ мутации тела с `id` нет — запись не
+    выполняется, и в имени остаётся значение ПРЕДЫДУЩЕЙ операции. Опрос уезжает
+    на чужую, давно завершённую операцию: `done === true` держится, зелёный
+    приходит быстро и уверенно, а мутация, ради которой кейс написан, не
+    проверена вовсе.
+
+    ПОЧЕМУ ПРОХОДОМ ПО ШАГАМ, А НЕ ТОЛЬКО В `save_from_response`. Помощник
+    снятие уже делает — но захват в дереве пишут и РУКАМИ, прямо в кейсе
+    (`pm.environment.set('opId', pm.response.json().id)`). Требование,
+    предъявленное только помощнику, обходится тем, что помощника не позвали, и
+    обходится молча. Проход задаёт ТОТ ЖЕ вопрос, что гейт
+    `deploy/scripts/assert-delete-operation-outcome.py`, и по тому же признаку:
+    имя берётся из адреса опроса, а не из соглашения об именовании — общий
+    `opId` в дереве не единственный, кейсы заводят собственные имена, и часть их
+    не оканчивается на `OpId` (`_opGetAnon_opId`, `_igBindAnchorOp`).
+
+    ПРЕДМЕТ — ЛЮБАЯ МУТАЦИЯ, НЕ ТОЛЬКО УДАЛЕНИЕ. Подмена чужой операцией
+    происходит от отказа захвата, а не от глагола: перепись по дереву на
+    1577829c7 дала 205 таких цепочек — DELETE 1, PATCH 18, POST 186.
+
+    КУДА ВСТАВЛЯЕТСЯ. В начало того скрипта, где стоит сам захват: снятие после
+    захвата было бы не снятием, а стиранием только что захваченного.
+    """
+    out = list(steps)
+    chains: Dict[int, List[int]] = {}
+    subject: Optional[int] = None
+    for idx, st in enumerate(out):
+        if st.method == "GET" and _OP_POLL_PATH.search(st.path):
+            if subject is not None:
+                chains.setdefault(subject, []).append(idx)
+            continue
+        if st.method in _MUTATION_METHODS:
+            subject = idx
+    for sidx, polls in chains.items():
+        m = _OP_POLL_PATH.search(out[polls[0]].path)
+        if not m:
+            continue
+        var = m.group(1)
+        pre = _strip_js_comments("\n".join(out[sidx].pre_script))
+        test = _strip_js_comments("\n".join(out[sidx].test_script))
+        if not (_writes_env(pre, var) or _writes_env(test, var)):
+            continue
+        if _clears_env(pre, var) or _clears_env(test, var):
+            continue
+        reset = [f"pm.environment.unset({js_str(var)});"]
+        if _writes_env(pre, var):
+            out[sidx] = replace(out[sidx], pre_script=reset + list(out[sidx].pre_script))
+        else:
+            out[sidx] = replace(out[sidx], test_script=reset + list(out[sidx].test_script))
+    return out
+
+
 def _js_code_and_literals(src: str):
     """Разложить скрипт на ИСПОЛНЯЕМУЮ часть и значения строковых литералов.
 
@@ -1806,6 +2062,26 @@ def _js_code_and_literals(src: str):
 
 _PUB_SET_RE = re.compile(r"pm\.environment\.set\(\s*@S(\d+)@\s*,")
 _PUB_BIND_RE = re.compile(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=")
+# Объявление БЕЗ инициализатора (`let j;`) и присваивание отдельным оператором
+# (`j = pm.response.json()`). Форма `let j; try { j = pm.response.json(); } catch (e)
+# { j = null; }` — самая частая запись безопасного разбора тела в этом корпусе, и
+# `_PUB_BIND_RE` её не узнаёт вовсе: она требует `=` В ОБЪЯВЛЕНИИ. Пока узнавалось
+# только объявление-с-инициализатором, цепочка происхождения рвалась на первом
+# звене, и проход не видел ни публикации, ни всего, что от этого имени
+# производилось дальше. Тот же распознаватель и по той же причине расширен в гейте
+# `internal/repohygiene/artifactgates` — проход и гейт обязаны считать ОДНО И ТО ЖЕ,
+# иначе они разойдутся на первом же шаге, записанном не по канону.
+_PUB_DECL_RE = re.compile(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*[;,]")
+# Имя непосредственно перед `=`: `a.b = c` отсекается предшествующей точкой,
+# `==`/`===`/`=>` — заглядыванием вперёд, `+=`/`!==`/`>=` — тем, что между именем и
+# `=` у них стоит оператор.
+_PUB_ASSIGN_RE = re.compile(r"(?:^|[^.\w$])([A-Za-z_$][\w$]*)\s*=(?![=>])")
+# Слова, за которыми `имя =` связыванием значения не является. Перечень закрытый:
+# «что-нибудь похожее на ключевое слово» отсекло бы имя, начинающееся так же.
+_PUB_RESERVED = frozenset((
+    "if", "for", "while", "switch", "return", "function", "const", "let", "var",
+    "catch", "typeof", "new", "delete", "void", "in", "of",
+))
 
 
 def _published_resource_vars(src: str, op_var: str) -> List[str]:
@@ -1842,11 +2118,42 @@ def _published_resource_vars(src: str, op_var: str) -> List[str]:
                 return True
         return False
 
+    # ОБЛАСТЬ ВИДИМОСТИ БЕРЁТСЯ У ОБЪЯВЛЕНИЯ, А НЕ У ПРИСВАИВАНИЯ. `let j;` стоит на
+    # верхнем уровне скрипта, а значение ему присваивают внутри `try { … }` — то
+    # есть глубже. Считать глубиной связывания глубину присваивания значило бы
+    # закрывать имя вместе с блоком `try`, и все последующие чтения `j` оказались бы
+    # «вне области» — ровно наоборот тому, как это работает в JavaScript.
+    decl_depth = {}
+    for m in _PUB_DECL_RE.finditer(code):
+        decl_depth[m.group(1)] = depth[m.start()]
     for m in _PUB_BIND_RE.finditer(code):
-        semi = code.find(";", m.end())
-        expr = code[m.end():semi if semi >= 0 else len(code)]
-        binds.append((m.start(), depth[m.start()], m.group(1),
-                      "metadata" in expr or visible(m.start(), expr)))
+        decl_depth[m.group(1)] = depth[m.start()]
+
+    sites = []  # (offset, depth, name, expr_at)
+    for m in _PUB_BIND_RE.finditer(code):
+        sites.append((m.start(), depth[m.start()], m.group(1), m.end()))
+    for m in _PUB_ASSIGN_RE.finditer(code):
+        name = m.group(1)
+        if name in _PUB_RESERVED:
+            continue
+        at = m.start(1)
+        # Объявление-с-инициализатором уже учтено выше: `const v = …` матчится и
+        # сюда. Считать его дважды безвредно для вердикта, но смещение связывания
+        # разошлось бы на длину `const `, а от смещения зависит проверка
+        # «объявлено ДО использования».
+        head = code[:at].rstrip()
+        if head.endswith(("const", "let", "var")) and len(head) < at:
+            tail = "const" if head.endswith("const") else ("let" if head.endswith("let") else "var")
+            j = len(head) - len(tail)
+            if j == 0 or not (code[j - 1].isalnum() or code[j - 1] in "_$"):
+                continue
+        sites.append((at, decl_depth.get(name, 0), name, m.end()))
+    sites.sort(key=lambda s: s[0])
+
+    for off, d, name, expr_at in sites:
+        semi = code.find(";", expr_at)
+        expr = code[expr_at:semi if semi >= 0 else len(code)]
+        binds.append((off, d, name, "metadata" in expr or visible(off, expr)))
 
     def arg_tail(pos: int) -> str:
         lvl = 1
@@ -2203,8 +2510,8 @@ def case_to_postman(case: Case) -> Dict:
     # уникальными (`<case-id> :: <шаг>`) и переписывает буквальные переходы
     # по БАЗОВЫМ именам, поэтому переименование обёрткой сломало бы резолв.
     case = replace(case, steps=_assert_published_id_outcome(
-        _assert_delete_operation_outcome(
-            _wrap_own_fresh_reads(case.steps, rename=False))))
+        _reset_captured_operation_id(_assert_delete_operation_outcome(
+            _wrap_own_fresh_reads(case.steps, rename=False)))))
     tags = [f"class:{c}" for c in case.classes] + [f"priority:{case.priority}"]
 
     # HARNESS FIX: step names MUST be globally UNIQUE across the whole collection.
@@ -2745,6 +3052,12 @@ def load_cases_module(path: Path):
     mod.security_injection_block = security_injection_block
     mod.http_method_block = http_method_block
     mod.malformed_body_block = malformed_body_block
+    # Помощники экранирования — тем же впрыском (#1209): декларация тоже
+    # порождает JavaScript, и вторая копия предиката разошлась бы с первой молча.
+    mod.js_regex_src = js_regex_src
+    # Тем же впрыском — проверка ИМЕНИ (#1220): у имени исхода
+    # «экранировать» нет, поэтому годность проверяется при генерации.
+    mod.js_name = js_name
     spec.loader.exec_module(mod)
     return mod
 

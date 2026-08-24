@@ -270,9 +270,12 @@ func TestTokenHook_ClientCredentials_MappedSAKey_StillMints(t *testing.T) {
 	h := newFullyWiredTokenHook(t, &fakeUserLookup{}, stubMappedSA{
 		found: true,
 		soc: domain.ServiceAccountOAuthClient{
-			ID:            "soc_01abcdefghjkmnpqr",
-			SvaID:         "sva_01abcdefghjkmnpqr",
-			OAuthClientID: "soc_01abcdefghjkmnpqr",
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             "soc_01abcdefghjkmnpqr",
+			SvaID:          "sva_01abcdefghjkmnpqr",
+			OAuthClientID:  "soc_01abcdefghjkmnpqr",
 		},
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",

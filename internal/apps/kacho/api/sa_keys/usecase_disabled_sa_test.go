@@ -84,8 +84,11 @@ func TestIssue_EnabledServiceAccount_StillIssues(t *testing.T) {
 func TestRevoke_DisabledServiceAccount_StillRevokes(t *testing.T) {
 	repo := &stubSAClientRepo{disabled: true}
 	repo.getRow = domain.ServiceAccountOAuthClient{
-		ID:    "soc00000000000000001",
-		SvaID: "sva00000000000000001",
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind: domain.CredentialKindKeypair,
+		ID:             "soc00000000000000001",
+		SvaID:          "sva00000000000000001",
 	}
 	ops := &stubOpsRepo{}
 	uc := NewRevokeSAKeyUseCase(repo, &stubTx{}, &stubHydra{}, ops)
@@ -95,5 +98,17 @@ func TestRevoke_DisabledServiceAccount_StillRevokes(t *testing.T) {
 		KeyID:            repo.getRow.ID,
 	}); err != nil {
 		t.Fatalf("the keys of a disabled account must remain revocable: %v", err)
+	}
+	// The synchronous return says only that the verb ACCEPTED the request; the
+	// removal happens in the worker. Without the two assertions below this test
+	// stayed green on a revoke that removed nothing at all — and with revoke now
+	// answering success on a barren outcome (#1216), "no error" is exactly what
+	// a broken removal would also look like.
+	waitForOp(t, ops)
+	if ops.lastErr != nil {
+		t.Fatalf("the revoke of a disabled account's key failed in the worker: %+v", ops.lastErr)
+	}
+	if !repo.deleted {
+		t.Error("the row was not removed — the key of a disabled account stayed live")
 	}
 }

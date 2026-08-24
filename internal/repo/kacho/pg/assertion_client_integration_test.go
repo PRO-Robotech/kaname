@@ -82,8 +82,9 @@ func (f assertionFixture) seedUserClient(t *testing.T, id, mirror, keyPEM, alg s
 	t.Helper()
 	_, err := f.pool.Exec(context.Background(),
 		`INSERT INTO kacho_iam.user_oauth_clients
-		   (id, user_id, hydra_client_id, created_by_user_id, public_key_pem, key_algorithm, expires_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		   (id, user_id, hydra_client_id, created_by_user_id, public_key_pem, key_algorithm, expires_at,
+		    credential_kind)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,'KEYPAIR')`,
 		id, f.user, mirror, f.user, keyPEM, alg, expires)
 	require.NoError(t, err)
 }
@@ -93,8 +94,9 @@ func (f assertionFixture) seedSAClient(t *testing.T, id, mirror, keyPEM, alg str
 	t.Helper()
 	_, err := f.pool.Exec(context.Background(),
 		`INSERT INTO kacho_iam.service_account_oauth_clients
-		   (id, sva_id, hydra_client_id, created_by_user_id, public_key_pem, key_algorithm)
-		 VALUES ($1,$2,$3,$4,$5,$6)`,
+		   (id, sva_id, hydra_client_id, created_by_user_id, public_key_pem, key_algorithm,
+		    credential_kind)
+		 VALUES ($1,$2,$3,$4,$5,$6,'KEYPAIR')`,
 		id, f.sva, mirror, f.user, keyPEM, alg)
 	require.NoError(t, err)
 }

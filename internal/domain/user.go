@@ -68,12 +68,18 @@ func (s InviteStatus) Validate() error {
 	}
 }
 
-// User — mirror identity from Kratos, scoped per-Account.
+// User — зеркало личности из внешнего провайдера. Одна личность — ОДНА строка,
+// сколько бы аккаунтов её ни пригласило.
 //
-// One Kratos identity → N User rows (one per Account: invited or owner).
-// external_id (the Kratos `sub`) is unique per-Account only among ACTIVE
-// rows; PENDING rows hold external_id="" until first login (see partial
-// UNIQUE `users_account_external_id_unique WHERE external_id <> ""`).
+// Принадлежность аккаунту здесь НЕ живёт: её выражает строка
+// `kacho_iam.memberships` (одна на пару «человек × аккаунт»), и членств у одного
+// человека бывает несколько. Ключ идентичности — глобальный:
+// `users_identity_email_uniq` и `users_identity_external_id_uniq`
+// (`20260823050000_users_identity_uniqueness_goes_global.sql`, стадия S4-expand
+// перехода IAM-ID-1). PENDING-строка держит external_id="" до первого входа.
+//
+// Поле AccountID — ЛЕГАСИ-колонка перехода: она жива и `NOT NULL` до стадии S4,
+// но «его аккаунт» из неё не читается — у человека их несколько.
 type User struct {
 	ID           UserID
 	AccountID    AccountID
@@ -95,15 +101,12 @@ type User struct {
 // (matches DB CHECK users_invite_status_consistency).
 func (u User) Validate() error {
 	var errs error
-	// AccountID — required: every User belongs to exactly one Account (NOT NULL
-	// account_id + FK). Domain enforces non-emptiness here, consistent with the
-	// sibling self-validating types (Project/Group/ServiceAccount.Validate). The
-	// full id-prefix/length format check stays centralized at the use-case layer
-	// (shared.ValidateResourceID) — the domain gate is "the invariant holds",
-	// not the transport-format validation.
-	if u.AccountID == "" {
-		errs = multierr.Append(errs, fmt.Errorf("Illegal argument account_id: required"))
-	}
+	// AccountID здесь НАМЕРЕННО не проверяется (IAM-ID-1-58, стадия S2).
+	// Человек больше не «человек в аккаунте»: принадлежность выражает строка
+	// memberships, и членств у него бывает несколько — значит требование
+	// непустоты сделало бы целевую форму невыразимой в домене. Инвариант
+	// колонки при этом держит СХЕМА (`users.account_id NOT NULL` + FK, жив до
+	// стадии S4), а не software-проверка (ban #10).
 	errs = multierr.Append(errs, u.Email.Validate())
 	errs = multierr.Append(errs, u.Labels.Validate())
 	if u.DisplayName != "" {

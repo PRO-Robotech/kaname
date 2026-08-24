@@ -189,16 +189,40 @@ type PostgresConfig struct {
 //	                        действует глобальный дефолт провайдера. Задаётся
 //	                        профилем деплоя; override KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL.
 type AuthNConfig struct {
-	Mode          Mode   `mapstructure:"mode"`
-	Domain        string `mapstructure:"domain"`
-	HydraIssuer   string `mapstructure:"hydra-issuer"`
-	HydraAdminURL string `mapstructure:"hydra-admin-url"`
+	Mode Mode `mapstructure:"mode"`
+	// IdentityProvider — ПОСАДКА ЛИЧНОСТИ: чем стенд проверяет человека,
+	// внешним поставщиком удостоверений или своей чеканкой (задача #1125).
+	//
+	// Разводит требования старта: под `external` обязательны три адреса
+	// поставщика, под `own` — не требуется ни одного, зато обязательна своя
+	// чеканка и свой вход человека. Умолчания в коде НЕТ намеренно (см.
+	// identity_provider.go): незаданное значение — отказ старта, а не молча
+	// выбранная полоса. Перечень требований каждой полосы — LaneRequirements.
+	IdentityProvider IdentityProvider `mapstructure:"identity-provider"`
+	Domain           string           `mapstructure:"domain"`
+	HydraIssuer      string           `mapstructure:"hydra-issuer"`
+	HydraAdminURL    string           `mapstructure:"hydra-admin-url"`
 	// HydraAdminCAFile — PEM bundle the provider-admin hop is verified against
 	// when it is served over TLS. Empty ⇒ the default transport (system roots),
 	// which an internal-CA certificate never chains to. Set ⇒ the bundle becomes
 	// the ONLY anchor, and one that cannot be read refuses the start.
 	HydraAdminCAFile string `mapstructure:"hydra-admin-ca-file"`
-	HydraTokenURL    string `mapstructure:"hydra-token-url"`
+	// HydraAdminTokenEnv — ИМЯ переменной окружения, из которой берётся
+	// административный предъявитель внешнего поставщика.
+	//
+	// Само значение в YAML не пишется никогда (секрет), поэтому полем настройки
+	// объявлено имя переменной — та же косвенность, что у общего секрета хуков
+	// и у ключа обёртки.
+	//
+	// ПОЧЕМУ ЭТО ПОЛЕ ВООБЩЕ ПОЯВИЛОСЬ. Ручка существовала и прежде, но
+	// читалась прямым обращением к окружению В КОРНЕ СБОРКИ — то есть была
+	// невидима проверке настройки при старте by construction. Проверка читает
+	// ПОЛЯ, и только их; значит ручка мимо полей не участвует в полосности
+	// посадки и не может быть снята значением поля посадки. Полосность,
+	// неполная ровно на ту ручку, которую проверка не видит, — это тот же
+	// класс, что чинила подфаза Ф4б-0.
+	HydraAdminTokenEnv string `mapstructure:"hydra-admin-token-env"`
+	HydraTokenURL      string `mapstructure:"hydra-token-url"`
 	// HydraTokenCAFile / HydraJWKSCAFile — the same anchor discipline for the two
 	// hops to the provider's PUBLIC listener: the token exchange (a signed client
 	// assertion out, the minted bearer back) and the JWKS upstream (the keyset the

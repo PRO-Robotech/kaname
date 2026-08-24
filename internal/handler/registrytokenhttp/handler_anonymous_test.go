@@ -55,9 +55,7 @@ func TestToken_AnonymousDisabled_NoCreds_401(t *testing.T) {
 	if !strings.HasPrefix(rec.Header().Get("WWW-Authenticate"), "Bearer ") {
 		t.Fatal("disabled-anon no-creds must carry a Bearer challenge")
 	}
-	if strings.Contains(rec.Body.String(), "token") {
-		t.Fatalf("401 body must not carry a token: %s", rec.Body.String())
-	}
+	assertNoBearerHandedOut(t, rec.Body.Bytes())
 }
 
 // TestToken_AnonymousEnabled_IssuerUnavailable_503 — Hydra unreachable on the

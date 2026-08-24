@@ -82,13 +82,7 @@ func startSecretBackstop(ctx context.Context, pool *pgxpool.Pool, cfg config.Con
 	sw := secretsweep.New(
 		secretSweepStore{inner: kachopg.NewOpsResponseRedactor(pool, "kacho_iam")},
 		secretsweep.Spec{
-			Targets: []secretsweep.Target{
-				// Both spellings are named on the machine-key response: the current
-				// one-shot key and the legacy secret kept for wire compatibility. A
-				// field the message does not carry is skipped.
-				{ResponseType: saKey.TypeUrl, Fields: []string{"private_key_pem", "client_secret"}},
-				{ResponseType: userToken.TypeUrl, Fields: []string{"private_key_pem"}},
-			},
+			Targets: secretSweepTargets(saKey.TypeUrl, userToken.TypeUrl),
 			Settled: settled,
 			Window:  secretSweepWindow,
 			Limit:   secretSweepBatch,
@@ -100,4 +94,34 @@ func startSecretBackstop(ctx context.Context, pool *pgxpool.Pool, cfg config.Con
 	logger.Info("one-shot credential backstop started",
 		"settled_after", settled.String(), "window", secretSweepWindow.String())
 	return nil
+}
+
+// secretSweepTargets — ПЕРЕЧЕНЬ ПОДМЕТАЛЬЩИКА: тип ответа → поля-носители.
+//
+// Вынесен из тела построителя намеренно: перечень, который ВЫПИСЫВАЮТ,
+// расходится с контрактом молча — и расходится в сторону «не называем», потому
+// что не назвать проще. Поле, которого перечень не называет, подметальщик
+// ПРОПУСКАЕТ, и таблица читается чистой навсегда; отсутствие записи при этом
+// неотличимо от «поле проверено и чисто».
+//
+// Поэтому перечень обязан быть ЧИТАЕМ ГЕЙТОМ (`secret_bearing_ledger_test.go`):
+// гейт берёт помеченные опцией контракта поля из ДЕСКРИПТОРОВ и требует, чтобы
+// каждое, чьё сообщение названо ответом операции, стояло здесь.
+//
+// Обе меры держат РАЗНЫЕ свойства и держатся вместе: секрет не кладётся в тело
+// при записи (конструкция того пути, который заводит фаза), а перечень
+// подметальщика страхует ЛЮБОЙ путь, включая тот, что заведут завтра и который
+// о конструкции знать не будет.
+func secretSweepTargets(saKeyType, userTokenType string) []secretsweep.Target {
+	return []secretsweep.Target{
+		// У ответа машинного ключа названы ОБА написания: нынешний одноразовый
+		// ключ и легаси-секрет, оставленный ради совместимости провода. Поле,
+		// которого сообщение не несёт, пропускается.
+		//
+		// `secret` — базовый секрет (#1142). В тело, записываемое в строку
+		// операции, он не кладётся ВОВСЕ, поэтому подметать здесь нечего; запись
+		// стоит как БЭКСТОП против будущего второго пути записи.
+		{ResponseType: saKeyType, Fields: []string{"private_key_pem", "client_secret", "secret"}},
+		{ResponseType: userTokenType, Fields: []string{"private_key_pem", "secret"}},
+	}
 }

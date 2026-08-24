@@ -4,6 +4,7 @@ const sidebars: SidebarsConfig = {
   iamSidebar: [
     'intro',
     'getting-started',
+    'first-credential',
     {
       type: 'category',
       label: 'Архитектура',

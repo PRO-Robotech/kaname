@@ -38,6 +38,14 @@ func RegisterDefaults(v *viper.Viper) {
 	// (`global.kacho.registry.serviceAud`), см. registry_token.go. Незаданное
 	// при поднятом слушателе отвергается стражем старта.
 	v.SetDefault("api-server.registry-token.ttl", 5*time.Minute)
+	// ОКНО ПЕРЕХОДА #1143 — ПУСТО, ТО ЕСТЬ ЗАКРЫТО. Умолчание объявляется здесь
+	// ЯВНО, хотя пустая строка и есть нулевое значение поля: viper связывает с
+	// переменной окружения только те ключи, о которых знает, и ключ без
+	// объявленного умолчания даёт документированную ручку БЕЗ ЧИТАТЕЛЯ —
+	// оператор её задаёт, а исход загрузки не меняется. Держит это
+	// TestDocumentedEnvName_KeyMaterialWindowUntil.
+	// ENV: KACHO_IAM_API_SERVER__REGISTRY_TOKEN__KEY_MATERIAL_WINDOW_UNTIL
+	v.SetDefault("api-server.registry-token.key-material-window-until", "")
 	// Cluster-INTERNAL Hydra-JWKS proxy HTTP listener (`GET /.well-known/jwks.json`)
 	// — a SEPARATE cluster-internal port (default `tcp://0.0.0.0:9097`), served ONLY
 	// on the kacho-iam-internal Service (never external, ban #6) over one-way
@@ -76,6 +84,18 @@ func RegisterDefaults(v *viper.Viper) {
 	// access). Local fixtures / the newman stand opt INTO dev explicitly via
 	// KACHO_IAM_AUTH_MODE=dev (values.dev.yaml carries mode: dev).
 	v.SetDefault("authn.mode", "production")
+	// authn.identity-provider — УМОЛЧАНИЯ НЕТ НАМЕРЕННО (задача #1125).
+	//
+	// Обе альтернативы разобраны и обе отвергнуты: умолчание `external`
+	// заставило бы каждый профиль, поля не объявивший, требовать адресов, у
+	// которых нет носителя; умолчание `own` МОЛЧА сняло бы провайдерские
+	// требования у профиля, который просто забыли обновить. Умолчание живёт в
+	// ПРОФИЛЕ — базовый профиль зонтичного чарта объявляет значение явно.
+	//
+	// Строки `SetDefault` для этого ключа быть не должно: она и есть то самое
+	// умолчание в коде. Свойство держит проба
+	// TestF4d01_UnsetIdentityProviderRefusesTheStart — при умолчании она
+	// перестала бы наблюдать незаданное значение вовсе.
 	// AuthN core — configurable domain + Hydra issuer + hooks. Secrets are
 	// resolved from env so they don't sit in YAML/ConfigMap.
 	v.SetDefault("authn.domain", "api.kacho.cloud")
@@ -83,6 +103,11 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.hydra-jwks-url", "")     // resolved via ResolveHydraJWKSURL() (env KACHO_IAM_HYDRA_JWKS_URL)
 	v.SetDefault("authn.hook-shared-secret", "") // no default — security-sensitive
 	v.SetDefault("authn.hook-shared-secret-env", "KACHO_IAM_HOOK_TOKEN")
+	// Административный предъявитель внешнего поставщика: в YAML пишется ИМЯ
+	// переменной, значение — никогда (секрет). Прежде эта ручка читалась прямо
+	// из окружения в корне сборки и потому была невидима проверке настройки при
+	// старте (задача #1125).
+	v.SetDefault("authn.hydra-admin-token-env", "KACHO_IAM_HYDRA_ADMIN_TOKEN")
 	v.SetDefault("authn.jwks-encryption-key-hex", "")
 	v.SetDefault("authn.jwks-encryption-key-hex-env", "KACHO_IAM_JWKS_ENC_KEY")
 	v.SetDefault("authn.hooks-http-endpoint", "tcp://0.0.0.0:9092")

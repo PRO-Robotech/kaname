@@ -13,11 +13,17 @@ import dedent from 'ts-dedent'
 схему, запустить сервис, а затем пройти базовый сценарий — создать аккаунт, пригласить
 пользователя, объявить роль и привязать её. Все примеры используют нейтральные идентификаторы.
 
-:::info Что нужно
-Go-тулчейн (для сборки из исходников) и доступный **PostgreSQL**.
-Для интерактивного входа и выпуска токенов дополнительно нужны Ory Kratos и Ory Hydra — в
-локальном стенде они поднимаются helm-umbrella. REST-примеры идут через `api-gateway` (порт
-указан как `18080` для локального стенда — подставьте свой).
+:::info Кому какие шаги
+**Шаги 1–3 — тому, кто разворачивает сервис**: сборка, миграции, запуск. Нужны Go-тулчейн и
+доступный **PostgreSQL**; для интерактивного входа и выпуска удостоверений — Ory Kratos и Ory
+Hydra (в локальном стенде поднимаются helm-umbrella).
+
+**Шаги 4–9 — клиенту**, у которого сервис уже развёрнут. Им нужна одна вещь, которой у нового
+клиента ещё нет: удостоверение в `$TOKEN`. Как его получить — [Первое
+удостоверение](/first-credential); начните оттуда, если `$TOKEN` у вас пуст.
+
+REST-примеры идут через `api-gateway` (порт указан как `18080` для локального стенда —
+подставьте свой).
 :::
 
 ## 1. Собрать сервис и мигратор
@@ -75,6 +81,15 @@ Production-режим обязывает mTLS на публичном и interna
 стартовать (fail-closed, без «insecure downgrade»). Детали —
 [Конфигурация](/install/configuration).
 
+Дальше — клиентская часть. Все примеры используют переменную с удостоверением; если её ещё
+нет, возьмите её на странице [Первое удостоверение](/first-credential).
+
+<CodeBlock language="bash">
+  {dedent`
+    export TOKEN='kacho_…'   # базовый токен доступа либо JWT
+  `}
+</CodeBlock>
+
 ## 4. Создать аккаунт
 
 Аккаунт — верхнеуровневый tenant-контейнер. Создание — self-service: аутентифицированный
@@ -84,7 +99,7 @@ Production-режим обязывает mTLS на публичном и interna
 <CodeBlock language="bash">
   {dedent`
     curl -X POST 'http://localhost:18080/iam/v1/accounts' \\
-      -H 'Authorization: Bearer <JWT>' \\
+      -H "Authorization: Bearer $TOKEN" \\
       -H 'Content-Type: application/json' \\
       -d '{
             "name": "acme",
@@ -121,7 +136,7 @@ Production-режим обязывает mTLS на публичном и interna
 <CodeBlock language="bash">
   {dedent`
     curl -X POST 'http://localhost:18080/iam/v1/projects' \\
-      -H 'Authorization: Bearer <JWT>' \\
+      -H "Authorization: Bearer $TOKEN" \\
       -H 'Content-Type: application/json' \\
       -d '{ "accountId": "acc2bkd71802av7dywa8", "name": "web-prod" }'
   `}
@@ -136,7 +151,7 @@ Production-режим обязывает mTLS на публичном и interna
 <CodeBlock language="bash">
   {dedent`
     curl -X POST 'http://localhost:18080/iam/v1/users:invite' \\
-      -H 'Authorization: Bearer <JWT>' \\
+      -H "Authorization: Bearer $TOKEN" \\
       -H 'Content-Type: application/json' \\
       -d '{
             "accountId": "acc2bkd71802av7dywa8",
@@ -158,7 +173,7 @@ Production-режим обязывает mTLS на публичном и interna
 <CodeBlock language="bash">
   {dedent`
     curl -X POST 'http://localhost:18080/iam/v1/roles' \\
-      -H 'Authorization: Bearer <JWT>' \\
+      -H "Authorization: Bearer $TOKEN" \\
       -H 'Content-Type: application/json' \\
       -d '{
             "accountId": "acc2bkd71802av7dywa8",
@@ -183,7 +198,7 @@ AccessBinding соединяет субъект (User / ServiceAccount / Group) 
 <CodeBlock language="bash">
   {dedent`
     curl -X POST 'http://localhost:18080/iam/v1/accessBindings' \\
-      -H 'Authorization: Bearer <JWT>' \\
+      -H "Authorization: Bearer $TOKEN" \\
       -H 'Content-Type: application/json' \\
       -d '{
             "subjects": [ { "type": "SUBJECT_TYPE_USER", "id": "usrbr69ze0ftz3jf7396" } ],
@@ -209,7 +224,7 @@ AccessBinding соединяет субъект (User / ServiceAccount / Group) 
   {dedent`
     # кто я и что вижу
     curl 'http://localhost:18080/iam/v1/me' \\
-      -H 'Authorization: Bearer <JWT>'
+      -H "Authorization: Bearer $TOKEN"
   `}
 </CodeBlock>
 

@@ -74,8 +74,11 @@ func TestTokenHook_FederatedPath_ForwardsIssuerToEnricher(t *testing.T) {
 	saPort := &fakeSAPort{
 		mappingOK: true,
 		mapping: domain.ServiceAccountOAuthClient{
-			ID:    "soc_01abcdefghjkmnpqr",
-			SvaID: "sva_01abcdefghjkmnpqr",
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             "soc_01abcdefghjkmnpqr",
+			SvaID:          "sva_01abcdefghjkmnpqr",
 		},
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",

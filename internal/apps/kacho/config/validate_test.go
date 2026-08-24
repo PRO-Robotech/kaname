@@ -35,7 +35,12 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			},
 		},
 		AuthN: config.AuthNConfig{
-			Mode:                 mode,
+			Mode: mode,
+			// Посадка личности объявлена ЯВНО и равна той, в которой сегодня
+			// работает всякий развёрнутый профиль: личность проверяет внешний
+			// поставщик. Умолчания у поля нет by construction (задача #1125),
+			// поэтому фикстура обязана его назвать — как обязан профиль.
+			IdentityProvider:     config.IdentityProviderExternal,
 			TrustedForwarderSANs: []string{"spiffe://kacho.cloud/ns/kacho/sa/kacho-api-gateway"},
 			HydraAdminURL:        "https://kacho-umbrella-hydra-admin.kacho.svc:4445",
 			HydraAdminCAFile:     "/etc/kacho-iam/tls/server/ca.crt",

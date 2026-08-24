@@ -59,10 +59,13 @@ func newExpiryTokenHook(t *testing.T, expiresAt *time.Time, audit *fakeAudit) *i
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	saPort := expirySAPort{
 		soc: domain.ServiceAccountOAuthClient{
-			ID:            "soc_01abcdefghjkmnpqr",
-			SvaID:         "sva_01abcdefghjkmnpqr",
-			OAuthClientID: "kacho-sak-expiry",
-			ExpiresAt:     expiresAt,
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             "soc_01abcdefghjkmnpqr",
+			SvaID:          "sva_01abcdefghjkmnpqr",
+			OAuthClientID:  "kacho-sak-expiry",
+			ExpiresAt:      expiresAt,
 		},
 		sa: domain.ServiceAccount{
 			ID:        "sva_01abcdefghjkmnpqr",

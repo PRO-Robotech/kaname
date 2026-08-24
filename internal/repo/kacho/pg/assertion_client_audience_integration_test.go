@@ -45,6 +45,9 @@ func insertSAKey(t *testing.T, f assertionFixture, c domain.ServiceAccountOAuthC
 // saKeyRow — минимальная строка ключа с ключевым материалом.
 func saKeyRow(f assertionFixture, id, mirror string, audiences []string) domain.ServiceAccountOAuthClient {
 	return domain.ServiceAccountOAuthClient{
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind:    domain.CredentialKindKeypair,
 		ID:                domain.SAOAuthClientID(id),
 		SvaID:             domain.ServiceAccountID(f.sva),
 		OAuthClientID:     domain.OAuthClientID(mirror),
@@ -121,8 +124,9 @@ func TestSAKeyDeclaredAudiencesSchemaRefusesUnusableElements(t *testing.T) {
 	seed := func(id string, audiences []string) error {
 		_, err := f.pool.Exec(ctx,
 			`INSERT INTO kacho_iam.service_account_oauth_clients
-			   (id, sva_id, hydra_client_id, created_by_user_id, public_key_pem, key_algorithm, declared_audiences)
-			 VALUES ($1,$2,$3,$4,$5,'ES256',$6::text[])`,
+			   (id, sva_id, hydra_client_id, created_by_user_id, public_key_pem, key_algorithm, declared_audiences,
+			    credential_kind)
+			 VALUES ($1,$2,$3,$4,$5,'ES256',$6::text[],'KEYPAIR')`,
 			id, f.sva, "mirror-"+id, f.user, testPublicKeyPEM, audiences)
 		return err
 	}

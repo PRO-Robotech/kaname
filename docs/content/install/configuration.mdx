@@ -53,8 +53,9 @@ Kachō IAM конфигурируется через переменные окр
 <table>
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
   <tbody>
-    <tr><td><code>KACHO_IAM_HYDRA_ADMIN_URL</code> / <code>KACHO_IAM_HYDRA_ADMIN_TOKEN</code></td><td>Admin-API Hydra (регистрация OAuth-клиентов)</td></tr>
-    <tr><td><code>KACHO_IAM_HYDRA_ISSUER</code> / <code>KACHO_IAM_HYDRA_TOKEN_URL</code></td><td>Issuer и token-endpoint Hydra</td></tr>
+    <tr><td><code>KACHO_IAM_AUTHN__IDENTITY_PROVIDER</code></td><td><b>Посадка личности</b>: чем стенд проверяет человека — <code>external</code> (внешний поставщик удостоверений) или <code>own</code> (собственная чеканка платформы). <b>Умолчания нет</b>: незаданное и неизвестное значение — отказ старта с именем поля. Разводит требования старта: под <code>external</code> обязательны три адреса поставщика (строки ниже), под <code>own</code> — ни одного, зато обязательна включённая своя чеканка. Значение сверяется <b>точно</b>: регистр не приводится, пробелы не обрезаются</td></tr>
+    <tr><td><code>KACHO_IAM_HYDRA_ADMIN_URL</code> / <code>KACHO_IAM_HYDRA_ADMIN_TOKEN</code></td><td>Admin-API Hydra (регистрация OAuth-клиентов). Требуется <b>только</b> под <code>external</code>. Имя переменной предъявителя объявляется настройкой <code>authn.hydra-admin-token-env</code> — значение в YAML не пишется никогда</td></tr>
+    <tr><td><code>KACHO_IAM_HYDRA_ISSUER</code> / <code>KACHO_IAM_HYDRA_TOKEN_URL</code></td><td>Issuer и token-endpoint Hydra. Требуются <b>только</b> под <code>external</code></td></tr>
     <tr><td><code>KACHO_IAM_BOOTSTRAP_ROOT_EMAIL</code></td><td>Email первого cluster-admin (bootstrap)</td></tr>
     <tr><td><code>KACHO_IAM_JWKS_ENC_KEY</code></td><td>Ключ <b>обёртки</b> приватной половины подписного ключа: 32 байта в <b>hex</b> (64 знака). Принимает <b>перечень через запятую</b> — первый ключ оборачивает, все открывают; так ключ обёртки и меняется, без простоя и без переписывания хранилища. Соседней ручки срока ротации <b>не существует</b> — прежняя редакция называла её рядом, а в дереве ноль вхождений; ротацию сервис не планирует по расписанию</td></tr>
     <tr><td><code>KACHO_IAM_SAKEY_REDACT_GRACE</code> / <code>KACHO_IAM_USERTOKEN_REDACT_GRACE</code></td><td>Grace-период редактирования секретов</td></tr>

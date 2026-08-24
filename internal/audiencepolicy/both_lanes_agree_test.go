@@ -19,6 +19,22 @@
 //
 // «Полос выдачи N · сверяют адресата M». Одно число скрыло бы ровно тот случай,
 // ради которого проба заведена, — полосу, которую забыли завести в перечень.
+//
+// # Осей сравнения ДВЕ, и они охватывают разное (задача #1143)
+//
+// ВНЕШНЯЯ граница посадки есть у КАЖДОЙ полосы выдачи: она объявлена посадкой,
+// а не удостоверением. Её сличают все.
+//
+// ВНУТРЕННЯЯ граница — сужение, объявленное при выдаче САМОГО удостоверения, —
+// есть только там, где удостоверение её несёт. Докерная полоса реестра несла
+// её, пока принимала ключ служебной учётки; приём ключевого материала снят
+// (#1143), и у базового токена доступа поля адресатов нет — оно отвергается на
+// выдаче. Полоса осталась в переписи, ось сузилась.
+//
+// Разница полос по этой оси — РЕШЕНИЕ, а не побочный эффект, и перепись
+// печатает её числом: «полос N · из них несут сужение удостоверения M». Свести
+// оси в одну значило бы либо потребовать от базового токена того, чего у него
+// нет, либо снять требование с ключа, у которого оно есть.
 package audiencepolicy_test
 
 import (
@@ -33,6 +49,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho/pkg/credsecret"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/client_token"
 	registrytokenuc "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/registry_token"
@@ -55,6 +72,10 @@ const (
 type lane struct {
 	name  string
 	issue func(t *testing.T, declared []string, requested string) error
+	// carriesDeclaredNarrowing — несёт ли УДОСТОВЕРЕНИЕ этой полосы сужение
+	// адресатов, объявленное при его выдаче. false означает «у этого вида
+	// такого поля нет», а не «сужение не проверяется».
+	carriesDeclaredNarrowing bool
 }
 
 // lanesUnderTest — перечень полос выдачи по ключу служебной учётки.
@@ -65,56 +86,84 @@ type lane struct {
 // автор увидит эту строку, потому что перепись ниже печатает число полос.
 func lanesUnderTest() []lane {
 	return []lane{
-		{name: "токен-эндпоинт платформы", issue: issueViaClientToken},
-		{name: "докерная полоса реестра", issue: issueViaRegistryToken},
+		{name: "токен-эндпоинт платформы", issue: issueViaClientToken, carriesDeclaredNarrowing: true},
+		// Сужение удостоверения ушло вместе с приёмом ключевого материала
+		// (#1143): базовый токен доступа поля адресатов не несёт.
+		{name: "докерная полоса реестра", issue: issueViaRegistryToken, carriesDeclaredNarrowing: false},
 	}
 }
 
 // TestBothIssuanceLanesRefuseTheSameForeignAudience — обе полосы отвергают один
 // и тот же чужой адресат и принимают один и тот же объявленный.
 func TestBothIssuanceLanesRefuseTheSameForeignAudience(t *testing.T) {
-	cases := []struct {
+	type input struct {
 		name      string
 		declared  []string
 		requested string
 		wantErr   bool
-	}{
+	}
+	// ВНЕШНЯЯ граница: сличается на ВСЕХ полосах — она объявлена посадкой.
+	landing := []input{
 		{"адресат вне объявленного посадкой", nil, audForeign, true},
-		{"адресат посадки без сужения ключа", nil, audRegistry, false},
-		{"ключ сужен на чужой адресат, заказан адресат посадки", []string{audForeign}, audRegistry, true},
-		{"ключ сужен на адресат посадки, он же заказан", []string{audRegistry}, audRegistry, false},
-		{"ключ сужен, заказан чужой адресат", []string{audRegistry}, audForeign, true},
-		{"запрос адресата не назвал", []string{audRegistry}, "", false},
+		{"адресат посадки без сужения удостоверения", nil, audRegistry, false},
+		{"запрос адресата не назвал", nil, "", false},
+	}
+	// ВНУТРЕННЯЯ граница: сличается только там, где удостоверение её несёт.
+	declared := []input{
+		{"удостоверение сужено на чужой адресат, заказан адресат посадки", []string{audForeign}, audRegistry, true},
+		{"удостоверение сужено на адресат посадки, он же заказан", []string{audRegistry}, audRegistry, false},
+		{"удостоверение сужено, заказан чужой адресат", []string{audRegistry}, audForeign, true},
+		{"запрос адресата не назвал, удостоверение сужено", []string{audRegistry}, "", false},
 	}
 
 	lanes := lanesUnderTest()
-	agreed := 0
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			verdicts := make(map[string]bool, len(lanes))
-			for _, l := range lanes {
-				err := l.issue(t, c.declared, c.requested)
-				verdicts[l.name] = err != nil
-				if c.wantErr {
-					require.Error(t, err, "полоса %q обязана отвергнуть", l.name)
-				} else {
-					require.NoError(t, err, "полоса %q обязана принять", l.name)
-				}
-			}
-			first := verdicts[lanes[0].name]
-			for _, l := range lanes[1:] {
-				require.Equal(t, first, verdicts[l.name],
-					"полосы разошлись на входе %q: %q сказала %v, %q сказала %v — "+
-						"расхождение полос одного механизма обязано быть решением, а не побочным эффектом",
-					c.name, lanes[0].name, first, l.name, verdicts[l.name])
-			}
-		})
-		agreed++
+	narrowing := make([]lane, 0, len(lanes))
+	for _, l := range lanes {
+		if l.carriesDeclaredNarrowing {
+			narrowing = append(narrowing, l)
+		}
 	}
+
+	compare := func(t *testing.T, over []lane, cases []input, axis string) int {
+		t.Helper()
+		sliced := 0
+		for _, c := range cases {
+			t.Run(axis+": "+c.name, func(t *testing.T) {
+				verdicts := make(map[string]bool, len(over))
+				for _, l := range over {
+					err := l.issue(t, c.declared, c.requested)
+					verdicts[l.name] = err != nil
+					if c.wantErr {
+						require.Error(t, err, "полоса %q обязана отвергнуть", l.name)
+					} else {
+						require.NoError(t, err, "полоса %q обязана принять", l.name)
+					}
+				}
+				first := verdicts[over[0].name]
+				for _, l := range over[1:] {
+					require.Equal(t, first, verdicts[l.name],
+						"полосы разошлись на входе %q: %q сказала %v, %q сказала %v — "+
+							"расхождение полос одного механизма обязано быть решением, а не побочным эффектом",
+						c.name, over[0].name, first, l.name, verdicts[l.name])
+				}
+			})
+			sliced++
+		}
+		return sliced
+	}
+
+	slicedLanding := compare(t, lanes, landing, "внешняя граница")
+	slicedDeclared := compare(t, narrowing, declared, "сужение удостоверения")
+
 	require.NotZero(t, len(lanes), "перепись без полос — не перепись")
-	require.NotZero(t, len(cases), "перепись без входов — не перепись")
-	t.Logf("перепись: полос выдачи %d · сверяют адресата %d · входов сличено %d",
-		len(lanes), len(lanes), agreed)
+	require.NotZero(t, len(narrowing),
+		"ни одна полоса не несёт сужения удостоверения — ось не измеряется вовсе, "+
+			"и её пробы зеленеют, ничего не утверждая")
+	require.NotZero(t, len(landing), "перепись без входов внешней границы — не перепись")
+	require.NotZero(t, len(declared), "перепись без входов сужения — не перепись")
+	t.Logf("перепись: полос выдачи %d · сверяют внешнюю границу %d · из них несут сужение удостоверения %d "+
+		"· входов сличено: внешняя граница %d, сужение %d",
+		len(lanes), len(lanes), len(narrowing), slicedLanding, slicedDeclared)
 }
 
 // ── полоса 1: токен-эндпоинт платформы ──────────────────────────────────────
@@ -187,29 +236,46 @@ func (s stubKeys) ActiveSigningKey(context.Context) (tokensigner.SigningMaterial
 
 // ── полоса 2: докерная полоса реестра ───────────────────────────────────────
 
+// issueViaRegistryToken — докерная полоса. `declared` она не принимает и
+// принять не может: у базового токена доступа поля адресатов нет (#1143),
+// поэтому вызывающий и не подаёт ей входы оси сужения.
 func issueViaRegistryToken(t *testing.T, declared []string, requested string) error {
 	t.Helper()
+	require.Empty(t, declared,
+		"докерной полосе подан вход оси сужения — у принимаемого ею вида такого поля нет; "+
+			"перечень полос и перечень входов разошлись")
+
+	secret, _, err := credsecret.Mint(clientID)
+	require.NoError(t, err)
+
 	uc := registrytokenuc.NewIssueRegistryTokenUseCase(
 		registrytokenuc.Config{
 			AssertionAudience: "https://hydra.kacho.local/oauth2/token",
 			AllowedAudiences:  []string{audRegistry},
 			DefaultService:    audRegistry,
 		},
-		dockerValidator{declared: declared}, dockerSigner{}, dockerExchanger{},
-	).WithLocalMinter(dockerMinter{})
+		dockerSigner{}, dockerExchanger{},
+	).WithLocalMinter(dockerMinter{}).WithBasicCredentialResolver(dockerAuthority{secret: secret})
 
-	_, err := uc.Execute(context.Background(), registrytokenuc.IssueInput{
-		Username: "cid-ci", Password: "-----private-pem-----", Service: requested,
+	_, err = uc.Execute(context.Background(), registrytokenuc.IssueInput{
+		Username: clientID, Password: secret, Service: requested,
 	})
 	return err
 }
 
-type dockerValidator struct{ declared []string }
+// dockerAuthority — авторитет о предъявленном базовом секрете. Форму разбирает
+// тем же единственным объявлением, что и продукт.
+type dockerAuthority struct{ secret string }
 
-func (v dockerValidator) Validate(context.Context, string, string) (registrytokenuc.Credential, error) {
-	return registrytokenuc.Credential{
-		ClientID: clientID, KeyID: clientID, Subject: "sva_0123456789abcdefg",
-		DeclaredAudiences: v.declared,
+func (a dockerAuthority) ResolveBasic(_ context.Context, presented string) (domain.BasicCredential, error) {
+	p, perr := credsecret.Parse(presented)
+	if perr != nil || presented != a.secret {
+		return domain.BasicCredential{}, domain.ErrBasicCredentialRefused
+	}
+	return domain.BasicCredential{
+		PrincipalType: "service_account",
+		PrincipalID:   "sva_0123456789abcdefg",
+		CredentialID:  p.CredentialID,
 	}, nil
 }
 

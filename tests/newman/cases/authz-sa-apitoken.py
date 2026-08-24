@@ -193,12 +193,18 @@ def allow_asserts(case_id, method, path):
             f"    'поле {key} присутствует и не является массивом: ' + pm.response.text()).to.equal(true);",
             "});",
         ]
+    # Образец собирается ЗДЕСЬ и целиком уезжает в проверку `js_regex_src`:
+    # между косыми чертами стоит КОД, а не текст, и негодный образец сломал бы не
+    # утверждение, а СИНТАКСИС порождаемого файла — там, где автор значения его не
+    # увидит (#1209). Проверяется весь литерал, а не подставляемый кусок: кусок,
+    # безупречный сам по себе, способен сменить смысл соседям (`a|b` в `^a|b…$`).
+    op_id_pattern = f"^{_VPC_OPERATION_PREFIX}[a-z0-9]+$"
     return [
         f"pm.test('[{case_id}] ALLOW: HTTP 200 (мутация принята)', () => "
         "pm.expect(pm.response.code, pm.response.text()).to.equal(200));",
         "let _j; try { _j = pm.response.json(); } catch(e) { _j = null; }",
         f"pm.test('[{case_id}] ALLOW: конверт Operation', () => {{",
-        f"  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/^{_VPC_OPERATION_PREFIX}[a-z0-9]+$/);",
+        f"  pm.expect(_j && _j.id, 'operation.id: ' + pm.response.text()).to.match(/{js_regex_src(op_id_pattern, where='iam/allow_asserts/operation-id')}/);",
         "  pm.expect(_j.metadata, 'operation.metadata').to.be.an('object');",
         "});",
     ]

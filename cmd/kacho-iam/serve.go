@@ -294,6 +294,19 @@ func runServe(cfg config.Config) error {
 	// PDP-бэкенда (iam гейтит свои RPC внутренними floor'ами поверх relation-store,
 	// а не чужим Check). Production-posture гейт обязан утверждать на этом
 	// наблюдаемом факте, а не на хранимом конфиге (см. observability.BootPosture).
+	// Половина ПОЛНОТЫ ПРОВЯЗКИ у полосности посадки личности (задача #1125).
+	// Стоит ЗДЕСЬ, а не в config.Validate(): настройка собранных объектов не
+	// видит и выразить их отсутствие не может. Отказ — отдельный текст, и он
+	// НЕ заменяется посадочной проверкой.
+	//
+	// Перепись печатается и на успешном старте: «ноль недостижимых записей»
+	// обязано быть отличимо от «каталог не читали».
+	laneWiring := observeLaneWiring(ctx, tokenSigner, logger)
+	logger.Info("identity posture lane wiring", laneWiringCensus(laneWiring)...)
+	if err := config.ValidateLaneWiring(cfg, laneWiring); err != nil {
+		return fmt.Errorf("identity posture lane: %w", err)
+	}
+
 	observability.LogBootPosture(logger,
 		bootPosture(cfg, mtlsCfg, svcs.ownGates.FormReachable()))
 
@@ -649,10 +662,35 @@ func runServe(cfg config.Config) error {
 	// (3) Выдача docker-токена (`/iam/token`, Registry v2 auth-server).
 	//
 	// Единственная ВНЕШНЕ досягаемая поверхность iam: `docker login` приходит
-	// через вход кластера. Её аутентификация — предъявление приватного ключа
-	// служебной учётки, которого сервер не хранит; объявлена значением, и именно
-	// поэтому пара осей проходит проверку.
+	// через вход кластера. Её аутентификация — предъявление БАЗОВОГО ТОКЕНА
+	// ДОСТУПА (#1142), от которого сервер хранит только свёртку. Ключевой
+	// материал в поле пароля снят задачей #1143 и принимается лишь пока открыто
+	// объявленное оператором окно перехода (ручка ниже).
 	registryTokenAddr := cfg.APIServer.RegistryToken.ListenAddress()
+	// Мгновение окна перехода берётся у настройки РАЗОБРАННЫМ. Неразборчивое
+	// значение сюда не доходит: его отвергает страж старта
+	// `RegistryTokenConfig.Validate` — его зовёт `config.Config.Validate`, а её,
+	// в свою очередь, `main` ДО `runServe`, и на её отказе процесс выходит
+	// кодом 1. Отказ ниже поэтому недостижим на живой посадке и стоит здесь
+	// затем, чтобы значение не оказалось использовано неразобранным, если
+	// когда-нибудь эту функцию позовут в обход `main`.
+	registryTokenKeyMaterialWindow, kmwErr := cfg.APIServer.RegistryToken.KeyMaterialWindowUntil()
+	if kmwErr != nil {
+		return fmt.Errorf("registry token shim: %w", kmwErr)
+	}
+	if !registryTokenKeyMaterialWindow.IsZero() {
+		// Открытое окно — ОСЛАБЛЕНИЕ ПОСАДКИ, и оно обязано быть заметно в
+		// самоотчёте процесса: посадка, о которой процесс молчит, отличима от
+		// строгой только чтением настройки, а её при разборе инцидента читают
+		// последней. Истёкшее окно называется тем же сообщением: ручка, которой
+		// больше нечего открывать, — находка, а не норма.
+		logger.Warn("docker token: key-material transition window is declared",
+			"until", registryTokenKeyMaterialWindow.Format(time.RFC3339),
+			"open_now", time.Now().Before(registryTokenKeyMaterialWindow),
+			"knob", "api-server.registry-token.key-material-window-until",
+			"effect", "the docker lane keeps accepting key material in the password field until that instant",
+			"close_when", "kacho_iam_registry_token_credential_kind_total{outcome=\"key_material_accepted_in_window\"} stops growing")
+	}
 	var registryTokenHandler http.Handler
 	if registryTokenAddr != "" {
 		mux, berr := registrytokenwire.Build(pool, registrytokenwire.BuildConfig{
@@ -667,6 +705,17 @@ func runServe(cfg config.Config) error {
 			// читателя: он выглядит исправным, потому что его пробы зелены.
 			Signer:   tokenSigner,
 			TokenTTL: cfg.APIServer.RegistryToken.TokenTTL(),
+			// ОКНО ПЕРЕХОДА ЛОМАЮЩЕГО ИЗМЕНЕНИЯ #1143 — уже РАЗОБРАННОЕ выше:
+			// сборка полосы получает мгновение, а не строку, и своего разбора
+			// не заводит. Второй разборщик того же значения разошёлся бы с
+			// первым молча — и разошёлся бы именно там, где расхождение не
+			// видно, потому что на годном входе оба отвечают одинаково.
+			KeyMaterialWindowUntil: registryTokenKeyMaterialWindow,
+			// Счётчик исходов провязывается БЕЗУСЛОВНО, а не вместе с окном:
+			// он обязан считать и отказы прежнему виду, то есть работать именно
+			// на посадке БЕЗ окна — иначе оператор, у которого обновление
+			// сломало вход арендаторам, узнаёт об этом из жалобы.
+			CredentialKindObserver: metricsReg.RegistryTokenCredentialKindRecorder(),
 		})
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)

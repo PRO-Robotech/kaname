@@ -173,6 +173,11 @@ func (u *MintUseCase) provision(ctx context.Context) (Identity, error) {
 			PublicKeyPEM:    pubPEM,
 			KeyAlgorithm:    "ES256",
 			Labels:          domain.Labels{},
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем и читателем не вычисляется
+			// (#1142). Здесь чеканится ключевая пара — значит KEYPAIR.
+			// Неназванный вид отвергается закрытым словарём таблицы: это и
+			// есть предмет ограничения — писатель, который вида не назвал.
+			CredentialKind: domain.CredentialKindKeypair,
 		}
 		if ierr := u.store.InsertMapping(ctx, tx, c); ierr != nil {
 			return Identity{}, u.mapErr(ctx, "insert mapping", ierr)

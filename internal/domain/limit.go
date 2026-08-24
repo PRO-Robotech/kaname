@@ -275,6 +275,23 @@ var countableKinds = []CountableKind{
 	// new edge, and in particular not the `iam → owner` edge §7 п.3 forbids.
 	{"iam.accessBinding", CarrierAccount},
 
+	// Удостоверения принципала — сколько путей входа он держит одновременно
+	// (задача #1191). Считаются ВСЕ, независимо от вида предъявления
+	// (KEYPAIR · SECRET · FEDERATED · LEGACY) и от того, действует ли
+	// удостоверение сейчас: слот освобождает ОТЗЫВ, а не истечение срока.
+	//
+	// Ребёнок обоих видов — `iam.credential`, ПОДЧИНЁННЫЙ РЕСУРС
+	// (`credential_ceiling.go`): своего типа модели прав у удостоверения нет,
+	// потому что право на него вычисляется от принципала.
+	//
+	// Носитель — САМ принципал, а не внешний субъект входа, и это отличается от
+	// соседнего вида `iam.account` осознанно: счёт ведётся там, где живёт
+	// внешний ключ строки удостоверения, приглашённый (у которого внешнего
+	// субъекта ещё нет) остаётся под потолком, а у машины внешнего субъекта нет
+	// вовсе — один принцип на оба ресурса вместо двух разных.
+	{"iam.user.credential", "iam.user"},
+	{"iam.serviceAccount.credential", "iam.serviceAccount"},
+
 	// compute — `project_id` on every row.
 	{"compute.instance", CarrierProject},
 	{"compute.guestAccessKey", CarrierProject},

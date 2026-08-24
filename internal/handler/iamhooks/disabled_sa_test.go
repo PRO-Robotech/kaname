@@ -54,9 +54,12 @@ func (f *fakeStateSAPort) LookupByOAuthClientID(_ context.Context, id domain.OAu
 		return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "no such sa-key client")
 	}
 	return domain.ServiceAccountOAuthClient{
-		ID:            "soc_01disabledhook01",
-		SvaID:         f.sa.ID,
-		OAuthClientID: id,
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind: domain.CredentialKindKeypair,
+		ID:             "soc_01disabledhook01",
+		SvaID:          f.sa.ID,
+		OAuthClientID:  id,
 	}, nil
 }
 

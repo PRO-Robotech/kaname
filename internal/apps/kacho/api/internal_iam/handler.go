@@ -100,6 +100,15 @@ type Handler struct {
 	registrar resourceRegistrar
 	regGate   relationWriteGate
 
+	// basicCredentials — авторитет о предъявленном базовом секрете (#1142).
+	// nil → глагол fail-closed Unavailable.
+	basicCredentials basicCredentialResolver
+
+	// logger — поверхность НАБЛЮДАЕМОСТИ отказов. Различимость причин отказа
+	// живёт здесь, а не в том, что видит предъявитель: «ноль отказов за всю
+	// жизнь контроля» обязано быть заметно, иначе мёртвый контроль невидим.
+	logger *slog.Logger
+
 	// sessionRevoker — writer for ForceLogout. nil → the RPC
 	// fails closed Unavailable. Shares the session_revocations table with the
 	// user-logout Revoke path and the refresh-hook reader.
@@ -132,6 +141,12 @@ func NewHandler(l *LookupSubjectUseCase, authz Authorizer) *Handler {
 
 // WithSubjectChange — attaches the SubjectChangeService to the handler.
 // Called from the composition root (cmd/kacho-iam/main.go).
+func (h *Handler) WithLogger(l *slog.Logger) *Handler {
+	h.logger = l
+	return h
+}
+
+// WithSubjectChange — attaches the SubjectChangeService to the handler.
 func (h *Handler) WithSubjectChange(sc subjectChanger) *Handler {
 	h.subjectChange = sc
 	return h

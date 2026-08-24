@@ -65,6 +65,26 @@ func rawJSONField(t *testing.T, body []byte, field string) string {
 	return string(v)
 }
 
+// assertNoBearerHandedOut утверждает ПРЕДМЕТ, а не подстроку: в теле отказа нет
+// ни поля `token`, ни `access_token`.
+//
+// Прежняя редакция искала подстроку «token» в сыром теле — и краснела на теле,
+// которое ПО ЗАМЫСЛУ называет годный вид удостоверения («basic access token»,
+// задача #1143). Подстрока не отличает выданный предъявительский токен от
+// прозы, называющей, чем его получить; поле — отличает.
+func assertNoBearerHandedOut(t *testing.T, body []byte) {
+	t.Helper()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("тело отказа не JSON: %v (%s)", err, body)
+	}
+	for _, field := range []string{"token", "access_token"} {
+		if _, ok := raw[field]; ok {
+			t.Fatalf("тело отказа несёт поле %q: %s", field, body)
+		}
+	}
+}
+
 func newTokenHandler(iss TokenIssuer) *TokenHandler {
 	return NewTokenHandler(Config{
 		Realm:          "https://api.kacho.local/iam/token",
@@ -159,9 +179,7 @@ func TestToken_InvalidCredentials_401(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d; want 401", rec.Code)
 	}
-	if strings.Contains(rec.Body.String(), "token") {
-		t.Fatalf("401 body must not carry a token: %s", rec.Body.String())
-	}
+	assertNoBearerHandedOut(t, rec.Body.Bytes())
 	if !strings.HasPrefix(rec.Header().Get("WWW-Authenticate"), "Bearer ") {
 		t.Fatal("401 must carry a Bearer challenge")
 	}

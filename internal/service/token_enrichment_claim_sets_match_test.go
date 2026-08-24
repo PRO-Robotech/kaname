@@ -126,9 +126,12 @@ func TestF2_42_ClaimSetsOfBothIssuancePathsMatchForTheSamePrincipal(t *testing.T
 	)
 
 	uoc := domain.UserOAuthClient{
-		ID:            domain.UserOAuthClientID(ourUserClientID),
-		UserID:        domain.UserID(ownerUser),
-		OAuthClientID: domain.OAuthClientID(mirrorUser),
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind: domain.CredentialKindKeypair,
+		ID:             domain.UserOAuthClientID(ourUserClientID),
+		UserID:         domain.UserID(ownerUser),
+		OAuthClientID:  domain.OAuthClientID(mirrorUser),
 	}
 	user := domain.User{
 		ID:           domain.UserID(ownerUser),
@@ -136,9 +139,12 @@ func TestF2_42_ClaimSetsOfBothIssuancePathsMatchForTheSamePrincipal(t *testing.T
 		InviteStatus: domain.InviteStatusActive,
 	}
 	soc := domain.ServiceAccountOAuthClient{
-		ID:            domain.SAOAuthClientID(ourSAClientID),
-		SvaID:         domain.ServiceAccountID(ownerSA),
-		OAuthClientID: domain.OAuthClientID(mirrorSA),
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind: domain.CredentialKindKeypair,
+		ID:             domain.SAOAuthClientID(ourSAClientID),
+		SvaID:          domain.ServiceAccountID(ownerSA),
+		OAuthClientID:  domain.OAuthClientID(mirrorSA),
 	}
 	sa := domain.ServiceAccount{
 		ID:        domain.ServiceAccountID(ownerSA),

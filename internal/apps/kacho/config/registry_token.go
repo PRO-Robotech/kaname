@@ -51,6 +51,57 @@ type RegistryTokenConfig struct {
 	Issuer   string        `mapstructure:"issuer"`
 	Service  string        `mapstructure:"service"`
 	TTL      time.Duration `mapstructure:"ttl"`
+
+	// KeyMaterialWindowUntilRaw — ОКНО ПЕРЕХОДА ЛОМАЮЩЕГО ИЗМЕНЕНИЯ #1143:
+	// мгновение (RFC 3339), до которого докерная полоса ПРОДОЛЖАЕТ принимать
+	// ключевой материал в поле пароля наряду с базовым токеном доступа.
+	//
+	// ENV: KACHO_IAM_API_SERVER__REGISTRY_TOKEN__KEY_MATERIAL_WINDOW_UNTIL
+	// Пример значения: 2026-09-30T00:00:00Z
+	//
+	// УМОЛЧАНИЕ — ПУСТО, ТО ЕСТЬ ОКНО ЗАКРЫТО. Незаданное послабление не
+	// означает «принимать оба»: fail-closed.
+	//
+	// ПРЕДИКАТ СНЯТИЯ ЭТОЙ РУЧКИ вписан в неё саму и состоит из двух частей:
+	//   (1) она принимает МГНОВЕНИЕ, а не флажок, поэтому бессрочное окно ею
+	//       невыразимо by construction и закрывается временем, а не памятью;
+	//   (2) счётчик `kacho_iam_registry_token_credential_kind_total` с меткой
+	//       outcome="key_material_accepted_in_window" держит ноль при ненулевой
+	//       сумме прочих исходов — значит прежним видом больше не входит никто,
+	//       и ручку вместе с восстановленным ради неё проверяющим
+	//       (registry_token/sakey_validator.go) снимают одним изменением.
+	//
+	// Цена обоих умолчаний измерена и названа в
+	// registry_token/key_material_window.go — здесь она не пересказывается,
+	// чтобы два места об одном предмете не разошлись.
+	KeyMaterialWindowUntilRaw string `mapstructure:"key-material-window-until"`
+}
+
+// KeyMaterialWindowUntil — разобранное мгновение окна перехода.
+//
+// Нулевое время + nil — окно не объявлено (умолчание). Ошибка — значение
+// написано, но неразборчиво; тогда исход ОДИН — отказ, потому что догадка в
+// любую сторону даёт посадку, которой оператор не выбирал: «принимать оба»
+// открыло бы приём снятого вида опечаткой, а молчаливое закрытие оставило бы
+// оператора в уверенности, что окно есть, — и сломало бы ровно тех
+// арендаторов, которых он берёг.
+func (c RegistryTokenConfig) KeyMaterialWindowUntil() (time.Time, error) {
+	raw := strings.TrimSpace(c.KeyMaterialWindowUntilRaw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	until, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf(
+			"api-server.registry-token.key-material-window-until %q is not an RFC 3339 instant "+
+				"(example: 2026-09-30T00:00:00Z) — this knob is the TRANSITION WINDOW of a breaking "+
+				"change: while it is open the docker lane keeps accepting key material in the password "+
+				"field alongside the Kacho basic access token. It takes an INSTANT and not a flag on "+
+				"purpose: an unbounded window never expires, so it would silently keep private key "+
+				"halves travelling over the wire forever. Unset means the window is CLOSED",
+			c.KeyMaterialWindowUntilRaw)
+	}
+	return until, nil
 }
 
 // ListenAddress — normalised listen-addr for the token HTTP server (empty
@@ -106,6 +157,17 @@ func (c RegistryTokenConfig) TokenTTL() time.Duration {
 // величины связаны по существу, и связь обязана проверяться там, где она есть,
 // а не там, где о ней помнят.
 func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig) error {
+	// Окно перехода #1143 разбирается СТРАЖЕМ СТАРТА, а не только на пути
+	// запроса. Разобранное лишь на пути запроса означает, что процесс поднялся
+	// с настройкой, которой нет, и узнает об этом первый вошедший клиент.
+	//
+	// Проверяется ДО прочих сверок и НЕЗАВИСИМО от того, поднят ли слушатель:
+	// написанная и неразборчивая ручка есть ошибка настройки при любом составе
+	// полос, а страж, молчащий о ней при выключенном слушателе, оставил бы
+	// опечатку доживать до включения.
+	if _, err := c.KeyMaterialWindowUntil(); err != nil {
+		return err
+	}
 	if c.ListenAddress() == "" {
 		// Слушателя нет — полосы нет, и сверять нечего. Страж, требующий того,
 		// чем не пользуются, есть отказ в старте без предмета.

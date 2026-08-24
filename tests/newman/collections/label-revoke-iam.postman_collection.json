@@ -122,6 +122,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('_op__lriamPrjC');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -394,6 +395,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('_opu__lriamPrjC');",
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
                   "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
@@ -678,6 +680,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('_op__lriamSa1');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -856,6 +859,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('_op__lriamPrj1');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -1147,6 +1151,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('_op__lriamRole1');",
                   "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
                   "try {",
                   "  const j = pm.response.json();",
@@ -1325,6 +1330,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('_lriamBind1');",
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
                   "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
@@ -1620,6 +1626,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('_opu__lriamPrj1');",
                   "// bounded read-your-writes retry over the owner-tuple materialization window",
                   "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
                   "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",

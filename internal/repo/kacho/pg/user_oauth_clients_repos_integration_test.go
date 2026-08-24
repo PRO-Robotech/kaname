@@ -14,7 +14,8 @@ package pg_test
 //     uoc_ (N:1), без коллизии, ни одна не «теряется».
 //   - UNIQUE hydra_client_id: коллизия → 23505 → ErrAlreadyExists.
 //   - USR-09(c): FK user_id → users ON DELETE CASCADE (удаление user снимает токены).
-//   - USR-13: DeleteByID идемпотентен — повторный delete → ErrNotFound.
+//   - USR-13: DeleteOwnedByID идемпотентен и СУЖЕН ВЛАДЕЛЬЦЕМ — повторное
+//     снятие и снятие чужой строки дают found=false БЕЗ ошибки (#1216).
 //
 // Запуск: `go test ./internal/repo/kacho/pg/... -run UserOAuthClient`. Skip с -short.
 
@@ -42,6 +43,9 @@ import (
 // hydra_client_id (по suffix).
 func newUOC(userID domain.UserID, suffix string) domain.UserOAuthClient {
 	return domain.UserOAuthClient{
+		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+		// словарь таблицы отвергает строку, вида не назвавшую.
+		CredentialKind:  domain.CredentialKindKeypair,
 		ID:              domain.UserOAuthClientID(domain.NewKac127ID(domain.PrefixUserOAuthClient)),
 		UserID:          userID,
 		OAuthClientID:   domain.OAuthClientID("hydra-uoc-" + suffix),
@@ -252,7 +256,16 @@ func TestUserOAuthClient_09c_UserDelete_CascadesTokens(t *testing.T) {
 		"FK ON DELETE CASCADE снял токен вместе с user, got %v", err)
 }
 
-func TestUserOAuthClient_13_DeleteByID_Idempotent(t *testing.T) {
+// TestUserOAuthClient_13_DeleteOwnedByID_IdempotentAndOwnerScoped — USR-13 в
+// редакции #1216.
+//
+// Прежняя редакция утверждала обратное: «повторный revoke уже удалённого токена
+// → ErrNotFound». Утверждение было верным про код, который здесь стоял, и
+// противоречило приёмке базового токена BAT-1-44, которая называет исход
+// повторного отзыва поимённо — УСПЕХ. Сменился не текст пробы, а контракт:
+// снятие теперь идёт ОДНИМ оператором, суженным владельцем, и «строки нет» с
+// «строка чужая» неразличимы by construction (security.md §Hardening #6).
+func TestUserOAuthClient_13_DeleteOwnedByID_IdempotentAndOwnerScoped(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -263,23 +276,49 @@ func TestUserOAuthClient_13_DeleteByID_Idempotent(t *testing.T) {
 	defer pool.Close()
 
 	uid := mustSeedUser(t, ctx, pool, "uoc13")
+	other := mustSeedUser(t, ctx, pool, "uoc13b")
 	repo := kachopg.NewUserOAuthClientRepo(pool)
 	txb := kachopg.NewPoolTxBeginner(pool)
 
 	row := insertUOC(t, ctx, txb, repo, newUOC(uid, "del"))
+	foreign := insertUOC(t, ctx, txb, repo, newUOC(other, "del-foreign"))
 
-	// Первый delete — успех.
+	// ── ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: своя строка снимается и ВОЗВРАЩАЕТСЯ.
+	// Без него три отрицания ниже были бы верны и об операторе, не снимающем
+	// ничего никогда.
 	tx, err := txb.Begin(ctx)
 	require.NoError(t, err)
-	require.NoError(t, repo.DeleteByID(ctx, tx, row.ID))
+	got, found, err := repo.DeleteOwnedByID(ctx, tx, uid, row.ID)
+	require.NoError(t, err)
+	require.True(t, found, "своя живая строка не снята — отрицания ниже вакуумны")
+	require.Equal(t, row.ID, got.ID, "снятая строка возвращена не та")
 	require.NoError(t, tx.Commit(ctx))
 
-	// Повторный delete — детерминированный ErrNotFound (не 500).
+	// ── (1) ПОВТОРНОЕ снятие: found=false БЕЗ ошибки (BAT-1-44).
 	tx2, err := txb.Begin(ctx)
 	require.NoError(t, err)
-	defer func() { _ = tx2.Rollback(ctx) }()
-	err = repo.DeleteByID(ctx, tx2, row.ID)
-	require.Error(t, err)
-	assert.True(t, stderrors.Is(err, iamerr.ErrNotFound),
-		"повторный revoke уже удалённого токена → ErrNotFound, got %v", err)
+	_, found, err = repo.DeleteOwnedByID(ctx, tx2, uid, row.ID)
+	require.NoError(t, err, "повторное снятие обязано быть законным исходом, а не ошибкой")
+	assert.False(t, found, "повторное снятие сообщило, что что-то сняло")
+	require.NoError(t, tx2.Commit(ctx))
+
+	// ── (2) Идентификатор, которого не было НИКОГДА — тот же исход.
+	tx3, err := txb.Begin(ctx)
+	require.NoError(t, err)
+	_, foundNever, errNever := repo.DeleteOwnedByID(ctx, tx3, uid, "uoc00000000000000404")
+	require.NoError(t, errNever)
+	assert.False(t, foundNever)
+	require.NoError(t, tx3.Commit(ctx))
+
+	// ── (3) ЧУЖАЯ строка: тот же исход, и строка ПЕРЕЖИВАЕТ вызов.
+	tx4, err := txb.Begin(ctx)
+	require.NoError(t, err)
+	_, foundForeign, errForeign := repo.DeleteOwnedByID(ctx, tx4, uid, foreign.ID)
+	require.NoError(t, errForeign)
+	assert.False(t, foundForeign, "оператор снял ЧУЖУЮ строку — сужение владельцем не работает")
+	require.NoError(t, tx4.Commit(ctx))
+
+	survived, err := repo.Get(ctx, foreign.ID)
+	require.NoError(t, err, "чужая строка исчезла после чужого отзыва")
+	assert.Equal(t, foreign.ID, survived.ID)
 }

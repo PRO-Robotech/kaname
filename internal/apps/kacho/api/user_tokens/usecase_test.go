@@ -29,8 +29,11 @@ import (
 // ---- Mocks ----
 
 type stubUserClientRepo struct {
-	inserted  domain.UserOAuthClient
-	getRow    domain.UserOAuthClient
+	inserted domain.UserOAuthClient
+	getRow   domain.UserOAuthClient
+	// getErr — «репозиторий говорит: строки нет». Отдельно от пустого getRow,
+	// потому что пустая строка и отсутствие строки — разные состояния, и проба
+	// отзыва различает их: отсутствие есть законный исход снятия.
 	getErr    error
 	listRows  []domain.UserOAuthClient
 	deleted   bool
@@ -40,6 +43,10 @@ type stubUserClientRepo struct {
 	// caller who asked.
 	blocked    bool
 	blockedIDs map[domain.UserID]bool
+	// insertErr — запись отвергнута хранилищем. Заведено пробой отказа учёта
+	// (#1191): решение о потолке принимает атомарный оператор вставки, поэтому
+	// подать его в use-case можно только отказом самой записи.
+	insertErr error
 }
 
 // AccountForUser — резолвер account'а User (порт UserClientRepo). Дефолт —
@@ -55,17 +62,25 @@ func (s *stubUserClientRepo) AccountForUser(ctx context.Context, id domain.UserI
 	return "acc00000000000000001", may, nil
 }
 
-func (s *stubUserClientRepo) Get(ctx context.Context, id domain.UserOAuthClientID) (domain.UserOAuthClient, error) {
-	return s.getRow, s.getErr
-}
 func (s *stubUserClientRepo) Insert(ctx context.Context, tx service.Tx, c domain.UserOAuthClient) (domain.UserOAuthClient, error) {
+	if s.insertErr != nil {
+		return domain.UserOAuthClient{}, s.insertErr
+	}
 	s.inserted = c
 	c.CreatedAt = time.Now().UTC()
 	return c, nil
 }
-func (s *stubUserClientRepo) DeleteByID(ctx context.Context, tx service.Tx, id domain.UserOAuthClientID) error {
+
+// DeleteOwnedByID — дублёр воспроизводит предикат НАСТОЯЩЕГО оператора: строка
+// снимается, только если совпали И идентификатор, И владелец. Дублёр, снимающий
+// по одному идентификатору, был бы снисходительнее продукта и сделал бы
+// невидимым ровно тот дефект, ради которого написаны пробы отзыва.
+func (s *stubUserClientRepo) DeleteOwnedByID(ctx context.Context, tx service.Tx, ownerID domain.UserID, id domain.UserOAuthClientID) (domain.UserOAuthClient, bool, error) {
+	if s.getErr != nil || s.getRow.ID != id || s.getRow.UserID != ownerID {
+		return domain.UserOAuthClient{}, false, nil
+	}
 	s.deleted = true
-	return nil
+	return s.getRow, true, nil
 }
 func (s *stubUserClientRepo) List(ctx context.Context, userID domain.UserID, pageToken string, pageSize int32) ([]domain.UserOAuthClient, string, error) {
 	return s.listRows, "", nil
@@ -283,14 +298,24 @@ func TestIssue_AuditNoSecret(t *testing.T) {
 	}
 }
 
-// TestRevoke_CrossUserIsolation (USR-08): токен другого user → NotFound, delete
-// не выполняется.
+// TestRevoke_CrossUserIsolation (USR-08): токен другого user НЕ снимается.
+//
+// Половина, которая сменилась (#1216): исход больше не `NotFound`. Он совпал с
+// исходом отзыва уже отозванного — успехом, — потому что различие исходов и
+// было оракулом существования чужого удостоверения (security.md §Hardening #6).
+// Что именно все безрезультатные исходы НЕРАЗЛИЧИМЫ, утверждает соседняя проба
+// TestRevoke_RepeatAbsentAndForeignShareOneOutcome; здесь утверждается вторая
+// половина USR-08, которая не менялась и меняться не может: чужая строка
+// переживает вызов.
 func TestRevoke_CrossUserIsolation(t *testing.T) {
 	repo := &stubUserClientRepo{
 		getRow: domain.UserOAuthClient{
-			ID:            "uoc00000000000000001",
-			UserID:        "usr00000000000000002", // принадлежит другому user
-			OAuthClientID: "hydra-x",
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             "uoc00000000000000001",
+			UserID:         "usr00000000000000002", // принадлежит другому user
+			OAuthClientID:  "hydra-x",
 		},
 	}
 	ops := &stubOpsRepo{}
@@ -303,8 +328,8 @@ func TestRevoke_CrossUserIsolation(t *testing.T) {
 		t.Fatalf("Execute (sync) unexpected err: %v", err)
 	}
 	waitForOp(t, ops)
-	if ops.lastErr == nil || codes.Code(ops.lastErr.Code) != codes.NotFound {
-		t.Fatalf("worker must fail NotFound (cross-user isolation), got %+v", ops.lastErr)
+	if ops.lastErr != nil {
+		t.Fatalf("отзыв чужого токена обязан быть неотличим от промаха, а промах — успех; got %+v", ops.lastErr)
 	}
 	if repo.deleted {
 		t.Error("cross-user revoke must NOT delete the row")
@@ -316,9 +341,12 @@ func TestRevoke_CrossUserIsolation(t *testing.T) {
 func TestRevoke_HappyPath(t *testing.T) {
 	repo := &stubUserClientRepo{
 		getRow: domain.UserOAuthClient{
-			ID:            "uoc00000000000000009",
-			UserID:        "usr00000000000000001",
-			OAuthClientID: "hydra-usr-9",
+			// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
+			// словарь таблицы отвергает строку, вида не назвавшую.
+			CredentialKind: domain.CredentialKindKeypair,
+			ID:             "uoc00000000000000009",
+			UserID:         "usr00000000000000001",
+			OAuthClientID:  "hydra-usr-9",
 		},
 	}
 	ops := &stubOpsRepo{}

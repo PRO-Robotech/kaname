@@ -36,8 +36,11 @@ func NewHandler(issue *IssueUserTokenUseCase, revoke *RevokeUserTokenUseCase, li
 // Issue implements UserTokenService.Issue.
 //
 // Identity-spoofing guard: `created_by_user_id` ОБЯЗАН приходить из
-// аутентифицированного принципала; значение из тела запроса принимается только если
-// совпадает с принципалом (strict reject — silent-override прячет клиентские баги).
+// аутентифицированного принципала; значение из тела запроса принимается только
+// если совпадает с тем, которого сервис ЗАПИШЕТ (strict reject — silent-override
+// прячет клиентские баги). Правило живёт в ОДНОМ месте на обе полосы выдачи —
+// `shared.CreatedByLane`; здесь называется только то, чем эта полоса от
+// соседней отличается.
 //
 // Admin/seed path (#60): a ServiceAccount principal (the acr-exempt #58
 // bootstrap-admin SA, or any system_admin SA the gateway FGA-authorized for
@@ -48,6 +51,13 @@ func NewHandler(issue *IssueUserTokenUseCase, revoke *RevokeUserTokenUseCase, li
 // This never lets the SA spoof an arbitrary created_by — it is forced to the
 // request's user_id — and the REAL actor (the SA) is still captured in the
 // durable audit_outbox event (usecases.go doIssue actor=PrincipalUserID).
+//
+// Присланное на этой полосе значение БОЛЬШЕ НЕ ВЫБРАСЫВАЕТСЯ МОЛЧА (#1245).
+// Прежде правило против подлога стояло только в ветке вызывающего-человека, и
+// вызывающая машина получала успех при неприменённом параметре — запрещённый
+// третий исход (api-conventions.md «Принято-и-проигнорировано»). Теперь
+// совпавшее с записываемым значение применяется, любое другое отвергается
+// синхронно, с именем поля.
 func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueUserTokenRequest) (*operationpb.Operation, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
@@ -56,16 +66,19 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueUserTokenRequest) (
 	if principal == "" {
 		return nil, authzguard.PermissionDenied()
 	}
+	callerIsServiceAccount := operations.PrincipalFromContext(ctx).Type == "service_account"
+	// Один источник правила на обе полосы выдачи: вызывающий-человек называет
+	// свой принципал либо ничего, вызывающая машина — целевого пользователя либо
+	// ничего. Всё прочее отвергается здесь, до создания асинхронной операции.
+	if err := shared.CreatedByLaneForUserToken(principal, callerIsServiceAccount, req.GetUserId()).
+		ValidateRequested(req.GetCreatedByUserId()); err != nil {
+		return nil, err
+	}
 	createdBy := principal
-	if operations.PrincipalFromContext(ctx).Type == "service_account" {
+	if callerIsServiceAccount {
 		// SA caller — record created_by = the target user (self). The gateway FGA
 		// Check already authorized this SA for v_update on the target user object.
 		createdBy = req.GetUserId()
-	} else if rv := req.GetCreatedByUserId(); rv != "" && rv != principal {
-		// user/system caller — anti-spoofing: a request-body created_by must match
-		// the authenticated principal (or be empty).
-		return nil, status.Error(codes.InvalidArgument,
-			"Illegal argument created_by_user_id: must match authenticated principal or be empty")
 	}
 	op, err := h.issue.Execute(ctx, IssueInput{
 		UserID:          domain.UserID(req.GetUserId()),
@@ -76,6 +89,8 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueUserTokenRequest) (
 		// (ресурс несёт только Issue/List/Revoke — нет Update).
 		Name:   req.GetName(),
 		Labels: labelsFromProto(req.GetLabels()),
+		// Вид удостоверения. Не назван — прежнее поведение дословно.
+		CredentialKind: CredentialKindFromProto(req.GetCredentialKind()),
 	})
 	if err != nil {
 		return nil, err

@@ -70,6 +70,14 @@ type ServiceAccountOAuthClient struct {
 	// внешняя граница остаётся и требуется непустой стражем старта выдачи.
 	DeclaredAudiences []string
 
+	// CredentialKind — вид удостоверения. ЗАПИСЫВАЕТСЯ при вставке; читателем
+	// не вычисляется и из состава прочих полей не выводится.
+	CredentialKind CredentialKind
+	// SecretHash — sha256 по идентификатору строки И секретной части вместе,
+	// 32 байта. Непуст ТОЛЬКО у вида SECRET. Сам секрет не хранится нигде: он
+	// существует только в теле ответа, полученного вызывающим выдачи.
+	SecretHash []byte
+
 	// Name — человекочитаемое имя ключа, выставляется на Issue (create-only,
 	// immutable — ресурс несёт только Issue/List/Revoke). Пусто для legacy-строк.
 	Name OAuthClientName
