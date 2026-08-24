@@ -1069,14 +1069,35 @@ CASES.append(Case(
 #
 # So the fixture is the defect, not the product: the case has to target a user that
 # is genuinely deletable. It self-seeds one — an invite WITHOUT `roleId` creates a
-# PENDING user row and no AccessBinding — and deletes it as the account owner (the
-# non-self branch of the Delete guard: owner of the target's account). Run-unique
-# email keeps it idempotent across runs.
+# PENDING user row and no AccessBinding. Run-unique email keeps it idempotent
+# across runs.
+#
+# ЗДЕСЬ УДАЛЯЛ РАСПОРЯДИТЕЛЬ АККАУНТА, И ТАКОЙ ПОЛОСЫ БОЛЬШЕ НЕТ (#1131). Абзац
+# выше называл её «non-self branch of the Delete guard: owner of the target's
+# account» — на дереве этой ветви не осталось: строка `iam_user` ГЛОБАЛЬНА, одна
+# на все аккаунты человека, поэтому её снятие из аккаунта A стирает человека и в
+# аккаунте B. Снятие переведено на `iam_user.identity_remover`, у которого
+# источников уровня аккаунта НЕТ ВОВСЕ: круг — сам человек либо надзор облака.
+# Ни делегированный распорядитель, ни ВЛАДЕЛЕЦ аккаунта туда не входят, так что
+# смена предъявителя на владельца прежнюю редакцию не спасла бы.
+#
+# ПОЧЕМУ ЭТО НЕ ОСЛАБЛЕНИЕ. Утверждения не тронуты: операция обязана ЗАВЕРШИТЬСЯ
+# УСПЕХОМ, и человека после этого не должно быть. Сменился предъявитель — с того,
+# кто права лишён, на того, кто им располагает; иначе кейс проверял бы отказ
+# модели, а не удаление. Отказ распорядителю аккаунта не потерян и утверждается
+# отдельно — `IAM-USR-RMID-NEG-ACCOUNT-ADMIN::identity-delete-denied`.
+#
+# ЧТЕНИЕ ПОСЛЕ УДАЛЕНИЯ — ТЕМ ЖЕ ПРЕДЪЯВИТЕЛЕМ, и это чинит вторую половину
+# дефекта (b), названного выше. Прежде «gone» снимал посторонний принципал, у
+# которого 403/404 приходит независимо от того, существует ли строка, — то есть
+# утверждение удовлетворялось скрытием существования, а не удалением. У надзора
+# облака путь к строке есть всегда, поэтому его `404` означает ровно то, что
+# кейс обещает: строки нет.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
     id="IAM-USR-DL-CRUD-OK",
-    title="Delete a binding-free user as the owner of its account → Operation SUCCEEDS, Get returns 404",
+    title="Delete a binding-free user as the cloud administrator → Operation SUCCEEDS, Get returns 404",
     classes=["CRUD"],
     priority="P0",
     steps=[
@@ -1116,7 +1137,7 @@ CASES.append(Case(
             name="delete-user",
             method="DELETE",
             path="/iam/v1/users/{{delUserId}}",
-            auth="jwtAccountAdminA",
+            auth="jwtBootstrap",
             test_script=[
                 *assert_status(200),
                 *assert_iam_operation_envelope(),
@@ -1129,7 +1150,7 @@ CASES.append(Case(
         assert_op_success(),
         # Poll the GET until the user is actually gone (async delete + FGA
         # tuple removal can lag the Operation→done a beat).
-        get_until_gone("/iam/v1/users/{{delUserId}}", "User"),
+        get_until_gone("/iam/v1/users/{{delUserId}}", "User", auth="jwtBootstrap"),
     ],
 ))
 
@@ -1389,7 +1410,25 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/users/{{blkPendingId}}:block",
             body={},
-            auth="jwtAccountAdminAStepUp",
+            # ЗДЕСЬ СТОЯЛ РАСПОРЯДИТЕЛЬ АККАУНТА, И ОН БОЛЬШЕ НЕ ДЕРЖИТ ЭТОГО
+            # ПРАВА (#1102). Запрет пишется в состояние ГЛОБАЛЬНОЙ строки и
+            # останавливает выдачу удостоверений человеку ВЕЗДЕ, поэтому
+            # `iam_user.identity_suspender` источников уровня аккаунта не имеет:
+            # круг — надзор облака, и только он.
+            #
+            # ПОЧЕМУ ЭТО НЕ ОСЛАБЛЕНИЕ, А ВОССТАНОВЛЕНИЕ ПРЕДМЕТА. Кейс утверждает,
+            # что решает СОСТОЯНИЕ: `400`+`code=9`+«is not active». Отказ модели
+            # (`403`+`code=7`) до состояния не доходит вовсе, то есть на прежнем
+            # предъявителе кейс перестал проверять то, ради чего написан. Отказ
+            # распорядителю аккаунта при этом НЕ потерян и утверждается по-прежнему —
+            # `IAM-USR-GOV-NEG-ACCOUNT-ADMIN::identity-block-denied`, тем же
+            # предъявителем `jwtAccountAdminAStepUp`.
+            #
+            # Порог повышения (`required_acr_min=2`) этому предъявителю не помеха и
+            # не подделка: `grpcsrv.EvaluateStepUp` ПЕРВОЙ ветвью освобождает
+            # машинного принципала до всякого сравнения acr, а `jwtBootstrap` —
+            # служебная учётка кластерного администратора.
+            auth="jwtBootstrap",
             test_script=[
                 *assert_answered("block-pending"),
                 # 400/9 — единственный исход, который НЕЛЬЗЯ получить ни промахом
@@ -1448,7 +1487,10 @@ CASES.append(Case(
             method="POST",
             path="/iam/v1/users/{{ubkPendingId}}:unblock",
             body={},
-            auth="jwtAccountAdminAStepUp",
+            # Надзор облака — по той же причине, что у парного кейса выше
+            # (`identity_suspender` без источников уровня аккаунта, #1102); здесь
+            # она не пересказывается, иначе заведутся два места об одном предмете.
+            auth="jwtBootstrap",
             test_script=[
                 *assert_answered("unblock-pending"),
                 # 400, не 412 — см. парный кейс выше и таблицу отображения в
@@ -2090,7 +2132,11 @@ CASES.append(Case(
             name="dual-cleanup",
             method="DELETE",
             path="/iam/v1/users/{{dualUserFromA}}",
-            auth="jwtAccountAdminA",
+            # Снятие строки личности — не право аккаунта (#1131,
+            # `iam_user.identity_remover`). Уборка за собой обязана идти тем, кто
+            # это право держит, иначе она молча не убирает: отказ пришёл бы на
+            # шаг, чей предмет — вовсе не модель прав.
+            auth="jwtBootstrap",
             test_script=[
                 *assert_status(200),
                 *save_from_response("j.id", "opId"),
