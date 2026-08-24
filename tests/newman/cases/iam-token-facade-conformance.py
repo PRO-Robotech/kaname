@@ -151,10 +151,15 @@ moved out with IBT-14 and are declared by the registry suite instead — the sec
 of them reaches a shard-gated component, and that is precisely why the lane could
 not stay here.
 
-  {{iamJwksBaseUrl}}          iam JWKS-proxy listener (:9097). Cluster-internal,
+  {{iamJwksBaseUrl}}          iam key-publisher listener (:9097). Cluster-internal,
                               server-TLS with an internal-CA leaf → the steps carry
                               `insecure_tls` (the tunnel's trust chain is not the
-                              subject; WHAT IS SERVED is).
+                              subject; WHAT IS SERVED is). TWO paths are read on it,
+                              one per accepted issuer: the mirror of the provider and
+                              the platform's own key-set record. Both are declared as
+                              module constants next to `_jwks_step`, and each fetch
+                              asserts 200 — a record that moved makes this suite name
+                              the address it asked for, never pass having read nothing.
   {{providerPublicBaseUrl}}   the signing provider's PUBLIC endpoint (:4444). Read by
                               the TEST as an oracle for the mirror comparison — this
                               is the one place a direct provider read is legitimate,
