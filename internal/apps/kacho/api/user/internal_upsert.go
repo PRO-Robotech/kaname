@@ -664,8 +664,11 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 			}
 
 			// 2. INSERT account. Name = "personal-cloud-<6-char tail>"
-			// ("Personal cloud"; используем kebab-форму чтобы соответствовать
-			// accountName regex `^[a-z][-a-z0-9]{2,62}$`).
+			// ("Personal cloud"). Имя ВЫБРАНО, а не подставлено умолчанием:
+			// личный аккаунт заводится без участия арендатора, и «personal-cloud-…»
+			// он прочтёт, а идентификатор — нет. Форме дерева оно отвечает как
+			// есть (`pkg/validate/nameform`): строчные, дефис в середине, хвост —
+			// крокфордово тело идентификатора.
 			tail := strings.ToLower(string(accID[len(accID)-6:]))
 			if _, err := w.AccountsW().Insert(ctx, domain.Account{
 				ID:          accID,

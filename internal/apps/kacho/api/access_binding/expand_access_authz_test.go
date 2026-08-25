@@ -82,13 +82,17 @@ func TestExpandAccess_B3_OwnObject_Allowed(t *testing.T) {
 // on the object (delegated administration, Path 2) may expand it.
 func TestExpandAccess_B3_DelegatedAdmin_Allowed(t *testing.T) {
 	repo := newABFakeRepo("usr_owner", "acc_x", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	// Тип назван так, как его знает МОДЕЛЬ (`compute_instance`). Точечная форма
+	// каталога (`compute.instance`), стоявшая здесь прежде, моделью не объявлена:
+	// проба была снисходительнее продукта — источник подставной, поэтому она
+	// зеленела на паре, по которой настоящая форма не собрала бы плана (#1290).
 	exp := &fakeLister{byNode: map[string][]string{
-		"compute.instance:inst_x#v_delete": {"user:usr_a"},
+		"compute_instance:inst_x#v_delete": {"user:usr_a"},
 	}}
 	// recordingFGA.Check returns true → delegated admin path passes.
 	uc := NewExpandAccessUseCase(exp).WithGrantAuthority(repo, newRecordingFGA(), nil)
 
-	res, _, err := uc.Execute(foreignCtx(), "compute.instance", "inst_x", "v_delete", 0)
+	res, _, err := uc.Execute(foreignCtx(), "compute_instance", "inst_x", "v_delete", 0)
 	require.NoError(t, err, "a delegated FGA admin may expand the object")
 	require.Len(t, res, 1)
 }
@@ -112,18 +116,80 @@ func TestExpandAccess_B2_UnknownRelation_Rejected(t *testing.T) {
 	assert.Equal(t, 0, exp.calls, "no FGA Read probe for an invalid relation")
 }
 
-// TestExpandAccess_B2_KnownRelations_Accepted — every relation in the closed set
-// (per-verb v_*, tier viewer/editor/admin, group member) passes validation.
+// TestExpandAccess_B2_KnownRelations_Accepted — каждое отношение закрытой
+// поверхности проходит вход НА ТИПЕ, КОТОРЫЙ ЕГО ОБЪЯВЛЯЕТ.
+//
+// Прежняя редакция спрашивала ВЕСЬ набор у ОДНОГО типа (`account`) и тем
+// закрепляла дефект: приём судил ОБЪЕДИНЕНИЕ наборов всех типов, поэтому
+// `v_create` и `member` у аккаунта вход проходили, а план по ним не собирался —
+// корректный запрос возвращал вызывающему внутреннюю ошибку (#1290). Проба была
+// зелёной ровно на сломанном.
+//
+// Единица утверждения теперь ПАРА, а не отношение: у каждой строки свой тип, и
+// именно он это отношение объявляет.
 func TestExpandAccess_B2_KnownRelations_Accepted(t *testing.T) {
 	repo := newABFakeRepo("usr_owner", "acc_mine", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	ctx := newOwnerContext("usr_owner")
-	known := []string{"v_get", "v_list", "v_create", "v_update", "v_delete", "viewer", "editor", "admin", "member"}
-	for _, rel := range known {
+	known := []struct {
+		objectType string
+		objectID   string
+		relation   string
+	}{
+		{"account", "acc_mine", "v_get"},
+		{"account", "acc_mine", "v_list"},
+		{"account", "acc_mine", "v_update"},
+		{"account", "acc_mine", "v_delete"},
+		{"account", "acc_mine", "viewer"},
+		{"account", "acc_mine", "editor"},
+		{"account", "acc_mine", "admin"},
+		// `v_create` объявляет ровно один тип — реестр: «создать репозиторий в
+		// этом пространстве имён» действительно операция над ним.
+		{"registry_registry", "reg_x", "v_create"},
+		// Состав группы целей отделён от изменения самой группы (NLB-TGT-1).
+		{"nlb_target_group", "tg_x", "v_addtargets"},
+		{"nlb_target_group", "tg_x", "v_removetargets"},
+		// Членство бывает только у группы.
+		{"iam_group", "grp_x", "member"},
+	}
+	for _, c := range known {
 		exp := &fakeLister{byNode: map[string][]string{
-			"account:acc_mine#" + rel: {"user:usr_a"},
+			c.objectType + ":" + c.objectID + "#" + c.relation: {"user:usr_a"},
 		}}
 		uc := NewExpandAccessUseCase(exp).WithGrantAuthority(repo, newRecordingFGA(), nil)
-		_, _, err := uc.Execute(ctx, "account", "acc_mine", rel, 0)
-		require.NoError(t, err, "known relation %q must be accepted", rel)
+		_, _, err := uc.Execute(ctx, c.objectType, c.objectID, c.relation, 0)
+		require.NoError(t, err, "объявленная пара %s.%s обязана проходить вход", c.objectType, c.relation)
+		assert.Equal(t, 1, exp.calls, "объявленная пара %s.%s обязана доходить до источника",
+			c.objectType, c.relation)
+	}
+}
+
+// TestExpandAccess_B2_SurfaceRelationOnAForeignType_Rejected — ЗЕРКАЛО к
+// предыдущему: то же отношение поверхности у типа, который его НЕ объявляет,
+// отвергается терминально и до источника не доходит.
+//
+// Без этого зеркала положительная проба выше зеленела бы и на приёме, который
+// берёт всё подряд, — то есть ровно на дефекте, который она заводится ловить.
+func TestExpandAccess_B2_SurfaceRelationOnAForeignType_Rejected(t *testing.T) {
+	repo := newABFakeRepo("usr_owner", "acc_mine", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	ctx := newOwnerContext("usr_owner")
+	foreign := []struct {
+		objectType string
+		objectID   string
+		relation   string
+	}{
+		{"account", "acc_mine", "v_create"},
+		{"account", "acc_mine", "member"},
+		{"account", "acc_mine", "v_addtargets"},
+		{"vpc_network", "vpcn_x", "v_removetargets"},
+		{"iam_user", "usr_x", "v_delete"},
+	}
+	for _, c := range foreign {
+		exp := &fakeLister{byNode: map[string][]string{}}
+		uc := NewExpandAccessUseCase(exp).WithGrantAuthority(repo, newRecordingFGA(), nil)
+		_, _, err := uc.Execute(ctx, c.objectType, c.objectID, c.relation, 0)
+		require.Error(t, err, "пара %s.%s не объявлена — вход обязан её отвергнуть", c.objectType, c.relation)
+		assert.Equal(t, codes.InvalidArgument, status.Code(err),
+			"отказ по паре %s.%s обязан быть терминальным", c.objectType, c.relation)
+		assert.Equal(t, 0, exp.calls, "до источника такой запрос доходить не должен")
 	}
 }

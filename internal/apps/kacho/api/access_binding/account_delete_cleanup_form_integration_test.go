@@ -52,7 +52,7 @@ func ownerFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, acc, ow
 		require.NoErrorf(t, err, "посев (%s)", sql)
 	}
 	// Имя аккаунта — ОТДЕЛЬНЫМ параметром, а не идентификатором: схема требует
-	// `^[a-z][-a-z0-9]{2,62}$` (`accounts_name_check`), и подчёркивание, законное
+	// единственной форме имени дерева (`accounts_name_check`), и подчёркивание, законное
 	// в идентификаторе, в имени отвергается.
 	run(`INSERT INTO kacho_iam.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)
 	     ON CONFLICT DO NOTHING`, acc, accName, owner)

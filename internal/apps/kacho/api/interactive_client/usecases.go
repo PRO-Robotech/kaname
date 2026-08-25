@@ -217,9 +217,16 @@ func NewCreateUseCase(r clientRepo, p providerClients, ops operations.Repo, audi
 // receives is always pollable; a failure is recorded on it as a terminal error
 // rather than leaving the caller polling a row that does not exist.
 func (uc *CreateUseCase) Execute(ctx context.Context, req *iamv1.CreateInteractiveClientRequest) (*operationpb.Operation, error) {
+	id := ids.NewHyphenID(ids.PrefixInteractiveClientHyphen)
 	c := domain.InteractiveClient{
-		ID:                     domain.InteractiveClientID(ids.NewHyphenID(ids.PrefixInteractiveClientHyphen)),
-		Name:                   domain.InteractiveClientName(req.GetName()),
+		ID: domain.InteractiveClientID(id),
+		// Пустое имя — законный вход создания и означает «назови сам»: до
+		// записи его заменяет имя, производное от идентификатора (#1279). Имя
+		// клиента уникально на ВЕСЬ кластер, поэтому умолчание обязано быть
+		// производным именно от идентификатора — он глобально уникален by
+		// construction, и два безымянных создания не столкнутся БЕЗ
+		// проверки-перед-вставкой (запрет #10).
+		Name:                   domain.InteractiveClientName(corevalidate.NameOrDefault(req.GetName(), id)),
 		Description:            domain.Description(req.GetDescription()),
 		Labels:                 labelsFromProto(req.GetLabels()),
 		RedirectURIs:           req.GetRedirectUris(),

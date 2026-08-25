@@ -242,9 +242,13 @@ func TestHandler_Authorize_RedactsBackendError(t *testing.T) {
 			})
 			return err
 		}},
+		// Тип назван так, как его знает модель: ExpandRelations отвергает пару,
+		// которой тип не объявляет, ТЕРМИНАЛЬНО и до обращения к источнику
+		// (#1290). С выдуманным типом проба спрашивала бы про порядок отказов, а
+		// её предмет — редактирование текста НЕДОСТУПНОГО источника.
 		{"ExpandRelations", func() error {
 			_, err := h.ExpandRelations(moduleCertCtx(), &iamv1.ExpandRelationsRequest{
-				Resource: &iamv1.ResourceRef{Type: "x", Id: "1"}, Relation: "viewer",
+				Resource: &iamv1.ResourceRef{Type: "account", Id: "acc_1"}, Relation: "viewer",
 			})
 			return err
 		}},

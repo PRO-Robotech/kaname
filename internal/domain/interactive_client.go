@@ -17,12 +17,12 @@ import (
 // and the only externally addressable identity (core rule #15).
 type InteractiveClientID string
 
-// InteractiveClientName — cluster-unique cosmetic label. Same kebab convention
-// as every other iam resource name, so the DB CHECK and this validator agree.
+// InteractiveClientName — cluster-unique cosmetic label. Judged by the single
+// resource-name form of the tree, so the DB CHECK and this validator agree.
 type InteractiveClientName string
 
-// Validate — kebab name, 3-63 chars.
-func (n InteractiveClientName) Validate() error { return validateKebabName("name", string(n)) }
+// Validate — единственная форма имени (`pkg/validate/nameform`).
+func (n InteractiveClientName) Validate() error { return validateResourceName("name", string(n)) }
 
 // InteractiveClientStatus — lifecycle status.
 type InteractiveClientStatus string

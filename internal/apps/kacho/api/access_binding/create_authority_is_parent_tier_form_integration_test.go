@@ -136,7 +136,7 @@ func seedCreateAuthorityFixture(t *testing.T, ctx context.Context, pool *pgxpool
 		_, err := tx.Exec(ctx, sql, args...)
 		require.NoErrorf(t, err, "посев (%s)", sql)
 	}
-	// Имена — по схеме (`^[a-z][-a-z0-9]{2,62}$`): подчёркивание законно в
+	// Имена — по единственной форме имени дерева: подчёркивание законно в
 	// идентификаторе и отвергается в имени.
 	run(`INSERT INTO kacho_iam.accounts (id, name, owner_user_id)
 	     VALUES ('acc_ca_home', 'home-account',    'usr_createauth'),

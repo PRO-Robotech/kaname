@@ -79,7 +79,7 @@ _OK_ACCOUNTS = {"accounts": [{"id": ACCOUNT_A, "name": "selftest"}], "nextPageTo
 _OK_OPERATION = {"id": "iop00000000000000001", "description": "selftest", "done": False,
                  "metadata": {"projectId": PROJECT_A1}}
 _OK_NAME_REJECT = {"code": 3,
-                   "message": "Illegal argument name: must match ^[a-z][-a-z0-9]{2,62}$",
+                   "message": "Illegal argument name: must match ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$",
                    "details": []}
 
 # Реальные дефекты — все НЕ-403, то есть ровно те, что прежняя форма не видела.

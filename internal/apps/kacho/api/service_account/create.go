@@ -14,6 +14,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
@@ -91,11 +92,15 @@ func (u *CreateServiceAccountUseCase) Execute(ctx context.Context, sa domain.Ser
 	if err := shared.ValidateResourceID(string(sa.AccountID), domain.PrefixAccount, "account"); err != nil {
 		return nil, err
 	}
+	// Идентификатор рождается ДО проверки имени намеренно: пустое имя — законный
+	// вход создания и означает «назови сам», а умолчание производится ОТ
+	// ИДЕНТИФИКАТОРА, значит подставить его раньше нечем (#1279).
+	saID := ids.NewID(domain.PrefixServiceAccount)
+	sa.Name = domain.SvcAccountName(corevalidate.NameOrDefault(string(sa.Name), saID))
+
 	if err := sa.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
-
-	saID := ids.NewID(domain.PrefixServiceAccount)
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Create service account %s", sa.Name),

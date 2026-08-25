@@ -26,6 +26,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmodel"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authztypes"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -288,6 +289,28 @@ func (h *Handler) ExpandRelations(ctx context.Context, req *iamv1.ExpandRelation
 	}
 	if req.GetRelation() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Illegal argument relation: required")
+	}
+	// Пара (тип ресурса, отношение) приходит от вызывающего ЦЕЛИКОМ, а разбирает
+	// её компиляция плана по набору КОНКРЕТНОГО типа. Пара, которой тип не
+	// объявляет, плана не даёт никогда — и до этой проверки уезжала в форму,
+	// возвращаясь `UNAVAILABLE`, то есть «повтори позже» на ввод, который годным
+	// не станет ни при каком повторе (#1290, соседний по классу с
+	// AccessBindingService.ExpandAccess).
+	//
+	// Предикат тот же, на котором стоит компиляция (`authzmodel.Declares`), —
+	// поэтому приём и разбор здесь судят один набор by construction. Поверхность
+	// НЕ сужается: это интроспекция графа прав, и машинерия модели (переносчики
+	// охвата, резолверы) остаётся законным вопросом, если тип её объявляет.
+	if plans, perr := authzmodel.Shared(); perr != nil {
+		slog.ErrorContext(ctx, "authz model unparsed", "op", "ExpandRelations", "err", perr.Error())
+		return nil, status.Error(codes.Unavailable, msgAuthzUnavailable)
+	} else if !plans.DeclaresType(req.GetResource().GetType()) {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"Illegal argument resource.type %q", req.GetResource().GetType())
+	} else if !plans.Declares(req.GetResource().GetType(), req.GetRelation()) {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"Illegal argument relation %q (not declared on resource type %q)",
+			req.GetRelation(), req.GetResource().GetType())
 	}
 	// Inner defense-in-depth: ExpandRelations discloses the full userset tree of
 	// a resource, so a tenant caller must administer that resource or be a

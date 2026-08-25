@@ -29,7 +29,7 @@ N бесконтрольных bindings.
 |---------------|---------------|--------------|-----------|---------------------------------------|
 | `id`          | `GroupID`     | да           | да        | `grp<17-char>`. Длина 20.             |
 | `account_id`  | `AccountID`   | да           | **да**    | FK → `accounts(id) ON DELETE RESTRICT`. |
-| `name`        | `GroupName`   | да           | нет       | kebab `^[a-z][-a-z0-9]{2,62}$`.       |
+| `name`        | `GroupName`   | нет°         | нет       | `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$` (DNS label, RFC 1123). ° Пустое — сервер подставит имя от `id`. |
 | `description` | `Description` | нет          | нет       | ≤256.                                  |
 | `labels`      | `Labels`      | нет          | нет       | ≤64 пар.                               |
 | `created_at`  | `time.Time`   | да (server)  | да        | UTC.                                  |

@@ -520,7 +520,7 @@ CASES.append(Case(
             auth=_HUMAN,
             test_script=[
                 "pm.test('not 500', () => pm.expect(pm.response.code).to.not.eql(500));",
-                # Строка инъекции не может удовлетворить ^[a-z][-a-z0-9]{2,62}$, поэтому
+                # Строка инъекции не может удовлетворить форму имени продукта, поэтому
                 # исход ровно один. Прежнее `oneOf([200,400,413])` принимало и успех, и
                 # отказ — то есть не утверждало ничего о том, что инъекция отвергнута.
                 *assert_status(400),
@@ -1240,15 +1240,19 @@ def _bva_name_script(var: str, length: int) -> list:
         # продукта на границе имени — тогда как граничного случая в запросе уже не было.
         # Отправленный шаг со сломанной фикстурой хуже неотправленного: он даёт
         # утверждению предмет, которого тот не описывает.
+        # Форма — та же, что у продукта (`pkg/validate/nameform`). Она здесь
+        # ВЫПИСАНА, а не импортирована: сценарий исполняется движком коллекции,
+        # у которого доступа к дереву нет. Расхождение с продуктом не тихое —
+        # утверждение ниже называет переменную и роняет ФИКСТУРУ, а не кейс.
         "const _bvaOk = _rid.length > 0 && _n.length === _len "
-        "&& /^[a-z][-a-z0-9]{2,62}$/.test(_n);",
+        "&& /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/.test(_n);",
         "if (!_bvaOk) {",
         f"  pm.test('fixture: runId is seeded (name entropy source for {var})', "
         "() => pm.expect(_rid.length, 'runId').to.be.above(0));",
         f"  pm.test('fixture: BVA name is exactly {length} chars', "
         "() => pm.expect(_n.length, _n).to.eql(_len));",
-        f"  pm.test('fixture: BVA name matches the product regex ({var})', "
-        "() => pm.expect(_n).to.match(/^[a-z][-a-z0-9]{2,62}$/));",
+        f"  pm.test('fixture: BVA name matches the product name form ({var})', "
+        "() => pm.expect(_n).to.match(/^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/));",
         "  pm.execution.skipRequest();",
         "}",
     ]
@@ -1256,7 +1260,18 @@ def _bva_name_script(var: str, length: int) -> list:
 
 CASES.append(Case(
     id="IAM-ACC-CR-BVA-NAME-MIN",
-    title="Create с name len=3 (min) → 200 OK",
+    # Контрактный минимум длины имени — ОДИН символ (RFC 1123), а не три: прежняя
+    # форма iam была уже канона, и #1279 её сняла. Здесь длина остаётся 3, и это
+    # решение, а не недосмотр: имя аккаунта уникально на ВЕСЬ кластер
+    # (`accounts_name_unique`), а односимвольных имён всего 26 — параллельные
+    # прогоны и соседние арендаторы столкнулись бы на них детерминированно, и
+    # кейс падал бы `409` по чужой причине.
+    #
+    # Единица как ГРАНИЦА утверждается там, где уникальность не мешает: доменный
+    # тип (`internal/domain/resource_name_canon_test.go`), путь создания каждого
+    # ресурса (`name_canon_test.go` рядом с каждым use-case) и ограничение живой
+    # базы (`internal/nameformdb`, образец «один символ»).
+    title="Create с name len=3 → 200 OK",
     classes=["BVA"],
     priority="P2",
     steps=[

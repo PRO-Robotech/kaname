@@ -8,6 +8,10 @@ MIGRATOR_BIN   := kacho-migrator
 MIGRATOR_CMD   := ./cmd/migrator
 IMAGE          := kacho-iam:dev
 
+# Ревизия дерева уезжает в образ аргументом сборки (IMAGE_BUILD_ARGS).
+# Объявление одно на дерево — см. разбор в самом файле.
+include ../../provenance.mk
+
 .PHONY: build build-migrator test test-short vet lint docker generate audit-list-filter
 .PHONY: proto-install-plugins proto-vendor proto-lint proto-gen
 
@@ -79,7 +83,7 @@ audit-list-filter:
 # Re-копирование common-файла создало бы конфликтующий unqualified
 # public.operations — отсюда no-op.
 docker:
-	docker build -f Dockerfile -t $(IMAGE) .
+	docker build $(IMAGE_BUILD_ARGS) -f Dockerfile -t $(IMAGE) .
 
 .PHONY: migrate-up migrate-down migrate-status
 # migrate-* дергают отдельный binary `bin/kacho-migrator`.

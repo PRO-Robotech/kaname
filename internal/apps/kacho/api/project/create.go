@@ -17,6 +17,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
@@ -100,11 +101,16 @@ func (u *CreateProjectUseCase) Execute(ctx context.Context, p domain.Project) (*
 	if err := shared.ValidateResourceID(string(p.AccountID), domain.PrefixAccount, "account"); err != nil {
 		return nil, err
 	}
+	// Идентификатор рождается ДО проверки имени намеренно: пустое имя — законный
+	// вход создания и означает «назови сам», а умолчание производится ОТ
+	// ИДЕНТИФИКАТОРА, значит подставить его раньше нечем (#1279). Проверка формы
+	// после подстановки судит ровно то, что будет записано.
+	projID := ids.NewID(domain.PrefixProject)
+	p.Name = domain.ProjectName(corevalidate.NameOrDefault(string(p.Name), projID))
+
 	if err := p.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
-
-	projID := ids.NewID(domain.PrefixProject)
 
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,

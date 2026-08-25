@@ -12,6 +12,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
@@ -93,11 +94,15 @@ func (u *CreateGroupUseCase) Execute(ctx context.Context, g domain.Group) (*oper
 	if err := shared.ValidateResourceID(string(g.AccountID), domain.PrefixAccount, "account"); err != nil {
 		return nil, err
 	}
+	// Идентификатор рождается ДО проверки имени намеренно: пустое имя — законный
+	// вход создания и означает «назови сам», а умолчание производится ОТ
+	// ИДЕНТИФИКАТОРА, значит подставить его раньше нечем (#1279).
+	grpID := ids.NewID(domain.PrefixGroup)
+	g.Name = domain.GroupName(corevalidate.NameOrDefault(string(g.Name), grpID))
+
 	if err := g.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
-
-	grpID := ids.NewID(domain.PrefixGroup)
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Create group %s", g.Name),

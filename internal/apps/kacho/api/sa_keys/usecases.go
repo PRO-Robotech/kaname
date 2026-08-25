@@ -53,6 +53,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
@@ -393,8 +394,12 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 			return nil, status.Errorf(codes.InvalidArgument, "trusted_subjects[%d]: %v", i, err)
 		}
 	}
-	if err := domain.OAuthClientName(in.Name).Validate(); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	// Форма имени на пути СОЗДАНИЯ: пустая строка законна и означает «назови
+	// сам» — до записи её заменит умолчание, производное от идентификатора
+	// (`commitMapping`). Судить её здесь доменным типом значило бы отвергнуть
+	// законный вход: тот тип судит то, что БУДЕТ ЗАПИСАНО (#1279).
+	if err := corevalidate.NameOnCreate("name", in.Name); err != nil {
+		return nil, err
 	}
 	if err := in.Labels.Validate(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
@@ -1157,6 +1162,12 @@ func (u *IssueSAKeyUseCase) releaseProviderClient(ctx context.Context, clientID,
 // intent, direct call as fallback) — the compensating intent CANNOT ride this
 // tx, because this tx is precisely the one that rolls back.
 func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.ServiceAccountOAuthClient, hydraClientID, actor, keyAlgorithm string) (domain.ServiceAccountOAuthClient, error) {
+	// Пустое имя до записи не доживает: оно означало «назови сам», и здесь, где
+	// идентификатор уже назначен, его заменяет имя, производное от него (#1279).
+	// Подстановка стоит в ОДНОЙ точке — той, через которую проходит КАЖДЫЙ вид
+	// выпуска: рассыпанная по видам, она разошлась бы между ними молча.
+	row.Name = domain.OAuthClientName(corevalidate.NameOrDefault(string(row.Name), string(row.ID)))
+
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
 		u.releaseProviderClient(ctx, hydraClientID, "mapping tx could not be started")

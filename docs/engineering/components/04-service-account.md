@@ -30,7 +30,7 @@ kacho-iam держит только запись с id, именем и account_
 |---------------|---------------------------|--------------|-----------|---------------------------------------------------|
 | `id`          | `ServiceAccountID`        | да           | да        | `sva<17-char>`. Длина 20.                         |
 | `account_id`  | `AccountID`               | да           | **да**    | FK → `accounts(id) ON DELETE RESTRICT`.           |
-| `name`        | `SvcAccountName`          | да           | нет       | `^[a-z][-a-z0-9]{2,62}$`.                         |
+| `name`        | `SvcAccountName`          | нет°         | нет       | `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$` (DNS label, RFC 1123). ° Пустое — сервер подставит имя от `id`. |
 | `description` | `Description`             | нет          | нет       | len ≤256.                                          |
 | `enabled`     | `bool`                    | да           | нет       | default `true`. Меняется ТОЛЬКО действиями `Disable`/`Enable`, НЕ через `Update`. |
 | `created_at`  | `time.Time`               | да (server)  | да        | UTC.                                              |

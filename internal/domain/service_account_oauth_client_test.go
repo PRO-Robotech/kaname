@@ -191,6 +191,10 @@ func TestSAOAuthClient_Validate_FederatedVsPrivateKey(t *testing.T) {
 		SvaID:           "sva_01",
 		OAuthClientID:   "hydra-cli",
 		CreatedByUserID: "usr_01",
+		// Имя названо явно, потому что предмет этой пробы — вид удостоверения,
+		// а не имя: строка без имени отвергалась бы формой (#1279), и
+		// положительный контроль ниже падал бы по чужой причине.
+		Name: "federated-key",
 	}
 
 	// Federated row with public_key set → must reject.

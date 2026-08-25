@@ -61,5 +61,19 @@ FROM mirror.gcr.io/library/alpine:3.24
 RUN apk upgrade --no-cache && apk add --no-cache ca-certificates
 COPY --from=builder /kacho-iam /usr/local/bin/kacho-iam
 COPY --from=builder /kacho-migrator /usr/local/bin/kacho-migrator
+# ПРОВЕНАНС ОБРАЗА — из какого дерева он собран. Клеймо и файл берут величину из
+# ОДНОГО `ARG`, поэтому разойтись не могут. Файл нужен потому, что у РАБОТАЮЩЕГО
+# контейнера клеймо не прочесть ничем, кроме демона хоста или реестра, — а у
+# управляемого кластера нет ни того, ни другого, тогда как `kubectl exec … cat`
+# есть всегда. Пустое умолчание намеренно: сборка руками ревизии знать не обязана,
+# а цель провенанса скажет словами, что величина не проставлена.
+# Разбор целиком — deploy/scripts/stand-provenance.sh; что величину проставляет
+# КАЖДАЯ сборка дерева — deploy/stand_provenance_declaration_test.go.
+ARG KACHO_IMAGE_REVISION=""
+ARG KACHO_IMAGE_VERSION=""
+LABEL org.opencontainers.image.revision="$KACHO_IMAGE_REVISION" \
+      org.opencontainers.image.version="$KACHO_IMAGE_VERSION"
+RUN mkdir -p /etc/kacho && printf '%s\n' "$KACHO_IMAGE_REVISION" > /etc/kacho/image-revision
+
 USER 65532
 ENTRYPOINT ["/usr/local/bin/kacho-iam"]

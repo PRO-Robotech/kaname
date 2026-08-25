@@ -63,6 +63,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
@@ -222,8 +223,12 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	if len(in.Description) > 256 {
 		return nil, status.Error(codes.InvalidArgument, "description too long (max 256)")
 	}
-	if err := domain.OAuthClientName(in.Name).Validate(); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	// Форма имени на пути СОЗДАНИЯ: пустая строка законна и означает «назови
+	// сам» — до записи её заменит умолчание, производное от идентификатора
+	// (`commitMapping`). Судить её здесь доменным типом значило бы отвергнуть
+	// законный вход: тот тип судит то, что БУДЕТ ЗАПИСАНО (#1279).
+	if err := corevalidate.NameOnCreate("name", in.Name); err != nil {
+		return nil, err
 	}
 	if err := in.Labels.Validate(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
@@ -539,6 +544,12 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 // iam.user_token.issued audit_outbox-строка эмитится в ТОЙ ЖЕ tx, что Insert
 // (атомарно, запрет #10): audit-строка коммитится iff строка коммитится.
 func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.UserOAuthClient, actor, keyAlgorithm string) (domain.UserOAuthClient, error) {
+	// Пустое имя до записи не доживает: оно означало «назови сам», и здесь, где
+	// идентификатор уже назначен, его заменяет имя, производное от него (#1279).
+	// Подстановка стоит в ОДНОЙ точке — той, через которую проходит КАЖДЫЙ вид
+	// выпуска: рассыпанная по видам, она разошлась бы между ними молча.
+	row.Name = domain.OAuthClientName(corevalidate.NameOrDefault(string(row.Name), string(row.ID)))
+
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
 		return domain.UserOAuthClient{}, mapPGErr(err)

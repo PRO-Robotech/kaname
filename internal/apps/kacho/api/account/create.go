@@ -29,6 +29,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
@@ -212,20 +213,33 @@ func (u *CreateAccountUseCase) Execute(ctx context.Context, a domain.Account) (*
 		return nil, shared.InvalidArg("ownerUserId", "Illegal argument ownerUserId (derived from caller)")
 	}
 	a.OwnerUserID = domain.UserID(principalID)
-	// Sync 2: full domain validation (name regex + description length + labels;
-	// owner° now populated from caller).
-	if err := a.Validate(); err != nil {
-		return nil, shared.MapValidationErr(err)
-	}
 
 	// ID generation: используем literal-prefix через domain.PrefixAccount.
 	// Future: переключиться на `ids.PrefixAccount` после его добавления
 	// в kacho-corelib/ids.
+	//
+	// Идентификатор рождается ДО проверки имени намеренно: пустое имя — законный
+	// вход создания и означает «назови сам», а умолчание производится ОТ
+	// ИДЕНТИФИКАТОРА, значит подставить его раньше нечем (#1279).
 	accID := ids.NewID(domain.PrefixAccount)
 	// F2: pre-allocate the default Project id so CreateAccountMetadata carries
 	// BOTH accountId AND defaultProjectId before the Operation is done — the
 	// client never has to List the default project.
 	defaultProjID := ids.NewID(domain.PrefixProject)
+
+	// Пустое имя заменяется именем, производным от идентификатора, — ДО
+	// проверки формы, поэтому проверка судит ровно то, что будет записано, и
+	// строка с пустым именем не возникает. Умолчание — сам идентификатор: он
+	// глобально уникален by construction, а `accounts_name_unique` уникален по
+	// имени на ВЕСЬ кластер, поэтому столкнуться безымянным создателям не на
+	// чем — и без проверки-перед-вставкой (запрет #10).
+	a.Name = domain.AccountName(corevalidate.NameOrDefault(string(a.Name), accID))
+
+	// Sync 2: full domain validation (name form + description length + labels;
+	// owner° now populated from caller).
+	if err := a.Validate(); err != nil {
+		return nil, shared.MapValidationErr(err)
+	}
 
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,

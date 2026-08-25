@@ -72,7 +72,7 @@ func seedBootstrapUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, em
 		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
 		uid, accID, "ext-"+uid, email, "Bootstrap Admin")
 	require.NoError(t, err)
-	// accounts.name must match ^[a-z][-a-z0-9]{2,62}$ — derive a valid lowercase
+	// accounts.name must match the single resource-name form of the tree — derive a valid lowercase
 	// suffix from the (crockford-base32, lowercase) account id tail.
 	_, err = tx.Exec(ctx, `
 		INSERT INTO accounts (id, name, owner_user_id, labels)

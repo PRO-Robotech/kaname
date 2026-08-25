@@ -559,7 +559,7 @@ def teardown(name, acb_var):
 
 
 def create_group(name, group_name, group_var, op_var):
-    """GroupService.Create (kebab-case name, ^[a-z][-a-z0-9]{2,62}$) + op-poll capturing id."""
+    """GroupService.Create (имя по единственной форме дерева) + op-poll capturing id."""
     return [
         Step(
             name=name,

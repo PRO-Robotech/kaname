@@ -17,11 +17,13 @@ package pg
 import (
 	stderrors "errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/PRO-Robotech/kacho/pkg/validate/nameform"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
@@ -30,7 +32,9 @@ import (
 //
 //	accounts_name_unique        → ErrAlreadyExists "Account with name %s already exists"
 //	accounts_owner_fk           → ErrFailedPrecondition "User %s not found"
-//	accounts_name_check         → ErrInvalidArg ...regex...
+//	<таблица>_name_check        → ErrInternal (защита последнего рубежа: форму
+//	                              имени проверяет сам сервис, значит срабатывание
+//	                              ограничения — НАШ дефект, а не ввод вызывающего)
 //	projects_account_fk (FK→accounts on INSERT project)        → ErrFailedPrecondition
 //	projects_account_fk (FK←projects on DELETE account, 23503) → ErrFailedPrecondition "Account %s contains projects and cannot be deleted"
 //
@@ -98,6 +102,22 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 	case "23503": // foreign_key_violation
 		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "%s", fkText(pgErr, kindHint, idHint))
 	case "23514": // check_violation
+		// Полоса ФОРМЫ ИМЕНИ отделена от прочих проверок, и отделена по вопросу
+		// «чьё это значение» (задача #718, здесь — #1279).
+		//
+		// Форму имени iam проверяет САМ, до вставки: доменный newtype на каждом
+		// из шести именуемых типов плюс подстановка умолчания на пути создания.
+		// Значит ограничение таблицы есть защита ПОСЛЕДНЕГО РУБЕЖА, и его
+		// срабатывание означает не «вызывающий прислал негодное имя», а «сервис
+		// пропустил негодное значение» — НАШ дефект. `INVALID_ARGUMENT` здесь
+		// обвинял бы вызывающего в чужой ошибке и не давал бы ему ничего, что
+		// можно исправить.
+		if nameform.IsConstraint(pgErr.TableName, pgErr.ConstraintName) {
+			slog.Error("name form backstop fired: service admitted a name it validates itself",
+				"sqlstate", pgErr.Code, "table", pgErr.TableName,
+				"constraint", pgErr.ConstraintName, "kind", kindHint, "id", idHint)
+			return iamerr.ErrInternal
+		}
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", checkText(pgErr))
 	case "23502": // not_null_violation
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", notNullText(pgErr))
@@ -331,16 +351,17 @@ func integrityText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 }
 
 func checkText(pgErr *pgconn.PgError) string {
+	// Связей формы имени в этой таблице НЕТ намеренно: они отводятся раньше, в
+	// ветке 23514, и отвечают фиксированным INTERNAL. Прежде здесь стояли две
+	// записи, называвшие форму `^[a-z][-a-z0-9]{2,62}$`, — они пережили бы её
+	// смену молча и посылали бы арендатора чинить имя по правилу, которого в
+	// дереве нет (#1279).
 	switch pgErr.ConstraintName {
-	case "accounts_name_check":
-		return "Illegal argument name: must match ^[a-z][-a-z0-9]{2,62}$"
 	case "accounts_description_check", "projects_description_check", "groups_description_check",
 		"service_accounts_description_check", "roles_description_check":
 		return "Illegal argument description: length must be <=256"
 	case "accounts_labels_valid", "projects_labels_valid", "groups_labels_valid":
 		return "Illegal argument labels: invalid key/value format or cardinality"
-	case "projects_name_check", "service_accounts_name_check", "groups_name_check":
-		return "Illegal argument name: must match ^[a-z][-a-z0-9]{2,62}$"
 	case "roles_custom_name_check":
 		return "Illegal argument name: must match ^[a-z][a-z0-9_]{0,40}$ (custom role)"
 	case "roles_system_name_check":

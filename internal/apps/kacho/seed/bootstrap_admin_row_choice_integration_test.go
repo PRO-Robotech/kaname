@@ -150,7 +150,7 @@ func seedAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, ownerUse
 }
 
 // accountName — имя аккаунта, годное по `accounts_name_check`
-// (`^[a-z][-a-z0-9]{2,62}$`) и уникальное по `accounts_name_unique`: хвост
+// (единственная форма имени дерева) и уникальное по `accounts_name_unique`: хвост
 // идентификатора крокфордов, то есть уже в нужном алфавите.
 func accountName(accountID string) string {
 	return "boot-acc-" + strings.ToLower(accountID[len(accountID)-6:])

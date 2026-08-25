@@ -33,7 +33,7 @@ Account замещает связку `Organization` + `Cloud` из устаре
 | Поле           | Тип                     | Обязательное | Immutable | Описание / валидация                                                  |
 |----------------|-------------------------|--------------|-----------|-----------------------------------------------------------------------|
 | `id`           | `AccountID` (`acc_...`) | да           | да        | `acc<17-char>` (`ids.NewID("acc")`). Длина 20.                        |
-| `name`         | `AccountName`           | да           | нет       | `^[a-z][-a-z0-9]{2,62}$` (kebab-case).                                |
+| `name`         | `AccountName`           | нет°         | нет       | `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$` — единственная форма имени дерева (DNS label, RFC 1123). ° Пустое имя — законный вход: сервер подставляет имя, производное от `id`. |
 | `description`  | `Description`           | нет          | нет       | `len ≤ 256`.                                                           |
 | `labels`       | `Labels`                | нет          | нет       | map<key,val>, cardinality ≤64, key `^[a-z][-_./@a-z0-9]{0,62}$`, val ≤63. |
 | `owner_user_id`| `UserID`                | да           | **да**    | FK → `users(id) ON DELETE RESTRICT`. Hard-immutable.                  |
@@ -312,7 +312,7 @@ make -C deploy logs-svc SVC=iam
 ## Ссылки на код
 
 - `internal/domain/account.go` — entity + Validate.
-- `internal/domain/types.go::AccountID, AccountName, validateKebabName` — newtypes.
+- `internal/domain/types.go::AccountID, AccountName, validateResourceName` — newtypes.
 - `internal/apps/kacho/api/account/` — use-cases.
 - `internal/repo/kacho/pg/account_repo.go` — pg-impl.
 - `internal/migrations/0001_initial.sql` — DDL `accounts`.

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+
+	"github.com/PRO-Robotech/kacho/pkg/validate/nameform"
 )
 
 // Self-validating domain newtypes.
@@ -39,9 +41,13 @@ type (
 	SvcAccountName string
 
 	// OAuthClientName — человекочитаемое имя токена (SA-key / user-token).
-	// Опционально: пустое допустимо (токен может нести только description).
-	// Непустое обязано следовать той же kebab-конвенции, что и остальные
-	// iam-имена (`^[a-z][-a-z0-9]{2,62}$`).
+	// Судится единственной формой имени дерева, как и остальные имена iam.
+	//
+	// Пустая строка остаётся законным ВХОДОМ выпуска и означает «назови сам»:
+	// до записи её заменяет имя, производное от идентификатора
+	// (`validate.NameOrDefault` в use-case). Здесь пустое уже не проходит —
+	// эта проверка судит то, что БУДЕТ ЗАПИСАНО, а записи с пустым именем не
+	// бывает.
 	OAuthClientName string
 
 	DisplayName     string
@@ -103,10 +109,21 @@ var validResourceTypes = map[ResourceType]struct{}{
 	"*":                         {},
 }
 
-// Regex / limits — centralised so domain.Validate and the DB CHECKs
-// (migration `0001_initial.sql`) agree.
+// Regex / limits — centralised so domain.Validate and the DB CHECKs agree.
+//
+// Формы имени ресурса здесь БОЛЬШЕ НЕТ: она объявлена один раз на всё дерево
+// (`pkg/validate/nameform`), и iam читает то же объявление (#1279). Прежде
+// здесь стояла своя — `^[a-z][-a-z0-9]{2,62}$`, — и расходилась с каноном в
+// обе стороны: была УЖЕ него по началу имени (буква вместо буквы-или-цифры) и
+// по длине (от 3 вместо 1), и ШИРЕ него по хвосту (допускала имя, кончающееся
+// дефисом). Гейт единственности формы её не видел by construction: он ловит
+// байт-идентичную копию канона, а независимо написанную регулярку — нет, и
+// свою слепую зону называет сам.
+//
+// Идентификатор роли остаётся своим и формой имени НЕ судится: `roles/vpc.admin`
+// — то, на что ссылаются привязки, а не косметическая метка (записанное решение
+// владельца, #715).
 var (
-	nameKebabRe         = regexp.MustCompile(`^[a-z][-a-z0-9]{2,62}$`)
 	roleNameCustomRe    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,40}$`)
 	roleNameSystemRe    = regexp.MustCompile(`^roles/[a-z]+\.[a-z]+$`)
 	emailRe             = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
@@ -116,19 +133,18 @@ var (
 
 // Validate — per newtype.
 
-func (n AccountName) Validate() error    { return validateKebabName("name", string(n)) }
-func (n ProjectName) Validate() error    { return validateKebabName("name", string(n)) }
-func (n GroupName) Validate() error      { return validateKebabName("name", string(n)) }
-func (n SvcAccountName) Validate() error { return validateKebabName("name", string(n)) }
+func (n AccountName) Validate() error    { return validateResourceName("name", string(n)) }
+func (n ProjectName) Validate() error    { return validateResourceName("name", string(n)) }
+func (n GroupName) Validate() error      { return validateResourceName("name", string(n)) }
+func (n SvcAccountName) Validate() error { return validateResourceName("name", string(n)) }
 
-// Validate — OAuthClientName: пустое имя допустимо (токен может нести только
-// description); непустое обязано соответствовать kebab-конвенции.
-func (n OAuthClientName) Validate() error {
-	if n == "" {
-		return nil
-	}
-	return validateKebabName("name", string(n))
-}
+// Validate — OAuthClientName судится той же формой, что и остальные имена.
+//
+// Прежде здесь стояла ветка «пустое допустимо», и она была единственным местом
+// iam, где имя доживало до записи пустым. Пустое имя — не «имя, которого нет»,
+// а ресурс, который не ищется, не отличается в списке и показывается прочерком.
+// Ветка снята: пустое заменяется умолчанием ДО записи, в use-case выпуска.
+func (n OAuthClientName) Validate() error { return validateResourceName("name", string(n)) }
 
 // RoleName — two forms: custom (without `roles/` prefix) or system
 // (`roles/<module>.<role>`). Both are accepted here; the use-case layer
@@ -264,10 +280,22 @@ func (r ResourceType) Validate() error {
 	return fmt.Errorf("Illegal argument resource_type %q", string(r))
 }
 
-// validateKebabName — shared helper for AccountName/ProjectName/GroupName/SvcAccountName.
-func validateKebabName(field, v string) error {
-	if !nameKebabRe.MatchString(v) {
-		return fmt.Errorf("Illegal argument %s: must match ^[a-z][-a-z0-9]{2,62}$", field)
+// validateResourceName — единственная проверка формы имени ресурса iam.
+//
+// Делегирует ЕДИНСТВЕННОМУ объявлению формы (`pkg/validate/nameform`), а не
+// повторяет его: два места об одном предмете расходятся молча — так и разошлись
+// прежние четыре валидатора дерева (#715) и эта, пятая, форма iam (#1279).
+//
+// Пакет формы намеренно БЕЗ транспорта, поэтому его вправе читать слой домена,
+// которому grpc запрещён (`architecture.md`): в Go зависимость пакетная, и
+// импорт валидаторов ради одной строки затянул бы сюда grpc целиком.
+//
+// Текст отказа называет ДЕЙСТВУЮЩУЮ форму, взяв её из того же объявления:
+// выписанная копия пережила бы смену канона и посылала бы арендатора чинить имя
+// по несуществующему правилу.
+func validateResourceName(field, v string) error {
+	if !nameform.OK(v) {
+		return fmt.Errorf("Illegal argument %s: must match %s", field, nameform.Form)
 	}
 	return nil
 }

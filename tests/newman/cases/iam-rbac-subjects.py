@@ -69,7 +69,7 @@ conformance suite that must stay fully green.
 
 GROUP-NAME NOTE: the ExpandAccess case creates a REAL group whose name is
 kebab-case (`rbac-e31-grp-{{runId}}`). Group.name is validated by domain
-GroupName.Validate → ^[a-z][-a-z0-9]{2,62}$ (parity with Account/Project/
+GroupName.Validate → the single resource-name form of the tree (parity with Account/Project/
 SvcAccount). An underscore in the name is rejected sync 400 INVALID_ARGUMENT
 before the Operation is created — keep this name hyphenated, never `rbac_e31_*`.
 """
@@ -896,7 +896,7 @@ CASES.append(Case(
             path="/iam/v1/groups",
             body={
                 # Group.name is kebab-case (domain GroupName.Validate →
-                # ^[a-z][-a-z0-9]{2,62}$, same as Account/Project/SvcAccount).
+                # the single resource-name form of the tree, same as Account/Project/SvcAccount).
                 # Underscores are rejected sync 400 — keep this hyphenated.
                 "accountId": "{{accountAId}}",
                 "name": "rbac-e31-grp-{{runId}}",
@@ -1254,6 +1254,59 @@ CASES.append(Case(
 # authorized account-A admin probes account A with a bogus relation → 400, NOT a
 # silent empty 200 / arbitrary-string FGA probe.
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# RBACSUBJ-EXPAND-VAL-PAIR: отношение с ПОВЕРХНОСТИ, которого ЭТОТ тип не
+# объявляет, отвергается на входе (400 INVALID_ARGUMENT), а не падает внутрь.
+#
+# Приём отношения шёл по ОБЪЕДИНЕНИЮ наборов всех типов, а план собирается по
+# набору КОНКРЕТНОГО типа: пара из зазора доезжала до формы и возвращала
+# вызывающему 500 на КОРРЕКТНОМ запросе. `v_create` объявляет ровно один тип —
+# реестр; у аккаунта его нет. Отказ обязан быть ТЕРМИНАЛЬНЫМ: повтор не поможет
+# никогда (#1290).
+#
+# Второй шаг — ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: тот же аккаунт с отношением, которое он
+# объявляет, по-прежнему отвечает 200. Без него отрицание зеленело бы на RPC,
+# отвергающем всё.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="RBACSUBJ-EXPAND-VAL-PAIR",
+    title="ExpandAccess: отношение поверхности, не объявленное этим типом → 400 INVALID_ARGUMENT (приём и компиляция судят один набор)",
+    classes=["RBAC", "RULES", "SUBJECTS", "EXPAND", "VAL", "NEGATIVE"],
+    priority="P1",
+    steps=[
+        # verifies (пара «тип × отношение» судится на входе)
+        Step(
+            name="expand-access-relation-not-on-type",
+            method="GET",
+            path="/iam/v1/accessBindings:expandAccess?objectType=account&objectId={{accountAId}}&relation=v_create",
+            auth="jwtAccountAdminA",
+            test_script=[
+                "const j = pm.response.json();",
+                "pm.test('пара, которой тип не объявляет → 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
+                "pm.test('код INVALID_ARGUMENT (3), а не INTERNAL (13)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
+                "pm.test('отказ называет поле и тип', () => {",
+                "  pm.expect(String(j.message || ''), JSON.stringify(j)).to.contain('relation');",
+                "  pm.expect(String(j.message || ''), JSON.stringify(j)).to.contain('account');",
+                "});",
+            ],
+        ),
+        # ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: объявленное этим же типом отношение проходит.
+        Step(
+            name="expand-access-relation-on-type",
+            method="GET",
+            path="/iam/v1/accessBindings:expandAccess?objectType=account&objectId={{accountAId}}&relation=v_delete",
+            auth="jwtAccountAdminA",
+            test_script=[
+                "const j = pm.response.json();",
+                "pm.test('объявленная типом пара → 200', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(200));",
+                "pm.test('ответ несёт перечень принципалов', () => pm.expect(Array.isArray(j.principals), JSON.stringify(j)).to.be.true);",
+            ],
+        ),
+    ],
+))
+
 
 CASES.append(Case(
     id="RBACSUBJ-EXPAND-VAL-RELATION",

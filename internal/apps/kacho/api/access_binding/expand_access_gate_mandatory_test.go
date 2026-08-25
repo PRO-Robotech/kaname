@@ -60,12 +60,16 @@ func TestExpandAccess_UnwiredAuthority_FailsClosed(t *testing.T) {
 // weaken the gate either: a leaf object authorizes purely through the relation
 // store, and a caller the store denies stays denied.
 func TestExpandAccess_OnlyRelationsWired_StillGated(t *testing.T) {
+	// Тип назван так, как его знает МОДЕЛЬ (`compute_instance`). Прежде здесь
+	// стояла точечная форма каталога (`compute.instance`), которую модель не
+	// объявляет вовсе: с ней вход отвергается раньше стража, и проба утверждала бы
+	// про порядок отказов, а не про то, что страж безусловен (#1290).
 	exp := &fakeLister{byNode: map[string][]string{
-		"compute.instance:inst_x#v_delete": {"user:usr_secret_member"},
+		"compute_instance:inst_x#v_delete": {"user:usr_secret_member"},
 	}}
 	uc := NewExpandAccessUseCase(exp).WithGrantAuthority(nil, &denyingFGA{}, nil)
 
-	res, _, err := uc.Execute(foreignCtx(), "compute.instance", "inst_x", "v_delete", 0)
+	res, _, err := uc.Execute(foreignCtx(), "compute_instance", "inst_x", "v_delete", 0)
 
 	require.Error(t, err)
 	assert.Equal(t, codes.PermissionDenied, status.Code(err))

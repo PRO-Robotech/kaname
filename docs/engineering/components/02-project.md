@@ -49,7 +49,7 @@ prod / staging / dev — это три Project одного Account).
 |---------------|---------------------------|--------------|-----------|--------------------------------------------------------|
 | `id`          | `ProjectID` (`prj_...`)   | да           | да        | `prj<17-char>`. Длина 20.                              |
 | `account_id`  | `AccountID`               | да           | да        | FK → `accounts(id) ON DELETE RESTRICT`.                |
-| `name`        | `ProjectName`             | да           | нет       | `^[a-z][-a-z0-9]{2,62}$`.                              |
+| `name`        | `ProjectName`             | нет°         | нет       | `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$` (DNS label, RFC 1123). ° Пустое — сервер подставит имя от `id`. |
 | `description` | `Description`             | нет          | нет       | `len ≤ 256`.                                            |
 | `labels`      | `Labels`                  | нет          | нет       | ≤64 пар, ключ regex, val ≤63.                          |
 | `created_at`  | `time.Time`               | да (server)  | да        | UTC.                                                   |

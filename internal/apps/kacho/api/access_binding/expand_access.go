@@ -136,12 +136,50 @@ func (u *ExpandAccessUseCase) Execute(ctx context.Context, objectType, objectID,
 	if relation == "" {
 		return nil, false, status.Error(codes.InvalidArgument, "Illegal argument relation (must be non-empty)")
 	}
-	// Validate `relation` against the closed known-relation set BEFORE any FGA
-	// probe. An arbitrary string would otherwise be forwarded verbatim into the FGA
-	// query, letting a caller probe the model's internal relation graph. Unknown →
-	// INVALID_ARGUMENT.
-	if !authzmap.IsExpandableRelation(relation) {
+	// Пара (тип объекта, отношение) судится ДО любого обращения к источнику — и
+	// судится ТЕМ ЖЕ набором, которым её потом разбирает компиляция плана
+	// (`authzmap.AcceptExpand` → `authzmodel.Declares`).
+	//
+	// Прежде здесь стоял только вопрос о ПОВЕРХНОСТИ: отношение принималось, если
+	// его объявлял ХОТЬ ОДИН тип, — то есть по ОБЪЕДИНЕНИЮ наборов. План же
+	// собирается по набору КОНКРЕТНОГО типа, и пара из зазора между ними доезжала
+	// до формы и возвращалась INTERNAL на КОРРЕКТНОМ запросе (#1290): «мы
+	// сломались» там, где сломались не мы — запрос назвал пару, которой не бывает.
+	// Зазор был не краевым случаем: на день заведения 80 пар из 189 принимаемых по
+	// глагольной оси и 158 из 352 по всей поверхности. Числа названы как замер, а
+	// не как инвариант: текущие печатает перепись
+	// (authzmap/expand_acceptance_test.go), и она же роняет прогон, если приём и
+	// компиляция снова разойдутся.
+	//
+	// Отказ ТЕРМИНАЛЬНЫЙ (`INVALID_ARGUMENT`): повтор того же запроса не пройдёт
+	// никогда. И он называет ВИНОВНОЕ поле — у необъявленного типа не объявлено ни
+	// одно отношение, поэтому жалоба на отношение увела бы править не ту
+	// координату.
+	//
+	// Проверка стоит ДО пообъектного стража прав (`api-conventions` §порядок:
+	// format-validate → authz → источник): иначе ответ на один и тот же негодный
+	// ввод зависел бы от того, что вызывающему выдано. Оракула здесь нет —
+	// каноническая модель прав лежит в репозитории и тенантских данных не несёт.
+	verdict, verr := authzmap.AcceptExpand(objectType, relation)
+	if verr != nil {
+		// Модель не разобралась — это НАША поломка, а не негодный ввод.
+		if u.logger != nil {
+			u.logger.ErrorContext(ctx, "ExpandAccess: модель прав не разобрана", slog.Any("error", verr))
+		}
+		return nil, false, status.Error(codes.Internal, "failed to expand access")
+	}
+	switch verdict {
+	case authzmap.ExpandTypeNotDeclared:
+		return nil, false, status.Errorf(codes.InvalidArgument, "Illegal argument object_type %q", objectType)
+	case authzmap.ExpandRelationOffSurface:
+		// Тон сохранён дословно: машинерия модели отвергалась этим текстом и
+		// раньше, и он часть контракта (сквозной кейс RBACSUBJ-EXPAND-VAL-RELATION).
 		return nil, false, status.Errorf(codes.InvalidArgument, "Illegal argument relation %q", relation)
+	case authzmap.ExpandRelationNotOnType:
+		return nil, false, status.Errorf(codes.InvalidArgument,
+			"Illegal argument relation %q (not declared on object type %q)", relation, objectType)
+	case authzmap.ExpandAccepted:
+		// пара разбирается — идём дальше, к стражу прав
 	}
 
 	// Per-object authority gate (read==enforce). The caller may expand "who

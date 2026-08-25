@@ -95,7 +95,7 @@ func seedExpandFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 		require.NoErrorf(t, err, "посев (%s)", sql)
 	}
 	// Имена проходят `accounts_name_check` / `projects_name_check` /
-	// `groups_name_check` (`^[a-z][-a-z0-9]{2,62}$`): подчёркивание в ИМЕНИ
+	// `groups_name_check` (единственная форма имени дерева): подчёркивание в ИМЕНИ
 	// отвергается схемой, в идентификаторе — нет.
 	run(`INSERT INTO kacho_iam.accounts (id, name, owner_user_id)
 	     VALUES ('acc_A', 'home-account', 'usr_owner'), ('acc_B', 'foreign-account', 'usr_owner')
