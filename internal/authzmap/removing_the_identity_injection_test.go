@@ -55,9 +55,20 @@ const (
 	removalType     = "iam_user"
 
 	// removalInjectedWidth — форма, стоявшая здесь до #1131: `Delete` гейтился
-	// глаголом типа, поэтому дословное возвращение прежнего состояния — это
-	// отношение, равное глаголу.
-	removalInjectedWidth = "define identity_remover: v_delete"
+	// ГЛАГОЛОМ типа (`v_delete`), и прежнее состояние возвращается его объявлением.
+	//
+	// Здесь стояло дословное `define identity_remover: v_delete`, и эта форма УМЕРЛА
+	// вместе со своим предметом: глагол снят с типа (#1189), поэтому ссылка на него
+	// перестаёт разбираться — краснел бы РАЗБОР, а не предикат, и опыт молча
+	// перестал бы что-либо доказывать (`testing.md` §«Фикстура пробы, привязанная к
+	// снимаемому предмету, истекает вместе с ним»).
+	//
+	// Взамен подставляется то, ВО ЧТО этот глагол разворачивался — его объявление
+	// дословно, как оно стояло у типа. Ширина та же: прямой список субъектов делает
+	// отношение ВЫДАВАЕМЫМ, а `super_admin` (= `admin from account`) приносит
+	// источники уровня аккаунта. Форма живёт независимо от набора глаголов типа и
+	// поэтому переживёт следующее его сужение.
+	removalInjectedWidth = "define identity_remover: [user, service_account, group#member] or super_admin"
 	// removalInjectedGrantable — сегодняшняя форма плюс прямой список субъектов:
 	// круг держателей внешне тот же, но отношение становится ВЫДАВАЕМЫМ.
 	removalInjectedGrantable = "define identity_remover: [user, service_account, group#member] or subject or super_admin from account"
@@ -160,20 +171,25 @@ func TestRemovingTheIdentityGate_InjectionCutsBothWays(t *testing.T) {
 // TestRemovingTheIdentityInjection_IsScopedToTheTypeNotTheSubstring — опыт над
 // самим опытом.
 //
-// Замена по подстроке дала бы ЛОЖНО-ЗЕЛЁНЫЙ результат: `define v_delete:` стоит в
+// Замена по подстроке дала бы ЛОЖНО-ЗЕЛЁНЫЙ результат: объявление глагола стоит в
 // модели у десятков типов, и текстовая правка попала бы в первый попавшийся —
 // значит гейт «не поймал бы» инъекцию просто потому, что её поставили не туда.
 // Здесь берётся заведомо НЕУНИКАЛЬНОЕ объявление и утверждается, что тронут
 // ровно один тип.
+//
+// Неуникальным свидетелем стоял `define v_delete:` — он ушёл вместе со своим
+// предметом (#1189: глагол снят с `iam_user`). Взят `define v_list:`: он объявлен и
+// у подопытного, и у соседа, и НИ У ОДНОГО из них не несёт `subject` — значит
+// утверждение «после инъекции самочтение появилось» не выполняется до неё.
 func TestRemovingTheIdentityInjection_IsScopedToTheTypeNotTheSubstring(t *testing.T) {
 	clean := removalCleanCanonical(t)
 
-	const shared = "define v_delete:"
+	const shared = "define v_list:"
 	require.Greaterf(t, strings.Count(clean, shared), 1,
 		"предпосылка опыта: объявление %q обязано встречаться у НЕСКОЛЬКИХ типов, иначе он не "+
 			"отличает сужение по типу от замены по подстроке", shared)
 
-	const injected = "define v_delete: [user] or subject"
+	const injected = "define v_list: [user] or subject"
 	text := replaceDefineInType(t, clean, removalType, shared, injected)
 	require.Equalf(t, 1, strings.Count(text, injected),
 		"инъекция внеслась %d раз(а) — сужение блоком типа не работает",
@@ -183,12 +199,12 @@ func TestRemovingTheIdentityInjection_IsScopedToTheTypeNotTheSubstring(t *testin
 	require.NoError(t, err)
 
 	// Тронут ИМЕННО `iam_user`.
-	touched := inspectCredentialRelation(t, m, removalType, "v_delete")
+	touched := inspectCredentialRelation(t, m, removalType, "v_list")
 	require.Truef(t, touched.HasSelf,
 		"опыт не тронул тип %s — замена ушла в другой блок", removalType)
 
 	// Соседний тип с тем же объявлением НЕ тронут.
-	untouched := inspectCredentialRelation(t, m, "iam_group", "v_delete")
+	untouched := inspectCredentialRelation(t, m, "iam_group", "v_list")
 	require.Falsef(t, untouched.HasSelf,
 		"замена задела соседний тип iam_group — сужение по типу не состоялось, и всякий "+
 			"«зелёный» результат опыта выше ничего не доказывает")

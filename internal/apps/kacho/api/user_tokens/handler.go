@@ -42,15 +42,43 @@ func NewHandler(issue *IssueUserTokenUseCase, revoke *RevokeUserTokenUseCase, li
 // `shared.CreatedByLane`; здесь называется только то, чем эта полоса от
 // соседней отличается.
 //
-// Admin/seed path (#60): a ServiceAccount principal (the acr-exempt #58
-// bootstrap-admin SA, or any system_admin SA the gateway FGA-authorized for
-// v_update@iam_user) cannot itself be the created_by — its `sva…` id is not a
-// users(id) row, so forcing created_by=principal would fail the created_by FK
-// (23503) as an opaque async code-9 (issue #60). For an SA caller the token is
-// recorded with created_by = the TARGET user (self, always a valid user row).
-// This never lets the SA spoof an arbitrary created_by — it is forced to the
-// request's user_id — and the REAL actor (the SA) is still captured in the
-// durable audit_outbox event (usecases.go doIssue actor=PrincipalUserID).
+// ЧЕМ ГЕЙТИТСЯ ЭТОТ ГЛАГОЛ — по каталогу прав, а не по памяти (#1258):
+//
+//	ГЕЙТ КАТАЛОГА kacho.cloud.iam.v1.UserTokenService/Issue: token_issuer@iam_user
+//
+// Здесь стояло `v_update@iam_user`, и это было неверно дважды. Во-первых,
+// каталог гейтит выпуск отношением `token_issuer` (область — из `user_id`
+// запроса), а `v_update` не читает по этому глаголу никто. Во-вторых, `v_update`
+// на строке личности СНЯТ с типа целиком (#1128): отношения с таким именем у
+// `iam_user` больше нет.
+//
+// Разница не косметическая, и «починка» кода под прежний текст расширила бы
+// доступ. `token_issuer` объявлен вычисляемым (`token_issuer: subject`):
+// обладать им можно единственным способом — БЫТЬ этим человеком. Его нельзя
+// выдать ни кортежем, ни ролью, ни материализацией реконсайлера, и источников
+// уровня аккаунта у него нет намеренно (#1086): персональный токен делает
+// предъявителя самим человеком во ВСЕХ аккаунтах, где тот состоит, поэтому
+// право, взятое внутри одного аккаунта, вышло бы за его границу. `v_update` же
+// — глагол, и глаголы выдаются ролями. Читатель, доверившийся прежнему тексту,
+// искал бы, почему выдача не помогает, и «исправил» бы гейт на выдаваемое.
+//
+// Значит на полосе МАШИНЫ вызывающий приходит сюда единственным путём — плоским
+// надзором администратора облака (`AuthorizeService.verdict` спрашивает его
+// после отрицательного ответа модели, одинаково для любого отношения). Так
+// работает и учётка первичной посадки, освобождённая от порога уверенности.
+//
+// Почему ответственным записывается ЦЕЛЕВОЙ пользователь, а не вызывающий:
+// идентификатор служебной учётки (`sva…`) строкой `users(id)` не является, и
+// запись `created_by = принципал` уронила бы внешний ключ (23503) непрозрачным
+// асинхронным отказом. Подлога это не открывает — значение принуждено к
+// `user_id` того же запроса, — а НАСТОЯЩИЙ актор (машина) остаётся в долговечном
+// событии аудита (`usecases.go` doIssue, actor=PrincipalUserID).
+//
+// Предикат для следующего читателя (сверяет каталог, а не этот текст):
+//
+//	jq -r '.[]|select(.fqn=="kacho.cloud.iam.v1.UserTokenService/Issue")
+//	       |"\(.required_relation)@\(.scope_extractor.object_type)"' \
+//	  gateway/internal/middleware/embed/permission_catalog.json
 //
 // Присланное на этой полосе значение БОЛЬШЕ НЕ ВЫБРАСЫВАЕТСЯ МОЛЧА (#1245).
 // Прежде правило против подлога стояло только в ветке вызывающего-человека, и
@@ -76,8 +104,10 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueUserTokenRequest) (
 	}
 	createdBy := principal
 	if callerIsServiceAccount {
-		// SA caller — record created_by = the target user (self). The gateway FGA
-		// Check already authorized this SA for v_update on the target user object.
+		// SA caller — record created_by = the target user (self). Право на этот
+		// вызов уже установлено выше по тракту: край спрашивает `token_issuer`
+		// на `iam_user` (см. шапку метода), и машина проходит его плоским
+		// надзором администратора облака.
 		createdBy = req.GetUserId()
 	}
 	op, err := h.issue.Execute(ctx, IssueInput{

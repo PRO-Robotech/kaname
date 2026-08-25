@@ -103,7 +103,14 @@ CASE_GLOBS = ("services/*/tests/newman/cases/*.py",
               "gateway/tests/newman/cases/*.py")
 
 CODE, TEXT = "код", "текст"
-SANITISER = {CODE: "js_regex_src(", TEXT: "js_regex_literal_text("}
+# Помощники, ЗАВЕРШАЮЩИЕ подстановку своим исходом. Признак членства один и
+# проверяемый: помощник ВОЗВРАЩАЕТ результат помощника исхода — проверка
+# образца происходит внутри него, а не в месте подстановки. Обёртка в месте
+# вызова была бы вторым вызовом того же помощника и не проверяла бы ничего
+# сверх, поэтому такой помощник признаётся, а не оборачивается (#1253).
+SANITISER = {CODE: ("js_regex_src(", "credential_secret_pattern("),
+             TEXT: ("js_regex_literal_text(",)}
+_ALL_SANITISERS = tuple(h for hs in SANITISER.values() for h in hs)
 
 # Потолок соседнего корпуса (#1181): подстановок в литерал СТРОКИ или комментария
 # в декларациях. Замер 2026-08-24 на `8a3e00f18` + эта правка. Расти нельзя;
@@ -118,6 +125,13 @@ RECORDED = {
     ("services/registry/tests/newman/cases/registry.py", "op_envelope"): CODE,
     ("services/storage/tests/newman/cases/sec-d.py", "id_pattern"): CODE,
     ("services/vpc/tests/newman/cases/vpc1.py", "msg_text"): TEXT,
+    # Форма секрета удостоверения: образец приходит из общего объявления
+    # (`credential-secret-form.json`), а не выписан в кейсе. Вторая сторона,
+    # читающая то же объявление, чеканит значения кодом продукта и требует,
+    # чтобы образец их принимал, а подделки отвергал (#1253).
+    ("services/iam/tests/newman/cases/basic-access-token.py", "'userToken'"): CODE,
+    ("services/iam/tests/newman/cases/docker-lane-credential-kind.py",
+     "'serviceAccountKey'"): CODE,
 }
 
 
@@ -181,7 +195,7 @@ def _parse_as_function_body(source: str):
 
 def _predmet(expr: str) -> str:
     """Что именно подставляется: аргумент помощника, если он есть, иначе всё."""
-    for helper in SANITISER.values():
+    for helper in _ALL_SANITISERS:
         if expr.startswith(helper):
             depth, out = 0, []
             for ch in expr[len(helper):]:
@@ -233,7 +247,7 @@ def test_every_regex_substitution_in_a_declaration_carries_a_recorded_outcome():
         if not place.expr.startswith(SANITISER[outcome]):
             findings.append(
                 f"{place} — записан исход «{outcome}», но значение подставлено "
-                f"без {SANITISER[outcome]}…)")
+                f"без {' | '.join(SANITISER[outcome])}…)")
     strings = [p for p in all_places if p.state in jslex.IN_STRING + jslex.IN_COMMENT]
     print(f"осмотрено: деклараций {len(paths)}, f-строк {total['fstrings']}, "
           f"из них порождающих JS {total['js_fstrings']}, подстановок "
@@ -289,7 +303,7 @@ def _classify(source: str) -> list:
     """Как перепись судит один файл: (что подставлено, обёрнуто ли своим)."""
     _seen, places = jslex.scan_source(source, "<синтетика>")
     return [(_predmet(p.expr),
-             any(p.expr.startswith(h) for h in SANITISER.values()))
+             p.expr.startswith(_ALL_SANITISERS))
             for p in places if p.state in jslex.IN_REGEX]
 
 

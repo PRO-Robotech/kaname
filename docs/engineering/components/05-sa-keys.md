@@ -59,7 +59,7 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 | `sva_id`              | `ServiceAccountID`   | да           | да        | FK → `service_accounts(id)`.              |
 | `hydra_client_id`     | TEXT                 | да           | да        | имя, которым клиент себя называет. UNIQUE. См. врезку ниже. |
 | `description`         | TEXT                 | нет          | —         | Free-form, ≤256 chars.                    |
-| `created_by_user_id`  | TEXT                 | да           | да        | Admin, выпустивший ключ (audit).          |
+| `created_by_user_id`  | TEXT                 | да           | да        | Ответственный за выпуск (audit). В запросе поле необязательно: край подставляет человеку — вызывающего, служебной учётке — владельца аккаунта целевой учётки. |
 | `created_at`          | TIMESTAMPTZ          | да (server)  | да        | UTC.                                      |
 | `expires_at`          | TIMESTAMPTZ          | нет          | —         | Срок жизни ключа. **Энфорсится** (см. ниже). NULL = бессрочный. |
 | `last_used_at`        | TIMESTAMPTZ          | нет          | —         | Best-effort touch.                        |

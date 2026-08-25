@@ -41,33 +41,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// seedRoleGrantingUserDelete — роль, дающая СНЯТИЕ ЛИЧНОСТИ, и выдача её субъекту
-// на весь аккаунт: тот самый путь, которым пообъектный доступ приезжает
-// пригласившему.
+// ЗДЕСЬ ЖИЛА `seedRoleGrantingUserDelete` — фикстура, клавшая роль с глаголом
+// `delete` на `iam.user`. Она СНЯТА ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ (#1189): глагол снят
+// с типа, поэтому роль, называющая его, разрешается в ПУСТОЙ набор — материализация
+// сверяется с набором типа и отбрасывает чужой глагол. Фикстура клала бы строку
+// проекции, которой продукт больше не производит, то есть была бы СНИСХОДИТЕЛЬНЕЕ
+// продукта; а контроль на `v_delete` вообще перестал бы разбираться — краснел бы
+// вердикт, а не предикат.
 //
-// Отличается от соседней `seedRoleGrantingUserRead` одним глаголом, и различие
-// несущее: контроль фикстуры ниже спрашивает именно `v_delete`, а роль чтения
-// его не даёт. Фикстура, кладущая не тот глагол, доказывала бы запрет на пустоте.
-func seedRoleGrantingUserDelete(t *testing.T, w *ciWorld, roleID, bindingID, subjectID, accountID string) {
-	t.Helper()
-	w.exec(t, `INSERT INTO kacho_iam.roles (id, name, permissions, rules, cluster_id)
-	           VALUES ($1, 'test.userdelete', '[]'::jsonb,
-	                   jsonb_build_array(jsonb_build_object(
-	                       'module', 'iam', 'resources', jsonb_build_array('user'),
-	                       'verbs',  jsonb_build_array('delete'))),
-	                   'cluster_kacho_root')`, roleID)
-	w.exec(t, `INSERT INTO kacho_iam.role_verb (role_id, object_type, verb)
-	           VALUES ($1, 'iam.user', 'delete')`, roleID)
-	w.exec(t, `INSERT INTO kacho_iam.role_rule_selectors
-	             (role_id, rule_fp, arm, object_types, match_labels)
-	           VALUES ($1, 'fp-rmid', 'anchor', ARRAY['iam.user'::text], '{}'::jsonb)`, roleID)
-	w.exec(t, `INSERT INTO kacho_iam.access_bindings
-	             (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
-	           VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`,
-		bindingID, subjectID, roleID, accountID)
-	w.exec(t, `INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
-	           VALUES ($1, 'user', $2)`, bindingID, subjectID)
-}
+// Ровно тот же ход уже сделан соседней фикстурой при снятии `v_update` (#1128), и
+// её разбор здесь не пересказывается — см. `seedRoleGrantingUserRead`.
+//
+// СИЛА ОТРИЦАНИЯ ОТ ЭТОГО НЕ УПАЛА, а выросла: самая сильная пообъектная выдача,
+// какую каталог вообще способен произвести на строке личности, — теперь ЧТЕНИЕ.
+// Проба сеет её и показывает, что снятие строки всё равно недостижимо изнутри
+// аккаунта: распоряжение личностью выражено вычисляемыми отношениями, которые
+// нельзя ни выдать, ни материализовать.
 
 // TestRemovingTheIdentityIsNotReachableFromInsideTheAccount — вердикт по
 // закоммиченным строкам.
@@ -92,7 +81,7 @@ func TestRemovingTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 
 	// Три пути, которыми право доходит до пригласившего, посеяны тем же способом,
 	// каким их производит продукт.
-	seedRoleGrantingUserDelete(t, w, "rol-rmid1", "acb-rmid1", inviter, acc)
+	seedRoleGrantingUserRead(t, w, "rol-rmid1", "acb-rmid1", inviter, acc)
 	w.factThroughJournal(t, "user:"+inviter, "admin", "account", acc)
 	w.factThroughJournal(t, "user:"+owner, "owner", "account", acc)
 	// Сам человек. Кортеж пишется на заведении пользователя (internal_upsert.go).
@@ -123,9 +112,11 @@ func TestRemovingTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 	// Посев ДЕЙСТВИТЕЛЬНО живой: пригласивший держит на этой строке глагол
 	// снятия, который материализует выдача. Без этого утверждения каждое
 	// отрицание ниже было бы истинно и на пустой базе.
-	require.True(t, w.allowed(t, "user:"+inviter, "v_delete", person),
-		"КОНТРОЛЬ: пригласивший обязан держать глагол `v_delete` на строке своего члена — "+
-			"иначе фикстура ничего не посеяла и все отрицания ниже вакуумны")
+	require.True(t, w.allowed(t, "user:"+inviter, "v_get", person),
+		"КОНТРОЛЬ: пригласивший обязан держать глагол `v_get` на строке своего члена — "+
+			"иначе фикстура ничего не посеяла и все отрицания ниже вакуумны. Здесь спрашивался "+
+			"`v_delete`; глагол снят с типа (#1189), и это САМАЯ СИЛЬНАЯ пообъектная выдача, "+
+			"какую каталог способен произвести на строке личности")
 
 	// ── ОТРИЦАНИЕ — предмет пробы ────────────────────────────────────────────
 	for _, c := range []struct{ who, what string }{

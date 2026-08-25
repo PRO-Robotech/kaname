@@ -500,8 +500,13 @@ func TestIAMDirectForward_09_UserGroup_ForwardEqualsFull(t *testing.T) {
 			require.NotEmpty(t, relFwd, "forward materialized owner tuples on the new %s", tc.name)
 			assert.Equal(t, relFull, relFwd,
 				"%s: forward ≡ full owner relation-set (no drift)", tc.name)
-			assert.True(t, ledgerHasTuple(t, ctx, pool, ownerBID, ownerUser, "admin", tc.fgaType+":"+fwdID),
-				"forward materializes the owner admin tuple on the new %s", tc.name)
+			// Ярус спрашивается у ТИПА (см. ownerTierOn): у `iam_user`
+			// распоряжающихся глаголов не осталось, поэтому владелец получает там
+			// `viewer`. Утверждение о НЕПУСТОТЕ набора от этого не слабеет — слабеет
+			// только допущение, что ярус у всех типов один.
+			wantTier := ownerTierOn(tc.fgaType)
+			assert.True(t, ledgerHasTuple(t, ctx, pool, ownerBID, ownerUser, wantTier, tc.fgaType+":"+fwdID),
+				"forward materializes the owner %q tuple on the new %s", wantTier, tc.name)
 		})
 	}
 }

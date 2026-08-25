@@ -95,9 +95,18 @@ func TestResourceVerbsGate_SilentOnTheTree(t *testing.T) {
 	if !ok {
 		t.Fatalf("ресурса %s нет в каталоге — опыт над суженным не поставить", narrowedResource)
 	}
-	if contains(narrow.Declared, "update") {
-		t.Fatalf("%s всё ещё объявляет `update` — он перестал быть суженным, и оси ниже "+
-			"меряют не то", narrowedResource)
+	var narrowedBy []string
+	// Предпосылка спрашивает СВОЙСТВО («набор уже́ прежнего предложения»), а не
+	// отсутствие названного глагола: имя одного глагола устаревает при следующем
+	// сужении того же типа, и предпосылка начала бы утверждать не то, что меряет.
+	for _, v := range previouslyOfferedToEveryResource {
+		if !contains(narrow.Declared, v) {
+			narrowedBy = append(narrowedBy, v)
+		}
+	}
+	if len(narrowedBy) == 0 {
+		t.Fatalf("%s снова объявляет всё, что предлагалось каждому ресурсу (%v) — он перестал "+
+			"быть суженным, и оси ниже меряют не то", narrowedResource, narrow.Declared)
 	}
 	neighbour, ok := offeringOf(offerings, neighbourResource)
 	if !ok || !contains(neighbour.Declared, "update") {
@@ -108,8 +117,8 @@ func TestResourceVerbsGate_SilentOnTheTree(t *testing.T) {
 	if !ok || len(wider.Declared) <= len(neighbour.Declared) {
 		t.Fatalf("%s больше не шире обычного набора — ось расширения потеряла предмет", widerResource)
 	}
-	t.Logf("перепись опыта: суженный %s=%v; сосед %s=%v; расширенный %s=%v",
-		narrowedResource, narrow.Declared, neighbourResource, neighbour.Declared,
+	t.Logf("перепись опыта: суженный %s=%v (не хватает %v); сосед %s=%v; расширенный %s=%v",
+		narrowedResource, narrow.Declared, narrowedBy, neighbourResource, neighbour.Declared,
 		widerResource, wider.Declared)
 }
 
@@ -152,8 +161,20 @@ func TestResourceVerbsGate_FallsOnEachAxis(t *testing.T) {
 
 	t.Run("ось 2 обратная: запись перечня пережила свой предмет", func(t *testing.T) {
 		// Суженному вернули полный набор — запись перечня стало нечего исключать.
+		//
+		// Возвращается ИМЕННО ТО, ЧЕГО НЕ ХВАТАЕТ, а не выписанный глагол: здесь
+		// стояло дописывание одного `update`, и оно перестало восстанавливать полный
+		// набор, как только у того же типа сняли второй глагол (#1189) — порча
+		// «вносилась», а предмета не создавала, то есть опыт молча перестал бы
+		// доказывать что-либо. Дополнение до `previouslyOfferedToEveryResource`
+		// переживёт и следующее сужение.
 		got, ok := withOffering(base, narrowedResource, func(o resourceOffering) resourceOffering {
-			full := append(append([]string(nil), o.Declared...), "update")
+			full := append([]string(nil), o.Declared...)
+			for _, v := range previouslyOfferedToEveryResource {
+				if !contains(full, v) {
+					full = append(full, v)
+				}
+			}
 			o.Declared, o.Offered = full, full
 			return o
 		})

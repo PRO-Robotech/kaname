@@ -142,6 +142,20 @@ func tiersTheTypeCanServe(family string) (tiers []string, narrowed bool) {
 	return tiers, len(tiers) < len(catalogTiers)
 }
 
+// verbsExpandingWildcardFor — набор, которым разворачивается подстановка `*` для
+// ЭТОЙ пары (модуль, ресурс): набор её типа, а для пары, не резолвящейся ни в один
+// тип (форма `*.*`), — все глаголы платформы. Тот же выбор, что делает
+// материализация (`scopeTypeVerbs`), и сделан он здесь по той же причине: два
+// места об одном предмете разойдутся молча.
+func verbsExpandingWildcardFor(module, resource string) []string {
+	if fgaType, ok := authzmap.ObjectType(module, resource); ok {
+		if verbs := authzmap.VerbsOfType(fgaType); len(verbs) > 0 {
+			return verbs
+		}
+	}
+	return authzmap.AllVerbVocabulary()
+}
+
 func containsTier(in []string, t string) bool {
 	for _, x := range in {
 		if x == t {
@@ -207,12 +221,21 @@ func legacyTierMap(perms []string) map[string]string {
 // for a role's rules. For each rule, domain.ResolveVerbsAndTier(verbs) yields the
 // rule's tier; that tier is folded into every ({module} × resource) pair the rule
 // touches (one module per rule).
+//
+// НАБОР, КОТОРЫМ РАЗВОРАЧИВАЕТСЯ ПОДСТАНОВКА, БЕРЁТСЯ ПО ПАРЕ, а не общий на все.
+// Здесь стояло ПЕРЕСЕЧЕНИЕ наборов всех типов, и пока наборы совпадали, оно
+// равнялось набору любого типа — то есть было верным по совпадению. Пересечение
+// объявлено СУЖАЮЩИМСЯ: как только тип снимает у себя глагол, оно перестаёт
+// совпадать с набором СОСЕДНЕГО типа, и ожидание пробы расходится с тем, что
+// считает прод (#1189: пересечение стало `[get list]`, и 17 семейств `admin`
+// вычислялись здесь как `viewer`). Предикат обязан спрашивать тот же набор, что
+// материализация, — иначе это второе место об одном предмете.
 func rulesTierMap(rules domain.Rules) map[string]string {
 	out := map[string]string{}
 	for _, r := range rules {
-		_, tier := domain.ResolveVerbsAndTier(r.Verbs, authzmap.CommonVerbVocabulary())
 		for _, res := range r.Resources {
 			key := r.Module + "." + res
+			_, tier := domain.ResolveVerbsAndTier(r.Verbs, verbsExpandingWildcardFor(r.Module, res))
 			if tierRank[tier] > tierRank[out[key]] {
 				out[key] = tier
 			}
@@ -394,7 +417,10 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 				continue
 			}
 			wildcardBearers[r.name] = true
-			_, wantTier := domain.ResolveVerbsAndTier(rule.Verbs, authzmap.CommonVerbVocabulary())
+			// Форма `*.*` ни в один тип не резолвится, поэтому подстановку
+			// разворачивают ВСЕ глаголы платформы — тот же запасной набор, что берёт
+			// материализация на якоре без собственного (см. scopeTypeVerbs).
+			_, wantTier := domain.ResolveVerbsAndTier(rule.Verbs, authzmap.AllVerbVocabulary())
 			require.Containsf(t, []string{"viewer", "editor", "admin"}, wantTier,
 				"#201 emit-fact: wildcard system-role %s must resolve to a tier-tuple relation (got %q) — an unresolved tier is the empty-grant #201 bug",
 				r.name, wantTier)

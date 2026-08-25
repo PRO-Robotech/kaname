@@ -124,6 +124,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
+                  "pm.environment.unset('batIssueOpId');",
                   "pm.test(\"\\u0432\\u044b\\u0434\\u0430\\u0447\\u0430 \\u0431\\u0430\\u0437\\u043e\\u0432\\u043e\\u0433\\u043e \\u0441\\u0435\\u043a\\u0440\\u0435\\u0442\\u0430: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
                   "  pm.expect(pm.response && pm.response.code,",
                   "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
@@ -159,7 +160,11 @@
                   "  pm.expect(_id, 'идентификатор из строки').to.eql(_r.token.id);",
                   "});",
                   "pm.environment.set('batSecret', _r.secret);",
-                  "pm.environment.set('batCredId', _r.token.id);"
+                  "pm.environment.set('batCredId', _r.token.id);",
+                  "pm.environment.set('batIssueOpId', pm.response.json().id);",
+                  "const _last = String(_r.secret).slice(-1);",
+                  "pm.environment.set('batTamperedSecret',",
+                  "  String(_r.secret).slice(0, -1) + (_last === '0' ? '1' : '0'));"
                 ]
               }
             }
@@ -260,6 +265,196 @@
                   "pm.test('принципалом стал ВЛАДЕЛЕЦ удостоверения, а не кто-то ещё', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(JSON.stringify(j)).to.include(pm.environment.get('userAAAId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-BAT-SECRET-LIFECYCLE-OK :: present-tampered-secret",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "me"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'batTamperedSecret'",
+                  "const __t = pm.environment.get('batTamperedSecret') || pm.variables.get('batTamperedSecret') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: batTamperedSecret is set (subject under test)', () => {",
+                  "    pm.expect.fail('batTamperedSecret is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"\\u043f\\u0440\\u0435\\u0434\\u044a\\u044f\\u0432\\u043b\\u0435\\u043d\\u0438\\u0435 \\u0441\\u0435\\u043a\\u0440\\u0435\\u0442\\u0430 \\u0441 \\u0438\\u0441\\u043f\\u043e\\u0440\\u0447\\u0435\\u043d\\u043d\\u043e\\u0439 \\u043a\\u043e\\u043d\\u0442\\u0440\\u043e\\u043b\\u044c\\u043d\\u043e\\u0439 \\u0441\\u0443\\u043c\\u043c\\u043e\\u0439: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('строка с испорченной контрольной суммой ОТВЕРГНУТА краем', () => {",
+                  "  const _t = String(pm.environment.get('batTamperedSecret') || '');",
+                  "  const _l = String(pm.environment.get('batSecret') || '');",
+                  "  pm.expect(_t, 'подделка обязана отличаться от подлинника').to.not.eql(_l);",
+                  "  pm.expect(pm.response.code, 'HTTP — 200 означает, что полоса приёма'",
+                  "    + ' не РАЗБИРАЕТ удостоверение, а лишь смотрит на его вид: тогда'",
+                  "    + ' «живой секрет принят» соседним шагом ничего не доказывает.'",
+                  "    + ' Тело: ' + pm.response.text()).to.be.oneOf([401, 403]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-BAT-SECRET-LIFECYCLE-OK :: reread-issue-operation",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/operations/{{batIssueOpId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "operations",
+                "{{batIssueOpId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// bounded read-your-writes retry over the owner-tuple materialization window",
+                  "// (opgate removed -> eventual-consistency); retries SELF only on 403/404.",
+                  "// ПОЛОСА — синхронный отказ ЭТОГО шага. У асинхронной мутации отказ ВЛАДЕЛЬЦА",
+                  "// приезжает внутри Operation и сюда НЕ попадает: нужен прогрев чтением.",
+                  "if (pm.environment.get('_authRetryStarted') !== pm.info.requestName) {",
+                  "  pm.environment.set('_authRetryCount', '0');",
+                  "  pm.environment.set('_authRetryStarted', pm.info.requestName);",
+                  "}",
+                  "const _arc = parseInt(pm.environment.get('_authRetryCount') || '0', 10);",
+                  "if ([403,404].includes(pm.response.code) && _arc < 15) {",
+                  "  pm.environment.set('_authRetryCount', String(_arc + 1));",
+                  "  const _ard = Date.now(); while (Date.now() - _ard < 400) { /* owner-tuple materialization wait */ }",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "  return;",
+                  "}",
+                  "pm.environment.unset('_authRetryCount');",
+                  "pm.environment.unset('_authRetryStarted');",
+                  "pm.test(\"\\u043f\\u043e\\u0432\\u0442\\u043e\\u0440\\u043d\\u043e\\u0435 \\u0447\\u0442\\u0435\\u043d\\u0438\\u0435 \\u043e\\u043f\\u0435\\u0440\\u0430\\u0446\\u0438\\u0438 \\u0432\\u044b\\u0434\\u0430\\u0447\\u0438: request was ANSWERED (a check that did not run is not a check that passed)\", () => {",
+                  "  pm.expect(pm.response && pm.response.code,",
+                  "    'no response — the endpoint was not reached. This is a broken harness, not a passing check: fix reachability (the runner forwards the port and injects the base URL) or delete the probe.')",
+                  "    .to.be.a('number');",
+                  "});",
+                  "pm.test('операция выдачи ПЕРЕЧИТЫВАЕТСЯ — положительный контроль'",
+                  "  + ' к утверждению ниже', () => {",
+                  "  pm.expect(pm.response.code, 'HTTP: ' + pm.response.text()).to.eql(200);",
+                  "});",
+                  "pm.test('перечитанная операция НЕ несёт секрета: показан один раз', () => {",
+                  "  const _raw = pm.response.text();",
+                  "  const _live = String(pm.environment.get('batSecret') || '');",
+                  "  pm.expect(_live, 'шаг выдачи не захватил секрет — сравнивать не с чем')",
+                  "    .to.be.a('string').with.length.greaterThan(0);",
+                  "  pm.expect(_raw, 'тело операции содержит выданный секрет дословно')",
+                  "    .to.not.include(_live);",
+                  "  pm.expect(_raw, 'тело операции несёт марку базового удостоверения —'",
+                  "    + ' значит какой-то секрет в нём всё-таки лежит')",
+                  "    .to.not.include('kacho_');",
                   "});"
                 ]
               }

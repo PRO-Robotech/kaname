@@ -132,9 +132,15 @@ func TestOwnerIamContent_ForwardMaterializes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			objID := tc.seedFn()
 			require.NoError(t, rec.ReconcileObject(ctx, tc.objType, objID))
+			// Ярус спрашивается у ТИПА, а не пишется литералом: он выводится из
+			// развёрнутых глаголов, и у типа без распоряжающихся глаголов (`iam_user`)
+			// владелец получает `viewer`, а не `admin`. Литерал утверждал бы о типе то,
+			// чего материализация не делает.
+			wantTier := ownerTierOn(tc.fgaType)
 			assert.True(t,
-				ledgerHasTuple(t, ctx, pool, ownerBID, ownerUser, "admin", tc.fgaType+":"+objID),
-				"owner must FORWARD-materialize admin tuple on a %s created after the binding (C-01b)", tc.name)
+				ledgerHasTuple(t, ctx, pool, ownerBID, ownerUser, wantTier, tc.fgaType+":"+objID),
+				"owner must FORWARD-materialize the %q tuple on a %s created after the binding (C-01b)",
+				wantTier, tc.name)
 		})
 	}
 }

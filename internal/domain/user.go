@@ -17,8 +17,9 @@ import (
 // ACTIVE  — either self-signup via `UpsertFromIdentity` without a pending
 // invite, or a PENDING row activated on first-login (matched by email).
 // BLOCKED — административный запрет на членство в Account'е. Ставится и снимается
-// ДЕЙСТВИЯМИ `UserService.Block` / `Unblock` (право `v_update@iam_user` = админ
-// аккаунта плюс каскад облака); писатель — `userWriter.SetInviteStatus`.
+// ДЕЙСТВИЯМИ `UserService.Block` / `Unblock` (право `identity_suspender@iam_user`
+// = админ аккаунта плюс каскад облака; `v_update` с этого типа снят, #1128);
+// писатель — `userWriter.SetInviteStatus`.
 //
 // Состояние принадлежит СТРОКЕ ЧЛЕНСТВА, а не человеку. Одна личность держит по
 // строке на каждый Account, поэтому запрет принадлежит тому аккаунту, который его

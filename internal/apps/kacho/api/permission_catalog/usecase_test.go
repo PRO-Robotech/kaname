@@ -156,16 +156,18 @@ func TestListPermissionCatalog_ClosedVerbsAreTheCommonSetInCanonicalOrder(t *tes
 	// `create` вышло, когда `v_create` остался у одного `registry_registry`
 	// (контейнерная семантика «создать репозиторий в этом пространстве имён» —
 	// единственная, у которой есть читатель). `update` вышло, когда `v_update` был
-	// снят с `iam_user` (#1128): правку записи личности спрашивает `record_writer`,
-	// запрет — `identity_suspender`, и читателя у глагола не осталось.
+	// снят с `iam_user` (#1128), `delete` — когда с того же типа снят `v_delete`
+	// (#1189): распоряжение строкой личности выражено ИМЕНОВАННЫМИ отношениями
+	// (`record_writer`, `identity_suspender`, `identity_remover`), и читателя у обоих
+	// глаголов не осталось ни одного.
 	//
 	// СЛЕДСТВИЯ У ЭТОГО СУЖЕНИЯ БОЛЬШЕ НЕТ, и в этом весь смысл #1128: выпадающий
 	// список редактора ролей строится теперь из `CatalogResource.verbs` — набора
-	// ЭТОГО ресурса, — поэтому 26 типов, объявляющих `update`, продолжают его
-	// предлагать, а `loadbalancer.targetGroups` и `registry.registries` предлагают
+	// ЭТОГО ресурса, — поэтому 26 типов, объявляющих `update` и `delete`, продолжают
+	// их предлагать, а `loadbalancer.targetGroups` и `registry.registries` предлагают
 	// сверх того свои собственные глаголы. Обе стороны утверждает
 	// resource_verbs_test.go.
-	want := []string{"get", "list", "delete"}
+	want := []string{"get", "list"}
 	if len(got) != len(want) {
 		t.Fatalf("closedVerbs=%v, want %v", got, want)
 	}

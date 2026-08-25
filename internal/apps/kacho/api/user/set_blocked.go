@@ -138,8 +138,10 @@ func NewUnblockUserUseCase(r Repo, opsRepo operations.Repo) *UnblockUserUseCase 
 
 func (u *setInviteStatusUseCase) Execute(ctx context.Context, id domain.UserID) (*operations.Operation, error) {
 	// Anti-anonymous floor only. WHO may suspend this membership is decided by
-	// the MODEL: the api-gateway Checks `v_update@iam_user:<user_id>` (plus the
-	// step-up floor) before iam is dialed — security.md «Авторизация живёт в
+	// the MODEL: the api-gateway Checks `identity_suspender@iam_user:<user_id>`
+	// (plus the step-up floor) before iam is dialed — каталог прав,
+	// `UserService/Block` и `/Unblock`. Здесь стояло `v_update`, отношение,
+	// СНЯТОЕ с этого типа вместе со своим читателем (#1102, #1128, #1258) — security.md «Авторизация живёт в
 	// МОДЕЛИ, а не в самодельных проверках». A second, hand-rolled rule here
 	// would not be grantable, scopable, revocable or auditable, and it would lock
 	// machine principals out of a control they are entitled to operate.

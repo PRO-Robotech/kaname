@@ -54,7 +54,7 @@ import (
 var blockedWriters = map[string]string{
 	"../../internal/repo/kacho/pg/user_repo.go": "UserService.Unblock — административное снятие " +
 		"(use-case services/iam/internal/apps/kacho/api/user/set_blocked.go, " +
-		"право v_update@iam_user = админ аккаунта + каскад облака). Писатель — " +
+		"право identity_suspender@iam_user = админ аккаунта + каскад облака). Писатель — " +
 		"userWriter.SetInviteStatus; тот же метод обслуживает и снятие, поэтому " +
 		"односторонним контроль быть не может by construction.",
 }

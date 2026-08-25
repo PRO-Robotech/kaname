@@ -82,14 +82,24 @@ func TestMigration_F51_LegacyTablesDropped(t *testing.T) {
 // быть не может: правку записи личности выражает `record_writer`, отношение
 // ВЫЧИСЛЯЕМОЕ, и выдать его нельзя ни кортежем, ни привязкой.
 //
-// 66 − 9 − 7 − 1 = 49.
+// MINUS `iam.user.admin`, выведенной вместе со снятием `v_delete` с того же типа
+// (#1189). Её правило — подстановка `*`, разворачиваемая в набор ТИПА; после снятия
+// последнего распоряжающегося глагола набор стал `[get list]`, и роль
+// материализовала ярус НАБЛЮДАТЕЛЯ и те же два глагола, что соседняя
+// `iam.user.view`. То есть дубликат под именем, обещающим администрирование, — а
+// администрирование строки личности выражено ВЫЧИСЛЯЕМЫМИ отношениями
+// (`record_writer`, `identity_suspender`, `identity_remover`), которые нельзя выдать.
+// Ярус, которому нечем быть, в посеве существовать не должен: этого требует гейт
+// паритета ярусов (tier_parity_integration_test.go, свойство 1, обратная сторона).
+//
+// 66 − 9 − 7 − 1 − 1 = 48.
 //
 // The number is asserted EXACTLY, not as a floor, so a re-seed that quietly brings
 // a retired role back fails here — that is the guard, and it is worth the upkeep.
 // It lives in ONE place because it was previously written out twice and a
 // deliberate retire then had to find both; the second copy is a precondition in
 // TestMigration_F53_AccessNotSevered.
-const wantSystemRoles = 49
+const wantSystemRoles = 48
 
 // TestMigration_F53_SystemRolesReseededWithRules — every system role has
 // non-empty rules after re-seed; the count is exact.

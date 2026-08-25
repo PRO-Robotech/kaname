@@ -159,8 +159,18 @@ CASES.append(Case(
                 "const _r = pm.response.json().response || {};",
                 # ПАРА: что есть и чего нет. «Секрет непуст» в одиночку зеленело
                 # бы на ответе, который ВДОБАВОК отдал ключевой материал.
-                "pm.test('ответ несёт непустую строку секрета', () => {",
-                "  pm.expect(_r.secret, 'response.secret').to.be.a('string').with.length.greaterThan(0);",
+                # ФОРМА, А НЕ ТОЛЬКО НЕПУСТОТА, и образец берётся ИЗ ОБЪЯВЛЕНИЯ
+                # (#1253). «Непуст» зеленеет на любой строке, включая ту, которую
+                # продукт не чеканит; а образец, выписанный здесь руками, был бы
+                # второй копией предиката — она уже расходилась молча в соседнем
+                # кейсе. Объявление одно (`credential-secret-form.json`), и
+                # `scripts/credsecretmint/form_test.go` требует, чтобы оно
+                # принимало значения, ОТЧЕКАНЕННЫЕ `credsecret.Mint`.
+                # Вид здесь — ключ служебной учётки: `SAKeyService.Issue` чеканит
+                # идентификатор с префиксом `PrefixSAOAuthClient`.
+                "pm.test('ответ несёт непустую строку секрета объявленной формы', () => {",
+                "  pm.expect(_r.secret, 'response.secret').to.be.a('string')",
+                f"    .and.to.match(/{credential_secret_pattern('serviceAccountKey', where='docker-lane/issue-secret-credential')}/);",
                 "});",
                 "pm.test('ответ вида SECRET НЕ несёт ключевого материала ни в одном поле', () => {",
                 "  pm.expect(_r.privateKeyPem || '', 'response.privateKeyPem').to.eql('');",

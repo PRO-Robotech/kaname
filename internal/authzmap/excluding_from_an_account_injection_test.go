@@ -102,8 +102,14 @@ func TestExcludingFromAnAccountGate_InjectionCutsBothWays(t *testing.T) {
 		"на дереве без дефекта круги приглашения и исключения не равны — опыт ставится не над тем")
 
 	// ── ось I: решение уезжает на строку личности (плечо КАТАЛОГА) ────────────
+	// Здесь стоял глагол `v_delete` типа `iam_user` — он снят вместе со своим
+	// предметом (#1189), и ссылка на него перестала бы КОМПИЛИРОВАТЬСЯ: краснел бы
+	// разбор, а не предикат. Взято отношение, которым решение о строке личности
+	// принимается НА САМОМ ДЕЛЕ (`identity_remover`, #1131), — то есть инъекция стала
+	// не только живучей, но и правдоподобнее: ровно так выглядел бы возврат класса
+	// #1102, где исключение из аккаунта гейтили распоряжением глобальной строкой.
 	onIdentity := inspectExclusionPair(t, cleanModel, admission,
-		catalogGate{relation: "v_delete", objectType: "iam_user"})
+		catalogGate{relation: "identity_remover", objectType: "iam_user"})
 	require.Equalf(t, "iam_user", onIdentity.ExclusionType,
 		"инъекция не внеслась: объект решения остался %s", onIdentity.ExclusionType)
 	require.Falsef(t, onIdentity.CirclesEqual,
