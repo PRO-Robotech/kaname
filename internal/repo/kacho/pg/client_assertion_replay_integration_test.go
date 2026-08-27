@@ -182,62 +182,21 @@ func TestClientAssertionReplay_KeyIsScopedToTheClient(t *testing.T) {
 	require.True(t, isReplayed(repo.Redeem(ctx, "uoc-client-a", shared, expiresAt)))
 }
 
-// TestClientAssertionReplay_RowLivesExactlyAsLongAsTheAssertion — F2-27.
+// # Здесь стояла проба «строка живёт ровно столько, сколько утверждение» — СНЯТА ВМЕСТЕ С ЕЁ ПРЕДМЕТОМ
 //
-// Обе стороны §6.3 утверждаются ОДНИМ прогоном:
+// Она подавала сборщику момент ВХОДОМ (`repo.Reap(ctx, now.Add(time.Minute))`) и
+// этим и была ценна: часы приходили параметром, и проба не спала. Такой
+// сигнатуры больше нет — часы уборки стали часами БАЗЫ (задача #1292, приёмка
+// `retention-sweep-has-a-caller.md` §2.2), потому что убирает одна реплика, а
+// принимает любая, и «процесс против процесса» ничем не ограничено.
 //
-//   - «не дольше»: истёкшая строка убирается сборщиком, и число строк
-//     возвращается к тому, что было ДО предъявления;
-//   - «не короче»: строка ещё не истёкшего утверждения проход сборщика
-//     ПЕРЕЖИВАЕТ, и повтор по-прежнему отвергается.
-//
-// Без второй половины «пережила» неотличимо от «истекла раньше», а все прочие
-// утверждения проходят на сборщике, опустошающем таблицу целиком — то есть на
-// реализации, делающей повтор законным.
-func TestClientAssertionReplay_RowLivesExactlyAsLongAsTheAssertion(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, setupTestDB(t))
-	require.NoError(t, err)
-	pgtest.ClosePoolAtEnd(t, pool)
-	repo := kachopg.NewClientAssertionReplayRepo(pool)
-
-	before, err := repo.Len(ctx)
-	require.NoError(t, err)
-
-	now := time.Now().UTC()
-	const clientID = "uoc-reaper"
-	// Одно утверждение истечёт, второе — нет.
-	require.NoError(t, repo.Redeem(ctx, clientID, "jti-short", now.Add(30*time.Second)))
-	require.NoError(t, repo.Redeem(ctx, clientID, "jti-long", now.Add(10*time.Minute)))
-
-	afterRedeem, err := repo.Len(ctx)
-	require.NoError(t, err)
-	require.Equal(t, before+2, afterRedeem)
-
-	// Сборщик по часам, поданным ВХОДОМ: проба не спит и не зависит от
-	// системного времени.
-	reaped, err := repo.Reap(ctx, now.Add(time.Minute))
-	require.NoError(t, err)
-	require.EqualValues(t, 1, reaped)
-
-	// «не дольше»: число строк вернулось к исходному плюс пережившая строка.
-	afterReap, err := repo.Len(ctx)
-	require.NoError(t, err)
-	require.Equal(t, before+1, afterReap)
-
-	// «не короче»: строка ещё не истёкшего утверждения проход сборщика
-	// пережила, и повтор по-прежнему отвергается КАК ПОВТОР.
-	require.True(t, isReplayed(repo.Redeem(ctx, clientID, "jti-long", now.Add(10*time.Minute))))
-
-	// А истёкшее утверждение из таблицы ушло — и его слот свободен. Наружу оба
-	// отказа побайтово совпадают (§7), поэтому «повтор» от «истёк» различает
-	// проверка срока ВЫШЕ по потоку, а не эта таблица; здесь утверждается
-	// состояние хранилища, а не тон ответа.
-	require.NoError(t, repo.Redeem(ctx, clientID, "jti-short", now.Add(10*time.Minute)))
-}
+// Утверждаемое ею свойство не пропало и не ослаблено — оно переехало вместе с
+// предикатом и стало СТРОЖЕ: `TestRetentionSweep_Assertions_RemovesExpiredKeepsLive`
+// (RET-SWP-01) требует того же по обе стороны, а
+// `TestRetentionSweep_Assertions_AdmissionWindowStaysClosed` (RET-SWP-17)
+// добавляет то, чего прежняя проба не различала вовсе, — что порог не открывает
+// окна законного повтора шириной `ClockSkew`. Обе — в
+// `retention_sweep_integration_test.go`.
 
 // isReplayed — предъявление отвергнуто как ПОВТОР.
 func isReplayed(err error) bool { return domain.IsAssertionReplayed(err) }

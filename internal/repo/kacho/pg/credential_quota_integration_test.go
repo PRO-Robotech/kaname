@@ -247,30 +247,47 @@ func requireQuotaRefusal(t *testing.T, err error, wantCode, wantText string) {
 	}
 }
 
-// CRED-CAP-01 — потолок, который ОГРАНИЧИВАЕТ. Величина умолчания — десять.
+// defaultUserCredentialCeiling / defaultSACredentialCeiling — действующие
+// величины умолчания.
+//
+// Были 10 и 20; стали 12 и 24 задачей #1264 вместе с автоснятием истёкших.
+// Прежние числа закладывали запас под неотозванные истёкшие удостоверения —
+// разбор показал, что запаса в них не было ВОВСЕ: `5 назначений × 2` есть сам
+// модельный пик правильной ротации, а не модель с запасом. Разложение и цена —
+// в миграции 20260825170000 и в приёмке `expired-credential-reclaim.md` §4.
+//
+// Числа стоят ЗДЕСЬ ОДНАЖДЫ, а не в каждом кейсе: пять вхождений одного числа
+// разошлись бы при следующем пересмотре молча.
+const (
+	defaultUserCredentialCeiling = 12
+	defaultSACredentialCeiling   = 24
+)
+
+// CRED-CAP-01 — потолок, который ОГРАНИЧИВАЕТ.
 func TestCredQuota_01_EleventhCredentialOfAPersonIsRefused(t *testing.T) {
 	pool, ctx := newCredQuotaDB(t)
 	userID, _, _ := credQuotaFixture(t, ctx, pool, "eleventh")
 
-	for i := 1; i <= 10; i++ {
+	for i := 1; i <= defaultUserCredentialCeiling; i++ {
 		require.NoErrorf(t, insertUserCredential(ctx, pool, userID, "KEYPAIR", false),
-			"удостоверение %d из десяти обязано пройти — потолок, отвергающий разрешённое, "+
-				"это не потолок, а поломка", i)
+			"удостоверение %d из %d обязано пройти — потолок, отвергающий разрешённое, "+
+				"это не потолок, а поломка", i, defaultUserCredentialCeiling)
 	}
 	requireQuotaRefusal(t, insertUserCredential(ctx, pool, userID, "KEYPAIR", false),
-		"KQ001", "has reached its limit of 10 iam.user.credential")
+		"KQ001", fmt.Sprintf("has reached its limit of %d iam.user.credential", defaultUserCredentialCeiling))
 }
 
-// CRED-CAP-02 — то же у машины; величина умолчания — двадцать.
+// CRED-CAP-02 — то же у машины.
 func TestCredQuota_02_TwentyFirstCredentialOfAServiceAccountIsRefused(t *testing.T) {
 	pool, ctx := newCredQuotaDB(t)
 	userID, svaID, _ := credQuotaFixture(t, ctx, pool, "twentyfirst")
 
-	for i := 1; i <= 20; i++ {
-		require.NoErrorf(t, insertSACredential(ctx, pool, svaID, userID, "KEYPAIR"), "ключ %d из двадцати", i)
+	for i := 1; i <= defaultSACredentialCeiling; i++ {
+		require.NoErrorf(t, insertSACredential(ctx, pool, svaID, userID, "KEYPAIR"),
+			"ключ %d из %d", i, defaultSACredentialCeiling)
 	}
 	requireQuotaRefusal(t, insertSACredential(ctx, pool, svaID, userID, "KEYPAIR"),
-		"KQ001", "has reached its limit of 20 iam.serviceAccount.credential")
+		"KQ001", fmt.Sprintf("has reached its limit of %d iam.serviceAccount.credential", defaultSACredentialCeiling))
 }
 
 // CRED-CAP-03 — счёт НЕ дробится по виду предъявления: секрет занимает
@@ -593,12 +610,12 @@ func TestCredQuota_20_TheAccountingRowIsBornWithItsPrincipal(t *testing.T) {
 	require.True(t, found, "у человека нет строки учёта: списывать нечего, и первая же выдача "+
 		"отвергается «потолок не назван»")
 	require.EqualValues(t, 0, used)
-	require.EqualValues(t, 10, limit, "снимок величины не взят из авторитета")
+	require.EqualValues(t, defaultUserCredentialCeiling, limit, "снимок величины не взят из авторитета")
 
 	used, limit, found = credUsed(t, ctx, pool, "iam.serviceAccount", svaID, kindSACredential)
 	require.True(t, found, "у служебной учётки нет строки учёта")
 	require.EqualValues(t, 0, used)
-	require.EqualValues(t, 20, limit)
+	require.EqualValues(t, defaultSACredentialCeiling, limit)
 
 	var mirror string
 	require.NoError(t, pool.QueryRow(ctx, `

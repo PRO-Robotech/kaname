@@ -51,9 +51,23 @@
 значением продукта». НЕ доказано: «продукт на стенде отвечает именно так» — это
 свойство продукта, и его подтверждает только прогон против поднятого стенда.
 
+# Пол вердикта и его собственное доказательство
+
+«Упавших ноль» вердиктом не является: ноль приходит и от полосы, где нечего
+было исполнять. Поэтому здесь пол — отчёт получен, утверждения ИСПОЛНЕНЫ,
+запросы отвечены, скрипт не отказал, — и он сам есть утверждение, обязанное
+уметь падать. Его доказательство (`--self-test`) идёт ПЕРВЫМ действием каждого
+запуска, а не отдельной строкой конвейера: строку снимают молча, а вызывающего
+по построению снять нельзя, не сняв сам производитель, — того держит гейт
+дерева `internal/repohygiene` `TestBasicCredentialFormProofIsProducedByARun`.
+
 Запуск (стенда не нужно; нужны newman и go):
 
     python3 scripts/selftest_basic_access_token.py
+
+Только доказательство пола — ни newman, ни go, ни коллекции не требует:
+
+    python3 scripts/selftest_basic_access_token.py --self-test
 
 Коды возврата: 0 — свойство держится; 1 — находки; 2 — предпосылка не выполнена
 (нет newman, нет go, нет коллекции, ни одна ось не исполнилась — то есть проба
@@ -221,16 +235,66 @@ def folder_named(prefix: str) -> str:
     raise SystemExit(f"ПРЕДПОСЫЛКА: в коллекции нет кейса {prefix}")
 
 
-def run_folder(stand: Stand, folder: str) -> tuple[int, int, list[str]]:
-    """Гоняет кейс против подставного края.
+class Outcome:
+    """Исход одной полосы — ШЕСТЬ величин, а не одна.
 
-    Возвращает (упавших утверждений, отказов СКРИПТА, тексты).
+    Числа берутся из `run.stats`, а НЕ пересчитываются обходом
+    `run.executions`: массив расходится со сводкой в обе стороны, и занижение
+    выглядит как улучшение.
 
-    Отказы скрипта считаются ОТДЕЛЬНО и никогда не вычитаются из вердикта:
-    newman пишет исключение тест-скрипта в `testScripts`, а НЕ в
-    `assertions.failed`, поэтому кейс с неразобранным скриптом отчитывается
-    нулём упавших. Это третья категория исхода — «не выполнилось».
+    Отказы скрипта и безответные запросы считаются ОТДЕЛЬНО и никогда не
+    вычитаются из вердикта: newman пишет исключение тест-скрипта в
+    `testScripts`, а не в `assertions.failed`, поэтому полоса с неразобранным
+    скриптом отчитывается нулём упавших. Это третья категория исхода — «не
+    выполнилось».
     """
+
+    def __init__(self) -> None:
+        self.report = False        # отчёт вообще получен
+        self.executions = 0        # запросов исполнено
+        self.requests_failed = 0   # из них БЕЗ ОТВЕТА
+        self.assertions = 0        # утверждений исполнено
+        self.failed = 0            # из них упавших
+        self.script_errors = 0     # отказов скрипта / пред-скрипта
+        self.texts: list[str] = []
+
+    @property
+    def passed(self) -> int:
+        return self.assertions - self.failed
+
+    @property
+    def silent(self) -> bool:
+        """Отчёт есть, а утверждений в нём НЕТ — отдельная категория.
+
+        Ноль упавших при нуле исполненных неотличим от прохода по одному лишь
+        счётчику отказов: `passed = total - failed` даёт ноль, и полоса
+        отчитывается «зелёной», не проверив ничего.
+        """
+        return self.report and self.assertions == 0
+
+    def caught(self) -> bool:
+        """Инъекция ПОЙМАНА: что-то исполнилось и на этом упало."""
+        return self.assertions > 0 and (self.failed > 0 or self.script_errors > 0)
+
+    def clean(self) -> bool:
+        """Законный вход ПРОШЁЛ: исполнилось, ответило и не упало.
+
+        Пол обязателен. Без него «упавших 0» приходит и от полосы, где нечего
+        было исполнять, — а предикат задачи #1253 требует ЗЕЛЁНОГО утверждения,
+        то есть исполненного и совпавшего, а не отсутствия красного.
+        """
+        return (self.report and self.assertions > 0 and self.failed == 0
+                and self.script_errors == 0 and self.requests_failed == 0)
+
+    def line(self) -> str:
+        return (f"запросов {self.executions} (без ответа {self.requests_failed}) · "
+                f"утверждений {self.assertions} (упало {self.failed}) · "
+                f"отказов скрипта {self.script_errors}")
+
+
+def run_folder(stand: Stand, folder: str) -> Outcome:
+    """Гоняет кейс против подставного края и возвращает ШЕСТЬ величин исхода."""
+    res = Outcome()
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "report.json"
         base = f"http://127.0.0.1:{stand.port}"
@@ -246,27 +310,152 @@ def run_folder(stand: Stand, folder: str) -> tuple[int, int, list[str]]:
         ]
         subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if not out.exists():
-            return -1, -1, ["НЕТ ОТЧЁТА — прогон не состоялся"]
+            res.texts.append("НЕТ ОТЧЁТА — прогон не состоялся")
+            return res
+        res.report = True
         rep = json.loads(out.read_text())
         run = rep.get("run", {})
-        fails, script_errors = [], 0
         for f in run.get("failures", []):
             err = f.get("error", {}) or {}
             if err.get("test"):
-                fails.append(err["test"])
+                res.texts.append(err["test"])
             else:
-                script_errors += 1
-                fails.append("СКРИПТ НЕ ИСПОЛНИЛСЯ: " + str(err.get("message", "")))
+                res.script_errors += 1
+                res.texts.append("СКРИПТ НЕ ИСПОЛНИЛСЯ: " + str(err.get("message", "")))
         stats = run.get("stats", {})
-        script_errors += int(stats.get("testScripts", {}).get("failed", 0))
-        script_errors += int(stats.get("prerequestScripts", {}).get("failed", 0))
-        passed = int(stats.get("assertions", {}).get("total", 0)) - \
-            int(stats.get("assertions", {}).get("failed", 0))
-        fails.append(f"__passed__={passed}")
-        return int(stats.get("assertions", {}).get("failed", 0)), script_errors, fails
+        res.script_errors += int(stats.get("testScripts", {}).get("failed", 0))
+        res.script_errors += int(stats.get("prerequestScripts", {}).get("failed", 0))
+        res.assertions = int(stats.get("assertions", {}).get("total", 0))
+        res.failed = int(stats.get("assertions", {}).get("failed", 0))
+        res.requests_failed = int(stats.get("requests", {}).get("failed", 0))
+        # Запросы считаются ПО СВОДКЕ, а не обходом массива исполнений:
+        # массив расходится со сводкой в обе стороны, и занижение выглядит
+        # как улучшение (`e2e-flow.md` §1).
+        res.executions = int(stats.get("requests", {}).get("total", 0))
+        return res
+
+
+def outcome_from_stats(stats: dict, *, report: bool = True,
+                       failures: list[str] | None = None) -> Outcome:
+    """Исход, собранный из сводки, — без newman.
+
+    Нужен самопроверке ниже: способность ПОЛА упасть доказывается на
+    синтетической сводке, а не подъёмом подставного края.
+    """
+    res = Outcome()
+    res.report = report
+    if not report:
+        return res
+    res.assertions = int(stats.get("assertions", 0))
+    res.failed = int(stats.get("failed", 0))
+    res.requests_failed = int(stats.get("requests_failed", 0))
+    res.executions = int(stats.get("requests", 0))
+    res.script_errors = int(stats.get("script_errors", 0))
+    res.texts = list(failures or [])
+    return res
+
+
+def self_test() -> int:
+    """Доказательство ПОЛА в обе стороны — стенда и newman не требует.
+
+    Пол («законный вход обязан быть исполнен, а не только не упасть») сам есть
+    утверждение о дереве, и утверждение это обязано уметь падать. Проверять его
+    настоящим прогоном нельзя: чтобы получить отчёт с нулём утверждений, нужна
+    коллекция, которой в дереве нет и заводить которую ради пробы значило бы
+    завести вторую копию предмета.
+
+    Каждая ось названа парой: вход, на котором свойство обязано ДЕРЖАТЬСЯ, и
+    вход, на котором оно обязано ОТКАЗАТЬ. Односторонняя проба зеленела бы на
+    предикате, отвергающем всё.
+    """
+    green = {"assertions": 23, "failed": 0, "requests": 9,
+             "requests_failed": 0, "script_errors": 0}
+    axes = [
+        # (имя, исход, ожидание: clean, silent, caught)
+        ("законный вход исполнен и не упал",
+         outcome_from_stats(green), True, False, False),
+        ("ОТЧЁТ С НУЛЁМ УТВЕРЖДЕНИЙ — не зелёное и не красное",
+         outcome_from_stats({**green, "assertions": 0, "requests": 0}), False, True, False),
+        ("отчёта нет вовсе — прогон не состоялся",
+         outcome_from_stats(green, report=False), False, False, False),
+        ("упавшее утверждение — не проход",
+         outcome_from_stats({**green, "failed": 1}), False, False, True),
+        ("отказ скрипта — не проход, хотя упавших ноль",
+         outcome_from_stats({**green, "script_errors": 1}), False, False, True),
+        ("безответный запрос — не проход, хотя упавших ноль",
+         outcome_from_stats({**green, "requests_failed": 1}), False, False, False),
+        ("инъекция поймана: исполнилось И упало",
+         outcome_from_stats({**green, "failed": 4}), False, False, True),
+        ("инъекция на пустом отчёте ловлей НЕ считается",
+         outcome_from_stats({**green, "assertions": 0, "failed": 0, "requests": 0}),
+         False, True, False),
+        # ОТКАЗ СКРИПТА ПРИ НУЛЕ УТВЕРЖДЕНИЙ — «не выполнилось», а НЕ ловля.
+        #
+        # Ось добавлена ПО НАХОДКЕ ИНЪЕКЦИИ, а не по замыслу: `caught()`,
+        # ослабленный до «упало ИЛИ отказал скрипт» — то есть потерявший
+        # требование «что-то исполнилось», — проходил все прежние восемь осей
+        # МОЛЧА. Ни одна из них не подавала отказ вместе с нулём утверждений,
+        # поэтому требование «исполнилось И упало» было объявлено, но не
+        # проверено ничем: самопроверка пола сама имела форму без содержания.
+        #
+        # Вход реален, а не выдуман ради оси: отказ пред-скрипта newman пишет в
+        # `prerequestScripts.failed`, тогда как `assertions.total` остаётся
+        # нулём — шаг не дошёл НИ ДО ОДНОГО утверждения. Сказать про такую
+        # полосу «инъекция поймана» не о чем: она не исполнялась.
+        #
+        # Пары `assertions=0, failed=1` здесь нет намеренно: упавших не бывает
+        # больше исполненных, и синтетика такого состояния утверждала бы о
+        # входе, которого newman не производит.
+        ("отказ скрипта при НУЛЕ утверждений — «не выполнилось», а не ловля",
+         outcome_from_stats({**green, "assertions": 0, "failed": 0,
+                             "requests": 1, "script_errors": 1}),
+         False, True, False),
+    ]
+
+    findings = []
+    for name, got, want_clean, want_silent, want_caught in axes:
+        for what, have, want in (("clean", got.clean(), want_clean),
+                                 ("silent", got.silent, want_silent),
+                                 ("caught", got.caught(), want_caught)):
+            if have != want:
+                findings.append(f"{name}: {what} = {have}, ожидалось {want}")
+
+    print(f"самопроверка пола: осей {len(axes)} · утверждений {len(axes) * 3} · "
+          f"находок {len(findings)}")
+    if not axes:
+        print("ПРЕДПОСЫЛКА: осей ноль — самопроверка не проверила ничего")
+        return 2
+    if findings:
+        print("\nНАХОДКИ:")
+        for f in findings:
+            print("  •", f)
+        return 1
+    print("самопроверка: OK — пол отличает исполненное от неисполненного в обе стороны")
+    return 0
 
 
 def main() -> int:
+    # ПОЛ ДОКАЗЫВАЕТСЯ ТЕМ ЖЕ ЗАПУСКОМ, который производит зелёное утверждение.
+    #
+    # Самопроверка ниже — утверждение о том, что вердикт этого прогона вообще
+    # что-то значит: «упавших ноль» приходит и от полосы, где нечего было
+    # исполнять. Отдельной строкой в конвейере она была бы вторым местом об
+    # одном предмете и снималась бы молча — ровно тот класс, ради которого
+    # заведена задача #1253: проверка, которую никто не зовёт, ничего не
+    # производит, и её зелёное существует только в чужой голове.
+    #
+    # Здесь у неё вызывающий ПО ПОСТРОЕНИЮ: снять его нельзя, не сняв сам
+    # производитель, а того держит гейт дерева `internal/repohygiene`
+    # `TestBasicCredentialFormProofIsProducedByARun`. Цена — доли секунды:
+    # самопроверка не требует ни newman, ни go, ни коллекции, поэтому стоит
+    # ПЕРЕД проверками предпосылок и краснеет даже там, где прогона не будет.
+    rc = self_test()
+    if rc != 0:
+        print("\nПОЛ САМОПРОВЕРКИ НЕ ДЕРЖИТСЯ — вердикт прогона ниже был бы "
+              "недействителен: он не отличил бы «исполнено и совпало» от "
+              "«не исполнялось вовсе»")
+        return rc
+
     if not shutil.which("newman"):
         print("ПРЕДПОСЫЛКА: newman не установлен — проба не проверила ничего")
         return 2
@@ -282,20 +471,35 @@ def main() -> int:
     _, foreign_secret = mint("soc")
 
     findings: list[str] = []
+    outcomes: list[Outcome] = []
     executed = 0
 
-    # ── ЗАКОННЫЙ ВХОД: обязан пройти МОЛЧА ─────────────────────────────────
+    # ── ЗАКОННЫЙ ВХОД: обязан пройти МОЛЧА И НЕ ВПУСТУЮ ────────────────────
+    #
+    # «Упавших ноль» вердиктом не является: ноль приходит и от полосы, где
+    # нечего было исполнять. Измерено на синтетической коллекции с ПУСТОЙ
+    # папкой того же имени — прежняя редакция печатала «зелёных утверждений 0 —
+    # форма совпала, предъявление прошло, отзыв дошёл», то есть утверждала
+    # ровно то, чего не проверяла. Предикат задачи #1253 требует ЗЕЛЁНОГО
+    # утверждения, а не отсутствия красного, поэтому здесь пол: отчёт получен,
+    # утверждения исполнены, запросы отвечены, скрипт не отказал.
     with Stand(credential_id=cred_id, secret=secret) as st:
-        failed, script_errors, texts = run_folder(st, folder)
+        legal = run_folder(st, folder)
     executed += 1
-    passed = next((t.split("=")[1] for t in texts if t.startswith("__passed__=")), "?")
-    if failed != 0 or script_errors != 0:
+    outcomes.append(legal)
+    if legal.silent:
         findings.append(
-            f"ЗАКОННЫЙ ВХОД НЕ ПРОШЁЛ: упавших утверждений {failed}, отказов скрипта "
-            f"{script_errors}\n    " + "\n    ".join(t for t in texts if not t.startswith("__")))
+            "ЗАКОННЫЙ ВХОД: ОТЧЁТ С НУЛЁМ УТВЕРЖДЕНИЙ — это «не выполнилось», а не "
+            f"зелёное, и в успех оно не засчитывается ({legal.line()}). "
+            "Производитель зелёного утверждения о форме не произвёл ни одного")
+    elif not legal.clean():
+        findings.append(
+            f"ЗАКОННЫЙ ВХОД НЕ ПРОШЁЛ: {legal.line()}\n    "
+            + "\n    ".join(legal.texts))
     else:
-        print(f"законный вход: зелёных утверждений {passed} — секрет отчеканен продуктом "
-              f"({secret[:14]}…), форма совпала, предъявление прошло, отзыв дошёл")
+        print(f"законный вход: зелёных утверждений {legal.passed} из {legal.assertions} — "
+              f"секрет отчеканен продуктом ({secret[:14]}…), форма совпала, "
+              f"предъявление прошло, отзыв дошёл")
 
     # ── ИНЪЕКЦИИ: каждая обязана УПАСТЬ ────────────────────────────────────
     injections = [
@@ -321,18 +525,33 @@ def main() -> int:
     ]
     for name, kw in injections:
         with Stand(credential_id=cred_id, secret=secret, **kw) as st:
-            failed, script_errors, texts = run_folder(st, folder)
+            got = run_folder(st, folder)
         executed += 1
-        if failed <= 0 and script_errors <= 0:
+        outcomes.append(got)
+        if got.silent:
             findings.append(
-                f"ИНЪЕКЦИЯ НЕ ПОЙМАНА ({name}): упавших утверждений {failed}, "
-                f"отказов скрипта {script_errors} — кейс не различает этот вход")
+                f"ИНЪЕКЦИЯ НЕ ИСПОЛНЯЛАСЬ ({name}): отчёт с нулём утверждений "
+                f"({got.line()}) — это «не выполнилось», и «не поймана» здесь сказать "
+                "не о чем")
+        elif not got.caught():
+            findings.append(
+                f"ИНЪЕКЦИЯ НЕ ПОЙМАНА ({name}): {got.line()} — кейс не различает этот вход")
         else:
-            said = next((t for t in texts if not t.startswith("__")), "(без текста)")
-            print(f"инъекция поймана: {name} → упало {failed}; первое: {said[:120]}")
+            said = next((t for t in got.texts), "(без текста)")
+            print(f"инъекция поймана: {name} → упало {got.failed}; первое: {said[:120]}")
 
-    print(f"\nперепись: осей исполнено {executed} (законный вход 1 + инъекций "
-          f"{len(injections)}), находок {len(findings)}")
+    # ── ВЕРДИКТ ПО ЧИСЛАМ, а не по слову. Шесть величин, и каждая отдельно:
+    # «не выполнилось» не вычитается из вердикта и не зачитывается в успех.
+    silent = sum(1 for o in outcomes if o.silent)
+    no_report = sum(1 for o in outcomes if not o.report)
+    print(f"\nперепись: полос исполнено {executed} из {1 + len(injections)} "
+          f"(законный вход 1 + инъекций {len(injections)}) · "
+          f"запросов {sum(o.executions for o in outcomes)} · "
+          f"утверждений {sum(o.assertions for o in outcomes)} · "
+          f"упавших {sum(o.failed for o in outcomes)} · "
+          f"безответных запросов {sum(o.requests_failed for o in outcomes)} · "
+          f"отчётов с нулём утверждений {silent} · без отчёта {no_report} · "
+          f"находок {len(findings)}")
     if executed <= 1:
         print("ПРЕДПОСЫЛКА: ни одна инъекция не исполнилась — проба не проверила ничего")
         return 2
@@ -345,4 +564,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(self_test() if "--self-test" in sys.argv[1:] else main())

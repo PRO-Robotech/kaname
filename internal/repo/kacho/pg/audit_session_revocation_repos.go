@@ -136,12 +136,44 @@ func (r *SessionRevocationRepo) Insert(ctx context.Context, tx pgx.Tx, s domain.
 	return out, nil
 }
 
-// DeleteExpired — cron-cleanup; возвращает количество удаленных row.
-func (r *SessionRevocationRepo) DeleteExpired(ctx context.Context, now time.Time) (int64, error) {
-	tag, err := r.pool.Exec(ctx,
-		`DELETE FROM session_revocations WHERE ttl_expires_at <= $1`, now)
+// DeleteExpired убирает истёкшие строки отзыва — партией и по часам БАЗЫ.
+//
+// # Расписания нет: уборку ведёт фоновая петля процесса
+//
+// Здесь стояло «cron-cleanup». Расписания в этом дереве не существует, а
+// вызывающего у метода не было НИ ОДНОГО — то есть комментарий называл механизм,
+// которого нет, у функции, которую никто не звал. Вызывающий живёт теперь в
+// `retention.Sweeper.Start` (провязан в `cmd/kacho-iam/retention.go`); свойство
+// «у объявленного уборщика есть прод-вызывающий» держит гейт дерева
+// `internal/repohygiene` `TestDeclaredRetentionSweepersHaveAProductionCaller`.
+//
+// # Порог: величина та же, что у читателей, и ИСТОЧНИК ЧАСОВ тоже
+//
+// Все четыре SQL-читателя таблицы судят `ttl_expires_at > now()` — часами БАЗЫ.
+// Здесь стояло `ttl_expires_at <= $1` с моментом ПРОЦЕССА, и это выглядело «тем
+// же выражением с обратным знаком», но им не было: при уходе процессных часов
+// вперёд на δ снималась строка, которую читатели ещё считают действующей, и на
+// δ отзыв переставал исполняться — `IsRevoked` отвечал «не отозван» о токене,
+// который отозван. Интеграционная проба этого не видит, пока оба источника
+// берутся с одной машины; RET-SWP-19 подаёт их врозь намеренно.
+//
+// Слагаемое порога у этого предмета — НОЛЬ, и это не пропуск: часы уборки и
+// читателей уже одни, запасу взяться неоткуда. Оно всё равно приходит входом,
+// потому что форма уборщика одна на все предметы реестра.
+func (r *SessionRevocationRepo) DeleteExpired(ctx context.Context, grace time.Duration, batch int) (int64, bool, error) {
+	const q = `
+DELETE FROM session_revocations
+ WHERE ctid IN (
+     SELECT ctid FROM session_revocations
+      WHERE ttl_expires_at <= now() - make_interval(secs => $1)
+      ORDER BY ttl_expires_at
+      LIMIT $2
+      FOR UPDATE SKIP LOCKED
+ )`
+	tag, err := r.pool.Exec(ctx, q, grace.Seconds(), batch)
 	if err != nil {
-		return 0, mapErr(err, "", "")
+		return 0, false, mapErr(err, "", "")
 	}
-	return tag.RowsAffected(), nil
+	n := tag.RowsAffected()
+	return n, n == int64(batch), nil
 }

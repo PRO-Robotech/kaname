@@ -92,6 +92,18 @@ func (s *Sweeper) WithTicker(f func(time.Duration) (<-chan time.Time, func())) *
 // Run sweeps once immediately — a restart is exactly when a strand is most likely —
 // and then on the interval until ctx is done. Non-fatal by contract: a failing
 // sweep is logged and retried, never a reason to take the process down.
+//
+// РЕПЛИКИ: на-реплику — петля идёт в каждой реплике, и дубль здесь безвреден не
+// по совпадению, а по конструкции записи: каждая правка — идемпотентный
+// однооператорный UPDATE одной строки, и два процесса, стирающие одно и то же
+// поле, производят одинаковые байты. Клейма нет НАМЕРЕННО: замок добавил бы
+// способ застрять самому страховочному механизму, а он существует ровно на тот
+// случай, когда застрял быстрый путь.
+//
+// Запись появилась вместе с расширением распознавателя петель (задача #1264):
+// петля движима каналом тикера В ПЕРЕМЕННОЙ (подменяемые часы), и до расширения
+// гейт её НЕ ВИДЕЛ — молчание здесь означало «не смотрели», а не «исход
+// объявлен».
 func (s *Sweeper) Run(ctx context.Context) {
 	s.SweepOnce(ctx)
 

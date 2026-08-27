@@ -31,6 +31,15 @@ type Config struct {
 	APIServer  APIServerConfig  `mapstructure:"api-server"`
 	Repository RepositoryConfig `mapstructure:"repository"`
 	AuthN      AuthNConfig      `mapstructure:"authn"`
+	// Jobs — фоновые задания сервиса (задача #1264). Секция заведена по
+	// прецеденту сметателя целей nlb: интервал работы, удаляющей РЕСУРС
+	// АРЕНДАТОРА по времени, живёт в конфигурации со стражем старта, а не
+	// константой в композиционном корне.
+	Jobs JobsConfig `mapstructure:"jobs"`
+	// Retention — величины фоновой уборки таблиц, чей рост задаёт внешний
+	// (задача #1292). Порогов в ней нет: они вычисляются из `pkg/tokenpolicy`,
+	// см. retention.go.
+	Retention RetentionConfig `mapstructure:"retention"`
 	// Секции `authz` здесь НЕТ, и это не пропуск. Она держала ровно две ручки —
 	// перечень типов, переключённых на реляционную форму, и признак теневой
 	// сверки, — и обе снялись вместе с внешним движком отношений: переключать

@@ -6,6 +6,7 @@ package config_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 )
@@ -24,6 +25,16 @@ import (
 // are ABOUT that hop overwrite it (validate_provider_admin_hop_test.go).
 func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 	return config.Config{
+		// Величины фоновой уборки посеяны здесь на тех же основаниях, что
+		// адреса: страж старта требует их положительными в ЛЮБОМ режиме
+		// (задача #1292), поэтому нулевой литерал ронял бы каждую пробу,
+		// которая не про уборку. Пробы, которые ПРО неё, значения
+		// перезаписывают (retention_test.go).
+		Retention: config.RetentionConfig{
+			Interval:          5 * time.Minute,
+			Batch:             1000,
+			MaxBatchesPerPass: 20,
+		},
 		APIServer: config.APIServerConfig{
 			Endpoint:         "tcp://0.0.0.0:9090",
 			InternalEndpoint: "tcp://0.0.0.0:9091",

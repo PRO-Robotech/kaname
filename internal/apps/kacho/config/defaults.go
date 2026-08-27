@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+
+	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 )
 
 // RegisterDefaults sets default values for every config key (defaults are
@@ -53,6 +55,29 @@ func RegisterDefaults(v *viper.Viper) {
 	// data-plane fetches verification keys from iam (Hydra stays the signer).
 	// Override via KACHO_IAM_API_SERVER__JWKS_PROXY__ENDPOINT.
 	v.SetDefault("api-server.jwks-proxy.endpoint", "tcp://0.0.0.0:9097")
+
+	// retention — фоновая уборка таблиц, чей рост задаёт внешний (задача #1292).
+	//
+	// Порогов здесь НЕТ: они вычисляются из `pkg/tokenpolicy` реестром уборки —
+	// настраиваемый порог развели бы с предикатом читателя молча.
+	//
+	// Интервал: верхняя граница числа строк = темп × (срок строки + интервал);
+	// при сроке до часа пять минут добавляют к ней около 8 %, то есть величина
+	// не определяющая и выбрана по стоимости прогона.
+	// ENV: KACHO_IAM_RETENTION__INTERVAL
+	v.SetDefault("retention.interval", 5*time.Minute)
+	// Партия — длина одного оператора DELETE. Величина того же рода уже живёт в
+	// дереве у уборщика края (`gateway/internal/idempotencypg`), менять её без
+	// замера незачем.
+	// ENV: KACHO_IAM_RETENTION__BATCH
+	v.SetDefault("retention.batch", 1000)
+	// Потолок партий за проход. Одна партия за тик даёт скорость догона
+	// «партия / интервал», и при более высоком темпе записи уборщик не догонит
+	// НИКОГДА, оставаясь зелёным по всякой проверке «вызвался ли». Двадцать
+	// партий по тысяче за пять минут — 240 тыс. строк в час на предмет, при
+	// длительности прохода, ограниченной сверху.
+	// ENV: KACHO_IAM_RETENTION__MAX_BATCHES_PER_PASS
+	v.SetDefault("retention.max-batches-per-pass", 20)
 
 	// repository
 	v.SetDefault("repository.postgres.url", "postgres://iam@localhost:5432/kacho_iam")
@@ -149,6 +174,24 @@ func RegisterDefaults(v *viper.Viper) {
 	// default instead of "never expires", and requests carry an inclusive
 	// ceiling. Overrides: KACHO_IAM_SAKEY_DEFAULT_TTL / KACHO_IAM_SAKEY_MAX_TTL.
 	v.SetDefault("authn.sakey-default-ttl", 90*24*time.Hour)
+
+	// ── Фоновые задания ────────────────────────────────────────────────────
+	//
+	// Снятие истёкших удостоверений (задача #1264). Умолчания названы вместе с
+	// основанием, а не выбраны: интервал — из точности относительно отсрочки
+	// (час даёт около четырёх процентов от суток); отсрочка — продуктовое
+	// решение о НАБЛЮДАЕМОСТИ (человек, у которого доступ перестал работать
+	// ночью, приходит утром и обязан увидеть ПРИЧИНУ — истёкшую строку в
+	// перечне, — а не пустоту); партия ограничивает длительность транзакции.
+	//
+	// Включено ПО УМОЛЧАНИЮ: гигиена истёкших была обязанностью арендатора
+	// ровно потому, что платформа её не делала, и выключенное по умолчанию
+	// умолчание оставило бы её там же.
+	v.SetDefault("jobs.expired-credential-reclaim.enabled", true)
+	v.SetDefault("jobs.expired-credential-reclaim.interval", time.Hour)
+	v.SetDefault("jobs.expired-credential-reclaim.grace", tokenpolicy.ExpiredCredentialReclaimGrace)
+	v.SetDefault("jobs.expired-credential-reclaim.batch-size", 200)
+	v.SetDefault("jobs.expired-credential-reclaim.dry-run", false)
 	v.SetDefault("authn.sakey-max-ttl", 365*24*time.Hour)
 	// Per-client access_token_lifespan for the SA-key OAuth2 client. Default 0 =
 	// omit the field and inherit the provider-global TTL, so an existing

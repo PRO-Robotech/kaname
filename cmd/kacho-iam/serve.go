@@ -193,6 +193,12 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("secret backstop: %w", err)
 	}
 
+	// Снятие истёкших удостоверений (задача #1264). Провязка ОБЯЗАТЕЛЬНА и
+	// стоит рядом с уборщиком секретов: уборщик без вызывающего — механизм,
+	// который выглядит существующим и не делает ничего, а таких в этом сервисе
+	// уже два.
+	startExpiredCredentialReclaim(ctx, pool, cfg, logger)
+
 	// Своя чеканка токенов (задача #897): ключница, подписывающий ключ и
 	// подписант. Собирается ДО поверхностей, потому что от неё зависят обе —
 	// выдача докер-токена и публикация нашей записи набора.
@@ -201,6 +207,13 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("своя чеканка токенов: %w", err)
 	}
 	startSigningKeySweeper(ctx, signingKeystore, logger)
+
+	// Фоновая уборка таблиц, чей рост задаёт внешний (задача #1292). Три
+	// предмета обслуживает ОДНА петля: три расписания об одном предмете
+	// разошлись бы молча.
+	if err := startRetentionSweeper(ctx, pool, cfg, metricsReg, logger); err != nil {
+		return err
+	}
 
 	svcs := buildServices(pool, slavePool, opsRepo, kachoRepo, metricsReg, cfg, tokenSigner, logger)
 

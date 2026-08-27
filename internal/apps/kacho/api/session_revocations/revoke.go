@@ -30,6 +30,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
@@ -38,10 +39,48 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
-// defaultRevocationTTL — fallback retention when the caller omits ttl_expires_at.
+// DefaultRevocationTTL — fallback retention when the caller omits ttl_expires_at.
 // Must be ≥ the token's exp so the cache stays authoritative for the token's
 // lifetime; 30d mirrors the proto docstring + the api-gateway logout handler.
-const defaultRevocationTTL = 30 * 24 * time.Hour
+//
+// Экспортирована с задачи #1292: она — слагаемое ПОТОЛКА (ниже), и потолок
+// проверяется пробой. Копия величины в пробе разошлась бы с продуктом молча.
+//
+// Названное и НЕ решённое здесь: 30 сут против потолка срока токена
+// `MaxTokenTTL` в 30 мин — расхождение в 1440 раз, то есть строка держится на
+// три порядка дольше, чем может жить токен, который она отвергает. Это не
+// предмет уборки, а вопрос о том, какие токены адресует отзыв по `jti`;
+// заведён задачей-преемником (§9 приёмки). Здесь важно лишь то, что величина
+// ОБЪЯВЛЕНА и КОНЕЧНА.
+const DefaultRevocationTTL = 30 * 24 * time.Hour
+
+// MaxRevocationTTL — потолок срока строки отзыва.
+//
+// # Зачем потолок вообще
+//
+// Уборка НЕ ограничивает рост, пока срок строки называет вызывающий и потолка у
+// него нет: строка с далёким горизонтом не удовлетворяет порогу
+// `ttl_expires_at <= now()` НИКОГДА и переживает всякий проход при любом выборе
+// интервала. Поверхность здесь Internal, но темп всё равно задаёт не iam.
+//
+// # Почему величина ВЫЧИСЛЯЕТСЯ, а не выбирается
+//
+// Новое число пришлось бы выбирать, а выбирать не из чего: контракт говорит
+// «should be ≥ original token's exp», а `exp` вызывающий не присылает. Поэтому
+// потолок — объявленный срок хранения продукта плюс допуск на расхождение
+// часов. Вызывающий вправе УКОРОТИТЬ срок, но не удлинить его сверх того, что
+// продукт объявил своим.
+//
+// # Слагаемое ClockSkew — не украшение
+//
+// Единственный вызывающий дерева (выход с края) присылает ровно
+// `DefaultRevocationTTL`, но ЧАСАМИ КРАЯ. Потолок, вычисленный часами iam без
+// запаса, отверг бы этот запрос всякий раз, когда часы края идут вперёд хоть на
+// миллисекунду, — и отверг бы ТИХО: край логирует отказ предупреждением,
+// отвечает 200 и кладёт текст в поле, у которого во всём дереве один писатель и
+// ни одного читателя. Дефект был бы строго хуже того, который чинится: рост
+// ограничен, отзыв не работает, следа нет.
+const MaxRevocationTTL = DefaultRevocationTTL + tokenpolicy.ClockSkew
 
 // eventSessionAllRevoked — audit_outbox taxonomy value for the
 // revoke-all session path. Defined locally so the use-case stays free of a
@@ -169,10 +208,23 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 
 	var rev *domain.SessionRevocation
 	if in.TokenJTI != "" {
-		ttl := now.Add(defaultRevocationTTL)
+		// Присланная величина ПРИНИМАЕТСЯ ИЛИ ОТВЕРГАЕТСЯ — третьего исхода нет.
+		//
+		// Здесь стояло `if t.After(now) { ttl = t }`: момент в прошлом молча
+		// выбрасывался, подставлялось умолчание, и вызывающий получал успех,
+		// будучи уверен, что его величина применена. Проверка на этот случай
+		// уже существовала и была НЕДОСТИЖИМА — `domain.SessionRevocation.
+		// Validate` отвергает `ttl_expires_at <= revoked_at` каноничным
+		// текстом, но до неё значение уже заменялось. Подстановка снята:
+		// значение уходит в Validate, и отказ производит существующее правило.
+		ttl := now.Add(DefaultRevocationTTL)
 		if in.TTLExpiresAt != nil {
-			if t := in.TTLExpiresAt.AsTime(); t.After(now) {
-				ttl = t.UTC()
+			ttl = in.TTLExpiresAt.AsTime().UTC()
+			if ceiling := now.Add(MaxRevocationTTL); ttl.After(ceiling) {
+				return nil, shared.InvalidArg("ttl_expires_at", fmt.Sprintf(
+					"Illegal argument ttl_expires_at: must be at most %s from now (%s); "+
+						"a row the sweep can never reach is not retention, it is unbounded growth",
+					MaxRevocationTTL, ceiling.Format(time.RFC3339)))
 			}
 		}
 		r := domain.SessionRevocation{

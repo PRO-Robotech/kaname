@@ -27,6 +27,13 @@ func (c Config) Validate() error {
 
 	errs = multierr.Append(errs, c.validateMode())
 
+	// Страж величин фоновой уборки (задача #1292). Зовёт ТОТ ЖЕ предикат, что и
+	// построитель уборщика: две проверки об одном предмете разошлись бы молча —
+	// и разошлись бы там, где расхождение не видно, ведь обе отвечают «годно»
+	// на годном. Уборка с нулевой партией исполняется и не убирает ничего, то
+	// есть выглядит работающей, будучи мёртвой.
+	errs = multierr.Append(errs, c.Retention.Validate())
+
 	// Страж своей чеканки токенов (задача #897). Действует в ЛЮБОМ режиме, а
 	// не только в производственном: незаданный издатель и пустой перечень
 	// допустимых алгоритмов означают «не сужаем» на всяком поднятом стенде, и
@@ -66,6 +73,13 @@ func (c Config) Validate() error {
 				ttl, tokenpolicy.MaxTokenTTL))
 		}
 	}
+
+	// Страж уборщика истёкших удостоверений (задача #1264). Срок докерного
+	// токена — СЛАГАЕМОЕ вычисляемой нижней границы отсрочки, поэтому он
+	// приходит стражу параметром из живой конфигурации: константа здесь
+	// вывела бы отсрочку из-под её же основания при поднятом сроке.
+	errs = multierr.Append(errs,
+		c.Jobs.ExpiredCredentialReclaim.Validate(c.APIServer.RegistryToken.TokenTTL()))
 
 	// logger.level must be a known level so a typo fails fast at boot rather
 	// than silently degrading observability. SlogLevel reports the allowed set.
