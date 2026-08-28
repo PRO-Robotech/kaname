@@ -30,75 +30,52 @@ from pathlib import Path
 from dataclasses import dataclass, field, replace
 from typing import List, Dict, Optional
 
+# --- общий слой генератора (задача #1367) ------------------------------------
+# Помощники ниже общие для ВСЕХ наборов newman и живут в дереве в одном
+# экземпляре: `tests/newman/kacholib/gen_shared.py`. До сведения каждый набор нёс
+# свою копию, и правка помощника стоила восьми правок — «поправил у себя» было
+# неотличимо от «поправил везде».
+def _kacholib_dir() -> Path:
+    """Каталог общего слоя, найденный ВВЕРХ ОТ ЭТОГО ФАЙЛА, а не от cwd.
 
-def js_str(value: str) -> str:
-    r"""Строковый литерал JavaScript, произведённый СЕРИАЛИЗАТОРОМ (#1181).
-
-    Текст вызывающего — пояснение, фрагмент контракт-тона, подпись шага, имя
-    переменной — уезжает в ПОРОЖДАЕМЫЙ скрипт шага. Апостроф закрывает литерал,
-    перевод строки рвёт строку, `</script>` закрывает элемент: ломается не
-    текст, а СИНТАКСИС файла, которого автор фразы не видит.
-
-    ПОЧЕМУ ЭТО НЕ ВИДНО В ВЕРДИКТЕ. newman пишет исключение скрипта в
-    `testScripts`, а НЕ в `assertions.failed`. Шаг, чей скрипт не разобрался,
-    даёт НОЛЬ упавших утверждений: кейс перестаёт проверять что бы то ни было и
-    продолжает отчитываться зелёным по этой величине. Это третья категория
-    исхода («не выполнилось»), зачтённая в «прошло».
-
-    ПОЧЕМУ СЕРИАЛИЗАТОР, А НЕ ЗАМЕНА ЗНАКОВ. Рукописная замена всегда неполна:
-    geo экранировал обратный слэш и апостроф, но не перевод строки, и потому
-    закрывал ровно тот случай, который однажды заметили. Полный набор — обратный
-    слэш, управляющие знаки, кавычка — делает `json.dumps`. Сверх него закрыты
-    три случая, которых JSON не знает, и каждый ЗНАЧЕНИЯ литерала не меняет:
-
-      * U+2028/U+2029 — законный JSON, но до ES2019 рвали литерал JS;
-      * `</` → `<\/` — иначе закрылся бы элемент `script`, если текст шага
-        встроят в отчёт-документ; `\/` в JS тождественно `/`;
-      * апостроф → `\'` — литерал одинарно-кавычечный (ниже о том, почему).
-        Правило применяется ПОСЛЕ сериализатора, когда каждый обратный слэш уже
-        удвоен, поэтому оно не может ни пропустить случай, ни съесть чужой
-        экранирующий знак.
-
-    ПОЧЕМУ ОДИНАРНАЯ КАВЫЧКА, А НЕ ДВОЙНАЯ ИЗ `json.dumps`. Порождаемый скрипт
-    цитирует одинарной; двойная кавычка сменила бы БАЙТЫ 91 закоммиченной
-    коллекции, которые читают два десятка гейтов, ничего не изменив по существу.
-    Одинарная форма даёт байт-в-байт то же, что вклейка, на всяком входе, где
-    вклейка была законна, — поэтому перегенерация после этой правки обязана дать
-    ПУСТОЙ diff, и это единственное, что доказывает: экранирование ничего не
-    исказило.
-
-    ЧЕМ ДЕРЖИТСЯ. Проба
-    `services/iam/tests/newman/scripts/js_literal_escape_test.py` — одна на все
-    восемь генераторов, потому что шов один, а восемь копий разошлись бы. Она
-    утверждает четыре разных вещи: ФОРМУ по всему дереву (ни одной подстановки
-    в литерал помимо этих двух помощников), СУЩЕСТВО по швам (враждебный вход
-    даёт РАЗБИРАЕМЫЙ скрипт), положительный контроль (безобидная фраза читается
-    дословно) и ОБРАТИМОСТЬ настоящим движком — node, а не `json.loads`: судить
-    надо тем языком, который литерал и будет исполнять.
+    Генератор зовут из каталога набора (`python3 scripts/gen.py`), поэтому путь,
+    выведенный из текущего каталога, был бы свойством того, ОТКУДА позвали, а не
+    того, где лежит дерево.
     """
-    body = json.dumps(str(value), ensure_ascii=False)[1:-1]
-    body = body.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
-    body = body.replace("</", "<\\/")
-    body = body.replace('\\"', '"').replace("'", "\\'")
-    return "'" + body + "'"
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "tests" / "newman" / "kacholib"
+        if (candidate / "gen_shared.py").is_file():
+            return candidate
+    raise SystemExit(
+        "общий слой генератора не найден: ожидается "
+        "<корень>/tests/newman/kacholib/gen_shared.py.\n"
+        "Это ОТКАЗ, а не пропуск: без общих помощников генератор собрал бы "
+        "коллекции молча и не тем."
+    )
 
 
-def js_comment(value: str) -> str:
-    r"""Текст вызывающего ВНУТРИ комментария порождаемого скрипта (#1181).
+sys.path.insert(0, str(_kacholib_dir()))
 
-    У комментария опасен ровно один класс знаков — КОНЕЦ СТРОКИ: он закрывает
-    комментарий, и остаток значения становится КОДОМ. Кавычки внутри комментария
-    безвредны, поэтому литерала тут не строят — строку вставляют в текст, и
-    внешние кавычки сериализатора снимаются.
-
-    Концов строки у JavaScript ЧЕТЫРЕ, а у JSON два: сверх `\n` и `\r` строку
-    завершают U+2028 и U+2029, и `json.dumps` их не трогает — они законный JSON.
-    Именно на этом правило и ловилось: враждебное имя с U+2028 закрывало
-    комментарий, и `${...}` за ним разбирался как выражение. Поэтому два знака
-    дописываются к набору сериализатора явно — не вместо него, а поверх.
-    """
-    text = json.dumps(str(value), ensure_ascii=False)[1:-1]
-    return text.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+from gen_shared import (  # noqa: E402  — импорт после провязки sys.path
+    _MUTATION_METHODS,
+    _OP_POLL_PATH,
+    _PUB_SET_RE,
+    _accepted_http_codes,
+    _assert_delete_operation_outcome,
+    _asserts_done,
+    _asserts_outcome,
+    _assigns_env_var,
+    _body_text,
+    _carries_assertion,
+    _js_code_and_literals,
+    _published_id_outcome_assert,
+    _regex_literal_must_contain_the_whole_pattern,
+    _reset_captured_operation_id,
+    _strip_js_comments,
+    assert_field_violation,
+    js_comment,
+    js_str,
+)
 
 
 _NAME_OK = re.compile(r"\A[A-Za-z0-9_]+\Z")
@@ -213,43 +190,6 @@ def js_regex_src(pattern: str, *, where: str, flags: str = "") -> str:
     _regex_literal_must_contain_the_whole_pattern(pattern, where)
     _regex_must_parse_in_javascript(pattern, flags, where)
     return pattern
-
-
-def _regex_literal_must_contain_the_whole_pattern(pattern: str, where: str) -> None:
-    """Литерал `/…/` обязан кончиться ТАМ, где кончился образец, и не раньше."""
-    in_class, i = False, 0
-    while i < len(pattern):
-        ch = pattern[i]
-        # Разделители строк — экранированными: знаками они невидимы в
-        # исходнике, и первый же редактор молча их съест.
-        if ch in "\n\r\u2028\u2029":
-            raise ValueError(
-                f"{where}: образец несёт конец строки (U+{ord(ch):04X}) —"
-                f" литерал регулярного выражения его не переживёт, скрипт"
-                f" порвётся на этой строке")
-        if ch == "\\":
-            if i + 1 >= len(pattern):
-                raise ValueError(
-                    f"{where}: образец кончается одиноким обратным слэшем —"
-                    f" он экранирует закрывающий разделитель, и литерал не"
-                    f" закроется")
-            i += 2
-            continue
-        if in_class:
-            if ch == "]":
-                in_class = False
-        elif ch == "[":
-            in_class = True
-        elif ch == "/":
-            raise ValueError(
-                f"{where}: образец несёт НЕэкранированный разделитель `/` —"
-                f" литерал закроется на нём, а хвост образца станет КОДОМ."
-                f" Напишите `\\/`: в регулярном выражении это тот же знак")
-        i += 1
-    if in_class:
-        raise ValueError(
-            f"{where}: в образце незакрытый класс символов `[` — движок дочитает"
-            f" его до закрывающего разделителя и объявит литерал незавершённым")
 
 
 def _regex_must_parse_in_javascript(pattern: str, flags: str, where: str) -> None:
@@ -759,18 +699,6 @@ def assert_scoped_authz_deny(action: str,
         out.append(f"  pm.expect(md.resource, JSON.stringify(j)).to.eql({resource_expr});")
     out.append("});")
     return out
-
-
-def assert_field_violation(field_name: str) -> List[str]:
-    return [
-        f"pm.test({js_str(f'field violation on \"{field_name}\"')}, () => {{",
-        "  const j = pm.response.json();",
-        "  const det = (j.details || []).find(d => (d['@type']||'').includes('BadRequest'));",
-        "  pm.expect(det, 'BadRequest detail').to.be.an('object');",
-        f"  const fv = (det.fieldViolations || []).find(v => v.field === {js_str(field_name)});",
-        f"  pm.expect(fv, {js_str(f'fieldViolation for {field_name}')}).to.be.an('object');",
-        "});",
-    ]
 
 
 _ENV_SET_RE = re.compile(r"""pm\.environment\.set\(\s*['"](\w+)['"]""")
@@ -1792,90 +1720,6 @@ def _auth_pre_script(auth: str) -> List[str]:
     ]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ШАГ УДАЛЕНИЯ ОБЯЗАН НЕСТИ УТВЕРЖДЕНИЕ — ставится ЗДЕСЬ, при сериализации.
-#
-# Перепись по дереву (82 коллекции, 8233 шага, 1359 из них DELETE) нашла 457
-# шагов удаления БЕЗ единого утверждения: ни `pm.test`, ни голого `pm.expect`,
-# ни `pm.response.to.*`. Такой шаг читает 200, 403, 404 и 500 одинаково и
-# зеленеет на каждом.
-#
-# Тихим это не остаётся. У асинхронного удаления шаг захватывает `opId` из тела
-# ответа, а следующий шаг опрашивает операцию по этому имени. Отказ тела не
-# несёт — захват не срабатывает, `opId` остаётся ОТ ПРЕДЫДУЩЕЙ операции (как
-# правило уже `done`), и опрос подтверждает чужой, давно завершённый успех.
-# Кейс отчитывается зелёным по операции, которую он не запускал; ресурс при
-# этом жив — фикстура течёт, ограниченный пул деградирует, списочные контракты
-# плывут.
-#
-# ПОЧЕМУ ИСХОД ОДИН, А НЕ «ЛИБО УСПЕХ, ЛИБО ОТКАЗ». Перепись действующего лица
-# по этим шагам: все они удаляют СВОЙ ресурс под предъявителем, которому это
-# разрешено (434 — предъявитель коллекции, 23 — администратор аккаунта своего
-# же кейса), и ни один не идёт под субъектом, которому отказ полагается по
-# замыслу. Отрицательные кейсы удаления утверждение уже несут — и по этому
-# признаку injection их не касается by construction.
-#
-# Отказ ПРЕДМЕТА у асинхронного удаления («тип машины ещё используется»)
-# приезжает ошибкой операции, а HTTP при этом 200 — поэтому утверждение о коде
-# ответа не конкурирует с утверждением об исходе операции: первое проверяет,
-# что запрос принят, второе — что он сделал.
-#
-# ВСТАВКА В КОНЕЦ — не вкусовщина. Обёртка повторного обращения
-# (`retry_until_authorized`) возвращает управление из скрипта, пока ждёт окна
-# видимости; утверждение, поставленное ПЕРЕД ней, роняло бы шаг на первом же
-# 403, который обёртка обязана переждать. В конце оно исполняется ровно один
-# раз — на терминальном ответе.
-#
-# ВЫКЛЮЧАТЕЛЯ НЕТ. Шаг, которому полагается другой исход, пишет СВОЁ
-# утверждение — и тем самым подавляет это по построению. Список исключений не
-# заводится: ему было бы нечего исключать, а исключение без предмета переживает
-# свой предмет и начинает лгать.
-#
-# Свойство держится гейтом `deploy/scripts/assert-delete-steps-are-asserted.py`
-# (он же — авторитет по предикату; расхождение с ним видно как красный гейт).
-_ASSERT_FORMS = ("pm.test(", "pm.expect(", "pm.response.to.")
-
-
-def _strip_js_comments(src: str) -> str:
-    """Снять `//`-хвосты и `/* */`-блоки, не трогая строковые литералы.
-
-    Читается ИСПОЛНЯЕМАЯ часть, а не текст: обёртка повторного обращения
-    приносит в шаг несколько строк объяснений, и поиск по сырому тексту принял
-    бы объяснение защиты за саму защиту. `//` внутри строки (в URL) при этом
-    комментарием не является — срезав его, читатель отрубил бы код следом.
-    """
-    out, i, n, quote = [], 0, len(src), None
-    while i < n:
-        ch, nxt = src[i], (src[i + 1] if i + 1 < n else "")
-        if quote:
-            out.append(ch)
-            if ch == "\\" and i + 1 < n:
-                out.append(nxt); i += 2; continue
-            if ch == quote:
-                quote = None
-            i += 1; continue
-        if ch in ("'", '"', "`"):
-            quote = ch; out.append(ch); i += 1; continue
-        if ch == "/" and nxt == "/":
-            while i < n and src[i] != "\n":
-                i += 1
-            continue
-        if ch == "/" and nxt == "*":
-            i += 2
-            while i < n and not (src[i] == "*" and i + 1 < n and src[i + 1] == "/"):
-                if src[i] == "\n":
-                    out.append("\n")
-                i += 1
-            i += 2; continue
-        out.append(ch); i += 1
-    return "".join(out)
-
-
-def _carries_assertion(exec_lines: List[str]) -> bool:
-    code = _strip_js_comments("\n".join(exec_lines))
-    return any(form in code for form in _ASSERT_FORMS)
-
-
 # Утверждение о том, что удаление ПРИНЯТО. Ровно одно и однозначное: `oneOf`
 # со взаимоисключающими исходами утверждением не является (testing.md).
 _DELETE_ACCEPTED = [
@@ -1886,247 +1730,6 @@ _DELETE_ACCEPTED = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# ИСХОД ОПЕРАЦИИ УДАЛЕНИЯ УТВЕРЖДАЕТСЯ, А НЕ ТОЛЬКО ЕЁ ЗАВЕРШЕНИЕ
-# ---------------------------------------------------------------------------
-# Опрос дожидается `done` и на этом успокаивается. Но `done` — это «воркер
-# закончил», а не «сделал»: операция, завершившаяся ОШИБКОЙ, тоже `done`.
-# Поэтому отказ удаления читался как успех — ресурс оставался жить, ограниченный
-# пул деградировал, списочные контракты плыли, а вердикт не менялся.
-#
-# Утверждение ставится ПРОХОДОМ ПО ШАГАМ КЕЙСА, а не параметром помощника:
-# опросов в дереве больше, чем вызовов помощника (часть кейсов несёт собственные,
-# рукописные), и параметр закрыл бы только своих — то есть починил бы экземпляр,
-# а не класс. Предмет опроса — ближайшая предшествующая мутация ТОГО ЖЕ кейса;
-# граница кейса соблюдается намеренно, иначе опрос подхватил бы удаление из
-# соседнего и утверждение относилось бы к паре, которой нет.
-#
-# Кейс, чей ПРЕДМЕТ — отказ удаления (`must_fail`), исход уже утверждает сам, и
-# проход его не трогает: наличие утверждения об `error` — единственный признак,
-# по которому шаг признаётся закрытым, а форма записи не навязывается.
-#
-# Гейт по дереву на обе половины пары — `deploy/scripts/assert-delete-operation-outcome.py`.
-_OP_POLL_PATH = re.compile(r"/operations/\{\{(\w+)\}\}")
-_MUTATION_METHODS = ("POST", "PUT", "PATCH", "DELETE")
-# Утверждение об исходе / о завершении — обращение к полю операции ВНУТРИ аргумента
-# `pm.expect(...)`. Опознаётся ПОЛЕ, а не носитель и не форма выражения: имя
-# переменной у каждого поллера своё (`j`, `_dj`, `_do`), а записей исхода в дереве
-# три (`j.error && j.error.code`, `Boolean(j.response) && !j.error`,
-# `pm.environment.get('lastOpError') || ''`). Узнавать одну значило бы ловить
-# полюбившуюся запись вместо существа — и дописать утверждение туда, где оно уже есть.
-_FIELD_OUTCOME = re.compile(r"\.error\b|lastOpError")
-_FIELD_DONE = re.compile(r"\.done\b")
-
-
-def _expect_args(code: str):
-    for m in re.finditer(r"pm\.expect\(", code):
-        yield code[m.end():m.end() + 300].split(";")[0]
-
-
-def _asserts_outcome(code: str) -> bool:
-    return any(_FIELD_OUTCOME.search(a) for a in _expect_args(code))
-
-
-def _asserts_done(code: str) -> bool:
-    return any(_FIELD_DONE.search(a) for a in _expect_args(code))
-
-
-def _delete_outcome_assert(need_done: bool) -> List[str]:
-    """Утверждение об исходе операции удаления, дописываемое в КОНЕЦ скрипта опроса.
-
-    Конец, а не начало: у опроса есть ранние выходы — «поллить нечего» (мутация
-    отвергнута синхронно, имя пустое), «ответ не 200» и «ещё не done, повторяем».
-    Дописанное в конец исполняется ровно тогда, когда опрос дошёл до терминального
-    состояния, — и не утверждает ничего там, где утверждать не о чем.
-
-    `need_done` — у рукописных поллеров уборки завершение не утверждается вовсе;
-    для них к исходу добавляется и оно, иначе повисшая операция осталась бы зелёной.
-    Носитель ответа читается ЗАНОВО (`_do`), а не переиспользуется: имя переменной
-    у каждого поллера своё, и опираться на него значило бы связать проход с формой.
-    """
-    lines = [
-        "// ИСХОД УДАЛЕНИЯ, А НЕ ТОЛЬКО ЕГО ЗАВЕРШЕНИЕ: операция, завершившаяся",
-        "// ошибкой, тоже done — без этого утверждения отказ удаления читается как",
-        "// успех, ресурс остаётся жить, а вердикт не меняется.",
-        "(function () {",
-        "  var _do; try { _do = pm.response.json(); } catch (e) { return; }",
-    ]
-    if need_done:
-        lines += [
-            "  pm.test('delete operation done', function () {",
-            "    pm.expect(_do.done, JSON.stringify(_do)).to.eql(true);",
-            "  });",
-        ]
-    lines += [
-        "  pm.test('delete operation succeeded (no operation.error)', function () {",
-        "    pm.expect(_do.error && JSON.stringify(_do.error), 'operation.error')"
-        ".to.eql(undefined);",
-        "  });",
-        "})();",
-    ]
-    return lines
-
-
-def _assert_delete_operation_outcome(steps: List[Step]) -> List[Step]:
-    """У каждого удаления кто-нибудь из читателей его операции обязан назвать ИСХОД.
-
-    Вопрос задаётся ОДИН НА ЦЕПОЧКУ, а не каждому шагу. У одного удаления опросов
-    бывает несколько: первый дожидается завершения, следующий читает ту же операцию
-    и утверждает о ней предметное. Требуя утверждения от каждого, проход дописал бы
-    «операция удаления УСПЕШНА» ожидающему шагу кейса, чей ПРЕДМЕТ — ОТКАЗ удаления,
-    и кейс стал бы утверждать обе взаимоисключающие вещи разом. Замеренные случаи:
-    удаление отсутствующего образа (ожидается ошибка операции с точным текстом) и
-    удаление роли, на которую есть выдача. Поэтому: если исход называет ЛЮБОЙ шаг
-    цепочки — успехом или отказом, — дописывать нечего.
-
-    Дописывается ПЕРВОМУ шагу цепочки: он и есть тот, кто дождался терминального
-    состояния, и чинить класс надо там, где он возникает.
-    """
-    out = list(steps)
-    chains = {}
-    subject = None
-    for idx, st in enumerate(out):
-        if st.method == "GET" and _OP_POLL_PATH.search(st.path):
-            if subject is not None:
-                chains.setdefault(subject, []).append(idx)
-            continue
-        if st.method in _MUTATION_METHODS:
-            subject = idx
-    for sidx, polls in chains.items():
-        if out[sidx].method != "DELETE":
-            continue
-        code = "\n".join(_strip_js_comments("\n".join(out[k].test_script)) for k in polls)
-        if _asserts_outcome(code):
-            continue
-        k = polls[0]
-        out[k] = replace(out[k], test_script=list(out[k].test_script)
-                         + _delete_outcome_assert(not _asserts_done(code)))
-    return out
-
-
-_ENV_WRITE_TPL = r"environment\.set\(\s*['\"]%s['\"]\s*,"
-_ENV_CLEAR_TPL = r"environment\.unset\(\s*['\"]%s['\"]\s*\)"
-_ENV_EMPTY_TPL = r"environment\.set\(\s*['\"]%s['\"]\s*,\s*(''|\"\")\s*\)"
-
-
-def _writes_env(code: str, var: str) -> bool:
-    return re.search(_ENV_WRITE_TPL % re.escape(var), code) is not None
-
-
-def _clears_env(code: str, var: str) -> bool:
-    """Снятие имени — либо `unset`, либо присвоение ПУСТОЙ строки.
-
-    Обе формы решают одну задачу: устаревшее значение не переживает шаг. Пустая
-    строка — законная запись помощника синхронного отказа: имя остаётся
-    ОПРЕДЕЛЁННЫМ, и страж неразрешённой подстановки не роняет опрос там, где
-    отсутствия операции и ждали.
-    """
-    return (re.search(_ENV_CLEAR_TPL % re.escape(var), code) is not None
-            or re.search(_ENV_EMPTY_TPL % re.escape(var), code) is not None)
-
-
-def _reset_captured_operation_id(steps: List[Step]) -> List[Step]:
-    """Захват идентификатора операции — ЗАМЕНА, а не дозапись: имя снимается первым.
-
-    ЧТО ИНАЧЕ ПРОИСХОДИТ. Имя, которое читает следующий опрос, пишется телом
-    ответа мутации. У ОТВЕРГНУТОЙ мутации тела с `id` нет — запись не
-    выполняется, и в имени остаётся значение ПРЕДЫДУЩЕЙ операции. Опрос уезжает
-    на чужую, давно завершённую операцию: `done === true` держится, зелёный
-    приходит быстро и уверенно, а мутация, ради которой кейс написан, не
-    проверена вовсе.
-
-    ПОЧЕМУ ПРОХОДОМ ПО ШАГАМ, А НЕ ТОЛЬКО В `save_from_response`. Помощник
-    снятие уже делает — но захват в дереве пишут и РУКАМИ, прямо в кейсе
-    (`pm.environment.set('opId', pm.response.json().id)`). Требование,
-    предъявленное только помощнику, обходится тем, что помощника не позвали, и
-    обходится молча. Проход задаёт ТОТ ЖЕ вопрос, что гейт
-    `deploy/scripts/assert-delete-operation-outcome.py`, и по тому же признаку:
-    имя берётся из адреса опроса, а не из соглашения об именовании — общий
-    `opId` в дереве не единственный, кейсы заводят собственные имена, и часть их
-    не оканчивается на `OpId` (`_opGetAnon_opId`, `_igBindAnchorOp`).
-
-    ПРЕДМЕТ — ЛЮБАЯ МУТАЦИЯ, НЕ ТОЛЬКО УДАЛЕНИЕ. Подмена чужой операцией
-    происходит от отказа захвата, а не от глагола: перепись по дереву на
-    1577829c7 дала 205 таких цепочек — DELETE 1, PATCH 18, POST 186.
-
-    КУДА ВСТАВЛЯЕТСЯ. В начало того скрипта, где стоит сам захват: снятие после
-    захвата было бы не снятием, а стиранием только что захваченного.
-    """
-    out = list(steps)
-    chains: Dict[int, List[int]] = {}
-    subject: Optional[int] = None
-    for idx, st in enumerate(out):
-        if st.method == "GET" and _OP_POLL_PATH.search(st.path):
-            if subject is not None:
-                chains.setdefault(subject, []).append(idx)
-            continue
-        if st.method in _MUTATION_METHODS:
-            subject = idx
-    for sidx, polls in chains.items():
-        m = _OP_POLL_PATH.search(out[polls[0]].path)
-        if not m:
-            continue
-        var = m.group(1)
-        pre = _strip_js_comments("\n".join(out[sidx].pre_script))
-        test = _strip_js_comments("\n".join(out[sidx].test_script))
-        if not (_writes_env(pre, var) or _writes_env(test, var)):
-            continue
-        if _clears_env(pre, var) or _clears_env(test, var):
-            continue
-        reset = [f"pm.environment.unset({js_str(var)});"]
-        if _writes_env(pre, var):
-            out[sidx] = replace(out[sidx], pre_script=reset + list(out[sidx].pre_script))
-        else:
-            out[sidx] = replace(out[sidx], test_script=reset + list(out[sidx].test_script))
-    return out
-
-
-def _js_code_and_literals(src: str):
-    """Разложить скрипт на ИСПОЛНЯЕМУЮ часть и значения строковых литералов.
-
-    Комментарии снимаются, каждый строковый литерал заменяется меткой `@S<k>@`, а
-    его значение уходит в список под индексом `k`. Так решение о публикации
-    принимается по коду (текст внутри литерала им не является — иначе
-    `pm.test('has metadata', …)` сошло бы за захват идентификатора), а ИМЯ
-    переменной окружения всё-таки читается: в скелете, где содержимое литералов
-    погашено, его бы уже не было.
-
-    Разбор один на обе надобности намеренно: два разборщика расходятся молча и
-    расходятся там, где расхождение не видно.
-    """
-    out, lits, i, n = [], [], 0, len(src)
-    while i < n:
-        ch, nxt = src[i], (src[i + 1] if i + 1 < n else "")
-        if ch == "/" and nxt == "/":
-            while i < n and src[i] != "\n":
-                i += 1
-            continue
-        if ch == "/" and nxt == "*":
-            i += 2
-            while i < n and not (src[i] == "*" and i + 1 < n and src[i + 1] == "/"):
-                if src[i] == "\n":
-                    out.append("\n")
-                i += 1
-            i += 2
-            continue
-        if ch in ("'", '"', "`"):
-            q, j, buf = ch, i + 1, []
-            while j < n:
-                if src[j] == "\\" and j + 1 < n:
-                    buf.append(src[j + 1]); j += 2; continue
-                if src[j] == q:
-                    break
-                buf.append(src[j]); j += 1
-            out.append("@S%d@" % len(lits))
-            lits.append("".join(buf))
-            i = j + 1
-            continue
-        out.append(ch)
-        i += 1
-    return "".join(out), lits
-
-
-_PUB_SET_RE = re.compile(r"pm\.environment\.set\(\s*@S(\d+)@\s*,")
 _PUB_BIND_RE = re.compile(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=")
 # Объявление БЕЗ инициализатора (`let j;`) и присваивание отдельным оператором
 # (`j = pm.response.json()`). Форма `let j; try { j = pm.response.json(); } catch (e)
@@ -2241,61 +1844,6 @@ def _published_resource_vars(src: str, op_var: str) -> List[str]:
         if "metadata" in expr or visible(m.start(), expr):
             names.append(name)
     return sorted(names)
-
-
-def _published_id_outcome_assert(names: List[str], need_done: bool,
-                                 need_assert: bool = True) -> List[str]:
-    """Снятие фантомного идентификатора и (по надобности) утверждение об ИСХОДЕ.
-
-    Дописывается в КОНЕЦ скрипта: у опроса есть ранние выходы — «поллить нечего»
-    (мутация отвергнута синхронно), «ответ не 200» и «ещё не done, повторяем».
-    Дописанное в конец исполняется ровно тогда, когда исход уже известен.
-
-    СНЯТИЕ ИМЕНИ НУЖНО ДАЖЕ ТАМ, ГДЕ ИСХОД УЖЕ УТВЕРЖДЁН. newman не прекращает
-    кейс на упавшем утверждении: без снятия фантомный идентификатор всё равно
-    уезжает в следующие шаги, и к настоящей находке добавляется каскад чужих
-    отказов вокруг несуществующего объекта. Поэтому `need_assert=False` — форма
-    для синхронной операции, чей шаг сам назвал исход: утверждать второй раз
-    нечего, а снимать — надо.
-
-    На успешной операции ветка не берётся вовсе: зелёный прогон эта правка не
-    меняет ничем.
-
-    Носитель ответа читается ЗАНОВО (`_po`), а не переиспользуется: имя переменной
-    у каждого поллера своё, и опираться на него значило бы связать проход с формой.
-    """
-    lines = [
-        "// ИСХОД, А НЕ ТОЛЬКО ЗАВЕРШЕНИЕ: операция несёт предвыделенный идентификатор",
-        "// ресурса в metadata и тогда, когда завершилась ошибкой, — done у неё такой же",
-        "// true. Опубликованный без этой проверки идентификатор уезжает дальше",
-        "// координатой ресурса, которого нет, и падает уже не тот шаг, который ошибся.",
-        "(function () {",
-        "  var _po; try { _po = pm.response.json(); } catch (e) { return; }",
-    ]
-    if need_done:
-        lines += [
-            "  pm.test('operation done', function () {",
-            "    pm.expect(_po.done, JSON.stringify(_po)).to.eql(true);",
-            "  });",
-        ]
-    lines += ["  if (_po.error) {"]
-    lines += ["    pm.environment.unset('%s');" % v for v in names]
-    lines += ["  }"]
-    if need_assert:
-        lines += [
-            "  pm.test('operation succeeded (no phantom %s)', function () {" % ", ".join(names),
-            "    pm.expect(_po.error && JSON.stringify(_po.error), 'operation.error')"
-            ".to.eql(undefined);",
-            "  });",
-        ]
-    lines += ["})();"]
-    return lines
-
-
-def _assigns_env_var(src: str, name: str) -> bool:
-    """Шаг ПРИСВАИВАЕТ это имя окружения (любым значением, включая сброс в пустое)."""
-    code, lits = _js_code_and_literals(src)
-    return any(lits[int(m.group(1))] == name for m in _PUB_SET_RE.finditer(code))
 
 
 def _assert_published_id_outcome(steps: List[Step]) -> List[Step]:
@@ -2487,41 +2035,6 @@ _FRESH_VAR_SET_RE = re.compile(
 )
 _VAR_REF_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}")
 
-# Набор HTTP-исходов, которые шаг ПРИНИМАЕТ. Оба выражения привязаны к
-# `pm.response.code`, поэтому набор gRPC-кодов (`pm.expect(j.code, …).to.be
-# .oneOf([5, 9])`) сюда не попадает: числа там из другого пространства и на
-# полосу видимости не отображаются. Границей служит `;` — конец стейтмента.
-_HTTP_EQ_RE = re.compile(r"pm\.response\.code[^;]*?\.to\.(?:be\.)?(?:eql|equal)\((\d{3})\)")
-_HTTP_ONEOF_RE = re.compile(r"pm\.response\.code[^;]*?\.to\.be\.oneOf\(\[([0-9,\s]+)\]\)")
-
-
-def _accepted_http_codes(body: str) -> set:
-    """HTTP-коды, объявленные шагом как приемлемый исход."""
-    acc = set()
-    for m in _HTTP_EQ_RE.finditer(body):
-        acc.add(int(m.group(1)))
-    for m in _HTTP_ONEOF_RE.finditer(body):
-        for part in m.group(1).split(","):
-            part = part.strip()
-            if part:
-                acc.add(int(part))
-    return {c for c in acc if 100 <= c <= 599}
-
-
-def _body_text(step: Step) -> str:
-    """Текст тела запроса для поиска ссылок на переменные.
-
-    Тело — произвольной вложенности, поэтому сериализуется целиком, а не
-    обходится по верхним ключам: ссылка на свежий ресурс встречается и внутри
-    вложенного объекта (`{"v4Source": {"subnetId": "{{subId}}"}}`).
-    """
-    if not step.body:
-        return ""
-    try:
-        return json.dumps(step.body)
-    except (TypeError, ValueError):
-        return str(step.body)
-
 
 def _wrap_own_fresh_reads(steps: List[Step], rename: bool = True) -> List[Step]:
     """Обернуть положительные первые обращения к своему свежему ресурсу.
@@ -2583,7 +2096,6 @@ def _wrap_own_fresh_reads(steps: List[Step], rename: bool = True) -> List[Step]:
             fresh.add(name)
         out.append(st)
     return out
-
 
 
 def case_to_postman(case: Case) -> Dict:
@@ -2707,7 +2219,6 @@ def build_collection(resource: str, cases: List[Case]) -> Dict:
         "item": [case_to_postman(c) for c in cases],
         "variable": [],
     }
-
 
 
 # ---------------------------------------------------------------------------

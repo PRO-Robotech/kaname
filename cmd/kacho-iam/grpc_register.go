@@ -12,17 +12,16 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations/operationspb"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 	quotav1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/quota/v1"
-
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler"
 )
 
 // registerPublicServices — публичные RPC + OperationService на внешний listener.
 func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo operations.Repo) {
-	operationpb.RegisterOperationServiceServer(srv, handler.NewOperationHandler(opsRepo))
+	operationpb.RegisterOperationServiceServer(srv, operationspb.NewHandler(opsRepo))
 	if svcs != nil && svcs.accountHandler != nil {
 		iamv1.RegisterAccountServiceServer(srv, svcs.accountHandler)
 	}

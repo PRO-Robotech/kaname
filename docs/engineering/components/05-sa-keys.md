@@ -335,10 +335,10 @@ go test -short -count=1 -timeout 120s \
   `IssueSAKeyResponse`, reflect-clear поле `private_key_pem` (+ legacy
   `client_secret`), UPDATE обратно. Idempotent (повторный clear no-op).
   Реализация без `jsonb_set` — operations хранит proto-bytes, не JSON.
-- **AntiAnonymous integration:** `OperationHandler.Get` has anti-leak gate:
+- **AntiAnonymous integration:** `operationspb.Handler.Get` (общий слой) has anti-leak gate:
   если operation содержит secret-поле и principal anonymous — возвращает
   NotFound (даже если operation существует). См.
-  `internal/handler/operation_handler_anti_leak_test.go`.
+  `pkg/operations/operationspb/handler_test.go` (полоса сведена в общий слой).
 
 ## Gotchas / известные ограничения
 
@@ -385,7 +385,7 @@ go test -short -count=1 -timeout 120s \
   здесь стоял другой каталог, и две ссылки об одном предмете расходились).
 - `internal/migrations/0001_initial.sql` — таблица
   `service_account_oauth_clients` (`public_key_pem`, `key_algorithm`).
-- `internal/handler/operation_handler_anti_leak_test.go`.
+- `pkg/operations/operationspb/handler_test.go` (полоса сведена в общий слой).
 - `internal/service/token_enrichment_service.go` — SA-claims path
   (`kacho_principal_type=service_account`, `kacho_principal_id`,
   `kacho_account_id`).

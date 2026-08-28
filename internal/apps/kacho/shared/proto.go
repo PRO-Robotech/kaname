@@ -23,6 +23,7 @@ import (
 
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations/operationspb"
 )
 
 // TimestampProto конвертирует time.Time в *timestamppb.Timestamp с truncate'ом
@@ -35,31 +36,12 @@ func TimestampProto(t time.Time) *timestamppb.Timestamp {
 	return timestamppb.New(t.Truncate(time.Second))
 }
 
-// OperationToProto маппит corelib.Operation в proto.Operation. Используется
-// всеми handler'ами для возврата операций в gRPC-response (Create/Update/
-// Delete/etc — async-API contract).
+// OperationToProto — прослойка к общему слою: перевод строки операции в контракт
+// объявлен в дереве ОДИН раз (`pkg/operations/operationspb`, задача #1369).
 //
-// nil-input → nil (caller обычно проверяет на nil сразу после).
+// До сведения объявлений было двенадцать, а смысловых версий — пять; расходились
+// они именем помощника усечения времени и охраной пустого значения, то есть там,
+// где расхождение не ломает сборку и видно только тому, кто сравнит копии.
 func OperationToProto(op *operations.Operation) *operationpb.Operation {
-	if op == nil {
-		return nil
-	}
-	p := &operationpb.Operation{
-		Id:                   op.ID,
-		Description:          op.Description,
-		CreatedAt:            TimestampProto(op.CreatedAt),
-		CreatedBy:            op.CreatedBy,
-		ModifiedAt:           TimestampProto(op.ModifiedAt),
-		Done:                 op.Done,
-		Metadata:             op.Metadata,
-		PrincipalType:        op.Principal.Type,
-		PrincipalId:          op.Principal.ID,
-		PrincipalDisplayName: op.Principal.DisplayName,
-	}
-	if op.Error != nil {
-		p.Result = &operationpb.Operation_Error{Error: op.Error}
-	} else if op.Response != nil {
-		p.Result = &operationpb.Operation_Response{Response: op.Response}
-	}
-	return p
+	return operationspb.ToProto(op)
 }

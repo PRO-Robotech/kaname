@@ -186,19 +186,19 @@ curl "http://localhost:18080/iam/v1/accounts/$ACC_ID/operations:all?pageSize=20"
 
 ### Anti-replay для secret-носящих operations
 
-`OperationHandler.Get` имеет anti-leak guard:
+`operationspb.Handler.Get` (общий слой `pkg/operations/operationspb`) имеет anti-leak guard:
 
 - Если operation содержит проторесповс с secret-field (`IssueSAKeyResponse`),
 - И principal anonymous (`system` / unauth),
 - Возвращается `NOT_FOUND` (даже если operation существует).
 
-См. тест `internal/handler/operation_handler_anti_leak_test.go`.
+См. пробы общего слоя — `pkg/operations/operationspb/handler_test.go` (полоса сведена туда).
 
 ### Типичные ошибки
 
 | Сценарий                              | gRPC code             | HTTP | Текст                                          |
 |---------------------------------------|------------------------|------|------------------------------------------------|
-| operation_id не найден                | `NOT_FOUND`            | 404  | `Operation iop_xxx not found`                  |
+| operation_id не найден                | `NOT_FOUND`            | 404  | `operation iop_xxx not found`                  |
 | Anonymous Get на secret-operation     | `NOT_FOUND`            | 404  | (anti-leak — выглядит как not-found)           |
 | Operation.done=false, Cancel          | `OK`                   | 200  | no-op (IAM operations sync)                    |
 
@@ -213,12 +213,16 @@ make -C deploy psql SVC=iam
 # > SELECT id, description, done, principal_type, principal_id, principal_display_name FROM kacho_iam.operations LIMIT 20;
 # > SELECT count(*) FROM kacho_iam.operations WHERE done=false;     -- in-flight
 
-# Anti-leak: пробы лежат в services/iam/internal/handler/operation_handler_anti_leak_test.go.
+# Anti-leak: полоса владения операцией сведена в общий слой, и пробы живут там же
+# — pkg/operations/operationspb/handler_test.go. Прежде здесь стояла команда,
+# указывавшая на снятый файл iam: она матчила НОЛЬ проб и выходила нулём, то есть
+# была ровно тем, о чём предупреждает строка ниже.
+#
 # Имя в -run обязано совпадать хоть с одной пробой: -run, не совпавший ни с чем,
 # печатает «no tests to run» и выходит НУЛЁМ — команда выглядит исполненной.
 go test -short -count=1 -timeout 60s \
-  -run "TestW1_6_09_Operation" \
-  ./services/iam/internal/handler/...
+  -run "TestAnonymousGetsNotFoundAndNeverReachesRepo|TestForeignAndMissingAreByteIdentical|TestOwnerIsServedAndOwnerKeyComesFromContext" \
+  ./pkg/operations/operationspb/
 ```
 
 ## Подробности реализации
@@ -226,7 +230,7 @@ go test -short -count=1 -timeout 60s \
 - **Repo:** общий `pkg/operations` (`repo.go`); iam добавляет поверх него редактор
   секретов в ответе — `internal/repo/kacho/pg/ops_response_redactor.go`. Отдельного
   файла-репозитория операций у iam нет.
-- **Handler:** `internal/handler/operation_handler.go` + `operation_handler_anti_leak_test.go`.
+- **Handler:** `pkg/operations/operationspb/handler.go` + `handler_test.go` (общий слой).
 - **Wiring:** `cmd/kacho-iam/serve.go::operations.NewRepo(pool, "kacho_iam")`.
 - **Исполнение:** use-case зовёт `operations.Run` (`pkg/operations`) сразу после
   writer-TX; IAM-операции в основном завершаются тут же (sync-ish). Бэкстопом стоит
@@ -259,7 +263,7 @@ go test -short -count=1 -timeout 60s \
 
 ## Ссылки на код
 
-- `internal/handler/operation_handler.go`
+- `pkg/operations/operationspb/handler.go`
 - `internal/repo/kacho/pg/ops_response_redactor.go`
 - `internal/migrations/0001_initial.sql` (IAM extension — колонки принципала)
 - `cmd/kacho-iam/serve.go` (`operations.NewRepo(pool, "kacho_iam")`)

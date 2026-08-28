@@ -24,6 +24,7 @@ import (
 
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/kacho/pkg/operations/operationspb"
 )
 
 // ownedOpsRepo — фейк, реализующий И общий operations.Repo, И ownership-scoped
@@ -130,7 +131,7 @@ func (r *ownedOpsRepo) ListOwned(_ context.Context, _ operations.ListFilter, _ o
 func TestOperationCancel_ReadFailureDoesNotWaiveOwnership(t *testing.T) {
 	repo := newOwnedOpsRepo(sampleOp())
 	repo.unscopedGetErr = errors.New("read failed: connection reset by peer")
-	h := NewOperationHandler(repo)
+	h := operationspb.NewHandler(repo)
 
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: "usr_bob"})
@@ -149,7 +150,7 @@ func TestOperationCancel_ReadFailureDoesNotWaiveOwnership(t *testing.T) {
 // владелец по-прежнему отменяет свою операцию.
 func TestOperationCancel_OwnerStillCancels(t *testing.T) {
 	repo := newOwnedOpsRepo(sampleOp())
-	h := NewOperationHandler(repo)
+	h := operationspb.NewHandler(repo)
 
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: "usr_alice"})
@@ -170,7 +171,7 @@ func TestOperationCancel_OwnerStillCancels(t *testing.T) {
 // ничем; проба снова смотрит на факт мутации, а не на код.
 func TestOperationCancel_AnonymousDoesNotCancel(t *testing.T) {
 	repo := newOwnedOpsRepo(sampleOp())
-	h := NewOperationHandler(repo)
+	h := operationspb.NewHandler(repo)
 
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "system", ID: "anonymous"})
@@ -190,7 +191,7 @@ func TestOperationCancel_AnonymousDoesNotCancel(t *testing.T) {
 func TestOperationGet_ResolvedThroughOwnershipScopedPort(t *testing.T) {
 	repo := newOwnedOpsRepo(sampleOp())
 	repo.unscopedGetErr = errors.New("read failed: connection reset by peer")
-	h := NewOperationHandler(repo)
+	h := operationspb.NewHandler(repo)
 
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: "usr_alice"})
@@ -208,7 +209,7 @@ func TestOperationGet_ResolvedThroughOwnershipScopedPort(t *testing.T) {
 // ownership-scoped порта (ошибка провязки) не должен превращаться в
 // несуженный доступ: оба метода отказывают.
 func TestOperationHandler_FailsClosedWithoutOwnershipScopedRepo(t *testing.T) {
-	h := NewOperationHandler(&fakeOpsRepoW16{store: map[string]*operations.Operation{
+	h := operationspb.NewHandler(&fakeOpsRepoW16{store: map[string]*operations.Operation{
 		"iop_alice_op_1234567890ab": sampleOp(),
 	}})
 	ctx := operations.WithPrincipal(context.Background(),
