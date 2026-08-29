@@ -105,6 +105,13 @@
       "table": "kacho_iam.conditions",
       "kind": "retire",
       "expect_rows": 0
+    },
+    {
+      "version": 20260828114800,
+      "table": "kacho_iam.watch_cursors",
+      "kind": "retire",
+      "expect_rows": 0,
+      "note": "A ledger of stream positions keyed by SERVICE, with a CHECK naming three domains. Zero rows by construction: no reader and no writer in its whole life, established by census over its columns — `last_event_id` occurs exactly once in the tree, in this table's own declaration. It is the most dangerous of the four cursor tables for what its key says: keyed by subscriber it would invite one service to hold the position; keyed by service it reads as a CENTRAL ledger in which iam tracks how far each domain has read, so picking it up would reverse the decision for the whole platform and add an edge from a leaf back to the domains that the topology does not allow. That it was never widened is visible in the constraint itself: it names three domains (`vpc`, `compute`, `loadbalancer`) while the tree holds seven services — `storage`, `registry`, `geo` and iam itself never entered the list, and none of the 143 migrations preceding this one ever touched the constraint. NOT evidence, stated so the next reader does not derive it again as this entry's author did and was refuted at review: `loadbalancer` looks stale beside the `services/nlb` directory but is not — it is the platform's own domain name (proto package `kacho.cloud.loadbalancer.v1`, binary `kacho-loadbalancer`). On that axis the constraint AGREES with the platform; only the incompleteness of the list shows the lag. The position of a subscription belongs to the CLIENT, which is what lets a stream survive reconnecting to a different replica."
     }
   ]
 }

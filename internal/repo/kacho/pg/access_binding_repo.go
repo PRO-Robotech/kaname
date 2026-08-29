@@ -1046,39 +1046,29 @@ func (w *abWriter) EmitSubjectChangeEvent(ctx context.Context, evt access_bindin
 		evt.Op = deriveOpFromEventType(evt.EventType)
 	}
 
+	// Величины предмета (`resource_type`/`resource_id`) в нагрузку не идут — ни
+	// колонкой, ни близнецом внутри неё: читателя у них не было ни одного, а
+	// платила за них каждая мутация выдачи (kacho#1462).
 	payload, err := json.Marshal(struct {
-		SubjectID    string `json:"subject_id"`
-		SubjectType  string `json:"subject_type,omitempty"`
-		Op           string `json:"op"`
-		EventType    string `json:"event_type"`
-		ResourceType string `json:"resource_type"`
-		ResourceID   string `json:"resource_id"`
+		SubjectID   string `json:"subject_id"`
+		SubjectType string `json:"subject_type,omitempty"`
+		Op          string `json:"op"`
+		EventType   string `json:"event_type"`
 	}{
-		SubjectID:    evt.SubjectID,
-		SubjectType:  evt.SubjectType,
-		Op:           evt.Op,
-		EventType:    evt.EventType,
-		ResourceType: evt.ResourceType,
-		ResourceID:   evt.ResourceID,
+		SubjectID:   evt.SubjectID,
+		SubjectType: evt.SubjectType,
+		Op:          evt.Op,
+		EventType:   evt.EventType,
 	})
 	if err != nil {
 		return fmt.Errorf("emit subject_change_outbox: marshal payload: %w", err)
 	}
 
-	// nullable optional columns
-	var resType, resID any
-	if evt.ResourceType != "" {
-		resType = evt.ResourceType
-	}
-	if evt.ResourceID != "" {
-		resID = evt.ResourceID
-	}
-
 	_, err = w.tx.Exec(ctx, `
 		INSERT INTO kacho_iam.subject_change_outbox
-			(subject_id, op, event_type, resource_type, resource_id, payload)
-		VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-		evt.SubjectID, evt.Op, evt.EventType, resType, resID, payload)
+			(subject_id, op, event_type, payload)
+		VALUES ($1, $2, $3, $4::jsonb)`,
+		evt.SubjectID, evt.Op, evt.EventType, payload)
 	if err != nil {
 		return fmt.Errorf("emit subject_change_outbox: %w", err)
 	}

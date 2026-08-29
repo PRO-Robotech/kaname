@@ -80,7 +80,6 @@ flowchart LR
         metrics[":9095 HTTP<br/>Prometheus /metrics"]
 
         lro[(LRO operations worker<br/>+ orphan-reconciler)]
-        subjDr[(subject_change drainer)]
         bootDr[(bootstrap-admin reconciler)]
         rsab[(binding reconciler-worker)]
     end
@@ -88,14 +87,13 @@ flowchart LR
     Tenants -- TLS gRPC --> gRPCpub
     APIGW[api-gateway] -- public RPC + InternalIAM --> gRPCpub
     APIGW -- InternalIAMService.Check --> gRPCint
+    APIGW -- PollSubjectChanges (курсор) --> gRPCint
     VPC[kacho-vpc] -- Check / RegisterResource --> gRPCint
     Compute[kacho-compute] -- Check / RegisterResource --> gRPCint
     NLB[kacho-nlb] -- Check / RegisterResource --> gRPCint
 
     Hydra[Ory Hydra] -- token / refresh hook --> hooks
     Kratos[Ory Kratos] -- provision hook --> hooks
-
-    subjDr -- InvalidateSubject --> APIGW
 
     iam --- Postgres[("Postgres<br/>schema kacho_iam")]
 ```
@@ -104,8 +102,6 @@ flowchart LR
 
 - **LRO operations worker** — гоняет async-мутации к терминалу; orphan-reconciler
   закрывает осиротевшие `done=false`-операции умершего процесса по committed-реальности.
-- **subject_change drainer** — пушит инвалидацию authz-кеша на api-gateway
-  (`InvalidateSubject`) при изменении грантов субъекта.
 - **bootstrap-admin reconciler** — выдает `system_admin@cluster` пользователю из
   `KACHO_IAM_BOOTSTRAP_ROOT_EMAIL` (best-effort, no-op при пустом env).
 - **binding reconciler-worker** — пере-материализует label-selector и by-name гранты
@@ -167,8 +163,11 @@ C4Context
    транзакции кладёт намерение об отношении в журнал `fga_outbox`. Триггер журнала
    складывает из строки прямой факт **в той же транзакции**, поэтому «закоммичено» и
    «действует» совпадают.
-2. **Сброс кэша края** — `subject_change` drainer инвалидирует authz-кеш api-gateway.
-   Это единственная оставшаяся очередь на этом пути, и она про кэш, а не про право.
+2. **Сброс кэша края** — iam **никого не зовёт**: он лишь дописывает строку в журнал
+   `subject_change_outbox` той же транзакцией. Читает журнал сам api-gateway
+   (`InternalIAMService.PollSubjectChanges`, курсор по возрастанию `id`) и гасит свой
+   кэш сам. Это про кэш, а не про право, и соединение здесь открывает **потребитель**:
+   iam — лист графа рёбер и о своих потребителях не знает.
 3. **Проверка** — на каждом RPC:
    - публичный путь: api-gateway зовёт `AuthorizeService.Check`;
    - peer-путь: `kacho-vpc` / `kacho-compute` / `kacho-nlb` / `kacho-geo` зовут
@@ -268,10 +267,10 @@ sequenceDiagram
 
 **Build-зависимости (Go):**
 
-- `github.com/PRO-Robotech/kacho-corelib` — ids, operations (LRO table + worker),
+- `github.com/PRO-Robotech/kacho/pkg` — ids, operations (LRO table + worker),
   db (pgxpool), grpcsrv, observability, outbox/drainer, safeconv; а также shared-proto
   stubs (operation/validation/authz_options).
-- `github.com/PRO-Robotech/kacho-iam/proto/gen/go/kacho/cloud/iam/v1` — собственные
+- `github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1` — собственные
   доменные proto-stubs (генерируются локально из `proto/`).
 - `github.com/jackc/pgx/v5` — Postgres driver.
 - `github.com/spf13/viper` — конфиг.

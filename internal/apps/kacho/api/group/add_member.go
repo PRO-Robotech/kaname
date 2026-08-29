@@ -123,7 +123,7 @@ func (u *AddMemberUseCase) doAdd(ctx context.Context, in AddMemberInput) (*anypb
 			// Drop the member's cached verdicts. The tuple intent above travels to
 			// the relation store; it reaches NO verdict cache, and verdict caches are
 			// dropped by exactly one path — a subject_change_outbox row drained to the
-			// edge's InvalidateSubject. Same writer-tx as the membership DML (ban #10):
+			// journal read by the edge itself. Same writer-tx as the membership DML (ban #10):
 			// a rolled-back change must not announce an invalidation that had no cause.
 			//
 			// The subject is the MEMBER: the edge keys cached verdicts by whoever

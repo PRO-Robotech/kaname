@@ -20,9 +20,27 @@ import (
 )
 
 func TestIntegration_IamDropsAreMeasured(t *testing.T) {
-	dropguardtest.Run(t, dropguardtest.Options{
+	rep := dropguardtest.Run(t, dropguardtest.Options{
 		Service:      "iam",
 		FS:           migrations.FS,
 		ManifestPath: "dropguard.json",
 	})
+
+	// The count is a ratchet on the chain, and it catches something Reconcile
+	// cannot. Reconcile refuses a drop whose number is unstated, so a drop can
+	// never land alone — but a drop and its declaration land together in one
+	// commit, and internally they agree. Nothing outside the migrations directory
+	// moves, so nothing in the diff says the chain grew. This number is that
+	// something: it cannot change by itself, so a drop that appeared without it
+	// moving is a drop nobody looked at.
+	if rep.DropsInChain != 18 {
+		t.Errorf("iam chain holds %d Up-section drop(s), expected 18; a drop that appeared without this number moving is a drop nobody looked at", rep.DropsInChain)
+	}
+
+	// And the retire of the subscription-cursor table is named, so that removing
+	// the migration together with its declaration cannot leave the gate green on
+	// a chain that quietly got the invitation back (PRO-Robotech/kacho#1148).
+	if _, ok := rep.Rows["20260828114800/kacho_iam.watch_cursors"]; !ok {
+		t.Errorf("20260828114800/kacho_iam.watch_cursors was never counted — the retire of the server-side subscription cursors rests on a number this run did not produce")
+	}
 }

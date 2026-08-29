@@ -13,6 +13,14 @@ type SubjectChange struct {
 	ID        int64
 	SubjectID string
 	Op        string
+	// SubjectType — тип субъекта в словаре модели прав (`user` |
+	// `service_account` | `group`). Пусто у строк, записанных до того, как
+	// производители начали его проставлять.
+	//
+	// Едет наружу, потому что идентификатор БЕЗ типа субъекта не называет: пара
+	// собирается только вместе, и вызывающий, получивший половину, не может ни
+	// закрыть поток названного субъекта, ни сбросить его записи поимённо.
+	SubjectType string
 }
 
 // SubjectChangeReader — port: read side of subject_change_outbox.

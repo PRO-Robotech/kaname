@@ -85,14 +85,28 @@
   колонок `user`/`relation`/`object` у таблицы нет. DDL — `0001_initial.sql`.
 - `kacho_iam.relation_fact` — проекция журнала, из которой форма читает прямой факт.
 - `kacho_iam.subject_change_outbox(id, subject_id, op, created_at, notified_at, event_type,
-  resource_type, resource_id, sent_at, attempt_count)` — очередь сброса кэша края;
-  DDL — `0001_initial.sql`.
+  sent_at, attempt_count, last_error, payload)` — **журнал** смены субъекта,
+  который край читает курсором по возрастанию `id`; DDL — `0001_initial.sql`.
+  Колонки `sent_at` / `attempt_count` / `last_error` остались от прежней формы (очередь с
+  доставкой) и **не пишутся никем**: читатель на них не смотрит by construction. Считать по
+  ним отставание нельзя — `WHERE sent_at IS NULL` вернёт весь журнал.
+  Величин предмета (`resource_type` / `resource_id`) у журнала **больше нет**: их писала
+  каждая мутация выдачи, а читателя у них не было ни одного — ни проекции чтения, ни
+  контракта, ни потребителя на крае. Сняты миграцией
+  `20260829124512_subject_change_journal_drops_the_unread_scope_hint.sql` (задача #1462).
 - `kacho_iam.resource_scope_edge` — представление цепи областей (см.
   [`../architecture/scope-chain-reaches-the-root.md`](../architecture/scope-chain-reaches-the-root.md)).
 
 `subject_change_outbox` несёт свой канал `NOTIFY` — **`kacho_iam_subject_outbox_added`**
 (имя канала не повторяет имя таблицы: так его объявляет триггерная функция
 `subject_change_outbox_notify()`).
+
+> [!warning] У этого канала не осталось слушателя — предмет открыт
+> Слушателем был дренаж очереди, снятый вместе с ребром iam → край. Край слушать не может
+> **по построению**: драйвера Postgres у него нет, а прямое чтение базы iam — это ban #8.
+> Уведомление сегодня производится и никем не потребляется. Это тот же класс, по которому
+> ранее снимали соседний канал (`755001_session_revoked_channel_retires_with_its_listener.sql`),
+> — и его собственное обоснование ссылалось на дренаж, которого больше нет.
 
 ## Диаграмма — выдача и последующая проверка
 
@@ -102,7 +116,6 @@ sequenceDiagram
     participant Admin as Admin tool
     participant IAM as kacho-iam :9090
     participant DB as Postgres kacho_iam
-    participant SubDrainer as subject_change drainer
     participant GW as api-gateway authz-cache
     participant Caller
 
@@ -117,11 +130,12 @@ sequenceDiagram
     IAM->>DB: COMMIT
     IAM-->>Admin: Operation done=true
 
-    Note over SubDrainer,GW: Сброс кэша края — единственная оставшаяся очередь
-    DB->>SubDrainer: NOTIFY kacho_iam_subject_outbox_added
-    SubDrainer->>DB: SELECT FOR UPDATE SKIP LOCKED
-    SubDrainer->>GW: InternalAuthzCache.InvalidateSubject(subject)
-    SubDrainer->>DB: DELETE FROM subject_change_outbox WHERE id=...
+    Note over GW,DB: Сброс кэша края — соединение открывает ПОТРЕБИТЕЛЬ
+    GW->>IAM: PollSubjectChanges(since_id, limit)
+    IAM->>DB: SELECT id, subject_id, op WHERE id > since_id ORDER BY id
+    DB-->>IAM: партия + head_id
+    IAM-->>GW: партия + head_id
+    GW->>GW: партия непуста → сброс кэша ЭТОЙ реплики, курсор := max(id)
 
     Note over Caller,DB: Проверка — запрос к своей же базе
     Caller->>GW: API-вызов с JWT
@@ -219,13 +233,20 @@ SELECT id, event_type, payload, created_at
 | Участок | Цель | Худший случай |
 |---|---|---|
 | фиксация выдачи (вместе с проекцией факта) | < 10 мс | < 100 мс |
-| сброс кэша края | < 50 мс | 30 с (запасной опрос) |
+| сброс кэша края — реплика, обслужившая мутацию | сразу | сразу (самосброс) |
+| сброс кэша края — остальные реплики | один интервал опроса (`2s`) | два интервала |
 | промах кэша → вердикт формы | < 50 мс | < 500 мс |
 
 **Материализации в этом бюджете нет.** Прямой факт складывается той же
 транзакцией, что и выдача, поэтому строка «дренаж очереди» из таблицы ушла
-вместе с дренажом. Оставшийся хвост в 30 с — про **кэш края**, а не про
-видимость права: вызов, идущий мимо кэша, видит выдачу сразу после фиксации.
+вместе с дренажом. Оставшийся хвост — про **кэш края**, а не про видимость
+права: вызов, идущий мимо кэша, видит выдачу сразу после фиксации.
+
+Величину хвоста задаёт **интервал опроса края**
+(`KACHO_API_GATEWAY_SUBJECT_CHANGE_POLL_INTERVAL`, умолчание `2s`), а не настройка iam:
+iam о крае не знает и на этот срок не влияет. Прежняя редакция называла здесь `30 с` —
+число описывало запасной опрос снятого дренажа и с фактическим умолчанием края
+расходилось на порядок.
 
 ## Подробности реализации
 
@@ -249,23 +270,28 @@ SELECT id, event_type, payload, created_at
 композиционный корень выдаёт **одно** значение каждому стражу, поэтому страж не
 может спросить мимо формы.
 
-### Сброс кэша края
+### Сброс кэша края — со стороны iam его НЕТ
 
-`cmd/kacho-iam/subject_change_wiring.go` →
-`internal/clients/cache_invalidation_applier.go` — вызов
-`InternalAuthzCacheService.InvalidateSubject` в api-gateway. Запасной путь —
-`InternalIAMService.PollSubjectChanges(since_id, limit)`: край держит указатель
-и опрашивает раз в 30 с.
+iam только **дописывает** строку в `subject_change_outbox` (`EmitSubjectChangeEvent`,
+`internal/repo/kacho/pg/access_binding_repo.go`) и отдаёт журнал по запросу:
+`InternalIAMService.PollSubjectChanges(since_id, limit)` →
+`internal/service/subject_change_service.go` → `internal/repo/kacho/pg/subject_change_repo.go`.
+Ни клиента к краю, ни дренажа, ни апплаера у iam нет.
 
-### Настройка дренажа кэша
+Читатель — сам край: `gateway/internal/watcher/subject_change_watcher.go` держит курсор в
+памяти **своей реплики** и зовёт `PollSubjectChanges` раз в
+`KACHO_API_GATEWAY_SUBJECT_CHANGE_POLL_INTERVAL` (умолчание `2s`); непустая партия ⇒ сброс
+кэша этой реплики. Свежий процесс инициализирует курсор по `head_id` и историю не
+переигрывает.
 
-| Параметр (`drainer.Config`) | Умолчание | Описание |
-|---|---|---|
-| `BatchSize` | 32 | партия за проход |
-| `PollFallback` | 30s | если `NOTIFY` не пришёл |
-| `MaxAttempts` | 10 | повторов на строку |
-| `BackoffMin/Max` | 1s/30s | отступ |
-| `ApplyTimeout` | 5s | срок применения |
+> [!note] Здесь стояла настройка дренажа — параметров больше нет
+> Раздел перечислял размер партии, запасной опрос, число повторов, отступ и срок применения
+> (`drainer.Config`), а рядом — шесть ручек `KACHO_IAM_GATEWAY_INTERNAL*` с адресом края и
+> клиентским mTLS до него. Всё снято вместе с дренажом: ни одной из этих величин не
+> существует. Единственная величина, задающая сходимость, живёт **у края**, а не здесь.
+>
+> Ручка адреса была вдобавок **обязательной**, поэтому владелец прав не поднимался там, где
+> края нет вовсе, — именно это делало вынос iam отдельным продуктом невыразимым.
 
 Отдельных переменных окружения под вердикт **нет**: сроки движка
 (`KACHO_IAM_FGA_CHECK_TIMEOUT_MS`, `…_LIST_OBJECTS_…`, `…_WRITE_…`), адрес
@@ -275,8 +301,14 @@ SELECT id, event_type, payload, created_at
 
 - **`subject_change_outbox` не каскадит на удаление пользователя** —
   осиротевшие события сброса безвредны (сброс несуществующего субъекта — no-op).
-- **Дренаж кэша под конкуренцией** — `FOR UPDATE SKIP LOCKED` гарантирует, что
-  два обработчика не возьмут одну строку; масштабирование безопасно.
+- **Журнал читают ВСЕ реплики края, и это норма, а не гонка.** Чтение курсором не
+  захватывает строк и ничего не помечает, поэтому одну и ту же строку законно видят все
+  реплики: сброс кэша — событие процесса, а не кластера. Разведи опрос по одной выбранной
+  реплике — кэш остальных не сбросится вовсе, то есть отозванный доступ продолжит действовать.
+- **Журнал смены субъекта не усекается ничем.** Строки не помечаются и не удаляются;
+  `count(*)` растёт монотонно на исправной службе, и «строк много» здесь **не означает**
+  «сброс не доехал». Усечение по нижней границе курсоров невыразимо: курсоры живут в памяти
+  реплик края и iam их не видит.
 - **Журнал растёт** — строки намерений остаются как след выдачи. Наблюдать
   `count(*) FROM kacho_iam.fga_outbox`, но «строки копятся» здесь больше **не
   означает** «право не доехало»: право доезжает фиксацией, а не вывозом строки.

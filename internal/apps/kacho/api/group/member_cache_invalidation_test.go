@@ -7,10 +7,12 @@
 // A GROUP-subject AccessBinding grants through the `group:<gid>#member` userset.
 // Removing a member therefore takes access away — but the only thing the
 // use-case emitted was the FGA tuple intent, which travels to the relation store
-// and reaches NO verdict cache. Verdict caches are dropped by exactly one path:
-// a `subject_change_outbox` row drained to the edge's InvalidateSubject. With no
-// row emitted, the sole way a removed member stops passing is the cache entry
-// ageing out — i.e. the revocation window, and only that.
+// and reaches NO verdict cache. Verdict caches are dropped by the `subject_change`
+// journal: строка пишется ЗДЕСЬ, а гасит кэш её ЧИТАТЕЛЬ — край, открывающий
+// чтение сам (задача #1024 развернула направление; прежде строку толкал дренаж
+// владельца прав). With no row emitted, the sole way a removed member stops
+// passing is the cache entry ageing out — i.e. the revocation window, and only
+// that.
 //
 // `subject_change_op_check` has admitted `group_member_change` since the initial
 // schema; nothing ever produced it.

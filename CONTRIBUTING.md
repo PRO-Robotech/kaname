@@ -11,7 +11,7 @@ SPDX-License-Identifier: BUSL-1.1
 ## Сообщить об ошибке или предложить улучшение
 
 Все задачи ведутся в **GitHub Issues**:
-`https://github.com/PRO-Robotech/kacho-iam/issues`.
+`https://github.com/PRO-Robotech/kacho/issues`.
 
 - **Баг** — приложите версию, шаги воспроизведения, ожидаемое и фактическое
   поведение, релевантные логи. Метка `bug`.

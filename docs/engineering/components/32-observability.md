@@ -4,7 +4,7 @@
 
 Гайд по metrics и logs для kacho-iam. Две плоскости:
 
-- **Logs** — структурированный slog (JSON), общий пакет `kacho-corelib/observability`.
+- **Logs** — структурированный slog (JSON), общий пакет `pkg/observability`.
 - **Metrics** — Prometheus (`client_golang`), собственный adapter
   `internal/observability/metrics`. Экспорт — на отдельном cluster-internal
   HTTP-порту, никогда на публичной tenant-поверхности.

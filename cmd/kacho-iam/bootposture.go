@@ -63,7 +63,7 @@ func bootPosture(cfg config.Config, mtlsCfg config.MTLSConfig, authzCheckWired b
 		AuthMode:          cfg.AuthN.Mode.String(),
 		DBSSLMode:         coredb.SSLModeFromDSN(cfg.DSN()),
 		PublicMTLS:        mtlsCfg.PublicServerMTLS.Enable,
-		InternalMTLS:      mtlsCfg.InternalServerMTLS.Enable,
+		InternalMTLS:      observability.InternalMTLSFrom(mtlsCfg.InternalServerMTLS.Enable),
 		AuthZCheck:        authzCheckWired,
 		TrustedForwarders: cfg.AuthN.TrustedForwarders().IsNarrowed(),
 		IdentityProvider:  cfg.AuthN.IdentityProvider.String(),

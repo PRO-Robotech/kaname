@@ -32,7 +32,7 @@ const mtlsEnvPrefix = "KACHO_IAM"
 // IAM исходящих peer-дилов на ресурсы не делает), поэтому здесь только
 // server-edges. subject_change-drainer → api-gateway internal — отдельный
 // client-edge, конфигурируется в composition root (cmd/kacho-iam/
-// subject_change_wiring.go) и вне scope.
+// снятым дренажом смены субъекта) и вне scope.
 //
 // Каждое ребро независимо: env-имена выводятся из тега родительского поля.
 // Напр. InternalServerMTLS → KACHO_IAM_INTERNAL_SERVER_MTLS_{ENABLE,CERTFILE,
@@ -413,7 +413,7 @@ func loadCAPool(files []string) (*x509.CertPool, error) {
 	for _, f := range files {
 		// #nosec G304 -- trusted operator-config path (env KACHO_IAM_*_CLIENTCAFILES,
 		// mounted internal-CA bundle), not request/user input. Same idiom as
-		// cmd/kacho-iam/subject_change_wiring.go gateway-CA read.
+		// снятым дренажом смены субъекта: доверенного корня края владельцу прав больше не нужно.
 		pem, err := os.ReadFile(f)
 		if err != nil {
 			return nil, fmt.Errorf("read CA file %q: %w", f, err)

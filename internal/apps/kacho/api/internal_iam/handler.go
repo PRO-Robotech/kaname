@@ -334,9 +334,10 @@ func (h *Handler) PollSubjectChanges(ctx context.Context, req *iamv1.PollSubject
 	resp := &iamv1.PollSubjectChangesResponse{HeadId: headID}
 	for _, c := range changes {
 		resp.Changes = append(resp.Changes, &iamv1.SubjectChange{
-			Id:        c.ID,
-			SubjectId: c.SubjectID,
-			Op:        c.Op,
+			Id:          c.ID,
+			SubjectId:   c.SubjectID,
+			Op:          c.Op,
+			SubjectType: c.SubjectType,
 		})
 	}
 	return resp, nil

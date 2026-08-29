@@ -26,7 +26,7 @@ import hero from '@site/src/css/hero.module.css'
     <a className={hero.btnPrimary} href="/getting-started">Быстрый старт →</a>
     <a className={hero.btnGhost} href="/api/overview">Обзор API</a>
     <a className={hero.btnGhost} href="/architecture/authz">Авторизация</a>
-    <a className={hero.btnGhost} href="https://github.com/PRO-Robotech/kacho-iam">GitHub</a>
+    <a className={hero.btnGhost} href="https://github.com/PRO-Robotech/kacho/tree/main/services/iam">GitHub</a>
   </div>
 </header>
 
@@ -156,7 +156,7 @@ flowchart LR
   <div className={hero.featureCard}>
     <span className={hero.featureIcon}>⇄</span>
     <span className={hero.featureTitle}>gRPC + REST API</span>
-    <span className={hero.featureBody}>Единый контракт на Protocol Buffers (<code>kacho-proto</code>), REST-проекция через grpc-gateway.</span>
+    <span className={hero.featureBody}>Единый контракт на Protocol Buffers (<code>proto/</code>), REST-проекция через grpc-gateway.</span>
   </div>
   <div className={hero.featureCard}>
     <span className={hero.featureIcon}>🔑</span>
@@ -191,7 +191,7 @@ flowchart LR
   <thead><tr><th>Технология</th><th>Применение</th></tr></thead>
   <tbody>
     <tr><td>Go</td><td>Язык реализации (чистая архитектура: handler → use-case → domain)</td></tr>
-    <tr><td>Protocol Buffers / Buf</td><td>Контракт API (<code>kacho-proto</code>, домен <code>kacho.cloud.iam.v1</code>)</td></tr>
+    <tr><td>Protocol Buffers / Buf</td><td>Контракт API (<code>proto/</code>, домен <code>kacho.cloud.iam.v1</code>)</td></tr>
     <tr><td>PostgreSQL / pgx v5</td><td>Хранилище <code>kacho_iam</code> — и данные, и права, и вердикт (без ORM — sqlc + handwritten pgx)</td></tr>
     <tr><td>Ory Kratos</td><td>Аутентификация и хранение личностей (login / passkey); User — проекция identity</td></tr>
     <tr><td>Ory Hydra</td><td>OAuth 2.0 authorization server: токены сервис-аккаунтов и пользователей</td></tr>
@@ -200,15 +200,15 @@ flowchart LR
   </tbody>
 </table>
 
-## Структура репозиториев
+## Структура монорепо
 
 <table>
-  <thead><tr><th>Репозиторий</th><th>Назначение</th></tr></thead>
+  <thead><tr><th>Каталог</th><th>Назначение</th></tr></thead>
   <tbody>
-    <tr><td><strong>kacho-iam</strong></td><td>Этот сервис: control-plane IAM (Account / Project / User / SA / Group / Role / AccessBinding)</td></tr>
-    <tr><td><strong>kacho-proto</strong></td><td>Центральные <code>.proto</code> + сгенерированные Go-stubs + FGA-модель авторизации</td></tr>
-    <tr><td><strong>kacho-corelib</strong></td><td>Общие пакеты (db, grpcsrv, grpcclient, config, observability, operations, ids, ...)</td></tr>
-    <tr><td><strong>kacho-api-gateway</strong></td><td>Edge: gRPC-proxy + REST mux + проверка JWT + per-RPC authz-middleware</td></tr>
-    <tr><td><strong>kacho-vpc / kacho-compute / kacho-geo / kacho-nlb</strong></td><td>Консументы IAM: вызывают <code>InternalIAMService.Check</code> на каждом RPC</td></tr>
+    <tr><td><strong>services/iam/</strong></td><td>Этот сервис: control-plane IAM (Account / Project / User / SA / Group / Role / AccessBinding)</td></tr>
+    <tr><td><strong>proto/</strong></td><td>Центральные <code>.proto</code> + сгенерированные Go-stubs + FGA-модель авторизации</td></tr>
+    <tr><td><strong>pkg/</strong></td><td>Общие пакеты (db, grpcsrv, grpcclient, config, observability, operations, ids, ...)</td></tr>
+    <tr><td><strong>gateway/</strong></td><td>Edge: gRPC-proxy + REST mux + проверка JWT + per-RPC authz-middleware</td></tr>
+    <tr><td><strong>services/vpc/ · services/compute/ · services/geo/ · services/nlb/</strong></td><td>Консументы IAM: вызывают <code>InternalIAMService.Check</code> на каждом RPC</td></tr>
   </tbody>
 </table>

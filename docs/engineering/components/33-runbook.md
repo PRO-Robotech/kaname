@@ -31,7 +31,7 @@ kubectl -n kacho get pod -l app=kacho-iam
 # DB reachable? (от корня репозитория)
 make -C deploy psql SVC=iam   # либо nc -zv <db-host> 5432
 
-# subject_change_outbox растет (pending = sent_at IS NULL)?
+# fga_outbox: непринятые строки (pending = sent_at IS NULL).
 kubectl -n kacho exec deploy/postgres -- \
   psql -c "SELECT count(*) FROM kacho_iam.fga_outbox WHERE sent_at IS NULL;"
 
@@ -49,8 +49,10 @@ kubectl -n kacho logs -l app=kacho-iam --since=5m | grep -E "ERROR|FATAL|authz|v
    переключён ли пул на реплику.
 3. **kacho-iam OOM/crash** → `kubectl rollout restart deploy/kacho-iam`;
    проверить memory limits.
-4. **subject_change_outbox backlog огромный** (>10k pending) — см. раздел ниже:
-   drainer все подтянет, но grant→Check propagation временно нарушена.
+4. **subject_change_outbox — НЕ очередь, и «backlog» по ней не считается.** Это
+   журнал с курсором: строки не помечаются доставленными и не удаляются, поэтому
+   `count(*)` растёт монотонно на исправной службе. Отставание живёт **у читателя**
+   (края), а не в таблице — см. раздел ниже.
 
 **Escalation:** SRE on-call → IAM team.
 
@@ -69,22 +71,38 @@ kubectl -n kacho logs -l app=kacho-iam --since=5m | grep -E "ERROR|FATAL|authz|v
 
 ### Причина 1 — отстал кэш края (частая, самоисправляющаяся)
 
-api-gateway кэширует срез прав субъекта; сброс идёт очередью
-`kacho_iam.subject_change_outbox` (канал `kacho_iam_subject_outbox_added`) плюс
-запасной опрос раз в 30 с. Пока сброс не доехал, край отвечает по старому срезу.
+api-gateway кэширует срез прав субъекта и **гасит этот кэш сам**: каждая его реплика
+читает `kacho_iam.subject_change_outbox` курсором по возрастанию `id` через
+`InternalIAMService.PollSubjectChanges` с интервалом
+`KACHO_API_GATEWAY_SUBJECT_CHANGE_POLL_INTERVAL` (умолчание `2s`). Пока опрос не
+прошёл, край отвечает по старому срезу.
+
+> [!important] Отставание живёт У ЧИТАТЕЛЯ, и в этой таблице его НЕ ВИДНО
+> `subject_change_outbox` — журнал с курсором, а не очередь с доставкой: iam ничего
+> в него не «отправляет». Колонки `sent_at` / `attempt_count` / `last_error` в схеме
+> остались, но **их никто не пишет**, и читатель на них не смотрит by construction —
+> выборка идёт по `id > since_id`. Поэтому запрос вида
+> `WHERE sent_at IS NULL` вернёт **весь журнал целиком** и будет расти на совершенно
+> исправной службе. Прежняя редакция этого раздела предлагала именно такой запрос:
+> процедура показывала «растущее отставание» всегда.
+>
+> Курсор каждая реплика края держит **в своей памяти**, поэтому со стороны iam
+> «докуда дочитали» не видно вовсе. Отставание диагностируется на крае, а не здесь.
 
 ```bash
-# Сколько pending и насколько стара самая старая.
+# Глубина журнала и его голова — это НЕ отставание, а точка отсчёта курсора.
 kubectl -n kacho exec deploy/postgres -- psql -c "
-SELECT count(*)                AS pending,
-       now() - min(created_at) AS oldest_pending_age,
-       max(last_error)         AS last_error
-FROM kacho_iam.subject_change_outbox
-WHERE sent_at IS NULL;
+SELECT count(*) AS rows_total, max(id) AS head_id, max(created_at) AS last_row
+FROM kacho_iam.subject_change_outbox;
 "
 
-# Ошибки применения в логах.
-kubectl -n kacho logs -l app=kacho-iam --since=10m | grep -E "subject_change"
+# Строки по конкретному субъекту: намерение вообще записалось?
+kubectl -n kacho exec deploy/postgres -- psql -c "
+SELECT id, op, event_type, created_at
+FROM kacho_iam.subject_change_outbox
+WHERE subject_id = '<subject_id>'
+ORDER BY id DESC LIMIT 10;
+"
 ```
 
 **Действия:**
@@ -92,14 +110,18 @@ kubectl -n kacho logs -l app=kacho-iam --since=10m | grep -E "subject_change"
 1. **Проверить, что дело в кэше** — спросить iam напрямую, минуя край:
    `AuthorizeService.Check` по внутреннему слушателю. Отвечает `allowed=true` —
    значит право есть и отстал именно кэш.
-2. **Дренаж завис** (пропущен `NOTIFY`) → разбудить:
+2. **Проверить, что строка записалась** — запрос по `subject_id` выше. Строки нет ⇒
+   предмет не в сбросе кэша, а в производителе (use-case выдачи); идти в Причину 2.
+3. **Строка есть, край не сходится дольше пары интервалов** — предмет на **крае**,
+   не в iam. Смотреть там: доходит ли опрос до iam и не заклинил ли он.
    ```bash
-   kubectl -n kacho exec deploy/postgres -- psql -c "NOTIFY kacho_iam_subject_outbox_added;"
+   kubectl -n kacho logs -l app=api-gateway --since=10m | grep -iE "subject.?change|poll"
    ```
-   Не помогает — `kubectl rollout restart deploy/kacho-iam` (дренаж переустановит
-   `LISTEN` и догонит опросом на старте).
-3. **Край недоступен для сброса** → `last_error` повторяется; проверить
-   internal-порт api-gateway и mTLS-ребро.
+   Ребро открывает край; будить его со стороны iam **нечем и не нужно** — iam о
+   крае не знает.
+4. **Крайняя мера — перекатить край**, а не iam: `kubectl rollout restart
+   deploy/api-gateway`. Реплика поднимется, возьмёт курсор по `head_id` и продолжит
+   с головы журнала.
 
 ### Причина 2 — намерение не стало фактом (редкая, не самоисправляющаяся)
 
@@ -324,12 +346,14 @@ make -C deploy psql SVC=iam
 # Tail logs.
 kubectl -n kacho logs -l app=kacho-iam -f --tail=200
 
-# Состояние всех outbox-очередей.
+# Состояние очередей. ВНИМАНИЕ: во второй колонке РАЗНЫЕ величины — у fga/audit это
+# непринятые строки, у subject_change это ВЕСЬ журнал (у него нет пометки доставки:
+# его читают курсором, и «pending» по нему не определён).
 kubectl -n kacho exec deploy/postgres -- psql -c "
-SELECT 'fga'              AS q, count(*) FILTER (WHERE sent_at IS NULL) AS pending, max(created_at) AS last FROM kacho_iam.fga_outbox
-UNION ALL SELECT 'subject_change', count(*),                                       max(created_at)       FROM kacho_iam.subject_change_outbox
-UNION ALL SELECT 'resource_reconcile', count(*),                                   max(created_at)       FROM kacho_iam.resource_reconcile_outbox
-UNION ALL SELECT 'audit',          count(*) FILTER (WHERE status='pending'),       max(created_at)       FROM kacho_iam.audit_outbox;
+SELECT 'fga (pending)'            AS q, count(*) FILTER (WHERE sent_at IS NULL) AS n, max(created_at) AS last FROM kacho_iam.fga_outbox
+UNION ALL SELECT 'subject_change (ВСЕГО, журнал)', count(*),                          max(created_at)       FROM kacho_iam.subject_change_outbox
+UNION ALL SELECT 'resource_reconcile (всего)',     count(*),                          max(created_at)       FROM kacho_iam.resource_reconcile_outbox
+UNION ALL SELECT 'audit (pending)',   count(*) FILTER (WHERE status='pending'),        max(created_at)       FROM kacho_iam.audit_outbox;
 "
 
 # LRO in-flight (метрика на :9095).
@@ -337,9 +361,6 @@ kubectl -n kacho exec deploy/kacho-iam -- curl -s http://localhost:9095/metrics 
 
 # Решения authz (rate/итог) — деградация видна по росту deny.
 kubectl -n kacho exec deploy/kacho-iam -- curl -s http://localhost:9095/metrics | grep kacho_iam_authz_check_decisions_total
-
-# Принудительно разбудить дренаж сброса кэша края.
-kubectl -n kacho exec deploy/postgres -- psql -c "NOTIFY kacho_iam_subject_outbox_added;"
 
 # Graceful restart Deployment.
 kubectl rollout restart deploy/kacho-iam -n kacho

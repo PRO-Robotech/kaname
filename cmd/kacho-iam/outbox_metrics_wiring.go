@@ -64,17 +64,17 @@ const outboxMetricsInterval = 15 * time.Second
 // перестали помечаться отправленными не из-за сбоя, а потому, что отправлять их
 // некуда. Тревога, которая звонит всегда, — это тревога, которую отключают первой.
 
-// runSubjectChangeOutboxMetrics — скан очереди инвалидаций кэша вердиктов.
-func runSubjectChangeOutboxMetrics(ctx context.Context, pool *pgxpool.Pool, rec outboxmetrics.Recorder, logger *slog.Logger) {
-	collector := outboxmetrics.NewCollector(pool, rec, outboxmetrics.CollectorConfig{
-		Table:       subjectChangeOutboxTable,
-		MaxAttempts: subjectChangeMaxAttempts,
-		Interval:    outboxMetricsInterval,
-	})
-	collector.Run(ctx, func(err error) {
-		logger.Warn("subject_change outbox metrics scan failed", "table", subjectChangeOutboxTable, "err", err)
-	})
-}
+// ЗДЕСЬ БЫЛ СКАН ЖУРНАЛА СМЕНЫ СУБЪЕКТА — у него больше нет предмета
+// (задача #1024), и снят он по той же причине, что и скан очереди кортежей выше.
+//
+// Он мерил ДОСТАВКУ. Доставки не стало вместе с толчком к краю: направление
+// развёрнуто, потребитель читает журнал КУРСОРОМ (`id > $1`) и `sent_at` не
+// трогает. Величины «возраст самой старой неотправленной» и «число отравленных»
+// после этого описывают не сбой, а устройство: они растут на исправной службе и
+// растут всегда.
+//
+// Тревога, которая звонит всегда, — это тревога, которую отключают первой, а
+// вместе с ней перестают читать и настоящую.
 
 // auditOutboxTable — журнал аудита control-plane.
 //

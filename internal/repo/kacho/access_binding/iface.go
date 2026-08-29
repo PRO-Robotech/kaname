@@ -358,7 +358,7 @@ type RelationTuple struct {
 type SubjectChangeEvent struct {
 	// SubjectID — raw (unprefixed) FGA subject id (e.g. "usr_alice",
 	// "sva_bot", "grp_admins"). The drainer applier maps to FGA-prefixed
-	// form before calling gateway InvalidateSubject.
+	// form; читателем журнала является КРАЙ, открывающий чтение сам (задача #1024).
 	SubjectID string `json:"subject_id"`
 
 	// SubjectType — FGA object type of the subject: user | service_account |
@@ -387,10 +387,15 @@ type SubjectChangeEvent struct {
 	// were retired by migration 754001.
 	Op string `json:"op"`
 
-	// ResourceType / ResourceID — optional scope hint for future
-	// per-resource cache invalidation. MVP gateway ignores them.
-	ResourceType string `json:"resource_type,omitempty"`
-	ResourceID   string `json:"resource_id,omitempty"`
+	// Величин предмета (`resource_type`/`resource_id`) здесь НЕТ и не должно
+	// быть: они стояли «подсказкой на будущее» для пообъектного сброса кэша
+	// решений, которого не существует. Их не выбирала проекция чтения, не
+	// выставлял контракт `PollSubjectChanges`, не читал потребитель на крае — а
+	// заполняла их каждая мутация выдачи, в writer-транзакции. Сняты вместе с
+	// колонками журнала (миграция 20260829124512, kacho#1462).
+	//
+	// Понадобится пообъектный сброс — он приведёт СВОЮ величину вместе с
+	// читателем, а не за фазу до него.
 }
 
 type PageFilter struct {

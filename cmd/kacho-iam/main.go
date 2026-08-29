@@ -14,7 +14,7 @@
 //   - hooks_mux.go — HTTP hooks mux (Hydra token/refresh)
 //   - env.go — env-helpers (DSN mask, FGA timeouts)
 //   - listeners.go / governance_wiring.go /
-//     subject_change_wiring.go — phase-specific wiring
+//     wiring.go — phase-specific wiring
 package main
 
 import (

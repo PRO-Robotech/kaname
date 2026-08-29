@@ -7,10 +7,17 @@ package pg_test
 // триггера на kacho_iam.resource_reconcile_outbox (testcontainers Postgres 16).
 //
 // Контракт: INSERT строки в очередь reconcile-событий обязан доставить pg_notify
-// на канал kacho_iam_resource_reconcile_outbox с payload = id строки — byte-mirror
-// триггера fga_outbox_notify. Это переводит дренаж reconcile-очереди с poll-only на
-// NOTIFY-driven (паритет с fga_outbox), чтобы материализация label-selector гранта
-// укладывалась в один reconcile-проход, а не ждала тика дренажа.
+// на канал kacho_iam_resource_reconcile_outbox с payload = id строки. Это переводит
+// дренаж reconcile-очереди с poll-only на NOTIFY-driven, чтобы материализация
+// label-selector гранта укладывалась в один reconcile-проход, а не ждала тика
+// дренажа.
+//
+// Здесь стояло «byte-mirror триггера fga_outbox_notify» и «паритет с fga_outbox» —
+// оба утверждения ПЕРЕЖИЛИ свой предмет: уведомление журнала намерений снято
+// вместе со своим дренажом (миграция 20260829123045, kacho#1436), и зеркалить
+// теперь нечего. Свойство ЭТОГО канала от того не изменилось: у него есть живой
+// слушатель (`reconcile_notify.go`), и потому он остаётся — а заодно служит
+// положительным контролем семейству проб «канал без слушателя».
 //
 // RED до миграции с триггером (NOTIFY не приходит → ожидание истекает), GREEN после.
 

@@ -82,8 +82,7 @@ sequenceDiagram
     participant FGAGate as Grant authority check
     participant DB as Postgres
     participant Out as fga_outbox (журнал намерений)
-    participant Sub as subject_change_outbox
-    participant Drainer as subject_change drainer
+    participant Sub as subject_change_outbox (журнал)
     participant GW as api-gateway cache
 
     Caller->>IAM: Create AccessBinding<br/>{subject=user:usr_alice, role=rol_viewer, resource=project:prj_..}
@@ -106,8 +105,10 @@ sequenceDiagram
     IAM-->>Caller: Operation (done=true, response=AccessBinding)
 
     Note over DB,GW: право действует с COMMIT; асинхронен только сброс кэша края
-    DB-->>Drainer: NOTIFY kacho_iam_subject_outbox_added
-    Drainer->>GW: InternalAuthzCache.InvalidateSubject(subject_id)
+    GW->>IAM: PollSubjectChanges(since_id) — край опрашивает САМ
+    IAM->>Sub: SELECT ... WHERE id > since_id
+    Sub-->>GW: партия строк + head_id
+    GW->>GW: партия непуста → сброс кэша ЭТОЙ реплики
 
     Note over Caller,GW: ── Subsequent Check ──
     Caller->>GW: API call с JWT (subject=usr_alice)
@@ -299,8 +300,9 @@ go test -short -count=1 -timeout 120s \
   `AccessBindingsW().EmitRelationWrite(ctx, …)` внутри writer-tx; отношения приходят из
   `authzmap.PermissionsToRelations(role.permissions)`. Триггер журнала складывает из
   строк прямой факт там же.
-- **Subject-change emit:** `subject_change_outbox` row для invalidate
-  api-gateway authz cache на subject_id (см. [`29-relational-verdict.md`](29-relational-verdict.md)).
+- **Subject-change emit:** строка `subject_change_outbox` с `subject_id` — намерение
+  сбросить кэш края. iam её только **пишет**; читает журнал сам api-gateway
+  (`PollSubjectChanges`, курсор). См. [`29-relational-verdict.md`](29-relational-verdict.md).
 - **Anti-leak guards:** ListBySubject анонимно → ничего не вернет; см.
   `list_by_subject_anti_leak_test.go`.
 
@@ -320,8 +322,8 @@ go test -short -count=1 -timeout 120s \
   вывозом строки журнала во внешний движок, в котором проверка отвечала
   `allowed=false`. Окна нет: прямой факт складывается той же транзакцией, а
   движка, до которого надо было доехать, не существует. Отстать может **кэш
-  края** (сброс идёт очередью `subject_change_outbox`), и это отдельный предмет:
-  вызов мимо кэша видит выдачу сразу.
+  края** (край читает `subject_change_outbox` курсором и гасит кэш сам), и это
+  отдельный предмет: вызов мимо кэша видит выдачу сразу.
 
 ## Связанные компоненты
 

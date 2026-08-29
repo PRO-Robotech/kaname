@@ -215,14 +215,10 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 		return nil, shared.MapRepoErr(err)
 	}
 	// Subject-change outbox (authz-cache invalidation — access removed).
-	if err := w.AccessBindingsW().EmitSubjectChangeEvent(ctx, abrepo.SubjectChangeEvent{
-		SubjectID:    string(binding.SubjectID),
-		SubjectType:  string(binding.SubjectType),
-		EventType:    "binding_revoke",
-		Op:           "binding_delete",
-		ResourceType: string(binding.ResourceType),
-		ResourceID:   string(binding.ResourceID),
-	}); err != nil {
+	// НА КАЖДОГО субъекта привязки, а не на легаси-одиночку: см.
+	// emitSubjectChangeForEverySubject.
+	if err := emitSubjectChangeForEverySubject(ctx, w.AccessBindings().ListSubjects, w.AccessBindingsW().EmitSubjectChangeEvent,
+		binding, "binding_revoke", "binding_delete"); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
 	// Durable compliance audit event in the SAME writer-tx (ban #10).

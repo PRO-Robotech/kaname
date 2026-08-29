@@ -17,6 +17,8 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
+	"github.com/PRO-Robotech/kacho/internal/pgtest"
+
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
@@ -89,4 +91,69 @@ func TestSubjectChangeRepo_PollSubjectChanges(t *testing.T) {
 	require.Equal(t, "usr_c", changes2[0].SubjectID)
 	require.Equal(t, "binding_upsert", changes2[0].Op)
 	require.Equal(t, id3, headID2)
+}
+
+// TestSubjectChangeRepo_PollCarriesTheSubjectType — тип субъекта доезжает до
+// вызывающего (kacho#1022).
+//
+// # Что здесь проверяется и почему настоящей базой
+//
+// Тип субъекта колонкой не лежит — он живёт внутри `payload`, потому что полосе
+// сплошного сброса кэша он был не нужен. Вызывающий, которому надо назвать
+// субъекта целиком (`user:usrXXXX`), получал половину имени, и собрать вторую
+// было неоткуда. Достаётся тип выражением по jsonb, а выражение по jsonb —
+// именно то, что нельзя проверить подделкой: она вернёт то, что в неё положили.
+//
+// Посев идёт писателем продукта: фикстура не вправе быть снисходительнее.
+func TestSubjectChangeRepo_PollCarriesTheSubjectType(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+
+	ctx := context.Background()
+	dsn := kachopg.NewTestPostgres(t)
+
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	// Закрытие с пределом: отложенное ждало бы соединение, которое проба,
+	// упавшая внутри открытой транзакции, не вернёт никогда, — и унесло бы с
+	// собой вердикт всего пакета.
+	pgtest.ClosePoolAtEnd(t, pool)
+
+	repo := kachopg.NewSubjectChangeRepo(pool)
+	abRepo := kachopg.New(pool, nil)
+
+	seed := func(evt access_binding.SubjectChangeEvent) {
+		t.Helper()
+		w, err := abRepo.Writer(ctx)
+		require.NoError(t, err)
+		require.NoError(t, w.AccessBindingsW().EmitSubjectChangeEvent(ctx, evt))
+		require.NoError(t, w.Commit(ctx))
+	}
+
+	seed(access_binding.SubjectChangeEvent{
+		SubjectID: "usr_typed", SubjectType: "user", Op: "binding_revoke",
+	})
+	seed(access_binding.SubjectChangeEvent{
+		SubjectID: "sva_typed", SubjectType: "service_account", Op: "binding_upsert",
+	})
+	// Строка БЕЗ типа: так писали до того, как производители стали его
+	// проставлять. Она обязана приехать с ПУСТЫМ типом, а не с выдуманным:
+	// вызывающий отличит «не назван» от «назван» только так.
+	seed(access_binding.SubjectChangeEvent{
+		SubjectID: "usr_untyped", Op: "binding_upsert",
+	})
+
+	changes, _, err := repo.PollSubjectChanges(ctx, 0, 256)
+	require.NoError(t, err)
+	require.Len(t, changes, 3)
+
+	got := make(map[string]string, len(changes))
+	for _, c := range changes {
+		got[c.SubjectID] = c.SubjectType
+	}
+	require.Equal(t, "user", got["usr_typed"])
+	require.Equal(t, "service_account", got["sva_typed"])
+	require.Equal(t, "", got["usr_untyped"],
+		"строка без типа обязана приехать неназванной — иначе вызывающий соберёт субъекта, которого нет")
 }

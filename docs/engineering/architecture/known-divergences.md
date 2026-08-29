@@ -18,7 +18,7 @@ tags, so two config-parsing mechanisms coexist in the same package.
 
 **Why (by design, not a defect)**: the per-edge mTLS server credentials are
 carried by `grpcsrv.TLSServer`, a **horizontal value-struct owned by
-`kacho-corelib`**. That corelib type intentionally exposes no `mapstructure`
+`pkg/`**. That corelib type intentionally exposes no `mapstructure`
 tags (it is a plain cross-service value type), so it cannot be populated through
 the viper/`mapstructure` decoder without either (a) adding `mapstructure` tags to
 a corelib type — a workspace-wide change to a shared horizontal package, owned by
@@ -37,7 +37,7 @@ mTLS parameter uses the documented `KACHO_IAM_*_MTLS_*` env vars; these are not
 expressible under a YAML `config:` section by design.
 
 **Convergence path (deferred)**: give `grpcsrv.TLSServer` `mapstructure` tags
-upstream in `kacho-corelib` and load mTLS through the same viper path. This is a
+upstream in `pkg/` and load mTLS through the same viper path. This is a
 corelib-wide migration (touches every service embedding `grpcsrv.TLSServer`) and
 is intentionally **not** done as part of a single-service change. Tracked as a
 convergence item for the next corelib config pass; no runtime impact until then.
@@ -138,7 +138,7 @@ proves the emitter/catalog match the canonical `fga_model.fga` DSL.
 > их отвергнуть.
 
 **What was wrong**: both resolved the canonical DSL through a sibling `kacho-proto`
-checkout or the pinned `kacho-proto` Go-module directory — neither of which exists
+checkout or the pinned `kacho-proto` Go-module directory (today: `proto/`) — neither of which exists
 after the polyrepo→monorepo consolidation, and the `.fga` file itself was not
 carried over. The DSL was therefore unresolvable **on every run**, so both gates
 `t.Skip`-ed themselves while the package still reported `ok`. The only surviving
@@ -642,9 +642,21 @@ Postgres у края нет ни одного файла, и завести ег
 
 | звено | чем является |
 |---|---|
-| очередь `subject_change_outbox` | намерение, записанное в той же транзакции, что мутация |
-| её канал `kacho_iam_subject_outbox_added` | уведомление, **у которого слушатель есть** |
-| дренаж iam → `InternalAuthzCacheService.InvalidateSubject` | вызов края по gRPC, без чужой базы |
+| журнал `subject_change_outbox` | намерение, записанное в той же транзакции, что мутация |
+| `InternalIAMService.PollSubjectChanges` | край читает журнал **сам**, курсором по `id`, без чужой базы |
+
+> [!warning] Третье звено этой таблицы снято, и второе пережило своё основание
+> Здесь стоял дренаж `iam → InternalAuthzCacheService.InvalidateSubject` — вызов края со
+> стороны владельца прав. Ребро снято целиком (задача #1024): оно шло **из листа обратно к
+> потребителю**, а адрес края был у iam обязательной ручкой, из-за чего владелец прав не
+> поднимался там, где края нет. Направление развёрнуто: соединение открывает потребитель.
+>
+> Отсюда следствие для соседней строки, которую эта таблица утверждала: канал
+> `kacho_iam_subject_outbox_added` объявлялся уведомлением, **у которого слушатель есть**, —
+> и слушателем был именно снятый дренаж. Слушателя у него больше нет, а край слушать не
+> может по построению (нет драйвера Postgres; прямое чтение базы iam — ban #8). То есть
+> довод, которым здесь обосновывали снятие соседнего канала, теперь применим и к этому.
+> Предмет открыт и в этой правке не закрывается: он в миграции, а не в документе.
 
 **Что НЕ снято.** Таблица `session_revocations` остаётся: у неё живой писатель
 (выход с края) и живые читатели (`IsRevoked`, `ListByUser`, `DeleteExpired`). Снято

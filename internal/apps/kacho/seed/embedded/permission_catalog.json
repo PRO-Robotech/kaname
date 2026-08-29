@@ -911,6 +911,16 @@
     "exempt_reason": "INTERNAL_LISTENER"
   },
   {
+    "fqn": "kacho.cloud.iam.v1.InternalIAMService/CheckBasicCredentialLive",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
+  },
+  {
     "fqn": "kacho.cloud.iam.v1.InternalIAMService/ForceLogout",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",

@@ -242,14 +242,10 @@ func (u *DeleteAccessBindingUseCase) doDelete(ctx context.Context, id domain.Acc
 	}
 	// Emit subject_change_outbox row in the same TX as the deletion: a rollback
 	// of this TX will not leave an orphan outbox row (atomicity guarantee).
-	if err := w.AccessBindingsW().EmitSubjectChangeEvent(ctx, abrepo.SubjectChangeEvent{
-		SubjectID:    string(deletedBinding.SubjectID),
-		SubjectType:  string(deletedBinding.SubjectType),
-		EventType:    "binding_revoke",
-		Op:           "binding_delete",
-		ResourceType: string(deletedBinding.ResourceType),
-		ResourceID:   string(deletedBinding.ResourceID),
-	}); err != nil {
+	// НА КАЖДОГО субъекта привязки, а не на легаси-одиночку: см.
+	// emitSubjectChangeForEverySubject.
+	if err := emitSubjectChangeForEverySubject(ctx, w.AccessBindings().ListSubjects, w.AccessBindingsW().EmitSubjectChangeEvent,
+		deletedBinding, "binding_revoke", "binding_delete"); err != nil {
 		return nil, shared.MapRepoErr(err)
 	}
 

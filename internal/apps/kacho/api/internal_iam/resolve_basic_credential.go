@@ -22,6 +22,12 @@ import (
 type basicCredentialResolver interface {
 	ResolveBasic(ctx context.Context, presented string) (domain.BasicCredential, error)
 	TouchLastUsed(ctx context.Context, credentialID string, throttle time.Duration) error
+	// CheckBasicLive — тот же предикат живости, спрошенный по идентификатору,
+	// без предъявления секрета (#1450). Порт ОДИН на оба вопроса намеренно:
+	// второй порт об одном предмете дал бы возможность провязать один вопрос и
+	// не провязать другой — молча и ровно на том стенде, где это заметить
+	// некому.
+	CheckBasicLive(ctx context.Context, credentialID string) error
 }
 
 // lastUsedThrottle — дроссель записи отметки предъявления. Равен окну вердикта
@@ -70,7 +76,7 @@ func (h *Handler) ResolveBasicCredential(
 			h.logger.ErrorContext(ctx, "basic credential authority failed",
 				slog.Any("error", err))
 		}
-		return nil, status.Error(codes.Unavailable, "credential state could not be established")
+		return nil, status.Error(codes.Unavailable, credentialStateUnknownText)
 	}
 
 	// Отметка предъявления обновляется ЗДЕСЬ — на промахе кэша края, а не на

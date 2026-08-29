@@ -76,9 +76,15 @@ listener'ы. Каждый может требовать mTLS.
     <tr><td><code>KACHO_IAM_HOOKS_SERVER_MTLS_…</code></td><td>mTLS hooks-listener'а (Kratos identity-хуки)</td></tr>
     <tr><td><code>KACHO_IAM_METRICS_SERVER_MTLS_…</code></td><td>mTLS metrics-listener'а (Prometheus)</td></tr>
     <tr><td><code>KACHO_IAM_API_SERVER__METRICS_ENDPOINT</code></td><td>Адрес Prometheus <code>/metrics</code> (cluster-internal, по умолчанию <code>tcp://0.0.0.0:9095</code>). Имя без двойных подчёркиваний, стоявшее здесь прежде, встречается в дереве <b>только в комментарии</b> — читателя у него нет</td></tr>
-    <tr><td><code>KACHO_IAM_GATEWAY_INTERNAL_…</code></td><td>Адрес и клиентский mTLS до internal-mux api-gateway (subject-change)</td></tr>
   </tbody>
 </table>
+
+:::note Ручек с адресом api-gateway у iam больше нет
+Здесь стояла строка про адрес и клиентский mTLS до internal-порта api-gateway — iam ходил туда
+сбрасывать кэш решений. Ни одной из этих переменных **не существует**: направление развёрнуто,
+край сам читает журнал смены субъекта у iam. Ручка адреса была вдобавок обязательной, из-за чего
+iam не поднимался там, где api-gateway нет вовсе; теперь iam разворачивается без него.
+:::
 
 ## Режим аутентификации
 

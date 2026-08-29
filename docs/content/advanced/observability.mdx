@@ -20,7 +20,7 @@ Kachō IAM — центральный авторизатор платформы,
   <tbody>
     <tr><td><strong>gRPC RPC</strong></td><td>Rate / latency / error по методам (p50/p95/p99); всплеск <code>PERMISSION_DENIED</code> / <code>UNAUTHENTICATED</code></td></tr>
     <tr><td><strong>Authz Check</strong></td><td>Латентность <code>Check</code> (бюджет ≤ 30 ms p95); доля deny; отказы вердикта</td></tr>
-    <tr><td><strong>Сброс кэша края</strong></td><td>Глубина <code>subject_change_outbox</code>, лаг дренажа, retry / отравленные строки (при отставании край дольше отвечает по старому срезу прав)</td></tr>
+    <tr><td><strong>Сброс кэша края</strong></td><td>Темп записи в <code>subject_change_outbox</code> и рейт <code>PollSubjectChanges</code>. Отставание живёт <strong>у читателя</strong>: журнал читает сам api-gateway курсором, и «докуда дочитали» со стороны iam не видно. Глубина журнала растёт монотонно и отставанием <strong>не является</strong></td></tr>
     <tr><td><strong>Пул БД</strong></td><td>Занятость pgx-пула, длительность транзакций, contention</td></tr>
     <tr><td><strong>Операции (LRO)</strong></td><td>Длительность операций, доля ошибок worker'а</td></tr>
     <tr><td><strong>Ory-интеграции</strong></td><td>Латентность / ошибки вызовов Hydra (Issue/Revoke) и identity-хуков Kratos</td></tr>
@@ -34,7 +34,8 @@ Kachō IAM — центральный авторизатор платформы,
 
 - `PERMISSION_DENIED` с указанием subject / relation / object — диагностика отказов доступа;
 - `authz_no_principal` — потеря principal в async-worker'е (см. ниже);
-- ошибки дренажа сброса кэша края (несовпадение домена объекта, отравленные строки).
+- отказы `PollSubjectChanges` — край не смог прочитать журнал (его кэш решений держит старый
+  срез прав дольше обычного).
 
 ## Трассировка
 
@@ -47,7 +48,7 @@ OpenTelemetry-контекст пробрасывается сквозь RPC. Д
 ```mermaid
 flowchart TD
   check["Check p95 &gt; 30ms или рост deny"] --> a["база под нагрузкой / раздутая цепь областей / план вывода"]
-  outbox["subject_change_outbox глубина растёт"] --> b["дренаж отстаёт → кэш края держит старый срез прав"]
+  outbox["PollSubjectChanges: отказы или тишина"] --> b["край не читает журнал → его кэш держит старый срез прав"]
   denied["всплеск PERMISSION_DENIED"] --> c["баг привязки / domain-binding / истёкшие сессии"]
   authn["всплеск UNAUTHENTICATED"] --> d["протухшие cookie-сессии (не баг эндпоинта)"]
 ```

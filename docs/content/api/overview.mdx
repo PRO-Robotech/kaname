@@ -16,7 +16,7 @@ import dedent from 'ts-dedent'
 [AccessBinding](/api/access-binding) и т.д.).
 
 :::info Единый контракт — gRPC, REST — проекция
-Источник истины — Protocol Buffers в `kacho-proto` (домен `kacho.cloud.iam.v1`). REST-поверхность
+Источник истины — Protocol Buffers в `proto/` (домен `kacho.cloud.iam.v1`). REST-поверхность
 строится через **grpc-gateway**: каждый RPC аннотирован `google.api.http`. Семантика (коды
 ошибок, валидация) одинакова для gRPC и REST; примеры ниже — в REST-форме (через `api-gateway`).
 :::
@@ -86,9 +86,14 @@ Kachō IAM управляет **семью типами tenant-facing ресур
 `google.rpc.Status error` при ошибке или итоговый ресурс (`response`) при успехе. Поллинг —
 через `OperationService.Get`; подробнее — [Операции](/api/operations).
 
-:::note Watch RPC не существует
-Изменения отслеживаются поллингом: `List` каждые 2–5 c или `OperationService.Get(id)` для
-in-flight операции. Долгоживущего Watch-стрима в API нет.
+:::note Подписки на операции нет; журнала подписки у IAM тоже пока нет
+Изменения ресурсов IAM отслеживаются поллингом: `List` каждые 2–5 c или
+`OperationService.Get(id)` для in-flight операции.
+
+Поток изменений **ресурсов** у платформы есть — одна ручка края, Server-Sent Events, — но
+владельцами журнала объявлены другие домены; ресурсы IAM в него сегодня не попадают. Исход
+операции поток не заменяет ни у одного домена: у провалившейся мутации события нет вовсе.
+Устройство подписки — в документации api-gateway, страница «Подписка на изменения».
 :::
 
 ## Формат JSON

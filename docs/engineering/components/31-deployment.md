@@ -113,7 +113,7 @@ flowchart TB
 
 ## Helm-chart
 
-Chart лежит в `deploy/` (под-chart umbrella-релиза `kacho-deploy`). Шаблоны:
+Chart лежит в `deploy/` (под-chart umbrella-релиза `kacho-umbrella` (`deploy/helm/umbrella/`)). Шаблоны:
 `templates/deployment.yaml`, `templates/configmap.yaml`, `templates/service.yaml`.
 
 ```bash
@@ -264,12 +264,16 @@ anonymous fail-closed); dev-стенд явно опускает его до `de
 
 - **LRO worker** (`operations`-таблица из corelib) — async-исполнение мутаций +
   orphan-reconciler, добивающий осиротевшие `done=false` операции умершего процесса.
-- **`subject_change_outbox` drainer** — push `InvalidateSubject` на internal-порт
-  api-gateway, убирая окно сходимости poll-инвалидации кэша.
 - **bootstrap-admin reconciler** — повторяет выдачу `system_admin@cluster`, пока
   user-mirror не появится (best-effort, non-fatal; no-op без env).
 - **resource-scoped AccessBinding reconciler** — membership label-selector'ов +
   containment + истечение TTL-грантов.
+
+> [!note] Дренажа сброса кэша края здесь больше нет
+> В перечне стоял worker, вычитывавший `subject_change_outbox` и звавший край на его
+> internal-порту. Снят вместе с ребром: журнал остаётся, но читает его **сам край**
+> (`InternalIAMService.PollSubjectChanges`, курсор). iam своих потребителей не знает и
+> ни одного исходящего вызова к ним не делает — он лист графа рёбер.
 
 ## Миграции
 
@@ -538,7 +542,7 @@ grpcurl -plaintext -d '{"external_id":"bootstrap-admin","email":"admin@kacho.clo
 
 ## Ссылки на код
 
-- `cmd/kacho-iam/{main,serve,wiring,env,grpc_register,hooks_mux,subject_change_wiring}.go`
+- `cmd/kacho-iam/{main,serve,wiring,env,grpc_register,hooks_mux}.go`
 - `cmd/migrator/main.go`
 - `internal/apps/kacho/config/`
 - `internal/migrations/0001_initial.sql`

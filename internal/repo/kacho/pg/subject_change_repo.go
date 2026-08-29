@@ -29,8 +29,12 @@ var _ service.SubjectChangeReader = (*SubjectChangeRepo)(nil)
 // PollSubjectChanges returns rows with id > sinceID ordered ascending,
 // at most limit rows, plus headID = current MAX(id) (0 when empty).
 func (r *SubjectChangeRepo) PollSubjectChanges(ctx context.Context, sinceID int64, limit int32) ([]service.SubjectChange, int64, error) {
+	// Тип субъекта живёт в `payload`, а не колонкой: полосе сброса кэша он был не
+	// нужен, и колонки под него не завели. Достаётся он тем же чтением, чтобы у
+	// перепроса и у толчка имя субъекта собиралось из ОДНОГО источника — иначе
+	// две полосы об одном предмете разошлись бы молча.
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, subject_id, op
+		`SELECT id, subject_id, op, COALESCE(payload->>'subject_type', '')
 		   FROM kacho_iam.subject_change_outbox
 		  WHERE id > $1
 		  ORDER BY id ASC
@@ -44,7 +48,7 @@ func (r *SubjectChangeRepo) PollSubjectChanges(ctx context.Context, sinceID int6
 	var changes []service.SubjectChange
 	for rows.Next() {
 		var c service.SubjectChange
-		if err := rows.Scan(&c.ID, &c.SubjectID, &c.Op); err != nil {
+		if err := rows.Scan(&c.ID, &c.SubjectID, &c.Op, &c.SubjectType); err != nil {
 			return nil, 0, fmt.Errorf("scan subject_change: %w", err)
 		}
 		changes = append(changes, c)

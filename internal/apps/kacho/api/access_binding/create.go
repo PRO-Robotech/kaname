@@ -376,12 +376,10 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	// the SAME writer-tx as the binding INSERT (ban #10).
 	for _, s := range b.Subjects {
 		if err := w.AccessBindingsW().EmitSubjectChangeEvent(ctx, abrepo.SubjectChangeEvent{
-			SubjectID:    string(s.ID),
-			SubjectType:  string(s.Type),
-			EventType:    "binding_grant",
-			Op:           "binding_upsert",
-			ResourceType: string(created.ResourceType),
-			ResourceID:   string(created.ResourceID),
+			SubjectID:   string(s.ID),
+			SubjectType: string(s.Type),
+			EventType:   "binding_grant",
+			Op:          "binding_upsert",
 		}); err != nil {
 			return nil, shared.MapRepoErr(err)
 		}
