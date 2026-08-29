@@ -6,7 +6,10 @@
 // invalidation. Read-only; no mutation.
 package service
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // SubjectChange — a row of kacho_iam.subject_change_outbox, plain Go (no proto).
 type SubjectChange struct {
@@ -23,10 +26,29 @@ type SubjectChange struct {
 	SubjectType string
 }
 
+// ErrSubjectChangeNotSettled — граница журнала ЕЩЁ НЕ УСТОЯЛАСЬ: позиции нет.
+//
+// Не ошибка хранилища и не пустой журнал. Номер строки выдаётся счётчиком на
+// вставке, а видимой она становится на фиксации, поэтому позицию можно назвать
+// только за писателями, которые уже доистекли. Пока наблюдение их лишь
+// ЗАПОМНИЛО, называть позицию нечем — а ноль вызывающий, усваивающий позицию на
+// первом проходе, прочёл бы как «журнал кончается здесь» и сел бы в его начало.
+//
+// Состояние ХОЛОДНОГО СТАРТА, а не режим работы: признак подтверждённости
+// монотонен и однажды подтвердившись не отзывается. Вызывающий переспрашивает на
+// следующем такте; вечное молчание закрывает его собственный fail-closed.
+var ErrSubjectChangeNotSettled = errors.New("subject change journal position is not settled yet")
+
 // SubjectChangeReader — port: read side of subject_change_outbox.
 type SubjectChangeReader interface {
-	// PollSubjectChanges returns rows with id > sinceID ordered ascending,
-	// at most limit rows, plus headID = current MAX(id) (0 when empty).
+	// PollSubjectChanges returns rows of the window `(sinceID, settled]` in
+	// ascending order, at most limit rows, plus the position the caller may adopt
+	// as its cursor — the settled boundary, narrowed to the last delivered row
+	// when the page was cut by limit.
+	//
+	// Never "everything above the cursor" and never `MAX(id)`: a position issued
+	// past a number still in flight loses that row silently and forever.
+	// [ErrSubjectChangeNotSettled] when there is no settled position yet.
 	PollSubjectChanges(ctx context.Context, sinceID int64, limit int32) (changes []SubjectChange, headID int64, err error)
 }
 
@@ -40,11 +62,10 @@ func NewSubjectChangeService(reader SubjectChangeReader) *SubjectChangeService {
 	return &SubjectChangeService{reader: reader}
 }
 
-// PollSubjectChanges returns up to `limit` rows from subject_change_outbox
-// where id > sinceID, ordered ascending. limit is clamped to [1, 1000];
-// zero or negative defaults to 256. Also returns headID = MAX(id) in the
-// table (0 when empty) so a freshly started caller can seed its cursor
-// without replaying history.
+// PollSubjectChanges returns up to `limit` rows of the window `(sinceID, settled]`,
+// ordered ascending. limit is clamped to [1, 1000]; zero or negative defaults to
+// 256. Also returns the position a freshly started caller may seed its cursor
+// with — the settled boundary, never `MAX(id)`.
 func (s *SubjectChangeService) PollSubjectChanges(ctx context.Context, sinceID int64, limit int32) ([]SubjectChange, int64, error) {
 	if limit <= 0 {
 		limit = 256

@@ -84,16 +84,23 @@
   — журнал намерений; ключ кортежа лежит **внутри** `payload` (jsonb), отдельных
   колонок `user`/`relation`/`object` у таблицы нет. DDL — `0001_initial.sql`.
 - `kacho_iam.relation_fact` — проекция журнала, из которой форма читает прямой факт.
-- `kacho_iam.subject_change_outbox(id, subject_id, op, created_at, notified_at, event_type,
-  sent_at, attempt_count, last_error, payload)` — **журнал** смены субъекта,
-  который край читает курсором по возрастанию `id`; DDL — `0001_initial.sql`.
-  Колонки `sent_at` / `attempt_count` / `last_error` остались от прежней формы (очередь с
-  доставкой) и **не пишутся никем**: читатель на них не смотрит by construction. Считать по
-  ним отставание нельзя — `WHERE sent_at IS NULL` вернёт весь журнал.
-  Величин предмета (`resource_type` / `resource_id`) у журнала **больше нет**: их писала
-  каждая мутация выдачи, а читателя у них не было ни одного — ни проекции чтения, ни
-  контракта, ни потребителя на крае. Сняты миграцией
-  `20260829124512_subject_change_journal_drops_the_unread_scope_hint.sql` (задача #1462).
+- `kacho_iam.subject_change_outbox(id, subject_id, op, created_at, event_type, payload)`
+  — **журнал** смены субъекта, который край читает курсором по возрастанию `id`;
+  DDL — `0001_initial.sql`. Шесть колонок, и это весь журнал: величин доставки у него
+  **больше нет**.
+  Журнал усыхал дважды, и оба раза снималось то, у чего не было ни писателя, ни читателя:
+  - величины предмета (`resource_type` / `resource_id`) — их писала каждая мутация выдачи,
+    а читателя не было ни одного. Сняты миграцией
+    `20260829124512_subject_change_journal_drops_the_unread_scope_hint.sql` (задача #1462);
+  - величины доставки (`sent_at` / `attempt_count` / `last_error` / `notified_at`) вместе
+    с частичным индексом `subject_change_pending_v2_idx` по `sent_at IS NULL` — они
+    остались от прежней формы (очередь с доставкой) и не двигались никем после снятия
+    толчка к краю. Сняты миграцией
+    `20260829181500_subject_change_journal_drops_the_delivery_columns.sql` (задача #1396).
+
+  Практическое следствие: считать по этому журналу отставание **нечем и не нужно** —
+  колонки `sent_at` нет, а запрос по ней теперь отвергается базой, а не возвращает
+  весь журнал молча. Отставание живёт у читателя (см. `33-runbook.md`).
 - `kacho_iam.resource_scope_edge` — представление цепи областей (см.
   [`../architecture/scope-chain-reaches-the-root.md`](../architecture/scope-chain-reaches-the-root.md)).
 

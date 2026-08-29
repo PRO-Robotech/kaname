@@ -328,6 +328,15 @@ func (h *Handler) PollSubjectChanges(ctx context.Context, req *iamv1.PollSubject
 	}
 	changes, headID, err := h.subjectChange.PollSubjectChanges(ctx, req.GetSinceId(), req.GetLimit())
 	if err != nil {
+		// «Позиции ещё нет» — состояние холодного старта, а не отказ хранилища:
+		// назвать его общим отказом значило бы посоветовать вызывающему разбирать
+		// поломку там, где верный следующий шаг — переспросить. Отдельный тон
+		// восстанавливает этот шаг (`retryable`), и он же не даёт вызывающему
+		// принять ноль за позицию (kacho#1374).
+		if stderrors.Is(err, service.ErrSubjectChangeNotSettled) {
+			slog.WarnContext(ctx, "subject change journal position is not settled yet", "err", err)
+			return nil, status.Error(codes.Unavailable, "subject change position not settled")
+		}
 		slog.ErrorContext(ctx, "poll subject changes", "err", err)
 		return nil, status.Error(codes.Internal, "subject change poll failed")
 	}

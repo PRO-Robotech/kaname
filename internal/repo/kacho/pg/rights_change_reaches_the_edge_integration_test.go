@@ -114,7 +114,7 @@ func TestRightsChangeReachesTheEdgeAndTheVerdictIsRecomputed(t *testing.T) {
 	// участвуют; подставлять вместо обработчика свою заглушку значило бы
 	// проверять форму, которой продукт не производит.
 	handler := internal_iam.NewHandler(nil, nil).
-		WithSubjectChange(service.NewSubjectChangeService(kachopg.NewSubjectChangeRepo(pool)))
+		WithSubjectChange(service.NewSubjectChangeService(kachopg.NewSubjectChangeRepo(pool, nil)))
 
 	lis := bufconn.Listen(1 << 20)
 	srv := grpc.NewServer()

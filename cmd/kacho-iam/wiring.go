@@ -614,7 +614,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	internalIAMHandler := internaliamapp.NewHandler(lookupSubject, checkAuthz).
 		// PollSubjectChanges drains subject_change_outbox for api-gateway
 		// authz-cache invalidation. Internal-only (port 9091).
-		WithSubjectChange(service.NewSubjectChangeService(kachopg.NewSubjectChangeRepo(pool))).
+		//
+		// Журнал процесса адаптеру НАЗЫВАЕТСЯ, а не берётся умолчанием: чтение
+		// идёт окном до границы устоявшегося, и удержание границы
+		// незавершившимся писателем — единственное состояние, в котором край
+		// молчит при живых событиях. Без жалобы в журнал процесса оно
+		// неотличимо от «событий нет» (kacho#1374).
+		WithSubjectChange(service.NewSubjectChangeService(
+			kachopg.NewSubjectChangeRepo(pool, logger))).
 		// SEC-C — FGA-proxy RPCs + ReBAC authz gate.
 		WithResourceRegistrar(registerResourceUC, regGate).
 		// #1142 — авторитет о предъявленном базовом секрете. Край зовёт его на

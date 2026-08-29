@@ -253,6 +253,26 @@ func (r *LimitRepo) StatedFor(ctx context.Context, scopeID string) ([]domain.Lim
 // Withdrawn rows travel here and nowhere else: a puller that only ever learns
 // about writes can never drop a projection row, so a withdrawn project override
 // would keep overriding forever.
+//
+// # Голый курсор здесь БЕЗОПАСЕН, и держит это не «наверное» (kacho#1373)
+//
+// Обычно позиция, продвинутая на голый номер, теряет строку навсегда: номер
+// выдаётся счётчиком на вставке, а видимой строка становится на фиксации, и
+// перечитывание идёт строго «больше курсора». Здесь этого окна НЕТ: ревизию
+// штампует триггер `limits_stamp_revision` (миграция 0092), берущий
+// `pg_advisory_xact_lock` ПЕРЕД `nextval` и держащий её до конца транзакции.
+// Значит невыданными в каждый момент остаются номера ОДНОГО писателя, все они
+// старше всякого видимого, и порядок ревизий есть порядок фиксаций.
+//
+// Свойство лежит в ЧУЖОМ и далёком артефакте, поэтому его держат ДВЕ половины, и
+// ни одна не заменяет другую: объявление — гейт `internal/repohygiene`
+// (он читает тела триггеров последовательно, и позднейшая миграция вправе
+// закрытость снять); поведение — `TestLimitRevisionOrderIsCommitOrder`, чья
+// способность падать доказана тем же триггером без блокировки в базе пробы.
+//
+// Верхняя граница по устоявшемуся здесь НЕ применяется осознанно: она добавила
+// бы на путь чтения наблюдение блокировок и режим «поток задержан
+// незавершившимся писателем» там, где терять нечего.
 func (r *LimitRepo) ChangedSince(ctx context.Context, after int64, limit int) ([]domain.Limit, int64, error) {
 	const q = `SELECT ` + limitCols + ` FROM kacho_iam.limits
 		WHERE revision > $1
