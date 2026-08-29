@@ -15,10 +15,17 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
+
+	"github.com/PRO-Robotech/kacho/internal/dropguard"
 )
 
 // Config — параметры одного запуска runner'а.
 type Config struct {
+	// Service — имя сервиса, чью цепочку применяет этот runner. Обязательное:
+	// без него живой счёт строк перед сносом не может назвать, что он стережёт,
+	// а безымянный отказ в логе init-контейнера некому адресовать.
+	Service       string
 	Dialect       *Dialect
 	DSN           string
 	FS            fs.FS
@@ -27,6 +34,9 @@ type Config struct {
 
 // Validate проверяет минимально необходимые поля перед обращением к диалекту.
 func (c Config) Validate() error {
+	if c.Service == "" {
+		return errors.New("service is empty (the live drop preflight would have nothing to name)")
+	}
 	if c.Dialect == nil {
 		return errors.New("dialect is not set")
 	}
@@ -58,9 +68,38 @@ func New(cfg Config) (*Runner, error) {
 	return &Runner{cfg: cfg}, nil
 }
 
-// Up прогоняет миграции вверх. Делегирует в Dialect-impl.
+// Up прогоняет миграции вверх — сперва СОСЧИТАВ строки в таблицах, которые
+// уронят ещё не применённые миграции (см. preflightDrops), и лишь затем
+// делегируя в Dialect-impl. Ненулевой счёт прекращает применение.
 func (r *Runner) Up(target string) error {
-	return r.cfg.Dialect.Up(context.Background(), r.cfg.DSN, r.cfg.FS, r.cfg.MigrationsDir, target)
+	ctx := context.Background()
+	// СЧЁТ ПЕРЕД СНОСОМ — здесь, а не в вызывающем, и это единственное место.
+	// Шаг, который зовут отдельной строкой, однажды не позовут; отсюда его не
+	// обойти, не обойдя сам Up. Ненулевой счёт возвращает ошибку — миграции не
+	// применяются вовсе.
+	if err := r.preflightDrops(ctx); err != nil {
+		return err
+	}
+	return r.cfg.Dialect.Up(ctx, r.cfg.DSN, r.cfg.FS, r.cfg.MigrationsDir, target)
+}
+
+// preflightDrops считает на ЖИВОЙ базе строки в каждой таблице, которую уронит
+// ещё не применённая миграция.
+//
+// Измеряющий гейт в internal/migrations отвечает на другой вопрос — сколько сеет
+// наша собственная цепочка, проигранная в пустую базу. Что записал арендатор, не
+// знает ни один контейнер; узнать это можно только здесь и только сейчас, пока
+// строки ещё существуют.
+//
+// Соединение своё и закрывается сразу: держать его до конца применения незачем, а
+// dbready внутри openPgxDB заодно даёт барьер готовности до первого вопроса.
+func (r *Runner) preflightDrops(ctx context.Context) error {
+	db, err := openPgxDB(ctx, r.cfg.DSN, r.cfg.Dialect.Spec())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	return dropguard.Gate(ctx, db, r.cfg.Service, r.cfg.FS, os.Stderr)
 }
 
 // Down откатывает миграции. Делегирует в Dialect-impl.
