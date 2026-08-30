@@ -10,32 +10,30 @@
 // против реального CockroachDB (PL/pgSQL-триггеры / LISTEN-NOTIFY схемы). Seam
 // удалён (speculative generality); если появится второй РЕАЛЬНО расходящийся
 // диалект — интерфейс возвращается тогда.
+//
+// Метадата диалекта живёт в общем пакете — [migratorcli.SpecPostgres]; здесь
+// она НЕ переобъявляется (#1383, docs/architecture/migrator-form.md).
 package migrator
 
-import "fmt"
+import (
+	"fmt"
 
-// DialectSpec — описательная метадата диалекта для CLI-резолва и diagnostics.
-type DialectSpec struct {
-	Name         string
-	GooseDialect string
-	SQLDriver    string
-}
-
-// SpecPostgres — метадата единственного поддерживаемого диалекта.
-var SpecPostgres = DialectSpec{
-	Name:         "postgres",
-	GooseDialect: "postgres",
-	SQLDriver:    "pgx",
-}
+	"github.com/PRO-Robotech/kacho/pkg/migratorcli"
+)
 
 // NewDialect возвращает диалект по имени из CLI/конфига. Поддерживается только
 // "postgres" (пустая строка → postgres по умолчанию); любое другое имя — ошибка
 // с явным списком поддерживаемых значений.
+//
+// Приём пустой строки — известное расхождение с двумя соседями, и оно числится
+// живой строкой ведомости `dialect-empty-accepted`
+// (internal/repohygiene/migratordivergence_test.go). Здесь оно не снимается:
+// его предмет — тип диалекта, а тот сводится вместе с накатом.
 func NewDialect(name string) (*Dialect, error) {
 	switch name {
-	case "", SpecPostgres.Name:
+	case "", migratorcli.SpecPostgres.Name:
 		return &Dialect{}, nil
 	default:
-		return nil, fmt.Errorf("unknown dialect %q (supported: %s)", name, SpecPostgres.Name)
+		return nil, fmt.Errorf("unknown dialect %q (supported: %s)", name, migratorcli.SpecPostgres.Name)
 	}
 }

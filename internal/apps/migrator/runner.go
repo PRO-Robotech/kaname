@@ -122,9 +122,10 @@ func (r *Runner) Up(target string) error {
 // строки ещё существуют.
 //
 // Соединение своё и закрывается сразу: держать его до конца применения незачем, а
-// dbready внутри openPgxDB заодно даёт барьер готовности до первого вопроса.
+// dbready внутри migratorcli.OpenDB заодно даёт барьер готовности до первого
+// вопроса.
 func (r *Runner) preflightDrops(ctx context.Context, scope dropguard.Target) error {
-	db, err := openPgxDB(ctx, r.cfg.DSN, r.cfg.Dialect.Spec())
+	db, err := migratorcli.OpenDB(ctx, r.cfg.DSN, r.cfg.Dialect.Spec())
 	if err != nil {
 		return err
 	}
