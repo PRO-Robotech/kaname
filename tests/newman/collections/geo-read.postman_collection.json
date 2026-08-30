@@ -113,7 +113,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
                   "pm.test('REGRESSION: not 503 (gateway->geo no-children)', () => {",
                   "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.not.equal(503);",
                   "});",
@@ -214,7 +214,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
                   "pm.test('REGRESSION: not 503 (gateway->geo no-children)', () => {",
                   "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.not.equal(503);",
                   "});",

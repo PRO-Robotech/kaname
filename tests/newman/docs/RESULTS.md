@@ -71,8 +71,8 @@ Injection check on a real report (JSON-отчёт коллекции authz-deny 
 reported `assertions.failed=3`; the gate printed **2**. The one it removed was
 `AUTHZ-REVOKE-ENFORCED-A-INV :: inv-get-account-allow-warm-cache`.
 
-**The mechanism that keys on the reason stays.** `retry_until_authorized` /
-`retry_until_absent` / the operation-poll loops retry while the *response* says the
+**The mechanism that keys on the reason stays.** `retry_until_authorized` and the
+operation-poll loops retry while the *response* says the
 specific transient thing, and when the budget is spent the real assertion runs on the
 terminal response — so a genuine deny still fails. That is a check about behaviour. A
 name-match is not, and is not a substitute for one.
@@ -136,9 +136,10 @@ cases exists in-tree, so a residual red means teardown failed or a run overlappe
 window: a finding, not a lag. The model-side reason such a grant reaches child resources at all
 is tracked open in [`kacho-iam#276`](https://github.com/PRO-Robotech/kacho-iam/issues/276).
 
-Note also that the reason-keyed mechanism was **already** applied here — the `-abs<N>` suffix is
-`retry_until_absent` (25 × 500 ms ≈ 12.5 s, then the real assertion runs once on the terminal
-response). The deduction was a second, name-keyed layer on top of it, and it was the one that
+Note also that the reason-keyed mechanism was **already** applied here — the `-abs<N>` suffix
+comes from the absence-wait wrapper (25 × 500 ms ≈ 12.5 s, then the real assertion runs once on
+the terminal response). That wrapper is no longer declared in this suite: it had no caller here
+and was removed with #1478; the mechanism it describes lives on in compute and vpc. The deduction was a second, name-keyed layer on top of it, and it was the one that
 could hide a persistent leak.
 
 **nlb — 17 folders, matched on their `-rya<N>` (already retry-wrapped) steps**

@@ -382,7 +382,10 @@ CASES.append(Case(
                 *save_from_response("j.id", "opId"),
             ],
         )),
-        assert_op_error(9, "FAILED_PRECONDITION", msg_substr="contains projects"),
+        # `msg_substr` приводит обе стороны к нижнему регистру и заглавную `A`
+        # владельца не различает; `msg_regex` сверяет текст как есть.
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        msg_regex="Account [^ ]+ contains projects and cannot be deleted"),
         # Уборка идёт ПОСЛЕ утверждения об отказе и ничего в нём не меняет: отказ
         # уже зафиксирован на непустом аккаунте. Сняв потомка, снимаем и родителя —
         # иначе аккаунт, чьё удаление кейс проверяет, переживает прогон и держит

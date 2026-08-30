@@ -34,7 +34,7 @@ import gen  # noqa: E402
 
 def _items(case):
     """Generated collection items of a case, keyed by bare step name."""
-    col = gen.case_to_postman(case)
+    col = gen._RUN.case_item(case)
     return {it["name"].split(" :: ", 1)[1]: it for it in col["item"]}
 
 
@@ -254,7 +254,7 @@ def test_generated_poll_step_is_valid_json_serialisable():
             gen.poll_operation_until_done(),
         ],
     )
-    json.dumps(gen.case_to_postman(case))
+    json.dumps(gen._RUN.case_item(case))
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +278,7 @@ def test_generated_poll_step_is_valid_json_serialisable():
 
 
 def _prerequest(step: gen.Step) -> str:
-    item = gen.step_to_postman(step)
+    item = gen._RUN.step_item(step)
     for ev in item.get("event", []):
         if ev["listen"] == "prerequest":
             return "\n".join(ev["script"]["exec"])

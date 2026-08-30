@@ -92,6 +92,16 @@ func runServe(cfg config.Config) error {
 		logger.Warn("authn.mode=production-strict: anonymous rejected + TLS+SSL strictly validated")
 	}
 
+	// Посадка процесса — ЧЕРЕЗ ЦЕНТРАЛЬНЫЙ ДЕСКРИПТОР, и до первого соединения
+	// с базой (задача продукта #1406). Место выбрано не по вкусу: страж
+	// шифрования до собственной базы, стоящий ПОСЛЕ открытия пула, судит
+	// соединение, которое уже открыто, — то есть на боевой посадке с
+	// `sslmode=disable` открытый канал успел бы состояться.
+	posture, perr := describePosture(cfg, logger)
+	if perr != nil {
+		return fmt.Errorf("посадка процесса: %w", perr)
+	}
+
 	pool, err := coredb.NewPool(ctx, cfg.DSN())
 	if err != nil {
 		return err
@@ -321,7 +331,7 @@ func runServe(cfg config.Config) error {
 	}
 
 	observability.LogBootPosture(logger,
-		bootPosture(cfg, mtlsCfg, svcs.ownGates.FormReachable()))
+		bootPosture(posture, cfg, mtlsCfg, svcs.ownGates.FormReachable()))
 
 	// Per-RPC CALLER policy for the internal listener (audit C1/C3/H3/M1). iam
 	// does NOT re-ReBAC the end user here — the api-gateway is the platform's

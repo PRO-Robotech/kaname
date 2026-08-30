@@ -283,7 +283,9 @@ CASES.append(Case(
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                "pm.test('scopeType required text', () => pm.expect((pm.response.json().message||'').toLowerCase(), JSON.stringify(pm.response.json())).to.include('scopetype is required'));",
+                # Дословно: владелец пишет `scopeType` смешанным регистром, и приведение
+                # регистра не различало бы этого ни при каком ответе.
+                "pm.test('scopeType required text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.eql('scopeType is required'));",
             ],
         ),
         Step(

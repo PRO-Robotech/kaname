@@ -28,7 +28,7 @@
 
 ПОМОЩНИКИ БЕРУТСЯ У ГЕНЕРАТОРА, А НЕ ПИШУТСЯ ЗАНОВО. Декларация не импортирует
 `gen` — помощники приезжают к ней впрыском в пространство имён модуля
-(`load_cases_module`), тем же путём, каким она получает `Step`, `Case` и
+(`gen._RUN.load`), тем же путём, каким она получает `Step`, `Case` и
 `assert_status`. Вторая копия предиката разошлась бы с первой молча, и это ровно
 тот класс, который здесь и стерегут.
 
@@ -162,7 +162,7 @@ def _declaration(service: str, stem: str):
     gen = _generator(service)
     path = REPO_ROOT / "services" / service / "tests/newman/cases" / f"{stem}.py"
     assert path.is_file(), f"декларации {service}/{stem}.py в дереве нет"
-    return gen.load_cases_module(path)
+    return gen._RUN.load(path)
 
 
 # ------------------------------------------------------------------ движок

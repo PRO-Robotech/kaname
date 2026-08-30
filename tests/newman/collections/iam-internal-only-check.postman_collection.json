@@ -1239,7 +1239,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
                   "pm.test('INT-UPSERT: user id has usr prefix', () => {",
                   "  const j = pm.response.json();",
                   "  // UpsertFromIdentity returns an Operation with metadata.userId.",
@@ -1445,7 +1445,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
                   "pm.test('INT-UPSERT-IDEM: same user id returned', () => {",
                   "  const j = pm.response.json();",
                   "  const uid = (j.metadata && j.metadata.userId) || (j.user && j.user.id) || j.id;",
@@ -1553,7 +1553,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
                   "const j = pm.response.json();",
                   "// LookupSubject returns {user: {id: '...', ...}} or {serviceAccount: {...}}.",
                   "const subjectId = (j.user && j.user.id) || (j.serviceAccount && j.serviceAccount.id) || j.subjectId;",
@@ -2106,7 +2106,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
                   "pm.test('INT-IC-LIST: the internal listener serves the page', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j, JSON.stringify(j)).to.be.an('object');",
@@ -2450,7 +2450,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('status 200', () => pm.expect(pm.response.code).to.eql(200));",
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
                   "pm.test('INT-LIMIT-LIST: the internal listener serves the page', () => {",
                   "  const j = pm.response.json();",
                   "  pm.expect(j, JSON.stringify(j)).to.be.an('object');",

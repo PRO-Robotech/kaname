@@ -35,6 +35,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/PRO-Robotech/kacho/pkg/db/pgfault"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -151,8 +153,7 @@ func RunBootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 		 VALUES ($1, $2, 'user', $3, 'bootstrap', $4)`,
 		grantID, clusterID, userID, now)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if pgfault.Classify(err).Is(pgfault.Unique) {
 			// Idempotent / concurrent HA — winner already INSERTed.
 			logger.WarnContext(ctx,
 				"concurrent bootstrap detected, cluster admin grant already created by another instance",

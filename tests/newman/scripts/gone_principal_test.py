@@ -17,7 +17,7 @@
 оси: субъект, объект, форма доказательства доступа, предпосылка самого стража.
 
 ФИКСТУРА НЕ СНИСХОДИТЕЛЬНЕЕ ПРОДУКТА. Синтетические коллекции здесь собираются
-НАСТОЯЩИМ сериализатором (`gen.build_collection`), а не пишутся руками: страж
+НАСТОЯЩИМ сериализатором набора (`gen._RUN.collection`), а не пишутся руками: страж
 читает выданный им же комментарий с именем бэрера, и рукописный JSON молча
 разошёлся бы с тем, что реально уезжает в прогон.
 
@@ -39,7 +39,7 @@ def _emit(tmp_path, *cases):
     d = tmp_path / "collections"
     d.mkdir(exist_ok=True)
     (d / "synthetic.postman_collection.json").write_text(
-        json.dumps(gen.build_collection("synthetic", list(cases)), ensure_ascii=False))
+        json.dumps(gen._RUN.collection("synthetic", list(cases)), ensure_ascii=False))
     return d
 
 
@@ -186,7 +186,7 @@ def test_zero_recognised_gone_steps_is_a_FAILURE_marker_drift(tmp_path, capsys):
 def test_the_marker_is_derived_from_the_helper_not_copied(tmp_path):
     # Копия текста разошлась бы с helper'ом молча. Проба утверждает СХОДИМОСТЬ:
     # маркер обязан находиться в скрипте, который helper реально печатает.
-    col = gen.case_to_postman(_gone_case("T-MARK", gone_auth="jwtOwner", witness_auth="jwtOwner"))
+    col = gen._RUN.case_item(_gone_case("T-MARK", gone_auth="jwtOwner", witness_auth="jwtOwner"))
     # Склейка ТА ЖЕ, что у стража (`_test_code`): повторный `json.dumps` удвоил бы
     # обратную косую, и проба утверждала бы про строку, которой страж не видит.
     blob = "\n".join(line for it in col["item"] for ev in it.get("event", [])

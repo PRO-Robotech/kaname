@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/PRO-Robotech/kacho/pkg/db/pgfault"
 	"github.com/PRO-Robotech/kacho/pkg/pagetoken"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
@@ -213,16 +213,13 @@ func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Ac
 	out, err := scanAccount(row)
 	if err != nil {
 		// На UNIQUE / FK / CHECK идем через mapErr с verbatim-text hint'ами.
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) {
-			switch pgErr.Code {
-			case "23505":
-				return domain.Account{}, mapErr(err, "", string(a.Name)) // accounts_name_unique → "Account with name <name> already exists"
-			case "23503":
-				return domain.Account{}, mapErr(err, "", string(a.OwnerUserID)) // accounts_owner_fk → "User <id> not found"
-			case "23514":
-				return domain.Account{}, mapErr(err, "", "")
-			}
+		switch pgfault.Classify(err).Class {
+		case pgfault.Unique:
+			return domain.Account{}, mapErr(err, "", string(a.Name)) // accounts_name_unique → "Account with name <name> already exists"
+		case pgfault.ForeignKey:
+			return domain.Account{}, mapErr(err, "", string(a.OwnerUserID)) // accounts_owner_fk → "User <id> not found"
+		case pgfault.Check:
+			return domain.Account{}, mapErr(err, "", "")
 		}
 		return domain.Account{}, mapErr(err, "", string(a.ID))
 	}

@@ -513,7 +513,7 @@ def test_the_shape_check_catches_what_a_parse_check_would_miss():
 def test_a_legitimate_name_passes_verbatim_and_the_step_parses():
     """ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ на настоящем шве: подпись → ключ → разбор."""
     gen = GENERATORS["storage"]
-    mod = gen.load_cases_module(
+    mod = gen._RUN.load(
         REPO_ROOT / "services/storage/tests/newman/cases/sec-d.py")
     step = mod._check_step("tuple-present-vol", "storage_volume", "volumeId",
                            expect_allowed=True)
@@ -553,7 +553,7 @@ def test_the_name_no_longer_derives_from_the_step_title():
         "потеряло предмет, и вместе с ним отпадает довод в пользу снятия")
 
     gen = GENERATORS["storage"]
-    mod = gen.load_cases_module(
+    mod = gen._RUN.load(
         REPO_ROOT / "services/storage/tests/newman/cases/sec-d.py")
 
     def key_of(title):

@@ -533,7 +533,9 @@ CASES.append(Case(
                 "const j = pm.response.json();",
                 "pm.test('empty subjects rejected sync 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
                 "pm.test('error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
-                "pm.test('error text: Illegal argument subjects (must be 1..32)', () => pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('illegal argument subjects'));",
+                # Дословно и целиком: приведение регистра прячет заглавную `I`, а
+                # обрезанная подстрока не отличает предела от любого другого отказа о subjects.
+                "pm.test('error text: Illegal argument subjects (must be 1..32)', () => pm.expect(j.message || '', JSON.stringify(j)).to.include('Illegal argument subjects (must be 1..32)'));",
             ],
         ),
     ],
@@ -576,7 +578,9 @@ CASES.append(Case(
                 "const j = pm.response.json();",
                 "pm.test('>32 subjects rejected sync 400', () => pm.expect(pm.response.code, JSON.stringify(j)).to.eql(400));",
                 "pm.test('error code INVALID_ARGUMENT (3)', () => pm.expect(j.code, JSON.stringify(j)).to.eql(3));",
-                "pm.test('error text: Illegal argument subjects (must be 1..32)', () => pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.include('illegal argument subjects'));",
+                # Дословно и целиком: приведение регистра прячет заглавную `I`, а
+                # обрезанная подстрока не отличает предела от любого другого отказа о subjects.
+                "pm.test('error text: Illegal argument subjects (must be 1..32)', () => pm.expect(j.message || '', JSON.stringify(j)).to.include('Illegal argument subjects (must be 1..32)'));",
             ],
         ),
     ],

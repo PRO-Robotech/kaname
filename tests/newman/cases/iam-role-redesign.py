@@ -181,7 +181,7 @@ CASES.append(Case(
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                "pm.test('XOR scope text', () => pm.expect((pm.response.json().message||'').toLowerCase(), JSON.stringify(pm.response.json())).to.include('exactly one of account_id'));",
+                "pm.test('XOR scope text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.eql('Illegal argument: exactly one of account_id / project_id (a custom role is account- XOR project-scoped)'));",
             ],
         ),
     ],
@@ -251,7 +251,8 @@ CASES.append(Case(
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                "pm.test('Illegal argument permissions text', () => pm.expect((pm.response.json().message||'').toLowerCase(), JSON.stringify(pm.response.json())).to.include('illegal argument permissions'));",
+                # Дословно: владелец пишет `Illegal argument permissions (compiled/output-only)`.
+                "pm.test('Illegal argument permissions text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.eql('Illegal argument permissions (compiled/output-only)'));",
             ],
         ),
     ],
@@ -274,7 +275,9 @@ CASES.append(Case(
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                "pm.test('rules must be non-empty text', () => pm.expect((pm.response.json().message||'').toLowerCase(), JSON.stringify(pm.response.json())).to.include('rules'));",
+                # Дословно и целиком: `rules` в нижнем регистре зеленело на ЛЮБОМ
+                # отказе, называющем это поле, — и заглавной `I` не различало вовсе.
+                "pm.test('rules must be non-empty text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.eql('Illegal argument rules (must be non-empty)'));",
             ],
         ),
     ],
@@ -357,7 +360,8 @@ CASES.append(Case(
                 "  pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400);",
                 "  pm.expect(pm.response.json().code).to.eql(9);",
                 "});",
-                "pm.test('read-only system role text', () => pm.expect((pm.response.json().message||'').toLowerCase(), JSON.stringify(pm.response.json())).to.include('system role is read-only'));",
+                # Дословно: владелец пишет `System role is read-only and cannot be updated`.
+                "pm.test('read-only system role text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.eql('System role is read-only and cannot be updated'));",
             ],
         ),
     ],

@@ -145,52 +145,23 @@ func TestValidate_Production_SecretFromEnv_OK(t *testing.T) {
 	}
 }
 
-// TestValidate_Production_RequiresSecureSSLMode — a production (non-strict) boot
-// with the DB link left at sslmode=disable is rejected. IAM rows (user/SA
-// records, session-revocation and token rows, a just-issued SA-key client_secret
-// briefly staged in operations.response_data) must never traverse a plaintext DB
-// link. The DB-TLS gate now applies to BOTH production variants, not strict-only.
-func TestValidate_Production_RequiresSecureSSLMode(t *testing.T) {
-	cfg := goodEndpoints(config.ModeProduction, "disable")
-	cfg.AuthN.HookSharedSecret = "a-strong-shared-secret"
-	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("Validate() = nil, want error for sslmode=disable in production")
-	}
-	if !strings.Contains(err.Error(), "ssl-mode") {
-		t.Fatalf("Validate() error = %q, want it to name ssl-mode", err.Error())
-	}
-}
-
-// TestValidate_Production_EmptySSLMode_Rejected — an unset sslmode (which baseDSN
-// substitutes with "disable") is likewise rejected in production: a secure mode
-// must be chosen explicitly.
-func TestValidate_Production_EmptySSLMode_Rejected(t *testing.T) {
-	cfg := goodEndpoints(config.ModeProduction, "")
-	cfg.AuthN.HookSharedSecret = "a-strong-shared-secret"
-	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("Validate() = nil, want error for empty ssl-mode in production")
-	}
-	if !strings.Contains(err.Error(), "ssl-mode") {
-		t.Fatalf("Validate() error = %q, want it to name ssl-mode", err.Error())
-	}
-}
-
-// TestValidate_Production_SecureSSLMode_OK — require/verify-ca/verify-full each
-// satisfy the production DB-TLS gate.
-func TestValidate_Production_SecureSSLMode_OK(t *testing.T) {
-	for _, m := range []string{"require", "verify-ca", "verify-full"} {
-		cfg := goodEndpoints(config.ModeProduction, m)
-		cfg.AuthN.HookSharedSecret = "a-strong-shared-secret"
-		cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
-		if err := cfg.Validate(); err != nil {
-			t.Fatalf("Validate() = %v, want nil for production with ssl-mode=%q", err, m)
-		}
-	}
-}
+// ПРОБЫ БОЕВОГО ШИФРОВАНИЯ ДО БАЗЫ ПЕРЕЕХАЛИ ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ.
+//
+// Здесь стояли три пробы (`disable` отвергается · незаданное отвергается ·
+// require/verify-ca/verify-full принимаются). Ось судит теперь центральный
+// дескриптор посадки — один перечень безопасных значений на всё дерево вместо
+// копии у каждого сервиса (задача продукта #1406), — и пробы переехали за ней в
+// `cmd/kacho-iam/posture_test.go`, к тому месту, которое эту ось решает.
+//
+// Оставить их здесь значило бы утверждать про `Validate()` то, чего она больше
+// не делает: они стали бы либо красными без предмета, либо (после ослабления)
+// пробами, которые не могут упасть.
+//
+// Переезд ещё и ИСПРАВИЛ их предмет. Снятая копия читала поле настройки, тогда
+// как в пул уходит строка `Config.DSN()`: `sslmode` приходит и из сырого URL, а
+// пустое поле деривится в `disable`. Стенд, задавший режим прямо в URL, копия
+// отвергала при исправной посадке; дескриптор читает ТУ строку, что уходит в
+// пул, и такой стенд принимает.
 
 // TestValidate_Dev_EmptySecrets_OK — dev mode legitimately omits AuthN secrets
 // (the hook handlers accept calls without a Bearer in dev). Validate must NOT

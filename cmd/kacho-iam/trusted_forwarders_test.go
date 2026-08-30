@@ -176,7 +176,16 @@ func TestListener_BlankOnlyAllowListIsNotANarrowing(t *testing.T) {
 // проводку, — отчёт не может разойтись с посадкой.
 func TestBootPosture_ReportsWhetherTheCircleIsNarrowed(t *testing.T) {
 	posture := func(sans ...string) bool {
-		return bootPosture(fwdCfg(sans...), config.MTLSConfig{}, true).TrustedForwarders
+		cfg := fwdCfg(sans...)
+		// Дескриптор посадки строится на ПРИНИМАЕМОМ круге: центральный
+		// конструктор не пропускает несужённый круг на боевой посадке (О1), и
+		// это его работа. Предмет пробы другой — что САМООТЧЁТ описывает исход,
+		// а не намерение, — поэтому измеряемый круг подаётся в `bootPosture`
+		// отдельно, ровно тем значением, которое проба и проверяет.
+		accepted := fwdCfg(fwdGatewaySAN)
+		accepted.Repository.Postgres.URL = "postgres://u:p@pg-iam:5432/kacho_iam"
+		accepted.Repository.Postgres.SSLMode = "require"
+		return bootPosture(acceptedPosture(t, accepted), cfg, config.MTLSConfig{}, true).TrustedForwarders
 	}
 	t.Run("pinned", func(t *testing.T) {
 		if !posture(fwdGatewaySAN) {

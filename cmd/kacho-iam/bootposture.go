@@ -4,8 +4,8 @@
 package main
 
 import (
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/observability"
+	"github.com/PRO-Robotech/kacho/pkg/servicecontract"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 )
@@ -57,11 +57,18 @@ import (
 //     corelib отбрасывает пустые записи, поэтому список из одних пустых записей
 //     вырождается там в «доверяем любому», и рапортовать его как сужение значило
 //     бы отчитываться о намерении вместо исхода.
-func bootPosture(cfg config.Config, mtlsCfg config.MTLSConfig, authzCheckWired bool) observability.BootPosture {
+func bootPosture(posture servicecontract.Descriptor, cfg config.Config,
+	mtlsCfg config.MTLSConfig, authzCheckWired bool) observability.BootPosture {
+	// Режим и шифрование до базы берутся из ПРИНЯТОГО дескриптора, а не из
+	// настройки рядом. Разница не косметическая: настройка отвечает намерением,
+	// дескриптор — тем, что прошло отказы старта. Пока их было два места,
+	// самоотчёт мог рапортовать посадку, которой процесс не принимал.
+	accepted := posture.Spec()
+	dbSSLMode, _ := accepted.DBSSLMode.Get()
 	return observability.BootPosture{
 		Service:           "iam",
-		AuthMode:          cfg.AuthN.Mode.String(),
-		DBSSLMode:         coredb.SSLModeFromDSN(cfg.DSN()),
+		AuthMode:          accepted.Mode.String(),
+		DBSSLMode:         dbSSLMode,
 		PublicMTLS:        mtlsCfg.PublicServerMTLS.Enable,
 		InternalMTLS:      observability.InternalMTLSFrom(mtlsCfg.InternalServerMTLS.Enable),
 		AuthZCheck:        authzCheckWired,

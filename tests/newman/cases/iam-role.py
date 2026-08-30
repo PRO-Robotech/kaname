@@ -1467,10 +1467,13 @@ CASES.append(Case(
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                "pm.test('message: wildcard system-only', () => {",
-                "  const j = pm.response.json();",
-                "  pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.contain('system-only');",
-                "});",
+                # Текст владельца целиком (services/iam/internal/domain/rule.go), а не
+                # часть «system-only»: её несут ДВА разных отказа iam — про модуль и про
+                # произвольное поле, — и подмену одного другим шаг не различал (#1520).
+                # Вхождением, а не равенством: `Validate` накапливает нарушения, и число
+                # слагаемых в сообщении зависит от входа.
+                *assert_refusal_message_contains(
+                    "Illegal argument module (wildcard '*' is system-only)"),
             ],
         ),
     ],
@@ -1625,10 +1628,11 @@ CASES.append(Case(
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                "pm.test('message: mutually exclusive', () => {",
-                "  const j = pm.response.json();",
-                "  pm.expect((j.message || '').toLowerCase(), JSON.stringify(j)).to.contain('mutually exclusive');",
-                "});",
+                # Текст владельца целиком (services/iam/internal/domain/rule.go), а не
+                # часть «mutually exclusive»: её несёт и отказ про цель привязки
+                # (`allInScope and resources`), то есть о ДРУГОМ предмете (#1520).
+                *assert_refusal_message_contains(
+                    "Illegal argument: resourceNames and matchLabels are mutually exclusive"),
             ],
         ),
     ],

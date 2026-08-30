@@ -8,11 +8,11 @@ import (
 	"net/url"
 	"strings"
 
+	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 
 	"go.uber.org/multierr"
-
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 )
 
 // Validate checks Config invariants (pure function — no logger, no
@@ -96,14 +96,20 @@ func (c Config) Validate() error {
 			fmt.Errorf("api-server.internal-endpoint is empty"))
 	}
 
-	switch strings.ToLower(c.Repository.Postgres.SSLMode) {
-	case "disable", "require", "verify-ca", "verify-full":
-	case "":
+	// Словарь принимаемых значений — НЕ свой: он приходит из дома семантики
+	// строки подключения (`pkg/db`), объявленный один раз на всё дерево (задача
+	// продукта #1464). Здесь судится ФОРМА значения, а не посадка: боевую ось
+	// («шифруется ли канал») забрал центральный дескриптор ещё в #1406, и
+	// возвращать её сюда нельзя — предмет у неё один.
+	switch {
+	case coredb.SSLModeConfigurable(c.Repository.Postgres.SSLMode):
+	case strings.TrimSpace(c.Repository.Postgres.SSLMode) == "":
 		// permitted — baseDSN will substitute "disable"
 	default:
 		errs = multierr.Append(errs,
-			fmt.Errorf("repository.postgres.ssl-mode=%q (allowed: disable, require, verify-ca, verify-full)",
-				c.Repository.Postgres.SSLMode))
+			fmt.Errorf("repository.postgres.ssl-mode=%q (allowed: %s)",
+				c.Repository.Postgres.SSLMode,
+				strings.Join(coredb.ConfigurableSSLModes(), ", ")))
 	}
 
 	if strings.TrimSpace(c.Repository.Postgres.URL) == "" {
@@ -114,6 +120,15 @@ func (c Config) Validate() error {
 	// Круг отправителей чужой личности проверяется на ЛЮБОМ старте, а не только в
 	// боевом режиме, — поэтому стоит ВНЕ ветки IsProduction (см.
 	// validateTrustedForwarders).
+	//
+	// Эту ось судит ТАКЖЕ центральный дескриптор посадки (`pkg/servicecontract`,
+	// отказ старта О1), который iam принимает в композиционном корне. Второго
+	// ИСТОЧНИКА при этом не заводится, и различие тут существенное: обе стороны
+	// зовут ОДНУ функцию общей библиотеки (`grpcsrv.TrustedForwarders.Require`)
+	// с одними именами ручек — это второе место ВЫЗОВА, а не второй перечень
+	// безопасных значений. Разойтись им не на чем: решение принимает один код.
+	// Ранняя проверка здесь при этом полезна — она отказывает ещё в `main`, до
+	// `runServe`.
 	errs = multierr.Append(errs, c.validateTrustedForwarders())
 
 	if c.AuthN.Mode.IsProduction() {
@@ -131,24 +146,17 @@ func (c Config) Validate() error {
 		// отсутствие не может.
 		errs = multierr.Append(errs, c.validateIdentityProviderLane())
 
-		// DB-TLS gate — applies to EVERY production variant, not strict-only. All
-		// IAM data (user/SA records, session-revocation + token rows, the
-		// transient SA-key client_secret briefly staged in operations.response_data
-		// before redaction) traverses this link; a plaintext connection
-		// (sslmode=disable, or the empty default baseDSN substitutes with
-		// "disable") is a boot-time misconfiguration in production, exactly like a
-		// missing mTLS listener. A network-adjacent attacker on a plaintext DB link
-		// can passively read credentials and IAM rows (CWE-319). Dev mode is
-		// unaffected — see InsecureDevWarnings.
-		switch strings.ToLower(c.Repository.Postgres.SSLMode) {
-		case "require", "verify-ca", "verify-full":
-			// OK
-		default:
-			errs = multierr.Append(errs,
-				fmt.Errorf("production mode: repository.postgres.ssl-mode must be one of require|verify-ca|verify-full (got %q)",
-					c.Repository.Postgres.SSLMode))
-		}
-		// (production-strict adds no DB-TLS requirement beyond this gate.)
+		// Шифрование до собственной базы здесь БОЛЬШЕ НЕ СУДИТСЯ — сведено к
+		// одному источнику (задача продукта #1406). Требование не ослаблено: тот
+		// же перечень безопасных значений, один на всё дерево, судит центральный
+		// дескриптор посадки (`pkg/servicecontract`, отказ старта О8), который
+		// iam принимает в композиционном корне ДО открытия пула.
+		//
+		// Снятая копия к тому же судила НАМЕРЕНИЕ, а не исход: она читала поле
+		// настройки, тогда как в пул уходит строка, собранная `Config.DSN()`, —
+		// `sslmode` приходит и из сырого URL, а пустое поле деривится в
+		// `disable`. Стенд, задавший режим прямо в URL, копия отвергала при
+		// исправной посадке. Дескриптор читает ТУ строку, что уходит в пул.
 	}
 
 	return errs
@@ -195,10 +203,6 @@ func (c Config) validateProductionBootstrapMint() error {
 // on a non-empty circle; on an unnarrowed one it answers "trusted" for ANY peer
 // that passed client-certificate verification, and the forwarded metadata
 // identity becomes the subject of every authorization decision iam then makes.
-// Both ports are ordinary Services in the namespace, the TLS layer checks the
-// issuing authority rather than the name, and the only NetworkPolicy that selects
-// the iam pod covers the internal port and is off outside production — so this
-// circle is the only thing that narrows.
 //
 // The consequence is not abstract: on :9090 iam deliberately does NOT re-ReBAC
 // the end user (the api-gateway is the single authZ front door), so a neighbour
@@ -211,7 +215,9 @@ func (c Config) validateProductionBootstrapMint() error {
 // production profile, where the cost of the mistake is highest. Outside
 // production an unnarrowed circle stays possible, but as an EXPLICIT opt-in.
 // The shared guard is grpcsrv.TrustedForwarders.Require — one outcome and one
-// refusal text across all seven services; only the knob names differ.
+// refusal text across all seven services; only the knob names differ. The
+// central posture descriptor calls THE SAME guard with the same knob names, so
+// this is a second call site rather than a second source (see Validate).
 func (c Config) validateTrustedForwarders() error {
 	return c.AuthN.TrustedForwarders().Require(grpcsrv.ForwarderGate{
 		Production:   c.AuthN.Mode.IsProduction(),

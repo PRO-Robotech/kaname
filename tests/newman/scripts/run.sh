@@ -36,6 +36,41 @@
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
+NEWMAN_DIR="$PWD"
+
+# ОТБОР КОЛЛЕКЦИЙ — ИЗ ОБЩЕГО СЛОЯ, А НЕ СВОИМ ОБХОДОМ.
+#
+# Здесь набор обходил `collections/` СВОИМ циклом — в двух местах, остатком и
+# вердиктом. Перечень коллекций объявлен деревом, и каждый свой обход есть ещё
+# одно место об одном предмете: правило отбора уже расходилось между копиями
+# (`__init__`/`__main__` против ЛЮБОГО ведущего подчёркивания), и расходилось
+# оно молча.
+#
+# ПОРЯДОК вызовов у этого набора остаётся рукописным ОСОЗНАННО (посев и
+# зависимость между коллекциями), и правило этого не запрещает: предмет общего
+# отбора — МНОЖЕСТВО, а не порядок.
+#
+# Общий слой ищется ВВЕРХ ОТ ЭТОГО ФАЙЛА, а не от cwd: прогонщик зовут из
+# каталога набора, и путь, выведенный из текущего каталога, был бы свойством
+# того, ОТКУДА позвали. Поиск — тот же бутстрап, что у `_kacholib_dir()` в
+# gen.py, и по той же причине неустраним: общий слой нельзя найти его же
+# средствами.
+_stems_lib() {
+  local d="$NEWMAN_DIR"
+  while [[ "$d" != "/" ]]; do
+    if [[ -f "$d/tests/newman/kacholib/stems.sh" ]]; then
+      printf '%s\n' "$d/tests/newman/kacholib/stems.sh"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  echo "общий слой отбора не найден: ожидается <корень>/tests/newman/kacholib/stems.sh" >&2
+  echo "Это ОТКАЗ, а не пропуск: без него прогонщик выбрал бы коллекции молча и не те." >&2
+  return 1
+}
+_STEMS_LIB="$(_stems_lib)"
+# shellcheck source=/dev/null
+. "$_STEMS_LIB"
 
 SERVICE=""
 BAIL=""
@@ -445,16 +480,15 @@ else
   # (посев, зависимость от соседа). Печатается перепись, поэтому «подобрано 0»
   # отличимо от «не смотрели».
   _rest_seen=0 _rest_taken=0
-  for _f in collections/*.postman_collection.json; do
-    [[ -e "$_f" ]] || continue
+  while IFS= read -r _stem; do
+    [[ -n "$_stem" ]] || continue
     _rest_seen=$((_rest_seen + 1))
-    _stem="$(basename "$_f" .postman_collection.json)"
     _was_run "$_stem" && continue
     _is_delegated "$_stem" && continue
     _rest_taken=$((_rest_taken + 1))
     echo "[remainder] ${_stem} — сгенерирована, но перечнем вызовов НЕ названа; гоню здесь"
     run_one "$_stem"
-  done
+  done < <(newman_present_stems "$NEWMAN_DIR")
   echo "[remainder] коллекций сгенерировано ${_rest_seen} · подобрано остатком ${_rest_taken}"
 fi
 
@@ -507,9 +541,7 @@ else
     stems+=("$s")
   done < <(
     {
-      for f in collections/*.postman_collection.json; do
-        [[ -e "$f" ]] && basename "$f" .postman_collection.json
-      done
+      newman_present_stems "$NEWMAN_DIR"
       for f in out/*.rc; do
         [[ -e "$f" ]] && basename "$f" .rc
       done

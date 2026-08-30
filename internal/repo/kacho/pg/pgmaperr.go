@@ -23,7 +23,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/PRO-Robotech/kacho/pkg/validate/nameform"
+	"github.com/PRO-Robotech/kacho/pkg/db/pgfault"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
@@ -85,7 +85,20 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// действие администратора одно и то же — назначить величину, — а какую
 		// именно, говорит текст производителя, который доезжает дословно.
 		return iamerr.Wrapf(iamerr.ErrQuotaNotProvisioned, "%s", pgErr.Message)
-	case "23000": // integrity_constraint_violation — поднято ЯВНО триггером схемы
+	}
+
+	// Классы целостности — через дом `pkg/db/pgfault`: одно правило корпуса, одно
+	// место решения. Тексты остаются ЗДЕСЬ: тон отказа — часть контракта этого
+	// сервиса («Account %s contains projects and cannot be deleted»), а не общего
+	// правила, и дом, взявший на себя текст, потребовал бы менять контракт ради
+	// централизации.
+	//
+	// Полоса учёта величин разобрана ВЫШЕ и по коду как есть: её коды производит
+	// триггер схемы этого сервиса, а не сервер на ограничении таблицы, и общего
+	// правила о них корпус не формулирует. Дом молчит о том, чего не знает.
+	f := pgfault.Classify(err)
+	switch f.Class {
+	case pgfault.IntegrityConstraint: // integrity_constraint_violation — поднято ЯВНО триггером схемы
 		// Единственный производитель в дереве — отложенный триггер
 		// `membership_carrying_rights_is_kept` (миграция 472002): членство,
 		// несущее живую выдачу в своём аккаунте, снять нельзя. Предикат:
@@ -97,11 +110,11 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// берётся НЕ из сообщения сервера — оно диагностика хранилища, — а из
 		// таблицы связей ниже, и незнакомая связь получает общий текст без утечки.
 		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "%s", integrityText(pgErr, kindHint, idHint))
-	case "23505": // unique_violation
+	case pgfault.Unique: // unique_violation
 		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "%s", uniqueText(pgErr, kindHint, idHint))
-	case "23503": // foreign_key_violation
+	case pgfault.ForeignKey: // foreign_key_violation
 		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "%s", fkText(pgErr, kindHint, idHint))
-	case "23514": // check_violation
+	case pgfault.Check: // check_violation
 		// Полоса ФОРМЫ ИМЕНИ отделена от прочих проверок, и отделена по вопросу
 		// «чьё это значение» (задача #718, здесь — #1279).
 		//
@@ -112,20 +125,19 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// пропустил негодное значение» — НАШ дефект. `INVALID_ARGUMENT` здесь
 		// обвинял бы вызывающего в чужой ошибке и не давал бы ему ничего, что
 		// можно исправить.
-		if nameform.IsConstraint(pgErr.TableName, pgErr.ConstraintName) {
+		if pgfault.CheckLaneOf(f) == pgfault.LaneServiceDefect {
 			slog.Error("name form backstop fired: service admitted a name it validates itself",
-				"sqlstate", pgErr.Code, "table", pgErr.TableName,
-				"constraint", pgErr.ConstraintName, "kind", kindHint, "id", idHint)
+				append([]any{"kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
 			return iamerr.ErrInternal
 		}
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", checkText(pgErr))
-	case "23502": // not_null_violation
+	case pgfault.NotNull: // not_null_violation
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", notNullText(pgErr))
-	case "23P01": // exclusion_violation
+	case pgfault.Exclusion: // exclusion_violation
 		// No EXCLUDE constraints in kacho_iam today; map generically WITHOUT
 		// pgErr.Message (which would leak the constraint/range to the client).
 		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "resource conflicts with an existing reservation")
-	case "40001": // serialization_failure
+	case pgfault.SerializationConflict: // serialization_failure
 		// A transient write-write serialization conflict — the transaction can
 		// succeed on retry. gRPC ABORTED is the idiomatic "retry the transaction"
 		// code (FAILED_PRECONDITION would tell a well-behaved client NOT to retry,
