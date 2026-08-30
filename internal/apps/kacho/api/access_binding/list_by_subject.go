@@ -14,6 +14,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
@@ -51,6 +52,29 @@ func (u *ListBySubjectUseCase) WithRelationQueries(q clients.RelationQueries) *L
 }
 
 func (u *ListBySubjectUseCase) Execute(ctx context.Context, subjectType domain.SubjectType, subjectID domain.SubjectID, f repoab.PageFilter) ([]domain.AccessBinding, string, error) {
+	// Формат страницы — ПЕРВЫМ стейтментом и в ТОЙ ЖЕ функции, которая ниже
+	// замыкается допуском (#1437). Вопрос «правильно ли составлен запрос» имеет
+	// ОДИН ответ для всех вызывающих, поэтому отвечать на него надо раньше, чем
+	// на вопрос «что этому вызывающему видно»: иначе один и тот же мусорный
+	// курсор получает `InvalidArgument` тому, у кого полоса есть, и
+	// `PermissionDenied` тому, у кого её нет.
+	//
+	// Проверка стоит ЗДЕСЬ, а не только в хендлере, потому что требование
+	// локальное: страж у одного вызывающего не защищает второго вызывающего той
+	// же функции, а «репозиторий провалидирует» верно ровно для того пути,
+	// который до репозитория доходит, — замыкание до него не доходит by
+	// construction. Соседний глагол того же чтения (ListSubjectPrivileges) нёс
+	// эту проверку, а здесь её не было: полосы одного механизма обязаны
+	// сверяться между собой (`architecture.md`).
+	//
+	// Разбор — ТОТ ЖЕ, что исполняется на пути чтения (`pagetoken` внутри
+	// `shared.ValidatePagination`): второй кодек курсора разошёлся бы с первым
+	// молча и ровно там, где расхождение не видно — на валидном входе оба
+	// отвечают «валидно».
+	if err := shared.ValidatePagination(f.PageToken, f.PageSize); err != nil {
+		return nil, "", err
+	}
+
 	// Допуск — ЕДИНЫМ предикатом, общим с ListSubjectPrivileges
 	// (subject_read_authority.go). Прежде здесь стояло СВОЁ условие — «вызывающий
 	// обязан БЫТЬ субъектом», — и оно расходилось с соседним глаголом: тот же

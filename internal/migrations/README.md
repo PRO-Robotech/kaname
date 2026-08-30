@@ -25,7 +25,7 @@ ls services/iam/internal/migrations/*.sql | wc -l
   + default-roles seed (12 system-ролей с детерминированными id);
 - governance расширения (`access_bindings_jit_eligibility`, `_jit_pending`,
   `break_glass_*`);
-- federation / identity (`federation_*`, `scim_*`, `dpop_replay_jti`);
+- federation / identity (`federation_*`, `scim_*`);
 - **чеканку своих токенов** — ключница подписных ключей
   (`token_signing_keys`: `kid`, алгоритм, состояние, публичная половина,
   ОБЁРНУТАЯ приватная половина, срок; «подписывает ровно один» держит частичный

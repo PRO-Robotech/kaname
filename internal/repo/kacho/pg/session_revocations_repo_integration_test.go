@@ -151,36 +151,3 @@ func TestSessionRevocations_Hook_ConcurrentRevoke_NoRace(t *testing.T) {
 		`SELECT count(*) FROM session_revocations WHERE token_jti = $1`, jti).Scan(&count))
 	assert.Equal(t, 1, count)
 }
-
-func TestDPoPReplay_Hook_PostgresPersistence(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	// This test verifies dpop_replay_jti migration applies and PK enforces.
-	ctx := context.Background()
-	dsn := setupTestDB(t)
-	pool, err := pgxpool.New(ctx, dsn)
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-
-	// First INSERT succeeds.
-	jti := "dpop-" + ids.NewID(domain.PrefixUser)
-	_, err = pool.Exec(ctx,
-		`INSERT INTO dpop_replay_jti (jti, seen_at, htm, htu, jkt) VALUES ($1, now(), 'POST', 'https://x', 'jkt-x')`,
-		jti)
-	require.NoError(t, err)
-
-	// Second INSERT (replay) fails with SQLSTATE 23505.
-	_, err = pool.Exec(ctx,
-		`INSERT INTO dpop_replay_jti (jti, seen_at, htm, htu, jkt) VALUES ($1, now(), 'POST', 'https://x', 'jkt-x')`,
-		jti)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate key")
-
-	// DELETE cleanup на старые rows.
-	_, err = pool.Exec(ctx, `UPDATE dpop_replay_jti SET seen_at = now() - INTERVAL '10 minutes' WHERE jti = $1`, jti)
-	require.NoError(t, err)
-	tag, err := pool.Exec(ctx, `DELETE FROM dpop_replay_jti WHERE seen_at <= now() - INTERVAL '5 minutes'`)
-	require.NoError(t, err)
-	assert.GreaterOrEqual(t, tag.RowsAffected(), int64(1))
-}
