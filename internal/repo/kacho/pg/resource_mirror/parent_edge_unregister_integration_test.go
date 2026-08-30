@@ -39,8 +39,8 @@ import (
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/resource_mirror"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 // TestParentEdges_UnregisterClearsTheChain — снятие регистрации снимает и цепь.
@@ -49,7 +49,7 @@ func TestParentEdges_UnregisterClearsTheChain(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
@@ -76,7 +76,7 @@ func TestParentEdges_StaleUnregisterKeepsTheChain(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 

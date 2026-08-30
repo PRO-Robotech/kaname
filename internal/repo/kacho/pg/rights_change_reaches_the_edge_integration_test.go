@@ -62,6 +62,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 // verdictCache — наблюдаемое потребителя: держит ли он ещё закешированный
@@ -90,7 +91,7 @@ func TestRightsChangeReachesTheEdgeAndTheVerdictIsRecomputed(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, kachopg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	// Закрытие ограничено сроком: отложенное ждёт соединение, которого проба,
 	// упавшая внутри открытой транзакции, не вернёт никогда, — и уносит вердикт

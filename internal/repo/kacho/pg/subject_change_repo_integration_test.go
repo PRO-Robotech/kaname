@@ -21,6 +21,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 // TestSubjectChangeRepo_PollSubjectChanges verifies:
@@ -41,7 +42,7 @@ func TestSubjectChangeRepo_PollSubjectChanges(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	dsn := kachopg.NewTestPostgres(t)
+	dsn := iampgtest.NewTestPostgres(t)
 
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
@@ -120,7 +121,7 @@ func TestSubjectChangeRepo_PollCarriesTheSubjectType(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	dsn := kachopg.NewTestPostgres(t)
+	dsn := iampgtest.NewTestPostgres(t)
 
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
@@ -199,7 +200,7 @@ func TestSubjectChangeRepo_ZeroHeadMeansAnEmptyJournal(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	dsn := kachopg.NewTestPostgres(t)
+	dsn := iampgtest.NewTestPostgres(t)
 
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)

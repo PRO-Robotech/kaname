@@ -15,6 +15,7 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"github.com/PRO-Robotech/kacho/pkg/dbready"
+	"github.com/PRO-Robotech/kacho/pkg/migratorcli"
 )
 
 // Dialect — PostgreSQL-миграции (единственный поддерживаемый диалект;
@@ -49,7 +50,7 @@ func (p *Dialect) Up(ctx context.Context, dsn string, fsys fs.FS, dir string, ta
 	if target == "" {
 		return goose.UpContext(ctx, db, dir, goose.WithAllowMissing())
 	}
-	version, perr := parseTargetVersion(target)
+	version, perr := migratorcli.ParseTargetVersion(target)
 	if perr != nil {
 		return perr
 	}
@@ -69,7 +70,7 @@ func (p *Dialect) Down(ctx context.Context, dsn string, fsys fs.FS, dir string, 
 	if target == "" {
 		return goose.DownContext(ctx, db, dir)
 	}
-	version, perr := parseTargetVersion(target)
+	version, perr := migratorcli.ParseTargetVersion(target)
 	if perr != nil {
 		return perr
 	}

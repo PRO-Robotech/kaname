@@ -53,7 +53,11 @@ import (
 const (
 	defaultDialect       = "postgres"
 	defaultMigrationsDir = "."
-	envDSN               = "KACHO_MIGRATOR_DSN"
+	// envDSN — имя переменной окружения второго приоритета. НЕ литерал: оно же
+	// печатается в тексте отказа предусловий через общий пакет, и два места об
+	// одном имени разошлись бы молча — оператор прочитал бы в подсказке одно, а
+	// сервис читал бы другое (#1383).
+	envDSN = migratorcli.EnvDSN
 )
 
 // rootOptions — shared параметры всех subcommand'ов, накапливаются persistent-флагами.

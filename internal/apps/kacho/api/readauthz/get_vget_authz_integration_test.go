@@ -61,6 +61,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 // readAuthzFixture — живой репозиторий и живая дверь решения над засеянной
@@ -96,7 +97,7 @@ func newReadAuthzFixture(t *testing.T) *readAuthzFixture {
 	}
 	ctx := context.Background()
 
-	pool, err := coredb.NewPool(ctx, kachopg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	repo := kachopg.New(pool, nil)

@@ -27,8 +27,8 @@ import (
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 func TestFGAOutboxEmitter_EmitWriteTx_AppendsRowsAtomically(t *testing.T) {
@@ -36,7 +36,7 @@ func TestFGAOutboxEmitter_EmitWriteTx_AppendsRowsAtomically(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	dsn := pg.NewTestPostgres(t)
+	dsn := iampgtest.NewTestPostgres(t)
 
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
@@ -101,7 +101,7 @@ func TestFGAOutboxEmitter_EmitDeleteTx_AppendsRevokeRows(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	dsn := pg.NewTestPostgres(t)
+	dsn := iampgtest.NewTestPostgres(t)
 
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestFGAOutboxEmitter_RollbackRemovesRows(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	dsn := pg.NewTestPostgres(t)
+	dsn := iampgtest.NewTestPostgres(t)
 
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
@@ -163,7 +163,7 @@ func TestFGAOutboxEmitter_EmitWriteTx_EmptyTuplesIsNoop(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	dsn := pg.NewTestPostgres(t)
+	dsn := iampgtest.NewTestPostgres(t)
 
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestFGAOutboxEmitter_SetInsertPreservesPerKeyOrder(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 

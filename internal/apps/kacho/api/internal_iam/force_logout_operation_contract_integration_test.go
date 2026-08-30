@@ -37,6 +37,7 @@ import (
 	internaliam "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 const forceLogoutAdminID = "usr0000000000000admin"
@@ -50,7 +51,7 @@ func (allowAdmin) Check(_ context.Context, _, _, _ string) (bool, error) { retur
 func newForceLogoutHandler(t *testing.T) (*internaliam.Handler, *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, kachopg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
@@ -200,7 +201,7 @@ func TestForceLogout_UnwiredOperationRepo_FailsClosed(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, kachopg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	uid := seedForceLogoutUser(t, ctx, pool)

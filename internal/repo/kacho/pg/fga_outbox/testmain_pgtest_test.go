@@ -14,7 +14,7 @@ import (
 
 // TestMain hands this package one Postgres instead of one per test.
 //
-// pg.NewTestPostgres — which every test here calls — used to boot a container and
+// iampgtest.NewTestPostgres — which every test here calls — used to boot a container and
 // replay the whole iam migration chain per call. It now hands back a database on
 // the one container this test BINARY owns, and the container belongs to the
 // binary, so the wiring has to live in the package that owns the binary.

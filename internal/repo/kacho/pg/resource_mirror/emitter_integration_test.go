@@ -27,8 +27,8 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/resource_mirror"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 func TestResourceMirror_UpsertTx_InsertsRowAtomically(t *testing.T) {
@@ -36,7 +36,7 @@ func TestResourceMirror_UpsertTx_InsertsRowAtomically(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -65,7 +65,7 @@ func TestResourceMirror_UpsertTx_EmptyLabelsLandsAsObject(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -91,7 +91,7 @@ func TestResourceMirror_UpsertTx_RollbackDiscardsRow(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -111,7 +111,7 @@ func TestResourceMirror_UpsertTx_RepeatDoesNotDuplicate(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -135,7 +135,7 @@ func TestResourceMirror_UpsertTx_OverwritesLabelsLastWrite(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -169,7 +169,7 @@ func TestResourceMirror_UpsertTx_StaleSourceVersionIsNoop(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -201,7 +201,7 @@ func TestResourceMirror_UpsertTx_SameSourceVersionIsIdempotentNoop(t *testing.T)
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -227,7 +227,7 @@ func TestResourceMirror_UpsertTx_NewerSourceVersionApplies(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -257,7 +257,7 @@ func TestResourceMirror_DeleteTx_StaleTombstoneDoesNotWipeFreshRow(t *testing.T)
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -283,7 +283,7 @@ func TestResourceMirror_DeleteTx_FreshTombstoneRemovesRow(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -304,7 +304,7 @@ func TestResourceMirror_DeleteTx_RemovesRow(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -326,7 +326,7 @@ func TestResourceMirror_DeleteTx_AbsentIsNoop(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -401,7 +401,7 @@ func TestResourceMirror_UpsertTx_ReportsWhetherRowChanged(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -451,7 +451,7 @@ func TestResourceMirror_UpsertTx_ReportsWhetherProjectionWasReplaced(t *testing.
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 

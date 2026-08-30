@@ -33,8 +33,8 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/resource_mirror"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 // readParentChain — цепь предков объекта в порядке возрастания глубины.
@@ -70,7 +70,7 @@ func TestParentEdges_ReRegistrationWithChainDoesNotEmptyTheSet(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -108,7 +108,7 @@ func TestParentEdges_ReRegistrationWithoutChainEmptiesTheSet(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -136,7 +136,7 @@ func TestParentEdges_MovedObjectLosesTheOldAncestor(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 

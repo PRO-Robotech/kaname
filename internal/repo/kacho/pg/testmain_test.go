@@ -33,7 +33,7 @@ import (
 // This package used to carry its own hand-written copy of that machinery, which
 // left it with TWO mechanisms: the shared container for setupTestDB, and four
 // helpers that each still booted a container of their own (startPostgresUpTo,
-// setupKac127TestDB, setupRedactorPG, and pg.NewTestPostgres). They now all take
+// setupKac127TestDB, setupRedactorPG, and iampgtest.NewTestPostgres). They now all take
 // their database from internal/pgtest, so there is one mechanism here.
 //
 // # The enforcement half (unchanged in intent)

@@ -13,7 +13,7 @@ import (
 
 // TestMain hands this package ONE Postgres instead of one per test.
 //
-// The tests here reach the database through kachopg.NewTestPostgres, which now
+// The tests here reach the database through iampgtest.NewTestPostgres, which now
 // asks pgtest for a database on the container this binary owns. The container
 // belongs to the test BINARY, and each package is its own binary, so the wiring
 // has to be repeated per package — see internal/pgtest for why a clone of a

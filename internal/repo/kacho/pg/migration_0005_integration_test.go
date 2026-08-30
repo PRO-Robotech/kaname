@@ -19,7 +19,7 @@
 //
 // The migration MUST be at `internal/migrations/0005_rbac_v2_grammar_and_scope.sql`
 // and registered in the embed.FS. Helper: a tiny goose-driven up-to-N applier
-// inline (testhelpers.go only ships up-to-head).
+// inline (iampgtest only ships up-to-head).
 package pg_test
 
 import (

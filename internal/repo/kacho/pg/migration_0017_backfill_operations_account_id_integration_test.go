@@ -45,7 +45,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
-	pg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 // applyBackfill0017 re-runs the exact Up body of
@@ -131,7 +131,7 @@ func TestMigration0017_BackfillsProjectAccountOpsByResourceID(t *testing.T) {
 		t.Skip("integration: requires Postgres container")
 	}
 	ctx := context.Background()
-	dsn := pg.NewTestPostgres(t)
+	dsn := iampgtest.NewTestPostgres(t)
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
 	defer pool.Close()
@@ -171,7 +171,7 @@ func TestMigration0017_BackfillsGroupServiceAccountUserOps(t *testing.T) {
 		t.Skip("integration: requires Postgres container")
 	}
 	ctx := context.Background()
-	dsn := pg.NewTestPostgres(t)
+	dsn := iampgtest.NewTestPostgres(t)
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
 	defer pool.Close()
@@ -218,7 +218,7 @@ func TestMigration0017_LeavesCategoryIIAndUnknownResourceOpsNull(t *testing.T) {
 		t.Skip("integration: requires Postgres container")
 	}
 	ctx := context.Background()
-	dsn := pg.NewTestPostgres(t)
+	dsn := iampgtest.NewTestPostgres(t)
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
 	defer pool.Close()
@@ -253,7 +253,7 @@ func TestMigration0017_DoesNotOverwriteAlreadyStampedAccountID(t *testing.T) {
 		t.Skip("integration: requires Postgres container")
 	}
 	ctx := context.Background()
-	dsn := pg.NewTestPostgres(t)
+	dsn := iampgtest.NewTestPostgres(t)
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
 	defer pool.Close()

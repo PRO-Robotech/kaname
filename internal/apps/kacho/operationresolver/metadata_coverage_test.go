@@ -34,6 +34,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kacho/internal/treecorpus"
 )
 
 // resolverFile — файл, чей переключатель и есть предмет проверки.
@@ -175,7 +177,7 @@ func TestEveryOperationMetadataIsResolvedOrPinned(t *testing.T) {
 // ветку под то, чего не существует.
 func declaredOperationMetadata(t *testing.T, root string) ([]string, []string) {
 	t.Helper()
-	files, err := filepath.Glob(filepath.Join(root, protoGlob))
+	files, err := treecorpus.Glob(filepath.Join(root, protoGlob))
 	if err != nil {
 		t.Fatalf("обход %s: %v", protoGlob, err)
 	}

@@ -35,6 +35,7 @@ import (
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 // svaID derives the deterministic ServiceAccount id for a module svc-name
@@ -91,7 +92,7 @@ func TestSeedModuleSA_B01_ModuleIdentitiesCreated(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -134,7 +135,7 @@ func TestSeedModuleSA_B02_ComputeRoleRetiredWriteCapabilityKept(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -150,7 +151,7 @@ func TestSeedModuleSA_B03_VpcRoleRetiredWriteCapabilityKept(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -166,7 +167,7 @@ func TestSeedModuleSA_B04_NlbRoleRetiredIdentityAndWriteKept(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -222,7 +223,7 @@ func TestSeedModuleSA_B05_OperatorFullyRetired(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 
@@ -265,7 +266,7 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 		t.Skip("skipping integration test (requires Docker)")
 	}
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, pg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
 

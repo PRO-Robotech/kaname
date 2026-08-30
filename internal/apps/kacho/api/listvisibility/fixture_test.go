@@ -27,7 +27,7 @@
 //     выводами модели (`owner`, `super_admin`, членство в группе), — а приёмка
 //     называет их всех путями видимости, которые сужение обязано знать.
 //
-// Поэтому: `kachopg.NewTestPostgres` (контейнер, промигрирован) плюс ТА ЖЕ дверь
+// Поэтому: `iampgtest.NewTestPostgres` (контейнер, промигрирован) плюс ТА ЖЕ дверь
 // решения, которую композиционный корень провязывает стражам в проде —
 // `authzcascade.Wrap(relverdict.NewAsker(pool))` поверх той же базы.
 //
@@ -68,6 +68,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 // probePageSize — the page size every threshold probe asks for. It is the
@@ -107,7 +108,7 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	ctx := context.Background()
 
-	pool, err := coredb.NewPool(ctx, kachopg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	// Закрытие С ПРЕДЕЛОМ, а не `t.Cleanup(pool.Close)`: отложенное закрытие ждёт
 	// соединение, которое проба, упавшая внутри открытой транзакции, не вернёт

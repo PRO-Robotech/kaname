@@ -37,6 +37,7 @@ import (
 
 	internaliam "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
 )
 
 // newRegisterUC builds the RegisterResource use-case backed by a real pool's
@@ -44,7 +45,7 @@ import (
 func newRegisterUC(t *testing.T) (*internaliam.RegisterResourceUseCase, *outboxProbe) {
 	t.Helper()
 	ctx := context.Background()
-	pool, err := coredb.NewPool(ctx, kachopg.NewTestPostgres(t))
+	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	uc := internaliam.NewRegisterResourceUseCase(

@@ -57,6 +57,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kacho/internal/treecorpus"
 	"github.com/stretchr/testify/require"
 )
 
@@ -159,7 +160,7 @@ func modelMemberKinds(dsl string) []string {
 // могла быть заменена, и судить первую значило бы судить отменённое.
 func groupMemberKindsFromSchema(t *testing.T, root string) ([]string, string) {
 	t.Helper()
-	files, err := filepath.Glob(filepath.Join(root, migrationsGlob))
+	files, err := treecorpus.Glob(filepath.Join(root, migrationsGlob))
 	require.NoError(t, err)
 	require.NotEmptyf(t, files, "миграций не найдено по %s — гейт беспредметен", migrationsGlob)
 	sort.Strings(files)
