@@ -294,6 +294,11 @@ type abFakeRepo struct {
 	// used by the viewer ∪ v_list union-floor unit tests. Also the source rows for
 	// the unified List fake.
 	lbsRows []domain.AccessBinding
+	// lbsubRows — фикстурные строки чтения ListBySubject. Засеваются
+	// seedABListBySubject. До #1352 это чтение отдавало пустоту всегда, и дублёр
+	// отвечал тем же — на пустом ответе сужение утверждать нечем: «чужого нет»
+	// зеленело бы на полностью сломанной полосе.
+	lbsubRows []domain.AccessBinding
 	// lastListFilter — the ListFilter the unified List last received (F11 tests
 	// assert the use-case's VisibleIDs push-down + predicate mapping).
 	lastListFilter ab_repo.ListFilter
@@ -452,6 +457,14 @@ func (r *abFakeRepo) seedMaterializedAt(id domain.AccessBindingID, at time.Time)
 
 // seedABListByAccount — test helper. Replaces the fixture rows returned by
 // the fake fakeABRdr.ListByAccount.
+// seedABListBySubject replaces the fixture rows returned by the fake
+// ListBySubject.
+func seedABListBySubject(r *abFakeRepo, rows []domain.AccessBinding) {
+	r.mu.Lock()
+	r.lbsubRows = rows
+	r.mu.Unlock()
+}
+
 func (r *abFakeRepo) seedABListByAccount(rows []domain.AccessBinding) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -725,7 +738,14 @@ func (a *fakeABRdr) ListByScope(_ context.Context, resourceType domain.ResourceT
 	return out, "", nil
 }
 func (a *fakeABRdr) ListBySubject(_ context.Context, _ domain.SubjectType, _ domain.SubjectID, _ ab_repo.PageFilter) ([]domain.AccessBinding, string, error) {
-	return nil, "", nil
+	a.repo.mu.Lock()
+	defer a.repo.mu.Unlock()
+	if a.repo.lbsubRows == nil {
+		return nil, "", nil
+	}
+	out := make([]domain.AccessBinding, len(a.repo.lbsubRows))
+	copy(out, a.repo.lbsubRows)
+	return out, "", nil
 }
 func (a *fakeABRdr) ListByAccount(_ context.Context, _ domain.AccountID, _ ab_repo.AccountPageFilter) ([]domain.AccessBinding, string, error) {
 	a.repo.mu.Lock()

@@ -310,6 +310,17 @@ else
   # run here, else the gate reports `iam-permission-catalog(no-report)` as a
   # phantom failure.
   run_one "iam-permission-catalog"
+  # iam-membership-read — чтение принадлежности человека аккаунту на
+  # аккаунт-скоупных путях (IAM-ID-2, стадия S1). Три полосы отрицаний
+  # утверждаются СРАВНЕНИЕМ ТЕЛ, а не совпадением кодов: чужой аккаунт против
+  # несуществующего, три положения человека против пустого перечня, чужое
+  # членство против отсутствующего.
+  #
+  # Прогон объявляется ЗДЕСЬ, потому что шаг сводного вердикта разбирает КАЖДЫЙ
+  # collections/*.json: без этой строки набор исполнялся бы нулём коллекций, а
+  # гейт назвал бы `iam-membership-read(no-report)` — и это читалось бы как
+  # призрачный отказ, а не как «набор не запускали».
+  run_one "iam-membership-read"
   # iam-token-facade-conformance — #59 Phase C: iam is the SINGLE FACADE to the
   # token-signing provider (security.md §«Production-mode обязателен ВЕЗДЕ» п.4).
   # IBT-04/05/06/10 (the acceptance's e2e-conformance scenarios) + IBT-12/13/14/15

@@ -172,7 +172,12 @@ func TestListSubjectPrivileges_1_3_01_OwnerSeesMemberEnriched(t *testing.T) {
 		spPriv("acb00000000000bind01", "rol_editor", "editor", "project", "prj00000000000projX1", domain.ScopeProject),
 		spPriv("acb00000000000bind02", "rol_viewer", "viewer", "account", spAccA, domain.ScopeAccount),
 	})
-	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
+	// Модель прав: владелец acc-A держит `v_get` на обеих выдачах — он выводится
+	// у него через `super_admin from account` / `... from project`. Дублёр не
+	// выводит, поэтому предпосылка сужения названа здесь явно (#1354).
+	uc := NewListSubjectPrivilegesUseCase(repo).
+		WithRelationStore(&denyingFGA{}, nil).
+		WithRelationQueries(spVisibleTo(spOwnerID, "acb00000000000bind01", "acb00000000000bind02"))
 
 	ctx := userCtxAB(spOwnerID) // owner of acc-A (home account of usr-MEMBER)
 	out, next, err := uc.Execute(ctx, domain.SubjectTypeUser, domain.SubjectID(spMemberID), repoab.PageFilter{})
@@ -197,8 +202,15 @@ func TestListSubjectPrivileges_1_3_07_AccountAdminViaFGA_Allowed(t *testing.T) {
 		spPriv("acb00000000000bind01", "rol_v", "viewer", "account", spAccA, domain.ScopeAccount),
 	})
 	// usr-ADMIN is NOT the owner of acc-A, but holds FGA admin on account:acc-A.
-	fga := newRecordingFGA() // Check → true
-	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(fga, nil)
+	//
+	// Отношение выдаётся ТОЧЕЧНО, а не дублёром, отвечающим «да» на всё: такой
+	// дублёр делает вызывающего ещё и администратором облака, и проба, названная
+	// полосой делегированного распорядителя, молча проверяла бы полосу надзора —
+	// оставаясь зелёной при полностью сломанной первой (#1354).
+	fga := &scopedFGA{allow: map[string]bool{"admin|account:" + spAccA: true}}
+	uc := NewListSubjectPrivilegesUseCase(repo).
+		WithRelationStore(fga, nil).
+		WithRelationQueries(spVisibleTo(spAdminID, "acb00000000000bind01"))
 
 	ctx := userCtxAB(spAdminID)
 	out, _, err := uc.Execute(ctx, domain.SubjectTypeUser, domain.SubjectID(spMemberID), repoab.PageFilter{})
@@ -216,7 +228,9 @@ func TestListSubjectPrivileges_1_3_07a_ServiceAccountSubject_OwnerAllowed(t *tes
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
 		spPriv("acb00000000000bind01", "rol_editor", "editor", "project", "prj00000000000projX1", domain.ScopeProject),
 	})
-	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
+	uc := NewListSubjectPrivilegesUseCase(repo).
+		WithRelationStore(&denyingFGA{}, nil).
+		WithRelationQueries(spVisibleTo(spOwnerID, "acb00000000000bind01"))
 
 	ctx := userCtxAB(spOwnerID) // owner of acc-A, home account of sva-BOT
 	out, _, err := uc.Execute(ctx, domain.SubjectTypeServiceAccount, domain.SubjectID(spSAID), repoab.PageFilter{})
@@ -252,7 +266,12 @@ func TestListSubjectPrivileges_1_3_09_ZeroBindings_EmptyList(t *testing.T) {
 	repo := spRepo()
 	// seed empty.
 	repo.seedSubjectPrivileges(nil)
-	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
+	// Порт сужения провязан и НИЧЕГО не разрешает: пустой ответ здесь — свойство
+	// пустого перечня, а не сужения. Непровязанный порт — неполадка посадки, и
+	// она отказывает независимо от того, сколько строк на странице.
+	uc := NewListSubjectPrivilegesUseCase(repo).
+		WithRelationStore(&denyingFGA{}, nil).
+		WithRelationQueries(newABQueriesStub())
 
 	ctx := userCtxAB(spOwnerID)
 	out, next, err := uc.Execute(ctx, domain.SubjectTypeUser, domain.SubjectID(spMemberID), repoab.PageFilter{})
@@ -288,7 +307,9 @@ func TestListSubjectPrivileges_1_3_13_DanglingRole_EmptyName(t *testing.T) {
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
 		spPriv("acb00000000000bind01", "rol_gone", "", "account", spAccA, domain.ScopeAccount),
 	})
-	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
+	uc := NewListSubjectPrivilegesUseCase(repo).
+		WithRelationStore(&denyingFGA{}, nil).
+		WithRelationQueries(spVisibleTo(spOwnerID, "acb00000000000bind01"))
 
 	ctx := userCtxAB(spOwnerID)
 	out, _, err := uc.Execute(ctx, domain.SubjectTypeUser, domain.SubjectID(spMemberID), repoab.PageFilter{})
@@ -310,7 +331,9 @@ func TestListSubjectPrivileges_1_3b_01_OwnerSeesGroupEnriched(t *testing.T) {
 		spPriv("acb00000000000bind01", "rol_editor", "editor", "project", "prj00000000000projX1", domain.ScopeProject),
 		spPriv("acb00000000000bind02", "rol_viewer", "viewer", "account", spAccA, domain.ScopeAccount),
 	})
-	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
+	uc := NewListSubjectPrivilegesUseCase(repo).
+		WithRelationStore(&denyingFGA{}, nil).
+		WithRelationQueries(spVisibleTo(spOwnerID, "acb00000000000bind01", "acb00000000000bind02"))
 
 	ctx := userCtxAB(spOwnerID) // owner of acc-A (home account of grp-1)
 	out, next, err := uc.Execute(ctx, domain.SubjectTypeGroup, domain.SubjectID(spGroupID), repoab.PageFilter{})
@@ -334,8 +357,12 @@ func TestListSubjectPrivileges_1_3b_02_AccountAdminViaFGA_Allowed(t *testing.T) 
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
 		spPriv("acb00000000000bind01", "rol_v", "viewer", "account", spAccA, domain.ScopeAccount),
 	})
-	fga := newRecordingFGA() // Check(admin on account:acc-A) → true
-	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(fga, nil)
+	// Точечное отношение, а не «да» на всё: см. 1_3_07 — иначе проба съезжает на
+	// полосу надзора облака и о делегированном распорядителе молчит.
+	fga := &scopedFGA{allow: map[string]bool{"admin|account:" + spAccA: true}}
+	uc := NewListSubjectPrivilegesUseCase(repo).
+		WithRelationStore(fga, nil).
+		WithRelationQueries(spVisibleTo(spAdminID, "acb00000000000bind01"))
 
 	ctx := userCtxAB(spAdminID) // not owner of acc-A, holds FGA admin on it
 	out, _, err := uc.Execute(ctx, domain.SubjectTypeGroup, domain.SubjectID(spGroupID), repoab.PageFilter{})

@@ -84,8 +84,10 @@ doubles as the access-gone assertion). Group subjects are created fresh per run 
 id) → no pre-clean needed.
 
 Discovery deliberately uses `:listByScope` on the account, NOT `:listBySubject`: the
-latter is a strict self-list by contract (no administrative override), so for the
-admin caller it refused every time and the pre-clean never ran at all.
+latter WAS a strict self-list by contract, so for the admin caller it refused every time
+and the pre-clean never ran at all. Since #1352 that read admits the account administrator
+as well (narrowed to that account); the choice stands anyway — the pre-clean wants every
+subject in the account scope, and that is the question `:listByScope` answers.
 
 Fixture deps (crud-fixture/setup.sh + authz-fixtures): jwtAccountAdminA (owner/grant-authority
 on accountAId), accountAId, projectA1Id (an account-A project), ceremonyUserId/jwtHumanCeremony
@@ -238,12 +240,16 @@ def pre_clean(tag, subject_type, subject_id_tmpl, grant_step_name):
                 #
                 # Прежде здесь стоял `:listBySubject` для ЧУЖОГО субъекта. Это не
                 # «известный продуктовый предел», как утверждал прежний текст, и не
-                # kacho-iam#276 (тот про другое). Это ОБЪЯВЛЕННЫЙ контракт метода:
+                # kacho-iam#276 (тот про другое). Это был ОБЪЯВЛЕННЫЙ контракт метода:
                 # строгий список только про себя, административного обхода нет. Значит
                 # для админа исход был ровно один — отказ, — предочистка не выполнялась
                 # НИКОГДА, а `oneOf([200, 403])` это скрывало, принимая недостижимый
                 # успех. Рабочая замена уже была в дереве (набор by-label visibility):
                 # перечисление по ОБЛАСТИ аккаунта + фильтр по субъекту.
+                #
+                # Контракт с тех пор изменён (#1352): чтение допускает и распорядителя
+                # домашнего аккаунта субъекта, сужая ответ границами этого аккаунта.
+                # Замена от этого не устарела — предочистке нужны ВСЕ субъекты области.
                 *assert_status(200),
                 f"pm.environment.unset('{dup_var}');",
                 "const arr = (pm.response.json() || {}).accessBindings || [];",

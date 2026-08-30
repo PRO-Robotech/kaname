@@ -163,6 +163,7 @@ var Profile = listfiltergate.Profile{
 
 	ProtoFiles: []string{
 		"kacho/cloud/iam/v1/internal_cluster_service.proto",
+		"kacho/cloud/iam/v1/membership_service.proto",
 		"kacho/cloud/iam/v1/sa_key_service.proto",
 		"kacho/cloud/iam/v1/user_token_service.proto",
 	},
@@ -200,10 +201,25 @@ var Profile = listfiltergate.Profile{
 		// уже сделано формой запроса, и это сильнее.
 		"identityquota.List": subjectScoped,
 
+		// ListSubjectPrivileges допускает по ДОМАШНЕМУ аккаунту субъекта, а строки
+		// ответа называют области выдач — в том числе в чужих аккаунтах. Допуск
+		// поэтому полнотой защиты не является, и объявлен здесь именно РЯДНЫЙ
+		// фильтр: полоса распорядителя аккаунта проходит пообъектный вопрос, полосы
+		// собственного чтения и надзора облака его не требуют (#1354).
+		"access_binding.ListSubjectPrivileges": rowFilter,
+
+		// ListBySubject отвечает на ТОТ ЖЕ вопрос, что и ListSubjectPrivileges, и
+		// с #1352 решает допуск ТЕМ ЖЕ предикатом. Раньше здесь стоял охраняющий
+		// объект: вызывающий обязан был БЫТЬ субъектом, поэтому сужать было
+		// нечего. Теперь чтение допускает и распорядителя аккаунта, чьи строки
+		// называют области выдач — в том числе в чужих аккаунтах, — и полнотой
+		// защиты допуск быть перестал. Объявлен РЯДНЫЙ фильтр: полоса
+		// распорядителя проходит пообъектный вопрос, полосы собственного чтения и
+		// надзора облака его не требуют.
+		"access_binding.ListBySubject": rowFilter,
+
 		// ---- one containing object, checked before the page is read ----
-		"access_binding.ListBySubject":         subjectGate("requireGroupMembership"),
-		"access_binding.ListSubjectPrivileges": subjectGate("IsSelf"),
-		"access_binding.ListAssignableRoles":   subjectGate("requireGrantAuthority"),
+		"access_binding.ListAssignableRoles": subjectGate("requireGrantAuthority"),
 		// ListAllOperations and ListIamOperations both gate first and then call the
 		// UNSCOPED operations repo — the one carrying an explicit IDOR warning — so
 		// the gate preceding the read is the whole of their protection, and a
@@ -252,6 +268,20 @@ var Profile = listfiltergate.Profile{
 		// declaration names the field and the gate verifies it in the proto.
 		"sa_keys.List":     edgeGate("sa_key_service.proto", "service_account_id"),
 		"user_tokens.List": edgeGate("user_token_service.proto", "user_id"),
+		// membership.List сужает свой SQL аккаунтом из ПУТИ, и никакая проверка
+		// внутри сервиса вызывающего против этого аккаунта не сверяет — это
+		// решение, а не пропуск: у запроса есть ОДИН объект, про который можно
+		// задать ОДИН вопрос, и задаёт его край. Пообъектный фильтр здесь
+		// утверждал бы сужение, которому нечего сужать: строки уже отобраны тем
+		// же аккаунтом, а право на него проверено ДО вызова.
+		//
+		// Поэтому объявление называет ПОЛЕ, и гейт сверяет по контракту, что
+		// на нём действительно стоят `required_relation` и `scope_extractor`.
+		// Отношение — `viewer` @ `account`; подстановочным кортежем оно НЕ
+		// выполнимо (тип объявляет `[user, service_account, group#member] or
+		// editor`, члена `user:*` в нём нет), поэтому оно сужает, а не означает
+		// «аутентифицирован».
+		"membership.List": edgeGate("membership_service.proto", "account_id"),
 
 		// ---- reference data every authenticated caller may read ----
 		"permission_catalog.ListPermissionCatalog": {

@@ -1242,6 +1242,26 @@
     "required_acr_min": "2"
   },
   {
+    "fqn": "kacho.cloud.iam.v1.MembershipService/Get",
+    "permission": "iam.memberships.get",
+    "required_relation": "viewer",
+    "scope_extractor": {
+      "object_type": "account",
+      "from_request_field": "account_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.MembershipService/List",
+    "permission": "iam.memberships.list",
+    "required_relation": "viewer",
+    "scope_extractor": {
+      "object_type": "account",
+      "from_request_field": "account_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.iam.v1.PermissionCatalogService/ListPermissionCatalog",
     "permission": "iam.permissions.list",
     "required_relation": "viewer",

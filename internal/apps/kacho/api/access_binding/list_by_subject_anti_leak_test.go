@@ -1,12 +1,26 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// list_by_subject_w1_6_test.go — ListBySubject self-only enforcement for all
-// subject types (user / service_account / group). User and service_account
-// subjects require IsSelf. Group subjects are allowed iff the caller is a
-// member of the group (via group.IsMember adapter); non-members 403.
-// system/bootstrap principals can never be a group member by DB CHECK so
-// they 403 unconditionally for group subjects.
+// list_by_subject_anti_leak_test.go — полоса СОБСТВЕННОГО чтения ListBySubject и
+// отказ тому, у кого нет никакой полосы.
+//
+// # Что здесь пиннится, а что НЕТ (важно после #1352)
+//
+// Пробы ниже утверждают про полосу «сам субъект»: человек и служебная учётка —
+// по тождеству (`IsSelf`), группа — по членству. Про «административного обхода
+// нет» они НЕ утверждают и утверждать перестали: допуск у этого чтения общий с
+// ListSubjectPrivileges и несёт ещё две полосы — надзор облака и распорядителя
+// домашнего аккаунта субъекта (subject_read_authority.go).
+//
+// Отказы ниже остаются верными по ДРУГОЙ причине, и её надо назвать, иначе
+// зелёное читается как подтверждение снятого контракта: субъектов этих фикстур в
+// хранилище НЕТ (`newABFakeRepo` их не заводит), поэтому домашнего аккаунта у них
+// нет, административные полосы не срабатывают by construction, а модель прав не
+// провязана. Сравнение полос между собой и полосы распорядителя — в
+// subject_read_authority_test.go.
+//
+// system/bootstrap principals can never be a group member by DB CHECK, so they
+// 403 unconditionally for group subjects.
 package access_binding
 
 import (

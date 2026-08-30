@@ -217,15 +217,19 @@ project|account|cluster). Требует `viewer` на scope.
 <ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listBySubject">
 
 **«Что назначено этому субъекту»** — привязки субъекта (`subjectType`/`subjectId`). Типичный
-паттерн — self-list (subject = вызывающий). Cluster-scoped gate.
+паттерн — self-list (subject = вызывающий). Читать может также владелец либо распорядитель
+домашнего аккаунта субъекта — и тогда ответ содержит только привязки **в границах этого
+аккаунта**; администратор облака видит всё. Тот же допуск, что у `listSubjectPrivileges`.
 
 </ApiOperation>
 
 <ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listSubjectPrivileges">
 
 **«Привилегии субъекта, с именами ролей»** — обогащённые привязки User/ServiceAccount: имя роли
-резолвится server-side (JOIN, без N+1). Авторизация — self ИЛИ account-admin домашнего аккаунта
-субъекта; cross-account → 403. Well-formed-но-нет субъект → `NOT_FOUND`.
+резолвится server-side (JOIN, без N+1). Авторизация — та же, что у `listBySubject`: self
+(для субъекта-группы — её участник) ИЛИ account-admin домашнего аккаунта субъекта ИЛИ
+администратор облака. Ответ распорядителя аккаунта сужён его границами; cross-account → 403.
+Well-formed-но-нет субъект → `NOT_FOUND`.
 
 </ApiOperation>
 

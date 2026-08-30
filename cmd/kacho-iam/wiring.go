@@ -29,6 +29,7 @@ import (
 	internaliamapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
 	internaloperationsapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_operations"
 	limitapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/limit"
+	membershipapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/membership"
 	permissioncatalogapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/permission_catalog"
 	projectapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/project"
 	roleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/role"
@@ -61,8 +62,12 @@ type services struct {
 	internalUserHandler   *userapp.InternalHandler
 	serviceAccountHandler *serviceaccountapp.Handler
 	groupHandler          *groupapp.Handler
-	roleHandler           *roleapp.Handler
-	accessBindingHandler  *accessbindingapp.Handler
+	// membershipHandler — MembershipService: чтение принадлежности человека
+	// аккаунту. Регистрируется ТОЛЬКО на публичном слушателе — см. довод у
+	// registerPublicServices.
+	membershipHandler    *membershipapp.Handler
+	roleHandler          *roleapp.Handler
+	accessBindingHandler *accessbindingapp.Handler
 	// internalIAMHandler — InternalIAMService (LookupSubject for the
 	// api-gateway auth-interceptor; Check delegates to AuthorizeService).
 	internalIAMHandler *internaliamapp.Handler
@@ -187,6 +192,15 @@ func ownGateWiringComplaint(store *authzcascade.Client) string {
 // and that capability must be proven at compile time, not type-asserted here.
 func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	kachoRepo kachorepo.Repository,
+	// membershipRepo — УЗКИЙ корень чтения членства, приходящий ОТДЕЛЬНЫМ
+	// параметром, а не выуживаемый приведением типа из соседнего.
+	//
+	// Причина названа у самого порта: расширить общий корень значило бы
+	// потребовать нового метода от 46 дублёров в 25 файлах проб соседних
+	// ресурсов. Приведение типа здесь было бы дешевле по строкам и хуже по
+	// существу — оно превращает провязку в утверждение о том, какая реализация
+	// пришла, и это утверждение проверялось бы в рантайме, а не сборкой.
+	membershipRepo membershipapp.Repo,
 	metricsReg *metrics.Registry,
 	cfg config.Config, tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
 	_ = slavePool // kachoRepo is built and passed in by main()
@@ -392,6 +406,18 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		groupAdd, groupRemove, groupListMembers).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 
+	// MembershipService — чтение членства на аккаунт-скоупных путях.
+	//
+	// Ни клиента модели прав, ни фильтра страницы здесь НЕТ, и это утверждение,
+	// а не пропуск: единственный гейт этих чтений — пообъектная проверка КРАЯ по
+	// аккаунту из пути, а строки отбираются тем же аккаунтом в условии запроса.
+	// Провязать сюда второй замок значило бы заменить проверку края кодом,
+	// который можно забыть в следующей ветке.
+	membershipHandler := membershipapp.NewHandler(
+		membershipapp.NewGetMembershipUseCase(membershipRepo),
+		membershipapp.NewListMembershipsUseCase(membershipRepo),
+	)
+
 	// RoleService.
 	roleCreate := roleapp.NewCreateRoleUseCase(kachoRepo, opsRepo).
 		WithRelationStore(relationStore, logger).
@@ -489,15 +515,28 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRelationQueries(relationStore).
 		WithClusterAdmins(kachopg.NewClusterAdminGrantReader(pool)).
 		WithListScanRecorder(listScanRec)
-	abListBySub := accessbindingapp.NewListBySubjectUseCase(kachoRepo)
+	// ListBySubject — тот же вопрос, что и у ListSubjectPrivileges («какие выдачи
+	// есть у этого субъекта»), поэтому и допуск у него ТОТ ЖЕ, единым предикатом
+	// (#1352). Оба порта обязательны: RelationStore решает полосы надзора облака
+	// и делегированного распорядителя, RelationQueries сужает СТРАНИЦУ полосы
+	// распорядителя построчно (#1354). Непровязанный порт этим чтением
+	// ОТКАЗЫВАЕТ — провязка здесь не удобство, а условие работоспособности полосы.
+	abListBySub := accessbindingapp.NewListBySubjectUseCase(kachoRepo).
+		WithRelationStore(relationStore, logger).
+		WithRelationQueries(relationStore)
 	abListByAcc := accessbindingapp.NewListByAccountUseCase(kachoRepo).
 		WithRelationStore(relationStore, logger).
 		WithRelationQueries(relationStore)
 	// ListSubjectPrivileges — enriched self|account-admin read.
 	// RelationStore wired so the delegated-admin (FGA admin@account) authz path
-	// resolves admins who are not the home-account owner (D-4 path b).
+	// resolves admins who are not the home-account owner (D-4 path b);
+	// RelationQueries — пообъектный вопрос, которым СТРАНИЦА сужается по правам
+	// вызывающего (#1354). Непровязанный порт этим чтением ОТКАЗЫВАЕТ, поэтому
+	// провязка здесь — не удобство, а условие работоспособности полосы
+	// распорядителя аккаунта.
 	abListSubjPriv := accessbindingapp.NewListSubjectPrivilegesUseCase(kachoRepo).
-		WithRelationStore(relationStore, logger)
+		WithRelationStore(relationStore, logger).
+		WithRelationQueries(relationStore)
 	// ListAssignableRoles — roles valid to bind on a resource,
 	// scope_group-annotated. Same grant-authority gate as ListByScope/Create
 	// (RelationStore wired so the delegated-admin + cluster-scope authority paths
@@ -800,6 +839,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		internalUserHandler:    internalUserHandler,
 		serviceAccountHandler:  saHandler,
 		groupHandler:           groupHandler,
+		membershipHandler:      membershipHandler,
 		roleHandler:            roleHandler,
 		accessBindingHandler:   abHandler,
 		internalIAMHandler:     internalIAMHandler,

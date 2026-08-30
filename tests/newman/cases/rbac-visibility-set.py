@@ -72,9 +72,11 @@ filtering (M− would become visible). Each case therefore first deletes (with a
 active account-A binding for userINVId via a bounded list→delete→await loop, asserting the
 slate is clean (zero residual account-A bindings) before granting the by-label role. Discovery
 uses the ADMIN-AUTHORIZED :listByScope on account/accountAId (owner sees all subjects, filter
-by subjectId) — NOT :listBySubject, which is a cross-user query that 403s for the admin caller
-and yielded a FALSE clean slate (the residual binding survived and leaked M− into the visible
-set). This makes the exact-set assertion self-contained and deterministic — it does NOT depend
+by subjectId) — NOT :listBySubject, which at the time 403'd for the admin caller and yielded a
+FALSE clean slate (the residual binding survived and leaked M− into the visible set). Since
+#1352 :listBySubject admits the account administrator too (narrowed to that account), so the
+403 above is HISTORY, not the contract; the choice stands on its own merit — the pre-clean
+wants every subject in the account scope, which is what :listByScope answers. This makes the exact-set assertion self-contained and deterministic — it does NOT depend
 on any other case/suite having torn down.
 
 PAGINATION — the reads use `pageSize=1000` so the run-created projects are returned on a
@@ -241,8 +243,8 @@ def preclean_account_loop(tag, next_step):
             method="GET",
             # Discovery MUST use an AUTHORIZED read: :listByScope on account/accountAId
             # (the account owner sees EVERY binding in the account scope, ALL subjects).
-            # The prior :listBySubject?subjectId=userINVId is a CROSS-user query (the
-            # jwtAccountAdminA caller is NOT the subject) → correctly 403; the test then
+            # The prior :listBySubject?subjectId=userINVId 403'd for the jwtAccountAdminA
+            # caller (at the time the read admitted the subject only); the test then
             # treated the empty result as a clean slate, so a residual account-scoped
             # view binding for userINVId leaked into the by-label visibility assertion
             # (M− projects became visible → exact-set mismatch). listByScope returns all
@@ -501,8 +503,9 @@ def robust_revoke_binding(name, acb_var, auth="jwtAccountAdminA"):
     binding leaks (its DELETE 403s on the admin's not-yet-materialized v_delete on the fresh
     binding object), the v_list-only object inherits v_get from the leaked {get,list} grant
     → its detail Get returns 200 instead of 404 (the invariant violated). The cross-subject preclean
-    cannot clean it (admin gets 403 on listBySubject for another user), so the revoke itself must
-    commit. Retry the DELETE while 403, then require it to have committed.
+    could not clean it (at the time the admin got 403 on listBySubject for another user; since
+    #1352 that read admits the account administrator, narrowed to the account), so the revoke
+    itself must commit. Retry the DELETE while 403, then require it to have committed.
 
     ИСХОД ОДИН — 200 С OPERATION, и «already-gone 404» из утверждения убран. Он описывал
     состояние, которого эта полоса достичь не может: роль и выдача создаются в ЭТОМ кейсе
