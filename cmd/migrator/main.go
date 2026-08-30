@@ -28,16 +28,18 @@
 //	--dialect postgres                    (default; единственный поддерживаемый)
 //	--dsn     <connection-string>         (или ENV KACHO_MIGRATOR_DSN)
 //
-// Если --dsn пуст и KACHO_MIGRATOR_DSN пуст — читаем `config.Load()` (viper)
-// и берем `cfg.MigrateDSN()`. Это позволяет одному helm-values задавать
-// БД-параметры для обоих binary, не дублируя DSN.
+// Приоритет источников DSN — один на семь точек наката и объявлен в общем пакете
+// (`pkg/migratorcli.ResolveDSN`): --dsn > ENV KACHO_MIGRATOR_DSN > конфигурация
+// сервиса. Запасная конфигурация здесь — `config.Load()` (viper), из неё берётся
+// `cfg.MigrateDSN()`: одно helm-values задаёт БД-параметры обоим binary, не
+// дублируя DSN. Своей редакции порядка тут быть не должно — две редакции об одном
+// предмете расходятся молча, и разошлись: тексты отказа у iam, vpc и общего
+// пакета называли РАЗНЫЕ подмножества собственных источников (#1544).
 package main
 
 import (
-	"fmt"
 	"io/fs"
 	"os"
-	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // регистрирует "pgx" driver для sql.Open
 	"github.com/spf13/cobra"
@@ -183,28 +185,29 @@ func newStatusCmd(opts *rootOptions, migrationsFS fs.FS) *cobra.Command {
 
 // buildRunner собирает migrator.Runner из persistent-флагов + ENV + config-fallback.
 //
-// Источник DSN — приоритет: --dsn flag > ENV KACHO_MIGRATOR_DSN > viper-config
-// (config.Load → cfg.MigrateDSN). Так одно helm-values покрывает оба binary, и
-// можно явно перекрыть `--dsn` для cross-DB-инструментов и ad-hoc запусков.
+// Приоритет DSN живёт в общем пакете (`migratorcli.ResolveDSN`), а не здесь:
+// --dsn > ENV KACHO_MIGRATOR_DSN > конфигурация сервиса. Сюда принадлежит только
+// то, чем СВОЯ конфигурация читается, — имя переменной пути и способ достать из
+// неё строку подключения; общий пакет не вправе называть оператору чужое имя.
 func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migrator.Runner, error) {
 	dialect, err := migrator.NewDialect(opts.dialect)
 	if err != nil {
 		return nil, err
 	}
 
-	dsn := strings.TrimSpace(opts.dsn)
-	if dsn == "" {
-		dsn = strings.TrimSpace(os.Getenv(envDSN))
-	}
-	if dsn == "" {
-		// Fallback к kacho-iam viper-config: тот же DB_HOST/PORT/USER/PASSWORD/NAME/SSLMODE.
-		// Если KACHO_IAM_DB_PASSWORD не выставлен — config.Load() Validate провалится
-		// (что и есть желаемое UX — явное «set DSN или iam-creds», а не silent default).
+	// Запасная конфигурация iam — тот же DB_HOST/PORT/USER/PASSWORD/NAME/SSLMODE,
+	// что и у kacho-iam. Если KACHO_IAM_DB_PASSWORD не выставлен, config.Load
+	// проваливает Validate — и это желаемое: оператор читает «задай DSN или
+	// учётные данные iam», а не получает молчаливое умолчание.
+	dsn, err := migratorcli.ResolveDSN(opts.dsn, func() (string, error) {
 		cfg, cerr := config.Load(os.Getenv("KACHO_IAM_CONFIG_PATH"))
 		if cerr != nil {
-			return nil, fmt.Errorf("dsn unset (--dsn / %s) and iam config load failed: %w", envDSN, cerr)
+			return "", cerr
 		}
-		dsn = cfg.MigrateDSN()
+		return cfg.MigrateDSN(), nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return migrator.New(migrator.Config{
