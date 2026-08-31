@@ -660,12 +660,13 @@ func runServe(cfg config.Config) error {
 	// (1) Приём вебхуков провайдера личности (Hydra token/refresh, Kratos
 	// provision). Cluster-internal-only (запрет #6), отдельный порт от gRPC.
 	hooksAddr := cfg.AuthN.HooksHTTPListenAddress()
+	hooksHandler, healthAgg := buildHooksMux(pool, kachoRepo, opsRepo, svcs.ownGates, metricsReg, cfg, logger)
 	hooksSurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "вебхуки провайдера личности",
 		Mode:    surfaceMode,
 		Logger:  logger,
 		Addr:    addrAxis(hooksAddr, "KACHO_IAM_HOOKS_HTTP_ADDR не задан профилем развёртывания: обогащение токена и заведение пользователя по первому входу на этой посадке не обслуживаются"),
-		Handler: buildHooksMux(pool, kachoRepo, opsRepo, svcs.ownGates, metricsReg, cfg, logger),
+		Handler: hooksHandler,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
 			"общий секрет провайдера, проверяется обработчиком на каждом запросе"),
@@ -982,6 +983,13 @@ func runServe(cfg config.Config) error {
 	var shutdownOnce sync.Once
 	triggerShutdown := func() {
 		shutdownOnce.Do(func() {
+			// Готовность переводится в отказ ПЕРВЫМ действием гашения — до
+			// остановки слушателей: kubelet перестаёт слать трафик, пока текущие
+			// вызовы дорабатывают. Для листа графа это дороже, чем для остальных:
+			// к владельцу прав на каждом вызове ходят ВСЕ прочие сервисы, и
+			// гасящийся под, продолжающий объявлять себя готовым, отправляет их
+			// проверку доступа в отказ соединения.
+			healthAgg.SetShuttingDown()
 			stopAdmission()
 			stopGRPCBounded(internalSrv, gracefulTimeout)
 			stopGRPCBounded(grpcSrv, gracefulTimeout)

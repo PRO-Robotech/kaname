@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/kacho/pkg/observability/health"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	reconcileapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
@@ -27,7 +28,20 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
-// buildHooksMux — собирает HTTP mux для AuthN hooks.
+// errLROWorkerNotReady — сентинел чекера готовности.
+//
+// На провод он НЕ попадает: общий носитель отдаёт наружу только ИМЯ упавшей
+// зависимости, а причину оставляет процессу — наружу не текут ни детали ошибки,
+// ни внутренние координаты. Текст поэтому адресован разбирающему, и слово он
+// повторяет соседское (`services/compute`): один и тот же отказ, названный в
+// двух сервисах по-разному, разводит операционный словарь на ровном месте.
+var errLROWorkerNotReady = errors.New("LRO dispatcher loop not running")
+
+// buildHooksMux — собирает HTTP mux для AuthN hooks и агрегатор его
+// диагностической поверхности.
+//
+// Агрегатор ВОЗВРАЩАЕТСЯ, а не остаётся внутри: гашение обязано перевести
+// готовность в отказ ДО остановки слушателей, а знает о гашении корень.
 //
 // kachoRepo / opsRepo / relationStore прокидываются из composition root
 // (serve.go) — provision hook (Kratos user-provisioning, C4) строит
@@ -41,7 +55,7 @@ func buildHooksMux(
 	metricsReg *metrics.Registry,
 	cfg config.Config,
 	logger *slog.Logger,
-) http.Handler {
+) (http.Handler, *health.Aggregator) {
 	hookSecret := cfg.AuthN.ResolveHookSharedSecret()
 	domain := cfg.AuthN.ResolveDomain()
 	hydraIssuer := cfg.AuthN.ResolveHydraIssuer()
@@ -125,27 +139,31 @@ func buildHooksMux(
 		logger,
 	)
 
+	// Готовность СТРОИТСЯ из именованных зависимостей и отдаётся отдельным путём
+	// от живости; чарт пробирует именно её. Что именно проверяет каждая — вопрос
+	// композиционного корня: он один знает, чья это база и чей исполнитель
+	// операций. Носитель — ОБЩИЙ, тот же, что у остальных шести сервисов.
+	healthAgg := health.New([]health.Checker{
+		{Name: "database", Check: pool.Ping},
+		{Name: "lro-worker", Check: func(context.Context) error {
+			if operations.Ready() {
+				return nil
+			}
+			return errLROWorkerNotReady
+		}},
+	})
+
 	mux := handlerinternal.NewMux(handlerinternal.Handlers{
 		TokenHook:     tokenHook,
 		RefreshHook:   refreshHook,
 		ProvisionHook: provisionHook,
 		RecoveryHook:  recoveryHook,
-		// /readyz отражает доступность критичных зависимостей: коннект к БД и
-		// поднятый LRO-worker. /healthz остается чистым liveness.
-		Readiness: []handlerinternal.ReadinessChecker{
-			{Name: "database", Check: pool.Ping},
-			{Name: "lro-worker", Check: func(context.Context) error {
-				if operations.Ready() {
-					return nil
-				}
-				return errors.New("lro worker not ready")
-			}},
-		},
+		Health:        healthAgg,
 	})
 	wrapped := handlerinternal.LoggerMiddleware(mux, func(method, path string, status int) {
 		logger.Info("hooks http", "method", method, "path", path, "status", status)
 	})
-	return wrapped
+	return wrapped, healthAgg
 }
 
 // userProvisionAdapter maps the iamhooks.UserProvisioner port to the
