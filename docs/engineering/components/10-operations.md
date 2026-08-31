@@ -154,7 +154,7 @@ id (`iop` → iam) в `gateway/internal/opsproxy/proxy.go`.
 # Любой mutating RPC возвращает Operation.
 OP=$(curl -s -X POST http://localhost:18080/iam/v1/accounts \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"name":"foo","owner_user_id":"usr_x"}' | jq -r .id)
+  -d '{"name":"foo"}' | jq -r .id)
 echo "Operation: $OP"
 
 # Poll до done. Путь домен-агностичен — без имени сервиса в начале.

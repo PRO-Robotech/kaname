@@ -187,8 +187,9 @@ curl -X POST http://localhost:18080/iam/v1/accessBindings \
     "subject_type":"user",
     "subject_id":"usr_alice",
     "role_id":"rol_viewer",
-    "resource_type":"project",
-    "resource_id":"prj_yyy"
+    "scope_type":"iam.project",
+    "scope_id":"prj_yyy",
+    "target":{"all_in_scope":{}}
   }'
 # → Operation, после poll → AccessBinding с acb_id
 

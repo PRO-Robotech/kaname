@@ -233,8 +233,7 @@ curl -X POST http://localhost:18080/iam/v1/users:invite \
     "account_id":"acc_xxx",
     "email":"bob@example.com",
     "role_id":"rol_viewer",
-    "resource_type":"project",
-    "resource_id":"prj_yyy"
+    "project_id":"prj_yyy"
   }'
 # → {operationId, user_id:"usr_..."}
 ```

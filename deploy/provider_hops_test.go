@@ -133,7 +133,7 @@ func TestStacks_ProviderHopsAreDeclaredAndTheirTransportIsAccountedFor(t *testin
 		t.Run(name, func(t *testing.T) {
 			merged := mergeProfiles(t, stack)
 			if !isProductionClass(merged) {
-				t.Skipf("%s is dev-class by its own declaration (kacho-iam.config.authn.mode) — "+
+				t.Skipf("%s is dev-class by its own declaration (kacho-iam.authMode) — "+
 					"the requirement rides the same exemption as iam's boot guard", name)
 			}
 			examinedStacks++
@@ -273,6 +273,25 @@ func declaredAnchor(tree map[string]any, h hop) (string, bool) {
 // stand changes posture, and then exempts the very stack that just started needing
 // the check.
 func isProductionClass(tree map[string]any) bool {
-	mode, ok := stringAt(tree, "kacho-iam", "config", "authn", "mode")
-	return ok && strings.HasPrefix(mode, "production")
+	return strings.HasPrefix(declaredPosture(tree), "production")
+}
+
+// declaredPosture — посадка, объявленная стеком о САМОМ СЕБЕ.
+//
+// Адрес канонический — `kacho-iam.authMode` в корне значений сервиса. Прежний
+// (`config.authn.mode`) читается следом и ровно потому, что шаблон чарта его тоже
+// пока принимает: стек, оставшийся на нём, обязан проверяться, а не выпадать из
+// проверки молча.
+//
+// Порядок здесь несущий, и вот чем он оплачен: когда адрес свели к одному
+// написанию, а этот отбор остался на прежнем, ни один стек не опознался боевым —
+// все шесть ушли в Skip, перепись прочитала НОЛЬ, и проверка отчиталась бы
+// успехом при любом содержимом профилей. Отбор по ключу, который переехал, не
+// краснеет: он тихо перестаёт находить предмет.
+func declaredPosture(tree map[string]any) string {
+	if v, ok := stringAt(tree, "kacho-iam", "authMode"); ok {
+		return v
+	}
+	v, _ := stringAt(tree, "kacho-iam", "config", "authn", "mode")
+	return v
 }

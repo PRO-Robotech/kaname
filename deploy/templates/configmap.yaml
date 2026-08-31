@@ -59,4 +59,4 @@ data:
         password-from-env: KACHO_IAM_DB_PASSWORD
 
     authn:
-      mode: {{ default "production" .Values.authn.mode | quote }}
+      mode: {{ default "production" (include "kacho-iam-svc.authMode" .) | quote }}

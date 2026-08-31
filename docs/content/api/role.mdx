@@ -32,13 +32,26 @@ import dedent from 'ts-dedent'
 <table>
   <thead><tr><th>Поле Rule</th><th>Тип</th><th>Описание</th></tr></thead>
   <tbody>
-    <tr><td><code>module</code></td><td>string</td><td>Ровно один domain-модуль: <code>iam</code> / <code>vpc</code> / <code>compute</code> / <code>loadbalancer</code></td></tr>
+    <tr><td><code>module</code></td><td>string</td><td>Ровно один domain-модуль из закрытого набора платформы: <code>iam</code> / <code>vpc</code> / <code>compute</code> / <code>loadbalancer</code> / <code>registry</code> / <code>storage</code></td></tr>
     <tr><td><code>resources</code></td><td>string[]</td><td>Типы ресурсов модуля (1–16), lowercase (<code>networks</code>, <code>subnets</code>, ...)</td></tr>
     <tr><td><code>verbs</code></td><td>string[]</td><td>Глаголы (1–16): <code>get</code> / <code>list</code> / <code>create</code> / <code>update</code> / <code>delete</code></td></tr>
     <tr><td><code>resourceNames</code></td><td>string[]</td><td>Опц. пин по id (≤256). Взаимоисключающе с <code>matchLabels</code></td></tr>
     <tr><td><code>matchLabels</code></td><td>map</td><td>Опц. отбор по меткам (AND-equality, ≤16). Взаимоисключающе с <code>resourceNames</code></td></tr>
   </tbody>
 </table>
+
+:::note Модулей шесть, и перечень читается вызовом
+Набор закрыт и совпадает с набором доменов платформы: `iam`, `vpc`, `compute`, `loadbalancer`,
+`registry`, `storage`. Неизвестный модуль отвергается синхронно (`INVALID_ARGUMENT`).
+
+Тонко выдать доступ к **хранилищу** и **реестру** можно так же, как к сетям, — системная роль на
+весь уровень для этого не нужна. Какие `resources` и `verbs` каждый модуль принимает,
+возвращает `GET /iam/v1/permissionCatalog` ([Authorize](/api/authorize#permissioncatalog)):
+это источник таксономии, а не эта страница.
+
+Имя модуля балансировщика — `loadbalancer`, не `nlb`. Домена `geo` в наборе нет: справочник
+размещения читается всяким аутентифицированным и правами не выдаётся.
+:::
 
 Форма правила задаёт «прицел» (anchor):
 

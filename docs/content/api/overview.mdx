@@ -201,7 +201,8 @@ flowchart LR
     <tr><td><code>INVALID_ARGUMENT</code></td><td>400</td><td>Нарушение формата / валидации; malformed id; immutable-поле в update_mask</td></tr>
     <tr><td><code>NOT_FOUND</code></td><td>404</td><td>Корректный по формату, но несуществующий ресурс</td></tr>
     <tr><td><code>ALREADY_EXISTS</code></td><td>409</td><td>Нарушение UNIQUE (например, дублирующее имя роли)</td></tr>
-    <tr><td><code>FAILED_PRECONDITION</code></td><td>400</td><td>Состояние не позволяет (удаление аккаунта с проектами; system-роль; deletion_protection)</td></tr>
+    <tr><td><code>FAILED_PRECONDITION</code></td><td>400</td><td>Состояние не позволяет (удаление аккаунта с проектами; system-роль; deletion_protection); потолок квоты на вид не назван ни на одной области видимости (признак <code>QUOTA_NOT_PROVISIONED</code>)</td></tr>
+    <tr><td><code>RESOURCE_EXHAUSTED</code></td><td>429</td><td>Исчерпана квота на число ресурсов вида: потолок назван и выбран полностью (признак <code>QUOTA_EXCEEDED</code>) — см. <a href="/api/quotas">Квоты</a></td></tr>
     <tr><td><code>UNAVAILABLE</code></td><td>503</td><td>База IAM или peer (Hydra) недоступны — fail-closed для мутаций</td></tr>
     <tr><td><code>UNAUTHENTICATED</code></td><td>401</td><td>Нет / невалиден JWT (или анонимный запрос)</td></tr>
     <tr><td><code>PERMISSION_DENIED</code></td><td>403</td><td>Нет нужного отношения в authz-Check</td></tr>
@@ -217,6 +218,13 @@ HTTP-статус выбирает край: своего отображения
 HTTP-статусу: ветка `if status == 409` на предусловие не сработает ни разу.
 :::
 
+:::note Исчерпание квоты — два разных отказа
+Потолок на число ресурсов вида даёт **два** отказа, и они требуют разного действия:
+`RESOURCE_EXHAUSTED` / **429** (признак `QUOTA_EXCEEDED`) — предел выбран, его нужно
+**поднять**; `FAILED_PRECONDITION` / **400** (признак `QUOTA_NOT_PROVISIONED`) — предел не
+назван вовсе, его нужно **завести**. Полосы различаются по `reason` в `details`, а не по
+тексту сообщения. Свой предел и потребление — на странице [Квоты](/api/quotas).
+:::
 
 Тон сообщений стабилен и является частью контракта: `"<Resource> %s not found"`,
 `"<field> is immutable after <Resource>.Create"`, `"Illegal argument <thing>"`.

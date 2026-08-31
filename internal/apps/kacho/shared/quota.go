@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kacho/pkg/quota/quotadetail"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
@@ -83,9 +84,15 @@ func quotaRefusal(err error) (error, bool) {
 	}
 
 	st := status.New(code, iamerr.StripSentinel(err))
+	// Величины производителя — в штатное поле `metadata`, а не в прозу. Контракт
+	// от этого не меняется: `ErrorInfo.metadata` существует ровно под такие
+	// величины, и клиент, читавший только признак, продолжает работать
+	// (задача продукта #1605). Величин нет — поле остаётся пустым; выдумывать их
+	// нечем, а ноль есть законная величина занятого и молчанием быть не может.
 	withDetails, derr := st.WithDetails(&errdetails.ErrorInfo{
-		Reason: reason,
-		Domain: quotaReasonDomain,
+		Reason:   reason,
+		Domain:   quotaReasonDomain,
+		Metadata: quotadetail.MetadataFromError(err),
 	})
 	if derr != nil {
 		// Деталь не прикрепилась — код и текст важнее признака.

@@ -16,8 +16,17 @@ import dedent from 'ts-dedent'
 Каждый аккаунт имеет ровно одного **владельца** (`ownerUserId`) — пользователя-администратора,
 получающего полный доступ к содержимому аккаунта.
 
-Аккаунт создаётся **self-service**: аутентифицированный пользователь заводит собственный аккаунт,
-и `ownerUserId` обязан совпадать с самим вызывающим (защита от захвата чужого владения).
+Аккаунт создаётся **self-service**: аутентифицированный пользователь заводит собственный аккаунт.
+`ownerUserId` при этом **не присылается** — владельцем становится сам вызывающий, и край выводит
+его из проверенного удостоверения. Захватывать чужое владение нечем by construction, поэтому
+сравнения «владелец обязан совпадать с вызывающим» в контракте нет.
+
+:::info Вместе с аккаунтом создаётся проект `default`
+Create — **одна транзакция на два ресурса**: с аккаунтом заводится проект с именем `default`.
+Его идентификатор приходит в `Operation.metadata.defaultProjectId` ещё до завершения операции,
+поэтому искать его списком не нужно. Проект обычный — ничем не выделен, переименовывается и
+удаляется как любой другой; но пока он есть, **аккаунт не удалится** (см. таблицу ошибок).
+:::
 
 ## Поля
 
@@ -25,10 +34,10 @@ import dedent from 'ts-dedent'
   <thead><tr><th>Поле</th><th>Тип</th><th>Изменяемость</th><th>Описание</th></tr></thead>
   <tbody>
     <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Идентификатор аккаунта (префикс <code>acc</code>)</td></tr>
-    <tr><td><code>name</code></td><td>string</td><td>mutable</td><td><strong>Глобально уникальное</strong> имя (одно пространство имён на всю платформу, не на аккаунт), 3–63 симв., <code>^&#91;a-z&#93;&#91;-a-z0-9&#93;&#123;2,62&#125;$</code></td></tr>
+    <tr><td><code>name</code></td><td>string</td><td>mutable</td><td><strong>Глобально уникальное</strong> имя (одно пространство имён на всю платформу, не на аккаунт): DNS label по RFC 1123 — <code>^&#91;a-z0-9&#93;(&#91;-a-z0-9&#93;&#123;0,61&#125;&#91;a-z0-9&#93;)?$</code>, строчные латинские буквы, цифры и дефис, длина 1–63; цифра первым знаком допустима (<code>9lives</code> — валидное имя)</td></tr>
     <tr><td><code>description</code></td><td>string</td><td>mutable</td><td>Описание, 0–256 символов</td></tr>
     <tr><td><code>labels</code></td><td>map&lt;string,string&gt;</td><td>mutable</td><td>Метки <code>key:value</code>, до 64; аккаунт label-selectable для scoped-грантов</td></tr>
-    <tr><td><code>ownerUserId</code></td><td>string</td><td>immutable</td><td>User-владелец (админ аккаунта). Задаётся при Create, не меняется</td></tr>
+    <tr><td><code>ownerUserId</code></td><td>string</td><td>output-only</td><td>User-владелец (админ аккаунта). <strong>В запросе не задаётся</strong> — выводится из вызывающего; после Create неизменяем</td></tr>
     <tr><td><code>createdAt</code></td><td>timestamp</td><td>output-only</td><td>Момент создания (RFC 3339, усечён до секунд)</td></tr>
   </tbody>
 </table>
@@ -97,9 +106,19 @@ handler возвращает 200 и только те аккаунты, где �
 
 <ApiOperation method="POST" endpoint="/iam/v1/accounts" async>
 
-Создаёт аккаунт. Self-service: `ownerUserId` обязан совпадать с вызывающим (иначе
-`INVALID_ARGUMENT`). `ownerUserId` должен ссылаться на существующего пользователя — иначе
-операция завершится `FAILED_PRECONDITION`. Асинхронно: ответ — `Operation` с `response: Account`.
+Создаёт аккаунт. Self-service: владельцем становится вызывающий. **`ownerUserId` присылать
+нельзя** — поле выходное, и любое присланное значение отвергается синхронно, первым стейтментом,
+до заведения операции:
+
+<CodeBlock language="json">
+  {dedent`
+    { "code": 3, "message": "Illegal argument ownerUserId (derived from caller)" }
+  `}
+</CodeBlock>
+
+Отвергается **в том числе ваш собственный верный идентификатор** — отказ не о том, что значение
+не то, а о том, что поля на входе нет. Асинхронно: ответ — `Operation` с `response: Account` и
+`metadata: { accountId, defaultProjectId }`.
 
 <CodeBlock language="bash">
   {dedent`
@@ -108,8 +127,7 @@ handler возвращает 200 и только те аккаунты, где �
       -H 'Content-Type: application/json' \\
       -d '{
             "name": "acme",
-            "description": "ACME production account",
-            "ownerUserId": "usrbr69ze0ftz3jf7396"
+            "description": "ACME production account"
           }'
   `}
 </CodeBlock>
@@ -122,7 +140,9 @@ handler возвращает 200 и только те аккаунты, где �
 
 Меняет изменяемые поля (`name`, `description`, `labels`) по `updateMask`. **`ownerUserId`
 immutable** — его наличие в `updateMask` вернёт `INVALID_ARGUMENT`
-(`"owner_user_id is immutable after Account.Create"`). Требует `v_update`. Асинхронно.
+(`"ownerUserId is immutable after Account.Create"`; маска принимается в обоих написаниях —
+`owner_user_id` и `ownerUserId`, — а текст отказа один и camelCase). Требует `v_update`.
+Асинхронно.
 
 <CodeBlock language="bash">
   {dedent`
@@ -184,10 +204,9 @@ account-scoped AccessBinding). Sync, курсор `(createdAt, id)` ASC. Тре�
   <tbody>
     <tr><td>Get/Update/Delete несуществующего аккаунта</td><td><code>NOT_FOUND</code></td><td><code>"Account &lt;id&gt; not found"</code></td></tr>
     <tr><td><code>name</code> уже занят <strong>любым</strong> аккаунтом платформы</td><td><code>ALREADY_EXISTS</code></td><td><code>"Account with name &lt;name&gt; already exists"</code>. Пространство имён общее для всех арендаторов — занятое имя занято глобально</td></tr>
-    <tr><td><code>ownerUserId</code> ≠ вызывающий при Create</td><td><code>INVALID_ARGUMENT</code></td><td>Self-service anti-hijacking</td></tr>
-    <tr><td><code>ownerUserId</code> ссылается на несуществующего User</td><td><code>FAILED_PRECONDITION</code></td><td>Проверяется в async-операции</td></tr>
-    <tr><td><code>ownerUserId</code> в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"owner_user_id is immutable after Account.Create"</code></td></tr>
-    <tr><td><strong>Delete аккаунта с проектами</strong></td><td><code>FAILED_PRECONDITION</code></td><td>Сначала удалить все проекты аккаунта</td></tr>
+    <tr><td><code>ownerUserId</code> присутствует в теле <code>Create</code> — <strong>с любым значением, включая ваше собственное</strong></td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument ownerUserId (derived from caller)"</code>. Синхронно, до заведения операции: поле выходное, на входе его нет</td></tr>
+    <tr><td><code>ownerUserId</code> в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"ownerUserId is immutable after Account.Create"</code></td></tr>
+    <tr><td><strong>Delete аккаунта с проектами</strong></td><td><code>FAILED_PRECONDITION</code></td><td>Сначала удалить все проекты аккаунта — <strong>включая созданный вместе с ним <code>default</code></strong></td></tr>
     <tr><td>Нет нужного отношения</td><td><code>PERMISSION_DENIED</code></td><td>Authz-Check не прошёл</td></tr>
   </tbody>
 </table>

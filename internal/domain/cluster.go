@@ -38,7 +38,13 @@ func (id ClusterID) Validate() error {
 	return nil
 }
 
-// ClusterName — kebab-case (1..64).
+// ClusterName — отображаемое имя singleton-кластера: длина 1..64 и БОЛЬШЕ
+// ничего. Здесь стояло «kebab-case», и это было обещанием алфавита, которого
+// проверка не делает ни в одной ветке.
+//
+// Форму имени ресурса (`pkg/validate/nameform`) поле НЕ несёт намеренно: оно
+// не задаётся клиентом — значение пишет посевная миграция, а у службы кластера
+// нет глагола, который бы его менял.
 type ClusterName string
 
 func (n ClusterName) Validate() error {

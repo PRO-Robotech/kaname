@@ -136,9 +136,11 @@ kubectl -n kacho port-forward svc/kacho-iam 9091:9091 &
 grpcurl -plaintext -d '{"external_id":"ory-sub-xyz"}' localhost:9091 \
   kacho.cloud.iam.v1.InternalIAMService/LookupSubject
 
-# Check.
+# Check. Тройка называется subject_id / relation / object — все три строки в
+# FGA-форме "<тип>:<id>"; глагола вида "vpc.network.create" на входе нет,
+# спрашивается ОТНОШЕНИЕ модели.
 grpcurl -plaintext -d '{
-  "subject":"user:usr_alice","action":"vpc.network.create","resource":{"type":"project","id":"prj_yyy"}
+  "subject_id":"user:usr_alice","relation":"editor","object":"project:prj_yyy"
 }' localhost:9091 kacho.cloud.iam.v1.InternalIAMService/Check
 
 # UpsertFromIdentity (api-gateway после OIDC).

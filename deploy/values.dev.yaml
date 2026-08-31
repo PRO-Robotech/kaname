@@ -18,7 +18,7 @@ repository:
     # deploy/iam_pool_declaration_parity_test.go.
     maxConns: 40
 
-authn:
-  mode: dev
+# ПОСАДКА БЕЗОПАСНОСТИ — один адрес на весь флот (прежний: authn.mode).
+authMode: dev
 
 # OpenFGA по умолчанию disabled в dev-overlay. Auth-tier — Ory Kratos + Hydra.

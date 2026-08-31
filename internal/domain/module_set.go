@@ -31,8 +31,14 @@ var knownModuleSet = func() map[string]struct{} {
 }()
 
 // IsKnownModule reports whether m is a member of the closed platform module-set
-// {iam, vpc, compute, loadbalancer, registry}. The wildcard `*` is NOT a known module (it
-// is a system-only marker handled separately by Rule.Validate).
+// declared by knownModules above — today {iam, vpc, compute, loadbalancer, registry,
+// storage}. The wildcard `*` is NOT a known module (it is a system-only marker
+// handled separately by Rule.Validate).
+//
+// Перечень здесь НАЗЫВАЕТ набор, а не задаёт его: единственный источник — литерал
+// knownModules. Эта строка уже переживала свой предмет — она осталась при пяти
+// именах, когда шестое (storage) было добавлено, и разошлась молча: проба набора
+// утверждала ЧЛЕНСТВО, а не равенство, поэтому росту набора не сопротивлялась.
 func IsKnownModule(m string) bool {
 	_, ok := knownModuleSet[m]
 	return ok

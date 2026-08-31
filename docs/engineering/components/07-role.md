@@ -161,7 +161,7 @@ curl -X POST http://localhost:18080/iam/v1/roles \
     "name":"billing_viewer",
     "account_id":"acc_xxx",
     "description":"View billing only",
-    "permissions":["billing.*.read","billing.invoice.list"]
+    "rules":[{"module":"iam","resources":["roles"],"verbs":["get","list"]}]
   }'
 ```
 
@@ -179,12 +179,12 @@ curl "http://localhost:18080/iam/v1/roles?is_system=true" -H "Authorization: Bea
 curl http://localhost:18080/iam/v1/roles/rol00000000000000abc -H "Authorization: Bearer $TOKEN"
 ```
 
-### Update custom role (расширить permissions)
+### Update custom role (расширить правила)
 
 ```bash
 curl -X PATCH http://localhost:18080/iam/v1/roles/rol_custom_xxx \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"permissions":["billing.*.read","billing.*.list"],"update_mask":"permissions"}'
+  -d '{"rules":[{"module":"iam","resources":["roles"],"verbs":["get","list","update"]}],"update_mask":"rules"}'
 ```
 
 ### Идемпотентность

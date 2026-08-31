@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/PRO-Robotech/kacho/pkg/db/pgfault"
+	"github.com/PRO-Robotech/kacho/pkg/quota/quotadetail"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
@@ -70,9 +71,13 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 	// об одном предмете. Текст третьего НЕ сохраняется — он про нашу схему, и
 	// арендатору о ней знать нечего.
 	case "KQ001": // место кончилось: строка учёта есть, used >= limit
-		return iamerr.Wrapf(iamerr.ErrQuotaExceeded, "%s", pgErr.Message)
+		// Величины производителя приклеиваются ЗДЕСЬ — дальше по пути
+		// `*pgconn.PgError` уже нет, и прочитать `DETAIL` негде (задача #1605).
+		return quotadetail.Attach(
+			iamerr.Wrapf(iamerr.ErrQuotaExceeded, "%s", pgErr.Message), pgErr.Detail)
 	case "KQ002": // потолок не назван ни на одной области видимости
-		return iamerr.Wrapf(iamerr.ErrQuotaNotProvisioned, "%s", pgErr.Message)
+		return quotadetail.Attach(
+			iamerr.Wrapf(iamerr.ErrQuotaNotProvisioned, "%s", pgErr.Message), pgErr.Detail)
 	case "KQ003": // строка ресурса не несёт носителя — дефект схемы, не арендатора
 		return iamerr.Wrapf(iamerr.ErrInternal, "quota accounting")
 	// Полоса ТЕМПА (`kacho_rate_refuse`, миграция задачи #618). Её производитель

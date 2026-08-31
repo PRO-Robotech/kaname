@@ -13,19 +13,31 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
-// TestIsKnownModule_ClosedSet — the closed platform module-set is EXACTLY
-// {iam, vpc, compute, loadbalancer, registry}. geo is NOT a module (Geography
-// moved to its own service, not in authzmap.objectTypes). `nlb` is NOT the token —
-// the load-balancer module is named `loadbalancer`. The wildcard `*` is NOT a
-// "known module" (it is a system-only marker handled separately by Rule.Validate,
-// not by IsKnownModule).
+// TestIsKnownModule_ClosedSet — the two halves of the closed platform module-set:
+// everything the set DECLARES is known, and a list of near-misses is not. geo is
+// NOT a module (Geography moved to its own service, not in authzmap.objectTypes).
+// `nlb` is NOT the token — the load-balancer module is named `loadbalancer`. The
+// wildcard `*` is NOT a "known module" (it is a system-only marker handled
+// separately by Rule.Validate, not by IsKnownModule).
+//
+// Положительная половина ВЫВОДИТСЯ из KnownModules, а не выписывается. Прежняя
+// редакция несла собственный перечень из ПЯТИ имён и заголовок «EXACTLY» — но
+// утверждала ЧЛЕНСТВО каждого, а не равенство наборов, поэтому шестое имя
+// (storage) добавилось, ничего не покраснив, и заголовок стал ложью. Точный
+// состав пинит module_set_drift_test.go — второго места об одном предмете здесь
+// не заводится; здесь проверяется, что объявленное и признаваемое совпадают.
 func TestIsKnownModule_ClosedSet(t *testing.T) {
-	known := []string{"iam", "vpc", "compute", "loadbalancer", "registry"}
+	known := domain.KnownModules()
+	if len(known) == 0 {
+		t.Fatal("KnownModules() пуст — обход беспредметен, «ноль находок» получено даром")
+	}
 	for _, m := range known {
 		if !domain.IsKnownModule(m) {
-			t.Errorf("IsKnownModule(%q) = false, want true (member of closed set)", m)
+			t.Errorf("IsKnownModule(%q) = false, want true (объявлен в KnownModules)", m)
 		}
 	}
+	t.Logf("перепись: модулей объявлено %d (%v)", len(known), known)
+
 	unknown := []string{"banana", "geo", "nlb", "loadbalancers", "iAm", "", "*", "vpc "}
 	for _, m := range unknown {
 		if domain.IsKnownModule(m) {

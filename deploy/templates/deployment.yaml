@@ -96,6 +96,13 @@ spec:
               containerPort: {{ .Values.ports.internalGrpc }}
             - name: metrics
               containerPort: {{ .Values.ports.metrics }}
+            # Слушатель вебхуков провайдера личности. Здесь же живут `/healthz` и
+            # `/readyz`, поэтому порт обязан быть объявлен: по нему идут пробы, а
+            # оператор, ищущий, куда постучаться за причиной неготовности, читает
+            # именно `ports:`. Умолчание зеркалит umbrella-чарт и умолчание самого
+            # процесса (authn.hooks-http-endpoint = tcp://0.0.0.0:9092).
+            - name: http-hooks
+              containerPort: {{ .Values.ports.hooksHttp | default 9092 }}
           volumeMounts:
             - name: config
               mountPath: /etc/kacho-iam
@@ -112,13 +119,25 @@ spec:
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
+          # ГОТОВНОСТЬ СПРАШИВАЕТСЯ ПО ТОМУ, ЧТО СЕРВИС СТРОИТ. `/readyz` живёт на
+          # слушателе вебхуков и отражает коннект к базе и поднятый LRO-worker;
+          # `/healthz` там же — чистая живость. Прежде оба слота спрашивали
+          # `tcpSocket: grpc`: iam с недоступной базой оставался Ready, а он фронтит
+          # authN+authZ каждому сервису платформы.
+          #
+          # Схемы HTTPS здесь нет намеренно: ручки TLS слушателей у ЭТОГО чарта не
+          # существует (её несёт umbrella-чарт), поэтому слушатель остаётся
+          # открытым текстом, и проба обязана спрашивать так же. Появится ручка —
+          # проба обязана переехать вместе с ней тем же изменением.
           readinessProbe:
-            tcpSocket:
-              port: grpc
+            httpGet:
+              path: /readyz
+              port: http-hooks
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
-              port: grpc
+            httpGet:
+              path: /healthz
+              port: http-hooks
             initialDelaySeconds: 10
             periodSeconds: 30

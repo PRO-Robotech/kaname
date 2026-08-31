@@ -39,6 +39,7 @@ const sidebars: SidebarsConfig = {
         'api/tokens',
         'api/authorize',
         'api/operations',
+        'api/quotas',
       ],
     },
     {
