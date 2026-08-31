@@ -9,6 +9,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // SubjectChange — a row of kacho_iam.subject_change_outbox, plain Go (no proto).
@@ -39,6 +40,42 @@ type SubjectChange struct {
 // следующем такте; вечное молчание закрывает его собственный fail-closed.
 var ErrSubjectChangeNotSettled = errors.New("subject change journal position is not settled yet")
 
+// SubjectChangePositionLostError — КУРСОР НИЖЕ ПОЛА ЖУРНАЛА (задача #1712).
+//
+// Строки между курсором вызывающего и полом СНЯТЫ, и он их уже не получит.
+//
+// # Почему это отказ, а не тишина
+//
+// Чтение идёт окном `id > since AND id <= settled`: снятая строка в него просто
+// не попадает, курсор переезжает через неё по последней прочитанной позиции, и
+// «строк не было» становится НЕОТЛИЧИМО от «строки убрали». Полоса при этом
+// fail-open by design — пропущенная строка означает непогашенный кэш вердиктов
+// края, то есть неприменённый отзыв доступа, молча.
+//
+// Пока такого отказа не существовало, уборка журнала была невозможна не по
+// предпочтению, а by construction: любой уборщик уносил бы отзывы у читателя
+// из-под курсора. Этот отказ — недостававший предикат обнаружения пропуска.
+//
+// # Почему тип, а не значение-часовой
+//
+// Возобновимая позиция здесь НЕСУЩАЯ: без неё вызывающему некуда сесть — принять
+// ноль значило бы проиграть журнал с начала, остаться на месте — получать тот же
+// отказ вечно. Значение-часовой позиции не носит by construction.
+//
+// Не путать с [ErrSubjectChangeNotSettled]: тот говорит «переспроси на следующем
+// такте», этот — «повтор не пройдёт никогда, пересядь». Советы противоположные.
+type SubjectChangePositionLostError struct {
+	// EarliestResumable — нижняя позиция, с которой возобновление ещё ничего не
+	// теряет: «самая ранняя удержанная строка минус один», а у вычищенного
+	// целиком журнала — сама граница устоявшегося.
+	EarliestResumable int64
+}
+
+func (e *SubjectChangePositionLostError) Error() string {
+	return fmt.Sprintf("subject change position is no longer resumable; earliest resumable position is %d",
+		e.EarliestResumable)
+}
+
 // SubjectChangeReader — port: read side of subject_change_outbox.
 type SubjectChangeReader interface {
 	// PollSubjectChanges returns rows of the window `(sinceID, settled]` in
@@ -49,6 +86,10 @@ type SubjectChangeReader interface {
 	// Never "everything above the cursor" and never `MAX(id)`: a position issued
 	// past a number still in flight loses that row silently and forever.
 	// [ErrSubjectChangeNotSettled] when there is no settled position yet.
+	// [SubjectChangePositionLostError] when sinceID sits BELOW the journal floor:
+	// the rows between them have been removed and will never be delivered, so a
+	// silent empty page would read as "nothing changed" — i.e. an unapplied
+	// revocation, silently.
 	PollSubjectChanges(ctx context.Context, sinceID int64, limit int32) (changes []SubjectChange, headID int64, err error)
 }
 

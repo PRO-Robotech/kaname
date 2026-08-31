@@ -33,6 +33,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kacho/pkg/authz/proxytuple"
+	"github.com/PRO-Robotech/kacho/pkg/subjectchange"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
@@ -336,6 +337,29 @@ func (h *Handler) PollSubjectChanges(ctx context.Context, req *iamv1.PollSubject
 		if stderrors.Is(err, service.ErrSubjectChangeNotSettled) {
 			slog.WarnContext(ctx, "subject change journal position is not settled yet", "err", err)
 			return nil, status.Error(codes.Unavailable, "subject change position not settled")
+		}
+		// «Позиция утрачена» — ТРЕТЬЯ полоса, и слить её нельзя ни с одной из
+		// двух соседних (задача #1712).
+		//
+		// С «позиции ещё нет» — потому что советы противоположны: та говорит
+		// «переспроси на следующем такте», эта — «повтор не пройдёт НИКОГДА,
+		// пересядь». Вызывающий, прочитавший вторую как первую, повторял бы с
+		// утраченной позиции вечно, и петля отзыва встала бы навсегда — молча
+		// для клиента, у которого кэш вердиктов отвечает по снятым правам.
+		//
+		// С общим отказом — потому что `INTERNAL` текста не несёт by
+		// construction (он приносит имена схемы и драйвера), а возобновимая
+		// позиция ОБЯЗАНА доехать: без неё вызывающему некуда сесть.
+		//
+		// Отказ собирается ТЕМ ЖЕ конструктором, каким его разбирает край:
+		// собственная сборка деталей здесь была бы вторым местом об одном
+		// предмете и разошлась бы с настоящим читателем молча — обе непусты, обе
+		// выглядят полосой, а совпасть перестают навсегда.
+		var lost *service.SubjectChangePositionLostError
+		if stderrors.As(err, &lost) {
+			slog.WarnContext(ctx, "subject change position is no longer resumable",
+				"since_id", req.GetSinceId(), "earliest_resumable_position", lost.EarliestResumable)
+			return nil, subjectchange.PositionLost(lost.EarliestResumable)
 		}
 		slog.ErrorContext(ctx, "poll subject changes", "err", err)
 		return nil, status.Error(codes.Internal, "subject change poll failed")
