@@ -17,7 +17,8 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
+
+	"github.com/PRO-Robotech/kacho/pkg/servicecontract"
 )
 
 // Mode — overall service mode.
@@ -41,17 +42,34 @@ const (
 	ModeProductionStrict
 )
 
-// String — canonical name for logging / config-errors.
+// String — каноническое имя для журнала и текстов отказа. Берётся у ДОМА
+// словаря, а не пишется здесь: имя и разбор — две стороны одного соответствия, и
+// объявленные порознь они разошлись бы молча.
 func (m Mode) String() string {
+	host, known := m.host()
+	if !known {
+		// Значение вне перечня сюда не приходит: разбор его отвергает. Ветка
+		// остаётся ради ЧИТАЕМОСТИ отказа, если оно всё же появится — иначе
+		// невозможное значение напечаталось бы именем законной посадки, и
+		// разбирающий пошёл бы искать не там.
+		return fmt.Sprintf("mode(%d)", int(m))
+	}
+	return host.String()
+}
+
+// host переводит режим сервиса в общий словарь посадки. Второе значение — знал
+// ли перевод, что переводит: «не знаю» и «dev» обязаны быть различимы, иначе
+// невозможное значение молча читалось бы как самая слабая посадка.
+func (m Mode) host() (servicecontract.Mode, bool) {
 	switch m {
 	case ModeDev:
-		return "dev"
+		return servicecontract.ModeDev, true
 	case ModeProduction:
-		return "production"
+		return servicecontract.ModeProduction, true
 	case ModeProductionStrict:
-		return "production-strict"
+		return servicecontract.ModeProductionStrict, true
 	default:
-		return fmt.Sprintf("mode(%d)", int(m))
+		return 0, false
 	}
 }
 
@@ -62,20 +80,26 @@ func (m Mode) IsProduction() bool {
 
 // parseMode — pointwise inverse of String(); used by the custom
 // mapstructure hook and the YAML/ENV loader.
+//
+// Словарь допустимых написаний — НЕ свой: он объявлен в дереве один раз
+// (`servicecontract.Modes`), и отказ перечисляет ТОТ ЖЕ набор, что у остальных
+// шести стражей старта. Свой словарь здесь был, и он был одним из пяти; копии не
+// собираются вместе и друг друга не читают, поэтому расхождение приходило молча —
+// один из пяти расходился с остальными В ОБЕ СТОРОНЫ (задача продукта #1656).
+//
+// Неизвестное значение спарено с БОЕВЫМ режимом, а не с dev: оба вызывающих
+// (хук mapstructure и UnmarshalJSON) на ошибке прерываются, но вызывающий,
+// игнорирующий ошибку, обязан получить fail-closed, а не анонимный полный доступ.
 func parseMode(s string) (Mode, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "dev":
+	switch mode, err := servicecontract.ParseMode(s); {
+	case err != nil:
+		return ModeProduction, err
+	case mode == servicecontract.ModeDev:
 		return ModeDev, nil
-	case "production":
-		return ModeProduction, nil
-	case "production-strict":
+	case mode == servicecontract.ModeProductionStrict:
 		return ModeProductionStrict, nil
 	default:
-		// Fail-CLOSED on an unknown/typo'd mode (F14 safe-by-default): pair the
-		// error with the production value, NOT ModeDev (anonymous→full access). Both
-		// consumers (the mapstructure hook + UnmarshalJSON) abort on the error today,
-		// but an error-ignoring caller must still default to anonymous-fail-closed.
-		return ModeProduction, fmt.Errorf("unknown mode %q (allowed: dev, production, production-strict)", s)
+		return ModeProduction, nil
 	}
 }
 

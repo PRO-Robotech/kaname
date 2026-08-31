@@ -109,6 +109,15 @@ func StripSentinel(err error) string {
 	for _, s := range []error{ErrNotFound, ErrAlreadyExists, ErrFailedPrecondition, ErrInvalidArg, ErrInternal, ErrUnavailable, ErrPermissionDenied, ErrUnauthenticated, ErrAborted, ErrQuotaExceeded, ErrQuotaNotProvisioned, ErrQuotaRateExceeded, ErrSelfRevoke, ErrLastAdmin} {
 		prefix := s.Error() + ": "
 		if rest, ok := strings.CutPrefix(msg, prefix); ok {
+			// Пустой остаток — вырожденный случай: обёртка без текста
+			// (`Wrapf(sentinel, "%s", "")`). Отдать его клиенту значило бы
+			// отказать БЕЗ СООБЩЕНИЯ — код без единого слова о том, что делать
+			// дальше, неотличимый в журнале от потери сообщения. Замещается
+			// текстом того sentinel'а, чей префикс совпал (задача продукта
+			// #1658, полоса ct2-misc).
+			if rest == "" {
+				return s.Error()
+			}
 			return rest
 		}
 	}
