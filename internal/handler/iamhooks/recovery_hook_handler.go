@@ -101,7 +101,7 @@ func (h *RecoveryHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
-	if !requireHookAuth(w, r, h.cfg.HookSharedSecret) {
+	if !requireHookAuth(w, r, h.cfg.HookSharedSecret, h.logger, "recovery_hook") {
 		return
 	}
 
