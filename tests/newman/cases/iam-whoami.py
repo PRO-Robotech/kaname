@@ -6,12 +6,27 @@
 Covered RPCs:
   AuthorizeService.WhoAmI (GET /iam/v1/me) — caller identity + permission snapshot.
 
-CRUD fixture dependency:
-  jwtAccountAdminA  — JWT for accountA owner (userAAAId)
-  jwtAccountAdminB  — JWT for accountBId owner (userAABId)
-  jwtNoBindings     — authenticated, no account membership
-  jwtBootstrap      — bootstrap admin (admin@prorobotech.ru)
-  userAAAId / userAABId / userNOBId
+CRUD fixture dependency (ровно то, что читает тело — сверено переписью):
+  jwtHumanCeremony            — предъявитель ЧЕЛОВЕКА, добытый настоящим входом
+                                паролем (волна церемонии); владелец ceremonyAccountId
+  jwtHumanCeremonyNoBindings  — предъявитель ЧЕЛОВЕКА без единой выдачи
+  ceremonyUserId              — id того же человека, что предъявляет jwtHumanCeremony
+  ceremonyNoBindingsUserId    — id человека без выдач
+  ceremonyAccountId           — аккаунт, которым владеет ceremonyUserId
+
+  ПОЧЕМУ ИМЕННО ЧЕЛОВЕК, А НЕ СЛУЖЕБНАЯ УЧЁТКА. Кейс утверждает про ответ
+  `subject == "user:<id>"` и про непустой `accounts`. Машинный предъявитель дал бы
+  `service_account:<sva>` и пустой `userId` — то есть утверждения проверяли бы
+  другой класс принципала, а не тот, о котором написаны.
+
+  ЗДЕСЬ СТОЯЛ БЛОК, ПЕРЕЖИВШИЙ СВОЙ ПРЕДМЕТ (задача #1441, п.5). Он называл
+  `jwtAccountAdminA`/`jwtAccountAdminB`/`jwtNoBindings`/`jwtBootstrap` и объявлял
+  первые два предъявителями `userAAAId`/`userAABId`. Тело не читает НИ ОДИН из
+  четырёх слотов (перепись: слотов в шапке 4, использовано 0), а сама пара
+  невозможна by construction: `user*Id` — ЦЕЛИ ПРИВЯЗКИ, ни один выдаваемый
+  предъявитель ими не аутентифицируется (`tests/authz-fixtures/principal_pairings.py`,
+  `BINDING_TARGET_ONLY_IDS`). Держится гейтом
+  `scripts/case_header_principal_claim_test.py`.
 
 Contract:
   - GET /iam/v1/me on the gateway-external mux, listed as `<exempt>` in the
@@ -30,15 +45,15 @@ Contract:
   - Anonymous → 401 UNAUTHENTICATED (16) — handler is authoritative gate
     because the catalog marks WhoAmI as <exempt>.
 
-Acceptance scenarios:
-  Happy: jwtAccountAdminA → 200, subject == "user:<userAAAId>", userId == userAAAId,
-    accounts contains accountAId with `owner` tag (implicit owner-role).
-  Negative: anonymous (no Bearer) → 401, code 16.
+Acceptance scenarios (три, по числу кейсов набора):
+  IAM-WAI-GT-CRUD-OK   — jwtHumanCeremony → 200, subject == "user:<ceremonyUserId>",
+    userId == ceremonyUserId, accounts содержит ceremonyAccountId.
+  IAM-WAI-GT-AUTHZ-ANON-DENY — без предъявителя → 401, код 16.
+  IAM-WAI-GT-CRUD-NOB  — jwtHumanCeremonyNoBindings → 200, accounts пуст
+    (`<exempt>`: ручка открыта всякому АУТЕНТИФИЦИРОВАННОМУ, выдач не требует).
 
-Test-first note (strict TDD):
-  Cases are written RED-first. They will fail until
-  AuthorizeService.WhoAmI is correctly implemented and wired through api-gateway
-  REST mux at /iam/v1/me. Do not weaken assertions — fix the implementation.
+  Положительный контроль стоит ПЕРЕД отрицанием и в том же наборе: «accounts пуст»
+  без него было бы верно и о ручке, не заполняющей accounts никогда.
 
 verifies: WhoAmI happy-path + anonymous denial; matches WhoAmIResponse
 fields documented in proto access_binding_service.proto.

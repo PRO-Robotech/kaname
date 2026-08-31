@@ -114,7 +114,12 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// «состояние ресурса не позволяет», а не поломка сервиса. Текст при этом
 		// берётся НЕ из сообщения сервера — оно диагностика хранилища, — а из
 		// таблицы связей ниже, и незнакомая связь получает общий текст без утечки.
-		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "%s", integrityText(pgErr, kindHint, idHint))
+		//
+		// Признак ВЫБИРАЕТСЯ вместе с текстом, а не ставится общим на весь класс:
+		// у отказа «членство несёт права» есть потребитель, дочитывающий перечень
+		// мешающих выдач, и отличить эту полосу от прочих предусловий он обязан
+		// машинно (см. `iamerr.ErrMembershipCarriesRights`).
+		return iamerr.Wrapf(integritySentinel(pgErr, kindHint), "%s", integrityText(pgErr, kindHint, idHint))
 	case pgfault.Unique: // unique_violation
 		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "%s", uniqueText(pgErr, kindHint, idHint))
 	case pgfault.ForeignKey: // foreign_key_violation
@@ -354,8 +359,30 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 // Подсказка приходит из `writeTx.Commit`: отложенный триггер срабатывает НА
 // КОММИТЕ, и назвать человека с аккаунтом можно только тем, что писатель оставил
 // в подсказке (`userWriter.RemoveMembership`).
+// isMembershipCarriesRights — распознаватель ОДНОЙ полосы 23000, общий для
+// текста и для признака.
+//
+// Один распознаватель, а не два похожих условия рядом: разъехавшись, они дали бы
+// худший из исходов — отказ с текстом про выдачи и признаком другой полосы, то
+// есть ответ, машинно заявляющий одно, а прозой другое.
+func isMembershipCarriesRights(pgErr *pgconn.PgError, kindHint string) bool {
+	return pgErr.ConstraintName == "membership_carrying_rights_is_kept" || kindHint == "Membership.Remove"
+}
+
+// integritySentinel — какой полосе принадлежит отказ 23000.
+//
+// Незнакомая связь остаётся общим предусловием: у неё нет потребителя, который
+// умел бы что-то дочитать, и объявить её особой полосой значило бы обещать
+// клиенту различение, за которым ничего не стоит.
+func integritySentinel(pgErr *pgconn.PgError, kindHint string) error {
+	if isMembershipCarriesRights(pgErr, kindHint) {
+		return iamerr.ErrMembershipCarriesRights
+	}
+	return iamerr.ErrFailedPrecondition
+}
+
 func integrityText(pgErr *pgconn.PgError, kindHint, idHint string) string {
-	if pgErr.ConstraintName == "membership_carrying_rights_is_kept" || kindHint == "Membership.Remove" {
+	if isMembershipCarriesRights(pgErr, kindHint) {
 		user, account, _ := splitBindingHint(idHint)
 		if user != "" && account != "" {
 			return fmt.Sprintf("User %s still has active access bindings in Account %s and cannot be removed from it", user, account)

@@ -164,7 +164,51 @@ func (uc *RemoveFromAccountUseCase) doRemove(ctx context.Context, userID domain.
 				},
 			})
 		}); err != nil {
-		return nil, err
+		return nil, uc.nameBlockingGrants(ctx, err, userID, accountID)
 	}
 	return anypb.New(&emptypb.Empty{})
+}
+
+// nameBlockingGrants дополняет отказ «членство несёт права» перечнем выдач,
+// которые его держат (задача продукта #1686).
+//
+// # Почему это ЗДЕСЬ, а не там, где формируется текст
+//
+// Триггер отложенный: отказ приходит на КОММИТЕ, и к этому моменту транзакция
+// мертва — спросить у неё, что помешало, нельзя ни одним запросом. Отображение
+// ошибок (`repo/kacho/pg/pgmaperr.go`) соединения не имеет вовсе и назвать может
+// только то, что писатель оставил в подсказке: человека и аккаунт. Перечень
+// добывается ОТДЕЛЬНЫМ чтением, и место, где есть и репозиторий, и уже
+// полученный отказ, — здесь.
+//
+// # Это НЕ проверка-перед-снятием (ban #10)
+//
+// Решает по-прежнему база. Чтение идёт ПОСЛЕ отказа и только затем, чтобы отказ
+// назвал предмет. Гонка между отказом и чтением законна и разрешена в сторону
+// молчания: выдачи успели отозвать — перечень пуст, и отказ остаётся прежним, а
+// не превращается в утверждение «мешающих выдач ноль», которого база не делала.
+//
+// # Отказ дочитывания не подменяет собой отказ исключения
+//
+// База не ответила на второе чтение — возвращается ПЕРВЫЙ отказ как есть.
+// Подменить его ошибкой чтения значило бы сказать клиенту «сервис сломан» там,
+// где сервис работает верно и всего лишь не смог украсить сообщение.
+func (uc *RemoveFromAccountUseCase) nameBlockingGrants(
+	ctx context.Context, refusal error, userID domain.UserID, accountID domain.AccountID,
+) error {
+	if !shared.IsMembershipCarriesRights(refusal) {
+		return refusal
+	}
+	r, rerr := uc.repo.Reader(ctx)
+	if rerr != nil {
+		return refusal
+	}
+	defer func() { _ = r.Rollback(ctx) }()
+
+	ids, total, lerr := r.AccessBindings().ListActiveHoldingMembership(
+		ctx, userID, accountID, shared.MaxNamedBlockingGrants)
+	if lerr != nil {
+		return refusal
+	}
+	return shared.NameBlockingGrants(refusal, ids, total)
 }

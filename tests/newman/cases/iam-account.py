@@ -364,7 +364,10 @@ CASES.append(Case(
             ],
         ),
         # Poll and assert error.code == 6 (ALREADY_EXISTS).
-        assert_op_error(6, "ALREADY_EXISTS", msg_substr="already exists"),
+        # Текст владельца ЦЕЛИКОМ: «already exists» несут пять разных отказов iam,
+        # и утверждение об общей части проходило на отказе о ЧУЖОМ ресурсе (#1748).
+        assert_op_error(6, "ALREADY_EXISTS",
+                        msg_text="Account with name crud-{{runId}} already exists"),
     ],
 ))
 
@@ -1376,7 +1379,11 @@ CASES.append(Case(
                 *save_from_response("j.id", "opId"),
             ],
         ),
-        assert_op_error(9, "FAILED_PRECONDITION", msg_substr="cannot be deleted"),
+        # Текст владельца ЦЕЛИКОМ: «cannot be deleted» несут ОДИННАДЦАТЬ разных
+        # отказов iam, и утверждение об общей части не различало, какая именно
+        # помеха удержала удаление (#1748).
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        msg_text="Account {{accountAId}} contains projects and cannot be deleted"),
     ],
 ))
 

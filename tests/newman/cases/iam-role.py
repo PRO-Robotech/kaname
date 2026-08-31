@@ -7,11 +7,20 @@ Covered RPCs:  Create, Get, List, Update, Delete, ListOperations.
 
 CRUD fixture dependency:
   Reuses vars from crud-fixture/setup.sh (superset: authz-fixtures/setup.sh):
-    jwtAccountAdminA  — JWT for userAAAId (admin of accountAId)
-    jwtAccountAdminB  — JWT for accountBId owner
+    jwtAccountAdminA  — служебная учётка, admin @ accountAId (НЕ предъявитель userAAAId)
+    jwtAccountAdminB  — служебная учётка, admin @ accountBId
     jwtNoBindings     — authenticated, no account membership
     accountAId        — pre-seeded account for custom role scope
     accountBId        — cross-account (for isolation probes)
+
+  ПОЧЕМУ `user*Id` НЕ ПРЕДЪЯВИТЕЛИ. Это ЦЕЛИ ПРИВЯЗКИ — строки пользователей,
+  заведённые, чтобы разрешился триггер существования субъекта. Ни один выдаваемый
+  предъявитель ими не аутентифицируется, и не может: машинный харнесс получает
+  `client_credentials`, то есть служебную учётку. Привязать роль к `{{user*Id}}` и
+  читать `{{jwt*}}` значит завести канал, который не разрешится ни при каком
+  бюджете, а выглядеть это будет таймаутом шестью шагами позже. Набор объявлен
+  ДАННЫМИ (`tests/authz-fixtures/principal_pairings.py`, `BINDING_TARGET_ONLY_IDS`)
+  и сверяется гейтом `scripts/case_header_principal_claim_test.py`.
 
   System roles are seeded with deterministic ids: `rol` + substr(md5(<name>),1,17).
   See authz-deny.py constants (ROLE_ADMIN, ROLE_VIEW).

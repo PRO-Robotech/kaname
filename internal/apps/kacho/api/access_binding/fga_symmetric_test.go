@@ -690,6 +690,14 @@ func (r *fakeRoleRdr) ListAssignable(_ context.Context, _, _ string, _ role_repo
 // fakeABRdr — access_binding Reader; returns last-inserted AB by id.
 type fakeABRdr struct{ repo *abFakeRepo }
 
+// ListActiveHoldingMembership — предмета этой пробы не касается: она не исключает
+// человека из аккаунта. Пустой перечень — ЗАКОННЫЙ ответ (мешающих выдач нет), а
+// не заглушка «ответить нечем»: дублёр обязан выполнять контракт настоящего, и
+// молчаливо шире его не отвечать.
+func (a *fakeABRdr) ListActiveHoldingMembership(context.Context, domain.UserID, domain.AccountID, int) ([]string, int, error) {
+	return nil, 0, nil
+}
+
 func (a *fakeABRdr) Get(_ context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
 	a.repo.mu.Lock()
 	defer a.repo.mu.Unlock()

@@ -57,6 +57,13 @@ func MapRepoErr(err error) error {
 	if refusal, ok := quotaRefusal(err); ok {
 		return refusal
 	}
+	// Отказ «членство несёт права» — по той же причине и ДО общего switch'а: он
+	// несёт признак полосы, по которому исключение человека узнаёт, что перечень
+	// мешающих выдач можно дочитать. Sentinel-ветка ниже пересобирает статус
+	// голым `status.Error(code, text)` и признак потеряла бы (задача #1686).
+	if refusal, ok := membershipRefusal(err); ok {
+		return refusal
+	}
 	switch {
 	case stderrors.Is(err, iamerr.ErrNotFound):
 		return status.Error(codes.NotFound, iamerr.StripSentinel(err))

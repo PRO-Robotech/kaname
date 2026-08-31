@@ -89,7 +89,51 @@ var (
 	// `(SELECT count(*) FROM cluster_admin_grants WHERE granted_until IS NULL) > 1`
 	// — atomic, no separate SELECT-then-UPDATE race window.
 	ErrLastAdmin = stderrors.New("last admin revoke forbidden")
+
+	// ErrMembershipCarriesRights — членство снимают, пока на него опирается живая
+	// выдача. Отложенный триггер `membership_carrying_rights_is_kept` (миграция
+	// 472002) отвергает это НА КОММИТЕ. Маппится в FAILED_PRECONDITION — так
+	// называет полосу контракт RemoveFromAccount.
+	//
+	// # Почему СВОЙ признак, а не общий ErrFailedPrecondition
+	//
+	// Контракт обещает отказ «с перечисленными выдачами», а перечень добывается
+	// ОТДЕЛЬНЫМ чтением: триггер отложенный, и к моменту отказа транзакция мертва
+	// — спросить у неё, что помешало, нельзя ни одним запросом. Значит у отказа
+	// есть потребитель (use-case исключения), который обязан отличить ЭТУ полосу
+	// от всех прочих предусловий, чтобы знать, что именно дочитывать. Общий
+	// признак этого не даёт: под ним лежат десятки разных отказов, и «дочитать
+	// выдачи» на любом из них было бы догадкой.
+	//
+	// Признак уезжает и КЛИЕНТУ — токеном `MEMBERSHIP_CARRIES_RIGHTS` в
+	// `google.rpc.ErrorInfo` (`shared.membershipRefusal`), поэтому полоса
+	// различается машинно и не зависит от языка прозы.
+	//
+	// # Это СПЕЦИАЛИЗАЦИЯ предусловия, а не полоса рядом с ним
+	//
+	// `errors.Is(err, ErrFailedPrecondition)` на нём по-прежнему ИСТИНА, и это
+	// несущее свойство, а не удобство: на общий признак ветвятся пять мест
+	// не-тестового дерева и не одна проба. Заведи полосу рядом — и каждое из них
+	// молча перестало бы узнавать этот отказ, причём ни одно не сказало бы об
+	// этом: они просто ушли бы в ветку «прочее».
+	//
+	// Текст СОВПАДАЕТ с общим намеренно. Он служит префиксом, который снимает
+	// `StripSentinel`, и собственный текст потребовал бы записи в её перечне —
+	// то есть второго места об одном предмете. Наружу этот текст не уезжает
+	// никогда: он снимается до отправки.
+	ErrMembershipCarriesRights error = specialisedSentinel{general: ErrFailedPrecondition}
 )
+
+// specialisedSentinel — признак ЧАСТНОГО случая общего признака.
+//
+// Нужен там, где у отказа появляется потребитель, которому мало кода: он обязан
+// узнать ИМЕННО эту полосу, чтобы что-то по ней доделать (для «членство несёт
+// права» — дочитать перечень мешающих выдач). При этом отказ не перестаёт быть
+// общим случаем, и все, кто ветвился на общий, обязаны продолжать работать.
+type specialisedSentinel struct{ general error }
+
+func (s specialisedSentinel) Error() string { return s.general.Error() }
+func (s specialisedSentinel) Unwrap() error { return s.general }
 
 // Wrapf — standard fmt.Errorf-style wrapper with an explicit sentinel. Use
 // in use-cases: `return errors.Wrapf(errors.ErrNotFound, "Account %s not found", id)`.

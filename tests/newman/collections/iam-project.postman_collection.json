@@ -634,7 +634,11 @@
                   "pm.environment.unset('_opErrStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('error code 6 (ALREADY_EXISTS)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(6));",
-                  "pm.test('error text includes \"already exists\"', () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include('already exists'));"
+                  "pm.test('operation refusal text is the owner\\'s verbatim tone', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  const opMsg = (j.error && j.error.message) || '';",
+                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('Project with name prj-' + pm.environment.get('runId') + ' already exists');",
+                  "});"
                 ]
               }
             }

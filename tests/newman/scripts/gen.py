@@ -77,6 +77,8 @@ from gen_shared import (  # noqa: E402  — импорт после провяз
     _assert_delete_operation_outcome,
     assert_field_violation,
     assert_grpc_code,
+    assert_op_refusal_message,
+    assert_op_refusal_message_contains,
     assert_refusal_message,
     assert_refusal_message_contains,
     _assert_published_id_outcome,
@@ -1020,7 +1022,9 @@ def poll_request_until_status(name: str, method: str, path: str, test_script: Li
 
 def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
                     msg_regex: Optional[str] = None, auth: str = AUTH_INHERIT_OP,
-                    op_var: str = "opId") -> Step:
+                    op_var: str = "opId", reason: Optional[str] = None,
+                    msg_text: Optional[str] = None,
+                    msg_text_contains: Optional[str] = None) -> Step:
     """Поллит /operations/{op_var} до done и проверяет, что operation завершилась с error.code == code.
 
     The auth parameter carries a valid Bearer token: OperationService/Get is
@@ -1061,8 +1065,29 @@ def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
     ]
     if msg_substr is not None:
         body.append(f"pm.test({js_str(f'error text includes \"{msg_substr}\"')}, () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include({js_str(msg_substr.lower())}));")
+    if reason is not None:
+        # ПАРА: код И машинный признак полосы. Код один на многие полосы
+        # (FAILED_PRECONDITION отдают и предел, и состояние, и предусловие на
+        # чужой ресурс), поэтому сам по себе он полосу не называет; признак
+        # называет — и НЕ ЗАВИСИТ ОТ ЯЗЫКА прозы, тогда как проза есть контракт,
+        # который меняется осознанно (`api-conventions.md` §By-lane code-split).
+        #
+        # Признак живёт в `Operation.error.details` — это `google.rpc.Status`, и
+        # его `details` переживают хранение (`pkg/operations`: они кладутся
+        # `proto.Marshal(Status)` и восстанавливаются на чтении). Пустой перечень
+        # деталей — законный ответ БЕЗ признака, и он обязан быть красным: отказ,
+        # потерявший признак, для клиента неотличим от чужой полосы.
+        body.append(
+            f"pm.test({js_str(f'error carries reason {reason}')}, () => {{"
+            " const ds = (j.error && j.error.details) || [];"
+            " const rs = ds.map(d => d && d.reason).filter(Boolean);"
+            f" pm.expect(rs, JSON.stringify(j)).to.include({js_str(reason)}); }});")
     if msg_regex is not None:
         body.append(f"pm.test({js_str(f'error text matches /{msg_regex}/')}, () => pm.expect(j.error && j.error.message || '', JSON.stringify(j)).to.match(/{js_regex_src(msg_regex, where='iam/assert_op_error/msg_regex')}/));")
+    if msg_text is not None:
+        body.extend(assert_op_refusal_message(msg_text))
+    if msg_text_contains is not None:
+        body.extend(assert_op_refusal_message_contains(msg_text_contains))
     return Step(name="assert-op-error", method="GET", path="/operations/{{" + op_var + "}}",
                 auth=auth, op_var=op_var, pre_script=_op_id_guard(op_var, True), test_script=body)
 
@@ -1739,6 +1764,14 @@ _INJECTED = {
     "assert_op_success": assert_op_success,
     "js_regex_src": js_regex_src,
     "js_name": js_name,
+    # СЕРИАЛИЗАТОР СТРОКИ — впрыскивается, потому что без него декларация не
+    # может исполнить правило #1181 даже при желании автора: вклейка в литерал
+    # остаётся ЕДИНСТВЕННОЙ доступной формой, и корпус растёт не по небрежности,
+    # а по построению. Соседний набор (vpc) впрыскивает его давно и вклеек в
+    # литерал строки почти не имеет; iam впрыскивал `js_name`/`js_regex_src` —
+    # то есть помощников для ИМЕНИ и для ВЫРАЖЕНИЯ, — а помощника для самого
+    # частого случая, строки, у автора кейса не было.
+    "js_str": js_str,
     "credential_secret_pattern": credential_secret_pattern,
 }
 

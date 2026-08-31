@@ -26,6 +26,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"google.golang.org/grpc"
 
+	"github.com/PRO-Robotech/kacho/pkg/authz"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 	"github.com/PRO-Robotech/kacho/pkg/observability"
@@ -660,7 +661,10 @@ func runServe(cfg config.Config) error {
 	// (1) Приём вебхуков провайдера личности (Hydra token/refresh, Kratos
 	// provision). Cluster-internal-only (запрет #6), отдельный порт от gRPC.
 	hooksAddr := cfg.AuthN.HooksHTTPListenAddress()
-	hooksHandler, healthAgg := buildHooksMux(pool, kachoRepo, opsRepo, svcs.ownGates, metricsReg, cfg, logger)
+	// Носитель готовности отдаётся сюда, чтобы гашение переводило `/readyz` в
+	// 503 ДО остановки серверов (см. triggerShutdown ниже). Без этого носитель
+	// был бы, а дёрнуть его было бы некому (#1752).
+	hooksHandler, hooksHealth := buildHooksMux(pool, kachoRepo, opsRepo, svcs.ownGates, metricsReg, cfg, logger)
 	hooksSurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "вебхуки провайдера личности",
 		Mode:    surfaceMode,
@@ -983,13 +987,10 @@ func runServe(cfg config.Config) error {
 	var shutdownOnce sync.Once
 	triggerShutdown := func() {
 		shutdownOnce.Do(func() {
-			// Готовность переводится в отказ ПЕРВЫМ действием гашения — до
-			// остановки слушателей: kubelet перестаёт слать трафик, пока текущие
-			// вызовы дорабатывают. Для листа графа это дороже, чем для остальных:
-			// к владельцу прав на каждом вызове ходят ВСЕ прочие сервисы, и
-			// гасящийся под, продолжающий объявлять себя готовым, отправляет их
-			// проверку доступа в отказ соединения.
-			healthAgg.SetShuttingDown()
+			// ПЕРВЫМ делом — снять под из ротации: kubelet перестаёт слать
+			// трафик ДО того, как серверы начнут отказывать. Порядок здесь и
+			// есть предмет: флип после остановки не успевает ничего.
+			hooksHealth.SetShuttingDown()
 			stopAdmission()
 			stopGRPCBounded(internalSrv, gracefulTimeout)
 			stopGRPCBounded(grpcSrv, gracefulTimeout)
@@ -1230,9 +1231,19 @@ func runServe(cfg config.Config) error {
 	// (idle-conn-reset): NOTIFY несет latency, поэтому дефолт поднят со 150ms до 1s — реже
 	// холостых claim'ов, а recovery при потере NOTIFY все равно ≤1s (и под 30s sweep'ом).
 	// Sweep (полный проход) остается 30s как defense-in-depth. Оба интервала override-ятся env.
+	//
+	// Обе величины — ВТОРАЯ ступень цепочки отзыва гранта, и обе судятся при
+	// старте: посадка, объявившая обход шире потолка политики, процесс не
+	// поднимает. Пара читается ОДИН раз и той же парой уезжает в воркер —
+	// прочтя ручку дважды, страж и воркер разошлись бы там, где переменную
+	// меняли между вызовами. Разбор — `reconcile_window.go`.
+	reconcileWindows := readReconcileWindows()
+	if err := reconcileWindows.validate(authz.RevocationPolicy.MaterializationCeiling); err != nil {
+		return err
+	}
 	reconcileWorker := seed.NewReconcileWorker(reconcileEngine, reconcileAdapter, seed.ReconcileWorkerConfig{
-		SweepInterval: envDurationMS("KACHO_IAM_RECONCILE_SWEEP_INTERVAL_MS", 30*time.Second),
-		DrainInterval: envDurationMS("KACHO_IAM_RECONCILE_DRAIN_INTERVAL_MS", 1*time.Second),
+		SweepInterval: reconcileWindows.Sweep,
+		DrainInterval: reconcileWindows.Drain,
 		Notify:        reconcileAdapter,
 		Logger:        logger.With(slog.String("component", "rsab_reconciler")),
 	})

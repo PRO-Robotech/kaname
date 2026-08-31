@@ -55,7 +55,7 @@ type OutboxRecorder struct {
 
 	dirBacklog   *prometheus.GaugeVec
 	dirOldest    *prometheus.GaugeVec
-	dirDelivered *prometheus.GaugeVec
+	dirDelivered *prometheus.CounterVec
 }
 
 // newOutboxRecorder регистрирует коллекторы в этом реестре. Зовётся ровно один
@@ -84,11 +84,14 @@ func (r *Registry) newOutboxRecorder() *OutboxRecorder {
 			Help: "Возраст самой старой недоставленной строки одного направления — " +
 				"отвечает на «как давно это направление перестало доезжать».",
 		}, []string{"table", "direction"}),
-		dirDelivered: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		dirDelivered: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "kacho_iam_outbox_delivered_total",
-			Help: "Доставленные строки очереди по направлению. Единственная величина, " +
-				"отличающая «их не было» от «они не доезжают»: ноль по снятию означает, " +
-				"что ни один отзыв прав не был применён за всю жизнь очереди.",
+			Help: "Доставленные строки очереди по направлению, считаются В МОМЕНТ " +
+				"доставки. Единственная величина, отличающая «их не было» от «они не " +
+				"доезжают»: ноль по снятию означает, что ни один отзыв прав не был " +
+				"применён С МОМЕНТА СТАРТА ПРОЦЕССА. Счётчик, а не измеритель: значение " +
+				"не зависит от числа хранимых строк, поэтому уборка доставленных его не " +
+				"снижает; порог ставить на increase() за окно.",
 		}, []string{"table", "direction"}),
 	}
 	r.reg.MustRegister(rec.backlog, rec.oldest, rec.poison,
@@ -140,9 +143,20 @@ func (rec *OutboxRecorder) SetOldestPendingAgeByDirection(table, direction strin
 	rec.dirOldest.WithLabelValues(table, direction).Set(age)
 }
 
-// SetDeliveredTotal реализует outbox/metrics.DirectionRecorder.
-func (rec *OutboxRecorder) SetDeliveredTotal(table, direction string, count float64) {
-	rec.dirDelivered.WithLabelValues(table, direction).Set(count)
+// IncDeliveredByDirection — ОДНА доставленная строка направления.
+//
+// СЧЁТЧИК, инкрементируемый наблюдателем дренажа, а не измеритель, ставящийся
+// сканом (#1714): величина объявлена «за всё время», и счёт по живым строкам
+// совпадал с этим ровно до появления уборки доставленных строк.
+func (rec *OutboxRecorder) IncDeliveredByDirection(table, direction string) {
+	rec.dirDelivered.WithLabelValues(table, direction).Inc()
+}
+
+// InitDeliveredByDirection заводит серию направления с нулём, не увеличивая её:
+// дочерняя серия счётчика иначе появилась бы только после ПЕРВОЙ доставки, и
+// «ни одного отзыва не доставлено» выражалось бы отсутствием ряда вместо нуля.
+func (rec *OutboxRecorder) InitDeliveredByDirection(table, direction string) {
+	rec.dirDelivered.WithLabelValues(table, direction)
 }
 
 // Compile-time: адаптер удовлетворяет ОБА corelib-порта.

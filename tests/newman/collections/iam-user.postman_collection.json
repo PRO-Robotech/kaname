@@ -4510,7 +4510,11 @@
                   "pm.environment.unset('_opErrStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
-                  "pm.test('error text includes \"has active access bindings and cannot be deleted\"', () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include('has active access bindings and cannot be deleted'));"
+                  "pm.test('operation refusal text is the owner\\'s verbatim tone', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  const opMsg = (j.error && j.error.message) || '';",
+                  "  pm.expect(opMsg, JSON.stringify(j)).to.eql('User ' + pm.environment.get('ceremonyUserId') + ' has active access bindings and cannot be deleted');",
+                  "});"
                 ]
               }
             }
@@ -9716,7 +9720,8 @@
                   "pm.environment.unset('_opErrStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
-                  "pm.test('error text matches /^User usr[a-z0-9]+ still has active access bindings in Account acc[a-z0-9]+ and cannot be removed from it$/', () => pm.expect(j.error && j.error.message || '', JSON.stringify(j)).to.match(/^User usr[a-z0-9]+ still has active access bindings in Account acc[a-z0-9]+ and cannot be removed from it$/));"
+                  "pm.test('error carries reason MEMBERSHIP_CARRIES_RIGHTS', () => { const ds = (j.error && j.error.details) || []; const rs = ds.map(d => d && d.reason).filter(Boolean); pm.expect(rs, JSON.stringify(j)).to.include('MEMBERSHIP_CARRIES_RIGHTS'); });",
+                  "pm.test('error text matches /^User usr[a-z0-9]+ still has active access bindings in Account acc[a-z0-9]+ and cannot be removed from it: acb[a-z0-9]+(, acb[a-z0-9]+)* \\\\(\\\\d+ total\\\\); revoke them before removing the membership$/', () => pm.expect(j.error && j.error.message || '', JSON.stringify(j)).to.match(/^User usr[a-z0-9]+ still has active access bindings in Account acc[a-z0-9]+ and cannot be removed from it: acb[a-z0-9]+(, acb[a-z0-9]+)* \\(\\d+ total\\); revoke them before removing the membership$/));"
                 ]
               }
             }
@@ -9833,6 +9838,18 @@
                   "  const m = (j.error && j.error.message) || '';",
                   "  pm.expect(m, JSON.stringify(j)).to.include(pm.environment.get('holdVictimId'));",
                   "  pm.expect(m, JSON.stringify(j)).to.include(pm.environment.get('accountAId'));",
+                  "});",
+                  "pm.test('машинный перечень выдач и текст называют одни и те же выдачи', () => {",
+                  "  const j = pm.response.json();",
+                  "  const m = (j.error && j.error.message) || '';",
+                  "  const ds = (j.error && j.error.details) || [];",
+                  "  const ei = ds.find(d => d && d.reason === 'MEMBERSHIP_CARRIES_RIGHTS');",
+                  "  pm.expect(ei, 'признак полосы обязан быть в деталях: ' + JSON.stringify(j)).to.be.an('object');",
+                  "  const ids = ((ei.metadata || {}).blocking_binding_ids || '').split(',').filter(Boolean);",
+                  "  pm.expect(ids, 'перечень мешающих выдач пуст — обещание контракта без исполнителя: ' + JSON.stringify(j)).to.not.be.empty;",
+                  "  ids.forEach(id => pm.expect(m, 'машинно назван ' + id + ', а в тексте его нет: ' + JSON.stringify(j)).to.include(id));",
+                  "  const cnt = parseInt((ei.metadata || {}).blocking_binding_count || '0', 10);",
+                  "  pm.expect(cnt, 'величина перечня обязана быть не меньше числа названных: ' + JSON.stringify(j)).to.be.at.least(ids.length);",
                   "});"
                 ]
               }

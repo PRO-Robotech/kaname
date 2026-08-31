@@ -175,6 +175,15 @@ func (r *fakeABRdr) SelectTuplesClaimedByOtherActiveBindings(context.Context, do
 func (r *fakeABRdr) ListByRole(context.Context, domain.RoleID, access_binding.ListByRoleFilter) ([]domain.AccessBinding, string, error) {
 	return nil, "", nil
 }
+
+// ListActiveHoldingMembership — предмета этой пробы не касается: она не исключает
+// человека из аккаунта. Пустой перечень — ЗАКОННЫЙ ответ (мешающих выдач нет), а
+// не заглушка «ответить нечем»: дублёр обязан выполнять контракт настоящего, и
+// молчаливо шире его не отвечать.
+func (r *fakeABRdr) ListActiveHoldingMembership(context.Context, domain.UserID, domain.AccountID, int) ([]string, int, error) {
+	return nil, 0, nil
+}
+
 func (r *fakeABRdr) ListSubjects(context.Context, domain.AccessBindingID) ([]domain.Subject, error) {
 	return nil, nil
 }

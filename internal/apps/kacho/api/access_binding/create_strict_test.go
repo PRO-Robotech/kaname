@@ -244,6 +244,15 @@ func (r *strictDupABReader) SelectTuplesClaimedByOtherActiveBindings(context.Con
 func (r *strictDupABReader) ListByRole(context.Context, domain.RoleID, repoab.ListByRoleFilter) ([]domain.AccessBinding, string, error) {
 	return nil, "", nil
 }
+
+// ListActiveHoldingMembership — предмета этой пробы не касается: она не исключает
+// человека из аккаунта. Пустой перечень — ЗАКОННЫЙ ответ (мешающих выдач нет), а
+// не заглушка «ответить нечем»: дублёр обязан выполнять контракт настоящего, и
+// молчаливо шире его не отвечать.
+func (r *strictDupABReader) ListActiveHoldingMembership(context.Context, domain.UserID, domain.AccountID, int) ([]string, int, error) {
+	return nil, 0, nil
+}
+
 func (r *strictDupABReader) ListSubjects(context.Context, domain.AccessBindingID) ([]domain.Subject, error) {
 	return nil, nil
 }

@@ -1386,6 +1386,77 @@ func (r *abReader) SelectTuplesClaimedByOtherActiveBindings(ctx context.Context,
 	return out, nil
 }
 
+// membershipHoldingBindingsPredicate — предикат «эта выдача держит членство
+// человека в аккаунте». $1 = user_id, $2 = account_id.
+//
+// ЭТО КОПИЯ УСЛОВИЯ ТРИГГЕРА `membership_carrying_rights_is_kept` (миграция
+// 472002), и копия намеренная: перенести его в общее место нельзя — триггер
+// исполняется внутри базы на удалении строки, а это чтение идёт снаружи и после
+// отказа. Копия названа копией здесь, чтобы правка одной стороны заставляла
+// открыть вторую; расхождение наблюдаемо пробой, которая заводит выдачу каждой
+// формы и требует, чтобы отвергнутое триггером было названо отказом.
+//
+// Три оси, ровно как у триггера: живая · адресует ЭТОГО человека (обе проекции
+// субъекта) · в области ЭТОГО аккаунта либо его проекта.
+const membershipHoldingBindingsPredicate = `
+	  status = 'ACTIVE'
+	  AND ( (subject_type = 'user' AND subject_id = $1)
+	        OR EXISTS (SELECT 1 FROM access_binding_subjects s
+	                    WHERE s.binding_id = access_bindings.id
+	                      AND s.subject_type = 'user' AND s.subject_id = $1) )
+	  AND ( (resource_type = 'account' AND resource_id = $2)
+	        OR (resource_type = 'project'
+	            AND resource_id IN (SELECT id FROM projects WHERE account_id = $2)) )`
+
+// ListActiveHoldingMembership — выдачи, держащие членство (задача #1686).
+//
+// Один запрос отдаёт и ограниченный перечень, и ПОЛНУЮ величину: два запроса
+// читали бы два разных снимка, и «названо 5 из 3» стало бы наблюдаемым исходом.
+// Порядок — (created_at, id) ASC: отказ, называющий одни и те же выдачи в разном
+// порядке от прогона к прогону, нельзя ни сравнить, ни закрепить пробой.
+//
+// cursor-list-table: access_bindings
+//
+// Объявление стоит потому, что имя таблицы в запросе СОБИРАЕТСЯ в Go (предикат
+// вынесен константой ради сверки с триггером), и обход дерева его не видит.
+// Без объявления индекс под этот порядок не проверялся бы никем — а порядок тут
+// не украшение: он и есть то, что делает перечень воспроизводимым.
+func (r *abReader) ListActiveHoldingMembership(
+	ctx context.Context, userID domain.UserID, accountID domain.AccountID, limit int,
+) ([]string, int, error) {
+	if limit <= 0 {
+		return nil, 0, nil
+	}
+	rows, err := r.tx.Query(ctx, `
+		SELECT id, count(*) OVER () AS total
+		  FROM access_bindings
+		 WHERE `+membershipHoldingBindingsPredicate+`
+		 ORDER BY created_at ASC, id ASC
+		 LIMIT $3`, string(userID), string(accountID), limit)
+	if err != nil {
+		return nil, 0, mapErr(err, "", string(userID))
+	}
+	defer rows.Close()
+
+	var (
+		ids   []string
+		total int
+	)
+	for rows.Next() {
+		var id string
+		var t int
+		if err := rows.Scan(&id, &t); err != nil {
+			return nil, 0, mapErr(err, "", string(userID))
+		}
+		ids = append(ids, id)
+		total = t
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, mapErr(err, "", string(userID))
+	}
+	return ids, total, nil
+}
+
 // ListActiveByRole returns every non-revoked (PENDING/ACTIVE) binding of a role
 // (Role.Update reconcile fan-out). The set is bounded by the active
 // bindings of the SINGLE mutated role. Ordered (created_at, id) ASC for

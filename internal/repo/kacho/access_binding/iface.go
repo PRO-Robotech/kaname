@@ -121,6 +121,28 @@ type ReaderIface interface {
 	// the use-case layer, as for the other List RPCs. Read-only — no race path.
 	ListByRole(ctx context.Context, roleID domain.RoleID, filter ListByRoleFilter) ([]domain.AccessBinding, string, error)
 
+	// ListActiveHoldingMembership возвращает выдачи, которые ДЕРЖАТ членство
+	// человека в аккаунте, — те самые, из-за которых отложенный триггер
+	// `membership_carrying_rights_is_kept` (миграция 472002) отвергает исключение.
+	// Возвращает до `limit` идентификаторов И полную их величину: перечень
+	// ограничен сверху, и клиент, читающий только его, принял бы «названо пять»
+	// за «их пять».
+	//
+	// # Предикат ПОВТОРЯЕТ триггер, и это несущее требование
+	//
+	// Живые (`status='ACTIVE'`) · адресующие ЭТОГО человека (обе проекции субъекта,
+	// легаси-одиночная и множественная) · в области ЭТОГО аккаунта либо его
+	// проекта. Разойдись он с триггером — отказ называл бы не то, что помешало:
+	// шире, и клиент отзывает лишнее, а исключение всё равно не проходит; уже, и
+	// он отзывает названное, упирается снова и не понимает, почему.
+	//
+	// # Это НЕ проверка-перед-снятием
+	//
+	// Решает по-прежнему база (ban #10). Чтение идёт ПОСЛЕ отказа и только затем,
+	// чтобы отказ назвал предмет; пустой ответ (выдачи успели отозвать) отказ не
+	// отменяет — он лишь остаётся неперечисленным.
+	ListActiveHoldingMembership(ctx context.Context, userID domain.UserID, accountID domain.AccountID, limit int) (ids []string, total int, err error)
+
 	// ListSubjects returns the multi-subject set of ONE binding ordered by
 	// (ordinal, subject_type, subject_id) (the read-projection).
 	// Zero rows ⇒ a legacy binding written before the backfill — the read-side

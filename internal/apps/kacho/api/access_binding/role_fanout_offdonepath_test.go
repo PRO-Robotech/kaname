@@ -138,6 +138,14 @@ type multiBindingABReader struct {
 	parent *multiBindingRepo
 }
 
+// ListActiveHoldingMembership — предмета этой пробы не касается: она не исключает
+// человека из аккаунта. Пустой перечень — ЗАКОННЫЙ ответ (мешающих выдач нет), а
+// не заглушка «ответить нечем»: дублёр обязан выполнять контракт настоящего, и
+// молчаливо шире его не отвечать.
+func (r *multiBindingABReader) ListActiveHoldingMembership(context.Context, domain.UserID, domain.AccountID, int) ([]string, int, error) {
+	return nil, 0, nil
+}
+
 func (r *multiBindingABReader) ListActiveByRole(context.Context, domain.RoleID) ([]domain.AccessBinding, error) {
 	return r.parent.bindings, nil
 }

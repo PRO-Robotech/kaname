@@ -7,12 +7,21 @@ Covered RPCs:  Create, Get, List, Update, Delete, ListOperations.
 
 CRUD fixture dependency:
   Reuses vars from crud-fixture/setup.sh (superset: authz-fixtures/setup.sh):
-    jwtAccountAdminA  — JWT for userAAAId (sub=auth-test-account-admin-a@example.com)
-    jwtAccountAdminB  — JWT for accountBId owner
+    jwtAccountAdminA  — служебная учётка, admin @ accountAId (НЕ предъявитель userAAAId)
+    jwtAccountAdminB  — служебная учётка, admin @ accountBId
     jwtNoBindings     — authenticated but no account membership
     userAAAId         — the User id that is owner of accountAId
     accountAId        — pre-seeded account owned by userAAAId
     accountBId        — cross-account (for isolation probes)
+
+  ПОЧЕМУ `user*Id` НЕ ПРЕДЪЯВИТЕЛИ. Это ЦЕЛИ ПРИВЯЗКИ — строки пользователей,
+  заведённые, чтобы разрешился триггер существования субъекта. Ни один выдаваемый
+  предъявитель ими не аутентифицируется, и не может: машинный харнесс получает
+  `client_credentials`, то есть служебную учётку. Привязать роль к `{{user*Id}}` и
+  читать `{{jwt*}}` значит завести канал, который не разрешится ни при каком
+  бюджете, а выглядеть это будет таймаутом шестью шагами позже. Набор объявлен
+  ДАННЫМИ (`tests/authz-fixtures/principal_pairings.py`, `BINDING_TARGET_ONLY_IDS`)
+  и сверяется гейтом `scripts/case_header_principal_claim_test.py`.
 
   crud-fixture extension:
     setup.sh already creates a project "crud-child-prj" in accountAId (for the
@@ -187,7 +196,10 @@ CASES.append(Case(
                 *save_from_response("j.id", "opId"),
             ],
         ),
-        assert_op_error(6, "ALREADY_EXISTS", msg_substr="already exists"),
+        # Текст владельца ЦЕЛИКОМ: «already exists» несут пять разных отказов iam,
+        # и утверждение об общей части проходило на отказе о ЧУЖОМ ресурсе (#1748).
+        assert_op_error(6, "ALREADY_EXISTS",
+                        msg_text="Project with name prj-{{runId}} already exists"),
     ],
 ))
 

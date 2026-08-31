@@ -2106,7 +2106,8 @@
                   "  pm.environment.unset('_sysDelCount'); pm.environment.unset('_sysDelStarted');",
                   "  pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "  pm.test('op.error FAILED_PRECONDITION (9)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
-                  "  pm.test('cannot be deleted text', () => pm.expect(((j.error&&j.error.message)||'').toLowerCase(), JSON.stringify(j)).to.include('cannot be deleted'));",
+                  "  const opMsg = (j.error && j.error.message) || '';",
+                  "  pm.test('op refusal is the owner verbatim tone', () => pm.expect(opMsg, JSON.stringify(j)).to.eql('System role rol1bda80f2be4d3658e cannot be deleted'));",
                   "}"
                 ]
               }

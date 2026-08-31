@@ -10,15 +10,24 @@ Not covered here: InternalUserService.UpsertFromIdentity, InternalUserService.Ge
 
 CRUD fixture dependency:
   Reuses vars from crud-fixture/setup.sh (superset: authz-fixtures/setup.sh):
-    jwtAccountAdminA  — JWT for userAAAId
-    jwtAccountAdminB  — JWT for accountBId owner
+    jwtAccountAdminA  — служебная учётка, admin @ accountAId (НЕ предъявитель userAAAId)
+    jwtAccountAdminB  — служебная учётка, admin @ accountBId
     jwtNoBindings     — authenticated, no account membership
-    jwtInvitee        — JWT for user with binding on accountBId
-    userAAAId         — User.id of jwtAccountAdminA principal
-    userNOBId         — User.id of jwtNoBindings principal
-    userINVId         — User.id of jwtInvitee principal
+    jwtInvitee        — служебная учётка с выдачей на accountBId
+    userAAAId         — ЦЕЛЬ ПРИВЯЗКИ: строка пользователя, владеющая accountAId
+    userNOBId         — ЦЕЛЬ ПРИВЯЗКИ: пользователь без выдач
+    userINVId         — ЦЕЛЬ ПРИВЯЗКИ: приглашаемый пользователь
     accountAId        — pre-seeded account owned by userAAAId
     accountBId        — cross-account (for List scope + Invite target)
+
+  ПОЧЕМУ `user*Id` НЕ ПРЕДЪЯВИТЕЛИ. Это ЦЕЛИ ПРИВЯЗКИ — строки пользователей,
+  заведённые, чтобы разрешился триггер существования субъекта. Ни один выдаваемый
+  предъявитель ими не аутентифицируется, и не может: машинный харнесс получает
+  `client_credentials`, то есть служебную учётку. Привязать роль к `{{user*Id}}` и
+  читать `{{jwt*}}` значит завести канал, который не разрешится ни при каком
+  бюджете, а выглядеть это будет таймаутом шестью шагами позже. Набор объявлен
+  ДАННЫМИ (`tests/authz-fixtures/principal_pairings.py`, `BINDING_TARGET_ONLY_IDS`)
+  и сверяется гейтом `scripts/case_header_principal_claim_test.py`.
 
   Users are seeded via InternalUserService.UpsertFromIdentity (internal flow)
   during setup.sh or authz-fixtures/setup.sh. The public Invite flow is tested
@@ -1207,8 +1216,12 @@ CASES.append(Case(
             ],
         ),
         # Polls as jwtHumanCeremony — inherited from the step that minted the operation.
+        # Текст владельца ЦЕЛИКОМ: «has active access bindings and cannot be deleted»
+        # несут отказы User, Group и ServiceAccount, и утверждение об общей части не
+        # различало, ЧЕЙ отказ пришёл (#1748).
         assert_op_error(9, "FAILED_PRECONDITION",
-                        msg_substr="has active access bindings and cannot be deleted",
+                        msg_text="User {{ceremonyUserId}} has active access bindings "
+                                 "and cannot be deleted",
                         op_var="boundDelOpId"),
     ],
 ))
@@ -2010,13 +2023,36 @@ CASES.append(Case(
                 *save_from_response("j.id", "opId"),
             ],
         ),
-        # Код И текст. Текст прибит целиком, а не подстрокой: обобщённая ветвь
-        # той же карты («user still has active access bindings in this account…»)
-        # подстроку содержит, поэтому подстрока прошла бы на потерянной подсказке.
+        # ПАРА: код, машинный признак полосы И текст.
+        #
+        # ТЕКСТ ПРИБИТ ЦЕЛИКОМ, а не подстрокой, и причина прежняя: обобщённая
+        # ветвь той же карты («user still has active access bindings in this
+        # account…») подстроку содержит, поэтому подстрока прошла бы на
+        # потерянной подсказке.
+        #
+        # ХВОСТ ПЕРЕЧНЯ — ЧАСТЬ ОБЕЩАНИЯ, А НЕ УКРАШЕНИЕ. Контракт
+        # RemoveFromAccount обещает отказ «with the grants named»; до #1686 у
+        # обещания не было исполнителя, и текст обрывался на аккаунте. Регексп
+        # поэтому ТРЕБУЕТ хотя бы одного названного идентификатора выдачи:
+        # снимут перечень — кейс покраснеет, и это ровно тот исход, ради
+        # которого он пишется.
+        #
+        # ВЕЛИЧИНА ПЕРЕЧНЯ НЕ ПРИБИВАЕТСЯ ЧИСЛОМ (`\d+`, не `1`). Сколько выдач
+        # заводит приглашение — свойство ФИКСТУРЫ, а не предмета: предмет в том,
+        # что выдачи НАЗВАНЫ. Прибей единицу — и кейс станет краснеть на правке
+        # фикстуры, к его утверждению отношения не имеющей.
+        #
+        # ПРИЗНАК — ТО, НА ЧЁМ КЛЮЧУЕТСЯ КЛИЕНТ. Тон message остаётся контрактом
+        # и меняется осознанно; `reason` от языка и тона не зависит вовсе,
+        # поэтому пара «код + признак» есть машинная половина утверждения, а
+        # регексп — человеческая.
         assert_op_error(
             9, "FAILED_PRECONDITION",
+            reason="MEMBERSHIP_CARRIES_RIGHTS",
             msg_regex=r"^User usr[a-z0-9]+ still has active access bindings in "
-                      r"Account acc[a-z0-9]+ and cannot be removed from it$",
+                      r"Account acc[a-z0-9]+ and cannot be removed from it: "
+                      r"acb[a-z0-9]+(, acb[a-z0-9]+)* \(\d+ total\); "
+                      r"revoke them before removing the membership$",
         ),
         # Пара идентификаторов — ТА САМАЯ. Операция уже `done` (шаг выше довёл
         # её поллингом), поэтому чтение одиночное.
@@ -2033,6 +2069,28 @@ CASES.append(Case(
                 "  const m = (j.error && j.error.message) || '';",
                 "  pm.expect(m, JSON.stringify(j)).to.include(pm.environment.get('holdVictimId'));",
                 "  pm.expect(m, JSON.stringify(j)).to.include(pm.environment.get('accountAId'));",
+                "});",
+                # ПРОЗА И МАШИННАЯ ПОЛОВИНА ГОВОРЯТ ОБ ОДНОМ. Перечень уезжает
+                # дважды — текстом и в `metadata` признака, — то есть это два
+                # места об одном предмете, и разойтись они могут молча: клиент,
+                # читающий признак, получил бы один набор, читающий текст —
+                # другой, и ни одна проба по отдельности этого не увидела бы.
+                #
+                # Утверждение НЕ ЗНАЕТ фикстуры: оно не называет ни одного
+                # идентификатора и не считает их. Спрашивается ровно
+                # согласованность — каждый названный машинно обязан стоять и в
+                # тексте, — поэтому оно переживает любую правку приглашения.
+                "pm.test('машинный перечень выдач и текст называют одни и те же выдачи', () => {",
+                "  const j = pm.response.json();",
+                "  const m = (j.error && j.error.message) || '';",
+                "  const ds = (j.error && j.error.details) || [];",
+                "  const ei = ds.find(d => d && d.reason === 'MEMBERSHIP_CARRIES_RIGHTS');",
+                "  pm.expect(ei, 'признак полосы обязан быть в деталях: ' + JSON.stringify(j)).to.be.an('object');",
+                "  const ids = ((ei.metadata || {}).blocking_binding_ids || '').split(',').filter(Boolean);",
+                "  pm.expect(ids, 'перечень мешающих выдач пуст — обещание контракта без исполнителя: ' + JSON.stringify(j)).to.not.be.empty;",
+                "  ids.forEach(id => pm.expect(m, 'машинно назван ' + id + ', а в тексте его нет: ' + JSON.stringify(j)).to.include(id));",
+                "  const cnt = parseInt((ei.metadata || {}).blocking_binding_count || '0', 10);",
+                "  pm.expect(cnt, 'величина перечня обязана быть не меньше числа названных: ' + JSON.stringify(j)).to.be.at.least(ids.length);",
                 "});",
             ],
         ),

@@ -512,7 +512,11 @@ CASES.append(Case(
             auth="jwtAccountAdminA",
             test_script=[*assert_status(200), *save_from_response("j.id", "opId")],
         ),
-        assert_op_error(6, "ALREADY_EXISTS", msg_substr="already exists"),
+        # Текст владельца ЦЕЛИКОМ: «already exists» несут пять разных отказов iam
+        # (Account/Group/Project/Role/ServiceAccount), и утверждение об общей части
+        # проходило на отказе о ЧУЖОМ ресурсе (#1748).
+        assert_op_error(6, "ALREADY_EXISTS",
+                        msg_text="Project with name rddup{{runId}} already exists"),
         # Same name under accountB (jwtAccountAdminB) → success (per-account uniqueness).
         Step(
             name="create-same-name-B",
