@@ -138,6 +138,20 @@ func runServe(cfg config.Config) error {
 	// для квалификации SQL-операций.
 	opsRepo := operations.NewRepo(pool, "kacho_iam")
 
+	// Фоновая уборка терминальных строк таблицы операций.
+	//
+	// Строка заводится КАЖДОЙ мутацией — контракт объявляет мутации асинхронными,
+	// и `Operation` возвращается вместо ресурса, — а снятия строк не было ни у
+	// одного из восьми владельцев. Порог, предикат и расписание объявлены в
+	// `pkg/operations` и `pkg/retention` ОДИН раз: восемь расписаний об одном
+	// предмете разошлись бы молча.
+	if _, err := operations.StartRetentionSweep(
+		ctx, opsRepo, operations.DefaultRetentionConfig(),
+		logger,
+	); err != nil {
+		return fmt.Errorf("фоновая уборка таблицы операций: %w", err)
+	}
+
 	// Cross-service gRPC dial — kacho-iam is a leaf-owner of Account/Project,
 	// so it currently has no outbound peer-clients (other services dial in
 	// for `iam.v1.ProjectService.Get` etc.).
