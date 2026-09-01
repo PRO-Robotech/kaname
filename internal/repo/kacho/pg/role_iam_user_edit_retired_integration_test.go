@@ -38,7 +38,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 )
 
 // TestRoleIamUserEdit_RetiredWhileItsNeighboursRemain — вердикт по закоммиченным
@@ -58,7 +57,7 @@ func TestRoleIamUserEdit_RetiredWhileItsNeighboursRemain(t *testing.T) {
 	// Селекторы системных ролей проецируются самолечащим посевом. Зовём его явно:
 	// иначе «ноль селекторов у снятой роли» был бы получен из того, что их не
 	// проецировал никто, а не из снятия.
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))
+	require.NoError(t, bootSeedRuleSides(ctx, pool))
 
 	// ── Перепись ДО вердикта ────────────────────────────────────────────────
 	totalRoles := scalarInt(t, ctx, pool, `SELECT count(*) FROM kacho_iam.roles`)

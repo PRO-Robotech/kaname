@@ -1295,6 +1295,10 @@ func runServe(cfg config.Config) error {
 	// прогона, каждая область оставляет событие аудита.
 	orphanScopeSweeper := seed.NewOrphanScopeSweeper(kachoRepo, kachopg.NewOrphanScopeAdapter(pool),
 		seed.OrphanScopeConfig{Logger: logger.With(slog.String("component", "orphan_scope_sweep"))})
+	// Счётчик исходов пересчёта проекции глаголов роли — по одной системной роли.
+	// Успехи считаются наравне с отказами: без знаменателя «ноль отказов» не
+	// отличается от «пересчёта не было вовсе».
+	roleVerbReseed := metricsReg.NewRoleVerbReseedRecorder()
 	tasks = append(tasks, func() error {
 		if ores, oerr := orphanScopeSweeper.RunOnce(ctx); oerr != nil {
 			logger.Warn("orphan-scope sweep failed (next boot will retry)",
@@ -1304,6 +1308,38 @@ func runServe(cfg config.Config) error {
 		}
 		if oerr := seed.BackfillOwnerBindings(ctx, pool); oerr != nil {
 			logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))
+		}
+		// Пересчёт проекции «роль → тип объекта × глагол» — СВОЯ полоса отказа.
+		//
+		// Проекция есть то, из чего цепь вердикта собирает ответ «разрешено ли
+		// действие». Пока её отказ приезжал сюда обёрнутым в ошибку досева выше,
+		// он печатался уровнем ЧУЖОЙ полосы (`Warn` — «ожидаемое отклонение,
+		// ретрай штатен»), и различить «база не ответила» от «механизм не
+		// работает» было нечем. Полос две, и они расходятся по исходу:
+		// транзиентная сообщается `Error` и старт не роняет (проекция
+		// самолечащая, менять ограниченное отставание на полный отказ службы
+		// нельзя); структурная — системные роли есть, пересеяна ни одна —
+		// РОНЯЕТ старт, потому что «повтори позже» на ней есть ложь.
+		verbs, verr := seed.ReseedSystemRoleVerbs(ctx, kachoRepo, pool, roleVerbReseed)
+		if verr != nil {
+			logger.Error("пересчёт проекции глаголов роли отказал",
+				slog.Any("err", verr),
+				slog.Int("roles_examined", verbs.Examined),
+				slog.Int("roles_reseeded", verbs.Reseeded),
+				slog.Int("roles_failed", verbs.Failed))
+		}
+		// Перепись печатается ВСЕГДА, независимо от исхода: без неё «ноль
+		// пересеянных» неотличимо от «ноль прочитанных».
+		logger.Info("перепись пересчёта проекции глаголов роли",
+			slog.Int("roles_examined", verbs.Examined),
+			slog.Int("roles_reseeded", verbs.Reseeded),
+			slog.Int("roles_failed", verbs.Failed),
+			slog.Int("pairs", verbs.Pairs))
+		if verbs.Structural() {
+			return fmt.Errorf("пересчёт проекции глаголов роли: осмотрено %d системных ролей, "+
+				"пересеяно 0 — повтор даст то же самое, и цепь вердикта собирает ответ "+
+				"«разрешено ли действие» из строк, которых нет: %w",
+				verbs.Examined, verr)
 		}
 		// Перепись встроенного доступа. Системные выдачи можно ОТОЗВАТЬ — это и есть
 		// предмет #893/#895, — поэтому их отсутствие обязано быть видно оператору, а

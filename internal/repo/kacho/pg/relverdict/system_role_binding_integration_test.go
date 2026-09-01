@@ -34,6 +34,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
+	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
 )
 
@@ -53,9 +54,17 @@ func withSeededPool(t *testing.T, fn func(ctx context.Context, tx pgx.Tx)) {
 		t.Fatalf("пул: %v", err)
 	}
 	pgtest.ClosePoolAtEnd(t, pool)
-	// Обе стороны правила системной роли кладёт продукт, а не фикстура.
+	// Обе стороны правила системной роли кладёт продукт, а не фикстура. Полос
+	// ДВЕ, и зовутся они порознь: у пересчёта проекции глаголов свой вход (порт
+	// записи), своя зернистость и своя полоса отказа, поэтому досев селекторов
+	// его не зовёт. Позвать одну и утверждать о вердикте значило бы спрашивать
+	// про строки, которых нет: роль с одними селекторами адресует объект и не
+	// разрешает на нём ничего.
 	if err := seed.SyncAllSystemRoleSelectors(ctx, pool); err != nil {
-		t.Fatalf("досев системных ролей: %v", err)
+		t.Fatalf("досев селекторов системных ролей: %v", err)
+	}
+	if _, err := seed.ReseedSystemRoleVerbs(ctx, kachopg.New(pool, nil), pool, nil); err != nil {
+		t.Fatalf("досев проекции глаголов системных ролей: %v", err)
 	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {

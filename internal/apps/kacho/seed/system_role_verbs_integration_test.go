@@ -40,7 +40,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
@@ -59,6 +58,10 @@ import (
 // Расти долгу по-прежнему нельзя молча — любой новый селектор вне каталога
 // роняет пробу и называет себя поимённо.
 
+// IAM-RV-1-01 — системная роль получает проекцию на старте (характеризующий
+// замок приёмки `role-verb-projection-sole-writer.md`, §5.0: требовать от него
+// красноты запрещено — поведение дерево уже даёт, и оно обязано ПЕРЕЖИТЬ снятие
+// второй реализации записи).
 func TestSystemRoleVerbProjectionIsSeededAlongsideItsSelectors(t *testing.T) {
 	if testing.Short() {
 		t.Skip("нужен Postgres")
@@ -68,7 +71,7 @@ func TestSystemRoleVerbProjectionIsSeededAlongsideItsSelectors(t *testing.T) {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))
+	require.NoError(t, bootSeedLanes(ctx, pool))
 
 	rows, err := pool.Query(ctx,
 		`SELECT r.id, r.name, s.object_types FROM kacho_iam.role_rule_selectors s
@@ -140,6 +143,8 @@ func TestSystemRoleVerbProjectionIsSeededAlongsideItsSelectors(t *testing.T) {
 // Легаси-роль адресует область целиком уровневым отношением, а не пообъектным
 // глаголом, и досев, раздающий глаголы и ей, расширил бы доступ. Без этого
 // близнеца проба выше зеленела бы на досеве «выдать всем всё».
+// IAM-RV-1-10 — системная роль без материализующих правил получает ПУСТУЮ
+// проекцию, а не отказ (характеризующий замок той же приёмки).
 func TestSystemRoleWithoutMaterializingRulesGetsNoVerbs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("нужен Postgres")
@@ -157,7 +162,7 @@ func TestSystemRoleWithoutMaterializingRulesGetsNoVerbs(t *testing.T) {
 		         'cluster_kacho_root')`)
 	require.NoError(t, err)
 
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))
+	require.NoError(t, bootSeedLanes(ctx, pool))
 
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,

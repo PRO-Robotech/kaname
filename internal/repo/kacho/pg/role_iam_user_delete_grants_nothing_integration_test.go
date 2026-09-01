@@ -50,7 +50,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 )
 
 // TestRoleIamUserDelete_GrantsNothingAndIsNoLongerProjected — вердикт по
@@ -70,7 +69,7 @@ func TestRoleIamUserDelete_GrantsNothingAndIsNoLongerProjected(t *testing.T) {
 	// Проекция системных ролей самолечащая. Зовём её явно: иначе «ноль пар с
 	// глаголом delete» был бы получен из того, что проекцию не считал никто, а не
 	// из сужения набора типа.
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))
+	require.NoError(t, bootSeedRuleSides(ctx, pool))
 
 	// ── Перепись ДО вердикта ────────────────────────────────────────────────
 	totalRoles := scalarInt(t, ctx, pool, `SELECT count(*) FROM kacho_iam.roles`)

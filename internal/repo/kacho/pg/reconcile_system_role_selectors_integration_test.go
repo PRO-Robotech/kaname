@@ -38,7 +38,6 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
@@ -150,7 +149,7 @@ func TestSysRoleSel_02_Backfill_ProjectsAllSystemRoles(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))
+	require.NoError(t, bootSeedRuleSides(ctx, pool))
 
 	for _, name := range []string{"admin", "edit", "view", "vpc.network.admin"} {
 		assert.GreaterOrEqual(t, selectorRowCount(t, ctx, pool, systemRoleID(name)), 1,
@@ -230,12 +229,12 @@ func TestSysRoleSel_04_Idempotent_SelfHeal(t *testing.T) {
 
 	editRole := systemRoleID("edit")
 
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))
+	require.NoError(t, bootSeedRuleSides(ctx, pool))
 	require.Equal(t, 1, selectorRowCount(t, ctx, pool, editRole),
 		"edit role carries exactly one anchor selector")
 
 	// Idempotent: a second run makes no change.
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))
+	require.NoError(t, bootSeedRuleSides(ctx, pool))
 	assert.Equal(t, 1, selectorRowCount(t, ctx, pool, editRole),
 		"re-running the selector backfill is a no-op (idempotent UPSERT)")
 
@@ -246,7 +245,7 @@ func TestSysRoleSel_04_Idempotent_SelfHeal(t *testing.T) {
 		 VALUES ($1, 'deadbeefstalefp', 'anchor', ARRAY['vpc.network']::text[], '{}'::text[], '{}'::jsonb)`,
 		string(editRole))
 	require.NoError(t, err)
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))
+	require.NoError(t, bootSeedRuleSides(ctx, pool))
 	assert.Equal(t, 0, selectorRowCountFP(t, ctx, pool, editRole, "deadbeefstalefp"),
 		"a stale selector fingerprint (no current rule) must be self-healed away")
 	assert.Equal(t, 1, selectorRowCount(t, ctx, pool, editRole),

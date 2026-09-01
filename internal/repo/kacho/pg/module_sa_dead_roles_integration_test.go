@@ -65,7 +65,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
 )
 
@@ -104,7 +103,7 @@ func TestModuleSARoles_RetiredAndGrantNothing(t *testing.T) {
 	// Селекторы системных ролей проецируются самолечащим посевом (в проде — на
 	// загрузке). Зовём его явно, иначе «ноль селекторов» был бы получен из того,
 	// что их не проецировал никто, а не из снятия ролей.
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))
+	require.NoError(t, bootSeedRuleSides(ctx, pool))
 
 	// ── Перепись ДО вердикта: «ноль находок» обязано быть отличимо от «ноль
 	// прочитанного».

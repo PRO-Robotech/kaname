@@ -68,7 +68,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
@@ -145,7 +144,7 @@ func TestOperatorFanout_RetiredAndGrantsNothing(t *testing.T) {
 	// Селекторы системных ролей проецируются самолечащим посевом (в проде — на
 	// загрузке). Зовём его явно, иначе «ноль селекторов» был бы получен из того,
 	// что их не проецировал никто, а не из снятия роли.
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))
+	require.NoError(t, bootSeedRuleSides(ctx, pool))
 
 	operatorSVA := scalarString(t, ctx, pool, operatorSVAExpr)
 	operatorRole := scalarString(t, ctx, pool, operatorRoleExpr)
@@ -226,7 +225,7 @@ func seedLivePrincipalBoundToResolvableRole(
 		 ON CONFLICT DO NOTHING`, bindingID, subjectID, roleID)
 	require.NoError(t, err, "контроль: не удалось выдать живому принципалу привязку")
 
-	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool),
+	require.NoError(t, bootSeedRuleSides(ctx, pool),
 		"контроль: не удалось спроецировать селекторы после выдачи")
 	return subjectID
 }
