@@ -21,4 +21,6 @@ repository:
 # ПОСАДКА БЕЗОПАСНОСТИ — один адрес на весь флот (прежний: authn.mode).
 authMode: dev
 
-# OpenFGA по умолчанию disabled в dev-overlay. Auth-tier — Ory Kratos + Hydra.
+# Здесь стояло «OpenFGA по умолчанию disabled в dev-overlay»: движок снят целиком
+# стадией S6 эпика #747, выключать нечего и включить нельзя. Вердикт о доступе
+# вычисляет реляционная форма в базе iam. Auth-tier — Ory Kratos + Hydra.

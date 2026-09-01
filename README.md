@@ -4,9 +4,15 @@ IAM-сервис Kachō: control-plane для identity & access. Управля�
 моделью **Account, Project, User, ServiceAccount, Group, Role, AccessBinding** и
 несет runtime-авторизацию поверх нее:
 
-- **AuthZ (OpenFGA ReBAC)** — публичный `AuthorizeService` (PDP) + internal
-  `Check` (authz-gate, который зовут остальные сервисы). Гранты `AccessBinding`
-  транслируются в FGA-tuples через transactional-outbox внутри writer-tx.
+- **AuthZ (реляционная форма в своей базе)** — публичный `AuthorizeService` (PDP)
+  + internal `Check` (authz-gate, который зовут остальные сервисы). Вердикт
+  вычисляется **в той же базе**, что и остальное состояние службы
+  (`internal/authzcascade` поверх `repo/kacho/pg/relverdict`); внешнего движка
+  отношений в пути решения нет — он снят целиком стадией S6 эпика #747, и его
+  возвращение стережёт гейт `internal/repohygiene/authzengineretired.go`. Гранты
+  `AccessBinding` кладутся строками журнала намерений (`kacho_iam.fga_outbox`)
+  тем же writer-tx, что меняет выдачу, — журнал остался, снят его прежний
+  потребитель.
 - **Permission catalog** — `PermissionCatalogService`: грантуемая таксономия `<module>.<resource>.<verb>`.
 - **Service-account keys** — `SAKeyService` (static SA-ключи через Ory Hydra).
 - **Cluster-admin grants** — internal `InternalClusterService` (time-bombed/permanent).
@@ -49,7 +55,9 @@ composition root, `cmd/migrator/main.go` — отдельный CLI миграц
 - `repo/kacho/`        — CQRS Repository / Reader / Writer + pg-impl.
 - `dto/`               — generic table-driven DTO трансферы.
 - `handler/`           — тонкий gRPC transport-слой.
-- `clients/`           — peer-клиенты (TTL+LRU): Ory (Hydra/Kratos), OpenFGA Check, SPIRE SVID.
+- `clients/`           — peer-клиенты (TTL+LRU) к Ory Hydra (admin/OAuth/сессии/
+                         обмен токенов) + порты вопроса о доступе (`relations.go`);
+                         реализация портов — своя база, не сетевой сосед.
 - `migrations/`        — Postgres goose-миграции (sequential, `0001_initial.sql` — baseline).
 - `errors/`            — sentinel errors + `WrapPgErr` (SQLSTATE → service.Err\*).
 
