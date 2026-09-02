@@ -35,6 +35,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // --- артефакты дерева, из которых выводится population ---------------------
@@ -354,13 +355,13 @@ func TestCreateOnlyGrantOpensNoObjectSelfRPC(t *testing.T) {
 				}
 				implies := implications(t, string(dsl), fgaType)
 
-				createTuples, emitted := ruleObjectTuples("user:usr_probe", []string{"create"}, dotted, "obj_probe")
+				createTuples, emitted := ruleObjectTuples(catalogfixture.Facts(), "user:usr_probe", []string{"create"}, dotted, "obj_probe")
 				if !emitted {
 					t.Fatalf("эмиссия для %s не состоялась — утверждения ниже были бы бессодержательными", dotted)
 				}
 				createClosure[fgaType] = closure(relationsOf(createTuples), implies)
 
-				fullTuples, emitted := ruleObjectTuples("user:usr_probe", []string{"*"}, dotted, "obj_probe")
+				fullTuples, emitted := ruleObjectTuples(catalogfixture.Facts(), "user:usr_probe", []string{"*"}, dotted, "obj_probe")
 				if !emitted {
 					t.Fatalf("эмиссия полного правила для %s не состоялась", dotted)
 				}
@@ -448,7 +449,7 @@ func TestCreateOnlyGrantMaterializesSomething(t *testing.T) {
 		implies := implications(t, string(dsl), fgaType)
 
 		// (а) глагол считан → ярус записи на объекте.
-		createTuples, emitted := ruleObjectTuples("user:usr_probe", []string{"create"}, dotted, "obj_probe")
+		createTuples, emitted := ruleObjectTuples(catalogfixture.Facts(), "user:usr_probe", []string{"create"}, dotted, "obj_probe")
 		if !emitted {
 			t.Fatalf("эмиссия для %s не состоялась", dotted)
 		}
@@ -475,7 +476,7 @@ func TestCreateOnlyGrantMaterializesSomething(t *testing.T) {
 			t.Fatalf("тип %s не объявляет глагольных отношений — половина (б) была бы бессодержательна", fgaType)
 		}
 		liveVerb := strings.TrimPrefix(declared[0], "v_")
-		liveTuples, emitted := ruleObjectTuples("user:usr_probe", []string{liveVerb}, dotted, "obj_probe")
+		liveTuples, emitted := ruleObjectTuples(catalogfixture.Facts(), "user:usr_probe", []string{liveVerb}, dotted, "obj_probe")
 		if !emitted {
 			t.Fatalf("эмиссия правила с глаголом %q на %s не состоялась", liveVerb, dotted)
 		}

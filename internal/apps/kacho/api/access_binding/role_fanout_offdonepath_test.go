@@ -46,6 +46,7 @@ import (
 	reposa "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	repouser "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // failingFanout — a fan-out whose pass always fails, the way a lock wait that
@@ -84,7 +85,7 @@ func TestRoleUpdate_FailingMembershipPass_StillReportsTheCommittedChangeAsDone(t
 	opsRepo := newFakeOpsRepo()
 	fan := &failingFanout{count: 3, failed: errors.New("canceling statement due to statement timeout")}
 
-	uc := roleapp.NewUpdateRoleUseCase(repo, opsRepo).
+	uc := roleapp.NewUpdateRoleUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithTupleReconciler(NewRoleTupleReconciler()).
 		WithMembershipFanout(fan)
 

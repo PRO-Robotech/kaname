@@ -3,7 +3,8 @@
 
 // Package manifest — форму манифеста домена судит ОДИН исполнитель: разбор в
 // Go-структуры плюс `Decoder.KnownFields(true)` (задача #1088, приёмка
-// services/iam/docs/engineering/acceptance/module-manifest-seed-contract.md).
+// services/iam/docs/engineering/acceptance/module-manifest-seed-contract.md,
+// далее module-manifest-resources-roles-deprecated.md — задача #1778).
 //
 // Манифест — то, что домен объявляет платформе: чем он является и что нужно
 // завести при его установке. Эта под-фаза описывает ОБОЛОЧКУ (`apiVersion`,
@@ -42,12 +43,17 @@
 // схлопывает `null:` и `~:` в один ключ, теряя одно значение без единого
 // признака. Поэтому тип ключа судится по ТЕГУ узла разбора — см. keys.go.
 //
-// # Разделы, которых эта под-фаза не описывает, отвергаются ЯВНО
+// # Разделов ЧЕТЫРЕ, и все четыре описаны
 //
-// `resources`, `roles` и `deprecatedVerbs` заведёт задача-преемник
-// PRO-Robotech/kacho#1778. До тех пор они не «неизвестные ключи», а известные и
-// ещё не описанные, и отказ говорит именно это: молча принять и выбросить нельзя —
-// вызывающий получил бы успех и уверенность, что его раздел применён.
+// Оболочка плюс `resources` (что модуль объявляет платформе о своих правах),
+// `roles` (роли аккаунта и проекта), `deprecatedVerbs` (принимаем на чтении, не
+// производим) и `seed` (что заводит установка модуля). Каждый живёт в своём
+// файле пакета — resources.go, roles.go, deprecated.go — вместе со своим
+// разбором и своими отказами.
+//
+// Неизвестный раздел отвергается `KnownFields(true)`: он называет и ключ, и
+// номер строки. Молча принять и выбросить нельзя — вызывающий получил бы успех
+// и уверенность, что его раздел применён.
 package manifest
 
 import (
@@ -76,8 +82,6 @@ var (
 	ErrRootNotMapping = errors.New("manifest: document root is not a mapping")
 	// ErrNonStringKey — ключ отображения не является строкой (см. keys.go).
 	ErrNonStringKey = errors.New("manifest: mapping key is not a string")
-	// ErrSectionNotDescribed — раздел известен, но эта под-фаза его не описывает.
-	ErrSectionNotDescribed = errors.New("manifest: section is not described yet")
 	// ErrShape — документ не ложится на объявленную форму: неизвестное поле либо
 	// значение не того типа. Несёт сообщение библиотеки, называющее поле и строку.
 	ErrShape = errors.New("manifest: document does not match the declared shape")
@@ -102,11 +106,6 @@ var (
 // узнать не только что ошибся, но и чем это чинить.
 var supportedAPIVersions = []string{"iam/v1"}
 
-// sectionsNotDescribedYet — разделы, известные манифесту и не описанные ЭТОЙ
-// под-фазой. Перечень снимается вместе с посадкой их схемы (#1778), а не
-// «когда-нибудь»: пока раздел здесь, его отказ называет задачу номером.
-var sectionsNotDescribedYet = []string{"resources", "roles", "deprecatedVerbs"}
-
 // Manifest — оболочка манифеста домена.
 //
 // Раздел `seed` — УКАЗАТЕЛЬ: «модуль ничего не сеет» и «модуль объявил посев, и
@@ -114,7 +113,18 @@ var sectionsNotDescribedYet = []string{"resources", "roles", "deprecatedVerbs"}
 type Manifest struct {
 	APIVersion string `yaml:"apiVersion"`
 	Module     string `yaml:"module"`
-	Seed       *Seed  `yaml:"seed"`
+	// Resources — что модуль объявляет платформе о своих правах. Раздел
+	// НЕОДНОРОДЕН: часть ключей порождается из аннотаций, часть пишет человек —
+	// см. resources.go.
+	Resources []Resource `yaml:"resources"`
+	// Roles — роли уровня аккаунта и проекта. Системную роль манифест не
+	// объявляет: её сеет применённая миграция — см. roles.go.
+	Roles []Role `yaml:"roles"`
+	// DeprecatedVerbs — глаголы, принимаемые на чтении и не производимые на
+	// записи. Ключ карты — само имя глагола, значение — запись с предикатом
+	// снятия; см. deprecated.go.
+	DeprecatedVerbs map[string]DeprecatedVerb `yaml:"deprecatedVerbs"`
+	Seed            *Seed                     `yaml:"seed"`
 
 	// linkage — перепись валидатора связности, снятая при загрузке. Поле
 	// неэкспортируемое и без yaml-тега: это НЕ ключ документа, а результат
@@ -220,20 +230,6 @@ type SubjectRef struct {
 // бы шагом, который вызывающий вправе забыть, и манифест с выдачей на
 // несуществующую роль уехал бы дальше, получив «годен».
 func Load(data []byte) (*Manifest, error) {
-	// Раздел `roles` эта под-фаза не описывает и отвергает явно (MOD-MF-07),
-	// поэтому объявленных манифестом ролей у загрузчика нет ни при каком входе,
-	// и валидатору связности сверять `roleId` не с чем. Состояние подаётся
-	// ЯВНО, а не пустым перечнем: «раздел не объявлен» и «объявлен и пуст» суть
-	// разные утверждения. Послабление истекает само — проба
-	// TestMODMF13RoleSetStaysUnwiredOnlyWhileTheSectionIsRefused краснеет в тот
-	// день, когда раздел перестанет отвергаться.
-	return loadWithRoles(data, rolesNotDeclared())
-}
-
-// loadWithRoles — прод-путь загрузки; перечень объявленных манифестом ролей
-// приходит параметром, потому что раздел, который его несёт, описывает не эта
-// под-фаза (PRO-Robotech/kacho#1778).
-func loadWithRoles(data []byte, roles roleIDs) (*Manifest, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrShape, err)
@@ -249,9 +245,6 @@ func loadWithRoles(data []byte, roles roleIDs) (*Manifest, error) {
 
 	if faults := checkStringKeys(doc); len(faults) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrNonStringKey, joinFaults(faults))
-	}
-	if err := refuseSectionsNotDescribedYet(doc); err != nil {
-		return nil, err
 	}
 	if err := refuseNullSeed(doc); err != nil {
 		return nil, err
@@ -277,14 +270,40 @@ func loadWithRoles(data []byte, roles roleIDs) (*Manifest, error) {
 		return nil, err
 	}
 
+	// Разделы судятся В ПОРЯДКЕ ДОКУМЕНТА, и находки собираются ВСЕ: названная
+	// первая заставила бы автора чинить их по одной, по прогону на каждую.
+	faults := validateResources(&m, doc)
+	faults = append(faults, validateRoles(&m, doc)...)
+	faults = append(faults, validateDeprecatedVerbs(&m, doc)...)
+
 	// Связность — последняя ступень той же загрузки; почему не отдельным
-	// вызовом, сказано в шапке Load.
-	census, faults := validateSeedLinkage(&m, doc, roles)
+	// вызовом, сказано в шапке Load. Перечень ролей приезжает ИЗ РАЗОБРАННОГО
+	// ДОКУМЕНТА: послабление #1088, при котором он подавался параметром, истекло
+	// вместе с описанием раздела.
+	census, linkFaults := validateSeedLinkage(&m, doc, roleIDsOf(doc, &m))
+	faults = append(faults, linkFaults...)
 	if len(faults) > 0 {
 		return nil, errors.Join(faults...)
 	}
 	m.linkage = census
 	return &m, nil
+}
+
+// roleIDsOf — роли, объявленные РАЗОБРАННЫМ документом.
+//
+// Состояний ТРИ, а не два, и различает их присутствие самого ключа в документе:
+// «раздел не объявлен» значит «сверять не с чем», «объявлен и пуст» — «автор
+// сказал, что ролей у него нет», и всякая выдача тогда ссылается в пустоту.
+// Схлопни их в одно — и правило замолчит ровно там, где автор ошибся.
+func roleIDsOf(doc *yaml.Node, m *Manifest) roleIDs {
+	if mapValue(doc, "roles") == nil {
+		return rolesNotDeclared()
+	}
+	ids := make([]string, 0, len(m.Roles))
+	for _, r := range m.Roles {
+		ids = append(ids, r.ID)
+	}
+	return rolesDeclared(ids...)
 }
 
 // validateEnvelope — оболочка: по какой версии читать и чей это манифест.
@@ -307,22 +326,6 @@ func (m *Manifest) validateEnvelope() error {
 	if !domain.IsKnownModule(m.Module) {
 		return fmt.Errorf("%w: got %q, the platform module set is closed: %s",
 			ErrUnknownModule, m.Module, strings.Join(domain.KnownModules(), ", "))
-	}
-	return nil
-}
-
-// refuseSectionsNotDescribedYet — известный, но ещё не описанный раздел
-// отвергается ЯВНО, с номером задачи-преемника: координата в тексте отказа есть
-// часть контракта и обязана резолвиться.
-func refuseSectionsNotDescribedYet(doc *yaml.Node) error {
-	for i := 0; i+1 < len(doc.Content); i += 2 {
-		key := doc.Content[i]
-		if !contains(sectionsNotDescribedYet, key.Value) {
-			continue
-		}
-		return fmt.Errorf(
-			"%w: line %d: section %q is accepted by no reader yet — its schema lands with PRO-Robotech/kacho#1778; remove the section until then",
-			ErrSectionNotDescribed, key.Line, key.Value)
 	}
 	return nil
 }

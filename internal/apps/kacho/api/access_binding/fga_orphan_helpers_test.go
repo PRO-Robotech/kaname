@@ -18,6 +18,7 @@ import (
 	roleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/role"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	ab_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // ─── ordered, deduped emitted-tuple store ────────────────────────────────────
@@ -300,6 +301,12 @@ func (w *fakeRoleWtr) ReplaceRoleVerbs(context.Context, domain.RoleID, []domain.
 	return nil
 }
 
+// ReplaceRuleRefs — ТРЕТЬЯ сторона того же правила (kacho#1030). Дублёр умеет и
+// её по тому же доводу: не умеющий делает невидимым путь, ради которого стоит.
+func (w *fakeRoleWtr) ReplaceRuleRefs(context.Context, domain.RoleID, []domain.RoleRuleRef) error {
+	return nil
+}
+
 // ─── Role.Update use-case wiring ─────────────────────────────────────────────
 
 // newRoleUpdateUseCaseForTest builds the REAL UpdateRoleUseCase with the REAL
@@ -307,7 +314,7 @@ func (w *fakeRoleWtr) ReplaceRoleVerbs(context.Context, domain.RoleID, []domain.
 // exercises the production reconcile path. fga is wired for backwards-compat
 // surface parity (not used sync).
 func newRoleUpdateUseCaseForTest(repo *abFakeRepo, opsRepo operations.Repo, _ *recordingFGA) *roleapp.UpdateRoleUseCase {
-	return roleapp.NewUpdateRoleUseCase(repo, opsRepo).
+	return roleapp.NewUpdateRoleUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithTupleReconciler(NewRoleTupleReconciler())
 }
 

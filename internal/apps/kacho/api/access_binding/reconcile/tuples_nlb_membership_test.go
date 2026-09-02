@@ -12,13 +12,17 @@ package reconcile
 // ИМЕННО отношение, которое примет владелец модели, — и утверждается парой с
 // отрицанием: держатель управления составом НЕ получает изменения самой группы.
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
+)
 
 // TestRuleObjectTuples_TargetGroupMembershipVerbsMaterialize — несущее утверждение.
 func TestRuleObjectTuples_TargetGroupMembershipVerbsMaterialize(t *testing.T) {
 	// Авторское написание — ровно то, что лежит в системной роли
 	// `loadbalancer.target_manager` (миграция 0031).
-	got, ok := ruleObjectTuples("user:usr_a",
+	got, ok := ruleObjectTuples(catalogfixture.Facts(), "user:usr_a",
 		[]string{"addTargets", "removeTargets"}, "loadbalancer.targetGroups", "tgr_1")
 	if !ok {
 		t.Fatalf("эмиссия не состоялась вовсе — утверждения ниже были бы бессодержательны")
@@ -50,7 +54,7 @@ func TestRuleObjectTuples_TargetGroupMembershipVerbsMaterialize(t *testing.T) {
 // Без этой пары «объявили у типа» неотличимо от «вернули глобальный словарь», при
 // котором глагол поехал бы висячим отношением на все прочие типы.
 func TestRuleObjectTuples_MembershipVerbsAreScopedToTheirType(t *testing.T) {
-	got, ok := ruleObjectTuples("user:usr_a",
+	got, ok := ruleObjectTuples(catalogfixture.Facts(), "user:usr_a",
 		[]string{"addTargets", "removeTargets"}, "vpc.network", "net_1")
 	if !ok {
 		t.Fatalf("эмиссия на соседнем типе не состоялась — отрицание было бы бессодержательным")
@@ -78,7 +82,7 @@ func TestRuleObjectTuples_MembershipVerbsAreScopedToTheirType(t *testing.T) {
 // Иначе под-фаза сузила бы существующий доступ: сегодня `*.*`-роль правит группу и,
 // значит, управляет её составом; после раскола она обязана управлять им по-прежнему.
 func TestRuleObjectTuples_TargetGroupWildcardCoversMembership(t *testing.T) {
-	got, ok := ruleObjectTuples("user:usr_a", []string{"*"}, "loadbalancer.targetGroups", "tgr_1")
+	got, ok := ruleObjectTuples(catalogfixture.Facts(), "user:usr_a", []string{"*"}, "loadbalancer.targetGroups", "tgr_1")
 	if !ok {
 		t.Fatalf("эмиссия подстановки не состоялась вовсе")
 	}

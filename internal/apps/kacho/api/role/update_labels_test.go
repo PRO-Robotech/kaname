@@ -43,6 +43,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 const (
@@ -93,7 +94,7 @@ func TestUpdateRole_T33_UnknownMaskField_Rejected(t *testing.T) {
 
 func TestUpdateRole_T33UPD01_LabelsChangeEmitsReconcileEvent(t *testing.T) {
 	repo := newRlUpdRepo(domain.Labels{"team": "billing"})
-	uc := NewUpdateRoleUseCase(repo, newRlFakeOps())
+	uc := NewUpdateRoleUseCase(repo, newRlFakeOps(), catalogfixture.Source())
 
 	_, err := uc.Execute(ownerCtx(), UpdateRoleInput{
 		ID:         rlUpdRoleID,
@@ -111,7 +112,7 @@ func TestUpdateRole_T33UPD01_LabelsChangeEmitsReconcileEvent(t *testing.T) {
 
 func TestUpdateRole_T33UPD01_LabelsUnchanged_NoReconcileEvent(t *testing.T) {
 	repo := newRlUpdRepo(domain.Labels{"team": "payments"})
-	uc := NewUpdateRoleUseCase(repo, newRlFakeOps())
+	uc := NewUpdateRoleUseCase(repo, newRlFakeOps(), catalogfixture.Source())
 
 	_, err := uc.Execute(ownerCtx(), UpdateRoleInput{
 		ID:         rlUpdRoleID,
@@ -263,6 +264,12 @@ func (w *rlRoleWtr) ReplaceRuleSelectors(context.Context, domain.RoleID, []domai
 // глаголов пишется рядом с селекторами. Дублёр, не умеющий метода, делает
 // невидимым ровно тот путь, ради которого его ставят.
 func (w *rlRoleWtr) ReplaceRoleVerbs(context.Context, domain.RoleID, []domain.RoleVerb) error {
+	return nil
+}
+
+// ReplaceRuleRefs — ТРЕТЬЯ сторона того же правила (kacho#1030). Дублёр умеет и
+// её по тому же доводу: не умеющий делает невидимым путь, ради которого стоит.
+func (w *rlRoleWtr) ReplaceRuleRefs(context.Context, domain.RoleID, []domain.RoleRuleRef) error {
 	return nil
 }
 

@@ -68,7 +68,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
 )
@@ -126,10 +126,16 @@ func (c RoleVerbReseedCensus) Structural() bool {
 //
 // Наблюдатель необязателен: `nil` означает «исходы никуда не считать» — так его
 // зовут операционные точки входа, у которых реестра метрик нет.
+// Каталожный факт приходит ПАРАМЕТРОМ, а не спрашивается у литерала
+// (kacho#1816): именно этот пересчёт пишет пары, чей тип обязан иметь ЖИВУЮ
+// строку каталога (внешний ключ `role_verb_type_fk`). Оставь его на литерале — и
+// снятый тип доедет до ключа и будет отвергнут им, то есть отказ придёт ЧУЖОЙ
+// полосой.
 func ReseedSystemRoleVerbs(
 	ctx context.Context,
 	repo kachorepo.Repository,
 	pool *pgxpool.Pool,
+	cat *catalog.Facts,
 	obs RoleVerbReseedObserver,
 ) (RoleVerbReseedCensus, error) {
 	var census RoleVerbReseedCensus
@@ -142,7 +148,7 @@ func ReseedSystemRoleVerbs(
 
 	var failures []error
 	for _, rr := range roles {
-		pairs := authzmap.RoleVerbsFromSelectors(rr.rules.MaterializingSelectors())
+		pairs := cat.RoleVerbsFromSelectors(rr.rules.MaterializingSelectors())
 		if rerr := replaceRoleVerbsInOwnTx(ctx, repo, rr.id, pairs); rerr != nil {
 			census.Failed++
 			failures = append(failures, rerr)

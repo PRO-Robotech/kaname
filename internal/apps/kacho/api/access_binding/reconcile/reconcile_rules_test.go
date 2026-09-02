@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // memberKey joins (objectType, objectID) with a NUL separator for the fakeStore's
@@ -406,7 +407,7 @@ func TestReconcileRules_MatchLabels_PerObjectOnly_NoAnchor(t *testing.T) {
 			},
 		},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBinding(context.Background(), "acb-1"))
 
 	// Only i-prod is materialized ACTIVE.
@@ -454,7 +455,7 @@ func TestReconcileRules_MatchLabels_ForeignScope_Rejected(t *testing.T) {
 			},
 		},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBinding(context.Background(), "acb-1"))
 
 	require.Len(t, f.upserts, 1)
@@ -502,7 +503,7 @@ func TestReconcileRules_RuleRemoved_EagerRevokeByRuleFP(t *testing.T) {
 			{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-b"},
 		},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBinding(context.Background(), "acb-1"))
 
 	// i-b (the removed rule's member) is deleted + its tuple eager-revoked.
@@ -550,7 +551,7 @@ func TestReconcileRules_ActiveToRejected_RevokesViaLedger(t *testing.T) {
 			{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-moved"},
 		},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBinding(context.Background(), "acb-1"))
 
 	// Member flips to REJECTED + audited; the stale tuple is eager-revoked via ledger.
@@ -588,7 +589,7 @@ func TestReconcileRules_AnchorAll_PerObject_AllInScope(t *testing.T) {
 			},
 		},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBinding(context.Background(), "acb-1"))
 
 	// The advisory lock is taken exactly once per pass.
@@ -636,7 +637,7 @@ func TestReconcileRules_Names_OnlyNamed(t *testing.T) {
 			},
 		},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBinding(context.Background(), "acb-1"))
 
 	require.Len(t, f.upserts, 1, "only the named object materialized")
@@ -679,7 +680,7 @@ func TestReconcileObject_FanOut_DeterministicLockOrder(t *testing.T) {
 		bindingsForObject: []domain.AccessBindingID{"acb-c", "acb-a"},
 		selectorBindings:  []domain.AccessBindingID{"acb-b", "acb-a"},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileObject(context.Background(), "vpc.network", "nX"))
 
 	// Each distinct binding is locked exactly once (dedup) ...

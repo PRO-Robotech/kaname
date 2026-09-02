@@ -35,6 +35,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // ── Create: unknown (module,resource) → sync INVALID_ARGUMENT ────────────────────
@@ -81,7 +82,7 @@ func TestCreateRole_UnknownResourceToken_SingularOfPluralType_RejectedSync(t *te
 
 func TestUpdateRole_UnknownResourceToken_RejectedSync(t *testing.T) {
 	repo := newRlUpdRepo(domain.Labels{})
-	uc := NewUpdateRoleUseCase(repo, newRlFakeOps())
+	uc := NewUpdateRoleUseCase(repo, newRlFakeOps(), catalogfixture.Source())
 
 	_, err := uc.Execute(ownerCtx(), UpdateRoleInput{
 		ID: rlUpdRoleID,

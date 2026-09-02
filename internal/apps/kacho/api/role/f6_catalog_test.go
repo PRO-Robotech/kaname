@@ -20,6 +20,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 func sysRole(name string) domain.Role {
@@ -94,7 +95,7 @@ func TestRole_IAM_1_16_SystemRoleUpdateImmutable(t *testing.T) {
 	repo.roles["rol0000000000000sys1"] = domain.Role{
 		ID: "rol0000000000000sys1", ClusterID: "cluster_kacho_root", Name: "admin", IsSystem: true,
 	}
-	uc := NewUpdateRoleUseCase(repo, newRlFakeOps())
+	uc := NewUpdateRoleUseCase(repo, newRlFakeOps(), catalogfixture.Source())
 
 	newName := domain.RoleName("hacked")
 	_, err := uc.Execute(ctxUser("usr-1"), UpdateRoleInput{

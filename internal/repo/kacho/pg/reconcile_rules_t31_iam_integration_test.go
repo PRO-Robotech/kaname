@@ -45,6 +45,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // newRegisterUCWired builds the RegisterResource use-case wired exactly like the
@@ -71,7 +72,7 @@ func newRegisterUCWired(pool *pgxpool.Pool) *internal_iam.RegisterResourceUseCas
 // path under test); the one boot-sweep is harmless (idempotent reconcile).
 func drainOnce(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	adapter := kachopg.NewReconcileAdapter(pool)
+	adapter := kachopg.NewReconcileAdapter(pool, catalogfixture.Source())
 	engine := newReconcilerEngine(pool)
 	worker := seed.NewReconcileWorker(engine, adapter, seed.ReconcileWorkerConfig{
 		DrainInterval: 20 * time.Millisecond,

@@ -122,8 +122,9 @@ func (c LinkageCensus) String() string {
 		c.BindingsRead, c.SubjectsResolved, c.GroupsDeclared, c.JoinsRead, c.RoleRefsChecked, c.RoleRefsRead)
 	if !c.RolesDeclared {
 		// Ноль сверенных обязан объяснять СЕБЯ: иначе он читается как «сверили
-		// и не нашли расхождений».
-		s += " — раздел roles не описан (PRO-Robotech/kacho#1778)"
+		// и не нашли расхождений». Раздел `roles` описан загрузчиком (#1778),
+		// поэтому единственная причина здесь — автор его не объявил.
+		s += " — раздел roles манифестом не объявлен"
 	}
 	return s
 }

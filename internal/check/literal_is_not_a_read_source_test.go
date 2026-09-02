@@ -1,0 +1,341 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: BUSL-1.1
+
+package check
+
+// literal_is_not_a_read_source_test.go — гейт ИСТЕЧЕНИЯ ПОСЛАБЛЕНИЯ
+// (kacho#1816, приёмка
+// `services/iam/docs/engineering/acceptance/catalog-readers-move-to-the-table.md`,
+// сценарии IAM-CT-2-08 · -09 · -10 · -11).
+//
+// # Что здесь послабление
+//
+// Послаблением является не страж паритета и не сам литерал (§2.1 приёмки прямо
+// отвергает их снятие: литерал — производная канона `fga_model.fga`, и без него
+// строки каталога остались бы без якоря к канону вовсе). Послабление — РОЛЬ
+// ЛИТЕРАЛА КАК ИСТОЧНИКА ЧТЕНИЯ на пути запроса. Она и обязана истечь.
+//
+// # Почему это гейт дерева, а не проба сервиса
+//
+// «Ни один прод-файл не спрашивает каталожный факт у литерала» — свойство
+// ДЕРЕВА. Проба сервиса о нём не утверждает ничего: внутри работающего процесса
+// литерал и живые строки равны по построению (страж старта отказывает в пуске
+// при расхождении), поэтому читатель на литерале отвечает ровно то же, что
+// читатель на строках, и проба зеленеет при любом их распределении. Различие
+// появляется только ПОСЛЕ старта — когда строка снята в работающем процессе, —
+// и его утверждает интеграционная проба `-06`/`-07`, а не этот гейт.
+//
+// # Гейт судит УЗЕЛ РАЗБОРА, а не слово
+//
+// Имена этих функций встречаются в комментариях — в том числе в комментарии,
+// объясняющем сам запрет. Гейт по подстроке краснел бы на собственном
+// объяснении; поэтому он разбирает файл и смотрит на выражение выбора
+// `<пакет>.<Символ>`, где `<пакет>` — ЛОКАЛЬНОЕ имя импорта `authzmap`
+// (псевдоним учитывается), а не строка «authzmap» в тексте.
+//
+// # Перепись печатается ВСЕГДА
+//
+// «Ноль находок» обязано быть отличимо от «ноль прочитанного»: обход, не
+// прочитавший ни одного импортёра, роняет прогон (`-10`), а число осмотренных
+// импортёров и распознанных символов печатается независимо от исхода.
+
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+)
+
+// authzmapImportPath — импортируемый пакет-литерал.
+const authzmapImportPath = "github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+
+// iamTreeRel — поддерево, которое обходит гейт. Предмет запрета — прод-код
+// СЕРВИСА; чужие деревья каталог модуля iam не читают и не вправе.
+const iamTreeRel = "services/iam"
+
+// catalogFactSymbols — КАТАЛОЖНЫЙ ФАКТ: «грантуема ли пара» и «какие глаголы
+// объявлены». Ответ на любой из этих вопросов может измениться в РАБОТАЮЩЕМ
+// процессе — снятием строки, — поэтому спрашивать его у литерала прод-код не
+// вправе.
+var catalogFactSymbols = map[string]bool{
+	"VerbsOfType":            true,
+	"TypeHasVerbRelations":   true,
+	"Catalog":                true,
+	"CommonVerbVocabulary":   true,
+	"AllVerbVocabulary":      true,
+	"RoleVerbsFromSelectors": true,
+	"GrantedVerbs":           true,
+}
+
+// typeDictionarySymbols — ПЕРЕХОДНИК между словарями имени типа. Остаётся на
+// литерале по решению §2.2 приёмки: колонки с именем типа МОДЕЛИ в каталоге нет,
+// `cluster` строки не имеет вовсе, а второй переходник дерево запрещает дословно
+// (`authzmap/type_dictionaries.go`). Перечислен здесь не для отбора, а как
+// ЗАКОННЫЙ БЛИЗНЕЦ: сценарий `-09` требует, чтобы гейт на нём молчал, и без
+// этого перечня требование негде было бы прочитать.
+var typeDictionarySymbols = []string{
+	"CatalogTypeName", "ModelTypeName", "DottedType", "FGAObjectType", "ObjectType",
+}
+
+// catalogFactExemptFiles — три файла, чей перевод меняет НАБЛЮДАЕМОЕ АРЕНДАТОРОМ
+// и потому принадлежит задаче #1814 (§4.1 приёмки): в ответе появились бы снятые
+// строки, а превью роли перестало бы показывать глаголы по снятому ресурсу.
+// Послабление ИСТЕКАЕТ САМО: файл, переставший спрашивать каталожный факт,
+// становится записью без предмета и роняет гейт.
+// Записи ДВЕ, а не три, и это ОТСТУПЛЕНИЕ от §4.1 приёмки, сделанное по замеру.
+//
+// Приёмка называет третьим `role/rules_catalog.go` и обосновывает это тем, что
+// он читает каталожный факт заодно с `list_catalog.go`. Замер её собственным
+// предикатом (§2.5) показывает обратное: `rules_catalog.go` называет ровно один
+// символ пакета — `authzmap.ObjectType`, то есть ПЕРЕХОДНИК, остающийся на
+// литерале по решению §2.2. Каталожный факт он не спрашивает нигде.
+//
+// Откуда взялась третья запись: предикат §6.4 приёмки — ТЕКСТОВЫЙ `grep`, а в
+// комментарии `rules_catalog.go` стоит фраза «`authzmap.Catalog()`/`ObjectType`
+// is the ONE …», объясняющая как раз это устройство. Предикат посчитал
+// СОБСТВЕННОЕ ОБЪЯСНЕНИЕ проверяемого — ровно тот класс, который §7 приёмки
+// называет риском этого гейта («судит слово, а не предмет») и от которого
+// требует разбора узла. Гейт разбор ведёт, поэтому и разошёлся с приёмкой.
+//
+// Следствие для §2.3: файлов каталожного факта СЕМЬ, а не восемь; наблюдаемых
+// арендатором — ДВА, а не три. Переводимых пять — это число сошлось, потому что
+// третья запись стояла по обе стороны вычитания.
+var catalogFactExemptFiles = []string{
+	"services/iam/internal/apps/kacho/api/permission_catalog/list_catalog.go",
+	"services/iam/internal/dto/toproto/role.go",
+}
+
+// catalogFactUse — одно распознанное обращение к каталожному факту.
+type catalogFactUse struct {
+	File   string // путь от корня модуля
+	Line   int
+	Symbol string
+}
+
+// authzmapUses разбирает ПЕРЕЧЕНЬ файлов и возвращает обращения к символам
+// `want` через локальное имя импорта `authzmap`, плюс число осмотренных
+// ИМПОРТЁРОВ (файлов, которые пакет действительно импортируют).
+//
+// Единица счёта осмотренного — ИМПОРТЁР, а не файл дерева: файл, называющий имя
+// пакета только в прозе, литерал не читает ничем, и считать его осмотренным
+// значило бы завышать объём (§0.1 приёмки — там этот класс и измерен: 28 файлов
+// по слову против 21 импортёра).
+//
+// СОСТАВ ПРИХОДИТ ПАРАМЕТРОМ, а не собирается здесь обходом диска. Причин две, и
+// обе несущие: (а) состав прод-дерева обязан браться из ИНДЕКСА git, иначе в него
+// попадает игнорируемое — рабочие копии агентов, распаковки чартов, отчёты
+// прогонов, — и вердикт становится свойством рабочего каталога, а не коммита
+// (гейт `internal/repohygiene` `TestTreeWalkersAskTheIndex` требует ровно этого);
+// (б) инъекция подаёт этой же функции синтетический перечень, а доказательство,
+// требующее испортить живое дерево, в конвейере не исполняется никогда.
+func authzmapUses(root string, files []string, want map[string]bool) (
+	uses []catalogFactUse, importers int, err error) {
+	fset := token.NewFileSet()
+	for _, path := range files {
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, perr := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if perr != nil {
+			return nil, importers, fmt.Errorf("разобрать %s: %w", path, perr)
+		}
+		local := localNameOfImport(file, authzmapImportPath)
+		if local == "" {
+			continue
+		}
+		importers++
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			rel = path
+		}
+		rel = filepath.ToSlash(rel)
+		ast.Inspect(file, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			ident, ok := sel.X.(*ast.Ident)
+			if !ok || ident.Name != local {
+				return true
+			}
+			if !want[sel.Sel.Name] {
+				return true
+			}
+			uses = append(uses, catalogFactUse{
+				File:   rel,
+				Line:   fset.Position(sel.Sel.Pos()).Line,
+				Symbol: sel.Sel.Name,
+			})
+			return true
+		})
+	}
+	sort.Slice(uses, func(i, j int) bool {
+		if uses[i].File != uses[j].File {
+			return uses[i].File < uses[j].File
+		}
+		return uses[i].Line < uses[j].Line
+	})
+	return uses, importers, nil
+}
+
+// authzmapImportersOfTree — тот же разбор по СОСТАВУ ИНДЕКСА прод-дерева
+// сервиса.
+func authzmapImportersOfTree(root string, want map[string]bool) (
+	uses []catalogFactUse, importers int, err error) {
+	files, ferr := treecorpus.UnderWithSuffix(filepath.Join(root, iamTreeRel), ".go")
+	if ferr != nil {
+		return nil, 0, ferr
+	}
+	return authzmapUses(root, files, want)
+}
+
+// localNameOfImport — ЛОКАЛЬНОЕ имя, под которым файл импортировал путь `path`;
+// пустая строка означает «файл его не импортирует».
+//
+// Псевдоним учитывается намеренно: гейт, знающий только написание `authzmap.`,
+// не увидел бы `am "…/authzmap"` — форму столь же законную, и всё записанное в
+// ней оказалось бы ВНЕ наблюдения (не нарушением, а невидимостью).
+func localNameOfImport(file *ast.File, path string) string {
+	for _, imp := range file.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || p != path {
+			continue
+		}
+		if imp.Name != nil {
+			if imp.Name.Name == "_" || imp.Name.Name == "." {
+				// Пустой импорт литерала не читает; точечный не даёт выражения
+				// выбора и потому этим гейтом неразличим — форма в дереве не
+				// встречается, а появившись, обязана быть запрещена своим
+				// изменением, а не проглочена этим.
+				return ""
+			}
+			return imp.Name.Name
+		}
+		return "authzmap"
+	}
+	return ""
+}
+
+// TestIAMCT2_LiteralIsNotAReadSource — сценарии `-08`, `-09`, `-10`, `-11`.
+//
+// Имя фиксировано приёмкой (§6.4): предикат снятия задачи ключуется на него, и
+// образец, не совпавший с тем, как гейт назвали, вернул бы вакуумность через
+// заднюю дверь — `go test -run` с образцом, которому ничего не отвечает,
+// выходит УСПЕХОМ.
+func TestIAMCT2_LiteralIsNotAReadSource(t *testing.T) {
+	root := catalogRepoRoot(t)
+
+	uses, importers, err := authzmapImportersOfTree(root, catalogFactSymbols)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+
+	// Перепись — ДО любого вердикта и независимо от него.
+	t.Logf("осмотрено импортёров: %d; символов каталожного факта распознано: %d",
+		importers, len(uses))
+
+	// `-10`: обход пуст ⇒ вердикт беспредметен.
+	if importers == 0 {
+		t.Fatalf("обход не прочитал НИ ОДНОГО импортёра %s под %s — "+
+			"вердикт беспредметен: «ноль находок» здесь неотличимо от «ноль прочитанного»",
+			authzmapImportPath, iamTreeRel)
+	}
+	// Распознаватель обязан быть доказуемо непустым: три файла #1814 каталожный
+	// факт спрашивают и спрашивать будут до своей задачи, поэтому ноль
+	// РАСПОЗНАННЫХ означает, что сломан сам распознаватель, а не что дерево
+	// чисто.
+	if len(uses) == 0 {
+		t.Fatalf("распознано ноль символов каталожного факта при %d осмотренных импортёрах — "+
+			"это отказ РАСПОЗНАВАТЕЛЯ, а не чистое дерево: %d файла задачи #1814 "+
+			"каталожный факт спрашивают по решению §4.1 приёмки",
+			importers, len(catalogFactExemptFiles))
+	}
+
+	exempt := map[string]bool{}
+	for _, f := range catalogFactExemptFiles {
+		exempt[f] = true
+	}
+	seenExempt := map[string]bool{}
+	var findings []catalogFactUse
+	for _, u := range uses {
+		if exempt[u.File] {
+			seenExempt[u.File] = true
+			continue
+		}
+		findings = append(findings, u)
+	}
+
+	// `-08`: находка называет ФАЙЛ и СИМВОЛ.
+	if len(findings) > 0 {
+		var b strings.Builder
+		for _, f := range findings {
+			fmt.Fprintf(&b, "\n  %s:%d — authzmap.%s", f.File, f.Line, f.Symbol)
+		}
+		t.Errorf("прод-код спрашивает КАТАЛОЖНЫЙ ФАКТ у литерала (%d обращений):%s\n\n"+
+			"Каталожный факт — «грантуема ли пара» и «какие глаголы объявлены» — "+
+			"может измениться в РАБОТАЮЩЕМ процессе снятием строки; читатель на литерале "+
+			"продолжит считать снятый тип живым до следующего перезапуска, и отказ придёт "+
+			"ЧУЖОЙ полосой (ключом role_verb_type_fk в отладке арендатора). "+
+			"Спрашивайте снимок каталога (services/iam/internal/catalog), а не литерал. "+
+			"Переходник имени типа (%s) под запрет НЕ подпадает — он остаётся на литерале "+
+			"по решению §2.2 приёмки kacho#1816.",
+			len(findings), b.String(), strings.Join(typeDictionarySymbols, " · "))
+	}
+
+	// Послабление ИСТЕКАЕТ САМО: запись, которой больше нечего исключать, —
+	// находка. Иначе слепая зона переживёт свой предмет и достанется следующему
+	// читателю, который положит в неё что угодно.
+	for _, f := range catalogFactExemptFiles {
+		if !seenExempt[f] {
+			t.Errorf("исключение %q больше нечего исключать: файл каталожного факта у литерала "+
+				"не спрашивает (либо переехал/снят). Снимите запись — послабление без предмета "+
+				"становится слепой зоной, заведённой вперёд", f)
+		}
+	}
+}
+
+// TestIAMCT2_TypeDictionaryStaysOnTheLiteral — сценарий `-09`, ЗАКОННЫЙ БЛИЗНЕЦ.
+//
+// Без него отрицание выше неотличимо от гейта, который краснеет на любом
+// обращении к пакету: переходник имени типа обязан по-прежнему проходить, и это
+// не снисходительность, а решение §2.2 — колонки имени типа МОДЕЛИ в каталоге
+// нет, `cluster` строки не имеет, второго переходника дерево не заводит.
+func TestIAMCT2_TypeDictionaryStaysOnTheLiteral(t *testing.T) {
+	root := catalogRepoRoot(t)
+
+	want := map[string]bool{}
+	for _, s := range typeDictionarySymbols {
+		want[s] = true
+	}
+	uses, importers, err := authzmapImportersOfTree(root, want)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	t.Logf("осмотрено импортёров: %d; обращений к переходнику имени типа: %d", importers, len(uses))
+
+	if importers == 0 {
+		t.Fatalf("обход не прочитал ни одного импортёра — утверждение беспредметно")
+	}
+	if len(uses) == 0 {
+		t.Fatalf("обращений к переходнику ноль: близнец перестал быть законным примером, "+
+			"и отрицание в %s снова неотличимо от вакуумного",
+			"TestIAMCT2_LiteralIsNotAReadSource")
+	}
+	// Утверждение положительное: переходник в прод-дереве ЖИВ и гейту не мешает.
+	// Оно падает ровно тогда, когда кто-нибудь расширит catalogFactSymbols
+	// переходником — то есть запретит то, что решением разрешено.
+	for _, s := range typeDictionarySymbols {
+		if catalogFactSymbols[s] {
+			t.Errorf("переходник %q попал в набор каталожного факта: решение §2.2 приёмки "+
+				"kacho#1816 оставляет его на литерале, и запрет на него — не ужесточение, "+
+				"а требование неисполнимого (колонки имени типа МОДЕЛИ в каталоге нет)", s)
+		}
+	}
+}

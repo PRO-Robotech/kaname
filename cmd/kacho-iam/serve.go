@@ -47,6 +47,7 @@ import (
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 )
 
 // grpcStopper — поверхность graceful/forced остановки gRPC-сервера. *grpc.Server
@@ -188,6 +189,52 @@ func runServe(cfg config.Config) error {
 	metricsReg.RegisterPoolStats("primary", pool)
 	metricsReg.RegisterPoolStats("replica", slavePool)
 
+	// КАТАЛОГ МОДУЛЯ: одно чтение, страж паритета и снимок — в таком порядке и
+	// ДО сборки служб (задача #1816).
+	//
+	// Читатель живого множества ОДИН (`kachopg.NewCatalogRepo`), и вызывающих у
+	// него двое: страж, сверяющий строки с литералом, и снимок, которым отвечают
+	// читатели на пути запроса. Дай каждому свой запрос — получишь два места об
+	// одном предмете, и разойдутся они молча. Отсюда величина, которую
+	// утверждает проба `IAM-CT-2-01`: операторов к таблицам каталога за время
+	// старта ровно столько, сколько шлёт сам страж.
+	//
+	// ПОЧЕМУ ЗДЕСЬ, А НЕ В ЗАДАЧАХ СТАРТА, где страж стоял прежде. Снимок нужен
+	// use-case'ам создания и правки роли, реконсайлеру и адаптеру выдач — то
+	// есть до `buildServices`. Порядок, ради которого страж заводился, при этом
+	// СОХРАНЁН: пересчёт проекции «роль → тип × глагол» идёт задачей ниже, то
+	// есть по-прежнему ПОСЛЕ стража, и расхождение не проявляется отказом
+	// пересчёта.
+	//
+	// Отказ ФАТАЛЕН и приходит РАНЬШЕ, чем прежде: расхождение не рассасывается
+	// повторами, а снаружи выглядит как «прав не выдали». Пустой каталог — это
+	// «условие не создано» (миграции не применены), и он тоже обязан назваться
+	// прямо, а не отвергать все правила арендатора разом.
+	catalogRepo := kachopg.NewCatalogRepo(pool)
+	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo)
+	// Перепись печатается ВСЕГДА, независимо от исхода: без неё «ноль
+	// расхождений» неотличимо от «ноль прочитанного».
+	logger.Info("перепись каталога модуля",
+		slog.Int("literal_modules", catalogCensus.LiteralModules),
+		slog.Int("literal_resources", catalogCensus.LiteralResources),
+		slog.Int("literal_verbs", catalogCensus.LiteralVerbs),
+		slog.Int("row_modules", catalogCensus.RowModules),
+		slog.Int("row_resources", catalogCensus.RowResources),
+		slog.Int("row_verbs", catalogCensus.RowVerbs),
+		slog.Int("missing", len(catalogCensus.MissingRows)),
+		slog.Int("extra", len(catalogCensus.ExtraRows)))
+	if catErr != nil {
+		return fmt.Errorf("каталог модуля: %w", catErr)
+	}
+	// Снимок наполняется ТЕМИ ЖЕ строками, которые прочитал страж, — своего
+	// чтения не заводит.
+	catalogSnapshot, csErr := catalog.NewSnapshot(catalogCensus.Live, catalogRepo,
+		logger.With(slog.String("component", "catalog_snapshot")),
+		metricsReg.NewCatalogSnapshotRecorder())
+	if csErr != nil {
+		return fmt.Errorf("снимок каталога модуля: %w", csErr)
+	}
+
 	// Подключаем Prometheus-Recorder и логгер к default-registry LRO-worker'а и
 	// поднимаем его dispatcher ДО приема трафика. Без этого default-registry держит
 	// NopRecorder (live terminal-write/inflight метрики мертвы), а operations.Ready()
@@ -240,7 +287,8 @@ func runServe(cfg config.Config) error {
 		return err
 	}
 
-	svcs := buildServices(pool, slavePool, opsRepo, kachoRepo, kachoRepo, metricsReg, cfg, tokenSigner, logger)
+	svcs := buildServices(pool, slavePool, opsRepo, kachoRepo, kachoRepo, catalogSnapshot,
+		metricsReg, cfg, tokenSigner, logger)
 
 	// gRPC servers. PrincipalExtract-interceptor читает
 	// x-kacho-principal-* metadata-headers, которые api-gateway auth-interceptor
@@ -664,7 +712,8 @@ func runServe(cfg config.Config) error {
 	// Носитель готовности отдаётся сюда, чтобы гашение переводило `/readyz` в
 	// 503 ДО остановки серверов (см. triggerShutdown ниже). Без этого носитель
 	// был бы, а дёрнуть его было бы некому (#1752).
-	hooksHandler, hooksHealth := buildHooksMux(pool, kachoRepo, opsRepo, svcs.ownGates, metricsReg, cfg, logger)
+	hooksHandler, hooksHealth := buildHooksMux(pool, kachoRepo, opsRepo, svcs.ownGates,
+		catalogSnapshot, metricsReg, cfg, logger)
 	hooksSurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "вебхуки провайдера личности",
 		Mode:    surfaceMode,
@@ -1221,8 +1270,9 @@ func runServe(cfg config.Config) error {
 	// AND periodically sweeps every selector binding (D12 defense-in-depth) +
 	// expires TTL-elapsed bindings (D9 eager-revoke). In-process worker (no new
 	// deploy); non-fatal by contract.
-	reconcileAdapter := kachopg.NewReconcileAdapter(pool)
-	reconcileEngine := reconcile.New(reconcileAdapter, logger.With(slog.String("component", "rsab_reconciler")))
+	reconcileAdapter := kachopg.NewReconcileAdapter(pool, catalogSnapshot)
+	reconcileEngine := reconcile.New(reconcileAdapter,
+		logger.With(slog.String("component", "rsab_reconciler")), catalogSnapshot)
 	// resource_reconcile_outbox дренажится NOTIFY-driven (паритет с fga_outbox drainer):
 	// AFTER INSERT триггер (миграция 0042) шлет pg_notify на канал
 	// kacho_iam_resource_reconcile_outbox, reconcileAdapter LISTEN'ит его и будит worker —
@@ -1309,6 +1359,13 @@ func runServe(cfg config.Config) error {
 		if oerr := seed.BackfillOwnerBindings(ctx, pool); oerr != nil {
 			logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))
 		}
+		// Страж расхождения литерала и строк каталога отработал РАНЬШЕ — в
+		// композиционном корне, до сборки служб (задача #1816): его чтением
+		// наполняется снимок каталога, а снимок нужен use-case'ам. Порядок,
+		// ради которого страж заводился, этим не нарушен: пересчёт ниже
+		// по-прежнему идёт ПОСЛЕ стража, поэтому расхождение не проявляется
+		// отказом пересчёта — то есть чужой полосой.
+		//
 		// Пересчёт проекции «роль → тип объекта × глагол» — СВОЯ полоса отказа.
 		//
 		// Проекция есть то, из чего цепь вердикта собирает ответ «разрешено ли
@@ -1320,7 +1377,8 @@ func runServe(cfg config.Config) error {
 		// самолечащая, менять ограниченное отставание на полный отказ службы
 		// нельзя); структурная — системные роли есть, пересеяна ни одна —
 		// РОНЯЕТ старт, потому что «повтори позже» на ней есть ложь.
-		verbs, verr := seed.ReseedSystemRoleVerbs(ctx, kachoRepo, pool, roleVerbReseed)
+		verbs, verr := seed.ReseedSystemRoleVerbs(ctx, kachoRepo, pool,
+			catalogSnapshot.Facts(), roleVerbReseed)
 		if verr != nil {
 			logger.Error("пересчёт проекции глаголов роли отказал",
 				slog.Any("err", verr),

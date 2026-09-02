@@ -21,7 +21,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -58,6 +58,11 @@ type ObjectReconciler interface {
 type CreateRoleUseCase struct {
 	repo    Repo
 	opsRepo operations.Repo
+	// cat — источник КАТАЛОЖНОГО ФАКТА: какие глаголы объявлены живым типом
+	// (kacho#1816). Обязателен: проекция «роль → тип × глагол» без него пуста, а
+	// пустая проекция — это не «наблюдение выключено», а вердикт, определённый
+	// наполовину.
+	cat catalog.Source
 	// Optional FGA hierarchy-tuple writer. Writes
 	// `iam_role:<id>#account@account:<acc>` after a successful custom-role
 	// INSERT so iam_role-scoped authz cascades resolve (`admin from account`).
@@ -67,8 +72,8 @@ type CreateRoleUseCase struct {
 	logger     *slog.Logger
 }
 
-func NewCreateRoleUseCase(r Repo, opsRepo operations.Repo) *CreateRoleUseCase {
-	return &CreateRoleUseCase{repo: r, opsRepo: opsRepo}
+func NewCreateRoleUseCase(r Repo, opsRepo operations.Repo, cat catalog.Source) *CreateRoleUseCase {
+	return &CreateRoleUseCase{repo: r, opsRepo: opsRepo, cat: cat}
 }
 
 // WithRelationStore wires the role→account hierarchy-tuple writer.
@@ -187,8 +192,22 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 			// вердикт наполовину определённым, а расхождение проявится не отказом,
 			// а неверным ответом.
 			if verr := w.RolesW().ReplaceRoleVerbs(ctx, inserted.ID,
-				authzmap.RoleVerbsFromSelectors(inserted.Rules.MaterializingSelectors())); verr != nil {
+				u.cat.Facts().RoleVerbsFromSelectors(inserted.Rules.MaterializingSelectors())); verr != nil {
 				return domain.Role{}, verr
+			}
+			// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и
+			// пишется она в той же транзакции по той же причине. Отличие от двух
+			// предыдущих в том, ЧТО кладётся: те несут только резолвящееся, эта —
+			// КАЖДЫЙ объявленный сегмент. На ней стоят ключи в каталог, и именно
+			// она отвергает правило, называющее ресурс или глагол, которых на
+			// платформе нет либо больше нет (kacho#1030, миграция 20260901113757).
+			//
+			// Своей проверки каталога здесь НЕТ намеренно: между «спросить» и
+			// «записать» помещается снятие ресурса, и правило пережило бы свой
+			// референт (запрет #10). Судит ОПЕРАТОР ВСТАВКИ.
+			if rerr := w.RolesW().ReplaceRuleRefs(ctx, inserted.ID,
+				domain.RuleRefsOf(inserted.Rules)); rerr != nil {
+				return domain.Role{}, rerr
 			}
 			// Role audit payload carries id + name + actor — NOT the full
 			// permissions matrix (avoid payload blow-up; 5.2-17).

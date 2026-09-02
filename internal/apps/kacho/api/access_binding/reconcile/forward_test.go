@@ -26,6 +26,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // TestReconcileObjectForward_MaterializesSingleObject_NoExclusiveLock — the fast-path
@@ -56,7 +57,7 @@ func TestReconcileObjectForward_MaterializesSingleObject_NoExclusiveLock(t *test
 		// The scope-narrowed fast-path source returns the matching binding.
 		selectorBindings: []domain.AccessBindingID{"acb-1"},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "compute.instance", "i-new"))
 
 	// NO EXCLUSIVE advisory lock — the additive forward path removes the serialization
@@ -123,7 +124,7 @@ func TestReconcileObjectForward_IAMDirect_MaterializesSingleObject_NoExclusiveLo
 		// The iam-direct fast-path source returns the owner binding.
 		iamDirectSelectorBindings: []domain.AccessBindingID{"acb-owner"},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "iam.accessBinding", "acb-new"))
 
 	// (a) NO EXCLUSIVE advisory lock — additive iam-direct forward takes only SHARE.
@@ -177,7 +178,7 @@ func TestReconcileObjectForward_IAMDirect_ForeignScope_NoOverGrant(t *testing.T)
 		},
 		iamDirectSelectorBindings: []domain.AccessBindingID{"acb-owner"},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "iam.accessBinding", "acb-foreign"))
 
 	assert.Empty(t, f.upserts, "additive iam-direct forward does NOT write a REJECTED member")
@@ -224,7 +225,7 @@ func TestReconcileObjectForward_IAMDirect_ReRegister_DelegatesToFull_DeleteStale
 		// BindingsForObject non-empty ⇒ the discriminator routes to the FULL path.
 		bindingsForObject: []domain.AccessBindingID{"acb-1"},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "iam.project", "p-flip"))
 
 	// Routed to the FULL path: EXCLUSIVE advisory lock taken (delete-stale serialization).
@@ -263,7 +264,7 @@ func TestReconcileObjectForward_ForeignScope_SkipsNoTuple(t *testing.T) {
 		},
 		selectorBindings: []domain.AccessBindingID{"acb-1"},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "compute.instance", "i-foreign"))
 
 	assert.Empty(t, f.upserts, "additive forward does NOT write a REJECTED member")
@@ -292,7 +293,7 @@ func TestReconcileObjectForward_ClusterSuperAdmin_NoPerObject(t *testing.T) {
 		},
 		selectorBindings: []domain.AccessBindingID{"acb-cluster"},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "compute.instance", "i-any"))
 
 	assert.Empty(t, f.upserts, "cluster super-admin is NOT materialized per-object (D-9 short-circuit preserved)")
@@ -307,7 +308,7 @@ func TestReconcileObjectForward_ObjectNotInMirror_NoOp(t *testing.T) {
 		subjectType: "user", subjectID: "usr-1", active: true,
 		selectorBindings: []domain.AccessBindingID{"acb-1"},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "compute.instance", "i-absent"))
 	assert.Empty(t, f.upserts)
 	assert.Empty(t, allWrites(f))
@@ -356,7 +357,7 @@ func TestReconcileObjectForward_ReRegister_DelegatesToFull_DeleteStale(t *testin
 		// BindingsForObject non-empty ⇒ the discriminator routes to the FULL path.
 		bindingsForObject: []domain.AccessBindingID{"acb-1"},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "compute.instance", "i-flip"))
 
 	// Routed to the FULL path: EXCLUSIVE advisory lock taken (delete-stale serialization).

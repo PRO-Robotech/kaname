@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"sort"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
@@ -345,6 +346,12 @@ type TxRunner interface {
 type Reconciler struct {
 	tx     TxRunner
 	logger *slog.Logger
+	// cat — источник КАТАЛОЖНОГО ФАКТА: какие глаголы объявлены живым типом.
+	//
+	// Обязателен, а не опционален, как `size` ниже: без него проход не может
+	// вычислить ни одного кортежа, и незаполненное поле дало бы не «наблюдение
+	// выключено», а «выдача не материализуется» — тихо и целиком.
+	cat catalog.Source
 	// size — OPTIONAL recorder of how big one binding's materialization is. nil ⇒ the
 	// observation is a no-op; the pass itself does not depend on it.
 	size SizeRecorder
@@ -387,11 +394,13 @@ type SyncFGATuple struct {
 // выдача, не снимается») делается его же данными и делается в базе.
 
 // New constructs the reconciler.
-func New(tx TxRunner, logger *slog.Logger) *Reconciler {
+//
+// `cat` — источник каталожного факта; параметр ОБЯЗАТЕЛЬНЫЙ (см. поле `cat`).
+func New(tx TxRunner, logger *slog.Logger, cat catalog.Source) *Reconciler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Reconciler{tx: tx, logger: logger}
+	return &Reconciler{tx: tx, logger: logger, cat: cat}
 }
 
 // WithSizeRecorder wires the OPTIONAL materialization-size recorder. nil-safe: an
@@ -826,7 +835,7 @@ func (r *Reconciler) reconcileBindingForObject(
 
 	var desired []DesiredMember
 	if objPresent {
-		desired = desiredMembersForObject(bs, obj)
+		desired = desiredMembersForObject(r.cat.Facts(), bs, obj)
 	}
 
 	// The NARROW diff base: this binding's members ON THIS OBJECT only.
@@ -859,14 +868,14 @@ func (r *Reconciler) reconcileBindingForObject(
 // — a project/account label update reaches it through the iam-direct feed. Suppressed for
 // a per-object target, matching desiredRuleMembers (granting the whole scope anchor
 // contradicts a least-priv per-object grant).
-func desiredMembersForObject(bs BindingScope, o domain.MirrorObject) []DesiredMember {
+func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.MirrorObject) []DesiredMember {
 	subject := domain.FGASubjectRef(bs.SubjectType, bs.SubjectID)
 	perObject := len(bs.Target.Resources) > 0
 
 	var out []DesiredMember
 	if len(bs.ScopeSelfVerbs) > 0 && !perObject &&
 		o.ObjectType == "iam."+bs.Scope.Type && o.ObjectID == bs.Scope.ID {
-		if sm, ok := scopeSelfMember(subject, bs.Scope.Type, bs.Scope.ID, bs.ScopeSelfVerbs); ok {
+		if sm, ok := scopeSelfMember(cat, subject, bs.Scope.Type, bs.Scope.ID, bs.ScopeSelfVerbs); ok {
 			out = append(out, sm)
 		}
 	}
@@ -880,7 +889,7 @@ func desiredMembersForObject(bs BindingScope, o domain.MirrorObject) []DesiredMe
 		if !selectorMatchesObject(sel, o) {
 			continue
 		}
-		dm, ok := desiredMemberForObject(subject, sel, o, bs.Scope)
+		dm, ok := desiredMemberForObject(cat, subject, sel, o, bs.Scope)
 		if !ok {
 			// A type the model has no FGA object for → no tuple → skip the object
 			// (fail-closed: a typo'd type never grants).
@@ -1031,7 +1040,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 	// lists specific content objects, not the scope anchor. So a per-object target never
 	// materializes the scope-self member (over-grant guard, IAM-1-21).
 	if len(bs.ScopeSelfVerbs) > 0 && !perObject {
-		if sm, ok := scopeSelfMember(subject, bs.Scope.Type, bs.Scope.ID, bs.ScopeSelfVerbs); ok {
+		if sm, ok := scopeSelfMember(r.cat.Facts(), subject, bs.Scope.Type, bs.Scope.ID, bs.ScopeSelfVerbs); ok {
 			out = append(out, sm)
 		}
 	}
@@ -1050,7 +1059,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			// (desiredMemberForObject), so the full recompute and the forward path
 			// derive BYTE-IDENTICAL tuples (idempotency: forward + async full both
 			// emit the same set, and the read-delta FGA writer skips duplicates).
-			dm, ok := desiredMemberForObject(subject, sel, o, bs.Scope)
+			dm, ok := desiredMemberForObject(r.cat.Facts(), subject, sel, o, bs.Scope)
 			if !ok {
 				// A type the model has no FGA object for → no tuple → skip the object
 				// (fail-closed: a typo'd type never grants).
@@ -1076,14 +1085,14 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 //     excluded from CompileRules, so the tuples come from the rule verbs, not RolePerms.
 //   - the object's type has no FGA object type → ok=false (skip; a typo'd type never
 //     grants, fail-closed).
-func desiredMemberForObject(subject string, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
+func desiredMemberForObject(cat *catalog.Facts, subject string, sel domain.RuleSelector, o domain.MirrorObject, scope domain.ScopeAnchor) (DesiredMember, bool) {
 	if !o.IsContainedIn(scope) {
 		return DesiredMember{
 			RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
 			Status: domain.VerificationRejected,
 		}, true
 	}
-	tuples, ok := ruleObjectTuples(subject, sel.Verbs, o.ObjectType, o.ObjectID)
+	tuples, ok := ruleObjectTuples(cat, subject, sel.Verbs, o.ObjectType, o.ObjectID)
 	if !ok {
 		return DesiredMember{}, false
 	}

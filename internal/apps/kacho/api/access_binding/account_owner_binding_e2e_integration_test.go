@@ -28,6 +28,7 @@ import (
 	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 	repoacct "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 func TestAccountCreate_P6_OwnerBinding_CoCommit_E2E(t *testing.T) {
@@ -39,7 +40,7 @@ func TestAccountCreate_P6_OwnerBinding_CoCommit_E2E(t *testing.T) {
 	pool := poolFromDSN(t, dsn)
 	repo := kachopg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kacho_iam")
-	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil)
+	rec := reconcile.New(kachopg.NewReconcileAdapter(pool, catalogfixture.Source()), nil, catalogfixture.Source())
 
 	// Seed the creator user (needs a home account for the owner FK on its own
 	// account; the NEW account created below is owned by this user).

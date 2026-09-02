@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // TestReconcileBindingForward_MaterializesDesired_NoExclusiveLock (IAM-FMB-01 unit) — the
@@ -61,7 +62,7 @@ func TestReconcileBindingForward_MaterializesDesired_NoExclusiveLock(t *testing.
 		// Brand-new binding — no materialized members yet (the create hot-path).
 		current: nil,
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBindingForward(context.Background(), "acb-new"))
 
 	// NO EXCLUSIVE advisory lock — the additive create-forward removes the serialization
@@ -114,7 +115,7 @@ func TestReconcileBindingForward_ForeignScope_SkipsNoTuple(t *testing.T) {
 		},
 		current: nil,
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBindingForward(context.Background(), "acb-new"))
 
 	assert.Empty(t, f.upserts, "additive create-forward does NOT write a REJECTED member")
@@ -161,7 +162,7 @@ func TestReconcileBindingForward_ExistingMembers_DelegatesToFull(t *testing.T) {
 			{User: "user:usr-1", Relation: "viewer", Object: "compute_instance:i-flip"},
 		},
 	}
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 	require.NoError(t, rec.ReconcileBindingForward(context.Background(), "acb-1"))
 
 	// Routed to the FULL path: EXCLUSIVE advisory lock taken (delete-stale serialization);

@@ -40,6 +40,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // ownerAccessBindingStore builds the create-path shape: a brand-new
@@ -81,7 +82,7 @@ func ownerAccessBindingStore(sameCreateMembers []domain.AccessBindingID) *fakeSt
 // access_binding of the account queues on.
 func TestReconcileObjectForwardNoStale_MembersOfSameCreate_StayOnAdditivePath(t *testing.T) {
 	f := ownerAccessBindingStore([]domain.AccessBindingID{"acb-new"})
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 
 	require.NoError(t, rec.ReconcileObjectForwardNoStale(context.Background(), "iam.accessBinding", "acb-new"))
 
@@ -121,7 +122,7 @@ func TestReconcileObjectForwardNoStale_MembersOfSameCreate_StayOnAdditivePath(t 
 // `post-revoke-deny` defect.
 func TestReconcileObjectForward_WithoutProof_KeepsDeleteStaleGuard(t *testing.T) {
 	f := ownerAccessBindingStore([]domain.AccessBindingID{"acb-owner"})
-	rec := New(fakeRunner{s: f}, nil)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
 
 	require.NoError(t, rec.ReconcileObjectForward(context.Background(), "iam.accessBinding", "acb-new"))
 

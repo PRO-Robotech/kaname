@@ -47,6 +47,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // recordingObjectReconciler records which object-reconcile entry point the use-case
@@ -115,7 +116,7 @@ var _ ObjectReconciler = (*recordingObjectReconciler)(nil)
 func TestUpdateRole_LabelChange_RematerializesObjectInProcess(t *testing.T) {
 	repo := newRlUpdRepo(domain.Labels{"labelrevoke": "treska"})
 	rec := &recordingObjectReconciler{}
-	uc := NewUpdateRoleUseCase(repo, newRlFakeOps()).WithObjectReconciler(rec, nil)
+	uc := NewUpdateRoleUseCase(repo, newRlFakeOps(), catalogfixture.Source()).WithObjectReconciler(rec, nil)
 
 	_, err := uc.Execute(ownerCtx(), UpdateRoleInput{
 		ID:         rlUpdRoleID,
@@ -141,7 +142,7 @@ func TestUpdateRole_LabelChange_RematerializesObjectInProcess(t *testing.T) {
 func TestUpdateRole_NonLabelChange_NoRematerialization(t *testing.T) {
 	repo := newRlUpdRepo(domain.Labels{"labelrevoke": "treska"})
 	rec := &recordingObjectReconciler{}
-	uc := NewUpdateRoleUseCase(repo, newRlFakeOps()).WithObjectReconciler(rec, nil)
+	uc := NewUpdateRoleUseCase(repo, newRlFakeOps(), catalogfixture.Source()).WithObjectReconciler(rec, nil)
 
 	newDesc := domain.Description("renamed for the audit trail")
 	_, err := uc.Execute(ownerCtx(), UpdateRoleInput{

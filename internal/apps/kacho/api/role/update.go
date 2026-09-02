@@ -22,7 +22,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
@@ -83,10 +83,14 @@ type UpdateRoleUseCase struct {
 	// event + periodic sweep remain the backstop.
 	objects ObjectReconciler
 	logger  *slog.Logger
+	// cat — источник КАТАЛОЖНОГО ФАКТА (kacho#1816). Обязателен по той же
+	// причине, что и у создания: проекция «роль → тип × глагол» пишется в той же
+	// транзакции, и пустая проекция оставила бы вердикт определённым наполовину.
+	cat catalog.Source
 }
 
-func NewUpdateRoleUseCase(r Repo, opsRepo operations.Repo) *UpdateRoleUseCase {
-	return &UpdateRoleUseCase{repo: r, opsRepo: opsRepo}
+func NewUpdateRoleUseCase(r Repo, opsRepo operations.Repo, cat catalog.Source) *UpdateRoleUseCase {
+	return &UpdateRoleUseCase{repo: r, opsRepo: opsRepo, cat: cat}
 }
 
 // WithTupleReconciler wires the FGA tuple reconcile fan-out. nil-safe.
@@ -289,8 +293,22 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 				// исчезнуть из проекции, иначе отзыв права не применяется — молча,
 				// потому что добавление проходит успешно.
 				if verr := w.RolesW().ReplaceRoleVerbs(ctx, upd.ID,
-					authzmap.RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors())); verr != nil {
+					u.cat.Facts().RoleVerbsFromSelectors(upd.Rules.MaterializingSelectors())); verr != nil {
 					return domain.Role{}, verr
+				}
+				// Проекция ОБЪЯВЛЕННЫХ сегментов — третья сторона того же правила, и
+				// пишется она в той же транзакции по той же причине. Отличие от двух
+				// предыдущих в том, ЧТО кладётся: те несут только резолвящееся, эта —
+				// КАЖДЫЙ объявленный сегмент. На ней стоят ключи в каталог, и именно
+				// она отвергает правило, называющее ресурс или глагол, которых на
+				// платформе нет либо больше нет (kacho#1030, миграция 20260901113757).
+				//
+				// Своей проверки каталога здесь НЕТ намеренно: между «спросить» и
+				// «записать» помещается снятие ресурса, и правило пережило бы свой
+				// референт (запрет #10). Судит ОПЕРАТОР ВСТАВКИ.
+				if rerr := w.RolesW().ReplaceRuleRefs(ctx, upd.ID,
+					domain.RuleRefsOf(upd.Rules)); rerr != nil {
+					return domain.Role{}, rerr
 				}
 			}
 			// changed_fields records WHAT changed (e.g. ["permissions"]) — the

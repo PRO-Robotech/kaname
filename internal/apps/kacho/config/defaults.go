@@ -192,6 +192,14 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("jobs.expired-credential-reclaim.grace", tokenpolicy.ExpiredCredentialReclaimGrace)
 	v.SetDefault("jobs.expired-credential-reclaim.batch-size", 200)
 	v.SetDefault("jobs.expired-credential-reclaim.dry-run", false)
+
+	// Обновление снимка каталога модуля (#1816). Минута — верхняя граница
+	// отставания снимка от базы, то есть столько снятый в работающем процессе
+	// ресурс продолжает считаться живым. Величина выбрана по предмету: строки
+	// каталога сегодня пишет только миграция, а административный путь снятия
+	// заводится отдельной задачей; окно, измеряемое минутой, короче любого
+	// осмысленного окна применения такого снятия.
+	v.SetDefault("jobs.catalog-snapshot.refresh-interval", time.Minute)
 	v.SetDefault("authn.sakey-max-ttl", 365*24*time.Hour)
 	// Per-client access_token_lifespan for the SA-key OAuth2 client. Default 0 =
 	// omit the field and inherit the provider-global TTL, so an existing

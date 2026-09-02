@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // sizeSpy — двойник приёмника размера материализации.
@@ -78,7 +79,7 @@ func TestBindingMaterializationSizeGrowsWithMatchedObjects(t *testing.T) {
 	for _, n := range []int{1, 3, 12} {
 		spy := &sizeSpy{}
 		f := sizeFixture(n)
-		rec := New(fakeRunner{s: f}, nil).WithSizeRecorder(spy)
+		rec := New(fakeRunner{s: f}, nil, catalogfixture.Source()).WithSizeRecorder(spy)
 		require.NoError(t, rec.ReconcileBinding(context.Background(), "acb-1"))
 
 		require.Equal(t, 1, spy.calls, "один проход выдачи — одно наблюдение")
@@ -105,12 +106,12 @@ func TestBindingMaterializationTuplesGrowWithVerbs(t *testing.T) {
 
 	narrow := &sizeSpy{}
 	fNarrow := sizeFixture(objects, "get")
-	require.NoError(t, New(fakeRunner{s: fNarrow}, nil).WithSizeRecorder(narrow).
+	require.NoError(t, New(fakeRunner{s: fNarrow}, nil, catalogfixture.Source()).WithSizeRecorder(narrow).
 		ReconcileBinding(context.Background(), "acb-1"))
 
 	wide := &sizeSpy{}
 	fWide := sizeFixture(objects, "get", "list", "update", "delete")
-	require.NoError(t, New(fakeRunner{s: fWide}, nil).WithSizeRecorder(wide).
+	require.NoError(t, New(fakeRunner{s: fWide}, nil, catalogfixture.Source()).WithSizeRecorder(wide).
 		ReconcileBinding(context.Background(), "acb-1"))
 
 	assert.Equal(t, objects, narrow.objects[0])
@@ -131,7 +132,7 @@ func TestBindingMaterializationEmptyPassIsReportedAsZero(t *testing.T) {
 
 	spy := &sizeSpy{}
 	f := sizeFixture(0)
-	require.NoError(t, New(fakeRunner{s: f}, nil).WithSizeRecorder(spy).
+	require.NoError(t, New(fakeRunner{s: f}, nil, catalogfixture.Source()).WithSizeRecorder(spy).
 		ReconcileBinding(context.Background(), "acb-1"))
 
 	require.Equal(t, 1, spy.calls, "пустой проход тоже наблюдается")
@@ -144,7 +145,7 @@ func TestBindingMaterializationRecorderIsOptional(t *testing.T) {
 	t.Parallel()
 
 	f := sizeFixture(2)
-	require.NoError(t, New(fakeRunner{s: f}, nil).ReconcileBinding(context.Background(), "acb-1"))
+	require.NoError(t, New(fakeRunner{s: f}, nil, catalogfixture.Source()).ReconcileBinding(context.Background(), "acb-1"))
 	require.Len(t, f.upserts, 2, "проход без приёмника материализует то же самое")
 }
 
@@ -172,7 +173,7 @@ func TestBindingMaterializationSizeObservedOnCreateForwardPath(t *testing.T) {
 	for _, n := range []int{1, 3, 12} {
 		spy := &sizeSpy{}
 		f := sizeFixture(n) // current: nil — новая привязка, горячий путь создания
-		rec := New(fakeRunner{s: f}, nil).WithSizeRecorder(spy)
+		rec := New(fakeRunner{s: f}, nil, catalogfixture.Source()).WithSizeRecorder(spy)
 		require.NoError(t, rec.ReconcileBindingForward(context.Background(), "acb-new"))
 
 		require.Equalf(t, 1, spy.calls,
@@ -212,7 +213,7 @@ func TestBindingMaterializationObservedOnceWhenForwardDelegatesToFull(t *testing
 	}}
 
 	spy := &sizeSpy{}
-	rec := New(fakeRunner{s: f}, nil).WithSizeRecorder(spy)
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source()).WithSizeRecorder(spy)
 	require.NoError(t, rec.ReconcileBindingForward(context.Background(), "acb-1"))
 
 	require.Equalf(t, 1, spy.calls,

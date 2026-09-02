@@ -1,0 +1,197 @@
+# SPDX-License-Identifier: BUSL-1.1
+#
+# Фикстура проб: манифест vpc со ВСЕМИ четырьмя разделами.
+#
+# Раздел `resources` несёт ДЕВЯТЬ ресурсов — по числу типов vpc в закрытой
+# таблице `authzmap.objectTypes` (предикат:
+# `grep -cE '^\s+"vpc\.' services/iam/internal/authzmap/fga_types.go` → 9).
+# Черновик воркспейса называет десятый (`quota`), у которого типа объекта нет
+# вовсе: право на квоту проверяется на проекте. Он здесь не стоит — ключ
+# `objectType` обязателен, и назвать его квоте нечем.
+#
+# Имя файла — НЕ `manifest.yaml`: проверка дерева (check.go) читает файлы ровно
+# с этим базовым именем, и фикстура, названная так, судилась бы как настоящий
+# манифест модуля iam.
+
+apiVersion: iam/v1
+module: vpc
+
+resources:
+
+  - name: network
+    objectType: vpc_network
+    parent: project
+    producer: derived
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+      - {name: listOperations,   class: list}
+      - {name: addCidrBlocks,    class: update}
+      - {name: removeCidrBlocks, class: update}
+
+  - name: subnet
+    objectType: vpc_subnet
+    parent: project
+    producer: derived
+    # Отношение, не выводимое ни из одного действия: RPC под него нет.
+    # Объявляется дословно, иначе перегенерация модели его СНИМЕТ.
+    relations:
+      - {name: use, definition: "[user, service_account] or editor"}
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+      - {name: listOperations,    class: list}
+      - {name: addCidrBlocks,     class: update}
+      - {name: removeCidrBlocks,  class: update}
+      - {name: listUsedAddresses, class: list}
+
+  - name: securityGroup
+    objectType: vpc_security_group
+    parent: project
+    producer: derived
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+      - {name: listOperations, class: list}
+      - {name: updateRule,     class: update}
+      - {name: updateRules,    class: update}
+
+  - name: routeTable
+    objectType: vpc_route_table
+    parent: project
+    producer: derived
+    verbs: [get, list, create, update, delete, {name: listOperations, class: list}]
+
+  - name: address
+    objectType: vpc_address
+    parent: project
+    producer: derived
+    relations:
+      - {name: use, definition: "[user, service_account] or editor"}
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+      - {name: listOperations, class: list}
+
+  - name: gateway
+    objectType: vpc_gateway
+    parent: project
+    producer: derived
+    verbs: [get, list, create, update, delete, {name: listOperations, class: list}]
+
+  - name: networkInterface
+    objectType: vpc_network_interface
+    parent: project
+    producer: derived
+    verbs: [get, list, create, update, delete, {name: listOperations, class: list}]
+
+  - name: cidrGroup
+    objectType: vpc_cidr_group
+    parent: project
+    producer: derived
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+      - {name: listOperations,   class: list}
+      - {name: addCidrBlocks,    class: update}
+      - {name: removeCidrBlocks, class: update}
+
+  # Административный ресурс кластера. Аннотации о нём молчат BY CONSTRUCTION:
+  # его глаголы живут на внутреннем слушателе (ban #6), и якоря области этот
+  # тип не несут — отсюда `producer: authored`.
+  - name: addressPool
+    objectType: vpc_address_pool
+    parent: cluster
+    producer: authored
+    doc: |
+      Административный ресурс с якорем на кластере: его RPC гейтятся прямо на
+      cluster:cluster_kacho_root#system_admin, поэтому пообъектного указателя на
+      него не пишет никто.
+    # Состав субъектов и набор ярусов у административного ресурса УЖЕ общего:
+    # группы среди субъектов нет, яруса editor нет вовсе. Умолчание здесь
+    # расширило бы доступ молча.
+    subjects: [user, service_account]
+    tiers: [admin, viewer]
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+      - {name: addCidrBlocks,          class: update}
+      - {name: removeCidrBlocks,       class: update}
+      - {name: bindAsNetworkDefault,   class: update}
+      - {name: unbindNetworkDefault,   class: update}
+      - {name: getUtilization,         class: get}
+      - {name: listAddresses,          class: list}
+
+roles:
+
+  - id: vpc.internalConsumer
+    name: Смежный модуль
+    description: >
+      Ходит в vpc на пути запроса: аллокация адресов, ссылки, привязка
+      интерфейсов.
+    tier: {tierType: iam.project, tierId: prj000000000000000}
+    rules:
+      - module: vpc
+        resources: [address, networkInterface, subnet]
+        verbs: [get, list]
+
+  - id: vpc.addressPoolAdmin
+    name: Администратор адресного пространства
+    description: Ведёт адресные пулы облака.
+    tier: {tierType: iam.account, tierId: acc000000000000000}
+    rules:
+      - module: vpc
+        resources: [addressPool]
+        verbs: [get, list, create, update, delete]
+
+deprecatedVerbs:
+  read:
+    class: get
+    since: "2026-08-23"
+    reason: >
+      Синоним чтения из прежней грамматики. Ни одного RPC не адресует;
+      проецируется в отношение чтения наравне с get и list.
+    removeWhen: >
+      Ни одна выданная привязка не ссылается на роль, чьи права содержат
+      сегмент `.read`. Предикат: выдач с таким правом ноль.
+
+seed:
+
+  serviceAccounts:
+    - name: kacho-vpc
+      account: system
+      description: >
+        Личность модуля на пути запроса: под ней vpc ходит в geo за зонами,
+        в iam за пределами квот и правами.
+
+  groups:
+    - name: vpc-internal-consumers
+      account: system
+      description: >
+        Смежные модули, ходящие в vpc на пути запроса.
+
+  accessBindings:
+    - subjects:
+        - {type: group, name: vpc-internal-consumers}
+      roleId: vpc.internalConsumer
+      scopeType: iam.cluster
+      scopeId: cluster_kacho_root
+      target: allInScope

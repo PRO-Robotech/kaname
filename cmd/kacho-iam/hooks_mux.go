@@ -19,6 +19,7 @@ import (
 	reconcileapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
 	userapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	handlerinternal "github.com/PRO-Robotech/kacho/services/iam/internal/handler/iamhooks"
@@ -50,6 +51,10 @@ func buildHooksMux(
 	kachoRepo kachorepo.Repository,
 	opsRepo operations.Repo,
 	relationStore clients.RelationStore,
+	// catalogSource — каталожный факт из живых строк (задача #1816): ЖИВОЙ путь
+	// первого входа материализует доступ тем же реконсайлером, что и gRPC-путь,
+	// и обязан читать тот же каталог.
+	catalogSource catalog.Source,
 	metricsReg *metrics.Registry,
 	cfg config.Config,
 	logger *slog.Logger,
@@ -112,7 +117,7 @@ func buildHooksMux(
 	// signup path) forward-materializes the bootstrap owner's per-object content
 	// access — parity with the gRPC InternalUserService wiring (wiring.go). Without
 	// it the LIVE signup user is 403 on their own account's content until the sweep.
-	provisionReconciler := reconcileapp.New(kachopg.NewReconcileAdapter(pool), logger)
+	provisionReconciler := reconcileapp.New(kachopg.NewReconcileAdapter(pool, catalogSource), logger, catalogSource)
 	userUpsert := userapp.NewUpsertFromIdentityUseCase(kachoRepo, opsRepo).
 		WithLogger(logger).
 		WithReconciler(provisionReconciler).

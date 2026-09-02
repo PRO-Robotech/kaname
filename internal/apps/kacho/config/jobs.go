@@ -40,6 +40,48 @@ import (
 // JobsConfig — фоновые задания.
 type JobsConfig struct {
 	ExpiredCredentialReclaim ExpiredCredentialReclaimConfig `mapstructure:"expired-credential-reclaim"`
+	// CatalogSnapshot — обновление снимка каталога модуля (задача #1816).
+	CatalogSnapshot CatalogSnapshotConfig `mapstructure:"catalog-snapshot"`
+}
+
+// CatalogSnapshotConfig — обновление снимка каталога модуля в процессе.
+//
+// # Что за снимок
+//
+// Каталожный факт — какие пары «модуль.ресурс» грантуемы и какие глаголы
+// объявлены — читается из строк `kacho_iam.catalog_*` и держится в памяти:
+// спрашивают его на горячих путях (создание и правка роли, пересчёт проекции,
+// сборка кортежей), а сам он мал и меняется реже всего в схеме. Запрос к базе на
+// каждом обращении оплачивался бы запросом арендатора.
+//
+// # Почему величина ЗДЕСЬ, а не константой в корне
+//
+// Период обновления И ЕСТЬ верхняя граница отставания снимка от базы: столько
+// снятый ресурс продолжает считаться живым. Вшитая величина есть решение,
+// принятое за оператора и ему не предъявленное.
+type CatalogSnapshotConfig struct {
+	// RefreshInterval — как часто снимок перечитывает живое множество.
+	//
+	// Ноль здесь НЕ означает «выключено»: выключенного обновления у снимка не
+	// бывает — снимок без обновления отстаёт бессрочно, а строки каталога
+	// снимаются в работающем процессе. Непозитивная величина отвергается стражем
+	// старта, а не понимается как выключатель.
+	RefreshInterval time.Duration `mapstructure:"refresh-interval"`
+}
+
+// Validate — страж старта секции.
+//
+// Отказ в старте, а не тихое подтягивание к умолчанию: подтягивание оставило бы
+// оператора в уверенности, что действует написанная им величина, тогда как
+// действует другая.
+func (c CatalogSnapshotConfig) Validate() error {
+	if c.RefreshInterval <= 0 {
+		return fmt.Errorf(
+			"jobs.catalog-snapshot.refresh-interval is %s — must be positive: "+
+				"a non-positive interval is not 'disabled', it is a snapshot that lags "+
+				"forever while answering as if it were current (kacho#1816)", c.RefreshInterval)
+	}
+	return nil
 }
 
 // ExpiredCredentialReclaimConfig — снятие истёкших удостоверений.

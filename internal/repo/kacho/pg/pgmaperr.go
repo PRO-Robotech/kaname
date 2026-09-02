@@ -334,6 +334,36 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 			return "condition is in use by access bindings"
 		}
 		return fmt.Sprintf("Condition %s not found", idHint)
+	case "role_rule_ref_res_fk":
+		// Сегмент называет ИМЯ ОГРАНИЧЕНИЯ, токен — подсказка писателя,
+		// поставленная на его собственном операторе вставки (role_repo.go,
+		// ReplaceRuleRefs). Ни то, ни другое НЕ берётся из pgErr.Detail: его этот
+		// файл не читает намеренно (см. хвост функции — защита от разведки схемы).
+		//
+		// Поле названо во МНОЖЕСТВЕННОМ числе — `resources`, — потому что так оно
+		// называется в теле запроса, которое прислал вызывающий, а не так, как
+		// называется колонка таблицы.
+		//
+		// ТОН — предусловия, а не валидации: «Illegal argument …» принадлежит
+		// INVALID_ARGUMENT, а эта полоса отвечает FAILED_PRECONDITION, и различие
+		// кодов и есть доказательство, что отвечал ключ, а не грамматика.
+		res, _ := splitRuleRefHint(idHint)
+		if res != "" {
+			return fmt.Sprintf("resources: %s is not a live platform resource", res)
+		}
+		return "resources: rule names a resource that is not live in the platform catalog"
+	case "role_rule_ref_verb_fk":
+		res, verb := splitRuleRefHint(idHint)
+		if res != "" && verb != "" {
+			return fmt.Sprintf("verbs: %s is not a live verb of resource %s", verb, res)
+		}
+		return "verbs: rule names a verb that is not live for its resource"
+	case "role_verb_type_fk":
+		// Проекция ГЛАГОЛОВ (role_verb) ссылается на живую строку каталога тем же
+		// точечным написанием, каким её пишет `ReplaceRoleVerbs`. Подсказка там —
+		// идентификатор роли, а не сегмент, поэтому текст называет предмет, а не
+		// токен: иначе он назвал бы роль виновницей чужого отказа.
+		return "resources: rule names a resource that is not live in the platform catalog"
 	case "access_binding_subjects_subject_ref":
 		// Migration 0050 BEFORE DELETE trigger on users/service_accounts/groups: a
 		// principal still referenced as a subjects[0..N] grantee

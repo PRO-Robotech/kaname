@@ -19,6 +19,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/role"
 	service_account "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/service_account"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // ── 5.2-13 Project C/U/D ───────────────────────────────────────────────────────
@@ -163,7 +164,7 @@ func TestRoleAudit_5_2_17_CrudEmits(t *testing.T) {
 	ctx := context.Background()
 	owner, accID := seedUserAccount(t, ctx, env.pool, "rol17")
 
-	_, err := role.NewCreateRoleUseCase(env.repo, env.opsRepo).Execute(
+	_, err := role.NewCreateRoleUseCase(env.repo, env.opsRepo, catalogfixture.Source()).Execute(
 		withPrincipal(owner), domain.Role{
 			AccountID: accID,
 			Name:      domain.RoleName("vpc_reader_17"),
@@ -181,7 +182,7 @@ func TestRoleAudit_5_2_17_CrudEmits(t *testing.T) {
 	// no full permissions blob required — name is fine, but the secret-free
 	// payload must not embed an exploded permission matrix beyond changed_fields.
 
-	_, err = role.NewUpdateRoleUseCase(env.repo, env.opsRepo).Execute(
+	_, err = role.NewUpdateRoleUseCase(env.repo, env.opsRepo, catalogfixture.Source()).Execute(
 		withPrincipal(owner), role.UpdateRoleInput{
 			ID:         domain.RoleID(rolID),
 			Rules:      domain.Rules{{Module: "vpc", Resources: []string{"network", "subnet"}, Verbs: []string{"get"}}},

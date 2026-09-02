@@ -25,6 +25,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 func roleNonOwnerCtxs() map[string]context.Context {
@@ -39,7 +40,7 @@ func roleNonOwnerCtxs() map[string]context.Context {
 func TestUpdateRole_NonOwnerPrincipal_NotRejectedInService(t *testing.T) {
 	for name, ctx := range roleNonOwnerCtxs() {
 		t.Run(name, func(t *testing.T) {
-			uc := NewUpdateRoleUseCase(newRlUpdRepo(domain.Labels{"team": "billing"}), newRlFakeOps())
+			uc := NewUpdateRoleUseCase(newRlUpdRepo(domain.Labels{"team": "billing"}), newRlFakeOps(), catalogfixture.Source())
 			op, err := uc.Execute(ctx, UpdateRoleInput{
 				ID:         rlUpdRoleID,
 				Labels:     domain.Labels{"team": "payments"},
@@ -67,7 +68,7 @@ func TestDeleteRole_NonOwnerPrincipal_NotRejectedInService(t *testing.T) {
 
 func TestRoleMutations_AnonymousStillRejected(t *testing.T) {
 	t.Run("update", func(t *testing.T) {
-		uc := NewUpdateRoleUseCase(newRlUpdRepo(nil), newRlFakeOps())
+		uc := NewUpdateRoleUseCase(newRlUpdRepo(nil), newRlFakeOps(), catalogfixture.Source())
 		_, err := uc.Execute(context.Background(), UpdateRoleInput{
 			ID: rlUpdRoleID, UpdateMask: []string{"labels"},
 		})

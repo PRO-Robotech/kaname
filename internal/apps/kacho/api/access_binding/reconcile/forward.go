@@ -475,7 +475,7 @@ func (r *Reconciler) forwardObjectForBinding(ctx context.Context, s ReconcileSto
 	// `*.*` binding carries selectors with EMPTY ObjectTypes (the D-9 flat short-circuit
 	// owns cluster super-admin), so nothing matches → no per-object materialization on
 	// cluster (short-circuit preserved).
-	for _, dm := range desiredMembersForObject(bs, obj) {
+	for _, dm := range desiredMembersForObject(r.cat.Facts(), bs, obj) {
 		if dm.Status != domain.VerificationActive {
 			// A REJECTED containment verdict: the additive forward path materializes only
 			// ACTIVE grants; the async full backstop owns the REJECTED member row +

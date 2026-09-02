@@ -25,6 +25,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // seedComputeEditorRole inserts a project-scoped reusable role covering
@@ -114,8 +115,8 @@ func countContainmentAudit(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 }
 
 func newReconciler(pool *pgxpool.Pool) (*reconcile.Reconciler, *kachopg.ReconcileAdapter) {
-	adapter := kachopg.NewReconcileAdapter(pool)
-	return reconcile.New(adapter, nil), adapter
+	adapter := kachopg.NewReconcileAdapter(pool, catalogfixture.Source())
+	return reconcile.New(adapter, nil, catalogfixture.Source()), adapter
 }
 
 // gammaFixture sets up account/project/owner/member/role and returns the repo.

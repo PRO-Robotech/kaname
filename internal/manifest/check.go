@@ -67,7 +67,7 @@ import (
 //	                  даёт вердикта НИ ПО ОДНОМУ манифесту дерева.
 //
 // Нарушение любого из трёх есть НАХОДКА, называющая величину, — не отказ
-// проверки и не молчание. Подробности — у readManifest.
+// проверки и не молчание. Подробности — у ReadUnderRoot.
 
 const (
 	// CheckOK — каждый найденный манифест прочитан и годен.
@@ -225,7 +225,7 @@ func CheckTree(root string) CheckReport {
 		}
 
 		rel := displayPath(root, path)
-		data, err := readManifest(treeRoot, rel)
+		data, err := ReadUnderRoot(treeRoot, rel)
 		if err != nil {
 			report.Findings = append(report.Findings, fmt.Sprintf(
 				"%s: манифест не прочитан: %v", rel, err))
@@ -242,7 +242,7 @@ func CheckTree(root string) CheckReport {
 	return report
 }
 
-// readManifest читает манифест ПОД КОРНЕМ обхода, ОБЫЧНЫМ ФАЙЛОМ и НЕ БОЛЬШЕ
+// ReadUnderRoot читает манифест ПОД НАЗВАННЫМ КОРНЕМ, ОБЫЧНЫМ ФАЙЛОМ и НЕ БОЛЬШЕ
 // предела. Ни одно из трёх не следует из того, что путь породил обход.
 //
 // # Почему путь, порождённый обходом, нельзя читать ПО ИМЕНИ
@@ -274,7 +274,7 @@ func CheckTree(root string) CheckReport {
 // есть находку, посылающую читателя не туда. Поэтому предел держит сам читатель
 // (io.LimitReader), а размер из fstat служит только тем, чтобы НАЗВАТЬ величину:
 // без неё читателю нечем решить, чинить файл или поднимать предел.
-func readManifest(root *os.Root, rel string) ([]byte, error) {
+func ReadUnderRoot(root *os.Root, rel string) ([]byte, error) {
 	f, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		// Отказ называется вместе с ГРАНИЦЕЙ, в которой он случился: про уход за

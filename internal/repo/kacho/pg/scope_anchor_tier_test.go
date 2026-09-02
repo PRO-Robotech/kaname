@@ -38,6 +38,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // TestScopeAnchorWithoutItsOwnVerbSet_StillResolvesToAdminTier — гейт на дереве.
@@ -49,7 +50,7 @@ func TestScopeAnchorWithoutItsOwnVerbSet_StillResolvesToAdminTier(t *testing.T) 
 			"исполняется, и эта проба утверждает о ветке, которой нет", own)
 	}
 
-	fallback := scopeTypeVerbs("cluster")
+	fallback := scopeTypeVerbs(catalogfixture.Facts(), "cluster")
 	if len(fallback) == 0 {
 		t.Fatal("запасной набор пуст — подстановка `*` на якоре развернулась бы в ничто, " +
 			"и роль-суперпользователь не дала бы даже чтения")
@@ -80,7 +81,7 @@ func TestScopeAnchorWithoutItsOwnVerbSet_StillResolvesToAdminTier(t *testing.T) 
 	if len(own) == 0 {
 		t.Fatal("у якоря `project` нет своего набора — контроль, ради которого он выбран, исчез")
 	}
-	got := scopeTypeVerbs("project")
+	got := scopeTypeVerbs(catalogfixture.Facts(), "project")
 	if len(got) != len(own) {
 		t.Errorf("якорь `project` развернулся в %v вместо своего набора %v — запасной путь "+
 			"подменяет собственный", got, own)

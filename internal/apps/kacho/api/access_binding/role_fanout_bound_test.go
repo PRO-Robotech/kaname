@@ -24,6 +24,7 @@ import (
 
 	roleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/role"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // fakeFanout — a role.RulesMembershipFanout returning a fixed active-binding count
@@ -89,7 +90,7 @@ func TestRoleUpdate_C21_FanoutBoundExceeded_FailedPrecondition(t *testing.T) {
 	opsRepo := newFakeOpsRepo()
 	fan := newFakeFanout(roleapp.MaxRoleFanoutBindings + 1)
 
-	uc := roleapp.NewUpdateRoleUseCase(repo, opsRepo).
+	uc := roleapp.NewUpdateRoleUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithTupleReconciler(NewRoleTupleReconciler()).
 		WithMembershipFanout(fan)
 
@@ -113,7 +114,7 @@ func TestRoleUpdate_C21_FanoutWithinBound_Runs(t *testing.T) {
 	opsRepo := newFakeOpsRepo()
 	fan := newFakeFanout(3)
 
-	uc := roleapp.NewUpdateRoleUseCase(repo, opsRepo).
+	uc := roleapp.NewUpdateRoleUseCase(repo, opsRepo, catalogfixture.Source()).
 		WithTupleReconciler(NewRoleTupleReconciler()).
 		WithMembershipFanout(fan)
 

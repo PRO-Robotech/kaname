@@ -559,6 +559,82 @@ func (w *roleWriter) ReplaceRoleVerbs(ctx context.Context, roleID domain.RoleID,
 	return nil
 }
 
+// ReplaceRuleRefs заменяет проекцию ОБЪЯВЛЕННЫХ сегментов правила роли.
+//
+// ПОЛНАЯ ЗАМЕНА, как и у проекции глаголов: сегмент, снятый из правил, обязан
+// исчезнуть отсюда, иначе ключ продолжал бы держать строку каталога, которую
+// роль больше не называет.
+//
+// # Своей проверки каталога здесь НЕТ намеренно
+//
+// Существование сегмента судит БАЗА — ключи `role_rule_ref_res_fk` и
+// `role_rule_ref_verb_fk`. Проверка в коде была бы software check-then-act
+// (запрет #10): между «спросить каталог» и «записать правило» помещается снятие
+// ресурса, и правило пережило бы свой референт. Тот же порядок, что у
+// `ReplaceRoleVerbs` после #1028.
+//
+// # Подсказка ставится ПООПЕРАТОРНО, и это не стиль
+//
+// Отказ ключа называет ПОЛЕ (по имени ограничения, ветвь `fkText`) и ТОКЕН.
+// Токен из ошибки драйвера взять нельзя: единственный его носитель —
+// `pgErr.Detail`, а `fkText` не читает его намеренно (защита от разведки схемы).
+// Значит токен обязан прийти от писателя — и прийти ТОТ САМЫЙ: правило несёт N
+// сегментов, а сказать надо про нарушивший. Носители подсказки уровня транзакции
+// (`ownerFKHint`, `membershipHint`) этого не дают by construction — они по
+// одному значению на транзакцию. Вставка идёт ПО СТРОКЕ, поэтому в момент отказа
+// писатель держит ровно один сегмент, и подсказка однозначна.
+//
+// Работает это ТОЛЬКО при немедленной форме ключа (`DEFERRABLE INITIALLY
+// IMMEDIATE`, миграция 20260901113757): при отложенной оператор уже завершился успехом,
+// и подсказывать некому.
+func (w *roleWriter) ReplaceRuleRefs(ctx context.Context, roleID domain.RoleID, refs []domain.RoleRuleRef) error {
+	if _, err := w.tx.Exec(ctx,
+		`DELETE FROM kacho_iam.role_rule_ref WHERE role_id = $1`, string(roleID)); err != nil {
+		return mapErr(err, "", string(roleID))
+	}
+	for _, ref := range refs {
+		var verb any
+		if !ref.IsAnchor() {
+			verb = ref.Verb
+		}
+		if _, err := w.tx.Exec(ctx,
+			`INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb)
+			 VALUES ($1, $2, $3, $4)
+			 ON CONFLICT DO NOTHING`,
+			string(roleID), ref.Module, ref.Resource, verb,
+		); err != nil {
+			// Подсказка — ТОТ САМЫЙ токен, на котором отказал оператор. Какой
+			// сегмент назвать, решает ветвь `fkText` по имени ограничения; здесь
+			// подаются оба, потому что писатель не знает, который из двух ключей
+			// сработал, и гадать об этом ему не положено.
+			return mapErr(err, "", ruleRefHint(ref))
+		}
+	}
+	return nil
+}
+
+// ruleRefHint — подсказка вида «resource\x1fverb» для одного оператора вставки.
+// Разделитель — тот же приём, что у подсказки выдачи (`splitBindingHint`):
+// значений два, а носитель у `mapErr` один.
+func ruleRefHint(ref domain.RoleRuleRef) string {
+	return ref.Resource + ruleRefHintSep + ref.Verb
+}
+
+// ruleRefHintSep — разделитель половин подсказки. Токен правила его содержать не
+// может: грамматика сегмента (`ruleResRe`/`ruleVerbRe`) допускает только буквы,
+// цифры, дефис и подчёркивание.
+const ruleRefHintSep = "\x1f"
+
+// splitRuleRefHint — обратная сторона `ruleRefHint`. Подсказка без разделителя
+// возвращается как ресурс: так ветвь `fkText` остаётся годной, если её позовут с
+// подсказкой другой формы.
+func splitRuleRefHint(hint string) (resource, verb string) {
+	if i := strings.Index(hint, ruleRefHintSep); i >= 0 {
+		return hint[:i], hint[i+len(ruleRefHintSep):]
+	}
+	return hint, ""
+}
+
 func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
 	if _, err := w.tx.Exec(ctx,
 		`DELETE FROM kacho_iam.role_rule_selectors WHERE role_id = $1`, string(roleID)); err != nil {

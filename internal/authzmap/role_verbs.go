@@ -49,7 +49,27 @@ import "github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 // глагола, каким бы ни был `typeVerbs`: отношения `v_*` у него не существует,
 // и пара в проекции адресовала бы отношение, которого нет в модели.
 func GrantedVerbs(fgaType string, authored, typeVerbs []string) []string {
-	if len(VerbsOfType(fgaType)) == 0 {
+	return GrantedVerbsWithDeclared(fgaType, len(VerbsOfType(fgaType)) > 0, authored, typeVerbs)
+}
+
+// GrantedVerbsWithDeclared — ТОТ ЖЕ предикат, но единственный факт, который он
+// берёт у каталога, приходит ПАРАМЕТРОМ: объявляет ли тип набор глаголов вообще.
+//
+// Разделение заведено задачей #1816. Каталог существует ДВУМЯ выражениями —
+// литералом (производная канона `fga_model.fga`) и живыми строками
+// `kacho_iam.catalog_*`, — и ответ на «объявлен ли набор» у них расходится ровно
+// в один момент: когда строка снята в РАБОТАЮЩЕМ процессе. Вычисление же
+// глаголов от источника не зависит вовсе, поэтому оно и осталось ОДНИМ: две
+// реализации вопроса «что роль разрешает на типе» по отдельности непротиворечивы
+// и расходятся молча — так роль-администратор давала движку весь набор, а
+// проекции `role_verb` ни одного глагола (#496).
+//
+// `declaresVerbs` и `typeVerbs` — РАЗНЫЕ величины, и свести их нельзя: вызывающий
+// вправе предъявить набор ЗАПАСНОЙ (якорь без собственного набора разворачивает
+// подстановку общим словарём ради вывода яруса), и тогда `typeVerbs` непуст, а
+// тип не объявляет ничего.
+func GrantedVerbsWithDeclared(fgaType string, declaresVerbs bool, authored, typeVerbs []string) []string {
+	if !declaresVerbs {
 		return nil
 	}
 	expanded, _ := domain.ResolveVerbsAndTier(authored, typeVerbs)

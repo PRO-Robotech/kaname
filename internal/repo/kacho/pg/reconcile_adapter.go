@@ -30,7 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
@@ -44,11 +44,19 @@ import (
 // pool; each reconcile pass opens its own writer-tx.
 type ReconcileAdapter struct {
 	pool *pgxpool.Pool
+	// cat — источник КАТАЛОЖНОГО ФАКТА (kacho#1816). Нужен здесь, потому что
+	// набор глаголов якоря выводится при чтении выдачи (`bindingScopeFrom`), а
+	// не при её материализации.
+	cat catalog.Source
 }
 
 // NewReconcileAdapter constructs the adapter over a pool.
-func NewReconcileAdapter(pool *pgxpool.Pool) *ReconcileAdapter {
-	return &ReconcileAdapter{pool: pool}
+//
+// `cat` — источник каталожного факта; параметр ОБЯЗАТЕЛЬНЫЙ: без него набор
+// глаголов якоря пуст, и роль-суперпользователь молча понизилась бы с
+// администратора до наблюдателя.
+func NewReconcileAdapter(pool *pgxpool.Pool, cat catalog.Source) *ReconcileAdapter {
+	return &ReconcileAdapter{pool: pool, cat: cat}
 }
 
 // WithTx runs fn inside a single writer-tx (reconcile.TxRunner). Commit on
@@ -64,7 +72,7 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 			_ = tx.Rollback(ctx)
 		}
 	}()
-	store := &reconcileStore{tx: tx}
+	store := &reconcileStore{tx: tx, cat: a.cat.Facts()}
 	if err := fn(ctx, store); err != nil {
 		return err
 	}
@@ -85,6 +93,10 @@ func (a *ReconcileAdapter) WithTx(ctx context.Context, fn func(ctx context.Conte
 type reconcileStore struct {
 	tx        pgx.Tx
 	roleCache map[domain.RoleID]domain.Role
+	// cat — каталожный факт, взятый ОДИН раз на весь проход. Брать его заново
+	// на каждой выдаче значило бы допустить проход, собранный из разных
+	// моментов времени.
+	cat *catalog.Facts
 }
 
 // LoadBinding reads the minimal scope/selector/role facts for a binding inside
@@ -202,7 +214,7 @@ func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.
 	for _, b := range bindings {
 		// Роль, удалённая из-под выдачи, — «нет покрытия» (пустая доменная роль), тот же
 		// исход, что у одиночного чтения: реконсайлер не эмитит кортежей, а не падает.
-		out[b.ID] = bindingScopeFrom(b, roles[b.RoleID])
+		out[b.ID] = bindingScopeFrom(s.cat, b, roles[b.RoleID])
 	}
 	return out, nil
 }
@@ -245,7 +257,7 @@ func (s *reconcileStore) loadBinding(ctx context.Context, bindingID domain.Acces
 		}
 	}
 
-	return bindingScopeFrom(b, role), true, nil
+	return bindingScopeFrom(s.cat, b, role), true, nil
 }
 
 // role reads a role inside the tx, memoized for the lifetime of THIS pass. The per-binding
@@ -274,7 +286,7 @@ func (s *reconcileStore) role(ctx context.Context, id domain.RoleID) (domain.Rol
 // bindingScopeFrom — ЕДИНСТВЕННАЯ точка вывода BindingScope из строки выдачи и её роли.
 // Ею пользуются и поштучное чтение (loadBinding), и пакетное (LoadBindingsUnlocked),
 // поэтому пакетный путь не может разойтись с одиночным ни в одном факте.
-func bindingScopeFrom(b domain.AccessBinding, role domain.Role) reconcile.BindingScope {
+func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Role) reconcile.BindingScope {
 	return reconcile.BindingScope{
 		BindingID:   b.ID,
 		Scope:       scopeAnchorFor(b),
@@ -296,7 +308,7 @@ func bindingScopeFrom(b domain.AccessBinding, role domain.Role) reconcile.Bindin
 		// (+ verb-bearing v_*) tuple on the scope object itself (the write-authz /
 		// no-access-loss anchor the removed binding-time anchor emit produced).
 		ScopeSelfVerbs: role.Rules.ScopeSelfVerbs(string(b.ResourceType),
-			scopeTypeVerbs(string(b.ResourceType))),
+			scopeTypeVerbs(cat, string(b.ResourceType))),
 		// Target — the per-object least-privilege selection (F8, IAM-1-21). When
 		// Target.Resources is non-empty the reconciler materializes ONLY the listed
 		// objects (never the whole scope). Read from the persisted access_bindings.target
@@ -1416,9 +1428,13 @@ func (a *ReconcileAdapter) ListSelectorBindingIDs(ctx context.Context) ([]domain
 // типа отнимало глагол здесь — а понижение яруса на кластере ровно то, чего этот
 // комментарий и обещал не допустить. Наблюдалось при #1189: пересечение стало
 // `[get list]`, ярус подстановки — `viewer`. Держит `scope_anchor_tier_test.go`.
-func scopeTypeVerbs(scopeType string) []string {
-	if set := authzmap.VerbsOfType(scopeType); len(set) > 0 {
+// Каталог приходит ПАРАМЕТРОМ, а не спрашивается у литерала (kacho#1816):
+// «какие глаголы объявлены» может измениться в РАБОТАЮЩЕМ процессе снятием
+// строки, и читатель на литерале продолжил бы считать снятый тип живым до
+// следующего перезапуска.
+func scopeTypeVerbs(cat *catalog.Facts, scopeType string) []string {
+	if set := cat.VerbsOfType(scopeType); len(set) > 0 {
 		return set
 	}
-	return authzmap.AllVerbVocabulary()
+	return cat.AllVerbVocabulary()
 }

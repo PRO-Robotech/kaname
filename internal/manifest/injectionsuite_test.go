@@ -71,9 +71,6 @@ type injection struct {
 	// needle — что обязан назвать текст отказа: координата либо предмет.
 	// «Связность нарушена» — не отказ, а его отсутствие.
 	needle string
-	// roles — роли, объявленные манифестом. Раздел `roles` эта под-фаза не
-	// описывает (MOD-MF-07), поэтому на оси roleId перечень подаётся напрямую.
-	roles roleIDs
 }
 
 // injectionRun — исход прогона набора: перепись плюс два РАЗНЫХ перечня.
@@ -120,7 +117,7 @@ func executeInjections(fixture string, set []injection) injectionRun {
 		}
 		run.InputsProduced++
 
-		_, err := loadWithRoles([]byte(doc), in.roles)
+		_, err := Load([]byte(doc))
 		run.Executed++
 
 		switch {
@@ -184,11 +181,27 @@ func nonStringKeyInjection(name, literal string, quoted bool) injection {
 	}
 }
 
-// declaredRoles — роли фикстуры, объявленные явно: ось roleId иначе не
-// проверяется вовсе (раздел `roles` отвергается, сверять не с чем).
-func declaredRoles() roleIDs {
-	return rolesDeclared("vpc.internalConsumer", "vpc.addressPoolAdmin")
-}
+// rolesSectionOnlyFirst — раздел `roles`, объявляющий ТОЛЬКО первую из двух
+// ролей фикстуры: вторая выдача повисает на необъявленной.
+//
+// Раздел вносится ИНЪЕКЦИЕЙ, а не дописывается к фикстуре: у оси `module`
+// образец `module: vpc` обязан встречаться в документе ровно один раз, а всякое
+// правило выдачи называет свой модуль. Дописав раздел к фикстуре, набор отнял бы
+// вход у двух чужих утверждений — и сказал бы об этом третьей категорией, а не
+// вердиктом.
+//
+// До #1778 раздел вносить было НЕЛЬЗЯ вовсе: он отвергался разбором, и перечень
+// ролей подавался валидатору полем набора. Послабление истекло вместе с
+// описанием раздела; поле снято.
+const rolesSectionOnlyFirst = `
+roles:
+  - id: vpc.internalConsumer
+    name: Смежный модуль
+    description: Ходит в vpc на пути запроса — аллокация адресов и ссылки.
+    tier: {tierType: iam.project, tierId: prj000000000000000}
+    rules:
+      - {module: vpc, resources: [address], verbs: [get, list]}
+`
 
 // manifestInjections — набор целиком. Оси — из §9.2 приёмки; у каждой РЕД-строки
 // в наборе есть законный близнец либо контроль неиспорченной фикстуры.
@@ -246,12 +259,13 @@ func manifestInjections() []injection {
 
 		// ── связность ВЫДАЧ ────────────────────────────────────────────────
 		{
-			name: "roleId вне объявленных ролей", old: "      roleId: vpc.internalConsumer",
-			replacement: "      roleId: vpc.nosuchRole", wantErr: ErrRoleNotDeclared,
-			needle: "seed.accessBindings[0].roleId", roles: declaredRoles(),
+			name: "roleId выдачи не объявлен разделом ролей",
+			old:  "\nseed:\n", replacement: rolesSectionOnlyFirst + "\nseed:\n",
+			wantErr: ErrRoleNotDeclared, needle: "seed.accessBindings[1].roleId",
 		},
 		{
-			name: "законный близнец: roleId из объявленных", wantErr: nil, roles: declaredRoles(),
+			name: "законный близнец: обе роли объявлены разделом",
+			old:  "\nseed:\n", replacement: declaredRolesSection + "\nseed:\n", wantErr: nil,
 		},
 		{
 			name: "субъект выдачи не заведён этим посевом",
@@ -266,11 +280,21 @@ func manifestInjections() []injection {
 			wantErr:     ErrGroupNeverGranted, needle: "vpc-orphan-group",
 		},
 
-		// ── раздел, который эта под-фаза не описывает ──────────────────────
+		// ── НЕИЗВЕСТНЫЙ раздел ─────────────────────────────────────────────
+		// До #1778 здесь стоял «известный, но ещё не описанный раздел»: три
+		// раздела отвергались по имени, называя задачу номером. Разделы описаны,
+		// предмет того утверждения исчез — и оно заменено, а не снято: раздел,
+		// которого форма не знает, обязан отвергаться и после, называя ключ.
 		{
-			name: "известный, но ещё не описанный раздел", old: "\nseed:\n",
-			replacement: "\nresources: {}\nseed:\n", wantErr: ErrSectionNotDescribed,
-			needle: "PRO-Robotech/kacho#1778",
+			name: "неизвестный раздел отвергается с именем ключа", old: "\nseed:\n",
+			replacement: "\nservices: {}\nseed:\n", wantErr: ErrShape,
+			needle: "services",
+		},
+		{
+			name:        "законный близнец: описанный раздел принимается",
+			old:         "\nseed:\n",
+			replacement: "\ndeprecatedVerbs:\n  read: {class: get, since: \"2026-08-23\", reason: синоним чтения, removeWhen: выдач ноль}\nseed:\n",
+			wantErr:     nil,
 		},
 
 		// ── связность ВСТУПЛЕНИЙ ───────────────────────────────────────────

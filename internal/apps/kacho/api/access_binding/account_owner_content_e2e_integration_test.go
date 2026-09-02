@@ -32,6 +32,7 @@ import (
 	repoacct "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -54,7 +55,7 @@ func TestAccountOwner_MaterializesOnServiceAccountContent_E2E(t *testing.T) {
 	pool := poolFromDSN(t, dsn)
 	repo := kachopg.New(pool, nil)
 	opsRepo := operations.NewRepo(pool, "kacho_iam")
-	rec := reconcile.New(kachopg.NewReconcileAdapter(pool), nil)
+	rec := reconcile.New(kachopg.NewReconcileAdapter(pool, catalogfixture.Source()), nil, catalogfixture.Source())
 
 	owner := mustSeedUser(t, ctx, pool, "aoc-own")
 	octx := operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: string(owner)})

@@ -16,6 +16,7 @@ import (
 	"fmt"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
@@ -30,34 +31,40 @@ import (
 // Иначе доступ несёт ярусный кортеж. ok=false
 // when the (objectType) has no FGA object type (a typo'd type never grants —
 // fail-closed). The subject is the binding's subject (already FGA-formatted).
-func ruleObjectTuples(subject string, verbs []string, objectType, objectID string) ([]domain.MembershipTuple, bool) {
+func ruleObjectTuples(cat *catalog.Facts, subject string, verbs []string, objectType, objectID string) ([]domain.MembershipTuple, bool) {
 	fgaType, ok := fgaObjectType(objectType)
 	if !ok {
 		return nil, false
 	}
-	return ruleObjectTuplesWithTypeVerbs(subject, verbs, fgaType, objectID, typeVerbsOf(fgaType))
+	return ruleObjectTuplesWithTypeVerbs(cat, subject, verbs, fgaType, objectID, typeVerbsOf(cat, fgaType))
 }
 
 // typeVerbsOf — набор глаголов, объявленный ТИПОМ; для неглагольного типа —
 // словарь, ОБЩИЙ для всех ресурсов.
+//
+// Каталог приходит ПАРАМЕТРОМ, а не спрашивается у литерала (kacho#1816): ответ
+// на «какие глаголы объявлены» может измениться в РАБОТАЮЩЕМ процессе — снятием
+// строки, — и читатель на литерале продолжил бы считать снятый тип живым до
+// следующего перезапуска. Отказ тогда приходит ЧУЖОЙ полосой: пара по снятому
+// типу доезжает до внешнего ключа `role_verb_type_fk` и отвергается им.
 //
 // Запасной вариант нужен ради яруса, а не ради `v_*`: ярус выводится из
 // РАЗВЁРНУТЫХ глаголов правила, поэтому подстановка `*` на типе без собственного
 // набора обязана по-прежнему давать полный набор — иначе роль-суперпользователь
 // молча понизилась бы с администратора до наблюдателя. Отношения `v_*` при этом не
 // эмитятся всё равно: пустой набор не принадлежит никому (domain.IsVerbOfType).
-func typeVerbsOf(fgaType string) []string {
-	if set := authzmap.VerbsOfType(fgaType); len(set) > 0 {
+func typeVerbsOf(cat *catalog.Facts, fgaType string) []string {
+	if set := cat.VerbsOfType(fgaType); len(set) > 0 {
 		return set
 	}
-	return authzmap.CommonVerbVocabulary()
+	return cat.CommonVerbVocabulary()
 }
 
 // ruleObjectTuplesWithTypeVerbs — та же сборка при ЯВНО переданном наборе типа.
 // Набор — параметр, чтобы отрицательные кейсы могли предъявить тип с УРЕЗАННЫМ
 // набором: сегодня такого типа в таблице нет, а свойство обязано охраняться ДО
 // появления первого пользователя.
-func ruleObjectTuplesWithTypeVerbs(subject string, verbs []string, fgaType, objectID string,
+func ruleObjectTuplesWithTypeVerbs(cat *catalog.Facts, subject string, verbs []string, fgaType, objectID string,
 	typeVerbs []string) ([]domain.MembershipTuple, bool) {
 	_, tier := domain.ResolveVerbsAndTier(verbs, typeVerbs)
 	object := fmt.Sprintf("%s:%s", fgaType, objectID)
@@ -65,7 +72,7 @@ func ruleObjectTuplesWithTypeVerbs(subject string, verbs []string, fgaType, obje
 	// `role_verb`, читаемая формой E. Две реализации одного вопроса («что роль
 	// разрешает на типе») по отдельности непротиворечивы и расходятся молча: ровно
 	// так роль-администратор давала движку всё, а форме E — ничего (#496).
-	granted := authzmap.GrantedVerbs(fgaType, verbs, typeVerbs)
+	granted := cat.GrantedVerbs(fgaType, verbs, typeVerbs)
 
 	seen := map[domain.MembershipTuple]struct{}{}
 	var out []domain.MembershipTuple
@@ -109,12 +116,12 @@ const scopeSelfRuleFP = "scope_self"
 // object (account:<X>/project:<X>). ok=false when the role grants nothing on the
 // scope self OR the scope type has no dotted iam mapping (cluster — D-9 short-circuit
 // owns cluster super-admin, not this per-object path).
-func scopeSelfMember(subject string, scopeType, scopeID string, verbs []string) (DesiredMember, bool) {
+func scopeSelfMember(cat *catalog.Facts, subject string, scopeType, scopeID string, verbs []string) (DesiredMember, bool) {
 	dotted := "iam." + scopeType // iam.account / iam.project (cluster has no mapping)
 	if _, ok := fgaObjectType(dotted); !ok {
 		return DesiredMember{}, false
 	}
-	tuples, ok := scopeSelfTuples(subject, scopeType, scopeID, verbs)
+	tuples, ok := scopeSelfTuples(cat, subject, scopeType, scopeID, verbs)
 	if !ok {
 		return DesiredMember{}, false
 	}
@@ -145,7 +152,7 @@ func scopeSelfMember(subject string, scopeType, scopeID string, verbs []string) 
 // type re-enabling the dead path). ok=false when scopeType is not a per-object
 // hierarchy scope or there are no verbs (a content-only role grants nothing on the
 // anchor).
-func scopeSelfTuples(subject, scopeType, scopeID string, verbs []string) ([]domain.MembershipTuple, bool) {
+func scopeSelfTuples(cat *catalog.Facts, subject, scopeType, scopeID string, verbs []string) ([]domain.MembershipTuple, bool) {
 	if scopeID == "" || len(verbs) == 0 {
 		return nil, false
 	}
@@ -156,16 +163,16 @@ func scopeSelfTuples(subject, scopeType, scopeID string, verbs []string) ([]doma
 		// cluster (D-9 short-circuit owns it) + any non-hierarchy scope → no member.
 		return nil, false
 	}
-	return scopeSelfTuplesWithTypeVerbs(subject, scopeType, scopeID, verbs, typeVerbsOf(scopeType))
+	return scopeSelfTuplesWithTypeVerbs(cat, subject, scopeType, scopeID, verbs, typeVerbsOf(cat, scopeType))
 }
 
 // scopeSelfTuplesWithTypeVerbs — та же сборка при ЯВНО переданном наборе типа
 // (см. ruleObjectTuplesWithTypeVerbs про то, зачем набор параметром).
-func scopeSelfTuplesWithTypeVerbs(subject, scopeType, scopeID string,
+func scopeSelfTuplesWithTypeVerbs(cat *catalog.Facts, subject, scopeType, scopeID string,
 	verbs, typeVerbs []string) ([]domain.MembershipTuple, bool) {
 	_, tier := domain.ResolveVerbsAndTier(verbs, typeVerbs)
 	object := scopeType + ":" + scopeID
-	emitVerbs := len(typeVerbsDeclared(scopeType)) > 0
+	emitVerbs := len(typeVerbsDeclared(cat, scopeType)) > 0
 
 	seen := map[domain.MembershipTuple]struct{}{}
 	var out []domain.MembershipTuple
@@ -202,6 +209,6 @@ func fgaObjectType(objectType string) (string, bool) {
 // решает, эмитить ли `v_*` вообще: тип, ничего не объявивший, не получает ни
 // одного отношения (fail-closed), даже когда подстановка правила развёрнута общим
 // словарём ради вывода яруса.
-func typeVerbsDeclared(fgaType string) []string {
-	return authzmap.VerbsOfType(fgaType)
+func typeVerbsDeclared(cat *catalog.Facts, fgaType string) []string {
+	return cat.VerbsOfType(fgaType)
 }

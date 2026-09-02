@@ -81,6 +81,12 @@ func (c Config) Validate() error {
 	errs = multierr.Append(errs,
 		c.Jobs.ExpiredCredentialReclaim.Validate(c.APIServer.RegistryToken.TokenTTL()))
 
+	// Страж обновления снимка каталога (задача #1816). Своего слагаемого у него
+	// нет: величина обязана быть положительной, потому что снимок без обновления
+	// отстаёт бессрочно и при этом продолжает отвечать — то есть выглядит
+	// исправным.
+	errs = multierr.Append(errs, c.Jobs.CatalogSnapshot.Validate())
+
 	// logger.level must be a known level so a typo fails fast at boot rather
 	// than silently degrading observability. SlogLevel reports the allowed set.
 	if _, err := c.Logger.SlogLevel(); err != nil {

@@ -52,6 +52,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // iamDirectAnchorCandidates runs the iam-direct fan-out for one object and returns
@@ -108,7 +109,7 @@ func TestIAMDirectAnchorArm_IsScopedToContainingAccount(t *testing.T) {
 	bidB := insertThinBindingScope(t, ctx, repo, adminB, roleB,
 		"account", string(accB.ID), domain.ScopeAccount)
 
-	adapter := kachopg.NewReconcileAdapter(pool)
+	adapter := kachopg.NewReconcileAdapter(pool, catalogfixture.Source())
 
 	gid := seedNativeGroup(t, ctx, pool, accA.ID, "anch-grp-a")
 	got := iamDirectAnchorCandidates(t, ctx, adapter, "iam.group", gid)
@@ -148,7 +149,7 @@ func TestIAMDirectAnchorArm_ProjectScopedBindingSeesOnlyItsOwnProject(t *testing
 	bidHome := insertThinBindingScope(t, ctx, repo, admin, role,
 		"project", string(prjHome.ID), domain.ScopeProject)
 
-	adapter := kachopg.NewReconcileAdapter(pool)
+	adapter := kachopg.NewReconcileAdapter(pool, catalogfixture.Source())
 
 	// (+) its own project is a candidate.
 	gotHome := iamDirectAnchorCandidates(t, ctx, adapter, "iam.project", string(prjHome.ID))

@@ -52,6 +52,7 @@ import (
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // reseedProbeCluster — якорь, по которому роль считается системной.
@@ -87,7 +88,7 @@ func bootSeedLanes(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := seed.SyncAllSystemRoleSelectors(ctx, pool); err != nil {
 		return err
 	}
-	_, err := seed.ReseedSystemRoleVerbs(ctx, kachopg.New(pool, nil), pool, nil)
+	_, err := seed.ReseedSystemRoleVerbs(ctx, kachopg.New(pool, nil), pool, catalogfixture.Facts(), nil)
 	return err
 }
 
@@ -98,7 +99,7 @@ func bootBindingsAndVerbs(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := seed.BackfillOwnerBindings(ctx, pool); err != nil {
 		return err
 	}
-	_, err := seed.ReseedSystemRoleVerbs(ctx, kachopg.New(pool, nil), pool, nil)
+	_, err := seed.ReseedSystemRoleVerbs(ctx, kachopg.New(pool, nil), pool, catalogfixture.Facts(), nil)
 	return err
 }
 

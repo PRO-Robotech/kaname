@@ -73,6 +73,13 @@ func yamlKey(f reflect.StructField) (string, bool) {
 }
 
 // elemType — тип, чьи поля становятся продолжением пути, и суффикс пути.
+//
+// Форм у составного значения ТРИ, и распознаватель обязан знать все: указатель
+// (путь не меняется), список (суффикс `[]`) и КАРТА (суффикс `{}`). Форма, о
+// которой обход не знает, не даёт ни красного, ни зелёного — она МОЛЧИТ, и всё
+// записанное в ней оказывается вне наблюдения (`testing.md` §«Гейт на класс»,
+// п. 7). Карта заведена вместе с разделом `deprecatedVerbs`, чей ключ — само имя
+// глагола; без неё четыре ключа его записи не сличались бы со схемой ВОВСЕ.
 func elemType(t reflect.Type) (reflect.Type, string) {
 	suffix := ""
 	for {
@@ -81,6 +88,9 @@ func elemType(t reflect.Type) (reflect.Type, string) {
 			t = t.Elem()
 		case reflect.Slice, reflect.Array:
 			suffix += "[]"
+			t = t.Elem()
+		case reflect.Map:
+			suffix += "{}"
 			t = t.Elem()
 		default:
 			return t, suffix
@@ -168,6 +178,13 @@ func TestMODMF21StructSideFieldPathsAreDerivedNotWritten(t *testing.T) {
 		"seed.accessBindings[].subjects[].type",
 		"seed.joins[].serviceAccount.name",
 		"seed.joins[].why",
+		// Три раздела #1778: список ресурсов, обе формы глагола и КАРТА
+		// устаревших глаголов — форма, которой обход не знал до неё.
+		"resources[].verbs[].class",
+		"resources[].relations[].definition",
+		"roles[].rules[].matchLabels",
+		"roles[].tier.tierType",
+		"deprecatedVerbs{}.removeWhen",
 	} {
 		if !seen[want] {
 			t.Errorf("обход не дошёл до пути %q: %v", want, paths)

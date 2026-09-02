@@ -42,6 +42,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
@@ -201,6 +202,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// существу — оно превращает провязку в утверждение о том, какая реализация
 	// пришла, и это утверждение проверялось бы в рантайме, а не сборкой.
 	membershipRepo membershipapp.Repo,
+	// catalogSource — КАТАЛОЖНЫЙ ФАКТ из ЖИВЫХ строк (задача #1816): какие пары
+	// грантуемы и какие глаголы объявлены. Приходит отдельным параметром, а не
+	// спрашивается у литерала внутри use-case'ов: ответ на него может измениться
+	// в работающем процессе — снятием строки, — и читатель на литерале
+	// продолжил бы считать снятый тип живым до следующего перезапуска.
+	catalogSource catalog.Source,
 	metricsReg *metrics.Registry,
 	cfg config.Config, tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
 	_ = slavePool // kachoRepo is built and passed in by main()
@@ -257,7 +264,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// membership fan-out, AND the P6 Account.Create owner auto-binding
 	// materialization (C-01/C-01b). Created once here so every consumer drives the
 	// same instance.
-	rsabReconciler := reconcileapp.New(kachopg.NewReconcileAdapter(pool), logger)
+	rsabReconciler := reconcileapp.New(kachopg.NewReconcileAdapter(pool, catalogSource), logger, catalogSource)
 	if metricsReg != nil {
 		// Размер материализации привязки — измерение, не потолок. Он ничего не
 		// отвергает: величина, которой привязка может достичь, не измерена, а предел,
@@ -419,7 +426,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	)
 
 	// RoleService.
-	roleCreate := roleapp.NewCreateRoleUseCase(kachoRepo, opsRepo).
+	roleCreate := roleapp.NewCreateRoleUseCase(kachoRepo, opsRepo, catalogSource).
 		WithRelationStore(relationStore, logger).
 		WithObjectReconciler(rsabReconciler)
 	// Role.Update of an active role's permissions reconciles the FGA
@@ -435,7 +442,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// rule_fp). One use-case over the pg ReconcileAdapter (Clean Architecture port).
 	// NOTE: rsabReconciler is created once near the top of buildServices (shared
 	// with the Account.Create owner auto-binding materialization).
-	roleUpdate := roleapp.NewUpdateRoleUseCase(kachoRepo, opsRepo).
+	roleUpdate := roleapp.NewUpdateRoleUseCase(kachoRepo, opsRepo, catalogSource).
 		WithTupleReconciler(accessbindingapp.NewRoleTupleReconciler()).
 		WithMembershipFanout(accessbindingapp.NewRoleMembershipFanout(kachoRepo, rsabReconciler)).
 		// Same revoke-latency fix as accountUpdate above, for the role AS AN OBJECT

@@ -44,7 +44,7 @@ import (
 // publishedSchemaPath — опубликованный контракт. Лежит ВНЕ `internal/`
 // намеренно: `internal` есть правило видимости Go, а контракт, который читает
 // автор манифеста и его редактор, не вправе читаться как внутренний.
-const publishedSchemaPath = "../../schema/module-manifest-seed.schema.json"
+const publishedSchemaPath = "../../schema/module-manifest.schema.json"
 
 // schemaShapeKeywords — ключевые слова, ведущие ВГЛУБЬ документа, и то, как они
 // меняют путь. Пустая строка — путь не меняется (применители), "[]" — элемент
@@ -62,7 +62,7 @@ var (
 	annotationKeywords = []string{
 		"$schema", "$id", "$comment", "title", "description",
 		"type", "enum", "const", "pattern", "format", "default", "examples",
-		"required", "minItems", "maxItems", "uniqueItems",
+		"required", "minItems", "maxItems", "uniqueItems", "maxProperties",
 		"minLength", "maxLength", "minimum", "maximum",
 	}
 )
@@ -110,12 +110,31 @@ func walkSchemaKeys(node any, prefix, at string, paths *[]string, unknown *[]str
 				walkSchemaKeys(props[name], path, at+".properties."+name, paths, unknown)
 			}
 		case keyword == "additionalProperties":
-			// Схема закрыта: значение обязано быть `false`. Подсхема здесь
-			// описывала бы БЕЗЫМЯННЫЕ ключи, которых у структур быть не может.
-			if allowed, isBool := value.(bool); !isBool || allowed {
-				*unknown = append(*unknown, at+": additionalProperties не false — "+
-					"безымянный ключ структурам невыразим")
+			// Форм у этого слова ДВЕ, и обе законны — распознаватель обязан
+			// знать обе, иначе записанное во второй окажется вне наблюдения
+			// (`testing.md` §«Гейт на класс», п. 7):
+			//
+			//   false      отображение ЗАКРЫТО: у него именованные ключи, и
+			//              безымянный структурам невыразим;
+			//   подсхема   отображение есть КАРТА: ключ — данные (имя глагола),
+			//              а подсхема описывает ЗНАЧЕНИЕ. Путь получает суффикс
+			//              `{}` — тот же, что даёт стороне структур `map[…]T`.
+			//
+			// Вторая форма заведена вместе с разделом `deprecatedVerbs` (#1778);
+			// до него закрытым обязано было быть КАЖДОЕ отображение, и это было
+			// верно ровно пока карт в манифесте не было.
+			if allowed, isBool := value.(bool); isBool {
+				if allowed {
+					*unknown = append(*unknown, at+": additionalProperties true — "+
+						"схема перестала быть закрытой, и неизвестный ключ проходил бы её молча")
+				}
+				continue
 			}
+			if _, isSchema := value.(map[string]any); !isSchema {
+				*unknown = append(*unknown, at+": additionalProperties не false и не подсхема")
+				continue
+			}
+			walkSchemaKeys(value, prefix+"{}", at+".additionalProperties", paths, unknown)
 		case inSet(itemApplicators, keyword):
 			walkSchemaKeys(value, prefix+"[]", at+"."+keyword, paths, unknown)
 		case inSet(pathNeutralApplicators, keyword):

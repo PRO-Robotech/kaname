@@ -120,3 +120,24 @@ func TestReclaimDisabledIsNotValidated(t *testing.T) {
 		t.Fatalf("выключенному уборщику проверять нечего: %v", err)
 	}
 }
+
+// TestCatalogSnapshot_NonPositiveIntervalRefusesTheStart — страж периода
+// обновления снимка каталога (kacho#1816).
+//
+// Ноль здесь НЕ выключатель: выключенного обновления у снимка не бывает — снимок
+// без обновления отстаёт бессрочно и при этом продолжает отвечать, то есть
+// снаружи выглядит исправным. Отсюда отказ старта, а не тихое подтягивание к
+// умолчанию.
+func TestCatalogSnapshot_NonPositiveIntervalRefusesTheStart(t *testing.T) {
+	for _, v := range []time.Duration{0, -time.Second} {
+		if err := (CatalogSnapshotConfig{RefreshInterval: v}).Validate(); err == nil {
+			t.Errorf("период %s принят — снимок, который никогда не обновляется, "+
+				"объявлен исправным", v)
+		}
+	}
+	// ЗАКОННЫЙ БЛИЗНЕЦ: без него отрицание выше зеленело бы и на страже,
+	// отвергающем ЛЮБУЮ величину.
+	if err := (CatalogSnapshotConfig{RefreshInterval: time.Minute}).Validate(); err != nil {
+		t.Errorf("положительный период отвергнут: %v", err)
+	}
+}

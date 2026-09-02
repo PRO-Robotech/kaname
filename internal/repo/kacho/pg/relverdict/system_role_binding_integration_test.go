@@ -36,6 +36,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // systemRoleEdit / systemRoleAdmin — идентификаторы посеянных миграцией ролей.
@@ -63,7 +64,7 @@ func withSeededPool(t *testing.T, fn func(ctx context.Context, tx pgx.Tx)) {
 	if err := seed.SyncAllSystemRoleSelectors(ctx, pool); err != nil {
 		t.Fatalf("досев селекторов системных ролей: %v", err)
 	}
-	if _, err := seed.ReseedSystemRoleVerbs(ctx, kachopg.New(pool, nil), pool, nil); err != nil {
+	if _, err := seed.ReseedSystemRoleVerbs(ctx, kachopg.New(pool, nil), pool, catalogfixture.Facts(), nil); err != nil {
 		t.Fatalf("досев проекции глаголов системных ролей: %v", err)
 	}
 	tx, err := pool.Begin(ctx)

@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // scopeWideBinding builds a fakeStore holding ONE account-scoped binding whose
@@ -84,7 +85,7 @@ func TestReconcileObject_NarrowToChangedObject_DoesNotRescanScope(t *testing.T) 
 	const n = 500
 	f, _ := scopeWideBinding(n)
 
-	require.NoError(t, New(fakeRunner{s: f}, nil).
+	require.NoError(t, New(fakeRunner{s: f}, nil, catalogfixture.Source()).
 		ReconcileObject(context.Background(), "compute.instance", "i-0042"))
 
 	assert.Equal(t, 0, f.matchAllCalls,
@@ -112,7 +113,7 @@ func TestReconcileObject_CostIsIndependentOfScopeSize(t *testing.T) {
 	large, _ := scopeWideBinding(500)
 
 	rec := func(f *fakeStore) {
-		require.NoError(t, New(fakeRunner{s: f}, nil).
+		require.NoError(t, New(fakeRunner{s: f}, nil, catalogfixture.Source()).
 			ReconcileObject(context.Background(), "compute.instance", "i-0001"))
 	}
 	rec(small)
@@ -152,7 +153,7 @@ func TestReconcileObject_EmitsEachTupleOncePerPass(t *testing.T) {
 		selectorBindings: []domain.AccessBindingID{"acb-1"},
 	}
 
-	require.NoError(t, New(fakeRunner{s: f}, nil).
+	require.NoError(t, New(fakeRunner{s: f}, nil, catalogfixture.Source()).
 		ReconcileObject(context.Background(), "compute.instance", "i-1"))
 
 	seen := map[domain.MembershipTuple]int{}
@@ -203,7 +204,7 @@ func TestReconcileObject_Narrow_StillRevokesOnLabelRemoval(t *testing.T) {
 		bindingsForObject: []domain.AccessBindingID{"acb-1"},
 	}
 
-	require.NoError(t, New(fakeRunner{s: f}, nil).
+	require.NoError(t, New(fakeRunner{s: f}, nil, catalogfixture.Source()).
 		ReconcileObject(context.Background(), "compute.instance", "i-1"))
 
 	var revoked []domain.MembershipTuple
@@ -260,12 +261,12 @@ func TestReconcileObject_Narrow_ReGrantAfterRevokeIsEmitted(t *testing.T) {
 
 	// (1) GRANT — label matches, nothing materialized yet.
 	grant := newStore(map[string]string{"tier": "gold"}, nil, nil)
-	require.NoError(t, New(fakeRunner{s: grant}, nil).ReconcileObject(ctx, "compute.instance", "i-1"))
+	require.NoError(t, New(fakeRunner{s: grant}, nil, catalogfixture.Source()).ReconcileObject(ctx, "compute.instance", "i-1"))
 	require.True(t, hasTuple(allWrites(grant), "v_get", "compute_instance:i-1"), "grant emits the tuple")
 
 	// (2) REVOKE — label removed; the standing grant is revoked and the ledger cleared.
 	revoke := newStore(map[string]string{"tier": "bronze"}, activeMember, standingLedger)
-	require.NoError(t, New(fakeRunner{s: revoke}, nil).ReconcileObject(ctx, "compute.instance", "i-1"))
+	require.NoError(t, New(fakeRunner{s: revoke}, nil, catalogfixture.Source()).ReconcileObject(ctx, "compute.instance", "i-1"))
 	var revoked []domain.MembershipTuple
 	for _, b := range revoke.tdeletes {
 		revoked = append(revoked, b...)
@@ -275,7 +276,7 @@ func TestReconcileObject_Narrow_ReGrantAfterRevokeIsEmitted(t *testing.T) {
 	// (3) RE-GRANT — the label comes back. The member row and the ledger were cleared by
 	// (2), so the tuple MUST be enqueued again. A payload-keyed queue dedup would drop it.
 	regrant := newStore(map[string]string{"tier": "gold"}, nil, nil)
-	require.NoError(t, New(fakeRunner{s: regrant}, nil).ReconcileObject(ctx, "compute.instance", "i-1"))
+	require.NoError(t, New(fakeRunner{s: regrant}, nil, catalogfixture.Source()).ReconcileObject(ctx, "compute.instance", "i-1"))
 	assert.True(t, hasTuple(allWrites(regrant), "v_get", "compute_instance:i-1"),
 		"a re-grant after a revoke must be re-emitted — the producer dedup must not swallow it")
 	assert.True(t, hasTuple(allWrites(regrant), "editor", "compute_instance:i-1"),
@@ -305,7 +306,7 @@ func TestReconcileObject_Narrow_ScopeSelfObjectStillMaterialized(t *testing.T) {
 		bindingsForObject:         []domain.AccessBindingID{"acb-1"},
 	}
 
-	require.NoError(t, New(fakeRunner{s: f}, nil).
+	require.NoError(t, New(fakeRunner{s: f}, nil, catalogfixture.Source()).
 		ReconcileObject(context.Background(), "iam.project", "prj-1"))
 
 	w := allWrites(f)

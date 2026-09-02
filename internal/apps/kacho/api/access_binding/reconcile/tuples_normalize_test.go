@@ -11,10 +11,14 @@ package reconcile
 // модели такую запись отвергает окончательно, а отказ классифицируется как
 // постоянный: строка навсегда блокирует свою партицию очереди.
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
+)
 
 func TestRuleObjectTuples_RelationNameUsesNormalizedVerb(t *testing.T) {
-	got, ok := ruleObjectTuples("user:usr_a", []string{"Update", "Get"}, "vpc.network", "net_1")
+	got, ok := ruleObjectTuples(catalogfixture.Facts(), "user:usr_a", []string{"Update", "Get"}, "vpc.network", "net_1")
 	if !ok {
 		t.Fatalf("эмиссия не состоялась вовсе — утверждения ниже были бы бессодержательными")
 	}
@@ -37,7 +41,7 @@ func TestRuleObjectTuples_RelationNameUsesNormalizedVerb(t *testing.T) {
 }
 
 func TestScopeSelfTuples_RelationNameUsesNormalizedVerb(t *testing.T) {
-	got, ok := scopeSelfTuples("user:usr_a", "account", "acc_1", []string{"Get"})
+	got, ok := scopeSelfTuples(catalogfixture.Facts(), "user:usr_a", "account", "acc_1", []string{"Get"})
 	if !ok {
 		t.Fatalf("эмиссия якоря не состоялась вовсе")
 	}

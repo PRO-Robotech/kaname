@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 func emittedTuplesCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, bindingID domain.AccessBindingID) int {
@@ -289,7 +290,7 @@ func TestABEmittedTuples_RoleUpdateReconcile_PreservesMemberTuples(t *testing.T)
 		{User: "user:" + string(uid), Relation: "v_get", Object: "vpc_subnet:sub-emsrc"},
 		{User: "user:" + string(uid), Relation: "viewer", Object: "vpc_subnet:sub-emsrc"},
 	}
-	adapter := kachopg.NewReconcileAdapter(pool)
+	adapter := kachopg.NewReconcileAdapter(pool, catalogfixture.Source())
 	require.NoError(t, adapter.WithTx(ctx, func(ctx context.Context, s reconcileapp.ReconcileStore) error {
 		return s.RecordEmittedTuples(ctx, ab.ID, memberTuples)
 	}))

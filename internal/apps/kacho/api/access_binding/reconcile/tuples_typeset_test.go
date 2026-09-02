@@ -23,6 +23,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // allDottedCatalogKeys — точечные ключи КАЖДОГО грантуемого типа каталога.
@@ -69,7 +70,7 @@ func TestRuleObjectTuples_DoesNotEmitVerbNotDeclaredByType(t *testing.T) {
 	// таблице нет и что после переформулировки выразимо.
 	narrow := []string{"get", "list", "create", "update"}
 
-	got, ok := ruleObjectTuplesWithTypeVerbs("user:usr_a", []string{"update", "delete"},
+	got, ok := ruleObjectTuplesWithTypeVerbs(catalogfixture.Facts(), "user:usr_a", []string{"update", "delete"},
 		"vpc_network", "net_1", narrow)
 	if !ok {
 		t.Fatalf("эмиссия не состоялась вовсе — отрицание ниже было бы бессодержательным")
@@ -99,7 +100,7 @@ func TestRuleObjectTuples_DoesNotEmitVerbNotDeclaredByType(t *testing.T) {
 func TestRuleObjectTuples_LiteralDeletePathIsAlsoPaired(t *testing.T) {
 	narrow := []string{"get", "list", "create", "update"}
 
-	got, ok := ruleObjectTuplesWithTypeVerbs("user:usr_a", []string{"update"},
+	got, ok := ruleObjectTuplesWithTypeVerbs(catalogfixture.Facts(), "user:usr_a", []string{"update"},
 		"vpc_network", "net_1", narrow)
 	if !ok {
 		t.Fatalf("эмиссия не состоялась вовсе")
@@ -119,7 +120,7 @@ func TestRuleObjectTuples_LiteralDeletePathIsAlsoPaired(t *testing.T) {
 // обычный `update` на обычном типе по-прежнему со-материализует `v_delete`.
 // Сужение не задело общий путь — это и есть «поведение не изменилось».
 func TestRuleObjectTuples_OrdinaryUpdateStillEmits(t *testing.T) {
-	got, ok := ruleObjectTuples("user:usr_a", []string{"update"}, "vpc.network", "net_1")
+	got, ok := ruleObjectTuples(catalogfixture.Facts(), "user:usr_a", []string{"update"}, "vpc.network", "net_1")
 	if !ok {
 		t.Fatalf("эмиссия на обычном типе не состоялась")
 	}
@@ -144,7 +145,7 @@ func TestRuleObjectTuples_WildcardRuleEmitsNothingDangling(t *testing.T) {
 	}
 	checked, verbTuples := 0, 0
 	for _, key := range dotted {
-		got, ok := ruleObjectTuples("user:usr_a", []string{"*"}, key, "obj_1")
+		got, ok := ruleObjectTuples(catalogfixture.Facts(), "user:usr_a", []string{"*"}, key, "obj_1")
 		if !ok {
 			t.Errorf("%s: тип каталога не резолвится в FGA-тип — правило молча не материализуется", key)
 			continue
@@ -173,7 +174,7 @@ func TestRuleObjectTuples_WildcardRuleEmitsNothingDangling(t *testing.T) {
 // (якорь собственного охвата привязки) сверяется тем же условием.
 func TestScopeSelfTuples_DoesNotEmitVerbNotDeclaredByType(t *testing.T) {
 	narrow := []string{"get", "list"}
-	got, ok := scopeSelfTuplesWithTypeVerbs("user:usr_a", "account", "acc_1",
+	got, ok := scopeSelfTuplesWithTypeVerbs(catalogfixture.Facts(), "user:usr_a", "account", "acc_1",
 		[]string{"get", "delete"}, narrow)
 	if !ok {
 		t.Fatalf("эмиссия якоря не состоялась вовсе")

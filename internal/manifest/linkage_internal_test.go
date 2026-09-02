@@ -4,27 +4,20 @@
 // linkage_internal_test.go — MOD-MF-13: `roleId` выдачи обязан существовать
 // среди ролей, объявленных ЭТИМ манифестом.
 //
-// # Почему сценарий разбирается ВНУТРИ пакета, а не через Load
+// # Здесь ИСТЕКЛО послабление #1088, и это надо сказать вслух
 //
-// Раздел `roles` эта под-фаза не описывает и отвергает явно (MOD-MF-07,
-// задача-преемник PRO-Robotech/kacho#1778). Значит документа, объявляющего роли,
-// сегодня не существует ни при каком входе — а положительный контроль MOD-MF-13
-// требует ровно его: «тот же манифест с `roleId` из `roles` — ошибок нет».
+// Прежняя редакция файла разбирала сценарий ВНУТРИ пакета, подавая перечень
+// ролей валидатору напрямую: раздел `roles` тогда отвергался разбором, и
+// документа, объявляющего роли, не существовало ни при каком входе.
+// Рядом стояла проба-предикат
+// TestMODMF13RoleSetStaysUnwiredOnlyWhileTheSectionIsRefused — послабление,
+// истекающее САМО: она краснела в тот день, когда раздел перестанет
+// отвергаться, и называла починку своим текстом.
 //
-// Отсюда два следствия, и оба названы прямо, а не умолчаны:
-//
-//  1. правило нельзя применять безусловно. Манифест не объявляет ролей ни при
-//     каком входе, поэтому безусловная проверка отвергала бы КАЖДУЮ выдачу — и
-//     первым покраснел бы неиспорченный черновик, то есть контроль MOD-MF-16;
-//  2. состояний у перечня ролей ТРИ, а не два: «раздел не объявлен» ·
-//     «объявлен и пуст» · «объявлен с перечнем». Первое означает «сверять не с
-//     чем», второе — «сверять не с чем, и это сказано автором», и смешение их
-//     дало бы правило, которое молчит на пустом перечне.
-//
-// Механизм проверки при этом ЖИВОЙ и доказан инъекцией: перечень подаётся
-// валидатору напрямую тем же прод-путём (`loadWithRoles`), которым его подаст
-// разбор, когда раздел `roles` будет описан. Проба-предикат ниже краснеет в тот
-// день, когда раздел перестанет отвергаться, и требует провязать перечень.
+// День настал (#1778): раздел описан, перечень ролей приезжает ИЗ РАЗОБРАННОГО
+// ДОКУМЕНТА, и проба-предикат снята ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ, а не ослаблена.
+// Сценарий с этого дня выражается через прод-путь `Load` целиком — включая
+// положительный контроль, ради которого он и жил внутри пакета.
 package manifest
 
 import (
@@ -46,11 +39,31 @@ func mustReadSeedFixture(t *testing.T) string {
 	return string(data)
 }
 
-// declaredRolesOfTheFixture — роли, которые объявляет тот же документ черновика
-// разделом `roles`. Здесь они подаются перечнем, потому что раздел отвергается
-// разбором: см. шапку файла.
-func declaredRolesOfTheFixture() roleIDs {
-	return rolesDeclared("vpc.internalConsumer", "vpc.addressPoolAdmin")
+// declaredRolesSection — раздел `roles`, объявляющий обе роли, на которые
+// ссылаются выдачи фикстуры посева. Пишется ЗДЕСЬ, а не в самой фикстуре:
+// фикстура посева служит пробам, которым раздел ролей не нужен, и дописывать в
+// неё чужой предмет значило бы менять вход у всех.
+const declaredRolesSection = `
+roles:
+  - id: vpc.internalConsumer
+    name: Смежный модуль
+    description: Ходит в vpc на пути запроса — аллокация адресов и ссылки.
+    tier: {tierType: iam.project, tierId: prj000000000000000}
+    rules:
+      - {module: vpc, resources: [address], verbs: [get, list]}
+  - id: vpc.addressPoolAdmin
+    name: Администратор адресного пространства
+    description: Ведёт адресные пулы облака.
+    tier: {tierType: iam.account, tierId: acc000000000000000}
+    rules:
+      - {module: vpc, resources: [addressPool], verbs: [get, list]}
+`
+
+// fixtureWithDeclaredRoles — фикстура посева ПЛЮС раздел ролей: документ, на
+// котором положительный контроль MOD-MF-13 выразим прод-путём.
+func fixtureWithDeclaredRoles(t *testing.T) string {
+	t.Helper()
+	return mustReadSeedFixture(t) + declaredRolesSection
 }
 
 // ── MOD-MF-13 ───────────────────────────────────────────────────────────────
@@ -61,13 +74,13 @@ func declaredRolesOfTheFixture() roleIDs {
 // `^[a-z][a-zA-Z0-9]*\.[a-zA-Z][a-zA-Z0-9]*$` строка отвечает, и больше схеме
 // сказать нечего. Свойство держит валидатор.
 func TestMODMF13RoleIDOutsideDeclaredRolesIsRefused(t *testing.T) {
-	doc := mustReadSeedFixture(t)
-	if n := strings.Count(doc, "vpc.addressPoolAdmin"); n != 1 {
+	doc := fixtureWithDeclaredRoles(t)
+	if n := strings.Count(doc, "roleId: vpc.addressPoolAdmin"); n != 1 {
 		t.Fatalf("образец встречается %d раз, инъекция требует ровно одного", n)
 	}
-	broken := strings.Replace(doc, "vpc.addressPoolAdmin", "vpc.nosuchRole", 1)
+	broken := strings.Replace(doc, "roleId: vpc.addressPoolAdmin", "roleId: vpc.nosuchRole", 1)
 
-	_, err := loadWithRoles([]byte(broken), declaredRolesOfTheFixture())
+	_, err := Load([]byte(broken))
 	if err == nil {
 		t.Fatalf("выдача на роль, которой манифест не объявляет, принята")
 	}
@@ -87,7 +100,7 @@ func TestMODMF13RoleIDOutsideDeclaredRolesIsRefused(t *testing.T) {
 
 	// Парный положительный: тот же документ с `roleId` из объявленных — ошибок
 	// нет, и перепись говорит, что сверка ДЕЙСТВИТЕЛЬНО состоялась.
-	m, err := loadWithRoles([]byte(doc), declaredRolesOfTheFixture())
+	m, err := Load([]byte(doc))
 	if err != nil {
 		t.Fatalf("выдача на объявленную роль отвергнута: %v", err)
 	}
@@ -98,21 +111,21 @@ func TestMODMF13RoleIDOutsideDeclaredRolesIsRefused(t *testing.T) {
 			c.RoleRefsChecked, c.RoleRefsRead)
 	}
 	if !c.RolesDeclared {
-		t.Errorf("перечень ролей подан, а перепись считает его необъявленным: %s", c)
+		t.Errorf("раздел объявлен, а перепись считает его необъявленным: %s", c)
 	}
 }
 
 // TestMODMF13DeclaredButEmptyIsNotTheSameAsNotDeclared — состояний ТРИ, а не
-// два, и разница наблюдаема.
+// два, и разница наблюдаема ЧЕРЕЗ ПРОД-ПУТЬ.
 //
 // Раздел, объявленный пустым, есть утверждение автора «ролей у меня нет», и
 // тогда всякая выдача ссылается в пустоту. Отсутствие раздела — не утверждение
 // вовсе, и сверять не с чем. Схлопни их в одно — и правило замолчит ровно там,
 // где автор ошибся: он написал `roles: []` и раздал права.
 func TestMODMF13DeclaredButEmptyIsNotTheSameAsNotDeclared(t *testing.T) {
-	doc := mustReadSeedFixture(t)
+	seed := mustReadSeedFixture(t)
 
-	empty, err := loadWithRoles([]byte(doc), rolesDeclared())
+	empty, err := Load([]byte(seed + "\nroles: []\n"))
 	if err == nil {
 		t.Fatalf("роли объявлены пустым перечнем, а выдачи на них приняты: %+v", empty)
 	}
@@ -120,13 +133,13 @@ func TestMODMF13DeclaredButEmptyIsNotTheSameAsNotDeclared(t *testing.T) {
 		t.Errorf("отказ не относится к виду ErrRoleNotDeclared: %v", err)
 	}
 
-	notDeclared, err := loadWithRoles([]byte(doc), rolesNotDeclared())
+	notDeclared, err := Load([]byte(seed))
 	if err != nil {
 		t.Fatalf("раздел ролей не объявлен, сверять не с чем — а документ отвергнут: %v", err)
 	}
 	c := notDeclared.Linkage()
 	if c.RolesDeclared {
-		t.Errorf("перечень не подан, а перепись считает его объявленным: %s", c)
+		t.Errorf("раздел не объявлен, а перепись считает его объявленным: %s", c)
 	}
 	if c.RoleRefsChecked != 0 || c.RoleRefsRead != 2 {
 		t.Errorf("сверено %d из %d — при необъявленном разделе сверяется ноль, и прочитано это должно быть двумя",
@@ -134,42 +147,7 @@ func TestMODMF13DeclaredButEmptyIsNotTheSameAsNotDeclared(t *testing.T) {
 	}
 	// Перепись обязана СКАЗАТЬ, что ноль сверенных — это «не с чем сверять», а
 	// не «сверили и не нашли расхождений».
-	if !strings.Contains(c.String(), "раздел roles не описан") {
+	if !strings.Contains(c.String(), "раздел roles манифестом не объявлен") {
 		t.Errorf("перепись молчит о том, почему сверено ноль: %s", c)
-	}
-}
-
-// TestMODMF13RoleSetStaysUnwiredOnlyWhileTheSectionIsRefused — послабление,
-// истекающее САМО.
-//
-// Загрузчик подаёт валидатору «раздел не объявлен» ровно потому, что раздел
-// `roles` отвергается разбором. Как только он перестанет отвергаться, эта проба
-// краснеет и называет, что провязать: перечень ролей обязан приехать из
-// разобранного документа, а не остаться необъявленным.
-//
-// Без такой пробы послабление не истекло бы никогда: оно выглядит исправной
-// работой и на зелёном прогоне неотличимо от провязанного перечня.
-func TestMODMF13RoleSetStaysUnwiredOnlyWhileTheSectionIsRefused(t *testing.T) {
-	if !contains(sectionsNotDescribedYet, "roles") {
-		t.Fatalf("раздел `roles` больше не отвергается разбором — значит документ может " +
-			"объявить роли, и Load обязан подать их валидатору вместо rolesNotDeclared(): " +
-			"провяжите перечень в loadWithRoles и снимите эту пробу вместе с послаблением")
-	}
-
-	// Предмет послабления измеряется, а не объявляется: документ с разделом
-	// `roles` отвергается разбором, поэтому производителя перечня у Load нет.
-	doc := mustReadSeedFixture(t) + "\nroles:\n  - id: vpc.internalConsumer\n"
-	if _, err := Load([]byte(doc)); !errors.Is(err, ErrSectionNotDescribed) {
-		t.Fatalf("документ с разделом `roles` обязан отвергаться разбором, получено: %v", err)
-	}
-
-	// И вторая половина: сам Load подаёт именно «не объявлено» — иначе
-	// послабление жило бы не там, где эта проба его сторожит.
-	m, err := Load([]byte(mustReadSeedFixture(t)))
-	if err != nil {
-		t.Fatalf("фикстура отвергнута: %v", err)
-	}
-	if m.Linkage().RolesDeclared {
-		t.Errorf("Load объявил перечень ролей подданным, хотя раздел отвергается разбором")
 	}
 }

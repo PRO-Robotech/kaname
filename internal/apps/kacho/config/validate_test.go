@@ -35,6 +35,15 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			Batch:             1000,
 			MaxBatchesPerPass: 20,
 		},
+		// Период обновления снимка каталога — на тех же основаниях, что и
+		// величины уборки выше: страж старта требует его положительным в ЛЮБОМ
+		// режиме (задача #1816), потому что выключенного обновления у снимка не
+		// бывает — снимок без обновления отстаёт бессрочно и при этом продолжает
+		// отвечать. Пробы, которые ПРО него, значение перезаписывают
+		// (jobs_test.go).
+		Jobs: config.JobsConfig{
+			CatalogSnapshot: config.CatalogSnapshotConfig{RefreshInterval: time.Minute},
+		},
 		APIServer: config.APIServerConfig{
 			Endpoint:         "tcp://0.0.0.0:9090",
 			InternalEndpoint: "tcp://0.0.0.0:9091",

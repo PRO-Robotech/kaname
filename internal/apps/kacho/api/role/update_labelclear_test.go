@@ -14,11 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 func TestUpdateRole_LabelClearViaMask(t *testing.T) {
 	repo := newRlUpdRepo(domain.Labels{"team": "billing"})
-	uc := NewUpdateRoleUseCase(repo, newRlFakeOps())
+	uc := NewUpdateRoleUseCase(repo, newRlFakeOps(), catalogfixture.Source())
 
 	_, err := uc.Execute(ownerCtx(), UpdateRoleInput{
 		ID:         rlUpdRoleID,
