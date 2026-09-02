@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 // attribution.go — привязка записи каталога прав к ДЕЙСТВИЮ модуля.
@@ -31,6 +33,21 @@ import (
 //
 // Остаётся `fqn`: `kacho.cloud.<модуль>.v1.<Служба>/<Метод>`. Служба называет
 // ресурс, метод — действие, приставка `Internal` — плоскость исполнения.
+//
+// # Имя службы даёт ресурс, но НЕ ЕГО НАПИСАНИЕ
+//
+// Здесь объявлено, ОТКУДА берётся ресурс; каким словом он записывается —
+// объявлено у закрытой таблицы типов (`authzmap.CatalogSpelling`), и второй раз
+// здесь не объявляется. Причина не стилистическая: у написания таблицы есть
+// читатель на пути запроса (`validateRuleCatalog` отвергает правило роли,
+// назвавшее ресурс иначе; тем же ключом эмиттер резолвит тип объекта), а у
+// написания, выведенного из имени службы, читателя нет ни одного.
+//
+// До #1884 приведения не было, и у трёх модулей из шести два написания
+// расходились: `TargetGroupService` давал `targetGroup`, таблица объявляла
+// `targetGroups`. Годного написания у автора манифеста не оставалось НИ ОДНОГО —
+// одно не сопоставлялось ни с одной записью каталога (все действия ресурса
+// выпадали из проверок молча, кодом 0), другое отвергалось на пути запроса.
 //
 // # Правило простое НАМЕРЕННО, и цена простоты названа
 //
@@ -73,7 +90,9 @@ var (
 type Action struct {
 	// Module — модуль, которому действие принадлежит (`vpc`).
 	Module string
-	// Resource — ресурс в написании закрытой таблицы типов (`securityGroup`).
+	// Resource — ресурс в написании закрытой таблицы типов (`securityGroup`,
+	// `targetGroups`). Написание ПРИВЕДЕНО (см. splitFQN): имя службы даёт
+	// ресурс, слово для него объявляет таблица.
 	Resource string
 	// Verb — имя действия (`get`, `addCidrBlocks`, `internalAttach`).
 	Verb string
@@ -84,6 +103,15 @@ type Action struct {
 	Relation string
 	// Object — тип объекта, на котором отношение спрашивается.
 	Object string
+	// Internal — действие живёт на ВНУТРЕННЕМ слушателе.
+	//
+	// Плоскость видна прямо в записи каталога — приставкой `Internal` у имени
+	// службы, — и правило её чтения объявлено ЗДЕСЬ ЖЕ, единственным местом
+	// (`splitFQN`). Поле заведено потому, что раздел `resources` объявляет ту
+	// же плоскость своим признаком `internal`, и два объявления одного предмета
+	// обязаны сверяться (linkage.go); прежде вычисленная плоскость
+	// отбрасывалась, то есть сверять было нечем.
+	Internal bool
 }
 
 // Exempt — у действия нет гейта вовсе: `required_relation` пуст.
@@ -104,7 +132,7 @@ func Attribute(entries []CatalogEntry) ([]Action, []error) {
 	seen := make(map[string]string, len(entries))
 
 	for _, e := range entries {
-		module, resource, verb, ok := splitFQN(e.FQN)
+		module, resource, verb, internal, ok := splitFQN(e.FQN)
 		if !ok {
 			faults = append(faults, fmt.Errorf("%w: %s", ErrEntryOutsideModuleShape, e.FQN))
 			continue
@@ -123,6 +151,7 @@ func Attribute(entries []CatalogEntry) ([]Action, []error) {
 			FQN:      e.FQN,
 			Relation: e.RequiredRelation,
 			Object:   e.ScopeObjectType,
+			Internal: internal,
 		})
 	}
 
@@ -134,31 +163,38 @@ func Attribute(entries []CatalogEntry) ([]Action, []error) {
 
 // splitFQN — единственное объявление правила «запись каталога → (модуль,
 // ресурс, действие)».
-func splitFQN(fqn string) (module, resource, verb string, ok bool) {
+func splitFQN(fqn string) (module, resource, verb string, internal, ok bool) {
 	head, method, cut := strings.Cut(fqn, "/")
 	if !cut || method == "" {
-		return "", "", "", false
+		return "", "", "", false, false
 	}
 	parts := strings.Split(head, ".")
 	// kacho · cloud · <модуль> · v1 · <Служба>
 	if len(parts) != 5 || parts[0] != "kacho" || parts[1] != "cloud" || parts[3] != "v1" {
-		return "", "", "", false
+		return "", "", "", false, false
 	}
 	module, service := parts[2], parts[4]
 	if module == "" {
-		return "", "", "", false
+		return "", "", "", false, false
 	}
-	internal := strings.HasPrefix(service, "Internal")
+	internal = strings.HasPrefix(service, "Internal")
 	base := strings.TrimPrefix(service, "Internal")
 	if !strings.HasSuffix(base, "Service") || base == "Service" {
-		return "", "", "", false
+		return "", "", "", false, false
 	}
-	resource = lowerFirst(strings.TrimSuffix(base, "Service"))
+	// Написание ресурса ПРИВОДИТСЯ к тому, которым его называет закрытая таблица
+	// типов. Приведение объявлено ОДИН раз и не здесь
+	// (authzmap.catalogSpellingByServiceName): у ключа таблицы есть читатель на
+	// пути запроса — validateRuleCatalog отвергает правило роли, назвавшее ресурс
+	// иначе, — а у написания, выведенного из имени службы, читателя нет. Без
+	// приведения оба написания негодны разом: одно не сопоставляется ни с одной
+	// записью каталога, другое отвергается на пути запроса (#1884).
+	resource = authzmap.CatalogSpelling(module, lowerFirst(strings.TrimSuffix(base, "Service")))
 	verb = lowerFirst(method)
 	if internal {
 		verb = "internal" + upperFirst(verb)
 	}
-	return module, resource, verb, true
+	return module, resource, verb, internal, true
 }
 
 func lowerFirst(s string) string {

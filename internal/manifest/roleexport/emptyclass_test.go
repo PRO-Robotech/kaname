@@ -13,12 +13,12 @@
 // разошлась бы с первым молча. Каталог прав берётся встроенный — тот самый, что
 // читает посев.
 //
-// Роль `vpc.addressPoolAdmin` фикстуры называет ресурс `addressPool` и пять
+// Роль `vpc.address_pool_admin` фикстуры называет ресурс `addressPool` и пять
 // классов; каждое из 22 действий этого ресурса гейтится `system_admin` на
 // `cluster`, то есть парой, которую правило роли модуля не пишет ни при каком
 // написании. Пять пустых классов — не выдумка пробы, а свойство дерева.
 //
-// Роль `vpc.internalConsumer` той же фикстуры — законный близнец: её классы
+// Роль `vpc.internal_consumer` той же фикстуры — законный близнец: её классы
 // `get` и `list` на `address`, `networkInterface` и `subnet` покрывают
 // действия, гейтящиеся `v_get` / `v_list` на объекте типа ресурса.
 package roleexport_test
@@ -117,13 +117,13 @@ func TestMODRL05EmptyClassOnANamedResourceIsRefused(t *testing.T) {
 	}
 	if len(empty) != 5 {
 		t.Fatalf("пустых классов найдено %d, в фикстуре их пять "+
-			"(get · list · create · update · delete у vpc.addressPoolAdmin); находки: %v",
+			"(get · list · create · update · delete у vpc.address_pool_admin); находки: %v",
 			len(empty), faults)
 	}
 	seen := map[string]bool{}
 	for _, f := range empty {
-		if f.Role != "vpc.addressPoolAdmin" {
-			t.Errorf("пустой класс приписан роли %q; в фикстуре пуста только vpc.addressPoolAdmin", f.Role)
+		if f.Role != "vpc.address_pool_admin" {
+			t.Errorf("пустой класс приписан роли %q; в фикстуре пуста только vpc.address_pool_admin", f.Role)
 		}
 		if f.Resource != "addressPool" {
 			t.Errorf("пустой класс приписан ресурсу %q, ожидался addressPool", f.Resource)
@@ -160,7 +160,7 @@ func TestMODRL05RefusalNamesThePairAndTheWayOut(t *testing.T) {
 	for _, want := range []string{
 		"system_admin", // отношение, которое спрашивает гейт
 		"cluster",      // объект, НА КОТОРОМ оно спрашивается
-		"vpc.addressPoolAdmin",
+		"vpc.address_pool_admin",
 		"addressPool",
 	} {
 		if !strings.Contains(refusal, want) {
@@ -181,7 +181,7 @@ func TestMODRL05aNonEmptyClassIsSilent(t *testing.T) {
 
 	for _, f := range faults {
 		var got roleexport.Finding
-		if errors.As(f, &got) && got.Role == "vpc.internalConsumer" {
+		if errors.As(f, &got) && got.Role == "vpc.internal_consumer" {
 			t.Errorf("законный близнец получил находку: %v", f)
 		}
 	}

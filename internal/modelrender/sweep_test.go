@@ -47,7 +47,7 @@ func manifestFor(module string, resources ...string) string {
 	for _, r := range resources {
 		sb.WriteString("  - name: " + strings.TrimPrefix(r, "vpc_") + "\n")
 		sb.WriteString("    objectType: " + r + "\n")
-		sb.WriteString("    parent: project\n")
+		sb.WriteString("    parents: [project]\n")
 		sb.WriteString("    producer: derived\n")
 		sb.WriteString("    verbs:\n      - get\n")
 	}

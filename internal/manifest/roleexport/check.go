@@ -158,8 +158,9 @@ func judgeResource(facts VerbFacts, m *manifest.Manifest, roleID string, rule ma
 			Detail: fmt.Sprintf(
 				"роль %q: правило называет ресурс %q модуля %q, а каталог прав не приписывает "+
 					"этому ресурсу ни одного действия. Право по нему пусто при любом классе; "+
-					"проверь написание ресурса — оно то же, что в закрытой таблице типов "+
-					"(единственное число, верблюжье)",
+					"проверь написание ресурса — оно ДОСЛОВНО то же, каким ресурс назван "+
+					"ключом закрытой таблицы типов (числа у написания нет: `securityGroup` "+
+					"у vpc, `targetGroups` у балансировщика)",
 				roleID, resource, rule.Module),
 		}}, 0
 	}
@@ -167,7 +168,7 @@ func judgeResource(facts VerbFacts, m *manifest.Manifest, roleID string, rule ma
 	fgaType, _ := authzmap.ObjectType(rule.Module, resource)
 	var faults []error
 	judged := 0
-	for _, verb := range rule.Verbs {
+	for _, verb := range rule.Classes {
 		class := classOf(m, verb)
 		judged++
 		if len(Covers(facts, own, fgaType, class)) > 0 {

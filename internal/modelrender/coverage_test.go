@@ -180,9 +180,9 @@ func TestASideIsNotClaimedWhenNeitherIsRicher(t *testing.T) {
 		body := manifestFor(m)
 		if m == "vpc" {
 			body = "apiVersion: iam/v1\nmodule: vpc\nresources:\n" +
-				"  - name: network\n    objectType: vpc_network\n    parent: project\n" +
+				"  - name: network\n    objectType: vpc_network\n    parents: [project]\n" +
 				"    producer: derived\n    subjects:\n      - user\n    verbs:\n      - get\n" +
-				"  - name: subnet\n    objectType: vpc_subnet\n    parent: project\n" +
+				"  - name: subnet\n    objectType: vpc_subnet\n    parents: [project]\n" +
 				"    producer: derived\n    verbs:\n      - get\n"
 		}
 		writeManifest(t, root, m, body)

@@ -57,6 +57,34 @@ type WriterIface interface {
 	// FK RESTRICT (`access_bindings_role_fk`) → SQLSTATE 23503 → FailedPrecondition.
 	Delete(ctx context.Context, id domain.RoleID) error
 
+	// UpsertSystemRole заводит либо приводит к объявленному состоянию строку
+	// СИСТЕМНОЙ роли — той, чей ярус кластерный (`cluster_id` непуст, отчего
+	// вычисляемый `is_system` истинен). Единственный писатель системной строки,
+	// не являющийся миграцией (приёмка
+	// `services/iam/docs/engineering/acceptance/roles-come-as-data-not-migrations.md`
+	// §3.1); `Insert` выше её произвести НЕ МОЖЕТ by construction — `cluster_id`
+	// в его перечне колонок отсутствует.
+	//
+	// # Приведение по `id`, и НИКОГДА не «снять и положить»
+	//
+	// Роль с выдачами удалить нельзя — `access_bindings_role_fk … ON DELETE
+	// RESTRICT` отвергнет операцию; а если бы не отверг, каскад унёс бы селекторы,
+	// проекцию глаголов и проекцию сегментов молча. Поэтому оператор ОДИН:
+	// вставка с приведением при конфликте по первичному ключу.
+	//
+	// # `changed` есть свойство ОПЕРАТОРА, а не сравнение в коде
+	//
+	// Приведение исполняется только при отличии объявленных полей — предикат
+	// стоит в `WHERE` ветви `DO UPDATE`, поэтому «ноль отличий» даёт ноль
+	// затронутых строк, и вызывающий узнаёт об этом по `changed=false`. Сравнение
+	// в коде было бы software check-then-act (запрет #10): между чтением и
+	// записью помещается чужая правка.
+	//
+	// `labels` и `created_at` пишутся ТОЛЬКО при вставке: манифест их не
+	// объявляет, и приведение, стиравшее бы метки арендатора, объявляло бы
+	// владение тем, чего манифест не несёт.
+	UpsertSystemRole(ctx context.Context, r domain.Role) (out domain.Role, changed bool, err error)
+
 	// ReplaceRuleSelectors syncs kacho_iam.role_rule_selectors with the role's
 	// UNIFIED materializing rules: ARM_ANCHOR
 	// (all) + ARM_NAMES + ARM_LABELS. It DELETEs the role's current selector rows and

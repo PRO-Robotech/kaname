@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -93,6 +94,23 @@ func validateDeprecatedVerbs(m *Manifest, doc *yaml.Node) []error {
 			{"reason", entry.Reason, "без него следующий не знает, действует ли ещё основание"},
 			{"removeWhen", entry.RemoveWhen, "без него запись не истечёт НИКОГДА и переживёт свой предмет"},
 		} {
+			// Проза судится ПРЕДЕЛОМ, ключ-перечисление — непустотой: у класса
+			// и даты предела длины нет, схема их не объявляет, и требовать его
+			// значило бы завести правило, которого контракт не несёт.
+			if required.key == "reason" || required.key == "removeWhen" {
+				if !proseShorterThan(required.value, minProseRunes) {
+					continue
+				}
+				faults = append(faults, linkFault{
+					kind:  ErrDeprecatedVerbIncomplete,
+					coord: locate(doc, "deprecatedVerbs", name),
+					detail: fmt.Sprintf("deprecatedVerbs.%s.%s: %d знаков, требуется не менее %d — %s",
+						name, required.key,
+						utf8.RuneCountInString(strings.TrimSpace(required.value)),
+						minProseRunes, required.why),
+				})
+				continue
+			}
 			if strings.TrimSpace(required.value) != "" {
 				continue
 			}

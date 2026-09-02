@@ -67,14 +67,27 @@ import (
 // только сверка (2). Записано затем, чтобы следующий читатель не принял зелёный
 // гейт за подтверждение.
 //
-// # ЕДИНСТВЕННОЕ РАСХОЖДЕНИЕ С ПРОИЗВОДИТЕЛЕМ — В ПОТОКЕ УПРАВЛЕНИЯ, НЕ В РЕЗУЛЬТАТЕ
+// # РАСХОЖДЕНИЯ С ПРОИЗВОДИТЕЛЕМ — ОБА В ПОТОКЕ УПРАВЛЕНИЯ, НИ ОДНО В ТЕКСТЕ
 //
-// Производитель трогает рёбра ТОЛЬКО когда зеркало реально применилось: он
-// читает `RowsAffected` и ветвится. Пачка ветвиться не может — ответы приходят
-// после подачи всей пачки. Поэтому посевщик подаёт все стейтменты безусловно.
-// На посеве СВЕЖИХ объектов результат тождественен (вставка применяется всегда),
-// и это доказывает сверка (2); на повторной подаче устаревшей версии пути
-// разошлись бы — поэтому посевщик и не годится ни для чего, кроме посева.
+// Их ДВА, и оба названы: пачка не может ветвиться — ответы приходят после
+// подачи всей пачки, — поэтому посевщик подаёт все стейтменты безусловно и не
+// читает ни одного ответа.
+//
+//  1. **рёбра.** Производитель трогает их ТОЛЬКО когда зеркало реально
+//     применилось: он читает `RowsAffected` и ветвится. На посеве СВЕЖИХ
+//     объектов результат тождественен (вставка применяется всегда), и это
+//     доказывает сверка (2); на повторной подаче устаревшей версии пути
+//     разошлись бы — поэтому посевщик и не годится ни для чего, кроме посева;
+//  2. **живость типа.** Производитель читает `typeLive` и отвечает отказом,
+//     называя тип. Посевщик тот же вердикт получает (стейтмент его возвращает)
+//     и ОТБРАСЫВАЕТ: `Flush` дренирует ответы через `br.Exec()`. Значит на
+//     неживом типе сетка молча посадит ноль строк зеркала — и рёбра при этом
+//     всё равно ляжет. Ловит это ПЕРЕПИСЬ (3): `census.go` считает
+//     `count(*) FROM kacho_iam.resource_mirror`, и ноль объектов там неотличим
+//     от «условие замера не создано» ровно потому, что это одно и то же.
+//
+// Текст стейтментов при этом не расходится НИ В ЧЁМ — он копия, и её тождество
+// доказывает сверка (2).
 
 // BatchObjects — сколько объектов уходит в БД одним обменом.
 //
@@ -175,18 +188,33 @@ func (s *Seeder) Queue(ctx context.Context, row MirrorRow) error {
 		    AND source_version    < $6`,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
 
-	// (2) INSERT-OR-SUPERSEDE — вставка зеркала.
+	// (2) INSERT-OR-SUPERSEDE — вставка зеркала ПОД УСЛОВИЕМ ЖИВОГО ТИПА.
+	//
+	// Условие каталога приехало в производителя задачей #1031, и здесь оно не
+	// «добавлено по аналогии», а СКОПИРОВАНО вместе со стейтментом: расхождение
+	// текста означало бы, что сетка мерит запрос ДЕШЕВЛЕ того, который выпускает
+	// продукт, — то есть все её числа оптимистичны ровно на стоимость
+	// непройденной сверки с каталогом.
 	s.batch.Queue(
-		`INSERT INTO kacho_iam.resource_mirror
-		   (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
-		 VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
-		 ON CONFLICT (object_type, object_id) DO UPDATE
-		    SET parent_project_id = EXCLUDED.parent_project_id,
-		        parent_account_id = EXCLUDED.parent_account_id,
-		        labels            = EXCLUDED.labels,
-		        source_version    = EXCLUDED.source_version,
-		        updated_at        = now()
-		  WHERE resource_mirror.source_version < EXCLUDED.source_version`,
+		`WITH live_type AS (
+		     SELECT 1
+		       FROM kacho_iam.catalog_resource
+		      WHERE dotted = $1 AND live
+		 ), applied AS (
+		     INSERT INTO kacho_iam.resource_mirror
+		       (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
+		     SELECT $1::text, $2::text, $3::text, $4::text, $5::jsonb, $6::timestamptz, now()
+		      WHERE EXISTS (SELECT 1 FROM live_type)
+		     ON CONFLICT (object_type, object_id) DO UPDATE
+		        SET parent_project_id = EXCLUDED.parent_project_id,
+		            parent_account_id = EXCLUDED.parent_account_id,
+		            labels            = EXCLUDED.labels,
+		            source_version    = EXCLUDED.source_version,
+		            updated_at        = now()
+		      WHERE resource_mirror.source_version < EXCLUDED.source_version
+		     RETURNING 1
+		 )
+		 SELECT EXISTS (SELECT 1 FROM live_type), (SELECT count(*) FROM applied)`,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
 
 	edgeType := edgeObjectType(row.ObjectType)

@@ -17,8 +17,10 @@ import (
 // Раздел `resources` неоднороден (см. шапку manifest/resources.go), и рендер
 // наследует это различие дословно:
 //
-//	порождается    указатель якоря · super_admin · ярусы · v_<глагол>
-//	объявляется    doc · relations[] (текст определения — ДОСЛОВНО)
+//	порождается    указатели · super_admin · ярусы · v_<глагол>
+//	объявляется    notes[] (проза с якорем) · relations[] (текст определения —
+//	               ДОСЛОВНО) вместе с их местом · cascade[] · источники яруса и
+//	               действия
 //
 // Текст авторского отношения здесь НЕ разбирается: его грамматика принадлежит
 // модели прав, и второй её разборщик разошёлся бы с первым МОЛЧА — на той самой
@@ -31,6 +33,17 @@ import (
 // та же со снятым звеном — `admin → super_admin`, `viewer → admin`. Постоянная
 // «viewer от editor» породила бы у второго ссылку на ярус, которого у него нет.
 //
+// Цепочкой дело не исчерпывается: ярус вправе назвать СВОИ источники ключом
+// `from`, и тогда они заменяют звено цепочки целиком. Замер: `account` несёт
+// `or owner or super_admin`, `iam_user` — `or subject or editor`.
+//
+// # Каскад супер-доступа тоже приходит ИЗ МАНИФЕСТА
+//
+// Написаний каскада в каноне четыре сверх умолчания, и восемь модульных блоков
+// несут не умолчание. Форма структурная (`cascade[]` — пары `<relation> from
+// <parent>`), а не текстовая: разбор строки завёл бы второй разборщик грамматики
+// модели прав.
+//
 // # Субъекты сужают ЯРУСЫ и не трогают глаголы — это замер, а не симметрия
 //
 // У `vpc_address_pool` ярусы несут `[user, service_account]`, а его же `v_get`
@@ -39,17 +52,19 @@ import (
 var (
 	// ErrObjectTypeEmpty — рендерить нечего: тип объекта не назван.
 	ErrObjectTypeEmpty = errors.New("modelrender: resource objectType is empty")
-	// ErrParentEmpty — якорь области не назван; указатель якоря — первая строка блока.
-	ErrParentEmpty = errors.New("modelrender: resource parent is empty")
+	// ErrParentEmpty — указателей нет ни одного; указатель — первая строка блока,
+	// и каскад супер-доступа выводится от его имени.
+	ErrParentEmpty = errors.New("modelrender: resource has no parents")
 )
 
-// defaultSubjects — набор субъектов, который канон несёт у ярусов и у глаголов
-// по умолчанию. Ресурс вправе СУЗИТЬ его у ярусов ключом `subjects`.
-var defaultSubjects = []string{"user", "service_account", "group#member"}
-
-// defaultTiers — ярусы по умолчанию, в порядке убывания прав. Порядок несущий:
-// каждый следующий ярус выводится от предыдущего.
-var defaultTiers = []string{"admin", "editor", "viewer"}
+// Умолчания состава субъектов и цепочки ярусов объявлены У ЗАГРУЗЧИКА и берутся
+// оттуда: на них ссылается его проверка источников яруса, и вторая копия здесь
+// разошлась бы с первой молча — обе стороны отвечают одинаково ровно там, где
+// совпадают.
+var (
+	defaultSubjects = manifest.DefaultSubjects()
+	defaultTiers    = manifest.DefaultTiers()
+)
 
 // Render порождает блок типа модели из ресурса манифеста.
 //
@@ -60,7 +75,7 @@ func Render(r manifest.Resource) ([]byte, error) {
 	if r.ObjectType == "" {
 		return nil, ErrObjectTypeEmpty
 	}
-	if r.Parent == "" {
+	if len(r.Parents) == 0 {
 		return nil, ErrParentEmpty
 	}
 
@@ -68,17 +83,25 @@ func Render(r manifest.Resource) ([]byte, error) {
 	b.WriteString("type " + r.ObjectType + "\n")
 	b.WriteString("  relations\n")
 
-	// Авторский комментарий стоит СРАЗУ ПОСЛЕ `relations`, и позиция эта ОДНА.
-	// Канон располагает прозу и в других местах блока; выразить это манифест
-	// сегодня не может — `doc` есть один текст без координаты, и формы для
-	// позиционированной прозы (Н-04 приёмки) в схеме нет. Позиция названа здесь,
-	// а остаток сосчитан переписью, чтобы «выражено не всё» не выглядело «всё».
-	for _, line := range docLines(r.Doc) {
-		b.WriteString("    " + line + "\n")
+	// Примечание печатается ПЕРЕД своим якорем, поэтому строку отношения пишет
+	// один вызов на всех: место прозы приходит из манифеста, и второй путь записи
+	// строки разошёлся бы с первым молча — на том отношении, о котором не знает.
+	notes := notesByAnchor(r)
+	define := func(name, definition string) {
+		for _, line := range noteLines(notes[name]) {
+			b.WriteString("    " + line + "\n")
+		}
+		b.WriteString("    define " + name + ": " + definition + "\n")
 	}
 
-	b.WriteString("    define " + r.Parent + ": [" + r.Parent + "]\n")
-	b.WriteString("    define super_admin: super_admin from " + r.Parent + "\n")
+	// Указателей бывает больше одного, и порядок их — порядок манифеста: канон
+	// ставит у `iam_access_binding` `project`, затем `account`, затем `cluster`, и
+	// сортировка дала бы другой блок.
+	for _, p := range r.Parents {
+		define(p.Name, "["+p.Type+"]")
+	}
+	define(manifest.SuperAdminRelation(), cascadeOf(r))
+	writeAuthoredRelations(r, "beforeTiers", define)
 
 	subjects := r.Subjects
 	if len(subjects) == 0 {
@@ -86,48 +109,119 @@ func Render(r manifest.Resource) ([]byte, error) {
 	}
 	tiers := r.Tiers
 	if len(tiers) == 0 {
-		tiers = defaultTiers
+		tiers = make([]manifest.ResourceTier, 0, len(defaultTiers))
+		for _, name := range defaultTiers {
+			tiers = append(tiers, manifest.ResourceTier{Name: name})
+		}
 	}
 
-	// Каждый следующий ярус выводится от ПРЕДЫДУЩЕГО, а первый — от super_admin.
-	previous := "super_admin"
+	// Каждый следующий ярус выводится от ПРЕДЫДУЩЕГО, а первый — от super_admin;
+	// ярус, назвавший свои источники, берёт их вместо цепочки. Замер: `account`
+	// несёт `or owner or super_admin`, `iam_user` — `or subject or editor`, и
+	// постоянная цепочка не даёт ни того, ни другого.
+	previous := manifest.SuperAdminRelation()
 	for _, tier := range tiers {
-		b.WriteString("    define " + tier + ": [" + strings.Join(subjects, ", ") + "] or " + previous + "\n")
-		previous = tier
+		sources := tier.From
+		if len(sources) == 0 {
+			sources = []string{previous}
+		}
+		define(tier.Name, "["+strings.Join(subjects, ", ")+"] or "+strings.Join(sources, " or "))
+		previous = tier.Name
 	}
-
-	// Авторское отношение воспроизводится ДОСЛОВНО: грамматика определения
-	// принадлежит модели прав, и второй её разборщик разошёлся бы с первым молча.
-	for _, rel := range r.Relations {
-		b.WriteString("    define " + rel.Name + ": " + rel.Definition + "\n")
-	}
+	writeAuthoredRelations(r, "beforeVerbs", define)
 
 	// Порядок глаголов задаёт КАНОН, а не манифест: перестановка ресурсов и
 	// глаголов в YAML рендер не меняет (B-04). Субъекты здесь умолчательные —
-	// сужение ключом `subjects` трогает ярусы и не трогает глаголы.
+	// сужение ключом `subjects` РЕСУРСА трогает ярусы и не трогает глаголы, —
+	// а своим составом и своими источниками действие распоряжается САМО.
 	for _, verb := range verbsInCanonOrder(r.Verbs) {
-		b.WriteString("    define " + manifest.VerbRelationName(verb) + ": [" +
-			strings.Join(defaultSubjects, ", ") + "] or super_admin\n")
+		subjects := defaultSubjects
+		sources := []string{manifest.SuperAdminRelation()}
+		if len(verb.Subjects) > 0 {
+			subjects = verb.Subjects
+		}
+		if len(verb.From) > 0 {
+			sources = verb.From
+		}
+		define(manifest.VerbRelationName(verb.Name),
+			"["+strings.Join(subjects, ", ")+"] or "+strings.Join(sources, " or "))
 	}
+	writeAuthoredRelations(r, "afterVerbs", define)
 
 	return []byte(b.String()), nil
 }
 
-// docLines — строки авторского комментария без хвостовой пустой.
+// writeAuthoredRelations — авторские отношения ОДНОГО места, в порядке манифеста.
 //
-// Пустая строка внутри блока разделила бы его надвое: единица блока есть тело до
-// ПЕРВОЙ пустой строки, и комментарий, несущий её, породил бы два блока из одного.
-func docLines(doc string) []string {
-	if strings.TrimSpace(doc) == "" {
+// Отношение воспроизводится ДОСЛОВНО: грамматика определения принадлежит модели
+// прав, и второй её разборщик разошёлся бы с первым молча.
+//
+// Место приходит из манифеста, а не задаётся телом этой функции: раскладок в
+// каноне ТРИ (перед ярусами · после ярусов · после действий), и постоянная
+// объявляла расхождением то, о чём никто не решал.
+func writeAuthoredRelations(r manifest.Resource, place string, define func(name, definition string)) {
+	for _, rel := range r.Relations {
+		at := rel.Position
+		if at == "" {
+			at = manifest.DefaultRelationPosition()
+		}
+		if at != place {
+			continue
+		}
+		define(rel.Name, rel.Definition)
+	}
+}
+
+// cascadeOf — правая часть отношения супер-доступа.
+//
+// Умолчание — `super_admin from <первый указатель>`: так написаны 19 модульных
+// блоков канона из 27. Остальные восемь несут иные написания, и они приходят из
+// манифеста ключом `cascade`.
+func cascadeOf(r manifest.Resource) string {
+	terms := r.Cascade
+	if len(terms) == 0 {
+		terms = []manifest.CascadeTerm{{
+			Relation: manifest.SuperAdminRelation(), From: r.Parents[0].Name,
+		}}
+	}
+	parts := make([]string, 0, len(terms))
+	for _, t := range terms {
+		parts = append(parts, t.Relation+" from "+t.From)
+	}
+	return strings.Join(parts, " or ")
+}
+
+// notesByAnchor — примечания ресурса по имени отношения, перед которым они стоят.
+// Якорь у каждого свой: два примечания на одном отвергает загрузчик, потому что
+// порядок между ними ничем не задан.
+func notesByAnchor(r manifest.Resource) map[string]string {
+	if len(r.Notes) == 0 {
 		return nil
 	}
-	out := strings.Split(strings.TrimRight(doc, "\n"), "\n")
-	for i, l := range out {
-		if strings.TrimSpace(l) == "" {
-			out[i] = "#"
-		}
+	out := make(map[string]string, len(r.Notes))
+	for _, n := range r.Notes {
+		out[n.Before] = n.Text
 	}
 	return out
+}
+
+// noteLines — строки примечания ДОСЛОВНО, без хвостовой пустой.
+//
+// Знак комментария принадлежит ТЕКСТУ, а не рендеру, и это замер: отступ у всех
+// 634 строк прозы модульных блоков — четыре пробела, формы `#текст` без пробела
+// нет ни одной, голых решёток 76. Значит рендер строки есть чистое склеивание
+// `"    " + строка`, и правила «добавить решётку» заводить не нужно.
+//
+// Отвергнутая альтернатива названа с ценой: хранить текст БЕЗ решётки и
+// добавлять её здесь. Тогда 76 голых решёток становятся пустыми строками YAML, и
+// правило «пустая строка означает решётку» живёт В ДВУХ местах — у загрузчика и
+// у рендера, — а два места об одном предмете расходятся молча. Строку без
+// решётки отвергает загрузчик, называя якорь и номер строки внутри текста.
+func noteLines(text string) []string {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimRight(text, "\n"), "\n")
 }
 
 // canonicalVerbOrder — порядок глаголов канона. Замер по дереву: у 24 блоков из 27
@@ -147,31 +241,32 @@ func CanonicalVerbOrder() map[string]int {
 	return out
 }
 
-// verbsInCanonOrder — глаголы ресурса в порядке канона: сперва канонические в
-// объявленном порядке, затем прочие в порядке манифеста.
+// verbsInCanonOrder — действия ресурса в порядке канона: сперва канонические в
+// объявленном порядке, затем прочие в порядке манифеста. Возвращается САМО
+// действие, а не его имя: состав субъектов и источники вывода принадлежат ему.
 //
 // Прочие идут ПОСЛЕ и в порядке документа, а не отсортированно: канон ставит
 // `v_addtargets`/`v_removetargets` последними, и сортировка поставила бы первым
 // `addtargets` — то есть рендер разошёлся бы с каноном на единственном блоке,
 // который эту форму несёт.
-func verbsInCanonOrder(verbs []manifest.Verb) []string {
-	present := make(map[string]bool, len(verbs))
+func verbsInCanonOrder(verbs []manifest.Verb) []manifest.Verb {
+	byName := make(map[string]manifest.Verb, len(verbs))
 	for _, v := range verbs {
 		if v.Name != "" {
-			present[v.Name] = true
+			byName[v.Name] = v
 		}
 	}
-	var out []string
+	var out []manifest.Verb
 	for _, canonical := range canonicalVerbOrder {
-		if present[canonical] {
-			out = append(out, canonical)
-			delete(present, canonical)
+		if v, ok := byName[canonical]; ok {
+			out = append(out, v)
+			delete(byName, canonical)
 		}
 	}
 	for _, v := range verbs {
-		if present[v.Name] {
-			out = append(out, v.Name)
-			delete(present, v.Name)
+		if kept, ok := byName[v.Name]; ok {
+			out = append(out, kept)
+			delete(byName, v.Name)
 		}
 	}
 	return out

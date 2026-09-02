@@ -253,52 +253,102 @@ type jsonRule struct {
 	MatchLabels   map[string]string `json:"match_labels,omitempty"`
 }
 
-func TestTierParity_AllSystemRoles_F53(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping testcontainers integration in -short mode")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, setupTestDB(t))
-	require.NoError(t, err)
-	defer pool.Close()
+// ─────────────────────────────────────────────────────────────────────────────
+// ПРЕДИКАТ ПАРИТЕТА — ВЫДЕЛЕН, потому что популяций у него ДВЕ
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Прежде оба свойства стояли ВНУТРИ тела пробы ниже, и воспроизвести их у
+// второй популяции было нечем. Копия завела бы второе место об одном предмете,
+// и разошлись бы они МОЛЧА: обе стороны остались бы зелёными, утверждая разное.
+// Поэтому предикат — функция, а популяция — её аргумент (задача #1894).
+//
+// Популяций сегодня две, и обе идут через ЭТОТ вызов:
+//
+//  1. строки, посеянные применёнными миграциями — проба ниже;
+//  2. строки, записанные ПРИМЕНИТЕЛЕМ ролей модуля —
+//     `module_roles_applier_integration_test.go`, сценарии MOD-RD-26/27,
+//     держатель Г11 приёмки `roles-come-as-data-not-migrations.md`.
+//
+// Читатель популяции тоже ОДИН — `systemRolesOfBase`: `WHERE is_system` без
+// различения писателя. Различение было бы отдельным решением, и оно прямо
+// отвергнуто (П21 приёмки): строка применителя обязана попадать под тот же
+// вопрос, что строка миграции.
+//
+// # Почему предикат вписан СЮДА, а шапка файла не тронута
+//
+// Три координаты приёмки `system-role-segments-resolve.md` пинят СТРОКУ
+// `legacyVerbTier` (`…tier_parity_integration_test.go:182`), и всякая вставка
+// выше неё сдвигает их МОЛЧА: гейта на координату вида `файл:строка` в дереве
+// нет (заведено задачей #1896, гейт координат судит только имя пробы). Поэтому
+// новое стоит ниже 182-й строки, а объяснение — здесь, у предмета, а не в шапке.
+// Координата П21 на выборку популяции всё равно уехала: код, на который она
+// указывала, переехал в `systemRolesOfBase`, и удержать её было нечем — но её
+// собственный предикат (`grep -n 'WHERE is_system ORDER BY name' …`) резолвится
+// по-прежнему.
 
-	rows, err := pool.Query(ctx,
-		`SELECT name, permissions, rules FROM kacho_iam.roles WHERE is_system ORDER BY name`)
-	require.NoError(t, err)
-	defer rows.Close()
+// tierParityRole — строка, над которой считается паритет: имя, свёрнутые
+// разрешения и правила. Форма ОДНА на обе популяции: разойдись входы, предикат
+// разошёлся бы сам с собой, и «те же ярусы» доказывалось бы двумя разными
+// вопросами.
+type tierParityRole struct {
+	name  string
+	perms []string
+	rules domain.Rules
+}
 
-	type roleRow struct {
-		name  string
-		perms []string
-		rules domain.Rules
-	}
-	var roles []roleRow
-	for rows.Next() {
-		var name string
-		var permsJSON, rulesJSON []byte
-		require.NoError(t, rows.Scan(&name, &permsJSON, &rulesJSON))
+// tierParityReport — исход предиката: перепись осмотренного и находки по
+// КАЖДОМУ свойству ОТДЕЛЬНО.
+//
+// Отдельно — не ради вида вывода: вызывающему нужно уметь утверждать про одно
+// свойство, не задев остальные. Инъекция, роняющая всё сразу, не доказывает,
+// что упало проверяемое, — поэтому MOD-RD-26 требует находки свойства 1 и
+// ОТСУТСТВИЯ находок свойства 2 на одном и том же входе.
+type tierParityReport struct {
+	// Roles — строк прочитано. Перепись, а не украшение: без неё «ноль находок»
+	// неотличимо от «ноль прочитанного», и каждое свойство ниже зеленело бы
+	// вакуумно на непосеянной базе.
+	Roles int
+	// Families — семейство → тир → имя роли. Отдаётся вызывающему: свойство
+	// полной подстановки квантифицируется по префикс-менее семье, и выводить её
+	// второй раз значило бы завести вторую классификацию имён.
+	Families map[string]map[string]string
+	// OnAxis — ролей, стоящих на оси тиров.
+	OnAxis int
+	// Untiered — имена, оси не несущие: неярусные встроенные, семейством не
+	// являющиеся by construction.
+	Untiered []string
+	// OffAxis — ПРЕДПОСЫЛКА предиката, а не его находка: имя вида
+	// `<модуль>.<ресурс>.<x>` с `x` вне оси читается как «не семейство» и молча
+	// уходит из-под свойства 1. Слепая зона, которую эта корзина обнажает.
+	OffAxis []string
+	// Narrowed — семейств, чья ось СУЖЕНА набором глаголов их типа.
+	Narrowed int
+	// TierGaps — свойство 1, ОБЕ его стороны: тир, который тип обслуживает, у
+	// семейства обязан быть; тир, которому нечем быть, — не должен.
+	TierGaps []string
+	// Mismatches — свойство 2: ярус, выведенный из правил, равен ярусу,
+	// выведенному из легаси-разрешений, у КАЖДОЙ роли и КАЖДОЙ пары.
+	Mismatches []string
+}
 
-		var perms []string
-		require.NoError(t, json.Unmarshal(permsJSON, &perms))
+// Census — перепись осмотренного одной строкой. Печатается ВСЕГДА, а не только
+// на находке: «ноль находок» обязано быть отличимо от «ноль прочитанного».
+func (r tierParityReport) Census() string {
+	return fmt.Sprintf("перепись паритета: прочитано системных ролей %d · семейств тиров %d "+
+		"(ролей на оси %d) · неярусных встроенных %d · семейств с СУЖЕННОЙ осью %d",
+		r.Roles, len(r.Families), r.OnAxis, len(r.Untiered), r.Narrowed)
+}
 
-		var jr []jsonRule
-		require.NoError(t, json.Unmarshal(rulesJSON, &jr))
-		dr := make(domain.Rules, 0, len(jr))
-		for _, r := range jr {
-			dr = append(dr, domain.Rule{
-				Module: r.Module, Resources: r.Resources, Verbs: r.Verbs,
-				ResourceNames: r.ResourceNames, MatchLabels: r.MatchLabels,
-			})
-		}
-		roles = append(roles, roleRow{name: name, perms: perms, rules: dr})
-	}
-	require.NoError(t, rows.Err())
+// evaluateTierParity — ПРЕДИКАТ паритета ярусов над произвольной популяцией
+// системных ролей. Ничего не утверждает: находки возвращает вызывающему.
+//
+// Возвращает, а не утверждает, ровно потому, что вызывающих двое и ждут они
+// РАЗНОГО: проба посева требует пустых находок, MOD-RD-26 требует находки
+// свойства 1 с названным ярусом. Предикат, зашивший в себя `assert`, второму
+// вызывающему был бы недоступен, и тот завёл бы копию.
+func evaluateTierParity(roles []tierParityRole) tierParityReport {
+	rep := tierParityReport{Roles: len(roles), Families: map[string]map[string]string{}}
 
-	// ── Census. Stated separately so that "no findings" below cannot be read off
-	// an empty catalog: every assertion in this test quantifies over `roles`, so a
-	// database that was never seeded would satisfy all of them vacuously.
-	families := map[string]map[string]string{} // family → tier → role name
-	var untiered, offAxis []string
 	for _, r := range roles {
 		family, tier, tiered := classifySystemRole(r.name)
 		if !tiered {
@@ -306,23 +356,17 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 			// read as "not a family" and quietly escape the completeness property
 			// below — the blind spot this bucket exists to expose.
 			if strings.Count(r.name, ".") == 2 {
-				offAxis = append(offAxis, r.name)
+				rep.OffAxis = append(rep.OffAxis, r.name)
 			}
-			untiered = append(untiered, r.name)
+			rep.Untiered = append(rep.Untiered, r.name)
 			continue
 		}
-		if families[family] == nil {
-			families[family] = map[string]string{}
+		if rep.Families[family] == nil {
+			rep.Families[family] = map[string]string{}
 		}
-		families[family][tier] = r.name
+		rep.Families[family][tier] = r.name
 	}
-	t.Logf("census: %d seeded system roles read — %d tier families (%d roles on the tier axis) + %d non-tiered built-ins",
-		len(roles), len(families), len(roles)-len(untiered), len(untiered))
-	require.NotEmpty(t, families, "census: read %d system roles and ZERO tier families — "+
-		"either the migrations did not seed the catalog or the naming convention moved; "+
-		"every parity assertion below would be vacuously green", len(roles))
-	require.Empty(t, offAxis, "census: system role(s) named <module>.<resource>.<x> with <x> off the %v axis — "+
-		"such a name is not read as a family member, so its tier parity is never checked", catalogTiers)
+	rep.OnAxis = rep.Roles - len(rep.Untiered)
 
 	// ── Property 1: catalog tier parity. Every family the seed names carries the
 	// COMPLETE tier axis. Derived from the seeded catalog, so a retire that removes
@@ -330,44 +374,38 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 	// this green, while dropping one tier of a family that is still served fails
 	// here and names the tier — a resource whose catalog offers `admin` and `view`
 	// but no `edit` is a grantable surface with a hole in it.
-	var tierGaps []string
-	narrowedFamilies := 0
-	familyNames := make([]string, 0, len(families))
-	for f := range families {
+	familyNames := make([]string, 0, len(rep.Families))
+	for f := range rep.Families {
 		familyNames = append(familyNames, f)
 	}
 	sort.Strings(familyNames)
 	for _, f := range familyNames {
 		want, narrowed := tiersTheTypeCanServe(f)
 		if narrowed {
-			narrowedFamilies++
+			rep.Narrowed++
 		}
 		for _, tier := range want {
-			if _, ok := families[f][tier]; !ok {
-				tierGaps = append(tierGaps, fmt.Sprintf(
-					"%s: tier %q missing (family has %s)", f, tier, presentTiers(families[f])))
+			if _, ok := rep.Families[f][tier]; !ok {
+				rep.TierGaps = append(rep.TierGaps, fmt.Sprintf(
+					"%s: tier %q missing (family has %s)", f, tier, presentTiers(rep.Families[f])))
 			}
 		}
 		// Обратная сторона: тир, которому НЕЧЕМ быть, не должен существовать.
 		// Без неё сужение оси превратилось бы в послабление: роль, обещающая
 		// правку там, где тип правки не объявляет, не даёт ничего.
 		for _, tier := range catalogTiers {
-			if _, present := families[f][tier]; !present {
+			if _, present := rep.Families[f][tier]; !present {
 				continue
 			}
 			if !containsTier(want, tier) {
-				tierGaps = append(tierGaps, fmt.Sprintf(
+				rep.TierGaps = append(rep.TierGaps, fmt.Sprintf(
 					"%s: tier %q посеян, но тип не объявляет ни одного глагола этого тира — "+
 						"роль обещает то, чего материализация не даст", f, tier))
 			}
 		}
 	}
-	t.Logf("census: families with a NARROWED tier axis (the type declares no verb of some tier): %d of %d",
-		narrowedFamilies, len(familyNames))
-	assert.Empty(t, tierGaps, "catalog tier parity: every seeded family must carry the tier axis its TYPE can serve; gaps:\n%s",
-		strings.Join(tierGaps, "\n"))
 
-	var mismatches []string
+	// ── Property 2: rules-derived tier EQUALS legacy permissions-derived tier.
 	for _, r := range roles {
 		legacy := legacyTierMap(r.perms)
 		rule := rulesTierMap(r.rules)
@@ -387,14 +425,86 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 		sort.Strings(sortedKeys)
 		for _, k := range sortedKeys {
 			if legacy[k] != rule[k] {
-				mismatches = append(mismatches,
+				rep.Mismatches = append(rep.Mismatches,
 					r.name+" ["+k+"]: legacy="+legacy[k]+" rules="+rule[k])
 			}
 		}
 	}
-	assert.Empty(t, mismatches,
+
+	return rep
+}
+
+// requireTierParityPremise — ПРЕДПОСЫЛКА предиката, а не его находка. Оба
+// вызывающих обязаны её пройти, каких бы находок они ни ждали: без неё пустая
+// популяция удовлетворяет любое утверждение о ярусах вакуумно, а имя вне оси
+// молча уходит из-под свойства 1.
+func requireTierParityPremise(t *testing.T, rep tierParityReport) {
+	t.Helper()
+	t.Log(rep.Census())
+	require.NotEmpty(t, rep.Families, "перепись: прочитано системных ролей %d и НОЛЬ семейств тиров — "+
+		"либо миграции не посеяли каталог, либо соглашение об именовании уехало; "+
+		"всякое утверждение о ярусах ниже было бы вакуумно зелёным", rep.Roles)
+	require.Empty(t, rep.OffAxis, "перепись: системная роль вида <модуль>.<ресурс>.<x> с <x> вне оси %v — "+
+		"такое имя не читается как член семейства, и его паритет не проверяется никогда", catalogTiers)
+}
+
+// systemRolesOfBase — ПОПУЛЯЦИЯ паритета: все системные роли базы, кем бы они ни
+// были записаны.
+//
+// Различения писателя здесь нет НАМЕРЕННО (П21 приёмки
+// `roles-come-as-data-not-migrations.md`): строка, записанная применителем ролей
+// модуля, обязана попадать под тот же вопрос, что строка, посеянная миграцией.
+// Читатель ОДИН на обе популяции — иначе «те же роли» читались бы двумя разными
+// выборками, и разойтись они могли бы молча.
+func systemRolesOfBase(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []tierParityRole {
+	t.Helper()
+	rows, err := pool.Query(ctx,
+		`SELECT name, permissions, rules FROM kacho_iam.roles WHERE is_system ORDER BY name`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var roles []tierParityRole
+	for rows.Next() {
+		var name string
+		var permsJSON, rulesJSON []byte
+		require.NoError(t, rows.Scan(&name, &permsJSON, &rulesJSON))
+
+		var perms []string
+		require.NoError(t, json.Unmarshal(permsJSON, &perms))
+
+		var jr []jsonRule
+		require.NoError(t, json.Unmarshal(rulesJSON, &jr))
+		dr := make(domain.Rules, 0, len(jr))
+		for _, r := range jr {
+			dr = append(dr, domain.Rule{
+				Module: r.Module, Resources: r.Resources, Verbs: r.Verbs,
+				ResourceNames: r.ResourceNames, MatchLabels: r.MatchLabels,
+			})
+		}
+		roles = append(roles, tierParityRole{name: name, perms: perms, rules: dr})
+	}
+	require.NoError(t, rows.Err())
+	return roles
+}
+
+func TestTierParity_AllSystemRoles_F53(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping testcontainers integration in -short mode")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, setupTestDB(t))
+	require.NoError(t, err)
+	defer pool.Close()
+
+	roles := systemRolesOfBase(t, ctx, pool)
+	rep := evaluateTierParity(roles)
+	requireTierParityPremise(t, rep)
+
+	assert.Empty(t, rep.TierGaps, "catalog tier parity: every seeded family must carry the tier axis its TYPE can serve; gaps:\n%s",
+		strings.Join(rep.TierGaps, "\n"))
+	assert.Empty(t, rep.Mismatches,
 		"F-53 tier-parity: rules-derived tier must equal legacy permissions-derived tier for all %d seeded system roles; mismatches:\n%s",
-		len(roles), strings.Join(mismatches, "\n"))
+		rep.Roles, strings.Join(rep.Mismatches, "\n"))
 
 	// emit-FACT gap — the tier-parity assertion above proves the tier VALUE
 	// matches, but it NEVER proved a wildcard `*.*` system-role rule is actually
@@ -432,7 +542,7 @@ func TestTierParity_AllSystemRoles_F53(t *testing.T) {
 	// pass on any three — including three that are not the trio — and would have to
 	// be re-guessed whenever the catalog moves.
 	for _, tier := range catalogTiers {
-		name, ok := families[globalFamily][tier]
+		name, ok := rep.Families[globalFamily][tier]
 		require.Truef(t, ok, "#201 emit-fact: the %s family has no %q member — checked by the catalog tier parity above",
 			globalFamily, tier)
 		require.Truef(t, wildcardBearers[name],

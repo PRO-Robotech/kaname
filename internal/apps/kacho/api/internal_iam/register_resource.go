@@ -25,6 +25,7 @@ package internal_iam
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -760,6 +761,18 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		// enqueues below. Ordering within the tx is otherwise irrelevant — all three
 		// statements still commit together or roll back together (ban #10).
 		if changed, projectionUnchanged, err = uc.mirror.UpsertTx(ctx, tx, row); err != nil {
+			// Тип без живой строки каталога — это ОТКАЗ ВХОДУ, а не сбой записи.
+			// Он выносится сюда до обёртки: обёртка «upsert resource mirror» —
+			// внутреннее имя шага, и, доехав до провода, она сказала бы
+			// вызывающему про наше устройство вместо того, что чинить.
+			//
+			// Полоса называет ПОЛЕ (`object`) отдельным элементом отказа, а не
+			// прозой: вызывающий машинно узнаёт, какой из трёх элементов кортежа
+			// негоден. Чей это тип — вопрос другой полосы, и на неё отвечает
+			// правило приёма отказом по правам, без причины.
+			if stderrors.Is(err, iamerr.ErrUnknownResourceType) {
+				return false, false, shared.InvalidArg("object", iamerr.StripSentinel(err))
+			}
 			return false, false, fmt.Errorf("upsert resource mirror: %w", err)
 		}
 		// An UNVERSIONED producer ('-infinity') loses every monotonic comparison, so its

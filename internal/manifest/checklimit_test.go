@@ -18,6 +18,8 @@
 package manifest
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -99,4 +101,89 @@ func TestCheckTreeReadsAManifestExactlyAtTheLimit(t *testing.T) {
 		t.Errorf("прочитано манифестов %d, положен 1: %v", report.ManifestsRead, report.Paths)
 	}
 	t.Logf("перепись: %s (предел %d байт)", report.Summary(), manifestSizeLimit)
+}
+
+// treeRootFromPackage — корень дерева относительно каталога пакета. Пробы Go
+// исполняются из каталога своего пакета, поэтому путь относительный.
+const treeRootFromPackage = "../../../.."
+
+// manifestHeadroomDivisor — во сколько раз предел обязан превосходить САМЫЙ
+// БОЛЬШОЙ манифест дерева.
+//
+// Величина выбрана так, чтобы предупреждение пришло ЗА ТРИ ЧЕТВЕРТИ до отказа:
+// решение «двигать предел или чинить документ» принимается заранее, а не в
+// минуту, когда проверка перестала читать манифест. Порог, срабатывающий в
+// момент отказа, решения не готовит — он о нём сообщает.
+const manifestHeadroomDivisor = 4
+
+// TestManifestSizeLimitOutgrowsTheBiggestManifestOfThisTree — обоснование
+// предела ВЫВОДИТСЯ из дерева, а не выписывается рядом с константой
+// (задача PRO-Robotech/kacho#1908).
+//
+// # Почему проба, а не число в комментарии
+//
+// Комментарий у константы называл максимум «vpc, 42 626 байт» и запас «в 24
+// раза». Число было снято с черновика в ДРУГОМ дереве и пережило свой предмет:
+// самый большой манифест этого дерева — другой файл и другая величина. Само по
+// себе это безобидно, а читает его тот, кто решает, двигать предел или чинить
+// документ, — то есть неверно ровно то, ради чего комментарий и написан.
+//
+// Здесь величина берётся у дерева на каждом прогоне и ПЕЧАТАЕТСЯ: второго места
+// об одном предмете не заводится, и устареть ему нечем.
+//
+// # Обход — ПРОД-ПУТЬ
+//
+// `CheckTree` — тот самый исполнитель, которым судит
+// `make -C services/iam module-manifest-check`. Свой обходчик рядом разошёлся бы
+// с ним молча на первом же новом месте манифеста.
+//
+// # Пустой обход — НАХОДКА
+//
+// Иначе «запас достаточен» стало бы неотличимо от «манифестов не нашлось»:
+// у пустого множества максимума нет, и утверждение о нём тривиально истинно.
+func TestManifestSizeLimitOutgrowsTheBiggestManifestOfThisTree(t *testing.T) {
+	rep := CheckTree(treeRootFromPackage)
+	if len(rep.Findings) > 0 {
+		t.Fatalf("дерево не прочитано целиком, вердикта о размере нет ни по одному "+
+			"манифесту: %v", rep.Findings)
+	}
+	if rep.ManifestsRead == 0 {
+		t.Fatalf("манифестов не найдено ни одного — обход пуст (%s): у пустого множества "+
+			"максимума нет, и утверждение о запасе было бы тривиально истинным", rep.Summary())
+	}
+
+	biggest, biggestPath := 0, ""
+	for _, p := range rep.Paths {
+		size, err := treeFileSize(t, p)
+		if err != nil {
+			t.Fatalf("размер %s не прочитан: %v", p, err)
+		}
+		if size > biggest {
+			biggest, biggestPath = size, p
+		}
+	}
+
+	bound := manifestSizeLimit / manifestHeadroomDivisor
+	if biggest > bound {
+		t.Errorf("самый большой манифест дерева — %s, %d байт; предел %d, и запас упал "+
+			"ниже объявленного (%d-кратного): решение «двигать предел или чинить документ» "+
+			"пора принять СЕЙЧАС, а не в минуту, когда чтение упрётся в предел",
+			biggestPath, biggest, manifestSizeLimit, manifestHeadroomDivisor)
+	}
+
+	t.Logf("перепись: %s · самый большой %s = %d байт · предел %d · запас %.1f-кратный "+
+		"(объявленный минимум — %d-кратный)",
+		rep.Summary(), biggestPath, biggest, manifestSizeLimit,
+		float64(manifestSizeLimit)/float64(biggest), manifestHeadroomDivisor)
+}
+
+// treeFileSize — размер файла, найденного обходом. Путь приходит от CheckTree
+// относительно корня обхода, поэтому корень возвращается к нему здесь.
+func treeFileSize(t *testing.T, rel string) (int, error) {
+	t.Helper()
+	fi, err := os.Stat(filepath.Join(treeRootFromPackage, rel))
+	if err != nil {
+		return 0, err
+	}
+	return int(fi.Size()), nil
 }

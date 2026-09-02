@@ -221,12 +221,12 @@ module: vpc
 resources:
   - name: network
     objectType: vpc_network
-    parent: project
+    parents: [project]
     producer: derived
     verbs: [create]
   - name: networkInterface
     objectType: vpc_network_interface
-    parent: project
+    parents: [project]
     producer: derived
     verbs: [{name: internalAttach, class: update}]
 `)
@@ -259,7 +259,7 @@ module: vpc
 resources:
   - name: networkInterface
     objectType: vpc_network_interface
-    parent: project
+    parents: [project]
     producer: derived
     verbs: [{name: internalListByInstance, class: list}]
 `)
@@ -294,7 +294,7 @@ module: vpc
 resources:
   - name: network
     objectType: vpc_network
-    parent: project
+    parents: [project]
     producer: derived
     verbs: [get, {name: internalGet, class: get}]
 `)

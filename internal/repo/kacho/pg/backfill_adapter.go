@@ -220,18 +220,40 @@ func (a *BackfillAdapter) SeedSmokeMirrorObject(ctx context.Context, objectType,
 	if len(labels) == 0 {
 		labelsJSON = []byte("{}")
 	}
-	if _, err := a.pool.Exec(ctx,
+	// Условие каталога — то же, каким его спрашивает эталонная полоса
+	// (`resource_mirror.UpsertTx`). Дымовая проба кладёт строку в БОЕВУЮ таблицу
+	// поднятого кластера, а не в свою: тип, снятый из каталога, производитель бы
+	// отверг, и обойти его здесь значило бы записать то, что продукт не
+	// принимает. Инвариант, выраженный в одном операторе из нескольких, — это
+	// инвариант, которого нет.
+	//
+	// Явные приведения обязательны: в списке `SELECT` тип параметра не выводится
+	// из колонки назначения, как он выводился в форме `VALUES`.
+	tag, err := a.pool.Exec(ctx,
 		`INSERT INTO kacho_iam.resource_mirror
 		   (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
-		 VALUES ($1, $2, $3, $4, $5::jsonb, now(), now())
+		 SELECT $1::text, $2::text, $3::text, $4::text, $5::jsonb, now(), now()
+		  WHERE EXISTS (
+		    SELECT 1 FROM kacho_iam.catalog_resource WHERE dotted = $1 AND live
+		  )
 		 ON CONFLICT (object_type, object_id) DO UPDATE
 		    SET parent_project_id = EXCLUDED.parent_project_id,
 		        parent_account_id = EXCLUDED.parent_account_id,
 		        labels            = EXCLUDED.labels,
 		        source_version    = now(),
 		        updated_at        = now()`,
-		objectType, objectID, parentProject, parentAccount, string(labelsJSON)); err != nil {
+		objectType, objectID, parentProject, parentAccount, string(labelsJSON))
+	if err != nil {
 		return fmt.Errorf("backfill: seed smoke mirror object %s:%s: %w", objectType, objectID, err)
+	}
+	// Ноль строк здесь означает РОВНО «тип не живой»: ветка `DO UPDATE` условия
+	// не несёт, поэтому на живом типе она применяется всегда. Отказ НАЗЫВАЕТ
+	// причину: без него дымовая проба сказала бы «объект не материализовался» —
+	// то есть обвинила бы прямой путь в том, чего он не делал.
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("backfill: seed smoke mirror object %s:%s: resource type %q "+
+			"is not a live entry of the platform resource catalog",
+			objectType, objectID, objectType)
 	}
 	return nil
 }

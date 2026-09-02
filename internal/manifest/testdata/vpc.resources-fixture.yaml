@@ -20,7 +20,7 @@ resources:
 
   - name: network
     objectType: vpc_network
-    parent: project
+    parents: [project]
     producer: derived
     verbs:
       - get
@@ -34,7 +34,7 @@ resources:
 
   - name: subnet
     objectType: vpc_subnet
-    parent: project
+    parents: [project]
     producer: derived
     # Отношение, не выводимое ни из одного действия: RPC под него нет.
     # Объявляется дословно, иначе перегенерация модели его СНИМЕТ.
@@ -53,7 +53,7 @@ resources:
 
   - name: securityGroup
     objectType: vpc_security_group
-    parent: project
+    parents: [project]
     producer: derived
     verbs:
       - get
@@ -67,13 +67,13 @@ resources:
 
   - name: routeTable
     objectType: vpc_route_table
-    parent: project
+    parents: [project]
     producer: derived
     verbs: [get, list, create, update, delete, {name: listOperations, class: list}]
 
   - name: address
     objectType: vpc_address
-    parent: project
+    parents: [project]
     producer: derived
     relations:
       - {name: use, definition: "[user, service_account] or editor"}
@@ -87,19 +87,19 @@ resources:
 
   - name: gateway
     objectType: vpc_gateway
-    parent: project
+    parents: [project]
     producer: derived
     verbs: [get, list, create, update, delete, {name: listOperations, class: list}]
 
   - name: networkInterface
     objectType: vpc_network_interface
-    parent: project
+    parents: [project]
     producer: derived
     verbs: [get, list, create, update, delete, {name: listOperations, class: list}]
 
   - name: cidrGroup
     objectType: vpc_cidr_group
-    parent: project
+    parents: [project]
     producer: derived
     verbs:
       - get
@@ -116,12 +116,16 @@ resources:
   # тип не несут — отсюда `producer: authored`.
   - name: addressPool
     objectType: vpc_address_pool
-    parent: cluster
+    parents: [cluster]
     producer: authored
-    doc: |
-      Административный ресурс с якорем на кластере: его RPC гейтятся прямо на
-      cluster:cluster_kacho_root#system_admin, поэтому пообъектного указателя на
-      него не пишет никто.
+    # Примечание несёт ЯКОРЬ — имя отношения, перед которым оно стоит в блоке:
+    # канон располагает прозу и у указателя, и у ярусов, и у действий.
+    notes:
+      - before: cluster
+        text: |
+          # Административный ресурс с якорем на кластере: его RPC гейтятся прямо на
+          # cluster:cluster_kacho_root#system_admin, поэтому пообъектного указателя на
+          # него не пишет никто.
     # Состав субъектов и набор ярусов у административного ресурса УЖЕ общего:
     # группы среди субъектов нет, яруса editor нет вовсе. Умолчание здесь
     # расширило бы доступ молча.
@@ -142,8 +146,7 @@ resources:
 
 roles:
 
-  - id: vpc.internalConsumer
-    name: Смежный модуль
+  - id: vpc.internal_consumer
     description: >
       Ходит в vpc на пути запроса: аллокация адресов, ссылки, привязка
       интерфейсов.
@@ -151,16 +154,15 @@ roles:
     rules:
       - module: vpc
         resources: [address, networkInterface, subnet]
-        verbs: [get, list]
+        classes: [get, list]
 
-  - id: vpc.addressPoolAdmin
-    name: Администратор адресного пространства
+  - id: vpc.address_pool_admin
     description: Ведёт адресные пулы облака.
     tier: {tierType: iam.account, tierId: acc000000000000000}
     rules:
       - module: vpc
         resources: [addressPool]
-        verbs: [get, list, create, update, delete]
+        classes: [get, list, create, update, delete]
 
 deprecatedVerbs:
   read:
@@ -191,7 +193,7 @@ seed:
   accessBindings:
     - subjects:
         - {type: group, name: vpc-internal-consumers}
-      roleId: vpc.internalConsumer
+      roleId: vpc.internal_consumer
       scopeType: iam.cluster
       scopeId: cluster_kacho_root
       target: allInScope

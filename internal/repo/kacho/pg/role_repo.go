@@ -324,6 +324,98 @@ func (w *roleWriter) Insert(ctx context.Context, r domain.Role) (domain.Role, er
 	return out, nil
 }
 
+// UpsertSystemRole — единственный писатель строки СИСТЕМНОЙ роли, не
+// являющийся миграцией (приёмка `roles-come-as-data-not-migrations.md` §3.1,
+// §3.5).
+//
+// # Почему отдельный оператор, а не `Insert`
+//
+// `Insert` выше системную роль произвести НЕ МОЖЕТ: `cluster_id` в его перечне
+// колонок отсутствует, а `is_system` вычисляется ровно из него
+// (`GENERATED ALWAYS AS (cluster_id IS NOT NULL) STORED`, миграция 0056). Это не
+// дефект `Insert`, а решение: путь пользовательской роли не вправе писать
+// кластерный ярус.
+//
+// # `is_system` в перечне колонок ОТСУТСТВУЕТ намеренно
+//
+// Вставка значения в вычисляемую колонку — ошибка 428C9. Ярус задаётся
+// непустым `cluster_id`, и только им.
+//
+// # Приведение — при отличии, и это свойство ОПЕРАТОРА
+//
+// Предикат отличия стоит в `WHERE` ветви `DO UPDATE`: совпало всё — строк
+// затронуто ноль, `RETURNING` пуст, вызывающий получает `changed=false`.
+// Сравнение в коде было бы software check-then-act (запрет #10).
+//
+// `labels` и `created_at` приведением НЕ трогаются: манифест их не объявляет,
+// и стирать метки арендатора значило бы объявить владение тем, чего манифест не
+// несёт.
+//
+// # Времени правки эта строка НЕ НЕСЁТ — столбца для него НЕТ
+//
+// Здесь стояло `updated_at = $7`, а столбца с таким именем у `kacho_iam.roles`
+// нет никогда: перепись DDL по всем миграциям даёт десять столбцов при создании
+// и девять операций над столбцами после, и `updated_at` среди них не значится
+// ни разу (у двенадцати ДРУГИХ таблиц схемы он есть — тот же предикат его
+// находит, значит слепоты у переписи нет). Неизвестный столбец в `ON CONFLICT
+// DO UPDATE SET` — ошибка РАЗБОРА всего оператора (`42703`), а не его ветви:
+// отказ приходил на первом же вызове, включая вставку, и применитель не записал
+// бы ни одной роли ни при каком входе.
+//
+// Соблазн вернуть строку велик, потому что `domain.Role` поле `UpdatedAt`
+// объявляет. Оно ЗДЕСЬ не производится и не читается: `roleCols` его не
+// выбирает, ни один путь чтения роли его не заполняет. Понадобится время правки
+// — заводится СТОЛБЕЦ новой миграцией (запрет #5), и только после этого строка
+// в перечне присваиваний.
+//
+// Держится это `module_role_upsert_integration_test.go`: оператор доводится до
+// настоящего сервера. Дублёр писателя (`moduleroles/apply_test.go`) перечня
+// столбцов не видит НИКОГДА — он переписывает семантику на Go, и потому был
+// зелёным при неисполнимом операторе.
+func (w *roleWriter) UpsertSystemRole(ctx context.Context, r domain.Role) (domain.Role, bool, error) {
+	permsJSON, err := json.Marshal(stringSlice(r.Permissions))
+	if err != nil {
+		return domain.Role{}, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument permissions: %s", err.Error())
+	}
+	rulesJSON, err := rulesToJSON(r.Rules)
+	if err != nil {
+		return domain.Role{}, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument rules: %s", err.Error())
+	}
+	labelsJSON, err := marshalLabels(r.Labels)
+	if err != nil {
+		return domain.Role{}, false, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
+	}
+	now := time.Now().UTC()
+	q := fmt.Sprintf(`
+		INSERT INTO roles (id, cluster_id, name, description, permissions, rules, created_at, labels)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (id) DO UPDATE
+		   SET name        = EXCLUDED.name,
+		       description = EXCLUDED.description,
+		       permissions = EXCLUDED.permissions,
+		       rules       = EXCLUDED.rules
+		 WHERE roles.name        IS DISTINCT FROM EXCLUDED.name
+		    OR roles.description IS DISTINCT FROM EXCLUDED.description
+		    OR roles.permissions IS DISTINCT FROM EXCLUDED.permissions
+		    OR roles.rules       IS DISTINCT FROM EXCLUDED.rules
+		RETURNING %s`, roleCols)
+	row := w.tx.QueryRow(ctx, q,
+		string(r.ID), string(r.ClusterID), string(r.Name), string(r.Description),
+		permsJSON, rulesJSON, now, labelsJSON,
+	)
+	out, err := scanRole(row)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		// Конфликт по первичному ключу случился, а предикат отличия оказался
+		// ложным: объявленное состояние уже стоит в строке. Это ШТАТНЫЙ исход
+		// повторного применения, а не отказ.
+		return domain.Role{}, false, nil
+	case err != nil:
+		return domain.Role{}, false, mapErr(err, "", string(r.Name))
+	}
+	return out, true, nil
+}
+
 // Update — UPDATE на mutable полях. Custom-role: name (с UNIQUE check),
 // description, permissions. System-role caller отвергает на use-case-уровне.
 func (w *roleWriter) Update(ctx context.Context, r domain.Role, updateMask []string) (domain.Role, error) {
@@ -395,7 +487,15 @@ func roleUpdateSet(r domain.Role, updateMask []string) ([]string, []any, error) 
 	// `rules` is the authored mutable field; when it is set, the use-case has
 	// already recompiled `permissions` from the new rules and updates BOTH in the
 	// same writer-tx so the stored compiled set never drifts from the authority.
-	// `updated_at` is bumped on every applied mutation.
+	// Времени правки среди присваиваний НЕТ, и это не пропуск: столбца
+	// `updated_at` у `kacho_iam.roles` не существует (перепись DDL по всем
+	// миграциям — десять столбцов при создании, девять операций после, и
+	// `updated_at` среди них ни разу). Здесь стояло обратное — «`updated_at` is
+	// bumped on every applied mutation», — и это ровно тот комментарий, по
+	// которому следующий читатель чинит КОД под неверный текст: присваивание
+	// `updated_at` в соседнем операторе (`UpsertSystemRole`) появилось так и
+	// сделало его неразбираемым целиком (`42703`), то есть неисполнимым при
+	// любом входе.
 	mutableFields := map[string]bool{"name": true, "description": true, "permissions": true, "rules": true, "labels": true}
 	apply := map[string]bool{}
 	if len(updateMask) == 0 {

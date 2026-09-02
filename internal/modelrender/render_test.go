@@ -36,7 +36,7 @@ func canonBlock(t *testing.T, typ string) string {
 // умолчательные субъекты и ярусы.
 func gatewayResource() manifest.Resource {
 	return manifest.Resource{
-		Name: "gateway", ObjectType: "vpc_gateway", Parent: "project", Producer: "derived",
+		Name: "gateway", ObjectType: "vpc_gateway", Parents: []manifest.Parent{{Name: "project", Type: "project"}}, Producer: "derived",
 		Verbs: []manifest.Verb{{Name: "get"}, {Name: "list"}, {Name: "update"}, {Name: "delete"}},
 	}
 }
@@ -79,7 +79,7 @@ func TestB05TheTrailingNewlineIsAByteToo(t *testing.T) {
 // (снято #1115). Черновик был зелен ровно потому, что сверялся со снимком.
 func TestB02TheRetiredRelationDoesNotComeBack(t *testing.T) {
 	got, err := modelrender.Render(manifest.Resource{
-		Name: "subnet", ObjectType: "vpc_subnet", Parent: "project", Producer: "derived",
+		Name: "subnet", ObjectType: "vpc_subnet", Parents: []manifest.Parent{{Name: "project", Type: "project"}}, Producer: "derived",
 		Verbs: []manifest.Verb{{Name: "get"}, {Name: "list"}, {Name: "update"}, {Name: "delete"}},
 	})
 	if err != nil {
@@ -93,15 +93,19 @@ func TestB02TheRetiredRelationDoesNotComeBack(t *testing.T) {
 	}
 }
 
-// TestB03TheDocIsReproducedVerbatim — авторский комментарий стоит внутри блока
+// TestB03TheNoteIsReproducedVerbatim — авторское примечание стоит внутри блока
 // дословно, с тем же отступом и тем же порядком строк.
 //
 // Внутриблочный комментарий канона несёт самоистекающие маркеры и ссылки на
 // задачи. Потерять его перегенерацией значило бы снять условие, о котором никто
-// не решал.
-func TestB03TheDocIsReproducedVerbatim(t *testing.T) {
+// не решал. Знак комментария ставит РЕНДЕР: автор пишет прозу, у которой
+// грамматики нет.
+func TestB03TheNoteIsReproducedVerbatim(t *testing.T) {
 	r := gatewayResource()
-	r.Doc = "# первая строка разбора\n#\n# третья строка, со ссылкой #1089"
+	r.Notes = []manifest.Note{{
+		Before: "project",
+		Text:   "# первая строка разбора\n#\n# третья строка, со ссылкой #1089",
+	}}
 	got, err := modelrender.Render(r)
 	if err != nil {
 		t.Fatalf("рендер отказал: %v", err)
@@ -120,11 +124,18 @@ func TestB03TheDocIsReproducedVerbatim(t *testing.T) {
 	}
 }
 
-// TestC01RemovingTheDocIsSeenByTheComparison — инъекция C-01: снятый `doc` даёт
-// расхождение, и сторона названа.
-func TestC01RemovingTheDocIsSeenByTheComparison(t *testing.T) {
+// TestC04RemovingTheNoteIsSeenByTheComparison — инъекция C-04 приёмки о доме
+// прозы: снятое примечание даёт побайтовое расхождение.
+//
+// Заменяет собой инъекцию C-01 задачи #1089, снимавшую ключ `doc`. Ключа больше
+// нет, и старая инъекция ПОТЕРЯЛА БЫ СВОЙ ПРЕДМЕТ: вход, на котором она находит
+// нарушение, перестал быть представимым, а проверка при этом молчала бы и
+// выглядела исправной (`testing.md` §«Гейт на класс», п. 9). Поэтому она не
+// оставлена «на всякий случай», а переведена на примечание — тем же изменением,
+// каким снят ключ.
+func TestC04RemovingTheNoteIsSeenByTheComparison(t *testing.T) {
 	withDoc := gatewayResource()
-	withDoc.Doc = "# разбор, который сняли"
+	withDoc.Notes = []manifest.Note{{Before: "project", Text: "# разбор, который сняли"}}
 	full, err := modelrender.Render(withDoc)
 	if err != nil {
 		t.Fatalf("рендер отказал: %v", err)
@@ -134,7 +145,7 @@ func TestC01RemovingTheDocIsSeenByTheComparison(t *testing.T) {
 		t.Fatalf("рендер отказал: %v", err)
 	}
 	if string(full) == string(stripped) {
-		t.Fatalf("снятие `doc` рендер не изменило — комментарий не порождается вовсе")
+		t.Fatalf("снятие примечания рендер не изменило — комментарий не порождается вовсе")
 	}
 }
 
@@ -186,9 +197,9 @@ func TestC03ReturningARetiredTierIsRenderedAndThusDiverges(t *testing.T) {
 // у групп молча.
 func TestTiersNarrowTiersAndNeverTheVerbs(t *testing.T) {
 	got, err := modelrender.Render(manifest.Resource{
-		Name: "addressPool", ObjectType: "vpc_address_pool", Parent: "cluster", Producer: "authored",
+		Name: "addressPool", ObjectType: "vpc_address_pool", Parents: []manifest.Parent{{Name: "cluster", Type: "cluster"}}, Producer: "authored",
 		Subjects: []string{"user", "service_account"},
-		Tiers:    []string{"admin", "viewer"},
+		Tiers:    []manifest.ResourceTier{{Name: "admin"}, {Name: "viewer"}},
 		Verbs:    []manifest.Verb{{Name: "get"}, {Name: "list"}, {Name: "update"}, {Name: "delete"}},
 	})
 	if err != nil {
@@ -212,7 +223,7 @@ func TestTiersNarrowTiersAndNeverTheVerbs(t *testing.T) {
 // TestRenderRefusesAResourceWithoutAnObjectType — рендерить нечего: отказ, а не
 // блок с пустым именем типа.
 func TestRenderRefusesAResourceWithoutAnObjectType(t *testing.T) {
-	if _, err := modelrender.Render(manifest.Resource{Name: "x", Parent: "project"}); err == nil {
+	if _, err := modelrender.Render(manifest.Resource{Name: "x", Parents: []manifest.Parent{{Name: "project", Type: "project"}}}); err == nil {
 		t.Fatalf("ресурс без типа объекта отрендерен")
 	}
 	if _, err := modelrender.Render(manifest.Resource{Name: "x", ObjectType: "vpc_network"}); err == nil {

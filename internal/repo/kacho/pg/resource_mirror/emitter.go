@@ -39,6 +39,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
 // Row — the tenant-facing projection mirrored for one owner object. Labels nil
@@ -153,6 +154,12 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	// $5::jsonb` is jsonb equality — key order and whitespace do not make a projection
 	// "different". An unversioned producer ('-infinity') never satisfies `< $6` and so
 	// never reaches this branch: it supplies no proof and gets no exemption.
+	//
+	// УСЛОВИЕ ПРИЁМА СТОИТ И ЗДЕСЬ. Полоса срабатывает на СУЩЕСТВУЮЩЕЙ строке и
+	// вставки не делает, поэтому без своего `EXISTS` она давала бы обход: тип
+	// снят с платформы, а регистрация им проходит — только потому, что строка
+	// уже лежит. Ноль затронутых строк здесь ничего не скрывает: вердикт о
+	// каталоге выносит оператор (2), и он различает «не принято» и «не новее».
 	tag, err := tx.Exec(ctx,
 		`UPDATE kacho_iam.resource_mirror
 		    SET source_version = $6, updated_at = now()
@@ -161,7 +168,9 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 		    AND parent_project_id = $3
 		    AND parent_account_id = $4
 		    AND labels            = $5::jsonb
-		    AND source_version    < $6`,
+		    AND source_version    < $6
+		    AND EXISTS (SELECT 1 FROM kacho_iam.catalog_resource cr
+		                 WHERE cr.dotted = $1 AND cr.live)`,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version,
 	)
 	if err != nil {
@@ -170,26 +179,76 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	if tag.RowsAffected() > 0 {
 		return Outcome{Applied: true, ProjectionUnchanged: true}, nil
 	}
-	// (2) INSERT-OR-SUPERSEDE. Either the row is new, or the incoming projection differs
-	// from the stored one, or the version is not newer (0 rows — a redelivery the
-	// monotonic guard already recognised).
-	tag, err = tx.Exec(ctx,
-		`INSERT INTO kacho_iam.resource_mirror
-		   (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
-		 VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
-		 ON CONFLICT (object_type, object_id) DO UPDATE
-		    SET parent_project_id = EXCLUDED.parent_project_id,
-		        parent_account_id = EXCLUDED.parent_account_id,
-		        labels            = EXCLUDED.labels,
-		        source_version    = EXCLUDED.source_version,
-		        updated_at        = now()
-		  WHERE resource_mirror.source_version < EXCLUDED.source_version`,
+	// (2) INSERT-OR-SUPERSEDE ПОД УСЛОВИЕМ ПРИЁМА. Either the row is new, or the
+	// incoming projection differs from the stored one, or the version is not newer
+	// (0 rows — a redelivery the monotonic guard already recognised).
+	//
+	// # ДВА ВЕРДИКТА ОДНИМ ОПЕРАТОРОМ, И ВТОРОЙ НУЖЕН ИМЕННО ЗДЕСЬ
+	//
+	// «Тип не принят» и «редоставка не новее» дают ОДИНАКОВЫЙ ноль затронутых
+	// строк. Вызывающий читает этот ноль как «делать нечего» и возвращает УСПЕХ —
+	// то есть голое `WHERE EXISTS` превратило бы отказ в тихое согласие, ровно на
+	// том входе, ради которого условие и заводится. Поэтому оператор возвращает
+	// ОБА факта: принадлежность типа живому каталогу и число применённых строк.
+	//
+	// # ПОЧЕМУ ЭТО НЕ ЧТЕНИЕ-И-ДЕЙСТВИЕ (запрет #10)
+	//
+	// Сверка и запись — ОДИН оператор в одном снимке: между «спросил» и «вставил»
+	// нет окна, в которое поместилось бы снятие типа. Читающая ветвь общая для
+	// обоих вердиктов, поэтому разойтись они не могут by construction.
+	//
+	// # ПОЧЕМУ НЕ ВНЕШНИЙ КЛЮЧ
+	//
+	// Ключ на `(dotted, live)` выражал бы ту же сверку постоянным инвариантом — и
+	// тем самым запретил бы СНЯТИЕ типа, пока у арендатора есть хоть один ресурс
+	// этого типа (`ON UPDATE NO ACTION` отверг бы перевод строки каталога в
+	// неживую), а каскад унёс бы чужие данные. Условие приёма и постоянный
+	// инвариант здесь — разные утверждения: регистрировать новым типом нельзя,
+	// а уже зарегистрированное обязано пережить снятие (зеркало терпит висячую
+	// ссылку by design). Проба:
+	// TestResourceMirror_RetiredTypeKeepsItsAlreadyRegisteredRows.
+	//
+	// Явные приведения у параметров обязательны: в списке `SELECT` тип параметра
+	// не выводится из колонки назначения, как он выводился в форме `VALUES`.
+	var typeLive bool
+	var appliedRows int64
+	if err = tx.QueryRow(ctx,
+		`WITH live_type AS (
+		     SELECT 1
+		       FROM kacho_iam.catalog_resource
+		      WHERE dotted = $1 AND live
+		 ), applied AS (
+		     INSERT INTO kacho_iam.resource_mirror
+		       (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
+		     SELECT $1::text, $2::text, $3::text, $4::text, $5::jsonb, $6::timestamptz, now()
+		      WHERE EXISTS (SELECT 1 FROM live_type)
+		     ON CONFLICT (object_type, object_id) DO UPDATE
+		        SET parent_project_id = EXCLUDED.parent_project_id,
+		            parent_account_id = EXCLUDED.parent_account_id,
+		            labels            = EXCLUDED.labels,
+		            source_version    = EXCLUDED.source_version,
+		            updated_at        = now()
+		      WHERE resource_mirror.source_version < EXCLUDED.source_version
+		     RETURNING 1
+		 )
+		 SELECT EXISTS (SELECT 1 FROM live_type), (SELECT count(*) FROM applied)`,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version,
-	)
-	if err != nil {
+	).Scan(&typeLive, &appliedRows); err != nil {
 		return Outcome{}, fmt.Errorf("resource_mirror: upsert: %w", err)
 	}
-	applied := tag.RowsAffected() > 0
+	if !typeLive {
+		// Отказ НАЗЫВАЕТ поле и правило: без имени типа вызывающий не знает, что
+		// чинить, а «invalid object» одинаково звучало бы и на грамматике.
+		// Наименование каталога здесь не является оракулом: перечень грантуемых
+		// типов платформа отдаёт арендатору сама (PermissionCatalogService), то
+		// есть отказ не сообщает ничего, чего вызывающий не мог бы прочесть. Чей
+		// это тип — вопрос ДРУГОЙ полосы (правило приёма), и она по-прежнему
+		// отвечает отказом без причины.
+		return Outcome{}, iamerr.Wrapf(iamerr.ErrUnknownResourceType,
+			"resource type %q is not a live entry of the platform resource catalog",
+			row.ObjectType)
+	}
+	applied := appliedRows > 0
 	if applied {
 		if err := upsertParentEdges(ctx, tx, row, version); err != nil {
 			return Outcome{}, err
@@ -314,6 +373,16 @@ func splitObjectRef(ref string) (typ, id string, ok bool) {
 // version together), so a mixed versioned-register / legacy-delete window exists only
 // transiently during rollout and degrades gracefully. Same atomicity contract
 // as UpsertTx.
+//
+// # СНЯТИЕ КАТАЛОГ НЕ СПРАШИВАЕТ, И ЭТО РЕШЕНИЕ, А НЕ ПРОПУСК
+//
+// UpsertTx требует у типа живую строку каталога; здесь такого условия нет
+// намеренно. Условие приёма связывает ВХОД, а снятие входом не является: оно
+// убирает то, что уже лежит. Спроси мы каталог и здесь — ресурс, чей тип сняли
+// с платформы после его регистрации, стал бы НЕудаляемым: снять его было бы
+// нечем, а строка зеркала продолжала бы участвовать в подборе по признакам.
+// Отказ на снятии дороже отказа на приёме и в очереди потребителя: невыполнимое
+// снятие означает право, которое не отзывается.
 func DeleteTx(ctx context.Context, tx pgx.Tx, objectType, objectID string, tombstone time.Time) error {
 	if tx == nil {
 		return fmt.Errorf("resource_mirror: tx must not be nil")

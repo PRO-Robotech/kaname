@@ -130,7 +130,7 @@ func TestMODMR17DeprecatedClassIsCheckedAgainstTheSameClosedSet(t *testing.T) {
 // находка, а не выбор в пользу одного из них.
 func TestMODMR18AVerbIsNotBothDeprecatedAndLive(t *testing.T) {
 	base := "apiVersion: iam/v1\nmodule: vpc\nresources:\n" +
-		"  - name: network\n    objectType: vpc_network\n    parent: project\n    producer: derived\n" +
+		"  - name: network\n    objectType: vpc_network\n    parents: [project]\n    producer: derived\n" +
 		"    verbs: [get, list]\n" +
 		"deprecatedVerbs:\n  %s:\n" + deprecatedAllKeys
 

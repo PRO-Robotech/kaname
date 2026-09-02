@@ -11,6 +11,7 @@ package access_binding
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
@@ -303,6 +304,13 @@ func (w *fakeRoleWtr) ReplaceRoleVerbs(context.Context, domain.RoleID, []domain.
 
 // ReplaceRuleRefs — ТРЕТЬЯ сторона того же правила (kacho#1030). Дублёр умеет и
 // её по тому же доводу: не умеющий делает невидимым путь, ради которого стоит.
+// UpsertSystemRole — писатель СИСТЕМНОЙ строки. Дублёр её не производит: путь
+// этих проб к кластерному ярусу не ведёт, и молча вернуть «записано» значило бы
+// сделать дублёра снисходительнее продукта.
+func (w *fakeRoleWtr) UpsertSystemRole(context.Context, domain.Role) (domain.Role, bool, error) {
+	return domain.Role{}, false, errors.New("дублёр системную роль не пишет")
+}
+
 func (w *fakeRoleWtr) ReplaceRuleRefs(context.Context, domain.RoleID, []domain.RoleRuleRef) error {
 	return nil
 }

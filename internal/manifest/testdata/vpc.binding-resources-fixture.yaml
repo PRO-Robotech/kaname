@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: BUSL-1.1
+#
+# Фикстура проб: выдача с ПЕРЕЧНЕМ ОБЪЕКТОВ (`target: resources`).
+#
+# Заведена затем, что три оси требовательности схемы —
+# `seed.accessBindings[].resources` и пара ключей его элемента — в остальных
+# двух фикстурах ВХОДА НЕ ИМЕЮТ: обе выдают на весь ярус (`allInScope`), и
+# ветка перечня в них не встречается ни разу. Перепись честно называла их
+# третьей категорией; третья категория не вердикт, поэтому вход произведён.
+#
+# Имя файла — НЕ `manifest.yaml`: проверка дерева читает файлы ровно с этим
+# базовым именем, и фикстура, названная так, судилась бы как настоящий манифест.
+
+apiVersion: iam/v1
+module: vpc
+
+seed:
+
+  groups:
+    - name: vpc-pool-operators
+      account: system
+      description: >
+        Операторы, которым выдан доступ на ПОИМЕНОВАННЫЕ адресные пулы, а не на
+        весь ярус: перечень объектов и есть предмет этой фикстуры.
+
+  accessBindings:
+    - subjects:
+        - {type: group, name: vpc-pool-operators}
+      roleId: vpc.addressPoolAdmin
+      scopeType: iam.cluster
+      scopeId: cluster_kacho_root
+      target: resources
+      resources:
+        - {type: vpc.addressPool, id: apl000000000000001}
+        - {type: vpc.addressPool, id: apl000000000000002}

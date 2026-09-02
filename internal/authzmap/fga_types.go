@@ -498,13 +498,14 @@ var objectTypes = map[string]string{
 	"loadbalancer.listeners":            "nlb_listener",
 
 	// registry (kacho-registry) — object-prefix `registry_` == service name, so
-	// no moduleObjectDomain mapping is required. `registries` is the namespace
+	// the module-name vocabulary (pkg/platformmodules) declares the two the same.
+	// `registries` is the namespace
 	// resource; `repositories` is the per-repo authz object (docker pull/push).
 	"registry.registries":   "registry_registry",
 	"registry.repositories": "registry_repository",
 
 	// storage (kacho-storage) — object-prefix `storage_` == service name (like
-	// registry), so no moduleObjectDomain mapping is required. Volume / Snapshot /
+	// registry), so the vocabulary declares the two the same. Volume / Snapshot /
 	// Image are per-object verb-bearing authz targets: their Get/Update/Delete
 	// scope_extractor anchors on the object itself ({storage_volume,volume_id} etc.),
 	// so RegisterResource mirrors them here → the reconciler materializes per-object

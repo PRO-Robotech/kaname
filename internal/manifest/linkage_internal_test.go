@@ -45,18 +45,16 @@ func mustReadSeedFixture(t *testing.T) string {
 // неё чужой предмет значило бы менять вход у всех.
 const declaredRolesSection = `
 roles:
-  - id: vpc.internalConsumer
-    name: Смежный модуль
+  - id: vpc.internal_consumer
     description: Ходит в vpc на пути запроса — аллокация адресов и ссылки.
     tier: {tierType: iam.project, tierId: prj000000000000000}
     rules:
-      - {module: vpc, resources: [address], verbs: [get, list]}
-  - id: vpc.addressPoolAdmin
-    name: Администратор адресного пространства
+      - {module: vpc, resources: [address], classes: [get, list]}
+  - id: vpc.address_pool_admin
     description: Ведёт адресные пулы облака.
     tier: {tierType: iam.account, tierId: acc000000000000000}
     rules:
-      - {module: vpc, resources: [addressPool], verbs: [get, list]}
+      - {module: vpc, resources: [addressPool], classes: [get, list]}
 `
 
 // fixtureWithDeclaredRoles — фикстура посева ПЛЮС раздел ролей: документ, на
@@ -75,10 +73,10 @@ func fixtureWithDeclaredRoles(t *testing.T) string {
 // сказать нечего. Свойство держит валидатор.
 func TestMODMF13RoleIDOutsideDeclaredRolesIsRefused(t *testing.T) {
 	doc := fixtureWithDeclaredRoles(t)
-	if n := strings.Count(doc, "roleId: vpc.addressPoolAdmin"); n != 1 {
+	if n := strings.Count(doc, "roleId: vpc.address_pool_admin"); n != 1 {
 		t.Fatalf("образец встречается %d раз, инъекция требует ровно одного", n)
 	}
-	broken := strings.Replace(doc, "roleId: vpc.addressPoolAdmin", "roleId: vpc.nosuchRole", 1)
+	broken := strings.Replace(doc, "roleId: vpc.address_pool_admin", "roleId: vpc.nosuchRole", 1)
 
 	_, err := Load([]byte(broken))
 	if err == nil {
@@ -94,7 +92,7 @@ func TestMODMF13RoleIDOutsideDeclaredRolesIsRefused(t *testing.T) {
 		}
 	}
 	// Отказ обязан назвать и то, ЧЕМ он чинится: перечень объявленных ролей.
-	if !strings.Contains(msg, "vpc.internalConsumer") {
+	if !strings.Contains(msg, "vpc.internal_consumer") {
 		t.Errorf("отказ не называет объявленных ролей: %s", msg)
 	}
 

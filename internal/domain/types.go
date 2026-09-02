@@ -123,9 +123,28 @@ var validResourceTypes = map[ResourceType]struct{}{
 // Идентификатор роли остаётся своим и формой имени НЕ судится: `roles/vpc.admin`
 // — то, на что ссылаются привязки, а не косметическая метка (записанное решение
 // владельца, #715).
+// CustomRoleNameForm — форма имени ПОЛЬЗОВАТЕЛЬСКОЙ роли. Зеркало ограничения
+// таблицы `roles_custom_name_check` (`0056_role_definition_tier.sql`,
+// применённая миграция, ban #5).
+const CustomRoleNameForm = `^[a-z][a-z0-9_]{0,40}$`
+
+// SystemRoleNameForm — форма имени СИСТЕМНОЙ роли. Зеркало ограничения таблицы
+// `roles_system_name_check` того же файла: нижний регистр, дефис в первом
+// сегменте, подчёркивание в сегментах после первого, не более трёх сегментов.
+//
+// Здесь стояло `^roles/[a-z]+\.[a-z]+$`, и этой форме не удовлетворяла НИ ОДНА
+// живая строка: предикат `grep -c "'roles/"` по каталогу миграций даёт ноль во
+// всех файлах, а имена продукта записаны как `vpc.network.admin`. То есть
+// `Role.Validate()` отвергал каждую системную роль платформы — и покраснеть это
+// не могло, потому что системную роль в Go до задачи #1824 никто не строил.
+//
+// Правило пережило свой предмет молча; сегодня оно зеркалит ограничение,
+// которое действительно судит записываемую строку.
+const SystemRoleNameForm = `^[a-z][-a-z0-9]*(\.[a-z][a-z0-9_]*){0,2}$`
+
 var (
-	roleNameCustomRe    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,40}$`)
-	roleNameSystemRe    = regexp.MustCompile(`^roles/[a-z]+\.[a-z]+$`)
+	roleNameCustomRe    = regexp.MustCompile(CustomRoleNameForm)
+	roleNameSystemRe    = regexp.MustCompile(SystemRoleNameForm)
 	emailRe             = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 	labelKeyRe          = regexp.MustCompile(`^[a-z][-_./@a-z0-9]{0,62}$`)
 	permissionElementRe = regexp.MustCompile(`^(\*|[a-z][a-z0-9-]*)\.(\*|[a-z][a-zA-Z0-9_-]*)\.(\*|[a-zA-Z0-9_-]+)\.(\*|[a-z][a-zA-Z0-9_-]*)$`)
@@ -146,15 +165,39 @@ func (n SvcAccountName) Validate() error { return validateResourceName("name", s
 // Ветка снята: пустое заменяется умолчанием ДО записи, в use-case выпуска.
 func (n OAuthClientName) Validate() error { return validateResourceName("name", string(n)) }
 
-// RoleName — two forms: custom (without `roles/` prefix) or system
-// (`roles/<module>.<role>`). Both are accepted here; the use-case layer
-// constrains context (Create custom role accepts only the custom form;
-// system roles come from seed migrations only).
+// Validate — форма имени роли БЕЗ различения яруса: годна любая из двух.
+// Оставлена для вызывающих, которым ярус неизвестен; сама сущность судится
+// `ValidateAtTier`, потому что ограничений в таблице ДВА и каждое условлено
+// вычисляемым `is_system`.
 func (n RoleName) Validate() error {
 	if roleNameCustomRe.MatchString(string(n)) || roleNameSystemRe.MatchString(string(n)) {
 		return nil
 	}
-	return fmt.Errorf("Illegal argument name: must match ^[a-z][a-z0-9_]{0,40}$ (custom) or ^roles/[a-z]+\\.[a-z]+$ (system)")
+	return fmt.Errorf("Illegal argument name: must match %s (custom) or %s (system)",
+		CustomRoleNameForm, SystemRoleNameForm)
+}
+
+// ValidateAtTier — форма имени роли ПО ЯРУСУ, зеркало двух ограничений таблицы.
+//
+// Различать обязательно: в базе стоят ДВА условленных ограничения
+// (`roles_custom_name_check` под `is_system OR …` и `roles_system_name_check`
+// под `NOT is_system OR …`), и правило, не различающее ярусов, расходится с
+// ними в обе стороны сразу — принимает точечное имя у пользовательской роли и
+// отвергает его у системной. Отказ тогда приезжает от базы (SQLSTATE 23514) без
+// имени поля и без координаты.
+func (n RoleName) ValidateAtTier(isSystem bool) error {
+	if isSystem {
+		if roleNameSystemRe.MatchString(string(n)) {
+			return nil
+		}
+		return fmt.Errorf("Illegal argument name: system role name must match %s "+
+			"(constraint roles_system_name_check)", SystemRoleNameForm)
+	}
+	if roleNameCustomRe.MatchString(string(n)) {
+		return nil
+	}
+	return fmt.Errorf("Illegal argument name: custom role name must match %s "+
+		"(constraint roles_custom_name_check)", CustomRoleNameForm)
 }
 
 func (d DisplayName) Validate() error {

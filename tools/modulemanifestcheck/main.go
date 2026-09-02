@@ -213,6 +213,18 @@ func checkRights(root string, paths []string) int {
 		// же связки.
 		rep := roleexport.Check(facts, m, actions)
 		fmt.Printf("  права ролей %s: %s\n", rel, rep.Summary())
+		// Соединение «действие раздела ↔ запись каталога» судится ЗДЕСЬ, а не
+		// только пробой пакета. Пока вызова не было, обещание соседней
+		// диагностики («судит несопоставленное действие сверка соединения, и
+		// там это ОТКАЗ») было ложным: у `CheckActionLinkage` не было НИ ОДНОГО
+		// вызывающего в прод-коде, и направление «каталог → раздел» не
+		// исполнялось нигде.
+		lfaults, lcensus := roleexport.CheckActionLinkage(m, actions)
+		fmt.Printf("  соединение %s: %s\n", rel, lcensus.Summary())
+		for _, f := range lfaults {
+			fmt.Fprintf(os.Stderr, "НАХОДКА: %s: %s\n", rel, f)
+			code = manifest.CheckFailed
+		}
 		// Пометки печатаются в ВЫВОД, а не в поток ошибок, и вердикта не
 		// меняют: состояние, за которое автор манифеста не отвечает, обязано
 		// быть названо и обязано быть отличимо от находки.

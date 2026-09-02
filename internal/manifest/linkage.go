@@ -70,6 +70,15 @@ var (
 	ErrJoinReasonMissing = errors.New("manifest: join does not say why")
 	// ErrRefNotAPair — сторона вступления адресована не парой (аккаунт, имя).
 	ErrRefNotAPair = errors.New("manifest: reference is not a pair (account, name)")
+	// ErrBindingIncomplete — выдача не назвала, ЧТО она выдаёт, ГДЕ и НА ЧТО.
+	// Схема требует все четыре ключа (`roleId`, `scopeType`, `scopeId`,
+	// `target`); без любого из них выдача неисполнима, а не «частична».
+	ErrBindingIncomplete = errors.New("manifest: accessBinding is incomplete")
+	// ErrSeededSubjectIncomplete — заведомая запись посева не назвала себя
+	// целиком: имя, аккаунт либо назначение. Отдельный вид от связности:
+	// связность спрашивает, есть ли у названного предмет, а здесь предмет ещё
+	// не назван.
+	ErrSeededSubjectIncomplete = errors.New("manifest: seeded subject is incomplete")
 )
 
 // minJoinReasonRunes — предел длины причины вступления, объявленный схемой
@@ -80,6 +89,52 @@ var (
 // бы вдвое более короткую причину, чем латинская. Расхождение тихое — оба
 // варианта выглядят работающими на английском входе.
 const minJoinReasonRunes = 12
+
+// minProseRunes — предел длины прозы, которую манифест АВТОРствует: описание
+// группы, описание служебной записи, причина устаревания глагола и предикат его
+// снятия. Объявлен схемой (`minLength: 16`) у всех четырёх сразу.
+//
+// # Назначения роли здесь БОЛЬШЕ НЕТ, и это не послабление, а другой предмет
+//
+// Пятым полем стояло `roles[].description`, и предел был для него негоден по
+// ОБЕИМ причинам, ради которых предел вообще заводят (#1904). Разбор и
+// доказательство живым набором — `roles.go` §«Назначение роли судится
+// НАЛИЧИЕМ»; здесь названо только то, чем эти четыре от него отличаются:
+// каждое из них манифест ПИШЕТ ВПЕРВЫЕ. Группы и служебной записи, о которых
+// идёт речь, до применения манифеста не существует, у глагола нет ни причины,
+// ни предиката снятия, пока их не назвали. Автору ничто не мешает написать их
+// как следует, и предел поднимает пол.
+//
+// У назначения роли писатель ПРЕДШЕСТВУЮЩИЙ — применённая миграция, — а
+// применитель кладёт объявленное ДОСЛОВНО поверх живой строки. Манифест там не
+// авторствует, а переписывает, и предел не поднимает пол, а запрещает переписать.
+//
+// # Почему предел повторён здесь, а не выведен из схемы
+//
+// Схема — файл JSON за границей `internal`, и разбирать его на пути загрузки
+// значило бы поставить чтение чужого документа в тракт, который обязан работать
+// без него. Расхождение при этом невозможно МОЛЧА: перепись требовательности
+// (`requiredness_internal_test.go`) портит вход РОВНО ДО объявленной схемой
+// границы и требует отказа, поэтому смена предела в схеме краснит гейт в тот же
+// прогон. Два места об одном предмете здесь держит проверка, а не обещание.
+//
+// # Почему предел вообще есть, а не «лишь бы непусто»
+//
+// Пустое описание и описание в один знак различаются только на вид: оба не
+// отвечают на вопрос, ради которого поле заведено, — выдавать ли эту роль,
+// зачем эта группа, под что эта личность. Предел не делает прозу хорошей, он
+// отсекает отписку, поставленную ради прохождения проверки.
+const minProseRunes = 16
+
+// proseShorterThan — проза короче предела, считая ЗНАКАМИ, а не байтами.
+//
+// Знаками, потому что проза здесь пишется по-русски, кириллический знак весит
+// два байта, и проверка по `len` пропустила бы вдвое более короткий текст, чем
+// латинский. Расхождение тихое: на английском входе оба варианта выглядят
+// работающими. Тот же довод уже записан у причины вступления.
+func proseShorterThan(s string, bound int) bool {
+	return utf8.RuneCountInString(strings.TrimSpace(s)) < bound
+}
 
 // seedableSubjectTypes — виды субъектов, которые посев модуля ЗАВОДИТ.
 //
@@ -275,8 +330,31 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs) (LinkageCen
 	grantedGroups := map[string]struct{}{}
 
 	for i, b := range seed.AccessBindings {
+		// Полнота выдачи судится ДО связности, и порядок здесь содержателен:
+		// «роль не объявлена» о ПУСТОМ идентификаторе отправило бы автора
+		// сверять перечень ролей, тогда как роль он просто не назвал. Отказ
+		// обязан называть поле и правило, а не ближайшее следствие.
+		for _, need := range []struct{ key, value, why string }{
+			{"roleId", b.RoleID, "выдача не сказала, ЧТО она выдаёт"},
+			{"scopeType", b.ScopeType, "выдача не сказала, на каком ярусе она действует"},
+			{"scopeId", b.ScopeID, "выдача не сказала, на каком объекте яруса она действует"},
+			{"target", b.Target, "выдача не сказала, распространяется ли она на весь ярус либо на перечень объектов"},
+		} {
+			if strings.TrimSpace(need.value) != "" {
+				continue
+			}
+			faults = append(faults, linkFault{
+				kind:  ErrBindingIncomplete,
+				coord: locate(doc, "seed", "accessBindings", i),
+				detail: fmt.Sprintf("seed.accessBindings[%d].%s: ключ не назван — %s",
+					i, need.key, need.why),
+			})
+		}
+
+		faults = append(faults, validateBindingTarget(doc, i, b, bindingResourcesDeclared(doc, i))...)
+
 		census.RoleRefsRead++
-		if roles.declared {
+		if roles.declared && b.RoleID != "" {
 			census.RoleRefsChecked++
 			if !roles.has(b.RoleID) {
 				faults = append(faults, linkFault{
@@ -322,6 +400,18 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs) (LinkageCen
 		}
 	}
 
+	for i, sa := range seed.ServiceAccounts {
+		faults = append(faults, validateSeededProse(doc, "serviceAccounts", i,
+			sa.Name, sa.Account, sa.Description,
+			"под что ИМЕННО эта личность модуля")...)
+	}
+
+	for i, g := range seed.Groups {
+		faults = append(faults, validateSeededProse(doc, "groups", i,
+			g.Name, g.Account, g.Description,
+			"кого эта группа собирает и зачем")...)
+	}
+
 	for i, g := range seed.Groups {
 		if _, ok := grantedGroups[g.Name]; ok {
 			continue
@@ -339,6 +429,119 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs) (LinkageCen
 		faults = append(faults, validateJoin(doc, i, j, seededAccounts)...)
 	}
 	return census, faults
+}
+
+// Виды выдачи по охвату. Перечень закрыт схемой (`target.enum`); здесь названы
+// оба, потому что правило о перечне объектов зависит от того, КОТОРЫЙ выбран.
+const (
+	bindingTargetAllInScope = "allInScope"
+	bindingTargetResources  = "resources"
+)
+
+// bindingResourcesDeclared — назван ли ключ `resources` у выдачи В ДОКУМЕНТЕ.
+//
+// Состояний ТРИ, а не два, и различает их присутствие самого ключа: «не назван»
+// значит «выдача на весь ярус», «назван и пуст» — «автор сказал, что объектов
+// нет», и тогда выдача не покрывает НИ ОДНОГО объекта при действующей на вид
+// привязке. Схлопни их в одно — и правило замолчит ровно там, где автор ошибся.
+// Тот же довод, по которому перечень ролей читается из разобранного документа.
+func bindingResourcesDeclared(doc *yaml.Node, i int) bool {
+	seed := mapValue(doc, "seed")
+	if seed == nil {
+		return false
+	}
+	return mapValue(seqItem(mapValue(seed, "accessBindings"), i), "resources") != nil
+}
+
+// validateBindingTarget — охват выдачи и перечень объектов согласованы, а сам
+// перечень назвал каждый объект парой (тип, идентификатор).
+//
+// Правило ОДНО на оба вида охвата намеренно: «перечень обязателен при
+// `resources`» и «перечень не читается при `allInScope`» суть две половины
+// одного утверждения, и разведённые по разным местам они разошлись бы на первом
+// же уточнении — тот самый класс «два правила об одном поле».
+func validateBindingTarget(doc *yaml.Node, i int, b AccessBinding, declared bool) []error {
+	var faults []error
+	switch {
+	case declared && len(b.Resources) == 0:
+		faults = append(faults, linkFault{
+			kind:  ErrBindingIncomplete,
+			coord: locate(doc, "seed", "accessBindings", i, "resources"),
+			detail: fmt.Sprintf("seed.accessBindings[%d].resources: перечень назван и пуст — "+
+				"выдача не покрывает НИ ОДНОГО объекта; привязка при этом создаётся и выглядит "+
+				"действующей, а доступа не даёт", i),
+		})
+	case b.Target == bindingTargetResources && !declared:
+		faults = append(faults, linkFault{
+			kind:  ErrBindingIncomplete,
+			coord: locate(doc, "seed", "accessBindings", i, "target"),
+			detail: fmt.Sprintf("seed.accessBindings[%d]: охват назван %q, а перечня объектов нет — "+
+				"выдаче не на что распространяться", i, bindingTargetResources),
+		})
+	case b.Target == bindingTargetAllInScope && declared:
+		faults = append(faults, linkFault{
+			kind:  ErrBindingIncomplete,
+			coord: locate(doc, "seed", "accessBindings", i, "resources"),
+			detail: fmt.Sprintf("seed.accessBindings[%d]: охват назван %q — выдача покрывает весь "+
+				"ярус и БУДУЩИЕ объекты тоже, поэтому перечень при нём не читает никто; "+
+				"написанный, он утверждает сужение, которого не будет", i, bindingTargetAllInScope),
+		})
+	}
+
+	for j, res := range b.Resources {
+		for _, need := range []struct{ key, value, why string }{
+			{"type", res.Type, "не сказано, объект какого типа выдаётся"},
+			{"id", res.ID, "не назван неизменяемый идентификатор объекта; имя внешней адресации " +
+				"не несёт и меняется свободно, поэтому выдача по имени пережила бы переименование молча"},
+		} {
+			if strings.TrimSpace(need.value) != "" {
+				continue
+			}
+			faults = append(faults, linkFault{
+				kind:  ErrBindingIncomplete,
+				coord: locate(doc, "seed", "accessBindings", i, "resources", j),
+				detail: fmt.Sprintf("seed.accessBindings[%d].resources[%d].%s: ключ не назван — %s",
+					i, j, need.key, need.why),
+			})
+		}
+	}
+	return faults
+}
+
+// validateSeededProse — заводимая посевом запись назвала себя целиком.
+//
+// Служебная запись и группа судятся ОДНИМ правилом намеренно: это однородные
+// вещи, и разное требование к однородным вещам само по себе расхождение —
+// ровно то, что уже сказано комментарием фикстуры про `description`. Второе
+// правило для второй записи разошлось бы с первым на первом же уточнении.
+func validateSeededProse(doc *yaml.Node, section string, i int,
+	name, account, description, purpose string) []error {
+	var faults []error
+	for _, need := range []struct{ key, value, why string }{
+		{"name", name, "запись не назвала себя: по имени её адресуют выдачи и вступления"},
+		{"account", account, "не сказано, в каком аккаунте запись заводится"},
+	} {
+		if strings.TrimSpace(need.value) != "" {
+			continue
+		}
+		faults = append(faults, linkFault{
+			kind:   ErrSeededSubjectIncomplete,
+			coord:  locate(doc, "seed", section, i),
+			detail: fmt.Sprintf("seed.%s[%d].%s: %s", section, i, need.key, need.why),
+		})
+	}
+	if proseShorterThan(description, minProseRunes) {
+		faults = append(faults, linkFault{
+			kind:  ErrSeededSubjectIncomplete,
+			coord: locate(doc, "seed", section, i),
+			detail: fmt.Sprintf("seed.%s[%d].description: %d знаков, требуется не менее %d — "+
+				"описание отвечает на вопрос, %s; следующий, кто увидит запись, "+
+				"иначе не узнает, снимать её или оставить",
+				section, i, utf8.RuneCountInString(strings.TrimSpace(description)),
+				minProseRunes, purpose),
+		})
+	}
+	return faults
 }
 
 // validateJoin — одно вступление: обе стороны парой · СВОЯ запись · причина.

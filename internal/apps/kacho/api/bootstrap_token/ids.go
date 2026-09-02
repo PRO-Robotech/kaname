@@ -16,8 +16,7 @@
 package bootstrap_token
 
 import (
-	"crypto/md5" // #nosec G501 -- deterministic id derivation (must match Postgres md5() in migration 0058), not a security primitive
-	"encoding/hex"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // Deterministic seed strings — MUST stay byte-identical to migration 0058's
@@ -34,18 +33,13 @@ const (
 )
 
 // md5Suffix returns the first 17 hex chars of md5(s) — identical to Postgres
-// `substr(md5(s),1,17)`. All hex chars are valid Crockford-base32 (0-9a-f ⊂
-// [0-9a-hjkmnp-tv-z]), so the derived ids satisfy the soc_/cag_ id CHECKs.
+// `substr(md5(s),1,17)`.
 //
-// The only inputs are the package constants above, and the outputs are public
-// identifiers — nothing here is authentication material. The digest is fixed by
-// an already-applied migration: 0058 seeded its rows under
-// `substr(md5('kacho-bootstrap-admin'),1,17)`, so a different digest would not
-// be "stronger", it would simply stop addressing the rows that exist.
-func md5Suffix(s string) string {
-	sum := md5.Sum([]byte(s)) // #nosec G401 -- deterministic id (must match Postgres md5()), not a security primitive
-	return hex.EncodeToString(sum[:])[:17]
-}
+// Формула ОБЪЯВЛЕНА ОДИН РАЗ — `domain.DerivedIDSuffix`, — и здесь только
+// зовётся. Прежде объявлений было три (это, `authzguard` и текст миграций), и
+// разошлись бы они молча: полученный идентификатор остаётся синтаксически верным
+// и перестаёт адресовать существующую строку.
+func md5Suffix(s string) string { return domain.DerivedIDSuffix(s) }
 
 // Identity — the deterministic bootstrap identity (derived; matches migration
 // 0058's seeded rows).

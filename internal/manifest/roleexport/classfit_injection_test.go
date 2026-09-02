@@ -32,7 +32,7 @@ func TestInjectionThreeRuns_ClassFitAndEmptyClassAreIndependent(t *testing.T) {
 	actions := mustActions(t)
 
 	// Прогон 1 — КОНТРОЛЬ. Фикстура как написана: стадия 1 молчит, стадия 2
-	// говорит (у фикстуры есть свои пустые классы у `vpc.addressPoolAdmin`), и
+	// говорит (у фикстуры есть свои пустые классы у `vpc.address_pool_admin`), и
 	// это состояние берётся ЭТАЛОНОМ, а не «нулём».
 	base := mustFixture(t)
 	baseClassFaults, _, baseClassCensus := roleexport.CheckResourceClasses(catalogfixture.Facts(), base, actions)
@@ -173,17 +173,21 @@ func TestNoteKindsAreNamedInWords(t *testing.T) {
 }
 
 // withEmptyClassRule — фикстура с ОДНОЙ правкой в разделе ролей: роли
-// `vpc.internalConsumer` дописывается класс, пригодного содержимого у которого
+// `vpc.internal_consumer` дописывается класс, пригодного содержимого у которого
 // на её ресурсах нет.
 //
 // Правится роль, а НЕ раздел `resources`: инъекция обязана адресовать предмет
 // существующего контроля и не задевать нового.
 func withEmptyClassRule(t *testing.T) string {
 	t.Helper()
-	const anchor = "        verbs: [get, list]\n"
+	// Якорь — ПРАВИЛО РОЛИ, и ключ у него `classes`: право роли пишется им, а
+	// снятый `verbs` загрузчик отвергает явно. Якорь переехал вместе со своим
+	// предметом; оставленный при старом ключе, он ронял бы пробу отказом «якорь
+	// встречается 0 раз» — то есть говорил бы о СЕБЕ, а не о дереве.
+	const anchor = "        classes: [get, list]\n"
 	src := mustFixtureText(t)
 	if strings.Count(src, anchor) != 1 {
 		t.Fatalf("якорь правки встречается %d раз", strings.Count(src, anchor))
 	}
-	return strings.Replace(src, anchor, "        verbs: [get, list, create]\n", 1)
+	return strings.Replace(src, anchor, "        classes: [get, list, create]\n", 1)
 }

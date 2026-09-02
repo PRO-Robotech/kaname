@@ -61,7 +61,11 @@ type Role struct {
 // empty set cannot exist.
 func (r Role) Validate() error {
 	var errs error
-	errs = multierr.Append(errs, r.Name.Validate())
+	// Имя судится ПО ЯРУСУ: ограничений в таблице два, и каждое условлено
+	// вычисляемым `is_system`. Ярус берётся оттуда же, откуда его берёт база, —
+	// из непустого `cluster_id` (`IsSystemDerived`), а не из поля `IsSystem`:
+	// поле — проекция чтения, а решение о форме принимается до записи.
+	errs = multierr.Append(errs, r.Name.ValidateAtTier(r.IsSystemDerived()))
 	errs = multierr.Append(errs, r.Description.Validate())
 	errs = multierr.Append(errs, r.Labels.Validate())
 	if len(r.Rules) > 0 {

@@ -195,12 +195,11 @@ func nonStringKeyInjection(name, literal string, quoted bool) injection {
 // описанием раздела; поле снято.
 const rolesSectionOnlyFirst = `
 roles:
-  - id: vpc.internalConsumer
-    name: Смежный модуль
+  - id: vpc.internal_consumer
     description: Ходит в vpc на пути запроса — аллокация адресов и ссылки.
     tier: {tierType: iam.project, tierId: prj000000000000000}
     rules:
-      - {module: vpc, resources: [address], verbs: [get, list]}
+      - {module: vpc, resources: [address], classes: [get, list]}
 `
 
 // manifestInjections — набор целиком. Оси — из §9.2 приёмки; у каждой РЕД-строки
@@ -216,8 +215,8 @@ func manifestInjections() []injection {
 			replacement: "\nseedz:\n", wantErr: ErrShape, needle: "seedz",
 		},
 		{
-			name: "неизвестный ключ на глубине", old: "      roleId: vpc.internalConsumer",
-			replacement: "      rolelD: vpc.internalConsumer", wantErr: ErrShape, needle: "rolelD",
+			name: "неизвестный ключ на глубине", old: "      roleId: vpc.internal_consumer",
+			replacement: "      rolelD: vpc.internal_consumer", wantErr: ErrShape, needle: "rolelD",
 		},
 
 		// ── оболочка ───────────────────────────────────────────────────────
@@ -276,7 +275,7 @@ func manifestInjections() []injection {
 		},
 		{
 			name: "заведённая группа без единой выдачи", old: "  groups:\n",
-			replacement: "  groups:\n    - {name: vpc-orphan-group, account: system, description: без выдачи}\n",
+			replacement: "  groups:\n    - {name: vpc-orphan-group, account: system, description: заведена без выдачи намеренно}\n",
 			wantErr:     ErrGroupNeverGranted, needle: "vpc-orphan-group",
 		},
 
@@ -293,7 +292,7 @@ func manifestInjections() []injection {
 		{
 			name:        "законный близнец: описанный раздел принимается",
 			old:         "\nseed:\n",
-			replacement: "\ndeprecatedVerbs:\n  read: {class: get, since: \"2026-08-23\", reason: синоним чтения, removeWhen: выдач ноль}\nseed:\n",
+			replacement: "\ndeprecatedVerbs:\n  read: {class: get, since: \"2026-08-23\", reason: синоним чтения из прежней грамматики, removeWhen: выдач с таким правом ноль}\nseed:\n",
 			wantErr:     nil,
 		},
 

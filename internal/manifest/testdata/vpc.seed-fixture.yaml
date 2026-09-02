@@ -63,14 +63,14 @@ seed:
   accessBindings:
     - subjects:
         - {type: group, name: vpc-internal-consumers}
-      roleId: vpc.internalConsumer
+      roleId: vpc.internal_consumer
       scopeType: iam.cluster
       scopeId: cluster_kacho_root
       target: allInScope        # и будущие интерфейсы с адресами тоже
 
     - subjects:
         - {type: group, name: cloud-network-admins}
-      roleId: vpc.addressPoolAdmin
+      roleId: vpc.address_pool_admin
       scopeType: iam.cluster
       scopeId: cluster_kacho_root
       target: allInScope        # и будущие пулы тоже

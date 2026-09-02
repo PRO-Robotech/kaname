@@ -47,7 +47,7 @@ seed:
   accessBindings:
     - subjects:
         - {type: group, name: vpc-internal-consumers}
-      roleId: vpc.internalConsumer
+      roleId: vpc.internal_consumer
       scopeType: iam.cluster
       scopeId: cluster_kacho_root
       target: allInScope
@@ -183,7 +183,7 @@ func TestMODMF01RealManifestPassesTheLoader(t *testing.T) {
 		t.Errorf("группы прочитаны неверно: %q, %q", m.Seed.Groups[0].Name, m.Seed.Groups[1].Name)
 	}
 	b := m.Seed.AccessBindings[0]
-	if b.RoleID != "vpc.internalConsumer" || b.ScopeType != "iam.cluster" ||
+	if b.RoleID != "vpc.internal_consumer" || b.ScopeType != "iam.cluster" ||
 		b.ScopeID != "cluster_kacho_root" || b.Target != "allInScope" {
 		t.Errorf("выдача прочитана неверно: %+v", b)
 	}
@@ -414,11 +414,11 @@ func TestMODMF07UnknownSectionIsRefusedExplicitly(t *testing.T) {
 	// Парный положительный: ВСЕ ЧЕТЫРЕ описанных раздела принимаются. Без него
 	// отрицание зеленело бы на загрузчике, отвергающем всякий раздел.
 	described := "apiVersion: iam/v1\nmodule: vpc\n" +
-		"resources:\n  - {name: network, objectType: vpc_network, parent: project, producer: derived, verbs: [get]}\n" +
-		"roles:\n  - id: vpc.viewer\n    name: Наблюдатель\n    description: Читает.\n" +
+		"resources:\n  - {name: network, objectType: vpc_network, parents: [project], producer: derived, verbs: [get]}\n" +
+		"roles:\n  - id: vpc.viewer\n    description: Читает топологию проекта.\n" +
 		"    tier: {tierType: iam.project, tierId: prj000000000000000}\n" +
-		"    rules:\n      - {module: vpc, resources: [network], verbs: [get]}\n" +
-		"deprecatedVerbs:\n  read: {class: get, since: \"2026-08-23\", reason: синоним чтения, removeWhen: выдач ноль}\n" +
+		"    rules:\n      - {module: vpc, resources: [network], classes: [get]}\n" +
+		"deprecatedVerbs:\n  read: {class: get, since: \"2026-08-23\", reason: синоним чтения из прежней грамматики, removeWhen: выдач с таким правом ноль}\n" +
 		"seed: {}\n"
 	if _, err := manifest.Load([]byte(described)); err != nil {
 		t.Fatalf("описанный раздел отвергнут: %v", err)

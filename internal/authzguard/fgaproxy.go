@@ -25,14 +25,13 @@ package authzguard
 
 import (
 	"context"
-	"crypto/md5" // #nosec G501 -- deterministic id derivation (must match Postgres md5() in migration 0009), not a security primitive
-	"encoding/hex"
 	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 const (
@@ -173,7 +172,10 @@ func SANToServiceAccountID(san string) (string, bool) {
 // ServiceAccountIDForService derives the deterministic module SA id from a
 // service short-name (`'sva' || substr(md5('kacho-<svc>'),1,17)`). Single
 // source of truth shared by the gate and the seed migration helper.
+//
+// Формула ОДНА на дерево и живёт в `domain.DerivedIDSuffix`: своя копия здесь
+// разошлась бы с постгресовой молча — полученный идентификатор остался бы
+// синтаксически верным и перестал бы находить строку.
 func ServiceAccountIDForService(svc string) string {
-	sum := md5.Sum([]byte(svcNamePrefix + svc)) // #nosec G401 -- deterministic id (must match Postgres md5()), not a security primitive
-	return "sva" + hex.EncodeToString(sum[:])[:17]
+	return "sva" + domain.DerivedIDSuffix(svcNamePrefix+svc)
 }

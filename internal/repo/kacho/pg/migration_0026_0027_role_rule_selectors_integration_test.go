@@ -82,9 +82,18 @@ func TestMigration0026_RoleRuleSelectorsTable(t *testing.T) {
 	require.NoError(t, err, "insert role_rule_selectors row")
 
 	// PK (role_id, rule_fp): duplicate → 23505.
+	//
+	// Тип здесь — `storage.volumes`, а не прежний `compute.disk`: предмет пробы —
+	// уникальность ключа, тип выбран лишь ради непохожести на строку выше. Пара
+	// `compute.disk` СНЯТА с платформы (блочное хранение переехало в storage), и
+	// с миграцией 20260902174500 её отвергает триггер живости — то есть отказ
+	// приходил бы кодом 23514 ДО проверки ключа, и проба утверждала бы о другом
+	// инварианте, ничего об этом не сказав. Предмет не менялся: `storage.volumes`
+	// — живая строка каталога, строки по-прежнему различаются, ключ по-прежнему
+	// один.
 	_, dErr := pool.Exec(ctx, `
 		INSERT INTO kacho_iam.role_rule_selectors (role_id, rule_fp, object_types, match_labels, arm, resource_names)
-		VALUES ($1, 'fp_abc', ARRAY['compute.disk'], '{"env":"dev"}'::jsonb, 'labels', '{}')`,
+		VALUES ($1, 'fp_abc', ARRAY['storage.volumes'], '{"env":"dev"}'::jsonb, 'labels', '{}')`,
 		roleID)
 	require.Error(t, dErr, "duplicate (role_id, rule_fp) must violate PK")
 	var pgErr *pgconn.PgError

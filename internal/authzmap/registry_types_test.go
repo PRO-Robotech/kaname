@@ -8,7 +8,8 @@ package authzmap_test
 // kacho-registry владеет двумя FGA-типами: `registry_registry` (namespace) и
 // `registry_repository` (per-repo). Оба verb-bearing (полный v_* набор,
 // развязанный от tier). object-prefix `registry_` совпадает с именем сервиса
-// kacho-registry — moduleObjectDomain-mapping НЕ нужен.
+// kacho-registry — словарь имён модулей (pkg/platformmodules) объявляет у него
+// обе колонки одинаковыми.
 
 import (
 	"testing"
