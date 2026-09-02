@@ -46,7 +46,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
-// deleteProjectFixture — репозиторий с уже существующим проектом под acc-A.
+// deleteProjectFixture — репозиторий с уже существующим проектом под acc-A000000000000000.
 func deleteProjectFixture(t *testing.T) (*fakeProjRepo, *DeleteProjectUseCase) {
 	t.Helper()
 	repo := newFakeProjRepo()

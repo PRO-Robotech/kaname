@@ -172,7 +172,7 @@ DELETE FROM session_revocations
  )`
 	tag, err := r.pool.Exec(ctx, q, grace.Seconds(), batch)
 	if err != nil {
-		return 0, false, mapErr(err, "", "")
+		return 0, false, mapErr(err, "SessionRevocation.DeleteExpired", "")
 	}
 	n := tag.RowsAffected()
 	return n, n == int64(batch), nil

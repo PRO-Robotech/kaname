@@ -294,6 +294,26 @@ else
   run_one "iam-account-redesign"
   run_one "iam-role-redesign"
   run_one "iam-access-binding-redesign"
+  # iam-access-binding-account-scope — поле `accountId` у канонического List:
+  # «выдачи субъекта в названном аккаунте» одним вызовом (задача #1737, приёмка
+  # docs/engineering/acceptance/subject-grants-within-an-account.md). Строка
+  # обязательна: гейт `assert all suites green` разбирает КАЖДУЮ
+  # collections/*.json, поэтому без неё коллекция не отработает, а гейт доложит
+  # `iam-access-binding-account-scope(no-report)` — фантомный отказ, а не тишину.
+  # Зависимости окружения (jwtAccountAdminA / jwtPureNoBindings / accountAId /
+  # accountBId / projectA1Id / userNOBId) сеются общими authz-фикстурами.
+  run_one "iam-access-binding-account-scope"
+  # iam-access-binding-include-revoked — флаг `includeRevoked` на ДВУХ остальных
+  # поверхностях, которые его принимают: `accounts/{id}/accessBindings`
+  # (ListByAccount) и `accessBindings:listByRole` (ListByRole). Перечень
+  # поверхностей выведен из контракта (`bool include_revoked` встречается в
+  # трёх запросах), третью — канонический List — покрывает соседняя коллекция.
+  # Порядок: сразу за ней, зависимости окружения те же самые.
+  #
+  # Остаточный проход ниже подобрал бы коллекцию и без этой строки (набор
+  # вердикта выводится из дерева, а не из перечня вызовов), но подхват — сигнал
+  # автору, а не норма: место в порядке у коллекции есть, и оно здесь.
+  run_one "iam-access-binding-include-revoked"
   # geo-read — AUTHENTICATED kacho-geo public reads through the api-gateway
   # (gateway->geo "no children to pick from" 503 regression; api-gateway#83 +
   # deploy#99). kacho-geo has no own tests/newman/, so the authenticated geo

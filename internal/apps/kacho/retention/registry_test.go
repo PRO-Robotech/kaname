@@ -6,15 +6,33 @@
 //
 // # Что здесь утверждается и почему модульно
 //
-// Пороги трёх предметов объявлены в §2.2 приёмки:
+// Пороги первых трёх предметов объявлены в §2.2 приёмки:
 //
 //	уборка утверждений:  expires_at     <= now() − (ClockSkew + RemovalSlack)
 //	уборка отзывов:      ttl_expires_at <= now()
 //	уборка отсечек:      revoke_before  <  now() − (MaxTokenTTL + ClockSkew + RemovalSlack)
 //
-// Третья запись — НОЛЬ слагаемых — стоит здесь контролем: без неё проба зеленела
-// бы на реализации, прибавляющей запас всюду. У отзывов часы уборки и всех
-// четырёх читателей уже одни (база), и слагаемому там взяться неоткуда.
+// Четвёртый предмет — окна темпа заведения (задача #1364) — объявлен здесь же:
+//
+//	уборка окон темпа:   window_started_at < now() − window_seconds − 0
+//
+// Пятый предмет — журнал смены субъекта (задача #1758) — объявлен здесь же:
+//
+//	уборка журнала:      created_at < now() − subjectchange.JournalRetention
+//
+// Величина берётся У ЧИТАТЕЛЯ (`pkg/subjectchange`), а не выписывается: порог
+// удержания есть функция предиката читателя, и копия разошлась бы с ним молча —
+// в опасную сторону, снимая строки, которые читатель ещё вправе получить.
+//
+// `window_seconds` в порог НЕ входит величиной: он читается уборщиком из
+// действующей строки величин тем же оператором, что и читателем-триггером
+// (`identity_admission_window_repo.go`). Реестр объявляет только СЛАГАЕМОЕ
+// запаса, и оно ноль.
+//
+// Записи с НУЛЁМ слагаемых стоят здесь контролем: без них проба зеленела бы на
+// реализации, прибавляющей запас всюду. У отзывов часы уборки и всех четырёх
+// читателей уже одни (база), у окон темпа — часы уборки и единственного
+// читателя, и слагаемому там взяться неоткуда.
 //
 // Слагаемое запаса в пороге УТВЕРЖДЕНИЙ держит только эта проба, и это сказано
 // вслух: его предикат — отстающие часы ЧИТАЮЩЕЙ реплики, а интеграционная
@@ -27,17 +45,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PRO-Robotech/kacho/pkg/subjectchange"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 )
 
 // TestRegistryThresholdsAreTheReadersPredicate — RET-SWP-04.
 func TestRegistryThresholdsAreTheReadersPredicate(t *testing.T) {
-	subjects := Subjects(stubReaper{}, stubReaper{}, stubReaper{})
+	subjects := Subjects(stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{})
 
 	want := map[string]time.Duration{
-		SubjectClientAssertionReplay: tokenpolicy.ClockSkew + tokenpolicy.RemovalSlack,
-		SubjectSessionRevocations:    0,
-		SubjectMintedTokenCutoffs:    tokenpolicy.MaxTokenTTL + tokenpolicy.ClockSkew + tokenpolicy.RemovalSlack,
+		SubjectClientAssertionReplay:    tokenpolicy.ClockSkew + tokenpolicy.RemovalSlack,
+		SubjectSessionRevocations:       0,
+		SubjectMintedTokenCutoffs:       tokenpolicy.MaxTokenTTL + tokenpolicy.ClockSkew + tokenpolicy.RemovalSlack,
+		SubjectIdentityAdmissionWindows: 0,
+		SubjectSubjectChangeJournal:     subjectchange.JournalRetention,
 	}
 
 	if len(subjects) != len(want) {
@@ -73,7 +94,7 @@ func TestRegistryThresholdsAreTheReadersPredicate(t *testing.T) {
 // копия совпадает.
 func TestRegistryThresholdsFollowPolicyRatherThanACopy(t *testing.T) {
 	byName := map[string]time.Duration{}
-	for _, s := range Subjects(stubReaper{}, stubReaper{}, stubReaper{}) {
+	for _, s := range Subjects(stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}, stubReaper{}) {
 		byName[s.Name] = s.Grace
 	}
 
@@ -93,7 +114,7 @@ func TestRegistryThresholdsFollowPolicyRatherThanACopy(t *testing.T) {
 	}
 }
 
-// stubReaper — дублёр всех трёх портов сразу. Он ничего не снимает и ничего не
+// stubReaper — дублёр всех портов реестра сразу. Он ничего не снимает и ничего не
 // утверждает о базе: предмет этой пробы — ПОРОГИ реестра, а не поведение уборки.
 // Поведение держат интеграционные RET-SWP-01…03 на настоящей базе.
 type stubReaper struct{}
@@ -107,5 +128,13 @@ func (stubReaper) DeleteExpired(_ context.Context, _ time.Duration, _ int) (int6
 }
 
 func (stubReaper) SweepStaleCutoffs(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (stubReaper) SweepElapsedAdmissionWindows(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (stubReaper) SweepAgedRows(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
 	return 0, false, nil
 }

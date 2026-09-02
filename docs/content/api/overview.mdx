@@ -28,15 +28,15 @@ import dedent from 'ts-dedent'
 
 ## Ресурсы и их назначение
 
-Kachō IAM управляет **семью типами tenant-facing ресурсов** плюс кредами доступа. Все ресурсы —
-плоские (flat): domain-поля на верхнем уровне сообщения, без K8s-envelope.
+Все ресурсы — плоские (flat): domain-поля на верхнем уровне сообщения, без K8s-envelope.
 
 <table>
   <thead><tr><th>Ресурс</th><th>Бизнес-назначение</th><th>Страница</th></tr></thead>
   <tbody>
     <tr><td><strong>Account</strong></td><td>Верхнеуровневый tenant-контейнер</td><td>[Account](/api/account)</td></tr>
     <tr><td><strong>Project</strong></td><td>Контейнер ресурсов внутри аккаунта</td><td>[Project](/api/project)</td></tr>
-    <tr><td><strong>User</strong></td><td>Человек-субъект (invite-based, per-Account)</td><td>[User](/api/user)</td></tr>
+    <tr><td><strong>User</strong></td><td>Человек-субъект: глобальная личность, одна строка на человека</td><td>[User](/api/user)</td></tr>
+    <tr><td><strong>Membership</strong></td><td>Принадлежность человека аккаунту; их у него может быть несколько. Только чтение</td><td>[Membership](/api/membership)</td></tr>
     <tr><td><strong>ServiceAccount</strong></td><td>Машинный субъект</td><td>[ServiceAccount](/api/service-account)</td></tr>
     <tr><td><strong>Group</strong></td><td>Набор субъектов для bulk-грантов</td><td>[Group](/api/group)</td></tr>
     <tr><td><strong>Role</strong></td><td>Именованный набор правил доступа</td><td>[Role](/api/role)</td></tr>
@@ -161,9 +161,10 @@ anti-anonymous интерсептором (`UNAUTHENTICATED`). Освобожд�
   вправе прочитать её одиночным `Get`, — предикат страницы и есть `v_get` (исключение — `Role`,
   чьё чтение по id энфорсится в сервисе той же функцией, что фильтрует страницу); пустой список,
   если ничего не видно;
-- **step-up floor** `required_acr_min=2` несёт узкий набор RPC, меняющих posture безопасности
-  (выдача учётных данных, выдача и отзыв прав, блокировка, необратимое удаление) — 24 записи
-  каталога прав из 289, а не пользовательская поверхность целиком.
+- **step-up floor** `required_acr_min=2` несёт **узкий набор** RPC, меняющих posture
+  безопасности (выдача учётных данных, выдача и отзыв прав, блокировка и приглашение,
+  необратимое удаление), а не пользовательская поверхность целиком. Критерий и полный перечень
+  — [Модель авторизации](/architecture/authz#step-up).
 
 Если отношения нет → `PERMISSION_DENIED` (HTTP `403`). Недоступность базы IAM на пути запроса →
 fail-closed. Полная модель — [Авторизация](/architecture/authz).
@@ -173,10 +174,21 @@ flowchart LR
   cli["Клиент"] -->|"Bearer JWT"| agw["api-gateway"]
   agw -->|"verify JWT"| agw
   agw -->|"iam.v1.* + subject"| iam["kacho-iam"]
-  iam -->|"Check(subject, relation, object)"| pg[("PostgreSQL kacho_iam")]
-  fga -->|"allow / deny"| iam
-  iam -->|"SQL"| pg[("kacho_iam")]
+  iam -->|"Check(subject, relation, object)"| pg[("PostgreSQL<br/>kacho_iam")]
+  pg -->|"allow / deny"| iam
 ```
+
+:::note Здесь была нарисована внешняя служба отношений — её нет
+Прежняя редакция схемы несла отдельный узел, отвечавший краю «allow / deny», и стрелка из него
+приходила к IAM. Такой службы в пути решения **нет**: вердикт складывается запросом к той же
+схеме `kacho_iam`, в которой лежат выдачи. Отдельного хранилища, до которого право должно
+доехать, не существует, и состояние «привязка создана, но право ещё не действует» невыразимо
+by construction.
+
+Схема на первой странице — единственное место, откуда состав компонентов берут целиком.
+Нарисованный на ней лишний узел клиент считает существующим и планирует под него: ищет его
+настройки, ждёт его отказов, закладывает его в свою схему развёртывания.
+:::
 
 ## Формат ошибок
 
@@ -189,7 +201,7 @@ flowchart LR
   {dedent`
     {
       "code": 5,
-      "message": "Account acc_missing not found",
+      "message": "Account acc9v3k1z7q0m5xhtn2d not found",
       "details": []
     }
   `}
@@ -249,25 +261,42 @@ HTTP-статусу: ветка `if status == 409` на предусловие �
 
 ## Идентификаторы
 
-Идентификаторы ресурсов IAM — **серверные**: `NewID(<prefix>)` = 3-символьный префикс + 17
-символов Crockford-base32. Тип ресурса читается по префиксу. Malformed id → sync
-`INVALID_ARGUMENT` первым стейтментом RPC; well-formed-но-нет → `NOT_FOUND`.
+Идентификаторы ресурсов IAM — **серверные**: префикс плюс **17 символов
+Crockford-base32** (строчные, без `i`/`l`/`o`/`u`). Тип ресурса читается по префиксу.
+Malformed id → sync `INVALID_ARGUMENT` первым стейтментом RPC; well-formed-но-нет →
+`NOT_FOUND`.
+
+:::warning Разделителей ТРИ, и подставить не тот — значит получить `INVALID_ARGUMENT`
+Форма зависит от ресурса, и в таблице ниже она названа у каждого. Копируя идентификатор из
+примера, берите его целиком: `acc…` без разделителя, `lim-…` через дефис и `cag_…` через
+подчёркивание — это **разные** формы, а не варианты записи одной.
+
+Особенно это касается **идентификатора операции**: он слитный (`iop` + 17), и край
+маршрутизирует опрос по его первым трём символам. Подчёркнутая форма `iop_…` на этом пути
+не резолвится вовсе — опрос вернёт `INVALID_ARGUMENT`, а не «операция не найдена».
+:::
 
 <table>
-  <thead><tr><th>Ресурс</th><th>Префикс</th></tr></thead>
+  <thead><tr><th>Ресурс</th><th>Идентификатор</th></tr></thead>
   <tbody>
-    <tr><td>Account</td><td><code>acc</code></td></tr>
-    <tr><td>Project</td><td><code>prj</code></td></tr>
-    <tr><td>User</td><td><code>usr</code></td></tr>
-    <tr><td>ServiceAccount</td><td><code>sva</code></td></tr>
-    <tr><td>Group</td><td><code>grp</code></td></tr>
-    <tr><td>Role</td><td><code>rol</code></td></tr>
-    <tr><td>AccessBinding</td><td><code>acb</code></td></tr>
-    <tr><td>Operation</td><td><code>iop</code></td></tr>
-    <tr><td>UserOAuthClient (токен)</td><td><code>uoc</code></td></tr>
-    <tr><td>ServiceAccountOAuthClient (ключ)</td><td><code>soc</code></td></tr>
+    <tr><td>Account</td><td><code>acc&lt;17&gt;</code></td></tr>
+    <tr><td>Project</td><td><code>prj&lt;17&gt;</code></td></tr>
+    <tr><td>User</td><td><code>usr&lt;17&gt;</code></td></tr>
+    <tr><td>ServiceAccount</td><td><code>sva&lt;17&gt;</code></td></tr>
+    <tr><td>Group</td><td><code>grp&lt;17&gt;</code></td></tr>
+    <tr><td>Role</td><td><code>rol&lt;17&gt;</code></td></tr>
+    <tr><td>AccessBinding</td><td><code>acb&lt;17&gt;</code></td></tr>
+    <tr><td>Operation</td><td><code>iop&lt;17&gt;</code></td></tr>
+    <tr><td>UserOAuthClient (токен)</td><td><code>uoc&lt;17&gt;</code></td></tr>
+    <tr><td>ServiceAccountOAuthClient (ключ)</td><td><code>soc&lt;17&gt;</code></td></tr>
+    <tr><td><a href="/api/membership">Membership</a></td><td><code>mbr-&lt;17&gt;</code> — <strong>через дефис</strong></td></tr>
+    <tr><td><a href="/api/limit">Limit</a> <em>(административный)</em></td><td><code>lim-&lt;17&gt;</code> — <strong>через дефис</strong></td></tr>
   </tbody>
 </table>
+
+Отдельно стоит **якорь кластера** — `cluster_kacho_root`. Это не сгенерированный
+идентификатор, а постоянное имя единственного объекта уровня кластера: оно одно и то же
+на всяком развёртывании и в этой схеме не участвует.
 
 ## Точность временных меток
 

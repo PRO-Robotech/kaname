@@ -31,7 +31,7 @@ func createProjectNamed(t *testing.T, name string) *iamv1.Project {
 	uc := NewCreateProjectUseCase(repo, opsRepo)
 
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr00000000000000abcd"})
+		operations.Principal{Type: "user", ID: "usr0000000000000abcd"})
 	op, err := uc.Execute(ctx, domain.Project{
 		AccountID: "acc0000000000000abcd",
 		Name:      domain.ProjectName(name),

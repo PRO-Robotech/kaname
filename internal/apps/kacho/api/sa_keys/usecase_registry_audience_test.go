@@ -60,15 +60,15 @@ func TestResolveAudience_AlwaysIncludesRegistryAudience(t *testing.T) {
 			name:           "caller omits audience → internal default + registry audience",
 			audiencePrefix: "kacho:iam:",
 			registryAud:    testRegistryAud,
-			in:             IssueInput{ServiceAccountID: "sva_docker"},
-			wantContains:   []string{"kacho:iam:/sa/sva_docker", testRegistryAud},
+			in:             IssueInput{ServiceAccountID: "sva_docker0000000000"},
+			wantContains:   []string{"kacho:iam:/sa/sva_docker0000000000", testRegistryAud},
 		},
 		{
 			name:           "caller-supplied audience is unioned with registry audience",
 			audiencePrefix: "kacho:iam:",
 			registryAud:    testRegistryAud,
 			in: IssueInput{
-				ServiceAccountID: "sva_ext",
+				ServiceAccountID: "sva_ext0000000000000",
 				Audience:         []string{"sts.example.com"},
 			},
 			wantContains: []string{"sts.example.com", testRegistryAud},
@@ -78,7 +78,7 @@ func TestResolveAudience_AlwaysIncludesRegistryAudience(t *testing.T) {
 			audiencePrefix: "kacho:iam:",
 			registryAud:    testRegistryAud,
 			in: IssueInput{
-				ServiceAccountID: "sva_ext",
+				ServiceAccountID: "sva_ext0000000000000",
 				Audience:         []string{testRegistryAud, "sts.example.com"},
 			},
 			wantContains: []string{"sts.example.com", testRegistryAud},
@@ -87,7 +87,7 @@ func TestResolveAudience_AlwaysIncludesRegistryAudience(t *testing.T) {
 			name:           "no prefix, no caller audience → registry audience only",
 			audiencePrefix: "",
 			registryAud:    testRegistryAud,
-			in:             IssueInput{ServiceAccountID: "sva_docker"},
+			in:             IssueInput{ServiceAccountID: "sva_docker0000000000"},
 			wantContains:   []string{testRegistryAud},
 		},
 	}
@@ -128,8 +128,8 @@ func TestIssue_PrivateKeyJWT_WhitelistsRegistryAudienceByDefault(t *testing.T) {
 	u.RegistryAudience = testRegistryAud
 
 	_, err := u.Execute(context.Background(), IssueInput{
-		ServiceAccountID: "sva_docker",
-		CreatedByUserID:  "usr_admin",
+		ServiceAccountID: "sva_docker0000000000",
+		CreatedByUserID:  "usr_admin00000000000",
 		// No Audience — the docker/registry use-case that triggered #320.
 	})
 	if err != nil {
@@ -144,7 +144,7 @@ func TestIssue_PrivateKeyJWT_WhitelistsRegistryAudienceByDefault(t *testing.T) {
 		t.Fatalf("Hydra audience = %v, want to contain registry audience %q (#320: docker login fails without it)",
 			hydra.gotReq.Audience, testRegistryAud)
 	}
-	if !containsStr(hydra.gotReq.Audience, "https://internal.example/iam/sa/sva_docker") {
+	if !containsStr(hydra.gotReq.Audience, "https://internal.example/iam/sa/sva_docker0000000000") {
 		t.Errorf("Hydra audience = %v, must still contain the kacho-internal default", hydra.gotReq.Audience)
 	}
 

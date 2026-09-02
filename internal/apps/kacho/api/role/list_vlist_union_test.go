@@ -99,8 +99,8 @@ func (s *roleUnionFGAStub) CheckWithContext(_ context.Context, subject, relation
 func TestListRoles_Union_VListOnlyGrant_CustomVisible(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	seedSystemRole(repo, "rol-sys1")
-	seedCustomRole(repo, "rol-c1", "acc-A")
-	seedCustomRole(repo, "rol-c2", "acc-A") // ungranted
+	seedCustomRole(repo, "rol-c1", "acc-A000000000000000")
+	seedCustomRole(repo, "rol-c2", "acc-A000000000000000") // ungranted
 
 	fga := newRoleUnionFGAStub()
 	fga.set("v_list", "user:usr-u1", []string{"rol-c1"}) // object-only v_list grant
@@ -121,7 +121,7 @@ func TestListRoles_Union_VListOnlyGrant_CustomVisible(t *testing.T) {
 // account-admin resolves viewer via the account-tier cascade).
 func TestListRoles_Union_ViewerGrant_StillVisible(t *testing.T) {
 	repo := newRoleListFakeRepo()
-	seedCustomRole(repo, "rol-c1", "acc-A")
+	seedCustomRole(repo, "rol-c1", "acc-A000000000000000")
 
 	fga := newRoleUnionFGAStub()
 	fga.set("viewer", "user:usr-u1", []string{"rol-c1"})
@@ -137,8 +137,8 @@ func TestListRoles_Union_ViewerGrant_StillVisible(t *testing.T) {
 // UNION + dedup: a role in BOTH sets appears once.
 func TestListRoles_Union_Dedup(t *testing.T) {
 	repo := newRoleListFakeRepo()
-	seedCustomRole(repo, "rol-c1", "acc-A")
-	seedCustomRole(repo, "rol-c2", "acc-A")
+	seedCustomRole(repo, "rol-c1", "acc-A000000000000000")
+	seedCustomRole(repo, "rol-c2", "acc-A000000000000000")
 
 	fga := newRoleUnionFGAStub()
 	fga.set("viewer", "user:usr-u1", []string{"rol-c1", "rol-c2"})
@@ -154,7 +154,7 @@ func TestListRoles_Union_Dedup(t *testing.T) {
 // fail-closed: an FGA error on EITHER relation → Unavailable.
 func TestListRoles_Union_FGAUnavailable_FailClosed(t *testing.T) {
 	repo := newRoleListFakeRepo()
-	seedCustomRole(repo, "rol-c1", "acc-A")
+	seedCustomRole(repo, "rol-c1", "acc-A000000000000000")
 
 	fga := newRoleUnionFGAStub()
 	fga.err = stderrors.New("relation form did not answer: connection closed")

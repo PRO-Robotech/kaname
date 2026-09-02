@@ -138,9 +138,14 @@ func TestRightsChangeReachesTheEdgeAndTheVerdictIsRecomputed(t *testing.T) {
 	// Ждать настоящего срока значило бы угадывать момент, когда чтение
 	// закончилось, — угадывание верное на свободной машине и неверное на занятой.
 	reader, err := subjectchange.New(subjectchange.Config{
-		Poller:   subjectchange.NewReader(conn),
-		Flush:    cache.invalidate,
-		Interval: time.Hour,
+		Poller: subjectchange.NewReader(conn),
+		Flush:  cache.invalidate,
+		// Величины выбраны так, чтобы fail-closed по сроку не наступил за
+		// секунды прогона, и НЕ ШИРЕ удержания журнала: срок, объявляющий
+		// рабочим молчание длиннее того, что владелец хранит, отвергается
+		// сборкой (#1758). Проба зовёт `Poll` напрямую, поэтому период здесь
+		// задаёт только срок одного вызова.
+		Interval: time.Minute,
 		// Реестр открытых потоков у владельца отсутствует BY CONSTRUCTION:
 		// длинные соединения держит потребитель, и правило видимости `internal/`
 		// не пускает сюда его проекцию. Заменитель здесь законен и не ослабляет
@@ -154,7 +159,7 @@ func TestRightsChangeReachesTheEdgeAndTheVerdictIsRecomputed(t *testing.T) {
 		// закрыватель делал бы несделанную провязку неотличимой от сделанной
 		// (kacho#1022).
 		Closer:     noStreamsHere{},
-		StaleAfter: 2 * time.Hour,
+		StaleAfter: 5 * time.Minute,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	require.NoError(t, err)

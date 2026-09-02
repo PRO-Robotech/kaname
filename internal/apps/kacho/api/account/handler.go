@@ -116,7 +116,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetAccountRequest) (*iamv1
 	}
 	pb, err := accountToPb(a)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "marshal account")
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return pb, nil
 }
@@ -147,7 +147,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListAccountsRequest) (*ia
 	for _, a := range rows {
 		pb, err := accountToPb(a)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "marshal account")
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 		out = append(out, pb)
 	}

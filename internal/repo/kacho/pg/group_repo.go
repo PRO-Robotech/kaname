@@ -460,7 +460,7 @@ func (w *groupWriter) RemoveMember(ctx context.Context, groupID domain.GroupID, 
 		string(groupID), string(memberType), string(memberID),
 	)
 	if err != nil {
-		return mapErr(err, "", string(memberID))
+		return mapErr(err, "Group.RemoveMember", string(memberID))
 	}
 	return nil
 }

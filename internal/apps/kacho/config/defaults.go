@@ -223,6 +223,34 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.bootstrap-mint.signing-key-env", "KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM")
 	v.SetDefault("authn.bootstrap-mint.allowed-client-sans", []string{})
 
+	// invite-mail — величины НАШЕГО отправителя письма приглашения (приёмка
+	// ID-MAIL-1, Р23/Р25). Умолчания есть РОВНО У ДВУХ величин, и обе — про
+	// ограниченность, а не про адрес: незаданный предел означал бы бесконечное
+	// ожидание, незаданное число повторов — бесконечный повтор, то есть ровно те
+	// дефекты, которые эти величины и снимают.
+	//
+	// У УЗЛА, АДРЕСА ОТПРАВИТЕЛЯ И УДОСТОВЕРЕНИЯ УМОЛЧАНИЙ НЕТ, и это решение
+	// (Р3): величина, которую построение подставляет молча, предметом стража быть
+	// не может — он зелен при любом входе, потому что незаданной она не бывает.
+	// Пустой узел даёт наблюдаемый исход «настройка» на каждой попытке, а не
+	// тихую отправку в никуда.
+	//
+	// Посадка полосы по умолчанию — шифрованная; незащищённой полосы разбор не
+	// производит ни при каком входе (ban #16).
+	// Override: KACHO_IAM_INVITE_MAIL__RELAY, __FROM, __FROM_NAME,
+	// __USERNAME_ENV, __PASSWORD_ENV, __TLS_MODE, __CA_BUNDLE_FILE, __LOGIN_URL,
+	// __ATTEMPT_TIMEOUT, __MAX_ATTEMPTS.
+	v.SetDefault("invite-mail.relay", "")
+	v.SetDefault("invite-mail.from", "")
+	v.SetDefault("invite-mail.from-name", "")
+	v.SetDefault("invite-mail.username-env", "")
+	v.SetDefault("invite-mail.password-env", "")
+	v.SetDefault("invite-mail.tls-mode", "starttls")
+	v.SetDefault("invite-mail.ca-bundle-file", "")
+	v.SetDefault("invite-mail.login-url", "")
+	v.SetDefault("invite-mail.attempt-timeout", defaultInviteMailAttemptTimeout)
+	v.SetDefault("invite-mail.max-attempts", defaultInviteMailMaxAttempts)
+
 	// The external relations engine, the gateway-internal drainer, Enterprise SSO,
 	// Governance, Federation/CAEP/ComplianceReport/Notify and the dead healthcheck
 	// placeholder were all removed from this YAML (dead config). The drainer is

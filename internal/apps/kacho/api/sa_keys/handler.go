@@ -157,7 +157,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListSAKeysRequest) (*iamv
 	for _, c := range rows {
 		pb, err := saClientToProto(c)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "marshal SA client")
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 		out = append(out, pb)
 	}

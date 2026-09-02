@@ -80,7 +80,7 @@ func TestGroup_ListOperations_MalformedID_InvalidArgument(t *testing.T) {
 // иначе use-case честно откажет (несуженного отката нет). ListOwned фильтрует
 // по владельцу — ровно то, что делает предикат в SQL WHERE.
 
-var opsCaller = operations.Principal{Type: "user", ID: "usr-caller", DisplayName: "caller@kacho.local"}
+var opsCaller = operations.Principal{Type: "user", ID: "usr-caller0000000000", DisplayName: "caller@kacho.local"}
 
 func opsCallerCtx() context.Context {
 	return operations.WithPrincipal(context.Background(), opsCaller)

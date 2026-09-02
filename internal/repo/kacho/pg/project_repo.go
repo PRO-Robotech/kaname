@@ -214,7 +214,7 @@ func (w *projectWriter) Update(ctx context.Context, p domain.Project, updateMask
 func (w *projectWriter) Delete(ctx context.Context, id domain.ProjectID) error {
 	tag, err := w.tx.Exec(ctx, `DELETE FROM projects WHERE id = $1`, string(id))
 	if err != nil {
-		return mapErr(err, "", string(id))
+		return mapErr(err, "Project.Delete", string(id))
 	}
 	if tag.RowsAffected() == 0 {
 		return iamerr.Wrapf(iamerr.ErrNotFound, "Project %s not found", id)

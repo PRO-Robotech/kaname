@@ -59,8 +59,8 @@ func newTTLHarness(t *testing.T) *ttlHarness {
 
 func (h *ttlHarness) issue(t *testing.T, in IssueInput) error {
 	t.Helper()
-	in.ServiceAccountID = "sva_test"
-	in.CreatedByUserID = "usr_admin"
+	in.ServiceAccountID = "sva_test000000000000"
+	in.CreatedByUserID = "usr_admin00000000000"
 	_, err := h.uc.Execute(context.Background(), in)
 	return err
 }

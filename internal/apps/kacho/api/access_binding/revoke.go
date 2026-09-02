@@ -245,7 +245,7 @@ func (u *RevokeAccessBindingUseCase) doRevoke(ctx context.Context, id domain.Acc
 
 	pb, err := abToPb(revoked)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "marshal access binding")
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return anypb.New(pb)
 }

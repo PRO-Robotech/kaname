@@ -186,8 +186,8 @@ func TestIssue_FederatedPath_HydraRequestShape(t *testing.T) {
 	u.AudiencePrefix = "https://example/api"
 
 	in := IssueInput{
-		ServiceAccountID: "sva_test",
-		CreatedByUserID:  "usr_admin",
+		ServiceAccountID: "sva_test000000000000",
+		CreatedByUserID:  "usr_admin00000000000",
 		TrustedSubjects: []domain.TrustedSubject{
 			{
 				Issuer:         "https://token.actions.githubusercontent.com",
@@ -219,7 +219,7 @@ func TestIssue_FederatedPath_HydraRequestShape(t *testing.T) {
 	if hydra.gotReq.JWKS != nil {
 		t.Errorf("federated client must NOT carry JWKS, got %+v", hydra.gotReq.JWKS)
 	}
-	if len(hydra.gotReq.Audience) != 1 || hydra.gotReq.Audience[0] != "https://example/api/sa/sva_test" {
+	if len(hydra.gotReq.Audience) != 1 || hydra.gotReq.Audience[0] != "https://example/api/sa/sva_test000000000000" {
 		t.Errorf("Audience = %v", hydra.gotReq.Audience)
 	}
 
@@ -258,8 +258,8 @@ func TestIssue_FederatedPath_InvalidTrustedSubject_Rejected(t *testing.T) {
 	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
 
 	_, err := u.Execute(context.Background(), IssueInput{
-		ServiceAccountID: "sva_test",
-		CreatedByUserID:  "usr_admin",
+		ServiceAccountID: "sva_test000000000000",
+		CreatedByUserID:  "usr_admin00000000000",
 		TrustedSubjects: []domain.TrustedSubject{
 			{Issuer: "https://x", SubjectPattern: "(["}, // invalid RE2
 		},
@@ -284,8 +284,8 @@ func TestIssue_PrivateKeyJWT_Path_StillWorks(t *testing.T) {
 	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
 
 	_, err := u.Execute(context.Background(), IssueInput{
-		ServiceAccountID: "sva_test",
-		CreatedByUserID:  "usr_admin",
+		ServiceAccountID: "sva_test000000000000",
+		CreatedByUserID:  "usr_admin00000000000",
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)

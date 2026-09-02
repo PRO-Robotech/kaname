@@ -50,9 +50,26 @@ kubectl -n kacho logs -l app=kacho-iam --since=5m | grep -E "ERROR|FATAL|authz|v
 3. **kacho-iam OOM/crash** → `kubectl rollout restart deploy/kacho-iam`;
    проверить memory limits.
 4. **subject_change_outbox — НЕ очередь, и «backlog» по ней не считается.** Это
-   журнал с курсором: строки не помечаются доставленными и не удаляются, поэтому
-   `count(*)` растёт монотонно на исправной службе. Отставание живёт **у читателя**
-   (края), а не в таблице — см. раздел ниже.
+   журнал с курсором: строки не помечаются доставленными, поэтому «pending» по
+   ним не определён. Отставание живёт **у читателя** (края), а не в таблице —
+   см. раздел ниже.
+
+   Строки при этом **снимаются** фоновой уборкой: журнал удерживается ровно
+   столько, сколько читателю позволено отставать. Поэтому `count(*)` выходит на
+   полку, а не растёт монотонно, и падение этого числа — норма, а не потеря.
+   Величина удержания объявлена один раз, у самого читателя
+   (`pkg/subjectchange`, `JournalRetention`); уборка идёт общей петлёй сервиса и
+   печатает снятое по каждому предмету отдельно (`retention sweep removed rows`,
+   `subject=subject_change_outbox`).
+
+   **Что означает `subject-change position is no longer resumable` в журнале
+   края.** Читатель отстал дальше удержания и ответил fail-closed: погасил кэш
+   решений целиком и закрыл все открытые потоки. Отзыв при этом применён ШИРЕ
+   нужного, а не потерян. В штатной работе такого не бывает — срок молчания,
+   который край объявляет рабочим, обязан укладываться в удержание, и посадка,
+   объявившая иначе, **не поднимается**. Значит запись означает одно из двух:
+   читатель действительно отсутствовал дольше удержания (сеть, перекат владельца
+   прав) либо удержание опустили. Ищите первое.
 
 **Escalation:** SRE on-call → IAM team.
 
@@ -351,11 +368,12 @@ make -C deploy psql SVC=iam
 kubectl -n kacho logs -l app=kacho-iam -f --tail=200
 
 # Состояние очередей. ВНИМАНИЕ: во второй колонке РАЗНЫЕ величины — у fga/audit это
-# непринятые строки, у subject_change это ВЕСЬ журнал (у него нет пометки доставки:
-# его читают курсором, и «pending» по нему не определён).
+# непринятые строки, у subject_change это ВЕСЬ УДЕРЖАННЫЙ журнал (пометки доставки у
+# него нет: его читают курсором, «pending» по нему не определён, а строки снимает
+# фоновая уборка по сроку — число выходит на полку, а не растёт монотонно).
 kubectl -n kacho exec deploy/postgres -- psql -c "
 SELECT 'fga (pending)'            AS q, count(*) FILTER (WHERE sent_at IS NULL) AS n, max(created_at) AS last FROM kacho_iam.fga_outbox
-UNION ALL SELECT 'subject_change (ВСЕГО, журнал)', count(*),                          max(created_at)       FROM kacho_iam.subject_change_outbox
+UNION ALL SELECT 'subject_change (УДЕРЖАНО, журнал)', count(*),                          max(created_at)       FROM kacho_iam.subject_change_outbox
 UNION ALL SELECT 'resource_reconcile (всего)',     count(*),                          max(created_at)       FROM kacho_iam.resource_reconcile_outbox
 UNION ALL SELECT 'audit (pending)',   count(*) FILTER (WHERE status='pending'),        max(created_at)       FROM kacho_iam.audit_outbox;
 "

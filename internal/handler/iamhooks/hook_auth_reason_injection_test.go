@@ -116,7 +116,21 @@ func probeHalves(t *testing.T, refuse hookAuthRefusalWriter, logLine func(*slog.
 
 	run := func(present bool) (body, headers, log string) {
 		var buf bytes.Buffer
-		logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		// ВРЕМЯ СНИМАЕТСЯ. Два прогона идут в разные моменты, поэтому метка
+		// времени различает записи ВСЕГДА — и «журналы различимы» становится
+		// истинным даже там, где текст сведён к одному. Инъекция «тишина»
+		// тогда не срабатывает, а проба читает собственный недетерминизм как
+		// проверяемое свойство. Поймано конвейером: локально две записи
+		// попадали в одну наносекунду и совпадали, на ранере — нет.
+		logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+			ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+				if a.Key == slog.TimeKey {
+					return slog.Attr{}
+				}
+				return a
+			},
+		}))
 		r := httptest.NewRequest(http.MethodPost, "/iam/v1/hooks/token", nil)
 		if present {
 			r.Header.Set(hookAuthHeader, hookAuthProbePresented)

@@ -119,7 +119,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetServiceAccountRequest) 
 	}
 	pb, err := saToPb(sa)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "marshal service account")
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return pb, nil
 }
@@ -149,7 +149,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListServiceAccountsReques
 	for _, sa := range rows {
 		pb, err := saToPb(sa)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "marshal service account")
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 		out = append(out, pb)
 	}

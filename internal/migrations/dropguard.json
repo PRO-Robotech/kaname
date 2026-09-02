@@ -119,6 +119,13 @@
       "kind": "retire",
       "expect_rows": 0,
       "note": "A replay ledger for proof-of-possession, created by the base schema and never written to since. Zero rows by construction: writers and readers in the non-test tree are zero, no migration in this chain INSERTs into it, and iam exposes no surface on any listener through which a row could be made. What this drop does NOT mean, stated first because the table's name reads as a protection: replay protection is ALIVE and untouched, it lives at the edge in `kacho_gateway.dpop_replay` under the edge's own migration 20260822140000. This table was never its store. It is more dangerous than an ordinary dead table because it carries the FULL shape of a replay ledger — proof id, seen-at, verb, address, key thumbprint — so a reader of iam's schema concludes iam holds single-use state, and both roads from that conclusion are wrong: treat the edge's store as a duplicate and remove it, or add a second writer here. The second is worse, because one mechanism in two schemas of two services is decided by two clocks and two windows, and single-use is a property of ONE decision: once the two stores disagree, a proof passes that either of them alone would have refused."
+    },
+    {
+      "version": 20260831120000,
+      "table": "kacho_iam.fga_model_version",
+      "kind": "retire",
+      "expect_rows": 0,
+      "note": "The version of the authorization model as LOADED INTO THE EXTERNAL RELATIONSHIP ENGINE, created by the base schema. The engine was retired by line R7-3 — the verdict is now computed by the relational form in the service's own database — so there is nowhere left to load a model and nothing left to write this row: writers and readers in the non-test tree are zero, and no migration in this chain INSERTs into it. What the drop does NOT mean, stated first because the name reads as model versioning: the DSL the relationship model is written in OUTLIVED the engine and is parsed by the service itself; the model text remains the source of truth for the shape. What goes is the record of a LOAD into a foreign store, not the versioning of the model. It is more dangerous than an ordinary dead table because it carries the full shape of a deployment journal — model id, DSL digest, applied-at, applied-by — so a reader of the schema concludes that model changes are recorded somewhere, and both roads from that conclusion are wrong: hunt for a writer that does not exist, or add a second one and thereby create a second place about one subject. Three objects go with the table and are counted with it: the sequence fga_model_version_id_seq (declared OWNED BY the column), the primary key and the unique key on the model id."
     }
   ]
 }

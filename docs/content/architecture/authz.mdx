@@ -57,8 +57,8 @@ scope привязки — и ровно их.
 
 ```mermaid
 flowchart LR
-  rpc["RPC Get(project prj_x)"] --> gw["gateway authz-middleware"]
-  gw -->|"Check(user:usr_y, v_get, project:prj_x)"| iam["kacho-iam: реляционная форма"]
+  rpc["RPC Get(project prj7mfpj2my52k5a06kg)"] --> gw["gateway authz-middleware"]
+  gw -->|"Check(user:usrbr69ze0ftz3jf7396, v_get, project:prj7mfpj2my52k5a06kg)"| iam["kacho-iam: реляционная форма"]
   iam -->|"allow"| ok["выполнить"]
   iam -->|"deny"| no["403 PERMISSION_DENIED"
 ```
@@ -137,22 +137,50 @@ Top-level `List` (Account / Project / User / ServiceAccount / Group / Role) **н
   аккаунта-владельца scope ИЛИ FGA `admin` на объекте scope. Проверяется в handler'е, т.к. тип
   объекта scope зависит от запроса.
 
-## Step-up (ACR floor)
+## Step-up (ACR floor) {#step-up}
 
 `required_acr_min=2` — **минимальный уровень свежести аутентификации** (second-factor): если ACR
 токена ниже требуемого, запрос отклоняется независимо от наличия отношения. Service→service-вызовы
 (SA-principal) освобождены от ACR-floor.
 
-Floor стоит на **узком наборе** RPC, а не на пользовательской поверхности целиком: из 289 записей
-каталога прав его несут 24, из них 22 — в IAM. Критерий — операция меняет posture безопасности:
-выдача учётных данных (`UserTokenService.Issue`/`Revoke`, `SAKeyService.Issue`/`Revoke`), выдача и
-отзыв прав (`AccessBindingService.Create`/`Update`/`Delete`/`Revoke`, `InternalClusterService.
-GrantAdmin`/`RevokeAdmin`, `RoleService.Update`/`Delete`, `GroupService.AddMember`/`RemoveMember`),
-блокировка и приглашение пользователя, включение/выключение ServiceAccount, необратимое удаление
-(`AccountService`/`ProjectService`/`GroupService`.`Delete`).
+Floor стоит на **узком наборе** RPC, а не на пользовательской поверхности целиком. Критерий —
+**операция меняет posture безопасности**; сегодня под него подпадают:
+
+<table>
+  <thead><tr><th>Что меняется</th><th>Глаголы</th></tr></thead>
+  <tbody>
+    <tr><td>выдача и отзыв удостоверений</td><td><code>UserTokenService.Issue</code>/<code>Revoke</code>, <code>SAKeyService.Issue</code>/<code>Revoke</code></td></tr>
+    <tr><td>выдача и отзыв прав</td><td><code>AccessBindingService.Create</code>/<code>Update</code>/<code>Delete</code>/<code>Revoke</code>, <code>RoleService.Update</code>/<code>Delete</code>, <code>GroupService.AddMember</code>/<code>RemoveMember</code>, <code>InternalClusterService.GrantAdmin</code>/<code>RevokeAdmin</code></td></tr>
+    <tr><td>состав арендатора</td><td><code>UserService.Invite</code>/<code>RemoveFromAccount</code>/<code>Block</code>/<code>Unblock</code>, <code>ServiceAccountService.Enable</code>/<code>Disable</code></td></tr>
+    <tr><td>пределы арендатора</td><td><code>LimitService.Create</code>/<code>Update</code>/<code>Delete</code> и их внутренние двойники</td></tr>
+    <tr><td>регистрация интерактивного клиента</td><td><code>InternalInteractiveClientService.Create</code>/<code>Update</code>/<code>Delete</code></td></tr>
+    <tr><td>необратимое удаление</td><td><code>AccountService</code> / <code>ProjectService</code> / <code>GroupService</code>.<code>Delete</code></td></tr>
+  </tbody>
+</table>
 
 Рутинные чтения и обычный CRUD ресурсов floor **не несут**: сплошной step-up превратил бы
 повторную аутентификацию в фоновый шум, на который перестают смотреть, и ничего бы не защитил.
+
+:::note Здесь стояли числа — и они устарели молча
+Прежняя редакция называла «из 289 записей каталога прав его несут 24, из них 22 — в IAM».
+Числа были выписаны, а не выведены, поэтому расходились с каталогом при каждой новой записи —
+и разошлись по **всем трём**: записей стало больше, глаголов с порогом больше, а «22 из 24 в
+IAM» неверно и качественно (за пределами IAM таких глаголов нет вовсе).
+
+Заметить это чтением нельзя: цифра выглядит замеренной. Поэтому здесь стоит **критерий и
+перечень**, а не счёт. Точные величины на любой ревизии дерева — из самого каталога, одной
+командой:
+
+```bash
+# записей в каталоге прав · из них с порогом 2 · их распределение по доменам
+jq 'length' gateway/internal/middleware/embed/permission_catalog.json
+jq '[.[] | select(.required_acr_min == "2")] | length' gateway/internal/middleware/embed/permission_catalog.json
+jq -r '.[] | select(.required_acr_min == "2") | .fqn' gateway/internal/middleware/embed/permission_catalog.json
+```
+
+Каталог — не справочная величина: по нему край принимает решение в рантайме, обе его копии
+байт-идентичны и сверяются гейтом сборки. Число, взятое из него, и есть факт.
+:::
 
 ## Условия на кортежах
 

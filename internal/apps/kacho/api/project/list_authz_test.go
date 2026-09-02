@@ -216,7 +216,7 @@ func TestListProjects_RBACv2_CanonicalScenario_GrantsConcreteIDs(t *testing.T) {
 	repo := newListFakeRepo()
 	// All three projects live in acc-other; usr-bob does NOT own it, so the
 	// pre-RBAC-v2 owner-based filter would return nothing.
-	seedAccount(repo, "acc-other", "usr-other")
+	seedAccount(repo, "acc-other", "usr-other00000000000")
 	seedProject(repo, "prj-a", "acc-other")
 	seedProject(repo, "prj-b", "acc-other")
 	seedProject(repo, "prj-c", "acc-other") // MUST remain hidden
@@ -272,7 +272,7 @@ func TestListProjects_RBACv2_CanonicalScenario_GrantsConcreteIDs(t *testing.T) {
 // PermissionDenied (he must not learn that any project exists at all).
 func TestListProjects_RBACv2_NoGrants_ReturnsEmpty(t *testing.T) {
 	repo := newListFakeRepo()
-	seedAccount(repo, "acc-other", "usr-other")
+	seedAccount(repo, "acc-other", "usr-other00000000000")
 	seedProject(repo, "prj-a", "acc-other")
 	seedProject(repo, "prj-b", "acc-other")
 
@@ -351,7 +351,7 @@ func TestListProjects_OwnerBeyondTheAccountPage_StillSeesTheirProjects(t *testin
 	}
 	// The caller's own account sorts after all of them.
 	seedAccount(repo, "acc-zzzz-mine", "usr-late")
-	seedProject(repo, "prj-mine", "acc-zzzz-mine")
+	seedProject(repo, "prj-mine000000000000", "acc-zzzz-mine")
 
 	// The grant branch denies everything: ownership is the only thing that can make
 	// this row visible, which is what the assertion is about.
@@ -361,7 +361,7 @@ func TestListProjects_OwnerBeyondTheAccountPage_StillSeesTheirProjects(t *testin
 	out, _, err := uc.Execute(ctxAs("usr-late"), repoproject.ListFilter{PageSize: 100})
 	require.NoError(t, err)
 	require.Len(t, out, 1, "the owner of the account must see the project in it")
-	assert.Equal(t, domain.ProjectID("prj-mine"), out[0].ID)
+	assert.Equal(t, domain.ProjectID("prj-mine000000000000"), out[0].ID)
 
 	// И цена не следует за населением. Прежде она была «один просмотр аккаунта на
 	// каждый РАЗЛИЧНЫЙ аккаунт страницы»; теперь владение приходит одним вопросом

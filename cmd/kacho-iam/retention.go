@@ -15,10 +15,12 @@
 // `internal/repohygiene` `TestDeclaredRetentionSweepersHaveAProductionCaller`,
 // а не этот комментарий.
 //
-// # Почему ОДНА петля на три предмета
+// # Почему ОДНА петля на все предметы
 //
-// Три петли — три расписания об одном предмете, и они расходятся молча. Петля
-// владеет реестром: добавление уборщика — одна запись, а не новая петля.
+// Несколько петель — несколько расписаний об одном предмете, и они расходятся
+// молча. Петля владеет реестром: добавление уборщика — одна запись, а не новая
+// петля. Четвёртым предметом заведены окна темпа заведения аккаунтов (#1364), и
+// добавление стоило ровно одной строки — ровно то, ради чего петля одна.
 package main
 
 import (
@@ -53,6 +55,13 @@ func startRetentionSweeper(
 			kachopg.NewClientAssertionReplayRepo(pool),
 			kachopg.NewSessionRevocationRepo(pool),
 			kachopg.NewMintedTokenRevocationRepo(pool),
+			kachopg.NewIdentityAdmissionWindowRepo(pool),
+			// Пятым предметом — журнал смены субъекта (#1758). Наблюдатель
+			// границы устоявшегося у него СВОЙ, а не общий с читателем, и это
+			// безопасно by construction: граница монотонна, поэтому величина,
+			// наблюдённая до оператора, остаётся нижней оценкой — снимется не
+			// больше, чем позволено.
+			kachopg.NewSubjectChangeJournalSweeper(pool, logger),
 		),
 		logger.With(slog.String("component", "retention_sweep")),
 	)

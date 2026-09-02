@@ -200,6 +200,25 @@ func (u *ListUseCase) Execute(ctx context.Context, f repoab.ListFilter) (ListPag
 	if err != nil {
 		return ListPage{}, err
 	}
+	// account_id — ФОРМАТ здесь же, до решения о том, кто спрашивает (#1737,
+	// IAM-AB-SIA-14). Проверка стоит в ТОЙ ЖЕ функции, которая замыкается на
+	// неопознанном вызывающем: guard этажом выше не защищает второго
+	// вызывающего этой функции, а до репозитория замыкание не доходит by
+	// construction — то есть репозиторный backstop на этой полосе не
+	// исполняется. Иначе ответ на один и тот же негодный ввод зависел бы от
+	// того, что вызывающему выдано: `400` при живом гранте и `200 []` при пустом.
+	//
+	// Пустая строка ПРОПУСКАЕТСЯ намеренно: она означает «не сужать», а не
+	// «аккаунт с пустым id». Required-проверка — отдельная ответственность, и
+	// здесь её предмета нет: поле необязательное.
+	//
+	// Производитель — тот же, что у ListByAccount на этом же поле, поэтому оба
+	// глагола отвечают на один вход побайтово одинаково (IAM-AB-SIA-12/16).
+	if f.AccountID != "" {
+		if err := shared.ValidateResourceID(f.AccountID, domain.PrefixAccount, "account"); err != nil {
+			return ListPage{}, err
+		}
+	}
 
 	subject, _ := authzguard.PrincipalSubject(ctx) // fail-closed: anon / unknown → ""
 	if subject == "" {
@@ -400,10 +419,15 @@ func (u *ListUseCase) collectVisiblePage(
 	scan := shared.ListScan{}
 	for len(visible) < need {
 		rows, _, err := rd.AccessBindings().List(ctx, repoab.ListFilter{
-			SubjectID:      f.SubjectID,
-			RoleID:         f.RoleID,
-			ScopeType:      f.ScopeType,
-			ScopeID:        f.ScopeID,
+			SubjectID: f.SubjectID,
+			RoleID:    f.RoleID,
+			ScopeType: f.ScopeType,
+			ScopeID:   f.ScopeID,
+			// Фильтр пересобирается по полю, а не копируется целиком, поэтому
+			// новый предикат обязан быть перечислен ЗДЕСЬ. Пропуск не ломает
+			// сборку и не виден в диффе: поле приняли бы и молча выбросили —
+			// ровно тот запрет, который держит IAM-AB-SIA-06.
+			AccountID:      f.AccountID,
 			IncludeRevoked: f.IncludeRevoked,
 			PageSize:       chunk,
 			After:          cursor,

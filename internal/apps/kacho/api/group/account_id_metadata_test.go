@@ -14,6 +14,7 @@ package group
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -270,4 +271,19 @@ func (r *fakeGrpWriter) Visibility() visibility.ReaderIface { return nil }
 // дублёр отвечает пусто и говорит об этом, а не притворяется источником.
 func (r *fakeGrpRdr) MembersOfGroups(context.Context, []domain.GroupID) ([]domain.GroupMember, []domain.GroupID, error) {
 	return nil, nil, nil
+}
+
+// EmitInviteMail — порт со-коммита намерения отправить письмо приглашения.
+// Дублёр не глотает того, что настоящий отвергает: пустой адресат и пустой ключ
+// партиции отвергаются здесь так же, как ограничением миграции, — иначе фикстура
+// была бы снисходительнее продукта и скрыла бы ровно тот дефект, ради которого её
+// подставляют.
+func (w *fakeGrpWriter) EmitInviteMail(_ context.Context, userID, _, to, _ string) error {
+	if to == "" {
+		return fmt.Errorf("invite mail: recipient required")
+	}
+	if userID == "" {
+		return fmt.Errorf("invite mail: user id required")
+	}
+	return nil
 }

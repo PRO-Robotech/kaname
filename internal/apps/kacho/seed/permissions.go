@@ -250,6 +250,23 @@ func isReadVerb(perm string) bool {
 // Implements authzguard.DenyActionLookup. fqn is the full method name WITHOUT
 // the leading slash — the same normalisation the edge applies before its own
 // catalog lookup, so both layers key on one string.
+// ScopeForMethod — the object type on which the method's permission is granted
+// (project / account / cluster), or "" when the catalog names none or the row
+// is exempt.
+//
+// "" is meaningful here too: a method whose row carries no scope extractor has
+// no single object to point a caller at, and inventing one would send them to
+// ask the wrong owner. Implements the second half of
+// authzguard.DenyActionLookup — see its doc for why both halves must be
+// functions of the METHOD alone.
+func (r *PermissionRegistry) ScopeForMethod(fqn string) string {
+	e, ok := r.byFQN[fqn]
+	if !ok || e.Permission == catalogderive.ExemptPermission {
+		return ""
+	}
+	return e.ScopeExtractor.ObjectType
+}
+
 func (r *PermissionRegistry) ActionForMethod(fqn string) string {
 	e, ok := r.byFQN[fqn]
 	if !ok || e.Permission == catalogderive.ExemptPermission {

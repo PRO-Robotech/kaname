@@ -71,6 +71,7 @@ from gen_shared import (  # noqa: E402  — импорт после провяз
     generate,
     Run,
     retry_until_authorized,
+    retry_until_present,
     _RYA_SEQ,
     _accepted_http_codes,
     assert_created_at_seconds,
@@ -96,6 +97,7 @@ from gen_shared import (  # noqa: E402  — импорт после провяз
     _is_operation_id_var,
     _js_code_and_literals,
     js_comment,
+    js_name,
     js_regex_src,
     js_str,
     load_cases_module,
@@ -118,64 +120,6 @@ from gen_shared import (  # noqa: E402  — импорт после провяз
     _VAR_REF_RE,
     _wrap_own_fresh_reads,
 )
-
-
-_NAME_OK = re.compile(r"\A[A-Za-z0-9_]+\Z")
-
-
-def js_name(value: str, *, where: str) -> str:
-    r"""ИМЯ вызывающего внутри порождаемого скрипта (#1220).
-
-    Здесь вызывающий даёт не текст и не код, а ИМЯ — идентификатор порождаемой
-    переменной либо ключ переменной прогона (`pm.environment.get('_ck_…')`).
-
-    ПОЧЕМУ ИСХОДА «ЭКРАНИРОВАТЬ» НЕТ. Литерал закрывается сериализатором:
-    значение остаётся значением, меняется лишь его запись. Имя так закрыть
-    нельзя — оно либо годно как имя, либо порождаемый файл не разбирается вовсе.
-    А там, где значение — лишь ЧАСТЬ имени, сериализатор хуже отказа: он вернёт
-    разбираемый скрипт с ДРУГИМ именем, и тот, кто имя пишет, разойдётся с тем,
-    кто его читает.
-
-    ТОТ ЖЕ КЛЮЧ ПИШЕТСЯ И ВНЕ JavaScript. Соседние шаги подставляют это же имя в
-    адрес (`/operations/{{_…RevOp}}`), а адрес — не JavaScript: сериализатор
-    строки там неприменим by construction. Экранировать одну сторону и не
-    экранировать другую значит развести писателя и читателя МОЛЧА.
-
-    ПОЧЕМУ ЭТО НЕ ВИДНО В ВЕРДИКТЕ. Негодное имя ломает не текст, а СИНТАКСИС
-    порождаемого файла, которого автор значения не видит. newman пишет отказ
-    разбора в `testScripts`, а НЕ в `assertions.failed`: шаг с неразобранным
-    скриптом даёт НОЛЬ упавших утверждений и отчитывается зелёным по этой
-    величине. Третья категория исхода, зачтённая в «прошло».
-
-    ВЫВОДИТЬ ИМЯ ИЗ ПРОЗЫ — не исход, и это измерено, а не предположено. Шов
-    storage собирал ключ из подписи шага, отображая `-` в `_`; отображение
-    неоднозначно, поэтому подписи `tuple-present-vol` и `tuple_present_vol`
-    давали ОДИН ключ, а скрипт при этом разбирался. Такую подстановку снимают, а
-    не чинят переводом: имя выводится из значения, которое именем УЖЕ является.
-
-    Годное имя возвращается ДОСЛОВНО: помощник ничего не переписывает, кроме
-    объявленного перевода, поэтому его появление на шве байт в байт сохраняет
-    порождаемую коллекцию.
-
-    ЧЕМ ДЕРЖИТСЯ. Проба
-    `services/iam/tests/newman/scripts/js_name_position_test.py` — одна на все
-    генераторы: перепись по дереву (каждая подстановка в позицию имени несёт
-    ЗАПИСАННЫЙ исход), инъекция негодным именем (обязана упасть, назвав место) и
-    положительный контроль законным (обязан пройти молча и остаться ДОСЛОВНЫМ).
-    """
-    if not isinstance(value, str) or value == "":
-        raise ValueError(
-            f"{where}: имя пусто. Пустое имя даёт ключ, склеенный с соседним"
-            f" текстом, — переменную, которую никто не читает, и молчаливый"
-            f" пропуск утверждения вместо отказа")
-    if not _NAME_OK.match(value):
-        bad = sorted({ch for ch in value if not _NAME_OK.match(ch)})
-        raise ValueError(
-            f"{where}: {value!r} именем быть не может — знаки {bad!r} вне"
-            f" [A-Za-z0-9_]. Экранировать имя нельзя: оно либо годно, либо"
-            f" порождаемый скрипт не разбирается, а newman запишет это в"
-            f" testScripts и отчитается НУЛЁМ упавших утверждений")
-    return value
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -823,6 +767,17 @@ def require_env_url(var: str, path: str, why: str = "") -> List[str]:
 # и падает, называя следствие вместо предмета.
 _rya = functools.partial(retry_until_authorized,
                         budget=15, interval_ms=400, lane_head=True)
+
+# То же окно у СПИСОЧНОГО ожидания — и то же правило: величину называет НАБОР,
+# а не общий слой (#1379). Форма общая: до сведения ЭТОТ набор нёс ЧЕТВЁРТУЮ
+# копию ожидания — кейс-локальную, вписанную прямо в тест-скрипт, — потому что в
+# общем слое обёртки не было вовсе. Она отличалась от трёх остальных ещё и по
+# существу: читала ОДНО поле ответа по имени вместо первого массива, не
+# отсекала не-200 и не снимала свои счётчики. Здесь остаётся только величина.
+_rup = functools.partial(retry_until_present,
+                        budget=25, interval_ms=500)
+
+
 def _op_id_guard(op_var: str, required: bool) -> List[str]:
     """Pre-request guard: do not send the poll when `op_var` is empty.
 
@@ -1040,6 +995,13 @@ def assert_op_error(code: int, code_name: str, msg_substr: Optional[str] = None,
     suite) overwrites between the action and this assertion, so it polls a
     FOREIGN operation (the IAM-ACB-ADD/RM red was reading an IssueSAKey op,
     code 13). Default "opId" keeps every existing caller byte-identical.
+
+    reason: признак полосы из `google.rpc.ErrorInfo.reason` в `error.details[]`.
+    Пинить его ОБЯЗАТЕЛЬНО там, где один код отказа несёт несколько полос: код у
+    них общий (`api-conventions.md` §by-lane code-split), тон сообщения стабилен,
+    но НЕ парсибелен, поэтому машинно различает вызывающего только признак.
+    Утверждение о признаке идёт В ПАРЕ с кодом, а не вместо него: по одному коду
+    не отличить полосу, по одному признаку не заметить смену отображения.
 
     Poll-until-done: this is a self-re-invoking poll step
     (setNextRequest → same request, bounded by POLL_CAP) with a request-name-scoped
@@ -1756,6 +1718,7 @@ _INJECTED = {
     "require_env_url": require_env_url,
     "poll_operation_until_done": poll_operation_until_done,
     "retry_until_authorized": _rya,
+    "retry_until_present": _rup,
     "get_until_gone": get_until_gone,
     "poll_request_until_status": poll_request_until_status,
     "reliable_delete": reliable_delete,

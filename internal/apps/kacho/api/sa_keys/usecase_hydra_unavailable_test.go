@@ -55,7 +55,7 @@ func TestIssue_HydraCreateUnavailable_MapsToUnavailableAndLogs(t *testing.T) {
 
 	// No TrustedSubjects → private_key_jwt path (the path the newman
 	// AUTHZGCP-SAKEY-SECRET-NOT-LEAKED case exercises).
-	in := IssueInput{ServiceAccountID: "sva_test", CreatedByUserID: "usr_admin"}
+	in := IssueInput{ServiceAccountID: "sva_test000000000000", CreatedByUserID: "usr_admin00000000000"}
 	_, err := u.Execute(context.Background(), in)
 	require.NoError(t, err, "Execute returns the started Operation synchronously; the failure lands in the async op")
 

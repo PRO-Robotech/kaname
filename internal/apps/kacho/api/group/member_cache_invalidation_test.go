@@ -47,8 +47,8 @@ func (a *fakeABWriter) EmitSubjectChangeEvent(_ context.Context, e abrepo.Subjec
 func (w *fakeMemberWriter) AccessBindingsW() abrepo.WriterIface { return w.abw }
 
 const (
-	testGroupID  = domain.GroupID("grp00000000000000abcd")
-	testMemberID = domain.SubjectID("usr00000000000000aaaa")
+	testGroupID  = domain.GroupID("grp0000000000000abcd")
+	testMemberID = domain.SubjectID("usr0000000000000aaaa")
 )
 
 // TestRemoveMember_InvalidatesTheMembersVerdictCache — the observable one.
@@ -94,12 +94,12 @@ func TestAddMember_InvalidatesTheMembersVerdictCache(t *testing.T) {
 	_, err := uc.doAdd(context.Background(), AddMemberInput{
 		GroupID:    testGroupID,
 		MemberType: domain.SubjectTypeServiceAccount,
-		MemberID:   domain.SubjectID("sva00000000000000bbbb"),
+		MemberID:   domain.SubjectID("sva0000000000000bbbb"),
 	})
 	require.NoError(t, err)
 
 	require.Len(t, w.abw.events, 1)
-	assert.Equal(t, "sva00000000000000bbbb", w.abw.events[0].SubjectID)
+	assert.Equal(t, "sva0000000000000bbbb", w.abw.events[0].SubjectID)
 	assert.Equal(t, "group_member_change", w.abw.events[0].EventType)
 }
 

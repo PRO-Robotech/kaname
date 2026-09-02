@@ -183,7 +183,7 @@ func (r *InteractiveClientRepo) Delete(ctx context.Context, id domain.Interactiv
 		return domain.InteractiveClient{}, false, nil
 	}
 	if err != nil {
-		return domain.InteractiveClient{}, false, mapErr(err, "", string(id))
+		return domain.InteractiveClient{}, false, mapErr(err, "InteractiveClient.Delete", string(id))
 	}
 	return out, true, nil
 }

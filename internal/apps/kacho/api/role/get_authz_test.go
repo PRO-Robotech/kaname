@@ -80,7 +80,7 @@ func TestGetRole_D1_GrantedCustom_Served(t *testing.T) {
 		ID:        domain.RoleID("rol0000000000000cst1"),
 		Name:      domain.RoleName("net-ops"),
 		IsSystem:  false,
-		AccountID: domain.AccountID("acc-A"),
+		AccountID: domain.AccountID("acc-A000000000000000"),
 		Rules:     domain.Rules{{Module: "vpc", Resources: []string{"address"}, Verbs: []string{"get"}}},
 		CreatedAt: time.Now().UTC(),
 	}
@@ -113,7 +113,7 @@ func TestGetRole_D1_VListOnlyGrantedCustom_Served(t *testing.T) {
 		ID:        domain.RoleID("rol0000000000000cst2"),
 		Name:      domain.RoleName("selector-only"),
 		IsSystem:  false,
-		AccountID: domain.AccountID("acc-A"),
+		AccountID: domain.AccountID("acc-A000000000000000"),
 		Rules:     domain.Rules{{Module: "vpc", Resources: []string{"address"}, Verbs: []string{"get"}}},
 		CreatedAt: time.Now().UTC(),
 	}
@@ -137,7 +137,7 @@ func TestGetRole_D1_UngrantedCustom_NotFound_NoLeak(t *testing.T) {
 		ID:        domain.RoleID("rol0000000000000cst9"),
 		Name:      domain.RoleName("secret-policy"),
 		IsSystem:  false,
-		AccountID: domain.AccountID("acc-A"),
+		AccountID: domain.AccountID("acc-A000000000000000"),
 		Rules:     domain.Rules{{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"*"}}},
 		CreatedAt: time.Now().UTC(),
 	}
@@ -165,12 +165,12 @@ func TestGetRole_D1_ForeignAccountCustom_NotFound(t *testing.T) {
 		ID:        domain.RoleID("rol0000000000000frgn"),
 		Name:      domain.RoleName("other-acc-role"),
 		IsSystem:  false,
-		AccountID: domain.AccountID("acc-B"), // foreign account
+		AccountID: domain.AccountID("acc-B000000000000000"), // foreign account
 		Rules:     domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"delete"}}},
 		CreatedAt: time.Now().UTC(),
 	}
 
-	fga := newRoleFGAStub() // caller has no grant in acc-B
+	fga := newRoleFGAStub() // caller has no grant in acc-B000000000000000
 	uc := NewGetRoleUseCase(repo).WithRelationStore(fga)
 
 	_, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000frgn"))
@@ -184,7 +184,7 @@ func TestGetRole_D1_FGAUnavailable_FailClosed(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	repo.roles["rol0000000000000cst1"] = domain.Role{
 		ID: domain.RoleID("rol0000000000000cst1"), IsSystem: false,
-		AccountID: domain.AccountID("acc-A"),
+		AccountID: domain.AccountID("acc-A000000000000000"),
 		Rules:     domain.Rules{{Module: "vpc", Resources: []string{"subnet"}, Verbs: []string{"get"}}},
 	}
 	fga := newRoleFGAStub()
@@ -205,7 +205,7 @@ func TestGetRole_D1_NilFGA_CustomFailClosed(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	repo.roles["rol0000000000000cst1"] = domain.Role{
 		ID: domain.RoleID("rol0000000000000cst1"), IsSystem: false,
-		AccountID: domain.AccountID("acc-A"),
+		AccountID: domain.AccountID("acc-A000000000000000"),
 	}
 	uc := NewGetRoleUseCase(repo) // NO WithRelationStore
 	_, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000cst1"))
@@ -232,9 +232,9 @@ func TestGetRole_D1_MalformedID_InvalidArgFirst(t *testing.T) {
 func TestGetRole_D45_ReadEnforceParity_GetSetEqualsListSet(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	seedSystemRole(repo, "rol0000000000000sys1")
-	seedCustomRole(repo, "rol0000000000000cgr1", "acc-A") // granted
-	seedCustomRole(repo, "rol0000000000000cgr2", "acc-A") // granted
-	seedCustomRole(repo, "rol0000000000000cun3", "acc-A") // ungranted
+	seedCustomRole(repo, "rol0000000000000cgr1", "acc-A000000000000000") // granted
+	seedCustomRole(repo, "rol0000000000000cgr2", "acc-A000000000000000") // granted
+	seedCustomRole(repo, "rol0000000000000cun3", "acc-A000000000000000") // ungranted
 
 	fga := newRoleFGAStub()
 	fga.set("user:usr-u1", []string{"rol0000000000000cgr1", "rol0000000000000cgr2"})

@@ -134,11 +134,11 @@ func TestAddMember_CoCommitsFGAMemberTuple_User(t *testing.T) {
 	repo, w := newFakeMemberRepo()
 	uc := NewAddMemberUseCase(repo, nil)
 
-	gid := domain.GroupID("grp00000000000000abcd")
+	gid := domain.GroupID("grp0000000000000abcd")
 	in := AddMemberInput{
 		GroupID:    gid,
 		MemberType: domain.SubjectTypeUser,
-		MemberID:   domain.SubjectID("usr00000000000000aaaa"),
+		MemberID:   domain.SubjectID("usr0000000000000aaaa"),
 	}
 	_, err := uc.doAdd(context.Background(), in)
 	require.NoError(t, err)
@@ -151,9 +151,9 @@ func TestAddMember_CoCommitsFGAMemberTuple_User(t *testing.T) {
 	require.Len(t, w.writeEmitted[0], 1)
 	got := w.writeEmitted[0][0]
 	assert.Equal(t, service.RelationTuple{
-		User:     "user:usr00000000000000aaaa",
+		User:     "user:usr0000000000000aaaa",
 		Relation: "member",
-		Object:   "group:grp00000000000000abcd",
+		Object:   "group:grp0000000000000abcd",
 	}, got, "member-tuple must target FGA type `group` (binding userset), NOT iam_group")
 }
 
@@ -162,9 +162,9 @@ func TestAddMember_CoCommitsFGAMemberTuple_ServiceAccount(t *testing.T) {
 	uc := NewAddMemberUseCase(repo, nil)
 
 	in := AddMemberInput{
-		GroupID:    domain.GroupID("grp00000000000000abcd"),
+		GroupID:    domain.GroupID("grp0000000000000abcd"),
 		MemberType: domain.SubjectTypeServiceAccount,
-		MemberID:   domain.SubjectID("sva00000000000000bbbb"),
+		MemberID:   domain.SubjectID("sva0000000000000bbbb"),
 	}
 	_, err := uc.doAdd(context.Background(), in)
 	require.NoError(t, err)
@@ -172,9 +172,9 @@ func TestAddMember_CoCommitsFGAMemberTuple_ServiceAccount(t *testing.T) {
 	require.Len(t, w.writeEmitted, 1)
 	require.Len(t, w.writeEmitted[0], 1)
 	assert.Equal(t, service.RelationTuple{
-		User:     "service_account:sva00000000000000bbbb",
+		User:     "service_account:sva0000000000000bbbb",
 		Relation: "member",
-		Object:   "group:grp00000000000000abcd",
+		Object:   "group:grp0000000000000abcd",
 	}, w.writeEmitted[0][0], "service_account member uses the service_account FGA prefix")
 	assert.Empty(t, w.delEmitted, "AddMember must not emit a delete")
 }
@@ -184,9 +184,9 @@ func TestRemoveMember_CoCommitsFGAMemberTupleDelete(t *testing.T) {
 	uc := NewRemoveMemberUseCase(repo, nil)
 
 	in := RemoveMemberInput{
-		GroupID:    domain.GroupID("grp00000000000000abcd"),
+		GroupID:    domain.GroupID("grp0000000000000abcd"),
 		MemberType: domain.SubjectTypeUser,
-		MemberID:   domain.SubjectID("usr00000000000000aaaa"),
+		MemberID:   domain.SubjectID("usr0000000000000aaaa"),
 	}
 	_, err := uc.doRemove(context.Background(), in)
 	require.NoError(t, err)
@@ -196,9 +196,9 @@ func TestRemoveMember_CoCommitsFGAMemberTupleDelete(t *testing.T) {
 	require.Len(t, w.delEmitted, 1, "RemoveMember must co-commit exactly one EmitFGARelationDelete batch")
 	require.Len(t, w.delEmitted[0], 1)
 	assert.Equal(t, service.RelationTuple{
-		User:     "user:usr00000000000000aaaa",
+		User:     "user:usr0000000000000aaaa",
 		Relation: "member",
-		Object:   "group:grp00000000000000abcd",
+		Object:   "group:grp0000000000000abcd",
 	}, w.delEmitted[0][0], "symmetric revoke of the exact member-tuple AddMember wrote")
 	assert.Empty(t, w.writeEmitted, "RemoveMember must not emit a write")
 }

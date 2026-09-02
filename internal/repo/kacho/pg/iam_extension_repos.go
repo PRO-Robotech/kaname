@@ -66,7 +66,7 @@ func (r *SAOAuthClientRepo) GetByOAuthClientID(ctx context.Context, hydraClientI
 		string(hydraClientID))
 	out, err := scanSAOAuthClient(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "SAOAuthClient with hydra_client_id %s not found", hydraClientID)
+		return domain.ServiceAccountOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "ServiceAccount credential %s not found", hydraClientID)
 	}
 	if err != nil {
 		return domain.ServiceAccountOAuthClient{}, mapErr(err, "", string(hydraClientID))

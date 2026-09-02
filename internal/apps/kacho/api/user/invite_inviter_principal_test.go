@@ -38,6 +38,7 @@ package user
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -135,6 +136,11 @@ type invPrincRepo struct {
 	// принимающий больше настоящего, делает невидимым ровно тот дефект, ради
 	// которого его подставляют — путь мог не эмитить ничего.
 	emitted []service.RelationTuple
+	// mailIntents — намерения отправить письмо приглашения, со-коммиченные ТОЙ
+	// ЖЕ транзакцией. Запоминаются по той же причине, что и строки журнала выше:
+	// путь мог не эмитить ничего, и дублёр, глотающий вызов, сделал бы это
+	// невидимым.
+	mailIntents []mailIntent
 }
 
 func (f *invPrincRepo) Reader(context.Context) (kachorepo.Reader, error) {
@@ -280,4 +286,30 @@ func (invPrincUserRdr) MembershipExists(context.Context, domain.UserID, domain.A
 // пробы другой. Снятие членства проверяется своими пробами (#1127).
 func (*invPrincUserWtr) RemoveMembership(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
+}
+
+// EmitInviteMail — порт со-коммита намерения отправить письмо приглашения.
+// Дублёр не глотает того, что настоящий отвергает: пустой адресат и пустой ключ
+// партиции отвергаются здесь так же, как ограничением миграции, — иначе фикстура
+// была бы снисходительнее продукта и скрыла бы ровно тот дефект, ради которого её
+// подставляют.
+func (w *invPrincWriter) EmitInviteMail(_ context.Context, userID, accountID, to, _ string) error {
+	if to == "" {
+		return fmt.Errorf("invite mail: recipient required")
+	}
+	if userID == "" {
+		return fmt.Errorf("invite mail: user id required")
+	}
+	w.parent.mu.Lock()
+	defer w.parent.mu.Unlock()
+	w.parent.mailIntents = append(w.parent.mailIntents,
+		mailIntent{UserID: userID, AccountID: accountID, To: to})
+	return nil
+}
+
+// mailIntent — со-коммиченное намерение отправить письмо, запомненное дублёром.
+type mailIntent struct {
+	UserID    string
+	AccountID string
+	To        string
 }

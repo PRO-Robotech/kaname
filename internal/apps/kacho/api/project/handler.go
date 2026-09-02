@@ -96,7 +96,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetProjectRequest) (*iamv1
 	}
 	pb, err := projectToPb(p)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "marshal project")
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return pb, nil
 }
@@ -128,7 +128,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListProjectsRequest) (*ia
 	for _, p := range rows {
 		pb, err := projectToPb(p)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "marshal project")
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 		out = append(out, pb)
 	}

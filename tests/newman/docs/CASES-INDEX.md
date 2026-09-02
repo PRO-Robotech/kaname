@@ -1,0 +1,1007 @@
+# kacho-iam — CASES-INDEX
+
+Каталог кейсов newman-набора iam. Источник истины — модули `cases/*.py`;
+коллекции в `collections/` **генерируются** `scripts/gen.py`. Этот файл —
+производный каталог, и сверяет его с деревом `scripts/validate-cases.py`
+(общее тело — `tests/newman/kacholib/casesindex.py`).
+
+**Что держит сверщик.** Итог и число по КАЖДОМУ модулю совпадают с деревом;
+ни один заголовок не называет модуль, которого нет; каждый идентификатор
+каталогизирован — литерально здесь, либо суффикс-паттерном `*-<СУФФИКС>`,
+либо тегом `# index: <ref>` рядом со строкой `id=` в модуле кейсов.
+Уникальность идентификаторов держит хребет генератора
+(`kacholib/gen_shared.py`, `_scan_suite`) — она проверяется и на каждой
+генерации, а не только здесь.
+
+**Чего сверщик НЕ держит.** Он не судит СМЫСЛ записи: что против
+идентификатора написана правда, машинно не решается. Перечень ниже назван
+поимённо и пересчитан, но описания у каждого кейса нет — оно живёт в шапке
+своего модуля и в самом кейсе. Это сказано вслух, чтобы «каталог зелёный»
+не читалось шире сделанного.
+
+**Почему перечень литеральный, а не по паттернам, как у соседей.** У шести
+наборов идентификатор устроен `<РЕСУРС>-<ГЛАГОЛ>-<КЛАСС>-<ВАРИАНТ>`, и
+суффикс-паттерн сворачивает десятки кейсов в одну запись. У iam сегментом
+больше (`IAM-<РЕСУРС>-…`), и замер это подтверждает: отрезание первого
+сегмента даёт 729 различных суффиксов на 729 кейсов — то есть ноль
+свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
+сегмента), но каталог на нём не строится.
+
+Всего кейсов: 729
+
+## Перепись по модулям
+
+| модуль | кейсов |
+|---|---:|
+| `cases/authz-deny.py` | 293 |
+| `cases/authz-failclosed.py` | 3 |
+| `cases/authz-sa-apitoken.py` | 30 |
+| `cases/basic-access-token.py` | 2 |
+| `cases/docker-lane-credential-kind.py` | 1 |
+| `cases/geo-read.py` | 4 |
+| `cases/iam-access-binding-account-scope.py` | 9 |
+| `cases/iam-access-binding-include-revoked.py` | 2 |
+| `cases/iam-access-binding-redesign.py` | 17 |
+| `cases/iam-account-redesign.py` | 9 |
+| `cases/iam-account.py` | 38 |
+| `cases/iam-authz-grant-check-propagation.py` | 10 |
+| `cases/iam-flat-authz-vbc.py` | 2 |
+| `cases/iam-group.py` | 33 |
+| `cases/iam-interactive-client.py` | 8 |
+| `cases/iam-internal-only-check.py` | 16 |
+| `cases/iam-invite-grant-fga.py` | 4 |
+| `cases/iam-limit.py` | 11 |
+| `cases/iam-list-visibility.py` | 3 |
+| `cases/iam-membership-read.py` | 7 |
+| `cases/iam-permission-catalog.py` | 2 |
+| `cases/iam-project.py` | 33 |
+| `cases/iam-rbac-rules-labels.py` | 2 |
+| `cases/iam-rbac-scope-grant.py` | 2 |
+| `cases/iam-rbac-subjects.py` | 14 |
+| `cases/iam-read-authz-vget.py` | 3 |
+| `cases/iam-role-redesign.py` | 10 |
+| `cases/iam-role.py` | 44 |
+| `cases/iam-service-account.py` | 28 |
+| `cases/iam-subject-privileges-read.py` | 6 |
+| `cases/iam-system-grant-visibility.py` | 1 |
+| `cases/iam-token-facade-conformance.py` | 7 |
+| `cases/iam-user.py` | 43 |
+| `cases/iam-whoami.py` | 3 |
+| `cases/label-revoke-iam.py` | 2 |
+| `cases/label-revoke-nlb.py` | 1 |
+| `cases/label-revoke-storage.py` | 3 |
+| `cases/label-revoke-vpc.py` | 8 |
+| `cases/rbac-subject-channel-equivalence.py` | 8 |
+| `cases/rbac-visibility-set.py` | 7 |
+
+---
+
+## `cases/authz-deny.py` — 293 кейсов
+
+> Case-set authz-deny для kacho-iam.
+
+- `AUTHZ-ACCT-GT-OWN-ANON`
+- `AUTHZ-ACCT-GT-CROSS-ANON`
+- `AUTHZ-ACCT-UP-OWN-ANON`
+- `AUTHZ-ACCT-UP-CROSS-ANON`
+- `AUTHZ-ACCT-DL-OWN-ANON`
+- `AUTHZ-ACCT-LS-ANON`
+- `AUTHZ-ACCT-GT-OWN-NOB`
+- `AUTHZ-ACCT-GT-CROSS-NOB`
+- `AUTHZ-ACCT-UP-OWN-NOB`
+- `AUTHZ-ACCT-UP-CROSS-NOB`
+- `AUTHZ-ACCT-DL-OWN-NOB`
+- `AUTHZ-ACCT-LS-NOB`
+- `AUTHZ-ACCT-GT-OWN-PA1`
+- `AUTHZ-ACCT-GT-CROSS-PA1`
+- `AUTHZ-ACCT-UP-OWN-PA1`
+- `AUTHZ-ACCT-UP-CROSS-PA1`
+- `AUTHZ-ACCT-DL-OWN-PA1`
+- `AUTHZ-ACCT-LS-PA1`
+- `AUTHZ-ACCT-GT-OWN-AAA`
+- `AUTHZ-ACCT-GT-CROSS-AAA`
+- `AUTHZ-ACCT-UP-OWN-AAA`
+- `AUTHZ-ACCT-UP-CROSS-AAA`
+- `AUTHZ-ACCT-DL-OWN-AAA`
+- `AUTHZ-ACCT-LS-AAA`
+- `AUTHZ-ACCT-GT-OWN-AAB`
+- `AUTHZ-ACCT-GT-CROSS-AAB`
+- `AUTHZ-ACCT-UP-OWN-AAB`
+- `AUTHZ-ACCT-UP-CROSS-AAB`
+- `AUTHZ-ACCT-DL-OWN-AAB`
+- `AUTHZ-ACCT-LS-AAB`
+- `AUTHZ-ACCT-GT-OWN-INV`
+- `AUTHZ-ACCT-GT-CROSS-INV`
+- `AUTHZ-ACCT-UP-OWN-INV`
+- `AUTHZ-ACCT-UP-CROSS-INV`
+- `AUTHZ-ACCT-DL-OWN-INV`
+- `AUTHZ-ACCT-LS-INV`
+- `AUTHZ-ACCT-UPFORM-OWN-AAA`
+- `AUTHZ-PRJ-CR-A-ANON`
+- `AUTHZ-PRJ-CR-B-ANON`
+- `AUTHZ-PRJ-GT-A1-ANON`
+- `AUTHZ-PRJ-GT-B1-ANON`
+- `AUTHZ-PRJ-UP-A1-ANON`
+- `AUTHZ-PRJ-UP-B1-ANON`
+- `AUTHZ-PRJ-DL-A-ANON`
+- `AUTHZ-PRJ-LS-A-ANON`
+- `AUTHZ-PRJ-LS-B-ANON`
+- `AUTHZ-PRJ-CR-A-NOB`
+- `AUTHZ-PRJ-CR-B-NOB`
+- `AUTHZ-PRJ-GT-A1-NOB`
+- `AUTHZ-PRJ-GT-B1-NOB`
+- `AUTHZ-PRJ-UP-A1-NOB`
+- `AUTHZ-PRJ-UP-B1-NOB`
+- `AUTHZ-PRJ-DL-A-NOB`
+- `AUTHZ-PRJ-LS-A-NOB`
+- `AUTHZ-PRJ-LS-B-NOB`
+- `AUTHZ-PRJ-CR-A-PA1`
+- `AUTHZ-PRJ-CR-B-PA1`
+- `AUTHZ-PRJ-GT-A1-PA1`
+- `AUTHZ-PRJ-GT-B1-PA1`
+- `AUTHZ-PRJ-UP-A1-PA1`
+- `AUTHZ-PRJ-UP-B1-PA1`
+- `AUTHZ-PRJ-DL-A-PA1`
+- `AUTHZ-PRJ-LS-A-PA1`
+- `AUTHZ-PRJ-LS-B-PA1`
+- `AUTHZ-PRJ-CR-A-AAA`
+- `AUTHZ-PRJ-CR-B-AAA`
+- `AUTHZ-PRJ-GT-A1-AAA`
+- `AUTHZ-PRJ-GT-B1-AAA`
+- `AUTHZ-PRJ-UP-A1-AAA`
+- `AUTHZ-PRJ-UP-B1-AAA`
+- `AUTHZ-PRJ-DL-A-AAA`
+- `AUTHZ-PRJ-LS-A-AAA`
+- `AUTHZ-PRJ-LS-B-AAA`
+- `AUTHZ-PRJ-CR-A-AAB`
+- `AUTHZ-PRJ-CR-B-AAB`
+- `AUTHZ-PRJ-GT-A1-AAB`
+- `AUTHZ-PRJ-GT-B1-AAB`
+- `AUTHZ-PRJ-UP-A1-AAB`
+- `AUTHZ-PRJ-UP-B1-AAB`
+- `AUTHZ-PRJ-DL-A-AAB`
+- `AUTHZ-PRJ-LS-A-AAB`
+- `AUTHZ-PRJ-LS-B-AAB`
+- `AUTHZ-PRJ-CR-A-INV`
+- `AUTHZ-PRJ-CR-B-INV`
+- `AUTHZ-PRJ-GT-A1-INV`
+- `AUTHZ-PRJ-GT-B1-INV`
+- `AUTHZ-PRJ-UP-A1-INV`
+- `AUTHZ-PRJ-UP-B1-INV`
+- `AUTHZ-PRJ-DL-A-INV`
+- `AUTHZ-PRJ-LS-A-INV`
+- `AUTHZ-PRJ-LS-B-INV`
+- `AUTHZ-GRP-CR-A-ANON`
+- `AUTHZ-GRP-CR-B-ANON`
+- `AUTHZ-GRP-GT-A-ANON`
+- `AUTHZ-GRP-LS-A-ANON`
+- `AUTHZ-GRP-LS-B-ANON`
+- `AUTHZ-GRP-DL-A-ANON`
+- `AUTHZ-GRP-CR-A-NOB`
+- `AUTHZ-GRP-CR-B-NOB`
+- `AUTHZ-GRP-GT-A-NOB`
+- `AUTHZ-GRP-LS-A-NOB`
+- `AUTHZ-GRP-LS-B-NOB`
+- `AUTHZ-GRP-DL-A-NOB`
+- `AUTHZ-GRP-CR-A-PA1`
+- `AUTHZ-GRP-CR-B-PA1`
+- `AUTHZ-GRP-GT-A-PA1`
+- `AUTHZ-GRP-LS-A-PA1`
+- `AUTHZ-GRP-LS-B-PA1`
+- `AUTHZ-GRP-DL-A-PA1`
+- `AUTHZ-GRP-CR-A-AAA`
+- `AUTHZ-GRP-CR-B-AAA`
+- `AUTHZ-GRP-GT-A-AAA`
+- `AUTHZ-GRP-LS-A-AAA`
+- `AUTHZ-GRP-LS-B-AAA`
+- `AUTHZ-GRP-DL-A-AAA`
+- `AUTHZ-GRP-CR-A-AAB`
+- `AUTHZ-GRP-CR-B-AAB`
+- `AUTHZ-GRP-GT-A-AAB`
+- `AUTHZ-GRP-LS-A-AAB`
+- `AUTHZ-GRP-LS-B-AAB`
+- `AUTHZ-GRP-DL-A-AAB`
+- `AUTHZ-GRP-CR-A-INV`
+- `AUTHZ-GRP-CR-B-INV`
+- `AUTHZ-GRP-GT-A-INV`
+- `AUTHZ-GRP-LS-A-INV`
+- `AUTHZ-GRP-LS-B-INV`
+- `AUTHZ-GRP-DL-A-INV`
+- `AUTHZ-SA-CR-A-ANON`
+- `AUTHZ-SA-CR-B-ANON`
+- `AUTHZ-SA-GT-A-ANON`
+- `AUTHZ-SA-LS-A-ANON`
+- `AUTHZ-SA-LS-B-ANON`
+- `AUTHZ-SA-DL-A-ANON`
+- `AUTHZ-SA-CR-A-NOB`
+- `AUTHZ-SA-CR-B-NOB`
+- `AUTHZ-SA-GT-A-NOB`
+- `AUTHZ-SA-LS-A-NOB`
+- `AUTHZ-SA-LS-B-NOB`
+- `AUTHZ-SA-DL-A-NOB`
+- `AUTHZ-SA-CR-A-PA1`
+- `AUTHZ-SA-CR-B-PA1`
+- `AUTHZ-SA-GT-A-PA1`
+- `AUTHZ-SA-LS-A-PA1`
+- `AUTHZ-SA-LS-B-PA1`
+- `AUTHZ-SA-DL-A-PA1`
+- `AUTHZ-SA-CR-A-AAA`
+- `AUTHZ-SA-CR-B-AAA`
+- `AUTHZ-SA-GT-A-AAA`
+- `AUTHZ-SA-LS-A-AAA`
+- `AUTHZ-SA-LS-B-AAA`
+- `AUTHZ-SA-DL-A-AAA`
+- `AUTHZ-SA-CR-A-AAB`
+- `AUTHZ-SA-CR-B-AAB`
+- `AUTHZ-SA-GT-A-AAB`
+- `AUTHZ-SA-LS-A-AAB`
+- `AUTHZ-SA-LS-B-AAB`
+- `AUTHZ-SA-DL-A-AAB`
+- `AUTHZ-SA-CR-A-INV`
+- `AUTHZ-SA-CR-B-INV`
+- `AUTHZ-SA-GT-A-INV`
+- `AUTHZ-SA-LS-A-INV`
+- `AUTHZ-SA-LS-B-INV`
+- `AUTHZ-SA-DL-A-INV`
+- `AUTHZ-AB-CR-A-ANON`
+- `AUTHZ-AB-CR-B-ANON`
+- `AUTHZ-AB-GT-A-ANON`
+- `AUTHZ-AB-DL-A-ANON`
+- `AUTHZ-AB-CR-A-NOB`
+- `AUTHZ-AB-CR-B-NOB`
+- `AUTHZ-AB-GT-A-NOB`
+- `AUTHZ-AB-DL-A-NOB`
+- `AUTHZ-AB-CR-A-PA1`
+- `AUTHZ-AB-CR-B-PA1`
+- `AUTHZ-AB-GT-A-PA1`
+- `AUTHZ-AB-DL-A-PA1`
+- `AUTHZ-AB-CR-A-AAA`
+- `AUTHZ-AB-CR-B-AAA`
+- `AUTHZ-AB-GT-A-AAA`
+- `AUTHZ-AB-DL-A-AAA`
+- `AUTHZ-AB-CR-A-AAB`
+- `AUTHZ-AB-CR-B-AAB`
+- `AUTHZ-AB-GT-A-AAB`
+- `AUTHZ-AB-DL-A-AAB`
+- `AUTHZ-AB-CR-A-INV`
+- `AUTHZ-AB-CR-B-INV`
+- `AUTHZ-AB-GT-A-INV`
+- `AUTHZ-AB-DL-A-INV`
+- `AUTHZ-ULG04-NONMEMBER-PRJGRP-LIST-EMPTY`
+- `AUTHZ-ROLE-LS-ANON`
+- `AUTHZ-ROLE-GT-ANON`
+- `AUTHZ-ROLE-CR-ANON`
+- `AUTHZ-ROLE-UP-ANON`
+- `AUTHZ-ROLE-DL-ANON`
+- `AUTHZ-ROLE-LS-NOB`
+- `AUTHZ-ROLE-GT-NOB`
+- `AUTHZ-ROLE-CR-NOB`
+- `AUTHZ-ROLE-UP-NOB`
+- `AUTHZ-ROLE-DL-NOB`
+- `AUTHZ-ROLE-LS-PA1`
+- `AUTHZ-ROLE-GT-PA1`
+- `AUTHZ-ROLE-CR-PA1`
+- `AUTHZ-ROLE-UP-PA1`
+- `AUTHZ-ROLE-DL-PA1`
+- `AUTHZ-ROLE-LS-AAA`
+- `AUTHZ-ROLE-GT-AAA`
+- `AUTHZ-ROLE-CR-AAA`
+- `AUTHZ-ROLE-UP-AAA`
+- `AUTHZ-ROLE-DL-AAA`
+- `AUTHZ-ROLE-LS-AAB`
+- `AUTHZ-ROLE-GT-AAB`
+- `AUTHZ-ROLE-CR-AAB`
+- `AUTHZ-ROLE-UP-AAB`
+- `AUTHZ-ROLE-DL-AAB`
+- `AUTHZ-ROLE-LS-INV`
+- `AUTHZ-ROLE-GT-INV`
+- `AUTHZ-ROLE-CR-INV`
+- `AUTHZ-ROLE-UP-INV`
+- `AUTHZ-ROLE-DL-INV`
+- `AUTHZ-INV-A-ANON`
+- `AUTHZ-INV-B-ANON`
+- `AUTHZ-INV-A-NOB`
+- `AUTHZ-INV-B-NOB`
+- `AUTHZ-INV-A-PA1`
+- `AUTHZ-INV-B-PA1`
+- `AUTHZ-INV-A-AAA`
+- `AUTHZ-INV-B-AAA`
+- `AUTHZ-INV-A-AAB`
+- `AUTHZ-INV-B-AAB`
+- `AUTHZ-INV-A-INV`
+- `AUTHZ-INV-B-INV`
+- `AUTHZ-INV-FORMA-AAA`
+- `AUTHZ-USR-GT-A-ANON`
+- `AUTHZ-USR-GT-B-ANON`
+- `AUTHZ-USR-LS-A-ANON`
+- `AUTHZ-USR-LS-B-ANON`
+- `AUTHZ-USR-DL-A-ANON`
+- `AUTHZ-USR-GT-A-NOB`
+- `AUTHZ-USR-GT-B-NOB`
+- `AUTHZ-USR-LS-A-NOB`
+- `AUTHZ-USR-LS-B-NOB`
+- `AUTHZ-USR-DL-A-NOB`
+- `AUTHZ-USR-GT-A-PA1`
+- `AUTHZ-USR-GT-B-PA1`
+- `AUTHZ-USR-LS-A-PA1`
+- `AUTHZ-USR-LS-B-PA1`
+- `AUTHZ-USR-DL-A-PA1`
+- `AUTHZ-USR-GT-A-AAA`
+- `AUTHZ-USR-GT-B-AAA`
+- `AUTHZ-USR-LS-A-AAA`
+- `AUTHZ-USR-LS-B-AAA`
+- `AUTHZ-USR-DL-A-AAA`
+- `AUTHZ-USR-GT-A-AAB`
+- `AUTHZ-USR-GT-B-AAB`
+- `AUTHZ-USR-LS-A-AAB`
+- `AUTHZ-USR-LS-B-AAB`
+- `AUTHZ-USR-DL-A-AAB`
+- `AUTHZ-USR-GT-A-INV`
+- `AUTHZ-USR-GT-B-INV`
+- `AUTHZ-USR-LS-A-INV`
+- `AUTHZ-USR-LS-B-INV`
+- `AUTHZ-USR-DL-A-INV`
+- `AUTHZ-USR-GT-SELF-CEREMONY`
+- `AUTHZ-ESC-SELF-ADMIN-A-ANON`
+- `AUTHZ-ESC-SELF-ADMIN-B-ANON`
+- `AUTHZ-ESC-SELF-ADMIN-A-NOB`
+- `AUTHZ-ESC-SELF-ADMIN-B-NOB`
+- `AUTHZ-ESC-SELF-ADMIN-A-PA1`
+- `AUTHZ-ESC-SELF-ADMIN-B-PA1`
+- `AUTHZ-ESC-SELF-ADMIN-A-AAA`
+- `AUTHZ-ESC-SELF-ADMIN-B-AAA`
+- `AUTHZ-ESC-SELF-ADMIN-A-AAB`
+- `AUTHZ-ESC-SELF-ADMIN-B-AAB`
+- `AUTHZ-ESC-SELF-ADMIN-A-INV`
+- `AUTHZ-ESC-SELF-ADMIN-B-INV`
+- `AUTHZ-ESC-ACCT-HIJACK-ANON`
+- `AUTHZ-ESC-ACCT-HIJACK-NOB`
+- `AUTHZ-ESC-ACCT-HIJACK-PA1`
+- `AUTHZ-ESC-ACCT-HIJACK-AAA`
+- `AUTHZ-ESC-ACCT-HIJACK-AAB`
+- `AUTHZ-ESC-ACCT-HIJACK-INV`
+- `AUTHZ-ESC-CUSTOM-ROLE-ANON`
+- `AUTHZ-ESC-CUSTOM-ROLE-NOB`
+- `AUTHZ-ESC-CUSTOM-ROLE-PA1`
+- `AUTHZ-ESC-CUSTOM-ROLE-AAA`
+- `AUTHZ-ESC-CUSTOM-ROLE-AAB`
+- `AUTHZ-ESC-CUSTOM-ROLE-INV`
+- `AUTHZ-DATA-LEAK-USR-LS-ANON`
+- `AUTHZ-DATA-LEAK-USR-LS-NOB`
+- `AUTHZ-DATA-LEAK-USR-LS-PA1`
+- `AUTHZ-DATA-LEAK-USR-LS-AAA`
+- `AUTHZ-DATA-LEAK-USR-LS-AAB`
+- `AUTHZ-DATA-LEAK-USR-LS-INV`
+- `AUTHZ-REVOKE-ENFORCED-A-INV`
+
+## `cases/authz-failclosed.py` — 3 кейсов
+
+> Case-set authz-failclosed — отказ, когда вердикта о правах взять неоткуда.
+
+- `AUTHZ-FAILCLOSED-OPENFGA-DOWN`
+- `AUTHZ-FAILCLOSED-LIST-NEVER-EMPTY-200`
+- `AUTHZ-FAILCLOSED-EDGE-KEY-SOURCE-LANE`
+
+## `cases/authz-sa-apitoken.py` — 30 кейсов
+
+> Case-set authz-sa-apitoken для kacho-iam.
+
+- `AUTHZ-SA-NET-GT-A1`
+- `AUTHZ-SA-NET-LS-A1`
+- `AUTHZ-SA-NET-CR-A1`
+- `AUTHZ-SA-NET-LS-A2-DENY`
+- `AUTHZ-SA-NET-GT-B1`
+- `AUTHZ-SA-NET-CR-B1`
+- `AUTHZ-SA-NET-LS-B1-DENY`
+- `AUTHZ-SA-ACCT-GT-A`
+- `AUTHZ-SA-ACCT-UP-A`
+- `AUTHZ-SA-ESC-SELF-ADMIN`
+- `AUTHZ-SA-ESC-SELF-VPC-B1`
+- `AUTHZ-SA-ESC-SELF-MODIFY`
+- `AUTHZ-SA-ESC-ISSUE-KEY`
+- `AUTHZ-SA-ESC-CUSTOM-ROLE`
+- `AUTHZ-SANG-NET-GT-A1`
+- `AUTHZ-SANG-NET-LS-A1-DENY`
+- `AUTHZ-SANG-NET-CR-A1`
+- `AUTHZ-SANG-SA-LS-A-EMPTY`
+- `AUTHZ-APITOK-NET-GT-A1`
+- `AUTHZ-APITOK-NET-LS-A1`
+- `AUTHZ-APITOK-NET-GT-B1`
+- `AUTHZ-APITOK-ACCT-GT-A`
+- `AUTHZ-APITOK-NET-LS-B1-DENY`
+- `AUTHZ-APITOK-REVOKED-GT-A1`
+- `AUTHZ-APITOK-REVOKED-LS-A1`
+- `AUTHZ-APITOK-MALFORMED-GT-A1`
+- `AUTHZ-APITOK-EXPIRED-GT-A1`
+- `AUTHZ-APITOK-REVOKED-CR`
+- `AUTHZ-APITOK-MALFORMED-CR`
+- `AUTHZ-APITOK-ESC-SELF-ADMIN`
+
+## `cases/basic-access-token.py` — 2 кейсов
+
+> Case-set basic-access-token — БАЗОВЫЙ ТОКЕН ДОСТУПА (задача #1142).
+
+- `IAM-BAT-SECRET-LIFECYCLE-OK`
+- `IAM-BAT-SECRET-TTL-ABOVE-CEILING-NEG`
+
+## `cases/docker-lane-credential-kind.py` — 1 кейсов
+
+> Case-set docker-lane-credential-kind — ДОКЕР-ПОЛОСА ПРИНИМАЕТ ОДИН ВИД (#1143).
+
+- `IAM-DOCKER-LANE-BASIC-TOKEN-ONLY`
+
+## `cases/geo-read.py` — 4 кейсов
+
+> Case-set: AUTHENTICATED kacho-geo public reads through the api-gateway.
+
+- `GEO-ZON-GT-CONF-OK`
+- `GEO-REG-GT-CONF-OK`
+- `GEO-ZON-GT-AUTHZ-ANON-DENY`
+- `GEO-REG-GT-AUTHZ-ANON-DENY`
+
+## `cases/iam-access-binding-account-scope.py` — 9 кейсов
+
+> Case-set: «выдачи субъекта в названном аккаунте» одним вызовом (задача #1737).
+
+- `IAM-AB-SIA-01-FANOUT-OK`
+- `IAM-AB-SIA-06-DISCRIMINATING-OK`
+- `IAM-AB-SIA-02-COMPOSES-WITH-SUBJECT-OK`
+- `IAM-AB-SIA-03-COMPOSES-WITH-INCLUDE-REVOKED-OK`
+- `IAM-AB-SIA-13-EMPTY-IS-LEGAL-OK`
+- `IAM-AB-SIA-10-11-ANTI-ORACLE-OK`
+- `IAM-AB-SIA-12-MALFORMED-NEG`
+- `IAM-AB-SIA-16-WRONG-PREFIX-NEG`
+- `IAM-AB-SIA-14-FORMAT-BEFORE-EMPTY-GRANT-NEG`
+
+## `cases/iam-access-binding-include-revoked.py` — 2 кейсов
+
+> Case-set: флаг `includeRevoked` — на КАЖДОЙ поверхности, которая его принимает.
+
+- `IAM-AB-REV-01-BY-ACCOUNT-INCLUDE-REVOKED-OK`
+- `IAM-AB-REV-02-BY-ROLE-INCLUDE-REVOKED-OK`
+
+## `cases/iam-access-binding-redesign.py` — 17 кейсов
+
+> Case-set для AccessBindingService — IAM-1 REDESIGN (authz-core: scope+target+revoke).
+
+- `IAM-ACB-RD-CR-SCOPE-ALLINSCOPE-OK`
+- `IAM-ACB-RD-CR-TARGET-RESOURCES-OK`
+- `IAM-ACB-RD-CR-NO-TARGET-NEG`
+- `IAM-ACB-RD-CR-TARGET-UNKNOWN-TYPE-NEG`
+- `IAM-ACB-RD-CR-SCOPETYPE-REQUIRED-NEG`
+- `IAM-ACB-RD-UP-SCOPE-IMMUTABLE-NEG`
+- `IAM-ACB-RD-CR-ROLECOVERSTYPE-NEG`
+- `IAM-ACB-RD-CR-ROLE-NOTASSIGNABLE-NEG`
+- `IAM-ACB-RD-CR-SCOPEID-MALFORMED-NEG`
+- `IAM-ACB-RD-DL-HARD-OK`
+- `IAM-ACB-RD-REVOKE-SOFT-OK`
+- `IAM-ACB-RD-REGRANT-AFTER-REVOKE-OK`
+- `IAM-ACB-RD-LS-PAGETOKEN-GARBAGE-NEG`
+- `IAM-ACB-RD-LS-PAGESIZE-OVER-NEG`
+- `IAM-ACB-RD-LS-PAGESIZE-NEGATIVE-VALUE-NEG`
+- `IAM-ACB-RD-LS-FILTER-UNKNOWN-KEY-NEG`
+- `IAM-ACB-RD-LS-FILTER-WHITELIST-OK`
+
+## `cases/iam-account-redesign.py` — 9 кейсов
+
+> Case-set для AccountService + ProjectService — IAM-1 REDESIGN (tenancy-tree).
+
+- `IAM-ACC-RD-CR-OWNER-DERIVE-OK`
+- `IAM-ACC-RD-CR-OWNER-INBODY-ATTACKER-NEG`
+- `IAM-ACC-RD-CR-OWNER-INBODY-SELF-NEG`
+- `IAM-ACC-RD-UP-OWNER-IMMUTABLE-NEG`
+- `IAM-ACC-RD-CR-SAGA-TWO-ID-OK`
+- `IAM-ACC-RD-DL-NONEMPTY-RESTRICT-NEG`
+- `IAM-PRJ-RD-CR-UNDER-ACCOUNT-OK`
+- `IAM-PRJ-RD-UP-ACCOUNT-IMMUTABLE-NEG`
+- `IAM-PRJ-RD-CR-DUP-NAME-PER-ACCOUNT`
+
+## `cases/iam-account.py` — 38 кейсов
+
+> Case-set для AccountService.
+
+- `IAM-ACC-CR-CRUD-OK`
+- `IAM-ACC-CR-NEG-NAME-INVALID`
+- `IAM-ACC-CR-NEG-NAME-DUP`
+- `IAM-ACC-CR-NEG-OWNER-MISSING`
+- `IAM-ACC-CR-AUTHZ-ANON-DENY`
+- `IAM-ACC-CR-AUTHZ-OWNER-MISMATCH-DENY`
+- `IAM-ACC-CR-BVA-NAME-OVER`
+- `IAM-ACC-CR-SEC-INJECTION`
+- `IAM-ACC-GT-CRUD-OK`
+- `IAM-ACC-GT-NEG-NOTFOUND`
+- `IAM-ACC-GT-NEG-ID-MALFORMED`
+- `IAM-ACC-GT-AUTHZ-ANON-DENY`
+- `IAM-ACC-GT-AUTHZ-FOREIGN-DENY`
+- `IAM-ACC-LS-CRUD-OK`
+- `IAM-ACC-LS-AUTHZ-ANON-DENY`
+- `IAM-ACC-LS-AUTHZ-SCOPE-INVITED-ADMIN-SEES`
+- `IAM-ACC-LS-AUTHZ-SECL-CROSS-USER-ISOLATION`
+- `IAM-ACC-LS-BVA-PAGESIZE-0`
+- `IAM-ACC-LS-BVA-PAGESIZE-1`
+- `IAM-ACC-LS-BVA-PAGESIZE-MAX`
+- `IAM-ACC-LS-BVA-PAGESIZE-OVER`
+- `IAM-ACC-LS-NEG-PAGETOKEN-GARBAGE`
+- `IAM-ACC-UP-CRUD-OK`
+- `IAM-ACC-UP-NEG-NOTFOUND`
+- `IAM-ACC-UP-NEG-IMMUTABLE-OWNER`
+- `IAM-ACC-UP-NEG-MASK-UNKNOWN`
+- `IAM-ACC-UP-AUTHZ-ANON-DENY`
+- `IAM-ACC-UP-AUTHZ-NONADMIN-DENY`
+- `IAM-ACC-DL-CRUD-OK`
+- `IAM-ACC-CR-BVA-NAME-MIN`
+- `IAM-ACC-CR-BVA-NAME-MAX`
+- `IAM-ACC-DL-NEG-NOTFOUND`
+- `IAM-ACC-DL-NEG-HAS-CHILDREN`
+- `IAM-ACC-DL-AUTHZ-ANON-DENY`
+- `IAM-ACC-DL-AUTHZ-NONOWNER-DENY`
+- `IAM-ACC-LSOP-CRUD-OK`
+- `IAM-ACC-LSOP-NEG-NOTFOUND`
+- `IAM-ACC-LSOP-AUTHZ-ANON-DENY`
+
+## `cases/iam-authz-grant-check-propagation.py` — 10 кейсов
+
+> Atomic grant→FGA-Check propagation regression suite.
+
+- `AUTHZGCP-OP-GET-ANON-DENY`
+- `AUTHZGCP-OP-CANCEL-ANON-DENY`
+- `AUTHZGCP-SAKEY-SECRET-NOT-LEAKED`
+- `AUTHZGCP-BIND-LIST-BY-SUBJECT-FOREIGN-DENY`
+- `AUTHZGCP-BIND-LIST-BY-SCOPE-SCOPED`
+- `AUTHZGCP-BIND-DELETE-BY-ADMIN-ALLOW`
+- `AUTHZGCP-BIND-DELETE-BY-STRANGER-DENY`
+- `AUTHZGCP-SAKEY-CREATEDBY-NOT-SPOOFABLE`
+- `AUTHZGCP-AB-CREATE-CHECK-VISIBLE`
+- `AUTHZGCP-AB-DELETE-CHECK-INVISIBLE`
+
+## `cases/iam-flat-authz-vbc.py` — 2 кейсов
+
+> Case-set for the flat verb-bearing authz model (iam) — black-box
+
+- `IAM-VBC-ACB-UNSPECIFIED-SUBJECT-DERIVE`
+- `IAM-VBC-ACB-BAD-PREFIX-SUBJECT`
+
+## `cases/iam-group.py` — 33 кейсов
+
+> Case-set для GroupService + member management.
+
+- `IAM-GRP-CR-CRUD-OK`
+- `IAM-GRP-CR-NEG-NAME-INVALID`
+- `IAM-GRP-CR-NEG-ACCOUNT-MISSING`
+- `IAM-GRP-CR-AUTHZ-ANON-DENY`
+- `IAM-GRP-CR-AUTHZ-NONADMIN-DENY`
+- `IAM-GRP-GT-CRUD-OK`
+- `IAM-GRP-GT-NEG-NOTFOUND`
+- `IAM-GRP-GT-AUTHZ-FOREIGN-DENY`
+- `IAM-GRP-LS-CRUD-OK`
+- `IAM-GRP-LS-AUTHZ-ANON-DENY`
+- `IAM-GRP-LS-AUTHZ-SCOPE-FILTER`
+- `IAM-GRP-LS-BVA-PAGESIZE-0`
+- `IAM-GRP-LS-BVA-PAGESIZE-1`
+- `IAM-GRP-LS-BVA-PAGESIZE-MAX`
+- `IAM-GRP-LS-BVA-PAGESIZE-OVER`
+- `IAM-GRP-UP-CRUD-OK`
+- `IAM-GRP-UP-NEG-NOTFOUND`
+- `IAM-GRP-UP-AUTHZ-NONADMIN-DENY`
+- `IAM-GRP-UP-AUTHZ-DELEGATED-ADMIN-ALLOW`
+- `IAM-GRP-AM-CRUD-OK`
+- `IAM-GRP-AM-IDEMPOTENT-DUP`
+- `IAM-GRP-AM-NEG-MEMBER-MISSING`
+- `IAM-GRP-AM-AUTHZ-NONADMIN-DENY`
+- `IAM-GRP-RM-CRUD-OK`
+- `IAM-GRP-RM-IDEMPOTENT-NOT-MEMBER`
+- `IAM-GRP-RM-AUTHZ-NONADMIN-DENY`
+- `IAM-GRP-LM-CRUD-OK`
+- `IAM-GRP-LM-NEG-NOTFOUND`
+- `IAM-GRP-LM-AUTHZ-FOREIGN-DENY`
+- `IAM-GRP-DL-CRUD-OK`
+- `IAM-GRP-DL-NEG-NOTFOUND`
+- `IAM-GRP-DL-AUTHZ-ANON-DENY`
+- `IAM-GRP-LSOP-CRUD-OK`
+
+## `cases/iam-interactive-client.py` — 8 кейсов
+
+> Case-set: InternalInteractiveClientService — the interactive-login client (IAM-INT-1, S1).
+
+- `IAM-IC-CR-CRUD-OK`
+- `IAM-IC-CR-CONF-DUP-NAME`
+- `IAM-IC-CR-VAL-REDIRECT-URIS`
+- `IAM-IC-GT-NEG-ABSENT`
+- `IAM-IC-GT-VAL-MALFORMED-ID`
+- `IAM-IC-UP-VAL-IMMUTABLE-MASK`
+- `IAM-IC-UP-VAL-UNKNOWN-MASK`
+- `IAM-IC-DL-IDM-REPEAT`
+
+## `cases/iam-internal-only-check.py` — 16 кейсов
+
+> Case-set для iam-internal-only-check.
+
+- `IAM-INT-NEG-EXT-REST-ALIVE`
+- `IAM-INT-NEG-EXT-USER-UPSERT`
+- `IAM-INT-NEG-EXT-IAM-LOOKUPSUBJECT`
+- `IAM-INT-NEG-EXT-IAM-CHECK`
+- `IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS`
+- `IAM-INT-OK-INT-USER-UPSERT`
+- `IAM-INT-OK-INT-USER-UPSERT-IDEM`
+- `IAM-INT-OK-INT-IAM-LOOKUPSUBJECT`
+- `IAM-INT-OK-INT-IAM-LOOKUPSUBJECT-UNKNOWN`
+- `IAM-INT-OK-INT-IAM-CHECK`
+- `IAM-INT-NEG-EXT-IC-LIST`
+- `IAM-INT-NEG-EXT-IC-CREATE`
+- `IAM-INT-OK-INT-IC-LIST`
+- `IAM-INT-NEG-EXT-LIMIT-LIST`
+- `IAM-INT-NEG-EXT-LIMIT-CREATE`
+- `IAM-INT-OK-INT-LIMIT-LIST`
+
+## `cases/iam-invite-grant-fga.py` — 4 кейсов
+
+> RC-1 — anchor-grant FGA materialization (e2e, black-box) — GREEN BY THE RIGHT REASON.
+
+- `INVGRANT-TE1-ACCOUNT-ANCHOR-VIEWER-RC1`
+- `INVGRANT-TE2-CROSS-ACCOUNT-PROJECT-INVISIBLE`
+- `INVGRANT-TE3-ARMNAMES-ACCOUNT-PARITY`
+- `INVGRANT-TE4-PROJECT-ANCHOR-VIEWER-RC1`
+
+## `cases/iam-limit.py` — 11 кейсов
+
+> Case-set: InternalLimitService — resource-count ceilings (issue #291, stage S1).
+
+- `IAM-LIM-CR-CRUD-OK`
+- `IAM-LIM-CR-VAL-NEG-VALUE`
+- `IAM-LIM-CR-VAL-KIND`
+- `IAM-LIM-GT-NEG-ABSENT`
+- `IAM-LIM-GT-VAL-MALFORMED-ID`
+- `IAM-LIM-CR-CONF-DUP-TRIPLE`
+- `IAM-LIM-CR-NEG-ABSENT-SCOPE`
+- `IAM-LIM-RS-CRUD-PRECEDENCE`
+- `IAM-LIM-RS-SEC-NARROW-GATE`
+- `IAM-LIM-CS-CRUD-DELTA`
+- `IAM-LIM-DL-IDM-REPEAT`
+
+## `cases/iam-list-visibility.py` — 3 кейсов
+
+> Case-set iam-list-visibility — страница списка есть страница ВИДИМОГО (задача #645).
+
+- `IAM-645-LIST-VISIBLE-PAGE-PROJECTS`
+- `IAM-645-LIST-VISIBLE-PAGE-ACCOUNTS`
+- `IAM-645-LIST-VISIBLE-PAGE-USERS`
+
+## `cases/iam-membership-read.py` — 7 кейсов
+
+> Case-set чтения принадлежности человека аккаунту (IAM-ID-2, стадия S1).
+
+- `IAM-ID2-LIST-CRUD-OK`
+- `IAM-ID2-INVITED-PENDING-OK`
+- `IAM-ID2-NEG-FOREIGN-ACCOUNT`
+- `IAM-ID2-NEG-FORM`
+- `IAM-ID2-NEG-PAGINATION`
+- `IAM-ID2-ORACLE-EMPTY`
+- `IAM-ID2-ORACLE-GET-404`
+
+## `cases/iam-permission-catalog.py` — 2 кейсов
+
+> Case-set: PermissionCatalogService.ListPermissionCatalog.
+
+- `CONF-G-01-catalog-happy`
+- `NEG-G-02-catalog-anonymous-unauthenticated`
+
+## `cases/iam-project.py` — 33 кейсов
+
+> Case-set для ProjectService.
+
+- `IAM-PRJ-CR-CRUD-OK`
+- `IAM-PRJ-CR-NEG-NAME-INVALID`
+- `IAM-PRJ-CR-NEG-NAME-DUP`
+- `IAM-PRJ-CR-NEG-ACCOUNT-MISSING`
+- `IAM-PRJ-CR-AUTHZ-ANON-DENY`
+- `IAM-PRJ-CR-AUTHZ-NONADMIN-DENY`
+- `IAM-PRJ-CR-BVA-NAME-MIN`
+- `IAM-PRJ-CR-BVA-NAME-MAX`
+- `IAM-PRJ-CR-BVA-NAME-OVER`
+- `IAM-PRJ-GT-CRUD-OK`
+- `IAM-PRJ-GT-NEG-NOTFOUND`
+- `IAM-PRJ-GT-AUTHZ-ANON-DENY`
+- `IAM-PRJ-GT-AUTHZ-FOREIGN-DENY`
+- `IAM-PRJ-LS-CRUD-OK`
+- `IAM-PRJ-LS-AUTHZ-ANON-DENY`
+- `IAM-PRJ-LS-AUTHZ-INVITED-ADMIN-SEES`
+- `IAM-PRJ-LS-AUTHZ-SECL-CROSS-USER-ISOLATION`
+- `IAM-PRJ-LS-NEG-PAGINATION-CONSISTENT`
+- `IAM-PRJ-LS-BVA-PAGESIZE-0`
+- `IAM-PRJ-LS-BVA-PAGESIZE-1`
+- `IAM-PRJ-LS-BVA-PAGESIZE-MAX`
+- `IAM-PRJ-LS-BVA-PAGESIZE-OVER`
+- `IAM-PRJ-UP-CRUD-OK`
+- `IAM-PRJ-UP-NEG-NOTFOUND`
+- `IAM-PRJ-UP-NEG-IMMUTABLE-ACCOUNT`
+- `IAM-PRJ-UP-AUTHZ-ANON-DENY`
+- `IAM-PRJ-UP-AUTHZ-NONADMIN-DENY`
+- `IAM-PRJ-DL-CRUD-OK`
+- `IAM-PRJ-DL-NEG-NOTFOUND`
+- `IAM-PRJ-DL-NEG-HAS-CHILDREN`
+- `IAM-PRJ-DL-AUTHZ-ANON-DENY`
+- `IAM-PRJ-LSOP-CRUD-OK`
+- `IAM-PRJ-LSOP-NEG-NOTFOUND`
+
+## `cases/iam-rbac-rules-labels.py` — 2 кейсов
+
+> RBAC rules model — black-box matchLabels suite.
+
+- `RBACLBL-FED-ACCEPTED`
+- `RBACLBL-IAMTYPE-ACCEPTED`
+
+## `cases/iam-rbac-scope-grant.py` — 2 кейсов
+
+> RBAC explicit model — black-box FGA Check matrix.
+
+- `RBACSG-ESCALATION-CLOSED`
+- `RBACSG-PER-VERB`
+
+## `cases/iam-rbac-subjects.py` — 14 кейсов
+
+> RBAC rules model — black-box subjects[] / ExpandAccess / ListByRole suite.
+
+- `RBACSUBJ-CR-MULTI-OK`
+- `RBACSUBJ-CR-VAL-SUBJECTS-EMPTY`
+- `RBACSUBJ-CR-VAL-SUBJECTS-OVER32`
+- `RBACSUBJ-PROJ-NEWAUTHOR-LEGACY-FILLED`
+- `RBACSUBJ-PROJ-LEGACYAUTHOR-SUBJECTS-FILLED`
+- `RBACSUBJ-LISTBYROLE-OK`
+- `RBACSUBJ-LISTBYROLE-VAL-MALFORMED`
+- `RBACSUBJ-LISTBYROLE-UNAUTH`
+- `RBACSUBJ-EXPAND-GROUP-OK`
+- `RBACSUBJ-GROUP-GRANTS-MEMBER-OK`
+- `RBACSUBJ-EXPAND-UNAUTH`
+- `RBACSUBJ-EXPAND-FOREIGN-DENIED`
+- `RBACSUBJ-EXPAND-VAL-PAIR`
+- `RBACSUBJ-EXPAND-VAL-RELATION`
+
+## `cases/iam-read-authz-vget.py` — 3 кейсов
+
+> Case-set для read-authz v_get (iam) — black-box через api-gateway.
+
+- `IAM-RDAUTHZ-ACC-GT-GRANTED-NONOWNER-OK`
+- `IAM-RDAUTHZ-ACC-GT-NONGRANTED-DENY`
+- `IAM-RDAUTHZ-ACC-GT-NONEXISTENT-EQ-DENIED`
+
+## `cases/iam-role-redesign.py` — 10 кейсов
+
+> Case-set для RoleService — IAM-1 REDESIGN (authz-core: definitionTier + catalog).
+
+- `IAM-ROL-RD-CR-DEFINITIONTIER-OK`
+- `IAM-ROL-RD-CR-DEFINITIONTIER-EMPTY-TIERTYPE-NEG`
+- `IAM-ROL-RD-CR-LEGACY-BOTH-SCOPES-XOR-NEG`
+- `IAM-ROL-RD-GT-NO-COMPILED-PERMISSIONS`
+- `IAM-ROL-RD-CR-PERMISSIONS-INPUT-REJECT-NEG`
+- `IAM-ROL-RD-CR-EMPTY-RULES-REJECT-NEG`
+- `IAM-ROL-RD-LS-CANONICAL-CATALOG-OK`
+- `IAM-ROL-RD-UP-SYSTEM-IMMUTABLE-NEG`
+- `IAM-ROL-RD-DL-SYSTEM-NEG`
+- `IAM-ROL-RD-CR-UNKNOWN-RESOURCE-TOKEN-NEG`
+
+## `cases/iam-role.py` — 44 кейсов
+
+> Case-set для RoleService.
+
+- `IAM-ROL-CR-CRUD-OK`
+- `IAM-ROL-CR-NEG-NAME-INVALID`
+- `IAM-ROL-CR-NEG-RULE-INVALID`
+- `IAM-ROL-CR-NEG-MODULE-UNKNOWN`
+- `IAM-ROL-CR-NEG-PERMISSIONS-REJECTED`
+- `IAM-ROL-CR-AUTHZ-FOREIGN-ACCOUNT-DENY`
+- `IAM-ROL-CR-AUTHZ-ANON-DENY`
+- `IAM-ROL-CR-AUTHZ-NONADMIN-DENY`
+- `IAM-ROL-GT-CRUD-OK`
+- `IAM-ROL-GT-NEG-NOTFOUND`
+- `IAM-ROL-GT-NEG-FOREIGN-CUSTOM-404`
+- `IAM-ROL-LS-SYSTEM-ONLY-NO-ACCOUNT`
+- `IAM-ROL-LS-SYSTEM-PLUS-CUSTOM-WITH-ACCOUNT`
+- `IAM-ROL-LS-NEG-NO-FOREIGN-CUSTOM`
+- `IAM-ROL-LS-AUTHZ-ANON`
+- `IAM-ROL-LS-BVA-PAGESIZE-0`
+- `IAM-ROL-LS-BVA-PAGESIZE-1`
+- `IAM-ROL-LS-BVA-PAGESIZE-MAX`
+- `IAM-ROL-LS-BVA-PAGESIZE-OVER`
+- `IAM-ROL-UP-CRUD-OK`
+- `IAM-ROL-UP-NEG-SYSTEM-NO-PATH`
+- `IAM-ROL-UP-NEG-NOTFOUND`
+- `IAM-ROL-UP-AUTHZ-NONADMIN-DENY`
+- `IAM-ROL-DL-CRUD-OK`
+- `IAM-ROL-DL-NEG-SYSTEM`
+- `IAM-ROL-DL-NEG-IN-USE`
+- `IAM-ROL-DL-AUTHZ-NONADMIN-DENY`
+- `IAM-ROL-LSOP-CRUD-OK`
+- `IAM-ROL-LSOP-NEG-PAGE-TOKEN-GARBAGE`
+- `IAM-ROL-CR-RULES-VERB-STAR-OK`
+- `IAM-ROL-CR-RULES-MODULE-STAR-DENY`
+- `IAM-ROL-CR-RULES-RESOURCE-STAR-DENY`
+- `IAM-ROL-CR-RULES-FEEDGATE-IAMROLE-OK`
+- `IAM-ROL-CR-RULES-FEEDGATE-IAMPROJECT-OK`
+- `IAM-ROL-CR-RULES-XOR-DENY`
+- `IAM-ROL-CR-RULES-EMPTY-DENY`
+- `IAM-ROL-CR-RULES-CAP-OVER-DENY`
+- `IAM-ROLE-F52-RULES-PUBLIC`
+- `IAM-ROLE-F52-PERMS-REJECTED`
+- `IAM-ROL-CR-PROJECT-SCOPED`
+- `IAM-ROL-CR-NEG-BOTH-SCOPES`
+- `IAM-ROL-CR-NEG-NO-SCOPE`
+- `IAM-ROL-UP-T33-LABELS-OK`
+- `IAM-ROL-CR-T33-NEG-BADLABELS`
+
+## `cases/iam-service-account.py` — 28 кейсов
+
+> Case-set для ServiceAccountService.
+
+- `IAM-SVA-CR-CRUD-OK`
+- `IAM-SVA-CR-NEG-NAME-INVALID`
+- `IAM-SVA-CR-NEG-NAME-DUP`
+- `IAM-SVA-CR-NEG-PROJECT-MISSING`
+- `IAM-SVA-CR-AUTHZ-ANON-DENY`
+- `IAM-SVA-CR-AUTHZ-NONADMIN-DENY`
+- `IAM-SVA-GT-CRUD-OK`
+- `IAM-SVA-GT-NEG-NOTFOUND`
+- `IAM-SVA-GT-AUTHZ-FOREIGN-DENY`
+- `IAM-SVA-LS-CRUD-OK`
+- `IAM-SVA-LS-AUTHZ-ANON-DENY`
+- `IAM-SVA-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY`
+- `IAM-SVA-LS-BVA-PAGESIZE-0`
+- `IAM-SVA-LS-BVA-PAGESIZE-1`
+- `IAM-SVA-LS-BVA-PAGESIZE-MAX`
+- `IAM-SVA-LS-BVA-PAGESIZE-OVER`
+- `IAM-SVA-UP-CRUD-OK`
+- `IAM-SVA-UP-NEG-NOTFOUND`
+- `IAM-SVA-UP-NEG-IMMUTABLE-PROJECT`
+- `IAM-SVA-UP-AUTHZ-NONADMIN-DENY`
+- `IAM-SVA-DL-CRUD-OK`
+- `IAM-SVA-DL-NEG-NOTFOUND`
+- `IAM-SVA-DL-AUTHZ-ANON-DENY`
+- `IAM-SVA-LSOP-CRUD-OK`
+- `IAM-SVA-LSOP-NEG-NOTFOUND`
+- `IAM-SVA-DIS-CRUD-OK`
+- `IAM-SVA-DIS-NEG-NOTFOUND`
+- `IAM-SVA-DIS-NEG-CROSS-ACCOUNT`
+
+## `cases/iam-subject-privileges-read.py` — 6 кейсов
+
+> Case-set чтения ПРИВИЛЕГИЙ названного субъекта чёрным ящиком (задача #1438).
+
+- `IAM-ACB-LSP-SELF-OK`
+- `IAM-ACB-LSP-ADMIN-NARROWED`
+- `IAM-ACB-LSP-STRANGER-DENY`
+- `IAM-ACB-LSP-DENY-NO-ORACLE`
+- `IAM-ACB-LSP-VAL`
+- `IAM-ACB-LSP-PAGE-BEFORE-IDENTITY`
+
+## `cases/iam-system-grant-visibility.py` — 1 кейсов
+
+> Case-set: встроенный доступ платформы ВИДЕН на поверхности выдач.
+
+- `IAM-ACB-SYSGRANT-VISIBLE-OK`
+
+## `cases/iam-token-facade-conformance.py` — 7 кейсов
+
+> Case-set: iam is the SINGLE FACADE to the token-signing provider (#59, Phase C).
+
+- `IBT-04-FACADE-VERIFIES-THE-BEARER-THE-EDGE-ACCEPTS`
+- `IBT-12-FACADE-JWKS-MIRRORS-THE-PROVIDER`
+- `IBT-05-CREDENTIAL-LIFECYCLE-THROUGH-FACADE-RPCS`
+- `IBT-13-PRINCIPAL-CLAIMS-STAMPED-BY-THE-FACADE-HOOK`
+- `IBT-06-BOOTSTRAP-MINT-HAS-NO-REST-DOOR`
+- `IBT-15-PROVIDER-SURFACES-NOT-REACHABLE-THROUGH-THE-EDGE`
+- `IBT-10-ONLY-FACADE-ISSUED-RS256-IS-ACCEPTED`
+
+## `cases/iam-user.py` — 43 кейсов
+
+> Case-set для UserService.
+
+- `IAM-USR-GT-CRUD-OK`
+- `IAM-USR-GT-NEG-NOTFOUND`
+- `IAM-USR-GT-AUTHZ-ANON-DENY`
+- `IAM-USR-GT-AUTHZ-FOREIGN-DENY`
+- `IAM-USR-LS-CRUD-OK`
+- `IAM-USR-LS-AUTHZ-ANON-DENY`
+- `IAM-USR-LS-AUTHZ-SCOPE-NONMEMBER-EMPTY`
+- `IAM-USR-SETUP-INVITE-INV-TO-B`
+- `IAM-USR-LS-AUTHZ-MEMBER-NO-OVERSHOW`
+- `IAM-USR-LS-BVA-PAGESIZE-0`
+- `IAM-USR-LS-BVA-PAGESIZE-1`
+- `IAM-USR-LS-BVA-PAGESIZE-MAX`
+- `IAM-USR-LS-BVA-PAGESIZE-OVER`
+- `IAM-USR-INV-CRUD-OK`
+- `IAM-USR-INV-NEG-EMAIL-INVALID`
+- `IAM-USR-INV-NEG-ROLE-MISSING`
+- `IAM-USR-INV-IDEM-REINVITE`
+- `IAM-USR-INV-AUTHZ-ANON-DENY`
+- `IAM-USR-INV-AUTHZ-NONADMIN-DENY`
+- `IAM-USR-INV-FLOW-INVITEE-GETS-ACCESS`
+- `IAM-USR-DL-CRUD-OK`
+- `IAM-USR-DL-NEG-ACTIVE-BINDINGS`
+- `IAM-USR-DL-NEG-NOTFOUND`
+- `IAM-USR-DL-AUTHZ-ANON-DENY`
+- `IAM-USR-DL-AUTHZ-NONADMIN-DENY`
+- `IAM-USR-UP-CRUD-OK-LABELS`
+- `IAM-USR-UP-NEG-IMMUTABLE-EXTERNALID`
+- `IAM-USR-BLK-NEG-PENDING`
+- `IAM-USR-UBK-NEG-PENDING`
+- `IAM-USR-BLK-NEG-NOTFOUND`
+- `IAM-USR-BLK-AUTHZ-ANON-DENY`
+- `IAM-USR-BLK-NEG-CROSS-ACCOUNT`
+- `IAM-USR-GOV-NEG-ACCOUNT-ADMIN`
+- `IAM-USR-EXCL-CRUD-OK`
+- `IAM-USR-EXCL-NEG-CROSS-ACCOUNT`
+- `IAM-USR-EXCL-NEG-LIVE-GRANT`
+- `IAM-USR-RMID-NEG-ACCOUNT-ADMIN`
+- `IAM-USR-IDENTITY-GLOBAL-TWO-ACCOUNTS`
+- `IAM-USR-TOK-ACTAS-NEG-INVITER`
+- `IAM-USR-TOK-ACTAS-POS-SELF`
+- `IAM-USR-TOK-READ-POS-SELF`
+- `IAM-USR-TOK-READ-NEG-ACCOUNT-ADMIN`
+- `IAM-USR-TOK-READ-NEG-TENANT`
+
+## `cases/iam-whoami.py` — 3 кейсов
+
+> Case-set для AuthorizeService.WhoAmI.
+
+- `IAM-WAI-GT-CRUD-OK`
+- `IAM-WAI-GT-AUTHZ-ANON-DENY`
+- `IAM-WAI-GT-CRUD-NOB`
+
+## `cases/label-revoke-iam.py` — 2 кейсов
+
+> IAM-native label clear via updateMask=labels — revokes ARM_LABELS grant (e2e, black-box).
+
+- `IAM-LBLCLEAR-PROJECT-EMPTY-01`
+- `IAM-LBLREVOKE-PROJECT-01`
+
+## `cases/label-revoke-nlb.py` — 1 кейсов
+
+> Cross-service ARM_LABELS revoke-on-label-change, nlb.listener (e2e).
+
+- `T31-LBLREVOKE-NLB-LISTENER-04`
+
+## `cases/label-revoke-storage.py` — 3 кейсов
+
+> Cross-service ARM_LABELS revoke-on-label-change, storage resources (e2e).
+
+- `T31-LBLREVOKE-STORAGE-VOLUME-03`
+- `T31-LBLREVOKE-STORAGE-SNAPSHOT-03`
+- `T31-LBLREVOKE-STORAGE-IMAGE-03`
+
+## `cases/label-revoke-vpc.py` — 8 кейсов
+
+> Cross-service ARM_LABELS revoke-on-label-change, vpc resources (e2e, black-box).
+
+- `T31-LBLREVOKE-VPC-NETWORK-01`
+- `T31-LBLREVOKE-VPC-SECGROUP-02`
+- `T31-LBLREVOKE-VPC-NETWORK-ADD-01`
+- `T31-LBLREVOKE-VPC-NETWORK-CHANGE-01`
+- `T31-LBLREVOKE-VPC-NETWORK-IDM-01`
+- `T31-LBLREVOKE-VPC-NETWORK-FULLPATCH-01`
+- `T31-LBLREVOKE-VPC-NETWORK-UNAVAIL-01`
+- `T31-LBLREVOKE-VPC-INVITE-GRANT-REVOKE`
+
+## `cases/rbac-subject-channel-equivalence.py` — 8 кейсов
+
+> RBAC explicit model — subject-channel equivalence black-box suite.
+
+- `IAM-CH-USER-EQUIV-OK`
+- `IAM-CH-GRP-EQUIV-OK`
+- `IAM-CH-GRP-MEMBERSHIP-FLIP-OK`
+- `IAM-CH-GRP-NONMEMBER-DENY`
+- `IAM-CH-GRP-REVOKE-BINDING-OK`
+- `IAM-CH-SA-EQUIV-OK`
+- `IAM-CH-SA-USER-ISOLATION-DENY`
+- `IAM-CH-USER-SA-ISOLATION-DENY`
+
+## `cases/rbac-visibility-set.py` — 7 кейсов
+
+> RBAC explicit model — exact-set visibility invariants black-box suite.
+
+- `IAM-SET-PRJ-LABEL-EXACT-OK`
+- `IAM-SET-PRJ-LIST-READ-PARITY`
+- `IAM-SET-SVA-LABEL-EXACT-OK`
+- `IAM-SET-ROL-LABEL-EXACT-OK`
+- `IAM-SET-GRP-LABEL-EXACT-OK`
+- `IAM-SET-SVA-LIST-READ-PARITY`
+- `IAM-SET-GRP-LIST-READ-PARITY`
+

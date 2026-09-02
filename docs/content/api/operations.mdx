@@ -1,6 +1,6 @@
 ---
 id: operations
-sidebar_position: 12
+sidebar_position: 13
 title: Операции
 ---
 
@@ -38,7 +38,7 @@ import dedent from 'ts-dedent'
 <CodeBlock language="json">
   {dedent`
     {
-      "id": "iop_8b0c4d2e6f1a3",
+      "id": "iop3qz8v5n2wk7d0mfht",
       "description": "create account acme",
       "createdAt": "2026-06-24T10:00:00Z",
       "done": true,
@@ -57,7 +57,7 @@ import dedent from 'ts-dedent'
 <CodeBlock language="json">
   {dedent`
     {
-      "id": "iop_8b0c4d2e6f1a3",
+      "id": "iop3qz8v5n2wk7d0mfht",
       "done": true,
       "error": { "code": 9, "message": "account has non-empty projects", "details": [] }
     }
@@ -77,7 +77,7 @@ import dedent from 'ts-dedent'
 
 <CodeBlock language="bash">
   {dedent`
-    curl 'http://localhost:18080/operations/iop_8b0c4d2e6f1a3' \\
+    curl 'http://localhost:18080/operations/iop3qz8v5n2wk7d0mfht' \\
       -H 'Authorization: Bearer <JWT>'
   `}
 </CodeBlock>

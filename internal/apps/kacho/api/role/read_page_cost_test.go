@@ -153,7 +153,7 @@ func crowdedRoleScenario(t *testing.T) (*roleListFakeRepo, *pageCostRoleRelation
 	grantedIDs = append(grantedIDs, ownedID)
 
 	repo := newRoleListFakeRepo()
-	seedCustomRole(repo, ownedID, "acc-A")
+	seedCustomRole(repo, ownedID, "acc-A000000000000000")
 
 	return repo, newPageCostRoleRelations(grantedIDs...), ownedID
 }
@@ -219,7 +219,7 @@ func TestListRoles_SystemOnlyPageAsksNothingAboutObjects(t *testing.T) {
 // Get, and a system role stays the catalog floor (no relation question at all).
 func TestRoleReads_UngrantedCustomStaysInvisibleInACrowdedType(t *testing.T) {
 	repo, rel, _ := crowdedRoleScenario(t)
-	seedCustomRole(repo, "rol0000000000000scrt", "acc-A") // never granted
+	seedCustomRole(repo, "rol0000000000000scrt", "acc-A000000000000000") // never granted
 	seedSystemRole(repo, "rol0000000000000sys1")
 
 	t.Run("List omits the ungranted custom role but keeps system", func(t *testing.T) {

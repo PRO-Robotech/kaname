@@ -104,7 +104,7 @@ func TestListAccounts_PageMembershipRequiresReadRelation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newAcctListFakeRepo()
 			seedAcct(repo, "acc-1", "usr-owner")
-			seedAcct(repo, "acc-2", "usr-other")
+			seedAcct(repo, "acc-2", "usr-other00000000000")
 
 			fga := newAcctUnionFGAStub()
 			fga.set(tc.relation, "user:usr-u1", []string{"acc-1"})
@@ -130,7 +130,7 @@ func TestListAccounts_ReadRelationDedup(t *testing.T) {
 	repo := newAcctListFakeRepo()
 	seedAcct(repo, "acc-1", "usr-u1")
 	seedAcct(repo, "acc-2", "usr-u1")
-	seedAcct(repo, "acc-3", "usr-other")
+	seedAcct(repo, "acc-3", "usr-other00000000000")
 
 	fga := newAcctUnionFGAStub()
 	fga.set("v_get", "user:usr-u1", []string{"acc-1", "acc-2"})
@@ -147,7 +147,7 @@ func TestListAccounts_ReadRelationDedup(t *testing.T) {
 func TestListAccounts_P7_ForeignAccount_NoLeak(t *testing.T) {
 	repo := newAcctListFakeRepo()
 	seedAcct(repo, "acc-1", "usr-u1")
-	seedAcct(repo, "acc-foreign", "usr-other")
+	seedAcct(repo, "acc-foreign", "usr-other00000000000")
 
 	fga := newAcctUnionFGAStub()
 	fga.set("v_list", "user:usr-u1", []string{"acc-1"})

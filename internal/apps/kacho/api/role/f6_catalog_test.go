@@ -52,7 +52,7 @@ func TestRole_IAM_1_15_DtoCatalogFields(t *testing.T) {
 		assert.True(t, pb.GetIsSystem())
 	})
 	t.Run("custom role: displayName=name, empty purpose", func(t *testing.T) {
-		r := domain.Role{ID: "rol-c", AccountID: "acc-A", Name: "app-deployer", Rules: f4Rules()}
+		r := domain.Role{ID: "rol-c000000000000000", AccountID: "acc-A000000000000000", Name: "app-deployer", Rules: f4Rules()}
 		pb, err := roleToPb(r)
 		require.NoError(t, err)
 		assert.Equal(t, "app-deployer", pb.GetDisplayName())
@@ -69,11 +69,11 @@ func TestRole_IAM_1_15_ListCanonicalFirst(t *testing.T) {
 		repo.roles[string(r.ID)] = r
 	}
 	// a non-canonical system role + a custom role
-	repo.roles["rol0000000000000other"] = domain.Role{ID: "rol0000000000000other", ClusterID: "cluster_kacho_root", IsSystem: true, Name: "iam.user.view", Rules: f4Rules()}
-	repo.roles["rol00000000000000cust"] = domain.Role{ID: "rol00000000000000cust", AccountID: "acc-A", Name: "custom-role", Rules: f4Rules()}
+	repo.roles["rol000000000000other"] = domain.Role{ID: "rol000000000000other", ClusterID: "cluster_kacho_root", IsSystem: true, Name: "iam.user.view", Rules: f4Rules()}
+	repo.roles["rol0000000000000cust"] = domain.Role{ID: "rol0000000000000cust", AccountID: "acc-A000000000000000", Name: "custom-role", Rules: f4Rules()}
 
 	fga := newRoleFGAStub()
-	fga.set("user:usr-1", []string{"rol00000000000000cust"}) // custom visible to caller
+	fga.set("user:usr-1", []string{"rol0000000000000cust"}) // custom visible to caller
 
 	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxUser("usr-1"), reporole.ListFilter{PageSize: 100})

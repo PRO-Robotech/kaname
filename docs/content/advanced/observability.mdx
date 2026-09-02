@@ -20,7 +20,7 @@ Kachō IAM — центральный авторизатор платформы,
   <tbody>
     <tr><td><strong>gRPC RPC</strong></td><td>Rate / latency / error по методам (p50/p95/p99); всплеск <code>PERMISSION_DENIED</code> / <code>UNAUTHENTICATED</code></td></tr>
     <tr><td><strong>Authz Check</strong></td><td>Латентность <code>Check</code> (бюджет ≤ 30 ms p95); доля deny; отказы вердикта</td></tr>
-    <tr><td><strong>Сброс кэша края</strong></td><td>Темп записи в <code>subject_change_outbox</code> и рейт <code>PollSubjectChanges</code>. Отставание живёт <strong>у читателя</strong>: журнал читает сам api-gateway курсором, и «докуда дочитали» со стороны iam не видно. Глубина журнала растёт монотонно и отставанием <strong>не является</strong></td></tr>
+    <tr><td><strong>Сброс кэша края</strong></td><td>Темп записи в <code>subject_change_outbox</code> и рейт <code>PollSubjectChanges</code>. Отставание живёт <strong>у читателя</strong>: журнал читает сам api-gateway курсором, и «докуда дочитали» со стороны iam не видно. Глубина журнала отставанием <strong>не является</strong>: строки снимает фоновая уборка по сроку, поэтому число выходит на полку, а его падение — норма</td></tr>
     <tr><td><strong>Пул БД</strong></td><td>Занятость pgx-пула, длительность транзакций, contention</td></tr>
     <tr><td><strong>Операции (LRO)</strong></td><td>Длительность операций, доля ошибок worker'а</td></tr>
     <tr><td><strong>Ory-интеграции</strong></td><td>Латентность / ошибки вызовов Hydra (Issue/Revoke) и identity-хуков Kratos</td></tr>

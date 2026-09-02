@@ -151,8 +151,8 @@ func (r *recordingOpsRepo) ListOwned(_ context.Context, f operations.ListFilter,
 var _ operations.OwnedOperationRepo = (*recordingOpsRepo)(nil)
 
 var (
-	sharedCaller = operations.Principal{Type: "user", ID: "usr-caller", DisplayName: "caller@kacho.local"}
-	sharedOther  = operations.Principal{Type: "user", ID: "usr-other", DisplayName: "other@kacho.local"}
+	sharedCaller = operations.Principal{Type: "user", ID: "usr-caller0000000000", DisplayName: "caller@kacho.local"}
+	sharedOther  = operations.Principal{Type: "user", ID: "usr-other00000000000", DisplayName: "other@kacho.local"}
 )
 
 // Этот use-case обслуживает семь RPC iam разом, поэтому утверждение о выдаче

@@ -123,7 +123,11 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 	case pgfault.Unique: // unique_violation
 		return iamerr.Wrapf(iamerr.ErrAlreadyExists, "%s", uniqueText(pgErr, kindHint, idHint))
 	case pgfault.ForeignKey: // foreign_key_violation
-		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "%s", fkText(pgErr, kindHint, idHint))
+		// Признак берётся от `fkText`: он и только он знает, какая из двух
+		// сторон ссылки нарушена. Обе вложены в ErrFailedPrecondition, поэтому
+		// код отказа не меняется — меняется различимость.
+		text, lane := fkText(pgErr, kindHint, idHint)
+		return iamerr.Wrapf(lane, "%s", text)
 	case pgfault.Check: // check_violation
 		// Полоса ФОРМЫ ИМЕНИ отделена от прочих проверок, и отделена по вопросу
 		// «чьё это значение» (задача #718, здесь — #1279).
@@ -155,7 +159,10 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// READ COMMITTED regime (within-service invariants use single-statement
 		// CAS / advisory locks / triggers, none of which raise 40001); mapped
 		// correctly so a future SERIALIZABLE path surfaces a retryable code.
-		return iamerr.Wrapf(iamerr.ErrAborted, "serialization conflict, retry")
+		// Текст называет ДЕЙСТВИЕ вызывающего, а не уровень изоляции СУБД:
+		// «serialization» — термин нашего хранилища, и арендатор по нему сделать
+		// не может ничего. Код (ABORTED) и смысл «повтори» сохранены дословно.
+		return iamerr.Wrapf(iamerr.ErrAborted, "conflicting concurrent change, retry the request")
 	}
 	// connection family 08xxx
 	if strings.HasPrefix(pgErr.Code, "08") {
@@ -218,12 +225,16 @@ func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	switch pgErr.ConstraintName {
 	case "accounts_name_unique":
 		return fmt.Sprintf("Account with name %s already exists", idHint)
-	case "users_external_id_unique",
-		// users_active_external_id_uniq — глобальный частичный ключ 0011 по
-		// (external_id) WHERE invite_status='ACTIVE'. Проигранная гонка
-		// конкурентного первого входа (два входа одного внешнего субъекта)
-		// приходит этим 23505.
-		"users_active_external_id_uniq",
+	// Имени `users_external_id_unique` в этом перечне НЕТ и заводить его не
+	// надо: ни одна миграция такого ключа не создаёт. Оно стояло здесь и
+	// молчало — ветвь, которую сервер не выберет никогда, выглядит покрытием и
+	// им не является (гейт `TestRefusalTextNeverNamesARetiredConstraint`).
+	//
+	// users_active_external_id_uniq — глобальный частичный ключ 0011 по
+	// (external_id) WHERE invite_status='ACTIVE'. Проигранная гонка
+	// конкурентного первого входа (два входа одного внешнего субъекта)
+	// приходит этим 23505.
+	case "users_active_external_id_uniq",
 		// users_identity_external_id_uniq — тот же предмет, но строго шире
 		// (миграция 20260823050000): ключ накрывает и запрещённую строку, у
 		// которой внешний субъект непуст по тому же CHECK. Отображается в ТОТ ЖЕ
@@ -247,10 +258,15 @@ func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 		return fmt.Sprintf("ServiceAccount with name %s already exists", idHint)
 	case "groups_account_name_unique":
 		return fmt.Sprintf("Group with name %s already exists", idHint)
-	case "roles_custom_unique", "roles_system_unique":
+	// `roles_custom_unique` здесь не стоит по той же причине: схема заводит
+	// только системный ключ, а имя пользовательского не создаёт ни одна
+	// миграция.
+	case "roles_system_unique":
 		return fmt.Sprintf("Role with name %s already exists", idHint)
-	case "access_bindings_unique",
-		"access_bindings_active_grant_uniq":
+	// Прежний частичный ключ `access_bindings_unique` (0001) снят миграцией
+	// 0003 в пользу более сильного `access_bindings_active_grant_uniq`;
+	// сервер его имени больше не назовёт.
+	case "access_bindings_active_grant_uniq":
 		// Подсказка от access_binding.Insert — единственного места, где под рукой
 		// сразу субъект, область и роль. Разбирается общим splitBindingHint,
 		// потому что ЭТУ ЖЕ строку читает ветвь FK по роли ниже и берёт из неё
@@ -271,36 +287,44 @@ func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	return "resource with these attributes already exists"
 }
 
-func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
+// fkText — текст И ПРИЗНАК ПОЛОСЫ нарушения внешнего ключа.
+//
+// Возвращаются оба, потому что у одного ограничения ДВЕ противоположные
+// стороны: ссылаемого ресурса нет (лечится созданием) — и ресурс ещё
+// используется (лечится освобождением). Сторону знает вызывающий репозиторий и
+// сообщает её подсказкой `<Ресурс>.<Глагол>`; на ней же построены все
+// разобранные ветви ниже. Отдавать один текст на обе стороны, как было прежде,
+// значит не восстанавливать следующий шаг ни в одном из двух случаев.
+func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 	switch pgErr.ConstraintName {
 	case "accounts_owner_fk":
-		return fmt.Sprintf("User %s not found", idHint)
+		return fmt.Sprintf("User %s not found", idHint), iamerr.ErrReferenceMissing
 	case "projects_account_fk":
 		// Direction-sensitive:
 		//   INSERT project with non-existent account_id → "Account <id> not found"
 		//   DELETE account with dangling projects       → "Account <id> contains projects and cannot be deleted"
 		// kindHint decides: "Account.Delete" → reverse direction; otherwise INSERT-side.
 		if kindHint == "Account.Delete" {
-			return fmt.Sprintf("Account %s contains projects and cannot be deleted", idHint)
+			return fmt.Sprintf("Account %s contains projects and cannot be deleted", idHint), iamerr.ErrReferenceInUse
 		}
-		return fmt.Sprintf("Account %s not found", idHint)
+		return fmt.Sprintf("Account %s not found", idHint), iamerr.ErrReferenceMissing
 	case "service_accounts_account_fk":
 		if kindHint == "Account.Delete" {
-			return fmt.Sprintf("Account %s contains service accounts and cannot be deleted", idHint)
+			return fmt.Sprintf("Account %s contains service accounts and cannot be deleted", idHint), iamerr.ErrReferenceInUse
 		}
-		return fmt.Sprintf("Account %s not found", idHint)
+		return fmt.Sprintf("Account %s not found", idHint), iamerr.ErrReferenceMissing
 	case "groups_account_fk":
 		if kindHint == "Account.Delete" {
-			return fmt.Sprintf("Account %s contains groups and cannot be deleted", idHint)
+			return fmt.Sprintf("Account %s contains groups and cannot be deleted", idHint), iamerr.ErrReferenceInUse
 		}
-		return fmt.Sprintf("Account %s not found", idHint)
+		return fmt.Sprintf("Account %s not found", idHint), iamerr.ErrReferenceMissing
 	case "roles_account_fk":
 		if kindHint == "Account.Delete" {
-			return fmt.Sprintf("Account %s contains custom roles and cannot be deleted", idHint)
+			return fmt.Sprintf("Account %s contains custom roles and cannot be deleted", idHint), iamerr.ErrReferenceInUse
 		}
-		return fmt.Sprintf("Account %s not found", idHint)
+		return fmt.Sprintf("Account %s not found", idHint), iamerr.ErrReferenceMissing
 	case "group_members_group_fk":
-		return fmt.Sprintf("Group %s not found", idHint)
+		return fmt.Sprintf("Group %s not found", idHint), iamerr.ErrReferenceMissing
 	case "access_bindings_role_fk":
 		// Direction-sensitive:
 		//   INSERT binding with a non-existent role_id → "Role <id> not found"
@@ -310,7 +334,7 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 		// is deliberately NOT qualified with "active" — AccessBindingService.Delete
 		// is a HARD delete (purges the row) which is what clears the precondition.
 		if kindHint == "Role.Delete" {
-			return "role is in use by access bindings"
+			return "role is in use by access bindings", iamerr.ErrReferenceInUse
 		}
 		// Подсказка на INSERT-стороне приходит от access_binding.Insert и несёт
 		// ТРИ поля. Прежде эта ветвь печатала её целиком, поэтому вызывающий
@@ -320,20 +344,33 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 		// Тексты отказов — часть контракта (api-conventions.md §Error-format),
 		// поэтому берётся именно роль (issue #105).
 		if _, _, role := splitBindingHint(idHint); role != "" {
-			return fmt.Sprintf("Role %s not found", role)
+			return fmt.Sprintf("Role %s not found", role), iamerr.ErrReferenceMissing
 		}
-		return fmt.Sprintf("Role %s not found", idHint)
-	case "access_binding_conditions_condition_fk":
-		// Direction-sensitive (migration 0048 — DB-level Condition reference):
-		//   INSERT attach row with a non-existent condition_id → "Condition <id> not found"
-		//   DELETE Condition still referenced by ANY attach row (23503 RESTRICT) → in-use text.
-		// ConditionsCRUDService.Delete passes kindHint "Condition.Delete"; this
-		// FK is what closes the delete-vs-attach TOCTOU (the software refcheck is
-		// only a best-effort early message).
-		if kindHint == "Condition.Delete" {
-			return "condition is in use by access bindings"
-		}
-		return fmt.Sprintf("Condition %s not found", idHint)
+		return fmt.Sprintf("Role %s not found", idHint), iamerr.ErrReferenceMissing
+	// Здесь стояла ветвь `access_binding_conditions_condition_fk` — два текста,
+	// называвших арендатору ресурс `Condition`. Его тенантская поверхность снята
+	// ЦЕЛИКОМ (приёмка «ретайр тенантской поверхности условного доступа»), а
+	// вместе с нею миграцией `0075` снесены обе таблицы и внешний ключ,
+	// заведённый `0048`. Ветвь пережила свой предмет и стала неотличима от
+	// исправной: сервер этого имени не назовёт никогда, поэтому ни один прогон
+	// не мог покраснеть, а обещанный ею текст посылал клиента искать настройку
+	// того, чего в продукте нет. Держит класс гейт
+	// `TestRefusalTextNeverNamesARetiredConstraint`.
+
+	// ТРИ ВЕТВИ НИЖЕ ПРИШЛИ ИЗ ЛИНИИ КАТАЛОГА (#1855) и переведены на форму с
+	// признаком полосы. Полоса у всех трёх — сторона ССЫЛКИ
+	// (`ErrReferenceMissing`), потому что ровно это говорит их текст: правило
+	// назвало сегмент, которого в каталоге нет. Обе полосы вложены в
+	// ErrFailedPrecondition, поэтому код отказа не изменился — изменилась
+	// различимость.
+	//
+	// Обратная сторона (`ON DELETE/UPDATE NO ACTION` в миграции
+	// 20260901113757: снятие или отзыв строки каталога, на которую ещё ссылается
+	// правило) этими ветвями НЕ различается. Сегодня у неё нет производителя —
+	// каталог заполняет только посев миграции, а глагол применения и отзыва
+	// заведён задачей #1034, — поэтому ветвь без такого различения не
+	// молчит о живом случае. Предмет назван, чтобы различение завели ВМЕСТЕ с
+	// глаголом, а не после первого отказа не с той стороны.
 	case "role_rule_ref_res_fk":
 		// Сегмент называет ИМЯ ОГРАНИЧЕНИЯ, токен — подсказка писателя,
 		// поставленная на его собственном операторе вставки (role_repo.go,
@@ -349,21 +386,21 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 		// кодов и есть доказательство, что отвечал ключ, а не грамматика.
 		res, _ := splitRuleRefHint(idHint)
 		if res != "" {
-			return fmt.Sprintf("resources: %s is not a live platform resource", res)
+			return fmt.Sprintf("resources: %s is not a live platform resource", res), iamerr.ErrReferenceMissing
 		}
-		return "resources: rule names a resource that is not live in the platform catalog"
+		return "resources: rule names a resource that is not live in the platform catalog", iamerr.ErrReferenceMissing
 	case "role_rule_ref_verb_fk":
 		res, verb := splitRuleRefHint(idHint)
 		if res != "" && verb != "" {
-			return fmt.Sprintf("verbs: %s is not a live verb of resource %s", verb, res)
+			return fmt.Sprintf("verbs: %s is not a live verb of resource %s", verb, res), iamerr.ErrReferenceMissing
 		}
-		return "verbs: rule names a verb that is not live for its resource"
+		return "verbs: rule names a verb that is not live for its resource", iamerr.ErrReferenceMissing
 	case "role_verb_type_fk":
 		// Проекция ГЛАГОЛОВ (role_verb) ссылается на живую строку каталога тем же
 		// точечным написанием, каким её пишет `ReplaceRoleVerbs`. Подсказка там —
 		// идентификатор роли, а не сегмент, поэтому текст называет предмет, а не
 		// токен: иначе он назвал бы роль виновницей чужого отказа.
-		return "resources: rule names a resource that is not live in the platform catalog"
+		return "resources: rule names a resource that is not live in the platform catalog", iamerr.ErrReferenceMissing
 	case "access_binding_subjects_subject_ref":
 		// Migration 0050 BEFORE DELETE trigger on users/service_accounts/groups: a
 		// principal still referenced as a subjects[0..N] grantee
@@ -376,11 +413,56 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 		if res == "" {
 			res = "Principal"
 		}
-		return fmt.Sprintf("%s %s has active access bindings and cannot be deleted", res, idHint)
+		return fmt.Sprintf("%s %s has active access bindings and cannot be deleted", res, idHint), iamerr.ErrReferenceInUse
 	}
-	// Unmapped FK — generic text; never leak pgErr.Detail/Message (they embed
-	// the referenced table/column/value → schema reconnaissance).
-	return "referenced resource not found or still in use"
+	// Неразобранная связь. Текст общий — имя таблицы, колонки и значение из
+	// `pgErr.Detail`/`Message` наружу НЕ идут (разведка схемы), — но состояние
+	// называется ОДНО, а не два взаимоисключающих.
+	//
+	// Сторону выбирает глагол подсказки. Снятие строки — единственный способ
+	// получить нарушение со стороны ссылающихся, и репозиторий его знает;
+	// исполнимость этого различения держит гейт
+	// `TestDeletingRepoMethodNamesItsKindHint`: метод, снимающий строку, обязан
+	// подсказку передать. Всё прочее (вставка, правка) даёт сторону ссылки.
+	//
+	// Умолчание при пустой подсказке — сторона ССЫЛКИ, и выбрано оно не на глаз:
+	// нарушение при вставке даёт любое создание с негодной ссылкой, тогда как
+	// сторона снятия закрыта гейтом выше.
+	if isDeletingHint(kindHint) {
+		return "resource is still referenced by other resources; release those references before deleting it",
+			iamerr.ErrReferenceInUse
+	}
+	return "referenced resource does not exist; create it or correct the reference before retrying",
+		iamerr.ErrReferenceMissing
+}
+
+// isDeletingHint — глагол подсказки `<Ресурс>.<Глагол>` означает снятие строки.
+// Перечень глаголов закрыт и совпадает с тем, что требует гейт подсказок:
+// два места об одном предмете разошлись бы молча, поэтому оба читают ЭТУ
+// функцию — гейт сверяет имена методов с нею же.
+func isDeletingHint(kindHint string) bool {
+	_, verb, ok := strings.Cut(kindHint, ".")
+	if !ok {
+		return false
+	}
+	return IsDeletingVerb(verb)
+}
+
+// IsDeletingVerb — глагол, снимающий строку. Экспортирован ради гейта подсказок
+// (`TestDeletingRepoMethodNamesItsKindHint`), который обязан судить ТЕМ ЖЕ
+// предикатом, каким судит рантайм: собственная копия перечня разошлась бы с
+// этой молча и ровно там, где расхождение не видно.
+func IsDeletingVerb(verb string) bool {
+	// Сравнение по НАЧАЛУ, а не на равенство: глаголы уточняются («DeleteExpired»,
+	// «DeleteOwnedByID», «RemoveMember»), и точное равенство объявляло бы
+	// уточнённый глагол не снимающим — то есть отдавало бы клиенту текст чужой
+	// стороны ровно там, где подсказка передана верно.
+	for _, v := range []string{"Delete", "Remove", "Purge", "Drop"} {
+		if strings.HasPrefix(verb, v) {
+			return true
+		}
+	}
+	return false
 }
 
 // integrityText — client-facing текст для 23000 (integrity_constraint_violation),

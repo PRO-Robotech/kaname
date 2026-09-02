@@ -84,7 +84,7 @@ func listMembersOf(h *Handler, ctx context.Context) (*iamv1.ListGroupMembersResp
 // the refusal does not confirm the group exists.
 func TestListMembers_WithoutStandingOnTheGroup_IsRefused(t *testing.T) {
 	repo := &memberPageRepo{members: []domain.GroupMember{
-		{MemberType: "user", MemberID: "usr_member"},
+		{MemberType: "user", MemberID: "usr_member0000000000"},
 	}}
 
 	resp, err := listMembersOf(rosterHandler(repo, rosterGrants()), asRosterUser("usr_outsider"))
@@ -100,7 +100,7 @@ func TestListMembers_WithoutStandingOnTheGroup_IsRefused(t *testing.T) {
 // that denies everyone, which is the shape that reads greenest when broken.
 func TestListMembers_WithTheGrantedRelation_IsServed(t *testing.T) {
 	repo := &memberPageRepo{members: []domain.GroupMember{
-		{MemberType: "user", MemberID: "usr_member"},
+		{MemberType: "user", MemberID: "usr_member0000000000"},
 	}}
 	h := rosterHandler(repo, rosterGrants(
 		"user:usr_delegate|v_list|iam_group:"+membersGroupID))
@@ -115,7 +115,7 @@ func TestListMembers_WithTheGrantedRelation_IsServed(t *testing.T) {
 // materialised — the same super-gate the sibling reads carry.
 func TestListMembers_ClusterAdmin_IsServed(t *testing.T) {
 	repo := &memberPageRepo{members: []domain.GroupMember{
-		{MemberType: "user", MemberID: "usr_member"},
+		{MemberType: "user", MemberID: "usr_member0000000000"},
 	}}
 	h := rosterHandler(repo, rosterGrants(
 		"user:usr_root|system_admin|cluster:"+domain.ClusterSingletonID))
@@ -131,7 +131,7 @@ func TestListMembers_Anonymous_IsRefusedWithAndWithoutRelationPort(t *testing.T)
 	for name, wire := range map[string]bool{"port wired": true, "port absent": false} {
 		t.Run(name, func(t *testing.T) {
 			repo := &memberPageRepo{members: []domain.GroupMember{
-				{MemberType: "user", MemberID: "usr_member"},
+				{MemberType: "user", MemberID: "usr_member0000000000"},
 			}}
 			var relations *memberRosterChecker
 			if wire {

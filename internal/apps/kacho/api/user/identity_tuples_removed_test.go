@@ -130,8 +130,8 @@ func TestIntegration_IdentityTuplesAreRemovedFromTheModel(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	const (
-		userID    = "usr00000000000tupl1"
-		accountID = "acc00000000000tupl1"
+		userID    = "usr000000000000tupl1"
+		accountID = "acc000000000000tupl1"
 	)
 
 	// ── форма СОЗДАНИЯ: кортежи объекта личности лежат в состоянии ───────────

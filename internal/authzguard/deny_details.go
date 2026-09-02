@@ -35,6 +35,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/protoadapt"
 )
 
 const (
@@ -45,13 +46,34 @@ const (
 
 	// denyDomain — likewise identical to the edge's, for the same reason.
 	denyDomain = "kacho.cloud.iam.v1"
+
+	// grantRequiredViolation — the violation type naming the missing grant.
+	// Deliberately shaped like the step-up one ("authz.step_up") so a client
+	// reads both next-step signals through one lookup.
+	grantRequiredViolation = "authz.grant_required"
 )
 
-// DenyActionLookup — port: full method name (no leading slash) → the permission
-// name the catalog gives that method, or "" when the catalog has no row for it
-// or the row is exempt. Implemented by *seed.PermissionRegistry.
+// DenyActionLookup — port: full method name (no leading slash) → what the
+// catalog says about that method.
+//
+// ActionForMethod — the permission name, or "" when the catalog has no row for
+// it or the row is exempt.
+//
+// ScopeForMethod — the OBJECT TYPE on which that permission is granted
+// (project / account / cluster), or "" when the row names none. It is the other
+// half of the answer a refusal owes its caller: the action says WHAT is
+// missing, the scope says WHERE it is granted — and therefore whom to ask.
+//
+// Both are functions of the METHOD alone. That is not an implementation detail
+// but the property that keeps the enriched refusal free of an existence oracle:
+// nothing from the request, the object id or the subject enters the answer, so
+// a refusal on an existing object stays byte-identical to a refusal on one that
+// does not exist. Asserted by TestDenyNextStep_IsAFunctionOfTheMethodOnly.
+//
+// Implemented by *seed.PermissionRegistry.
 type DenyActionLookup interface {
 	ActionForMethod(fqn string) string
+	ScopeForMethod(fqn string) string
 }
 
 // DenyDetailUnary returns an interceptor that attaches the machine-readable
@@ -64,6 +86,24 @@ type DenyActionLookup interface {
 //   - the resource — on a data-filtered method there is no single resource by
 //     construction; naming one would be a claim the service cannot make. The
 //     edge fills that field only where it resolved a scope object.
+//
+// WHAT IT ALSO ATTACHES, AND WHY THAT IS NOT AN ORACLE
+// ----------------------------------------------------
+// A refusal exists so the caller can build the NEXT STEP. A bare one does not
+// restore it: the administrator learns neither which permission to request nor
+// from whom. So the refusal carries the step — in the DETAILS, never in the
+// prose. The message stays the verbatim "permission denied" on every refusal,
+// byte for byte, because a distinguishable text is exactly the existence oracle
+// the fixed wording exists to close.
+//
+// The form is not invented here: it is the one the step-up refusal already
+// uses (acr_floor.go — a PreconditionFailure violation the edge turns into an
+// RFC 9470 challenge). Type "authz.grant_required", Subject = the scope object
+// type, Description = the permission to ask for and where it is granted.
+//
+// A refusal that ALREADY names its own next step (the step-up one) gets no
+// second advice: the caller there may hold the grant in full, and "ask for the
+// permission" would send them the wrong way.
 //
 // A method with no catalog row gets NOTHING attached. That is the whole point:
 // an absent action is how a caller recognises a catalog miss, so inventing an
@@ -99,23 +139,107 @@ func withDenyReason(catalog DenyActionLookup, fullMethod string, err error) erro
 	if action == "" {
 		return err
 	}
-	// WithDetails APPENDS, so any detail already on the status (the step-up
-	// PreconditionFailure that tells the caller what to do about the refusal)
-	// survives.
-	enriched, derr := st.WithDetails(&errdetails.ErrorInfo{
-		Reason: denyReason,
-		Domain: denyDomain,
-		Metadata: map[string]string{
-			"action": action,
-			"fqn":    fqn,
-		},
-	})
+	tier := scopeTier(catalog.ScopeForMethod(fqn))
+
+	meta := map[string]string{
+		"action": action,
+		"fqn":    fqn,
+	}
+	if tier != "" {
+		// Named only when the catalog names a scope. An invented one would be a
+		// claim the service cannot make — the same reason an absent action is
+		// left absent rather than filled with a blank.
+		meta["scope"] = tier
+	}
+
+	details := []protoadapt.MessageV1{&errdetails.ErrorInfo{
+		Reason:   denyReason,
+		Domain:   denyDomain,
+		Metadata: meta,
+	}}
+	// The next step in human words — but only where there IS a next step to
+	// name, and only where the refusal does not already name one of its own.
+	if tier != "" && !hasPreconditionFailure(st) {
+		details = append(details, &errdetails.PreconditionFailure{
+			Violations: []*errdetails.PreconditionFailure_Violation{{
+				Type:        grantRequiredViolation,
+				Subject:     tier,
+				Description: grantAdvice(action, tier),
+			}},
+		})
+	}
+
+	// WithDetails APPENDS, so any detail already on the status survives.
+	enriched, derr := st.WithDetails(details...)
 	if derr != nil {
 		// Marshalling a fixed, tiny message cannot realistically fail; if it
 		// somehow does, the refusal itself must still reach the caller intact.
 		return err
 	}
 	return enriched.Err()
+}
+
+// scopeTier переводит тип объекта модели прав в ЯРУС, названный словами
+// продукта.
+//
+// ПОЧЕМУ НЕ ОТДАВАТЬ ТИП КАК ЕСТЬ — и это не вкус, а перемеренная ошибка первой
+// редакции этого кода. Тип объекта в записи каталога — это ЦЕЛЬ проверки
+// (`iam_access_binding`, `compute_instance`, `vpc_cidr_group`), а не область, у
+// администратора которой просят выдачу. Отдав его дословно, отказ (а) назвал бы
+// арендатору словарь модели прав — того, чего в клиентских текстах сегодня ноль
+// и заводить обратно нельзя, — и (б) советовал бы «попросите у администратора
+// этого iam_access_binding», что попросту неверно: выдача делается на самом
+// ресурсе либо на содержащем его проекте или аккаунте.
+//
+// Ярусов четыре, и все четыре — слова продукта:
+//
+//	cluster / account / project — область названа каталогом прямо;
+//	resource                    — проверка идёт по КОНКРЕТНОМУ объекту, и выдача
+//	                              делается на нём либо на содержащем его проекте
+//	                              или аккаунте;
+//	""                          — область не названа: сказать нечего, и молчание
+//	                              здесь честнее выдуманного совета.
+func scopeTier(objectType string) string {
+	switch objectType {
+	case "":
+		return ""
+	case "cluster", "account", "project":
+		return objectType
+	default:
+		return "resource"
+	}
+}
+
+// grantAdvice — следующий шаг словами, по ярусу. Текст английский и стабильный:
+// он часть контракта, а русскую редакцию производит клиентская поверхность из
+// машинного признака (решение о языке клиентских отказов —
+// services/iam/internal/errors/client_refusal_reason_coverage_test.go).
+func grantAdvice(action, tier string) string {
+	const lead = "the '"
+	switch tier {
+	case "cluster":
+		return lead + action + "' permission is granted cluster-wide; ask a cluster administrator for it"
+	case "account":
+		return lead + action + "' permission is granted by an AccessBinding on the account; " +
+			"ask an administrator of that account for it"
+	case "project":
+		return lead + action + "' permission is granted by an AccessBinding on the project; " +
+			"ask an administrator of that project or of its account for it"
+	default:
+		return lead + action + "' permission is granted by an AccessBinding on this resource, " +
+			"or on the project or account that contains it; " +
+			"ask an administrator of that project or account for it"
+	}
+}
+
+// hasPreconditionFailure — у отказа уже назван его собственный следующий шаг.
+func hasPreconditionFailure(st *status.Status) bool {
+	for _, d := range st.Details() {
+		if _, ok := d.(*errdetails.PreconditionFailure); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func hasErrorInfo(st *status.Status) bool {

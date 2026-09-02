@@ -25,7 +25,7 @@ func TestFKRoleTextNamesTheRoleNotTheWholeHint(t *testing.T) {
 	)
 	hint := subject + "|" + scope + "|" + role
 
-	got := fkText(&pgconn.PgError{ConstraintName: "access_bindings_role_fk"}, "", hint)
+	got, _ := fkText(&pgconn.PgError{ConstraintName: "access_bindings_role_fk"}, "", hint)
 
 	want := "Role " + role + " not found"
 	if got != want {
@@ -43,7 +43,7 @@ func TestFKRoleTextNamesTheRoleNotTheWholeHint(t *testing.T) {
 // Обратное направление той же связи не затронуто: удаление роли, на которую ещё
 // ссылаются выдачи, говорит про использование, а не про «не найдена».
 func TestFKRoleDeleteDirectionUnchanged(t *testing.T) {
-	got := fkText(&pgconn.PgError{ConstraintName: "access_bindings_role_fk"}, "Role.Delete", "anything")
+	got, _ := fkText(&pgconn.PgError{ConstraintName: "access_bindings_role_fk"}, "Role.Delete", "anything")
 	if got != "role is in use by access bindings" {
 		t.Fatalf("направление DELETE изменилось: %q", got)
 	}
@@ -68,7 +68,10 @@ func TestBindingHintSplitTolerantToShortForms(t *testing.T) {
 
 	// Текст UNIQUE продолжает называть субъекта и область — то есть добавление
 	// третьего слота не сломало первого потребителя.
-	got := uniqueText(&pgconn.PgError{ConstraintName: "access_bindings_unique"}, "", "usr1|project:prj1|rol1")
+	// Имя ключа — живое (`access_bindings_active_grant_uniq`, миграция 0003).
+	// Прежде здесь стояло снятое ею `access_bindings_unique`: проба закрепляла
+	// текст на имени, которого сервер не назовёт, и оставалась зелёной.
+	got := uniqueText(&pgconn.PgError{ConstraintName: "access_bindings_active_grant_uniq"}, "", "usr1|project:prj1|rol1")
 	want := "these permissions are already granted to usr1 on project:prj1"
 	if got != want {
 		t.Fatalf("текст UNIQUE сломан третьим слотом:\n  получено: %q\n  ожидалось: %q", got, want)

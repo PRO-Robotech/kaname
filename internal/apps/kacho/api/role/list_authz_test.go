@@ -238,11 +238,11 @@ func (s *roleFGAStub) CheckWithContext(_ context.Context, subject, relation, obj
 // selector-without-content) on iam_role — the Design-B viewer ∪ v_list union.
 func TestListRoles_UsesViewerAndVListRelationsOnIamRole(t *testing.T) {
 	repo := newRoleListFakeRepo()
-	seedCustomRole(repo, "rol-c1", "acc-A")
+	seedCustomRole(repo, "rol-c1", "acc-A000000000000000")
 	// A second, UNGRANTED custom role: the per-object union short-circuits on a
 	// `viewer` allow, so the `v_list` arm is only reachable via a role `viewer`
 	// denies. Without this row the union's second branch would never be exercised.
-	seedCustomRole(repo, "rol-c2", "acc-A")
+	seedCustomRole(repo, "rol-c2", "acc-A000000000000000")
 
 	fga := newRoleFGAStub()
 	fga.set("user:usr-u1", []string{"rol-c1"})
@@ -264,7 +264,7 @@ func TestListRoles_D40_SystemRolesAlwaysVisible_CustomFiltered(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	seedSystemRole(repo, "rol-sys1")
 	seedSystemRole(repo, "rol-sys2")
-	seedCustomRole(repo, "rol-c1", "acc-A")
+	seedCustomRole(repo, "rol-c1", "acc-A000000000000000")
 
 	fga := newRoleFGAStub() // empty grant-set for the caller
 	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
@@ -280,9 +280,9 @@ func TestListRoles_D40_SystemRolesAlwaysVisible_CustomFiltered(t *testing.T) {
 func TestListRoles_D41_D43_CustomByGrant_Union(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	seedSystemRole(repo, "rol-sys1")
-	seedCustomRole(repo, "rol-c1", "acc-A")
-	seedCustomRole(repo, "rol-c2", "acc-A")
-	seedCustomRole(repo, "rol-c3", "acc-A") // not granted
+	seedCustomRole(repo, "rol-c1", "acc-A000000000000000")
+	seedCustomRole(repo, "rol-c2", "acc-A000000000000000")
+	seedCustomRole(repo, "rol-c3", "acc-A000000000000000") // not granted
 
 	fga := newRoleFGAStub()
 	fga.set("user:usr-u1", []string{"rol-c1", "rol-c2"})
@@ -297,7 +297,7 @@ func TestListRoles_D41_D43_CustomByGrant_Union(t *testing.T) {
 // LST-5 no-leak: an ungranted custom role is absent from List (existence not leaked).
 func TestListRoles_D44_NoLeak_UngrantedCustomAbsent(t *testing.T) {
 	repo := newRoleListFakeRepo()
-	seedCustomRole(repo, "rol-cZ", "acc-A") // foreign / ungranted
+	seedCustomRole(repo, "rol-cZ", "acc-A000000000000000") // foreign / ungranted
 
 	fga := newRoleFGAStub() // no grant
 	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
@@ -313,18 +313,18 @@ func TestListRoles_D44_NoLeak_UngrantedCustomAbsent(t *testing.T) {
 func TestListRoles_185_AccountScope_ForeignCustomHidden(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	seedSystemRole(repo, "rol-sys1")
-	seedCustomRole(repo, "rol-cA", "acc-A")
-	seedCustomRole(repo, "rol-cB", "acc-B") // foreign account
+	seedCustomRole(repo, "rol-cA", "acc-A000000000000000")
+	seedCustomRole(repo, "rol-cB", "acc-B000000000000000") // foreign account
 
 	fga := newRoleFGAStub()
 	fga.set("user:usr-u1", []string{"rol-cA", "rol-cB"}) // even if the model would allow both
 
 	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
-	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100, AccountID: domain.AccountID("acc-A")})
+	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100, AccountID: domain.AccountID("acc-A000000000000000")})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"rol-sys1", "rol-cA"}, roleIDs(out),
-		"#185: accountId=acc-A → system + acc-A custom only; acc-B custom never visible")
-	require.Equal(t, domain.AccountID("acc-A"), repo.lastFilter.AccountID,
+		"#185: accountId=acc-A000000000000000 → system + acc-A000000000000000 custom only; acc-B000000000000000 custom never visible")
+	require.Equal(t, domain.AccountID("acc-A000000000000000"), repo.lastFilter.AccountID,
 		"accountId scope is pushed into the repo filter")
 }
 
@@ -333,7 +333,7 @@ func TestListRoles_185_AccountScope_ForeignCustomHidden(t *testing.T) {
 func TestListRoles_D47_FGAUnavailable_FailClosed(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	seedSystemRole(repo, "rol-sys1")
-	seedCustomRole(repo, "rol-c1", "acc-A")
+	seedCustomRole(repo, "rol-c1", "acc-A000000000000000")
 
 	fga := newRoleFGAStub()
 	fga.err = stderrors.New("relation form did not answer: connection closed")
@@ -350,7 +350,7 @@ func TestListRoles_D47_FGAUnavailable_FailClosed(t *testing.T) {
 // nil relation port → fail-closed Unavailable (never an unfiltered catalog leak).
 func TestListRoles_D47_NilFGA_FailClosed(t *testing.T) {
 	repo := newRoleListFakeRepo()
-	seedCustomRole(repo, "rol-c1", "acc-A")
+	seedCustomRole(repo, "rol-c1", "acc-A000000000000000")
 
 	uc := NewListRolesUseCase(repo) // NO WithRelationStore
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})

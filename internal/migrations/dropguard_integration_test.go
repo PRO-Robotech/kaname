@@ -33,8 +33,8 @@ func TestIntegration_IamDropsAreMeasured(t *testing.T) {
 	// moves, so nothing in the diff says the chain grew. This number is that
 	// something: it cannot change by itself, so a drop that appeared without it
 	// moving is a drop nobody looked at.
-	if rep.DropsInChain != 19 {
-		t.Errorf("iam chain holds %d Up-section drop(s), expected 19; a drop that appeared without this number moving is a drop nobody looked at", rep.DropsInChain)
+	if rep.DropsInChain != 20 {
+		t.Errorf("iam chain holds %d Up-section drop(s), expected 20; a drop that appeared without this number moving is a drop nobody looked at", rep.DropsInChain)
 	}
 
 	// And the retire of the subscription-cursor table is named, so that removing

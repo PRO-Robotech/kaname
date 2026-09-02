@@ -1,6 +1,6 @@
 ---
 id: authorize
-sidebar_position: 11
+sidebar_position: 12
 title: Авторизация и каталог
 ---
 
@@ -46,7 +46,7 @@ per-subject/per-resource решение принимает handler.
       -H 'Content-Type: application/json' \\
       -d '{
             "subject": "user:usrbr69ze0ftz3jf7396",
-            "resource": { "type": "vpc_network", "id": "enp_2f9k3qw8x7m2n" },
+            "resource": { "type": "vpc_network", "id": "net4h7q2xk9v0m3n5rst" },
             "action": "vpc.networks.get"
           }'
   `}
@@ -57,11 +57,20 @@ per-subject/per-resource решение принимает handler.
     {
       "allowed": true,
       "denyReasons": [],
-      "authorizationModelId": "01KV…",
       "checkedAt": "2026-06-24T10:30:00Z"
     }
   `}
 </CodeBlock>
+
+:::note Здесь стояло поле `authorizationModelId` — оно снято с контракта
+Пример ответа показывал его, а разбор снятия стоял на этой же странице **84 строками ниже**.
+Клиент читает пример как образец и пишет по нему разбор — разбор, который ждал бы поля, не
+приходящего никогда. Противоречие в пределах одного документа обнаруживается только сплошным
+чтением, то есть не обнаруживается.
+
+Что снято и почему — [ниже](#retired-fields). В примере запроса тем же заходом исправлен
+префикс идентификатора сети: там стоял `enp…`, а это префикс **операции** VPC, не сети.
+:::
 
 `action` — строка `<domain>.<resource>.<verb>`; сервер резолвит её в отношение модели прав. Опциональный
 `context` (`google.protobuf.Struct`) несёт данные для вычисления условий на кортежах — `acr_value`,
@@ -120,10 +129,10 @@ Page size ≤ 1000. Опциональный `subjectTypeFilter`.
 
 ```json
 {
-  "resource": { "type": "project", "id": "prj_yyy" },
+  "resource": { "type": "project", "id": "prj7mfpj2my52k5a06kg" },
   "relation": "viewer",
   "tree": {
-    "leaves": ["user:usr_alice", "group:grp_ops#member"],
+    "leaves": ["user:usrbr69ze0ftz3jf7396", "group:grpq3v8z1w6k0dn2yfhs#member"],
     "truncated": false
   }
 }
@@ -131,6 +140,8 @@ Page size ≤ 1000. Опциональный `subjectTypeFilter`.
 
 `truncated` — единственный сигнал «перечень обрезан серверным пределом»; вызывающий, который его
 игнорирует, примет префикс за полный набор.
+
+### Что снято с контракта {#retired-fields}
 
 :::note Что снято с контракта и почему это не урезание
 Это **свойство источника**, а не понижение возможностей:

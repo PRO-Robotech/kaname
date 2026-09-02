@@ -89,6 +89,16 @@ type Registry struct {
 	// (buildHooksMux). Второй конструктор уронил бы старт на duplicate-register.
 	inviteActivationOnce sync.Once
 	inviteActivation     *InviteActivationRecorder
+
+	// inviteMailOnce/inviteMail — единственный экземпляр счётчика исходов
+	// ОТПРАВКИ письма приглашения. Он про другой предмет, чем сосед выше:
+	// активация отвечает на «выкупили ли приглашение», отправка — на «ушло ли
+	// письмо и почему нет». Потребитель сегодня один (применитель очереди), но
+	// единственность держится тем же способом: второй конструктор уронил бы
+	// старт на повторной регистрации ровно тогда, когда механизм провязали
+	// целиком.
+	inviteMailOnce sync.Once
+	inviteMail     *InviteMailRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

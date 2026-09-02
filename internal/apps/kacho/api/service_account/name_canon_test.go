@@ -94,7 +94,7 @@ func createServiceAccountNamed(t *testing.T, name string) *iamv1.ServiceAccount 
 	uc := NewCreateServiceAccountUseCase(newLcsRepo(nil), opsRepo)
 
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr00000000000000abcd"})
+		operations.Principal{Type: "user", ID: "usr0000000000000abcd"})
 	op, err := uc.Execute(ctx, domain.ServiceAccount{
 		AccountID: domain.AccountID(lcsAcctID),
 		Name:      domain.SvcAccountName(name),

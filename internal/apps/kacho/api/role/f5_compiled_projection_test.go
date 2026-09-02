@@ -25,8 +25,8 @@ import (
 // when the role carries them.
 func TestRole_IAM_1_13_PublicProjectionOmitsPermissions(t *testing.T) {
 	r := domain.Role{
-		ID:          "rol-app",
-		AccountID:   "acc-A",
+		ID:          "rol-app0000000000000",
+		AccountID:   "acc-A000000000000000",
 		Name:        "app-deployer",
 		Rules:       f4Rules(),
 		Permissions: domain.Permissions{"compute.instance.*.get", "compute.disk.*.get"},
@@ -41,7 +41,7 @@ func TestRole_IAM_1_13_GetRoleCompiledReturnsCompiled(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	repo.roles["rol0000000000000app1"] = domain.Role{
 		ID:          "rol0000000000000app1",
-		AccountID:   "acc-A",
+		AccountID:   "acc-A000000000000000",
 		Name:        "app-deployer",
 		Rules:       f4Rules(),
 		Permissions: domain.Permissions{"compute.instance.*.get", "compute.disk.*.get"},

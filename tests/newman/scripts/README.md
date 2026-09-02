@@ -5,7 +5,13 @@
 - `gen.py`             — генератор Postman-коллекций из `cases/*.py`
 - `run.sh`             — full-run по всем сервисам или одному (`SERVICE=iam-account`)
 - `coverage.py`        — RPC → case-id coverage gate (запускается из CI)
-- `validate-cases.py`  — pre-gen валидация уникальности case-id (если есть)
+- `validate-cases.py`  — сверщик КАТАЛОГА кейсов: перепись `docs/CASES-INDEX.md`
+                        против дерева (итог и по каждому модулю) + покрытие каждого
+                        идентификатора. Тело общее на дерево
+                        (`tests/newman/kacholib/casesindex.py`), здесь — только
+                        решения набора; доказательство инъекцией — `casesindex_test.py`.
+                        **Уникальность идентификаторов держит не он**, а хребет
+                        генератора (`_scan_suite`): дубль роняет сам `gen.py`
 
 Форма базового удостоверения (#1253) — объявлена ОДИН раз в
 `../credential-secret-form.json`; читают её двое, и вторая копия образца не

@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	stderrors "errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -314,3 +315,18 @@ func (r *rlUpdReader) Visibility() visibility.ReaderIface { return nil }
 // «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
 // ненаречённое.
 func (r *rlUpdWriter) Visibility() visibility.ReaderIface { return nil }
+
+// EmitInviteMail — порт со-коммита намерения отправить письмо приглашения.
+// Дублёр не глотает того, что настоящий отвергает: пустой адресат и пустой ключ
+// партиции отвергаются здесь так же, как ограничением миграции, — иначе фикстура
+// была бы снисходительнее продукта и скрыла бы ровно тот дефект, ради которого её
+// подставляют.
+func (w *rlUpdWriter) EmitInviteMail(_ context.Context, userID, _, to, _ string) error {
+	if to == "" {
+		return fmt.Errorf("invite mail: recipient required")
+	}
+	if userID == "" {
+		return fmt.Errorf("invite mail: user id required")
+	}
+	return nil
+}

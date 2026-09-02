@@ -94,7 +94,7 @@ func createGroupNamed(t *testing.T, name string) *iamv1.Group {
 	uc := NewCreateGroupUseCase(repo, opsRepo)
 
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr00000000000000abcd"})
+		operations.Principal{Type: "user", ID: "usr0000000000000abcd"})
 	op, err := uc.Execute(ctx, domain.Group{
 		AccountID: "acc0000000000000aaaa",
 		Name:      domain.GroupName(name),

@@ -228,7 +228,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetAccessBindingRequest) (
 	}
 	pb, err := abToPb(b)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "marshal access binding")
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return pb, nil
 }
@@ -264,6 +264,15 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListAccessBindingsRequest
 	// key) so it COMPOSES with the single-predicate filter expression; default
 	// false keeps parity with those two RPCs.
 	f.IncludeRevoked = req.GetIncludeRevoked()
+	// (5) account scope: the account⇒child-project fan-out (#1737). Like
+	// include_revoked it is a dedicated field, NOT a filter key, so it composes
+	// with the single-predicate filter expression — and the two axes the question
+	// "what does THIS subject hold in THIS account" needs can be named at once.
+	//
+	// Its FORMAT is judged by the use-case, not here: the empty-grant
+	// short-circuit lives there, and a guard on this side would leave the second
+	// caller of that use-case unprotected (api-conventions.md §Gotcha'и).
+	f.AccountID = req.GetAccountId()
 
 	page, err := h.list.Execute(ctx, f)
 	if err != nil {
@@ -620,7 +629,7 @@ func listPageToProto(page ListPage) (*iamv1.ListAccessBindingsResponse, error) {
 	for _, b := range page.Bindings {
 		pb, err := abToPb(b)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "marshal access binding")
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 		out = append(out, pb)
 		records = append(records, &iamv1.GrantSurfaceRecord{
@@ -680,7 +689,7 @@ func listToProto(rows []domain.AccessBinding, next string) (*iamv1.ListAccessBin
 	for _, b := range rows {
 		pb, err := abToPb(b)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "marshal access binding")
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 		out = append(out, pb)
 	}

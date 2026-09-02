@@ -23,7 +23,7 @@ func TestSAClientToProto_TruncatesTimestampsToSeconds(t *testing.T) {
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind: domain.CredentialKindKeypair,
 		ID:             "sak_test_1234567890abcd",
-		SvaID:          "sva_test_1234567890abcd",
+		SvaID:          "sva_test_1234567890a",
 		CreatedAt:      created,
 		ExpiresAt:      &expires,
 		LastUsedAt:     &used,

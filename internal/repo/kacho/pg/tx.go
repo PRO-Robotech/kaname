@@ -20,6 +20,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/group"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/invite_mail_outbox"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/reconcile_outbox"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
@@ -164,6 +165,14 @@ func (w *writeTx) EmitFGARelationDelete(ctx context.Context, tuples []service.Re
 // "mirror.delete" (reused literals — an iam-direct label change is an upsert).
 func (w *writeTx) EmitReconcileEvent(ctx context.Context, eventType, objectType, objectID string) error {
 	return reconcile_outbox.EmitTx(ctx, w.tx, eventType, objectType, objectID)
+}
+
+// EmitInviteMail ставит намерение отправить письмо приглашения на ЭТОЙ
+// writer-транзакции — атомарно со строкой приглашения (ban #10). Откат
+// приглашения снимает и намерение: письма о приглашении, которого не случилось,
+// не бывает by construction.
+func (w *writeTx) EmitInviteMail(ctx context.Context, userID, accountID, to, loginURL string) error {
+	return invite_mail_outbox.EmitTx(ctx, w.tx, userID, accountID, to, loginURL)
 }
 
 // InsertRecoveryCompletion — idempotency-gate INSERT on THIS writer-tx

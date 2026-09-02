@@ -45,7 +45,7 @@ func TestIssue_OwnIssuance_RegistersNothingAtTheProvider(t *testing.T) {
 
 	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).WithOwnIssuance()
 
-	in := IssueInput{ServiceAccountID: "sva_test", CreatedByUserID: "usr_admin"}
+	in := IssueInput{ServiceAccountID: "sva_test000000000000", CreatedByUserID: "usr_admin00000000000"}
 	if _, err := uc.Execute(context.Background(), in); err != nil {
 		t.Fatalf("Execute (sync): %v", err)
 	}
@@ -93,7 +93,7 @@ func TestIssue_ProviderContour_StillRegistersAtTheProvider(t *testing.T) {
 
 	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops)
 
-	in := IssueInput{ServiceAccountID: "sva_test", CreatedByUserID: "usr_admin"}
+	in := IssueInput{ServiceAccountID: "sva_test000000000000", CreatedByUserID: "usr_admin00000000000"}
 	if _, err := uc.Execute(context.Background(), in); err != nil {
 		t.Fatalf("Execute (sync): %v", err)
 	}
@@ -123,7 +123,7 @@ func TestIssue_OwnIssuance_CommitFailure_CompensatesNothing(t *testing.T) {
 		WithCompensationEmitter(comp).
 		WithOwnIssuance()
 
-	in := IssueInput{ServiceAccountID: "sva_test", CreatedByUserID: "usr_admin"}
+	in := IssueInput{ServiceAccountID: "sva_test000000000000", CreatedByUserID: "usr_admin00000000000"}
 	if _, err := uc.Execute(context.Background(), in); err != nil {
 		t.Fatalf("Execute (sync): %v", err)
 	}
@@ -150,7 +150,7 @@ func TestIssue_ProviderContour_CommitFailure_StillCompensates(t *testing.T) {
 
 	uc := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).WithCompensationEmitter(comp)
 
-	in := IssueInput{ServiceAccountID: "sva_test", CreatedByUserID: "usr_admin"}
+	in := IssueInput{ServiceAccountID: "sva_test000000000000", CreatedByUserID: "usr_admin00000000000"}
 	if _, err := uc.Execute(context.Background(), in); err != nil {
 		t.Fatalf("Execute (sync): %v", err)
 	}

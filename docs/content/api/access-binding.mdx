@@ -1,6 +1,6 @@
 ---
 id: access-binding
-sidebar_position: 8
+sidebar_position: 9
 title: AccessBinding
 ---
 
@@ -177,8 +177,16 @@ concrete-правила (`resourceNames`) эмитят прямые пообъе
 
 ## Методы
 
-`AccessBindingService` — мутации (`Create`/`Update`/`Delete`, async) плюс **семь** read-RPC
-для разных срезов («кому что», «кто держит роль», «кто реально имеет доступ») и журнал операций.
+`AccessBindingService` — мутации (`Create`/`Update`/`Delete`/`Revoke`, async), чтения
+(`Get` плюс перечисление привязок) и журнал операций.
+
+:::tip Начните с `List` — остальные списочные чтения он замещает
+Каноническое перечисление — `GET /iam/v1/accessBindings` с необязательным `filter`. Четыре
+исторических среза (`listByScope`, `listBySubject`, `listByRole`, `ListByAccount`) **помечены к
+снятию** в контракте: они остаются рабочими ради обратной совместимости, но новую интеграцию
+на них строить не надо. Что чем заменяется — в таблице «[Перечисление
+привязок](#reads)» ниже.
+:::
 
 ### Get — получить привязку
 
@@ -261,38 +269,248 @@ gateway, т.к. тип объекта зависит от запроса). admin
 
 </ApiOperation>
 
+### Забрать доступ: два исхода, и выбирать надо осознанно {#withdraw}
+
+Доступ забирают двумя глаголами. Оба снимают отношения в той же транзакции, поэтому **после
+`done=true` доступа нет ни при одном из них**. Различаются они тем, что остаётся в системе:
+
+<table>
+  <thead><tr><th>Исход</th><th>Глагол</th><th>Что со строкой</th><th>Последующий <code>Get</code></th></tr></thead>
+  <tbody>
+    <tr><td><strong>след сохраняется</strong> (аудит)</td><td><code>Revoke</code></td><td>остаётся, <code>status</code> → терминальный <code>REVOKED</code>, проставляются <code>revokedAt</code> / <code>revokedByUserId</code></td><td>возвращает строку</td></tr>
+    <tr><td><strong>строки не остаётся</strong></td><td><code>Delete</code></td><td>физически удаляется</td><td><code>NOT_FOUND</code></td></tr>
+  </tbody>
+</table>
+
+Если вам нужно потом ответить на вопрос «какие выдачи действовали в момент T» — берите
+`Revoke`: `Delete` стирает основание этого ответа. Разбор вопроса — [История
+выдач](#history) ниже.
+
+Повторная выдача той же тройки (субъект, роль, scope) после отзыва даёт **новую** `ACTIVE`-
+строку: частичный UNIQUE активных выдач отозванные не учитывает.
+
+### Revoke — отозвать привязку, сохранив след
+
+<ApiOperation method="POST" endpoint="/iam/v1/accessBindings/{access_binding_id}:revoke" async>
+
+Переводит `status` в терминальный `REVOKED`, проставляет `revokedAt` и `revokedByUserId`.
+Строка остаётся читаемой. Требует `v_delete` и **порог аутентификации `2`** (отзыв прав меняет
+posture безопасности). Асинхронно.
+
+`deletionProtection` соблюдается ровно как у `Delete`: отзыв защищённой привязки отвергается
+`FAILED_PRECONDITION` — сначала снять флаг через `Update`.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/accessBindings/acb0qayfwaq4fjavnywz:revoke' \\
+      -H "Authorization: Bearer $TOKEN" \\
+      -H 'Content-Type: application/json' -d '{}'
+  `}
+</CodeBlock>
+
+Отозванные строки в списке по умолчанию **не показываются**: чтобы их увидеть, попросите
+`includeRevoked=true` у [`List`](#list).
+
+</ApiOperation>
+
 ### Delete — удалить привязку
 
 <ApiOperation method="DELETE" endpoint="/iam/v1/accessBindings/{access_binding_id}" async>
 
-Удаляет привязку (отзыв доступа). Если `deletionProtection=true` → `FAILED_PRECONDITION`
+Удаляет привязку физически: последующий `Get` отвечает `NOT_FOUND`. Если
+`deletionProtection=true` → `FAILED_PRECONDITION`
 (`"access binding <id> has deletion_protection enabled; clear it via Update before Delete"`) —
-сначала снять флаг через Update. Требует `v_delete`. Асинхронно.
+сначала снять флаг через Update. Требует `v_delete` и порог аутентификации `2`. Асинхронно.
 
 </ApiOperation>
 
-### Read-срезы
+## Перечисление привязок {#reads}
 
-Семь синхронных read-RPC отвечают на разные вопросы аудита доступа. Все — scope-filtered:
-вызывающий видит только строки на объектах, которые вправе читать.
+Все перечисления — синхронные чтения (не `Operation`). Каноническое — `List`; остальные
+отвечают на тот же вопрос иначе либо помечены к снятию.
+
+<table>
+  <thead><tr><th>Чтение</th><th>Вопрос</th><th>Полоса разграничения</th><th>Состояние</th></tr></thead>
+  <tbody>
+    <tr><td><a href="#list"><code>List</code></a></td><td>«что вижу я», с необязательным <code>filter</code></td><td>построчно</td><td><strong>каноническое</strong></td></tr>
+    <tr><td><a href="#list-by-scope"><code>:listByScope</code></a></td><td>«что привязано к этому якорю»</td><td>гейт края</td><td>к снятию → <code>List</code> + <code>filter=scope</code>/<code>scopeId</code></td></tr>
+    <tr><td><a href="#list-by-subject"><code>:listBySubject</code></a></td><td>«что назначено этому субъекту»</td><td>построчно</td><td>к снятию → <code>List</code> + <code>filter=subject</code></td></tr>
+    <tr><td><a href="#list-by-role"><code>:listByRole</code></a></td><td>«кто держит роль R»</td><td>построчно</td><td>к снятию → <code>List</code> + <code>filter=role</code></td></tr>
+    <tr><td><a href="#list-by-account"><code>ListByAccount</code></a></td><td>«все привязки аккаунта и его проектов»</td><td>гейт края</td><td>к снятию → <code>List</code> + <code>filter=scope="iam.account"</code></td></tr>
+    <tr><td><a href="#list-subject-privileges"><code>:listSubjectPrivileges</code></a></td><td>«привилегии субъекта, с именами ролей»</td><td>построчно</td><td>действующее</td></tr>
+    <tr><td><a href="#list-assignable-roles"><code>:listAssignableRoles</code></a></td><td>«какие роли можно выдать здесь»</td><td>гейт края</td><td>действующее</td></tr>
+    <tr><td><a href="#expand-access"><code>:expandAccess</code></a></td><td>«кто реально имеет доступ»</td><td>построчно</td><td>действующее</td></tr>
+  </tbody>
+</table>
+
+### Две полосы разграничения — и они отвечают ПО-РАЗНОМУ {#lanes}
+
+Здесь стояло «все read-RPC scope-filtered». Это неверно: полос **две**, и вызывающий видит
+разницу.
+
+<table>
+  <thead><tr><th></th><th>Гейт края (пообъектный)</th><th>Сужение построчно</th></tr></thead>
+  <tbody>
+    <tr><td>когда применяется</td><td>у запроса есть <strong>один</strong> объект, про который можно задать один вопрос: якорь scope, аккаунт из пути, объект из запроса</td><td>единого объекта нет by construction — строки страницы сидят на <strong>разных</strong> объектах</td></tr>
+    <tr><td>кто отвечает</td><td>край — <strong>до</strong> того, как запрос дойдёт до сервиса</td><td>сервис: читает страницу курсором и спрашивает модель прав про идентификаторы <strong>этой</strong> страницы</td></tr>
+    <tr><td>нет права</td><td><code>PERMISSION_DENIED</code> (403)</td><td><code>200</code> и <strong>пустая страница</strong></td></tr>
+    <tr><td>негодный <code>pageToken</code> при отсутствии права</td><td><code>PERMISSION_DENIED</code></td><td><code>INVALID_ARGUMENT</code></td></tr>
+  </tbody>
+</table>
+
+**Пишите обработчик на оба исхода.** «Пустая страница» и «отказ» означают для вас разное —
+«ничего нет» против «нельзя смотреть», — и какой из двух придёт, задаёт полоса чтения, а не
+ваши права. Столбец «Полоса разграничения» в таблице выше называет её по каждому чтению.
+
+Различие **не случайное**: оно следует из того, есть ли у запроса один объект. Пообъектный
+гейт края сильнее — его нельзя забыть в следующей ветке кода, — но применим он только там, где
+такой объект есть. Заводить второй замок к уже закрытой двери там, где строки и так отбираются
+по объекту из пути, значило бы держать две проверки об одном предмете.
+
+**Общее у обеих полос:** страница никогда не шире, чем чтение по id. Строка попадает в выдачу
+ровно тогда, когда вызывающий вправе прочитать её одиночным `Get` (`v_get`). Ошибка модели
+прав — `UNAVAILABLE`, а не расширенная выдача.
+
+### List — что вижу я {#list}
+
+<ApiOperation method="GET" endpoint="/iam/v1/accessBindings">
+
+**Каноническое перечисление.** Возвращает привязки, которые вызывающий вправе прочитать по id,
+с необязательным сужением.
+
+<CodeBlock language="bash">
+  {dedent`
+    # всё, что вижу
+    curl 'http://localhost:18080/iam/v1/accessBindings?pageSize=100' \\
+      -H "Authorization: Bearer $TOKEN"
+
+    # выдачи одного субъекта, включая отозванные (аудит)
+    curl 'http://localhost:18080/iam/v1/accessBindings?filter=subject%3D%22usrbr69ze0ftz3jf7396%22&includeRevoked=true' \\
+      -H "Authorization: Bearer $TOKEN"
+  `}
+</CodeBlock>
+
+<table>
+  <thead><tr><th>Параметр</th><th>Значение</th></tr></thead>
+  <tbody>
+    <tr><td><code>filter</code></td><td><strong>Ровно один</strong> предикат вида <code>&lt;ключ&gt;="&lt;значение&gt;"</code>. Ключи: <code>subject</code>, <code>role</code>, <code>scope</code> (точечный тип якоря — <code>iam.cluster</code> / <code>iam.account</code> / <code>iam.project</code>), <code>scopeId</code>. Неизвестный ключ → <code>INVALID_ARGUMENT</code>. Пусто — без сужения</td></tr>
+    <tr><td><code>includeRevoked</code></td><td>Показать и отозванные (<code>status=REVOKED</code>). По умолчанию <code>false</code>. Это <strong>отдельный флаг, а не ключ фильтра</strong> — иначе он не сочетался бы с предикатом, которых в выражении ровно один</td></tr>
+    <tr><td><code>pageSize</code></td><td>По умолчанию 100; больше 1000 → <code>INVALID_ARGUMENT</code> (отвергается, не подрезается)</td></tr>
+    <tr><td><code>pageToken</code></td><td>Непрозрачный курсор. Негодный токен → <code>INVALID_ARGUMENT</code>, и проверяется он <strong>до</strong> сужения страницы — то есть ответ на негодный ввод не зависит от того, что вам выдано</td></tr>
+  </tbody>
+</table>
+
+Порядок — `(createdAt, id)` ASC, keyset-пагинация. Полоса — сужение построчно: без прав вы
+получите `200` и пустую страницу, а **непустой `nextPageToken` при пустом массиве** означает
+«на этой странице ничего видимого», а не «выдач нет». Идите по курсору дальше.
+
+</ApiOperation>
+
+### listByScope — что привязано к этому якорю {#list-by-scope}
+
+**Начинайте с `List`** — он отвечает на все вопросы срезов ниже, и только он не помечен
+устаревшим.
+
+<ApiOperation method="GET" endpoint="/iam/v1/accessBindings">
+
+**«Покажи выдачи»** — каноническое чтение. Отдаёт страницу привязок, которые вызывающий вправе
+прочитать по идентификатору; сортировка `(createdAt, id)` ASC, keyset-пагинация
+(`pageSize` до 1000, `pageToken`).
+
+Сужается тремя независимыми входами, и они **композируются**:
+
+<table>
+  <thead><tr><th>Вход</th><th>Что сужает</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>filter</code></td>
+      <td>
+        <strong>ровно один</strong> предикат: <code>subject="&lt;id&gt;"</code> ·
+        <code>role="&lt;id&gt;"</code> · <code>scope="iam.account|iam.project|iam.cluster"</code> ·
+        <code>scopeId="&lt;id&gt;"</code>. Неизвестный ключ → <code>INVALID_ARGUMENT</code>
+      </td>
+    </tr>
+    <tr>
+      <td><code>accountId</code></td>
+      <td>область одного аккаунта: выдачи на <strong>самом аккаунте</strong> плюс выдачи на
+      <strong>каждом его проекте</strong></td>
+    </tr>
+    <tr>
+      <td><code>includeRevoked</code></td>
+      <td>показать и отозванные строки (<code>status=REVOKED</code>); по умолчанию скрыты</td>
+    </tr>
+  </tbody>
+</table>
+
+**«Что у этого человека в моём аккаунте» — один запрос.** Это самый частый вопрос ревизии
+доступа, и раньше он требовал обхода по всем аккаунтам субъекта:
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -G 'http://localhost:18080/iam/v1/accessBindings' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      --data-urlencode 'filter=subject="usrbr69ze0ftz3jf7396"' \\
+      --data-urlencode 'accountId=accbr69ze0ftz3jf7396'
+  `}
+</CodeBlock>
+
+**`accountId` — это не `scopeId`, и разница практическая.** `scopeId` сверяется с якорем самой
+строки, поэтому `scope="iam.account"` + `scopeId=<аккаунт>` вернёт выдачи, привязанные
+**к аккаунту**, и ни одной выдачи на его проектах. `accountId` покрывает и то, и другое.
+
+**Чужой либо несуществующий аккаунт в `accountId` даёт пустую страницу**, а не отказ: по ответу
+нельзя узнать, существует ли аккаунт. Негодный по форме идентификатор (или идентификатор другого
+ресурса, например `prj-…`) отвергается сразу — `400` / `INVALID_ARGUMENT`,
+`"invalid account id '<значение>'"`. Пустое значение `accountId` означает «не сужать».
+
+</ApiOperation>
 
 <ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listByScope">
+
+:::warning Помечено к снятию — используйте `List`
+Замена: [`List`](#list) с `filter=scope="iam.<tier>"` и `filter=scopeId="<id>"`. Чтение
+остаётся рабочим ради обратной совместимости; новую интеграцию на нём не стройте.
+:::
 
 **«Что привязано к этому scope»** — привязки на якоре. Якорь задаётся либо канонической парой
 `scopeType` (точечная, `iam.project`) / `scopeId`, либо устаревшей `resourceType`
 (короткая, `project` | `account` | `cluster`) / `resourceId` — она принимается, пока `scopeType`
-пуст. Требует `viewer` на scope.
+пуст. Требует `viewer` на scope; полоса — **гейт края**.
+
+:::danger Через REST присылайте ОБЕ пары — иначе отказ придёт РАНЬШЕ сервиса
+Сказанное выше про «пока `scopeType` пуст» верно для **сервиса**. Край до сервиса ещё не
+доходит: per-request scope он резолвит по **легаси**-паре `resourceType`/`resourceId`, поэтому
+запрос, несущий только каноническую пару, получает `PERMISSION_DENIED` **на краю** — сервис
+его не видит вовсе.
+
+Пока это так, на **этом** чтении присылайте обе пары. Отличить такой отказ от настоящей
+нехватки прав нечем: он приходит той же полосой. Ещё один довод перейти на
+[`List`](#list) — у него якорь задаётся `filter`-предикатом, и полосы у него нет.
+:::
 
 </ApiOperation>
 
+### listBySubject — что назначено этому субъекту {#list-by-subject}
+
 <ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listBySubject">
+
+:::warning Помечено к снятию — используйте `List`
+Замена: [`List`](#list) с `filter=subject="<id>"`. Чтение остаётся рабочим ради обратной
+совместимости; новую интеграцию на нём не стройте.
+:::
 
 **«Что назначено этому субъекту»** — привязки субъекта (`subjectType`/`subjectId`). Типичный
 паттерн — self-list (subject = вызывающий). Читать может также владелец либо распорядитель
 домашнего аккаунта субъекта — и тогда ответ содержит только привязки **в границах этого
 аккаунта**; администратор облака видит всё. Тот же допуск, что у `listSubjectPrivileges`.
 
+Полоса — **сужение построчно**. Существование субъекта не сообщается: нерезолвящийся субъект
+отвечает пустой страницей своему же читателю и `PERMISSION_DENIED` всем остальным — тем же
+ответом, что субъект в чужом аккаунте.
+
 </ApiOperation>
+
+### listSubjectPrivileges — привилегии субъекта {#list-subject-privileges}
 
 <ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listSubjectPrivileges">
 
@@ -302,7 +520,13 @@ gateway, т.к. тип объекта зависит от запроса). admin
 администратор облака. Ответ распорядителя аккаунта сужён его границами; cross-account → 403.
 Well-formed-но-нет субъект → `NOT_FOUND`.
 
+Полоса — **сужение построчно**. В отличие от `listBySubject`, здесь существование субъекта
+**сообщается** (`NOT_FOUND`) тому, кто вправе его читать: резолв субъекта нужен для самой
+авторизации.
+
 </ApiOperation>
+
+### listAssignableRoles — какие роли можно выдать здесь {#list-assignable-roles}
 
 <ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listAssignableRoles">
 
@@ -312,28 +536,66 @@ Well-formed-но-нет субъект → `NOT_FOUND`.
 enforcement Create («что показано» == «что можно создать»). Каждая роль помечена `scopeGroup`
 (SYSTEM / ACCOUNT / PROJECT) для группировки в UI.
 
+Требует `viewer` на названном объекте; полоса — **гейт края**, поэтому без права придёт
+`PERMISSION_DENIED`, а не пустой список.
+
 </ApiOperation>
+
+### listByRole — кто держит роль R {#list-by-role}
 
 <ApiOperation method="GET" endpoint="/iam/v1/accessBindings:listByRole">
 
-**«Кто держит роль R»** — привязки, несущие данную роль (audit). Scope-filtered; сортировка
+:::warning Помечено к снятию — используйте `List`
+Замена: [`List`](#list) с `filter=role="<roleId>"` (плюс `includeRevoked=true` для
+аудита отозванного). Чтение остаётся рабочим ради обратной совместимости; новую интеграцию на
+нём не стройте.
+:::
+
+**«Кто держит роль R»** — привязки, несущие данную роль (audit). Полоса — **сужение
+построчно**: каждая строка сидит на своём scope, единого объекта у запроса нет. Сортировка
 `(createdAt, id)` ASC, keyset-пагинация.
 
 </ApiOperation>
+
+### expandAccess — кто реально имеет доступ {#expand-access}
 
 <ApiOperation method="GET" endpoint="/iam/v1/accessBindings:expandAccess">
 
 **«Кто реально имеет доступ»** — раскрывает основания на объекте+отношении в конкретных
 принципалов: резолвит членство групп (group → members) в USER/SERVICE_ACCOUNT. Закрывает
-audit-пробел «привязка на GROUP показывает лишь группу, а не её текущих членов». Viewer-floor.
+audit-пробел «привязка на GROUP показывает лишь группу, а не её текущих членов».
+
+Тип объекта приходит **полем запроса**, поэтому построить объект край не может — полоса
+**сужение построчно**. Вызывающему без полномочий несуществующий объект и чужой отвечают
+одинаково.
 
 </ApiOperation>
 
+### ListByAccount — все привязки аккаунта {#list-by-account}
+
 <ApiOperation method="GET" endpoint="/iam/v1/accounts/{account_id}/accessBindings">
 
-**`ListByAccount`** — все привязки аккаунта (по всем субъектам): напрямую на аккаунт плюс на
-каждый его проект. Требует `admin` на аккаунте (админ видит всех, включая тех, кого не он
-выдавал). Фильтры: `subjectTypeFilter`, `includeRevoked` (по умолчанию false). Требует `v_list`.
+:::warning Помечено к снятию — используйте `List`
+Замена: [`List`](#list) с `filter=scope="iam.account"` + `filter=scopeId="<accountId>"` (либо
+весь видимый набор), плюс `includeRevoked`.
+
+**Что замена не воспроизводит одним вызовом** — названо честно: этот глагол разворачивает
+аккаунт в его дочерние проекты, `List` этого не делает. И порядок другой: здесь
+`(createdAt DESC, id ASC)`, у `List` — `createdAt` ASC.
+:::
+
+Все привязки аккаунта (по всем субъектам): напрямую на аккаунт плюс на каждый его проект.
+Фильтры: `subjectTypeFilter`, `includeRevoked` (по умолчанию false).
+
+**Замков два, и оба обязаны сойтись.** Край гейтит `v_list` на объекте аккаунта (полоса —
+**гейт края**); сверх того сервис требует распорядителя аккаунта — владелец, `admin` на
+аккаунте либо администратор облака. Распорядитель видит всех, включая тех, кого не он
+выдавал.
+
+**Устарел — тот же охват даёт `List` с `accountId`.** Отличий осталось два, и оба намеренные:
+порядок (здесь `createdAt` DESC, у `List` — ASC, поэтому сравнивать ответы двух глаголов надо
+**по составу**, а не по позиции) и `subjectTypeFilter` — `List` сужает субъекта по точному
+идентификатору, а не по классу.
 
 </ApiOperation>
 
@@ -345,9 +607,9 @@ API отвечает и будет отвечать, на второй — **н�
 
 ### Отвечается: «какие выдачи действовали в момент T»
 
-**Да, и это свойство хранения, а не отдельная возможность.** Отзыв привязки — **мягкий**: строка
-не удаляется, а переходит в терминальный `status=REVOKED` с проставленными `revokedAt` и
-`revokedByUserId`. `Get` по идентификатору продолжает возвращать её и после отзыва.
+**Да, если вы забирали доступ [`Revoke`](#withdraw), а не `Delete`.** Мягкий отзыв строку
+сохраняет, и `Get` по идентификатору продолжает возвращать её; `Delete` удаляет строку
+физически, и восстанавливать интервал становится не из чего.
 
 Интервал действия выдачи задан четырьмя полями, и по ним восстанавливается состояние на любой
 момент:
@@ -363,8 +625,8 @@ API отвечает и будет отвечать, на второй — **н�
 </table>
 
 Выдача действовала в момент `T`, если `createdAt ≤ T`, при этом `T < revokedAt` (или отзыва не
-было) и `T < expiresAt` (или срок не задан). Строки читаются обычными read-срезами ниже; отдельного
-«исторического» RPC для этого не нужно.
+было) и `T < expiresAt` (или срок не задан). Строки читаются обычным
+[`List`](#list) с `includeRevoked=true`; отдельного «исторического» RPC для этого не нужно.
 
 ### Не отвечается: «был ли доступ разрешён в момент T»
 
@@ -385,16 +647,18 @@ API отвечает и будет отвечать, на второй — **н�
 
 - `AuthorizeService.ExpandRelations` — из чего складывается право на этом ресурсе прямо сейчас,
   плоским перечнем оснований;
-- read-срезы ниже плюс поля интервала — какие выдачи существовали и когда действовали.
+- [`List`](#list) с `includeRevoked=true` плюс поля интервала — какие выдачи существовали и
+  когда действовали.
 
 Если нужен именно журнал решений во времени, его источником должен быть **аудит на стороне
 вызывающего** (кто что запросил и что получил в ответ), а не переигрывание вердикта задним числом.
 
-### ListOperations — операции над привязкой
+## ListOperations — операции над привязкой
 
 <ApiOperation method="GET" endpoint="/iam/v1/accessBindings/{access_binding_id}/operations">
 
-Возвращает операции над привязкой. Sync. Требует `v_list`.
+Возвращает операции над привязкой. Sync, курсорная пагинация. Требует `v_list` на самой
+привязке; полоса — **гейт края** (объект один — привязка из пути).
 
 </ApiOperation>
 
@@ -405,7 +669,7 @@ API отвечает и будет отвечать, на второй — **н�
   <tbody>
     <tr><td>Get/Delete несуществующей привязки</td><td><code>NOT_FOUND</code></td><td><code>"AccessBinding &lt;id&gt; not found"</code></td></tr>
     <tr><td>Create дубля (same subject+role+scope)</td><td>— (idempotent)</td><td>Возвращает существующую привязку</td></tr>
-    <tr><td>Delete привязки с <code>deletionProtection=true</code></td><td><code>FAILED_PRECONDITION</code></td><td>Сначала снять флаг через Update</td></tr>
+    <tr><td><code>Revoke</code> / <code>Delete</code> привязки с <code>deletionProtection=true</code></td><td><code>FAILED_PRECONDITION</code></td><td>Сначала снять флаг через <code>Update</code></td></tr>
     <tr><td>Create без grant-authority на scope</td><td><code>PERMISSION_DENIED</code></td><td>Нужен owner/admin на объекте scope</td></tr>
     <tr><td>Пустой / &gt;32 <code>subjects[]</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument subjects (must be 1..32)"</code></td></tr>
     <tr><td>Immutable-поле (role/subjects/scope) в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td>Мутабельны только <code>deletion_protection</code> и <code>labels</code></td></tr>
@@ -413,12 +677,16 @@ API отвечает и будет отвечать, на второй — **н�
     <tr><td><code>scopeType</code> задан коротким словом (<code>"PROJECT"</code>)</td><td><code>INVALID_ARGUMENT</code></td><td><code>Illegal argument scopeType "PROJECT"</code> — форма точечная: <code>iam.project</code></td></tr>
     <tr><td><code>target</code> отсутствует либо без ветви</td><td><code>INVALID_ARGUMENT</code></td><td><code>"target is required; use target.allInScope&#123;&#125; to grant all objects under the anchor"</code></td></tr>
     <tr><td><code>target.resources</code> пуст или &gt; предела</td><td><code>INVALID_ARGUMENT</code></td><td><code>"Illegal argument target.resources (must be 1..256)"</code></td></tr>
+    <tr><td>Чтение полосы «гейт края» без права на объект</td><td><code>PERMISSION_DENIED</code></td><td>Отвечает край, до сервиса — см. <a href="#lanes">Две полосы</a></td></tr>
+    <tr><td>Чтение полосы «сужение построчно» без права</td><td>— (<code>200</code>)</td><td>Пустая страница; <code>nextPageToken</code> может быть непуст</td></tr>
+    <tr><td><code>:listByScope</code> только с канонической парой якоря</td><td><code>PERMISSION_DENIED</code></td><td>Край резолвит scope по легаси-паре; присылайте <a href="#list-by-scope">обе</a></td></tr>
+    <tr><td>Неизвестный ключ в <code>filter</code> у <code>List</code></td><td><code>INVALID_ARGUMENT</code></td><td>Белый список: <code>subject</code>, <code>role</code>, <code>scope</code>, <code>scopeId</code></td></tr>
   </tbody>
 </table>
 
-:::tip Отзыв доступа = удалить привязку
-Чтобы забрать доступ, удалите привязку (или снимите субъект из multi-subject-привязки —
-пересозданием). Снятие метки со scope, по которому доступ был выдан через `matchLabels`, тоже
-отзывает грант — метка перестаёт матчить правило. Поэтому изменение меток аккаунта/проекта —
-security-значимая операция.
+:::tip Забрать доступ можно и не трогая привязку
+Штатный путь — [`Revoke` либо `Delete`](#withdraw) (или снятие субъекта из multi-subject-
+привязки — пересозданием). Но грант, выданный через `matchLabels`, отзывается ещё и **снятием
+метки** со scope: метка перестаёт матчить правило. Поэтому изменение меток аккаунта или проекта
+— security-значимая операция, и её видно не в журнале привязок, а в журнале метки.
 :::

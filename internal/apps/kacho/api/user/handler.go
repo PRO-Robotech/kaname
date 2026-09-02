@@ -76,7 +76,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetUserRequest) (*iamv1.Us
 	}
 	pb, err := userToPb(u)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "marshal user")
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return pb, nil
 }
@@ -106,7 +106,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListUsersRequest) (*iamv1
 	for _, u := range rows {
 		pb, err := userToPb(u)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "marshal user")
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 		out = append(out, pb)
 	}
@@ -230,7 +230,7 @@ func (h *InternalHandler) Get(ctx context.Context, req *iamv1.GetUserRequest) (*
 	}
 	pb, err := userToPb(u)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "marshal user")
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return pb, nil
 }

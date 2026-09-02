@@ -13,6 +13,7 @@ package user
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -632,4 +633,19 @@ func (fakeUserUR) MembershipExists(context.Context, domain.UserID, domain.Accoun
 // проверяется своими пробами (#1127).
 func (*fakeUserUW) RemoveMembership(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
+}
+
+// EmitInviteMail — порт со-коммита намерения отправить письмо приглашения.
+// Дублёр не глотает того, что настоящий отвергает: пустой адресат и пустой ключ
+// партиции отвергаются здесь так же, как ограничением миграции, — иначе фикстура
+// была бы снисходительнее продукта и скрыла бы ровно тот дефект, ради которого её
+// подставляют.
+func (w *fakeUWtr) EmitInviteMail(_ context.Context, userID, _, to, _ string) error {
+	if to == "" {
+		return fmt.Errorf("invite mail: recipient required")
+	}
+	if userID == "" {
+		return fmt.Errorf("invite mail: user id required")
+	}
+	return nil
 }

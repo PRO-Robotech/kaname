@@ -67,11 +67,13 @@ Kachō IAM управляет **описанием личностей и пра�
 
 ## Доменная модель
 
-Kachō IAM управляет **семью типами tenant-facing ресурсов** плюс кредами доступа. Все ресурсы —
-«плоские» (flat): domain-поля на верхнем уровне сообщения, без K8s-envelope. Иерархия
-владения: **Account → Project**; субъекты (User / ServiceAccount / Group) и роли живут в
-пределах аккаунта, а привязки доступа (AccessBinding) соединяют субъект, роль и уровень
-иерархии.
+Все ресурсы — «плоские» (flat): domain-поля на верхнем уровне сообщения, без K8s-envelope.
+Иерархия владения: **Account → Project**; служебные учётки, группы и роли живут в пределах
+аккаунта, а привязки доступа (AccessBinding) соединяют субъект, роль и уровень иерархии.
+
+**Человек в эту иерархию не вложен.** User — глобальная личность платформы, одна строка на
+человека; его принадлежность аккаунтам выражает отдельный ресурс **Membership**, и их у него
+может быть несколько.
 
 <table>
   <thead>
@@ -80,7 +82,8 @@ Kachō IAM управляет **семью типами tenant-facing ресур
   <tbody>
     <tr><td><strong>Account</strong></td><td>Верхнеуровневый tenant-контейнер: владеет проектами, ролями, группами, сервис-аккаунтами</td><td><code>acc</code></td></tr>
     <tr><td><strong>Project</strong></td><td>Среднеуровневый контейнер внутри аккаунта; к нему привязываются ресурсы других сервисов</td><td><code>prj</code></td></tr>
-    <tr><td><strong>User</strong></td><td>Человек-субъект (проекция личности из Kratos), per-Account</td><td><code>usr</code></td></tr>
+    <tr><td><strong>User</strong></td><td>Человек-субъект: глобальная личность, одна строка на человека независимо от числа его аккаунтов</td><td><code>usr</code></td></tr>
+    <tr><td><strong>Membership</strong></td><td>Принадлежность человека аккаунту — отдельная связь; только чтение</td><td><code>mbr-</code></td></tr>
     <tr><td><strong>ServiceAccount</strong></td><td>Машинный (non-human) субъект — рабочие нагрузки, CI, интеграции</td><td><code>sva</code></td></tr>
     <tr><td><strong>Group</strong></td><td>Набор субъектов, которым роль выдаётся оптом</td><td><code>grp</code></td></tr>
     <tr><td><strong>Role</strong></td><td>Именованный набор правил «глаголы × ресурсы» (system или custom)</td><td><code>rol</code></td></tr>
@@ -98,14 +101,18 @@ Kachō IAM управляет **семью типами tenant-facing ресур
 flowchart TD
   cluster["Cluster<br/>cluster_kacho_root"] --> account["Account (acc…)"]
   account --> project["Project (prj…)"]
-  account --> user["User (usr…)"]
   account --> sa["ServiceAccount (sva…)"]
   account --> group["Group (grp…)"]
   account --> role["Role (rol…) · custom"]
+  user["User (usr…)<br/>глобальная личность"] --- mbr["Membership (mbr-…)"]
+  mbr --- account
   ab["AccessBinding (acb…)"] -. "subject" .-> user
   ab -. "role" .-> role
   ab -. "scope (CLUSTER / ACCOUNT / PROJECT)" .-> project
 ```
+
+Человек стоит **сбоку** от иерархии владения намеренно: он в аккаунт не вложен, а связан с ним
+членством — и таких связей у него может быть несколько.
 
 AccessBinding — центральный ресурс модели: он связывает один или несколько **субъектов**
 (User / ServiceAccount / Group) с **ролью** на выбранном **уровне иерархии** (`scope`:

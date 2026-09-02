@@ -1,9 +1,10 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// retention_sweep_integration_test.go — уборка трёх таблиц iam, чей рост задаёт
+// retention_sweep_integration_test.go — уборка таблиц iam, чей рост задаёт
 // внешний (приёмка `retention-sweep-has-a-caller.md`, сценарии RET-SWP-01…03,
-// 05…08, 15…17, 19, 20).
+// 05…08, 15…17, 19, 20; окна темпа заведения — задача #1364, вне объёма той
+// приёмки: она вынесла их из своего дословно).
 //
 // # Почему строки ставятся ОТНОСИТЕЛЬНО `now()` БАЗЫ
 //
@@ -426,13 +427,15 @@ func TestRetentionSweep_ReportsEachSubjectSeparately(t *testing.T) {
 	assertions := kachopg.NewClientAssertionReplayRepo(pool)
 	revocations := kachopg.NewSessionRevocationRepo(pool)
 	cutoffs := kachopg.NewMintedTokenRevocationRepo(pool)
+	windows := kachopg.NewIdentityAdmissionWindowRepo(pool)
+	journal := kachopg.NewSubjectChangeJournalSweeper(pool, nil)
 	uid := mustSeedUser(t, ctx, pool, "ret-15")
 
 	// По отзывам — есть что снять; по утверждениям и отсечкам — нечего.
 	putRevocationAt(t, ctx, pool, uid, "ret15-"+ids.NewID(domain.PrefixUser), -time.Hour)
 
 	sw, err := retention.New(retention.Config{Interval: time.Minute, Batch: sweepBatch, MaxBatchesPerPass: 2},
-		retention.Subjects(assertions, revocations, cutoffs), nil)
+		retention.Subjects(assertions, revocations, cutoffs, windows, journal), nil)
 	require.NoError(t, err)
 	res := sw.Pass(ctx)
 	require.NoError(t, res.Err())
@@ -441,6 +444,8 @@ func TestRetentionSweep_ReportsEachSubjectSeparately(t *testing.T) {
 		"предмет без находок в отчёте отсутствует — «нечего убирать» неотличимо от «уборка не доходит»")
 	require.Contains(t, res.Removed, retention.SubjectSessionRevocations)
 	require.Contains(t, res.Removed, retention.SubjectMintedTokenCutoffs)
+	require.Contains(t, res.Removed, retention.SubjectIdentityAdmissionWindows)
+	require.Contains(t, res.Removed, retention.SubjectSubjectChangeJournal)
 	require.EqualValues(t, 1, res.Removed[retention.SubjectSessionRevocations])
 
 	// Величина имеет читателя: накопитель прохода виден снаружи.
@@ -567,4 +572,120 @@ func deleteUser(t *testing.T, ctx context.Context, repo *kachopg.Repository, uid
 		return derr
 	}
 	return w.Commit(ctx)
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Уборка окон темпа заведения (задача #1364)
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Порог этого предмета не объявлен величиной в Go: его несущая часть —
+// длительность окна — лежит в действующей строке величин, и уборщик читает её
+// оттуда же, откуда читатель-триггер. Поэтому пробы ставят СВОЮ величину строкой
+// и меряют исход относительно неё.
+//
+// Вид пробы берётся отдельным, а не `iam.account`: посев миграции держит
+// действующую величину именно на нём, и проба, правящая её, судила бы полосу,
+// которую тут же и сломала бы для соседних проб.
+
+// putAdmissionLimit заводит действующую величину темпа для отдельного вида.
+func putAdmissionLimit(t *testing.T, ctx context.Context, pool *pgxpool.Pool, kind string, maxEvents, windowSeconds int) {
+	t.Helper()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO kacho_iam.account_admission_rate_limits (kind, max_events, window_seconds)
+		VALUES ($1, $2, $3)`, kind, maxEvents, windowSeconds)
+	require.NoError(t, err)
+}
+
+// putAdmissionWindowAt ставит окно, начавшееся `offset` назад по часам БАЗЫ.
+func putAdmissionWindowAt(t *testing.T, ctx context.Context, pool *pgxpool.Pool, carrier, kind string, offset time.Duration, admitted int) {
+	t.Helper()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO kacho_iam.identity_admission_windows (carrier_id, kind, window_started_at, admitted)
+		VALUES ($1, $2, now() + make_interval(secs => $3), $4)`,
+		carrier, kind, offset.Seconds(), admitted)
+	require.NoError(t, err)
+}
+
+// countAdmissionWindows — число строк вида. Утверждается ЧИСЛО, а не факт
+// вызова: «вызвался» зелено и на уборщике, не снявшем ничего, и на уборщике,
+// опустошившем таблицу.
+func countAdmissionWindows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, kind string) int64 {
+	t.Helper()
+	var n int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.identity_admission_windows WHERE kind = $1`, kind).Scan(&n))
+	return n
+}
+
+// TestRetentionSweep_AdmissionWindows_RemovesElapsedKeepsLive — истёкшее окно
+// снимается, действующее остаётся.
+//
+// Строка (б) лежит ВНУТРИ окна: уборщик, взявший порог `now()` вместо
+// `now() − window_seconds`, снял бы её — то есть обнулил бы счётчик действующего
+// окна и подарил бы носителю полный потолок заново.
+func TestRetentionSweep_AdmissionWindows_RemovesElapsedKeepsLive(t *testing.T) {
+	ctx, pool := retentionPool(t)
+	repo := kachopg.NewIdentityAdmissionWindowRepo(pool)
+
+	kind := "ret64a.rateWindow"
+	const window = 3600
+	putAdmissionLimit(t, ctx, pool, kind, 3, window)
+
+	carrierA := "ret64a-elapsed-" + ids.NewID(domain.PrefixUser) // окно истекло
+	carrierB := "ret64a-live-" + ids.NewID(domain.PrefixUser)    // окно идёт
+
+	putAdmissionWindowAt(t, ctx, pool, carrierA, kind, -(window*time.Second + time.Minute), 3)
+	putAdmissionWindowAt(t, ctx, pool, carrierB, kind, -time.Minute, 3)
+
+	removed, _, err := repo.SweepElapsedAdmissionWindows(ctx, 0, sweepBatch)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, removed, "снята обязана быть РОВНО истёкшая строка")
+	require.EqualValues(t, 1, countAdmissionWindows(t, ctx, pool, kind),
+		"осталась обязана быть РОВНО строка действующего окна")
+
+	var live int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.identity_admission_windows WHERE kind = $1 AND carrier_id = $2`,
+		kind, carrierB).Scan(&live))
+	require.EqualValues(t, 1, live,
+		"снята строка ДЕЙСТВУЮЩЕГО окна: счётчик обнулён, носителю подарен полный потолок заново")
+}
+
+// TestRetentionSweep_AdmissionWindows_ZeroCeilingKeepsTheRow — вид, чья
+// действующая величина не допускает НИ ОДНОГО заведения в окне, строку
+// сохраняет.
+//
+// Это несущее условие уборки, а не осторожность. Ветвь вставки триггера
+// безусловна, ветвь правки — под условием `<= max_events`. При `max_events = 0`
+// снятая строка означает разрешение там, где администратор запретил всё; при
+// `max_events >= 1` обе ветви приводят к одному состоянию и одному исходу.
+//
+// Вторая половина пробы — положительный контроль: та же истёкшая строка при
+// величине `1` снимается. Без него проба зеленела бы на уборщике, не снимающем
+// ничего.
+func TestRetentionSweep_AdmissionWindows_ZeroCeilingKeepsTheRow(t *testing.T) {
+	ctx, pool := retentionPool(t)
+	repo := kachopg.NewIdentityAdmissionWindowRepo(pool)
+
+	const window = 3600
+	elapsed := -(window*time.Second + time.Minute)
+
+	zeroKind := "ret64b.zeroCeiling"
+	oneKind := "ret64b.oneCeiling"
+	putAdmissionLimit(t, ctx, pool, zeroKind, 0, window)
+	putAdmissionLimit(t, ctx, pool, oneKind, 1, window)
+
+	carrier := "ret64b-" + ids.NewID(domain.PrefixUser)
+	putAdmissionWindowAt(t, ctx, pool, carrier, zeroKind, elapsed, 0)
+	putAdmissionWindowAt(t, ctx, pool, carrier, oneKind, elapsed, 1)
+
+	removed, _, err := repo.SweepElapsedAdmissionWindows(ctx, 0, sweepBatch)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, removed, "снята обязана быть РОВНО строка вида, допускающего заведение")
+
+	require.EqualValues(t, 1, countAdmissionWindows(t, ctx, pool, zeroKind),
+		"снята строка вида с нулевым потолком: её отсутствие даёт носителю безусловное заведение "+
+			"по ветви вставки — то есть разрешение там, где администратор запретил всё")
+	require.EqualValues(t, 0, countAdmissionWindows(t, ctx, pool, oneKind),
+		"истёкшая строка вида с потолком 1 НЕ снята — уборка не убирает ничего")
 }

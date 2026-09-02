@@ -6,8 +6,12 @@ package access_binding
 // list_subject_privileges.go — ListSubjectPrivilegesUseCase for
 // RPC AccessBindingService.ListSubjectPrivileges.
 //
-// Sync, enriched read of a subject's DIRECT privileges with server-resolved
-// role names (JOIN in the repo). Допуск — ОДИН предикат с ListBySubject
+// Sync, enriched read of a subject's privileges with server-resolved role names
+// (JOIN in the repo). Привилегии — И прямые (`DIRECT`), И полученные через
+// членство в группе (`GROUP`, `via_group_id` называет группу): различение делает
+// сам запрос репозитория (access_binding_repo.go, subject-match). Здесь стояло
+// «DIRECT privileges» — утверждение, пережившее свой предмет, и оно совпадало с
+// такой же устаревшей фразой контракта. Допуск — ОДИН предикат с ListBySubject
 // (subject_read_authority.go): «сам субъект ИЛИ распорядитель его ДОМАШНЕГО
 // аккаунта ИЛИ администратор облака». Он зеркалит requireGrantAuthority, но
 // объектом области берёт домашний аккаунт СУБЪЕКТА (account:<subject.account_id>),

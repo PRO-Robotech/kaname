@@ -34,7 +34,7 @@ import (
 func TestSAKeyListRejectsOutOfRangePageSizeOnTheRawRequest(t *testing.T) {
 	t.Run("отрицательный page_size — InvalidArgument", func(t *testing.T) {
 		err := pageProbecallNoPanic(t, func() error {
-			_, e := (&Handler{}).List(context.Background(), &iamv1.ListSAKeysRequest{ServiceAccountId: "sva_probe", PageSize: -1})
+			_, e := (&Handler{}).List(context.Background(), &iamv1.ListSAKeysRequest{ServiceAccountId: "sva_probe00000000000", PageSize: -1})
 			return e
 		})
 		require.Error(t, err, "отрицательный page_size принят: значение схлопнуто в 0 до проверки")
@@ -44,7 +44,7 @@ func TestSAKeyListRejectsOutOfRangePageSizeOnTheRawRequest(t *testing.T) {
 
 	t.Run("page_size выше предела — InvalidArgument", func(t *testing.T) {
 		err := pageProbecallNoPanic(t, func() error {
-			_, e := (&Handler{}).List(context.Background(), &iamv1.ListSAKeysRequest{ServiceAccountId: "sva_probe", PageSize: 1001})
+			_, e := (&Handler{}).List(context.Background(), &iamv1.ListSAKeysRequest{ServiceAccountId: "sva_probe00000000000", PageSize: 1001})
 			return e
 		})
 		require.Error(t, err)
@@ -54,7 +54,7 @@ func TestSAKeyListRejectsOutOfRangePageSizeOnTheRawRequest(t *testing.T) {
 
 	t.Run("граница диапазона проходит формат-гейт", func(t *testing.T) {
 		err := pageProbecallTolerating(func() error {
-			_, e := (&Handler{}).List(context.Background(), &iamv1.ListSAKeysRequest{ServiceAccountId: "sva_probe", PageSize: 1000})
+			_, e := (&Handler{}).List(context.Background(), &iamv1.ListSAKeysRequest{ServiceAccountId: "sva_probe00000000000", PageSize: 1000})
 			return e
 		})
 		pageProbeassertNotRejectedByPageFormat(t, err)
@@ -62,7 +62,7 @@ func TestSAKeyListRejectsOutOfRangePageSizeOnTheRawRequest(t *testing.T) {
 
 	t.Run("законная страница проходит формат-гейт", func(t *testing.T) {
 		err := pageProbecallTolerating(func() error {
-			_, e := (&Handler{}).List(context.Background(), &iamv1.ListSAKeysRequest{ServiceAccountId: "sva_probe", PageSize: 100})
+			_, e := (&Handler{}).List(context.Background(), &iamv1.ListSAKeysRequest{ServiceAccountId: "sva_probe00000000000", PageSize: 100})
 			return e
 		})
 		pageProbeassertNotRejectedByPageFormat(t, err)

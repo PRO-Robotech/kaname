@@ -104,7 +104,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetRoleRequest) (*iamv1.Ro
 	}
 	pb, err := roleToPb(r)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "marshal role")
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return pb, nil
 }
@@ -138,7 +138,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListRolesRequest) (*iamv1
 	for _, r := range rows {
 		pb, err := roleToPb(r)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "marshal role")
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 		out = append(out, pb)
 	}

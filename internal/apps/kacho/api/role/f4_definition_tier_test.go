@@ -40,11 +40,11 @@ func TestRole_IAM_1_10_DtoEmitsDefinitionTier(t *testing.T) {
 		wantID     string
 		wantSystem bool
 	}{
-		{"account-tier custom", domain.Role{ID: "rol-x", AccountID: "acc-A", Name: "app-deployer", Rules: f4Rules()}, "iam.account", "acc-A", false},
-		{"project-tier custom", domain.Role{ID: "rol-y", ProjectID: "prj-P", Name: "p", Rules: f4Rules()}, "iam.project", "prj-P", false},
+		{"account-tier custom", domain.Role{ID: "rol-x000000000000000", AccountID: "acc-A000000000000000", Name: "app-deployer", Rules: f4Rules()}, "iam.account", "acc-A000000000000000", false},
+		{"project-tier custom", domain.Role{ID: "rol-y000000000000000", ProjectID: "prj-P000000000000000", Name: "p", Rules: f4Rules()}, "iam.project", "prj-P000000000000000", false},
 		// Stored IsSystem is intentionally left false to prove the projection derives
 		// system-ness from the cluster tier, not the stored flag.
-		{"cluster-tier system (derived)", domain.Role{ID: "rol-z", ClusterID: "cluster_kacho_root", Name: "admin", Rules: f4Rules(), IsSystem: false}, "iam.cluster", "cluster_kacho_root", true},
+		{"cluster-tier system (derived)", domain.Role{ID: "rol-z000000000000000", ClusterID: "cluster_kacho_root", Name: "admin", Rules: f4Rules(), IsSystem: false}, "iam.cluster", "cluster_kacho_root", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,20 +80,20 @@ func TestRole_IAM_1_10_CreateReqMapsDefinitionTier(t *testing.T) {
 	t.Run("account tier", func(t *testing.T) {
 		r, err := roleFromCreateReq(&iamv1.CreateRoleRequest{
 			Name:           "app-deployer",
-			DefinitionTier: &iamv1.DefinitionTier{TierType: "iam.account", TierId: "acc-A"},
+			DefinitionTier: &iamv1.DefinitionTier{TierType: "iam.account", TierId: "acc-A000000000000000"},
 			Rules:          []*iamv1.Rule{{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"}}},
 		})
 		require.NoError(t, err)
-		assert.Equal(t, domain.AccountID("acc-A"), r.AccountID)
+		assert.Equal(t, domain.AccountID("acc-A000000000000000"), r.AccountID)
 		assert.Equal(t, domain.ProjectID(""), r.ProjectID)
 	})
 	t.Run("project tier", func(t *testing.T) {
 		r, err := roleFromCreateReq(&iamv1.CreateRoleRequest{
 			Name:           "p",
-			DefinitionTier: &iamv1.DefinitionTier{TierType: "iam.project", TierId: "prj-P"},
+			DefinitionTier: &iamv1.DefinitionTier{TierType: "iam.project", TierId: "prj-P000000000000000"},
 		})
 		require.NoError(t, err)
-		assert.Equal(t, domain.ProjectID("prj-P"), r.ProjectID)
+		assert.Equal(t, domain.ProjectID("prj-P000000000000000"), r.ProjectID)
 		assert.Equal(t, domain.AccountID(""), r.AccountID)
 	})
 }
@@ -104,7 +104,7 @@ func TestRole_IAM_1_10_CreateReqMapsDefinitionTier(t *testing.T) {
 // unknown tierType all reject.
 func TestRole_IAM_1_11_CreateReqDefinitionTierNegative(t *testing.T) {
 	for _, tc := range []struct{ name, tt, tid string }{
-		{"empty tierType (pre-Phase-0 required)", "", "acc-A"},
+		{"empty tierType (pre-Phase-0 required)", "", "acc-A000000000000000"},
 		{"cluster tier rejected (seeded, not API)", "iam.cluster", "cluster_kacho_root"},
 		{"unknown tierType", "iam.folder", "x"},
 	} {

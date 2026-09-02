@@ -80,14 +80,14 @@ func (r *UserOAuthClientRepo) Get(ctx context.Context, id domain.UserOAuthClient
 // конкретного клиента.
 func (r *UserOAuthClientRepo) GetByOAuthClientID(ctx context.Context, hydraClientID domain.OAuthClientID) (domain.UserOAuthClient, error) {
 	if hydraClientID == "" {
-		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "UserOAuthClient with hydra_client_id %s not found", hydraClientID)
+		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "User credential %s not found", hydraClientID)
 	}
 	row := r.pool.QueryRow(ctx,
 		fmt.Sprintf(`SELECT %s FROM user_oauth_clients WHERE hydra_client_id = $1`, uocCols),
 		string(hydraClientID))
 	out, err := scanUserOAuthClient(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "UserOAuthClient with hydra_client_id %s not found", hydraClientID)
+		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "User credential %s not found", hydraClientID)
 	}
 	if err != nil {
 		return domain.UserOAuthClient{}, mapErr(err, "", string(hydraClientID))

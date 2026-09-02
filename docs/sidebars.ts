@@ -31,6 +31,7 @@ const sidebars: SidebarsConfig = {
         'api/account',
         'api/project',
         'api/user',
+        'api/membership',
         'api/service-account',
         'api/group',
         'api/role',

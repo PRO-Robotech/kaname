@@ -24,7 +24,7 @@ func createAccountNamed(t *testing.T, name string) *iamv1.Account {
 	uc := NewCreateAccountUseCase(newFakeRepo(), opsRepo)
 
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr00000000000000abcd"})
+		operations.Principal{Type: "user", ID: "usr0000000000000abcd"})
 	op, err := uc.Execute(ctx, domain.Account{Name: domain.AccountName(name)})
 	require.NoError(t, err, "создание с именем %q обязано пройти синхронную проверку", name)
 	require.NotNil(t, op)

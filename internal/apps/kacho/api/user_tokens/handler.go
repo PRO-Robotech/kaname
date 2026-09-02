@@ -168,7 +168,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListUserTokensRequest) (*
 	for _, c := range rows {
 		pb, err := userTokenToProto(c)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "marshal user token")
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 		out = append(out, pb)
 	}

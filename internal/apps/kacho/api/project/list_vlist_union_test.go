@@ -111,7 +111,7 @@ func TestListProjects_PageMembershipRequiresReadRelation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newListFakeRepo()
-			seedAccount(repo, "acc-other", "usr-other") // usr-u1 does NOT own it
+			seedAccount(repo, "acc-other", "usr-other00000000000") // usr-u1 does NOT own it
 			seedProject(repo, "prj-a", "acc-other")
 			seedProject(repo, "prj-b", "acc-other")
 
@@ -155,7 +155,7 @@ func TestListProjects_OwnerFloorAndReadRelationDedup(t *testing.T) {
 // P7-D — no-leak: a project in none of the three sets stays hidden.
 func TestListProjects_P7_Foreign_NoLeak(t *testing.T) {
 	repo := newListFakeRepo()
-	seedAccount(repo, "acc-other", "usr-other")
+	seedAccount(repo, "acc-other", "usr-other00000000000")
 	seedProject(repo, "prj-a", "acc-other")
 	seedProject(repo, "prj-foreign", "acc-other")
 
@@ -217,7 +217,7 @@ func TestListProjects_ServiceAccountFilteredByTheSameRelation(t *testing.T) {
 // pass a database that did not answer off as a lawful denial.
 func TestListProjects_P7_FGAUnavailable_FailClosed(t *testing.T) {
 	repo := newListFakeRepo()
-	seedAccount(repo, "acc-other", "usr-other")
+	seedAccount(repo, "acc-other", "usr-other00000000000")
 	seedProject(repo, "prj-a", "acc-other")
 
 	fga := newProjUnionFGAStub()

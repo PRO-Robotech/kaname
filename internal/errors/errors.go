@@ -65,6 +65,24 @@ var (
 	// 429) с признаком `QUOTA_RATE_EXCEEDED`.
 	ErrQuotaRateExceeded = stderrors.New("admission rate quota exceeded")
 
+	// ErrReferenceMissing / ErrReferenceInUse — ДВЕ ПРОТИВОПОЛОЖНЫЕ стороны
+	// одного нарушения ссылочной целостности, и они разведены намеренно.
+	//
+	// Прежде обе приходили одним текстом «referenced resource not found or still
+	// in use». Первая лечится СОЗДАНИЕМ ссылаемого ресурса, вторая —
+	// ОСВОБОЖДЕНИЕМ ссылок; вызывающий выбрать не мог, потому что различающего
+	// признака у него не было ни в тексте, ни в коде, ни в деталях. Отказ,
+	// объединяющий взаимоисключающие причины, следующего шага не восстанавливает
+	// by construction: любой выбранный шаг верен ровно в половине случаев.
+	//
+	// Оба ВЛОЖЕНЫ в ErrFailedPrecondition, а не заменяют его: код отказа не
+	// меняется (состояние ресурсов не позволяет операцию — это по-прежнему
+	// FAILED_PRECONDITION), меняется только различимость. Признак полосы едет
+	// в `google.rpc.ErrorInfo` (`shared.referenceRefusal`), потому что разбор
+	// прозы вызывающим запрещён конвенцией.
+	ErrReferenceMissing = fmt.Errorf("%w: referenced resource missing", ErrFailedPrecondition)
+	ErrReferenceInUse   = fmt.Errorf("%w: resource still referenced", ErrFailedPrecondition)
+
 	// ErrAborted — a transient concurrency conflict the caller can retry (the
 	// operation was aborted, typically a transaction serialization failure).
 	// Maps to gRPC ABORTED, the idiomatic "retry the transaction" code — unlike
@@ -173,7 +191,10 @@ func StripSentinel(err error) string {
 		return ""
 	}
 	msg := err.Error()
-	for _, s := range []error{ErrNotFound, ErrAlreadyExists, ErrFailedPrecondition, ErrInvalidArg, ErrInternal, ErrUnavailable, ErrPermissionDenied, ErrUnauthenticated, ErrAborted, ErrQuotaExceeded, ErrQuotaNotProvisioned, ErrQuotaRateExceeded, ErrSelfRevoke, ErrLastAdmin} {
+	// Порядок несущий: ErrReferenceMissing/InUse вложены в ErrFailedPrecondition,
+	// поэтому их полный префикс обязан примеряться ПЕРВЫМ — иначе общий префикс
+	// снимется раньше и в тексте останется хвост «referenced resource missing: ».
+	for _, s := range []error{ErrReferenceMissing, ErrReferenceInUse, ErrNotFound, ErrAlreadyExists, ErrFailedPrecondition, ErrInvalidArg, ErrInternal, ErrUnavailable, ErrPermissionDenied, ErrUnauthenticated, ErrAborted, ErrQuotaExceeded, ErrQuotaNotProvisioned, ErrQuotaRateExceeded, ErrSelfRevoke, ErrLastAdmin} {
 		prefix := s.Error() + ": "
 		if rest, ok := strings.CutPrefix(msg, prefix); ok {
 			// Пустой остаток — вырожденный случай: обёртка без текста

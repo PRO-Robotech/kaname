@@ -32,7 +32,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
-const iam1Principal = "usr00000000000000abcd"
+const iam1Principal = "usr0000000000000abcd"
 
 // IAM-1-01: owner derived from the authenticated caller when absent from body.
 func TestAccount_IAM_1_01_OwnerDerivedFromCaller(t *testing.T) {

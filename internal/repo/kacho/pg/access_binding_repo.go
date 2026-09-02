@@ -140,6 +140,29 @@ func (r *abReader) GetForNoKeyUpdate(ctx context.Context, id domain.AccessBindin
 	return out, nil
 }
 
+// accountScopePredicate — «привязка лежит в области ЭТОГО аккаунта»: либо
+// привязана к самому аккаунту, либо к любому его проекту. Один placeholder,
+// названный дважды: аккаунт и его проекты сверяются с одним и тем же значением.
+//
+// ОДНО написание на двух вызывающих — `List` (поле AccountID, #1737) и
+// `ListByAccount`. Прежде их было два, и приёмка требует от них ОДИНАКОВОГО
+// охвата; держать это требование на двух написаниях значило бы завести два
+// ответа на вопрос «чья это привязка», которые разойдутся молча.
+//
+// Третье написание в этом файле — `membershipHoldingBindingsPredicate` (#1686) —
+// сюда НЕ сводится: копия там объявлена копией НАМЕРЕННО, чтобы правка одной
+// стороны заставляла открыть вторую, и у неё свой предмет (отказ исключения).
+//
+// Within-service refs (ban #10): подзапрос читает FK-проверенную таблицу
+// projects — ни кросс-сервисного вызова, ни TOCTOU.
+func accountScopePredicate(argPos int) string {
+	return fmt.Sprintf(
+		`((resource_type = 'account' AND resource_id = $%[1]d)
+		   OR (resource_type = 'project'
+		       AND resource_id IN (SELECT id FROM projects WHERE account_id = $%[1]d)))`,
+		argPos)
+}
+
 // List — the unified read (redesign-2026 F11). Builds the WHERE from whatever
 // optional predicates the filter carries (subject/role/scope-type/scope-id),
 // then keyset-paginates by (created_at, id) ASC. Read VISIBILITY is NOT a
@@ -182,6 +205,19 @@ func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]dom
 	}
 	if f.ScopeID != "" {
 		addEq("resource_id", f.ScopeID)
+	}
+	// Сужение до области ОДНОГО аккаунта (#1737): сам аккаунт плюс каждый его
+	// проект. Тот же предикат, что у ListByAccount, — одно написание на оба
+	// глагола, поэтому «одинаковый охват» есть свойство кода, а не совпадение.
+	//
+	// Стоит ОТДЕЛЬНО от сужения кандидатов ниже и от него не зависит: у
+	// администратора облака и у держателя cluster-scoped выдачи Candidates равен
+	// nil, и предикат, спрятанный внутрь того блока, для них не исполнился бы
+	// вовсе — ответ остался бы на вид исправным и шире запрошенного.
+	if f.AccountID != "" {
+		conditions = append(conditions, accountScopePredicate(argIdx))
+		args = append(args, f.AccountID)
+		argIdx++
 	}
 	// Argument-free predicate (like ListByAccount/ListByRole) — appending it does not
 	// disturb argIdx.
@@ -309,11 +345,9 @@ func (r *abReader) ListByAccount(ctx context.Context, accountID domain.AccountID
 	args := []any{string(accountID)}
 	argIdx := 2
 
-	conditions := []string{
-		`((resource_type = 'account' AND resource_id = $1)
-		   OR (resource_type = 'project'
-		       AND resource_id IN (SELECT id FROM projects WHERE account_id = $1)))`,
-	}
+	// Тот же предикат, что у `List` с полем AccountID (#1737) — одно написание,
+	// поэтому охват обоих глаголов совпадает by construction.
+	conditions := []string{accountScopePredicate(1)}
 
 	if !f.IncludeRevoked {
 		conditions = append(conditions, `status <> 'REVOKED'`)
@@ -749,7 +783,7 @@ func unmarshalTarget(b []byte) (domain.AccessTarget, error) {
 func (w *abWriter) Delete(ctx context.Context, id domain.AccessBindingID) error {
 	tag, err := w.tx.Exec(ctx, `DELETE FROM access_bindings WHERE id = $1`, string(id))
 	if err != nil {
-		return mapErr(err, "", string(id))
+		return mapErr(err, "AccessBinding.Delete", string(id))
 	}
 	if tag.RowsAffected() == 0 {
 		return iamerr.Wrapf(iamerr.ErrNotFound, "AccessBinding %s not found", id)
@@ -767,7 +801,7 @@ func (w *abWriter) DeleteGuarded(ctx context.Context, id domain.AccessBindingID)
 	tag, err := w.tx.Exec(ctx,
 		`DELETE FROM access_bindings WHERE id = $1 AND deletion_protection = false`, string(id))
 	if err != nil {
-		return mapErr(err, "", string(id))
+		return mapErr(err, "AccessBinding.Delete", string(id))
 	}
 	if tag.RowsAffected() > 0 {
 		return nil
@@ -1692,7 +1726,7 @@ func (w *abWriter) DeleteSubject(ctx context.Context, bindingID domain.AccessBin
 		  WHERE binding_id = $1 AND subject_type = $2 AND subject_id = $3`,
 		string(bindingID), string(subject.Type), string(subject.ID))
 	if err != nil {
-		return false, mapErr(err, "", string(bindingID))
+		return false, mapErr(err, "AccessBinding.DeleteSubject", string(bindingID))
 	}
 	return tag.RowsAffected() > 0, nil
 }

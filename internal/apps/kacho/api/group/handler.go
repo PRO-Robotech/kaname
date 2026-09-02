@@ -100,7 +100,7 @@ func (h *Handler) Get(ctx context.Context, req *iamv1.GetGroupRequest) (*iamv1.G
 	}
 	pb, err := groupToPb(g)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "marshal group")
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 	return pb, nil
 }
@@ -130,7 +130,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListGroupsRequest) (*iamv
 	for _, g := range rows {
 		pb, err := groupToPb(g)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "marshal group")
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 		out = append(out, pb)
 	}
@@ -176,7 +176,7 @@ func (h *Handler) ListMembers(ctx context.Context, req *iamv1.ListGroupMembersRe
 	for _, m := range res.Members {
 		pb, err := groupMemberToPb(m)
 		if err != nil {
-			return nil, status.Error(codes.Internal, "marshal group member")
+			return nil, status.Error(codes.Internal, "internal error")
 		}
 		out = append(out, pb)
 	}

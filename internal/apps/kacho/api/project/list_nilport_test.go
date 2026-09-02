@@ -23,7 +23,7 @@ import (
 // видимость никогда не резолвится через owner-only обходной путь.
 func TestListProjects_NilRelationPort_Unavailable(t *testing.T) {
 	repo := newListFakeRepo()
-	seedAccount(repo, "acc-other", "usr-other") // usr-u1 НЕ владелец → нет owner-обхода
+	seedAccount(repo, "acc-other", "usr-other00000000000") // usr-u1 НЕ владелец → нет owner-обхода
 	seedProject(repo, "prj-a", "acc-other")
 
 	uc := NewListProjectsUseCase(repo) // relationQueries не сконфигурирован (nil)

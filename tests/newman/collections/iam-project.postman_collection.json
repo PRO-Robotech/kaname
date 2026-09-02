@@ -4576,7 +4576,8 @@
                   "pm.environment.unset('_opErrStarted');",
                   "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
                   "pm.test('error code 9 (FAILED_PRECONDITION)', () => pm.expect(j.error && j.error.code, JSON.stringify(j)).to.eql(9));",
-                  "pm.test('error text includes \"referenced resource not found or still in use\"', () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include('referenced resource not found or still in use'));"
+                  "pm.test('error text includes \"resource is still referenced by other resources\"', () => pm.expect((j.error && j.error.message || '').toLowerCase(), JSON.stringify(j)).to.include('resource is still referenced by other resources'));",
+                  "pm.test('error carries reason REFERENCE_IN_USE', () => { const ds = (j.error && j.error.details) || []; const rs = ds.map(d => d && d.reason).filter(Boolean); pm.expect(rs, JSON.stringify(j)).to.include('REFERENCE_IN_USE'); });"
                 ]
               }
             }

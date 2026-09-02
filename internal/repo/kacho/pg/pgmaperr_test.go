@@ -80,7 +80,11 @@ func TestWrapPgErr_NoLeak_OnUnmappedConstraints(t *testing.T) {
 		// целиком, и это утверждает отдельная проба ниже.
 		{"unmapped-sqlstate", "XX000", iamerr.ErrInternal, "database error: sqlstate XX000"},
 		{"unmapped-unique", "23505", iamerr.ErrAlreadyExists, "resource with these attributes already exists"},
-		{"unmapped-fk", "23503", iamerr.ErrFailedPrecondition, "referenced resource not found or still in use"},
+		// Неразобранная связь называет ОДНО состояние. Пустая подсказка — сторона
+		// ссылки; обратная сторона утверждается отдельно
+		// (`TestUnmappedForeignKeyNamesOneStateNotTwo`), и там же стоит
+		// требование, чтобы два состояния не сходились в один текст.
+		{"unmapped-fk", "23503", iamerr.ErrReferenceMissing, "referenced resource does not exist; create it or correct the reference before retrying"},
 		{"unmapped-check", "23514", iamerr.ErrInvalidArg, "Illegal argument: value violates a constraint"},
 		{"exclusion", "23P01", iamerr.ErrFailedPrecondition, "resource conflicts with an existing reservation"},
 	}
@@ -112,8 +116,8 @@ func TestWrapPgErr_SerializationFailure_Aborted(t *testing.T) {
 		t.Fatalf("40001: must NOT be FailedPrecondition (non-retryable)")
 	}
 	out := iamerr.StripSentinel(err)
-	if out != "serialization conflict, retry" {
-		t.Errorf("text = %q; want %q", out, "serialization conflict, retry")
+	if out != "conflicting concurrent change, retry the request" {
+		t.Errorf("text = %q; want %q", out, "conflicting concurrent change, retry the request")
 	}
 	assertNoLeak(t, out)
 }
@@ -144,32 +148,12 @@ func TestWrapPgErr_KnownConstraint_KeepsVerbatimContract(t *testing.T) {
 	}
 }
 
-// TestWrapPgErr_ConditionFK_DirectionSensitive — migration 0048's DB-level
-// Condition reference (access_binding_conditions_condition_fk) must map 23503 to
-// FailedPrecondition with direction-sensitive, schema-free text: INSERT side →
-// "Condition <id> not found"; delete side (kindHint "Condition.Delete", the ON
-// DELETE RESTRICT firing on the TOCTOU race) → "condition is in use ...".
-func TestWrapPgErr_ConditionFK_DirectionSensitive(t *testing.T) {
-	const constraint = "access_binding_conditions_condition_fk"
-
-	insErr := wrapPgErr(mkPgErr("23503", constraint), "", "cnd_x")
-	if !stderrors.Is(insErr, iamerr.ErrFailedPrecondition) {
-		t.Fatalf("insert side: want ErrFailedPrecondition, got %v", insErr)
-	}
-	if got := iamerr.StripSentinel(insErr); got != "Condition cnd_x not found" {
-		t.Errorf("insert side text = %q; want %q", got, "Condition cnd_x not found")
-	}
-	assertNoLeak(t, iamerr.StripSentinel(insErr))
-
-	delErr := wrapPgErr(mkPgErr("23503", constraint), "Condition.Delete", "cnd_x")
-	if !stderrors.Is(delErr, iamerr.ErrFailedPrecondition) {
-		t.Fatalf("delete side: want ErrFailedPrecondition, got %v", delErr)
-	}
-	if got := iamerr.StripSentinel(delErr); got != "condition is in use by access bindings" {
-		t.Errorf("delete side text = %q; want in-use text", got)
-	}
-	assertNoLeak(t, iamerr.StripSentinel(delErr))
-}
+// Проба `TestWrapPgErr_ConditionFK_DirectionSensitive` снята ВМЕСТЕ со своим
+// предметом: тенантская поверхность ресурса `Condition` ретайрнута целиком, а
+// миграция `0075` снесла таблицы и внешний ключ, чьё имя проба закрепляла. Она
+// оставалась зелёной и после снятия — вход подавала сама, синтетическим
+// `pgconn.PgError`, — то есть удостоверяла текст, который сервер больше не
+// произведёт. Класс держит `TestRefusalTextNeverNamesARetiredConstraint`.
 
 // TestWrapPgErr_SubjectRefBeforeDelete_ResourceAware — migration 0050's BEFORE
 // DELETE trigger RAISEs 23503 tagged CONSTRAINT='access_binding_subjects_subject_ref'

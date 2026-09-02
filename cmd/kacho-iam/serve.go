@@ -1192,6 +1192,46 @@ func runServe(cfg config.Config) error {
 		runProviderCompensationMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
+
+	// ПИСЬМО ПРИГЛАШЕНИЯ: дренаж очереди, возврат отравленных строк и
+	// наблюдаемость (приёмка ID-MAIL-1, Р23/Р25; §10 пп. 20–21).
+	//
+	// Намерение отправить письмо со-коммичено строкой приглашения в её же
+	// транзакции, а исполняется ЗДЕСЬ — at-least-once, поэтому оно переживает и
+	// смерть процесса, и недоступность почтового узла. Дренаж поднимается
+	// ВСЕГДА, в том числе при необъявленной почтовой полосе: тогда отправитель
+	// на каждой попытке даёт наблюдаемый исход «настройка» — громко и в свою
+	// клетку счётчика, — а не молчит. Не поднять его значило бы завести очередь,
+	// у которой нет исполнителя: намерения копятся, письма не уходят, и всё
+	// выглядит работающим, потому что приглашение-то создаётся.
+	inviteMailDrainerTask, imerr := buildInviteMailDrainer(
+		pool, cfg, metricsReg.InviteMailRecorder(), logger)
+	if imerr != nil {
+		_ = listener.Close()
+		_ = internalListener.Close()
+		return fmt.Errorf("invite mail drainer wiring: %w", imerr)
+	}
+	tasks = append(tasks, func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("invite mail drainer panicked", "panic", r)
+				err = fmt.Errorf("invite mail drainer panic: %v", r)
+			}
+			if err != nil {
+				triggerShutdown()
+			}
+		}()
+		return inviteMailDrainerTask()
+	})
+	// Возврат отравленных, наблюдаемость очереди и уборка доставленных строк.
+	// Ошибка сборки останавливает старт: уборка, собранная молча и не
+	// исполняющаяся, оставляет очередь расти вечно.
+	if berr := startInviteMailBackstop(
+		ctx, pool, cfg, metricsReg.OutboxRecorder(), logger); berr != nil {
+		_ = listener.Close()
+		_ = internalListener.Close()
+		return fmt.Errorf("invite mail backstop wiring: %w", berr)
+	}
 	// СКАНА ЖУРНАЛА СМЕНЫ СУБЪЕКТА ЗДЕСЬ НЕТ — у него больше нет предмета.
 	//
 	// Он мерил ДОСТАВКУ: возраст самой старой неотправленной строки и число

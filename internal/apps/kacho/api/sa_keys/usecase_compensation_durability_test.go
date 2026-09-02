@@ -112,8 +112,8 @@ func (c *recordingCompensation) snapshot() []string {
 // (ветка та же по составу саги: регистрация у провайдера → коммит своей строки).
 func federatedInput() IssueInput {
 	return IssueInput{
-		ServiceAccountID: "sva_test",
-		CreatedByUserID:  "usr_admin",
+		ServiceAccountID: "sva_test000000000000",
+		CreatedByUserID:  "usr_admin00000000000",
 		TrustedSubjects: []domain.TrustedSubject{
 			{
 				Issuer:         "https://token.actions.githubusercontent.com",

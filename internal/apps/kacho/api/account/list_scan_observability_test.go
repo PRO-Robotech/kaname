@@ -104,7 +104,7 @@ func TestListScan_CountsEveryRefill_NotOnlyTheLastOne(t *testing.T) {
 	repo := newAcctListFakeRepo()
 	for _, id := range []string{"acc-1", "acc-2", "acc-3", "acc-4", "acc-5",
 		"acc-6", "acc-7", "acc-8", "acc-9"} {
-		seedPagedAcct(repo, id, "usr-other")
+		seedPagedAcct(repo, id, "usr-other00000000000")
 	}
 
 	// Видимы только три последних ⇒ страница набирается на третьем обходе.

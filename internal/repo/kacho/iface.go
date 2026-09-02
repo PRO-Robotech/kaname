@@ -124,6 +124,20 @@ type Writer interface {
 	// "mirror.upsert" | "mirror.delete" (reused literals).
 	EmitReconcileEvent(ctx context.Context, eventType, objectType, objectID string) error
 
+	// EmitInviteMail ставит намерение отправить письмо приглашения в
+	// `kacho_iam.invite_mail_outbox` на ЭТОЙ writer-транзакции — атомарно со
+	// строкой приглашения (ban #10).
+	//
+	// Атомарность здесь несущая, а не удобная: при откате приглашения намерения
+	// нет ВОВСЕ (человек не получит письма о приглашении, которого не случилось),
+	// а при состоявшемся приглашении оно переживает смерть процесса. Прямой вызов
+	// ретранслятора из обработчика не даёт ни того, ни другого.
+	//
+	// userID служит ключом партиции порядка: письма одному человеку уходят в том
+	// порядке, в котором их поставили. Ссылки-предъявителя намерение не несёт —
+	// доступ даёт владение почтовым ящиком, а не обладание письмом.
+	EmitInviteMail(ctx context.Context, userID, accountID, to, loginURL string) error
+
 	// InsertRecoveryCompletion — idempotency-gate INSERT for the Kratos
 	// recovery-completed webhook (kacho_iam.recovery_completions, migration 0015).
 	// Runs `INSERT … ON CONFLICT (recovery_jti) DO NOTHING` and
