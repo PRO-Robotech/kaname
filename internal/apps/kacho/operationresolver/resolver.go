@@ -299,11 +299,17 @@ func marshalGroup(g domain.Group) (*anypb.Any, error) {
 //
 // Метод, а не свободная функция: набор глаголов типа берётся у ЖИВОГО каталога
 // резолвера, а не у словаря, порождённого сборкой (#1994).
+//
+// Вычисленное состояние снимается ЯВНО ([domain.Role.WithoutComputedState]) —
+// тем же доводом, что у второго переводчика роли: обещание «нулевое значение
+// означает „этим ответом не вычислено"» держалось by construction и снималось
+// одной строкой молча.
 func (r *Resolver) marshalRole(role domain.Role) (*anypb.Any, error) {
 	if r.cat == nil {
 		return nil, fmt.Errorf("operationresolver: каталожный факт не провязан — " +
 			"превью роли собрать нечем (kacho#1994)")
 	}
+	role = role.WithoutComputedState()
 	role.TypeVerbs = r.cat.Facts().RolePreviewLookup()
 	var dst *iamv1.Role
 	if err := dto.Transfer(dto.FromTo(role, &dst)); err != nil {

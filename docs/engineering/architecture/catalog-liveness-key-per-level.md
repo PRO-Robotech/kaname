@@ -26,6 +26,26 @@ SPDX-License-Identifier: BUSL-1.1
 | `catalog_resource` → `catalog_module` | **ключом**: `catalog_resource_module_live_fk (module, module_live)` → `catalog_module (module, live)` (`#1859`) |
 | `catalog_verb` → `catalog_resource` | **ничем**: `catalog_verb_resource_fk (module, resource)` идёт на ПЕРВИЧНЫЙ ключ ресурса |
 
+> [!note] У `catalog_module` есть ЧЕТВЁРТЫЙ ссылающийся, и он не уровень каталога
+> `kacho_iam.roles.owner_module` — потребитель, а не ступень трёхуровневой цепи,
+> поэтому в таблице выше его строки нет и быть не должно. Но живость родителя он
+> держит **той же формой**: `roles_owner_module_live_fk (owner_module,
+> owner_module_live)` → `catalog_module (module, live)` `MATCH SIMPLE`
+> (задача `#2026`), рядом с безусловным `roles_owner_module_fk`.
+>
+> Названо здесь потому, что решение этой страницы — «уровень либо несёт ключ
+> живости, либо называет решение, почему не несёт» — читается как перечень ВСЕХ,
+> кто ссылается на каталог. Единицы счёта здесь две, и путать их нельзя:
+> на `catalog_module` ссылаются **4 ключа** из **2 таблиц**
+> (`catalog_resource` — безусловный и живостный, `roles` — те же два), тогда как
+> таблица выше перечисляет **уровни цепи**, и `roles` уровнем не является.
+> Предикат: `grep -n 'REFERENCES kacho_iam.catalog_module'
+> services/iam/internal/migrations/*.sql`. Без этой оговорки второй
+> ссылающийся выглядел бы пропущенным.
+>
+> Практическое следствие для порядка снятия — `role-withdrawal-is-a-mark.md`
+> §«Что это решение РАЗМЫКАЕТ»; здесь оно не пересказывается.
+
 ```sh
 grep -rn "REFERENCES kacho_iam.catalog_" services/iam/internal/migrations/*.sql
 ```

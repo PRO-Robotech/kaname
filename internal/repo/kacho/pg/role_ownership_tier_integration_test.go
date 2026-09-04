@@ -30,8 +30,22 @@ package pg_test
 //	имя без точки-разделителя                    → 23514 того же ограничения
 //	владелец вне каталога                        → 23503 roles_owner_module_fk
 //	владелец в каталоге                          → проходит          (иначе -10 зеленел бы на ключе, отвергающем ВСЯКОГО владельца)
-//	владелец СНЯТ из каталога                    → проходит          — названное следствие формы ключа, не удача
-//	снятие модуля при живой роли                 → проходит          — близнец IAM-MW-1-08 соседней APPROVED-приёмки
+//	владелец СНЯТ из каталога                    → 23503 roles_owner_module_live_fk   ← ПЕРЕВЁРНУТО (#2026)
+//	снятие модуля при ЖИВОЙ роли                 → 23503 roles_owner_module_live_fk   ← ПЕРЕВЁРНУТО (#2026)
+//	снятие модуля, все роли которого СНЯТЫ       → проходит          — без этой половины два отрицания выше
+//	                                                                  неотличимы от «модуль снять нельзя никогда»
+//
+// # Две последние строки ПЕРЕВЁРНУТЫ, и переворот был ЗАКАЗАН, а не случился
+//
+// До #2026 обе читались «проходит», и это было верно: ключ шёл на первичный ключ
+// каталога и о живости не спрашивал. Шапки обоих сценариев называли условие
+// своего переворота дословно — «его обязано ПЕРЕВЕРНУТЬ то изменение, которое
+// даст роли собственную живость (#1913)». Условие наступило: пометка снятия роли
+// в дереве есть, производитель провязан, и `roles_owner_module_live_fk` делает
+// оба состояния непредставимыми.
+//
+// Форма самоистечения сработала как задумана: проба не «сломалась» и не была
+// ослаблена — она ЗАМЕНЕНА утверждением о новом свойстве того же предмета.
 //
 // # Имя ограничения — часть сценария
 //
@@ -265,13 +279,55 @@ func TestOwnerOutsideTheModuleCatalogIsRefusedByTheKey(t *testing.T) {
 		insertSystemRole(ctx, pool, module+".livecheck", &module, ownedRules(module, "network")))
 }
 
-// TestOwnerRetiredFromTheCatalogIsNotRefused — IAM-OM-1-11.
+// retireModuleReturningErr — снятие модуля ПОЛНЫМ путём, отдающее ошибку
+// последнего шага вызывающему.
 //
-// Сценарий закрепляет ВЫБРАННУЮ семантику, а не удачу реализации: ключ идёт на
-// первичный ключ каталога и о живости не спрашивает. Его обязано ПЕРЕВЕРНУТЬ то
-// изменение, которое даст роли собственную живость (#1913); до тех пор его
-// зелень означает «состояние представимо и названо», а не «дыры нет».
-func TestOwnerRetiredFromTheCatalogIsNotRefused(t *testing.T) {
+// Своим помощником, а не `withdrawModule`: тот роняет пробу через
+// `require.NoError` и потому годится ровно там, где снятие обязано ПРОЙТИ.
+// Здесь предмет обратный — отказ, — и его надо получить в руки, чтобы утвердить
+// SQLSTATE и ИМЯ ключа.
+//
+// Порядок «глаголы → ресурсы → модуль» повторён дословно и обязателен: ударь мы
+// сразу в строку модуля, первым ответил бы ключ СОСЕДНЕГО уровня
+// (`catalog_resource_module_live_fk`), и проба зеленела бы на чужом отказе.
+func retireModuleReturningErr(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
+	module, reason string,
+) error {
+	t.Helper()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	relocateModuleGrants(t, ctx, tx, module, reason)
+
+	_, err = tx.Exec(ctx, `
+		UPDATE kacho_iam.catalog_verb
+		   SET live = false, retired_at = now(), retired_reason = $2
+		 WHERE module = $1 AND live`, module, reason)
+	require.NoError(t, err, "снятие глаголов модуля")
+
+	_, err = tx.Exec(ctx, `
+		UPDATE kacho_iam.catalog_resource
+		   SET live = false, retired_at = now(), retired_reason = $2
+		 WHERE module = $1 AND live`, module, reason)
+	require.NoError(t, err, "снятие ресурсов модуля")
+
+	_, err = tx.Exec(ctx, `
+		UPDATE kacho_iam.catalog_module
+		   SET live = false, retired_at = now(), retired_reason = $2
+		 WHERE module = $1 AND live`, module, reason)
+	return err
+}
+
+// TestOwnerRetiredFromTheCatalogIsRefusedByTheLivenessKey — IAM-OM-1-11,
+// ПЕРЕВЁРНУТ задачей #2026.
+//
+// Прежняя редакция закрепляла обратное — «роль со снятым владельцем
+// записывается» — и называла условие своего переворота дословно: «его обязано
+// ПЕРЕВЕРНУТЬ то изменение, которое даст роли собственную живость (#1913)».
+// Условие наступило, и сценарий ЗАМЕНЁН утверждением о новом свойстве того же
+// предмета, а не ослаблен.
+func TestOwnerRetiredFromTheCatalogIsRefusedByTheLivenessKey(t *testing.T) {
 	if testing.Short() {
 		t.Skip("нужен Postgres")
 	}
@@ -282,7 +338,7 @@ func TestOwnerRetiredFromTheCatalogIsNotRefused(t *testing.T) {
 	// снять одну строку модуля нельзя by construction. Помощник тот же, каким
 	// пользуется проба соседней приёмки, — своего второго писателя здесь не
 	// заводится.
-	verbs, refs := withdrawModule(t, ctx, pool, withdrawnModule, "проба #1032 -11")
+	verbs, refs := withdrawModule(t, ctx, pool, withdrawnModule, "проба #2026 -11")
 	t.Logf("модуль %q снят: переселено выдач %d, объявлений %d", withdrawnModule, verbs, refs)
 
 	var live bool
@@ -291,22 +347,39 @@ func TestOwnerRetiredFromTheCatalogIsNotRefused(t *testing.T) {
 	require.False(t, live, "предпосылка сценария: модуль снят")
 
 	owner := withdrawnModule
+	err := insertSystemRole(ctx, pool, owner+".afterretire", &owner, ownedRules(owner, "registry"))
+	require.Error(t, err,
+		"ЖИВАЯ роль со СНЯТЫМ владельцем обязана отвергаться КЛЮЧОМ: иначе роль снятого "+
+			"модуля продолжает грантовать, и отвергнуть это состояние нечем")
+	code, constraint := pgCode(err)
+	t.Logf("владелец %q снят: SQLSTATE %s, ключ %q", owner, code, constraint)
+	require.Equal(t, "23503", code)
+	require.Equal(t, "roles_owner_module_live_fk", constraint,
+		"имя ключа — часть сценария: под именем roles_owner_module_fk отвечал бы ключ, "+
+			"который о живости не спрашивает вовсе")
+
+	// Законный близнец: ЖИВОЙ модуль каталога ту же роль принимает. Без него
+	// отрицание выше зеленело бы на ключе, отвергающем ВСЯКОГО владельца.
+	alive := liveCatalogModule(t, ctx, pool)
 	require.NoError(t,
-		insertSystemRole(ctx, pool, owner+".afterretire", &owner, ownedRules(owner, "registry")),
-		"роль со СНЯТЫМ владельцем записывается: ключ адресует строку каталога независимо от "+
-			"её живости. Это названное следствие формы ключа (#1913), а не дыра, найденная пробой")
-	t.Logf("состояние «модуль %q снят, а роль с этим владельцем записана» ПРЕДСТАВИМО — "+
-		"остаток назван и заведён задачей #1913", owner)
+		insertSystemRole(ctx, pool, alive+".afterretire", &alive, ownedRules(alive, "network")),
+		"роль живого модуля обязана записываться: ключ судит ЖИВОСТЬ владельца, "+
+			"а не наличие владельца вообще")
 }
 
-// TestRetiringAModuleThatOwnsARolePasses — IAM-OM-1-12, близнец IAM-MW-1-08.
+// TestRetiringAModuleThatOwnsALiveRoleIsRefused — IAM-OM-1-12, ПЕРЕВЁРНУТ
+// задачей #2026, и вместе с ним переехал его довод.
 //
-// Прямой ответ на вопрос «не отбирает ли эта задача свойство, которое сосед
-// доказал прогоном»: снятие модуля при живой роли обязано ПРОХОДИТЬ и до, и
-// после миграции. Именно этот вход отверг форму ключа живости (§2.1 приёмки):
-// с ключом на пару `(module, live)` строка роли отпускала бы референт только
-// своим удалением, а удаления у роли модуля нет ни одного.
-func TestRetiringAModuleThatOwnsARolePasses(t *testing.T) {
+// Прежняя редакция требовала, чтобы снятие модуля при живой роли ПРОХОДИЛО, и
+// обосновывала это так: с ключом на пару строка роли отпускала бы референт
+// только своим УДАЛЕНИЕМ, а удаления у роли модуля нет ни одного — значит модуль
+// не снимался бы никогда.
+//
+// Посылка была верна и БОЛЬШЕ НЕ ВЕРНА. Роль отпускает референт не удалением, а
+// ПОМЕТКОЙ снятия (#1913): у снятой строки составляющая ключа обращается в NULL.
+// Поэтому положительный контроль ниже — не послабление, а ровно тот вход, на
+// котором прежний довод держался: модуль, все роли которого сняты, снимается.
+func TestRetiringAModuleThatOwnsALiveRoleIsRefused(t *testing.T) {
 	if testing.Short() {
 		t.Skip("нужен Postgres")
 	}
@@ -317,19 +390,44 @@ func TestRetiringAModuleThatOwnsARolePasses(t *testing.T) {
 		insertSystemRole(ctx, pool, owner+".stillhere", &owner, ownedRules(owner, "registry")),
 		"предпосылка сценария: у модуля есть живая роль")
 
-	verbs, refs := withdrawModule(t, ctx, pool, owner, "проба #1032 -12")
+	// ОТРИЦАНИЕ. Помощник соседней приёмки снимает модуль полным путём и на
+	// последнем шаге упирается в ключ живости роли.
+	err := retireModuleReturningErr(t, ctx, pool, owner, "проба #2026 -12")
+	require.Error(t, err,
+		"снятие модуля при ЖИВОЙ роли обязано отвергаться: иначе роль снятого модуля "+
+			"продолжает грантовать")
+	code, constraint := pgCode(err)
+	t.Logf("снятие модуля %q при живой роли отвергнуто: SQLSTATE %s, ключ %q",
+		owner, code, constraint)
+	require.Equal(t, "23503", code)
+	require.Equal(t, "roles_owner_module_live_fk", constraint)
+
+	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — обязателен. Без него отрицание выше неотличимо от
+	// «модуль снять нельзя НИКОГДА», а это ровно тот исход, которым круг 1
+	// приёмки отверг форму ключа живости.
+	res, err := pool.Exec(ctx, `
+		UPDATE kacho_iam.roles
+		   SET live = false, retired_at = now(), retired_reason = 'проба #2026 -12'
+		 WHERE owner_module = $1 AND live`, owner)
+	require.NoError(t, err, "пометка снятия ролей модуля")
+	require.Positive(t, res.RowsAffected(), "предпосылка контроля: снимать было что")
+
+	verbs, refs := withdrawModule(t, ctx, pool, owner, "проба #2026 -12 контроль")
 
 	var live bool
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT live FROM kacho_iam.catalog_module WHERE module = $1`, owner).Scan(&live))
 	require.Falsef(t, live,
-		"снятие модуля %q при живой роли обязано ПРОХОДИТЬ: обратное отобрало бы у соседа "+
-			"свойство, доказанное его прогоном (IAM-MW-1-08)", owner)
+		"модуль %q, все роли которого СНЯТЫ, обязан сниматься: обратное означало бы, что "+
+			"ключ не держит порядок, а запирает каталог навсегда", owner)
 
-	var roles int
+	// Строки ролей ПЕРЕЖИЛИ снятие модуля — на этом стоит обратимость (#1913).
+	var roles, liveRoles int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.roles WHERE owner_module = $1`, owner).Scan(&roles))
-	t.Logf("модуль %q снят (переселено выдач %d, объявлений %d), ролей с этим владельцем "+
-		"осталось %d — остаток назван (#1913), а не спрятан", owner, verbs, refs, roles)
-	require.Positive(t, roles)
+		`SELECT count(*), count(*) FILTER (WHERE live)
+		   FROM kacho_iam.roles WHERE owner_module = $1`, owner).Scan(&roles, &liveRoles))
+	t.Logf("модуль %q снят (переселено выдач %d, объявлений %d), ролей с этим владельцем %d, "+
+		"из них живых %d", owner, verbs, refs, roles, liveRoles)
+	require.Positive(t, roles, "снятие модуля роль НЕ удаляет — она помечена")
+	require.Zero(t, liveRoles)
 }

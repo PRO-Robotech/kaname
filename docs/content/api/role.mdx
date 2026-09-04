@@ -302,10 +302,32 @@ system-only).
       "effectiveVerbs": ["get", "list"],
       "verbNotes": {},
       "displayName": "vpc-viewer",
-      "purpose": ""
+      "purpose": "",
+      "health": "ROLE_HEALTH_HEALTHY",
+      "declaredSegments": 2,
+      "unresolvedSegments": 0,
+      "withdrawnGrants": [],
+      "prunedSelectorTypes": [],
+      "ruleStates": [
+        {
+          "ruleIndex": 0,
+          "state": "RULE_LIFECYCLE_ACTIVE",
+          "segments": 2,
+          "lostSegments": 0,
+          "explainedSegments": 0
+        }
+      ],
+      "lifecycle": { "state": "ROLE_LIFECYCLE_STATE_DECLARED" }
     }
   `}
 </CodeBlock>
+
+Последние семь полей — **разбор**, и здесь он показывает здоровую роль: единственное
+правило называет два сегмента (`vpc.networks` × `get` и × `list`), не потерян ни один,
+отбирать и вырезать было нечего, модуль роль объявляет. Приходят они **всегда**, а не
+«при беде»: пустые ведомости и нули — такое же утверждение, как непустые, и именно на
+них опирается вызывающий, решая, что чинить нечего. У снятой роли `lifecycle` несёт
+рядом `retiredAt`, `retiredReason` и `retiredBy`; у объявленной их нет.
 
 У этой роли два набора глаголов совпадают — она ничего не редактирует. Расходятся они у
 роли-редактора, и читать нужно `effectiveVerbs`: исполняется он. Роль `compute-operator`

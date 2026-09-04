@@ -16,9 +16,14 @@ import (
 	_ "github.com/PRO-Robotech/kacho/services/iam/internal/dto/toproto"
 )
 
+// marshalRole — проекция роли для ответа операции.
+//
+// Вычисленное состояние снимается ЯВНО ([domain.Role.WithoutComputedState]), а
+// не «не проставляется»: второе держалось тем, что производителя никто не звал
+// на этом пути, и снималось одной строкой молча. Довод целиком — там же.
 func marshalRole(r domain.Role) (*anypb.Any, error) {
 	var dst *iamv1.Role
-	if err := dto.Transfer(dto.FromTo(r, &dst)); err != nil {
+	if err := dto.Transfer(dto.FromTo(r.WithoutComputedState(), &dst)); err != nil {
 		return nil, fmt.Errorf("dto.Transfer Role: %w", err)
 	}
 	return anypb.New(dst)
