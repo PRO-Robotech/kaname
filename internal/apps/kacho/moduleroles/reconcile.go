@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
 )
@@ -23,8 +24,8 @@ import (
 //	роль модуля, у которого манифеста нет  → его манифест её и сверит
 //	роль БЕЗ модуля-владельца              → владельца нет by construction
 //
-// Признак третьего класса — ЧЛЕНСТВО в закрытом наборе модулей платформы
-// (`domain.IsKnownModule`), а НЕ число сегментов. Разница не педантская:
+// Признак третьего класса — ЧЛЕНСТВО в наборе модулей платформы, каким его
+// объявляет КАНОН (`authzmap.CatalogSeedModules`), а НЕ число сегментов. Разница не педантская:
 // `kacho-system.admin` и `kacho-system.viewer` точку несут, и по признаку
 // «односегментное» уехали бы во второй класс — то есть числились бы ждущими
 // манифеста модуля, которого не существует, и ждали бы его вечно.
@@ -107,6 +108,10 @@ func (c ReconcileCensus) Void() bool { return c.LiveExamined == 0 && c.Declared 
 // порядок сделал бы вывод несравнимым между прогонами.
 func Reconcile(module string, declared []manifest.Role, live []domain.Role) ([]Discrepancy, ReconcileCensus) {
 	census := ReconcileCensus{Module: module}
+	// Набор — КАНОН, а не живые строки: сверка отвечает на вопрос «есть ли у
+	// этого имени модуль-владелец вообще», и роль СНЯТОГО модуля владельца не
+	// теряет — её объявление по-прежнему принадлежит его манифесту (#1927).
+	known := domain.ModuleSetOf(authzmap.CatalogSeedModules()...)
 
 	declaredSet := make(map[domain.RoleName]struct{}, len(declared))
 	for i := range declared {
@@ -130,7 +135,7 @@ func Reconcile(module string, declared []manifest.Role, live []domain.Role) ([]D
 		census.LiveExamined++
 		owner, _, hasDot := strings.Cut(string(r.Name), ".")
 		switch {
-		case !hasDot || !domain.IsKnownModule(owner):
+		case !hasDot || !known.IsKnownModule(owner):
 			census.WithoutOwner++
 			continue
 		case owner != module:

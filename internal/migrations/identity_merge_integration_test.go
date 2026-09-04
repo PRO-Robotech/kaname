@@ -1,64 +1,37 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// identity_merge_integration_test.go — стадия S2 перехода IAM-ID-1 (задача
-// kacho#472): права переносятся при отрыве идентичности и НЕ расширяются.
+// identity_merge_integration_test.go — свойства ЛИЧНОСТИ, ЧЬИХ ЧЛЕНСТВ БОЛЬШЕ
+// ОДНОГО (задача kacho#472, стадия S2 перехода IAM-ID-1).
 //
-// # Предмет — измерен, а не пересказан из задачи
+// # Здесь стояли семь проб СВЕДЕНИЯ строк личности — предмета у них больше нет
 //
-// Задача формулирует предмет как «один человек в двух аккаунтах имеет два
-// идентификатора и два набора прав». Приёмка (§5 группа D, выноска) сужает это
-// до состояния, которое ДЕЙСТВИТЕЛЬНО конструируемо на дереве, и знать сужение
-// обязательно — иначе Given неисполним:
+// Прежняя редакция файла останавливала цепочку миграций перед переносом
+// `20260822234500`, сеяла две строки на одну почту и утверждала об исходе
+// переноса: права доехали со своей областью · доступ не расширился · неразрешимая
+// группа отвергнута · одна и та же выдача, held дважды, сведена. Ни одного из
+// условий этих проб в дереве больше нет, и не по одной причине, а по двум:
 //
-//   - двух ACTIVE-строк у одного человека быть не может: глобальный ключ
-//     `users_active_external_id_uniq` этого не допускает;
-//   - а вот две строки «приглашён» — могут. Приглашение резолвит субъект в
-//     старейшую ACTIVE-строку по почте; для ни разу не входившего таковой нет,
-//     и право выдаётся на его ПЕР-АККАУНТНУЮ строку. Пригласив такого человека
-//     в два аккаунта, получаем две строки с разными субъектами и по праву на
-//     каждой. Первый вход активирует ОДНУ; вторая остаётся неактивируемой, а
-//     выданное на неё право — ОСИРОТЕВШИМ: оно лежит в леджере и не действует
-//     ни для кого.
+//  1. миграций сервиса теперь ОДНА — свод; версии, на которой можно было
+//     остановиться «перед переносом», не существует;
+//  2. состояние «два человека на одну почту» стало НЕПРЕДСТАВИМЫМ: глобальный
+//     ключ `users_identity_email_uniq` лежит в своде и отвергает вторую строку
+//     на первой же вставке. То есть Given этих проб отвергает продукт, а не
+//     проба.
 //
-// Отсюда предмет переноса: строки-дубли сводятся к одной личности, а права,
-// выданные на снимаемые строки, переезжают на выжившую — С СОХРАНЕНИЕМ ОБЛАСТИ.
+// Пробы сняты вместе со своим предметом, а не ослаблены: отказ разовой миграции,
+// которой нет, — не свойство схемы, и утверждать о нём нечего. Что осталось
+// НАБЛЮДАЕМЫМ и потому утверждается здесь — три свойства, каждое живёт в схеме
+// независимо от того, каким путём человек получил второе членство:
 //
-// # Почему «не расширяясь» — ОТДЕЛЬНАЯ проба, а не примечание к первой
+//   - зеркало не снимает членства, которого не заводило (проба 1);
+//   - цепь областей личности называет РОВНО аккаунты её членств (проба 2);
+//   - осиротить право снятием строки человека не даёт страж `0050`, а не тот
+//     сторож, которого называл комментарий миграции (проба 3).
 //
-// Проба переноса утверждает, что право ДОЕХАЛО. На вопрос «не приехало ли
-// сверх того» она не отвечает вовсе: множество «после» может содержать
-// доехавшее И лишнее одновременно, и первая проба останется зелёной. Это
-// разные утверждения о разных множествах, и сливать их в одно значит потерять
-// то, которое дороже: расширение доступа тише потери — потерю замечает
-// пострадавший, приобретение не замечает никто.
-//
-// # Что здесь НЕ утверждается — граница названа
-//
-// Исход `Check` (материализованный вердикт) здесь не утверждается: его считает
-// реконсайлер в Go, и в окне после переноса он ещё не сошёлся (IAM-ID-1-32 —
-// перенос НЕ гейтится на видимость, ban #9). Предмет этих проб — ЛЕДЖЕР
-// выдач: кто на каком объекте назван субъектом. Материализация читает его же,
-// поэтому расширение ледждера есть необходимое условие расширения доступа, а
-// отсутствие расширения в леджере — необходимое условие его отсутствия в
-// вердикте. Проба на исход `Check` живёт уровнем выше и здесь не дублируется.
-//
-// # Что леджером НЕ исчерпывается — три оси, заведённые по найденным слепотам
-//
-// Леджер выдач — не всё, чем сведение может расширить доступ, и каждая из осей
-// ниже заведена не из полноты, а по опыту:
-//
-//   - КЛАСТЕРНАЯ выдача живёт своей таблицей, которой запрос по леджеру не
-//     касается вовсе, — а миграция её переставляет. Ярус верхний, ошибка
-//     необратима (проба 3, ось 3);
-//   - ЦЕПЬ ОБЛАСТЕЙ отвечает на другой вопрос — «через какой аккаунт до личности
-//     достаёт администратор», — и сведение её РАСШИРЯЕТ. Это заявленное
-//     следствие, а не побочное; проба 6 требует, чтобы расширение было РОВНО
-//     объявленным, и истекает сама, когда объект аккаунт-скоупа переедет на
-//     членство;
-//   - ГРАНИЦА СТРАЖЕЙ: что именно не даёт снять строку человека, пока право на
-//     неё живо. Проба 9 закрепляет настоящего держателя — комментарий миграции
-//     называл не того, и такой комментарий приглашает переставить стейтменты.
+// Приёмки, оставшиеся без держателя вместе со снятыми пробами, названы в отчёте
+// линии: сценарии, описывающие поведение разовой миграции, держателя в дереве
+// больше не имеют — и это остаток, а не починка.
 
 package migrations_test
 
@@ -72,18 +45,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
-
-// identityMergeVersion — версия миграции переноса. Метка времени заведения, а
-// не номер задачи: `TestNewMigrationOutranksEveryAppliedOne` требует именно её —
-// номер по задаче у #472 меньше уже применённых, и мигратор такую версию на
-// живой базе не применит.
-const identityMergeVersion = 20260822234500
 
 // seedAccountWithOwner заводит аккаунт вместе с его владельцем одной
 // транзакцией: оба ключа цикла объявлены DEFERRABLE INITIALLY DEFERRED, поэтому
@@ -161,53 +126,6 @@ func grantOn(t *testing.T, db *sql.DB, bindingID, subjectUserID, roleID, resType
 	return bindingID
 }
 
-// seedProject заводит проект в уже существующем аккаунте. Он нужен как объект,
-// на который у человека нет прав НИ ОДНОЙ строкой: аккаунт для этого не годится
-// — обе сводимые строки держат выдачи именно на аккаунты.
-func seedProject(t *testing.T, db *sql.DB, id, accountID, name string) string {
-	t.Helper()
-	_, err := db.Exec(`
-		INSERT INTO kacho_iam.projects (id, account_id, name) VALUES ($1, $2, $3)`,
-		id, accountID, name)
-	require.NoError(t, err, "посев проекта %s в аккаунте %s", id, accountID)
-	return id
-}
-
-// theCluster — единственный кластер дерева (`clusters_id_singleton_ck`).
-func theCluster(t *testing.T, db *sql.DB) string {
-	t.Helper()
-	var id string
-	require.NoError(t, db.QueryRow(`SELECT id FROM kacho_iam.clusters ORDER BY id LIMIT 1`).Scan(&id))
-	require.NotEmpty(t, id, "ПРЕДПОСЫЛКА: кластер сеется 0001 — без него ось кластерной выдачи беспредметна")
-	return id
-}
-
-// grantClusterAdmin кладёт кластерную выдачу на названную строку человека.
-// Внешнего ключа на `users` у таблицы нет, поэтому состояние конструируется и
-// для строки-дубля — именно это и делает ось измеримой.
-func grantClusterAdmin(t *testing.T, db *sql.DB, grantID, subjectUserID string) string {
-	t.Helper()
-	_, err := db.Exec(`
-		INSERT INTO kacho_iam.cluster_admin_grants (id, cluster_id, subject_type, subject_id, granted_by)
-		VALUES ($1, $2, 'user', $3, 'system:test')`,
-		grantID, theCluster(t, db), subjectUserID)
-	require.NoError(t, err, "посев кластерной выдачи %s", grantID)
-	return grantID
-}
-
-// liveGrantPredicate — «названная строка человека является субъектом ЖИВОЙ
-// выдачи», в обеих проекциях субъекта. Один текст на все три способа ключевать,
-// чтобы способы различались только ключом, а не отбором.
-const liveGrantPredicate = `
-		 WHERE b.status = 'ACTIVE'
-		   AND (
-		         (b.subject_type = 'user' AND b.subject_id = $1)
-		      OR EXISTS (SELECT 1 FROM kacho_iam.access_binding_subjects s
-		                  WHERE s.binding_id = b.id
-		                    AND s.subject_type = 'user' AND s.subject_id = $1)
-		       )
-		 ORDER BY 1`
-
 func queryStrings(t *testing.T, db *sql.DB, query string, args ...any) []string {
 	t.Helper()
 	rows, err := db.Query(query, args...)
@@ -222,36 +140,6 @@ func queryStrings(t *testing.T, db *sql.DB, query string, args ...any) []string 
 	require.NoError(t, rows.Err())
 	sort.Strings(out)
 	return out
-}
-
-// grantHandlesOf — те же живые выдачи, но ключом служит САМА ВЫДАЧА (её
-// идентификатор), а не её область.
-//
-// Почему области НЕДОСТАТОЧНО — измерено, а не предположено. Область
-// схлопывает разные выдачи в один элемент: украденная у постороннего выдача на
-// `account:accB` даёт элемент, который в множестве «после» УЖЕ есть — законно,
-// от собственной выдачи дубля. Отрицание тогда молчит на настоящей краже: проба
-// с внесённым переносом чужой выдачи оставалась зелёной, а снимки «до»/«после»
-// совпадали до символа. Идентификатор выдачи переезд субъекта не меняет,
-// поэтому множество, ключёванное им, сравнимо поэлементно и кражу называет.
-func grantHandlesOf(t *testing.T, db *sql.DB, userID string) []string {
-	t.Helper()
-	return queryStrings(t, db, `
-		SELECT DISTINCT b.id || ' на ' || b.resource_type || ':' || b.resource_id ||
-		                ' ролью ' || b.role_id
-		  FROM kacho_iam.access_bindings b`+liveGrantPredicate, userID)
-}
-
-// clusterGrantHandlesOf — кластерные выдачи названной строки. Отдельная ось:
-// `grantScopesOf` этой таблицы не читает ВОВСЕ, а переезд по ней меняет верхний
-// ярус супер-доступа, где ошибка необратима.
-func clusterGrantHandlesOf(t *testing.T, db *sql.DB, userID string) []string {
-	t.Helper()
-	return queryStrings(t, db, `
-		SELECT g.id || ' на cluster:' || g.cluster_id
-		  FROM kacho_iam.cluster_admin_grants g
-		 WHERE g.subject_type = 'user' AND g.subject_id = $1
-		 ORDER BY 1`, userID)
 }
 
 // scopeParentsOf — аккаунт-предки объекта в цепи областей: то, через что до
@@ -278,40 +166,6 @@ func canonicalModelText(t *testing.T) string {
 	return string(b)
 }
 
-// grantScopesOf — множество областей, на которых НАЗВАННАЯ строка человека
-// является субъектом живой выдачи, в форме "<тип>:<идентификатор>".
-//
-// Читает ОБЕ проекции субъекта — легаси-одиночную (`access_bindings.subject_id`)
-// и множественную (`access_binding_subjects`), — потому что перенос обязан
-// пройти по обеим: строка, переехавшая в одной и оставшаяся в другой, дала бы
-// расхождение проекций, невидимое пробе, которая смотрит в одну.
-func grantScopesOf(t *testing.T, db *sql.DB, userID string) []string {
-	t.Helper()
-	rows, err := db.Query(`
-		SELECT DISTINCT b.resource_type || ':' || b.resource_id
-		  FROM kacho_iam.access_bindings b
-		 WHERE b.status = 'ACTIVE'
-		   AND (
-		         (b.subject_type = 'user' AND b.subject_id = $1)
-		      OR EXISTS (SELECT 1 FROM kacho_iam.access_binding_subjects s
-		                  WHERE s.binding_id = b.id
-		                    AND s.subject_type = 'user' AND s.subject_id = $1)
-		       )
-		 ORDER BY 1`, userID)
-	require.NoError(t, err)
-	defer func() { _ = rows.Close() }()
-
-	out := []string{}
-	for rows.Next() {
-		var scope string
-		require.NoError(t, rows.Scan(&scope))
-		out = append(out, scope)
-	}
-	require.NoError(t, rows.Err())
-	sort.Strings(out)
-	return out
-}
-
 func membershipAccountsOf(t *testing.T, db *sql.DB, userID string) []string {
 	t.Helper()
 	rows, err := db.Query(`
@@ -326,22 +180,6 @@ func membershipAccountsOf(t *testing.T, db *sql.DB, userID string) []string {
 	}
 	require.NoError(t, rows.Err())
 	sort.Strings(out)
-	return out
-}
-
-func rowsWithEmail(t *testing.T, db *sql.DB, email string) []string {
-	t.Helper()
-	rows, err := db.Query(`
-		SELECT id FROM kacho_iam.users WHERE lower(email) = lower($1) ORDER BY id`, email)
-	require.NoError(t, err)
-	defer func() { _ = rows.Close() }()
-	out := []string{}
-	for rows.Next() {
-		var id string
-		require.NoError(t, rows.Scan(&id))
-		out = append(out, id)
-	}
-	require.NoError(t, rows.Err())
 	return out
 }
 
@@ -362,7 +200,7 @@ func TestIntegration_MirrorKeepsMembershipsItDidNotCreate(t *testing.T) {
 	}
 	ctx := context.Background()
 	dsn := pgtest.NewEmptyDB(t)
-	db := upTo(t, dsn, identityMergeVersion)
+	db := upAllIAMMigrations(t, dsn)
 	defer func() { _ = db.Close() }()
 
 	_, accA := seedAccountWithOwner(t, db, "mirrorxa")
@@ -394,390 +232,42 @@ func TestIntegration_MirrorKeepsMembershipsItDidNotCreate(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Проба 2 — перенос: одна строка, оба членства, права доехали со своей областью.
-func TestIntegration_DuplicateIdentityRowsMergeAndRightsTravelWithTheirScope(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	dsn := pgtest.NewEmptyDB(t)
-
-	// Цепочка доводится до версии ПЕРЕД переносом: дубли обязаны уже лежать,
-	// когда перенос применяется, — иначе проба измеряла бы поведение писателей,
-	// а не работу миграции над УЖЕ существующими строками.
-	db := upTo(t, dsn, identityMergeVersion-1)
-	defer func() { _ = db.Close() }()
-
-	_, accA := seedAccountWithOwner(t, db, "mergeaaa")
-	ownerB, accB := seedAccountWithOwner(t, db, "mergebbb")
-
-	const email = "person@example.test"
-	// Каноническая строка — старейшая ACTIVE по почте: в неё край резолвит токен
-	// и на неё уже выданы права.
-	canonical := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "aacanon"), email, accA, "ACTIVE", "ext-person")
-	// Дубль: тот же человек, приглашённый во второй аккаунт и ни разу не
-	// входивший. Его право осиротело.
-	duplicate := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "zzdupli"), email, accB, "PENDING", "")
-
-	role := anyAssignableRole(t, db)
-	grantOn(t, db, "acb"+fmt.Sprintf("%017s", "grantaa"), canonical, role, "account", accA)
-	grantOn(t, db, "acb"+fmt.Sprintf("%017s", "grantbb"), duplicate, role, "account", accB)
-	// Контроль: чужая выдача в том же аккаунте B. Перенос не вправе её тронуть.
-	grantOn(t, db, "acb"+fmt.Sprintf("%017s", "grantob"), ownerB, role, "account", accB)
-
-	require.Len(t, rowsWithEmail(t, db, email), 2,
-		"ПРЕДПОСЫЛКА: дублей обязано быть два — на одной строке перенос беспредметен")
-
-	require.NoError(t, goose.UpTo(db, ".", identityMergeVersion),
-		"миграция переноса обязана применяться на живой цепочке")
-
-	// ── одна строка на человека ──────────────────────────────────────────────
-	require.Equal(t, []string{canonical}, rowsWithEmail(t, db, email),
-		"после переноса у человека обязана остаться ОДНА строка, и это каноническая "+
-			"(старейшая ACTIVE по почте) — та, на которую права уже выданы и в которую "+
-			"край резолвит токен; идентификатор личности не перечеканивается (ban #15)")
-
-	// ── членства обоих аккаунтов на выжившей строке ──────────────────────────
-	require.Equal(t, []string{accA, accB}, membershipAccountsOf(t, db, canonical),
-		"членства снятых строк обязаны переехать на выжившую: принадлежность аккаунту "+
-			"есть отдельная связь, и человек состоит в обоих")
-
-	// ── права доехали, каждое со СВОЕЙ областью ──────────────────────────────
-	require.Equal(t,
-		[]string{"account:" + accA, "account:" + accB},
-		grantScopesOf(t, db, canonical),
-		"осиротевшее право обязано доехать до выжившей строки, оставшись в том аккаунте, "+
-			"где выдано (IAM-ID-1-28)")
-
-	// ── чужая выдача не тронута ──────────────────────────────────────────────
-	require.Equal(t, []string{"account:" + accB}, grantScopesOf(t, db, ownerB),
-		"перенос тронул выдачу, к переносимой личности отношения не имеющую")
-
-	// ── ни одна ссылка не указывает на снятую строку ─────────────────────────
-	require.Empty(t, danglingSubjectRefs(t, db, duplicate),
-		"в леджере остались ссылки на снятую строку: право, субъект которого не резолвится, "+
-			"не действует ни для кого и при этом выглядит выданным")
-}
-
-// danglingSubjectRefs — ссылки на строку человека, которой больше нет.
-func danglingSubjectRefs(t *testing.T, db *sql.DB, userID string) []string {
-	t.Helper()
-	out := []string{}
-	for _, q := range []struct{ what, sql string }{
-		{"access_bindings.subject_id", `
-			SELECT count(*) FROM kacho_iam.access_bindings
-			 WHERE subject_type = 'user' AND subject_id = $1`},
-		{"access_binding_subjects.subject_id", `
-			SELECT count(*) FROM kacho_iam.access_binding_subjects
-			 WHERE subject_type = 'user' AND subject_id = $1`},
-		{"memberships.user_id", `
-			SELECT count(*) FROM kacho_iam.memberships WHERE user_id = $1`},
-	} {
-		var n int
-		require.NoError(t, db.QueryRow(q.sql, userID).Scan(&n))
-		if n > 0 {
-			out = append(out, fmt.Sprintf("%s: %d", q.what, n))
-		}
-	}
-	return out
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Проба 3 — ОТРИЦАНИЕ: перенос не расширил доступ ни в одном аккаунте.
-//
-// Отдельная проба, а не примечание к предыдущей: та отвечает «доехало ли», эта —
-// «не приехало ли сверх того». Множество «после» может содержать доехавшее И
-// лишнее одновременно, и первая проба останется зелёной.
-//
-// # ТРИ ОСИ, И НИ ОДНА НЕ ЛИШНЯЯ — каждая заведена по СЛЕПОТЕ, найденной опытом
-//
-//  1. ВЫДАЧА как ключ, а не её область. Область схлопывает разные выдачи в один
-//     элемент: `DISTINCT <тип>:<id>` не отличает право дубля на `account:B` от
-//     украденного права постороннего на тот же `account:B`. Проба с внесённым
-//     переносом чужой выдачи оставалась ЗЕЛЁНОЙ, а снимки «до» и «после»
-//     совпадали до символа. Ключ-идентификатор выдачи это различает.
-//  2. ЧУЖОЙ ОБЪЕКТ, которого нет ни у одной из сводимых строк, — проект внутри
-//     второго аккаунта. Прежний «посторонний объект» был выдачей на ТОТ ЖЕ
-//     аккаунт, что и законная выдача дубля, то есть посторонним не был.
-//  3. КЛАСТЕРНАЯ ВЫДАЧА. `grantScopesOf` этой таблицы не читает вовсе, а
-//     миграция её переставляет. Ярус верхний, ошибка необратима — ось обязана
-//     быть измеряемой, а не подразумеваемой.
-func TestIntegration_MergeGrantsNoAccessThatWasNotAlreadyGranted(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	dsn := pgtest.NewEmptyDB(t)
-	db := upTo(t, dsn, identityMergeVersion-1)
-	defer func() { _ = db.Close() }()
-
-	_, accA := seedAccountWithOwner(t, db, "widenaaa")
-	ownerB, accB := seedAccountWithOwner(t, db, "widenbbb")
-
-	const email = "widen@example.test"
-	canonical := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "aawiden"), email, accA, "ACTIVE", "ext-widen")
-	duplicate := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "zzwiden"), email, accB, "PENDING", "")
-
-	role := anyAssignableRole(t, db)
-	grantOn(t, db, "acb"+fmt.Sprintf("%017s", "wgranta"), canonical, role, "account", accA)
-	grantOn(t, db, "acb"+fmt.Sprintf("%017s", "wgrantb"), duplicate, role, "account", accB)
-
-	// Третье лицо на ТОЙ ЖЕ области, что и законная выдача дубля. По области
-	// неотличимо от доехавшего — ловится только ключом выдачи (ось 1).
-	grantOn(t, db, "acb"+fmt.Sprintf("%017s", "wgrantf"), ownerB, role, "account", accB)
-
-	// Третье лицо на объекте, которого у человека нет НИ ОДНОЙ строкой (ось 2).
-	prjB := seedProject(t, db, "prj"+fmt.Sprintf("%017s", "widenprj"), accB, "widen-foreign-project")
-	grantOn(t, db, "acb"+fmt.Sprintf("%017s", "wgrantp"), ownerB, role, "project", prjB)
-
-	// Кластерная ось (3): у дубля выдача есть, у канонической строки — нет,
-	// у третьего лица — своя.
-	cagDup := grantClusterAdmin(t, db, "cag_"+fmt.Sprintf("%017s", "dpgrant"), duplicate)
-	cagOwn := grantClusterAdmin(t, db, "cag_"+fmt.Sprintf("%017s", "wnrgrant"), ownerB)
-	require.NotEqual(t, cagDup, cagOwn, "ПРЕДПОСЫЛКА: кластерные выдачи различимы")
-
-	// ── снимок «до», по трём осям ────────────────────────────────────────────
-	beforeScopes := unionSorted(grantScopesOf(t, db, canonical), grantScopesOf(t, db, duplicate))
-	beforeHandles := unionSorted(grantHandlesOf(t, db, canonical), grantHandlesOf(t, db, duplicate))
-	beforeCluster := unionSorted(clusterGrantHandlesOf(t, db, canonical), clusterGrantHandlesOf(t, db, duplicate))
-	t.Logf("снимок «до»: области %v · выдачи %v · кластерные выдачи %v",
-		beforeScopes, beforeHandles, beforeCluster)
-
-	require.NotEmpty(t, beforeScopes,
-		"ПРЕДПОСЫЛКА: множество «до» не пусто — на пустом отрицание истинно тождественно")
-	require.Len(t, beforeHandles, 2,
-		"ПРЕДПОСЫЛКА: у сводимых строк ровно две выдачи — иначе ключ выдачи ничего не различает")
-	require.Len(t, beforeCluster, 1,
-		"ПРЕДПОСЫЛКА: кластерная выдача есть ровно у дубля — иначе ось 3 беспредметна")
-
-	// Чужое «до» — то, чего перенос не вправе коснуться.
-	foreignHandles := grantHandlesOf(t, db, ownerB)
-	require.Len(t, foreignHandles, 2,
-		"ПРЕДПОСЫЛКА: у третьего лица две выдачи — на общей с дублем области и на чужом объекте")
-
-	require.NoError(t, goose.UpTo(db, ".", identityMergeVersion))
-
-	afterScopes := grantScopesOf(t, db, canonical)
-	afterHandles := grantHandlesOf(t, db, canonical)
-	afterCluster := clusterGrantHandlesOf(t, db, canonical)
-	t.Logf("снимок «после»: области %v · выдачи %v · кластерные выдачи %v",
-		afterScopes, afterHandles, afterCluster)
-
-	// ── ни одной лишней ВЫДАЧИ (ось 1 и 2, IAM-ID-1-30) ──────────────────────
-	require.Empty(t, subtract(afterHandles, beforeHandles),
-		"перенос назвал выжившую строку субъектом выдачи, которой не держала ни одна из "+
-			"сведённых строк: право обязано оставаться у того, кому выдано")
-
-	// ── и ни одной потерянной (IAM-ID-1-29) ──────────────────────────────────
-	require.Empty(t, subtract(beforeHandles, afterHandles),
-		"перенос потерял выдачу: множества обязаны совпадать элемент в элемент")
-
-	// ── то же по областям: грубее ключом, зато ближе к тому, что видит человек ─
-	require.Empty(t, subtract(afterScopes, beforeScopes),
-		"перенос выдал доступ на область, которой не было ни у одной из сведённых строк")
-	require.Empty(t, subtract(beforeScopes, afterScopes),
-		"перенос потерял область")
-
-	// ── кластерная ось (3) ───────────────────────────────────────────────────
-	require.Equal(t, beforeCluster, afterCluster,
-		"кластерная выдача обязана ПЕРЕЕХАТЬ и не размножиться: право остаётся у того же "+
-			"человека, а чужая кластерная выдача переносом не затрагивается")
-	require.Empty(t, clusterGrantHandlesOf(t, db, duplicate),
-		"кластерная выдача снятой строки обязана уехать с неё, иначе она висит без субъекта")
-
-	// ── третье лицо не тронуто ───────────────────────────────────────────────
-	require.Equal(t, foreignHandles, grantHandlesOf(t, db, ownerB),
-		"перенос тронул выдачи третьего лица")
-	require.Equal(t, []string{cagOwn + " на cluster:" + theCluster(t, db)},
-		clusterGrantHandlesOf(t, db, ownerB),
-		"перенос тронул кластерную выдачу третьего лица")
-
-	// ── положительные контроли сравнения ─────────────────────────────────────
-	// Утверждения выше молчат и когда расхождения нет, и когда сравнение само
-	// сломано. Контроль подаёт то самое, что проба обязана поймать — чужой
-	// элемент, пришедший в множество «после», — и требует, чтобы ТО ЖЕ сравнение
-	// его нашло. По каждой оси отдельно: сломаться они могут порознь.
-	require.NotEmpty(t, subtract(withExtra(afterHandles, foreignHandles[0]), beforeHandles),
-		"сравнение выдач обязано НАХОДИТЬ пришедшую чужую выдачу: молчание здесь означало "+
-			"бы, что обе пустоты по этой оси не доказывали ничего")
-	require.NotEmpty(t, subtract(withExtra(afterScopes, "project:"+prjB), beforeScopes),
-		"сравнение областей обязано НАХОДИТЬ пришедшую чужую область")
-	require.NotEmpty(t,
-		subtract(withExtra(afterCluster, cagOwn+" на cluster:"+theCluster(t, db)), beforeCluster),
-		"сравнение кластерных выдач обязано НАХОДИТЬ пришедшую чужую кластерную выдачу")
-}
-
-// withExtra — множество плюс один элемент. Нужен положительным контролям:
-// сравнение обязано НАЙТИ чужой элемент, а не только смолчать на его отсутствии.
-func withExtra(set []string, extra string) []string {
-	return append(append([]string{}, set...), extra)
-}
-
-func unionSorted(a, b []string) []string {
-	seen := map[string]bool{}
-	out := []string{}
-	for _, s := range append(append([]string{}, a...), b...) {
-		if !seen[s] {
-			seen[s] = true
-			out = append(out, s)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// subtract — что есть в a и нет в b.
-func subtract(a, b []string) []string {
-	in := map[string]bool{}
-	for _, s := range b {
-		in[s] = true
-	}
-	out := []string{}
-	for _, s := range a {
-		if !in[s] {
-			out = append(out, s)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-var _ = migrations.FS
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Пробы 4, 5 и 8 — ОТКАЗ умеет сработать.
-//
-// Миграция объявляет ТРИ группы неразрешимыми и роняет прогон, называя число.
-// Объявленный, но ни разу не проверенный отказ — форма без содержания: он
-// выглядит защитой и молчит ровно тогда, когда обязан заговорить. Здесь он
-// ставится в условия, где обязан сработать, и рядом — положительный контроль:
-// на разрешимых данных та же миграция проходит (его несут пробы 2, 3 и 7).
-//
-// Третья группа (выдача-дубль, названная субъектом постороннего) проверяется
-// пробой 8 — она стоит рядом со своей разрешимой сестрой, пробой 7, чтобы
-// граница между «решается само» и «решает владелец продукта» читалась парой.
-
-// applyMergeExpectingRefusal применяет миграцию и возвращает текст отказа.
-func applyMergeExpectingRefusal(t *testing.T, db *sql.DB) string {
-	t.Helper()
-	err := goose.UpTo(db, ".", identityMergeVersion)
-	require.Error(t, err,
-		"миграция обязана ОТКАЗАТЬ на неразрешимой группе: сведение, принявшее решение "+
-			"за владельца продукта, меняет чей-то доступ молча")
-	return err.Error()
-}
-
-// TestIntegration_MergeRefusesAGroupItCannotDecide_BlockedRow — заблокированная
-// строка среди дублей.
-func TestIntegration_MergeRefusesAGroupItCannotDecide_BlockedRow(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	dsn := pgtest.NewEmptyDB(t)
-	db := upTo(t, dsn, identityMergeVersion-1)
-	defer func() { _ = db.Close() }()
-
-	_, accA := seedAccountWithOwner(t, db, "refuseba")
-	_, accB := seedAccountWithOwner(t, db, "refusebb")
-
-	const email = "refuse-blocked@example.test"
-	seedRowInAccount(t, db, "usr"+fmt.Sprintf("%017s", "rbactiv"), email, accA, "ACTIVE", "ext-rb")
-	// Третье состояние: о нём сведение рассуждать не умеет.
-	seedRowInAccount(t, db, "usr"+fmt.Sprintf("%017s", "rbblock"), email, accB, "BLOCKED", "ext-rb2")
-
-	msg := applyMergeExpectingRefusal(t, db)
-	require.Contains(t, msg, "заблокированную строку",
-		"отказ обязан НАЗЫВАТЬ предмет: «миграция упала» без предмета не даёт оператору "+
-			"ни одного следующего шага. Получено: %s", msg)
-
-	// Строки на месте: отказавшая миграция не оставляет половины работы.
-	require.Len(t, rowsWithEmail(t, db, email), 2,
-		"отказ обязан быть полным: транзакция миграции откатывается целиком")
-}
-
-// TestIntegration_MergeRefusesAGroupItCannotDecide_TwoActiveRows — две разные
-// внешние личности на одной почте.
-func TestIntegration_MergeRefusesAGroupItCannotDecide_TwoActiveRows(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	dsn := pgtest.NewEmptyDB(t)
-	db := upTo(t, dsn, identityMergeVersion-1)
-	defer func() { _ = db.Close() }()
-
-	_, accA := seedAccountWithOwner(t, db, "refuse2a")
-	_, accB := seedAccountWithOwner(t, db, "refuse2b")
-
-	const email = "refuse-two-active@example.test"
-	// Внешние идентификаторы РАЗНЫЕ — иначе строку отверг бы глобальный ключ
-	// `users_active_external_id_uniq`, и проба измеряла бы его, а не отказ.
-	seedRowInAccount(t, db, "usr"+fmt.Sprintf("%017s", "r2first"), email, accA, "ACTIVE", "ext-r2-one")
-	seedRowInAccount(t, db, "usr"+fmt.Sprintf("%017s", "r2secnd"), email, accB, "ACTIVE", "ext-r2-two")
-
-	msg := applyMergeExpectingRefusal(t, db)
-	require.Contains(t, msg, "больше одной активной строки",
-		"отказ обязан назвать предмет. Получено: %s", msg)
-
-	require.Len(t, rowsWithEmail(t, db, email), 2,
-		"отказ обязан быть полным: транзакция миграции откатывается целиком")
-}
-
-// addSubjectTo — второй субъект той же выдачи. Множественная проекция принимает
-// нескольких грантополучателей, и каждый из них — САМОСТОЯТЕЛЬНЫЙ адресат права
-// (0050). Именно поэтому выдачу, среди субъектов которой есть посторонний,
-// сведение гасить не вправе.
-func addSubjectTo(t *testing.T, db *sql.DB, bindingID, subjectUserID string, ordinal int) {
-	t.Helper()
-	_, err := db.Exec(`
-		INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
-		VALUES ($1, 'user', $2, $3)`, bindingID, subjectUserID, ordinal)
-	require.NoError(t, err, "посев второго субъекта выдачи %s", bindingID)
-}
-
-// liveBindingsOnKey — живые выдачи с названным ключом живой выдачи: роль,
-// область, слепок цели. Ключ тот же, каким их различает частичный уникальный
-// индекс `access_bindings_active_grant_uniq`.
-func liveBindingsOnKey(t *testing.T, db *sql.DB, roleID, resType, resID string) []string {
-	t.Helper()
-	return queryStrings(t, db, `
-		SELECT b.id || ' субъект ' || b.subject_id
-		  FROM kacho_iam.access_bindings b
-		 WHERE b.revoked_at IS NULL
-		   AND b.role_id = $1 AND b.resource_type = $2 AND b.resource_id = $3
-		 ORDER BY 1`, roleID, resType, resID)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Проба 6 — ОКНО, КОТОРОЕ СВЕДЕНИЕ ОТКРЫВАЕТ, РАВНО ОБЪЯВЛЕННОМУ.
+// Проба 2 — ЦЕПЬ ОБЛАСТЕЙ ЛИЧНОСТИ НАЗЫВАЕТ РОВНО АККАУНТЫ ЕЁ ЧЛЕНСТВ.
 //
 // # Предмет
 //
 // Цепь областей ведёт от личности к аккаунту через ЧЛЕНСТВО (944001, ветвь 4a).
-// Пока членство одно, у объекта личности ровно один аккаунт-предок. Сведение
-// даёт человеку второе членство — и предков становится два, то есть
-// `iam_user.super_admin: admin from account` начинает выполняться
-// администратором ОБОИХ аккаунтов.
+// Пока членство одно, у объекта личности ровно один аккаунт-предок; со вторым
+// членством предков становится два, то есть `iam_user.super_admin: admin from
+// account` начинает выполняться администратором ОБОИХ аккаунтов.
 //
-// Это следствие ЗАЯВЛЕНО в шапке миграции (§«ОКНО, КОТОРОЕ ЭТА МИГРАЦИЯ
-// ОТКРЫВАЕТ») и не является побочным: три поверхности дерева уже требуют, чтобы
-// у человека со вторым членством назывались ОБА аккаунта (стадия S3, #471).
-// Закрывается оно СМЕНОЙ ОБЪЕКТА — аккаунт-скоупным становится членство, а не
-// личность (тип `iam_membership` в модели прав), и это отдельная стадия.
+// Это заявленное следствие, а не побочное: три поверхности дерева требуют,
+// чтобы у человека со вторым членством назывались ОБА аккаунта (стадия S3,
+// #471). Закрывается оно СМЕНОЙ ОБЪЕКТА — аккаунт-скоупным становится членство,
+// а не личность (тип `iam_membership` в модели прав), и это отдельная стадия.
 //
 // # Что здесь утверждается
 //
-// Что расширение РОВНО такое, как объявлено, и ни на элемент шире: множество
-// аккаунт-предков выжившей строки после сведения равно множеству её членств —
-// не больше (аккаунт, где человека нет, не появляется) и не меньше.
+// Что множество аккаунт-предков РАВНО множеству членств — не больше (аккаунт,
+// где человека нет, не появляется) и не меньше. Утверждается это в ОБЕ стороны:
+// второе членство предка добавляет, снятие второго членства — убирает. Одной
+// стороны мало: «предков два» зеленело бы и на цепи, которая называет всё
+// подряд, и на цепи, которая ничего не забывает.
+//
+// # Что изменилось против прежней редакции
+//
+// Второе членство прежде появлялось СВЕДЕНИЕМ дублей — его больше нет (см.
+// шапку файла). Умерла лестница, а не свойство: членство вставляется прямо, той
+// же формой, что у пробы 1, и утверждение стало ШИРЕ — оно больше не о том, что
+// делает разовая миграция, а о том, как устроена цепь у всякого человека с
+// двумя членствами, каким бы путём второе ни завелось.
 //
 // # Почему проба ИСТЕКАЕТ САМА
 //
 // Её предпосылка — что типа `iam_membership` в модели ещё нет. Появится тип —
 // проба покраснеет и потребует переписать себя под новый объект. Послабление,
 // которое не истекает само, переживает свой предмет и начинает лгать.
-func TestIntegration_MergeWidensTheIdentityScopeExactlyAsDeclared(t *testing.T) {
+func TestIntegration_TheIdentityScopeChainNamesExactlyTheAccountsOfItsMemberships(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
@@ -793,11 +283,11 @@ func TestIntegration_MergeWidensTheIdentityScopeExactlyAsDeclared(t *testing.T) 
 	require.Equal(t, 0, declarations,
 		"ПРЕДПОСЫЛКА ИСТЕКЛА: модель прав объявила тип `iam_membership` — значит объект "+
 			"аккаунт-скоупа переехал с личности на членство, и окно, которое эта проба "+
-			"описывает, закрыто. Перепиши пробу под новый объект и сними объявление окна "+
-			"из шапки миграции: описание дыры, пережившее дыру, лжёт")
+			"описывает, закрыто. Перепиши пробу под новый объект: описание дыры, пережившее "+
+			"дыру, лжёт")
 
 	dsn := pgtest.NewEmptyDB(t)
-	db := upTo(t, dsn, identityMergeVersion-1)
+	db := upAllIAMMigrations(t, dsn)
 	defer func() { _ = db.Close() }()
 
 	_, accA := seedAccountWithOwner(t, db, "scopeaaa")
@@ -807,37 +297,34 @@ func TestIntegration_MergeWidensTheIdentityScopeExactlyAsDeclared(t *testing.T) 
 	// которая называет всё подряд.
 	_, accC := seedAccountWithOwner(t, db, "scopeccc")
 
-	const email = "scope@example.test"
-	canonical := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "aascope"), email, accA, "ACTIVE", "ext-scope")
-	duplicate := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "zzscope"), email, accB, "PENDING", "")
+	person := seedRowInAccount(t, db,
+		"usr"+fmt.Sprintf("%017s", "aascope"), "scope@example.test", accA, "ACTIVE", "ext-scope")
 
-	role := anyAssignableRole(t, db)
-	grantOn(t, db, "acb"+fmt.Sprintf("%017s", "sgranta"), canonical, role, "account", accA)
-	grantOn(t, db, "acb"+fmt.Sprintf("%017s", "sgrantb"), duplicate, role, "account", accB)
+	// ── «до»: одно членство — один аккаунт-предок ────────────────────────────
+	require.Equal(t, []string{accA}, membershipAccountsOf(t, db, person),
+		"ПРЕДПОСЫЛКА: зеркало завело членство названного аккаунта — иначе измерять нечего")
+	require.Equal(t, []string{"account:" + accA}, scopeParentsOf(t, db, "iam_user", person),
+		"ПРЕДПОСЫЛКА: у личности с одним членством ровно один аккаунт-предок — иначе "+
+			"расширение ниже измерять не от чего")
 
-	// ── «до»: у каждой строки ровно один аккаунт-предок ──────────────────────
-	require.Equal(t, []string{"account:" + accA}, scopeParentsOf(t, db, "iam_user", canonical),
-		"ПРЕДПОСЫЛКА: до сведения у живой личности ровно один аккаунт-предок — иначе "+
-			"измерять расширение не от чего")
-	require.Equal(t, []string{"account:" + accB}, scopeParentsOf(t, db, "iam_user", duplicate),
-		"ПРЕДПОСЫЛКА: до сведения второй аккаунт достаёт до строки-приглашения, а не до "+
-			"живой личности — в этом и состоит разница, которую сведение снимает")
+	// ── второе членство: то, которого зеркало не заводит ни при каком входе ──
+	_, err := db.Exec(`
+		INSERT INTO kacho_iam.memberships (id, user_id, account_id, state)
+		VALUES (kacho_iam.membership_mirror_id($1, $2), $1, $2, 'ACTIVE')`, person, accB)
+	require.NoError(t, err, "посев второго членства в аккаунте %s", accB)
 
-	require.NoError(t, goose.UpTo(db, ".", identityMergeVersion))
-
-	after := scopeParentsOf(t, db, "iam_user", canonical)
-	t.Logf("аккаунт-предки выжившей личности после сведения: %v", after)
+	after := scopeParentsOf(t, db, "iam_user", person)
+	t.Logf("осмотрено: членств %d, аккаунт-предков %d — %v",
+		len(membershipAccountsOf(t, db, person)), len(after), after)
 
 	// ── расширение РАВНО объявленному ────────────────────────────────────────
 	require.Equal(t, []string{"account:" + accA, "account:" + accB}, after,
-		"расширение области личности обязано быть РОВНО объявленным: оба аккаунта, где у "+
-			"человека есть членство, и ни одного сверх того")
+		"область личности обязана называть РОВНО оба аккаунта, где у человека есть "+
+			"членство, и ни одного сверх того")
 
 	// ── и равно множеству членств: другого источника у звена нет ─────────────
 	wantFromMemberships := []string{}
-	for _, a := range membershipAccountsOf(t, db, canonical) {
+	for _, a := range membershipAccountsOf(t, db, person) {
 		wantFromMemberships = append(wantFromMemberships, "account:"+a)
 	}
 	sort.Strings(wantFromMemberships)
@@ -850,128 +337,21 @@ func TestIntegration_MergeWidensTheIdentityScopeExactlyAsDeclared(t *testing.T) 
 		"измерение обязано РАЗЛИЧАТЬ аккаунты: если бы цепь называла и тот аккаунт, где "+
 			"человека нет, равенство выше не доказывало бы ничего")
 
-	require.Empty(t, scopeParentsOf(t, db, "iam_user", duplicate),
-		"у снятой строки не может остаться аккаунт-предка: объекта больше нет")
+	// ── обратная сторона: снятие членства УБИРАЕТ предка ─────────────────────
+	//
+	// Без неё «предков два» зеленело бы на цепи, которая предков только
+	// накапливает: администратор аккаунта, из которого человека вывели, сохранял
+	// бы власть над его личностью, и заметить это было бы нечем.
+	_, err = db.Exec(`
+		DELETE FROM kacho_iam.memberships WHERE user_id = $1 AND account_id = $2`, person, accB)
+	require.NoError(t, err)
+	require.Equal(t, []string{"account:" + accA}, scopeParentsOf(t, db, "iam_user", person),
+		"аккаунт-предок пережил снятие членства, которым он держался: цепь предков "+
+			"накапливает, а не следует членствам")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Проба 7 — ОДНО И ТО ЖЕ ПРАВО ДВАЖДЫ: сведение разрешает эту форму САМО.
-//
-// Каноническая строка и дубль держат ЖИВУЮ выдачу одной роли на один объект:
-// приглашение выдало право пер-аккаунтной строке, администратор выдал то же
-// право активной напрямую. Переставить субъект обеих нельзя — частичный ключ
-// `access_bindings_active_grant_uniq` допускает ровно одну живую.
-//
-// До правки эта форма падала СЫРЫМ 23505: goose ронял накат, сервис не
-// поднимался, а оператор читал сообщение Postgres вместо предмета. Миграция при
-// этом обещала, что неразрешимых форм ДВЕ и обе названы числом, — то есть
-// обещание было неполным на третью.
-func TestIntegration_MergeResolvesTheSameGrantHeldTwice(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	dsn := pgtest.NewEmptyDB(t)
-	db := upTo(t, dsn, identityMergeVersion-1)
-	defer func() { _ = db.Close() }()
-
-	_, accA := seedAccountWithOwner(t, db, "twiceaaa")
-	_, accB := seedAccountWithOwner(t, db, "twicebbb")
-
-	const email = "twice@example.test"
-	canonical := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "aatwice"), email, accA, "ACTIVE", "ext-twice")
-	duplicate := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "zztwice"), email, accB, "PENDING", "")
-
-	role := anyAssignableRole(t, db)
-	// ДВА НАБОРА ПРАВ на один и тот же объект — ровно то, чем задача называет
-	// предмет: право выдано и пер-аккаунтной строке, и активной напрямую.
-	byInvite := grantOn(t, db, "acb"+fmt.Sprintf("%017s", "tgrantd"), duplicate, role, "account", accB)
-	direct := grantOn(t, db, "acb"+fmt.Sprintf("%017s", "tgrantc"), canonical, role, "account", accB)
-
-	require.Len(t, liveBindingsOnKey(t, db, role, "account", accB), 2,
-		"ПРЕДПОСЫЛКА: живых выдач с одним ключом ровно две — на одной форма не воспроизводится")
-
-	before := grantScopesOf(t, db, canonical)
-
-	require.NoError(t, goose.UpTo(db, ".", identityMergeVersion),
-		"третья форма обязана иметь НАЗВАННЫЙ исход: сырой 23505 из-под ключа не даёт "+
-			"оператору ни предмета, ни следующего шага")
-
-	// ── право осталось, и ровно одно ─────────────────────────────────────────
-	require.Equal(t, []string{"account:" + accB}, before,
-		"ПРЕДПОСЫЛКА: до сведения право у канонической строки уже было")
-	require.Equal(t, []string{"account:" + accB}, grantScopesOf(t, db, canonical),
-		"право обязано остаться тем же: гашение дубля не отнимает доступ, потому что то "+
-			"же право у человека уже есть другой выдачей")
-
-	require.Equal(t, []string{direct + " субъект " + canonical},
-		liveBindingsOnKey(t, db, role, "account", accB),
-		"живой обязана остаться выдача КАНОНИЧЕСКОЙ строки: порядок выбора тотальный, "+
-			"поэтому два прогона на одинаковых данных гасят одно и то же")
-
-	// ── погашено ОТЗЫВОМ, а не удалением: цепочка аудита переживает сведение ─
-	var status, revokedBy string
-	require.NoError(t, db.QueryRow(`
-		SELECT status, coalesce(revoked_by_user_id, '') FROM kacho_iam.access_bindings WHERE id = $1`,
-		byInvite).Scan(&status, &revokedBy))
-	require.Equal(t, "REVOKED", status,
-		"выдача-дубль обязана остаться строкой: удаление стёрло бы след того, что право выдавали")
-	require.Equal(t, "system:identity-merge", revokedBy,
-		"отзыв обязан назвать себя: иначе в аудите он неотличим от отзыва администратором")
-
-	// ── и ни одной ссылки на снятую строку ───────────────────────────────────
-	require.Empty(t, danglingSubjectRefs(t, db, duplicate),
-		"в леджере остались ссылки на снятую строку")
-	require.Equal(t, []string{canonical}, rowsWithEmail(t, db, email),
-		"сведение обязано состояться: отказ здесь означал бы, что форма объявлена "+
-			"неразрешимой, хотя ответ у неё есть")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Проба 8 — ОТКАЗ на выдаче-дубле, названной субъектом ПОСТОРОННЕГО.
-//
-// Гашение дубля законно ровно потому, что то же право у того же человека
-// остаётся другой выдачей. Если у выдачи есть второй субъект, гашение отнимает
-// право у него — а оставить её живой нельзя из-за ключа. Ответа, который
-// миграция могла бы вычислить, нет: какая из двух одинаковых выдач остаётся
-// жить, решает владелец продукта.
-func TestIntegration_MergeRefusesAGroupItCannotDecide_SharedDuplicateGrant(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
-	}
-	dsn := pgtest.NewEmptyDB(t)
-	db := upTo(t, dsn, identityMergeVersion-1)
-	defer func() { _ = db.Close() }()
-
-	_, accA := seedAccountWithOwner(t, db, "sharedaa")
-	ownerB, accB := seedAccountWithOwner(t, db, "sharedbb")
-
-	const email = "shared@example.test"
-	canonical := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "aashare"), email, accA, "ACTIVE", "ext-share")
-	duplicate := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "zzshare"), email, accB, "PENDING", "")
-
-	role := anyAssignableRole(t, db)
-	byInvite := grantOn(t, db, "acb"+fmt.Sprintf("%017s", "hgrantd"), duplicate, role, "account", accB)
-	grantOn(t, db, "acb"+fmt.Sprintf("%017s", "hgrantc"), canonical, role, "account", accB)
-	// Посторонний — второй адресат ТОЙ ЖЕ выдачи.
-	addSubjectTo(t, db, byInvite, ownerB, 1)
-
-	msg := applyMergeExpectingRefusal(t, db)
-	require.Contains(t, msg, "названы субъектом не только сводимой личности",
-		"отказ обязан НАЗЫВАТЬ предмет: «миграция упала» без предмета не даёт оператору "+
-			"ни одного следующего шага. Получено: %s", msg)
-
-	require.Len(t, rowsWithEmail(t, db, email), 2,
-		"отказ обязан быть полным: транзакция миграции откатывается целиком")
-	require.Len(t, liveBindingsOnKey(t, db, role, "account", accB), 2,
-		"отказавшая миграция не гасит ничего: половина работы хуже её отсутствия")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Проба 9 — КТО НА САМОМ ДЕЛЕ НЕ ДАЁТ ОСИРОТИТЬ ПРАВО.
+// Проба 3 — КТО НА САМОМ ДЕЛЕ НЕ ДАЁТ ОСИРОТИТЬ ПРАВО.
 //
 // # Предмет: комментарий про безопасность, который был ложен
 //
@@ -992,7 +372,7 @@ func TestIntegration_TheGuardAgainstOrphanedGrantsIsTheSubjectRef(t *testing.T) 
 	}
 	ctx := context.Background()
 	dsn := pgtest.NewEmptyDB(t)
-	db := upTo(t, dsn, identityMergeVersion)
+	db := upAllIAMMigrations(t, dsn)
 	defer func() { _ = db.Close() }()
 
 	_, acc := seedAccountWithOwner(t, db, "guardaaa")
@@ -1004,7 +384,7 @@ func TestIntegration_TheGuardAgainstOrphanedGrantsIsTheSubjectRef(t *testing.T) 
 	require.Equal(t, []string{acc}, membershipAccountsOf(t, db, person),
 		"ПРЕДПОСЫЛКА: зеркало завело членство — иначе снимать нечего")
 
-	// ── форма А: порядок миграции. Говорит 0050, и говорит НА СТЕЙТМЕНТЕ ─────
+	// ── форма А: снятие членства, затем строки. Говорит 0050, и НА СТЕЙТМЕНТЕ ──
 	tx, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	_, err = tx.ExecContext(ctx, `DELETE FROM kacho_iam.memberships WHERE user_id = $1`, person)

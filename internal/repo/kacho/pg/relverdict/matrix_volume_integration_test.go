@@ -294,16 +294,7 @@ var matrixWantWrite = []string{"access_bindings"}
 // адресации, и удовлетворена она обязана быть здесь.
 func matrixDSN(t *testing.T) string {
 	t.Helper()
-	dsn := pgtest.NewDB(t)
-	const opts = "options=-c%20search_path%3Dkacho_iam%2Cpublic"
-	if strings.Contains(dsn, "options=") || strings.Contains(dsn, "options%3D") {
-		return dsn
-	}
-	sep := "?"
-	if strings.Contains(dsn, "?") {
-		sep = "&"
-	}
-	return dsn + sep + opts
+	return pgtest.NewDB(t)
 }
 
 // openMatrixPool — пул с трассировщиком.

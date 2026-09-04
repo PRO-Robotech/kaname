@@ -59,12 +59,7 @@ import (
 // «нет такой таблицы», и проба падала бы на ФИКСТУРЕ, а не на предмете.
 func dsnWithSchema(t *testing.T) string {
 	t.Helper()
-	dsn := pgtest.NewDB(t)
-	sep := "?"
-	if strings.Contains(dsn, "?") {
-		sep = "&"
-	}
-	return dsn + sep + "options=-c%20search_path%3Dkacho_iam%2Cpublic"
+	return pgtest.NewDB(t)
 }
 
 // seedUserWithAccount заводит человека и его аккаунт; членство ставит зеркало S1.

@@ -101,7 +101,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/PRO-Robotech/kacho/internal/authzplan"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmodel"
 )
 
@@ -195,9 +194,11 @@ const maxConditionRows = 256
 // $5 отношения атомов-фактов · $6 глаголы атомов-выдачи · $7 max_depth · $8 limit
 // $9 object_type в словаре КАТАЛОГА — им названы `resource_mirror.object_type`,
 // `role_verb.object_type` и `role_rule_selectors.object_types`, тогда как вопрос
-// приходит словарём модели. Перевод делается ОДИН раз, на входе, единственным
-// переходником (`authzmap.CatalogTypeName`); двух словарей в одном соединении
-// быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
+// приходит словарём модели. Перевод делается ОДИН раз, на входе, и читает ЖИВУЮ
+// строку каталога (`catalogTypeName`, catalogtype.go): таблица, порождённая
+// сборкой, о типе, заведённом применением манифеста в работающем процессе, не
+// знает (kacho#1986). Двух словарей в одном соединении быть не должно —
+// соединение по разным написаниям не совпадает НИКОГДА и молча.
 const verdictSQL = `
 WITH RECURSIVE
 -- scope — ОБЛАСТИ, на которые может быть сделана действующая выдача: сам объект
@@ -243,10 +244,11 @@ WITH RECURSIVE
 -- Под представлением лежат kacho_iam.resource_parent_edge (присланное) плюс
 -- kacho_iam.relation_fact, kacho_iam.accounts, kacho_iam.clusters,
 -- kacho_iam.memberships, kacho_iam.groups, kacho_iam.service_accounts,
--- kacho_iam.roles и kacho_iam.access_bindings (выводимое). Имя
--- kacho_iam.users здесь СНЯТО вместе с ветвью, которая его читала: звено
--- личности берёт аккаунт из членства, и держать имя в перечне значило бы
--- заявлять основание, которого у вердикта больше нет. Имена названы здесь ЯВНО, и не ради
+-- kacho_iam.roles и kacho_iam.access_bindings (выводимое). Таблица личностей из
+-- перечня СНЯТА вместе с ветвью, которая её читала: звено личности берёт аккаунт
+-- из членства. Её имя здесь намеренно НЕ ВОСПРОИЗВОДИТСЯ даже в разборе этого
+-- снятия — перечень сверяется с телом представления, и имя таблицы, которую цепь
+-- не читает, было бы находкой, а не пояснением. Имена названы здесь ЯВНО, и не ради
 -- полноты рассказа: отпечаток предмета замера выводит читаемые таблицы ИЗ ТЕКСТА
 -- вердикта, поэтому представление, названное одним своим именем, увело бы
 -- собственные основания из-под прибора — их правку он перестал бы замечать молча.
@@ -643,10 +645,15 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	}
 	g.LabelAxisTable = labelTable
 
+	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	if err != nil {
+		return Unknown, g, err
+	}
+
 	rows, err := q.Query(ctx, verdictQuerySQL(labelTable),
 		in.Subject, in.ObjectType, in.ObjectID,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		authzmap.CatalogTypeName(in.ObjectType),
+		catalogType,
 	)
 	if err != nil {
 		return Unknown, g, fmt.Errorf("relverdict: запрос: %w", err)
@@ -965,10 +972,15 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 		return nil, nil, err
 	}
 
+	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	rows, err := q.Query(ctx, verdictManyQuerySQL(labelTable),
 		in.Subject, in.ObjectType, in.ObjectIDs,
 		factParents, factRelations, bindVerbs, MaxAncestorDepth, maxConditionRows,
-		authzmap.CatalogTypeName(in.ObjectType),
+		catalogType,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("relverdict: запрос о странице: %w", err)

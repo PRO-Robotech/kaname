@@ -184,7 +184,9 @@ func (rs Rules) CoversType(dottedType string) bool {
 //
 // It is a lookup, not a derivation. The predicate used to re-spell the dotted form
 // into the bare scope-anchor vocabulary (`compute.instance` → `compute_instance`,
-// checked against validResourceTypes) and claimed that kept the two in sync by
+// checked against a hand-written whitelist that has since been removed — the anchor
+// vocabulary is the three hierarchy tiers and is declared once, `scopeAnchorTiers`)
+// and claimed that kept the two in sync by
 // construction; it did not, because the two vocabularies answer different questions
 // and are spelled in different conventions. Deriving one name from another instead
 // of resolving it against the one table that owns it is the same mistake as reading

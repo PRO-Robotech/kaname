@@ -65,17 +65,7 @@ var sakeyEvtIDRe = regexp.MustCompile(`^evt_[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{20,3
 func setupSAKeyTestDB(t testing.TB) string {
 	t.Helper()
 
-	dsn := pgtest.NewDB(t)
-
-	const optionsParam = "options=-c%20search_path%3Dkacho_iam%2Cpublic"
-	if strings.Contains(dsn, "options=") || strings.Contains(dsn, "options%3D") {
-		return dsn
-	}
-	sep := "?"
-	if strings.Contains(dsn, "?") {
-		sep = "&"
-	}
-	return dsn + sep + optionsParam
+	return pgtest.NewDB(t)
 }
 
 // seedSAKeyUserAndSA seeds a user + owning account + a service account and

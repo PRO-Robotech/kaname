@@ -22,6 +22,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 
 	abapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding"
 	accountapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/account"
@@ -417,7 +418,7 @@ func roleSurface() surface {
 		// so those rows belong in the answer for every caller.
 		floorVisible: func(t *testing.T, e *env) []string { return e.systemRoleIDs(t) },
 		list: func(t *testing.T, e *env, ctx context.Context, a listArgs) ([]string, string, error) {
-			uc := roleapp.NewListRolesUseCase(e.repo).WithRelationStore(queriesOr(e, a))
+			uc := roleapp.NewListRolesUseCase(e.repo, catalogfixture.Source()).WithRelationStore(queriesOr(e, a))
 			rows, next, err := uc.Execute(ctx, reporole.ListFilter{PageSize: a.pageSize, PageToken: a.pageToken})
 			ids := make([]string, 0, len(rows))
 			for _, r := range rows {
@@ -426,7 +427,7 @@ func roleSurface() surface {
 			return ids, next, err
 		},
 		get: func(t *testing.T, e *env, ctx context.Context, id string) error {
-			uc := roleapp.NewGetRoleUseCase(e.repo).WithRelationStore(e.gates)
+			uc := roleapp.NewGetRoleUseCase(e.repo, catalogfixture.Source()).WithRelationStore(e.gates)
 			_, err := uc.Execute(ctx, domain.RoleID(id))
 			return err
 		},

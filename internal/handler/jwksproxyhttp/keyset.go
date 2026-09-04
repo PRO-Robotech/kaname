@@ -205,9 +205,23 @@ func toJWK(k domain.PublishedKey) (jwk, error) {
 	case *ecdsa.PublicKey:
 		out.Kty = "EC"
 		out.Crv = key.Curve.Params().Name
+		// Сырые координаты X/Y объявлены устаревшими в Go 1.26: как *big.Int они
+		// теряют ведущие нули и не годятся для криптографических значений.
+		// Bytes() отдаёт несжатую форму точки 0x04 || X || Y, где ОБЕ координаты
+		// уже дополнены слева до размера кривой, — ровно то, чего требует JWK,
+		// и без ручного дополнения. Отдаваемые байты те же, что и прежде.
+		raw, err := key.Bytes()
+		if err != nil {
+			return jwk{}, fmt.Errorf("public half is not a valid curve point")
+		}
 		size := (key.Curve.Params().BitSize + 7) / 8
-		out.X = b64(leftPad(key.X.Bytes(), size))
-		out.Y = b64(leftPad(key.Y.Bytes(), size))
+		if len(raw) != 1+2*size {
+			// Форма точки — часть контракта записи. Неожиданная длина закрывает
+			// запись целиком: усечённая координата неотличима от полной.
+			return jwk{}, fmt.Errorf("uncompressed point is %d bytes, want %d", len(raw), 1+2*size)
+		}
+		out.X = b64(raw[1 : 1+size])
+		out.Y = b64(raw[1+size:])
 	case ed25519.PublicKey:
 		out.Kty = "OKP"
 		out.Crv = "Ed25519"
@@ -229,13 +243,4 @@ func bigEndianExponent(e int) []byte {
 		buf = []byte{0}
 	}
 	return buf
-}
-
-func leftPad(raw []byte, size int) []byte {
-	if len(raw) >= size {
-		return raw
-	}
-	out := make([]byte, size)
-	copy(out[size-len(raw):], raw)
-	return out
 }

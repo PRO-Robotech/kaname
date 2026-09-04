@@ -16,11 +16,11 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
-func TestRegistryModuleKnown(t *testing.T) {
-	if !domain.IsKnownModule("registry") {
-		t.Error("domain.IsKnownModule(\"registry\") = false; want true")
-	}
-}
+// Утверждение «registry — модуль платформы» ЗДЕСЬ СНЯТО ВМЕСТЕ С ПРЕДМЕТОМ
+// (#1927): домен закрытого набора не объявляет, и проба на `domain.IsKnownModule`
+// перестала бы иметь вход, оставшись на вид рабочей. Точный состав набора пинит
+// `authzmap/module_set_drift_test.go` — у него есть производитель
+// (`authzmap.CatalogSeedModules`), а у домена его нет by construction.
 
 func TestRegistryLabelSelectability(t *testing.T) {
 	if !domain.IsLabelSelectableType("registry.registries") {

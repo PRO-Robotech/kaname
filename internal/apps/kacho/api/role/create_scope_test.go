@@ -9,6 +9,8 @@ package role
 // opsRepo/repo are touched), so a use-case with nil deps is safe.
 
 import (
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
+
 	"context"
 	"testing"
 
@@ -39,7 +41,7 @@ func validRules() domain.Rules {
 // 212-NEG-1: both account_id AND project_id set → InvalidArgument (a custom role
 // is exactly one scope). No role created.
 func TestCreateRole_212_BothScopesSet_InvalidArgument(t *testing.T) {
-	uc := &CreateRoleUseCase{} // nil repo/opsRepo: reject is a sync pre-check
+	uc := &CreateRoleUseCase{cat: catalogfixture.Source()} // nil repo/opsRepo: reject is a sync pre-check
 	_, err := uc.Execute(authnCtx(), domain.Role{
 		AccountID: "acc0000000000000abcd",
 		ProjectID: "prj0000000000000abcd",
@@ -55,7 +57,7 @@ func TestCreateRole_212_BothScopesSet_InvalidArgument(t *testing.T) {
 // 212-NEG-2: neither account_id NOR project_id set → InvalidArgument (custom
 // role must carry a scope; system roles are seeded by migration). No role.
 func TestCreateRole_212_NoScope_InvalidArgument(t *testing.T) {
-	uc := &CreateRoleUseCase{}
+	uc := &CreateRoleUseCase{cat: catalogfixture.Source()}
 	_, err := uc.Execute(authnCtx(), domain.Role{
 		Name:  "no_scope",
 		Rules: validRules(),
@@ -69,7 +71,7 @@ func TestCreateRole_212_NoScope_InvalidArgument(t *testing.T) {
 // 212-NEG-3: a malformed project_id (wrong prefix) → InvalidArgument, mirroring
 // the account_id id-format guard. No role created.
 func TestCreateRole_212_MalformedProjectID_InvalidArgument(t *testing.T) {
-	uc := &CreateRoleUseCase{}
+	uc := &CreateRoleUseCase{cat: catalogfixture.Source()}
 	_, err := uc.Execute(authnCtx(), domain.Role{
 		ProjectID: "not-a-project-id",
 		Name:      "bad_prj",

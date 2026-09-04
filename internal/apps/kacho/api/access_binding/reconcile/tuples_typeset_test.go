@@ -144,14 +144,20 @@ func TestRuleObjectTuples_WildcardRuleEmitsNothingDangling(t *testing.T) {
 		t.Fatalf("каталог пуст — предпосылка инъекции радиуса сломана")
 	}
 	checked, verbTuples := 0, 0
+	// Каталожный факт берётся ОДИН на весь обход: он неизменяем, а пересборка на
+	// каждом ключе была бы вторым множеством, равным первому по совпадению.
+	facts := catalogfixture.Facts()
 	for _, key := range dotted {
-		got, ok := ruleObjectTuples(catalogfixture.Facts(), "user:usr_a", []string{"*"}, key, "obj_1")
+		got, ok := ruleObjectTuples(facts, "user:usr_a", []string{"*"}, key, "obj_1")
 		if !ok {
 			t.Errorf("%s: тип каталога не резолвится в FGA-тип — правило молча не материализуется", key)
 			continue
 		}
 		checked++
-		fgaType, _ := fgaObjectType(key)
+		// Имя типа спрашивается у ТОГО ЖЕ источника, у которого его спрашивает
+		// проверяемый код (kacho#1967): второй источник дал бы пробу, зелёную по
+		// другому каталогу.
+		fgaType, _ := facts.FGAObjectType(key)
 		declared := map[string]bool{}
 		for _, r := range typeVerbRelationsOf(fgaType) {
 			declared[r] = true

@@ -18,10 +18,41 @@ package check
 // вторым гейтом того же предмета (`retired_block_storage_test.go`), а не рядом с
 // прочими гейтами дерева.
 //
-// Гейт первый — ПАРИТЕТ: строки, которые сеет миграция 20260901113757, обязаны быть
+// Гейт первый — ПАРИТЕТ: строки, которые сеет миграция каталога, обязаны быть
 // ровно тем множеством, которое даёт литерал `authzmap`. Расхождение здесь
-// невидимо ничем другим: миграция применена и правке не подлежит (запрет #5), а
-// литерал правится свободно.
+// невидимо ничем другим: применённую миграцию не правят (запрет #5), а литерал
+// правится свободно.
+//
+// # Форм записи посева ДВЕ, и распознаватель обязан знать обе
+//
+// Рука пишет один оператор на много кортежей, перечисляя лишь те колонки, что
+// отличаются от умолчания:
+//
+//	INSERT INTO kacho_iam.catalog_verb (module, resource, verb) VALUES
+//	  ('alpha', 'thing', 'get'),
+//	  ('beta', 'other', 'list');
+//
+// `pg_dump --column-inserts` — по оператору на строку, ВСЕ колонки, готовые
+// значения:
+//
+//	INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at,
+//	  retired_reason, live, per_object) VALUES ('compute', 'instance', 'get',
+//	  NULL, NULL, true, true);
+//
+// Прежняя редакция знала только первую: она искала ЛИТЕРАЛЬНЫЙ префикс вместе с
+// перечнем колонок (`… catalog_verb (module, resource, verb) VALUES`). После
+// свода 171 миграции в одну первичную, собранную дампом, все четыре префикса
+// давали ноль попаданий — то есть гейт краснел «оператор посева не найден», а не
+// сверял. Поэтому разбор ведётся ПО КОЛОНКАМ: оператор читается как пара
+// «перечень колонок × кортежи», и обе формы становятся одним входом.
+//
+// # Половины словаря различаются ЗНАЧЕНИЕМ, а не оператором
+//
+// До свода пообъектную и ярусную половины сеяли РАЗНЫЕ миграции, и гейты
+// различали их по тексту оператора. Дамп кладёт обе половины в одну таблицу
+// одним перечнем колонок, а различает `per_object`. Так же и снятые строки
+// ресурса: они отличаются от живых не оператором, а `live`. Разбор по колонкам
+// берёт именно это — значение дискриминатора, — поэтому переживает обе формы.
 //
 // Гейт второй — ФОРМА КЛЮЧА: `RESTRICT` рядом с `DEFERRABLE` принимается DDL и
 // молча инертен (измерено на PostgreSQL 16.15, приёмка §0.2 Н2, проба C4), а
@@ -38,10 +69,20 @@ import (
 // catalogSeedCensus — объём осмотренного. Печатается всегда: «ноль расхождений»
 // обязано быть отличимо от «ноль прочитанного».
 type catalogSeedCensus struct {
+	// ПРОЧИТАНО — сколько строк разбор вынул из оператора.
+	ReadModuleRows   int
+	ReadResourceRows int
+	ReadVerbRows     int
+
+	// КЛАССИФИЦИРОВАНО — сколько из прочитанного попало в каждую половину.
+	// Числа печатаются ПАРОЙ с прочитанным: расширяя распознаватель, обязан
+	// двигаться объём осмотренного, а не только число находок; одно число
+	// скрывает ровно тот случай, ради которого перепись и заведена.
 	SeededModules   int
 	SeededResources int
 	SeededVerbs     int
 	RetiredSeeded   int
+	TierOnlyVerbs   int
 }
 
 // splitTupleFields — поля одного кортежа, разрезанные по ВЕРХНЕУРОВНЕВОЙ запятой.
@@ -89,120 +130,260 @@ func splitTupleFields(inner string) []string {
 	return out
 }
 
-// parseSeedBlock — кортежи ОДНОГО оператора INSERT, начиная со строки, на
-// которой этот оператор объявлен. Читается ИСПОЛНЯЕМАЯ часть: строка,
-// начинающаяся с `--`, кортежем не является, и комментарий, объясняющий посев,
-// не может быть засчитан за него.
+// insertRow — одна строка оператора INSERT: перечень колонок, кортеж значений и
+// доступ по имени колонки.
 //
-// Кортеж может занимать НЕСКОЛЬКО строк (строка снятого ресурса занимает три),
-// поэтому накопление идёт до баланса скобок, а не по строке.
-func parseSeedBlock(body, insertPrefix string) ([][]string, error) {
-	i := strings.Index(body, insertPrefix)
-	if i < 0 {
-		return nil, fmt.Errorf("оператор посева не найден: %q", insertPrefix)
-	}
-	rest := body[i+len(insertPrefix):]
+// Кортеж и перечень хранятся ОБА, а не только карта: их несовпадение по длине —
+// самостоятельная находка, и по карте её не увидеть (лишнее значение просто не
+// получит имени, а недостающее — молча станет отсутствующим).
+type insertRow struct {
+	cols   []string
+	vals   []string
+	byName map[string]string
+}
 
-	var out [][]string
-	var buf strings.Builder
+// has — колонка НАЗВАНА оператором. Отличать от «значение пусто» обязательно:
+// колонка, оператором не названная, приходит из умолчания схемы.
+func (r insertRow) has(col string) bool {
+	_, ok := r.byName[col]
+	return ok
+}
+
+// get — значение названной колонки; для неназванной — пустая строка.
+func (r insertRow) get(col string) string { return r.byName[col] }
+
+// boolOrDefault — значение булевой колонки с УМОЛЧАНИЕМ СХЕМЫ.
+//
+// Колонка, не названная оператором, значения не теряет: её ставит `DEFAULT` из
+// `CREATE TABLE` того же файла — `live boolean DEFAULT true NOT NULL` и
+// `per_object boolean DEFAULT true NOT NULL`. Рукописный посев на это умолчание
+// и опирается (живая строка колонки `live` не несёт вовсе), дамп же печатает
+// значение всегда. Разбор обязан читать обе формы одинаково, иначе рукописная
+// живая строка была бы прочитана как «значение не задано».
+func (r insertRow) boolOrDefault(col string, def bool) bool {
+	if !r.has(col) {
+		return def
+	}
+	return strings.EqualFold(strings.TrimSpace(r.get(col)), "true")
+}
+
+// isNull — SQL-овый NULL, а не пустая строка. Дамп пишет отсутствие преемника
+// словом `NULL`; рукописный посев мог не назвать колонку вовсе. Оба означают
+// «преемника нет», и путать их с пустой строкой нельзя: пустая строка была бы
+// именем ресурса, которого не существует.
+func isNull(v string) bool {
+	t := strings.TrimSpace(v)
+	return t == "" || strings.EqualFold(t, "null")
+}
+
+func isSpaceByte(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+func skipSpace(s string, i int) int {
+	for i < len(s) && isSpaceByte(s[i]) {
+		i++
+	}
+	return i
+}
+
+// readParenGroup — содержимое сбалансированной скобочной группы, начинающейся в
+// позиции i, и позиция сразу за её закрывающей скобкой.
+//
+// Скобки внутри строкового литерала не считаются, и это не край: причина снятия
+// ресурса — русская проза, которая скобки и запятые содержит свободно.
+func readParenGroup(s string, i int) (inner string, next int, ok bool) {
+	if i >= len(s) || s[i] != '(' {
+		return "", i, false
+	}
 	depth := 0
-	for _, line := range strings.Split(rest, "\n") {
-		if idx := strings.Index(line, "--"); idx >= 0 && depth == 0 {
-			line = line[:idx]
-		}
-		t := strings.TrimSpace(line)
-		if t == "" {
-			continue
-		}
-		if depth == 0 && !strings.HasPrefix(t, "(") {
-			break // оператор кончился
-		}
-		for _, ch := range t {
-			switch ch {
-			case '(':
-				depth++
-			case ')':
-				depth--
+	inQuote := false
+	start := i + 1
+	for ; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == '\'':
+			// Удвоенная кавычка внутри литерала — экранированная, не конец.
+			if inQuote && i+1 < len(s) && s[i+1] == '\'' {
+				i++
+				continue
+			}
+			inQuote = !inQuote
+		case inQuote:
+			// внутри литерала скобки — текст
+		case ch == '(':
+			depth++
+		case ch == ')':
+			depth--
+			if depth == 0 {
+				return s[start:i], i + 1, true
 			}
 		}
-		buf.WriteString(t)
-		if depth > 0 {
-			buf.WriteByte(' ')
-			continue
-		}
-		tuple := strings.TrimSpace(buf.String())
-		buf.Reset()
-		done := strings.HasSuffix(tuple, ";")
-		tuple = strings.TrimRight(tuple, ";,")
-		tuple = strings.TrimSpace(tuple)
-		tuple = strings.TrimPrefix(tuple, "(")
-		tuple = strings.TrimSuffix(tuple, ")")
-		out = append(out, splitTupleFields(tuple))
-		if done {
+	}
+	return "", i, false
+}
+
+// parseInsertRows — строки, вставляемые в названную таблицу, ЛЮБОЙ из двух форм
+// записи (см. шапку файла).
+//
+// Читается ИСПОЛНЯЕМАЯ часть: комментарий, объясняющий посев, за посев не
+// считается — иначе гейт зеленел бы на собственном объяснении.
+//
+// Отказов ДВА, и они разные: оператора нет вовсе (таблицу не сеют, либо имя
+// разошлось) и оператор есть, а кортежей ноль. Второй — тот самый случай, ради
+// которого отказ и заведён: «расхождений нет» обязано быть отличимо от «ничего
+// не прочитано».
+func parseInsertRows(body, table string) ([]insertRow, error) {
+	exec := stripSQLComments(body)
+	prefix := "INSERT INTO " + table
+
+	statements := 0
+	var out []insertRow
+	for off := 0; off < len(exec); {
+		j := strings.Index(exec[off:], prefix)
+		if j < 0 {
 			break
 		}
+		p := off + j + len(prefix)
+		off = p
+		// Соседняя таблица, чьё имя ПРОДОЛЖАЕТ искомое (`catalog_verb_history`),
+		// отсекается требованием ниже: за именем обязан идти перечень колонок, то
+		// есть пробелы и `(`. На `_history (` пробелы позиции не сдвигают, а `_`
+		// скобкой не является — оператор не читается вовсе.
+		//
+		// Отдельная проверка границы имени здесь СТОЯЛА и снята: её снятие не
+		// меняло исхода ни на одном входе, включая инъекцию границы, — то есть
+		// она документировала контракт, который держит другой код. Свойство при
+		// этом проверяется: TestIAMCT114_Injection_TableNameBoundaryIsRespected.
+		p = skipSpace(exec, p)
+		colsInner, afterCols, ok := readParenGroup(exec, p)
+		if !ok {
+			continue
+		}
+		cols := splitTupleFields(colsInner)
+		p = skipSpace(exec, afterCols)
+		if !strings.HasPrefix(exec[p:], "VALUES") {
+			continue
+		}
+		p = skipSpace(exec, p+len("VALUES"))
+		statements++
+		for {
+			inner, afterTuple, okTuple := readParenGroup(exec, p)
+			if !okTuple {
+				break
+			}
+			vals := splitTupleFields(inner)
+			row := insertRow{cols: cols, vals: vals, byName: make(map[string]string, len(cols))}
+			for k, c := range cols {
+				if k < len(vals) {
+					row.byName[c] = vals[k]
+				}
+			}
+			out = append(out, row)
+			p = skipSpace(exec, afterTuple)
+			if p < len(exec) && exec[p] == ',' {
+				p = skipSpace(exec, p+1)
+				continue
+			}
+			break
+		}
+		off = p
+	}
+
+	if statements == 0 {
+		return nil, fmt.Errorf("оператор посева не найден: INSERT INTO %s", table)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("оператор %q не дал ни одного кортежа — обход пуст, "+
-			"и «расхождений нет» неотличимо от «ничего не прочитано»", insertPrefix)
+		return nil, fmt.Errorf("оператор INSERT INTO %s не дал ни одного кортежа — обход пуст, "+
+			"и «расхождений нет» неотличимо от «ничего не прочитано»", table)
 	}
 	return out, nil
+}
+
+// arityFindings — кортежи, не сходящиеся с перечнем колонок СВОЕГО оператора.
+//
+// Прежняя редакция сверяла длину кортежа с ЧИСЛОМ (три поля, семь полей) —
+// утверждение о форме, верное ровно для той записи, под которую гейт писался.
+// Сверка с перечнем колонок того же оператора верна для обеих форм и не требует
+// знать наперёд, сколько колонок автор назовёт.
+func arityFindings(kind string, rows []insertRow) []string {
+	var out []string
+	for _, r := range rows {
+		if len(r.vals) != len(r.cols) {
+			out = append(out, fmt.Sprintf(
+				"посев %s: кортеж из %d значений при %d названных колонках: %s",
+				kind, len(r.vals), len(r.cols), strings.Join(r.vals, "|")))
+		}
+	}
+	return out
 }
 
 // auditCatalogSeed — сверка посева миграции с литералом, в ОБЕ стороны.
 // wantModules/wantResources/wantVerbs приходят от вызывающего: гейт дерева
 // подаёт настоящий литерал, инъекция — синтетический.
+//
+// Глаголы сверяются ПООБЪЕКТНЫЕ: ярусную половину той же таблицы судит
+// `auditTierOnlyVerbSeed`. Половины разведены не по операторам (дамп кладёт их
+// одним), а по значению `per_object` — и вместе две сверки покрывают таблицу
+// целиком в обе стороны, дыры между ними нет.
 func auditCatalogSeed(body string, wantModules, wantResources, wantVerbs []string) (catalogSeedCensus, []string, error) {
 	var c catalogSeedCensus
 	var findings []string
 
-	mods, err := parseSeedBlock(body, "INSERT INTO kacho_iam.catalog_module (module) VALUES")
+	mods, err := parseInsertRows(body, "kacho_iam.catalog_module")
 	if err != nil {
 		return c, nil, err
 	}
-	res, err := parseSeedBlock(body, "INSERT INTO kacho_iam.catalog_resource (module, resource, dotted) VALUES")
+	res, err := parseInsertRows(body, "kacho_iam.catalog_resource")
 	if err != nil {
 		return c, nil, err
 	}
-	verbs, err := parseSeedBlock(body, "INSERT INTO kacho_iam.catalog_verb (module, resource, verb) VALUES")
+	verbs, err := parseInsertRows(body, "kacho_iam.catalog_verb")
 	if err != nil {
 		return c, nil, err
 	}
-	retired, err := parseSeedBlock(body,
-		"(module, resource, dotted, retired_at, retired_reason, superseded_by, live) VALUES")
-	if err != nil {
-		return c, nil, err
-	}
+	c.ReadModuleRows, c.ReadResourceRows, c.ReadVerbRows = len(mods), len(res), len(verbs)
+
+	findings = append(findings, arityFindings("модуля", mods)...)
+	findings = append(findings, arityFindings("ресурса", res)...)
+	findings = append(findings, arityFindings("глагола", verbs)...)
 
 	gotMod := map[string]bool{}
 	for _, r := range mods {
-		if len(r) != 1 {
-			findings = append(findings, "посев модуля: кортеж не из одного поля: "+strings.Join(r, "|"))
-			continue
+		if !r.boolOrDefault("live", true) {
+			continue // снятый модуль живым ключом каталога не является
 		}
-		gotMod[r[0]] = true
+		gotMod[r.get("module")] = true
 	}
+
 	gotRes := map[string]bool{}
+	var retired []insertRow
 	for _, r := range res {
-		if len(r) != 3 {
-			findings = append(findings, "посев ресурса: кортеж не из трёх полей: "+strings.Join(r, "|"))
-			continue
-		}
+		module, resource, dotted := r.get("module"), r.get("resource"), r.get("dotted")
 		// Производная форма обязана согласоваться с парой ЗДЕСЬ, а не только
 		// проверкой в схеме: расхождение написаний — прямой путь к классу 513001.
-		if r[2] != r[0]+"."+r[1] {
+		// Проверяется у ВСЯКОЙ строки, живой и снятой: третье написание в снятой
+		// строке уводит преемника ровно так же.
+		if dotted != module+"."+resource {
 			findings = append(findings, fmt.Sprintf(
-				"посев ресурса: точечная форма %q не выводится из пары (%s, %s)", r[2], r[0], r[1]))
+				"посев ресурса: точечная форма %q не выводится из пары (%s, %s)", dotted, module, resource))
 		}
-		gotRes[r[2]] = true
-	}
-	gotVerb := map[string]bool{}
-	for _, r := range verbs {
-		if len(r) != 3 {
-			findings = append(findings, "посев глагола: кортеж не из трёх полей: "+strings.Join(r, "|"))
+		if r.boolOrDefault("live", true) {
+			gotRes[dotted] = true
 			continue
 		}
-		gotVerb[r[0]+"."+r[1]+"."+r[2]] = true
+		retired = append(retired, r)
+	}
+
+	gotVerb := map[string]bool{}
+	for _, r := range verbs {
+		if !r.boolOrDefault("live", true) {
+			continue // снятый глагол живым ключом каталога не является
+		}
+		if !r.boolOrDefault("per_object", true) {
+			continue // ярусная половина — предмет auditTierOnlyVerbSeed
+		}
+		gotVerb[r.get("module")+"."+r.get("resource")+"."+r.get("verb")] = true
 	}
 
 	c.SeededModules, c.SeededResources, c.SeededVerbs = len(gotMod), len(gotRes), len(gotVerb)
@@ -216,17 +397,13 @@ func auditCatalogSeed(body string, wantModules, wantResources, wantVerbs []strin
 	// каталога. Преемник, указывающий на снятое, восстанавливает клиенту шаг,
 	// которого не существует.
 	for _, r := range retired {
-		if len(r) < 7 {
-			findings = append(findings, "посев снятого: кортеж короче семи полей: "+strings.Join(r, "|"))
-			continue
-		}
-		successor := r[5]
-		if successor == "" {
-			findings = append(findings, "посев снятого: строка "+r[2]+" не несёт преемника")
+		successor := r.get("superseded_by")
+		if isNull(successor) {
+			findings = append(findings, "посев снятого: строка "+r.get("dotted")+" не несёт преемника")
 			continue
 		}
 		if !gotRes[successor] {
-			findings = append(findings, "посев снятого: преемник "+successor+" строки "+r[2]+
+			findings = append(findings, "посев снятого: преемник "+successor+" строки "+r.get("dotted")+
 				" не является живым ключом каталога")
 		}
 	}
@@ -273,18 +450,48 @@ var (
 
 // auditKeyForm — форма ключей, объявленных телом миграции.
 //
-// Проверяются ДВА свойства, и они разные: `RESTRICT … DEFERRABLE` запрещён
-// ВЕЗДЕ в этом дереве (форма принимается DDL и молча инертна), а
-// `INITIALLY DEFERRED` запрещён ТОЛЬКО на ключах, названных вызывающим, —
-// одиннадцать существующих объявлений дерева этой проверкой не пересматриваются.
-func auditKeyForm(body string, immediateOnly []string) (scanned int, findings []string) {
+// Проверяются ДВА свойства, и они разные: `RESTRICT … DEFERRABLE` запрещён у
+// всякого объявления тела, кроме поимённо названных вызывающим, а
+// `INITIALLY DEFERRED` запрещён ТОЛЬКО на ключах, названных вызывающим.
+//
+// # Охват ВЫРОС с семи объявлений до сорока двух — и предпосылку пришлось
+// перемерить
+//
+// До свода тело гейта было одной миграцией, объявлявшей семь ключей, и запрет
+// `RESTRICT … DEFERRABLE` был записан как «ВЕЗДЕ в этом дереве». Это утверждение
+// никогда не проверялось на дереве: гейт видел свою миграцию и только её. Свод
+// сделал телом всю схему (замер: объявлений ключа 42), и предпосылка упала —
+// дерево несёт ДВА объявления этой формы, и оба намеренные.
+//
+// Узкая популяция предпосылку не подтверждает, она её СКРЫВАЕТ; расширяя охват,
+// перемеряют предпосылку, а не только новые элементы.
+//
+// # Почему ведомость, а не сужение запрета обратно до трёх ключей
+//
+// Сужение вернуло бы охват к семи объявлениям и снова спрятало бы остальные 35.
+// Ведомость сохраняет охват и НАЗЫВАЕТ то, что прежде было невидимо: третье
+// объявление этой формы — находка, а запись, которой нечего исключать, — тоже
+// находка (послабление обязано истекать само).
+func auditKeyForm(body string, immediateOnly, restrictDeferrableExempt []string) (scanned int, findings []string) {
+	exemptAll := stripSQLComments(body)
+	// Самоистечение: запись, у которой в теле нет предмета, — находка. Без этого
+	// ведомость пережила бы снятие ключа и осталась бы слепой зоной, выданной
+	// вперёд следующему объявлению того же имени.
+	for _, name := range restrictDeferrableExempt {
+		if !strings.Contains(exemptAll, "ADD CONSTRAINT "+name) {
+			findings = append(findings, "послабление на RESTRICT рядом с DEFERRABLE названо для ключа "+
+				name+", а такого объявления в теле нет: исключению нечего исключать, и "+
+				"следующее объявление того же имени уехало бы под него незамеченным")
+		}
+	}
+
 	for _, stmt := range strings.Split(body, ";") {
 		if !strings.Contains(stmt, "FOREIGN KEY") && !strings.Contains(stmt, "REFERENCES") {
 			continue
 		}
 		scanned++
 		exec := stripSQLComments(stmt)
-		if reRestrictDeferrable.MatchString(exec) {
+		if reRestrictDeferrable.MatchString(exec) && !namesAnyOf(exec, restrictDeferrableExempt) {
 			findings = append(findings, "объявление ключа несёт RESTRICT рядом с DEFERRABLE: "+
 				"форма принимается DDL и молча инертна — проверка остаётся немедленной "+
 				"(измерено, приёмка rule-segments-have-a-referent §0.2 Н2)")
@@ -298,6 +505,15 @@ func auditKeyForm(body string, immediateOnly []string) (scanned int, findings []
 		}
 	}
 	return scanned, findings
+}
+
+func namesAnyOf(stmt string, names []string) bool {
+	for _, n := range names {
+		if strings.Contains(stmt, n) {
+			return true
+		}
+	}
+	return false
 }
 
 // stripSQLComments — снять строчные комментарии. Гейт судит ИСПОЛНЯЕМОЕ: слово
@@ -327,38 +543,46 @@ func stripSQLComments(s string) string {
 // Свести их в один значило бы склеить два тела и потерять ответ на вопрос
 // «какая миграция разошлась».
 
-// tierOnlyVerbSeedPrefix — оператор посева ярусной половины. Форма кортежа у
-// него ЧЕТЫРЁХПОЛЬНАЯ: признак словаря стоит значением, а не умолчанием, —
-// строка, положенная умолчанием `true`, была бы пообъектной и вернула бы
-// материализацию снятого отношения.
-const tierOnlyVerbSeedPrefix = "INSERT INTO kacho_iam.catalog_verb (module, resource, verb, per_object) VALUES"
-
 // auditTierOnlyVerbSeed — сверка ярусного посева с литералом, в ОБЕ стороны.
 //
 // Проверяются ДВЕ вещи, и вторая не выводится из первой: множество троек и
 // ЗНАЧЕНИЕ признака у каждой. Кортеж с `true` прошёл бы сверку множеств и означал
 // бы ровно обратное тому, ради чего заведён.
+//
+// # Признак словаря судится у троек, НАЗВАННЫХ литералом
+//
+// До свода ярусную половину сеяла отдельная миграция, и всякая строка её тела
+// была ярусной по построению — поэтому прежняя редакция требовала `false` от
+// КАЖДОГО прочитанного кортежа. Дамп кладёт обе половины одной таблицей, и то же
+// требование объявило бы находкой все 109 пообъектных строк, не нарушивших
+// ничего. Требование сохранено там, где у него есть предмет: у тройки, которую
+// литерал объявил ярусной, признак обязан быть `false`. Пообъектные строки судит
+// `auditCatalogSeed` — вместе две сверки покрывают таблицу целиком.
 func auditTierOnlyVerbSeed(body string, want []string) (seeded int, findings []string, err error) {
-	rows, err := parseSeedBlock(body, tierOnlyVerbSeedPrefix)
+	rows, err := parseInsertRows(body, "kacho_iam.catalog_verb")
 	if err != nil {
 		return 0, nil, err
 	}
+	findings = append(findings, arityFindings("ярусного глагола", rows)...)
+
+	wantSet := setOf(want)
 	got := map[string]bool{}
 	for _, r := range rows {
-		if len(r) != 4 {
-			findings = append(findings, "посев ярусного глагола: кортеж не из четырёх полей: "+
-				strings.Join(r, "|"))
+		if !r.boolOrDefault("live", true) {
+			continue // снятый глагол ярусной половиной не является
+		}
+		key := r.get("module") + "." + r.get("resource") + "." + r.get("verb")
+		if r.boolOrDefault("per_object", true) {
+			if wantSet[key] {
+				findings = append(findings, fmt.Sprintf(
+					"посев ярусного глагола %s: признак словаря %q, а не false — "+
+						"пообъектная строка вернула бы материализацию снятого отношения",
+					key, r.get("per_object")))
+			}
 			continue
 		}
-		if r[3] != "false" {
-			findings = append(findings, fmt.Sprintf(
-				"посев ярусного глагола %s.%s.%s: признак словаря %q, а не false — "+
-					"пообъектная строка вернула бы материализацию снятого отношения",
-				r[0], r[1], r[2], r[3]))
-			continue
-		}
-		got[r[0]+"."+r[1]+"."+r[2]] = true
+		got[key] = true
 	}
-	findings = append(findings, symmetricDiff("ярусный глагол", setOf(want), got)...)
+	findings = append(findings, symmetricDiff("ярусный глагол", wantSet, got)...)
 	return len(got), findings, nil
 }

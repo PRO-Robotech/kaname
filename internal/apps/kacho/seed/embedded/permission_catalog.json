@@ -1111,6 +1111,46 @@
     "required_acr_min": "2"
   },
   {
+    "fqn": "kacho.cloud.iam.v1.InternalModuleService/Apply",
+    "permission": "iam.modules.apply",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "2"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.InternalModuleService/Get",
+    "permission": "iam.modules.get",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.InternalModuleService/List",
+    "permission": "iam.modules.list",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kacho.cloud.iam.v1.InternalModuleService/Plan",
+    "permission": "iam.modules.plan",
+    "required_relation": "system_admin",
+    "scope_extractor": {
+      "object_type": "cluster",
+      "from_request_field": "*"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kacho.cloud.iam.v1.InternalOperationsService/ListIamOperations",
     "permission": "iam.internal_operationses.listIamOperations",
     "required_relation": "system_admin",

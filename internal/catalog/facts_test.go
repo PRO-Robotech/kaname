@@ -213,7 +213,7 @@ func TestTierOnlyRowNeverEntersTheVerbSetOfItsType(t *testing.T) {
 
 	rows := catalog.Rows{
 		Modules:   []string{"vpc"},
-		Resources: []catalog.ResourceRow{{Module: "vpc", Resource: "network"}},
+		Resources: []catalog.ResourceRow{{Module: "vpc", Resource: "network", ObjectType: fgaType}},
 		Verbs: []catalog.VerbRow{
 			{Module: "vpc", Resource: "network", Verb: "get", PerObject: true},
 			{Module: "vpc", Resource: "network", Verb: "create"},

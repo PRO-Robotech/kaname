@@ -47,6 +47,7 @@ func TestRegisterResourceUseCase_BeginFailure_MapsUnavailable(t *testing.T) {
 	uc := NewRegisterResourceUseCase(
 		smEmitter{}, mirrorAdapter{},
 		failBeginTxBeginner{err: errors.New("failed to connect to `host=iamdb port=5432 user=kacho_iam`: connection refused")},
+		seededCatalogTypes{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{

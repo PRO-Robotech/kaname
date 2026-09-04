@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/modelrender"
 )
 
@@ -26,7 +26,7 @@ import (
 func sixModules(t *testing.T, canon string) string {
 	t.Helper()
 	root := helperTree(t, canon)
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		body := manifestFor(m)
 		if m == "vpc" {
 			body = manifestFor(m, "vpc_network", "vpc_subnet")
@@ -146,7 +146,7 @@ func TestC05InjectionReorderingTwoCanonBlocksIsCaught(t *testing.T) {
 // инъекциях неотличимо от молчания мёртвой.
 func TestInjectionOfTheExistingPropertyRedsOnlyTheExistingOne(t *testing.T) {
 	root := helperTree(t, twoBlockCanon)
-	modules := domain.KnownModules()
+	modules := authzmap.CatalogSeedModules()
 	for _, m := range modules[:len(modules)-1] {
 		body := manifestFor(m)
 		if m == "vpc" {
@@ -190,7 +190,7 @@ type vpc_network
     define v_get: [user, service_account, group#member] or super_admin
 `
 	root := helperTree(t, docCanon)
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		body := manifestFor(m)
 		if m == "vpc" {
 			body = "apiVersion: iam/v1\nmodule: vpc\nresources:\n" +

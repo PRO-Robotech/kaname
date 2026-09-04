@@ -47,6 +47,7 @@ func newRegisterUCWithMirror(t *testing.T) (*internaliam.RegisterResourceUseCase
 		kachopg.NewFGAOutboxEmitter(),
 		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
+		kachopg.NewCatalogTypeReader(),
 	)
 	return uc, &mirrorProbe{pool: pool}
 }

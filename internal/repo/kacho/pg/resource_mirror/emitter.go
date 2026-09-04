@@ -38,7 +38,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
@@ -210,11 +209,21 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	//
 	// Явные приведения у параметров обязательны: в списке `SELECT` тип параметра
 	// не выводится из колонки назначения, как он выводился в форме `VALUES`.
+	// ИМЯ ТИПА МОДЕЛИ ПРИЕЗЖАЕТ ИЗ ТОЙ ЖЕ СТРОКИ, ЧЬЮ ЛИВНОСТЬ ЗДЕСЬ СПРАШИВАЮТ.
+	//
+	// Цепь предков этой регистрации названа словарём МОДЕЛИ, и раньше перевод
+	// брался у словаря, ПОРОЖДЁННОГО СБОРКОЙ: тип, заведённый применением
+	// манифеста в работающем процессе, тот словарь возвращал точечным именем, и
+	// вставка ребра отвергалась проверкой схемы — то есть регистрация не
+	// проходила ВОВСЕ (kacho#1982). Читать имя вторым запросом не надо: строка,
+	// дающая право на запись, и строка, дающая имя, — ОДНА, и берутся они одним
+	// оператором в одном снимке.
 	var typeLive bool
+	var modelType *string
 	var appliedRows int64
 	if err = tx.QueryRow(ctx,
 		`WITH live_type AS (
-		     SELECT 1
+		     SELECT object_type
 		       FROM kacho_iam.catalog_resource
 		      WHERE dotted = $1 AND live
 		 ), applied AS (
@@ -231,9 +240,11 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 		      WHERE resource_mirror.source_version < EXCLUDED.source_version
 		     RETURNING 1
 		 )
-		 SELECT EXISTS (SELECT 1 FROM live_type), (SELECT count(*) FROM applied)`,
+		 SELECT EXISTS (SELECT 1 FROM live_type),
+		        (SELECT object_type FROM live_type),
+		        (SELECT count(*) FROM applied)`,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version,
-	).Scan(&typeLive, &appliedRows); err != nil {
+	).Scan(&typeLive, &modelType, &appliedRows); err != nil {
 		return Outcome{}, fmt.Errorf("resource_mirror: upsert: %w", err)
 	}
 	if !typeLive {
@@ -250,7 +261,12 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	}
 	applied := appliedRows > 0
 	if applied {
-		if err := upsertParentEdges(ctx, tx, row, version); err != nil {
+		// `modelType` непуст by construction: сюда доходит только живая строка
+		// (ветвь `!typeLive` выше), а колонка объявлена `NOT NULL` под проверкой
+		// грамматики. Ветви «имени нет» здесь не заводится — она объявляла бы
+		// состояние, которого не бывает, и первый же читатель принял бы её за
+		// свидетельство, что бывает.
+		if err := upsertParentEdges(ctx, tx, row, *modelType, version); err != nil {
 			return Outcome{}, err
 		}
 	}
@@ -282,13 +298,21 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 // цепь, названная словарём каталога, не смогла бы дойти до строки администратора
 // облака вовсе.
 //
-// Перевод берётся ЕДИНСТВЕННЫЙ (`authzmap.ModelTypeName`) и идемпотентен:
-// родительская сторона приезжает от владельца ресурса уже модельными именами
-// (`project`, `account`, `registry_registry`), и второй перевод её не портит.
+// Перевод берётся ЕДИНСТВЕННЫЙ (`modelTypeName`, model_dictionary.go) и читает
+// ЖИВУЮ строку каталога, а не словарь, порождённый сборкой: иначе тип,
+// заведённый применением манифеста в работающем процессе, приезжал бы сюда
+// точечным именем и вся регистрация отвергалась бы проверкой схемы (kacho#1982).
+// Родительская сторона приезжает от владельца ресурса уже модельными именами
+// (`project`, `account`, `registry_registry`) — их перевод не трогает, потому что
+// сужение идёт по СВОЙСТВУ имени, а не по перечню имён.
+//
+// Имя САМОГО объекта переводить здесь нечем и не надо: оно приезжает уже
+// разрешённым из строки, чью ливность спросил вызывающий тем же оператором. Свой
+// запрос тут завёл бы второе место об одном предмете — и второй снимок.
+//
 // Держится это не здесь, а проверками схемы `*_type NOT LIKE '%.%'`: регрессия
 // писателя отвергается строкой, а не перестаёт совпадать тихо.
-func upsertParentEdges(ctx context.Context, tx pgx.Tx, row Row, version any) error {
-	objectType := authzmap.ModelTypeName(row.ObjectType)
+func upsertParentEdges(ctx context.Context, tx pgx.Tx, row Row, objectType string, version any) error {
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM kacho_iam.resource_parent_edge
 		  WHERE object_type = $1 AND object_id = $2`,
@@ -307,11 +331,15 @@ func upsertParentEdges(ctx context.Context, tx pgx.Tx, row Row, version any) err
 			return fmt.Errorf("resource_parent_edge: непонятая форма предка %q "+
 				"(ожидается \"<type>:<id>\")", ancestor)
 		}
+		parentType, err := modelTypeName(ctx, tx, typ)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO kacho_iam.resource_parent_edge
 			   (object_type, object_id, parent_type, parent_id, depth, source_version, updated_at)
 			 VALUES ($1, $2, $3, $4, $5, $6, now())`,
-			objectType, row.ObjectID, authzmap.ModelTypeName(typ), id, i+1, version,
+			objectType, row.ObjectID, parentType, id, i+1, version,
 		); err != nil {
 			return fmt.Errorf("resource_parent_edge: insert depth %d: %w", i+1, err)
 		}
@@ -396,14 +424,23 @@ func DeleteTx(ctx context.Context, tx pgx.Tx, objectType, objectID string, tombs
 		return fmt.Errorf("resource_mirror: delete: %w", err)
 	}
 	// Цепь предков — вторая половина той же регистрации. Перевод словаря берётся
-	// ЕДИНСТВЕННЫЙ и тот же, которым цепь писалась (`authzmap.ModelTypeName` в
+	// ЕДИНСТВЕННЫЙ и тот же, которым цепь писалась (`modelTypeName` в
 	// `upsertParentEdges`): назови её здесь словарём каталога — снятие не совпало
 	// бы ни с одним ребром и промолчало бы, то есть выглядело бы исполненным.
+	//
+	// Перевод ливность НЕ спрашивает (см. model_dictionary.go): условие приёма
+	// связывает вход, а снятие входом не является. Ресурс, чей тип сняли с
+	// платформы после его регистрации, обязан оставаться удаляемым — снятие типа
+	// мягкое, строка каталога остаётся, и имя по ней резолвится по-прежнему.
+	modelType, err := modelTypeName(ctx, tx, objectType)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM kacho_iam.resource_parent_edge
 		  WHERE object_type = $1 AND object_id = $2
 		    AND source_version <= $3`,
-		authzmap.ModelTypeName(objectType), objectID, versionOr(tombstone),
+		modelType, objectID, versionOr(tombstone),
 	); err != nil {
 		return fmt.Errorf("resource_parent_edge: delete: %w", err)
 	}

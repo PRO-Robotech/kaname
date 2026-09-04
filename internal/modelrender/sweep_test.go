@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/modelrender"
 )
 
@@ -72,7 +72,7 @@ func allWaivers(except ...string) []modelrender.Waiver {
 		skip[m] = true
 	}
 	var out []modelrender.Waiver
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		if !skip[m] {
 			out = append(out, modelrender.Waiver{Module: m, Issue: 1091})
 		}
@@ -96,7 +96,7 @@ func TestC08NothingToRenderIsVoidNotSuccess(t *testing.T) {
 	if len(findings) != 0 {
 		t.Fatalf("VOID с находками: %v", findings)
 	}
-	if census.ModulesInSet != len(domain.KnownModules()) || census.ManifestsFound != 0 {
+	if census.ModulesInSet != len(authzmap.CatalogSeedModules()) || census.ManifestsFound != 0 {
 		t.Fatalf("перепись не называет обе величины: %s", census)
 	}
 	t.Logf("перепись VOID: %s", census)
@@ -115,11 +115,11 @@ func TestC08NothingToRenderWithoutTheWaiverIsAFinding(t *testing.T) {
 	if code != modelrender.SweepFinding {
 		t.Fatalf("исход %d, ожидался %d (находка)", code, modelrender.SweepFinding)
 	}
-	if len(findings) != len(domain.KnownModules()) {
+	if len(findings) != len(authzmap.CatalogSeedModules()) {
 		t.Fatalf("находок %d, ожидалось %d — по одной на модуль набора",
-			len(findings), len(domain.KnownModules()))
+			len(findings), len(authzmap.CatalogSeedModules()))
 	}
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		named := false
 		for _, f := range findings {
 			if f.Module == m {
@@ -136,9 +136,12 @@ func TestC08NothingToRenderWithoutTheWaiverIsAFinding(t *testing.T) {
 // у шестого записи ведомости нет: находка С ИМЕНЕМ МОДУЛЯ.
 func TestC09ModuleOfTheClosedSetWithoutAManifestIsNamed(t *testing.T) {
 	root := helperTree(t, twoBlockCanon)
-	modules := domain.KnownModules()
-	missing := modules[len(modules)-1]
-	for _, m := range modules[:len(modules)-1] {
+	modules := authzmap.CatalogSeedModules()
+	missing := lastModuleWithoutCanonBlocks(t, modules)
+	for _, m := range modules {
+		if m == missing {
+			continue
+		}
 		body := manifestFor(m)
 		if m == "vpc" {
 			body = manifestFor(m, "vpc_network", "vpc_subnet")
@@ -163,9 +166,12 @@ func TestC09ModuleOfTheClosedSetWithoutAManifestIsNamed(t *testing.T) {
 // позаписно осталось бы недоказанным.
 func TestC09TheSameMissingManifestWithALedgerRecordPasses(t *testing.T) {
 	root := helperTree(t, twoBlockCanon)
-	modules := domain.KnownModules()
-	missing := modules[len(modules)-1]
-	for _, m := range modules[:len(modules)-1] {
+	modules := authzmap.CatalogSeedModules()
+	missing := lastModuleWithoutCanonBlocks(t, modules)
+	for _, m := range modules {
+		if m == missing {
+			continue
+		}
 		body := manifestFor(m)
 		if m == "vpc" {
 			body = manifestFor(m, "vpc_network", "vpc_subnet")
@@ -190,7 +196,7 @@ func TestC09TheSameMissingManifestWithALedgerRecordPasses(t *testing.T) {
 // предыдущих проб неотличимо от молчания мёртвого.
 func TestC09SixModulesSixManifestsPass(t *testing.T) {
 	root := helperTree(t, twoBlockCanon)
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		body := manifestFor(m)
 		if m == "vpc" {
 			body = manifestFor(m, "vpc_network", "vpc_subnet")
@@ -219,7 +225,7 @@ func TestC09SixModulesSixManifestsPass(t *testing.T) {
 // — слепая зона, выданная вперёд.
 func TestN05ALedgerRecordWithNothingToForgiveIsAFinding(t *testing.T) {
 	root := helperTree(t, twoBlockCanon)
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		body := manifestFor(m)
 		if m == "vpc" {
 			body = manifestFor(m, "vpc_network", "vpc_subnet")
@@ -278,4 +284,24 @@ func TestN05AWaiverForAModuleOutsideTheClosedSetIsAFinding(t *testing.T) {
 	if !named {
 		t.Fatalf("находка не называет модуль вне набора: %v", findings)
 	}
+}
+
+// lastModuleWithoutCanonBlocks — модуль, которому канон проб блоков НЕ объявляет.
+//
+// Выбор не произволен, и это стоило прогона. Пробы ниже снимают манифест ОДНОГО
+// модуля; сняв тот, чьи блоки канон и сверяет (`vpc` в `twoBlockCanon`), обход
+// остаётся без единого сверенного блока и отвечает «сверять нечего»
+// (`SweepVoid`) — то есть проба утверждала бы о ПУСТОТЕ, а не о ведомости и не о
+// находке. До #1927 нужный модуль доставался даром: набор приходил в
+// «каноническом порядке платформы», и последним в нём стоял `storage`. Теперь
+// набор ВЫВОДИТСЯ сортировкой, последним стал `vpc`, и совпадение кончилось.
+func lastModuleWithoutCanonBlocks(t *testing.T, modules []string) string {
+	t.Helper()
+	for i := len(modules) - 1; i >= 0; i-- {
+		if modules[i] != "vpc" {
+			return modules[i]
+		}
+	}
+	t.Fatalf("в наборе (%v) нет модуля без блоков канона — снимать нечего", modules)
+	return ""
 }

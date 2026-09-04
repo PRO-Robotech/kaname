@@ -18,10 +18,53 @@ package pg
 //     mirror may speak the catalog's ("iam.project"). A join that matched only one
 //     spelling would never match the other, and would do so silently — the same
 //     class migration 0091 fixed for the scope chain.
+//
+// # Сведение двух словарей — ПЕРЕВОДОМ У ВЛАДЕЛЬЦА, а не разбором строки (#2003)
+//
+// Здесь стояло ОТРЕЗАНИЕ последнего сегмента после точки, и оно переводом не
+// является: правило «отрезать» не следует ни из чего. Совпадало оно с переводом
+// у ДВУХ типов из семи (`iam.account` → `account`, `iam.project` → `project`) —
+// и ровно этими двумя проверяют «работает ли вообще», поэтому промах на
+// остальных пяти был тихим. Замер по закрытой таблице: отрезание даёт верное имя
+// у 2 точечных ключей из 27.
+//
+// Вывести имя типа из пары «модуль.ресурс» нельзя НИ ОДНИМ выражением, и это не
+// оценка, а объявленный факт дерева: правило `objectType ← <module>_<resource>`
+// снято целиком (миграция `catalog_resource_carries_the_model_type`), потому что
+// у `storage`/`registry` имя ресурса множественное при единственном типе
+// (`storage.volumes` → `storage_volume`), а у ярусных предков тип идёт вовсе без
+// приставки модуля (`iam.account` → `account`). Имя обязано ПРИЕХАТЬ строкой
+// манифеста — и приезжает: колонкой `catalog_resource.object_type`.
+//
+// Отсюда перевод стоит В ЗАПРОСЕ, а не в Go:
+//
+//	точки НЕТ  → это уже словарь модели → тождество. Пересечения у словарей нет
+//	             by construction (CHECK `access_bindings_resource_ck` не пускает
+//	             точку в колонку выдачи), поэтому другого прочтения не существует;
+//	точка ЕСТЬ → это словарь каталога → имя берётся у ЖИВОЙ СТРОКИ, тем же
+//	             оператором и в том же снимке, что и чтение кандидатов.
+//
+// Это ТОТ ЖЕ ход, каким переведён производитель зеркала (#1982,
+// `resource_mirror/model_dictionary.go`), и то же его обоснование. Разница одна:
+// там перевод — условие ЗАПИСИ, и промах обязан быть громким отказом; здесь это
+// путь ЧТЕНИЯ, где отказывать не на чем — непереводимый точечный ключ остаётся
+// собой и попадает под имя, которого не спрашивает ни один вызывающий. То есть
+// сужает, а не открывает: выдумать имя было бы хуже промаха.
+//
+// ЛИВНОСТЬ НЕ СПРАШИВАЕТСЯ, и это решение, а не упущение — то же, что у
+// производителя: тип, снятый с платформы ПОСЛЕ выдачи, обязан продолжать
+// резолвиться, иначе уже выданное тихо перестало бы попадать в кандидаты при
+// живой строке выдачи. Снятие типа мягкое (`live = false`, строка остаётся),
+// поэтому промах перевода означает тип, которого у платформы не было НИКОГДА.
+//
+// Перевод одним оператором сохраняет и то, ради чего памятка вообще заведена:
+// один проход независимо от числа дозаполнений страницы. Строка каталога
+// однозначна by construction — PK (module, resource) плюс CHECK
+// `dotted = module || '.' || resource` при бесточечном модуле, — поэтому левое
+// соединение не может размножить строку выдачи.
 
 import (
 	"context"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -76,7 +119,13 @@ SELECT 'own'::text AS kind, ''::text AS otype, a.id AS oid
   FROM kacho_iam.accounts a
  WHERE $1 = 'user' AND a.owner_user_id = $2
 UNION ALL
-SELECT 'grant'::text, t.otype, t.oid FROM tgt t`
+-- Имя типа приводится к словарю МОДЕЛИ переводом у владельца словаря: точечный
+-- ключ каталога резолвится живой строкой, бесточечный — уже модельный и остаётся
+-- собой (соединение по нему не совпадает никогда: колонка dotted точку несёт
+-- всегда). Непереводимый точечный ключ остаётся собой ОСОЗНАННО — см. шапку файла.
+SELECT 'grant'::text, COALESCE(cr.object_type, t.otype), t.oid
+  FROM tgt t
+  LEFT JOIN kacho_iam.catalog_resource cr ON cr.dotted = t.otype`
 
 func (r *visibilityReader) ScopeOf(ctx context.Context, s visibility.Subject) (visibility.Scope, error) {
 	out := visibility.Scope{GrantedObjects: map[string][]string{}}
@@ -106,7 +155,9 @@ func (r *visibilityReader) ScopeOf(ctx context.Context, s visibility.Subject) (v
 			scoped[oid] = struct{}{}
 			continue
 		}
-		switch t := modelTypeName(otype); {
+		// Имя уже названо словарём модели: перевод сделан запросом, у владельца
+		// словаря. Второго перевода здесь не заводится — он и был снятым дефектом.
+		switch t := otype; {
 		case t == "" || t == "*" || t == "cluster" || oid == "*":
 			// A cluster-scoped or wildcard grant reaches every row; narrowing by
 			// account or id would then be narrower than the model.
@@ -126,16 +177,6 @@ func (r *visibilityReader) ScopeOf(ctx context.Context, s visibility.Subject) (v
 		out.ScopedAccounts = append(out.ScopedAccounts, id)
 	}
 	return out, nil
-}
-
-// modelTypeName reduces a type name to the model's dictionary. A dot is the
-// structural discriminator between the two dictionaries (migration 0091): the
-// catalog's names carry one, the model's never do.
-func modelTypeName(t string) string {
-	if i := strings.LastIndex(t, "."); i >= 0 {
-		return t[i+1:]
-	}
-	return t
 }
 
 var _ visibility.ReaderIface = (*visibilityReader)(nil)

@@ -39,6 +39,7 @@ package moduleroleparity_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -51,9 +52,11 @@ import (
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/moduleroleparity"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/rightsfixture"
 )
 
 // liveRoleFloor — системных ролей кластерного яруса, ниже которого чтение
@@ -169,7 +172,7 @@ func moduleStates(ctx context.Context, t *testing.T, root string) (
 	}
 	// Модуль закрытого набора, у которого живые роли есть, а манифеста нет,
 	// молчал бы иначе: его строки не попали бы ни в одно состояние.
-	for _, mod := range domain.KnownModules() {
+	for _, mod := range authzmap.CatalogSeedModules() {
 		if claimed[mod] || len(liveByOwner[mod]) == 0 {
 			continue
 		}
@@ -215,7 +218,7 @@ func readLiveSystemRoles(ctx context.Context, t *testing.T, pool *pgxpool.Pool) 
 		require.NoErrorf(t, derr, "правила роли %q не разобраны кодеком домена", name)
 
 		owner, _, hasDot := strings.Cut(name, ".")
-		if !hasDot || !domain.IsKnownModule(owner) {
+		if !hasDot || !domain.ModuleSetOf(authzmap.CatalogSeedModules()...).IsKnownModule(owner) {
 			ownerless++
 			continue
 		}
@@ -231,7 +234,7 @@ func readLiveSystemRoles(ctx context.Context, t *testing.T, pool *pgxpool.Pool) 
 func declaredRoles(ctx context.Context, t *testing.T, m *manifest.Manifest) []moduleroleparity.Role {
 	t.Helper()
 	rec := &recordingTx{}
-	rep, err := moduleroles.NewApplier(rec).Apply(ctx, m)
+	rep, err := moduleroles.NewApplier(rec, rightsfixture.Export()).Apply(ctx, m, moduleroles.BootActorID)
 	require.NoErrorf(t, err, "применитель отверг манифест модуля %s: объявление негодно ДО базы",
 		m.Module)
 	require.Equalf(t, rep.Declared, len(rec.written),
@@ -271,6 +274,24 @@ func (r *recordingTx) UpsertSystemRole(_ context.Context, role domain.Role) (dom
 func (r *recordingTx) ReplaceRuleRefs(context.Context, domain.RoleID, []domain.RoleRuleRef) error {
 	return nil
 }
+
+// LiveSystemRoles / RetireRole / ReviveRole — сверка манифестов дерева СНЯТИЯ не
+// проверяет (#1913): её предмет — согласие объявленного с записанным, а не
+// жизненный цикл строки.
+//
+// Живых ролей отдаётся НОЛЬ намеренно, а не «все объявленные»: при пустой
+// популяции сверка расхождений не находит и снимать ей нечего, поэтому
+// запоминающий писатель не может дать зелёное на снятии, которого не делал.
+func (r *recordingTx) LiveSystemRoles(context.Context) ([]domain.Role, error) { return nil, nil }
+
+func (r *recordingTx) RetireRole(_ context.Context, id domain.RoleID, _, _, _ string) (
+	domain.RoleRetirement, error) {
+	return domain.RoleRetirement{}, fmt.Errorf(
+		"запоминающий писатель позван на снятие роли %s: сверка манифестов снятия не "+
+			"делает, и молчаливое согласие здесь скрыло бы вызов, которого быть не должно", id)
+}
+
+func (r *recordingTx) ReviveRole(context.Context, domain.RoleID) (bool, error) { return false, nil }
 
 // manifestFiles — манифесты модулей ВЫВОДЯТСЯ обходом дерева, а не выписываются.
 //

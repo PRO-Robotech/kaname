@@ -15,6 +15,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 func getPresent(_ context.Context, id domain.RoleID) (domain.Role, error) {
@@ -82,7 +83,7 @@ func TestResolveExistence_TransientReadError(t *testing.T) {
 
 // TestResolve_NilMetadata — операция без метаданных не наша → Skip.
 func TestResolve_NilMetadata(t *testing.T) {
-	r := New(nil)
+	r := New(nil, catalogfixture.Source())
 	res, err := r.Resolve(context.Background(), operations.Operation{ID: "iop_1"})
 	require.NoError(t, err)
 	require.Equal(t, operations.OutcomeSkip, res.Outcome)

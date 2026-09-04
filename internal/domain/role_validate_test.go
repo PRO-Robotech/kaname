@@ -42,7 +42,7 @@ func TestRole_A10_LabelOnlyRoleValidates(t *testing.T) {
 		Rules:       rules,
 		Permissions: compiled, // empty — must NOT trip the ≥1 lower bound
 	}
-	if err := r.Validate(); err != nil {
+	if err := r.Validate(fixtureModules()); err != nil {
 		t.Fatalf("Role.Validate() = %v, want nil (label-only rules-role must be accepted)", err)
 	}
 }
@@ -71,7 +71,7 @@ func TestRole_A10_MixedArmRoleValidates(t *testing.T) {
 		Rules:       rules,
 		Permissions: compiled,
 	}
-	if err := r.Validate(); err != nil {
+	if err := r.Validate(fixtureModules()); err != nil {
 		t.Fatalf("Role.Validate() = %v, want nil", err)
 	}
 }
@@ -86,7 +86,7 @@ func TestRole_LegacyEmptyPermissionsRejected(t *testing.T) {
 		Name:      RoleName("legacy_empty"),
 		// No Rules; empty Permissions.
 	}
-	err := r.Validate()
+	err := r.Validate(fixtureModules())
 	if err == nil {
 		t.Fatalf("Role.Validate() = nil, want error (legacy permissions-only role with empty set)")
 	}
@@ -110,7 +110,7 @@ func TestRole_RulesRoleInvalidCompiledRejected(t *testing.T) {
 		// grammar validation even on the rules path.
 		Permissions: Permissions{"vpc.subnet.get"},
 	}
-	if err := r.Validate(); err == nil {
+	if err := r.Validate(fixtureModules()); err == nil {
 		t.Fatalf("Role.Validate() = nil, want grammar error for malformed compiled token")
 	}
 }

@@ -78,12 +78,26 @@ system-only).
   <tbody>
     <tr><td><code>id</code></td><td>string</td><td>output-only</td><td>Идентификатор (префикс <code>rol</code>)</td></tr>
     <tr><td><code>name</code></td><td>string</td><td>mutable</td><td>Имя, уникальное в активном scope, 1–41 симв.</td></tr>
-    <tr><td><code>description</code></td><td>string</td><td>mutable</td><td>Описание, 0–256 символов</td></tr>
+    <tr><td><code>description</code></td><td>string</td><td>mutable</td><td>Описание, 0–256 символов. Для роли, объявленной манифестом модуля, это <b>единственный</b> носитель человеческой прозы: её пишет автор модуля, и она приходит сюда дословно</td></tr>
+    <tr><td><code>displayName</code></td><td>string</td><td>output-only</td><td>Метка каталога <b>четырёх</b> канонических имён: <code>view</code> → Viewer, <code>edit</code> → Editor, <code>admin</code> → Admin, <code>owner</code> → Owner. У всякой другой роли — в том числе у роли модуля (<code>vpc.address.admin</code>) — <b>равна <code>name</code></b></td></tr>
+    <tr><td><code>purpose</code></td><td>string</td><td>output-only</td><td>Назначение канонической роли одной строкой, из того же каталога четырёх. У всякой другой роли <b>пусто</b>, и пусто означает «записи в каталоге нет», а не «у роли нет назначения»: назначение роли модуля читайте в <code>description</code></td></tr>
     <tr><td><code>rules</code></td><td>Rule[]</td><td>mutable (OCC)</td><td>Авторизованная политика, 1–64 правила</td></tr>
+    <tr><td><code>permissions</code></td><td>string[]</td><td>output-only</td><td><b>Всегда пустой</b> <code>[]</code>, и приходит он в каждом ответе. Это не «у роли нет прав»: политику несёт <code>rules</code>, а <code>permissions</code> — внутренняя скомпилированная форма, снятая с публичной поверхности. Стройте клиента по <code>rules</code>. На входе <code>Create</code> присланное значение отвергается (<code>INVALID_ARGUMENT</code>, <code>"Illegal argument permissions (compiled/output-only)"</code>), в <code>updateMask</code> — <code>"permissions is immutable after Role.Create"</code></td></tr>
+    <tr><td><code>authoredVerbs</code></td><td>string[]</td><td>output-only</td><td>Что роль выдаёт <b>по написанному</b>: объединение глаголов её <code>rules[]</code>, без повторов и в каноническом порядке (<code>{'*'}</code> раскрывается в полный CRUD). Пусто у роли, выданной одними метками</td></tr>
+    <tr><td><code>effectiveVerbs</code></td><td>string[]</td><td>output-only</td><td>Что роль выдаёт <b>на самом деле</b>, и <b>исполняется именно этот набор</b>. Равен <code>authoredVerbs</code> плюс, у роли-редактора (несёт <code>update</code> и не несёт ни <code>delete</code>, ни <code>{'*'}</code>), производный <code>{'delete*'}</code>: редактор вправе удалить листовые объекты своей области, но <b>не</b> сам аккаунт или проект. У всякой другой роли два набора совпадают</td></tr>
+    <tr><td><code>verbNotes</code></td><td>map&lt;string,string&gt;</td><td>output-only</td><td>Пояснение к производным глаголам, ключ — сам глагол. Сегодня объясняет ровно один: <code>verbNotes["delete{'*'}"]</code> говорит, откуда взялось расхождение <code>effectiveVerbs</code> с <code>authoredVerbs</code></td></tr>
+    <tr><td><code>health</code></td><td>enum</td><td>output-only</td><td>Даёт ли роль то, что объявляет: <code>ROLE_HEALTH_HEALTHY</code> — каждый адресуемый сегмент правил имеет выдачу; <code>ROLE_HEALTH_DEGRADED</code> — часть сегментов не даёт ничего; <code>ROLE_HEALTH_EMPTY</code> — не даёт ничего <b>ни один</b>, при том что роль на вид действует. <code>ROLE_HEALTH_UNSPECIFIED</code> означает «этим ответом не вычислено» и <b>никогда</b> «роль здорова»: его несут ответы операций <code>Create</code>/<code>Update</code>, а <code>Get</code> и <code>List</code> заполняют поле всегда</td></tr>
+    <tr><td><code>declaredSegments</code></td><td>int32</td><td>output-only</td><td>Сколько адресуемых сегментов объявляют правила роли. Сегмент — пара «ресурс × глагол» либо «ресурс × любой глагол» (правило с <code>{'*'}</code> в глаголах даёт <b>один</b> сегмент, а не по одному на глагол). Подстановка в модуле и в ресурсе сегментов не даёт, поэтому у роли <code>{'*.*'}</code> здесь ноль — и это не признак беды</td></tr>
+    <tr><td><code>unresolvedSegments</code></td><td>int32</td><td>output-only</td><td>Сколько из объявленных сегментов не дают <b>ни одной</b> выдачи. Ноль у здоровой роли; равен <code>declaredSegments</code> у роли, не дающей ничего. Значим только когда <code>health</code> не <code>ROLE_HEALTH_UNSPECIFIED</code> — иначе оба счётчика нули просто потому, что их не считали</td></tr>
+    <tr><td><code>withdrawnGrants</code></td><td>array</td><td>output-only</td><td>Что у роли <b>отобрано и почему</b>. Каждый элемент — пара <code>objectType</code> + <code>verb</code> (пустой глагол означает «правило не называло глагол поимённо»), <code>source</code> (<code>WITHDRAWN_GRANT_SOURCE_GRANT</code> — право по паре действовало и перестало; <code>WITHDRAWN_GRANT_SOURCE_RULE_REFERENCE</code> — сегмент правила перестал резолвиться), <code>reason</code> — причина <b>платформы</b>, а не ваше действие, <code>withdrawnAt</code> и <code>cause</code> — <b>почему</b> строка переселена: <code>WITHDRAWN_GRANT_CAUSE_CATALOG_RETIRED</code> — платформа сняла строку каталога, на которую ссылалось ваше правило (роль при этом объявлена и жива); <code>WITHDRAWN_GRANT_CAUSE_ROLE_RETIRED</code> — снята <b>сама роль</b>, её модуль перестал её объявлять. Различие определяет будущее строки: при возврате объявления роли строки <code>WITHDRAWN_GRANT_CAUSE_ROLE_RETIRED</code> уходят отсюда, а <code>WITHDRAWN_GRANT_CAUSE_CATALOG_RETIRED</code> остаются. Пустой список означает «отобранного нет». Список <b>объясняет</b> счётчики выше и не определяет их: у роли, пострадавшей от типа, которого платформа не знает, отбирать было нечего — и список пуст при <code>health</code> не <code>ROLE_HEALTH_HEALTHY</code></td></tr>
+    <tr><td><code>prunedSelectorTypes</code></td><td>array</td><td>output-only</td><td>Какие типы ресурсов <b>вырезаны из правил</b> роли, когда платформа сняла их с обслуживания. Каждый элемент — <code>objectType</code>, <code>outcome</code> (<code>SELECTOR_PRUNE_OUTCOME_SHORTENED</code> — правило продолжает действовать, но на меньшем наборе типов; <code>SELECTOR_PRUNE_OUTCOME_DROPPED</code> — у правила не осталось ни одного обслуживаемого типа, и оно не даёт ничего), <code>reason</code> — причина <b>платформы</b>, а не ваше действие, и <code>prunedAt</code>. Пустой список означает «вырезанного нет». Отличается от <code>withdrawnGrants</code> предметом: там пара «тип + глагол», здесь глагола нет вовсе — правило называет типы, а не пары</td></tr>
+    <tr><td><code>ruleStates</code></td><td>array</td><td>output-only</td><td>Состояние <b>каждого</b> вашего правила: <code>RULE_LIFECYCLE_ACTIVE</code> — правило даёт объявленное; <code>RULE_LIFECYCLE_WITHDRAWN</code> — платформа сняла то, на что оно ссылалось, и это записано; <code>RULE_LIFECYCLE_UNRESOLVED</code> — правило ссылается на то, чего сейчас нет, и снятия не было. Записей ровно по числу правил, адресуются <code>ruleIndex</code> — номером правила в <code>rules</code>. Рядом со словом три величины ЭТОГО правила: <code>segments</code> — сколько пар «ресурс × глагол» оно называет, <code>lostSegments</code> — сколько из них перестали действовать, <code>explainedSegments</code> — сколько из потерянных объяснены. Имена отличаются от счётчиков роли намеренно: <b>единица другая</b>. Роль считает сегмент, названный двумя вашими правилами, один раз, а правила — каждое своё, поэтому <b>равенство сумм не гарантировано</b>: оно нарушается ровно тогда, когда сегмент назван дважды, а на прочих ролях суммы совпадают. <code>RULE_LIFECYCLE_UNSPECIFIED</code> и пустой список означают «этим ответом не вычислено», а не «правила не действуют»</td></tr>
+    <tr><td><code>lifecycle</code></td><td>object</td><td>output-only</td><td><b>Стоит ли за ролью объявление её модуля сегодня.</b> <code>state</code>: <code>ROLE_LIFECYCLE_STATE_DECLARED</code> — модуль по-прежнему её объявляет; <code>ROLE_LIFECYCLE_STATE_WITHDRAWN</code> — перестал, и роль <b>снята</b>. У снятой рядом три величины: <code>retiredAt</code> — когда, <code>retiredReason</code> — почему, <code>retiredBy</code> — кто. Отдельно от <code>health</code> намеренно: <code>ROLE_HEALTH_EMPTY</code> дают <b>оба</b> состояния, а ваш следующий шаг у них разный — снятая роль не заработает <b>никогда</b>, пока модуль не объявит её снова, а объявленная чинится на стороне платформы. Снятая роль <b>остаётся</b> в <code>Get</code> и <code>List</code>, и выданные на неё права <b>переживают</b> снятие — но доступа больше не дают; новую выдачу на неё платформа отвергает. <code>ROLE_LIFECYCLE_STATE_UNSPECIFIED</code> означает «этим ответом не вычислено» и <b>никогда</b> «роль объявлена»: его несут ответы операций <code>Create</code>/<code>Update</code>, а <code>Get</code> и <code>List</code> заполняют состояние всегда</td></tr>
     <tr><td><code>isSystem</code></td><td>bool</td><td>immutable</td><td>true — system-роль (read-only публично)</td></tr>
     <tr><td><code>accountId</code></td><td>string</td><td>immutable</td><td>Аккаунт-scope (XOR с projectId), только для custom</td></tr>
     <tr><td><code>projectId</code></td><td>string</td><td>immutable</td><td>Project-scope (XOR с accountId), только для custom</td></tr>
     <tr><td><code>clusterId</code></td><td>string</td><td>immutable</td><td>Непусто только для system-ролей (<code>cluster_kacho_root</code>)</td></tr>
+    <tr><td><code>definitionTier</code></td><td>object</td><td>output-only</td><td>Ярус, на котором роль определена, — проекция трёх колонок области (<code>clusterId</code> / <code>accountId</code> / <code>projectId</code>) в <b>два</b> поля: <code>tierType</code> (<code>iam.cluster</code> / <code>iam.account</code> / <code>iam.project</code>) и <code>tierId</code> — идентификатор якоря этого яруса (<code>cluster_kacho_root</code>, <code>acc…</code> либо <code>prj…</code>). Слово «scope» за ним не закреплено: им называется якорь AccessBinding, а не ярус определения роли. <code>isSystem</code> <b>производен</b> отсюда (ярус <code>iam.cluster</code>), а не хранится отдельным признаком</td></tr>
     <tr><td><code>resourceVersion</code></td><td>string</td><td>OCC-token</td><td>xmin-backed; обязателен при изменении <code>rules</code></td></tr>
     <tr><td><code>createdByUserId</code></td><td>string</td><td>output-only</td><td>Автор роли (governance/audit)</td></tr>
     <tr><td><code>labels</code></td><td>map&lt;string,string&gt;</td><td>mutable</td><td>Метки самого ресурса Role (не путать с <code>Rule.matchLabels</code>)</td></tr>
@@ -103,6 +117,167 @@ system-only).
 Возвращает роль по идентификатору. Каталог ролей — tenant-wide reference: чтение доступно любому
 аутентифицированному вызывающему (без per-role scope).
 
+Ответ несёт **все** поля ресурса, в том числе пустые: пустое значение — часть стабильного
+контракта, а не пропуск. Поэтому `purpose` приходит как `""`, а `labels`, `verbNotes` и
+`permissions` — как `{}` / `[]`.
+
+## Когда роль перестаёт давать то, что обещает
+
+Роль называет типы и глаголы платформы. Ссылка может потерять свой предмет — если
+модуль сняли с обслуживания либо тип объявлен, но платформа его не знает. Роль при
+этом **никуда не девается и не сужается молча**: она продолжает существовать, её
+`rules[]` остаются теми же, что при выдаче, — но выдавать она начинает меньше.
+
+Узнать это можно из ответа `Get` и `List` **одинаково**: оба несут `health` и пару
+счётчиков, и оба считают их одним и тем же способом.
+
+```json
+{
+  "id": "rol...",
+  "health": "ROLE_HEALTH_DEGRADED",
+  "declaredSegments": 12,
+  "unresolvedSegments": 3,
+  "withdrawnGrants": [
+    {
+      "objectType": "compute.instances",
+      "verb": "start",
+      "source": "WITHDRAWN_GRANT_SOURCE_GRANT",
+      "reason": "не объявлен манифестом модуля compute",
+      "withdrawnAt": "2026-09-03T13:15:44Z"
+    }
+  ]
+}
+```
+
+Читается так: роль объявляет двенадцать пар «ресурс × глагол», три из них не дают
+ничего. `EMPTY` означает, что не даёт ничего ни одна, — роль выглядит действующей и
+не действует.
+
+Счётчики говорят **сколько**, `withdrawnGrants` — **что именно и почему**. Без него
+«право отобрали» со стороны читающего неотличимо от «права не было»: свою роль вы не
+меняли, а действовать она перестала. `reason` — причина платформы, `withdrawnAt` —
+момент; у всего, что отобрано одним изменением каталога, момент совпадает, поэтому по
+нему собирается разом всё, что унесло одно снятие.
+
+**Список пуст не всегда потому, что ничего не отбирали.** Он наполняется только тем,
+что платформа сняла с обслуживания. У третьего пути потери — тип объявлен, а платформа
+его не знает — отбирать было нечего, и список пуст при `health` не `HEALTHY`. Судить
+по нему о здоровье роли поэтому нельзя: он объясняет счётчики, а не заменяет их.
+
+**Порядок элементов не значим** — это набор. Сверяйте его по составу, а не по номеру
+элемента.
+
+### Что вырезано из правил: `prunedSelectorTypes`
+
+`withdrawnGrants` отвечает про то, что адресуется парой «тип + глагол». Но правило
+называет и **типы ресурсов** — без глагола, — и когда платформа снимает тип с
+обслуживания, он вырезается оттуда же. Это второе поле, потому что событие второе:
+
+```json
+{
+  "prunedSelectorTypes": [
+    {
+      "objectType": "compute.instances",
+      "outcome": "SELECTOR_PRUNE_OUTCOME_SHORTENED",
+      "reason": "не объявлен манифестом модуля compute",
+      "prunedAt": "2026-09-03T13:15:44Z"
+    }
+  ]
+}
+```
+
+`outcome` различает два исхода, и различие существенное: `SHORTENED` — правило
+продолжает действовать, но на меньшем наборе типов; `DROPPED` — обслуживаемых типов
+у правила не осталось, и оно не даёт **ничего**. Сложенные в одну величину, эти два
+случая неразличимы, а решения по ним разные.
+
+**Один тип может встретиться дважды с разными исходами** — если его называли два
+ваших правила и одно из них лишилось последнего типа, а другое нет. А вот записи,
+которые различались бы только тем, из какого правила вырезано, приходят **одной**:
+какое именно из ваших правил это было, поле не сообщает, и повторять один и тот же
+факт дважды оно не станет.
+
+**Ваши правила при этом не менялись.** `rules[]` в ответе остаются ровно теми, что вы
+записали: вырезание касается того, что платформа по ним обслуживает, а не вашего
+объявления. Поэтому «правило перестало работать» и «правило исправлено» — разные
+вещи, и вернуть тип в обслуживание правкой роли нельзя.
+
+**Отбор по этому полю не поддерживается**, и синтаксиса для него нет: разбор
+выражения `filter` знает равенство и вхождение, а «не равно» — не знает.
+
+### Какое правило пострадало и почему: `ruleStates`
+
+Счётчики роли говорят **сколько** сегментов перестало действовать. Два поля выше
+говорят, **что именно** снято. Остаётся вопрос, на который не отвечает ни одно:
+**какое из ваших правил** это задело — и по какой из двух причин.
+
+Причин ровно две, и счётчики у них выглядят **одинаково**:
+
+- **платформа сняла** то, на что правило ссылалось, — и записала это;
+- **правило не разрешилось**: оно называет то, чего платформа не знает, и снимать
+  было нечего, поэтому в `withdrawnGrants` о нём нет ни строки.
+
+Без слова второе неотличимо от первого: список пуст, счётчик ненулевой, и «право
+отобрали» читается ровно так же, как «права не было никогда».
+
+```json
+{
+  "rules": [
+    { "module": "vpc", "resources": ["network"], "verbs": ["get"] },
+    { "module": "vpc", "resources": ["gateway"], "verbs": ["delete"] },
+    { "module": "probe", "resources": ["thing"], "verbs": ["delete"] }
+  ],
+  "ruleStates": [
+    { "ruleIndex": 0, "state": "RULE_LIFECYCLE_ACTIVE",
+      "segments": 1, "lostSegments": 0, "explainedSegments": 0 },
+    { "ruleIndex": 1, "state": "RULE_LIFECYCLE_WITHDRAWN",
+      "segments": 1, "lostSegments": 1, "explainedSegments": 1 },
+    { "ruleIndex": 2, "state": "RULE_LIFECYCLE_UNRESOLVED",
+      "segments": 1, "lostSegments": 1, "explainedSegments": 0 }
+  ]
+}
+```
+
+Правило 1 — право у вас **отобрали**, и `withdrawnGrants` рядом называет чем и
+почему. Правило 2 — оно ссылается на то, чего в платформе нет, и объяснения не
+будет: разбирать надо **его**.
+
+**Ключ — `ruleIndex`, номер правила в `rules`.** Порядок самих записей не значим:
+это набор, сверяйте по ключу, а не по позиции. Записей всегда столько же, сколько
+правил, — включая правила, которым терять нечего.
+
+**Правило, у которого одна потеря объяснена, а другая нет, читается
+`UNRESOLVED`** — слово называет то состояние, которое требует разбора. Состав при
+этом виден: необъяснённых у него `lostSegments − explainedSegments`, и обе
+величины стоят рядом со словом.
+
+**Величины правила и счётчики роли — РАЗНЫЕ единицы, и потому названы по-разному.**
+`declaredSegments` роли считает сегмент, названный двумя вашими правилами, **один
+раз**; `segments` каждого правила — своё. Поэтому суммы совпадают не всегда, и
+расходятся они ровно на таком сегменте — как в примере выше, где его нет и суммы
+равны. Складывать их не надо: они отвечают на разные вопросы.
+
+**Правило без адресуемых сегментов — `ACTIVE`.** Правило с `*` в модуле или в
+ресурсе не называет имён, поэтому терять ему нечего, и его `segments` равен нулю.
+
+**Пустой список означает два разных факта, и различает их `rules`.** У роли без
+правил (унаследованной, заданной через `permissions`) он пуст потому, что
+состояние есть свойство правила. У ответа `Create`/`Update` — потому, что не
+вычислялся. Смотрите на `rules`, а не на длину этого списка.
+
+**`ruleIndex` действителен в пределах одного ответа.** `Update` перестраивает
+`rules` целиком, поэтому сохранять индекс между вызовами нельзя: адресуется роль
+своим `id`, а правило — своим содержанием.
+
+**Ревизии и автора у `WITHDRAWN` здесь нет.** Причина снятия и его момент
+приезжают в `withdrawnGrants`, адресуемом той же парой «тип + глагол».
+
+**`health` и `effectiveVerbs` отвечают на разные вопросы, и расходятся намеренно.**
+`effectiveVerbs` говорит, что роль **обещает** по написанному; `health` — что по ней
+**выдаётся на самом деле**. После снятия модуля первое не меняется, второе меняется;
+у типа, которого платформа не знает, первое покажет весь словарь глаголов, а второе
+будет `EMPTY`. Сложение их в одно утверждение даст неверный ответ в обе стороны.
+
 <CodeBlock language="json">
   {dedent`
     {
@@ -110,15 +285,52 @@ system-only).
       "accountId": "acc2bkd71802av7dywa8",
       "name": "vpc-viewer",
       "description": "Read-only VPC networks",
+      "permissions": [],
       "isSystem": false,
+      "createdAt": "2026-06-24T10:15:00Z",
+      "clusterId": "",
+      "projectId": "",
       "rules": [
         { "module": "vpc", "resources": ["networks"], "verbs": ["get", "list"] }
       ],
       "resourceVersion": "8821",
-      "createdAt": "2026-06-24T10:15:00Z"
+      "createdByUserId": "usrb3n8q1x7wzk52pfeq",
+      "updatedAt": "2026-06-24T10:15:00Z",
+      "labels": {},
+      "definitionTier": { "tierType": "iam.account", "tierId": "acc2bkd71802av7dywa8" },
+      "authoredVerbs": ["get", "list"],
+      "effectiveVerbs": ["get", "list"],
+      "verbNotes": {},
+      "displayName": "vpc-viewer",
+      "purpose": ""
     }
   `}
 </CodeBlock>
+
+У этой роли два набора глаголов совпадают — она ничего не редактирует. Расходятся они у
+роли-редактора, и читать нужно `effectiveVerbs`: исполняется он. Роль `compute-operator`
+из примера `Create` ниже несёт `update` и не несёт `delete` — значит она редактор, и к её
+действующему набору добавлен производный `delete*`:
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "name": "compute-operator",
+      "rules": [
+        { "module": "compute", "resources": ["instances"], "verbs": ["get", "list", "update"] }
+      ],
+      "authoredVerbs": ["get", "list", "update"],
+      "effectiveVerbs": ["get", "list", "update", "delete*"],
+      "verbNotes": {
+        "delete*": "co-materialized on in-scope leaf objects, NOT on the account/project anchor itself"
+      }
+    }
+  `}
+</CodeBlock>
+
+Читается это так: оператор вправе удалить те машины, которые редактирует, но не сам аккаунт
+или проект, в котором они лежат. Права на удаление ему никто не выписывал — оно следует из
+права на изменение, и `verbNotes` называет, откуда взялось расхождение.
 
 </ApiOperation>
 

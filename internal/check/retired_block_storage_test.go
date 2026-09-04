@@ -172,8 +172,17 @@ func TestRetiredBlockStorageIsNotInIAMVocabularies(t *testing.T) {
 	//
 	// So the control is now the present OWNER of these resources, which is what
 	// this file asserts everywhere else: the retire moved the per-object grant, it
-	// did not remove it. domain.ResourceType keeps answering for the scope anchor,
-	// a different question, so its control stays compute_instance.
+	// did not remove it.
+	//
+	// domain.ResourceType keeps answering for the scope anchor — a different
+	// question — but its control is NO LONGER compute_instance, and the reason is
+	// the finding itself. The anchor vocabulary is the three hierarchy tiers; a
+	// per-object type was never producible as an anchor. It answered true here only
+	// because the anchor whitelist was a second, diverged copy carrying 20
+	// unreachable entries, so this control was pairing a real negative with a
+	// positive that WAS the defect. The whitelist is removed (#1092) and the
+	// control is an actual anchor, which is what "the predicate is not false for
+	// everything" needs.
 	for _, r := range retiredBlockStorage {
 		require.Falsef(t, domain.ValidTargetType(r.dotted),
 			"domain.ValidTargetType(%q) is still true — an AccessBinding may still target the retired resource", r.dotted)
@@ -186,8 +195,10 @@ func TestRetiredBlockStorageIsNotInIAMVocabularies(t *testing.T) {
 	}
 	require.True(t, domain.ValidTargetType("compute.instance"),
 		"domain.ValidTargetType(\"compute.instance\") is false — the live sibling must be targetable, or the negative half above proves nothing")
-	require.NoError(t, domain.ResourceType("compute_instance").Validate(),
-		"domain.ResourceType(\"compute_instance\").Validate() rejects the live sibling — the negative half above proves nothing")
+	require.NoError(t, domain.ResourceType("project").Validate(),
+		"domain.ResourceType(\"project\").Validate() rejects a hierarchy tier — the anchor vocabulary is damaged and the negative half above proves nothing")
+	require.Error(t, domain.ResourceType("compute_instance").Validate(),
+		"domain.ResourceType(\"compute_instance\").Validate() accepts a per-object type as a scope ANCHOR — no write path produces one")
 
 	// (4) label-selectable / materializable feed — what the reconciler may
 	// materialize per object, and what a `*.*` wildcard rule expands to.

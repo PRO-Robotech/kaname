@@ -205,8 +205,20 @@ func replaceRoleVerbsInOwnTx(
 // на том же соединении, что и запись, нельзя.
 func listMaterializingSystemRoles(ctx context.Context, pool *pgxpool.Pool) ([]systemRoleRules, error) {
 	rows, err := pool.Query(ctx,
+		// Снятая роль ПРОПУСКАЕТСЯ, а не отвергается ключом (#1913).
+		//
+		// Отзыв есть ПОМЕТКА: `is_system` и `rules` у снятой роли остаются
+		// прежними навсегда, поэтому предикат без живости достаёт её всякий раз.
+		// Её проекцию отвергает ключ `role_verb_role_live_fk`, и пересчёт
+		// записывает это ОТКАЗОМ — то есть считает находкой правильное поведение
+		// ключа. Прибор, у которого находки ложны, перестают читать; сверх того
+		// счётчик отказов двигает вердикт старта к структурному.
+		//
+		// Пропуск, а не обработка отказа: у снятой роли проекции быть НЕ ДОЛЖНО,
+		// и ключ здесь работает как задуман. Неверен был отбор.
 		`SELECT id, rules FROM kacho_iam.roles
 		  WHERE is_system = true
+		    AND live
 		    AND rules IS NOT NULL
 		    AND jsonb_typeof(rules) = 'array'
 		    AND jsonb_array_length(rules) > 0`)

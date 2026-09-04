@@ -57,8 +57,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 // ListQuery — вопрос «какие объекты этого типа доступны субъекту».
@@ -118,9 +116,11 @@ const DefaultPageSize = 500
 // $6 типы предков атомов-фактов · $7 отношения атомов-фактов · $8 глаголы атомов-выдачи
 // $9 object_type в словаре КАТАЛОГА — им названы `resource_mirror.object_type`,
 // `role_verb.object_type` и `role_rule_selectors.object_types`, тогда как вопрос
-// приходит словарём модели. Перевод делается ОДИН раз, на входе, единственным
-// переходником (`authzmap.CatalogTypeName`); двух словарей в одном соединении
-// быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
+// приходит словарём модели. Перевод делается ОДИН раз, на входе, и читает ЖИВУЮ
+// строку каталога (`catalogTypeName`, catalogtype.go): таблица, порождённая
+// сборкой, о типе, заведённом применением манифеста в работающем процессе, не
+// знает (kacho#1986). Двух словарей в одном соединении быть не должно —
+// соединение по разным написаниям не совпадает НИКОГДА и молча.
 const listSQL = `
 WITH RECURSIVE speaker_pair(s_type, s_id, via) AS (
     -- СУБЪЕКТ ВЫДАЧИ — ПАРОЙ КОЛОНОК, а не склейкой.
@@ -372,12 +372,19 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	//
 	// Метка `{{labels_join}}` отсюда ушла вместе со своим предметом: метки едут
 	// колонкой кандидата, второго чтения того же места больше нет.
+	// Имя типа в словаре КАТАЛОГА — у ЖИВОЙ строки каталога (kacho#1986). Читается
+	// ОДИН раз на вызов, как и сборка запроса: заходов у обхода несколько, а тип у
+	// них один.
+	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	if err != nil {
+		return nil, "", err
+	}
 	sql := listQuerySQL(labelTable)
 
 	after := in.AfterID
 	for {
 		allowed, scanned, last, err := listSweep(ctx, q, sql, in, after, limit,
-			factParents, factRelations, bindVerbs)
+			factParents, factRelations, bindVerbs, catalogType)
 		if err != nil {
 			return nil, "", err
 		}
@@ -412,10 +419,11 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 // живущие в собственных таблицах iam, — то есть перечислял бы пустоту, называя
 // это отказом в правах.
 func listSweep(ctx context.Context, q pgx.Tx, sql string, in ListQuery, after string, size int,
-	factParents, factRelations, bindVerbs []string) (allowed []string, scanned int, last string, err error) {
+	factParents, factRelations, bindVerbs []string, catalogType string,
+) (allowed []string, scanned int, last string, err error) {
 	rows, err := q.Query(ctx, sql,
 		in.Subject, in.ObjectType, after, size, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, authzmap.CatalogTypeName(in.ObjectType))
+		factParents, factRelations, bindVerbs, catalogType)
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("relverdict: перечисление: %w", err)
 	}

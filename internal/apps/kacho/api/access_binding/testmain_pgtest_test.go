@@ -22,7 +22,12 @@ import (
 // прогон, где все пробы пропущены, не платит ничего.
 func TestMain(m *testing.M) {
 	pgtest.Run(m, pgtest.Config{
-		Name:    "iam",
-		Migrate: pgtest.Goose(migrations.FS),
+		// Приведение схемы — ОДИН раз на пакет, у выдающего базу.
+		// Прежде его приписывал каждый вызывающий своей копией; забывший
+		// получал `relation … does not exist` — отказ, читающийся как дефект
+		// продукта. Довод целиком — `internal/pgtest` §searchpath.
+		SearchPath: "kacho_iam,public",
+		Name:       "iam",
+		Migrate:    pgtest.Goose(migrations.FS),
 	})
 }

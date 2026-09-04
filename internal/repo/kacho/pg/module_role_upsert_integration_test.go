@@ -204,3 +204,118 @@ func upsertSystemRoleTx(
 	require.NoError(t, w.Commit(ctx))
 	return out, changed, nil
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ВЛАДЕНИЕ РОЛЬЮ — писатель (задача продукта #1032, сценарии IAM-OM-1-14, -15).
+//
+// Столбец, который ПИШУТ и не ЧИТАЮТ, невидим отовсюду: его нет ни в ответе, ни
+// в объекте в памяти. Здесь цена такой невидимости названа точно —
+// `PolicyOfRole` получил бы пустого владельца у роли, которая им обладает, и
+// судил бы её ПЛАТФОРМЕННОЙ, то есть самой мягкой. Поэтому проба идёт по всей
+// цепочке: объявление → оператор → строка → чтение.
+
+// ownedModuleRole — объявленная роль модуля С ВЛАДЕЛЬЦЕМ. Имя составляется из
+// владельца: этого требует проверка строки `roles_owner_module_name_prefix`, и
+// подать сюда несоставленное имя значило бы получить отказ ЧУЖОГО ограничения.
+func ownedModuleRole(t *testing.T, owner, name, description string, rules domain.Rules) domain.Role {
+	t.Helper()
+	r := declaredModuleRole(t, name, description, rules)
+	r.OwnerModule = owner
+	return r
+}
+
+// TestIAMOM115_OwnerModuleSurvivesTheWriterAndTheRepeatedApply — IAM-OM-1-15.
+//
+// Свойство «повторное применение не пишет ничего» держится предикатом отличия в
+// `ON CONFLICT DO UPDATE … WHERE`; сценарий утверждает, что новая колонка его НЕ
+// ЛОМАЕТ — и что она доезжает до строки и обратно.
+func TestIAMOM115_OwnerModuleSurvivesTheWriterAndTheRepeatedApply(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, setupTestDB(t))
+	require.NoError(t, err)
+	pgtest.ClosePoolAtEnd(t, pool)
+	repo := kachopg.New(pool, nil)
+
+	declared := ownedModuleRole(t, "vpc", "vpc.probe1032.viewer", "Роль модуля с владельцем.",
+		domain.Rules{{Module: "vpc", Resources: []string{"*"}, Verbs: []string{"get"}}})
+
+	inserted, changed, err := upsertSystemRoleTx(ctx, t, repo, declared)
+	require.NoError(t, err, "роль модуля с владельцем обязана записаться")
+	require.True(t, changed)
+	require.Equal(t, "vpc", inserted.OwnerModule,
+		"владелец обязан ДОЕХАТЬ обратно: столбец, который пишут и не читают, невидим "+
+			"отовсюду, и политика роли читалась бы платформенной — самой мягкой")
+	require.True(t, inserted.IsSystem,
+		"признак системности НЕ меняется ни на одну строку: арендатор роль модуля не правит")
+
+	// Строка судится ПО СТРОКЕ, а не по объекту: столбец мог бы заполняться в
+	// памяти и не доезжать до таблицы.
+	var stored *string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT owner_module FROM roles WHERE id = $1`, string(declared.ID)).Scan(&stored))
+	require.NotNil(t, stored)
+	require.Equal(t, "vpc", *stored)
+
+	// Повторное применение того же объявления не пишет ничего.
+	_, changed, err = upsertSystemRoleTx(ctx, t, repo, declared)
+	require.NoError(t, err, "повторное применение — ШТАТНЫЙ исход")
+	require.False(t, changed,
+		"новая колонка сломала бы предикат отличия, если бы читалась не тем способом, "+
+			"каким пишется")
+}
+
+// TestIAMOM114_TwoProvidersDeclareTheSameLeafName — IAM-OM-1-14.
+//
+// Пространство имён системных ролей плоское и глобальное
+// (`roles_system_unique UNIQUE (cluster_id, name) WHERE is_system`). Без
+// составления имени второй поставщик со своим `viewer` получал бы 23505 по
+// причине, от него не зависящей.
+//
+// Порядок применения на исход не влияет — утверждается обоими: иначе сценарий
+// зеленел бы на реализации, где вторая молча перезаписывает первую.
+func TestIAMOM114_TwoProvidersDeclareTheSameLeafName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, setupTestDB(t))
+	require.NoError(t, err)
+	pgtest.ClosePoolAtEnd(t, pool)
+	repo := kachopg.New(pool, nil)
+
+	vpc := ownedModuleRole(t, "vpc", "vpc.viewer", "Наблюдатель сети.",
+		domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get"}}})
+	compute := ownedModuleRole(t, "compute", "compute.viewer", "Наблюдатель машин.",
+		domain.Rules{{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"}}})
+
+	for _, order := range [][]domain.Role{{vpc, compute}, {compute, vpc}} {
+		for _, r := range order {
+			out, _, uerr := upsertSystemRoleTx(ctx, t, repo, r)
+			require.NoErrorf(t, uerr,
+				"роль %q поставщика %q обязана применяться независимо от порядка",
+				r.Name, r.OwnerModule)
+			if out.ID != "" {
+				require.Equal(t, r.OwnerModule, out.OwnerModule)
+			}
+		}
+	}
+
+	var owners []string
+	rows, err := pool.Query(ctx,
+		`SELECT owner_module FROM roles WHERE name IN ('vpc.viewer','compute.viewer') ORDER BY name`)
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var o *string
+		require.NoError(t, rows.Scan(&o))
+		require.NotNil(t, o, "у роли модуля владелец обязан быть непустым")
+		owners = append(owners, *o)
+	}
+	require.NoError(t, rows.Err())
+	t.Logf("перепись: строк с листовым именем viewer %d, владельцы %v", len(owners), owners)
+	require.Equal(t, []string{"compute", "vpc"}, owners,
+		"обе строки записаны, у каждой СВОЙ владелец — вторая первую не перезаписала")
+}

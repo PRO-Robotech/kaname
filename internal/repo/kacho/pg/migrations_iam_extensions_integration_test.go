@@ -47,7 +47,7 @@ import (
 func setupKac127TestDB(t testing.TB) *sql.DB {
 	t.Helper()
 
-	db, err := sql.Open("pgx", appendSearchPathOptions(pgtest.NewDB(t)))
+	db, err := sql.Open("pgx", pgtest.NewDB(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 

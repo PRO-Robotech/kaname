@@ -148,7 +148,7 @@ func TestRetiredTypeIsRejectedOnEveryArm(t *testing.T) {
 	// Positive half FIRST: if the live control does not pass an arm, every
 	// rejection on that arm below is meaningless.
 	for _, arm := range arms {
-		if err := ruleOnArm(t, liveBothSets, arm).Validate(false); err != nil {
+		if err := ruleOnArm(t, liveBothSets, arm).Validate(TenantPolicy(), fixtureModules()); err != nil {
 			t.Fatalf("%s: live control %q was rejected: %v — the negative half on this arm proves nothing",
 				armName(arm), liveBothSets, err)
 		}
@@ -158,7 +158,7 @@ func TestRetiredTypeIsRejectedOnEveryArm(t *testing.T) {
 	// Negative half.
 	for _, dotted := range retiredDotted {
 		for _, arm := range arms {
-			err := ruleOnArm(t, dotted, arm).Validate(false)
+			err := ruleOnArm(t, dotted, arm).Validate(TenantPolicy(), fixtureModules())
 			if err == nil {
 				t.Errorf("%s: rule naming retired type %q was ACCEPTED — the role advertises a grant "+
 					"that can never take effect (no mirror rows of this type exist); kacho-storage owns these resources",
@@ -187,12 +187,12 @@ func TestRetiredTypeGateDidNotCollapseTheTwoReconcilerVocabularies(t *testing.T)
 			"deliberate one-type difference was retired, or the feed registry drifted", ty)
 	}
 	for _, arm := range []Arm{ArmAnchor, ArmNames} {
-		if err := ruleOnArm(t, ty, arm).Validate(false); err != nil {
+		if err := ruleOnArm(t, ty, arm).Validate(TenantPolicy(), fixtureModules()); err != nil {
 			t.Errorf("%s: %q was rejected: %v — the owner grant must still expand onto repositories, "+
 				"otherwise the images are unreachable even for the owner", armName(arm), ty, err)
 		}
 	}
-	if err := ruleOnArm(t, ty, ArmLabels).Validate(false); err == nil {
+	if err := ruleOnArm(t, ty, ArmLabels).Validate(TenantPolicy(), fixtureModules()); err == nil {
 		t.Errorf("ARM_LABELS: %q was accepted — a repo has no own-table labels, so a match_labels "+
 			"selector on it is inapplicable and the feed-gate must still refuse it", ty)
 	}
@@ -213,7 +213,7 @@ func TestLiveSeededRuleTypesStillValidate(t *testing.T) {
 	}
 	for _, dotted := range seeded {
 		for _, arm := range []Arm{ArmAnchor, ArmNames} {
-			if err := ruleOnArm(t, dotted, arm).Validate(false); err != nil {
+			if err := ruleOnArm(t, dotted, arm).Validate(TenantPolicy(), fixtureModules()); err != nil {
 				t.Errorf("%s: seeded rule type %q no longer validates: %v — a system role that "+
 					"migrations install would stop loading", armName(arm), dotted, err)
 			}

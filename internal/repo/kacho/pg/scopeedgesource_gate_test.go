@@ -169,9 +169,8 @@ var legalDifferences = []legalDifference{
 		"материализация), и это ПРОВЕРЯЕТСЯ отдельным утверждением ниже (источник 4), а не " +
 		"пропускается. Здесь пропущена только ПОСВОЙСТВЕННАЯ сверка колонки-указателя: у " +
 		"личности аккаунт не является свойством её собственной строки, поэтому ветвь цепи " +
-		"выбирает не из `o`, а из `m` (таблицы связи), и разбор ветвей этого гейта, " +
-		"написанный под форму «колонка своей строки», такую ветвь не разбирает by " +
-		"construction. Сверять её здесь дословно было бы нечем: у материализации на этом " +
+		"выбирает не из `o`, а из `m` (таблицы связи), и колонки СВОЕЙ строки у звена нет " +
+		"вовсе. Сверять её здесь дословно было бы нечем: у материализации на этом " +
 		"месте стоит выражение-НАБОР (аккаунтов у человека столько, сколько членств), а не " +
 		"колонка. Что набор действительно читается связью — держит поведенческая проба " +
 		"reconcile_person_membership_scope_integration_test.go, а не эта запись"},
@@ -228,57 +227,231 @@ func upBlock(body string) (string, error) {
 	return strings.Join(kept, "\n"), nil
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// РАЗБОР SQL: ДВЕ ЗАКОННЫЕ ФОРМЫ ЗАПИСИ ОДНОГО ПРЕДМЕТА
+//
+// Представление записывается в дереве ДВУМЯ формами, и обе законны:
+//
+//	РУКОПИСНАЯ — `SELECT 'iam_group'::text, o.id, 'account'::text, o.account_id, 1`
+//	             и `lower(o.resource_type) IN ('project', 'account', 'cluster')`;
+//	ФОРМА СВОДА — `pg_dump` пишет тот же смысл иначе: каждый элемент выборки на
+//	             своей строке и с псевдонимом (`AS object_type`), а членство в
+//	             закрытом наборе — через `= ANY (ARRAY[…])`.
+//
+// Распознаватель, знающий ОДНУ форму, на второй не краснеет и не зеленеет — он
+// МОЛЧИТ: ветвь просто не разбирается, тип выходит из-под сверки, и «источники
+// согласны» становится неотличимо от «ничего не прочитано». Поэтому список
+// выборки разбирается ПОЗИЦИОННО (режется по запятым вне скобок и вне строковых
+// литералов, псевдоним снимается), а не образцом под одну форму; закрытый набор
+// областей ищется в обеих записях. Каждая форма доказана своей инъекцией.
+
 var (
 	reObjectType = regexp.MustCompile(`SELECT\s+'([a-z_]+)'::text`)
-	reFrom       = regexp.MustCompile(`FROM\s+(kacho_iam\.[a-z_]+)\s+o\b`)
-	// reFromAny — та же таблица при ЛЮБОМ псевдониме. Первое совпадение в ветви
-	// и есть её источник: вложенные `NOT EXISTS (SELECT 1 FROM …)` стоят ниже
-	// собственного FROM ветви.
-	reFromAny    = regexp.MustCompile(`FROM\s+(kacho_iam\.[a-z_]+)\s+[a-z]\b`)
-	reSelectList = regexp.MustCompile(`SELECT\s+'[a-z_]+'::text,\s*o\.id,\s*([^,]+),\s*([^,]+),\s*1`)
-	// reScopeSet — ЗАКРЫТЫЙ НАБОР областей берётся из отбора ветви, а не из
-	// списка выборки: в списке стоит `lower(o.resource_type)` — ВЫРАЖЕНИЕ,
-	// а не перечень. Гейт, прочитавший выражение вместо набора, объявил бы
-	// расхождение по каждой законной области сразу — то есть покраснел бы на
-	// верной реализации, ровно тем способом, который сам и ловит.
-	reScopeSet = regexp.MustCompile(`lower\(o\.resource_type\)\s+IN\s*\(([^)]*)\)`)
+	// reObjectTypeLiteral — тот же литерал как ЦЕЛЫЙ элемент выборки: разбор
+	// позиционный, поэтому тип берётся из первого элемента, а не откуда придётся.
+	reObjectTypeLiteral = regexp.MustCompile(`^'([a-z_]+)'::text$`)
+	// reFromTableAlias — таблица ветви и её ПСЕВДОНИМ. Псевдоним нужен целиком:
+	// по нему отличается «колонка своей строки» (`o`) от таблицы связи (`m`).
+	// Открывающая скобка допускается: свод пишет соединение как `FROM (a CROSS JOIN b)`.
+	reFromTableAlias = regexp.MustCompile(`\(?\s*(kacho_iam\.[a-z_]+)\s+(?:AS\s+)?([a-z][a-z0-9_]*)\b`)
+	// reColumnAlias — псевдоним элемента выборки (`… AS parent_id`), который
+	// пишет свод и не пишет рука.
+	reColumnAlias = regexp.MustCompile(`(?i)\s+AS\s+[a-z_][a-z0-9_]*$`)
+	// reScopeSetIn / reScopeSetAny — ЗАКРЫТЫЙ НАБОР областей берётся из отбора
+	// ветви, а не из списка выборки: в списке стоит `lower(o.resource_type)` —
+	// ВЫРАЖЕНИЕ, а не перечень. Гейт, прочитавший выражение вместо набора,
+	// объявил бы расхождение по каждой законной области сразу — то есть
+	// покраснел бы на верной реализации, ровно тем способом, который сам и ловит.
+	//
+	// Форм две, и обе обязаны быть здесь: рукописная (`IN (…)`) и форма свода
+	// (`= ANY (ARRAY[…])`). Знать одну значило бы не судить набор ВОВСЕ на
+	// дереве, записанном другой, — при этом гейт отказывает («набор не
+	// разобран»), а не молчит, и именно поэтому его отказ читается как поломка
+	// самого гейта, а не как находка.
+	reScopeSetIn  = regexp.MustCompile(`lower\(o\.resource_type\)\s+IN\s*\(([^)]*)\)`)
+	reScopeSetAny = regexp.MustCompile(`lower\(o\.resource_type\)\s*=\s*ANY\s*\(\s*ARRAY\[([^\]]*)\]\s*\)`)
 )
 
-// parseBranches разбирает ветви представления из исполняемого SQL.
+// isSQLWordByte — байт, который может стоять ВНУТРИ имени или ключевого слова.
+func isSQLWordByte(c byte) bool {
+	return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// sqlTopLevel — позиции запятых и первых вхождений названных лексем НА НУЛЕВОЙ
+// ГЛУБИНЕ скобок и ВНЕ строковых литералов.
 //
-// Разбираются только ветви формы «SELECT '<тип>'::text, o.id, <предок>, <колонка>, 1
-// FROM <таблица> o» — то есть выводимые из СОБСТВЕННОЙ СТРОКИ объекта. Ветви
-// журнала и синглтона кластера этой формы не имеют и попадают в
-// legalDifferences по имени типа.
-func parseBranches(sqlText string) []scopeEdgeBranch {
-	var out []scopeEdgeBranch
-	for _, arm := range strings.Split(sqlText, "UNION ALL") {
-		ot := reObjectType.FindStringSubmatch(arm)
-		if ot == nil {
+// Кавычки учитываются не для аккуратности: `POSITION((':'::text) IN (f.subject))`
+// несёт двоеточие внутри литерала, а закрытый набор областей — запятые; разбор,
+// считающий их наравне с остальными, режет выражение посередине.
+func sqlTopLevel(s string, lexemes ...string) (commas []int, at map[string]int) {
+	at = map[string]int{}
+	depth := 0
+	inQuote := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inQuote {
+			if c == '\'' {
+				if i+1 < len(s) && s[i+1] == '\'' {
+					i++
+					continue
+				}
+				inQuote = false
+			}
 			continue
 		}
-		// Таблица НЕОБЯЗАТЕЛЬНА: ветви проекта и аккаунта читают проекцию
-		// журнала и синглтон кластера, а не собственную строку объекта, и
-		// пропустить их значило бы вывести два типа из-под сверки МОЛЧА —
-		// они не попали бы ни в сверенные, ни в пропущенные, и счётчик
-		// объёма осмотренного соврал бы в обе стороны сразу.
-		br := scopeEdgeBranch{ObjectType: ot[1]}
-		if from := reFrom.FindStringSubmatch(arm); from != nil {
-			br.Table = from[1]
+		switch c {
+		case '\'':
+			inQuote = true
+			continue
+		case '(':
+			depth++
+			continue
+		case ')':
+			depth--
+			continue
+		case ',':
+			if depth == 0 {
+				commas = append(commas, i)
+			}
+			continue
 		}
-		if from := reFromAny.FindStringSubmatch(arm); from != nil {
-			br.SourceTable = from[1]
+		if depth != 0 {
+			continue
 		}
-		if set := reScopeSet.FindStringSubmatch(arm); set != nil {
-			br.ScopeSet = set[1]
+		for _, w := range lexemes {
+			if _, seen := at[w]; seen {
+				continue
+			}
+			if !strings.HasPrefix(s[i:], w) {
+				continue
+			}
+			// Граница слова спрашивается только у СЛОВА: точка с запятой стоит
+			// вплотную к скобке, и требовать от неё границы значило бы не найти
+			// её никогда.
+			if isSQLWordByte(w[0]) {
+				if i > 0 && isSQLWordByte(s[i-1]) {
+					continue
+				}
+				if j := i + len(w); j < len(s) && isSQLWordByte(s[j]) {
+					continue
+				}
+			}
+			at[w] = i
 		}
-		if sl := reSelectList.FindStringSubmatch(arm); sl != nil {
-			br.ParentType = strings.TrimSpace(sl[1])
-			br.ParentCol = strings.TrimSpace(sl[2])
+	}
+	return commas, at
+}
+
+// splitSelectList режет список выборки на элементы и снимает псевдонимы.
+func splitSelectList(list string) []string {
+	commas, _ := sqlTopLevel(list)
+	var items []string
+	prev := 0
+	for _, cut := range append(commas, len(list)) {
+		item := strings.TrimSpace(list[prev:cut])
+		items = append(items, strings.TrimSpace(reColumnAlias.ReplaceAllString(item, "")))
+		prev = cut + 1
+	}
+	return items
+}
+
+// scopeEdgeViewBody — ТЕЛО объявления представления: от глагола до его
+// собственной точки с запятой.
+//
+// Референт сужен до тела НАМЕРЕННО, и это не оптимизация. Прежде им был весь
+// блок `Up`, и это было верно ровно пока представление объявляла ОТДЕЛЬНАЯ
+// миграция. В своде тот же блок несёт ВСЮ схему сервиса: «ветви представления»
+// стали бы разбираться из чужих операторов, а последняя ветвь тянула бы за собой
+// три тысячи строк, к цепи отношения не имеющих. То есть референт выродился бы
+// вместе с числом файлов, а не с предметом. Тело не зависит от того, в скольких
+// файлах записана схема.
+func scopeEdgeViewBody(up string) (string, error) {
+	loc := scopeEdgeViewAnchor.FindStringIndex(up)
+	if loc == nil {
+		return "", fmt.Errorf("в исполняемом блоке нет объявления " +
+			"kacho_iam.resource_scope_edge: разбирать нечего, и молчание здесь означало бы " +
+			"«ничего не прочитано», а не «источники согласны»")
+	}
+	body := up[loc[0]:]
+	if _, at := sqlTopLevel(body, ";"); len(at) > 0 {
+		body = body[:at[";"]]
+	}
+	return body, nil
+}
+
+// parseBranches разбирает ветви представления из ТЕЛА его объявления.
+//
+// Разбираются ветви, чей первый элемент выборки — литерал типа. Ветвь
+// «присланное дословно» такого литерала не несёт (она выбирает колонки
+// resource_parent_edge) и в разбор не попадает by construction.
+func parseBranches(viewBody string) []scopeEdgeBranch {
+	var out []scopeEdgeBranch
+	for _, arm := range strings.Split(viewBody, "UNION ALL") {
+		if br, ok := parseBranch(arm); ok {
+			out = append(out, br)
 		}
-		out = append(out, br)
 	}
 	return out
+}
+
+// parseBranch разбирает ОДНУ ветвь. Форма записи безразлична (см. разбор выше).
+func parseBranch(arm string) (scopeEdgeBranch, bool) {
+	// Ветвь ограничивается СВОИМ оператором: точка с запятой на нулевой глубине
+	// и есть его конец.
+	if _, at := sqlTopLevel(arm, ";"); len(at) > 0 {
+		arm = arm[:at[";"]]
+	}
+	sel := strings.Index(arm, "SELECT")
+	if sel < 0 {
+		return scopeEdgeBranch{}, false
+	}
+	rest := arm[sel+len("SELECT"):]
+	_, at := sqlTopLevel(rest, "FROM", "WHERE")
+	fromAt, hasFrom := at["FROM"]
+	if !hasFrom {
+		// Ветвь без собственного FROM неразбираема, но ТИП назвать можно — и
+		// надо: промолчав, гейт вывел бы тип из-под сверки МОЛЧА, то есть завёл
+		// бы ровно ту слепую зону, ради закрытия которой написан.
+		if m := reObjectType.FindStringSubmatch(arm); m != nil {
+			return scopeEdgeBranch{ObjectType: m[1]}, true
+		}
+		return scopeEdgeBranch{}, false
+	}
+	items := splitSelectList(rest[:fromAt])
+	if len(items) == 0 {
+		return scopeEdgeBranch{}, false
+	}
+	m := reObjectTypeLiteral.FindStringSubmatch(items[0])
+	if m == nil {
+		return scopeEdgeBranch{}, false
+	}
+	// Таблица и колонка НЕОБЯЗАТЕЛЬНЫ: ветви проекта и аккаунта читают проекцию
+	// журнала и синглтон кластера, а не собственную строку объекта, и пропустить
+	// их значило бы вывести два типа из-под сверки МОЛЧА — они не попали бы ни в
+	// сверенные, ни в пропущенные, и счётчик объёма соврал бы в обе стороны.
+	br := scopeEdgeBranch{ObjectType: m[1]}
+	if len(items) >= 5 {
+		br.ParentType, br.ParentCol = items[2], items[3]
+	}
+	tail := rest[fromAt+len("FROM"):]
+	if w, has := at["WHERE"]; has && w > fromAt {
+		tail = rest[fromAt+len("FROM") : w]
+	}
+	if t := reFromTableAlias.FindStringSubmatch(tail); t != nil {
+		br.SourceTable = t[1]
+		if t[2] == "o" {
+			br.Table = t[1]
+		}
+	}
+	if w, has := at["WHERE"]; has {
+		where := rest[w:]
+		if set := reScopeSetIn.FindStringSubmatch(where); set != nil {
+			br.ScopeSet = set[1]
+		} else if set := reScopeSetAny.FindStringSubmatch(where); set != nil {
+			br.ScopeSet = set[1]
+		}
+	}
+	return br, true
 }
 
 // TestG2_ScopeEdgeSourceAgreesWithItsPerPropertyReference — Г2.
@@ -338,7 +511,11 @@ func auditScopeEdgeSourcesWith(
 	if err != nil {
 		return nil, []string{err.Error()}
 	}
-	branches := parseBranches(up)
+	view, verr := scopeEdgeViewBody(up)
+	if verr != nil {
+		return nil, []string{verr.Error()}
+	}
+	branches := parseBranches(view)
 	if len(branches) == 0 {
 		return report, append(findings, fmt.Sprintf(
 			"в блоке Up не разобрано НИ ОДНОЙ ветви, выводимой из строки объекта: "+
@@ -565,6 +742,87 @@ func injectedFindings(t *testing.T, migration, body string) []string {
 	return findings
 }
 
+// pointEdit — точечная правка НАСТОЯЩЕГО текста в той форме, которая в дереве
+// есть. Возвращает число применённых правок: инъекция обязана требовать РОВНО
+// одной, иначе «гейт покраснел» ничего не доказывает.
+//
+// Форм у представления две (см. разбор выше), и инъекция обязана уметь обе:
+// привязанная к одной, при смене формы она отказывает словами «ничего не
+// изменилось» — а этот отказ читается как поломка гейта, хотя гейт исправен.
+func pointEdit(body string, forms [][2]string) (string, int) {
+	out, applied := body, 0
+	for _, f := range forms {
+		if strings.Contains(out, f[0]) {
+			out = strings.Replace(out, f[0], f[1], 1)
+			applied++
+		}
+	}
+	return out, applied
+}
+
+// groupPointerForms — увод колонки-указателя группы с account_id на её же id.
+var groupPointerForms = [][2]string{
+	{ // форма свода
+		"    o.account_id AS parent_id,\n    1 AS depth\n   FROM kacho_iam.groups o",
+		"    o.id AS parent_id,\n    1 AS depth\n   FROM kacho_iam.groups o",
+	},
+	{ // рукописная
+		"SELECT 'iam_group'::text, o.id, 'account'::text, o.account_id, 1",
+		"SELECT 'iam_group'::text, o.id, 'account'::text, o.id, 1",
+	},
+}
+
+// bindingScopeDropForms — снятие области «кластер» из закрытого набора привязки.
+var bindingScopeDropForms = [][2]string{
+	{ // форма свода
+		"lower(o.resource_type) = ANY (ARRAY['project'::text, 'account'::text, 'cluster'::text])",
+		"lower(o.resource_type) = ANY (ARRAY['project'::text, 'account'::text])",
+	},
+	{ // рукописная
+		"lower(o.resource_type) IN ('project', 'account', 'cluster')",
+		"lower(o.resource_type) IN ('project', 'account')",
+	},
+}
+
+// identityBranchToColumnForms — увод звена личности с таблицы связи обратно на
+// колонку строки, то есть в состояние, из которого его вывели #944 и #1172.
+var identityBranchToColumnForms = [][2]string{
+	{ // форма свода
+		"    m.user_id AS object_id,\n    'account'::text AS parent_type,\n" +
+			"    m.account_id AS parent_id,\n    1 AS depth\n   FROM kacho_iam.memberships m",
+		"    o.id AS object_id,\n    'account'::text AS parent_type,\n" +
+			"    o.account_id AS parent_id,\n    1 AS depth\n   FROM kacho_iam.users o",
+	},
+	{ // рукописная
+		"SELECT 'iam_user'::text, m.user_id, 'account'::text, m.account_id, 1\n" +
+			"    FROM kacho_iam.memberships m",
+		"SELECT 'iam_user'::text, o.id, 'account'::text, o.account_id, 1\n" +
+			"    FROM kacho_iam.users o",
+	},
+}
+
+// handWrittenForms — перевод ДВУХ ветвей свода в РУКОПИСНУЮ форму без смены
+// смысла. Текст правой части взят дословно из миграции, объявлявшей
+// представление до свода: это настоящая форма дерева, а не сочинённая для пробы.
+//
+// Ветви выбраны так, чтобы задеть ОБА распознавателя, которых касается форма:
+// список выборки (группа) и закрытый набор областей (привязка). Скобки в обеих
+// заменах сбалансированы — иначе разбор по глубине читал бы следующую ветвь как
+// продолжение этой.
+var handWrittenForms = [][2]string{
+	{
+		" SELECT 'iam_group'::text AS object_type,\n    o.id AS object_id,\n" +
+			"    'account'::text AS parent_type,\n    o.account_id AS parent_id,\n" +
+			"    1 AS depth\n   FROM kacho_iam.groups o",
+		"  SELECT 'iam_group'::text, o.id, 'account'::text, o.account_id, 1\n" +
+			"    FROM kacho_iam.groups o",
+	},
+	{
+		"(lower(o.resource_type) = ANY (ARRAY['project'::text, 'account'::text, 'cluster'::text]))",
+		"(lower(o.resource_type) IN ('project', 'account', 'cluster'))",
+	},
+}
+
 // TestG2_InjectionPointerColumnDivergedIsFound — (а) ОБЯЗАН ПОКРАСНЕТЬ.
 //
 // Колонка-указатель изменена в ОДНОЙ записи (в представлении) и не изменена в
@@ -581,13 +839,11 @@ func TestG2_InjectionPointerColumnDivergedIsFound(t *testing.T) {
 	migration, body := readScopeEdgeMigration(t)
 	// Точечная правка НАСТОЯЩЕГО текста: у группы указатель уводится с
 	// account_id на собственный идентификатор.
-	broken := strings.Replace(body,
-		"SELECT 'iam_group'::text, o.id, 'account'::text, o.account_id, 1",
-		"SELECT 'iam_group'::text, o.id, 'account'::text, o.id, 1", 1)
-	if broken == body {
-		t.Fatalf("инъекция ничего не изменила: ветвь группы в миграции не найдена "+
-			"в ожидаемой форме, и «гейт покраснел» ничего не доказывало бы.\n"+
-			"Миграция: %s", migration)
+	broken, applied := pointEdit(body, groupPointerForms)
+	if applied != 1 {
+		t.Fatalf("правок применено %d вместо одной: ветвь группы в миграции не найдена "+
+			"НИ В ОДНОЙ из известных форм записи, и «гейт покраснел» ничего не "+
+			"доказывало бы.\nМиграция: %s", applied, migration)
 	}
 	found := injectedFindings(t, migration, broken)
 	if len(found) == 0 {
@@ -613,12 +869,10 @@ func TestG2_InjectionPointerColumnDivergedIsFound(t *testing.T) {
 // отвечал бы отказом, неотличимым от честного.
 func TestG2_InjectionScopeDroppedFromClosedSetIsFound(t *testing.T) {
 	migration, body := readScopeEdgeMigration(t)
-	broken := strings.Replace(body,
-		"lower(o.resource_type) IN ('project', 'account', 'cluster')",
-		"lower(o.resource_type) IN ('project', 'account')", 1)
-	if broken == body {
-		t.Fatalf("инъекция ничего не изменила: закрытый набор областей в миграции не "+
-			"найден в ожидаемой форме.\nМиграция: %s", migration)
+	broken, applied := pointEdit(body, bindingScopeDropForms)
+	if applied != 1 {
+		t.Fatalf("правок применено %d вместо одной: закрытый набор областей в миграции "+
+			"не найден НИ В ОДНОЙ из известных форм записи.\nМиграция: %s", applied, migration)
 	}
 	found := injectedFindings(t, migration, broken)
 	if len(found) == 0 {
@@ -638,15 +892,29 @@ func TestG2_InjectionScopeDroppedFromClosedSetIsFound(t *testing.T) {
 func TestG2_InjectionUndeclaredTypeIsFound(t *testing.T) {
 	migration, body := readScopeEdgeMigration(t)
 	// Законная по форме, но никем не объявленная ветвь: тот же вид, что у
-	// пользователя, только тип другой.
+	// пользователя, только тип другой. Записана РУКОПИСНОЙ формой — она
+	// такая же законная, как форма свода, и заодно даёт разбору список выборки
+	// без псевдонимов.
+	//
+	// Вставляется ВНУТРЬ тела представления, а не после него: гейт судит тело, и
+	// ветвь, приписанная за точкой с запятой, до него не доехала бы вовсе — а
+	// «гейт промолчал» читалось бы как его слепота, хотя он не видел правки.
+	up, uerr := upBlock(body)
+	if uerr != nil {
+		t.Fatalf("блок Up не разобран: %v", uerr)
+	}
+	view, verr := scopeEdgeViewBody(up)
+	if verr != nil {
+		t.Fatalf("тело представления не найдено: %v", verr)
+	}
 	extra := `
 UNION ALL
   SELECT 'iam_unnamed'::text, o.id, 'account'::text, o.account_id, 1
     FROM kacho_iam.users o
    WHERE COALESCE(o.account_id, '') <> ''`
-	broken := strings.Replace(body, "\n\nCOMMENT ON VIEW", extra+";\n\nCOMMENT ON VIEW", 1)
-	if broken == body {
-		t.Fatalf("инъекция ничего не изменила: якорь вставки в миграции не найден")
+	broken := "-- +goose Up\n" + strings.Replace(up, view, view+extra, 1) + "\n-- +goose Down\n"
+	if !strings.Contains(broken, "iam_unnamed") {
+		t.Fatalf("инъекция ничего не изменила: ветвь не вставлена в тело представления")
 	}
 	found := injectedFindings(t, migration, broken)
 	if len(found) == 0 {
@@ -682,6 +950,63 @@ func TestG2_InjectionLegalDifferencesStaySilent(t *testing.T) {
 	}
 }
 
+// TestG2_InjectionHandWrittenFormStaysSilent — (б) ОБЯЗАН МОЛЧАТЬ.
+//
+// ФОРМА, А НЕ СМЫСЛ. Две ветви свода переписаны РУКОПИСНОЙ формой — той самой,
+// какой представление объявлялось до сведения цепи, — и смысл при этом не
+// изменён ни в одном знаке: тот же тип, та же таблица, та же колонка, тот же
+// закрытый набор.
+//
+// Без этой пробы «распознаватель знает обе формы» было бы объявлением. Знай он
+// одну, вторая дала бы ему не красное и не зелёное, а МОЛЧАНИЕ: ветвь группы
+// осталась бы без колонки-указателя (находка о верной реализации), а ветвь
+// привязки — без набора областей (отказ «не разобрано»). Обе стороны здесь и
+// проверяются разом.
+func TestG2_InjectionHandWrittenFormStaysSilent(t *testing.T) {
+	migration, body := readScopeEdgeMigration(t)
+	handWritten, applied := pointEdit(body, handWrittenForms)
+	if applied != len(handWrittenForms) {
+		t.Fatalf("переведено в рукописную форму %d ветвей из %d: перевод не состоялся, "+
+			"и молчание гейта ничего не сказало бы о второй форме.\nМиграция: %s",
+			applied, len(handWrittenForms), migration)
+	}
+	if found := injectedFindings(t, migration, handWritten); len(found) > 0 {
+		t.Fatalf("гейт КРАСЕН на том же представлении, записанном РУКОПИСНОЙ формой:\n%s\n"+
+			"Смысл не менялся — значит распознаватель судит написание, а не предмет, и на "+
+			"дереве этой формы он объявлял бы расхождение по каждой ветви сразу.",
+			strings.Join(found, "\n"))
+	}
+}
+
+// TestG2_InjectionHandWrittenFormDefectIsFound — (а) ОБЯЗАН ПОКРАСНЕТЬ.
+//
+// Обратная половина предыдущей: молчание на рукописной форме обязано быть
+// молчанием ПО СУЩЕСТВУ, а не оттого, что распознаватель её не прочитал. Дефект
+// вносится в РУКОПИСНУЮ запись закрытого набора — область «кластер» снята, —
+// и он обязан быть найден так же, как в форме свода.
+func TestG2_InjectionHandWrittenFormDefectIsFound(t *testing.T) {
+	migration, body := readScopeEdgeMigration(t)
+	handWritten, applied := pointEdit(body, handWrittenForms)
+	if applied != len(handWrittenForms) {
+		t.Fatalf("переведено в рукописную форму %d ветвей из %d: инъекции нечего ломать.\n"+
+			"Миграция: %s", applied, len(handWrittenForms), migration)
+	}
+	broken := strings.Replace(handWritten,
+		"lower(o.resource_type) IN ('project', 'account', 'cluster')",
+		"lower(o.resource_type) IN ('project', 'account')", 1)
+	if broken == handWritten {
+		t.Fatalf("инъекция ничего не изменила: рукописного набора областей в тексте нет")
+	}
+	found := injectedFindings(t, migration, broken)
+	if len(found) == 0 {
+		t.Fatalf("гейт ПРОМОЛЧАЛ на области, снятой из РУКОПИСНОЙ записи набора: вторая " +
+			"форма прочитана, но не судится — то есть не прочитана")
+	}
+	if joined := strings.Join(found, "\n"); !strings.Contains(joined, "cluster") {
+		t.Errorf("находка не называет потерянную область:\n%s", joined)
+	}
+}
+
 // TestG2_InjectionLinkedParentTableDivergedInTheChainIsFound — (а) ОБЯЗАН ПОКРАСНЕТЬ.
 //
 // СТОРОНА ЦЕПИ. Звено личности уводится обратно на колонку строки — то есть в то
@@ -691,15 +1016,11 @@ func TestG2_InjectionLegalDifferencesStaySilent(t *testing.T) {
 // человека перестаёт быть для каскада его аккаунтом.
 func TestG2_InjectionLinkedParentTableDivergedInTheChainIsFound(t *testing.T) {
 	migration, body := readScopeEdgeMigration(t)
-	broken := strings.Replace(body,
-		"SELECT 'iam_user'::text, m.user_id, 'account'::text, m.account_id, 1\n"+
-			"    FROM kacho_iam.memberships m",
-		"SELECT 'iam_user'::text, o.id, 'account'::text, o.account_id, 1\n"+
-			"    FROM kacho_iam.users o", 1)
-	if broken == body {
-		t.Fatalf("инъекция ничего не изменила: ветвь личности в миграции не найдена в "+
-			"ожидаемой форме, и «гейт покраснел» ничего не доказывало бы.\nМиграция: %s",
-			migration)
+	broken, applied := pointEdit(body, identityBranchToColumnForms)
+	if applied != 1 {
+		t.Fatalf("правок применено %d вместо одной: ветвь личности в миграции не найдена "+
+			"НИ В ОДНОЙ из известных форм записи, и «гейт покраснел» ничего не "+
+			"доказывало бы.\nМиграция: %s", applied, migration)
 	}
 	found := injectedFindings(t, migration, broken)
 	if len(found) == 0 {

@@ -152,6 +152,18 @@ type ActionLinkageCensus struct {
 	// OutsidePopulation — записей каталога этого модуля, чей ресурс раздел не
 	// объявляет вовсе либо объявляет авторским. Не находка, но и не ноль.
 	OutsidePopulation int
+	// MatchedInternal — сопоставленных пар, чья плоскость ВНУТРЕННЯЯ.
+	//
+	// Заведено потому, что `PlaneDisagrees == 0` само по себе не отличает «обе
+	// стороны согласны» от «сравнивать было нечего». Пока раздел `resources` не
+	// объявлял НИ ОДНОГО внутреннего действия (замер #1997: ноль у всех шести
+	// манифестов при 101 внутренней записи каталога), сверка плоскости на
+	// каждой паре сравнивала `false` с `false` — то есть была исправна и
+	// беспредметна разом, и отличить это от работающей проверки было нечем.
+	//
+	// Число печатается переписью и утверждается гейтом дерева: «ноль находок»
+	// обязано быть отличимо от «ноль прочитанного».
+	MatchedInternal int
 	// PlaneDisagrees — пар, разошедшихся о плоскости исполнения.
 	PlaneDisagrees int
 }
@@ -164,11 +176,11 @@ func (c ActionLinkageCensus) Summary() string {
 			"записей каталога %d · сопоставлено %d · без записи каталога %d · "+
 			"едет на объявленном отношении %d · гейтится ярусом области %d · "+
 			"без гейта вовсе %d · БЕЗ СЧЁТА %d · вне популяции %d · "+
-			"расхождений плоскости %d",
+			"из них внутренней плоскости %d · расхождений плоскости %d",
 		c.ResourcesDerived, c.ResourcesAuthored, c.ManifestVerbs, c.CatalogActions,
 		c.Matched, c.WithoutCatalogEntry, c.RidesDeclaredRelation,
 		c.GatedAtScopeTier, c.UnnamedExempt, c.WithoutManifestVerb,
-		c.OutsidePopulation, c.PlaneDisagrees)
+		c.OutsidePopulation, c.MatchedInternal, c.PlaneDisagrees)
 }
 
 // verbRelationPrefix — приставка отношения, порождаемого действием.
@@ -228,6 +240,14 @@ func CheckActionLinkage(m *manifest.Manifest, actions []Action) ([]error, Action
 	for name, r := range derived {
 		set := make(map[string]bool, len(r.Verbs))
 		for _, v := range r.Verbs {
+			// Порождает ли действие отношение — решает ПЛОСКОСТЬ, и правило
+			// объявлено там же, где имя (manifest.VerbProducesRelation).
+			// Внутреннее действие отношения не порождает, поэтому «едет на
+			// объявленном отношении» от него не наступает: иначе запись
+			// каталога считалась бы покрытой отношением, которого в модели нет.
+			if !manifest.VerbProducesRelation(v) {
+				continue
+			}
 			set[manifest.VerbRelationName(v.Name)] = true
 		}
 		renderedOf[name] = set
@@ -262,6 +282,9 @@ func CheckActionLinkage(m *manifest.Manifest, actions []Action) ([]error, Action
 				continue
 			}
 			census.Matched++
+			if a.Internal {
+				census.MatchedInternal++
+			}
 			if v.Internal != a.Internal {
 				census.PlaneDisagrees++
 				faults = append(faults, LinkageFinding{

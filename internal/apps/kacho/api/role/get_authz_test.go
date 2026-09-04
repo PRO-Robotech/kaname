@@ -47,6 +47,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // ───────────── tests ─────────────
@@ -64,7 +65,7 @@ func TestGetRole_D1_SystemRole_ServedToAll(t *testing.T) {
 	}
 
 	fga := newRoleFGAStub() // empty grant-set
-	uc := NewGetRoleUseCase(repo).WithRelationStore(fga)
+	uc := NewGetRoleUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 
 	got, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000sys1"))
 	require.NoError(t, err, "system role is the catalog floor — served to every authenticated caller")
@@ -88,7 +89,7 @@ func TestGetRole_D1_GrantedCustom_Served(t *testing.T) {
 	fga := newRoleFGAStub()
 	fga.set("user:usr-u1", []string{"rol0000000000000cst1"})
 
-	uc := NewGetRoleUseCase(repo).WithRelationStore(fga)
+	uc := NewGetRoleUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	got, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000cst1"))
 	require.NoError(t, err, "granted custom role is served")
 	require.Equal(t, "rol0000000000000cst1", string(got.ID))
@@ -121,7 +122,7 @@ func TestGetRole_D1_VListOnlyGrantedCustom_Served(t *testing.T) {
 	fga := newRoleUnionFGAStub()
 	fga.set("v_list", "user:usr-u1", []string{"rol0000000000000cst2"}) // NO viewer
 
-	uc := NewGetRoleUseCase(repo).WithRelationStore(fga)
+	uc := NewGetRoleUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	got, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000cst2"))
 	require.NoError(t, err, "a v_list-only selector grant must serve Get (union, read==enforce)")
 	require.Equal(t, "rol0000000000000cst2", string(got.ID))
@@ -143,7 +144,7 @@ func TestGetRole_D1_UngrantedCustom_NotFound_NoLeak(t *testing.T) {
 	}
 
 	fga := newRoleFGAStub() // no grant for the caller
-	uc := NewGetRoleUseCase(repo).WithRelationStore(fga)
+	uc := NewGetRoleUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 
 	got, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000cst9"))
 	require.Error(t, err, "ungranted custom role must NOT be served")
@@ -171,7 +172,7 @@ func TestGetRole_D1_ForeignAccountCustom_NotFound(t *testing.T) {
 	}
 
 	fga := newRoleFGAStub() // caller has no grant in acc-B000000000000000
-	uc := NewGetRoleUseCase(repo).WithRelationStore(fga)
+	uc := NewGetRoleUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 
 	_, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000frgn"))
 	st, _ := status.FromError(err)
@@ -190,7 +191,7 @@ func TestGetRole_D1_FGAUnavailable_FailClosed(t *testing.T) {
 	fga := newRoleFGAStub()
 	fga.err = stderrors.New("relation form did not answer: connection closed")
 
-	uc := NewGetRoleUseCase(repo).WithRelationStore(fga)
+	uc := NewGetRoleUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	got, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000cst1"))
 	require.Error(t, err)
 	st, ok := status.FromError(err)
@@ -207,7 +208,7 @@ func TestGetRole_D1_NilFGA_CustomFailClosed(t *testing.T) {
 		ID: domain.RoleID("rol0000000000000cst1"), IsSystem: false,
 		AccountID: domain.AccountID("acc-A000000000000000"),
 	}
-	uc := NewGetRoleUseCase(repo) // NO WithRelationStore
+	uc := NewGetRoleUseCase(repo, catalogfixture.Source()) // NO WithRelationStore
 	_, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000cst1"))
 	st, _ := status.FromError(err)
 	require.Equal(t, codes.Unavailable, st.Code(), "nil relation port on custom Get → fail-closed Unavailable")
@@ -218,7 +219,7 @@ func TestGetRole_D1_NilFGA_CustomFailClosed(t *testing.T) {
 func TestGetRole_D1_MalformedID_InvalidArgFirst(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	fga := newRoleFGAStub()
-	uc := NewGetRoleUseCase(repo).WithRelationStore(fga)
+	uc := NewGetRoleUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 
 	_, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("not-a-role"))
 	st, _ := status.FromError(err)
@@ -239,8 +240,8 @@ func TestGetRole_D45_ReadEnforceParity_GetSetEqualsListSet(t *testing.T) {
 	fga := newRoleFGAStub()
 	fga.set("user:usr-u1", []string{"rol0000000000000cgr1", "rol0000000000000cgr2"})
 
-	listUC := NewListRolesUseCase(repo).WithRelationStore(fga)
-	getUC := NewGetRoleUseCase(repo).WithRelationStore(fga)
+	listUC := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
+	getUC := NewGetRoleUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 
 	// List visibility for the subject.
 	rows, _, err := listUC.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})

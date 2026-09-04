@@ -26,11 +26,13 @@ package pg_test
 // снятие ресурса подаётся `retireResource` в соседнем файле. О транспорте,
 // операции и правах эти пробы не говорят НИЧЕГО.
 //
-// Не утверждается и то, что «модуль снят» влияет на приём правил: членство
-// модуля читается на пути запроса ЛИТЕРАЛОМ (`domain.IsKnownModule`), и перевод
-// этого читателя на строки — остаток #1816. Сценарий IAM-MW-1-10 сегодня
-// производит ОБРАТНОЕ и потому здесь не стоит: проба, утверждающая желаемое, была
-// бы красной по чужому предмету.
+// Не утверждается и то, что «модуль снят» влияет на приём правил, — но уже по
+// другой причине, чем прежде: у сценария IAM-MW-1-10 появился СВОЙ производитель
+// в соседнем файле (`module_membership_from_rows_integration_test.go`, задача
+// #1927). Здесь его не заводится, чтобы два места не утверждали об одном
+// предмете. Прежняя редакция этого абзаца говорила, что членство читается
+// литералом `domain.IsKnownModule` и сценарий производит ОБРАТНОЕ; литерал снят
+// вместе с функцией, и утверждение пережило бы свой предмет.
 //
 // # Почему перепись сравнивается МНОЖЕСТВАМИ
 //
@@ -104,7 +106,7 @@ func declaredCatalogSize() (modules, resources, verbs int) {
 	for _, e := range authzmap.Catalog() {
 		seen[e.Module+"."+e.Resource] = true
 	}
-	return len(domain.KnownModules()), len(seen), len(authzmap.CatalogSeedVerbs())
+	return len(authzmap.CatalogSeedModules()), len(seen), len(authzmap.CatalogSeedVerbs())
 }
 
 // moduleResources — точечные имена ресурсов модуля, живых и снятых.
@@ -130,7 +132,7 @@ func relocateModuleGrants(t *testing.T, ctx context.Context, tx pgx.Tx, module, 
 		  FROM kacho_iam.role_verb rv
 		  JOIN kacho_iam.catalog_resource cr ON cr.dotted = rv.object_type
 		 WHERE cr.module = $1
-		ON CONFLICT (role_id, object_type, verb, source)
+		ON CONFLICT (role_id, object_type, verb, source, cause)
 		DO UPDATE SET reason = EXCLUDED.reason, orphaned_at = now()`, module, reason)
 	require.NoError(t, err)
 	verbs = int(tag.RowsAffected())
@@ -146,7 +148,7 @@ func relocateModuleGrants(t *testing.T, ctx context.Context, tx pgx.Tx, module, 
 		SELECT rr.role_id, rr.module || '.' || rr.resource, COALESCE(rr.verb, ''), 'rule_ref', $2
 		  FROM kacho_iam.role_rule_ref rr
 		 WHERE rr.module = $1
-		ON CONFLICT (role_id, object_type, verb, source)
+		ON CONFLICT (role_id, object_type, verb, source, cause)
 		DO UPDATE SET reason = EXCLUDED.reason, orphaned_at = now()`, module, reason)
 	require.NoError(t, err)
 	refs = int(tag.RowsAffected())
@@ -491,9 +493,12 @@ func TestIAMMW114_RevivalByInsertIsRefused(t *testing.T) {
 	requireNoRefsYet(t, ctx, pool, "vpc", "cidrGroup")
 	require.NoError(t, retireResource(ctx, pool, "vpc", "cidrGroup", "проба IAM-MW-1-14"))
 
+	// Имя типа модели прав подаётся ЯВНО: колонка обязательна (миграция
+	// 20260903112400), и без неё вставку отвергал бы `23502` — то есть проба
+	// утверждала бы про NOT NULL вместо первичного ключа, о котором она.
 	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.catalog_resource (module, resource, dotted)
-		VALUES ('vpc', 'cidrGroup', 'vpc.cidrGroup')`)
+		INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, object_type)
+		VALUES ('vpc', 'cidrGroup', 'vpc.cidrGroup', 'vpc_cidr_group')`)
 	require.Error(t, err, "повторная установка не вставляет строку заново")
 	code, constraint := pgCode(err)
 	t.Logf("вставка отвергнута: SQLSTATE %s, ограничение %q", code, constraint)

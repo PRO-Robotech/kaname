@@ -192,23 +192,11 @@ func (s *reconcileStore) LoadBindingsUnlocked(ctx context.Context, ids []domain.
 	// от размера веера.
 	roles := make(map[domain.RoleID]domain.Role, len(roleIDs))
 	if len(roleIDs) > 0 {
-		rrows, rerr := s.tx.Query(ctx,
-			fmt.Sprintf(`SELECT %s FROM roles WHERE id = ANY($1)`, roleCols), roleIDs)
+		loaded, rerr := loadRolesWithLifecycle(ctx, s.tx, roleIDs)
 		if rerr != nil {
-			return nil, fmt.Errorf("reconcile: load roles batch: %w", rerr)
+			return nil, rerr
 		}
-		for rrows.Next() {
-			ro, serr := scanRole(rrows)
-			if serr != nil {
-				rrows.Close()
-				return nil, fmt.Errorf("reconcile: scan role batch row: %w", serr)
-			}
-			roles[ro.ID] = ro
-		}
-		rrows.Close()
-		if rerr := rrows.Err(); rerr != nil {
-			return nil, fmt.Errorf("reconcile: load roles batch: %w", rerr)
-		}
+		roles = loaded
 	}
 
 	for _, b := range bindings {
@@ -272,21 +260,92 @@ func (s *reconcileStore) role(ctx context.Context, id domain.RoleID) (domain.Rol
 	if ro, ok := s.roleCache[id]; ok {
 		return ro, nil
 	}
-	ro, err := (&roleReader{tx: s.tx}).Get(ctx, id)
+	// Читается ТЕМ ЖЕ загрузчиком, что пакетный путь: жизненное состояние роли
+	// решает, даёт ли она покрытие (#1913), и два оператора об одном предмете
+	// разошлись бы молча — на живой роли они отвечают одинаково.
+	loaded, err := loadRolesWithLifecycle(ctx, s.tx, []string{string(id)})
 	if err != nil {
-		if errors.Is(err, iamerr.ErrNotFound) {
-			s.roleCache[id] = domain.Role{}
-		}
-		return ro, err
+		return domain.Role{}, err
+	}
+	ro, ok := loaded[id]
+	if !ok {
+		s.roleCache[id] = domain.Role{}
+		return domain.Role{}, iamerr.Wrapf(iamerr.ErrNotFound, "Role %s not found", id)
 	}
 	s.roleCache[id] = ro
 	return ro, nil
+}
+
+// loadRolesWithLifecycle — роли ВМЕСТЕ с их жизненным состоянием.
+//
+// Единственный загрузчик роли на пути реконсиляции, и это решение: состояние
+// решает, даёт ли роль покрытие вообще (`bindingScopeFrom`), поэтому загрузчик,
+// его не читающий, отдал бы снятую роль неотличимой от объявленной.
+//
+// `roleCols` состояния не несёт НАМЕРЕННО: тот же перечень читают пути ответа
+// операции, а ответ операции жизненного состояния не вычисляет (§2.6 приёмки).
+// Поэтому живость дочитывается ОТДЕЛЬНОЙ колонкой здесь, а не добавляется туда.
+func loadRolesWithLifecycle(ctx context.Context, tx pgx.Tx, ids []string) (
+	map[domain.RoleID]domain.Role, error,
+) {
+	out := make(map[domain.RoleID]domain.Role, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := tx.Query(ctx,
+		fmt.Sprintf(`SELECT %s, live FROM roles WHERE id = ANY($1)`, roleCols), ids)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: load roles: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var live bool
+		ro, serr := scanRoleWithTrailing(rows, &live)
+		if serr != nil {
+			return nil, fmt.Errorf("reconcile: scan role row: %w", serr)
+		}
+		ro.Lifecycle.State = domain.RoleLifecycleDeclared
+		if !live {
+			ro.Lifecycle.State = domain.RoleLifecycleWithdrawn
+		}
+		out[ro.ID] = ro
+	}
+	if rerr := rows.Err(); rerr != nil {
+		return nil, fmt.Errorf("reconcile: load roles: %w", rerr)
+	}
+	return out, nil
 }
 
 // bindingScopeFrom — ЕДИНСТВЕННАЯ точка вывода BindingScope из строки выдачи и её роли.
 // Ею пользуются и поштучное чтение (loadBinding), и пакетное (LoadBindingsUnlocked),
 // поэтому пакетный путь не может разойтись с одиночным ни в одном факте.
 func bindingScopeFrom(cat *catalog.Facts, b domain.AccessBinding, role domain.Role) reconcile.BindingScope {
+	// СНЯТАЯ роль даёт ровно то же, что РОЛЬ, УДАЛЁННАЯ из-под выдачи, — «нет
+	// покрытия» (#1913). Правила у неё целы: отзыв есть ПОМЕТКА, и `rules`
+	// остаются прежними навсегда. Оставь их читаться — и реконсайлер вычислит
+	// непустой желаемый состав, а вставку отвергнет
+	// `access_binding_target_members_role_live_fk`; `23503` в этой полосе не
+	// классифицируется нигде и унесёт проход целиком.
+	//
+	// Пропуск верен и ПО СУЩЕСТВУ: снятая роль не даёт НИЧЕГО, значит желаемый
+	// состав у неё пуст. Выдача при этом ПЕРЕЖИВАЕТ снятие намеренно (§2.4
+	// приёмки) — она факт прошлого, который платформа объясняет; и оживление
+	// возвращает роль в множество само, поэтому своего восстановителя составу
+	// цели заводить не нужно.
+	//
+	// Решение стоит ЗДЕСЬ, в единственной точке вывода, а не в двух операторах
+	// чтения: разойдясь, они дали бы пакетному и поштучному пути разные ответы об
+	// одной выдаче — и разошлись бы молча, потому что на живой роли отвечают
+	// одинаково.
+	// Признак — «состояние НЕ равно „объявлена"», а не «равно „снята"», и это
+	// FAIL-CLOSED намеренно. Нулевое состояние означает «роль прочитана не тем
+	// загрузчиком», и читать его как «объявлена» значило бы материализовать право
+	// по молчанию. Сегодня оба пути идут через `loadRolesWithLifecycle`, поэтому
+	// нулевого состояния здесь не бывает; но ошибка следующего вызывающего
+	// обязана стоить потери покрытия, а не выдачи лишнего.
+	if role.Lifecycle.State != domain.RoleLifecycleDeclared {
+		role = domain.Role{ID: role.ID}
+	}
 	return reconcile.BindingScope{
 		BindingID:   b.ID,
 		Scope:       scopeAnchorFor(b),

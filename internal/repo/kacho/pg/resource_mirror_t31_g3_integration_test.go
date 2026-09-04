@@ -74,6 +74,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 		kachopg.NewFGAOutboxEmitter(),
 		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
+		kachopg.NewCatalogTypeReader(),
 	)
 
 	const objType, objID = "vpc.network", "net-g3"

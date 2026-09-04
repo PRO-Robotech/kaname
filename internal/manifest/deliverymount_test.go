@@ -65,6 +65,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kacho/pkg/modulemanifest"
+	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
 )
 
@@ -108,17 +110,20 @@ func configMapMount(t *testing.T, data map[string]string) string {
 // Ключ, названный по каталогу, есть прямая координата источника
 // (`services/<ключ>/manifest.yaml`) — по ней оператор чинит находку, не держа
 // это соответствие в голове.
+// ПЕРЕЧЕНЬ каталогов выписан, а СООТВЕТСТВИЕ «каталог службы → модуль каталога»
+// берётся у единственного объявления (`pkg/platformmodules`). Это разные
+// предметы, и путать их нельзя: манифест несут ШЕСТЬ служб из семи объявленных
+// (у geo его нет вовсе), поэтому перечень словарём не выводится — а вот
+// написание модуля выписывать здесь было бы второй копией соглашения, которая
+// разошлась бы с деревом молча (#1885).
 func deliveredModules() map[string]string {
 	out := map[string]string{}
-	for dir, module := range map[string]string{
-		"compute":  "compute",
-		"iam":      "iam",
-		"nlb":      "loadbalancer",
-		"registry": "registry",
-		"storage":  "storage",
-		"vpc":      "vpc",
-	} {
-		out[dir+".manifest.yaml"] = "apiVersion: iam/v1\nmodule: " + module + "\n"
+	for _, dir := range []string{"compute", "iam", "nlb", "registry", "storage", "vpc"} {
+		module, ok := platformmodules.CatalogModuleOfService(dir)
+		if !ok {
+			panic("служба " + dir + " словарём написаний не объявлена")
+		}
+		out[modulemanifest.DeliveryKey(dir)] = "apiVersion: iam/v1\nmodule: " + module + "\n"
 	}
 	return out
 }

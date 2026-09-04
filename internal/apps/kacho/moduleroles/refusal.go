@@ -79,6 +79,21 @@ const (
 	// отказа приезжает её текстом, а класс — её кодом; применитель ни того, ни
 	// другого не перетолковывает.
 	LaneWriteFailed = "MODULE_ROLE_WRITE_FAILED"
+	// LaneNamedRightIncomplete — ПОИМЁННЫЙ перечень права роли не полон по
+	// своему классу (#1998). Полоса отдельная от двух первых: чинится перечень,
+	// а не форма правила и не состояние базы, и текст отказа несёт недостающие
+	// имена.
+	LaneNamedRightIncomplete = "MODULE_ROLE_NAMED_RIGHT_INCOMPLETE"
+	// LaneRightsExportNotWired — производитель правил роли НЕ ПРОВЯЗАН. Виновата
+	// провязка, а не вход: правку манифеста этот отказ не примет ни при какой
+	// строке, и объединять его с предыдущей полосой значило бы послать
+	// вызывающего чинить не то.
+	LaneRightsExportNotWired = "MODULE_ROLE_RIGHTS_EXPORT_NOT_WIRED"
+	// LaneRetirementActorUnnamed — АВТОР снятия не назван вызывающим. Полоса
+	// своя, потому что чинится ПРОВЯЗКОЙ: ни вход манифеста, ни состояние базы
+	// тут ни при чём. Подставить «system» вместо отказа значило бы сделать вопрос
+	// «кто у меня отобрал» безответным ровно тогда, когда его задают (#1913).
+	LaneRetirementActorUnnamed = "MODULE_ROLE_RETIREMENT_ACTOR_UNNAMED"
 )
 
 // refusalDomain — источник отказа в `ErrorInfo.domain`, как его видит клиент.
@@ -116,7 +131,9 @@ func RefusalLane(err error) string {
 				continue
 			}
 			switch ei.GetReason() {
-			case LaneRejectedByDomain, LanePolicyNotCompilable, LaneWriteFailed:
+			case LaneRejectedByDomain, LanePolicyNotCompilable, LaneWriteFailed,
+				LaneNamedRightIncomplete, LaneRightsExportNotWired,
+				LaneRetirementActorUnnamed:
 				return ei.GetReason()
 			}
 		}
@@ -128,6 +145,12 @@ func RefusalLane(err error) string {
 		return LanePolicyNotCompilable
 	case errors.Is(err, ErrWriteFailed):
 		return LaneWriteFailed
+	case errors.Is(err, ErrNamedRightIncomplete):
+		return LaneNamedRightIncomplete
+	case errors.Is(err, ErrRightsExportNotWired):
+		return LaneRightsExportNotWired
+	case errors.Is(err, ErrRetirementActorUnnamed):
+		return LaneRetirementActorUnnamed
 	}
 	return ""
 }

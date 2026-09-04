@@ -15,7 +15,6 @@ package access_binding_test
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -65,19 +64,7 @@ var _ clients.RelationStore = allowRelationStore{}
 // not there.
 func setupTestDB(t testing.TB) string {
 	t.Helper()
-	return appendSearchPathOptions(pgtest.NewDB(t))
-}
-
-func appendSearchPathOptions(dsn string) string {
-	const optionsParam = "options=-c%20search_path%3Dkacho_iam%2Cpublic"
-	if strings.Contains(dsn, "options=") || strings.Contains(dsn, "options%3D") {
-		return dsn
-	}
-	sep := "?"
-	if strings.Contains(dsn, "?") {
-		sep = "&"
-	}
-	return dsn + sep + optionsParam
+	return pgtest.NewDB(t)
 }
 
 func poolFromDSN(t *testing.T, dsn string) *pgxpool.Pool {

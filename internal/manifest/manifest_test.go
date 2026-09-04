@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
 )
@@ -355,7 +356,7 @@ func TestMODMF06ModuleOutsideThePlatformSetIsRefused(t *testing.T) {
 // шестое было добавлено). Проба утверждает РАВЕНСТВО поведения владельцу, а не
 // членство отдельных имён: членство росту набора не сопротивляется.
 func TestMODMF06ModuleSetIsReadFromItsOwnerNotCopied(t *testing.T) {
-	owned := domain.KnownModules()
+	owned := authzmap.CatalogSeedModules()
 	if len(owned) == 0 {
 		t.Fatalf("набор владельца пуст — сверять нечего")
 	}
@@ -368,7 +369,7 @@ func TestMODMF06ModuleSetIsReadFromItsOwnerNotCopied(t *testing.T) {
 		}
 	}
 	for _, m := range []string{"nlb", "geo", "vpc2", "VPC"} {
-		if domain.IsKnownModule(m) {
+		if domain.ModuleSetOf(authzmap.CatalogSeedModules()...).IsKnownModule(m) {
 			continue // владелец его знает — тогда это не отрицательный вход
 		}
 		doc := strings.Replace(compactManifest, "module: vpc", "module: "+m, 1)

@@ -288,8 +288,20 @@ func syncAllSystemRoleSelectorsTx(ctx context.Context, tx pgxQuerierExecer) erro
 	// any Exec on the same tx (pgx forbids interleaving a live Rows with another query
 	// on the same conn).
 	rows, err := tx.Query(ctx,
+		// Снятая роль ПРОПУСКАЕТСЯ, а не отвергается ключом (#1913).
+		//
+		// Отзыв есть ПОМЕТКА: `is_system` и `rules` у снятой роли остаются
+		// прежними навсегда, поэтому предикат без живости достаёт её всякий раз.
+		// Её проекцию отвергает ключ `role_rule_selectors_role_live_fk` — и радиус
+		// отказа не одна роль, а ВСЯ эта транзакция: вместе с ней откатывается
+		// посев субъектов-владельцев и эмиссия кортежей иерархии для всех
+		// системных ролей, а следующий старт даёт то же самое.
+		//
+		// Пропуск, а не обработка отказа: у снятой роли проекции быть НЕ ДОЛЖНО,
+		// и ключ здесь работает как задуман. Неверен был отбор.
 		`SELECT id, rules FROM kacho_iam.roles
 		  WHERE is_system = true
+		    AND live
 		    AND rules IS NOT NULL
 		    AND jsonb_typeof(rules) = 'array'
 		    AND jsonb_array_length(rules) > 0`)

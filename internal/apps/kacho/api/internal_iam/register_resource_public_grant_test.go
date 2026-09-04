@@ -114,16 +114,27 @@ func publicGrantRig() (*RegisterResourceUseCase, *mirrorSpy, *countingEmitter, *
 	m := newMirrorSpy()
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}).WithReconcile(ev)
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}).WithReconcile(ev)
 	return uc, m, e, ev
 }
 
-// mirrorKey mirrors tupleIntent.objectType() for the assertions below.
+// mirrorKey — ключ строки зеркала для утверждений ниже: имя типа в словаре
+// КАТАЛОГА плюс идентификатор.
+//
+// Перевод спрашивается у ТОГО ЖЕ дублёра, что провязан в use-case этих проб
+// (`seededCatalogTypes`), а не выписывается второй копией: разойдясь, ожидание
+// и продукт совпадали бы ровно там, где совпадают, и проба перестала бы
+// утверждать про ключ хоть что-нибудь.
 func mirrorKey(t *testing.T, object string) string {
 	t.Helper()
 	ti := tupleIntent{object: object}
-	ot, oid := ti.objectType()
-	return ot + ":" + oid
+	fgaType, oid := ti.splitObject()
+	dotted, ok, err := seededCatalogTypes{}.DottedTypeTx(context.Background(), nil, fgaType)
+	require.NoError(t, err)
+	if !ok {
+		dotted = fgaType
+	}
+	return dotted + ":" + oid
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────

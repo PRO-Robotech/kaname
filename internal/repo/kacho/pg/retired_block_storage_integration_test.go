@@ -3,56 +3,53 @@
 
 package pg_test
 
-// retired_block_storage_integration_test.go — the effective-state half of the
-// block-storage retire gate.
+// retired_block_storage_integration_test.go — состояние базы после отставки
+// блочного хранения.
 //
-// services/iam/internal/check/retired_block_storage_test.go covers the artefacts
-// in the tree: iam's four vocabularies, the canonical authorization model, the
-// generated ConfigMap, the permission catalog. None of that can see a ROW. A
-// vocabulary can be spotless while nine bindable system roles still name the
-// resource, their wildcard selectors still expand onto it, and the reconciler is
-// still handed mirror rows of that type — which is exactly the state the compute
-// retire left behind.
+// services/iam/internal/check/retired_block_storage_test.go судит АРТЕФАКТЫ
+// дерева: четыре словаря iam, канонический файл модели, порождённый конфигмап,
+// каталог прав. Ни один из них не видит СТРОКИ. Словарь бывает безупречен, пока
+// девять привязываемых системных ролей всё ещё называют ресурс, их подстановки
+// разворачиваются на него, а реконсайлеру подают зеркальные строки этого типа —
+// ровно то состояние, которое оставила за собой отставка блочного хранения у
+// compute.
 //
-// So this file asserts the schema a migrated database actually has, and it does it
-// twice over, because the two questions are different:
+// Поэтому здесь утверждается схема, которую база РЕАЛЬНО получила.
 //
-//	after every migration — the seeded state carries no retired name any more;
-//	on a re-run of the retiring migration — its statements REMOVE a retired row
-//	that is present, and LEAVE a live one alone. A fresh database is empty of
-//	retired rows whether or not the DELETE works, so the first assertion alone
-//	would be satisfied by a migration that does nothing at all.
+// # Здесь стояла вторая проба — она снята вместе со своим предметом
 //
-// ПОВТОР ИДЁТ НА СХЕМЕ ВЕРСИИ 0074, А НЕ НА ГОЛОВЕ (kacho#1042). Прежде тело
-// миграции переигрывалось поверх полностью намигрированной базы, и это несло
-// структурный изъян: тело обязано ссылаться на объекты СВОЕЙ эпохи, а поздняя
-// миграция вправе их снять. Так и вышло — 20260822160000 (kacho#917) сняла у
-// журнала намерений колонки доставки, и шаг (5) тела 0074, отбирающий очередные
-// кортежи по `sent_at IS NULL`, перестал исполняться вовсе: повтор падал
-// `column "sent_at" does not exist` (42703) ЦЕЛИКОМ, то есть проба перестала
-// утверждать даже то, о чём спрашивала. Править саму 0074 нельзя (ban #5), и
-// правильного тела у неё нет: тело верно для своей версии схемы.
+// Рядом жило утверждение о СТАТЕМЕНТАХ миграции 0074: схема поднималась ровно до
+// её версии, сеялись снятая и живая строки, тело переигрывалось, и проверялось,
+// что снята только снятая. Довод был верен для мира лестницы: свежая база пуста
+// от снятых строк независимо от того, работает DELETE или нет, — то есть
+// утверждение ниже удовлетворила бы и миграция, не делающая НИЧЕГО.
 //
-// Поэтому база поднимается ровно до 0074 (`migrateEnvUpTo`), фикстуры сеются
-// сырым SQL той же эпохи, и тело переигрывается там, где оно исполнимо. Изъян
-// закрыт НАВСЕГДА: следующая миграция, снявшая что-нибудь из названного в 0074,
-// эту пробу больше не заденет. Побочный выигрыш — шаг (5) теперь исполняется и
-// утверждается, а раньше не утверждался никем.
+// Свод 171 миграции в одну первичную этот довод снял. Миграции, которая могла бы
+// «не делать ничего», больше нет: посев — буквальный перечень строк, и отсутствие
+// в нём снятого имени есть факт перечня, а не утверждение о статементе.
 //
-// Every assertion is paired with a positive control from the SAME module
-// (compute.instance) or the present owner (storage.volumes): "the retired name is
-// absent" is otherwise indistinguishable from "the table is empty" and from "the
-// migration deleted more than it was supposed to".
+// Сильнее того, повторное появление снятого имени теперь запрещено СХЕМОЙ:
+// триггер `role_rule_selector_types_live` отвергает объявленный тип, которого нет
+// живым в `catalog_resource` (23514). Это свойство держат свои пробы —
+// role_rule_selector_types_live_integration_test.go и
+// selector_liveness_refusal_reaches_the_caller_integration_test.go, — и
+// переписывать их здесь значило бы завести второе место об одном предмете.
+//
+// # Почему утверждение ниже не стало вакуумным
+//
+// Каждое отрицание идёт В ПАРЕ с положительным контролем из ТОГО ЖЕ модуля
+// (compute.instance) или у нынешнего владельца (storage.volumes): «снятого имени
+// нет» иначе неотличимо от «таблица пуста» и от «снято больше положенного».
+// Плюс перепись объёма: число прочитанных ролей и строк проекции печатается и
+// обязано быть ненулевым.
 
 import (
 	"context"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // retiredDottedTypes / retiredRoleNames — the block-storage identities iam has
@@ -130,145 +127,15 @@ func TestRetiredBlockStorageIsGoneFromMigratedSchema(t *testing.T) {
 		require.Zerof(t, n, "access_bindings still reference retired role %q", name)
 	}
 
-	// (4) resource_mirror carries no retired type. On a fresh database this is
-	// vacuous by itself — TestRetireMigrationRemovesRetiredRowsOnly below is what
-	// proves the statement behind it.
+	// (4) resource_mirror carries no retired type. Прежде рядом стояла проба,
+	// переигрывавшая тело отставки, и она держала это утверждение от вакуума;
+	// её предмет — статементы миграции — снят сводом. Сегодня от вакуума держит
+	// схема: `role_rule_selector_types_live` отвергает снятый тип на записи, и
+	// это свойство утверждают свои пробы.
 	for _, ty := range retiredDottedTypes {
 		var n int
 		require.NoError(t, pool.QueryRow(ctx,
 			`SELECT count(*) FROM kacho_iam.resource_mirror WHERE object_type = $1`, ty).Scan(&n))
 		require.Zerof(t, n, "resource_mirror still holds rows of retired object type %q", ty)
 	}
-}
-
-// retireMigrationPrefix / retireMigrationVersion — the migration under test.
-// Named once so the gate moves with it; версия нужна, чтобы поднять схему ровно
-// до неё (см. шапку файла).
-const (
-	retireMigrationPrefix  = "0074"
-	retireMigrationVersion = int64(74)
-)
-
-func TestRetireMigrationRemovesRetiredRowsOnly(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: requires Postgres container")
-	}
-	ctx := context.Background()
-
-	// Схема РОВНО той версии, для которой тело 0074 написано: 0074 уже применена,
-	// повтор ниже — проверка идемпотентности и прицельности её операторов.
-	pool, db, _ := migrateEnvUpTo(t, ctx, retireMigrationVersion)
-
-	// A retired-type mirror row and a live-type one, side by side.
-	seedRetireFixtureMirrorRow(t, ctx, pool, "compute.disk", "dsk-retired-fixture")
-	seedRetireFixtureMirrorRow(t, ctx, pool, "compute.instance", "ins-live-fixture")
-	seedRetireFixtureMirrorRow(t, ctx, pool, "storage.volumes", "vol-live-fixture")
-
-	// Очередные кортежи журнала намерений: на снятом типе и на живом. Шаг (5) тела
-	// отбирает первый и обязан не тронуть второй. Пара обязательна: «строки нет»
-	// неотличимо от «оператор снёс всё».
-	seedRetireFixtureOutboxRow(t, ctx, pool, "compute_disk:dsk-retired-fixture")
-	seedRetireFixtureOutboxRow(t, ctx, pool, "compute_instance:ins-live-fixture")
-
-	// A custom role whose selector names a retired type ALONGSIDE a live one. The
-	// retire must strip the retired element and keep the row; dropping the whole
-	// row would take the live type's materialization with it.
-	owner := mustSeedUser(t, ctx, pool, "retiredbs")
-	acc := ownAccountOf(t, ctx, pool, owner)
-	mixedRole := seedCustomRoleSQL(t, ctx, pool, acc, "retiredbs_mixed")
-	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.role_rule_selectors
-		  (role_id, rule_fp, object_types, match_labels, arm, resource_names)
-		VALUES ($1, 'fp_mixed', ARRAY['compute.disk','compute.instance'], '{"env":"prod"}'::jsonb, 'labels', '{}')`,
-		mixedRole)
-	require.NoError(t, err, "seed mixed selector")
-
-	// A custom role whose selector names ONLY retired types: nothing is left to
-	// select, and role_rule_selectors_types_nonempty forbids a zero-type row, so
-	// the row itself must go.
-	onlyRole := seedCustomRoleSQL(t, ctx, pool, acc, "retiredbs_only")
-	_, err = pool.Exec(ctx, `
-		INSERT INTO kacho_iam.role_rule_selectors
-		  (role_id, rule_fp, object_types, match_labels, arm, resource_names)
-		VALUES ($1, 'fp_only', ARRAY['compute.disk','compute.image'], '{"env":"prod"}'::jsonb, 'labels', '{}')`,
-		onlyRole)
-	require.NoError(t, err, "seed retired-only selector")
-
-	// Re-run the REAL migration body (not a copy of it) against the seeded state.
-	require.NoError(t, applyMigrationUpBody(t, db, retireMigrationPrefix),
-		"re-running the retire migration must be idempotent")
-
-	// Mirror: the retired row is gone, the live ones are untouched.
-	requireMirrorCount(t, ctx, pool, "compute.disk", "dsk-retired-fixture", 0)
-	requireMirrorCount(t, ctx, pool, "compute.instance", "ins-live-fixture", 1)
-	requireMirrorCount(t, ctx, pool, "storage.volumes", "vol-live-fixture", 1)
-
-	// Журнал намерений: снятый тип уходит, живой остаётся.
-	requireOutboxCount(t, ctx, pool, "compute_disk:dsk-retired-fixture", 0)
-	requireOutboxCount(t, ctx, pool, "compute_instance:ins-live-fixture", 1)
-
-	// Mixed selector: kept, with the retired element removed and the live one left.
-	var mixedTypes []string
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT object_types FROM kacho_iam.role_rule_selectors WHERE role_id = $1 AND rule_fp = 'fp_mixed'`,
-		mixedRole).Scan(&mixedTypes))
-	require.Equal(t, []string{"compute.instance"}, mixedTypes,
-		"the retired element must be stripped and the live one kept — dropping the row would take the live type's materialization with it")
-
-	// Retired-only selector: removed entirely (a zero-type row is forbidden).
-	var onlyLeft int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.role_rule_selectors WHERE role_id = $1 AND rule_fp = 'fp_only'`,
-		onlyRole).Scan(&onlyLeft))
-	require.Zero(t, onlyLeft, "a selector left with no object type at all must be removed, not left violating role_rule_selectors_types_nonempty")
-}
-
-// ownAccountOf — аккаунт, который mustSeedUser завёл вместе с пользователем.
-// Берётся запросом, а не через Go-репозиторий: репозиторий пишет по схеме ГОЛОВЫ,
-// а эта проба работает на схеме версии 0074.
-func ownAccountOf(t *testing.T, ctx context.Context, pool *pgxpool.Pool, uid domain.UserID) domain.AccountID {
-	t.Helper()
-	var accID string
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT account_id FROM kacho_iam.users WHERE id = $1`, string(uid)).Scan(&accID))
-	return domain.AccountID(accID)
-}
-
-// seedRetireFixtureOutboxRow — очередная (недоставленная) строка журнала намерений
-// на заданный объект. `relation` обязателен: на версии 0074 ключ упорядочивания
-// заполняет триггер, и его сторож отвергает неполную полезную нагрузку.
-func seedRetireFixtureOutboxRow(t *testing.T, ctx context.Context, pool *pgxpool.Pool, object string) {
-	t.Helper()
-	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
-		VALUES ('fga.tuple.write',
-		        jsonb_build_object('user', 'user:usr-retiredbs', 'relation', 'v_get', 'object', $1::text),
-		        now())`, object)
-	require.NoError(t, err, "seed fga_outbox row for %s", object)
-}
-
-// requireOutboxCount — сколько строк журнала осталось на объекте.
-func requireOutboxCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, object string, want int) {
-	t.Helper()
-	var n int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.fga_outbox WHERE payload->>'object' = $1`, object).Scan(&n))
-	require.Equalf(t, want, n, "kacho_iam.fga_outbox rows on %s", object)
-}
-
-func seedRetireFixtureMirrorRow(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objectType, objectID string) {
-	t.Helper()
-	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.resource_mirror (object_type, object_id, parent_project_id, parent_account_id, labels)
-		VALUES ($1, $2, '', '', '{}'::jsonb)`, objectType, objectID)
-	require.NoError(t, err, "seed resource_mirror %s:%s", objectType, objectID)
-}
-
-func requireMirrorCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, objectType, objectID string, want int) {
-	t.Helper()
-	var n int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.resource_mirror WHERE object_type = $1 AND object_id = $2`,
-		objectType, objectID).Scan(&n))
-	require.Equalf(t, want, n, "resource_mirror %s:%s", objectType, objectID)
 }

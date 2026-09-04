@@ -51,13 +51,7 @@ import (
 func setupBootstrapDB(t *testing.T) string {
 	t.Helper()
 
-	dsn := pgtest.NewDB(t)
-	if strings.Contains(dsn, "?") {
-		dsn += "&"
-	} else {
-		dsn += "?"
-	}
-	return dsn + "options=-c%20search_path%3Dkacho_iam%2Cpublic"
+	return pgtest.NewDB(t)
 }
 
 func seedBootstrapUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, email string) string {

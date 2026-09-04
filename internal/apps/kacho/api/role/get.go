@@ -35,6 +35,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
@@ -42,14 +43,20 @@ import (
 
 type GetRoleUseCase struct {
 	repo Repo
+	// cat — ЖИВЫЕ строки каталога: набор глаголов типа для превью роли (#1994).
+	// Приходит ОБЯЗАТЕЛЬНЫМ параметром, а не опцией: непровязанный источник даёт
+	// роль без набора, а проекция такую роль отвергает — то есть чтение отказало
+	// бы целиком и в рантайме. Компилятор ловит это раньше.
+	cat catalog.Source
+
 	// relationQueries — FGA ListObjects port resolving the caller's readable-role
 	// (`viewer` tier) set on iam_role. Required for CUSTOM-role Get; when nil
 	// a custom-role Get fails closed (Unavailable). System-role Get never needs it.
 	relationQueries clients.RelationQueries
 }
 
-func NewGetRoleUseCase(r Repo) *GetRoleUseCase {
-	return &GetRoleUseCase{repo: r}
+func NewGetRoleUseCase(r Repo, cat catalog.Source) *GetRoleUseCase {
+	return &GetRoleUseCase{repo: r, cat: cat}
 }
 
 // WithRelationStore wires the FGA ListObjects client used to enforce per-object
@@ -75,24 +82,45 @@ func (u *GetRoleUseCase) Execute(ctx context.Context, id domain.RoleID) (domain.
 		return domain.Role{}, shared.MapRepoErr(err)
 	}
 
-	// System roles are the tenant-wide catalog floor — served to every
-	// authenticated caller, exempt from the per-object filter.
-	if out.IsSystem {
-		return out, nil
+	// РЕШЕНИЕ О ДОСТУПЕ — ОДНО, И УСПЕШНЫЙ ВОЗВРАТ ТОЖЕ ОДИН.
+	//
+	// Здесь стояли ДВА успешных возврата: системная роль выходила РАНЬШЕ, не
+	// спрашивая модель вовсе. Пока у чтения не было производного поля, это было
+	// безразлично; с появлением целости (#1035) оно стало ловушкой — помощник,
+	// поставленный после резолва видимости, на системном пути не исполнился бы
+	// НИКОГДА. Цена промаха была бы ровно мимо предмета: двенадцать ролей
+	// инцидента 513001 — СИСТЕМНЫЕ, и путь снятия каталога их не задевает
+	// (переселение ограничено `is_system = false`), то есть форма 513001 —
+	// единственный их путь к деградации и единственный, который такая
+	// расстановка глушит.
+	//
+	// Сведение к одному возврату делает пропущенный путь НЕПРЕДСТАВИМЫМ, а не
+	// запрещённым комментарием. Решения не меняются ни на одно: системная роль
+	// по-прежнему пол каталога и модель о ней не спрашивается.
+	authorized := out.IsSystem
+	if !authorized {
+		// CUSTOM role → per-object enforce via the SAME FGA grant-set as List.
+		// id ∉ set → NOT_FOUND (no existence leak); FGA error/nil port →
+		// Unavailable (fail-closed).
+		principal := operations.PrincipalFromContext(ctx)
+		visible, verr := resolveVisibleRoleIDs(ctx, u.relationQueries, principal, []string{string(id)})
+		if verr != nil {
+			return domain.Role{}, verr // already a fail-closed Unavailable status
+		}
+		authorized = visible[string(id)]
+	}
+	if !authorized {
+		// Ungranted custom role: same NOT_FOUND text as a non-existent role — the
+		// caller cannot distinguish "exists but not yours" from "does not exist".
+		return domain.Role{}, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrNotFound, "Role %s not found", id))
 	}
 
-	// CUSTOM role → per-object enforce via the SAME FGA grant-set as List.
-	// id ∉ set → NOT_FOUND (no existence leak); FGA error/nil port → Unavailable
-	// (fail-closed). The role body is returned ONLY when the caller is granted.
-	principal := operations.PrincipalFromContext(ctx)
-	visible, err := resolveVisibleRoleIDs(ctx, u.relationQueries, principal, []string{string(id)})
-	if err != nil {
-		return domain.Role{}, err // already a fail-closed Unavailable status
+	// Целость считается ПОСЛЕ решения о доступе и на отказном пути не считается
+	// вовсе: значение не производится для роли, которую вызывающий читать не
+	// вправе.
+	page := []domain.Role{out}
+	if ierr := attachIntegrity(ctx, rd, u.cat, page); ierr != nil {
+		return domain.Role{}, ierr
 	}
-	if visible[string(id)] {
-		return out, nil
-	}
-	// Ungranted custom role: same NOT_FOUND text as a non-existent role — the
-	// caller cannot distinguish "exists but not yours" from "does not exist".
-	return domain.Role{}, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrNotFound, "Role %s not found", id))
+	return page[0], nil
 }

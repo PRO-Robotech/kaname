@@ -37,7 +37,6 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/authz/proxytuple"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
@@ -198,19 +197,19 @@ type tupleIntent struct {
 	object   string
 }
 
-// objectType / objectID parse the FGA `<type>:<id>` object into the dotted
-// closed-table key (resource_mirror.object_type) + opaque id. validateTuple has
-// already enforced the `<type>:<id>` grammar, so colon split is safe here.
-func (t tupleIntent) objectType() (string, string) {
+// splitObject разбирает объект FGA `<type>:<id>` на имя типа и непрозрачный
+// идентификатор. `validateTuple` уже потребовал грамматику `<type>:<id>`,
+// поэтому разрез по первому двоеточию безопасен.
+//
+// ПЕРЕВОДА ЗДЕСЬ БОЛЬШЕ НЕТ, и это несущее место (kacho#1990). Стоявший тут
+// обратный перевод спрашивал словарь, ПОРОЖДЁННЫЙ СБОРКОЙ, и на промахе
+// оставлял имя МОДЕЛИ там, где колонка названа словарём КАТАЛОГА, — то есть
+// объект типа, заведённого применением манифеста в работающем процессе, в
+// зеркало не попадал вовсе. Имя каталога теперь спрашивается у живой строки, в
+// той же транзакции, что пишет зеркало (`catalog_type.go`).
+func (t tupleIntent) splitObject() (fgaType, id string) {
 	colon := strings.IndexByte(t.object, ':')
-	fgaType := t.object[:colon]
-	id := t.object[colon+1:]
-	// Reverse-map known FGA types to the dotted key (e.g. compute_instance →
-	// compute.instance); unknown types are kept verbatim (generic mirror).
-	if dotted, ok := authzmap.DottedType(fgaType); ok {
-		return dotted, id
-	}
-	return fgaType, id
+	return t.object[:colon], t.object[colon+1:]
 }
 
 // isPureGrant reports whether the intent only opens the object for anonymous
@@ -230,21 +229,35 @@ func (t tupleIntent) isPureGrant() bool {
 // resource_mirror co-commit (labels + parent-scope of the owner object) + the
 // reconcile-event enqueue and parent_account_id backfill.
 type RegisterResourceUseCase struct {
-	emitter   relationOutboxEmitter
-	mirror    resourceMirrorEmitter
-	txb       service.TxBeginner
-	reconcile reconcileEventEmitter // optional, nil-safe
-	accounts  accountResolver       // optional, nil-safe
-	objRecon  objectReconciler      // sync post-commit — optional, nil-safe
-	residual  residualTupleReader   // names what the withdrawal must still take away — optional, nil-safe
-	metrics   materializationRecorder
-	logger    *slog.Logger
+	emitter      relationOutboxEmitter
+	mirror       resourceMirrorEmitter
+	txb          service.TxBeginner
+	catalogTypes catalogTypeReader     // ОБЯЗАТЕЛЕН, см. конструктор
+	reconcile    reconcileEventEmitter // optional, nil-safe
+	accounts     accountResolver       // optional, nil-safe
+	objRecon     objectReconciler      // sync post-commit — optional, nil-safe
+	residual     residualTupleReader   // names what the withdrawal must still take away — optional, nil-safe
+	metrics      materializationRecorder
+	logger       *slog.Logger
 }
 
 // NewRegisterResourceUseCase — constructor. `mirror` co-commits the
 // resource_mirror row in the same writer-tx as the owner-tuple emit.
-func NewRegisterResourceUseCase(emitter relationOutboxEmitter, mirror resourceMirrorEmitter, txb service.TxBeginner) *RegisterResourceUseCase {
-	return &RegisterResourceUseCase{emitter: emitter, mirror: mirror, txb: txb}
+//
+// `catalogTypes` — ПАРАМЕТР, А НЕ ОПЦИЯ, и различие несущее. Необъявленный
+// читатель означал бы запасной путь «переводим словарём сборки», то есть ровно
+// тот дефект, ради снятия которого он заведён (kacho#1990): запасной путь
+// молчалив — он даёт верный ответ на посеянных типах и неверный на заведённых
+// применением, и отличить одно от другого по исходу нельзя. Обязательность
+// проверяет КОМПИЛЯТОР: каждое место сборки use-case названо им поимённо, и
+// забыть провязку нельзя.
+func NewRegisterResourceUseCase(
+	emitter relationOutboxEmitter,
+	mirror resourceMirrorEmitter,
+	txb service.TxBeginner,
+	catalogTypes catalogTypeReader,
+) *RegisterResourceUseCase {
+	return &RegisterResourceUseCase{emitter: emitter, mirror: mirror, txb: txb, catalogTypes: catalogTypes}
 }
 
 // WithReconcile wires the reconcile-event emitter: a mirror change
@@ -310,7 +323,7 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 	if err := corevalidate.Labels("labels", labels); err != nil {
 		return err
 	}
-	objType, objID := t.objectType()
+	fgaType, objID := t.splitObject()
 	if t.isPureGrant() {
 		// Tuple only: no projection write, so no redelivery gate to consult and
 		// no binding fan-out to drive (no binding's desired set depends on the
@@ -318,8 +331,8 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 		_, err = uc.emitGrant(ctx, t, true, sourceVersion(in))
 		return err
 	}
-	changed, projectionUnchanged, err := uc.emit(ctx, t, service.ResourceMirrorRow{
-		ObjectType:      objType,
+	objType, changed, projectionUnchanged, err := uc.emit(ctx, t, service.ResourceMirrorRow{
+		ObjectType:      fgaType,
 		ObjectID:        objID,
 		ParentProjectID: in.GetParentProjectId(),
 		ParentAccountID: in.GetParentAccountId(),
@@ -489,7 +502,7 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 		_, err = uc.emitGrant(ctx, t, false, sourceVersion(in))
 		return err
 	}
-	objType, objID := t.objectType()
+	fgaType, objID := t.splitObject()
 	// EVERY relationship THIS PROXY COULD HAVE WRITTEN ON THE OBJECT GOES WITH IT.
 	//
 	// Withdrawing a hierarchy tuple is not "remove one edge", it is "this object no
@@ -511,11 +524,12 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 	// standing over-grant, so the tuple-delete and the reconcile event are enqueued
 	// unconditionally (fail-closed). The producer-cost saving is taken only on the grant
 	// path, where a no-op is provably a redelivery of work already done.
-	if _, _, err = uc.emit(ctx, t, service.ResourceMirrorRow{
-		ObjectType:    objType,
+	objType, _, _, err := uc.emit(ctx, t, service.ResourceMirrorRow{
+		ObjectType:    fgaType,
 		ObjectID:      objID,
 		SourceVersion: sourceVersion(in),
-	}, false, residual...); err != nil {
+	}, false, residual...)
+	if err != nil {
 		return err
 	}
 	// SYMMETRY WITH Register. Registration drives its materialization in-process right
@@ -727,16 +741,27 @@ func (uc *RegisterResourceUseCase) emitGrant(ctx context.Context, t tupleIntent,
 // SKIPPED with it (they were performed by the delivery that did write the row). The
 // unregister path always enqueues (a swallowed revoke would be an over-grant), so its
 // flag is informational only.
-func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool, extra ...service.RelationTuple) (changed bool, projectionUnchanged bool, err error) {
+// `row.ObjectType` приходит сюда именем словаря МОДЕЛИ — тем, что стояло в
+// кортеже, — и переводится в имя словаря КАТАЛОГА ВНУТРИ транзакции, до первого
+// обращения к зеркалу. Переведённое имя возвращается вызывающему: пост-коммитный
+// проход материализации адресует ТОТ ЖЕ объект, что легло в зеркало, и второй
+// перевод у него разошёлся бы с первым молча.
+func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row service.ResourceMirrorRow, write bool, extra ...service.RelationTuple) (objectType string, changed bool, projectionUnchanged bool, err error) {
 	tx, err := uc.txb.Begin(ctx)
 	if err != nil {
 		// Backend-down at connection acquisition → retriable Unavailable (the
 		// handler maps ErrUnavailable → codes.Unavailable; the caller's
 		// transactional-outbox drainer then re-delivers). Fixed opaque message —
 		// never surface the raw pgx driver text (host/port/user/db).
-		return false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+		return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
+
+	// Имя типа КАТАЛОГА — у живой строки, в этом же снимке (kacho#1990).
+	if row.ObjectType, err = uc.catalogObjectType(ctx, tx, row.ObjectType); err != nil {
+		return "", false, false, fmt.Errorf("resolve catalog object type: %w", err)
+	}
+	objectType = row.ObjectType
 
 	// The tuple named by the request, plus whatever the caller established must go with
 	// it (see residualTuples): one atomic enqueue, so a withdrawal cannot commit half of
@@ -751,7 +776,7 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		if uc.accounts != nil && row.ParentAccountID == "" && row.ParentProjectID != "" {
 			accID, ok, rerr := uc.accounts.AccountForProjectTx(ctx, tx, row.ParentProjectID)
 			if rerr != nil {
-				return false, false, fmt.Errorf("resolve account for project: %w", rerr)
+				return "", false, false, fmt.Errorf("resolve account for project: %w", rerr)
 			}
 			if ok {
 				row.ParentAccountID = accID
@@ -771,9 +796,9 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			// негоден. Чей это тип — вопрос другой полосы, и на неё отвечает
 			// правило приёма отказом по правам, без причины.
 			if stderrors.Is(err, iamerr.ErrUnknownResourceType) {
-				return false, false, shared.InvalidArg("object", iamerr.StripSentinel(err))
+				return "", false, false, shared.InvalidArg("object", iamerr.StripSentinel(err))
 			}
-			return false, false, fmt.Errorf("upsert resource mirror: %w", err)
+			return "", false, false, fmt.Errorf("upsert resource mirror: %w", err)
 		}
 		// An UNVERSIONED producer ('-infinity') loses every monotonic comparison, so its
 		// `changed = false` proves nothing about redelivery — treat it as changed so a
@@ -786,15 +811,15 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 		}
 		if changed {
 			if err = uc.emitter.EmitWriteTx(ctx, tx, tuples); err != nil {
-				return false, false, fmt.Errorf("emit fga outbox: %w", err)
+				return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
 			}
 		}
 	} else {
 		if err = uc.emitter.EmitDeleteTx(ctx, tx, tuples); err != nil {
-			return false, false, fmt.Errorf("emit fga outbox: %w", err)
+			return "", false, false, fmt.Errorf("emit fga outbox: %w", err)
 		}
 		if err = uc.mirror.DeleteTx(ctx, tx, row.ObjectType, row.ObjectID, row.SourceVersion); err != nil {
-			return false, false, fmt.Errorf("delete resource mirror: %w", err)
+			return "", false, false, fmt.Errorf("delete resource mirror: %w", err)
 		}
 	}
 	// Enqueue a reconcile event in the SAME writer-tx as the mirror
@@ -816,14 +841,14 @@ func (uc *RegisterResourceUseCase) emit(ctx context.Context, t tupleIntent, row 
 			eventType = "mirror.delete"
 		}
 		if err = uc.reconcile.EmitTx(ctx, tx, eventType, row.ObjectType, row.ObjectID); err != nil {
-			return false, false, fmt.Errorf("emit reconcile event: %w", err)
+			return "", false, false, fmt.Errorf("emit reconcile event: %w", err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		// Backend-down at commit → retriable Unavailable (same opaque, no-leak
 		// contract as Begin). The row/tuple did not durably land; the caller's
 		// drainer re-delivers.
-		return false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
+		return "", false, false, iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable")
 	}
-	return changed, projectionUnchanged, nil
+	return objectType, changed, projectionUnchanged, nil
 }

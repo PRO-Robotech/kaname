@@ -869,52 +869,23 @@ func scanUserStateWrite(row scanner) (domain.User, bool /*updated*/, bool /*rowE
 }
 
 func scanUser(row scanner) (domain.User, error) {
-	var (
-		u            domain.User
-		accountID    sql.NullString
-		externalID   sql.NullString
-		displayName  sql.NullString
-		inviteStatus sql.NullString
-		invitedBy    sql.NullString
-		labelsJSON   []byte
-	)
-	err := row.Scan(
-		(*string)(&u.ID),
-		&accountID,
-		&externalID,
-		(*string)(&u.Email),
-		&displayName,
-		&inviteStatus,
-		&invitedBy,
-		&u.CreatedAt,
-		&labelsJSON,
-	)
-	if err != nil {
-		return domain.User{}, err
-	}
-	if accountID.Valid {
-		u.AccountID = domain.AccountID(accountID.String)
-	}
-	if externalID.Valid {
-		u.ExternalID = domain.ExternalSubject(externalID.String)
-	}
-	if displayName.Valid {
-		u.DisplayName = domain.DisplayName(displayName.String)
-	}
-	if inviteStatus.Valid {
-		u.InviteStatus = domain.InviteStatus(inviteStatus.String)
-	}
-	if invitedBy.Valid {
-		u.InvitedBy = domain.UserID(invitedBy.String)
-	}
-	u.Labels, err = unmarshalLabels(labelsJSON)
-	if err != nil {
+	var u domain.User
+	if err := scanUserInto(row, &u); err != nil {
 		return domain.User{}, err
 	}
 	return u, nil
 }
 
-func scanUserWithCreated(row scanner, out *domain.User, created *bool) error {
+// scanUserInto — ЕДИНСТВЕННОЕ объявление порядка назначений под userCols.
+// `extra` — приёмники, дописанные запросом ПОСЛЕ проекции (признак вставки у
+// CTE-форм InsertPending/Upsert); без них это обычное чтение userCols.
+//
+// Порядок объявлен один раз намеренно. Прежде его несли два независимых списка
+// — `scanUser` и этот, — и компилятор их не связывал: расхождение выражалось бы
+// только отказом живой Postgres на пути чтения. Ровно так у роли колонка,
+// добавленная в проекцию и не добавленная во вторую копию списка, положила
+// правку КАЖДОЙ роли (#1943). Заводя колонку в userCols, правь список здесь.
+func scanUserInto(row scanner, out *domain.User, extra ...any) error {
 	var (
 		accountID    sql.NullString
 		externalID   sql.NullString
@@ -923,7 +894,7 @@ func scanUserWithCreated(row scanner, out *domain.User, created *bool) error {
 		invitedBy    sql.NullString
 		labelsJSON   []byte
 	)
-	if err := row.Scan(
+	dest := append([]any{
 		(*string)(&out.ID),
 		&accountID,
 		&externalID,
@@ -933,8 +904,8 @@ func scanUserWithCreated(row scanner, out *domain.User, created *bool) error {
 		&invitedBy,
 		&out.CreatedAt,
 		&labelsJSON,
-		created,
-	); err != nil {
+	}, extra...)
+	if err := row.Scan(dest...); err != nil {
 		return err
 	}
 	if accountID.Valid {
@@ -958,6 +929,10 @@ func scanUserWithCreated(row scanner, out *domain.User, created *bool) error {
 	}
 	out.Labels = labels
 	return nil
+}
+
+func scanUserWithCreated(row scanner, out *domain.User, created *bool) error {
+	return scanUserInto(row, out, created)
 }
 
 func scanUserWithInserted(row scanner, out *domain.User, inserted *bool) error {

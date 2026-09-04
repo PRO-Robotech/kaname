@@ -19,6 +19,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/dto"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
@@ -38,6 +39,13 @@ const (
 type Resolver struct {
 	repo kachorepo.Repository
 	log  *slog.Logger
+	// cat — ЖИВЫЕ строки каталога: набор глаголов типа для превью роли (#1994).
+	//
+	// Нужен здесь по той же причине, что и на пути чтения: осиротевшая операция
+	// над ролью доводится до терминального исхода ЭТИМ кодом, и её ответ несёт то
+	// же превью, что вернул бы `Get`. Собрать его другим источником значило бы
+	// отдать арендатору два разных ответа об одной роли.
+	cat catalog.Source
 }
 
 // Option — функциональная опция Resolver.
@@ -53,8 +61,12 @@ func WithLogger(l *slog.Logger) Option {
 }
 
 // New конструирует Resolver.
-func New(repo kachorepo.Repository, opts ...Option) *Resolver {
-	r := &Resolver{repo: repo, log: slog.Default()}
+//
+// Каталожный факт приходит ОБЯЗАТЕЛЬНЫМ параметром: роль без набора глаголов
+// проекция отвергает, и опция позволила бы забыть провязку — исход был бы виден
+// только тогда, когда осиротевшая операция над ролью впервые дойдёт до резолва.
+func New(repo kachorepo.Repository, cat catalog.Source, opts ...Option) *Resolver {
+	r := &Resolver{repo: repo, cat: cat, log: slog.Default()}
 	for _, o := range opts {
 		o(r)
 	}
@@ -138,11 +150,11 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 		return resolveExistence(ctx, kindDelete, m.GetGroupId(), rd.Groups().Get, marshalGroup)
 
 	case *iamv1.CreateRoleMetadata:
-		return resolveExistence(ctx, kindCreate, m.GetRoleId(), rd.Roles().Get, marshalRole)
+		return resolveExistence(ctx, kindCreate, m.GetRoleId(), rd.Roles().Get, r.marshalRole)
 	case *iamv1.UpdateRoleMetadata:
-		return resolveExistence(ctx, kindUpdate, m.GetRoleId(), rd.Roles().Get, marshalRole)
+		return resolveExistence(ctx, kindUpdate, m.GetRoleId(), rd.Roles().Get, r.marshalRole)
 	case *iamv1.DeleteRoleMetadata:
-		return resolveExistence(ctx, kindDelete, m.GetRoleId(), rd.Roles().Get, marshalRole)
+		return resolveExistence(ctx, kindDelete, m.GetRoleId(), rd.Roles().Get, r.marshalRole)
 
 	case *iamv1.CreateAccessBindingMetadata:
 		return resolveExistence(ctx, kindCreate, m.GetAccessBindingId(), rd.AccessBindings().Get, marshalAccessBinding)
@@ -283,9 +295,18 @@ func marshalGroup(g domain.Group) (*anypb.Any, error) {
 	return anypb.New(dst)
 }
 
-func marshalRole(r domain.Role) (*anypb.Any, error) {
+// marshalRole — проекция роли для терминального ответа операции.
+//
+// Метод, а не свободная функция: набор глаголов типа берётся у ЖИВОГО каталога
+// резолвера, а не у словаря, порождённого сборкой (#1994).
+func (r *Resolver) marshalRole(role domain.Role) (*anypb.Any, error) {
+	if r.cat == nil {
+		return nil, fmt.Errorf("operationresolver: каталожный факт не провязан — " +
+			"превью роли собрать нечем (kacho#1994)")
+	}
+	role.TypeVerbs = r.cat.Facts().RolePreviewLookup()
 	var dst *iamv1.Role
-	if err := dto.Transfer(dto.FromTo(r, &dst)); err != nil {
+	if err := dto.Transfer(dto.FromTo(role, &dst)); err != nil {
 		return nil, err
 	}
 	return anypb.New(dst)

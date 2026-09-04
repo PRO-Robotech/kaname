@@ -105,6 +105,27 @@ func TestChainCeilingIsTheSumOfThreeSteps(t *testing.T) {
 // её проверку; (б) ручки второй ступени читаются РОВНО В ОДНОМ месте — иначе
 // воркер получил бы величину, которой страж не видел, и «судится» перестало бы
 // означать «судится то, с чем работают».
+//
+// # Распознаватель ключуется на РУЧКЕ, а не на общем чтеце (kacho#1945)
+//
+// Здесь считались ВСЕ вызовы `envDurationMS` — то есть общего чтеца ЛЮБОЙ
+// миллисекундной ручки процесса. Пока такая ручка в пакете была одна, разница
+// между «читают ручки второй ступени» и «зовут envDurationMS» не наблюдалась;
+// вторая ручка сделала её видимой — и гейт покраснел на файле, который к окну
+// пересчёта не относится ничем.
+//
+// Это не ослабление, а сужение до СВОЕГО предмета: считается вызов, чей первый
+// аргумент — одна из двух ручек второй ступени. Второй их читатель по-прежнему
+// находка; читатель ЧУЖОЙ ручки находкой быть перестал, потому что ею и не был.
+// reconcileWindowKnobIdents — имена констант ручек ВТОРОЙ СТУПЕНИ. Судятся
+// идентификаторы, а не значения: значение — строка, и оно встречается в прозе
+// (комментарии, страницы посадки), а гейт по строке краснел бы на собственном
+// объяснении.
+var reconcileWindowKnobIdents = map[string]bool{
+	"reconcileSweepKnob": true,
+	"reconcileDrainKnob": true,
+}
+
 func TestReconcileWindowGuardIsWiredAndTheKnobsHaveOneReader(t *testing.T) {
 	fset := token.NewFileSet()
 	pkgDir := "."
@@ -137,7 +158,14 @@ func TestReconcileWindowGuardIsWiredAndTheKnobsHaveOneReader(t *testing.T) {
 				case "readReconcileWindows":
 					readCallFiles[name]++
 				case "envDurationMS":
-					envReaderFiles[name]++
+					// Ключ — РУЧКА, а не чтец: `envDurationMS` читает любую
+					// миллисекундную ручку процесса, и счёт по его имени
+					// считал бы чужие.
+					if len(call.Args) > 0 {
+						if id, isIdent := call.Args[0].(*ast.Ident); isIdent && reconcileWindowKnobIdents[id.Name] {
+							envReaderFiles[name]++
+						}
+					}
 				}
 			case *ast.SelectorExpr:
 				if fn.Sel.Name == "validate" {

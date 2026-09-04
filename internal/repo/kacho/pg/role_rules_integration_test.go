@@ -33,6 +33,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // A-01: a role authored with mixed-arm rules round-trips its rules[] AND its
@@ -279,7 +280,7 @@ func TestRole_A10_LabelOnlyRolePersists(t *testing.T) {
 		Permissions: compiled, // empty
 	}
 	// (a) domain.Role.Validate accepts a rules-role with empty compiled permissions.
-	require.NoError(t, r.Validate(), "label-only rules-role must pass domain.Role.Validate")
+	require.NoError(t, r.Validate(catalogfixture.Facts()), "label-only rules-role must pass domain.Role.Validate")
 
 	// (b) Insert persists it (DB CHECK roles_permissions_valid must allow an empty
 	// permissions array WHEN rules is non-empty).

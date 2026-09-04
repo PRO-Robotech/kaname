@@ -13,6 +13,21 @@
 //
 // Каждое отрицание здесь стоит рядом с положительным контролем: перечень
 // отказов зеленел бы на схеме, отвергающей вообще всё.
+//
+// # Здесь стояла проба ОБРАТНОГО ЗАПОЛНЕНИЯ (BAT-1-25) — предмета у неё нет
+//
+// Она останавливала цепочку перед `20260824210000`, сеяла три формы уже лежащих
+// строк без колонки вида и требовала, чтобы миграция расклассифицировала их по
+// СОДЕРЖИМОМУ в четыре ветви. Миграций сервиса теперь одна — свод, — и колонка
+// `credential_kind` в нём объявлена сразу `NOT NULL`: строки без вида не
+// существует ни на одной применимой ревизии, поэтому Given пробы отвергает
+// продукт, а не проба.
+//
+// Проба снята вместе со своим предметом, а не ослаблена. То, ради чего вид
+// вводился, — что схема САМА держит инварианты каждой из четырёх форм —
+// утверждают пробы BAT-1-19, BAT-1-20 и BAT-1-24 ниже, и на своде они живут без
+// изменений. Сценарий приёмки BAT-1-25 остался без держателя; он назван в отчёте
+// линии как остаток, а не как починка.
 
 package migrations_test
 
@@ -21,11 +36,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
 // seedCredentialOwners заводит владельцев, без которых внешние ключи обеих
@@ -263,107 +276,6 @@ func TestBAT1_19_ServiceAccountMirrorRelaxationIsPartialNotRemoval(t *testing.T)
 	require.Error(t, err, "SECRET с перечнем доверенных субъектов записался")
 }
 
-// BAT-1-25 — обратное заполнение по СОДЕРЖИМОМУ, четыре ветви. Третья ветвь
-// утверждается ОТДЕЛЬНО И ОБЯЗАТЕЛЬНО: без неё правило было бы двузначным над
-// четырёхформенным корпусом, и строка без материала получила бы KEYPAIR — вид,
-// требований которого она не выполняет.
-func TestBAT1_25_BackfillClassifiesByActualContentInFourBranches(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: нужен Postgres в контейнере")
-	}
-	// Цепочка доводится ДО нашей миграции, строки сеются, затем миграция
-	// применяется — иначе обратному заполнению нечего заполнять.
-	dsn := pgtest.NewEmptyDB(t)
-	db := upToVersionIAM(t, dsn, basicTokenMigrationVersion-1)
-	defer db.Close()
-	seedCredentialOwners(t, db)
-
-	pem := "-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----"
-	trusted := `[{"issuer":"https://idp.example.invalid","subject_pattern":"^x$"}]`
-
-	_, err := db.Exec(`
-INSERT INTO kacho_iam.service_account_oauth_clients
-    (id, sva_id, hydra_client_id, created_by_user_id, public_key_pem, key_algorithm, trusted_subjects)
-VALUES
-    ('soc_00000000000000100', 'sva00000000000000bat', 'm-keypair',   'usr00000000000000bat', $1,  'ES256', '[]'::jsonb),
-    ('soc_00000000000000101', 'sva00000000000000bat', 'm-federated', 'usr00000000000000bat', '',  '',      $2::jsonb),
-    ('soc_00000000000000102', 'sva00000000000000bat', 'm-legacy',    'usr00000000000000bat', '',  '',      '[]'::jsonb)`,
-		pem, trusted)
-	require.NoError(t, err, "посев трёх форм уже лежащих строк")
-
-	_, err = db.Exec(`
-INSERT INTO kacho_iam.user_oauth_clients
-    (id, user_id, hydra_client_id, created_by_user_id, public_key_pem, key_algorithm)
-VALUES
-    ('uoc_00000000000000100', 'usr00000000000000bat', 'u-keypair', 'usr00000000000000bat', $1, 'ES256'),
-    ('uoc_00000000000000101', 'usr00000000000000bat', NULL,        'usr00000000000000bat', '', '')`, pem)
-	require.NoError(t, err, "посев двух форм строк личности")
-
-	upAllIAMMigrationsOn(t, db)
-
-	for id, want := range map[string]string{
-		"soc_00000000000000100": "KEYPAIR",
-		"soc_00000000000000101": "FEDERATED",
-		"soc_00000000000000102": "LEGACY",
-	} {
-		var got string
-		require.NoError(t, db.QueryRow(
-			`SELECT credential_kind FROM kacho_iam.service_account_oauth_clients WHERE id = $1`, id).Scan(&got))
-		require.Equal(t, want, got, "строка %s классифицирована как %s", id, got)
-	}
-	for id, want := range map[string]string{
-		"uoc_00000000000000100": "KEYPAIR",
-		"uoc_00000000000000101": "LEGACY",
-	} {
-		var got string
-		require.NoError(t, db.QueryRow(
-			`SELECT credential_kind FROM kacho_iam.user_oauth_clients WHERE id = $1`, id).Scan(&got))
-		require.Equal(t, want, got, "строка %s классифицирована как %s", id, got)
-	}
-
-	// Ни одна строка не теряет ни одного своего поля.
-	var pemAfter, mirrorAfter string
-	require.NoError(t, db.QueryRow(
-		`SELECT public_key_pem, hydra_client_id FROM kacho_iam.service_account_oauth_clients WHERE id = 'soc_00000000000000100'`).
-		Scan(&pemAfter, &mirrorAfter))
-	require.Equal(t, pem, pemAfter, "ключевой материал потерян обратным заполнением")
-	require.Equal(t, "m-keypair", mirrorAfter, "зеркало потеряно обратным заполнением")
-
-	// Перепись печатается ПО КАЖДОМУ виду: ноль по виду — законный ИЗМЕРЕННЫЙ
-	// исход, и он обязан быть виден как измеренный.
-	for _, k := range []string{"KEYPAIR", "SECRET", "FEDERATED", "LEGACY"} {
-		var n int
-		require.NoError(t, db.QueryRow(
-			`SELECT count(*) FROM kacho_iam.service_account_oauth_clients WHERE credential_kind = $1`, k).Scan(&n))
-		t.Logf("осмотрено: service_account_oauth_clients вид %s строк %d", k, n)
-	}
-}
-
-// basicTokenMigrationVersion — версия миграции, вводящей вид удостоверения.
-// Названа числом, потому что проба обратного заполнения обязана остановить
-// цепочку НЕПОСРЕДСТВЕННО перед ней: заполнять нечего, если строки посеяны
-// после.
 // noHash — пустой хеш. Именно ПУСТОЙ, а не NULL: колонка объявлена NOT NULL
 // DEFAULT ”, и «секрета нет» выражается пустым значением, а не отсутствием.
 var noHash = []byte{}
-
-const basicTokenMigrationVersion int64 = 20260824210000
-
-// upToVersionIAM доводит цепочку до названной версии включительно.
-func upToVersionIAM(t *testing.T, dsn string, version int64) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("pgx", dsn)
-	require.NoError(t, err)
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.UpTo(db, ".", version))
-	return db
-}
-
-// upAllIAMMigrationsOn доводит цепочку до конца на уже открытом соединении.
-func upAllIAMMigrationsOn(t *testing.T, db *sql.DB) {
-	t.Helper()
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.Up(db, "."))
-}

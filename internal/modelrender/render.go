@@ -135,6 +135,14 @@ func Render(r manifest.Resource) ([]byte, error) {
 	// сужение ключом `subjects` РЕСУРСА трогает ярусы и не трогает глаголы, —
 	// а своим составом и своими источниками действие распоряжается САМО.
 	for _, verb := range verbsInCanonOrder(r.Verbs) {
+		// Плоскость решает, ПОРОЖДАЕТ ли действие отношение, и правило это
+		// объявлено ОДИН раз (manifest.VerbProducesRelation) — здесь оно
+		// применяется, а не переписывается. Внутреннее действие отношения не
+		// порождает: его не спрашивает ни один гейт, а канон такой строки не
+		// несёт, и побайтовая сверка отвергла бы её.
+		if !manifest.VerbProducesRelation(verb) {
+			continue
+		}
 		subjects := defaultSubjects
 		sources := []string{manifest.SuperAdminRelation()}
 		if len(verb.Subjects) > 0 {

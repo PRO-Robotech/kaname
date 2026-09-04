@@ -82,9 +82,9 @@ func TestRefusalLaneOfTheWriterSurvivesTheTxExecutor(t *testing.T) {
 		onRefs: iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 			"resources: %s is not a live platform resource", "probeWithdrawn"),
 	}
-	_, err := moduleroles.NewApplier(store).Apply(context.Background(),
+	_, err := applierUnderTest(t, store).Apply(context.Background(),
 		clusterManifest("vpc", "vpc.network.admin",
-			[]manifest.Rule{{Module: "vpc", Resources: []string{"network"}, Classes: []string{"get"}}}))
+			[]manifest.Rule{{Module: "vpc", Resources: []string{"network"}, Classes: []string{"get"}}}), moduleroles.BootActorID)
 	if err == nil {
 		t.Fatalf("писатель отказал — применение обязано отказать тоже")
 	}
@@ -120,9 +120,9 @@ func TestRefusalLaneOfTheDomainDiffersFromTheWriter(t *testing.T) {
 	// Полоса домена: правило называет СНЯТЫЙ тип. До писателя такой вход не
 	// доходит — проверка домена стоит раньше.
 	domainStore := newStore()
-	_, domainErr := moduleroles.NewApplier(domainStore).Apply(context.Background(),
+	_, domainErr := applierUnderTest(t, domainStore).Apply(context.Background(),
 		clusterManifest("vpc", "vpc.network.admin",
-			[]manifest.Rule{{Module: "compute", Resources: []string{"disk"}, Classes: []string{"get"}}}))
+			[]manifest.Rule{{Module: "compute", Resources: []string{"disk"}, Classes: []string{"get"}}}), moduleroles.BootActorID)
 	if domainErr == nil {
 		t.Fatalf("правило называет снятый тип — применение обязано отказать")
 	}
@@ -136,9 +136,9 @@ func TestRefusalLaneOfTheDomainDiffersFromTheWriter(t *testing.T) {
 		onRefs: iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 			"resources: %s is not a live platform resource", "probeWithdrawn"),
 	}
-	_, writeErr := moduleroles.NewApplier(writerStore).Apply(context.Background(),
+	_, writeErr := applierUnderTest(t, writerStore).Apply(context.Background(),
 		clusterManifest("vpc", "vpc.network.admin",
-			[]manifest.Rule{{Module: "vpc", Resources: []string{"network"}, Classes: []string{"get"}}}))
+			[]manifest.Rule{{Module: "vpc", Resources: []string{"network"}, Classes: []string{"get"}}}), moduleroles.BootActorID)
 	if writeErr == nil {
 		t.Fatalf("писатель отказал — применение обязано отказать тоже")
 	}

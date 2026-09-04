@@ -119,7 +119,7 @@ func (r *smObjectReconciler) snapshot() [][2]string {
 func newRegUC(t *testing.T, rec *smObjectReconciler) (*RegisterResourceUseCase, *smTxBeginner) {
 	t.Helper()
 	txb := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb)
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{})
 	if rec != nil {
 		uc = uc.WithObjectReconciler(rec, nil)
 	}

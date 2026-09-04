@@ -44,7 +44,7 @@ import (
 // `compute.instances` is not, and today it silently compiles into a grant that
 // materializes nothing.
 func TestCreateRole_UnknownResourceToken_RejectedSync(t *testing.T) {
-	uc := &CreateRoleUseCase{} // nil repo/opsRepo: the reject must be a sync pre-check
+	uc := &CreateRoleUseCase{cat: catalogfixture.Source()} // nil repo/opsRepo: the reject must be a sync pre-check
 	_, err := uc.Execute(authnCtx(), domain.Role{
 		AccountID: "acc0000000000000abcd",
 		Name:      "typo_role",
@@ -65,7 +65,7 @@ func TestCreateRole_UnknownResourceToken_RejectedSync(t *testing.T) {
 // catalog is plural (`storage.volumes`). Locks that the check is a table lookup,
 // not a pluralisation heuristic.
 func TestCreateRole_UnknownResourceToken_SingularOfPluralType_RejectedSync(t *testing.T) {
-	uc := &CreateRoleUseCase{}
+	uc := &CreateRoleUseCase{cat: catalogfixture.Source()}
 	_, err := uc.Execute(authnCtx(), domain.Role{
 		AccountID: "acc0000000000000abcd",
 		Name:      "typo_role_2",
@@ -103,22 +103,42 @@ func TestUpdateRole_UnknownResourceToken_RejectedSync(t *testing.T) {
 // Conformance both ways: the gate must accept EXACTLY the published catalog. If it
 // rejected a grantable token the platform would lose a legitimate grant, which is a
 // worse failure than the one being fixed.
+//
+// После #1993 это утверждение стало ещё и СВЕРКОЙ ДВУХ СТОРОН: слева —
+// опубликованный каталог (`authzmap.Catalog()`, порождённый сборкой), справа —
+// ЖИВЫЕ строки посева, по которым теперь судит гейт. Расхождение сторон означало
+// бы, что арендатор читает грантуемым то, что платформа отвергает.
 func TestRuleCatalogGate_AcceptsEveryPublishedCatalogToken(t *testing.T) {
+	facts := catalogfixture.Facts()
 	for _, e := range authzmap.Catalog() {
 		rules := domain.Rules{{Module: e.Module, Resources: []string{e.Resource}, Verbs: []string{"get"}}}
-		assert.NoErrorf(t, validateRuleCatalog(rules, false),
+		assert.NoErrorf(t, validateRuleCatalog(rules, false, facts),
 			"catalog token %s.%s is published as grantable but the gate rejects it", e.Module, e.Resource)
 	}
+}
+
+// Каталог НЕ ПРОВЯЗАН — отказ, а не пропуск (#1993). Пропуск снял бы гейт целиком
+// и молча: правило над ЛЮБЫМ токеном проходило бы и материализовалось в ничто —
+// ровно тот тихий отказ, ради которого гейт заведён. Отрицательный контроль к
+// утверждению выше: без него «принято» было бы неотличимо от «сузить нечем».
+func TestRuleCatalogGate_NoCatalogSupplied_Rejected(t *testing.T) {
+	err := validateRuleCatalog(
+		domain.Rules{{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"}}},
+		false, nil)
+	require.Error(t, err, "непровязанный каталог обязан ОТКАЗАТЬ, а не пропустить")
+	assert.Contains(t, err.Error(), "was not supplied",
+		"текст обязан назвать провязку, а не вход арендатора: следующий шаг у этих двух разный")
 }
 
 // Wildcards are the system-role shape and are policed by domain.Rule.Validate
 // (system-only); the catalog gate must not double-reject them, else a system role
 // or the wildcard policy error would be masked by a spurious catalog error.
 func TestRuleCatalogGate_SkipsWildcards(t *testing.T) {
+	facts := catalogfixture.Facts()
 	assert.NoError(t, validateRuleCatalog(
-		domain.Rules{{Module: "*", Resources: []string{"*"}, Verbs: []string{"*"}}}, true))
+		domain.Rules{{Module: "*", Resources: []string{"*"}, Verbs: []string{"*"}}}, true, facts))
 	assert.NoError(t, validateRuleCatalog(
-		domain.Rules{{Module: "compute", Resources: []string{"*"}, Verbs: []string{"get"}}}, true))
+		domain.Rules{{Module: "compute", Resources: []string{"*"}, Verbs: []string{"get"}}}, true, facts))
 }
 
 // ── System roles: the seeded catalog must stay valid ─────────────────────────────
@@ -136,8 +156,9 @@ func TestRuleCatalogGate_SystemContextExempt(t *testing.T) {
 		{Module: "loadbalancer", Resources: []string{"operations"}, Verbs: []string{"get"}},
 		{Module: "vpc", Resources: []string{"subnetses"}, Verbs: []string{"list"}},
 	}
-	assert.NoError(t, validateRuleCatalog(seeded, true),
+	facts := catalogfixture.Facts()
+	assert.NoError(t, validateRuleCatalog(seeded, true, facts),
 		"a seeded system role's permission-derived tokens must not be rejected")
-	assert.Error(t, validateRuleCatalog(seeded, false),
+	assert.Error(t, validateRuleCatalog(seeded, false, facts),
 		"the same tokens authored into a CUSTOM role must be rejected")
 }

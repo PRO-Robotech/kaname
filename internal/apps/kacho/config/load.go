@@ -73,9 +73,17 @@ func Load(path string) (Config, error) {
 	// Привязка регистрирует ключ, НЕ давая ему значения: незаданная переменная
 	// оставляет поле нулевым, и отказ старта при объявленной опоре наступает
 	// ровно так же.
+	//
+	// Ручки СБОРКИ (задача #1971) привязываются здесь же и по той же причине:
+	// умолчания у них нет намеренно, а без привязки документированное имя не
+	// доехало бы до поля ВООБЩЕ. Секция читается одним словарём — все четыре
+	// ключа kebab-case, как вся прочая конфигурация службы, — поэтому имя
+	// переменной выводится тем же замены­телем и не требует второго правила.
 	for key, env := range map[string]string{
-		"manifests.dir":      "KACHO_IAM_MANIFESTS__DIR",
-		"manifests.required": "KACHO_IAM_MANIFESTS__REQUIRED",
+		"manifests.dir":           "KACHO_IAM_MANIFESTS__DIR",
+		"manifests.required":      "KACHO_IAM_MANIFESTS__REQUIRED",
+		"manifests.compose-model": "KACHO_IAM_MANIFESTS__COMPOSE_MODEL",
+		"manifests.admission":     "KACHO_IAM_MANIFESTS__ADMISSION",
 	} {
 		if err := v.BindEnv(key, env); err != nil {
 			return Config{}, fmt.Errorf("bind %s env: %w", key, err)

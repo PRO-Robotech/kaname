@@ -56,7 +56,7 @@ type scopeCarrierFixture struct {
 
 func newScopeCarrierFixture(t *testing.T, ctx context.Context) *scopeCarrierFixture {
 	t.Helper()
-	pool, err := pgxpool.New(ctx, appendSearchPathOptions(pgtest.NewDB(t)))
+	pool, err := pgxpool.New(ctx, pgtest.NewDB(t))
 	require.NoError(t, err)
 	// Закрытие пула С ПРЕДЕЛОМ: голое pool.Close ждёт занятые соединения без
 	// срока, и проба, уронившая транзакцию, вешает прогон вместо того чтобы

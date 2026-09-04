@@ -10,16 +10,23 @@ package pg_test
 // Приёмка: services/iam/docs/engineering/acceptance/roles-pointing-at-moved-resources.md
 // (APPROVED круга 2), сценарии IAM-RM-1-08, -09, -10, -16. Задача продукта #1825.
 //
-// Предмет, довод в пользу триггера и выбор fail-closed разобраны в шапке миграции
-// 20260902174500_selector_types_name_a_live_resource.sql — здесь они не
-// пересказываются, чтобы не завести двух мест об одном предмете.
+// Предмет, довод в пользу триггера и выбор fail-closed разобраны в САМОЙ СХЕМЕ —
+// комментарием к функции триггера (`COMMENT ON FUNCTION
+// kacho_iam.role_rule_selector_types_live()`); здесь они не пересказываются,
+// чтобы не завести двух мест об одном предмете.
+//
+// Здесь стояло имя отдельной миграции, и оно пережило свой предмет вместе со
+// сведением цепи в одну первичную. Разбор при этом не пропал — он переехал в
+// схему вместе с объявлением, — а вот координата стала ложной. Поэтому названо
+// ОБЪЯВЛЕНИЕ, а не файл: имя файла меняет перенос, объявление — нет.
 //
 // ГРАНИЦА НАЗВАНА: утверждение «отказ приходит от базы» без базы недоказуемо,
 // поэтому пробы формы у триггера нет и быть не может. Проба IAM-RM-1-16 читает
-// ТЕКСТ миграции и о поведении не говорит ничего.
+// ТЕКСТ поставляемой схемы и о поведении не говорит ничего.
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -31,10 +38,12 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
-// selectorMigrationPrefix — префикс имени миграции-предмета. Текст читается ИЗ
-// ПОСТАВЛЯЕМОГО ФАЙЛА (migrations.FS), а не переписывается в пробу: копия была бы
-// вторым местом об одном предмете и разошлась бы с оригиналом молча.
-const selectorMigrationPrefix = "20260902174500"
+// selectorTrigger — имя триггера-предмета. ИМЯ, А НЕ КООРДИНАТА: файл, в котором
+// объявление лежит, меняет перенос, а объявление переживает его.
+//
+// Текст читается ИЗ ПОСТАВЛЯЕМОГО НАБОРА (migrations.FS), а не переписывается в
+// пробу: копия была бы вторым местом об одном предмете и разошлась бы молча.
+const selectorTrigger = "role_rule_selectors_types_live"
 
 // writeSelector — прямая вставка строки селекторов. Прямая намеренно: предмет
 // пробы — ТРИГГЕР, то есть инвариант, который обязан держаться независимо от
@@ -170,38 +179,176 @@ func TestIAMRM110_SystemRoleSelectorSeedPasses(t *testing.T) {
 		strings.Join(stale, ", "))
 }
 
-// TestIAMRM116_MigrationRollbackDropsTheTriggerAndRestoresNothing — IAM-RM-1-16.
+// TestIAMRM116_DeliveredSchemaCarriesTheTriggerAndItsReversePathRemovesIt —
+// IAM-RM-1-16.
 //
-// Проба ФОРМЫ: читает текст поставляемой миграции. О поведении она не говорит
+// Проба ФОРМЫ: читает текст поставляемой схемы. О поведении она не говорит
 // ничего — это сказано вслух, чтобы её зелёное не читалось шире сделанного.
-func TestIAMRM116_MigrationRollbackDropsTheTriggerAndRestoresNothing(t *testing.T) {
-	entries, err := migrations.FS.ReadDir(".")
-	require.NoError(t, err)
-	var body string
-	var name string
-	for _, e := range entries {
-		if !strings.HasPrefix(e.Name(), selectorMigrationPrefix) {
+//
+// РЕФЕРЕНТ ПЕРЕЕХАЛ, И ЭТО НАДО СКАЗАТЬ ПРЯМО. Сценарий приёмки писался под
+// «новую миграцию» — отдельный файл, вводивший триггер. Цепь миграций сервиса
+// сведена в одну первичную, и такого файла в дереве больше нет: вопрос
+// «непуста ли нижняя половина ЭТОЙ миграции» перестал быть задаваемым by
+// construction, а не потому, что ответ изменился.
+//
+// Предмет при этом жив и проверяется ПРЯМЕЕ: триггер лежит в поставляемой схеме,
+// а обратный путь этой схемы объявлен, непуст, СНИМАЕТ триггер и ничего не
+// восстанавливает. Прежняя редакция утверждала это об одном файле; новая — о
+// том, что поставляется, и от числа файлов не зависит.
+//
+// Снятие триггера засчитывается ДВУМЯ формами, и обе законны: обратный путь либо
+// называет его (`DROP TRIGGER`), либо снимает объект, который его несёт
+// (`DROP SCHEMA … CASCADE`). Сегодня в дереве вторая; первая была вчера и
+// вернётся с любой миграцией, заводящей триггер своим файлом. Обе доказаны
+// инъекцией.
+func TestIAMRM116_DeliveredSchemaCarriesTheTriggerAndItsReversePathRemovesIt(t *testing.T) {
+	name, up := deliveredSchemaDeclaring(t, "CREATE TRIGGER "+selectorTrigger)
+
+	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ, и он первый: без него «обратный путь снимает
+	// триггер» верно тождественно на схеме, где триггера нет вовсе.
+	require.Containsf(t, up, "kacho_iam.role_rule_selector_types_live()",
+		"схема (%s) объявляет триггер, но не называет функцию, которую он исполняет: "+
+			"объявление есть, предмета у него нет", name)
+
+	for _, f := range auditReversePath(t, name) {
+		t.Error(f)
+	}
+}
+
+// executableLines — строки БЕЗ комментариев. Вырезать обязательно в обе стороны:
+// разбор по подстроке зеленел бы на собственном объяснении там, где ищет
+// снятие, и краснел бы на нём же там, где ищет запрещённое.
+func executableLines(block string) string {
+	var kept []string
+	for _, line := range strings.Split(block, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "--") {
 			continue
 		}
-		name = e.Name()
-		raw, rerr := migrations.FS.ReadFile(e.Name())
-		require.NoError(t, rerr)
-		body = string(raw)
+		kept = append(kept, line)
 	}
-	require.NotEmptyf(t, name, "ПРЕДПОСЫЛКА НАРУШЕНА: миграции с префиксом %s в "+
-		"поставляемом наборе нет — судить не о чем", selectorMigrationPrefix)
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
 
+// reversePathOf — откатная половина поставляемой миграции, ИСПОЛНЯЕМАЯ часть.
+func reversePathOf(t *testing.T, name string) string {
+	t.Helper()
+	raw, err := migrations.FS.ReadFile(name)
+	require.NoErrorf(t, err, "поставляемая миграция %s не прочитана: отказ чтения — "+
+		"не пропуск", name)
+	body := string(raw)
 	i := strings.Index(body, "-- +goose Down")
-	require.Positivef(t, i, "у миграции %s нет откатной половины", name)
-	down := strings.TrimSpace(body[i+len("-- +goose Down"):])
-	require.NotEmptyf(t, down, "откатная половина %s ПУСТА: обратный путь объявлен "+
-		"полным (§2.9) и не исполнен", name)
-	require.Contains(t, down, "DROP TRIGGER")
-	require.Contains(t, down, "role_rule_selectors_types_live")
+	require.Positivef(t, i, "у миграции %s нет откатной половины вовсе", name)
+	return executableLines(body[i+len("-- +goose Down"):])
+}
+
+// auditReversePath отдаёт находки ЗНАЧЕНИЕМ, а не побочным эффектом: инъекция
+// обязана читать ИСХОД разбора, иначе «проба покраснела» неотличимо от «инъекция
+// сломала пробу».
+func auditReversePath(t *testing.T, name string) []string {
+	t.Helper()
+	return auditReversePathText(name, reversePathOf(t, name))
+}
+
+func auditReversePathText(name, down string) []string {
+	var findings []string
+	if down == "" {
+		return []string{fmt.Sprintf("откатная половина %s ПУСТА: обратный путь объявлен "+
+			"полным (§2.9) и не исполнен", name)}
+	}
+	namesTrigger := strings.Contains(down, "DROP TRIGGER") && strings.Contains(down, selectorTrigger)
+	dropsCarrier := strings.Contains(down, "DROP SCHEMA") &&
+		strings.Contains(down, "kacho_iam") && strings.Contains(down, "CASCADE")
+	if !namesTrigger && !dropsCarrier {
+		findings = append(findings, fmt.Sprintf(
+			"обратный путь %s не снимает триггер %s: он не называет его (DROP TRIGGER) и "+
+				"не снимает объект, который его несёт (DROP SCHEMA … CASCADE).\n"+
+				"Откат, оставляющий триггер, возвращает состояние, которого накат не "+
+				"отнимал, — и следующий накат встретит его дважды объявленным.",
+			name, selectorTrigger))
+	}
 	// Откат ничего не восстанавливает — иначе он вернул бы состояние, которого
-	// миграция не отнимала: данных она не трогает вовсе.
+	// накат не отнимал: данных он не трогает вовсе.
 	for _, forbidden := range []string{"INSERT INTO", "UPDATE kacho_iam.", "DELETE FROM"} {
-		require.NotContainsf(t, down, forbidden,
-			"откат %s трогает ДАННЫЕ (%s), хотя накат их не трогал", name, forbidden)
+		if strings.Contains(down, forbidden) {
+			findings = append(findings, fmt.Sprintf(
+				"откат %s трогает ДАННЫЕ (%s), хотя накат их не трогал", name, forbidden))
+		}
+	}
+	return findings
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ИНЪЕКЦИЯ В ОБЕ СТОРОНЫ
+
+// TestIAMRM116_InjectionEmptyReversePathIsFound — ОБЯЗАН ПОКРАСНЕТЬ.
+func TestIAMRM116_InjectionEmptyReversePathIsFound(t *testing.T) {
+	if found := auditReversePathText("инъекция: пустой откат", ""); len(found) == 0 {
+		t.Fatal("разбор ПРОШЁЛ на пустом обратном пути: «объявлен полным» стало " +
+			"неотличимо от «не объявлен вовсе»")
+	}
+}
+
+// TestIAMRM116_InjectionReversePathThatKeepsTheTriggerIsFound — ОБЯЗАН ПОКРАСНЕТЬ.
+//
+// Кормится НАСТОЯЩИЙ обратный путь дерева с точечной правкой: снятие носителя
+// заменено безобидным оператором. Триггер после такого отката остаётся.
+func TestIAMRM116_InjectionReversePathThatKeepsTheTriggerIsFound(t *testing.T) {
+	name, _ := deliveredSchemaDeclaring(t, "CREATE TRIGGER "+selectorTrigger)
+	down := reversePathOf(t, name)
+	broken := strings.Replace(down, "DROP SCHEMA", "COMMENT ON SCHEMA", 1)
+	if broken == down {
+		broken = strings.Replace(down, "DROP TRIGGER", "COMMENT ON TRIGGER", 1)
+	}
+	if broken == down {
+		t.Fatalf("инъекция ничего не изменила: обратный путь %s не снимает ни носителя, "+
+			"ни триггер — тогда проба обязана быть красной сама по себе", name)
+	}
+	found := auditReversePathText(name, broken)
+	if len(found) == 0 {
+		t.Fatal("разбор ПРОМОЛЧАЛ на откате, оставляющем триггер: он не держит ничего")
+	}
+	if joined := strings.Join(found, "\n"); !strings.Contains(joined, selectorTrigger) {
+		t.Errorf("находка не называет триггер:\n%s", joined)
+	}
+}
+
+// TestIAMRM116_InjectionNamedDropIsAcceptedToo — ЗАКОННЫЙ БЛИЗНЕЦ.
+//
+// Обратный путь, снимающий триггер ПОИМЁННО, — та же вторая законная форма.
+// Красное здесь означало бы разбор, требующий сноса всей схемы от каждой
+// миграции, которая заводит триггер своим файлом.
+func TestIAMRM116_InjectionNamedDropIsAcceptedToo(t *testing.T) {
+	named := "DROP TRIGGER IF EXISTS " + selectorTrigger +
+		" ON kacho_iam.role_rule_selectors;"
+	if found := auditReversePathText("инъекция: поимённое снятие", named); len(found) > 0 {
+		t.Fatalf("разбор КРАСЕН на обратном пути, снимающем триггер поимённо:\n%s\n"+
+			"Это вторая законная форма, и требовать вместо неё сноса схемы значило бы "+
+			"краснеть на верной миграции.", strings.Join(found, "\n"))
+	}
+}
+
+// TestIAMRM116_InjectionReversePathTouchingDataIsFound — ОБЯЗАН ПОКРАСНЕТЬ.
+func TestIAMRM116_InjectionReversePathTouchingDataIsFound(t *testing.T) {
+	name, _ := deliveredSchemaDeclaring(t, "CREATE TRIGGER "+selectorTrigger)
+	down := reversePathOf(t, name) + "\nDELETE FROM kacho_iam.role_rule_selectors;"
+	found := auditReversePathText(name, down)
+	if len(found) == 0 {
+		t.Fatal("разбор ПРОМОЛЧАЛ на откате, трогающем ДАННЫЕ: он вернул бы состояние, " +
+			"которого накат не отнимал")
+	}
+}
+
+// TestIAMRM116_InjectionCommentAboutTheDropIsNotTheDrop — ЗАКОННЫЙ БЛИЗНЕЦ НАОБОРОТ.
+//
+// Обратный путь, где снятие только ОБЪЯСНЕНО комментарием, снятием не является.
+// Без этой пробы разбор зеленел бы на собственном объяснении — тот самый класс,
+// ради которого исполняемая часть вырезается.
+func TestIAMRM116_InjectionCommentAboutTheDropIsNotTheDrop(t *testing.T) {
+	onlyProse := "-- здесь был DROP SCHEMA IF EXISTS kacho_iam CASCADE;\n" +
+		"-- и DROP TRIGGER " + selectorTrigger + ";\nSELECT 1;"
+	if found := auditReversePathText("инъекция: снятие только в прозе",
+		executableLines(onlyProse)); len(found) == 0 {
+		t.Fatal("разбор ПРОШЁЛ на откате, где снятие только объяснено комментарием: " +
+			"он читает текст, а не исполняемое")
 	}
 }

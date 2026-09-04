@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/PRO-Robotech/kacho/pkg/modulemanifest"
 )
 
 // check.go — проверка ДЕРЕВА: каждый найденный манифест разбирается тем же
@@ -91,10 +93,13 @@ const (
 
 // manifestFileName — имя, под которым модуль кладёт свой манифест.
 //
-// Одно на дерево и здесь же: второе место, называющее это имя, разошлось бы с
-// первым молча, и часть манифестов перестала бы находиться, не дав ни одной
-// находки.
-const manifestFileName = "manifest.yaml"
+// Значение берётся у ЕДИНСТВЕННОГО объявления (`pkg/modulemanifest`), а не
+// пишется здесь: читателей у имени трое, и они в разных деревьях видимости —
+// правило `internal` запрещает производителю ConfigMap импортировать этот пакет.
+// Пока имя стояло тремя копиями, расхождение было МОЛЧАЛИВЫМ: обход, разошедшийся
+// с производителем, перестаёт находить часть манифестов и не даёт при этом ни
+// одной находки (задача #1934).
+const manifestFileName = modulemanifest.FileName
 
 // manifestSizeLimit — сколько байт манифеста читатель берёт в память.
 //
@@ -196,8 +201,26 @@ func (r CheckReport) Summary() string {
 // много, и вызывающему нужен не первый отказ, а ПЕРЕЧЕНЬ вместе с переписью.
 // Нечитаемый корень при этом остаётся находкой, а не пустым деревом: опечатка в
 // пути иначе печатала бы успокоительное «проверять нечего».
-func CheckTree(root string) CheckReport {
-	return walkManifests(root, isTreeManifestName)
+// Модель прав ВНОСИТ вызывающий (#2002): у оснастки дерева канон есть, и он
+// авторитетен — тип, о котором она спрашивает, уже в нём. Не внесена — связность
+// выдачи отношением не судится, и перепись связности это говорит.
+func CheckTree(root string, opts ...LoadOption) CheckReport {
+	return walkManifests(root, isTreeManifestName, ReferentShippedTable, opts...)
+}
+
+// CheckTreeForGeneration — тот же обход для прохода, ПОРОЖДАЮЩЕГО таблицу
+// типов (задача #1930).
+//
+// Существование типа здесь не судится: таблица есть продукт этого прохода, и
+// спрашивать у неё значило бы спрашивать у собственного ответа. Судит его канон
+// — `modelrender.Sweep`, у которого канон есть; форму по-прежнему судит
+// загрузчик. Почему референтов два и почему это один предикат, а не два места об
+// одном предмете — [TypeReferent].
+// Оракул связности здесь не вносится, и это ТОТ ЖЕ довод, что у референта: тип,
+// ради которого идёт порождение, канон образа не объявляет by construction —
+// суждение каноном отвергло бы законную выдачу на нём (#2002).
+func CheckTreeForGeneration(root string) CheckReport {
+	return walkManifests(root, isTreeManifestName, ReferentCanon)
 }
 
 // isTreeManifestName — что считается манифестом В ДЕРЕВЕ РАЗРАБОТКИ: базовое имя
@@ -220,7 +243,8 @@ func isDeliveredManifestName(name string) bool { return !strings.HasPrefix(name,
 //
 // Второй обход, написанный рядом, разошёлся бы с первым молча — и разошёлся бы
 // именно в той половине, которую никто не читает глазами.
-func walkManifests(root string, accept func(name string) bool) CheckReport {
+func walkManifests(root string, accept func(name string) bool, referent TypeReferent,
+	opts ...LoadOption) CheckReport {
 	var report CheckReport
 
 	// Корень открывается ОДИН раз и служит ГРАНИЦЕЙ чтения: всё, что читается
@@ -282,7 +306,7 @@ func walkManifests(root string, accept func(name string) bool) CheckReport {
 		}
 		report.ManifestsRead++
 		report.Paths = append(report.Paths, rel)
-		m, err := Load(data)
+		m, err := LoadWithReferent(data, referent, opts...)
 		if err != nil {
 			report.Findings = append(report.Findings, rel+": "+err.Error())
 			return nil

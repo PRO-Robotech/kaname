@@ -55,8 +55,34 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// МОДЕЛЬ ПРОЦЕССА — до первого теста, то есть до первого её читателя.
+	//
+	// Окно у установки ровно одно и то же, что на старте службы: установка после
+	// первого чтения запрещена (`authzmodel.ErrModelAlreadyRead`), а читают модель
+	// пути вердикта. Другого места, где это окно ещё открыто, в прогоне пакета нет.
+	//
+	// Отказ ФАТАЛЕН и приходит ЗДЕСЬ, а не отказом вердикта: несозданное условие,
+	// доехавшее до пробы, читалось бы как «красное» — и чинить пошли бы
+	// `relverdict`, который ни при чём. Довод целиком —
+	// harness_composed_model_test.go.
+	//
+	// Перепись печатается ВСЕГДА, независимо от исхода: без неё «добавлено 0»
+	// неотличимо от «прочитано 0».
+	rep, admission, mErr := installHarnessComposedModel()
+	fmt.Fprintf(os.Stderr, "модель процесса прогона: композиция [%s]; допуск [%s]\n",
+		rep.Census(), admission.Census())
+	if mErr != nil {
+		fmt.Fprintf(os.Stderr, "модель процесса не собрана: %v\n", mErr)
+		os.Exit(1)
+	}
+
 	os.Exit(pgtest.Run(m, pgtest.Config{
-		Name:    "iam",
-		Migrate: pgtest.Goose(migrations.FS),
+		// Приведение схемы — ОДИН раз на пакет, у выдающего базу.
+		// Прежде его приписывал каждый вызывающий своей копией; забывший
+		// получал `relation … does not exist` — отказ, читающийся как дефект
+		// продукта. Довод целиком — `internal/pgtest` §searchpath.
+		SearchPath: "kacho_iam,public",
+		Name:       "iam",
+		Migrate:    pgtest.Goose(migrations.FS),
 	}))
 }

@@ -27,8 +27,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 // Source — одно основание права.
@@ -66,9 +64,11 @@ type Source struct {
 // $4 типы предков атомов-фактов · $5 отношения атомов-фактов · $6 глаголы атомов-выдачи
 // $7 object_type в словаре КАТАЛОГА — им названы `resource_mirror.object_type`,
 // `role_verb.object_type` и `role_rule_selectors.object_types`, тогда как вопрос
-// приходит словарём модели. Перевод делается ОДИН раз, на входе, единственным
-// переходником (`authzmap.CatalogTypeName`); двух словарей в одном соединении
-// быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
+// приходит словарём модели. Перевод делается ОДИН раз, на входе, и читает ЖИВУЮ
+// строку каталога (`catalogTypeName`, catalogtype.go): таблица, порождённая
+// сборкой, о типе, заведённом применением манифеста в работающем процессе, не
+// знает (kacho#1986). Двух словарей в одном соединении быть не должно —
+// соединение по разным написаниям не совпадает НИКОГДА и молча.
 const expandSQL = `
 WITH RECURSIVE
 -- scope — ОБЛАСТИ, на которые может быть сделана действующая выдача: сам объект
@@ -222,8 +222,13 @@ func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string
 	if err != nil {
 		return nil, err
 	}
+	// Имя типа в словаре КАТАЛОГА — у ЖИВОЙ строки каталога (kacho#1986).
+	catalogType, err := catalogTypeName(ctx, q, objectType)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := q.Query(ctx, expandQuerySQL(labelTable), objectType, objectID, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, authzmap.CatalogTypeName(objectType))
+		factParents, factRelations, bindVerbs, catalogType)
 	if err != nil {
 		return nil, fmt.Errorf("relverdict: разбор: %w", err)
 	}

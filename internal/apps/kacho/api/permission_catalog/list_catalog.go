@@ -6,24 +6,48 @@
 //
 // The backend-driven grantable role-rule catalog: a PUBLIC sync read returning
 // the grantable-token taxonomy (modules → resources + per-type editor flags),
-// the closed verb set, and the wildcard policy. It is a PROJECTION FROM CODE —
-// authzmap.Catalog() (the closed objectTypes table) + authzmap.TypeHasVerbRelations
-// + authzmap.CommonVerbVocabulary() + a curated hasListEndpoint table — there is NO database,
-// NO migration, NO repo/pg layer. The catalog is immutable at runtime; it
-// extends only with a new backend release that adds a (module,resource) pair to
-// objectTypes (lockstep with fga_model.fga), which then appears automatically
-// (the projection is derived, not hand-maintained).
+// the common verb set, and the wildcard policy.
 //
-// Clean-arch: this use-case imports only `domain` + `authzmap` (both in-process
-// projections). It does NOT import grpc/proto — the handler projects the
-// use-case output to the proto wire shape.
+// ─────────────────────────────────────────────────────────────────────────────
+// ВИТРИНА ОТВЕЧАЕТ ЖИВЫМИ СТРОКАМИ КАТАЛОГА (#1976)
+//
+// Здесь стояло «проекция ИЗ КОДА: `authzmap.Catalog()` — закрытая таблица
+// objectTypes, — базы НЕТ, миграции НЕТ, каталог неизменяем в рантайме». Каждое
+// из четырёх утверждений было верно в день записи и перестало им быть: каталог
+// живёт СТРОКАМИ (`kacho_iam.catalog_resource` / `catalog_verb`), заводит их
+// применение манифеста модуля, а снятие (#1861) делает строку неживой.
+//
+// Расхождение перечня сборки с живыми строками наблюдаемо арендатору В ОБЕ
+// стороны, и обе половины тихие:
+//
+//	СНЯТИЕ    строка снята, перечень сборки её называет → витрина предлагает
+//	          тип, на который выдача отвергается ключом (`role_rule_ref_res_fk` /
+//	          `role_verb_type_fk` → `catalog_resource(..., live)`). Доступ не
+//	          расширяется — отказ fail-closed, — но клиент читает витрину как
+//	          перечень того, что можно выдать, и получает отказ на предложенном;
+//	СОЗДАНИЕ  тип заведён применением в РАБОТАЮЩЕМ процессе, сборка о нём не
+//	          знает → витрина о нём молчит, и арендатор не находит того, что сам
+//	          же объявил. Отказа нет ни одного: есть отсутствие строки, которое
+//	          читается как «такого ресурса у платформы нет».
+//
+// Витрина проецирует живые строки ТОЧНО — без добавлений и без изъятий, — и
+// второго чтения этим не заводит: снимок каталога уже собран и обновляется
+// фоном (`catalog.Snapshot`), поэтому вызов стоит разыменования указателя.
+//
+// Что ОСТАЛОСЬ за сборкой и почему это законно: `hasListEndpoint` — свойство
+// КРАЯ, а не каталога (публичный ли у типа отфильтрованный список), и живой
+// строкой оно не объявляется ни одной колонкой.
+//
+// Clean-arch: use-case импортирует `domain` + порт `catalog` и НЕ импортирует
+// grpc/proto — проекцию на провод делает хендлер.
 package permission_catalog
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
@@ -49,10 +73,10 @@ type Module struct {
 
 // Resource — one grantable (module,resource) token plus the editor flags.
 type Resource struct {
-	// Resource — the 2nd token segment, spelled exactly as in authzmap.objectTypes.
+	// Resource — the 2nd token segment, spelled exactly as in catalog_resource.resource.
 	Resource string
-	// HasVerbRelations — mirror of authzmap.TypeHasVerbRelations(objectType):
-	// true for verb-bearing leaves, false for tier-only ancestors (account/project).
+	// HasVerbRelations — набор глаголов ЖИВОЙ строки непуст: true у глагольных
+	// листьев, false у ярусных предков (account/project).
 	HasVerbRelations bool
 	// HasListEndpoint — true iff the type has a PUBLIC per-object filtered List on
 	// the api-gateway EXTERNAL listener (curated closed table; Internal-only List
@@ -66,7 +90,7 @@ type Resource struct {
 	// verb-bearing but NOT label-selectable). ARM_NAMES is NOT feed-gated.
 	LabelSelectable bool
 	// Verbs — глаголы, которые правило роли вправе назвать НА ЭТОМ ресурсе, в
-	// каноническом порядке показа. Зеркало `authzmap.VerbsOfType(objectType)`;
+	// каноническом порядке показа. Зеркало `catalog.Facts.VerbsOfType(objectType)`;
 	// пусто ровно тогда, когда HasVerbRelations = false.
 	//
 	// ЭТО источник выпадающего списка редактора ролей, а не ClosedVerbs (#1128):
@@ -87,13 +111,15 @@ type WildcardPolicy struct {
 	ModuleResourceWildcardSystemOnly bool
 }
 
-// ListPermissionCatalogUseCase — builds the catalog projection. Stateless (the
-// catalog is in-code); constructed once in the composition root.
-type ListPermissionCatalogUseCase struct{}
+// ListPermissionCatalogUseCase — builds the catalog projection.
+type ListPermissionCatalogUseCase struct {
+	// catalogSource — ЖИВЫЕ строки каталога, из которых строится витрина.
+	catalogSource catalog.Source
+}
 
 // NewListPermissionCatalogUseCase — builder.
-func NewListPermissionCatalogUseCase() *ListPermissionCatalogUseCase {
-	return &ListPermissionCatalogUseCase{}
+func NewListPermissionCatalogUseCase(catalogSource catalog.Source) *ListPermissionCatalogUseCase {
+	return &ListPermissionCatalogUseCase{catalogSource: catalogSource}
 }
 
 // Execute returns the grantable taxonomy. Authenticated-floor: an anonymous
@@ -105,25 +131,43 @@ func (u *ListPermissionCatalogUseCase) Execute(ctx context.Context) (Catalog, er
 		return Catalog{}, err
 	}
 
-	// Project authzmap.Catalog() (the closed objectTypes table) into ordered
-	// modules → resources. Catalog() is already sorted by the dotted key, so
-	// modules and resources both come out deterministically ordered, and a
-	// future objectTypes addition appears automatically.
+	// Каталожный факт берётся ОДИН раз на весь ответ. Взять его повторно внутри
+	// цикла значило бы собрать витрину из двух снимков: перечень пар от одного,
+	// набор глаголов от другого — и в окне обновления арендатор получил бы
+	// ресурс без глаголов либо глаголы снятого ресурса.
+	if u.catalogSource == nil {
+		// Провязки НЕТ — отказ, а не пустая витрина. Пустой ответ здесь читался
+		// бы как «платформа не даёт выдать ничего», то есть как утверждение о
+		// каталоге, которого никто не делал.
+		return Catalog{}, fmt.Errorf("каталог разрешений: источник живых строк не провязан — " +
+			"ответить перечнем, порождённым сборкой, значило бы назвать снятые типы живыми (#1976)")
+	}
+	facts := u.catalogSource.Facts()
+
 	var modules []Module
 	idxByModule := make(map[string]int)
-	for _, e := range authzmap.Catalog() {
-		fgaType, _ := authzmap.ObjectType(e.Module, e.Resource)
+	for _, e := range facts.Resources() {
+		dotted := e.Module + "." + e.Resource
+		// Набор ЭТОГО типа читается у живой строки. Пустой набор означает тип без
+		// пообъектных отношений действия (ярусный предок иерархии), и он законен:
+		// `HasVerbRelations` ровно это и объявляет.
+		verbs := facts.VerbsOfType(e.ObjectType)
 		res := Resource{
-			Resource:         e.Resource,
-			HasVerbRelations: authzmap.TypeHasVerbRelations(fgaType),
-			HasListEndpoint:  hasPublicListEndpoint(e.Module, e.Resource),
+			Resource: e.Resource,
+			// HasVerbRelations выводится из набора живой строки, а не спрашивается
+			// вторым вопросом: два источника одного факта разошлись бы на типе,
+			// у которого глаголы сняли, а признак забыли.
+			HasVerbRelations: len(verbs) > 0,
+			// HasListEndpoint — свойство КРАЯ, не каталога: живой строкой оно не
+			// объявляется, поэтому остаётся закрытой таблицей (см. шапку).
+			HasListEndpoint: hasPublicListEndpoint(e.Module, e.Resource),
 			// LabelSelectable — the ARM_LABELS feed-gate, projected straight from
-			// the domain source of truth (the dotted key matches authzmap's form).
-			LabelSelectable: domain.IsLabelSelectableType(e.Module + "." + e.Resource),
+			// the domain source of truth (the dotted key matches the catalog form).
+			LabelSelectable: domain.IsLabelSelectableType(dotted),
 			// Verbs — набор ЭТОГО типа, приведённый к каноническому порядку той же
 			// точкой, что и превью роли: порядок поверхности — часть контракта, и
 			// второй его источник разошёлся бы с первым молча.
-			Verbs: domain.OrderVerbsForDisplay(authzmap.VerbsOfType(fgaType)),
+			Verbs: domain.OrderVerbsForDisplay(verbs),
 		}
 		i, ok := idxByModule[e.Module]
 		if !ok {
@@ -148,8 +192,12 @@ func (u *ListPermissionCatalogUseCase) Execute(ctx context.Context) (Catalog, er
 	// алфавиту, поэтому без этого приведения смена источника молча переставила бы
 	// значения местами.
 	//
+	// Считается по ЖИВЫМ строкам тем же фактом, что и наборы типов выше: общее из
+	// одного источника, а частное из другого дало бы поле, не являющееся
+	// пересечением показанных наборов.
+	//
 	// CommonVerbVocabulary уже возвращает свежую копию — источник истины не алиасится.
-	closedVerbs := domain.OrderVerbsForDisplay(authzmap.CommonVerbVocabulary())
+	closedVerbs := domain.OrderVerbsForDisplay(facts.CommonVerbVocabulary())
 
 	return Catalog{
 		Modules:     modules,

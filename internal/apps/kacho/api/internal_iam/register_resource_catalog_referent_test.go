@@ -80,6 +80,7 @@ func TestRegisterResource_UnknownResourceType_IsAFieldNamedInvalidArgument(t *te
 		// приёма пропускает, и именно на нём сверка с каталогом что-то решает.
 		refusingMirror{objectType: "vpc_totally_invented"},
 		&smTxBeginner{},
+		seededCatalogTypes{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{
@@ -126,6 +127,7 @@ func TestRegisterResource_LiveResourceType_StillRegisters(t *testing.T) {
 		emitter,
 		refusingMirror{objectType: "vpc_totally_invented"},
 		&smTxBeginner{},
+		seededCatalogTypes{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{

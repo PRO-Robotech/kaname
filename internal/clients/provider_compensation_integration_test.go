@@ -13,7 +13,6 @@ package clients_test
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -98,14 +97,9 @@ func setupCompensationDB(t *testing.T) *pgxpool.Pool {
 	if testing.Short() {
 		t.Skip("skipping integration test in -short mode (postgres)")
 	}
-	// Своя база на общем Postgres пакета + search_path как у прод-бинаря.
+	// Своя база на общем Postgres пакета; путь поиска — тот же, что у прод-бинаря,
+	// и объявлен `pgtest.Config.SearchPath` этого пакета.
 	dsn := pgtest.NewDB(t)
-	const optionsParam = "options=-c%20search_path%3Dkacho_iam%2Cpublic"
-	if strings.Contains(dsn, "?") {
-		dsn += "&" + optionsParam
-	} else {
-		dsn += "?" + optionsParam
-	}
 	pool, err := coredb.NewPool(context.Background(), dsn)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)

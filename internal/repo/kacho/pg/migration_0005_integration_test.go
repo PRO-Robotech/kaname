@@ -1,390 +1,242 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: BUSL-1.1
 
-// migration_0005_integration_test.go — integration tests for the
-// `0005_rbac_v2_grammar_and_scope.sql` migration.
+// migration_0005_integration_test.go — инварианты грамматики прав RBAC v2 и
+// области выдачи (`access_bindings.scope`).
 //
-// Scenarios:
+// # Имя файла историческое, и это сказано здесь, а не подразумевается
 //
-//   - legacy 3-segment role.permissions promoted to 4-segment in-place
-//   - pre-existing 4-segment row passes through unchanged
-//   - malformed 4-segment INSERT rejected (SQLSTATE 23514)
-//   - wildcard-only `*.*.*.*` passes the v2 validator
-//   - access_bindings.scope backfill matches resource_type
-//   - scope CHECK + NOT NULL enforced
-//   - idempotent re-run does not duplicate data
-//   - backup tables `_pre_rbac_v2_*` carry pre-state
-//   - zero malformed permissions remain (defensive sweep)
-//   - malformed seed row aborts the migration without data loss
+// Файл заводился под миграцию `0005_rbac_v2_grammar_and_scope.sql` и шагал по
+// ЛЕСТНИЦЕ версий: поднять базу до 4, посеять состояние «до», применить пятую,
+// сверить состояние «после». Свод 171 миграции iam в одну первичную снял
+// лестницу целиком — файлов в каталоге ровно один (предикат:
+// `ls services/iam/internal/migrations/*.sql | wc -l` → 1), и никакого «до
+// пятой» больше не существует.
 //
-// The migration MUST be at `internal/migrations/0005_rbac_v2_grammar_and_scope.sql`
-// and registered in the embed.FS. Helper: a tiny goose-driven up-to-N applier
-// inline (iampgtest only ships up-to-head).
+// Переименовать файл нельзя тем же заходом, что его правит, поэтому имя
+// оставлено, а предмет назван здесь. Исторические номера сценариев (S3.1…S3.11)
+// сохранены в шапках проб — по ним находится то, что искали.
+//
+// # Разбор по ПРЕДМЕТУ: шесть проб перенесены, четыре сняты
+//
+// Проба снимается, только когда умер её ПРЕДМЕТ, а не когда умерла лестница, по
+// которой она к нему шла. Разложение — замером, по каждой:
+//
+//	S3.1  повышение legacy 3-сегментной записи до 4-сегментной НА МЕСТЕ
+//	      — СНЯТА: предмет есть ШАГ. Записи, которую повышать, в схеме не
+//	      существует: проверка отвергает трёхсегментную форму при вставке.
+//	S3.2  четырёхсегментная запись проходит
+//	      — ПЕРЕНЕСЕНА (вторая половина пробы; первая была про то же повышение).
+//	S3.3  негодная запись отвергается 23514
+//	      — ПЕРЕНЕСЕНА: грамматику держит `roles_permissions_valid`, живая.
+//	S3.4  `*.*.*.*` проходит
+//	      — ПЕРЕНЕСЕНА.
+//	S3.5  область выдачи выводится из типа ресурса
+//	      — ПЕРЕНЕСЕНА, и производитель НАЗВАН ДРУГОЙ: значение то же, но ставит
+//	      его теперь не обратное заполнение шага, а триггер
+//	      `access_bindings_scope_default_trg` — единственный производитель этого
+//	      значения в сведённой схеме.
+//	S3.6  область вне (1,2,3) отвергается; опущенная выводится
+//	      — ПЕРЕНЕСЕНА.
+//	S3.7  повторный прогон шага не двоит строк
+//	      — СНЯТА: шага нет, повторять нечего.
+//	S3.8  таблицы `_pre_rbac_v2_*` несут состояние «до»
+//	      — СНЯТА: таблицы сняты сводом (предикат: `grep -c _pre_rbac_v2` по
+//	      своду → 0). Утверждать о них значило бы утверждать о несуществующем.
+//	S3.10 негодных записей в посеянных ролях не остаётся
+//	      — ПЕРЕНЕСЕНА: посев ролей живой и вырос с 12 строк до 48.
+//	S3.11 шаг прерывается на неповышаемой строке, откат сохраняет её
+//	      — СНЯТА: предмет есть ПРЕРЫВАНИЕ ШАГА.
+//
+// Ослабления ни в одной перенесённой пробе нет: утверждения те же, изменилось
+// то, ЧЕМ поднимается база — не лестницей, а сведённой схемой целиком.
 package pg_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
-// startPostgresUpTo hands the caller an EMPTY database on the package's shared
-// Postgres, applies migrations up to and including version `to`, and returns a
-// connection pool.
+// ЗДЕСЬ ЛЕЖАЛИ ДВА ПОМОЩНИКА ЛЕСТНИЦЫ ВЕРСИЙ — startPostgresUpTo и applyOneMore.
 //
-// It stops short of the latest migration so callers can seed pre-migration state,
-// then call `applyOneMore(t, db)` to advance to the migration under test. The
-// database therefore has to be EMPTY rather than a clone of the migrated template:
-// the starting point is the whole point. It used to be an empty CONTAINER, which
-// bought that same starting point at the price of a server start per test.
-func startPostgresUpTo(t *testing.T, to int64) (*pgxpool.Pool, *sql.DB, string) {
+// Оба писались под цепочку из 171 миграции: первый останавливался НЕ ДОХОДЯ до
+// последней, чтобы вызывающий посеял состояние «до», второй шагал ровно один
+// раз. Свод оставил одну миграцию, и лестницы не стало: `to` любой величины
+// даёт всю схему целиком, а шагать после неё некуда.
+//
+// Их оставляли ради проб соседних миграций (0010, 0014, 0081), правившихся
+// своим изменением. Те пробы сняты вместе со своим предметом — снятой личностью
+// сетевого оператора (см. retired_operator_identity_integration_test.go), —
+// и вызывающих у помощников не осталось НИ ОДНОГО.
+//
+// Мёртвый помощник хуже отсутствующего: он выглядит рабочим, и следующий,
+// кому понадобится «состояние до», позовёт его и получит состояние ПОСЛЕ, не
+// узнав об этом ничем. Конечное состояние даёт setupTestDB.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Фикстура
+
+// rbacFixture — приведённая база с минимальной обвязкой: кластер, аккаунт,
+// пользователь, проект и одна кластерная роль, на которую можно сослаться.
+type rbacFixture struct {
+	pool   *pgxpool.Pool
+	roleID string
+}
+
+// newRbacFixture сеет обвязку ОДНОЙ транзакцией: связь аккаунта с владельцем и
+// пользователя с аккаунтом взаимна, и её внешние ключи отложены — построчная
+// автофиксация проверяла бы их на каждом операторе и отвергла бы любой порядок
+// вставки.
+func newRbacFixture(t *testing.T, ctx context.Context, suffix string) *rbacFixture {
 	t.Helper()
-	ctx := context.Background()
 
-	dsn := appendSearchPathOptions(pgtest.NewEmptyDB(t))
-
-	db, err := sql.Open("pgx", dsn)
+	pool, err := coredb.NewPool(ctx, setupTestDB(t))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = db.Close() })
+	pgtest.ClosePoolAtEnd(t, pool)
 
-	goose.SetBaseFS(migrations.FS)
-	require.NoError(t, goose.SetDialect("postgres"))
-	require.NoError(t, goose.UpTo(db, ".", to))
+	roleID := "rol0000000000000" + suffix
 
-	pool, err := coredb.NewPool(ctx, dsn)
+	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
-	t.Cleanup(func() { pool.Close() })
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		_, xerr := tx.Exec(ctx, sql, args...)
+		require.NoError(t, xerr, sql)
+	}
+	exec(`INSERT INTO kacho_iam.clusters (id, name) VALUES ('cluster_kacho_root', 'kacho')
+	      ON CONFLICT DO NOTHING`)
+	exec(`INSERT INTO kacho_iam.accounts (id, name, owner_user_id)
+	      VALUES ($1, $2, $3)`, "acc-"+suffix, "probe-"+suffix, "usr-"+suffix)
+	exec(`INSERT INTO kacho_iam.users (id, external_id, email, account_id)
+	      VALUES ($1, $2, $3, $4)`,
+		"usr-"+suffix, "ext-"+suffix, "usr-"+suffix+"@kacho.local", "acc-"+suffix)
+	exec(`INSERT INTO kacho_iam.projects (id, account_id, name)
+	      VALUES ($1, $2, $3)`, "prj-"+suffix, "acc-"+suffix, "home")
+	// Роль КЛАСТЕРНОГО яруса: на неё ссылаются выдачи всех областей, тогда как
+	// роль проекта ограничена своей. Имя обязано пройти roles_system_name_check.
+	exec(`INSERT INTO kacho_iam.roles (id, name, permissions, cluster_id)
+	      VALUES ($1, $2, '["compute.instance.*.get"]'::jsonb, 'cluster_kacho_root')`,
+		roleID, "kacho.probe"+suffix)
+	require.NoError(t, tx.Commit(ctx))
 
-	return pool, db, dsn
+	return &rbacFixture{pool: pool, roleID: roleID}
 }
 
-// applyOneMore advances goose by exactly one migration.
-func applyOneMore(t *testing.T, db *sql.DB) error {
-	t.Helper()
-	return goose.UpByOne(db, ".")
+// insertRole — вставка роли кластерного яруса с названным набором прав.
+// Возвращает ошибку как есть: грамматику судят пробы, а не помощник.
+func (f *rbacFixture) insertRole(ctx context.Context, id, name, perms string) error {
+	_, err := f.pool.Exec(ctx, `
+		INSERT INTO kacho_iam.roles (id, name, permissions, cluster_id)
+		VALUES ($1, $2, $3::jsonb, 'cluster_kacho_root')`, id, name, perms)
+	return err
 }
 
-// seedRole inserts a role row honouring the pre-migration validator (3-segment
-// permissions are accepted by 0001's iam_permissions_valid).
-func seedRole(t *testing.T, pool *pgxpool.Pool, id, name string, perms string) {
-	t.Helper()
-	ctx := context.Background()
-	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.roles(id, name, is_system, permissions, cluster_id)
-		VALUES ($1, $2, true, $3::jsonb, 'cluster_kacho_root')`,
-		id, name, perms)
-	require.NoError(t, err, "seed role %s", id)
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Грамматика прав (перенесено: S3.2, S3.3, S3.4, S3.10)
 
-// seedBinding inserts an access_binding (used both pre-migration to test
-// scope backfill, and post-migration to test CHECK enforcement).
-func seedBinding(t *testing.T, pool *pgxpool.Pool, id, resType, resID, roleID string) {
-	t.Helper()
-	ctx := context.Background()
-	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.access_bindings
-		    (id, subject_type, subject_id, role_id, resource_type, resource_id,
-		     status, granted_by_user_id)
-		VALUES ($1, 'user', 'usr00000000000000seed', $2, $3, $4, 'ACTIVE',
-		        'usr00000000000000seed')`,
-		id, roleID, resType, resID)
-	require.NoError(t, err, "seed binding %s", id)
-}
-
-// TestMigration0005_S31_PromotesLegacy3SegToWildcard4Seg — legacy 3-segment promoted to 4-segment in-place.
-func TestMigration0005_S31_PromotesLegacy3SegToWildcard4Seg(t *testing.T) {
+// TestRbacV2Grammar_FourSegmentPermissionIsAccepted — S3.2, вторая половина.
+//
+// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ для отрицания ниже: без него «негодная запись
+// отвергнута» было бы неотличимо от «в эту таблицу не вставляется ничего».
+func TestRbacV2Grammar_FourSegmentPermissionIsAccepted(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires docker")
 	}
 	ctx := context.Background()
-	pool, db, _ := startPostgresUpTo(t, 4)
+	f := newRbacFixture(t, ctx, "g4a")
 
-	seedRole(t, pool, "rol00000000000000s31a", "kacho.viewer",
-		`["compute.instance.read","vpc.network.create","iam.role.delete"]`)
-	// Need an active rol seed-role tied to a custom-role pattern: kacho-iam ships
-	// 12 system roles via 0001; we add ours as system to satisfy roles_scope_xor.
-
-	require.NoError(t, applyOneMore(t, db))
+	require.NoError(t, f.insertRole(ctx, "rol0000000000000g4ab", "kacho.probeg4ab",
+		`["compute.instance.inst-abc.update","vpc.network.*.create"]`),
+		"четырёхсегментная запись обязана приниматься — и именованным ресурсом, и подстановкой")
 
 	var raw string
-	require.NoError(t, pool.QueryRow(ctx,
+	require.NoError(t, f.pool.QueryRow(ctx,
 		`SELECT permissions::text FROM kacho_iam.roles WHERE id=$1`,
-		"rol00000000000000s31a",
-	).Scan(&raw))
-
-	for _, want := range []string{
-		`"compute.instance.*.read"`,
-		`"vpc.network.*.create"`,
-		`"iam.role.*.delete"`,
-	} {
-		require.Contains(t, raw, want, "promoted permissions should include %s; got %s", want, raw)
-	}
-	require.NotContains(t, raw, `"compute.instance.read"`, "legacy 3-seg should be gone")
+		"rol0000000000000g4ab").Scan(&raw))
+	require.Contains(t, raw, `"compute.instance.inst-abc.update"`)
+	require.Contains(t, raw, `"vpc.network.*.create"`)
 }
 
-// TestMigration0005_S32_PreExisting4SegPassesThrough — a 4-segment row passes through unchanged.
-func TestMigration0005_S32_PreExisting4SegPassesThrough(t *testing.T) {
+// TestRbacV2Grammar_MalformedPermissionIsRejected — S3.3.
+//
+// Утверждается ПАРА: код SQLSTATE и имя проверки. Одного кода мало — 23514
+// приходит от любой проверки таблицы, и проба зеленела бы, отвергнись строка по
+// совершенно другой причине.
+func TestRbacV2Grammar_MalformedPermissionIsRejected(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires docker")
 	}
 	ctx := context.Background()
-	pool, db, _ := startPostgresUpTo(t, 4)
+	f := newRbacFixture(t, ctx, "g4b")
 
-	// Pre-migration validator only accepts 3-seg, so we cannot seed a 4-seg
-	// row directly. Instead seed two 3-seg perms and verify both promote
-	// individually — the "passthrough" guarantee is exercised by the v2
-	// validator on the next test (S3.3).
-	seedRole(t, pool, "rol00000000000000s32a", "kacho.viewer",
-		`["compute.instance.read","vpc.network.read"]`)
-
-	require.NoError(t, applyOneMore(t, db))
-
-	var raw string
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT permissions::text FROM kacho_iam.roles WHERE id=$1`,
-		"rol00000000000000s32a",
-	).Scan(&raw))
-	require.Contains(t, raw, `"compute.instance.*.read"`)
-	require.Contains(t, raw, `"vpc.network.*.read"`)
-
-	// Now post-migration: writing a fresh 4-segment row succeeds.
-	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.roles(id, name, is_system, permissions, cluster_id)
-		VALUES ($1, $2, true, $3::jsonb, 'cluster_kacho_root')`,
-		"rol00000000000000s32b", "kacho.editor",
-		`["compute.instance.inst-abc.update","vpc.network.*.create"]`)
-	require.NoError(t, err, "post-migration 4-seg insert should succeed")
-}
-
-// TestMigration0005_S33_RejectsMalformedPostMigration — a malformed 4-segment INSERT is rejected (SQLSTATE 23514).
-func TestMigration0005_S33_RejectsMalformedPostMigration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires docker")
+	bad := []struct{ why, perms string }{
+		{"пустой сегмент", `["compute.instance.bad..verb"]`},
+		{"три сегмента — форма до RBAC v2", `["compute.instance.read"]`},
+		{"пять сегментов", `["compute.instance.inst-A.read.extra"]`},
+		{"пустой сегмент ресурса", `["compute..*.read"]`},
+		{"заглавные в модуле", `["UPPER.instance.*.read"]`},
 	}
-	ctx := context.Background()
-	pool, db, _ := startPostgresUpTo(t, 4)
-	require.NoError(t, applyOneMore(t, db))
+	for i, c := range bad {
+		id := fmt.Sprintf("rol0000000000000g4b%d", i)
+		err := f.insertRole(ctx, id, fmt.Sprintf("kacho.probeg4b%d", i), c.perms)
+		require.Error(t, err, "%s: %s обязано отвергаться", c.why, c.perms)
 
-	bad := []string{
-		`["compute.instance.bad..verb"]`,         // empty segment
-		`["compute.instance.read"]`,              // only 3 segments — must reject
-		`["compute.instance.inst-A.read.extra"]`, // 5 segments
-		`["compute..*.read"]`,                    // empty resource segment
-		`["UPPER.instance.*.read"]`,              // bad case for module
-	}
-	for _, perms := range bad {
-		_, err := pool.Exec(ctx, `
-			INSERT INTO kacho_iam.roles(id, name, is_system, permissions, cluster_id)
-			VALUES ($1, $2, true, $3::jsonb, 'cluster_kacho_root')`,
-			"rol00000000000000s33"+fmt.Sprintf("%d", len(perms)%10),
-			"kacho.bad"+fmt.Sprintf("%d", len(perms)%10),
-			perms)
-		require.Error(t, err, "expected reject for %s", perms)
 		pgErr := unwrapPgErr(err)
-		require.NotNil(t, pgErr, "expected pg-level error for %s; got %v", perms, err)
-		require.Equal(t, "23514", pgErr.Code, "expected CHECK violation 23514 for %s", perms)
+		require.NotNil(t, pgErr, "%s: ожидалась ошибка уровня СУБД, получено %v", c.why, err)
+		require.Equal(t, "23514", pgErr.Code, "%s: ожидалось нарушение проверки", c.why)
 		require.Contains(t, pgErr.ConstraintName, "permissions",
-			"violation should name a permissions-validating constraint for %s", perms)
+			"%s: нарушение обязано называть проверку ПРАВ, иначе строка отвергнута по "+
+				"другой причине и о грамматике проба не утверждает ничего", c.why)
 	}
 }
 
-// TestMigration0005_S34_WildcardOnlyPassesValidator — wildcard-only `*.*.*.*` passes the v2 validator.
-func TestMigration0005_S34_WildcardOnlyPassesValidator(t *testing.T) {
+// TestRbacV2Grammar_WildcardOnlyIsAccepted — S3.4.
+func TestRbacV2Grammar_WildcardOnlyIsAccepted(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires docker")
 	}
 	ctx := context.Background()
-	pool, db, _ := startPostgresUpTo(t, 4)
-	require.NoError(t, applyOneMore(t, db))
+	f := newRbacFixture(t, ctx, "g4c")
 
-	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.roles(id, name, is_system, permissions, cluster_id)
-		VALUES ($1, $2, true, $3::jsonb, 'cluster_kacho_root')`,
-		"rol00000000000000s34a", "kacho.superuser",
-		`["*.*.*.*"]`)
-	require.NoError(t, err)
+	require.NoError(t, f.insertRole(ctx, "rol0000000000000g4cw", "kacho.probeg4cw", `["*.*.*.*"]`),
+		"подстановка во всех четырёх сегментах законна: это и есть форма роли «может всё»")
 }
 
-// TestMigration0005_S35_ScopeBackfillByResourceType — access_bindings.scope backfill matches resource_type.
-func TestMigration0005_S35_ScopeBackfillByResourceType(t *testing.T) {
+// TestRbacV2Grammar_SeededRolesAreAllFourSegment — S3.10.
+//
+// Предмет не в конкретной роли, а в ПОСЕВЕ целиком: строка, разошедшаяся с
+// грамматикой, не отвергается ничем при чтении и всплывает отказом вердикта у
+// арендатора.
+//
+// Перепись печатается ВСЕГДА: «негодных ноль» обязано быть отличимо от «прочитано
+// ноль» — на пустой таблице отрицание выполняется тождественно.
+func TestRbacV2Grammar_SeededRolesAreAllFourSegment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires docker")
 	}
 	ctx := context.Background()
-	pool, db, _ := startPostgresUpTo(t, 4)
+	f := newRbacFixture(t, ctx, "g4d")
 
-	// Seed a custom-role to satisfy FK access_bindings_role_fk
-	seedRole(t, pool, "rol00000000000000s35a", "kacho.viewer",
-		`["compute.instance.read"]`)
-
-	seeds := []struct {
-		id, resType, resID string
-		wantScope          int
-	}{
-		{"acb00000000000000clst1", "cluster", "cluster_kacho_root", 1},
-		{"acb00000000000000acct1", "account", "acc00000000000000a001", 2},
-		{"acb00000000000000proj1", "project", "prj00000000000000p001", 3},
-		{"acb00000000000000vpcn1", "vpc_network", "enp00000000000000n001", 3},
-		{"acb00000000000000inst1", "compute_instance", "epd00000000000000i001", 3},
-		{"acb00000000000000user1", "user", "usr00000000000000u001", 3},
-		{"acb00000000000000role1", "iam_role", "rol00000000000000r001", 3},
-	}
-	for _, s := range seeds {
-		seedBinding(t, pool, s.id, s.resType, s.resID, "rol00000000000000s35a")
-	}
-
-	require.NoError(t, applyOneMore(t, db))
-
-	for _, s := range seeds {
-		var scope int
-		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT scope FROM kacho_iam.access_bindings WHERE id=$1`,
-			s.id,
-		).Scan(&scope))
-		require.Equal(t, s.wantScope, scope,
-			"resource_type=%s expected scope=%d", s.resType, s.wantScope)
-	}
-}
-
-// TestMigration0005_S36_ScopeCheckAndNotNull — scope CHECK + NOT NULL enforced.
-func TestMigration0005_S36_ScopeCheckAndNotNull(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires docker")
-	}
-	ctx := context.Background()
-	pool, db, _ := startPostgresUpTo(t, 4)
-	seedRole(t, pool, "rol00000000000000s36a", "kacho.viewer",
-		`["compute.instance.read"]`)
-	require.NoError(t, applyOneMore(t, db))
-
-	// CHECK violation: scope=4 not in (1,2,3)
-	_, err := pool.Exec(ctx, `
-		INSERT INTO kacho_iam.access_bindings
-		    (id, subject_type, subject_id, role_id, resource_type, resource_id,
-		     status, granted_by_user_id, scope)
-		VALUES ('acb00000000000000bad01', 'user', 'usr_x', $1, 'account', 'acc_y',
-		        'ACTIVE', 'usr_z', 4)`, "rol00000000000000s36a")
-	require.Error(t, err)
-	pgErr := unwrapPgErr(err)
-	require.NotNil(t, pgErr)
-	require.Equal(t, "23514", pgErr.Code)
-	require.Contains(t, pgErr.ConstraintName, "scope_ck")
-
-	// Omitted scope: BEFORE INSERT trigger derives it from resource_type so
-	// pre-W4 callers (existing repo Insert SQL without `scope` column) keep
-	// working. The NOT NULL constraint stays; only the path to satisfying
-	// it is the trigger, not a column default.
-	_, err = pool.Exec(ctx, `
-		INSERT INTO kacho_iam.access_bindings
-		    (id, subject_type, subject_id, role_id, resource_type, resource_id,
-		     status, granted_by_user_id)
-		VALUES ('acb00000000000000ok01', 'user', 'usr_x', $1, 'cluster',
-		        'cluster_kacho_root', 'ACTIVE', 'usr_z')`,
-		"rol00000000000000s36a")
-	require.NoError(t, err, "trigger must fill scope from resource_type='cluster'")
-	var derived int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT scope FROM kacho_iam.access_bindings WHERE id='acb00000000000000ok01'`,
-	).Scan(&derived))
-	require.Equal(t, 1, derived, "cluster resource_type derives scope=1")
-}
-
-// TestMigration0005_S37_Idempotent re-runs the migration; row counts stable.
-func TestMigration0005_S37_Idempotent(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires docker")
-	}
-	ctx := context.Background()
-	pool, db, _ := startPostgresUpTo(t, 4)
-
-	seedRole(t, pool, "rol00000000000000s37a", "kacho.viewer",
-		`["compute.instance.read"]`)
-	seedBinding(t, pool, "acb00000000000000s37a", "account", "acc00000000000000a001",
-		"rol00000000000000s37a")
-
-	require.NoError(t, applyOneMore(t, db))
-
-	var rolesBefore, bindingsBefore, backupBefore int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.roles`).Scan(&rolesBefore))
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.access_bindings`).Scan(&bindingsBefore))
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam._pre_rbac_v2_roles`).Scan(&backupBefore))
-
-	// Force goose to re-apply migration 5.
-	_, err := pool.Exec(ctx, `DELETE FROM goose_db_version WHERE version_id = 5`)
-	require.NoError(t, err)
-	require.NoError(t, applyOneMore(t, db))
-
-	var rolesAfter, bindingsAfter, backupAfter int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.roles`).Scan(&rolesAfter))
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.access_bindings`).Scan(&bindingsAfter))
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam._pre_rbac_v2_roles`).Scan(&backupAfter))
-
-	require.Equal(t, rolesBefore, rolesAfter, "roles row-count stable")
-	require.Equal(t, bindingsBefore, bindingsAfter, "access_bindings row-count stable")
-	require.Equal(t, backupBefore, backupAfter, "backup row-count stable (TRUNCATE-then-INSERT contract)")
-}
-
-// TestMigration0005_S38_BackupTablesCarryPreState — backup tables `_pre_rbac_v2_*` carry pre-state.
-func TestMigration0005_S38_BackupTablesCarryPreState(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires docker")
-	}
-	ctx := context.Background()
-	pool, db, _ := startPostgresUpTo(t, 4)
-
-	seedRole(t, pool, "rol00000000000000s38a", "kacho.viewer",
-		`["compute.instance.read","vpc.network.create"]`)
-	seedBinding(t, pool, "acb00000000000000s38a", "account", "acc00000000000000a001",
-		"rol00000000000000s38a")
-
-	require.NoError(t, applyOneMore(t, db))
-
-	var roleBackup string
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT permissions::text FROM kacho_iam._pre_rbac_v2_roles WHERE id=$1`,
-		"rol00000000000000s38a",
-	).Scan(&roleBackup))
-	require.Contains(t, roleBackup, `"compute.instance.read"`, "backup keeps pre-migration 3-seg form")
-	require.NotContains(t, roleBackup, `*.read`, "backup must NOT be promoted")
-
-	var bindingBackupCount int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam._pre_rbac_v2_access_bindings WHERE id=$1`,
-		"acb00000000000000s38a",
-	).Scan(&bindingBackupCount))
-	require.Equal(t, 1, bindingBackupCount)
-}
-
-// TestMigration0005_S310_ZeroMalformedPostMigration — zero malformed permissions remain (defensive sweep).
-func TestMigration0005_S310_ZeroMalformedPostMigration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("requires docker")
-	}
-	ctx := context.Background()
-	pool, db, _ := startPostgresUpTo(t, 4)
-	// 0001 seeds 12 system roles. Verify post-migration they're all 4-seg.
-	require.NoError(t, applyOneMore(t, db))
+	var total, withPerms int
+	require.NoError(t, f.pool.QueryRow(ctx,
+		`SELECT count(*), count(*) FILTER (WHERE jsonb_array_length(permissions) > 0)
+		   FROM kacho_iam.roles`).Scan(&total, &withPerms))
+	t.Logf("осмотрено ролей: %d, из них с непустым набором прав: %d", total, withPerms)
+	require.Positive(t, withPerms,
+		"ролей с непустым набором прав ноль — обход пуст, и вердикт беспредметен: "+
+			"утверждение «негодных нет» выполнялось бы тождественно")
 
 	var leftCount int
-	require.NoError(t, pool.QueryRow(ctx, `
+	require.NoError(t, f.pool.QueryRow(ctx, `
 		SELECT count(*) FROM kacho_iam.roles
 		WHERE EXISTS (
 			SELECT 1 FROM jsonb_array_elements_text(permissions) p
@@ -393,52 +245,105 @@ func TestMigration0005_S310_ZeroMalformedPostMigration(t *testing.T) {
 			   OR p !~ '^(\*|[a-zA-Z][a-zA-Z0-9_-]*)\.(\*|[a-zA-Z][a-zA-Z0-9_-]*)\.(\*|[a-zA-Z0-9_-]+)\.(\*|[a-z][a-zA-Z0-9_-]*)$'
 		)
 	`).Scan(&leftCount))
-	require.Equal(t, 0, leftCount, "all roles must be strict 4-segment post-migration")
+	require.Equal(t, 0, leftCount, "каждая посеянная роль обязана нести строго четырёхсегментные права")
 }
 
-// TestMigration0005_S311_AbortOnMalformedSeed — a malformed seed row aborts the migration without data loss.
+// ─────────────────────────────────────────────────────────────────────────────
+// Область выдачи (перенесено: S3.5, S3.6)
+
+// insertBinding — выдача с ЯВНО названной областью либо без неё (scope < 0).
+func (f *rbacFixture) insertBinding(ctx context.Context, id, resType, resID, subject string, scope int) error {
+	if scope < 0 {
+		_, err := f.pool.Exec(ctx, `
+			INSERT INTO kacho_iam.access_bindings
+			    (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
+			VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE')`,
+			id, subject, f.roleID, resType, resID)
+		return err
+	}
+	_, err := f.pool.Exec(ctx, `
+		INSERT INTO kacho_iam.access_bindings
+		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status, scope)
+		VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE', $6)`,
+		id, subject, f.roleID, resType, resID, scope)
+	return err
+}
+
+// TestAccessBindingScope_DerivedFromResourceType — S3.5.
 //
-// A row that the promoter cannot fix (>4 or <3 segments) trips the new CHECK
-// when it is re-attached; the migration transaction aborts, the seed row is
-// preserved.
-func TestMigration0005_S311_AbortOnMalformedSeed(t *testing.T) {
+// # Предмет тот же, ПРОИЗВОДИТЕЛЬ другой — и это сказано, а не умолчано
+//
+// Прежде значение ставило обратное заполнение шага миграции; в сведённой схеме
+// единственный его производитель — триггер `access_bindings_scope_default_trg`.
+// Утверждаемая таблица «тип ресурса → область» не изменилась ни в одной строке,
+// поэтому проба перенесена, а не заведена заново.
+//
+// Ветвь `ELSE 3` покрыта НЕСКОЛЬКИМИ типами намеренно: один тип не отличил бы
+// «умолчание работает» от «этот тип назван поимённо».
+func TestAccessBindingScope_DerivedFromResourceType(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires docker")
 	}
 	ctx := context.Background()
-	pool, db, _ := startPostgresUpTo(t, 4)
+	f := newRbacFixture(t, ctx, "sc1")
+	subject := "usr-sc1"
 
-	// The 0001 validator accepts 3-seg only. 5-seg cannot be seeded the
-	// normal way. Bypass: temporarily drop the CHECK to seed bad data.
-	_, err := pool.Exec(ctx,
-		`ALTER TABLE kacho_iam.roles DROP CONSTRAINT roles_permissions_valid`)
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `
-		INSERT INTO kacho_iam.roles(id, name, is_system, permissions, cluster_id)
-		VALUES ('rol00000000000000s311', 'kacho.broken', true,
-		        '["a.b.c.d.e"]'::jsonb, 'cluster_kacho_root')`)
-	require.NoError(t, err)
+	cases := []struct {
+		id, resType, resID string
+		want               int
+	}{
+		{"acb0000000000000clst1", "cluster", "cluster_kacho_root", 1},
+		{"acb0000000000000acct1", "account", "acc-sc1", 2},
+		{"acb0000000000000proj1", "project", "prj-sc1", 3},
+		{"acb0000000000000vpcn1", "vpc_network", "enp00000000000000n001", 3},
+		{"acb0000000000000inst1", "compute_instance", "epd00000000000000i001", 3},
+		{"acb0000000000000user1", "user", "usr00000000000000u001", 3},
+		{"acb0000000000000role1", "iam_role", "rol00000000000000r001", 3},
+	}
+	for _, c := range cases {
+		require.NoError(t, f.insertBinding(ctx, c.id, c.resType, c.resID, subject, -1),
+			"выдача на тип %s обязана вставляться без названной области", c.resType)
+	}
+	for _, c := range cases {
+		var got int
+		require.NoError(t, f.pool.QueryRow(ctx,
+			`SELECT scope FROM kacho_iam.access_bindings WHERE id=$1`, c.id).Scan(&got))
+		require.Equal(t, c.want, got, "тип ресурса %s обязан давать область %d", c.resType, c.want)
+	}
+}
 
-	err = applyOneMore(t, db)
-	require.Error(t, err, "migration must abort on un-promotable malformed row")
+// TestAccessBindingScope_OutOfRangeIsRejectedAndOmittedIsDerived — S3.6.
+//
+// Две стороны в ОДНОЙ пробе намеренно: отрицание («четвёрка отвергнута») без
+// парного положительного («опущенная выводится») зеленело бы и на схеме, куда
+// выдача не вставляется вовсе.
+func TestAccessBindingScope_OutOfRangeIsRejectedAndOmittedIsDerived(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires docker")
+	}
+	ctx := context.Background()
+	f := newRbacFixture(t, ctx, "sc2")
+	subject := "usr-sc2"
 
-	// The seed row is preserved (transaction rolled back).
-	var stillThere int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.roles WHERE id='rol00000000000000s311'`,
-	).Scan(&stillThere))
-	require.Equal(t, 1, stillThere, "rollback preserves the malformed row")
+	err := f.insertBinding(ctx, "acb0000000000000bad01", "account", "acc-sc2", subject, 4)
+	require.Error(t, err, "область вне (1,2,3) обязана отвергаться")
+	pgErr := unwrapPgErr(err)
+	require.NotNil(t, pgErr, "ожидалась ошибка уровня СУБД, получено %v", err)
+	require.Equal(t, "23514", pgErr.Code)
+	require.Contains(t, pgErr.ConstraintName, "scope_ck",
+		"нарушение обязано называть проверку ОБЛАСТИ: иначе строка отвергнута по другой "+
+			"причине и об области проба не утверждает ничего")
 
-	// Verify the migration did NOT half-apply: scope column should NOT exist
-	// after rollback.
-	var hasScope bool
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM information_schema.columns
-			WHERE table_schema='kacho_iam' AND table_name='access_bindings'
-			  AND column_name='scope'
-		)`).Scan(&hasScope))
-	require.False(t, hasScope, "scope column must NOT exist after migration rollback")
+	// Опущенная область: колонка объявлена NOT NULL и умолчания не имеет —
+	// значение ставит триггер. Вставка без области обязана проходить, иначе
+	// вызывающие, не знающие о колонке, перестали бы работать.
+	require.NoError(t, f.insertBinding(ctx,
+		"acb0000000000000ok001", "cluster", "cluster_kacho_root", subject, -1),
+		"триггер обязан вывести область из типа ресурса")
+	var derived int
+	require.NoError(t, f.pool.QueryRow(ctx,
+		`SELECT scope FROM kacho_iam.access_bindings WHERE id='acb0000000000000ok001'`).Scan(&derived))
+	require.Equal(t, 1, derived, "тип ресурса cluster даёт область 1")
 }
 
 // unwrapPgErr — peel pgconn.PgError out of wrap chain.

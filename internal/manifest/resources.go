@@ -732,7 +732,7 @@ func (v *Verb) UnmarshalYAML(node *yaml.Node) error {
 //
 // Находки собираются ВСЕ: названная первая заставила бы автора манифеста чинить
 // их по одной, по прогону на каждую, и скрыла бы, сколько их всего.
-func validateResources(m *Manifest, doc *yaml.Node) []error {
+func validateResources(m *Manifest, doc *yaml.Node, referent TypeReferent) []error {
 	var faults []error
 	seen := map[string][]int{}
 
@@ -750,7 +750,7 @@ func validateResources(m *Manifest, doc *yaml.Node) []error {
 			seen[r.Name] = append(seen[r.Name], i)
 		}
 
-		faults = append(faults, validateResourceAnchors(r, doc, i)...)
+		faults = append(faults, validateResourceAnchors(r, doc, i, referent)...)
 		faults = append(faults, validateResourceCascade(r, doc, i)...)
 		faults = append(faults, validateResourceTiers(r, doc, i)...)
 		faults = append(faults, validateResourceBaseRoles(r, doc, i)...)
@@ -787,7 +787,16 @@ func validateResources(m *Manifest, doc *yaml.Node) []error {
 }
 
 // validateResourceAnchors — тип объекта, якорь области и вид ключей записи.
-func validateResourceAnchors(r *Resource, doc *yaml.Node, i int) []error {
+//
+// # Существование типа судит РЕФЕРЕНТ, а не всегда таблица (задача #1930)
+//
+// Форму — «тип назван дословно» — судит эта функция при любом референте: имя
+// пустым не бывает ни в порождении, ни в потреблении. А вот ЧЛЕНСТВО в закрытой
+// таблице спрашивается только тогда, когда таблица уже произведена
+// ([ReferentShippedTable]); в проходе, который её ПОРОЖДАЕТ, тот же вопрос был
+// бы вопросом к собственному ответу, и существование там судит канон
+// (`modelrender.Sweep`).
+func validateResourceAnchors(r *Resource, doc *yaml.Node, i int, referent TypeReferent) []error {
 	var faults []error
 
 	switch r.ObjectType {
@@ -799,7 +808,7 @@ func validateResourceAnchors(r *Resource, doc *yaml.Node, i int) []error {
 				"<модуль>_<ресурс>» снято, оно не действует у 10 записей закрытой таблицы из 27",
 		})
 	default:
-		if _, ok := authzmap.DottedType(r.ObjectType); !ok {
+		if _, ok := authzmap.DottedType(r.ObjectType); referent.judgesTypeExistence() && !ok {
 			faults = append(faults, linkFault{
 				kind:  ErrObjectTypeUnknown,
 				coord: locate(doc, "resources", i, "objectType"),
@@ -939,7 +948,11 @@ func declaredRelationNames(r *Resource) map[string]struct{} {
 		}
 	}
 	for _, v := range r.Verbs {
-		if v.Name != "" {
+		// Внутреннее действие отношения не порождает (VerbProducesRelation),
+		// поэтому и ссылаться на него в `from` нечем: источник, которого блок
+		// не объявляет, даёт вердикт «нет» всегда, оставаясь на вид
+		// полноценным.
+		if v.Name != "" && VerbProducesRelation(v) {
 			out[VerbRelationName(v.Name)] = struct{}{}
 		}
 	}
@@ -1345,3 +1358,64 @@ func validateNoteText(n *Note, doc *yaml.Node, i, k int) []error {
 // Держит правило проба против ДЕРЕВА (verb_relation_name_test.go), а не против
 // литерала рядом: литерал согласился бы с любой редакцией правила.
 func VerbRelationName(verb string) string { return "v_" + strings.ToLower(verb) }
+
+// VerbProducesRelation — порождает ли действие отношение модели.
+//
+// Действие ВНУТРЕННЕЙ плоскости не порождает: арендатору оно недоступно by
+// construction (ban #6), а отношение существует ровно затем, чтобы правом на
+// него кого-то наделить.
+//
+// # Это ЗАМЕР, а не осторожность
+//
+// Перепись каталога прав (101 внутреннее действие шести модулей) даёт четыре
+// вида гейта у внутреннего действия, и ни один не спрашивает отношения, которое
+// породило бы ТОЛЬКО оно:
+//
+//   - ярус ОБЛАСТИ (`system_admin` / `system_viewer` на `cluster`) — 58; кортеж
+//     на область пишет ярусная роль платформы, к разделу модуля отношения нет;
+//   - отношение, которое УЖЕ порождает объявленное ТЕНАНТСКОЕ действие того же
+//     ресурса (`v_update` / `v_get` на `vpc_address`) — 8; второго объявления
+//     ему не нужно;
+//   - собственное отношение ресурса (`editor`, `realization_writer`,
+//     `announce_writer`, `session_reader`, `admin`, `viewer`);
+//   - гейта нет вовсе — 18 освобождённых; правом такое действие не выдаётся ни
+//     при каком разделе.
+//
+// # Чем это плохо, если порождать всё-таки
+//
+// Порождённое `v_internal…` — отношение, которого не спрашивает НИ ОДИН гейт.
+// Право на него выдаётся, перечисляется в роли и не даёт доступа ни к чему;
+// отличить такую выдачу от неисполненной вызывающему нечем. Тот же довод уже
+// записан у базовых ярусов (`validateResourceBaseRoles`): ресурс, все действия
+// которого внутренние, ярусов не получает именно поэтому.
+//
+// Вторым следствием побайтовая сверка канона (`make -C services/iam
+// model-canon-check`) отвергала бы строку, которой в модели нет, — то есть
+// объявить внутреннее действие было НЕЛЬЗЯ НИ ОДНИМ ВХОДОМ, пока правило не
+// объявлено здесь.
+//
+// # Почему объявлено ОДИН раз
+//
+// Читателей ПЯТЬ, и они в разных пакетах. Здесь стояло «три» — перечень был
+// неполон в день записи, и цена неполноты измерена на сведённом дереве: два
+// ненайденных читателя вывели из манифестов каталог, которого модель не несёт.
+//
+//   - рендер блоков модели (`modelrender.Render`) — что попадает в `define v_*`;
+//   - сверка соединения (`roleexport`) — набор отношений, на которых «едет»
+//     незаявленная запись каталога;
+//   - загрузчик (`declaredRelationNames`) — что вправе стоять в `from`;
+//   - порождение таблиц типов (`authzmapgen.verbRelationsOf`) — набор `v_*`
+//     ТИПА. Ключ здесь КЛАСС, а не имя, поэтому внутреннее действие втаскивало
+//     в набор класс, которого у тенантских действий ресурса нет вовсе:
+//     `vpc_address` и `storage_image` получали `v_create`, `iam_user` —
+//     `v_update`, при том что модель ни одного не объявляет;
+//   - деривация строк каталога (`modulecatalog.RowsOf`) — за какое действие
+//     выдаётся право. Строка существует затем, чтобы правило роли резолвилось в
+//     `v_<токен>`; у внутреннего действия его нет, и строка обещала бы выдачу,
+//     которой не будет.
+//
+// Вторая копия правила расходится с первой МОЛЧА: обе стороны отвечают
+// одинаково на тенантском действии, то есть на подавляющем большинстве входов.
+// Именно так это и вышло — расхождение проявилось не на правке правила, а на
+// сведении линии, когда манифесты впервые объявили внутреннее действие.
+func VerbProducesRelation(v Verb) bool { return !v.Internal }

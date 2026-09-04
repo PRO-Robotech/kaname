@@ -31,7 +31,7 @@ func TestRole_IAM_1_13_PublicProjectionOmitsPermissions(t *testing.T) {
 		Rules:       f4Rules(),
 		Permissions: domain.Permissions{"compute.instance.*.get", "compute.disk.*.get"},
 	}
-	pb, err := roleToPb(r)
+	pb, err := roleToPb(withPreviewLookup(r))
 	require.NoError(t, err)
 	assert.Empty(t, pb.GetPermissions(), "public Role projection must not carry compiled permissions") //nolint:staticcheck // asserts deprecated field stays empty
 }

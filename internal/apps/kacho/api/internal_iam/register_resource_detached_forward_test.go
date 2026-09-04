@@ -70,7 +70,7 @@ func (r *dfRecon) ReconcileObjectForwardNoStale(ctx context.Context, t, id strin
 func TestRegisterResource_ForwardSurvivesCallerCancellation(t *testing.T) {
 	rec := &dfRecon{}
 	txb := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb).WithObjectReconciler(rec, nil)
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}).WithObjectReconciler(rec, nil)
 
 	// Ровно та ситуация, что на стенде: дедлайн вызывающего истёк к моменту, когда
 	// writer-tx уже закоммичен и очередь дошла до пост-коммитного прохода.
@@ -97,7 +97,7 @@ func TestRegisterResource_ForwardSurvivesCallerCancellation(t *testing.T) {
 func TestRegisterResource_DetachedForwardKeepsItsOwnBudget(t *testing.T) {
 	rec := &dfRecon{}
 	txb2 := &smTxBeginner{}
-	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb2).WithObjectReconciler(rec, nil)
+	uc := NewRegisterResourceUseCase(smEmitter{}, mirrorAdapter{}, txb2, seededCatalogTypes{}).WithObjectReconciler(rec, nil)
 
 	// Вызывающий жив и щедр — проба смотрит не на его отмену, а на то, что бюджет
 	// прохода СОБСТВЕННЫЙ, а не унаследованный.

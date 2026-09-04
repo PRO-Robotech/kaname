@@ -337,3 +337,15 @@ func roleUpdateInput(roleID string, rules domain.Rules) roleapp.UpdateRoleInput 
 		UpdateMask: []string{"rules"},
 	}
 }
+
+// LiveSystemRoles / RetireRole / ReviveRole — дублёр: отзыв роли этот путь не
+// исполняет. Отдаётся пустое, а не правдоподобное: дублёр, отвечающий «снял»,
+// сделал бы невидимым ровно тот дефект, ради которого его подставляют.
+func (w *fakeRoleWtr) LiveSystemRoles(context.Context) ([]domain.Role, error) { return nil, nil }
+
+func (w *fakeRoleWtr) RetireRole(context.Context, domain.RoleID, string, string, string) (
+	domain.RoleRetirement, error) {
+	return domain.RoleRetirement{}, nil
+}
+
+func (w *fakeRoleWtr) ReviveRole(context.Context, domain.RoleID) (bool, error) { return false, nil }

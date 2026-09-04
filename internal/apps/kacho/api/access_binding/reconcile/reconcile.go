@@ -1304,8 +1304,19 @@ func desiredActiveTupleSet(desired []DesiredMember) map[domain.MembershipTuple]s
 // Empty ledger ⇒ nothing to revoke (the legacy-arm re-derivation fallback is gone;
 // all members are role.rules-driven).
 func (r *Reconciler) revokeTuplesFor(ctx context.Context, s ReconcileStore, bs BindingScope, m domain.TargetMember) ([]domain.MembershipTuple, bool) {
-	fgaType, ok := fgaObjectType(m.ObjectType)
+	// Имя типа модели читается у ЖИВЫХ строк — тем же источником, каким его
+	// раскрывает желаемая сторона прохода. Промах здесь означает члена по типу,
+	// чья строка каталога снята в работающем процессе: снять его кортежи нечем,
+	// потому что ключ реестра эмитированного собирается из этого имени. Молча
+	// это остаться не вправе — иначе выданное по снятому типу переживает снятие,
+	// и об этом не говорит ни одна полоса.
+	fgaType, ok := r.cat.Facts().FGAObjectType(m.ObjectType)
 	if !ok {
+		r.logger.WarnContext(ctx, "reconcile: member object_type has no live catalog row; its emitted tuples cannot be revoked this pass",
+			"binding_id", string(bs.BindingID),
+			"object_type", m.ObjectType,
+			"object_id", m.ObjectID,
+			"rule_fp", m.RuleFP)
 		return nil, false
 	}
 	object := fgaType + ":" + m.ObjectID

@@ -66,7 +66,7 @@ func ownerCtx() context.Context {
 // ── sync mask-discipline reject paths (nil repo — pre-checks) ────────────────────
 
 func TestUpdateRole_T33_LabelsMutable_ImmutableFieldRejected(t *testing.T) {
-	uc := &UpdateRoleUseCase{} // nil deps: mask-discipline is a sync pre-check
+	uc := &UpdateRoleUseCase{cat: catalogfixture.Source()} // nil deps: mask-discipline is a sync pre-check
 	roleName := domain.RoleName("x")
 	_, err := uc.Execute(ownerCtx(), UpdateRoleInput{
 		ID:         rlUpdRoleID,
@@ -79,7 +79,7 @@ func TestUpdateRole_T33_LabelsMutable_ImmutableFieldRejected(t *testing.T) {
 }
 
 func TestUpdateRole_T33_UnknownMaskField_Rejected(t *testing.T) {
-	uc := &UpdateRoleUseCase{}
+	uc := &UpdateRoleUseCase{cat: catalogfixture.Source()}
 	_, err := uc.Execute(ownerCtx(), UpdateRoleInput{
 		ID:         rlUpdRoleID,
 		UpdateMask: []string{"bogus_field"},
@@ -330,3 +330,47 @@ func (w *rlUpdWriter) EmitInviteMail(_ context.Context, userID, _, to, _ string)
 	}
 	return nil
 }
+
+// UnresolvedSegments — дублёр ОТКАЗЫВАЕТ, а не отвечает «неразрешённых нет»:
+// заглушка, возвращающая пустое, была бы снисходительнее продукта и молча
+// зеленила бы утверждения о деградации роли. Целость в этих пробах не предмет,
+// поэтому её путь здесь исполняться не должен — а если исполнится, проба упадёт.
+func (r *rlRoleRdr) UnresolvedSegments(context.Context, []domain.RoleSegment) (map[domain.RoleID][]domain.RoleSegment, error) {
+	return nil, stderrors.New("UnresolvedSegments не предмет этих проб")
+}
+
+// WithdrawnGrants — дублёр ОТКАЗЫВАЕТ, а не отвечает «отобранного нет»:
+// заглушка, возвращающая пустое, была бы снисходительнее продукта. Ведомость
+// в этих пробах не предмет, поэтому её путь исполняться не должен — а если
+// исполнится, проба упадёт.
+func (r *rlRoleRdr) WithdrawnGrants(context.Context, []domain.RoleID) (map[domain.RoleID][]domain.WithdrawnGrant, error) {
+	return nil, stderrors.New("WithdrawnGrants не предмет этих проб")
+}
+
+// PrunedSelectorTypes — дублёр ОТКАЗЫВАЕТ по тому же доводу, что и сосед выше:
+// заглушка, возвращающая пустое, была бы снисходительнее продукта и молча
+// прятала бы лишний вопрос к ведомости.
+func (r *rlRoleRdr) PrunedSelectorTypes(context.Context, []domain.RoleID) (map[domain.RoleID][]domain.PrunedSelectorType, error) {
+	return nil, stderrors.New("PrunedSelectorTypes не предмет этих проб")
+}
+
+// Lifecycles — дублёр: жизненное состояние ролей этот путь не спрашивает.
+// Пустая карта означает «не вычислено», и вызывающий оставляет нулевое
+// состояние — ровно то, что дублёр обязан отдавать о величине, которой не
+// владеет.
+func (*rlRoleRdr) Lifecycles(_ context.Context, _ []domain.RoleID) (
+	map[domain.RoleID]domain.RoleLifecycle, error) {
+	return nil, nil
+}
+
+// LiveSystemRoles / RetireRole / ReviveRole — дублёр: отзыв роли этот путь не
+// исполняет. Отдаётся пустое, а не правдоподобное: дублёр, отвечающий «снял»,
+// сделал бы невидимым ровно тот дефект, ради которого его подставляют.
+func (*rlRoleWtr) LiveSystemRoles(_ context.Context) ([]domain.Role, error) { return nil, nil }
+
+func (*rlRoleWtr) RetireRole(_ context.Context, _ domain.RoleID, _, _, _ string) (
+	domain.RoleRetirement, error) {
+	return domain.RoleRetirement{}, nil
+}
+
+func (*rlRoleWtr) ReviveRole(_ context.Context, _ domain.RoleID) (bool, error) { return false, nil }

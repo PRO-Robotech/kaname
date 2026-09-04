@@ -26,8 +26,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 // SubjectsQuery — вопрос «кто может это над этим объектом».
@@ -54,9 +52,11 @@ type SubjectsQuery struct {
 // $6 типы предков атомов-фактов · $7 отношения атомов-фактов · $8 глаголы атомов-выдачи
 // $9 object_type в словаре КАТАЛОГА — им названы `resource_mirror.object_type`,
 // `role_verb.object_type` и `role_rule_selectors.object_types`, тогда как вопрос
-// приходит словарём модели. Перевод делается ОДИН раз, на входе, единственным
-// переходником (`authzmap.CatalogTypeName`); двух словарей в одном соединении
-// быть не должно — соединение по разным написаниям не совпадает НИКОГДА и молча.
+// приходит словарём модели. Перевод делается ОДИН раз, на входе, и читает ЖИВУЮ
+// строку каталога (`catalogTypeName`, catalogtype.go): таблица, порождённая
+// сборкой, о типе, заведённом применением манифеста в работающем процессе, не
+// знает (kacho#1986). Двух словарей в одном соединении быть не должно —
+// соединение по разным написаниям не совпадает НИКОГДА и молча.
 const subjectsSQL = `
 WITH RECURSIVE
 -- scope — ОБЛАСТИ, на которые может быть сделана действующая выдача: сам объект
@@ -208,9 +208,15 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	if err != nil {
 		return nil, "", err
 	}
+	// Имя типа в словаре КАТАЛОГА — у ЖИВОЙ строки каталога, а не у таблицы,
+	// порождённой сборкой (kacho#1986, catalogtype.go).
+	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	if err != nil {
+		return nil, "", err
+	}
 	rows, err := q.Query(ctx, subjectsQuerySQL(labelTable),
 		in.ObjectType, in.ObjectID, in.AfterID, limit, MaxAncestorDepth,
-		factParents, factRelations, bindVerbs, authzmap.CatalogTypeName(in.ObjectType))
+		factParents, factRelations, bindVerbs, catalogType)
 	if err != nil {
 		return nil, "", fmt.Errorf("relverdict: перечисление субъектов: %w", err)
 	}

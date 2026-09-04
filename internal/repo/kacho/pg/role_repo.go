@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -41,7 +42,13 @@ type roleReader struct {
 // read populates domain.Role's full scope (ClusterID for system, ProjectID for
 // project-scoped custom) — the isRoleAssignable predicate
 // (domain.IsRoleAssignable / ScopeGroupOf) reads those fields.
-const roleCols = "id, cluster_id, account_id, project_id, name, description, permissions, rules, is_system, created_at, labels"
+//
+// `owner_module` стоит здесь с задачи #1032: без него политика послабления
+// подстановки читалась бы из строки НЕПОЛНО — `PolicyOfRole` получал бы пустого
+// владельца у роли, которая им обладает, и судила бы её платформенной, то есть
+// САМОЙ МЯГКОЙ. Столбец, который пишут и не читают, невидим отовсюду; здесь цена
+// такой невидимости — послабление, выданное молча.
+const roleCols = "id, cluster_id, account_id, project_id, name, description, permissions, rules, is_system, owner_module, created_at, labels"
 
 // rulesToJSON / rulesFromJSON delegate to the domain codec (domain.EncodeRules /
 // domain.DecodeRules) — the single source of truth for the roles.rules JSONB shape
@@ -72,8 +79,8 @@ func (r *roleReader) Get(ctx context.Context, id domain.RoleID) (domain.Role, er
 // has no version column, so the row's system xmin is the snapshot Role.Update
 // echoes into UpdateCAS for the lost-update guard (the read-modify-write
 // OCC-without-version-column pattern). xmin is selected first, then the canonical
-// roleCols (scanRoleWithVersion reads the leading xmin slot then delegates to
-// scanRole's column order).
+// roleCols — scanRoleWithVersion prepends the xmin slot to the SAME destination
+// list every other roleCols reader uses.
 func (r *roleReader) GetWithVersion(ctx context.Context, id domain.RoleID) (domain.Role, string, error) {
 	var version string
 	row := r.tx.QueryRow(ctx,
@@ -86,6 +93,259 @@ func (r *roleReader) GetWithVersion(ctx context.Context, id domain.RoleID) (doma
 		return domain.Role{}, "", mapErr(err, "", string(id))
 	}
 	return out, version, nil
+}
+
+// UnresolvedSegments — сколько объявленных сегментов роли не имеют строки в
+// проекции, которую читает вердикт.
+//
+// # Почему проба НА СЕГМЕНТ, а не одна выборка проекции страницы
+//
+// Форма выбрана замером, а не первым впечатлением. Хеш-полусоединение (одна
+// выборка на страницу) выглядит вчетверо дешевле по блокам и СКАНИРУЕТ
+// `role_verb` целиком — то есть дорожает с популяцией установки: при росте
+// 2000 → 8000 ролей оно идёт 599 → 2015 блоков, тогда как форма ниже держится
+// 2509 → 2511. Проба на сегмент вернее именно тем, чем на малой установке
+// выглядит хуже: стоимость обязана следовать СТРАНИЦЕ, величина которой
+// ограничена контрактом, а не популяции, которая не ограничена ничем.
+//
+// Каждая проба — поиск по `role_verb_pkey (role_id, object_type, verb)`;
+// дополнительного индекса не требуется, ключ начинается с `role_id`.
+//
+// Пустой глагол — ЯКОРЬ (правило не сузило глаголы): годится любая строка
+// своего типа. Это `d.verb = ”`, а не NULL: массивы приходят плотными.
+func (r *roleReader) UnresolvedSegments(
+	ctx context.Context, declared []domain.RoleSegment,
+) (map[domain.RoleID][]domain.RoleSegment, error) {
+	out := make(map[domain.RoleID][]domain.RoleSegment, len(declared))
+	if len(declared) == 0 {
+		return out, nil
+	}
+	ids := make([]string, 0, len(declared))
+	types := make([]string, 0, len(declared))
+	verbs := make([]string, 0, len(declared))
+	for _, d := range declared {
+		ids = append(ids, string(d.RoleID))
+		types = append(types, d.ObjectType)
+		verbs = append(verbs, d.Verb)
+	}
+	rows, err := r.tx.Query(ctx, `
+		WITH d(role_id, object_type, verb) AS (
+		  SELECT * FROM unnest($1::text[], $2::text[], $3::text[])
+		)
+		SELECT d.role_id, d.object_type, d.verb
+		  FROM d
+		 WHERE NOT EXISTS (
+		   SELECT 1 FROM kacho_iam.role_verb rv
+		    WHERE rv.role_id     = d.role_id
+		      AND rv.object_type = d.object_type
+		      AND (d.verb = '' OR rv.verb = d.verb))`, ids, types, verbs)
+	if err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, objectType, verb string
+		if serr := rows.Scan(&id, &objectType, &verb); serr != nil {
+			return nil, mapErr(serr, "", "")
+		}
+		rid := domain.RoleID(id)
+		out[rid] = append(out[rid], domain.RoleSegment{RoleID: rid, ObjectType: objectType, Verb: verb})
+	}
+	if rerr := rows.Err(); rerr != nil {
+		return nil, mapErr(rerr, "", "")
+	}
+	return out, nil
+}
+
+// WithdrawnGrants — ЕДИНСТВЕННЫЙ путь чтения ведомости переселения (#1992).
+//
+// # Что было неверно
+//
+// Ведомость наполнялась применителем каталога и не читалась НИКЕМ: писателей
+// два, читателей ноль. Заведена она затем, чтобы отобранное право было
+// восстановимо и объяснимо, — и не давала этого, потому что цепочка обрывалась
+// на пути чтения, а обрыв не наблюдался ниоткуда.
+//
+// # Почему ОДИН вопрос на страницу
+//
+// Тем же доводом, что у соседа выше: стоимость обязана следовать СТРАНИЦЕ,
+// величина которой ограничена контрактом, а не популяции ролей, которая не
+// ограничена ничем. Выборка идёт по началу первичного ключа ведомости
+// (`role_id`), дополнительного индекса не требуется.
+//
+// # Почему исходное написание популяции НЕ уезжает наружу
+//
+// Столбец ведомости несёт написание закрытого набора схемы; наружу едет
+// доменное состояние. Отдай мы строку как есть, написание схемы стало бы частью
+// контракта чтения, и переименование столбца сделалось бы ломающим изменением.
+// Неизвестное написание отвергается ОТКАЗОМ, а не молча становится нулевым
+// состоянием: нулевое означает «не прочитано этим ответом», и выдать за него
+// прочитанное-но-непонятое значило бы соврать ровно тем полем, которое эти два
+// случая и разводит.
+func (r *roleReader) WithdrawnGrants(
+	ctx context.Context, roleIDs []domain.RoleID,
+) (map[domain.RoleID][]domain.WithdrawnGrant, error) {
+	out := make(map[domain.RoleID][]domain.WithdrawnGrant, len(roleIDs))
+	if len(roleIDs) == 0 {
+		return out, nil
+	}
+	ids := make([]string, 0, len(roleIDs))
+	for _, id := range roleIDs {
+		ids = append(ids, string(id))
+	}
+	rows, err := r.tx.Query(ctx, `
+		SELECT role_id, object_type, verb, source, reason, orphaned_at, applied_by, cause
+		  FROM kacho_iam.role_grant_orphan
+		 WHERE role_id = ANY($1::text[])
+		 ORDER BY role_id, object_type, verb, source, cause`, ids)
+	if err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, source, cause string
+		var g domain.WithdrawnGrant
+		if serr := rows.Scan(&id, &g.ObjectType, &g.Verb, &source, &g.Reason,
+			&g.WithdrawnAt, &g.AppliedBy, &cause); serr != nil {
+			return nil, mapErr(serr, "", "")
+		}
+		// Причина читается ЗАКРЫТЫМ набором, без корзины «прочее»: непонятая
+		// строка отвергается, а не выдаётся за невычисленную. Молча назвать её
+		// «снят каталог» значило бы сказать арендатору, что при возврате
+		// объявления она останется, — а этого мы не знаем.
+		switch cause {
+		case "catalog_retired":
+			g.Cause = domain.WithdrawnGrantCauseCatalogRetired
+		case "role_retired":
+			g.Cause = domain.WithdrawnGrantCauseRoleRetired
+		default:
+			return nil, fmt.Errorf("ведомость переселения несёт неизвестную причину %q: "+
+				"закрытый набор схемы разошёлся с разбором, и отдать такую строку "+
+				"нулевой причиной значило бы выдать непонятое за невычисленное", cause)
+		}
+		switch source {
+		case "role_verb":
+			g.Source = domain.WithdrawnGrantSourceGrant
+		case "rule_ref":
+			g.Source = domain.WithdrawnGrantSourceRuleRef
+		default:
+			return nil, fmt.Errorf("ведомость переселения несёт неизвестную популяцию %q: "+
+				"закрытый набор схемы разошёлся с разбором, и отдать такую строку "+
+				"нулевым состоянием значило бы выдать непонятое за невычисленное", source)
+		}
+		g.WithdrawnAt = g.WithdrawnAt.Truncate(time.Second)
+		out[domain.RoleID(id)] = append(out[domain.RoleID(id)], g)
+	}
+	if rerr := rows.Err(); rerr != nil {
+		return nil, mapErr(rerr, "", "")
+	}
+	return out, nil
+}
+
+// PrunedSelectorTypes — ЕДИНСТВЕННЫЙ путь чтения ведомости вырезания (#1988).
+//
+// # Что было неверно
+//
+// Ведомость `role_selector_prune` наполнялась применителем каталога ТЕМ ЖЕ
+// оператором, что вырезает, — и не читалась НИКЕМ: писатель один, прод-читателей
+// ноль. Заведена она затем, чтобы необратимое вырезание перестало быть
+// безмолвным, и не давала этого: цепочка обрывалась на пути чтения, а обрыв не
+// наблюдался ниоткуда, потому что каждая половина по отдельности исправна.
+//
+// Это тот же класс и та же цена, что были у соседа выше: со стороны арендатора
+// «правило перестало отбирать тип» неотличимо от «оно его и не отбирало».
+//
+// # Почему ОДИН вопрос на страницу
+//
+// Тем же доводом, что у обоих соседей: стоимость обязана следовать СТРАНИЦЕ,
+// величина которой ограничена контрактом, а не популяции ролей, которая не
+// ограничена ничем. Выборка идёт по началу первичного ключа ведомости
+// (`role_id`), дополнительного индекса не требуется.
+//
+// # Почему DISTINCT, а не строка-в-строку
+//
+// Ведомость ключуется тройкой «роль + ОТПЕЧАТОК ПРАВИЛА + тип»: отпечаток нужен
+// ХРАНЕНИЮ — без него два правила, потерявшие один тип, схлопнулись бы в одну
+// строку, и второе вырезание осталось бы незаписанным. Читающему он не отдаётся
+// (см. [domain.PrunedSelectorType]), поэтому строки, различавшиеся ТОЛЬКО им,
+// для читающего есть ОДИН факт: отдай мы их как есть — арендатор увидел бы пару
+// неотличимых записей об одном типе с одним исходом и прочёл бы её как дефект.
+//
+// Схлопывание безопасно ПО ПОСТРОЕНИЮ, а не по удаче: причина и момент
+// функционально зависят от типа. Причина читается у той самой строки каталога,
+// чьё снятие сделало элемент висячим, — она одна на точечный тип; момент есть
+// время транзакции применения, а вернуться в отбор снятый тип не может — запись
+// селектора, называющего неживой тип, отвергает страж живости. Значит две
+// строки с одним типом и одним исходом совпадают и по остальным колонкам.
+//
+// АВТОР (#2005) входит в набор различения и кардинальности НЕ МЕНЯЕТ — по тому
+// же доводу и в силу того же факта: он есть свойство ТРАНЗАКЦИИ применения, то
+// есть функционально зависит от момента, который в наборе уже стоит. Две строки,
+// совпавшие по типу, исходу и моменту, пришли из одного применения, а у одного
+// применения автор один. Добавь он различий — это означало бы, что момент их не
+// различил, то есть что вырезание одного типа случилось дважды в одну
+// транзакцию; такого входа нет by construction.
+//
+// # Почему написание исхода НЕ уезжает наружу
+//
+// Столбец несёт написание закрытого набора схемы; наружу едет доменное
+// состояние. Отдай мы строку как есть, написание столбца стало бы частью
+// контракта чтения. Неизвестное написание отвергается ОТКАЗОМ, а не молча
+// становится нулевым состоянием: нулевое означает «не прочитано этим ответом», и
+// выдать за него прочитанное-но-непонятое значило бы соврать ровно тем полем,
+// которое эти два случая и разводит.
+//
+// # Отсутствие причины отдаётся ПУСТОЙ строкой, и это не потеря
+//
+// Колонка нуллируема намеренно: под вырезание попадают и элементы, повисшие до
+// заведения применителя, а строки каталога, снятые ранними миграциями, причины
+// не несут. NULL там означает «строка каталога причины не несла» — то же самое,
+// что пустая строка у читающего, и второго состояния здесь не требуется.
+func (r *roleReader) PrunedSelectorTypes(
+	ctx context.Context, roleIDs []domain.RoleID,
+) (map[domain.RoleID][]domain.PrunedSelectorType, error) {
+	out := make(map[domain.RoleID][]domain.PrunedSelectorType, len(roleIDs))
+	if len(roleIDs) == 0 {
+		return out, nil
+	}
+	ids := make([]string, 0, len(roleIDs))
+	for _, id := range roleIDs {
+		ids = append(ids, string(id))
+	}
+	rows, err := r.tx.Query(ctx, `
+		SELECT DISTINCT role_id, object_type, outcome,
+		       coalesce(retired_reason, ''), pruned_at, applied_by
+		  FROM kacho_iam.role_selector_prune
+		 WHERE role_id = ANY($1::text[])
+		 ORDER BY role_id, object_type, outcome`, ids)
+	if err != nil {
+		return nil, mapErr(err, "", "")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, outcome string
+		var p domain.PrunedSelectorType
+		if serr := rows.Scan(&id, &p.ObjectType, &outcome, &p.Reason, &p.PrunedAt,
+			&p.AppliedBy); serr != nil {
+			return nil, mapErr(serr, "", "")
+		}
+		switch outcome {
+		case "shortened":
+			p.Outcome = domain.SelectorPruneOutcomeShortened
+		case "dropped":
+			p.Outcome = domain.SelectorPruneOutcomeDropped
+		default:
+			return nil, fmt.Errorf("ведомость вырезания несёт неизвестный исход %q: "+
+				"закрытый набор схемы разошёлся с разбором, и отдать такую строку "+
+				"нулевым состоянием значило бы выдать непонятое за невычисленное", outcome)
+		}
+		p.PrunedAt = p.PrunedAt.Truncate(time.Second)
+		out[domain.RoleID(id)] = append(out[domain.RoleID(id)], p)
+	}
+	if rerr := rows.Err(); rerr != nil {
+		return nil, mapErr(rerr, "", "")
+	}
+	return out, nil
 }
 
 func (r *roleReader) List(ctx context.Context, f role.ListFilter) ([]domain.Role, string, error) {
@@ -387,21 +647,30 @@ func (w *roleWriter) UpsertSystemRole(ctx context.Context, r domain.Role) (domai
 	}
 	now := time.Now().UTC()
 	q := fmt.Sprintf(`
-		INSERT INTO roles (id, cluster_id, name, description, permissions, rules, created_at, labels)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO roles (id, cluster_id, name, description, permissions, rules, owner_module, created_at, labels)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (id) DO UPDATE
-		   SET name        = EXCLUDED.name,
-		       description = EXCLUDED.description,
-		       permissions = EXCLUDED.permissions,
-		       rules       = EXCLUDED.rules
-		 WHERE roles.name        IS DISTINCT FROM EXCLUDED.name
-		    OR roles.description IS DISTINCT FROM EXCLUDED.description
-		    OR roles.permissions IS DISTINCT FROM EXCLUDED.permissions
-		    OR roles.rules       IS DISTINCT FROM EXCLUDED.rules
+		   SET name         = EXCLUDED.name,
+		       description  = EXCLUDED.description,
+		       permissions  = EXCLUDED.permissions,
+		       rules        = EXCLUDED.rules,
+		       owner_module = EXCLUDED.owner_module
+		 WHERE roles.name         IS DISTINCT FROM EXCLUDED.name
+		    OR roles.description  IS DISTINCT FROM EXCLUDED.description
+		    OR roles.permissions  IS DISTINCT FROM EXCLUDED.permissions
+		    OR roles.rules        IS DISTINCT FROM EXCLUDED.rules
+		    OR roles.owner_module IS DISTINCT FROM EXCLUDED.owner_module
 		RETURNING %s`, roleCols)
+	// Владелец пишется как ОТСУТСТВИЕ, а не как пустая строка: ключ на каталог
+	// однокомпонентный, и `NULL` под него не подпадает by construction, тогда как
+	// `''` искал бы в каталоге модуль с пустым именем и отвергался бы ключом.
+	var owner *string
+	if r.OwnerModule != "" {
+		owner = &r.OwnerModule
+	}
 	row := w.tx.QueryRow(ctx, q,
 		string(r.ID), string(r.ClusterID), string(r.Name), string(r.Description),
-		permsJSON, rulesJSON, now, labelsJSON,
+		permsJSON, rulesJSON, owner, now, labelsJSON,
 	)
 	out, err := scanRole(row)
 	switch {
@@ -735,7 +1004,59 @@ func splitRuleRefHint(hint string) (resource, verb string) {
 	return hint, ""
 }
 
+// ReplaceRuleSelectors заменяет проекцию селекторов правила роли ПОЛНОСТЬЮ.
+//
+// # Замки на строки каталога берутся ПЕРВЫМИ (задача продукта #1996)
+//
+// Страж живости селектора читает строку каталога под `FOR KEY SHARE` (миграция
+// `20260903181000`), и без этого предварительного запроса замок на неё
+// брался бы ВНУТРИ вставки — то есть ПОСЛЕ замка на строках селекторов, снятых
+// удалением выше. Порядок оказывался обратным порядку применителя каталога
+// (строка каталога → строки селекторов), и пара давала взаимную блокировку.
+//
+// Цена инверсии измерена, а не предположена: Postgres обнаруживал пару и
+// отвергал СТОРОНУ АРЕНДАТОРА — применитель доходил до конца, а правка правил
+// роли получала `40P01`, приезжавший вызывающему как `ABORTED`
+// «conflicting concurrent change, retry the request». То есть цену платил не
+// тот, кто инверсию создаёт, повтор без правки условия ничего не менял, а
+// условие наступления от арендатора не зависело вовсе.
+//
+// # Это НЕ вторая проверка живости, и путать нельзя
+//
+// Запрос ничего не отвергает: ноль строк — законный исход, и решение о нём
+// принимает страж, как и раньше. Берётся РОВНО ТОТ ЖЕ набор строк, что возьмёт
+// страж (`dotted = <элемент> AND live`), поэтому второго словаря живости здесь
+// не заводится, а замок, взятый вперёд, к моменту вставки уже держится.
+//
+// Порядок внутри набора — по `dotted`: `ORDER BY` стоит под захватом строк,
+// поэтому набор берётся детерминированно, а не в порядке обхода индекса.
+//
+// # Граница СНЯТА: перекрёстный порядок по нескольким типам закрыт (#2012)
+//
+// Здесь стояло «не закрыто», и его довод был НЕВЕРЕН: снимаемые строки приходят
+// из `ReadModule` (`ORDER BY resource`) и фильтруются `Withdrawn` с сохранением
+// порядка — то есть порядок операторов снятия задавала не разница манифестов.
+// Инверсия жила между ДВУМЯ проходами применителя: объявленные он брал на
+// upsert'е, снимаемые на retire, и снимаемое имя, сортирующееся раньше
+// сохраняемого, доставалось ему последним.
+//
+// Применитель берёт теперь замки на строки ресурсов модуля ОДНИМ оператором и
+// тем же `ORDER BY dotted` (`catalogWriter.LockModuleResources`), до первой
+// записи. Порядок у обеих сторон назначает БАЗА, и расхождение перестало быть
+// представимым. Утверждает это проба, ставящая обе стороны в гонку на двух
+// типах, названных в обратном порядке
+// (`catalog_applier_lock_order_integration_test.go`), — прочитать порядок
+// нельзя, он есть свойство исполнения.
 func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.RoleID, selectors []domain.RuleSelector) error {
+	if types := lockedCatalogTypesOf(selectors); len(types) > 0 {
+		if _, err := w.tx.Exec(ctx, `
+			SELECT 1 FROM kacho_iam.catalog_resource
+			 WHERE dotted = ANY($1) AND live
+			 ORDER BY dotted
+			   FOR KEY SHARE`, types); err != nil {
+			return mapErr(err, "", string(roleID))
+		}
+	}
 	if _, err := w.tx.Exec(ctx,
 		`DELETE FROM kacho_iam.role_rule_selectors WHERE role_id = $1`, string(roleID)); err != nil {
 		// Route SQLSTATE → sentinel (mapErr) rather than bare fmt.Errorf(%w) so a
@@ -784,6 +1105,37 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 	return nil
 }
 
+// lockedCatalogTypesOf — точечные имена, чьи строки каталога возьмёт страж
+// живости: объединение `ObjectTypes` тех селекторов, которые действительно
+// пойдут во вставку.
+//
+// Селектор с пустым набором типов пропускается вставкой (правило-подстановка
+// проецируется в ноль типов), поэтому его имена сюда не попадают: замок на
+// строку, которую никто не спросит, был бы лишней сериализацией.
+//
+// Набор отсортирован и лишён повторов: правило вправе назвать один тип дважды,
+// а замок на него один.
+func lockedCatalogTypesOf(selectors []domain.RuleSelector) []string {
+	seen := make(map[string]struct{})
+	for _, sel := range selectors {
+		if len(sel.ObjectTypes) == 0 {
+			continue
+		}
+		for _, t := range sel.ObjectTypes {
+			seen[t] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for t := range seen {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // armText maps the domain Arm to the role_rule_selectors.arm enum text.
 func armText(a domain.Arm) string {
 	switch a {
@@ -799,45 +1151,7 @@ func armText(a domain.Arm) string {
 // ---- helpers ---------------------------------------------------------------
 
 func scanRole(row scanner) (domain.Role, error) {
-	var (
-		ro                       domain.Role
-		clusterID, accID, projID sql.NullString
-		permsJSON, rulesJSON     []byte
-		labelsJSON               []byte
-	)
-	err := row.Scan(
-		(*string)(&ro.ID),
-		&clusterID,
-		&accID,
-		&projID,
-		(*string)(&ro.Name),
-		(*string)(&ro.Description),
-		&permsJSON,
-		&rulesJSON,
-		&ro.IsSystem,
-		&ro.CreatedAt,
-		&labelsJSON,
-	)
-	if err != nil {
-		return domain.Role{}, err
-	}
-	if clusterID.Valid {
-		ro.ClusterID = domain.ClusterID(clusterID.String)
-	}
-	if accID.Valid {
-		ro.AccountID = domain.AccountID(accID.String)
-	}
-	if projID.Valid {
-		ro.ProjectID = domain.ProjectID(projID.String)
-	}
-	if err := scanRolePolicy(&ro, permsJSON, rulesJSON); err != nil {
-		return domain.Role{}, err
-	}
-	ro.Labels, err = unmarshalLabels(labelsJSON)
-	if err != nil {
-		return domain.Role{}, err
-	}
-	return ro, nil
+	return scanRoleWithVersion(row)
 }
 
 // scanRolePolicy decodes the permissions + rules JSONB columns into the role.
@@ -859,18 +1173,47 @@ func scanRolePolicy(ro *domain.Role, permsJSON, rulesJSON []byte) error {
 	return nil
 }
 
-// scanRoleWithVersion scans a row whose FIRST column is xmin::text (the OCC token)
-// followed by the canonical roleCols projection. The token is read into *versionOut
-// then scanRole's column order is reproduced (GetWithVersion).
-func scanRoleWithVersion(row scanner, versionOut *string) (domain.Role, error) {
+// scanRoleWithVersion — ЕДИНСТВЕННОЕ объявление порядка назначений под roleCols.
+// Без versionOut это обычное чтение проекции (сюда делегирует scanRole); с ним
+// запрос ОБЯЗАН нести ведущую колонку `xmin::text`, и токен пишется в
+// *versionOut[0] — слот версии встаёт первым в тот же список (GetWithVersion).
+//
+// Порядок здесь именно ОДИН, а не «воспроизведён»: прежде список был написан
+// дважды, и вторая копия отстала на колонку `owner_module` — правка любой роли
+// отвечала арендатору INTERNAL, потому что описаний полей приходило 13, а
+// приёмников было 12. Компилятор такое расхождение не ловит, роняет его только
+// живая Postgres. Заводя колонку в roleCols, правь список ЗДЕСЬ; второго места,
+// способного с ним разойтись, больше нет, а остаточную ось «проекция против
+// списка» держит TestProjectionScanArityMatchesItsColumns.
+// scanRoleWithTrailing — те же колонки `roleCols`, за которыми идут ДОПОЛНИТЕЛЬНЫЕ
+// приёмники вызывающего.
+//
+// Заведена ради одного случая: путь реконсиляции читает роль ВМЕСТЕ с её
+// живостью, а `roleCols` живость не несёт намеренно — тот же перечень читают
+// пути ответа операции, а ответ операции жизненного состояния не вычисляет.
+// Второго разбора строки роли при этом не заводится: хвост приклеивается к
+// ЭТОМУ, а копия разошлась бы с ним молча на первой же новой колонке.
+func scanRoleWithTrailing(row scanner, trailing ...any) (domain.Role, error) {
+	return scanRoleWithVersionAndTrailing(row, nil, trailing)
+}
+
+func scanRoleWithVersion(row scanner, versionOut ...*string) (domain.Role, error) {
+	return scanRoleWithVersionAndTrailing(row, versionOut, nil)
+}
+
+func scanRoleWithVersionAndTrailing(row scanner, versionOut []*string, trailing []any) (domain.Role, error) {
 	var (
 		ro                       domain.Role
 		clusterID, accID, projID sql.NullString
+		ownerModule              sql.NullString
 		permsJSON, rulesJSON     []byte
 		labelsJSON               []byte
 	)
-	err := row.Scan(
-		versionOut,
+	dest := make([]any, 0, 13)
+	if len(versionOut) > 0 {
+		dest = append(dest, versionOut[0])
+	}
+	dest = append(dest,
 		(*string)(&ro.ID),
 		&clusterID,
 		&accID,
@@ -880,10 +1223,12 @@ func scanRoleWithVersion(row scanner, versionOut *string) (domain.Role, error) {
 		&permsJSON,
 		&rulesJSON,
 		&ro.IsSystem,
+		&ownerModule,
 		&ro.CreatedAt,
 		&labelsJSON,
 	)
-	if err != nil {
+	dest = append(dest, trailing...)
+	if err := row.Scan(dest...); err != nil {
 		return domain.Role{}, err
 	}
 	if clusterID.Valid {
@@ -895,9 +1240,16 @@ func scanRoleWithVersion(row scanner, versionOut *string) (domain.Role, error) {
 	if projID.Valid {
 		ro.ProjectID = domain.ProjectID(projID.String)
 	}
+	// Пустая колонка означает ПЛАТФОРМЕННУЮ роль, и пустая строка домена
+	// означает ровно то же: `PolicyOfRole` читает непустоту, а не наличие. Второй
+	// формы отсутствия здесь не заводится.
+	if ownerModule.Valid {
+		ro.OwnerModule = ownerModule.String
+	}
 	if err := scanRolePolicy(&ro, permsJSON, rulesJSON); err != nil {
 		return domain.Role{}, err
 	}
+	var err error
 	ro.Labels, err = unmarshalLabels(labelsJSON)
 	if err != nil {
 		return domain.Role{}, err

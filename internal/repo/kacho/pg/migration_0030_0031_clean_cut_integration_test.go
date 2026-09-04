@@ -29,6 +29,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/dto"
 	_ "github.com/PRO-Robotech/kacho/services/iam/internal/dto/toproto" // register Role transfer
 	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 )
@@ -243,6 +244,14 @@ func TestMigration_F52_SystemRolePublicDTOEmptyPermissions(t *testing.T) {
 	require.NotEmpty(t, got.Rules, "F-52/F-53: re-seeded 'view' must carry rules[]")
 	require.NotEmpty(t, got.Permissions,
 		"F-53: roles.permissions column is still written (backs FGA emission)")
+
+	// Набор глаголов типа приходит ПРОВЯЗКОЙ, как в проде (create.go, update.go,
+	// integrity.go берут его у `Facts().RolePreviewLookup()`): проекция без него
+	// отказывает намеренно — превью, собранное словарём сборки, разошлось бы с
+	// материализацией на типе, заведённом применением манифеста (kacho#1994).
+	// Проба зовёт преобразование напрямую, минуя use-case, поэтому провязывает
+	// сама — тем же производителем, а не своей копией набора.
+	got.TypeVerbs = catalogfixture.Facts().RolePreviewLookup()
 
 	var pb *iamv1.Role
 	require.NoError(t, dto.Transfer(dto.FromTo(got, &pb)))

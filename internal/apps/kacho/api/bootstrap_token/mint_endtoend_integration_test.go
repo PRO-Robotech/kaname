@@ -29,7 +29,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
-	"strings"
 	"testing"
 	"time"
 
@@ -109,18 +108,6 @@ func (p ownClientPort) GetSAKey(ctx context.Context, id domain.SAOAuthClientID) 
 	return p.sa.Get(ctx, id)
 }
 
-func dsnWithSearchPath(dsn string) string {
-	const optionsParam = "options=-c%20search_path%3Dkacho_iam%2Cpublic"
-	if strings.Contains(dsn, "options=") || strings.Contains(dsn, "options%3D") {
-		return dsn
-	}
-	sep := "?"
-	if strings.Contains(dsn, "?") {
-		sep = "&"
-	}
-	return dsn + sep + optionsParam
-}
-
 // TestBootstrapTokenIsMintedByUsAndLooksLikeWhatTheEdgeAccepts — свежая база,
 // никакой внешней стороны, на выходе — предъявитель, чью подпись, издателя,
 // адресата, тип и принципала проверяет край.
@@ -132,7 +119,7 @@ func TestBootstrapTokenIsMintedByUsAndLooksLikeWhatTheEdgeAccepts(t *testing.T) 
 		t.Skip("нужен Postgres в контейнере: пропуск под -short, прогон — make test-pg-outside-selection")
 	}
 	ctx := context.Background()
-	dsn := dsnWithSearchPath(pgtest.NewDB(t))
+	dsn := pgtest.NewDB(t)
 	pool, err := coredb.NewPool(ctx, dsn)
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)

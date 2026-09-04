@@ -634,6 +634,9 @@ resources:
     verbs:
       - {name: get, from: [subject, super_admin]}
       - list
+      - {name: internalGet, class: get, internal: true}
+      - {name: internalOnRecoveryCompleted, class: update, internal: true}
+      - {name: internalUpsertFromIdentity, class: update, internal: true}
 
   - name: serviceAccount
     objectType: iam_service_account

@@ -14,8 +14,10 @@ package moduleroles_test
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
@@ -28,6 +30,8 @@ type fakeStore struct {
 	rows  map[domain.RoleID]domain.Role
 	refs  map[domain.RoleID][]domain.RoleRuleRef
 	calls int // вызовов писателя строки
+	// retired — идентификаторы снятых ролей в порядке снятия (#1913).
+	retired []domain.RoleID
 }
 
 func newStore() *fakeStore {
@@ -108,7 +112,7 @@ func vpcManifest(t *testing.T, id, class string) *manifest.Manifest {
 // TestMODRD12AppliedRoleIsSystemAndAnchoredAtTheCluster — MOD-RD-12.
 func TestMODRD12AppliedRoleIsSystemAndAnchoredAtTheCluster(t *testing.T) {
 	store := newStore()
-	rep, err := moduleroles.NewApplier(store).Apply(context.Background(), vpcManifest(t, "vpc.network.admin", "get"))
+	rep, err := applierUnderTest(t, store).Apply(context.Background(), vpcManifest(t, "vpc.network.admin", "get"), moduleroles.BootActorID)
 	if err != nil {
 		t.Fatalf("применение отвергнуто: %v", err)
 	}
@@ -139,12 +143,12 @@ func TestMODRD12AppliedRoleIsSystemAndAnchoredAtTheCluster(t *testing.T) {
 // TestMODRD13SecondRunWithoutAnEditWritesNothing — MOD-RD-13.
 func TestMODRD13SecondRunWithoutAnEditWritesNothing(t *testing.T) {
 	store := newStore()
-	ap := moduleroles.NewApplier(store)
+	ap := applierUnderTest(t, store)
 	m := vpcManifest(t, "vpc.network.admin", "get")
-	if _, err := ap.Apply(context.Background(), m); err != nil {
+	if _, err := ap.Apply(context.Background(), m, moduleroles.BootActorID); err != nil {
 		t.Fatalf("первое применение отвергнуто: %v", err)
 	}
-	rep, err := ap.Apply(context.Background(), m)
+	rep, err := ap.Apply(context.Background(), m, moduleroles.BootActorID)
 	if err != nil {
 		t.Fatalf("повторное применение отвергнуто: %v", err)
 	}
@@ -158,14 +162,14 @@ func TestMODRD13SecondRunWithoutAnEditWritesNothing(t *testing.T) {
 // правило приведено, `id` не изменился, а значит выдачи целы.
 func TestMODRD14RuleEditIsBroughtOverWithoutChangingTheID(t *testing.T) {
 	store := newStore()
-	ap := moduleroles.NewApplier(store)
-	if _, err := ap.Apply(context.Background(), vpcManifest(t, "vpc.network.admin", "get")); err != nil {
+	ap := applierUnderTest(t, store)
+	if _, err := ap.Apply(context.Background(), vpcManifest(t, "vpc.network.admin", "get"), moduleroles.BootActorID); err != nil {
 		t.Fatalf("первое применение отвергнуто: %v", err)
 	}
 	id := domain.SystemRoleID("vpc.network.admin")
 	before := store.rows[id]
 
-	rep, err := ap.Apply(context.Background(), vpcManifest(t, "vpc.network.admin", "list"))
+	rep, err := ap.Apply(context.Background(), vpcManifest(t, "vpc.network.admin", "list"), moduleroles.BootActorID)
 	if err != nil {
 		t.Fatalf("применение правки отвергнуто: %v", err)
 	}
@@ -192,11 +196,11 @@ func TestMODRD14RuleEditIsBroughtOverWithoutChangingTheID(t *testing.T) {
 // бы символом, есть ДРУГАЯ роль, и старая строка цела.
 func TestMODRD09ARenamedRoleIsADifferentRole(t *testing.T) {
 	store := newStore()
-	ap := moduleroles.NewApplier(store)
-	if _, err := ap.Apply(context.Background(), vpcManifest(t, "vpc.network.admin", "get")); err != nil {
+	ap := applierUnderTest(t, store)
+	if _, err := ap.Apply(context.Background(), vpcManifest(t, "vpc.network.admin", "get"), moduleroles.BootActorID); err != nil {
 		t.Fatalf("первое применение отвергнуто: %v", err)
 	}
-	if _, err := ap.Apply(context.Background(), vpcManifest(t, "vpc.network.admins", "get")); err != nil {
+	if _, err := ap.Apply(context.Background(), vpcManifest(t, "vpc.network.admins", "get"), moduleroles.BootActorID); err != nil {
 		t.Fatalf("применение переименованной отвергнуто: %v", err)
 	}
 	if _, ok := store.rows[domain.SystemRoleID("vpc.network.admin")]; !ok {
@@ -220,7 +224,7 @@ func TestMODRD15AForeignTierOrModuleNeverReachesTheWriter(t *testing.T) {
 		t.Fatalf("фикстура отвергнута: %v", err)
 	}
 	store := newStore()
-	rep, err := moduleroles.NewApplier(store).Apply(context.Background(), m)
+	rep, err := applierUnderTest(t, store).Apply(context.Background(), m, moduleroles.BootActorID)
 	if err != nil {
 		t.Fatalf("применение отвергнуто: %v", err)
 	}
@@ -249,7 +253,7 @@ func TestApplierRefusesARoleThatTheDomainRejects(t *testing.T) {
 	m.Roles[0].Rules[0].Classes = []string{"НЕ-ЛАТИНСКИЙ"}
 
 	store := newStore()
-	_, err = moduleroles.NewApplier(store).Apply(context.Background(), m)
+	_, err = applierUnderTest(t, store).Apply(context.Background(), m, moduleroles.BootActorID)
 	if err == nil {
 		t.Fatalf("роль, негодная по домену, записана")
 	}
@@ -262,4 +266,58 @@ func TestApplierRefusesARoleThatTheDomainRejects(t *testing.T) {
 	if store.calls != 0 {
 		t.Errorf("негодная роль дошла до писателя: вызовов %d", store.calls)
 	}
+}
+
+// LiveSystemRoles / RetireRole / ReviveRole — дублёр ОТЗЫВА (#1913).
+//
+// Он держит ровно то, что и оператор: живость строки, её пометку и снятие
+// проекции сегментов. Порядок «проекции → пометка» дублёр НЕ изображает — его
+// держит ключ схемы, и проверяется он интеграционной пробой против настоящего
+// сервера. Изобразить порядок здесь значило бы проверять свою подстановку.
+//
+// Сужение по владельцу дублёр повторяет: без него отрицание «платформенная роль
+// не тронута» зеленело бы на дублёре, который не сужает ничего, — то есть
+// дублёр был бы СНИСХОДИТЕЛЬНЕЕ продукта ровно на измеряемой оси.
+func (s *fakeStore) LiveSystemRoles(_ context.Context) ([]domain.Role, error) {
+	out := make([]domain.Role, 0, len(s.rows))
+	for _, r := range s.rows {
+		if r.Lifecycle.Withdrawn() {
+			continue
+		}
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (s *fakeStore) RetireRole(_ context.Context, id domain.RoleID, ownerModule, reason, actor string) (
+	domain.RoleRetirement, error,
+) {
+	r, ok := s.rows[id]
+	if !ok || r.OwnerModule != ownerModule || r.Lifecycle.Withdrawn() {
+		// Ноль затронутых строк — штатный исход, а не отказ: владелец не тот
+		// либо роль уже снята.
+		return domain.RoleRetirement{}, nil
+	}
+	out := domain.RoleRetirement{Marked: true, ResettledRuleRefs: len(s.refs[id])}
+	delete(s.refs, id)
+	r.Lifecycle = domain.RoleLifecycle{
+		State:         domain.RoleLifecycleWithdrawn,
+		RetiredAt:     time.Now().UTC(),
+		RetiredReason: reason,
+		RetiredBy:     actor,
+	}
+	s.rows[id] = r
+	s.retired = append(s.retired, id)
+	return out, nil
+}
+
+func (s *fakeStore) ReviveRole(_ context.Context, id domain.RoleID) (bool, error) {
+	r, ok := s.rows[id]
+	if !ok || !r.Lifecycle.Withdrawn() {
+		return false, nil
+	}
+	r.Lifecycle = domain.RoleLifecycle{State: domain.RoleLifecycleDeclared}
+	s.rows[id] = r
+	return true, nil
 }

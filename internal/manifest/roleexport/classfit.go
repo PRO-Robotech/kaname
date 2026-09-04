@@ -65,6 +65,11 @@ import (
 // отдельный предмет: ключ `objectType` уже сверяется загрузчиком с той же
 // таблицей на членство (`ErrObjectTypeUnknown`), но не на то, что это тип ИМЕННО
 // ЭТОГО ресурса.
+//
+// Сверка эта с задачи #1930 условлена РЕФЕРЕНТОМ: в проходе, ПОРОЖДАЮЩЕМ
+// таблицу, её не происходит вовсе (`manifest.ReferentCanon`) — судить вход своим
+// продуктом значит спрашивать у ответа. На предикат ниже это не влияет ни в одну
+// сторону: он читает таблицу САМ и о том, спрашивал ли её загрузчик, не знает.
 
 var (
 	// ErrDeclaredClassDoesNotSatisfyGate — объявленный класс действия не
@@ -164,6 +169,16 @@ type ClassCensus struct {
 	Exempt int
 	// Unmatched — каталог такого действия не знает: сверять не с чем.
 	Unmatched int
+	// UnmatchedAuthored — из них НА АВТОРСКИХ ресурсах (`producer: authored`).
+	//
+	// Печатается рядом с `Unmatched`, а не вместо него, и не сливается в сумму:
+	// у этих двух популяций РАЗНОЕ продолжение. Несопоставленное действие
+	// порождённого ресурса судит сверка соединения (`CheckActionLinkage`) и там
+	// это ОТКАЗ; авторский ресурс её популяции не принадлежит вовсе, и по нему
+	// не будет ни отказа, ни второго слова. Одно число из двух этого различия не
+	// показывает, а «ноль ложных обещаний» становится неотличимо от «ноль
+	// осмотренных» (задача #1935).
+	UnmatchedAuthored int
 	// ResourcesWithBaseRoles — ресурсов, объявивших базовые ярусные роли.
 	ResourcesWithBaseRoles int
 	// BaseRoleTiersDerived — ярусов, ВЫВЕДЕННЫХ из этих объявлений.
@@ -184,10 +199,12 @@ func (c ClassCensus) Summary() string {
 	return fmt.Sprintf(
 		"действий каталога %d · ресурсов манифеста %d · действий раздела %d · "+
 			"класс удовлетворяет %d · отказов %d · непригодно для роли %d · "+
-			"освобождено %d · не сопоставлено %d · ресурсов с базовыми ярусами %d · "+
+			"освобождено %d · не сопоставлено %d (из них авторских %d) · "+
+			"ресурсов с базовыми ярусами %d · "+
 			"ярусов выведено %d · действий внутренней плоскости %d",
 		c.ActionsAttributed, c.ResourcesRead, c.VerbsRead,
 		c.ClassSatisfies, c.Findings, c.Unsuitable, c.Exempt, c.Unmatched,
+		c.UnmatchedAuthored,
 		c.ResourcesWithBaseRoles, c.BaseRoleTiersDerived, c.InternalVerbs)
 }
 
@@ -222,7 +239,8 @@ func CheckResourceClasses(facts VerbFacts, m *manifest.Manifest, actions []Actio
 			if v.Internal {
 				census.InternalVerbs++
 			}
-			note, fault := judgeVerb(facts, m.Module, r.Name, fgaType, v, byKey, &census)
+			note, fault := judgeVerb(facts, m.Module, r.Name, fgaType,
+				r.Producer == "authored", v, byKey, &census)
 			if note != nil {
 				notes = append(notes, *note)
 			}
@@ -234,18 +252,61 @@ func CheckResourceClasses(facts VerbFacts, m *manifest.Manifest, actions []Actio
 	return faults, notes, census
 }
 
+// unmatchedSequel — ЧТО БУДЕТ с несопоставленным действием дальше. Ответ зависит
+// от `producer` записи, и различитель у пометки под рукой — это ключ той же
+// записи манифеста, которую она судит.
+//
+// # Почему безусловное обещание было ложью на четверти дерева
+//
+// Пометка обещала читателю, что несопоставленное действие осудит сверка
+// соединения (`CheckActionLinkage`), — безусловно. Её популяция ограничена
+// `producer: derived`, и это записанное РЕШЕНИЕ, а не упущение: у авторского
+// ресурса записи каталога нет by construction, поэтому требовать от него пары
+// значило бы требовать того, чего не бывает (linkage.go, §«Популяция
+// ограничена…»).
+//
+// Замер на `release/modules-6`, единица — пометка одного действия: пометок
+// печаталось 4, и ВСЕ ЧЕТЫРЕ приходились на авторский `registry.repositories`,
+// то есть обещали отказ, которого не будет. Доля ложных — 4 из 4.
+//
+// Половинчатая правда здесь хуже равномерной ошибки: на порождённом ресурсе
+// обещание сбывается, доверие к пометке заслужено — и тратится оно ровно на том
+// случае, где она лжёт. Читатель шёл к выводу сверки соединения, видел «без
+// записи каталога 0 · вне популяции 1» и заключал одно из двух неверных: что
+// пометка ошибочна вообще либо что соседняя сверка сломана. Верный вывод
+// («ресурс авторский, пары от него не требуют») из вывода прогона не следовал
+// ни одной строкой.
+//
+// Класс — гипотеза о МЕХАНИЗМЕ: посылка о том, как устроен чужой механизм, взята
+// из его назначения, а не из его кода (задача #1935).
+func unmatchedSequel(authored bool) string {
+	if authored {
+		return "Второго слова по нему НЕ БУДЕТ: сверка соединения " +
+			"(CheckActionLinkage) авторские ресурсы (`producer: authored`) не судит — " +
+			"записи каталога у них нет by construction, и пары от них не требуют. " +
+			"Действие остаётся объявленным и негейтящимся; чинится это записью " +
+			"каталога у ресурса либо снятием действия из раздела"
+	}
+	return "Судит несопоставленное действие сверка соединения " +
+		"(CheckActionLinkage), и там это ОТКАЗ: она же называет написание, " +
+		"которого ждёт каталог"
+}
+
 // judgeVerb — вердикт по ОДНОМУ действию раздела; счётчики переписи двигает
 // он же, чтобы состояние и его учёт нельзя было рассогласовать.
 //
 // Возвращает ПОМЕТКУ и ОТКАЗ; ровно одно из двух непусто, а на удовлетворяющем
 // классе — оба пусты.
-func judgeVerb(facts VerbFacts, module, resource, fgaType string, v manifest.Verb,
-	byKey map[string]Action, census *ClassCensus) (*Note, error) {
+func judgeVerb(facts VerbFacts, module, resource, fgaType string, authored bool,
+	v manifest.Verb, byKey map[string]Action, census *ClassCensus) (*Note, error) {
 
 	class := declaredClass(v)
 	a, ok := byKey[module+"."+resource+"."+v.Name]
 	if !ok {
 		census.Unmatched++
+		if authored {
+			census.UnmatchedAuthored++
+		}
 		return &Note{
 			Kind: NoteActionUnknownToCatalog, Module: module, Resource: resource,
 			Verb: v.Name, Class: class,
@@ -253,10 +314,8 @@ func judgeVerb(facts VerbFacts, module, resource, fgaType string, v manifest.Ver
 				"ресурс %q модуля %q: каталог прав не знает действия %q — класс %q сверить "+
 					"не с чем, и по ЭТОЙ оси действие выведено из всех трёх проверок. Здесь "+
 					"это пометка, а не отказ: предмет стадии — соответствие КЛАССА гейту, а "+
-					"гейта нет. Судит несопоставленное действие сверка соединения "+
-					"(CheckActionLinkage), и там это ОТКАЗ: она же называет написание, "+
-					"которого ждёт каталог",
-				resource, module, v.Name, class),
+					"гейта нет. %s",
+				resource, module, v.Name, class, unmatchedSequel(authored)),
 		}, nil
 	}
 	if a.Exempt() {
@@ -407,6 +466,15 @@ type Report struct {
 	Rules Census
 	// RulesJudged — исполнялась ли стадия 2.
 	RulesJudged bool
+	// Named — перепись стадии 3 (названное вхождение, MOD-RL-19); нулевая,
+	// когда стадия не исполнялась.
+	Named NamedCensus
+	// Export — перепись стадии 4 (полнота поимённого перечня, MOD-RL-18).
+	Export ExportCensus
+	// NamedJudged — исполнялись ли стадии 3 и 4. Отдельно от `RulesJudged`:
+	// «стадия молчит» и «стадия не исполнялась» — разные вещи, и вторая не
+	// вычитается из вердикта и не зачитывается в успех.
+	NamedJudged bool
 }
 
 // Summary — перепись обеих стадий строкой, с прямым указанием на неисполненную.
@@ -416,15 +484,31 @@ func (r Report) Summary() string {
 			"стадия «класс удовлетворяет гейт» красна, и множество, по которому " +
 			"считается полнота, ещё не определено"
 	}
-	return r.Classes.Summary() + " | правила ролей: " + r.Rules.Summary()
+	if !r.NamedJudged {
+		return r.Classes.Summary() + " | правила ролей: " + r.Rules.Summary() +
+			" | поимённая форма: проверка НЕ ИСПОЛНЯЛАСЬ — стадия классов правил красна, " +
+			"и класс, по которому считается полнота, ещё не определён"
+	}
+	return r.Classes.Summary() + " | правила ролей: " + r.Rules.Summary() +
+		" | " + r.Named.Summary() + " | " + r.Export.Summary()
 }
 
-// Check — обе стадии в ОБЪЯВЛЕННОМ порядке (§3.6 п. 6).
+// Check — ЧЕТЫРЕ стадии в ОБЪЯВЛЕННОМ порядке (§3.6 п. 6, MOD-RL-22 Then):
+// класс действия → класс правила → НАЗВАННОЕ → ПОЛНОТА названного.
 //
 // Порядок и замыкание живут ЗДЕСЬ, а не у вызывающего: проверка порядка,
 // написанная в команде обхода дерева, не защищала бы второго вызывающего той же
 // связки, а «валидирует команду» верно лишь для того пути, который до неё
 // доходит.
+//
+// # Почему названное и его полнота идут ПОСЛЕ, а не рядом
+//
+// Обе считаются ПО КЛАССУ: пригодность названного действия и полнота перечня
+// определены относительно класса, объявленного разделом `resources`. Пока стадия
+// 1 красна, класс объявлен не тем, чем его понимает проверка доступа, и «полный»
+// перечень оказался бы неполным по факту. Пока красна стадия 2, у роли есть
+// пустое право, и вердикт о полноте соседнего был бы вердиктом о роли, которая и
+// так не экспортируется.
 func Check(facts VerbFacts, m *manifest.Manifest, actions []Action) Report {
 	faults, notes, classes := CheckResourceClasses(facts, m, actions)
 	rep := Report{Faults: faults, Notes: notes, Classes: classes}
@@ -435,5 +519,21 @@ func Check(facts VerbFacts, m *manifest.Manifest, actions []Action) Report {
 	rep.Faults = append(rep.Faults, ruleFaults...)
 	rep.Rules = ruleCensus
 	rep.RulesJudged = true
+	if len(ruleFaults) > 0 {
+		return rep
+	}
+	namedFaults, namedCensus := CheckNamedVerbs(facts, m, actions)
+	rep.Faults = append(rep.Faults, namedFaults...)
+	rep.Named = namedCensus
+	rep.NamedJudged = true
+	if len(namedFaults) > 0 {
+		// Полнота перечня, часть которого непригодна, считалась бы по классу,
+		// содержащему то, что правом не выдаётся: отказ назвал бы автору
+		// недостающие имена, дописать которые он всё равно не вправе.
+		return rep
+	}
+	_, exportFaults, exportCensus := ExportRoleRules(facts, m, actions)
+	rep.Faults = append(rep.Faults, exportFaults...)
+	rep.Export = exportCensus
 	return rep
 }

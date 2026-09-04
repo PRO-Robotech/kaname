@@ -37,12 +37,13 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // newHandler builds the production handler the same way the composition root
 // does (no fakes — the catalog is in-code).
 func newHandler() *Handler {
-	return NewHandler(NewListPermissionCatalogUseCase())
+	return NewHandler(NewListPermissionCatalogUseCase(catalogfixture.Source()))
 }
 
 // authedCtx — a non-anonymous principal (any authenticated user satisfies the

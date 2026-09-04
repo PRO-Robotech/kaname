@@ -3,49 +3,80 @@
 
 package domain
 
-// module_set.go — RBAC rules-model 2026 platform module-set ownership.
+// module_set.go — ПОРТ членства в наборе модулей платформы.
 //
-// The domain OWNS the closed platform module-set. A Rule.module must be a member
-// of this set (besides being grammar-valid and non-empty); Rule.Validate consults
-// IsKnownModule to reject an unknown module on the request-path (INVALID_ARGUMENT)
-// — WITHOUT the domain importing authzmap (clean-arch: pure Go,
-// stdlib only).
+// # Что здесь было и почему снято (задача продукта #1927)
 //
-// The set MUST stay in lockstep with the module-prefixes of authzmap.objectTypes
-// (the FGA object-type catalog) — authzmap CONSUMES this set (or is held lockstep
-// via the authzmap↔domain drift-test). geo is intentionally absent (Geography is
-// its own service, not in objectTypes); the load-balancer module token is
-// `loadbalancer` (NOT `nlb`).
-
-// knownModules — the closed set of platform modules a rule may grant over. Order
-// is the canonical platform order (iam first, then resource domains).
-var knownModules = []string{"iam", "vpc", "compute", "loadbalancer", "registry", "storage"}
-
-// knownModuleSet — membership index built once from knownModules.
-var knownModuleSet = func() map[string]struct{} {
-	m := make(map[string]struct{}, len(knownModules))
-	for _, k := range knownModules {
-		m[k] = struct{}{}
-	}
-	return m
-}()
-
-// IsKnownModule reports whether m is a member of the closed platform module-set
-// declared by knownModules above — today {iam, vpc, compute, loadbalancer, registry,
-// storage}. The wildcard `*` is NOT a known module (it is a system-only marker
-// handled separately by Rule.Validate).
+// Здесь стоял литерал `knownModules` — закрытый перечень из шести имён, который
+// домен ОБЪЯВЛЯЛ своим. `Rule.Validate` спрашивал его на пути запроса и отвергал
+// незнакомый модуль. Литерал снят: набор модулей платформы стал СТРОКАМИ
+// (`kacho_iam.catalog_module`, миграция 20260901113757), и второе объявление того
+// же предмета в Go означало, что снятие модуля не доезжает до пути запроса
+// НИКОГДА — процесс продолжал бы считать снятый модуль живым до перезапуска, а
+// заведённый строкой — несуществующим до релиза.
 //
-// Перечень здесь НАЗЫВАЕТ набор, а не задаёт его: единственный источник — литерал
-// knownModules. Эта строка уже переживала свой предмет — она осталась при пяти
-// именах, когда шестое (storage) было добавлено, и разошлась молча: проба набора
-// утверждала ЧЛЕНСТВО, а не равенство, поэтому росту набора не сопротивлялась.
-func IsKnownModule(m string) bool {
-	_, ok := knownModuleSet[m]
+// # Почему ПОРТ, а не «домен спрашивает каталог»
+//
+// Домен — чистый Go (stdlib плюс multierr): ни pgx, ни сгенерированных стабов,
+// ни пакета каталога он не импортирует, и импортировать не станет — каталог
+// импортирует ЕГО. Поэтому набор приходит ПАРАМЕТРОМ, а порт объявлен у
+// потребителя, то есть здесь.
+//
+// # Что даёт компилятор, чего не дала бы проверка у вызывающего
+//
+// Membership можно было унести из домена целиком — в гейт каталога use-case'а,
+// где уже судится сегмент ресурса. Тогда всякий следующий вызывающий
+// `Rules.Validate` пропускал бы членство МОЛЧА: отказ приходил бы позже и чужой
+// полосой (ключ `role_rule_ref` в базе), а у правила с подстановкой ресурса —
+// не приходил бы вовсе, потому что строки проекции такое правило не даёт.
+// Параметр закрывает это построением: назвать источник набора обязан КАЖДЫЙ
+// вызывающий, и забыть его нельзя — не соберётся.
+//
+// # Кто чем отвечает
+//
+//	путь запроса (создание и правка роли)   ЖИВЫЕ строки — catalog.Facts
+//	загрузчик манифеста, применитель ролей,
+//	оснастка дерева, левая сторона паритета КАНОН — authzmap.CatalogSeedModules()
+//
+// Различие не стилистическое: первый вопрос — «жив ли модуль ПРЯМО СЕЙЧАС», и
+// его ответ меняется в работающем процессе снятием строки; второй — «объявлен ли
+// модуль платформой», и он обязан быть воспроизводим из ДЕРЕВА, потому что
+// оснастка сверяет канон на машине, где базы нет by construction. Согласие двух
+// ответов держит страж старта (`seed.AssertCatalogParity`), отказывающий в пуске
+// при расхождении, — то же устройство, что у ресурсов и глаголов.
+
+// ModuleSet — членство в наборе модулей платформы, каким его знает ВЫЗЫВАЮЩИЙ.
+//
+// Подстановочный знак `*` членом набора не является ни в одной реализации: он не
+// имя модуля, а маркер политики, и разбирается [Rule.Validate] отдельно.
+type ModuleSet interface {
+	// IsKnownModule — состоит ли модуль в наборе.
+	IsKnownModule(module string) bool
+}
+
+// moduleSetOf — набор, собранный из перечня имён.
+type moduleSetOf map[string]struct{}
+
+// IsKnownModule реализует [ModuleSet].
+func (s moduleSetOf) IsKnownModule(module string) bool {
+	_, ok := s[module]
 	return ok
 }
 
-// KnownModules returns a copy of the closed platform module-set in canonical
-// order. Used by the authzmap↔domain drift-test to assert lockstep.
-func KnownModules() []string {
-	return append([]string(nil), knownModules...)
+// ModuleSetOf — набор из перечня имён, для вызывающего, у которого перечень уже
+// в руках: канон дерева, фикстура пробы, применитель ролей модуля.
+//
+// Пустой перечень даёт набор, не признающий НИЧЕГО, и это не вырожденный случай,
+// а тот же fail-closed, что у отсутствующего набора ниже: «перечень пуст» не есть
+// «принимаем любой». Разница лишь в том, что здесь отказ приходит с именем
+// модуля, а там — с указанием на непровязанный источник.
+func ModuleSetOf(names ...string) ModuleSet {
+	s := make(moduleSetOf, len(names))
+	for _, n := range names {
+		if n == "" {
+			continue
+		}
+		s[n] = struct{}{}
+	}
+	return s
 }

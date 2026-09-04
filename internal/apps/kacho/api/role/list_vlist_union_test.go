@@ -50,6 +50,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // roleUnionFGAStub — relation-aware stub clients.RelationQueries: it distinguishes
@@ -106,7 +107,7 @@ func TestListRoles_Union_VListOnlyGrant_CustomVisible(t *testing.T) {
 	fga.set("v_list", "user:usr-u1", []string{"rol-c1"}) // object-only v_list grant
 	fga.set("viewer", "user:usr-u1", nil)
 
-	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"rol-sys1", "rol-c1"}, roleIDs(out),
@@ -127,7 +128,7 @@ func TestListRoles_Union_ViewerGrant_StillVisible(t *testing.T) {
 	fga.set("viewer", "user:usr-u1", []string{"rol-c1"})
 	fga.set("v_list", "user:usr-u1", nil)
 
-	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"rol-c1"}, roleIDs(out),
@@ -144,7 +145,7 @@ func TestListRoles_Union_Dedup(t *testing.T) {
 	fga.set("viewer", "user:usr-u1", []string{"rol-c1", "rol-c2"})
 	fga.set("v_list", "user:usr-u1", []string{"rol-c2"}) // dedup
 
-	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"rol-c1", "rol-c2"}, roleIDs(out),
@@ -159,7 +160,7 @@ func TestListRoles_Union_FGAUnavailable_FailClosed(t *testing.T) {
 	fga := newRoleUnionFGAStub()
 	fga.err = stderrors.New("relation form did not answer: connection closed")
 
-	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	_, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 	require.Error(t, err)
 	st, ok := status.FromError(err)

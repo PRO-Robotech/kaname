@@ -3,43 +3,54 @@
 
 package migrations_test
 
-// identity_merge_membership_state_integration_test.go — состояние ПЕРЕЕХАВШЕГО
-// членства утверждается, а не подразумевается (задача #1044).
+// identity_merge_membership_state_integration_test.go — ВЫХОД из состояния
+// «приглашён» утверждается, а не подразумевается (задача #1044).
 //
-// # Что было измерено, прежде чем что-либо чинить
+// # Что здесь держится
 //
-// Задача заявляла: после сведения строк личности переехавшее членство остаётся
-// «приглашён» НАВСЕГДА. Замер по дереву показал, что это верно ровно до
-// следующей миграции цепочки и неверно после неё:
+// У человека может быть больше одного членства, и состояние каждого обязано
+// следовать ЛИЧНОСТИ, а не тому аккаунту, через который членство завелось.
+// Держит это зеркало `membership_mirror_from_user()` — точнее, его ТРЕТЬЯ
+// ветвь, отдельная от двух первых:
 //
-//	группа (вошедший + приглашённый)   после переноса      после всей цепочки
-//	                                   accB = PENDING      accB = ACTIVE
-//	группа (никто не входил)           оба   PENDING       оба   PENDING
+//	IF NEW.invite_status <> 'PENDING' THEN
+//	    UPDATE kacho_iam.memberships SET state = 'ACTIVE'
+//	     WHERE user_id = NEW.id AND state = 'PENDING';
+//	END IF;
 //
-// То есть предмет — не состояние, а ОКНО, и окно это закрывается догоняющей
-// правкой соседней миграции, внутри того же прогона мигратора. Правильное
-// состояние выводится из ВЫЖИВШЕЙ строки («входил ли человек»), а не переносится
-// со снимаемой, — и оба замера это подтверждают: там, где не входил никто,
-// «приглашён» остаётся и остаётся ВЕРНО.
+// Первые две ветви правят членство ТОГО аккаунта, что стоит в колонке строки
+// (`account_id = NEW.account_id`), и до второго членства не достают вовсе.
+// Значит без третьей ветви человек, вошедший в продукт, остаётся «приглашённым»
+// во всех аккаунтах, кроме одного.
 //
-// # Почему проба всё-таки нужна, хотя состояние сегодня верное
+// # Почему проба нужна, хотя состояние сегодня верное
 //
-// Верность держалась ничем. Соседние пробы сведения читают у членства ТОЛЬКО
-// аккаунт (`membershipAccountsOf`), поэтому состояние могло разъехаться молча:
-// снимут догоняющую правку — и никто не заметит; напишут следующую миграцию
-// сведения по образцу этой — догоняющая правка второй раз не выполнится, потому
-// что она одноразовая.
+// Верность держится ничем, кроме этих трёх проб. Соседние пробы членства читают
+// у него ТОЛЬКО аккаунт (`membershipAccountsOf`), а пробы зеркала —
+// `pg/membership_mirror_integration_test.go` — утверждают ВХОД в состояние
+// («приглашённому ставится PENDING») и ни одна не утверждает ВЫХОД из него.
+// Снимут третью ветвь — не покраснеет ничто.
 //
 // Наблюдаемо для арендатора это выглядит так: человек вошёл, а второй аккаунт
-// пропал из его собственного ответа «кто я» — при том что администратор того
-// аккаунта власть над его личностью сохраняет (§16 реестра отступлений).
-// Пропажа тише приобретения, и заметить её некому.
+// пропал из его собственного ответа «кто я» — `ListAccountsForUser` отбирает по
+// `state = 'ACTIVE'`, — при том что администратор того аккаунта власть над его
+// личностью сохраняет (§16 реестра отступлений). Пропажа тише приобретения, и
+// заметить её некому.
 //
-// # Что утверждается — ВЫХОД из состояния, а не вход в него
+// # Здесь стояли пробы СВЕДЕНИЯ строк личности — предмет у них снят
 //
-// Вход работает и без этих проб: зеркало ставит «приглашён» приглашённому. Здесь
-// утверждается, что из «приглашён» есть выход для того, кто вошёл, — и что для
-// того, кто не входил, выхода нет.
+// Прежняя редакция строила второе членство сведением дублей: цепочка
+// останавливалась перед миграцией переноса, сеялись две строки на одну почту,
+// и перенос сводил их в одну. Ни того, ни другого в дереве больше нет — 171
+// миграция сведена в один свод, а глобальный ключ `users_identity_email_uniq`
+// делает две строки на одну почту НЕПРЕДСТАВИМЫМИ by construction.
+//
+// Умерла ЛЕСТНИЦА, а не свойство: второе членство строится прямой вставкой —
+// ровно так же, как это делает соседняя проба зеркала
+// (`TestIntegration_MirrorKeepsMembershipsItDidNotCreate`), — и утверждается то
+// же самое. Инъекция стала СИЛЬНЕЕ прежней: она подаёт переход «первый вход»
+// напрямую и потому судит третью ветвь, а не исход миграции, внутри которой та
+// ветвь была лишь одним из стейтментов.
 
 import (
 	"database/sql"
@@ -47,7 +58,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/internal/pgtest"
@@ -93,98 +103,120 @@ func pendingMembershipsOf(t *testing.T, db *sql.DB, userID string) []string {
 	return out
 }
 
-// mergedPairOnTheFullChain — общая посадка: два дубля одной почты сводятся, и
-// цепочка миграций доводится ДО КОНЦА.
+// personInvitedToTwoAccounts — общая посадка: приглашённый человек, у которого
+// ДВА членства и оба «приглашён».
 //
-// До конца — принципиально. Останавливаться на самой миграции сведения значило
-// бы судить об одном её стейтменте, тогда как арендатор видит СОСТОЯНИЕ ДЕРЕВА:
-// на поднятом стенде применено всё, что есть.
-func mergedPairOnTheFullChain(t *testing.T, tagA, tagB, email, firstStatus, secondStatus string) (*sql.DB, string, string, string) {
+// Второе членство вставляется ПРЯМО, а не заводится зеркалом: зеркало заводит
+// членство только того аккаунта, что стоит в колонке строки, и второго не
+// создаёт ни при каком входе. Именно поэтому оно и есть предмет — состояние
+// такого членства правит только третья ветвь.
+//
+// Идентификатор берётся у `membership_mirror_id`, а не выдумывается: форму
+// держит `memberships_id_form_check`, и фикстура обязана быть не снисходительнее
+// продукта.
+func personInvitedToTwoAccounts(t *testing.T, tagA, tagB, email string) (*sql.DB, string, string, string) {
 	t.Helper()
-	dsn := pgtest.NewEmptyDB(t)
-	db := upTo(t, dsn, identityMergeVersion-1)
+	db := upAllIAMMigrations(t, pgtest.NewEmptyDB(t))
 	t.Cleanup(func() { _ = db.Close() })
 
 	_, accA := seedAccountWithOwner(t, db, tagA)
 	_, accB := seedAccountWithOwner(t, db, tagB)
 
-	first := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "aa"+tagA), email, accA, firstStatus, "ext-"+tagA)
-	second := seedRowInAccount(t, db,
-		"usr"+fmt.Sprintf("%017s", "zz"+tagB), email, accB, secondStatus, "ext-"+tagB)
+	person := seedRowInAccount(t, db,
+		"usr"+fmt.Sprintf("%017s", "pp"+tagA), email, accA, "PENDING", "")
 
-	require.Len(t, rowsWithEmail(t, db, email), 2,
-		"ПРЕДПОСЫЛКА: дублей обязано быть два — на одной строке сведение беспредметно")
+	_, err := db.Exec(`
+		INSERT INTO kacho_iam.memberships (id, user_id, account_id, state)
+		VALUES (kacho_iam.membership_mirror_id($1, $2), $1, $2, 'PENDING')`, person, accB)
+	require.NoError(t, err, "посев второго членства человека %s в аккаунте %s", person, accB)
 
-	require.NoError(t, goose.Up(db, "."),
-		"цепочка обязана доходить до конца: арендатор видит применённое дерево, "+
-			"а не отдельный стейтмент")
+	require.Equal(t, []string{accA, accB}, membershipAccountsOf(t, db, person),
+		"ПРЕДПОСЫЛКА: членств обязано быть ДВА — на одном членстве третья ветвь "+
+			"неотличима от второй, и всякое утверждение ниже зеленело бы при её отсутствии")
+	require.Equal(t, []string{accA, accB}, pendingMembershipsOf(t, db, person),
+		"ПРЕДПОСЫЛКА: оба членства обязаны быть «приглашён» — иначе выходить неоткуда "+
+			"и проба ни о чём не говорит")
 
-	survivors := rowsWithEmail(t, db, email)
-	require.Len(t, survivors, 1,
-		"после сведения у человека обязана остаться ОДНА строка, иначе проба говорит "+
-			"не о переехавшем членстве")
-	_ = second
-	_ = first
-	return db, survivors[0], accA, accB
+	return db, person, accA, accB
 }
 
-// TestIntegration_MovedMembershipOfAPersonWhoLoggedInIsNotLeftPending — главное
+// logIn — первый вход человека. Ровно то, что делает `ActivateInvite`: строка
+// перестаёт быть приглашением и получает внешний субъект.
+func logIn(t *testing.T, db *sql.DB, person, externalID string) {
+	t.Helper()
+	res, err := db.Exec(`
+		UPDATE kacho_iam.users
+		   SET invite_status = 'ACTIVE', external_id = $2
+		 WHERE id = $1`, person, externalID)
+	require.NoError(t, err)
+	affected, err := res.RowsAffected()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, affected, "вход не состоялся: строка человека не изменена")
+}
+
+// TestIntegration_SecondMembershipOfAPersonWhoLoggedInIsNotLeftPending — главное
 // утверждение: у ВОШЕДШЕГО человека ни одно членство не остаётся «приглашён».
 //
-// «Приглашён» означает «приглашение выдано, человек ещё не вошёл». На выжившей
-// строке это утверждение ложно by construction: строка выжила потому, что по ней
-// входили. Членство, оставшееся в этом состоянии, лжёт о человеке — и лжёт
-// единственному читателю состояния, `ListAccountsForUser`, который отдаёт ответ
-// «кто я».
-func TestIntegration_MovedMembershipOfAPersonWhoLoggedInIsNotLeftPending(t *testing.T) {
+// «Приглашён» означает «приглашение выдано, человек ещё не вошёл». После входа
+// это утверждение ложно о человеке, а не об аккаунте, поэтому членство, в нём
+// оставшееся, лжёт единственному читателю состояния — `ListAccountsForUser`,
+// который отдаёт ответ «кто я».
+func TestIntegration_SecondMembershipOfAPersonWhoLoggedInIsNotLeftPending(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
+		t.Skip("integration: нужен Postgres в контейнере")
 	}
 	const email = "moved-in@example.test"
-	db, survivor, accA, accB := mergedPairOnTheFullChain(t, "movedaaa", "movedbbb", email, "ACTIVE", "PENDING")
+	db, person, accA, accB := personInvitedToTwoAccounts(t, "movedaaa", "movedbbb", email)
 
-	t.Logf("осмотрено: выжившая строка %s, членств %d — %v",
-		survivor, len(membershipStatesOf(t, db, survivor)), membershipStatesOf(t, db, survivor))
+	logIn(t, db, person, "ext-moved")
 
-	// ПРЕДПОСЫЛКА: членство действительно ПЕРЕЕХАЛО. Без неё утверждение
-	// «ничего не осталось приглашённым» зеленело бы на человеке, у которого
-	// второго членства нет вовсе.
-	require.Equal(t, []string{accA, accB}, membershipAccountsOf(t, db, survivor),
-		"ПРЕДПОСЫЛКА: членства обоих аккаунтов обязаны быть на выжившей строке — "+
-			"иначе переезжать было нечему и проба ни о чём не говорит")
+	t.Logf("осмотрено: строка %s, членств %d — %v",
+		person, len(membershipStatesOf(t, db, person)), membershipStatesOf(t, db, person))
 
-	require.Empty(t, pendingMembershipsOf(t, db, survivor),
-		"членство вошедшего человека осталось «приглашён». Состояние переехало со "+
-			"снимаемой строки вместо того, чтобы быть выведенным из выжившей: "+
-			"`ListAccountsForUser` отбирает по `state = 'ACTIVE'`, поэтому такой аккаунт "+
-			"пропадает из ответа «кто я» — при том что власть администратора этого "+
-			"аккаунта над личностью сохраняется (§16 реестра отступлений)")
+	require.Empty(t, pendingMembershipsOf(t, db, person),
+		"членство вошедшего человека осталось «приглашён». Состояние следует АККАУНТУ, через "+
+			"который членство завелось, вместо того чтобы следовать личности: первые две ветви "+
+			"зеркала правят только членство своего аккаунта (`account_id = NEW.account_id`), а "+
+			"третья — та, что достаёт до остальных, — не сработала. `ListAccountsForUser` "+
+			"отбирает по `state = 'ACTIVE'`, поэтому такой аккаунт пропадает из ответа «кто я» "+
+			"— при том что власть администратора этого аккаунта над личностью сохраняется "+
+			"(§16 реестра отступлений)")
+
+	require.Equal(t, []string{accA, accB}, membershipAccountsOf(t, db, person),
+		"зеркало сняло членство, которого не заводило: вход обязан активировать ВСЕ членства, "+
+			"а не оставлять человека в одном аккаунте (IAM-ID-1-04)")
 }
 
-// TestIntegration_MovedMembershipOfAPersonWhoNeverLoggedInStaysPending —
+// TestIntegration_SecondMembershipOfAPersonWhoNeverLoggedInStaysPending —
 // ЗАКОННЫЙ БЛИЗНЕЦ, а не украшение.
 //
-// Утверждаемое свойство — «состояние выводится из выжившей строки», а НЕ «всё
-// становится активным». Без этой стороны предыдущая проба осталась бы зелёной на
-// коде, который переводит в «активно» ВСЁ подряд, — то есть на приглашении,
-// объявившем человека вошедшим. Приобретение тише потери, и ловить его надо
-// отдельным утверждением.
-func TestIntegration_MovedMembershipOfAPersonWhoNeverLoggedInStaysPending(t *testing.T) {
+// Утверждаемое свойство — «состояние следует ЛИЧНОСТИ», а НЕ «всё становится
+// активным». Без этой стороны проба выше осталась бы зелёной на зеркале,
+// переводящем в «активно» любую правку строки, — то есть на приглашении,
+// объявившем человека вошедшим.
+//
+// Утверждаются ДВА момента, потому что беззаботность зеркала бывает двух видов:
+// «оно активирует при заведении» и «оно активирует при любой правке». Первый
+// ловится состоянием сразу после посева, второй — правкой, входом НЕ являющейся.
+func TestIntegration_SecondMembershipOfAPersonWhoNeverLoggedInStaysPending(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
+		t.Skip("integration: нужен Postgres в контейнере")
 	}
 	const email = "never-in@example.test"
-	db, survivor, accA, accB := mergedPairOnTheFullChain(t, "neveraaa", "neverbbb", email, "PENDING", "PENDING")
+	db, person, accA, accB := personInvitedToTwoAccounts(t, "neveraaa", "neverbbb", email)
 
-	require.Equal(t, []string{accA, accB}, membershipAccountsOf(t, db, survivor),
-		"ПРЕДПОСЫЛКА: членства обоих аккаунтов обязаны быть на выжившей строке")
+	// Правка строки, входом НЕ являющаяся: приглашение остаётся приглашением.
+	_, err := db.Exec(`
+		UPDATE kacho_iam.users SET display_name = 'renamed' WHERE id = $1`, person)
+	require.NoError(t, err)
 
-	require.Equal(t, []string{accA, accB}, pendingMembershipsOf(t, db, survivor),
-		"членство человека, НЕ входившего ни разу, переведено в «активно». Это не "+
-			"починка, а расширение: приглашение объявлено принятым за того, кто его "+
-			"не принимал, и `ListAccountsForUser` назовёт ему аккаунт, в который он "+
-			"не входил")
+	t.Logf("осмотрено: строка %s, членств %d — %v",
+		person, len(membershipStatesOf(t, db, person)), membershipStatesOf(t, db, person))
+
+	require.Equal(t, []string{accA, accB}, pendingMembershipsOf(t, db, person),
+		"членство человека, НЕ входившего ни разу, переведено в «активно». Это не починка, а "+
+			"расширение: приглашение объявлено принятым за того, кто его не принимал, и "+
+			"`ListAccountsForUser` назовёт ему аккаунт, в который он не входил")
 }
 
 // TestIntegration_ThePendingMembershipPredicateCanSeeAViolation — ИНЪЕКЦИЯ.
@@ -195,31 +227,32 @@ func TestIntegration_MovedMembershipOfAPersonWhoNeverLoggedInStaysPending(t *tes
 // неверного идентификатора. Поэтому тот же самый предикат ставится перед
 // нарушением, ВНЕСЁННЫМ в живые строки, и обязан его назвать.
 //
-// Дефект вносится не в миграцию, а в данные: миграция одноразова, и проба,
-// привязанная к её версии, стала бы закреплять дефект как желаемое поведение —
-// а он желаемым не является и, будучи однажды починен в самом стейтменте, сделал
-// бы такую пробу ложной тревогой.
+// Дефект вносится в ДАННЫЕ, а не в зеркало: зеркало правит состояние только на
+// записи строки человека, и проба, чинящая его через строку, измеряла бы ту же
+// третью ветвь второй раз вместо способности предиката видеть.
 func TestIntegration_ThePendingMembershipPredicateCanSeeAViolation(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping integration test (requires Docker)")
+		t.Skip("integration: нужен Postgres в контейнере")
 	}
 	const email = "inject@example.test"
-	db, survivor, _, accB := mergedPairOnTheFullChain(t, "injectaa", "injectbb", email, "ACTIVE", "PENDING")
+	db, person, _, accB := personInvitedToTwoAccounts(t, "injectaa", "injectbb", email)
 
-	require.Empty(t, pendingMembershipsOf(t, db, survivor),
+	logIn(t, db, person, "ext-inject")
+
+	require.Empty(t, pendingMembershipsOf(t, db, person),
 		"ПРЕДПОСЫЛКА инъекции: до внесения дефекта приглашённых членств быть не должно — "+
 			"иначе инъекция ничего не доказывает")
 
 	res, err := db.Exec(`
 		UPDATE kacho_iam.memberships SET state = 'PENDING'
-		 WHERE user_id = $1 AND account_id = $2`, survivor, accB)
+		 WHERE user_id = $1 AND account_id = $2`, person, accB)
 	require.NoError(t, err)
 	affected, err := res.RowsAffected()
 	require.NoError(t, err)
 	require.EqualValues(t, 1, affected,
 		"дефект не внесён: строка, которую предикат обязан увидеть, не изменена")
 
-	require.Equal(t, []string{accB}, pendingMembershipsOf(t, db, survivor),
+	require.Equal(t, []string{accB}, pendingMembershipsOf(t, db, person),
 		"предикат НЕ УВИДЕЛ внесённого нарушения — значит зелёное в пробах выше "+
 			"означает «ничего не прочитано», а не «нарушений нет»")
 }

@@ -255,7 +255,8 @@ func validateScopeID(resourceType, resourceID string) error {
 		}
 	default:
 		// A non-hierarchy scope type is rejected upstream by domain.Validate
-		// (validResourceTypes) — no scope-id format contract here.
+		// (the anchor vocabulary `scopeAnchorTiers`) — no scope-id format
+		// contract here.
 	}
 	return nil
 }

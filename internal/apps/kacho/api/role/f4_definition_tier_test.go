@@ -48,7 +48,7 @@ func TestRole_IAM_1_10_DtoEmitsDefinitionTier(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			pb, err := roleToPb(tc.role)
+			pb, err := roleToPb(withPreviewLookup(tc.role))
 			require.NoError(t, err)
 			require.NotNil(t, pb.GetDefinitionTier(), "definitionTier must be populated")
 			assert.Equal(t, tc.wantType, pb.GetDefinitionTier().GetTierType())

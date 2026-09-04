@@ -71,9 +71,39 @@ var (
 	// ErrRefNotAPair — сторона вступления адресована не парой (аккаунт, имя).
 	ErrRefNotAPair = errors.New("manifest: reference is not a pair (account, name)")
 	// ErrBindingIncomplete — выдача не назвала, ЧТО она выдаёт, ГДЕ и НА ЧТО.
-	// Схема требует все четыре ключа (`roleId`, `scopeType`, `scopeId`,
-	// `target`); без любого из них выдача неисполнима, а не «частична».
+	// Форм выдачи ДВЕ и они взаимоисключающи (`roleId` либо `grantedRelation`);
+	// сверх ровно одной из них выдача обязана назвать `scopeType`, `scopeId` и
+	// `target`. Без любого из этих ключей выдача неисполнима, а не «частична».
 	ErrBindingIncomplete = errors.New("manifest: accessBinding is incomplete")
+	// ErrRelationNotDeclared — выдача называет отношение, которого канон модели
+	// прав у типа якоря не объявляет. Отличается от ErrRelationComputed: там
+	// отношение есть и выдать его напрямую нечем, здесь его нет вовсе.
+	ErrRelationNotDeclared = errors.New("manifest: accessBinding grants a relation the canon does not declare")
+	// ErrRelationComputed — отношение объявлено ВЫЧИСЛЯЕМЫМ: прямых записей
+	// субъекта у него нет, значит выдать его напрямую нечем. Свой вид, а не
+	// «вид получателя не принят»: схлопнув их, судья назвал бы неверный предмет,
+	// и автор чинил бы получателя там, где чинить надо выбор отношения.
+	ErrRelationComputed = errors.New("manifest: accessBinding grants a computed relation")
+	// ErrRelationRecipientKind — объявление отношения не принимает получателя
+	// названного вида. Судится по канону, а не по второму перечню.
+	ErrRelationRecipientKind = errors.New("manifest: relation does not admit this recipient kind")
+	// ErrBindingAnchor — выдача посева объявлена не на кластерном singleton'е.
+	//
+	// Вид называет ВЫДАЧУ, а не форму выдачи: якорь есть свойство самой выдачи,
+	// и обе её формы — роль и отношение — судятся им одинаково (#1953). Прежнее
+	// имя (`ErrRelationAnchor`) и его оговорка «выдачи ролью не касается» были
+	// верны ровно до этой работы и стали бы ложью, пережившей свой предмет.
+	ErrBindingAnchor = errors.New("manifest: seed access binding is anchored outside the cluster singleton")
+	// ЗДЕСЬ СТОЯЛ ErrCanonUnparsed — сигнал «канон модели прав не разобрался».
+	// Он снят ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ (#2002): загрузчик больше не добывает
+	// модель сам, поэтому состояния «пошли за моделью и не получили её» у него
+	// не существует ни при каком входе. Модель либо внесена вызывающим и
+	// разобрана им, либо не внесена — и тогда об объявлении отношения не
+	// утверждается ничего.
+	//
+	// Оставленный сигнал был бы вариантом, которого код никогда не производит:
+	// он документировал бы контракт, не имеющий входа, и следующий читатель
+	// чинил бы под него ветку, которой нет.
 	// ErrSeededSubjectIncomplete — заведомая запись посева не назвала себя
 	// целиком: имя, аккаунт либо назначение. Отдельный вид от связности:
 	// связность спрашивает, есть ли у названного предмет, а здесь предмет ещё
@@ -168,13 +198,24 @@ type LinkageCensus struct {
 	RoleRefsChecked int
 	// RolesDeclared — объявлял ли манифест раздел ролей вообще.
 	RolesDeclared bool
+	// RelationGrantsRead — выдач ОТНОШЕНИЕМ прочитано.
+	RelationGrantsRead int
+	// RelationGrantsJudged — из них суждено против ВНЕСЁННОЙ модели.
+	//
+	// Две величины стоят рядом намеренно. Модель вносит вызывающий (#2002), и на
+	// пути старта она не вносится вовсе — там существование судит композиция,
+	// у которой ответ авторитетен. Одно число скрыло бы ровно этот случай: ноль
+	// суждённых читался бы как «сверили и не нашли расхождений», тогда как он
+	// означает «не сверяли, и это решено».
+	RelationGrantsJudged int
 }
 
 // String — перепись одной строкой; её печатает потребитель загрузчика.
 func (c LinkageCensus) String() string {
 	s := fmt.Sprintf(
-		"выдач прочитано %d · субъектов разрешено %d · групп заведено %d · вступлений прочитано %d · roleId сверено %d из %d",
-		c.BindingsRead, c.SubjectsResolved, c.GroupsDeclared, c.JoinsRead, c.RoleRefsChecked, c.RoleRefsRead)
+		"выдач прочитано %d · субъектов разрешено %d · групп заведено %d · вступлений прочитано %d · roleId сверено %d из %d · выдач отношением суждено %d из %d",
+		c.BindingsRead, c.SubjectsResolved, c.GroupsDeclared, c.JoinsRead, c.RoleRefsChecked, c.RoleRefsRead,
+		c.RelationGrantsJudged, c.RelationGrantsRead)
 	if !c.RolesDeclared {
 		// Ноль сверенных обязан объяснять СЕБЯ: иначе он читается как «сверили
 		// и не нашли расхождений». Раздел `roles` описан загрузчиком (#1778),
@@ -308,7 +349,7 @@ func seqItem(n *yaml.Node, i int) *yaml.Node {
 // Порядок обхода — порядок документа: выдачи (роль, затем субъекты) · группы ·
 // вступления. Он детерминирован, поэтому отказ на одном и том же документе
 // читается одинаково от прогона к прогону.
-func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs) (LinkageCensus, []error) {
+func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs, oracle RelationOracle) (LinkageCensus, []error) {
 	census := LinkageCensus{RolesDeclared: roles.declared}
 	if m == nil || m.Seed == nil {
 		return census, nil
@@ -334,8 +375,21 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs) (LinkageCen
 		// «роль не объявлена» о ПУСТОМ идентификаторе отправило бы автора
 		// сверять перечень ролей, тогда как роль он просто не назвал. Отказ
 		// обязан называть поле и правило, а не ближайшее следствие.
+		// Форма выдачи судится ОТДЕЛЬНО от остальных ключей: их у неё две, они
+		// взаимоисключающи, и «названы обе» есть находка, а не отсутствие
+		// ключа. Прежде здесь стояло требование именно `roleId` — довод «выдача
+		// не сказала, ЧТО она выдаёт» остался верным, а требование стало
+		// однобоким (#1936).
+		faults = append(faults, validateGrantForm(doc, i, b)...)
+
+		// Якорь судится ПО ЗНАЧЕНИЮ и ОДНИМ судьёй на обе формы выдачи: он есть
+		// свойство самой выдачи, а не того, чем она наделяет (#1953). Тип
+		// объекта разбирается здесь один раз и отдаётся канону ниже — второго
+		// резолва того же значения в дереве нет.
+		anchorObjectType, anchorUsable, anchorFaults := validateGrantAnchor(doc, i, b)
+		faults = append(faults, anchorFaults...)
+
 		for _, need := range []struct{ key, value, why string }{
-			{"roleId", b.RoleID, "выдача не сказала, ЧТО она выдаёт"},
 			{"scopeType", b.ScopeType, "выдача не сказала, на каком ярусе она действует"},
 			{"scopeId", b.ScopeID, "выдача не сказала, на каком объекте яруса она действует"},
 			{"target", b.Target, "выдача не сказала, распространяется ли она на весь ярус либо на перечень объектов"},
@@ -365,6 +419,13 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs) (LinkageCen
 				})
 			}
 		}
+
+		// seededSubjects — номера субъектов, которых этот же посев ЗАВОДИТ.
+		// Только они доходят до канона: вид, посевом не заводимый (человек),
+		// отвергается ниже, и назвать канон его виновником значило бы отправить
+		// автора чинить не то — канон человека как раз принимает. Порядок двух
+		// проверок объявлен здесь, а не выведен из порядка чтения полей.
+		var seededSubjects []int
 
 		for j, s := range b.Subjects {
 			if s.Type == "group" {
@@ -396,7 +457,25 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs) (LinkageCen
 				})
 			default:
 				census.SubjectsResolved++
+				seededSubjects = append(seededSubjects, j)
 			}
+		}
+
+		// Канон спрашивается ПОСЛЕДНИМ и только у формы отношения: у формы роли
+		// предмета нет — роль раздаёт глаголы своими правилами.
+		//
+		// Непригодный якорь канон не спрашивает: тип объекта, у которого
+		// спрашивать, даёт именно он. Спросить всё равно значило бы выдать
+		// второй отказ за одну ошибку — и отправить автора чинить отношение
+		// там, где неверен якорь.
+		if strings.TrimSpace(b.GrantedRelation) != "" {
+			census.RelationGrantsRead++
+			if oracle != nil {
+				census.RelationGrantsJudged++
+			}
+		}
+		if anchorUsable {
+			faults = append(faults, validateRelationGrant(doc, i, b, anchorObjectType, seededSubjects, oracle)...)
 		}
 	}
 
@@ -420,7 +499,8 @@ func validateSeedLinkage(m *Manifest, doc *yaml.Node, roles roleIDs) (LinkageCen
 			kind:  ErrGroupNeverGranted,
 			coord: locate(doc, "seed", "groups", i),
 			detail: fmt.Sprintf(
-				"группа %q заведена и не названа ни в одной выдаче: имя без предмета — выдайте ей роль в seed.accessBindings либо не заводите",
+				"группа %q заведена и не названа ни в одной выдаче: имя без предмета — "+
+					"выдайте ей роль либо отношение в seed.accessBindings, либо не заводите",
 				g.Name),
 		})
 	}

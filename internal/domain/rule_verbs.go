@@ -210,6 +210,15 @@ type RoleRuleRef struct {
 // IsAnchor — правило не сузило глаголы.
 func (r RoleRuleRef) IsAnchor() bool { return r.Verb == "" }
 
+// Dotted — точечная форма имени типа (`vpc.network`), та самая, какой говорят
+// `role_verb.object_type`, `role_rule_selectors.object_types` и колонка
+// `catalog_resource.dotted` под своим CHECK.
+//
+// ЕДИНСТВЕННОЕ место, где эта склейка пишется в Go: второе написание разошлось
+// бы с первым молча, а соединение по разным словарям не совпадает никогда — и
+// отличить это от «права нет» было бы нечем.
+func (r RoleRuleRef) Dotted() string { return r.Module + "." + r.Resource }
+
 // RuleRefsOf — объявленные сегменты правил в форме строк проекции.
 //
 // Источник — АВТОРСКОЕ правило, а не селекторы: селекторы уже прошли через

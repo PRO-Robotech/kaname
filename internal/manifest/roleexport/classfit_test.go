@@ -368,3 +368,123 @@ func mustFixtureText(t *testing.T) string {
 	}
 	return string(data)
 }
+
+// ── Задача #1935: пометка не вправе обещать отказ, которого не будет ────────
+
+// unmatchedNoteOn — сверка ДВУХ проверок на ОДНОМ манифесте: что пометка стадии
+// класса обещает про несопоставленное действие, и что соседняя сверка соединения
+// про него на самом деле говорит.
+//
+// Обе зовутся здесь намеренно. Прочитать текст пометки и поверить ему — ровно то,
+// из-за чего #1935 и завёлся: посылка о чужом механизме бралась из его назначения,
+// а не из его кода. Поэтому обещание проверяется ИСХОДОМ соседа, а не прочтением.
+func unmatchedNoteOn(t *testing.T, doc, resource, verb string) (roleexport.Note, roleexport.ClassCensus, []error) {
+	t.Helper()
+	m := mustLoadManifest(t, doc)
+	actions := mustActions(t)
+	_, notes, census := roleexport.CheckResourceClasses(catalogfixture.Facts(), m, actions)
+	linkFaults, lcensus := roleexport.CheckActionLinkage(m, actions)
+	t.Logf("перепись класса:     %s", census.Summary())
+	t.Logf("перепись соединения: %s", lcensus.Summary())
+	n, ok := noteFor(notes, resource, verb)
+	if !ok {
+		t.Fatalf("действие %s.%s не получило пометки — вход пробы не производит "+
+			"состояния «каталог такого действия не знает», и утверждать ей не о чем",
+			resource, verb)
+	}
+	if n.Kind != roleexport.NoteActionUnknownToCatalog {
+		t.Fatalf("вид пометки %v, ожидался «каталог такого действия не знает»", n.Kind)
+	}
+	return n, census, linkFaults
+}
+
+// TestMODRL22NoteOnADerivedResourcePromisesARefusalThatComes — ОТРИЦАТЕЛЬНАЯ
+// половина предиката #1935: на ПОРОЖДЁННОМ ресурсе пометка обещает отказ соседней
+// сверки, и отказ приходит.
+//
+// Без этой половины правка свелась бы к «убрать обещание отовсюду», и пометка
+// перестала бы говорить правду там, где говорила её.
+func TestMODRL22NoteOnADerivedResourcePromisesARefusalThatComes(t *testing.T) {
+	const doc = `apiVersion: iam/v1
+module: vpc
+resources:
+  - name: network
+    objectType: vpc_network
+    parents: [project]
+    producer: derived
+    verbs: [get, {name: internalGet, class: get}]
+`
+	n, census, linkFaults := unmatchedNoteOn(t, doc, "network", "internalGet")
+
+	if !strings.Contains(n.Detail, "CheckActionLinkage") ||
+		!strings.Contains(n.Detail, "ОТКАЗ") {
+		t.Errorf("пометка порождённого ресурса не обещает отказа соседней сверки:\n  %s", n.Detail)
+	}
+	if census.Unmatched != 1 || census.UnmatchedAuthored != 0 {
+		t.Errorf("перепись: не сопоставлено %d (авторских %d), ожидалось 1 (0)",
+			census.Unmatched, census.UnmatchedAuthored)
+	}
+	// ИСХОД соседа, а не его назначение: обещание проверяется прогоном.
+	var got int
+	for _, f := range linkFaults {
+		var lf roleexport.LinkageFinding
+		if errors.As(f, &lf) && errors.Is(f, roleexport.ErrActionUnknownToCatalog) &&
+			lf.Resource == "network" && lf.Verb == "internalGet" {
+			got++
+		}
+	}
+	if got != 1 {
+		t.Fatalf("сверка соединения отказов по network.internalGet дала %d, ожидался 1 — "+
+			"обещание пометки не сбывается и на порождённом ресурсе, то есть оно ложно "+
+			"ВЕЗДЕ, а не наполовину: %v", got, linkFaults)
+	}
+}
+
+// TestMODRL22aNoteOnAnAuthoredResourceDoesNotPromiseASilentNeighbour —
+// ПОЛОЖИТЕЛЬНАЯ половина: на АВТОРСКОМ ресурсе с тем же входом пометка говорит,
+// что второго слова не будет, и сосед молчит.
+//
+// Вход отличается от близнеца выше РОВНО ОДНИМ ключом — `producer`. Свой манифест
+// отличался бы ещё десятком мест, и красное пришло бы неизвестно от какого.
+func TestMODRL22aNoteOnAnAuthoredResourceDoesNotPromiseASilentNeighbour(t *testing.T) {
+	const doc = `apiVersion: iam/v1
+module: vpc
+resources:
+  - name: network
+    objectType: vpc_network
+    parents: [project]
+    producer: authored
+    verbs: [get, {name: internalGet, class: get}]
+`
+	n, census, linkFaults := unmatchedNoteOn(t, doc, "network", "internalGet")
+
+	if strings.Contains(n.Detail, "и там это ОТКАЗ") {
+		t.Errorf("пометка авторского ресурса обещает отказ соседней сверки, которая его "+
+			"популяции не судит вовсе:\n  %s", n.Detail)
+	}
+	if !strings.Contains(n.Detail, "producer: authored") {
+		t.Errorf("пометка не называет РАЗЛИЧИТЕЛЬ (`producer`), поэтому читатель не может "+
+			"проверить её утверждение о соседе:\n  %s", n.Detail)
+	}
+	// Перепись несёт ОБЕ величины: одно число сделало бы «ноль ложных обещаний»
+	// неотличимым от «ноль осмотренных».
+	if census.Unmatched != 1 || census.UnmatchedAuthored != 1 {
+		t.Errorf("перепись: не сопоставлено %d (авторских %d), ожидалось 1 (1)",
+			census.Unmatched, census.UnmatchedAuthored)
+	}
+	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ стадии класса: соседнее действие того же авторского
+	// ресурса сопоставилось и было ОСУЖДЕНО. Стадия класса авторские ресурсы
+	// судит — в отличие от сверки соединения, — и без этой строки «не сопоставлено
+	// 1» зеленело бы на реализации, до ресурса не дошедшей.
+	if census.ClassSatisfies != 1 {
+		t.Errorf("удовлетворяет %d, ожидалось 1 — стадия класса до авторского ресурса не "+
+			"дошла, и утверждение о её пометке ничего не значит", census.ClassSatisfies)
+	}
+	// ИСХОД соседа: он молчит — и молчит ПО СУЩЕСТВУ, а не потому, что вход пуст.
+	for _, f := range linkFaults {
+		var lf roleexport.LinkageFinding
+		if errors.As(f, &lf) && lf.Resource == "network" {
+			t.Fatalf("сверка соединения судила авторский ресурс: %v", f)
+		}
+	}
+}

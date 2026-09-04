@@ -55,7 +55,7 @@ func TestBootRefusesWhenDeclaredDeliveryIsEmpty(t *testing.T) {
 	// заголовок этой пробы.
 	root := writeDelivery(t, nil)
 
-	err := loadDeliveredManifests(logger, config.ManifestsConfig{Dir: root, Required: true})
+	got, err := loadDeliveredManifests(logger, config.ManifestsConfig{Dir: root, Required: true})
 	if err == nil {
 		t.Fatal("объявленная и пустая доставка пущена в старт — сорванное монтирование " +
 			"стало бы неотличимо от «модулей нет»")
@@ -63,6 +63,13 @@ func TestBootRefusesWhenDeclaredDeliveryIsEmpty(t *testing.T) {
 	if !strings.Contains(buf.String(), "перепись доставки манифестов модулей") {
 		t.Errorf("перепись не напечатана при отказе — «доставка сорвана» неотличимо от "+
 			"«каталог прочитан и он пуст»: %s", buf.String())
+	}
+	// Сорванная доставка обязана доехать до вызывающего ОШИБКОЙ, а не пустым
+	// перечнем: пустой перечень означает «доставка не объявлена», и применитель
+	// каталога (#1034) отличить эти два состояния сам не может ничем.
+	if len(got) != 0 {
+		t.Errorf("сорванная доставка вернула %d манифестов — применитель принял бы их "+
+			"за полное объявление платформы", len(got))
 	}
 }
 
@@ -74,8 +81,16 @@ func TestBootPassesOnADeliveredManifestAndSaysWhatArrived(t *testing.T) {
 		"vpc/manifest.yaml": "apiVersion: iam/v1\nmodule: vpc\n",
 	})
 
-	if err := loadDeliveredManifests(logger, config.ManifestsConfig{Dir: root, Required: true}); err != nil {
+	got, err := loadDeliveredManifests(logger, config.ManifestsConfig{Dir: root, Required: true})
+	if err != nil {
 		t.Fatalf("годная доставка отвергнута: %v", err)
+	}
+	// РАЗОБРАННЫЕ манифесты отдаются вызывающему (#1034): применитель каталога
+	// применяет ровно то, что прочитал читатель. Читай он дерево вторым проходом,
+	// это были бы два места об одном предмете, расходящиеся молча.
+	if len(got) != 1 || got[0].Module != "vpc" {
+		t.Fatalf("читатель не отдал разобранного: %+v — применителю пришлось бы читать "+
+			"каталог доставки заново", got)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "manifests_read=1") {
@@ -91,8 +106,13 @@ func TestBootSaysAloudThatDeliveryIsNotDeclared(t *testing.T) {
 	// Незаявленная доставка — законное состояние, но МОЛЧАТЬ о ней нельзя: она
 	// снаружи неотличима от доставки объявленной и сорванной.
 	logger, buf := captureBoot()
-	if err := loadDeliveredManifests(logger, config.ManifestsConfig{}); err != nil {
+	got, err := loadDeliveredManifests(logger, config.ManifestsConfig{})
+	if err != nil {
 		t.Fatalf("незаявленная доставка отвергнута — стенд, её не объявивший, перестал бы подниматься: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("незаявленная доставка вернула %d манифестов — применитель получил бы "+
+			"вход, которого посадка не объявляла", len(got))
 	}
 	if !strings.Contains(buf.String(), "не объявлена посадкой") {
 		t.Errorf("о незаявленной доставке процесс промолчал: %s", buf.String())

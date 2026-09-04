@@ -9,13 +9,12 @@ package reconcile
 // RULE's verbs (domain.ResolveVerbsAndTier), so the reconciler can emit/eager-
 // revoke the tuple of a single member on a diff.
 //
-// This is a use-case-layer concern (it owns the authzmap dependency), keeping the
-// domain pure.
+// This is a use-case-layer concern (it owns the catalog-snapshot dependency),
+// keeping the domain pure.
 
 import (
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
@@ -32,7 +31,7 @@ import (
 // when the (objectType) has no FGA object type (a typo'd type never grants —
 // fail-closed). The subject is the binding's subject (already FGA-formatted).
 func ruleObjectTuples(cat *catalog.Facts, subject string, verbs []string, objectType, objectID string) ([]domain.MembershipTuple, bool) {
-	fgaType, ok := fgaObjectType(objectType)
+	fgaType, ok := cat.FGAObjectType(objectType)
 	if !ok {
 		return nil, false
 	}
@@ -112,13 +111,13 @@ const scopeSelfRuleFP = "scope_self"
 // scopeSelfMember builds the DesiredMember for the binding's scope anchor itself
 // (D-7 / КФ-3 / C-01) from the role's scope-self verbs. The member object_type is
 // the dotted iam scope key (iam.account / iam.project) so it round-trips through
-// fgaObjectType for the symmetric revoke; the FGA tuples target the bare scope
+// the catalog snapshot for the symmetric revoke; the FGA tuples target the bare scope
 // object (account:<X>/project:<X>). ok=false when the role grants nothing on the
-// scope self OR the scope type has no dotted iam mapping (cluster — D-9 short-circuit
+// scope self OR the scope type has no live catalog row (cluster — D-9 short-circuit
 // owns cluster super-admin, not this per-object path).
 func scopeSelfMember(cat *catalog.Facts, subject string, scopeType, scopeID string, verbs []string) (DesiredMember, bool) {
 	dotted := "iam." + scopeType // iam.account / iam.project (cluster has no mapping)
-	if _, ok := fgaObjectType(dotted); !ok {
+	if _, ok := cat.FGAObjectType(dotted); !ok {
 		return DesiredMember{}, false
 	}
 	tuples, ok := scopeSelfTuples(cat, subject, scopeType, scopeID, verbs)
@@ -145,8 +144,8 @@ func scopeSelfMember(cat *catalog.Facts, subject string, scopeType, scopeID stri
 // scope-self member. cluster is DELIBERATELY excluded: cluster super-admin is served
 // by the D-9 flat short-circuit (cluster:cluster_kacho_root#system_admin), NOT a
 // per-object tuple — materializing per-object on cluster is the Q-2/D-9 anti-pattern.
-// The sole caller (scopeSelfMember) already gates cluster out (fgaObjectType
-// "iam.cluster" is absent from the objectTypes registry), so this function never
+// The sole caller (scopeSelfMember) already gates cluster out ("iam.cluster" has no
+// catalog row at all — the hierarchy apex is not a resource), so this function never
 // receives scopeType=="cluster"; the guard below is the explicit fail-closed fence
 // (scope_self_cluster_guard_test.go pins the invariant against a future iam.cluster
 // type re-enabling the dead path). ok=false when scopeType is not a per-object
@@ -197,13 +196,23 @@ func scopeSelfTuplesWithTypeVerbs(cat *catalog.Facts, subject, scopeType, scopeI
 	return out, true
 }
 
-// fgaObjectType resolves the FGA object_type for a dotted closed-table key
-// (e.g. "compute.instance" → "compute_instance"). Thin alias over the canonical
-// authzmap.FGAObjectType so the reconciler's tuple-object derivation and the
-// verify-gate's ledger lookup (review #5) share ONE mapping and cannot drift.
-func fgaObjectType(objectType string) (string, bool) {
-	return authzmap.FGAObjectType(objectType)
-}
+// ИМЯ ТИПА МОДЕЛИ СПРАШИВАЕТСЯ У ЖИВЫХ СТРОК (kacho#1967, kacho#1816)
+//
+// Здесь стоял собственный переходник реконсайлера — тонкая оболочка над
+// `authzmap.FGAObjectType`, то есть над словарём, ПОРОЖДЁННЫМ СБОРКОЙ
+// (`authzmap/tables_gen.go` из манифестов, #1092). Тип, которого сборка не
+// знала, получал `ok=false`, и вызывающий пропускал его МОЛЧА: строки каталога
+// записаны, членство модуля отвечает «да», роль создаётся без отказа — и ни одного
+// кортежа не материализуется. Теперь имя читается из строки каталога
+// (`catalog.Facts.FGAObjectType`), куда его положил манифест модуля, и тип, заведённый
+// применением в РАБОТАЮЩЕМ процессе, раскрывается без пересборки.
+//
+// Переходников от этого НЕ СТАЛО ДВА: соответствие нигде не вычисляется, у
+// него сменилось место хранения. Согласие строки с таблицей сборки — у стража
+// старта (`seed.AssertCatalogParity`), и сверка идёт на КАЖДОМ старте с
+// отказом в пуске при расхождении. Собственной оболочки пакет больше не держит:
+// однострочный переадресатор к `catalog.Facts` не добавлял ничего, кроме второго
+// имени у одного вопроса.
 
 // typeVerbsDeclared — набор, ОБЪЯВЛЕННЫЙ типом, без запасного варианта. Именно он
 // решает, эмитить ли `v_*` вообще: тип, ничего не объявивший, не получает ни

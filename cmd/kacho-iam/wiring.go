@@ -30,6 +30,7 @@ import (
 	internaloperationsapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_operations"
 	limitapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/limit"
 	membershipapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/membership"
+	moduleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/module"
 	permissioncatalogapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/permission_catalog"
 	projectapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/project"
 	roleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/role"
@@ -39,6 +40,7 @@ import (
 	userapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user"
 	usertokensapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user_tokens"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
@@ -95,6 +97,15 @@ type services struct {
 	// interactiveClientHandler — InternalInteractiveClientService: lifecycle of
 	// the OAuth2 client a HUMAN signs in through (IAM-INT-1). Internal-only.
 	interactiveClientHandler *interactiveclientapp.Handler
+
+	// moduleHandler — InternalModuleService: четыре глагола над строками
+	// каталога прав ОДНОГО модуля (план, применение, два чтения). Internal-only
+	// (запрет #6), регистрируется на :9091 и НИКОГДА на внешнем слушателе.
+	//
+	// Гейт права стоит в use-case первым стейтментом и является ЕДИНСТВЕННОЙ
+	// авторизацией этой поверхности: ступень подтверждения личности к ней
+	// сегодня не применяется — решение записано в приёмке, а не умолчание.
+	moduleHandler *moduleapp.Handler
 
 	// limitHandler — InternalLimitService: the ceiling on how many resources of
 	// one kind a tenant may hold, plus the two reads owner-services live on
@@ -208,6 +219,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// в работающем процессе — снятием строки, — и читатель на литерале
 	// продолжил бы считать снятый тип живым до следующего перезапуска.
 	catalogSource catalog.Source,
+	// catalogRows — ЧИТАТЕЛЬ строк каталога, тот же экземпляр, что прочитал их
+	// страж паритета на старте. Приходит параметром, а не собирается здесь
+	// заново: читатель живого множества в дереве ОДИН, и второй его экземпляр
+	// был бы вторым местом об одном предмете — расходиться им нечем сегодня и
+	// есть чем завтра.
+	catalogRows moduleapp.CatalogStateSource,
 	metricsReg *metrics.Registry,
 	cfg config.Config, tokenSigner *tokensigner.Signer, logger *slog.Logger) *services {
 	_ = slavePool // kachoRepo is built and passed in by main()
@@ -458,11 +475,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// CUSTOM roles enforce per-object via the SAME FGA v_list set as List
 	// (read==enforce, D-45). relationStore is always non-nil, so a custom-role Get
 	// fails closed on an FGA outage (Unavailable, D-47) — never a body leak.
-	roleGet := roleapp.NewGetRoleUseCase(kachoRepo).WithRelationStore(relationStore)
+	roleGet := roleapp.NewGetRoleUseCase(kachoRepo, catalogSource).WithRelationStore(relationStore)
 	// roleList — per-object scope-filtered: the FGA v_list set on
 	// iam_role is intersected with the catalog (system roles bypass). relationStore
 	// is always non-nil, so List fails closed on an FGA outage (D-47).
-	roleList := roleapp.NewListRolesUseCase(kachoRepo).WithRelationStore(relationStore).
+	roleList := roleapp.NewListRolesUseCase(kachoRepo, catalogSource).WithRelationStore(relationStore).
 		WithListScanRecorder(listScanRec)
 	roleHandler := roleapp.NewHandler(roleCreate, roleUpdate, roleDelete, roleGet, roleList).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
@@ -598,6 +615,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		kachopg.NewFGAOutboxEmitter(),
 		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
+		// Имя типа КАТАЛОГА читается у ЖИВОЙ строки, в транзакции записи зеркала
+		// (kacho#1990). Параметр, а не опция: запасной путь «переводим словарём
+		// сборки» молчалив — верный ответ на посеянных типах и неверный на
+		// заведённых применением манифеста в работающем процессе.
+		kachopg.NewCatalogTypeReader(),
 	).
 		WithReconcile(kachopg.NewReconcileEventEmitter()).
 		WithAccountResolver(kachopg.NewProjectAccountResolver()).
@@ -837,7 +859,34 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// ── PermissionCatalogService — RBAC rules-model G public catalog ──
 	// In-code projection (authzmap + domain): no repo, no peer-call. Stateless.
 	permissionCatalogHandler := permissioncatalogapp.NewHandler(
-		permissioncatalogapp.NewListPermissionCatalogUseCase())
+		permissioncatalogapp.NewListPermissionCatalogUseCase(catalogSource))
+
+	// ── InternalModuleService — каталог прав ОДНОГО модуля (задача #1034) ──
+	//
+	// Применитель здесь — ГЛАГОЛЬНЫЙ (`NewVerbApplier`), а не тот, которым
+	// пользуется путь старта: он сверяет опору БЕЗУСЛОВНО и требует
+	// подтверждения с обоими потолками. Различает их ТИП, а не флаг — подать
+	// сюда стартовый нельзя, и это проверяет сборка.
+	//
+	// Производитель ПЛАНОВОГО состояния (отпечаток модуля и оценки последствий)
+	// приходит отдельным портом. Непровязанный, он означает отказ `Plan`, и отказ
+	// этот закрывает и `Apply`: подтверждения, которое тот требует, взять негде.
+	//
+	// Провязан он ЗДЕСЬ и над ТЕМ ЖЕ пулом, что писатель, — иначе отпечаток,
+	// показанный планом, читался бы из другой базы, чем сверяет CAS применения.
+	// Оценка последствий при этом идёт читающей транзакцией (`READ ONLY`), а её
+	// предикаты — те же, что вставляет в свои операторы писатель.
+	moduleApplier := modulecatalog.NewVerbApplier(kachopg.NewCatalogWriteRepo(pool))
+	modulePlanState := kachopg.NewCatalogPlanRepo(pool)
+	moduleDelivery := newManifestDeliverySource(cfg.Manifests)
+	moduleHandler := moduleapp.NewHandler(
+		moduleapp.NewPlanUseCase(moduleDelivery, catalogRows, modulePlanState).
+			WithAdminChecker(relationStore),
+		moduleapp.NewApplyUseCase(moduleDelivery, moduleApplier, opsRepo, logger).
+			WithAdminChecker(relationStore),
+		moduleapp.NewGetUseCase(catalogRows).WithAdminChecker(relationStore),
+		moduleapp.NewListUseCase(catalogRows).WithAdminChecker(relationStore),
+	)
 
 	return &services{
 		accountHandler:         accountHandler,
@@ -854,6 +903,9 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 		// interactive-login client lifecycle.
 		interactiveClientHandler: interactiveClientHandler,
+
+		// каталог прав одного модуля — план, применение, два чтения.
+		moduleHandler: moduleHandler,
 
 		// resource-count ceilings (admin CRUD + owner-facing resolve/delta).
 		limitHandler:       limitHandler,

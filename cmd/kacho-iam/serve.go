@@ -37,6 +37,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/clienttokenhttp"
@@ -216,8 +218,49 @@ func runServe(cfg config.Config) error {
 	// Сорванная доставка обязана назваться своим именем РАНЬШЕ, чем о
 	// расхождении заговорит страж: иначе оператор прочтёт отказ доставки как
 	// расхождение каталога и пойдёт чинить не то.
-	if mErr := loadDeliveredManifests(logger, cfg.Manifests); mErr != nil {
+	deliveredManifests, mErr := loadDeliveredManifests(logger, cfg.Manifests)
+	if mErr != nil {
 		return mErr
+	}
+
+	// МОДЕЛЬ ПРАВ — сразу за чтением доставки и ДО всего, что её читает
+	// (задачи #1969, #2002).
+	//
+	// Место выбрано не «поближе к манифестам»: установка запрещена после первого
+	// чтения модели, а читают её пути вердикта и разбора прав ниже. Значит
+	// композиция обязана встать здесь — раньше первого читателя и позже
+	// доставки, из которой она собирается. Другого окна между этими двумя
+	// границами нет.
+	//
+	// Отказ ФАТАЛЕН на каждом звене: собранная модель, не прошедшая допуск, —
+	// это данные оператора, расширяющие модель прав установки, и мягкий проход
+	// здесь означал бы контроль, который не откажет ни разу.
+	if cErr := installComposedModel(logger, deliveredManifests); cErr != nil {
+		return cErr
+	}
+
+	// ПРИМЕНЕНИЕ ДОСТАВЛЕННОГО — между чтением доставки и стражем паритета
+	// (задача #1034).
+	//
+	// Применитель — ЕДИНСТВЕННЫЙ писатель строк каталога в прод-коде; до этой
+	// провязки его не звал никто, и каталог наполнял посев миграции, то есть
+	// объявленное манифестом состояние доезжало до базы только пересборкой
+	// образа. Довод о месте, порядке и о том, почему отказ фатален, —
+	// `services/iam/docs/engineering/architecture/module-catalog-applier-runs-at-boot.md`;
+	// порядок держит гейт `module_catalog_apply_wiring_test.go`, а не этот
+	// комментарий.
+	//
+	// Страж НИЖЕ судит то, что применитель ТОЛЬКО ЧТО записал: ConfigMap с
+	// манифестами — данные оператора, а не релиза, и в одиночку он не вправе
+	// расширить каталог за пределы того, что знает образ.
+	catalogApplier := modulecatalog.NewApplier(kachopg.NewCatalogWriteRepo(pool))
+	// Наблюдатель — ОТДЕЛЬНЫМ оператором, а не цепочкой к конструктору: гейт
+	// провязки (`module_catalog_apply_wiring_test.go`) опознаёт связывание по
+	// вызову конструктора в правой части, и цепочка увела бы применителя
+	// из-под его наблюдения — молча.
+	catalogApplier = catalogApplier.WithObserver(metricsReg.NewModuleCatalogRecorder())
+	if aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests); aErr != nil {
+		return aErr
 	}
 
 	catalogRepo := kachopg.NewCatalogRepo(pool)
@@ -231,8 +274,21 @@ func runServe(cfg config.Config) error {
 		slog.Int("row_modules", catalogCensus.RowModules),
 		slog.Int("row_resources", catalogCensus.RowResources),
 		slog.Int("row_verbs", catalogCensus.RowVerbs),
+		slog.Int("retired_modules", catalogCensus.RetiredModules),
+		slog.Int("retired_resources", catalogCensus.RetiredResources),
+		slog.Int("retired_verbs", catalogCensus.RetiredVerbs),
 		slog.Int("missing", len(catalogCensus.MissingRows)),
+		slog.Int("withdrawn", len(catalogCensus.WithdrawnRows)),
 		slog.Int("extra", len(catalogCensus.ExtraRows)))
+	// Снятое называется ПОИМЁННО, а не одним счётчиком. Счётчик отвечает на
+	// вопрос «сколько», а оператору, читающему журнал старта, нужен другой:
+	// ЧТО именно перестало выдаваться. Снятие проходит молча by construction —
+	// оно и заведено затем, чтобы не ронять пуск, — поэтому единственное место,
+	// где его видно, это здесь.
+	if len(catalogCensus.WithdrawnRows) > 0 {
+		logger.Info("строки каталога сняты решением — старт продолжается",
+			slog.Any("rows", catalogCensus.WithdrawnRows))
+	}
 	if catErr != nil {
 		return fmt.Errorf("каталог модуля: %w", catErr)
 	}
@@ -243,6 +299,40 @@ func runServe(cfg config.Config) error {
 		metricsReg.NewCatalogSnapshotRecorder())
 	if csErr != nil {
 		return fmt.Errorf("снимок каталога модуля: %w", csErr)
+	}
+
+	// Каталог прав — ОДНО чтение на процесс, и оно здесь, потому что первым его
+	// спрашивает производитель правил роли (ниже). Прежде реестр загружался
+	// перед порогом acr; те три его читателя остались теми же и берут ЭТО
+	// связывание. Второй загрузки не заводится: она разошлась бы с первой молча.
+	permRegistry, err := seed.LoadPermissionRegistry(ctx, logger)
+	if err != nil {
+		return fmt.Errorf("load permission catalog: %w", err)
+	}
+
+	// ПРИМЕНЕНИЕ РОЛЕЙ ДОСТАВЛЕННОГО — ПОСЛЕ стража паритета каталога
+	// (задача #2010).
+	//
+	// Применитель ролей — единственный писатель строк `kacho_iam.roles` в
+	// прод-коде помимо миграции; до этой провязки его не звал никто, и
+	// объявленная манифестом роль доезжала до базы только пересборкой образа.
+	// Довод о месте, порядке и о том, почему отказ фатален, — шапка
+	// `module_roles_apply.go`; порядок держит гейт
+	// `module_roles_apply_wiring_test.go`, а не этот комментарий.
+	//
+	// Каталожный факт берётся из ТЕХ ЖЕ живых строк, которые прочитал страж:
+	// третьего чтения каталога на старте не заводится.
+	rolesRights, rightsActions, rightsUnattributed, rrErr := buildModuleRoleRights(
+		catalogCensus.Live, permRegistry)
+	logger.Info("производитель правил роли модуля",
+		slog.Int("catalog_actions", rightsActions),
+		slog.Int("unattributed_entries", rightsUnattributed))
+	if rrErr != nil {
+		return fmt.Errorf("роли модуля: %w", rrErr)
+	}
+	rolesApplier := moduleroles.NewApplier(moduleroles.NewRepoTxRunner(kachoRepo), rolesRights)
+	if raErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, deliveredManifests); raErr != nil {
+		return raErr
 	}
 
 	// Подключаем Prometheus-Recorder и логгер к default-registry LRO-worker'а и
@@ -266,7 +356,7 @@ func runServe(cfg config.Config) error {
 	// Orphan-reconciler backstop: разрешает осиротевшие done=false операции умершего
 	// процесса (kill-9 / истекший terminal-write budget) в терминал по
 	// committed-реальности ресурса. Boot-sweep + периодический фон; non-fatal.
-	startLROReconciler(ctx, pool, kachoRepo, lroRec, logger)
+	startLROReconciler(ctx, pool, kachoRepo, catalogSnapshot, lroRec, logger)
 
 	// Durable backstop for one-shot credentials staged in FINISHED operation
 	// responses. The reconciler above cannot cover them: its claim is done=false and
@@ -298,6 +388,9 @@ func runServe(cfg config.Config) error {
 	}
 
 	svcs := buildServices(pool, slavePool, opsRepo, kachoRepo, kachoRepo, catalogSnapshot,
+		// Тот же экземпляр читателя, что прочитал строки для стража паритета
+		// и для снимка: третьего чтения каталога на старте не заводится.
+		catalogRepo,
 		metricsReg, cfg, tokenSigner, logger)
 
 	// gRPC servers. PrincipalExtract-interceptor читает
@@ -476,10 +569,8 @@ func runServe(cfg config.Config) error {
 	// RPC → PermissionDenied with an RFC-9470 step-up signal in the status
 	// details. FQN→acr_min comes from the embedded permission catalog. Chained
 	// AFTER UnaryTrustedPrincipalExtract (sets acr) + internalCallerPolicy.
-	permRegistry, err := seed.LoadPermissionRegistry(ctx, logger)
-	if err != nil {
-		return fmt.Errorf("load permission catalog (acr-floor): %w", err)
-	}
+	// Реестр прав загружен ВЫШЕ, вместе с производителем правил роли: одно
+	// чтение встроенного каталога на процесс, три читателя.
 	internalACRFloor := authzguard.NewACRFloor(permRegistry, authzguard.GatewayFrontedInternalRPCs()).
 		WithProductionMode(productionMode)
 
@@ -1277,6 +1368,18 @@ func runServe(cfg config.Config) error {
 	// исходов, иначе ноль на витрине означал бы сразу и «личностей не было», и
 	// «замер не снят». Это страховка, а не мера: отказ по такому порогу пришёл бы
 	// следующему честному человеку, поэтому порог только наблюдается.
+	// Петля обновления снимка каталога. БЕЗ НЕЁ снимок наполняется однажды на
+	// старте и больше не перечитывается: снятие модуля перестаёт доезжать до
+	// пути запроса до перезапуска службы, и состояние не сходится само (#1945).
+	// Отказ круга петлю не прерывает — он уже сообщён журналом и счётчиком, а
+	// прекращение обновлений сменило бы ограниченное отставание на бессрочное.
+	// Провязку держит гейт `TestIAM1945_CatalogSnapshotBuiltByTheRootIsAlsoStartedByIt`:
+	// построенный корнем снимок обязан быть им же и запущен.
+	tasks = append(tasks, func() error {
+		catalogSnapshot.Run(ctx, catalogSnapshotRefreshPeriod())
+		return nil
+	})
+
 	identityGrowth := newIdentityGrowthSampler(kachopg.NewIdentityGrowthRepo(pool))
 	metricsReg.NewIdentityGrowthCollector(identityGrowth.Counts)
 	tasks = append(tasks, func() error {

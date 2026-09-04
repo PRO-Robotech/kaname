@@ -113,7 +113,7 @@ with insecure :9090/:9091») — никакого молчаливого insecur
   <thead><tr><th>Ключ · переменная</th><th>Назначение</th></tr></thead>
   <tbody>
     <tr><td><code>manifests.dir</code> · <code>KACHO_IAM_MANIFESTS__DIR</code></td><td>Каталог, в который посадка монтирует манифесты модулей. Пусто — доставка не заведена</td></tr>
-    <tr><td><code>manifests.required</code> · <code>KACHO_IAM_MANIFESTS__REQUIRED</code></td><td>Опирается ли посадка на манифесты. Объявлено при пустом каталоге — отказ старта</td></tr>
+    <tr><td><code>manifests.required</code> · <code>KACHO_IAM_MANIFESTS__REQUIRED</code></td><td>Опирается ли посадка на манифесты. С <code>manifests.dir</code> это пара, и неполная она отвергается в обе стороны: объявлено при пустом каталоге — отказ старта; каталог назван, а опора не объявлена — тоже отказ. Доставка снимается пустым каталогом, а не отзывом опоры</td></tr>
   </tbody>
 </table>
 

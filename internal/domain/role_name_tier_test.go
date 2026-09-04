@@ -48,7 +48,7 @@ func TestSystemRoleNameFormMirrorsTheAppliedConstraint(t *testing.T) {
 		"admin", "edit", "view", "owner",
 	}
 	for _, name := range live {
-		if err := systemRoleFixture(name).Validate(); err != nil {
+		if err := systemRoleFixture(name).Validate(fixtureModules()); err != nil {
 			t.Errorf("живая системная роль %q отвергнута доменом: %v\n"+
 				"Пока она отвергается, ни один писатель на Go не может её записать — "+
 				"и это второе препятствие рядом с тем, что путь пользовательской роли "+
@@ -62,7 +62,7 @@ func TestSystemRoleNameFormMirrorsTheAppliedConstraint(t *testing.T) {
 		"vpc.networkOperator", "vpc.network.rules.admin", "roles/iam.viewer",
 		"Vpc.network.admin", "vpc.network.", "",
 	} {
-		err := systemRoleFixture(name).Validate()
+		err := systemRoleFixture(name).Validate(fixtureModules())
 		if err == nil {
 			t.Errorf("имя %q принято доменом, а ограничение таблицы "+
 				"roles_system_name_check его отвергнет: отказ придёт SQLSTATE 23514 "+
@@ -88,12 +88,12 @@ func TestCustomRoleNameFormIsNotWidenedByTheSystemForm(t *testing.T) {
 			Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get"},
 		}},
 	}
-	if err := custom.Validate(); err != nil {
+	if err := custom.Validate(fixtureModules()); err != nil {
 		t.Fatalf("законная пользовательская роль отвергнута: %v", err)
 	}
 	widened := custom
 	widened.Name = "vpc.network.admin"
-	if err := widened.Validate(); err == nil {
+	if err := widened.Validate(fixtureModules()); err == nil {
 		t.Errorf("пользовательская роль с точечным именем принята — форма яруса не " +
 			"различает ярусов, и отказ приедет от ограничения таблицы, а не от домена")
 	}

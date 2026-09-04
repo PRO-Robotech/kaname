@@ -12,6 +12,7 @@ package pg
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,6 +20,13 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
+
+// userPoolCols — проекция pool-scoped чтения. Она УЖЕ отличается от userCols
+// (метки сюда не входят: хукам они не адресованы), поэтому это своя проекция, а
+// не переиспользование чужой. Объявлена один раз: прежде тот же список стоял
+// инлайном в обоих запросах, а приёмники под него — в двух побайтово
+// одинаковых сканерах, то есть одну проекцию несли ЧЕТЫРЕ независимых места.
+const userPoolCols = "id, account_id, external_id, email, display_name, invite_status, invited_by, created_at"
 
 // UserPoolRepo — pool-scoped read.
 type UserPoolRepo struct {
@@ -42,11 +50,11 @@ func NewUserPoolRepo(pool *pgxpool.Pool) *UserPoolRepo {
 // domain.InviteStatus.MayAuthenticate. Tx-scoped userReader свой ACTIVE-only
 // вариант сохраняет: у upsert-пути вопрос действительно «дай пригодные».
 func (r *UserPoolRepo) FindByExternalID(ctx context.Context, externalID domain.ExternalSubject) ([]domain.User, error) {
-	const q = `
-		SELECT id, account_id, external_id, email, display_name, invite_status, invited_by, created_at
+	q := fmt.Sprintf(`
+		SELECT %s
 		  FROM users
 		 WHERE external_id = $1
-		 ORDER BY created_at ASC`
+		 ORDER BY created_at ASC`, userPoolCols)
 	rows, err := r.pool.Query(ctx, q, string(externalID))
 	if err != nil {
 		return nil, mapErr(err, "", string(externalID))
@@ -54,7 +62,7 @@ func (r *UserPoolRepo) FindByExternalID(ctx context.Context, externalID domain.E
 	defer rows.Close()
 	var out []domain.User
 	for rows.Next() {
-		u, err := scanUserFromRows(rows)
+		u, err := scanUserFromRow(rows)
 		if err != nil {
 			return nil, mapErr(err, "", string(externalID))
 		}
@@ -65,10 +73,10 @@ func (r *UserPoolRepo) FindByExternalID(ctx context.Context, externalID domain.E
 
 // GetByID — single row lookup by user_id.
 func (r *UserPoolRepo) GetByID(ctx context.Context, id domain.UserID) (domain.User, error) {
-	const q = `
-		SELECT id, account_id, external_id, email, display_name, invite_status, invited_by, created_at
+	q := fmt.Sprintf(`
+		SELECT %s
 		  FROM users
-		 WHERE id = $1`
+		 WHERE id = $1`, userPoolCols)
 	row := r.pool.QueryRow(ctx, q, string(id))
 	u, err := scanUserFromRow(row)
 	if err != nil {
@@ -80,26 +88,11 @@ func (r *UserPoolRepo) GetByID(ctx context.Context, id domain.UserID) (domain.Us
 	return u, nil
 }
 
-func scanUserFromRows(rows pgx.Rows) (domain.User, error) {
-	var u domain.User
-	var displayName, externalID string
-	var invitedBy *string
-	if err := rows.Scan(
-		(*string)(&u.ID), (*string)(&u.AccountID), &externalID,
-		(*string)(&u.Email), &displayName,
-		(*string)(&u.InviteStatus), &invitedBy, &u.CreatedAt,
-	); err != nil {
-		return domain.User{}, err
-	}
-	u.ExternalID = domain.ExternalSubject(externalID)
-	u.DisplayName = domain.DisplayName(displayName)
-	if invitedBy != nil {
-		u.InvitedBy = domain.UserID(*invitedBy)
-	}
-	return u, nil
-}
-
-func scanUserFromRow(row pgx.Row) (domain.User, error) {
+// scanUserFromRow — ЕДИНСТВЕННОЕ объявление порядка назначений под
+// userPoolCols. Принимает `scanner`, а не pgx.Row: pgx.Rows несёт тот же метод,
+// поэтому одиночное чтение и обход набора строк обслуживаются одним списком, а
+// не двумя его копиями.
+func scanUserFromRow(row scanner) (domain.User, error) {
 	var u domain.User
 	var displayName, externalID string
 	var invitedBy *string

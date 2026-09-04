@@ -50,8 +50,22 @@ var (
 	reCreateTable  = regexp.MustCompile(`(?i)CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)`)
 	reCountTrigger = regexp.MustCompile(`(?is)CREATE\s+TRIGGER\s+\w+\s+AFTER[^;]*?\sON\s+([a-z_][a-z0-9_.]*)[^;]*?kacho_quota_count\(\s*'([a-zA-Z0-9.]+)'`)
 	reAccountArm   = regexp.MustCompile(`v_kind\s+IN\s*\(([^)]*)\)`)
-	reQuoted       = regexp.MustCompile(`'([^']*)'`)
-	reSpace        = regexp.MustCompile(`\s+`)
+
+	// Ограничение носителя записывается в дереве ДВУМЯ законными формами, и обе
+	// обязаны быть известны распознавателю: форма, о которой он не знает, даёт
+	// не красное и не зелёное, а МОЛЧАНИЕ — предмет уходит из-под наблюдения,
+	// ничего не нарушив (`testing.md` §«Гейт на класс» п. 7).
+	//
+	//   - рукописная миграция пишет членство как `carrier_type IN ('a','b')`;
+	//   - свод, снятый `pg_dump`, — как `carrier_type = ANY (ARRAY['a'::text, …])`
+	//     и оборачивает выражение в лишние скобки, поэтому `\(+`.
+	//
+	// Обе привязаны к ИМЕНИ ограничения: без привязки распознаватель читал бы
+	// любой CHECK, называющий `carrier_type`, и принял бы за предмет соседний.
+	reCarrierIn  = regexp.MustCompile(`(?is)CONSTRAINT\s+project_resource_quotas_carrier_ck\s+CHECK\s*\(+\s*carrier_type\s+IN\s*\(([^)]*)\)`)
+	reCarrierAny = regexp.MustCompile(`(?is)CONSTRAINT\s+project_resource_quotas_carrier_ck\s+CHECK\s*\(+\s*carrier_type\s*=\s*ANY\s*\(\s*ARRAY\s*\[([^\]]*)\]`)
+	reQuoted     = regexp.MustCompile(`'([^']*)'`)
+	reSpace      = regexp.MustCompile(`\s+`)
 )
 
 // iamMigrationCorpus читает миграции сервиса и печатает объём осмотренного:
@@ -295,30 +309,7 @@ func TestCredentialCeilingAnchor_CarrierIsNamedTheSameEverywhere(t *testing.T) {
 	// которое схема принимает.
 	names := migrationNamesInVersionOrder(bodies)
 
-	accepted := map[string]bool{}
-	reCarrierCk := regexp.MustCompile(`(?is)ADD\s+CONSTRAINT\s+project_resource_quotas_carrier_ck\s+CHECK\s*\(\s*carrier_type\s+IN\s*\(([^)]*)\)`)
-	reCreateCarrierCk := regexp.MustCompile(`(?is)CONSTRAINT\s+project_resource_quotas_carrier_ck\s+CHECK\s*\(carrier_type\s+IN\s*\(([^)]*)\)`)
-	declarations := 0
-	for _, name := range names {
-		flat := reSpace.ReplaceAllString(bodies[name], " ")
-		// Обратный ход миграции объявляет ПРЕЖНЮЮ форму — её читать нельзя:
-		// действует то, что стоит в прямом ходе.
-		if i := strings.Index(flat, "+goose Down"); i >= 0 {
-			flat = flat[:i]
-		}
-		for _, re := range []*regexp.Regexp{reCarrierCk, reCreateCarrierCk} {
-			for _, m := range re.FindAllStringSubmatch(flat, -1) {
-				next := map[string]bool{}
-				for _, q := range reQuoted.FindAllStringSubmatch(m[1], -1) {
-					next[q[1]] = true
-				}
-				if len(next) > 0 {
-					accepted = next
-					declarations++
-				}
-			}
-		}
-	}
+	accepted, declarations := carrierValuesAccepted(names, bodies)
 	require.NotZero(t, declarations,
 		"ограничение носителя не найдено ни в одной миграции — предикат мерит форму записи, а не факт")
 	require.NotEmpty(t, accepted)
@@ -391,4 +382,119 @@ func migrationNamesInVersionOrder(bodies map[string]string) []string {
 		return names[i] < names[j]
 	})
 	return names
+}
+
+// carrierValuesAccepted — носители, которые ПРИНИМАЕТ ограничение схемы, и число
+// объявлений, из которых это вычитано.
+//
+// Отделён от дерева ради инъекции: судить о том, знает ли распознаватель все
+// законные формы записи, можно только подав ему каждую из них — на живом дереве
+// он молчит одинаково и когда формы нет, и когда он её не узнал.
+//
+// Последнее объявление выигрывает: миграции применяются по ЧИСЛОВОЙ версии, и
+// порядок имён здесь обязан приходить от `migrationNamesInVersionOrder`.
+func carrierValuesAccepted(names []string, bodies map[string]string) (map[string]bool, int) {
+	accepted := map[string]bool{}
+	declarations := 0
+	for _, name := range names {
+		flat := reSpace.ReplaceAllString(bodies[name], " ")
+		// Обратный ход миграции объявляет ПРЕЖНЮЮ форму — её читать нельзя:
+		// действует то, что стоит в прямом ходе.
+		if i := strings.Index(flat, "+goose Down"); i >= 0 {
+			flat = flat[:i]
+		}
+		for _, re := range []*regexp.Regexp{reCarrierIn, reCarrierAny} {
+			for _, m := range re.FindAllStringSubmatch(flat, -1) {
+				next := map[string]bool{}
+				for _, q := range reQuoted.FindAllStringSubmatch(m[1], -1) {
+					next[q[1]] = true
+				}
+				if len(next) > 0 {
+					accepted = next
+					declarations++
+				}
+			}
+		}
+	}
+	return accepted, declarations
+}
+
+// TestCredentialCeilingAnchor_CarrierRecognizerKnowsBothForms — ИНЪЕКЦИЯ по
+// КАЖДОЙ законной форме записи предмета, с законным близнецом на каждой оси.
+//
+// Заведена по находке: свод миграций сервиса в один файл снят `pg_dump`, и тот
+// пишет членство через `= ANY (ARRAY[…])`. Распознаватель знал только форму
+// `IN (…)` — и предмет ушёл из-под наблюдения целиком. Обнаружилось это лишь
+// потому, что у пробы стояла проверка СОБСТВЕННОЙ предпосылки («объявлений
+// ноль»); без неё расхождение носителя перестало бы ловиться молча.
+func TestCredentialCeilingAnchor_CarrierRecognizerKnowsBothForms(t *testing.T) {
+	t.Parallel()
+
+	const name = "project_resource_quotas_carrier_ck"
+	want := map[string]bool{"project": true, "iam.user": true}
+
+	t.Run("форма рукописной миграции: IN (…)", func(t *testing.T) {
+		got, n := carrierValuesAccepted([]string{"0001_x.sql"}, map[string]string{
+			"0001_x.sql": "ALTER TABLE q ADD CONSTRAINT " + name +
+				" CHECK (carrier_type IN ('project', 'iam.user'));",
+		})
+		require.Equal(t, 1, n)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("форма свода pg_dump: = ANY (ARRAY[…]) в лишних скобках", func(t *testing.T) {
+		got, n := carrierValuesAccepted([]string{"0001_x.sql"}, map[string]string{
+			"0001_x.sql": "CREATE TABLE q (\n    CONSTRAINT " + name +
+				" CHECK (((carrier_type = ANY (ARRAY['project'::text, 'iam.user'::text]))" +
+				" AND (carrier_id <> ''::text)))\n);",
+		})
+		require.Equal(t, 1, n,
+			"форма свода не узнана: распознаватель молчал бы, ничего не нарушив")
+		require.Equal(t, want, got)
+	})
+
+	t.Run("законный близнец: ЧУЖОЕ ограничение того же столбца не читается", func(t *testing.T) {
+		_, n := carrierValuesAccepted([]string{"0001_x.sql"}, map[string]string{
+			"0001_x.sql": "CREATE TABLE q (\n    CONSTRAINT identity_admission_windows_carrier_ck" +
+				" CHECK (((carrier_type = ANY (ARRAY['nonsense'::text])) AND (carrier_id <> ''::text)))\n);",
+		})
+		require.Zero(t, n,
+			"распознаватель прочитал соседнее ограничение: без привязки к ИМЕНИ он мерит "+
+				"столбец, а не предмет, и объявил бы принимаемым чужой перечень")
+	})
+
+	t.Run("форма, которой распознаватель не знает: объявлений ноль", func(t *testing.T) {
+		_, n := carrierValuesAccepted([]string{"0001_x.sql"}, map[string]string{
+			"0001_x.sql": "CREATE TABLE q (\n    CONSTRAINT " + name +
+				" CHECK (carrier_type <@ '{project,iam.user}'::text[])\n);",
+		})
+		require.Zero(t, n,
+			"неизвестная форма обязана давать НОЛЬ объявлений: именно на нуле срабатывает "+
+				"проверка собственной предпосылки, и она — единственное, чем эта слепота видна")
+	})
+
+	t.Run("обратный ход не читается: действует прямой", func(t *testing.T) {
+		got, n := carrierValuesAccepted([]string{"0001_x.sql"}, map[string]string{
+			"0001_x.sql": "-- +goose Up\nCONSTRAINT " + name +
+				" CHECK (carrier_type IN ('project', 'iam.user'))\n" +
+				"-- +goose Down\nCONSTRAINT " + name +
+				" CHECK (carrier_type IN ('прежнее'))",
+		})
+		require.Equal(t, 1, n)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("последнее объявление по числовой версии выигрывает", func(t *testing.T) {
+		bodies := map[string]string{
+			"484002_a.sql": "CONSTRAINT " + name + " CHECK (carrier_type IN ('project'))",
+			"20260824230000_b.sql": "CONSTRAINT " + name +
+				" CHECK (((carrier_type = ANY (ARRAY['project'::text, 'iam.user'::text]))))",
+		}
+		got, n := carrierValuesAccepted(migrationNamesInVersionOrder(bodies), bodies)
+		require.Equal(t, 2, n)
+		require.Equal(t, want, got,
+			"выиграло объявление с МЕНЬШЕЙ версией: строковый порядок ставит "+
+				"`20260824230000` раньше `484002`, и гейт объявил бы находкой значение, "+
+				"которое схема принимает")
+	})
 }

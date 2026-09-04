@@ -164,6 +164,26 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	if svcs != nil && svcs.interactiveClientHandler != nil {
 		iamv1.RegisterInternalInteractiveClientServiceServer(srv, svcs.interactiveClientHandler)
 	}
+	// InternalModuleService — четыре глагола над строками каталога прав ОДНОГО
+	// модуля: план, применение, два чтения (задача #1034). Internal-only
+	// (запрет #6): НИКОГДА не регистрируется на внешнем слушателе, и префикс
+	// `Internal` в имени службы — действующий дискриминатор, а не привычка
+	// именования.
+	//
+	// Гейт права стоит В ХЕНДЛЕРЕ, первым стейтментом каждого из четырёх
+	// глаголов (`system_admin` на синглтоне `cluster`, fail-closed). Он и есть
+	// ЕДИНСТВЕННАЯ авторизация этой поверхности: своего рубежа сверх
+	// транспортного внутренний слушатель не несёт, а объявленная контрактом
+	// ступень подтверждения личности к этим методам сегодня не применяется —
+	// решение записано приёмкой, а не оставлено умолчанием. Поэтому регистрация
+	// без гейта не существует ни в одном коммите: они внесены одним изменением.
+	//
+	// Краю служба не фронтится: REST-маршрута к ней нет и в этой под-фазе не
+	// будет, поэтому в перечень методов, фронтящихся краем, она не вносится —
+	// внесение дало бы поверхность, недостижимую ни для кого.
+	if svcs != nil && svcs.moduleHandler != nil {
+		iamv1.RegisterInternalModuleServiceServer(srv, svcs.moduleHandler)
+	}
 	// InternalLimitService — resource-count ceilings (issue #291). Internal-only
 	// (ban #6): NEVER registered on the external listener. The five CRUD verbs are
 	// gateway-fronted admin surface; Resolve / ListChangedSince are dialled

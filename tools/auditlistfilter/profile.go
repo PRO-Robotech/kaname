@@ -319,6 +319,23 @@ var Profile = listfiltergate.Profile{
 				"enforces, and a page filtered to what the MACHINE can see would silently drop " +
 				"tenants whose limits it must apply. The exclusion expires with the RPC.",
 		},
+		"module.List": {
+			Shape: listfiltergate.ClusterScoped,
+			Reason: "the module catalog is the platform's own registry of modules, their " +
+				"resources and verbs — the rows the rights model itself is keyed on. It carries " +
+				"no project_id, account_id or owner column, so there is no per-object grant to " +
+				"narrow the page to: RowFilter here would state a check whose subject does not " +
+				"exist. What bounds the caller is the surface instead: the RPC lives ONLY on " +
+				"InternalModuleService, is registered ONLY on the cluster-internal listener " +
+				"(ban #6, pinned by register_module_internal_only_test.go), and its catalog entry " +
+				"demands `system_admin` on `cluster` — a relation defined `[user, service_account]` " +
+				"with NO `user:*` member, so unlike `viewer` it is not satisfiable by a wildcard " +
+				"tuple. The same relation is re-checked in the handler as its first statement " +
+				"(authz_order_test.go pins that order), because the internal listener carries no " +
+				"authorization interceptor of its own. Add an owner column to the catalog rows and " +
+				"the reason above stops being true — at which point this must become RowFilter. " +
+				"The exclusion expires with its method: retire the RPC and this entry becomes a finding.",
+		},
 		"interactive_client.List": {
 			Shape: listfiltergate.ClusterScoped,
 			Reason: "an interactive-login client is a CLUSTER-level OAuth2 client registration: " +

@@ -37,7 +37,7 @@ func basicCredPool(t *testing.T) *pgxpool.Pool {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
-	pool, err := pgxpool.New(context.Background(), appendSearchPathOptions(pgtest.NewDB(t)))
+	pool, err := pgxpool.New(context.Background(), pgtest.NewDB(t))
 	require.NoError(t, err)
 	// Закрытие пула — С ПРЕДЕЛОМ. Голый `pool.Close` на удерживаемом соединении
 	// висит без срока: пакет умирает по таймауту целиком, и вердикта не остаётся

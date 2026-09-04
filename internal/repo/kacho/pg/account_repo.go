@@ -193,8 +193,14 @@ type accountWriter struct {
 }
 
 // Insert — INSERT INTO accounts ... RETURNING (id, created_at).
-// CreatedAt здесь явно проставляется в UTC для детерминированности тестов
-// (parity с kacho-vpc/internal/repo/kacho/pg/network.go::Insert).
+// CreatedAt здесь явно проставляется в UTC для детерминированности тестов.
+//
+// Здесь стояла ссылка на одноимённую запись СОСЕДНЕГО сервиса как на образец
+// паритета, и она указывала на полирепо-путь, которого в дереве нет с переезда
+// в монорепо. Следить за таким утверждением некому дважды: приватный адаптер
+// чужого сервиса меняется своей полосой, а по коду сервисы друг от друга не
+// зависят вовсе. Довод «UTC ради детерминированности» самодостаточен и в чужом
+// подтверждении не нуждается (#1951).
 func (w *accountWriter) Insert(ctx context.Context, a domain.Account) (domain.Account, error) {
 	labelsJSON, err := marshalLabels(a.Labels)
 	if err != nil {

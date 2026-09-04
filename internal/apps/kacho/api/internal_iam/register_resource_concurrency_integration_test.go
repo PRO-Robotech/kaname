@@ -42,6 +42,7 @@ func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
 		kachopg.NewFGAOutboxEmitter(),
 		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
+		kachopg.NewCatalogTypeReader(),
 	)
 
 	req := &iamv1.RegisterResourceRequest{

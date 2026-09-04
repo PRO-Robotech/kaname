@@ -3,8 +3,8 @@
 
 package toproto
 
-// role_superuser_preview_test.go — превью роли `*.*` показывает ВСЕ глаголы
-// платформы, а не пересечение наборов типов (найдено при #1189).
+// role_superuser_preview_test.go — превью роли `*.*` показывает ВЕСЬ словарь
+// каталога, а не пересечение наборов типов (найдено при #1189).
 //
 // # Предмет
 //
@@ -20,6 +20,17 @@ package toproto
 // к ней не относящейся. Наблюдалось при снятии `v_delete` с `iam_user`:
 // пересечение стало `[get list]`.
 //
+// # Источник сменился, свойство осталось (#1994)
+//
+// Резолв больше не спрашивает словарь, ПОРОЖДЁННЫЙ СБОРКОЙ: и набор типа, и
+// запасной словарь приходят из ЖИВЫХ строк каталога
+// (`catalog.Facts.RolePreviewLookup`). Проба переписана под новый источник, а не
+// ослаблена: она по-прежнему утверждает, что `*.*` видит ВЕСЬ словарь, и
+// по-прежнему требует, чтобы пересечение было УЖЕ показанного.
+//
+// Каталог берётся у фикстуры, равной ПОСЕВУ МИГРАЦИИ, поэтому утверждение
+// остаётся о дереве, а не о выдуманном множестве.
+//
 // # Обе стороны
 //
 // Утверждение «превью несёт write-глагол» зеленело бы на любом непустом наборе,
@@ -29,25 +40,28 @@ package toproto
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // TestSuperuserRolePreview_ShowsEveryVerbThePlatformHas — гейт на дереве.
 func TestSuperuserRolePreview_ShowsEveryVerbThePlatformHas(t *testing.T) {
+	facts := catalogfixture.Facts()
+	lookup := facts.RolePreviewLookup()
+
 	// Правило `*.*` — та самая форма, у которой нет своего типа (миграция 0031:
 	// admin / edit / view). Резолв обязан промахнуться, иначе запасной путь не
 	// исполняется и проба утверждает о мёртвой ветке.
-	if _, ok := authzmap.ObjectType("*", "*"); ok {
+	if _, ok := facts.FGAObjectType("*.*"); ok {
 		t.Fatal("пара (`*`,`*`) стала резолвиться в тип — запасной путь больше не исполняется")
 	}
 
-	shown, ok := roleTypeVerbLookup("*", "*")
+	shown, ok := lookup("*", "*")
 	if !ok || len(shown) == 0 {
 		t.Fatal("превью роли `*.*` пусто — она выглядела бы ничего не дающей")
 	}
 
-	all := authzmap.AllVerbVocabulary()
+	all := facts.AllVerbVocabulary()
 	if len(shown) != len(all) {
 		t.Errorf("превью роли `*.*` показывает %v, а платформа объявляет %v — роль-"+
 			"суперпользователь обещает не то, что даёт. Запасной словарь обязан означать "+
@@ -57,7 +71,7 @@ func TestSuperuserRolePreview_ShowsEveryVerbThePlatformHas(t *testing.T) {
 	}
 
 	// ── КОНТРОЛЬ: пересечение УЖЕ показанного ───────────────────────────────
-	common := authzmap.CommonVerbVocabulary()
+	common := facts.CommonVerbVocabulary()
 	if len(common) >= len(shown) {
 		t.Fatalf("пересечение %v не уже показанного %v — наборы типов сошлись обратно, и "+
 			"проба перестала отличать одно от другого", common, shown)

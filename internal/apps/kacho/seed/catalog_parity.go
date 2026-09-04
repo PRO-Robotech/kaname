@@ -22,11 +22,50 @@ package seed
 // называет предмет прямо и приходит ДО приёма запросов — то есть арендатор не
 // видит ни одного ложного отказа.
 //
+// # Литерал — ВЕРХНЯЯ ГРАНИЦА, а не равенство (задача #1861)
+//
+// Опорная сторона здесь — перечень, порождённый сборкой из манифестов дерева
+// (`authzmap` порождается из `services/*/manifest.yaml`). Требуй страж ТОЧНОГО
+// равенства — и снятие строки становится невозможным by construction: живая
+// строка уходит, а образ её по-прежнему называет, поэтому следующий старт
+// отказан, и снять модуль нельзя иначе как пересборкой образа. Так и было до
+// этой правки, и это ровно то, что задача называет «опора стража это литерал».
+//
+// Поэтому сверка НЕСИММЕТРИЧНА, и обе стороны названы:
+//
+//	живых строк БОЛЬШЕ, чем в литерале   отказ. Доставка оператора — данные, а не
+//	                                     релиз, и в одиночку она не вправе
+//	                                     расширить каталог за пределы того, что
+//	                                     знает образ: имени типа, которого нет в
+//	                                     модели прав, кортеж не адресует.
+//	живых строк МЕНЬШЕ, и строка СНЯТА   законно. Снятие и есть та операция,
+//	                                     ради которой у всех трёх таблиц заведены
+//	                                     `retired_at` / `retired_reason` / `live`.
+//	живых строк МЕНЬШЕ, и строки НЕТ     отказ. Это не снятие, а НЕПРИЕХАВШАЯ
+//	ВОВСЕ                                строка: посев не применён, миграция не
+//	                                     дошла. Чинится противоположно.
+//
+// Различает вторую строку от третьей ровно одно — СНЯТАЯ СТРОКА. Снятая строка
+// не удаляется (`catalog_*_live_uk UNIQUE (…, live)`, `CHECK (live = (retired_at
+// IS NULL))`), поэтому свидетельство решения остаётся в базе навсегда, и
+// спросить его стоит одного оператора на таблицу.
+//
+// # Что при этом ПЕРЕСТАЁТ проверять страж, и чем это удержано
+//
+// Он больше не роняет старт на снятой строке. Доступ от этого не расширяется ни
+// на одну строку — наоборот, сужается, — и удержано это КОНСТРУКЦИЕЙ БАЗЫ, а не
+// обещанием: ключи проекции правила (`role_rule_ref_res_fk`,
+// `role_rule_ref_verb_fk`, `role_verb_type_fk`) ссылаются на `(…, live)`, поэтому
+// правило, назвавшее снятый тип, отвергается ключом, а не кодом (запрет #10).
+// Обратная сторона того же ключа: снять строку, у которой ЕСТЬ живые выдачи,
+// база не даст — снятие обязано пройти через путь, который их сначала уберёт.
+//
 // # Перепись печатается ВСЕГДА
 //
-// Обе величины — сколько прочитано из литерала и сколько из таблицы — выводятся
-// независимо от исхода: «ноль расхождений» обязано быть отличимо от «ноль
-// прочитанного».
+// Все величины — сколько прочитано из литерала, сколько живыми строками, сколько
+// снятыми и сколько снято решением — выводятся независимо от исхода: «ноль
+// расхождений» обязано быть отличимо и от «ноль прочитанного», и от «снята
+// половина каталога, и это прошло молча».
 
 import (
 	"context"
@@ -36,8 +75,23 @@ import (
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
+
+// CatalogSource — порт стража: ЖИВОЕ множество каталога и СНЯТОЕ.
+//
+// Объявлен ЗДЕСЬ, у потребителя, а не расширяет `catalog.RowSource`: снятые
+// строки спрашивает ровно один вызывающий — этот страж, — а снимок каталога на
+// пути запроса обходится живым множеством и о снятом знать не должен. Расширь я
+// общий порт — второй потребитель получил бы величину, которую обязан отсеивать
+// сам, то есть второе место, где решается, что значит «живо».
+type CatalogSource interface {
+	catalog.RowSource
+	// ReadRetiredCatalog — строки, снятые решением: `retired_at` проставлен,
+	// `live` ложен. Множества живого и снятого НЕ ПЕРЕСЕКАЮТСЯ by construction —
+	// у каждой из трёх таблиц первичный ключ по имени строки, поэтому строка
+	// бывает либо живой, либо снятой, но не обеими.
+	ReadRetiredCatalog(ctx context.Context) (catalog.Rows, error)
+}
 
 // CatalogParityCensus — объём осмотренного и найденное расхождение.
 type CatalogParityCensus struct {
@@ -51,6 +105,19 @@ type CatalogParityCensus struct {
 	MissingRows []string
 	// ExtraRows — есть живой строкой, нет в литерале.
 	ExtraRows []string
+	// RetiredModules / RetiredResources / RetiredVerbs — объём СНЯТОГО,
+	// прочитанный этой сверкой. Печатается всегда: «расхождений ноль» обязано
+	// быть отличимо от «снято полкаталога, и это прошло молча».
+	RetiredModules   int
+	RetiredResources int
+	RetiredVerbs     int
+	// WithdrawnRows — строки литерала, которых нет живыми, и это ЗАКОННО:
+	// строка снята решением, и снятая строка тому свидетельством.
+	//
+	// Отдельно от MissingRows намеренно: эти два состояния снаружи выглядят
+	// одинаково («прав не выдали»), а чинятся противоположно — первое не
+	// чинится вовсе, второе применением миграций.
+	WithdrawnRows []string
 	// Live — ЖИВОЕ множество, прочитанное этой сверкой.
 	//
 	// Оно отдаётся наружу затем, чтобы снимок каталога наполнялся ТЕМ ЖЕ
@@ -66,15 +133,32 @@ func (c CatalogParityCensus) Diverged() bool {
 	return len(c.MissingRows) > 0 || len(c.ExtraRows) > 0
 }
 
-// Empty — таблиц каталога не прочитано ни строки. Отдельно от расхождения,
+// Empty — ЖИВЫХ строк каталога не прочитано ни одной. Отдельно от расхождения,
 // потому что предмет другой: расхождение чинится повторным посевом, пустой
-// каталог — применением миграций.
+// каталог — применением миграций либо возвратом снятого.
 func (c CatalogParityCensus) Empty() bool {
 	return c.RowModules == 0 && c.RowResources == 0 && c.RowVerbs == 0
 }
 
+// WhollyRetired — живых строк нет, а снятые ЕСТЬ: каталог снят целиком, а не
+// «не доехал».
+//
+// Отдельный предикат, потому что отдельный предмет. Оба состояния роняют старт —
+// пустой каталог отверг бы все правила разом, — но чинятся они противоположно:
+// непринятые миграции применяют, снятый целиком каталог возвращают. Один текст
+// на два предмета послал бы оператора чинить не то.
+func (c CatalogParityCensus) WhollyRetired() bool {
+	return c.Empty() && (c.RetiredModules > 0 || c.RetiredResources > 0 || c.RetiredVerbs > 0)
+}
+
 // AssertCatalogParity сверяет ЖИВЫЕ строки каталога с литералом-источником и
 // возвращает перепись вместе с исходом. Ошибка означает отказ старта.
+//
+// Это КОМПОЗИЦИЯ двух вещей, а не третья: `MeasureCatalogParity` считает
+// перепись, `BootRefusal` судит её. Вызывающий, которому нужен ДРУГОЙ вердикт по
+// той же переписи (применитель каталога спрашивает «вывело ли применение каталог
+// за опору», а не «поднимать ли службу»), зовёт измерение и судит сам — второй
+// копии сверки в дереве от этого не заводится.
 //
 // Строки приходят через ПОРТ, а не читаются здесь своим запросом. Причина — не
 // слоистость: этим же чтением наполняется снимок каталога (`internal/catalog`),
@@ -82,19 +166,36 @@ func (c CatalogParityCensus) Empty() bool {
 // места, которые разойдутся молча. Порт читает ПУЛ, а не реплику: та отстаёт, а
 // страж исполняется на старте, когда отставание наиболее вероятно, — прочитанный
 // оттуда пустой каталог дал бы отказ старта на исправной службе.
-func AssertCatalogParity(ctx context.Context, src catalog.RowSource) (CatalogParityCensus, error) {
+func AssertCatalogParity(ctx context.Context, src CatalogSource) (CatalogParityCensus, error) {
+	c, err := MeasureCatalogParity(ctx, src)
+	if err != nil {
+		return c, err
+	}
+	return c, c.BootRefusal()
+}
+
+// MeasureCatalogParity — ИЗМЕРЕНИЕ: перепись живого и снятого множеств против
+// опоры. Суждения не выносит и о пуске не говорит ничего.
+//
+// # Отказ здесь означает РОВНО ОДНО — порт не ответил
+//
+// Это несущее свойство разреза, а не оформление. У прежней слитной функции
+// отказов было четыре (чтение живого · чтение снятого · пустой каталог ·
+// расхождение), общего сентинела ни у одного, и вызывающий, взявший
+// `census, _ := …`, получал перепись, диффа в которой НЕТ ВОВСЕ: обе корзины
+// пусты, `Diverged()` ложь — то есть «не выполнилось» выглядело как «расхождений
+// нет». Для стража старта разницы не было (он читал ошибку), для применителя она
+// означала бы РАЗРЕШИТЕЛЬНЫЙ вердикт на непрочитанном каталоге.
+//
+// Теперь отказ отсюда приходит только от порта, а три состояния переписи —
+// суждение `BootRefusal`, и оно у стража старта своё.
+func MeasureCatalogParity(ctx context.Context, src CatalogSource) (CatalogParityCensus, error) {
 	var c CatalogParityCensus
 
 	want := LiteralRows()
-	wantMod := setOf(want.Modules)
-	wantRes := map[string]bool{}
-	for _, r := range want.Resources {
-		wantRes[r.Module+"."+r.Resource] = true
-	}
-	wantVerb := map[string]bool{}
-	for _, v := range want.Verbs {
-		wantVerb[verbKey(v)] = true
-	}
+	wantMod := keysOfModules(want.Modules)
+	wantRes := keysOfResources(want.Resources)
+	wantVerb := keysOfVerbs(want.Verbs)
 	c.LiteralModules, c.LiteralResources, c.LiteralVerbs = len(wantMod), len(wantRes), len(wantVerb)
 
 	live, err := src.ReadLiveCatalog(ctx)
@@ -103,45 +204,84 @@ func AssertCatalogParity(ctx context.Context, src catalog.RowSource) (CatalogPar
 	}
 	c.Live = live
 
-	gotMod := setOf(live.Modules)
-	gotRes := map[string]bool{}
-	for _, r := range live.Resources {
-		gotRes[r.Module+"."+r.Resource] = true
-	}
-	gotVerb := map[string]bool{}
-	for _, v := range live.Verbs {
-		gotVerb[verbKey(v)] = true
-	}
+	gotMod := keysOfModules(live.Modules)
+	gotRes := keysOfResources(live.Resources)
+	gotVerb := keysOfVerbs(live.Verbs)
 	c.RowModules, c.RowResources, c.RowVerbs = len(gotMod), len(gotRes), len(gotVerb)
 
-	diffInto(&c.MissingRows, &c.ExtraRows, "модуль", wantMod, gotMod)
-	diffInto(&c.MissingRows, &c.ExtraRows, "ресурс", wantRes, gotRes)
-	diffInto(&c.MissingRows, &c.ExtraRows, "глагол", wantVerb, gotVerb)
+	// СНЯТОЕ читается ВСЕГДА, а не только при найденном расхождении. Читай его
+	// «по необходимости» — и на исправном каталоге страж не сходил бы за ним ни
+	// разу, то есть отказ порта снятого впервые обнаружился бы в тот момент,
+	// когда от ответа что-то зависит. Отказ здесь ФАТАЛЕН: непрочитанное снятое
+	// множество не есть «ничего не снято», а без ответа отличить снятую строку
+	// от непроехавшей нечем.
+	retired, rerr := src.ReadRetiredCatalog(ctx)
+	if rerr != nil {
+		return c, fmt.Errorf("прочитать снятые строки каталога модуля: %w", rerr)
+	}
+	retiredMod := keysOfModules(retired.Modules)
+	retiredRes := keysOfResources(retired.Resources)
+	retiredVerb := keysOfVerbs(retired.Verbs)
+	c.RetiredModules, c.RetiredResources, c.RetiredVerbs = len(retiredMod), len(retiredRes), len(retiredVerb)
+
+	diffInto(&c, "модуль", wantMod, gotMod, identitiesOf(retiredMod))
+	diffInto(&c, "ресурс", wantRes, gotRes, identitiesOf(retiredRes))
+	diffInto(&c, "глагол", wantVerb, gotVerb, identitiesOf(retiredVerb))
 	sort.Strings(c.MissingRows)
 	sort.Strings(c.ExtraRows)
+	sort.Strings(c.WithdrawnRows)
 
+	return c, nil
+}
+
+// BootRefusal — СУЖДЕНИЕ о переписи глазами ПУТИ СТАРТА: три состояния, каждое
+// означает отказ пуска. `nil` — пускать можно.
+//
+// Суждение отделено от измерения потому, что оно НЕ ОДНО на дереве: применитель
+// каталога спрашивает у той же переписи другое — «вывело ли применение каталог за
+// опору», — и текст «старт отказан» там был бы ложью о происходящем. Разделение
+// не заводит второй сверки: перепись по-прежнему считает одно место
+// (`MeasureCatalogParity`), а вердиктов у неё столько, сколько вызывающих.
+//
+// Три состояния названы по отдельности, а не сложены в один текст, потому что
+// чинятся они ПРОТИВОПОЛОЖНО: каталог, снятый целиком, возвращают; пустой —
+// применяют миграции; разошедшийся — пересевают.
+func (c CatalogParityCensus) BootRefusal() error {
 	switch {
+	case c.WhollyRetired():
+		return fmt.Errorf("каталог модуля снят ЦЕЛИКОМ: живых строк "+
+			"catalog_module/catalog_resource/catalog_verb 0/0/0, снятых %d/%d/%d при %d/%d/%d "+
+			"в литерале. Каталог без единой живой строки отверг бы ВСЕ правила разом, поэтому "+
+			"старт отказан; чинится это возвратом снятого, а не посевом (kacho#1861)",
+			c.RetiredModules, c.RetiredResources, c.RetiredVerbs,
+			c.LiteralModules, c.LiteralResources, c.LiteralVerbs)
 	case c.Empty():
-		return c, fmt.Errorf("каталог модуля пуст: строк catalog_module/catalog_resource/catalog_verb "+
+		return fmt.Errorf("каталог модуля пуст: строк catalog_module/catalog_resource/catalog_verb "+
 			"прочитано 0/0/0 при %d/%d/%d в литерале — пустой каталог отверг бы ВСЕ правила разом, "+
 			"и это читалось бы как поломка продукта, а не как непринятые миграции (kacho#1030, IAM-CT-1-16)",
 			c.LiteralModules, c.LiteralResources, c.LiteralVerbs)
 	case c.Diverged():
-		return c, fmt.Errorf("литерал и строки каталога разошлись: нет строкой [%s]; нет в литерале [%s]. "+
-			"Прочитано из литерала %d/%d/%d, строками %d/%d/%d. Расхождение снаружи выглядит как "+
-			"«прав не выдали», поэтому старт отказан, а не продолжен (kacho#1030, IAM-CT-1-15)",
+		return fmt.Errorf("литерал и строки каталога разошлись: нет строкой [%s]; нет в литерале [%s]. "+
+			"Прочитано из литерала %d/%d/%d, живыми строками %d/%d/%d, снятыми %d/%d/%d; "+
+			"снято решением %d строк — эти расхождением НЕ считаются. Оставшееся снаружи выглядит "+
+			"как «прав не выдали», поэтому старт отказан, а не продолжен (kacho#1030, IAM-CT-1-15)",
 			strings.Join(c.MissingRows, ", "), strings.Join(c.ExtraRows, ", "),
 			c.LiteralModules, c.LiteralResources, c.LiteralVerbs,
-			c.RowModules, c.RowResources, c.RowVerbs)
+			c.RowModules, c.RowResources, c.RowVerbs,
+			c.RetiredModules, c.RetiredResources, c.RetiredVerbs,
+			len(c.WithdrawnRows))
 	}
-	return c, nil
+	return nil
 }
 
 // LiteralRows — каталог, каким его объявляет ЛИТЕРАЛ: тот же перечень, которым
 // миграция посеяла строки и с которым их сверяет страж выше.
 //
-// Производитель перечня ОДИН (`authzmap.CatalogSeed*` + `domain.KnownModules`), и
-// зовут его отсюда трое: посев миграции, гейт паритета дерева и этот страж.
+// Производитель перечня ОДИН (`authzmap.CatalogSeed*`, все три половины), и зовут
+// его отсюда трое: посев миграции, гейт паритета дерева и этот страж. До #1927
+// модульную половину давал отдельный литерал домена — второе место об одном
+// предмете, за согласием которого следил отдельный гейт дрейфа; теперь она
+// выводится из того же `objectTypes`, что и ресурсы.
 // Второй производитель разошёлся бы с первым молча — ровно в тот момент, когда
 // расхождение и опасно.
 //
@@ -149,9 +289,34 @@ func AssertCatalogParity(ctx context.Context, src catalog.RowSource) (CatalogPar
 // стороны сверки обязаны быть выражены одинаково, иначе сравнение начинает
 // зависеть от того, кто как разложил свою сторону.
 func LiteralRows() catalog.Rows {
-	rows := catalog.Rows{Modules: domain.KnownModules()}
+	rows := catalog.Rows{Modules: authzmap.CatalogSeedModules()}
 	for _, r := range authzmap.CatalogSeedResources() {
-		rows.Resources = append(rows.Resources, catalog.ResourceRow{Module: r.Module, Resource: r.Resource})
+		// Имя типа модели берётся у переходника ЛИТЕРАЛА, и это его законное
+		// место: левая сторона паритета обязана быть выводима ИЗ ДЕРЕВА — её
+		// спрашивает страж старта и оснастка, у которой базы нет by construction.
+		// Правая сторона читает ту же величину КОЛОНКОЙ, и расхождение двух
+		// сторон — предмет стража.
+		// `ok` читается, а не отбрасывается (#1980). Промах невозможен by
+		// construction — строка посева производна от `Catalog()`, — и предпосылка
+		// держится пробой `TestCatalogPairsAlwaysResolveBackToTheirType`.
+		//
+		// Пропуск, а не пустой тип, и не отказ. Пустой тип уехал бы в ЛЕВУЮ сторону
+		// паритета значением, и «пары нет» стало бы неотличимо от «пара с пустым
+		// типом» — сверка сравнивала бы фантом с живой строкой. Пропущенная строка
+		// же выходит наружу той величиной, которая для этого и заведена: живая
+		// строка без пары в литерале называется стражем `ExtraRows`, то есть
+		// расхождение становится ВИДНЫМ, а не тихим. Отказа здесь нет, потому что
+		// подписи под него нет: у функции 40+ вызывающих и возврата ошибки она не
+		// несёт; заводить его ради недостижимой ветви значило бы менять контракт
+		// ради того, чего не бывает. Тот же выбор уже сделан соседом —
+		// `CatalogSeedVerbs()` на промахе тоже пропускает.
+		fgaType, ok := authzmap.ObjectType(r.Module, r.Resource)
+		if !ok {
+			continue
+		}
+		rows.Resources = append(rows.Resources, catalog.ResourceRow{
+			Module: r.Module, Resource: r.Resource, ObjectType: fgaType,
+		})
 	}
 	for _, v := range authzmap.CatalogSeedVerbs() {
 		rows.Verbs = append(rows.Verbs, catalog.VerbRow{
@@ -159,6 +324,34 @@ func LiteralRows() catalog.Rows {
 		})
 	}
 	return rows
+}
+
+// resourceKey — ключ сверки строки ресурса, несущий ИМЯ ТИПА МОДЕЛИ.
+//
+// Имя входит в ключ по той же причине, по какой признак словаря входит в ключ
+// глагола ниже: строка, посеянная с ЧУЖИМ именем типа, существует и по паре
+// (модуль, ресурс) сверку прошла бы молча — а разошлась бы ровно та величина,
+// ради которой колонка заведена. Отношение `v_<глагол>` адресуется именно ею, и
+// расхождение здесь означает права, выданные не на тот объект.
+//
+// Так расхождение видно с ОБЕИХ сторон — «нет строкой» и «нет в литерале» разом
+// (`diffInto`).
+func resourceKey(r catalog.ResourceRow) string {
+	return r.Module + "." + r.Resource + " → " + r.ObjectType
+}
+
+// resourceIdentity — ИМЯ строки ресурса без её формы: то, чем строка адресуется
+// первичным ключом `catalog_resource_pkey (module, resource)`.
+//
+// Идентичность отделена от ключа сверки НАМЕРЕННО, и различие несущее.
+// Свидетельство о снятии ищется по ИДЕНТИЧНОСТИ: снятая строка сохраняет ту
+// форму, какая была у неё в момент снятия, а форма снятой строки ничего уже не
+// значит — отношение `v_*` на ней не резолвится, ключ проекции требует `live`.
+// Ищи страж свидетельство по ПОЛНОМУ ключу — снятая строка с устаревшим именем
+// типа читалась бы как «строки нет вовсе», то есть решение оператора выглядело
+// бы непринятой миграцией.
+func resourceIdentity(r catalog.ResourceRow) string {
+	return r.Module + "." + r.Resource
 }
 
 // verbKey — ключ сверки строки глагола, несущий ПРИЗНАК СЛОВАРЯ.
@@ -173,29 +366,91 @@ func verbKey(v catalog.VerbRow) string {
 	if v.PerObject {
 		kind = " (пообъектный)"
 	}
-	return v.Module + "." + v.Resource + "." + v.Verb + kind
+	return verbIdentity(v) + kind
 }
 
-func setOf(values []string) map[string]bool {
-	out := make(map[string]bool, len(values))
+// verbIdentity — ИМЯ строки действия без признака словаря: то, чем строка
+// адресуется первичным ключом `catalog_verb_pkey (module, resource, verb)`.
+// Причина отделения — та же, что у ресурса выше.
+func verbIdentity(v catalog.VerbRow) string {
+	return v.Module + "." + v.Resource + "." + v.Verb
+}
+
+// keysOfModules / keysOfResources / keysOfVerbs — множество строк одного вида в
+// форме «ключ сверки → идентичность строки».
+//
+// Две величины, а не одна: КЛЮЧ несёт форму (имя типа модели у ресурса, признак
+// словаря у действия) и решает, СОШЛИСЬ ли стороны; ИДЕНТИЧНОСТЬ несёт только
+// имя строки и решает, ЕСТЬ ли о ней свидетельство снятия. Схлопни их в одну —
+// и одно из двух решений начнёт приниматься неверно (см. `resourceIdentity`).
+//
+// У модуля форма и имя совпадают: у `catalog_module` кроме имени и живости
+// колонок нет.
+func keysOfModules(values []string) map[string]string {
+	out := make(map[string]string, len(values))
 	for _, v := range values {
-		out[v] = true
+		out[v] = v
 	}
 	return out
 }
 
-// diffInto — расхождение в ОБЕ стороны. Одностороннее сравнение (включение)
-// молчало бы на строке, которой в литерале нет: она даёт правилу референт, по
-// которому оно резолвится, а проекция — нет.
-func diffInto(missing, extra *[]string, kind string, want, got map[string]bool) {
-	for k := range want {
-		if !got[k] {
-			*missing = append(*missing, kind+" "+k)
+func keysOfResources(rows []catalog.ResourceRow) map[string]string {
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[resourceKey(r)] = resourceIdentity(r)
+	}
+	return out
+}
+
+func keysOfVerbs(rows []catalog.VerbRow) map[string]string {
+	out := make(map[string]string, len(rows))
+	for _, v := range rows {
+		out[verbKey(v)] = verbIdentity(v)
+	}
+	return out
+}
+
+// identitiesOf — множество ИДЕНТИЧНОСТЕЙ, по которым ищется свидетельство снятия.
+func identitiesOf(keyed map[string]string) map[string]bool {
+	out := make(map[string]bool, len(keyed))
+	for _, identity := range keyed {
+		out[identity] = true
+	}
+	return out
+}
+
+// diffInto — расхождение в ОБЕ стороны, с ТРЕМЯ исходами у пропавшей строки.
+//
+// Сравнение остаётся двусторонним: одностороннее (включение) молчало бы на
+// строке, которой в литерале нет, — а она даёт правилу референт, по которому оно
+// резолвится, при том что проекция такой строки не производит.
+//
+// Новое здесь — разбор той половины, где живых строк МЕНЬШЕ. У пропавшей строки
+// исходов два, и они противоположны по способу починки:
+//
+//	есть СНЯТАЯ строка той же идентичности   решение оператора → WithdrawnRows,
+//	                                         старт продолжается
+//	строки нет НИ ЖИВОЙ, НИ СНЯТОЙ           посев не доехал → MissingRows,
+//	                                         старт отказан
+//
+// Свидетельство действует ТОЛЬКО в эту сторону. Живая строка вне литерала
+// остаётся отказом при любом снятом множестве: снятие сужает доступ, а лишняя
+// живая строка его расширяет, и расширять каталог за пределы того, что знает
+// образ, доставка оператора не вправе.
+func diffInto(c *CatalogParityCensus, kind string, want, got map[string]string, retiredIDs map[string]bool) {
+	for k, identity := range want {
+		if _, live := got[k]; live {
+			continue
 		}
+		if retiredIDs[identity] {
+			c.WithdrawnRows = append(c.WithdrawnRows, kind+" "+k)
+			continue
+		}
+		c.MissingRows = append(c.MissingRows, kind+" "+k)
 	}
 	for k := range got {
-		if !want[k] {
-			*extra = append(*extra, kind+" "+k)
+		if _, declared := want[k]; !declared {
+			c.ExtraRows = append(c.ExtraRows, kind+" "+k)
 		}
 	}
 }

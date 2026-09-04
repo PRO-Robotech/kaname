@@ -37,12 +37,22 @@
 //
 // # Что этот набор НЕ утверждает
 //
-// Он ничего не говорит о том, ЧЕМ страж судит: опорная сторона у него сегодня —
-// Go-литерал, и это предмет §2.7 той же приёмки (задача #1861 целиком). Переезд
-// опорной стороны меняет производителя входа этого набора — тогда `LiteralRows`
-// здесь заменяется на новый источник, а сами утверждения переживают переезд:
-// они про способность стража отказать и назвать строку, а не про то, откуда он
-// берёт «что должно существовать».
+// Он ничего не говорит о том, ОТКУДА берётся опорная сторона: сегодня это
+// перечень, порождённый сборкой из манифестов дерева (`authzmap` порождается из
+// `services/*/manifest.yaml`). Смени источник — производитель входа этого набора
+// сменится вместе с ним (`LiteralRows` заменится на новый), а утверждения
+// переживут переезд: они про способность стража отказать, назвать строку и
+// отличить снятое от непроехавшего, а не про то, кто написал «что должно
+// существовать».
+//
+// # Что набор УТВЕРЖДАЕТ после #1861
+//
+// Опорная сторона судит как ВЕРХНЯЯ ГРАНИЦА, а не как равенство: живых строк
+// вправе быть МЕНЬШЕ, если о пропавшей есть СНЯТАЯ строка. Поэтому у каждой
+// инъекции теперь две половины входа — живая и снятая, — и снятое множество
+// подаётся ВСЕГДА, в том числе пустым: строка, о снятии которой свидетельства
+// нет, обязана остаться расхождением, иначе послабление накрыло бы и
+// непроехавший посев.
 package seed_test
 
 import (
@@ -65,9 +75,14 @@ import (
 // чтением. Второй запрос об одном предмете разошёлся бы с первым молча, поэтому
 // «обращений ровно одно» утверждается здесь, где это стоит одной строки.
 type stubRowSource struct {
-	rows  catalog.Rows
-	err   error
-	calls int
+	rows catalog.Rows
+	err  error
+	// retired — СНЯТОЕ множество. Пустое по умолчанию: строка, о снятии которой
+	// свидетельства нет, обязана оставаться расхождением.
+	retired      catalog.Rows
+	retiredErr   error
+	calls        int
+	retiredCalls int
 }
 
 func (s *stubRowSource) ReadLiveCatalog(_ context.Context) (catalog.Rows, error) {
@@ -76,6 +91,14 @@ func (s *stubRowSource) ReadLiveCatalog(_ context.Context) (catalog.Rows, error)
 		return catalog.Rows{}, s.err
 	}
 	return s.rows, nil
+}
+
+func (s *stubRowSource) ReadRetiredCatalog(_ context.Context) (catalog.Rows, error) {
+	s.retiredCalls++
+	if s.retiredErr != nil {
+		return catalog.Rows{}, s.retiredErr
+	}
+	return s.retired, nil
 }
 
 // errPortRefused — отказ порта. Собственный вид, чтобы утверждать оборачивание,
@@ -104,6 +127,15 @@ type parityInjection struct {
 	// той строке, которой в литерале нет, — а она даёт правилу референт.
 	wantMissing int
 	wantExtra   int
+	// retire — СНЯТОЕ множество, собранное из того же производителя входа. nil
+	// означает «снятого нет вовсе»: тогда пропавшая живая строка обязана
+	// остаться расхождением, а не сойти за снятую.
+	retire func(catalog.Rows) catalog.Rows
+	// wantWithdrawn — сколько строк литерала ожидается ЗАКОННО снятыми.
+	// Утверждается отдельно от расхождения: «страж промолчал» и «страж промолчал
+	// и назвал, что именно снято» — разные вещи, и первая зеленеет на страже,
+	// который перестал смотреть вовсе.
+	wantWithdrawn int
 }
 
 // TestCatalogParityGuardRefusesAndNamesTheRow — набор инъекций стража паритета
@@ -222,6 +254,95 @@ func TestCatalogParityGuardRefusesAndNamesTheRow(t *testing.T) {
 			wantInText:    []string{"каталог модуля пуст", "0/0/0"},
 			wantNotInText: []string{"разошлись"},
 		},
+		{
+			// ПРЕДМЕТ #1861. Строка СНЯТА решением — живой её нет, снятая есть.
+			// Это не расхождение: снятие и есть та операция, ради которой у
+			// каждой из трёх таблиц заведены `retired_at` / `retired_reason` /
+			// `live`. Отказ здесь означал бы, что снять строку нельзя иначе как
+			// пересборкой образа, — то есть опорой стража остаётся то, что он
+			// обязан пережить.
+			name: "строка глагола СНЯТА — страж молчит и называет снятое",
+			mutate: func(r catalog.Rows) catalog.Rows {
+				r.Verbs = dropVerbRow(r.Verbs, dropVerb)
+				return r
+			},
+			retire: func(full catalog.Rows) catalog.Rows {
+				return catalog.Rows{Verbs: pickVerbRow(full.Verbs, dropVerb)}
+			},
+			wantErr:       false,
+			wantWithdrawn: 1,
+		},
+		{
+			// ТА ЖЕ ОПЕРАЦИЯ НА РЕСУРСЕ, вместе с его действиями: ключ живости
+			// `catalog_verb_resource_live_fk` не допускает живого действия у
+			// снятого ресурса, поэтому снятие приходит связкой, и проба обязана
+			// подавать его связкой — иначе она утверждала бы о состоянии,
+			// которого база не производит.
+			name: "строка ресурса СНЯТА вместе со своими действиями — страж молчит",
+			mutate: func(r catalog.Rows) catalog.Rows {
+				r.Resources = dropResourceRow(r.Resources, dropResource)
+				r.Verbs = dropVerbsOfResource(r.Verbs, dropResource)
+				return r
+			},
+			retire: func(full catalog.Rows) catalog.Rows {
+				return catalog.Rows{
+					Resources: pickResourceRow(full.Resources, dropResource),
+					Verbs:     pickVerbsOfResource(full.Verbs, dropResource),
+				}
+			},
+			wantErr:       false,
+			wantWithdrawn: 1 + verbsOfResource(full, dropResource),
+		},
+		{
+			// СВИДЕТЕЛЬСТВО ОБЯЗАТЕЛЬНО. Та же пропавшая строка БЕЗ снятой —
+			// по-прежнему расхождение: «строка снята решением» и «строка не
+			// доехала вовсе» снаружи выглядят одинаково, и различает их ровно
+			// наличие снятой строки.
+			name: "строка глагола пропала БЕЗ снятой — расхождение остаётся",
+			mutate: func(r catalog.Rows) catalog.Rows {
+				r.Verbs = dropVerbRow(r.Verbs, dropVerb)
+				return r
+			},
+			retire:      nil,
+			wantErr:     true,
+			wantInText:  []string{"глагол " + dropVerb.key, "нет строкой"},
+			wantMissing: 1,
+			wantExtra:   0,
+		},
+		{
+			// СНЯТИЕ НЕ ПРИКРЫВАЕТ ЛИШНЮЮ СТРОКУ. Свидетельство о снятии
+			// действует только в ту сторону, где живых строк МЕНЬШЕ. Живая
+			// строка вне литерала остаётся отказом при любом снятом множестве:
+			// доставка оператора не вправе расширить каталог за пределы того,
+			// что знает образ.
+			name: "лишняя живая строка при НЕПУСТОМ снятом множестве — отказ",
+			mutate: func(r catalog.Rows) catalog.Rows {
+				r.Resources = append(append([]catalog.ResourceRow{}, r.Resources...),
+					catalog.ResourceRow{Module: "vpc", Resource: "nonesuch"})
+				return r
+			},
+			retire: func(full catalog.Rows) catalog.Rows {
+				return catalog.Rows{Verbs: pickVerbRow(full.Verbs, dropVerb)}
+			},
+			wantErr:    true,
+			wantInText: []string{"нет в литерале", "ресурс vpc.nonesuch"},
+			wantExtra:  1,
+		},
+		{
+			// ВЕСЬ КАТАЛОГ СНЯТ — тоже отказ, но ДРУГОЙ. Пустое живое множество
+			// отвергло бы все правила разом, поэтому старт отказан в обоих
+			// случаях; чинятся они противоположно, и текст обязан их различать.
+			name:   "весь каталог снят — отказ называет снятие, а не непринятые миграции",
+			mutate: func(catalog.Rows) catalog.Rows { return catalog.Rows{} },
+			retire: func(full catalog.Rows) catalog.Rows { return full },
+			// Снятыми оказываются ВСЕ строки литерала. Число не выписано, а
+			// выведено из того же производителя входа: выписанное разошлось бы
+			// с ним молча при первой правке каталога.
+			wantWithdrawn: len(full.Modules) + len(full.Resources) + len(full.Verbs),
+			wantErr:       true,
+			wantInText:    []string{"снят"},
+			wantNotInText: []string{"миграц"},
+		},
 	}
 
 	for _, tc := range cases {
@@ -230,7 +351,11 @@ func TestCatalogParityGuardRefusesAndNamesTheRow(t *testing.T) {
 			if tc.mutate != nil {
 				rows = tc.mutate(rows)
 			}
-			src := &stubRowSource{rows: rows}
+			var retired catalog.Rows
+			if tc.retire != nil {
+				retired = tc.retire(cloneRows(full))
+			}
+			src := &stubRowSource{rows: rows, retired: retired}
 			census, err := seed.AssertCatalogParity(context.Background(), src)
 
 			// Обращение к порту РОВНО ОДНО: прочитанное отдаётся наружу, чтобы
@@ -239,11 +364,27 @@ func TestCatalogParityGuardRefusesAndNamesTheRow(t *testing.T) {
 				t.Errorf("обращений к порту %d, ожидалось 1 — второй запрос об одном "+
 					"предмете разошёлся бы с первым молча", src.calls)
 			}
+			// Снятое спрашивается РОВНО ОДИН раз и спрашивается ВСЕГДА: страж,
+			// не сходивший за снятым, отличить «снято решением» от «не доехало»
+			// не может ничем, а молчит он при этом так же.
+			if src.retiredCalls != 1 {
+				t.Errorf("обращений за снятым множеством %d, ожидалось 1 — без него "+
+					"«снято решением» неотличимо от «строка не доехала»", src.retiredCalls)
+			}
 			// Перепись печатается ВСЕГДА, независимо от исхода.
-			t.Logf("перепись стража: литерал %d/%d/%d, строки %d/%d/%d, нет строкой %d, нет в литерале %d",
+			t.Logf("перепись стража: литерал %d/%d/%d, строки %d/%d/%d, снятые %d/%d/%d, "+
+				"нет строкой %d, снято решением %d, нет в литерале %d",
 				census.LiteralModules, census.LiteralResources, census.LiteralVerbs,
 				census.RowModules, census.RowResources, census.RowVerbs,
-				len(census.MissingRows), len(census.ExtraRows))
+				census.RetiredModules, census.RetiredResources, census.RetiredVerbs,
+				len(census.MissingRows), len(census.WithdrawnRows), len(census.ExtraRows))
+
+			if len(census.WithdrawnRows) != tc.wantWithdrawn {
+				t.Errorf("снятых строк %d, ожидалось %d: %v — «страж промолчал» и «страж "+
+					"промолчал и назвал, ЧТО снято» разные вещи, и первое зеленеет на страже, "+
+					"переставшем смотреть вовсе",
+					len(census.WithdrawnRows), tc.wantWithdrawn, census.WithdrawnRows)
+			}
 
 			if !tc.wantErr {
 				if err != nil {
@@ -415,4 +556,96 @@ func dropString(in []string, want string) []string {
 		panic(fmt.Sprintf("инъекция не сняла модуль %q (снято %d)", want, dropped))
 	}
 	return out
+}
+
+// ── вспомогательное: сборка СНЯТОГО множества из того же производителя ───────
+//
+// Снятое собирается ВЫБОРКОЙ из полного множества, а не выписывается: выписанная
+// строка разошлась бы с производителем молча при первой правке каталога, и проба
+// сверяла бы свою копию вместо предмета. Каждая выборка падает на пустом
+// результате — инъекция, ничего не выбравшая, подала бы стражу пустое снятое
+// множество и утверждала бы совсем другое.
+
+func pickVerbRow(in []catalog.VerbRow, pick verbPick) []catalog.VerbRow {
+	for _, v := range in {
+		if verbTriple(v) == pick.triple && v.PerObject == pick.perObject {
+			return []catalog.VerbRow{v}
+		}
+	}
+	panic(fmt.Sprintf("строка глагола %q в производителе входа не найдена", pick.key))
+}
+
+func pickResourceRow(in []catalog.ResourceRow, dotted string) []catalog.ResourceRow {
+	for _, r := range in {
+		if r.Module+"."+r.Resource == dotted {
+			return []catalog.ResourceRow{r}
+		}
+	}
+	panic(fmt.Sprintf("строка ресурса %q в производителе входа не найдена", dotted))
+}
+
+func pickVerbsOfResource(in []catalog.VerbRow, dotted string) []catalog.VerbRow {
+	out := make([]catalog.VerbRow, 0, 8)
+	for _, v := range in {
+		if v.Module+"."+v.Resource == dotted {
+			out = append(out, v)
+		}
+	}
+	if len(out) == 0 {
+		panic(fmt.Sprintf("у ресурса %q в производителе входа ни одного действия", dotted))
+	}
+	return out
+}
+
+func dropVerbsOfResource(in []catalog.VerbRow, dotted string) []catalog.VerbRow {
+	out := make([]catalog.VerbRow, 0, len(in))
+	dropped := 0
+	for _, v := range in {
+		if v.Module+"."+v.Resource == dotted {
+			dropped++
+			continue
+		}
+		out = append(out, v)
+	}
+	if dropped == 0 {
+		panic(fmt.Sprintf("инъекция не сняла ни одного действия ресурса %q", dotted))
+	}
+	return out
+}
+
+func verbsOfResource(r catalog.Rows, dotted string) int {
+	return len(pickVerbsOfResource(r.Verbs, dotted))
+}
+
+// TestCatalogParityGuardRefusesWhenTheRetiredSideCannotBeRead — НЕПРОЧИТАННОЕ
+// снятое множество не есть «ничего не снято».
+//
+// Порт снятого отказал — значит вопрос «строка снята решением или не доехала
+// вовсе?» остался без ответа, и пропускать старт на этом основании нельзя:
+// отсутствие ответа не есть «да». Fail-closed здесь тот же, что у самого стража,
+// и живая половина сверки его не заменяет: она при отказавшем снятом порте
+// по-прежнему выглядит расхождением, то есть отказ был бы ВЕРНЫМ ПО ИСХОДУ и
+// ложным по предмету — оператор пошёл бы чинить каталог вместо базы.
+func TestCatalogParityGuardRefusesWhenTheRetiredSideCannotBeRead(t *testing.T) {
+	full := seed.LiteralRows()
+	if len(full.Resources) == 0 {
+		t.Fatalf("производитель входа пуст — проба беспредметна")
+	}
+
+	src := &stubRowSource{rows: cloneRows(full), retiredErr: errPortRefused}
+	census, err := seed.AssertCatalogParity(context.Background(), src)
+	if err == nil {
+		t.Fatalf("страж молчит при отказавшем порте СНЯТОГО — непрочитанное снятое "+
+			"множество принято за «ничего не снято»; перепись снятого %d/%d/%d",
+			census.RetiredModules, census.RetiredResources, census.RetiredVerbs)
+	}
+	if !errors.Is(err, errPortRefused) {
+		t.Errorf("отказ порта снятого не обёрнут: %v — вызывающий не отличит недоступную "+
+			"базу от расхождения каталога", err)
+	}
+	if census.LiteralModules == 0 || census.LiteralResources == 0 || census.LiteralVerbs == 0 {
+		t.Errorf("перепись опорной стороны не заполнена (%d/%d/%d) — «ноль расхождений» "+
+			"неотличимо от «ноль прочитанного»",
+			census.LiteralModules, census.LiteralResources, census.LiteralVerbs)
+	}
 }

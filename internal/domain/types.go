@@ -65,7 +65,10 @@ type (
 
 	// SubjectType — enum: user|service_account|group.
 	SubjectType string
-	// ResourceType — enum (whitelist). Validated through `validResourceTypes`.
+	// ResourceType — ЯКОРЬ ОБЛАСТИ привязки: один из трёх ярусов иерархии
+	// (`cluster`/`account`/`project`). Вокабуляр объявлен ОДИН раз —
+	// `scopeAnchorTiers` в access_binding_scope.go, — и `Validate()` судит по
+	// нему. Пообъектный тип якорем не бывает: он живёт на оси `target` (F8).
 	ResourceType string
 )
 
@@ -75,39 +78,6 @@ const (
 	SubjectTypeServiceAccount SubjectType = "service_account"
 	SubjectTypeGroup          SubjectType = "group"
 )
-
-// validResourceTypes — fixed enum. Extended via migrations.
-//
-// `cluster` is a singleton scope (resource_id MUST equal
-// `domain.ClusterSingletonID` = "cluster_kacho_root"); see
-// AccessBinding.Validate which enforces the singleton invariant. Unified into
-// AccessBinding (Item #5) — replaces the standalone cluster_admin_grants
-// path for new grants while migration 0004 backfills history.
-var validResourceTypes = map[ResourceType]struct{}{
-	"cluster":                   {},
-	"account":                   {},
-	"project":                   {},
-	"vpc_network":               {},
-	"vpc_subnet":                {},
-	"vpc_address":               {},
-	"vpc_route_table":           {},
-	"vpc_security_group":        {},
-	"vpc_gateway":               {},
-	"vpc_network_interface":     {},
-	"vpc_cidr_group":            {},
-	"compute_instance":          {},
-	"compute_guest_access_key":  {},
-	"compute_placement_group":   {},
-	"loadbalancer_nlb":          {},
-	"loadbalancer_target_group": {},
-	"iam_account":               {},
-	"iam_project":               {},
-	"iam_user":                  {},
-	"iam_service_account":       {},
-	"iam_group":                 {},
-	"iam_role":                  {},
-	"*":                         {},
-}
 
 // Regex / limits — centralised so domain.Validate and the DB CHECKs agree.
 //
@@ -315,9 +285,13 @@ func (s SubjectType) Validate() error {
 	}
 }
 
-// Validate — ResourceType — whitelist check.
+// Validate — ResourceType — ярус иерархии, и только он.
+//
+// Судит ЕДИНСТВЕННОЕ объявление вокабуляра якоря (`scopeAnchorTiers`), а не своя
+// копия: копия здесь была, разошлась с ним на 20 записей и принимала пообъектные
+// типы, которых не производит ни один путь записи. Разбор — у самого объявления.
 func (r ResourceType) Validate() error {
-	if _, ok := validResourceTypes[r]; ok {
+	if IsScopeAnchorKind(string(r)) {
 		return nil
 	}
 	return fmt.Errorf("Illegal argument resource_type %q", string(r))

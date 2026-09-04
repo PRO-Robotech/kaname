@@ -128,7 +128,13 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	// so a malformed rule surfaces its specific error (A-05/A-10/A-13) rather than a
 	// misleading compiled-cap message. Only a well-formed rule set is then compiled;
 	// the compiler enforces the ≤1024 compiled-cap (A-12).
-	if verr := r.Rules.Validate(r.IsSystem); verr != nil {
+	// Набор модулей — ЖИВЫЕ строки каталога, а не литерал: снятый модуль
+	// обязан перестать приниматься без перезапуска службы, а заведённый строкой
+	// — начать приниматься без релиза (#1927). Снимок один и тот же, что у
+	// проекции глаголов ниже, поэтому обе стороны правила судятся согласованным
+	// множеством, а не двумя моментами времени.
+	facts := u.cat.Facts()
+	if verr := r.Rules.Validate(domain.PolicyOfRole(r.IsSystem, r.OwnerModule), facts); verr != nil {
 		return nil, shared.MapValidationErr(verr)
 	}
 	// Grantable-token gate: the resource segment must be a PUBLISHED
@@ -139,7 +145,13 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	// AFTER Rule.Validate so the wildcard/XOR/feed errors surface first (they are
 	// more specific), and BEFORE CompileRules so the compiled projection never
 	// carries an ungrantable token.
-	if verr := validateRuleCatalog(r.Rules, r.IsSystem); verr != nil {
+	// Источник — ТОТ ЖЕ снимок живых строк, которым выше судился сегмент МОДУЛЯ
+	// и ниже строится проекция глаголов (#1993): обе стороны правила обязаны
+	// судиться согласованным множеством, а не двумя моментами времени и не двумя
+	// словарями. Прежде здесь спрашивалась таблица, ПОРОЖДЁННАЯ СБОРКОЙ, и тип,
+	// заведённый применением манифеста в работающем процессе, отвергался ею —
+	// первое звено цепи «клиент завёл тип манифестом → получил права».
+	if verr := validateRuleCatalog(r.Rules, r.IsSystem, facts); verr != nil {
 		return nil, shared.MapValidationErr(verr)
 	}
 	compiled, cerr := domain.CompileRules(r.Rules)
@@ -147,7 +159,7 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 		return nil, shared.MapValidationErr(cerr)
 	}
 	r.Permissions = compiled
-	if err := r.Validate(); err != nil {
+	if err := r.Validate(facts); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
 
@@ -280,6 +292,9 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 	// async at-least-once backstop, driven by the co-committed reconcile event.
 	u.reconcileObject(ctx, "iam.role", string(created.ID))
 
+	// Эхо мутации проецируется тем же набором, что и чтение: иначе `Create`
+	// вернул бы превью, собранное другим источником, чем последующий `Get`.
+	created.TypeVerbs = u.cat.Facts().RolePreviewLookup()
 	return marshalRole(created)
 }
 

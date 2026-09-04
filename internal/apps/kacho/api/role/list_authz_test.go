@@ -45,6 +45,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -67,6 +68,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // ───────────── fake repo (Roles().List only) ─────────────
@@ -74,10 +76,51 @@ import (
 type roleListFakeRepo struct {
 	roles      map[string]domain.Role
 	lastFilter reporole.ListFilter
+
+	// projected — строки проекции, которую читает вердикт: ключ
+	// «роль|точечный-тип|глагол». Дублёр отвечает ИЗ СВОЕГО НАБОРА, а не
+	// «неразрешённых нет»: заглушка, возвращающая пустое, была бы
+	// снисходительнее продукта и молча зеленила бы пробы деградации.
+	projected map[string]bool
+	// segCalls — сколько раз спрошена целость. Единица стоимости страницы.
+	segCalls int
+	// segFail — отказ выборки целости (полоса fail-closed).
+	segFail error
+	// wdCalls — сколько раз спрошена ведомость отобранного. Единица стоимости
+	// страницы: вопрос обязан быть ОДИН, а не по вопросу на роль.
+	wdCalls int
+	// wdFail — отказ выборки ведомости (полоса fail-closed).
+	wdFail error
+	// withdrawn — что дублёр знает об отобранном, по ролям.
+	withdrawn map[string][]domain.WithdrawnGrant
+	// psCalls — сколько раз спрошена ведомость ВЫРЕЗАННОГО. Та же единица
+	// стоимости, что у соседа: один вопрос на страницу, а не на роль.
+	psCalls int
+	// psFail — отказ выборки ведомости вырезанного (полоса fail-closed).
+	psFail error
+	// pruned — что дублёр знает о вырезанном, по ролям.
+	pruned map[string][]domain.PrunedSelectorType
+
+	// ─── ручки ИНЪЕКЦИИ (`ledger_read_cost_injection_test.go`) ───
+	//
+	// Ими вносится дефект, от которого пробы стоимости и fail-closed обязаны
+	// краснеть. Держать их у дублёра, а не у пробы, приходится потому, что
+	// наблюдаемое у обоих свойств — ПОВЕДЕНИЕ ЧИТАТЕЛЯ, а подменить читателя
+	// прод-кода проба не может, не тронув прод (ban #13).
+	//
+	// В штатных прогонах обе — нулевые, поэтому дублёр остаётся тем же.
+
+	// ledgerPerRole — считать вопрос ПО РОЛИ, как считал бы поролевой читатель.
+	// Наблюдаемое совпадает с настоящим дефектом дословно: счётчик равен числу
+	// ролей страницы вместо единицы.
+	ledgerPerRole bool
+	// ledgerSwallow — проглотить отказ ведомости и ответить пустым, как ответил
+	// бы помощник, логирующий ошибку вместо возврата.
+	ledgerSwallow bool
 }
 
 func newRoleListFakeRepo() *roleListFakeRepo {
-	return &roleListFakeRepo{roles: map[string]domain.Role{}}
+	return &roleListFakeRepo{roles: map[string]domain.Role{}, projected: map[string]bool{}}
 }
 
 func (f *roleListFakeRepo) Reader(ctx context.Context) (kachorepo.Reader, error) {
@@ -116,6 +159,81 @@ func (a *roleListReader) GetWithVersion(ctx context.Context, id domain.RoleID) (
 }
 func (a *roleListReader) ListAssignable(ctx context.Context, rt, rid string, f reporole.ListFilter) ([]domain.Role, string, error) {
 	return nil, "", stderrors.New("ListAssignable not used in list tests")
+}
+
+// UnresolvedSegments отвечает из набора проекций дублёра — по одному вопросу на
+// СТРАНИЦУ, как продукт. Пустой набор здесь означает «ни один сегмент не
+// спроецирован», а не «всё в порядке»: ответ «неразрешённых нет» на непустом
+// входе делал бы дублёра снисходительнее продукта.
+func (a *roleListReader) UnresolvedSegments(ctx context.Context, declared []domain.RoleSegment) (map[domain.RoleID][]domain.RoleSegment, error) {
+	a.p.segCalls++
+	if a.p.segFail != nil {
+		return nil, a.p.segFail
+	}
+	out := map[domain.RoleID][]domain.RoleSegment{}
+	for _, d := range declared {
+		if a.p.matches(d) {
+			continue
+		}
+		out[d.RoleID] = append(out[d.RoleID], d)
+	}
+	return out, nil
+}
+
+// WithdrawnGrants отвечает из набора дублёра — ОДНИМ вопросом на страницу, как
+// продукт. Пустой ответ здесь означает «у этих ролей отобранного нет», и это
+// законное состояние продукта, а не снисходительность: ведомость наполняется
+// только снятием строки каталога, которого в этих пробах не происходит.
+func (a *roleListReader) WithdrawnGrants(ctx context.Context, ids []domain.RoleID) (map[domain.RoleID][]domain.WithdrawnGrant, error) {
+	a.p.wdCalls++
+	if a.p.ledgerPerRole {
+		a.p.wdCalls += len(ids) - 1
+	}
+	if a.p.wdFail != nil && !a.p.ledgerSwallow {
+		return nil, a.p.wdFail
+	}
+	out := map[domain.RoleID][]domain.WithdrawnGrant{}
+	for _, id := range ids {
+		if g, ok := a.p.withdrawn[string(id)]; ok {
+			out[id] = g
+		}
+	}
+	return out, nil
+}
+
+// PrunedSelectorTypes отвечает из набора дублёра — ОДНИМ вопросом на страницу,
+// как продукт. Пустой ответ означает «у этих ролей вырезанного нет», и это
+// законное состояние: ведомость наполняется только снятием строки каталога,
+// которого в этих пробах не происходит.
+func (a *roleListReader) PrunedSelectorTypes(ctx context.Context, ids []domain.RoleID) (map[domain.RoleID][]domain.PrunedSelectorType, error) {
+	a.p.psCalls++
+	if a.p.ledgerPerRole {
+		a.p.psCalls += len(ids) - 1
+	}
+	if a.p.psFail != nil && !a.p.ledgerSwallow {
+		return nil, a.p.psFail
+	}
+	out := map[domain.RoleID][]domain.PrunedSelectorType{}
+	for _, id := range ids {
+		if g, ok := a.p.pruned[string(id)]; ok {
+			out[id] = g
+		}
+	}
+	return out, nil
+}
+
+// matches — есть ли у роли строка проекции под этот сегмент. Якорь (глагол не
+// назван) удовлетворяется ЛЮБОЙ строкой своего типа.
+func (f *roleListFakeRepo) matches(d domain.RoleSegment) bool {
+	if d.Verb != "" {
+		return f.projected[string(d.RoleID)+"|"+d.ObjectType+"|"+d.Verb]
+	}
+	for k := range f.projected {
+		if strings.HasPrefix(k, string(d.RoleID)+"|"+d.ObjectType+"|") {
+			return true
+		}
+	}
+	return false
 }
 
 // List mirrors the pg repo's filter contract: AccountID scopes to system +
@@ -247,7 +365,7 @@ func TestListRoles_UsesViewerAndVListRelationsOnIamRole(t *testing.T) {
 	fga := newRoleFGAStub()
 	fga.set("user:usr-u1", []string{"rol-c1"})
 
-	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	_, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, fga.relations["viewer"], 1,
@@ -267,7 +385,7 @@ func TestListRoles_D40_SystemRolesAlwaysVisible_CustomFiltered(t *testing.T) {
 	seedCustomRole(repo, "rol-c1", "acc-A000000000000000")
 
 	fga := newRoleFGAStub() // empty grant-set for the caller
-	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 	require.NoError(t, err)
@@ -287,7 +405,7 @@ func TestListRoles_D41_D43_CustomByGrant_Union(t *testing.T) {
 	fga := newRoleFGAStub()
 	fga.set("user:usr-u1", []string{"rol-c1", "rol-c2"})
 
-	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"rol-sys1", "rol-c1", "rol-c2"}, roleIDs(out),
@@ -300,7 +418,7 @@ func TestListRoles_D44_NoLeak_UngrantedCustomAbsent(t *testing.T) {
 	seedCustomRole(repo, "rol-cZ", "acc-A000000000000000") // foreign / ungranted
 
 	fga := newRoleFGAStub() // no grant
-	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 	require.NoError(t, err)
@@ -319,7 +437,7 @@ func TestListRoles_185_AccountScope_ForeignCustomHidden(t *testing.T) {
 	fga := newRoleFGAStub()
 	fga.set("user:usr-u1", []string{"rol-cA", "rol-cB"}) // even if the model would allow both
 
-	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100, AccountID: domain.AccountID("acc-A000000000000000")})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"rol-sys1", "rol-cA"}, roleIDs(out),
@@ -338,7 +456,7 @@ func TestListRoles_D47_FGAUnavailable_FailClosed(t *testing.T) {
 	fga := newRoleFGAStub()
 	fga.err = stderrors.New("relation form did not answer: connection closed")
 
-	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 	require.Error(t, err, "an unanswered question must NOT return a (degraded) list")
 	require.Empty(t, out)
@@ -352,7 +470,7 @@ func TestListRoles_D47_NilFGA_FailClosed(t *testing.T) {
 	repo := newRoleListFakeRepo()
 	seedCustomRole(repo, "rol-c1", "acc-A000000000000000")
 
-	uc := NewListRolesUseCase(repo) // NO WithRelationStore
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()) // NO WithRelationStore
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 	require.Error(t, err)
 	require.Empty(t, out)
@@ -417,4 +535,13 @@ type roleUnrestrictedVisibility struct{}
 
 func (roleUnrestrictedVisibility) ScopeOf(_ context.Context, _ visibility.Subject) (visibility.Scope, error) {
 	return visibility.Scope{Unrestricted: true, GrantedObjects: map[string][]string{}}, nil
+}
+
+// Lifecycles — дублёр: жизненное состояние ролей этот путь не спрашивает.
+// Пустая карта означает «не вычислено», и вызывающий оставляет нулевое
+// состояние — ровно то, что дублёр обязан отдавать о величине, которой не
+// владеет.
+func (*roleListReader) Lifecycles(_ context.Context, _ []domain.RoleID) (
+	map[domain.RoleID]domain.RoleLifecycle, error) {
+	return nil, nil
 }

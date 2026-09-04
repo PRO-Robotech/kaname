@@ -194,3 +194,32 @@ func TestInvite_AbsentRole_IsRefusedWithTheSameText(t *testing.T) {
 // «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
 // ненаречённое.
 func (r *inviteRoleReader) Visibility() visibility.ReaderIface { return nil }
+
+// UnresolvedSegments — см. довод у соседних дублёров: отказ, а не «всё в порядке».
+// WithdrawnGrants — дублёр ОТКАЗЫВАЕТ, а не отвечает «отобранного нет»:
+// заглушка, возвращающая пустое, была бы снисходительнее продукта. Ведомость
+// в этих пробах не предмет, поэтому её путь исполняться не должен — а если
+// исполнится, проба упадёт.
+func (inviteRoleReaderRoles) WithdrawnGrants(context.Context, []domain.RoleID) (map[domain.RoleID][]domain.WithdrawnGrant, error) {
+	return nil, stderrors.New("WithdrawnGrants не предмет этих проб")
+}
+
+// PrunedSelectorTypes — дублёр ОТКАЗЫВАЕТ по тому же доводу, что и сосед выше:
+// заглушка, возвращающая пустое, была бы снисходительнее продукта и молча
+// прятала бы лишний вопрос к ведомости.
+func (inviteRoleReaderRoles) PrunedSelectorTypes(context.Context, []domain.RoleID) (map[domain.RoleID][]domain.PrunedSelectorType, error) {
+	return nil, stderrors.New("PrunedSelectorTypes не предмет этих проб")
+}
+
+func (inviteRoleReaderRoles) UnresolvedSegments(context.Context, []domain.RoleSegment) (map[domain.RoleID][]domain.RoleSegment, error) {
+	return nil, stderrors.New("UnresolvedSegments не предмет этих проб")
+}
+
+// Lifecycles — дублёр: жизненное состояние ролей этот путь не спрашивает.
+// Пустая карта означает «не вычислено», и вызывающий оставляет нулевое
+// состояние — ровно то, что дублёр обязан отдавать о величине, которой не
+// владеет.
+func (inviteRoleReaderRoles) Lifecycles(_ context.Context, _ []domain.RoleID) (
+	map[domain.RoleID]domain.RoleLifecycle, error) {
+	return nil, nil
+}

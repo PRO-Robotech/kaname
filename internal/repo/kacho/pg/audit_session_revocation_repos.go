@@ -50,9 +50,21 @@ func (r *AuditOutboxRepo) Get(ctx context.Context, id domain.AuditEventID) (doma
 }
 
 // InsertTx — enqueue audit event atomically с domain mutation (caller controls TX).
+// InsertTx — единственный путь записи строки аудита в ЧУЖУЮ транзакцию.
+//
+// Имя таблицы КВАЛИФИЦИРОВАНО схемой намеренно. Вызывающий у этого пути теперь
+// не один: кроме арендаторских писателей его зовёт применитель каталога модуля,
+// а его собственные операторы квалифицированы полностью — он не вправе зависеть
+// от `search_path` сессии, потому что каталог есть данные ПЛАТФОРМЫ и правится
+// соединениями, настроенными по-разному. Незаквалифицированное имя давало
+// `42P01` на соединении без нужного пути поиска, то есть след применения
+// пропадал бы вместе с применением там, где сессия настроена иначе.
+//
+// Для прочих вызывающих правка — тождественная: их соединения путь поиска несут,
+// и квалификация разрешается в ту же таблицу.
 func (r *AuditOutboxRepo) InsertTx(ctx context.Context, tx pgx.Tx, e domain.AuditOutboxEntry) (domain.AuditOutboxEntry, error) {
 	const q = `
-		INSERT INTO audit_outbox (
+		INSERT INTO kacho_iam.audit_outbox (
 		    id, event_type, tenant_account_id,
 		    event_payload, status, attempts, created_at, next_attempt_at
 		) VALUES ($1, $2, $3, $4::jsonb, COALESCE(NULLIF($5, ''), 'pending'),

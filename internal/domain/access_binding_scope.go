@@ -79,36 +79,59 @@ const (
 	ScopeTypeProjectDotted = "iam.project"
 )
 
+// scopeAnchorTiers — ЕДИНСТВЕННОЕ объявление вокабуляра ЯКОРЯ: голый ярус,
+// которым он хранится, → его проволочная (точечная) форма. Читают ОБА перевода
+// ниже и `ResourceType.Validate()`; второго перечня ярусов в дереве не заводится.
+//
+// Здесь стоял только перевод, а перечень пригодных якорей вела ВТОРАЯ карта —
+// `validResourceTypes` в types.go. Две карты об одном предмете разошлись: та
+// несла 23 записи против трёх, и 20 из них назвать якорем не мог ни один путь
+// записи (публичный Create приводит `scopeType` через `ScopeTypeFromDotted` —
+// закрытый набор из трёх; остальные писатели проставляют ярус литералом). То
+// есть проверка выглядела сужением, ничего не сужая, и молча расширилась бы в
+// день появления вызывающего без явной области. Снята вместе со своим предметом,
+// а не обойдена; предикат — `scope_anchor_vocabulary_test.go` (#1092).
+var scopeAnchorTiers = map[string]string{
+	"cluster": ScopeTypeClusterDotted,
+	"account": ScopeTypeAccountDotted,
+	"project": ScopeTypeProjectDotted,
+}
+
+// scopeAnchorByDotted — обратный указатель, ВЫВЕДЕННЫЙ из того же объявления:
+// выписанный вручную разошёлся бы с прямым, и разошёлся бы молча.
+var scopeAnchorByDotted = func() map[string]string {
+	m := make(map[string]string, len(scopeAnchorTiers))
+	for bare, dotted := range scopeAnchorTiers {
+		m[dotted] = bare
+	}
+	return m
+}()
+
+// IsScopeAnchorKind reports whether a bare within-service kind may anchor an
+// AccessBinding. Only the three hierarchy tiers can; a per-object type names an
+// object UNDER the anchor and belongs to the `target` axis (F8), whose vocabulary
+// is the materialization feed (`ValidTargetType`).
+func IsScopeAnchorKind(bare string) bool {
+	_, ok := scopeAnchorTiers[bare]
+	return ok
+}
+
 // ScopeTypeToDotted maps the bare within-service anchor kind to the dotted wire
 // scopeType. An unrecognized kind is returned unchanged (defensive — a binding
 // anchor is always one of the three tiers).
 func ScopeTypeToDotted(bare string) string {
-	switch bare {
-	case "cluster":
-		return ScopeTypeClusterDotted
-	case "account":
-		return ScopeTypeAccountDotted
-	case "project":
-		return ScopeTypeProjectDotted
-	default:
-		return bare
+	if dotted, ok := scopeAnchorTiers[bare]; ok {
+		return dotted
 	}
+	return bare
 }
 
 // ScopeTypeFromDotted maps the dotted wire scopeType to the bare within-service
 // anchor kind. ok=false for any value outside the closed three-tier set (empty,
 // non-dotted bare, or unknown dotted) — the caller rejects it with InvalidArgument.
 func ScopeTypeFromDotted(dotted string) (bare string, ok bool) {
-	switch dotted {
-	case ScopeTypeClusterDotted:
-		return "cluster", true
-	case ScopeTypeAccountDotted:
-		return "account", true
-	case ScopeTypeProjectDotted:
-		return "project", true
-	default:
-		return "", false
-	}
+	bare, ok = scopeAnchorByDotted[dotted]
+	return bare, ok
 }
 
 // DeriveFromResourceType — best-effort fallback for code paths that have

@@ -42,7 +42,7 @@ func TestRole_IAM_1_15_DtoCatalogFields(t *testing.T) {
 			ID: "rol0000000000000edit", ClusterID: "cluster_kacho_root", Name: "edit",
 			Rules: domain.Rules{{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get", "list", "create", "update"}}},
 		}
-		pb, err := roleToPb(r)
+		pb, err := roleToPb(withPreviewLookup(r))
 		require.NoError(t, err)
 		assert.Equal(t, "Editor", pb.GetDisplayName())
 		assert.NotEmpty(t, pb.GetPurpose())
@@ -53,7 +53,7 @@ func TestRole_IAM_1_15_DtoCatalogFields(t *testing.T) {
 	})
 	t.Run("custom role: displayName=name, empty purpose", func(t *testing.T) {
 		r := domain.Role{ID: "rol-c000000000000000", AccountID: "acc-A000000000000000", Name: "app-deployer", Rules: f4Rules()}
-		pb, err := roleToPb(r)
+		pb, err := roleToPb(withPreviewLookup(r))
 		require.NoError(t, err)
 		assert.Equal(t, "app-deployer", pb.GetDisplayName())
 		assert.Empty(t, pb.GetPurpose())
@@ -75,7 +75,7 @@ func TestRole_IAM_1_15_ListCanonicalFirst(t *testing.T) {
 	fga := newRoleFGAStub()
 	fga.set("user:usr-1", []string{"rol0000000000000cust"}) // custom visible to caller
 
-	uc := NewListRolesUseCase(repo).WithRelationStore(fga)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(fga)
 	out, _, err := uc.Execute(ctxUser("usr-1"), reporole.ListFilter{PageSize: 100})
 	require.NoError(t, err)
 

@@ -4,7 +4,6 @@
 package bootstrap_token
 
 import (
-	"strings"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -51,17 +50,5 @@ func setupTestDB(t testing.TB) string {
 	if testing.Short() {
 		t.Skip("нужен Postgres в контейнере: пропуск под -short, прогон — make test-pg-outside-selection")
 	}
-	return appendSearchPathOptions(pgtest.NewDB(t))
-}
-
-func appendSearchPathOptions(dsn string) string {
-	const optionsParam = "options=-c%20search_path%3Dkacho_iam%2Cpublic"
-	if strings.Contains(dsn, "options=") || strings.Contains(dsn, "options%3D") {
-		return dsn
-	}
-	sep := "?"
-	if strings.Contains(dsn, "?") {
-		sep = "&"
-	}
-	return dsn + sep + optionsParam
+	return pgtest.NewDB(t)
 }

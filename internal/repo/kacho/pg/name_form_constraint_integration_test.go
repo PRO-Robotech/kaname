@@ -118,7 +118,6 @@ func TestIntegration_IAM_NameFormConstraintIsEnforced(t *testing.T) {
 		},
 		// Таблицы схемы со столбцом имени, которым форма НЕ ставится осознанно.
 		Excluded: map[string]string{
-			"_pre_rbac_v2_roles": "архив прежней модели ролей: строк не прибавляется, писателя нет",
 			"service_account_oauth_clients": "имя ключа судит только доменный тип; дубля формы в базе " +
 				"у этой таблицы не было и не заводится этой правкой",
 			"user_oauth_clients": "имя токена судит только доменный тип; дубля формы в базе " +

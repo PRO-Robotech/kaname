@@ -201,12 +201,78 @@ func wholeProjection(t *testing.T, ctx context.Context, pool *pgxpool.Pool) []st
 	return out
 }
 
+// seedProbeCatalogResourceNotInCompiledSet кладёт ЖИВУЮ строку каталога ресурсов,
+// точечное имя которой компилируемое множество раскрытия НЕ знает.
+//
+// # Зачем это нужно, и почему прежнего входа больше нет
+//
+// Утверждение «проекция не выдумывает типов» ставилось на роли, объявлявшей тип,
+// которого каталог не знает вовсе. Такой строки селектора больше НЕ БЫВАЕТ:
+// триггер `role_rule_selectors_types_live` (миграция
+// `20260902174500_selector_types_name_a_live_resource.sql`) отвергает её НА ВХОДЕ,
+// и вопрос вместе с входом стал непредставим — проба падала на своей фикстуре,
+// не дойдя ни до одного утверждения (задача #1941).
+//
+// Вход, который дерево ПРОИЗВОДИТ сегодня, ровно один и он уже, а не шире:
+// источников имени типа ДВА, и они разные по построению — таблица
+// `kacho_iam.catalog_resource`, которую судит триггер, и закрытое компилируемое
+// множество `authzmap.objectTypes`, по которому раскрывает `RoleVerbsFromSelectors`
+// (`fgaType, ok := authzmap.FGAObjectType(dotted); if !ok { continue }`). Пока они
+// сходятся, разницы не видно; разойдись они — а это ровно состояние, которое
+// называет шапка самой миграции («рассинхрон литерала типов и каталога», #1816), —
+// селектор пишется, а раскрывать его нечем.
+//
+// То есть проба стала ТОЧНЕЕ прежней, а не слабее: раньше «каталог не знает» и
+// «множество не раскрывает» были истинны одновременно, и по зелени нельзя было
+// сказать, которая половина держит границу. Теперь каталог тип ЗНАЕТ, и
+// отсутствие пар удерживает ровно множество раскрытия — предмет `#1030`.
+//
+// Строка кладётся сырым SQL — тем же путём, каким её кладёт миграция посева, и
+// проходит ВСЕ ограничения таблицы (`dotted = module || '.' || resource`, ключ
+// модуля, живость): подделки здесь нет, есть законная строка каталога.
+func seedProbeCatalogResourceNotInCompiledSet(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
+	module, resource string) string {
+	t.Helper()
+	dotted := module + "." + resource
+	// Имя типа модели прав — ОБЯЗАТЕЛЬНАЯ колонка строки каталога
+	// (`catalog_resource.object_type`, миграция 20260903112400: NOT NULL плюс
+	// проверка формы). Фикстура, её опускавшая, была СНИСХОДИТЕЛЬНЕЕ продукта:
+	// она подавала вход, которого в дереве не бывает, и с появлением колонки
+	// перестала вставляться вовсе (`23502`). Значение выводится тем же правилом,
+	// каким его выводит манифест синтетического модуля, — здесь это законно: имя
+	// принадлежит фикстуре, а не каталогу платформы.
+	objectType := module + "_" + strings.ToLower(resource)
+	_, err := pool.Exec(ctx,
+		`INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, object_type)
+		 VALUES ($1, $2, $3, $4)`, module, resource, dotted, objectType)
+	require.NoErrorf(t, err, "посев живой строки каталога %s", dotted)
+	return dotted
+}
+
+// selectorRowsNaming — сколько строк селекторов роли называют этот точечный тип.
+//
+// Это ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ границы ниже, и без него она вакуумна: «пар нет»
+// зеленело бы и на селекторе, который не записался вовсе, — то есть на том самом
+// состоянии, из-за которого проба и переписывалась.
+func selectorRowsNaming(t *testing.T, ctx context.Context, pool *pgxpool.Pool, roleID, dotted string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kacho_iam.role_rule_selectors
+		  WHERE role_id = $1 AND $2 = ANY(object_types)`, roleID, dotted).Scan(&n))
+	return n
+}
+
 // IAM-RV-1-04 — два прогона досева дают одно и то же (ХАРАКТЕРИЗУЮЩИЙ ЗАМОК).
 //
-// Замок фиксирует СЕГОДНЯШНЕЕ поведение как известное, включая его границу:
-// объявленный ролью тип, которого нет в множестве раскрытия, в проекции
-// ОТСУТСТВУЕТ. Это предмет `#1030`, а не дефект этой полосы, и записан он здесь
-// затем, чтобы его смена была видна.
+// Замок фиксирует СЕГОДНЯШНЕЕ поведение как известное, включая его границу: тип,
+// ЖИВОЙ в каталоге ресурсов, но не раскрываемый компилируемым множеством, в
+// проекции ОТСУТСТВУЕТ. Это предмет `#1030`, а не дефект этой полосы, и записан
+// он здесь затем, чтобы его смена была видна.
+//
+// Вход этой границы был переписан по #1941: прежний (тип, которого каталог не
+// знает вовсе) стал непредставим — его отвергает триггер живости на входе
+// селектора. Разбор нового входа — у `seedProbeCatalogResourceNotInCompiledSet`.
 func TestIAMRV104_TwoReseedRunsAgreeAndDoNotInventTypes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("нужен Postgres")
@@ -214,7 +280,10 @@ func TestIAMRV104_TwoReseedRunsAgreeAndDoNotInventTypes(t *testing.T) {
 	ctx, pool := newReseedPool(t)
 
 	resolvable := seedProbeSystemRole(t, ctx, pool, "rol-rv104-known", "probe.rv104.known", materializingRules)
-	// Тип объявлен, но каталогом не раскрывается: перевод его пропускает.
+	// Тип ЖИВЁТ в каталоге ресурсов — иначе триггер живости отверг бы селектор на
+	// входе, — но компилируемое множество раскрытия его не знает: перевод его
+	// пропускает.
+	undisclosed := seedProbeCatalogResourceNotInCompiledSet(t, ctx, pool, "iam", "thereisnosuchresource")
 	unknown := seedProbeSystemRole(t, ctx, pool, "rol-rv104-unknown", "probe.rv104.unknown",
 		`[{"module":"iam","resources":["thereisnosuchresource"],"verbs":["get"]}]`)
 
@@ -223,19 +292,27 @@ func TestIAMRV104_TwoReseedRunsAgreeAndDoNotInventTypes(t *testing.T) {
 	require.NoError(t, bootSeedLanes(ctx, pool))
 	second := wholeProjection(t, ctx, pool)
 
+	namedBySelector := selectorRowsNaming(t, ctx, pool, unknown, undisclosed)
 	t.Logf("пар в проекции: прогон 1 — %d, прогон 2 — %d; роль с раскрываемым типом — %d пар, "+
-		"роль с нераскрываемым — %d пар", len(first), len(second),
-		projectionSizeOf(t, ctx, pool, resolvable), projectionSizeOf(t, ctx, pool, unknown))
+		"роль с нераскрываемым — %d пар; строк селекторов, называющих %s, — %d",
+		len(first), len(second),
+		projectionSizeOf(t, ctx, pool, resolvable), projectionSizeOf(t, ctx, pool, unknown),
+		undisclosed, namedBySelector)
 
 	require.NotEmpty(t, first, "проекция пуста после досева — сравнение двух прогонов было бы "+
 		"вакуумным: оно выполнялось бы на досеве, не пишущем ничего")
 	require.Equal(t, first, second, "второй прогон досева изменил проекцию — пересчёт не идемпотентен")
 	require.Positive(t, projectionSizeOf(t, ctx, pool, resolvable),
 		"роль с раскрываемым типом пар не получила — положительный контроль границы ниже мёртв")
+	require.Positivef(t, namedBySelector,
+		"селектор, называющий %s, не записан — значит триггер живости его отверг либо досев "+
+			"селекторов до него не дошёл. Тогда утверждение ниже вакуумно: «пар нет» верно по "+
+			"причине, к множеству раскрытия отношения не имеющей", undisclosed)
 	require.Zerof(t, projectionSizeOf(t, ctx, pool, unknown),
-		"ГРАНИЦА, названная прямо: объявленный, но не раскрываемый тип в проекции отсутствует. "+
-			"Это предмет #1030 (раскрытие идёт через компилируемое множество Go), а не дефект "+
-			"этой полосы. Проба фиксирует сегодняшнее поведение, чтобы его смена была видна")
+		"ГРАНИЦА, названная прямо: тип, живой в каталоге ресурсов, но не раскрываемый "+
+			"компилируемым множеством, в проекции отсутствует. Это предмет #1030 (раскрытие "+
+			"идёт через компилируемое множество Go), а не дефект этой полосы. Проба фиксирует "+
+			"сегодняшнее поведение, чтобы его смена была видна")
 }
 
 // IAM-RV-1-05 — досев не трогает роли арендатора (ХАРАКТЕРИЗУЮЩИЙ ЗАМОК).

@@ -178,7 +178,12 @@ func (h *Handler) WithResourceRegistrar(registrar resourceRegistrar, gate relati
 // The refusal carries no reason: which clause refused is deliberately not observable
 // (fail-closed, no oracle). Locked by TestProxyTupleRefusalMapsToPermissionDenied.
 func validateProxyTuple(callerDomain, subject, relation, object string) error {
-	if err := proxytuple.ValidateTuple(callerDomain, subject, relation, object); err != nil {
+	// Словарь владения типом подаётся ЗДЕСЬ: правило живёт в общем фундаменте, а
+	// закрытая таблица типов — за границей его видимости (см. proxy_type_owner.go).
+	// Без него «чей это тип» отвечала бы приставка имени, то есть соглашение об
+	// именовании, и тип, чьё имя приставке не подчиняется, был бы невыразим (#1885).
+	if err := proxytuple.ValidateTuple(callerDomain, subject, relation, object,
+		proxytuple.WithTypeOwner(catalogTypeOwner{})); err != nil {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
 	return nil

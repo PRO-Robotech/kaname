@@ -72,6 +72,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
@@ -82,6 +83,12 @@ import (
 
 type ListRolesUseCase struct {
 	repo Repo
+	// cat — ЖИВЫЕ строки каталога: набор глаголов типа для превью роли (#1994).
+	// Приходит ОБЯЗАТЕЛЬНЫМ параметром, а не опцией: непровязанный источник даёт
+	// роль без набора, а проекция такую роль отвергает — то есть чтение отказало
+	// бы целиком и в рантайме. Компилятор ловит это раньше.
+	cat catalog.Source
+
 	// relationQueries — FGA port resolving the principal's `viewer ∪ v_list`
 	// visibility on the iam_role objects of a page. When nil the use-case fails
 	// closed.
@@ -92,8 +99,8 @@ type ListRolesUseCase struct {
 	listScan shared.ListScanRecorder
 }
 
-func NewListRolesUseCase(r Repo) *ListRolesUseCase {
-	return &ListRolesUseCase{repo: r}
+func NewListRolesUseCase(r Repo, cat catalog.Source) *ListRolesUseCase {
+	return &ListRolesUseCase{repo: r, cat: cat}
 }
 
 // WithRelationStore wires the FGA client used to resolve the principal's
@@ -276,6 +283,16 @@ func (u *ListRolesUseCase) collectVisiblePage(
 	// (created_at,id) keyset order is preserved within each rank group; this is a
 	// presentation refinement over the authoritative keyset page.
 	sortCatalogFirst(page)
+
+	// Целость — ОДИН вопрос на СТРАНИЦУ, и задаётся он после её сужения: на
+	// накопителе `visible` он стоил бы на `want+1` строк больше, а внутри цикла
+	// добора — по вопросу на итерацию. Стоимость ответа обязана принадлежать
+	// ответу, а не тому, сколько строк пришлось прочитать, чтобы его собрать.
+	//
+	// Тот же производитель, что у `Get`: расхождение поверхностей непредставимо.
+	if ierr := attachIntegrity(ctx, rd, u.cat, page); ierr != nil {
+		return nil, "", ierr
+	}
 	return page, next, nil
 }
 

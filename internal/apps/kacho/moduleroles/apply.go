@@ -39,17 +39,38 @@
 //  4. **не трогает роли без модуля-владельца** (`admin`, `edit`, `view`,
 //     `owner`, `kacho-system.*`): их первый сегмент не член закрытого набора
 //     модулей платформы, поэтому манифестом они невыразимы by construction.
+//
+// # Правила роли ПРОИЗВОДИТ ЭКСПОРТЁР, а не перевод манифеста (#1998)
+//
+// Форм записи права две, и к классу сводится только ПРОВЕРЕННЫЙ поимённый
+// перечень: сведение требует каталога прав, которого у загрузчика нет. Значит у
+// поимённой формы ровно один законный производитель — `roleexport.ExportRoleRules`,
+// и применитель берёт правила у него.
+//
+// Здесь стоял прямой перевод (`manifest.Rule.DomainRule()`), и поимённое право
+// он отдавал ПУСТЫМ. Дырой это не было — домен отвергает правило без глаголов, —
+// но отказ говорил не о том: «политика роли не компилируется» посылает автора
+// править форму правила, тогда как править надо перечень. И, что дороже: у
+// полноты перечня не было читателя на пути ПРИМЕНЕНИЯ вовсе — она жила в
+// исполнителе обхода дерева, а работающий процесс её не спрашивал.
+//
+// Следствие, названное прямо: `DomainRule()` перестал быть путём поимённой
+// формы by construction — через применитель она проходит уже сведённой либо не
+// проходит вовсе.
 package moduleroles
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 
+	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest/roleexport"
 )
 
 var (
@@ -62,6 +83,30 @@ var (
 	// ErrWriteFailed — писатель отказал. Несёт дословный отказ оператора:
 	// инварианты держит БАЗА, и её текст — часть контракта.
 	ErrWriteFailed = errors.New("moduleroles: writing the declared role failed")
+	// ErrNamedRightIncomplete — поимённый перечень права роли не полон по своему
+	// классу, и роль не произведена ЦЕЛИКОМ.
+	//
+	// Отдельный сентинел, а не «политика не компилируется»: у них разные
+	// починки. Несворачиваемость правит ФОРМУ правила, неполнота — ПЕРЕЧЕНЬ, и
+	// один отказ на два предмета отправил бы автора не туда.
+	ErrNamedRightIncomplete = errors.New(
+		"moduleroles: declared role named right is incomplete for its class")
+	// ErrRightsExportNotWired — производитель правил роли не провязан.
+	//
+	// Отказ, а не пропуск: без экспортёра поимённое право либо не сводится, либо
+	// сводится молча, и оба исхода означают право, отличное от просимого.
+	// Виновата ПРОВЯЗКА, а не вход, поэтому полоса своя — следующий шаг у этих
+	// двух отказов разный.
+	ErrRightsExportNotWired = errors.New(
+		"moduleroles: role rules producer is not wired")
+	// ErrRetirementActorUnnamed — автор снятия не назван вызывающим.
+	//
+	// Отказ, а не умолчание: пометка снятия несёт автора, и подставленный
+	// «system» сделал бы вопрос «кто у меня отобрал» безответным ровно тогда,
+	// когда его задают. Тот же довод, по которому `applied_by` завели двум
+	// ведомостям (#1913, миграция 20260903215500).
+	ErrRetirementActorUnnamed = errors.New(
+		"moduleroles: retirement actor is not named by the caller")
 )
 
 // Сентинелы выше — ВТОРОЕ лицо отказа, для вызывающего в процессе. Первое —
@@ -78,6 +123,19 @@ type RoleWriter interface {
 	// ReplaceRuleRefs заменяет проекцию ОБЪЯВЛЕННЫХ сегментов правила ПОЛНОСТЬЮ:
 	// сегмент, снятый из правил, обязан исчезнуть и отсюда.
 	ReplaceRuleRefs(ctx context.Context, roleID domain.RoleID, refs []domain.RoleRuleRef) error
+
+	// LiveSystemRoles — живые системные роли, какими их видит эта транзакция.
+	// Нужны СВЕРКЕ: без них «живёт, не объявлена» не производится ничем.
+	LiveSystemRoles(ctx context.Context) ([]domain.Role, error)
+
+	// RetireRole снимает роль модуля: переселение, снятие проекций и пометка.
+	// Порядок между ними держит схема, а не порядок этих вызовов.
+	RetireRole(ctx context.Context, id domain.RoleID, ownerModule, reason, actor string) (
+		domain.RoleRetirement, error)
+
+	// ReviveRole оживляет снятую роль и очищает ведомость её собственной
+	// причины. `false` означает «оживлять нечего», а не отказ.
+	ReviveRole(ctx context.Context, id domain.RoleID) (bool, error)
 }
 
 // TxRunner — исполнение под ОДНОЙ транзакцией записи. Строка роли и её проекция
@@ -87,13 +145,32 @@ type TxRunner interface {
 	RunInWriteTx(ctx context.Context, fn func(ctx context.Context, w RoleWriter) error) error
 }
 
-// Applier — применитель. Состояния не держит: повторный прогон — штатный режим.
-type Applier struct {
-	tx TxRunner
+// RightsExport — ПРОИЗВОДИТЕЛЬ правил роли из манифеста. Порт объявлен ЗДЕСЬ, в
+// use-case: он описывает потребность применителя, а не каталог прав.
+//
+// Возвращает правила по идентификатору роли и находки. Роль, чьё право
+// произвести нельзя, в карту НЕ ПОПАДАЕТ ЦЕЛИКОМ — частичное производство дало
+// бы роль ýже объявленной, и отличить её от работающей можно было бы только
+// вызовом.
+type RightsExport interface {
+	ExportRoleRules(m *manifest.Manifest) (rules map[string][]domain.Rule, faults []error)
 }
 
-// NewApplier собирает применитель над исполнителем транзакций.
-func NewApplier(tx TxRunner) *Applier { return &Applier{tx: tx} }
+// Applier — применитель. Состояния не держит: повторный прогон — штатный режим.
+type Applier struct {
+	tx     TxRunner
+	rights RightsExport
+}
+
+// NewApplier собирает применитель над исполнителем транзакций и производителем
+// правил.
+//
+// Производитель — параметр КОНСТРУКТОРА, а не необязательное дополнение: без
+// него применитель обязан отказать, и делать отказ следствием забытого вызова
+// «с...» значило бы держать режим, в котором проверка полноты снята молча.
+func NewApplier(tx TxRunner, rights RightsExport) *Applier {
+	return &Applier{tx: tx, rights: rights}
+}
 
 // Report — перепись применения. Печатается числами, потому что «применено»
 // без чисел неотличимо от «прошло мимо»: применитель, не нашедший ни одной
@@ -112,12 +189,63 @@ type Report struct {
 	Skipped int
 	// Names — имена записанных ролей в порядке объявления.
 	Names []string
+
+	// SectionDeclared — назвал ли документ раздел `roles` вообще.
+	//
+	// Печатается ОТДЕЛЬНО от `Declared`, потому что состояний у раздела ТРИ:
+	// «не объявлен» и «объявлен и пуст» дают одинаковый ноль объявленных ролей и
+	// означают ПРОТИВОПОЛОЖНОЕ — «сверять не с чем» против «ролей у модуля нет».
+	SectionDeclared bool
+
+	// Retired — строк помечено снятыми. Счётчик СВОЙ, а не часть `Written`:
+	// снятие и запись — разные события, и «записано 0, снято 3» обязано быть
+	// отличимо от «записано 3».
+	Retired int
+
+	// RetiredNames — имена снятых ролей в порядке сверки.
+	//
+	// Поимённо, а не одним счётчиком: оператору, читающему журнал старта, нужен
+	// не вопрос «сколько», а вопрос «ЧТО именно перестало выдаваться». Снятие
+	// проходит молча by construction — оно и заведено затем, чтобы не ронять
+	// пуск, — поэтому единственное место, где его видно, это перепись.
+	RetiredNames []string
+
+	// Resettled — строк проекций переселено в ведомость отобранного. Число
+	// печатается рядом со снятыми: «снято 3, переселено 0» означает, что роли
+	// были уже без проекций, и это другое утверждение о платформе.
+	Resettled int
+
+	// Removed — строк проекций СНЯТО без переселения: отбор и состав цели.
+	//
+	// Число своё, а не часть `Resettled`: переселённое ушло в ведомость и
+	// объяснено арендатору, снятое — нет. Слив их, перепись объявила бы
+	// объяснённым то, чего никто не объяснял.
+	Removed int
+
+	// Census — объём, осмотренный СВЕРКОЙ: сколько живых строк прочитано, сколько
+	// из них принадлежит этому модулю, чужим модулям и никому.
+	//
+	// Печатается рядом со счётчиком снятых, потому что счётчик его не закрывает:
+	// «снято 0» при «живых осмотрено 0» и «снято 0» при «живых осмотрено 48» —
+	// разные утверждения о платформе, а молчание у них одно.
+	//
+	// Нулевая перепись законна и означает, что сверка не звалась: раздел ролей
+	// манифестом не объявлен. Отличить это от «звалась и ничего не нашла»
+	// позволяет [ReconcileCensus.Void].
+	Census ReconcileCensus
 }
 
 // String — перепись одной строкой.
 func (r Report) String() string {
-	return fmt.Sprintf("модуль %s · объявлено кластерных %d · записано %d · без изменений %d · "+
-		"иного яруса %d", r.Module, r.Declared, r.Written, r.Unchanged, r.Skipped)
+	section := "раздел ролей НЕ объявлен"
+	if r.SectionDeclared {
+		section = "раздел ролей объявлен"
+	}
+	return fmt.Sprintf("модуль %s · %s · объявлено кластерных %d · записано %d · "+
+		"без изменений %d · иного яруса %d · снято %d %v · переселено %d · "+
+		"снято без переселения %d",
+		r.Module, section, r.Declared, r.Written, r.Unchanged, r.Skipped,
+		r.Retired, r.RetiredNames, r.Resettled, r.Removed)
 }
 
 // Apply приводит строки системных ролей модуля к объявленному манифестом
@@ -129,8 +257,33 @@ func (r Report) String() string {
 // `id` — функцией имени (`domain.SystemRoleID`), якорь — синглтоном кластера,
 // разрешения — сворачиванием правил. Ничего из выведенного манифест не несёт, и
 // принимать его оттуда было бы вторым объявлением одного предмета.
-func (a *Applier) Apply(ctx context.Context, m *manifest.Manifest) (Report, error) {
-	rep := Report{Module: m.Module}
+func (a *Applier) Apply(ctx context.Context, m *manifest.Manifest, actor string) (Report, error) {
+	rep := Report{Module: m.Module, SectionDeclared: m.RolesDeclared()}
+
+	// Автор — ПАРАМЕТР, а не умолчание. Подставить здесь «system» значило бы
+	// сделать вопрос «кто у меня отобрал» безответным ровно тогда, когда его
+	// задают, — тот же довод, по которому `applied_by` завели двум ведомостям
+	// (20260903215500).
+	//
+	// ВЫЗЫВАЮЩИЙ СЕГОДНЯ ОДИН — путь старта, и он называет процессного актора
+	// (`BootActorID`). Второй, глагол применения, придёт с `#1034` и назовёт
+	// проверенную личность вызывающего; параметризация заведена ПОД НЕГО, и это
+	// сказано будущим временем намеренно: перепись значений актора по дереву
+	// даёт сегодня одно.
+	if actor == "" {
+		return rep, retirementRefusal(m.Module,
+			fmt.Errorf("%w: %s", ErrRetirementActorUnnamed, m.Module))
+	}
+
+	// Производитель правил спрашивается ПЕРВЫМ: без него ни одна форма права до
+	// строки роли не доезжает в том виде, в каком её объявили, — а отказ по
+	// дороге сказал бы о форме правила вместо провязки.
+	if a.rights == nil {
+		werr := fmt.Errorf("%w: %s", ErrRightsExportNotWired, m.Module)
+		return rep, refuse(codes.FailedPrecondition, werr.Error(),
+			LaneRightsExportNotWired, m.Module, "", werr)
+	}
+	exported, faults := a.rights.ExportRoleRules(m)
 
 	declared := make([]domain.Role, 0, len(m.Roles))
 	for i := range m.Roles {
@@ -142,14 +295,29 @@ func (a *Applier) Apply(ctx context.Context, m *manifest.Manifest) (Report, erro
 			rep.Skipped++
 			continue
 		}
-		r, err := roleOf(m.Module, mr)
+		rules, produced := exported[mr.ID]
+		if !produced {
+			// Роль отвергнута производителем целиком. Находки СВОЕЙ роли и есть
+			// отказ: они называют недостающие имена, а собственного текста у
+			// применителя тут быть не может — перечень классов знает экспортёр.
+			return rep, namedRightRefusal(m.Module, mr.ID, faults)
+		}
+		r, err := roleOf(m.Module, mr, rules)
 		if err != nil {
 			return rep, err
 		}
 		declared = append(declared, r)
 	}
 	rep.Declared = len(declared)
-	if rep.Declared == 0 {
+	// РАННЕГО ВЫХОДА ПО НУЛЮ ЗДЕСЬ БОЛЬШЕ НЕТ, и это несущее.
+	//
+	// Он стоял тут, пока применитель умел только писать: писать нечего — идти
+	// некуда. С появлением отзыва ноль объявленных стал ЗАКОННЫМ входом,
+	// означающим «ролей у модуля нет», и выйти на нём значило бы не снять ни
+	// одной роли ровно в том случае, ради которого §2.2 различает три состояния
+	// раздела.
+	if rep.Declared == 0 && !rep.SectionDeclared {
+		// Раздел не объявлен ВОВСЕ: «сверять не с чем». Ни записи, ни снятия.
 		return rep, nil
 	}
 
@@ -161,28 +329,52 @@ func (a *Applier) Apply(ctx context.Context, m *manifest.Manifest) (Report, erro
 	var failed domain.RoleName
 	err := a.tx.RunInWriteTx(ctx, func(ctx context.Context, w RoleWriter) error {
 		for _, r := range declared {
+			// ОЖИВЛЕНИЕ идёт ПЕРВЫМ, до приведения полей, и это порядок, а не
+			// вкус: проекция сегментов ссылается на «эту роль И она жива», и
+			// запись её под снятой ролью отверг бы ключ.
+			revived, verr := w.ReviveRole(ctx, r.ID)
+			if verr != nil {
+				failed = r.Name
+				return fmt.Errorf("%w: %s: %w", ErrWriteFailed, r.Name, verr)
+			}
 			out, changed, uerr := w.UpsertSystemRole(ctx, r)
 			if uerr != nil {
 				failed = r.Name
 				return fmt.Errorf("%w: %s: %w", ErrWriteFailed, r.Name, uerr)
 			}
-			if !changed {
+			// ОЖИВЛЁННАЯ роль пишет проекцию ДАЖЕ при совпадении полей.
+			// Снятие унесло её строки, поэтому «объявленное состояние уже стоит»
+			// здесь верно про КОЛОНКИ и ложно про ПРОЕКЦИЮ: без этой ветви роль
+			// вернулась бы живой и без единого сегмента, то есть не дающей
+			// ничего, — и отличить это от исправной работы было бы нельзя.
+			if !changed && !revived {
 				rep.Unchanged++
 				continue
+			}
+			// Идентификатор и правила берутся у ОБЪЯВЛЕННОЙ роли, а не у ответа
+			// писателя: при `changed=false` ответ пуст by construction —
+			// предикат отличия не нашёл отличий, и `RETURNING` не отдал строки.
+			id, rules := r.ID, r.Rules
+			if changed {
+				id, rules = out.ID, out.Rules
 			}
 			// Проекция ОБЪЯВЛЕННЫХ сегментов пишется ПОЛНОЙ заменой и в этой же
 			// транзакции: ключи в каталог стоят на ней, а не на колонке `rules`,
 			// поэтому приведение, тронувшее правила и не тронувшее проекцию,
 			// оставило бы их несогласованными молча. Отказ ключа здесь и есть
 			// производитель отказа «каталог такого ресурса не знает».
-			if rerr := w.ReplaceRuleRefs(ctx, out.ID, domain.RuleRefsOf(out.Rules)); rerr != nil {
+			if rerr := w.ReplaceRuleRefs(ctx, id, domain.RuleRefsOf(rules)); rerr != nil {
 				failed = r.Name
 				return fmt.Errorf("%w: %s: %w", ErrWriteFailed, r.Name, rerr)
 			}
-			rep.Written++
-			rep.Names = append(rep.Names, string(r.Name))
+			if changed {
+				rep.Written++
+				rep.Names = append(rep.Names, string(r.Name))
+			} else {
+				rep.Unchanged++
+			}
 		}
-		return nil
+		return a.retire(ctx, w, m, actor, &rep, &failed)
 	})
 	if err != nil {
 		// Всякий отказ ОТСЮДА принадлежит полосе писателя by construction:
@@ -198,6 +390,11 @@ func (a *Applier) Apply(ctx context.Context, m *manifest.Manifest) (Report, erro
 // писателя: отказ тогда называет роль и правило, а не приезжает SQLSTATE от
 // оператора вставки.
 //
+// Правила приходят ПАРАМЕТРОМ, от производителя (#1998), а не переводятся здесь:
+// поимённая форма сводится к классу только после проверки полноты, и второй
+// перевод разошёлся бы с первым молча — оба отвечают одинаково на форме классов,
+// то есть на всяком входе, который сюда доезжал раньше.
+//
 // Полоса называется ЗДЕСЬ ЖЕ, а не восстанавливается вызывающим: обе причины
 // известны в точке отказа, и разбирать собственный сентинел позже значило бы
 // заводить классификатор своего же кода — с корзиной «прочее», которая молча
@@ -207,20 +404,26 @@ func (a *Applier) Apply(ctx context.Context, m *manifest.Manifest) (Report, erro
 // платформы. Полоса писателя отвечает FAILED_PRECONDITION, поэтому даже клиент,
 // не читающий деталей, различает эти два отказа кодом.
 //
-// # Параметр `module` — АДРЕСАТ отказа, а не предикат, и это сказано вслух
+// # Параметр `module` — ВЛАДЕЛЕЦ роли и адресат отказа, но НЕ предикат выдачи
 //
-// Он попадает в признак полосы и в текст отказа; сравнения с модулем правила
-// здесь нет ни одной строкой, и его тут быть не должно. Владение выдачей судит
-// ЗАГРУЗЧИК — `manifest.ErrRoleRuleForeignModule` (задача #1902), — то есть
-// раньше и с координатой `roles[i].rules[j].module`, которой у применителя нет:
-// узла документа он не держит. Вторая проверка того же предмета разошлась бы с
-// первой молча — обе отвечают одинаково на законном входе.
-func roleOf(module string, mr *manifest.Role) (domain.Role, error) {
+// С задачи #1032 он попадает в строку роли: `OwnerModule` — носитель владения,
+// из которого выводится политика послабления подстановки ([domain.PolicyOfRole]).
+// До неё послабление было следствием кластерного якоря, и роль модуля получала
+// его вместе с системностью — то есть прямой путь к `*.*.*`.
+//
+// Сравнения с модулем ПРАВИЛА здесь по-прежнему нет ни одной строкой, и его тут
+// быть не должно. Владение ВЫДАЧЕЙ судит ЗАГРУЗЧИК —
+// `manifest.ErrRoleRuleForeignModule` (задача #1902), — то есть раньше и с
+// координатой `roles[i].rules[j].module`, которой у применителя нет: узла
+// документа он не держит. Вторая проверка того же предмета разошлась бы с первой
+// молча — обе отвечают одинаково на законном входе.
+//
+// Различие двух предметов названо, чтобы его не свели: #1902 отвечает на «вправе
+// ли модуль раздавать права в ЧУЖОМ домене» (не вправе), #1032 — на «докуда
+// достаёт ПОДСТАНОВКА в роли, которой модуль владеет» (до границы его модуля).
+func roleOf(module string, mr *manifest.Role, produced []domain.Rule) (domain.Role, error) {
 	name := domain.RoleName(mr.ID)
-	rules := make(domain.Rules, 0, len(mr.Rules))
-	for _, rule := range mr.Rules {
-		rules = append(rules, rule.DomainRule())
-	}
+	rules := domain.Rules(produced)
 	compiled, cerr := domain.CompileRules(rules)
 	if cerr != nil {
 		werr := fmt.Errorf("%w: %s: %w", ErrRolePolicyNotCompilable, name, cerr)
@@ -235,11 +438,43 @@ func roleOf(module string, mr *manifest.Role) (domain.Role, error) {
 		Rules:       rules,
 		Permissions: compiled,
 		IsSystem:    true,
+		// Владелец — модуль МАНИФЕСТА, и другого источника у него нет. Отсюда
+		// политика роли становится МОДУЛЬНОЙ: подстановка ресурса законна ровно
+		// в пределах этого модуля, подстановка модуля — не законна вовсе.
+		OwnerModule: module,
 	}
-	if verr := r.Validate(); verr != nil {
+	// Набор модулей — КАНОН: применитель исполняется на старте, до того как
+	// снимок каталога наполнен, и роль модуля объявлена ДЕРЕВОМ, а не строкой
+	// (#1927). Живость модуля судит путь запроса, где она наблюдаема.
+	if verr := r.Validate(domain.ModuleSetOf(authzmap.CatalogSeedModules()...)); verr != nil {
 		werr := fmt.Errorf("%w: %s: %w", ErrRoleRejectedByDomain, name, verr)
 		return domain.Role{}, refuse(codes.InvalidArgument, werr.Error(),
 			LaneRejectedByDomain, module, string(name), werr)
 	}
 	return r, nil
+}
+
+// namedRightRefusal — отказ полосы неполного поимённого перечня.
+//
+// Текст собирается из находок ИМЕННО ЭТОЙ роли: находки соседних принадлежат
+// своим ролям, и приложить их сюда значило бы назвать автору починку, которая
+// его роли не касается. Если находки по роли нет ни одной, отказ говорит об
+// этом прямо — молчаливое «роль не произведена» без причины отправило бы
+// читателя искать её перебором.
+func namedRightRefusal(module, roleID string, faults []error) error {
+	var own []string
+	for _, f := range faults {
+		var finding roleexport.Finding
+		if errors.As(f, &finding) && finding.Role == roleID {
+			own = append(own, finding.Detail)
+		}
+	}
+	detail := strings.Join(own, "; ")
+	if detail == "" {
+		detail = fmt.Sprintf("роль %q не произведена производителем правил, и находки по ней "+
+			"не названо ни одной", roleID)
+	}
+	werr := fmt.Errorf("%w: %s: %s", ErrNamedRightIncomplete, roleID, detail)
+	return refuse(codes.InvalidArgument, werr.Error(),
+		LaneNamedRightIncomplete, module, roleID, werr)
 }

@@ -119,46 +119,102 @@ func TestMODRC06TranslationIsTotal(t *testing.T) {
 
 // TestMODRC07NoKeyIsAcceptedAndDropped — значение КАЖДОГО ключа
 // `manifest.Rule` найдено в результате ПО ЗНАЧЕНИЮ, а не по имени поля.
+//
+// # Правил ДВА, потому что форм права две и они взаимоисключающи (kacho#1844)
+//
+// Прежде здесь стояло одно правило, заполненное всеми ключами разом, и результат
+// брался у одного перевода. С возвращением поимённой формы такой вход стал
+// НЕПРЕДСТАВИМЫМ: правило с обеими записями права загрузчик отвергает
+// (`validateRuleRightForm`), то есть проба судила бы то, чего продукт принять не
+// может.
+//
+// Поэтому вход — ДВА правила, по одному на форму, и у каждого спрашивается тот
+// перевод, который эта форма проходит:
+//
+//	`classes` → `DomainRule()`   — путь ПРИМЕНИТЕЛЯ;
+//	`verbs`   → `formRule()`     — путь ПРОВЕРКИ ФОРМЫ; на путь применителя
+//	                               поимённое право не выходит несведённым, и это
+//	                               fail-closed решение, а не потеря значения
+//	                               (сведение к классу требует каталога прав,
+//	                               которого у загрузчика нет).
+//
+// Предмет пробы от этого не сузился: «принято-и-проигнорировано» означает
+// отсутствие читателя ВООБЩЕ, а у поимённого права их четыре — проверка формы,
+// проверка существования названного, `Right()` и экспортёр. Сузить проверку до
+// одного перевода значило бы объявить дефектом само существование второй формы.
 func TestMODRC07NoKeyIsAcceptedAndDropped(t *testing.T) {
-	src := reflect.ValueOf(filledRule())
-	st := src.Type()
-	out := reflect.ValueOf(filledRule().DomainRule())
-	dt := out.Type()
+	// Ключ → правило, его несущее, и перевод, который эта форма проходит.
+	forms := []struct {
+		name string
+		rule Rule
+		out  domain.Rule
+	}{
+		{name: "форма классов", rule: filledRule(), out: filledRule().DomainRule()},
+		{name: "форма поимённая", rule: filledNamedRule(), out: filledNamedRule().formRule()},
+	}
 
 	inspected, found := 0, 0
-	for i := 0; i < st.NumField(); i++ {
-		f := st.Field(i)
-		tag, ok := f.Tag.Lookup("yaml")
-		if !ok {
-			continue
-		}
-		key := strings.Split(tag, ",")[0]
-		if key == "" || key == "-" {
-			continue
-		}
-		inspected++
-		want := src.Field(i).Interface()
-		hit := false
-		for j := 0; j < dt.NumField(); j++ {
-			if !dt.Field(j).IsExported() {
+	for _, form := range forms {
+		src := reflect.ValueOf(form.rule)
+		st := src.Type()
+		out := reflect.ValueOf(form.out)
+		dt := out.Type()
+		for i := 0; i < st.NumField(); i++ {
+			f := st.Field(i)
+			tag, ok := f.Tag.Lookup("yaml")
+			if !ok {
 				continue
 			}
-			if reflect.DeepEqual(out.Field(j).Interface(), want) {
-				hit = true
-				break
+			key := strings.Split(tag, ",")[0]
+			if key == "" || key == "-" {
+				continue
 			}
+			// Ключ ЧУЖОЙ формы в этом правиле пуст by construction: формы
+			// взаимоисключающи, и требовать его значения здесь значило бы
+			// требовать непредставимого входа.
+			if src.Field(i).IsZero() {
+				continue
+			}
+			inspected++
+			want := src.Field(i).Interface()
+			hit := false
+			for j := 0; j < dt.NumField(); j++ {
+				if !dt.Field(j).IsExported() {
+					continue
+				}
+				if reflect.DeepEqual(out.Field(j).Interface(), want) {
+					hit = true
+					break
+				}
+			}
+			if !hit {
+				t.Errorf("%s: значение ключа %q не найдено ни в одном поле domain.Rule: ключ "+
+					"принят и выброшен — «принято-и-проигнорировано» на уровне перевода",
+					form.name, key)
+				continue
+			}
+			found++
 		}
-		if !hit {
-			t.Errorf("значение ключа %q не найдено ни в одном поле domain.Rule: ключ принят "+
-				"и выброшен — «принято-и-проигнорировано» на уровне перевода", key)
-			continue
-		}
-		found++
 	}
 	if inspected == 0 {
 		t.Fatal("ключей правила осмотрено ноль — вердикт беспредметен")
 	}
-	t.Logf("перепись: ключей правила осмотрено %d · найдено в результате %d", inspected, found)
+	// Обе формы обязаны быть осмотрены: перепись по одной прошла бы и на
+	// правиле, второй формы не несущем вовсе.
+	if inspected < 2*len(forms) {
+		t.Errorf("ключей осмотрено %d при %d формах — вход не несёт обеих", inspected, len(forms))
+	}
+	t.Logf("перепись: форм %d · ключей правила осмотрено %d · найдено в результате %d",
+		len(forms), inspected, found)
+}
+
+// filledNamedRule — то же правило ПОИМЁННОЙ формой. Отличается от `filledRule`
+// ровно записью права: иначе пара различала бы не форму, а содержимое.
+func filledNamedRule() Rule {
+	r := filledRule()
+	r.Classes = nil
+	r.Verbs = []string{"getNetwork"}
+	return r
 }
 
 // ── MOD-RC-08 ───────────────────────────────────────────────────────────────

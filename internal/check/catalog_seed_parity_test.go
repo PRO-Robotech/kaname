@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
 )
 
@@ -50,27 +49,69 @@ func catalogRepoRoot(t *testing.T) string {
 	}
 }
 
-// catalogMigrationPath — миграция, сеющая каталог модуля и ПООБЪЕКТНУЮ половину
-// словаря глаголов.
-const catalogMigrationPath = "services/iam/internal/migrations/20260901113757_rule_segments_have_a_referent.sql"
-
-// tierOnlyMigrationPath — миграция, сеющая ЯРУСНУЮ половину словаря (#1863).
+// catalogMigrationPath — миграция, сеющая каталог модуля и ОБЕ половины словаря
+// глаголов.
 //
-// Миграции две, потому что первая применена и правке не подлежит (запрет #5), а
-// не потому, что посев разложили для удобства. Сверяются они порознь: гейт
-// обязан отвечать, КАКАЯ из двух разошлась с литералом.
-const tierOnlyMigrationPath = "services/iam/internal/migrations/20260902062000_authored_verb_dictionary_separates_from_the_per_object_one.sql"
+// # Здесь стояли ДВЕ координаты, и обе пережили свой предмет
+//
+// Пообъектную половину сеяла миграция 20260901113757, ярусную — 20260902062000,
+// и порознь они сверялись не для удобства: первая была применена, а применённую
+// не правят (запрет #5). Свод 171 миграции в одну первичную снял обе — файлов в
+// каталоге ровно один (предикат: `ls services/iam/internal/migrations/*.sql | wc -l`
+// → 1), — и обе константы стали ссылками в никуда.
+//
+// # Гейта по-прежнему ДВА, хотя тело у них одно
+//
+// Свести их в один значило бы потерять ответ на вопрос «какая половина словаря
+// разошлась с литералом»: сверка идёт с РАЗНЫМИ половинами перечня, и слитая
+// находка называла бы таблицу вместо половины. Половины теперь различаются не
+// оператором, а значением `per_object` — см. шапку `catalog_seed_parity.go`.
+const catalogMigrationPath = "services/iam/internal/migrations/0001_initial.sql"
+
+// restrictDeferrableExempt — ключи, которым форма `RESTRICT … DEFERRABLE`
+// прощена ПОИМЁННО, с причиной и предикатом снятия.
+//
+// # Почему ведомость появилась вместе со сводом
+//
+// Пока телом гейта была одна миграция, он видел семь объявлений ключа и объявлял
+// `RESTRICT … DEFERRABLE` запрещённым «везде в этом дереве», ни разу этого не
+// измерив. Свод сделал телом всю схему — объявлений стало 42, — и обнажил два
+// объявления этой формы, оба СТАРШЕ гейта: они стояли в дереве и до свода, в
+// миграциях, которых гейт не читал (предикат:
+// `git grep -h RESTRICT <до-свода> -- 'services/iam/internal/migrations/*.sql' | grep DEFERRABLE`).
+//
+// # Почему прощены, а не объявлены находкой
+//
+// `accounts.owner_user_id → users.id` и `users.account_id → accounts.id` — цикл,
+// и отложенность на нём НЕСУЩАЯ: заведение личного аккаунта вставляет строку
+// пользователя первой, а сам аккаунт — следом, в той же транзакции. Это записано
+// решением в дереве и цитирует оба ключа поимённо (снятая миграция
+// 470001_memberships_expand.sql, комментарий у ключа членства).
+//
+// Опасность, которую называет запрет, к ним не относится: `ON DELETE RESTRICT`
+// не откладывается никогда, но откладывается ПРОВЕРКА СО СТОРОНЫ ССЫЛАЮЩЕГОСЯ —
+// ровно та половина, ради которой цикл и объявлен отложенным. Запрет остаётся
+// верным там, где автор ждёт отложенности от самого действия удаления.
+//
+// # Предикат снятия
+//
+// Запись держится, пока объявление существует; исчезнет — гейт назовёт её
+// потерявшей предмет и упадёт (проверено инъекцией). Правильность самой формы
+// для этих двух ключей ЗДЕСЬ НЕ РЕШАЕТСЯ: ведомость фиксирует, что вопрос не
+// рассматривался вместе с этим гейтом, а не что он решён.
+var restrictDeferrableExempt = []string{"accounts_owner_fk", "users_account_fk"}
 
 // literalCatalog — перечень, ВЫВЕДЕННЫЙ единственным производителем
 // (`authzmap.CatalogSeed*`), а не выписанный здесь. Второй производитель того же
 // перечня разошёлся бы с первым молча — ровно в тот момент, когда расхождение и
 // опасно.
 //
-// Глаголы отдаются ПООБЪЕКТНЫЕ: с ними сверяется посев `catalogMigrationPath`, и
-// ярусная половина в нём отсутствует by construction — она заведена позже,
-// отдельной миграцией.
+// Глаголы отдаются ПООБЪЕКТНЫЕ: ярусную половину той же таблицы сверяет
+// `TestTierOnlyVerbSeedMatchesTheLiteral`. Половины лежат в ОДНОМ операторе и
+// различаются значением `per_object` — прежде их различал текст оператора, и это
+// свойство свод снял.
 func literalCatalog() (modules, resources, verbs []string) {
-	modules = domain.KnownModules()
+	modules = authzmap.CatalogSeedModules()
 	for _, r := range authzmap.CatalogSeedResources() {
 		resources = append(resources, r.Dotted)
 	}
@@ -115,10 +156,16 @@ func TestIAMCT114_CatalogSeedMatchesTheLiteral(t *testing.T) {
 	if aerr != nil {
 		t.Fatalf("разобрать посев: %v", aerr)
 	}
-	t.Logf("осмотрено: литерал — модулей %d, ресурсов %d, глаголов %d; "+
-		"посев — модулей %d, ресурсов %d, глаголов %d, снятых строк %d",
+	// Перепись печатает ПРОЧИТАННОЕ и КЛАССИФИЦИРОВАННОЕ ПАРОЙ. Одного числа
+	// мало: расширяя распознаватель, обязан двигаться объём осмотренного, и
+	// именно эта пара отличает «прибавка была слепой зоной» от «дерево выросло».
+	t.Logf("осмотрено: литерал — модулей %d, ресурсов %d, пообъектных глаголов %d; "+
+		"прочитано строк — модуля %d, ресурса %d, глагола %d; "+
+		"классифицировано — модулей %d, живых ресурсов %d, снятых ресурсов %d, "+
+		"пообъектных глаголов %d",
 		len(mods), len(res), len(verbs),
-		c.SeededModules, c.SeededResources, c.SeededVerbs, c.RetiredSeeded)
+		c.ReadModuleRows, c.ReadResourceRows, c.ReadVerbRows,
+		c.SeededModules, c.SeededResources, c.RetiredSeeded, c.SeededVerbs)
 
 	if c.RetiredSeeded == 0 {
 		t.Error("снятых строк посеяно ноль: снятие выражено запретительным списком в Go, " +
@@ -138,9 +185,10 @@ func TestIAMCT113_CatalogKeysCarryTheDeclaredForm(t *testing.T) {
 	}
 
 	immediateOnly := []string{"role_rule_ref_res_fk", "role_rule_ref_verb_fk", "role_verb_type_fk"}
-	scanned, findings := auditKeyForm(string(body), immediateOnly)
-	t.Logf("осмотрено объявлений ключа: %d; проверено на немедленность: %d",
-		scanned, len(immediateOnly))
+	scanned, findings := auditKeyForm(string(body), immediateOnly, restrictDeferrableExempt)
+	t.Logf("осмотрено объявлений ключа: %d; проверено на немедленность: %d; "+
+		"прощено на форме RESTRICT рядом с DEFERRABLE: %d",
+		scanned, len(immediateOnly), len(restrictDeferrableExempt))
 	if scanned == 0 {
 		t.Fatal("объявлений ключа не прочитано ни одного — обход пуст, вердикт беспредметен")
 	}
@@ -179,7 +227,7 @@ func indexOf(hay, needle string) int {
 // есть ключ пропускает то, чего в словаре нет.
 func TestTierOnlyVerbSeedMatchesTheLiteral(t *testing.T) {
 	root := catalogRepoRoot(t)
-	body, err := os.ReadFile(filepath.Join(root, tierOnlyMigrationPath))
+	body, err := os.ReadFile(filepath.Join(root, catalogMigrationPath))
 	if err != nil {
 		t.Fatalf("прочитать миграцию ярусной половины: %v", err)
 	}
@@ -194,7 +242,8 @@ func TestTierOnlyVerbSeedMatchesTheLiteral(t *testing.T) {
 	if aerr != nil {
 		t.Fatalf("разобрать ярусный посев: %v", aerr)
 	}
-	t.Logf("осмотрено: литерал — ярусных пар %d; посев — ярусных пар %d", len(want), seeded)
+	t.Logf("осмотрено: литерал — ярусных пар %d; посев — ярусных пар %d "+
+		"(из одной таблицы с пообъектной половиной, различает per_object)", len(want), seeded)
 	if seeded == 0 {
 		t.Fatal("ярусных пар не посеяно ни одной — обход пуст, вердикт беспредметен")
 	}

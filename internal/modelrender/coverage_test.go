@@ -12,7 +12,6 @@ import (
 	"github.com/PRO-Robotech/kacho/internal/authzplan"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/modelrender"
 )
 
@@ -34,7 +33,7 @@ import (
 // закрытой таблице, а в манифесте его нет: находка, называющая ТИП и сторону.
 func TestCanonBlockOwnedByAModuleButAbsentFromItsManifestIsAFinding(t *testing.T) {
 	root := helperTree(t, twoBlockCanon)
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		body := manifestFor(m)
 		if m == "vpc" {
 			// Ресурс `subnet` СНЯТ: его блок в каноне остаётся, а порождать его
@@ -66,7 +65,7 @@ func TestCanonBlockOwnedByAModuleButAbsentFromItsManifestIsAFinding(t *testing.T
 // краснеющего на любом дереве.
 func TestTheSameTreeWithTheResourceDeclaredIsSilent(t *testing.T) {
 	root := helperTree(t, twoBlockCanon)
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		body := manifestFor(m)
 		if m == "vpc" {
 			body = manifestFor(m, "vpc_network", "vpc_subnet")
@@ -95,7 +94,7 @@ func TestTheSameTreeWithTheResourceDeclaredIsSilent(t *testing.T) {
 // значит прощать ей на вид есть что, и запись переживёт свой предмет навсегда.
 func TestAnUnparsableManifestIsNotReadAsAbsent(t *testing.T) {
 	root := helperTree(t, twoBlockCanon)
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		writeManifest(t, root, m, manifestFor(m))
 	}
 	broken := filepath.Join(root, "modules", "vpc", "manifest.yaml")
@@ -137,7 +136,7 @@ func TestTheClosedTableSpeaksTheModuleVocabulary(t *testing.T) {
 	}
 
 	known := map[string]bool{}
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		known[m] = true
 	}
 	for _, e := range authzmap.Catalog() {
@@ -148,7 +147,7 @@ func TestTheClosedTableSpeaksTheModuleVocabulary(t *testing.T) {
 	}
 
 	total := 0
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		owned := modelrender.OwnedTypes(seed.LiteralRows().Resources, dsl, m)
 		if len(owned) == 0 {
 			t.Errorf("у модуля %s набора нет НИ ОДНОГО типа в каноне: либо ключ таблицы "+
@@ -160,7 +159,7 @@ func TestTheClosedTableSpeaksTheModuleVocabulary(t *testing.T) {
 		t.Fatal("обход пуст: ожидаемое не выведено ни для одного модуля")
 	}
 	t.Logf("перепись: модулей набора %d · типов, принадлежащих модулям %d · вне модулей %d",
-		len(domain.KnownModules()), total, len(modelrender.TypesOutsideModules(seed.LiteralRows().Resources, dsl)))
+		len(authzmap.CatalogSeedModules()), total, len(modelrender.TypesOutsideModules(seed.LiteralRows().Resources, dsl)))
 }
 
 // TestASideIsNotClaimedWhenNeitherIsRicher — расхождение, у которого строк
@@ -176,7 +175,7 @@ func TestTheClosedTableSpeaksTheModuleVocabulary(t *testing.T) {
 // вывод называл его богаче — то есть посылал чинить ровно в обратную сторону.
 func TestASideIsNotClaimedWhenNeitherIsRicher(t *testing.T) {
 	root := helperTree(t, twoBlockCanon)
-	for _, m := range domain.KnownModules() {
+	for _, m := range authzmap.CatalogSeedModules() {
 		body := manifestFor(m)
 		if m == "vpc" {
 			body = "apiVersion: iam/v1\nmodule: vpc\nresources:\n" +

@@ -58,6 +58,7 @@ func newRegisterUCWired(pool *pgxpool.Pool) *internal_iam.RegisterResourceUseCas
 		kachopg.NewFGAOutboxEmitter(),
 		kachopg.NewResourceMirrorEmitter(),
 		kachopg.NewPoolTxBeginner(pool),
+		kachopg.NewCatalogTypeReader(),
 	).
 		WithReconcile(kachopg.NewReconcileEventEmitter()).
 		WithAccountResolver(kachopg.NewProjectAccountResolver())

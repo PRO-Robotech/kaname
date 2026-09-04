@@ -129,65 +129,36 @@ func TestTargetTypeRegistryRefusesTypesTheFeedNeverProduces(t *testing.T) {
 	}
 }
 
-// TestTargetTypeRegistryDoesNotAcceptAnchorVocabularySpellings — the rest of the
-// negative half.
+// TestTargetTypeRegistryIsSeparateFromTheScopeAnchorVocabulary — две ОСИ, два
+// вокабуляра, и путать их нельзя.
 //
-// The case-convention twins above cannot reach a name that differs by WORD rather
-// than by case ("networkLoadBalancers" vs "nlb"). This walks the other vocabulary
-// instead: every bare anchor name is un-spelled back into its dotted form, and the
-// result must not be an acceptable target unless the feed actually emits it. It
-// covers exactly the space a name-derived predicate could reach, so it is the
-// regression lock against re-deriving one.
-func TestTargetTypeRegistryDoesNotAcceptAnchorVocabularySpellings(t *testing.T) {
-	feed := AllMaterializableTypes()
-	live := make(map[string]bool, len(feed))
-	for _, dotted := range feed {
-		live[dotted] = true
-	}
-
-	var candidates, accepted []string
-	for bare := range validResourceTypes {
-		i := strings.IndexByte(string(bare), '_')
-		if i <= 0 {
-			continue // cluster / account / project / "*" — anchor-only, no dotted form
-		}
-		dotted := string(bare[:i]) + "." + string(bare[i+1:])
-		if live[dotted] {
-			continue // the feed does emit this one; the positive half owns it
-		}
-		candidates = append(candidates, dotted)
-		if ValidTargetType(dotted) {
-			accepted = append(accepted, dotted)
-		}
-	}
-	require.NotEmptyf(t, candidates,
-		"every anchor-vocabulary spelling is also a live feed type — this gate has no subject left and must be replaced by whatever guards the merged vocabulary")
-	t.Logf("scanned: %d anchor-vocabulary spellings absent from the %d-type feed", len(candidates), len(feed))
-
-	require.Emptyf(t, accepted,
-		"%d anchor-vocabulary spellings are accepted as per-object targets although the feed never emits them; a binding naming one grants nothing and says so to nobody: %v",
-		len(accepted), accepted)
-}
-
-// TestTargetTypeRegistryIsSeparateFromTheScopeAnchorVocabulary — validResourceTypes
-// answers a DIFFERENT question (which anchor kind a binding is attached to:
-// cluster / account / project and the legacy bare kinds) and must keep answering
-// it. This is the control on the fix: the target predicate stops reading that map,
-// the anchor predicate must not.
+// `target` (F8) называет ОБЪЕКТ под якорем и судится лентой материализации;
+// `ResourceType` называет САМ ЯКОРЬ и судится тремя ярусами иерархии. Наборы не
+// пересекаются вовсе, и это утверждается с ОБЕИХ сторон — иначе «раздельны»
+// зеленело бы на любом из двух опустевших вокабуляров.
+//
+// Здесь этот гейт ходил в `validResourceTypes` — рукописную карту, которая была
+// вторым, разошедшимся объявлением вокабуляра якоря. Карта снята вместе со своим
+// предметом (#1092), и гейт переведён на ЖИВОЙ источник: ленту и сам предикат
+// якоря. Словесные же близнецы (`nlb` против `networkLoadBalancers`) переписыванием
+// ленты недостижимы — их стережёт гейт у порождённой таблицы
+// (authzmap/target_vocabulary_word_twins_test.go), где живёт производитель.
 func TestTargetTypeRegistryIsSeparateFromTheScopeAnchorVocabulary(t *testing.T) {
-	require.NotEmpty(t, validResourceTypes, "validResourceTypes is empty — the anchor vocabulary would assert nothing")
-	t.Logf("scanned: validResourceTypes=%d entries", len(validResourceTypes))
+	feed := AllMaterializableTypes()
+	require.NotEmpty(t, feed, "AllMaterializableTypes() пуста — гейт не утверждал бы ничего")
 
-	for _, anchor := range []string{"cluster", "account", "project"} {
+	anchors := []string{"cluster", "account", "project"}
+	for _, anchor := range anchors {
 		require.NoErrorf(t, ResourceType(anchor).Validate(),
-			"ResourceType(%q).Validate() rejects a scope anchor — the anchor vocabulary was damaged", anchor)
+			"ResourceType(%q).Validate() отвергает ярус — вокабуляр якоря повреждён", anchor)
+		require.Falsef(t, ValidTargetType(anchor),
+			"ValidTargetType(%q) истинно — ярус принят как ПООБЪЕКТНАЯ цель", anchor)
 	}
-	// A retired block-storage type is in neither vocabulary. Paired with the
-	// anchors above so "absent" is distinguishable from "the map is gone".
-	for _, retired := range []string{"compute_disk", "compute_image", "compute_snapshot"} {
-		require.Errorf(t, ResourceType(retired).Validate(),
-			"ResourceType(%q).Validate() accepts a retired block-storage type", retired)
+	for _, dotted := range feed {
+		require.Errorf(t, ResourceType(dotted).Validate(),
+			"ResourceType(%q).Validate() принимает пообъектный тип как ЯКОРЬ области", dotted)
 	}
+	t.Logf("перепись: ярусов якоря %d, типов ленты %d, пересечение 0", len(anchors), len(feed))
 }
 
 // TestRetiredBlockStorageHasATargetableSuccessor — the lane's own paired

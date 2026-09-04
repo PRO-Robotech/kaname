@@ -70,7 +70,7 @@ func TestRule_A13_Validate(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			r := base()
 			c.mutate(&r)
-			err := r.Validate(c.systemCtx)
+			err := r.Validate(domain.PolicyOfRole(c.systemCtx, ""), fixtureModules())
 			if c.wantErr == "" {
 				if err != nil {
 					t.Fatalf("Rule.Validate() = %v, want nil", err)
@@ -95,7 +95,7 @@ func TestRule_Validate_ModuleEmpty(t *testing.T) {
 	// verbs valid, no selector) so multierr accumulates EXACTLY one error → the
 	// single stable text. Assertion is precise.
 	r := domain.Rule{Module: "", Resources: []string{"subnet"}, Verbs: []string{"get"}}
-	err := r.Validate(false)
+	err := r.Validate(domain.TenantPolicy(), fixtureModules())
 	if err == nil {
 		t.Fatalf("Validate() = nil, want %q", "Illegal argument module (must be non-empty)")
 	}
@@ -114,7 +114,7 @@ func TestRule_Validate_ModuleUnknown(t *testing.T) {
 	// "banana" matches ruleModuleRe (^[a-z][a-z0-9-]*$) but is NOT in the closed
 	// set {iam,vpc,compute,loadbalancer}. Request-path reject via IsKnownModule.
 	r := domain.Rule{Module: "banana", Resources: []string{"subnet"}, Verbs: []string{"get"}}
-	err := r.Validate(false)
+	err := r.Validate(domain.TenantPolicy(), fixtureModules())
 	if err == nil {
 		t.Fatalf("Validate() = nil, want %q", "Illegal argument module (unknown module 'banana')")
 	}
@@ -127,7 +127,7 @@ func TestRule_Validate_ModuleUnknown(t *testing.T) {
 	}
 	// Counter-example (positive): a member of the set validates clean.
 	ok := domain.Rule{Module: "vpc", Resources: []string{"subnet"}, Verbs: []string{"get"}}
-	if err := ok.Validate(false); err != nil {
+	if err := ok.Validate(domain.TenantPolicy(), fixtureModules()); err != nil {
 		t.Fatalf("Validate(known module) = %v, want nil", err)
 	}
 }
@@ -139,7 +139,7 @@ func TestRule_Validate_ModuleInvalidToken(t *testing.T) {
 	for _, m := range cases {
 		t.Run(m, func(t *testing.T) {
 			r := domain.Rule{Module: m, Resources: []string{"subnet"}, Verbs: []string{"get"}}
-			err := r.Validate(false)
+			err := r.Validate(domain.TenantPolicy(), fixtureModules())
 			if err == nil || !strings.Contains(err.Error(), "Illegal argument module (invalid token") {
 				t.Fatalf("Validate(%q) = %v, want 'Illegal argument module (invalid token ...)'", m, err)
 			}
@@ -158,18 +158,18 @@ func TestRule_Validate_ModuleWildcardSystemOnly(t *testing.T) {
 	// system-only text (one violation: wildcard in custom context; resource is
 	// concrete, no selector).
 	custom := domain.Rule{Module: "*", Resources: []string{"instance"}, Verbs: []string{"get"}}
-	err := custom.Validate(false)
+	err := custom.Validate(domain.TenantPolicy(), fixtureModules())
 	if err == nil || !strings.Contains(err.Error(), "Illegal argument module (wildcard '*' is system-only)") {
 		t.Fatalf("custom module-* = %v, want 'Illegal argument module (wildcard '*' is system-only)'", err)
 	}
 	// seed (systemCtx=true): module:"*" without selector accepted (admin form).
 	seed := domain.Rule{Module: "*", Resources: []string{"instance"}, Verbs: []string{"get"}}
-	if err := seed.Validate(true); err != nil {
+	if err := seed.Validate(domain.PolicyOfRole(true, ""), fixtureModules()); err != nil {
 		t.Fatalf("seed module-* = %v, want nil (system relax)", err)
 	}
 	// seed full superuser `*.*.* ` accepted (admin/edit/view re-seed form).
 	su := domain.Rule{Module: "*", Resources: []string{"*"}, Verbs: []string{"*"}}
-	if err := su.Validate(true); err != nil {
+	if err := su.Validate(domain.PolicyOfRole(true, ""), fixtureModules()); err != nil {
 		t.Fatalf("seed *.*.* = %v, want nil (system superuser)", err)
 	}
 }
@@ -181,7 +181,7 @@ func TestRule_Validate_WildcardPlusSelector_AccumulatesBothErrors(t *testing.T) 
 		Module: "*", Resources: []string{"instance"}, Verbs: []string{"get"},
 		MatchLabels: map[string]string{"env": "prod"},
 	}
-	err := r.Validate(false)
+	err := r.Validate(domain.TenantPolicy(), fixtureModules())
 	if err == nil {
 		t.Fatalf("Validate() = nil, want BOTH module-system-only AND wildcard-cannot-combine")
 	}
@@ -250,7 +250,7 @@ func TestRule_A10_FeedGate(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := c.rule.Validate(false)
+			err := c.rule.Validate(domain.TenantPolicy(), fixtureModules())
 			if c.wantErr == "" {
 				if err != nil {
 					t.Fatalf("Validate() = %v, want nil", err)

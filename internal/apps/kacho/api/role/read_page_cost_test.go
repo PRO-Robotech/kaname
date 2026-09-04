@@ -56,6 +56,7 @@ import (
 	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
 	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
+	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
 )
 
 // roleTypePopulation — how many iam_role objects the subject is granted besides
@@ -163,7 +164,7 @@ func crowdedRoleScenario(t *testing.T) (*roleListFakeRepo, *pageCostRoleRelation
 func TestGetRole_OwnRoleAmongACrowdedType(t *testing.T) {
 	repo, rel, ownedID := crowdedRoleScenario(t)
 
-	uc := NewGetRoleUseCase(repo).WithRelationStore(rel)
+	uc := NewGetRoleUseCase(repo, catalogfixture.Source()).WithRelationStore(rel)
 	got, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID(ownedID))
 
 	require.NoError(t, err, "granted, existing custom role must be readable by id")
@@ -180,7 +181,7 @@ func TestGetRole_OwnRoleAmongACrowdedType(t *testing.T) {
 func TestListRoles_OwnRoleAmongACrowdedType(t *testing.T) {
 	repo, rel, ownedID := crowdedRoleScenario(t)
 
-	uc := NewListRolesUseCase(repo).WithRelationStore(rel)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(rel)
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 
 	require.NoError(t, err)
@@ -205,7 +206,7 @@ func TestListRoles_SystemOnlyPageAsksNothingAboutObjects(t *testing.T) {
 	seedSystemRole(repo, "rol0000000000000sys2")
 	rel := newPageCostRoleRelations() // grants nothing at all
 
-	uc := NewListRolesUseCase(repo).WithRelationStore(rel)
+	uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(rel)
 	out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 
 	require.NoError(t, err)
@@ -223,7 +224,7 @@ func TestRoleReads_UngrantedCustomStaysInvisibleInACrowdedType(t *testing.T) {
 	seedSystemRole(repo, "rol0000000000000sys1")
 
 	t.Run("List omits the ungranted custom role but keeps system", func(t *testing.T) {
-		uc := NewListRolesUseCase(repo).WithRelationStore(rel)
+		uc := NewListRolesUseCase(repo, catalogfixture.Source()).WithRelationStore(rel)
 		out, _, err := uc.Execute(ctxUser("usr-u1"), reporole.ListFilter{PageSize: 100})
 		require.NoError(t, err)
 		ids := roleIDs(out)
@@ -232,7 +233,7 @@ func TestRoleReads_UngrantedCustomStaysInvisibleInACrowdedType(t *testing.T) {
 	})
 
 	t.Run("Get of the ungranted custom role is NOT_FOUND", func(t *testing.T) {
-		uc := NewGetRoleUseCase(repo).WithRelationStore(rel)
+		uc := NewGetRoleUseCase(repo, catalogfixture.Source()).WithRelationStore(rel)
 		got, err := uc.Execute(ctxUser("usr-u1"), domain.RoleID("rol0000000000000scrt"))
 		require.Error(t, err)
 		assert.Equal(t, codes.NotFound, status.Code(err),

@@ -25,6 +25,55 @@ type Facts struct {
 	verbsByFGAType map[string][]string
 	common         []string
 	all            []string
+	// modules — ЖИВЫЕ строки `catalog_module`, индекс членства. Хранится
+	// отдельным набором, а не выводится из `verbsByFGAType`: приставка имени
+	// типа МОДЕЛИ модулю не равна (`nlb_listener` против модуля
+	// `loadbalancer`), и вывод оттуда дал бы третий словарь имени модуля.
+	modules map[string]struct{}
+	// moduleOrder — тот же набор в порядке чтения, для переписей и текстов
+	// отказа. Копия отдаётся наружу, чтобы вызывающий не испортил снимок
+	// сортировкой на месте.
+	moduleOrder []string
+	// fgaTypeByDotted — переходник «точечное имя каталога → имя типа МОДЕЛИ»,
+	// собранный ИЗ ЖИВЫХ СТРОК.
+	//
+	// Раньше это спрашивалось у `authzmap.FGAObjectType`, то есть у словаря,
+	// ПОРОЖДЁННОГО СБОРКОЙ. Направление СНЯТИЯ такой переходник закрывал (строка
+	// исчезла — читатель её не видит), а направление ЗАВЕДЕНИЯ не закрывал ничем:
+	// тип, которого сборка не знала, получал «не найдено», и строка пропускалась
+	// МОЛЧА — при живом членстве модуля и роли, созданной без отказа (#1816,
+	// IAM-CT-2-14).
+	//
+	// Вторым переходником это не является: соответствие здесь не вычисляется, а
+	// читается из строки, куда его положил манифест модуля. Согласие с таблицей
+	// сборки на посеянных строках держит страж старта.
+	fgaTypeByDotted map[string]string
+	// resources — ЖИВЫЕ пары каталога в порядке точечного ключа.
+	//
+	// Хранится перечнем, а не выводится из `fgaTypeByDotted` обходом карты:
+	// обход карты в Go не упорядочен, а порядок здесь — часть контракта витрины
+	// разрешений, которая эти пары показывает арендатору.
+	//
+	// Пара хранится РАЗОБРАННОЙ, хотя точечный ключ её и определяет: разбор по
+	// первой точке — правило, знать которое есть работа сборщика факта, а не
+	// каждого читателя. Второе место, знающее это правило, разошлось бы с первым
+	// на ресурсе, чьё имя содержит точку.
+	resources []ResourceEntry
+}
+
+// ResourceEntry — одна ЖИВАЯ пара каталога вместе с именем её типа в словаре
+// МОДЕЛИ ПРАВ.
+//
+// Три величины отдаются ВМЕСТЕ намеренно. Имя типа не выводится из пары
+// (правила `<модуль>_<ресурс>`, верного на всех строках, не существует — см.
+// `ResourceRow.ObjectType`), поэтому читатель, получивший пару без имени, пошёл
+// бы за ним к словарю, ПОРОЖДЁННОМУ СБОРКОЙ, — то есть ровно туда, откуда его
+// уводит этот перечень.
+type ResourceEntry struct {
+	Module   string
+	Resource string
+	// ObjectType — имя типа в словаре МОДЕЛИ ПРАВ (`vpc_network`, `account`).
+	ObjectType string
 }
 
 // NewFacts собирает факт из живых строк каталога.
@@ -42,10 +91,48 @@ func NewFacts(rows Rows) (*Facts, error) {
 			len(rows.Modules), len(rows.Resources), len(rows.Verbs))
 	}
 
-	live := make(map[string]bool, len(rows.Resources))
-	for _, r := range rows.Resources {
-		live[r.Module+"."+r.Resource] = true
+	modules := make(map[string]struct{}, len(rows.Modules))
+	moduleOrder := make([]string, 0, len(rows.Modules))
+	for _, m := range rows.Modules {
+		if _, dup := modules[m]; dup {
+			continue
+		}
+		modules[m] = struct{}{}
+		moduleOrder = append(moduleOrder, m)
 	}
+	sort.Strings(moduleOrder)
+
+	live := make(map[string]bool, len(rows.Resources))
+	fgaTypeByDotted := make(map[string]string, len(rows.Resources))
+	resources := make([]ResourceEntry, 0, len(rows.Resources))
+	for _, r := range rows.Resources {
+		dotted := r.Module + "." + r.Resource
+		live[dotted] = true
+		// Строка БЕЗ имени типа — ОТКАЗ, а не пропуск. Пропуск здесь и есть тот
+		// дефект, ради снятия которого колонка заведена: ресурс существует,
+		// членство модуля отвечает «да», роль создаётся без отказа — и проекция
+		// по нему пуста, о чём не говорит ни одна полоса.
+		//
+		// Схема такой строки не производит (`object_type NOT NULL` плюс
+		// грамматика), поэтому предмет отказа — читатель, собравший строки в
+		// ПАМЯТИ: деривация манифеста и фикстуры. Там ключа нет by construction,
+		// и молчание отличалось бы от исправной работы только числом пар, которое
+		// никто не смотрит.
+		if r.ObjectType == "" {
+			return nil, fmt.Errorf("строка каталога %s не несёт имени типа модели прав: "+
+				"проекция «роль → тип × глагол» по ней была бы ПУСТА при роли, созданной "+
+				"без отказа, и ни одна полоса об этом не сказала бы (kacho#1816, IAM-CT-2-14)",
+				dotted)
+		}
+		fgaTypeByDotted[dotted] = r.ObjectType
+		resources = append(resources, ResourceEntry(r))
+	}
+	sort.Slice(resources, func(i, j int) bool {
+		if resources[i].Module != resources[j].Module {
+			return resources[i].Module < resources[j].Module
+		}
+		return resources[i].Resource < resources[j].Resource
+	})
 
 	byDotted := make(map[string][]string, len(rows.Resources))
 	for _, v := range rows.Verbs {
@@ -72,16 +159,19 @@ func NewFacts(rows Rows) (*Facts, error) {
 		byDotted[dotted] = append(byDotted[dotted], v.Verb)
 	}
 
-	f := &Facts{verbsByFGAType: make(map[string][]string, len(byDotted))}
+	f := &Facts{
+		verbsByFGAType:  make(map[string][]string, len(byDotted)),
+		modules:         modules,
+		moduleOrder:     moduleOrder,
+		fgaTypeByDotted: fgaTypeByDotted,
+		resources:       resources,
+	}
 	for dotted, verbs := range byDotted {
-		fgaType, ok := authzmap.FGAObjectType(dotted)
-		if !ok {
-			// Строка есть, а имени типа модели у неё нет — тип чужой либо снят с
-			// канона. Отношения `v_*` у него не существует, поэтому набор
-			// глаголов для него не имеет адресата: пара в проекции указывала бы
-			// на отношение, которого нет в модели.
-			continue
-		}
+		// Имя типа есть у КАЖДОЙ живой строки: строка без него отвергнута выше,
+		// а глагол снятого ресурса отсеян отбором `live` до сюда. Значит промах
+		// здесь невозможен by construction, и ветви «не нашлось» тут больше нет —
+		// она объявляла бы состояние, которого не бывает.
+		fgaType := fgaTypeByDotted[dotted]
 		sort.Strings(verbs)
 		f.verbsByFGAType[fgaType] = verbs
 	}
@@ -131,6 +221,63 @@ func vocabularies(byType map[string][]string) (common, all []string) {
 	return common, all
 }
 
+// IsKnownModule — членство модуля в ЖИВОМ каталоге. Реализует
+// `domain.ModuleSet`: домен набора не знает и получает его отсюда.
+//
+// # Почему ответ берётся у снимка, а не у запроса к базе
+//
+// Каталог мал и меняется реже всего в схеме, а спрашивают его на горячем пути
+// создания и правки роли. Запрос на каждом обращении оплачивался бы запросом
+// арендатора. Отставание при этом ОГРАНИЧЕНО и НАЗВАНО — оно равно периоду
+// обновления снимка, задаваемому профилем развёртывания (см. [Snapshot]), а не
+// сроку жизни процесса: снятие модуля доезжает до пути запроса за один период,
+// без перезапуска.
+//
+// Подстановочный знак `*` модулем НЕ является: строки с таким именем в каталоге
+// нет и быть не может (`catalog_module_nonempty` плюс грамматика имени), а
+// разрешает его политика правила, а не набор.
+func (f *Facts) IsKnownModule(module string) bool {
+	_, ok := f.modules[module]
+	return ok
+}
+
+// Modules — ЖИВЫЕ модули каталога, отсортированно. Возвращается КОПИЯ: снимок
+// вызывающему не принадлежит.
+func (f *Facts) Modules() []string {
+	out := make([]string, len(f.moduleOrder))
+	copy(out, f.moduleOrder)
+	return out
+}
+
+// FGAObjectType — имя типа МОДЕЛИ ПРАВ для точечного имени каталога
+// («vpc.network» → «vpc_network»), по ЖИВЫМ строкам; ok=false у ресурса, чья
+// строка снята либо которого в каталоге нет вовсе.
+//
+// Это тот же вопрос, что задавал `authzmap.FGAObjectType`, и та же закрытость:
+// незнакомая пара обязана дать ok=false, а НЕ произвольный тип модели. Отличие
+// одно и оно несущее — ИСТОЧНИК. Порождённая сборкой таблица закрывала
+// направление СНЯТИЯ и не закрывала ЗАВЕДЕНИЕ: тип, которого сборка не знала,
+// получал «не найдено», и вызывающий пропускал его молча при роли, созданной без
+// отказа (#1816, IAM-CT-2-14).
+//
+// Вторым переходником это не является: соответствие не вычисляется, а читается
+// из строки, куда его положил манифест модуля.
+// Resources — ЖИВЫЕ пары каталога в порядке точечного ключа.
+//
+// Отдаётся КОПИЯ по той же причине, что и у `Modules`: перечень принадлежит
+// неизменяемому факту, и сортировка на месте у вызывающего испортила бы снимок
+// для всех остальных.
+func (f *Facts) Resources() []ResourceEntry {
+	out := make([]ResourceEntry, len(f.resources))
+	copy(out, f.resources)
+	return out
+}
+
+func (f *Facts) FGAObjectType(dotted string) (string, bool) {
+	fgaType, ok := f.fgaTypeByDotted[dotted]
+	return fgaType, ok
+}
+
 // VerbsOfType — ГЛАГОЛЫ, объявленные ЖИВЫМ типом, отсортированно; nil у типа,
 // чья строка снята либо которого в каталоге нет вовсе (`cluster`).
 //
@@ -168,6 +315,44 @@ func (f *Facts) AllVerbVocabulary() []string {
 // который зависит от каталога, — объявляет ли ЖИВОЙ тип набор глаголов вообще.
 // Повторить вычисление здесь значило бы завести второе место об одном предмете:
 // ровно так роль-администратор однажды давала движку всё, а проекции — ничего.
+// RolePreviewLookup — резолв набора глаголов ПАРЫ каталога для превью роли
+// (#1994).
+//
+// Пара переводится в имя типа МОДЕЛИ по ЖИВОЙ строке, и набор берётся у неё же.
+// Прежде перевод делала таблица, ПОРОЖДЁННАЯ СБОРКОЙ: тип, заведённый применением
+// манифеста в работающем процессе, она не резолвила, и вызывающий брал запасной
+// набор — глаголы ВСЕЙ платформы.
+//
+// # Запасной набор ОСТАЁТСЯ, и он тут же
+//
+// Правило, не адресующее ни одного типа (форма `*.*` роли-суперпользователя),
+// своего набора не имеет by construction: перечислить ресурсы подстановки домену
+// нечем. Пустое превью читалось бы как «роль ничего не даёт», поэтому такая пара
+// получает ОБЪЕДИНЕНИЕ наборов живых типов.
+//
+// Объединение, а НЕ пересечение: пересечение сужается, когда какой-нибудь тип
+// снимает у себя глагол, — и роль `*.*` начинала бы обещать меньше, чем даёт, от
+// правки, к ней не относящейся (наблюдалось при #1189).
+//
+// Оба ответа приходят из ОДНОГО факта: взяв набор типа отсюда, а запасной у
+// другого источника, вызывающий получил бы превью, собранное из двух снимков.
+func (f *Facts) RolePreviewLookup() domain.TypeVerbLookup {
+	return domain.WithCommonFallback(
+		func(module, resource string) ([]string, bool) {
+			fgaType, ok := f.FGAObjectType(module + "." + resource)
+			if !ok {
+				return nil, false
+			}
+			verbs := f.VerbsOfType(fgaType)
+			if len(verbs) == 0 {
+				return nil, false
+			}
+			return verbs, true
+		},
+		f.AllVerbVocabulary(),
+	)
+}
+
 func (f *Facts) GrantedVerbs(fgaType string, authored, typeVerbs []string) []string {
 	return authzmap.GrantedVerbsWithDeclared(fgaType, len(f.verbsByFGAType[fgaType]) > 0,
 		authored, typeVerbs)
@@ -180,9 +365,18 @@ func (f *Facts) GrantedVerbs(fgaType string, authored, typeVerbs []string) []str
 // каким его читает вердикт (`role_verb.object_type`); набор глаголов
 // спрашивается по имени МОДЕЛИ, поэтому перевод делается здесь ровно один раз.
 //
-// Тип, чья строка СНЯТА, пар не даёт — и это предмет задачи #1816: пара по
-// снятому типу дошла бы до внешнего ключа `role_verb_type_fk` и была бы им
-// отвергнута, то есть отказ пришёл бы ЧУЖОЙ полосой.
+// НАПРАВЛЕНИЙ ДВА, и оба обязаны быть верны по живым строкам:
+//
+//   - СНЯТИЕ: тип, чья строка снята, пар не даёт. Пара по снятому типу дошла бы
+//     до внешнего ключа `role_verb_type_fk` и была бы им отвергнута, то есть
+//     отказ пришёл бы ЧУЖОЙ полосой (IAM-CT-2-06);
+//   - ЗАВЕДЕНИЕ: тип, заведённый применением манифеста в РАБОТАЮЩЕМ процессе,
+//     пары даёт. Пока переходник спрашивался у таблицы, порождённой сборкой,
+//     этого не было: незнакомый ей тип пропускался молча, и арендатор не получал
+//     ничего при роли, созданной без отказа (IAM-CT-2-14).
+//
+// Порознь каждое направление выполнимо портом, который не производит пар
+// НИКОГДА, — поэтому утверждаются оба.
 func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain.RoleVerb {
 	seen := make(map[domain.RoleVerb]bool)
 	out := make([]domain.RoleVerb, 0, len(selectors))
@@ -191,7 +385,7 @@ func (f *Facts) RoleVerbsFromSelectors(selectors []domain.RuleSelector) []domain
 			if dotted == "" {
 				continue
 			}
-			fgaType, ok := authzmap.FGAObjectType(dotted)
+			fgaType, ok := f.FGAObjectType(dotted)
 			if !ok {
 				continue
 			}

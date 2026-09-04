@@ -46,7 +46,7 @@ import (
 // TestMain'ом один раз, — состояние и изоляция те же (см. internal/pgtest).
 func setupRedactorPG(t *testing.T) string {
 	t.Helper()
-	return appendSearchPathOptions(pgtest.NewDB(t))
+	return pgtest.NewDB(t)
 }
 
 // TestKAC164_RedactSAKeyClientSecret_FullFlow — closeout proof.

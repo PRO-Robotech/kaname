@@ -64,9 +64,16 @@ type abReader struct {
 }
 
 // abCols — access_bindings columns (RBAC v2 + scope + deletion_protection + F8
-// target). Order parity между SELECT (scanAB) и RETURNING (Insert/TransitionStatus/
-// SetDeletionProtection/DeleteGuarded). `target_digest` is write-only (index key,
-// computed on Insert) — NOT scanned, so it is deliberately absent here.
+// target). Порядок SELECT и RETURNING совпадает ПОСТРОЕНИЕМ: оба места
+// интерполируют эту константу, и разойтись им нечем. `target_digest` is
+// write-only (index key, computed on Insert) — NOT scanned, so it is
+// deliberately absent here.
+//
+// Здесь стоял поимённый перечень глаголов, несущих RETURNING. Он разошёлся с
+// деревом в ОБЕ стороны: называл `DeleteGuarded`, который эту проекцию не
+// возвращает, и молчал о `RevokeGuarded` и `UpdateLabels`, которые возвращают.
+// Рукописный перечень рядом с тем, что и так держится построением, гарантии не
+// добавляет — он добавляет второе место, стареющее молча (#1951).
 //
 // `role_id` читается через COALESCE: у ФОРМЫ ОТНОШЕНИЯ (системная выдача) роли
 // нет, и колонка допускает NULL. Пустая строка здесь — не подмена значения, а его
@@ -985,12 +992,18 @@ func scanAB(row scanner) (domain.AccessBinding, error) {
 	return scanABWithVersion(row)
 }
 
-// scanABWithVersion scans the canonical abCols into a domain.AccessBinding. When
-// versionOut is provided (γ GetWithVersion) the query MUST prepend an
+// scanABWithVersion — ЕДИНСТВЕННОЕ объявление порядка назначений под abCols.
+// When versionOut is provided (γ GetWithVersion) the query MUST prepend an
 // `xmin::text` column and the token is written into *versionOut[0] — the Scan
 // dest list is built with the version slot first to match. Without versionOut it
-// is the plain abCols scan (parity with the prior scanAB). Single helper keeps
-// the field list DRY across Get / GetWithVersion / list paths.
+// is the plain abCols scan: сюда делегирует `scanAB`, поэтому список один на
+// Get / GetWithVersion / list paths.
+//
+// Прежняя редакция обещала «parity with the prior scanAB». Отдельного `scanAB`
+// со своим списком уже нет — сверять стало не с чем, и утверждение о совпадении
+// пережило свой предмет. Расходиться внутри пакета этому списку теперь нечем;
+// остаточную ось «abCols против списка» держит проба арности
+// TestProjectionScanArityMatchesItsColumns (#1951).
 func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding, error) {
 	var (
 		ab           domain.AccessBinding
