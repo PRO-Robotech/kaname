@@ -639,16 +639,18 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 		}
 		return Unknown, g, err
 	}
-	labelTable, err := labelAxisOf(in.ObjectType)
-	if err != nil {
-		return Unknown, g, err
-	}
-	g.LabelAxisTable = labelTable
-
+	// Имя каталога читается ПЕРЕД выбором оси: ось выбирается по нему же
+	// (kacho#2036), и второго чтения каталога ради неё не заводится.
 	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return Unknown, g, err
 	}
+
+	labelTable, err := labelAxisOf(catalogType, in.ObjectType)
+	if err != nil {
+		return Unknown, g, err
+	}
+	g.LabelAxisTable = labelTable
 
 	rows, err := q.Query(ctx, verdictQuerySQL(labelTable),
 		in.Subject, in.ObjectType, in.ObjectID,
@@ -967,12 +969,14 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 		}
 		return nil, nil, err
 	}
-	labelTable, err := labelAxisOf(in.ObjectType)
+	// Имя каталога читается ПЕРЕД выбором оси: ось выбирается по нему же
+	// (kacho#2036), и второго чтения каталога ради неё не заводится.
+	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	labelTable, err := labelAxisOf(catalogType, in.ObjectType)
 	if err != nil {
 		return nil, nil, err
 	}

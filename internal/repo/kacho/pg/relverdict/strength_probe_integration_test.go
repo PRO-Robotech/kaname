@@ -653,7 +653,7 @@ func measureAsk(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictCa
 	res.tuples = after - before
 	res.calls = int64(capture.count())
 
-	axis, err := relverdict.LabelAxisForTest(strModelType)
+	axis, err := relverdict.LabelAxisForTest(strCatalogType, strModelType)
 	if err != nil {
 		t.Fatalf("ось меток: %v", err)
 	}
@@ -721,7 +721,7 @@ func measureList(t *testing.T, ctx context.Context, tx pgx.Tx, capture *verdictC
 		res.mode = scalegrid.AskDenyLabel
 	}
 
-	axis, err := relverdict.LabelAxisForTest(strModelType)
+	axis, err := relverdict.LabelAxisForTest(strCatalogType, strModelType)
 	if err != nil {
 		t.Fatalf("ось меток: %v", err)
 	}

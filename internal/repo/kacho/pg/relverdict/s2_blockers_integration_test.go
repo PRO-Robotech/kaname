@@ -48,7 +48,7 @@ func askAndExplain(t *testing.T, ctx context.Context, tx pgx.Tx, cap *verdictCap
 	if err != nil {
 		t.Fatalf("вопрос вердикта об %s: %v", objectID, err)
 	}
-	axis, err := relverdict.LabelAxisForTest(probeModelType)
+	axis, err := relverdict.LabelAxisForTest(probeCatalogType, probeModelType)
 	if err != nil {
 		t.Fatalf("ось меток: %v", err)
 	}
@@ -692,7 +692,7 @@ func TestVerdictBindingArmIsBoundedAndRunsFirst(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("вопрос вердикта: %v", err)
 	}
-	axis, err := relverdict.LabelAxisForTest(probeModelType)
+	axis, err := relverdict.LabelAxisForTest(probeCatalogType, probeModelType)
 	if err != nil {
 		t.Fatalf("ось меток: %v", err)
 	}

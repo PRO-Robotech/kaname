@@ -216,14 +216,16 @@ func Expand(ctx context.Context, q pgx.Tx, objectType, objectID, relation string
 	if err != nil {
 		return nil, err
 	}
-	// Неназначенная ось меток — ошибка, а не пустой перечень оснований: пустой
-	// перечень неотличим от честного «оснований нет» (см. labelAxisOf).
-	labelTable, err := labelAxisOf(objectType)
+	// Имя типа в словаре КАТАЛОГА — у ЖИВОЙ строки каталога (kacho#1986). Читается
+	// ПЕРЕД выбором оси: ось выбирается по этому же имени (kacho#2036), и второго
+	// чтения каталога ради неё не заводится.
+	catalogType, err := catalogTypeName(ctx, q, objectType)
 	if err != nil {
 		return nil, err
 	}
-	// Имя типа в словаре КАТАЛОГА — у ЖИВОЙ строки каталога (kacho#1986).
-	catalogType, err := catalogTypeName(ctx, q, objectType)
+	// Неназначенная ось меток — ошибка, а не пустой перечень оснований: пустой
+	// перечень неотличим от честного «оснований нет» (см. labelAxisOf).
+	labelTable, err := labelAxisOf(catalogType, objectType)
 	if err != nil {
 		return nil, err
 	}

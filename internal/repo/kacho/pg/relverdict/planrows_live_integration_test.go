@@ -151,7 +151,7 @@ func TestPlanRows_InstrumentReadsTheProductsOwnStatement(t *testing.T) {
 	sverochnaya := after - before
 
 	// ── 1. Текст запроса взят у продукта ─────────────────────────────────────
-	axis, err := relverdict.LabelAxisForTest("vpc_network")
+	axis, err := relverdict.LabelAxisForTest("vpc.network", "vpc_network")
 	if err != nil {
 		t.Fatalf("ось меток: %v", err)
 	}

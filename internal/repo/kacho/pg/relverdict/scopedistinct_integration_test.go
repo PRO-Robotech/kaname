@@ -190,7 +190,7 @@ func measureScopeShape(t *testing.T, ctx context.Context, shape chainShape) scop
 			"платится", shape.name, got)
 	}
 
-	axis, err := relverdict.LabelAxisForTest("vpc_network")
+	axis, err := relverdict.LabelAxisForTest("vpc.network", "vpc_network")
 	if err != nil {
 		t.Fatalf("ось меток: %v", err)
 	}

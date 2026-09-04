@@ -33,7 +33,16 @@ import (
 func VerdictQuerySQLForTest(labelTable string) string { return verdictQuerySQL(labelTable) }
 
 // LabelAxisForTest — ось меток, выбранная по типу объекта.
-func LabelAxisForTest(objectType string) (string, error) { return labelAxisOf(objectType) }
+//
+// Аргументов ДВА, и первый — имя типа в словаре КАТАЛОГА, ровно как у продукта
+// (kacho#2036): ось выбирается по живому имени каталога, а не по таблице,
+// порождённой сборкой. Мост, скрывший бы этот аргумент за переводом «как у
+// сборки», был бы дублёром, принимающим больше настоящего: на типе, чью строку
+// каталога тронуло применение, он отвечал бы не то, что отвечает продукт, и
+// расхождение осталось бы невидимым ровно там, где его и ловят.
+func LabelAxisForTest(catalogType, objectType string) (string, error) {
+	return labelAxisOf(catalogType, objectType)
+}
 
 // MaxConditionRowsForTest — предел числа различных условий на вопрос.
 //

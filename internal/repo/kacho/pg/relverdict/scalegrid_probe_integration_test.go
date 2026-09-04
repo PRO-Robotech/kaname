@@ -588,7 +588,7 @@ func measurePoint(t *testing.T, ctx context.Context, tx pgx.Tx, cap *verdictCapt
 	// Оператор берётся ЗАХВАТОМ у настоящего вызова, а не собирается пробой:
 	// проба, собравшая девять параметров своей рукой, планировала бы ДРУГОЙ
 	// запрос и молчала бы об этом.
-	axis, err := relverdict.LabelAxisForTest(probeModelType)
+	axis, err := relverdict.LabelAxisForTest(probeCatalogType, probeModelType)
 	if err != nil {
 		t.Fatalf("ось меток: %v", err)
 	}

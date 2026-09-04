@@ -202,15 +202,17 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	if err != nil {
 		return nil, "", err
 	}
-	// Неназначенная ось меток — ошибка, а не пустой перечень: пустой перечень
-	// неотличим от честного «никто не имеет» (см. labelAxisOf).
-	labelTable, err := labelAxisOf(in.ObjectType)
+	// Имя типа в словаре КАТАЛОГА — у ЖИВОЙ строки каталога, а не у таблицы,
+	// порождённой сборкой (kacho#1986, catalogtype.go). Читается ПЕРЕД выбором
+	// оси: ось выбирается по этому же имени (kacho#2036), и второго чтения
+	// каталога ради неё не заводится.
+	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
 	if err != nil {
 		return nil, "", err
 	}
-	// Имя типа в словаре КАТАЛОГА — у ЖИВОЙ строки каталога, а не у таблицы,
-	// порождённой сборкой (kacho#1986, catalogtype.go).
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	// Неназначенная ось меток — ошибка, а не пустой перечень: пустой перечень
+	// неотличим от честного «никто не имеет» (см. labelAxisOf).
+	labelTable, err := labelAxisOf(catalogType, in.ObjectType)
 	if err != nil {
 		return nil, "", err
 	}

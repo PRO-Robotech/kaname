@@ -357,10 +357,18 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	if err != nil {
 		return nil, "", err
 	}
+	// Имя типа в словаре КАТАЛОГА — у ЖИВОЙ строки каталога (kacho#1986). Читается
+	// ОДИН раз на вызов, как и сборка запроса: заходов у обхода несколько, а тип у
+	// них один. Стоит ПЕРЕД выбором оси: ось выбирается по этому же имени
+	// (kacho#2036), и второго чтения каталога ради неё не заводится.
+	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
+	if err != nil {
+		return nil, "", err
+	}
 	// Ось меток — и одновременно источник кандидатов: объект собственного типа iam
 	// живёт в своей таблице целиком. Неназначенная ось — ошибка, а не пустая
 	// страница (см. labelAxisOf).
-	labelTable, err := labelAxisOf(in.ObjectType)
+	labelTable, err := labelAxisOf(catalogType, in.ObjectType)
 	if err != nil {
 		return nil, "", err
 	}
@@ -372,13 +380,6 @@ func List(ctx context.Context, q pgx.Tx, in ListQuery) (ids []string, nextAfterI
 	//
 	// Метка `{{labels_join}}` отсюда ушла вместе со своим предметом: метки едут
 	// колонкой кандидата, второго чтения того же места больше нет.
-	// Имя типа в словаре КАТАЛОГА — у ЖИВОЙ строки каталога (kacho#1986). Читается
-	// ОДИН раз на вызов, как и сборка запроса: заходов у обхода несколько, а тип у
-	// них один.
-	catalogType, err := catalogTypeName(ctx, q, in.ObjectType)
-	if err != nil {
-		return nil, "", err
-	}
 	sql := listQuerySQL(labelTable)
 
 	after := in.AfterID

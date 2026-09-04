@@ -593,7 +593,7 @@ func withPlan(r opResult, m planrows.Measurement, shape string) opResult {
 func matrixAskAndExplain(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	capture *verdictCapture, want relverdict.Verdict) (planrows.Measurement, string) {
 	t.Helper()
-	axis, err := relverdict.LabelAxisForTest(probeModelType)
+	axis, err := relverdict.LabelAxisForTest(probeCatalogType, probeModelType)
 	if err != nil {
 		t.Fatalf("ось меток: %v", err)
 	}
