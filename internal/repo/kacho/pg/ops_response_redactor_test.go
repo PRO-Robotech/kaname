@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // ops_response_redactor_test.go — unit tests for the redactor adapter's
 // pre-validation. DB integration is exercised via integration tests

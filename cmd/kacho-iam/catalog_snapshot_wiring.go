@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // catalog_snapshot_wiring.go — период, с которым снимок каталога перечитывает
 // живые строки (kacho#1945).

@@ -181,7 +181,6 @@ type group
 # tuples with any other object id (P3-D17).
 #   - system_admin  — standing cluster administrator.
 #   - system_viewer — read-only cluster catalog viewer.
-#   - console       — cluster console access, MFA-gated.
 #   - any_admin     — alias for system_admin (kept as a relation name so
 #                     hierarchy `any_admin from cluster` references stay
 #                     valid across many downstream type definitions).
@@ -214,7 +213,25 @@ type cluster
     # жизнь. Снятие убирает ВИД защиты там, где защиты не было.
     #
     # Решение и его цена — services/iam/docs/engineering/architecture/relations-without-readers-withdrawn.md
-    define console: [user with mfa_fresh, service_account with mfa_fresh]
+    # ЗДЕСЬ СТОЯЛО `console`, И ОНО СНЯТО (#1820). Отношение объявлялось на
+    # КЛАСТЕРЕ и не читалось ничем: записи каталога прав с ним не было ни одной,
+    # ни одно объявление модели его не выводило (ни `or console`, ни
+    # `console from cluster`), и путь запроса его не спрашивал. Дома у него не
+    # было by construction: манифест домена его не объявляет — оно не
+    # принадлежит модулю; каталог прав не называет — у него нет RPC.
+    #
+    # ПОЧЕМУ СНЯТО, А НЕ ОСТАВЛЕНО БРОНЬЮ — тот же довод, что у `billing_admin`
+    # выше: выдать его было НЕЧЕМ. Роль отображается в ярусы
+    # `viewer`/`editor`/`admin`, правило роли даёт только глаголы `v_*`; пути,
+    # которым кортеж с `console` на кластере попал бы в хранилище, не существует
+    # ни одного, и проверка против него отвечала бы «нет» всем и всегда.
+    #
+    # ЧТО ЭТО НЕ ЗАТРАГИВАЕТ: `console` на типе `compute_instance` — ДРУГОЕ
+    # отношение, живое, и у него свой предмет (#2056, требование усиленного
+    # входа исполняет край).
+    #
+    # Разбор всех отношений якорей `cluster` и `account` —
+    # services/iam/docs/engineering/architecture/anchor-relations-adjudicated.md
     define any_admin: system_admin
     # KAC-178 §3: viewer — общий read-relation для глобальных reference-данных
     # (compute.Region, compute.Zone, …), к которым каталог permissions

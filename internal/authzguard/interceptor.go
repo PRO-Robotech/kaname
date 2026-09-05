@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // interceptor.go — gRPC unary/stream interceptor for kacho-iam, a
 // defence-in-depth anti-anonymous floor in front of every mutating RPC.

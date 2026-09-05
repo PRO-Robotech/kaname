@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // metadata_coverage_test.go — гейт против операции, которую некому довести до
 // терминального состояния.
@@ -35,7 +35,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // resolverFile — файл, чей переключатель и есть предмет проверки.
@@ -269,15 +269,22 @@ func repoRootForCoverage(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("рабочий каталог: %v", err)
 	}
+	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
+	// теперь СВОЙ модуль, и подъём «до первого» останавливался бы в её каталоге,
+	// а пути ниже называют место В ДЕРЕВЕ МОНОРЕПО — от корня.
+	outermost := ""
 	for i := 0; i < 12; i++ {
 		if _, serr := os.Stat(filepath.Join(dir, "go.mod")); serr == nil {
-			return dir
+			outermost = dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break
 		}
 		dir = parent
+	}
+	if outermost != "" {
+		return outermost
 	}
 	t.Fatalf("не найден корень репозитория (каталог с go.mod) над %s", dir)
 	return ""

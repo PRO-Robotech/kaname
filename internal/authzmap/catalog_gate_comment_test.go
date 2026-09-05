@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // catalog_gate_comment_test.go — КОММЕНТАРИЙ, НАЗЫВАЮЩИЙ ГЕЙТ ГЛАГОЛА, СВЕРЯЕТСЯ
 // С КАТАЛОГОМ ПРАВ (#1258).
@@ -50,7 +50,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // iamServiceGoTreeRelPath — что обходится.
@@ -151,7 +151,7 @@ func readCatalogGateEntries(t *testing.T) []catalogGateEntry {
 
 // walkIAMProductionGoFiles обходит не-тестовое дерево Go сервиса.
 //
-// Состав берётся у ИНДЕКСА git (`internal/treecorpus`), а не обходом диска.
+// Состав берётся у ИНДЕКСА git (`pkg/treecorpus`), а не обходом диска.
 // Обход диска читал бы игнорируемое — рабочие копии агентов, распаковки чартов,
 // отчёты прогонов, — и вердикт стал бы свойством рабочего каталога, а не
 // коммита. Пустой корпус там же объявлен отказом, поэтому «ноль находок» здесь

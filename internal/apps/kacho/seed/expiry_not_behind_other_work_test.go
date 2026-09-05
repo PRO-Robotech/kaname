@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // expiry_not_behind_other_work_test.go — a grant whose term has ended must stop
 // answering "allowed" without waiting for unrelated work.
@@ -42,8 +42,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/reconcile_outbox"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/reconcile_outbox"
 )
 
 // discardLogger keeps the worker's non-fatal warnings out of the test output.
@@ -100,6 +100,15 @@ func (q *exQueue) ClaimReconcileEvents(context.Context, int) ([]reconcile_outbox
 	return nil, nil
 }
 func (q *exQueue) MarkReconcileEventSent(context.Context, int64) error { return nil }
+
+// RecordReconcileEventFailure — порт учёта отказа (#2050). Здесь он не предмет:
+// сверка в этих пробах не отказывает, поэтому дублёр обязан молчать, а не
+// считать. Вызов на успешном пути — находка, и её ловит
+// `TestReconcileDrain_SuccessIsNotCounted`.
+func (q *exQueue) RecordReconcileEventFailure(context.Context, int64, string) (int, error) {
+	return 0, nil
+}
+
 func (q *exQueue) ListSelectorBindingIDs(context.Context) ([]domain.AccessBindingID, error) {
 	return q.selectors, nil
 }

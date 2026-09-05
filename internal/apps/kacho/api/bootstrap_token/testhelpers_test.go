@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package bootstrap_token
 
@@ -8,7 +8,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // setupTestDB hands the calling test its OWN database — all goose migrations
@@ -18,14 +18,14 @@ import (
 // It used to start a fresh container and replay the whole chain on every call.
 // The database now comes from the one container this test binary owns (wired in
 // testmain_pgtest_test.go), cloned from a template migrated once — see
-// internal/pgtest for why a clone is the same isolation a separate container
+// pkg/pgtest for why a clone is the same isolation a separate container
 // gave. The 0058 seed is part of the template, so it is present in every clone.
 //
 // # Почему здесь стоит пропуск под кратким режимом
 //
 // Пропуска тут не было, и это делало пакет ЕДИНСТВЕННЫМ во всём дереве, кто
 // поднимает Postgres под `-short`. Перепись поведением (маркер в
-// internal/pgtest.newDatabase, прогон 43 пакетов-владельцев контейнера,
+// pkg/pgtest.newDatabase, прогон 43 пакетов-владельцев контейнера,
 // `-short -p 1`): три теста этого пакета доходят до старта контейнера, у
 // остальных 42 пакетов — ноль.
 //
@@ -37,7 +37,7 @@ import (
 // контейнерные пробы исполняла ТОЛЬКО быстрая волна — в той самой раскладке,
 // которую корневой Makefile описывает как негодную для контейнерных пакетов
 // («под -p 12 контейнерные пакеты голодают друг у друга»). И второе, независимое
-// от нагрузки: `internal/pgtest` по построению ОТКАЗЫВАЕТ, а не пропускает, когда
+// от нагрузки: `pkg/pgtest` по построению ОТКАЗЫВАЕТ, а не пропускает, когда
 // демона Docker нет, — поэтому быстрая волна, задуманная как обходящаяся без
 // Docker, без него не проходила.
 //

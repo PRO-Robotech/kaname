@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // linkage_test.go — способность сверки «действие манифеста ↔ запись каталога»
 // УПАСТЬ, доказанная инъекцией по каждой оси (задача PRO-Robotech/kacho#1844).
@@ -24,8 +24,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest/roleexport"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest/roleexport"
 )
 
 // linkageCatalog — две записи каталога одного ресурса: внешняя и внутренняя.

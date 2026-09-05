@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // own_gate_wiring_guard_test.go — отказ в старте, исполненный в ОБЕ стороны.
 //
@@ -35,7 +35,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzcascade"
 )
 
 // askerNeverAsked — форма, которую страж НЕ спрашивает.

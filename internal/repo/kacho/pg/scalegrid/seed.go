@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package scalegrid
 
@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/resource_mirror"
 )
 
 // ПОСЕВЩИК ПРИБОРА ПОРЯДКОВ — КОНВЕЙЕРИЗОВАННАЯ ПОДАЧА ТЕХ ЖЕ СТЕЙТМЕНТОВ
@@ -50,8 +52,10 @@ import (
 // сам удовлетворять инвариантам, которые производитель держал за него. Три
 // обязанности, и все три исполнены рядом:
 //
-//  1. подаются ДОСЛОВНО те же стейтменты, что выпускает производитель, — не их
-//     редакция. Текст ниже сверен с `resource_mirror/emitter.go`;
+//  1. подаются ТЕ ЖЕ стейтменты, что выпускает производитель, — не их редакция
+//     и не её копия: текст объявлен ОДИН раз у него
+//     (`resource_mirror.StmtVersionOnlyBump`, `.StmtInsertOrSupersede`), и
+//     посевщик подаёт в пачку ЭТИ константы;
 //  2. ПОСТРОЧНАЯ СВЕРКА с производителем на малой точке: N посажено обоими
 //     путями, содержимое обеих таблиц сверено по всем колонкам. Без неё быстрый
 //     посевщик вправе посадить форму, которой производитель не производит, и
@@ -86,8 +90,19 @@ import (
 //     `count(*) FROM kacho_iam.resource_mirror`, и ноль объектов там неотличим
 //     от «условие замера не создано» ровно потому, что это одно и то же.
 //
-// Текст стейтментов при этом не расходится НИ В ЧЁМ — он копия, и её тождество
-// доказывает сверка (2).
+// Текст стейтментов при этом не расходится НИ В ЧЁМ — и это ПОСТРОЕНИЕ, а не
+// вывод сверки. Прежняя редакция утверждала здесь дословность копии и держалась
+// прозой: производителя у утверждения не было ни одного, а сверка (2) тождества
+// ТЕКСТА не доказывает — она сажает один набор двумя путями и сравнивает строки
+// результата. Копии успели разойтись дважды: условие приёма не доехало до полосы
+// сдвига версии, имя типа словаря модели — до полосы вставки; обе оси прошли
+// молча, потому что на живом типе строки результата одинаковы (#1890).
+//
+// Копия больше невыразима: объявление одно. Что копия не заведётся снова, стережёт
+// `TestSeederTakesStatementsFromTheProducer` (`statement_source_test.go`) — он
+// требует у посевщика НОЛЬ пишущих в зеркало литералов при непустом их числе у
+// производителя; читающие переписи посевщика под него не подпадают, и это его
+// законный близнец.
 
 // BatchObjects — сколько объектов уходит в БД одним обменом.
 //
@@ -176,45 +191,22 @@ func (s *Seeder) Queue(ctx context.Context, row MirrorRow) error {
 	}
 	version := versionOr(row.SourceVersion)
 
-	// (1) VERSION-ONLY BUMP — условный UPDATE производителя.
-	s.batch.Queue(
-		`UPDATE kacho_iam.resource_mirror
-		    SET source_version = $6, updated_at = now()
-		  WHERE object_type       = $1
-		    AND object_id         = $2
-		    AND parent_project_id = $3
-		    AND parent_account_id = $4
-		    AND labels            = $5::jsonb
-		    AND source_version    < $6`,
-		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
-
-	// (2) INSERT-OR-SUPERSEDE — вставка зеркала ПОД УСЛОВИЕМ ЖИВОГО ТИПА.
+	// (1) СДВИГ ВЕРСИИ и (2) ВСТАВКА ПОД УСЛОВИЕМ ПРИЁМА — операторы
+	// ПРОИЗВОДИТЕЛЯ, взятые у него, а не их редакция.
 	//
-	// Условие каталога приехало в производителя задачей #1031, и здесь оно не
-	// «добавлено по аналогии», а СКОПИРОВАНО вместе со стейтментом: расхождение
-	// текста означало бы, что сетка мерит запрос ДЕШЕВЛЕ того, который выпускает
-	// продукт, — то есть все её числа оптимистичны ровно на стоимость
-	// непройденной сверки с каталогом.
-	s.batch.Queue(
-		`WITH live_type AS (
-		     SELECT 1
-		       FROM kacho_iam.catalog_resource
-		      WHERE dotted = $1 AND live
-		 ), applied AS (
-		     INSERT INTO kacho_iam.resource_mirror
-		       (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
-		     SELECT $1::text, $2::text, $3::text, $4::text, $5::jsonb, $6::timestamptz, now()
-		      WHERE EXISTS (SELECT 1 FROM live_type)
-		     ON CONFLICT (object_type, object_id) DO UPDATE
-		        SET parent_project_id = EXCLUDED.parent_project_id,
-		            parent_account_id = EXCLUDED.parent_account_id,
-		            labels            = EXCLUDED.labels,
-		            source_version    = EXCLUDED.source_version,
-		            updated_at        = now()
-		      WHERE resource_mirror.source_version < EXCLUDED.source_version
-		     RETURNING 1
-		 )
-		 SELECT EXISTS (SELECT 1 FROM live_type), (SELECT count(*) FROM applied)`,
+	// Здесь стояли КОПИИ обоих, и шапка утверждала их дословность прозой.
+	// Копии разошлись молча по двум осям сразу: у полосы сдвига версии не было
+	// условия приёма (сетка сдвигала версию на типе, снятом с платформы), у
+	// полосы вставки не было имени типа словаря модели, приехавшего к
+	// производителю позже. Сверка, сажающая один набор двумя путями, этого не
+	// видит: она сравнивает СТРОКИ РЕЗУЛЬТАТА, а на живом типе они одинаковы.
+	//
+	// Тождество теперь построением: объявление одно (#1890). Ответы обоих
+	// операторов посевщик по-прежнему отбрасывает — вердикт о том, легли ли
+	// строки, выносит перепись (3), и это её предмет, а не его.
+	s.batch.Queue(resource_mirror.StmtVersionOnlyBump,
+		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
+	s.batch.Queue(resource_mirror.StmtInsertOrSupersede,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version)
 
 	edgeType := edgeObjectType(row.ObjectType)

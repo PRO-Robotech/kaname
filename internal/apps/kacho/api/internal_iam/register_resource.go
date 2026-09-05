@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // register_resource.go — RegisterResourceUseCase (Internal FGA-proxy).
 //
@@ -35,10 +35,10 @@ import (
 
 	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 	"github.com/PRO-Robotech/kacho/pkg/authz/proxytuple"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // relationOutboxEmitter — narrow write port: emit FGA tuple

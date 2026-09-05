@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // acting_as_a_person_is_not_editing_his_record_test.go — гейт на КЛАСС: право
 // ДЕЙСТВОВАТЬ ОТ ИМЕНИ человека не выводится из права ПРАВИТЬ ЕГО ЗАПИСЬ.
@@ -72,7 +72,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
 )
 
 // actingAsRPCs — публичные RPC, чей предмет есть ДЕЙСТВИЕ ОТ ИМЕНИ человека:

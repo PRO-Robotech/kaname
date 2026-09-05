@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package modulecatalog_test
 
@@ -51,10 +51,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // planVerdict — вердикт плана, как его объявляет §2.11.
@@ -97,7 +97,7 @@ const planVerdictSpareResource = "addressPool"
 // и утверждает `TestPlanHypotheticalStateCarriesTheRetiredSideToo`.
 func planVerdictProducer(live, retired catalog.Rows, declared modulecatalog.Declared) (planVerdict, error) {
 	plan, err := modulecatalog.PlanAgainstAnchor(
-		context.Background(), modulecatalog.NewCatalogState(live, retired), declared)
+		context.Background(), modulecatalog.NewCatalogState(live, retired), declared, seed.ImageAnchor())
 	return planVerdict(plan.Verdict), err
 }
 
@@ -443,7 +443,7 @@ func verdictByTheAnchor(t *testing.T, s planState, naive bool) planVerdict {
 	if naive {
 		nextRetired = catalog.Rows{}
 	}
-	census, _ := seed.AssertCatalogParity(context.Background(), &planStubSource{live: nextLive, retired: nextRetired})
+	census, _ := seed.AssertCatalogParity(context.Background(), &planStubSource{live: nextLive, retired: nextRetired}, seed.ImageAnchor())
 	return refusedIf(census.Diverged())
 }
 

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // federated_test.go — федеративная полоса проверяющего: утверждение подписал
 // ВНЕШНИЙ издатель, а перечень доверенных издателей ведём мы (задача #1124).
@@ -25,9 +25,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/clientassertion"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clientassertion"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 const (

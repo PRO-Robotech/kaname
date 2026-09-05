@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // keys.go — derive the PUBLIC key of the bootstrap client from the env-held
 // bootstrap ES256 private key. The private half is supplied at wire-time from a

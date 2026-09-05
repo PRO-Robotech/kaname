@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package modulecatalog — ПРИМЕНИТЕЛЬ КАТАЛОГА модуля: читает манифест как данные
 // и приводит строки `kacho_iam.catalog_module` / `catalog_resource` /
@@ -120,8 +120,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 var (
@@ -605,7 +605,7 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 			if cerr != nil {
 				return fmt.Errorf("%w: чтение каталога для сверки опоры: %w", ErrWriteFailed, cerr)
 			}
-			plan, aerr := AnchorVerdictOf(ctx, state)
+			plan, aerr := AnchorVerdictOf(ctx, state, conf.anchor)
 			if aerr != nil {
 				return fmt.Errorf("%w: сверка опоры: %w", ErrWriteFailed, aerr)
 			}

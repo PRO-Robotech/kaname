@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package moduleroles
 
@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // reconcile.go — сверка «объявлено манифестом против живого в базе» (приёмка
@@ -108,10 +108,22 @@ func (c ReconcileCensus) Void() bool { return c.LiveExamined == 0 && c.Declared 
 // порядок сделал бы вывод несравнимым между прогонами.
 func Reconcile(module string, declared []manifest.Role, live []domain.Role) ([]Discrepancy, ReconcileCensus) {
 	census := ReconcileCensus{Module: module}
-	// Набор — КАНОН, а не живые строки: сверка отвечает на вопрос «есть ли у
+	// Набор — канон ПЛЮС сверяемый модуль. Сверка отвечает на вопрос «есть ли у
 	// этого имени модуль-владелец вообще», и роль СНЯТОГО модуля владельца не
 	// теряет — её объявление по-прежнему принадлежит его манифесту (#1927).
-	known := domain.ModuleSetOf(authzmap.CatalogSeedModules()...)
+	//
+	// Сверяемый модуль добавлен вместе с размыканием набора (`manifest`,
+	// moduleset.go): его в порождённой сборкой таблице может не быть вовсе, а
+	// без него живая роль модуля оператора попадала в «без владельца» и
+	// ПРОПУСКАЛАСЬ — расхождение «живая, но не объявлена» не находилось никогда,
+	// и снять устаревшую роль оператора было нечем.
+	//
+	// ОСТАТОК НАЗВАН, а не умолчан: роль ТРЕТЬЕГО модуля оператора при сверке
+	// этого попадёт в «без владельца» вместо «другого модуля». Это разряд
+	// ПЕРЕПИСИ, а не решение — ни одна ветвь ниже на нём не ветвится, — и его
+	// точный ответ дают живые строки каталога, чья опора переезжает задачей
+	// #1861.
+	known := domain.ModuleSetOf(append(authzmap.CatalogSeedModules(), module)...)
 
 	declaredSet := make(map[domain.RoleName]struct{}, len(declared))
 	for i := range declared {

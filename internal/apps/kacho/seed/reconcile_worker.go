@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package seed
 
@@ -34,8 +34,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/reconcile_outbox"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/reconcile_outbox"
 )
 
 // ReconcileEngine — the reconcile use-case surface the worker drives.
@@ -49,6 +49,16 @@ type ReconcileEngine interface {
 type ReconcileQueue interface {
 	ClaimReconcileEvents(ctx context.Context, limit int) ([]reconcile_outbox.Event, error)
 	MarkReconcileEventSent(ctx context.Context, id int64) error
+	// RecordReconcileEventFailure учитывает ОДИН отказ сверки по строке:
+	// увеличивает счётчик попыток, записывает причину и возвращает число попыток
+	// ПОСЛЕ учёта.
+	//
+	// Порт заведён #2050. До него отказ оставлял строку неотправленной и
+	// повторялся ВЕЧНО, не двигая ни счётчика, ни причины: столбцы были
+	// объявлены схемой и не писались никем — то есть создавали вид учёта
+	// попыток, которого не было. Постоянно падающее событие повторялось без
+	// видимости и без отсечки.
+	RecordReconcileEventFailure(ctx context.Context, id int64, cause string) (int, error)
 	ListSelectorBindingIDs(ctx context.Context) ([]domain.AccessBindingID, error)
 	ListExpiredBindingIDs(ctx context.Context) ([]domain.AccessBindingID, error)
 }
@@ -177,9 +187,7 @@ func (w *ReconcileWorker) drain(ctx context.Context) {
 	}
 	for _, e := range events {
 		if err := w.engine.ReconcileObject(ctx, e.ObjectType, e.ObjectID); err != nil {
-			w.logger.WarnContext(ctx, "reconcile object failed, will retry",
-				slog.String("object_type", e.ObjectType), slog.String("object_id", e.ObjectID),
-				slog.Any("err", err))
+			w.recordFailure(ctx, e, err)
 			continue // leave event unsent → re-delivered next drain (idempotent)
 		}
 		if err := w.queue.MarkReconcileEventSent(ctx, e.ID); err != nil {
@@ -187,6 +195,43 @@ func (w *ReconcileWorker) drain(ctx context.Context) {
 				slog.Int64("event_id", e.ID), slog.Any("err", err))
 		}
 	}
+}
+
+// recordFailure учитывает один отказ сверки по строке очереди и говорит вслух,
+// когда строка пересекла порог отсечки.
+//
+// ПОЧЕМУ УЧЁТ, А НЕ ТОЛЬКО ЖУРНАЛ (#2050). До него отказ оставлял строку
+// неотправленной и повторялся ВЕЧНО, не двигая ни `attempt_count`, ни
+// `last_error`: столбцы схема объявляла, а писателя у них не было ни одного.
+// Постоянно падающее событие повторялось без видимости и без отсечки, а
+// объявленные и никем не записываемые столбцы создавали ВИД учёта попыток.
+//
+// ПЕРЕХОД ЧЕРЕЗ ПОРОГ ГОВОРИТСЯ ОДИН РАЗ, а не на каждом проходе: строка,
+// пересёкшая порог, из клейма выпадает, поэтому второго прохода по ней не
+// будет вовсе. Жалоба уровня ошибки — потому что отсечка означает, что чинить
+// надо не повторами.
+//
+// ОТКАЗ САМОГО УЧЁТА не роняет проход и не зачитывается в успех: строка
+// остаётся неотправленной и вернётся следующим клеймом. Молчать о нём нельзя —
+// неучтённая попытка есть отсечка, до которой очередь не доедет.
+func (w *ReconcileWorker) recordFailure(ctx context.Context, e reconcile_outbox.Event, cause error) {
+	attempts, rerr := w.queue.RecordReconcileEventFailure(ctx, e.ID, cause.Error())
+	if rerr != nil {
+		w.logger.WarnContext(ctx, "reconcile failure accounting failed",
+			slog.Int64("event_id", e.ID), slog.Any("err", rerr))
+		return
+	}
+	if attempts >= reconcile_outbox.MaxAttempts {
+		w.logger.ErrorContext(ctx, "reconcile event poisoned, cut off from the claim",
+			slog.Int64("event_id", e.ID),
+			slog.String("object_type", e.ObjectType), slog.String("object_id", e.ObjectID),
+			slog.Int("attempts", attempts), slog.Int("max_attempts", reconcile_outbox.MaxAttempts),
+			slog.Any("err", cause))
+		return
+	}
+	w.logger.WarnContext(ctx, "reconcile object failed, will retry",
+		slog.String("object_type", e.ObjectType), slog.String("object_id", e.ObjectID),
+		slog.Int("attempts", attempts), slog.Any("err", cause))
 }
 
 // sweep re-reconciles every selector binding (D12 defense-in-depth).

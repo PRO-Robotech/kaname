@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg
 
@@ -25,9 +25,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/group"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/group"
 )
 
 type groupReader struct {
@@ -35,6 +35,13 @@ type groupReader struct {
 }
 
 const groupCols = "id, account_id, name, description, labels, created_at"
+
+// groupUpdateQ — оператор записи группы. СТАТИЧЕСКИЙ: набор колонок известен
+// компилятору, применимость поля приезжает параметром (#2065; разбор —
+// `mutable_triplet_update.go`). `account_id` неизменяем и в перечень не входит —
+// вызывающий отвергает его до записи.
+const groupUpdateQ = `UPDATE groups SET` + mutableTripletSetSQL +
+	` WHERE id = $1 RETURNING ` + groupCols
 
 func (r *groupReader) Get(ctx context.Context, id domain.GroupID) (domain.Group, error) {
 	row := r.tx.QueryRow(ctx,
@@ -340,44 +347,15 @@ func (w *groupWriter) Update(ctx context.Context, g domain.Group, updateMask []s
 	if err != nil {
 		return domain.Group{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
-	mutableFields := map[string]bool{"name": true, "description": true, "labels": true}
-	apply := map[string]bool{}
-	if len(updateMask) == 0 {
-		for k := range mutableFields {
-			apply[k] = true
-		}
-	} else {
-		for _, f := range updateMask {
-			if !mutableFields[f] {
-				return domain.Group{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument update_mask field %q", f)
-			}
-			apply[f] = true
-		}
+	args, changed, err := mutableTripletUpdateArgs(
+		string(g.ID), string(g.Name), string(g.Description), labelsJSON, updateMask)
+	if err != nil {
+		return domain.Group{}, err
 	}
-	parts := []string{}
-	args := []any{}
-	idx := 1
-	if apply["name"] {
-		parts = append(parts, fmt.Sprintf("name = $%d", idx))
-		args = append(args, string(g.Name))
-		idx++
-	}
-	if apply["description"] {
-		parts = append(parts, fmt.Sprintf("description = $%d", idx))
-		args = append(args, string(g.Description))
-		idx++
-	}
-	if apply["labels"] {
-		parts = append(parts, fmt.Sprintf("labels = $%d", idx))
-		args = append(args, labelsJSON)
-	}
-	if len(parts) == 0 {
+	if !changed {
 		return w.Get(ctx, g.ID)
 	}
-	args = append(args, string(g.ID))
-	q := fmt.Sprintf(`UPDATE groups SET %s WHERE id = $%d RETURNING %s`,
-		strings.Join(parts, ", "), len(args), groupCols)
-	row := w.tx.QueryRow(ctx, q, args...)
+	row := w.tx.QueryRow(ctx, groupUpdateQ, args...)
 	out, err := scanGroup(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

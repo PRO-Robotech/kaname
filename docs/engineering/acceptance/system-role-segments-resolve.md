@@ -1,6 +1,6 @@
 <!--
 Copyright (c) PRO-Robotech
-SPDX-License-Identifier: BUSL-1.1
+SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
 # Приёмка: правила системных ролей говорят словарём глаголов платформы
@@ -2413,7 +2413,7 @@ GREEN  --- PASS: TestNewMigrationCitesAnApprovedAcceptance
 Ведомость (`poolcloseunbounded_test.go:102`, `"services/iam": 462`) линией **не
 тронута**: файла нет среди восьми изменённых. Замен ровно восемь, и они не
 косметика — `pgtest.ClosePoolAtEnd` действительно закрывает пул с пределом
-(`internal/pgtest/poolclose.go:85–95`, `closePoolWithin` + `t.Cleanup`), а не
+(`pkg/pgtest/poolclose.go:85–95`, `closePoolWithin` + `t.Cleanup`), а не
 переименовывает старое поведение.
 
 **Смена срока жизни проверена отдельно:** `t.Cleanup` против `defer` различались

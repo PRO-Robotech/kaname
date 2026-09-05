@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package authzmodel — каноническая модель прав, доступная коду iam в рантайме.
 //
@@ -56,7 +56,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
 )
 
 // DSL — каноническая модель.

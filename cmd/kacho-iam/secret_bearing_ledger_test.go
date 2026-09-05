@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // secret_bearing_ledger_test.go — ПОМЕЧЕННОЕ ПОЛЕ-НОСИТЕЛЬ ОБЯЗАНО СТОЯТЬ В
 // ПЕРЕЧНЕ ПОДМЕТАЛЬЩИКА (задача #1142, приёмка BAT-1 §4.3.2–§4.3.3,

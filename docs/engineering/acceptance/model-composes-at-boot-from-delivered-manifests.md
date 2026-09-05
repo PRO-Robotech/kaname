@@ -1,6 +1,6 @@
 <!--
 Copyright (c) PRO-Robotech
-SPDX-License-Identifier: BUSL-1.1
+SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
 # Приёмка: модель процесса собирается на старте из доставленных манифестов
@@ -192,7 +192,7 @@ $ go run ./services/iam/tools/modelcanoncheck ; echo $?
 `:137` это **вызов** `authzmodel.Shared()`. Фактический граф (`go list -deps`):
 
 ```
-authzmodel  → internal/authzplan   (и БОЛЬШЕ НИЧЕГО из kacho)
+authzmodel  → services/iam/internal/authzplan   (и БОЛЬШЕ НИЧЕГО из kacho)
 manifest    → authzmodel → authzplan;  authzmap, domain, …
 modelrender → manifest → authzmodel → authzplan;  authzmap, catalog
 ```
@@ -203,14 +203,21 @@ modelrender → manifest → authzmodel → authzplan;  authzmap, catalog
 
 ### 0.7 ПОДТВЕРЖДЕНО: шов для композиции УЖЕ объявлен в дереве
 
-`services/iam/internal/manifest/typereferent.go:57` объявляет два референта:
+`services/iam/internal/manifest/typereferent.go` объявляет два референта:
 `ReferentShippedTable` (ПОТРЕБЛЕНИЕ, нулевое значение) и `ReferentCanon`
 (ПОРОЖДЕНИЕ — «таблица есть ПРОДУКТ этого прохода, и судить им вход значит
-спрашивать у ответа»). Предикат — `judgesTypeExistence()` на `:66`.
+спрашивать у ответа»).
 
-**Условность отказа проверена прогоном, а не чтением:** ресурс с `objectType`
-`vpc_probe_thing` при `ReferentShippedTable` отвергается, при `ReferentCanon` —
-**проходит** (`err=<nil>, resources=1`).
+> **Замер этого раздела ПЕРЕЖИЛ свой предмет — снят задачей `#2015`.**
+> Здесь стояло: «ресурс с `objectType` `vpc_probe_thing` при
+> `ReferentShippedTable` отвергается, при `ReferentCanon` — проходит», и предикат
+> назывался `judgesTypeExistence()`. Таблица типов разомкнута: новый тип
+> принимается ОБОИМИ референтами, и приведённый прогон дал бы сегодня
+> `err=<nil>` в обеих полосах. Шов для композиции при этом никуда не делся —
+> референт остался, но различает он теперь ВЛАДЕНИЕ, а не существование
+> (`guardsImageOwnership()`), и условность отказа проверяется входом «тип образа
+> у ЧУЖОЙ строки». Решение —
+> `services/iam/docs/engineering/architecture/object-type-table-is-open-to-the-operator.md`.
 
 ### 0.8 ПОДТВЕРЖДЕНО: круг «таблица ← манифесты ← таблица» замкнут в дереве
 
@@ -231,7 +238,7 @@ services/iam/internal/authzmap/tables_gen.go:84 var objectTypes = map[string]str
 
 Задание требует «множество типов РАЗОБРАННОЙ модели равно „типы канона ∪
 объявленные `objectType`" в ОБЕ стороны». **Этого мало.**
-`authzplan.ParseModel` (`internal/authzplan/compile.go:189-196`) на повторном
+`authzplan.ParseModel` (`services/iam/internal/authzplan/compile.go:189-196`) на повторном
 объявлении типа дописывает `m.Types` и МОЛЧА перезаписывает `m.byName[name]`:
 
 ```go
@@ -487,7 +494,7 @@ $ go list -deps ./services/iam/cmd/kacho-iam | grep -c modelrender
 | в задании | в дереве | предикат |
 |---|---|---|
 | `sourcesOf` — `query.go:1090` | **`:1089`** (`:1090` — первая строка тела) | `grep -n 'func sourcesOf'` |
-| `authzplan` — под `services/iam` | **корень монорепо**, `internal/authzplan/` | `find . -type d -name authzplan` → одна |
+| `authzplan` — под `services/iam` | **корень монорепо**, `internal/authzplan/` (с тех пор переехал под `services/iam/` линией выноса) | `find . -type d -name authzplan` → одна |
 | `Plan(...)` в `authzplan` | там `Plan` — **тип** (`compile.go:421`); функция — `(*Model).Compile` (`:462`) | `grep -n 'func \|^type '` |
 | `loadDeliveredManifests` определена в `serve.go` | **`module_manifests.go:58`**; `serve.go` только зовёт | `git grep -n 'func loadDeliveredManifests'` |
 
@@ -698,15 +705,15 @@ $ go list -deps ./services/iam/cmd/kacho-iam | grep -c modelrender
 
 | # | производитель | координата | что производит |
 |---|---|---|---|
-| П-01 | `authzplan.ResolveCanonicalModel()` | `internal/authzplan/canonical.go:31` | путь и байты канона из дерева; отказ — `canonical model %s not found walking up from %s` (`:64`) |
+| П-01 | `authzplan.ResolveCanonicalModel()` | `services/iam/internal/authzplan/canonical.go:31` | путь и байты канона из дерева; отказ — `canonical model %s not found walking up from %s` (`:64`) |
 | П-02 | `authzmodel.New(dsl string) (*Plans, error)` | `services/iam/internal/authzmodel/authzmodel.go:113` | **разбор НАЗВАННОЙ модели** — шов композиции; `Shared()` выражен через него |
 | П-03 | `modelrender.Render(manifest.Resource) ([]byte, error)` | `services/iam/internal/modelrender/render.go:74` | байты блока типа; ошибок **ровно две** — `ErrObjectTypeEmpty` (`:54`), `ErrParentEmpty` (`:57`) |
 | П-04 | `modelrender.SplitCanon(dsl []byte) []Block` | `services/iam/internal/modelrender/canon.go:55` | разбор на блоки; граница — пустая строка ЛИБО следующий `type ` в нулевой колонке (`:69-72`) |
-| П-05 | `authzplan.ParseModel` | `internal/authzplan/compile.go:171` | `len(m.Types)` — **мощность**, растущая на повторе (§0.9) |
-| П-06 | `ParseModel` default-ветвь | `internal/authzplan/compile.go:223` | `строка %d: нераспознанная строка внутри типа %q: %q` — fail-closed на `type` с отступом |
+| П-05 | `authzplan.ParseModel` | `services/iam/internal/authzplan/compile.go:171` | `len(m.Types)` — **мощность**, растущая на повторе (§0.9) |
+| П-06 | `ParseModel` default-ветвь | `services/iam/internal/authzplan/compile.go:223` | `строка %d: нераспознанная строка внутри типа %q: %q` — fail-closed на `type` с отступом |
 | П-07 | `loadDeliveredManifests` | `services/iam/cmd/kacho-iam/module_manifests.go:58` | `[]*manifest.Manifest`; перепись `slog` (`dir`, `paths_seen`, `dirs_skipped`, `manifests_read`, `findings`, `modules`) печатается **до** ветвления на ошибку |
-| П-08 | `manifest.TypeReferent` | `services/iam/internal/manifest/typereferent.go:57` | два референта; `judgesTypeExistence()` (`:66`); `String()` печатает «канон …» / «закрытая таблица типов» |
-| П-09 | `ErrUnknownModule` · `ErrObjectTypeUnknown` | `manifest.go:116` (формат `:400`) · `resources.go:79` (формат `:811-818`) | тексты отказа Д-доставки; второй **условен** по референту |
+| П-08 | `manifest.TypeReferent` | `services/iam/internal/manifest/typereferent.go` | два референта. **Предмет сменился (`#2015`):** референт различает не «чем судится существование», а «является ли таблица образом» — `guardsImageOwnership()`; `String()` печатает «порождение …» / «образ …» |
+| П-09 | `ErrMalformedModule` · `ErrObjectTypeMalformed` · `ErrObjectTypeRedefinesImage` · `ErrObjectTypeCollision` | `moduleset.go` · `resources.go` | тексты отказа Д-доставки. **`ErrUnknownModule` и `ErrObjectTypeUnknown` СНЯТЫ вместе со своим предметом** (`#1927`, `#2015`): наборы модулей и типов разомкнуты, членство не спрашивается, и производителя у обоих отказов не осталось ни одного. Пришедшие на их место судят ФОРМУ, ВЛАДЕНИЕ и СТОЛКНОВЕНИЕ — то, что автор манифеста читает в тексте и может исправить; отказ владения **условен** по референту |
 | П-10 | `seed.AssertCatalogParity` | `catalog_parity.go:84`; отказы `:124`, `:129`; `LiteralRows()` `:153` | `ExtraRows`/`MissingRows` + перепись `literal_*`/`row_*`/`missing`/`extra` (`serve.go:247-255`) |
 | П-11 | `catalog.Facts.FGAObjectType(dotted) (string, bool)` | `services/iam/internal/catalog/facts.go:230` | тот же вопрос по **ЖИВЫМ строкам**; шапка `:221` это объявляет дословно |
 | П-12 | `validateRuleCatalog` | `rules_catalog.go:91`, судья `:105` | текущий отказ Д-роли по таблице сборки |
@@ -1445,7 +1452,7 @@ type synthmod_r%d
 **Расхождение чисел разрешено УТОЧНЕНИЕМ ЕДИНИЦЫ, а не выбором правдоподобного.**
 Параллельный замер называл «запомненный план 69 ns», мой — 5 µs, разница
 семидесятикратная. Оба верны и о разном: 5 µs — это `(*Model).Compile`
-(`internal/authzplan/compile.go:462`), который **ничего не помнит**; 69 ns —
+(`services/iam/internal/authzplan/compile.go:462`), который **ничего не помнит**; 69 ns —
 `authzmodel.Plans.Plan` (`authzmodel.go:126`), держащий запомненное в
 `by map[string]authzplan.Plan` под `sync.RWMutex`. **Горячий путь ходит через
 второй**, и потому композиция на него не влияет вовсе.

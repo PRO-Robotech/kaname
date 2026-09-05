@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // signer_test.go — сценарии F1-10, F1-12, F1-14, F1-15 приёмки F1.
 package tokensigner_test
@@ -12,9 +12,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/signingkeygen"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/tokensigner"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/signingkeygen"
+	"github.com/PRO-Robotech/kacho-iam/internal/tokensigner"
 )
 
 // stubKeys — подставной источник подписного материала.

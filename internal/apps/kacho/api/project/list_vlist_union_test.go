@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // list_vlist_union_test.go — what makes a project a member of a List page.
 //
@@ -38,10 +38,10 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	repoproject "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzfilter"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	repoproject "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/project"
 )
 
 // ───────────── relation-aware stub ──────────────────────────────────────────

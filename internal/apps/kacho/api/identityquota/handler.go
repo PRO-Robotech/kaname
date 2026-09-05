@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package identityquota — арендаторское чтение квот, носителем которых является
 // личность.
@@ -20,9 +20,9 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/quota/quotapb"
 	"github.com/PRO-Robotech/kacho/pkg/quota/quotaread"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // Reader — то, что нужно чтению от хранилища.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // basic_credential_lane_test.go — ПОЛОСА ДОКЕРА ДЛЯ БАЗОВОГО СЕКРЕТА.
 //
@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/credsecret"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // fakeBasicResolver — авторитет о предъявленном базовом секрете.

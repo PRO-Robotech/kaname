@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package modelrender
 
@@ -11,11 +11,11 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 	"github.com/PRO-Robotech/kacho/pkg/modulemanifest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
 )
 
 // sweep.go — обход ЗАКРЫТОГО НАБОРА модулей и сверка порождённого с каноном
@@ -37,7 +37,7 @@ import (
 // # Исходов ТРИ, и «частично» не является четвёртым
 //
 //	0  сверено всё объявленное  — у каждого модуля набора манифест, все сверки прошли
-//	1  находка                  — расхождение блоков ЛИБО модуль без манифеста и без записи ведомости
+//	1  находка                  — любой повод перечня §2 п. 7 приёмки (перечень там ОДИН)
 //	2  VOID                     — сверять нечего НИ ДЛЯ ОДНОГО модуля
 //
 // VOID в успех НЕ ЗАСЧИТЫВАЕТСЯ и из вердикта НЕ ВЫЧИТАЕТСЯ: «зелёный под
@@ -53,7 +53,14 @@ import (
 const (
 	// SweepOK — сверено всё объявленное.
 	SweepOK = 0
-	// SweepFinding — расхождение либо модуль без манифеста и без записи ведомости.
+	// SweepFinding — находка: любой повод перечня §2 п. 7 приёмки
+	// `model-generated-from-manifest.md`.
+	//
+	// Перечень здесь НЕ воспроизводится и не сокращается до пары примеров.
+	// Прежняя редакция называла два повода из перечисленных нормой поимённо и
+	// пережила решение, которым перечень был сведён: второе место об одном
+	// предмете расходится с первым молча, и расходится в сторону, где читатель
+	// достраивает недостающее сам (задача #1856).
 	SweepFinding = 1
 	// SweepVoid — сверять нечего ни для одного модуля.
 	//
@@ -211,11 +218,19 @@ func Sweep(resources []catalog.ResourceRow, root string, waivers []Waiver) (Cens
 	if ferr != nil {
 		return census, []Finding{{Detail: "обход дерева отказал: " + ferr.Error()}}, SweepFinding
 	}
-	for _, path := range unparsable {
-		findings = append(findings, Finding{Detail: fmt.Sprintf(
-			"манифест не разобран: %s — документ назвался манифестом и модуля не объявил, "+
-				"поэтому он не засчитан НИ модулем, НИ его отсутствием; форму судит "+
-				"`make -C services/iam module-manifest-check`", path)})
+	// unusableFor — модули, чей манифест ЛЕЖИТ и негоден. Объявление «не засчитан
+	// НИ модулем, НИ его отсутствием» исполняется обеими половинами: в `found`
+	// такой документ не попадает (первая), и модуль по нему непокрытым не
+	// объявляется (вторая, #2045).
+	unusableFor := make(map[string]struct{}, len(unparsable))
+	for _, u := range unparsable {
+		if u.Module != "" {
+			unusableFor[u.Module] = struct{}{}
+		}
+		findings = append(findings, Finding{Module: u.Module, Detail: fmt.Sprintf(
+			"%s: %s — %v; документ назвался манифестом и манифестом не стал, поэтому он не "+
+				"засчитан НИ модулем, НИ его отсутствием; форму судит "+
+				"`make -C services/iam module-manifest-check`", u.Cause, u.Path, u.Err)})
 	}
 
 	// Ведомость судится ДО обхода: запись без номера и запись на модуль вне
@@ -240,6 +255,12 @@ func Sweep(resources []catalog.ResourceRow, root string, waivers []Waiver) (Cens
 	for _, module := range modules {
 		path, ok := found[module]
 		if !ok {
+			// Манифест модуля лежит и негоден: он уже назван своей находкой с
+			// СОБСТВЕННОЙ причиной. Объявить модуль непокрытым значило бы послать
+			// читателя заводить документ, который написан (#2045).
+			if _, unusable := unusableFor[module]; unusable {
+				continue
+			}
 			switch w, forgiven := waived[module]; {
 			case forgiven:
 				census.Waived++
@@ -459,9 +480,43 @@ func firstDivergence(rendered, canon []byte) string {
 // Форму документа здесь никто не судит второй раз — это предмет одного
 // исполнителя (`make -C services/iam module-manifest-check`). Здесь он лишь не
 // вправе быть засчитан ни модулем, ни его отсутствием.
-func findManifests(treeRoot *os.Root, root string) (map[string]string, []string, error) {
+// unusableManifest — документ, назвавшийся манифестом и манифестом не ставший.
+//
+// Причин ТРИ, и они означают разное: путь не приведён к корню обхода (наша
+// ошибка) · файл не прочитан (документа по имени нет либо он недоступен) ·
+// документ не разобран (текст есть, форма негодна). Прежде они сваливались в
+// одну корзину строк, ошибка КАЖДОЙ выбрасывалась, а печаталось по ним одно
+// сообщение, утверждавшее одну конкретную причину — «модуля не объявил», — в
+// общем случае неверную (задача #1905).
+//
+// Ошибка носится САМА, а не пересказывается: пересказ есть второе место об одном
+// предмете, и расходится он молча.
+//
+// # Границы доказанного, названные честно
+//
+// Производителя красного имеют ДВЕ причины из трёх: «не прочитан» и «не
+// разобран». Приведение пути к корню обхода отказать здесь не может — путь
+// приходит от обхода ТОГО ЖЕ корня, — поэтому ветвь оборонительная и пробы у неё
+// нет. Это сказано, а не выдано за проверенное: молчание пробы, которой нет,
+// неотличимо от молчания пробы, которая не падает.
+type unusableManifest struct {
+	Path string
+	// Module — модуль, который документ ОБЪЯВИЛ, либо пусто, если не объявил
+	// (или объявить не мог: документ не прочитан). Снимается тем же читателем
+	// оболочки, что и у обхода манифестов (`manifest.PeekModule`), а не своим:
+	// вторая реализация разошлась бы с первой молча.
+	//
+	// Пустое значение здесь означает «приписать НЕ К ЧЕМУ», и тогда «модуль без
+	// манифеста» остаётся верным. Различение несущее: без него починка #2045
+	// выродилась бы в замалчивание непокрытого модуля.
+	Module string
+	Cause  string
+	Err    error
+}
+
+func findManifests(treeRoot *os.Root, root string) (map[string]string, []unusableManifest, error) {
 	out := map[string]string{}
-	var unparsable []string
+	var unparsable []unusableManifest
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -492,23 +547,31 @@ func findManifests(treeRoot *os.Root, root string) (map[string]string, []string,
 		// с первой молча.
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
-			unparsable = append(unparsable, path)
+			unparsable = append(unparsable, unusableManifest{Path: path,
+				Cause: "путь манифеста не приведён к корню обхода", Err: relErr})
 			return nil
 		}
 		raw, rerr := manifest.ReadUnderRoot(treeRoot, filepath.ToSlash(rel))
 		if rerr != nil {
-			unparsable = append(unparsable, path)
+			unparsable = append(unparsable, unusableManifest{Path: path,
+				Cause: "манифест не прочитан", Err: rerr})
 			return nil
 		}
 		m, lerr := manifest.LoadWithReferent(raw, manifest.ReferentCanon)
 		if lerr != nil {
-			unparsable = append(unparsable, path)
+			// Документ прочитан, значит оболочку снять ЕСТЬ С ЧЕГО: имя модуля
+			// берётся у него самого, и негодный документ перестаёт читаться как
+			// отсутствующий (#2045). Отказ загрузчика при этом остаётся находкой —
+			// приписан он или нет.
+			unparsable = append(unparsable, unusableManifest{Path: path,
+				Module: manifest.PeekModule(raw),
+				Cause:  "манифест не разобран", Err: lerr})
 			return nil
 		}
 		out[m.Module] = path
 		return nil
 	})
-	sort.Strings(unparsable)
+	sort.Slice(unparsable, func(i, j int) bool { return unparsable[i].Path < unparsable[j].Path })
 	return out, unparsable, err
 }
 

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // seed_rule_verb_resolvability_integration_test.go — гейт на класс «посеянная
 // роль называет ГЛАГОЛ, которого объявивший её тип не несёт».
@@ -74,10 +74,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // knownUnresolvableSeedVerbs — глаголы ДЕЙСТВУЮЩЕГО посева, которых объявивший
@@ -320,17 +320,13 @@ func TestSeededRoleRuleVerbsAreDeclaredByTheType(t *testing.T) {
 	}
 
 	// Самоистечение: запись пина, которой больше нечего описывать, — находка.
-	var stale []string
-	for key := range knownUnresolvableSeedVerbs {
-		if !seen[key] {
-			stale = append(stale, key)
-		}
-	}
-	sort.Strings(stale)
-	for _, key := range stale {
-		t.Errorf("запись пина без предмета: «%s» перечислена, но такого нерезолвящегося глагола "+
-			"в посеве нет.\nГлагол привели к словарю, роль удалили либо правило сняли — сними и "+
-			"запись, иначе перечень описывает мир, которого нет.", key)
+	// Разбор ОБЩИЙ с гейтом-близнецом (seed_pin_self_expiry_test.go): вторая
+	// реализация разошлась бы с первой молча — обе дают «ноль находок» на честном
+	// перечне, и различие видно только на том входе, ради которого они написаны.
+	// Там же живёт доказательство её способности упасть и смолчать.
+	for _, f := range stalePinFindings("knownUnresolvableSeedVerbs",
+		"нерезолвящегося глагола", knownUnresolvableSeedVerbs, seen) {
+		t.Error(f)
 	}
 }
 

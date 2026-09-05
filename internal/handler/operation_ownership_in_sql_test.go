@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // operation_ownership_in_sql_test.go — предмет: гейт владения операцией не
 // вправе зависеть от УСПЕХА отдельного чтения.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // wrapping_key_list_test.go — ручка ключа обёртки принимает ПЕРЕЧЕНЬ (задача
 // #1065): первый оборачивает, все открывают.
@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/keywrap"
+	"github.com/PRO-Robotech/kacho-iam/internal/keywrap"
 )
 
 const (

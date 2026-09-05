@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // list_cursor_plan_integration_test.go — задача #708, доказательство ДЕЙСТВИЯ.
 //
@@ -8,7 +8,7 @@
 // настоящей цепочке миграций iam берёт порядок страницы ИЗ ЭТОГО индекса и не
 // содержит узла сортировки. Разбор обоих вопросов, довод в пользу
 // детерминированной постановки и требование контроля — в шапке
-// `internal/listcursorplan`.
+// `pkg/listcursorplan`.
 //
 // Проба красна на состоянии ДО фикса: без `708001` план несёт узел сортировки,
 // потому что порядок брать неоткуда.
@@ -17,8 +17,8 @@ package cursorplan_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/listcursorplan"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/pkg/listcursorplan"
 )
 
 func TestIntegration_IAM_CursorPagesTakeTheirOrderFromAnIndex(t *testing.T) {

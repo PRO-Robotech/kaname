@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """exec-coverage.py — EXECUTION coverage gate: did every request in the collection
 actually run?

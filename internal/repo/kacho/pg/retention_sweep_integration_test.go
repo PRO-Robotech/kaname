@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // retention_sweep_integration_test.go — уборка таблиц iam, чей рост задаёт
 // внешний (приёмка `retention-sweep-has-a-caller.md`, сценарии RET-SWP-01…03,
@@ -34,12 +34,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/retention"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/retention"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 // sweepBatch — партия проб. Мала намеренно: предмет проб — предикат и порог, а
@@ -429,13 +429,15 @@ func TestRetentionSweep_ReportsEachSubjectSeparately(t *testing.T) {
 	cutoffs := kachopg.NewMintedTokenRevocationRepo(pool)
 	windows := kachopg.NewIdentityAdmissionWindowRepo(pool)
 	journal := kachopg.NewSubjectChangeJournalSweeper(pool, nil)
+	reconcileQ := kachopg.NewReconcileOutboxSweeper(pool)
+	compensationQ := kachopg.NewProviderCompensationSweeper(pool)
 	uid := mustSeedUser(t, ctx, pool, "ret-15")
 
 	// По отзывам — есть что снять; по утверждениям и отсечкам — нечего.
 	putRevocationAt(t, ctx, pool, uid, "ret15-"+ids.NewID(domain.PrefixUser), -time.Hour)
 
 	sw, err := retention.New(retention.Config{Interval: time.Minute, Batch: sweepBatch, MaxBatchesPerPass: 2},
-		retention.Subjects(assertions, revocations, cutoffs, windows, journal), nil)
+		retention.Subjects(assertions, revocations, cutoffs, windows, journal, reconcileQ, compensationQ), nil)
 	require.NoError(t, err)
 	res := sw.Pass(ctx)
 	require.NoError(t, res.Err())
@@ -446,6 +448,7 @@ func TestRetentionSweep_ReportsEachSubjectSeparately(t *testing.T) {
 	require.Contains(t, res.Removed, retention.SubjectMintedTokenCutoffs)
 	require.Contains(t, res.Removed, retention.SubjectIdentityAdmissionWindows)
 	require.Contains(t, res.Removed, retention.SubjectSubjectChangeJournal)
+	require.Contains(t, res.Removed, retention.SubjectReconcileOutbox)
 	require.EqualValues(t, 1, res.Removed[retention.SubjectSessionRevocations])
 
 	// Величина имеет читателя: накопитель прохода виден снаружи.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package session_revocations
 
@@ -56,7 +56,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // isRevokedMethod — имя метода, чьих вызывающих считает перепись.
@@ -276,12 +276,22 @@ func monorepoRootForDoc(t *testing.T) string {
 	wd, err := os.Getwd()
 	require.NoError(t, err)
 	dir := wd
+	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
+	// теперь СВОЙ модуль (она выносится отдельным репозиторием), и подъём «до
+	// первого» останавливался бы в её каталоге. Пути, которые ниже склеиваются с
+	// этим корнем, называют место В ДЕРЕВЕ МОНОРЕПО — от корня, — поэтому
+	// остановка внутри службы удваивала сегмент и обход искал `services/iam/
+	// services/iam/…`, которого не существует.
+	outermost := ""
 	for {
 		if _, serr := os.Stat(filepath.Join(dir, "go.mod")); serr == nil {
-			return dir
+			outermost = dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
+			if outermost != "" {
+				return outermost
+			}
 			t.Fatalf("корень монорепо (go.mod) не найден от %s", wd)
 		}
 		dir = parent

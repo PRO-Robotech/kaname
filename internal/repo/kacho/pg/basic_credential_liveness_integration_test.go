@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // basic_credential_liveness_integration_test.go — ЖИВОСТЬ, СПРОШЕННАЯ ПО
 // ИДЕНТИФИКАТОРУ, СОВПАДАЕТ С ЖИВОСТЬЮ, СПРОШЕННОЙ ПО СЕКРЕТУ (задача #1450).
@@ -48,9 +48,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 	"github.com/PRO-Robotech/kacho/pkg/credsecret"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
 )
 
 // basicCredLane — ПОЛОСА УДОСТОВЕРЕНИЯ, сверяемая на каждом состоянии строки.

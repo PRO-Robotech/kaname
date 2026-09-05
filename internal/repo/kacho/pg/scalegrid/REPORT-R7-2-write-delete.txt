@@ -2,25 +2,23 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
 =======================================================================
 
 ПРОВЕНАНС
-  снято               2026-09-04 18:05:03 MSK
-  ревизия дерева      25e1046b313bf6d75cd5ec1b01c73be181525d39
-  состояние дерева    ГРЯЗНОЕ: путей с несохранёнными правками 3.
-                      Ревизия выше НЕ описывает исполнявшееся дерево целиком —
-                      повторение по ней даст другой код. Отчёт остаётся годным
-                      как наблюдение и НЕ годится как воспроизводимый замер.
+  снято               2026-09-05 13:24:51 MSK
+  ревизия дерева      2c5e28ac165ecba7b4ffb5580d7f5db600e90d09
+  состояние дерева    чистое (несохранённых правок нет) — ревизия описывает
+                      исполнявшееся дерево целиком
   машина              AMD Ryzen 9 5950X 16-Core Processor, ядер 32
   Postgres            16.15
 
 ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА (гейт свежести сверяет его с текущим деревом)
   отпечаток состава     576b21cbe9ecb616
-  отпечаток содержимого ef9ae74617da527e
+  отпечаток содержимого e67df7b76ba51902
   файлов под отпечатком 4, таблиц выведено 1 (kacho_iam.resource_mirror)
-  предикат отпечатка    все не-тестовые .go каталога services/iam/internal/apps/kacho/api/access_binding/reconcile; все .sql каталога services/iam/internal/migrations, называющие хотя бы одну таблицу, которую пишет материализатор (имена таблиц ВЫВЕДЕНЫ из его кода по приставке "kacho_iam.", а не выписаны)
+  предикат отпечатка    все не-тестовые .go каталога services/iam/internal/apps/kacho/api/access_binding/reconcile; все .sql каталога services/iam/internal/migrations, называющие хотя бы одну таблицу, которую пишет материализатор (имена таблиц ВЫВЕДЕНЫ из его кода по приставке "kacho_iam.", а не выписаны); у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев (директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ обесценивает; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора (-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала
   ФАЙЛЫ ПОД ОТПЕЧАТКОМ (пофайлово, чтобы гейт назвал ВИНОВНИКА, а не только факт)
-    21cad624feb8efcb  services/iam/internal/apps/kacho/api/access_binding/reconcile/forward.go
-    c77f955ef4bb9aca  services/iam/internal/apps/kacho/api/access_binding/reconcile/reconcile.go
-    7684f0b53fc6e4a0  services/iam/internal/apps/kacho/api/access_binding/reconcile/tuples.go
-    d32c3de6026269b1  services/iam/internal/migrations/0001_initial.sql
+    0b61bfc1ac92bc7d  services/iam/internal/apps/kacho/api/access_binding/reconcile/forward.go
+    6c94512002b2eb84  services/iam/internal/apps/kacho/api/access_binding/reconcile/reconcile.go
+    c083ac2f0f723823  services/iam/internal/apps/kacho/api/access_binding/reconcile/tuples.go
+    6323f9705aff7665  services/iam/internal/migrations/0001_initial.sql
 
 СЕТКА (константа в коде, ниоткуда не переопределяется)
   полосы: аддитивная (создание выдачи) · полная (правка роли) · удаление истечением срока · веер выдач
@@ -30,7 +28,7 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
   срок отсоединённого прохода: 2m0s (shared.PostCommitTimeout, читается из кода)
 
 ВОСПРОИЗВЕДЕНИЕ (дословно)
-  KACHO_STRENGTH_WRITE=1 go test ./services/iam/internal/repo/kacho/pg/ -run TestStrengthWriteDelete_Report -count=1 -v -timeout 120m
+  KACHO_STRENGTH_WRITE=1 go test -C services/iam ./internal/repo/kacho/pg/ -run TestStrengthWriteDelete_Report -count=1 -v -timeout 120m
 
 ЧТО ЭТОТ ОТЧЁТ ИЗМЕРЯЕТ И ЧЕГО НЕ ИЗМЕРЯЕТ (дословно)
   ИЗМЕРЯЕТ  продуктовый материализатор прав (reconcile.Reconciler поверх
@@ -43,7 +41,7 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
             Прежних слагаемых «применение кортежа к движку» и «ожидание в
             очереди до дренажа» нет у самого предмета: прямой факт складывает
             триггер в момент коммита журнала.
-  Числа этого отчёта НЕЛЬЗЯ складывать с числами прибора tools/authzformbench:
+  Числа этого отчёта НЕЛЬЗЯ складывать с числами прибора services/iam/tools/authzformbench:
   это другой прибор с другими единицами и другим предметом.
 
 ИСХОД ПРОХОДА — ПЕРВОЙ КОЛОНКОЙ, ДО ВСЯКИХ МИЛЛИСЕКУНД
@@ -54,23 +52,23 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
 полоса                     членов      исход                                       время   стейтм.     ACTIVE     реестр очер.движ.
 ------------------------------------------------------------------------------------------------------------------------------------
 аддитивная (создание)      100         СОШЁЛСЯ                                      32ms         9        100        400       128
-аддитивная (создание)      1000        СОШЁЛСЯ                                     264ms         9       1000       4000      1028
-аддитивная (создание)      10000       СОШЁЛСЯ                                    2.689s         9      10000      40000     10028
-аддитивная (создание)      65536       СОШЁЛСЯ                                    5.602s        72      65536       4096      1052
-аддитивная (создание)      655360*     ОТКАТИЛСЯ ПО СРОКУ СТЕЙТМЕНТА (57014)     50.256s        70          0          0        28
-полная (правка роли)       100         СОШЁЛСЯ                                      71ms       307        100        400       128
-полная (правка роли)       1000        СОШЁЛСЯ                                     667ms      3007       1000       4000      1028
-полная (правка роли)       10000       СОШЁЛСЯ                                    6.901s     30007      10000      40000     10028
-полная (правка роли)       65536       СОШЁЛСЯ                                   37.335s    132166      65536       4096      1052
-полная (правка роли)       655360*     ОБОРВАН ПО СРОКУ ПРОХОДА (2 мин)             2m0s    413223          0          0        28
-удаление истечением срока  100         СОШЁЛСЯ                                     119ms      1107          0          0       228
-удаление истечением срока  1000        СОШЁЛСЯ                                    1.813s     11007          0          0      2028
-удаление истечением срока  10000       СОШЁЛСЯ                                   42.367s    110007          0          0     20028
-удаление истечением срока  65536       СОШЁЛСЯ                                   36.399s    140295          0          0      2076
-полная, ВЕЕР выдач         1×100       СОШЁЛСЯ                                      77ms       307        100        400       128
-полная, ВЕЕР выдач         9×100       СОШЁЛСЯ                                     624ms      2763        100        400       928
-полная, ВЕЕР выдач         227×100     СОШЁЛСЯ                                   17.073s     69689        100        400     22728
-полная, ВЕЕР выдач         512×100*    СОШЁЛСЯ                                   39.591s    157184        100        400     51228
+аддитивная (создание)      1000        СОШЁЛСЯ                                     266ms         9       1000       4000      1028
+аддитивная (создание)      10000       СОШЁЛСЯ                                    2.638s         9      10000      40000     10028
+аддитивная (создание)      65536       СОШЁЛСЯ                                    5.442s        72      65536       4096      1052
+аддитивная (создание)      655360*     ОТКАТИЛСЯ ПО СРОКУ СТЕЙТМЕНТА (57014)     50.002s        70          0          0        28
+полная (правка роли)       100         СОШЁЛСЯ                                      74ms       307        100        400       128
+полная (правка роли)       1000        СОШЁЛСЯ                                     685ms      3007       1000       4000      1028
+полная (правка роли)       10000       СОШЁЛСЯ                                    6.874s     30007      10000      40000     10028
+полная (правка роли)       65536       СОШЁЛСЯ                                   36.871s    132166      65536       4096      1052
+полная (правка роли)       655360*     ОБОРВАН ПО СРОКУ ПРОХОДА (2 мин)             2m0s    422355          0          0        28
+удаление истечением срока  100         СОШЁЛСЯ                                     123ms      1107          0          0       228
+удаление истечением срока  1000        СОШЁЛСЯ                                    1.795s     11007          0          0      2028
+удаление истечением срока  10000       СОШЁЛСЯ                                   42.889s    110007          0          0     20028
+удаление истечением срока  65536       СОШЁЛСЯ                                   36.799s    140295          0          0      2076
+полная, ВЕЕР выдач         1×100       СОШЁЛСЯ                                      74ms       307        100        400       128
+полная, ВЕЕР выдач         9×100       СОШЁЛСЯ                                     633ms      2763        100        400       928
+полная, ВЕЕР выдач         227×100     СОШЁЛСЯ                                   17.264s     69689        100        400     22728
+полная, ВЕЕР выдач         512×100*    СОШЁЛСЯ                                   40.138s    157184        100        400     51228
 
 СТЕЙТМЕНТОВ НА ЧЛЕНА — ЭТО И ЕСТЬ РАЗЛИЧИЕ ПАКЕТНОЙ И ПОШТУЧНОЙ ПОЛОС
   Знаменатель — члены ВСЕГО (веер × членов на выдачу), а не члены одной выдачи:
@@ -78,24 +76,24 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
   другого предиката.
 полоса                     членов всего     стейтментов         на члена три самых частых
 ------------------------------------------------------------------------------------------------------------------------------------
-аддитивная (создание)      100                        9           0.0900 begin×1 · SELECT binding_id, role_id,×1 · SELECT m.object_type, m.object_id,×1
-аддитивная (создание)      1000                       9           0.0090 commit×1 · SELECT id, subject_type,×1 · begin×1
-аддитивная (создание)      10000                      9           0.0009 begin×1 · SELECT id, subject_type,×1 · SELECT id, cluster_id,×1
-аддитивная (создание)      65536                     72           0.0011 SELECT m.object_type, m.object_id,×64 · SELECT binding_id, role_id,×1 · SELECT id, cluster_id,×1
-аддитивная (создание)      655360                    70           0.0001 SELECT m.object_type, m.object_id,×64 · SELECT binding_id, role_id,×1 · SELECT id, subject_type,×1
-полная (правка роли)       100                      307           3.0700 INSERT INTO kacho_iam.access_binding_target_members×100 · INSERT INTO kacho_iam.access_binding_emitted_tuples×100 · INSERT INTO kacho_iam.fga_outbox×100
+аддитивная (создание)      100                        9           0.0900 begin×1 · SELECT m.object_type, m.object_id,×1 · INSERT INTO kacho_iam.access_binding_emitted_tuples×1
+аддитивная (создание)      1000                       9           0.0090 begin×1 · SELECT id, subject_type,×1 · SELECT id, cluster_id,×1
+аддитивная (создание)      10000                      9           0.0009 INSERT INTO kacho_iam.access_binding_target_members×1 · INSERT INTO kacho_iam.access_binding_emitted_tuples×1 · commit×1
+аддитивная (создание)      65536                     72           0.0011 SELECT m.object_type, m.object_id,×64 · SELECT id, subject_type,×1 · SELECT id, cluster_id,×1
+аддитивная (создание)      655360                    70           0.0001 SELECT m.object_type, m.object_id,×64 · rollback×1 · begin×1
+полная (правка роли)       100                      307           3.0700 INSERT INTO kacho_iam.access_binding_target_members×100 · INSERT INTO kacho_iam.fga_outbox×100 · INSERT INTO kacho_iam.access_binding_emitted_tuples×100
 полная (правка роли)       1000                    3007           3.0070 INSERT INTO kacho_iam.access_binding_target_members×1000 · INSERT INTO kacho_iam.fga_outbox×1000 · INSERT INTO kacho_iam.access_binding_emitted_tuples×1000
-полная (правка роли)       10000                  30007           3.0007 INSERT INTO kacho_iam.fga_outbox×10000 · INSERT INTO kacho_iam.access_binding_emitted_tuples×10000 · INSERT INTO kacho_iam.access_binding_target_members×10000
-полная (правка роли)       65536                 132166           2.0167 INSERT INTO kacho_iam.access_binding_target_members×65536 · INSERT INTO kacho_iam.access_binding_emitted_tuples×65536 · INSERT INTO kacho_iam.fga_outbox×1024
-полная (правка роли)       655360                413223           0.6305 INSERT INTO kacho_iam.access_binding_target_members×201457 · INSERT INTO kacho_iam.access_binding_emitted_tuples×201456 · INSERT INTO kacho_iam.fga_outbox×10240
+полная (правка роли)       10000                  30007           3.0007 INSERT INTO kacho_iam.fga_outbox×10000 · INSERT INTO kacho_iam.access_binding_target_members×10000 · INSERT INTO kacho_iam.access_binding_emitted_tuples×10000
+полная (правка роли)       65536                 132166           2.0167 INSERT INTO kacho_iam.access_binding_emitted_tuples×65536 · INSERT INTO kacho_iam.access_binding_target_members×65536 · INSERT INTO kacho_iam.fga_outbox×1024
+полная (правка роли)       655360                422355           0.6445 INSERT INTO kacho_iam.access_binding_target_members×206023 · INSERT INTO kacho_iam.access_binding_emitted_tuples×206022 · INSERT INTO kacho_iam.fga_outbox×10240
 удаление истечением срока  100                     1107          11.0700 DELETE FROM kacho_iam.access_binding_emitted_tuples×400 · SELECT EXISTS (×400 · SELECT fga_user, relation,×100
-удаление истечением срока  1000                   11007          11.0070 DELETE FROM kacho_iam.access_binding_emitted_tuples×4000 · SELECT EXISTS (×4000 · DELETE FROM kacho_iam.access_binding_target_members×1000
-удаление истечением срока  10000                 110007          11.0007 DELETE FROM kacho_iam.access_binding_emitted_tuples×40000 · SELECT EXISTS (×40000 · DELETE FROM kacho_iam.access_binding_target_members×10000
-удаление истечением срока  65536                 140295           2.1407 SELECT fga_user, relation,×65536 · DELETE FROM kacho_iam.access_binding_target_members×65536 · DELETE FROM kacho_iam.access_binding_emitted_tuples×4096
-полная, ВЕЕР выдач         100                      307           3.0700 INSERT INTO kacho_iam.access_binding_target_members×100 · INSERT INTO kacho_iam.fga_outbox×100 · INSERT INTO kacho_iam.access_binding_emitted_tuples×100
-полная, ВЕЕР выдач         900                     2763           3.0700 INSERT INTO kacho_iam.fga_outbox×900 · INSERT INTO kacho_iam.access_binding_target_members×900 · INSERT INTO kacho_iam.access_binding_emitted_tuples×900
-полная, ВЕЕР выдач         22700                  69689           3.0700 INSERT INTO kacho_iam.access_binding_target_members×22700 · INSERT INTO kacho_iam.access_binding_emitted_tuples×22700 · INSERT INTO kacho_iam.fga_outbox×22700
-полная, ВЕЕР выдач         51200                 157184           3.0700 INSERT INTO kacho_iam.access_binding_target_members×51200 · INSERT INTO kacho_iam.fga_outbox×51200 · INSERT INTO kacho_iam.access_binding_emitted_tuples×51200
+удаление истечением срока  1000                   11007          11.0070 SELECT EXISTS (×4000 · DELETE FROM kacho_iam.access_binding_emitted_tuples×4000 · SELECT fga_user, relation,×1000
+удаление истечением срока  10000                 110007          11.0007 DELETE FROM kacho_iam.access_binding_emitted_tuples×40000 · SELECT EXISTS (×40000 · INSERT INTO kacho_iam.fga_outbox×10000
+удаление истечением срока  65536                 140295           2.1407 DELETE FROM kacho_iam.access_binding_target_members×65536 · SELECT fga_user, relation,×65536 · DELETE FROM kacho_iam.access_binding_emitted_tuples×4096
+полная, ВЕЕР выдач         100                      307           3.0700 INSERT INTO kacho_iam.access_binding_emitted_tuples×100 · INSERT INTO kacho_iam.access_binding_target_members×100 · INSERT INTO kacho_iam.fga_outbox×100
+полная, ВЕЕР выдач         900                     2763           3.0700 INSERT INTO kacho_iam.access_binding_target_members×900 · INSERT INTO kacho_iam.fga_outbox×900 · INSERT INTO kacho_iam.access_binding_emitted_tuples×900
+полная, ВЕЕР выдач         22700                  69689           3.0700 INSERT INTO kacho_iam.fga_outbox×22700 · INSERT INTO kacho_iam.access_binding_target_members×22700 · INSERT INTO kacho_iam.access_binding_emitted_tuples×22700
+полная, ВЕЕР выдач         51200                 157184           3.0700 INSERT INTO kacho_iam.fga_outbox×51200 · INSERT INTO kacho_iam.access_binding_emitted_tuples×51200 · INSERT INTO kacho_iam.access_binding_target_members×51200
 
 НАСЫЩЕНИЕ ШТАТНОГО ПРИБОРА
   Корзины `kacho_iam_binding_materialization_tuples` кончаются на 5000. Точка,
@@ -135,4 +133,4 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЗАПИСЬ и УДАЛЕНИЕ (пр
 
 
 ОБЪЁМ ОСМОТРЕННОГО
-  точек исполнено 18, настенное время 6m35s
+  точек исполнено 18, настенное время 6m40s

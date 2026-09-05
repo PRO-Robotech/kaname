@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // resources_test.go — раздел `resources` (приёмка
 // services/iam/docs/engineering/acceptance/module-manifest-resources-roles-deprecated.md,
@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // mustReadResourcesFixture — манифест vpc со всеми четырьмя разделами.
@@ -216,11 +216,17 @@ func TestMODMR05ClassOutsideTheClosedSetIsRefused(t *testing.T) {
 
 // ── MOD-MR-06 ───────────────────────────────────────────────────────────────
 
-// TestMODMR06ObjectTypeIsRequiredAndResolvedByTheClosedTable — правило вывода
+// TestMODMR06ObjectTypeIsRequiredAndJudgedByFormNotMembership — правило вывода
 // `objectType ← <module>_<resource>` СНЯТО (приёмка §2.4: оно не действует у 10
-// записей из 27), поэтому ключ обязателен у каждого ресурса, а его значение
-// резолвится закрытой таблицей.
-func TestMODMR06ObjectTypeIsRequiredAndResolvedByTheClosedTable(t *testing.T) {
+// записей из 27), поэтому ключ обязателен у каждого ресурса.
+//
+// ЗДЕСЬ СТОЯЛО «а его значение резолвится закрытой таблицей», и второе
+// отрицание пробы утверждало ровно это: `vpc_gatewayz` отвергался как «тип вне
+// закрытой таблицы». Предмет снят задачей #2015 вместе с самим предикатом —
+// таблица разомкнута, и годное по форме имя есть заявка на НОВЫЙ тип модуля,
+// а не опечатка. Утверждение заменено, а не ослаблено: отрицаний по-прежнему
+// два, но они судят ФОРМУ и ВЛАДЕНИЕ (разбор — objecttype.go).
+func TestMODMR06ObjectTypeIsRequiredAndJudgedByFormNotMembership(t *testing.T) {
 	base := "apiVersion: iam/v1\nmodule: vpc\nresources:\n" +
 		"  - name: gateway\n%s    parents: [project]\n    producer: derived\n    verbs: [get]\n"
 
@@ -245,16 +251,34 @@ func TestMODMR06ObjectTypeIsRequiredAndResolvedByTheClosedTable(t *testing.T) {
 		t.Fatalf("парный положительный отвергнут: %v", err)
 	}
 
-	// Второй отрицательный: значение вне закрытой таблицы.
-	_, err = manifest.Load([]byte(strings.Replace(base, "%s", "    objectType: vpc_gatewayz\n", 1)))
+	// Второй отрицательный: значение негодно по ФОРМЕ.
+	_, err = manifest.Load([]byte(strings.Replace(base, "%s", "    objectType: vpc-gatewayz\n", 1)))
 	if err == nil {
-		t.Fatalf("тип вне закрытой таблицы принят")
+		t.Fatalf("негодное по форме имя типа принято")
 	}
-	if !errors.Is(err, manifest.ErrObjectTypeUnknown) {
+	if !errors.Is(err, manifest.ErrObjectTypeMalformed) {
 		t.Errorf("отказ не отнесён к своей причине: %v", err)
 	}
-	if !strings.Contains(err.Error(), "vpc_gatewayz") {
+	if !strings.Contains(err.Error(), "vpc-gatewayz") {
 		t.Errorf("отказ не называет полученное значение: %v", err)
+	}
+
+	// Третий отрицательный: годное по форме имя, но тип уже занят образом под
+	// ДРУГОЙ строкой.
+	_, err = manifest.Load([]byte(strings.Replace(base, "%s", "    objectType: vpc_network\n", 1)))
+	if err == nil {
+		t.Fatalf("тип чужой строки образа присвоен и это прошло")
+	}
+	if !errors.Is(err, manifest.ErrObjectTypeRedefinesImage) {
+		t.Errorf("отказ не отнесён к своей причине: %v", err)
+	}
+
+	// Парный положительный ко ВТОРОМУ и ТРЕТЬЕМУ отрицаниям: годное по форме имя,
+	// которого образ не несёт, — заявка на новый тип модуля, и она принимается.
+	// Без него оба отрицания зеленели бы на загрузчике, отвергающем всякий тип,
+	// которого нет в таблице, — то есть на снятом предмете.
+	if _, err := manifest.Load([]byte(strings.Replace(base, "%s", "    objectType: vpc_gatewayz\n", 1))); err != nil {
+		t.Fatalf("новый тип модуля отвергнут — таблица не разомкнулась: %v", err)
 	}
 }
 

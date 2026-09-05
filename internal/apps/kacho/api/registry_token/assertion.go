@@ -1,9 +1,9 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package registry_token
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/registrytoken"
+import "github.com/PRO-Robotech/kacho-iam/internal/registrytoken"
 
 // ES256AssertionSigner — the AssertionSigner that signs a client_assertion (JWS)
 // with ES256 using the presented SA-key private half. Pure crypto (stdlib), no

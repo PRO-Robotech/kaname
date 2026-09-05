@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // secret_bearing_ledger_injection_test.go — ДОКАЗАТЕЛЬСТВО, ЧТО ГЕЙТ BAT-1-73
 // СПОСОБЕН УПАСТЬ, И ЧТО ОН МОЛЧИТ НА ЗАКОННОМ БЛИЗНЕЦЕ.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package access_binding
 
@@ -14,15 +14,15 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/dto"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzfilter"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/dto"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 
-	_ "github.com/PRO-Robotech/kacho/services/iam/internal/dto/toproto"
+	_ "github.com/PRO-Robotech/kacho-iam/internal/dto/toproto"
 )
 
 // auditTenantAccountID derives the Account scope for the audit_outbox
@@ -360,4 +360,26 @@ func (u *CreateAccessBindingUseCase) validateGlobalAllSelector(ctx context.Conte
 			"GLOBAL scope requires names or labels selector for non-cluster-admin roles")
 	}
 	return nil
+}
+
+// callerIsSubjectOf — самопол выдачи: принципал названным субъектом ЭТОЙ выдачи.
+//
+// Судится ВЕСЬ набор `Subjects`, а не легаси-первый `SubjectID`. До #2049 оба
+// самопола читали только `SubjectID` (= `Subjects[0]`), поэтому субъект,
+// стоящий в мультисубъектной выдаче не первым, своей же выдачи не видел:
+// самопол он не проходил и уезжал в ветвь права выдавать, которой у него нет.
+// Направление отказа безопасное (меньше доступа, не больше) — оттого дефект был
+// тихим: жалуется только тот, кому не показали.
+//
+// Набор наполняет путь чтения (`ListSubjects` / `projectSubjectsBatch`) той же
+// читающей транзакцией, что и саму строку. У легаси-строки без детей набор пуст
+// — тогда судится легаси-первый, и старая полоса не отзывается: это не запасной
+// путь, а единственный субъект такой выдачи.
+func callerIsSubjectOf(ctx context.Context, b domain.AccessBinding) bool {
+	for _, s := range b.Subjects {
+		if authzguard.IsSelf(ctx, string(s.ID)) {
+			return true
+		}
+	}
+	return authzguard.IsSelf(ctx, string(b.SubjectID))
 }

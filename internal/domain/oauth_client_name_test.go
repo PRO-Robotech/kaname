@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // oauth_client_name_test.go — доменная валидация имени токена
 // (`OAuthClientName`): единственная форма имени дерева, как у всякого другого

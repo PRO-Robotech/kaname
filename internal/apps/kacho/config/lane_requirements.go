@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // lane_requirements.go — ТРЕБОВАНИЯ ПОЛОС посадки личности, объявленные
 // таблицей (задача #1125, подфаза Ф4д эпика #896).

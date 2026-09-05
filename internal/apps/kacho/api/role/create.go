@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package role
 
@@ -19,12 +19,12 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // ObjectReconciler — narrow port (rbac-contract-a-fix, C-01b): SYNCHRONOUSLY
@@ -38,8 +38,8 @@ import (
 type ObjectReconciler interface {
 	// ReconcileObjectForward is the ADDITIVE forward fast-path for the freshly-created
 	// role-AS-OBJECT (iam.role): it materializes ONLY that new role's per-object
-	// owner/admin tuples across the matching bindings under a SHARE advisory lock (no
-	// EXCLUSIVE / O(scope) recompute), the throughput fix for the owner-tuple
+	// owner/admin tuples across the matching bindings while holding NO advisory lock at
+	// all (neither EXCLUSIVE nor SHARE, no O(scope) recompute), the throughput fix for the owner-tuple
 	// materialization lag under a parallel role-create burst. It transparently delegates
 	// to the FULL ReconcileObject if the object already has members (delete-stale guard).
 	ReconcileObjectForwardNoStale(ctx context.Context, objectType, objectID string) error
@@ -282,7 +282,7 @@ func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor s
 	// backstop. nil-safe.
 	//
 	// IAM-FMB throughput fix: the sync post-commit materialization takes the ADDITIVE
-	// forward (ReconcileObjectForward, SHARE advisory lock, single-object — the role is
+	// forward (ReconcileObjectForward, NO advisory lock at all, single-object — the role is
 	// brand-new so there is NOTHING stale to delete) instead of the FULL EXCLUSIVE
 	// ReconcileObject, whose per-binding advisory lock + O(scope) recompute serialized on
 	// the SINGLE owner/account binding every role of an account shares → the owner-tuple

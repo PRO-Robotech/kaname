@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package modulecatalog
 
@@ -62,7 +62,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
 )
 
 var (
@@ -111,6 +113,15 @@ type Request struct {
 	// MaxResettledRoleVerbs — потолок ВТОРОЙ популяции: сколько выдач глаголов
 	// применение вправе переселить. `nil` ⇒ отказ.
 	MaxResettledRoleVerbs *int
+	// Anchor — ОПОРА паритета, против которой сверяется произведённое состояние
+	// (задача #1861).
+	//
+	// Едет ЗАПРОСОМ, а не полем применителя: применитель один на процесс, а
+	// запросов у него много одновременно, и опора, положенная в него, менялась
+	// бы под соседним вызовом. Нулевое значение = опора одного образа, то есть
+	// САМАЯ УЗКАЯ: забытая опора сужает допуск до сегодняшнего, а не открывает
+	// его.
+	Anchor seed.Anchor
 }
 
 // confirmation — проверенный вход глагола.
@@ -122,6 +133,7 @@ type confirmation struct {
 	expectedState         string
 	maxResettledRuleRefs  *int
 	maxResettledRoleVerbs *int
+	anchor                seed.Anchor
 }
 
 // validate приводит вход глагола к проверенному виду.
@@ -155,6 +167,7 @@ func (r Request) validate() (*confirmation, error) {
 		expectedState:         r.ExpectedState,
 		maxResettledRuleRefs:  r.MaxResettledRuleRefs,
 		maxResettledRoleVerbs: r.MaxResettledRoleVerbs,
+		anchor:                r.Anchor,
 	}, nil
 }
 

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // validate_provider_admin_hop_test.go — a production iam must not reach the
 // identity provider's ADMIN API at a GUESSED address, nor in the clear.
@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 )
 
 // adminHopCfg — goodEndpoints plus the secrets production demands, so the

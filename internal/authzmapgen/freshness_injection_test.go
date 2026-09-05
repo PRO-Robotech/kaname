@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package authzmapgen_test
 
@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmapgen"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmapgen"
 )
 
 // syntheticManifest — минимальный годный манифест модуля.
@@ -56,7 +56,7 @@ func syntheticRoot(t *testing.T, modules map[string][]string) string {
 // производитель.
 func regenerate(t *testing.T, root string) {
 	t.Helper()
-	tables, err := authzmapgen.Collect(root)
+	tables, err := authzmapgen.CollectSynthetic(root)
 	if err != nil {
 		t.Fatalf("Collect(%s): %v", root, err)
 	}
@@ -79,7 +79,7 @@ func regenerate(t *testing.T, root string) {
 // дерево.
 func TestFreshnessGateIsSilentOnASynthesizedFreshTree(t *testing.T) {
 	root := syntheticRoot(t, map[string][]string{"vpc": {"network"}, "iam": {"group"}})
-	census, err := authzmapgen.CheckFresh(root)
+	census, err := authzmapgen.CheckFreshSynthetic(root)
 	if err != nil {
 		t.Fatalf("свежее дерево объявлено отставшим: %v (%s)", err, census.Summary())
 	}
@@ -106,7 +106,7 @@ func TestFreshnessGateCatchesAHandEditOfTheProduct(t *testing.T) {
 		t.Fatalf("инъекция не записана: %v", err)
 	}
 
-	_, err = authzmapgen.CheckFresh(root)
+	_, err = authzmapgen.CheckFreshSynthetic(root)
 	if err == nil {
 		t.Fatal("гейт молчит на продукте, правленном руками — «сгенерировано» стало бы " +
 			"словом, за которым никто не следит")
@@ -128,7 +128,7 @@ func TestFreshnessGateCatchesAManifestThatMovedWithoutRegeneration(t *testing.T)
 		t.Fatalf("манифест не переписан: %v", err)
 	}
 
-	census, err := authzmapgen.CheckFresh(root)
+	census, err := authzmapgen.CheckFreshSynthetic(root)
 	if err == nil {
 		t.Fatal("новый ресурс манифеста не доехал до таблиц, и гейт промолчал — тип не " +
 			"резолвился бы краем, а проверка выглядела бы пройденной")
@@ -140,7 +140,7 @@ func TestFreshnessGateCatchesAManifestThatMovedWithoutRegeneration(t *testing.T)
 	// А после перегенерации — молчит. Без этой половины «краснеет» было бы
 	// неотличимо от «краснеет всегда».
 	regenerate(t, root)
-	if _, err := authzmapgen.CheckFresh(root); err != nil {
+	if _, err := authzmapgen.CheckFreshSynthetic(root); err != nil {
 		t.Fatalf("перегенерация не сняла находку: %v", err)
 	}
 }
@@ -152,7 +152,7 @@ func TestFreshnessGateCatchesAManifestThatMovedWithoutRegeneration(t *testing.T)
 // «платформа не объявляет ничего».
 func TestCollectRefusesAVoidSweep(t *testing.T) {
 	root := t.TempDir()
-	if _, err := authzmapgen.Collect(root); err == nil {
+	if _, err := authzmapgen.CollectSynthetic(root); err == nil {
 		t.Fatal("обход без единого манифеста принят — таблица из пустоты выглядит целой")
 	}
 }
@@ -170,7 +170,7 @@ func TestCollectRefusesAFindingRatherThanDroppingATypeSilently(t *testing.T) {
 		t.Fatalf("негодный манифест не записан: %v", err)
 	}
 
-	if _, err := authzmapgen.Collect(root); err == nil {
+	if _, err := authzmapgen.CollectSynthetic(root); err == nil {
 		t.Fatal("негодный манифест пропущен молча — таблица из части манифестов выглядит " +
 			"целой и теряет тип")
 	}

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package metrics
 
@@ -71,6 +71,21 @@ type OutboxRecorder struct {
 	dirBacklog   *prometheus.GaugeVec
 	dirOldest    *prometheus.GaugeVec
 	dirDelivered *prometheus.CounterVec
+
+	// scans / scanFailures — ИСХОД самого скана.
+	//
+	// Все измерители выше появляются только после первого УДАЧНОГО скана:
+	// измеритель без детей семейства не отдаёт вовсе. Значит «сканер отказывает
+	// с самого старта» и «сканера тут нет вовсе» давали ОДНУ картину — пустую, —
+	// и величина, заведённая ровно затем, чтобы молчание очереди было слышно,
+	// сама молчала неотличимо от исправной работы (#2062).
+	//
+	// Предварительная инициализация ВОЗРАСТА нулём исходом не была: ноль
+	// возраста означает «очередь пуста», то есть ложь до первого скана. У
+	// счётчика исходов ноль — законное значение, а отсутствие ряда невозможно by
+	// construction: клетки заводятся при провязке сканера.
+	scans        *prometheus.CounterVec
+	scanFailures *prometheus.CounterVec
 }
 
 // newOutboxRecorder регистрирует коллекторы в этом реестре. Зовётся ровно один
@@ -108,9 +123,23 @@ func (r *Registry) newOutboxRecorder() *OutboxRecorder {
 				"не зависит от числа хранимых строк, поэтому уборка доставленных его не " +
 				"снижает; порог ставить на increase() за окно.",
 		}, []string{"table", "direction"}),
+		scans: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kacho_iam_outbox_scans_total",
+			Help: "Сканы очереди, ДОШЕДШИЕ ДО ЗНАЧЕНИЙ. Ноль при живом процессе " +
+				"означает, что состояние очереди не снималось ни разу — то есть " +
+				"измерители ниже молчат не потому, что очередь пуста.",
+		}, []string{"table"}),
+		scanFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kacho_iam_outbox_scan_failures_total",
+			Help: "Отказы скана очереди (неверные права, сломанный запрос, " +
+				"недоступная база). Порог ставить на increase() за окно; пара с " +
+				"kacho_iam_outbox_scans_total отличает «скан не работал ни разу» от " +
+				"«очередь пуста».",
+		}, []string{"table"}),
 	}
 	r.reg.MustRegister(rec.backlog, rec.oldest, rec.poison,
-		rec.dirBacklog, rec.dirOldest, rec.dirDelivered)
+		rec.dirBacklog, rec.dirOldest, rec.dirDelivered,
+		rec.scans, rec.scanFailures)
 	return rec
 }
 
@@ -126,8 +155,32 @@ func (r *Registry) OutboxRecorder() *OutboxRecorder {
 }
 
 // SetBacklogDepth реализует outbox/metrics.Recorder.
+//
+// Здесь же считается УДАЧНЫЙ скан, и это не побочный эффект, а построение:
+// сканер зовёт этот метод ровно один раз за проход и ровно тогда, когда
+// значения получены (pkg/outbox/metrics, Collector.Scan — три Set-вызова после
+// единственного чтения). Отдельный явный вызов «скан удался» был бы вторым
+// местом об одном предмете и разошёлся бы с измерителями молча; счётчик,
+// двигающийся ВМЕСТЕ со значением, разойтись с ним не может.
 func (rec *OutboxRecorder) SetBacklogDepth(table string, depth float64) {
 	rec.backlog.WithLabelValues(table).Set(depth)
+	rec.scans.WithLabelValues(table).Inc()
+}
+
+// InitScanOutcomes заводит клетки исходов скана нулём, не увеличивая их.
+//
+// Зовётся при ПРОВЯЗКЕ сканера, а не при первом его проходе: иначе ряды
+// появились бы только после первого исхода, и «сканер не сделал ни одного
+// прохода» снова выражалось бы отсутствием ряда — тем самым, из-за чего эти
+// счётчики и заведены.
+func (rec *OutboxRecorder) InitScanOutcomes(table string) {
+	rec.scans.WithLabelValues(table)
+	rec.scanFailures.WithLabelValues(table)
+}
+
+// ObserveScanFailure — ОДИН отказавший проход сканера.
+func (rec *OutboxRecorder) ObserveScanFailure(table string) {
+	rec.scanFailures.WithLabelValues(table).Inc()
 }
 
 // SetOldestPendingAgeSeconds реализует outbox/metrics.Recorder.

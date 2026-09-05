@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Command audit-list-filter is the CI entry point of kacho-iam's public-List gate.
 // What is checked lives in package listfiltergate; how this service is laid out
@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/PRO-Robotech/kacho/services/iam/tools/auditlistfilter"
-	"github.com/PRO-Robotech/kacho/tools/listfiltergate"
+	"github.com/PRO-Robotech/kacho-iam/tools/auditlistfilter"
+	"github.com/PRO-Robotech/kacho/pkg/listfiltergate"
 )
 
 func main() {

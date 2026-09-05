@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package domain
 
@@ -52,17 +52,59 @@ func TestAuthoredVerbs_WildcardExpandsToRuleTypeSet(t *testing.T) {
 		"превью пообещало глагол, которого тип не объявляет — обещание шире материализации")
 }
 
-// TestAuthoredVerbs_UnknownTypeFallsBackToCommon — правило, не резолвящееся ни в
-// один известный тип, разворачивается общим для всех ресурсов словарём. Парный к
-// кейсу выше: без него «следует набору» было бы неотличимо от «молчит на незнакомом».
-func TestAuthoredVerbs_UnknownTypeFallsBackToCommon(t *testing.T) {
-	role := Role{Rules: Rules{{Module: "nosuch", Resources: []string{"thing"}, Verbs: []string{"*"}}}}
-	unknown := func(module, resource string) ([]string, bool) {
-		_, _ = module, resource
-		return nil, false
-	}
-	got := role.AuthoredVerbs(WithCommonFallback(unknown, []string{"get", "list", "create", "update", "delete"}))
-	require.Equal(t, []string{"get", "list", "create", "update", "delete"}, got)
+// unknownLookup — ни одна пара не резолвится. Общий вход обоих кейсов ниже:
+// различает их ФОРМА правила, а не поведение резолва.
+func unknownLookup(module, resource string) ([]string, bool) {
+	_, _ = module, resource
+	return nil, false
+}
+
+// commonVocabulary — запасной словарь, общий для всех ресурсов.
+var commonVocabulary = []string{"get", "list", "create", "update", "delete"}
+
+// TestAuthoredVerbs_WildcardRuleFallsBackToCommon — ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ
+// запасного словаря: правило-подстановка (`*.*` роли-суперпользователя) своего
+// набора не имеет by construction — перечислить ресурсы подстановки домену
+// нечем, — поэтому получает общий словарь. Пустое превью читалось бы как «роль
+// ничего не даёт».
+//
+// Парный к кейсу ниже: без него «названный ресурс не разворачивается» было бы
+// неотличимо от «запасной словарь не работает вовсе».
+func TestAuthoredVerbs_WildcardRuleFallsBackToCommon(t *testing.T) {
+	role := Role{Rules: Rules{{Module: "*", Resources: []string{"*"}, Verbs: []string{"*"}}}}
+	got := role.AuthoredVerbs(WithCommonFallback(unknownLookup, commonVocabulary))
+	require.Equal(t, commonVocabulary, got,
+		"правило-подстановка осталось без превью — роль выглядит ничего не дающей")
+}
+
+// TestAuthoredVerbs_NamedUnresolvedTypeContributesNothing — НАЗВАННЫЙ ресурс,
+// который не резолвится (снят с каталога либо не существовал), не разворачивается
+// НИ ВО ЧТО (kacho#1814).
+//
+// Прежде запасной словарь выдавался ЛЮБОЙ нерезолвящейся паре, и это переворачивало
+// смысл снятия ресурса: после снятия превью роли показывало не «меньше», а БОЛЬШЕ —
+// глаголы всей платформы вместо набора одного типа. Роль обещала арендатору то,
+// чего материализация не даёт, причём тем громче, чем меньше правило адресует.
+//
+// Здесь стоял кейс, ЗАКРЕПЛЯВШИЙ это поведение: он подавал пару `nosuch.thing` —
+// названную, а не подстановку — и требовал общий словарь. Кейс переписан на
+// подстановку (выше), потому что запасной словарь объявлялся именно для неё.
+func TestAuthoredVerbs_NamedUnresolvedTypeContributesNothing(t *testing.T) {
+	role := Role{Rules: Rules{{Module: "compute", Resources: []string{"disk"}, Verbs: []string{"*"}}}}
+	got := role.AuthoredVerbs(WithCommonFallback(unknownLookup, commonVocabulary))
+	require.Empty(t, got,
+		"правило, называющее снятый ресурс, развернулось в глаголы ВСЕЙ платформы: "+
+			"снятие ресурса расширяет обещание роли вместо того, чтобы сужать его")
+}
+
+// TestAuthoredVerbs_NamedResolvedTypeIsUnaffected — второй положительный
+// контроль: сужение выше касается ТОЛЬКО нерезолвящейся пары. Названный ресурс,
+// который резолвится, разворачивается своим набором, как и прежде.
+func TestAuthoredVerbs_NamedResolvedTypeIsUnaffected(t *testing.T) {
+	role := Role{Rules: Rules{{Module: "iam", Resources: []string{"role"}, Verbs: []string{"*"}}}}
+	got := role.AuthoredVerbs(WithCommonFallback(lookupFive, commonVocabulary))
+	require.Equal(t, commonVocabulary, got,
+		"резолвящийся тип потерял свой набор — сужение задело законную полосу")
 }
 
 // TestAuthoredVerbs_MultiTypeRuleTakesTheUnion — правило адресует НЕСКОЛЬКО типов:

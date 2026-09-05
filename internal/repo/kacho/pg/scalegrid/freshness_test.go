@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package scalegrid_test
 
@@ -58,8 +58,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/internal/gitenv"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/scalegrid"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/scalegrid"
+	"github.com/PRO-Robotech/kacho/pkg/gitenv"
 )
 
 // scaleGridReportMaxAge — В8, величина ратифицирована владельцем.
@@ -70,8 +70,8 @@ const scaleGridReportDateMark = "  снято               "
 
 // scaleGridRunHint — КАК ПЕРЕСНЯТЬ. Отдельной строкой: сообщение отказа обязано
 // говорить, что делать, а не только что не так.
-const scaleGridRunHint = "KACHO_SCALEGRID_FULL=1 go test " +
-	"./services/iam/internal/repo/kacho/pg/relverdict/ -run TestScaleGrid_FullGridReport " +
+const scaleGridRunHint = "KACHO_SCALEGRID_FULL=1 go test -C services/iam " +
+	"./internal/repo/kacho/pg/relverdict/ -run TestScaleGrid_FullGridReport " +
 	"-count=1 -v -timeout 120m"
 
 // ── ВЕРДИКТ: ЧИСТАЯ ФУНКЦИЯ ─────────────────────────────────────────────────
@@ -171,10 +171,10 @@ func guardedReports() []guardedReport {
 	return []guardedReport{
 		{path: scalegrid.ReportPath, subject: scalegrid.ComputeFingerprint, hint: scaleGridRunHint},
 		{path: scalegrid.StrengthReportPath, subject: scalegrid.ComputeFingerprint,
-			hint: "KACHO_STRENGTH_FULL=1 go test ./services/iam/internal/repo/kacho/pg/relverdict/ " +
+			hint: "KACHO_STRENGTH_FULL=1 go test -C services/iam ./internal/repo/kacho/pg/relverdict/ " +
 				"-run TestStrengthGrid_Report -count=1 -v -timeout 120m"},
 		{path: scalegrid.WriteDeleteReportPath, subject: scalegrid.ComputeWriteDeleteFingerprint,
-			hint: "KACHO_STRENGTH_WRITE=1 go test ./services/iam/internal/repo/kacho/pg/ " +
+			hint: "KACHO_STRENGTH_WRITE=1 go test -C services/iam ./internal/repo/kacho/pg/ " +
 				"-run TestStrengthWriteDelete_Report -count=1 -v -timeout 120m"},
 	}
 }
@@ -349,7 +349,7 @@ func TestScaleGridFreshnessGateCanFailAndCanStaySilent(t *testing.T) {
 
 // repoRoot — корень дерева.
 //
-// Спрашивается у git через `internal/gitenv`, а не собирается из `..`: число
+// Спрашивается у git через `pkg/gitenv`, а не собирается из `..`: число
 // шагов вверх зависит от того, где лежит вызывающий, и переезд файла молча увёл
 // бы гейт смотреть в другой каталог. Прямой `exec.Command("git", …)` в этом
 // дереве — находка отдельного гейта: унаследованные `GIT_DIR`/`GIT_INDEX_FILE`

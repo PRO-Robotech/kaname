@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // role_verb_type_form_integration_test.go — комментарий колонки
 // `role_verb.object_type` и КЛЮЧ, который её судит, говорят об одной форме

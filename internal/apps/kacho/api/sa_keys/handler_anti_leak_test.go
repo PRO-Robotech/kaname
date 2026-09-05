@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // handler_w1_6_test.go — SAKey.Issue takes created_by_user_id from the
 // authenticated principal — not from the request body. Body field accepted

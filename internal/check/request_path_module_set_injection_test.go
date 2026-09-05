@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package check
 
@@ -62,8 +62,8 @@ func writeSyntheticReach(t *testing.T, files []injectedFile) (root string, paths
 const usecaseWithCanon = `package role
 
 import (
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 func validate(r domain.Rules) error {
@@ -74,8 +74,8 @@ func validate(r domain.Rules) error {
 const usecaseWithAliasedCanon = `package role
 
 import (
-	am "github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	am "github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 func validate(r domain.Rules) error {
@@ -109,7 +109,7 @@ func IsKnownModule(m string) bool {
 
 const usecaseWithVariadicNames = `package role
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+import "github.com/PRO-Robotech/kacho-iam/internal/domain"
 
 func known() domain.ModuleSet {
 	return domain.ModuleSetOf("iam", "vpc", "compute", "loadbalancer", "registry", "storage")
@@ -123,7 +123,7 @@ func known() domain.ModuleSet {
 // нарушителя.
 const usecaseNamingCanonInProse = `package role
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+import "github.com/PRO-Robotech/kacho-iam/internal/domain"
 
 // Набор модулей — ЖИВЫЕ строки каталога, а не канон authzmap.CatalogSeedModules:
 // снятый модуль обязан перестать приниматься без перезапуска службы (#1927).
@@ -143,7 +143,7 @@ func labelSelectable() []string { return []string{"vpc", "compute"} }
 // набора не читает.
 const usecaseWithBlankImport = `package role
 
-import _ "github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+import _ "github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 
 func nothing() {}
 `
@@ -152,7 +152,7 @@ func nothing() {}
 // запроса она не является: фикстура вправе называть канон.
 const probeOnTheRequestPath = `package role
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+import "github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 
 func canon() []string { return authzmap.CatalogSeedModules() }
 `

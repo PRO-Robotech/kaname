@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // bootstrap_token_internal_only_test.go — pins the gRPC-registration contract for
 // InternalBootstrapTokenService (#58, ban #6 / IBT-06 / IBT-07):
@@ -36,7 +36,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	bootstraptoken "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/bootstrap_token"
+	bootstraptoken "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/bootstrap_token"
 )
 
 func TestBootstrapToken_InternalOnly_NotOnExternalListener(t *testing.T) {

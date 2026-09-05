@@ -1,11 +1,11 @@
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Values.name }}
-  namespace: kacho
+  namespace: {{ .Release.Namespace }}
 spec:
   replicas: {{ .Values.replicas }}
   selector:
@@ -51,10 +51,25 @@ spec:
         fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
+      {{- $tls := .Values.tls | default dict }}
       volumes:
         - name: config
           configMap:
             name: {{ .Values.name }}-config
+        {{- if $tls.secretName }}
+        # МАТЕРИАЛ TLS СЛУШАТЕЛЕЙ. Ручки самих рёбер приезжают переменными
+        # окружения (карта `env` профиля) — их читает `config.LoadMTLS` через
+        # envconfig, — но ПУТЬ, который они называют, обязан существовать в поде.
+        # Ручка, называющая файл, которого под не несёт, есть объявленная и
+        # неисполнимая возможность: процесс отказывает в пуске на нечитаемом
+        # файле, а профиль читается как настроенный.
+        #
+        # Секрет не объявлен — том не заводится, и посадка остаётся прежней:
+        # dev-цепочка чарта материала TLS не называет.
+        - name: tls-server
+          secret:
+            secretName: {{ $tls.secretName | quote }}
+        {{- end }}
       initContainers:
         # Миграции БД исполняет отдельный binary `kacho-migrator`
         # (cobra-based CLI), не subcommand основного.
@@ -107,6 +122,11 @@ spec:
             - name: config
               mountPath: /etc/kacho-iam
               readOnly: true
+            {{- if $tls.secretName }}
+            - name: tls-server
+              mountPath: {{ printf "%s/server" (required "tls.mountPath не задан при объявленном tls.secretName: путь монтирования обязан быть назван явно — иначе ручки рёбер называют файлы, которых в поде нет" $tls.mountPath) | quote }}
+              readOnly: true
+            {{- end }}
           env:
             - name: KACHO_IAM_CONFIG_PATH
               value: /etc/kacho-iam/config.yaml
@@ -118,6 +138,17 @@ spec:
             {{- range $k, $v := .Values.env }}
             - name: {{ $k }}
               value: {{ $v | quote }}
+            {{- end }}
+            {{- range $k, $v := .Values.secrets }}
+            # ВЕЛИЧИНА ЖИВЁТ В СЕКРЕТЕ, А НЕ В ПРОФИЛЕ. Общий сговор с провайдером
+            # личности и ключ обёртки ключницы страж старта требует непустыми в
+            # боевом режиме, но профиль чарта отслеживается git — значит их место
+            # здесь, ссылкой, а не значением в карте `env`.
+            - name: {{ $k }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required (printf "secrets.%s.secretName не задан" $k) $v.secretName | quote }}
+                  key: {{ required (printf "secrets.%s.secretKey не задан" $k) $v.secretKey | quote }}
             {{- end }}
           # ГОТОВНОСТЬ СПРАШИВАЕТСЯ ПО ТОМУ, ЧТО СЕРВИС СТРОИТ. `/readyz` живёт на
           # слушателе вебхуков и отражает коннект к базе и поднятый LRO-worker;

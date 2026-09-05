@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // subject_change_repo.go — pgxpool adapter implementing service.SubjectChangeReader.
 // Drains kacho_iam.subject_change_outbox for the InternalIAMService.PollSubjectChanges
@@ -37,7 +37,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/subscription"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // Имена журнала — КОНСТАНТЫ этого пакета, а не строки, пришедшие снаружи:

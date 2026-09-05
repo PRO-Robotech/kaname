@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -54,10 +54,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 const (
@@ -99,7 +99,7 @@ func TestApplyBeyondTheParityAnchorIsRefused(t *testing.T) {
 	// ПРЕДПОСЫЛКА: посеянный каталог сошёлся с опорой. Без неё отказ ниже
 	// приезжал бы неизвестно откуда, а «состояние не изменилось» утверждалось бы
 	// о состоянии, которое уже было неверным.
-	census, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+	census, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 	require.NoError(t, err, "предпосылка не создана: посеянный каталог уже разошёлся с опорой")
 	logParityCensus(t, "предпосылка", census)
 
@@ -121,7 +121,7 @@ func TestApplyBeyondTheParityAnchorIsRefused(t *testing.T) {
 	require.Equal(t, before, moduleCatalogSnapshot(t, ctx, pool, anchoredModule),
 		"отказ оставил след: применение обязано быть отвергнуто ВНУТРИ транзакции, до коммита")
 
-	after, perr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+	after, perr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 	logParityCensus(t, "после отказа", after)
 	require.NoError(t, perr,
 		"после отказа каталог обязан оставаться сошедшимся с опорой: лишние живые строки %v",
@@ -143,7 +143,7 @@ func TestApplyNarrowingTheCatalogPassesAndTheNextBootStands(t *testing.T) {
 	ctx = verbCallerCtx(ctx)
 	applier := verbApplierOver(t, pool)
 
-	census, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+	census, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 	require.NoError(t, err, "предпосылка не создана: посеянный каталог уже разошёлся с опорой")
 	logParityCensus(t, "предпосылка", census)
 
@@ -177,7 +177,7 @@ func TestApplyNarrowingTheCatalogPassesAndTheNextBootStands(t *testing.T) {
 	require.NotEmpty(t, reason, "у снятой строки нет причины: за неё никто не отвечает")
 
 	// Пуск СОСТОИТСЯ — вердикт стража, а не мнение пробы.
-	after, perr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+	after, perr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 	logParityCensus(t, "после сужения", after)
 	require.NoError(t, perr, "после законного сужения путь старта отказан: %v", perr)
 	require.NotEmpty(t, after.WithdrawnRows, "снятие не попало в третью корзину стража")
@@ -202,12 +202,12 @@ func TestApplyFixingDriftPassesAndLeavesParityWhole(t *testing.T) {
 	ctx = verbCallerCtx(ctx)
 	applier := verbApplierOver(t, pool)
 
-	_, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+	_, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 	require.NoError(t, err, "предпосылка не создана: посеянный каталог уже разошёлся с опорой")
 
 	insertDriftResource(t, ctx, pool, anchoredModule, driftResource, driftObjectType)
 
-	drifted, derr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+	drifted, derr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 	logParityCensus(t, "дрейф заведён", drifted)
 	require.Error(t, derr, "лишняя живая строка вне опоры обязана ронять пуск — иначе чинить нечего")
 	require.Truef(t, namesRow(drifted.ExtraRows, "ресурс "+anchoredModule+"."+driftResource),
@@ -224,7 +224,7 @@ func TestApplyFixingDriftPassesAndLeavesParityWhole(t *testing.T) {
 	require.NotNil(t, retiredAt, "у снятой строки не проставлен момент снятия")
 	require.NotEmpty(t, reason, "у снятой строки нет причины")
 
-	fixed, ferr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+	fixed, ferr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 	logParityCensus(t, "после починки", fixed)
 	require.NoError(t, ferr, "после починки путь старта по-прежнему отказан: %v", ferr)
 	require.Empty(t, fixed.ExtraRows, "лишняя строка пережила применение")
@@ -385,7 +385,7 @@ func logParityCensus(t *testing.T, when string, c seed.CatalogParityCensus) {
 	t.Helper()
 	t.Logf("паритет (%s): литерал %d/%d/%d, живыми %d/%d/%d, снятыми %d/%d/%d; "+
 		"нет строкой %v, нет в литерале %v, снято решением %d",
-		when, c.LiteralModules, c.LiteralResources, c.LiteralVerbs,
+		when, c.AnchorModules, c.AnchorResources, c.AnchorVerbs,
 		c.RowModules, c.RowResources, c.RowVerbs,
 		c.RetiredModules, c.RetiredResources, c.RetiredVerbs,
 		c.MissingRows, c.ExtraRows, len(c.WithdrawnRows))

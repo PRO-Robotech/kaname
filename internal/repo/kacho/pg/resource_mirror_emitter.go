@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // resource_mirror_emitter.go — pg adapter for service.ResourceMirrorEmitter.
 //
@@ -14,8 +14,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/resource_mirror"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/resource_mirror"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // ResourceMirrorEmitter — adapter implementing service.ResourceMirrorEmitter on

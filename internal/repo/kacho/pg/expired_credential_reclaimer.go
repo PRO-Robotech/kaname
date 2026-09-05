@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // expired_credential_reclaimer.go — долговечная половина снятия истёкших
 // удостоверений (задача #1264, приёмка `expired-credential-reclaim.md`).
@@ -50,7 +50,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // ExpiredCredentialReclaimSpec — границы одного прогона. ДЛИТЕЛЬНОСТИ, а не

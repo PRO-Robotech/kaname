@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // keys.go — Phase 3a (private_key_jwt) keypair helpers for SA Keys.
 //
@@ -18,7 +18,7 @@ import (
 	"encoding/pem"
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 )
 
 // generatedKey holds all artifacts produced by generateES256Key.

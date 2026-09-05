@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // usecase_quota_refusal_test.go — отказ учёта доезжает до вызывающего ПАРОЙ
 // «код + признак» (задача #1191, приёмка сценарий CRED-CAP-19).
@@ -23,7 +23,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
 
 func quotaRefusalReason(t *testing.T, err error) (codes.Code, string, string) {

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // validate_provider_public_hops_test.go — the two hops iam makes to the identity
 // provider's PUBLIC listener must be named by an operator, and when they are
@@ -37,7 +37,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 )
 
 // publicHopCfg — a production config that satisfies every other production

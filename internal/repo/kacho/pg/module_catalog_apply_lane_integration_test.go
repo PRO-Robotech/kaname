@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -47,9 +47,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 // beyondAnchorManifest — доставленный манифест `vpc`, объявляющий ОДНУ строку,
@@ -77,7 +77,7 @@ func TestApplyLaneDecidesWhoChecksTheAnchor(t *testing.T) {
 		// полосы.
 		ctx = verbCallerCtx(ctx)
 
-		census, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+		census, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 		require.NoError(t, err, "предпосылка не создана: посеянный каталог уже разошёлся с опорой")
 		logParityCensus(t, "предпосылка", census)
 		before := moduleCatalogSnapshot(t, ctx, pool, anchoredModule)
@@ -90,7 +90,7 @@ func TestApplyLaneDecidesWhoChecksTheAnchor(t *testing.T) {
 		require.Equal(t, before, moduleCatalogSnapshot(t, ctx, pool, anchoredModule),
 			"отказ глагола оставил след: сверка обязана ронять транзакцию ДО коммита")
 
-		after, perr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+		after, perr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 		logParityCensus(t, "после отказа глагола", after)
 		require.NoError(t, perr, "после отказа каталог обязан оставаться сошедшимся с опорой")
 	})
@@ -98,7 +98,7 @@ func TestApplyLaneDecidesWhoChecksTheAnchor(t *testing.T) {
 	t.Run("старт оставляет опору стражу", func(t *testing.T) {
 		ctx, pool := catalogPool(t)
 
-		census, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+		census, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 		require.NoError(t, err, "предпосылка не создана: посеянный каталог уже разошёлся с опорой")
 		logParityCensus(t, "предпосылка", census)
 
@@ -112,7 +112,7 @@ func TestApplyLaneDecidesWhoChecksTheAnchor(t *testing.T) {
 
 		// ВТОРОЙ РУБЕЖ — он и есть причина, по которой первой половине здесь не
 		// место. Без этого утверждения «старт проходит» читалось бы как дыра.
-		guard, gerr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+		guard, gerr := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 		logParityCensus(t, "страж после применения на старте", guard)
 		require.Error(t, gerr,
 			"страж пропустил строку вне опоры: тогда у пути старта нет ВТОРОГО рубежа, "+

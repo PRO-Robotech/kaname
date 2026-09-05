@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package manifest
 
@@ -89,8 +89,10 @@ func (r CheckReport) Modules() []string {
 // Отчёт отдаётся и при ошибке намеренно: без переписи «доставка сорвана» не
 // отличается от «каталог прочитан, и он пуст», а чинятся эти два состояния
 // по-разному.
-func LoadDelivered(root string) (CheckReport, error) {
-	report := CheckDelivery(root)
+// Набор модулей, известный вызывающему (живые строки каталога), вносится
+// опциями и ДОБАВЛЯЕТСЯ к объявлениям самой доставки — moduleset.go.
+func LoadDelivered(root string, opts ...LoadOption) (CheckReport, error) {
+	report := CheckDelivery(root, opts...)
 	switch report.ExitCode() {
 	case CheckOK:
 		return report, nil
@@ -115,12 +117,12 @@ func LoadDelivered(root string) (CheckReport, error) {
 // Отдельная точка входа, а не флаг у CheckTree: у полос разные вызывающие и
 // разные предметы, и вызывающий не должен выбирать поведение булевым аргументом,
 // смысл которого читается только по объявлению.
-func CheckDelivery(root string) CheckReport {
+func CheckDelivery(root string, opts ...LoadOption) CheckReport {
 	// Референт — ЗАКРЫТАЯ ТАБЛИЦА, и это не умолчание: доставка есть
 	// ПОТРЕБЛЕНИЕ. Таблица к этому моменту уже произведена и вкомпилирована в
 	// бинарь, поэтому манифест, назвавший тип вне неё, не работает никак —
 	// селектор роли адресовал бы несуществующий тип и не дал бы ни одного
 	// пообъектного права, молча. Смена референта в порождающем проходе
 	// (#1930) старту службы не отнимает НИЧЕГО: он идёт этой полосой.
-	return walkManifests(root, isDeliveredManifestName, ReferentShippedTable)
+	return walkManifestsOnDisk(root, isDeliveredManifestName, ReferentShippedTable, opts...)
 }

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // ledger_author_test.go — АВТОР снятия доезжает от применения до писателя
 // ведомостей (#2005).
@@ -29,7 +29,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
 )
 
 // TestApplyPassesTheResolvedActorToBothLedgers — несущее утверждение шва.

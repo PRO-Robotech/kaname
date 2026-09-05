@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package authzmapgen_test
 
@@ -32,7 +32,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmapgen"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmapgen"
 )
 
 // repoRoot — корень репозитория от каталога этого пакета.
@@ -40,7 +40,7 @@ const repoRoot = "../../../.."
 
 func renderTree(t *testing.T, root string) ([]byte, authzmapgen.Census) {
 	t.Helper()
-	tables, err := authzmapgen.Collect(root)
+	tables, err := authzmapgen.CollectSynthetic(root)
 	if err != nil {
 		t.Fatalf("обход манифестов %s не состоялся (%v) — предпосылка гейта исчезла, "+
 			"а не дерево стало чистым", root, err)
@@ -77,7 +77,7 @@ func TestGeneratedTablesAreFresh(t *testing.T) {
 //
 // Прежняя редакция клала приманку в НАСТОЯЩЕЕ дерево службы (`services/iam/`)
 // и убирала её за собой. Пока проба шла одна, это работало. При штатном
-// `go test ./services/iam/...` без `-p 1` соседний пакет обходит тот же каталог
+// `go test -C services/iam ./...` без `-p 1` соседний пакет обходит тот же каталог
 // В ЭТО ЖЕ ВРЕМЯ: он успевает прочитать запись каталога, а к `lstat` файла уже
 // нет. Соседняя проба падает с текстом «обход дерева службы не выполнен» — то
 // есть говорит о ДЕРЕВЕ, хотя дерево исправно. Это третья категория («не

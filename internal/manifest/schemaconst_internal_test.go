@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // schemaconst_internal_test.go — `const` опубликованной схемы есть утверждение о
 // ЗНАЧЕНИИ, и у каждого такого утверждения обязан быть исполнитель (задачи

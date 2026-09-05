@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // register_resource_internal_only_test.go — Internal-only contract for the
 // FGA-proxy RPCs.
@@ -35,7 +35,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	internaliamapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
+	internaliamapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/internal_iam"
 )
 
 // serveBufconn starts a gRPC server fed by the given registrar over an

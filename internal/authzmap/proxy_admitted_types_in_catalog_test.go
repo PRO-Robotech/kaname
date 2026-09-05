@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // proxy_admitted_types_in_catalog_test.go — ПРАВИЛО ПРИЁМА И КАТАЛОГ СХОДЯТСЯ.
 //
@@ -35,8 +35,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/pkg/authz/proxytuple"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 )
 
 // TestProxyAdmittedObjectTypesAreInTheCatalog — тип, допущенный правилом приёма,

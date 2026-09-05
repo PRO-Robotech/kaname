@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -39,12 +39,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // catalogStatementCounter — наблюдатель операторов, считающий ОТДЕЛЬНО те, что
@@ -111,7 +111,7 @@ func TestIAMCT2_01_SnapshotAddsNoSecondReadOfTheCatalog(t *testing.T) {
 
 	// K — операторов у стража, вызванного ОТДЕЛЬНО.
 	counter.reset()
-	censusK, err := seed.AssertCatalogParity(ctx, repo)
+	censusK, err := seed.AssertCatalogParity(ctx, repo, seed.ImageAnchor())
 	if err != nil {
 		t.Fatalf("страж паритета: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestIAMCT2_01_SnapshotAddsNoSecondReadOfTheCatalog(t *testing.T) {
 
 	// N — операторов за весь путь СТАРТА: страж плюс наполнение снимка.
 	counter.reset()
-	censusN, err := seed.AssertCatalogParity(ctx, repo)
+	censusN, err := seed.AssertCatalogParity(ctx, repo, seed.ImageAnchor())
 	if err != nil {
 		t.Fatalf("страж паритета на пути старта: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestIAMCT2_06_07_RetiredAfterStartDoesNotReachTheProjection(t *testing.T) {
 	pool, _, ctx := countedCatalogPool(t)
 	repo := kachopg.NewCatalogRepo(pool)
 
-	census, err := seed.AssertCatalogParity(ctx, repo)
+	census, err := seed.AssertCatalogParity(ctx, repo, seed.ImageAnchor())
 	if err != nil {
 		t.Fatalf("страж паритета: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestIAMCT2_06_07_RetiredAfterStartDoesNotReachTheProjection(t *testing.T) {
 	// СТАРТА, а не форма вызова: `serve.go` возвращает ошибку ровно тогда, когда
 	// её вернул страж, поэтому «страж молчит» здесь и означает «служба
 	// поднялась».
-	parity, perr := seed.AssertCatalogParity(ctx, repo)
+	parity, perr := seed.AssertCatalogParity(ctx, repo, seed.ImageAnchor())
 	if perr != nil {
 		t.Fatalf("страж отказал в старте после СНЯТИЯ строки — снять модуль по-прежнему "+
 			"нельзя иначе как пересборкой образа: %v", perr)
@@ -266,7 +266,7 @@ func TestIAMCT2_06_07_RetiredAfterStartDoesNotReachTheProjection(t *testing.T) {
 		`DELETE FROM kacho_iam.catalog_resource WHERE dotted = $1`, dotted); err != nil {
 		t.Fatalf("удалить строку ресурса вовсе: %v", err)
 	}
-	gone, gerr := seed.AssertCatalogParity(ctx, repo)
+	gone, gerr := seed.AssertCatalogParity(ctx, repo, seed.ImageAnchor())
 	if gerr == nil {
 		t.Errorf("страж молчит при строке, которой нет НИ ЖИВОЙ, НИ СНЯТОЙ — непроехавший "+
 			"посев принят за решение оператора; снято решением %d, нет строкой %d",
@@ -318,7 +318,7 @@ func TestIAMCT2_14_AppliedAfterStartReachesTheProjection(t *testing.T) {
 		t.Fatalf("сборка знает %q — предпосылка -14 отпала, проба стала бы вакуумной", appliedDotted)
 	}
 
-	census, err := seed.AssertCatalogParity(ctx, repo)
+	census, err := seed.AssertCatalogParity(ctx, repo, seed.ImageAnchor())
 	if err != nil {
 		t.Fatalf("страж паритета: %v", err)
 	}
@@ -426,7 +426,7 @@ func TestWithdrawnRowDoesNotBlockTheNextBoot(t *testing.T) {
 
 	// КОНТРОЛЬ: до снятия цепь старта проходит. Без него «поднялась» ниже
 	// зеленело бы и на дереве, где она не поднималась никогда.
-	if _, err := seed.AssertCatalogParity(ctx, repo); err != nil {
+	if _, err := seed.AssertCatalogParity(ctx, repo, seed.ImageAnchor()); err != nil {
 		t.Fatalf("контроль: страж отказал ДО снятия — вердикт беспредметен: %v", err)
 	}
 
@@ -447,7 +447,7 @@ func TestWithdrawnRowDoesNotBlockTheNextBoot(t *testing.T) {
 	}
 
 	// ── звено 1: страж паритета ─────────────────────────────────────────────
-	parity, perr := seed.AssertCatalogParity(ctx, repo)
+	parity, perr := seed.AssertCatalogParity(ctx, repo, seed.ImageAnchor())
 	if perr != nil {
 		t.Fatalf("СТАРТ ОТКАЗАН после снятия строки — снять её нельзя иначе как "+
 			"пересборкой образа, и это ровно предмет #1861: %v", perr)

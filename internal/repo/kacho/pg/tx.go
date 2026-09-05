@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg
 
@@ -14,20 +14,20 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	kacho "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/group"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/invite_mail_outbox"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/reconcile_outbox"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	kacho "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/group"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/fga_outbox"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/invite_mail_outbox"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/reconcile_outbox"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/project"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/role"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/service_account"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/visibility"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // readTx — kacho.Reader поверх pgx.Tx (TxOptions{AccessMode: ReadOnly}).

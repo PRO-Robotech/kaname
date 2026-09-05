@@ -1,0 +1,105 @@
+# прочитано: точек N [10, 100, 1000]; операций 10 ['C-cascade', 'R1-check', 'R2-one-partition', 'R3-page-full', 'T-inline-grant', 'T-inline-revoke', 'W1-grant', 'W2-revoke-1', 'W3-relabel-1', 'W4-relabel-K']; ячеек времени 180; ячеек объёма 18
+
+правило отнесения объявлено ДО прогона (§13): X=1.5; опорная точка N=100; порог каскада=200 мс, применяется к ОБЕИМ формам
+
+══ точка N=10 ══
+  W1-grant           лучше         E P50=5.3 P95=7.0
+                     база:         min P50=12.3 у BCD-combined → 2.32×; min P95=12.7 у BCD-combined → 1.81×
+  W2-revoke-1        в полосе      E P50=2.9 P95=5.3
+                     база:         min P50=4.0 у BCD-combined → 1.38×; min P95=4.4 у BCD-combined → 0.83×
+  W3-relabel-1       лучше         E P50=4.3 P95=4.4
+                     база:         min P50=9.8 у BCD-combined → 2.28×; min P95=11.1 у BCD-combined → 2.52×
+  W4-relabel-K       лучше         E P50=4.1 P95=5.3
+                     база:         min P50=20.0 у BCD-combined → 4.88×; min P95=26.5 у D-container → 5.00×
+  R1-check           в полосе      E P50=0.3 P95=1.2
+                     база:         min P50=1.3 у C-role-relation → 4.33×; min P95=1.5 у C-role-relation → 1.25×
+  R2-one-partition   лучше         E P50=0.3 P95=0.4
+                     база:         min P50=20.9 у A-flat → 69.67×; min P95=27.2 у BCD-combined → 68.00×
+  R3-page-full       лучше         E P50=0.3 P95=0.3
+                     база:         min P50=21.0 у C-role-relation → 70.00×; min P95=24.2 у BCD-combined → 80.67×
+  V-volume           лучше         E GrantBytes=13182Б, GrantTotal=12 стр
+                     база:         min GrantBytes=20744Б у D-container → 1.57× (min GrantTotal=20 стр у D-container, категорию не задаёт)
+  ИСХОД N=10: 1 — форма E выигрывает
+  корзины: лучше=6 хуже=0 в полосе=2 база неполна=0 (сумма 8)
+  операций с неполной базой: ноль
+
+══ точка N=100 ══
+  W1-grant           лучше         E P50=5.3 P95=6.2
+                     база:         min P50=30.9 у BCD-combined → 5.83×; min P95=31.1 у BCD-combined → 5.02×
+  W2-revoke-1        в полосе      E P50=4.2 P95=4.4
+                     база:         min P50=4.1 у BCD-combined → 0.98×; min P95=4.3 у BCD-combined → 0.98×
+  W3-relabel-1       лучше         E P50=3.1 P95=4.3
+                     база:         min P50=8.9 у BCD-combined → 2.87×; min P95=9.5 у BCD-combined → 2.21×
+  W4-relabel-K       лучше         E P50=5.1 P95=5.8
+                     база:         min P50=21.0 у BCD-combined → 4.12×; min P95=23.7 у D-container → 4.09×
+  R1-check           в полосе      E P50=0.3 P95=1.2
+                     база:         min P50=1.3 у C-role-relation → 4.33×; min P95=1.6 у C-role-relation → 1.33×
+  R2-one-partition   лучше         E P50=0.6 P95=0.8
+                     база:         min P50=34.3 у B-group → 57.17×; min P95=41.5 у B-group → 51.88×
+  R3-page-full       лучше         E P50=1.0 P95=1.2
+                     база:         min P50=45.7 у A-flat → 45.70×; min P95=59.6 у B-group → 49.67×
+  V-volume           лучше         E GrantBytes=25425Б, GrantTotal=12 стр
+                     база:         min GrantBytes=48284Б у D-container → 1.90× (min GrantTotal=110 стр у D-container, категорию не задаёт)
+  ИСХОД N=100: 1 — форма E выигрывает
+  корзины: лучше=6 хуже=0 в полосе=2 база неполна=0 (сумма 8)
+  операций с неполной базой: ноль
+
+══ точка N=1000 ══
+  W1-grant           лучше         E P50=6.0 P95=6.4
+                     база:         min P50=252.5 у BCD-combined → 42.08×; min P95=296.6 у D-container → 46.34×
+  W2-revoke-1        в полосе      E P50=4.3 P95=8.3
+                     база:         min P50=4.2 у B-group → 0.98×; min P95=5.8 у D-container → 0.70×
+  W3-relabel-1       лучше         E P50=3.4 P95=4.4
+                     база:         min P50=10.0 у B-group → 2.94×; min P95=12.9 у D-container → 2.93×
+  W4-relabel-K       лучше         E P50=5.5 P95=6.1
+                     база:         min P50=22.8 у D-container → 4.15×; min P95=24.4 у D-container → 4.00×
+  R1-check           в полосе      E P50=0.3 P95=1.1
+                     база:         min P50=1.3 у A-flat → 4.33×; min P95=1.6 у C-role-relation → 1.45×
+  R2-one-partition   лучше         E P50=0.6 P95=0.7
+                     база:         min P50=28.8 у A-flat → 48.00×; min P95=37.3 у A-flat → 53.29×
+  R3-page-full       лучше         E P50=6.3 P95=7.2
+                     база:         min P50=216.9 у A-flat → 34.43×; min P95=269.7 у A-flat → 37.46×
+  V-volume           лучше         E GrantBytes=147825Б, GrantTotal=12 стр
+                     база:         min GrantBytes=323684Б у D-container → 2.19× (min GrantTotal=1010 стр у D-container, категорию не задаёт)
+  ИСХОД N=1000: 1 — форма E выигрывает
+  корзины: лучше=6 хуже=0 в полосе=2 база неполна=0 (сумма 8)
+  операций с неполной базой: ноль
+
+── SPLIT-PERCENTILES ──
+  N=10 R1-check: E P50=0.3 против min 1.3 у C-role-relation (4.33×), E P95=1.2 против min 1.5 у C-role-relation (1.25×) — перцентили расходятся, отнесено в полосу
+  N=100 R1-check: E P50=0.3 против min 1.3 у C-role-relation (4.33×), E P95=1.2 против min 1.6 у C-role-relation (1.33×) — перцентили расходятся, отнесено в полосу
+  N=1000 R1-check: E P50=0.3 против min 1.3 у A-flat (4.33×), E P95=1.1 против min 1.6 у C-role-relation (1.45×) — перцентили расходятся, отнесено в полосу
+── SPLIT-VOLUME ──
+  (ни одной)
+── N-DEPENDENT ──
+  (ни одной — категория одинакова на всех трёх точках)
+
+── C-cascade: порог 200 мс к ОБЕИМ формам ──
+  N=10    A-flat             P50=2.0    P95=2.4    в пороге
+  N=10    B-group            P50=1.6    P95=1.8    в пороге
+  N=10    C-role-relation    P50=1.9    P95=2.5    в пороге
+  N=10    D-container        P50=1.7    P95=2.0    в пороге
+  N=10    BCD-combined       P50=1.7    P95=1.8    в пороге
+  N=10    E-relational       P50=0.3    P95=0.3    в пороге
+  N=100   A-flat             P50=1.7    P95=2.4    в пороге
+  N=100   B-group            P50=1.7    P95=1.9    в пороге
+  N=100   C-role-relation    P50=1.7    P95=1.9    в пороге
+  N=100   D-container        P50=1.8    P95=2.1    в пороге
+  N=100   BCD-combined       P50=3.2    P95=4.9    в пороге
+  N=100   E-relational       P50=0.3    P95=0.3    в пороге
+  N=1000  A-flat             P50=1.8    P95=1.9    в пороге
+  N=1000  B-group            P50=1.7    P95=1.8    в пороге
+  N=1000  C-role-relation    P50=1.7    P95=2.0    в пороге
+  N=1000  D-container        P50=1.7    P95=2.0    в пороге
+  N=1000  BCD-combined       P50=1.7    P95=2.1    в пороге
+  N=1000  E-relational       P50=0.3    P95=0.4    в пороге
+  худший P95 по формам: A-flat=2.4, B-group=1.9, C-role-relation=2.5, D-container=2.1, BCD-combined=4.9, E-relational=0.4
+  порог превышен: ни одной формой
+
+── T-inline (§4.3; в шаг 1 не входят) ──
+  T-inline-grant   N=10    движок: ['not-applicable']; E: 3.9 (4.9) q=6 i=13
+  T-inline-grant   N=100   движок: ['not-applicable']; E: 3.8 (4.9) q=6 i=13
+  T-inline-grant   N=1000  движок: ['not-applicable']; E: 4.9 (5.2) q=6 i=13
+  T-inline-revoke  N=10    движок: ['not-applicable']; E: 3.0 (4.4) q=4 i=2
+  T-inline-revoke  N=100   движок: ['not-applicable']; E: 4.3 (4.5) q=4 i=2
+  T-inline-revoke  N=1000  движок: ['not-applicable']; E: 4.1 (4.4) q=4 i=2

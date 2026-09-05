@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package config
 
@@ -173,6 +173,11 @@ func RegisterDefaults(v *viper.Viper) {
 	// bounded in time. So the omitted-ttl_seconds case resolves to a finite
 	// default instead of "never expires", and requests carry an inclusive
 	// ceiling. Overrides: KACHO_IAM_SAKEY_DEFAULT_TTL / KACHO_IAM_SAKEY_MAX_TTL.
+	// Окно вердикта СОБСТВЕННОЙ ДВЕРИ iam. Пять секунд — то же число, что у
+	// остальных площадок платформы (`pkg/authz.RevocationPolicy`), и выбрано оно
+	// однородностью, а не удобством: окно отзыва у владельца модели не имеет
+	// причин быть шире, чем у тех, кто спрашивает его же.
+	v.SetDefault("authz.cache-ttl", 5*time.Second)
 	v.SetDefault("authn.sakey-default-ttl", 90*24*time.Hour)
 
 	// ── Фоновые задания ────────────────────────────────────────────────────

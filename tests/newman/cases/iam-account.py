@@ -1,5 +1,5 @@
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Case-set для AccountService.
 
@@ -1273,7 +1273,7 @@ CASES.append(Case(
     # Единица как ГРАНИЦА утверждается там, где уникальность не мешает: доменный
     # тип (`internal/domain/resource_name_canon_test.go`), путь создания каждого
     # ресурса (`name_canon_test.go` рядом с каждым use-case) и ограничение живой
-    # базы (`internal/nameformdb`, образец «один символ»).
+    # базы (`pkg/nameformdb`, образец «один символ»).
     title="Create с name len=3 → 200 OK",
     classes=["BVA"],
     priority="P2",

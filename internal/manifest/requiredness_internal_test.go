@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // requiredness_internal_test.go — согласие схемы и загрузчика по ТРЕБОВАТЕЛЬНОСТИ
 // (задача PRO-Robotech/kacho#1840).

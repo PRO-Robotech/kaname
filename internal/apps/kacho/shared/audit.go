@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package shared
 
@@ -8,7 +8,7 @@ package shared
 // through Writer.EmitAuditEvent (atomic in the writer-tx); these helpers only
 // support the emit-per-committed-change contract (a no-op update emits nothing).
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+import "github.com/PRO-Robotech/kacho-iam/internal/domain"
 
 // LabelsEqual reports whether two label maps are equal (same keys + values).
 // Used by Update use-cases to decide whether `labels` is a real change for the

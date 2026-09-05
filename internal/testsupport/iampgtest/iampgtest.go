@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package iampgtest — помощник, дающий пробам iam базу с готовым `search_path`.
 //
@@ -19,7 +19,7 @@
 // `services/iam/internal/repo/kacho/pg`, который прод-код импортирует законно.
 // Go собирает всё, что импортируется по графу, и назначение файла на это не
 // влияет: суффикс `_test.go` выводит файл из сборки, слово «test» в имени — нет.
-// Через `internal/pgtest` в оба боевых бинаря iam приезжал `testcontainers-go` с
+// Через `pkg/pgtest` в оба боевых бинаря iam приезжал `testcontainers-go` с
 // клиентом Docker — 54 пакета при нуле у всех прочих бинарей дерева (#1484).
 //
 // Шапка того файла при этом утверждала обратное: «a helper never linked into a
@@ -51,7 +51,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // NewTestPostgres возвращает DSN на СОБСТВЕННУЮ базу вызывающего, с
@@ -61,7 +61,7 @@ import (
 // вызов — из-за чего пакеты, звавшие его, перерастали 600 с, которые `go test`
 // даёт пакету по умолчанию. Теперь он отдаёт базу на том единственном контейнере,
 // который принадлежит тестовому бинарю вызывающего; почему клон промигрированного
-// шаблона — та же изоляция, что отдельный контейнер, разобрано в `internal/pgtest`.
+// шаблона — та же изоляция, что отдельный контейнер, разобрано в `pkg/pgtest`.
 func NewTestPostgres(t testing.TB) string {
 	t.Helper()
 	return AppendIAMSearchPath(pgtest.NewDB(t))

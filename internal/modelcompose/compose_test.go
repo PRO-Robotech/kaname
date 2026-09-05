@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package modelcompose_test
 
@@ -16,11 +16,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmodel"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/modelcompose"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmodel"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/modelcompose"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 const probeType = "probemod_alpha"
@@ -159,12 +159,22 @@ func repoRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
+	// теперь СВОЙ модуль (она выносится отдельным репозиторием), и подъём «до
+	// первого» останавливался бы в её каталоге. Пути, которые ниже склеиваются с
+	// этим корнем, называют место В ДЕРЕВЕ МОНОРЕПО — от корня, — поэтому
+	// остановка внутри службы удваивала сегмент и обход искал `services/iam/
+	// services/iam/…`, которого не существует.
+	outermost := ""
 	for {
 		if _, serr := os.Stat(filepath.Join(dir, "go.mod")); serr == nil {
-			return dir
+			outermost = dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
+			if outermost != "" {
+				return outermost
+			}
 			t.Fatal("корень монорепо не найден")
 		}
 		dir = parent

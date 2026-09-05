@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // list_operations_test.go — unit tests for the shared ListOperationsUseCase
 // (the per-resource ListOperations RPC backing logic).
@@ -28,7 +28,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 )
 
 // recordingOpsRepo implements operations.Repo, capturing the ListFilter it was

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // roles_test.go — раздел `roles` (приёмка §2.6, §2.6а; сценарии MOD-MR-10 …
 // MOD-MR-15).
@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // ── MOD-MR-10 ───────────────────────────────────────────────────────────────

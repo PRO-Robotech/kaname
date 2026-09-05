@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // constants_extended.go — id-префиксы и константы.
 // Стиль формата отличается от corelib `ids.NewID` (3-char prefix +
@@ -46,6 +46,21 @@ const (
 	// re-seeded with `*.*.*` rules by migration 0031. Also a legitimate
 	// cluster-admin superuser.
 	SystemAdminRoleID = "rol000000000sysadmin"
+
+	// SystemViewerRoleID — рукописный детерминированный id второй системной роли
+	// пола каталога (`kacho-system.viewer`), посеянной миграцией 0001.
+	//
+	// ДЛИНА ЕГО — 21, а не 20, и это ФАКТ ПРИМЕНЁННОЙ МИГРАЦИИ, а не описка,
+	// которую можно поправить: id неизменяем на всю жизнь ресурса (ban #15,
+	// «операции смены id НЕ существует»), а применённую миграцию править нельзя
+	// (ban #5). Переименование поздней миграцией сверх того есть перенос выдачи с
+	// одной роли на другую — тихое расширение прав, отвергаемое гейтом
+	// `TestNoMigrationMovesGrantsBetweenRoles`.
+	//
+	// Поэтому литерал назван здесь и стоит в закрытом перечне
+	// `SeededResourceIDs()`: проверка формы принимает то, что продукт сам посеял,
+	// а не объявляет собственный посев негодным. Задача #1808.
+	SystemViewerRoleID = "rol000000000sysviewer"
 )
 
 // OwnerRoleRules is the canonical authored policy of the `owner` system-role:

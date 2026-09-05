@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // local_mint.go — НАША чеканка бутстрап-удостоверения (задача #1119, Ф4б эпика
 // #896).

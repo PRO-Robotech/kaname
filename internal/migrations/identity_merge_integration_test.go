@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // identity_merge_integration_test.go — свойства ЛИЧНОСТИ, ЧЬИХ ЧЛЕНСТВ БОЛЬШЕ
 // ОДНОГО (задача kacho#472, стадия S2 перехода IAM-ID-1).
@@ -47,7 +47,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // seedAccountWithOwner заводит аккаунт вместе с его владельцем одной

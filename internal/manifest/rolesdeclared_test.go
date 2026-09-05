@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // rolesdeclared_test.go — ОБЪЯВЛЕННОСТЬ раздела `roles` доезжает до
 // применителя ЗНАЧЕНИЕМ (приёмка
@@ -28,7 +28,7 @@ package manifest_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // TestRolesDeclaredDistinguishesTheThreeStatesOfTheSection — три состояния и

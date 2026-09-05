@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // seed_rule_resolvability_integration_test.go — гейт на класс «посеянная роль
 // называет ресурс именем, которого закрытая таблица типов не несёт».
@@ -44,8 +44,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // knownUnresolvableSeedPairs — пары ДЕЙСТВУЮЩЕГО посева, которых закрытая
@@ -199,18 +199,11 @@ func TestSeededRoleRulesResolveOrArePinned(t *testing.T) {
 
 	// Самоистечение: запись пина, которой больше нечего описывать, — находка.
 	// Иначе перечень переживает свой предмет и становится ложным утверждением о
-	// дереве.
-	var stale []string
-	for key := range knownUnresolvableSeedPairs {
-		if !seen[key] {
-			stale = append(stale, key)
-		}
-	}
-	sort.Strings(stale)
-	for _, key := range stale {
-		t.Errorf("запись пина без предмета: «%s» перечислена, но такой неразрешимой пары в посеве нет.\n"+
-			"Имя привели к словарю, роль удалили либо правило сняли — сними и запись, иначе "+
-			"перечень описывает мир, которого нет.", key)
+	// дереве. Разбор ОБЩИЙ с гейтом-близнецом (seed_pin_self_expiry_test.go), и
+	// там же лежит доказательство его способности упасть и смолчать.
+	for _, f := range stalePinFindings("knownUnresolvableSeedPairs",
+		"неразрешимой пары", knownUnresolvableSeedPairs, seen) {
+		t.Error(f)
 	}
 }
 

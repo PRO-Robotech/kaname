@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // fga_types.go — closed (module, resource) → fga_object_type table.
 //
@@ -292,7 +292,7 @@ func AllVerbVocabulary() []string {
 // форма, в которой глагол попадает в кортеж.
 const VerbRelationPrefix = "v_"
 
-//go:generate go run github.com/PRO-Robotech/kacho/services/iam/cmd/authzmap-tables -root ../../../..
+//go:generate go run github.com/PRO-Robotech/kacho-iam/cmd/authzmap-tables -root ../../../..
 
 // ─────────────────────────────────────────────────────────────────────────────
 // НАБОРЫ ДЕЙСТВИЙ ПОРОЖДАЮТСЯ ИЗ МАНИФЕСТОВ — ОДНА ТАБЛИЦА ИЗ ДВУХ (#1092)

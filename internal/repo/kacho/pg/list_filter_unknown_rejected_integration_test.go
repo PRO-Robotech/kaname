@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -28,13 +28,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	repoaccount "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
-	repouser "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	repoaccount "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	repouser "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/user"
 )
 
 // TestAccountList_UnknownFilter_445 — the `name=`-family parser (shared by

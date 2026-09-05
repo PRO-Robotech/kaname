@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package main — single-purpose binary `kacho-iam`.
 // Этот binary обслуживает только `serve` (gRPC API + internal endpoint);
@@ -23,7 +23,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/observability"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 )
 
 // configPathEnv — путь к YAML-конфигу. Пустое значение допустимо (defaults +

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // client_token.go — настройка токен-эндпоинта платформы и его страж старта
 // (задача #898, приёмка F2 §9.1 п. 1, 9).

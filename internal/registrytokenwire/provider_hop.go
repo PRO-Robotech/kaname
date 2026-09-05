@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // provider_hop.go — выбор полосы обмена для контура выдачи докер-токена и
 // отставленная дорога к прежнему издателю (задача #1119, Ф4б эпика #896).
@@ -44,8 +44,8 @@ import (
 	"context"
 	"fmt"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/registry_token"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 )
 
 // retiredProviderExchange — обменник на месте снятой дороги к прежнему издателю.

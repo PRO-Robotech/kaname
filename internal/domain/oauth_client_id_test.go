@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // oauth_client_id_test.go — доменная валидация id токенов после перехода на
 // конвенцию corelib `ids.NewID` (3-char prefix + 17-char crockford, БЕЗ

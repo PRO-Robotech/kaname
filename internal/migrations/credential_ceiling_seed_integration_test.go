@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // credential_ceiling_seed_integration_test.go — СТРОКА УЧЁТА потолка заводится
 // вместе с носителем и начинается с НУЛЯ (задача #1191, приёмка §7.4).
@@ -38,7 +38,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // CRED-CAP-35 (то, что от него осталось наблюдаемым) — принципал БЕЗ

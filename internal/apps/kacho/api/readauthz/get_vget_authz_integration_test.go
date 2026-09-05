@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package readauthz_test
 
@@ -51,17 +51,17 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	accountapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/account"
-	groupapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/group"
-	projectapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/project"
-	saapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/service_account"
-	userapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzcascade"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
+	accountapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/account"
+	groupapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/group"
+	projectapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/project"
+	saapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/service_account"
+	userapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/user"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzcascade"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/relverdict"
+	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/iampgtest"
 )
 
 // readAuthzFixture — живой репозиторий и живая дверь решения над засеянной

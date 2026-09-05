@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // ports.go — port-интерфейсы handler-слоя (Clean Architecture).
 //
@@ -11,7 +11,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // UserLookupPort — read-side dependency для token/refresh hooks.

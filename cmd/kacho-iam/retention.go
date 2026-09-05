@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // retention.go — провязка фоновой уборки таблиц, чей рост задаёт внешний
 // (задача #1292, приёмка `retention-sweep-has-a-caller.md`).
@@ -30,10 +30,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/retention"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/retention"
+	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 // startRetentionSweeper поднимает фоновую уборку и подключает её величины к
@@ -62,6 +62,16 @@ func startRetentionSweeper(
 			// наблюдённая до оператора, остаётся нижней оценкой — снимется не
 			// больше, чем позволено.
 			kachopg.NewSubjectChangeJournalSweeper(pool, logger),
+			// Шестым предметом — очередь сверки прав (#2050). Её дренированные
+			// строки не снимались никогда, при том что приём уборки уже был и
+			// применён к соседней очереди.
+			kachopg.NewReconcileOutboxSweeper(pool),
+			// Седьмым предметом — очередь компенсаций у внешнего провайдера
+			// (#2069). Её доставленные строки не снимались никогда, и реестр
+			// роста таблиц объявлял её долгом; уборщик СВОЙ, потому что общий
+			// уборщик платформы требует ключа партиции, а он у этой очереди
+			// пуст намеренно — поток коммутативен.
+			kachopg.NewProviderCompensationSweeper(pool),
 		),
 		logger.With(slog.String("component", "retention_sweep")),
 	)

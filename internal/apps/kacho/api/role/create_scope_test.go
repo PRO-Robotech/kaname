@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package role
 
@@ -9,7 +9,7 @@ package role
 // opsRepo/repo are touched), so a use-case with nil deps is safe.
 
 import (
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/catalogfixture"
 
 	"context"
 	"testing"
@@ -19,7 +19,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // authnCtx returns a context carrying an authenticated user principal so the

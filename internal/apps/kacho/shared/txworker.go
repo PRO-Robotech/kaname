@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package shared — txworker.go: generic Write-TX scaffolding для worker'ов
 // async-операций (doCreate / doUpdate / doDelete / etc).
@@ -12,7 +12,7 @@ package shared
 import (
 	"context"
 
-	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
+	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
 )
 
 // DoWithWriteTx оборачивает стандартный writer-tx паттерн вокруг одной

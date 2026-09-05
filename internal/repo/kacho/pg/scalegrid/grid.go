@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package scalegrid
 
@@ -16,7 +16,7 @@ import (
 // стилистическая: отчёт, снятый на СОКРАЩЁННОЙ сетке, неотличим от полного и
 // читается как полный. Прецедент в этом же дереве уже есть — переопределение
 // объёма замера переменной окружения у соседнего прибора
-// (`tools/authzformbench`, `AUTHZFORMBENCH_NS`), — и повторять его здесь
+// (`services/iam/tools/authzformbench`, `AUTHZFORMBENCH_NS`), — и повторять его здесь
 // запрещено сценарием R7-1-03.
 //
 // Читателей у сетки ТРОЕ, и все трое берут её ОТСЮДА: прибор (что мерить),

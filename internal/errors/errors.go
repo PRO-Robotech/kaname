@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package errors — pgx-free sentinel error family for kacho-iam.
 //
@@ -182,32 +182,126 @@ func Wrapf(sentinel error, format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{sentinel}, args...)...)
 }
 
+// strippableSentinels — признаки, чьё имя снимается с клиентского текста.
+//
+// Порядок НЕСУЩИЙ: ErrReferenceMissing/ErrReferenceInUse вложены в
+// ErrFailedPrecondition, поэтому их полный префикс обязан примеряться ПЕРВЫМ —
+// иначе общий префикс совпадёт раньше и в тексте останется хвост
+// «referenced resource missing: ».
+var strippableSentinels = []error{
+	ErrReferenceMissing, ErrReferenceInUse, ErrNotFound, ErrAlreadyExists,
+	ErrFailedPrecondition, ErrInvalidArg, ErrInternal, ErrUnavailable,
+	ErrPermissionDenied, ErrUnauthenticated, ErrAborted, ErrQuotaExceeded,
+	ErrQuotaNotProvisioned, ErrQuotaRateExceeded, ErrSelfRevoke, ErrLastAdmin,
+}
+
+// cutSentinelPrefix — снимает с текста имя признака, если оно стоит ПРЕФИКСОМ
+// именно этого текста. Возвращает совпавший признак и остаток.
+func cutSentinelPrefix(msg string) (error, string, bool) {
+	for _, s := range strippableSentinels {
+		if rest, ok := strings.CutPrefix(msg, s.Error()+": "); ok {
+			return s, rest, true
+		}
+	}
+	return nil, "", false
+}
+
+// maxChainNodes — потолок обхода цепочки. Цепочка отказа в этом сервисе
+// глубиной в единицы узлов; потолок стоит не ради скорости, а чтобы обход
+// завершался и на цепочке, замкнутой чужим `Unwrap`.
+const maxChainNodes = 64
+
+// nodeWithSentinelPrefix — ПЕРВЫЙ узел цепочки (снаружи внутрь), чей
+// собственный текст начинается именем признака.
+//
+// Обход именно снаружи внутрь: у вложенных признаков текст внешнего узла
+// содержит текст внутреннего, и снимать надо тот, что виден клиенту первым.
+func nodeWithSentinelPrefix(err error) (error, error, string) {
+	frontier := []error{err}
+	for seen := 0; len(frontier) > 0 && seen < maxChainNodes; {
+		var next []error
+		for _, n := range frontier {
+			seen++
+			if seen > maxChainNodes {
+				break
+			}
+			if s, rest, ok := cutSentinelPrefix(n.Error()); ok {
+				return n, s, rest
+			}
+			switch u := n.(type) {
+			case interface{ Unwrap() error }:
+				if c := u.Unwrap(); c != nil {
+					next = append(next, c)
+				}
+			case interface{ Unwrap() []error }:
+				for _, c := range u.Unwrap() {
+					if c != nil {
+						next = append(next, c)
+					}
+				}
+			}
+		}
+		frontier = next
+	}
+	return nil, nil, ""
+}
+
 // StripSentinel — extracts the "useful" part of the message (after
 // "sentinel: ") so the handler layer can show the client the canonical Kachō text
 // without the internal prefix (parity with
 // kacho-vpc/internal/handler/mapping.go::stripSentinel).
+//
+// # Имя признака снимается ГДЕ БЫ ОНО НИ СТОЯЛО, а не только в начале
+//
+// Прежде имя снималось префиксом ВСЕГО сообщения. Вызывающий, добавивший свой
+// контекст перед отказом репозитория (`fmt.Errorf("%w: %s: %w", ErrWriteFailed,
+// name, err)`), ставит свой текст ВПЕРЁД — префикс перестаёт совпадать, и
+// служебное имя остаётся в середине:
+//
+//	moduleroles: writing the declared role failed: vpc.network.admin:
+//	failed precondition: resources: probeWithdrawn is not a live platform resource
+//
+// Класс отказа уже назван кодом статуса и признаком полосы, поэтому в тексте он
+// лишний и вдобавок сообщает имя внутренней переменной. Чистота текста держалась
+// не свойством функции, а тем, что до сих пор никто не оборачивал (#1889).
+//
+// # Вырезается ровно то, что произвела обёртка признака, а не совпавшие слова
+//
+// Наивная починка — поиск слов признака по тексту — испортила бы отказ, который
+// называет эти слова ПО ДЕЛУ (`name: "failed precondition: x" is not a valid
+// role name`: строку прислал сам вызывающий). Поэтому место реза берётся из
+// ЦЕПОЧКИ: находится узел, чей собственный `Error()` начинается именем признака,
+// и в сообщении замещается ровно его текст. Узел, которого в сообщении нет
+// (свой `Error()`, не склеивающий вложенное), оставляет текст нетронутым.
 func StripSentinel(err error) string {
 	if err == nil {
 		return ""
 	}
 	msg := err.Error()
-	// Порядок несущий: ErrReferenceMissing/InUse вложены в ErrFailedPrecondition,
-	// поэтому их полный префикс обязан примеряться ПЕРВЫМ — иначе общий префикс
-	// снимется раньше и в тексте останется хвост «referenced resource missing: ».
-	for _, s := range []error{ErrReferenceMissing, ErrReferenceInUse, ErrNotFound, ErrAlreadyExists, ErrFailedPrecondition, ErrInvalidArg, ErrInternal, ErrUnavailable, ErrPermissionDenied, ErrUnauthenticated, ErrAborted, ErrQuotaExceeded, ErrQuotaNotProvisioned, ErrQuotaRateExceeded, ErrSelfRevoke, ErrLastAdmin} {
-		prefix := s.Error() + ": "
-		if rest, ok := strings.CutPrefix(msg, prefix); ok {
-			// Пустой остаток — вырожденный случай: обёртка без текста
-			// (`Wrapf(sentinel, "%s", "")`). Отдать его клиенту значило бы
-			// отказать БЕЗ СООБЩЕНИЯ — код без единого слова о том, что делать
-			// дальше, неотличимый в журнале от потери сообщения. Замещается
-			// текстом того sentinel'а, чей префикс совпал (задача продукта
-			// #1658, полоса ct2-misc).
-			if rest == "" {
-				return s.Error()
-			}
-			return rest
-		}
+
+	node, sentinel, rest := nodeWithSentinelPrefix(err)
+	if node == nil {
+		return msg
 	}
-	return msg
+	// Пустой остаток — вырожденный случай: обёртка без текста
+	// (`Wrapf(sentinel, "%s", "")`). Отдать его клиенту значило бы отказать БЕЗ
+	// СООБЩЕНИЯ — код без единого слова о том, что делать дальше, неотличимый в
+	// журнале от потери сообщения. Замещается текстом того sentinel'а, чей
+	// префикс совпал (задача продукта #1658, полоса ct2-misc).
+	if rest == "" {
+		rest = sentinel.Error()
+	}
+
+	inner := node.Error()
+	if inner == msg {
+		return rest
+	}
+	// Признак стоит в середине: замещается ТЕКСТ НАЙДЕННОГО УЗЛА целиком —
+	// его очищенным вариантом. Последнее вхождение, потому что вложенное
+	// склеивается позже внешнего.
+	i := strings.LastIndex(msg, inner)
+	if i < 0 {
+		return msg
+	}
+	return msg[:i] + rest + msg[i+len(inner):]
 }

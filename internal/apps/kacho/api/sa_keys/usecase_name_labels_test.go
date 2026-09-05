@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // usecase_name_labels_test.go — unit-тесты create-only name + labels на SA-key
 // Issue (маппинг проходит в persisted row + proto-response) и стемпинг account_id
@@ -13,7 +13,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // AccountForServiceAccount — резолвер account'а SA (порт SAClientRepo). Дефолт —

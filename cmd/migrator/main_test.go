@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // main_test.go — разбор командной строки мигратора kacho-iam. БД не
 // открывается: пробы быстрые и не зависят от docker. Настоящий накат — предмет

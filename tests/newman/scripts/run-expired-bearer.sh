@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # run-expired-bearer.sh — ВОЛНА ИСТЁКШЕГО ПРЕДЪЯВИТЕЛЯ: создаёт условие «срок токена
 # УЖЕ прошёл», гоняет коллекцию, которой это условие нужно, и выносит вердикт ЧИСЛАМИ.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // authorize_service_test.go — unit tests for AuthorizeService.
 package service
@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
 
 // mockRelations — minimal Authorizer for unit tests.

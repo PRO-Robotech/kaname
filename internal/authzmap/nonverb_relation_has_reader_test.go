@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // nonverb_relation_has_reader_test.go — гейт на КЛАСС: НЕглагольное отношение,
 // объявленное моделью, обязано кем-то ЧИТАТЬСЯ при решении о доступе.
@@ -100,8 +100,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // relPair — (тип объекта модели, имя отношения).

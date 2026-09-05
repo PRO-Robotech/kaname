@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // role_catalog_module_role_test.go — замок на то, что публичный контракт роли
 // теперь ОБЪЯВЛЯЕТ (задача продукта #1925).

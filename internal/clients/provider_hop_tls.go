@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // provider_hop_tls.go — one implementation of "verify this hop against the anchor
 // the operator pinned, and against nothing else", shared by every hop iam makes to

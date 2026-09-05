@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // keys_internal_test.go — ключ-нестрока: ШЕСТЬ форм, а не десять (MOD-MF-08 · 09 ·
 // 10 · 11, приёмка §5.3).

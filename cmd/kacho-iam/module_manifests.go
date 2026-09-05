@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package main
 
@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // module_manifests.go — манифесты модулей ЧИТАЮТСЯ НА СТАРТЕ (задача #1875).
@@ -75,6 +75,10 @@ func loadDeliveredManifests(logger *slog.Logger, cfg config.ManifestsConfig) ([]
 		slog.Int("dirs_skipped", report.DirsSkipped),
 		slog.Int("manifests_read", report.ManifestsRead),
 		slog.Int("findings", len(report.Findings)),
+		// Чем была таблица типов для этого чтения. «Находок ноль» и «владение
+		// не охранялось» — РАЗНЫЕ утверждения о доставке, и различить их
+		// оператору нечем, если перепись об этом молчит.
+		slog.String("type_table", report.Referent.String()),
 		slog.Any("modules", report.Modules()))
 	if err != nil {
 		return nil, fmt.Errorf("доставка манифестов модулей: %w", err)

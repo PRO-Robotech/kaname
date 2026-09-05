@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // relationsubjects_test.go — доказательство того, что чтение допустимых видов
 // получателя ОТВЕЧАЕТ ПО ОБЪЯВЛЕНИЮ, а не по написанию записи.
@@ -33,7 +33,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmodel"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmodel"
 )
 
 // synthetic — канон, поданный текстом. Связный: тип субъекта объявлен, у

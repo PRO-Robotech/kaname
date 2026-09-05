@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // service_account_oauth_client_test.go — domain validation for the
 // private_key_jwt shape and the federation-IN (trusted_subjects) shape of the

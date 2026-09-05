@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package fga_outbox — atomic emit-in-tx helper for kacho_iam.fga_outbox.
 //
@@ -22,25 +22,31 @@
 //	Первого больше нет — применять некуда; второй остался и стал единственным.
 //
 //	Следствие названо прямо, потому что оно меняет срок: строка журнала теперь
-//	действует С КОММИТА, а не «когда доедет». `sent_at` и счётчик попыток при
-//	этом никем не двигаются — доставки не существует; переименование журнала,
-//	чьё имя называет снятый движок, — предмет отдельной задачи (§7 приёмки).
+//	действует С КОММИТА, а не «когда доедет». Величин доставки у таблицы нет
+//	ВОВСЕ — не «их никто не двигает», а их не существует (см. форму ниже);
+//	переименование журнала, чьё имя называет снятый движок, — предмет отдельной
+//	задачи (§7 приёмки).
 //
 //	Per ban #10 — within-service refs/invariants live on DB-level: tx-commit is
 //	the atomicity primitive, not "INSERT then call the store and hope".
 //
-// Schema of `kacho_iam.fga_outbox` (table and NOTIFY trigger — migration
-// `0001_initial.sql`; the ordering partition key — `0067_fga_outbox_tuple_key_partition.sql`):
+// Форма `kacho_iam.fga_outbox` (таблица и триггеры — миграция `0001_initial.sql`).
+// ЧЕТЫРЕ колонки, и это вся таблица:
 //
 //	id            bigserial    PK
 //	event_type    text         IN ('fga.tuple.write','fga.tuple.delete')
-//	payload       jsonb        {"user":"…","object":"…"} plus EITHER "relation"
-//	                           (one relation) OR "relations" (the subject's whole
-//	                           set on that object; see emitTx)
+//	payload       jsonb        {"user":"…","object":"…"} плюс ЛИБО "relation"
+//	                           (одно отношение), ЛИБО "relations" (весь набор
+//	                           субъекта на этом объекте; см. emitTx)
 //	created_at    timestamptz  default now()
-//	sent_at       timestamptz  NULL until drainer applies
-//	last_error    text
-//	attempt_count int
+//
+// Величин доставки (`sent_at`, `last_error`, `attempt_count`) здесь НЕТ, и перечислять
+// их было бы не описанием, а обещанием: запрос по ним отвергается базой (42703).
+// Они существовали ради клейма дренажа и сняты вместе с ним миграцией 20260822160000
+// (kacho#917); ключ упорядочивания `tuple_key` и его триггер — 20260823001000
+// (kacho#1033). Класс «журнал спрашивают по признаку доставки, которого у него нет»
+// держит гейт `internal/repohygiene`
+// `TestJournalWithoutDeliveryMarkerIsNotQueriedByIt` (kacho#1049).
 //
 // Ключа упорядочивания у строки БОЛЬШЕ НЕТ. Колонку `tuple_key` заполнял триггер
 // `BEFORE INSERT`, а читал её клейм дренажа — «только голова партиции». Дренажа
@@ -51,9 +57,9 @@
 // миграцией 20260823001000 (kacho#1033); сама колонка и её индексы — миграцией
 // 20260822160000 (kacho#917).
 //
-// Drainer event types (clients/fga_applier.go):
-//   - clients.FGAEventTypeWrite  = "fga.tuple.write"
-//   - clients.FGAEventTypeDelete = "fga.tuple.delete"
+// Виды записи объявлены ЗДЕСЬ ЖЕ ([EventTypeWrite] / [EventTypeDelete]). Прежде они
+// брались у применителя дренажа, но ни применителя, ни его файла в дереве нет — ссылка
+// на них посылала читателя по координате, которой не существует.
 package fga_outbox
 
 import (
@@ -63,7 +69,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 )
 
 // EventTypeWrite / EventTypeDelete — the two event types this table carries.

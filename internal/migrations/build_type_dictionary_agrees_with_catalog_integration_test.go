@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // build_type_dictionary_agrees_with_catalog_integration_test.go — СЛОВАРЬ
 // СБОРКИ и ПОСЕЯННЫЙ КАТАЛОГ говорят об одном типе одно и то же (задача
@@ -43,7 +43,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 )
 
 // edgeObjectTypeDictionaryConstraint — ограничение, которым держится граница.

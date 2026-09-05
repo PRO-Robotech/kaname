@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // registry_token_key_material_window_test.go — РУЧКА ОКНА ПЕРЕХОДА #1143.
 //
@@ -18,7 +18,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 )
 
 // УМОЛЧАНИЕ — ОКНО ЗАКРЫТО. Fail-closed: незаданная ручка не означает

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // usecase_own_issuance_test.go — выдача ключа служебной учётки на ПЕРЕВЕДЁННОМ
 // контуре не заводит зеркала клиента у прежнего издателя (задача #1120,

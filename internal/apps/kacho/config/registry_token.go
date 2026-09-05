@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // registry_token.go — config for the Docker Registry v2 `/iam/token`
 // auth-server HTTP listener (the `/iam/token` endpoint only). There is NO JWKS
@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/audiencepolicy"
+	"github.com/PRO-Robotech/kacho-iam/internal/audiencepolicy"
 )
 
 // Built-in policy defaults. viper also registers them (defaults.go); the
@@ -186,7 +186,7 @@ func (c RegistryTokenConfig) Validate(clientToken ClientTokenConfig) error {
 				"by the deployment as global.kacho.registry.serviceAud and read by BOTH sides of the lane "+
 				"(the registry ships it as KACHO_REGISTRY_SERVICE_AUD and advertises it to the docker client; "+
 				"we mint it into aud). Declare global.kacho.registry.serviceAud, or set this key directly "+
-				"when running iam on its own",
+				"when running iam on its own (env KACHO_IAM_API_SERVER__REGISTRY_TOKEN__SERVICE)",
 			c.ListenAddress())
 	}
 	if !clientToken.Enabled {

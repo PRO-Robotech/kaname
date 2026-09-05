@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package main
 
@@ -50,7 +50,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // moduleVerbApplierCtor — конструктор ГЛАГОЛЬНОГО применителя. Отличается от
@@ -59,7 +59,7 @@ import (
 const moduleVerbApplierCtor = "NewVerbApplier"
 
 // moduleVerbConsumerPkg — пакет-потребитель: use-case четырёх глаголов.
-const moduleVerbConsumerPkg = "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/module"
+const moduleVerbConsumerPkg = "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/module"
 
 // moduleVerbApplierPort — имя ПОРТА применителя в пакете-потребителе. Именно на
 // значении этого типа обязан быть позван `Apply`.

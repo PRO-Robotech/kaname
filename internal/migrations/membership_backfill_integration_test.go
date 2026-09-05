@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // membership_backfill_integration_test.go — «одно членство на строку человека»
 // (IAM-ID-1, задача kacho#470): взаимная однозначность держится на КАЖДОМ
@@ -61,7 +61,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // seedUser вставляет строку пользователя вместе с её аккаунтом одной

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // list_operations_test.go — unit test for ServiceAccountService.ListOperations.
 //
@@ -20,8 +20,8 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	serviceaccount "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/service_account"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	serviceaccount "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/service_account"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 )
 
 type fakeOpsList struct {

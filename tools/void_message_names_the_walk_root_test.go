@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package tools_regression
 
@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kacho/pkg/gitenv"
 )
 
 // void_message_names_the_walk_root_test.go — сообщение о ТРЕТЬЕЙ категории исхода
@@ -62,6 +64,26 @@ func runSplit(t *testing.T, script string, args ...string) (int, string, string)
 	return code, out.String(), errb.String()
 }
 
+// emptyRepo — дерево, на котором проверка ФОРМЫ даёт ИМЕННО VOID: репозиторий
+// без единого манифеста.
+//
+// Репозиторий, а не голый временный каталог: полоса дерева берёт перечень путей
+// у ИНДЕКСА (задача PRO-Robotech/kacho#2041), и каталог без индекса даёт НАХОДКУ
+// «перечень взять неоткуда», а не «проверять нечего». Предпосылка пробы требует
+// ровно VOID — значит индекс обязан быть, и обязан быть пустым.
+func emptyRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	// gitenv, а не exec напрямую: `cmd.Dir` НЕ выбирает репозиторий, когда в
+	// окружении стоит GIT_DIR — переменная сильнее рабочего каталога, и фикстура
+	// завела бы индекс ТОЙ копии, из которой запущен прогон.
+	cmd := gitenv.Command(root, "init", "-q")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init в %s: %v\n%s", root, err, out)
+	}
+	return root
+}
+
 // voidCanonTree — дерево, на котором сверка канона даёт ИМЕННО VOID: канон несёт
 // только типы вне закрытого набора модулей, а манифесты всех шести модулей
 // ресурсов не объявляют. Тогда находок нет (каждый модуль манифест несёт) и
@@ -107,7 +129,7 @@ func TestManifestVoidMessagesNameTheWalkRootInThemselves(t *testing.T) {
 		script string
 		root   func(*testing.T) string
 	}{
-		{"форма манифеста", "module-manifest-check.sh", func(t *testing.T) string { return t.TempDir() }},
+		{"форма манифеста", "module-manifest-check.sh", emptyRepo},
 		{"сверка канона", "model-canon-check.sh", voidCanonTree},
 	}
 	for _, c := range cases {

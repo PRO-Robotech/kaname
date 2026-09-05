@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package access_binding
 
@@ -55,19 +55,19 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
-	ab_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
-	acct_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/group"
-	proj_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
-	role_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
-	sa_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
-	user_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	ab_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	acct_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/group"
+	proj_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/project"
+	role_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/role"
+	sa_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/service_account"
+	user_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/visibility"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // ─── Symmetric FGA grant/revoke ────────────────────────────────────────────

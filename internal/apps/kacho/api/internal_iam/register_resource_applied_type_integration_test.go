@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // register_resource_applied_type_integration_test.go — РЕГИСТРАЦИЯ ОБЪЕКТА ТИПА,
 // ЗАВЕДЁННОГО ПРИМЕНЕНИЕМ МАНИФЕСТА В РАБОТАЮЩЕМ ПРОЦЕССЕ (kacho#1990).
@@ -39,15 +39,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	internaliam "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
+	internaliam "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/internal_iam"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/iampgtest"
 )
 
 // Тип, заведённый ПРИМЕНЕНИЕМ: словарь сборки о нём не знает by construction —

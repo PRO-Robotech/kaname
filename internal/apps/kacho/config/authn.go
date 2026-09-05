@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // authn_phase2.go — helpers for the AuthN core config fields.
 //
@@ -23,7 +23,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/keywrap"
+	"github.com/PRO-Robotech/kacho-iam/internal/keywrap"
 )
 
 // ResolveHookSharedSecret returns the current shared-secret for Hydra hooks.

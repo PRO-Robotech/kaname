@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package main
 
@@ -21,7 +21,7 @@ import (
 
 const snapshotBuiltAndStarted = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+import "github.com/PRO-Robotech/kacho-iam/internal/catalog"
 
 func serve() error {
 	snap, err := catalog.NewSnapshot(rows, src, log, obs)
@@ -38,7 +38,7 @@ func serve() error {
 
 const snapshotBuiltNotStarted = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+import "github.com/PRO-Robotech/kacho-iam/internal/catalog"
 
 func serve() error {
 	snap, err := catalog.NewSnapshot(rows, src, log, obs)
@@ -54,7 +54,7 @@ func serve() error {
 // знающий одно написание, молчал бы на форме столь же законной.
 const snapshotAliasedNotStarted = `package main
 
-import cat "github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+import cat "github.com/PRO-Robotech/kacho-iam/internal/catalog"
 
 func serve() error {
 	snap, err := cat.NewSnapshot(rows, src, log, obs)
@@ -71,7 +71,7 @@ func serve() error {
 // ровно на живом дефекте, который и наблюдался.
 const snapshotNotStartedButNeighbourIs = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+import "github.com/PRO-Robotech/kacho-iam/internal/catalog"
 
 func serve() error {
 	snap, err := catalog.NewSnapshot(rows, src, log, obs)
@@ -91,7 +91,7 @@ func serve() error {
 // snapshotDiscarded — снимок не связан вовсе. Предмета нет, находки быть не должно.
 const snapshotDiscarded = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+import "github.com/PRO-Robotech/kacho-iam/internal/catalog"
 
 func probe() { _, _ = catalog.NewSnapshot(rows, src, log, obs) }
 `

@@ -1,5 +1,5 @@
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 BINARY         := kacho-iam
 CMD            := ./cmd/kacho-iam
@@ -50,7 +50,7 @@ lint:
 
 # audit-list-filter — CI gate for kacho-iam's listing surface: every method that
 # hands a page to a caller must narrow it, and must declare HOW. What is checked
-# lives in tools/listfiltergate; how this service is laid out lives in
+# lives in pkg/listfiltergate; how this service is laid out lives in
 # services/iam/tools/auditlistfilter.
 #
 # iam carries the widest listing surface in the repository — 30 methods across 21
@@ -61,7 +61,7 @@ lint:
 #
 # The check parses the tree, so a resource is recognised by what its declaration IS —
 # a package declaring a listing method on the transport type — and never by which
-# file holds it; see tools/listfiltergate for the whole contract.
+# file holds it; see pkg/listfiltergate for the whole contract.
 #
 # The run always prints its census (files, packages, resources, listing methods,
 # undeclared, cluster-scoped): "zero findings" must be distinguishable from "zero
@@ -73,7 +73,7 @@ lint:
 # Invoked by CI as `make -C services/iam audit-list-filter`. That it is invoked at
 # all is locked twice over: internal/repohygiene/listfiltergatewiring_test.go
 # derives the service list from this Makefile and from the workflow and compares
-# them in both directions, and tools/listfiltergate/coverage_test.go reports an
+# them in both directions, and pkg/listfiltergate/coverage_test.go reports an
 # unanalysed service as a finding.
 audit-list-filter:
 	@./tools/audit-list-filter.sh
@@ -125,6 +125,39 @@ audit-list-filter:
 module-manifest-check:
 	@./tools/module-manifest-check.sh
 
+# operator-docs / operator-docs-check — документы, которые читает ЧУЖОЙ оператор.
+#
+# ПОРОЖДАЮТСЯ два перечня, и оба иначе устарели бы молча:
+#   THIRD-PARTY-NOTICES.md   — что линкуют ПОСТАВЛЯЕМЫЕ бинари и под чем это
+#                              распространяется. Единица счёта — два бинаря
+#                              образа, а не весь go.mod и не дерево с пробами:
+#                              средства проб в образ не попадают;
+#   INSTALL.md, блок величин — перечень того, без чего служба не пускается,
+#                              порождённый из таблицы стража старта. Таблица
+#                              доказывается ПРОГОНОМ (снятая величина обязана
+#                              ронять старт, поданная объявленным путём — отказ
+#                              снимать), поэтому документ не может обещать
+#                              величину, которой страж не требует, и не может
+#                              назвать способ её задать, который её не задаёт.
+#
+# ИСХОДОВ ЧЕТЫРЕ: 0 сходится · 1 находка · 2 без предмета · 3 не исполнялось.
+# Второй — НЕ вердикт о дереве: «ноль находок» обязано быть отличимо от «ноль
+# прочитанного».
+#
+# ЧЕГО ЦЕЛЬ НЕ СУДИТ: правдивость прозы вокруг порождённого блока. «Понятно» и
+# «полно» машинного предиката не имеют, и обещать проверку, которой нет, значило
+# бы завести ровно тот класс, который корпус ловит. Наличие пяти документов, их
+# предмет и разрешимость ссылок между ними держит проба
+# tools/operatordocs/present_test.go.
+#
+# Вызов: `make -C services/iam operator-docs` / `... operator-docs-check`
+.PHONY: operator-docs operator-docs-check
+operator-docs:
+	@./tools/operator-docs.sh --write
+
+operator-docs-check:
+	@./tools/operator-docs.sh
+
 # model-canon-check — блоки модели доступов сверяются с манифестами модулей
 # ПОБАЙТОВО (задача #1089). Цель обходит закрытый набор модулей, порождает блоки
 # типов из манифеста каждого и сравнивает их с каноном
@@ -173,6 +206,35 @@ module-manifest-check:
 .PHONY: model-canon-check
 model-canon-check:
 	@./tools/model-canon-check.sh
+
+# cla-check — вклад стороннего автора без подтверждённого соглашения о вкладе.
+#
+# Предмет — не гигиена, а необратимость: продукт выходит под AGPL, и владелец
+# сохраняет за собой возможность выдать его же на других условиях. Возможность
+# держится на праве выдавать лицензии на ВЕСЬ код; первый принятый сторонний
+# вклад без соглашения её закрывает НАВСЕГДА — вернуться можно только собрав
+# согласие каждого автора поимённо, а искать их через год некому и не по чему.
+#
+# Класс не производит симптома: вклад принят, сборка зелёная, продукт работает,
+# и неверным становится утверждение о ПРАВАХ — а его никто не прогоняет.
+# Заметить это можно только в день смены лицензии, то есть когда чинить нечем.
+#
+# Цель — тонкая обёртка над `go test`, а не второй исполнитель: судит тот же
+# пакет, что и общий прогон дерева, поэтому расходиться им не на чем. `-v`
+# стоит намеренно — гейт печатает объём осмотренного, и без него «ноль находок»
+# было бы неотличимо от «ноль прочитанного».
+#
+# Текст соглашения и обе формы подтверждения — services/iam/CLA.md;
+# ведомость своих, подписавших и машинных личностей — services/iam/cla-ledger.yaml.
+#
+# Вызов: `make -C services/iam cla-check`
+#
+# Путь — ОТ КОРНЯ МОДУЛЯ СЛУЖБЫ: у неё свой go.mod, и подъём в корень монорепо
+# ради пути `./services/iam/...` отказывает — тот модуль этих пакетов не
+# содержит. В конвейере цель не зовётся, поэтому отказ был тихим.
+.PHONY: cla-check
+cla-check:
+	@go test ./tools/clagate/ -count=1 -v
 
 # Общая `operations`-таблица из kacho-corelib/migrations/common/0001_operations.sql
 # встроена inline в internal/migrations/0001_initial.sql под схемой kacho_iam.

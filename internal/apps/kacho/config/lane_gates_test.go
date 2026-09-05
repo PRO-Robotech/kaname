@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // lane_gates_test.go — ГЕЙТЫ по дереву для полосности посадки личности:
 // сценарии F4d-03, F4d-10 и F4d-11 приёмки Ф4д.

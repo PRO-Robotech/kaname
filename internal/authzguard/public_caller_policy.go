@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // public_caller_policy.go — the per-RPC CALLER policy for the PUBLIC listener
 // (:9090). Sibling of caller_policy.go (:9091), same shape, different table.

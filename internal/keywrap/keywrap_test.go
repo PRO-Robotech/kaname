@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // keywrap_test.go — обёртка приватной половины подписного ключа.
 //
@@ -14,7 +14,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/keywrap"
+	"github.com/PRO-Robotech/kacho-iam/internal/keywrap"
 )
 
 func key(b byte) []byte { return bytes.Repeat([]byte{b}, keywrap.KeySize) }

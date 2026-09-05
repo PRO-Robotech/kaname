@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // invite_mail_integration_test.go — свойства ОЧЕРЕДИ писем приглашения на живой
 // базе.
@@ -8,6 +8,25 @@
 // намерение отправить письмо появляются вместе либо не появляются вовсе. Проба
 // «событие эмитировано» утверждала бы о ВЫЗОВЕ, а не о свойстве, и осталась бы
 // зелёной на отправке письма о приглашении, которого не случилось.
+//
+// # MAIL-53 ДЕРЖИТСЯ ДВУМЯ ПОЛОВИНАМИ, И НИ ОДНА НЕ НАЗЫВАЛА ЕГО ПО ИМЕНИ
+//
+// Сценарий MAIL-53 приёмки ID-MAIL-1 требует ДВУХ разных свойств, и держат их
+// разные пробы — поэтому имя сценария не стояло ни у одной, а поиск по нему
+// давал ноль при живых производителях:
+//
+//	повтор ограничен НАЗВАННЫМ числом    Test_InviteMailQueue_MisconfiguredLaneIsPoisonedNotRetriedForever
+//	                                     (здесь) — строка отравляется, а не крутится вечно;
+//	                                     сама величина приезжает из объявления и проверена
+//	                                     Test_InviteMailDrainerConfig_CarriesBothValuesSeparately
+//	                                     (services/iam/cmd/kacho-iam/invite_mail_wiring_test.go)
+//	второго письма не порождается        Test_InviteMailQueue_SurvivesTheDeathOfTheProcessThatEmitted
+//	                                     (здесь) — отправка ровно одна, клетка «сдано» ровно одна,
+//	                                     и очередь ПУСТЕЕТ: непустевшая очередь и есть второе письмо
+//
+// Разводить эти половины по одной пробе нельзя: первая требует ОТКАЗЫВАЮЩЕГО
+// транспорта, вторая — исправного. Проба, совмещающая оба, утверждала бы о
+// поведении, которого в одном прогоне не бывает.
 package clients_test
 
 import (
@@ -25,8 +44,8 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 	outboxmetrics "github.com/PRO-Robotech/kacho/pkg/outbox/metrics"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/invite_mail_outbox"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/invite_mail_outbox"
 )
 
 // Test_InviteMailIntent_IsAtomicWithTheInviteRow — MAIL-50, несущая половина.

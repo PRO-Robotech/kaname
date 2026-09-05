@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // handler_sa_lane_no_silent_drop_test.go — a request field the service does not
 // honour must not be accepted in silence (api-conventions.md, «Принято-и-
@@ -32,7 +32,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // TestHandlerIssue_SAPrincipal_SpoofedCreatedBy_IsRejectedNotDropped — the

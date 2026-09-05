@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // parity_test.go — держатель второй половины #1891: манифест модуля ОБЪЯВЛЯЕТ
 // посев, который у модуля есть, и объявление сходится с живой базой.
@@ -54,13 +54,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/moduleseedparity"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/moduleseedparity"
 )
 
 // Пороги чтения: ниже них молчание гейта сказано ни о чём. Числа взяты у живой
@@ -493,17 +493,32 @@ func manifestFiles(t *testing.T, root string) []string {
 	return out
 }
 
-// repoRoot — корень монорепо: ближайший вверх каталог с go.mod.
+// repoRoot — корень монорепо: САМЫЙ ВНЕШНИЙ каталог с go.mod.
+//
+// Не «ближайший вверх»: у службы теперь СВОЙ модуль (`services/iam`,
+// github.com/PRO-Robotech/kacho-iam), и подъём до первого встречного
+// останавливался бы в её каталоге. Ниже к этому корню приклеивается `services`,
+// то есть путь В ДЕРЕВЕ МОНОРЕПО от корня, — остановка внутри службы удваивала
+// сегмент, и обход искал `services/iam/services`, которого не существует. Отказ
+// приходил из os.ReadDir, то есть выглядел поломкой пробы, а не сдвигом корня.
+//
+// Тот же выбор и по той же причине сделан у соседа —
+// `internal/authzmap` monorepoRootForReaders; расходиться им нельзя.
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	dir, err := os.Getwd()
+	wd, err := os.Getwd()
 	require.NoError(t, err)
+	dir := wd
+	outermost := ""
 	for {
 		if _, serr := os.Stat(filepath.Join(dir, "go.mod")); serr == nil {
-			return dir
+			outermost = dir
 		}
 		parent := filepath.Dir(dir)
-		require.NotEqualf(t, parent, dir, "go.mod не найден выше %s", dir)
+		if parent == dir {
+			require.NotEmptyf(t, outermost, "корень монорепо (go.mod) не найден от %s", wd)
+			return outermost
+		}
 		dir = parent
 	}
 }

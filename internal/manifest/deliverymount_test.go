@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package manifest_test
 
@@ -65,9 +65,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 	"github.com/PRO-Robotech/kacho/pkg/modulemanifest"
 	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
 )
 
 // configMapMountTimestampDir — имя каталога полезной нагрузки, как его кладёт том

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // subordinate_resource_test.go — гейт на КЛАСС «второй источник имён стал
 // самозаявлением» (задача #1191, приёмка §3.3, утверждения G1–G4).
@@ -30,7 +30,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // subordinateFindings — судья записей подчинённых ресурсов.

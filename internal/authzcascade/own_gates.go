@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package authzcascade
 
@@ -29,7 +29,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 )
 
 // Asker — реляционная форма, отвечающая на вопрос о доступе своей базой.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package relverdict_test
 
@@ -14,15 +14,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/internal/gitenv"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/scalegrid"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/scalegrid"
+	"github.com/PRO-Robotech/kacho/pkg/gitenv"
 )
 
 // matrixReportAbsPath — абсолютный путь отчёта, разрешённый от КОРНЯ дерева.
 //
 // Корень спрашивается у git, а не собирается из `..`: рабочая копия может быть
 // где угодно, и относительный путь уехал бы мимо дерева молча. Команда идёт
-// через `internal/gitenv` — прямой вызов git унаследовал бы `GIT_DIR` и увёл бы
+// через `pkg/gitenv` — прямой вызов git унаследовал бы `GIT_DIR` и увёл бы
 // вопрос в чужой репозиторий.
 func matrixReportAbsPath() (string, error) {
 	out, err := gitenv.Command("", "rev-parse", "--show-toplevel").Output()

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package access_binding
 
@@ -16,10 +16,10 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	roleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/role"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	ab_repo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
+	roleapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/role"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	ab_repo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/catalogfixture"
 )
 
 // ─── ordered, deduped emitted-tuple store ────────────────────────────────────

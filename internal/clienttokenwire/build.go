@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package clienttokenwire — сборка токен-эндпоинта платформы (задача #898,
 // приёмка F2 §9.1 п. 11).
@@ -34,11 +34,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/client_token"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clientassertion"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/clienttokenhttp"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/client_token"
+	"github.com/PRO-Robotech/kacho-iam/internal/clientassertion"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/clienttokenhttp"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 // BuildConfig — вход сборки. Каждая величина обязательна.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package seed
 
@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/reconcile_outbox"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/reconcile_outbox"
 )
 
 // fakeNotifyEngine — фиксирует вызовы ReconcileObject и сигналит о первом.
@@ -65,6 +65,15 @@ func (q *fakeNotifyQueue) MarkReconcileEventSent(_ context.Context, id int64) er
 	q.mu.Unlock()
 	return nil
 }
+
+// RecordReconcileEventFailure — порт учёта отказа (#2050). Здесь он не предмет:
+// сверка в этих пробах не отказывает, поэтому дублёр обязан молчать, а не
+// считать. Вызов на успешном пути — находка, и её ловит
+// `TestReconcileDrain_SuccessIsNotCounted`.
+func (q *fakeNotifyQueue) RecordReconcileEventFailure(context.Context, int64, string) (int, error) {
+	return 0, nil
+}
+
 func (q *fakeNotifyQueue) ListSelectorBindingIDs(context.Context) ([]domain.AccessBindingID, error) {
 	return nil, nil
 }

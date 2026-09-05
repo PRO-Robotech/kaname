@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // acr_floor_module_apply_test.go — ступень подтверждения личности у
 // `InternalModuleService/Apply` ДЕЙСТВУЕТ, а не объявлена (задача #1991, Д9
@@ -39,7 +39,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
 )
 
 const moduleApplyMethod = "/kacho.cloud.iam.v1.InternalModuleService/Apply"

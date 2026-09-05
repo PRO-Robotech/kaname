@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // governing_the_identity_integration_test.go — «распоряжаться СТРОКОЙ ЛИЧНОСТИ»
 // и «распоряжаться ПРАВАМИ В СВОЁМ АККАУНТЕ» решаются РАЗНО, на той двери, куда

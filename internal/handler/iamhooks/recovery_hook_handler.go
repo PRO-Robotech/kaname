@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // recovery_hook_handler.go — завершение восстановления пароля, приходящее от
 // провайдера личности по HTTP на слушатель хуков (:9092).

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // reading_a_persons_session_history_integration_test.go — «читать ИСТОРИЮ
 // СЕССИЙ человека» решается на той двери, куда приходит каждый запрос платформы

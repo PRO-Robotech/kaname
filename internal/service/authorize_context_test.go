@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // authorize_context_test.go — условный контекст, доезжающий до решающей стороны,
 // обязан быть СЕРВЕРНЫМ в части свойств принципала и соединения.

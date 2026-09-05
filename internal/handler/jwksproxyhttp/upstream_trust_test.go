@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // upstream_trust_test.go — the keyset this mirror re-serves is the data-plane's
 // only anchor for deciding whether a token was signed by the provider. So the
@@ -30,8 +30,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/jwksproxyhttp"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/jwksproxyhttp"
 )
 
 // legitKeyset / substitutedKeyset — well-formed, non-empty JWKS documents. The

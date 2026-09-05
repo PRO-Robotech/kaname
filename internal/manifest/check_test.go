@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // check_test.go — ТРИ исхода проверки дерева (MOD-MF-17, 18, 19; приёмка §5.5).
 //
@@ -29,6 +29,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // writeTree — синтетическое дерево: путь относительно корня → содержимое.
@@ -62,7 +64,7 @@ func TestMODMF17GoodTreeExitsZeroAndNamesTheVolume(t *testing.T) {
 		"services/vpc/README.md":         "не манифест",
 	})
 
-	report := CheckTree(root)
+	report := CheckSyntheticTree(root)
 	if report.ExitCode() != CheckOK {
 		t.Fatalf("годное дерево дало код %d, ожидался %d; находки: %v",
 			report.ExitCode(), CheckOK, report.Findings)
@@ -79,15 +81,23 @@ func TestMODMF17GoodTreeExitsZeroAndNamesTheVolume(t *testing.T) {
 
 // TestMODMF18BadManifestFailsTheRunAndNamesTheFix — негодный манифест роняет
 // прогон и называет путь, предмет и способ починки.
+//
+// # Порча ПЕРЕПИСАНА вместе со своим предметом
+//
+// Здесь портили ИМЯ МОДУЛЯ на «не из закрытого набора» (`nlb` против токена
+// `loadbalancer`). Набор РАЗОМКНУТ (moduleset.go), и такой порчи больше не
+// существует: `nlb` — годное имя. Порча заменена на негодную ФОРМУ имени, у
+// которой вход есть всегда; предмет пробы (обход не обрывается · находка
+// называет место и способ починки) не изменился.
 func TestMODMF18BadManifestFailsTheRunAndNamesTheFix(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"services/vpc/manifest.yaml": goodManifest(t),
-		"services/nlb/manifest.yaml": strings.Replace(goodManifest(t), "module: vpc", "module: nlb", 1),
+		"services/nlb/manifest.yaml": strings.Replace(goodManifest(t), "module: vpc", "module: NLB", 1),
 	})
 
-	report := CheckTree(root)
+	report := CheckSyntheticTree(root)
 	if report.ExitCode() != CheckFailed {
-		t.Fatalf("дерево с незнакомым модулем дало код %d, ожидался %d",
+		t.Fatalf("дерево с негодным именем модуля дало код %d, ожидался %d",
 			report.ExitCode(), CheckFailed)
 	}
 	if report.ManifestsRead != 2 {
@@ -98,7 +108,7 @@ func TestMODMF18BadManifestFailsTheRunAndNamesTheFix(t *testing.T) {
 		t.Fatalf("находок %d, ожидалась 1: %v", len(report.Findings), report.Findings)
 	}
 	fault := report.Findings[0]
-	for _, want := range []string{"services/nlb/manifest.yaml", "nlb", "loadbalancer"} {
+	for _, want := range []string{"services/nlb/manifest.yaml", "NLB", domain.ModuleNameGrammar()} {
 		if !strings.Contains(fault, want) {
 			t.Errorf("находка не называет %q — читателю нечем чинить: %q", want, fault)
 		}
@@ -114,7 +124,7 @@ func TestMODMF19EmptyTreeIsVoidNotSuccess(t *testing.T) {
 		"deploy/values.prod.yaml": "manifest: не то, что ищем\n",
 	})
 
-	report := CheckTree(root)
+	report := CheckSyntheticTree(root)
 	code := report.ExitCode()
 	if code == CheckOK || code == CheckFailed {
 		t.Fatalf("пустое дерево дало код %d — он обязан отличаться и от %d, и от %d: "+
@@ -128,7 +138,7 @@ func TestMODMF19EmptyTreeIsVoidNotSuccess(t *testing.T) {
 	// Текст обязан ОТЛИЧАТЬСЯ от текста годного дерева: код возврата читает
 	// оболочка, а человек читает строку, и она не вправе выглядеть успехом.
 	good := writeTree(t, map[string]string{"services/vpc/manifest.yaml": goodManifest(t)})
-	if report.Summary() == CheckTree(good).Summary() {
+	if report.Summary() == CheckSyntheticTree(good).Summary() {
 		t.Errorf("итог пустого дерева дословно совпал с итогом годного: %q", report.Summary())
 	}
 	if !strings.Contains(report.Summary(), "нечего") {
@@ -159,7 +169,7 @@ func TestCheckTreeSkipsWhatIsNotOurs(t *testing.T) {
 		t.Fatalf("файл в .git: %v", err)
 	}
 
-	report := CheckTree(root)
+	report := CheckSyntheticTree(root)
 	if report.ManifestsRead != 1 {
 		t.Fatalf("прочитано манифестов %d, положен 1 — обход берёт лишнее либо "+
 			"не берёт своего: %v", report.ManifestsRead, report.Paths)

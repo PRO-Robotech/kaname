@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // checklimit_test.go — СКОЛЬКО читает обход дерева.
 //
@@ -55,7 +55,7 @@ func TestCheckTreeRefusesAManifestOverTheLimitAndNamesTheValue(t *testing.T) {
 		"services/huge/manifest.yaml": oversized,
 	})
 
-	report := CheckTree(root)
+	report := CheckSyntheticTree(root)
 
 	if report.ExitCode() != CheckFailed {
 		t.Fatalf("манифест сверх предела дал код %d, ожидался %d — предела нет: "+
@@ -91,7 +91,7 @@ func TestCheckTreeReadsAManifestExactlyAtTheLimit(t *testing.T) {
 		"services/vpc/manifest.yaml": manifestOfSize(t, manifestSizeLimit),
 	})
 
-	report := CheckTree(root)
+	report := CheckSyntheticTree(root)
 
 	if report.ExitCode() != CheckOK {
 		t.Fatalf("манифест РОВНО в предел дал код %d, ожидался %d: %v",

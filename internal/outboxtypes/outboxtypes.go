@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package outboxtypes holds the NEUTRAL writer-tx outbox payload value types
 // shared across the Clean-Architecture boundary between the use-case layer

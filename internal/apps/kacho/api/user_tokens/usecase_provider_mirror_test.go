@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // usecase_provider_mirror_test.go — выдача персонального токена не заводит
 // зеркала у поставщика (задача #1121, подфаза Ф4б-3 эпика #896).

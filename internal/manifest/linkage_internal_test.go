@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // linkage_internal_test.go — MOD-MF-13: `roleId` выдачи обязан существовать
 // среди ролей, объявленных ЭТИМ манифестом.

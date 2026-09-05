@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // schemaagreement_internal_test.go — СОГЛАСИЕ опубликованной схемы и Go-структур
 // (MOD-MF-21, MOD-MF-22; приёмка §5.6).

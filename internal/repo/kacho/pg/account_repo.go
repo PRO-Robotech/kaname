@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg
 
@@ -25,11 +25,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
 	"github.com/PRO-Robotech/kacho/pkg/db/pgfault"
 	"github.com/PRO-Robotech/kacho/pkg/pagetoken"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
 )
 
 // accountReader — Get/List/ExistsByName поверх pgx.Tx (read-only или RW).
@@ -38,6 +38,13 @@ type accountReader struct {
 }
 
 const accountCols = "id, name, description, labels, owner_user_id, created_at"
+
+// accountUpdateQ — оператор записи аккаунта. СТАТИЧЕСКИЙ: набор колонок известен
+// компилятору, применимость поля приезжает параметром (#2065; разбор —
+// `mutable_triplet_update.go`). `owner_user_id` неизменяем и в перечень не
+// входит — вызывающий отвергает его до записи.
+const accountUpdateQ = `UPDATE accounts SET` + mutableTripletSetSQL +
+	` WHERE id = $1 RETURNING ` + accountCols
 
 // Get — well-formed-but-absent → NotFound с "Account <id> not found".
 func (r *accountReader) Get(ctx context.Context, id domain.AccountID) (domain.Account, error) {
@@ -251,19 +258,17 @@ func (w *accountWriter) Update(ctx context.Context, a domain.Account, updateMask
 		return domain.Account{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
 	}
 
-	set, args, err := buildAccountUpdateSet(a, labelsJSON, updateMask)
+	args, changed, err := mutableTripletUpdateArgs(
+		string(a.ID), string(a.Name), string(a.Description), labelsJSON, updateMask)
 	if err != nil {
 		return domain.Account{}, err
 	}
-	if set == "" {
+	if !changed {
 		// Mask без mutable-полей → no-op; вернуть текущую row.
 		return w.Get(ctx, a.ID)
 	}
-	args = append(args, string(a.ID))
-	q := fmt.Sprintf(`UPDATE accounts SET %s WHERE id = $%d RETURNING %s`,
-		set, len(args), accountCols)
 
-	row := w.tx.QueryRow(ctx, q, args...)
+	row := w.tx.QueryRow(ctx, accountUpdateQ, args...)
 	out, err := scanAccount(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -398,46 +403,6 @@ func unmarshalLabels(b []byte) (domain.Labels, error) {
 		out[domain.LabelKey(k)] = domain.LabelVal(v)
 	}
 	return out, nil
-}
-
-func buildAccountUpdateSet(a domain.Account, labelsJSON []byte, mask []string) (string, []any, error) {
-	mutableFields := map[string]bool{"name": true, "description": true, "labels": true}
-	apply := map[string]bool{}
-	if len(mask) == 0 {
-		// full-PATCH: применяем все mutable, immutable из тела silent-ignore
-		// (отфильтрован caller'ом по semantic'у "full-PATCH = body wins on mutable only").
-		for k := range mutableFields {
-			apply[k] = true
-		}
-	} else {
-		for _, f := range mask {
-			if !mutableFields[f] {
-				// caller гарантирует, что immutable/unknown отвергнуты на sync-уровне;
-				// сюда не должно прилететь.
-				return "", nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument update_mask field %q", f)
-			}
-			apply[f] = true
-		}
-	}
-
-	parts := []string{}
-	args := []any{}
-	idx := 1
-	if apply["name"] {
-		parts = append(parts, fmt.Sprintf("name = $%d", idx))
-		args = append(args, string(a.Name))
-		idx++
-	}
-	if apply["description"] {
-		parts = append(parts, fmt.Sprintf("description = $%d", idx))
-		args = append(args, string(a.Description))
-		idx++
-	}
-	if apply["labels"] {
-		parts = append(parts, fmt.Sprintf("labels = $%d", idx))
-		args = append(args, labelsJSON)
-	}
-	return strings.Join(parts, ", "), args, nil
 }
 
 // ---- filter / page-token helpers ------------------------------------------

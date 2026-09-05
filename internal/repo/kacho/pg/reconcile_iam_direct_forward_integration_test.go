@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -16,7 +16,7 @@ package pg_test
 // under a parallel create burst. The forward path now materializes ONLY the freshly-
 // created iam-direct object's per-object tuples for each matching binding, reading the
 // object from its OWN table (GetIAMDirectObject) + the iam-direct fan-out
-// (IAMDirectSelectorBindingsMatchingObject), under a SHARE advisory lock — so N
+// (IAMDirectSelectorBindingsMatchingObject), holding NO advisory lock at all — so N
 // concurrent creates in one account do NOT serialize.
 //
 // Coverage (RED → GREEN):
@@ -61,9 +61,9 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 // countLedgerTuple counts emitted-tuple ledger rows for a (binding, object, relation).

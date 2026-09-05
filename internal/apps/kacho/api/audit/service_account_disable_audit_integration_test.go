@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package audit_test
 
@@ -29,9 +29,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	service_account "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/service_account"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	service_account "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/service_account"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 func TestServiceAccountDisable_RecordsTheEventAndReachesTheIssuanceGate(t *testing.T) {

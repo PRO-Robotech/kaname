@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // reading_a_persons_credentials_test.go — гейт на КЛАСС: ВИДЕТЬ ПЕРЕЧЕНЬ
 // УДОСТОВЕРЕНИЙ ЧЕЛОВЕКА не вправе тот, кто распоряжается его аккаунтом.
@@ -82,7 +82,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
 )
 
 // credentialReadRPCs — публичные RPC, чей предмет есть ЧТЕНИЕ СВЕДЕНИЙ ОБ

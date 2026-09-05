@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package check
 
@@ -41,7 +41,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // literalPackageRel — пакет, объявляющий литерал каталога.
@@ -58,8 +58,8 @@ const literalFileName = "fga_types.go"
 // а способность дотянуться до базы, и новый адаптер под другим именем обязан
 // подпадать под тот же запрет, не требуя правки этого перечня.
 var rowReachingImports = []string{
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog",
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo",
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog",
+	"github.com/PRO-Robotech/kacho-iam/internal/repo",
 	"github.com/jackc/pgx",
 }
 
@@ -203,13 +203,13 @@ func TestIAMCT2_11_Injection(t *testing.T) {
 	}{
 		{
 			name:     "контроль: законный близнец молчит",
-			goFile:   "package authzmap\n\nimport \"github.com/PRO-Robotech/kacho/services/iam/internal/domain\"\n\nvar _ = domain.KnownModules\n",
+			goFile:   "package authzmap\n\nimport \"github.com/PRO-Robotech/kacho-iam/internal/domain\"\n\nvar _ = domain.KnownModules\n",
 			makefile: "lint:\n\tgofmt -l services/iam/internal/authzmap/fga_types.go\n",
 			wantHit:  false,
 		},
 		{
 			name:     "инъекция: пакет-литерал импортирует порт строк",
-			goFile:   "package authzmap\n\nimport \"github.com/PRO-Robotech/kacho/services/iam/internal/catalog\"\n\nvar _ = catalog.Rows{}\n",
+			goFile:   "package authzmap\n\nimport \"github.com/PRO-Robotech/kacho-iam/internal/catalog\"\n\nvar _ = catalog.Rows{}\n",
 			makefile: "lint:\n\techo ok\n",
 			wantHit:  true,
 		},

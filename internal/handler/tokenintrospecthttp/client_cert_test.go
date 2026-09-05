@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // client_cert_test.go — авторитет отзыва принимает вопрос только от пира,
 // предъявившего ПРОВЕРЕННЫЙ сертификат.
@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/tokenintrospecthttp"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/tokenintrospecthttp"
 )
 
 func askWithTLS(t *testing.T, h http.Handler, token string, state *tls.ConnectionState) int {

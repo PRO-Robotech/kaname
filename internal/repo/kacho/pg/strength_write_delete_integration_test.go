@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -17,7 +17,7 @@ package pg_test
 //
 // Что участвует — материализатор целиком и своим кодом: `reconcile.Reconciler`
 // поверх настоящего `pg.ReconcileAdapter` и настоящего Postgres (testcontainers).
-// Соседний прибор `tools/authzformbench` — ДРУГОЙ прибор с другими единицами: он
+// Соседний прибор `services/iam/tools/authzformbench` — ДРУГОЙ прибор с другими единицами: он
 // сравнивает формы одной выдачи между собой, а не меряет продуктовый материализатор.
 // Складывать его числа с этими нельзя. Что именно он берёт за образец сравнения,
 // здесь не воспроизводится намеренно: это его предмет, он меняется вместе с ним, и
@@ -61,10 +61,10 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/scalegrid"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/scalegrid"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // strengthWDEnv — ручка «запускать замер записи и удаления», и только это.
@@ -446,7 +446,7 @@ func TestStrengthWriteDelete_Report(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	runCommand := fmt.Sprintf("%s=1 go test ./services/iam/internal/repo/kacho/pg/ "+
+	runCommand := fmt.Sprintf("%s=1 go test -C services/iam ./internal/repo/kacho/pg/ "+
 		"-run TestStrengthWriteDelete_Report -count=1 -v -timeout 120m", strengthWDEnv)
 	prov := scalegrid.TakeProvenance(runCommand, nil)
 	prov.GridText = wdGridText()
@@ -775,7 +775,7 @@ func renderWDReport(results []wdResult, wall time.Duration, final bool) string {
 	w("            Прежних слагаемых «применение кортежа к движку» и «ожидание в\n")
 	w("            очереди до дренажа» нет у самого предмета: прямой факт складывает\n")
 	w("            триггер в момент коммита журнала.\n")
-	w("  Числа этого отчёта НЕЛЬЗЯ складывать с числами прибора tools/authzformbench:\n")
+	w("  Числа этого отчёта НЕЛЬЗЯ складывать с числами прибора services/iam/tools/authzformbench:\n")
 	w("  это другой прибор с другими единицами и другим предметом.\n")
 
 	w("\nИСХОД ПРОХОДА — ПЕРВОЙ КОЛОНКОЙ, ДО ВСЯКИХ МИЛЛИСЕКУНД\n")

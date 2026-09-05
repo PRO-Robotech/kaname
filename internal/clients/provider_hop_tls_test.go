@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // provider_hop_tls_test.go — every hop iam makes to the identity provider is
 // verified against the anchor it was given, and against nothing else.
@@ -37,7 +37,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 )
 
 // testCA — a generated certificate authority plus the material to serve and to

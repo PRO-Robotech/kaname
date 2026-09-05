@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // linkage_test.go — СВЯЗНОСТЬ разобранного манифеста: то, что форма выразить не
 // способна (задача #1088, приёмка §5.4 и §5.7, сценарии MOD-MF-13…16 и 23…26).
@@ -31,7 +31,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // replaceOnce — порча документа ровно в одном месте.

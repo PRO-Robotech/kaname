@@ -1,5 +1,5 @@
 -- Copyright (c) PRO-Robotech
--- SPDX-License-Identifier: BUSL-1.1
+-- SPDX-License-Identifier: AGPL-3.0-or-later
 --
 -- 20260904135459_role_owner_module_needs_a_liveness_key — СНЯТИЕ МОДУЛЯ при
 -- живых ролях: порядок держит КЛЮЧ, а не рассуждение.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // provider_absent_test.go — разбор «контур бутстрап-удостоверения не достаёт до
 // поставщика НИ ОДНИМ портом» (задача #1119, Ф4б эпика #896).
@@ -45,7 +45,7 @@ import (
 )
 
 // providerClientPkg — пакет клиентов внешнего поставщика удостоверений.
-const providerClientPkg = "github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+const providerClientPkg = "github.com/PRO-Robotech/kacho-iam/internal/clients"
 
 // bootstrapMintPackages — каталоги, составляющие путь чеканки бутстрапа:
 // use-case и его композиция. Пути относительны каталогу ЭТОГО пакета, поэтому

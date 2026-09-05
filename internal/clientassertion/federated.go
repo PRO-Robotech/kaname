@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // federated.go — федеративная полоса приёма: утверждение подписал ВНЕШНИЙ
 // издатель, а перечень доверенных издателей ведём мы (задача #1124, RFC 7523
@@ -35,7 +35,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // VerifyFederated проверяет утверждение, подписанное внешним издателем, и

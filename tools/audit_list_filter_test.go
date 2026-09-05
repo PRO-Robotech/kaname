@@ -1,10 +1,10 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package tools_regression locks the behaviour of kacho-iam's audit-list-filter
 // gate against the REAL tree.
 //
-// The fixtures in tools/listfiltergate assert the analyser's discrimination on
+// The fixtures in pkg/listfiltergate assert the analyser's discrimination on
 // synthetic trees. What they cannot assert is that iam's own PROFILE points at
 // declarations that exist, that its own listings stay clean, and that the ban it
 // derives is the ban it thinks it derives. A profile can name a type that has moved
@@ -40,7 +40,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // treesRead are the directories the gate parses for iam: the listing surface, and
@@ -91,7 +91,7 @@ func runGate(t *testing.T, root string, args ...string) (string, error) {
 // copyTrees materialises a throwaway copy of everything the gate reads, so an
 // injection can be made against the REAL declarations without touching the repo.
 //
-// The file set comes from the git INDEX (internal/treecorpus), not from a disk
+// The file set comes from the git INDEX (pkg/treecorpus), not from a disk
 // walk. Under services/ a walk also reads what the repository does not contain —
 // agent working copies, generated directories, run reports — every one of them
 // already declared out of the tree by .gitignore and invisible to filepath.WalkDir.

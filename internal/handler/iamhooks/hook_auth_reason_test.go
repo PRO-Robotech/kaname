@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // hook_auth_reason_test.go — отказ обратного хука НАЗЫВАЕТ СВОЮ ПРИЧИНУ В
 // ЖУРНАЛЕ и НЕ называет её в ответе (#1747).

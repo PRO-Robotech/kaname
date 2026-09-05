@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // ids_fixture_form_test.go — ГЕЙТ по дереву: фикстура пробы не снисходительнее
 // продукта в том, что касается формы СОБСТВЕННОГО идентификатора.
@@ -85,7 +85,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 )
 
 // deliberateBadFormMark — пометка намеренно негодного литерала. Текст

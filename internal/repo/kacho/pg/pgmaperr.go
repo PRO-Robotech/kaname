@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg
 
@@ -23,9 +23,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/pkg/db/pgfault"
 	"github.com/PRO-Robotech/kacho/pkg/quota/quotadetail"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
 )
 
 // wrapPgErr — SQLSTATE → ErrXxx mapping point, constraint-name aware. The
@@ -158,12 +158,18 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		//
 		// Форму имени iam проверяет САМ, до вставки: доменный newtype на каждом
 		// из шести именуемых типов плюс подстановка умолчания на пути создания.
+		//
+		// Предикатов ЗДЕСЬ ДВА, и второй не украшение (задача #1903). Общий
+		// (`pgfault.CheckLaneOf` → `nameform.IsConstraint`) опознаёт ограничение
+		// ТОЧНЫМ сравнением `<таблица>_name_check`. У роли ограничений формы два,
+		// по одному на ярус, и названы они иначе — конструкции они не отвечают и
+		// потому не опознавались НИКОГДА.
 		// Значит ограничение таблицы есть защита ПОСЛЕДНЕГО РУБЕЖА, и его
 		// срабатывание означает не «вызывающий прислал негодное имя», а «сервис
 		// пропустил негодное значение» — НАШ дефект. `INVALID_ARGUMENT` здесь
 		// обвинял бы вызывающего в чужой ошибке и не давал бы ему ничего, что
 		// можно исправить.
-		if pgfault.CheckLaneOf(f) == pgfault.LaneServiceDefect {
+		if pgfault.CheckLaneOf(f) == pgfault.LaneServiceDefect || isRoleNameFormConstraint(f.Table, f.Constraint) {
 			slog.Error("name form backstop fired: service admitted a name it validates itself",
 				append([]any{"kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
 			return iamerr.ErrInternal
@@ -322,6 +328,24 @@ func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 	switch pgErr.ConstraintName {
 	case "accounts_owner_fk":
+		// Direction-sensitive, как у четырёх соседей ниже. Ограничение объявлено
+		// `ON DELETE RESTRICT`, поэтому оно срабатывает С ДВУХ сторон:
+		//   INSERT account с несуществующим owner_user_id → «User <id> not found»
+		//   DELETE user, ВЛАДЕЮЩЕГО аккаунтом              → «… owns accounts …»
+		// Второе — состояние «ещё ссылаются», противоположное «ссылки нет». До
+		// #2048 ветви не было вовсе: человек, которого только что вернул
+		// `ListUsers`, получал утверждение о собственном отсутствии, а клиент,
+		// ведущий состояние, снимал его строку у себя. Тон обеих сторон — часть
+		// контракта (api-conventions.md §Error-format); код у них ОДИН
+		// (`ErrFailedPrecondition`), различает их только сообщение.
+		//
+		// Полоса сужена до снятия ИМЕННО человека: это единственный глагол,
+		// нарушающий `accounts_owner_fk` со стороны ссылающихся. Широкое «всякая
+		// подсказка снятия» было бы неверно — снятие соседнего ресурса этого
+		// ключа не касается.
+		if kindHint == "User.Delete" {
+			return fmt.Sprintf("User %s owns accounts and cannot be deleted", idHint), iamerr.ErrReferenceInUse
+		}
 		return fmt.Sprintf("User %s not found", idHint), iamerr.ErrReferenceMissing
 	case "projects_account_fk":
 		// Direction-sensitive:
@@ -550,22 +574,55 @@ func integrityText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	return "resource state does not permit this operation"
 }
 
+// isRoleNameFormConstraint — ограничение ФОРМЫ ИМЕНИ РОЛИ, полоса дефекта
+// сервиса (задача #1903).
+//
+// # Почему предикат ЗДЕСЬ, а не расширением общего
+//
+// Общий перечень (`pkg/validate/nameform`) описывает форму имени РЕСУРСА — DNS
+// label по RFC 1123, одну на шесть схем, принявших канон. Имя роли ей не
+// подчиняется: у него ДВЕ собственные формы по ярусу, и держат их два
+// ограничения вместо одного. Расширение чужого пакета свело бы два разных
+// предмета в один словарь, и следующая смена канона имени ресурса потянула бы
+// за собой роль, которая к нему не относится.
+//
+// # Почему это НАШ дефект, а не ввод вызывающего
+//
+// Обе формы iam проверяет сам, до вставки: `RoleName.ValidateAtTier` — их
+// зеркало, и зовётся оно из `Role.Validate`. Значит ограничение таблицы есть
+// защита ПОСЛЕДНЕГО РУБЕЖА, и его срабатывание означает «сервис пропустил
+// негодное значение». `INVALID_ARGUMENT` здесь обвинял бы вызывающего в чужой
+// ошибке, а прежний текст вдобавок ВЫПИСЫВАЛ форму — то есть пережил бы её
+// смену молча.
+//
+// Имя таблицы проверяется наравне с именем ограничения: имена ограничений
+// уникальны в схеме, но сверка обеих координат не даёт полосе сработать на
+// одноимённом ограничении чужой таблицы, если такое однажды заведут.
+func isRoleNameFormConstraint(table, constraint string) bool {
+	if table != "roles" {
+		return false
+	}
+	return constraint == "roles_custom_name_check" || constraint == "roles_system_name_check"
+}
+
 func checkText(pgErr *pgconn.PgError) string {
 	// Связей формы имени в этой таблице НЕТ намеренно: они отводятся раньше, в
 	// ветке 23514, и отвечают фиксированным INTERNAL. Прежде здесь стояли две
 	// записи, называвшие форму `^[a-z][-a-z0-9]{2,62}$`, — они пережили бы её
 	// смену молча и посылали бы арендатора чинить имя по правилу, которого в
 	// дереве нет (#1279).
+	//
+	// Ещё две записи стояли здесь до #1903 — обе формы имени РОЛИ, и обе
+	// выписывали регулярку в текст арендатору. Утверждение выше было при них
+	// ложным: комментарий говорил «связей формы имени НЕТ», а они лежали семью
+	// строками ниже. Два места об одном предмете, из которых верно одно;
+	// теперь верно оба — роль отводится в ветке 23514 вместе с остальными.
 	switch pgErr.ConstraintName {
 	case "accounts_description_check", "projects_description_check", "groups_description_check",
 		"service_accounts_description_check", "roles_description_check":
 		return "Illegal argument description: length must be <=256"
 	case "accounts_labels_valid", "projects_labels_valid", "groups_labels_valid":
 		return "Illegal argument labels: invalid key/value format or cardinality"
-	case "roles_custom_name_check":
-		return "Illegal argument name: must match ^[a-z][a-z0-9_]{0,40}$ (custom role)"
-	case "roles_system_name_check":
-		return "Illegal argument name: must match ^roles/[a-z]+\\.[a-z]+$ (system role)"
 	case "users_email_check":
 		return "Illegal argument email: invalid format"
 	case "users_display_name_check":

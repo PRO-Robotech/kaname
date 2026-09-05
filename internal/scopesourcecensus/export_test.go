@@ -1,9 +1,9 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package scopesourcecensus_test
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/scopesourcecensus"
+import "github.com/PRO-Robotech/kacho-iam/internal/scopesourcecensus"
 
 // PlansForTest — перечень типов, о которых перепись обязана высказаться.
 //

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // subject_change_retention_integration_test.go — УБОРКА ЖУРНАЛА СМЕНЫ СУБЪЕКТА
 // (задача #1758).
@@ -35,8 +35,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/subjectchange"
 
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // journalGrace — порог проб. Берётся у ЧИТАТЕЛЯ, а не выписывается числом: копия

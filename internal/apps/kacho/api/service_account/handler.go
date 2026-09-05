@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package service_account — ServiceAccountService.
 // Key-credentials (key/secret create) — отдельный pipeline (через Ory Hydra
@@ -16,9 +16,9 @@ import (
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	reposa "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	reposa "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/service_account"
 )
 
 type Handler struct {

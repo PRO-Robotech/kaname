@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package relverdict_test
 
@@ -56,10 +56,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/planrows"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/scalegrid"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/planrows"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/relverdict"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/scalegrid"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // fullGridEnv — ручка «запускать полную сетку», и только это.
@@ -945,13 +945,13 @@ func TestScaleGrid_FullGridReport(t *testing.T) {
 		t.Skip("integration")
 	}
 	if os.Getenv(fullGridEnv) == "" {
-		t.Skipf("полная сетка идёт РУЧНЫМ прогоном: %s=1 go test ./services/iam/internal/repo/kacho/pg/relverdict/ "+
+		t.Skipf("полная сетка идёт РУЧНЫМ прогоном: %s=1 go test -C services/iam ./internal/repo/kacho/pg/relverdict/ "+
 			"-run TestScaleGrid_FullGridReport -count=1 -v -timeout 120m", fullGridEnv)
 	}
 	ctx := context.Background()
 	grid := scalegrid.Full()
 
-	runCommand := fmt.Sprintf("%s=1 go test ./services/iam/internal/repo/kacho/pg/relverdict/ "+
+	runCommand := fmt.Sprintf("%s=1 go test -C services/iam ./internal/repo/kacho/pg/relverdict/ "+
 		"-run TestScaleGrid_FullGridReport -count=1 -v -timeout 120m", fullGridEnv)
 	prov := scalegrid.TakeProvenance(runCommand, grid)
 

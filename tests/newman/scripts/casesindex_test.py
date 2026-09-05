@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Инъекция для сверщика каталога кейсов — предмет живёт в общем слое, `casesindex.audit`.
 

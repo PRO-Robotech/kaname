@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package access_binding
 
@@ -20,11 +20,11 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	repoab "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
 )
 
 type ListByRoleUseCase struct {
@@ -69,7 +69,7 @@ func (u *ListByRoleUseCase) Execute(ctx context.Context, roleID string, f repoab
 	// the subject) are also visible.
 	filtered := out[:0:0]
 	for _, b := range out {
-		if authzguard.IsSelf(ctx, string(b.SubjectID)) {
+		if callerIsSubjectOf(ctx, b) {
 			filtered = append(filtered, b)
 			continue
 		}

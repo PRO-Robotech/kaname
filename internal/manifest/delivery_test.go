@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package manifest_test
 
@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // deliveryDir — каталог доставки с названными манифестами.
@@ -104,9 +104,12 @@ func TestLoadDeliveredRefusesAnUnreadableRoot(t *testing.T) {
 }
 
 func TestLoadDeliveredRefusesABrokenManifestAndNamesIt(t *testing.T) {
+	// Модуль у второго документа ДРУГОЙ, и это не косметика: с тех пор как имя,
+	// объявленное дважды одним обходом, стало находкой (moduleset.go), прежняя
+	// фикстура несла ВТОРОЙ дефект и проба судила бы уже не свой предмет.
 	root := deliveryDir(t, map[string]string{
 		"vpc/manifest.yaml":    compactManifest,
-		"broken/manifest.yaml": "apiVersion: iam/v1\nmodule: vpc\nunknownSection: 1\n",
+		"broken/manifest.yaml": "apiVersion: iam/v1\nmodule: compute\nunknownSection: 1\n",
 	})
 
 	report, err := manifest.LoadDelivered(root)

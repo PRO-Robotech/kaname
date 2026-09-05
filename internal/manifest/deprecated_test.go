@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // deprecated_test.go — раздел `deprecatedVerbs` (приёмка §2.7; сценарии
 // MOD-MR-16 … MOD-MR-18).
@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 const deprecatedBase = "apiVersion: iam/v1\nmodule: vpc\ndeprecatedVerbs:\n  read:\n%s"

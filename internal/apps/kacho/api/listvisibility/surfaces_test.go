@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package listvisibility_test
 
@@ -20,25 +20,25 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/catalogfixture"
 
-	abapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding"
-	accountapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/account"
-	groupapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/group"
-	projectapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/project"
-	roleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/role"
-	saapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/service_account"
-	userapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user"
+	abapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding"
+	accountapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/account"
+	groupapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/group"
+	projectapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/project"
+	roleapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/role"
+	saapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/service_account"
+	userapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/user"
 
-	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
-	repoaccount "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
-	repogroup "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/group"
-	repoproject "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
-	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
-	reposa "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
-	repouser "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
+	repoab "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	repoaccount "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
+	repogroup "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/group"
+	repoproject "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/project"
+	reporole "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/role"
+	reposa "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/service_account"
+	repouser "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/user"
 )
 
 // listArgs — everything a probe may vary about one list call.

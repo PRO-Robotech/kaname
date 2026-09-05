@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // verb_axis_model_test.go — ось ГЛАГОЛОВ привязана к модели ПО КАЖДОМУ ТИПУ, по
 // образцу TestDrift_GuardMatchesModel, который так же привязывает ось ТИПОВ.
@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 )
 
 // emitterVerbRelations — какие `v_*` эмиттер написал бы НА ЭТОМ типе.

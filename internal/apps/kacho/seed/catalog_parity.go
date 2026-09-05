@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package seed
 
@@ -69,13 +69,121 @@ package seed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
 )
+
+// ErrAnchorRedefinesImage — доставка переопределяет форму строки, которую образ
+// уже объявил. Отдельный вид отказа: чинится он правкой манифеста оператора, а
+// не состоянием базы, и приходит ДО применения.
+var ErrAnchorRedefinesImage = errors.New("seed: delivered manifest redefines a row the image already declares")
+
+// Anchor — ОПОРА паритета: перечень строк, которые каталогу ПОЗВОЛЕНО нести.
+//
+// Опора складывается из ДВУХ слагаемых, и это и есть предмет задачи #1861:
+// перечень, порождённый сборкой (`LiteralRows`), и то, что объявила ДОСТАВКА
+// оператора. Пока слагаемое было одно, живая строка, которой образ не несёт,
+// отвергалась при любом входе — то есть объявить свой модуль данными было
+// нельзя, и установка в чужом облаке требовала пересборки образа.
+//
+// # Нулевое значение — САМАЯ УЗКАЯ опора, а не пустая
+//
+// `Anchor{}` означает «доставка не расширяла опору ничем», то есть один образ.
+// Это несущее свойство разреза: забытая опора сужает допуск до сегодняшнего, а
+// не открывает его. Пустое множество в роли опоры дало бы обратное — всякая
+// живая строка стала бы лишней, и старт отказал бы на исправном каталоге.
+type Anchor struct {
+	// delivered — строки, объявленные доставкой. Неэкспортируемое: собрать
+	// опору мимо `NewAnchor` нельзя, а значит нельзя и обойти отказ на
+	// переопределении строки образа.
+	delivered catalog.Rows
+	// added — перепись расширения: строки доставки СВЕРХ образа.
+	added []string
+}
+
+// ImageAnchor — опора ОДНОГО ОБРАЗА: доставка не расширяет её ничем.
+//
+// Названа функцией, а не оставлена нулевым значением, потому что у вызывающего
+// это УТВЕРЖДЕНИЕ, а не умолчание: «доставки здесь нет» и «про доставку забыли»
+// обязаны выглядеть по-разному в месте вызова.
+func ImageAnchor() Anchor { return Anchor{} }
+
+// AddedRows — строки, на которые доставка расширила опору, в порядке ключа.
+func (a Anchor) AddedRows() []string { return a.added }
+
+// NewAnchor собирает опору «образ ∪ доставка».
+//
+// Отказ означает РОВНО ОДНО: доставка ПЕРЕОПРЕДЕЛЯЕТ строку, которую образ уже
+// несёт. Дисциплина взята у близнеца — допуска собранной модели прав
+// (`composed-model-admits-only-what-it-owns.md`): доставка вправе добавить своё
+// и не вправе изменить ни одного объявления образа.
+func NewAnchor(delivered catalog.Rows) (Anchor, error) {
+	image := LiteralRows()
+
+	var redefined, added []string
+	admit := func(kind string, want, got map[string]string) {
+		// Обратный указатель «идентичность образа → его ключ». Идентичность и
+		// ключ различаются намеренно (см. `resourceIdentity`): ключ несёт ФОРМУ
+		// строки — имя типа модели у ресурса, признак словаря у действия, — и
+		// именно форму доставка не вправе переписать.
+		byIdentity := make(map[string]string, len(want))
+		for k, id := range want {
+			byIdentity[id] = k
+		}
+		for k, id := range got {
+			if _, verbatim := want[k]; verbatim {
+				// Дословный повтор строки образа. Это ОБЫЧНЫЙ вход, а не
+				// пограничный: манифесты дерева и есть источник образа, поэтому
+				// штатная доставка повторяет его целиком.
+				continue
+			}
+			if imageKey, known := byIdentity[id]; known {
+				redefined = append(redefined,
+					kind+" "+id+": образ объявляет ["+imageKey+"], доставка — ["+k+"]")
+				continue
+			}
+			added = append(added, kind+" "+k)
+		}
+	}
+	admit("модуль", keysOfModules(image.Modules), keysOfModules(delivered.Modules))
+	admit("ресурс", keysOfResources(image.Resources), keysOfResources(delivered.Resources))
+	admit("глагол", keysOfVerbs(image.Verbs), keysOfVerbs(delivered.Verbs))
+
+	if len(redefined) > 0 {
+		sort.Strings(redefined)
+		return Anchor{}, fmt.Errorf("%w: %s. Доставка вправе ДОБАВИТЬ строку, которой образ "+
+			"не несёт, и не вправе изменить форму строки, которую образ уже объявил: имя типа "+
+			"модели прав и признак словаря адресуют отношение, по которому выдаются права, — "+
+			"переписав их данными, оператор выдал бы права не на тот объект (kacho#1861)",
+			ErrAnchorRedefinesImage, strings.Join(redefined, "; "))
+	}
+	sort.Strings(added)
+	return Anchor{delivered: delivered, added: added}, nil
+}
+
+// rowsOfAnchor — то, что опора объявляет: образ ПЛЮС доставка.
+//
+// Слагаемые складываются, а не выбирается одно из двух: строки образа обязаны
+// остаться в опоре, иначе их пропажа из живого множества перестала бы быть
+// расхождением — то есть снятие мимо доставки прошло бы молча. Совпадающие
+// строки схлопываются ключом у вызывающего (`keysOf*` строят множества),
+// поэтому дословный повтор образа доставкой ничего не удваивает.
+func (a Anchor) rowsOfAnchor() catalog.Rows {
+	image := LiteralRows()
+	if len(a.delivered.Modules) == 0 && len(a.delivered.Resources) == 0 && len(a.delivered.Verbs) == 0 {
+		return image
+	}
+	return catalog.Rows{
+		Modules:   append(image.Modules, a.delivered.Modules...),
+		Resources: append(image.Resources, a.delivered.Resources...),
+		Verbs:     append(image.Verbs, a.delivered.Verbs...),
+	}
+}
 
 // CatalogSource — порт стража: ЖИВОЕ множество каталога и СНЯТОЕ.
 //
@@ -95,12 +203,22 @@ type CatalogSource interface {
 
 // CatalogParityCensus — объём осмотренного и найденное расхождение.
 type CatalogParityCensus struct {
-	LiteralModules   int
-	LiteralResources int
-	LiteralVerbs     int
-	RowModules       int
-	RowResources     int
-	RowVerbs         int
+	// AnchorModules / AnchorResources / AnchorVerbs — объём ОПОРЫ: образ плюс
+	// доставка. Имя поля называет опору, а не образ, потому что слагаемых у неё
+	// два (#1861), и «прочитано из литерала» стало бы утверждением шире факта.
+	AnchorModules   int
+	AnchorResources int
+	AnchorVerbs     int
+	// AnchorAdded — строки, на которые ДОСТАВКА расширила опору сверх образа.
+	//
+	// Печатается всегда, рядом с объёмом опоры: без него «расхождений ноль»
+	// неотличимо от «доставка расширила опору на половину каталога, и это прошло
+	// молча». Расширение законно, но молчаливым быть не вправе — ровно по той же
+	// причине, по какой поимённо называется снятое.
+	AnchorAdded  []string
+	RowModules   int
+	RowResources int
+	RowVerbs     int
 	// MissingRows — есть в литерале, нет живой строкой.
 	MissingRows []string
 	// ExtraRows — есть живой строкой, нет в литерале.
@@ -166,8 +284,8 @@ func (c CatalogParityCensus) WhollyRetired() bool {
 // места, которые разойдутся молча. Порт читает ПУЛ, а не реплику: та отстаёт, а
 // страж исполняется на старте, когда отставание наиболее вероятно, — прочитанный
 // оттуда пустой каталог дал бы отказ старта на исправной службе.
-func AssertCatalogParity(ctx context.Context, src CatalogSource) (CatalogParityCensus, error) {
-	c, err := MeasureCatalogParity(ctx, src)
+func AssertCatalogParity(ctx context.Context, src CatalogSource, a Anchor) (CatalogParityCensus, error) {
+	c, err := MeasureCatalogParity(ctx, src, a)
 	if err != nil {
 		return c, err
 	}
@@ -189,14 +307,15 @@ func AssertCatalogParity(ctx context.Context, src CatalogSource) (CatalogParityC
 //
 // Теперь отказ отсюда приходит только от порта, а три состояния переписи —
 // суждение `BootRefusal`, и оно у стража старта своё.
-func MeasureCatalogParity(ctx context.Context, src CatalogSource) (CatalogParityCensus, error) {
+func MeasureCatalogParity(ctx context.Context, src CatalogSource, a Anchor) (CatalogParityCensus, error) {
 	var c CatalogParityCensus
 
-	want := LiteralRows()
+	want := a.rowsOfAnchor()
+	c.AnchorAdded = a.added
 	wantMod := keysOfModules(want.Modules)
 	wantRes := keysOfResources(want.Resources)
 	wantVerb := keysOfVerbs(want.Verbs)
-	c.LiteralModules, c.LiteralResources, c.LiteralVerbs = len(wantMod), len(wantRes), len(wantVerb)
+	c.AnchorModules, c.AnchorResources, c.AnchorVerbs = len(wantMod), len(wantRes), len(wantVerb)
 
 	live, err := src.ReadLiveCatalog(ctx)
 	if err != nil {
@@ -251,22 +370,22 @@ func (c CatalogParityCensus) BootRefusal() error {
 	case c.WhollyRetired():
 		return fmt.Errorf("каталог модуля снят ЦЕЛИКОМ: живых строк "+
 			"catalog_module/catalog_resource/catalog_verb 0/0/0, снятых %d/%d/%d при %d/%d/%d "+
-			"в литерале. Каталог без единой живой строки отверг бы ВСЕ правила разом, поэтому "+
+			"в опоре. Каталог без единой живой строки отверг бы ВСЕ правила разом, поэтому "+
 			"старт отказан; чинится это возвратом снятого, а не посевом (kacho#1861)",
 			c.RetiredModules, c.RetiredResources, c.RetiredVerbs,
-			c.LiteralModules, c.LiteralResources, c.LiteralVerbs)
+			c.AnchorModules, c.AnchorResources, c.AnchorVerbs)
 	case c.Empty():
 		return fmt.Errorf("каталог модуля пуст: строк catalog_module/catalog_resource/catalog_verb "+
-			"прочитано 0/0/0 при %d/%d/%d в литерале — пустой каталог отверг бы ВСЕ правила разом, "+
+			"прочитано 0/0/0 при %d/%d/%d в опоре (образ + доставка) — пустой каталог отверг бы ВСЕ правила разом, "+
 			"и это читалось бы как поломка продукта, а не как непринятые миграции (kacho#1030, IAM-CT-1-16)",
-			c.LiteralModules, c.LiteralResources, c.LiteralVerbs)
+			c.AnchorModules, c.AnchorResources, c.AnchorVerbs)
 	case c.Diverged():
-		return fmt.Errorf("литерал и строки каталога разошлись: нет строкой [%s]; нет в литерале [%s]. "+
-			"Прочитано из литерала %d/%d/%d, живыми строками %d/%d/%d, снятыми %d/%d/%d; "+
+		return fmt.Errorf("опора и строки каталога разошлись: нет строкой [%s]; нет в опоре [%s]. "+
+			"Прочитано из опоры (образ + доставка) %d/%d/%d, живыми строками %d/%d/%d, снятыми %d/%d/%d; "+
 			"снято решением %d строк — эти расхождением НЕ считаются. Оставшееся снаружи выглядит "+
 			"как «прав не выдали», поэтому старт отказан, а не продолжен (kacho#1030, IAM-CT-1-15)",
 			strings.Join(c.MissingRows, ", "), strings.Join(c.ExtraRows, ", "),
-			c.LiteralModules, c.LiteralResources, c.LiteralVerbs,
+			c.AnchorModules, c.AnchorResources, c.AnchorVerbs,
 			c.RowModules, c.RowResources, c.RowVerbs,
 			c.RetiredModules, c.RetiredResources, c.RetiredVerbs,
 			len(c.WithdrawnRows))

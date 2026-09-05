@@ -1,9 +1,9 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+import "github.com/PRO-Robotech/kacho-iam/internal/catalog"
 
 // catalog_consequence_sql.go — ОТБОР СНИМАЕМОГО и ПРЕДИКАТЫ ПОСЛЕДСТВИЙ,
 // объявленные ОДИН РАЗ на обе стороны (задача продукта #1034, объём О6).

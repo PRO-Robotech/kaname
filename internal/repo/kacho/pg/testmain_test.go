@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -9,9 +9,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
 )
 
 // TestMain owns the one Postgres this package runs against, and enforces that the
@@ -28,13 +28,13 @@ import (
 // clone by copying the template's files, so it is cheap while remaining a genuinely
 // separate database: the isolation the CAS / UNIQUE / EXCLUDE / SKIP LOCKED proofs
 // depend on is unchanged, and concurrent goroutines inside one test still contend
-// on the same real rows. See internal/pgtest for the argument in full.
+// on the same real rows. See pkg/pgtest for the argument in full.
 //
 // This package used to carry its own hand-written copy of that machinery, which
 // left it with TWO mechanisms: the shared container for setupTestDB, and four
 // helpers that each still booted a container of their own (startPostgresUpTo,
 // setupKac127TestDB, setupRedactorPG, and iampgtest.NewTestPostgres). They now all take
-// their database from internal/pgtest, so there is one mechanism here.
+// their database from pkg/pgtest, so there is one mechanism here.
 //
 // # The enforcement half (unchanged in intent)
 //
@@ -80,7 +80,7 @@ func TestMain(m *testing.M) {
 		// Приведение схемы — ОДИН раз на пакет, у выдающего базу.
 		// Прежде его приписывал каждый вызывающий своей копией; забывший
 		// получал `relation … does not exist` — отказ, читающийся как дефект
-		// продукта. Довод целиком — `internal/pgtest` §searchpath.
+		// продукта. Довод целиком — `pkg/pgtest` §searchpath.
 		SearchPath: "kacho_iam,public",
 		Name:       "iam",
 		Migrate:    pgtest.Goose(migrations.FS),

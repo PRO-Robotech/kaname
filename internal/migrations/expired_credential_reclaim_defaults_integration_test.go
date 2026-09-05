@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // expired_credential_reclaim_defaults_integration_test.go — ВЕЛИЧИНЫ УМОЛЧАНИЯ
 // потолка после пересмотра (задача #1264, приёмка
@@ -46,8 +46,8 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // CRED-RCL-29 (первая половина) — авторитетные величины умолчания в дереве

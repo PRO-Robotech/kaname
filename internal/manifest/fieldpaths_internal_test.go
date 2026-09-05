@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // fieldpaths_internal_test.go — СТОРОНА СТРУКТУР для согласия схемы и структур
 // (MOD-MF-21, приёмка §5.6).

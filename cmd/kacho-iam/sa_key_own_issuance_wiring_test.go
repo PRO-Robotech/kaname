@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // sa_key_own_issuance_wiring_test.go — выбор полосы выдачи ключа служебной
 // учётки (задача #1120, подфаза Ф4б эпика #896).
@@ -28,7 +28,7 @@ package main
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 )
 
 func TestSAKeyIssuanceIsOurs_FollowsTheExchangeEndpoint(t *testing.T) {

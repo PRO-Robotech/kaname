@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package access_binding
 
@@ -38,12 +38,12 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	abrepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
 )
 
 // MinExpiresIn — the shortest lifetime AccessBinding.Create accepts. A binding's
@@ -68,8 +68,9 @@ const MinExpiresIn = 5 * time.Minute
 // Operation reports done does not race the async drain.
 type SelectorReconciler interface {
 	// ReconcileBindingForward is the ADDITIVE create-path fast-path (sub-phase IAM-FMB):
-	// it materializes THIS freshly-created binding's per-object membership additively under
-	// a SHARE advisory lock (no EXCLUSIVE / FOR UPDATE / delete-stale), the throughput fix
+	// it materializes THIS freshly-created binding's per-object membership additively while
+	// holding NO advisory lock at all (neither EXCLUSIVE nor SHARE, no FOR UPDATE, no
+	// delete-stale); the throughput fix
 	// for a mass-binding-create burst. It transparently delegates to the FULL
 	// ReconcileBinding if the binding already has members (delete-stale guard).
 	ReconcileBindingForward(ctx context.Context, bindingID domain.AccessBindingID) error
@@ -78,8 +79,8 @@ type SelectorReconciler interface {
 	ReconcileBinding(ctx context.Context, bindingID domain.AccessBindingID) error
 	// ReconcileObjectForwardNoStale is the ADDITIVE forward fast-path for the freshly-created
 	// binding-AS-OBJECT (iam.accessBinding): it materializes ONLY that new object's
-	// per-object owner/admin tuples across the matching bindings under a SHARE advisory
-	// lock (no EXCLUSIVE / O(scope) recompute), the throughput fix for the owner-tuple
+	// per-object owner/admin tuples across the matching bindings while holding NO
+	// advisory lock at all (neither EXCLUSIVE nor SHARE, no O(scope) recompute); the throughput fix for the owner-tuple
 	// materialization lag under a parallel create burst.
 	//
 	// The …NoStale variant asserts what only this call site knows: the object id was minted
@@ -423,7 +424,7 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	// otherwise. Non-fatal to Create — the binding is durably created; log + proceed.
 	//
 	// IAM-FMB throughput fix: the create-path takes the ADDITIVE forward
-	// (ReconcileBindingForward, SHARE advisory lock, no delete-stale) instead of the FULL
+	// (ReconcileBindingForward, NO advisory lock at all, no delete-stale) instead of the FULL
 	// EXCLUSIVE ReconcileBinding — a create is purely additive (the binding is brand-new →
 	// nothing stale to delete), so a mass-binding-create burst no longer serializes on the
 	// per-binding EXCLUSIVE lock / O(scope) delete-stale recompute (which lagged grant
@@ -470,7 +471,7 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 // membership). Best-effort/non-fatal.
 //
 // IAM-FMB throughput fix: it takes the ADDITIVE forward with the nothing-stale proof
-// (ReconcileObjectForwardNoStale, SHARE advisory lock, single-object) instead of the FULL
+// (ReconcileObjectForwardNoStale, NO advisory lock at all, single-object) instead of the FULL
 // EXCLUSIVE ReconcileObject, whose per-binding advisory lock + O(scope) recompute
 // serialized on the SINGLE owner/account binding every access_binding of an account
 // shares. The …NoStale variant matters because the sibling ReconcileBindingForward has,

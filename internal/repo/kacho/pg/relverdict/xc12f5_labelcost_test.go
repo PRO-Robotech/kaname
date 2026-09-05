@@ -1,15 +1,15 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package relverdict_test
 
 // xc12f5_labelcost_test.go — ПРОГОН Ф5: замер стоимости полномодельной формы на
 // ПУТИ МЕТОК.
 //
-// # Почему прогон живёт здесь, а прибор — в tools/authzformbench
+// # Почему прогон живёт здесь, а прибор — в services/iam/tools/authzformbench
 //
 // Прибор один, и второго рядом не заводится: словарь операций, правило отнесения,
-// исходы, окно неверного ответа и отчёт — всё это `tools/authzformbench/labelcost.go`,
+// исходы, окно неверного ответа и отчёт — всё это `services/iam/tools/authzformbench/labelcost.go`,
 // и этот файл их ИМПОРТИРУЕТ.
 //
 // А живёт он здесь по причине, которая от вкуса не зависит: измеряемая форма E —
@@ -73,10 +73,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
-	bench "github.com/PRO-Robotech/kacho/tools/authzformbench"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/relverdict"
+	bench "github.com/PRO-Robotech/kacho-iam/tools/authzformbench"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // f5Gate — прогон поднимает контейнеры и пишет сотни тысяч строк; `go test ./...`
@@ -378,7 +378,7 @@ func TestXC12F5LabelPathCost(t *testing.T) {
 	//
 	// Каноническая модель по-прежнему ЧИТАЕТСЯ, хотя модель авторизации для движка
 	// строить некому: её отпечаток — часть провенанса, а план вердикта формы E
-	// компилируется из неё же (`internal/authzplan`). «На какой модели снят замер»
+	// компилируется из неё же (`services/iam/internal/authzplan`). «На какой модели снят замер»
 	// остаётся осмысленным вопросом.
 	modelPath, canon, err := bench.ResolveCanonicalModel()
 	if err != nil {
@@ -444,7 +444,7 @@ func TestXC12F5LabelPathCost(t *testing.T) {
 			PageSize: 1000, Partition: 50, Parallelism: 8,
 		},
 		RepeatSchedule: strings.Join(schedule, " · "),
-		RunCommand: "AUTHZFORMBENCH_F5=1 go test ./services/iam/internal/repo/kacho/pg/relverdict/ " +
+		RunCommand: "AUTHZFORMBENCH_F5=1 go test -C services/iam ./internal/repo/kacho/pg/relverdict/ " +
 			"-run TestXC12F5LabelPathCost -count=1 -v -timeout 180m",
 		QueueNote:  f5QueueNote,
 		Unmeasured: f5Unmeasured(),
@@ -652,11 +652,11 @@ func seedCommon(t *testing.T, ctx context.Context, w *f5World, sc bench.LabelSce
 // f5PostgresImage — образ, на котором СНЯТ замер.
 //
 // Назван здесь, а не взят у стека прибора: стек больше не поднимается, а форма E
-// меряется на базе `internal/pgtest`, и умолчание образа объявлено там. Строка
+// меряется на базе `pkg/pgtest`, и умолчание образа объявлено там. Строка
 // дословно повторяет это умолчание; расходиться им нельзя, и если `pgtest`
 // сменит образ, провенанс соврёт молча — поэтому строка стоит рядом с ЕДИНСТВЕННЫМ
 // местом, где она печатается, а не разъезжается по прогону.
-const f5PostgresImage = "postgres:16-alpine (internal/pgtest)"
+const f5PostgresImage = "postgres:16-alpine (pkg/pgtest)"
 
 // ── вспомогательное ───────────────────────────────────────────────────────────
 

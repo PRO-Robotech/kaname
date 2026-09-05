@@ -1,6 +1,6 @@
 <!--
 Copyright (c) PRO-Robotech
-SPDX-License-Identifier: BUSL-1.1
+SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
 # Приёмка: у проекции роли один писатель
@@ -828,7 +828,7 @@ gh issue view 1028 -R PRO-Robotech/kacho --json title
 | `internal/repohygiene` `TestIdentifiersAreASCII` | продукт `f7e11a76b` | имена латиницей (запрет #17); русские комментарии законны | объявление одно |
 | `internal/repohygiene` `TestNoDeferredWorkInTheTree` | продукт `f7e11a76b` | ни одного маркера отсрочки (запрет #11) | объявление одно |
 | `internal/repohygiene` `TestNamedMakeTargetExists` | продукт `f7e11a76b` | эта приёмка **готовых команд сборки не называет** ⇒ предмета гейту не даёт. Назван, чтобы его молчание не приняли за подтверждение | объявление одно |
-| `internal/treecorpus` | продукт `f7e11a76b` | новый гейт дерева наследует `-count=1`: состав берётся у индекса git подпроцессом, которого кэш не видит | `ls` → каталог есть |
+| `pkg/treecorpus` | продукт `f7e11a76b` | новый гейт дерева наследует `-count=1`: состав берётся у индекса git подпроцессом, которого кэш не видит | `ls` → каталог есть |
 | **`internal/repohygiene/acceptanceledger_test.go`** | продукт `f7e11a76b` | дом `reScenarioCode` (`:47`) и гейта `TestNewMigrationCitesAnApprovedAcceptance` (`:116`). Запись в ведомость нужна **только если** изменение заведёт миграцию (§2.6) | `git ls-files … \| grep acceptanceledger` → `acceptanceledger_test.go`, `acceptanceledger_injection_test.go` |
 | `docs/acceptance-ledger.yaml` | продукт `f7e11a76b` | сама ведомость | `ls` → файл есть |
 | `internal/repohygiene/verbvocabulary_test.go` | продукт `f7e11a76b` | **предмета ему это изменение не даёт** — он судит словарь глаголов, не писателей. Назван, чтобы зелёный не прочитали как подтверждение единственности | `ls` → файл есть |

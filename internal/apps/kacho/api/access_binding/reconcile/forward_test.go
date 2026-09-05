@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package reconcile
 
@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/catalogfixture"
 )
 
 // TestReconcileObjectForward_MaterializesSingleObject_NoExclusiveLock — the fast-path
@@ -90,7 +90,7 @@ func TestReconcileObjectForward_MaterializesSingleObject_NoExclusiveLock(t *test
 // iam.accessBinding / iam.project owner materialization). A brand-new iam-native object
 // (here iam.accessBinding created inside an account with an owner `*.*` binding) is
 // materialized ADDITIVELY: the owner's full owner verb-set (v_* + admin tier) is emitted
-// on iam_access_binding:<id> under the SHARE advisory lock ONLY (f.locks==0), reading the
+// on iam_access_binding:<id> with NO advisory lock taken at all (f.locks==0), reading the
 // object from its OWN table (GetIAMDirectObject) and the matching bindings from the
 // iam-direct fan-out (IAMDirectSelectorBindingsMatchingObject) — NOT the FULL EXCLUSIVE
 // ReconcileObject the create-path used before (which serialized on the single owner

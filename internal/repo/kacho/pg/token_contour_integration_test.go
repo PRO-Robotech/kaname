@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // token_contour_integration_test.go — контур своей чеканки целиком, против
 // настоящей базы: ключница → подписант → публикуемый набор → авторитет отзыва.
@@ -29,17 +29,17 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/signingkeys"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/jwksproxyhttp"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/tokenintrospecthttp"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/keywrap"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/tokensigner"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/signingkeys"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/jwksproxyhttp"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/tokenintrospecthttp"
+	"github.com/PRO-Robotech/kacho-iam/internal/keywrap"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/tokensigner"
 )
 
 const contourIssuer = "https://iam.kacho.local"

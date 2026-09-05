@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // role_name_tier_test.go — форма имени роли судится ПО ЯРУСУ и зеркалит
 // ограничения таблицы (`0056_role_definition_tier.sql`).
@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // systemRoleFixture — системная роль с живым именем продукта.

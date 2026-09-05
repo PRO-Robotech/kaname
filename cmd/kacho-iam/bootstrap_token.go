@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // bootstrap_token.go — сборка контура бутстрап-удостоверения (задача #1119,
 // Ф4б эпика #896).
@@ -25,10 +25,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/bootstrap_token"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/bootstraptokenwire"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/tokensigner"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/bootstrap_token"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/bootstraptokenwire"
+	"github.com/PRO-Robotech/kacho-iam/internal/tokensigner"
 )
 
 // buildBootstrapTokenHandler собирает чеканку бутстрап-удостоверения.

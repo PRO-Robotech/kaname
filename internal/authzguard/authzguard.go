@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package authzguard — minimal per-use-case guard for kacho-iam. It answers
 // "did the caller name itself?", never "is the caller allowed": the per-RPC

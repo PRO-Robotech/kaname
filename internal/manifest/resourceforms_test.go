@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package manifest_test
 
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // resourceforms_test.go — ФОРМЫ раздела `resources`, заведённые ради блоков,
@@ -44,6 +44,13 @@ func mustRefuse(t *testing.T, doc string, kind error, mentions ...string) {
 	}
 }
 
+// ЗДЕСЬ ФИКСТУРЫ НАЗЫВАЛИ РЕСУРС `repository` при типе `registry_repository`, и
+// после размыкания таблицы типов (#2015) это стало НАХОДКОЙ, а не безобидной
+// синтетикой: образ объявляет `registry_repository` строкой `registry.repositories`,
+// то есть фикстура присваивала чужой типа ДРУГОЙ строке. Имя приведено к тому,
+// каким его несёт образ; предмет проб — форма указателя — не изменился, и
+// изменённый факт ровно один.
+
 // mustAccept — законный близнец: без него отрицание выше ничего не утверждает.
 func mustAccept(t *testing.T, doc string) *manifest.Manifest {
 	t.Helper()
@@ -63,7 +70,7 @@ func mustAccept(t *testing.T, doc string) *manifest.Manifest {
 // выдачи не является ни при каком написании. Якорь области остаётся закрытым
 // набором и здесь не расширяется — расширяется словарь ТИПОВ.
 func TestMODMR28ParentTypeMayBeAClosedTableType(t *testing.T) {
-	m := mustAccept(t, "apiVersion: iam/v1\nmodule: registry\nresources:\n  - name: repository\n"+
+	m := mustAccept(t, "apiVersion: iam/v1\nmodule: registry\nresources:\n  - name: repositories\n"+
 		"    objectType: registry_repository\n    producer: authored\n"+
 		"    parents:\n      - {name: parent, type: registry_registry}\n    verbs: [get]\n")
 	p := m.Resources[0].Parents
@@ -72,7 +79,7 @@ func TestMODMR28ParentTypeMayBeAClosedTableType(t *testing.T) {
 	}
 
 	// Отрицание: тип вне обоих словарей.
-	mustRefuse(t, "apiVersion: iam/v1\nmodule: registry\nresources:\n  - name: repository\n"+
+	mustRefuse(t, "apiVersion: iam/v1\nmodule: registry\nresources:\n  - name: repositories\n"+
 		"    objectType: registry_repository\n    producer: authored\n"+
 		"    parents:\n      - {name: parent, type: registry_repositoryz}\n    verbs: [get]\n",
 		manifest.ErrParentUnknown,
@@ -93,7 +100,7 @@ func TestMODMR28TheLongParentFormIsRefusedWhenNameEqualsType(t *testing.T) {
 	// Законный близнец: та же пара, записанная короткой формой.
 	mustAccept(t, resourceDoc("    parents: [project]\n"))
 	// И длинная форма там, где имя и тип РАЗЛИЧАЮТСЯ, остаётся законной.
-	mustAccept(t, "apiVersion: iam/v1\nmodule: registry\nresources:\n  - name: repository\n"+
+	mustAccept(t, "apiVersion: iam/v1\nmodule: registry\nresources:\n  - name: repositories\n"+
 		"    objectType: registry_repository\n    producer: authored\n"+
 		"    parents:\n      - {name: parent, type: registry_registry}\n    verbs: [get]\n")
 }
@@ -134,7 +141,7 @@ func TestMODMR29AnUnknownKeyInsideAParentIsRefusedWithItsLine(t *testing.T) {
 		}
 	}
 	// Законный близнец: тот же отображённый указатель с ВЕРНЫМ ключом.
-	mustAccept(t, "apiVersion: iam/v1\nmodule: registry\nresources:\n  - name: repository\n"+
+	mustAccept(t, "apiVersion: iam/v1\nmodule: registry\nresources:\n  - name: repositories\n"+
 		"    objectType: registry_repository\n    producer: authored\n"+
 		"    parents:\n      - {name: parent, type: registry_registry}\n    verbs: [get]\n")
 }

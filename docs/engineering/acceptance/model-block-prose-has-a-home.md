@@ -1,6 +1,6 @@
 <!--
 Copyright (c) PRO-Robotech
-SPDX-License-Identifier: BUSL-1.1
+SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
 # Приёмка: у прозы блока модели есть дом
@@ -773,7 +773,7 @@ type vpc_network
 
 | # | что производит | координата | проверено |
 |---|---|---|---|
-| **П-01** | резолв канона от корня дерева | `internal/authzplan/canonical.go` · `ResolveCanonicalModel` | прогоном `TestB07` |
+| **П-01** | резолв канона от корня дерева | `services/iam/internal/authzplan/canonical.go` · `ResolveCanonicalModel` | прогоном `TestB07` |
 | **П-02** | единица блока (тело, не баннер) | `services/iam/internal/modelrender/canon.go` · `SplitCanon` | тем же |
 | **П-03** | рендер блока из ресурса | `services/iam/internal/modelrender/render.go` · `Render` | тем же |
 | **П-04** | разбор манифеста в структуры | `services/iam/internal/manifest/manifest.go` · `Load` | чтением + `TestMODMF21…` |
@@ -1208,6 +1208,14 @@ gh issue list -R PRO-Robotech/kacho --state open --limit 20 \
 ревизии; временные пробы удалены, дерево чисто.
 
 ### 11.0 Опровергнутая гипотеза рецензента — первой
+
+
+> [!note] Пакет с тех пор ПЕРЕЕХАЛ — разбор ниже описывает прошлое и правится не текстом
+> Абзац записан, когда `authzplan` лежал в **корне монорепо**. Линия выноса iam
+> отдельным продуктом перенесла его в `services/iam/internal/authzplan/`, потому что
+> потребители у него только iam и его же прибор. Координаты ниже оставлены
+> ДОСЛОВНО: они свидетельствуют о замере своей ревизии, и правка пути превратила бы
+> разбор чужой ошибки в утверждение, которого никто не делал.
 
 Я начал с того, что объявил координату П-01 несуществующей: искал
 `services/iam/internal/authzplan/canonical.go`. Вторая форма

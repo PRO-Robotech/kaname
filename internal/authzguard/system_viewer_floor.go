@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // system_viewer_floor.go — the per-RPC `system_viewer`-FLOOR on
 // the cluster-internal listener's READ RPCs.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // roleclasses_test.go — ГЛАВНАЯ ФОРМА права роли: ключ `classes`
 // (приёмка `classes-form-of-role-right.md`, §3.1–§3.3, сценарии
@@ -31,7 +31,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // roleManifest — манифест с одним правилом роли, записанным дословно.

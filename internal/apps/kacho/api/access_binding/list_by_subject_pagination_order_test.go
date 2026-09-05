@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // list_by_subject_pagination_order_test.go — формат страницы судится ДО решения
 // о личности, и оба чтения выдач субъекта отвечают на него ОДИНАКОВО.
@@ -55,8 +55,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/pagetoken"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	repoab "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
 )
 
 // pageOrderGarbageToken — курсор, который не разбирается ни одним кодеком: не

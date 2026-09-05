@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg
 
@@ -60,8 +60,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	moduleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/module"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+	moduleapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/module"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
 )
 
 // planConsequencesSQL — ОЦЕНКА последствий снятия, три популяции одним

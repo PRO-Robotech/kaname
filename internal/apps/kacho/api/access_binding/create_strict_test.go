@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package access_binding
 
@@ -31,18 +31,18 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
-	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
-	repoaccount "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
-	repogroup "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/group"
-	repoproject "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
-	reporole "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/role"
-	reposa "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
-	repouser "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/user"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/visibility"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	repoab "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	repoaccount "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
+	repogroup "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/group"
+	repoproject "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/project"
+	reporole "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/role"
+	reposa "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/service_account"
+	repouser "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/user"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/visibility"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // TestCreateAccessBinding_DuplicateActive_OperationAlreadyExists.

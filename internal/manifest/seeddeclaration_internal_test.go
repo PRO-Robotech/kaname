@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // seeddeclaration_internal_test.go — раздел `seed` не объявляет себя тем, чего
 // у него нет (задача продукта #1948).
@@ -76,7 +76,7 @@ var seedSubsectionFields = []string{"AccessBindings", "Groups", "Joins", "Servic
 const manifestPackageDir = "services/iam/internal/manifest"
 
 // manifestImportPath — импорт, без которого держать `*manifest.Seed` нечем.
-const manifestImportPath = "github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+const manifestImportPath = "github.com/PRO-Robotech/kacho-iam/internal/manifest"
 
 // seedProducerCensus — объём осмотренного вместе с находками: «ноль
 // производителей» обязано быть отличимо от «ноль прочитанного».

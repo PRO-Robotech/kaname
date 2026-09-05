@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package iamhooks_test
 
@@ -20,8 +20,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // fakeRevocations — the revoke-all cutoff store, as both hooks read it.
@@ -60,13 +61,23 @@ func (f *fakeRevocations) MarkUserRevokedBefore(userID string, before time.Time)
 func newRefreshHandler(t *testing.T, users *fakeUserLookup, revs *fakeRevocations, audit *fakeAudit) *iamhooks.RefreshHookHandler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// Тот же производитель состава утверждений, что держит полоса выпуска
+	// (#2052). Дублёра здесь быть не может: предмет — что обе полосы отдают
+	// один состав, а подставной сборщик отвечал бы за них обеих.
+	claims := service.NewTokenEnrichmentService(
+		service.TokenEnrichmentConfig{
+			Domain:      "api.test.cloud",
+			HydraIssuer: "https://hydra.test.cloud",
+		},
+		users,
+	)
 	return iamhooks.NewRefreshHookHandler(
 		iamhooks.RefreshHookConfig{
 			HookSharedSecret: "secret",
 			Domain:           "api.test.cloud",
 			HydraIssuer:      "https://hydra.test.cloud",
 		},
-		users, revs, audit, logger,
+		users, claims, revs, audit, logger,
 	)
 }
 

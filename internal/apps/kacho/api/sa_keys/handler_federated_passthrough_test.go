@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // handler_federated_passthrough_test.go — ключевой материал издателя, названный
 // ВЫЗЫВАЮЩИМ на проводе, обязан доехать до перечня доверия.

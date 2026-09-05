@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package moduleseedparity — сверка раздела `seed` манифеста модуля с ЖИВОЙ
 // базой (задача #1891, вторая половина её предиката).

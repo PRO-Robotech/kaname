@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package check
 
@@ -32,7 +32,7 @@ func missFixture(t *testing.T, dir, name, importSpec, callSite string) string {
 	return full
 }
 
-const authzmapImport = `"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"`
+const authzmapImport = `"github.com/PRO-Robotech/kacho-iam/internal/authzmap"`
 
 // TestIAMCT2_TypeMissRecognizerInjection — распознаватель, обе стороны.
 func TestIAMCT2_TypeMissRecognizerInjection(t *testing.T) {

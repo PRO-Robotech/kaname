@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package relverdict_test
 
@@ -71,12 +71,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/planrows"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/scalegrid"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/planrows"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/relverdict"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/scalegrid"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // matrixEnv — ручка «запускать замер матрицы», и только это. Что мерить, она не
@@ -86,8 +86,8 @@ const matrixEnv = "KACHO_MATRIX_VOLUME"
 // matrixRunCommand — команда повторения, дословно. Константой рядом с ручкой,
 // потому что попадает в отчёт: отчёт без дословной команды через месяц нечем
 // проверить.
-const matrixRunCommand = "KACHO_MATRIX_VOLUME=1 go test " +
-	"./services/iam/internal/repo/kacho/pg/relverdict/ -run TestMatrixVolume_Report " +
+const matrixRunCommand = "KACHO_MATRIX_VOLUME=1 go test -C services/iam " +
+	"./internal/repo/kacho/pg/relverdict/ -run TestMatrixVolume_Report " +
 	"-count=1 -v -timeout 120m"
 
 // matrixReportPath — куда ложится отчёт, рядом с отчётами соседних приборов.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // fga_outbox_emitter.go — pg adapter for service.RelationOutboxEmitter.
 //
@@ -15,9 +15,9 @@ package pg
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/fga_outbox"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // FGAOutboxEmitter — adapter implementing service.RelationOutboxEmitter on top of

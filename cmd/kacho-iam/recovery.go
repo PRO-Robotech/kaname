@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package main
 
@@ -11,9 +11,9 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/operationresolver"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/operationresolver"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
 )
 
 // startLROReconciler wires the orphan-reconciler backstop. Without it an operation

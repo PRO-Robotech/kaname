@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package reconcile
 
@@ -12,7 +12,8 @@ package reconcile
 //
 // These pin the create-forward contract (mirror of the object-forward contract):
 //   - it materializes the binding's desired ACTIVE per-object members ADDITIVELY, taking
-//     ONLY the SHARE advisory lock (never the EXCLUSIVE full-path lock) — the throughput
+//     NO advisory lock at all (neither the EXCLUSIVE full-path lock nor a SHARE one) — the
+//     throughput
 //     property under a mass-binding-create burst (IAM-FMB-01);
 //   - a matched-but-foreign (cross-scope) object is NOT granted (additive-only leaves the
 //     REJECTED member + containment audit to the async full backstop) (IAM-FMB-03);
@@ -27,8 +28,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/catalogfixture"
 )
 
 // TestReconcileBindingForward_MaterializesDesired_NoExclusiveLock (IAM-FMB-01 unit) — the

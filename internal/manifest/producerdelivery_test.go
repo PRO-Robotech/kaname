@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package manifest_test
 
@@ -60,9 +60,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho/tools/modulemanifests"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	manifestproducer "github.com/PRO-Robotech/kacho/pkg/modulemanifest/producer"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // stacksTablePath — единственное объявление состава стендов, от корня дерева.
@@ -116,12 +116,22 @@ func repoRootFromTest(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("рабочий каталог не прочитан: %v", err)
 	}
+	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
+	// теперь СВОЙ модуль (она выносится отдельным репозиторием), и подъём «до
+	// первого» останавливался бы в её каталоге. Пути, которые ниже склеиваются с
+	// этим корнем, называют место В ДЕРЕВЕ МОНОРЕПО — от корня, — поэтому
+	// остановка внутри службы удваивала сегмент и обход искал `services/iam/
+	// services/iam/…`, которого не существует.
+	outermost := ""
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
+			outermost = dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
+			if outermost != "" {
+				return outermost
+			}
 			t.Fatalf("корень дерева не найден подъёмом от %s — предпосылка пробы исчезла", dir)
 		}
 		dir = parent
@@ -185,8 +195,8 @@ func auditDeliveryRoundTrip(t *testing.T, stacks []deliveryStack) ([]string, rou
 	modules := map[string]bool{}
 
 	for _, s := range stacks {
-		delivery, err := modulemanifests.Collect(s.Root, s.Profiles)
-		if errors.Is(err, modulemanifests.ErrNotDeclared) {
+		delivery, err := manifestproducer.Collect(s.Root, s.Profiles)
+		if errors.Is(err, manifestproducer.ErrNotDeclared) {
 			continue
 		}
 		census.Declaring++
@@ -196,7 +206,7 @@ func auditDeliveryRoundTrip(t *testing.T, stacks []deliveryStack) ([]string, rou
 				s.Name, err, delivery.Census.Summary()))
 			continue
 		}
-		rendered, err := modulemanifests.Render(delivery)
+		rendered, err := manifestproducer.Render(delivery)
 		if err != nil {
 			findings = append(findings, fmt.Sprintf("%s: объект не напечатан: %v", s.Name, err))
 			continue

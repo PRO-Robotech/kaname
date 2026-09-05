@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package access_binding_test
 
@@ -24,15 +24,15 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
-	accountapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/account"
-	saapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/service_account"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	repoab "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
-	repoacct "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/account"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding/reconcile"
+	accountapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/account"
+	saapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/service_account"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	repoab "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	repoacct "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/account"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/catalogfixture"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

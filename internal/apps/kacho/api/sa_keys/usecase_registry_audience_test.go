@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // usecase_registry_audience_test.go — verifies PRO-Robotech/kacho-iam#320:
 // a registry ServiceAccount key issued WITHOUT an explicit `audience` must

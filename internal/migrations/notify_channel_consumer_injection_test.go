@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // notify_channel_consumer_injection_test.go — доказательство, что гейт
 // потребителя СПОСОБЕН упасть, и падает на предмете, а не на его виде.

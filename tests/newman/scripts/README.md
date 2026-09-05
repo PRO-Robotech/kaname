@@ -20,7 +20,8 @@
 - `credsecretmint/`   — программа чеканки настоящим кодом продукта
                         (`ids.NewID` + `credsecret.Mint`) и Go-проба
                         `form_test.go`, сверяющая объявление с тем, что продукт
-                        ЧЕКАНИТ. Идёт обычным `make test-unit` (`go test ./...`),
+                        ЧЕКАНИТ. Идёт обычным `make test-unit` (её вторым
+                        прогоном, `go test -C services/iam ./...`),
                         отдельного вызова не требует;
 - `gen.py`            — helper `credential_secret_pattern(вид)` подставляет вид и
                         вставляет образец в порождаемый скрипт кейса.

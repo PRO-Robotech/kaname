@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package access_binding
 
@@ -9,10 +9,10 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 type GetAccessBindingUseCase struct {
@@ -100,7 +100,7 @@ func (u *GetAccessBindingUseCase) Execute(ctx context.Context, id domain.AccessB
 	//     `system_admin@cluster` — no DB owner). Bug B follow-on: the previous
 	//     ad-hoc account/project-only owner switch denied cluster-scope
 	//     bindings to the bootstrap cluster-admin (newman get-cluster-binding).
-	if authzguard.IsSelf(ctx, string(got.SubjectID)) {
+	if callerIsSubjectOf(ctx, got) {
 		return got, nil
 	}
 	// Release the read-TX before the authority check — requireGrantAuthority

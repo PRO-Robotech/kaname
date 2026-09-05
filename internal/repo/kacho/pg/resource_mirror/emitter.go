@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package resource_mirror — atomic emit-in-tx helper for kacho_iam.resource_mirror.
 //
@@ -38,7 +38,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
 
 // Row — the tenant-facing projection mirrored for one owner object. Labels nil
@@ -83,6 +83,76 @@ type Row struct {
 // negInfinity — the sentinel a zero/legacy SourceVersion maps to ('-infinity'),
 // so an older producer's empty version still applies (back-compat with a
 // producer that emits no version).
+// StmtVersionOnlyBump и StmtInsertOrSupersede — ДВА оператора зеркала,
+// объявленные ОДИН раз.
+//
+// # Почему экспортируются
+//
+// Их подаёт не только эмитент: посевщик сетки порядков (`../scalegrid`) шлёт те
+// же операторы пачкой, потому что мерит СТОИМОСТЬ того, что выпускает продукт.
+// Пока текст жил у него копией, копия расходилась молча — проверка, сажающая
+// один набор двумя путями, сравнивает СТРОКИ РЕЗУЛЬТАТА и на живом типе даёт
+// одно и то же. Разошлись копии дважды: условие приёма не доехало до полосы
+// сдвига версии, имя типа словаря модели — до полосы вставки (#1890).
+//
+// Объявление одно ⇒ расхождение невыразимо, и сверять нечего. Пачку это не
+// трогает: посевщик по-прежнему шлёт операторы пачкой, меняется лишь то, откуда
+// берётся текст.
+//
+// # Порядок параметров — часть объявления
+//
+// Оба оператора принимают $1..$6 в одном и том же порядке: тип объекта,
+// идентификатор, проект-родитель, аккаунт-родитель, метки (jsonb), версия
+// источника. Вызывающий передаёт их так же — иначе оператор один, а смысл
+// разный.
+const (
+	// StmtVersionOnlyBump — полоса СДВИГА ВЕРСИИ: строка уже лежит, входящая
+	// версия строго новее, и ничего из читаемого отбором не изменилось.
+	//
+	// УСЛОВИЕ ПРИЁМА СТОИТ И ЗДЕСЬ: полоса срабатывает на существующей строке и
+	// вставки не делает, поэтому без своего EXISTS она давала бы обход — тип снят
+	// с платформы, а регистрация им проходит только потому, что строка уже лежит.
+	StmtVersionOnlyBump = `UPDATE kacho_iam.resource_mirror
+		    SET source_version = $6, updated_at = now()
+		  WHERE object_type       = $1
+		    AND object_id         = $2
+		    AND parent_project_id = $3
+		    AND parent_account_id = $4
+		    AND labels            = $5::jsonb
+		    AND source_version    < $6
+		    AND EXISTS (SELECT 1 FROM kacho_iam.catalog_resource cr
+		                 WHERE cr.dotted = $1 AND cr.live)`
+
+	// StmtInsertOrSupersede — полоса ВСТАВКИ ПОД УСЛОВИЕМ ПРИЁМА, отвечающая
+	// ТРЕМЯ значениями: принят ли тип, его имя в словаре модели, число
+	// применённых строк.
+	//
+	// Имя типа берётся ТЕМ ЖЕ оператором, а не вторым запросом: строка, дающая
+	// право на запись, и строка, дающая имя, — одна, и читать их надо в одном
+	// снимке.
+	StmtInsertOrSupersede = `WITH live_type AS (
+		     SELECT object_type
+		       FROM kacho_iam.catalog_resource
+		      WHERE dotted = $1 AND live
+		 ), applied AS (
+		     INSERT INTO kacho_iam.resource_mirror
+		       (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
+		     SELECT $1::text, $2::text, $3::text, $4::text, $5::jsonb, $6::timestamptz, now()
+		      WHERE EXISTS (SELECT 1 FROM live_type)
+		     ON CONFLICT (object_type, object_id) DO UPDATE
+		        SET parent_project_id = EXCLUDED.parent_project_id,
+		            parent_account_id = EXCLUDED.parent_account_id,
+		            labels            = EXCLUDED.labels,
+		            source_version    = EXCLUDED.source_version,
+		            updated_at        = now()
+		      WHERE resource_mirror.source_version < EXCLUDED.source_version
+		     RETURNING 1
+		 )
+		 SELECT EXISTS (SELECT 1 FROM live_type),
+		        (SELECT object_type FROM live_type),
+		        (SELECT count(*) FROM applied)`
+)
+
 func versionOr(t time.Time) any {
 	if t.IsZero() {
 		return "-infinity"
@@ -159,17 +229,7 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	// снят с платформы, а регистрация им проходит — только потому, что строка
 	// уже лежит. Ноль затронутых строк здесь ничего не скрывает: вердикт о
 	// каталоге выносит оператор (2), и он различает «не принято» и «не новее».
-	tag, err := tx.Exec(ctx,
-		`UPDATE kacho_iam.resource_mirror
-		    SET source_version = $6, updated_at = now()
-		  WHERE object_type       = $1
-		    AND object_id         = $2
-		    AND parent_project_id = $3
-		    AND parent_account_id = $4
-		    AND labels            = $5::jsonb
-		    AND source_version    < $6
-		    AND EXISTS (SELECT 1 FROM kacho_iam.catalog_resource cr
-		                 WHERE cr.dotted = $1 AND cr.live)`,
+	tag, err := tx.Exec(ctx, StmtVersionOnlyBump,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version,
 	)
 	if err != nil {
@@ -221,28 +281,7 @@ func UpsertTx(ctx context.Context, tx pgx.Tx, row Row) (Outcome, error) {
 	var typeLive bool
 	var modelType *string
 	var appliedRows int64
-	if err = tx.QueryRow(ctx,
-		`WITH live_type AS (
-		     SELECT object_type
-		       FROM kacho_iam.catalog_resource
-		      WHERE dotted = $1 AND live
-		 ), applied AS (
-		     INSERT INTO kacho_iam.resource_mirror
-		       (object_type, object_id, parent_project_id, parent_account_id, labels, source_version, updated_at)
-		     SELECT $1::text, $2::text, $3::text, $4::text, $5::jsonb, $6::timestamptz, now()
-		      WHERE EXISTS (SELECT 1 FROM live_type)
-		     ON CONFLICT (object_type, object_id) DO UPDATE
-		        SET parent_project_id = EXCLUDED.parent_project_id,
-		            parent_account_id = EXCLUDED.parent_account_id,
-		            labels            = EXCLUDED.labels,
-		            source_version    = EXCLUDED.source_version,
-		            updated_at        = now()
-		      WHERE resource_mirror.source_version < EXCLUDED.source_version
-		     RETURNING 1
-		 )
-		 SELECT EXISTS (SELECT 1 FROM live_type),
-		        (SELECT object_type FROM live_type),
-		        (SELECT count(*) FROM applied)`,
+	if err = tx.QueryRow(ctx, StmtInsertOrSupersede,
 		row.ObjectType, row.ObjectID, row.ParentProjectID, row.ParentAccountID, payload, version,
 	).Scan(&typeLive, &modelType, &appliedRows); err != nil {
 		return Outcome{}, fmt.Errorf("resource_mirror: upsert: %w", err)

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Команда iamctl — инструмент оператора над каталогом прав модуля: пять
 // действий, не двенадцать (задача #1036).
@@ -39,8 +39,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/iamctl"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifestcheckrun"
+	"github.com/PRO-Robotech/kacho-iam/internal/iamctl"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifestcheckrun"
 )
 
 func main() {

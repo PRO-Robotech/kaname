@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // catalog_parity_test.go — СВОЯ проба стража старта (приёмка
 // services/iam/docs/engineering/acceptance/module-withdrawal-is-described.md,
@@ -63,8 +63,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
 )
 
 // stubRowSource — порт чтения живого каталога, отдающий заранее собранное
@@ -215,7 +215,7 @@ func TestCatalogParityGuardRefusesAndNamesTheRow(t *testing.T) {
 				return r
 			},
 			wantErr:     true,
-			wantInText:  []string{"нет в литерале", "ресурс vpc.nonesuch"},
+			wantInText:  []string{"нет в опоре", "ресурс vpc.nonesuch"},
 			wantMissing: 0,
 			wantExtra:   1,
 		},
@@ -325,7 +325,7 @@ func TestCatalogParityGuardRefusesAndNamesTheRow(t *testing.T) {
 				return catalog.Rows{Verbs: pickVerbRow(full.Verbs, dropVerb)}
 			},
 			wantErr:    true,
-			wantInText: []string{"нет в литерале", "ресурс vpc.nonesuch"},
+			wantInText: []string{"нет в опоре", "ресурс vpc.nonesuch"},
 			wantExtra:  1,
 		},
 		{
@@ -356,7 +356,7 @@ func TestCatalogParityGuardRefusesAndNamesTheRow(t *testing.T) {
 				retired = tc.retire(cloneRows(full))
 			}
 			src := &stubRowSource{rows: rows, retired: retired}
-			census, err := seed.AssertCatalogParity(context.Background(), src)
+			census, err := seed.AssertCatalogParity(context.Background(), src, seed.ImageAnchor())
 
 			// Обращение к порту РОВНО ОДНО: прочитанное отдаётся наружу, чтобы
 			// снимок не заводил своего запроса.
@@ -372,9 +372,9 @@ func TestCatalogParityGuardRefusesAndNamesTheRow(t *testing.T) {
 					"«снято решением» неотличимо от «строка не доехала»", src.retiredCalls)
 			}
 			// Перепись печатается ВСЕГДА, независимо от исхода.
-			t.Logf("перепись стража: литерал %d/%d/%d, строки %d/%d/%d, снятые %d/%d/%d, "+
-				"нет строкой %d, снято решением %d, нет в литерале %d",
-				census.LiteralModules, census.LiteralResources, census.LiteralVerbs,
+			t.Logf("перепись стража: опора %d/%d/%d, строки %d/%d/%d, снятые %d/%d/%d, "+
+				"нет строкой %d, снято решением %d, нет в опоре %d",
+				census.AnchorModules, census.AnchorResources, census.AnchorVerbs,
 				census.RowModules, census.RowResources, census.RowVerbs,
 				census.RetiredModules, census.RetiredResources, census.RetiredVerbs,
 				len(census.MissingRows), len(census.WithdrawnRows), len(census.ExtraRows))
@@ -391,7 +391,7 @@ func TestCatalogParityGuardRefusesAndNamesTheRow(t *testing.T) {
 					t.Fatalf("страж отказал на законном входе: %v", err)
 				}
 				if census.Diverged() {
-					t.Fatalf("расхождение на законном входе: нет строкой %v; нет в литерале %v",
+					t.Fatalf("расхождение на законном входе: нет строкой %v; нет в опоре %v",
 						census.MissingRows, census.ExtraRows)
 				}
 				return
@@ -399,7 +399,7 @@ func TestCatalogParityGuardRefusesAndNamesTheRow(t *testing.T) {
 
 			if err == nil {
 				t.Fatalf("страж МОЛЧИТ на испорченном входе — способность отказать не доказана; "+
-					"перепись: нет строкой %v; нет в литерале %v", census.MissingRows, census.ExtraRows)
+					"перепись: нет строкой %v; нет в опоре %v", census.MissingRows, census.ExtraRows)
 			}
 			if len(tc.wantInText) == 0 {
 				t.Fatalf("утверждение объявляет отказ и не называет, что отказ обязан сказать — " +
@@ -422,7 +422,7 @@ func TestCatalogParityGuardRefusesAndNamesTheRow(t *testing.T) {
 						len(census.MissingRows), tc.wantMissing, census.MissingRows)
 				}
 				if len(census.ExtraRows) != tc.wantExtra {
-					t.Errorf("нет в литерале %d, ожидалось %d: %v",
+					t.Errorf("нет в опоре %d, ожидалось %d: %v",
 						len(census.ExtraRows), tc.wantExtra, census.ExtraRows)
 				}
 			}
@@ -435,17 +435,17 @@ func TestCatalogParityGuardRefusesAndNamesTheRow(t *testing.T) {
 // объём осмотренного обязан быть напечатан и здесь.
 func TestCatalogParityGuardReportsCensusWhenThePortRefuses(t *testing.T) {
 	src := &stubRowSource{err: errPortRefused}
-	census, err := seed.AssertCatalogParity(context.Background(), src)
+	census, err := seed.AssertCatalogParity(context.Background(), src, seed.ImageAnchor())
 	if err == nil {
 		t.Fatalf("страж молчит при отказавшем порте — непрочитанный каталог не есть «каталог сошёлся»")
 	}
 	if !errors.Is(err, errPortRefused) {
 		t.Errorf("отказ порта не обёрнут: %v — вызывающий не отличит недоступную базу от расхождения", err)
 	}
-	if census.LiteralModules == 0 || census.LiteralResources == 0 || census.LiteralVerbs == 0 {
+	if census.AnchorModules == 0 || census.AnchorResources == 0 || census.AnchorVerbs == 0 {
 		t.Errorf("перепись опорной стороны не заполнена (%d/%d/%d) — «ноль расхождений» "+
 			"неотличимо от «ноль прочитанного»",
-			census.LiteralModules, census.LiteralResources, census.LiteralVerbs)
+			census.AnchorModules, census.AnchorResources, census.AnchorVerbs)
 	}
 	if census.RowModules != 0 || census.RowResources != 0 || census.RowVerbs != 0 {
 		t.Errorf("перепись живой стороны непуста (%d/%d/%d) при отказавшем порте",
@@ -633,7 +633,7 @@ func TestCatalogParityGuardRefusesWhenTheRetiredSideCannotBeRead(t *testing.T) {
 	}
 
 	src := &stubRowSource{rows: cloneRows(full), retiredErr: errPortRefused}
-	census, err := seed.AssertCatalogParity(context.Background(), src)
+	census, err := seed.AssertCatalogParity(context.Background(), src, seed.ImageAnchor())
 	if err == nil {
 		t.Fatalf("страж молчит при отказавшем порте СНЯТОГО — непрочитанное снятое "+
 			"множество принято за «ничего не снято»; перепись снятого %d/%d/%d",
@@ -643,9 +643,9 @@ func TestCatalogParityGuardRefusesWhenTheRetiredSideCannotBeRead(t *testing.T) {
 		t.Errorf("отказ порта снятого не обёрнут: %v — вызывающий не отличит недоступную "+
 			"базу от расхождения каталога", err)
 	}
-	if census.LiteralModules == 0 || census.LiteralResources == 0 || census.LiteralVerbs == 0 {
+	if census.AnchorModules == 0 || census.AnchorResources == 0 || census.AnchorVerbs == 0 {
 		t.Errorf("перепись опорной стороны не заполнена (%d/%d/%d) — «ноль расхождений» "+
 			"неотличимо от «ноль прочитанного»",
-			census.LiteralModules, census.LiteralResources, census.LiteralVerbs)
+			census.AnchorModules, census.AnchorResources, census.AnchorVerbs)
 	}
 }

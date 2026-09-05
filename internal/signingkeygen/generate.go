@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package signingkeygen порождает подписной ключ объявленного алгоритма и
 // проверяет предъявленный ключ против объявленного порога стойкости.
@@ -20,7 +20,7 @@ import (
 	"encoding/pem"
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // Material — порождённая пара. Приватная половина живёт здесь ровно до

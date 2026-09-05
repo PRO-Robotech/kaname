@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // lane_requirements_test.go — сценарии F4d-04, F4d-05, F4d-07, F4d-08, F4d-09 и
 // F4d-12 приёмки Ф4д, плюс ТАБЛИЧНАЯ проба отказа старта (F4d-10).
@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

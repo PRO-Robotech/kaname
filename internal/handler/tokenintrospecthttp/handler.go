@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package tokenintrospecthttp — авторитет отзыва НАШИХ токенов на
 // cluster-внутреннем слушателе (задача #897).
@@ -48,9 +48,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/httpbody"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // IntrospectPath — путь авторитета на cluster-внутреннем слушателе.

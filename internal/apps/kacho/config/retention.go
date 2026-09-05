@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // retention.go — секция `retention`: величины фоновой уборки таблиц, чей рост
 // задаёт внешний (задача #1292).
@@ -8,7 +8,7 @@ package config
 import (
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/retention"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/retention"
 )
 
 // RetentionConfig — величины уборки.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // sakey_binding_test.go — страж старта: требование связанного с отправителем
 // токена и переведённый контур выдачи противоречат друг другу (задача #1137).
@@ -35,8 +35,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 )
 
 // contourTranslated — посадка, на которой выдача ключей переведена на свою

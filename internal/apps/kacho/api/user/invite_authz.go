@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package user
 
@@ -14,7 +14,7 @@ package user
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 )
 
 // AuthzChecker — narrow port for cascade-traversal Check (same signature as

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -11,10 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/nameformdb"
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/pkg/nameformdb"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // TestIntegration_IAM_NameFormConstraintIsEnforced — задача #1279.
@@ -26,7 +26,7 @@ import (
 //
 // «Миграция применилась» и «ограничение отвергает негодную строку» — разные
 // утверждения; здесь доказывается второе. Разбор класса, перечень значений и
-// почему положительный контроль обязателен — `internal/nameformdb`.
+// почему положительный контроль обязателен — `pkg/nameformdb`.
 func TestIntegration_IAM_NameFormConstraintIsEnforced(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")

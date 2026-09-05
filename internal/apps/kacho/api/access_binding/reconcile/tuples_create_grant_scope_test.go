@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package reconcile
 
@@ -34,8 +34,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/catalogfixture"
 )
 
 // --- артефакты дерева, из которых выводится population ---------------------
@@ -69,12 +69,22 @@ func repoRootFromTest(t *testing.T) string {
 		t.Fatalf("getwd: %v", err)
 	}
 	dir := wd
+	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
+	// теперь СВОЙ модуль (она выносится отдельным репозиторием), и подъём «до
+	// первого» останавливался бы в её каталоге. Пути, которые ниже склеиваются с
+	// этим корнем, называют место В ДЕРЕВЕ МОНОРЕПО — от корня, — поэтому
+	// остановка внутри службы удваивала сегмент и обход искал `services/iam/
+	// services/iam/…`, которого не существует.
+	outermost := ""
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
+			outermost = dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
+			if outermost != "" {
+				return outermost
+			}
 			t.Fatalf("корень монорепо (go.mod) не найден от %s", wd)
 		}
 		dir = parent

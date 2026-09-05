@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // batchgate_test.go — the census that makes the batched page cost a statement
 // about the SERVICE rather than about one function.
@@ -133,7 +133,7 @@ func TestVisibilityCallSitesAllHoldABatchCapableChecker(t *testing.T) {
 func TestVisibilityCensusGateFiresOnAnInjectedDefect(t *testing.T) {
 	const defect = `package fake
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
+import "github.com/PRO-Robotech/kacho-iam/internal/authzfilter"
 
 type narrowChecker interface{ nothing() }
 
@@ -146,8 +146,8 @@ func (u *useCase) visibleIDs(ctx context.Context, subject string, ids []string) 
 	const legitimate = `package fake
 
 import (
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzfilter"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 )
 
 type useCase struct{ relationQueries clients.RelationQueries }
@@ -358,8 +358,8 @@ func TestVisibilityCensusGateSurvivesTheSiblingConfounder(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(good, "list.go"), []byte(`package good
 
 import (
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzfilter"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 )
 
 type useCase struct{ relationQueries clients.RelationQueries }
@@ -371,7 +371,7 @@ func (u *useCase) visibleIDs(ctx context.Context, subject string, ids []string) 
 
 	require.NoError(t, os.WriteFile(filepath.Join(bad, "list.go"), []byte(`package bad
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/authzfilter"
+import "github.com/PRO-Robotech/kacho-iam/internal/authzfilter"
 
 type narrowChecker interface{ nothing() }
 

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // usecase_trusted_issuers_test.go — федеративная выдача пишет перечень
 // доверенных издателей в НАШУ таблицу (задача #1124).
@@ -28,8 +28,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // testIssuerPublicKeyPEM — НАСТОЯЩИЙ открытый ключ, а не правдоподобная

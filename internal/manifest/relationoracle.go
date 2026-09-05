@@ -1,7 +1,9 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package manifest
+
+import "github.com/PRO-Robotech/kacho-iam/internal/domain"
 
 // relationoracle.go — модель прав ВНОСИТСЯ в загрузчик вызывающим (задача
 // продукта #2002; приёмка
@@ -92,6 +94,8 @@ type LoadOption func(*loadOptions)
 // вердикт по недочитанному был бы вымыслом.
 type loadOptions struct {
 	oracle RelationOracle
+	// modules — набор модулей, внесённый вызывающим; см. [WithModuleSet].
+	modules domain.ModuleSet
 }
 
 // WithRelationOracle вносит модель, против которой судится связность выдачи

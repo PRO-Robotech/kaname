@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // hooks_mux.go — HTTP mux composition for AuthN hooks listener.
 // Hydra hooks (token + refresh), DPoP replay cache.
@@ -16,20 +16,20 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/observability/health"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	reconcileapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
-	userapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/user"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	handlerinternal "github.com/PRO-Robotech/kacho/services/iam/internal/handler/iamhooks"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
-	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	reconcileapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding/reconcile"
+	userapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/user"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	handlerinternal "github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
+	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
 	"github.com/PRO-Robotech/kacho/pkg/schemaguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
 )
 
 // buildHooksMux — собирает HTTP mux для AuthN hooks и ВОЗВРАЩАЕТ носитель
@@ -104,6 +104,9 @@ func buildHooksMux(
 			HydraIssuer:      hydraIssuer,
 		},
 		users,
+		// The SAME producer the token hook enriches with. One claim set per
+		// principal, whichever lane asks for it.
+		tokenEnricher,
 		revsPg,
 		auditAdapter,
 		logger,

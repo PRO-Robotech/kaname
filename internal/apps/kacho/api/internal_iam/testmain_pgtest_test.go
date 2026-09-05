@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package internal_iam
 
@@ -7,8 +7,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // TestMain hands this package ONE Postgres instead of one per test.
@@ -16,7 +16,7 @@ import (
 // The tests here reach the database through iampgtest.NewTestPostgres, which now
 // asks pgtest for a database on the container this binary owns. The container
 // belongs to the test BINARY, and each package is its own binary, so the wiring
-// has to be repeated per package — see internal/pgtest for why a clone of a
+// has to be repeated per package — see pkg/pgtest for why a clone of a
 // migrated template is the same isolation a separate container gave.
 //
 // Nothing starts here: the container boots on the first NewDB, so a run where

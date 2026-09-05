@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package main
 
@@ -64,11 +64,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // moduleRolesPkgPath — пакет применителя ролей.
-const moduleRolesPkgPath = "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
+const moduleRolesPkgPath = "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/moduleroles"
 
 // moduleRolesApplierCtor — конструктор применителя ролей.
 const moduleRolesApplierCtor = "NewApplier"

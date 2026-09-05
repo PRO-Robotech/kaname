@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package main
 
@@ -55,11 +55,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // catalogPkgPath — пакет, чей снимок обязан быть запущен.
-const catalogPkgPath = "github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+const catalogPkgPath = "github.com/PRO-Robotech/kacho-iam/internal/catalog"
 
 // catalogSnapshotCtor — конструктор снимка.
 const catalogSnapshotCtor = "NewSnapshot"

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package authzmapgen — ПРОИЗВОДИТЕЛЬ двух таблиц типов пакета `authzmap` из
 // манифестов модулей (задача #1092).
@@ -80,7 +80,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // GeneratedRelPath — координата порождённого файла от корня репозитория.
@@ -169,7 +169,16 @@ type Tables struct {
 // прочитаны и в них ничего нет», а порождённая из пустоты таблица снесла бы
 // каталог целиком.
 func Collect(root string) (Tables, error) {
-	report := manifest.CheckTreeForGeneration(root)
+	return collectReport(root, manifest.CheckTreeForGeneration(root))
+}
+
+// collectReport — СУЖДЕНИЕ о прочитанном обходом: общее у полосы дерева
+// репозитория и полосы синтетического дерева.
+//
+// Различается у полос ровно ИСТОЧНИК ПЕРЕЧНЯ, и выбирает его вызывающий выше —
+// по имени, а не догадкой внутри. Второй разбор отчёта, написанный рядом,
+// разошёлся бы с первым молча.
+func collectReport(root string, report manifest.CheckReport) (Tables, error) {
 	if len(report.Findings) != 0 {
 		return Tables{}, fmt.Errorf(
 			"обход манифестов дерева %s дал находки (%s):\n\t%s\n"+
@@ -292,6 +301,13 @@ func CheckFresh(root string) (Census, error) {
 	if err != nil {
 		return tables.Census, err
 	}
+	return compareRendered(root, tables)
+}
+
+// compareRendered — сверка ПОРОЖДЁННОГО файла с тем, что даёт производитель:
+// общее у обеих полос, потому что предмет сверки от источника перечня не
+// зависит.
+func compareRendered(root string, tables Tables) (Census, error) {
 	want, err := Render(tables)
 	if err != nil {
 		return tables.Census, err

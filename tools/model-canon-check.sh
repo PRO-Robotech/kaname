@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 # model-canon-check.sh — блоки модели доступов сверяются с манифестами модулей
 # ПОБАЙТОВО: обход закрытого набора порождает блоки типов из манифеста каждого
@@ -29,7 +29,10 @@ cd "$REPO_ROOT"
 
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
-go build -o "$BUILD_DIR/model-canon-check" ./services/iam/tools/modelcanoncheck
+# Сборка идёт В МОДУЛЕ СЛУЖБЫ (`-C`): у неё свой `go.mod`, и путь пакета от
+# корня монорепо не резолвится. Корень ДЕРЕВА программе по-прежнему передаётся
+# ключом ниже — предмет её обхода не изменился.
+go build -C "$REPO_ROOT/services/iam" -o "$BUILD_DIR/model-canon-check" ./tools/modelcanoncheck
 
 # Код возврата снимается явно: под `set -e` ненулевой исход оборвал бы скрипт до
 # `exit`, а `exec` не дал бы сработать уборке за собой.

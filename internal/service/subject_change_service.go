@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // subject_change_service.go — read-side of subject_change_outbox.
 // Exposes the outbox by ascending-id cursor for api-gateway authz-cache

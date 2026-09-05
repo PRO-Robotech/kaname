@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package subjectstategate_test
 
@@ -18,7 +18,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/tools/subjectstategate"
+	"github.com/PRO-Robotech/kacho-iam/tools/subjectstategate"
 )
 
 // iamRoot — дерево, которое судит гейт (пакет лежит в services/iam/tools/…).

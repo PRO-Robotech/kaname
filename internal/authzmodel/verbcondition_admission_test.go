@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // verbcondition_admission_test.go — доставленный ГЛАГОЛ с условием отвергается
 // допуском, то есть отказом ПУСКА, а не молчаливой выдачей права (#1979).

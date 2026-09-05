@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // notify_channel_intent_journal_integration_test.go — уведомление журнала
 // намерений снято вместе со своим дренажом (#1436).

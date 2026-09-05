@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -8,7 +8,7 @@ package pg_test
 // IAM-FMB) driven through the pg ReconcileAdapter + testcontainers Postgres 16.
 //
 // The create-forward materializes the binding's desired ACTIVE per-object members
-// ADDITIVELY (SHARE advisory lock, LoadBindingUnlocked / no FOR UPDATE, write-missing-only,
+// ADDITIVELY (NO advisory lock at all, LoadBindingUnlocked / no FOR UPDATE, write-missing-only,
 // NO delete-stale diff) — the throughput fix for a mass-binding-create burst. The FULL
 // EXCLUSIVE ReconcileBinding REMAINS the Role.Update fan-out + sweep backstop (delete-stale
 // needs EXCLUSIVE there).
@@ -45,7 +45,7 @@ import (
 
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // Test 01 — FAST-MATERIALIZE (IAM-FMB-01). A single create-forward pass materializes the

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // sweeper_test.go — перепись прогона и разъезд реплик (задача #1264).
 
@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/expiredcredsweep"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/expiredcredsweep"
 )
 
 // fakeStore — дублёр долговечной половины.

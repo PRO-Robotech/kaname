@@ -1,6 +1,6 @@
 <!--
 Copyright (c) PRO-Robotech
-SPDX-License-Identifier: BUSL-1.1
+SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
 # Приёмка: выдача ОТНОШЕНИЕМ объявляется манифестом модуля
@@ -353,7 +353,7 @@ MOD-RG-13).
 второе написание того же предмета разошлось бы с первым молча.
 
 **Что переезд НЕ отменяет:** собственный разбор канона не заводится ни здесь, ни
-там — разбор общий (`internal/authzplan`), и довод против своего разбора уже
+там — разбор общий (`services/iam/internal/authzplan`), и довод против своего разбора уже
 записан и оплачен: свой разбор сравнивал запись со строкой и потому читал
 `group#member with <условие>` как «членство не принимается», отвечая уверенно и
 неверно.
@@ -1019,7 +1019,7 @@ MOD-RG-21).
 | опубликованный контракт автора манифеста | `services/iam/schema/module-manifest.schema.json` — `required`, `const` якоря, образцы имён | MOD-RG-05, 22; §1.3 п. 2 |
 | проба равенства множеств ключей формы и свойств схемы | `services/iam/internal/manifest/schemaagreement_internal_test.go` | MOD-RG-22 |
 | три ответа о принимаемых видах субъекта | `services/iam/internal/moduleseedparity/recipient.go` — `LookupRelation`, `RelationDeclaration.AdmitsGroupMember`, `HasDirectSubjects` | MOD-RG-09, 10, 11, 12 (переезжает, см. 12.2) |
-| разбор канона — общий, не свой | `internal/authzplan` — `ParseModel`, `DirectSubject` | MOD-RG-09…12, 15 |
+| разбор канона — общий, не свой | `services/iam/internal/authzplan` — `ParseModel`, `DirectSubject` | MOD-RG-09…12, 15 |
 | вкомпилированная копия канона и её разбор | `services/iam/internal/authzmodel` — `DSL` (`//go:embed`), `Shared()`, `Declares`, ошибка разбора | MOD-RG-14, 15 |
 | побайтовое равенство копии канону | `services/iam/internal/authzmodel/identity_test.go` | MOD-RG-14 |
 | перевод точечного якоря в тип объекта | `services/iam/internal/domain/access_binding_scope.go:132` — `ScopeTypeFromDotted` | MOD-RG-10, 12, 23 |

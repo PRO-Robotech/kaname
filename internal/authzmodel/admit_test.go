@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package authzmodel
 
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
 )
 
 // admit_test.go — пробы допуска собранной модели (предмет A приёмки
@@ -323,7 +323,8 @@ func TestAdmitLawfulDerivationIsExpressible(t *testing.T) {
 	if n := len(findingsOf(rep, RuleD5)); n != 0 {
 		t.Fatalf("законная форма вывода обязана проходить, находок Д5′: %d", n)
 	}
-	// Тот же ответ даёт канон целиком: невыразимых пар 0 из 273.
+	// Тот же ответ даёт канон целиком: невыразимых пар 0 из 272.
+	// Число перемерено после снятия `cluster#console` (#1820): было 273.
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
 		t.Fatalf("разбор канона: %v", err)
@@ -338,8 +339,8 @@ func TestAdmitLawfulDerivationIsExpressible(t *testing.T) {
 			}
 		}
 	}
-	if pairs != 273 || bad != 0 {
-		t.Fatalf("канон: невыразимых пар %d из %d (ждали 0 из 273)", bad, pairs)
+	if pairs != 272 || bad != 0 {
+		t.Fatalf("канон: невыразимых пар %d из %d (ждали 0 из 272)", bad, pairs)
 	}
 }
 
@@ -490,7 +491,8 @@ func TestAdmitRelationDeclaredTwiceInOneType(t *testing.T) {
 	if !strings.Contains(got[0].Text, "2") {
 		t.Fatalf("находка обязана называть число объявлений, получено %q", got[0].Text)
 	}
-	// Положительный близнец: в каноне 273 объявления и 0 имён, объявленных дважды.
+	// Положительный близнец: в каноне 272 объявления и 0 имён, объявленных дважды
+	// (было 273 — перемерено после снятия `cluster#console`, #1820).
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
 		t.Fatalf("разбор канона: %v", err)
@@ -508,8 +510,8 @@ func TestAdmitRelationDeclaredTwiceInOneType(t *testing.T) {
 			}
 		}
 	}
-	if decls != 273 || dups != 0 {
-		t.Fatalf("канон: объявлений %d (ждали 273), дублей имени %d (ждали 0)", decls, dups)
+	if decls != 272 || dups != 0 {
+		t.Fatalf("канон: объявлений %d (ждали 272), дублей имени %d (ждали 0)", decls, dups)
 	}
 }
 
@@ -610,14 +612,14 @@ func TestAdmitLawfulDerivationSourcesAreSilent(t *testing.T) {
 	}
 }
 
-// ── §2.1 · запретное множество канона: 2 из 273, транзитивных сверх прямых 0 ──
+// ── §2.1 · запретное множество канона: 2 из 272, транзитивных сверх прямых 0 ──
 //
 // Это ПРОИЗВОДИТЕЛЬ премиссы, которой ревизия круга 4 (§17.5) не нашла ни одного:
 // «два ребра и три дают на каноне один ответ» названо там числом-ориентиром, а
 // перемерить его на завтрашнем каноне было нечему. Здесь оно перемеряется на
 // каждом прогоне, и ЕДИНИЦА названа: пара (тип, отношение) канона, достигаемая
 // замыканием от ЛЮБОГО объявления канона.
-func TestCanonWildcardSetIsTwoOfTwoHundredSeventyThree(t *testing.T) {
+func TestCanonWildcardSetIsTwoOfTwoHundredSeventyTwo(t *testing.T) {
 	m, err := authzplan.ParseModel(DSL)
 	if err != nil {
 		t.Fatalf("разбор канона: %v", err)
@@ -636,8 +638,8 @@ func TestCanonWildcardSetIsTwoOfTwoHundredSeventyThree(t *testing.T) {
 			}
 		}
 	}
-	if pairs != 273 {
-		t.Fatalf("пар (тип, отношение) в каноне %d, ждали 273 — числа приёмки перемеряются, а не помнятся", pairs)
+	if pairs != 272 {
+		t.Fatalf("пар (тип, отношение) в каноне %d, ждали 272 — числа приёмки перемеряются, а не помнятся", pairs)
 	}
 	if len(direct) != 2 || !direct["cluster.viewer"] || !direct["registry_repository.v_get"] {
 		t.Fatalf("прямых подстановок канона %d, ждали 2 (cluster.viewer, registry_repository.v_get): %v", len(direct), direct)

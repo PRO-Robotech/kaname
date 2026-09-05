@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // manifests.go — доставка манифестов модулей работающей службе (задача #1875) и
 // СБОРКА модели прав установки из доставленного вместе с её допуском (#1971).

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package module_test
 
@@ -37,8 +37,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	moduleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/module"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	moduleapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/module"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // clusterSingleton — синглтон назван ОДИН раз на всё дерево; проба спрашивает

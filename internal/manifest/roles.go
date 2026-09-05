@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package manifest
 
@@ -13,8 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // roles.go — раздел `roles` (приёмка §2.6, §2.6а; сценарии MOD-MR-10 …
@@ -373,7 +372,12 @@ func (r Rule) formRule() domain.Rule {
 }
 
 // validateRoles — форма раздела `roles`. Находки собираются ВСЕ.
-func validateRoles(m *Manifest, doc *yaml.Node) []error {
+//
+// `modules` — набор, которым судятся модули, названные ПРАВИЛАМИ. Он ВНОСИТСЯ
+// вызывающим (moduleset.go) и здесь не добывается: прежде набор брался у
+// перечня, порождённого сборкой, и правило модуля оператора отвергалось
+// «unknown module» при том, что его манифест доставку уже прошёл.
+func validateRoles(m *Manifest, doc *yaml.Node, modules domain.ModuleSet) []error {
 	var faults []error
 	seen := map[string]int{}
 
@@ -391,9 +395,6 @@ func validateRoles(m *Manifest, doc *yaml.Node) []error {
 					"вызывающему нечем: привязка есть, доступа нет", i),
 			})
 		}
-		// Набор модулей — КАНОН, а не живые строки: загрузчика зовёт и оснастка
-		// дерева, у которой базы нет by construction (шапка manifest.go, #1927).
-		canon := domain.ModuleSetOf(authzmap.CatalogSeedModules()...)
 		for j, rule := range role.Rules {
 			// ФОРМА права судится ПЕРВОЙ: правило с обеими записями несёт два
 			// ответа на один вопрос, и вердикт домена о любом из них был бы
@@ -402,7 +403,7 @@ func validateRoles(m *Manifest, doc *yaml.Node) []error {
 				faults = append(faults, formFaults...)
 				continue
 			}
-			if err := rule.formRule().Validate(domain.TenantPolicy(), canon); err != nil {
+			if err := rule.formRule().Validate(domain.TenantPolicy(), modules); err != nil {
 				faults = append(faults, linkFault{
 					kind:   ErrRoleRuleInvalid,
 					coord:  locate(doc, "roles", i, "rules", j),

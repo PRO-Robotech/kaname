@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package registrytoken — ES256 client_assertion crypto for the Docker Registry
 // v2 auth-server (`/iam/token`) shim.

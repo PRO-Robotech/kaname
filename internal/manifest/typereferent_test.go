@@ -1,122 +1,178 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package manifest_test
 
-// typereferent_test.go — существование типа объекта судит РЕФЕРЕНТ, названный
-// вызывающим (задача продукта #1930).
+// typereferent_test.go — что различает референт, названный вызывающим.
 //
-// # Что здесь утверждается — обе стороны, и вторая несущая
+// # Предмет СМЕНИЛСЯ, и старые утверждения сняты вместе со своим (задача #2015)
 //
-//	новый тип, референт «закрытая таблица»  → ОТКАЗ  (потребление: таблица уже произведена)
-//	новый тип, референт «канон»             → ПРОХОД (порождение: таблица есть продукт прохода)
-//	пустой тип, любой референт              → ОТКАЗ  (форма судится всегда)
-//	известный тип, любой референт           → ПРОХОД (законный близнец)
+// Файл заводился задачей #1930 и утверждал: «существование типа судит РЕФЕРЕНТ»
+// — на полосе потребления таблица, в порождающем проходе канон. Первая половина
+// снята целиком: существование типа не спрашивается больше ни у кого, потому что
+// ресурс, объявивший тип, тем самым его и заводит (`objecttype.go`). Проба
+// `TestObjectTypeOutsideTheShippedTableIsRefusedWhenTheTableJudges` утверждала
+// ровно снятый предикат и потому удалена, а не ослаблена: оставь я её с
+// подправленным ожиданием — она бы утверждала о механизме, которого нет.
 //
-// Без второй строки круг остаётся замкнутым: новый тип не проходит ни одной из
-// двух дверей — загрузчик отвергает его, потому что таблица о нём не знает, а
-// таблица не узнаёт, потому что перегенерация начинается с загрузки.
+// # Что референт различает ТЕПЕРЬ — ВЛАДЕНИЕ
 //
-// Без четвёртой отрицание зеленело бы на загрузчике, отвергающем ВСЯКИЙ тип.
+//	тип образа у ЧУЖОЙ строки, референт «образ»       → ОТКАЗ  (доставка есть ДАННЫЕ оператора)
+//	тип образа у ЧУЖОЙ строки, референт «порождение»  → ПРОХОД (образа ещё нет; перенос типа
+//	                                                           между строками ДЕРЕВА законен)
+//	новый тип, любой референт                         → ПРОХОД (это и есть размыкание)
+//	пустой тип, любой референт                        → ОТКАЗ  (форма судится всегда)
+//	негодная форма, любой референт                    → ОТКАЗ  (то же)
+//	тип образа у СВОЕЙ строки, любой референт         → ПРОХОД (законный близнец)
+//
+// Без второй строки круг остаётся замкнутым с другой стороны: законный перенос
+// типа с одной строки дерева на другую отвергался бы своей же будущей таблицей,
+// и перегенерация не проходила бы.
+//
+// Без последней отрицания зеленели бы на загрузчике, отвергающем ВСЯКИЙ тип.
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
-// typeReferentFixture — минимально-полный манифест модуля с ОДНИМ ресурсом;
-// тип объекта подставляется.
+// typeReferentFixture — минимально-полный манифест модуля с ОДНИМ ресурсом; имя
+// ресурса и тип объекта подставляются.
 const typeReferentFixture = `apiVersion: iam/v1
 module: vpc
 resources:
-  - name: probe
-    objectType: %s
+  - name: %[1]s
+    objectType: %[2]s
     parents: [project]
     producer: derived
     verbs:
       - get
 `
 
-func manifestWithObjectType(objectType string) []byte {
-	return []byte(strings.Replace(typeReferentFixture, "%s", objectType, 1))
+func manifestWithResourceType(resource, objectType string) []byte {
+	return []byte(fmt.Sprintf(typeReferentFixture, resource, objectType))
 }
 
-// TestObjectTypeOutsideTheShippedTableIsRefusedWhenTheTableJudges — полоса
-// ПОТРЕБЛЕНИЯ: доставленный манифест, назвавший тип вне таблицы, не работает
-// никак, и отказ обязан прийти.
-func TestObjectTypeOutsideTheShippedTableIsRefusedWhenTheTableJudges(t *testing.T) {
-	const fresh = "vpc_probe_resource"
-	if _, ok := authzmap.DottedType(fresh); ok {
-		t.Fatalf("тип %q завели в закрытую таблицу — проба потеряла предмет: она утверждает "+
-			"про тип, которого таблица НЕ знает", fresh)
+// allReferents — оба вызывающих. Перечислены здесь один раз: выписанный у каждой
+// пробы, он разошёлся бы с объявлением молча при заведении третьего.
+var allReferents = []manifest.TypeReferent{
+	manifest.ReferentShippedTable, manifest.ReferentCanon,
+}
+
+// TestImageTypeOnAForeignRowIsRefusedWhenTheImageIsGuarded — полоса ПОТРЕБЛЕНИЯ:
+// тип, который несёт образ, доставка не вправе присвоить другой строке.
+func TestImageTypeOnAForeignRowIsRefusedWhenTheImageIsGuarded(t *testing.T) {
+	const known = "vpc_network"
+	dotted, shipped := authzmap.DottedType(known)
+	if !shipped {
+		t.Fatalf("тип %q выбыл из порождённой таблицы — проба утверждала бы про тип, "+
+			"которого образ НЕ несёт, и была бы зелёной при снятой охране", known)
+	}
+	if dotted == "vpc.probe" {
+		t.Fatalf("образ адресует %q строкой vpc.probe — фикстура совпала с образом, "+
+			"и присвоения в ней нет", known)
 	}
 
-	_, err := manifest.LoadWithReferent(manifestWithObjectType(fresh), manifest.ReferentShippedTable)
+	_, err := manifest.LoadWithReferent(manifestWithResourceType("probe", known),
+		manifest.ReferentShippedTable)
 	if err == nil {
-		t.Fatal("тип вне закрытой таблицы принят полосой потребления — селектор роли адресовал " +
-			"бы несуществующий тип и не дал бы ни одного пообъектного права, молча")
+		t.Fatal("чужой тип образа присвоен строкой доставки — правило её роли выдало бы " +
+			"пообъектные права на объекты, которых этот модуль не создавал")
 	}
-	if !errors.Is(err, manifest.ErrObjectTypeUnknown) {
+	if !errors.Is(err, manifest.ErrObjectTypeRedefinesImage) {
 		t.Errorf("отказ не отнесён к своей причине: %v", err)
 	}
+	// Отказ называет ОБЕ стороны: без второй автор не знает, у кого тип занят.
+	for _, want := range []string{known, dotted, "vpc.probe"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("отказ не называет %q: %v", want, err)
+		}
+	}
 
-	// Умолчание — потребление: забытый референт обязан давать СТРОГИЙ разбор.
-	if _, derr := manifest.Load(manifestWithObjectType(fresh)); !errors.Is(derr, manifest.ErrObjectTypeUnknown) {
-		t.Errorf("умолчание оказалось мягким — забытый референт открывал бы полосу молча: %v", derr)
+	// Умолчание — потребление: забытый референт обязан охранять, а не открывать.
+	if _, derr := manifest.Load(manifestWithResourceType("probe", known)); !errors.Is(
+		derr, manifest.ErrObjectTypeRedefinesImage) {
+		t.Errorf("умолчание оказалось мягким — забытый референт снимал бы охрану молча: %v", derr)
 	}
 }
 
-// TestObjectTypeOutsideTheShippedTablePassesWhenTheCanonJudges — НЕСУЩАЯ
-// половина: в проходе, ПОРОЖДАЮЩЕМ таблицу, загрузчик о существовании не
-// спрашивает.
+// TestImageTypeOnAForeignRowPassesWhenTheTableIsBeingGenerated — НЕСУЩАЯ
+// половина: в проходе, ПОРОЖДАЮЩЕМ таблицу, охранять нечего.
 //
-// Это и есть разрыв круга: до него новый тип не проходил ни одной из двух
-// дверей, и `authzmapgen.Collect` отказывал, а продукт не обновлялся вовсе.
-func TestObjectTypeOutsideTheShippedTablePassesWhenTheCanonJudges(t *testing.T) {
-	const fresh = "vpc_probe_resource"
-	m, err := manifest.LoadWithReferent(manifestWithObjectType(fresh), manifest.ReferentCanon)
+// Это и есть вторая сторона круга «производитель спрашивает у своего продукта»:
+// перенос типа с одной строки дерева на другую — законная правка, ради которой
+// перегенерация и запускается, — отвергался бы своей же будущей таблицей.
+func TestImageTypeOnAForeignRowPassesWhenTheTableIsBeingGenerated(t *testing.T) {
+	const known = "vpc_network"
+	m, err := manifest.LoadWithReferent(manifestWithResourceType("probe", known),
+		manifest.ReferentCanon)
 	if err != nil {
-		t.Fatalf("новый тип отвергнут в ПОРОЖДАЮЩЕМ проходе — круг «производитель спрашивает "+
-			"у своего продукта» не разорван: %v", err)
+		t.Fatalf("перенос типа отвергнут в ПОРОЖДАЮЩЕМ проходе: %v", err)
 	}
-	if len(m.Resources) != 1 || m.Resources[0].ObjectType != fresh {
+	if len(m.Resources) != 1 || m.Resources[0].ObjectType != known {
 		t.Fatalf("тип не доехал до разобранного документа: %+v", m.Resources)
+	}
+}
+
+// TestFreshObjectTypePassesUnderEveryReferent — размыкание: тип, которого образ
+// не несёт, принимается ОБЕИМИ полосами.
+func TestFreshObjectTypePassesUnderEveryReferent(t *testing.T) {
+	const fresh = "vpc_probe_resource"
+	if _, shipped := authzmap.DottedType(fresh); shipped {
+		t.Fatalf("тип %q завели в порождённую таблицу — проба потеряла предмет: она "+
+			"утверждает про тип, которого образ НЕ несёт", fresh)
+	}
+	for _, referent := range allReferents {
+		if _, err := manifest.LoadWithReferent(manifestWithResourceType("probe", fresh),
+			referent); err != nil {
+			t.Errorf("референт %v отверг НОВЫЙ тип — таблица не разомкнулась: %v", referent, err)
+		}
 	}
 }
 
 // TestObjectTypeFormIsJudgedByEveryReferent — форма судится ВСЕГДА.
 //
-// Смена референта снимает вопрос о СУЩЕСТВОВАНИИ, а не о форме: тип, не
-// названный вовсе, негоден в обоих проходах, и пропустить его значило бы
-// сменить предмет проверки под видом смены её референта.
+// Смена референта снимает вопрос о ВЛАДЕНИИ, а не о форме: имя, не названное
+// вовсе либо негодное, отвергнет колонка каталога ключом и допуск собранной
+// модели, поэтому пропустить его здесь значило бы отдать отказ чужой полосе.
 func TestObjectTypeFormIsJudgedByEveryReferent(t *testing.T) {
-	for _, referent := range []manifest.TypeReferent{
-		manifest.ReferentShippedTable, manifest.ReferentCanon,
-	} {
-		_, err := manifest.LoadWithReferent(manifestWithObjectType(`""`), referent)
+	for _, referent := range allReferents {
+		_, err := manifest.LoadWithReferent(manifestWithResourceType("probe", `""`), referent)
 		if !errors.Is(err, manifest.ErrObjectTypeRequired) {
 			t.Errorf("референт %v: пустой тип принят — форма перестала судиться: %v", referent, err)
+		}
+		_, err = manifest.LoadWithReferent(manifestWithResourceType("probe", `"vpc probe"`), referent)
+		if !errors.Is(err, manifest.ErrObjectTypeMalformed) {
+			t.Errorf("референт %v: негодная форма принята: %v", referent, err)
 		}
 	}
 }
 
-// TestKnownObjectTypePassesUnderEveryReferent — законный близнец обеих полос.
+// TestImageTypeOnItsOwnRowPassesUnderEveryReferent — законный близнец обеих полос.
 //
-// Без него отрицания выше зеленели бы на загрузчике, отвергающем ВСЯКИЙ тип.
-func TestKnownObjectTypePassesUnderEveryReferent(t *testing.T) {
+// Без него отрицания выше зеленели бы на загрузчике, отвергающем ВСЯКИЙ тип
+// образа.
+func TestImageTypeOnItsOwnRowPassesUnderEveryReferent(t *testing.T) {
 	const known = "vpc_network"
-	if _, ok := authzmap.DottedType(known); !ok {
-		t.Fatalf("тип %q выбыл из закрытой таблицы — законного близнеца построить не из чего", known)
+	dotted, shipped := authzmap.DottedType(known)
+	if !shipped {
+		t.Fatalf("тип %q выбыл из порождённой таблицы — законного близнеца построить не из чего", known)
 	}
-	for _, referent := range []manifest.TypeReferent{
-		manifest.ReferentShippedTable, manifest.ReferentCanon,
-	} {
-		if _, err := manifest.LoadWithReferent(manifestWithObjectType(known), referent); err != nil {
-			t.Errorf("референт %v отверг ИЗВЕСТНЫЙ тип: %v", referent, err)
+	// Имя строки берётся У ОБРАЗА, а не выписывается: выписанное разошлось бы с
+	// таблицей молча при первом же переименовании ресурса.
+	_, resource, ok := authzmap.SplitObjectType(dotted)
+	if !ok {
+		t.Fatalf("точечный ключ %q не разбирается — близнеца не собрать", dotted)
+	}
+	for _, referent := range allReferents {
+		if _, err := manifest.LoadWithReferent(manifestWithResourceType(resource, known),
+			referent); err != nil {
+			t.Errorf("референт %v отверг тип образа у ЕГО ЖЕ строки (%s): %v", referent, dotted, err)
 		}
 	}
 }

@@ -1,6 +1,6 @@
 <!--
 Copyright (c) PRO-Robotech
-SPDX-License-Identifier: BUSL-1.1
+SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
 # Приёмка: собранная модель допускается, только если добавляет СВОЁ и не трогает ничего чужого
@@ -192,7 +192,7 @@ SPDX-License-Identifier: BUSL-1.1
 | `Д8` на самом каноне | **проходит** | `Model.AssertOnePointerPerParentType()` → nil. Положительный близнец существует |
 | семь форм, принимаемых разбором молча | **7 из 7** | прогон, §2.8 |
 | `Д1` — перечень, а не множество | **подтверждено** | дубль `storage_volume`: вхождений имени **2**, различных имён **32** (было 32). Формулировка через множество даёт «новых имён 0» и **молчит** |
-| `AssertOnePointerPerParentType`: прод-вызывающих | **0** | `git grep -rn AssertOnePointerPerParentType` → **2** вхождения-вызова: прибор `tools/authzformbench/fullworld.go:141` и проба `internal/authzplan/compile_test.go:79`. `ParseModel` его не зовёт |
+| `AssertOnePointerPerParentType`: прод-вызывающих | **0** | `git grep -rn AssertOnePointerPerParentType` → **2** вхождения-вызова: прибор `services/iam/tools/authzformbench/fullworld.go:141` и проба `services/iam/internal/authzplan/compile_test.go:79`. `ParseModel` его не зовёт |
 | канон вшитый ≡ канон контракта | **побайтово** | `cmp services/iam/internal/authzmodel/fga_model.fga proto/kacho/cloud/iam/v1/fga_model.fga` → код 0 |
 | стендов · профилей в цепочках | **6** · **14** | `deploy/stacks.txt`; единица — строка `имя:цепочка` |
 
@@ -652,7 +652,7 @@ type acme_widget
 
 | # | производитель | координата | что производит |
 |---|---|---|---|
-| **П-01** | `authzplan.ParseModel` + `Model.validate` | `internal/authzplan/compile.go:171`, `:325` | отказ разбора с текстом; тексты процитированы в §2.7, §2.8 |
+| **П-01** | `authzplan.ParseModel` + `Model.validate` | `services/iam/internal/authzplan/compile.go:171`, `:325` | отказ разбора с текстом; тексты процитированы в §2.7, §2.8 |
 | **П-02** | поля `DirectSubject`: `Type`, `Wildcard`, `Userset`, `Condition` | там же, `:54` | признак подстановки, усерсета и условия — **поля разбора**, не написание |
 | **П-03** | `Model.Types`, `Model.Type`, `Model.TypeNames` | там же, `:106`, `:123`, `:126` | перечень и порядок типов; `Type` отдаёт **последний** одноимённый блок |
 | **П-04** | `ModelType.Relations`, `ModelType.Rel` | там же, `:96`, `:103` | перечень объявлений против доступа по имени — расхождение читателей (§2.3) |
@@ -1537,7 +1537,7 @@ K»)
 контракта — код 0), поэтому числа сравнимы.
 
 **Что проверено опытом, а не прочтением.** Временная проба клалась в
-`internal/authzplan/`, прогонялась и снималась; дерево до и после — чисто
+`services/iam/internal/authzplan/`, прогонялась и снималась; дерево до и после — чисто
 (`git status --porcelain` пуст).
 
 **Сошлось всё, что автор намерил** — тринадцать величин перемерены независимо:
@@ -1563,7 +1563,7 @@ K»)
 порядок обхода Go рандомизирует. Имена указателей попадают в текст отказа в
 порядке обхода.
 
-**Предикат** (ревизия `9b39f40e37`, `internal/authzplan/compile.go:602`): 400
+**Предикат** (ревизия `9b39f40e37`, `services/iam/internal/authzplan/compile.go:602`): 400
 прогонов на каноне плюс новый тип с двумя указателями в `project` дают **два
 различных текста** — `(project и owner_project)` ×356 и `(owner_project и
 project)` ×44.
@@ -1759,7 +1759,7 @@ project)` ×44.
 числа кругов сравнимы.
 
 **Что проверено ОПЫТОМ, а не прочтением.** Предикаты всех восьми клауз собраны
-заново в `internal/authzplan/` временными пробами, прогнаны и сняты; дерево до и
+заново в `services/iam/internal/authzplan/` временными пробами, прогнаны и сняты; дерево до и
 после — чисто (`git status --porcelain` пуст, тронут только этот файл).
 
 ### §17.1. Что воспроизвелось независимо

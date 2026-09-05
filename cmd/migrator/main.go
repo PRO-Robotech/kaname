@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package main — отдельный binary `kacho-migrator`: единая точка сборки CLI
 // миграций (cmd-binary не смешивает обязанности). Обслуживает миграции БД
@@ -38,18 +38,19 @@
 package main
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // регистрирует "pgx" driver для sql.Open
 	"github.com/spf13/cobra"
 
-	"github.com/PRO-Robotech/kacho/internal/migratorrun"
 	"github.com/PRO-Robotech/kacho/pkg/migratorcli"
 	"github.com/PRO-Robotech/kacho/pkg/migratorcli/cobraargs"
+	"github.com/PRO-Robotech/kacho/pkg/migratorrun"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
 )
 
 const (
@@ -215,9 +216,18 @@ func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, er
 	}
 
 	// Запасная конфигурация iam — тот же DB_HOST/PORT/USER/PASSWORD/NAME/SSLMODE,
-	// что и у kacho-iam. Если KACHO_IAM_DB_PASSWORD не выставлен, config.Load
-	// проваливает Validate — и это желаемое: оператор читает «задай DSN или
-	// учётные данные iam», а не получает молчаливое умолчание.
+	// что и у kacho-iam.
+	//
+	// ЗДЕСЬ СТОЯЛО «config.Load проваливает Validate» — это неверно, и неверно
+	// было всё время. `config.Load` стража НЕ зовёт: его шапка прямо говорит, что
+	// `Validate()` зовёт вызывающий, а вызывающий здесь — эта функция, и до
+	// правки она его не звала. То есть комментарий обещал проверку, которой на
+	// этом пути не существовало, а поставка ставит эту точку ПЕРВОЙ.
+	//
+	// Полного стража здесь по-прежнему нет, и это решение: в боевом режиме он
+	// требует секретов поставщика личности, которых init-контейнер не несёт и
+	// нести не должен. Судится ровно употребляемая величина — строка подключения,
+	// ниже по тексту.
 	dsn, err := migratorcli.ResolveDSN(opts.dsn, func() (string, error) {
 		cfg, cerr := config.Load(os.Getenv("KACHO_IAM_CONFIG_PATH"))
 		if cerr != nil {
@@ -227,6 +237,32 @@ func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, er
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// АДРЕС БАЗЫ ОБЯЗАН НАЗЫВАТЬ ХОСТ — иначе ожидание её не сойдётся НИКОГДА.
+	//
+	// В поставке эта точка исполняется ПЕРВОЙ (init-контейнер чарта перед
+	// службой), поэтому неверная настройка оператора разбивается о неё, а не о
+	// стража службы. До этой проверки она адрес не судила вовсе: накат уходил
+	// ждать базу по адресу без хоста и оставался в `running` с НУЛЁМ байт
+	// журнала — оператор видел под в `Init:0/1` и ни одного слова о причине.
+	//
+	// Ожидание базы само по себе законно: она поднимается рядом и может быть не
+	// готова. Незаконно НЕ РАЗЛИЧАТЬ «ещё не поднялась» (сходится само) и «адрес
+	// не задан» (не сойдётся никогда).
+	//
+	// Проверка стоит ПОСЛЕ разрешения приоритета источников, поэтому покрывает
+	// все три (`--dsn`, переменная окружения, конфигурация службы) и не заводит
+	// четвёртого места, где порядок пришлось бы повторить. Предикат — ТОТ ЖЕ, что
+	// зовёт страж службы: своя редакция разошлась бы молча.
+	//
+	// Полного `Config.Validate` здесь нет намеренно: в боевом режиме он требует
+	// секретов поставщика личности, которых init-контейнер не несёт и нести не
+	// должен — накат их не употребляет. Позвав его, мы уронили бы ШТАТНУЮ
+	// установку.
+	if !config.DSNNamesAHost(dsn) {
+		return nil, fmt.Errorf("database address %q names no host: it is not set, and waiting for "+
+			"the database would never converge; set --dsn, ENV %s, or the chart's db.host", config.RedactDSN(dsn), envDSN)
 	}
 
 	return migratorrun.New(migratorrun.Config{

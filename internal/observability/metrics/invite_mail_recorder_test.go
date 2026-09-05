@@ -1,6 +1,35 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
+// invite_mail_recorder_test.go — наблюдаемость НАШЕЙ отправки письма
+// приглашения (приёмка ID-MAIL-1, сценарий MAIL-31).
+//
+// # ГДЕ ЖИВЁТ КАЖДАЯ ИЗ ТРЁХ ВЕЛИЧИН MAIL-31 — НАЗВАНО ЗДЕСЬ, А НЕ ВЫВОДИТСЯ
+//
+// Сценарий требует ТРЁХ величин сразу, и держат их пробы в трёх пакетах:
+//
+//	число сданных писем              Test_InviteMailRecorder_AllCellsExistBeforeTheFirstLetter
+//	                                 (здесь; утверждается ПРИСУТСТВИЕ ряда, а не значение)
+//	число отказов ПО ВИДАМ           Test_InviteMailRecorder_CountsIntoTheNamedCell (здесь)
+//	                                 + clients: Test_InviteMailOutcomes_IsAClosedSet и
+//	                                 Test_InviteMailApplier_ClassifiesRefusalIntoItsOwnCell
+//	возраст СТАРЕЙШЕГО неотправленного  MAIL-50 на живой базе:
+//	                                 services/iam/internal/clients/invite_mail_integration_test.go,
+//	                                 Test_InviteMailQueue_OldestPendingAgeGrowsAndReturnsToZero
+//
+// # ПОЧЕМУ ЭТОТ АБЗАЦ ВООБЩЕ НАПИСАН
+//
+// Ни одна из проб имени MAIL-31 не называла, и поиск по нему давал НОЛЬ при трёх
+// живых производителях. Читатель, проверяющий предикат задачи #1776 по имени
+// сценария, заключал «производителя нет» — и это ровно тот случай, когда
+// предикат меряет СОГЛАШЕНИЕ ОБ ИМЕНАХ, а не предмет. Стоимость ошибки
+// односторонняя: работу заводят заново, а существующие пробы остаются
+// неизвестными следующему.
+//
+// Собирать три величины в ОДНУ пробу при этом нельзя: третья наблюдаема только
+// на живой базе (её ставит периодический скан очереди), а первые две — в
+// процессе без базы вовсе. Проба, требующая базы ради счётчика, перестала бы
+// исполняться там, где он живёт.
 package metrics
 
 import (
@@ -9,7 +38,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 )
 
 // Test_InviteMailRecorder_AllCellsExistBeforeTheFirstLetter — «ноль писем за всю

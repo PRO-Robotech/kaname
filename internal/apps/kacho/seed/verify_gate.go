@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package seed
 
@@ -53,8 +53,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // smokeMirrorType / smokeMirrorPrefix — the synthetic mirror object the boot
@@ -157,9 +157,57 @@ type VerifyStore interface {
 }
 
 // VerifyFailure — a binding that expected explicit tuples but has an empty ledger.
+//
+// Relation / Object / Subject НЕ дублируют Reason, а вынимают из него то, по чему
+// разбирают журнал. Прежде отказ печатал одно число, а эти три величины жили
+// внутри прозы и не выводились никогда — назвать несошедшуюся пару по журналу
+// было невозможно (задача #1865). Поля пусты у находок, у которых пары нет by
+// construction (пустая ведомость привязки): пустое значение здесь означает
+// «пары нет», а не «пара не названа».
 type VerifyFailure struct {
 	BindingID domain.AccessBindingID
 	Reason    string
+	Relation  string
+	Object    string
+	Subject   string
+}
+
+// verifyFailureLogCap — сколько пар называется поимённо, прежде чем остаток
+// сворачивается в число.
+//
+// Предел, а не «печатать всё»: страж идёт на старте, и отказ по каждой привязке
+// арендатора вылился бы в журнал, который никто не прочтёт. Предел, а не
+// «печатать одно число»: остаток называется числом ЯВНО, поэтому усечение видно
+// и не выдаёт себя за полный перечень.
+const verifyFailureLogCap = 50
+
+// logFailures называет КАЖДУЮ находку отдельной записью с полями.
+//
+// Поля, а не проза: разбирающий журнал отбирает по полю. Проза остаётся в
+// reason — она объясняет, а не адресует.
+func (g *VerifyGate) logFailures(ctx context.Context, msg string, report VerifyReport) {
+	g.logger.WarnContext(ctx, msg,
+		slog.Int("failures", len(report.Failures)),
+		slog.Int("bindings_checked", report.BindingsChecked))
+	for i, f := range report.Failures {
+		if i == verifyFailureLogCap {
+			g.logger.WarnContext(ctx, "verify-gate: остаток находок не назван поимённо",
+				slog.Int("named", verifyFailureLogCap),
+				slog.Int("unnamed", len(report.Failures)-verifyFailureLogCap))
+			break
+		}
+		attrs := []any{
+			slog.String("binding_id", string(f.BindingID)),
+			slog.String("reason", f.Reason),
+		}
+		if f.Relation != "" || f.Object != "" || f.Subject != "" {
+			attrs = append(attrs,
+				slog.String("relation", f.Relation),
+				slog.String("object", f.Object),
+				slog.String("subject", f.Subject))
+		}
+		g.logger.WarnContext(ctx, "verify-gate: находка", attrs...)
+	}
 }
 
 // VerifyReport — the gate verdict.
@@ -229,6 +277,9 @@ func (g *VerifyGate) VerifyRelationSatisfiesAction(ctx context.Context) (VerifyR
 			report.NoAccessLoss = false
 			report.Failures = append(report.Failures, VerifyFailure{
 				BindingID: c.BindingID,
+				Relation:  c.Relation,
+				Object:    c.Object,
+				Subject:   c.Subject,
 				Reason: fmt.Sprintf("required relation %q on %s does NOT resolve for %s "+
 					"(materialized but relation-not-satisfied — cutover blocked, F-11)",
 					c.Relation, c.Object, c.Subject),
@@ -236,8 +287,7 @@ func (g *VerifyGate) VerifyRelationSatisfiesAction(ctx context.Context) (VerifyR
 		}
 	}
 	if !report.NoAccessLoss {
-		g.logger.WarnContext(ctx, "verify-gate: relation-satisfies-action FAILED — catalog flip BLOCKED",
-			slog.Int("failures", len(report.Failures)))
+		g.logFailures(ctx, "verify-gate: relation-satisfies-action FAILED — catalog flip BLOCKED", report)
 	} else {
 		g.logger.InfoContext(ctx, "verify-gate: 100% relation-satisfies-action — catalog flip permitted",
 			slog.Int("bindings_checked", report.BindingsChecked))
@@ -284,8 +334,7 @@ func (g *VerifyGate) Verify(ctx context.Context) (VerifyReport, error) {
 		})
 	}
 	if !report.NoAccessLoss {
-		g.logger.WarnContext(ctx, "verify-gate: no-access-loss FAILED — contract phase BLOCKED",
-			slog.Int("failures", len(report.Failures)))
+		g.logFailures(ctx, "verify-gate: no-access-loss FAILED — contract phase BLOCKED", report)
 	} else {
 		g.logger.InfoContext(ctx, "verify-gate: 100% no-access-loss — contract phase permitted",
 			slog.Int("bindings_checked", report.BindingsChecked))

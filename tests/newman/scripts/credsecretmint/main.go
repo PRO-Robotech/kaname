@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // credsecretmint — печатает базовое удостоверение, ОТЧЕКАНЕННОЕ КОДОМ ПРОДУКТА.
 //
@@ -25,8 +25,11 @@
 //
 // Использование:
 //
-//	go run ./services/iam/tests/newman/scripts/credsecretmint            # вид uoc
-//	go run ./services/iam/tests/newman/scripts/credsecretmint -prefix soc
+//	go run -C services/iam ./tests/newman/scripts/credsecretmint            # вид uoc
+//	go run -C services/iam ./tests/newman/scripts/credsecretmint -prefix soc
+//
+// `-C` не украшение: служба несёт СВОЙ модуль, и путь от корня монорепо
+// отказывает — «main module … does not contain package …».
 package main
 
 import (

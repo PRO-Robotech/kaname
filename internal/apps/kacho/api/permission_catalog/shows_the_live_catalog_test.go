@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // shows_the_live_catalog_test.go — витрина разрешений отвечает СТРОКАМИ каталога,
 // а не перечнем, порождённым сборкой (#1976, #1816).
@@ -36,7 +36,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
 )
 
 // liveRows — каталог из ДВУХ строк, ни одна из которых не совпадает с деревом:

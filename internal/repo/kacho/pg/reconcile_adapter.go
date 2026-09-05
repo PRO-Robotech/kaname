@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg
 
@@ -29,15 +29,15 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/reconcile_outbox"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/resource_mirror"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/target_members"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding/reconcile"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/fga_outbox"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/reconcile_outbox"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/resource_mirror"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/target_members"
 )
 
 // ReconcileAdapter — composition-root adapter for the reconciler. Holds the
@@ -923,7 +923,11 @@ func (s *reconcileStore) SelectorBindingsMatchingObject(ctx context.Context, obj
 		     ON m.object_type = $1 AND m.object_id = $2
 		   LEFT JOIN kacho_iam.projects pj ON pj.id = m.parent_project_id
 		  WHERE b.status = 'ACTIVE'
-		    AND $1 = ANY(rrs.object_types)
+		    -- Форма ЧЛЕНСТВА, а не "скаляр = ANY(массив)": под столбцом стоит
+		    -- GIN, а он обслуживает @> / && / = и НЕ обслуживает вторую форму —
+		    -- планировщик на ней индекс не берёт и читает столбец
+		    -- последовательно. Семантика одна, путь доступа разный (#2053).
+		    AND rrs.object_types @> ARRAY[$1::text]
 		    AND ( (rrs.arm = 'anchor' AND (
 		                b.resource_type = 'cluster'
 		             OR (b.resource_type = 'account'
@@ -1022,7 +1026,9 @@ func (s *reconcileStore) IAMDirectSelectorBindingsMatchingObject(ctx context.Con
 	        JOIN kacho_iam.access_bindings b ON b.role_id = rrs.role_id
 	        JOIN ` + spec.table + ` o ON o.id = $2 ` + spec.join + `
 	       WHERE b.status = 'ACTIVE'
-	         AND $1 = ANY(rrs.object_types)
+	         -- Форма ЧЛЕНСТВА — см. соседний отбор выше: GIN не обслуживает
+	         -- "скаляр = ANY(массив)" (#2053).
+	         AND rrs.object_types @> ARRAY[$1::text]
 	         AND ( ` + anchorBranch + `
 	            OR (rrs.arm = 'names'  AND $2 = ANY(rrs.resource_names))` + labelsBranch + ` )
 	       ORDER BY b.id ASC`
@@ -1429,6 +1435,16 @@ func (a *ReconcileAdapter) MarkReconcileEventSent(ctx context.Context, id int64)
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// RecordReconcileEventFailure учитывает один отказ сверки по строке очереди:
+// увеличивает счётчик попыток и записывает причину.
+//
+// Пулом, а не транзакцией сверки: та откатывается целиком при отказе, и учёт
+// попытки откатился бы вместе с ней — счётчик не двигался бы никогда, а отсечка
+// была бы недостижима by construction (#2050).
+func (a *ReconcileAdapter) RecordReconcileEventFailure(ctx context.Context, id int64, cause string) (int, error) {
+	return reconcile_outbox.RecordFailure(ctx, a.pool, id, cause)
 }
 
 // ListSelectorBindingIDs returns the ids of all bindings whose ROLE carries an

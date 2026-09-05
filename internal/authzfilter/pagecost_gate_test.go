@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // pagecost_gate_test.go — what a page of visibility filtering COSTS, and the
 // structural condition that keeps that number meaningful.

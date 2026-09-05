@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // role_owner_module_cluster_tier_integration_test.go — роль с ВЛАДЕЛЬЦЕМ-МОДУЛЕМ
 // стоит на кластерном ярусе, и это держит СХЕМА, а не единственный писатель

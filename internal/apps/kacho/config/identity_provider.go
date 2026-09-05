@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // identity_provider.go — посадка личности со стороны настройки службы прав
 // (задача #1125, подфаза Ф4д эпика #896).

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // issue_required_field_behaviour_test.go — ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ к правилу об
 // ответственном: поле, которое край ДЕЙСТВИТЕЛЬНО требует, отвергается при

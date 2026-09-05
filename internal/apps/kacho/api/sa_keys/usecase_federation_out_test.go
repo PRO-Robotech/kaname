@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // usecase_federation_out_test.go — Phase 3c Federation OUT: end-to-end
 // IssueSAKeyUseCase.Execute() coverage that asserts caller-supplied audience
@@ -22,7 +22,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // TestIssue_PrivateKeyJWT_AudienceOverridesPrefix — Phase 3a + Phase 3c: when

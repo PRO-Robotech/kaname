@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package membership — MembershipService: чтение принадлежности человека
 // аккаунту на аккаунт-скоупных путях.
@@ -23,7 +23,7 @@ package membership
 import (
 	"context"
 
-	repomembership "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/membership"
+	repomembership "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/membership"
 )
 
 // Repo / Session — порты, объявленные ЗДЕСЬ, в use-case, и узкие намеренно:

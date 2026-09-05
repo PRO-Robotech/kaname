@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // token_signing_test.go — стражи старта своей чеканки: F1-03 (алгоритм вне
 // закрытого словаря), F1-09 (ключ обёртки), F1-20 (незаданный адресат либо

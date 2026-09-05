@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package access_binding
 
@@ -29,11 +29,11 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
 
 // fieldDeletionProtection / fieldLabels — the mutable AccessBinding fields (T3.3-IMM-01).
@@ -89,7 +89,8 @@ var abImmutableFields = map[string]string{
 type ObjectForwardReconciler interface {
 	// ReconcileObjectForward is the ADDITIVE forward fast-path for one object: it
 	// materializes ONLY that object's per-object tuples across the matching bindings
-	// under a SHARE advisory lock (no EXCLUSIVE / O(scope) recompute). It transparently
+	// while holding NO advisory lock at all (neither EXCLUSIVE nor SHARE, no O(scope)
+	// recompute). It transparently
 	// delegates to the FULL ReconcileObject when the object already has members
 	// (delete-stale guard) — which is the branch a REVOCATION takes.
 	ReconcileObjectForward(ctx context.Context, objectType, objectID string) error

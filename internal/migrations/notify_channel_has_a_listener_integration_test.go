@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // notify_channel_has_a_listener_integration_test.go — канал уведомления читается
 // по ЖИВОЙ схеме, а не по тексту миграций.
@@ -51,9 +51,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // TestIntegration_SessionRevokedChannelHasNoProducerLeft — регрессия на снятие
@@ -494,12 +494,22 @@ func repoRootFromMigrations(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	require.NoError(t, err)
+	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
+	// теперь СВОЙ модуль (она выносится отдельным репозиторием), и подъём «до
+	// первого» останавливался бы в её каталоге. Пути, которые ниже склеиваются с
+	// этим корнем, называют место В ДЕРЕВЕ МОНОРЕПО — от корня, — поэтому
+	// остановка внутри службы удваивала сегмент и обход искал `services/iam/
+	// services/iam/…`, которого не существует.
+	outermost := ""
 	for {
 		if _, serr := os.Stat(filepath.Join(dir, "go.mod")); serr == nil {
-			return dir
+			outermost = dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
+			if outermost != "" {
+				return outermost
+			}
 			t.Fatal("не найден корень репозитория (каталог с go.mod)")
 		}
 		dir = parent

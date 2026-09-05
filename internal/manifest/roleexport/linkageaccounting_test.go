@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // linkageaccounting_test.go — СЧЁТ обратной стороны сверки: запись каталога,
 // которую раздел `resources` не называет действием, обязана быть ОТНЕСЕНА к
@@ -35,8 +35,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest/roleexport"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest/roleexport"
 )
 
 // treeRootFromPackage — корень дерева относительно каталога пакета.

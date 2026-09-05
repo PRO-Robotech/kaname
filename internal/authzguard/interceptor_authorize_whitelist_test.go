@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // interceptor_authorize_whitelist_test.go — обход анонимного стража для двух
 // имён AuthorizeService, из которых ОДНО пережило свой предмет.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // system_grant_surface_integration_test.go — У СВЕЖЕЙ ПЛАТФОРМЫ НЕТ ДЕЙСТВУЮЩЕГО
 // ДОСТУПА ПОМИМО ПОВЕРХНОСТИ ВЫДАЧ.
@@ -53,8 +53,8 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // membershipRelation — отношение состава группы. Одно из двух, что перепись

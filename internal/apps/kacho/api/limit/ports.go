@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package limit — use-cases of InternalLimitService: the lifecycle of a
 // resource-count ceiling, plus the two reads owner-services live on.
@@ -12,7 +12,7 @@ package limit
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // limitRepo — persistence port.

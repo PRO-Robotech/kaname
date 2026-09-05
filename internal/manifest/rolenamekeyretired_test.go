@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // rolenamekeyretired_test.go — у роли манифеста НЕТ ключа `name`
 // (задача PRO-Robotech/kacho#1906).

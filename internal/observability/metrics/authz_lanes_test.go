@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package metrics_test
 
@@ -37,9 +37,9 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
 )
 
 // fakeSubjectAuthorizer — решатель полос края и сужателя.

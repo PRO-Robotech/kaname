@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // adapters.go — thin shims между port-iface'ами handler-слоя и repo adapter'ами
 // из internal/repo/kacho/pg.

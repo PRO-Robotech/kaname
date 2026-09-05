@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // handler_sa_lane_no_silent_drop_test.go — поле запроса, на которое сервис не
 // смотрит, не может быть принято молча (api-conventions.md, «Принято-и-

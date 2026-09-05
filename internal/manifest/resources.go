@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package manifest
 
@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 )
 
 // resources.go — раздел `resources` (приёмка
@@ -75,8 +75,32 @@ var (
 	// ErrObjectTypeRequired — тип объекта модели прав не назван. Правило вывода
 	// из имени СНЯТО (см. шапку), поэтому восстановить его нечем.
 	ErrObjectTypeRequired = errors.New("manifest: resource objectType is required")
-	// ErrObjectTypeUnknown — тип объекта вне закрытой таблицы authzmap.
-	ErrObjectTypeUnknown = errors.New("manifest: resource objectType is outside the closed table")
+	// ЗДЕСЬ БЫЛ `ErrObjectTypeUnknown` — «тип объекта вне закрытой таблицы
+	// authzmap». Он снят ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ (задача #2015): таблица типов
+	// разомкнута, членство в ней больше не спрашивается, и производителя у этого
+	// отказа не осталось ни одного. Оставь я сентинел «на всякий случай» — он
+	// объявлял бы отказ, которого продукт не производит, и следующий читатель
+	// написал бы на него проверку, зелёную при любом входе.
+	//
+	// ErrObjectTypeMalformed — имя типа объекта не той формы.
+	//
+	// Пришло на место снятого и отличается от него предметом: тот судил ЧЛЕНСТВО
+	// в таблице, недоступной автору манифеста, этот судит ФОРМУ, которую автор
+	// читает в тексте отказа и может исправить.
+	ErrObjectTypeMalformed = errors.New("manifest: resource objectType name is malformed")
+	// ErrObjectTypeRedefinesImage — доставка присваивает своей строке тип,
+	// который образ уже объявил ДРУГОЙ строкой.
+	//
+	// Отдельный отказ, а не частный случай формы: чинится он переносом типа к
+	// владельцу, а не правкой имени.
+	ErrObjectTypeRedefinesImage = errors.New("manifest: resource objectType redefines a type the image already declares")
+	// ErrObjectTypeCollision — один тип объекта объявлен больше чем одной
+	// строкой: двумя ресурсами документа либо двумя манифестами обхода.
+	//
+	// У типа один владелец. Прими мы второго — права, выданные на одну строку,
+	// материализовались бы на объектах другой, а чья строка доедет до
+	// применителя, решал бы порядок обхода.
+	ErrObjectTypeCollision = errors.New("manifest: object type is declared by more than one resource")
 	// ErrParentRequired — указатель на объект-владелец не назван.
 	ErrParentRequired = errors.New("manifest: resource parents are required")
 	// ErrParentUnknown — тип объекта указателя вне закрытого набора.
@@ -255,14 +279,33 @@ var scopeAnchors = []string{"project", "account", "cluster"}
 
 // parentTypeIsKnown — тип объекта, на который указатель вправе указывать.
 //
-// Принимается ДВА словаря, и они разные: якорь области (закрытый набор выше,
-// `cluster` живёт только в нём — записи в таблице типов у него нет вовсе) и тип
-// закрытой таблицы `authzmap`. Слить их одним ключом значило бы объявить, что
-// ресурс-владелец и область выдачи суть одно, — а замер по канону говорит
-// обратное: `registry_repository` указывает на `registry_registry`, который
-// областью выдачи не является ни при каком написании.
-func parentTypeIsKnown(typ string) bool {
+// Принимается ТРИ словаря, и они разные:
+//
+//	якорь области            закрытый набор выше; `cluster` живёт только в нём —
+//	                         записи в таблице типов у него нет вовсе;
+//	тип ОБРАЗА               порождённая сборкой таблица `authzmap`;
+//	тип ЭТОГО ЖЕ документа   ресурс, объявленный тем же манифестом (#2015).
+//
+// Слить первые два одним ключом значило бы объявить, что ресурс-владелец и
+// область выдачи суть одно, — а замер по канону говорит обратное:
+// `registry_repository` указывает на `registry_registry`, который областью
+// выдачи не является ни при каком написании.
+//
+// Третий словарь и есть размыкание: оператор чужого облака вправе подвесить свой
+// тип под свой же, и без него ЛЮБАЯ иерархия его модуля была бы невыразима — тип
+// родителя он объявляет тем же манифестом, и таблица образа о нём не знает by
+// construction (objecttype.go).
+//
+// Обход СЮДА не приходит намеренно: указатель резолвится по типам ТОГО ЖЕ
+// документа, а не всей доставки. Замер по дереву — указателей на тип (а не на
+// якорь области) ОДИН на шесть манифестов, и он внутридокументный; открыв обход,
+// я заведомо разрешил бы иерархию через границу модуля, которой сегодня нет и
+// решения о которой никто не принимал.
+func parentTypeIsKnown(typ string, ownTypes map[string]struct{}) bool {
 	if contains(scopeAnchors, typ) {
+		return true
+	}
+	if _, own := ownTypes[typ]; own {
 		return true
 	}
 	_, ok := authzmap.DottedType(typ)
@@ -736,6 +779,23 @@ func validateResources(m *Manifest, doc *yaml.Node, referent TypeReferent) []err
 	var faults []error
 	seen := map[string][]int{}
 
+	// Типы, объявленные ЭТИМ документом, известны ДО суждения о его ресурсах:
+	// иначе указатель на тип, объявленный НИЖЕ по документу, отвергался бы
+	// порядком записей, а не по существу (тот же довод, что у двух ступеней
+	// обхода в check.go).
+	ownTypes, typeCollisions := declaredTypesOf(m)
+	for _, c := range typeCollisions {
+		faults = append(faults, linkFault{
+			kind:  ErrObjectTypeCollision,
+			coord: locate(doc, "resources", c.Second, "objectType"),
+			detail: fmt.Sprintf("тип %q объявлен ресурсами resources[%d] и resources[%d] — "+
+				"у типа объекта один владелец; отношение `v_<глагол>` адресуется именем типа, "+
+				"поэтому права, выданные на одну строку, материализовались бы на объектах "+
+				"другой, а какая из двух строк каталога переживёт применение, решал бы "+
+				"порядок записей", c.Type, c.First, c.Second),
+		})
+	}
+
 	for i := range m.Resources {
 		r := &m.Resources[i]
 
@@ -750,7 +810,7 @@ func validateResources(m *Manifest, doc *yaml.Node, referent TypeReferent) []err
 			seen[r.Name] = append(seen[r.Name], i)
 		}
 
-		faults = append(faults, validateResourceAnchors(r, doc, i, referent)...)
+		faults = append(faults, validateResourceAnchors(m, r, doc, i, referent, ownTypes)...)
 		faults = append(faults, validateResourceCascade(r, doc, i)...)
 		faults = append(faults, validateResourceTiers(r, doc, i)...)
 		faults = append(faults, validateResourceBaseRoles(r, doc, i)...)
@@ -788,15 +848,25 @@ func validateResources(m *Manifest, doc *yaml.Node, referent TypeReferent) []err
 
 // validateResourceAnchors — тип объекта, якорь области и вид ключей записи.
 //
-// # Существование типа судит РЕФЕРЕНТ, а не всегда таблица (задача #1930)
+// # Что здесь судится о типе — ФОРМА и ВЛАДЕНИЕ, а НЕ членство (задача #2015)
 //
-// Форму — «тип назван дословно» — судит эта функция при любом референте: имя
-// пустым не бывает ни в порождении, ни в потреблении. А вот ЧЛЕНСТВО в закрытой
-// таблице спрашивается только тогда, когда таблица уже произведена
-// ([ReferentShippedTable]); в проходе, который её ПОРОЖДАЕТ, тот же вопрос был
-// бы вопросом к собственному ответу, и существование там судит канон
-// (`modelrender.Sweep`).
-func validateResourceAnchors(r *Resource, doc *yaml.Node, i int, referent TypeReferent) []error {
+// Членство в порождённой сборкой таблице снято как предикат: тип, объявленный
+// доставленным манифестом, ЗАВОДИТСЯ этим объявлением, и спрашивать таблицу
+// значило бы спрашивать у собственного ответа. Разбор — objecttype.go.
+//
+// Осталось два предиката, и они разные:
+//
+//	ФОРМА     судится при ЛЮБОМ референте: имя негодной формы отвергнет колонка
+//	          каталога ключом, а строка `type` — допуск собранной модели, и
+//	          отказ пришёл бы чужой полосой;
+//	ВЛАДЕНИЕ  судится там, где таблица УЖЕ ПРОИЗВЕДЕНА ([ReferentShippedTable]):
+//	          тип, который несёт образ, доставка не вправе присвоить другой
+//	          строке. В проходе, который таблицу ПОРОЖДАЕТ ([ReferentCanon]),
+//	          образа ещё нет — там тот же вопрос был бы вопросом к собственному
+//	          ответу, и законный перенос типа с одной строки дерева на другую
+//	          отвергался бы своей же будущей таблицей.
+func validateResourceAnchors(m *Manifest, r *Resource, doc *yaml.Node, i int,
+	referent TypeReferent, ownTypes map[string]struct{}) []error {
 	var faults []error
 
 	switch r.ObjectType {
@@ -808,18 +878,17 @@ func validateResourceAnchors(r *Resource, doc *yaml.Node, i int, referent TypeRe
 				"<модуль>_<ресурс>» снято, оно не действует у 10 записей закрытой таблицы из 27",
 		})
 	default:
-		if _, ok := authzmap.DottedType(r.ObjectType); referent.judgesTypeExistence() && !ok {
+		if err, bad := objectTypeFault(m.Module, r.Name, r.ObjectType,
+			referent.guardsImageOwnership()); bad {
 			faults = append(faults, linkFault{
-				kind:  ErrObjectTypeUnknown,
-				coord: locate(doc, "resources", i, "objectType"),
-				detail: fmt.Sprintf("типа %q нет в закрытой таблице типов iam: селектор роли "+
-					"адресовал бы тип, которого не существует, и не дал бы НИ ОДНОГО "+
-					"пообъектного права — молча, при действующей на вид привязке", r.ObjectType),
+				kind:   errors.Unwrap(err),
+				coord:  locate(doc, "resources", i, "objectType"),
+				detail: strings.TrimPrefix(err.Error(), errors.Unwrap(err).Error()+": "),
 			})
 		}
 	}
 
-	faults = append(faults, validateResourceParents(r, doc, i)...)
+	faults = append(faults, validateResourceParents(r, doc, i, ownTypes)...)
 
 	switch {
 	case r.Producer == "":
@@ -845,7 +914,7 @@ func validateResourceAnchors(r *Resource, doc *yaml.Node, i int, referent TypeRe
 //
 // Находки собираются ВСЕ и по каждому указателю: названная первая заставила бы
 // автора чинить их по одной, по прогону на каждую.
-func validateResourceParents(r *Resource, doc *yaml.Node, i int) []error {
+func validateResourceParents(r *Resource, doc *yaml.Node, i int, ownTypes map[string]struct{}) []error {
 	var faults []error
 	if len(r.Parents) == 0 {
 		return []error{linkFault{
@@ -892,7 +961,7 @@ func validateResourceParents(r *Resource, doc *yaml.Node, i int) []error {
 					"принимаются якорь области (%s) либо тип закрытой таблицы iam",
 					i, k, strings.Join(scopeAnchors, ", ")),
 			})
-		case !parentTypeIsKnown(p.Type):
+		case !parentTypeIsKnown(p.Type, ownTypes):
 			faults = append(faults, linkFault{
 				kind:  ErrParentUnknown,
 				coord: locate(doc, "resources", i, "parents", k),

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // refresh_hook_handler.go — Hydra refresh_token webhook.
 //
@@ -32,13 +32,12 @@ package iamhooks
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // RefreshHookConfig — runtime config.
@@ -48,20 +47,36 @@ type RefreshHookConfig struct {
 	HydraIssuer      string
 }
 
+// UserClaimsAssembler — the service-layer producer of the claim set for a User
+// the caller has already resolved. Implemented by
+// *service.TokenEnrichmentService.
+//
+// The refresh hook holds it rather than assembling claims itself: renewal and
+// issuance owe ONE person ONE claim set, and while each lane assembled its own
+// they were two places about one subject. Both lanes now ask the same producer,
+// so a change to it cannot reach one and miss the other.
+type UserClaimsAssembler interface {
+	UserClaims(u domain.User, subject string, hookCtx service.TokenHookContext) map[string]any
+}
+
 // RefreshHookHandler — HTTP handler.
 type RefreshHookHandler struct {
 	cfg         RefreshHookConfig
 	users       UserLookupPort
+	claims      UserClaimsAssembler
 	revocations UserRevocationLookup
 	audit       AuditEmitter
 	logger      *slog.Logger
-	now         func() time.Time
 }
 
 // NewRefreshHookHandler — constructor.
+//
+// claims is the SAME assembler the token hook's enricher is: one producer for
+// both lanes (see UserClaimsAssembler).
 func NewRefreshHookHandler(
 	cfg RefreshHookConfig,
 	users UserLookupPort,
+	claims UserClaimsAssembler,
 	revocations UserRevocationLookup,
 	audit AuditEmitter,
 	logger *slog.Logger,
@@ -72,10 +87,10 @@ func NewRefreshHookHandler(
 	return &RefreshHookHandler{
 		cfg:         cfg,
 		users:       users,
+		claims:      claims,
 		revocations: revocations,
 		audit:       audit,
 		logger:      logger,
-		now:         time.Now,
 	}
 }
 
@@ -236,16 +251,28 @@ func (h *RefreshHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. Re-inject ext_claims.
-	claims, err := h.refreshClaims(primary, &payload)
-	if err != nil {
-		if errors.Is(err, iamerr.ErrNotFound) {
-			http.Error(w, `{"error":"user_disabled"}`, http.StatusForbidden)
-			return
-		}
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
-		return
-	}
+	// 3. Re-inject ext_claims — ЧЕРЕЗ ТОГО ЖЕ производителя, что собирает их на
+	// выпуске (#2052).
+	//
+	// Здесь стояла собственная сборка состава: свой словарь утверждений и своя
+	// производная «согласие устройства» из областей `webauthn`/`passkey`. Та же
+	// производная живёт в слое службы, которому принадлежит, — то есть об одном
+	// предмете было ДВА места, и разошлись бы они молча: правка в службе не
+	// доехала бы сюда, один человек получил бы разные утверждения на выпуске и
+	// на продлении, а обе половины остались бы зелёными, потому что проба
+	// каждой утверждала своё ожидаемое значение сама.
+	//
+	// Принципала здесь разрешает сам хук (гейт отзыва взвешивает КАЖДУЮ строку
+	// личности), поэтому зовётся сборка по УЖЕ разрешённой строке, а не
+	// сквозное обогащение: второго чтения хранилища этот путь не заводит.
+	claims := h.claims.UserClaims(primary, payload.Subject, service.TokenHookContext{
+		GrantedScopes: payload.grantedScopes(),
+		AuthTime:      unixOrZero(payload.Session.IDToken.Claims.AuthTime),
+		ACR:           payload.Session.IDToken.Claims.ACR,
+		CnfJkt:        payload.Session.Cnf.Jkt,
+		CnfX5tS256:    payload.Session.Cnf.X5tS256,
+		OAuthClientID: payload.clientID(),
+	})
 
 	resp := hydraRefreshHookResponse{}
 	resp.Session.AccessToken = map[string]any{
@@ -310,34 +337,6 @@ func (h *RefreshHookHandler) userLevelRevoked(ctx context.Context, users []domai
 		}
 	}
 	return false, "", nil
-}
-
-// refreshClaims builds the enriched ID/access-token claim set from the resolved
-// user + the Hydra refresh payload. It performs no context-propagated work
-// (groups enrichment is not yet wired), so it takes no ctx — a caller that later
-// adds a DB/FGA lookup here must re-introduce ctx and thread it to that call.
-func (h *RefreshHookHandler) refreshClaims(u domain.User, p *hydraRefreshHookRequest) (map[string]any, error) {
-	claims := map[string]any{
-		"kacho_external_id":       string(u.ExternalID),
-		"kacho_user_id":           string(u.ID),
-		"kacho_active_account":    string(u.AccountID),
-		"kacho_groups":            []string{},
-		"kacho_principal_type":    "user",
-		"kacho_device_compliance": "unknown",
-		"kacho_jkt":               p.Session.Cnf.Jkt,
-		"kacho_x5t_s256":          p.Session.Cnf.X5tS256,
-		"kacho_acr":               p.Session.IDToken.Claims.ACR,
-		"kacho_audience":          h.cfg.Domain,
-		"kacho_issuer":            h.cfg.HydraIssuer,
-		"kacho_issued_at":         h.now().Unix(),
-	}
-	for _, sc := range p.grantedScopes() {
-		if sc == "webauthn" || sc == "passkey" {
-			claims["kacho_device_compliance"] = "attested"
-			break
-		}
-	}
-	return claims, nil
 }
 
 func (h *RefreshHookHandler) denyAndAudit(ctx context.Context, p hydraRefreshHookRequest, reason string) {

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // caller_authority.go — the authority gate for
 // AuthorizeService.{Check,BatchCheck,ListObjects,ListSubjects,ExpandRelations}.
@@ -39,7 +39,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 )
 
 // callerAuthorityRelations — FGA relations on the queried resource that grant a

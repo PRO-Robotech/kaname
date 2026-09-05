@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package listvisibility_test
 
@@ -19,8 +19,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	projectapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/project"
-	repoproject "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/project"
+	projectapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/project"
+	repoproject "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/project"
 )
 
 // seedInterleaved lays down `visible` objects the caller may read, with

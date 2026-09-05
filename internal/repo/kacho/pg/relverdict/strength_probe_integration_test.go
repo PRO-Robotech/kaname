@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package relverdict_test
 
@@ -50,9 +50,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/planrows"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/scalegrid"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/planrows"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/relverdict"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/scalegrid"
 )
 
 // strengthEnv — ручка «запускать сетку предела прочности», и только это.
@@ -840,14 +840,14 @@ func TestStrengthGrid_Report(t *testing.T) {
 		t.Skip("integration")
 	}
 	if os.Getenv(strengthEnv) == "" {
-		t.Skipf("сетка предела прочности идёт РУЧНЫМ прогоном: %s=1 go test "+
-			"./services/iam/internal/repo/kacho/pg/relverdict/ -run TestStrengthGrid_Report "+
+		t.Skipf("сетка предела прочности идёт РУЧНЫМ прогоном: %s=1 go test -C services/iam "+
+			"./internal/repo/kacho/pg/relverdict/ -run TestStrengthGrid_Report "+
 			"-count=1 -v -timeout 120m", strengthEnv)
 	}
 	ctx := context.Background()
 	grid := scalegrid.Strength()
 
-	runCommand := fmt.Sprintf("%s=1 go test ./services/iam/internal/repo/kacho/pg/relverdict/ "+
+	runCommand := fmt.Sprintf("%s=1 go test -C services/iam ./internal/repo/kacho/pg/relverdict/ "+
 		"-run TestStrengthGrid_Report -count=1 -v -timeout 120m", strengthEnv)
 	prov := scalegrid.TakeProvenance(runCommand, nil)
 	// Сетка у этого прибора СВОЯ, и провенанс обязан назвать именно её: шапка,

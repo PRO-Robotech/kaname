@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // session_revocations_internal_only_test.go — pins the gRPC-registration
 // contract for InternalSessionRevocationsService (ban #6: internal-only).
@@ -29,7 +29,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	sessionrevapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/session_revocations"
+	sessionrevapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/session_revocations"
 )
 
 func TestSessionRevocations_InternalOnly_NotOnExternalListener(t *testing.T) {

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // batch_test.go — what a page costs when the relation store is asked about many
 // objects in ONE request, and the gate that keeps a batch-capable checker from

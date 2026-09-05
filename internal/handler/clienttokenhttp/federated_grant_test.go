@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // federated_grant_test.go — эндпоинт принимает федеративную выдачу (задача
 // #1124, RFC 7523 §2.1).
@@ -25,8 +25,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/clientassertion"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clientassertion"
 )
 
 // federatedForm — законная форма федеративной выдачи.

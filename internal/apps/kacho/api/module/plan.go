@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package module
 
@@ -26,11 +26,11 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // withdrawnListCap — потолок ОБОИХ перечней снимаемого.
@@ -80,9 +80,17 @@ func (uc *PlanUseCase) Execute(ctx context.Context, module string) (*iamv1.PlanM
 		return nil, shared.InvalidArg("module", "required")
 	}
 
-	m, err := manifestFromDelivery(ctx, uc.delivery, module)
+	m, delivery, err := manifestFromDelivery(ctx, uc.delivery, module)
 	if err != nil {
 		return nil, err
+	}
+	// ОПОРА — из ТОЙ ЖЕ доставки, которой взят манифест (#1861). Оставь плану
+	// образ, и он объявил бы отказ на модуле, который старт этого же процесса
+	// принимает: два ответа об одном предмете, расходящиеся молча.
+	deliveredAnchor, aerr := modulecatalog.AnchorOfDelivery(delivery)
+	if aerr != nil {
+		return nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"опора паритета не собрана из доставки: %v", aerr))
 	}
 	declared, err := modulecatalog.RowsOf(m)
 	if err != nil {
@@ -110,7 +118,7 @@ func (uc *PlanUseCase) Execute(ctx context.Context, module string) (*iamv1.PlanM
 	// символ Go закрыть не может.
 	staleResources, staleVerbs := modulecatalog.Withdrawn(liveOfModule, declared)
 
-	anchor, err := modulecatalog.PlanAgainstAnchor(ctx, state, declared)
+	anchor, err := modulecatalog.PlanAgainstAnchor(ctx, state, declared, deliveredAnchor)
 	if err != nil {
 		// Непрочитанный либо беспредметный каталог — НЕ «расхождений нет».
 		// Отдать здесь `WOULD_APPLY` значило бы объявить применение безопасным по
@@ -179,9 +187,13 @@ func (uc *PlanUseCase) Execute(ctx context.Context, module string) (*iamv1.PlanM
 // Функция пакета, а не метод: оба глагола входа берут манифест ОДИНАКОВО, и
 // вторая копия этого разбора разошлась бы с первой молча — план объявлял бы
 // доставку сорванной там, где применение объявляет её необъявленной.
-func manifestFromDelivery(ctx context.Context, src DeliverySource, module string) (*manifest.Manifest, error) {
+// Возвращается ДВОЕ: названный манифест и ВСЯ доставка. Вторая нужна опоре
+// паритета (#1861), и берётся она ТЕМ ЖЕ чтением: второй проход по каталогу
+// доставки был бы вторым местом об одном предмете — выбрали бы один манифест, а
+// опору построили по другому составу, и разошлось бы это молча.
+func manifestFromDelivery(ctx context.Context, src DeliverySource, module string) (*manifest.Manifest, []*manifest.Manifest, error) {
 	if src == nil {
-		return nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+		return nil, nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 			"источник доставки манифестов не провязан"))
 	}
 	d, err := src.Read(ctx)
@@ -189,25 +201,25 @@ func manifestFromDelivery(ctx context.Context, src DeliverySource, module string
 	case err != nil:
 		// Объявлена и СОРВАНА. Числа входят в отказ: без них оператор не знает,
 		// прочитано ли хоть что-нибудь.
-		return nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+		return nil, nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 			"доставка манифестов объявлена посадкой и сорвана: прочитано манифестов %d, "+
 				"находок %d; чинится источником манифестов, а не повтором запроса: %v",
 			d.ManifestsRead, d.Findings, err))
 	case !d.Declared:
 		// НЕ ОБЪЯВЛЕНА. Отдельный отказ и отдельный текст: чинится посадкой.
-		return nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+		return nil, nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
 			"доставка манифестов модулей не объявлена посадкой: применять и планировать "+
 				"нечего; чинится посадкой (ручка каталога доставки), а не повтором запроса"))
 	}
 	for _, m := range d.Manifests {
 		if m != nil && m.Module == module {
-			return m, nil
+			return m, d.Manifests, nil
 		}
 	}
 	// Манифеста модуля в доставке НЕТ. Говорится прямо, что это не снятие: иначе
 	// оператор прочтёт отказ как «модуль снят» и пойдёт восстанавливать то, чего
 	// никто не снимал.
-	return nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrNotFound,
+	return nil, nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrNotFound,
 		"Module %s not found in the delivered manifests: отсутствие манифеста снятием "+
 			"модуля НЕ является; проверьте, что источник манифестов кладёт манифест "+
 			"этого модуля в объявленный посадкой каталог доставки (прочитано манифестов %d)",

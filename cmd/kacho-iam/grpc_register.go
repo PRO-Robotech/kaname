@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // grpc_register.go — registration of gRPC handlers onto public / internal servers.
 // Pure wiring: no business logic, no env reads.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // sakey_binding.go — предикат «контур выдачи ключей переведён» и страж старта
 // над требованием связанного с отправителем токена (задача #1137).

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package module
 
@@ -39,10 +39,10 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
 
 // ApplyUseCase — приводит строки каталога модуля к объявленному доставленным
@@ -86,9 +86,17 @@ func (uc *ApplyUseCase) Execute(
 			"применитель каталога не провязан"))
 	}
 
-	m, err := manifestFromDelivery(ctx, uc.delivery, module)
+	m, delivery, err := manifestFromDelivery(ctx, uc.delivery, module)
 	if err != nil {
 		return nil, err
+	}
+	// ОПОРА — из ТОЙ ЖЕ доставки, которой взят манифест (#1861), и она едет
+	// ЗАПРОСОМ: применитель один на процесс, а запросов у него много
+	// одновременно.
+	deliveredAnchor, aerr := modulecatalog.AnchorOfDelivery(delivery)
+	if aerr != nil {
+		return nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition,
+			"опора паритета не собрана из доставки: %v", aerr))
 	}
 
 	// Потолки и подтверждение проверяет САМ применитель — вторая копия проверки
@@ -102,6 +110,7 @@ func (uc *ApplyUseCase) Execute(
 		ExpectedState:         expectedState,
 		MaxResettledRuleRefs:  intFromOptional(maxResettledRuleRefs),
 		MaxResettledRoleVerbs: intFromOptional(maxResettledRoleVerbs),
+		Anchor:                deliveredAnchor,
 	}
 
 	op, oerr := operations.NewFromContext(ctx,

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package modelrender_test
 
@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/modelrender"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/modelrender"
 )
 
 // canon_test.go — разбор канона на блоки и вывод перечня типов вне модулей
@@ -23,9 +23,20 @@ import (
 //
 // Проба утверждает ЧИСЛО внутриблочных комментариев, а не только число блоков:
 // разборщик, взявший единицу B, дал бы то же число блоков (32) и другое число
-// комментариев, то есть ошибка была бы невидима по первой величине. 720 —
-// величина §0.7 приёмки, и совпадение означает, что разборщик здесь и разборщик
-// приёмки СОГЛАСНЫ, а не «оба молчат».
+// комментариев, то есть ошибка была бы невидима по первой величине.
+//
+// ЕДИНИЦА здесь — из §0.7 приёмки (строка-комментарий с отступом внутри тела
+// `type`), а ЧИСЛО — свойство ревизии канона, и его переснимают вместе с ним.
+// §0.7 записала 720 на своей ревизии, и оба разборщика тогда сошлись; #1820
+// сдвинул канон, и та же единица даёт сегодня 739. Число приёмки при этом НЕ
+// правится: она свидетельствует о замере, который был верен, — правка сделала
+// бы ложной верную запись. Сходится единица, а не число.
+//
+// Снимок здесь неизбежен: вывести ожидаемое можно было бы только тем же
+// разборщиком, а проба, сверяющая разборщик с самим собой, зеленеет при любом
+// его ответе. Цена снимка — красное на каждой правке канона; это не поломка, а
+// требование переснять его вместе с шапкой пакета (тот же уговор, что у
+// `TestCanonHeaderNamesItsUnitAndReproducesTheMeasurement`).
 func TestB06CanonBlockUnitIsTheBodyNotTheBanner(t *testing.T) {
 	path, dsl, err := authzplan.ResolveCanonicalModel()
 	if err != nil {
@@ -47,9 +58,11 @@ func TestB06CanonBlockUnitIsTheBodyNotTheBanner(t *testing.T) {
 			t.Errorf("блок %s несёт пустую строку — взята единица B, а не тело блока", b.Type)
 		}
 	}
-	if inner != 720 {
-		t.Errorf("внутриблочных комментариев %d, ожидалось 720 (§0.7 приёмки); "+
-			"расхождение означает, что единица блока не тело", inner)
+	if inner != 739 {
+		t.Errorf("внутриблочных комментариев %d, ожидалось 739 (перепись HEAD; единица — "+
+			"§0.7 приёмки: строка-комментарий с отступом внутри тела `type`); расхождение "+
+			"означает либо что единица блока не тело, либо что канон правился, а снимок "+
+			"здесь и шапка пакета не пересняты", inner)
 	}
 	t.Logf("перепись: блоков %d · внутриблочных комментариев %d · канон %s", len(blocks), inner, path)
 }

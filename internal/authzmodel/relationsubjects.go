@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // relationsubjects.go — КАКИЕ ВИДЫ ПОЛУЧАТЕЛЯ принимает объявление отношения.
 //
@@ -25,7 +25,7 @@
 //
 // # Собственного разбора канона здесь НЕ заводится, и довод уже оплачен
 //
-// Разбор общий — `internal/authzplan`. Свой разбор в этом дереве уже писали: он
+// Разбор общий — `services/iam/internal/authzplan`. Свой разбор в этом дереве уже писали: он
 // сравнивал запись со СТРОКОЙ `group#member` и потому читал
 // `group#member with <условие>` как «членство не принимается», отвечая уверенно
 // и неверно. Направление ошибки было худшим из двух — судья оставался зелёным.
@@ -48,7 +48,7 @@ package authzmodel
 import (
 	"sort"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
 )
 
 // Виды получателя В НАПИСАНИИ МАНИФЕСТА. Перечень закрыт: манифест берёт его у

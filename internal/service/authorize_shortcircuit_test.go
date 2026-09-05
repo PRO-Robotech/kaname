@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // authorize_shortcircuit_test.go — RBAC explicit-model 2026 P5 (D-9 / D-02 / D-15).
 //
@@ -27,7 +27,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // scClusterChecker — a RelationChecker-shaped fake: allows the flat cluster

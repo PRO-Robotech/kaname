@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg
 
@@ -21,9 +21,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/service_account"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/service_account"
 )
 
 type saReader struct {
@@ -171,6 +171,27 @@ func (w *saWriter) Insert(ctx context.Context, sa domain.ServiceAccount) (domain
 	return out, nil
 }
 
+// ─── Запись служебной учётки: набор колонок известен КОМПИЛЯТОРУ ────────────
+//
+// Оператор СТАТИЧЕСКИЙ, и это несущее свойство, а не стиль (задача продукта
+// #2058). Прежде список `SET` собирался из маски форматированием строки: какие
+// колонки пишет оператор, решалось во время исполнения и не проверялось ни
+// типами, ни компилятором. Применимость поля переехала из ТЕКСТА оператора в его
+// ПАРАМЕТР: колонка, которую маска не назвала, переписывается сама в себя —
+// наблюдаемо это тождественно прежнему поведению.
+//
+// `enabled` в перечень НЕ входит и входить не должен: на неё повешен триггер
+// `AFTER UPDATE OF enabled`, срезающий отчеканенные токены при отключении учётки.
+// Появись она среди присваиваний — триггер стал бы рассматривать КАЖДУЮ правку
+// имени или меток.
+const saUpdateQ = `UPDATE service_accounts SET
+	       name        = CASE WHEN $2::boolean THEN $3::text  ELSE name        END,
+	       description = CASE WHEN $4::boolean THEN $5::text  ELSE description END,
+	       labels      = CASE WHEN $6::boolean THEN $7::jsonb ELSE labels      END
+	 WHERE id = $1 RETURNING ` + saCols
+
+const saSetEnabledQ = `UPDATE service_accounts SET enabled = $2 WHERE id = $1 RETURNING ` + saCols
+
 func (w *saWriter) Update(ctx context.Context, sa domain.ServiceAccount, updateMask []string) (domain.ServiceAccount, error) {
 	mutableFields := map[string]bool{"name": true, "description": true, "labels": true}
 	apply := map[string]bool{}
@@ -181,39 +202,33 @@ func (w *saWriter) Update(ctx context.Context, sa domain.ServiceAccount, updateM
 	} else {
 		for _, f := range updateMask {
 			if !mutableFields[f] {
-				return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument update_mask field %q", f)
+				return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrInvalidArg,
+					"Illegal argument update_mask field %q", f)
 			}
 			apply[f] = true
 		}
 	}
-	parts := []string{}
-	args := []any{}
-	idx := 1
-	if apply["name"] {
-		parts = append(parts, fmt.Sprintf("name = $%d", idx))
-		args = append(args, string(sa.Name))
-		idx++
-	}
-	if apply["description"] {
-		parts = append(parts, fmt.Sprintf("description = $%d", idx))
-		args = append(args, string(sa.Description))
-		idx++
-	}
-	if apply["labels"] {
-		labelsJSON, err := marshalLabels(sa.Labels)
-		if err != nil {
-			return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument labels: %s", err.Error())
-		}
-		parts = append(parts, fmt.Sprintf("labels = $%d", idx))
-		args = append(args, labelsJSON)
-	}
-	if len(parts) == 0 {
+	if !apply["name"] && !apply["description"] && !apply["labels"] {
 		return w.Get(ctx, sa.ID)
 	}
-	args = append(args, string(sa.ID))
-	q := fmt.Sprintf(`UPDATE service_accounts SET %s WHERE id = $%d RETURNING %s`,
-		strings.Join(parts, ", "), len(args), saCols)
-	row := w.tx.QueryRow(ctx, q, args...)
+
+	// Значение готовится ТОЛЬКО для названного поля: отказ разбора принадлежит
+	// полю, которое вызывающий действительно прислал.
+	var labelsJSON []byte
+	if apply["labels"] {
+		var err error
+		if labelsJSON, err = marshalLabels(sa.Labels); err != nil {
+			return domain.ServiceAccount{}, iamerr.Wrapf(iamerr.ErrInvalidArg,
+				"Illegal argument labels: %s", err.Error())
+		}
+	}
+
+	row := w.tx.QueryRow(ctx, saUpdateQ,
+		string(sa.ID),
+		apply["name"], string(sa.Name),
+		apply["description"], string(sa.Description),
+		apply["labels"], labelsJSON,
+	)
 	out, err := scanSA(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -243,8 +258,7 @@ func (w *saWriter) Update(ctx context.Context, sa domain.ServiceAccount, updateM
 // The whole row comes back so the caller can name the account in an audit
 // record without a second read.
 func (w *saWriter) SetEnabled(ctx context.Context, id domain.ServiceAccountID, enabled bool) (domain.ServiceAccount, error) {
-	q := fmt.Sprintf(`UPDATE service_accounts SET enabled = $2 WHERE id = $1 RETURNING %s`, saCols)
-	row := w.tx.QueryRow(ctx, q, string(id), enabled)
+	row := w.tx.QueryRow(ctx, saSetEnabledQ, string(id), enabled)
 	out, err := scanSA(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

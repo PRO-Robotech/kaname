@@ -1,5 +1,5 @@
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Текст вызывающего, попадающий в ПОРОЖДАЕМЫЙ JavaScript, обязан кодироваться
 сериализатором, а не вклеиваться между кавычками (#1181).

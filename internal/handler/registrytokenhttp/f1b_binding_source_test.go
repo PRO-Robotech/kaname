@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // f1b_binding_source_test.go — Ф1б-10, входная половина: материал привязки
 // берётся из ПРОВЕРЕННОГО клиентского сертификата хопа выдачи и ниоткуда больше.
@@ -19,7 +19,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/registry_token"
+	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
 )
 
 // f1bCertPair — самоподписанный сертификат-заглушка и его ожидаемый отпечаток.

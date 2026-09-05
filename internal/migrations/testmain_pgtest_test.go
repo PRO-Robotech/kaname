@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package migrations_test
 
@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // TestMain hands this package one Postgres instead of one per dropguard run.
@@ -20,7 +20,7 @@ import (
 //
 // Each call still gets a genuinely separate database — separate catalog, separate rows,
 // separate advisory-lock space — so nothing crosses between two runs that did not cross
-// between two containers. See internal/pgtest.
+// between two containers. See pkg/pgtest.
 //
 // The container starts lazily, so under -short — where the guard reports every drop as
 // uncounted and skips — none is started.

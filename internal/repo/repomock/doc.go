@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package repomock — mock-impl iface'ов из `internal/repo/kacho/*` для unit-тестов
 // use-case'ов (parity с kacho-vpc/internal/repo/repomock).

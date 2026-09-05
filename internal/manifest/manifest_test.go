@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // manifest_test.go — форму манифеста домена судит ОДИН исполнитель (задача #1088,
 // приёмка services/iam/docs/engineering/acceptance/module-manifest-seed-contract.md).
@@ -25,9 +25,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // compactManifest — законный документ, испорченный по одному месту в каждой
@@ -321,60 +321,87 @@ func TestMODMF05UnknownAPIVersionIsRefused(t *testing.T) {
 
 // ── MOD-MF-06 ───────────────────────────────────────────────────────────────
 
-// TestMODMF06ModuleOutsideThePlatformSetIsRefused — `module` вне закрытого набора.
+// TestMODMF06ModuleNameIsJudgedByFormNotByTheShippedTable — имя модуля судится
+// ФОРМОЙ, а не членством в перечне, порождённом сборкой.
 //
-// Ловушка словаря, ради которой сценарий и написан: токен домена балансировки —
-// `loadbalancer`, а КАТАЛОГ сервиса зовётся `services/nlb`. Манифест, названный по
-// каталогу, разошёлся бы с набором молча.
-func TestMODMF06ModuleOutsideThePlatformSetIsRefused(t *testing.T) {
-	broken := strings.Replace(compactManifest, "module: vpc", "module: nlb", 1)
+// # Проба ПЕРЕПИСАНА, а не ослаблена
+//
+// До размыкания набора сценарий утверждал обратное: «модуль вне закрытого
+// набора отвергается», и ловушкой ему служило расхождение словарей — токен
+// домена балансировки `loadbalancer` против каталога `services/nlb`. Предмет
+// того утверждения ИСЧЕЗ: перечень порождался из манифестов НАШЕГО дерева и
+// вкомпилировался в бинарь, поэтому оператор чужого облака не мог объявить свой
+// модуль ни при каком входе. Оставить утверждение как есть было нельзя — оно
+// зеленело бы, запрещая ровно то, ради чего полоса и заведена.
+//
+// Ловушка словарей при этом никуда не делась и живёт своей пробой у применителя;
+// здесь она предметом не является: форма имени о словарях не знает.
+func TestMODMF06ModuleNameIsJudgedByFormNotByTheShippedTable(t *testing.T) {
+	broken := strings.Replace(compactManifest, "module: vpc", "module: Vpc", 1)
 
 	_, err := manifest.Load([]byte(broken))
 	if err == nil {
-		t.Fatalf("модуль вне закрытого набора принят молча")
+		t.Fatalf("имя модуля не той формы принято молча")
 	}
-	if !errors.Is(err, manifest.ErrUnknownModule) {
+	if !errors.Is(err, manifest.ErrMalformedModule) {
 		t.Errorf("отказ не отнесён к своей причине: %v", err)
 	}
-	if !strings.Contains(err.Error(), "nlb") {
-		t.Errorf("отказ не называет полученный токен: %v", err)
+	if !strings.Contains(err.Error(), "Vpc") {
+		t.Errorf("отказ не называет полученного токена: %v", err)
+	}
+	if !strings.Contains(err.Error(), domain.ModuleNameGrammar()) {
+		t.Errorf("отказ не называет правила (%s): %v", domain.ModuleNameGrammar(), err)
 	}
 
-	// Парный положительный — ИМЕННО `loadbalancer`, а не любой другой член набора:
-	// он и есть предмет ловушки.
-	twin := strings.Replace(compactManifest, "module: vpc", "module: loadbalancer", 1)
+	// Парный положительный — имя ГОДНОЙ формы, которого в порождённой таблице
+	// НЕТ. Без него отрицание зеленело бы на загрузчике, отвергающем всё.
+	twin := strings.Replace(compactManifest, "module: vpc", "module: acme", 1)
 	if _, err := manifest.Load([]byte(twin)); err != nil {
-		t.Fatalf("парный положительный (loadbalancer) отвергнут: %v", err)
+		t.Fatalf("годное имя вне порождённой таблицы отвергнуто: %v", err)
 	}
 }
 
-// TestMODMF06ModuleSetIsReadFromItsOwnerNotCopied — перечень модулей загрузчик
-// БЕРЁТ У ВЛАДЕЛЬЦА, а не несёт свою копию.
+// TestMODMF06LoaderVerdictDoesNotDependOnTheShippedTable — вердикт загрузчика об
+// имени модуля НЕ ЗАВИСИТ от перечня, порождённого сборкой.
 //
-// Копия разошлась бы с литералом молча — этот самый набор уже переживал такое
-// (комментарий у knownModules признаёт: строка осталась при пяти именах, когда
-// шестое было добавлено). Проба утверждает РАВЕНСТВО поведения владельцу, а не
-// членство отдельных имён: членство росту набора не сопротивляется.
-func TestMODMF06ModuleSetIsReadFromItsOwnerNotCopied(t *testing.T) {
+// # Проба ПЕРЕПИСАНА вместе со своим предметом
+//
+// Прежняя редакция утверждала обратное — что загрузчик БЕРЁТ перечень у
+// владельца, а не несёт свою копию, — и это было верно, пока перечень судил. Он
+// больше не судит, и утверждение о «равенстве поведения владельцу» лишилось бы
+// входа, продолжая выглядеть работающим (`testing.md` §«Гейт на класс», п. 9).
+//
+// Что утверждается теперь: члены перечня и не-члены годной формы проходят
+// ОДИНАКОВО, а различает их только форма. Перепись печатается — «сошлось» здесь
+// обязано быть отличимо от «перечень пуст, и сверять было нечего».
+func TestMODMF06LoaderVerdictDoesNotDependOnTheShippedTable(t *testing.T) {
 	owned := authzmap.CatalogSeedModules()
 	if len(owned) == 0 {
-		t.Fatalf("набор владельца пуст — сверять нечего")
+		t.Fatal("порождённая таблица пуста — сверка беспредметна")
 	}
-	t.Logf("перепись: модулей у владельца %d", len(owned))
 
-	for _, m := range owned {
+	outsiders := []string{"acme", "nlb", "geo", "vpc2", "a"}
+	for _, m := range outsiders {
+		if domain.ModuleSetOf(owned...).IsKnownModule(m) {
+			t.Fatalf("%q состоит в порождённой таблице — это не вход «вне таблицы», "+
+				"и утверждение ниже проверяло бы не то, что объявляет", m)
+		}
+	}
+	t.Logf("перепись: модулей в порождённой таблице %d (%s); входов вне её %d (%s)",
+		len(owned), strings.Join(owned, ", "), len(outsiders), strings.Join(outsiders, ", "))
+
+	for _, m := range append(append([]string(nil), owned...), outsiders...) {
 		doc := strings.Replace(compactManifest, "module: vpc", "module: "+m, 1)
 		if _, err := manifest.Load([]byte(doc)); err != nil {
-			t.Errorf("модуль %q — член набора владельца, а загрузчик его отверг: %v", m, err)
+			t.Errorf("имя %q годной формы отвергнуто загрузчиком: %v", m, err)
 		}
 	}
-	for _, m := range []string{"nlb", "geo", "vpc2", "VPC"} {
-		if domain.ModuleSetOf(authzmap.CatalogSeedModules()...).IsKnownModule(m) {
-			continue // владелец его знает — тогда это не отрицательный вход
-		}
+
+	// Отрицательная сторона — только форма, и она от таблицы не зависит тоже.
+	for _, m := range []string{"VPC", "vpc_2", "2vpc", "-vpc", "vpc.core", ""} {
 		doc := strings.Replace(compactManifest, "module: vpc", "module: "+m, 1)
 		if _, err := manifest.Load([]byte(doc)); err == nil {
-			t.Errorf("модуль %q владельцу неизвестен, а загрузчик его принял", m)
+			t.Errorf("имя %q не той формы принято загрузчиком", m)
 		}
 	}
 }

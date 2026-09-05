@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package check_test
 
@@ -13,9 +13,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // Форма идентификатора в контракте iam обязана совпадать с той, которую продукт
@@ -427,7 +427,7 @@ func isBodyPlaceholder(s string) bool {
 
 // grepTree — сколько файлов прочитано и встретился ли литерал в непробном дереве.
 //
-// Состав берётся у ИНДЕКСА (`internal/treecorpus`), а не обходом диска: правила
+// Состав берётся у ИНДЕКСА (`pkg/treecorpus`), а не обходом диска: правила
 // игнорирования действуют на любой глубине, и под `services/` на всякой машине,
 // где поднимали стенд, лежит неотслеживаемое — рабочие копии агентов,
 // распаковки чартов, отчёты прогонов. Обход диска сделал бы вердикт свойством

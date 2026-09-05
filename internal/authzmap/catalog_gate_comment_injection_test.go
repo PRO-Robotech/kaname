@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // catalog_gate_comment_injection_test.go — ДОКАЗАТЕЛЬСТВО, что соседний гейт
 // умеет и краснеть, и молчать.

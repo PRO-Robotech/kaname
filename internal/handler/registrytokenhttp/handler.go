@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package registrytokenhttp — thin HTTP transport for the IAM Docker Registry v2
 // auth-server: the `/iam/token` endpoint (Basic-auth → Hydra-brokered token).
@@ -34,8 +34,8 @@ import (
 	"net/http"
 	"time"
 
+	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
 	"github.com/PRO-Robotech/kacho/pkg/credsecret"
-	registrytokenuc "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/registry_token"
 )
 
 // unauthorizedBody — ЕДИНСТВЕННОЕ тело отказа этой полосы, одно на ВСЯКУЮ

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package clients
 
@@ -18,7 +18,7 @@ import (
 	"context"
 	"errors"
 
-	interactiveclient "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/interactive_client"
+	interactiveclient "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/interactive_client"
 )
 
 // InteractiveClientProvider adapts HydraAdminClient to the use-case port.

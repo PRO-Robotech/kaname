@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package main
 
@@ -31,7 +31,7 @@ import (
 
 const rolesApplierBuiltAndCalledDirectly = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/moduleroles"
 
 func serve() error {
 	rolesApplier := moduleroles.NewApplier(txRunner, rights)
@@ -47,7 +47,7 @@ func serve() error {
 // параметре.
 const rolesApplierHandedToAnApplyingHelper = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/moduleroles"
 
 func applyDeliveredModuleRoles(ctx context.Context, applier *moduleroles.Applier) error {
 	for _, m := range manifests {
@@ -68,7 +68,7 @@ func serve() error {
 // есть, зовущего нет.
 const rolesApplierBuiltNeverCalled = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/moduleroles"
 
 func serve() error {
 	rolesApplier := moduleroles.NewApplier(txRunner, rights)
@@ -81,7 +81,7 @@ func serve() error {
 // знающий одно написание, молчал бы на форме столь же законной.
 const rolesApplierAliasedNeverCalled = `package main
 
-import mr "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
+import mr "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/moduleroles"
 
 func serve() error {
 	rolesApplier := mr.NewApplier(txRunner, rights)
@@ -95,7 +95,7 @@ func serve() error {
 // передан», молчал бы здесь — то есть на глаголе, который по-прежнему не позван.
 const rolesApplierHandedToAHollowHelper = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/moduleroles"
 
 func logTheRolesApplier(ctx context.Context, applier *moduleroles.Applier) error {
 	logger.Info("применитель ролей собран", slog.Any("applier", applier))
@@ -114,7 +114,7 @@ func serve() error {
 // применитель того же имени метода — каталожный, — и перепутать их легко.
 const rolesApplierHandedToAHelperOfAnotherType = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/moduleroles"
 
 func applyCatalog(ctx context.Context, applier *modulecatalog.Applier) error {
 	_, err := applier.Apply(ctx, req, moduleroles.BootActorID)
@@ -131,7 +131,7 @@ func serve() error {
 // не должно: иначе гейт краснел бы на пробе, которая его строит и выбрасывает.
 const rolesApplierDiscarded = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/moduleroles"
 
 func probe() { _ = moduleroles.NewApplier(txRunner, rights) }
 `
@@ -263,7 +263,7 @@ func serve() error {
 	if mErr != nil {
 		return mErr
 	}
-	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo)
+	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo, seed.ImageAnchor())
 	if catErr != nil {
 		return catErr
 	}
@@ -279,7 +279,7 @@ func serve() error {
 		return mErr
 	}
 	use(deliveredManifests)
-	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo)
+	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo, seed.ImageAnchor())
 	return catErr
 }
 `
@@ -294,7 +294,7 @@ func serve() error {
 	if rErr := applyDeliveredModuleRoles(ctx, logger, rolesApplier, deliveredManifests); rErr != nil {
 		return rErr
 	}
-	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo)
+	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo, seed.ImageAnchor())
 	return catErr
 }
 `
@@ -310,7 +310,7 @@ func serve() error {
 		return mErr
 	}
 	use(deliveredManifests)
-	return seed.AssertCatalogParity(ctx, catalogRepo)
+	return seed.AssertCatalogParity(ctx, catalogRepo, seed.ImageAnchor())
 }
 `
 

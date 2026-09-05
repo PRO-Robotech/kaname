@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // handler_seed_test.go — #60 (SA-key analog): an acr-exempt system_admin
 // ServiceAccount caller (the #58 bootstrap-admin SA) seeds an SA-key for another
@@ -24,7 +24,7 @@ import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // newSeedIssueUC builds an IssueSAKeyUseCase over the unit stubs.

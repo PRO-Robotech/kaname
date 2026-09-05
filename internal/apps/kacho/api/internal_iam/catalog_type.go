@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package internal_iam
 
@@ -74,7 +74,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // catalogTypeReader — узкий порт чтения: точечное имя КАТАЛОГА по имени типа

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // usecase_secret_kind_test.go — ВЫДАЧА БАЗОВОГО СЕКРЕТА (задача #1142,
 // приёмка BAT-1 §2.5, §4.3, §7; сценарии BAT-1-09, 11, 12, 14, 16, 17, 21, 22).
@@ -20,7 +20,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/credsecret"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // BAT-1-09 — положительный путь фазы: выдача вида SECRET завершается НА ПУТИ

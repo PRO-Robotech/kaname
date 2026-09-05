@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Команда scope-source-census-sql печатает запрос переписи источников звена
 // цепи областей — либо перечень типов, о которых перепись обязана высказаться.
@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/scopesourcecensus"
+	"github.com/PRO-Robotech/kacho-iam/internal/scopesourcecensus"
 )
 
 func main() {

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // removing_the_identity_integration_test.go — «СТЕРЕТЬ СТРОКУ ЛИЧНОСТИ» и
 // «распоряжаться СВОИМ аккаунтом» решаются РАЗНО, на той двери, куда приходит

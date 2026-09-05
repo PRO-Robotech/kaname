@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // serve.go — runServe: full lifecycle of the kacho-iam binary.
 // Wires pools → repos → services → gRPC servers + HTTP listeners + drainers,
@@ -21,9 +21,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/H-BF/corlib/pkg/parallel"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 
 	"github.com/PRO-Robotech/kacho/pkg/authz"
@@ -31,25 +31,24 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 	"github.com/PRO-Robotech/kacho/pkg/observability"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 	"github.com/PRO-Robotech/kacho/pkg/servicecontract"
 	"github.com/PRO-Robotech/kacho/pkg/servicehost"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding/reconcile"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/moduleroles"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/clienttokenhttp"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/jwksproxyhttp"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/tokenintrospecthttp"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/observability/metrics"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/registrytokenwire"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding/reconcile"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/moduleroles"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/clienttokenhttp"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/jwksproxyhttp"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/tokenintrospecthttp"
+	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
+	"github.com/PRO-Robotech/kacho-iam/internal/registrytokenwire"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
 )
 
 // grpcStopper — поверхность graceful/forced остановки gRPC-сервера. *grpc.Server
@@ -223,6 +222,33 @@ func runServe(cfg config.Config) error {
 		return mErr
 	}
 
+	// ОПОРА ПАРИТЕТА — сразу за чтением доставки и ДО первой записи (#1861).
+	//
+	// Опора складывается из ДВУХ слагаемых: перечень, порождённый сборкой, и то,
+	// что объявила доставка. Пока слагаемое было одно, живая строка, которой
+	// образ не несёт, отвергалась при любом входе — то есть объявить свой модуль
+	// данными было нельзя, и установка в чужом облаке требовала пересборки
+	// образа. При этом соседняя половина того же старта — композиция модели
+	// прав — новый тип уже принимает; две половины противоречили друг другу.
+	//
+	// Отказ ФАТАЛЕН и приходит РАНЬШЕ применения: он означает ровно одно —
+	// доставка ПЕРЕОПРЕДЕЛЯЕТ форму строки, которую образ уже объявил. Мягкий
+	// проход здесь отдал бы данным оператора власть переписывать имя типа, по
+	// которому выдаются права.
+	catalogAnchor, anErr := modulecatalog.AnchorOfDelivery(deliveredManifests)
+	if anErr != nil {
+		return anErr
+	}
+	// Расширение опоры называется ПОИМЁННО, а не одним счётчиком: оно законно,
+	// но молчаливым быть не вправе — по той же причине, по какой поимённо
+	// называется снятое. Строка, которой образ не несёт, есть решение оператора,
+	// и оператор обязан видеть его в журнале старта.
+	if added := catalogAnchor.AddedRows(); len(added) > 0 {
+		logger.Info("доставка расширила опору паритета сверх образа",
+			slog.Int("added", len(added)),
+			slog.Any("rows", added))
+	}
+
 	// МОДЕЛЬ ПРАВ — сразу за чтением доставки и ДО всего, что её читает
 	// (задачи #1969, #2002).
 	//
@@ -264,13 +290,13 @@ func runServe(cfg config.Config) error {
 	}
 
 	catalogRepo := kachopg.NewCatalogRepo(pool)
-	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo)
+	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo, catalogAnchor)
 	// Перепись печатается ВСЕГДА, независимо от исхода: без неё «ноль
 	// расхождений» неотличимо от «ноль прочитанного».
 	logger.Info("перепись каталога модуля",
-		slog.Int("literal_modules", catalogCensus.LiteralModules),
-		slog.Int("literal_resources", catalogCensus.LiteralResources),
-		slog.Int("literal_verbs", catalogCensus.LiteralVerbs),
+		slog.Int("anchor_modules", catalogCensus.AnchorModules),
+		slog.Int("anchor_resources", catalogCensus.AnchorResources),
+		slog.Int("anchor_verbs", catalogCensus.AnchorVerbs),
 		slog.Int("row_modules", catalogCensus.RowModules),
 		slog.Int("row_resources", catalogCensus.RowResources),
 		slog.Int("row_verbs", catalogCensus.RowVerbs),
@@ -279,7 +305,8 @@ func runServe(cfg config.Config) error {
 		slog.Int("retired_verbs", catalogCensus.RetiredVerbs),
 		slog.Int("missing", len(catalogCensus.MissingRows)),
 		slog.Int("withdrawn", len(catalogCensus.WithdrawnRows)),
-		slog.Int("extra", len(catalogCensus.ExtraRows)))
+		slog.Int("extra", len(catalogCensus.ExtraRows)),
+		slog.Int("anchor_added_by_delivery", len(catalogCensus.AnchorAdded)))
 	// Снятое называется ПОИМЁННО, а не одним счётчиком. Счётчик отвечает на
 	// вопрос «сколько», а оператору, читающему журнал старта, нужен другой:
 	// ЧТО именно перестало выдаваться. Снятие проходит молча by construction —
@@ -590,6 +617,44 @@ func runServe(cfg config.Config) error {
 	// decides WHO MAY SPEAK FOR A USER, this decides ON WHICH RPC.
 	publicCallerPolicy := authzguard.NewPublicCallerPolicy(productionMode, authzguard.PublicPeerCallableRPCs())
 
+	// СОБСТВЕННАЯ ДВЕРЬ iam — пообъектный вопрос о доступе на публичном
+	// слушателе.
+	//
+	// Отвечает на то, чего две политики выше не спрашивают ВООБЩЕ. Они судят,
+	// КТО ЗВОНИТ (проверенный сертификат модуля) и ЗА КОГО ему позволено
+	// говорить; вопроса «а можно ли ЭТОМУ субъекту ЭТОТ объект» на публичной
+	// полосе не задавал никто, и комментарии обеих политик говорят это прямым
+	// текстом: решение оставлено краю.
+	//
+	// Пока iam стоит за нашим краем, довод верен. Вынесенный в чужое облако iam
+	// края не имеет by construction — и тогда «дверь держит кто-то другой»
+	// означает, что её не держит никто: аутентифицированный арендатор читает
+	// чужой аккаунт и удаляет чужой проект. Разбор и замер — в шапке
+	// authzguard/own_door.go.
+	//
+	// Решатель — СВОЙ (`svcs.ownGates`, полоса `servicecontract.AuthzSelf`): iam
+	// владелец модели, ребра к себе не бывает. Провязывается ЗДЕСЬ, а не у
+	// носителя, по той же причине, что и измеритель задержки выше, — свои
+	// слушатели iam строит сам.
+	//
+	// Дверь действует ВО ВСЕХ режимах, а не только в production. Полосы выше
+	// вырождаются в dev намеренно (на стенде нет mTLS, и решать им не о чем);
+	// здесь решать есть о чём при любой посадке, а режим, в котором пообъектной
+	// проверки нет, и есть та самая dev-insecure посадка, которую запрещает
+	// ban #16. Собственные пообъектные стражи iam (AllowsVGet) по этой же
+	// причине никогда не были default-off.
+	publicObjectDoor, err := authzguard.NewOwnDoor(authzguard.OwnDoorOptions{
+		SelfCheck: svcs.ownGates,
+		Logger:    logger,
+		// Окно отзыва — величина ОПЕРАТОРА посадки, а не платформы: кешируется
+		// только положительный вердикт, поэтому срок жизни записи и есть время,
+		// которое субъект с отобранным правом продолжает проходить.
+		PositiveTTL: cfg.AuthZ.CacheTTL,
+	})
+	if err != nil {
+		return err
+	}
+
 	// Измеритель задержки — ОДИН на процесс, полос у него две.
 	//
 	// Тот же измеритель, что носитель входящего пути ставит остальным шести
@@ -640,6 +705,11 @@ func runServe(cfg config.Config) error {
 	publicUnary = append(publicUnary,
 		publicCallerPolicy.Unary(),
 		authzguard.AntiAnonymousUnary(logger),
+		// Дверь — ПОСЛЕДНЕЙ: субъект к этому месту уже назван и уже отсечён,
+		// если он аноним, поэтому вопрос к модели задаётся только о том, кого
+		// есть о чём спрашивать. Обратный порядок тратил бы обращение к модели
+		// на запрос, который всё равно отвергнут.
+		publicObjectDoor.Unary(),
 	)
 	publicStream := append([]grpc.StreamServerInterceptor{
 		// Срок жизни подписки — своя серия и своя сетка корзин: это другая
@@ -650,6 +720,14 @@ func runServe(cfg config.Config) error {
 	publicStream = append(publicStream,
 		publicCallerPolicy.Stream(),
 		authzguard.AntiAnonymousStream(logger),
+		// Та же дверь на второй полосе. Стримовых RPC у iam сегодня НОЛЬ
+		// (`git grep -c 'returns (stream' -- proto/kacho/cloud/iam/v1` → 0),
+		// поэтому провязка ничего не решает СЕЙЧАС и стоит здесь ради того,
+		// чтобы решать, когда предмет появится: полоса без двери при полосе с
+		// дверью — это различие, которого никто не принимал, и обнаружилось бы
+		// оно первым же стримовым RPC. Соседняя политика провязана на обе полосы
+		// по той же причине.
+		publicObjectDoor.Stream(),
 	)
 	grpcSrv := grpcsrv.NewServer(
 		publicServerCreds,
@@ -819,7 +897,7 @@ func runServe(cfg config.Config) error {
 		Name:    "вебхуки провайдера личности",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(hooksAddr, "KACHO_IAM_HOOKS_HTTP_ADDR не задан профилем развёртывания: обогащение токена и заведение пользователя по первому входу на этой посадке не обслуживаются"),
+		Addr:    addrAxis(hooksAddr, "KACHO_IAM_AUTHN__HOOKS_HTTP_ENDPOINT не задан профилем развёртывания: обогащение токена и заведение пользователя по первому входу на этой посадке не обслуживаются"),
 		Handler: hooksHandler,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
@@ -839,7 +917,7 @@ func runServe(cfg config.Config) error {
 		Name:    "диагностика (/metrics)",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(metricsAddr, "KACHO_IAM_METRICS_ADDR не задан профилем развёртывания: скрейпа на этой посадке нет"),
+		Addr:    addrAxis(metricsAddr, "KACHO_IAM_API_SERVER__METRICS_ENDPOINT не задан профилем развёртывания: скрейпа на этой посадке нет"),
 		Handler: metricsMux,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.NotApplicable[servicecontract.SurfaceAuthMech](
@@ -935,7 +1013,7 @@ func runServe(cfg config.Config) error {
 		Name:    "выдача токенов (/iam/token, /iam/v1/token)",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(registryTokenAddr, "KACHO_IAM_REGISTRY_TOKEN_ADDR не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
+		Addr:    addrAxis(registryTokenAddr, "KACHO_IAM_API_SERVER__REGISTRY_TOKEN__ENDPOINT не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
 		Handler: registryTokenHandler,
 		Reach:   servicecontract.ReachExternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
@@ -1089,7 +1167,7 @@ func runServe(cfg config.Config) error {
 		Name:    "зеркало публичных ключей проверки (/.well-known/jwks.json)",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(jwksProxyAddr, "KACHO_IAM_JWKS_PROXY_ADDR не задан профилем развёртывания: плоскости данных реестра неоткуда взять ключи проверки, и её верификация останется закрытой"),
+		Addr:    addrAxis(jwksProxyAddr, "KACHO_IAM_API_SERVER__JWKS_PROXY__ENDPOINT не задан профилем развёртывания: плоскости данных реестра неоткуда взять ключи проверки, и её верификация останется закрытой"),
 		Handler: jwksProxyHandler,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.NotApplicable[servicecontract.SurfaceAuthMech](
@@ -1123,7 +1201,7 @@ func runServe(cfg config.Config) error {
 
 	// Параллельный запуск
 	// public-сервера + internal-сервера + shutdown-waiter через
-	// `parallel.ExecAbstract` (`github.com/H-BF/corlib/pkg/parallel`).
+	// `errgroup.Group` (`golang.org/x/sync/errgroup`).
 	// Failure-isolation: первая ошибка / SIGTERM / SIGINT триггерит
 	// graceful-stop ОБОИХ серверов. sync.Once гарантирует, что параллельные
 	// триггеры (SIGTERM пришел одновременно с crash internal'а) не сделают
@@ -1344,6 +1422,14 @@ func runServe(cfg config.Config) error {
 		runAuditOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
+	// Очередь сверки прав: состояние. У неё есть и доставка (дренаж ниже), и
+	// отсечка (#2050) — а отсечка без наблюдаемости делает отказ ТИХИМ: строка,
+	// перешагнувшая порог, из клейма выпадает и перестаёт жаловаться. Разбор —
+	// `reconcile_outbox_metrics_wiring.go`.
+	tasks = append(tasks, func() error {
+		runReconcileOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
+		return nil
+	})
 	// Журнал аудита: вывоз в приёмник. Строится ДО запуска задач, чтобы ошибка
 	// сборки останавливала старт, а не всплывала фоном: журнал, который не
 	// вывозится, снаружи неотличим от журнала, в котором нечего вывозить.
@@ -1502,6 +1588,11 @@ func runServe(cfg config.Config) error {
 	// Успехи считаются наравне с отказами: без знаменателя «ноль отказов» не
 	// отличается от «пересчёта не было вовсе».
 	roleVerbReseed := metricsReg.NewRoleVerbReseedRecorder()
+	// Счётчик исходов пересчёта проекции объявленных сегментов правила — своя
+	// метрика, а не метка у соседней: у полос разные предметы, и общая метка
+	// поднимала бы тревогу одинаково там, где арендатор получает отказ, и там,
+	// где перестаёт работать наша собственная проверка (kacho#1821).
+	ruleRefReseed := metricsReg.NewRuleRefReseedRecorder()
 	tasks = append(tasks, func() error {
 		if ores, oerr := orphanScopeSweeper.RunOnce(ctx); oerr != nil {
 			logger.Warn("orphan-scope sweep failed (next boot will retry)",
@@ -1552,6 +1643,39 @@ func runServe(cfg config.Config) error {
 				"«разрешено ли действие» из строк, которых нет: %w",
 				verbs.Examined, verr)
 		}
+		// Пересчёт проекции ОБЪЯВЛЕННЫХ СЕГМЕНТОВ правила — третья сторона того
+		// же правила и СВОЯ полоса отказа (kacho#1821).
+		//
+		// Системная роль заводится сырым SQL миграции и путём пользовательской
+		// роли не проходит никогда. Без этой полосы у роли, заведённой будущей
+		// миграцией, строк `role_rule_ref` не появлялось бы вовсе — ключи
+		// референта оказывались бы ни при чём, и молчаливый пропуск, ради
+		// которого референт заводился, вернулся бы для системной половины.
+		//
+		// ПОЧЕМУ ЭТА ПОЛОСА НЕ РОНЯЕТ СТАРТ, в отличие от соседней. Проекция
+		// глаголов есть то, из чего собирается ответ «разрешено ли действие»: её
+		// отсутствие ОТНИМАЕТ доступ молча, и «повтори позже» на ней есть ложь.
+		// Проекция сегментов — СТРАЖ ЦЕЛОСТНОСТИ правила: её отсутствие доступа
+		// не отнимает, оно снимает проверку. Ронять службу целиком из-за
+		// ненаписанного стража значило бы менять ограниченную потерю проверки на
+		// полный отказ. Поэтому здесь `Error` плюс счётчик плюс перепись — и
+		// структурная полоса НАЗВАНА в тексте, а не проглочена.
+		refs, rerr := seed.ReseedSystemRoleRuleRefs(ctx, kachoRepo, pool, ruleRefReseed)
+		if rerr != nil {
+			logger.Error("пересчёт проекции сегментов правила отказал",
+				slog.Any("err", rerr),
+				slog.Bool("structural", refs.Structural()),
+				slog.Int("roles_examined", refs.Examined),
+				slog.Int("roles_reseeded", refs.Reseeded),
+				slog.Int("roles_failed", refs.Failed))
+		}
+		// Перепись печатается ВСЕГДА, независимо от исхода: без неё «ноль
+		// пересеянных» неотличимо от «ноль прочитанных».
+		logger.Info("перепись пересчёта проекции сегментов правила",
+			slog.Int("roles_examined", refs.Examined),
+			slog.Int("roles_reseeded", refs.Reseeded),
+			slog.Int("roles_failed", refs.Failed),
+			slog.Int("refs", refs.Refs))
 		// Перепись встроенного доступа. Системные выдачи можно ОТОЗВАТЬ — это и есть
 		// предмет #893/#895, — поэтому их отсутствие обязано быть видно оператору, а
 		// не выглядеть поломкой продукта.
@@ -1603,9 +1727,11 @@ func runServe(cfg config.Config) error {
 		return nil
 	})
 
-	err = parallel.ExecAbstract(len(tasks), safeconv.IntToInt32(len(tasks)-1), func(i int) error {
-		return tasks[i]()
-	})
+	var group errgroup.Group
+	for _, task := range tasks {
+		group.Go(task)
+	}
+	err = group.Wait()
 	cancel()
 	return err
 }

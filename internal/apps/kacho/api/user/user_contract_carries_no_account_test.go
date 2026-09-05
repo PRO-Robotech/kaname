@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // user_contract_carries_no_account_test.go — ресурс «пользователь» не несёт
 // аккаунта (IAM-ID-1-19, задача kacho#471).

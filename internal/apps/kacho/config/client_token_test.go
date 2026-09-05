@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // client_token_test.go — страж старта токен-эндпоинта (приёмка F2, сценарии
 // F2-16, F2-22 сторона стража, F2-43 сторона стража).
@@ -25,8 +25,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
 )
 
 // signingOn — своя чеканка, настроенная полностью. Токен-эндпоинт выпускает

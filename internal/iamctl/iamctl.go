@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Пакет iamctl — инструмент оператора над каталогом прав модуля: пять действий,
 // не двенадцать (задача #1036).
@@ -55,10 +55,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/manifestcheckrun"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 	"github.com/PRO-Robotech/kacho/pkg/safeconv"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifestcheckrun"
 )
 
 // Коды возврата. Смысл каждого — в комментарии пакета.

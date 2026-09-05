@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // retention_test.go — величины уборки объявлены и проверяются при СТАРТЕ
 // (приёмка `retention-sweep-has-a-caller.md` §3.3).
@@ -26,7 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
 )
 
 // TestRetentionDefaultsAreDeclared — умолчания величин уборки объявлены.

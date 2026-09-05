@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package config
 
@@ -79,11 +79,42 @@ func Load(path string) (Config, error) {
 	// доехало бы до поля ВООБЩЕ. Секция читается одним словарём — все четыре
 	// ключа kebab-case, как вся прочая конфигурация службы, — поэтому имя
 	// переменной выводится тем же замены­телем и не требует второго правила.
+	// ВЕЛИЧИНЫ, КОТОРЫЕ НАЗЫВАЕТ ТЕКСТ ОТКАЗА, привязываются здесь по той же
+	// причине — и это НЕ третий повод, а тот же, доведённый до конца (задача
+	// #2040).
+	//
+	// Отказ стража называет оператору координату и переменную. Оператор задаёт
+	// ровно названное — и получает ТОТ ЖЕ отказ, потому что у ключа нет ни
+	// умолчания, ни привязки, а `AutomaticEnv` разрешает переменную только для
+	// ключа, который випер УЖЕ знает. Отличить свою ошибку от нашей он не может
+	// и упирается в цикл. Это самая дорогая форма класса «отказ не
+	// восстанавливает следующий шаг»: отказ ВЫГЛЯДИТ исчерпывающим.
+	//
+	// Умолчания у всех трёх нет НАМЕРЕННО, и привязка его не заводит: она
+	// регистрирует ключ, НЕ давая ему значения. Незаданная переменная оставляет
+	// поле нулевым — пустой круг отправителей, невыбранный опт-ин стенда,
+	// необъявленное имя чужой службы, — и отказ старта наступает ровно так же.
+	//
+	// Свойство держит гейт класса `TestRefusalNamedEnvVarReachesItsField`:
+	// всякая переменная, названная текстом отказа, обязана менять исход.
+	//
+	// Сканер видит здесь «зашитые учётные данные» (G101) и ошибается на ИМЕНИ:
+	// правило матчит подстроку `token` в ключе `api-server.registry-token.service`.
+	// Доказано опытом — снятие подстроки из ИМЕНИ ключа и переменной, при нетронутых
+	// значениях, даёт 1 → 0 находок. Значений здесь нет вовсе: карта отображает имя
+	// ключа конфигурации в ИМЯ переменной окружения, а сама привязка значения НЕ
+	// назначает (BindEnv регистрирует ключ, умолчания не заводя, — см. выше). Ключ
+	// переименованию не подлежит: это контракт с оператором.
+	// #nosec G101 -- ключи и имена переменных окружения, ни одного значения.
 	for key, env := range map[string]string{
 		"manifests.dir":           "KACHO_IAM_MANIFESTS__DIR",
 		"manifests.required":      "KACHO_IAM_MANIFESTS__REQUIRED",
 		"manifests.compose-model": "KACHO_IAM_MANIFESTS__COMPOSE_MODEL",
 		"manifests.admission":     "KACHO_IAM_MANIFESTS__ADMISSION",
+
+		"authn.trusted-forwarder-sans":      "KACHO_IAM_AUTHN__TRUSTED_FORWARDER_SANS",
+		"authn.trust-any-forwarder":         "KACHO_IAM_AUTHN__TRUST_ANY_FORWARDER",
+		"api-server.registry-token.service": "KACHO_IAM_API_SERVER__REGISTRY_TOKEN__SERVICE",
 	} {
 		if err := v.BindEnv(key, env); err != nil {
 			return Config{}, fmt.Errorf("bind %s env: %w", key, err)
@@ -164,6 +195,8 @@ func applyLegacyEnv(v *viper.Viper) {
 		{"KACHO_IAM_SAKEY_MAX_TTL", "authn.sakey-max-ttl"},
 		{"KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL", "authn.sakey-access-token-ttl"},
 		{"KACHO_IAM_SAKEY_BIND_DPOP", "authn.sakey-bind-dpop"},
+		// Окно отзыва собственной двери. Величина Go-длительности ("5s").
+		{"KACHO_IAM_AUTHZ_CACHE_TTL", "authz.cache-ttl"},
 	}
 	for _, m := range simple {
 		if val, ok := os.LookupEnv(m.env); ok {

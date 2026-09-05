@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package registry_token — the IAM Docker Registry v2 auth-server use-case:
 // authenticate the presented Basic credential and issue a registry token.
@@ -35,10 +35,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/PRO-Robotech/kacho-iam/internal/audiencepolicy"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/registrytoken"
 	"github.com/PRO-Robotech/kacho/pkg/credsecret"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/audiencepolicy"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/registrytoken"
 )
 
 // ErrInvalidCredentials — a validator's rejection (bad/unknown/expired/

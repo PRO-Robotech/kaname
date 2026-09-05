@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package domain
 
@@ -80,3 +80,22 @@ func ModuleSetOf(names ...string) ModuleSet {
 	}
 	return s
 }
+
+// IsWellFormedModuleName — годно ли имя по ФОРМЕ, безотносительно членства.
+//
+// Читателей у грамматики ДВА, и они судят разные поля: сегмент `module` правила
+// роли (validateModule) и оболочку манифеста (`module:`). Вторая копия образца
+// разошлась бы с первой молча — на том имени, о котором знает только одна.
+//
+// Подстановочный знак `*` формой имени НЕ является: он маркер политики, и
+// разбирается [Rule.Validate] отдельно.
+func IsWellFormedModuleName(module string) bool {
+	return ruleModuleRe.MatchString(module)
+}
+
+// ModuleNameGrammar — образец имени модуля СТРОКОЙ, для текстов отказа.
+//
+// Отказ обязан назвать не только негодный токен, но и правило: без правила автор
+// манифеста узнаёт, что ошибся, и не узнаёт, чем именно. Величина берётся у того
+// же объявления, что судит, — выписанная рядом, она разошлась бы с ним молча.
+func ModuleNameGrammar() string { return ruleModuleRe.String() }

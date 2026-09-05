@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package toproto — DTO transfer implementations domain/repo → proto for
 // kacho-iam. Transfers are registered at init time (parity with kacho-vpc).
@@ -10,7 +10,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/dto"
+	"github.com/PRO-Robotech/kacho-iam/internal/dto"
 )
 
 // tsTruncate — the single truncation granularity for every proto timestamp in

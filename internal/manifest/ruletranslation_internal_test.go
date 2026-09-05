@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // ruletranslation_internal_test.go — ПЕРЕВОД правила манифеста в правило домена
 // (приёмка `classes-form-of-role-right.md` §3.4; сценарии MOD-RC-06 … MOD-RC-08).
@@ -34,7 +34,7 @@ import (
 	"testing"
 	"unicode"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // yamlKeyNamesOf — ключи, ОБЪЯВЛЕННЫЕ тегами структуры, а не выписанные

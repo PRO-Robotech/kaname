@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 # assert-suites-green.sh — shared newman suite-green gate for EVERY kacho repo's
 # .github/workflows/newman-e2e.yml. Run with cwd = kacho-iam/tests/newman

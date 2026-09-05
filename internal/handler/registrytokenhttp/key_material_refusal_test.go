@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // key_material_refusal_test.go — НАБЛЮДАЕМЫЙ отказ докерной полосы после снятия
 // приёма ключевого материала (задача #1143, предикат снятия п.1 и п.2).
@@ -28,9 +28,9 @@ import (
 	"strings"
 	"testing"
 
+	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/credsecret"
-	registrytokenuc "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/registry_token"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
 )
 
 // liveCredential — авторитет о базовом секрете: знает ровно одну годную строку.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -44,7 +44,7 @@ package pg_test
 // расширение обязано быть ограничено членствами, а не снимать сужение вовсе.
 //
 // RED до перевода плана чтения на членства, GREEN после.
-// Прогон: `go test ./services/iam/internal/repo/kacho/pg/ -run PersonSelector`
+// Прогон: `go test -C services/iam ./internal/repo/kacho/pg/ -run PersonSelector`
 // (testcontainers + Docker). Пропускается под -short.
 
 import (
@@ -56,12 +56,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 // seedLabeledPerson кладёт строку человека, чья КОЛОНКА называет `columnAccount`,

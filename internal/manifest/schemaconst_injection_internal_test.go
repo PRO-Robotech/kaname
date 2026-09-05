@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // schemaconst_injection_internal_test.go — доказательство, что гейты `const`
 // СПОСОБНЫ упасть, и падают ровно на своём предмете.

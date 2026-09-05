@@ -1,15 +1,15 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package authzmodel
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // admit.go — ДОПУСК собранной модели прав: чистая функция, отвечающая на один
@@ -101,9 +101,19 @@ const (
 	RuleD8 Rule = "Д8"
 )
 
-// typeNameForm — форма имени типа. Она часть формы строки `type`, а не отдельная
-// клауза: предикат один, и двух объявлений одного предмета не заводится.
-var typeNameForm = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+// ФОРМА ИМЕНИ ТИПА ОБЪЯВЛЕНА НЕ ЗДЕСЬ (задача #2015).
+//
+// Она часть формы строки `type`, а не отдельная клауза: предикат один, и двух
+// объявлений одного предмета не заводится. Здесь стояло СВОЁ объявление образца
+// — до тех пор, пока читатель у него был один. Читателей стало три: этот допуск,
+// загрузчик манифеста (`internal/manifest`, после размыкания таблицы типов) и
+// колонка `catalog_resource.object_type` ограничением базы. Поэтому образец
+// переехал в `internal/domain`, к своему близнецу — форме имени модуля, — и
+// зовётся отсюда.
+//
+// Импорт `domain` сюда безопасен by construction: `domain` — чистый Go и на
+// `authzmodel` не ссылается (цикла нет), а поведение допуска не меняется —
+// образец тот же побайтово.
 
 // Finding — одна находка допуска.
 //
@@ -384,14 +394,14 @@ func suffixFormFindings(canon, composed string) []Finding {
 			continue
 		case strings.HasPrefix(line, "type "):
 			name := strings.TrimSpace(strings.TrimPrefix(line, "type "))
-			if typeNameForm.MatchString(name) {
+			if domain.IsWellFormedObjectTypeName(name) {
 				continue
 			}
 			out = append(out, Finding{
 				Rule: RuleD7Suffix,
 				Type: name,
 				Text: fmt.Sprintf("строка %d: имя типа %q не отвечает форме %s: %q",
-					num, name, typeNameForm.String(), line),
+					num, name, domain.ObjectTypeNameGrammar(), line),
 			})
 		default:
 			out = append(out, Finding{

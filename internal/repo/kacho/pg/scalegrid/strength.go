@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package scalegrid
 
@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/internal/gitenv"
+	"github.com/PRO-Robotech/kacho/pkg/gitenv"
 )
 
 // СЕТКА ПРЕДЕЛА ПРОЧНОСТИ — ПЯТЬ НОВЫХ ОСЕЙ И ИСХОД ВЕРДИКТА НА КАЖДОЙ ТОЧКЕ
@@ -360,7 +360,11 @@ const reconcileDir = "services/iam/internal/apps/kacho/api/access_binding/reconc
 const WriteDeleteFingerprintPredicate = `все не-тестовые .go каталога ` + reconcileDir +
 	`; все .sql каталога ` + migrateDir + `, называющие хотя бы одну таблицу, которую пишет ` +
 	`материализатор (имена таблиц ВЫВЕДЕНЫ из его кода по приставке "` + fingerprintTableMark +
-	`", а не выписаны)`
+	`", а не выписаны)` +
+	`; у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев ` +
+	`(директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ ` +
+	`обесценивает; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора ` +
+	`(-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала`
 
 // ComputeWriteDeleteFingerprint — отпечаток предмета замера записи и удаления.
 //
@@ -404,14 +408,13 @@ func ComputeWriteDeleteFingerprint(root string) (Fingerprint, error) {
 	}
 	fp.Composition = hex.EncodeToString(ch.Sum(nil))[:16]
 
-	bh := sha256.New()
-	for _, rel := range files {
-		body, rerr := os.ReadFile(filepath.Join(root, rel)) // #nosec G304 -- rel получен обходом СОБСТВЕННОГО дерева репозитория под корнем root
-		if rerr != nil {
-			return fp, fmt.Errorf("scalegrid: чтение %s: %w", rel, rerr)
-		}
-		bh.Write(body)
+	// Тот же `contentHash`, что у первого отпечатка: значащее содержимое
+	// определяется ОДИН раз. Второй экземпляр этой арифметики разошёлся бы с
+	// первым молча — оба давали бы «совпало» на неподвижном дереве, и заметить
+	// расхождение было бы нечем.
+	fp.Content, err = contentHash(root, files)
+	if err != nil {
+		return fp, err
 	}
-	fp.Content = hex.EncodeToString(bh.Sum(nil))[:16]
 	return fp, nil
 }

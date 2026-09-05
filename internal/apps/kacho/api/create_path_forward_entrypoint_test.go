@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // create_path_forward_entrypoint_test.go — гейт на КЛАСС: путь СОЗДАНИЯ не вправе
 // звать сторожевой вход быстрой материализации.
@@ -57,7 +57,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 const (
@@ -197,12 +197,19 @@ func apiDirForForwardGate(t *testing.T) string {
 	wd, err := os.Getwd()
 	require.NoError(t, err)
 	dir := wd
+	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
+	// теперь СВОЙ модуль, и подъём «до первого» останавливался бы в её каталоге,
+	// а пути ниже называют место В ДЕРЕВЕ МОНОРЕПО — от корня.
+	outermost := ""
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return filepath.Join(dir, "services", "iam", "internal", "apps", "kacho", "api")
+			outermost = dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
+			if outermost != "" {
+				return filepath.Join(outermost, "services", "iam", "internal", "apps", "kacho", "api")
+			}
 			t.Fatalf("корень монорепо (go.mod) не найден от %s", wd)
 		}
 		dir = parent

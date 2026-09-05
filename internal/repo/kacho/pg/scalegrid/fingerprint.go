@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package scalegrid
 
@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/scanner"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -66,7 +67,11 @@ const FingerprintPredicate = `все не-тестовые .go каталого�
 	`вне комментариев) хотя бы одной таблицы, ` +
 	`которую читает запрос вердикта (имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "` +
 	fingerprintTableMark + `", а не выписаны); БЕЗ файлов, объявленных оснасткой ` +
-	`отпечатка (они не касаются базы — проверяется разбором, а не перечнем)`
+	`отпечатка (они не касаются базы — проверяется разбором, а не перечнем)` +
+	`; у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев ` +
+	`(директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ ` +
+	`обесценивает; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора ` +
+	`(-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала`
 
 // Fingerprint — отпечаток предмета замера.
 type Fingerprint struct {
@@ -140,16 +145,132 @@ func ComputeFingerprint(root string) (Fingerprint, error) {
 	}
 	fp.Composition = hex.EncodeToString(ch.Sum(nil))[:16]
 
-	bh := sha256.New()
-	for _, rel := range files {
-		body, rerr := os.ReadFile(filepath.Join(root, rel)) // #nosec G304 -- rel получен обходом СОБСТВЕННОГО дерева репозитория (git ls-files под корнем root), не из запроса и не от пользователя; прибор читает свои же файлы, чтобы взять их отпечаток
-		if rerr != nil {
-			return fp, fmt.Errorf("scalegrid: чтение %s: %w", rel, rerr)
-		}
-		bh.Write(body)
+	fp.Content, err = contentHash(root, files)
+	if err != nil {
+		return fp, err
 	}
-	fp.Content = hex.EncodeToString(bh.Sum(nil))[:16]
 	return fp, nil
+}
+
+// ЗНАЧАЩЕЕ СОДЕРЖИМОЕ — ОТПЕЧАТОК ЛОВИТ ПОВЕДЕНИЕ, А НЕ БАЙТЫ (#2039)
+//
+// # Что было неверно
+//
+// Отпечаток брался от ВСЕХ байтов файла, поэтому правка, не касавшаяся ни
+// одного оператора, объявляла замер устаревшим. Смена заголовка лицензии в 90
+// файлах обесценила четыре отчёта разом; пересъёмка одного — до двух часов
+// прогона на поднятой базе. То есть прибор ловил «файл тронут», а обязан ловить
+// «предмет замера сдвинулся», и цена ошибки была не разовой: следующий, кто
+// сменит комментарий, встал бы перед тем же выбором — платить восемь часов либо
+// править гейт под результат.
+//
+// # Почему РАЗБОРОМ, а не текстовой заменой
+//
+// Текстовая замена «убрать всё после //» попадает ВНУТРЬ строкового литерала, а
+// эти файлы — сплошь запросы в обратных кавычках. Срезав хвост литерала, она
+// объявила бы правку запроса незначащей: дыра открылась бы ровно там, где она
+// дороже всего. Здесь границы комментариев даёт РАЗБОРЩИК, поэтому литерал не
+// может быть принят за комментарий by construction. Обе стороны закреплены
+// пробой (`fingerprint_significant_test.go`), включая строку с `//` внутри
+// запроса.
+//
+// # Что НЕ снимается — и это названо, а не подразумевается
+//
+//	директива `//go:...`  РЕШАЕТ, компилируется ли файл; снять её вместе с
+//	                      прозой значило бы перестать замечать смену состава
+//	                      собираемого кода
+//	.sql целиком          комментарии SQL здесь НЕ проза: `-- +goose Up` и
+//	                      `-- +goose Down` читает мигратор, `-- +kacho
+//	                      point-of-no-return` — гейт отката. Сняв их, мы
+//	                      перестали бы отличать миграцию, поменявшую Up и Down
+//	                      местами
+//
+// # Граница, названная честно
+//
+// Отпечаток берётся с потока ЛЕКСЕМ, поэтому неразличимыми становятся и правки
+// форматирования — отступ, перенос строки, пустая строка. Это осознанно: gofmt
+// в этом дереве обязателен, значит форматирование канонично, а замер от него не
+// зависит. Содержимое строковых литералов при этом сохраняется ДОСЛОВНО: лексема
+// несёт литерал целиком, и пробел внутри запроса лексером не трогается.
+
+// significantContent — содержимое файла БЕЗ незначащего.
+//
+// Для `.go` — поток лексем без комментариев (директивы сохранены). Для всего
+// остального — байты как есть.
+//
+// Неразбираемый `.go` — ОТКАЗ, а не молчаливый возврат байтов: возврат
+// восстановил бы байтовую чувствительность там, где её никто не ждёт, и отличить
+// это от исправной работы было бы нечем.
+func significantContent(rel string, src []byte) ([]byte, error) {
+	if !strings.HasSuffix(rel, ".go") {
+		return src, nil
+	}
+
+	fset := token.NewFileSet()
+	if _, err := parser.ParseFile(fset, rel, src, parser.SkipObjectResolution); err != nil {
+		return nil, fmt.Errorf(
+			"scalegrid: %s не разбирается как Go, значащее содержимое неопределимо: %w", rel, err)
+	}
+
+	lexFset := token.NewFileSet()
+	file := lexFset.AddFile(rel, lexFset.Base(), len(src))
+	var errs scanner.ErrorList
+	var sc scanner.Scanner
+	sc.Init(file, src, func(pos token.Position, msg string) { errs.Add(pos, msg) }, scanner.ScanComments)
+
+	var b strings.Builder
+	for {
+		_, tok, lit := sc.Scan()
+		if tok == token.EOF {
+			break
+		}
+		if tok == token.COMMENT && !isKeptDirective(lit) {
+			continue
+		}
+		if lit != "" {
+			b.WriteString(lit)
+		} else {
+			b.WriteString(tok.String())
+		}
+		b.WriteByte('\n')
+	}
+	if errs.Len() > 0 {
+		return nil, fmt.Errorf("scalegrid: %s не разбирается на лексемы: %w", rel, errs.Err())
+	}
+	return []byte(b.String()), nil
+}
+
+// isKeptDirective — комментарий, который остаётся под отпечатком.
+//
+// Директива — не проза: `//go:build` решает, попадёт ли файл в сборку вовсе.
+// Признак берётся у стандартной библиотеки (`ast.ParseDirective`), а не
+// выписывается перечнем: выписанный не двигался бы от директивы, которой мы
+// сегодня не знаем, и та уехала бы из-под отпечатка молча.
+func isKeptDirective(lit string) bool {
+	_, ok := ast.ParseDirective(token.NoPos, lit)
+	return ok
+}
+
+// contentHash — хэш ЗНАЧАЩЕГО содержимого перечня файлов.
+//
+// Одна реализация на обоих читателей отпечатка (вердикт и материализатор):
+// вторая разошлась бы с первой молча — и разошлась бы именно там, где
+// расхождение не видно, потому что обе давали бы «совпало» на неподвижном
+// дереве.
+func contentHash(root string, files []string) (string, error) {
+	h := sha256.New()
+	for _, rel := range files {
+		body, err := os.ReadFile(filepath.Join(root, rel)) // #nosec G304 -- rel получен обходом СОБСТВЕННОГО дерева репозитория под корнем root, не из запроса и не от пользователя; прибор читает свои же файлы, чтобы взять их отпечаток
+		if err != nil {
+			return "", fmt.Errorf("scalegrid: чтение %s: %w", rel, err)
+		}
+		significant, err := significantContent(rel, body)
+		if err != nil {
+			return "", err
+		}
+		h.Write(significant)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
 }
 
 // fingerprintScaffolding — файлы каталога сетки, которые ОСНАСТКА, а не предмет
@@ -265,12 +386,11 @@ func withoutScaffolding(root string, files []string) ([]string, error) {
 
 // ContentOf — отпечаток содержимого ОДНОГО файла; гейт называет им виновника.
 func ContentOf(root, rel string) string {
-	body, err := os.ReadFile(filepath.Join(root, rel)) // #nosec G304 -- rel получен обходом СОБСТВЕННОГО дерева репозитория (git ls-files под корнем root), не из запроса и не от пользователя; прибор читает свои же файлы, чтобы взять их отпечаток
+	sum, err := contentHash(root, []string{rel})
 	if err != nil {
 		return "нечитаем"
 	}
-	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:])[:16]
+	return sum
 }
 
 func nonTestGoFiles(root, dir string) ([]string, error) {
@@ -338,10 +458,25 @@ func migrationsNaming(root string, tables []string) ([]string, error) {
 // умолчания). Судить об этом пришлось бы по смыслу, а не по форме, — и первая
 // же ошибка суждения дала бы отчёт, который выглядит свежим и не является им.
 // Ошибка в эту сторону стоит лишнего прогона; в обратную — ложного числа.
+//
+// # Временный объект структуры не меняет (#1833)
+//
+// Форма «создать временную таблицу из выборки» несёт в ОДНОМ операторе три
+// признака сразу — `CREATE`, `DROP` (из хвоста `ON COMMIT DROP`) и имя
+// измеряемой таблицы, — но DDL идёт над временной таблицей, а измеряемая только
+// ЧИТАЕТСЯ. Плана чтения это не меняет, и отчёт от такой миграции ложным не
+// становится. Прежний предикат брал оператор целиком, потому что требовал лишь
+// совпадения глагола и имени где угодно в одном куске.
+//
+// Поэтому конструкции DDL над ВРЕМЕННЫМ объектом снимаются с оператора до
+// проверки на глагол: остался глагол — оператор судится как прежде, не
+// остался — оператор структуры не менял. Обратная сторона сохранена и
+// проверяется законным близнецом: та же форма БЕЗ слова `TEMP` создаёт таблицу
+// в схеме и под отпечаток попадает.
 func migrationTouchesStructure(src string, tables []string) bool {
 	code := stripSQLComments(src)
 	for _, stmt := range strings.Split(code, ";") {
-		if !ddlVerbRe.MatchString(stmt) {
+		if !ddlVerbRe.MatchString(stripTempObjectDDL(stmt)) {
 			continue
 		}
 		for _, tbl := range tables {
@@ -357,7 +492,26 @@ var (
 	ddlVerbRe       = regexp.MustCompile(`(?i)\b(CREATE|ALTER|DROP)\b`)
 	sqlLineComment  = regexp.MustCompile(`--[^\n]*`)
 	sqlBlockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+
+	// tempObjectCreate — создание ВРЕМЕННОГО объекта. Временный объект живёт в
+	// `pg_temp` и измеряемой таблицей быть не может by construction, поэтому
+	// глагол над ним о структуре схемы не говорит ничего.
+	tempObjectCreate = regexp.MustCompile(`(?i)\bCREATE\s+(?:GLOBAL\s+|LOCAL\s+)?(?:TEMP|TEMPORARY)\s+(?:UNLOGGED\s+)?(?:TABLE|VIEW|SEQUENCE)\b`)
+
+	// tempOnCommit — хвост `ON COMMIT …` формы создания временной таблицы.
+	// Слово `DROP` здесь — часть объявления времени жизни, а не снятие объекта;
+	// в Postgres эта оговорка законна ТОЛЬКО у временной таблицы.
+	tempOnCommit = regexp.MustCompile(`(?i)\bON\s+COMMIT\s+(?:DROP|DELETE\s+ROWS|PRESERVE\s+ROWS)\b`)
 )
+
+// stripTempObjectDDL — оператор без конструкций DDL над временными объектами.
+//
+// Снимается ровно объявление (`CREATE TEMP TABLE`, хвост `ON COMMIT …`), а не
+// весь оператор: всё остальное — включая соседний глагол над измеряемой
+// таблицей, если он в этом же операторе есть, — судится как прежде.
+func stripTempObjectDDL(stmt string) string {
+	return tempOnCommit.ReplaceAllString(tempObjectCreate.ReplaceAllString(stmt, " "), " ")
+}
 
 // stripSQLComments — текст без комментариев: они не исполняются, значит на
 // стоимость влиять не могут. Имя таблицы в объяснении, ПОЧЕМУ её здесь не

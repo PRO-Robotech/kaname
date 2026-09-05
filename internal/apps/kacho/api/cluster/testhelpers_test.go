@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package cluster_test
 
@@ -21,11 +21,11 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // setupTestDB hands the calling test its OWN database, with kacho_iam on the
@@ -34,7 +34,7 @@ import (
 // It used to start a fresh container and replay the whole migration chain on
 // every call. The database now comes from the one container this test binary
 // owns (wired in testmain_pgtest_test.go), cloned from a template migrated once
-// — see internal/pgtest for why a clone is the same isolation a separate
+// — see pkg/pgtest for why a clone is the same isolation a separate
 // container gave.
 func setupTestDB(t testing.TB) string {
 	t.Helper()

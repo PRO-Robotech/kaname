@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // caller_policy.go — the per-RPC CALLER policy for the cluster-internal listener
 // (:9091). It does NOT re-ReBAC the end user — that is the api-gateway's job (the

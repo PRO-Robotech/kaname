@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // roleruleforeignmodule_test.go — правило роли называет модуль МАНИФЕСТА
 // (задача PRO-Robotech/kacho#1902; замечание В1 приёмки
@@ -31,7 +31,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // roleRuleModuleFixture — манифест модуля `vpc` с одной ролью своего модуля;
@@ -46,10 +47,26 @@ func roleRuleWithModule(module string) []byte {
 	return []byte(strings.Replace(roleRuleModuleFixture, "%s", module, 1))
 }
 
+// installedModules — набор модулей УСТАНОВКИ, вносимый в загрузчик.
+//
+// Вносится с тех пор, как набор разомкнут (moduleset.go): прежде существование
+// чужого модуля подтверждал перечень, порождённый сборкой, и проба об этом
+// молчала, потому что перечень был встроен. Теперь существование — вопрос
+// установки, и проба обязана назвать, из чего она исходит.
+//
+// Различие не косметическое, и оно есть предмет соседней пробы
+// (openmoduleset_test.go): модуль, которого установка не знает, даёт отказ
+// ДОМЕНА «unknown module» — «такого модуля нет вовсе»; модуль, который она
+// знает, доходит до отказа ВЛАДЕНИЯ — «модуль есть, но он не твой». Починки у
+// них разные.
+func installedModules() manifest.LoadOption {
+	return manifest.WithModuleSet(domain.ModuleSetOf("vpc", "iam"))
+}
+
 // TestRoleRuleOfAForeignModuleIsRefused — правило роли, раздающее права в чужом
 // модуле, отвергается с названием ОБОИХ значений.
 func TestRoleRuleOfAForeignModuleIsRefused(t *testing.T) {
-	_, err := manifest.Load(roleRuleWithModule("iam"))
+	_, err := manifest.Load(roleRuleWithModule("iam"), installedModules())
 	if err == nil {
 		t.Fatalf("правило роли над чужим модулем принято")
 	}
@@ -65,13 +82,13 @@ func TestRoleRuleOfAForeignModuleIsRefused(t *testing.T) {
 	}
 
 	// Законный близнец: правило над СВОИМ модулем проходит.
-	if _, terr := manifest.Load(roleRuleWithModule("vpc")); terr != nil {
+	if _, terr := manifest.Load(roleRuleWithModule("vpc"), installedModules()); terr != nil {
 		t.Fatalf("парный положительный отвергнут: %v", terr)
 	}
 
 	// Контроль: подстановка остаётся отказом ДОМЕНА, а не отказом владения.
 	// Иначе новая проверка украла бы у домена его отказ вместе с текстом.
-	_, werr := manifest.Load(roleRuleWithModule(`"*"`))
+	_, werr := manifest.Load(roleRuleWithModule(`"*"`), installedModules())
 	if werr == nil {
 		t.Fatalf("подстановка модуля в несистемной роли принята")
 	}

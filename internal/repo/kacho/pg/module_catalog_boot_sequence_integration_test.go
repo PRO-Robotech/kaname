@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -17,7 +17,7 @@ package pg_test
 // Здесь предмет другой — ЦЕПОЧКА, которую теперь исполняет композиционный корень.
 // Манифесты приходят ТЕМ ЖЕ путём, каким их получает работающая служба: из
 // каталога доставки, через `manifest.LoadDelivered`, с ключами в форме ключей
-// ConfigMap (`<каталог службы>.manifest.yaml`, см. `tools/modulemanifests`).
+// ConfigMap (`<каталог службы>.manifest.yaml`, см. `pkg/modulemanifest/producer`).
 // Собери я вход в памяти — проба утверждала бы о применителе, а не о старте.
 //
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,10 +48,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 // deliveryOfShippedManifests раскладывает ПОСТАВЛЯЕМЫЕ манифесты дерева в
@@ -137,13 +137,13 @@ func TestModuleCatalogBootSequenceConvergesTheCatalogAndKeepsTheParityGuardGreen
 		modsAfter, resAfter, verbsAfter)
 
 	// ── шаг 3: страж паритета — ПОСЛЕ применителя, как в serve.go ───────────
-	parity, perr := seed.AssertCatalogParity(ctx, repo)
+	parity, perr := seed.AssertCatalogParity(ctx, repo, seed.ImageAnchor())
 	require.NoError(t, perr,
 		"страж паритета отверг каталог ПОСЛЕ применения — провязка ломала бы старт, "+
 			"а не чинила его (недостаёт %d, лишних %d)",
 		len(parity.MissingRows), len(parity.ExtraRows))
 	t.Logf("страж: литерал %d/%d/%d · строки %d/%d/%d · недостаёт %d · лишних %d",
-		parity.LiteralModules, parity.LiteralResources, parity.LiteralVerbs,
+		parity.AnchorModules, parity.AnchorResources, parity.AnchorVerbs,
 		parity.RowModules, parity.RowResources, parity.RowVerbs,
 		len(parity.MissingRows), len(parity.ExtraRows))
 
@@ -157,7 +157,7 @@ func TestModuleCatalogBootSequenceConvergesTheCatalogAndKeepsTheParityGuardGreen
 			"каталог: %s", second)
 	require.Equal(t, before, stateFingerprint(t, ctx, pool),
 		"второе применение сдвинуло состояние")
-	_, perr2 := seed.AssertCatalogParity(ctx, repo)
+	_, perr2 := seed.AssertCatalogParity(ctx, repo, seed.ImageAnchor())
 	require.NoError(t, perr2, "страж отверг каталог после ВТОРОГО применения")
 }
 

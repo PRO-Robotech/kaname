@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // basic_token_credential_kind_integration_test.go — ИНВАРИАНТЫ ВИДА
 // УДОСТОВЕРЕНИЯ ДЕРЖИТ ТАБЛИЦА, А НЕ ПРОВЕРКА В КОДЕ.
@@ -38,7 +38,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 )
 
 // seedCredentialOwners заводит владельцев, без которых внешние ключи обеих

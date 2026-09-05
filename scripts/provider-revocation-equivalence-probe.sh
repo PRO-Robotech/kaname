@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # provider-revocation-equivalence-probe.sh
 #
 # ВОПРОС (#797). Делает ли снятие СЕССИИ ВХОДА у провайдера уже выданный ТОКЕН

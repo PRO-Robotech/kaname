@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package main
 
@@ -31,7 +31,7 @@ import (
 
 const applierBuiltAndCalledDirectly = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
 
 func serve() error {
 	catalogApplier := modulecatalog.NewApplier(writeRepo)
@@ -46,7 +46,7 @@ func serve() error {
 // передаёт его провязке, которая зовёт применение на своём параметре.
 const applierHandedToAnApplyingHelper = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
 
 func applyDeliveredManifests(ctx context.Context, applier *modulecatalog.Applier) error {
 	_, err := applier.ApplyAll(ctx, manifests)
@@ -63,7 +63,7 @@ func serve() error {
 // зовущего нет.
 const applierBuiltNeverCalled = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
 
 func serve() error {
 	catalogApplier := modulecatalog.NewApplier(writeRepo)
@@ -76,7 +76,7 @@ func serve() error {
 // знающий одно написание, молчал бы на форме столь же законной.
 const applierAliasedNeverCalled = `package main
 
-import mc "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
+import mc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
 
 func serve() error {
 	catalogApplier := mc.NewApplier(writeRepo)
@@ -90,7 +90,7 @@ func serve() error {
 // молчал бы здесь — то есть на глаголе, который по-прежнему не позван.
 const applierHandedToAHollowHelper = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
 
 func logTheApplier(ctx context.Context, applier *modulecatalog.Applier) error {
 	logger.Info("применитель собран", slog.Any("applier", applier))
@@ -108,7 +108,7 @@ func serve() error {
 // бы на непозванном применителе.
 const applierHandedToAHelperOfAnotherType = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
 
 func applyLabels(ctx context.Context, patcher *labels.Patcher) error {
 	_, err := patcher.ApplyAll(ctx, nil)
@@ -125,7 +125,7 @@ func serve() error {
 // должно: иначе гейт краснел бы на пробе, которая его строит и выбрасывает.
 const applierDiscarded = `package main
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/modulecatalog"
+import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/modulecatalog"
 
 func probe() { _ = modulecatalog.NewApplier(writeRepo) }
 `
@@ -260,7 +260,7 @@ func serve() error {
 	if aErr := applyDeliveredManifests(ctx, logger, catalogApplier, deliveredManifests); aErr != nil {
 		return aErr
 	}
-	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo)
+	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo, seed.ImageAnchor())
 	return catErr
 }
 `
@@ -273,7 +273,7 @@ func serve() error {
 		return mErr
 	}
 	use(deliveredManifests)
-	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo)
+	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo, seed.ImageAnchor())
 	return catErr
 }
 `
@@ -285,7 +285,7 @@ func serve() error {
 	if mErr != nil {
 		return mErr
 	}
-	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo)
+	catalogCensus, catErr := seed.AssertCatalogParity(ctx, catalogRepo, seed.ImageAnchor())
 	if catErr != nil {
 		return catErr
 	}
@@ -304,7 +304,7 @@ func serve() error {
 		return mErr
 	}
 	use(deliveredManifests)
-	return seed.AssertCatalogParity(ctx, catalogRepo)
+	return seed.AssertCatalogParity(ctx, catalogRepo, seed.ImageAnchor())
 }
 `
 

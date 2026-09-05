@@ -1,13 +1,14 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // register_resource_integration_test.go — SEC-C group A (A-01..A-05).
 //
 // Verifies RegisterResource / UnregisterResource (Internal FGA-proxy):
 //   - A-01 happy: tuple enqueued into kacho_iam.fga_outbox (event fga.tuple.write),
 //     in the SAME writer-tx (rollback ⇒ no orphan row);
-//   - A-02 idempotent register: re-issue same tuple → OK (second outbox row,
-//     drainer collapses via already_exists→ErrAlreadyApplied);
+//   - A-02 idempotent register: re-issue same tuple → OK (вторая строка журнала;
+//     схлопывает их ПРОЕКЦИЯ — триггер `relation_fact_from_journal` пишет прямой
+//     факт через ON CONFLICT, поэтому два намерения дают один факт);
 //   - A-03 unregister: enqueues fga.tuple.delete;
 //   - A-04 idempotent unregister: missing tuple → OK (no NotFound);
 //   - A-05 invalid args: empty subject/relation/object + malformed object →
@@ -15,8 +16,15 @@
 //
 // The use-case writes the owner-hierarchy tuple verbatim from the request
 // ({subject_id, relation, object}); the SEC-A proto carries the pre-composed
-// FGA strings (drainer applies them as today, fga_applier.go idempotent
-// classification). Authz-gate (group B) is exercised in the rebac test.
+// relation strings.
+//
+// ЗДЕСЬ СТОЯЛА ССЫЛКА НА ПРИМЕНИТЕЛЯ ДРЕНАЖА — ни его, ни его файла в дереве нет.
+// Дренаж снят вместе с внешним движком прав (стадия S6 эпика #747); единственный
+// потребитель журнала — триггер проекции, и он складывает прямой факт В ТОЙ ЖЕ
+// транзакции. Прежняя проза объявляла асинхронное применение, которого не бывает,
+// и следующий читатель искал бы координату, которой не существует (kacho#1049).
+//
+// Authz-gate (group B) is exercised in the rebac test.
 //
 // Skipped under `go test -short`.
 package internal_iam_test
@@ -35,13 +43,14 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	internaliam "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/internal_iam"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/iampgtest"
+	internaliam "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/internal_iam"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/iampgtest"
 )
 
 // newRegisterUC builds the RegisterResource use-case backed by a real pool's
-// outbox emitter + tx beginner (no FGA dial — drainer applies asynchronously).
+// outbox emitter + tx beginner (внешнего вызова нет: строку журнала подхватывает
+// триггер проекции в той же транзакции).
 func newRegisterUC(t *testing.T) (*internaliam.RegisterResourceUseCase, *outboxProbe) {
 	t.Helper()
 	ctx := context.Background()
@@ -104,8 +113,9 @@ func TestRegisterResource_A02_IdempotentRegister(t *testing.T) {
 	err = uc.Register(ctx, req) // repeat — must be OK, never AlreadyExists.
 	require.NoError(t, err, "repeat register must be OK, not AlreadyExists (idempotency contract)")
 
-	// Two write rows enqueued; the drainer (fga_applier already_exists→success)
-	// collapses them to a single FGA tuple. The RPC never surfaces AlreadyExists.
+	// Two write rows enqueued; схлопывает их ПРОЕКЦИЯ (триггер журнала пишет прямой
+	// факт через ON CONFLICT), а не применитель дренажа — его не существует.
+	// The RPC never surfaces AlreadyExists.
 	n, _, _ := h.lastOutbox(t, ctx, obj)
 	require.Equal(t, 2, n)
 }

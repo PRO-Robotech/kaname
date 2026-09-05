@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // permission_test.go — unit tests for the RBAC v2 4-segment permission
 // grammar `module.resource.resourceName.verb` (migration 0005).
@@ -18,7 +18,7 @@ package domain_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 func TestPermission_Validate(t *testing.T) {

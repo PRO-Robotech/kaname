@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package role
 
@@ -8,8 +8,10 @@ package role
 // The Role catalog has TWO visibility layers:
 //   - SYSTEM roles (is_system) are the tenant-wide reference catalog floor: every
 //     authenticated caller may Get them (deterministic seed ids, not tenant-secret).
-//     They are NOT subject to the per-object filter — RoleService.Get stays
-//     <exempt> in proto so a system-role Get always passes the interceptor.
+//     They are NOT subject to the per-object filter: the contract declares
+//     RoleService.Get `scope_filtered` (and says why NOT exempt —
+//     role_service.proto), so the gateway asks no per-object question at all and
+//     the whole decision, floor included, is taken here.
 //   - CUSTOM roles are tenant-secret. Get enforces per-object via the SAME FGA
 //     `viewer ∪ v_list` question that drives RoleService.List (read==enforce,
 //     single source of truth — resolveVisibleRoleIDs), asked DIRECTLY on the one
@@ -21,9 +23,11 @@ package role
 //     found" (NOT PermissionDenied — no existence leak). This makes
 //     {role: Get(role) success} == {role: role ∈ List} for custom roles (parity).
 //
-// Why enforce in the use-case (not the interceptor): the RPC must stay <exempt>
-// so system-role Get passes for every caller; the custom-role gate therefore
-// lives here, mirroring list.go.
+// Why enforce in the use-case (not the interceptor): the RPC is declared
+// `scope_filtered`, which is precisely the statement that the per-object
+// decision belongs to the service. The gateway therefore resolves nothing here,
+// and both halves — the system-role floor and the custom-role gate — live in
+// this use-case, mirroring list.go.
 //
 // Fail-closed (security.md): a nil FGA port or an FGA error on a CUSTOM
 // role Get → Unavailable; the role body (rules[] — a snapshot of another
@@ -34,11 +38,11 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/shared"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
 
 type GetRoleUseCase struct {

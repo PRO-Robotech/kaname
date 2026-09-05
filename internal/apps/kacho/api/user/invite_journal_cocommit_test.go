@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // invite_journal_cocommit_test.go — приглашение кладёт указатель на предка
 // СТРОКОЙ ЖУРНАЛА в своей транзакции, а не записью в движок после коммита.
@@ -26,8 +26,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/service"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/service"
 )
 
 // inviteEmitted прогоняет одно приглашение и возвращает строки журнала,

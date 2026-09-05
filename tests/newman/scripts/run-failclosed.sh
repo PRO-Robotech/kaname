@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 # run-failclosed.sh — СОЗДАЁТ условие, которое нужно коллекции authz-failclosed,
 # гоняет её и возвращает стенд как было.

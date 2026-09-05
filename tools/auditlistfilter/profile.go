@@ -1,9 +1,9 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package auditlistfilter states how kacho-iam is laid out for the public-List
 // gate. The analysis itself — and why it parses instead of grepping — lives in
-// tools/listfiltergate.
+// pkg/listfiltergate.
 //
 // # Why this exists
 //
@@ -19,7 +19,7 @@
 //
 // That is the shape of the defect the gates themselves are written against: a check
 // is silent about what it never looked at. The remedy is not only this profile but
-// tools/listfiltergate/coverage_test.go, which derives the service list from the
+// pkg/listfiltergate/coverage_test.go, which derives the service list from the
 // committed tree so an unanalysed service is a FINDING rather than a quiet gap.
 //
 // # This service's shape
@@ -64,7 +64,7 @@
 // subject.
 package auditlistfilter
 
-import "github.com/PRO-Robotech/kacho/tools/listfiltergate"
+import "github.com/PRO-Robotech/kacho/pkg/listfiltergate"
 
 // subjectGate is the shape of a listing whose containing object is checked in the
 // use-case before the page is read.

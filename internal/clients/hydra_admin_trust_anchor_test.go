@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // hydra_admin_trust_anchor_test.go — the facade's hop to the provider's admin
 // API must verify the peer against the anchor it was given, and must refuse to
@@ -30,7 +30,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 )
 
 // writeTestCA generates a real self-signed CA and writes it as PEM, returning the

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // seed_module_sa_identity_helper_test.go — TEST-ONLY helper that re-applies the
 // SEC-C module ServiceAccount least-priv seed.

@@ -65,5 +65,6 @@ composition root, `cmd/migrator/main.go` — отдельный CLI миграц
 
 - Лицензия: [`LICENSE`](LICENSE)
 - Как контрибьютить: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Соглашение о вкладе (подтверждается `git commit -s`): [`CLA.md`](CLA.md)
 - ER-диаграмма доменной модели: [`docs/architecture/er-diagram.md`](docs/architecture/er-diagram.md)
 - Proto-контракты: `proto/kacho/cloud/iam/v1/`

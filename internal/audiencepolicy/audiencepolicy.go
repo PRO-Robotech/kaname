@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package audiencepolicy — ОДИН предикат выбора адресата выпускаемого токена,
 // общий для всех полос выдачи (задачи #1136, #1184).

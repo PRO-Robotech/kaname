@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // outbox_metrics_wiring.go — сканеры СОСТОЯНИЯ очередей kacho-iam.
 //
@@ -45,6 +45,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	outboxmetrics "github.com/PRO-Robotech/kacho/pkg/outbox/metrics"
+
+	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
 )
 
 // outboxMetricsInterval — период скана. Совпадает с остальными сервисами
@@ -126,14 +128,16 @@ const auditOutboxMaxAttempts = 10
 // Решение о приёмнике, границах доставки и предикат его пересмотра:
 // services/iam/docs/engineering/architecture/audit-outbox-has-no-receiver.md
 // (имя файла историческое, см. оговорку в его шапке).
-func runAuditOutboxMetrics(ctx context.Context, pool *pgxpool.Pool, rec outboxmetrics.Recorder, logger *slog.Logger) {
+func runAuditOutboxMetrics(ctx context.Context, pool *pgxpool.Pool, rec *metrics.OutboxRecorder, logger *slog.Logger) {
 	collector := outboxmetrics.NewCollector(pool, rec, outboxmetrics.CollectorConfig{
 		Table:       auditOutboxTable,
 		MaxAttempts: auditOutboxMaxAttempts,
 		Interval:    outboxMetricsInterval,
 		Shape:       outboxmetrics.ShapeStatus,
 	})
-	collector.Run(ctx, func(err error) {
-		logger.Warn("audit outbox metrics scan failed", "table", auditOutboxTable, "err", err)
-	})
+	// Исход скана наблюдается ЕДИНСТВЕННЫМ производителем — иначе очередь,
+	// чей сайт забыли поправить, молчала бы на отказе неотличимо от исправной
+	// работы (#2062).
+	collector.Run(ctx, metrics.OutboxScanObserver(rec, auditOutboxTable, logger,
+		"audit outbox metrics scan failed"))
 }

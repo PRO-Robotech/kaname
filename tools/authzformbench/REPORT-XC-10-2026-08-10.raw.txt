@@ -1,0 +1,199 @@
+authzformbench — comparative measurement of authorization-grant shapes
+==============================================================================
+when         2026-08-10T18:34:33+03:00
+tree         9f8879709c73b44a650659dfa153a0eb5b314cb6
+machine      dobryKot.global.bcs linux/amd64 12 cpu, MemTotal 65751784 kB
+openfga      openfga/openfga:v1.8.4   (datastore: postgres postgres:16-alpine)
+форма E      своя БД: postgres postgres:16-alpine, СВОЙ контейнер — иначе объём и нагрузка смешались бы
+каскад       leaf → project → account → cluster (глубина 3, объявлена — не подразумевается)
+cli          openfga/cli:v0.7.13
+model        /home/dk/.claude/jobs/2cf6b0b4/tmp/f3/forme/proto/kacho/cloud/iam/v1/fga_model.fga (sha256/16 e5133ec4c25ce69c)
+batch cap    50   (MEASURED off the engine, not assumed)
+shape        S=10 subjects, M=4 verbs [v_get v_list v_update v_delete], role="editor", K=100
+page         size=1000, partition=50, parallel=8
+repeats      writes=5 reads=20 (+1 discarded warm-up each)
+
+models under test
+  A-flat           canonical, unchanged
+  B-group          canonical, unchanged
+  C-role-relation  canonical + grant_viewer/grant_editor on vpc_network, 4 verbs rewritten
+  D-container      canonical + type label_set + labels pointer on vpc_network, 4 verbs rewritten
+  BCD-combined     canonical + type label_set + labels pointer on vpc_network, 4 verbs rewritten
+  E-relational     модель не требуется — вердикт вычисляется запросом к БД
+
+объявленная до прогона арифметика формы E (против неё сверяется измеренное)
+  выдача            S+2 строк (привязка + субъекты + селектор), ПОСТОЯННА по N
+  структурное       N + Spare + 2 + M строк — величина, обязанная расти с N
+  q(W1-grant        ) 5
+  q(W2-revoke-1     ) 3
+  q(W3-relabel-1    ) 3
+  q(W4-relabel-K    ) 3
+  q(T-inline-grant  ) 6
+  q(T-inline-revoke ) 4
+  q(R1-check        ) 1
+  q(R2-one-partition) 1
+  q(R3-page-full    ) 1
+  q(C-cascade       ) 1
+
+cell format  p50 (p95) ms, затем e=<обращения к движку> q=<SQL-стейтменты> i=<строк намерения>
+             колонки обращений РАЗДЕЛЬНЫ и не складываются: e — HTTP-вызовы движка,
+             за каждым из которых стоит своё число запросов к его Postgres; q — стейтменты
+             a page at N below the page size IS the whole set — read the item count
+
+производители величины q (StmtSQL) — по месту снятия, с контролем в обе стороны
+  движок (Postgres датастора OpenFGA) — дельта pg_stat_statements.calls — контроль пройден (холостая дельта 0, один стейтмент дал 1)
+  форма E (Postgres формы E) — счётчик стейтментов на pgx.Tracer собственного пула — контроль пройден (контроль в обе стороны прогоняется при открытии каждого хранилища и роняет открытие)
+
+── W1-grant ──────────────────────────────────────────────
+form              N=10                        N=100                       N=1000                    
+A-flat            85.1 (87.0) e=4 q=412 i=400  897.6 (905.3) e=40 q=4120 i=4000  8786.5 (9668.4) e=400 q=41200 i=40000
+B-group           17.3 (22.2) e=1 q=53 i=50   98.5 (106.8) e=5 q=425 i=410  859.9 (987.5) e=41 q=4133 i=4010
+C-role-relation   23.7 (24.6) e=1 q=103 i=100  225.1 (276.4) e=10 q=1030 i=1000  2353.0 (2618.7) e=100 q=10300 i=10000
+D-container       14.7 (15.7) e=1 q=23 i=20   32.7 (34.0) e=2 q=116 i=110  260.6 (296.6) e=11 q=1043 i=1010
+BCD-combined      12.3 (12.7) e=1 q=24 i=21   30.9 (31.1) e=2 q=117 i=111  252.5 (311.5) e=11 q=1044 i=1011
+E-relational      5.3 (7.0) q=5 i=12          5.3 (6.2) q=5 i=12          6.0 (6.4) q=5 i=12        
+
+── W2-revoke-1 ──────────────────────────────────────────────
+form              N=10                        N=100                       N=1000                    
+A-flat            10.1 (10.6) e=1 q=43 i=40   81.9 (90.9) e=4 q=412 i=400  630.6 (731.7) e=40 q=4120 i=4000
+B-group           4.2 (5.4) e=1 q=4 i=1       4.4 (5.4) e=1 q=4 i=1       4.2 (8.9) e=1 q=4 i=1     
+C-role-relation   8.2 (9.8) e=1 q=13 i=10     16.1 (18.4) e=1 q=103 i=100  171.1 (183.9) e=10 q=1030 i=1000
+D-container       5.4 (8.3) e=1 q=4 i=1       4.2 (5.2) e=1 q=4 i=1       5.5 (5.8) e=1 q=4 i=1     
+BCD-combined      4.0 (4.4) e=1 q=4 i=1       4.1 (4.3) e=1 q=4 i=1       6.8 (10.7) e=1 q=4 i=1    
+E-relational      2.9 (5.3) q=3 i=1           4.2 (4.4) q=3 i=1           4.3 (8.3) q=3 i=1         
+
+── W3-relabel-1 ──────────────────────────────────────────────
+form              N=10                        N=100                       N=1000                    
+A-flat            15.3 (17.3) e=1 q=43 i=40   18.3 (19.7) e=1 q=43 i=40   16.3 (18.1) e=1 q=43 i=40 
+B-group           12.3 (16.9) e=1 q=7 i=4     11.1 (13.0) e=1 q=7 i=4     10.0 (14.4) e=1 q=7 i=4   
+C-role-relation   12.5 (18.0) e=1 q=13 i=10   12.5 (14.9) e=1 q=13 i=10   11.4 (14.4) e=1 q=13 i=10 
+D-container       11.6 (21.4) e=1 q=4 i=1     10.8 (11.4) e=1 q=4 i=1     12.3 (12.9) e=1 q=4 i=1   
+BCD-combined      9.8 (11.1) e=1 q=4 i=1      8.9 (9.5) e=1 q=4 i=1       14.3 (19.9) e=1 q=4 i=1   
+E-relational      4.3 (4.4) q=3 i=1           3.1 (4.3) q=3 i=1           3.4 (4.4) q=3 i=1         
+
+── W4-relabel-K ──────────────────────────────────────────────
+form              N=10                        N=100                       N=1000                    
+A-flat            864.5 (889.6) e=40 q=4120 i=4000  932.9 (954.7) e=40 q=4120 i=4000  915.9 (976.4) e=40 q=4120 i=4000
+B-group           87.0 (88.5) e=4 q=412 i=400  84.9 (129.9) e=4 q=412 i=400  82.9 (92.3) e=4 q=412 i=400
+C-role-relation   243.7 (280.9) e=10 q=1030 i=1000  220.6 (235.7) e=10 q=1030 i=1000  225.3 (242.4) e=10 q=1030 i=1000
+D-container       24.8 (26.5) e=1 q=103 i=100  23.2 (23.7) e=1 q=103 i=100  22.8 (24.4) e=1 q=103 i=100
+BCD-combined      20.0 (32.4) e=1 q=103 i=100  21.0 (30.0) e=1 q=103 i=100  26.9 (31.3) e=1 q=103 i=100
+E-relational      4.1 (5.3) q=3 i=100         5.1 (5.8) q=3 i=100         5.5 (6.1) q=3 i=100       
+
+── T-inline-grant ──────────────────────────────────────────────
+form              N=10                        N=100                       N=1000                    
+A-flat            not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction
+B-group           not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction
+C-role-relation   not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction
+D-container       not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction
+BCD-combined      not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction
+E-relational      3.9 (4.9) q=6 i=13          3.8 (4.9) q=6 i=13          4.9 (5.2) q=6 i=13        
+
+── T-inline-revoke ──────────────────────────────────────────────
+form              N=10                        N=100                       N=1000                    
+A-flat            not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction
+B-group           not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction
+C-role-relation   not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction
+D-container       not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction
+BCD-combined      not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction  not-applicable: операция отсутствует у этой формы by construction
+E-relational      3.0 (4.4) q=4 i=2           4.3 (4.5) q=4 i=2           4.1 (4.4) q=4 i=2         
+
+── R1-check ──────────────────────────────────────────────
+form              N=10                        N=100                       N=1000                    
+A-flat            1.4 (1.8) e=1 q=5           1.4 (1.7) e=1 q=5           1.3 (1.7) e=1 q=5         
+B-group           1.5 (1.8) e=1 q=7           1.6 (1.8) e=1 q=7           1.5 (1.7) e=1 q=7         
+C-role-relation   1.3 (1.5) e=1 q=8           1.3 (1.6) e=1 q=7           1.4 (1.6) e=1 q=7         
+D-container       1.5 (1.7) e=1 q=11          1.5 (1.7) e=1 q=11          1.6 (1.8) e=1 q=11        
+BCD-combined      1.8 (2.0) e=1 q=17          1.9 (2.4) e=1 q=18          1.8 (2.0) e=1 q=17        
+E-relational      0.3 (1.2) q=1               0.3 (1.2) q=1               0.3 (1.1) q=1             
+
+── R2-one-partition ──────────────────────────────────────────────
+form              N=10                        N=100                       N=1000                    
+A-flat            20.9 (28.2) e=1 q=47 i=10   34.7 (47.4) e=1 q=294 i=50  28.8 (37.3) e=1 q=258 i=50
+B-group           24.1 (28.1) e=1 q=105 i=10  34.3 (41.5) e=1 q=487 i=50  32.7 (41.1) e=1 q=434 i=50
+C-role-relation   23.2 (30.2) e=1 q=95 i=10   36.5 (42.4) e=1 q=428 i=50  34.4 (40.0) e=1 q=441 i=50
+D-container       25.1 (29.9) e=1 q=130 i=10  43.2 (68.3) e=1 q=651 i=50  45.9 (59.7) e=1 q=581 i=50
+BCD-combined      23.3 (27.2) e=1 q=154 i=10  40.5 (52.2) e=1 q=788 i=50  54.8 (65.8) e=1 q=762 i=50
+E-relational      0.3 (0.4) q=1 i=10          0.6 (0.8) q=1 i=50          0.6 (0.7) q=1 i=50        
+
+── R3-page-full ──────────────────────────────────────────────
+form              N=10                        N=100                       N=1000                    
+A-flat            21.8 (51.2) e=1 q=55 i=10 ×1  45.7 (64.3) e=2 q=549 i=100 ×2  216.9 (269.7) e=20 q=5281 i=1000 ×20
+B-group           24.4 (31.9) e=1 q=112 i=10 ×1  48.5 (59.6) e=2 q=906 i=100 ×2  273.9 (294.1) e=20 q=8980 i=1000 ×20
+C-role-relation   21.0 (26.5) e=1 q=100 i=10 ×1  48.4 (66.2) e=2 q=896 i=100 ×2  321.5 (357.8) e=20 q=8879 i=1000 ×20
+D-container       26.3 (29.7) e=1 q=115 i=10 ×1  57.8 (86.0) e=2 q=1144 i=100 ×2  371.6 (422.7) e=20 q=12338 i=1000 ×20
+BCD-combined      23.3 (24.2) e=1 q=130 i=10 ×1  60.3 (90.1) e=2 q=1638 i=100 ×2  454.9 (490.6) e=20 q=15627 i=1000 ×20
+E-relational      0.3 (0.3) q=1 i=10 ×1       1.0 (1.2) q=1 i=100 ×1      6.3 (7.2) q=1 i=1000 ×1   
+
+── C-cascade ──────────────────────────────────────────────
+form              N=10                        N=100                       N=1000                    
+A-flat            2.0 (2.4) e=1 q=10 ×3       1.7 (2.4) e=1 q=9 ×3        1.8 (1.9) e=1 q=10 ×3     
+B-group           1.6 (1.8) e=1 q=12 ×3       1.7 (1.9) e=1 q=12 ×3       1.7 (1.8) e=1 q=12 ×3     
+C-role-relation   1.9 (2.5) e=1 q=14 ×3       1.7 (1.9) e=1 q=13 ×3       1.7 (2.0) e=1 q=14 ×3     
+D-container       1.7 (2.0) e=1 q=15 ×3       1.8 (2.1) e=1 q=16 ×3       1.7 (2.0) e=1 q=15 ×3     
+BCD-combined      1.7 (1.8) e=1 q=17 ×3       3.2 (4.9) e=1 q=18 ×3       1.7 (2.1) e=1 q=17 ×3     
+E-relational      0.3 (0.3) q=1 ×3            0.3 (0.3) q=1 ×3            0.3 (0.4) q=1 ×3          
+
+── V-volume ── строки выдачи / логические байты ВСЕХ строк хранилища ─────
+   структурное (указатели родителя у движка, строки зеркала у формы E) вынесено
+   отдельной парой: счёт строк его вычитает, байты — нет, и эта асимметрия базы
+   сравнения названа здесь, чтобы её можно было вычесть, а не проглотить молча
+form              N=10                              N=100                             N=1000                          
+A-flat            400 стр / 75764Б (+116 стр структ)  4000 стр / 611534Б (+206 стр структ)  40000 стр / 5969234Б (+1106 стр структ)
+B-group           50 стр / 25574Б (+116 стр структ)  410 стр / 97304Б (+206 стр структ)  4010 стр / 814604Б (+1106 стр структ)
+C-role-relation   100 стр / 33064Б (+116 стр структ)  1000 стр / 184534Б (+206 стр структ)  10000 стр / 1699234Б (+1106 стр структ)
+D-container       20 стр / 20744Б (+116 стр структ)  110 стр / 48284Б (+206 стр структ)  1010 стр / 323684Б (+1106 стр структ)
+BCD-combined      21 стр / 20825Б (+116 стр структ)  111 стр / 48365Б (+206 стр структ)  1011 стр / 323765Б (+1106 стр структ)
+E-relational      12 стр / 13182Б (+120 стр структ)  12 стр / 25425Б (+210 стр структ)  12 стр / 147825Б (+1110 стр структ)
+
+── откуда снята каждая ячейка ───────────────────────────────────────────
+   матрица собирается из мест с РАЗНЫМИ схемами; таблица без этого признака
+   выдавала бы за один прогон два
+  A-flat           services/iam/tools/authzformbench · store движка (схема OpenFGA)
+  B-group          services/iam/tools/authzformbench · store движка (схема OpenFGA)
+  C-role-relation  services/iam/tools/authzformbench · store движка (схема OpenFGA)
+  D-container      services/iam/tools/authzformbench · store движка (схема OpenFGA)
+  BCD-combined     services/iam/tools/authzformbench · store движка (схема OpenFGA)
+  E-relational     services/iam/tools/authzformbench · своя БД формы E (синтетическая схема, своя на хранилище)
+
+── четыре категории исхода ячейки ───────────────────────────────────────
+  measured         168
+  refused          0
+  not-run          0
+  not-applicable   30
+  ячеек всего      198 (сумма категорий обязана равняться числу ячеек)
+
+неприменимо by construction — с причиной по каждой ячейке
+  A-flat           N=10      T-inline-grant   операция отсутствует у этой формы by construction
+  A-flat           N=10      T-inline-revoke  операция отсутствует у этой формы by construction
+  A-flat           N=100     T-inline-grant   операция отсутствует у этой формы by construction
+  A-flat           N=100     T-inline-revoke  операция отсутствует у этой формы by construction
+  A-flat           N=1000    T-inline-grant   операция отсутствует у этой формы by construction
+  A-flat           N=1000    T-inline-revoke  операция отсутствует у этой формы by construction
+  B-group          N=10      T-inline-grant   операция отсутствует у этой формы by construction
+  B-group          N=10      T-inline-revoke  операция отсутствует у этой формы by construction
+  B-group          N=100     T-inline-grant   операция отсутствует у этой формы by construction
+  B-group          N=100     T-inline-revoke  операция отсутствует у этой формы by construction
+  B-group          N=1000    T-inline-grant   операция отсутствует у этой формы by construction
+  B-group          N=1000    T-inline-revoke  операция отсутствует у этой формы by construction
+  C-role-relation  N=10      T-inline-grant   операция отсутствует у этой формы by construction
+  C-role-relation  N=10      T-inline-revoke  операция отсутствует у этой формы by construction
+  C-role-relation  N=100     T-inline-grant   операция отсутствует у этой формы by construction
+  C-role-relation  N=100     T-inline-revoke  операция отсутствует у этой формы by construction
+  C-role-relation  N=1000    T-inline-grant   операция отсутствует у этой формы by construction
+  C-role-relation  N=1000    T-inline-revoke  операция отсутствует у этой формы by construction
+  D-container      N=10      T-inline-grant   операция отсутствует у этой формы by construction
+  D-container      N=10      T-inline-revoke  операция отсутствует у этой формы by construction
+  D-container      N=100     T-inline-grant   операция отсутствует у этой формы by construction
+  D-container      N=100     T-inline-revoke  операция отсутствует у этой формы by construction
+  D-container      N=1000    T-inline-grant   операция отсутствует у этой формы by construction
+  D-container      N=1000    T-inline-revoke  операция отсутствует у этой формы by construction
+  BCD-combined     N=10      T-inline-grant   операция отсутствует у этой формы by construction
+  BCD-combined     N=10      T-inline-revoke  операция отсутствует у этой формы by construction
+  BCD-combined     N=100     T-inline-grant   операция отсутствует у этой формы by construction
+  BCD-combined     N=100     T-inline-revoke  операция отсутствует у этой формы by construction
+  BCD-combined     N=1000    T-inline-grant   операция отсутствует у этой формы by construction
+  BCD-combined     N=1000    T-inline-revoke  операция отсутствует у этой формы by construction
+
+отказ движка и «не выполнилось»: 0 of 198 cells
+  (none — every cell in the matrix produced a number or a by-construction verdict)

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // seven_permissive_forms_test.go — семь форм, которые РАЗБОР принимает молча, а
 // ДОПУСК обязан ловить (#1978).
@@ -28,7 +28,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
 )
 
 // sevenForms — семь суффиксов канона, каждый несёт РОВНО ОДНУ форму.

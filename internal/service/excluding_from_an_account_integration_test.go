@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // excluding_from_an_account_integration_test.go — «ИСКЛЮЧИТЬ ИЗ МОЕГО АККАУНТА»
 // доступно тому, кто вправе туда пригласить, и НЕ доступно за границей его

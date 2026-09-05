@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // provider_compensation_outbox.go — компенсация частично исполненной саги
 // «зарегистрировать OAuth-клиента у провайдера → закоммитить свою строку».

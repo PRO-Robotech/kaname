@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package main
 
@@ -39,8 +39,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmodel"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmodel"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // deliveryDeclaringRelationGrant — манифест, объявляющий НЕПУСТОЙ
@@ -129,13 +129,21 @@ func TestBootComposesJudgesAndInstallsTheModel(t *testing.T) {
 	//
 	// ── СУТЬ 2 (#1969): провязка есть, и тип доставки доезжает до вердикта ────
 	//
-	// Манифест несёт ресурс, чьего типа канон образа НЕ объявляет. Он читается
-	// референтом ПОРОЖДЕНИЯ: закрытая таблица типов — продукт сборки, и судить
-	// ею новый тип значило бы спрашивать у ответа (см. manifest.TypeReferent).
-	newType := manifest.LoadWithReferent
-	mNew, err := newType([]byte(deliveryDeclaringANewType), manifest.ReferentCanon)
+	// Манифест несёт ресурс, чьего типа канон образа НЕ объявляет.
+	//
+	// ЗДЕСЬ СТОЯЛ ОБХОД: манифест читался референтом ПОРОЖДЕНИЯ
+	// (`manifest.ReferentCanon`) с доводом «закрытая таблица типов — продукт
+	// сборки, и судить ею новый тип значило бы спрашивать у ответа». Довод был
+	// верен, а обход был ЛОЖНЫМ вердиктом о старте: доставка читается на старте
+	// умолчанием (`manifest.LoadDelivered`), и вход, проходивший только под
+	// чужим референтом, на старте не прошёл бы. Задача #2015 сняла предмет
+	// целиком — таблица типов разомкнута, новый тип модуля принимается ТОЙ ЖЕ
+	// полосой, что читает доставку, — поэтому здесь стоит `manifest.Load`, и
+	// проба утверждает о пути старта, а не о его обходе.
+	mNew, err := manifest.Load([]byte(deliveryDeclaringANewType))
 	if err != nil {
-		t.Fatalf("предпосылка не создана: манифест с новым типом не разобрался: %v", err)
+		t.Fatalf("предпосылка не создана: манифест с новым типом не разобрался ПОЛОСОЙ "+
+			"СТАРТА: %v", err)
 	}
 
 	// Предпосылка провязки: канон образа этого типа НЕ объявляет. Без неё проба

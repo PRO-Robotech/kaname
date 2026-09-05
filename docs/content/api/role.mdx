@@ -65,10 +65,11 @@ import dedent from 'ts-dedent'
 Грантабельную таксономию (какие модули/ресурсы/глаголы допустимы) отдаёт
 [PermissionCatalog](/api/authorize#permissioncatalog).
 
-:::note Wildcard `"*"` — только для system-ролей
-Literal `"*"` в `resources` / `verbs` / `module` допустим лишь в system-ролях. В custom-роли
-он вернёт `INVALID_ARGUMENT` (глагол-`*` — «все глаголы типа» — грантабелен, но модуль/ресурс-`*`
-system-only).
+:::note Wildcard `"*"` — по полю, а не по роли
+Ярусом роли ограничена подстановка в `module` и `resources`: в custom-роли она вернёт
+`INVALID_ARGUMENT`, в system-роли законна. Подстановка в `verbs` — **не** ограничена: глагол-`*`
+означает «все глаголы типа» и грантабелен в custom-роли тоже; единственное условие — он идёт
+единственным элементом (`["*", "get"]` → `INVALID_ARGUMENT`).
 :::
 
 ## Поля ресурса

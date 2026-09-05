@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // subject_change_delivery_columns_integration_test.go — журнал смены субъекта не
 // обещает доставки, которой у него нет (#1396).

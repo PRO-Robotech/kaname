@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package moduleroles — ПРИМЕНИТЕЛЬ ролей модуля: читает манифест как данные и
 // приводит строки системных ролей своего модуля к объявленному состоянию
@@ -67,10 +67,9 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest/roleexport"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest/roleexport"
 )
 
 var (
@@ -443,10 +442,20 @@ func roleOf(module string, mr *manifest.Role, produced []domain.Rule) (domain.Ro
 		// в пределах этого модуля, подстановка модуля — не законна вовсе.
 		OwnerModule: module,
 	}
-	// Набор модулей — КАНОН: применитель исполняется на старте, до того как
-	// снимок каталога наполнен, и роль модуля объявлена ДЕРЕВОМ, а не строкой
-	// (#1927). Живость модуля судит путь запроса, где она наблюдаема.
-	if verr := r.Validate(domain.ModuleSetOf(authzmap.CatalogSeedModules()...)); verr != nil {
+	// Набор — МОДУЛЬ ЭТОГО МАНИФЕСТА, и другого правило назвать не вправе:
+	// раздача прав в чужом домене отвергается загрузчиком
+	// (`manifest.ErrRoleRuleForeignModule`), а подстановку модуля не допускает
+	// модульная политика роли. Значит перечень из одного имени — не сужение, а
+	// точная граница представимого здесь.
+	//
+	// ЗДЕСЬ СТОЯЛ КАНОН — перечень, ПОРОЖДЁННЫЙ СБОРКОЙ из манифестов нашего
+	// дерева (`authzmap.CatalogSeedModules()`), — с доводом «роль модуля
+	// объявлена ДЕРЕВОМ, а не строкой». Довод пережил свой предмет: набор
+	// модулей разомкнут (`manifest`, moduleset.go), манифест модуля оператора
+	// доставку проходит, и канон отвергал бы ЕГО РОЛИ отказом «unknown module»
+	// — то есть доставка грузилась бы и не применялась, а отказ приходил бы на
+	// старте службы о модуле, который её же доставка только что объявила.
+	if verr := r.Validate(domain.ModuleSetOf(module)); verr != nil {
 		werr := fmt.Errorf("%w: %s: %w", ErrRoleRejectedByDomain, name, verr)
 		return domain.Role{}, refuse(codes.InvalidArgument, werr.Error(),
 			LaneRejectedByDomain, module, string(name), werr)

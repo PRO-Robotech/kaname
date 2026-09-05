@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package interactiveclient — use-cases of InternalInteractiveClientService
 // (IAM-INT-1): the lifecycle of the OAuth2 client through which a HUMAN
@@ -14,7 +14,7 @@ package interactiveclient
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // clientRepo — persistence port.

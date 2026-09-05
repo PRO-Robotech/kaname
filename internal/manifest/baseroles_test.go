@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // baseroles_test.go — два признака раздела `resources`, которых требует приёмка
 // `#1090` (задача PRO-Robotech/kacho#1843): `baseRoles` у ресурса (§3.3) и
@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // baseRolesDoc — оболочка с одним ресурсом; %s подставляет тело ресурса.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // acr_floor.go — the per-RPC `required_acr_min` (step-up / MFA-freshness floor)
 // enforcement on the cluster-internal listener (:9091) for the GATEWAY-FRONTED

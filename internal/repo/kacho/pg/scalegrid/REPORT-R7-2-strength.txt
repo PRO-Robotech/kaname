@@ -3,37 +3,44 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 =========================================================================================================================================
 
 ПРОВЕНАНС
-  снято               2026-09-04 21:02:36 MSK
-  ревизия дерева      a28c815649404c4a714b7993e40955a5706aa587
-  состояние дерева    чистое (несохранённых правок нет) — ревизия описывает
-                      исполнявшееся дерево целиком
+  снято               2026-09-05 13:42:21 MSK
+  ревизия дерева      2c5e28ac165ecba7b4ffb5580d7f5db600e90d09
+  состояние дерева    чистое по предмету замера: несохранённых правок среди
+                      файлов под отпечатком нет — ревизия описывает
+                      исполнявшийся КОД целиком.
+                      Вне предмета правок 2 — на измеряемую стоимость они не
+                      влияют; принадлежность выведена из перечня файлов под
+                      отпечатком ниже, а не из выписанного исключения:
+                        вне предмета    services/iam/internal/repo/kacho/pg/scalegrid/REPORT-R7-2-write-delete.txt
+                        вне предмета    services/iam/internal/repo/kacho/pg/scalegrid/REPORT-R7-3-matrix-volume.txt
   машина              AMD Ryzen 9 5950X 16-Core Processor, ядер 32
   Postgres            16.15
 
 ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА (гейт свежести сверяет его с текущим деревом)
-  отпечаток состава     28861514f7e6ec37
-  отпечаток содержимого e99781007111ecaf
-  файлов под отпечатком 18, таблиц выведено 18 (kacho_iam.access_binding_subjects, kacho_iam.access_bindings, kacho_iam.accounts, kacho_iam.catalog_resource, kacho_iam.clusters, kacho_iam.group_members, kacho_iam.groups, kacho_iam.memberships, kacho_iam.projects, kacho_iam.relation_fact, kacho_iam.resource_mirror, kacho_iam.resource_parent_edge, kacho_iam.resource_scope_edge, kacho_iam.role_rule_selectors, kacho_iam.role_verb, kacho_iam.roles, kacho_iam.service_accounts, kacho_iam.users)
-  предикат отпечатка    все не-тестовые .go каталогов services/iam/internal/repo/kacho/pg/relverdict и services/iam/internal/repo/kacho/pg/scalegrid; те .sql каталога services/iam/internal/migrations, что МЕНЯЮТ СТРУКТУРУ (CREATE/ALTER/DROP вне комментариев) хотя бы одной таблицы, которую читает запрос вердикта (имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kacho_iam.", а не выписаны); БЕЗ файлов, объявленных оснасткой отпечатка (они не касаются базы — проверяется разбором, а не перечнем)
+  отпечаток состава     e63f641d844c5bb4
+  отпечаток содержимого be811c828e3b75bd
+  файлов под отпечатком 19, таблиц выведено 18 (kacho_iam.access_binding_subjects, kacho_iam.access_bindings, kacho_iam.accounts, kacho_iam.catalog_resource, kacho_iam.clusters, kacho_iam.group_members, kacho_iam.groups, kacho_iam.memberships, kacho_iam.projects, kacho_iam.relation_fact, kacho_iam.resource_mirror, kacho_iam.resource_parent_edge, kacho_iam.resource_scope_edge, kacho_iam.role_rule_selectors, kacho_iam.role_verb, kacho_iam.roles, kacho_iam.service_accounts, kacho_iam.users)
+  предикат отпечатка    все не-тестовые .go каталогов services/iam/internal/repo/kacho/pg/relverdict и services/iam/internal/repo/kacho/pg/scalegrid; те .sql каталога services/iam/internal/migrations, что МЕНЯЮТ СТРУКТУРУ (CREATE/ALTER/DROP вне комментариев) хотя бы одной таблицы, которую читает запрос вердикта (имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kacho_iam.", а не выписаны); БЕЗ файлов, объявленных оснасткой отпечатка (они не касаются базы — проверяется разбором, а не перечнем); у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев (директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ обесценивает; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора (-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала
   ФАЙЛЫ ПОД ОТПЕЧАТКОМ (пофайлово, чтобы гейт назвал ВИНОВНИКА, а не только факт)
-    d32c3de6026269b1  services/iam/internal/migrations/0001_initial.sql
-    be965ce4f4d9f114  services/iam/internal/migrations/20260904135459_role_owner_module_needs_a_liveness_key.sql
-    f4b0348d3c007de7  services/iam/internal/repo/kacho/pg/relverdict/asker.go
-    41ae4c0d65a7441c  services/iam/internal/repo/kacho/pg/relverdict/asker_gate.go
-    430a0396b5bd10b5  services/iam/internal/repo/kacho/pg/relverdict/catalogtype.go
-    7690dd1ed78f4b14  services/iam/internal/repo/kacho/pg/relverdict/condition.go
-    e49d16fcea46e348  services/iam/internal/repo/kacho/pg/relverdict/expand.go
-    2a2a0e6d45e4f8ba  services/iam/internal/repo/kacho/pg/relverdict/labelaxis.go
-    a58a458841a224f4  services/iam/internal/repo/kacho/pg/relverdict/list.go
-    0663db0e37577931  services/iam/internal/repo/kacho/pg/relverdict/membership.go
-    9cf793a133cf48b8  services/iam/internal/repo/kacho/pg/relverdict/query.go
-    883dd58eac4c9343  services/iam/internal/repo/kacho/pg/relverdict/subjects.go
-    6dd100ec78c176ec  services/iam/internal/repo/kacho/pg/scalegrid/census.go
-    ceab462930210d1e  services/iam/internal/repo/kacho/pg/scalegrid/dictionary.go
-    6138411d3c7dbc10  services/iam/internal/repo/kacho/pg/scalegrid/grid.go
-    5e176dc8409cc672  services/iam/internal/repo/kacho/pg/scalegrid/seed.go
-    1b91d4b57ab104da  services/iam/internal/repo/kacho/pg/scalegrid/strength.go
-    0c4fdd69541c927c  services/iam/internal/repo/kacho/pg/scalegrid/strength_census.go
+    6323f9705aff7665  services/iam/internal/migrations/0001_initial.sql
+    da2036e427d614d3  services/iam/internal/migrations/20260904135459_role_owner_module_needs_a_liveness_key.sql
+    d329665d2aa1de5e  services/iam/internal/migrations/20260905020423_roles_carry_a_time_of_last_edit.sql
+    28ccc0b674e6ac55  services/iam/internal/repo/kacho/pg/relverdict/asker.go
+    a3147290853d8f50  services/iam/internal/repo/kacho/pg/relverdict/asker_gate.go
+    30550271ea1a2ab6  services/iam/internal/repo/kacho/pg/relverdict/catalogtype.go
+    26004fc4746102cd  services/iam/internal/repo/kacho/pg/relverdict/condition.go
+    4e8dfe0e14082206  services/iam/internal/repo/kacho/pg/relverdict/expand.go
+    b579e517cdf0a073  services/iam/internal/repo/kacho/pg/relverdict/labelaxis.go
+    b6b6f779583a2416  services/iam/internal/repo/kacho/pg/relverdict/list.go
+    0e700f09e4cb34b2  services/iam/internal/repo/kacho/pg/relverdict/membership.go
+    734db07acd28c59e  services/iam/internal/repo/kacho/pg/relverdict/query.go
+    a4d449f6292e72c3  services/iam/internal/repo/kacho/pg/relverdict/subjects.go
+    3353a111d979d183  services/iam/internal/repo/kacho/pg/scalegrid/census.go
+    f2edbd685a512a60  services/iam/internal/repo/kacho/pg/scalegrid/dictionary.go
+    207aaca91e4a2a36  services/iam/internal/repo/kacho/pg/scalegrid/grid.go
+    fd913bc96faa0005  services/iam/internal/repo/kacho/pg/scalegrid/seed.go
+    39d58ae3d30f9397  services/iam/internal/repo/kacho/pg/scalegrid/strength.go
+    2d199b06764a7ced  services/iam/internal/repo/kacho/pg/scalegrid/strength_census.go
 
 СЕТКА (константа в коде, ниоткуда не переопределяется)
   ось V: 100, 1000, 10000, 100000  — неподвижны: M=0 L=1 S=7 K=1
@@ -47,7 +54,7 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
   отпечаток сетки: 56243a745174323e
 
 ВОСПРОИЗВЕДЕНИЕ (дословно)
-  KACHO_STRENGTH_FULL=1 go test ./services/iam/internal/repo/kacho/pg/relverdict/ -run TestStrengthGrid_Report -count=1 -v -timeout 120m
+  KACHO_STRENGTH_FULL=1 go test -C services/iam ./internal/repo/kacho/pg/relverdict/ -run TestStrengthGrid_Report -count=1 -v -timeout 120m
 ТРИ УТВЕРЖДЕНИЯ, КОТОРЫЕ ЭТОТ ОТЧЁТ НЕСЁТ ДОСЛОВНО
   1. Числа описывают путь, который СЕГОДНЯ И ПРИНИМАЕТ РЕШЕНИЕ О ДОСТУПЕ.
      Внешнего движка отношений в продукте НЕТ — он снят стадией S6 эпика
@@ -83,26 +90,26 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  100             57        65       122       40        144      3    1.014ms     4.01ms allow   
-  1000            57        63       120       40        142      3      889µs      987µs allow   
-  10000           57        63       120       40        142      3      898µs    1.032ms allow   
-  100000          57        63       120       40        142      3    1.074ms    1.262ms allow   
+  100             57        65       122       40        144      3        1ms     4.17ms allow   
+  1000            57        63       120       40        142      3      954µs     1.32ms allow   
+  10000           57        63       120       40        142      3      944µs    1.108ms allow   
+  100000          57        63       120       40        142      3      917µs    1.103ms allow   
     отношение верхней к нижней: тронуто 0.98× · сканов 1.00×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  100             65        74       139       42        143      3      928µs      999µs deny    
-  1000            65        71       136       42        140      3      882µs      939µs deny    
-  10000           65        71       136       42        140      3      881µs      952µs deny    
-  100000          65        71       136       42        140      3      923µs      976µs deny    
+  100             65        74       139       42        143      3      978µs    1.171ms deny    
+  1000            65        71       136       42        140      3      924µs    1.111ms deny    
+  10000           65        71       136       42        140      3     1.06ms    1.189ms deny    
+  100000          65        71       136       42        140      3      996µs    1.103ms deny    
     отношение верхней к нижней: тронуто 0.98× · сканов 1.00×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  100             57        67       124       42        134      3      918µs      976µs deny    
-  1000            57        67       124       42        134      3      865µs      911µs deny    
-  10000           57        67       124       42        134      3      891µs      975µs deny    
-  100000          57        67       124       42        134      3      907µs      940µs deny    
+  100             57        67       124       42        134      3      931µs      952µs deny    
+  1000            57        67       124       42        134      3      860µs      931µs deny    
+  10000           57        67       124       42        134      3      905µs    1.059ms deny    
+  100000          57        67       124       42        134      3      969µs      1.1ms deny    
     отношение верхней к нижней: тронуто 1.00× · сканов 1.00×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
@@ -145,32 +152,32 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  0               57        63       120       40        142      3    1.005ms    4.189ms allow   
-  1               58        63       121       40        143      3      926µs      981µs allow   
-  8               65        63       128       40        150      3      966µs    1.262ms allow   
-  64             121        63       184       40        206      3    1.022ms    1.365ms allow   
-  256*           313        55       368       40        388      3    1.332ms    1.494ms allow   
-  1024*         1081     13010     14091       40       1156      3    2.172ms      2.6ms allow   
+  0               57        63       120       40        142      3    1.022ms    4.269ms allow   
+  1               58        63       121       40        143      3      921µs    1.009ms allow   
+  8               65        63       128       40        150      3      901µs    1.059ms allow   
+  64             121        63       184       40        206      3    1.039ms    1.247ms allow   
+  256*           313        55       368       40        388      3    1.291ms    1.405ms allow   
+  1024*         1081     13010     14091       40       1156      3    2.158ms    2.236ms allow   
     отношение верхней к нижней: тронуто 117.42× · сканов 1.00×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  0               65        71       136       42        140      3      974µs    1.032ms deny    
-  1               66        71       137       42        141      3      971µs    1.215ms deny    
-  8               73        71       144       42        148      3      889µs    1.093ms deny    
-  64             129        71       200       42        204      3      996µs    1.043ms deny    
-  256*           313        56       369       40        386      3    1.275ms    1.335ms deny    
-  1024*         1081     13011     14092       40       1146      3    2.136ms      2.2ms deny    
+  0               65        71       136       42        140      3      964µs    1.108ms deny    
+  1               66        71       137       42        141      3      998µs    1.033ms deny    
+  8               73        71       144       42        148      3      992µs    1.203ms deny    
+  64             129        71       200       42        204      3    1.011ms    1.246ms deny    
+  256*           313        56       369       40        386      3    1.301ms    1.421ms deny    
+  1024*         1081     13011     14092       40       1146      3    2.152ms     2.18ms deny    
     отношение верхней к нижней: тронуто 103.62× · сканов 0.95×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  0               57        67       124       42        134      3      967µs    1.069ms deny    
-  1               58        67       125       42        135      3      890µs    1.262ms deny    
-  8               65        67       132       42        142      3      900µs     1.17ms deny    
-  64             121        67       188       42        198      3    1.034ms    1.304ms deny    
-  256*           290        52       342       40        380      3    1.257ms    1.539ms deny    
-  1024*         1058     13007     14065       40       1122      3    2.054ms    2.468ms deny    
+  0               57        67       124       42        134      3      990µs    1.199ms deny    
+  1               58        67       125       42        135      3      874µs      981µs deny    
+  8               65        67       132       42        142      3      936µs    1.261ms deny    
+  64             121        67       188       42        198      3      974µs    1.042ms deny    
+  256*           290        52       342       40        380      3    1.319ms    1.729ms deny    
+  1024*         1058     13007     14065       40       1122      3    1.995ms    2.192ms deny    
     отношение верхней к нижней: тронуто 113.43× · сканов 0.95×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
@@ -221,26 +228,26 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               57        63       120       40        142      3      993µs    4.108ms allow   
-  8               59        51       110       40        125      3      949µs    1.336ms allow   
-  64             171        51       222       40        125      3      971µs    1.206ms allow   
-  512*           548        51       599       41        632      3    1.002ms    1.097ms allow   
+  1               57        63       120       40        142      3    1.016ms    4.031ms allow   
+  8               59        51       110       40        125      3      903µs    1.019ms allow   
+  64             171        51       222       40        125      3      955µs    1.144ms allow   
+  512*           548        51       599       41        632      3      962µs    1.066ms allow   
     отношение верхней к нижней: тронуто 4.99× · сканов 1.02×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               65        71       136       42        140      3      949µs    1.005ms deny    
-  8               89        59       148       70        163      3      934µs      976µs deny    
-  64             425       115       540      294        499      3    1.234ms    1.305ms deny    
-  512*          2594       563      3157     2087       3187      3     3.49ms    3.553ms deny    
+  1               65        71       136       42        140      3      995µs    1.221ms deny    
+  8               89        59       148       70        163      3      970µs    1.023ms deny    
+  64             425       115       540      294        499      3    1.239ms    1.332ms deny    
+  512*          2594       563      3157     2087       3187      3    3.417ms    3.447ms deny    
     отношение верхней к нижней: тронуто 23.21× · сканов 49.69×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               57        67       124       42        134      3    1.007ms    1.228ms deny    
-  8               73        59       132       63        155      3      897µs      942µs deny    
-  64             297       115       412      231        435      3    1.203ms    1.624ms deny    
-  512*          1570       563      2133     1576       2675      3    2.779ms    3.043ms deny    
+  1               57        67       124       42        134      3      906µs    1.069ms deny    
+  8               73        59       132       63        155      3      889µs      914µs deny    
+  64             297       115       412      231        435      3    1.121ms    1.235ms deny    
+  512*          1570       563      2133     1576       2675      3    2.667ms    2.729ms deny    
     отношение верхней к нижней: тронуто 17.20× · сканов 37.52×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
@@ -283,26 +290,26 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               45        27        72       25         89      3      903µs    3.869ms allow   
-  7               45        18        63       31        144      3      887µs    1.139ms allow   
-  11              46        14        60       34         83      3      900µs      924µs allow   
-  341*           378       269       647      109        422      3    1.789ms    2.107ms allow   
+  1               45        27        72       25         89      3      896µs    4.126ms allow   
+  7               45        18        63       31        144      3      866µs      977µs allow   
+  11              46        14        60       34         83      3      864µs      901µs allow   
+  341*           378       269       647      109        422      3    1.772ms    1.858ms allow   
     отношение верхней к нижней: тронуто 8.99× · сканов 4.36×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               46        29        75       25         86      3      759µs      808µs deny    
-  7               45        19        64       31        142      3      800µs      842µs deny    
-  11              46        15        61       34         90      3      837µs      889µs deny    
-  341*           378       270       648      109        418      3    1.813ms    1.847ms deny    
+  1               46        29        75       25         86      3      780µs      822µs deny    
+  7               45        19        64       31        142      3      883µs      946µs deny    
+  11              46        15        61       34         90      3      870µs      942µs deny    
+  341*           378       270       648      109        418      3    1.822ms    1.874ms deny    
     отношение верхней к нижней: тронуто 8.64× · сканов 4.36×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               38        24        62       25         79      3      803µs    1.028ms deny    
-  7               38        15        53       31        141      3      794µs      838µs deny    
-  11              44        15        59       34         89      3      825µs      851µs deny    
-  341*           376       270       646      109        417      3    1.799ms    1.913ms deny    
+  1               38        24        62       25         79      3      716µs      853µs deny    
+  7               38        15        53       31        141      3      764µs      865µs deny    
+  11              44        15        59       34         89      3      818µs      905µs deny    
+  341*           376       270       646      109        417      3    1.828ms    1.903ms deny    
     отношение верхней к нижней: тронуто 10.42× · сканов 4.36×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
@@ -345,26 +352,26 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
   вопрос allow
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               57        63       120       40        142      3    1.001ms    4.272ms allow   
-  8               57        63       120       40        142      3      981µs    1.222ms allow   
-  32              53        59       112       40        138      3      915µs      936µs allow   
-  64              53        59       112       40        138      3      916µs      958µs allow   
+  1               57        63       120       40        142      3      997µs    4.279ms allow   
+  8               57        63       120       40        142      3      912µs    1.098ms allow   
+  32              53        59       112       40        138      3      958µs    1.234ms allow   
+  64              53        59       112       40        138      3      901µs      980µs allow   
     отношение верхней к нижней: тронуто 0.93× · сканов 1.00×
 
   вопрос deny(правило)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               65        71       136       42        140      3      982µs    1.155ms deny    
-  8               72        78       150       42        154      3      916µs     1.04ms deny    
-  32              91        97       188       42        228      3      965µs    1.282ms deny    
-  64             123       129       252       42        324      3    1.107ms     1.28ms deny    
+  1               65        71       136       42        140      3      875µs      919µs deny    
+  8               72        78       150       42        154      3      884µs      927µs deny    
+  32              91        97       188       42        228      3      978µs    1.002ms deny    
+  64             123       129       252       42        324      3    1.047ms    1.102ms deny    
     отношение верхней к нижней: тронуто 1.85× · сканов 1.00×
 
   вопрос deny(глагол)
   значение     строк   отброш.   тронуто   сканов  сверочная обращ.        p50        p99 вердикт 
-  1               57        67       124       42        134      3      933µs      963µs deny    
-  8               57        67       124       42        134      3      864µs      926µs deny    
-  32              32        52        84       40        196      3      896µs      946µs deny    
-  64              32        52        84       40        260      3      923µs    1.055ms deny    
+  1               57        67       124       42        134      3      948µs    1.093ms deny    
+  8               57        67       124       42        134      3      901µs      946µs deny    
+  32              32        52        84       40        196      3      921µs     1.14ms deny    
+  64              32        52        84       40        260      3      976µs    1.078ms deny    
     отношение верхней к нижней: тронуто 0.68× · сканов 0.95×
 
   ДЕЛЬТА ОТКАЗА (цена недочитанного): «тронуто» на deny(правило) минус на allow
@@ -410,18 +417,18 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
   никогда, и ОДИН вызов просматривает ВЕСЬ тип. Колонка «заходов» — несущая.
 
   стр.    доступно   заходов   отдано осмотрено<=    строк*  тронуто*  сверочная время вызова
-  50      100%             1       50         50      2017     23131       3817        110ms
-  500     100%             1      500        500     20017   1954531      37567       1.241s
-  1000    100%             1     1000       1000     40017   7528031      75067       1.564s
-  5000*   100%             1     5000       5000    200017 187610031     375067      12.435s
-  50      50%              1       50         50      2017     23131       3817         76ms
-  500     50%              2      500       1000     19517   2252531      75114        2.51s
-  1000    50%              2     1000       2000     39017   8850031     150104       3.311s
-  5000*   50%              2     5000      10000    195017 219100031     750104       28.33s
-  50      0%            2001        1     100050      1967     29931    7574217    2m38.827s
-  500     0%             201        1     100500     19517   2549031    7507617    4m10.516s
-  1000    0%             101        1     101000     39017  10098031    7503917    2m52.753s
-  5000*   0%              21        1     105000    195017 250490031    7500957    5m21.906s
+  50      100%             1       50         50      2017     23131       3817        107ms
+  500     100%             1      500        500     20017   1954531      37567       1.236s
+  1000    100%             1     1000       1000     40017   7528031      75067       1.571s
+  5000*   100%             1     5000       5000    200017 187610031     375067      12.321s
+  50      50%              1       50         50      2017     23131       3817         77ms
+  500     50%              2      500       1000     19517   2252531      75094        2.46s
+  1000    50%              2     1000       2000     39017   8850031     150084       3.315s
+  5000*   50%              2     5000      10000    195017 219100031     750084      28.113s
+  50      0%            2001        1     100050      1967     29931    7554217    36m29.82s
+  500     0%             201        1     100500     19517   2549031    7505607    4m14.169s
+  1000    0%             101        1     101000     39017  10098031    7502907    2m55.174s
+  5000*   0%              21        1     105000    195017 250490031    7500747    5m20.433s
 
   «строк*» и «тронуто*» сняты с ПЕРВОГО захода: суммировать планы разных заходов
   нельзя — это разные исполнения. Стоимость ВЫЗОВА читается по «заходов» × «строк*».
@@ -443,4 +450,4 @@ R7-2 — ПРЕДЕЛ ПРОЧНОСТИ: ЧТЕНИЕ (рамка A, реляц
 
 ОБЪЁМ ОСМОТРЕННОГО
   осей исполнено 6 из 6, точек 34, вопросов задано 78 (по 11 повторов на вопрос),
-  настенное время 17m48s
+  настенное время 51m44s

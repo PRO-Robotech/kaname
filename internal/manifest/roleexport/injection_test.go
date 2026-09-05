@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // injection_test.go — доказательство СПОСОБНОСТИ упасть и СПОСОБНОСТИ смолчать.
 //
@@ -25,9 +25,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest/roleexport"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest/roleexport"
+	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/catalogfixture"
 )
 
 // injectRules — временная копия фикстуры, где выдачи роли заменены дословно.
@@ -151,17 +151,51 @@ func TestInjection_ScopeTierIsRefused(t *testing.T) {
 // TestInjection_SameRelationNameOnTheResourceTypeIsSilent — ЗАКОННЫЙ БЛИЗНЕЦ ПО
 // ИМЕНИ, и он обязателен.
 //
-// Гейт спрашивает то же имя `editor`, но на объекте ТИПА РЕСУРСА
-// (`vpc_network_interface`, действия `internalAttach` / `internalDetach`), и
-// правило роли этот кортеж пишет. Без этого близнеца проверка зеленела бы на
-// реализации, отвергающей ярус ПО ИМЕНИ, — и дефект вернулся бы с другой стороны.
+// Гейт спрашивает то же имя `editor`, но на объекте ТИПА РЕСУРСА, и правило роли
+// этот кортеж пишет. Без этого близнеца проверка зеленела бы на реализации,
+// отвергающей ярус ПО ИМЕНИ, — и дефект вернулся бы с другой стороны.
+//
+// # Почему близнец подаётся ДЕЙСТВИЕМ, а не правилом манифеста (#1835)
+//
+// Прежняя редакция брала близнеца из настоящего каталога — действия
+// `internalAttach` / `internalDetach` ресурса `networkInterface`. Оба живут на
+// ПЛОСКОСТИ ИСПОЛНЕНИЯ, а класс её действий больше не покрывает: черновик
+// манифеста запрещает автоматическую выдачу таких действий, и запрет исполняется
+// с появлением формы `classes` (#1090). То есть прежний близнец проверял ДВА
+// свойства сразу и после введения запрета стал отрицать одно из них.
+//
+// Перепись, из-за которой близнеца нельзя просто перенести на другой ресурс: пар
+// «ярус + объект типа ресурса», встречающихся у АРЕНДАТОРСКИХ действий
+// встроенного каталога, — ноль; все пять таких пар (editor у storage_volume и
+// vpc_network_interface, viewer у storage_image и storage_volume, admin у
+// registry_registry) принадлежат только внутренней плоскости. Поэтому близнец
+// подаётся синтетическим действием арендаторской плоскости с тем же гейтом —
+// свойство остаётся ровно тем же, а плоскость перестаёт в него вмешиваться.
 func TestInjection_SameRelationNameOnTheResourceTypeIsSilent(t *testing.T) {
-	m := injectRules(t, [2]string{consumerRule,
-		"        resources: [networkInterface]\n        classes: [create]"})
-	for _, f := range emptyClassFindings(t, m) {
-		if f.Role == "vpc.internal_consumer" {
-			t.Errorf("законный близнец по имени отношения получил находку: %s", f.Detail)
-		}
+	tenant := roleexport.Action{
+		Module:   "vpc",
+		Resource: "networkInterface",
+		Verb:     "attach",
+		FQN:      "kacho.cloud.vpc.v1.NetworkInterfaceService/Attach",
+		Relation: "editor",
+		Object:   "vpc_network_interface",
+	}
+	covered := roleexport.Covers(catalogfixture.Facts(),
+		[]roleexport.Action{tenant}, "vpc_network_interface", "create")
+	if len(covered) != 1 {
+		t.Errorf("законный близнец по имени отношения не покрыт: ярус %q спрошен на объекте "+
+			"ТИПА РЕСУРСА (%s), и правило роли этот кортеж пишет — значит отвергать его нельзя. "+
+			"Покрыто %d действий", tenant.Relation, tenant.Object, len(covered))
+	}
+
+	// И то же имя на объекте ОБЛАСТИ по-прежнему НЕ производится: без этой
+	// половины близнец доказывал бы, что покрывается всё подряд.
+	scope := tenant
+	scope.Object = "project"
+	if got := roleexport.Covers(catalogfixture.Facts(),
+		[]roleexport.Action{scope}, "vpc_network_interface", "create"); len(got) != 0 {
+		t.Errorf("ярус %q на объекте ОБЛАСТИ (%s) покрыт — правило роли модуля этого кортежа "+
+			"не пишет ни при каком написании", scope.Relation, scope.Object)
 	}
 }
 

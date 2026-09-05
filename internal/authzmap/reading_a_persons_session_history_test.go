@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // reading_a_persons_session_history_test.go — гейт на КЛАСС: ИСТОРИЮ СЕССИЙ
 // ЧЕЛОВЕКА не читает тот, кто распоряжается его аккаунтом.
@@ -96,7 +96,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/internal/authzplan"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
 )
 
 // sessionHistoryRPC — RPC, чей предмет есть ЧТЕНИЕ ИСТОРИИ СЕССИЙ человека.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // dropguard_integration_test.go — iam's chain drops nothing, and that is DECLARED.
 //
@@ -34,9 +34,9 @@ package migrations_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/dropguard"
-	"github.com/PRO-Robotech/kacho/internal/dropguard/dropguardtest"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho/pkg/dropguard"
+	"github.com/PRO-Robotech/kacho/pkg/dropguard/dropguardtest"
 )
 
 func TestIntegration_IamDropsAreMeasured(t *testing.T) {

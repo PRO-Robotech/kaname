@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // module_sa_dead_roles_integration_test.go — гейт на снятие МЁРТВЫХ объявлений
 // ШЕСТИ служебных учёток модулей, и — отдельным утверждением — на сохранность
@@ -65,7 +65,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/fga_outbox"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/fga_outbox"
 )
 
 // retiredModuleSA — шесть снятых объявлений: имя службы (для детерминированного

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // attributionspelling_injection_test.go — доказательство способности проб
 // написания падать И молчать (задача #1884).

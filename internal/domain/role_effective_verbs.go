@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package domain
 
@@ -44,12 +44,26 @@ const EditorDeleteNote = "co-materialized on in-scope leaf objects, NOT on the a
 // а домен — без внешних зависимостей (см. rule_verbs.go, «pure domain»).
 type TypeVerbLookup func(module, resource string) (verbs []string, ok bool)
 
-// WithCommonFallback оборачивает lookup так, что нерезолвящаяся пара получает
+// WithCommonFallback оборачивает lookup так, что пара-ПОДСТАНОВКА получает
 // словарь, ОБЩИЙ для всех ресурсов.
 //
-// Это решение ВЫЗЫВАЮЩЕГО, не домена: правило, не адресующее ни одного известного
-// типа (в том числе `*`-форма), всё равно обязано дать превью — иначе роль
-// показала бы пустой набор и выглядела бы ничего не дающей.
+// Это решение ВЫЗЫВАЮЩЕГО, не домена: правило-подстановка (`*.*` роли-
+// суперпользователя) своего набора не имеет by construction — перечислить
+// ресурсы подстановки домену нечем, каталог ему не принадлежит, — а пустое
+// превью читалось бы как «роль ничего не даёт».
+//
+// # Запасной словарь даётся ПОДСТАНОВКЕ, а не всякому промаху (kacho#1814)
+//
+// Прежде его получала ЛЮБАЯ нерезолвящаяся пара, и это переворачивало смысл
+// снятия ресурса: правило, называющее снятый `compute.disk`, разворачивалось в
+// глаголы ВСЕЙ платформы, то есть после снятия превью показывало не «меньше», а
+// БОЛЬШЕ. Роль обещала арендатору то, чего материализация не даёт, и обещала
+// тем громче, чем уже правило.
+//
+// Различает ФОРМА пары, а не исход резолва: подстановка называет «все» и потому
+// законно берёт общий словарь; названный ресурс называет ОДИН тип, и если этого
+// типа нет — давать нечего. Промах названной пары остаётся промахом
+// (`ok=false`), и вызывающий разворачивает её ни во что.
 func WithCommonFallback(lookup TypeVerbLookup, common []string) TypeVerbLookup {
 	return func(module, resource string) ([]string, bool) {
 		if lookup != nil {
@@ -57,7 +71,10 @@ func WithCommonFallback(lookup TypeVerbLookup, common []string) TypeVerbLookup {
 				return verbs, true
 			}
 		}
-		return common, true
+		if module == wildcard || resource == wildcard {
+			return common, true
+		}
+		return nil, false
 	}
 }
 

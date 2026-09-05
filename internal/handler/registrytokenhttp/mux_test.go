@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package registrytokenhttp
 
@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/registry_token"
+	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
 )
 
 // TestNewMux_RoutesToken — the mux dispatches the canonical token path to its

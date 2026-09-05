@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package visibility — CQRS port for the STRUCTURAL FACTS about one caller that
 // a list use-case needs before it reads its first candidate row.

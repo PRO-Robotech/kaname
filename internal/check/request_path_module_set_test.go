@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package check
 
@@ -87,8 +87,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/treecorpus"
 	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
+	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 )
 
 // requestPathReach — поддеревья, которые достигает путь запроса. Пути от корня
@@ -99,7 +99,7 @@ var requestPathReach = []string{
 }
 
 // canonImportPath — пакет, чей канон набора модулей выводится ИЗ ДЕРЕВА.
-const canonImportPath = "github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+const canonImportPath = "github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 
 // canonModuleSymbol — производитель канона. Один символ, а не набор: остальные
 // экспортированные имена пакета отвечают на другие вопросы, и запрещать их

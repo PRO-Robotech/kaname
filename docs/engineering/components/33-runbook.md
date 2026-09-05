@@ -31,9 +31,10 @@ kubectl -n kacho get pod -l app=kacho-iam
 # DB reachable? (от корня репозитория)
 make -C deploy psql SVC=iam   # либо nc -zv <db-host> 5432
 
-# fga_outbox: непринятые строки (pending = sent_at IS NULL).
+# fga_outbox: глубина журнала и его голова. «Непринятых» строк у него НЕ БЫВАЕТ:
+# журнал читает триггер, складывающий прямой факт в той же транзакции, что и вставку.
 kubectl -n kacho exec deploy/postgres -- \
-  psql -c "SELECT count(*) FROM kacho_iam.fga_outbox WHERE sent_at IS NULL;"
+  psql -c "SELECT count(*) AS rows, max(created_at) AS last FROM kacho_iam.fga_outbox;"
 
 # Логи последние 5min.
 kubectl -n kacho logs -l app=kacho-iam --since=5m | grep -E "ERROR|FATAL|authz|verdict"
@@ -367,12 +368,13 @@ make -C deploy psql SVC=iam
 # Tail logs.
 kubectl -n kacho logs -l app=kacho-iam -f --tail=200
 
-# Состояние очередей. ВНИМАНИЕ: во второй колонке РАЗНЫЕ величины — у fga/audit это
-# непринятые строки, у subject_change это ВЕСЬ УДЕРЖАННЫЙ журнал (пометки доставки у
-# него нет: его читают курсором, «pending» по нему не определён, а строки снимает
-# фоновая уборка по сроку — число выходит на полку, а не растёт монотонно).
+# Состояние очередей. ВНИМАНИЕ: во второй колонке РАЗНЫЕ величины. У audit это
+# непринятые строки; у fga и subject_change — ВЕСЬ УДЕРЖАННЫЙ журнал (пометки доставки
+# у обоих нет: fga читает триггер в той же транзакции, subject_change читают курсором,
+# «pending» по ним не определён, а строки снимает фоновая уборка по сроку — число
+# выходит на полку, а не растёт монотонно).
 kubectl -n kacho exec deploy/postgres -- psql -c "
-SELECT 'fga (pending)'            AS q, count(*) FILTER (WHERE sent_at IS NULL) AS n, max(created_at) AS last FROM kacho_iam.fga_outbox
+SELECT 'fga (УДЕРЖАНО, журнал)'   AS q, count(*)                              AS n, max(created_at) AS last FROM kacho_iam.fga_outbox
 UNION ALL SELECT 'subject_change (УДЕРЖАНО, журнал)', count(*),                          max(created_at)       FROM kacho_iam.subject_change_outbox
 UNION ALL SELECT 'resource_reconcile (всего)',     count(*),                          max(created_at)       FROM kacho_iam.resource_reconcile_outbox
 UNION ALL SELECT 'audit (pending)',   count(*) FILTER (WHERE status='pending'),        max(created_at)       FROM kacho_iam.audit_outbox;

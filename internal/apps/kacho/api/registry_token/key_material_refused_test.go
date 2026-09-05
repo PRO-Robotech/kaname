@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // key_material_refused_test.go — ДОКЕРНАЯ ПОЛОСА БОЛЬШЕ НЕ ПРИНИМАЕТ КЛЮЧЕВОЙ
 // МАТЕРИАЛ В ПОЛЕ ПАРОЛЯ (задача #1143).

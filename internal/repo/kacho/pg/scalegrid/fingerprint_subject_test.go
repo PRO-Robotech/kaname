@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package scalegrid
 
@@ -65,6 +65,43 @@ func TestMigrationTouchesStructure_ProvenByInjection(t *testing.T) {
 			// Граница слова: `access_bindings_archive` — другая таблица.
 			sql:  "CREATE TABLE kacho_iam.access_bindings_archive (id text PRIMARY KEY);",
 			want: false,
+		},
+		{
+			name: "временная таблица ИЗ ВЫБОРКИ измеряемой — не влияет",
+			// #1833. `CREATE TEMP TABLE … ON COMMIT DROP AS SELECT … FROM <измеряемая>`
+			// несёт в ОДНОМ операторе и `CREATE`, и `DROP`, и имя измеряемой
+			// таблицы — но DDL идёт над ВРЕМЕННОЙ таблицей, а измеряемая только
+			// ЧИТАЕТСЯ. Плана чтения это не меняет, значит отчёт не устаревает.
+			sql: "CREATE TEMP TABLE _sys_rule ON COMMIT DROP AS\n" +
+				"  SELECT id, scope_type FROM kacho_iam.access_bindings WHERE role_id IS NOT NULL;",
+			want: false,
+		},
+		{
+			name: "временная таблица без ON COMMIT — тоже не влияет",
+			// Слово `DROP` из формы не обязательно: одного `CREATE` над временной
+			// таблицей довольно, чтобы прежний предикат взял оператор целиком.
+			sql:  "CREATE TEMPORARY TABLE _seg_scan AS SELECT verb FROM kacho_iam.role_rule_selectors;",
+			want: false,
+		},
+		{
+			name: "снятие временной таблицы по имени — не влияет",
+			sql:  "DROP TABLE IF EXISTS _seg_scan;\nSELECT count(*) FROM kacho_iam.access_bindings;",
+			want: false,
+		},
+		{
+			name: "ЗАКОННЫЙ БЛИЗНЕЦ: постоянная таблица из выборки измеряемой — влияет",
+			// Форма та же, слова `TEMP` нет. Такая таблица живёт в схеме и
+			// меняет её структуру — отпечаток обязан её взять. Без этого случая
+			// починка выродилась бы в «не брать CREATE … AS SELECT вовсе».
+			sql:  "CREATE TABLE kacho_iam.access_bindings_snapshot AS SELECT * FROM kacho_iam.access_bindings;",
+			want: true,
+		},
+		{
+			name: "ЗАКОННЫЙ БЛИЗНЕЦ: временная таблица И правка измеряемой — влияет",
+			// Оператор с временной таблицей отсеивается, СОСЕДНИЙ — нет.
+			sql: "CREATE TEMP TABLE _scan ON COMMIT DROP AS SELECT id FROM kacho_iam.access_bindings;\n" +
+				"ALTER TABLE kacho_iam.access_bindings ADD COLUMN note text;",
+			want: true,
 		},
 		{
 			name: "DDL и упоминание в РАЗНЫХ операторах — не влияет",
@@ -169,15 +206,22 @@ func repoRootFromPackageDir(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("рабочий каталог: %v", err)
 	}
+	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
+	// теперь СВОЙ модуль, и подъём «до первого» останавливался бы в её каталоге,
+	// а пути ниже называют место В ДЕРЕВЕ МОНОРЕПО — от корня.
+	outermost := ""
 	for i := 0; i < 12; i++ {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
+			outermost = dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break
 		}
 		dir = parent
+	}
+	if outermost != "" {
+		return outermost
 	}
 	t.Fatal("корень дерева не найден: подъём от каталога пакета не встретил go.mod")
 	return ""

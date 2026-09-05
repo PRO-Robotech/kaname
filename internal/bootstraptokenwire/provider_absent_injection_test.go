@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // provider_absent_injection_test.go — доказательство, что разбор дороги к
 // поставщику СПОСОБЕН упасть и способен смолчать.
@@ -34,7 +34,7 @@ func TestProviderRoadDetector_FindsTheRoad(t *testing.T) {
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
 )
 
 func provision(ctx context.Context, a *clients.HydraAdminClient) {}
@@ -57,7 +57,7 @@ func TestProviderRoadDetector_SilentOnALegitimateTwin(t *testing.T) {
 import (
 	"context"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/tokensigner"
+	"github.com/PRO-Robotech/kacho-iam/internal/tokensigner"
 )
 
 func mint(ctx context.Context, s *tokensigner.Signer) {}
@@ -78,7 +78,7 @@ func TestProviderRoadDetector_IgnoresTestTrees(t *testing.T) {
 	dir := t.TempDir()
 	body := `package synthetic
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/clients"
+import "github.com/PRO-Robotech/kacho-iam/internal/clients"
 
 var _ = clients.JWK{}
 `

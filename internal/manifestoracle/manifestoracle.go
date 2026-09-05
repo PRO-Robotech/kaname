@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package manifestoracle — переходник: модель прав отвечает на вопросы
 // загрузчика манифестов (задача продукта #2002).
@@ -24,8 +24,8 @@
 package manifestoracle
 
 import (
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmodel"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmodel"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 )
 
 // fromPlans — разобранная модель в роли оракула загрузчика.

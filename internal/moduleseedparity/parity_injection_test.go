@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Инъекция сверки посева: доказательство, что она СПОСОБНА упасть и способна
 // смолчать.
@@ -17,7 +17,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/moduleseedparity"
+	"github.com/PRO-Robotech/kacho-iam/internal/moduleseedparity"
 )
 
 func injSA(desc string) moduleseedparity.ServiceAccount {

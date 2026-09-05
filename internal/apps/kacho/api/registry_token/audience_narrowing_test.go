@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // audience_narrowing_test.go — адресат докерной полосы сверяется с
 // объявленным, а не берётся из запроса (задача #1184).
@@ -37,7 +37,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/registry_token"
+	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
 )
 
 const (

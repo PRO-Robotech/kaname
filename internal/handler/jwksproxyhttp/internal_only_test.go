@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package jwksproxyhttp_test
 
@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/jwksproxyhttp"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/registrytokenhttp"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/jwksproxyhttp"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/registrytokenhttp"
 )
 
 // RJU-06 — internal-only lock: the /.well-known/jwks.json route is served ONLY by

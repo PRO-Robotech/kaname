@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package internal_iam
 
@@ -33,7 +33,7 @@ package internal_iam
 // заводится сегодня») и соблюдён.
 
 import (
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 )
 
 // catalogTypeOwner — реализация порта `proxytuple.TypeOwner` над ПОРОЖДЁННОЙ

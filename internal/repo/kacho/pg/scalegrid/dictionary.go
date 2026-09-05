@@ -1,9 +1,9 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package scalegrid
 
-import "github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
+import "github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 
 // ЦЕПЬ ПИШЕТСЯ В СЛОВАРЕ МОДЕЛИ — А СТРОКА ЗЕРКАЛА В СЛОВАРЕ КАТАЛОГА
 //
@@ -81,7 +81,7 @@ import "github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
 // ВЫПОЛНЕНИЯ тихим быть не может — его держит схема. Обе половины прогоняются
 // одной командой, и обе живут в `services/iam/internal/migrations/`:
 //
-//	go test ./services/iam/internal/migrations/ \
+//	go test -C services/iam ./internal/migrations/ \
 //	  -run 'BuildTypeDictionaryAgrees|UnknownDottedTypeIsRefused' -count=1 -v
 
 // edgeObjectType — тип объекта в той форме, в какой его пишет в рёбра

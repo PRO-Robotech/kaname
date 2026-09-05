@@ -26,7 +26,7 @@
 - **Реляционная форма** (`internal/repo/kacho/pg/relverdict`) — единственный источник
   решения. Вердикт складывается запросом к собственной базе `kacho_iam` из четырёх
   источников: прямой факт, выдача роли на область, выдача по меткам, членство в группе.
-  Вывод отношений компилируется из модели прав (`internal/authzplan`). Внешнего движка
+  Вывод отношений компилируется из модели прав (`services/iam/internal/authzplan`). Внешнего движка
   отношений нет — см. [`29-relational-verdict.md`](29-relational-verdict.md).
 - **AuthorizeService** (публичный) — sync-проверка решений: `Check` / `BatchCheck` /
   `ListSubjects` / `ExpandRelations` / `WhoAmI`.
@@ -67,7 +67,7 @@
 
 `kacho-iam` (бинарник `cmd/kacho-iam`) поднимает четыре сетевых слушателя и набор
 фоновых worker'ов в одном процессе. Параллельный запуск — через
-`github.com/H-BF/corlib/pkg/parallel.ExecAbstract` с общим shutdown-триггером
+`golang.org/x/sync/errgroup` с общим shutdown-триггером
 (SIGTERM / SIGINT или первая ошибка задачи).
 
 ```mermaid
@@ -218,12 +218,27 @@ errors/              # sentinel + WrapPgErr.
 | `:9090`   | `AuthorizeService`              | Check / BatchCheck / ListSubjects / ExpandRelations / WhoAmI |
 | `:9090`   | `PermissionCatalogService`      | грантуемая таксономия прав                              |
 | `:9090`   | `OperationService`              | LRO Get / List / Cancel (corelib)                      |
+| `:9090`   | `MembershipService`             | read Membership (Account ↔ User)                       |
+| `:9090`   | `UserTokenService`              | Issue / List / Revoke пользовательских токенов         |
+| `:9090`   | `LimitService`                  | CRUD Limit — величины пределов арендатора              |
+| `:9090`   | `IdentityQuotaService`          | List квот личности (`kacho.cloud.quota.v1`)            |
 | `:9091`   | `InternalIAMService`            | Check + Register/UnregisterResource (fgaproxy)         |
 | `:9091`   | `AuthorizeService`              | тот же обработчик для peer-проверок по mTLS-ребру      |
 | `:9091`   | `InternalClusterService`        | cluster-admin grants (time-bombed / permanent)         |
 | `:9091`   | `InternalUserService`           | `UpsertFromIdentity` (mirror identity)                 |
 | `:9091`   | `InternalOperationsService`     | cluster-wide admin operations feed                     |
 | `:9091`   | `InternalSessionRevocationsService` | logout / force-logout + hot-path IsRevoked         |
+| `:9091`   | `InternalInteractiveClientService` | CRUD InteractiveClient (OAuth2-клиенты консоли) |
+| `:9091`   | `InternalLimitService`          | CRUD Limit + `Resolve` / `ListChangedSince` доменам    |
+| `:9091`   | `InternalModuleService`         | `Plan` / `Apply` манифеста модуля + read               |
+| `:9091`   | `InternalBootstrapTokenService` | `MintBootstrapToken` — удостоверение начальной настройки |
+
+**Состав таблицы держит гейт, а не внимание.** Перечень уже расходился с деревом —
+и расходился на ОБОИХ слушателях сразу. `services/iam/internal/check`
+`TestOverviewPortTableMatchesRegistration` берёт регистрации РАЗБОРОМ
+`cmd/kacho-iam/grpc_register.go` (узлами дерева, а не поиском по образцу: имя
+`Register…ServiceServer` законно стоит и в прозе) и требует совпадения по каждому
+слушателю в обе стороны — служба без строки и строка без службы одинаково красные.
 
 `AuthorizeService` дополнительно зарегистрирован на internal-listener: тот же обработчик
 переиспользуется сервисами платформы поверх уже установленного mTLS-ребра `:9091`. Это не нарушает internal-vs-external (запрет #6):
@@ -274,7 +289,7 @@ sequenceDiagram
   доменные proto-stubs (генерируются локально из `proto/`).
 - `github.com/jackc/pgx/v5` — Postgres driver.
 - `github.com/spf13/viper` — конфиг.
-- `github.com/H-BF/corlib/pkg/parallel` — параллельный запуск задач.
+- `golang.org/x/sync/errgroup` — параллельный запуск задач.
 - `go.uber.org/multierr` — cumulative validation errors.
 
 **Runtime-зависимости (peer):**

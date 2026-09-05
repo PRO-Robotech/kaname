@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -46,9 +46,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 // TestModuleStateIsBlindToTenantMovementAndSensitiveToCatalogForm — предикат
@@ -59,7 +59,7 @@ func TestModuleStateIsBlindToTenantMovementAndSensitiveToCatalogForm(t *testing.
 		catRepo := kachopg.NewCatalogRepo(pool)
 		repo := kachopg.New(pool, nil)
 
-		census, err := seed.AssertCatalogParity(ctx, catRepo)
+		census, err := seed.AssertCatalogParity(ctx, catRepo, seed.ImageAnchor())
 		require.NoError(t, err, "предпосылка не создана: посеянный каталог уже разошёлся с опорой")
 		snap, err := catalog.NewSnapshot(census.Live, catRepo, nil, nil)
 		require.NoError(t, err, "снимок каталога")
@@ -105,7 +105,7 @@ func TestModuleStateIsBlindToTenantMovementAndSensitiveToCatalogForm(t *testing.
 	t.Run("смена формы живой строки каталога состояние модуля меняет", func(t *testing.T) {
 		ctx, pool := catalogPool(t)
 
-		_, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool))
+		_, err := seed.AssertCatalogParity(ctx, kachopg.NewCatalogRepo(pool), seed.ImageAnchor())
 		require.NoError(t, err, "предпосылка не создана: посеянный каталог уже разошёлся с опорой")
 
 		base := moduleCatalogSnapshot(t, ctx, pool, anchoredModule)

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Фикстура пробы: оболочка манифеста плюс раздел `seed` ДОСЛОВНО из черновика
 # (kacho-workspace/docs/manifest-dcl/vpc.manifest.yaml, 2026-08-31). Отличия от
@@ -35,7 +35,7 @@ seed:
   # успехом о предмете, которого нет. Второй предикат жив и половину про ПЯТЬ
   # подтверждает дословно: `kacho-iam-bootstrap` есть, `kacho-iam` — нет.
   # Предикаты обеих половин:
-  #   go test ./services/iam/internal/authzmap/ -run TestModuleSet_PinnedComposition -count=1
+  #   go test -C services/iam ./internal/authzmap/ -run TestModuleSet_PinnedComposition -count=1
   #   git grep -ohE "'kacho-[a-z-]+'" -- 'services/iam/internal/migrations/*.sql' | sort -u
   #
   # Каждая обязана нести `description` —

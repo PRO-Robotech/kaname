@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // bootstrap_admin.go — startup-time bootstrap admin grant + fga_outbox enqueue.
 //
@@ -39,7 +39,7 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/db/pgfault"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // BootstrapAdminInput — bootstrap-run parameters.

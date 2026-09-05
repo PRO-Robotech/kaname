@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package clients_test
 
@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/migrations"
+	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
 )
 
 // TestMain hands this package one Postgres instead of one per test.
@@ -26,7 +26,7 @@ import (
 // поэтому цепочка миграций не изменилась и этот TestMain тоже.
 //
 // Каждой пробе по-прежнему достаётся своя база, склонированная с мигрированного
-// образца — почему клон, а не отдельный контейнер, см. internal/pgtest.
+// образца — почему клон, а не отдельный контейнер, см. pkg/pgtest.
 // Контейнер поднимается лениво, поэтому короткий прогон, пропускающий все пробы,
 // не поднимает ничего.
 func TestMain(m *testing.M) {
@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 		// Приведение схемы — ОДИН раз на пакет, у выдающего базу.
 		// Прежде его приписывал каждый вызывающий своей копией; забывший
 		// получал `relation … does not exist` — отказ, читающийся как дефект
-		// продукта. Довод целиком — `internal/pgtest` §searchpath.
+		// продукта. Довод целиком — `pkg/pgtest` §searchpath.
 		SearchPath: "kacho_iam,public",
 		Name:       "iam",
 		Migrate:    pgtest.Goose(migrations.FS),

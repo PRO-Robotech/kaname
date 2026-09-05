@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package membership
 
@@ -15,7 +15,7 @@ package membership
 import (
 	"github.com/PRO-Robotech/kacho/pkg/filter"
 
-	iamerr "github.com/PRO-Robotech/kacho/services/iam/internal/errors"
+	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 )
 
 // FilterFieldUserID — единственный терм белого списка.

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // projection_scan_arity_test.go — каждая каноническая проекция колонок читается
 // РОВНО СТОЛЬКИМИ приёмниками, сколько в ней колонок.
@@ -33,7 +33,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 )
 
 // errArityProbe обрывает чтение сразу после захвата длины: тело сканера за

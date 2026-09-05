@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // ledger_read_cost_injection_test.go — доказательство, что пробы соседа
 // СПОСОБНЫ упасть (#2001).

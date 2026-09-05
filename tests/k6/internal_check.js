@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // internal_check.js — нагрузка на InternalIAMService.Check: точечную проверку
 // доступа, которую per-RPC интерсепторы vpc / compute / nlb зовут на КАЖДОМ

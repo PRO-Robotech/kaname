@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // principal.go — helper: principal-id-as-string for handlers that need to
 // stamp `created_by` / `reviewer` / similar identity-derived fields from the

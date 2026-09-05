@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package access_binding_test
 
@@ -7,18 +7,24 @@ package access_binding_test
 // critical-section, END-TO-END on testcontainers PG16.
 //
 // The soft-revoke reads the binding's emitted-tuple ledger and removes exactly that
-// set. A concurrent ReconcileBindingForward pass materializes NEW members under a
-// SHARE advisory lock (pg_advisory_xact_lock_shared(hashtext(binding_id))) and
-// appends their tuples to the same ledger. If the revoke writer-tx takes no lock at
+// set. A concurrent ReconcileBindingForward pass materializes NEW members and appends
+// their tuples to the same ledger. If the revoke writer-tx takes no lock at
 // all, the two txs never conflict: the forward row lands after the revoke's snapshot
 // and is never in the delete-set — and because a REVOKED binding short-circuits
 // `!bs.Active` in reconcileBinding AND in both forward paths, nothing ever reclaims
 // it. The revoked subject keeps that object's verbs forever.
 //
-// This test stands in for the forward pass with a raw tx that holds the SHARE lock
-// and inserts the ledger row, and asserts the revoke (a) BLOCKS while that tx is
-// open (proving the EXCLUSIVE lock is really taken on the same hashtext key) and
+// This test stands in for a concurrent writer with a raw tx that holds SHARE on the
+// binding key and inserts the ledger row, and asserts the revoke (a) BLOCKS while that
+// tx is open (proving the EXCLUSIVE lock is really taken on the same hashtext key) and
 // (b) removes the racing tuple once it proceeds.
+//
+// РАСХОЖДЕНИЕ ДУБЛЁРА С ПРОДУКТОМ — названо, а не подразумевается. Сегодня форвард
+// advisory-блокировки НЕ БЕРЁТ ВОВСЕ (см. «LOCK CHOICE» в reconcile/forward.go), поэтому
+// дублёр здесь СТРОЖЕ продукта: он держит SHARE, а настоящий форвард не держит ничего.
+// Утверждение теста от этого остаётся верным — оно про отзыв: тот и правда берёт
+// EXCLUSIVE на том же ключе, и это доказывается ожиданием. Чего этот тест НЕ утверждает:
+// что настоящий форвард встал бы в очередь за отзывом — он не встанет.
 
 import (
 	"context"
@@ -32,11 +38,11 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	accessbindingapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/access_binding"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/clients"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	abrepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/access_binding"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	accessbindingapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/access_binding"
+	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	abrepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/access_binding"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 // denyingRelations — RelationStore that denies every question.
@@ -153,8 +159,8 @@ func TestAB_IAM_1_28_Revoke_SerializesWithConcurrentForwardPass(t *testing.T) {
 	}))
 	require.NoError(t, w.Commit(ctx))
 
-	// A concurrent forward pass: SHARE lock on hashtext(binding_id) + a NEW ledger
-	// row, not yet committed.
+	// Дублёр параллельного писателя: SHARE на hashtext(binding_id) + НОВАЯ строка журнала,
+	// ещё не закоммиченная. Настоящий форвард блокировки не берёт — см. шапку файла.
 	fwd, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	fwdDone := false

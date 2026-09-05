@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package pg_test
 
@@ -117,16 +117,16 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	roleapp "github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/api/role"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/authzmodel"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/domain"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/manifest"
-	kachorepo "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg/relverdict"
+	roleapp "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/role"
+	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kacho-iam/internal/authzmodel"
+	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	kachorepo "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/relverdict"
 )
 
 // Предмет ПЕРВОЙ пробы: ресурс ПОСТАВЛЯЕМОГО модуля. Блок его типа пришёл со
@@ -463,7 +463,7 @@ func TestDoD1_RuntimeAppliedCatalogRowCarriesTheGrantToTheVerdict(t *testing.T) 
 	repo := kachopg.New(pool, nil)
 	applier := applierOver(t, pool)
 
-	census, err := seed.AssertCatalogParity(ctx, catRepo)
+	census, err := seed.AssertCatalogParity(ctx, catRepo, seed.ImageAnchor())
 	require.NoError(t, err, "страж паритета каталога")
 	snap, err := catalog.NewSnapshot(census.Live, catRepo, nil, nil)
 	require.NoError(t, err, "снимок каталога")
@@ -691,7 +691,7 @@ func TestDoD1_TypeUnknownToTheBuildReachesTheVerdictThroughTheComposedModel(t *t
 			"собранную модель в TestMain (installHarnessComposedModel) — это обстановка "+
 			"пробы, а не предмет её утверждения", verdictAppliedModel)
 
-	census, err := seed.AssertCatalogParity(ctx, catRepo)
+	census, err := seed.AssertCatalogParity(ctx, catRepo, seed.ImageAnchor())
 	require.NoError(t, err, "страж паритета каталога")
 	snap, err := catalog.NewSnapshot(census.Live, catRepo, nil, nil)
 	require.NoError(t, err, "снимок каталога")

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package authzfilter resolves per-object READ-visibility for kacho-iam's own read
 // surfaces by asking a DIRECT per-object question — never by enumerating the objects

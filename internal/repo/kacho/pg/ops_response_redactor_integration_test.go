@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // ops_response_redactor_integration_test.go — end-to-end redactor proof.
 //
@@ -29,13 +29,13 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/PRO-Robotech/kacho/internal/pgtest"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 
-	kachopg "github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho/pg"
+	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
 )
 
 // setupRedactorPG отдаёт вызывающему СОБСТВЕННУЮ базу схемы kacho_iam на общем
@@ -43,7 +43,7 @@ import (
 //
 // Раньше на каждый вызов поднимался отдельный контейнер и заново проигрывалась
 // вся цепочка миграций. Теперь база клонируется из шаблона, смигрированного
-// TestMain'ом один раз, — состояние и изоляция те же (см. internal/pgtest).
+// TestMain'ом один раз, — состояние и изоляция те же (см. pkg/pgtest).
 func setupRedactorPG(t *testing.T) string {
 	t.Helper()
 	return pgtest.NewDB(t)

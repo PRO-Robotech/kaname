@@ -1,5 +1,5 @@
 # Copyright (c) PRO-Robotech
-# SPDX-License-Identifier: BUSL-1.1
+# SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Case-set: iam is the SINGLE FACADE to the token-signing provider (#59, Phase C).
 

@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 package iamhooks_test
 
@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/services/iam/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
 )
 
 // fakeProvisioner records the last ProvisionInput it received and can be

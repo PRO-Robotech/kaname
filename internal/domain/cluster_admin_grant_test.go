@@ -1,5 +1,5 @@
 // Copyright (c) PRO-Robotech
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 // cluster_admin_grant_test.go — unit tests для self-validating newtype
 // `ClusterAdminGrant`.
