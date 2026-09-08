@@ -20,6 +20,10 @@ api-server, repository, authn. Секции, которой нет в Config, в
 Зовётся из ОБОИХ шаблонов, ссылающихся на такие объекты: какой из них
 отрендерится первым, решает helm, а перечень обязан быть полным в любом. */}}
 {{- include "kaname-svc.requireOperatorSuppliedNames" . -}}
+{{/* СНЯТЫЙ ключ посадки отвергается вслух — из ОБОИХ шаблонов по той же
+причине, что и перечень выше: какой отрендерится первым, решает helm, а отказ
+обязан прийти в любом. */}}
+{{- include "kaname-svc.requireNoRetiredPortKnobs" . -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:

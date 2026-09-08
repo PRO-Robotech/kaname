@@ -79,6 +79,8 @@ var deliveryRoster = []string{
 	"probe_scheme_follows_edge_injection_test.go",
 	"probe_scheme_follows_edge_test.go",
 	"prod_profile_injection_test.go",
+	"port_knob_moves_its_listener_injection_test.go",
+	"port_knob_moves_its_listener_test.go",
 	"prod_profile_render_injection_test.go",
 	"prod_profile_render_test.go",
 	"prod_profile_test.go",

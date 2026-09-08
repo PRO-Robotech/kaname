@@ -5,6 +5,10 @@
 Зовётся из ОБОИХ шаблонов, ссылающихся на такие объекты: какой из них
 отрендерится первым, решает helm, а перечень обязан быть полным в любом. */}}
 {{- include "kaname-svc.requireOperatorSuppliedNames" . -}}
+{{/* СНЯТЫЙ ключ посадки отвергается вслух — из ОБОИХ шаблонов по той же
+причине, что и перечень выше: какой отрендерится первым, решает helm, а отказ
+обязан прийти в любом. */}}
+{{- include "kaname-svc.requireNoRetiredPortKnobs" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -62,7 +66,12 @@ spec:
         # поверхности не нужен — её маршрут здесь.
         {{- if .Values.metricsScrape.enabled }}
         prometheus.io/scrape: "true"
-        prometheus.io/port: {{ .Values.ports.metrics | quote }}
+        # ПОРТ ВЫВОДИТСЯ ИЗ УМОЛЧАНИЯ ПРОЦЕССА, а не читает ключ посадки.
+        # Здесь читался `ports.metrics` (задача #2394): карта настроек адреса
+        # метрик не эмитит вовсе, поэтому ключ двигал это объявление и порт
+        # пода, оставляя слушатель на прежнем адресе, — собиратель приходил
+        # туда, где никто не отвечает, а рендер был зелёным.
+        prometheus.io/port: {{ include "kaname-svc.processDefaultPort" "metrics" | quote }}
         prometheus.io/path: /metrics
         # СХЕМА ЧИТАЕТСЯ У ТОЙ ЖЕ РУЧКИ, ЧТО ПОДНИМАЕТ ТРАНСПОРТ СЛУШАТЕЛЯ.
         # Боевой профиль поднимает эту поверхность по TLS, и объявление,
@@ -162,8 +171,11 @@ spec:
               containerPort: {{ .Values.ports.grpc }}
             - name: grpc-internal
               containerPort: {{ .Values.ports.internalGrpc }}
+            # Диагностическая поверхность. Её адрес приходит умолчанием
+            # процесса ровно как у трёх соседей ниже, поэтому и порт выводится
+            # оттуда же: ключа посадки у неё нет (задача #2394).
             - name: metrics
-              containerPort: {{ .Values.ports.metrics }}
+              containerPort: {{ include "kaname-svc.processDefaultPort" "metrics" }}
             # Слушатель вебхуков провайдера личности. Здесь же живут `/healthz` и
             # `/readyz`, поэтому порт обязан быть объявлен: по нему идут пробы, а
             # оператор, ищущий, куда постучаться за причиной неготовности, читает
