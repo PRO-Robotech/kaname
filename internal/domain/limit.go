@@ -133,8 +133,20 @@ type LimitCarrier string
 const (
 	// CarrierProject — counted per project. The common case.
 	CarrierProject LimitCarrier = "project"
-	// CarrierAccount — counted per account. Used by kinds that have no project
-	// to live in: projects themselves, and the account-scoped iam subjects.
+	// CarrierAccount — counted per account, for kinds that have no project to
+	// live in.
+	//
+	// НИ ОДИН ВИД КАТАЛОГА ЕГО СЕГОДНЯ НЕ НАЗЫВАЕТ, и это состояние, а не
+	// упущение: шестеро, кто им пользовался, — проекты и субъекты в области
+	// аккаунта — сняты с каталога вместе со своим учётом
+	// (`PRO-Robotech/kacho#2117`, сценарий `KAN-Q3-04`), потому что не
+	// списывались ни разу.
+	//
+	// Константа ОСТАЁТСЯ, и снимать её этим изменением нельзя: величину
+	// `'account'` по-прежнему принимает ограничение
+	// `project_resource_quotas_carrier_ck` ПРИМЕНЁННОЙ миграции, а править
+	// применённую нельзя (ban #5). Уходит она вместе с остальным механизмом
+	// величин — стадией S4 той же приёмки, где снимаются таблицы и функции.
 	CarrierAccount LimitCarrier = "account"
 	// CarrierIdentity — counted per HUMAN, across every account they hold.
 	//
@@ -252,8 +264,8 @@ var countableKinds = []CountableKind{
 	// Плоский `vpc.networkInterface` (сколько их у ПРОЕКТА) остаётся ниже и
 	// продолжает списываться: снята ось «в одной подсети», а не учёт вообще.
 
-	// iam — the account is the tenancy root, and these have no project to live
-	// in. `iam.project` is the entry that makes "two parts ⇒ project" false.
+	// iam — the account is the tenancy root, and it has no project to live in.
+	// It is also the entry that makes "two parts ⇒ project" false.
 	//
 	// The account itself is counted per IDENTITY, and it is the only entry whose
 	// carrier is neither of the first two roots. Without it every ceiling inside
@@ -263,17 +275,23 @@ var countableKinds = []CountableKind{
 	// service that CHARGES, not only the one that states values — the accounts it
 	// counts live in its own database, so the charge is in the same transaction as
 	// the insert and needs no distributed transaction.
+	//
+	// СНЯТЫ ШЕСТЬ ВИДОВ — `iam.project`, `iam.user`, `iam.serviceAccount`,
+	// `iam.group`, `iam.role`, `iam.accessBinding` (задача
+	// `PRO-Robotech/kacho#2117`, приёмка `KAN-QUOTA-1`, сценарий `KAN-Q3-04`).
+	//
+	// Величина на них принималась, сохранялась и НЕ ПРИМЕНЯЛАСЬ НИ РАЗУ:
+	// списывающего триггера не было ни у одного, списания из прод-кода службы —
+	// тоже. Разбиение девяти видов службы на 3 действующих и 6 недействующих
+	// сделано ПРЕДИКАТОМ (З17/З18 приёмки: наличие вызова `kacho_quota_count`
+	// в применённой миграции), а не по имени вида.
+	//
+	// Поэтому снятие ЗАКРЫВАЕТ класс «принято-и-проигнорировано»
+	// (`api-conventions.md`), а не заводит потерю контроля: применять было
+	// нечего. Оставить их «на будущее» было бы держанием обещания, за которое
+	// никто не отвечает, — исход по умолчанию для такого поля — снять с
+	// контракта.
 	{"iam.account", CarrierIdentity},
-	{"iam.project", CarrierAccount},
-	{"iam.user", CarrierAccount},
-	{"iam.serviceAccount", CarrierAccount},
-	{"iam.group", CarrierAccount},
-	{"iam.role", CarrierAccount},
-	// The binding's target is polymorphic and carries no tenancy column of its
-	// own; iam reaches the account through its OWN mirror
-	// (`resource_mirror.parent_account_id`), which owners already populate. No
-	// new edge, and in particular not the `iam → owner` edge §7 п.3 forbids.
-	{"iam.accessBinding", CarrierAccount},
 
 	// Удостоверения принципала — сколько путей входа он держит одновременно
 	// (задача #1191). Считаются ВСЕ, независимо от вида предъявления

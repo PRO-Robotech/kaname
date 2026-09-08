@@ -135,29 +135,49 @@ func TestResolveEffective_FlatKindsStillSayProject(t *testing.T) {
 	}
 }
 
-// TestResolveEffective_AccountCarriedKindsSayAccount — вид, живущий в аккаунте,
-// называет аккаунт.
+// TestResolveEffective_IamKindsEchoTheirDeclaredCarrier — вид службы доступа
+// называет ОБЪЯВЛЕННОГО носителя, а не выведенного из формы имени.
 //
-// `iam.project` — та самая запись, на которой ложно правило «две части ⇒
-// проект»; ради неё носитель и объявляется, а не выводится.
-func TestResolveEffective_AccountCarriedKindsSayAccount(t *testing.T) {
-	var accountKinds []domain.LimitKind
-	for _, k := range domain.CountableKindsOfService("iam") {
-		if c, _ := domain.CarrierOfKind(k); c == domain.CarrierAccount {
-			accountKinds = append(accountKinds, k)
-		}
-	}
-	require.NotEmpty(t, accountKinds, "предмет: у iam есть виды, считаемые в аккаунте")
+// Здесь стояла проба «виды, живущие в аккаунте, называют аккаунт», и её предметом
+// был `iam.project` — та самая запись, на которой ложно правило «две части ⇒
+// проект». Шесть видов с носителем-аккаунтом СНЯТЫ (`PRO-Robotech/kacho#2117`,
+// сценарий `KAN-Q3-04`), и видов с носителем `CarrierAccount` в каталоге больше
+// НЕТ НИ ОДНОГО — прежняя проба осталась бы без предмета и краснела бы на
+// собственной предпосылке.
+//
+// Утверждение переведено на признак, который дерево ПРОИЗВОДИТ: правило «две
+// части ⇒ проект» по-прежнему ложно, и держит эту ложность теперь `iam.account`
+// (две части, носитель — ЛИЧНОСТЬ). Механизм под проверкой тот же самый: ответ
+// резолва обязан повторять объявленного носителя.
+func TestResolveEffective_IamKindsEchoTheirDeclaredCarrier(t *testing.T) {
+	kinds := domain.CountableKindsOfService("iam")
+	require.NotEmpty(t, kinds, "предмет: у службы доступа остались считаемые виды")
 
-	stated := make([]domain.Limit, 0, len(accountKinds))
-	for _, k := range accountKinds {
+	// Положительный контроль: хотя бы у одного вида носитель НЕ проект, иначе
+	// утверждение ниже зеленело бы на каталоге, где носитель выводится из формы
+	// имени, — то есть ровно там, где оно и должно краснеть.
+	nonProject := 0
+	stated := make([]domain.Limit, 0, len(kinds))
+	declared := map[domain.LimitKind]domain.LimitCarrier{}
+	for _, k := range kinds {
+		c, known := domain.CarrierOfKind(k)
+		require.Truef(t, known, "носитель вида %s не объявлен", k)
+		declared[k] = c
+		if c != domain.CarrierProject {
+			nonProject++
+		}
 		stated = append(stated, domain.Limit{Scope: domain.LimitScopeDefault, Kind: k, Value: 16})
 	}
+	require.NotZero(t, nonProject,
+		"положительный контроль: хотя бы один вид службы считается НЕ в проекте — "+
+			"иначе совпадение ниже есть одинаковость каталога, а не свойство записи")
 
 	got := domain.ResolveEffective("iam", stated)
-	require.Len(t, got, len(accountKinds))
+	require.Len(t, got, len(kinds))
 	for _, e := range got {
-		require.Equal(t, domain.CarrierAccount, e.Carrier,
-			"вид %s считается в аккаунте, и ответ обязан это сказать", e.Kind)
+		require.Equalf(t, declared[e.Kind], e.Carrier,
+			"вид %s объявлен с носителем %q, а резолв назвал %q", e.Kind, declared[e.Kind], e.Carrier)
 	}
+
+	t.Logf("перепись: видов службы %d, из них с носителем не-проект %d", len(kinds), nonProject)
 }

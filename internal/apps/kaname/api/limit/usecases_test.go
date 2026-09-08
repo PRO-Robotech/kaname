@@ -688,7 +688,12 @@ func TestResolve_PrecedenceAndCatalogueOrder(t *testing.T) {
 		{Scope: domain.LimitScopeDefault, Kind: "vpc.network", Value: 16},
 		{Scope: domain.LimitScopeProject, ScopeID: "prj-1", Kind: "vpc.network", Value: 4},
 		// A kind of ANOTHER service must not travel in this answer.
-		{Scope: domain.LimitScopeDefault, Kind: "iam.project", Value: 16},
+		//
+		// `iam.account` and not `iam.project`: the latter was withdrawn from the
+		// catalogue with five siblings (`PRO-Robotech/kacho#2117`, KAN-Q3-04), and
+		// a fixture naming a kind that no longer exists would still pass here — by
+		// being filtered for the wrong reason.
+		{Scope: domain.LimitScopeDefault, Kind: "iam.account", Value: 16},
 	}
 	got, err := NewResolveUseCase(repo).WithQuotaReaderChecker(&fakeChecker{answer: true}).
 		Execute(callerCtx(), "prj-1", "vpc")
