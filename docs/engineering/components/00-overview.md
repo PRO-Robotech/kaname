@@ -221,7 +221,7 @@ errors/              # sentinel + WrapPgErr.
 | `:9090`   | `MembershipService`             | read Membership (Account ↔ User)                       |
 | `:9090`   | `UserTokenService`              | Issue / List / Revoke пользовательских токенов         |
 | `:9090`   | `LimitService`                  | CRUD Limit — величины пределов арендатора              |
-| `:9090`   | `IdentityQuotaService`          | List квот личности (`kacho.cloud.quota.v1`)            |
+| `:9090`   | `IdentityQuotaService`          | List квот личности (`kaname.cloud.iam.v1`)             |
 | `:9091`   | `InternalIAMService`            | Check + Register/UnregisterResource (fgaproxy)         |
 | `:9091`   | `AuthorizeService`              | тот же обработчик для peer-проверок по mTLS-ребру      |
 | `:9091`   | `InternalClusterService`        | cluster-admin grants (time-bombed / permanent)         |

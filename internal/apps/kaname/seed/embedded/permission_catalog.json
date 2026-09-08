@@ -773,17 +773,6 @@
     "exempt_reason": "HANDLER_DECIDES"
   },
   {
-    "fqn": "kacho.cloud.quota.v1.IdentityQuotaService/List",
-    "permission": "\u003cexempt\u003e",
-    "required_relation": "",
-    "scope_extractor": {
-      "object_type": "",
-      "from_request_field": ""
-    },
-    "required_acr_min": "1",
-    "exempt_reason": "SELF_SERVICE"
-  },
-  {
     "fqn": "kacho.cloud.registry.v1.InternalRegistryService/GetRegistryStats",
     "permission": "registry.registries.getStats",
     "required_relation": "system_viewer",
@@ -2718,6 +2707,17 @@
       "from_request_field": "group_id"
     },
     "required_acr_min": "1"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.IdentityQuotaService/List",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "1",
+    "exempt_reason": "SELF_SERVICE"
   },
   {
     "fqn": "kaname.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken",

@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	quotav1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/quota/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 	"github.com/PRO-Robotech/kacho/pkg/quota/quotaread"
 
@@ -86,7 +86,7 @@ func callerCtx(userID string) context.Context {
 func TestList_ShowsTheCallersOwnCeilingAndUsage(t *testing.T) {
 	h, r := newFixture()
 
-	resp, err := h.List(callerCtx("usr-mine"), &quotav1.ListIdentityQuotasRequest{})
+	resp, err := h.List(callerCtx("usr-mine"), &iamv1.ListIdentityQuotasRequest{})
 	require.NoError(t, err)
 	require.Len(t, resp.GetQuotas(), 1,
 		"личность читает ПОЛНЫЙ набор своих видов: пустой ответ был бы прочитан как «предела нет»")
@@ -96,7 +96,7 @@ func TestList_ShowsTheCallersOwnCeilingAndUsage(t *testing.T) {
 	require.EqualValues(t, 5, got.GetLimit())
 	require.EqualValues(t, 3, got.GetUsed(),
 		"потребление — половина ответа: без него предел не говорит человеку, сколько у него осталось")
-	require.Equal(t, quotav1.Quota_DEFAULT, got.GetSourceScope())
+	require.Equal(t, iamv1.Quota_DEFAULT, got.GetSourceScope())
 	require.Equal(t, "identity", got.GetCarrierType())
 	require.Equal(t, "ext-mine", got.GetCarrierId())
 
@@ -114,7 +114,7 @@ func TestList_ShowsTheCallersOwnCeilingAndUsage(t *testing.T) {
 func TestList_AnswersAboutTheCallerAndNobodyElse(t *testing.T) {
 	h, r := newFixture()
 
-	resp, err := h.List(callerCtx("usr-mine"), &quotav1.ListIdentityQuotasRequest{})
+	resp, err := h.List(callerCtx("usr-mine"), &iamv1.ListIdentityQuotasRequest{})
 	require.NoError(t, err)
 
 	for _, q := range resp.GetQuotas() {
@@ -131,7 +131,7 @@ func TestList_AnswersAboutTheCallerAndNobodyElse(t *testing.T) {
 func TestList_RefusesAnAnonymousCaller(t *testing.T) {
 	h, r := newFixture()
 
-	_, err := h.List(context.Background(), &quotav1.ListIdentityQuotasRequest{})
+	_, err := h.List(context.Background(), &iamv1.ListIdentityQuotasRequest{})
 	require.Error(t, err)
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	require.Empty(t, r.askedUser, "анонимный запрос не должен доходить до чтения")
@@ -146,7 +146,7 @@ func TestList_RefusesAMachinePrincipalByName(t *testing.T) {
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "service_account", ID: "sva-1"})
 
-	_, err := h.List(ctx, &quotav1.ListIdentityQuotasRequest{})
+	_, err := h.List(ctx, &iamv1.ListIdentityQuotasRequest{})
 	require.Error(t, err)
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
 	require.Empty(t, r.askedIdentity)
@@ -157,7 +157,7 @@ func TestList_PropagatesAStorageRefusal(t *testing.T) {
 	h, r := newFixture()
 	r.identityErr = iamerr.Wrapf(iamerr.ErrNotFound, "User usr-mine not found")
 
-	_, err := h.List(callerCtx("usr-mine"), &quotav1.ListIdentityQuotasRequest{})
+	_, err := h.List(callerCtx("usr-mine"), &iamv1.ListIdentityQuotasRequest{})
 	require.Error(t, err)
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
@@ -166,7 +166,7 @@ func TestList_PropagatesAStorageRefusal(t *testing.T) {
 func TestList_WithNoReaderRefusesInsteadOfClaimingNoQuotas(t *testing.T) {
 	h := NewHandler(nil)
 
-	_, err := h.List(callerCtx("usr-mine"), &quotav1.ListIdentityQuotasRequest{})
+	_, err := h.List(callerCtx("usr-mine"), &iamv1.ListIdentityQuotasRequest{})
 	require.Error(t, err)
 	require.Equal(t, codes.Internal, status.Code(err))
 }
