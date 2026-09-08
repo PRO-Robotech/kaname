@@ -21,15 +21,15 @@ const (
 	// contractNoExempt — обе читающие полосы объявлены фильтруемыми.
 	contractNoExempt = `service RoleService {
   rpc Get (GetRoleRequest) returns (Role) {
-    option (kacho.iam.authz.v1.permission)     = "iam.roles.get";
-    option (kacho.iam.authz.v1.scope_filtered) = true;
+    option (corelib.authz.v1.permission)     = "iam.roles.get";
+    option (corelib.authz.v1.scope_filtered) = true;
   }
 }`
 	// contractWithExempt — тот же контракт, где полоса ДЕЙСТВИТЕЛЬНО освобождена.
 	// Ровно один факт отличия от близнеца выше.
 	contractWithExempt = `service RoleService {
   rpc Get (GetRoleRequest) returns (Role) {
-    option (kacho.iam.authz.v1.permission)     = "<exempt>";
+    option (corelib.authz.v1.permission)     = "<exempt>";
   }
 }`
 )

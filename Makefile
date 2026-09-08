@@ -428,7 +428,7 @@ VENDORED_PROTOS := \
 	kacho/cloud/api/operation.proto \
 	kacho/cloud/operation/operation.proto \
 	kacho/cloud/validation.proto \
-	kacho/iam/authz/v1/authz_options.proto
+	corelib/authz/v1/authz_options.proto
 
 ## proto-vendor — подтянуть общие контракты для резолва импортов [монорепо]
 proto-vendor:
