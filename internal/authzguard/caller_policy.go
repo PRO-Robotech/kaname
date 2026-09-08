@@ -9,6 +9,10 @@
 //  1. Floor — every internal RPC requires a VERIFIED mTLS module cert (SPIRE SAN
 //     spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>) in production. dev (no verified
 //     cert) → no-op (insecure back-compat, mirror RelationWriteGate).
+//     Пол удовлетворяет ТАКЖЕ хоп собственного REST-фронта службы — лист того же
+//     внутреннего центра, чьё имя учётной записи приставки модулей не несёт. Он
+//     объявляется корнем (WithOwnFrontHop) и допускается РОВНО к тому, к чему
+//     допущен любой проверенный модуль: круга края ниже он не проходит никогда.
 //  2. Gateway-only — the gateway-fronted privileged admin RPCs
 //     (GatewayFrontedInternalRPCs) may ONLY be called by the api-gateway SA. A
 //     direct call from any other module (e.g. a compromised kacho-vpc) → DENY in
@@ -209,6 +213,13 @@ type CallerPolicy struct {
 	// to call it. Only consulted for sanRestricted methods; a missing/empty entry
 	// denies everyone.
 	sanAllow map[string]map[string]struct{}
+	// ownFrontHop — ТОЧНОЕ имя клиентского листа, которым СОБСТВЕННЫЙ REST-фронт
+	// службы дозванивается до этого же слушателя. Пустое означает «фронта на
+	// этой посадке нет», и тогда полоса ниже не существует вовсе.
+	//
+	// Величина СРАВНИВАЕТСЯ ЦЕЛИКОМ, как в третьем рукаве: пространство имён и
+	// учётная запись — части личности, и «похожее» здесь не годится.
+	ownFrontHop string
 }
 
 // NewCallerPolicy builds the caller policy. gatewayOnlyRPCs is the set of
@@ -259,13 +270,74 @@ func (p *CallerPolicy) WithSANAllowlist(perRPC map[string][]string) *CallerPolic
 	return p
 }
 
+// WithOwnFrontHop объявляет имя клиентского листа, которым СОБСТВЕННЫЙ REST-фронт
+// службы приходит к этому же слушателю, и тем самым признаёт его ХОПОМ, а не
+// вызывающим.
+//
+// # Предмет: сертификат на этом хопе называет НЕ ЗВОНЯЩЕГО
+//
+// Фронт — обычный клиент своего же слушателя, и представляется он листом самой
+// службы. Учётная запись у службы своя, приставки платформенных модулей она не
+// несёт, поэтому [ServiceNameFromSAN] на такой строке не срабатывает — и пол
+// (рукав 1) отвергал КАЖДЫЙ запрос, пришедший через фронт, в боевой посадке. На
+// стенде рукав вырождается целиком, поэтому расхождение было невидимо ровно
+// там, где его ищут.
+//
+// # Что этот хоп получает — РОВНО ПОЛ, и ни одним методом больше
+//
+// Вопрос пола — «стоит ли за запросом проверенный лист нашего внутреннего
+// центра». На хопе фронта ответ ДА, и он получен на хоп раньше: в боевой
+// посадке фронт поднимается только с требованием проверенного клиентского
+// сертификата, а страж посадки отказывает в старте, когда это не так
+// (`requireInternalRESTMutualClientAuth`). Тот же класс удостоверения, тот же
+// внутренний центр — просто предыдущее звено.
+//
+// Вопрос ВТОРОГО рукава — «этот вызывающий есть край» — на хопе НЕ ОТВЕЧАЕМ, и
+// ответ его не сохраняет: фронт не переносит внутрь ни одного заголовка
+// запроса, а внутренний слушатель предъявленного удостоверения не читает вовсе.
+// Поэтому хоп краем не становится: короткое имя службы у него остаётся пустым,
+// и круг края отвергает его ровно так же, как отверг бы соседний модуль. Иначе
+// полоса HTTP оказалась бы ШИРЕ полосы gRPC — держатель любого листа
+// внутреннего центра дотянулся бы через фронт до глаголов, которые ему на gRPC
+// запрещены.
+//
+// Третий рукав хоп тоже не смягчает: он стоит выше и терминален, а чеканка
+// маршрута HTTP не имеет вовсе.
+//
+// Итог одной фразой: хоп фронта допускается ТОЧНО К ТОМУ, к чему допущен любой
+// проверенный модуль, — и это утверждается равенством множеств, а не
+// комментарием.
+//
+// # Почему величина приходит извне, а не выводится разбором
+//
+// Разбор судил бы ФОРМУ имени, то есть допускал бы КЛАСС строк. Здесь допущена
+// одна личность — наша собственная, — и предъявить её может только держатель
+// нашего же ключа. Соседний модуль держит свой и этой строкой назваться не
+// может. Корень собирает величину из того сертификата, который фронт
+// ФАКТИЧЕСКИ предъявляет, поэтому разойтись с проводом ей нечем.
+func (p *CallerPolicy) WithOwnFrontHop(san string) *CallerPolicy {
+	p.ownFrontHop = strings.TrimSpace(san)
+	return p
+}
+
+// isOwnFrontHop — предъявитель есть собственный REST-фронт службы.
+//
+// Пустое объявление не совпадает НИ С ЧЕМ: посадка без фронта не должна
+// открывать полосу, которой на ней нет.
+func (p *CallerPolicy) isOwnFrontHop(san string) bool {
+	return p.ownFrontHop != "" && san == p.ownFrontHop
+}
+
 // allow returns nil iff the call may proceed past the policy for fullMethod:
 //   - SAN-restricted RPC (arm 3): the caller must present a VERIFIED client cert
 //     whose exact SPIFFE SAN is allow-listed → otherwise PermissionDenied, in
 //     EVERY mode. An empty/absent allow-list denies everyone. Evaluated FIRST and
 //     terminally: this arm never falls through to the mode-relaxed arms below.
 //   - no verified module cert: prod → PermissionDenied (floor fail-closed);
-//     dev → nil (insecure back-compat).
+//     dev → nil (insecure back-compat). Хоп собственного REST-фронта пол
+//     удовлетворяет — он есть проверенный лист того же внутреннего центра, и
+//     право дотянуться до фронта решено на хоп раньше, рукопожатием
+//     (см. WithOwnFrontHop).
 //   - gateway-only RPC called by a non-gateway module: prod → PermissionDenied;
 //     dev → nil.
 //   - otherwise (any verified module for a non-gateway RPC, or the gateway for a
@@ -293,7 +365,13 @@ func (p *CallerPolicy) allow(ctx context.Context, fullMethod string) error {
 	if verified && san != "" {
 		svc, ok = ServiceNameFromSAN(grpcsrv.CertIdentityDomainFromContext(ctx), san)
 	}
-	if !ok {
+	// Хоп собственного REST-фронта удовлетворяет ПОЛ и на этом останавливается.
+	// Короткое имя службы у него остаётся ПУСТЫМ намеренно: круг края ниже
+	// сравнивает его с именем края и отвергает, поэтому полоса HTTP не может
+	// оказаться шире полосы gRPC. Разбор при этом не трогается — величина
+	// объявлена корнем и сравнивается целиком (см. WithOwnFrontHop).
+	floorSatisfied := ok || (verified && p.isOwnFrontHop(san))
+	if !floorSatisfied {
 		// No verified module cert. Dev → no-op; prod → fail-closed.
 		if !p.prodMode {
 			return nil

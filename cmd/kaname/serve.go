@@ -586,6 +586,22 @@ func runServe(cfg config.Config) error {
 	); err != nil {
 		return err
 	}
+	// А ЧЕМ фронт называется дальше — предмет отдельный, и решается он здесь.
+	// Рукопожатие выше отвечает «кому позволено дотянуться»; пер-RPC политика
+	// вызывающего спрашивает следующее: чей лист предъявлен её слушателю. Лист
+	// этот — собственный лист службы, и читается он из того файла, который фронт
+	// фактически предъявляет (см. ownfronthop.go).
+	ownFrontSAN, err := ownFrontHopSAN(mtlsCfg, cfg.AuthN.TrustDomain())
+	if err != nil {
+		return err
+	}
+	if err := requireOwnFrontHopIdentity(productionMode,
+		cfg.APIServer.InternalRESTListenAddress(),
+		cfg.APIServer.RESTListenAddress(),
+		mtlsCfg, cfg.AuthN.TrustDomain(), ownFrontSAN,
+	); err != nil {
+		return err
+	}
 	if err := requireDistinctSurfaceAddrs(
 		cfg.APIServer.ListenAddress(),
 		cfg.APIServer.InternalListenAddress(),
@@ -638,10 +654,16 @@ func runServe(cfg config.Config) error {
 	// The fga-proxy writes (Register/Unregister) are NOT in the
 	// gateway-only set and stay gated in-handler by RelationWriteGate (fga_writer)
 	// — their callers are vpc/compute/nlb module SAs, not the gateway.
+	//
+	// Хоп собственного REST-фронта объявляется ЗДЕСЬ и допускается ровно к полу:
+	// круг края он не проходит никогда, потому что краем не является и о том,
+	// кто за ним стоит, ничего не сообщает. Величина взята из сертификата,
+	// который фронт предъявляет, — разойтись с проводом ей нечем.
 	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs()).
 		WithSANAllowlist(map[string][]string{
 			authzguard.BootstrapMintFullMethod: cfg.AuthN.BootstrapMint.AllowedSANs(),
-		})
+		}).
+		WithOwnFrontHop(ownFrontSAN)
 
 	// Per-RPC `system_viewer`-FLOOR on the internal READ-RPC set
 	// (authN+authZ enforced everywhere: read-RPC gate viewer-tier). For
