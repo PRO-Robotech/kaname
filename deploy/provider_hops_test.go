@@ -72,8 +72,8 @@ import (
 // WHY TWO SOURCES AND NOT ONE TABLE. The same chart is installed two ways, and the
 // knob paths differ by exactly one segment:
 //
-//	as a subchart of our umbrella   kaname.kacho.iam.hydraAdminUrl
-//	standalone, as shipped          kacho.iam.hydraAdminUrl
+//	as a subchart of our umbrella   kaname.platform.iam.hydraAdminUrl
+//	standalone, as shipped          platform.iam.hydraAdminUrl
 //
 // The census used to read only the first, addressed as `../../../deploy/helm/
 // umbrella/...` — a path that exists in the monorepo and nowhere else. In the
@@ -166,23 +166,23 @@ type hop struct {
 var providerHops = []hop{
 	{
 		name:      "admin API",
-		knob:      []string{"kacho", "iam", "hydraAdminUrl"},
+		knob:      []string{"platform", "iam", "hydraAdminUrl"},
 		env:       "KANAME_HYDRA_ADMIN_URL",
-		anchor:    []string{"kacho", "iam", "hydraAdminCaFile"},
+		anchor:    []string{"platform", "iam", "hydraAdminCaFile"},
 		anchorEnv: "KANAME_HYDRA_ADMIN_CA_FILE",
 	},
 	{
 		name:      "JWKS upstream",
-		knob:      []string{"kacho", "iam", "hydraJwksUrl"},
+		knob:      []string{"platform", "iam", "hydraJwksUrl"},
 		env:       "KANAME_HYDRA_JWKS_URL",
-		anchor:    []string{"kacho", "iam", "hydraJwksCaFile"},
+		anchor:    []string{"platform", "iam", "hydraJwksCaFile"},
 		anchorEnv: "KANAME_HYDRA_JWKS_CA_FILE",
 	},
 	{
 		name:      "token endpoint",
-		knob:      []string{"kacho", "iam", "hydraTokenURL"},
+		knob:      []string{"platform", "iam", "hydraTokenURL"},
 		env:       "KANAME_HYDRA_TOKEN_URL",
-		anchor:    []string{"kacho", "iam", "hydraTokenCaFile"},
+		anchor:    []string{"platform", "iam", "hydraTokenCaFile"},
 		anchorEnv: "KANAME_HYDRA_TOKEN_CA_FILE",
 	},
 }
