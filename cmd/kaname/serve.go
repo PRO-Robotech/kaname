@@ -578,6 +578,14 @@ func runServe(cfg config.Config) error {
 	); err != nil {
 		return err
 	}
+	// Рубеж внутреннего фронта бывает только транспортным: своего он не заводит,
+	// а к собственному слушателю идёт СВОИМ удостоверением — значит «кому позволено
+	// дотянуться» решает рукопожатие и больше ничто (см. internalrestclientauth.go).
+	if err := requireInternalRESTMutualClientAuth(productionMode,
+		cfg.APIServer.InternalRESTListenAddress(), mtlsCfg,
+	); err != nil {
+		return err
+	}
 	if err := requireDistinctSurfaceAddrs(
 		cfg.APIServer.ListenAddress(),
 		cfg.APIServer.InternalListenAddress(),
@@ -1378,10 +1386,12 @@ func runServe(cfg config.Config) error {
 			"не обслуживаются"),
 		Handler: internalRESTHandler,
 		Reach:   servicecontract.ReachClusterInternal,
-		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
-			"цепочка внутреннего слушателя: проверенный сертификат модуля и его политика " +
-				"вызывающего — фронт своего рубежа не заводит и ничего к личности не добавляет"),
-		TLS: internalRESTFront.tls,
+		// Ось ВЫВОДИТСЯ из фактического режима ребра, а не вписывается: здесь
+		// стояла константа, называвшая проверенный сертификат модуля механизмом
+		// аутентификации ВЫЗЫВАЮЩЕГО, — а этот сертификат называет ХОП. Тот же
+		// приём, что применён к публичному фронту (#2194).
+		Auth: internalRESTFrontAuthAxis(mtlsCfg.InternalRESTRequiresClientCert()),
+		TLS:  internalRESTFront.tls,
 	})
 	if err != nil {
 		return fmt.Errorf("профиль поверхности внутреннего REST-фронта: %w", err)
