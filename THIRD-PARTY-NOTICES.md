@@ -65,7 +65,7 @@
 
 | Модуль | Версия | Файл лицензии в модуле |
 |---|---|---|
-| `github.com/PRO-Robotech/kacho` | `v0.0.0-20260908132410-d0e3772389b3` | `LICENSE` |
+| `github.com/PRO-Robotech/kacho` | `v0.0.0-20260908194923-dade8b706836` | `LICENSE` |
 
 ## MIT
 

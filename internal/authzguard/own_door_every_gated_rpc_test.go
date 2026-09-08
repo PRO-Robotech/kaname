@@ -47,7 +47,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	authzv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/iam/authz/v1"
+	authzv1 "github.com/PRO-Robotech/kacho/pkg/api/corelib/authz/v1"
 
 	"github.com/PRO-Robotech/kacho/pkg/authz/catalogderive"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
