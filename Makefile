@@ -261,6 +261,16 @@ module-manifest-check:
 # tools/operatordocs/present_test.go.
 #
 # Вызов: `make -C services/iam operator-docs` / `... operator-docs-check`
+.PHONY: helm-render-guard
+## helm-render-guard — офлайновый страж рендера чарта: вход, который чарт отдаёт
+## процессу, обязан пройти страж старта.
+##
+## Живёт отдельной целью, а не внутри `test`, потому что требует helm, а тот
+## пришпилен ровно к одной job конвейера (`helm` в .github/workflows/ci.yaml).
+## Провязку держит гейт класса internal/repohygiene/artifactgates/renderguard_test.go.
+helm-render-guard:
+	@bash deploy/render-guard.sh
+
 .PHONY: operator-docs operator-docs-check
 ## operator-docs — порождение операторской документации
 operator-docs:

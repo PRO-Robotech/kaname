@@ -59,12 +59,48 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
-// lanesUnderTest — полосы посадки личности, на которых прогоняется таблица.
-// Обе, а не одна: у каждой свой набор применимых строк, и полоса, оставшаяся
-// вне прогона, унесла бы с собой доказательство своих строк.
-var lanesUnderTest = []config.IdentityProvider{
-	config.IdentityProviderExternal,
-	config.IdentityProviderOwn,
+// landingsUnderTest — ПОСАДКИ, на которых прогоняется таблица.
+//
+// Не полосы, а посадки: у стража два независимых антецедента — посадка
+// поставщика личности И поднятость собственного публичного REST-фронта, —
+// поэтому применимых наборов не два, а четыре. Посадка, оставшаяся вне прогона,
+// унесла бы с собой доказательство своих строк.
+//
+// # Чего стоило отсутствие второй оси, и почему это не косметика
+//
+// Прогон шёл по двум полосам с ОПУЩЕННЫМ фронтом, поэтому второй антецедент
+// (`PresentedCredentialConfig.ValidateBinding`) не наступал НИ РАЗУ. Семь строк
+// были помечены как нужные только посадке `own` — и таблица это утверждение
+// подтверждала, потому что опровергнуть его было негде. На посадке `external` с
+// поднятым фронтом — ЕДИНСТВЕННОЙ, которую сегодня поднимает боевой профиль, —
+// страж требует все семь, и без них процесс не стартует (#2333, #2340).
+//
+// Утверждение Т2 («полный профиль, собранный ОБЪЯВЛЕННЫМИ путями, проходит
+// стража целиком») ловит это само, как только посадка оказывается в прогоне:
+// строка, объявленная неприменимой там, где страж её требует, не подаётся — и
+// профиль отвергается с её отказом в тексте.
+var landingsUnderTest = []config.Landing{
+	{Provider: config.IdentityProviderExternal},
+	{Provider: config.IdentityProviderExternal, OwnPublicRESTFront: true},
+	{Provider: config.IdentityProviderOwn},
+	{Provider: config.IdentityProviderOwn, OwnPublicRESTFront: true},
+}
+
+// ownPublicRESTFrontSample — адрес, которым посадка поднимает собственный
+// публичный REST-фронт.
+//
+// Величина в таблице обязательных НЕ значится и значиться не должна: страж её
+// не требует — она сама есть АНТЕЦЕДЕНТ требования. Подаётся здесь потому, что
+// без неё вторая половина антецедента не наступает, и половина посадок стала бы
+// копией первой.
+const ownPublicRESTFrontSample = "tcp://0.0.0.0:9098"
+
+// raiseOwnPublicRESTFront поднимает фронт, если посадка его объявляет.
+func raiseOwnPublicRESTFront(l config.Landing) error {
+	if !l.OwnPublicRESTFront {
+		return nil
+	}
+	return os.Setenv("KANAME_API_SERVER__REST_ENDPOINT", ownPublicRESTFrontSample)
 }
 
 // auditCensus — объём осмотренного. Печатается ВСЕГДА: без него «находок 0»
@@ -134,9 +170,12 @@ func restoreEnv(saved map[string]string) {
 // `Validate()`, а не `Load()`. Восстановление на выходе из сборки унесло бы
 // переменную до того, как страж её прочтёт, и профиль, собранный верно,
 // выглядел бы недособранным. Снимок и восстановление делает разбор целиком.
-func supplyProfile(dir string, table []config.RequiredSetting, lane config.IdentityProvider, omit string) (config.Config, error) {
+func supplyProfile(dir string, table []config.RequiredSetting, lane config.Landing, omit string) (config.Config, error) {
 	clearOwnEnv()
 	if err := os.Setenv("KANAME_AUTHN__MODE", "production"); err != nil {
+		return config.Config{}, err
+	}
+	if err := raiseOwnPublicRESTFront(lane); err != nil {
 		return config.Config{}, err
 	}
 
@@ -178,12 +217,15 @@ func supplyProfile(dir string, table []config.RequiredSetting, lane config.Ident
 
 // emptyProfile — боевой профиль, в котором объявлена ТОЛЬКО полоса. Им
 // доказывается полнота таблицы.
-func emptyProfile(lane config.IdentityProvider) (config.Config, error) {
+func emptyProfile(lane config.Landing) (config.Config, error) {
 	clearOwnEnv()
 	if err := os.Setenv("KANAME_AUTHN__MODE", "production"); err != nil {
 		return config.Config{}, err
 	}
-	if err := os.Setenv("KANAME_AUTHN__IDENTITY_PROVIDER", lane.String()); err != nil {
+	if err := os.Setenv("KANAME_AUTHN__IDENTITY_PROVIDER", lane.Provider.String()); err != nil {
+		return config.Config{}, err
+	}
+	if err := raiseOwnPublicRESTFront(lane); err != nil {
 		return config.Config{}, err
 	}
 	return config.Load("")
@@ -234,7 +276,7 @@ func auditRequiredSettings(dir string, table []config.RequiredSetting) ([]string
 	var findings []string
 	census := auditCensus{
 		Rows:       len(table),
-		Lanes:      len(lanesUnderTest),
+		Lanes:      len(landingsUnderTest),
 		Refusals:   map[string]int{},
 		Applicable: map[string]int{},
 	}
@@ -260,7 +302,7 @@ func auditRequiredSettings(dir string, table []config.RequiredSetting) ([]string
 		if strings.TrimSpace(s.Refusal) == "" {
 			findings = append(findings, s.Key+": не названа подстрока отказа — доказать строку прогоном нечем")
 		}
-		if strings.TrimSpace(s.SampleValue(config.IdentityProviderExternal)) == "" {
+		if strings.TrimSpace(s.SampleValue(config.Landing{Provider: config.IdentityProviderExternal})) == "" {
 			findings = append(findings, s.Key+": нет годного значения — подать величину прогоном нечем")
 		}
 		if s.Supply == config.SupplyEnv && strings.TrimSpace(s.Env) == "" {
@@ -268,7 +310,7 @@ func auditRequiredSettings(dir string, table []config.RequiredSetting) ([]string
 		}
 	}
 
-	for _, lane := range lanesUnderTest {
+	for _, lane := range landingsUnderTest {
 		// Т2 — ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ полосы: полный профиль, собранный
 		// объявленными путями, проходит стража целиком. Без него отрицания ниже
 		// зеленели бы на профиле, сломанном чем угодно.
@@ -338,11 +380,16 @@ func auditRequiredSettings(dir string, table []config.RequiredSetting) ([]string
 			if !s.AppliesTo(lane) || s.Key == config.IdentityProviderSetting {
 				continue
 			}
-			// УСЛОВНАЯ строка на пустом профиле отказа не производит by
-			// construction: её условие (заданная соседняя величина) не
-			// выполнено. Требовать от неё отказа здесь значило бы требовать от
-			// стража срабатывания без собственного предмета.
-			if s.Conditional {
+			// УСЛОВНАЯ на ЭТОЙ посадке строка отказа на пустом профиле не
+			// производит by construction: её условие (заданная соседняя
+			// величина) не выполнено. Требовать от неё отказа здесь значило бы
+			// требовать от стража срабатывания без собственного предмета.
+			//
+			// Условность спрашивается У ПОСАДКИ, а не у строки: у величины
+			// бывает два производителя отказа с разными антецедентами, и тогда
+			// на одной посадке она требуется сама по себе, а на другой — лишь
+			// вслед за соседкой.
+			if !s.ProducesRefusalOnEmptyProfile(lane) {
 				continue
 			}
 			if !mentions(got, s.Refusal) {
