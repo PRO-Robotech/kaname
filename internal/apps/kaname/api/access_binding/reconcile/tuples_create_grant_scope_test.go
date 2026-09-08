@@ -24,6 +24,33 @@ package reconcile
 // неотличимо от «эмиттер молчит вообще» и от «каталог назвал отношение, которого
 // модель не знает». Поэтому рядом — правило с подстановкой `*`, которое обязано
 // покрыть КАЖДЫЙ тот же RPC.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПОЧЕМУ ВСЕ ТРИ СТОРОНЫ ЧИТАЮТСЯ ТЕПЕРЬ ИЗ ПОСТАВКИ МОДУЛЯ (#2379)
+//
+// Утверждение сквозное, и до этой правки его стороны лежали в РАЗНЫХ деревьях:
+// population — у сгенерированного каталога прав КРАЯ, тип — у канона в каталоге
+// контрактов, кортежи — у эмиттера службы. После разреза первые две координаты
+// рядом с модулем не резолвятся, и проба целиком объявила бы третий исход.
+// Расширение доступа сверх выданного — класс ТИХИЙ: он не роняет ни один прогон,
+// потому что каждая сторона согласована сама с собой, — значит замолчавший
+// сторож здесь неотличим от исправного.
+//
+// Обе стороны у модуля ЕСТЬ, и это не запасной путь и не вторая истина:
+//
+//	каталог  — `internal/apps/kaname/seed/embedded/permission_catalog.json`,
+//	           побайтовая копия каталога края; равенство пары держит
+//	           платформенный гейт (`internal/repohygiene`, catalogparity),
+//	           судящий ОБЕ координаты платформы;
+//	модель   — резолв `authzplan.ResolveCanonicalModel`, который спрашивает
+//	           канон контракта ПЕРВЫМ и переходит к вшитой копии, только если
+//	           каталога контрактов в дереве нет вовсе. В монорепо ветвь копии
+//	           недостижима, поэтому числа переписей не меняются ни на байт.
+//
+// Того, что проба перестала читать, — второй копии каталога у края, — она и не
+// стерегла: расхождение копий есть предмет платформенного гейта, и он лежит там,
+// где обе копии ЕСТЬ. Утверждать это отсюда значило бы завести второе место об
+// одном предмете, и после разреза уцелело бы худшее из двух.
 
 import (
 	"encoding/json"
@@ -35,6 +62,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
@@ -42,16 +70,14 @@ import (
 
 // --- артефакты дерева, из которых выводится population ---------------------
 
-const (
-	// catalogRelPathGateway / catalogRelPathIAM — две вшитые копии каталога прав.
-	// Они обязаны быть байт-идентичны, поэтому проба читает ОБЕ: чтение одной
-	// оставило бы вторую дрейфовать при зелёной пробе.
-	catalogRelPathGateway = "gateway/internal/middleware/embed/permission_catalog.json"
-	catalogRelPathIAM     = "services/iam/internal/apps/kaname/seed/embedded/permission_catalog.json"
-
-	// modelRelPath — канонический источник отношений и их выводимости.
-	modelRelPath = "proto/kaname/cloud/iam/v1/fga_model.fga"
-)
+// catalogRelPathIAM — вшитая копия каталога прав, лежащая ВНУТРИ модуля.
+//
+// Координата записана от корня дерева платформы и лежит внутри каталога модуля,
+// поэтому резолв посадки возвращает её в ОБЕИХ посадках — пропуска здесь не
+// бывает by construction. Побайтовое равенство этой копии каталогу края держит
+// платформенный гейт; читать отсюда вторую координату значило бы завести второе
+// место об одном предмете (см. шапку).
+const catalogRelPathIAM = "services/iam/internal/apps/kaname/seed/embedded/permission_catalog.json"
 
 type catalogRow struct {
 	FQN            string `json:"fqn"`
@@ -91,6 +117,30 @@ func repoRootFromTest(t *testing.T) string {
 		}
 		dir = parent
 	}
+}
+
+// canonicalModel — канон модели, ПРИВЕДЁННЫЙ К ПОСАДКЕ, и координата, с которой
+// он прочитан.
+//
+// Резолв не наш: он живёт в `authzplan` и спрашивает канон контракта ПЕРВЫМ,
+// переходя к вшитой копии только там, где каталога контрактов нет вовсе. Второй
+// такой резолв здесь был бы вторым местом об одном предмете и разошёлся бы с
+// первым молча — на входе, где обе координаты существуют, оба отвечают
+// одинаково, и различие проявилось бы только в клоне.
+//
+// Отказ здесь — «проверка НЕ ИСПОЛНЯЛАСЬ», а не находка: без канона утверждать
+// нечего ни в одну сторону.
+func canonicalModel(t *testing.T) (path string, dsl []byte) {
+	t.Helper()
+	path, dsl, err := authzplan.ResolveCanonicalModel()
+	if err != nil {
+		t.Fatalf("канон модели не разрешён (%v): проверка НЕ ИСПОЛНЯЛАСЬ — сверять "+
+			"выводимость отношений не с чем", err)
+	}
+	if len(dsl) == 0 {
+		t.Fatalf("канон модели %s прочитан пустым — предикат ослеп бы молча", path)
+	}
+	return path, dsl
 }
 
 func readCatalog(t *testing.T, rel string) []catalogRow {
@@ -139,7 +189,7 @@ func implications(t *testing.T, dsl, fgaType string) map[string][]string {
 		}
 	}
 	if start < 0 {
-		t.Fatalf("модель %s не объявляет `type %s` — предпосылка пробы неверна", modelRelPath, fgaType)
+		t.Fatalf("каноническая модель не объявляет `type %s` — предпосылка пробы неверна", fgaType)
 	}
 	out := map[string][]string{}
 	for _, l := range lines[start+1:] {
@@ -183,7 +233,7 @@ func declaredRelations(t *testing.T, dsl, fgaType string) map[string]bool {
 		}
 	}
 	if start < 0 {
-		t.Fatalf("модель %s не объявляет `type %s` — предпосылка пробы неверна", modelRelPath, fgaType)
+		t.Fatalf("каноническая модель не объявляет `type %s` — предпосылка пробы неверна", fgaType)
 	}
 	out := map[string]bool{}
 	for _, l := range lines[start+1:] {
@@ -342,15 +392,10 @@ var hierarchyAnchors = map[string]bool{"account": true, "project": true, "cluste
 // он ТРЕБУЕТ, не должно резолвиться у субъекта, чьё правило назвало ровно один
 // глагол `create`.
 func TestCreateOnlyGrantOpensNoObjectSelfRPC(t *testing.T) {
-	// Читается ДЕРЕВО ПЛАТФОРМЫ: манифесты соседних модулей, каталог
-	// контрактов и канон модели в поставку нашего модуля не входят by
-	// construction. Их отсутствие — «условие не создано», а не находка.
-	dsl, err := os.ReadFile(platformtree.RequirePath(t, modelRelPath))
-	if err != nil {
-		t.Fatalf("каноническая модель %s не прочитана: %v", modelRelPath, err)
-	}
+	modelPath, dsl := canonicalModel(t)
+	t.Logf("осмотрено: канон модели прочитан из %s (%d Б)", modelPath, len(dsl))
 
-	for _, rel := range []string{catalogRelPathGateway, catalogRelPathIAM} {
+	for _, rel := range []string{catalogRelPathIAM} {
 		rows := readCatalog(t, rel)
 		population := objectSelfPublicRows(rows, hierarchyAnchors)
 		t.Logf("осмотрено: %s — %d записей, из них публичных object-self (не Create): %d",
@@ -451,13 +496,8 @@ func TestCreateOnlyGrantOpensNoObjectSelfRPC(t *testing.T) {
 // Без (б) «ярус есть» было бы неотличимо от «v_* сломаны на всём типе», а именно
 // на `v_*` и держится запрет соседней пробы.
 func TestCreateOnlyGrantMaterializesSomething(t *testing.T) {
-	// Читается ДЕРЕВО ПЛАТФОРМЫ: манифесты соседних модулей, каталог
-	// контрактов и канон модели в поставку нашего модуля не входят by
-	// construction. Их отсутствие — «условие не создано», а не находка.
-	dsl, err := os.ReadFile(platformtree.RequirePath(t, modelRelPath))
-	if err != nil {
-		t.Fatalf("каноническая модель %s не прочитана: %v", modelRelPath, err)
-	}
+	modelPath, dsl := canonicalModel(t)
+	t.Logf("осмотрено: канон модели прочитан из %s (%d Б)", modelPath, len(dsl))
 
 	checked := 0
 	for _, dotted := range []string{"storage.volumes", "storage.snapshots", "storage.images", "vpc.network"} {
