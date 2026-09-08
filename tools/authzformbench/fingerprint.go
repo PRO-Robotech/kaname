@@ -8,11 +8,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/PRO-Robotech/kacho/pkg/gitenv"
+
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // ОТПЕЧАТОК ПРИБОРА — «ИЗМЕНИЛОСЬ ЛИ ТО, ЧЕМ МЕРИЛИ»
@@ -35,7 +36,7 @@ import (
 // Не по вкусу, а по двум измеренным причинам:
 //
 //	(1) язык не даёт: отпечаток `scalegrid` живёт в
-//	    `services/iam/internal/repo/kacho/pg/scalegrid` — внутреннем пакете
+//	    `services/iam/internal/repo/kaname/pg/scalegrid` — внутреннем пакете
 //	    сервиса, и `tools/` его импортировать не может;
 //	(2) вынести общее в корневой `internal/` тоже нельзя ЗАДАРОМ: предмет
 //	    отпечатка `scalegrid` — содержимое СВОЕГО каталога, и перенос файла из
@@ -132,11 +133,20 @@ func ContentOf(root, rel string) string {
 }
 
 func readFileAt(root, rel string) ([]byte, error) {
-	return os.ReadFile(filepath.Join(root, rel)) // #nosec G304 -- rel получен обходом СОБСТВЕННОГО каталога прибора под корнем репозитория, не из запроса и не от пользователя: прибор читает свои же файлы, чтобы взять их отпечаток
+	abs, aerr := treeposture.PathUnder(root, rel)
+	if aerr != nil {
+		return nil, fmt.Errorf("authzformbench: координата %s не приведена к посадке корня %s: %w", rel, root, aerr)
+	}
+	return os.ReadFile(abs) // #nosec G304 -- rel получен обходом СОБСТВЕННОГО каталога прибора под корнем репозитория, не из запроса и не от пользователя: прибор читает свои же файлы, чтобы взять их отпечаток
 }
 
 func benchGoFiles(root string) ([]string, error) {
-	entries, err := os.ReadDir(filepath.Join(root, benchDir))
+	absBench, aerr := treeposture.PathUnder(root, benchDir)
+	if aerr != nil {
+		return nil, fmt.Errorf("authzformbench: координата %s не приведена к посадке корня %s: %w",
+			benchDir, root, aerr)
+	}
+	entries, err := os.ReadDir(absBench)
 	if err != nil {
 		return nil, fmt.Errorf("authzformbench: состав %s: %w", benchDir, err)
 	}

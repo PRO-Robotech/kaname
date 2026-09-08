@@ -27,7 +27,7 @@ Grant-идентичность AccessBinding (5-tuple subject↔role↔resource)
 **Ограничения:**
 - Grant-идентичность (5-tuple) immutable; для смены — Delete+Create.
   Mutable метаданные (`labels`, `deletion_protection`) — через `Update`.
-- `resource_id` — opaque (cross-service id, не валидируется на kacho-iam стороне).
+- `resource_id` — opaque (cross-service id, не валидируется на kaname стороне).
 - `status`: `PENDING` (reserved) / `ACTIVE` (steady) / `REVOKED` (terminal);
   обычный Create сразу дает `ACTIVE`.
 
@@ -51,7 +51,7 @@ Grant-идентичность AccessBinding (5-tuple subject↔role↔resource)
 | `created_at`        | `time.Time`                  | да (server)  | да        | UTC.                                                |
 
 **ID prefix:** `acb`.
-**DB table:** `kacho_iam.access_bindings` (`CREATE TABLE kacho_iam.access_bindings` в `0001_initial.sql`).
+**DB table:** `kaname.access_bindings` (`CREATE TABLE kaname.access_bindings` в `0001_initial.sql`).
 
 **UNIQUE constraint:** partial UNIQUE `access_bindings_active_grant_uniq ON
 (subject_type, subject_id, role_id, resource_type, resource_id) WHERE
@@ -77,7 +77,7 @@ atomic CAS UPDATE с `WHERE status IN ('PENDING','ACTIVE')`. REVOKED irreversibl
 sequenceDiagram
     autonumber
     participant Caller as Admin / Service
-    participant IAM as kacho-iam :9090
+    participant IAM as kaname :9090
     participant Guard as authzguard
     participant FGAGate as Grant authority check
     participant DB as Postgres
@@ -263,10 +263,10 @@ kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
 # psql:
 make -C deploy psql SVC=iam
-# > SELECT subject_type, subject_id, role_id, resource_type, resource_id, status FROM kacho_iam.access_bindings LIMIT 20;
-# > SELECT * FROM kacho_iam.fga_outbox LIMIT 10;      -- журнал намерений
-# > SELECT * FROM kacho_iam.relation_fact LIMIT 10;    -- проекция журнала
-# > SELECT * FROM kacho_iam.subject_change_outbox LIMIT 10;
+# > SELECT subject_type, subject_id, role_id, resource_type, resource_id, status FROM kaname.access_bindings LIMIT 20;
+# > SELECT * FROM kaname.fga_outbox LIMIT 10;      -- журнал намерений
+# > SELECT * FROM kaname.relation_fact LIMIT 10;    -- проекция журнала
+# > SELECT * FROM kaname.subject_change_outbox LIMIT 10;
 
 # Пробы привязки целиком — БЕЗ фильтра `-run`.
 #
@@ -275,14 +275,14 @@ make -C deploy psql SVC=iam
 # → пусто). Такая команда выходит УСПЕХОМ, не исполнив ни одной пробы, — то есть
 # читалась как зелёный прогон и им не была.
 go test -short -count=1 -timeout 120s \
-  ./services/iam/internal/apps/kacho/api/access_binding/ ./services/iam/internal/repo/kacho/pg/
+  ./services/iam/internal/apps/kaname/api/access_binding/ ./services/iam/internal/repo/kaname/pg/
 ```
 
 ## Подробности реализации
 
-- **Use-cases:** `internal/apps/kacho/api/access_binding/{create,delete,get,list_by_resource,list_by_subject}.go`.
-- **Handler:** `internal/apps/kacho/api/access_binding/handler.go`.
-- **Repo:** `internal/repo/kacho/pg/access_binding_repo.go` — strict INSERT
+- **Use-cases:** `internal/apps/kaname/api/access_binding/{create,delete,get,list_by_resource,list_by_subject}.go`.
+- **Handler:** `internal/apps/kaname/api/access_binding/handler.go`.
+- **Repo:** `internal/repo/kaname/pg/access_binding_repo.go` — strict INSERT
   (без `ON CONFLICT`); дубль активной 5-tuple → 23505 → `ErrAlreadyExists`.
 - **DB:** `access_bindings(id, subject_type, subject_id, role_id, resource_type,
   resource_id, status, condition_id, builtin_condition, expires_at, granted_by,
@@ -316,7 +316,7 @@ go test -short -count=1 -timeout 120s \
 - **Strict-create — контракт**: повторный Create активного гранта → `ALREADY_EXISTS`
   (не silent no-op). Идемпотентность grant-retry — на стороне caller'а
   (повтор видит `ALREADY_EXISTS`, не скрытый upsert).
-- **resource_id не валидируется** — kacho-iam не знает про конкретные id
+- **resource_id не валидируется** — kaname не знает про конкретные id
   VPC/Compute ресурсов. Dangling-ref переживается (Check на удаленном
   ресурсе даёт `allowed=false`: прямого факта о нём в `relation_fact` нет).
 - **Re-grant после revoke** — partial UNIQUE `access_bindings_active_grant_uniq`
@@ -338,7 +338,7 @@ go test -short -count=1 -timeout 120s \
 ## Ссылки на код
 
 - `internal/domain/access_binding.go`
-- `internal/apps/kacho/api/access_binding/`
-- `internal/repo/kacho/pg/access_binding_repo.go`, `access_binding_fga_outbox_integration_test.go`, `access_binding_subject_change_integration_test.go`
+- `internal/apps/kaname/api/access_binding/`
+- `internal/repo/kaname/pg/access_binding_repo.go`, `access_binding_fga_outbox_integration_test.go`, `access_binding_subject_change_integration_test.go`
 - `internal/authzmap/`
 - `internal/migrations/0001_initial.sql` — DDL `access_bindings`

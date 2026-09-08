@@ -42,7 +42,7 @@ func NewKac127ID(prefix string) string {
 
 	body := make([]byte, idBodyLen)
 	for i := 0; i < idBodyLen; i++ {
-		bitOff := uint(i * 5) // #nosec G115 -- i is the bounded loop index [0,idBodyLen); i*5 cannot overflow uint.
+		bitOff := uint(i * 5) // i is the bounded loop index [0,idBodyLen); i*5 cannot overflow uint.
 		var val uint64
 		switch {
 		case bitOff+5 <= 64:

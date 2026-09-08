@@ -56,34 +56,34 @@ REST-примеры идут через `api-gateway` (порт указан к�
 
 <CodeBlock language="bash">
   {dedent`
-    # API-сервер → bin/kacho-iam
+    # API-сервер → bin/kaname
     make build
 
-    # мигратор → bin/kacho-migrator
+    # мигратор → bin/kaname-migrator
     make build-migrator
   `}
 </CodeBlock>
 
 ## 2. Накатить миграции
 
-Схема `kacho_iam` создаётся набором goose-миграций: таблицы аккаунтов, проектов, пользователей,
+Схема `kaname` создаётся набором goose-миграций: таблицы аккаунтов, проектов, пользователей,
 сервис-аккаунтов, групп (+ `group_members`), ролей, привязок доступа, а также audit-outbox и
 `fga_outbox` (журнал намерений об отношениях). Мигратор — отдельный бинарь.
 
 <CodeBlock language="bash">
   {dedent`
     # применить все миграции (up)
-    KACHO_IAM_DB_PASSWORD=secret bin/kacho-migrator up
+    KANAME_DB_PASSWORD=secret bin/kaname-migrator up
 
     # посмотреть текущий статус
-    KACHO_IAM_DB_PASSWORD=secret bin/kacho-migrator status
+    KANAME_DB_PASSWORD=secret bin/kaname-migrator status
   `}
 </CodeBlock>
 
 Те же шаги обёрнуты в Make-цели: `make migrate-up`, `make migrate-status`.
 
 :::note Подключение к БД
-Параметры задаются переменными `KACHO_IAM_DB_*` (хост, порт, пользователь, имя БД, sslmode).
+Параметры задаются переменными `KANAME_DB_*` (хост, порт, пользователь, имя БД, sslmode).
 Полный список ключей — на странице [Конфигурация](/install/configuration).
 :::
 
@@ -96,8 +96,8 @@ cluster-internal (`:9091`, `InternalIAMService.Check` для peer-сервисо
 
 <CodeBlock language="bash">
   {dedent`
-    KACHO_IAM_DB_PASSWORD=secret \\
-    bin/kacho-iam serve
+    KANAME_DB_PASSWORD=secret \\
+    bin/kaname serve
   `}
 </CodeBlock>
 
@@ -276,7 +276,7 @@ AccessBinding соединяет субъект (User / ServiceAccount / Group) 
   <thead><tr><th>Поле</th><th>Что задаёт</th><th>Значения</th></tr></thead>
   <tbody>
     <tr><td><code>scopeType</code></td><td>уровень-якорь, в <strong>точечной</strong> форме</td><td><code>iam.cluster</code> / <code>iam.account</code> / <code>iam.project</code></td></tr>
-    <tr><td><code>scopeId</code></td><td>идентификатор якоря</td><td><code>cluster_kacho_root</code> / <code>acc…</code> / <code>prj…</code></td></tr>
+    <tr><td><code>scopeId</code></td><td>идентификатор якоря</td><td><code>cluster_root</code> / <code>acc…</code> / <code>prj…</code></td></tr>
     <tr><td><code>target</code></td><td>какие объекты под якорем охвачены</td><td><code>&#123; "allInScope": &#123;&#125; &#125;</code> либо перечень <code>resources</code></td></tr>
   </tbody>
 </table>

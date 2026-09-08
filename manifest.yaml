@@ -10,7 +10,7 @@
 #  отношений распоряжения — набор глаголов принадлежит ТИПУ, а не платформе.
 #
 #  Раздел `resources` порождает блоки типов модели доступов; сверка с каноном
-#  `proto/kacho/cloud/iam/v1/fga_model.fga` ПОБАЙТОВАЯ:
+#  `proto/kaname/cloud/iam/v1/fga_model.fga` ПОБАЙТОВАЯ:
 #      make -C services/iam model-canon-check
 #  Форму документа судит один разбор:
 #      make -C services/iam module-manifest-check
@@ -131,7 +131,7 @@ resources:
           # `iam_user.identity_remover`. Здесь закрывается вторая.
           #
           # ПОЧЕМУ ЭТО ОТНОШЕНИЕ АККАУНТА, А НЕ ЛИЧНОСТИ. Предмет действия — ЧЛЕНСТВО,
-          # то есть участие человека в ОДНОМ аккаунте (`kacho_iam.memberships`), а не
+          # то есть участие человека в ОДНОМ аккаунте (`kaname.memberships`), а не
           # строка `iam_user`, которая у него одна на всю платформу. Отношение на объекте
           # личности немедленно вернуло бы класс, закрытый #1102: держатель права на
           # глобальную строку распоряжается ею во ВСЕХ её аккаунтах. Область решения —
@@ -371,7 +371,7 @@ resources:
           # ПОЧЕМУ ЭТО НЕ ПРАВО АККАУНТА. Личность ГЛОБАЛЬНА — одна строка `iam_user` на
           # все аккаунты человека (миграция
           # 20260822234500_identity_rows_merge_and_rights_travel), а звено «личность →
-          # аккаунт» вердикт берёт из ЧЛЕНСТВА (`kacho_iam.memberships`), которых у
+          # аккаунт» вердикт берёт из ЧЛЕНСТВА (`kaname.memberships`), которых у
           # человека может быть несколько. Значит держатель права уровня ОДНОГО аккаунта
           # видел бы удостоверения человека ЦЕЛИКОМ — включая те, которыми он действует
           # в аккаунтах, к которым этот держатель отношения не имеет. Директива владельца
@@ -427,7 +427,7 @@ resources:
           # ПОЧЕМУ ЭТО НЕ ПРАВО АККАУНТА — то же основание, что у `token_reader`.
           # Личность ГЛОБАЛЬНА (одна строка `iam_user` на все аккаунты человека,
           # миграция 20260822234500_identity_rows_merge_and_rights_travel), а звено
-          # «личность → аккаунт» вердикт берёт из ЧЛЕНСТВА (`kacho_iam.memberships`),
+          # «личность → аккаунт» вердикт берёт из ЧЛЕНСТВА (`kaname.memberships`),
           # которых у человека может быть несколько. Держатель права уровня ОДНОГО
           # аккаунта читал бы историю сессий человека ЦЕЛИКОМ — включая сессии,
           # которыми тот действовал в аккаунтах, к этому держателю отношения не
@@ -542,7 +542,7 @@ resources:
           # ПОЧЕМУ ЭТО НЕ ПРАВО АККАУНТА — прямее, чем у меток. Запрет пишется в
           # состояние ГЛОБАЛЬНОЙ строки, поэтому останавливает выдачу удостоверений
           # человеку ВЕЗДЕ, а не в том аккаунте, откуда его нажали. Это разобрано в
-          # `services/iam/internal/apps/kacho/api/user/set_blocked.go` и наблюдаемо
+          # `services/iam/internal/apps/kaname/api/user/set_blocked.go` и наблюдаемо
           # утверждено пробой `api/audit/user_block_integration_test.go`
           # (`TestUserBlock_ReachesEveryAccountBecauseThePersonIsOneRow`). Распорядителю
           # аккаунта для его собственной задачи — «этот человек больше не работает у
@@ -757,7 +757,7 @@ resources:
 #  roles — системные роли модуля, объявленные ДАННЫМИ (#1891, #1904, #1916).
 #
 #  Писатель этих строк — применитель манифеста, а не миграция: он приводит
-#  `kacho_iam.roles` к объявленному здесь состоянию. Согласие объявления с живой
+#  `kaname.roles` к объявленному здесь состоянию. Согласие объявления с живой
 #  базой держит ПРОГОН, а не чтение:
 #      go test -C services/iam ./internal/moduleroleparity/
 #  Гейт поднимает Postgres, играет цепочку миграций дерева и сравнивает строки
@@ -792,7 +792,7 @@ roles:
     description: "Admin AccessBinding"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [accessBinding]
@@ -802,7 +802,7 @@ roles:
     description: "Edit AccessBinding"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [accessBinding]
@@ -812,7 +812,7 @@ roles:
     description: "Read AccessBinding"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [accessBinding]
@@ -822,7 +822,7 @@ roles:
     description: "Admin Account (CRUD)"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [account]
@@ -832,7 +832,7 @@ roles:
     description: "Edit Account (update only)"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [account]
@@ -842,7 +842,7 @@ roles:
     description: "Read Account"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [account]
@@ -852,7 +852,7 @@ roles:
     description: "Admin Group"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [group]
@@ -862,7 +862,7 @@ roles:
     description: "Edit Group"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [group]
@@ -872,7 +872,7 @@ roles:
     description: "Read Group"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [group]
@@ -882,7 +882,7 @@ roles:
     description: "Admin Project"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [project]
@@ -892,7 +892,7 @@ roles:
     description: "Edit Project"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [project]
@@ -902,7 +902,7 @@ roles:
     description: "Read Project"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [project]
@@ -912,7 +912,7 @@ roles:
     description: "Admin Role catalog"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [role]
@@ -922,7 +922,7 @@ roles:
     description: "Edit Role"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [role]
@@ -932,7 +932,7 @@ roles:
     description: "Read Role"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [role]
@@ -942,7 +942,7 @@ roles:
     description: "Admin ServiceAccount"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [serviceAccount]
@@ -952,7 +952,7 @@ roles:
     description: "Edit ServiceAccount"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [serviceAccount]
@@ -962,7 +962,7 @@ roles:
     description: "Read ServiceAccount"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [serviceAccount]
@@ -972,7 +972,7 @@ roles:
     description: "Read User"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: iam
         resources: [user]

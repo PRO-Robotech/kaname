@@ -36,9 +36,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // acmeEnvelope — оболочка модуля, которого нет в порождённой сборкой таблице.
@@ -58,7 +58,7 @@ const acmeWithRole = acmeEnvelope + `roles:
     description: "Полный доступ к виджетам acme в проекте оператора"
     tier:
       tierType: iam.cluster
-      tierId: cluster_kacho_root
+      tierId: cluster_root
     rules:
       - module: acme
         resources: [widget]

@@ -4,16 +4,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # assert-suites-green.sh — shared newman suite-green gate for EVERY kacho repo's
-# .github/workflows/newman-e2e.yml. Run with cwd = kacho-iam/tests/newman
-# (collections/ + out/ live there; all repos checkout kacho-iam@main and run the
+# .github/workflows/newman-e2e.yml. Run with cwd = kaname/tests/newman
+# (collections/ + out/ live there; all repos checkout kaname@main and run the
 # shared gen.py + run.sh, so the per-suite reports are identical).
 #
 # WHY this is shared (KAC — newman gate consolidation): each repo's
 # newman-e2e.yml used to carry its own inline copy of the verdict logic, and the
 # copies drifted — fixes for get-malformed (api-gateway#73), delete-binding
 # (iam#108) and the user-per-account invite (iam#113, migration 0011) only ever
-# reached kacho-iam's copy, so vpc/compute/nlb/api-gateway/deploy stayed RED on the
-# very same shared suites that kacho-iam reported GREEN. One script = one source of
+# reached kaname's copy, so vpc/compute/nlb/api-gateway/deploy stayed RED on the
+# very same shared suites that kaname reported GREEN. One script = one source of
 # truth; a change to the verdict lands everywhere at once.
 #
 # NOTHING IS SUBTRACTED FROM THE VERDICT. This gate reports the counts newman
@@ -34,6 +34,39 @@
 # None of the three non-passing outcomes is ever subtracted, whitelisted or
 # explained away.
 #
+# ПЯТЫЙ ИСХОД: УСЛОВИЕ НЕ СОЗДАНО — и он НЕ вердикт о продукте.
+#
+# Страж адреса (`gen.py::require_env_url`) роняет утверждение, когда прогонщик не
+# инъектировал переменную с адресом поверхности. Это единственное, что вообще
+# доезжает до отчёта от пропущенного запроса: пропуск сам по себе следа не
+# оставляет. Но слот у него был ОБЩИЙ с находкой — `assertions.failed`, — и пока
+# это так, «адрес не объявлен харнессу» неотличимо от «поверхность сломана» ни
+# глазом, ни машиной. Наблюдалось числом: 22 таких утверждения покрасили шард iam
+# целиком, и все 22 читались как находки о продукте (#2169).
+#
+# Такие утверждения несут МЕТКУ, которую ставит ровно один блок дерева
+# (`gen.py::PRECONDITION_MARK`, единственность держит
+# scripts/precondition_mark_test.py). Здесь они считаются ОТДЕЛЬНО и печатаются
+# отдельной строкой.
+#
+# ЭТО НЕ ВЫЧИТАНИЕ, И РАЗНИЦА НЕ В СЛОВАХ. Снятый отсюда «известно-красный»
+# whitelist делал красное ЗЕЛЁНЫМ, угадывая причину по чужому имени шага. Здесь
+# ничто не становится зелёным: прогон остаётся ненулевым, суита остаётся
+# названной, число печатается. Меняется КАТЕГОРИЯ, в которой читают исход, и
+# КОД ВОЗВРАТА, которым он приходит вызывающему.
+#
+# КОДОВ ВОЗВРАТА ТРИ, И НАХОДКА ОБЪЯВЛЯЕТСЯ ПЕРВОЙ:
+#   0 — зелено;
+#   1 — НАХОДКА: есть падение, не помеченное как «условие не создано», либо
+#       незаданный ответ, либо упавший скрипт, либо пустой отчёт;
+#   3 — УСЛОВИЕ НЕ СОЗДАНО: единственное, что не сошлось, — предмет, который
+#       обязан был создать харнесс (адрес поверхности от прогонщика, субъект от
+#       посева фикстур). Вердикта о продукте у этого прогона нет.
+# Тройка НИКОГДА не приходит вместе с находкой: прогон, где есть и то и другое,
+# отдаёт 1 — иначе категория стала бы маской. Тот же порядок, что у кода 3
+# гейта покрытия исполнения ниже: оба останавливают конвейер и посылают
+# читателя в РАЗНЫЕ места.
+#
 # The third one was missing until 2026-07-29, and it was invisible by construction:
 # newman books a test-script exception under `scripts`/`testScripts`, NOT under
 # `assertions.failed` (an assertion that never ran cannot fail) and NOT under
@@ -53,6 +86,23 @@ fi
 
 failed_suites=()
 
+# МЕТКА ТРЕТЬЕГО ИСХОДА БЕРЁТСЯ У ЕДИНСТВЕННОГО ПРОИЗВОДИТЕЛЯ.
+#
+# Её объявляет `scripts/gen.py::PRECONDITION_MARK` — тот же блок, который её и
+# ставит. Выписать её здесь вторым литералом значило бы завести два места об
+# одном предмете: они разошлись бы МОЛЧА и разошлись бы там, где расхождение не
+# видно — помеченные утверждения тихо вернулись бы в находки, то есть дефект,
+# ради которого метка заведена, вернулся бы вместе с зелёным гейтом.
+#
+# УМОЛЧАНИЯ У НЕЁ НЕТ. Не удалось прочитать — ОТКАЗ, а не «возьмём привычную
+# строку»: подставленное умолчание сделало бы категорию беспредметной, ничем
+# этого не показав.
+PRECONDITION_MARK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && python3 -c 'import gen; print(gen.PRECONDITION_MARK)' 2>/dev/null || true)"
+if [ -z "$PRECONDITION_MARK" ]; then
+  echo "FAIL: метку третьего исхода не прочитать у её производителя (scripts/gen.py::PRECONDITION_MARK) — категория «условие не создано» стала бы беспредметной" >&2
+  exit 1
+fi
+
 # Totals across the suite. Printed as ONE line at the end so a reader gets the
 # whole verdict in numbers without adding up per-collection lines: how many
 # collections produced a report OUT OF how many exist, plus requests, assertions,
@@ -66,6 +116,12 @@ tot_fails=0
 tot_scripts=0
 tot_unanswered=0
 tot_empty=0
+# Отдельный счётчик пятой категории — см. шапку. Он НЕ вычитается из tot_fails:
+# оба числа печатаются, и читатель видит и целое, и его помеченную часть.
+tot_precond=0
+# Нашлось ли хоть что-то, что вердиктом О ПРОДУКТЕ является. Только это решает,
+# приходит ли вызывающему 1 вместо 3.
+saw_finding=0
 
 # ─── Execution-coverage gate ─────────────────────────────────────────────────
 # The assertion-based verdict below can only see requests that RAN. A request
@@ -201,14 +257,27 @@ for col in "${collections[@]}"; do
   # exclude from itself, because 15 guarded requests sat under names it matched.
   # With no subtraction there is nothing to exclude from: they simply count.
 
+  # УСЛОВИЕ НЕ СОЗДАНО — помеченная часть `fails`. Считается по МЕТКЕ в имени
+  # утверждения: имя производит тот же блок, что и само утверждение, поэтому
+  # причина здесь не угадывается — она объявлена её автором (см. шапку).
+  precond=$(jq -r --arg m "$PRECONDITION_MARK" \
+    '[.run.failures[]? | select((.error.name? // "") == "AssertionError")
+      | select(((.error.test? // "") | startswith($m)))] | length' "$report")
+  # Находка = всё, что упало и меткой НЕ помечено. Считается вычитанием, но
+  # вычитается оно из числа ПАДЕНИЙ ради КЛАССИФИКАЦИИ, а не из вердикта:
+  # ноль находок при непустом precond всё равно останавливает конвейер (код 3).
+  findings=$((fails - precond))
+  [ "$findings" -lt 0 ] && findings=0
+
   tot_reported=$((tot_reported + 1))
   tot_requests=$((tot_requests + reqs))
   tot_asserts=$((tot_asserts + asserts))
   tot_fails=$((tot_fails + fails))
   tot_scripts=$((tot_scripts + scripts_failed))
   tot_unanswered=$((tot_unanswered + unanswered))
+  tot_precond=$((tot_precond + precond))
 
-  echo "$name: ran $reqs request(s) / $asserts assertion(s) — $fails failed, $scripts_failed SCRIPT FAILED, $unanswered UNANSWERED"
+  echo "$name: ran $reqs request(s) / $asserts assertion(s) — $fails failed (из них $precond УСЛОВИЕ НЕ СОЗДАНО, находок $findings), $scripts_failed SCRIPT FAILED, $unanswered UNANSWERED"
 
   # Name what did not answer. A count alone cannot be acted on, and the whole
   # point of separating this category is that somebody reads it.
@@ -250,7 +319,28 @@ done
 
 # The verdict in numbers, on one line. Read the FIRST pair first: a run that
 # stopped early leaves every other counter looking healthy.
+tot_findings=$((tot_fails - tot_precond))
+[ "$tot_findings" -lt 0 ] && tot_findings=0
 echo "TOTAL: ${tot_reported}/${#collections[@]} collection(s) reported, ${tot_requests} request(s), ${tot_asserts} assertion(s), ${tot_fails} failed, ${tot_scripts} SCRIPT FAILED, ${tot_unanswered} UNANSWERED, ${tot_empty} report(s) with no assertions"
+# Пятая категория — СВОЕЙ строкой, и обе величины рядом: «падений N, из них K
+# условие не создано, находок N-K». Одно число скрывает ровно тот случай, ради
+# которого категория заведена.
+echo "TOTAL(категории): находок ${tot_findings}, УСЛОВИЕ НЕ СОЗДАНО ${tot_precond} (метка «${PRECONDITION_MARK}», производитель scripts/gen.py)"
+# Находка — это ЛЮБОЙ исход, о продукте говорящий: непомеченное падение, запрос
+# без ответа, упавший скрипт, пустой отчёт, отсутствующий отчёт. Последнее уже
+# лежит в failed_suites, поэтому здесь считается остальное.
+if [ "$tot_findings" -gt 0 ] || [ "$tot_scripts" -gt 0 ] || [ "$tot_unanswered" -gt 0 ] || [ "$tot_empty" -gt 0 ]; then
+  saw_finding=1
+fi
+# Эти три исхода МЕТКОЙ не покрыты, и притворяться, что покрыты, нельзя:
+# отчёта нет вовсе · покрытие исполнения не сошлось · у покрытия не было
+# пригодного прогона. Первые два — вердикт о дереве; третий — своя третья
+# категория, у неё СВОЁ имя и свой адресат, и сводить её в эту значило бы
+# завести одно имя на два разных «не выполнилось». Поведение у них прежнее
+# (код 1), и меняется оно своим изменением, а не мимоходом этим.
+for _s in "${failed_suites[@]:-}"; do
+  case "$_s" in *"(no-report)"|*"(did-not-run)"|execution-coverage) saw_finding=1 ;; esac
+done
 
 # The same numbers into the job summary when running in CI. Each gate step is
 # short, so these blocks land in the interface one after another AS THE STEPS
@@ -271,10 +361,27 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     printf 'коллекций с отчётом **%s из %s** · запросов %s · утверждений %s · **упало %s** · скрипт упал %s · без ответа %s · пустых отчётов %s\n\n' \
       "$tot_reported" "${#collections[@]}" "$tot_requests" "$tot_asserts" \
       "$tot_fails" "$tot_scripts" "$tot_unanswered" "$tot_empty"
+    printf 'из них **находок %s**, **УСЛОВИЕ НЕ СОЗДАНО %s** — второе вердиктом о продукте не является\n\n' \
+      "$tot_findings" "$tot_precond"
   } >> "$GITHUB_STEP_SUMMARY"
 fi
 
 if [ "${#failed_suites[@]}" -gt 0 ]; then
+  if [ "$saw_finding" -eq 0 ] && [ "$tot_precond" -gt 0 ]; then
+    # ТРЕТИЙ ИСХОД. Не зелено и не красно: вердикта о продукте у этого прогона
+    # нет вовсе. Конвейер останавливается ровно так же (код ненулевой), но
+    # читателя посылает в ДРУГОЕ место — к харнессу, который не создал условия,
+    # а не к продукту, который никто не спрашивал.
+    #
+    # АДРЕСАТ НАЗЫВАЕТСЯ ОБА, а не один. Прежде здесь стоял «страж адреса» и
+    # «адреса поверхностей инъектирует прогонщик» — верно, пока производителем
+    # метки был один блок. Их стало три (адрес поверхности · субъект посева ·
+    # производное удостоверение, #2187), и текст, назвавший одного, посылал бы
+    # читателя чинить прогонщик там, где не отработал ПОСЕВ.
+    echo "УСЛОВИЕ НЕ СОЗДАНО: ${tot_precond} утверждени(й) стража настройки харнесса не получили своего предмета; suites: ${failed_suites[*]}"
+    echo "Это НЕ вердикт о продукте и НЕ зачёт: адреса поверхностей инъектирует прогонщик (deploy/scripts/newman-e2e.sh / newman-parallel.sh), субъектов выдаёт посев фикстур (tests/authz-fixtures/setup.sh) — предмет не создал кто-то из них. Имя переменной названо в самом утверждении."
+    exit 3
+  fi
   echo "FAIL: suites with failures: ${failed_suites[*]}"
   exit 1
 fi

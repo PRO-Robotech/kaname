@@ -60,7 +60,7 @@ func syntheticServiceRoot(t *testing.T, goMod, goFile, dockerfile string) string
 	return root
 }
 
-const goodGoMod = `module github.com/PRO-Robotech/kacho-iam
+const goodGoMod = `module github.com/PRO-Robotech/kaname
 
 go 1.26.0
 
@@ -72,7 +72,7 @@ require github.com/PRO-Robotech/kacho v0.0.0-20260904231955-a30d906b8edf
 const goodGoFile = `package sample
 
 import (
-	_ "github.com/PRO-Robotech/kacho-iam/internal/other"
+	_ "github.com/PRO-Robotech/kaname/internal/other"
 	_ "github.com/PRO-Robotech/kacho/pkg/ids"
 )
 `
@@ -94,7 +94,7 @@ func TestInjectionControl_SoundRootIsSilentInBothChecks(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, findings, "годный корень объявлен нарушением: проверка ловит форму, а не существо")
 	require.NotZero(t, census.filesParsed, "контроль беспредметен: файлов не разобрано")
-	require.Equal(t, "github.com/PRO-Robotech/kacho-iam", census.modulePath)
+	require.Equal(t, "github.com/PRO-Robotech/kaname", census.modulePath)
 
 	dcensus, dfindings, derr := scanDockerfileCoordinates(root)
 	require.NoError(t, derr)
@@ -198,13 +198,13 @@ func TestInjection_DockerfileBuildPathWithLeadingDotIsRecognised(t *testing.T) {
 	// Слепая зона первой редакции: ведущая точка снималась вместе с прочей
 	// пунктуацией, путь становился абсолютным и отбрасывался как принадлежащий
 	// файловой системе контейнера. Обе строки сборки проходили мимо наблюдения.
-	bad := goodDockerfile + "RUN go build ./services/iam/cmd/kacho-iam\n"
+	bad := goodDockerfile + "RUN go build ./services/iam/cmd/kaname\n"
 	root := syntheticServiceRoot(t, goodGoMod, goodGoFile, bad)
 
 	_, findings, err := scanDockerfileCoordinates(root)
 	require.NoError(t, err)
 	require.Len(t, findings, 1, "путь сборки, записанный через ./, не распознан как координата")
-	require.Equal(t, "services/iam/cmd/kacho-iam", findings[0].token)
+	require.Equal(t, "services/iam/cmd/kaname", findings[0].token)
 }
 
 func TestInjection_DockerfileNonCoordinateTokensStaySilent(t *testing.T) {
@@ -212,7 +212,7 @@ func TestInjection_DockerfileNonCoordinateTokensStaySilent(t *testing.T) {
 	// монтирования и путь модуля координатами дерева НЕ являются. Ни один из
 	// них в корне не существует, поэтому ложное распознавание немедленно дало
 	// бы находку.
-	noise := goodDockerfile + `COPY --from=builder /nowhere/kacho-iam /usr/local/bin/kacho-iam
+	noise := goodDockerfile + `COPY --from=builder /nowhere/kaname /usr/local/bin/kaname
 # образ mirror.gcr.io/library/alpine:3.24, монтирование target=/go/pkg/mod
 # модуль github.com/PRO-Robotech/kacho-nowhere/pkg/thing
 `

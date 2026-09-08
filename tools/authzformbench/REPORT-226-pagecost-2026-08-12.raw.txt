@@ -198,7 +198,7 @@ L5-правило-отозвано-ОТЗЫВ    форма E (relverdict, та�
 пробуждаются УВЕДОМЛЕНИЕМ (LISTEN/NOTIFY, триггер AFTER INSERT). Задержка
 уведомления прибором НЕ измерялась: прибор держит движок и Postgres, а не сервис.
 Периоды опроса — ЗАПАСНОЙ путь на пропущенное уведомление, и они разные:
-  · очередь реконсайла  KACHO_IAM_RECONCILE_DRAIN_INTERVAL_MS, умолчание 1000 мс;
+  · очередь реконсайла  KANAME_RECONCILE_DRAIN_INTERVAL_MS, умолчание 1000 мс;
                         полный проход (sweep) — 30 000 мс;
   · очередь движка      PollFallback 30 000 мс, повтор с отступом 1000…30 000 мс,
                         до 10 попыток.
@@ -207,7 +207,7 @@ L5-правило-отозвано-ОТЗЫВ    форма E (relverdict, та�
 этих слагаемых к измеренному не прибавлено — правило отнесения п.7.
 Форму E это не касается ни на одном из двух путей: у неё между изменением метки и
 вердиктом нет очереди вовсе, и её окно измерено целиком.
-предикат: grep -rn 'KACHO_IAM_RECONCILE_DRAIN_INTERVAL_MS|PollFallback|pg_notify' services/iam/cmd/kacho-iam/serve.go services/iam/cmd/kacho-iam/fga_outbox_drainer.go services/iam/internal/repo/kacho/pg/reconcile_notify.go
+предикат: grep -rn 'KANAME_RECONCILE_DRAIN_INTERVAL_MS|PollFallback|pg_notify' services/iam/cmd/kaname/serve.go services/iam/cmd/kaname/fga_outbox_drainer.go services/iam/internal/repo/kacho/pg/reconcile_notify.go
 
 
 ИСХОДЫ ЯЧЕЕК

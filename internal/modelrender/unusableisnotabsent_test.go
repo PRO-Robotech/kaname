@@ -33,8 +33,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho-iam/internal/modelrender"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/modelrender"
 )
 
 // absentFindingFor — находка «модуль закрытого набора без манифеста» у названного

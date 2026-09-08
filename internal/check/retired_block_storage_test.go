@@ -14,8 +14,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // Block-storage retire gate — the iam half.
@@ -47,7 +49,7 @@ import (
 // running database —
 // the seeded system roles, their selectors and the resource mirror are effective
 // state, and they are asserted against a real migrated schema in
-// services/iam/internal/repo/kacho/pg/retired_block_storage_integration_test.go.
+// services/iam/internal/repo/kaname/pg/retired_block_storage_integration_test.go.
 // Neither half is sufficient alone: a vocabulary can be clean while nine bindable
 // roles still name the resource, and the rows can be gone while the code still
 // advertises the type as grantable.
@@ -237,7 +239,7 @@ func TestRetiredBlockStorageIsNotInIAMVocabularies(t *testing.T) {
 // green while the other drifted, which is the exact failure the pair exists to
 // catch.
 const (
-	canonicalModelRelPath = "proto/kacho/cloud/iam/v1/fga_model.fga"
+	canonicalModelRelPath = "proto/kaname/cloud/iam/v1/fga_model.fga"
 	embeddedModelRelPath  = "services/iam/internal/authzmodel/fga_model.fga"
 )
 
@@ -289,11 +291,9 @@ func declaredTypes(dsl string) map[string]bool {
 // declared is a question the relational form REFUSES to answer — an error, not a
 // denial (`relverdict.Ask` has no plan for it).
 func TestRetiredBlockStorageIsNotInAuthorizationModel(t *testing.T) {
-	root := monorepoRoot(t)
-
-	canonical, err := os.ReadFile(filepath.Join(root, canonicalModelRelPath))
+	canonical, err := os.ReadFile(treePath(t, canonicalModelRelPath))
 	require.NoError(t, err, "canonical authorization model %s is missing — this gate has no source of truth", canonicalModelRelPath)
-	embRaw, err := os.ReadFile(filepath.Join(root, embeddedModelRelPath))
+	embRaw, err := os.ReadFile(treePath(t, embeddedModelRelPath))
 	require.NoError(t, err, "embedded authorization model %s is missing — the executed model cannot be checked", embeddedModelRelPath)
 
 	canonicalTypes := declaredTypes(string(canonical))
@@ -324,10 +324,9 @@ func TestRetiredBlockStorageIsNotInAuthorizationModel(t *testing.T) {
 // permission catalog. They are required to be byte-identical, so checking one
 // would let the other drift while this gate stayed green.
 func TestRetiredBlockStorageIsNotInPermissionCatalog(t *testing.T) {
-	root := monorepoRoot(t)
 	copies := []string{
 		filepath.Join("gateway", "internal", "middleware", "embed", "permission_catalog.json"),
-		filepath.Join("services", "iam", "internal", "apps", "kacho", "seed", "embedded", "permission_catalog.json"),
+		filepath.Join("services", "iam", "internal", "apps", "kaname", "seed", "embedded", "permission_catalog.json"),
 	}
 
 	type entry struct {
@@ -339,7 +338,10 @@ func TestRetiredBlockStorageIsNotInPermissionCatalog(t *testing.T) {
 	}
 
 	for _, rel := range copies {
-		raw, err := os.ReadFile(filepath.Join(root, rel))
+		// Копия каталога у КРАЯ живёт у платформы, копия модуля едет с ним:
+		// резолвер приводит обе координаты к посадке и в первом случае даёт
+		// «условие не создано», а не «нет файла».
+		raw, err := os.ReadFile(platformtree.RequirePath(t, rel))
 		require.NoError(t, err, "permission catalog copy %s is missing", rel)
 		var rows []entry
 		require.NoError(t, json.Unmarshal(raw, &rows), "decode %s", rel)

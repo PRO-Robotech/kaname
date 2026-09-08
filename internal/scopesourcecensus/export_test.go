@@ -3,7 +3,7 @@
 
 package scopesourcecensus_test
 
-import "github.com/PRO-Robotech/kacho-iam/internal/scopesourcecensus"
+import "github.com/PRO-Robotech/kaname/internal/scopesourcecensus"
 
 // PlansForTest — перечень типов, о которых перепись обязана высказаться.
 //

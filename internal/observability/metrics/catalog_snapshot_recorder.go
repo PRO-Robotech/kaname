@@ -40,7 +40,7 @@ type CatalogSnapshotRecorder struct {
 func (r *Registry) NewCatalogSnapshotRecorder() *CatalogSnapshotRecorder {
 	rec := &CatalogSnapshotRecorder{
 		outcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_catalog_snapshot_refreshes_total",
+			Name: Namespace + "_catalog_snapshot_refreshes_total",
 			Help: "Исходы обновления снимка каталога модуля: refreshed — новое живое " +
 				"множество прочитано и подменило прежнее; failed — обновление не удалось, " +
 				"снимок остался прежним. Заполнение на старте не считается ни тем, ни " +

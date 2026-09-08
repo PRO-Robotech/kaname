@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-coverage.py — newman RPC→case-id coverage gate for kacho-iam.
+coverage.py — newman RPC→case-id coverage gate for kaname.
 
 Parses kacho-proto IAM .proto files for `service X { rpc Y(...) ... }` blocks
 and their `option (google.api.http) = { <verb>: "<path>" … };` annotations,
@@ -282,7 +282,7 @@ def compute_coverage(rpcs: List[Rpc], cases: List[Tuple[str, str]]) -> Dict[str,
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--proto-glob", required=True,
-                   help="glob for .proto files (e.g. '../kacho-proto/proto/kacho/cloud/iam/v1/*.proto')")
+                   help="glob for .proto files (e.g. '../kacho-proto/proto/kaname/cloud/iam/v1/*.proto')")
     p.add_argument("--collections-glob", required=True,
                    help="glob for Postman collection JSON files")
     p.add_argument("--min", type=float, default=0.0,

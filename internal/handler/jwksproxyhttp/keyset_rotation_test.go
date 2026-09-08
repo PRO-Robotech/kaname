@@ -16,8 +16,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/jwksproxyhttp"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
 )
 
 func TestKeySet_AfterRotationOurRecordCarriesTheNewKey(t *testing.T) {

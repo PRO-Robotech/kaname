@@ -54,14 +54,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
 )
 
 const (
 	// accountExclusionRPC — RPC исключения из аккаунта.
-	accountExclusionRPC = "kacho.cloud.iam.v1.UserService/RemoveFromAccount"
+	accountExclusionRPC = "kaname.cloud.iam.v1.UserService/RemoveFromAccount"
 	// accountAdmissionRPC — вторая половина пары: приглашение в аккаунт.
-	accountAdmissionRPC = "kacho.cloud.iam.v1.UserService/Invite"
+	accountAdmissionRPC = "kaname.cloud.iam.v1.UserService/Invite"
 )
 
 // exclusionVerdict — то, что предикат ГОВОРИТ о паре «приглашение ↔ исключение».

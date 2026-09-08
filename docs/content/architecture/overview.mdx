@@ -6,7 +6,7 @@ title: Архитектура
 
 # Архитектура
 
-Эта страница описывает внутреннее устройство Kachō IAM: слоистую (clean) архитектуру,
+Эта страница описывает внутреннее устройство Kaname: слоистую (clean) архитектуру,
 database-per-service, интеграцию с провайдерами идентичности, набор listener'ов и место
 сервиса в платформе как leaf-узла и центрального авторизатора. Внешний контракт — на
 [страницах API](/api/overview); модель прав и потоки идентичности вынесены в отдельные разделы:
@@ -20,7 +20,7 @@ database-per-service, интеграцию с провайдерами иден�
 
 ```mermaid
 flowchart TD
-  handler["handler<br/>(тонкий transport: parse → use-case → format)"] --> uc["use-case<br/>(apps/kacho/api/{account,project,user,…})"]
+  handler["handler<br/>(тонкий transport: parse → use-case → format)"] --> uc["use-case<br/>(apps/kaname/api/{account,project,user,…})"]
   repo["repo (pgx adapter)"] --> uc
   clients["clients (Hydra / Kratos)"] --> uc
   uc --> domain["domain<br/>(сущности + Validate, чистый Go)"]
@@ -31,12 +31,12 @@ flowchart TD
   <thead><tr><th>Слой</th><th>Где</th><th>Ответственность</th></tr></thead>
   <tbody>
     <tr><td><strong>domain</strong></td><td><code>internal/domain/</code></td><td>Сущности + <code>Validate()</code>; закрытые наборы (verbs, subject-types). Только stdlib + proto</td></tr>
-    <tr><td><strong>use-case</strong></td><td><code>internal/apps/kacho/api/&lt;resource&gt;/</code></td><td>Бизнес-логика; определяет port-интерфейсы (Repo, Client). Не импортирует transport</td></tr>
+    <tr><td><strong>use-case</strong></td><td><code>internal/apps/kaname/api/&lt;resource&gt;/</code></td><td>Бизнес-логика; определяет port-интерфейсы (Repo, Client). Не импортирует transport</td></tr>
     <tr><td><strong>repo (adapter)</strong></td><td><code>internal/repo/</code></td><td>Реализация портов на handwritten pgx; SQLSTATE → sentinel; outbox-emit в TX</td></tr>
     <tr><td><strong>clients (adapter)</strong></td><td><code>internal/clients/</code></td><td>Hydra (OAuth-клиенты), Kratos (identity), сброс кэша прав на краю</td></tr>
     <tr><td><strong>handler</strong></td><td><code>internal/handler/</code></td><td>Тонкий transport: parse → use-case → format. Без бизнес-логики</td></tr>
     <tr><td><strong>authz</strong></td><td><code>internal/authzguard</code>, <code>authzmap</code>, <code>authztypes</code></td><td>Интерсепторы, permission-map, verb→relation, объектные типы</td></tr>
-    <tr><td><strong>composition root</strong></td><td><code>cmd/kacho-iam/</code></td><td>Единственное место wiring (serve.go); <code>cmd/migrator/</code> — миграции</td></tr>
+    <tr><td><strong>composition root</strong></td><td><code>cmd/kaname/</code></td><td>Единственное место wiring (serve.go); <code>cmd/migrator/</code> — миграции</td></tr>
   </tbody>
 </table>
 
@@ -45,7 +45,7 @@ flowchart TD
 
 ## База данных — database-per-service
 
-Kachō IAM владеет схемой `kacho_iam` в PostgreSQL и не делит её ни с кем. Within-service
+Kaname владеет схемой `kaname` в PostgreSQL и не делит её ни с кем. Within-service
 инварианты выражены на уровне БД (FK / UNIQUE / CHECK / partial-UNIQUE / CAS), а не
 software-проверками. Ключевые группы таблиц: аккаунты / проекты / пользователи / сервис-аккаунты /
 группы (+ `group_members`) / роли / привязки доступа, плюс audit-outbox, журнал намерений
@@ -63,7 +63,7 @@ software-проверками. Ключевые группы таблиц: ак�
 ## Авторизация — реляционная форма в собственной базе
 
 IAM — не только владелец модели прав, но и **точка её исполнения**. На каждый RPC (свой и чужой —
-через `InternalIAMService.Check`) он складывает вердикт запросом к схеме `kacho_iam`: прямой факт,
+через `InternalIAMService.Check`) он складывает вердикт запросом к схеме `kaname`: прямой факт,
 выдача роли на область, выдача по меткам, членство в группе.
 
 Модель прав (`fga_model.fga`) описывает типы объектов
@@ -109,11 +109,11 @@ UserToken — маппинг на Hydra-клиентов. Детали и пот
 
 ```mermaid
 flowchart LR
-  vpc["kacho-vpc"] -->|"Check + RegisterResource"| iam["kacho-iam"]
+  vpc["kacho-vpc"] -->|"Check + RegisterResource"| iam["kaname"]
   cmp["kacho-compute"] -->|"Check + RegisterResource"| iam
   geo["kacho-geo"] -->|"Check"| iam
   nlb["kacho-nlb"] -->|"Check"| iam
-  iam -->|"вердикт запросом"| pg[("PostgreSQL kacho_iam")]
+  iam -->|"вердикт запросом"| pg[("PostgreSQL kaname")]
   iam -->|"identity / OAuth"| ory["Ory Kratos + Hydra"]
 ```
 

@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmapgen"
+	"github.com/PRO-Robotech/kaname/internal/authzmapgen"
 )
 
 // injTypes — набор типов, которым судится синтетика. Тот же вид имени, что у

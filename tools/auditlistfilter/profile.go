@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package auditlistfilter states how kacho-iam is laid out for the public-List
+// Package auditlistfilter states how kaname is laid out for the public-List
 // gate. The analysis itself — and why it parses instead of grepping — lives in
 // pkg/listfiltergate.
 //
@@ -25,7 +25,7 @@
 // # This service's shape
 //
 // iam colocates transport and use-cases per resource, like vpc and nlb:
-// internal/apps/kacho/api/<res> holds a `Handler` whose listing methods delegate to
+// internal/apps/kaname/api/<res> holds a `Handler` whose listing methods delegate to
 // per-RPC use-cases in the same package. So the PACKAGE tells one resource from
 // another, and the analyser's walk reaches the use-case.
 //
@@ -47,14 +47,28 @@
 //
 // # What is NOT proven here, stated so nobody reads more into a pass
 //
-// access_binding.ListByRole narrows per row, but by evaluating requireGrantAuthority
-// inside the loop rather than by a batched VisibleSet. requireGrantAuthority is
-// therefore accepted as a filter call — and the analyser cannot tell a call inside a
-// per-row loop from a single call before it. For that one method the pass means "the
-// per-object question is asked", not "it is asked for every row". The stronger
-// statement is a test's job (services/iam/internal/apps/kacho/api/access_binding),
-// not this gate's, and pretending otherwise would be exactly the form-without-
-// substance this class is about.
+// access_binding.ListByRole narrows per row, but not by a batched VisibleSet: it asks
+// grant-authority about each row's SCOPE. Since #2054 it asks through a per-request
+// memo (pageAuthority.grantAuthorityVerdict) — the super-gate once per request, the
+// scope once per DISTINCT scope — because page_size reaches 1000 and the un-memoised
+// form spent two store questions per row. The memo changes no verdict; it removes the
+// repeat. So grantAuthorityVerdict is accepted as a filter call alongside
+// requireGrantAuthority, which the single-object verbs still use.
+//
+// This caveat said "by evaluating requireGrantAuthority inside the loop" until
+// 2026-09-06, and #2054 had made that false three weeks after it was written: the loop
+// evaluates the memo, and the analyser walks calls on the RECEIVER and its fields but
+// not on a local variable, so nothing along ListByRole reached any declared filter. The
+// gate went red — correctly, on its own terms — while the narrowing was fully present
+// and locked by four tests. A profile is a claim about the tree and expires with it.
+//
+// What the pass still does NOT prove, said so nobody reads more into it: the analyser
+// cannot tell a call inside a per-row loop from a single call before it. For this one
+// method the pass means "the per-object question is asked", not "it is asked for every
+// row". The stronger statement is a test's job — TestListByRole_StrangerSeesNothing and
+// TestListByRole_FilteringKeepsExactlyTheAuthorisedRows in
+// services/iam/internal/apps/kaname/api/access_binding — not this gate's, and pretending
+// otherwise would be exactly the form-without-substance this class is about.
 //
 // Likewise, the three EdgeGate methods delegate their check to the per-RPC
 // authorization at the edge. The gate verifies that the delegation is real — the RPC
@@ -77,7 +91,7 @@ func subjectGate(call string) listfiltergate.Listing {
 func edgeGate(file, field string) listfiltergate.Listing {
 	return listfiltergate.Listing{
 		Shape:       listfiltergate.EdgeGate,
-		ProtoFile:   "kacho/cloud/iam/v1/" + file,
+		ProtoFile:   "kaname/cloud/iam/v1/" + file,
 		ParentField: field,
 	}
 }
@@ -87,10 +101,10 @@ var (
 	subjectScoped = listfiltergate.Listing{Shape: listfiltergate.SubjectScoped}
 )
 
-// Profile describes kacho-iam to the analyser.
+// Profile describes kaname to the analyser.
 var Profile = listfiltergate.Profile{
 	Service:    "iam",
-	AnchorRoot: "internal/apps/kacho/api",
+	AnchorRoot: "internal/apps/kaname/api",
 	// One package per resource, all declaring the same transport type.
 	PerPackage:     true,
 	ReceiverSuffix: "Handler",
@@ -108,9 +122,27 @@ var Profile = listfiltergate.Profile{
 	ExtraReceivers: []string{"PublicHandler"},
 
 	// iam's per-object question to the model. VisibleSet is the batched form every
-	// page filter reaches; Visible is the single-object form. requireGrantAuthority
-	// is the per-row form used by ListByRole — see the caveat in the package comment.
-	Filters: []string{"VisibleSet", "Visible", "requireGrantAuthority"},
+	// page filter reaches; Visible is the single-object form. The two grant-authority
+	// names are the per-row form of access_binding: requireGrantAuthority asks it once
+	// for a single object, grantAuthorityVerdict asks it per row out of a per-request
+	// memo (#2054). See the caveat in the package comment.
+	//
+	// НАЗВАНО ИМЕНЕМ ПО СУЩЕСТВУ, А НЕ ХВОСТОМ СЕЛЕКТОРА. Метод зовётся через
+	// локальную переменную, поэтому анализатор записывает голое имя — и голым именем
+	// `verdict` в iam уже назван другой предмет (`internal/service/authorize_service.go`
+	// вычисляет им одно разрешение). Профиль, назвавший сужателем `verdict`, проверял бы
+	// написание; поэтому предмет переименован, а не перечень расширен под него.
+	//
+	// СКОЛЬКО ЛИСТИНГОВ ДЕРЖИТ КАЖДОЕ ИМЯ — замерено, а не предположено (2026-09-06,
+	// предикат: снять имя из этого перечня и прогнать гейт): VisibleSet — 9,
+	// grantAuthorityVerdict — 1 (ListByRole), requireGrantAuthority — 0, Visible — 0.
+	// Два последних НЕ мусор и не снимаются: это законные формы того же пообъектного
+	// вопроса, у которых сегодня нет носителя. Перечень сужателей — словарь СВОЙСТВА,
+	// а не ведомость послаблений: запись без носителя ничего не прощает, а её снятие
+	// покраснело бы на верном коде в день, когда простую форму напишут снова. Что она
+	// работоспособна, а не только объявлена, держит законный близнец инъекции
+	// TestGate_RowFilterMustStillAskThePerObjectQuestion — он сужает именно ею.
+	Filters: []string{"VisibleSet", "Visible", "requireGrantAuthority", "grantAuthorityVerdict"},
 	// The hand-written FLOOR only. Оба имени — чужой словарь: `ListAllowedIDs`
 	// не объявлен в iam нигде, а `ListObjects` был поверхностью снятого хранилища
 	// отношений (стадия S6, эпик #747) и объявления тоже больше не имеет. Пол
@@ -137,11 +169,11 @@ var Profile = listfiltergate.Profile{
 	// listing — and would be exactly the old defect inside one.
 	EnumerationSources: []listfiltergate.EnumerationSource{
 		{Dir: "internal/clients", Type: "RelationQueries"},
-		{Dir: "internal/repo/kacho/pg/relverdict", Type: "Asker"},
+		{Dir: "internal/repo/kaname/pg/relverdict", Type: "Asker"},
 	},
 	// "listOp.Execute" is the delegation to shared.ListOperationsUseCase, which is
 	// where the narrowing actually happens. It has to be named this way because the
-	// use-case lives in a DIFFERENT package (internal/apps/kacho/shared) and the
+	// use-case lives in a DIFFERENT package (internal/apps/kaname/shared) and the
 	// analyser's walk deliberately does not leave the package it is judging.
 	//
 	// Naming a field is against this gate's own doctrine — identify by declared type,
@@ -162,12 +194,12 @@ var Profile = listfiltergate.Profile{
 	SubjectScopers: []string{"ListForCaller", "listOp.Execute", "identityOfAuthenticatedCaller"},
 
 	ProtoFiles: []string{
-		"kacho/cloud/iam/v1/internal_cluster_service.proto",
-		"kacho/cloud/iam/v1/membership_service.proto",
-		"kacho/cloud/iam/v1/sa_key_service.proto",
-		"kacho/cloud/iam/v1/user_token_service.proto",
+		"kaname/cloud/iam/v1/internal_cluster_service.proto",
+		"kaname/cloud/iam/v1/membership_service.proto",
+		"kaname/cloud/iam/v1/sa_key_service.proto",
+		"kaname/cloud/iam/v1/user_token_service.proto",
 	},
-	FGAModel: "kacho/cloud/iam/v1/fga_model.fga",
+	FGAModel: "kaname/cloud/iam/v1/fga_model.fga",
 
 	Listings: map[string]listfiltergate.Listing{
 		// ---- pages narrowed per object, in the service ----

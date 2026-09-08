@@ -17,11 +17,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/publicauthzcensus"
+	"github.com/PRO-Robotech/kaname/internal/publicauthzcensus"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 func TestEveryPublicRPCCarriesAnObjectQuestion(t *testing.T) {
-	root := repoRoot(t)
+	// Перепись читает КАТАЛОГ КОНТРАКТОВ платформы. В поставку модуля он не
+	// входит by construction: контракты приезжают зависимостью, а не деревом.
+	// Красное у каждого, кто склонирует, вердиктом о продукте не является.
+	root := platformtree.Require(t)
 	c, err := publicauthzcensus.Collect(root)
 	if err != nil {
 		t.Fatalf("перепись не состоялась: %v", err)
@@ -95,8 +100,12 @@ func TestEveryPublicRPCCarriesAnObjectQuestion(t *testing.T) {
 
 	// Освобождённые контрактом НАЗЫВАЮТСЯ, а не молчат: на вынесенном iam это
 	// вся оставшаяся поверхность, к которой пообъектного вопроса не задаётся, и
-	// «их шесть» обязано быть видно без чтения кода. Находкой это не является —
-	// освобождение записано в контракте и рецензировалось.
+	// сколько их и какие именно — обязано быть видно без чтения кода. Находкой
+	// это не является: освобождение записано в контракте и рецензировалось.
+	//
+	// Число здесь НЕ выписано намеренно — его печатает строка ниже. Прежняя
+	// редакция называла его прозой («их шесть») и разошлась с деревом молча:
+	// освобождённых стало три, а комментарий продолжал утверждать шесть.
 	exempt := c.InCategory(publicauthzcensus.CategoryExempt)
 	names := make([]string, 0, len(exempt))
 	for _, r := range exempt {

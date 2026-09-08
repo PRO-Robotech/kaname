@@ -32,8 +32,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifestoracle"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifestoracle"
 )
 
 // canonOracle — модель, ВНЕСЁННАЯ в загрузчик пробой.
@@ -104,7 +104,7 @@ const bindingRelationToServiceAccount = `    - subjects:
         - {type: serviceAccount, name: kacho-vpc}
       grantedRelation: system_viewer
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope
 `
 
@@ -115,7 +115,7 @@ const bindingRelationToGroup = `    - subjects:
         - {type: group, name: vpc-quota-readers}
       grantedRelation: quota_reader
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope
 `
 
@@ -209,7 +209,7 @@ seed:
         - {type: group, name: vpc-quota-readers}
       roleId: vpc.internal_consumer
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope
 `)
 	m := mustLoadGrantOK(t, doc, "выдача ролью, форма которой не менялась")
@@ -233,7 +233,7 @@ func TestMODRG03BothGrantFormsNamedIsRefused(t *testing.T) {
       roleId: vpc.viewer
       grantedRelation: system_viewer
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope
 `)
 	mustRefuseGrant(t, doc, manifest.ErrBindingIncomplete,
@@ -251,7 +251,7 @@ func TestMODRG04NeitherGrantFormNamedIsRefused(t *testing.T) {
 	doc := seedWithBinding(`    - subjects:
         - {type: serviceAccount, name: kacho-vpc}
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope
 `)
 	msg := mustRefuseGrant(t, doc, manifest.ErrBindingIncomplete,
@@ -277,7 +277,7 @@ func TestMODRG09GroupRecipientRefusedWhenTheCanonDoesNotAdmitGroup(t *testing.T)
         - {type: group, name: vpc-quota-readers}
       grantedRelation: system_viewer
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope
 `)
 	msg := mustRefuseGrant(t, doc, manifest.ErrRelationRecipientKind,
@@ -307,7 +307,7 @@ func TestMODRG10UndeclaredRelationIsRefusedWithTheCanonList(t *testing.T) {
         - {type: serviceAccount, name: kacho-vpc}
       grantedRelation: system_vewer
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope
 `)
 	msg := mustRefuseGrant(t, doc, manifest.ErrRelationNotDeclared,
@@ -336,7 +336,7 @@ func TestMODRG11ComputedRelationGetsItsOwnRefusal(t *testing.T) {
         - {type: serviceAccount, name: kacho-vpc}
       grantedRelation: any_admin
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope
 `)
 	msg := mustRefuseGrant(t, doc, manifest.ErrRelationComputed,
@@ -362,7 +362,7 @@ func TestMODRG12SameNameOnAnotherTypeDoesNotSubstitute(t *testing.T) {
         - {type: serviceAccount, name: kacho-vpc}
       grantedRelation: member
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope
 `)
 	mustRefuseGrant(t, doc, manifest.ErrRelationNotDeclared,
@@ -385,7 +385,7 @@ func TestMODRG13SeedableCheckPrecedesTheCanonCheck(t *testing.T) {
         - {type: user, name: someone}
       grantedRelation: system_viewer
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope
 `)
 	msg := mustRefuseGrant(t, doc, manifest.ErrSubjectNotSeeded,

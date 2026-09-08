@@ -25,8 +25,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	operationv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 )
 
 // --- дублёр порта -----------------------------------------------------------

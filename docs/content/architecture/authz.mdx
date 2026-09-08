@@ -18,7 +18,7 @@ title: Модель авторизации
   <thead><tr><th>Понятие</th><th>Смысл</th></tr></thead>
   <tbody>
     <tr><td><strong>Субъект</strong></td><td>Кто действует: <code>user:usr…</code> / <code>service_account:sva…</code> / <code>group:grp…#member</code></td></tr>
-    <tr><td><strong>Объект</strong></td><td>Над чем: <code>account:acc…</code> / <code>project:prj…</code> / <code>vpc_network:enp…</code> / singleton <code>cluster:cluster_kacho_root</code></td></tr>
+    <tr><td><strong>Объект</strong></td><td>Над чем: <code>account:acc…</code> / <code>project:prj…</code> / <code>vpc_network:enp…</code> / singleton <code>cluster:cluster_root</code></td></tr>
     <tr><td><strong>Отношение</strong></td><td>Связь субъект↔объект: <code>viewer</code> / <code>editor</code> / <code>admin</code> / verb-bearing <code>v_get</code>/<code>v_update</code>/… / <code>owner</code></td></tr>
     <tr><td><strong>Прямой факт</strong></td><td>Записанная тройка <code>(объект, отношение, субъект)</code> в базе IAM</td></tr>
     <tr><td><strong>Scope / tier</strong></td><td>Уровень иерархии привязки: CLUSTER ▶ ACCOUNT ▶ PROJECT</td></tr>
@@ -58,7 +58,7 @@ scope привязки — и ровно их.
 ```mermaid
 flowchart LR
   rpc["RPC Get(project prj7mfpj2my52k5a06kg)"] --> gw["gateway authz-middleware"]
-  gw -->|"Check(user:usrbr69ze0ftz3jf7396, v_get, project:prj7mfpj2my52k5a06kg)"| iam["kacho-iam: реляционная форма"]
+  gw -->|"Check(user:usrbr69ze0ftz3jf7396, v_get, project:prj7mfpj2my52k5a06kg)"| iam["kaname: реляционная форма"]
   iam -->|"allow"| ok["выполнить"]
   iam -->|"deny"| no["403 PERMISSION_DENIED"
 ```
@@ -131,7 +131,7 @@ Top-level `List` (Account / Project / User / ServiceAccount / Group / Role) **н
 - **Owner** аккаунта (`ownerUserId`) получает полный доступ к содержимому аккаунта через
   cluster-role owner-механику; при создании аккаунта заводится защищённая owner-привязка
   (`deletionProtection=true`).
-- **cluster-admin** (`systemAdmin` на singleton `cluster:cluster_kacho_root`) — short-circuit:
+- **cluster-admin** (`systemAdmin` на singleton `cluster:cluster_root`) — short-circuit:
   проходит любой per-resource Check. Это платформенный администратор.
 - **grant-authority** — право *выдавать* доступ (`AccessBinding.Create`): владелец
   аккаунта-владельца scope ИЛИ FGA `admin` на объекте scope. Проверяется в handler'е, т.к. тип
@@ -225,7 +225,7 @@ REST-поверхности не существует. Ни один путь п
 
 ```mermaid
 flowchart LR
-  ab["AccessBinding.Create"] -->|"одна транзакция: выдача + журнал + прямой факт"| pg[("kacho_iam")]
+  ab["AccessBinding.Create"] -->|"одна транзакция: выдача + журнал + прямой факт"| pg[("kaname")]
   pg -->|"вердикт складывается запросом к этим же строкам"| check["последующие Check"]
   pg -.->|"асинхронно: сброс кэша края"| gw["api-gateway"]
 ```

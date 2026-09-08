@@ -6,7 +6,7 @@ package authzguard_test
 // cluster_admin_shortcircuit_test.go — RBAC explicit-model 2026 P5 (D-9 / КФ-2).
 //
 // IsClusterAdmin is the FLAT cluster-admin super-gate: a single relation Check
-// `cluster:cluster_kacho_root # system_admin @ <subj>`. It is NOT a hierarchical
+// `cluster:cluster_root # system_admin @ <subj>`. It is NOT a hierarchical
 // `<rel> from cluster` cascade — exactly one tuple = one fact. The same primitive
 // is reused by authorize_service.Check (public AuthZ + InternalIAMService.Check)
 // AND every write-authz site (requireGrantAuthority / fgaHoldsAdmin) so a
@@ -21,8 +21,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 type scFakeChecker struct {

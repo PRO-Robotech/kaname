@@ -5,7 +5,7 @@
 // grammar `module.resource.resourceName.verb` (migration 0005).
 //
 // permissionElementRe MUST stay in lockstep with the DB validator
-// `kacho_iam.iam_permissions_valid()` (internal/migrations/0005_rbac_v2_
+// `kaname.iam_permissions_valid()` (internal/migrations/0005_rbac_v2_
 // grammar_and_scope.sql). The regex there is:
 //
 //	^(\*|[a-z][a-z0-9-]*)\.(\*|[a-z][a-zA-Z0-9_-]*)\.(\*|[a-zA-Z0-9_-]+)\.(\*|[a-z][a-zA-Z0-9_-]*)$
@@ -18,7 +18,7 @@ package domain_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 func TestPermission_Validate(t *testing.T) {

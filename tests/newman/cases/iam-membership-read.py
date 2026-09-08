@@ -194,7 +194,7 @@ CASES.append(Case(
 # `users.invited_by` — внешний ключ в `users(id)`, поэтому НАЗВАТЬ там можно
 # только человека. Служебная учётка — законный приглашающий, но человеком она не
 # является, и продукт ОСОЗНАННО оставляет колонку пустой, унося актора на
-# `Operation` (`services/iam/internal/apps/kacho/api/user/invite.go`, врезка у
+# `Operation` (`services/iam/internal/apps/kaname/api/user/invite.go`, врезка у
 # `invitedBy`). Значит под машинным вызывающим утверждение «след приглашения
 # назван» непроверяемо by construction: оно спрашивает про поле, которого при
 # таком вызывающем не бывает.
@@ -205,7 +205,7 @@ CASES.append(Case(
 # Отходных путей здесь ровно два, и маска в них не входит: волна, создающая
 # условие, либо открытый долг с числом. Условие СОЗДАНО: человек церемонии
 # существует, владеет своим аккаунтом (`owner` → `admin` → `editor` → `viewer` по
-# модели, `proto/kacho/cloud/iam/v1/fga_model.fga` §type account) и несёт
+# модели, `proto/kaname/cloud/iam/v1/fga_model.fga` §type account) и несёт
 # поднятый уровень входа, которого требует запись каталога у `UserService/Invite`
 # (`required_acr_min: "2"`).
 #

@@ -43,6 +43,8 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // reconcileOutboxTable — таблица, чью уборку стережёт предпосылка.
@@ -77,7 +79,7 @@ var redriveConstructors = map[string]bool{"New": true, "NewRedriveOnly": true}
 func TestReconcileOutboxRetentionPremiseHolds(t *testing.T) {
 	root := catalogRepoRoot(t)
 
-	files, err := treecorpus.UnderWithSuffix(filepath.Join(root, iamTreeRel), ".go")
+	files, err := treecorpus.UnderWithSuffix(platformtree.RequirePath(t, iamTreeRel), ".go")
 	if err != nil {
 		t.Fatalf("состав индекса поддерева %s: %v", iamTreeRel, err)
 	}

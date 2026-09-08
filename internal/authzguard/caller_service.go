@@ -10,30 +10,20 @@
 // has been superseded by the per-RPC CallerPolicy and removed.
 package authzguard
 
-import "strings"
+import "github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 
 // ServiceNameFromSAN extracts the module service short-name from a verified SPIRE
-// SAN (`spiffe://kacho.cloud/ns/<ns>/sa/kacho-<svc>` → `<svc>`). Returns
-// ("", false) for any other shape (same parsing rules as SANToServiceAccountID).
-func ServiceNameFromSAN(san string) (string, bool) {
-	if !strings.HasPrefix(san, sanTrustPrefix) {
-		return "", false
-	}
-	idx := strings.LastIndex(san, sanSAInfix)
-	if idx < 0 {
-		return "", false
-	}
-	saName := san[idx+len(sanSAInfix):]
-	if !strings.HasPrefix(saName, svcNamePrefix) {
-		return "", false
-	}
-	svc := strings.TrimPrefix(saName, svcNamePrefix)
-	if svc == "" {
-		return "", false
-	}
-	ns := san[len(sanTrustPrefix):idx]
-	if ns == "" || strings.HasPrefix(ns, "/") {
-		return "", false
-	}
-	return svc, true
+// SAN (`spiffe://<trust-domain>/ns/<ns>/sa/kacho-<svc>` → `<svc>`). Returns
+// ("", false) for any other shape.
+//
+// # Одна реализация, а не две
+//
+// Здесь стояла ПОБАЙТОВАЯ КОПИЯ тела [SANToServiceDomain] — двадцать строк,
+// повторяющих тот же разбор. Расходятся такие копии молча: правка одной не
+// доезжает до другой, и вторая продолжает принимать то, что первая уже
+// отвергает. Свели их вместе с переводом домена доверия в величину — иначе
+// литерал пришлось бы снимать дважды, а копия осталась бы поводом завести его
+// снова.
+func ServiceNameFromSAN(d grpcsrv.TrustDomain, san string) (string, bool) {
+	return SANToServiceDomain(d, san)
 }

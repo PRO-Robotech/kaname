@@ -6,7 +6,7 @@
 // Pipeline (per request):
 //
 //  1. Resolve permission → FGA relation (`<domain>.<resource>.<verb>` →
-//     `<resource>_<verb>` per kacho-corelib/authz convention).
+//     `<resource>_<verb>` per pkg/authz convention).
 //  2. Build Conditions context (`current_time` from server clock; merges
 //     user-provided `context` from the RPC body).
 //  3. Вердикт реляционной формы по плану, скомпилированному из модели прав.
@@ -14,7 +14,7 @@
 //  4. Allow.
 //
 // Clean Architecture: domain.* + port-ifaces only. Adapter wiring lives in
-// cmd/kacho-iam/main.go.
+// cmd/kaname/main.go.
 //
 // The OPA guardrail overlay step (`data.kacho.iam.guardrails.deny`) was removed.
 // FGA is the sole policy gate; the OPA sidecar and bundle wiring are gone.
@@ -42,10 +42,10 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
-	"github.com/PRO-Robotech/kacho-iam/internal/authztypes"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authztypes"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // serverAuthoritativeCondKeys are CEL condition-context attributes that describe
@@ -144,7 +144,7 @@ type AuthorizeService struct {
 	relations Authorizer
 	// clusterAdmin — flat cluster-admin super-gate (explicit RBAC model). When
 	// wired, Check/CheckRelation short-circuit to ALLOW for a subject holding
-	// cluster:cluster_kacho_root#system_admin BEFORE the per-object FGA resolve.
+	// cluster:cluster_root#system_admin BEFORE the per-object FGA resolve.
 	// Optional / nil-safe: an unwired checker never short-circuits (the
 	// ordinary FGA path is the sole decision — backward-compatible).
 	clusterAdmin authzguard.RelationChecker
@@ -240,7 +240,7 @@ const batchCheckParallelism = 8
 // clusterAdminMemo memoizes the cluster-admin short-circuit verdict for a single
 // subject across a Check/BatchCheck pass, so a batch from one subject (or a single
 // request) issues the cluster:…#system_admin FGA Check AT MOST ONCE. The
-// cluster-admin relation is subject-scoped (one cluster:cluster_kacho_root#
+// cluster-admin relation is subject-scoped (one cluster:cluster_root#
 // system_admin tuple), so the verdict is identical for every object in the pass —
 // caching it is correct and preserves fail-closed (the Check is still performed,
 // just deduped).
@@ -441,7 +441,7 @@ func planCheck(ctx context.Context, req CheckRequest, now time.Time) checkPlan {
 		p.denyReason = fmt.Sprintf("action %q does not resolve to a known relation", req.Action)
 		return p
 	}
-	// Cluster is a singleton (`cluster_kacho_root` — см. domain/cluster.go::
+	// Cluster is a singleton (`cluster_root` — см. domain/cluster.go::
 	// ClusterSingletonID). Per-RPC catalog entries для reference data
 	// (compute.Region/Zone, etc.) задают
 	// scope_extractor: {object_type: cluster, from_request_field: '*'} →
@@ -526,7 +526,7 @@ func (s *AuthorizeService) verdict(
 //
 //	subject user:usr_abc lacks relation 'editor' on vpc_network:vpcn_xyz
 //	  (action 'vpc.networks.update'); current direct relations: [viewer]
-//	subject user:usr_def lacks relation 'admin' on cluster:cluster_kacho_root
+//	subject user:usr_def lacks relation 'admin' on cluster:cluster_root
 //	  (action 'iam.cluster.grantAdmin'); no direct relations granted
 //
 // The format is intentionally one-line + structured-enough for log
@@ -1160,7 +1160,7 @@ func (s *AuthorizeService) ExpandRelations(ctx context.Context, req ExpandReques
 }
 
 // resolveActionToRelation — `<domain>.<resource>.<verb>` → FGA relation.
-// Convention from kacho-corelib/authz: relation is `<resource>_<verb>` for
+// Convention from pkg/authz: relation is `<resource>_<verb>` for
 // verbs in {get,list,update,delete,create} mapped to {viewer,viewer,editor,
 // admin,editor}. For domain-specific actions we fall back to the verb
 // directly (`compute.instances.ssh` → `ssh`).

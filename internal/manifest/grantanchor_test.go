@@ -7,7 +7,7 @@
 // # Что здесь было неверно
 //
 // Опубликованная схема пинит якорь двумя `const` — `scopeType: iam.cluster` и
-// `scopeId: cluster_kacho_root`, — а единственный объявленный судья формы
+// `scopeId: cluster_root`, — а единственный объявленный судья формы
 // (загрузчик) значения не судил. Он требовал лишь, чтобы ключ был назван
 // непустым. Схема судьёй не является и судьёй не станет — она КОНТРАКТ для
 // автора манифеста и его редактора (см. шапку пакета), — поэтому `const` без
@@ -37,8 +37,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // bindingRoleAt — выдача РОЛЬЮ на названном якоре.

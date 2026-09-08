@@ -51,6 +51,8 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // iamServiceGoTreeRelPath — что обходится.
@@ -134,7 +136,7 @@ func judgeCatalogGateMarks(entries []catalogGateEntry, marks []catalogGateMark) 
 
 func readCatalogGateEntries(t *testing.T) []catalogGateEntry {
 	t.Helper()
-	path := filepath.Join(monorepoRoot(t), catalogRelPath)
+	path := platformtree.RequirePath(t, catalogRelPath)
 	raw, err := os.ReadFile(filepath.Clean(path)) // #nosec G304 -- путь-константа собственного дерева
 	if err != nil {
 		t.Fatalf("каталог прав %s не прочитан — судить отметки нечем: %v", catalogRelPath, err)
@@ -159,7 +161,9 @@ func readCatalogGateEntries(t *testing.T) []catalogGateEntry {
 func walkIAMProductionGoFiles(t *testing.T) (marks []catalogGateMark, filesRead int) {
 	t.Helper()
 	root := monorepoRoot(t)
-	files, err := treecorpus.UnderWithSuffix(filepath.Join(root, iamServiceGoTreeRelPath), ".go")
+	// Координата приводится к ПОСАДКЕ: обходится СВОЙ каталог модуля, он едет
+	// вместе с ним и в клоне лежит от его корня, без приставки.
+	files, err := treecorpus.UnderWithSuffix(platformtree.RequirePath(t, iamServiceGoTreeRelPath), ".go")
 	if err != nil {
 		t.Fatalf("состав %s не взят у индекса: %v", iamServiceGoTreeRelPath, err)
 	}

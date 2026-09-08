@@ -48,9 +48,10 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/httpbody"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/tokenrevocation"
 )
 
 // IntrospectPath — путь авторитета на cluster-внутреннем слушателе.
@@ -263,66 +264,26 @@ func (h *Handler) judge(ctx context.Context, raw string) (bool, error) {
 		return false, nil
 	}
 
-	// Ключей отсечки ДВА, и это не два механизма, а два ключа у одного
-	// (задача #898, приёмка F2 §2.10).
+	// Правило отзыва — ОДНО на обе поверхности, объявленное в своём пакете.
 	//
-	// Субъекта мало. Отзыв КЛИЕНТА — снятие ключа, которым клиент себя
-	// аутентифицирует, — обязан снимать и уже выданные ИМ токены; иначе
-	// контроль действует на выдаче и не действует на предъявлении, а такое
-	// состояние НЕ СХОДИТСЯ САМО: окно закрывает только срок токена, и
-	// величина его от нагрузки не зависит.
+	// Ключей отсечки несколько, и это не несколько механизмов, а несколько ключей
+	// у одного: отзыв КЛИЕНТА — снятие ключа, которым клиент себя
+	// аутентифицирует, — обязан снимать и уже выданные ИМ токены. Вторая копия
+	// правила разошлась бы молча и разошлась бы там, где расхождение не видно.
 	//
-	// Идентификатор клиента приезжает СВОИМ составом утверждений — тем же,
-	// что и на пути обратного вызова, — поэтому второго claim'а ради отзыва
-	// заводить не потребовалось. Ключи не коллизят by construction:
-	// идентификаторы платформы глобально уникальны (ban #15).
-	revocationKeys := []string{sub}
-	for _, name := range revocationSubjectClaims {
-		if v, ok := claims[name].(string); ok && v != "" {
-			revocationKeys = append(revocationKeys, v)
-		}
+	// Токен без отметки выпуска правило считает отозванным: он не сопоставим ни с
+	// какой отсечкой, и принять его значило бы завести материал, который отозвать
+	// нечем.
+	revoked, err := tokenrevocation.Revoked(ctx, h.cfg.Revocations, claims)
+	if err != nil {
+		// Недоступность источника отсечек НЕ ЕСТЬ «не отозван»: это третий
+		// исход, и спрашивающий закрывается сам.
+		return false, fmt.Errorf("revocations: %w", err)
 	}
-
-	// Токен без отметки выпуска не сопоставим НИ С КАКОЙ отсечкой — ни с уже
-	// стоящей, ни с будущей. Принять его значило бы завести материал, который
-	// отозвать нечем; при сомнении отказ.
-	issued, issuedErr := claims.GetIssuedAt()
-	if issuedErr != nil || issued == nil {
+	if revoked {
 		return false, nil
 	}
-
-	for _, key := range revocationKeys {
-		revokeBefore, found, err := h.cfg.Revocations.RevokedBefore(ctx, key)
-		if err != nil {
-			// Недоступность источника отсечек НЕ ЕСТЬ «не отозван»: это третий
-			// исход, и спрашивающий закрывается сам.
-			return false, fmt.Errorf("revocations: %w", err)
-		}
-		if !found {
-			continue
-		}
-		// Отзыв действует ВПЕРЁД: выпущенное до момента отсечки
-		// недействительно, выпущенное после — действительно. Иначе отзыв
-		// означал бы вечную блокировку принципала, а не снятие выданного.
-		if issued.Time.Before(revokeBefore) {
-			return false, nil
-		}
-	}
 	return true, nil
-}
-
-// revocationSubjectClaims — утверждения, чьё значение служит ВТОРЫМ ключом
-// отсечки.
-//
-// Перечень объявлен один раз и закрыт: имя, заведённое в составе утверждений и
-// забытое здесь, дало бы клиента, чей отзыв не доезжает до предъявления, — и
-// не доезжал бы он МОЛЧА, потому что «работает» и «не отозвано» выглядят
-// одинаково.
-var revocationSubjectClaims = []string{
-	// Клиент пользовательского токена.
-	"kacho_user_token_id",
-	// Клиент ключа служебной учётки.
-	"kacho_sa_key_id",
 }
 
 func parsePublicKey(pemStr string) (crypto.PublicKey, error) {

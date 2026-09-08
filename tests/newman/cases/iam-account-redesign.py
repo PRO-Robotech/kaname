@@ -45,7 +45,7 @@ accountBId, jwtAccountAdminB.
 Кейсы, чей предмет — синхронный ОТКАЗ заведения, остаются на человеке церемонии:
 отвергнутое заведение не списывает ничего.
 
-Grounded в landed-коде (services/iam/internal/apps/kacho/api/{account,project}):
+Grounded в landed-коде (services/iam/internal/apps/kaname/api/{account,project}):
   create.go:167 owner-in-body reject · update.go:57 owner immutable · create.go:255
   default "default" · account_repo.go:296 contains-projects · project/update.go:45
   accountId immutable · pgmaperr.go:95 dup-name.

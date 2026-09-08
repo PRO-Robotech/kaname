@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
 )
 
 // fakeProvisioner records the last ProvisionInput it received and can be

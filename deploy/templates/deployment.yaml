@@ -1,6 +1,10 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+{{/* ОТКАЗ ОДНИМ ПЕРЕЧНЕМ, когда не названы объекты, которых чарт не создаёт.
+Зовётся из ОБОИХ шаблонов, ссылающихся на такие объекты: какой из них
+отрендерится первым, решает helm, а перечень обязан быть полным в любом. */}}
+{{- include "kaname-svc.requireOperatorSuppliedNames" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,25 +20,30 @@ spec:
       labels:
         app: {{ .Values.name }}
       annotations:
-        # ПРИВЯЗКА ПОДА К СОДЕРЖИМОМУ ОБРАЗА.
+        # ПРИВЯЗКА ПОДА К СОДЕРЖИМОМУ ОБРАЗА — НЕОБЯЗАТЕЛЬНАЯ, И ЕЁ НАЗЫВАЕТ ТОТ,
+        # КТО СТАВИТ.
         #
-        # Тег локального образа (`kacho-*:dev`) неизменен, поэтому пересборка под
-        # тем же тегом НЕ меняет шаблон пода: Kubernetes не видит разницы и под не
+        # Предмет: координата образа с ИЗМЕНЯЕМЫМ тегом не меняет шаблон пода при
+        # пересборке под тем же тегом. Kubernetes разницы не видит, под не
         # перекатывается — процесс продолжает работать СТАРЫМ бинарником под новым
-        # тегом. Ровно тот же разрыв между намерением и исходом, что и у настроек,
-        # приезжающих массовым импортом (инцидент 2026-07-25), и лечится он так же —
-        # аннотацией, привязанной к содержимому.
+        # тегом. Привязка к прибитому отпечатку (`repo@sha256:…`) этой беды не
+        # имеет by construction: отпечаток и есть часть шаблона пода.
         #
-        # Значение — идентификатор содержимого образа; его пишет `make build-services`
-        # в helm/umbrella/values.image-ids.yaml сразу после сборки. Профиль, который
-        # этот файл не накладывает (offline-рендер, чужой реестр), получает "unset" —
-        # и тогда привязки нет, что честно: привязывать не к чему.
-        kacho.cloud/image-id: {{ dig "kachoImageIds" "iam" "unset" (.Values.global | default dict) | quote }}
-        # ConfigMap-content hash → pod rolling-restart при изменении config.yaml.
-        kacho.cloud/config-checksum: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # Поэтому ключ ПУСТ по умолчанию, а аннотация при пустом значении не
+        # рендерится ВОВСЕ. Постоянная заглушка была бы хуже отсутствия: она
+        # выглядит привязкой, ничего не привязывая. Кто ставит по изменяемому
+        # тегу — называет здесь идентификатор содержимого образа (поле `Id`
+        # из `docker image inspect`), обычно из своего конвейера сборки.
+        {{- with .Values.imageId }}
+        kaname.cloud/image-id: {{ . | quote }}
+        {{- end }}
+        # Отпечаток содержимого настроек → перекат пода при изменении config.yaml.
+        # Производитель у него ЕСТЬ всегда — шаблон настроек этого же чарта, —
+        # поэтому он безусловен, в отличие от привязки к образу выше.
+        kaname.cloud/config-checksum: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         # Объявления сбора здесь НЕТ, и это не пропуск. Этот каталог чарта не
         # разворачивается ничем: умбрелла тянет iam каталогом сабчарта
-        # (`deploy/helm/umbrella/charts/kacho-iam`), и объявление, стоявшее
+        # (`deploy/helm/umbrella/charts/kaname`), и объявление, стоявшее
         # здесь, не рендерилось ни в одном профиле — то есть было ровно тем
         # классом, ради которого заведена перепись накопителей: артефакт,
         # выглядящий как работа, у которого нет потребителя.
@@ -70,13 +79,29 @@ spec:
           secret:
             secretName: {{ $tls.secretName | quote }}
         {{- end }}
+        {{- if $tls.clientSecretName }}
+        # МАТЕРИАЛ КЛИЕНТСКОЙ ЛИЧНОСТИ — ОТДЕЛЬНЫЙ ЛИСТ, А НЕ ТОТ ЖЕ САМЫЙ.
+        #
+        # Служба звонит САМА СЕБЕ: её собственные REST-фронты идут к её же
+        # gRPC-слушателю. Лист слушателя выписывается с назначением `server auth`
+        # и без `client auth`, а проверка клиентской цепи идёт именно этим
+        # назначением, — поэтому предъявить серверный лист нельзя ни при каком
+        # входе: рукопожатие обрывается предупреждением `bad certificate`, и
+        # фронт возвращает арендатору 503 (задача #2186).
+        #
+        # Секрет не объявлен — тома нет, посадка прежняя: dev-цепочка чарта
+        # материала TLS не называет вовсе.
+        - name: tls-client
+          secret:
+            secretName: {{ $tls.clientSecretName | quote }}
+        {{- end }}
       initContainers:
-        # Миграции БД исполняет отдельный binary `kacho-migrator`
+        # Миграции БД исполняет отдельный binary `kaname-migrator`
         # (cobra-based CLI), не subcommand основного.
         - name: migrate
           image: "{{ .Values.image }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
-          command: ["/usr/local/bin/kacho-migrator", "up"]
+          command: ["/usr/local/bin/kaname-migrator", "up"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -84,12 +109,12 @@ spec:
               drop: ["ALL"]
           volumeMounts:
             - name: config
-              mountPath: /etc/kacho-iam
+              mountPath: /etc/kaname
               readOnly: true
           env:
-            - name: KACHO_IAM_CONFIG_PATH
-              value: /etc/kacho-iam/config.yaml
-            - name: KACHO_IAM_DB_PASSWORD
+            - name: KANAME_CONFIG_PATH
+              value: /etc/kaname/config.yaml
+            - name: KANAME_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.db.passwordSecretName }}
@@ -98,7 +123,7 @@ spec:
         - name: {{ .Values.name }}
           image: "{{ .Values.image }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
-          command: ["/usr/local/bin/kacho-iam", "serve"]
+          command: ["/usr/local/bin/kaname", "serve"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -118,23 +143,48 @@ spec:
             # процесса (authn.hooks-http-endpoint = tcp://0.0.0.0:9092).
             - name: http-hooks
               containerPort: {{ .Values.ports.hooksHttp | default 9092 }}
+            # Собственные REST-фронты службы (KAN-REST-1). ДВА разных порта, а не
+            # разбор пути на общем: принадлежность маршрута фронту обязана быть
+            # свойством того, куда вообще можно дозвониться.
+            {{- if .Values.ports.rest }}
+            - name: http-rest
+              containerPort: {{ .Values.ports.rest }}
+            {{- end }}
+            {{- if .Values.ports.internalRest }}
+            - name: http-rest-int
+              containerPort: {{ .Values.ports.internalRest }}
+            {{- end }}
           volumeMounts:
             - name: config
-              mountPath: /etc/kacho-iam
+              mountPath: /etc/kaname
               readOnly: true
             {{- if $tls.secretName }}
             - name: tls-server
               mountPath: {{ printf "%s/server" (required "tls.mountPath не задан при объявленном tls.secretName: путь монтирования обязан быть назван явно — иначе ручки рёбер называют файлы, которых в поде нет" $tls.mountPath) | quote }}
               readOnly: true
             {{- end }}
+            {{- if $tls.clientSecretName }}
+            - name: tls-client
+              mountPath: {{ printf "%s/client" (required "tls.mountPath не задан при объявленном tls.clientSecretName: путь монтирования обязан быть назван явно — иначе удостоверение исходящего вызова называет файл, которого в поде нет" $tls.mountPath) | quote }}
+              readOnly: true
+            {{- end }}
           env:
-            - name: KACHO_IAM_CONFIG_PATH
-              value: /etc/kacho-iam/config.yaml
-            - name: KACHO_IAM_DB_PASSWORD
+            - name: KANAME_CONFIG_PATH
+              value: /etc/kaname/config.yaml
+            - name: KANAME_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.db.passwordSecretName }}
                   key: {{ .Values.db.passwordSecretKey }}
+            {{- if (index .Values.env "KANAME_REST_UPSTREAM_MTLS_ENABLE") }}
+            # Имя, по которому фронт сверяет сертификат СОБСТВЕННОГО слушателя.
+            # ВЫЧИСЛЯЕТСЯ шаблоном, а не выписывается в профиле: дозвон идёт в
+            # петлю (адрес привязки целью соединения не является), а лист выписан
+            # на имя Service — выписанное руками разошлось бы с ним молча, и
+            # разошлось бы только в боевой посадке, где проверка включена.
+            - name: KANAME_REST_UPSTREAM_MTLS_SERVERNAME
+              value: {{ printf "%s.%s.svc.cluster.local" .Values.name .Release.Namespace | quote }}
+            {{- end }}
             {{- range $k, $v := .Values.env }}
             - name: {{ $k }}
               value: {{ $v | quote }}

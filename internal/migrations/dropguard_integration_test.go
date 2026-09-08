@@ -34,9 +34,9 @@ package migrations_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
 	"github.com/PRO-Robotech/kacho/pkg/dropguard"
 	"github.com/PRO-Robotech/kacho/pkg/dropguard/dropguardtest"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 func TestIntegration_IamDropsAreMeasured(t *testing.T) {
@@ -62,7 +62,7 @@ func TestIntegration_IamDropsAreMeasured(t *testing.T) {
 //
 // # Why this is a separate test and not the line it replaces
 //
-// It used to be one line inside the run above: the drop of `kacho_iam.watch_cursors`
+// It used to be one line inside the run above: the drop of `kaname.watch_cursors`
 // had to appear among the counted rows, so that deleting the migration together with
 // its declaration could not leave the gate green on a chain that had quietly got the
 // table back (PRO-Robotech/kacho#1148).
@@ -86,13 +86,13 @@ func TestIntegration_IamChainNeverBringsBackTheSubscriptionCursorTable(t *testin
 	// Control in the other direction. Without it, "the table is not created" would
 	// be green on a chain the parser stopped reading, on an empty embedded FS, and
 	// on a rename of CREATE TABLE syntax the parser no longer recognises.
-	const anchor = "kacho_iam.accounts"
+	const anchor = "kaname.accounts"
 	if !inv.CreatesTable(anchor) {
 		t.Fatalf("the anchor table %q is not created anywhere in %d migration file(s): the parser is not reading CREATE TABLE in this chain, so the absence asserted below would be an absence of reading",
 			anchor, inv.FilesScanned)
 	}
 
-	for _, table := range []string{"kacho_iam.watch_cursors", "watch_cursors"} {
+	for _, table := range []string{"kaname.watch_cursors", "watch_cursors"} {
 		if inv.CreatesTable(table) {
 			t.Errorf("%s is created by migration(s) %v — the server-side subscription cursor table is back, and the decision that retired it (PRO-Robotech/kacho#1148) was undone without anyone saying so",
 				table, inv.CreateVersions(table))

@@ -30,7 +30,7 @@ model
 # THE THREE TOP LEVELS ARE THE EXCEPTION, AND THEY CASCADE (owner directive
 # 2026-07-27, .claude/rules/security.md "Три уровня супер-доступа — КАСКАДОМ"):
 #
-#   1. cloud administrator  — `cluster:cluster_kacho_root#system_admin`, over everything;
+#   1. cloud administrator  — `cluster:cluster_root#system_admin`, over everything;
 #   2. bootstrap identity   — the SAME relation (migration 0058 seeds it for the
 #                             bootstrap SA, seed/bootstrap_admin.go for the root
 #                             user), so it needs no separate carrier;
@@ -123,7 +123,7 @@ model
 # `... from organization` derivation — Organization is fully gone.
 #
 # DSL conventions (acceptance §4):
-#   - `cluster:cluster_kacho_root`     — singleton enforced on write-side
+#   - `cluster:cluster_root`     — singleton enforced on write-side
 #     (P3-D17). One global cluster object.
 #   - `account` / `project` — STRUCTURAL parents
 #     (cluster ▶ account ▶ project ▶ <domain resource>);
@@ -177,7 +177,7 @@ type group
     define member: [user, service_account]
 
 # ---------------------------------------------------------------------------
-# Cluster — singleton "cluster_kacho_root". Write-side enforcement rejects
+# Cluster — singleton "cluster_root". Write-side enforcement rejects
 # tuples with any other object id (P3-D17).
 #   - system_admin  — standing cluster administrator.
 #   - system_viewer — read-only cluster catalog viewer.
@@ -249,7 +249,7 @@ type cluster
     #   create / update → editor
     #   delete          → admin
     # Cluster-scoped Internal admin RPCs (compute.regions.delete, etc.)
-    # land on object cluster:cluster_kacho_root with derived relation
+    # land on object cluster:cluster_root with derived relation
     # admin/editor. Without these aliases, FGA Check returned no-path for
     # every system_admin user even though their tuple was correct.
     # `system_admin` covers BOTH editor + admin so a single tuple grants
@@ -374,7 +374,7 @@ type account
     # `iam_user.identity_remover`. Здесь закрывается вторая.
     #
     # ПОЧЕМУ ЭТО ОТНОШЕНИЕ АККАУНТА, А НЕ ЛИЧНОСТИ. Предмет действия — ЧЛЕНСТВО,
-    # то есть участие человека в ОДНОМ аккаунте (`kacho_iam.memberships`), а не
+    # то есть участие человека в ОДНОМ аккаунте (`kaname.memberships`), а не
     # строка `iam_user`, которая у него одна на всю платформу. Отношение на объекте
     # личности немедленно вернуло бы класс, закрытый #1102: держатель права на
     # глобальную строку распоряжается ею во ВСЕХ её аккаунтах. Область решения —
@@ -595,7 +595,7 @@ type iam_user
     # ПОЧЕМУ ЭТО НЕ ПРАВО АККАУНТА. Личность ГЛОБАЛЬНА — одна строка `iam_user` на
     # все аккаунты человека (миграция
     # 20260822234500_identity_rows_merge_and_rights_travel), а звено «личность →
-    # аккаунт» вердикт берёт из ЧЛЕНСТВА (`kacho_iam.memberships`), которых у
+    # аккаунт» вердикт берёт из ЧЛЕНСТВА (`kaname.memberships`), которых у
     # человека может быть несколько. Значит держатель права уровня ОДНОГО аккаунта
     # видел бы удостоверения человека ЦЕЛИКОМ — включая те, которыми он действует
     # в аккаунтах, к которым этот держатель отношения не имеет. Директива владельца
@@ -650,7 +650,7 @@ type iam_user
     # ПОЧЕМУ ЭТО НЕ ПРАВО АККАУНТА — то же основание, что у `token_reader`.
     # Личность ГЛОБАЛЬНА (одна строка `iam_user` на все аккаунты человека,
     # миграция 20260822234500_identity_rows_merge_and_rights_travel), а звено
-    # «личность → аккаунт» вердикт берёт из ЧЛЕНСТВА (`kacho_iam.memberships`),
+    # «личность → аккаунт» вердикт берёт из ЧЛЕНСТВА (`kaname.memberships`),
     # которых у человека может быть несколько. Держатель права уровня ОДНОГО
     # аккаунта читал бы историю сессий человека ЦЕЛИКОМ — включая сессии,
     # которыми тот действовал в аккаунтах, к этому держателю отношения не
@@ -763,7 +763,7 @@ type iam_user
     # ПОЧЕМУ ЭТО НЕ ПРАВО АККАУНТА — прямее, чем у меток. Запрет пишется в
     # состояние ГЛОБАЛЬНОЙ строки, поэтому останавливает выдачу удостоверений
     # человеку ВЕЗДЕ, а не в том аккаунте, откуда его нажали. Это разобрано в
-    # `services/iam/internal/apps/kacho/api/user/set_blocked.go` и наблюдаемо
+    # `services/iam/internal/apps/kaname/api/user/set_blocked.go` и наблюдаемо
     # утверждено пробой `api/audit/user_block_integration_test.go`
     # (`TestUserBlock_ReachesEveryAccountBecauseThePersonIsOneRow`). Распорядителю
     # аккаунта для его собственной задачи — «этот человек больше не работает у
@@ -1072,7 +1072,7 @@ type vpc_cidr_group
 type vpc_address_pool
   relations
     # kacho:latent — cluster-anchored admin resource; its RPCs gate on
-    # cluster:cluster_kacho_root#system_admin directly, so no module registers an
+    # cluster:cluster_root#system_admin directly, so no module registers an
     # address pool and nothing writes this pointer today. Declared ahead of that
     # producer deliberately: the type is admin-curated and the anchor is what the
     # super-admin cascade below derives over. The marker expires by itself — the

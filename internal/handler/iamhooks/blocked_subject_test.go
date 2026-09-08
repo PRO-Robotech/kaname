@@ -37,10 +37,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 const blockedSubject = "kratos-blocked-sub"
@@ -101,7 +101,7 @@ func TestTokenHook_BlockedUser_Refused(t *testing.T) {
 
 	// Nothing was minted: no claims of any size reached the response.
 	assert.NotContains(t, w.Body.String(), "ext_claims")
-	assert.NotContains(t, w.Body.String(), "kacho_external_id")
+	assert.NotContains(t, w.Body.String(), "kaname_external_id")
 
 	for _, e := range audit.Events() {
 		assert.NotEqual(t, "authn.token.issued", e.EventType,
@@ -122,7 +122,7 @@ func TestTokenHook_UnknownSubject_StillMintsMinimalClaims(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code,
 		"first login must still mint; refusing it would break the one case this branch "+
 			"exists for. body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "kacho_external_id")
+	assert.Contains(t, w.Body.String(), "kaname_external_id")
 }
 
 // ── Refresh hook ────────────────────────────────────────────────────────────
@@ -205,8 +205,8 @@ func TestEnrichClaims_ActiveUser_Unaffected(t *testing.T) {
 
 	claims, _, err := svc.EnrichClaims(context.Background(), sub, service.TokenHookContext{})
 	require.NoError(t, err)
-	assert.Equal(t, string(active.ID), claims["kacho_user_id"])
-	assert.Equal(t, string(active.AccountID), claims["kacho_account_id"])
+	assert.Equal(t, string(active.ID), claims["kaname_user_id"])
+	assert.Equal(t, string(active.AccountID), claims["kaname_account_id"])
 }
 
 // A membership set holding both an active and a blocked row must resolve to the
@@ -223,7 +223,7 @@ func TestEnrichClaims_MixedMembership_PicksTheActiveRow(t *testing.T) {
 
 	claims, _, err := svc.EnrichClaims(context.Background(), sub, service.TokenHookContext{})
 	require.NoError(t, err)
-	assert.Equal(t, string(active.ID), claims["kacho_user_id"])
+	assert.Equal(t, string(active.ID), claims["kaname_user_id"])
 }
 
 // ── Personal access token ───────────────────────────────────────────────────

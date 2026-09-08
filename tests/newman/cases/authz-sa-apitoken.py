@@ -1,7 +1,7 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Case-set authz-sa-apitoken для kacho-iam.
+"""Case-set authz-sa-apitoken для kaname.
 
 The SA/api-token ALLOW cases (service-account vpc-editor@project-A1: NET-GT-A1,
 NET-CR-A1, APITOK-NET-GT-A1) require the fixture's vpc-editor grant on project-A1
@@ -16,7 +16,7 @@ grant), so these ALLOW cases pass (200).
     SA — non-human principal. Получает токен через Hydra `client_credentials`
     grant (у SA есть OAuth client_id/secret, выданный
     `SAKeyService.Issue`). Итоговый Kachō-JWT несет `sub=<svaId>` +
-    `kacho_principal_type=service_account` (token_hook augment).
+    `kaname_principal_type=service_account` (token_hook augment).
 
   Модель 6 — API token
     Статический long-lived API-token. На стенде моделируется JWT, привязанным
@@ -261,7 +261,7 @@ def emit(case_id, title, decision, method, path, body, subject, list_key="networ
 #
 # SA-A имеет AccessBinding(vpc-editor) на project-A1 (выдан в setup-фазе).
 # SA-A токен получен через client_credentials → claims содержат
-# kacho_principal_type=service_account, sub=<svaAId>.
+# kaname_principal_type=service_account, sub=<svaAId>.
 #
 # Decision table (SA-A — grant=vpc-editor@project-A1):
 #   resource в project-A1 (own)         → ALLOW  (binding покрывает)

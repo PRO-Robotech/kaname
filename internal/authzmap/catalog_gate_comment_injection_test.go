@@ -23,7 +23,7 @@ import (
 // каталога дерева (его читает сам гейт, и его перепись он печатает).
 var catalogGateInjectionEntries = []catalogGateEntry{
 	{
-		FQN:         "kacho.cloud.iam.v1.UserTokenService/Issue",
+		FQN:         "kaname.cloud.iam.v1.UserTokenService/Issue",
 		RequiredRel: "token_issuer",
 		ScopeExtractor: &struct {
 			ObjectType string `json:"object_type"`
@@ -48,7 +48,7 @@ func TestCatalogGateCommentInjection_TheOriginalWrongRelationIsFound(t *testing.
 	// ДЕФЕКТ, ВОЗВРАЩЁННЫЙ ДОСЛОВНО: отметка называет отношение, которое стояло
 	// в комментарии до починки (#1258).
 	broken := collectCatalogGateMarks("handler.go",
-		"// ГЕЙТ КАТАЛОГА kacho.cloud.iam.v1.UserTokenService/Issue: v_update@iam_user\n")
+		"// ГЕЙТ КАТАЛОГА kaname.cloud.iam.v1.UserTokenService/Issue: v_update@iam_user\n")
 	if len(broken) != 1 {
 		t.Fatalf("отметка не разобрана: %v", broken)
 	}
@@ -65,7 +65,7 @@ func TestCatalogGateCommentInjection_TheOriginalWrongRelationIsFound(t *testing.
 
 	// ЗАКОННЫЙ БЛИЗНЕЦ той же формы: верное отношение обязано молчать.
 	ok := collectCatalogGateMarks("handler.go",
-		"// ГЕЙТ КАТАЛОГА kacho.cloud.iam.v1.UserTokenService/Issue: token_issuer@iam_user\n")
+		"// ГЕЙТ КАТАЛОГА kaname.cloud.iam.v1.UserTokenService/Issue: token_issuer@iam_user\n")
 	if f := judgeCatalogGateMarks(catalogGateInjectionEntries, ok); len(f) != 0 {
 		t.Fatalf("верная отметка объявлена находкой — гейт ловит форму, а не существо: %v", f)
 	}
@@ -75,7 +75,7 @@ func TestCatalogGateCommentInjection_WrongObjectTypeIsFound(t *testing.T) {
 	// ДЕФЕКТ: отношение верное, тип объекта — нет. Область гейта берётся именно
 	// с типа, поэтому половина утверждения так же лжива, как целое.
 	broken := collectCatalogGateMarks("handler.go",
-		"// ГЕЙТ КАТАЛОГА kacho.cloud.iam.v1.UserTokenService/Issue: token_issuer@account\n")
+		"// ГЕЙТ КАТАЛОГА kaname.cloud.iam.v1.UserTokenService/Issue: token_issuer@account\n")
 	joined := strings.Join(judgeCatalogGateMarks(catalogGateInjectionEntries, broken), " | ")
 	if !strings.Contains(joined, "account") || !strings.Contains(joined, "iam_user") {
 		t.Fatalf("подменённый тип объекта не найден: %q", joined)
@@ -85,7 +85,7 @@ func TestCatalogGateCommentInjection_WrongObjectTypeIsFound(t *testing.T) {
 func TestCatalogGateCommentInjection_UnknownMethodIsFound(t *testing.T) {
 	// ДЕФЕКТ: отметка пережила метод, которого в каталоге нет.
 	broken := collectCatalogGateMarks("handler.go",
-		"// ГЕЙТ КАТАЛОГА kacho.cloud.iam.v1.UserTokenService/Mint: token_issuer@iam_user\n")
+		"// ГЕЙТ КАТАЛОГА kaname.cloud.iam.v1.UserTokenService/Mint: token_issuer@iam_user\n")
 	joined := strings.Join(judgeCatalogGateMarks(catalogGateInjectionEntries, broken), " | ")
 	if !strings.Contains(joined, "Mint") {
 		t.Fatalf("отметка на несуществующем методе не найдена: %q", joined)
@@ -105,7 +105,7 @@ func TestCatalogGateCommentInjection_ProseIsNotReadAsAMark(t *testing.T) {
 
 	// ЗАКОННЫЙ БЛИЗНЕЦ той же формы: та же пара С ОТМЕТКОЙ обязана читаться,
 	// иначе молчание выше означало бы мёртвый детектор, а не разборчивость.
-	marked := prose + "// ГЕЙТ КАТАЛОГА kacho.cloud.iam.v1.UserTokenService/Issue: v_update@iam_user\n"
+	marked := prose + "// ГЕЙТ КАТАЛОГА kaname.cloud.iam.v1.UserTokenService/Issue: v_update@iam_user\n"
 	marks := collectCatalogGateMarks("handler.go", marked)
 	if len(marks) != 1 {
 		t.Fatalf("отметка рядом с прозой не разобрана: %d", len(marks))

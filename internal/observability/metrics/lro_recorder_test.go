@@ -24,11 +24,11 @@ func TestLRORecorder_MetricsAreLive(t *testing.T) {
 	rec.IncReconcileRuns()
 	rec.IncOrphansRecovered("recovered")
 
-	got := gatherCounter(t, reg, "kacho_iam_lro_terminal_write_failures_total")
+	got := gatherCounter(t, reg, "kaname_lro_terminal_write_failures_total")
 	require.Equal(t, 2.0, got, "terminal-write failures must be recorded, not dropped")
-	require.Equal(t, 3.0, gatherGauge(t, reg, "kacho_iam_lro_inflight"), "inflight gauge must be live")
-	require.Equal(t, 1.0, gatherCounter(t, reg, "kacho_iam_lro_reconcile_runs_total"))
-	require.Equal(t, 1.0, gatherCounter(t, reg, "kacho_iam_lro_orphans_recovered_total"))
+	require.Equal(t, 3.0, gatherGauge(t, reg, "kaname_lro_inflight"), "inflight gauge must be live")
+	require.Equal(t, 1.0, gatherCounter(t, reg, "kaname_lro_reconcile_runs_total"))
+	require.Equal(t, 1.0, gatherCounter(t, reg, "kaname_lro_orphans_recovered_total"))
 }
 
 func gatherCounter(t *testing.T, r *Registry, name string) float64 {

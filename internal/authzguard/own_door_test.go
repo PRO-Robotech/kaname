@@ -22,15 +22,15 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 	// Дверь выводит карту из дескрипторов, ВЛИНКОВАННЫХ в бинарь. Процесс iam
 	// линкует все три пакета (grpc_register.go регистрирует их службы), поэтому
 	// проба обязана линковать их тоже: иначе она судила бы карту, которой в
 	// проде не бывает, и «не выводится» читалось бы как дефект двери.
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	_ "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 	_ "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/quota/v1"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 )
 
 // grantStore — модель прав пробы: разрешено ровно то, что перечислено.
@@ -92,7 +92,7 @@ func TestOwnDoor_StrangerIsRefusedOnSomeoneElsesObject(t *testing.T) {
 	_, err := doorUnder(t, store)(
 		tenantCtx(strangerUser),
 		&iamv1.GetProjectRequest{ProjectId: victimProject},
-		&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.ProjectService/Get"},
+		&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.ProjectService/Get"},
 		reached(&hit),
 	)
 	if hit {
@@ -119,7 +119,7 @@ func TestOwnDoor_GrantedCallerPasses(t *testing.T) {
 	_, err := doorUnder(t, store)(
 		tenantCtx(ownerUser),
 		&iamv1.GetProjectRequest{ProjectId: victimProject},
-		&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.ProjectService/Get"},
+		&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.ProjectService/Get"},
 		reached(&hit),
 	)
 	if err != nil {
@@ -142,7 +142,7 @@ func TestOwnDoor_DenyIsByteIdenticalToAGenuineMiss(t *testing.T) {
 	_, denyErr := door(
 		tenantCtx(strangerUser),
 		&iamv1.GetProjectRequest{ProjectId: victimProject},
-		&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.ProjectService/Get"},
+		&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.ProjectService/Get"},
 		reached(new(bool)),
 	)
 	// (2) настоящий промах владельца — тон контракта самого iam.
@@ -171,7 +171,7 @@ func TestOwnDoor_ModelOutageFailsClosed(t *testing.T) {
 	_, err := doorUnder(t, store)(
 		tenantCtx(strangerUser),
 		&iamv1.GetProjectRequest{ProjectId: victimProject},
-		&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.ProjectService/Get"},
+		&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.ProjectService/Get"},
 		reached(&hit),
 	)
 	if hit || err == nil {
@@ -187,7 +187,7 @@ func TestOwnDoor_MutationIsBehindTheDoorToo(t *testing.T) {
 	_, err := doorUnder(t, store)(
 		tenantCtx(strangerUser),
 		&iamv1.DeleteProjectRequest{ProjectId: victimProject},
-		&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.ProjectService/Delete"},
+		&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.ProjectService/Delete"},
 		reached(&hit),
 	)
 	if hit || err == nil {

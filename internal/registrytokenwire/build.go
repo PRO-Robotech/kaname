@@ -12,10 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/registrytokenhttp"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho-iam/internal/tokensigner"
+	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
+	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
 // BuildConfig — the composition inputs for the registry `/iam/token` shim.
@@ -144,7 +144,7 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 	// контроль. Непровязанная, она отвечала бы недоступностью издателя на
 	// КАЖДЫЙ вход в реестр, и заметить это можно было бы только по жалобе
 	// клиента.
-	useCase = useCase.WithBasicCredentialResolver(kachopg.NewBasicCredentialRepo(pool))
+	useCase = useCase.WithBasicCredentialResolver(kanamepg.NewBasicCredentialRepo(pool))
 
 	// СЧЁТЧИК ИСХОДОВ — до окна: он обязан считать и отказы прежнему виду,
 	// то есть работать ИМЕННО ТОГДА, когда окна нет. Счётчик, провязываемый
@@ -162,7 +162,7 @@ func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 	if !cfg.KeyMaterialWindowUntil.IsZero() {
 		useCase = useCase.WithKeyMaterialWindow(
 			cfg.KeyMaterialWindowUntil,
-			registrytokenuc.NewSAKeyValidator(NewSAClientLookup(kachopg.NewSAOAuthClientRepo(pool))),
+			registrytokenuc.NewSAKeyValidator(NewSAClientLookup(kanamepg.NewSAOAuthClientRepo(pool))),
 		)
 	}
 

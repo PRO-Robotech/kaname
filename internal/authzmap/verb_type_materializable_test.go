@@ -10,7 +10,7 @@
 // материализуются пообъектно реконсайлером — и только для типов, попадающих в
 // множество раскрытия подстановки `domain.AllMaterializableTypes()`. Это
 // множество boot-backfill `seed.SyncAllSystemRoleSelectors` проецирует в
-// `kacho_iam.role_rule_selectors` — индекс, по которому подбор находит привязку,
+// `kaname.role_rule_selectors` — индекс, по которому подбор находит привязку,
 // материализующую глаголы на свежесозданном объекте.
 //
 // Тип, объявивший глаголы, но отсутствующий в этом множестве, выглядит полностью
@@ -55,8 +55,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // latentTypeMarker — машинно различимая пометка спящего состояния в блоке типа

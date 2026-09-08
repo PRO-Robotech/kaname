@@ -19,7 +19,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
+	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 )
 
 // f1bCertPair — самоподписанный сертификат-заглушка и его ожидаемый отпечаток.

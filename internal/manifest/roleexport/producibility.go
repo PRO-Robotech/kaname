@@ -4,7 +4,7 @@
 package roleexport
 
 import (
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // producibility.go — ЕДИНСТВЕННОЕ объявление предиката «производит ли правило

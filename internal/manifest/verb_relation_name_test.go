@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // verb_relation_name_test.go — правило «имя отношения из имени глагола» ОДНО, и

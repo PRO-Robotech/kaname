@@ -32,7 +32,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
 // recordingObserver — счётчик исходов, закрытый набор клеток.

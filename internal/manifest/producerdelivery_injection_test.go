@@ -32,7 +32,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // productionStackName — стенд, чья посадка боевая. Имя, а не цепочка: цепочку
@@ -60,9 +60,9 @@ func syntheticRoot(t *testing.T, manifests map[string]string) string {
 // объекта доставки.
 func syntheticProfile(t *testing.T, name string) string {
 	t.Helper()
-	body := "kacho-iam: {}\n"
+	body := "kaname: {}\n"
 	if name != "" {
-		body = "kacho-iam:\n  manifests:\n    configMapName: " + name + "\n"
+		body = "kaname:\n  manifests:\n    configMapName: " + name + "\n"
 	}
 	p := filepath.Join(t.TempDir(), "values.synthetic.yaml")
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {

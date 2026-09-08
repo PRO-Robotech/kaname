@@ -82,7 +82,7 @@ POLL_CAP = 30
 # (group→member userset / group-binding tuple materializing in OpenFGA), as
 # opposed to the LRO operation-poll which only waits on the in-process worker.
 #
-# The drainer (cmd/kacho-iam/serve.go) is LISTEN/NOTIFY-driven with
+# The drainer (cmd/kaname/serve.go) is LISTEN/NOTIFY-driven with
 # PollFallback=30s and BackoffMin/Max=1s/30s. On the happy NOTIFY path the
 # tuple lands sub-second; but if a NOTIFY is missed (listener reconnect, the
 # row committed mid-batch) the next attempt is only the 30s fallback poll, and
@@ -342,7 +342,7 @@ def mint_user(env_var, ext, auth="jwtAccountAdminA"):
     (:8081), so POSTing it at the public {{baseUrl}} (:8080) returns 404 (ban #6). The
     PUBLIC user-mint path a tenant admin can drive over REST is Invite: it INSERTs a
     PENDING user row (invite.go InsertPending) and returns metadata.userId synchronously.
-    The row EXISTS in kacho_iam.users, so the 0049 trigger (existence, status-agnostic)
+    The row EXISTS in kaname.users, so the 0049 trigger (existence, status-agnostic)
     passes and the id is a valid binding subject. email is runId-scoped → a distinct real
     user per run (unique per-run subject → no active-grant UNIQUE collision) referenced
     by no other suite (→ no cross-suite pollution — the property the old synthetic ids

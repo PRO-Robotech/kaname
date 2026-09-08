@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // deliveryDir — каталог доставки с названными манифестами.

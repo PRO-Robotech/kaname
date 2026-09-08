@@ -29,14 +29,21 @@ import (
 	// Blank-import the iam proto package so its FileDescriptors register into
 	// protoregistry.GlobalFiles. Without this the test would only enumerate
 	// protos transitively imported by this package — incomplete.
-	_ "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	_ "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+
+	"github.com/PRO-Robotech/kaname/internal/contractnaming"
 )
 
 // iamServicePrefix — only enumerate services in the iam proto package.
-const iamServicePrefix = "kacho.cloud.iam.v1."
+//
+// Взято у ОБЪЯВЛЕННОГО источника имён, а не выписано: приставка, выписанная
+// литералом, чужое имя не отвергает — она его не видит, и обход молча сужается
+// до нуля (#2168). Здесь это поймал бы порог `count < 50` ниже; в трёх соседних
+// пробах порога не было, и они зеленели на пустой полосе.
+var iamServicePrefix = contractnaming.OwnContractPackage() + "."
 
 // TestAnonTable_AllFullMethodsClassified walks every method in
-// kacho.cloud.iam.v1.* and asserts that anonymous callers reach the handler
+// kaname.cloud.iam.v1.* and asserts that anonymous callers reach the handler
 // (read-only or whitelisted) OR are denied (everything else).
 //
 // Failures here signal one of:

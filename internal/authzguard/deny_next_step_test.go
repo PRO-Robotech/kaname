@@ -38,7 +38,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/contractnaming"
 )
 
 // grantRequirement извлекает нарушение предусловия, называющее недостающую
@@ -64,7 +65,7 @@ func TestDenyNextStep_NamesWhatIsMissingAndWhereToAskForIt(t *testing.T) {
 
 	// Метод с областью в каталоге: у него есть и право, и объект, на котором
 	// это право выдают, — то есть оба ответа, которых отказу не хватало.
-	const method = "/kacho.cloud.iam.v1.AccessBindingService/Get"
+	const method = "/kaname.cloud.iam.v1.AccessBindingService/Get"
 
 	st := denyThrough(t, reg, method)
 	require.Equal(t, codes.PermissionDenied, st.Code())
@@ -108,7 +109,7 @@ func TestDenyNextStep_NamesTheTierNotTheModelType(t *testing.T) {
 
 	checked, resourceTier := 0, 0
 	for _, e := range reg.All() {
-		if !strings.HasPrefix(e.FQN, "kacho.cloud.iam.") ||
+		if !strings.HasPrefix(e.FQN, contractnaming.OwnContractPackage()+".") ||
 			e.Permission == "" || e.ScopeExtractor.ObjectType == "" {
 			continue
 		}
@@ -162,7 +163,7 @@ func TestDenyNextStep_NamesTheTierNotTheModelType(t *testing.T) {
 // именно зависимость от запроса и делает отказ различимым.
 func TestDenyNextStep_IsAFunctionOfTheMethodOnly(t *testing.T) {
 	reg := mustRegistry(t)
-	const method = "/kacho.cloud.iam.v1.AccessBindingService/Get"
+	const method = "/kaname.cloud.iam.v1.AccessBindingService/Get"
 
 	deny := func(req any) *status.Status {
 		t.Helper()
@@ -200,7 +201,7 @@ func TestDenyNextStep_IsAFunctionOfTheMethodOnly(t *testing.T) {
 // выдуманный следующий шаг стёр бы различие, ради которого деталь заведена.
 func TestDenyNextStep_CatalogMissStaysBare(t *testing.T) {
 	reg := mustRegistry(t)
-	st := denyThrough(t, reg, "/kacho.cloud.iam.v1.AccessBindingService/NoSuchMethodHere")
+	st := denyThrough(t, reg, "/kaname.cloud.iam.v1.AccessBindingService/NoSuchMethodHere")
 	require.Equal(t, codes.PermissionDenied, st.Code())
 	require.Nil(t, grantRequirement(st),
 		"промах каталога не имеет следующего шага, который можно назвать честно")
@@ -223,7 +224,7 @@ func TestDenyNextStep_StepUpRefusalKeepsItsOwnStep(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	st := throughInterceptor(t, reg, "/kacho.cloud.iam.v1.AccessBindingService/Get", withStepUp.Err())
+	st := throughInterceptor(t, reg, "/kaname.cloud.iam.v1.AccessBindingService/Get", withStepUp.Err())
 	require.Nil(t, grantRequirement(st),
 		"к отказу, уже назвавшему свой шаг, второй совет не приписывается")
 }
@@ -237,7 +238,7 @@ func TestDenyNextStep_EveryScopedMethodNamesItsStep(t *testing.T) {
 	total, named := 0, 0
 	var bare []string
 	for _, e := range reg.All() {
-		if !strings.HasPrefix(e.FQN, "kacho.cloud.iam.") {
+		if !strings.HasPrefix(e.FQN, contractnaming.OwnContractPackage()+".") {
 			continue
 		}
 		if e.Permission == "" || e.ScopeExtractor.ObjectType == "" {

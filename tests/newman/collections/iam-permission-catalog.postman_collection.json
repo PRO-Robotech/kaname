@@ -1,7 +1,7 @@
 {
   "info": {
-    "_postman_id": "35f3d67a-d9a8-51e6-8694-026ce0c05779",
-    "name": "kacho-iam / newman / iam-permission-catalog",
+    "_postman_id": "2f7bd0b4-e5fb-54d3-b2aa-fd0e2af6f97b",
+    "name": "kaname / newman / iam-permission-catalog",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -81,7 +81,7 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
                   "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",

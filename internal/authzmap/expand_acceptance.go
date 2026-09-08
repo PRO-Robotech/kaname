@@ -33,7 +33,7 @@ package authzmap
 import (
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 )
 
 // ExpandAcceptance — исход входного контроля пары.

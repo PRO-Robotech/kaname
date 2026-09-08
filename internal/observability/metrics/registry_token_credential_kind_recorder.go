@@ -48,7 +48,7 @@ type RegistryTokenCredentialKindRecorder struct {
 func (r *Registry) NewRegistryTokenCredentialKindRecorder() *RegistryTokenCredentialKindRecorder {
 	rec := &RegistryTokenCredentialKindRecorder{
 		outcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_registry_token_credential_kind_total",
+			Name: Namespace + "_registry_token_credential_kind_total",
 			Help: "Исходы докерной полосы /iam/token по виду предъявленного удостоверения. " +
 				"basic_accepted — принят штатный вид (базовый токен доступа); это ЗНАМЕНАТЕЛЬ: " +
 				"без него ноль по прочим исходам неотличим от полосы, не обслужившей ни одного " +

@@ -29,10 +29,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 const (
@@ -115,7 +115,7 @@ func TestTokenHook_DisabledServiceAccount_Refused(t *testing.T) {
 
 	// Nothing was minted: no claim set of any size reached the response.
 	assert.NotContains(t, w.Body.String(), "ext_claims")
-	assert.NotContains(t, w.Body.String(), "kacho_principal_id")
+	assert.NotContains(t, w.Body.String(), "kaname_principal_id")
 	assert.NotContains(t, w.Body.String(), disabledSAAccount,
 		"least of all the claim set naming the account")
 

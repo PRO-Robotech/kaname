@@ -11,6 +11,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   самим автором сверх рецензии). Круг 7 блокирующих не нашёл: перепроверены арифметика
   обеих дискриминирующих полос (RET-SWP-03, 17), форма 5 и второй читатель отсечек,
   состав остатка 712 и все девять чисел §1.3 — сошлись до единицы
+- **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Правок 3, строк 15: `5504f44a7f` каталоги службы (9)
+  · `b81adf2760` имя службы (5) · `93ef852fe9` идентификатор лицензии (1).
+  Дельта целиком — подстановка токена (`kacho→kaname` · `kacho-iam→kaname` ·
+  `BUSL-1.1→AGPL-3.0-or-later`); непарных строк 0, пар с изменившимся числом
+  токенов 0; ни один сценарий, производитель, признак готовности и клауза не
+  тронуты. Одобрение относится к **содержимому**, а не к имени файла: APPROVED
+  выше есть вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю
+  редакцию ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение,
+  замер и цена обоих отвергнутых исходов —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 - **Правки ПОСЛЕ вердикта:** два замечания вердикта, оба косметические и не
   блокирующие — область предиката у числа «три попадания `DeleteExpired`» (§1.3) и
   согласование сокращённой записи `Reap(ctx)` (§2.2) с полной сигнатурой (§4.1).
@@ -22,13 +33,27 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 - **Тип изменения:** вводит фоновое поведение, удаляющее строки, и **меняет наблюдаемый
   исход в двух местах**, оба названы замером: `UserService.Delete` (§5) и приём
   `ttl_expires_at` у `InternalSessionRevocationsService.Revoke` (§2.5)
-- **Сервис:** `kacho-iam`; затрагивает `services/iam/internal/apps/kacho/`,
-  `services/iam/internal/repo/kacho/pg/`, `services/iam/cmd/kacho-iam/`,
+- **Сервис:** `kaname`; затрагивает `services/iam/internal/apps/kaname/`,
+  `services/iam/internal/repo/kaname/pg/`, `services/iam/cmd/kaname/`,
   `internal/repohygiene`, миграции iam
 - **Соседняя приёмка:** `expired-credential-reclaim.md` (задача #1264, APPROVED, **не
   реализована**). Её §1.4 нашла эту пару и вынесла из своего объёма; её §9.12 планировала
   гейт с ведомостью на неё. Здесь предмет закрывается, поэтому ведомость не заводится —
   следствие для #1264 названо в §9
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2212`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **1**. Правка одна и
+  механическая — приставка пути контракта `proto/kacho/cloud/iam/` →
+  `proto/kaname/cloud/iam/`: домен доступа переехал (`d46aaa7280`), и прежний
+  корень в дереве **не существует** (`git ls-files 'proto/kacho/cloud/iam/**'`
+  → 0). До правки координата не резолвилась, то есть **молчала**: читатель уходил
+  за ней и не находил. **НЕ тронуты** ни один сценарий, производитель, признак
+  готовности, клауза и ни одно число: непарных строк 0, пар с изменившимся числом
+  токенов 0. Записи замера, привязанные к ревизии, где прежний путь ЖИВ, оставлены
+  как есть намеренно — их перечень и предикат в теле задачи. Одобрение относится к
+  **содержимому**, а не к имени файла: APPROVED выше есть вердикт о редакции,
+  прочитанной проверяющим. Вердикт на нынешнюю редакцию ставит
+  `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 
 ---
 
@@ -45,8 +70,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 | Объявление | Сервис | Прод-вызывающих | Что это значит |
 |---|---|---:|---|
-| `ClientAssertionReplayRepo.Reap` (`repo/kacho/pg/client_assertion_replay_repo.go:90`) | iam | **0** | уборка не идёт |
-| `SessionRevocationRepo.DeleteExpired` (`repo/kacho/pg/audit_session_revocation_repos.go:140`) | iam | **0** | уборка не идёт |
+| `ClientAssertionReplayRepo.Reap` (`repo/kaname/pg/client_assertion_replay_repo.go:90`) | iam | **0** | уборка не идёт |
+| `SessionRevocationRepo.DeleteExpired` (`repo/kaname/pg/audit_session_revocation_repos.go:140`) | iam | **0** | уборка не идёт |
 | `Store.PurgeExpiredDPoPProofs` | gateway | **0** | уборка не идёт (вне области, §9) |
 | `targetGroupWriter.DeleteTargetsDrained` | nlb | **0** | мёртвый дубль: уборку делает свой оператор раннера (вне области, §9) |
 | `PendingBlobRepo.SweepStale` | registry | 1 | идёт |
@@ -109,10 +134,10 @@ grep -rn "\.Reap(\|\.DeleteExpired(\|\.PurgeExpiredDPoPProofs(\|\.SweepStale(\|\
 |---:|---|---|---|
 | 1 | `internal/migrations/898001_client_assertion_replay.sql:63` | «Обход сборщика идёт по сроку годности» | `client_assertion_replay` |
 | 2 | `internal/migrations/898001_client_assertion_replay.sql:68` (`COMMENT ON TABLE`) | «…убирается сборщиком» | `client_assertion_replay` |
-| 3 | `internal/repo/kacho/pg/client_assertion_replay_repo.go:75` | «`Reap` убирает строки утверждений, истёкших к названному моменту» | `client_assertion_replay` |
-| 4 | `internal/repo/kacho/pg/audit_session_revocation_repos.go:139` | «DeleteExpired — cron-cleanup» | `session_revocations` |
+| 3 | `internal/repo/kaname/pg/client_assertion_replay_repo.go:75` | «`Reap` убирает строки утверждений, истёкших к названному моменту» | `client_assertion_replay` |
+| 4 | `internal/repo/kaname/pg/audit_session_revocation_repos.go:139` | «DeleteExpired — cron-cleanup» | `session_revocations` |
 | 5 | `internal/domain/session_revocation.go:13` | «A cron cleanup deletes rows past ttl_expires_at» | `session_revocations` |
-| 6 | `proto/kacho/cloud/iam/v1/session_revocation.proto:18` | «background cron prunes» | `session_revocations`, **контракт** — поверхность Internal |
+| 6 | `proto/kaname/cloud/iam/v1/session_revocation.proto:18` | «background cron prunes» | `session_revocations`, **контракт** — поверхность Internal |
 | 7 | `internal/migrations/755001_session_revoked_channel_retires_with_its_listener.sql:35-36` | «у неё живые писатель … и читатели (`IsRevoked`, `ListByUser`, **`DeleteExpired`**)» | `session_revocations` |
 | 8 | `docs/engineering/architecture/known-divergences.md:649-651` | то же **утверждение**, перефразированное: «живой писатель (выход с края) и живые читатели» против «живые писатель (logout с края) и читатели». Перечень методов совпадает дословно — `IsRevoked`, `ListByUser`, **`DeleteExpired`** | `session_revocations` |
 
@@ -248,7 +273,7 @@ for P in "$WIDE" "$D" "$E"; do git grep -niE "$P" $REV -- $NAMED | wc -l; done  
 |---|---:|
 | `docs/engineering/acceptance/expired-credential-reclaim.md` | 277 |
 | `internal/migrations/0001_initial.sql` | 76 |
-| `cmd/kacho-iam/wiring.go` | 56 |
+| `cmd/kaname/wiring.go` | 56 |
 | `internal/migrations/20260822234500_identity_rows_merge_and_rights_travel.sql` | 54 |
 | `docs/engineering/architecture/known-divergences.md` | 47 |
 | `internal/migrations/898002_client_revocation_reaches_presentation.sql` | 28 |
@@ -303,7 +328,7 @@ via `Internal*` API; no public surface»), значит исправляется
 | | писатель | провязан ли писатель |
 |---|---|---|
 | `client_assertion_replay` | `Redeem` ← `internal/clientassertion/verifier.go:532` | да, на пути выдачи токена |
-| `session_revocations` | `Revoke`/`RevokeTx` ← адаптер, провязанный в `cmd/kacho-iam/wiring.go:603` и `hooks_mux.go:52` | да |
+| `session_revocations` | `Revoke`/`RevokeTx` ← адаптер, провязанный в `cmd/kaname/wiring.go:603` и `hooks_mux.go:52` | да |
 
 Снятие уборщика означало бы объявить рост приемлемым — но темп задаёт внешний (§1.2), и
 такое объявление было бы решением за того, кто его не принимает. Плюс два из восьми
@@ -337,7 +362,7 @@ via `Internal*` API; no public surface»), значит исправляется
 **уже нет**. Погашение судит по НАЛИЧИЮ строки (`INSERT … ON CONFLICT DO NOTHING`,
 `client_assertion_replay_repo.go:63`) и `expires_at` не читает вовсе — значит повтор в этом
 окне принимается как впервые предъявленное. Ширина окна — ровно `ClockSkew`, 60 с
-(`pkg/tokenpolicy/policy.go:167`, провязано в прод `cmd/kacho-iam/client_token.go:83`).
+(`pkg/tokenpolicy/policy.go:167`, провязано в прод `cmd/kaname/client_token.go:83`).
 
 ##### Дефект второй: источник часов. Величина совпала, источники — нет
 
@@ -487,7 +512,7 @@ RemovalSlack)`; предикат выше даёт лишь первые два 
 
 **Что уборка НЕ уносит.** Свидетельство «этому субъекту отзывали» живёт в аудите: путь
 отзыва пишет `iam.session.revoked` в `audit_outbox` **той же транзакцией**
-(`repo/kacho/pg/hook_pool_adapters.go:30,123`). Оперативная таблица отсечек — не журнал,
+(`repo/kaname/pg/hook_pool_adapters.go:30,123`). Оперативная таблица отсечек — не журнал,
 и её укорачивание истории не теряет.
 
 ### 2.4. Почему ОДНА петля, а не три
@@ -628,7 +653,7 @@ Internal. Вызывающий, сегодня присылающий момен
 > слепое пятно остаётся предметом приёмки #1264. Предмет свой она и закрыла: расширение
 > объявлено в §5.2 `expired-credential-reclaim.md` и посажено вместе с маркером `РЕПЛИКИ:`
 > у `secretsweep/sweeper.go`. Предикат: `grep -c 'РЕПЛИКИ:'
-> services/iam/internal/apps/kacho/secretsweep/sweeper.go` → **1** (было 0). Выбор формы в
+> services/iam/internal/apps/kaname/secretsweep/sweeper.go` → **1** (было 0). Выбор формы в
 > петле уборки перестал быть несущим — ровно как и предсказывала растяжка, оставленная в
 > `TestRetentionLoopFormIsTheRecognisedOne`; её утверждение перевёрнуто, а не ослаблено.
 
@@ -762,7 +787,7 @@ ALTER TABLE ONLY kacho_iam.session_revocations
 > [!note] Абзац выше — ЗАМЕР, а не утверждение о сегодняшнем дереве (помечено 2026-08-31, #1743)
 > Цитируемый текст верен на той ревизии, на которой этот разбор писался, и остаётся верен
 > на стволе: предикат `git grep -c 'referenced resource not found or still in use' --
-> services/iam/internal/repo/kacho/pg/pgmaperr.go` даёт на `origin/main` **1**.
+> services/iam/internal/repo/kaname/pg/pgmaperr.go` даёт на `origin/main` **1**.
 >
 > **Но у него есть преемник, и он уже написан — на другой линии.** Ветка
 > `release/identity-11` разводит этот слитый отказ на две противоположные полосы, потому

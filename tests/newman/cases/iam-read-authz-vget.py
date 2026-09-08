@@ -45,7 +45,7 @@ Fixture (crud-fixture/setup.sh):
 
 Test-first (strict TDD): кейс написан RED-first против
 owner-only use-case-gate — был красным (404), зеленый после v_get-фикса.
-Детерминированный двойник — internal/apps/kacho/api/readauthz/
+Детерминированный двойник — internal/apps/kaname/api/readauthz/
 get_vget_fga_integration_test.go (real-OpenFGA).
 """
 

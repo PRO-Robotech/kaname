@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // mustReadResourcesFixture — манифест vpc со всеми четырьмя разделами.
@@ -76,7 +76,7 @@ func TestMODMR01GeneratedResourcesSectionLoadsWhole(t *testing.T) {
 		t.Errorf("ресурс без производителя среди аннотаций помечен %q", pool.Producer)
 	}
 	if len(pool.Notes) != 1 || pool.Notes[0].Before != "cluster" ||
-		!strings.Contains(pool.Notes[0].Text, "cluster_kacho_root") {
+		!strings.Contains(pool.Notes[0].Text, "cluster_root") {
 		t.Errorf("авторский ключ notes потерян: %+v", pool.Notes)
 	}
 	if len(pool.Subjects) != 2 || len(pool.Tiers) != 2 {

@@ -52,7 +52,7 @@ import (
 // probedOutboxTable — очередь, на которой снимается картина. Любая очередь
 // сервиса подошла бы: решение объявлено одним для всех, и проба обязана быть
 // про решение, а не про конкретную таблицу.
-const probedOutboxTable = "kacho_iam.provider_compensation_outbox"
+const probedOutboxTable = "kaname.provider_compensation_outbox"
 
 // outboxPicture — наблюдаемая картина ЭТОЙ таблицы: ряды семейств очереди с их
 // значениями, в устойчивом порядке.
@@ -68,7 +68,7 @@ func outboxPicture(t *testing.T, r *Registry, table string) []string {
 
 	var out []string
 	for _, fam := range families {
-		if !strings.HasPrefix(fam.GetName(), "kacho_iam_outbox_") {
+		if !strings.HasPrefix(fam.GetName(), "kaname_outbox_") {
 			continue
 		}
 		for _, m := range fam.GetMetric() {

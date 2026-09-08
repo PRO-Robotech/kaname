@@ -44,7 +44,7 @@ package catalog
 
 import "context"
 
-// ResourceRow — одна ЖИВАЯ строка `kacho_iam.catalog_resource`.
+// ResourceRow — одна ЖИВАЯ строка `kaname.catalog_resource`.
 //
 // Точечная форма (`dotted`) в структуре не хранится: она производна от пары и
 // собирается там, где нужна. Хранить её третьим полем значило бы завести место,
@@ -72,7 +72,7 @@ type ResourceRow struct {
 	ObjectType string
 }
 
-// VerbRow — одна ЖИВАЯ строка `kacho_iam.catalog_verb`.
+// VerbRow — одна ЖИВАЯ строка `kaname.catalog_verb`.
 type VerbRow struct {
 	Module   string
 	Resource string
@@ -103,7 +103,7 @@ type Rows struct {
 }
 
 // RowSource — ПОРТ чтения живого каталога. Объявлен здесь, у потребителя;
-// реализация — `repo/kacho/pg/catalog_repo.go`.
+// реализация — `repo/kaname/pg/catalog_repo.go`.
 type RowSource interface {
 	ReadLiveCatalog(ctx context.Context) (Rows, error)
 }

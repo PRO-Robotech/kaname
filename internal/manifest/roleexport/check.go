@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // check.go — целостность правил роли: покрывает ли каждый названный класс хотя

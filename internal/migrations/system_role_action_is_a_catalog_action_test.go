@@ -46,18 +46,18 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 )
 
 // reRoleInsert — ПЕРВАЯ законная форма присвоения: вставка строки роли.
 var reRoleInsert = regexp.MustCompile(
-	`(?is)^INSERT\s+INTO\s+kacho_iam\.roles\s*\(([^)]*)\)\s*VALUES\s*\((.*)\)$`)
+	`(?is)^INSERT\s+INTO\s+kaname\.roles\s*\(([^)]*)\)\s*VALUES\s*\((.*)\)$`)
 
 // reRolePermsUpdate — ВТОРАЯ законная форма: присвоение массива прав правкой
 // одной строки. Массив пишется литералом намеренно: свод цепочки обязан быть
 // вычислим ЧТЕНИЕМ, а выражение над jsonb пришлось бы исполнять.
 var reRolePermsUpdate = regexp.MustCompile(
-	`(?is)^UPDATE\s+kacho_iam\.roles\s+SET\s+permissions\s*=\s*'(\[.*?\])'\s*::\s*jsonb\s+WHERE\s+id\s*=\s*'([^']+)'$`)
+	`(?is)^UPDATE\s+kaname\.roles\s+SET\s+permissions\s*=\s*'(\[.*?\])'\s*::\s*jsonb\s+WHERE\s+id\s*=\s*'([^']+)'$`)
 
 // reLineComment — построчный комментарий SQL. Снимается ОБЯЗАТЕЛЬНО: без этого
 // разбор считает собственное объяснение предмета за предмет.
@@ -81,7 +81,7 @@ func foldRolePermissions(ordered []string, bodies map[string]string) (
 		code := reLineComment.ReplaceAllString(upSection(bodies[name]), "")
 		for _, raw := range strings.Split(code, ";") {
 			stmt := strings.TrimSpace(reSpaceRun.ReplaceAllString(raw, " "))
-			if stmt == "" || !strings.Contains(stmt, "kacho_iam.roles") ||
+			if stmt == "" || !strings.Contains(stmt, "kaname.roles") ||
 				!strings.Contains(stmt, "permissions") {
 				continue
 			}

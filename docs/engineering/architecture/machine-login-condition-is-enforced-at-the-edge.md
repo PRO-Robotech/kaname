@@ -1,7 +1,7 @@
 # Вход ВНУТРЬ машины: требование усиленного входа исполняет край
 
 Решение по задаче #2056. Предмет — два отношения модели прав
-(`proto/kacho/cloud/iam/v1/fga_model.fga`, тип `compute_instance`):
+(`proto/kaname/cloud/iam/v1/fga_model.fga`, тип `compute_instance`):
 
 ```
 define ssh:     [user with mfa_fresh, service_account] or admin

@@ -34,7 +34,7 @@ import (
 	"testing"
 	"unicode"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // yamlKeyNamesOf — ключи, ОБЪЯВЛЕННЫЕ тегами структуры, а не выписанные

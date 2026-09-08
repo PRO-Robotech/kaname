@@ -63,6 +63,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // seedSubsectionFields — четыре подраздела посева. Перечень выводится из САМОГО
@@ -76,7 +78,7 @@ var seedSubsectionFields = []string{"AccessBindings", "Groups", "Joins", "Servic
 const manifestPackageDir = "services/iam/internal/manifest"
 
 // manifestImportPath — импорт, без которого держать `*manifest.Seed` нечем.
-const manifestImportPath = "github.com/PRO-Robotech/kacho-iam/internal/manifest"
+const manifestImportPath = "github.com/PRO-Robotech/kaname/internal/manifest"
 
 // seedProducerCensus — объём осмотренного вместе с находками: «ноль
 // производителей» обязано быть отличимо от «ноль прочитанного».
@@ -104,7 +106,11 @@ type seedProducerCensus struct {
 // взгляд человека. Недосчёт был бы опасен, и его здесь нет by construction.
 func findSeedRowProducers(t *testing.T) seedProducerCensus {
 	t.Helper()
-	root := treeRootFromPackage
+	// Корень обхода берётся резолвером посадки: в монорепо это корень платформы,
+	// в самостоятельном клоне — корень модуля. Подъём каталогами верен ровно для
+	// одной посадки и в другой выводит ВЫШЕ корня — в чужое дерево, откуда обход
+	// читал бы кеш модулей и объявлял находки о нём.
+	root, _ := platformtree.RequireCorpus(t)
 	var census seedProducerCensus
 	fset := token.NewFileSet()
 

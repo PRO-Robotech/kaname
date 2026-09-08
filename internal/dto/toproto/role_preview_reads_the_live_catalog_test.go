@@ -33,8 +33,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // appliedTypeFacts — каталожный факт, в котором есть тип, СБОРКЕ НЕИЗВЕСТНЫЙ.

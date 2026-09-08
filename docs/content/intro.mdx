@@ -32,7 +32,7 @@ import hero from '@site/src/css/hero.module.css'
 
 ## Что это и зачем
 
-**Kachō IAM** — control-plane сервис домена **Identity & Access Management**. Он отвечает на
+**Kaname** — control-plane сервис домена **Identity & Access Management**. Он отвечает на
 два фундаментальных вопроса платформы: *кто выполняет запрос* (аутентификация) и *имеет ли он
 право* его выполнить (авторизация). IAM — единственный владелец субъектов (пользователей,
 сервис-аккаунтов, групп) и модели прав (ролей и привязок доступа); все остальные сервисы —
@@ -50,7 +50,7 @@ API следует **конвенциям Kachō**: плоские (flat) рес
 мутации — асинхронные через `Operation` с поллингом.
 
 :::info Control-plane only
-Kachō IAM управляет **описанием личностей и прав**. Хранение паролей / passkey и интерактивный
+Kaname управляет **описанием личностей и прав**. Хранение паролей / passkey и интерактивный
 вход вынесены в интеграцию с Ory Kratos, а выпуск и валидация OAuth 2.0-токенов — в Ory Hydra
 (см. [Идентичность и токены](/architecture/identity)). IAM хранит *проекцию* личности
 (User-row) и модель авторизации.
@@ -99,7 +99,7 @@ Kachō IAM управляет **описанием личностей и пра�
 
 ```mermaid
 flowchart TD
-  cluster["Cluster<br/>cluster_kacho_root"] --> account["Account (acc…)"]
+  cluster["Cluster<br/>cluster_root"] --> account["Account (acc…)"]
   account --> project["Project (prj…)"]
   account --> sa["ServiceAccount (sva…)"]
   account --> group["Group (grp…)"]
@@ -120,7 +120,7 @@ CLUSTER ▶ ACCOUNT ▶ PROJECT). Роль описывает *что можно
 
 ## Как с сервисом общаться
 
-Kachō IAM — **leaf-узел** платформы: по сборке он не зависит ни от одного другого доменного
+Kaname — **leaf-узел** платформы: по сборке он не зависит ни от одного другого доменного
 сервиса. При этом он — **центральный магнит вызовов**: любой сервис на каждом RPC зовёт
 `InternalIAMService.Check` для авторизации, а tenant-запросы приходят через `api-gateway`.
 
@@ -133,7 +133,7 @@ flowchart LR
     agw["api-gateway<br/>gRPC-proxy + REST + JWT"]
   end
   subgraph cp["Control plane"]
-    iam["kacho-iam<br/>:9090 public · :9091 internal"]
+    iam["kaname<br/>:9090 public · :9091 internal"]
     peers["kacho-vpc · kacho-compute<br/>kacho-geo · kacho-nlb"]
   end
   subgraph idp["Identity providers"]
@@ -141,18 +141,18 @@ flowchart LR
     hydra["Ory Hydra<br/>OAuth2 tokens"]
   end
   subgraph store["Хранилище"]
-    pg[("PostgreSQL<br/>kacho_iam · права · outbox")]
+    pg[("PostgreSQL<br/>kaname · права · outbox")]
   end
 
   cli --> agw
-  agw -->|"kacho.cloud.iam.v1"| iam
+  agw -->|"kaname.cloud.iam.v1"| iam
   iam -->|"SQL · pgx"| pg
   iam -->|"identity hooks"| kratos
   iam -->|"OAuth2 clients"| hydra
   peers -->|"InternalIAMService.Check"| iam
 ```
 
-Система построена по принципу **database-per-service**: kacho-iam владеет схемой `kacho_iam` и
+Система построена по принципу **database-per-service**: kaname владеет схемой `kaname` и
 общается с другими доменами только по API. Права хранятся в той же схеме, и проверка `Check`
 складывает вердикт запросом к ней — отдельного хранилища отношений нет. Подробнее —
 [Модель авторизации](/architecture/authz).
@@ -198,8 +198,8 @@ flowchart LR
   <thead><tr><th>Технология</th><th>Применение</th></tr></thead>
   <tbody>
     <tr><td>Go</td><td>Язык реализации (чистая архитектура: handler → use-case → domain)</td></tr>
-    <tr><td>Protocol Buffers / Buf</td><td>Контракт API (<code>proto/</code>, домен <code>kacho.cloud.iam.v1</code>)</td></tr>
-    <tr><td>PostgreSQL / pgx v5</td><td>Хранилище <code>kacho_iam</code> — и данные, и права, и вердикт (без ORM — sqlc + handwritten pgx)</td></tr>
+    <tr><td>Protocol Buffers / Buf</td><td>Контракт API (<code>proto/</code>, домен <code>kaname.cloud.iam.v1</code>)</td></tr>
+    <tr><td>PostgreSQL / pgx v5</td><td>Хранилище <code>kaname</code> — и данные, и права, и вердикт (без ORM — sqlc + handwritten pgx)</td></tr>
     <tr><td>Ory Kratos</td><td>Аутентификация и хранение личностей (login / passkey); User — проекция identity</td></tr>
     <tr><td>Ory Hydra</td><td>OAuth 2.0 authorization server: токены сервис-аккаунтов и пользователей</td></tr>
     <tr><td>Goose</td><td>Версионирование схемы (набор миграций <code>0001…</code>)</td></tr>

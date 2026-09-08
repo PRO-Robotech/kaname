@@ -1,4 +1,4 @@
-# kacho-iam — ER-диаграмма (schema `kacho_iam`)
+# kaname — ER-диаграмма (schema `kaname`)
 
 Все FK / UNIQUE / CHECK / партиальные индексы / триггеры определены в миграциях
 `internal/migrations/` (базовая — `0001_initial.sql`); они — источник истины

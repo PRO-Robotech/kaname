@@ -42,6 +42,8 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // literalPackageRel — пакет, объявляющий литерал каталога.
@@ -58,8 +60,8 @@ const literalFileName = "fga_types.go"
 // а способность дотянуться до базы, и новый адаптер под другим именем обязан
 // подпадать под тот же запрет, не требуя правки этого перечня.
 var rowReachingImports = []string{
-	"github.com/PRO-Robotech/kacho-iam/internal/catalog",
-	"github.com/PRO-Robotech/kacho-iam/internal/repo",
+	"github.com/PRO-Robotech/kaname/internal/catalog",
+	"github.com/PRO-Robotech/kaname/internal/repo",
 	"github.com/jackc/pgx",
 }
 
@@ -154,7 +156,7 @@ var literalOriginMakefiles = []string{"Makefile", "services/iam/Makefile"}
 // TestIAMCT2_11_LiteralIsNotDerivedFromRows — сценарий `-11`.
 func TestIAMCT2_11_LiteralIsNotDerivedFromRows(t *testing.T) {
 	root := catalogRepoRoot(t)
-	pkgFiles, err := treecorpus.UnderWithSuffix(filepath.Join(root, literalPackageRel), ".go")
+	pkgFiles, err := treecorpus.UnderWithSuffix(platformtree.RequirePath(t, literalPackageRel), ".go")
 	if err != nil {
 		t.Fatalf("состав пакета-литерала: %v", err)
 	}
@@ -203,13 +205,13 @@ func TestIAMCT2_11_Injection(t *testing.T) {
 	}{
 		{
 			name:     "контроль: законный близнец молчит",
-			goFile:   "package authzmap\n\nimport \"github.com/PRO-Robotech/kacho-iam/internal/domain\"\n\nvar _ = domain.KnownModules\n",
+			goFile:   "package authzmap\n\nimport \"github.com/PRO-Robotech/kaname/internal/domain\"\n\nvar _ = domain.KnownModules\n",
 			makefile: "lint:\n\tgofmt -l services/iam/internal/authzmap/fga_types.go\n",
 			wantHit:  false,
 		},
 		{
 			name:     "инъекция: пакет-литерал импортирует порт строк",
-			goFile:   "package authzmap\n\nimport \"github.com/PRO-Robotech/kacho-iam/internal/catalog\"\n\nvar _ = catalog.Rows{}\n",
+			goFile:   "package authzmap\n\nimport \"github.com/PRO-Robotech/kaname/internal/catalog\"\n\nvar _ = catalog.Rows{}\n",
 			makefile: "lint:\n\techo ok\n",
 			wantHit:  true,
 		},

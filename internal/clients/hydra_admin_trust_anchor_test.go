@@ -30,7 +30,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
 // writeTestCA generates a real self-signed CA and writes it as PEM, returning the

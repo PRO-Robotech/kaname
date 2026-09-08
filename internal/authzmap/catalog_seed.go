@@ -7,7 +7,7 @@ package authzmap
 //
 // # Зачем это существует
 //
-// Каталог типов заведён строками в `kacho_iam.catalog_module` / `catalog_resource`
+// Каталог типов заведён строками в `kaname.catalog_module` / `catalog_resource`
 // / `catalog_verb` (миграция 20260901113757, задача #1030), а его источником остаются
 // литералы этого пакета: `objectTypes` — какие пары грантуемы, `typeVerbRelations`
 // — какие глаголы объявлены каждым типом.

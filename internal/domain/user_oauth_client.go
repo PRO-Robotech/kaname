@@ -13,7 +13,7 @@ import (
 
 // UserOAuthClient — персональный access-токен пользователя.
 //
-// private_key_jwt: kacho-iam генерирует пару ключей ECDSA P-256 на каждый токен,
+// private_key_jwt: kaname генерирует пару ключей ECDSA P-256 на каждый токен,
 // держит SPKI public PEM плюс алгоритм и возвращает приватный PEM вызывающему
 // ровно один раз. Секрет не существует at-rest.
 //
@@ -34,7 +34,7 @@ type UserOAuthClient struct {
 	// действительны до своего истечения.
 	//
 	// На пути разрешения клиента эта колонка НЕ участвует (см.
-	// repo/kacho/pg.AssertionClientRepo).
+	// repo/kaname/pg.AssertionClientRepo).
 	OAuthClientID   OAuthClientID
 	Description     Description
 	CreatedByUserID UserID

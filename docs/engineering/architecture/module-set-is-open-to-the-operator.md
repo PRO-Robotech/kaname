@@ -88,5 +88,5 @@ YAML-манифестом **на установку**, и её даёт опер
 | столкновение имён отвергается и называет оба места | `internal/manifest/openmoduleset_test.go` |
 | пустой обход остаётся отказом, перепись печатается | там же |
 | снятое имя обхода равно разобранному | `internal/manifest/peekmodule_internal_test.go` (инъекция: второй словарь ключа даёт красное с координатой) |
-| применитель принимает роль модуля оператора | `internal/apps/kacho/moduleroles/openmodule_internal_test.go` |
+| применитель принимает роль модуля оператора | `internal/apps/kaname/moduleroles/openmodule_internal_test.go` |
 | сверка видит живые роли модуля оператора | там же |

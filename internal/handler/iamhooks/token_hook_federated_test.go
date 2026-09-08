@@ -22,10 +22,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // fakeSAPort records the FindByExternalSubject call so the test can assert
@@ -59,7 +59,7 @@ func mustB64URL(b []byte) string {
 }
 
 // mkUnsignedJWT builds a `header.payload.<empty>` token. Hydra has already
-// verified the signature; the kacho-iam handler decodes the claim body only.
+// verified the signature; the kaname handler decodes the claim body only.
 func mkUnsignedJWT(t *testing.T, claims map[string]any) string {
 	t.Helper()
 	hdr, err := json.Marshal(map[string]any{"alg": "RS256", "typ": "JWT"})
@@ -143,12 +143,12 @@ func TestTokenHook_FederatedPath_ForwardsIssuerToEnricher(t *testing.T) {
 	claims, ok := resp.Session.AccessToken["ext_claims"].(map[string]any)
 	require.True(t, ok, "ext_claims must be present")
 
-	assert.Equal(t, "service_account", claims["kacho_principal_type"])
-	assert.Equal(t, "sva_01abcdefghjkmnpqr", claims["kacho_principal_id"])
-	assert.Equal(t, "https://token.actions.githubusercontent.com", claims["kacho_federation_issuer"])
-	assert.Equal(t, "repo:acme/infra:ref:refs/heads/main", claims["kacho_federation_subject"])
-	assert.Equal(t, "jwt-bearer", claims["kacho_federation_mode"])
-	assert.Equal(t, "hydra-cli-fake", claims["kacho_hydra_client_id"])
+	assert.Equal(t, "service_account", claims["kaname_principal_type"])
+	assert.Equal(t, "sva_01abcdefghjkmnpqr", claims["kaname_principal_id"])
+	assert.Equal(t, "https://token.actions.githubusercontent.com", claims["kaname_federation_issuer"])
+	assert.Equal(t, "repo:acme/infra:ref:refs/heads/main", claims["kaname_federation_subject"])
+	assert.Equal(t, "jwt-bearer", claims["kaname_federation_mode"])
+	assert.Equal(t, "hydra-cli-fake", claims["kaname_hydra_client_id"])
 }
 
 // TestTokenHook_NonFederatedRequest_NoExternalIssuerForwarded — when grant

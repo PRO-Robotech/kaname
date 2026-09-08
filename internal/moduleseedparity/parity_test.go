@@ -57,10 +57,10 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho-iam/internal/moduleseedparity"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/moduleseedparity"
 )
 
 // Пороги чтения: ниже них молчание гейта сказано ни о чём. Числа взяты у живой
@@ -288,8 +288,8 @@ func readLiveServiceAccounts(ctx context.Context, t *testing.T, pool *pgxpool.Po
 	t.Helper()
 	rows, err := pool.Query(ctx,
 		`SELECT a.name, sa.name, sa.description
-		   FROM kacho_iam.service_accounts sa
-		   JOIN kacho_iam.accounts a ON a.id = sa.account_id
+		   FROM kaname.service_accounts sa
+		   JOIN kaname.accounts a ON a.id = sa.account_id
 		  ORDER BY a.name, sa.name`)
 	require.NoError(t, err)
 	defer rows.Close()
@@ -339,11 +339,11 @@ func readLiveJoins(ctx context.Context, t *testing.T, pool *pgxpool.Pool) (
 	t.Helper()
 	rows, err := pool.Query(ctx,
 		`SELECT sa_acc.name, sa.name, grp_acc.name, g.name
-		   FROM kacho_iam.group_members gm
-		   JOIN kacho_iam.groups g ON g.id = gm.group_id
-		   JOIN kacho_iam.accounts grp_acc ON grp_acc.id = g.account_id
-		   JOIN kacho_iam.service_accounts sa ON sa.id = gm.member_id
-		   JOIN kacho_iam.accounts sa_acc ON sa_acc.id = sa.account_id
+		   FROM kaname.group_members gm
+		   JOIN kaname.groups g ON g.id = gm.group_id
+		   JOIN kaname.accounts grp_acc ON grp_acc.id = g.account_id
+		   JOIN kaname.service_accounts sa ON sa.id = gm.member_id
+		   JOIN kaname.accounts sa_acc ON sa_acc.id = sa.account_id
 		  WHERE gm.member_type = 'service_account'
 		  ORDER BY sa.name, g.name`)
 	require.NoError(t, err)
@@ -380,8 +380,8 @@ func readLiveGroups(ctx context.Context, t *testing.T, pool *pgxpool.Pool) (
 	t.Helper()
 	rows, err := pool.Query(ctx,
 		`SELECT a.name, g.name, g.description
-		   FROM kacho_iam.groups g
-		   JOIN kacho_iam.accounts a ON a.id = g.account_id
+		   FROM kaname.groups g
+		   JOIN kaname.accounts a ON a.id = g.account_id
 		  ORDER BY a.name, g.name`)
 	require.NoError(t, err)
 	defer rows.Close()
@@ -415,10 +415,10 @@ func readLiveBindings(ctx context.Context, t *testing.T, pool *pgxpool.Pool) (
 		        COALESCE(sa.name, ''), COALESCE(g.name, ''),
 		        COALESCE(ab.role_id, ''), ab.granted_relation,
 		        ab.resource_type, ab.resource_id
-		   FROM kacho_iam.access_bindings ab
-		   LEFT JOIN kacho_iam.service_accounts sa
+		   FROM kaname.access_bindings ab
+		   LEFT JOIN kaname.service_accounts sa
 		          ON sa.id = ab.subject_id AND ab.subject_type = 'service_account'
-		   LEFT JOIN kacho_iam.groups g
+		   LEFT JOIN kaname.groups g
 		          ON g.id = ab.subject_id AND ab.subject_type = 'group'
 		  ORDER BY ab.subject_type, ab.subject_id, ab.role_id, ab.granted_relation`)
 	require.NoError(t, err)
@@ -496,7 +496,7 @@ func manifestFiles(t *testing.T, root string) []string {
 // repoRoot — корень монорепо: САМЫЙ ВНЕШНИЙ каталог с go.mod.
 //
 // Не «ближайший вверх»: у службы теперь СВОЙ модуль (`services/iam`,
-// github.com/PRO-Robotech/kacho-iam), и подъём до первого встречного
+// github.com/PRO-Robotech/kaname), и подъём до первого встречного
 // останавливался бы в её каталоге. Ниже к этому корню приклеивается `services`,
 // то есть путь В ДЕРЕВЕ МОНОРЕПО от корня, — остановка внутри службы удваивала
 // сегмент, и обход искал `services/iam/services`, которого не существует. Отказ

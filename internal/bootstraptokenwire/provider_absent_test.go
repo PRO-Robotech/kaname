@@ -45,14 +45,14 @@ import (
 )
 
 // providerClientPkg — пакет клиентов внешнего поставщика удостоверений.
-const providerClientPkg = "github.com/PRO-Robotech/kacho-iam/internal/clients"
+const providerClientPkg = "github.com/PRO-Robotech/kaname/internal/clients"
 
 // bootstrapMintPackages — каталоги, составляющие путь чеканки бутстрапа:
 // use-case и его композиция. Пути относительны каталогу ЭТОГО пакета, поэтому
 // проба не зависит ни от корня дерева, ни от git.
 var bootstrapMintPackages = []string{
-	".",                                 // bootstraptokenwire — сборка контура
-	"../apps/kacho/api/bootstrap_token", // use-case чеканки
+	".",                                  // bootstraptokenwire — сборка контура
+	"../apps/kaname/api/bootstrap_token", // use-case чеканки
 }
 
 // providerImportsIn возвращает файлы каталога, импортирующие пакет поставщика,

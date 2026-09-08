@@ -4,11 +4,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: iam
+  name: {{ .Values.name }}
   namespace: {{ .Release.Namespace }}
 spec:
   selector:
-    app: iam
+    app: {{ .Values.name }}
   ports:
     - name: grpc
       port: {{ .Values.ports.grpc }}
@@ -16,3 +16,19 @@ spec:
     - name: grpc-internal
       port: {{ .Values.ports.internalGrpc }}
       targetPort: grpc-internal
+    # Собственные REST-фронты службы (KAN-REST-1).
+    #
+    # ОДИН Service здесь несёт оба порта, и это НЕ отменяет раздельность: она
+    # есть свойство СОКЕТА, а не объекта Service. Внутренний фронт слушает свой
+    # порт, и на публичном порту его маршруты не резолвятся ни при каком запросе.
+    # Кто дотянется до какого порта, решает сеть кластера, а не эта запись.
+    {{- if .Values.ports.rest }}
+    - name: http-rest
+      port: {{ .Values.ports.rest }}
+      targetPort: http-rest
+    {{- end }}
+    {{- if .Values.ports.internalRest }}
+    - name: http-rest-int
+      port: {{ .Values.ports.internalRest }}
+      targetPort: http-rest-int
+    {{- end }}

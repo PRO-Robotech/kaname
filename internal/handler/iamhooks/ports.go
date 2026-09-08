@@ -4,14 +4,14 @@
 // ports.go — port-интерфейсы handler-слоя (Clean Architecture).
 //
 // Handler НЕ зависит от pgx / sqlc / grpc-stubs. Зависит только от этих
-// abstract port'ов; реализации инжектируются из cmd/kacho-iam/main.go.
+// abstract port'ов; реализации инжектируются из cmd/kaname/main.go.
 package iamhooks
 
 import (
 	"context"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // UserLookupPort — read-side dependency для token/refresh hooks.

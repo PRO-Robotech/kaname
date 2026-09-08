@@ -66,7 +66,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
 )
 
 // governingRPCs — публичные RPC, чей предмет есть РАСПОРЯЖЕНИЕ СТРОКОЙ ЛИЧНОСТИ:
@@ -76,14 +76,14 @@ import (
 // не его написания. Перечень мал и закрыт; каждая запись обязана находиться в
 // каталоге, иначе перечень пережил свой предмет.
 var governingRPCs = []string{
-	"kacho.cloud.iam.v1.UserService/Update",
-	"kacho.cloud.iam.v1.UserService/Block",
-	"kacho.cloud.iam.v1.UserService/Unblock",
+	"kaname.cloud.iam.v1.UserService/Update",
+	"kaname.cloud.iam.v1.UserService/Block",
+	"kaname.cloud.iam.v1.UserService/Unblock",
 }
 
 // accountScopedReadRPC — чтение записи. Положительный контроль: именно у него
 // источники уровня аккаунта обязаны ОСТАТЬСЯ.
-const accountScopedReadRPC = "kacho.cloud.iam.v1.UserService/Get"
+const accountScopedReadRPC = "kaname.cloud.iam.v1.UserService/Get"
 
 // cloudSource — надзор облака (уровни 1-2: администратор облака и бутстрап-личность
 // сидят на ОДНОМ отношении, миграция 0058).

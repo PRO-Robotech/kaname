@@ -22,7 +22,7 @@
 // ЧЕКАНКОЙ ПРОДУКТА. Не с текстом чужого исходника (это была бы третья копия
 // предиката, и она разошлась бы так же), а с ЗНАЧЕНИЕМ, которое `credsecret.Mint`
 // производит для идентификатора от `ids.NewID` — теми же вызовами, что стоят на
-// пути выдачи (`services/iam/internal/apps/kacho/api/user_tokens/usecases.go`,
+// пути выдачи (`services/iam/internal/apps/kaname/api/user_tokens/usecases.go`,
 // `.../sa_keys/usecases.go`).
 //
 // Марка, длина хвоста и префиксы видов сверяются с ЭКСПОРТИРОВАННЫМИ величинами
@@ -45,9 +45,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/credsecret"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // declarationPath — единственное объявление формы. Путь относительный: проба

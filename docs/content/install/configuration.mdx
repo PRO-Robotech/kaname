@@ -9,8 +9,8 @@ import dedent from 'ts-dedent'
 
 # Конфигурация
 
-Kachō IAM конфигурируется через переменные окружения с префиксом **`KACHO_IAM_`** (плюс
-опциональный YAML-файл через `KACHO_IAM_CONFIG_PATH`). Эта страница перечисляет ключевые группы
+Kaname конфигурируется через переменные окружения с префиксом **`KANAME_`** (плюс
+опциональный YAML-файл через `KANAME_CONFIG_PATH`). Эта страница перечисляет ключевые группы
 настроек: подключение к БД, провайдеры идентичности (Kratos / Hydra), listener'ы и mTLS,
 режим аутентификации. Секреты (пароли, токены) подаются из окружения / секрет-хранилища, не
 хардкодятся.
@@ -20,28 +20,28 @@ Kachō IAM конфигурируется через переменные окр
 <table>
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
   <tbody>
-    <tr><td><code>KACHO_IAM_DB_HOST</code> / <code>KACHO_IAM_DB_PORT</code></td><td>Хост и порт PostgreSQL</td></tr>
-    <tr><td><code>KACHO_IAM_DB_USER</code> / <code>KACHO_IAM_DB_PASSWORD</code></td><td>Учётные данные</td></tr>
-    <tr><td><code>KACHO_IAM_DB_NAME</code></td><td>Имя БД (схема <code>kacho_iam</code>)</td></tr>
-    <tr><td><code>KACHO_IAM_DB_SSLMODE</code></td><td>Режим SSL (<code>require</code> в проде)</td></tr>
-    <tr><td><code>KACHO_IAM_DB_MAX_CONNS</code></td><td>Размер пула pgx</td></tr>
-    <tr><td><code>KACHO_IAM_REPOSITORY__POSTGRES__URL</code></td><td>Альтернатива — полный DSN одной строкой. Двойное подчёркивание — не опечатка: конфигурация грузится viper'ом с префиксом <code>KACHO_IAM</code>, точка пути ключа заменяется на <code>__</code>, дефис на <code>_</code></td></tr>
+    <tr><td><code>KANAME_DB_HOST</code> / <code>KANAME_DB_PORT</code></td><td>Хост и порт PostgreSQL</td></tr>
+    <tr><td><code>KANAME_DB_USER</code> / <code>KANAME_DB_PASSWORD</code></td><td>Учётные данные</td></tr>
+    <tr><td><code>KANAME_DB_NAME</code></td><td>Имя БД (схема <code>kaname</code>)</td></tr>
+    <tr><td><code>KANAME_DB_SSLMODE</code></td><td>Режим SSL (<code>require</code> в проде)</td></tr>
+    <tr><td><code>KANAME_DB_MAX_CONNS</code></td><td>Размер пула pgx</td></tr>
+    <tr><td><code>KANAME_REPOSITORY__POSTGRES__URL</code></td><td>Альтернатива — полный DSN одной строкой. Двойное подчёркивание — не опечатка: конфигурация грузится viper'ом с префиксом <code>KANAME</code>, точка пути ключа заменяется на <code>__</code>, дефис на <code>_</code></td></tr>
   </tbody>
 </table>
 
 ## Авторизация — отдельных переменных нет
 
 Решение о доступе вычисляется **в той же базе**, что и остальное состояние сервиса, поэтому
-настраивается общими `KACHO_IAM_DB_*` выше. Ни адреса, ни таймаутов, ни выбора провайдера
+настраивается общими `KANAME_DB_*` выше. Ни адреса, ни таймаутов, ни выбора провайдера
 авторизации задавать не нужно.
 
 :::caution Эти переменные СНЯТЫ — уберите их из своих профилей
 Если в вашем `values`/`env` остались перечисленные ниже, их можно удалить: **читателя у них
 нет**, процесс их не смотрит и на их отсутствие не жалуется.
 
-`KACHO_IAM_OPENFGA_ENDPOINT` · `KACHO_IAM_OPENFGA_STORE_ID` · `KACHO_IAM_OPENFGA_MODEL_ID` ·
-`KACHO_IAM_AUTHZ_PROVIDER` · `KACHO_IAM_FGA_CHECK_TIMEOUT_MS` ·
-`KACHO_IAM_FGA_WRITE_TIMEOUT_MS` · `KACHO_IAM_FGA_LIST_OBJECTS_TIMEOUT_MS`
+`KANAME_OPENFGA_ENDPOINT` · `KANAME_OPENFGA_STORE_ID` · `KANAME_OPENFGA_MODEL_ID` ·
+`KANAME_AUTHZ_PROVIDER` · `KANAME_FGA_CHECK_TIMEOUT_MS` ·
+`KANAME_FGA_WRITE_TIMEOUT_MS` · `KANAME_FGA_LIST_OBJECTS_TIMEOUT_MS`
 
 Они настраивали внешний движок прав, который снят целиком вместе со своим хранилищем и очередью.
 Оставленная переменная вреда не нанесёт, но и не сделает ничего — а выглядит как действующая
@@ -53,12 +53,12 @@ Kachō IAM конфигурируется через переменные окр
 <table>
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
   <tbody>
-    <tr><td><code>KACHO_IAM_AUTHN__IDENTITY_PROVIDER</code></td><td><b>Посадка личности</b>: чем стенд проверяет человека — <code>external</code> (внешний поставщик удостоверений) или <code>own</code> (собственная чеканка платформы). <b>Умолчания нет</b>: незаданное и неизвестное значение — отказ старта с именем поля. Разводит требования старта: под <code>external</code> обязательны три адреса поставщика (строки ниже), под <code>own</code> — ни одного, зато обязательна включённая своя чеканка. Значение сверяется <b>точно</b>: регистр не приводится, пробелы не обрезаются</td></tr>
-    <tr><td><code>KACHO_IAM_HYDRA_ADMIN_URL</code> / <code>KACHO_IAM_HYDRA_ADMIN_TOKEN</code></td><td>Admin-API Hydra (регистрация OAuth-клиентов). Требуется <b>только</b> под <code>external</code>. Имя переменной предъявителя объявляется настройкой <code>authn.hydra-admin-token-env</code> — значение в YAML не пишется никогда</td></tr>
-    <tr><td><code>KACHO_IAM_HYDRA_ISSUER</code> / <code>KACHO_IAM_HYDRA_TOKEN_URL</code></td><td>Issuer и token-endpoint Hydra. Требуются <b>только</b> под <code>external</code></td></tr>
-    <tr><td><code>KACHO_IAM_BOOTSTRAP_ROOT_EMAIL</code></td><td>Email первого cluster-admin (bootstrap)</td></tr>
-    <tr><td><code>KACHO_IAM_JWKS_ENC_KEY</code></td><td>Ключ <b>обёртки</b> приватной половины подписного ключа: 32 байта в <b>hex</b> (64 знака). Принимает <b>перечень через запятую</b> — первый ключ оборачивает, все открывают; так ключ обёртки и меняется, без простоя и без переписывания хранилища. Соседней ручки срока ротации <b>не существует</b> — прежняя редакция называла её рядом, а в дереве ноль вхождений; ротацию сервис не планирует по расписанию</td></tr>
-    <tr><td><code>KACHO_IAM_SAKEY_REDACT_GRACE</code> / <code>KACHO_IAM_USERTOKEN_REDACT_GRACE</code></td><td>Grace-период редактирования секретов</td></tr>
+    <tr><td><code>KANAME_AUTHN__IDENTITY_PROVIDER</code></td><td><b>Посадка личности</b>: чем стенд проверяет человека — <code>external</code> (внешний поставщик удостоверений) или <code>own</code> (собственная чеканка платформы). <b>Умолчания нет</b>: незаданное и неизвестное значение — отказ старта с именем поля. Разводит требования старта: под <code>external</code> обязательны три адреса поставщика (строки ниже), под <code>own</code> — ни одного, зато обязательна включённая своя чеканка. Значение сверяется <b>точно</b>: регистр не приводится, пробелы не обрезаются</td></tr>
+    <tr><td><code>KANAME_HYDRA_ADMIN_URL</code> / <code>KANAME_HYDRA_ADMIN_TOKEN</code></td><td>Admin-API Hydra (регистрация OAuth-клиентов). Требуется <b>только</b> под <code>external</code>. Имя переменной предъявителя объявляется настройкой <code>authn.hydra-admin-token-env</code> — значение в YAML не пишется никогда</td></tr>
+    <tr><td><code>KANAME_HYDRA_ISSUER</code> / <code>KANAME_HYDRA_TOKEN_URL</code></td><td>Issuer и token-endpoint Hydra. Требуются <b>только</b> под <code>external</code></td></tr>
+    <tr><td><code>KANAME_BOOTSTRAP_ROOT_EMAIL</code></td><td>Email первого cluster-admin (bootstrap)</td></tr>
+    <tr><td><code>KANAME_JWKS_ENC_KEY</code></td><td>Ключ <b>обёртки</b> приватной половины подписного ключа: 32 байта в <b>hex</b> (64 знака). Принимает <b>перечень через запятую</b> — первый ключ оборачивает, все открывают; так ключ обёртки и меняется, без простоя и без переписывания хранилища. Соседней ручки срока ротации <b>не существует</b> — прежняя редакция называла её рядом, а в дереве ноль вхождений; ротацию сервис не планирует по расписанию</td></tr>
+    <tr><td><code>KANAME_SAKEY_REDACT_GRACE</code> / <code>KANAME_USERTOKEN_REDACT_GRACE</code></td><td>Grace-период редактирования секретов</td></tr>
   </tbody>
 </table>
 
@@ -70,14 +70,32 @@ listener'ы. Каждый может требовать mTLS.
 <table>
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
   <tbody>
-    <tr><td><code>KACHO_IAM_GRPC_PORT</code> / <code>KACHO_IAM_INTERNAL_PORT</code></td><td>Порты public / internal listener'ов</td></tr>
-    <tr><td><code>KACHO_IAM_PUBLIC_SERVER_MTLS_…</code></td><td>mTLS публичного listener'а (cert / key / clientCA / enable)</td></tr>
-    <tr><td><code>KACHO_IAM_INTERNAL_SERVER_MTLS_…</code></td><td>mTLS internal listener'а (<code>InternalIAMService</code>)</td></tr>
-    <tr><td><code>KACHO_IAM_HOOKS_SERVER_MTLS_…</code></td><td>mTLS hooks-listener'а (Kratos identity-хуки)</td></tr>
-    <tr><td><code>KACHO_IAM_METRICS_SERVER_MTLS_…</code></td><td>mTLS metrics-listener'а (Prometheus)</td></tr>
-    <tr><td><code>KACHO_IAM_API_SERVER__METRICS_ENDPOINT</code></td><td>Адрес Prometheus <code>/metrics</code> (cluster-internal, по умолчанию <code>tcp://0.0.0.0:9095</code>). Имя без двойных подчёркиваний, стоявшее здесь прежде, встречается в дереве <b>только в комментарии</b> — читателя у него нет</td></tr>
+    <tr><td><code>KANAME_GRPC_PORT</code> / <code>KANAME_INTERNAL_PORT</code></td><td>Порты public / internal listener'ов</td></tr>
+    <tr><td><code>KANAME_PUBLIC_SERVER_MTLS_…</code></td><td>mTLS публичного listener'а (cert / key / clientCA / enable)</td></tr>
+    <tr><td><code>KANAME_INTERNAL_SERVER_MTLS_…</code></td><td>mTLS internal listener'а (<code>InternalIAMService</code>)</td></tr>
+    <tr><td><code>KANAME_HOOKS_SERVER_MTLS_…</code></td><td>mTLS hooks-listener'а (Kratos identity-хуки)</td></tr>
+    <tr><td><code>KANAME_METRICS_SERVER_MTLS_…</code></td><td>mTLS metrics-listener'а (Prometheus)</td></tr>
+    <tr><td><code>KANAME_JWKSPROXY_SERVER_MTLS_…</code></td><td>TLS зеркала ключей проверки (<code>/.well-known/jwks.json</code>, односторонняя)</td></tr>
+    <tr><td><code>KANAME_REGISTRYTOKEN_SERVER_MTLS_…</code></td><td>TLS докерной полосы (<code>/iam/token</code>, односторонняя)</td></tr>
+    <tr><td><code>KANAME_API_SERVER__METRICS_ENDPOINT</code></td><td>Адрес Prometheus <code>/metrics</code> (cluster-internal, по умолчанию <code>tcp://0.0.0.0:9095</code>). Имя без двойных подчёркиваний, стоявшее здесь прежде, встречается в дереве <b>только в комментарии</b> — читателя у него нет</td></tr>
   </tbody>
 </table>
+
+:::warning В боевой посадке транспорт этих рёбер ОБЯЗАТЕЛЕН
+Умолчание `…_ENABLE` — **открытый текст**, а не «слушатель выключен»: адреса всех
+HTTP-рёбер приходят умолчанием процесса и потому непусты всегда. Поэтому в боевой
+посадке процесс **отказывается стартовать**, пока транспорт не объявлен, и отказ
+называет ручку, адрес и то, что по этому проводу едет:
+
+```
+production mode requires TLS on the identity-provider hooks listener 0.0.0.0:9092
+(set KANAME_HOOKS_SERVER_MTLS_ENABLE=true with its cert/key): the identity
+provider's shared secret travels this hop …
+```
+
+Отказ называет **все** незакрытые рёбра сразу — профиль чинится за один заход, а не
+за три перезапуска. Вне боевой посадки страж молчит: стенд остаётся байт-идентичным.
+:::
 
 :::note Ручек с адресом api-gateway у iam больше нет
 Здесь стояла строка про адрес и клиентский mTLS до internal-порта api-gateway — iam ходил туда
@@ -91,8 +109,8 @@ iam не поднимался там, где api-gateway нет вовсе; те
 <table>
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
   <tbody>
-    <tr><td><code>KACHO_IAM_AUTHN__MODE</code></td><td>Режим аутентификации (dev-фикстуры vs production-strict)</td></tr>
-    <tr><td><code>KACHO_IAM_HOOK_TOKEN</code></td><td>Токен для identity-хуков Kratos</td></tr>
+    <tr><td><code>KANAME_AUTHN__MODE</code></td><td>Режим аутентификации (dev-фикстуры vs production-strict)</td></tr>
+    <tr><td><code>KANAME_HOOK_TOKEN</code></td><td>Токен для identity-хуков Kratos</td></tr>
   </tbody>
 </table>
 
@@ -112,8 +130,8 @@ with insecure :9090/:9091») — никакого молчаливого insecur
 <table>
   <thead><tr><th>Ключ · переменная</th><th>Назначение</th></tr></thead>
   <tbody>
-    <tr><td><code>manifests.dir</code> · <code>KACHO_IAM_MANIFESTS__DIR</code></td><td>Каталог, в который посадка монтирует манифесты модулей. Пусто — доставка не заведена</td></tr>
-    <tr><td><code>manifests.required</code> · <code>KACHO_IAM_MANIFESTS__REQUIRED</code></td><td>Опирается ли посадка на манифесты. С <code>manifests.dir</code> это пара, и неполная она отвергается в обе стороны: объявлено при пустом каталоге — отказ старта; каталог назван, а опора не объявлена — тоже отказ. Доставка снимается пустым каталогом, а не отзывом опоры</td></tr>
+    <tr><td><code>manifests.dir</code> · <code>KANAME_MANIFESTS__DIR</code></td><td>Каталог, в который посадка монтирует манифесты модулей. Пусто — доставка не заведена</td></tr>
+    <tr><td><code>manifests.required</code> · <code>KANAME_MANIFESTS__REQUIRED</code></td><td>Опирается ли посадка на манифесты. С <code>manifests.dir</code> это пара, и неполная она отвергается в обе стороны: объявлено при пустом каталоге — отказ старта; каталог назван, а опора не объявлена — тоже отказ. Доставка снимается пустым каталогом, а не отзывом опоры</td></tr>
   </tbody>
 </table>
 
@@ -132,14 +150,14 @@ with insecure :9090/:9091») — никакого молчаливого insecur
 
 <CodeBlock language="bash">
   {dedent`
-    export KACHO_IAM_DB_HOST=localhost
-    export KACHO_IAM_DB_PORT=5432
-    export KACHO_IAM_DB_USER=kacho
-    export KACHO_IAM_DB_PASSWORD=secret
-    export KACHO_IAM_DB_NAME=kacho_iam
-    export KACHO_IAM_DB_SSLMODE=disable
+    export KANAME_DB_HOST=localhost
+    export KANAME_DB_PORT=5432
+    export KANAME_DB_USER=kacho
+    export KANAME_DB_PASSWORD=secret
+    export KANAME_DB_NAME=kaname
+    export KANAME_DB_SSLMODE=disable
 
-    bin/kacho-migrator up
-    bin/kacho-iam serve
+    bin/kaname-migrator up
+    bin/kaname serve
   `}
 </CodeBlock>

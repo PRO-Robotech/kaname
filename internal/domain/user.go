@@ -73,7 +73,7 @@ func (s InviteStatus) Validate() error {
 // сколько бы аккаунтов её ни пригласило.
 //
 // Принадлежность аккаунту здесь НЕ живёт: её выражает строка
-// `kacho_iam.memberships` (одна на пару «человек × аккаунт»), и членств у одного
+// `kaname.memberships` (одна на пару «человек × аккаунт»), и членств у одного
 // человека бывает несколько. Ключ идентичности — глобальный:
 // `users_identity_email_uniq` и `users_identity_external_id_uniq`
 // (`20260823050000_users_identity_uniqueness_goes_global.sql`, стадия S4-expand

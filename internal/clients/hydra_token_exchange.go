@@ -5,7 +5,7 @@
 // endpoint (`POST /oauth2/token`). Used by the Docker Registry v2 `/iam/token`
 // shim: the shim signs an ES256 client_assertion from the presented SA-key and
 // brokers a `client_credentials` + `private_key_jwt` exchange, returning Hydra's
-// access_token to the docker client. kacho-iam no longer mints registry tokens
+// access_token to the docker client. kaname no longer mints registry tokens
 // itself — Hydra is the issuer/signer. (The data-plane verifies that token against
 // Hydra's JWKS, which iam mirrors on a separate cluster-internal jwks-proxy
 // listener — internal/handler/jwksproxyhttp — never re-signing anything.)

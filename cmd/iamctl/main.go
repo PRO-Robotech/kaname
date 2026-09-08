@@ -39,8 +39,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/iamctl"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifestcheckrun"
+	"github.com/PRO-Robotech/kaname/internal/iamctl"
+	"github.com/PRO-Robotech/kaname/internal/manifestcheckrun"
 )
 
 func main() {
@@ -48,15 +48,15 @@ func main() {
 	// действий свои наборы, и общий набор с ними не смешивается.
 	fs := flag.NewFlagSet("iamctl", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	endpoint := fs.String("endpoint", envOr("KACHO_IAMCTL_ENDPOINT", ""),
+	endpoint := fs.String("endpoint", envOr("KANAMECTL_ENDPOINT", ""),
 		"адрес ВНУТРЕННЕГО слушателя iam (:9091): глаголы каталога модуля внешним маршрутизатором не обслуживаются")
-	serverName := fs.String("server-name", envOr("KACHO_IAMCTL_SERVER_NAME", ""),
+	serverName := fs.String("server-name", envOr("KANAMECTL_SERVER_NAME", ""),
 		"имя, сверяемое с SAN сертификата службы")
-	caFiles := fs.String("ca", envOr("KACHO_IAMCTL_CA_FILES", ""),
+	caFiles := fs.String("ca", envOr("KANAMECTL_CA_FILES", ""),
 		"корни доверия через запятую: ими проверяется сертификат службы")
-	certFile := fs.String("cert", envOr("KACHO_IAMCTL_CERT_FILE", ""),
+	certFile := fs.String("cert", envOr("KANAMECTL_CERT_FILE", ""),
 		"СВОЁ удостоверение: служба решает по личности вызывающего, а не по факту достижимости")
-	keyFile := fs.String("key", envOr("KACHO_IAMCTL_KEY_FILE", ""),
+	keyFile := fs.String("key", envOr("KANAMECTL_KEY_FILE", ""),
 		"ключ к своему удостоверению")
 	timeout := fs.Duration("timeout", 30*time.Second,
 		"срок КАЖДОГО вызова службы")

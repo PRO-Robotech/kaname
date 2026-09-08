@@ -73,14 +73,14 @@ func TestReadingSessionHistoryIsNotReachableFromInsideTheAccount(t *testing.T) {
 	// Сам человек. Кортеж пишется на заведении пользователя (internal_upsert.go).
 	w.factThroughJournal(t, "user:"+invitee, "subject", "iam_user", invitee)
 	// Уровень 1.
-	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_kacho_root")
+	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_root")
 
 	// Отношение спрашивается У КАТАЛОГА, а не пишется литералом: каталог
 	// порождается из proto и является единственным источником per-RPC решения
 	// края. Литерал означал бы, что проба утверждает о СВОЁМ представлении
 	// гейта, а не о действующем.
 	histRel, histType := actingAsGateFromCatalog(t,
-		"kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser")
+		"kaname.cloud.iam.v1.InternalSessionRevocationsService/ListByUser")
 	require.Equalf(t, "iam_user", histType,
 		"история сессий гейтится не на объекте личности (%s)", histType)
 
@@ -142,7 +142,7 @@ func TestReadingSessionHistoryIsNotReachableFromInsideTheAccount(t *testing.T) {
 	// Сессия и удостоверение — соседние стороны одного человека. Модель их
 	// согласие уже стережёт равенством кругов; здесь то же спрашивается
 	// ВЕРДИКТОМ, потому что разъехаться два механизма могут молча.
-	tokRel, tokType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserTokenService/List")
+	tokRel, tokType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserTokenService/List")
 	require.Equalf(t, "iam_user", tokType,
 		"перечень удостоверений гейтится не на объекте личности (%s)", tokType)
 	for _, who := range []string{inviter, owner, stranger} {

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
-	"github.com/PRO-Robotech/kacho-iam/internal/modelrender"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/modelrender"
 )
 
 // canon_test.go — разбор канона на блоки и вывод перечня типов вне модулей
@@ -129,7 +129,7 @@ func TestB06AKnownTypeIsNotReportedAsOutside(t *testing.T) {
 func helperTree(t *testing.T, canon string) string {
 	t.Helper()
 	root := t.TempDir()
-	dir := filepath.Join(root, "proto", "kacho", "cloud", "iam", "v1")
+	dir := filepath.Join(root, "proto", "kaname", "cloud", "iam", "v1")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("каталог канона: %v", err)
 	}

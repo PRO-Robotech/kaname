@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // TokenHookConfig — runtime config для token hook.
@@ -237,7 +237,7 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// отдаёт его пустым. kacho-принципал такого токена — ServiceAccount за
 	// OAuth2-клиентом, поэтому fallback на client_id (session, затем request);
 	// enricher резолвит его в SA через LookupByOAuthClientID и штампует
-	// kacho_principal_id = SA-id.
+	// kaname_principal_id = SA-id.
 	if subject == "" {
 		subject = payload.Session.ClientID
 		if subject == "" {
@@ -378,7 +378,7 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// durable record; the token is already minted at this point).
 		if emitErr := h.audit.Emit(ctx, AuditEvent{
 			EventType:       "authn.token.issued",
-			TenantAccountID: getString(enriched, "kacho_active_account"),
+			TenantAccountID: getString(enriched, "kaname_active_account"),
 			Payload: map[string]any{
 				"subject":          subject,
 				"client_id":        payload.Request.ClientID,
@@ -488,7 +488,7 @@ func firstFormValue(m map[string][]string, key string) string {
 // decodeAssertionIssuer extracts the `iss` claim from an unverified JWT
 // assertion. Hydra has ALREADY validated the assertion's signature against
 // the configured trusted-issuer JWKS by the time it calls the token-hook;
-// kacho-iam only needs the issuer to disambiguate which external IdP this
+// kaname only needs the issuer to disambiguate which external IdP this
 // federated SA-token was minted for so the (iss, sub) lookup can target the
 // right `trusted_subjects` row. Failure returns "" — caller falls through to
 // the non-federated paths.

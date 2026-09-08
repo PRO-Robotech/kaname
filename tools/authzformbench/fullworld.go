@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // Мир, в котором задаётся вопросник по ПОЛНОЙ модели.
@@ -44,7 +46,9 @@ import (
 // Идентификаторы мира. Фиксированные строки: сравниваются формы, а разница в
 // идентификаторах была бы разницей в данных.
 const (
-	fmClusterObj = "cluster:cluster_kacho_root"
+	// Якорь кластера — из объявления продукта (см. forms.go); соседние
+	// идентификаторы мира синтетические.
+	fmClusterObj = "cluster:" + domain.ClusterSingletonID
 
 	fmHomeAccount    = "account:acc-home"
 	fmForeignAccount = "account:acc-foreign"
@@ -165,7 +169,7 @@ func buildWorld(m *Model) (*fmWorld, error) {
 	}
 
 	// Каркас: кластер, два аккаунта, два проекта.
-	add(fmObject{Type: "cluster", ID: "cluster_kacho_root", Tenant: tenantCluster})
+	add(fmObject{Type: "cluster", ID: domain.ClusterSingletonID, Tenant: tenantCluster})
 	add(fmObject{Type: "account", ID: "acc-home", Tenant: tenantHome, Labelled: true,
 		Pointers: map[string]string{"cluster": fmClusterObj}})
 	add(fmObject{Type: "account", ID: "acc-foreign", Tenant: tenantForeign, Labelled: true,

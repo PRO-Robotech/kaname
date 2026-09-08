@@ -44,7 +44,7 @@ and region) deployed behind the gateway so storage→iam RegisterResource feeds
 resource_mirror. The umbrella e2e brings up the full stack and runs this shared iam
 suite, so these execute against a complete deployment.
 
-RUNTIME DISCOVERY (no env-fixture dependency). The shared kacho-iam newman env carries
+RUNTIME DISCOVERY (no env-fixture dependency). The shared kaname newman env carries
 ONLY iam ids — it does NOT define existingZoneId / existingRegionId / existingDiskTypeId
 (those are per-service suite vars, absent in the iam harness). Each case therefore
 discovers what it needs from PUBLIC reads at runtime: GET /geo/v1/zones, GET

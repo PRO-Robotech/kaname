@@ -13,7 +13,7 @@
 // For the READ-RPC set (ReadFloorRPCs), it requires the CALLER MODULE
 // ServiceAccount (derived from the verified mTLS cert SAN, the SAME
 // SAN→sva derivation as fgaproxy) to hold a COARSE cluster relation
-// `system_viewer` on the singleton `cluster:cluster_kacho_root`, checked via the
+// `system_viewer` on the singleton `cluster:cluster_root`, checked via the
 // SAME RelationChecker port used by RelationWriteGate / InternalIAMService.Check.
 //
 // This is a COARSE "is this a legitimate internal reader" gate (defense-in-depth
@@ -65,6 +65,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 const (
@@ -73,9 +75,15 @@ const (
 	// service_account] with NO `user:*` wildcard (FGA model), so an
 	// arbitrary user:<rando> can never satisfy it.
 	systemViewerRelation = "system_viewer"
-	// clusterRootObject — the singleton cluster object, the same root
-	// used by cluster-scope AccessBindings and the operator tuple.
-	clusterRootObject = "cluster:cluster_kacho_root"
+	// clusterRootObject — объект якоря кластера, тот же, что у выдач кластерной
+	// области и у операторского кортежа.
+	//
+	// СОБИРАЕТСЯ из объявленного написания, а не повторяет его строкой: переход
+	// написания правит объявление, а повторённая рукой строка продолжила бы
+	// спрашивать про прежний объект молча — код собрался бы, типы сошлись бы.
+	// Выражение остаётся КОНСТАНТНЫМ: объявление нетипизировано, поэтому
+	// сложение вычисляется на сборке и соседний блок констант его принимает.
+	clusterRootObject = "cluster:" + domain.ClusterSingletonID
 )
 
 // ReadFloorRPCs returns the full-method set of cluster-internal READ RPCs that
@@ -97,24 +105,24 @@ const (
 func ReadFloorRPCs() []string {
 	return []string{
 		// InternalIAMService — service→service read lookups.
-		"/kacho.cloud.iam.v1.InternalIAMService/LookupSubject",
-		"/kacho.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
+		"/kaname.cloud.iam.v1.InternalIAMService/LookupSubject",
+		"/kaname.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
 		// InternalUserService — service→service user mirror read.
-		"/kacho.cloud.iam.v1.InternalUserService/Get",
+		"/kaname.cloud.iam.v1.InternalUserService/Get",
 		// InternalSessionRevocationsService — admin-UI revocation history. (Both
 		// the floor AND the gateway-only restriction apply — see CallerPolicy.)
 		// Neither of them is the per-USER decision for this RPC, and this comment
 		// says so deliberately: the RPC answers about a user the CALLER NAMES, and
 		// nothing on this chain reads that name. That decision is made against the
 		// named user in api/session_revocations/list_by_user_authz.go.
-		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
+		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
 		// InternalInteractiveClientService — admin reads of the interactive-login
 		// client surface (gateway-fronted; floor AND gateway-only both apply).
 		// The three mutations of the same service are deliberately ABSENT: the
 		// read floor is for reads, and the mutations are governed by the caller
 		// policy plus the acr floor.
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Get",
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/List",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Get",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/List",
 		// InternalLimitService — admin reads of the resource-count ceilings
 		// (gateway-fronted; floor AND gateway-only both apply). The three
 		// mutations of the same service are deliberately ABSENT: the read floor is
@@ -126,8 +134,8 @@ func ReadFloorRPCs() []string {
 		// require every owner to hold `system_viewer` on the cluster — the whole
 		// cluster-scoped read surface — in addition to the narrow relation that is
 		// supposed to be the entire grant.
-		"/kacho.cloud.iam.v1.InternalLimitService/Get",
-		"/kacho.cloud.iam.v1.InternalLimitService/List",
+		"/kaname.cloud.iam.v1.InternalLimitService/Get",
+		"/kaname.cloud.iam.v1.InternalLimitService/List",
 		// Двух читающих методов администрирования хранилища отношений здесь больше
 		// нет: служба снята вместе с движком (стадия S6 эпика #747). Потолок,
 		// объявленный для несуществующего метода, ничего не гейтит и вводит в
@@ -173,7 +181,7 @@ func (f *SystemViewerFloor) WithProductionMode(prod bool) *SystemViewerFloor {
 //  3. prod, no verified module-cert SAN (unverified / absent / malformed /
 //     foreign-trust-domain) → PermissionDenied (fail-closed).
 //  4. prod, valid SAN → derive sva → Check(service_account:<sva>,
-//     system_viewer, cluster:cluster_kacho_root):
+//     system_viewer, cluster:cluster_root):
 //     - err != nil (FGA outage / 5xx / network / ErrNotConfigured) → Unavailable
 //     (retryable, fail-closed — NOT allow; parity with RelationWriteGate).
 //     - allowed == false → PermissionDenied.
@@ -196,7 +204,7 @@ func (f *SystemViewerFloor) allow(ctx context.Context, fullMethod string) error 
 	if !verified || san == "" {
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
-	sva, ok := SANToServiceAccountID(san)
+	sva, ok := SANToServiceAccountID(grpcsrv.CertIdentityDomainFromContext(ctx), san)
 	if !ok {
 		// Malformed / foreign-trust-domain SAN → not a module identity.
 		return status.Error(codes.PermissionDenied, "permission denied")

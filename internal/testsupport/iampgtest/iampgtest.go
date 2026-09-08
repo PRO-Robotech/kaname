@@ -16,7 +16,7 @@
 // # Что было до этого — чтобы не завели снова
 //
 // Помощник лежал непроверочным файлом `testhelpers.go` ВНУТРИ пакета
-// `services/iam/internal/repo/kacho/pg`, который прод-код импортирует законно.
+// `services/iam/internal/repo/kaname/pg`, который прод-код импортирует законно.
 // Go собирает всё, что импортируется по графу, и назначение файла на это не
 // влияет: суффикс `_test.go` выводит файл из сборки, слово «test» в имени — нет.
 // Через `pkg/pgtest` в оба боевых бинаря iam приезжал `testcontainers-go` с
@@ -55,7 +55,7 @@ import (
 )
 
 // NewTestPostgres возвращает DSN на СОБСТВЕННУЮ базу вызывающего, с
-// `search_path=kacho_iam,public`.
+// `search_path=kaname,public`.
 //
 // Помощник когда-то поднимал свежий контейнер и проигрывал все миграции на каждый
 // вызов — из-за чего пакеты, звавшие его, перерастали 600 с, которые `go test`
@@ -68,10 +68,10 @@ func NewTestPostgres(t testing.TB) string {
 }
 
 // AppendIAMSearchPath добавляет параметр времени исполнения libpq, кладущий
-// `kacho_iam` в `search_path`. Форма URL-запроса `search_path=` драйвером pgx не
+// `kaname` в `search_path`. Форма URL-запроса `search_path=` драйвером pgx не
 // читается — отсюда написание `options=-c …`.
 func AppendIAMSearchPath(dsn string) string {
-	const optionsParam = "options=-c%20search_path%3Dkacho_iam%2Cpublic"
+	const optionsParam = "options=-c%20search_path%3Dkaname%2Cpublic"
 	if strings.Contains(dsn, "?") {
 		return dsn + "&" + optionsParam
 	}

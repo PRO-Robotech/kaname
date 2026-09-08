@@ -22,9 +22,9 @@ const (
 	vpcSAN     = "spiffe://kacho.cloud/ns/kacho/sa/kacho-vpc"
 
 	// gatewayOnlyMethod — a representative gateway-fronted privileged admin RPC.
-	gatewayOnlyMethod = "/kacho.cloud.iam.v1.InternalClusterService/GrantAdmin"
+	gatewayOnlyMethod = "/kaname.cloud.iam.v1.InternalClusterService/GrantAdmin"
 	// floorOnlyMethod — a non-gateway RPC: any verified module may call it.
-	floorOnlyMethod = "/kacho.cloud.iam.v1.InternalIAMService/Check"
+	floorOnlyMethod = "/kaname.cloud.iam.v1.InternalIAMService/Check"
 
 	// authorizeBatchCheckMethod — RPC, которым пообъектный фильтр страницы
 	// (kacho-vpc / kacho-compute / kacho-nlb) судит идентификаторы СВОЕЙ страницы
@@ -38,11 +38,11 @@ const (
 	// становились владельцу невидимы навсегда при живых правах. Утверждение о
 	// снятом имени ничего не защищает — представителем ребра стал тот вызов,
 	// который его сегодня несёт.
-	authorizeBatchCheckMethod = "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck"
+	authorizeBatchCheckMethod = "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck"
 	// authorizeCheckMethod / authorizeListSubjectsMethod — остальные RPC
 	// AuthorizeService, которые потребители держат на том же ребре.
-	authorizeCheckMethod        = "/kacho.cloud.iam.v1.AuthorizeService/Check"
-	authorizeListSubjectsMethod = "/kacho.cloud.iam.v1.AuthorizeService/ListSubjects"
+	authorizeCheckMethod        = "/kaname.cloud.iam.v1.AuthorizeService/Check"
+	authorizeListSubjectsMethod = "/kaname.cloud.iam.v1.AuthorizeService/ListSubjects"
 )
 
 // okHandler is a no-op unary handler returning a sentinel so a "pass" is
@@ -61,12 +61,12 @@ func (s fakeStream) Context() context.Context { return s.ctx }
 
 // newGatewayCtx returns a ctx carrying a verified api-gateway module cert SAN.
 func newGatewayCtx() context.Context {
-	return grpcsrv.WithCertIdentity(context.Background(), gatewaySAN, true)
+	return grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), gatewaySAN, true)
 }
 
 // newVPCCtx returns a ctx carrying a verified kacho-vpc module cert SAN.
 func newVPCCtx() context.Context {
-	return grpcsrv.WithCertIdentity(context.Background(), vpcSAN, true)
+	return grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), vpcSAN, true)
 }
 
 // testPolicy builds a CallerPolicy with the canonical gateway-only set.
@@ -160,7 +160,7 @@ func TestCallerPolicy_FloorOnly_NoCert_Dev(t *testing.T) {
 // as "no module cert" → PermissionDenied in prod.
 func TestCallerPolicy_UnverifiedCert_Prod(t *testing.T) {
 	p := testPolicy(true)
-	ctx := grpcsrv.WithCertIdentity(context.Background(), gatewaySAN, false)
+	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), gatewaySAN, false)
 	if err := p.allow(ctx, gatewayOnlyMethod); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("prod unverified cert: code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -170,7 +170,7 @@ func TestCallerPolicy_UnverifiedCert_Prod(t *testing.T) {
 // kacho-<svc>) is treated as "no module cert" → PermissionDenied in prod.
 func TestCallerPolicy_NonModuleSAN_Prod(t *testing.T) {
 	p := testPolicy(true)
-	ctx := grpcsrv.WithCertIdentity(context.Background(), "spiffe://kacho.cloud/ns/x/sa/not-a-module", true)
+	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), "spiffe://kacho.cloud/ns/x/sa/not-a-module", true)
 	if err := p.allow(ctx, gatewayOnlyMethod); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("prod non-module SAN: code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -250,17 +250,17 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 	}
 
 	mustHave := []string{
-		"/kacho.cloud.iam.v1.InternalClusterService/GrantAdmin",
-		"/kacho.cloud.iam.v1.InternalClusterService/RevokeAdmin",
-		"/kacho.cloud.iam.v1.InternalClusterService/ListAdmins",
-		"/kacho.cloud.iam.v1.InternalClusterService/Get",
-		"/kacho.cloud.iam.v1.InternalIAMService/ForceLogout",
+		"/kaname.cloud.iam.v1.InternalClusterService/GrantAdmin",
+		"/kaname.cloud.iam.v1.InternalClusterService/RevokeAdmin",
+		"/kaname.cloud.iam.v1.InternalClusterService/ListAdmins",
+		"/kaname.cloud.iam.v1.InternalClusterService/Get",
+		"/kaname.cloud.iam.v1.InternalIAMService/ForceLogout",
 		// SessionRevocations admin/gateway-fronted RPCs: Revoke is driven by
 		// the api-gateway logout handler; ListByUser is admin-UI fronted.
-		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
-		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
-		"/kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
-		"/kacho.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
+		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
+		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
+		"/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
+		"/kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
 	}
 	for _, m := range mustHave {
 		if _, ok := set[m]; !ok {
@@ -269,18 +269,18 @@ func TestGatewayFrontedInternalRPCs_Membership(t *testing.T) {
 	}
 
 	mustNotHave := []string{
-		"/kacho.cloud.iam.v1.InternalIAMService/Check",
-		"/kacho.cloud.iam.v1.InternalIAMService/LookupSubject",
-		"/kacho.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
-		"/kacho.cloud.iam.v1.InternalIAMService/RegisterResource",
-		"/kacho.cloud.iam.v1.InternalIAMService/UnregisterResource",
+		"/kaname.cloud.iam.v1.InternalIAMService/Check",
+		"/kaname.cloud.iam.v1.InternalIAMService/LookupSubject",
+		"/kaname.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
+		"/kaname.cloud.iam.v1.InternalIAMService/RegisterResource",
+		"/kaname.cloud.iam.v1.InternalIAMService/UnregisterResource",
 		// Здесь стояла WriteCreatorTuple. Запись снята вместе с RPC (#788):
 		// имени, которого нет в контракте, отрицание не о чем утверждать —
 		// оно проходило бы всегда и ничего не проверяло.
 		// IsRevoked is the api-gateway hot-path lookup (chicken-and-egg: runs
 		// before authz can possibly run) → floor-only, NOT gateway-restricted.
-		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked",
-		"/kacho.cloud.iam.v1.InternalUserService/Get",
+		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked",
+		"/kaname.cloud.iam.v1.InternalUserService/Get",
 	}
 	for _, m := range mustNotHave {
 		if _, ok := set[m]; ok {

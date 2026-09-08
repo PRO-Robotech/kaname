@@ -17,7 +17,7 @@ R?».
 1. **действие → отношение** — свёртка глагола (`get`/`list` → `viewer`,
    `create`/`update` → `editor`, `delete` → `admin`) либо явное поле
    `required_relation` (`internal/authzmap`).
-2. **вердикт реляционной формы** — запрос к собственной базе `kacho_iam`: прямой
+2. **вердикт реляционной формы** — запрос к собственной базе `kaname`: прямой
    факт ∪ выдача роли на область ∪ выдача по меткам ∪ членство в группе. Разбор —
    [`29-relational-verdict.md`](29-relational-verdict.md).
 
@@ -25,7 +25,7 @@ R?».
 
 **Ограничения:**
 - синхронный, только чтение (конверта `Operation` нет);
-- fail-closed: база `kacho_iam` недоступна → `UNAVAILABLE`, никогда «разрешено»
+- fail-closed: база `kaname` недоступна → `UNAVAILABLE`, никогда «разрешено»
   (см. [`../architecture/failure-domains.md`](../architecture/failure-domains.md)).
 
 > [!note] До стадии S6 решение принимал внешний движок отношений — его нет
@@ -144,7 +144,7 @@ sequenceDiagram
     participant Cli
     participant GW as api-gateway
     participant IAM as AuthorizeService
-    participant DB as Postgres kacho_iam
+    participant DB as Postgres kaname
 
     Cli->>GW: POST /iam/v1/authorize:check {subject, resource, action, context}
     GW->>IAM: gRPC Check
@@ -161,10 +161,10 @@ sequenceDiagram
 
 Отдельных переменных окружения у проверки доступа **нет**. Вердикт складывается
 той же базой, что и остальные чтения службы, и берёт её из общей настройки
-подключения (`KACHO_IAM_DB_*`). Переменные внешнего движка —
-`KACHO_IAM_OPENFGA_ENDPOINT`, `KACHO_IAM_OPENFGA_STORE_ID`,
-`KACHO_IAM_OPENFGA_MODEL_ID`, `KACHO_IAM_FGA_CHECK_TIMEOUT_MS`,
-`KACHO_IAM_FGA_LIST_OBJECTS_TIMEOUT_MS`, `KACHO_IAM_FGA_WRITE_TIMEOUT_MS` — сняты
+подключения (`KANAME_DB_*`). Переменные внешнего движка —
+`KANAME_OPENFGA_ENDPOINT`, `KANAME_OPENFGA_STORE_ID`,
+`KANAME_OPENFGA_MODEL_ID`, `KANAME_FGA_CHECK_TIMEOUT_MS`,
+`KANAME_FGA_LIST_OBJECTS_TIMEOUT_MS`, `KANAME_FGA_WRITE_TIMEOUT_MS` — сняты
 вместе с движком: у них не осталось читателя.
 
 ## Как пользоваться
@@ -192,15 +192,15 @@ curl -X POST http://localhost:18080/iam/v1/authorize:expandRelations \
 
 | Сценарий | gRPC-код | HTTP | Текст |
 |---|---|---|---|
-| база `kacho_iam` недоступна | `UNAVAILABLE` | 503 | фиксированный текст, без деталей драйвера |
+| база `kaname` недоступна | `UNAVAILABLE` | 503 | фиксированный текст, без деталей драйвера |
 | действие не найдено в каталоге | `INVALID_ARGUMENT` | 400 | `Illegal argument action: unknown` |
 | субъект пуст | `INVALID_ARGUMENT` | 400 | `Illegal argument subject: required` |
 
 ## Подробности реализации
 
 - **служба:** `internal/service/authorize_service.go`
-- **обработчик:** `internal/apps/kacho/api/authorize/handler.go`
-- **реляционная форма:** `internal/repo/kacho/pg/relverdict/`
+- **обработчик:** `internal/apps/kaname/api/authorize/handler.go`
+- **реляционная форма:** `internal/repo/kaname/pg/relverdict/`
 - **план вывода из модели:** `services/iam/internal/authzplan/`
 - **свёртка глагола:** `internal/authzmap/permissions_to_relations.go`
 
@@ -213,6 +213,6 @@ curl -X POST http://localhost:18080/iam/v1/authorize:expandRelations \
 ## Ссылки на код
 
 - `internal/service/authorize_service.go`
-- `internal/apps/kacho/api/authorize/handler.go`
-- `internal/repo/kacho/pg/relverdict/`
+- `internal/apps/kaname/api/authorize/handler.go`
+- `internal/repo/kaname/pg/relverdict/`
 - `internal/authzmap/`, `services/iam/internal/authzplan/`

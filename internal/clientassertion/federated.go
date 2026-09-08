@@ -35,7 +35,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // VerifyFederated проверяет утверждение, подписанное внешним издателем, и

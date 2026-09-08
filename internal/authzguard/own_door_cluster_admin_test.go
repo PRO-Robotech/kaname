@@ -50,7 +50,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 )
 
@@ -67,14 +67,14 @@ const (
 	foreignUser = "usr00000000000000042"
 
 	// credentialMint — глагол, у которого армы надзора в модели нет.
-	credentialMint = "/kacho.cloud.iam.v1.UserTokenService/Issue"
+	credentialMint = "/kaname.cloud.iam.v1.UserTokenService/Issue"
 )
 
 // clusterSuperGateFact — единственный факт, которым учётка первичной посадки
 // заведена миграцией: `system_admin` на синглтоне кластера.
 func clusterSuperGateFact(subject string) map[string]bool {
 	return map[string]bool{
-		subject + "|system_admin|" + "cluster:cluster_kacho_root": true,
+		subject + "|system_admin|" + "cluster:cluster_root": true,
 	}
 }
 
@@ -199,7 +199,7 @@ func TestOwnDoor_ObjectOutageIsNotOverriddenByTheSuperGate(t *testing.T) {
 	// заменяет. Проверяется ОБЪЁМ спрошенного, иначе «не разрешил» было бы
 	// неотличимо от «разрешил бы, да не успел».
 	for _, q := range store.asked {
-		if q == subject+"|system_admin|cluster:cluster_kacho_root" {
+		if q == subject+"|system_admin|cluster:cluster_root" {
 			t.Fatalf("надзор спрошен поверх неответившего объекта: %v", store.asked)
 		}
 	}

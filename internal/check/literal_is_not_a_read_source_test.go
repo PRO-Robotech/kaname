@@ -35,20 +35,20 @@ package check
 //  3. довод в пользу сужения ПРОВЕРЕН и не устоял. Задача называла пять
 //     недостижимых пакетов и опиралась на то, что `internal/manifest/roleexport`
 //     и `internal/modelrender` живут только в сборочных командах. Сегодня оба
-//     ДОСТИЖИМЫ из `cmd/kacho-iam` (`moduleroles/rightsexport.go` и `apply.go`
-//     → `cmd/kacho-iam/module_roles_apply.go`), то есть сужение, применённое
+//     ДОСТИЖИМЫ из `cmd/kaname` (`moduleroles/rightsexport.go` и `apply.go`
+//     → `cmd/kaname/module_roles_apply.go`), то есть сужение, применённое
 //     тогда, дало бы слепую зону ВНУТРИ бинаря сегодня — ровно ту
 //     необратимость, о которой предупреждал п. 2.
 //
 // Величины на момент решения (единица — КАТАЛОГ; ориентир, не гейт, и
 // перемеряются этими же командами из `services/iam`):
 //
-//	go list -deps ./cmd/kacho-iam | grep '^github.com/PRO-Robotech/kacho-iam' | sort
+//	go list -deps ./cmd/kaname | grep '^github.com/PRO-Robotech/kaname' | sort
 //	# → 87 пакетов достижимо из бинаря сервиса
-//	grep -rl 'kacho-iam/internal/authzmap"' --include=*.go . | grep -v '_test.go' \
+//	grep -rl 'kaname/internal/authzmap"' --include=*.go . | grep -v '_test.go' \
 //	  | xargs -n1 dirname | sort -u
 //	# → 11 каталогов-импортёров, из них НЕ достижимы бинарём 2:
-//	#   internal/repo/kacho/pg/scalegrid · internal/scopesourcecensus
+//	#   internal/repo/kaname/pg/scalegrid · internal/scopesourcecensus
 //
 // Цена решения названа честно: у этих двух перевод на порт — церемония, новых
 // свойств он не даёт. Платится она за то, что граница популяции не зависит от
@@ -90,10 +90,12 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // authzmapImportPath — импортируемый пакет-литерал.
-const authzmapImportPath = "github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+const authzmapImportPath = "github.com/PRO-Robotech/kaname/internal/authzmap"
 
 // iamTreeRel — поддерево, которое обходит гейт: прод-код сервиса ЦЕЛИКОМ, а не
 // только достижимый из его бинаря (почему именно так — врезка «Популяция ШИРЕ
@@ -288,7 +290,14 @@ func authzmapUses(root string, files []string, want map[string]bool) (
 // сервиса.
 func authzmapImportersOfTree(root string, want map[string]bool) (
 	uses []catalogFactUse, importers int, err error) {
-	files, ferr := treecorpus.UnderWithSuffix(filepath.Join(root, iamTreeRel), ".go")
+	// Координата приводится к ПОСАДКЕ по НАЗВАННОМУ корню: помощник не получает
+	// `*testing.T`, поэтому третий исход он возвращает ошибкой, а не пропуском —
+	// решает его вызывающий.
+	dir, perr := treeposture.PathUnder(root, iamTreeRel)
+	if perr != nil {
+		return nil, 0, perr
+	}
+	files, ferr := treecorpus.UnderWithSuffix(dir, ".go")
 	if ferr != nil {
 		return nil, 0, ferr
 	}

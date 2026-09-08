@@ -1,0 +1,279 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+// list_vlist_union_test.go — what makes a project a member of a List page.
+//
+// A row belongs on the page exactly when its holder may read that row by id. The
+// gateway gates ProjectService/Get on `v_get`, so that is the page predicate too
+// (internal/authzfilter). The owner-via-parent-Account branch is separate and
+// untouched: it never asks the relation store at all.
+//
+//	visible(project) = owned-via-account ∪ Check(subject, "v_get", "project:"+id)
+//
+// It used to union `viewer ∪ v_list`, argued as "the project shows up in the
+// selector while a Check on a resource INSIDE it still denies". The second half of
+// that sentence is true and irrelevant to the first: List returns the same Project
+// message Get does, so a row on the page IS the project's own contents, and the tier
+// holder was handed a project its own Get refused. Asserted in both directions below.
+//
+// Both halves of that union were spelled as enumerations of the type ("give me every
+// project this subject may see"). That door is gone with the external relation engine
+// (stage S6) and clients.RelationQueries carries no method that enumerates objects —
+// the reason being that the enumeration was capped server-side with no continuation
+// token, so past that population a tenant's own row became permanently invisible while
+// the row and the grant both existed.
+
+package project
+
+import (
+	"context"
+	stderrors "errors"
+	"fmt"
+	"sync"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/PRO-Robotech/kacho/pkg/operations"
+
+	"github.com/PRO-Robotech/kaname/internal/authzfilter"
+	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	repoproject "github.com/PRO-Robotech/kaname/internal/repo/kaname/project"
+)
+
+// ───────────── relation-aware stub ──────────────────────────────────────────
+
+// projUnionFGAStub — stub clients.RelationQueries, keyed by relation so a test can
+// grant one relation and assert what the page does with it.
+//
+// The name says "Union" for historical reasons and does NOT describe the predicate:
+// the page is judged by ONE relation, `v_get` (see the file header). Renaming a live
+// stub is churn; what was false lived in the comments, and that is what is corrected.
+//
+// It carried a per-relation call counter that nothing in this file ever read. It was
+// written by an enumeration door which no longer exists, and by the per-object door,
+// and consulted by neither — a counter nobody reads states nothing, so it is removed
+// rather than left looking like evidence.
+type projUnionFGAStub struct {
+	clients.RelationQueries
+	mu    sync.Mutex                     // the per-object Check port is called concurrently
+	idsBy map[string]map[string][]string // [relation][subject] = ids
+	err   error
+}
+
+func newProjUnionFGAStub() *projUnionFGAStub {
+	return &projUnionFGAStub{idsBy: map[string]map[string][]string{}}
+}
+
+func (s *projUnionFGAStub) set(relation, subject string, ids []string) {
+	if s.idsBy[relation] == nil {
+		s.idsBy[relation] = map[string][]string{}
+	}
+	s.idsBy[relation][subject] = ids
+}
+
+// CheckWithContext — the DIRECT per-object question the use-case asks
+// (internal/authzfilter), answering from the seeded (relation, subject) id-sets, so
+// these tests' fixtures and intent are unchanged by the removal of the enumeration
+// door.
+func (s *projUnionFGAStub) CheckWithContext(_ context.Context, subject, relation, object string,
+	_ map[string]any) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return false, s.err
+	}
+	id := fgaObjectID(object)
+	for _, got := range s.idsBy[relation][subject] {
+		if got == id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// The page cannot be WIDER than the read: a non-owner holding the tier (or the
+// object-only `v_list` selector grant) must not be handed a project whose Get it
+// cannot obtain. Paired with the positive arm, because a lone "is hidden" goes green
+// most convincingly when the filter shows nothing at all.
+func TestListProjects_PageMembershipRequiresReadRelation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		relation string
+		wantSeen []string
+	}{
+		{name: "tier only — Get would refuse it", relation: "viewer", wantSeen: nil},
+		{name: "object-only selector grant", relation: "v_list", wantSeen: nil},
+		{name: "the relation that gates Get", relation: "v_get", wantSeen: []string{"prj-a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newListFakeRepo()
+			seedAccount(repo, "acc-other", "usr-other00000000000") // usr-u1 does NOT own it
+			seedProject(repo, "prj-a", "acc-other")
+			seedProject(repo, "prj-b", "acc-other")
+
+			fga := newProjUnionFGAStub()
+			fga.set(tc.relation, "user:usr-u1", []string{"prj-a"})
+
+			uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
+
+			out, _, err := uc.Execute(ctxAs("usr-u1"), repoproject.ListFilter{PageSize: 100})
+			require.NoError(t, err)
+			require.ElementsMatch(t, tc.wantSeen, projIDs(out),
+				"the page must name exactly the projects this caller may read by id")
+		})
+	}
+}
+
+// Ownership is a floor that does not go through the relation store at all, so it
+// survives the narrowing — and a granted project still appears exactly once when it
+// is also owned.
+func TestListProjects_OwnerFloorAndReadRelationDedup(t *testing.T) {
+	repo := newListFakeRepo()
+	seedAccount(repo, "acc-alice", "usr-alice") // alice OWNS this
+	seedAccount(repo, "acc-bob", "usr-bob")
+	seedProject(repo, "prj-alice-1", "acc-alice") // owned AND granted → dedup
+	seedProject(repo, "prj-alice-2", "acc-alice") // owned only, no grant at all
+	seedProject(repo, "prj-bob-1", "acc-bob")     // granted
+	seedProject(repo, "prj-bob-2", "acc-bob")     // hidden
+
+	fga := newProjUnionFGAStub()
+	fga.set("v_get", "user:usr-alice", []string{"prj-bob-1", "prj-alice-1"})
+
+	uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
+
+	out, _, err := uc.Execute(ctxAs("usr-alice"), repoproject.ListFilter{PageSize: 100})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"prj-alice-1", "prj-alice-2", "prj-bob-1"}, projIDs(out),
+		"owned projects stay visible without any relation tuple; a granted one appears once; "+
+			"prj-bob-2 stays hidden")
+}
+
+// P7-D — no-leak: a project in none of the three sets stays hidden.
+func TestListProjects_P7_Foreign_NoLeak(t *testing.T) {
+	repo := newListFakeRepo()
+	seedAccount(repo, "acc-other", "usr-other00000000000")
+	seedProject(repo, "prj-a", "acc-other")
+	seedProject(repo, "prj-foreign", "acc-other")
+
+	fga := newProjUnionFGAStub()
+	fga.set("v_list", "user:usr-u1", []string{"prj-a"})
+	fga.set("viewer", "user:usr-u1", []string{"prj-a"})
+
+	uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
+
+	out, _, err := uc.Execute(ctxAs("usr-u1"), repoproject.ListFilter{PageSize: 100})
+	require.NoError(t, err)
+	require.NotContains(t, projIDs(out), "prj-foreign",
+		"project in neither owner/viewer/v_list set must stay hidden (no-leak)")
+}
+
+// A machine principal is filtered by the SAME relation as a human one — there is no
+// tier back door for service accounts.
+//
+// This replaces a case that asserted an "operator system_viewer floor": it stubbed a
+// `viewer` grant on every project and concluded kacho-vpc-operator sees them all. The
+// seed produces no such grant. The operator's backing role authors its iam rule on the
+// resource name `projectses`, which the closed object-type table does not carry
+// (`iam.project` does), so that rule resolves to no FGA type and materializes no tuple
+// at all — the floor the case described was a property of its own fixture, not of the
+// deployment. The operator's project fan-out is tracked separately; it is a dead grant,
+// not a predicate this page may widen for.
+func TestListProjects_ServiceAccountFilteredByTheSameRelation(t *testing.T) {
+	op := "sva-operator"
+
+	for _, tc := range []struct {
+		relation string
+		wantSeen []string
+	}{
+		{relation: "viewer", wantSeen: nil},
+		{relation: "v_get", wantSeen: []string{"prj-1", "prj-2"}},
+	} {
+		t.Run(tc.relation, func(t *testing.T) {
+			repo := newListFakeRepo()
+			seedAccount(repo, "acc-1", "usr-u1") // the operator owns nothing
+			seedProject(repo, "prj-1", "acc-1")
+			seedProject(repo, "prj-2", "acc-1")
+
+			fga := newProjUnionFGAStub()
+			fga.set(tc.relation, "service_account:"+op, []string{"prj-1", "prj-2"})
+
+			uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
+
+			out, _, err := uc.Execute(ctxSAProj(op), repoproject.ListFilter{PageSize: 100})
+			require.NoError(t, err)
+			require.ElementsMatch(t, tc.wantSeen, projIDs(out),
+				"a service account is subject to the read relation exactly as a user is")
+		})
+	}
+}
+
+// P7-F — fail-closed: a question that could not be answered → Unavailable.
+//
+// "Could not ask" and "not allowed" are different worlds: a page returned here would
+// pass a database that did not answer off as a lawful denial.
+func TestListProjects_P7_FGAUnavailable_FailClosed(t *testing.T) {
+	repo := newListFakeRepo()
+	seedAccount(repo, "acc-other", "usr-other00000000000")
+	seedProject(repo, "prj-a", "acc-other")
+
+	fga := newProjUnionFGAStub()
+	fga.err = stderrors.New("relation form did not answer: connection closed")
+
+	uc := NewListProjectsUseCase(repo).WithRelationStore(fga)
+
+	out, _, err := uc.Execute(ctxAs("usr-u1"), repoproject.ListFilter{PageSize: 100})
+	require.Error(t, err)
+	require.Empty(t, out)
+	st, ok := status.FromError(err)
+	require.True(t, ok, "want grpc status; got %v", err)
+	require.Equal(t, codes.Unavailable, st.Code(),
+		"an unanswered question → UNAVAILABLE fail-closed (INV-7)")
+}
+
+// projIDs / ctxSAProj — local helpers (the SEC-L test file owns the user ctx
+// helper; add SA + id-extractor here to avoid touching existing files).
+func projIDs(out []domain.Project) []string {
+	ids := make([]string, 0, len(out))
+	for _, p := range out {
+		ids = append(ids, string(p.ID))
+	}
+	return ids
+}
+
+func ctxSAProj(said string) context.Context {
+	return operations.WithPrincipal(context.Background(), operations.Principal{Type: "service_account", ID: said})
+}
+
+// BatchCheckWithContext — the batched door onto the SAME oracle CheckWithContext
+// answers from, so a verdict cannot depend on which door the filter chose.
+//
+// It is not optional politeness: authzfilter takes its batched path whenever the
+// checker offers this method, so a stub that omitted it would leave every test in
+// this file exercising a code path production does not take.
+//
+// The refusal above authzfilter.MaxBatchChecksPerRequest keeps the stub from being
+// SLACKER than the declaration it stands behind: that constant is the partition size
+// authzfilter itself declares and splits a page against, so a filter that stopped
+// honouring its own declaration goes red here instead of quietly changing the shape
+// of the request. An error, never a trim — a short answer is indistinguishable from
+// a page of denials.
+func (s *projUnionFGAStub) BatchCheckWithContext(ctx context.Context, subject, relation string,
+	objects []string, condCtx map[string]any) ([]bool, error) {
+	if len(objects) > authzfilter.MaxBatchChecksPerRequest {
+		return nil, fmt.Errorf("batch of %d objects exceeds the declared partition size %d",
+			len(objects), authzfilter.MaxBatchChecksPerRequest)
+	}
+	out := make([]bool, len(objects))
+	for i, object := range objects {
+		allowed, err := s.CheckWithContext(ctx, subject, relation, object, condCtx)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = allowed
+	}
+	return out, nil
+}

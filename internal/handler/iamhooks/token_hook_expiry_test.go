@@ -26,10 +26,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // expirySAPort — SA-key mapping resolved by Hydra client_id (the
@@ -171,7 +171,7 @@ func TestTokenHook_LiveSAKey_Issues(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	claims, ok := resp.Session.AccessToken["ext_claims"].(map[string]any)
 	require.True(t, ok, "a live key must still enrich")
-	assert.Equal(t, "sva_01abcdefghjkmnpqr", claims["kacho_principal_id"])
+	assert.Equal(t, "sva_01abcdefghjkmnpqr", claims["kaname_principal_id"])
 	assert.Contains(t, auditEventTypes(audit.Events()), "authn.token.issued")
 }
 
@@ -186,5 +186,5 @@ func TestTokenHook_NonExpiringSAKey_Issues(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code,
 		"a key with no stated expiry must keep working (bootstrap-admin / pre-TTL rows)")
-	assert.Contains(t, rec.Body.String(), "kacho_principal_id")
+	assert.Contains(t, rec.Body.String(), "kaname_principal_id")
 }

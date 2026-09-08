@@ -20,11 +20,11 @@ import (
 
 const (
 	// synthQueueMigration — миграция, объявляющая очередь вместе с колонкой.
-	synthQueueMigration = "CREATE TABLE kacho_iam.invite_mail_outbox (\n" +
+	synthQueueMigration = "CREATE TABLE kaname.invite_mail_outbox (\n" +
 		"    id bigserial PRIMARY KEY,\n" +
 		"    sent_at timestamptz\n);\n"
 	// synthOtherMigration — соседняя миграция без предмета.
-	synthOtherMigration = "ALTER TABLE kacho_iam.users ADD COLUMN nickname text;\n"
+	synthOtherMigration = "ALTER TABLE kaname.users ADD COLUMN nickname text;\n"
 	// synthWiring — провязка уборки для этой очереди.
 	synthWiring = "outbox.StartQueueRetentionSweep(ctx, pool, outbox.QueueRetentionConfig{\n" +
 		"\tTable: clients.InviteMailTable,\n})\n"

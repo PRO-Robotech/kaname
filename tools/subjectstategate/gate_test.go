@@ -18,7 +18,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/tools/subjectstategate"
+	"github.com/PRO-Robotech/kaname/tools/subjectstategate"
 )
 
 // iamRoot — дерево, которое судит гейт (пакет лежит в services/iam/tools/…).

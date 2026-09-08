@@ -8,13 +8,14 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // singleproducer_test.go — у проверки манифестов ОДНА композиция и тонкие
@@ -72,18 +73,28 @@ import (
 // «Ноль лишних вызывающих» обязано быть отличимо от «ноль прочитанных файлов»:
 // пустой обход — находка, а не успех.
 
-// entryPoints — точки входа, у каждой из которых прод-вызывающий ровно один.
-var entryPoints = map[string]string{
-	"CheckTree":              "services/iam/internal/manifestcheckrun",
-	"CheckTreeForGeneration": "services/iam/internal/authzmapgen",
+// entryPointsUnder — точки входа, у каждой из которых прод-вызывающий ровно один.
+//
+// Координаты СКЛАДЫВАЮТСЯ от приставки, а не выписываются: в монорепо файлы
+// модуля лежат под `services/iam`, в самостоятельном клоне — от его собственного
+// корня. Выписанная координата верна ровно для одной посадки и в другой не
+// совпадает ни с одной записью состава — молча, то есть «ноль находок» стало бы
+// неотличимо от «ноль прочитанного».
+func entryPointsUnder(prefix string) map[string]string {
+	return map[string]string{
+		"CheckTree":              platformtree.Under(prefix, "internal/manifestcheckrun"),
+		"CheckTreeForGeneration": platformtree.Under(prefix, "internal/authzmapgen"),
+	}
 }
 
 // composition — сама композиция и те, кому позволено её звать.
 const compositionCall = "Run"
 
-var compositionCallers = []string{
-	"services/iam/tools/modulemanifestcheck",
-	"services/iam/cmd/iamctl",
+func compositionCallersUnder(prefix string) []string {
+	return []string{
+		platformtree.Under(prefix, "tools/modulemanifestcheck"),
+		platformtree.Under(prefix, "cmd/iamctl"),
+	}
 }
 
 type callSite struct {
@@ -154,26 +165,14 @@ func walkCalls(t *testing.T, tree *treecorpus.Tree, want map[string]string) (map
 	return found, filesRead
 }
 
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	// Пакет лежит на четыре уровня ниже корня монорепо.
-	root, err := filepath.Abs("../../../..")
-	if err != nil {
-		t.Fatalf("обход НЕ ИСПОЛНЕН: корень не разрешён: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
-		t.Fatalf("обход НЕ ИСПОЛНЕН: корень %s не похож на монорепо: %v", root, err)
-	}
-	return root
-}
-
 // auditCallers — сами утверждения, отдающие НАХОДКИ, а не роняющие пробу.
 //
 // Вынесены из пробы именно затем, чтобы гейт можно было подать синтетическому
 // дереву: проверка, которую нельзя позвать на подготовленном входе, свою
 // способность упасть не доказывает ничем.
-func auditCallers(t *testing.T, tree *treecorpus.Tree) (findings []string, filesRead int) {
+func auditCallers(t *testing.T, tree *treecorpus.Tree, prefix string) (findings []string, filesRead int) {
 	t.Helper()
+	entryPoints := entryPointsUnder(prefix)
 	want := map[string]string{compositionCall: ""}
 	for name, dir := range entryPoints {
 		want[name] = dir
@@ -202,7 +201,7 @@ func auditCallers(t *testing.T, tree *treecorpus.Tree) (findings []string, files
 		gotCallers = append(gotCallers, s.pkgDir)
 	}
 	sort.Strings(gotCallers)
-	wantCallers := append([]string(nil), compositionCallers...)
+	wantCallers := append([]string(nil), compositionCallersUnder(prefix)...)
 	sort.Strings(wantCallers)
 	if strings.Join(gotCallers, ",") != strings.Join(wantCallers, ",") {
 		findings = append(findings, fmt.Sprintf(
@@ -224,14 +223,16 @@ func sortedKeys(m map[string]string) []string {
 }
 
 func TestManifestCheckKeepsOneCompositionAndTwoThinCallers(t *testing.T) {
-	tree, err := treecorpus.NewTree(repoRoot(t))
+	root, prefix := platformtree.RequireCorpus(t)
+	tree, err := treecorpus.NewTree(root)
 	if err != nil {
 		t.Fatalf("обход НЕ ИСПОЛНЕН: состав дерева не прочитан: %v", err)
 	}
-	findings, filesRead := auditCallers(t, tree)
+	findings, filesRead := auditCallers(t, tree, prefix)
 
-	t.Logf("перепись: прочитано файлов Go %d · точек входа %d · находок %d",
-		filesRead, len(entryPoints), len(findings))
+	t.Logf("перепись: корень обхода %s · приставка модуля %q · прочитано файлов Go %d · "+
+		"точек входа %d · находок %d",
+		root, prefix, filesRead, len(entryPointsUnder(prefix)), len(findings))
 	if filesRead == 0 {
 		t.Fatal("обход прочитал НОЛЬ файлов — вердикт беспредметен")
 	}

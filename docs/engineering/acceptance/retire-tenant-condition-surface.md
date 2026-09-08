@@ -6,9 +6,34 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 # Приёмка: ретайр тенантской поверхности условного доступа
 
 - **Статус:** APPROVED (самостоятельная рецензия по чек-листу — раздел 8), реализовано
+- **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Правок 3, строк 4: `5504f44a7f` каталоги службы (2)
+  · `b81adf2760` имя службы (1) · `93ef852fe9` идентификатор лицензии (1).
+  Дельта целиком — подстановка токена (`kacho→kaname` · `kacho-iam→kaname` ·
+  `BUSL-1.1→AGPL-3.0-or-later`); непарных строк 0, пар с изменившимся числом
+  токенов 0; ни один сценарий, производитель, признак готовности и клауза не
+  тронуты. Одобрение относится к **содержимому**, а не к имени файла: APPROVED
+  выше есть вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю
+  редакцию ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение,
+  замер и цена обоих отвергнутых исходов —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 - **Ревизия измерения:** `27cc2c4e` (ствол `redesign/integration`)
 - **Тип изменения:** ломающее изменение публичного контракта (снятие поверхности)
-- **Сервис:** `kacho-iam`; затрагивает `gateway`, `proto`, `pkg/api`, e2e-набор iam
+- **Сервис:** `kaname`; затрагивает `gateway`, `proto`, `pkg/api`, e2e-набор iam
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2212`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **2**. Правка одна и
+  механическая — приставка пути контракта `proto/kacho/cloud/iam/` →
+  `proto/kaname/cloud/iam/`: домен доступа переехал (`d46aaa7280`), и прежний
+  корень в дереве **не существует** (`git ls-files 'proto/kacho/cloud/iam/**'`
+  → 0). До правки координата не резолвилась, то есть **молчала**: читатель уходил
+  за ней и не находил. **НЕ тронуты** ни один сценарий, производитель, признак
+  готовности, клауза и ни одно число: непарных строк 0, пар с изменившимся числом
+  токенов 0. Записи замера, привязанные к ревизии, где прежний путь ЖИВ, оставлены
+  как есть намеренно — их перечень и предикат в теле задачи. Одобрение относится к
+  **содержимому**, а не к имени файла: APPROVED выше есть вердикт о редакции,
+  прочитанной проверяющим. Вердикт на нынешнюю редакцию ставит
+  `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 
 ---
 
@@ -51,7 +76,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | proto | `condition.proto`, `conditions_service.proto`, `access_binding_condition.proto` | 3 файла, 401 строка |
 | proto | `AccessBinding.condition_id = 9`, `AccessBinding.builtin_condition = 14` → `reserved` (номер **и** имя) | 2 поля |
 | gen | `pkg/api/.../condition*.pb.go`, `conditions_service*.pb.go` | перегенерация |
-| Go (iam) | пакет `api/conditions`, `service/conditions_*.go`, `repo/kacho/pg/conditions_repo.go`, `repo/kacho/condition/`, `domain/condition.go`, `domain/access_binding_condition.go` | 2013 строк прод-кода |
+| Go (iam) | пакет `api/conditions`, `service/conditions_*.go`, `repo/kaname/pg/conditions_repo.go`, `repo/kaname/condition/`, `domain/condition.go`, `domain/access_binding_condition.go` | 2013 строк прод-кода |
 | Go (iam) | `domain.AccessBinding.ConditionID`, проекция в ответ, колонка в `INSERT`/`SELECT` привязки | 1 поле, 3 места |
 | БД | новая миграция `0075`: `DROP TABLE conditions`, `DROP TABLE access_binding_conditions`, `ALTER TABLE access_bindings DROP COLUMN condition_id`, снятие триггера и функции из `0048` | 2 таблицы, 1 колонка, 1 триггер, 1 функция |
 | БД | объявления в `dropguard.json` с ожидаемым числом строк | 2 записи, `expect_rows: 0` |
@@ -82,7 +107,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 ## 4. Что остаётся живым (граница; нарушение границы — провал приёмки)
 
-- `condition …` в `proto/kacho/cloud/iam/v1/fga_model.fga` — **6 определений**, и ограничения типа `… with mfa_fresh` — **4 штуки** (по вхождениям, не по строкам — см. предупреждение к GWT-8);
+- `condition …` в `proto/kaname/cloud/iam/v1/fga_model.fga` — **6 определений**, и ограничения типа `… with mfa_fresh` — **4 штуки** (по вхождениям, не по строкам — см. предупреждение к GWT-8);
 - перечисление `BuiltinCondition` (`builtin_condition.proto`) — его читает `TupleCondition.builtin` внутреннего листенера;
 - `TupleCondition` / `Tuple.condition` в `internal_authorize_service.proto` и их обработчики (`internal_authorize/handler.go`, `clients/openfga_read.go`, `authztypes.TupleConditionRef`, `service/fga_tuple_writer.go`);
 - сбор контекста условия на краю (`gateway/internal/middleware/context_extractor.go`);
@@ -110,7 +135,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 >
 > | пункт §4 | состояние | предикат |
 > |---|---|---|
-> | `condition …` в модели прав | **ЖИВ** — 6 определений, 4 использования `… with mfa_fresh` (пятое вхождение — прозаический комментарий в самой модели, см. предупреждение к GWT-8) | `grep -c '^\s*condition ' proto/kacho/cloud/iam/v1/fga_model.fga` |
+> | `condition …` в модели прав | **ЖИВ** — 6 определений, 4 использования `… with mfa_fresh` (пятое вхождение — прозаический комментарий в самой модели, см. предупреждение к GWT-8) | `grep -c '^\s*condition ' proto/kaname/cloud/iam/v1/fga_model.fga` |
 > | перечисление `BuiltinCondition` | **ИСТЁК** — контракта нет; имя встречается только внутри гейта `internal/repohygiene/tenantconditionsurface_test.go`, где оно стоит **отрицанием** («не должно быть в контракте»), а не объявлением | `grep -rl BuiltinCondition --include='*.proto' .` → пусто |
 > | `TupleCondition` / `Tuple.condition` и их обработчики | **ИСТЁК** — контракта внутреннего листенера и обработчиков нет. Одноимённые Go-типы остаются в `services/iam/internal/clients/relations.go` и `internal/authztypes/authztypes.go`; это остаток на стороне кода, а не поверхность, которую охраняла граница | `grep -rl TupleCondition --include='*.proto' .` → пусто |
 > | сбор контекста условия на краю | **ЖИВ** | `ls gateway/internal/middleware/context_extractor.go` |
@@ -254,7 +279,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 **Прогоны:** `go build ./...` и `go vet ./...` зелёные;
 `go test ./internal/...` зелёный (215 с); `go test ./gateway/...` зелёный;
 `go test -short ./services/iam/...` зелёный; интеграционные пакеты iam
-(`repo/kacho/pg`, `authzcascade`, `authzmap`, `migrations`, `service`, `cmd`,
+(`repo/kaname/pg`, `authzcascade`, `authzmap`, `migrations`, `service`, `cmd`,
 `apps/...`) зелёные, кроме одного пре-существующего красного (ниже).
 
 ## 7б. Открытое — числом

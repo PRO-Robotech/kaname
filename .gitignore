@@ -6,8 +6,8 @@ bin/
 dist/
 coverage.out
 coverage-full.out
-/kacho-iam
-/kacho-migrator
+/kaname
+/kaname-migrator
 
 # Newman snapshots and run logs (audit trail, локально, не commit)
 tests/newman/out/snap*-local-*.json
@@ -43,3 +43,7 @@ CLAUDE.md
 AGENTS.md
 .codex/
 .agents/
+
+# Кэш golangci-lint: якорь — каталог модуля (Makefile, GOLANGCI_LINT_CACHE),
+# потому что модуль стоит и самостоятельным клоном, где корня монорепо нет.
+/.cache/

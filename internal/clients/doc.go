@@ -1,9 +1,9 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package clients — peer-gRPC clients for kacho-iam.
+// Package clients — peer-gRPC clients for kaname.
 //
-// kacho-iam is the leaf-owner of Account/Project/User and does not initiate
+// kaname is the leaf-owner of Account/Project/User and does not initiate
 // peer-domain calls itself. The clients here are dependencies on adjacent
 // systems (OIDC providers, HSM/PKCS#11, S3 report-store, etc.) — see
 // individual files for each client's scope. A client that pushed cache

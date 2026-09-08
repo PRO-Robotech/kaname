@@ -23,9 +23,9 @@ import (
 	"errors"
 	"fmt"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
+	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // ── Hydra token exchange ────────────────────────────────────────────────────

@@ -49,8 +49,8 @@ import (
 
 	authzv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/iam/authz/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/pkg/authz/catalogderive"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 )
 
 // probeID — правдоподобный идентификатор области, подставляемый в запрос.

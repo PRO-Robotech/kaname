@@ -34,8 +34,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 const (
@@ -152,8 +152,8 @@ func TestEnrichClaims_SAKey_NotYetExpired_Mints(t *testing.T) {
 	claims, _, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
 
 	require.NoError(t, err)
-	assert.Equal(t, "service_account", claims["kacho_principal_type"])
-	assert.Equal(t, expirySvaID, claims["kacho_principal_id"])
+	assert.Equal(t, "service_account", claims["kaname_principal_type"])
+	assert.Equal(t, expirySvaID, claims["kaname_principal_id"])
 }
 
 // TestEnrichClaims_SAKey_NoExpiry_Mints — NULL expires_at means non-expiring,
@@ -166,7 +166,7 @@ func TestEnrichClaims_SAKey_NoExpiry_Mints(t *testing.T) {
 	claims, _, err := svc.EnrichClaims(context.Background(), expiryClientID, TokenHookContext{ACR: "0"})
 
 	require.NoError(t, err, "a NULL expiry is non-expiring — the bootstrap-admin row shape")
-	assert.Equal(t, expirySvaID, claims["kacho_principal_id"])
+	assert.Equal(t, expirySvaID, claims["kaname_principal_id"])
 }
 
 // TestEnrichClaims_FederatedSAKey_Expired_Denied — the federation-in branch
@@ -255,7 +255,7 @@ func TestEnrichClaims_UserToken_NoExpiry_Mints(t *testing.T) {
 	claims, _, err := svc.EnrichClaims(context.Background(), "client-abc", TokenHookContext{})
 
 	require.NoError(t, err)
-	assert.Equal(t, "user", claims["kacho_principal_type"])
+	assert.Equal(t, "user", claims["kaname_principal_type"])
 }
 
 // TestEnrichClaims_ExpiredSAKey_DoesNotFallThroughToUserPath — the denial must

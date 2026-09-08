@@ -14,7 +14,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/keywrap"
+	"github.com/PRO-Robotech/kaname/internal/keywrap"
 )
 
 func key(b byte) []byte { return bytes.Repeat([]byte{b}, keywrap.KeySize) }

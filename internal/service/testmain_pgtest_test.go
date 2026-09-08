@@ -8,7 +8,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // TestMain выдаёт пакету ОДИН Postgres на весь тестовый бинарь: каждая проба

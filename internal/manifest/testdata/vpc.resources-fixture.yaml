@@ -124,7 +124,7 @@ resources:
       - before: cluster
         text: |
           # Административный ресурс с якорем на кластере: его RPC гейтятся прямо на
-          # cluster:cluster_kacho_root#system_admin, поэтому пообъектного указателя на
+          # cluster:cluster_root#system_admin, поэтому пообъектного указателя на
           # него не пишет никто.
     # Состав субъектов и набор ярусов у административного ресурса УЖЕ общего:
     # группы среди субъектов нет, яруса editor нет вовсе. Умолчание здесь
@@ -195,5 +195,5 @@ seed:
         - {type: group, name: vpc-internal-consumers}
       roleId: vpc.internal_consumer
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope

@@ -16,7 +16,7 @@
 // До C4 эти web_hook'и POST'или на gRPC :9091 c REST-style путем
 // `/iam/v1/internal/users:upsertFromIdentity` — путь, которого на чистом gRPC
 // (HTTP/2) listener не существует → каждый hook молча падал → пользователь
-// регистрировался, но никогда не зеркалился в kacho_iam (нет project/
+// регистрировался, но никогда не зеркалился в kaname (нет project/
 // namespace). C4 переводит provisioning на :9092 HTTP hooks listener
 // (Hydra-hook'и уже там) и вызывает use-case in-process.
 package iamhooks
@@ -42,7 +42,7 @@ type ProvisionInput struct {
 }
 
 // UserProvisioner — narrow port. Реализуется adapter'ом из
-// cmd/kacho-iam, который вызывает UpsertFromIdentityUseCase.Execute. Handler
+// cmd/kaname, который вызывает UpsertFromIdentityUseCase.Execute. Handler
 // не зависит от transport / use-case / operations-типов.
 type UserProvisioner interface {
 	Provision(ctx context.Context, in ProvisionInput) error

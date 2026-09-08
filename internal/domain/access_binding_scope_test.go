@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 func TestScope_String(t *testing.T) {
@@ -30,7 +30,7 @@ func TestScope_String(t *testing.T) {
 }
 
 func TestScope_ValidateAgainst_Matched(t *testing.T) {
-	require.NoError(t, domain.ScopeCluster.ValidateAgainst("cluster", "cluster_kacho_root"))
+	require.NoError(t, domain.ScopeCluster.ValidateAgainst("cluster", "cluster_root"))
 	require.NoError(t, domain.ScopeAccount.ValidateAgainst("account", "acc00000000000000a001"))
 	require.NoError(t, domain.ScopeProject.ValidateAgainst("project", "prj00000000000000p001"))
 }
@@ -43,9 +43,9 @@ func TestScope_ValidateAgainst_Mismatched(t *testing.T) {
 		{domain.ScopeCluster, "project", "prj01"},
 		{domain.ScopeCluster, "cluster", "wrong_root"},
 		{domain.ScopeAccount, "account", "wrong-prefix"},
-		{domain.ScopeAccount, "cluster", "cluster_kacho_root"},
+		{domain.ScopeAccount, "cluster", "cluster_root"},
 		{domain.ScopeProject, "project", "acc00000000000000a001"},
-		{domain.ScopeProject, "cluster", "cluster_kacho_root"},
+		{domain.ScopeProject, "cluster", "cluster_root"},
 		{domain.ScopeUnspecified, "account", "acc01"},
 	}
 	for _, tc := range cases {

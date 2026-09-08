@@ -11,7 +11,7 @@ package domain_test
 // заблокированный оказался бы заперт навсегда.
 //
 // ЧТО ИЗМЕНИЛОСЬ. Писатель запрета теперь СУЩЕСТВУЕТ — `UserService.Block` /
-// `Unblock` (use-case `internal/apps/kacho/api/user/set_blocked.go`, запись
+// `Unblock` (use-case `internal/apps/kaname/api/user/set_blocked.go`, запись
 // `userWriter.SetInviteStatus`). Прежняя редакция этого комментария утверждала,
 // что продуктового пути нет вовсе; с посадкой действий это стало бы ложью, а
 // комментарий, противоречащий коду, — ловушка: следующий читатель «починит» код
@@ -52,8 +52,8 @@ import (
 // Запись без такой ссылки смысла не имеет: гейт существует ровно для того, чтобы
 // запрет и путь его снятия появлялись вместе.
 var blockedWriters = map[string]string{
-	"../../internal/repo/kacho/pg/user_repo.go": "UserService.Unblock — административное снятие " +
-		"(use-case services/iam/internal/apps/kacho/api/user/set_blocked.go, " +
+	"../../internal/repo/kaname/pg/user_repo.go": "UserService.Unblock — административное снятие " +
+		"(use-case services/iam/internal/apps/kaname/api/user/set_blocked.go, " +
 		"право identity_suspender@iam_user = админ аккаунта + каскад облака). Писатель — " +
 		"userWriter.SetInviteStatus; тот же метод обслуживает и снятие, поэтому " +
 		"односторонним контроль быть не может by construction.",
@@ -150,11 +150,11 @@ func TestBlockedState_HasNoProductWriterWithoutALiftPath(t *testing.T) {
 	require.Empty(t, found,
 		"НЕОБЪЯВЛЕННЫЙ писатель состояния членства: %v\n\n"+
 			"Самостоятельное восстановление пароля запрет НЕ снимает (осознанное решение —\n"+
-			"см. internal/apps/kacho/api/user/internal_on_recovery.go). Значит у КАЖДОГО пути\n"+
+			"см. internal/apps/kaname/api/user/internal_on_recovery.go). Значит у КАЖДОГО пути\n"+
 			"записи обязан быть административный путь снятия, иначе заблокированный\n"+
 			"оказывается заперт навсегда.\n\n"+
 			"Форму бери с уже посаженной пары UserService.Block/Unblock\n"+
-			"(services/iam/internal/apps/kacho/api/user/set_blocked.go): ДЕЙСТВИЕ с операцией,\n"+
+			"(services/iam/internal/apps/kaname/api/user/set_blocked.go): ДЕЙСТВИЕ с операцией,\n"+
 			"а не поле маски; идемпотентно по состоянию, а не по переходу; событие в аудит;\n"+
 			"ярус повышенной аутентификации. Затем впиши файл в blockedWriters вместе со\n"+
 			"ссылкой на путь снятия — объявление и есть то, что этот гейт требует.", found)
@@ -236,7 +236,7 @@ func TestBlockedState_GateSeesAnInjectedWriter(t *testing.T) {
 	// действительно пишет колонку этой конструкцией. Переедет писатель на другую
 	// форму — маркер станет мёртвым, а гейт снова слепым, и заметить это должен
 	// он сам, а не следующий инцидент.
-	body, err := os.ReadFile("../../internal/repo/kacho/pg/user_repo.go")
+	body, err := os.ReadFile("../../internal/repo/kaname/pg/user_repo.go")
 	require.NoError(t, err, "боевой писатель состояния обязан существовать по этому пути")
 	require.Contains(t, string(body), "SET invite_status =",
 		"маркер формы записи обоснован тем, что писатель пользуется именно этой "+

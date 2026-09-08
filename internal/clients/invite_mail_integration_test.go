@@ -19,7 +19,7 @@
 //	                                     (здесь) — строка отравляется, а не крутится вечно;
 //	                                     сама величина приезжает из объявления и проверена
 //	                                     Test_InviteMailDrainerConfig_CarriesBothValuesSeparately
-//	                                     (services/iam/cmd/kacho-iam/invite_mail_wiring_test.go)
+//	                                     (services/iam/cmd/kaname/invite_mail_wiring_test.go)
 //	второго письма не порождается        Test_InviteMailQueue_SurvivesTheDeathOfTheProcessThatEmitted
 //	                                     (здесь) — отправка ровно одна, клетка «сдано» ровно одна,
 //	                                     и очередь ПУСТЕЕТ: непустевшая очередь и есть второе письмо
@@ -44,8 +44,8 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
 	outboxmetrics "github.com/PRO-Robotech/kacho/pkg/outbox/metrics"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/invite_mail_outbox"
+	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/invite_mail_outbox"
 )
 
 // Test_InviteMailIntent_IsAtomicWithTheInviteRow — MAIL-50, несущая половина.
@@ -99,19 +99,19 @@ func Test_InviteMailQueue_RefusesARowWithoutASubject(t *testing.T) {
 	pool := setupInviteMailDB(t)
 
 	_, err := pool.Exec(ctx,
-		`INSERT INTO kacho_iam.invite_mail_outbox (event_type, payload, resource_id)
+		`INSERT INTO kaname.invite_mail_outbox (event_type, payload, resource_id)
 		 VALUES ($1, $2, $3)`,
 		clients.EventInviteMailSend, `{"account_id":"acc-1"}`, "usr-1")
 	require.Error(t, err, "строка без адресата — отправка «никому», её записать нельзя")
 
 	_, err = pool.Exec(ctx,
-		`INSERT INTO kacho_iam.invite_mail_outbox (event_type, payload, resource_id)
+		`INSERT INTO kaname.invite_mail_outbox (event_type, payload, resource_id)
 		 VALUES ($1, $2, $3)`,
 		clients.EventInviteMailSend, `{"to":"a@example.invalid"}`, "")
 	require.Error(t, err, "пустой ключ партиции слил бы письма всех адресатов в одну партицию")
 
 	_, err = pool.Exec(ctx,
-		`INSERT INTO kacho_iam.invite_mail_outbox (event_type, payload, resource_id)
+		`INSERT INTO kaname.invite_mail_outbox (event_type, payload, resource_id)
 		 VALUES ($1, $2, $3)`,
 		"mail.invite.something_else", `{"to":"a@example.invalid"}`, "usr-1")
 	require.Error(t, err, "словарь видов события ЗАКРЫТ: опечатка отвергается на записи")
@@ -119,7 +119,7 @@ func Test_InviteMailQueue_RefusesARowWithoutASubject(t *testing.T) {
 	// Положительный контроль: законная строка проходит. Без него отрицания выше
 	// зеленели бы на таблице, которая не принимает ничего.
 	_, err = pool.Exec(ctx,
-		`INSERT INTO kacho_iam.invite_mail_outbox (event_type, payload, resource_id)
+		`INSERT INTO kaname.invite_mail_outbox (event_type, payload, resource_id)
 		 VALUES ($1, $2, $3)`,
 		clients.EventInviteMailSend, `{"to":"a@example.invalid","account_id":"acc-1"}`, "usr-1")
 	require.NoError(t, err, "положительный контроль: законная строка обязана записаться")
@@ -139,7 +139,7 @@ func Test_InviteMailQueue_OldestPendingAgeGrowsAndReturnsToZero(t *testing.T) {
 
 	// Недоставленное письмо, поставленное «давно».
 	_, err := pool.Exec(ctx,
-		`INSERT INTO kacho_iam.invite_mail_outbox (event_type, payload, resource_id, created_at)
+		`INSERT INTO kaname.invite_mail_outbox (event_type, payload, resource_id, created_at)
 		 VALUES ($1, $2, $3, now() - interval '600 seconds')`,
 		clients.EventInviteMailSend, `{"to":"stuck@example.invalid"}`, "usr-stuck")
 	require.NoError(t, err)
@@ -156,7 +156,7 @@ func Test_InviteMailQueue_OldestPendingAgeGrowsAndReturnsToZero(t *testing.T) {
 
 	// Письмо сдано — величина обязана вернуться к нулю.
 	_, err = pool.Exec(ctx,
-		`UPDATE kacho_iam.invite_mail_outbox SET sent_at = now() WHERE resource_id = $1`, "usr-stuck")
+		`UPDATE kaname.invite_mail_outbox SET sent_at = now() WHERE resource_id = $1`, "usr-stuck")
 	require.NoError(t, err)
 	require.NoError(t, col.Scan(ctx))
 	assert.Equal(t, float64(0), rec.OldestPendingAgeSeconds(clients.InviteMailTable),
@@ -319,7 +319,7 @@ func countInviteMail(ctx context.Context, t *testing.T, pool *pgxpool.Pool, user
 	t.Helper()
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.invite_mail_outbox WHERE resource_id = $1`, userID).Scan(&n))
+		`SELECT count(*) FROM kaname.invite_mail_outbox WHERE resource_id = $1`, userID).Scan(&n))
 	return n
 }
 
@@ -327,7 +327,7 @@ func countPendingInviteMail(ctx context.Context, t *testing.T, pool *pgxpool.Poo
 	t.Helper()
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kacho_iam.invite_mail_outbox WHERE sent_at IS NULL`).Scan(&n))
+		`SELECT count(*) FROM kaname.invite_mail_outbox WHERE sent_at IS NULL`).Scan(&n))
 	return n
 }
 
@@ -335,7 +335,7 @@ func attemptCount(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID 
 	t.Helper()
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT coalesce(max(attempt_count), 0) FROM kacho_iam.invite_mail_outbox WHERE resource_id = $1`,
+		`SELECT coalesce(max(attempt_count), 0) FROM kaname.invite_mail_outbox WHERE resource_id = $1`,
 		userID).Scan(&n))
 	return n
 }

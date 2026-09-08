@@ -28,14 +28,15 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // catalogProbeFile — файл проб ссылочной целостности каталога.
-const catalogProbeFile = "services/iam/internal/repo/kacho/pg/catalog_referent_integration_test.go"
+const catalogProbeFile = "services/iam/internal/repo/kaname/pg/catalog_referent_integration_test.go"
 
 // catalogMigrationRel — та же миграция, что сверяет гейт паритета.
 const catalogMigrationRel = catalogMigrationPath
@@ -95,8 +96,7 @@ func auditFixtureStrictness(filename, src string) (funcs, occurrences int, findi
 
 // TestIAMCT112_CatalogProbesDoNotDeferEverything — Т12.
 func TestIAMCT112_CatalogProbesDoNotDeferEverything(t *testing.T) {
-	root := catalogRepoRoot(t)
-	path := filepath.Join(root, catalogProbeFile)
+	path := platformtree.RequirePath(t, catalogProbeFile)
 	src, err := os.ReadFile(path) // #nosec G304 -- путь-константа своего дерева
 	if err != nil {
 		t.Fatalf("прочитать пробы каталога: %v — предмета у гейта нет", err)
@@ -171,8 +171,7 @@ func TestIAMCT112_InjectionFixtureGateSilentOnItsOwnExplanation(t *testing.T) {
 
 // TestIAMCT108_CatalogDictionaryColumnsRejectTheThirdSpelling — Т8.
 func TestIAMCT108_CatalogDictionaryColumnsRejectTheThirdSpelling(t *testing.T) {
-	root := catalogRepoRoot(t)
-	body, err := os.ReadFile(filepath.Join(root, catalogMigrationRel)) // #nosec G304
+	body, err := os.ReadFile(platformtree.RequirePath(t, catalogMigrationRel)) // #nosec G304
 	if err != nil {
 		t.Fatalf("прочитать миграцию каталога: %v", err)
 	}

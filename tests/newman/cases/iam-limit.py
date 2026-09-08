@@ -53,7 +53,7 @@ Not here, and each with its reason rather than a silence:
     tenant-lifecycle act with its own fixtures, and the invariant is the DATABASE's
     (a BEFORE DELETE trigger, since a polymorphic reference has no foreign key).
     It is locked by the integration test
-    `internal/repo/kacho/pg/limit_integration_test.go::TestLimit_12_ProjectDeleteWithdrawsItsLimits`,
+    `internal/repo/kaname/pg/limit_integration_test.go::TestLimit_12_ProjectDeleteWithdrawsItsLimits`,
     which asserts BOTH halves — the project's ceilings go, the account's and the
     platform's stay. Asserting it here would need a disposable project per run and
     would still not reach the second half.

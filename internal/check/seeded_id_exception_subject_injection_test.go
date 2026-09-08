@@ -21,7 +21,7 @@ import (
 func synthExceptionCorpus() map[string]string {
 	return map[string]string{
 		"0001_initial.sql": synthGoodSeed +
-			"INSERT INTO kacho_iam.roles (id, name, permissions) " +
+			"INSERT INTO kaname.roles (id, name, permissions) " +
 			"VALUES ('" + synthBadSeedID + "', 'kacho-system.viewer', '[]');\n",
 	}
 }

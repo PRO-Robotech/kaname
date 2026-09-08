@@ -14,7 +14,7 @@ import (
 	"flag"
 	"os"
 
-	"github.com/PRO-Robotech/kacho-iam/tools/operatordocs"
+	"github.com/PRO-Robotech/kaname/tools/operatordocs"
 )
 
 func main() {

@@ -52,7 +52,7 @@ type ModuleCatalogRecorder struct {
 func (r *Registry) NewModuleCatalogRecorder() *ModuleCatalogRecorder {
 	rec := &ModuleCatalogRecorder{
 		applies: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_module_catalog_applies_total",
+			Name: Namespace + "_module_catalog_applies_total",
 			Help: "Исходы применения манифеста модуля к строкам каталога: applied — " +
 				"транзакция модуля закоммичена; failed — применение отвергнуто, каталог " +
 				"остался прежним. ЗНАМЕНАТЕЛЬ для двух счётчиков ниже: без него их ноль " +
@@ -61,14 +61,14 @@ func (r *Registry) NewModuleCatalogRecorder() *ModuleCatalogRecorder {
 				"процесс не доживает до слушателя метрик.",
 		}, []string{"outcome"}),
 		retired: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_module_catalog_retired_rows_total",
+			Name: Namespace + "_module_catalog_retired_rows_total",
 			Help: "Строк каталога помечено снятыми, по виду: resource — строка ресурса; " +
 				"verb — строка действия. Снятие есть ПОМЕТКА, а не удаление. Ноль значим " +
 				"только вместе с ненулевым applies: без него он означает, что применения " +
 				"не было.",
 		}, []string{"kind"}),
 		resettled: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_module_catalog_resettled_projections_total",
+			Name: Namespace + "_module_catalog_resettled_projections_total",
 			Help: "Проекций арендаторских ролей переселено в сироты снятием строки " +
 				"каталога, по популяции: rule_ref — правило перестало резолвиться; " +
 				"role_verb — право отобрано. Популяции РАЗНЫЕ события, и сумма их не " +

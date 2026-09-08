@@ -34,9 +34,10 @@ package manifest
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // docExampleMarker — маркер, которым документ объявляет: блок ниже обязан
@@ -59,11 +60,11 @@ func TestDocumentedOperatorManifestsAreAcceptedByTheLoader(t *testing.T) {
 	if len(operatorFacingDocs) == 0 {
 		t.Fatal("перечень документов пуст — обход беспредметен, «ноль находок» получено даром")
 	}
-	root := repoRootForPeek(t)
-
 	docsRead, blocksFound := 0, 0
 	for _, rel := range operatorFacingDocs {
-		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		// Координата приводится к ПОСАДКЕ: документ едет вместе с модулем и в
+		// самостоятельном клоне лежит от его корня, без приставки.
+		raw, err := os.ReadFile(platformtree.RequirePath(t, rel))
 		if err != nil {
 			t.Fatalf("%s: документ не прочитан: %v — непрочитанное есть НАХОДКА, "+
 				"а не «проверять нечего»", rel, err)

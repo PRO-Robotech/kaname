@@ -6,7 +6,7 @@ package domain
 // Status enums — currently empty.
 //
 // Unlike kacho-vpc (PROVISIONING/ACTIVE/AVAILABLE/FAILED/DELETING on
-// NetworkInterface), the kacho-iam resources are flat: Account / Project /
+// NetworkInterface), the kaname resources are flat: Account / Project /
 // User / ServiceAccount / Group / Role / AccessBinding carry no status
 // field. Create/delete are synchronous at the DB level (the worker LRO
 // merely wraps the Insert/Delete inside an Operation envelope to keep

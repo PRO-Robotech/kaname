@@ -6,7 +6,7 @@ package service
 // token_enrichment_bootstrap_test.go — IBT-T5 (#58): the bootstrap-admin SA's
 // client_credentials token enriches to service-account principal claims exactly
 // like any SA-key token. This locks the claim contract the gateway relies on:
-// kacho_principal_type=service_account + kacho_principal_id=<bootstrap sva>, so
+// kaname_principal_type=service_account + kaname_principal_id=<bootstrap sva>, so
 // the gateway resolves the FGA subject `service_account:<sva>` (which holds the
 // seeded system_admin@cluster grant) and stamps the acr-exempt principal.
 
@@ -19,8 +19,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // Deterministic bootstrap identity (byte-identical to migration 0058 /
@@ -89,16 +89,16 @@ func TestEnrichClaims_BootstrapSA_ServiceAccountClaims(t *testing.T) {
 	claims, _, err := svc.EnrichClaims(context.Background(), bootstrapClientID, TokenHookContext{ACR: "0"})
 	require.NoError(t, err)
 
-	assert.Equal(t, "service_account", claims["kacho_principal_type"],
+	assert.Equal(t, "service_account", claims["kaname_principal_type"],
 		"bootstrap SA token must carry a service-account principal type (acr-exempt at the gateway)")
-	assert.Equal(t, bootstrapSvaID, claims["kacho_principal_id"],
+	assert.Equal(t, bootstrapSvaID, claims["kaname_principal_id"],
 		"principal id must be the bootstrap SA so the gateway resolves service_account:<sva>")
-	assert.Equal(t, bootstrapSocID, claims["kacho_sa_key_id"])
-	assert.Equal(t, systemAccountID, claims["kacho_account_id"])
-	assert.Equal(t, "api.kacho.cloud", claims["kacho_audience"])
+	assert.Equal(t, bootstrapSocID, claims["kaname_sa_key_id"])
+	assert.Equal(t, systemAccountID, claims["kaname_account_id"])
+	assert.Equal(t, "api.kacho.cloud", claims["kaname_audience"])
 	// The enricher passes through the (client_credentials ≈ "0") session ACR; the
 	// gateway step-up SA-exemption (O-1) is what lets this satisfy acr>=2 RPCs.
-	assert.Equal(t, "0", claims["kacho_acr"])
+	assert.Equal(t, "0", claims["kaname_acr"])
 }
 
 // A missing SA mapping falls through to the interactive-user path (guards against

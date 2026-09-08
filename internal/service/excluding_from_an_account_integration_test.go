@@ -60,13 +60,13 @@ func TestExcludingFromAnAccountIsReachableFromInsideThatAccountOnly(t *testing.T
 	w.factThroughJournal(t, "user:"+ownerA, "owner", "account", accA)
 	w.factThroughJournal(t, "user:"+ownerB, "owner", "account", accB)
 	// Уровень 1.
-	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_kacho_root")
+	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_root")
 
 	// Гейты спрашиваются У КАТАЛОГА: он порождается из proto и есть единственный
 	// источник per-RPC решения края. Литерал означал бы, что проба утверждает о
 	// СВОЁМ представлении гейта, а не о действующем.
-	exclRel, exclType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserService/RemoveFromAccount")
-	admitRel, admitType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserService/Invite")
+	exclRel, exclType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/RemoveFromAccount")
+	admitRel, admitType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Invite")
 	require.Equalf(t, "account", exclType,
 		"исключение гейтится не на объекте аккаунта (%s) — предмет пробы сменился", exclType)
 	require.Equalf(t, "account", admitType,

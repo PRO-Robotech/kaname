@@ -1,7 +1,7 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Нагрузочные цели kacho-iam.
+# Нагрузочные цели kaname.
 #
 # ПОЧЕМУ ЭТОТ ФАЙЛ ПОЯВИЛСЯ. Сценарий `authz_check.js` лежал в дереве и не
 # вызывался НИОТКУДА: цели у каталога не было (в отличие от services/nlb/tests/k6),
@@ -29,7 +29,7 @@ LABEL        ?= adhoc
 
 .PHONY: help
 help:
-	@echo "Нагрузочные сценарии kacho-iam:"
+	@echo "Нагрузочные сценарии kaname:"
 	@echo "  make k6-dry-run        — разбор обоих сценариев, стенд НЕ нужен"
 	@echo "  make k6-runner-up      — поднять генератор в кластере (сертификат+фикстура)"
 	@echo "  make k6-internal-check — одиночный прогон InternalIAMService.Check (TARGET_RPS/DURATION)"

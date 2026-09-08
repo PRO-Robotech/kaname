@@ -33,7 +33,7 @@ import (
 	"errors"
 	"testing"
 
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // errClusterStoreDown — отказ ТРАНСПОРТА надзора, не вердикт о правах.

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // fakeAuthorizer — stub implementing the relation-native check the decorator
@@ -47,7 +47,7 @@ func TestInstrumentedAuthorizer_AllowSamplesHistogram(t *testing.T) {
 	}
 
 	got := dumpMetrics(t, reg)
-	const want = `kacho_iam_authz_check_duration_seconds_count{allowed="true",rpc="CheckRelation"} 1`
+	const want = `kaname_authz_check_duration_seconds_count{allowed="true",rpc="CheckRelation"} 1`
 	if !strings.Contains(got, want) {
 		t.Fatalf("histogram sample missing.\nwant: %s\ngot:\n%s", want, got)
 	}
@@ -67,7 +67,7 @@ func TestInstrumentedAuthorizer_DenyCounter(t *testing.T) {
 	}
 
 	got := dumpMetrics(t, reg)
-	const want = `kacho_iam_authz_check_decisions_total{decision="deny",rpc="CheckRelation"} 1`
+	const want = `kaname_authz_check_decisions_total{decision="deny",rpc="CheckRelation"} 1`
 	if !strings.Contains(got, want) {
 		t.Fatalf("deny counter missing.\nwant: %s\ngot:\n%s", want, got)
 	}
@@ -89,7 +89,7 @@ func TestInstrumentedAuthorizer_ErrorPropagatesAndCounts(t *testing.T) {
 	}
 
 	got := dumpMetrics(t, reg)
-	const want = `kacho_iam_authz_check_decisions_total{decision="error",rpc="CheckRelation"} 1`
+	const want = `kaname_authz_check_decisions_total{decision="error",rpc="CheckRelation"} 1`
 	if !strings.Contains(got, want) {
 		t.Fatalf("error counter missing.\nwant: %s\ngot:\n%s", want, got)
 	}

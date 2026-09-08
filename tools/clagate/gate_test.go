@@ -25,14 +25,18 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/gitenv"
 
-	"github.com/PRO-Robotech/kacho-iam/tools/clagate"
+	"github.com/PRO-Robotech/kaname/internal/treeroot"
+	"github.com/PRO-Robotech/kaname/tools/clagate"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
-// repoRoot — корень дерева продукта (пакет лежит в services/iam/tools/clagate).
-const repoRoot = "../../../.."
-
-// ledgerPath — ведомость, объявляющая своих, подписавших и машинные личности.
-const ledgerPath = "services/iam/cla-ledger.yaml"
+// ledgerRel — ведомость, объявляющая своих, подписавших и машинные личности.
+//
+// Координата от корня ПЛАТФОРМЫ; к посадке её приводит резолвер, а не подъём
+// каталогами: число шагов вверх верно ровно для одной посадки, и в
+// самостоятельном клоне тот же подъём выводит ВЫШЕ корня клона.
+const ledgerRel = "services/iam/cla-ledger.yaml"
 
 // TestGate_IamHistoryIsConfirmed — боевой прогон по истории домена.
 //
@@ -40,15 +44,43 @@ const ledgerPath = "services/iam/cla-ledger.yaml"
 // быть отличимо от «ноль прочитанного». Поэтому проверяются ОБЕ величины —
 // сколько осмотрено и сколько найдено.
 func TestGate_IamHistoryIsConfirmed(t *testing.T) {
-	rep, err := clagate.Inspect(repoRoot, ledgerPath, "HEAD")
+	// Корень обхода истории — САМ репозиторий, в котором идёт прогон, а
+	// ведомость адресуется от него же: в монорепо это `services/iam/…`, в
+	// клоне — `cla-ledger.yaml` от его корня.
+	root, prefix := platformtree.RequireCorpus(t)
+	ledger := platformtree.Under(prefix, strings.TrimPrefix(ledgerRel, "services/iam/"))
+	rep, err := clagate.Inspect(root, ledger, "HEAD")
 	require.NoError(t, err)
 
-	require.Empty(t, rep.PremiseFailures,
-		"предпосылка гейта перестала быть верной: %v", rep.PremiseFailures)
+	// ПРЕДПОСЫЛКА ГЕЙТА — ИСТОРИЯ ДОМЕНА, и она есть не у всякого дерева.
+	//
+	// Ведомость объявляет ОБЛАСТЬ (`scope`) ОТНОСИТЕЛЬНО СЕБЯ (`.`), и к корню
+	// судимого дерева её сводит `Inspect`. Область поэтому резолвится в ОБЕИХ
+	// посадках — и ровно с этого начинается предмет: пока она резолвилась только
+	// в монорепо, «условие не создано» опознавалось по НЕРЕЗОЛВУ ОБЛАСТИ, то есть
+	// побочным следствием, а не предметом. Область резолвится — предмет пропал, и
+	// дерево БЕЗ истории домена стало красным вместо третьего исхода.
+	//
+	// Опознаётся он теперь ПРЯМО: дерево, в котором обход области не дал истории
+	// домена, вердикта о соглашении не выносит ни в одну сторону. Разводит исходы
+	// `clagate.Classify` — она же держит несущее свойство: в дереве платформы
+	// пропуск НЕДОСТИЖИМ, поэтому короткий обход остаётся там находкой и гейт
+	// нельзя снять поломкой ведомости.
+	//
+	// Посадку называет РЕЗОЛВЕР, а не проба: приставка модуля в составе непуста
+	// только тогда, когда рядом лежит дерево платформы.
+	inPlatformTree := prefix != ""
+	switch outcome, why := clagate.Classify(rep, inPlatformTree); outcome {
+	case clagate.OutcomeUnmetPremise:
+		t.Skipf("УСЛОВИЕ НЕ СОЗДАНО (не находка): %s.\n"+
+			"Посадка: %s. Осмотрено коммитов: %d.", why, root, rep.CommitsExamined)
+	case clagate.OutcomeBlindWalk:
+		t.Fatalf("гейт слеп, и это находка о нём: %s.\n"+
+			"Посадка: %s. Осмотрено коммитов: %d.", why, root, rep.CommitsExamined)
+	case clagate.OutcomeJudge:
+		// Предмет есть — судим ниже.
+	}
 
-	require.Greater(t, rep.CommitsExamined, 500,
-		"осмотрено %d коммитов — это не похоже на историю домена: обход усечён или область объявлена мимо дерева",
-		rep.CommitsExamined)
 	require.GreaterOrEqual(t, rep.IdentitiesSeen, 2,
 		"обход увидел %d личностей — при одной вердикт о РАЗЛИЧЕНИИ своего и стороннего вакуумен",
 		rep.IdentitiesSeen)
@@ -69,9 +101,11 @@ func TestGate_IamHistoryIsConfirmed(t *testing.T) {
 		"записи ведомости, которым больше нечего покрывать: %v — исключение живёт, пока у него есть предмет",
 		rep.UnusedEntries)
 
-	t.Logf("осмотрено: коммитов=%d, вкладов(коммит×личность)=%d, личностей=%d; "+
-		"свои=%d, подписью=%d, ведомостью=%d, освобождено=%d",
-		rep.CommitsExamined, rep.ContributionsInspected, rep.IdentitiesSeen,
+	// Посадка печатается ВМЕСТЕ с числами: те же величины в двух посадках
+	// означают разное, и вердикт, не назвавший посадки, сказан неизвестно о чём.
+	t.Logf("посадка: %s (дерево платформы: %t); осмотрено: коммитов=%d, "+
+		"вкладов(коммит×личность)=%d, личностей=%d; свои=%d, подписью=%d, ведомостью=%d, освобождено=%d",
+		root, inPlatformTree, rep.CommitsExamined, rep.ContributionsInspected, rep.IdentitiesSeen,
 		rep.ByOwners, rep.ConfirmedBySignOff, rep.ConfirmedByLedger, rep.Waived)
 }
 
@@ -493,4 +527,253 @@ func TestGate_LedgerInsideTheJudgedTreeIsRead(t *testing.T) {
 	if err != nil && strings.Contains(err.Error(), "вне судимого дерева") {
 		t.Fatalf("ведомость ВНУТРИ дерева отвергнута как внешняя: %v", err)
 	}
+}
+
+// --- Резолв посадки: инъекция в обе стороны ---------------------------------
+
+// TestPlacement_ModuleInsideAForeignRepositoryIsRefused — ИНЪЕКЦИЯ.
+//
+// Клон модуля положен внутрь ПОСТОРОННЕГО репозитория, и по вычисляемому пути
+// там лежит вполне годная ведомость. Прежний резолв (подъём на четыре уровня)
+// нашёл бы её и вынес бы зелёный вердикт о ЧУЖОЙ истории — отличить его от
+// настоящего нечем. Здесь предпосылка проверяется, и отказ НАЗЫВАЕТ её.
+//
+// Против положительного близнеца ниже отличается РОВНО ОДНИМ фактом: каталог
+// модуля этим репозиторием не отслеживается.
+func TestPlacement_ModuleInsideAForeignRepositoryIsRefused(t *testing.T) {
+	foreign := writeRepo(t, []commit{
+		{name: "Чужой", email: "stranger@example.org", message: "feat: чужое дерево"},
+	})
+
+	// Модуль распакован ВНУТРЬ чужого дерева и им не отслеживается.
+	mod := filepath.Join(foreign, "unpacked-module")
+	require.NoError(t, os.MkdirAll(mod, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mod, "go.mod"),
+		[]byte("module example.org/unpacked\n\ngo 1.24\n"), 0o600))
+	// Ведомость лежит по тому пути, который дал бы подъём литералом.
+	// Имя ведомости ВЫВОДИТСЯ из объявленной координаты, а не пишется вторым
+	// литералом: два места об одном имени разошлись бы молча, и фикстура тогда
+	// клала бы файл мимо того пути, который резолв ищет.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(mod, filepath.Base(ledgerRel)), []byte(minimalLedger), 0o600))
+
+	_, err := treeroot.Locate(mod)
+	require.Error(t, err, "резолв принял ЧУЖОЕ дерево за своё — вердикт был бы о его истории")
+	require.Contains(t, err.Error(), "не отслеживает каталог",
+		"отказ не называет предпосылки: читатель не отличит чужое дерево от отсутствия дерева")
+}
+
+// TestPlacement_ModuleTrackedByItsOwnRepositoryIsAccepted — ПОЛОЖИТЕЛЬНЫЙ
+// БЛИЗНЕЦ. Отличие ровно одно: каталог модуля этим репозиторием отслеживается.
+//
+// Без него отказ выше зеленел бы и на резолве, отвергающем всякое дерево.
+func TestPlacement_ModuleTrackedByItsOwnRepositoryIsAccepted(t *testing.T) {
+	dir := writeRepo(t, []commit{
+		{name: "Свой", email: "owner@example.com", message: "feat: своё дерево"},
+	})
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.org/own\n\ngo 1.24\n"), 0o600))
+
+	pl, err := treeroot.Locate(dir)
+	require.NoError(t, err, "своё дерево отвергнуто: резолв отвергает всякое, и инъекция вакуумна")
+	require.Equal(t, ".", pl.ModuleDir,
+		"модуль сам является корнем — путь в дереве обязан выводиться в «.», а не выписываться")
+}
+
+// TestPlacement_DirectoryOutsideAnyRepositoryIsNotAFinding — третий исход.
+//
+// Каталог вне всякого репозитория — «проверка НЕ ИСПОЛНЯЛАСЬ», а не находка о
+// дереве: истории здесь нет by construction, и красное у всякого, кто
+// распакует архив, вердиктом о продукте не является.
+func TestPlacement_DirectoryOutsideAnyRepositoryIsNotAFinding(t *testing.T) {
+	dir := t.TempDir()
+	// Предпосылка пробы: временный каталог сам не лежит внутри репозитория.
+	// Если лежит — условие не создано, и это ПРОПУСК с названной причиной, а не
+	// красное: вердикт был бы о том дереве.
+	for cur := dir; ; {
+		if _, err := os.Stat(filepath.Join(cur, ".git")); err == nil {
+			t.Skipf("УСЛОВИЕ НЕ СОЗДАНО (не находка): временный каталог лежит внутри "+
+				"репозитория %s — назовите TMPDIR вне всякого дерева", cur)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"),
+		[]byte("module example.org/loose\n\ngo 1.24\n"), 0o600))
+
+	_, err := treeroot.Locate(dir)
+	require.ErrorIs(t, err, treeroot.ErrTreeNotResolved,
+		"каталог без репозитория обязан давать «проверка НЕ ИСПОЛНЯЛАСЬ», а не находку")
+}
+
+// --- Три исхода боевого прогона: инъекция в обе стороны по каждой оси -------
+//
+// Ветвление живёт в `clagate.Classify`, а не в боевой пробе, ровно ради этого
+// раздела: проба идёт в том дереве, в котором её запустили, поэтому доказать
+// она может только ту сторону, что случилась. Здесь обе величины — посадка и
+// глубина обхода — приходят аргументами, и каждая ось судится в обе стороны.
+//
+// Каждая инъекция ниже отличается от своего положительного близнеца РОВНО
+// ОДНИМ фактом; отличие названо в заголовке пробы.
+
+// domainHistory — отчёт дерева, историю домена НЕСУЩЕГО. Все инъекции ниже
+// строятся ОТ НЕГО, чтобы отличие было ровно одно.
+func domainHistory() clagate.Report {
+	return clagate.Report{
+		LedgerPath:      "cla-ledger.yaml",
+		Scope:           []string{"."},
+		RevRange:        "HEAD",
+		CommitsExamined: clagate.HistoryFloorCommits + 1,
+	}
+}
+
+// TestClassify_DomainHistoryIsJudgedInBothPostures — ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ, и
+// он несущий.
+//
+// Без него всё, что ниже, зеленело бы на `Classify`, которая не выносит
+// вердикта НИКОГДА: «пропуск там, где надо» и «пропуск всегда» неотличимы, пока
+// не показано, что вердикт вообще бывает. Вторая половина — про арендатора:
+// настоящий клон истории домена НЕ ЛИШЁН, и гейт обязан работать в нём как в
+// монорепо, иначе третий исход съел бы ровно ту посадку, ради которой цель
+// перестала быть помеченной `[монорепо]`.
+func TestClassify_DomainHistoryIsJudgedInBothPostures(t *testing.T) {
+	for _, inPlatformTree := range []bool{true, false} {
+		outcome, why := clagate.Classify(domainHistory(), inPlatformTree)
+		require.Equal(t, clagate.OutcomeJudge, outcome,
+			"дерево с историей домена (посадка платформы: %t) обязано ДАВАТЬ вердикт: %s",
+			inPlatformTree, why)
+		require.Empty(t, why, "у вынесенного вердикта нет причины отказа — иначе она вводит в заблуждение")
+	}
+}
+
+// TestClassify_ShallowWalkInThePlatformTreeIsAFinding — ИНЪЕКЦИЯ.
+//
+// Отличие от близнеца выше РОВНО ОДНО: обход дал ровно порог вместо порога+1.
+// В дереве платформы история есть by construction, поэтому короткий обход
+// означает слепоту САМОГО ОБХОДА — находку, а не свойство поставки.
+func TestClassify_ShallowWalkInThePlatformTreeIsAFinding(t *testing.T) {
+	rep := domainHistory()
+	rep.CommitsExamined = clagate.HistoryFloorCommits
+
+	outcome, why := clagate.Classify(rep, true)
+
+	require.Equal(t, clagate.OutcomeBlindWalk, outcome,
+		"короткий обход в дереве платформы обязан быть находкой, иначе гейт снимается срезом истории")
+	require.Contains(t, why, "500", "находка обязана называть порог")
+	require.Contains(t, why, "[.]", "находка обязана называть область — иначе искать нечего")
+	require.Contains(t, why, "HEAD", "находка обязана называть диапазон обхода")
+}
+
+// TestClassify_ShallowWalkInAStandaloneCloneIsNotAFinding — тот же отчёт,
+// отличие РОВНО ОДНО: посадка.
+//
+// Это и есть предмет починки: фикстура гейта самостоятельных целей — состав
+// коммита, пересобранный `git init`-ом в один коммит. Истории домена у неё нет,
+// и красное у неё было бы красным у всякого, кто распакует поставку.
+func TestClassify_ShallowWalkInAStandaloneCloneIsNotAFinding(t *testing.T) {
+	rep := domainHistory()
+	rep.CommitsExamined = clagate.HistoryFloorCommits
+
+	outcome, why := clagate.Classify(rep, false)
+
+	require.Equal(t, clagate.OutcomeUnmetPremise, outcome,
+		"дерево без истории домена обязано давать ТРЕТИЙ исход, а не вердикт о продукте")
+	require.Contains(t, why, "САМОСТОЯТЕЛЬНАЯ",
+		"пропуск обязан НАЗЫВАТЬ непостроенную предпосылку — иначе он неотличим от заглушенной пробы")
+}
+
+// TestClassify_BrokenPremiseInThePlatformTreeIsAFinding — ИНЪЕКЦИЯ по ВТОРОЙ
+// оси: основание гейта не построено (ведомость без своих, область мимо дерева).
+//
+// Отличие от `domainHistory` ровно одно: непустой перечень отказов основания.
+// Прежняя редакция пропускала такой прогон БЕЗУСЛОВНО — то есть гейт снимался
+// поломкой собственной ведомости, молча и в монорепо.
+func TestClassify_BrokenPremiseInThePlatformTreeIsAFinding(t *testing.T) {
+	rep := domainHistory()
+	rep.PremiseFailures = []string{`область "services/nonexistent" в дереве не разрешается`}
+
+	outcome, why := clagate.Classify(rep, true)
+
+	require.Equal(t, clagate.OutcomeBlindWalk, outcome,
+		"поломка основания в дереве платформы обязана быть находкой, иначе гейт снимается правкой ведомости")
+	require.Contains(t, why, "services/nonexistent",
+		"находка обязана называть координату — иначе читатель ищет не там")
+}
+
+// TestClassify_BrokenPremiseInAStandaloneCloneIsNotAFinding — тот же отчёт,
+// отличие РОВНО ОДНО: посадка.
+func TestClassify_BrokenPremiseInAStandaloneCloneIsNotAFinding(t *testing.T) {
+	rep := domainHistory()
+	rep.PremiseFailures = []string{"у объявленных областей [.] нет ни одного коммита во всей истории"}
+
+	outcome, why := clagate.Classify(rep, false)
+
+	require.Equal(t, clagate.OutcomeUnmetPremise, outcome)
+	require.Contains(t, why, "нет ни одного коммита",
+		"пропуск обязан называть, ЧЕГО не хватило")
+}
+
+// TestClassify_TheSkipBranchIsUnreachableInThePlatformTree — НЕСУЩЕЕ
+// утверждение, из которого следует «в монорепо пропущено ноль».
+//
+// Оно проверяется перебором форм отчёта, а не доверием к автору ветвления:
+// пропуск, достижимый в дереве платформы, был бы маской — гейт снимался бы
+// правкой ведомости или срезом истории, и отличить это от исправной работы
+// нечем.
+func TestClassify_TheSkipBranchIsUnreachableInThePlatformTree(t *testing.T) {
+	shallow := domainHistory()
+	shallow.CommitsExamined = 0
+
+	broken := domainHistory()
+	broken.PremiseFailures = []string{"ведомость не называет ни одной своей личности"}
+
+	both := shallow
+	both.PremiseFailures = broken.PremiseFailures
+
+	forms := map[string]clagate.Report{
+		"история домена":            domainHistory(),
+		"пустой обход":              shallow,
+		"основание не построено":    broken,
+		"и то и другое сразу":       both,
+		"область не объявлена":      {RevRange: "HEAD", PremiseFailures: []string{"ведомость не называет области"}},
+		"отчёт в нулевом состоянии": {},
+	}
+
+	for name, rep := range forms {
+		outcome, why := clagate.Classify(rep, true)
+		require.NotEqual(t, clagate.OutcomeUnmetPremise, outcome,
+			"форма отчёта %q дала в дереве платформы ПРОПУСК: %s", name, why)
+	}
+	require.Len(t, forms, 6, "перебор усечён — перепись форм обязана быть названа числом")
+}
+
+// TestClassify_ASnapshotRepositoryIsNotDomainHistory — та же пара, но на
+// НАСТОЯЩЕМ отчёте настоящего репозитория, а не на собранном руками.
+//
+// Синтетический репозиторий из одного коммита — ровно то, что строит фикстура
+// гейта самостоятельных целей: состав коммита, распакованный и пересобранный
+// `git init`-ом. Отличие двух вызовов ниже — РОВНО ОДНО: посадка.
+func TestClassify_ASnapshotRepositoryIsNotDomainHistory(t *testing.T) {
+	dir := writeRepo(t, []commit{
+		{name: "Свой", email: "owner@example.com", message: "самостоятельная посадка модуля"},
+	})
+
+	rep := inspectFixture(t, dir, minimalLedger)
+
+	require.Empty(t, rep.PremiseFailures,
+		"область снимка резолвится и история у него есть — предмет починки именно в этом: "+
+			"нерезолв области предметом БОЛЬШЕ НЕ является")
+	require.Equal(t, 1, rep.CommitsExamined,
+		"снимок обязан давать ровно один коммит — иначе фикстура перестала изображать поставку")
+
+	standalone, why := clagate.Classify(rep, false)
+	require.Equal(t, clagate.OutcomeUnmetPremise, standalone,
+		"снимок в самостоятельной посадке обязан давать третий исход: %s", why)
+
+	platform, _ := clagate.Classify(rep, true)
+	require.Equal(t, clagate.OutcomeBlindWalk, platform,
+		"тот же отчёт в дереве платформы обязан быть НАХОДКОЙ — иначе дискриминатором служит не посадка")
 }

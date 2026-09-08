@@ -26,9 +26,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // grantJWTBearer — the federated machine grant, spelled the way the protocol
@@ -103,9 +103,9 @@ func TestTokenHook_ProviderBody_InteractiveIdentity_ResolvesToItsUser(t *testing
 
 	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 	claims := extClaimsOf(t, w)
-	assert.Equal(t, "user", claims["kacho_principal_type"])
-	assert.Equal(t, "usr_01abcdefghjkmnpqr", claims["kacho_principal_id"])
-	assert.Equal(t, "acc_01abcdefghjkmnpqr", claims["kacho_active_account"])
+	assert.Equal(t, "user", claims["kaname_principal_type"])
+	assert.Equal(t, "usr_01abcdefghjkmnpqr", claims["kaname_principal_id"])
+	assert.Equal(t, "acc_01abcdefghjkmnpqr", claims["kaname_active_account"])
 }
 
 // TestTokenHook_ProviderBody_ClientCredentials_SubjectlessSession_MappedSAKey_StillMints
@@ -145,8 +145,8 @@ func TestTokenHook_ProviderBody_ClientCredentials_SubjectlessSession_MappedSAKey
 
 	require.Equal(t, http.StatusOK, w.Code, "a live SA key must still mint; body: %s", w.Body.String())
 	claims := extClaimsOf(t, w)
-	assert.Equal(t, "service_account", claims["kacho_principal_type"])
-	assert.Equal(t, "sva_01abcdefghjkmnpqr", claims["kacho_principal_id"])
+	assert.Equal(t, "service_account", claims["kaname_principal_type"])
+	assert.Equal(t, "sva_01abcdefghjkmnpqr", claims["kaname_principal_id"])
 }
 
 // ───────────── which grant ran: the provider's word, not the client's form ─────────────

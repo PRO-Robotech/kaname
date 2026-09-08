@@ -33,7 +33,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 )
 
 // synthetic — канон, поданный текстом. Связный: тип субъекта объявлен, у

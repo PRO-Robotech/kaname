@@ -14,7 +14,7 @@ package migrations_test
 // ветвь, отдельная от двух первых:
 //
 //	IF NEW.invite_status <> 'PENDING' THEN
-//	    UPDATE kacho_iam.memberships SET state = 'ACTIVE'
+//	    UPDATE kaname.memberships SET state = 'ACTIVE'
 //	     WHERE user_id = NEW.id AND state = 'PENDING';
 //	END IF;
 //
@@ -69,7 +69,7 @@ import (
 func membershipStatesOf(t *testing.T, db *sql.DB, userID string) []string {
 	t.Helper()
 	rows, err := db.Query(`
-		SELECT account_id, state FROM kacho_iam.memberships WHERE user_id = $1`, userID)
+		SELECT account_id, state FROM kaname.memberships WHERE user_id = $1`, userID)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	out := []string{}
@@ -89,7 +89,7 @@ func membershipStatesOf(t *testing.T, db *sql.DB, userID string) []string {
 func pendingMembershipsOf(t *testing.T, db *sql.DB, userID string) []string {
 	t.Helper()
 	rows, err := db.Query(`
-		SELECT account_id FROM kacho_iam.memberships
+		SELECT account_id FROM kaname.memberships
 		 WHERE user_id = $1 AND state = 'PENDING' ORDER BY account_id`, userID)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
@@ -126,8 +126,8 @@ func personInvitedToTwoAccounts(t *testing.T, tagA, tagB, email string) (*sql.DB
 		"usr"+fmt.Sprintf("%017s", "pp"+tagA), email, accA, "PENDING", "")
 
 	_, err := db.Exec(`
-		INSERT INTO kacho_iam.memberships (id, user_id, account_id, state)
-		VALUES (kacho_iam.membership_mirror_id($1, $2), $1, $2, 'PENDING')`, person, accB)
+		INSERT INTO kaname.memberships (id, user_id, account_id, state)
+		VALUES (kaname.membership_mirror_id($1, $2), $1, $2, 'PENDING')`, person, accB)
 	require.NoError(t, err, "посев второго членства человека %s в аккаунте %s", person, accB)
 
 	require.Equal(t, []string{accA, accB}, membershipAccountsOf(t, db, person),
@@ -145,7 +145,7 @@ func personInvitedToTwoAccounts(t *testing.T, tagA, tagB, email string) (*sql.DB
 func logIn(t *testing.T, db *sql.DB, person, externalID string) {
 	t.Helper()
 	res, err := db.Exec(`
-		UPDATE kacho_iam.users
+		UPDATE kaname.users
 		   SET invite_status = 'ACTIVE', external_id = $2
 		 WHERE id = $1`, person, externalID)
 	require.NoError(t, err)
@@ -207,7 +207,7 @@ func TestIntegration_SecondMembershipOfAPersonWhoNeverLoggedInStaysPending(t *te
 
 	// Правка строки, входом НЕ являющаяся: приглашение остаётся приглашением.
 	_, err := db.Exec(`
-		UPDATE kacho_iam.users SET display_name = 'renamed' WHERE id = $1`, person)
+		UPDATE kaname.users SET display_name = 'renamed' WHERE id = $1`, person)
 	require.NoError(t, err)
 
 	t.Logf("осмотрено: строка %s, членств %d — %v",
@@ -244,7 +244,7 @@ func TestIntegration_ThePendingMembershipPredicateCanSeeAViolation(t *testing.T)
 			"иначе инъекция ничего не доказывает")
 
 	res, err := db.Exec(`
-		UPDATE kacho_iam.memberships SET state = 'PENDING'
+		UPDATE kaname.memberships SET state = 'PENDING'
 		 WHERE user_id = $1 AND account_id = $2`, person, accB)
 	require.NoError(t, err)
 	affected, err := res.RowsAffected()

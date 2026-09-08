@@ -22,7 +22,7 @@ WORKDIR /src
 # первой редакции этого самого абзаца.
 #
 # Что верно теперь. Служба несёт СВОЙ модуль (`go.mod`, путь
-# `github.com/PRO-Robotech/kacho-iam`), поэтому контекст сборки — этот каталог:
+# `github.com/PRO-Robotech/kaname`), поэтому контекст сборки — этот каталог:
 # `docker build -f Dockerfile <каталог службы>`. Соседних деревьев в контексте
 # нет и не требуется.
 #
@@ -64,23 +64,23 @@ COPY . .
 # разойдясь, он не сломает сборку (недостающее догрузит `go build`), но
 # расхождение видно глазом в соседних строках.
 RUN --mount=type=cache,target=/go/pkg/mod \
-    go list -deps ./cmd/kacho-iam ./cmd/migrator >/dev/null
+    go list -deps ./cmd/kaname ./cmd/migrator >/dev/null
 # Skill evgeniy §9 K.1 / AP-9: независимые binary в одном образе.
-# kacho-iam       — gRPC API-сервер (единственный subcommand — `serve`).
-# kacho-migrator  — CLI миграций (cobra: up|down|status|create), используется
+# kaname          — gRPC API-сервер (единственный subcommand — `serve`).
+# kaname-migrator — CLI миграций (cobra: up|down|status|create), используется
 #                   init-container'ом перед стартом основного pod'а.
 #
 # JWKS-ротатора здесь НЕТ и быть не должно: служба не чеканит токены провайдера и
 # не владеет его ключом подписи. Она ПРОКСИРУЕТ публичный набор ключей провайдера
 # байт-в-байт (internal/handler/jwksproxyhttp, :9097). Ротировать здесь нечего —
 # см. комментарий там же.
-RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kacho-iam ./cmd/kacho-iam \
- && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kacho-migrator ./cmd/migrator
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kaname ./cmd/kaname \
+ && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kaname-migrator ./cmd/migrator
 
 FROM mirror.gcr.io/library/alpine:3.24
 RUN apk upgrade --no-cache && apk add --no-cache ca-certificates
-COPY --from=builder /kacho-iam /usr/local/bin/kacho-iam
-COPY --from=builder /kacho-migrator /usr/local/bin/kacho-migrator
+COPY --from=builder /kaname /usr/local/bin/kaname
+COPY --from=builder /kaname-migrator /usr/local/bin/kaname-migrator
 # ПРОВЕНАНС ОБРАЗА — из какого дерева он собран. Клеймо и файл берут величину из
 # ОДНОГО `ARG`, поэтому разойтись не могут. Файл нужен потому, что у РАБОТАЮЩЕГО
 # контейнера клеймо не прочесть ничем, кроме демона хоста или реестра, — а у
@@ -98,4 +98,4 @@ LABEL org.opencontainers.image.revision="$KACHO_IMAGE_REVISION" \
 RUN mkdir -p /etc/kacho && printf '%s\n' "$KACHO_IMAGE_REVISION" > /etc/kacho/image-revision
 
 USER 65532
-ENTRYPOINT ["/usr/local/bin/kacho-iam"]
+ENTRYPOINT ["/usr/local/bin/kaname"]

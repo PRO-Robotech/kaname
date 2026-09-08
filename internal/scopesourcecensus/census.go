@@ -66,10 +66,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzcascade"
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kaname/internal/authzcascade"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
 // TypePlan — что перепись знает об одном типе, и откуда.
@@ -207,7 +207,7 @@ func SQL() (string, error) {
 // может.
 const pointerFacts = `
     SELECT DISTINCT object_type, object_id
-      FROM kacho_iam.relation_fact
+      FROM kaname.relation_fact
      WHERE relation = split_part(subject, ':', 1)
        AND position('#' in subject) = 0`
 
@@ -218,7 +218,7 @@ func arm(p TypePlan) string {
 		from += " " + p.Join
 	}
 	// noEdge — у строки нет ни одного звена в цепи.
-	noEdge := `NOT EXISTS (SELECT 1 FROM kacho_iam.resource_scope_edge e
+	noEdge := `NOT EXISTS (SELECT 1 FROM kaname.resource_scope_edge e
                     WHERE e.object_type = ` + ty + ` AND e.object_id = o.id)`
 	hasRow := `EXISTS (SELECT 1 FROM ` + p.Table + ` r WHERE r.id = x.object_id)`
 
@@ -227,7 +227,7 @@ func arm(p TypePlan) string {
          (SELECT count(*) FROM ` + from + ` WHERE NOT (` + noEdge + `)) AS in_chain,
          (SELECT count(*) FROM ` + from + ` WHERE ` + noEdge + ` AND NOT ` + p.ParentExpr + `) AS no_parent_ok,
          (SELECT count(*) FROM ` + from + ` WHERE ` + noEdge + ` AND ` + p.ParentExpr + `) AS lost,
-         (SELECT count(*) FROM (SELECT DISTINCT object_id FROM kacho_iam.resource_scope_edge
+         (SELECT count(*) FROM (SELECT DISTINCT object_id FROM kaname.resource_scope_edge
                                  WHERE object_type = ` + ty + `) x
             WHERE ` + hasRow + `
               AND NOT EXISTS (SELECT 1 FROM (` + pointerFacts + `) j
@@ -235,7 +235,7 @@ func arm(p TypePlan) string {
               AND NOT EXISTS (SELECT 1 FROM ` + from + ` WHERE o.id = x.object_id AND ` + p.ParentExpr + `)
          ) AS extra,
          (SELECT count(*) FROM (
-                  SELECT object_id FROM kacho_iam.resource_scope_edge WHERE object_type = ` + ty + `
+                  SELECT object_id FROM kaname.resource_scope_edge WHERE object_type = ` + ty + `
                   UNION
                   SELECT object_id FROM (` + pointerFacts + `) j WHERE j.object_type = ` + ty + `) x
             WHERE NOT ` + hasRow + `

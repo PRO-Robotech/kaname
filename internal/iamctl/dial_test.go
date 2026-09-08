@@ -18,7 +18,7 @@ import (
 func TestDialConfigRequiresTheAddressAndTheCredentialTogether(t *testing.T) {
 	full := DialConfig{
 		Endpoint:   "iam-internal.kacho.svc:9091",
-		ServerName: "kacho-iam-internal",
+		ServerName: "kaname-internal",
 		CAFiles:    []string{"/tls/ca.crt"},
 		CertFile:   "/tls/tls.crt",
 		KeyFile:    "/tls/tls.key",

@@ -78,7 +78,7 @@
 -- посева получает новый предмет либо снимается с объявленной причиной.
 --
 -- ── Запреты (non-negotiables) ──────────────────────────────────────────────
---   #4  cross-service cascade — нет (FK только внутри kacho_iam).
+--   #4  cross-service cascade — нет (FK только внутри kaname).
 --   #5  не редактировать применённую миграцию — свод разрешён владельцем
 --       (2026-09-04, дословно: «прода нет и мы такие деструктивные операции
 --       можем выполнять»).
@@ -90,7 +90,7 @@
 --       цепочки, окажется ВПЕРЕДИ образа, и под останется неготовым с
 --       названной причиной в теле `/readyz` — «схема ушла вперёд образа»,
 --       а не упадёт без объяснения.
---   #8  database-per-service — да (схема kacho_iam в собственной БД).
+--   #8  database-per-service — да (схема kaname в собственной БД).
 --   #10 within-service инварианты — FK / UNIQUE / partial UNIQUE / CHECK /
 --       EXCLUDE / триггеры, здесь же.
 --
@@ -132,24 +132,24 @@ SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
-SET search_path TO kacho_iam, public;
+SET search_path TO kaname, public;
 SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
 
 --
--- Name: kacho_iam; Type: SCHEMA; Schema: -; Owner: -
+-- Name: kaname; Type: SCHEMA; Schema: -; Owner: -
 --
 
-CREATE SCHEMA kacho_iam;
+CREATE SCHEMA kaname;
 
 
 --
--- Name: access_binding_role_assignable(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: access_binding_role_assignable(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.access_binding_role_assignable() RETURNS trigger
+CREATE FUNCTION kaname.access_binding_role_assignable() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -172,7 +172,7 @@ BEGIN
 
     SELECT is_system, coalesce(account_id, ''), coalesce(project_id, '')
       INTO r_is_system, r_account_id, r_project_id
-      FROM kacho_iam.roles
+      FROM kaname.roles
      WHERE id = NEW.role_id
      FOR KEY SHARE;
 
@@ -194,7 +194,7 @@ BEGIN
         END IF;
         IF r_project_id = '' AND r_account_id <> '' THEN
             SELECT account_id INTO scope_account
-              FROM kacho_iam.projects
+              FROM kaname.projects
              WHERE id = NEW.resource_id;
             IF FOUND AND scope_account = r_account_id THEN
                 RETURN NEW;
@@ -215,10 +215,10 @@ $$;
 
 
 --
--- Name: access_binding_subject_carries_scope(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: access_binding_subject_carries_scope(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.access_binding_subject_carries_scope() RETURNS trigger
+CREATE FUNCTION kaname.access_binding_subject_carries_scope() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -232,7 +232,7 @@ BEGIN
 
   SELECT b.resource_type, b.resource_id
     INTO rt, ri
-    FROM kacho_iam.access_bindings b
+    FROM kaname.access_bindings b
    WHERE b.id = NEW.binding_id;
 
   IF NOT FOUND THEN
@@ -253,10 +253,10 @@ $$;
 
 
 --
--- Name: access_bindings_role_is_live(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_role_is_live(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.access_bindings_role_is_live() RETURNS trigger
+CREATE FUNCTION kaname.access_bindings_role_is_live() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -274,7 +274,7 @@ BEGIN
     -- будущее: `FOR SHARE` останется верным, если референт когда-нибудь снимут.
     -- Разбор и замер — шапка файла.
     SELECT r.live INTO role_live
-      FROM kacho_iam.roles r
+      FROM kaname.roles r
      WHERE r.id = NEW.role_id
        FOR SHARE;
 
@@ -298,17 +298,17 @@ $$;
 
 
 --
--- Name: FUNCTION access_bindings_role_is_live(); Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: FUNCTION access_bindings_role_is_live(); Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON FUNCTION kacho_iam.access_bindings_role_is_live() IS 'Новая ССЫЛКА на снятую роль отвергается 23000 с именем связи access_bindings_role_is_live. Судится ПОЯВЛЕНИЕ ссылки, а не существование строки: UPDATE, не меняющий role_id, выходит рано — иначе пережившая выдача перестала бы приниматься к отзыву и переметке. Ключом это невыразимо: ключ судит обе стороны сразу, а снятие роли обязано выдачи ПЕРЕЖИВАТЬ (kacho#1913).';
+COMMENT ON FUNCTION kaname.access_bindings_role_is_live() IS 'Новая ССЫЛКА на снятую роль отвергается 23000 с именем связи access_bindings_role_is_live. Судится ПОЯВЛЕНИЕ ссылки, а не существование строки: UPDATE, не меняющий role_id, выходит рано — иначе пережившая выдача перестала бы приниматься к отзыву и переметке. Ключом это невыразимо: ключ судит обе стороны сразу, а снятие роли обязано выдачи ПЕРЕЖИВАТЬ (kacho#1913).';
 
 
 --
--- Name: access_bindings_scope_default(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_scope_default(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.access_bindings_scope_default() RETURNS trigger
+CREATE FUNCTION kaname.access_bindings_scope_default() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
@@ -329,10 +329,10 @@ $$;
 
 
 --
--- Name: group_members_member_exists(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: group_members_member_exists(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.group_members_member_exists() RETURNS trigger
+CREATE FUNCTION kaname.group_members_member_exists() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
@@ -343,10 +343,10 @@ BEGIN
     END IF;
 
     IF NEW.member_type = 'user' THEN
-        PERFORM 1 FROM kacho_iam.users
+        PERFORM 1 FROM kaname.users
             WHERE id = NEW.member_id FOR KEY SHARE;
     ELSIF NEW.member_type = 'service_account' THEN
-        PERFORM 1 FROM kacho_iam.service_accounts
+        PERFORM 1 FROM kaname.service_accounts
             WHERE id = NEW.member_id FOR KEY SHARE;
     ELSE
         RAISE EXCEPTION USING ERRCODE = '23514',
@@ -363,10 +363,10 @@ $$;
 
 
 --
--- Name: iam_permissions_valid(jsonb); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: iam_permissions_valid(jsonb); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.iam_permissions_valid(perms jsonb) RETURNS boolean
+CREATE FUNCTION kaname.iam_permissions_valid(perms jsonb) RETURNS boolean
     LANGUAGE plpgsql IMMUTABLE
     AS $_$
 DECLARE
@@ -387,10 +387,10 @@ $_$;
 
 
 --
--- Name: iam_rule_wildcards_confined(jsonb, text); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: iam_rule_wildcards_confined(jsonb, text); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.iam_rule_wildcards_confined(rules jsonb, owner_module text) RETURNS boolean
+CREATE FUNCTION kaname.iam_rule_wildcards_confined(rules jsonb, owner_module text) RETURNS boolean
     LANGUAGE plpgsql IMMUTABLE
     AS $$
 DECLARE
@@ -428,17 +428,17 @@ $$;
 
 
 --
--- Name: FUNCTION iam_rule_wildcards_confined(rules jsonb, owner_module text); Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: FUNCTION iam_rule_wildcards_confined(rules jsonb, owner_module text); Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON FUNCTION kacho_iam.iam_rule_wildcards_confined(rules jsonb, owner_module text) IS 'Подстановка роли с владельцем не выходит за её модуль. Глагол * не судится намеренно: он разрешён и в арендаторской роли безусловно, потому что он не сегмент пространства имён, а «все действия названного типа». Задача продукта #1032.';
+COMMENT ON FUNCTION kaname.iam_rule_wildcards_confined(rules jsonb, owner_module text) IS 'Подстановка роли с владельцем не выходит за её модуль. Глагол * не судится намеренно: он разрешён и в арендаторской роли безусловно, потому что он не сегмент пространства имён, а «все действия названного типа». Задача продукта #1032.';
 
 
 --
--- Name: iam_rules_valid(jsonb); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: iam_rules_valid(jsonb); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.iam_rules_valid(rules jsonb) RETURNS boolean
+CREATE FUNCTION kaname.iam_rules_valid(rules jsonb) RETURNS boolean
     LANGUAGE plpgsql IMMUTABLE
     AS $$
 DECLARE
@@ -500,14 +500,14 @@ $$;
 
 
 --
--- Name: identity_journal_note(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: identity_journal_note(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.identity_journal_note() RETURNS trigger
+CREATE FUNCTION kaname.identity_journal_note() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    INSERT INTO kacho_iam.identity_journal (identity, first_seen_at)
+    INSERT INTO kaname.identity_journal (identity, first_seen_at)
     VALUES (NEW.external_id, now())
     ON CONFLICT (identity) DO NOTHING;
     RETURN NULL;
@@ -516,17 +516,17 @@ $$;
 
 
 --
--- Name: FUNCTION identity_journal_note(); Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: FUNCTION identity_journal_note(); Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON FUNCTION kacho_iam.identity_journal_note() IS 'notes an identity the first time it appears, on insert and on the update that activates an invitation. Never refuses and never removes: observability is not a gate, and the ledger is accumulating on purpose';
+COMMENT ON FUNCTION kaname.identity_journal_note() IS 'notes an identity the first time it appears, on insert and on the update that activates an invitation. Never refuses and never removes: observability is not a gate, and the ledger is accumulating on purpose';
 
 
 --
--- Name: interactive_client_uris_wellformed(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: interactive_client_uris_wellformed(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.interactive_client_uris_wellformed() RETURNS trigger
+CREATE FUNCTION kaname.interactive_client_uris_wellformed() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -545,24 +545,24 @@ $$;
 
 
 --
--- Name: invite_mail_outbox_notify(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: invite_mail_outbox_notify(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.invite_mail_outbox_notify() RETURNS trigger
+CREATE FUNCTION kaname.invite_mail_outbox_notify() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    PERFORM pg_notify('kacho_iam_invite_mail_outbox', NEW.id::text);
+    PERFORM pg_notify('kaname_invite_mail_outbox', NEW.id::text);
     RETURN NEW;
 END;
 $$;
 
 
 --
--- Name: kacho_admission_rate_count(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: kacho_admission_rate_count(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.kacho_admission_rate_count() RETURNS trigger
+CREATE FUNCTION kaname.kacho_admission_rate_count() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -572,7 +572,7 @@ DECLARE
     v_window   bigint;
 BEGIN
     SELECT u.external_id INTO v_identity
-      FROM kacho_iam.users u
+      FROM kaname.users u
      WHERE u.id = NEW.owner_user_id;
 
     -- Владелец БЕЗ личности — законное состояние схемы (строка в состоянии
@@ -589,11 +589,11 @@ BEGIN
     -- угодно». Не названная величина означает отказ, как и у объёма: «не сказано»
     -- на пути безопасности читается закрыто.
     SELECT max_events, window_seconds INTO v_max, v_window
-      FROM kacho_iam.account_admission_rate_limits
+      FROM kaname.account_admission_rate_limits
      WHERE withdrawn_at IS NULL AND kind = v_kind;
 
     IF NOT FOUND THEN
-        PERFORM kacho_iam.kacho_rate_refuse(v_identity, v_kind);
+        PERFORM kaname.kacho_rate_refuse(v_identity, v_kind);
         RETURN NULL;
     END IF;
 
@@ -606,7 +606,7 @@ BEGIN
     -- первого и видит его результат: гонку разрешает база, а не порядок. Переход
     -- в следующее окно и списание считаются ОДНИМ выражением — посчитать «истекло
     -- ли окно» отдельно значило бы вернуть check-then-act через границу оператора.
-    INSERT INTO kacho_iam.identity_admission_windows AS w
+    INSERT INTO kaname.identity_admission_windows AS w
         (carrier_id, kind, window_started_at, admitted)
     VALUES (v_identity, v_kind, now(), 1)
     ON CONFLICT (carrier_id, kind) DO UPDATE
@@ -631,24 +631,24 @@ BEGIN
     -- Ноль строк означает ровно одно: окно полно. Это не check-then-act —
     -- решение уже принято атомарным оператором выше, а производитель отказа лишь
     -- облекает случившееся в контракт.
-    PERFORM kacho_iam.kacho_rate_refuse(v_identity, v_kind);
+    PERFORM kaname.kacho_rate_refuse(v_identity, v_kind);
     RETURN NULL;
 END;
 $$;
 
 
 --
--- Name: FUNCTION kacho_admission_rate_count(); Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: FUNCTION kacho_admission_rate_count(); Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON FUNCTION kacho_iam.kacho_admission_rate_count() IS 'charges one admission of the current window, in the same transaction as the account row. The first ever admission of an identity goes through the INSERT branch and is therefore unconditional: a rate refusal on first login would be a refusal to log in. Refusals come from kacho_rate_refuse';
+COMMENT ON FUNCTION kaname.kacho_admission_rate_count() IS 'charges one admission of the current window, in the same transaction as the account row. The first ever admission of an identity goes through the INSERT branch and is therefore unconditional: a rate refusal on first login would be a refusal to log in. Refusals come from kacho_rate_refuse';
 
 
 --
--- Name: kacho_labels_valid(jsonb); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: kacho_labels_valid(jsonb); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.kacho_labels_valid(labels jsonb) RETURNS boolean
+CREATE FUNCTION kaname.kacho_labels_valid(labels jsonb) RETURNS boolean
     LANGUAGE plpgsql IMMUTABLE
     AS $_$
 DECLARE
@@ -672,40 +672,40 @@ $_$;
 
 
 --
--- Name: kacho_quota_admit(text, text, text); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: kacho_quota_admit(text, text, text); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.kacho_quota_admit(v_carrier_type text, v_carrier_id text, v_kind text) RETURNS void
+CREATE FUNCTION kaname.kacho_quota_admit(v_carrier_type text, v_carrier_id text, v_kind text) RETURNS void
     LANGUAGE plpgsql
     AS $$
 DECLARE
     v_ok boolean;
 BEGIN
     SELECT used < limit_value INTO v_ok
-      FROM kacho_iam.project_resource_quotas
+      FROM kaname.project_resource_quotas
      WHERE carrier_type = v_carrier_type AND carrier_id = v_carrier_id AND kind = v_kind;
 
     IF COALESCE(v_ok, false) THEN
         RETURN;
     END IF;
 
-    PERFORM kacho_iam.kacho_quota_refuse(v_carrier_type, v_carrier_id, v_kind);
+    PERFORM kaname.kacho_quota_refuse(v_carrier_type, v_carrier_id, v_kind);
 END;
 $$;
 
 
 --
--- Name: FUNCTION kacho_quota_admit(v_carrier_type text, v_carrier_id text, v_kind text); Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: FUNCTION kacho_quota_admit(v_carrier_type text, v_carrier_id text, v_kind text); Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON FUNCTION kacho_iam.kacho_quota_admit(v_carrier_type text, v_carrier_id text, v_kind text) IS 'advisory band: says whether a slot is available WITHOUT taking it. Never a decision — the decision is the conditional UPDATE of the charging trigger; this exists so the tenant is refused early and in the same words';
+COMMENT ON FUNCTION kaname.kacho_quota_admit(v_carrier_type text, v_carrier_id text, v_kind text) IS 'advisory band: says whether a slot is available WITHOUT taking it. Never a decision — the decision is the conditional UPDATE of the charging trigger; this exists so the tenant is refused early and in the same words';
 
 
 --
--- Name: kacho_quota_carrier_lifecycle(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: kacho_quota_carrier_lifecycle(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.kacho_quota_carrier_lifecycle() RETURNS trigger
+CREATE FUNCTION kaname.kacho_quota_carrier_lifecycle() RETURNS trigger
     LANGUAGE plpgsql
     AS $_$
 DECLARE
@@ -720,7 +720,7 @@ BEGIN
     IF TG_OP = 'DELETE' THEN
         -- Ноль затронутых строк здесь НЕ отказ: строки учёта могло не быть
         -- (величина отозвана), и удаление принципала не вправе от этого зависеть.
-        DELETE FROM kacho_iam.project_resource_quotas
+        DELETE FROM kaname.project_resource_quotas
          WHERE carrier_type = v_carrier_type AND carrier_id = OLD.id AND kind = v_kind;
         RETURN NULL;
     END IF;
@@ -732,12 +732,12 @@ BEGIN
 
     -- Строка заводится с НУЛЁМ, и это верно: у нового принципала удостоверений
     -- нет by construction. Уже лежащие покрыты затравкой ниже.
-    INSERT INTO kacho_iam.project_resource_quotas
+    INSERT INTO kaname.project_resource_quotas
         (carrier_type, carrier_id, kind, used, limit_value,
          source_scope, source_scope_id, limit_revision, synced_at, account_id)
     SELECT v_carrier_type, NEW.id, v_kind, 0,
            l.limit_value, l.scope, l.scope_id, l.revision, now(), v_account
-      FROM kacho_iam.limits l
+      FROM kaname.limits l
      WHERE l.withdrawn_at IS NULL AND l.kind = v_kind AND l.scope = 'DEFAULT'
     ON CONFLICT (carrier_type, carrier_id, kind) DO NOTHING;
 
@@ -747,17 +747,17 @@ $_$;
 
 
 --
--- Name: FUNCTION kacho_quota_carrier_lifecycle(); Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: FUNCTION kacho_quota_carrier_lifecycle(); Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON FUNCTION kacho_iam.kacho_quota_carrier_lifecycle() IS 'creates and removes the accounting row of a PRINCIPAL carrier in the same transaction as the principal itself, so the row always has a producer. Neither arm can refuse: a missing row is zero affected rows, not an error — otherwise a person holding credentials would become undeletable';
+COMMENT ON FUNCTION kaname.kacho_quota_carrier_lifecycle() IS 'creates and removes the accounting row of a PRINCIPAL carrier in the same transaction as the principal itself, so the row always has a producer. Neither arm can refuse: a missing row is zero affected rows, not an error — otherwise a person holding credentials would become undeletable';
 
 
 --
--- Name: kacho_quota_count(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: kacho_quota_count(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.kacho_quota_count() RETURNS trigger
+CREATE FUNCTION kaname.kacho_quota_count() RETURNS trigger
     LANGUAGE plpgsql
     AS $_$
 DECLARE
@@ -808,7 +808,7 @@ BEGIN
         IF TG_OP = 'DELETE' THEN
             -- Возврат — в той же транзакции, что отзыв. GREATEST не даёт уйти
             -- ниже нуля; ноль затронутых строк не отказ (см. lifecycle выше).
-            UPDATE kacho_iam.project_resource_quotas
+            UPDATE kaname.project_resource_quotas
                SET used = GREATEST(used - 1, 0), updated_at = now()
              WHERE carrier_type = v_carrier_type AND carrier_id = v_carrier AND kind = v_kind;
             RETURN NULL;
@@ -816,7 +816,7 @@ BEGIN
 
         IF v_carrier_type = 'iam.serviceAccount' THEN
             SELECT COALESCE(sa.account_id, '') INTO v_account
-              FROM kacho_iam.service_accounts sa WHERE sa.id = v_carrier;
+              FROM kaname.service_accounts sa WHERE sa.id = v_carrier;
             v_account := COALESCE(v_account, '');
         END IF;
 
@@ -827,7 +827,7 @@ BEGIN
         -- одного из них управляла бы доступом в чужих.
         SELECT l.limit_value, l.scope, l.scope_id, l.revision
           INTO v_limit, v_scope, v_scope_id, v_revision
-          FROM kacho_iam.limits l
+          FROM kaname.limits l
          WHERE l.withdrawn_at IS NULL
            AND l.kind = v_kind
            AND (l.scope = 'DEFAULT'
@@ -842,9 +842,9 @@ BEGIN
             -- Строка учёта не вправе пережить авторитет: иначе отказ назвал бы
             -- величину, которой больше нет. Снятие до фиксации не доживёт —
             -- следующий оператор возбуждает исключение.
-            DELETE FROM kacho_iam.project_resource_quotas
+            DELETE FROM kaname.project_resource_quotas
              WHERE carrier_type = v_carrier_type AND carrier_id = v_carrier AND kind = v_kind;
-            PERFORM kacho_iam.kacho_quota_refuse(v_carrier_type, v_carrier, v_kind);
+            PERFORM kaname.kacho_quota_refuse(v_carrier_type, v_carrier, v_kind);
             RETURN NULL;
         END IF;
 
@@ -858,7 +858,7 @@ BEGIN
            INTO v_existing
           USING v_carrier, v_row ->> 'id';
 
-        INSERT INTO kacho_iam.project_resource_quotas
+        INSERT INTO kaname.project_resource_quotas
             (carrier_type, carrier_id, kind, used, limit_value,
              source_scope, source_scope_id, limit_revision, synced_at, account_id)
         VALUES (v_carrier_type, v_carrier, v_kind, v_existing,
@@ -873,7 +873,7 @@ BEGIN
         --
         -- Блокировку строки берёт этот оператор; второй писатель ждёт фиксации
         -- первого и видит его результат — гонку по-прежнему разрешает база.
-        UPDATE kacho_iam.project_resource_quotas
+        UPDATE kaname.project_resource_quotas
            SET limit_value     = v_limit,
                source_scope    = v_scope,
                source_scope_id = v_scope_id,
@@ -883,7 +883,7 @@ BEGIN
          WHERE carrier_type = v_carrier_type AND carrier_id = v_carrier AND kind = v_kind;
 
         -- Списание. Условие читает УЖЕ ОБНОВЛЁННЫЙ снимок той же строки.
-        UPDATE kacho_iam.project_resource_quotas
+        UPDATE kaname.project_resource_quotas
            SET used = used + 1, updated_at = now()
          WHERE carrier_type = v_carrier_type AND carrier_id = v_carrier AND kind = v_kind
            AND used < limit_value;
@@ -892,7 +892,7 @@ BEGIN
             RETURN NULL;
         END IF;
 
-        PERFORM kacho_iam.kacho_quota_refuse(v_carrier_type, v_carrier, v_kind);
+        PERFORM kaname.kacho_quota_refuse(v_carrier_type, v_carrier, v_kind);
         RETURN NULL;
     END IF;
 
@@ -902,7 +902,7 @@ BEGIN
     v_owner := v_row ->> 'owner_user_id';
 
     SELECT u.external_id INTO v_identity
-      FROM kacho_iam.users u
+      FROM kaname.users u
      WHERE u.id = v_owner;
 
     IF v_identity IS NULL OR v_identity = '' THEN
@@ -915,7 +915,7 @@ BEGIN
     END IF;
 
     IF TG_OP = 'DELETE' THEN
-        UPDATE kacho_iam.project_resource_quotas
+        UPDATE kaname.project_resource_quotas
            SET used = GREATEST(used - 1, 0), updated_at = now()
          WHERE carrier_type = 'identity' AND carrier_id = v_identity AND kind = v_kind;
         RETURN NULL;
@@ -923,24 +923,24 @@ BEGIN
 
     SELECT l.limit_value, l.scope, l.scope_id, l.revision
       INTO v_limit, v_scope, v_scope_id, v_revision
-      FROM kacho_iam.limits l
+      FROM kaname.limits l
      WHERE l.withdrawn_at IS NULL AND l.kind = v_kind AND l.scope = 'DEFAULT';
 
     IF NOT FOUND THEN
-        DELETE FROM kacho_iam.project_resource_quotas
+        DELETE FROM kaname.project_resource_quotas
          WHERE carrier_type = 'identity' AND carrier_id = v_identity AND kind = v_kind;
-        PERFORM kacho_iam.kacho_quota_refuse('identity', v_identity, v_kind);
+        PERFORM kaname.kacho_quota_refuse('identity', v_identity, v_kind);
         RETURN NULL;
     END IF;
 
-    INSERT INTO kacho_iam.project_resource_quotas
+    INSERT INTO kaname.project_resource_quotas
         (carrier_type, carrier_id, kind, used, limit_value,
          source_scope, source_scope_id, limit_revision, synced_at, account_id)
     VALUES ('identity', v_identity, v_kind, 0,
             v_limit, v_scope, v_scope_id, v_revision, now(), '')
     ON CONFLICT (carrier_type, carrier_id, kind) DO NOTHING;
 
-    UPDATE kacho_iam.project_resource_quotas
+    UPDATE kaname.project_resource_quotas
        SET used            = used + 1,
            limit_value     = v_limit,
            source_scope    = v_scope,
@@ -955,24 +955,24 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    PERFORM kacho_iam.kacho_quota_refuse('identity', v_identity, v_kind);
+    PERFORM kaname.kacho_quota_refuse('identity', v_identity, v_kind);
     RETURN NULL;
 END;
 $_$;
 
 
 --
--- Name: FUNCTION kacho_quota_count(); Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: FUNCTION kacho_quota_count(); Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON FUNCTION kacho_iam.kacho_quota_count() IS 'charges one slot on insert and returns it on delete, in the same transaction as the account row. Deferred to commit because the identity is resolved through the owner row, whose foreign key is itself deferred — the schema allows the account to be inserted first. The snapshot of the ceiling is refreshed from the local authority in the charging statement: the limit owner has no delta to catch up with. Refusals come from kacho_quota_refuse: KQ001 = full, KQ002 = no ceiling stated. An account whose owner carries no login identity is NOT counted and says so with a KQ003 warning: refusing it would change what the platform accepts under the guise of counting';
+COMMENT ON FUNCTION kaname.kacho_quota_count() IS 'charges one slot on insert and returns it on delete, in the same transaction as the account row. Deferred to commit because the identity is resolved through the owner row, whose foreign key is itself deferred — the schema allows the account to be inserted first. The snapshot of the ceiling is refreshed from the local authority in the charging statement: the limit owner has no delta to catch up with. Refusals come from kacho_quota_refuse: KQ001 = full, KQ002 = no ceiling stated. An account whose owner carries no login identity is NOT counted and says so with a KQ003 warning: refusing it would change what the platform accepts under the guise of counting';
 
 
 --
--- Name: kacho_quota_refuse(text, text, text); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: kacho_quota_refuse(text, text, text); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.kacho_quota_refuse(v_carrier_type text, v_carrier_id text, v_kind text) RETURNS void
+CREATE FUNCTION kaname.kacho_quota_refuse(v_carrier_type text, v_carrier_id text, v_kind text) RETURNS void
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -980,7 +980,7 @@ DECLARE
     v_used  bigint;
 BEGIN
     SELECT limit_value, used INTO v_limit, v_used
-      FROM kacho_iam.project_resource_quotas
+      FROM kaname.project_resource_quotas
      WHERE carrier_type = v_carrier_type AND carrier_id = v_carrier_id AND kind = v_kind;
 
     IF FOUND THEN
@@ -1006,17 +1006,17 @@ $$;
 
 
 --
--- Name: FUNCTION kacho_quota_refuse(v_carrier_type text, v_carrier_id text, v_kind text); Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: FUNCTION kacho_quota_refuse(v_carrier_type text, v_carrier_id text, v_kind text); Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON FUNCTION kacho_iam.kacho_quota_refuse(v_carrier_type text, v_carrier_id text, v_kind text) IS 'the ONLY producer of a quota refusal, generated for every owner from one template: both the advisory read and the authoritative charge call it, so their text, SQLSTATE and details cannot drift apart — there is one source, not five agreeing copies';
+COMMENT ON FUNCTION kaname.kacho_quota_refuse(v_carrier_type text, v_carrier_id text, v_kind text) IS 'the ONLY producer of a quota refusal, generated for every owner from one template: both the advisory read and the authoritative charge call it, so their text, SQLSTATE and details cannot drift apart — there is one source, not five agreeing copies';
 
 
 --
--- Name: kacho_rate_refuse(text, text); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: kacho_rate_refuse(text, text); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.kacho_rate_refuse(v_carrier_id text, v_kind text) RETURNS void
+CREATE FUNCTION kaname.kacho_rate_refuse(v_carrier_id text, v_kind text) RETURNS void
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -1024,7 +1024,7 @@ DECLARE
     v_window bigint;
 BEGIN
     SELECT max_events, window_seconds INTO v_max, v_window
-      FROM kacho_iam.account_admission_rate_limits
+      FROM kaname.account_admission_rate_limits
      WHERE withdrawn_at IS NULL AND kind = v_kind;
 
     IF FOUND THEN
@@ -1050,17 +1050,17 @@ $$;
 
 
 --
--- Name: FUNCTION kacho_rate_refuse(v_carrier_id text, v_kind text); Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: FUNCTION kacho_rate_refuse(v_carrier_id text, v_kind text); Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON FUNCTION kacho_iam.kacho_rate_refuse(v_carrier_id text, v_kind text) IS 'the only producer of a rate refusal: KQ004 = the window is full (wait), KQ005 = no rate stated (the administrator must state one). Separate from kacho_quota_refuse because that one is rendered from a template shared by six owners and speaks about the VOLUME row — this lane exists for one owner only';
+COMMENT ON FUNCTION kaname.kacho_rate_refuse(v_carrier_id text, v_kind text) IS 'the only producer of a rate refusal: KQ004 = the window is full (wait), KQ005 = no rate stated (the administrator must state one). Separate from kacho_quota_refuse because that one is rendered from a template shared by six owners and speaks about the VOLUME row — this lane exists for one owner only';
 
 
 --
--- Name: limits_scope_ref_exists(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: limits_scope_ref_exists(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.limits_scope_ref_exists() RETURNS trigger
+CREATE FUNCTION kaname.limits_scope_ref_exists() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
@@ -1073,7 +1073,7 @@ BEGIN
     IF NEW.scope = 'DEFAULT' THEN
         RETURN NEW;
     ELSIF NEW.scope = 'ACCOUNT' THEN
-        PERFORM 1 FROM kacho_iam.accounts WHERE id = NEW.scope_id FOR KEY SHARE;
+        PERFORM 1 FROM kaname.accounts WHERE id = NEW.scope_id FOR KEY SHARE;
         IF NOT FOUND THEN
             RAISE EXCEPTION USING
                 ERRCODE    = '23503',
@@ -1081,7 +1081,7 @@ BEGIN
                 MESSAGE    = format('Account %s not found', NEW.scope_id);
         END IF;
     ELSIF NEW.scope = 'PROJECT' THEN
-        PERFORM 1 FROM kacho_iam.projects WHERE id = NEW.scope_id FOR KEY SHARE;
+        PERFORM 1 FROM kaname.projects WHERE id = NEW.scope_id FOR KEY SHARE;
         IF NOT FOUND THEN
             RAISE EXCEPTION USING
                 ERRCODE    = '23503',
@@ -1098,10 +1098,10 @@ $$;
 
 
 --
--- Name: limits_stamp_revision(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: limits_stamp_revision(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.limits_stamp_revision() RETURNS trigger
+CREATE FUNCTION kaname.limits_stamp_revision() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
@@ -1113,22 +1113,22 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    PERFORM pg_advisory_xact_lock(hashtext('kacho_iam.limits_revision'));
-    NEW.revision := nextval('kacho_iam.limits_revision_seq');
+    PERFORM pg_advisory_xact_lock(hashtext('kaname.limits_revision'));
+    NEW.revision := nextval('kaname.limits_revision_seq');
     RETURN NEW;
 END;
 $$;
 
 
 --
--- Name: limits_withdraw_for_scope_object(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: limits_withdraw_for_scope_object(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.limits_withdraw_for_scope_object() RETURNS trigger
+CREATE FUNCTION kaname.limits_withdraw_for_scope_object() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    UPDATE kacho_iam.limits
+    UPDATE kaname.limits
        SET withdrawn_at = now()
      WHERE scope        = TG_ARGV[0]
        AND scope_id     = OLD.id
@@ -1139,21 +1139,21 @@ $$;
 
 
 --
--- Name: membership_carrying_rights_is_kept(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: membership_carrying_rights_is_kept(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.membership_carrying_rights_is_kept() RETURNS trigger
+CREATE FUNCTION kaname.membership_carrying_rights_is_kept() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM kacho_iam.accounts WHERE id = OLD.account_id) THEN
+    IF NOT EXISTS (SELECT 1 FROM kaname.accounts WHERE id = OLD.account_id) THEN
         RETURN NULL;
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM kacho_iam.users WHERE id = OLD.user_id) THEN
+    IF NOT EXISTS (SELECT 1 FROM kaname.users WHERE id = OLD.user_id) THEN
         RETURN NULL;
     END IF;
     IF EXISTS (
-        SELECT 1 FROM kacho_iam.memberships m
+        SELECT 1 FROM kaname.memberships m
          WHERE m.user_id = OLD.user_id AND m.account_id = OLD.account_id)
     THEN
         RETURN NULL;
@@ -1161,12 +1161,12 @@ BEGIN
 
     IF EXISTS (
         SELECT 1
-          FROM kacho_iam.access_bindings b
+          FROM kaname.access_bindings b
          WHERE b.status = 'ACTIVE'
            AND (
                  (b.subject_type = 'user' AND b.subject_id = OLD.user_id)
               OR EXISTS (
-                   SELECT 1 FROM kacho_iam.access_binding_subjects s
+                   SELECT 1 FROM kaname.access_binding_subjects s
                     WHERE s.binding_id = b.id
                       AND s.subject_type = 'user'
                       AND s.subject_id = OLD.user_id)
@@ -1174,7 +1174,7 @@ BEGIN
            AND (
                  (b.resource_type = 'account' AND b.resource_id = OLD.account_id)
               OR (b.resource_type = 'project' AND EXISTS (
-                    SELECT 1 FROM kacho_iam.projects p
+                    SELECT 1 FROM kaname.projects p
                      WHERE p.id = b.resource_id AND p.account_id = OLD.account_id))
                )
     )
@@ -1191,10 +1191,10 @@ $$;
 
 
 --
--- Name: membership_mirror_from_user(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: membership_mirror_from_user(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.membership_mirror_from_user() RETURNS trigger
+CREATE FUNCTION kaname.membership_mirror_from_user() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
@@ -1203,8 +1203,8 @@ BEGIN
         -- заводится здесь. Пустой аккаунт пропускается — строка без аккаунта
         -- законна, а членства без аккаунта не бывает.
         IF NEW.account_id IS NOT NULL AND NEW.account_id <> '' THEN
-            INSERT INTO kacho_iam.memberships (id, user_id, account_id, state, invited_by, created_at, updated_at)
-            VALUES (kacho_iam.membership_mirror_id(NEW.id, NEW.account_id),
+            INSERT INTO kaname.memberships (id, user_id, account_id, state, invited_by, created_at, updated_at)
+            VALUES (kaname.membership_mirror_id(NEW.id, NEW.account_id),
                     NEW.id,
                     NEW.account_id,
                     CASE WHEN NEW.invite_status = 'PENDING' THEN 'PENDING' ELSE 'ACTIVE' END,
@@ -1215,13 +1215,13 @@ BEGIN
                SET state      = EXCLUDED.state,
                    invited_by = EXCLUDED.invited_by,
                    updated_at = now()
-             WHERE kacho_iam.memberships.state      IS DISTINCT FROM EXCLUDED.state
-                OR kacho_iam.memberships.invited_by IS DISTINCT FROM EXCLUDED.invited_by;
+             WHERE kaname.memberships.state      IS DISTINCT FROM EXCLUDED.state
+                OR kaname.memberships.invited_by IS DISTINCT FROM EXCLUDED.invited_by;
         END IF;
     ELSE
         -- Правка строки: зеркало ПРАВИТ существующее членство и НЕ заводит
         -- нового. Снятое членство не возвращается ничем, кроме приглашения.
-        UPDATE kacho_iam.memberships m
+        UPDATE kaname.memberships m
            SET state      = CASE WHEN NEW.invite_status = 'PENDING' THEN 'PENDING' ELSE 'ACTIVE' END,
                invited_by = NEW.invited_by,
                updated_at = now()
@@ -1234,7 +1234,7 @@ BEGIN
     -- Первый вход: человек перестал быть приглашённым — значит приглашённым он
     -- не остаётся НИ В ОДНОМ аккаунте (20260823053000, воспроизведено дословно).
     IF NEW.invite_status <> 'PENDING' THEN
-        UPDATE kacho_iam.memberships
+        UPDATE kaname.memberships
            SET state = 'ACTIVE', updated_at = now()
          WHERE user_id = NEW.id AND state = 'PENDING';
     END IF;
@@ -1245,10 +1245,10 @@ $$;
 
 
 --
--- Name: membership_mirror_id(text, text); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: membership_mirror_id(text, text); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.membership_mirror_id(p_user_id text, p_account_id text) RETURNS text
+CREATE FUNCTION kaname.membership_mirror_id(p_user_id text, p_account_id text) RETURNS text
     LANGUAGE sql IMMUTABLE
     AS $$
     SELECT 'mbr-' || substr(md5('membership:' || p_user_id || ':' || p_account_id), 1, 17);
@@ -1256,17 +1256,17 @@ $$;
 
 
 --
--- Name: minted_cutoff_on_client_removal(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: minted_cutoff_on_client_removal(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.minted_cutoff_on_client_removal() RETURNS trigger
+CREATE FUNCTION kaname.minted_cutoff_on_client_removal() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    INSERT INTO kacho_iam.minted_token_revocations (subject, revoke_before, reason, revoked_by)
-    VALUES (OLD.id, now(), 'client key revoked: registry row removed', 'kacho_iam:client-key-revoked')
+    INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
+    VALUES (OLD.id, now(), 'client key revoked: registry row removed', 'kaname:client-key-revoked')
     ON CONFLICT (subject) DO UPDATE
-       SET revoke_before = GREATEST(kacho_iam.minted_token_revocations.revoke_before, EXCLUDED.revoke_before),
+       SET revoke_before = GREATEST(kaname.minted_token_revocations.revoke_before, EXCLUDED.revoke_before),
            reason        = EXCLUDED.reason,
            revoked_by    = EXCLUDED.revoked_by,
            updated_at    = now();
@@ -1276,17 +1276,17 @@ $$;
 
 
 --
--- Name: minted_cutoff_on_owner_deactivation(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: minted_cutoff_on_owner_deactivation(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.minted_cutoff_on_owner_deactivation() RETURNS trigger
+CREATE FUNCTION kaname.minted_cutoff_on_owner_deactivation() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    INSERT INTO kacho_iam.minted_token_revocations (subject, revoke_before, reason, revoked_by)
-    VALUES (NEW.id, now(), 'owner is no longer active', 'kacho_iam:owner-deactivated')
+    INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
+    VALUES (NEW.id, now(), 'owner is no longer active', 'kaname:owner-deactivated')
     ON CONFLICT (subject) DO UPDATE
-       SET revoke_before = GREATEST(kacho_iam.minted_token_revocations.revoke_before, EXCLUDED.revoke_before),
+       SET revoke_before = GREATEST(kaname.minted_token_revocations.revoke_before, EXCLUDED.revoke_before),
            reason        = EXCLUDED.reason,
            revoked_by    = EXCLUDED.revoked_by,
            updated_at    = now();
@@ -1296,15 +1296,15 @@ $$;
 
 
 --
--- Name: principal_not_referenced_as_subject(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: principal_not_referenced_as_subject(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.principal_not_referenced_as_subject() RETURNS trigger
+CREATE FUNCTION kaname.principal_not_referenced_as_subject() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
     IF EXISTS (
-        SELECT 1 FROM kacho_iam.access_binding_subjects
+        SELECT 1 FROM kaname.access_binding_subjects
          WHERE subject_type = TG_ARGV[0]
            AND subject_id   = OLD.id
     ) THEN
@@ -1320,24 +1320,24 @@ $$;
 
 
 --
--- Name: provider_compensation_outbox_notify(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: provider_compensation_outbox_notify(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.provider_compensation_outbox_notify() RETURNS trigger
+CREATE FUNCTION kaname.provider_compensation_outbox_notify() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    PERFORM pg_notify('kacho_iam_provider_compensation_outbox', NEW.id::text);
+    PERFORM pg_notify('kaname_provider_compensation_outbox', NEW.id::text);
     RETURN NEW;
 END;
 $$;
 
 
 --
--- Name: relation_fact_from_journal(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: relation_fact_from_journal(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.relation_fact_from_journal() RETURNS trigger
+CREATE FUNCTION kaname.relation_fact_from_journal() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -1388,14 +1388,14 @@ BEGIN
 
     FOREACH v_relation IN ARRAY v_relations LOOP
         IF NEW.event_type = 'fga.tuple.write' THEN
-            INSERT INTO kacho_iam.relation_fact
+            INSERT INTO kaname.relation_fact
                    (object_type, object_id, relation, subject, source_version, created_at)
             VALUES (v_type, v_id, v_relation, v_user, NEW.created_at, now())
             ON CONFLICT (object_type, object_id, relation, subject) DO UPDATE
                SET source_version = EXCLUDED.source_version
              WHERE relation_fact.source_version < EXCLUDED.source_version;
         ELSIF NEW.event_type = 'fga.tuple.delete' THEN
-            DELETE FROM kacho_iam.relation_fact
+            DELETE FROM kaname.relation_fact
              WHERE object_type = v_type AND object_id = v_id
                AND relation = v_relation AND subject = v_user
                AND source_version <= NEW.created_at;
@@ -1406,31 +1406,31 @@ END $$;
 
 
 --
--- Name: FUNCTION relation_fact_from_journal(); Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: FUNCTION relation_fact_from_journal(); Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON FUNCTION kacho_iam.relation_fact_from_journal() IS 'Проекция журнала намерений в прямой факт. Читает обе формы строки: набор отношений одной выдачи (`relations`, выигрывает у скаляра — он на выдаче лишь эхо) и одиночное `relation`. Отношение-глагол (v_*) НЕ переносится: его форма E выводит из выдачи, и копия сделала бы теневое сравнение тождеством.';
+COMMENT ON FUNCTION kaname.relation_fact_from_journal() IS 'Проекция журнала намерений в прямой факт. Читает обе формы строки: набор отношений одной выдачи (`relations`, выигрывает у скаляра — он на выдаче лишь эхо) и одиночное `relation`. Отношение-глагол (v_*) НЕ переносится: его форма E выводит из выдачи, и копия сделала бы теневое сравнение тождеством.';
 
 
 --
--- Name: resource_reconcile_outbox_notify(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: resource_reconcile_outbox_notify(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.resource_reconcile_outbox_notify() RETURNS trigger
+CREATE FUNCTION kaname.resource_reconcile_outbox_notify() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    PERFORM pg_notify('kacho_iam_resource_reconcile_outbox', NEW.id::text);
+    PERFORM pg_notify('kaname_resource_reconcile_outbox', NEW.id::text);
     RETURN NEW;
 END;
 $$;
 
 
 --
--- Name: role_rule_selector_types_live(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: role_rule_selector_types_live(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.role_rule_selector_types_live() RETURNS trigger
+CREATE FUNCTION kaname.role_rule_selector_types_live() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -1442,7 +1442,7 @@ BEGIN
         -- этой записью по разным снимкам: снятие меняет `live`, входящий в
         -- уникальные ограничения — цели внешних ключей, то есть обновляет КЛЮЧ и
         -- берёт FOR UPDATE, а FOR UPDATE с FOR KEY SHARE конфликтует.
-        PERFORM 1 FROM kacho_iam.catalog_resource cr
+        PERFORM 1 FROM kaname.catalog_resource cr
          WHERE cr.dotted = declared_type AND cr.live
            FOR KEY SHARE OF cr;
         IF NOT FOUND THEN
@@ -1459,17 +1459,17 @@ $$;
 
 
 --
--- Name: FUNCTION role_rule_selector_types_live(); Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: FUNCTION role_rule_selector_types_live(); Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON FUNCTION kacho_iam.role_rule_selector_types_live() IS 'Референт ТРЕТЬЕЙ поверхности проекции правила: каждый элемент role_rule_selectors.object_types обязан называть живую строку kacho_iam.catalog_resource. Внешний ключ на элемент массива невыразим, проверка в коде запрещена (ban #10) — поэтому триггер. Проверяется КАЖДЫЙ элемент; отказ 23514 называет элемент и роль. Локальная переменная названа declared_type, а не именем колонки catalog_resource: совпадение имён даёт 42702 на КАЖДОЙ записи селектора. Строка каталога читается ПОД FOR KEY SHARE — тем же замком, который взял бы внешний ключ: без него снятие строки и запись селектора расходятся по своим снимкам (перекос записи, #1985).';
+COMMENT ON FUNCTION kaname.role_rule_selector_types_live() IS 'Референт ТРЕТЬЕЙ поверхности проекции правила: каждый элемент role_rule_selectors.object_types обязан называть живую строку kaname.catalog_resource. Внешний ключ на элемент массива невыразим, проверка в коде запрещена (ban #10) — поэтому триггер. Проверяется КАЖДЫЙ элемент; отказ 23514 называет элемент и роль. Локальная переменная названа declared_type, а не именем колонки catalog_resource: совпадение имён даёт 42702 на КАЖДОЙ записи селектора. Строка каталога читается ПОД FOR KEY SHARE — тем же замком, который взял бы внешний ключ: без него снятие строки и запись селектора расходятся по своим снимкам (перекос записи, #1985).';
 
 
 --
--- Name: subject_ref_exists(); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: subject_ref_exists(); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.subject_ref_exists() RETURNS trigger
+CREATE FUNCTION kaname.subject_ref_exists() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -1484,7 +1484,7 @@ BEGIN
     IF NEW.subject_type = 'user' AND NEW.subject_id = '*' THEN
         IF TG_TABLE_NAME = 'access_binding_subjects' THEN
             SELECT b.is_system INTO parent_is_system
-              FROM kacho_iam.access_bindings b
+              FROM kaname.access_bindings b
              WHERE b.id = NEW.binding_id
              FOR KEY SHARE;
             IF NOT FOUND OR NOT parent_is_system THEN
@@ -1496,13 +1496,13 @@ BEGIN
     END IF;
 
     IF NEW.subject_type = 'user' THEN
-        PERFORM 1 FROM kacho_iam.users
+        PERFORM 1 FROM kaname.users
             WHERE id = NEW.subject_id FOR KEY SHARE;
     ELSIF NEW.subject_type = 'service_account' THEN
-        PERFORM 1 FROM kacho_iam.service_accounts
+        PERFORM 1 FROM kaname.service_accounts
             WHERE id = NEW.subject_id FOR KEY SHARE;
     ELSIF NEW.subject_type = 'group' THEN
-        PERFORM 1 FROM kacho_iam.groups
+        PERFORM 1 FROM kaname.groups
             WHERE id = NEW.subject_id FOR KEY SHARE;
     ELSE
         RAISE EXCEPTION USING ERRCODE = '23514',
@@ -1519,10 +1519,10 @@ $$;
 
 
 --
--- Name: text_array_longest(text[]); Type: FUNCTION; Schema: kacho_iam; Owner: -
+-- Name: text_array_longest(text[]); Type: FUNCTION; Schema: kaname; Owner: -
 --
 
-CREATE FUNCTION kacho_iam.text_array_longest(a text[]) RETURNS integer
+CREATE FUNCTION kaname.text_array_longest(a text[]) RETURNS integer
     LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
     AS $$ SELECT coalesce(max(length(x)), 0) FROM unnest(a) AS x $$;
 
@@ -1532,10 +1532,10 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
--- Name: access_binding_emitted_tuples; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: access_binding_emitted_tuples; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.access_binding_emitted_tuples (
+CREATE TABLE kaname.access_binding_emitted_tuples (
     binding_id text NOT NULL,
     fga_user text NOT NULL,
     relation text NOT NULL,
@@ -1549,10 +1549,10 @@ CREATE TABLE kacho_iam.access_binding_emitted_tuples (
 
 
 --
--- Name: access_binding_subjects; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: access_binding_subjects; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.access_binding_subjects (
+CREATE TABLE kaname.access_binding_subjects (
     binding_id text NOT NULL,
     subject_type text NOT NULL,
     subject_id text NOT NULL,
@@ -1565,10 +1565,10 @@ CREATE TABLE kacho_iam.access_binding_subjects (
 
 
 --
--- Name: access_binding_target_members; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: access_binding_target_members; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.access_binding_target_members (
+CREATE TABLE kaname.access_binding_target_members (
     binding_id text NOT NULL,
     object_type text NOT NULL,
     object_id text NOT NULL,
@@ -1587,17 +1587,17 @@ CREATE TABLE kacho_iam.access_binding_target_members (
 
 
 --
--- Name: COLUMN access_binding_target_members.live; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN access_binding_target_members.live; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.access_binding_target_members.live IS 'Константа true. Колонка существует ради ключа access_binding_target_members_role_live_fk: сослаться на «эта роль И она жива» без неё нечем. Константа законна потому, что строка состава СНИМАЕТСЯ, а не помечается.';
+COMMENT ON COLUMN kaname.access_binding_target_members.live IS 'Константа true. Колонка существует ради ключа access_binding_target_members_role_live_fk: сослаться на «эта роль И она жива» без неё нечем. Константа законна потому, что строка состава СНИМАЕТСЯ, а не помечается.';
 
 
 --
--- Name: access_bindings; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: access_bindings; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.access_bindings (
+CREATE TABLE kaname.access_bindings (
     id text NOT NULL,
     subject_type text NOT NULL,
     subject_id text NOT NULL,
@@ -1621,7 +1621,7 @@ CREATE TABLE kacho_iam.access_bindings (
     CONSTRAINT access_bindings_grant_form_ck CHECK ((((role_id IS NOT NULL) AND (granted_relation = ''::text)) OR ((role_id IS NULL) AND (granted_relation <> ''::text)))),
     CONSTRAINT access_bindings_granted_by_check CHECK ((length(granted_by_user_id) <= 64)),
     CONSTRAINT access_bindings_granted_relation_shape_ck CHECK (((granted_relation = ''::text) OR (granted_relation ~ '^[a-z][a-z0-9_]*$'::text))),
-    CONSTRAINT access_bindings_labels_valid CHECK (kacho_iam.kacho_labels_valid(labels)),
+    CONSTRAINT access_bindings_labels_valid CHECK (kaname.kacho_labels_valid(labels)),
     CONSTRAINT access_bindings_relation_form_anchor_ck CHECK (((granted_relation = ''::text) OR (resource_type = ANY (ARRAY['cluster'::text, 'account'::text, 'project'::text])))),
     CONSTRAINT access_bindings_relation_form_is_system_ck CHECK (((granted_relation = ''::text) OR is_system)),
     CONSTRAINT access_bindings_resource_ck CHECK (((resource_type ~ '^[a-z][a-z0-9_]*$'::text) OR (resource_type = '*'::text))),
@@ -1636,24 +1636,24 @@ CREATE TABLE kacho_iam.access_bindings (
 
 
 --
--- Name: COLUMN access_bindings.granted_relation; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN access_bindings.granted_relation; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.access_bindings.granted_relation IS 'Имя отношения модели, выдаваемое напрямую на области выдачи. Взаимоисключающе с role_id.';
-
-
---
--- Name: COLUMN access_bindings.is_system; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.access_bindings.is_system IS 'Выдача заведена платформой. Только для чтения на публичном контракте.';
+COMMENT ON COLUMN kaname.access_bindings.granted_relation IS 'Имя отношения модели, выдаваемое напрямую на области выдачи. Взаимоисключающе с role_id.';
 
 
 --
--- Name: account_admission_rate_limits; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN access_bindings.is_system; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.account_admission_rate_limits (
+COMMENT ON COLUMN kaname.access_bindings.is_system IS 'Выдача заведена платформой. Только для чтения на публичном контракте.';
+
+
+--
+-- Name: account_admission_rate_limits; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.account_admission_rate_limits (
     id bigint NOT NULL,
     kind text NOT NULL,
     max_events bigint NOT NULL,
@@ -1667,17 +1667,17 @@ CREATE TABLE kacho_iam.account_admission_rate_limits (
 
 
 --
--- Name: TABLE account_admission_rate_limits; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE account_admission_rate_limits; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.account_admission_rate_limits IS 'the ceiling on the RATE at which one identity may create accounts: how many per window. Separate from kacho_iam.limits because the value here is a PAIR and because the closed catalogue of countable kinds admits only real authz object types — a rate is not a thing one counts instances of';
+COMMENT ON TABLE kaname.account_admission_rate_limits IS 'the ceiling on the RATE at which one identity may create accounts: how many per window. Separate from kaname.limits because the value here is a PAIR and because the closed catalogue of countable kinds admits only real authz object types — a rate is not a thing one counts instances of';
 
 
 --
--- Name: account_admission_rate_limits_id_seq; Type: SEQUENCE; Schema: kacho_iam; Owner: -
+-- Name: account_admission_rate_limits_id_seq; Type: SEQUENCE; Schema: kaname; Owner: -
 --
 
-CREATE SEQUENCE kacho_iam.account_admission_rate_limits_id_seq
+CREATE SEQUENCE kaname.account_admission_rate_limits_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -1686,17 +1686,17 @@ CREATE SEQUENCE kacho_iam.account_admission_rate_limits_id_seq
 
 
 --
--- Name: account_admission_rate_limits_id_seq; Type: SEQUENCE OWNED BY; Schema: kacho_iam; Owner: -
+-- Name: account_admission_rate_limits_id_seq; Type: SEQUENCE OWNED BY; Schema: kaname; Owner: -
 --
 
-ALTER SEQUENCE kacho_iam.account_admission_rate_limits_id_seq OWNED BY kacho_iam.account_admission_rate_limits.id;
+ALTER SEQUENCE kaname.account_admission_rate_limits_id_seq OWNED BY kaname.account_admission_rate_limits.id;
 
 
 --
--- Name: accounts; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: accounts; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.accounts (
+CREATE TABLE kaname.accounts (
     id text NOT NULL,
     name text NOT NULL,
     description text DEFAULT ''::text NOT NULL,
@@ -1704,16 +1704,16 @@ CREATE TABLE kacho_iam.accounts (
     owner_user_id text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT accounts_description_check CHECK ((length(description) <= 256)),
-    CONSTRAINT accounts_labels_valid CHECK (kacho_iam.kacho_labels_valid(labels)),
+    CONSTRAINT accounts_labels_valid CHECK (kaname.kacho_labels_valid(labels)),
     CONSTRAINT accounts_name_check CHECK ((name ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'::text))
 );
 
 
 --
--- Name: audit_outbox; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: audit_outbox; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.audit_outbox (
+CREATE TABLE kaname.audit_outbox (
     id text NOT NULL,
     event_type text NOT NULL,
     tenant_account_id text,
@@ -1734,10 +1734,10 @@ CREATE TABLE kacho_iam.audit_outbox (
 
 
 --
--- Name: catalog_module; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: catalog_module; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.catalog_module (
+CREATE TABLE kaname.catalog_module (
     module text NOT NULL,
     retired_at timestamp with time zone,
     retired_reason text,
@@ -1749,17 +1749,17 @@ CREATE TABLE kacho_iam.catalog_module (
 
 
 --
--- Name: TABLE catalog_module; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE catalog_module; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.catalog_module IS 'Каталог модулей платформы. Источник посева — domain.KnownModules(). Строка живёт, пока retired_at IS NULL; согласие держит проверка, а не писатель.';
+COMMENT ON TABLE kaname.catalog_module IS 'Каталог модулей платформы. Источник посева — domain.KnownModules(). Строка живёт, пока retired_at IS NULL; согласие держит проверка, а не писатель.';
 
 
 --
--- Name: catalog_resource; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: catalog_resource; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.catalog_resource (
+CREATE TABLE kaname.catalog_resource (
     module text NOT NULL,
     resource text NOT NULL,
     dotted text NOT NULL,
@@ -1784,38 +1784,38 @@ END) STORED,
 
 
 --
--- Name: TABLE catalog_resource; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE catalog_resource; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.catalog_resource IS 'Каталог грантуемых типов. Источник посева — authzmap.objectTypes (27 живых) плюс domain.retiredTypes (3 снятых с преемником). Ключ role_rule_ref_res_fk ссылается на (module, resource, live), ключ role_verb_type_fk — на (dotted, live).';
-
-
---
--- Name: COLUMN catalog_resource.superseded_by; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.catalog_resource.superseded_by IS 'Точечное имя ЖИВОГО ресурса взамен снятого. Читается путём чтения каталога: в прерванной транзакции отказа чтения нет by construction, поэтому текст отказа преемника не называет и не обещает.';
+COMMENT ON TABLE kaname.catalog_resource IS 'Каталог грантуемых типов. Источник посева — authzmap.objectTypes (27 живых) плюс domain.retiredTypes (3 снятых с преемником). Ключ role_rule_ref_res_fk ссылается на (module, resource, live), ключ role_verb_type_fk — на (dotted, live).';
 
 
 --
--- Name: COLUMN catalog_resource.module_live; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN catalog_resource.superseded_by; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.catalog_resource.module_live IS 'Составляющая ключа «мой модуль ЖИВ». У живой строки — true, у снятой — NULL, и NULL здесь означает «эта строка модуль не удерживает», а не «значение не задано»: ключ с пустой составляющей считается выполненным (MATCH SIMPLE). Константа true сделала бы модуль неснимаемым — снятые строки каталога не удаляются.';
-
-
---
--- Name: COLUMN catalog_resource.object_type; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.catalog_resource.object_type IS 'Имя типа МОДЕЛИ ПРАВ (vpc_network, account), которым адресуется отношение v_<глагол>. Объявляется строкой манифеста (resources[].objectType) и приезжает вместе с ресурсом: правила вывода из пары не существует — у storage/registry имя ресурса множественное, а тип единственного числа, у ярусных предков иерархии тип идёт без приставки модуля. Без этой колонки тип, заведённый применением манифеста в работающем процессе, не доезжал бы до проекции вовсе (#1816, IAM-CT-2-14).';
+COMMENT ON COLUMN kaname.catalog_resource.superseded_by IS 'Точечное имя ЖИВОГО ресурса взамен снятого. Читается путём чтения каталога: в прерванной транзакции отказа чтения нет by construction, поэтому текст отказа преемника не называет и не обещает.';
 
 
 --
--- Name: catalog_verb; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN catalog_resource.module_live; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.catalog_verb (
+COMMENT ON COLUMN kaname.catalog_resource.module_live IS 'Составляющая ключа «мой модуль ЖИВ». У живой строки — true, у снятой — NULL, и NULL здесь означает «эта строка модуль не удерживает», а не «значение не задано»: ключ с пустой составляющей считается выполненным (MATCH SIMPLE). Константа true сделала бы модуль неснимаемым — снятые строки каталога не удаляются.';
+
+
+--
+-- Name: COLUMN catalog_resource.object_type; Type: COMMENT; Schema: kaname; Owner: -
+--
+
+COMMENT ON COLUMN kaname.catalog_resource.object_type IS 'Имя типа МОДЕЛИ ПРАВ (vpc_network, account), которым адресуется отношение v_<глагол>. Объявляется строкой манифеста (resources[].objectType) и приезжает вместе с ресурсом: правила вывода из пары не существует — у storage/registry имя ресурса множественное, а тип единственного числа, у ярусных предков иерархии тип идёт без приставки модуля. Без этой колонки тип, заведённый применением манифеста в работающем процессе, не доезжал бы до проекции вовсе (#1816, IAM-CT-2-14).';
+
+
+--
+-- Name: catalog_verb; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.catalog_verb (
     module text NOT NULL,
     resource text NOT NULL,
     verb text NOT NULL,
@@ -1836,31 +1836,31 @@ END) STORED,
 
 
 --
--- Name: TABLE catalog_verb; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE catalog_verb; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.catalog_verb IS 'Каталог глаголов ресурса, ДВУМЯ половинами: пообъектная (per_object = true) — источник посева authzmap.typeVerbRelations; ярусная (per_object = false) — классы действия без пообъектного референта by construction (create). Ключ role_rule_ref_verb_fk судит АВТОРСКИЙ глагол правила и ссылается на обе; набор глаголов ТИПА остаётся пообъектным.';
-
-
---
--- Name: COLUMN catalog_verb.per_object; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.catalog_verb.per_object IS 'Строка ПРОИЗВОДИТ пообъектное отношение v_<verb> на своём типе. Ложь — глагол законен АВТОРСКИ и не даёт кортежа ни на одном объекте: его действие несёт ярус на родителе. Читается internal/catalog.NewFacts: ярусная строка в набор глаголов типа НЕ входит, поэтому не материализуется.';
+COMMENT ON TABLE kaname.catalog_verb IS 'Каталог глаголов ресурса, ДВУМЯ половинами: пообъектная (per_object = true) — источник посева authzmap.typeVerbRelations; ярусная (per_object = false) — классы действия без пообъектного референта by construction (create). Ключ role_rule_ref_verb_fk судит АВТОРСКИЙ глагол правила и ссылается на обе; набор глаголов ТИПА остаётся пообъектным.';
 
 
 --
--- Name: COLUMN catalog_verb.resource_live; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN catalog_verb.per_object; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.catalog_verb.resource_live IS 'Составляющая ключа «мой ресурс ЖИВ». У живой строки — true, у снятой — NULL, и NULL здесь означает «эта строка ресурс не удерживает», а не «значение не задано»: ключ с пустой составляющей не проверяется вовсе (MATCH SIMPLE). Константа true сделала бы ресурс неснимаемым — снятые строки каталога не удаляются. СУЩЕСТВОВАНИЕ ресурса эта колонка не утверждает: его держит catalog_verb_resource_fk, и потому тот ключ не снимается.';
+COMMENT ON COLUMN kaname.catalog_verb.per_object IS 'Строка ПРОИЗВОДИТ пообъектное отношение v_<verb> на своём типе. Ложь — глагол законен АВТОРСКИ и не даёт кортежа ни на одном объекте: его действие несёт ярус на родителе. Читается internal/catalog.NewFacts: ярусная строка в набор глаголов типа НЕ входит, поэтому не материализуется.';
 
 
 --
--- Name: client_assertion_replay; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN catalog_verb.resource_live; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.client_assertion_replay (
+COMMENT ON COLUMN kaname.catalog_verb.resource_live IS 'Составляющая ключа «мой ресурс ЖИВ». У живой строки — true, у снятой — NULL, и NULL здесь означает «эта строка ресурс не удерживает», а не «значение не задано»: ключ с пустой составляющей не проверяется вовсе (MATCH SIMPLE). Константа true сделала бы ресурс неснимаемым — снятые строки каталога не удаляются. СУЩЕСТВОВАНИЕ ресурса эта колонка не утверждает: его держит catalog_verb_resource_fk, и потому тот ключ не снимается.';
+
+
+--
+-- Name: client_assertion_replay; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.client_assertion_replay (
     client_id text NOT NULL,
     assertion_id text NOT NULL,
     expires_at timestamp with time zone NOT NULL,
@@ -1871,17 +1871,17 @@ CREATE TABLE kacho_iam.client_assertion_replay (
 
 
 --
--- Name: TABLE client_assertion_replay; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE client_assertion_replay; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.client_assertion_replay IS 'Погашенные утверждения клиента: пара «клиент + идентификатор однократности». Допуск — один оператор, уникальность держит первичный ключ. Строка живёт до истечения утверждения и убирается сборщиком.';
+COMMENT ON TABLE kaname.client_assertion_replay IS 'Погашенные утверждения клиента: пара «клиент + идентификатор однократности». Допуск — один оператор, уникальность держит первичный ключ. Строка живёт до истечения утверждения и убирается сборщиком.';
 
 
 --
--- Name: cluster_admin_grants; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: cluster_admin_grants; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.cluster_admin_grants (
+CREATE TABLE kaname.cluster_admin_grants (
     id text NOT NULL,
     cluster_id text DEFAULT 'cluster_kacho_root'::text NOT NULL,
     subject_type text NOT NULL,
@@ -1898,10 +1898,10 @@ CREATE TABLE kacho_iam.cluster_admin_grants (
 
 
 --
--- Name: clusters; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: clusters; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.clusters (
+CREATE TABLE kaname.clusters (
     id text NOT NULL,
     name text NOT NULL,
     description text DEFAULT ''::text NOT NULL,
@@ -1913,10 +1913,10 @@ CREATE TABLE kacho_iam.clusters (
 
 
 --
--- Name: federated_trusted_issuers; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: federated_trusted_issuers; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.federated_trusted_issuers (
+CREATE TABLE kaname.federated_trusted_issuers (
     issuer text NOT NULL,
     subject text NOT NULL,
     sa_oauth_client_id text NOT NULL,
@@ -1933,17 +1933,17 @@ CREATE TABLE kacho_iam.federated_trusted_issuers (
 
 
 --
--- Name: TABLE federated_trusted_issuers; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE federated_trusted_issuers; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.federated_trusted_issuers IS 'Перечень доверенных издателей утверждения (#1124). Читается проверкой утверждения на пути запроса (internal/clientassertion, федеративная полоса) — до этой задачи перечень вёл внешний поставщик, и решение о доверии принимал он. Пара (issuer, subject) глобально уникальна: иначе разрешение стало бы недетерминированным. Пустая таблица означает «не доверяем никому» и является законным состоянием.';
+COMMENT ON TABLE kaname.federated_trusted_issuers IS 'Перечень доверенных издателей утверждения (#1124). Читается проверкой утверждения на пути запроса (internal/clientassertion, федеративная полоса) — до этой задачи перечень вёл внешний поставщик, и решение о доверии принимал он. Пара (issuer, subject) глобально уникальна: иначе разрешение стало бы недетерминированным. Пустая таблица означает «не доверяем никому» и является законным состоянием.';
 
 
 --
--- Name: fga_outbox; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: fga_outbox; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.fga_outbox (
+CREATE TABLE kaname.fga_outbox (
     id bigint NOT NULL,
     event_type text NOT NULL,
     payload jsonb NOT NULL,
@@ -1954,10 +1954,10 @@ WITH (autovacuum_analyze_scale_factor='0.0', autovacuum_analyze_threshold='1000'
 
 
 --
--- Name: fga_outbox_id_seq; Type: SEQUENCE; Schema: kacho_iam; Owner: -
+-- Name: fga_outbox_id_seq; Type: SEQUENCE; Schema: kaname; Owner: -
 --
 
-CREATE SEQUENCE kacho_iam.fga_outbox_id_seq
+CREATE SEQUENCE kaname.fga_outbox_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -1966,17 +1966,17 @@ CREATE SEQUENCE kacho_iam.fga_outbox_id_seq
 
 
 --
--- Name: fga_outbox_id_seq; Type: SEQUENCE OWNED BY; Schema: kacho_iam; Owner: -
+-- Name: fga_outbox_id_seq; Type: SEQUENCE OWNED BY; Schema: kaname; Owner: -
 --
 
-ALTER SEQUENCE kacho_iam.fga_outbox_id_seq OWNED BY kacho_iam.fga_outbox.id;
+ALTER SEQUENCE kaname.fga_outbox_id_seq OWNED BY kaname.fga_outbox.id;
 
 
 --
--- Name: group_members; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: group_members; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.group_members (
+CREATE TABLE kaname.group_members (
     group_id text NOT NULL,
     member_type text NOT NULL,
     member_id text NOT NULL,
@@ -1986,10 +1986,10 @@ CREATE TABLE kacho_iam.group_members (
 
 
 --
--- Name: groups; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: groups; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.groups (
+CREATE TABLE kaname.groups (
     id text NOT NULL,
     account_id text NOT NULL,
     name text NOT NULL,
@@ -1997,16 +1997,16 @@ CREATE TABLE kacho_iam.groups (
     labels jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT groups_description_check CHECK ((length(description) <= 256)),
-    CONSTRAINT groups_labels_valid CHECK (kacho_iam.kacho_labels_valid(labels)),
+    CONSTRAINT groups_labels_valid CHECK (kaname.kacho_labels_valid(labels)),
     CONSTRAINT groups_name_check CHECK ((name ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'::text))
 );
 
 
 --
--- Name: identity_admission_windows; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: identity_admission_windows; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.identity_admission_windows (
+CREATE TABLE kaname.identity_admission_windows (
     carrier_id text NOT NULL,
     kind text NOT NULL,
     window_started_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -2018,24 +2018,24 @@ CREATE TABLE kacho_iam.identity_admission_windows (
 
 
 --
--- Name: TABLE identity_admission_windows; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE identity_admission_windows; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.identity_admission_windows IS 'one row per identity and kind: when the current window started and how many admissions it has taken. A fixed window, not a sliding one — a sliding window needs a row per event and a sweeper. The cost is named rather than hidden: across a window boundary up to 2N admissions are possible';
-
-
---
--- Name: COLUMN identity_admission_windows.carrier_id; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.identity_admission_windows.carrier_id IS 'the external login subject (users.external_id), the same carrier the volume ceiling counts by — a user row is a membership and would hand out the bypass';
+COMMENT ON TABLE kaname.identity_admission_windows IS 'one row per identity and kind: when the current window started and how many admissions it has taken. A fixed window, not a sliding one — a sliding window needs a row per event and a sweeper. The cost is named rather than hidden: across a window boundary up to 2N admissions are possible';
 
 
 --
--- Name: identity_journal; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN identity_admission_windows.carrier_id; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.identity_journal (
+COMMENT ON COLUMN kaname.identity_admission_windows.carrier_id IS 'the external login subject (users.external_id), the same carrier the volume ceiling counts by — a user row is a membership and would hand out the bypass';
+
+
+--
+-- Name: identity_journal; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.identity_journal (
     identity text NOT NULL,
     first_seen_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT identity_journal_identity_ck CHECK ((identity <> ''::text))
@@ -2043,24 +2043,24 @@ CREATE TABLE kacho_iam.identity_journal (
 
 
 --
--- Name: TABLE identity_journal; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE identity_journal; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.identity_journal IS 'accumulating ledger of every login identity the platform has ever seen. Rows are never removed, not even when the person leaves: the question asked of it is about the whole life of the platform, and an instantaneous count answers a different one. Monotone by construction, so growth is defined on it';
-
-
---
--- Name: COLUMN identity_journal.identity; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.identity_journal.identity IS 'the external login subject (users.external_id), NOT a user row id: a user row is a membership scoped to one account, and one person holds one per account';
+COMMENT ON TABLE kaname.identity_journal IS 'accumulating ledger of every login identity the platform has ever seen. Rows are never removed, not even when the person leaves: the question asked of it is about the whole life of the platform, and an instantaneous count answers a different one. Monotone by construction, so growth is defined on it';
 
 
 --
--- Name: interactive_clients; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN identity_journal.identity; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.interactive_clients (
+COMMENT ON COLUMN kaname.identity_journal.identity IS 'the external login subject (users.external_id), NOT a user row id: a user row is a membership scoped to one account, and one person holds one per account';
+
+
+--
+-- Name: interactive_clients; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.interactive_clients (
     id text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     name text NOT NULL,
@@ -2082,10 +2082,10 @@ CREATE TABLE kacho_iam.interactive_clients (
 
 
 --
--- Name: invite_mail_outbox; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: invite_mail_outbox; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.invite_mail_outbox (
+CREATE TABLE kaname.invite_mail_outbox (
     id bigint NOT NULL,
     event_type text NOT NULL,
     payload jsonb NOT NULL,
@@ -2103,10 +2103,10 @@ CREATE TABLE kacho_iam.invite_mail_outbox (
 
 
 --
--- Name: invite_mail_outbox_id_seq; Type: SEQUENCE; Schema: kacho_iam; Owner: -
+-- Name: invite_mail_outbox_id_seq; Type: SEQUENCE; Schema: kaname; Owner: -
 --
 
-CREATE SEQUENCE kacho_iam.invite_mail_outbox_id_seq
+CREATE SEQUENCE kaname.invite_mail_outbox_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -2115,17 +2115,17 @@ CREATE SEQUENCE kacho_iam.invite_mail_outbox_id_seq
 
 
 --
--- Name: invite_mail_outbox_id_seq; Type: SEQUENCE OWNED BY; Schema: kacho_iam; Owner: -
+-- Name: invite_mail_outbox_id_seq; Type: SEQUENCE OWNED BY; Schema: kaname; Owner: -
 --
 
-ALTER SEQUENCE kacho_iam.invite_mail_outbox_id_seq OWNED BY kacho_iam.invite_mail_outbox.id;
+ALTER SEQUENCE kaname.invite_mail_outbox_id_seq OWNED BY kaname.invite_mail_outbox.id;
 
 
 --
--- Name: limits; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: limits; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.limits (
+CREATE TABLE kaname.limits (
     id text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     scope text NOT NULL,
@@ -2143,10 +2143,10 @@ CREATE TABLE kacho_iam.limits (
 
 
 --
--- Name: limits_revision_seq; Type: SEQUENCE; Schema: kacho_iam; Owner: -
+-- Name: limits_revision_seq; Type: SEQUENCE; Schema: kaname; Owner: -
 --
 
-CREATE SEQUENCE kacho_iam.limits_revision_seq
+CREATE SEQUENCE kaname.limits_revision_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -2155,10 +2155,10 @@ CREATE SEQUENCE kacho_iam.limits_revision_seq
 
 
 --
--- Name: memberships; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: memberships; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.memberships (
+CREATE TABLE kaname.memberships (
     id text NOT NULL,
     user_id text NOT NULL,
     account_id text NOT NULL,
@@ -2172,10 +2172,10 @@ CREATE TABLE kacho_iam.memberships (
 
 
 --
--- Name: minted_token_revocations; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: minted_token_revocations; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.minted_token_revocations (
+CREATE TABLE kaname.minted_token_revocations (
     subject text NOT NULL,
     revoke_before timestamp with time zone NOT NULL,
     reason text DEFAULT ''::text NOT NULL,
@@ -2188,17 +2188,17 @@ CREATE TABLE kacho_iam.minted_token_revocations (
 
 
 --
--- Name: TABLE minted_token_revocations; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE minted_token_revocations; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.minted_token_revocations IS 'Отзыв токенов, отчеканенных платформой: всё, выпущенное субъекту раньше revoke_before, недействительно. Читается авторитетом отзыва на пути запроса.';
+COMMENT ON TABLE kaname.minted_token_revocations IS 'Отзыв токенов, отчеканенных платформой: всё, выпущенное субъекту раньше revoke_before, недействительно. Читается авторитетом отзыва на пути запроса.';
 
 
 --
--- Name: operations; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: operations; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.operations (
+CREATE TABLE kaname.operations (
     id text NOT NULL,
     description text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -2222,10 +2222,10 @@ CREATE TABLE kacho_iam.operations (
 
 
 --
--- Name: project_resource_quotas; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: project_resource_quotas; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.project_resource_quotas (
+CREATE TABLE kaname.project_resource_quotas (
     carrier_type text NOT NULL,
     carrier_id text NOT NULL,
     kind text NOT NULL,
@@ -2247,31 +2247,31 @@ CREATE TABLE kacho_iam.project_resource_quotas (
 
 
 --
--- Name: TABLE project_resource_quotas; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE project_resource_quotas; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.project_resource_quotas IS 'resource-count accounting rows of the limit owner. iam is the only service that both states values and charges one of them: the accounts it counts live in this database, so the charge shares the transaction with the insert and the snapshot is refreshed from the authority in that same statement';
-
-
---
--- Name: COLUMN project_resource_quotas.carrier_id; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.project_resource_quotas.carrier_id IS 'for carrier_type=identity this is the external login subject (users.external_id), NOT a user row id: a user row is a membership scoped to one account, and counting per membership would hand out the bypass';
+COMMENT ON TABLE kaname.project_resource_quotas IS 'resource-count accounting rows of the limit owner. iam is the only service that both states values and charges one of them: the accounts it counts live in this database, so the charge shares the transaction with the insert and the snapshot is refreshed from the authority in that same statement';
 
 
 --
--- Name: CONSTRAINT project_resource_quotas_account_mirror_ck ON project_resource_quotas; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN project_resource_quotas.carrier_id; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON CONSTRAINT project_resource_quotas_account_mirror_ck ON kacho_iam.project_resource_quotas IS 'the account mirror is required of every carrier that BELONGS to exactly one account. The login identity has no account, and a person belongs to many: writing one of them would state a membership that does not hold. A service account belongs to exactly one, and carries it';
+COMMENT ON COLUMN kaname.project_resource_quotas.carrier_id IS 'for carrier_type=identity this is the external login subject (users.external_id), NOT a user row id: a user row is a membership scoped to one account, and counting per membership would hand out the bypass';
 
 
 --
--- Name: projects; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: CONSTRAINT project_resource_quotas_account_mirror_ck ON project_resource_quotas; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.projects (
+COMMENT ON CONSTRAINT project_resource_quotas_account_mirror_ck ON kaname.project_resource_quotas IS 'the account mirror is required of every carrier that BELONGS to exactly one account. The login identity has no account, and a person belongs to many: writing one of them would state a membership that does not hold. A service account belongs to exactly one, and carries it';
+
+
+--
+-- Name: projects; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.projects (
     id text NOT NULL,
     account_id text NOT NULL,
     name text NOT NULL,
@@ -2279,16 +2279,16 @@ CREATE TABLE kacho_iam.projects (
     labels jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT projects_description_check CHECK ((length(description) <= 256)),
-    CONSTRAINT projects_labels_valid CHECK (kacho_iam.kacho_labels_valid(labels)),
+    CONSTRAINT projects_labels_valid CHECK (kaname.kacho_labels_valid(labels)),
     CONSTRAINT projects_name_check CHECK ((name ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'::text))
 );
 
 
 --
--- Name: provider_compensation_outbox; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: provider_compensation_outbox; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.provider_compensation_outbox (
+CREATE TABLE kaname.provider_compensation_outbox (
     id bigint NOT NULL,
     event_type text NOT NULL,
     payload jsonb NOT NULL,
@@ -2305,10 +2305,10 @@ CREATE TABLE kacho_iam.provider_compensation_outbox (
 
 
 --
--- Name: provider_compensation_outbox_id_seq; Type: SEQUENCE; Schema: kacho_iam; Owner: -
+-- Name: provider_compensation_outbox_id_seq; Type: SEQUENCE; Schema: kaname; Owner: -
 --
 
-CREATE SEQUENCE kacho_iam.provider_compensation_outbox_id_seq
+CREATE SEQUENCE kaname.provider_compensation_outbox_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -2317,17 +2317,17 @@ CREATE SEQUENCE kacho_iam.provider_compensation_outbox_id_seq
 
 
 --
--- Name: provider_compensation_outbox_id_seq; Type: SEQUENCE OWNED BY; Schema: kacho_iam; Owner: -
+-- Name: provider_compensation_outbox_id_seq; Type: SEQUENCE OWNED BY; Schema: kaname; Owner: -
 --
 
-ALTER SEQUENCE kacho_iam.provider_compensation_outbox_id_seq OWNED BY kacho_iam.provider_compensation_outbox.id;
+ALTER SEQUENCE kaname.provider_compensation_outbox_id_seq OWNED BY kaname.provider_compensation_outbox.id;
 
 
 --
--- Name: recovery_completions; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: recovery_completions; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.recovery_completions (
+CREATE TABLE kaname.recovery_completions (
     recovery_jti text NOT NULL,
     external_id text NOT NULL,
     user_id text NOT NULL,
@@ -2341,17 +2341,17 @@ CREATE TABLE kacho_iam.recovery_completions (
 
 
 --
--- Name: TABLE recovery_completions; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE recovery_completions; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.recovery_completions IS 'Idempotency ledger for the Kratos recovery-completed webhook. PK recovery_jti dedups at-least-once delivery via INSERT … ON CONFLICT DO NOTHING; stores user_id / revoked_session_count for idempotent replay.';
+COMMENT ON TABLE kaname.recovery_completions IS 'Idempotency ledger for the Kratos recovery-completed webhook. PK recovery_jti dedups at-least-once delivery via INSERT … ON CONFLICT DO NOTHING; stores user_id / revoked_session_count for idempotent replay.';
 
 
 --
--- Name: relation_fact; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: relation_fact; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.relation_fact (
+CREATE TABLE kaname.relation_fact (
     object_type text NOT NULL,
     object_id text NOT NULL,
     relation text NOT NULL,
@@ -2371,17 +2371,17 @@ CREATE TABLE kacho_iam.relation_fact (
 
 
 --
--- Name: COLUMN relation_fact.object_type; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN relation_fact.object_type; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.relation_fact.object_type IS 'Тип объекта в словаре МОДЕЛИ ПРАВ — как в кортеже отношения, из которого факт записан.';
+COMMENT ON COLUMN kaname.relation_fact.object_type IS 'Тип объекта в словаре МОДЕЛИ ПРАВ — как в кортеже отношения, из которого факт записан.';
 
 
 --
--- Name: resource_mirror; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: resource_mirror; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.resource_mirror (
+CREATE TABLE kaname.resource_mirror (
     object_type text NOT NULL,
     object_id text NOT NULL,
     parent_project_id text DEFAULT ''::text NOT NULL,
@@ -2396,10 +2396,10 @@ CREATE TABLE kacho_iam.resource_mirror (
 
 
 --
--- Name: resource_parent_edge; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: resource_parent_edge; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.resource_parent_edge (
+CREATE TABLE kaname.resource_parent_edge (
     object_type text NOT NULL,
     object_id text NOT NULL,
     parent_type text NOT NULL,
@@ -2419,38 +2419,38 @@ CREATE TABLE kacho_iam.resource_parent_edge (
 
 
 --
--- Name: TABLE resource_parent_edge; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE resource_parent_edge; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.resource_parent_edge IS 'Цепь предков объекта в том виде, в каком её прислал владелец объекта: строка на предка, глубина — расстояние (1 — непосредственный). ЗАМЫКАНИЕМ НЕ ЯВЛЯЕТСЯ и схемой не требуется: производители шлют короткую цепь (обычно одно звено). СЮДА ПИШУТ, А ЧИТАЮТ ИЗ resource_scope_edge (миграция 740001): вопрос о доступе поднимается по представлению, которое добавляет к этим строкам два звена, выводимых из собственной схемы iam, — project→account и account→cluster. Прежде чем менять обход на одно чтение, докажи полноту замыкания: его не даёт ни эта таблица, ни представление.';
-
-
---
--- Name: COLUMN resource_parent_edge.object_type; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.resource_parent_edge.object_type IS 'Тип объекта в словаре МОДЕЛИ ПРАВ (vpc_network, account, cluster) — тем же, каким приходит вопрос о доступе и каким названы relation_fact.object_type и access_bindings.resource_type. НЕ словарь каталога (vpc.network): соединение по разным написаниям не совпадает никогда и молча.';
+COMMENT ON TABLE kaname.resource_parent_edge IS 'Цепь предков объекта в том виде, в каком её прислал владелец объекта: строка на предка, глубина — расстояние (1 — непосредственный). ЗАМЫКАНИЕМ НЕ ЯВЛЯЕТСЯ и схемой не требуется: производители шлют короткую цепь (обычно одно звено). СЮДА ПИШУТ, А ЧИТАЮТ ИЗ resource_scope_edge (миграция 740001): вопрос о доступе поднимается по представлению, которое добавляет к этим строкам два звена, выводимых из собственной схемы iam, — project→account и account→cluster. Прежде чем менять обход на одно чтение, докажи полноту замыкания: его не даёт ни эта таблица, ни представление.';
 
 
 --
--- Name: COLUMN resource_parent_edge.parent_type; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN resource_parent_edge.object_type; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.resource_parent_edge.parent_type IS 'Тип предка на расстоянии depth. Строка на дальнего предка ДОПУСКАЕТСЯ схемой, но производителями сегодня не пишется.';
-
-
---
--- Name: COLUMN resource_parent_edge.parent_id; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.resource_parent_edge.parent_id IS 'Идентификатор предка на расстоянии depth. Наличие строки на дальнего предка не гарантировано — цепь собирается обходом.';
+COMMENT ON COLUMN kaname.resource_parent_edge.object_type IS 'Тип объекта в словаре МОДЕЛИ ПРАВ (vpc_network, account, cluster) — тем же, каким приходит вопрос о доступе и каким названы relation_fact.object_type и access_bindings.resource_type. НЕ словарь каталога (vpc.network): соединение по разным написаниям не совпадает никогда и молча.';
 
 
 --
--- Name: resource_reconcile_outbox; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN resource_parent_edge.parent_type; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.resource_reconcile_outbox (
+COMMENT ON COLUMN kaname.resource_parent_edge.parent_type IS 'Тип предка на расстоянии depth. Строка на дальнего предка ДОПУСКАЕТСЯ схемой, но производителями сегодня не пишется.';
+
+
+--
+-- Name: COLUMN resource_parent_edge.parent_id; Type: COMMENT; Schema: kaname; Owner: -
+--
+
+COMMENT ON COLUMN kaname.resource_parent_edge.parent_id IS 'Идентификатор предка на расстоянии depth. Наличие строки на дальнего предка не гарантировано — цепь собирается обходом.';
+
+
+--
+-- Name: resource_reconcile_outbox; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.resource_reconcile_outbox (
     id bigint NOT NULL,
     object_type text NOT NULL,
     object_id text NOT NULL,
@@ -2466,11 +2466,11 @@ CREATE TABLE kacho_iam.resource_reconcile_outbox (
 
 
 --
--- Name: resource_reconcile_outbox_id_seq; Type: SEQUENCE; Schema: kacho_iam; Owner: -
+-- Name: resource_reconcile_outbox_id_seq; Type: SEQUENCE; Schema: kaname; Owner: -
 --
 
-ALTER TABLE kacho_iam.resource_reconcile_outbox ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME kacho_iam.resource_reconcile_outbox_id_seq
+ALTER TABLE kaname.resource_reconcile_outbox ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME kaname.resource_reconcile_outbox_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -2480,10 +2480,10 @@ ALTER TABLE kacho_iam.resource_reconcile_outbox ALTER COLUMN id ADD GENERATED AL
 
 
 --
--- Name: roles; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: roles; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.roles (
+CREATE TABLE kaname.roles (
     id text NOT NULL,
     account_id text,
     name text NOT NULL,
@@ -2503,64 +2503,64 @@ CREATE TABLE kacho_iam.roles (
     CONSTRAINT roles_custom_name_check CHECK ((is_system OR (name ~ '^[a-z][a-z0-9_]{0,40}$'::text))),
     CONSTRAINT roles_definition_tier_xor CHECK ((num_nonnulls(cluster_id, account_id, project_id) = 1)),
     CONSTRAINT roles_description_check CHECK ((length(description) <= 256)),
-    CONSTRAINT roles_labels_valid CHECK (kacho_iam.kacho_labels_valid(labels)),
+    CONSTRAINT roles_labels_valid CHECK (kaname.kacho_labels_valid(labels)),
     CONSTRAINT roles_live_matches_retired CHECK ((live = (retired_at IS NULL))),
     CONSTRAINT roles_owner_module_is_cluster_tier CHECK (((owner_module IS NULL) OR is_system)),
     CONSTRAINT roles_owner_module_name_prefix CHECK (((owner_module IS NULL) OR ("left"(name, (length(owner_module) + 1)) = (owner_module || '.'::text)))),
-    CONSTRAINT roles_permissions_valid CHECK ((((jsonb_array_length(permissions) = 0) AND (jsonb_array_length(rules) > 0)) OR kacho_iam.iam_permissions_valid(permissions))),
-    CONSTRAINT roles_rule_wildcards_confined CHECK (kacho_iam.iam_rule_wildcards_confined(rules, owner_module)),
-    CONSTRAINT roles_rules_valid CHECK (kacho_iam.iam_rules_valid(rules)),
+    CONSTRAINT roles_permissions_valid CHECK ((((jsonb_array_length(permissions) = 0) AND (jsonb_array_length(rules) > 0)) OR kaname.iam_permissions_valid(permissions))),
+    CONSTRAINT roles_rule_wildcards_confined CHECK (kaname.iam_rule_wildcards_confined(rules, owner_module)),
+    CONSTRAINT roles_rules_valid CHECK (kaname.iam_rules_valid(rules)),
     CONSTRAINT roles_system_name_check CHECK (((NOT is_system) OR (name ~ '^[a-z][-a-z0-9]*(\.[a-z][a-z0-9_]*){0,2}$'::text)))
 );
 
 
 --
--- Name: COLUMN roles.owner_module; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN roles.owner_module; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.roles.owner_module IS 'Модуль, которому принадлежит роль. NULL — платформенная роль (admin/edit/view/owner, kacho-system.*): её объявляет платформа, и послабление подстановки у неё полное. Непустое значение — роль, объявленная манифестом этого модуля: подстановка законна ровно в пределах названного модуля (roles_rule_wildcards_confined), а имя составлено из владельца (roles_owner_module_name_prefix). Признак is_system при этом НЕ меняется ни на одну строку: роль модуля остаётся системной, и арендатор её по-прежнему не правит. Задача продукта #1032.';
-
-
---
--- Name: COLUMN roles.retired_at; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.roles.retired_at IS 'Момент снятия роли. NULL — роль объявлена. Согласие с live держит проверка roles_live_matches_retired, а не писатель.';
+COMMENT ON COLUMN kaname.roles.owner_module IS 'Модуль, которому принадлежит роль. NULL — платформенная роль (admin/edit/view/owner, kacho-system.*): её объявляет платформа, и послабление подстановки у неё полное. Непустое значение — роль, объявленная манифестом этого модуля: подстановка законна ровно в пределах названного модуля (roles_rule_wildcards_confined), а имя составлено из владельца (roles_owner_module_name_prefix). Признак is_system при этом НЕ меняется ни на одну строку: роль модуля остаётся системной, и арендатор её по-прежнему не правит. Задача продукта #1032.';
 
 
 --
--- Name: COLUMN roles.retired_reason; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN roles.retired_at; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.roles.retired_reason IS 'Причина снятия — то, что арендатор читает у отобранного права. Без неё «отобрали» неотличимо от «сломалось».';
-
-
---
--- Name: COLUMN roles.retired_by; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.roles.retired_by IS 'Кто снял: сегодня — процессный актор пути старта; глагол применения назовёт проверенную личность вызывающего. Колонка NULLABLE, и это отличие от applied_by двух ведомостей (20260903215500, там NOT NULL DEFAULT '') названо намеренно: здесь пустого значения у снятой строки НЕ БЫВАЕТ — производитель заводится тем же изменением, что и колонка, и пишет автора всегда. NULL означает «роль не снята», а не «автора потеряли», и согласие с этим держит roles_live_matches_retired.';
+COMMENT ON COLUMN kaname.roles.retired_at IS 'Момент снятия роли. NULL — роль объявлена. Согласие с live держит проверка roles_live_matches_retired, а не писатель.';
 
 
 --
--- Name: COLUMN roles.live; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN roles.retired_reason; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.roles.live IS 'Живость строки роли. Колонка ОБЫЧНАЯ, а не выражение: на ней стоит референт uniqueness (id, live), а выражение референтом быть не может. Умолчание true делает существующие строки живыми БЕЗ обратного заполнения.';
-
-
---
--- Name: CONSTRAINT roles_owner_module_is_cluster_tier ON roles; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON CONSTRAINT roles_owner_module_is_cluster_tier ON kacho_iam.roles IS 'Роль с владельцем-модулем стоит на кластерном ярусе. До этого ограничения инвариант держали ДВА софтверных места (пропуск не-кластерного яруса применителем и единственный писатель owner_module) и — побочно — две проверки ИМЕНИ, требования которых несовместимы. Ни одно из четырёх не про владение: первые два снимаются вторым писателем, вторые два — послаблением формы имени. Задача продукта #2020.';
+COMMENT ON COLUMN kaname.roles.retired_reason IS 'Причина снятия — то, что арендатор читает у отобранного права. Без неё «отобрали» неотличимо от «сломалось».';
 
 
 --
--- Name: service_accounts; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN roles.retired_by; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.service_accounts (
+COMMENT ON COLUMN kaname.roles.retired_by IS 'Кто снял: сегодня — процессный актор пути старта; глагол применения назовёт проверенную личность вызывающего. Колонка NULLABLE, и это отличие от applied_by двух ведомостей (20260903215500, там NOT NULL DEFAULT '') названо намеренно: здесь пустого значения у снятой строки НЕ БЫВАЕТ — производитель заводится тем же изменением, что и колонка, и пишет автора всегда. NULL означает «роль не снята», а не «автора потеряли», и согласие с этим держит roles_live_matches_retired.';
+
+
+--
+-- Name: COLUMN roles.live; Type: COMMENT; Schema: kaname; Owner: -
+--
+
+COMMENT ON COLUMN kaname.roles.live IS 'Живость строки роли. Колонка ОБЫЧНАЯ, а не выражение: на ней стоит референт uniqueness (id, live), а выражение референтом быть не может. Умолчание true делает существующие строки живыми БЕЗ обратного заполнения.';
+
+
+--
+-- Name: CONSTRAINT roles_owner_module_is_cluster_tier ON roles; Type: COMMENT; Schema: kaname; Owner: -
+--
+
+COMMENT ON CONSTRAINT roles_owner_module_is_cluster_tier ON kaname.roles IS 'Роль с владельцем-модулем стоит на кластерном ярусе. До этого ограничения инвариант держали ДВА софтверных места (пропуск не-кластерного яруса применителем и единственный писатель owner_module) и — побочно — две проверки ИМЕНИ, требования которых несовместимы. Ни одно из четырёх не про владение: первые два снимаются вторым писателем, вторые два — послаблением формы имени. Задача продукта #2020.';
+
+
+--
+-- Name: service_accounts; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.service_accounts (
     id text NOT NULL,
     account_id text NOT NULL,
     name text NOT NULL,
@@ -2569,31 +2569,31 @@ CREATE TABLE kacho_iam.service_accounts (
     enabled boolean DEFAULT true NOT NULL,
     labels jsonb DEFAULT '{}'::jsonb NOT NULL,
     CONSTRAINT service_accounts_description_check CHECK ((length(description) <= 256)),
-    CONSTRAINT service_accounts_labels_valid CHECK (kacho_iam.kacho_labels_valid(labels)),
+    CONSTRAINT service_accounts_labels_valid CHECK (kaname.kacho_labels_valid(labels)),
     CONSTRAINT service_accounts_name_check CHECK ((name ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'::text))
 );
 
 
 --
--- Name: resource_scope_edge; Type: VIEW; Schema: kacho_iam; Owner: -
+-- Name: resource_scope_edge; Type: VIEW; Schema: kaname; Owner: -
 --
 
-CREATE VIEW kacho_iam.resource_scope_edge AS
+CREATE VIEW kaname.resource_scope_edge AS
  SELECT e.object_type,
     e.object_id,
     e.parent_type,
     e.parent_id,
     e.depth
-   FROM kacho_iam.resource_parent_edge e
+   FROM kaname.resource_parent_edge e
 UNION ALL
  SELECT 'project'::text AS object_type,
     f.object_id,
     split_part(f.subject, ':'::text, 1) AS parent_type,
     substr(f.subject, (POSITION((':'::text) IN (f.subject)) + 1)) AS parent_id,
     1 AS depth
-   FROM kacho_iam.relation_fact f
+   FROM kaname.relation_fact f
   WHERE ((f.object_type = 'project'::text) AND (f.relation = split_part(f.subject, ':'::text, 1)) AND (POSITION(('#'::text) IN (f.subject)) = 0) AND (NOT (EXISTS ( SELECT 1
-           FROM kacho_iam.resource_parent_edge e
+           FROM kaname.resource_parent_edge e
           WHERE ((e.object_type = 'project'::text) AND (e.object_id = f.object_id))))))
 UNION ALL
  SELECT 'account'::text AS object_type,
@@ -2601,10 +2601,10 @@ UNION ALL
     'cluster'::text AS parent_type,
     c.id AS parent_id,
     1 AS depth
-   FROM (kacho_iam.accounts a
-     CROSS JOIN kacho_iam.clusters c)
+   FROM (kaname.accounts a
+     CROSS JOIN kaname.clusters c)
   WHERE (NOT (EXISTS ( SELECT 1
-           FROM kacho_iam.resource_parent_edge e
+           FROM kaname.resource_parent_edge e
           WHERE ((e.object_type = 'account'::text) AND (e.object_id = a.id)))))
 UNION ALL
  SELECT 'iam_user'::text AS object_type,
@@ -2612,9 +2612,9 @@ UNION ALL
     'account'::text AS parent_type,
     m.account_id AS parent_id,
     1 AS depth
-   FROM kacho_iam.memberships m
+   FROM kaname.memberships m
   WHERE ((COALESCE(m.account_id, ''::text) <> ''::text) AND (NOT (EXISTS ( SELECT 1
-           FROM kacho_iam.resource_parent_edge e
+           FROM kaname.resource_parent_edge e
           WHERE ((e.object_type = 'iam_user'::text) AND (e.object_id = m.user_id))))))
 UNION ALL
  SELECT 'iam_group'::text AS object_type,
@@ -2622,9 +2622,9 @@ UNION ALL
     'account'::text AS parent_type,
     o.account_id AS parent_id,
     1 AS depth
-   FROM kacho_iam.groups o
+   FROM kaname.groups o
   WHERE ((COALESCE(o.account_id, ''::text) <> ''::text) AND (NOT (EXISTS ( SELECT 1
-           FROM kacho_iam.resource_parent_edge e
+           FROM kaname.resource_parent_edge e
           WHERE ((e.object_type = 'iam_group'::text) AND (e.object_id = o.id))))))
 UNION ALL
  SELECT 'iam_service_account'::text AS object_type,
@@ -2632,9 +2632,9 @@ UNION ALL
     'account'::text AS parent_type,
     o.account_id AS parent_id,
     1 AS depth
-   FROM kacho_iam.service_accounts o
+   FROM kaname.service_accounts o
   WHERE ((COALESCE(o.account_id, ''::text) <> ''::text) AND (NOT (EXISTS ( SELECT 1
-           FROM kacho_iam.resource_parent_edge e
+           FROM kaname.resource_parent_edge e
           WHERE ((e.object_type = 'iam_service_account'::text) AND (e.object_id = o.id))))))
 UNION ALL
  SELECT 'iam_role'::text AS object_type,
@@ -2642,9 +2642,9 @@ UNION ALL
     'account'::text AS parent_type,
     o.account_id AS parent_id,
     1 AS depth
-   FROM kacho_iam.roles o
+   FROM kaname.roles o
   WHERE ((COALESCE(o.account_id, ''::text) <> ''::text) AND (NOT (EXISTS ( SELECT 1
-           FROM kacho_iam.resource_parent_edge e
+           FROM kaname.resource_parent_edge e
           WHERE ((e.object_type = 'iam_role'::text) AND (e.object_id = o.id))))))
 UNION ALL
  SELECT 'iam_role'::text AS object_type,
@@ -2652,9 +2652,9 @@ UNION ALL
     'project'::text AS parent_type,
     o.project_id AS parent_id,
     1 AS depth
-   FROM kacho_iam.roles o
+   FROM kaname.roles o
   WHERE ((COALESCE(o.project_id, ''::text) <> ''::text) AND (NOT (EXISTS ( SELECT 1
-           FROM kacho_iam.resource_parent_edge e
+           FROM kaname.resource_parent_edge e
           WHERE ((e.object_type = 'iam_role'::text) AND (e.object_id = o.id))))))
 UNION ALL
  SELECT 'iam_access_binding'::text AS object_type,
@@ -2662,24 +2662,24 @@ UNION ALL
     lower(o.resource_type) AS parent_type,
     o.resource_id AS parent_id,
     1 AS depth
-   FROM kacho_iam.access_bindings o
+   FROM kaname.access_bindings o
   WHERE ((lower(o.resource_type) = ANY (ARRAY['project'::text, 'account'::text, 'cluster'::text])) AND (COALESCE(o.resource_id, ''::text) <> ''::text) AND (NOT (EXISTS ( SELECT 1
-           FROM kacho_iam.resource_parent_edge e
+           FROM kaname.resource_parent_edge e
           WHERE ((e.object_type = 'iam_access_binding'::text) AND (e.object_id = o.id))))));
 
 
 --
--- Name: VIEW resource_scope_edge; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: VIEW resource_scope_edge; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON VIEW kacho_iam.resource_scope_edge IS 'Цепь областей, какой её читает вопрос о доступе: рёбра, присланные владельцами ресурсов (resource_parent_edge), ПЛЮС достроенные звенья. Предок ПРОЕКТА берётся из проекции журнала (relation_fact), предок АККАУНТА — из схемы (accounts × clusters). Предок ЛИЧНОСТИ — из kacho_iam.memberships (#471): принадлежность аккаунту перестала быть колонкой строки человека и стала отдельной связью, которых у него может быть несколько; состояние членства не читается — звено есть указатель вверх, а не выдача. Предок ГРУППЫ, СЛУЖЕБНОЙ УЧЁТКИ и РОЛИ — колонкой их собственной строки; предок ПРИВЯЗКИ — парой resource_type/resource_id для трёх областных значений закрытого набора isBindableScope. Правило одно: источник, полный ПО ПОСТРОЕНИЮ для ЭТОГО звена. Владелец, назвавший цепь своего объекта сам, вывод отменяет (NOT EXISTS). ПИСАТЬ СЮДА НЕЛЬЗЯ: производители пишут в resource_parent_edge и в журнал.';
+COMMENT ON VIEW kaname.resource_scope_edge IS 'Цепь областей, какой её читает вопрос о доступе: рёбра, присланные владельцами ресурсов (resource_parent_edge), ПЛЮС достроенные звенья. Предок ПРОЕКТА берётся из проекции журнала (relation_fact), предок АККАУНТА — из схемы (accounts × clusters). Предок ЛИЧНОСТИ — из kaname.memberships (#471): принадлежность аккаунту перестала быть колонкой строки человека и стала отдельной связью, которых у него может быть несколько; состояние членства не читается — звено есть указатель вверх, а не выдача. Предок ГРУППЫ, СЛУЖЕБНОЙ УЧЁТКИ и РОЛИ — колонкой их собственной строки; предок ПРИВЯЗКИ — парой resource_type/resource_id для трёх областных значений закрытого набора isBindableScope. Правило одно: источник, полный ПО ПОСТРОЕНИЮ для ЭТОГО звена. Владелец, назвавший цепь своего объекта сам, вывод отменяет (NOT EXISTS). ПИСАТЬ СЮДА НЕЛЬЗЯ: производители пишут в resource_parent_edge и в журнал.';
 
 
 --
--- Name: role_grant_orphan; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: role_grant_orphan; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.role_grant_orphan (
+CREATE TABLE kaname.role_grant_orphan (
     role_id text NOT NULL,
     object_type text NOT NULL,
     verb text NOT NULL,
@@ -2696,31 +2696,31 @@ CREATE TABLE kacho_iam.role_grant_orphan (
 
 
 --
--- Name: TABLE role_grant_orphan; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE role_grant_orphan; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.role_grant_orphan IS 'Выдачи и объявления, потерявшие референт при снятии строки каталога. Снятие ПЕРЕСЕЛЯЕТ, а не отбирает молча: без этой таблицы отобранное право было бы неотличимо от никогда не выданного.';
-
-
---
--- Name: COLUMN role_grant_orphan.applied_by; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.role_grant_orphan.applied_by IS 'Автор применения, снявшего эту строку: проверенная личность вызывающего на пути глагола либо названный процессный актор на пути старта. НЕ учётка, под которой исполнялась транзакция. ПУСТАЯ строка означает «строка переселена до заведения колонки», а НЕ «автора потеряли».';
+COMMENT ON TABLE kaname.role_grant_orphan IS 'Выдачи и объявления, потерявшие референт при снятии строки каталога. Снятие ПЕРЕСЕЛЯЕТ, а не отбирает молча: без этой таблицы отобранное право было бы неотличимо от никогда не выданного.';
 
 
 --
--- Name: COLUMN role_grant_orphan.cause; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN role_grant_orphan.applied_by; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.role_grant_orphan.cause IS 'ПОЧЕМУ строка переселена: catalog_retired — снята строка каталога, на которую ссылалось правило; role_retired — снята сама роль. Причина входит в первичный ключ, потому что обе могут относиться к одной паре «тип × глагол»: оживление роли снимает строки СВОЕЙ причины и не трогает чужих.';
+COMMENT ON COLUMN kaname.role_grant_orphan.applied_by IS 'Автор применения, снявшего эту строку: проверенная личность вызывающего на пути глагола либо названный процессный актор на пути старта. НЕ учётка, под которой исполнялась транзакция. ПУСТАЯ строка означает «строка переселена до заведения колонки», а НЕ «автора потеряли».';
 
 
 --
--- Name: role_rule_ref; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN role_grant_orphan.cause; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.role_rule_ref (
+COMMENT ON COLUMN kaname.role_grant_orphan.cause IS 'ПОЧЕМУ строка переселена: catalog_retired — снята строка каталога, на которую ссылалось правило; role_retired — снята сама роль. Причина входит в первичный ключ, потому что обе могут относиться к одной паре «тип × глагол»: оживление роли снимает строки СВОЕЙ причины и не трогает чужих.';
+
+
+--
+-- Name: role_rule_ref; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.role_rule_ref (
     role_id text NOT NULL,
     module text NOT NULL,
     resource text NOT NULL,
@@ -2736,24 +2736,24 @@ CREATE TABLE kacho_iam.role_rule_ref (
 
 
 --
--- Name: TABLE role_rule_ref; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE role_rule_ref; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.role_rule_ref IS 'Проекция ОБЪЯВЛЕННЫХ сегментов правила роли — то, на чём внешний ключ в каталог ВОЗМОЖЕН (на roles.rules jsonb он невыразим: подзапрос в CHECK отвергается DDL). Строка кладётся на КАЖДЫЙ объявленный сегмент, а не на резолвящийся. АВТОР один — role_repo.ReplaceRuleRefs: форму строки объявляет только тот, кто её вносит. Снимать вправе и не-автор (применитель каталога, когда референт снят), но снятое он обязан ПЕРЕСЕЛИТЬ в role_grant_orphan тем же оператором.';
-
-
---
--- Name: COLUMN role_rule_ref.verb; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.role_rule_ref.verb IS 'NULL — ЯКОРЬ (правило не сузило глаголы). Ключ ресурса на такой строке проверяется, ключ глагола пропускается MATCH SIMPLE — ресурс уже проверен первым.';
+COMMENT ON TABLE kaname.role_rule_ref IS 'Проекция ОБЪЯВЛЕННЫХ сегментов правила роли — то, на чём внешний ключ в каталог ВОЗМОЖЕН (на roles.rules jsonb он невыразим: подзапрос в CHECK отвергается DDL). Строка кладётся на КАЖДЫЙ объявленный сегмент, а не на резолвящийся. АВТОР один — role_repo.ReplaceRuleRefs: форму строки объявляет только тот, кто её вносит. Снимать вправе и не-автор (применитель каталога, когда референт снят), но снятое он обязан ПЕРЕСЕЛИТЬ в role_grant_orphan тем же оператором.';
 
 
 --
--- Name: role_rule_selectors; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN role_rule_ref.verb; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.role_rule_selectors (
+COMMENT ON COLUMN kaname.role_rule_ref.verb IS 'NULL — ЯКОРЬ (правило не сузило глаголы). Ключ ресурса на такой строке проверяется, ключ глагола пропускается MATCH SIMPLE — ресурс уже проверен первым.';
+
+
+--
+-- Name: role_rule_selectors; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.role_rule_selectors (
     role_id text NOT NULL,
     rule_fp text NOT NULL,
     object_types text[] NOT NULL,
@@ -2767,31 +2767,31 @@ CREATE TABLE kacho_iam.role_rule_selectors (
     CONSTRAINT role_rule_selectors_arm_valid CHECK ((arm = ANY (ARRAY['anchor'::text, 'names'::text, 'labels'::text]))),
     CONSTRAINT role_rule_selectors_fp_nonempty CHECK ((rule_fp <> ''::text)),
     CONSTRAINT role_rule_selectors_labels_obj CHECK ((jsonb_typeof(match_labels) = 'object'::text)),
-    CONSTRAINT role_rule_selectors_labels_valid CHECK (kacho_iam.kacho_labels_valid(match_labels)),
+    CONSTRAINT role_rule_selectors_labels_valid CHECK (kaname.kacho_labels_valid(match_labels)),
     CONSTRAINT role_rule_selectors_live_true CHECK (live),
     CONSTRAINT role_rule_selectors_types_nonempty CHECK ((cardinality(object_types) >= 1))
 );
 
 
 --
--- Name: COLUMN role_rule_selectors.object_types; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN role_rule_selectors.object_types; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.role_rule_selectors.object_types IS 'Типы объектов в ТОЧЕЧНОЙ форме. Один словарь с role_verb.object_type: соединение по разным написаниям не совпадает никогда и молча.';
-
-
---
--- Name: COLUMN role_rule_selectors.live; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.role_rule_selectors.live IS 'Константа true. Колонка существует ради ключа role_rule_selectors_role_live_fk: сослаться на «эту роль И она жива» без неё нечем. Константа законна потому, что строка селектора СНИМАЕТСЯ, а не помечается.';
+COMMENT ON COLUMN kaname.role_rule_selectors.object_types IS 'Типы объектов в ТОЧЕЧНОЙ форме. Один словарь с role_verb.object_type: соединение по разным написаниям не совпадает никогда и молча.';
 
 
 --
--- Name: role_selector_prune; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN role_rule_selectors.live; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.role_selector_prune (
+COMMENT ON COLUMN kaname.role_rule_selectors.live IS 'Константа true. Колонка существует ради ключа role_rule_selectors_role_live_fk: сослаться на «эту роль И она жива» без неё нечем. Константа законна потому, что строка селектора СНИМАЕТСЯ, а не помечается.';
+
+
+--
+-- Name: role_selector_prune; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.role_selector_prune (
     role_id text NOT NULL,
     rule_fp text NOT NULL,
     object_type text NOT NULL,
@@ -2806,38 +2806,38 @@ CREATE TABLE kacho_iam.role_selector_prune (
 
 
 --
--- Name: TABLE role_selector_prune; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE role_selector_prune; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.role_selector_prune IS 'Элементы третьей проекции правила, вырезанные применителем каталога при снятии строки ресурса. Вырезание необратимо; без этой ведомости объём был виден ТОЛЬКО в плане применения, а постфактум — ниоткуда. Ведомость действует вперёд: уже вырезанное в ней не появится. Потолка на популяцию она не вводит и не подразумевает — потолок запрещал бы починку, см. #1034.';
-
-
---
--- Name: COLUMN role_selector_prune.outcome; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.role_selector_prune.outcome IS 'shortened — у строки селектора остался живой тип, она укорочена; dropped — живого типа не осталось, строка снята целиком. Разные события для разбирающего последствия, поэтому колонка, а не сумма.';
+COMMENT ON TABLE kaname.role_selector_prune IS 'Элементы третьей проекции правила, вырезанные применителем каталога при снятии строки ресурса. Вырезание необратимо; без этой ведомости объём был виден ТОЛЬКО в плане применения, а постфактум — ниоткуда. Ведомость действует вперёд: уже вырезанное в ней не появится. Потолка на популяцию она не вводит и не подразумевает — потолок запрещал бы починку, см. #1034.';
 
 
 --
--- Name: COLUMN role_selector_prune.pruned_at; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN role_selector_prune.outcome; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.role_selector_prune.pruned_at IS 'Время ТРАНЗАКЦИИ применения: у всех строк одного применения совпадает дословно, и по нему собирается вырезанное одним заходом. Отдельного идентификатора применения не заводится — он был бы вторым носителем уже выразимого факта.';
-
-
---
--- Name: COLUMN role_selector_prune.applied_by; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.role_selector_prune.applied_by IS 'Автор применения, вырезавшего этот тип из отбора правила. Та же величина и тот же источник, что у role_grant_orphan.applied_by: вопрос «кто снял» у обеих ведомостей общий — арендатор не различает, какой из проекций правила он лишился. ПУСТАЯ строка означает «строка вырезана до заведения колонки».';
+COMMENT ON COLUMN kaname.role_selector_prune.outcome IS 'shortened — у строки селектора остался живой тип, она укорочена; dropped — живого типа не осталось, строка снята целиком. Разные события для разбирающего последствия, поэтому колонка, а не сумма.';
 
 
 --
--- Name: role_verb; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN role_selector_prune.pruned_at; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.role_verb (
+COMMENT ON COLUMN kaname.role_selector_prune.pruned_at IS 'Время ТРАНЗАКЦИИ применения: у всех строк одного применения совпадает дословно, и по нему собирается вырезанное одним заходом. Отдельного идентификатора применения не заводится — он был бы вторым носителем уже выразимого факта.';
+
+
+--
+-- Name: COLUMN role_selector_prune.applied_by; Type: COMMENT; Schema: kaname; Owner: -
+--
+
+COMMENT ON COLUMN kaname.role_selector_prune.applied_by IS 'Автор применения, вырезавшего этот тип из отбора правила. Та же величина и тот же источник, что у role_grant_orphan.applied_by: вопрос «кто снял» у обеих ведомостей общий — арендатор не различает, какой из проекций правила он лишился. ПУСТАЯ строка означает «строка вырезана до заведения колонки».';
+
+
+--
+-- Name: role_verb; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.role_verb (
     role_id text NOT NULL,
     object_type text NOT NULL,
     verb text NOT NULL,
@@ -2850,31 +2850,31 @@ CREATE TABLE kacho_iam.role_verb (
 
 
 --
--- Name: TABLE role_verb; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE role_verb; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.role_verb IS 'Проекция «роль → тип объекта × глагол» — то, из чего цепь вердикта собирает ответ «разрешено ли действие». АВТОР один — role_repo.ReplaceRoleVerbs: форму строки объявляет только тот, кто её вносит. Снимать вправе и не-автор (применитель каталога, когда снят ресурс, на который ссылается role_verb_type_fk), но снятое он обязан ПЕРЕСЕЛИТЬ в role_grant_orphan тем же оператором.';
-
-
---
--- Name: COLUMN role_verb.object_type; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.role_verb.object_type IS 'Тип объекта в ТОЧЕЧНОЙ форме (iam.account, vpc.network) — той же, какой названы типы в role_rule_selectors.object_types. НЕ форма модели прав (vpc_network): вопрос о доступе приходит ею, и перевод делается на входе читателя.';
+COMMENT ON TABLE kaname.role_verb IS 'Проекция «роль → тип объекта × глагол» — то, из чего цепь вердикта собирает ответ «разрешено ли действие». АВТОР один — role_repo.ReplaceRoleVerbs: форму строки объявляет только тот, кто её вносит. Снимать вправе и не-автор (применитель каталога, когда снят ресурс, на который ссылается role_verb_type_fk), но снятое он обязан ПЕРЕСЕЛИТЬ в role_grant_orphan тем же оператором.';
 
 
 --
--- Name: COLUMN role_verb.live; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN role_verb.object_type; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.role_verb.live IS 'Константа true. Колонка существует ради ключа role_verb_type_fk: сослаться на «эту строку каталога И она жива» без неё нечем.';
+COMMENT ON COLUMN kaname.role_verb.object_type IS 'Тип объекта в ТОЧЕЧНОЙ форме (iam.account, vpc.network) — той же, какой названы типы в role_rule_selectors.object_types. НЕ форма модели прав (vpc_network): вопрос о доступе приходит ею, и перевод делается на входе читателя.';
 
 
 --
--- Name: service_account_oauth_clients; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN role_verb.live; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.service_account_oauth_clients (
+COMMENT ON COLUMN kaname.role_verb.live IS 'Константа true. Колонка существует ради ключа role_verb_type_fk: сослаться на «эту строку каталога И она жива» без неё нечем.';
+
+
+--
+-- Name: service_account_oauth_clients; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.service_account_oauth_clients (
     id text NOT NULL,
     sva_id text NOT NULL,
     hydra_client_id text,
@@ -2891,7 +2891,7 @@ CREATE TABLE kacho_iam.service_account_oauth_clients (
     declared_audiences text[] DEFAULT '{}'::text[] NOT NULL,
     credential_kind text NOT NULL,
     secret_hash bytea DEFAULT '\x'::bytea NOT NULL,
-    CONSTRAINT sa_oauth_clients_declared_audiences_wellformed CHECK (((NOT (''::text = ANY (declared_audiences))) AND (array_position(declared_audiences, NULL::text) IS NULL) AND (kacho_iam.text_array_longest(declared_audiences) <= 512))),
+    CONSTRAINT sa_oauth_clients_declared_audiences_wellformed CHECK (((NOT (''::text = ANY (declared_audiences))) AND (array_position(declared_audiences, NULL::text) IS NULL) AND (kaname.text_array_longest(declared_audiences) <= 512))),
     CONSTRAINT service_account_oauth_clients_credential_kind_ck CHECK ((credential_kind = ANY (ARRAY['KEYPAIR'::text, 'SECRET'::text, 'FEDERATED'::text, 'LEGACY'::text]))),
     CONSTRAINT service_account_oauth_clients_credential_shape_ck CHECK (
 CASE credential_kind
@@ -2906,30 +2906,30 @@ END),
     CONSTRAINT service_account_oauth_clients_hydra_client_id_check CHECK (((hydra_client_id IS NULL) OR ((length(hydra_client_id) >= 1) AND (length(hydra_client_id) <= 128) AND (hydra_client_id ~ '^[A-Za-z0-9._:-]+$'::text)))),
     CONSTRAINT service_account_oauth_clients_id_check CHECK ((id ~ '^soc_?[0-9a-hjkmnp-tv-z]{17}$'::text)),
     CONSTRAINT service_account_oauth_clients_key_algorithm_check CHECK ((key_algorithm = ANY (ARRAY[''::text, 'ES256'::text, 'RS256'::text, 'EdDSA'::text]))),
-    CONSTRAINT service_account_oauth_clients_labels_valid CHECK (kacho_iam.kacho_labels_valid(labels)),
+    CONSTRAINT service_account_oauth_clients_labels_valid CHECK (kaname.kacho_labels_valid(labels)),
     CONSTRAINT service_account_oauth_clients_trusted_subjects_array_ck CHECK ((jsonb_typeof(trusted_subjects) = 'array'::text))
 );
 
 
 --
--- Name: COLUMN service_account_oauth_clients.credential_kind; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN service_account_oauth_clients.credential_kind; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.service_account_oauth_clients.credential_kind IS 'Вид удостоверения. Записывается при вставке; читателем НЕ вычисляется. LEGACY описывает строки прежнего потока и не выдаётся ни одним глаголом.';
-
-
---
--- Name: COLUMN service_account_oauth_clients.secret_hash; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.service_account_oauth_clients.secret_hash IS 'sha256 по идентификатору строки И секретной части вместе, 32 байта. Сам секрет не хранится нигде: он существует только в теле ответа, полученного вызывающим выдачи.';
+COMMENT ON COLUMN kaname.service_account_oauth_clients.credential_kind IS 'Вид удостоверения. Записывается при вставке; читателем НЕ вычисляется. LEGACY описывает строки прежнего потока и не выдаётся ни одним глаголом.';
 
 
 --
--- Name: session_revocations; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN service_account_oauth_clients.secret_hash; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.session_revocations (
+COMMENT ON COLUMN kaname.service_account_oauth_clients.secret_hash IS 'sha256 по идентификатору строки И секретной части вместе, 32 байта. Сам секрет не хранится нигде: он существует только в теле ответа, полученного вызывающим выдачи.';
+
+
+--
+-- Name: session_revocations; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.session_revocations (
     token_jti text NOT NULL,
     revoked_at timestamp with time zone DEFAULT now() NOT NULL,
     reason text DEFAULT ''::text NOT NULL,
@@ -2944,10 +2944,10 @@ CREATE TABLE kacho_iam.session_revocations (
 
 
 --
--- Name: subject_change_outbox; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: subject_change_outbox; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.subject_change_outbox (
+CREATE TABLE kaname.subject_change_outbox (
     id bigint NOT NULL,
     subject_id text NOT NULL,
     op text NOT NULL,
@@ -2961,17 +2961,17 @@ CREATE TABLE kacho_iam.subject_change_outbox (
 
 
 --
--- Name: CONSTRAINT subject_change_op_check ON subject_change_outbox; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: CONSTRAINT subject_change_op_check ON subject_change_outbox; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON CONSTRAINT subject_change_op_check ON kacho_iam.subject_change_outbox IS 'Словарь видов события очереди смены субъекта. Каждое значение обязано иметь производителя в не-тестовом коде iam — это держит гейт internal/repohygiene TestQueueEventValueHasAProducer. Union двух написаний: op-псевдонимы (binding_upsert/binding_delete) и канонические event_type (binding_grant/binding_revoke/group_member_change), потому что deriveOpFromEventType пропускает незнакомый вид в op как есть. Расширяя словарь, заводи производителя тем же изменением: значение без производителя обещает подсистему, которой нет.';
+COMMENT ON CONSTRAINT subject_change_op_check ON kaname.subject_change_outbox IS 'Словарь видов события очереди смены субъекта. Каждое значение обязано иметь производителя в не-тестовом коде iam — это держит гейт internal/repohygiene TestQueueEventValueHasAProducer. Union двух написаний: op-псевдонимы (binding_upsert/binding_delete) и канонические event_type (binding_grant/binding_revoke/group_member_change), потому что deriveOpFromEventType пропускает незнакомый вид в op как есть. Расширяя словарь, заводи производителя тем же изменением: значение без производителя обещает подсистему, которой нет.';
 
 
 --
--- Name: subject_change_outbox_id_seq; Type: SEQUENCE; Schema: kacho_iam; Owner: -
+-- Name: subject_change_outbox_id_seq; Type: SEQUENCE; Schema: kaname; Owner: -
 --
 
-CREATE SEQUENCE kacho_iam.subject_change_outbox_id_seq
+CREATE SEQUENCE kaname.subject_change_outbox_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -2980,17 +2980,17 @@ CREATE SEQUENCE kacho_iam.subject_change_outbox_id_seq
 
 
 --
--- Name: subject_change_outbox_id_seq; Type: SEQUENCE OWNED BY; Schema: kacho_iam; Owner: -
+-- Name: subject_change_outbox_id_seq; Type: SEQUENCE OWNED BY; Schema: kaname; Owner: -
 --
 
-ALTER SEQUENCE kacho_iam.subject_change_outbox_id_seq OWNED BY kacho_iam.subject_change_outbox.id;
+ALTER SEQUENCE kaname.subject_change_outbox_id_seq OWNED BY kaname.subject_change_outbox.id;
 
 
 --
--- Name: token_signing_keys; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: token_signing_keys; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.token_signing_keys (
+CREATE TABLE kaname.token_signing_keys (
     kid text NOT NULL,
     algorithm text NOT NULL,
     state text NOT NULL,
@@ -3013,10 +3013,10 @@ CREATE TABLE kacho_iam.token_signing_keys (
 
 
 --
--- Name: user_oauth_clients; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: user_oauth_clients; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.user_oauth_clients (
+CREATE TABLE kaname.user_oauth_clients (
     id text NOT NULL,
     user_id text NOT NULL,
     hydra_client_id text,
@@ -3044,36 +3044,36 @@ END),
     CONSTRAINT user_oauth_clients_hydra_client_id_check CHECK (((hydra_client_id IS NULL) OR ((length(hydra_client_id) >= 1) AND (length(hydra_client_id) <= 128) AND (hydra_client_id ~ '^[A-Za-z0-9._:-]+$'::text)))),
     CONSTRAINT user_oauth_clients_id_check CHECK ((id ~ '^uoc_?[0-9a-hjkmnp-tv-z]{17}$'::text)),
     CONSTRAINT user_oauth_clients_key_algorithm_check CHECK ((key_algorithm = ANY (ARRAY[''::text, 'ES256'::text, 'RS256'::text, 'EdDSA'::text]))),
-    CONSTRAINT user_oauth_clients_labels_valid CHECK (kacho_iam.kacho_labels_valid(labels))
+    CONSTRAINT user_oauth_clients_labels_valid CHECK (kaname.kacho_labels_valid(labels))
 );
 
 
 --
--- Name: COLUMN user_oauth_clients.hydra_client_id; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN user_oauth_clients.hydra_client_id; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.user_oauth_clients.hydra_client_id IS 'Идентификатор клиента у внешнего поставщика. NULL — регистрации у него нет (выдача её больше не заводит); непустое значение принадлежит строке прежнего выпуска и держит окно двух издателей.';
-
-
---
--- Name: COLUMN user_oauth_clients.credential_kind; Type: COMMENT; Schema: kacho_iam; Owner: -
---
-
-COMMENT ON COLUMN kacho_iam.user_oauth_clients.credential_kind IS 'Вид удостоверения. Записывается при вставке; читателем НЕ вычисляется.';
+COMMENT ON COLUMN kaname.user_oauth_clients.hydra_client_id IS 'Идентификатор клиента у внешнего поставщика. NULL — регистрации у него нет (выдача её больше не заводит); непустое значение принадлежит строке прежнего выпуска и держит окно двух издателей.';
 
 
 --
--- Name: COLUMN user_oauth_clients.secret_hash; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: COLUMN user_oauth_clients.credential_kind; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON COLUMN kacho_iam.user_oauth_clients.secret_hash IS 'sha256 по идентификатору строки И секретной части вместе, 32 байта.';
+COMMENT ON COLUMN kaname.user_oauth_clients.credential_kind IS 'Вид удостоверения. Записывается при вставке; читателем НЕ вычисляется.';
 
 
 --
--- Name: user_token_revocations; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: COLUMN user_oauth_clients.secret_hash; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.user_token_revocations (
+COMMENT ON COLUMN kaname.user_oauth_clients.secret_hash IS 'sha256 по идентификатору строки И секретной части вместе, 32 байта.';
+
+
+--
+-- Name: user_token_revocations; Type: TABLE; Schema: kaname; Owner: -
+--
+
+CREATE TABLE kaname.user_token_revocations (
     user_id text NOT NULL,
     revoke_before timestamp with time zone NOT NULL,
     reason text DEFAULT ''::text NOT NULL,
@@ -3085,17 +3085,17 @@ CREATE TABLE kacho_iam.user_token_revocations (
 
 
 --
--- Name: TABLE user_token_revocations; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TABLE user_token_revocations; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TABLE kacho_iam.user_token_revocations IS 'Per-user revoke-all-before cutoff. Refresh-hook denies a token whose session auth_time <= revoke_before. Backs admin ForceLogout + Revoke(revoke_all_user_tokens).';
+COMMENT ON TABLE kaname.user_token_revocations IS 'Per-user revoke-all-before cutoff. Refresh-hook denies a token whose session auth_time <= revoke_before. Backs admin ForceLogout + Revoke(revoke_all_user_tokens).';
 
 
 --
--- Name: users; Type: TABLE; Schema: kacho_iam; Owner: -
+-- Name: users; Type: TABLE; Schema: kaname; Owner: -
 --
 
-CREATE TABLE kacho_iam.users (
+CREATE TABLE kaname.users (
     id text NOT NULL,
     external_id text NOT NULL,
     email text NOT NULL,
@@ -3110,2536 +3110,2536 @@ CREATE TABLE kacho_iam.users (
     CONSTRAINT users_external_id_check CHECK (((length(external_id) >= 0) AND (length(external_id) <= 256))),
     CONSTRAINT users_invite_status_check CHECK ((invite_status = ANY (ARRAY['PENDING'::text, 'ACTIVE'::text, 'BLOCKED'::text]))),
     CONSTRAINT users_invite_status_consistency CHECK ((((invite_status = 'PENDING'::text) AND (external_id = ''::text)) OR ((invite_status = ANY (ARRAY['ACTIVE'::text, 'BLOCKED'::text])) AND (length(external_id) > 0)))),
-    CONSTRAINT users_labels_valid CHECK (kacho_iam.kacho_labels_valid(labels))
+    CONSTRAINT users_labels_valid CHECK (kaname.kacho_labels_valid(labels))
 );
 
 
 --
--- Name: account_admission_rate_limits id; Type: DEFAULT; Schema: kacho_iam; Owner: -
+-- Name: account_admission_rate_limits id; Type: DEFAULT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.account_admission_rate_limits ALTER COLUMN id SET DEFAULT nextval('kacho_iam.account_admission_rate_limits_id_seq'::regclass);
+ALTER TABLE ONLY kaname.account_admission_rate_limits ALTER COLUMN id SET DEFAULT nextval('kaname.account_admission_rate_limits_id_seq'::regclass);
 
 
 --
--- Name: fga_outbox id; Type: DEFAULT; Schema: kacho_iam; Owner: -
+-- Name: fga_outbox id; Type: DEFAULT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.fga_outbox ALTER COLUMN id SET DEFAULT nextval('kacho_iam.fga_outbox_id_seq'::regclass);
+ALTER TABLE ONLY kaname.fga_outbox ALTER COLUMN id SET DEFAULT nextval('kaname.fga_outbox_id_seq'::regclass);
 
 
 --
--- Name: invite_mail_outbox id; Type: DEFAULT; Schema: kacho_iam; Owner: -
+-- Name: invite_mail_outbox id; Type: DEFAULT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.invite_mail_outbox ALTER COLUMN id SET DEFAULT nextval('kacho_iam.invite_mail_outbox_id_seq'::regclass);
+ALTER TABLE ONLY kaname.invite_mail_outbox ALTER COLUMN id SET DEFAULT nextval('kaname.invite_mail_outbox_id_seq'::regclass);
 
 
 --
--- Name: provider_compensation_outbox id; Type: DEFAULT; Schema: kacho_iam; Owner: -
+-- Name: provider_compensation_outbox id; Type: DEFAULT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.provider_compensation_outbox ALTER COLUMN id SET DEFAULT nextval('kacho_iam.provider_compensation_outbox_id_seq'::regclass);
+ALTER TABLE ONLY kaname.provider_compensation_outbox ALTER COLUMN id SET DEFAULT nextval('kaname.provider_compensation_outbox_id_seq'::regclass);
 
 
 --
--- Name: subject_change_outbox id; Type: DEFAULT; Schema: kacho_iam; Owner: -
+-- Name: subject_change_outbox id; Type: DEFAULT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.subject_change_outbox ALTER COLUMN id SET DEFAULT nextval('kacho_iam.subject_change_outbox_id_seq'::regclass);
+ALTER TABLE ONLY kaname.subject_change_outbox ALTER COLUMN id SET DEFAULT nextval('kaname.subject_change_outbox_id_seq'::regclass);
 
 
 --
--- Data for Name: access_binding_emitted_tuples; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: access_binding_emitted_tuples; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acb1296746dc06ec9e25', 'group:grp1ed8897b56bb9106f#member', 'quota_reader', 'cluster:cluster_kacho_root', 'binding');
-INSERT INTO kacho_iam.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acb0b5b813e060702892', 'service_account:sva3e9556e76be67f816', 'system_viewer', 'cluster:cluster_kacho_root', 'binding');
-INSERT INTO kacho_iam.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acb952a120de6e5bae37', 'service_account:sva85816c3a904b6bac6', 'system_viewer', 'cluster:cluster_kacho_root', 'binding');
-INSERT INTO kacho_iam.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acb59447ac7288264db6', 'service_account:sva8e7d21b2c8a633cd1', 'system_viewer', 'cluster:cluster_kacho_root', 'binding');
-INSERT INTO kacho_iam.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acbd89dbba69fd956d5e', 'service_account:svab91854890de887e6d', 'system_admin', 'cluster:cluster_kacho_root', 'binding');
-INSERT INTO kacho_iam.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acbc5d32d66fc8dc4952', 'user:*', 'viewer', 'cluster:cluster_kacho_root', 'binding');
-INSERT INTO kacho_iam.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acb9e920fb038c7e4f74', 'group:grp258e6bbe9bbe45568#member', 'fga_writer', 'cluster:cluster_kacho_root', 'binding');
+INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acb1296746dc06ec9e25', 'group:grp1ed8897b56bb9106f#member', 'quota_reader', 'cluster:cluster_kacho_root', 'binding');
+INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acb0b5b813e060702892', 'service_account:sva3e9556e76be67f816', 'system_viewer', 'cluster:cluster_kacho_root', 'binding');
+INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acb952a120de6e5bae37', 'service_account:sva85816c3a904b6bac6', 'system_viewer', 'cluster:cluster_kacho_root', 'binding');
+INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acb59447ac7288264db6', 'service_account:sva8e7d21b2c8a633cd1', 'system_viewer', 'cluster:cluster_kacho_root', 'binding');
+INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acbd89dbba69fd956d5e', 'service_account:svab91854890de887e6d', 'system_admin', 'cluster:cluster_kacho_root', 'binding');
+INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acbc5d32d66fc8dc4952', 'user:*', 'viewer', 'cluster:cluster_kacho_root', 'binding');
+INSERT INTO kaname.access_binding_emitted_tuples (binding_id, fga_user, relation, object, source) VALUES ('acb9e920fb038c7e4f74', 'group:grp258e6bbe9bbe45568#member', 'fga_writer', 'cluster:cluster_kacho_root', 'binding');
 
 
 --
--- Data for Name: access_binding_subjects; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: access_binding_subjects; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb13303edeb2b3605c8', 'user', 'usr1a18042d81fb438d6', 0, 'account', 'acc1a18042d81fb438d6');
-INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb1296746dc06ec9e25', 'group', 'grp1ed8897b56bb9106f', 0, 'cluster', 'cluster_kacho_root');
-INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb0b5b813e060702892', 'service_account', 'sva3e9556e76be67f816', 0, 'cluster', 'cluster_kacho_root');
-INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb952a120de6e5bae37', 'service_account', 'sva85816c3a904b6bac6', 0, 'cluster', 'cluster_kacho_root');
-INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb59447ac7288264db6', 'service_account', 'sva8e7d21b2c8a633cd1', 0, 'cluster', 'cluster_kacho_root');
-INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acbd89dbba69fd956d5e', 'service_account', 'svab91854890de887e6d', 0, 'cluster', 'cluster_kacho_root');
-INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acbc5d32d66fc8dc4952', 'user', '*', 0, 'cluster', 'cluster_kacho_root');
-INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb9e920fb038c7e4f74', 'group', 'grp258e6bbe9bbe45568', 0, 'cluster', 'cluster_kacho_root');
+INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb13303edeb2b3605c8', 'user', 'usr1a18042d81fb438d6', 0, 'account', 'acc1a18042d81fb438d6');
+INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb1296746dc06ec9e25', 'group', 'grp1ed8897b56bb9106f', 0, 'cluster', 'cluster_kacho_root');
+INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb0b5b813e060702892', 'service_account', 'sva3e9556e76be67f816', 0, 'cluster', 'cluster_kacho_root');
+INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb952a120de6e5bae37', 'service_account', 'sva85816c3a904b6bac6', 0, 'cluster', 'cluster_kacho_root');
+INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb59447ac7288264db6', 'service_account', 'sva8e7d21b2c8a633cd1', 0, 'cluster', 'cluster_kacho_root');
+INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acbd89dbba69fd956d5e', 'service_account', 'svab91854890de887e6d', 0, 'cluster', 'cluster_kacho_root');
+INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acbc5d32d66fc8dc4952', 'user', '*', 0, 'cluster', 'cluster_kacho_root');
+INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal, resource_type, resource_id) VALUES ('acb9e920fb038c7e4f74', 'group', 'grp258e6bbe9bbe45568', 0, 'cluster', 'cluster_kacho_root');
 
 
 --
--- Data for Name: access_binding_target_members; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: access_binding_target_members; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: access_bindings; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: access_bindings; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb13303edeb2b3605c8', 'user', 'usr1a18042d81fb438d6', 'rol72122ce96bfec66e2', 'account', 'acc1a18042d81fb438d6', now(), 'ACTIVE', NULL, 'system', NULL, NULL, 2, true, '{}', '{"allInScope": true}', 'all', '', false);
-INSERT INTO kacho_iam.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb1296746dc06ec9e25', 'group', 'grp1ed8897b56bb9106f', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'quota_reader', true);
-INSERT INTO kacho_iam.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb0b5b813e060702892', 'service_account', 'sva3e9556e76be67f816', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'system_viewer', true);
-INSERT INTO kacho_iam.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb952a120de6e5bae37', 'service_account', 'sva85816c3a904b6bac6', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'system_viewer', true);
-INSERT INTO kacho_iam.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb59447ac7288264db6', 'service_account', 'sva8e7d21b2c8a633cd1', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'system_viewer', true);
-INSERT INTO kacho_iam.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acbd89dbba69fd956d5e', 'service_account', 'svab91854890de887e6d', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'system_admin', true);
-INSERT INTO kacho_iam.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acbc5d32d66fc8dc4952', 'user', '*', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'viewer', true);
-INSERT INTO kacho_iam.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb9e920fb038c7e4f74', 'group', 'grp258e6bbe9bbe45568', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'fga_writer', true);
+INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb13303edeb2b3605c8', 'user', 'usr1a18042d81fb438d6', 'rol72122ce96bfec66e2', 'account', 'acc1a18042d81fb438d6', now(), 'ACTIVE', NULL, 'system', NULL, NULL, 2, true, '{}', '{"allInScope": true}', 'all', '', false);
+INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb1296746dc06ec9e25', 'group', 'grp1ed8897b56bb9106f', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'quota_reader', true);
+INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb0b5b813e060702892', 'service_account', 'sva3e9556e76be67f816', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'system_viewer', true);
+INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb952a120de6e5bae37', 'service_account', 'sva85816c3a904b6bac6', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'system_viewer', true);
+INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb59447ac7288264db6', 'service_account', 'sva8e7d21b2c8a633cd1', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'system_viewer', true);
+INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acbd89dbba69fd956d5e', 'service_account', 'svab91854890de887e6d', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'system_admin', true);
+INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acbc5d32d66fc8dc4952', 'user', '*', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'viewer', true);
+INSERT INTO kaname.access_bindings (id, subject_type, subject_id, role_id, resource_type, resource_id, created_at, status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, scope, deletion_protection, labels, target, target_digest, granted_relation, is_system) VALUES ('acb9e920fb038c7e4f74', 'group', 'grp258e6bbe9bbe45568', NULL, 'cluster', 'cluster_kacho_root', now(), 'ACTIVE', NULL, '', NULL, NULL, 1, true, '{}', '{"allInScope": true}', 'all', 'fga_writer', true);
 
 
 --
--- Data for Name: account_admission_rate_limits; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: account_admission_rate_limits; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.account_admission_rate_limits (id, kind, max_events, window_seconds, withdrawn_at, created_at) VALUES (1, 'iam.account', 3, 3600, NULL, now());
+INSERT INTO kaname.account_admission_rate_limits (id, kind, max_events, window_seconds, withdrawn_at, created_at) VALUES (1, 'iam.account', 3, 3600, NULL, now());
 
 
 --
--- Data for Name: accounts; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: accounts; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.accounts (id, name, description, labels, owner_user_id, created_at) VALUES ('acc1a18042d81fb438d6', 'kacho-system', 'System account anchoring internal module service-accounts (SEC-C)', '{}', 'usr1a18042d81fb438d6', now());
+INSERT INTO kaname.accounts (id, name, description, labels, owner_user_id, created_at) VALUES ('acc1a18042d81fb438d6', 'kacho-system', 'System account anchoring internal module service-accounts (SEC-C)', '{}', 'usr1a18042d81fb438d6', now());
 
 
 --
--- Data for Name: audit_outbox; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: audit_outbox; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: catalog_module; Type: TABLE DATA; Schema: kacho_iam; Owner: -
---
-
-INSERT INTO kacho_iam.catalog_module (module, retired_at, retired_reason, live) VALUES ('iam', NULL, NULL, true);
-INSERT INTO kacho_iam.catalog_module (module, retired_at, retired_reason, live) VALUES ('vpc', NULL, NULL, true);
-INSERT INTO kacho_iam.catalog_module (module, retired_at, retired_reason, live) VALUES ('compute', NULL, NULL, true);
-INSERT INTO kacho_iam.catalog_module (module, retired_at, retired_reason, live) VALUES ('loadbalancer', NULL, NULL, true);
-INSERT INTO kacho_iam.catalog_module (module, retired_at, retired_reason, live) VALUES ('registry', NULL, NULL, true);
-INSERT INTO kacho_iam.catalog_module (module, retired_at, retired_reason, live) VALUES ('storage', NULL, NULL, true);
-
-
---
--- Data for Name: catalog_resource; Type: TABLE DATA; Schema: kacho_iam; Owner: -
---
-
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'guestAccessKey', 'compute.guestAccessKey', NULL, NULL, NULL, true, 'compute_guest_access_key');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'instance', 'compute.instance', NULL, NULL, NULL, true, 'compute_instance');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'placementGroup', 'compute.placementGroup', NULL, NULL, NULL, true, 'compute_placement_group');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'accessBinding', 'iam.accessBinding', NULL, NULL, NULL, true, 'iam_access_binding');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'account', 'iam.account', NULL, NULL, NULL, true, 'account');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'group', 'iam.group', NULL, NULL, NULL, true, 'iam_group');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'project', 'iam.project', NULL, NULL, NULL, true, 'project');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'role', 'iam.role', NULL, NULL, NULL, true, 'iam_role');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'serviceAccount', 'iam.serviceAccount', NULL, NULL, NULL, true, 'iam_service_account');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'user', 'iam.user', NULL, NULL, NULL, true, 'iam_user');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('loadbalancer', 'listeners', 'loadbalancer.listeners', NULL, NULL, NULL, true, 'nlb_listener');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('loadbalancer', 'networkLoadBalancers', 'loadbalancer.networkLoadBalancers', NULL, NULL, NULL, true, 'nlb_network_load_balancer');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('loadbalancer', 'targetGroups', 'loadbalancer.targetGroups', NULL, NULL, NULL, true, 'nlb_target_group');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('registry', 'registries', 'registry.registries', NULL, NULL, NULL, true, 'registry_registry');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('registry', 'repositories', 'registry.repositories', NULL, NULL, NULL, true, 'registry_repository');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('storage', 'images', 'storage.images', NULL, NULL, NULL, true, 'storage_image');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('storage', 'snapshots', 'storage.snapshots', NULL, NULL, NULL, true, 'storage_snapshot');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('storage', 'volumes', 'storage.volumes', NULL, NULL, NULL, true, 'storage_volume');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'address', 'vpc.address', NULL, NULL, NULL, true, 'vpc_address');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'addressPool', 'vpc.addressPool', NULL, NULL, NULL, true, 'vpc_address_pool');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'cidrGroup', 'vpc.cidrGroup', NULL, NULL, NULL, true, 'vpc_cidr_group');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'gateway', 'vpc.gateway', NULL, NULL, NULL, true, 'vpc_gateway');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'network', 'vpc.network', NULL, NULL, NULL, true, 'vpc_network');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'networkInterface', 'vpc.networkInterface', NULL, NULL, NULL, true, 'vpc_network_interface');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'routeTable', 'vpc.routeTable', NULL, NULL, NULL, true, 'vpc_route_table');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'securityGroup', 'vpc.securityGroup', NULL, NULL, NULL, true, 'vpc_security_group');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'subnet', 'vpc.subnet', NULL, NULL, NULL, true, 'vpc_subnet');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'disk', 'compute.disk', now(), 'блочное хранение принадлежит kacho-storage; вторая копия ресурса снята', 'storage.volumes', false, 'compute_disk');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'image', 'compute.image', now(), 'блочное хранение принадлежит kacho-storage; вторая копия ресурса снята', 'storage.images', false, 'compute_image');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'snapshot', 'compute.snapshot', now(), 'блочное хранение принадлежит kacho-storage; вторая копия ресурса снята', 'storage.snapshots', false, 'compute_snapshot');
-
-
---
--- Data for Name: catalog_verb; Type: TABLE DATA; Schema: kacho_iam; Owner: -
---
-
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'guestAccessKey', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'guestAccessKey', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'guestAccessKey', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'guestAccessKey', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'instance', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'instance', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'instance', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'instance', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'placementGroup', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'placementGroup', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'placementGroup', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'placementGroup', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'accessBinding', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'accessBinding', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'accessBinding', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'accessBinding', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'account', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'account', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'account', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'account', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'group', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'group', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'group', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'group', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'project', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'project', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'project', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'project', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'role', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'role', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'role', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'role', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'serviceAccount', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'serviceAccount', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'serviceAccount', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'serviceAccount', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'user', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'user', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'listeners', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'listeners', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'listeners', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'listeners', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'networkLoadBalancers', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'networkLoadBalancers', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'networkLoadBalancers', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'networkLoadBalancers', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'addtargets', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'removetargets', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'registries', 'create', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'registries', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'registries', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'registries', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'registries', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'repositories', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'repositories', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'repositories', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'repositories', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'images', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'images', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'images', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'images', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'snapshots', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'snapshots', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'snapshots', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'snapshots', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'volumes', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'volumes', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'volumes', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'volumes', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'address', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'address', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'address', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'address', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'addressPool', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'addressPool', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'addressPool', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'addressPool', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'cidrGroup', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'cidrGroup', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'cidrGroup', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'cidrGroup', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'gateway', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'gateway', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'gateway', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'gateway', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'network', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'network', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'network', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'network', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'networkInterface', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'networkInterface', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'networkInterface', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'networkInterface', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'routeTable', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'routeTable', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'routeTable', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'routeTable', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'securityGroup', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'securityGroup', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'securityGroup', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'securityGroup', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'subnet', 'delete', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'subnet', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'subnet', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'subnet', 'update', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'guestAccessKey', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'instance', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'placementGroup', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'accessBinding', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'account', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'group', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'project', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'role', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'serviceAccount', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'user', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'listeners', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'networkLoadBalancers', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'repositories', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'images', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'snapshots', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'volumes', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'address', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'addressPool', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'cidrGroup', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'gateway', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'network', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'networkInterface', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'routeTable', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'securityGroup', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'subnet', 'create', NULL, NULL, true, false);
-
-
---
--- Data for Name: client_assertion_replay; Type: TABLE DATA; Schema: kacho_iam; Owner: -
---
-
-
-
---
--- Data for Name: cluster_admin_grants; Type: TABLE DATA; Schema: kacho_iam; Owner: -
---
-
-INSERT INTO kacho_iam.cluster_admin_grants (id, cluster_id, subject_type, subject_id, granted_by, granted_at, granted_until) VALUES ('cag_5f4510f927a011885', 'cluster_kacho_root', 'service_account', 'svab91854890de887e6d', 'bootstrap', now(), NULL);
-
-
---
--- Data for Name: clusters; Type: TABLE DATA; Schema: kacho_iam; Owner: -
---
-
-INSERT INTO kacho_iam.clusters (id, name, description, created_at) VALUES ('cluster_kacho_root', 'kacho-root', 'Root cluster for Kachō control plane', now());
-
-
---
--- Data for Name: federated_trusted_issuers; Type: TABLE DATA; Schema: kacho_iam; Owner: -
---
-
-
-
---
--- Data for Name: fga_outbox; Type: TABLE DATA; Schema: kacho_iam; Owner: -
---
-
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (1, 'fga.tuple.write', '{"user": "service_account:sva85816c3a904b6bac6", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (2, 'fga.tuple.write', '{"user": "service_account:sva8e7d21b2c8a633cd1", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (3, 'fga.tuple.write', '{"user": "service_account:svac4faf3358e07191f5", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (5, 'fga.tuple.write', '{"user": "service_account:sva3e9556e76be67f816", "object": "cluster:cluster_kacho_root", "relation": "system_viewer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (6, 'fga.tuple.write', '{"user": "service_account:sva85816c3a904b6bac6", "object": "cluster:cluster_kacho_root", "relation": "system_viewer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (7, 'fga.tuple.write', '{"user": "service_account:sva8e7d21b2c8a633cd1", "object": "cluster:cluster_kacho_root", "relation": "system_viewer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (8, 'fga.tuple.write', '{"user": "service_account:sva9e62bc58c3f0e45ea", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (9, 'fga.tuple.write', '{"user": "service_account:sva8ef8aa106f83f84e0", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (10, 'fga.tuple.write', '{"user": "service_account:svab91854890de887e6d", "object": "cluster:cluster_kacho_root", "relation": "system_admin"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (11, 'fga.tuple.delete', '{"user": "service_account:sva35c43c9fcf0146411", "object": "cluster:cluster_kacho_root", "relation": "system_viewer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (12, 'fga.tuple.write', '{"user": "service_account:sva85816c3a904b6bac6", "object": "group:grp1ed8897b56bb9106f", "relation": "member"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (13, 'fga.tuple.write', '{"user": "group:grp1ed8897b56bb9106f#member", "object": "cluster:cluster_kacho_root", "relation": "quota_reader"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (14, 'fga.tuple.write', '{"user": "service_account:svac4faf3358e07191f5", "object": "group:grp1ed8897b56bb9106f", "relation": "member"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (15, 'fga.tuple.write', '{"user": "service_account:sva9e62bc58c3f0e45ea", "object": "group:grp1ed8897b56bb9106f", "relation": "member"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (16, 'fga.tuple.write', '{"user": "service_account:sva8ef8aa106f83f84e0", "object": "group:grp1ed8897b56bb9106f", "relation": "member"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (17, 'fga.tuple.write', '{"user": "service_account:sva8e7d21b2c8a633cd1", "object": "group:grp1ed8897b56bb9106f", "relation": "member"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (18, 'fga.tuple.write', '{"user": "user:*", "object": "cluster:cluster_kacho_root", "relation": "viewer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (19, 'fga.tuple.write', '{"user": "service_account:sva85816c3a904b6bac6", "object": "group:grp258e6bbe9bbe45568", "relation": "member"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (20, 'fga.tuple.write', '{"user": "service_account:sva8e7d21b2c8a633cd1", "object": "group:grp258e6bbe9bbe45568", "relation": "member"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (21, 'fga.tuple.write', '{"user": "service_account:sva8ef8aa106f83f84e0", "object": "group:grp258e6bbe9bbe45568", "relation": "member"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (22, 'fga.tuple.write', '{"user": "service_account:sva9e62bc58c3f0e45ea", "object": "group:grp258e6bbe9bbe45568", "relation": "member"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (23, 'fga.tuple.write', '{"user": "service_account:svac4faf3358e07191f5", "object": "group:grp258e6bbe9bbe45568", "relation": "member"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (24, 'fga.tuple.write', '{"user": "group:grp258e6bbe9bbe45568#member", "object": "cluster:cluster_kacho_root", "relation": "fga_writer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (25, 'fga.tuple.delete', '{"user": "service_account:sva85816c3a904b6bac6", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (26, 'fga.tuple.delete', '{"user": "service_account:sva8e7d21b2c8a633cd1", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (27, 'fga.tuple.delete', '{"user": "service_account:sva8ef8aa106f83f84e0", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (28, 'fga.tuple.delete', '{"user": "service_account:sva9e62bc58c3f0e45ea", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
-INSERT INTO kacho_iam.fga_outbox (id, event_type, payload, created_at) VALUES (29, 'fga.tuple.delete', '{"user": "service_account:svac4faf3358e07191f5", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
-
-
---
--- Data for Name: group_members; Type: TABLE DATA; Schema: kacho_iam; Owner: -
---
-
-INSERT INTO kacho_iam.group_members (group_id, member_type, member_id, added_at) VALUES ('grp1ed8897b56bb9106f', 'service_account', 'sva85816c3a904b6bac6', now());
-INSERT INTO kacho_iam.group_members (group_id, member_type, member_id, added_at) VALUES ('grp1ed8897b56bb9106f', 'service_account', 'svac4faf3358e07191f5', now());
-INSERT INTO kacho_iam.group_members (group_id, member_type, member_id, added_at) VALUES ('grp1ed8897b56bb9106f', 'service_account', 'sva9e62bc58c3f0e45ea', now());
-INSERT INTO kacho_iam.group_members (group_id, member_type, member_id, added_at) VALUES ('grp1ed8897b56bb9106f', 'service_account', 'sva8ef8aa106f83f84e0', now());
-INSERT INTO kacho_iam.group_members (group_id, member_type, member_id, added_at) VALUES ('grp1ed8897b56bb9106f', 'service_account', 'sva8e7d21b2c8a633cd1', now());
-INSERT INTO kacho_iam.group_members (group_id, member_type, member_id, added_at) VALUES ('grp258e6bbe9bbe45568', 'service_account', 'sva85816c3a904b6bac6', now());
-INSERT INTO kacho_iam.group_members (group_id, member_type, member_id, added_at) VALUES ('grp258e6bbe9bbe45568', 'service_account', 'sva8e7d21b2c8a633cd1', now());
-INSERT INTO kacho_iam.group_members (group_id, member_type, member_id, added_at) VALUES ('grp258e6bbe9bbe45568', 'service_account', 'sva8ef8aa106f83f84e0', now());
-INSERT INTO kacho_iam.group_members (group_id, member_type, member_id, added_at) VALUES ('grp258e6bbe9bbe45568', 'service_account', 'sva9e62bc58c3f0e45ea', now());
-INSERT INTO kacho_iam.group_members (group_id, member_type, member_id, added_at) VALUES ('grp258e6bbe9bbe45568', 'service_account', 'svac4faf3358e07191f5', now());
+-- Data for Name: catalog_module; Type: TABLE DATA; Schema: kaname; Owner: -
+--
+
+INSERT INTO kaname.catalog_module (module, retired_at, retired_reason, live) VALUES ('iam', NULL, NULL, true);
+INSERT INTO kaname.catalog_module (module, retired_at, retired_reason, live) VALUES ('vpc', NULL, NULL, true);
+INSERT INTO kaname.catalog_module (module, retired_at, retired_reason, live) VALUES ('compute', NULL, NULL, true);
+INSERT INTO kaname.catalog_module (module, retired_at, retired_reason, live) VALUES ('loadbalancer', NULL, NULL, true);
+INSERT INTO kaname.catalog_module (module, retired_at, retired_reason, live) VALUES ('registry', NULL, NULL, true);
+INSERT INTO kaname.catalog_module (module, retired_at, retired_reason, live) VALUES ('storage', NULL, NULL, true);
+
+
+--
+-- Data for Name: catalog_resource; Type: TABLE DATA; Schema: kaname; Owner: -
+--
+
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'guestAccessKey', 'compute.guestAccessKey', NULL, NULL, NULL, true, 'compute_guest_access_key');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'instance', 'compute.instance', NULL, NULL, NULL, true, 'compute_instance');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'placementGroup', 'compute.placementGroup', NULL, NULL, NULL, true, 'compute_placement_group');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'accessBinding', 'iam.accessBinding', NULL, NULL, NULL, true, 'iam_access_binding');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'account', 'iam.account', NULL, NULL, NULL, true, 'account');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'group', 'iam.group', NULL, NULL, NULL, true, 'iam_group');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'project', 'iam.project', NULL, NULL, NULL, true, 'project');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'role', 'iam.role', NULL, NULL, NULL, true, 'iam_role');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'serviceAccount', 'iam.serviceAccount', NULL, NULL, NULL, true, 'iam_service_account');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('iam', 'user', 'iam.user', NULL, NULL, NULL, true, 'iam_user');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('loadbalancer', 'listeners', 'loadbalancer.listeners', NULL, NULL, NULL, true, 'nlb_listener');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('loadbalancer', 'networkLoadBalancers', 'loadbalancer.networkLoadBalancers', NULL, NULL, NULL, true, 'nlb_network_load_balancer');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('loadbalancer', 'targetGroups', 'loadbalancer.targetGroups', NULL, NULL, NULL, true, 'nlb_target_group');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('registry', 'registries', 'registry.registries', NULL, NULL, NULL, true, 'registry_registry');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('registry', 'repositories', 'registry.repositories', NULL, NULL, NULL, true, 'registry_repository');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('storage', 'images', 'storage.images', NULL, NULL, NULL, true, 'storage_image');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('storage', 'snapshots', 'storage.snapshots', NULL, NULL, NULL, true, 'storage_snapshot');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('storage', 'volumes', 'storage.volumes', NULL, NULL, NULL, true, 'storage_volume');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'address', 'vpc.address', NULL, NULL, NULL, true, 'vpc_address');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'addressPool', 'vpc.addressPool', NULL, NULL, NULL, true, 'vpc_address_pool');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'cidrGroup', 'vpc.cidrGroup', NULL, NULL, NULL, true, 'vpc_cidr_group');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'gateway', 'vpc.gateway', NULL, NULL, NULL, true, 'vpc_gateway');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'network', 'vpc.network', NULL, NULL, NULL, true, 'vpc_network');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'networkInterface', 'vpc.networkInterface', NULL, NULL, NULL, true, 'vpc_network_interface');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'routeTable', 'vpc.routeTable', NULL, NULL, NULL, true, 'vpc_route_table');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'securityGroup', 'vpc.securityGroup', NULL, NULL, NULL, true, 'vpc_security_group');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('vpc', 'subnet', 'vpc.subnet', NULL, NULL, NULL, true, 'vpc_subnet');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'disk', 'compute.disk', now(), 'блочное хранение принадлежит kacho-storage; вторая копия ресурса снята', 'storage.volumes', false, 'compute_disk');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'image', 'compute.image', now(), 'блочное хранение принадлежит kacho-storage; вторая копия ресурса снята', 'storage.images', false, 'compute_image');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('compute', 'snapshot', 'compute.snapshot', now(), 'блочное хранение принадлежит kacho-storage; вторая копия ресурса снята', 'storage.snapshots', false, 'compute_snapshot');
+
+
+--
+-- Data for Name: catalog_verb; Type: TABLE DATA; Schema: kaname; Owner: -
+--
+
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'guestAccessKey', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'guestAccessKey', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'guestAccessKey', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'guestAccessKey', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'instance', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'instance', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'instance', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'instance', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'placementGroup', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'placementGroup', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'placementGroup', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'placementGroup', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'accessBinding', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'accessBinding', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'accessBinding', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'accessBinding', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'account', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'account', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'account', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'account', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'group', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'group', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'group', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'group', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'project', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'project', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'project', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'project', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'role', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'role', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'role', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'role', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'serviceAccount', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'serviceAccount', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'serviceAccount', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'serviceAccount', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'user', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'user', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'listeners', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'listeners', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'listeners', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'listeners', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'networkLoadBalancers', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'networkLoadBalancers', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'networkLoadBalancers', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'networkLoadBalancers', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'addtargets', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'removetargets', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'registries', 'create', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'registries', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'registries', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'registries', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'registries', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'repositories', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'repositories', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'repositories', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'repositories', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'images', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'images', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'images', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'images', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'snapshots', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'snapshots', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'snapshots', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'snapshots', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'volumes', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'volumes', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'volumes', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'volumes', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'address', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'address', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'address', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'address', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'addressPool', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'addressPool', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'addressPool', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'addressPool', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'cidrGroup', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'cidrGroup', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'cidrGroup', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'cidrGroup', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'gateway', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'gateway', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'gateway', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'gateway', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'network', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'network', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'network', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'network', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'networkInterface', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'networkInterface', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'networkInterface', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'networkInterface', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'routeTable', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'routeTable', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'routeTable', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'routeTable', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'securityGroup', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'securityGroup', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'securityGroup', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'securityGroup', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'subnet', 'delete', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'subnet', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'subnet', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'subnet', 'update', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'guestAccessKey', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'instance', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('compute', 'placementGroup', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'accessBinding', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'account', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'group', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'project', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'role', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'serviceAccount', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('iam', 'user', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'listeners', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'networkLoadBalancers', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('loadbalancer', 'targetGroups', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('registry', 'repositories', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'images', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'snapshots', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('storage', 'volumes', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'address', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'addressPool', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'cidrGroup', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'gateway', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'network', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'networkInterface', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'routeTable', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'securityGroup', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('vpc', 'subnet', 'create', NULL, NULL, true, false);
+
+
+--
+-- Data for Name: client_assertion_replay; Type: TABLE DATA; Schema: kaname; Owner: -
+--
+
+
+
+--
+-- Data for Name: cluster_admin_grants; Type: TABLE DATA; Schema: kaname; Owner: -
+--
+
+INSERT INTO kaname.cluster_admin_grants (id, cluster_id, subject_type, subject_id, granted_by, granted_at, granted_until) VALUES ('cag_5f4510f927a011885', 'cluster_kacho_root', 'service_account', 'svab91854890de887e6d', 'bootstrap', now(), NULL);
+
+
+--
+-- Data for Name: clusters; Type: TABLE DATA; Schema: kaname; Owner: -
+--
+
+INSERT INTO kaname.clusters (id, name, description, created_at) VALUES ('cluster_kacho_root', 'kacho-root', 'Root cluster for Kachō control plane', now());
+
+
+--
+-- Data for Name: federated_trusted_issuers; Type: TABLE DATA; Schema: kaname; Owner: -
+--
+
+
+
+--
+-- Data for Name: fga_outbox; Type: TABLE DATA; Schema: kaname; Owner: -
+--
+
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (1, 'fga.tuple.write', '{"user": "service_account:sva85816c3a904b6bac6", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (2, 'fga.tuple.write', '{"user": "service_account:sva8e7d21b2c8a633cd1", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (3, 'fga.tuple.write', '{"user": "service_account:svac4faf3358e07191f5", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (5, 'fga.tuple.write', '{"user": "service_account:sva3e9556e76be67f816", "object": "cluster:cluster_kacho_root", "relation": "system_viewer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (6, 'fga.tuple.write', '{"user": "service_account:sva85816c3a904b6bac6", "object": "cluster:cluster_kacho_root", "relation": "system_viewer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (7, 'fga.tuple.write', '{"user": "service_account:sva8e7d21b2c8a633cd1", "object": "cluster:cluster_kacho_root", "relation": "system_viewer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (8, 'fga.tuple.write', '{"user": "service_account:sva9e62bc58c3f0e45ea", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (9, 'fga.tuple.write', '{"user": "service_account:sva8ef8aa106f83f84e0", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (10, 'fga.tuple.write', '{"user": "service_account:svab91854890de887e6d", "object": "cluster:cluster_kacho_root", "relation": "system_admin"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (11, 'fga.tuple.delete', '{"user": "service_account:sva35c43c9fcf0146411", "object": "cluster:cluster_kacho_root", "relation": "system_viewer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (12, 'fga.tuple.write', '{"user": "service_account:sva85816c3a904b6bac6", "object": "group:grp1ed8897b56bb9106f", "relation": "member"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (13, 'fga.tuple.write', '{"user": "group:grp1ed8897b56bb9106f#member", "object": "cluster:cluster_kacho_root", "relation": "quota_reader"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (14, 'fga.tuple.write', '{"user": "service_account:svac4faf3358e07191f5", "object": "group:grp1ed8897b56bb9106f", "relation": "member"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (15, 'fga.tuple.write', '{"user": "service_account:sva9e62bc58c3f0e45ea", "object": "group:grp1ed8897b56bb9106f", "relation": "member"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (16, 'fga.tuple.write', '{"user": "service_account:sva8ef8aa106f83f84e0", "object": "group:grp1ed8897b56bb9106f", "relation": "member"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (17, 'fga.tuple.write', '{"user": "service_account:sva8e7d21b2c8a633cd1", "object": "group:grp1ed8897b56bb9106f", "relation": "member"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (18, 'fga.tuple.write', '{"user": "user:*", "object": "cluster:cluster_kacho_root", "relation": "viewer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (19, 'fga.tuple.write', '{"user": "service_account:sva85816c3a904b6bac6", "object": "group:grp258e6bbe9bbe45568", "relation": "member"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (20, 'fga.tuple.write', '{"user": "service_account:sva8e7d21b2c8a633cd1", "object": "group:grp258e6bbe9bbe45568", "relation": "member"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (21, 'fga.tuple.write', '{"user": "service_account:sva8ef8aa106f83f84e0", "object": "group:grp258e6bbe9bbe45568", "relation": "member"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (22, 'fga.tuple.write', '{"user": "service_account:sva9e62bc58c3f0e45ea", "object": "group:grp258e6bbe9bbe45568", "relation": "member"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (23, 'fga.tuple.write', '{"user": "service_account:svac4faf3358e07191f5", "object": "group:grp258e6bbe9bbe45568", "relation": "member"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (24, 'fga.tuple.write', '{"user": "group:grp258e6bbe9bbe45568#member", "object": "cluster:cluster_kacho_root", "relation": "fga_writer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (25, 'fga.tuple.delete', '{"user": "service_account:sva85816c3a904b6bac6", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (26, 'fga.tuple.delete', '{"user": "service_account:sva8e7d21b2c8a633cd1", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (27, 'fga.tuple.delete', '{"user": "service_account:sva8ef8aa106f83f84e0", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (28, 'fga.tuple.delete', '{"user": "service_account:sva9e62bc58c3f0e45ea", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
+INSERT INTO kaname.fga_outbox (id, event_type, payload, created_at) VALUES (29, 'fga.tuple.delete', '{"user": "service_account:svac4faf3358e07191f5", "object": "iam_fgaproxy:system", "relation": "fga_writer"}', now());
+
+
+--
+-- Data for Name: group_members; Type: TABLE DATA; Schema: kaname; Owner: -
+--
+
+INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at) VALUES ('grp1ed8897b56bb9106f', 'service_account', 'sva85816c3a904b6bac6', now());
+INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at) VALUES ('grp1ed8897b56bb9106f', 'service_account', 'svac4faf3358e07191f5', now());
+INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at) VALUES ('grp1ed8897b56bb9106f', 'service_account', 'sva9e62bc58c3f0e45ea', now());
+INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at) VALUES ('grp1ed8897b56bb9106f', 'service_account', 'sva8ef8aa106f83f84e0', now());
+INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at) VALUES ('grp1ed8897b56bb9106f', 'service_account', 'sva8e7d21b2c8a633cd1', now());
+INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at) VALUES ('grp258e6bbe9bbe45568', 'service_account', 'sva85816c3a904b6bac6', now());
+INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at) VALUES ('grp258e6bbe9bbe45568', 'service_account', 'sva8e7d21b2c8a633cd1', now());
+INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at) VALUES ('grp258e6bbe9bbe45568', 'service_account', 'sva8ef8aa106f83f84e0', now());
+INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at) VALUES ('grp258e6bbe9bbe45568', 'service_account', 'sva9e62bc58c3f0e45ea', now());
+INSERT INTO kaname.group_members (group_id, member_type, member_id, added_at) VALUES ('grp258e6bbe9bbe45568', 'service_account', 'svac4faf3358e07191f5', now());
 
 
 --
--- Data for Name: groups; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: groups; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.groups (id, account_id, name, description, labels, created_at) VALUES ('grp1ed8897b56bb9106f', 'acc1a18042d81fb438d6', 'module-quota-readers', 'Owner-service accounts allowed to read effective resource-count limits (issue #291)', '{}', now());
-INSERT INTO kacho_iam.groups (id, account_id, name, description, labels, created_at) VALUES ('grp258e6bbe9bbe45568', 'acc1a18042d81fb438d6', 'module-relation-writers', 'Module service accounts allowed to write relation tuples through iam (issue #914)', '{}', now());
+INSERT INTO kaname.groups (id, account_id, name, description, labels, created_at) VALUES ('grp1ed8897b56bb9106f', 'acc1a18042d81fb438d6', 'module-quota-readers', 'Owner-service accounts allowed to read effective resource-count limits (issue #291)', '{}', now());
+INSERT INTO kaname.groups (id, account_id, name, description, labels, created_at) VALUES ('grp258e6bbe9bbe45568', 'acc1a18042d81fb438d6', 'module-relation-writers', 'Module service accounts allowed to write relation tuples through iam (issue #914)', '{}', now());
 
 
 --
--- Data for Name: identity_admission_windows; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: identity_admission_windows; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: identity_journal; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: identity_journal; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: interactive_clients; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: interactive_clients; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: invite_mail_outbox; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: invite_mail_outbox; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: limits; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: limits; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000001', now(), 'DEFAULT', '', 'vpc.network', 16, NULL, 1);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000002', now(), 'DEFAULT', '', 'vpc.subnet', 64, NULL, 2);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000003', now(), 'DEFAULT', '', 'vpc.address', 256, NULL, 3);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000004', now(), 'DEFAULT', '', 'vpc.networkInterface', 128, NULL, 4);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000005', now(), 'DEFAULT', '', 'vpc.securityGroup', 64, NULL, 5);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000006', now(), 'DEFAULT', '', 'vpc.routeTable', 32, NULL, 6);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000007', now(), 'DEFAULT', '', 'vpc.gateway', 16, NULL, 7);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000008', now(), 'DEFAULT', '', 'vpc.cidrGroup', 64, NULL, 8);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000009', now(), 'DEFAULT', '', 'iam.project', 16, NULL, 9);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000010', now(), 'DEFAULT', '', 'vpc.network.subnet', 16, NULL, 10);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000011', now(), 'DEFAULT', '', 'vpc.network.routeTable', 8, NULL, 11);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000012', now(), 'DEFAULT', '', 'vpc.network.securityGroup', 16, NULL, 12);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000014', now(), 'DEFAULT', '', 'iam.user', 128, NULL, 14);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000015', now(), 'DEFAULT', '', 'iam.serviceAccount', 128, NULL, 15);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000016', now(), 'DEFAULT', '', 'iam.group', 64, NULL, 16);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000017', now(), 'DEFAULT', '', 'iam.role', 64, NULL, 17);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000018', now(), 'DEFAULT', '', 'iam.accessBinding', 512, NULL, 18);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000019', now(), 'DEFAULT', '', 'compute.instance', 32, NULL, 19);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000020', now(), 'DEFAULT', '', 'compute.guestAccessKey', 64, NULL, 20);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000021', now(), 'DEFAULT', '', 'compute.placementGroup', 16, NULL, 21);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000022', now(), 'DEFAULT', '', 'storage.volumes', 64, NULL, 22);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000023', now(), 'DEFAULT', '', 'storage.snapshots', 128, NULL, 23);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000024', now(), 'DEFAULT', '', 'storage.images', 32, NULL, 24);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000025', now(), 'DEFAULT', '', 'loadbalancer.networkLoadBalancers', 16, NULL, 25);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000026', now(), 'DEFAULT', '', 'loadbalancer.targetGroups', 64, NULL, 26);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000027', now(), 'DEFAULT', '', 'loadbalancer.listeners', 64, NULL, 27);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000028', now(), 'DEFAULT', '', 'registry.registries', 8, NULL, 28);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000029', now(), 'DEFAULT', '', 'registry.repositories', 256, NULL, 29);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000030', now(), 'DEFAULT', '', 'loadbalancer.networkLoadBalancers.listeners', 16, NULL, 30);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000031', now(), 'DEFAULT', '', 'registry.registries.repositories', 64, NULL, 31);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000032', now(), 'DEFAULT', '', 'iam.account', 5, NULL, 32);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000033', now(), 'DEFAULT', '', 'iam.user.credential', 12, NULL, 35);
-INSERT INTO kacho_iam.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000034', now(), 'DEFAULT', '', 'iam.serviceAccount.credential', 24, NULL, 36);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000001', now(), 'DEFAULT', '', 'vpc.network', 16, NULL, 1);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000002', now(), 'DEFAULT', '', 'vpc.subnet', 64, NULL, 2);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000003', now(), 'DEFAULT', '', 'vpc.address', 256, NULL, 3);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000004', now(), 'DEFAULT', '', 'vpc.networkInterface', 128, NULL, 4);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000005', now(), 'DEFAULT', '', 'vpc.securityGroup', 64, NULL, 5);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000006', now(), 'DEFAULT', '', 'vpc.routeTable', 32, NULL, 6);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000007', now(), 'DEFAULT', '', 'vpc.gateway', 16, NULL, 7);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000008', now(), 'DEFAULT', '', 'vpc.cidrGroup', 64, NULL, 8);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000009', now(), 'DEFAULT', '', 'iam.project', 16, NULL, 9);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000010', now(), 'DEFAULT', '', 'vpc.network.subnet', 16, NULL, 10);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000011', now(), 'DEFAULT', '', 'vpc.network.routeTable', 8, NULL, 11);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000012', now(), 'DEFAULT', '', 'vpc.network.securityGroup', 16, NULL, 12);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000014', now(), 'DEFAULT', '', 'iam.user', 128, NULL, 14);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000015', now(), 'DEFAULT', '', 'iam.serviceAccount', 128, NULL, 15);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000016', now(), 'DEFAULT', '', 'iam.group', 64, NULL, 16);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000017', now(), 'DEFAULT', '', 'iam.role', 64, NULL, 17);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000018', now(), 'DEFAULT', '', 'iam.accessBinding', 512, NULL, 18);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000019', now(), 'DEFAULT', '', 'compute.instance', 32, NULL, 19);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000020', now(), 'DEFAULT', '', 'compute.guestAccessKey', 64, NULL, 20);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000021', now(), 'DEFAULT', '', 'compute.placementGroup', 16, NULL, 21);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000022', now(), 'DEFAULT', '', 'storage.volumes', 64, NULL, 22);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000023', now(), 'DEFAULT', '', 'storage.snapshots', 128, NULL, 23);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000024', now(), 'DEFAULT', '', 'storage.images', 32, NULL, 24);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000025', now(), 'DEFAULT', '', 'loadbalancer.networkLoadBalancers', 16, NULL, 25);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000026', now(), 'DEFAULT', '', 'loadbalancer.targetGroups', 64, NULL, 26);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000027', now(), 'DEFAULT', '', 'loadbalancer.listeners', 64, NULL, 27);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000028', now(), 'DEFAULT', '', 'registry.registries', 8, NULL, 28);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000029', now(), 'DEFAULT', '', 'registry.repositories', 256, NULL, 29);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000030', now(), 'DEFAULT', '', 'loadbalancer.networkLoadBalancers.listeners', 16, NULL, 30);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000031', now(), 'DEFAULT', '', 'registry.registries.repositories', 64, NULL, 31);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000032', now(), 'DEFAULT', '', 'iam.account', 5, NULL, 32);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000033', now(), 'DEFAULT', '', 'iam.user.credential', 12, NULL, 35);
+INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision) VALUES ('lim-00000000000000034', now(), 'DEFAULT', '', 'iam.serviceAccount.credential', 24, NULL, 36);
 
 
 --
--- Data for Name: memberships; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: memberships; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.memberships (id, user_id, account_id, state, invited_by, created_at, updated_at) VALUES ('mbr-abc4b224e47e60508', 'usr1a18042d81fb438d6', 'acc1a18042d81fb438d6', 'PENDING', NULL, now(), now());
+INSERT INTO kaname.memberships (id, user_id, account_id, state, invited_by, created_at, updated_at) VALUES ('mbr-abc4b224e47e60508', 'usr1a18042d81fb438d6', 'acc1a18042d81fb438d6', 'PENDING', NULL, now(), now());
 
 
 --
--- Data for Name: minted_token_revocations; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: minted_token_revocations; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: operations; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: operations; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: project_resource_quotas; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: project_resource_quotas; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.user', 'usr1a18042d81fb438d6', 'iam.user.credential', 0, 10, 'DEFAULT', '', 33, now(), '', now(), now());
-INSERT INTO kacho_iam.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'svac4faf3358e07191f5', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
-INSERT INTO kacho_iam.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'sva9e62bc58c3f0e45ea', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
-INSERT INTO kacho_iam.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'sva8e7d21b2c8a633cd1', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
-INSERT INTO kacho_iam.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'sva85816c3a904b6bac6', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
-INSERT INTO kacho_iam.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'sva8ef8aa106f83f84e0', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
-INSERT INTO kacho_iam.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'svab91854890de887e6d', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
-INSERT INTO kacho_iam.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'sva3e9556e76be67f816', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
+INSERT INTO kaname.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.user', 'usr1a18042d81fb438d6', 'iam.user.credential', 0, 10, 'DEFAULT', '', 33, now(), '', now(), now());
+INSERT INTO kaname.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'svac4faf3358e07191f5', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
+INSERT INTO kaname.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'sva9e62bc58c3f0e45ea', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
+INSERT INTO kaname.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'sva8e7d21b2c8a633cd1', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
+INSERT INTO kaname.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'sva85816c3a904b6bac6', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
+INSERT INTO kaname.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'sva8ef8aa106f83f84e0', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
+INSERT INTO kaname.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'svab91854890de887e6d', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
+INSERT INTO kaname.project_resource_quotas (carrier_type, carrier_id, kind, used, limit_value, source_scope, source_scope_id, limit_revision, synced_at, account_id, created_at, updated_at) VALUES ('iam.serviceAccount', 'sva3e9556e76be67f816', 'iam.serviceAccount.credential', 0, 20, 'DEFAULT', '', 34, now(), 'acc1a18042d81fb438d6', now(), now());
 
 
 --
--- Data for Name: projects; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: projects; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: provider_compensation_outbox; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: provider_compensation_outbox; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: recovery_completions; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: recovery_completions; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: relation_fact; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: relation_fact; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'quota_reader', 'group:grp1ed8897b56bb9106f#member', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'system_viewer', 'service_account:sva3e9556e76be67f816', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp1ed8897b56bb9106f', 'member', 'service_account:sva85816c3a904b6bac6', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'system_viewer', 'service_account:sva85816c3a904b6bac6', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp1ed8897b56bb9106f', 'member', 'service_account:sva8e7d21b2c8a633cd1', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'system_viewer', 'service_account:sva8e7d21b2c8a633cd1', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp1ed8897b56bb9106f', 'member', 'service_account:sva8ef8aa106f83f84e0', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp1ed8897b56bb9106f', 'member', 'service_account:sva9e62bc58c3f0e45ea', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'system_admin', 'service_account:svab91854890de887e6d', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp1ed8897b56bb9106f', 'member', 'service_account:svac4faf3358e07191f5', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'viewer', 'user:*', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp258e6bbe9bbe45568', 'member', 'service_account:sva85816c3a904b6bac6', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp258e6bbe9bbe45568', 'member', 'service_account:sva8e7d21b2c8a633cd1', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp258e6bbe9bbe45568', 'member', 'service_account:sva8ef8aa106f83f84e0', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp258e6bbe9bbe45568', 'member', 'service_account:sva9e62bc58c3f0e45ea', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp258e6bbe9bbe45568', 'member', 'service_account:svac4faf3358e07191f5', now(), now(), '', '{}');
-INSERT INTO kacho_iam.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'fga_writer', 'group:grp258e6bbe9bbe45568#member', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'quota_reader', 'group:grp1ed8897b56bb9106f#member', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'system_viewer', 'service_account:sva3e9556e76be67f816', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp1ed8897b56bb9106f', 'member', 'service_account:sva85816c3a904b6bac6', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'system_viewer', 'service_account:sva85816c3a904b6bac6', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp1ed8897b56bb9106f', 'member', 'service_account:sva8e7d21b2c8a633cd1', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'system_viewer', 'service_account:sva8e7d21b2c8a633cd1', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp1ed8897b56bb9106f', 'member', 'service_account:sva8ef8aa106f83f84e0', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp1ed8897b56bb9106f', 'member', 'service_account:sva9e62bc58c3f0e45ea', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'system_admin', 'service_account:svab91854890de887e6d', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp1ed8897b56bb9106f', 'member', 'service_account:svac4faf3358e07191f5', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'viewer', 'user:*', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp258e6bbe9bbe45568', 'member', 'service_account:sva85816c3a904b6bac6', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp258e6bbe9bbe45568', 'member', 'service_account:sva8e7d21b2c8a633cd1', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp258e6bbe9bbe45568', 'member', 'service_account:sva8ef8aa106f83f84e0', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp258e6bbe9bbe45568', 'member', 'service_account:sva9e62bc58c3f0e45ea', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('group', 'grp258e6bbe9bbe45568', 'member', 'service_account:svac4faf3358e07191f5', now(), now(), '', '{}');
+INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject, source_version, created_at, condition_name, condition_params) VALUES ('cluster', 'cluster_kacho_root', 'fga_writer', 'group:grp258e6bbe9bbe45568#member', now(), now(), '', '{}');
 
 
 --
--- Data for Name: resource_mirror; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: resource_mirror; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: resource_parent_edge; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: resource_parent_edge; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: resource_reconcile_outbox; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: resource_reconcile_outbox; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: role_grant_orphan; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: role_grant_orphan; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: role_rule_ref; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: role_rule_ref; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol096a471229217fbcf', 'vpc', 'address', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol096a471229217fbcf', 'vpc', 'address', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol1469d1a633ceae4b5', 'vpc', 'securityGroup', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol1469d1a633ceae4b5', 'vpc', 'securityGroup', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol213ce142e75132019', 'iam', 'accessBinding', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol213ce142e75132019', 'iam', 'accessBinding', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol213ce142e75132019', 'iam', 'accessBinding', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol26a49318d88632af2', 'vpc', 'gateway', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol26a49318d88632af2', 'vpc', 'gateway', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol31f5c2b4e7b3ee06c', 'vpc', 'subnet', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol31f5c2b4e7b3ee06c', 'vpc', 'subnet', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol34c4d5f1c7c722230', 'iam', 'account', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol34c4d5f1c7c722230', 'iam', 'account', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol34c4d5f1c7c722230', 'iam', 'account', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol38306aa220559b1f6', 'iam', 'serviceAccount', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol41dd066874f699c17', 'iam', 'account', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol41dd066874f699c17', 'iam', 'account', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol4d942f110ed3d7c47', 'vpc', 'network', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol4d942f110ed3d7c47', 'vpc', 'network', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol4d942f110ed3d7c47', 'vpc', 'network', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol5e145d87ee378211f', 'iam', 'serviceAccount', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol5e145d87ee378211f', 'iam', 'serviceAccount', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol5e145d87ee378211f', 'iam', 'serviceAccount', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol6307d201bf18e6763', 'iam', 'account', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol672f1ac772fab8697', 'iam', 'role', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol672f1ac772fab8697', 'iam', 'role', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol674f6a6d7e4eeb3b6', 'iam', 'project', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol68b2520862bf7a921', 'vpc', 'subnet', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol6a079e6a177963990', 'iam', 'group', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol6be01c0948936754b', 'compute', 'instance', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol6be01c0948936754b', 'compute', 'instance', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol79a7325eb0d31fad4', 'compute', 'instance', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol79a7325eb0d31fad4', 'compute', 'instance', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol79a7325eb0d31fad4', 'compute', 'instance', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol7ad445624b1d0e9a1', 'iam', 'project', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol7ad445624b1d0e9a1', 'iam', 'project', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol7b4c84039b79327e5', 'iam', 'project', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol7b4c84039b79327e5', 'iam', 'project', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol7b4c84039b79327e5', 'iam', 'project', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol88958a1dfa5ddf047', 'vpc', 'securityGroup', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol8df6147b3aa962b57', 'vpc', 'address', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol8ed48ecc3878c2e73', 'vpc', 'network', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol91e90d7a1d4d02658', 'vpc', 'subnet', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol91e90d7a1d4d02658', 'vpc', 'subnet', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol91e90d7a1d4d02658', 'vpc', 'subnet', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol9aeb6b9c5d5b01ec0', 'vpc', 'gateway', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol9d5dc5ed6308cee2a', 'vpc', 'gateway', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol9d5dc5ed6308cee2a', 'vpc', 'gateway', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol9d5dc5ed6308cee2a', 'vpc', 'gateway', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rola227db99b2e9bd131', 'vpc', 'securityGroup', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rola227db99b2e9bd131', 'vpc', 'securityGroup', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rola227db99b2e9bd131', 'vpc', 'securityGroup', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolab84e08ef4b5e0b22', 'vpc', 'routeTable', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolab84e08ef4b5e0b22', 'vpc', 'routeTable', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolb18c533133af2f130', 'iam', 'accessBinding', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolb18c533133af2f130', 'iam', 'accessBinding', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolc98b067591ded99e5', 'iam', 'group', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolc98b067591ded99e5', 'iam', 'group', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolca0d037b77856bea8', 'vpc', 'address', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolca0d037b77856bea8', 'vpc', 'address', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolca0d037b77856bea8', 'vpc', 'address', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold4f364618280185aa', 'iam', 'group', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold4f364618280185aa', 'iam', 'group', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold4f364618280185aa', 'iam', 'group', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold8267982db70ea7f0', 'vpc', 'routeTable', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold8267982db70ea7f0', 'vpc', 'routeTable', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold8267982db70ea7f0', 'vpc', 'routeTable', 'update', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolddd484b2677346167', 'vpc', 'routeTable', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role1eb529620e1ff235', 'iam', 'accessBinding', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role2f47108d41b38f39', 'iam', 'user', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role2f47108d41b38f39', 'iam', 'user', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'listeners', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'listeners', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'networkLoadBalancers', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'networkLoadBalancers', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'targetGroups', 'addtargets', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'targetGroups', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'targetGroups', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'targetGroups', 'removetargets', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role6859cc35f67d659e', 'iam', 'role', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'listeners', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'listeners', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'networkLoadBalancers', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'networkLoadBalancers', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'targetGroups', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'targetGroups', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolee27bb5ba1efb68cb', 'iam', 'role', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolfc25814dc6989172d', 'iam', 'serviceAccount', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolfc25814dc6989172d', 'iam', 'serviceAccount', 'list', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolfe4e91e8c9f6542a6', 'compute', 'instance', NULL, true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolfe683216e63311d3f', 'vpc', 'network', 'get', true);
-INSERT INTO kacho_iam.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolfe683216e63311d3f', 'vpc', 'network', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol096a471229217fbcf', 'vpc', 'address', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol096a471229217fbcf', 'vpc', 'address', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol1469d1a633ceae4b5', 'vpc', 'securityGroup', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol1469d1a633ceae4b5', 'vpc', 'securityGroup', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol213ce142e75132019', 'iam', 'accessBinding', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol213ce142e75132019', 'iam', 'accessBinding', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol213ce142e75132019', 'iam', 'accessBinding', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol26a49318d88632af2', 'vpc', 'gateway', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol26a49318d88632af2', 'vpc', 'gateway', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol31f5c2b4e7b3ee06c', 'vpc', 'subnet', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol31f5c2b4e7b3ee06c', 'vpc', 'subnet', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol34c4d5f1c7c722230', 'iam', 'account', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol34c4d5f1c7c722230', 'iam', 'account', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol34c4d5f1c7c722230', 'iam', 'account', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol38306aa220559b1f6', 'iam', 'serviceAccount', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol41dd066874f699c17', 'iam', 'account', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol41dd066874f699c17', 'iam', 'account', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol4d942f110ed3d7c47', 'vpc', 'network', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol4d942f110ed3d7c47', 'vpc', 'network', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol4d942f110ed3d7c47', 'vpc', 'network', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol5e145d87ee378211f', 'iam', 'serviceAccount', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol5e145d87ee378211f', 'iam', 'serviceAccount', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol5e145d87ee378211f', 'iam', 'serviceAccount', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol6307d201bf18e6763', 'iam', 'account', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol672f1ac772fab8697', 'iam', 'role', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol672f1ac772fab8697', 'iam', 'role', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol674f6a6d7e4eeb3b6', 'iam', 'project', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol68b2520862bf7a921', 'vpc', 'subnet', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol6a079e6a177963990', 'iam', 'group', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol6be01c0948936754b', 'compute', 'instance', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol6be01c0948936754b', 'compute', 'instance', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol79a7325eb0d31fad4', 'compute', 'instance', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol79a7325eb0d31fad4', 'compute', 'instance', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol79a7325eb0d31fad4', 'compute', 'instance', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol7ad445624b1d0e9a1', 'iam', 'project', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol7ad445624b1d0e9a1', 'iam', 'project', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol7b4c84039b79327e5', 'iam', 'project', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol7b4c84039b79327e5', 'iam', 'project', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol7b4c84039b79327e5', 'iam', 'project', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol88958a1dfa5ddf047', 'vpc', 'securityGroup', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol8df6147b3aa962b57', 'vpc', 'address', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol8ed48ecc3878c2e73', 'vpc', 'network', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol91e90d7a1d4d02658', 'vpc', 'subnet', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol91e90d7a1d4d02658', 'vpc', 'subnet', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol91e90d7a1d4d02658', 'vpc', 'subnet', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol9aeb6b9c5d5b01ec0', 'vpc', 'gateway', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol9d5dc5ed6308cee2a', 'vpc', 'gateway', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol9d5dc5ed6308cee2a', 'vpc', 'gateway', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rol9d5dc5ed6308cee2a', 'vpc', 'gateway', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rola227db99b2e9bd131', 'vpc', 'securityGroup', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rola227db99b2e9bd131', 'vpc', 'securityGroup', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rola227db99b2e9bd131', 'vpc', 'securityGroup', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolab84e08ef4b5e0b22', 'vpc', 'routeTable', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolab84e08ef4b5e0b22', 'vpc', 'routeTable', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolb18c533133af2f130', 'iam', 'accessBinding', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolb18c533133af2f130', 'iam', 'accessBinding', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolc98b067591ded99e5', 'iam', 'group', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolc98b067591ded99e5', 'iam', 'group', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolca0d037b77856bea8', 'vpc', 'address', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolca0d037b77856bea8', 'vpc', 'address', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolca0d037b77856bea8', 'vpc', 'address', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold4f364618280185aa', 'iam', 'group', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold4f364618280185aa', 'iam', 'group', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold4f364618280185aa', 'iam', 'group', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold8267982db70ea7f0', 'vpc', 'routeTable', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold8267982db70ea7f0', 'vpc', 'routeTable', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rold8267982db70ea7f0', 'vpc', 'routeTable', 'update', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolddd484b2677346167', 'vpc', 'routeTable', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role1eb529620e1ff235', 'iam', 'accessBinding', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role2f47108d41b38f39', 'iam', 'user', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role2f47108d41b38f39', 'iam', 'user', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'listeners', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'listeners', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'networkLoadBalancers', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'networkLoadBalancers', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'targetGroups', 'addtargets', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'targetGroups', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'targetGroups', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role563eb4128875f8d1', 'loadbalancer', 'targetGroups', 'removetargets', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('role6859cc35f67d659e', 'iam', 'role', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'listeners', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'listeners', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'networkLoadBalancers', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'networkLoadBalancers', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'targetGroups', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolecba563ba8698e792', 'loadbalancer', 'targetGroups', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolee27bb5ba1efb68cb', 'iam', 'role', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolfc25814dc6989172d', 'iam', 'serviceAccount', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolfc25814dc6989172d', 'iam', 'serviceAccount', 'list', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolfe4e91e8c9f6542a6', 'compute', 'instance', NULL, true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolfe683216e63311d3f', 'vpc', 'network', 'get', true);
+INSERT INTO kaname.role_rule_ref (role_id, module, resource, verb, live) VALUES ('rolfe683216e63311d3f', 'vpc', 'network', 'list', true);
 
 
 --
--- Data for Name: role_rule_selectors; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: role_rule_selectors; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.role_rule_selectors (role_id, rule_fp, object_types, match_labels, created_at, updated_at, arm, resource_names, live) VALUES ('rol21232f297a57a5a74', '3a9a54c3276716602674c9995c9321bea53a5ae693684842a389a80ecb1c80c4', '{compute.guestAccessKey,compute.instance,compute.placementGroup,iam.accessBinding,iam.account,iam.group,iam.project,iam.role,iam.serviceAccount,iam.user,loadbalancer.listeners,loadbalancer.networkLoadBalancers,loadbalancer.targetGroups,registry.registries,registry.repositories,storage.images,storage.snapshots,storage.volumes,vpc.address,vpc.cidrGroup,vpc.gateway,vpc.network,vpc.networkInterface,vpc.routeTable,vpc.securityGroup,vpc.subnet}', '{}', now(), now(), 'anchor', '{}', true);
-INSERT INTO kacho_iam.role_rule_selectors (role_id, rule_fp, object_types, match_labels, created_at, updated_at, arm, resource_names, live) VALUES ('rolde95b43bceeb4b998', 'e4919459188e4b7b3786370b6c0899a79b4df159bd1988aef0b3ad23bb5aacfe', '{compute.guestAccessKey,compute.instance,compute.placementGroup,iam.accessBinding,iam.account,iam.group,iam.project,iam.role,iam.serviceAccount,iam.user,loadbalancer.listeners,loadbalancer.networkLoadBalancers,loadbalancer.targetGroups,registry.registries,registry.repositories,storage.images,storage.snapshots,storage.volumes,vpc.address,vpc.cidrGroup,vpc.gateway,vpc.network,vpc.networkInterface,vpc.routeTable,vpc.securityGroup,vpc.subnet}', '{}', now(), now(), 'anchor', '{}', true);
-INSERT INTO kacho_iam.role_rule_selectors (role_id, rule_fp, object_types, match_labels, created_at, updated_at, arm, resource_names, live) VALUES ('rol1bda80f2be4d3658e', 'fe68d56d542e8b599256b1a7eee6e31eed6db358e7254af4b5e25c7195dcf68e', '{compute.guestAccessKey,compute.instance,compute.placementGroup,iam.accessBinding,iam.account,iam.group,iam.project,iam.role,iam.serviceAccount,iam.user,loadbalancer.listeners,loadbalancer.networkLoadBalancers,loadbalancer.targetGroups,registry.registries,registry.repositories,storage.images,storage.snapshots,storage.volumes,vpc.address,vpc.cidrGroup,vpc.gateway,vpc.network,vpc.networkInterface,vpc.routeTable,vpc.securityGroup,vpc.subnet}', '{}', now(), now(), 'anchor', '{}', true);
-INSERT INTO kacho_iam.role_rule_selectors (role_id, rule_fp, object_types, match_labels, created_at, updated_at, arm, resource_names, live) VALUES ('rol72122ce96bfec66e2', '3a9a54c3276716602674c9995c9321bea53a5ae693684842a389a80ecb1c80c4', '{compute.guestAccessKey,compute.instance,compute.placementGroup,iam.accessBinding,iam.account,iam.group,iam.project,iam.role,iam.serviceAccount,iam.user,loadbalancer.listeners,loadbalancer.networkLoadBalancers,loadbalancer.targetGroups,registry.registries,registry.repositories,storage.images,storage.snapshots,storage.volumes,vpc.address,vpc.cidrGroup,vpc.gateway,vpc.network,vpc.networkInterface,vpc.routeTable,vpc.securityGroup,vpc.subnet}', '{}', now(), now(), 'anchor', '{}', true);
+INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, created_at, updated_at, arm, resource_names, live) VALUES ('rol21232f297a57a5a74', '3a9a54c3276716602674c9995c9321bea53a5ae693684842a389a80ecb1c80c4', '{compute.guestAccessKey,compute.instance,compute.placementGroup,iam.accessBinding,iam.account,iam.group,iam.project,iam.role,iam.serviceAccount,iam.user,loadbalancer.listeners,loadbalancer.networkLoadBalancers,loadbalancer.targetGroups,registry.registries,registry.repositories,storage.images,storage.snapshots,storage.volumes,vpc.address,vpc.cidrGroup,vpc.gateway,vpc.network,vpc.networkInterface,vpc.routeTable,vpc.securityGroup,vpc.subnet}', '{}', now(), now(), 'anchor', '{}', true);
+INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, created_at, updated_at, arm, resource_names, live) VALUES ('rolde95b43bceeb4b998', 'e4919459188e4b7b3786370b6c0899a79b4df159bd1988aef0b3ad23bb5aacfe', '{compute.guestAccessKey,compute.instance,compute.placementGroup,iam.accessBinding,iam.account,iam.group,iam.project,iam.role,iam.serviceAccount,iam.user,loadbalancer.listeners,loadbalancer.networkLoadBalancers,loadbalancer.targetGroups,registry.registries,registry.repositories,storage.images,storage.snapshots,storage.volumes,vpc.address,vpc.cidrGroup,vpc.gateway,vpc.network,vpc.networkInterface,vpc.routeTable,vpc.securityGroup,vpc.subnet}', '{}', now(), now(), 'anchor', '{}', true);
+INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, created_at, updated_at, arm, resource_names, live) VALUES ('rol1bda80f2be4d3658e', 'fe68d56d542e8b599256b1a7eee6e31eed6db358e7254af4b5e25c7195dcf68e', '{compute.guestAccessKey,compute.instance,compute.placementGroup,iam.accessBinding,iam.account,iam.group,iam.project,iam.role,iam.serviceAccount,iam.user,loadbalancer.listeners,loadbalancer.networkLoadBalancers,loadbalancer.targetGroups,registry.registries,registry.repositories,storage.images,storage.snapshots,storage.volumes,vpc.address,vpc.cidrGroup,vpc.gateway,vpc.network,vpc.networkInterface,vpc.routeTable,vpc.securityGroup,vpc.subnet}', '{}', now(), now(), 'anchor', '{}', true);
+INSERT INTO kaname.role_rule_selectors (role_id, rule_fp, object_types, match_labels, created_at, updated_at, arm, resource_names, live) VALUES ('rol72122ce96bfec66e2', '3a9a54c3276716602674c9995c9321bea53a5ae693684842a389a80ecb1c80c4', '{compute.guestAccessKey,compute.instance,compute.placementGroup,iam.accessBinding,iam.account,iam.group,iam.project,iam.role,iam.serviceAccount,iam.user,loadbalancer.listeners,loadbalancer.networkLoadBalancers,loadbalancer.targetGroups,registry.registries,registry.repositories,storage.images,storage.snapshots,storage.volumes,vpc.address,vpc.cidrGroup,vpc.gateway,vpc.network,vpc.networkInterface,vpc.routeTable,vpc.securityGroup,vpc.subnet}', '{}', now(), now(), 'anchor', '{}', true);
 
 
 --
--- Data for Name: role_selector_prune; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: role_selector_prune; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: role_verb; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: role_verb; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: roles; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: roles; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol21232f297a57a5a74', NULL, 'admin', 'Global super-admin (all modules, all resources, all verbs)', '["*.*.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol6307d201bf18e6763', NULL, 'iam.account.admin', 'Admin Account (CRUD)', '["iam.account.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["account"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol674f6a6d7e4eeb3b6', NULL, 'iam.project.admin', 'Admin Project', '["iam.project.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["project"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolde95b43bceeb4b998', NULL, 'edit', 'Global edit-only (update operations on all resources, no create/delete/admin)', '["*.*.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol34c4d5f1c7c722230', NULL, 'iam.account.edit', 'Edit Account (update only)', '["iam.account.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "iam", "resources": ["account"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol7b4c84039b79327e5', NULL, 'iam.project.edit', 'Edit Project', '["iam.project.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "iam", "resources": ["project"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol8df6147b3aa962b57', NULL, 'vpc.address.admin', 'Admin Address', '["vpc.address.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["address"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolfe4e91e8c9f6542a6', NULL, 'compute.instance.admin', 'Admin Instance', '["compute.instance.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "compute", "resources": ["instance"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol000000000sysadmin', NULL, 'kacho-system.admin', 'Built-in system administrator (all permissions across all scopes)', '["*.*.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol38306aa220559b1f6', NULL, 'iam.service_account.admin', 'Admin ServiceAccount', '["iam.serviceAccount.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["serviceAccount"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol000000000sysviewer', NULL, 'kacho-system.viewer', 'Built-in system viewer (read-only)', '["*.*.*.read", "*.*.*.list", "*.*.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol1bda80f2be4d3658e', NULL, 'view', 'Global read-only (read/list/get all)', '["*.*.*.read", "*.*.*.list", "*.*.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol26a49318d88632af2', NULL, 'vpc.gateway.view', 'Read Gateway', '["vpc.gateway.*.read", "vpc.gateway.*.list", "vpc.gateway.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["gateway"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol41dd066874f699c17', NULL, 'iam.account.view', 'Read Account', '["iam.account.*.read", "iam.account.*.list", "iam.account.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["account"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol6be01c0948936754b', NULL, 'compute.instance.view', 'Read Instance', '["compute.instance.*.read", "compute.instance.*.list", "compute.instance.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "compute", "resources": ["instance"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol7ad445624b1d0e9a1', NULL, 'iam.project.view', 'Read Project', '["iam.project.*.read", "iam.project.*.list", "iam.project.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["project"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('role2f47108d41b38f39', NULL, 'iam.user.view', 'Read User', '["iam.user.*.read", "iam.user.*.list", "iam.user.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["user"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol9d5dc5ed6308cee2a', NULL, 'vpc.gateway.edit', 'Edit Gateway', '["vpc.gateway.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["gateway"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol79a7325eb0d31fad4', NULL, 'compute.instance.edit', 'Edit Instance', '["compute.instance.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "compute", "resources": ["instance"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol6a079e6a177963990', NULL, 'iam.group.admin', 'Admin Group', '["iam.group.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["group"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('role6859cc35f67d659e', NULL, 'iam.role.admin', 'Admin Role catalog', '["iam.role.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["role"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol8ed48ecc3878c2e73', NULL, 'vpc.network.admin', 'Admin Network', '["vpc.network.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["network"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol68b2520862bf7a921', NULL, 'vpc.subnet.admin', 'Admin Subnet', '["vpc.subnet.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["subnet"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol9aeb6b9c5d5b01ec0', NULL, 'vpc.gateway.admin', 'Admin Gateway', '["vpc.gateway.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["gateway"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rold4f364618280185aa', NULL, 'iam.group.edit', 'Edit Group', '["iam.group.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "iam", "resources": ["group"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol672f1ac772fab8697', NULL, 'iam.role.edit', 'Edit Role', '["iam.role.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "update"], "module": "iam", "resources": ["role"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol5e145d87ee378211f', NULL, 'iam.service_account.edit', 'Edit ServiceAccount', '["iam.serviceAccount.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "iam", "resources": ["serviceAccount"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('role1eb529620e1ff235', NULL, 'iam.access_binding.admin', 'Admin AccessBinding', '["iam.accessBinding.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["accessBinding"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolee27bb5ba1efb68cb', NULL, 'iam.role.view', 'Read Role', '["iam.role.*.read", "iam.role.*.list", "iam.role.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list"], "module": "iam", "resources": ["role"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol213ce142e75132019', NULL, 'iam.access_binding.edit', 'Edit AccessBinding', '["iam.accessBinding.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "iam", "resources": ["accessBinding"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol88958a1dfa5ddf047', NULL, 'vpc.security_group.admin', 'Admin SecurityGroup', '["vpc.securityGroup.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["securityGroup"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol096a471229217fbcf', NULL, 'vpc.address.view', 'Read Address', '["vpc.address.*.read", "vpc.address.*.list", "vpc.address.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["address"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol31f5c2b4e7b3ee06c', NULL, 'vpc.subnet.view', 'Read Subnet', '["vpc.subnet.*.read", "vpc.subnet.*.list", "vpc.subnet.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["subnet"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolb18c533133af2f130', NULL, 'iam.access_binding.view', 'Read AccessBinding', '["iam.accessBinding.*.read", "iam.accessBinding.*.list", "iam.accessBinding.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["accessBinding"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolc98b067591ded99e5', NULL, 'iam.group.view', 'Read Group', '["iam.group.*.read", "iam.group.*.list", "iam.group.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["group"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolfc25814dc6989172d', NULL, 'iam.service_account.view', 'Read ServiceAccount', '["iam.serviceAccount.*.read", "iam.serviceAccount.*.list", "iam.serviceAccount.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["serviceAccount"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolfe683216e63311d3f', NULL, 'vpc.network.view', 'Read Network', '["vpc.network.*.read", "vpc.network.*.list", "vpc.network.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["network"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol72122ce96bfec66e2', NULL, 'owner', 'Account owner (all modules, all resources, all verbs within the account)', '["*.*.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol4d942f110ed3d7c47', NULL, 'vpc.network.edit', 'Edit Network', '["vpc.network.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["network"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol91e90d7a1d4d02658', NULL, 'vpc.subnet.edit', 'Edit Subnet', '["vpc.subnet.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["subnet"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolca0d037b77856bea8', NULL, 'vpc.address.edit', 'Edit Address', '["vpc.address.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["address"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rola227db99b2e9bd131', NULL, 'vpc.security_group.edit', 'Edit SecurityGroup', '["vpc.securityGroup.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["securityGroup"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rold8267982db70ea7f0', NULL, 'vpc.route_table.edit', 'Edit RouteTable', '["vpc.routeTable.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["routeTable"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('role563eb4128875f8d1', NULL, 'loadbalancer.target_manager', 'NLB target manager (addTargets/removeTargets/getTargetStates + viewer on LB hierarchy)', '["loadbalancer.targetGroups.*.addTargets", "loadbalancer.targetGroups.*.removeTargets", "loadbalancer.networkLoadBalancers.*.getTargetStates", "loadbalancer.targetGroups.*.get", "loadbalancer.targetGroups.*.list", "loadbalancer.targetGroups.*.listOperations", "loadbalancer.networkLoadBalancers.*.get", "loadbalancer.networkLoadBalancers.*.list", "loadbalancer.listeners.*.get", "loadbalancer.listeners.*.list"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["addTargets", "removeTargets", "get", "list"], "module": "loadbalancer", "resources": ["targetGroups"]}, {"verbs": ["get", "list"], "module": "loadbalancer", "resources": ["networkLoadBalancers"]}, {"verbs": ["get", "list"], "module": "loadbalancer", "resources": ["listeners"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolddd484b2677346167', NULL, 'vpc.route_table.admin', 'Admin RouteTable', '["vpc.routeTable.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["routeTable"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol1469d1a633ceae4b5', NULL, 'vpc.security_group.view', 'Read SecurityGroup', '["vpc.securityGroup.*.read", "vpc.securityGroup.*.list", "vpc.securityGroup.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["securityGroup"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolab84e08ef4b5e0b22', NULL, 'vpc.route_table.view', 'Read RouteTable', '["vpc.routeTable.*.read", "vpc.routeTable.*.list", "vpc.routeTable.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["routeTable"]}]', '{}', NULL, NULL, NULL, NULL, true);
-INSERT INTO kacho_iam.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolecba563ba8698e792', NULL, 'loadbalancer.operator', 'NLB operator (start/stop/getTargetStates/listOperations + viewer on LB hierarchy)', '["loadbalancer.listeners.*.get", "loadbalancer.listeners.*.list", "loadbalancer.listeners.*.listOperations", "loadbalancer.networkLoadBalancers.*.get", "loadbalancer.networkLoadBalancers.*.getTargetStates", "loadbalancer.networkLoadBalancers.*.list", "loadbalancer.networkLoadBalancers.*.listOperations", "loadbalancer.targetGroups.*.get", "loadbalancer.targetGroups.*.list", "loadbalancer.targetGroups.*.listOperations"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list"], "module": "loadbalancer", "resources": ["networkLoadBalancers"]}, {"verbs": ["get", "list"], "module": "loadbalancer", "resources": ["listeners"]}, {"verbs": ["get", "list"], "module": "loadbalancer", "resources": ["targetGroups"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol21232f297a57a5a74', NULL, 'admin', 'Global super-admin (all modules, all resources, all verbs)', '["*.*.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol6307d201bf18e6763', NULL, 'iam.account.admin', 'Admin Account (CRUD)', '["iam.account.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["account"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol674f6a6d7e4eeb3b6', NULL, 'iam.project.admin', 'Admin Project', '["iam.project.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["project"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolde95b43bceeb4b998', NULL, 'edit', 'Global edit-only (update operations on all resources, no create/delete/admin)', '["*.*.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol34c4d5f1c7c722230', NULL, 'iam.account.edit', 'Edit Account (update only)', '["iam.account.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "iam", "resources": ["account"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol7b4c84039b79327e5', NULL, 'iam.project.edit', 'Edit Project', '["iam.project.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "iam", "resources": ["project"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol8df6147b3aa962b57', NULL, 'vpc.address.admin', 'Admin Address', '["vpc.address.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["address"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolfe4e91e8c9f6542a6', NULL, 'compute.instance.admin', 'Admin Instance', '["compute.instance.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "compute", "resources": ["instance"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol000000000sysadmin', NULL, 'kacho-system.admin', 'Built-in system administrator (all permissions across all scopes)', '["*.*.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol38306aa220559b1f6', NULL, 'iam.service_account.admin', 'Admin ServiceAccount', '["iam.serviceAccount.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["serviceAccount"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol000000000sysviewer', NULL, 'kacho-system.viewer', 'Built-in system viewer (read-only)', '["*.*.*.read", "*.*.*.list", "*.*.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol1bda80f2be4d3658e', NULL, 'view', 'Global read-only (read/list/get all)', '["*.*.*.read", "*.*.*.list", "*.*.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol26a49318d88632af2', NULL, 'vpc.gateway.view', 'Read Gateway', '["vpc.gateway.*.read", "vpc.gateway.*.list", "vpc.gateway.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["gateway"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol41dd066874f699c17', NULL, 'iam.account.view', 'Read Account', '["iam.account.*.read", "iam.account.*.list", "iam.account.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["account"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol6be01c0948936754b', NULL, 'compute.instance.view', 'Read Instance', '["compute.instance.*.read", "compute.instance.*.list", "compute.instance.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "compute", "resources": ["instance"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol7ad445624b1d0e9a1', NULL, 'iam.project.view', 'Read Project', '["iam.project.*.read", "iam.project.*.list", "iam.project.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["project"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('role2f47108d41b38f39', NULL, 'iam.user.view', 'Read User', '["iam.user.*.read", "iam.user.*.list", "iam.user.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["user"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol9d5dc5ed6308cee2a', NULL, 'vpc.gateway.edit', 'Edit Gateway', '["vpc.gateway.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["gateway"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol79a7325eb0d31fad4', NULL, 'compute.instance.edit', 'Edit Instance', '["compute.instance.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "compute", "resources": ["instance"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol6a079e6a177963990', NULL, 'iam.group.admin', 'Admin Group', '["iam.group.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["group"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('role6859cc35f67d659e', NULL, 'iam.role.admin', 'Admin Role catalog', '["iam.role.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["role"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol8ed48ecc3878c2e73', NULL, 'vpc.network.admin', 'Admin Network', '["vpc.network.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["network"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol68b2520862bf7a921', NULL, 'vpc.subnet.admin', 'Admin Subnet', '["vpc.subnet.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["subnet"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol9aeb6b9c5d5b01ec0', NULL, 'vpc.gateway.admin', 'Admin Gateway', '["vpc.gateway.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["gateway"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rold4f364618280185aa', NULL, 'iam.group.edit', 'Edit Group', '["iam.group.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "iam", "resources": ["group"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol672f1ac772fab8697', NULL, 'iam.role.edit', 'Edit Role', '["iam.role.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "update"], "module": "iam", "resources": ["role"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol5e145d87ee378211f', NULL, 'iam.service_account.edit', 'Edit ServiceAccount', '["iam.serviceAccount.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "iam", "resources": ["serviceAccount"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('role1eb529620e1ff235', NULL, 'iam.access_binding.admin', 'Admin AccessBinding', '["iam.accessBinding.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "iam", "resources": ["accessBinding"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolee27bb5ba1efb68cb', NULL, 'iam.role.view', 'Read Role', '["iam.role.*.read", "iam.role.*.list", "iam.role.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list"], "module": "iam", "resources": ["role"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol213ce142e75132019', NULL, 'iam.access_binding.edit', 'Edit AccessBinding', '["iam.accessBinding.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "iam", "resources": ["accessBinding"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol88958a1dfa5ddf047', NULL, 'vpc.security_group.admin', 'Admin SecurityGroup', '["vpc.securityGroup.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["securityGroup"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol096a471229217fbcf', NULL, 'vpc.address.view', 'Read Address', '["vpc.address.*.read", "vpc.address.*.list", "vpc.address.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["address"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol31f5c2b4e7b3ee06c', NULL, 'vpc.subnet.view', 'Read Subnet', '["vpc.subnet.*.read", "vpc.subnet.*.list", "vpc.subnet.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["subnet"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolb18c533133af2f130', NULL, 'iam.access_binding.view', 'Read AccessBinding', '["iam.accessBinding.*.read", "iam.accessBinding.*.list", "iam.accessBinding.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["accessBinding"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolc98b067591ded99e5', NULL, 'iam.group.view', 'Read Group', '["iam.group.*.read", "iam.group.*.list", "iam.group.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["group"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolfc25814dc6989172d', NULL, 'iam.service_account.view', 'Read ServiceAccount', '["iam.serviceAccount.*.read", "iam.serviceAccount.*.list", "iam.serviceAccount.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "iam", "resources": ["serviceAccount"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolfe683216e63311d3f', NULL, 'vpc.network.view', 'Read Network', '["vpc.network.*.read", "vpc.network.*.list", "vpc.network.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["network"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol72122ce96bfec66e2', NULL, 'owner', 'Account owner (all modules, all resources, all verbs within the account)', '["*.*.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "*", "resources": ["*"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol4d942f110ed3d7c47', NULL, 'vpc.network.edit', 'Edit Network', '["vpc.network.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["network"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol91e90d7a1d4d02658', NULL, 'vpc.subnet.edit', 'Edit Subnet', '["vpc.subnet.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["subnet"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolca0d037b77856bea8', NULL, 'vpc.address.edit', 'Edit Address', '["vpc.address.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["address"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rola227db99b2e9bd131', NULL, 'vpc.security_group.edit', 'Edit SecurityGroup', '["vpc.securityGroup.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["securityGroup"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rold8267982db70ea7f0', NULL, 'vpc.route_table.edit', 'Edit RouteTable', '["vpc.routeTable.*.update"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list", "update"], "module": "vpc", "resources": ["routeTable"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('role563eb4128875f8d1', NULL, 'loadbalancer.target_manager', 'NLB target manager (addTargets/removeTargets/getTargetStates + viewer on LB hierarchy)', '["loadbalancer.targetGroups.*.addTargets", "loadbalancer.targetGroups.*.removeTargets", "loadbalancer.networkLoadBalancers.*.getTargetStates", "loadbalancer.targetGroups.*.get", "loadbalancer.targetGroups.*.list", "loadbalancer.targetGroups.*.listOperations", "loadbalancer.networkLoadBalancers.*.get", "loadbalancer.networkLoadBalancers.*.list", "loadbalancer.listeners.*.get", "loadbalancer.listeners.*.list"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["addTargets", "removeTargets", "get", "list"], "module": "loadbalancer", "resources": ["targetGroups"]}, {"verbs": ["get", "list"], "module": "loadbalancer", "resources": ["networkLoadBalancers"]}, {"verbs": ["get", "list"], "module": "loadbalancer", "resources": ["listeners"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolddd484b2677346167', NULL, 'vpc.route_table.admin', 'Admin RouteTable', '["vpc.routeTable.*.*"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["*"], "module": "vpc", "resources": ["routeTable"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rol1469d1a633ceae4b5', NULL, 'vpc.security_group.view', 'Read SecurityGroup', '["vpc.securityGroup.*.read", "vpc.securityGroup.*.list", "vpc.securityGroup.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["securityGroup"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolab84e08ef4b5e0b22', NULL, 'vpc.route_table.view', 'Read RouteTable', '["vpc.routeTable.*.read", "vpc.routeTable.*.list", "vpc.routeTable.*.get"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["list", "get"], "module": "vpc", "resources": ["routeTable"]}]', '{}', NULL, NULL, NULL, NULL, true);
+INSERT INTO kaname.roles (id, account_id, name, description, permissions, created_at, cluster_id, project_id, rules, labels, owner_module, retired_at, retired_reason, retired_by, live) VALUES ('rolecba563ba8698e792', NULL, 'loadbalancer.operator', 'NLB operator (start/stop/getTargetStates/listOperations + viewer on LB hierarchy)', '["loadbalancer.listeners.*.get", "loadbalancer.listeners.*.list", "loadbalancer.listeners.*.listOperations", "loadbalancer.networkLoadBalancers.*.get", "loadbalancer.networkLoadBalancers.*.getTargetStates", "loadbalancer.networkLoadBalancers.*.list", "loadbalancer.networkLoadBalancers.*.listOperations", "loadbalancer.targetGroups.*.get", "loadbalancer.targetGroups.*.list", "loadbalancer.targetGroups.*.listOperations"]', now(), 'cluster_kacho_root', NULL, '[{"verbs": ["get", "list"], "module": "loadbalancer", "resources": ["networkLoadBalancers"]}, {"verbs": ["get", "list"], "module": "loadbalancer", "resources": ["listeners"]}, {"verbs": ["get", "list"], "module": "loadbalancer", "resources": ["targetGroups"]}]', '{}', NULL, NULL, NULL, NULL, true);
 
 
 --
--- Data for Name: service_account_oauth_clients; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: service_account_oauth_clients; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: service_accounts; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: service_accounts; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('sva85816c3a904b6bac6', 'acc1a18042d81fb438d6', 'kacho-vpc', 'Module SA: kacho-vpc (SEC-C least-priv)', now(), true, '{}');
-INSERT INTO kacho_iam.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('sva8e7d21b2c8a633cd1', 'acc1a18042d81fb438d6', 'kacho-compute', 'Module SA: kacho-compute (SEC-C least-priv)', now(), true, '{}');
-INSERT INTO kacho_iam.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('svac4faf3358e07191f5', 'acc1a18042d81fb438d6', 'kacho-nlb', 'Module SA: kacho-nlb (SEC-C least-priv)', now(), true, '{}');
-INSERT INTO kacho_iam.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('sva3e9556e76be67f816', 'acc1a18042d81fb438d6', 'kacho-api-gateway', 'Module SA: kacho-api-gateway (SEC-C identity-only)', now(), true, '{}');
-INSERT INTO kacho_iam.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('sva9e62bc58c3f0e45ea', 'acc1a18042d81fb438d6', 'kacho-registry', 'Module SA: kacho-registry (SEC-C least-priv)', now(), true, '{}');
-INSERT INTO kacho_iam.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('sva8ef8aa106f83f84e0', 'acc1a18042d81fb438d6', 'kacho-storage', 'Module SA: kacho-storage (SEC-C least-priv)', now(), true, '{}');
-INSERT INTO kacho_iam.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('svab91854890de887e6d', 'acc1a18042d81fb438d6', 'kacho-bootstrap-admin', 'Bootstrap admin ServiceAccount for non-interactive production-mode token mint (#58)', now(), true, '{}');
+INSERT INTO kaname.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('sva85816c3a904b6bac6', 'acc1a18042d81fb438d6', 'kacho-vpc', 'Module SA: kacho-vpc (SEC-C least-priv)', now(), true, '{}');
+INSERT INTO kaname.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('sva8e7d21b2c8a633cd1', 'acc1a18042d81fb438d6', 'kacho-compute', 'Module SA: kacho-compute (SEC-C least-priv)', now(), true, '{}');
+INSERT INTO kaname.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('svac4faf3358e07191f5', 'acc1a18042d81fb438d6', 'kacho-nlb', 'Module SA: kacho-nlb (SEC-C least-priv)', now(), true, '{}');
+INSERT INTO kaname.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('sva3e9556e76be67f816', 'acc1a18042d81fb438d6', 'kacho-api-gateway', 'Module SA: kacho-api-gateway (SEC-C identity-only)', now(), true, '{}');
+INSERT INTO kaname.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('sva9e62bc58c3f0e45ea', 'acc1a18042d81fb438d6', 'kacho-registry', 'Module SA: kacho-registry (SEC-C least-priv)', now(), true, '{}');
+INSERT INTO kaname.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('sva8ef8aa106f83f84e0', 'acc1a18042d81fb438d6', 'kacho-storage', 'Module SA: kacho-storage (SEC-C least-priv)', now(), true, '{}');
+INSERT INTO kaname.service_accounts (id, account_id, name, description, created_at, enabled, labels) VALUES ('svab91854890de887e6d', 'acc1a18042d81fb438d6', 'kacho-bootstrap-admin', 'Bootstrap admin ServiceAccount for non-interactive production-mode token mint (#58)', now(), true, '{}');
 
 
 --
--- Data for Name: session_revocations; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: session_revocations; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: subject_change_outbox; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: subject_change_outbox; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: token_signing_keys; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: token_signing_keys; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: user_oauth_clients; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: user_oauth_clients; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: user_token_revocations; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: user_token_revocations; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
 
 
 --
--- Data for Name: users; Type: TABLE DATA; Schema: kacho_iam; Owner: -
+-- Data for Name: users; Type: TABLE DATA; Schema: kaname; Owner: -
 --
 
-INSERT INTO kacho_iam.users (id, external_id, email, display_name, created_at, account_id, invite_status, invited_by, labels) VALUES ('usr1a18042d81fb438d6', '', 'system@kacho.local', 'Kacho System (module SA owner)', now(), 'acc1a18042d81fb438d6', 'PENDING', NULL, '{}');
+INSERT INTO kaname.users (id, external_id, email, display_name, created_at, account_id, invite_status, invited_by, labels) VALUES ('usr1a18042d81fb438d6', '', 'system@kacho.local', 'Kacho System (module SA owner)', now(), 'acc1a18042d81fb438d6', 'PENDING', NULL, '{}');
 
 
 --
--- Name: account_admission_rate_limits_id_seq; Type: SEQUENCE SET; Schema: kacho_iam; Owner: -
+-- Name: account_admission_rate_limits_id_seq; Type: SEQUENCE SET; Schema: kaname; Owner: -
 --
 
-SELECT pg_catalog.setval('kacho_iam.account_admission_rate_limits_id_seq', 1, true);
+SELECT pg_catalog.setval('kaname.account_admission_rate_limits_id_seq', 1, true);
 
 
 --
--- Name: fga_outbox_id_seq; Type: SEQUENCE SET; Schema: kacho_iam; Owner: -
+-- Name: fga_outbox_id_seq; Type: SEQUENCE SET; Schema: kaname; Owner: -
 --
 
-SELECT pg_catalog.setval('kacho_iam.fga_outbox_id_seq', 29, true);
+SELECT pg_catalog.setval('kaname.fga_outbox_id_seq', 29, true);
 
 
 --
--- Name: invite_mail_outbox_id_seq; Type: SEQUENCE SET; Schema: kacho_iam; Owner: -
+-- Name: invite_mail_outbox_id_seq; Type: SEQUENCE SET; Schema: kaname; Owner: -
 --
 
-SELECT pg_catalog.setval('kacho_iam.invite_mail_outbox_id_seq', 1, false);
+SELECT pg_catalog.setval('kaname.invite_mail_outbox_id_seq', 1, false);
 
 
 --
--- Name: limits_revision_seq; Type: SEQUENCE SET; Schema: kacho_iam; Owner: -
+-- Name: limits_revision_seq; Type: SEQUENCE SET; Schema: kaname; Owner: -
 --
 
-SELECT pg_catalog.setval('kacho_iam.limits_revision_seq', 36, true);
+SELECT pg_catalog.setval('kaname.limits_revision_seq', 36, true);
 
 
 --
--- Name: provider_compensation_outbox_id_seq; Type: SEQUENCE SET; Schema: kacho_iam; Owner: -
+-- Name: provider_compensation_outbox_id_seq; Type: SEQUENCE SET; Schema: kaname; Owner: -
 --
 
-SELECT pg_catalog.setval('kacho_iam.provider_compensation_outbox_id_seq', 1, false);
+SELECT pg_catalog.setval('kaname.provider_compensation_outbox_id_seq', 1, false);
 
 
 --
--- Name: resource_reconcile_outbox_id_seq; Type: SEQUENCE SET; Schema: kacho_iam; Owner: -
+-- Name: resource_reconcile_outbox_id_seq; Type: SEQUENCE SET; Schema: kaname; Owner: -
 --
 
-SELECT pg_catalog.setval('kacho_iam.resource_reconcile_outbox_id_seq', 1, false);
+SELECT pg_catalog.setval('kaname.resource_reconcile_outbox_id_seq', 1, false);
 
 
 --
--- Name: subject_change_outbox_id_seq; Type: SEQUENCE SET; Schema: kacho_iam; Owner: -
+-- Name: subject_change_outbox_id_seq; Type: SEQUENCE SET; Schema: kaname; Owner: -
 --
 
-SELECT pg_catalog.setval('kacho_iam.subject_change_outbox_id_seq', 1, false);
+SELECT pg_catalog.setval('kaname.subject_change_outbox_id_seq', 1, false);
 
 
 --
--- Name: access_binding_emitted_tuples access_binding_emitted_tuples_pk; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: access_binding_emitted_tuples access_binding_emitted_tuples_pk; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.access_binding_emitted_tuples
+ALTER TABLE ONLY kaname.access_binding_emitted_tuples
     ADD CONSTRAINT access_binding_emitted_tuples_pk PRIMARY KEY (binding_id, fga_user, relation, object);
 
 
 --
--- Name: access_binding_subjects access_binding_subjects_pk; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: access_binding_subjects access_binding_subjects_pk; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.access_binding_subjects
+ALTER TABLE ONLY kaname.access_binding_subjects
     ADD CONSTRAINT access_binding_subjects_pk PRIMARY KEY (binding_id, subject_type, subject_id);
 
 
 --
--- Name: access_binding_target_members access_binding_target_members_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: access_binding_target_members access_binding_target_members_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.access_binding_target_members
+ALTER TABLE ONLY kaname.access_binding_target_members
     ADD CONSTRAINT access_binding_target_members_pkey PRIMARY KEY (binding_id, role_id, rule_fp, object_type, object_id);
 
 
 --
--- Name: access_bindings access_bindings_id_scope_uk; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: access_bindings access_bindings_id_scope_uk; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.access_bindings
+ALTER TABLE ONLY kaname.access_bindings
     ADD CONSTRAINT access_bindings_id_scope_uk UNIQUE (id, resource_type, resource_id);
 
 
 --
--- Name: access_bindings access_bindings_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: access_bindings access_bindings_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.access_bindings
+ALTER TABLE ONLY kaname.access_bindings
     ADD CONSTRAINT access_bindings_pkey PRIMARY KEY (id);
 
 
 --
--- Name: account_admission_rate_limits account_admission_rate_limits_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: account_admission_rate_limits account_admission_rate_limits_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.account_admission_rate_limits
+ALTER TABLE ONLY kaname.account_admission_rate_limits
     ADD CONSTRAINT account_admission_rate_limits_pkey PRIMARY KEY (id);
 
 
 --
--- Name: accounts accounts_name_unique; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: accounts accounts_name_unique; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.accounts
+ALTER TABLE ONLY kaname.accounts
     ADD CONSTRAINT accounts_name_unique UNIQUE (name);
 
 
 --
--- Name: accounts accounts_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: accounts accounts_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.accounts
+ALTER TABLE ONLY kaname.accounts
     ADD CONSTRAINT accounts_pkey PRIMARY KEY (id);
 
 
 --
--- Name: audit_outbox audit_outbox_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: audit_outbox audit_outbox_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.audit_outbox
+ALTER TABLE ONLY kaname.audit_outbox
     ADD CONSTRAINT audit_outbox_pkey PRIMARY KEY (id);
 
 
 --
--- Name: catalog_module catalog_module_live_uk; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_module catalog_module_live_uk; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_module
+ALTER TABLE ONLY kaname.catalog_module
     ADD CONSTRAINT catalog_module_live_uk UNIQUE (module, live);
 
 
 --
--- Name: catalog_module catalog_module_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_module catalog_module_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_module
+ALTER TABLE ONLY kaname.catalog_module
     ADD CONSTRAINT catalog_module_pkey PRIMARY KEY (module);
 
 
 --
--- Name: catalog_resource catalog_resource_dotted_live_uk; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_resource catalog_resource_dotted_live_uk; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_resource
+ALTER TABLE ONLY kaname.catalog_resource
     ADD CONSTRAINT catalog_resource_dotted_live_uk UNIQUE (dotted, live);
 
 
 --
--- Name: catalog_resource catalog_resource_live_uk; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_resource catalog_resource_live_uk; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_resource
+ALTER TABLE ONLY kaname.catalog_resource
     ADD CONSTRAINT catalog_resource_live_uk UNIQUE (module, resource, live);
 
 
 --
--- Name: catalog_resource catalog_resource_object_type_live_uk; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_resource catalog_resource_object_type_live_uk; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_resource
+ALTER TABLE ONLY kaname.catalog_resource
     ADD CONSTRAINT catalog_resource_object_type_live_uk UNIQUE (object_type, live);
 
 
 --
--- Name: catalog_resource catalog_resource_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_resource catalog_resource_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_resource
+ALTER TABLE ONLY kaname.catalog_resource
     ADD CONSTRAINT catalog_resource_pkey PRIMARY KEY (module, resource);
 
 
 --
--- Name: catalog_verb catalog_verb_live_uk; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_verb catalog_verb_live_uk; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_verb
+ALTER TABLE ONLY kaname.catalog_verb
     ADD CONSTRAINT catalog_verb_live_uk UNIQUE (module, resource, verb, live);
 
 
 --
--- Name: catalog_verb catalog_verb_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_verb catalog_verb_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_verb
+ALTER TABLE ONLY kaname.catalog_verb
     ADD CONSTRAINT catalog_verb_pkey PRIMARY KEY (module, resource, verb);
 
 
 --
--- Name: client_assertion_replay client_assertion_replay_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: client_assertion_replay client_assertion_replay_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.client_assertion_replay
+ALTER TABLE ONLY kaname.client_assertion_replay
     ADD CONSTRAINT client_assertion_replay_pkey PRIMARY KEY (client_id, assertion_id);
 
 
 --
--- Name: cluster_admin_grants cluster_admin_grants_cluster_subject_uniq; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: cluster_admin_grants cluster_admin_grants_cluster_subject_uniq; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.cluster_admin_grants
+ALTER TABLE ONLY kaname.cluster_admin_grants
     ADD CONSTRAINT cluster_admin_grants_cluster_subject_uniq UNIQUE (cluster_id, subject_id);
 
 
 --
--- Name: cluster_admin_grants cluster_admin_grants_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: cluster_admin_grants cluster_admin_grants_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.cluster_admin_grants
+ALTER TABLE ONLY kaname.cluster_admin_grants
     ADD CONSTRAINT cluster_admin_grants_pkey PRIMARY KEY (id);
 
 
 --
--- Name: clusters clusters_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: clusters clusters_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.clusters
+ALTER TABLE ONLY kaname.clusters
     ADD CONSTRAINT clusters_pkey PRIMARY KEY (id);
 
 
 --
--- Name: federated_trusted_issuers federated_trusted_issuers_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: federated_trusted_issuers federated_trusted_issuers_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.federated_trusted_issuers
+ALTER TABLE ONLY kaname.federated_trusted_issuers
     ADD CONSTRAINT federated_trusted_issuers_pkey PRIMARY KEY (issuer, subject);
 
 
 --
--- Name: fga_outbox fga_outbox_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: fga_outbox fga_outbox_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.fga_outbox
+ALTER TABLE ONLY kaname.fga_outbox
     ADD CONSTRAINT fga_outbox_pkey PRIMARY KEY (id);
 
 
 --
--- Name: fga_outbox fga_outbox_relation_present_check; Type: CHECK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: fga_outbox fga_outbox_relation_present_check; Type: CHECK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE kacho_iam.fga_outbox
+ALTER TABLE kaname.fga_outbox
     ADD CONSTRAINT fga_outbox_relation_present_check CHECK (((((payload ->> 'relation'::text) IS NOT NULL) AND ((payload ->> 'relation'::text) <> ''::text)) OR (jsonb_array_length(COALESCE((payload -> 'relations'::text), '[]'::jsonb)) > 0))) NOT VALID;
 
 
 --
--- Name: group_members group_members_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: group_members group_members_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.group_members
+ALTER TABLE ONLY kaname.group_members
     ADD CONSTRAINT group_members_pkey PRIMARY KEY (group_id, member_type, member_id);
 
 
 --
--- Name: groups groups_account_name_unique; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: groups groups_account_name_unique; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.groups
+ALTER TABLE ONLY kaname.groups
     ADD CONSTRAINT groups_account_name_unique UNIQUE (account_id, name);
 
 
 --
--- Name: groups groups_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: groups groups_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.groups
+ALTER TABLE ONLY kaname.groups
     ADD CONSTRAINT groups_pkey PRIMARY KEY (id);
 
 
 --
--- Name: identity_admission_windows identity_admission_windows_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: identity_admission_windows identity_admission_windows_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.identity_admission_windows
+ALTER TABLE ONLY kaname.identity_admission_windows
     ADD CONSTRAINT identity_admission_windows_pkey PRIMARY KEY (carrier_id, kind);
 
 
 --
--- Name: identity_journal identity_journal_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: identity_journal identity_journal_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.identity_journal
+ALTER TABLE ONLY kaname.identity_journal
     ADD CONSTRAINT identity_journal_pkey PRIMARY KEY (identity);
 
 
 --
--- Name: interactive_clients interactive_clients_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: interactive_clients interactive_clients_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.interactive_clients
+ALTER TABLE ONLY kaname.interactive_clients
     ADD CONSTRAINT interactive_clients_pkey PRIMARY KEY (id);
 
 
 --
--- Name: invite_mail_outbox invite_mail_outbox_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: invite_mail_outbox invite_mail_outbox_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.invite_mail_outbox
+ALTER TABLE ONLY kaname.invite_mail_outbox
     ADD CONSTRAINT invite_mail_outbox_pkey PRIMARY KEY (id);
 
 
 --
--- Name: limits limits_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: limits limits_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.limits
+ALTER TABLE ONLY kaname.limits
     ADD CONSTRAINT limits_pkey PRIMARY KEY (id);
 
 
 --
--- Name: memberships memberships_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: memberships memberships_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.memberships
+ALTER TABLE ONLY kaname.memberships
     ADD CONSTRAINT memberships_pkey PRIMARY KEY (id);
 
 
 --
--- Name: minted_token_revocations minted_token_revocations_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: minted_token_revocations minted_token_revocations_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.minted_token_revocations
+ALTER TABLE ONLY kaname.minted_token_revocations
     ADD CONSTRAINT minted_token_revocations_pkey PRIMARY KEY (subject);
 
 
 --
--- Name: operations operations_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: operations operations_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.operations
+ALTER TABLE ONLY kaname.operations
     ADD CONSTRAINT operations_pkey PRIMARY KEY (id);
 
 
 --
--- Name: project_resource_quotas project_resource_quotas_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: project_resource_quotas project_resource_quotas_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.project_resource_quotas
+ALTER TABLE ONLY kaname.project_resource_quotas
     ADD CONSTRAINT project_resource_quotas_pkey PRIMARY KEY (carrier_type, carrier_id, kind);
 
 
 --
--- Name: projects projects_account_name_unique; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: projects projects_account_name_unique; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.projects
+ALTER TABLE ONLY kaname.projects
     ADD CONSTRAINT projects_account_name_unique UNIQUE (account_id, name);
 
 
 --
--- Name: projects projects_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: projects projects_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.projects
+ALTER TABLE ONLY kaname.projects
     ADD CONSTRAINT projects_pkey PRIMARY KEY (id);
 
 
 --
--- Name: provider_compensation_outbox provider_compensation_outbox_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: provider_compensation_outbox provider_compensation_outbox_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.provider_compensation_outbox
+ALTER TABLE ONLY kaname.provider_compensation_outbox
     ADD CONSTRAINT provider_compensation_outbox_pkey PRIMARY KEY (id);
 
 
 --
--- Name: recovery_completions recovery_completions_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: recovery_completions recovery_completions_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.recovery_completions
+ALTER TABLE ONLY kaname.recovery_completions
     ADD CONSTRAINT recovery_completions_pkey PRIMARY KEY (recovery_jti);
 
 
 --
--- Name: relation_fact relation_fact_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: relation_fact relation_fact_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.relation_fact
+ALTER TABLE ONLY kaname.relation_fact
     ADD CONSTRAINT relation_fact_pkey PRIMARY KEY (object_type, object_id, relation, subject);
 
 
 --
--- Name: resource_mirror resource_mirror_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: resource_mirror resource_mirror_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.resource_mirror
+ALTER TABLE ONLY kaname.resource_mirror
     ADD CONSTRAINT resource_mirror_pkey PRIMARY KEY (object_type, object_id);
 
 
 --
--- Name: resource_parent_edge resource_parent_edge_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: resource_parent_edge resource_parent_edge_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.resource_parent_edge
+ALTER TABLE ONLY kaname.resource_parent_edge
     ADD CONSTRAINT resource_parent_edge_pkey PRIMARY KEY (object_type, object_id, depth);
 
 
 --
--- Name: resource_reconcile_outbox resource_reconcile_outbox_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: resource_reconcile_outbox resource_reconcile_outbox_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.resource_reconcile_outbox
+ALTER TABLE ONLY kaname.resource_reconcile_outbox
     ADD CONSTRAINT resource_reconcile_outbox_pkey PRIMARY KEY (id);
 
 
 --
--- Name: role_grant_orphan role_grant_orphan_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_grant_orphan role_grant_orphan_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_grant_orphan
+ALTER TABLE ONLY kaname.role_grant_orphan
     ADD CONSTRAINT role_grant_orphan_pkey PRIMARY KEY (role_id, object_type, verb, source, cause);
 
 
 --
--- Name: role_rule_selectors role_rule_selectors_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_rule_selectors role_rule_selectors_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_rule_selectors
+ALTER TABLE ONLY kaname.role_rule_selectors
     ADD CONSTRAINT role_rule_selectors_pkey PRIMARY KEY (role_id, rule_fp);
 
 
 --
--- Name: role_selector_prune role_selector_prune_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_selector_prune role_selector_prune_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_selector_prune
+ALTER TABLE ONLY kaname.role_selector_prune
     ADD CONSTRAINT role_selector_prune_pkey PRIMARY KEY (role_id, rule_fp, object_type);
 
 
 --
--- Name: role_verb role_verb_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_verb role_verb_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_verb
+ALTER TABLE ONLY kaname.role_verb
     ADD CONSTRAINT role_verb_pkey PRIMARY KEY (role_id, object_type, verb);
 
 
 --
--- Name: roles roles_id_live_uk; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: roles roles_id_live_uk; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.roles
+ALTER TABLE ONLY kaname.roles
     ADD CONSTRAINT roles_id_live_uk UNIQUE (id, live);
 
 
 --
--- Name: roles roles_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: roles roles_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.roles
+ALTER TABLE ONLY kaname.roles
     ADD CONSTRAINT roles_pkey PRIMARY KEY (id);
 
 
 --
--- Name: service_account_oauth_clients service_account_oauth_clients_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: service_account_oauth_clients service_account_oauth_clients_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.service_account_oauth_clients
+ALTER TABLE ONLY kaname.service_account_oauth_clients
     ADD CONSTRAINT service_account_oauth_clients_pkey PRIMARY KEY (id);
 
 
 --
--- Name: service_accounts service_accounts_account_name_unique; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: service_accounts service_accounts_account_name_unique; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.service_accounts
+ALTER TABLE ONLY kaname.service_accounts
     ADD CONSTRAINT service_accounts_account_name_unique UNIQUE (account_id, name);
 
 
 --
--- Name: service_accounts service_accounts_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: service_accounts service_accounts_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.service_accounts
+ALTER TABLE ONLY kaname.service_accounts
     ADD CONSTRAINT service_accounts_pkey PRIMARY KEY (id);
 
 
 --
--- Name: session_revocations session_revocations_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: session_revocations session_revocations_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.session_revocations
+ALTER TABLE ONLY kaname.session_revocations
     ADD CONSTRAINT session_revocations_pkey PRIMARY KEY (token_jti);
 
 
 --
--- Name: subject_change_outbox subject_change_outbox_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: subject_change_outbox subject_change_outbox_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.subject_change_outbox
+ALTER TABLE ONLY kaname.subject_change_outbox
     ADD CONSTRAINT subject_change_outbox_pkey PRIMARY KEY (id);
 
 
 --
--- Name: token_signing_keys token_signing_keys_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: token_signing_keys token_signing_keys_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.token_signing_keys
+ALTER TABLE ONLY kaname.token_signing_keys
     ADD CONSTRAINT token_signing_keys_pkey PRIMARY KEY (kid);
 
 
 --
--- Name: user_oauth_clients user_oauth_clients_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: user_oauth_clients user_oauth_clients_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.user_oauth_clients
+ALTER TABLE ONLY kaname.user_oauth_clients
     ADD CONSTRAINT user_oauth_clients_pkey PRIMARY KEY (id);
 
 
 --
--- Name: user_token_revocations user_token_revocations_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: user_token_revocations user_token_revocations_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.user_token_revocations
+ALTER TABLE ONLY kaname.user_token_revocations
     ADD CONSTRAINT user_token_revocations_pkey PRIMARY KEY (user_id);
 
 
 --
--- Name: users users_pkey; Type: CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.users
+ALTER TABLE ONLY kaname.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
 
 
 --
--- Name: access_binding_subjects_binding_ordinal_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_binding_subjects_binding_ordinal_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_binding_subjects_binding_ordinal_idx ON kacho_iam.access_binding_subjects USING btree (binding_id, ordinal);
+CREATE INDEX access_binding_subjects_binding_ordinal_idx ON kaname.access_binding_subjects USING btree (binding_id, ordinal);
 
 
 --
--- Name: access_binding_subjects_subject_scope_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_binding_subjects_subject_scope_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_binding_subjects_subject_scope_idx ON kacho_iam.access_binding_subjects USING btree (subject_type, subject_id, resource_type, resource_id);
+CREATE INDEX access_binding_subjects_subject_scope_idx ON kaname.access_binding_subjects USING btree (subject_type, subject_id, resource_type, resource_id);
 
 
 --
--- Name: access_binding_target_members_object_binding_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_binding_target_members_object_binding_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_binding_target_members_object_binding_idx ON kacho_iam.access_binding_target_members USING btree (object_type, object_id, binding_id) INCLUDE (role_id, rule_fp, verification_status);
+CREATE INDEX access_binding_target_members_object_binding_idx ON kaname.access_binding_target_members USING btree (object_type, object_id, binding_id) INCLUDE (role_id, rule_fp, verification_status);
 
 
 --
--- Name: access_binding_target_members_object_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_binding_target_members_object_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_binding_target_members_object_idx ON kacho_iam.access_binding_target_members USING btree (object_type, object_id);
+CREATE INDEX access_binding_target_members_object_idx ON kaname.access_binding_target_members USING btree (object_type, object_id);
 
 
 --
--- Name: access_binding_target_members_pending_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_binding_target_members_pending_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_binding_target_members_pending_idx ON kacho_iam.access_binding_target_members USING btree (binding_id) WHERE (verification_status = 'PENDING_VERIFICATION'::text);
+CREATE INDEX access_binding_target_members_pending_idx ON kaname.access_binding_target_members USING btree (binding_id) WHERE (verification_status = 'PENDING_VERIFICATION'::text);
 
 
 --
--- Name: access_bindings_active_grant_uniq; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_active_grant_uniq; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX access_bindings_active_grant_uniq ON kacho_iam.access_bindings USING btree (subject_id, subject_type, role_id, resource_type, resource_id, target_digest) WHERE (revoked_at IS NULL);
+CREATE UNIQUE INDEX access_bindings_active_grant_uniq ON kaname.access_bindings USING btree (subject_id, subject_type, role_id, resource_type, resource_id, target_digest) WHERE (revoked_at IS NULL);
 
 
 --
--- Name: access_bindings_active_relation_grant_uniq; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_active_relation_grant_uniq; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX access_bindings_active_relation_grant_uniq ON kacho_iam.access_bindings USING btree (subject_type, subject_id, granted_relation, resource_type, resource_id) WHERE ((granted_relation <> ''::text) AND (revoked_at IS NULL));
+CREATE UNIQUE INDEX access_bindings_active_relation_grant_uniq ON kaname.access_bindings USING btree (subject_type, subject_id, granted_relation, resource_type, resource_id) WHERE ((granted_relation <> ''::text) AND (revoked_at IS NULL));
 
 
 --
--- Name: access_bindings_cursor_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_cursor_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_bindings_cursor_idx ON kacho_iam.access_bindings USING btree (created_at, id);
+CREATE INDEX access_bindings_cursor_idx ON kaname.access_bindings USING btree (created_at, id);
 
 
 --
--- Name: access_bindings_expires_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_expires_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_bindings_expires_idx ON kacho_iam.access_bindings USING btree (expires_at) WHERE ((expires_at IS NOT NULL) AND (status = 'ACTIVE'::text));
+CREATE INDEX access_bindings_expires_idx ON kaname.access_bindings USING btree (expires_at) WHERE ((expires_at IS NOT NULL) AND (status = 'ACTIVE'::text));
 
 
 --
--- Name: access_bindings_labels_gin; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_labels_gin; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_bindings_labels_gin ON kacho_iam.access_bindings USING gin (labels jsonb_path_ops);
+CREATE INDEX access_bindings_labels_gin ON kaname.access_bindings USING gin (labels jsonb_path_ops);
 
 
 --
--- Name: access_bindings_recent_cursor_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_recent_cursor_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_bindings_recent_cursor_idx ON kacho_iam.access_bindings USING btree (created_at DESC, id);
+CREATE INDEX access_bindings_recent_cursor_idx ON kaname.access_bindings USING btree (created_at DESC, id);
 
 
 --
--- Name: access_bindings_resource_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_resource_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_bindings_resource_idx ON kacho_iam.access_bindings USING btree (resource_type, resource_id);
+CREATE INDEX access_bindings_resource_idx ON kaname.access_bindings USING btree (resource_type, resource_id);
 
 
 --
--- Name: access_bindings_role_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_role_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_bindings_role_idx ON kacho_iam.access_bindings USING btree (role_id);
+CREATE INDEX access_bindings_role_idx ON kaname.access_bindings USING btree (role_id);
 
 
 --
--- Name: access_bindings_scope_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_scope_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_bindings_scope_idx ON kacho_iam.access_bindings USING btree (scope, resource_type);
+CREATE INDEX access_bindings_scope_idx ON kaname.access_bindings USING btree (scope, resource_type);
 
 
 --
--- Name: access_bindings_status_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_status_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_bindings_status_idx ON kacho_iam.access_bindings USING btree (status);
+CREATE INDEX access_bindings_status_idx ON kaname.access_bindings USING btree (status);
 
 
 --
--- Name: access_bindings_subject_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: access_bindings_subject_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX access_bindings_subject_idx ON kacho_iam.access_bindings USING btree (subject_type, subject_id);
+CREATE INDEX access_bindings_subject_idx ON kaname.access_bindings USING btree (subject_type, subject_id);
 
 
 --
--- Name: account_admission_rate_limits_kind_uk; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: account_admission_rate_limits_kind_uk; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX account_admission_rate_limits_kind_uk ON kacho_iam.account_admission_rate_limits USING btree (kind) WHERE (withdrawn_at IS NULL);
+CREATE UNIQUE INDEX account_admission_rate_limits_kind_uk ON kaname.account_admission_rate_limits USING btree (kind) WHERE (withdrawn_at IS NULL);
 
 
 --
--- Name: accounts_cursor_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: accounts_cursor_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX accounts_cursor_idx ON kacho_iam.accounts USING btree (created_at, id);
+CREATE INDEX accounts_cursor_idx ON kaname.accounts USING btree (created_at, id);
 
 
 --
--- Name: accounts_labels_gin; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: accounts_labels_gin; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX accounts_labels_gin ON kacho_iam.accounts USING gin (labels jsonb_path_ops);
+CREATE INDEX accounts_labels_gin ON kaname.accounts USING gin (labels jsonb_path_ops);
 
 
 --
--- Name: accounts_owner_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: accounts_owner_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX accounts_owner_idx ON kacho_iam.accounts USING btree (owner_user_id);
+CREATE INDEX accounts_owner_idx ON kaname.accounts USING btree (owner_user_id);
 
 
 --
--- Name: audit_outbox_federation_event_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: audit_outbox_federation_event_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX audit_outbox_federation_event_idx ON kacho_iam.audit_outbox USING btree (created_at) WHERE (event_type ~~ 'iam.federation.%'::text);
+CREATE INDEX audit_outbox_federation_event_idx ON kaname.audit_outbox USING btree (created_at) WHERE (event_type ~~ 'iam.federation.%'::text);
 
 
 --
--- Name: audit_outbox_pending_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: audit_outbox_pending_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX audit_outbox_pending_idx ON kacho_iam.audit_outbox USING btree (created_at, id) WHERE (status <> 'sent'::text);
+CREATE INDEX audit_outbox_pending_idx ON kaname.audit_outbox USING btree (created_at, id) WHERE (status <> 'sent'::text);
 
 
 --
--- Name: audit_outbox_tenant_account_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: audit_outbox_tenant_account_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX audit_outbox_tenant_account_idx ON kacho_iam.audit_outbox USING btree (tenant_account_id, created_at) WHERE (tenant_account_id IS NOT NULL);
+CREATE INDEX audit_outbox_tenant_account_idx ON kaname.audit_outbox USING btree (tenant_account_id, created_at) WHERE (tenant_account_id IS NOT NULL);
 
 
 --
--- Name: client_assertion_replay_expires_at_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: client_assertion_replay_expires_at_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX client_assertion_replay_expires_at_idx ON kacho_iam.client_assertion_replay USING btree (expires_at);
+CREATE INDEX client_assertion_replay_expires_at_idx ON kaname.client_assertion_replay USING btree (expires_at);
 
 
 --
--- Name: cluster_admin_grants_cluster_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: cluster_admin_grants_cluster_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX cluster_admin_grants_cluster_idx ON kacho_iam.cluster_admin_grants USING btree (cluster_id);
+CREATE INDEX cluster_admin_grants_cluster_idx ON kaname.cluster_admin_grants USING btree (cluster_id);
 
 
 --
--- Name: cluster_admin_grants_subject_unique; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: cluster_admin_grants_subject_unique; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX cluster_admin_grants_subject_unique ON kacho_iam.cluster_admin_grants USING btree (subject_type, subject_id) WHERE (granted_until IS NULL);
+CREATE UNIQUE INDEX cluster_admin_grants_subject_unique ON kaname.cluster_admin_grants USING btree (subject_type, subject_id) WHERE (granted_until IS NULL);
 
 
 --
--- Name: federated_trusted_issuers_by_client_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: federated_trusted_issuers_by_client_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX federated_trusted_issuers_by_client_idx ON kacho_iam.federated_trusted_issuers USING btree (sa_oauth_client_id);
+CREATE INDEX federated_trusted_issuers_by_client_idx ON kaname.federated_trusted_issuers USING btree (sa_oauth_client_id);
 
 
 --
--- Name: group_members_member_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: group_members_member_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX group_members_member_idx ON kacho_iam.group_members USING btree (member_type, member_id);
+CREATE INDEX group_members_member_idx ON kaname.group_members USING btree (member_type, member_id);
 
 
 --
--- Name: groups_account_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: groups_account_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX groups_account_idx ON kacho_iam.groups USING btree (account_id);
+CREATE INDEX groups_account_idx ON kaname.groups USING btree (account_id);
 
 
 --
--- Name: groups_cursor_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: groups_cursor_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX groups_cursor_idx ON kacho_iam.groups USING btree (created_at, id);
+CREATE INDEX groups_cursor_idx ON kaname.groups USING btree (created_at, id);
 
 
 --
--- Name: groups_labels_gin; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: groups_labels_gin; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX groups_labels_gin ON kacho_iam.groups USING gin (labels jsonb_path_ops);
+CREATE INDEX groups_labels_gin ON kaname.groups USING gin (labels jsonb_path_ops);
 
 
 --
--- Name: identity_journal_first_seen_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: identity_journal_first_seen_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX identity_journal_first_seen_idx ON kacho_iam.identity_journal USING btree (first_seen_at);
+CREATE INDEX identity_journal_first_seen_idx ON kaname.identity_journal USING btree (first_seen_at);
 
 
 --
--- Name: interactive_clients_client_id_uk; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: interactive_clients_client_id_uk; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX interactive_clients_client_id_uk ON kacho_iam.interactive_clients USING btree (client_id);
+CREATE UNIQUE INDEX interactive_clients_client_id_uk ON kaname.interactive_clients USING btree (client_id);
 
 
 --
--- Name: interactive_clients_created_at_id_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: interactive_clients_created_at_id_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX interactive_clients_created_at_id_idx ON kacho_iam.interactive_clients USING btree (created_at, id);
+CREATE INDEX interactive_clients_created_at_id_idx ON kaname.interactive_clients USING btree (created_at, id);
 
 
 --
--- Name: interactive_clients_name_uk; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: interactive_clients_name_uk; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX interactive_clients_name_uk ON kacho_iam.interactive_clients USING btree (name);
+CREATE UNIQUE INDEX interactive_clients_name_uk ON kaname.interactive_clients USING btree (name);
 
 
 --
--- Name: invite_mail_outbox_partition_head_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: invite_mail_outbox_partition_head_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX invite_mail_outbox_partition_head_idx ON kacho_iam.invite_mail_outbox USING btree (resource_id, id) WHERE (sent_at IS NULL);
+CREATE INDEX invite_mail_outbox_partition_head_idx ON kaname.invite_mail_outbox USING btree (resource_id, id) WHERE (sent_at IS NULL);
 
 
 --
--- Name: invite_mail_outbox_pending_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: invite_mail_outbox_pending_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX invite_mail_outbox_pending_idx ON kacho_iam.invite_mail_outbox USING btree (attempt_count, id) WHERE (sent_at IS NULL);
+CREATE INDEX invite_mail_outbox_pending_idx ON kaname.invite_mail_outbox USING btree (attempt_count, id) WHERE (sent_at IS NULL);
 
 
 --
--- Name: limits_created_at_id_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: limits_created_at_id_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX limits_created_at_id_idx ON kacho_iam.limits USING btree (created_at, id);
+CREATE INDEX limits_created_at_id_idx ON kaname.limits USING btree (created_at, id);
 
 
 --
--- Name: limits_revision_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: limits_revision_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX limits_revision_idx ON kacho_iam.limits USING btree (revision);
+CREATE INDEX limits_revision_idx ON kaname.limits USING btree (revision);
 
 
 --
--- Name: limits_scope_kind_uk; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: limits_scope_kind_uk; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX limits_scope_kind_uk ON kacho_iam.limits USING btree (scope, scope_id, kind) WHERE (withdrawn_at IS NULL);
+CREATE UNIQUE INDEX limits_scope_kind_uk ON kaname.limits USING btree (scope, scope_id, kind) WHERE (withdrawn_at IS NULL);
 
 
 --
--- Name: limits_scope_lookup_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: limits_scope_lookup_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX limits_scope_lookup_idx ON kacho_iam.limits USING btree (scope, scope_id) WHERE (withdrawn_at IS NULL);
+CREATE INDEX limits_scope_lookup_idx ON kaname.limits USING btree (scope, scope_id) WHERE (withdrawn_at IS NULL);
 
 
 --
--- Name: memberships_account_cursor_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: memberships_account_cursor_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX memberships_account_cursor_idx ON kacho_iam.memberships USING btree (account_id, created_at, id);
+CREATE INDEX memberships_account_cursor_idx ON kaname.memberships USING btree (account_id, created_at, id);
 
 
 --
--- Name: memberships_user_account_unique; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: memberships_user_account_unique; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX memberships_user_account_unique ON kacho_iam.memberships USING btree (user_id, account_id);
+CREATE UNIQUE INDEX memberships_user_account_unique ON kaname.memberships USING btree (user_id, account_id);
 
 
 --
--- Name: minted_token_revocations_revoke_before_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: minted_token_revocations_revoke_before_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX minted_token_revocations_revoke_before_idx ON kacho_iam.minted_token_revocations USING btree (revoke_before);
+CREATE INDEX minted_token_revocations_revoke_before_idx ON kaname.minted_token_revocations USING btree (revoke_before);
 
 
 --
--- Name: operations_account_id_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: operations_account_id_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX operations_account_id_idx ON kacho_iam.operations USING btree (account_id, created_at, id) WHERE (account_id IS NOT NULL);
+CREATE INDEX operations_account_id_idx ON kaname.operations USING btree (account_id, created_at, id) WHERE (account_id IS NOT NULL);
 
 
 --
--- Name: operations_created_at_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: operations_created_at_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX operations_created_at_idx ON kacho_iam.operations USING btree (created_at);
+CREATE INDEX operations_created_at_idx ON kaname.operations USING btree (created_at);
 
 
 --
--- Name: operations_cursor_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: operations_cursor_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX operations_cursor_idx ON kacho_iam.operations USING btree (created_at, id);
+CREATE INDEX operations_cursor_idx ON kaname.operations USING btree (created_at, id);
 
 
 --
--- Name: operations_done_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: operations_done_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX operations_done_idx ON kacho_iam.operations USING btree (done);
+CREATE INDEX operations_done_idx ON kaname.operations USING btree (done);
 
 
 --
--- Name: operations_principal_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: operations_principal_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX operations_principal_idx ON kacho_iam.operations USING btree (principal_type, principal_id);
+CREATE INDEX operations_principal_idx ON kaname.operations USING btree (principal_type, principal_id);
 
 
 --
--- Name: operations_resource_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: operations_resource_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX operations_resource_idx ON kacho_iam.operations USING btree (resource_id);
+CREATE INDEX operations_resource_idx ON kaname.operations USING btree (resource_id);
 
 
 --
--- Name: projects_account_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: projects_account_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX projects_account_idx ON kacho_iam.projects USING btree (account_id);
+CREATE INDEX projects_account_idx ON kaname.projects USING btree (account_id);
 
 
 --
--- Name: projects_cursor_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: projects_cursor_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX projects_cursor_idx ON kacho_iam.projects USING btree (created_at, id);
+CREATE INDEX projects_cursor_idx ON kaname.projects USING btree (created_at, id);
 
 
 --
--- Name: projects_labels_gin; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: projects_labels_gin; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX projects_labels_gin ON kacho_iam.projects USING gin (labels jsonb_path_ops);
+CREATE INDEX projects_labels_gin ON kaname.projects USING gin (labels jsonb_path_ops);
 
 
 --
--- Name: provider_compensation_outbox_pending_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: provider_compensation_outbox_pending_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX provider_compensation_outbox_pending_idx ON kacho_iam.provider_compensation_outbox USING btree (attempt_count, id) WHERE (sent_at IS NULL);
+CREATE INDEX provider_compensation_outbox_pending_idx ON kaname.provider_compensation_outbox USING btree (attempt_count, id) WHERE (sent_at IS NULL);
 
 
 --
--- Name: relation_fact_by_subject; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: relation_fact_by_subject; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX relation_fact_by_subject ON kacho_iam.relation_fact USING btree (subject, relation);
+CREATE INDEX relation_fact_by_subject ON kaname.relation_fact USING btree (subject, relation);
 
 
 --
--- Name: relation_fact_conditioned; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: relation_fact_conditioned; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX relation_fact_conditioned ON kacho_iam.relation_fact USING btree (condition_name) WHERE (condition_name <> ''::text);
+CREATE INDEX relation_fact_conditioned ON kaname.relation_fact USING btree (condition_name) WHERE (condition_name <> ''::text);
 
 
 --
--- Name: resource_mirror_labels_gin; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: resource_mirror_labels_gin; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX resource_mirror_labels_gin ON kacho_iam.resource_mirror USING gin (labels);
+CREATE INDEX resource_mirror_labels_gin ON kaname.resource_mirror USING gin (labels);
 
 
 --
--- Name: resource_mirror_parent_project_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: resource_mirror_parent_project_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX resource_mirror_parent_project_idx ON kacho_iam.resource_mirror USING btree (parent_project_id);
+CREATE INDEX resource_mirror_parent_project_idx ON kaname.resource_mirror USING btree (parent_project_id);
 
 
 --
--- Name: resource_parent_edge_by_parent; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: resource_parent_edge_by_parent; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX resource_parent_edge_by_parent ON kacho_iam.resource_parent_edge USING btree (parent_type, parent_id);
+CREATE INDEX resource_parent_edge_by_parent ON kaname.resource_parent_edge USING btree (parent_type, parent_id);
 
 
 --
--- Name: resource_reconcile_outbox_unsent_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: resource_reconcile_outbox_unsent_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX resource_reconcile_outbox_unsent_idx ON kacho_iam.resource_reconcile_outbox USING btree (id) WHERE (sent_at IS NULL);
+CREATE INDEX resource_reconcile_outbox_unsent_idx ON kaname.resource_reconcile_outbox USING btree (id) WHERE (sent_at IS NULL);
 
 
 --
--- Name: role_rule_ref_pair_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: role_rule_ref_pair_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX role_rule_ref_pair_idx ON kacho_iam.role_rule_ref USING btree (module, resource);
+CREATE INDEX role_rule_ref_pair_idx ON kaname.role_rule_ref USING btree (module, resource);
 
 
 --
--- Name: role_rule_ref_uk; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: role_rule_ref_uk; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX role_rule_ref_uk ON kacho_iam.role_rule_ref USING btree (role_id, module, resource, COALESCE(verb, ''::text));
+CREATE UNIQUE INDEX role_rule_ref_uk ON kaname.role_rule_ref USING btree (role_id, module, resource, COALESCE(verb, ''::text));
 
 
 --
--- Name: role_rule_selectors_object_types_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: role_rule_selectors_object_types_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX role_rule_selectors_object_types_idx ON kacho_iam.role_rule_selectors USING gin (object_types);
+CREATE INDEX role_rule_selectors_object_types_idx ON kaname.role_rule_selectors USING gin (object_types);
 
 
 --
--- Name: role_verb_by_type_verb; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: role_verb_by_type_verb; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX role_verb_by_type_verb ON kacho_iam.role_verb USING btree (object_type, verb);
+CREATE INDEX role_verb_by_type_verb ON kaname.role_verb USING btree (object_type, verb);
 
 
 --
--- Name: roles_acc_custom_unique; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: roles_acc_custom_unique; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX roles_acc_custom_unique ON kacho_iam.roles USING btree (account_id, name) WHERE ((is_system = false) AND (account_id IS NOT NULL));
+CREATE UNIQUE INDEX roles_acc_custom_unique ON kaname.roles USING btree (account_id, name) WHERE ((is_system = false) AND (account_id IS NOT NULL));
 
 
 --
--- Name: roles_account_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: roles_account_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX roles_account_idx ON kacho_iam.roles USING btree (account_id) WHERE (account_id IS NOT NULL);
+CREATE INDEX roles_account_idx ON kaname.roles USING btree (account_id) WHERE (account_id IS NOT NULL);
 
 
 --
--- Name: roles_cluster_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: roles_cluster_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX roles_cluster_idx ON kacho_iam.roles USING btree (cluster_id) WHERE (cluster_id IS NOT NULL);
+CREATE INDEX roles_cluster_idx ON kaname.roles USING btree (cluster_id) WHERE (cluster_id IS NOT NULL);
 
 
 --
--- Name: roles_cursor_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: roles_cursor_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX roles_cursor_idx ON kacho_iam.roles USING btree (created_at, id);
+CREATE INDEX roles_cursor_idx ON kaname.roles USING btree (created_at, id);
 
 
 --
--- Name: roles_labels_gin; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: roles_labels_gin; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX roles_labels_gin ON kacho_iam.roles USING gin (labels jsonb_path_ops);
+CREATE INDEX roles_labels_gin ON kaname.roles USING gin (labels jsonb_path_ops);
 
 
 --
--- Name: roles_prj_custom_unique; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: roles_prj_custom_unique; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX roles_prj_custom_unique ON kacho_iam.roles USING btree (project_id, name) WHERE ((is_system = false) AND (project_id IS NOT NULL));
+CREATE UNIQUE INDEX roles_prj_custom_unique ON kaname.roles USING btree (project_id, name) WHERE ((is_system = false) AND (project_id IS NOT NULL));
 
 
 --
--- Name: roles_project_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: roles_project_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX roles_project_idx ON kacho_iam.roles USING btree (project_id) WHERE (project_id IS NOT NULL);
+CREATE INDEX roles_project_idx ON kaname.roles USING btree (project_id) WHERE (project_id IS NOT NULL);
 
 
 --
--- Name: roles_system_unique; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: roles_system_unique; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX roles_system_unique ON kacho_iam.roles USING btree (cluster_id, name) WHERE (is_system = true);
+CREATE UNIQUE INDEX roles_system_unique ON kaname.roles USING btree (cluster_id, name) WHERE (is_system = true);
 
 
 --
--- Name: sa_oauth_clients_expires_at_reclaim_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: sa_oauth_clients_expires_at_reclaim_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX sa_oauth_clients_expires_at_reclaim_idx ON kacho_iam.service_account_oauth_clients USING btree (expires_at) WHERE (expires_at IS NOT NULL);
+CREATE INDEX sa_oauth_clients_expires_at_reclaim_idx ON kaname.service_account_oauth_clients USING btree (expires_at) WHERE (expires_at IS NOT NULL);
 
 
 --
--- Name: service_account_oauth_clients_hydra_client_id_unique; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: service_account_oauth_clients_hydra_client_id_unique; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX service_account_oauth_clients_hydra_client_id_unique ON kacho_iam.service_account_oauth_clients USING btree (hydra_client_id);
+CREATE UNIQUE INDEX service_account_oauth_clients_hydra_client_id_unique ON kaname.service_account_oauth_clients USING btree (hydra_client_id);
 
 
 --
--- Name: service_account_oauth_clients_secret_hash_unique; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: service_account_oauth_clients_secret_hash_unique; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX service_account_oauth_clients_secret_hash_unique ON kacho_iam.service_account_oauth_clients USING btree (secret_hash) WHERE (credential_kind = 'SECRET'::text);
+CREATE UNIQUE INDEX service_account_oauth_clients_secret_hash_unique ON kaname.service_account_oauth_clients USING btree (secret_hash) WHERE (credential_kind = 'SECRET'::text);
 
 
 --
--- Name: service_accounts_account_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: service_accounts_account_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX service_accounts_account_idx ON kacho_iam.service_accounts USING btree (account_id);
+CREATE INDEX service_accounts_account_idx ON kaname.service_accounts USING btree (account_id);
 
 
 --
--- Name: service_accounts_cursor_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: service_accounts_cursor_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX service_accounts_cursor_idx ON kacho_iam.service_accounts USING btree (created_at, id);
+CREATE INDEX service_accounts_cursor_idx ON kaname.service_accounts USING btree (created_at, id);
 
 
 --
--- Name: service_accounts_enabled_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: service_accounts_enabled_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX service_accounts_enabled_idx ON kacho_iam.service_accounts USING btree (account_id) WHERE (enabled = true);
+CREATE INDEX service_accounts_enabled_idx ON kaname.service_accounts USING btree (account_id) WHERE (enabled = true);
 
 
 --
--- Name: service_accounts_labels_gin; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: service_accounts_labels_gin; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX service_accounts_labels_gin ON kacho_iam.service_accounts USING gin (labels jsonb_path_ops);
+CREATE INDEX service_accounts_labels_gin ON kaname.service_accounts USING gin (labels jsonb_path_ops);
 
 
 --
--- Name: session_revocations_recent_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: session_revocations_recent_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX session_revocations_recent_idx ON kacho_iam.session_revocations USING btree (revoked_at, token_jti) WHERE (revoked_at > '2000-01-01 00:00:00+00'::timestamp with time zone);
+CREATE INDEX session_revocations_recent_idx ON kaname.session_revocations USING btree (revoked_at, token_jti) WHERE (revoked_at > '2000-01-01 00:00:00+00'::timestamp with time zone);
 
 
 --
--- Name: INDEX session_revocations_recent_idx; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: INDEX session_revocations_recent_idx; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON INDEX kacho_iam.session_revocations_recent_idx IS 'Cache warm-up при холодном старте api-gateway pod; query: SELECT token_jti FROM session_revocations WHERE revoked_at > now() - INTERVAL ''24 hours''';
+COMMENT ON INDEX kaname.session_revocations_recent_idx IS 'Cache warm-up при холодном старте api-gateway pod; query: SELECT token_jti FROM session_revocations WHERE revoked_at > now() - INTERVAL ''24 hours''';
 
 
 --
--- Name: session_revocations_ttl_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: session_revocations_ttl_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX session_revocations_ttl_idx ON kacho_iam.session_revocations USING btree (ttl_expires_at);
+CREATE INDEX session_revocations_ttl_idx ON kaname.session_revocations USING btree (ttl_expires_at);
 
 
 --
--- Name: session_revocations_user_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: session_revocations_user_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX session_revocations_user_idx ON kacho_iam.session_revocations USING btree (user_id);
+CREATE INDEX session_revocations_user_idx ON kaname.session_revocations USING btree (user_id);
 
 
 --
--- Name: token_signing_keys_keyset_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: token_signing_keys_keyset_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX token_signing_keys_keyset_idx ON kacho_iam.token_signing_keys USING btree (created_at, kid) WHERE (state = ANY (ARRAY['PUBLISHED'::text, 'ACTIVE'::text, 'RETIRED'::text]));
+CREATE INDEX token_signing_keys_keyset_idx ON kaname.token_signing_keys USING btree (created_at, kid) WHERE (state = ANY (ARRAY['PUBLISHED'::text, 'ACTIVE'::text, 'RETIRED'::text]));
 
 
 --
--- Name: token_signing_keys_one_active; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: token_signing_keys_one_active; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX token_signing_keys_one_active ON kacho_iam.token_signing_keys USING btree (state) WHERE (state = 'ACTIVE'::text);
+CREATE UNIQUE INDEX token_signing_keys_one_active ON kaname.token_signing_keys USING btree (state) WHERE (state = 'ACTIVE'::text);
 
 
 --
--- Name: user_oauth_clients_expires_at_reclaim_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: user_oauth_clients_expires_at_reclaim_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX user_oauth_clients_expires_at_reclaim_idx ON kacho_iam.user_oauth_clients USING btree (expires_at) WHERE (expires_at IS NOT NULL);
+CREATE INDEX user_oauth_clients_expires_at_reclaim_idx ON kaname.user_oauth_clients USING btree (expires_at) WHERE (expires_at IS NOT NULL);
 
 
 --
--- Name: user_oauth_clients_hydra_client_id_unique; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: user_oauth_clients_hydra_client_id_unique; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX user_oauth_clients_hydra_client_id_unique ON kacho_iam.user_oauth_clients USING btree (hydra_client_id);
+CREATE UNIQUE INDEX user_oauth_clients_hydra_client_id_unique ON kaname.user_oauth_clients USING btree (hydra_client_id);
 
 
 --
--- Name: user_oauth_clients_secret_hash_unique; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: user_oauth_clients_secret_hash_unique; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX user_oauth_clients_secret_hash_unique ON kacho_iam.user_oauth_clients USING btree (secret_hash) WHERE (credential_kind = 'SECRET'::text);
+CREATE UNIQUE INDEX user_oauth_clients_secret_hash_unique ON kaname.user_oauth_clients USING btree (secret_hash) WHERE (credential_kind = 'SECRET'::text);
 
 
 --
--- Name: user_oauth_clients_user_id_id_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: user_oauth_clients_user_id_id_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX user_oauth_clients_user_id_id_idx ON kacho_iam.user_oauth_clients USING btree (user_id, id);
+CREATE INDEX user_oauth_clients_user_id_id_idx ON kaname.user_oauth_clients USING btree (user_id, id);
 
 
 --
--- Name: users_account_email_unique; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: users_account_email_unique; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX users_account_email_unique ON kacho_iam.users USING btree (account_id, lower(email));
+CREATE UNIQUE INDEX users_account_email_unique ON kaname.users USING btree (account_id, lower(email));
 
 
 --
--- Name: users_account_external_id_unique; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: users_account_external_id_unique; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX users_account_external_id_unique ON kacho_iam.users USING btree (account_id, external_id) WHERE (external_id <> ''::text);
+CREATE UNIQUE INDEX users_account_external_id_unique ON kaname.users USING btree (account_id, external_id) WHERE (external_id <> ''::text);
 
 
 --
--- Name: users_active_external_id_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: users_active_external_id_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX users_active_external_id_idx ON kacho_iam.users USING btree (external_id) WHERE ((invite_status = 'ACTIVE'::text) AND (external_id <> ''::text));
+CREATE INDEX users_active_external_id_idx ON kaname.users USING btree (external_id) WHERE ((invite_status = 'ACTIVE'::text) AND (external_id <> ''::text));
 
 
 --
--- Name: users_active_external_id_uniq; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: users_active_external_id_uniq; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX users_active_external_id_uniq ON kacho_iam.users USING btree (external_id) WHERE ((invite_status = 'ACTIVE'::text) AND (external_id <> ''::text));
+CREATE UNIQUE INDEX users_active_external_id_uniq ON kaname.users USING btree (external_id) WHERE ((invite_status = 'ACTIVE'::text) AND (external_id <> ''::text));
 
 
 --
--- Name: users_cursor_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: users_cursor_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX users_cursor_idx ON kacho_iam.users USING btree (created_at, id);
+CREATE INDEX users_cursor_idx ON kaname.users USING btree (created_at, id);
 
 
 --
--- Name: users_email_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: users_email_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX users_email_idx ON kacho_iam.users USING btree (lower(email));
+CREATE INDEX users_email_idx ON kaname.users USING btree (lower(email));
 
 
 --
--- Name: users_email_pending_idx; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: users_email_pending_idx; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX users_email_pending_idx ON kacho_iam.users USING btree (lower(email)) WHERE (invite_status = 'PENDING'::text);
+CREATE INDEX users_email_pending_idx ON kaname.users USING btree (lower(email)) WHERE (invite_status = 'PENDING'::text);
 
 
 --
--- Name: users_identity_email_uniq; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: users_identity_email_uniq; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX users_identity_email_uniq ON kacho_iam.users USING btree (lower(email));
+CREATE UNIQUE INDEX users_identity_email_uniq ON kaname.users USING btree (lower(email));
 
 
 --
--- Name: users_identity_external_id_uniq; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: users_identity_external_id_uniq; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE UNIQUE INDEX users_identity_external_id_uniq ON kacho_iam.users USING btree (external_id) WHERE (external_id <> ''::text);
+CREATE UNIQUE INDEX users_identity_external_id_uniq ON kaname.users USING btree (external_id) WHERE (external_id <> ''::text);
 
 
 --
--- Name: users_labels_gin; Type: INDEX; Schema: kacho_iam; Owner: -
+-- Name: users_labels_gin; Type: INDEX; Schema: kaname; Owner: -
 --
 
-CREATE INDEX users_labels_gin ON kacho_iam.users USING gin (labels jsonb_path_ops);
+CREATE INDEX users_labels_gin ON kaname.users USING gin (labels jsonb_path_ops);
 
 
 --
--- Name: access_binding_subjects access_binding_subjects_carries_scope_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: access_binding_subjects access_binding_subjects_carries_scope_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER access_binding_subjects_carries_scope_trg BEFORE INSERT ON kacho_iam.access_binding_subjects FOR EACH ROW EXECUTE FUNCTION kacho_iam.access_binding_subject_carries_scope();
+CREATE TRIGGER access_binding_subjects_carries_scope_trg BEFORE INSERT ON kaname.access_binding_subjects FOR EACH ROW EXECUTE FUNCTION kaname.access_binding_subject_carries_scope();
 
 
 --
--- Name: access_binding_subjects access_binding_subjects_subject_exists_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: access_binding_subjects access_binding_subjects_subject_exists_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER access_binding_subjects_subject_exists_trg BEFORE INSERT OR UPDATE ON kacho_iam.access_binding_subjects FOR EACH ROW EXECUTE FUNCTION kacho_iam.subject_ref_exists();
+CREATE TRIGGER access_binding_subjects_subject_exists_trg BEFORE INSERT OR UPDATE ON kaname.access_binding_subjects FOR EACH ROW EXECUTE FUNCTION kaname.subject_ref_exists();
 
 
 --
--- Name: access_bindings access_bindings_role_assignable_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: access_bindings access_bindings_role_assignable_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER access_bindings_role_assignable_trg BEFORE INSERT OR UPDATE ON kacho_iam.access_bindings FOR EACH ROW EXECUTE FUNCTION kacho_iam.access_binding_role_assignable();
+CREATE TRIGGER access_bindings_role_assignable_trg BEFORE INSERT OR UPDATE ON kaname.access_bindings FOR EACH ROW EXECUTE FUNCTION kaname.access_binding_role_assignable();
 
 
 --
--- Name: access_bindings access_bindings_role_is_live_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: access_bindings access_bindings_role_is_live_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER access_bindings_role_is_live_trg BEFORE INSERT OR UPDATE ON kacho_iam.access_bindings FOR EACH ROW EXECUTE FUNCTION kacho_iam.access_bindings_role_is_live();
+CREATE TRIGGER access_bindings_role_is_live_trg BEFORE INSERT OR UPDATE ON kaname.access_bindings FOR EACH ROW EXECUTE FUNCTION kaname.access_bindings_role_is_live();
 
 
 --
--- Name: access_bindings access_bindings_scope_default_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: access_bindings access_bindings_scope_default_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER access_bindings_scope_default_trg BEFORE INSERT ON kacho_iam.access_bindings FOR EACH ROW EXECUTE FUNCTION kacho_iam.access_bindings_scope_default();
+CREATE TRIGGER access_bindings_scope_default_trg BEFORE INSERT ON kaname.access_bindings FOR EACH ROW EXECUTE FUNCTION kaname.access_bindings_scope_default();
 
 
 --
--- Name: access_bindings access_bindings_subject_exists_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: access_bindings access_bindings_subject_exists_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER access_bindings_subject_exists_trg BEFORE INSERT OR UPDATE ON kacho_iam.access_bindings FOR EACH ROW EXECUTE FUNCTION kacho_iam.subject_ref_exists();
+CREATE TRIGGER access_bindings_subject_exists_trg BEFORE INSERT OR UPDATE ON kaname.access_bindings FOR EACH ROW EXECUTE FUNCTION kaname.subject_ref_exists();
 
 
 --
--- Name: accounts accounts_quota_count; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: accounts accounts_quota_count; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE CONSTRAINT TRIGGER accounts_quota_count AFTER INSERT OR DELETE ON kacho_iam.accounts DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION kacho_iam.kacho_quota_count('iam.account');
+CREATE CONSTRAINT TRIGGER accounts_quota_count AFTER INSERT OR DELETE ON kaname.accounts DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION kaname.kacho_quota_count('iam.account');
 
 
 --
--- Name: accounts accounts_rate_admission; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: accounts accounts_rate_admission; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE CONSTRAINT TRIGGER accounts_rate_admission AFTER INSERT ON kacho_iam.accounts DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION kacho_iam.kacho_admission_rate_count('iam.account');
+CREATE CONSTRAINT TRIGGER accounts_rate_admission AFTER INSERT ON kaname.accounts DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION kaname.kacho_admission_rate_count('iam.account');
 
 
 --
--- Name: accounts accounts_withdraw_limits_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: accounts accounts_withdraw_limits_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER accounts_withdraw_limits_trg BEFORE DELETE ON kacho_iam.accounts FOR EACH ROW EXECUTE FUNCTION kacho_iam.limits_withdraw_for_scope_object('ACCOUNT');
+CREATE TRIGGER accounts_withdraw_limits_trg BEFORE DELETE ON kaname.accounts FOR EACH ROW EXECUTE FUNCTION kaname.limits_withdraw_for_scope_object('ACCOUNT');
 
 
 --
--- Name: group_members group_members_member_exists_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: group_members group_members_member_exists_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER group_members_member_exists_trg BEFORE INSERT OR UPDATE ON kacho_iam.group_members FOR EACH ROW EXECUTE FUNCTION kacho_iam.group_members_member_exists();
+CREATE TRIGGER group_members_member_exists_trg BEFORE INSERT OR UPDATE ON kaname.group_members FOR EACH ROW EXECUTE FUNCTION kaname.group_members_member_exists();
 
 
 --
--- Name: groups groups_subject_ref_before_delete_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: groups groups_subject_ref_before_delete_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER groups_subject_ref_before_delete_trg BEFORE DELETE ON kacho_iam.groups FOR EACH ROW EXECUTE FUNCTION kacho_iam.principal_not_referenced_as_subject('group');
+CREATE TRIGGER groups_subject_ref_before_delete_trg BEFORE DELETE ON kaname.groups FOR EACH ROW EXECUTE FUNCTION kaname.principal_not_referenced_as_subject('group');
 
 
 --
--- Name: interactive_clients interactive_clients_uris_wellformed_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: interactive_clients interactive_clients_uris_wellformed_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER interactive_clients_uris_wellformed_trg BEFORE INSERT OR UPDATE ON kacho_iam.interactive_clients FOR EACH ROW EXECUTE FUNCTION kacho_iam.interactive_client_uris_wellformed();
+CREATE TRIGGER interactive_clients_uris_wellformed_trg BEFORE INSERT OR UPDATE ON kaname.interactive_clients FOR EACH ROW EXECUTE FUNCTION kaname.interactive_client_uris_wellformed();
 
 
 --
--- Name: invite_mail_outbox invite_mail_outbox_notify_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: invite_mail_outbox invite_mail_outbox_notify_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER invite_mail_outbox_notify_trg AFTER INSERT ON kacho_iam.invite_mail_outbox FOR EACH ROW EXECUTE FUNCTION kacho_iam.invite_mail_outbox_notify();
+CREATE TRIGGER invite_mail_outbox_notify_trg AFTER INSERT ON kaname.invite_mail_outbox FOR EACH ROW EXECUTE FUNCTION kaname.invite_mail_outbox_notify();
 
 
 --
--- Name: limits limits_scope_ref_exists_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: limits limits_scope_ref_exists_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER limits_scope_ref_exists_trg BEFORE INSERT OR UPDATE ON kacho_iam.limits FOR EACH ROW EXECUTE FUNCTION kacho_iam.limits_scope_ref_exists();
+CREATE TRIGGER limits_scope_ref_exists_trg BEFORE INSERT OR UPDATE ON kaname.limits FOR EACH ROW EXECUTE FUNCTION kaname.limits_scope_ref_exists();
 
 
 --
--- Name: limits limits_stamp_revision_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: limits limits_stamp_revision_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER limits_stamp_revision_trg BEFORE INSERT OR UPDATE ON kacho_iam.limits FOR EACH ROW EXECUTE FUNCTION kacho_iam.limits_stamp_revision();
+CREATE TRIGGER limits_stamp_revision_trg BEFORE INSERT OR UPDATE ON kaname.limits FOR EACH ROW EXECUTE FUNCTION kaname.limits_stamp_revision();
 
 
 --
--- Name: memberships membership_carrying_rights_is_kept; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: memberships membership_carrying_rights_is_kept; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE CONSTRAINT TRIGGER membership_carrying_rights_is_kept AFTER DELETE ON kacho_iam.memberships DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION kacho_iam.membership_carrying_rights_is_kept();
+CREATE CONSTRAINT TRIGGER membership_carrying_rights_is_kept AFTER DELETE ON kaname.memberships DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION kaname.membership_carrying_rights_is_kept();
 
 
 --
--- Name: users membership_mirrors_user_row; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: users membership_mirrors_user_row; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER membership_mirrors_user_row AFTER INSERT OR UPDATE OF account_id, invite_status, invited_by ON kacho_iam.users FOR EACH ROW EXECUTE FUNCTION kacho_iam.membership_mirror_from_user();
+CREATE TRIGGER membership_mirrors_user_row AFTER INSERT OR UPDATE OF account_id, invite_status, invited_by ON kaname.users FOR EACH ROW EXECUTE FUNCTION kaname.membership_mirror_from_user();
 
 
 --
--- Name: projects projects_withdraw_limits_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: projects projects_withdraw_limits_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER projects_withdraw_limits_trg BEFORE DELETE ON kacho_iam.projects FOR EACH ROW EXECUTE FUNCTION kacho_iam.limits_withdraw_for_scope_object('PROJECT');
+CREATE TRIGGER projects_withdraw_limits_trg BEFORE DELETE ON kaname.projects FOR EACH ROW EXECUTE FUNCTION kaname.limits_withdraw_for_scope_object('PROJECT');
 
 
 --
--- Name: provider_compensation_outbox provider_compensation_outbox_notify_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: provider_compensation_outbox provider_compensation_outbox_notify_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER provider_compensation_outbox_notify_trg AFTER INSERT ON kacho_iam.provider_compensation_outbox FOR EACH ROW EXECUTE FUNCTION kacho_iam.provider_compensation_outbox_notify();
+CREATE TRIGGER provider_compensation_outbox_notify_trg AFTER INSERT ON kaname.provider_compensation_outbox FOR EACH ROW EXECUTE FUNCTION kaname.provider_compensation_outbox_notify();
 
 
 --
--- Name: fga_outbox relation_fact_follows_journal; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: fga_outbox relation_fact_follows_journal; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER relation_fact_follows_journal AFTER INSERT ON kacho_iam.fga_outbox FOR EACH ROW EXECUTE FUNCTION kacho_iam.relation_fact_from_journal();
+CREATE TRIGGER relation_fact_follows_journal AFTER INSERT ON kaname.fga_outbox FOR EACH ROW EXECUTE FUNCTION kaname.relation_fact_from_journal();
 
 
 --
--- Name: resource_reconcile_outbox resource_reconcile_outbox_notify_trigger; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: resource_reconcile_outbox resource_reconcile_outbox_notify_trigger; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER resource_reconcile_outbox_notify_trigger AFTER INSERT ON kacho_iam.resource_reconcile_outbox FOR EACH ROW EXECUTE FUNCTION kacho_iam.resource_reconcile_outbox_notify();
+CREATE TRIGGER resource_reconcile_outbox_notify_trigger AFTER INSERT ON kaname.resource_reconcile_outbox FOR EACH ROW EXECUTE FUNCTION kaname.resource_reconcile_outbox_notify();
 
 
 --
--- Name: role_rule_selectors role_rule_selectors_types_live; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: role_rule_selectors role_rule_selectors_types_live; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER role_rule_selectors_types_live BEFORE INSERT OR UPDATE ON kacho_iam.role_rule_selectors FOR EACH ROW EXECUTE FUNCTION kacho_iam.role_rule_selector_types_live();
+CREATE TRIGGER role_rule_selectors_types_live BEFORE INSERT OR UPDATE ON kaname.role_rule_selectors FOR EACH ROW EXECUTE FUNCTION kaname.role_rule_selector_types_live();
 
 
 --
--- Name: service_account_oauth_clients sa_oauth_client_removal_cuts_minted_tokens; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: service_account_oauth_clients sa_oauth_client_removal_cuts_minted_tokens; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER sa_oauth_client_removal_cuts_minted_tokens AFTER DELETE ON kacho_iam.service_account_oauth_clients FOR EACH ROW WHEN (((old.expires_at IS NULL) OR (old.expires_at > now()))) EXECUTE FUNCTION kacho_iam.minted_cutoff_on_client_removal();
+CREATE TRIGGER sa_oauth_client_removal_cuts_minted_tokens AFTER DELETE ON kaname.service_account_oauth_clients FOR EACH ROW WHEN (((old.expires_at IS NULL) OR (old.expires_at > now()))) EXECUTE FUNCTION kaname.minted_cutoff_on_client_removal();
 
 
 --
--- Name: TRIGGER sa_oauth_client_removal_cuts_minted_tokens ON service_account_oauth_clients; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TRIGGER sa_oauth_client_removal_cuts_minted_tokens ON service_account_oauth_clients; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TRIGGER sa_oauth_client_removal_cuts_minted_tokens ON kacho_iam.service_account_oauth_clients IS 'mirror of the user-side trigger: only a credential that was LIVE at removal leaves a cut-off row';
+COMMENT ON TRIGGER sa_oauth_client_removal_cuts_minted_tokens ON kaname.service_account_oauth_clients IS 'mirror of the user-side trigger: only a credential that was LIVE at removal leaves a cut-off row';
 
 
 --
--- Name: service_account_oauth_clients sa_oauth_clients_quota_count; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: service_account_oauth_clients sa_oauth_clients_quota_count; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER sa_oauth_clients_quota_count AFTER INSERT OR DELETE ON kacho_iam.service_account_oauth_clients FOR EACH ROW EXECUTE FUNCTION kacho_iam.kacho_quota_count('iam.serviceAccount.credential', 'sva_id');
+CREATE TRIGGER sa_oauth_clients_quota_count AFTER INSERT OR DELETE ON kaname.service_account_oauth_clients FOR EACH ROW EXECUTE FUNCTION kaname.kacho_quota_count('iam.serviceAccount.credential', 'sva_id');
 
 
 --
--- Name: service_accounts service_account_deactivation_cuts_minted_tokens; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: service_accounts service_account_deactivation_cuts_minted_tokens; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER service_account_deactivation_cuts_minted_tokens AFTER UPDATE OF enabled ON kacho_iam.service_accounts FOR EACH ROW WHEN ((old.enabled AND (NOT new.enabled))) EXECUTE FUNCTION kacho_iam.minted_cutoff_on_owner_deactivation();
+CREATE TRIGGER service_account_deactivation_cuts_minted_tokens AFTER UPDATE OF enabled ON kaname.service_accounts FOR EACH ROW WHEN ((old.enabled AND (NOT new.enabled))) EXECUTE FUNCTION kaname.minted_cutoff_on_owner_deactivation();
 
 
 --
--- Name: service_accounts service_accounts_quota_carrier_credential; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: service_accounts service_accounts_quota_carrier_credential; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER service_accounts_quota_carrier_credential AFTER INSERT OR DELETE ON kacho_iam.service_accounts FOR EACH ROW EXECUTE FUNCTION kacho_iam.kacho_quota_carrier_lifecycle('iam.serviceAccount.credential');
+CREATE TRIGGER service_accounts_quota_carrier_credential AFTER INSERT OR DELETE ON kaname.service_accounts FOR EACH ROW EXECUTE FUNCTION kaname.kacho_quota_carrier_lifecycle('iam.serviceAccount.credential');
 
 
 --
--- Name: service_accounts service_accounts_subject_ref_before_delete_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: service_accounts service_accounts_subject_ref_before_delete_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER service_accounts_subject_ref_before_delete_trg BEFORE DELETE ON kacho_iam.service_accounts FOR EACH ROW EXECUTE FUNCTION kacho_iam.principal_not_referenced_as_subject('service_account');
+CREATE TRIGGER service_accounts_subject_ref_before_delete_trg BEFORE DELETE ON kaname.service_accounts FOR EACH ROW EXECUTE FUNCTION kaname.principal_not_referenced_as_subject('service_account');
 
 
 --
--- Name: users user_deactivation_cuts_minted_tokens; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: users user_deactivation_cuts_minted_tokens; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER user_deactivation_cuts_minted_tokens AFTER UPDATE OF invite_status ON kacho_iam.users FOR EACH ROW WHEN (((old.invite_status = 'ACTIVE'::text) AND (new.invite_status <> 'ACTIVE'::text))) EXECUTE FUNCTION kacho_iam.minted_cutoff_on_owner_deactivation();
+CREATE TRIGGER user_deactivation_cuts_minted_tokens AFTER UPDATE OF invite_status ON kaname.users FOR EACH ROW WHEN (((old.invite_status = 'ACTIVE'::text) AND (new.invite_status <> 'ACTIVE'::text))) EXECUTE FUNCTION kaname.minted_cutoff_on_owner_deactivation();
 
 
 --
--- Name: user_oauth_clients user_oauth_client_removal_cuts_minted_tokens; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: user_oauth_clients user_oauth_client_removal_cuts_minted_tokens; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER user_oauth_client_removal_cuts_minted_tokens AFTER DELETE ON kacho_iam.user_oauth_clients FOR EACH ROW WHEN (((old.expires_at IS NULL) OR (old.expires_at > now()))) EXECUTE FUNCTION kacho_iam.minted_cutoff_on_client_removal();
+CREATE TRIGGER user_oauth_client_removal_cuts_minted_tokens AFTER DELETE ON kaname.user_oauth_clients FOR EACH ROW WHEN (((old.expires_at IS NULL) OR (old.expires_at > now()))) EXECUTE FUNCTION kaname.minted_cutoff_on_client_removal();
 
 
 --
--- Name: TRIGGER user_oauth_client_removal_cuts_minted_tokens ON user_oauth_clients; Type: COMMENT; Schema: kacho_iam; Owner: -
+-- Name: TRIGGER user_oauth_client_removal_cuts_minted_tokens ON user_oauth_clients; Type: COMMENT; Schema: kaname; Owner: -
 --
 
-COMMENT ON TRIGGER user_oauth_client_removal_cuts_minted_tokens ON kacho_iam.user_oauth_clients IS 'cuts tokens minted by a credential row that was still LIVE when removed. An already-expired row cannot have minted anything after it expired, and what it minted before is dead by then — the token TTL is trimmed to the remainder of the client lifetime. A cut-off row for it would be a permanent row about a transient nothing, and this table has no sweeper of its own';
+COMMENT ON TRIGGER user_oauth_client_removal_cuts_minted_tokens ON kaname.user_oauth_clients IS 'cuts tokens minted by a credential row that was still LIVE when removed. An already-expired row cannot have minted anything after it expired, and what it minted before is dead by then — the token TTL is trimmed to the remainder of the client lifetime. A cut-off row for it would be a permanent row about a transient nothing, and this table has no sweeper of its own';
 
 
 --
--- Name: user_oauth_clients user_oauth_clients_quota_count; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: user_oauth_clients user_oauth_clients_quota_count; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER user_oauth_clients_quota_count AFTER INSERT OR DELETE ON kacho_iam.user_oauth_clients FOR EACH ROW EXECUTE FUNCTION kacho_iam.kacho_quota_count('iam.user.credential', 'user_id');
+CREATE TRIGGER user_oauth_clients_quota_count AFTER INSERT OR DELETE ON kaname.user_oauth_clients FOR EACH ROW EXECUTE FUNCTION kaname.kacho_quota_count('iam.user.credential', 'user_id');
 
 
 --
--- Name: users users_identity_journal_activate; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: users users_identity_journal_activate; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER users_identity_journal_activate AFTER UPDATE OF external_id ON kacho_iam.users FOR EACH ROW WHEN (((old.external_id = ''::text) AND (new.external_id <> ''::text))) EXECUTE FUNCTION kacho_iam.identity_journal_note();
+CREATE TRIGGER users_identity_journal_activate AFTER UPDATE OF external_id ON kaname.users FOR EACH ROW WHEN (((old.external_id = ''::text) AND (new.external_id <> ''::text))) EXECUTE FUNCTION kaname.identity_journal_note();
 
 
 --
--- Name: users users_identity_journal_insert; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: users users_identity_journal_insert; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER users_identity_journal_insert AFTER INSERT ON kacho_iam.users FOR EACH ROW WHEN ((new.external_id <> ''::text)) EXECUTE FUNCTION kacho_iam.identity_journal_note();
+CREATE TRIGGER users_identity_journal_insert AFTER INSERT ON kaname.users FOR EACH ROW WHEN ((new.external_id <> ''::text)) EXECUTE FUNCTION kaname.identity_journal_note();
 
 
 --
--- Name: users users_quota_carrier_credential; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: users users_quota_carrier_credential; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER users_quota_carrier_credential AFTER INSERT OR DELETE ON kacho_iam.users FOR EACH ROW EXECUTE FUNCTION kacho_iam.kacho_quota_carrier_lifecycle('iam.user.credential');
+CREATE TRIGGER users_quota_carrier_credential AFTER INSERT OR DELETE ON kaname.users FOR EACH ROW EXECUTE FUNCTION kaname.kacho_quota_carrier_lifecycle('iam.user.credential');
 
 
 --
--- Name: users users_subject_ref_before_delete_trg; Type: TRIGGER; Schema: kacho_iam; Owner: -
+-- Name: users users_subject_ref_before_delete_trg; Type: TRIGGER; Schema: kaname; Owner: -
 --
 
-CREATE TRIGGER users_subject_ref_before_delete_trg BEFORE DELETE ON kacho_iam.users FOR EACH ROW EXECUTE FUNCTION kacho_iam.principal_not_referenced_as_subject('user');
+CREATE TRIGGER users_subject_ref_before_delete_trg BEFORE DELETE ON kaname.users FOR EACH ROW EXECUTE FUNCTION kaname.principal_not_referenced_as_subject('user');
 
 
 --
--- Name: access_binding_emitted_tuples access_binding_emitted_tuples_binding_id_fkey; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: access_binding_emitted_tuples access_binding_emitted_tuples_binding_id_fkey; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.access_binding_emitted_tuples
-    ADD CONSTRAINT access_binding_emitted_tuples_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES kacho_iam.access_bindings(id) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.access_binding_emitted_tuples
+    ADD CONSTRAINT access_binding_emitted_tuples_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES kaname.access_bindings(id) ON DELETE CASCADE;
 
 
 --
--- Name: access_binding_subjects access_binding_subjects_scope_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: access_binding_subjects access_binding_subjects_scope_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.access_binding_subjects
-    ADD CONSTRAINT access_binding_subjects_scope_fk FOREIGN KEY (binding_id, resource_type, resource_id) REFERENCES kacho_iam.access_bindings(id, resource_type, resource_id) ON UPDATE CASCADE ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.access_binding_subjects
+    ADD CONSTRAINT access_binding_subjects_scope_fk FOREIGN KEY (binding_id, resource_type, resource_id) REFERENCES kaname.access_bindings(id, resource_type, resource_id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
--- Name: access_binding_target_members access_binding_target_members_binding_id_fkey; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: access_binding_target_members access_binding_target_members_binding_id_fkey; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.access_binding_target_members
-    ADD CONSTRAINT access_binding_target_members_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES kacho_iam.access_bindings(id) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.access_binding_target_members
+    ADD CONSTRAINT access_binding_target_members_binding_id_fkey FOREIGN KEY (binding_id) REFERENCES kaname.access_bindings(id) ON DELETE CASCADE;
 
 
 --
--- Name: access_binding_target_members access_binding_target_members_role_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: access_binding_target_members access_binding_target_members_role_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.access_binding_target_members
-    ADD CONSTRAINT access_binding_target_members_role_fk FOREIGN KEY (role_id) REFERENCES kacho_iam.roles(id) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.access_binding_target_members
+    ADD CONSTRAINT access_binding_target_members_role_fk FOREIGN KEY (role_id) REFERENCES kaname.roles(id) ON DELETE CASCADE;
 
 
 --
--- Name: access_binding_target_members access_binding_target_members_role_live_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: access_binding_target_members access_binding_target_members_role_live_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.access_binding_target_members
-    ADD CONSTRAINT access_binding_target_members_role_live_fk FOREIGN KEY (role_id, live) REFERENCES kacho_iam.roles(id, live) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.access_binding_target_members
+    ADD CONSTRAINT access_binding_target_members_role_live_fk FOREIGN KEY (role_id, live) REFERENCES kaname.roles(id, live) ON DELETE CASCADE;
 
 
 --
--- Name: access_bindings access_bindings_role_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: access_bindings access_bindings_role_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.access_bindings
-    ADD CONSTRAINT access_bindings_role_fk FOREIGN KEY (role_id) REFERENCES kacho_iam.roles(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.access_bindings
+    ADD CONSTRAINT access_bindings_role_fk FOREIGN KEY (role_id) REFERENCES kaname.roles(id) ON DELETE RESTRICT;
 
 
 --
--- Name: accounts accounts_owner_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: accounts accounts_owner_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.accounts
-    ADD CONSTRAINT accounts_owner_fk FOREIGN KEY (owner_user_id) REFERENCES kacho_iam.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE ONLY kaname.accounts
+    ADD CONSTRAINT accounts_owner_fk FOREIGN KEY (owner_user_id) REFERENCES kaname.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
 
 --
--- Name: catalog_resource catalog_resource_module_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_resource catalog_resource_module_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_resource
-    ADD CONSTRAINT catalog_resource_module_fk FOREIGN KEY (module) REFERENCES kacho_iam.catalog_module(module);
+ALTER TABLE ONLY kaname.catalog_resource
+    ADD CONSTRAINT catalog_resource_module_fk FOREIGN KEY (module) REFERENCES kaname.catalog_module(module);
 
 
 --
--- Name: catalog_resource catalog_resource_module_live_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_resource catalog_resource_module_live_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_resource
-    ADD CONSTRAINT catalog_resource_module_live_fk FOREIGN KEY (module, module_live) REFERENCES kacho_iam.catalog_module(module, live);
+ALTER TABLE ONLY kaname.catalog_resource
+    ADD CONSTRAINT catalog_resource_module_live_fk FOREIGN KEY (module, module_live) REFERENCES kaname.catalog_module(module, live);
 
 
 --
--- Name: catalog_verb catalog_verb_resource_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_verb catalog_verb_resource_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_verb
-    ADD CONSTRAINT catalog_verb_resource_fk FOREIGN KEY (module, resource) REFERENCES kacho_iam.catalog_resource(module, resource);
+ALTER TABLE ONLY kaname.catalog_verb
+    ADD CONSTRAINT catalog_verb_resource_fk FOREIGN KEY (module, resource) REFERENCES kaname.catalog_resource(module, resource);
 
 
 --
--- Name: catalog_verb catalog_verb_resource_live_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: catalog_verb catalog_verb_resource_live_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.catalog_verb
-    ADD CONSTRAINT catalog_verb_resource_live_fk FOREIGN KEY (module, resource, resource_live) REFERENCES kacho_iam.catalog_resource(module, resource, live);
+ALTER TABLE ONLY kaname.catalog_verb
+    ADD CONSTRAINT catalog_verb_resource_live_fk FOREIGN KEY (module, resource, resource_live) REFERENCES kaname.catalog_resource(module, resource, live);
 
 
 --
--- Name: cluster_admin_grants cluster_admin_grants_cluster_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: cluster_admin_grants cluster_admin_grants_cluster_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.cluster_admin_grants
-    ADD CONSTRAINT cluster_admin_grants_cluster_fk FOREIGN KEY (cluster_id) REFERENCES kacho_iam.clusters(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.cluster_admin_grants
+    ADD CONSTRAINT cluster_admin_grants_cluster_fk FOREIGN KEY (cluster_id) REFERENCES kaname.clusters(id) ON DELETE RESTRICT;
 
 
 --
--- Name: federated_trusted_issuers federated_trusted_issuers_client_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: federated_trusted_issuers federated_trusted_issuers_client_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.federated_trusted_issuers
-    ADD CONSTRAINT federated_trusted_issuers_client_fk FOREIGN KEY (sa_oauth_client_id) REFERENCES kacho_iam.service_account_oauth_clients(id) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.federated_trusted_issuers
+    ADD CONSTRAINT federated_trusted_issuers_client_fk FOREIGN KEY (sa_oauth_client_id) REFERENCES kaname.service_account_oauth_clients(id) ON DELETE CASCADE;
 
 
 --
--- Name: group_members group_members_group_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: group_members group_members_group_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.group_members
-    ADD CONSTRAINT group_members_group_fk FOREIGN KEY (group_id) REFERENCES kacho_iam.groups(id) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.group_members
+    ADD CONSTRAINT group_members_group_fk FOREIGN KEY (group_id) REFERENCES kaname.groups(id) ON DELETE CASCADE;
 
 
 --
--- Name: groups groups_account_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: groups groups_account_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.groups
-    ADD CONSTRAINT groups_account_fk FOREIGN KEY (account_id) REFERENCES kacho_iam.accounts(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.groups
+    ADD CONSTRAINT groups_account_fk FOREIGN KEY (account_id) REFERENCES kaname.accounts(id) ON DELETE RESTRICT;
 
 
 --
--- Name: memberships memberships_account_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: memberships memberships_account_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.memberships
-    ADD CONSTRAINT memberships_account_fk FOREIGN KEY (account_id) REFERENCES kacho_iam.accounts(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE ONLY kaname.memberships
+    ADD CONSTRAINT memberships_account_fk FOREIGN KEY (account_id) REFERENCES kaname.accounts(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
--- Name: memberships memberships_user_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: memberships memberships_user_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.memberships
-    ADD CONSTRAINT memberships_user_fk FOREIGN KEY (user_id) REFERENCES kacho_iam.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE ONLY kaname.memberships
+    ADD CONSTRAINT memberships_user_fk FOREIGN KEY (user_id) REFERENCES kaname.users(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
 
 
 --
--- Name: projects projects_account_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: projects projects_account_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.projects
-    ADD CONSTRAINT projects_account_fk FOREIGN KEY (account_id) REFERENCES kacho_iam.accounts(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.projects
+    ADD CONSTRAINT projects_account_fk FOREIGN KEY (account_id) REFERENCES kaname.accounts(id) ON DELETE RESTRICT;
 
 
 --
--- Name: role_grant_orphan role_grant_orphan_role_id_fkey; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_grant_orphan role_grant_orphan_role_id_fkey; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_grant_orphan
-    ADD CONSTRAINT role_grant_orphan_role_id_fkey FOREIGN KEY (role_id) REFERENCES kacho_iam.roles(id) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.role_grant_orphan
+    ADD CONSTRAINT role_grant_orphan_role_id_fkey FOREIGN KEY (role_id) REFERENCES kaname.roles(id) ON DELETE CASCADE;
 
 
 --
--- Name: role_rule_ref role_rule_ref_res_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_rule_ref role_rule_ref_res_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_rule_ref
-    ADD CONSTRAINT role_rule_ref_res_fk FOREIGN KEY (module, resource, live) REFERENCES kacho_iam.catalog_resource(module, resource, live) DEFERRABLE;
+ALTER TABLE ONLY kaname.role_rule_ref
+    ADD CONSTRAINT role_rule_ref_res_fk FOREIGN KEY (module, resource, live) REFERENCES kaname.catalog_resource(module, resource, live) DEFERRABLE;
 
 
 --
--- Name: role_rule_ref role_rule_ref_role_id_fkey; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_rule_ref role_rule_ref_role_id_fkey; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_rule_ref
-    ADD CONSTRAINT role_rule_ref_role_id_fkey FOREIGN KEY (role_id) REFERENCES kacho_iam.roles(id) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.role_rule_ref
+    ADD CONSTRAINT role_rule_ref_role_id_fkey FOREIGN KEY (role_id) REFERENCES kaname.roles(id) ON DELETE CASCADE;
 
 
 --
--- Name: role_rule_ref role_rule_ref_role_live_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_rule_ref role_rule_ref_role_live_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_rule_ref
-    ADD CONSTRAINT role_rule_ref_role_live_fk FOREIGN KEY (role_id, live) REFERENCES kacho_iam.roles(id, live) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.role_rule_ref
+    ADD CONSTRAINT role_rule_ref_role_live_fk FOREIGN KEY (role_id, live) REFERENCES kaname.roles(id, live) ON DELETE CASCADE;
 
 
 --
--- Name: role_rule_ref role_rule_ref_verb_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_rule_ref role_rule_ref_verb_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_rule_ref
-    ADD CONSTRAINT role_rule_ref_verb_fk FOREIGN KEY (module, resource, verb, live) REFERENCES kacho_iam.catalog_verb(module, resource, verb, live) DEFERRABLE;
+ALTER TABLE ONLY kaname.role_rule_ref
+    ADD CONSTRAINT role_rule_ref_verb_fk FOREIGN KEY (module, resource, verb, live) REFERENCES kaname.catalog_verb(module, resource, verb, live) DEFERRABLE;
 
 
 --
--- Name: role_rule_selectors role_rule_selectors_role_id_fkey; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_rule_selectors role_rule_selectors_role_id_fkey; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_rule_selectors
-    ADD CONSTRAINT role_rule_selectors_role_id_fkey FOREIGN KEY (role_id) REFERENCES kacho_iam.roles(id) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.role_rule_selectors
+    ADD CONSTRAINT role_rule_selectors_role_id_fkey FOREIGN KEY (role_id) REFERENCES kaname.roles(id) ON DELETE CASCADE;
 
 
 --
--- Name: role_rule_selectors role_rule_selectors_role_live_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_rule_selectors role_rule_selectors_role_live_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_rule_selectors
-    ADD CONSTRAINT role_rule_selectors_role_live_fk FOREIGN KEY (role_id, live) REFERENCES kacho_iam.roles(id, live) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.role_rule_selectors
+    ADD CONSTRAINT role_rule_selectors_role_live_fk FOREIGN KEY (role_id, live) REFERENCES kaname.roles(id, live) ON DELETE CASCADE;
 
 
 --
--- Name: role_selector_prune role_selector_prune_role_id_fkey; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_selector_prune role_selector_prune_role_id_fkey; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_selector_prune
-    ADD CONSTRAINT role_selector_prune_role_id_fkey FOREIGN KEY (role_id) REFERENCES kacho_iam.roles(id) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.role_selector_prune
+    ADD CONSTRAINT role_selector_prune_role_id_fkey FOREIGN KEY (role_id) REFERENCES kaname.roles(id) ON DELETE CASCADE;
 
 
 --
--- Name: role_verb role_verb_role_id_fkey; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_verb role_verb_role_id_fkey; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_verb
-    ADD CONSTRAINT role_verb_role_id_fkey FOREIGN KEY (role_id) REFERENCES kacho_iam.roles(id) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.role_verb
+    ADD CONSTRAINT role_verb_role_id_fkey FOREIGN KEY (role_id) REFERENCES kaname.roles(id) ON DELETE CASCADE;
 
 
 --
--- Name: role_verb role_verb_role_live_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_verb role_verb_role_live_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_verb
-    ADD CONSTRAINT role_verb_role_live_fk FOREIGN KEY (role_id, live) REFERENCES kacho_iam.roles(id, live) ON DELETE CASCADE;
+ALTER TABLE ONLY kaname.role_verb
+    ADD CONSTRAINT role_verb_role_live_fk FOREIGN KEY (role_id, live) REFERENCES kaname.roles(id, live) ON DELETE CASCADE;
 
 
 --
--- Name: role_verb role_verb_type_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: role_verb role_verb_type_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.role_verb
-    ADD CONSTRAINT role_verb_type_fk FOREIGN KEY (object_type, live) REFERENCES kacho_iam.catalog_resource(dotted, live) DEFERRABLE;
+ALTER TABLE ONLY kaname.role_verb
+    ADD CONSTRAINT role_verb_type_fk FOREIGN KEY (object_type, live) REFERENCES kaname.catalog_resource(dotted, live) DEFERRABLE;
 
 
 --
--- Name: roles roles_account_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: roles roles_account_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.roles
-    ADD CONSTRAINT roles_account_fk FOREIGN KEY (account_id) REFERENCES kacho_iam.accounts(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.roles
+    ADD CONSTRAINT roles_account_fk FOREIGN KEY (account_id) REFERENCES kaname.accounts(id) ON DELETE RESTRICT;
 
 
 --
--- Name: roles roles_cluster_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: roles roles_cluster_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.roles
-    ADD CONSTRAINT roles_cluster_fk FOREIGN KEY (cluster_id) REFERENCES kacho_iam.clusters(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.roles
+    ADD CONSTRAINT roles_cluster_fk FOREIGN KEY (cluster_id) REFERENCES kaname.clusters(id) ON DELETE RESTRICT;
 
 
 --
--- Name: roles roles_owner_module_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: roles roles_owner_module_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.roles
-    ADD CONSTRAINT roles_owner_module_fk FOREIGN KEY (owner_module) REFERENCES kacho_iam.catalog_module(module);
+ALTER TABLE ONLY kaname.roles
+    ADD CONSTRAINT roles_owner_module_fk FOREIGN KEY (owner_module) REFERENCES kaname.catalog_module(module);
 
 
 --
--- Name: roles roles_project_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: roles roles_project_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.roles
-    ADD CONSTRAINT roles_project_fk FOREIGN KEY (project_id) REFERENCES kacho_iam.projects(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.roles
+    ADD CONSTRAINT roles_project_fk FOREIGN KEY (project_id) REFERENCES kaname.projects(id) ON DELETE RESTRICT;
 
 
 --
--- Name: service_account_oauth_clients service_account_oauth_clients_created_by_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: service_account_oauth_clients service_account_oauth_clients_created_by_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.service_account_oauth_clients
-    ADD CONSTRAINT service_account_oauth_clients_created_by_fk FOREIGN KEY (created_by_user_id) REFERENCES kacho_iam.users(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.service_account_oauth_clients
+    ADD CONSTRAINT service_account_oauth_clients_created_by_fk FOREIGN KEY (created_by_user_id) REFERENCES kaname.users(id) ON DELETE RESTRICT;
 
 
 --
--- Name: service_account_oauth_clients service_account_oauth_clients_sva_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: service_account_oauth_clients service_account_oauth_clients_sva_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.service_account_oauth_clients
-    ADD CONSTRAINT service_account_oauth_clients_sva_fk FOREIGN KEY (sva_id) REFERENCES kacho_iam.service_accounts(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.service_account_oauth_clients
+    ADD CONSTRAINT service_account_oauth_clients_sva_fk FOREIGN KEY (sva_id) REFERENCES kaname.service_accounts(id) ON DELETE RESTRICT;
 
 
 --
--- Name: service_accounts service_accounts_account_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: service_accounts service_accounts_account_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.service_accounts
-    ADD CONSTRAINT service_accounts_account_fk FOREIGN KEY (account_id) REFERENCES kacho_iam.accounts(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.service_accounts
+    ADD CONSTRAINT service_accounts_account_fk FOREIGN KEY (account_id) REFERENCES kaname.accounts(id) ON DELETE RESTRICT;
 
 
 --
--- Name: session_revocations session_revocations_user_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: session_revocations session_revocations_user_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.session_revocations
-    ADD CONSTRAINT session_revocations_user_fk FOREIGN KEY (user_id) REFERENCES kacho_iam.users(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.session_revocations
+    ADD CONSTRAINT session_revocations_user_fk FOREIGN KEY (user_id) REFERENCES kaname.users(id) ON DELETE RESTRICT;
 
 
 --
@@ -5660,43 +5660,43 @@ ALTER TABLE ONLY kacho_iam.session_revocations
 -- TestUserOAuthClient_09c_UserDelete_CascadesTokens и
 -- TestBAT1_47_EveryCascadeCauseTakesTheCredentialDown.
 --
--- Name: user_oauth_clients user_oauth_clients_user_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: user_oauth_clients user_oauth_clients_user_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.user_oauth_clients
-    ADD CONSTRAINT user_oauth_clients_user_fk FOREIGN KEY (user_id) REFERENCES kacho_iam.users(id) ON DELETE CASCADE;
-
-
---
--- Name: user_oauth_clients user_oauth_clients_created_by_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
---
-
-ALTER TABLE ONLY kacho_iam.user_oauth_clients
-    ADD CONSTRAINT user_oauth_clients_created_by_fk FOREIGN KEY (created_by_user_id) REFERENCES kacho_iam.users(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY kaname.user_oauth_clients
+    ADD CONSTRAINT user_oauth_clients_user_fk FOREIGN KEY (user_id) REFERENCES kaname.users(id) ON DELETE CASCADE;
 
 
 --
--- Name: user_token_revocations user_token_revocations_user_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: user_oauth_clients user_oauth_clients_created_by_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.user_token_revocations
-    ADD CONSTRAINT user_token_revocations_user_fk FOREIGN KEY (user_id) REFERENCES kacho_iam.users(id) ON DELETE CASCADE;
-
-
---
--- Name: users users_account_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
---
-
-ALTER TABLE ONLY kacho_iam.users
-    ADD CONSTRAINT users_account_fk FOREIGN KEY (account_id) REFERENCES kacho_iam.accounts(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE ONLY kaname.user_oauth_clients
+    ADD CONSTRAINT user_oauth_clients_created_by_fk FOREIGN KEY (created_by_user_id) REFERENCES kaname.users(id) ON DELETE RESTRICT;
 
 
 --
--- Name: users users_invited_by_fk; Type: FK CONSTRAINT; Schema: kacho_iam; Owner: -
+-- Name: user_token_revocations user_token_revocations_user_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
 --
 
-ALTER TABLE ONLY kacho_iam.users
-    ADD CONSTRAINT users_invited_by_fk FOREIGN KEY (invited_by) REFERENCES kacho_iam.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE ONLY kaname.user_token_revocations
+    ADD CONSTRAINT user_token_revocations_user_fk FOREIGN KEY (user_id) REFERENCES kaname.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: users users_account_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
+--
+
+ALTER TABLE ONLY kaname.users
+    ADD CONSTRAINT users_account_fk FOREIGN KEY (account_id) REFERENCES kaname.accounts(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+
+--
+-- Name: users users_invited_by_fk; Type: FK CONSTRAINT; Schema: kaname; Owner: -
+--
+
+ALTER TABLE ONLY kaname.users
+    ADD CONSTRAINT users_invited_by_fk FOREIGN KEY (invited_by) REFERENCES kaname.users(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -5734,14 +5734,14 @@ DECLARE
     sa_secrets   bigint;
     user_secrets bigint;
 BEGIN
-    IF to_regclass('kacho_iam.service_account_oauth_clients') IS NULL THEN
+    IF to_regclass('kaname.service_account_oauth_clients') IS NULL THEN
         RETURN;  -- схемы нет: сносить нечего, и считать не в чем
     END IF;
 
     SELECT count(*) INTO sa_secrets
-      FROM kacho_iam.service_account_oauth_clients WHERE credential_kind = 'SECRET';
+      FROM kaname.service_account_oauth_clients WHERE credential_kind = 'SECRET';
     SELECT count(*) INTO user_secrets
-      FROM kacho_iam.user_oauth_clients WHERE credential_kind = 'SECRET';
+      FROM kaname.user_oauth_clients WHERE credential_kind = 'SECRET';
 
     -- Перепись печатается ВСЕГДА, включая ноль: иначе «удостоверений вида
     -- SECRET нет» неотличимо от «их не считали».
@@ -5771,6 +5771,6 @@ END $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-DROP SCHEMA IF EXISTS kacho_iam CASCADE;
+DROP SCHEMA IF EXISTS kaname CASCADE;
 
 -- +goose StatementEnd

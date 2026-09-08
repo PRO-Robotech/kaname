@@ -44,7 +44,6 @@ package authzmap_test
 
 import (
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -104,7 +103,7 @@ func modelBodyTypes(dsl string) []string {
 // TestModelHeaderTypeListMatchesBody — перечень типов в шапке равен множеству
 // ресурсных типов тела, в ОБЕ стороны.
 func TestModelHeaderTypeListMatchesBody(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(monorepoRoot(t), canonicalModelRelPath))
+	raw, err := os.ReadFile(canonicalModelPath(t))
 	require.NoErrorf(t, err, "канонический %s не прочитан — гейту нечего сверять", canonicalModelRelPath)
 	dsl := string(raw)
 

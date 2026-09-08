@@ -3,7 +3,7 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# scripts/wave-a-audit.sh — count Phase + KAC + W refs in kacho-iam (Wave A acceptance gate).
+# scripts/wave-a-audit.sh — count Phase + KAC + W refs in kaname (Wave A acceptance gate).
 # Excludes: verifies-KAC-N annotations (workspace §13 finding pattern), migration filenames (Wave M), commits.
 
 set -euo pipefail

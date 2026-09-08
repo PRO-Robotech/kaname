@@ -59,6 +59,8 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // migrationsGlob — где лежат миграции сервиса относительно корня монорепо.
@@ -108,7 +110,7 @@ func TestGroupMemberKindsAgreeBetweenModelAndMigrationText(t *testing.T) {
 // groupMemberKindsFromModel — виды, принимаемые `type group` / `define member`.
 func groupMemberKindsFromModel(t *testing.T, root string) []string {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join(root, canonicalModelRelPath))
+	body, err := os.ReadFile(canonicalModelPath(t))
 	require.NoError(t, err)
 	f := parseModelDSL(string(body))
 	require.Truef(t, f.types["group"], "модель не объявляет `type group` — гейт беспредметен")
@@ -160,7 +162,8 @@ func modelMemberKinds(dsl string) []string {
 // могла быть заменена, и судить первую значило бы судить отменённое.
 func groupMemberKindsFromSchema(t *testing.T, root string) ([]string, string) {
 	t.Helper()
-	files, err := treecorpus.Glob(filepath.Join(root, migrationsGlob))
+	// Координата приводится к ПОСАДКЕ: файл едет вместе с модулем.
+	files, err := treecorpus.Glob(platformtree.RequirePath(t, migrationsGlob))
 	require.NoError(t, err)
 	require.NotEmptyf(t, files, "миграций не найдено по %s — гейт беспредметен", migrationsGlob)
 	sort.Strings(files)

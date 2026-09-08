@@ -1,0 +1,146 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package config_test
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+)
+
+// writeTestCert generates a throwaway self-signed cert+key+CA PEM trio for the
+// mTLS-wiring tests (no real PKI). Returns cert, key, ca paths.
+func writeTestCert(t *testing.T) (certFile, keyFile, caFile string) {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "kaname-test"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		DNSNames:              []string{"kaname.kacho.svc"},
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
+	require.NoError(t, err)
+	dir := t.TempDir()
+	certFile = filepath.Join(dir, "cert.pem")
+	keyFile = filepath.Join(dir, "key.pem")
+	caFile = filepath.Join(dir, "ca.pem")
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	require.NoError(t, os.WriteFile(certFile, certPEM, 0o600))
+	require.NoError(t, os.WriteFile(caFile, certPEM, 0o600))
+	keyDER, err := x509.MarshalECPrivateKey(priv)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600))
+	return certFile, keyFile, caFile
+}
+
+// TestMTLS_SEC_H_01_DisabledDefaultInsecure — no mTLS env set →
+// both server edges are off (zero-value); *ServerCreds() build insecure creds
+// without error (cert files NOT read). Zero-regression / dev backward-compat.
+func TestMTLS_SEC_H_01_DisabledDefaultInsecure(t *testing.T) {
+	m, err := config.LoadMTLS()
+	require.NoError(t, err)
+	assert.False(t, m.PublicServerMTLS.Enable, "public server mTLS off by default")
+	assert.False(t, m.InternalServerMTLS.Enable, "internal server mTLS off by default")
+
+	// Both server edges build their creds insecurely when disabled.
+	for name, build := range map[string]func() error{
+		"public-server":   func() error { _, e := m.PublicServerCreds(); return e },
+		"internal-server": func() error { _, e := m.InternalServerCreds(); return e },
+	} {
+		require.NoError(t, build(), "%s: disabled edge must build insecure creds", name)
+	}
+}
+
+// TestMTLS_SEC_H_02_EnabledNoCertErrors — enable=true but no/bad
+// cert-trio → *ServerCreds() returns an error (fail-closed, never silent
+// insecure; ban #11).
+func TestMTLS_SEC_H_02_EnabledNoCertErrors(t *testing.T) {
+	t.Setenv("KANAME_INTERNAL_SERVER_MTLS_ENABLE", "true")
+	// no CERTFILE/KEYFILE/CLIENTCAFILES → fail-closed.
+	m, err := config.LoadMTLS()
+	require.NoError(t, err)
+	assert.True(t, m.InternalServerMTLS.Enable)
+	_, err = m.InternalServerCreds()
+	require.Error(t, err, "enabled mTLS without a valid cert-trio must fail-closed")
+}
+
+// TestMTLS_SEC_H_03_EnabledInternalServerCreds — internal enable=true
+// with a valid server cert + client-CA builds RequireAndVerifyClientCert server
+// creds (the no-client-cert rejection is enforced at handshake in corelib).
+func TestMTLS_SEC_H_03_EnabledInternalServerCreds(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCert(t)
+	t.Setenv("KANAME_INTERNAL_SERVER_MTLS_ENABLE", "true")
+	t.Setenv("KANAME_INTERNAL_SERVER_MTLS_CERTFILE", certFile)
+	t.Setenv("KANAME_INTERNAL_SERVER_MTLS_KEYFILE", keyFile)
+	t.Setenv("KANAME_INTERNAL_SERVER_MTLS_CLIENTCAFILES", caFile)
+
+	m, err := config.LoadMTLS()
+	require.NoError(t, err)
+	assert.True(t, m.InternalServerMTLS.Enable)
+	opt, err := m.InternalServerCreds()
+	require.NoError(t, err, "valid server cert + client CA → server creds build")
+	require.NotNil(t, opt)
+}
+
+// TestMTLS_SEC_H_03_EnabledPublicServerCreds — public edge:
+// public enable=true with a valid server cert + client-CA builds server creds.
+func TestMTLS_SEC_H_03_EnabledPublicServerCreds(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCert(t)
+	t.Setenv("KANAME_PUBLIC_SERVER_MTLS_ENABLE", "true")
+	t.Setenv("KANAME_PUBLIC_SERVER_MTLS_CERTFILE", certFile)
+	t.Setenv("KANAME_PUBLIC_SERVER_MTLS_KEYFILE", keyFile)
+	t.Setenv("KANAME_PUBLIC_SERVER_MTLS_CLIENTCAFILES", caFile)
+
+	m, err := config.LoadMTLS()
+	require.NoError(t, err)
+	assert.True(t, m.PublicServerMTLS.Enable)
+	opt, err := m.PublicServerCreds()
+	require.NoError(t, err, "valid server cert + client CA → server creds build")
+	require.NotNil(t, opt)
+}
+
+// TestMTLS_SEC_H_08_PerEdgeIndependent — internal enable=true while
+// public enable=false → the two edges resolve to independent values (per-edge
+// rollback).
+func TestMTLS_SEC_H_08_PerEdgeIndependent(t *testing.T) {
+	certFile, keyFile, caFile := writeTestCert(t)
+	t.Setenv("KANAME_INTERNAL_SERVER_MTLS_ENABLE", "true")
+	t.Setenv("KANAME_INTERNAL_SERVER_MTLS_CERTFILE", certFile)
+	t.Setenv("KANAME_INTERNAL_SERVER_MTLS_KEYFILE", keyFile)
+	t.Setenv("KANAME_INTERNAL_SERVER_MTLS_CLIENTCAFILES", caFile)
+	// public edge intentionally left unset → enable=false.
+
+	m, err := config.LoadMTLS()
+	require.NoError(t, err)
+	assert.True(t, m.InternalServerMTLS.Enable, "internal edge on")
+	assert.False(t, m.PublicServerMTLS.Enable, "public edge stays off, independent")
+
+	// internal builds mTLS creds, public builds insecure — both without error.
+	internalOpt, err := m.InternalServerCreds()
+	require.NoError(t, err)
+	require.NotNil(t, internalOpt)
+	publicOpt, err := m.PublicServerCreds()
+	require.NoError(t, err)
+	require.NotNil(t, publicOpt)
+}

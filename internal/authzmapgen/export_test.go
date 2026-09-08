@@ -15,7 +15,7 @@
 // перечень первого и объявила бы «приманку не увидели» свойством продукта.
 package authzmapgen
 
-import "github.com/PRO-Robotech/kacho-iam/internal/manifest"
+import "github.com/PRO-Robotech/kaname/internal/manifest"
 
 // CollectSynthetic — [Collect] по дереву, репозиторием не являющемуся.
 func CollectSynthetic(root string) (Tables, error) {

@@ -48,7 +48,7 @@ import (
 // TestBuildRunner_RefusesADSNWithoutAHost — отрицание: адрес без хоста отвергнут
 // до всякого ожидания, и текст называет причину.
 func TestBuildRunner_RefusesADSNWithoutAHost(t *testing.T) {
-	opts := &rootOptions{dialect: defaultDialect, dsn: "postgres://iam@:5432/kacho_iam"}
+	opts := &rootOptions{dialect: defaultDialect, dsn: "postgres://iam@:5432/kaname"}
 
 	_, err := buildRunner(opts, fstest.MapFS{})
 	if err == nil {
@@ -65,7 +65,7 @@ func TestBuildRunner_RefusesADSNWithoutAHost(t *testing.T) {
 // — то есть на сломанной поставке. Соединение здесь не устанавливается: сборка
 // наката его не открывает, поэтому проба судит разбор, а не доступность базы.
 func TestBuildRunner_AcceptsADSNWithAHost(t *testing.T) {
-	opts := &rootOptions{dialect: defaultDialect, dsn: "postgres://iam@pg:5432/kacho_iam"}
+	opts := &rootOptions{dialect: defaultDialect, dsn: "postgres://iam@pg:5432/kaname"}
 
 	if _, err := buildRunner(opts, fstest.MapFS{}); err != nil {
 		t.Fatalf("buildRunner() = %q, want nil: адрес базы называет хост, отвергать нечего", err.Error())
@@ -83,7 +83,7 @@ func TestBuildRunner_AcceptsADSNWithAHost(t *testing.T) {
 // и в журнале init-контейнера стоял пароль открытым текстом.
 func TestBuildRunner_RefusalDoesNotEchoTheDBPassword(t *testing.T) {
 	const password = "s3cret-never-in-a-log"
-	opts := &rootOptions{dialect: defaultDialect, dsn: "postgres://iam:" + password + "@:5432/kacho_iam"}
+	opts := &rootOptions{dialect: defaultDialect, dsn: "postgres://iam:" + password + "@:5432/kaname"}
 
 	_, err := buildRunner(opts, fstest.MapFS{})
 	if err == nil {

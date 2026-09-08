@@ -56,19 +56,19 @@ func seedCredentialOwners(t *testing.T, db *sql.DB) {
 	require.NoError(t, err)
 
 	_, err = tx.Exec(`
-INSERT INTO kacho_iam.accounts (id, name, owner_user_id)
+INSERT INTO kaname.accounts (id, name, owner_user_id)
 VALUES ('acc00000000000000bat', 'bat-1', 'usr00000000000000bat')
 ON CONFLICT DO NOTHING`)
 	require.NoError(t, err, "посев аккаунта")
 
 	_, err = tx.Exec(`
-INSERT INTO kacho_iam.users (id, external_id, email, account_id, invite_status)
+INSERT INTO kaname.users (id, external_id, email, account_id, invite_status)
 VALUES ('usr00000000000000bat', 'ext-bat-1', 'bat1@example.invalid', 'acc00000000000000bat', 'ACTIVE')
 ON CONFLICT DO NOTHING`)
 	require.NoError(t, err, "посев человека")
 
 	_, err = tx.Exec(`
-INSERT INTO kacho_iam.service_accounts (id, account_id, name)
+INSERT INTO kaname.service_accounts (id, account_id, name)
 VALUES ('sva00000000000000bat', 'acc00000000000000bat', 'bat-one-sa')
 ON CONFLICT DO NOTHING`)
 	require.NoError(t, err, "посев служебной учётки")
@@ -83,7 +83,7 @@ func insertSACred(db *sql.DB, id, kind string, secretHash []byte, publicKeyPEM, 
 		expires = fmt.Sprintf("now() + interval '%d days'", ttlDays)
 	}
 	_, err := db.Exec(fmt.Sprintf(`
-INSERT INTO kacho_iam.service_account_oauth_clients
+INSERT INTO kaname.service_account_oauth_clients
     (id, sva_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, public_key_pem, key_algorithm, trusted_subjects, expires_at)
 VALUES ($1, 'sva00000000000000bat', $2, 'usr00000000000000bat', $3, $4, $5, $6, $7::jsonb, %s)`, expires),
 		id, mirror, kind, secretHash, publicKeyPEM, keyAlg, trusted)
@@ -98,7 +98,7 @@ func insertUserCred(db *sql.DB, id, kind string, secretHash []byte, publicKeyPEM
 		expires = fmt.Sprintf("now() + interval '%d days'", ttlDays)
 	}
 	_, err := db.Exec(fmt.Sprintf(`
-INSERT INTO kacho_iam.user_oauth_clients
+INSERT INTO kaname.user_oauth_clients
     (id, user_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash, public_key_pem, key_algorithm, expires_at)
 VALUES ($1, 'usr00000000000000bat', $2, 'usr00000000000000bat', $3, $4, $5, $6, %s)`, expires),
 		id, mirror, kind, secretHash, publicKeyPEM, keyAlg)
@@ -184,14 +184,14 @@ func TestBAT1_20_UpdatesThatBreakTheSecretShapeAreRefused(t *testing.T) {
 	hash[0] = 7
 	require.NoError(t, insertUserCred(db, "uoc_00000000000000030", "SECRET", hash, "", "", nil, 30))
 
-	_, err = db.Exec(`UPDATE kacho_iam.user_oauth_clients SET expires_at = NULL WHERE id = 'uoc_00000000000000030'`)
+	_, err = db.Exec(`UPDATE kaname.user_oauth_clients SET expires_at = NULL WHERE id = 'uoc_00000000000000030'`)
 	require.Error(t, err, "срок снят правкой — бессрочный секрет стал выразим")
 
-	_, err = db.Exec(`UPDATE kacho_iam.user_oauth_clients SET public_key_pem = 'x', key_algorithm = 'ES256' WHERE id = 'uoc_00000000000000030'`)
+	_, err = db.Exec(`UPDATE kaname.user_oauth_clients SET public_key_pem = 'x', key_algorithm = 'ES256' WHERE id = 'uoc_00000000000000030'`)
 	require.Error(t, err, "ключевой материал добавлен к строке вида SECRET")
 
 	// Положительный контроль: законная правка проходит.
-	_, err = db.Exec(`UPDATE kacho_iam.user_oauth_clients SET description = 'ноутбук' WHERE id = 'uoc_00000000000000030'`)
+	_, err = db.Exec(`UPDATE kaname.user_oauth_clients SET description = 'ноутбук' WHERE id = 'uoc_00000000000000030'`)
 	require.NoError(t, err, "законная правка отвергнута — ограничение шире предмета")
 }
 

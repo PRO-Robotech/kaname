@@ -22,13 +22,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clientassertion"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/kaname/internal/clientassertion"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 const (
-	testIssuerID = "https://iam.kacho.local"
+	testIssuerID = "https://kaname.kacho.local"
 	testClientID = "uoc_0123456789abcdefg"
 	testOwnerID  = "usr_0123456789abcdefg"
 )
@@ -501,7 +501,7 @@ func TestF2_15_AudienceIsOurIssuerIdentifierNotTheEndpointAddress(t *testing.T) 
 	for _, aud := range []any{
 		testIssuerID + "/oauth2/token",
 		testIssuerID + "/iam/v1/token",
-		"http://kacho-iam.kacho-system.svc:9096/iam/v1/token",
+		"http://kaname.kacho-system.svc:9096/iam/v1/token",
 		"",
 	} {
 		res, err := f.verify(t, sign(aud, "jti-15"))

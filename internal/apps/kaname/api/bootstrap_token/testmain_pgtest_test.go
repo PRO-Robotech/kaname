@@ -1,0 +1,33 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package bootstrap_token
+
+import (
+	"os"
+	"testing"
+
+	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
+)
+
+// TestMain hands this package ONE Postgres instead of one per test.
+//
+// The container belongs to the test BINARY, and each package is its own binary,
+// so this wiring is repeated per package. Each test still gets its own database,
+// cloned from a template migrated once — see pkg/pgtest for why a clone is
+// the same isolation a separate container gave.
+//
+// Nothing starts here: the container boots on the first NewDB, so a run where
+// every test skips pays nothing.
+func TestMain(m *testing.M) {
+	os.Exit(pgtest.Run(m, pgtest.Config{
+		// Приведение схемы — ОДИН раз на пакет, у выдающего базу.
+		// Прежде его приписывал каждый вызывающий своей копией; забывший
+		// получал `relation … does not exist` — отказ, читающийся как дефект
+		// продукта. Довод целиком — `pkg/pgtest` §searchpath.
+		SearchPath: "kaname,public",
+		Name:       "iam",
+		Migrate:    pgtest.Goose(migrations.FS),
+	}))
+}

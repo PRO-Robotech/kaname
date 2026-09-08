@@ -1,6 +1,6 @@
-# Explicit RBAC model — kacho-iam authz
+# Explicit RBAC model — kaname authz
 
-Нормативное описание модели авторизации `kacho-iam` в том виде, в каком она
+Нормативное описание модели авторизации `kaname` в том виде, в каком она
 работает в проде. Это **источник истины** по тому, как грант превращается в
 доступ; остальные документы (`19-authorize.md`, `29-relational-verdict.md`,
 `08-access-binding.md`, `07-role.md`) ссылаются сюда, а не дублируют модель.
@@ -29,7 +29,7 @@ super-admin (один флаг + short-circuit, см. ниже).
 > [!note] Со стадии S6 «плоский индекс» перестал быть отдельным хранилищем
 > Прежняя редакция называла плоским индексом внешний движок — отдельное хранилище,
 > в которое отношения доезжали очередью. Движка нет: те же прямые отношения лежат
-> строками в схеме `kacho_iam` (`relation_fact`), и вердикт складывается запросом к
+> строками в схеме `kaname` (`relation_fact`), и вердикт складывается запросом к
 > ним. Само решение — плоско, без магического каскада — не изменилось; изменилось
 > лишь то, что «индекс» перестал быть вторым хранилищем со своим окном
 > рассогласования.
@@ -160,7 +160,7 @@ wildcard-правило `*.*.*` **разворачивается per-object** �
 Материализовать per-object «на весь кластер» — анти-паттерн (миллионы tuple,
 churn на каждом Create). Поэтому cluster-admin — это:
 
-1. **Одно плоское cluster-relation** `cluster:cluster_kacho_root # system_admin @ <subject>`.
+1. **Одно плоское cluster-relation** `cluster:cluster_root # system_admin @ <subject>`.
 2. **Check short-circuit**: «является ли subject cluster-admin?» → ALLOW, минуя
    обычный per-object резолв.
 
@@ -178,7 +178,7 @@ Short-circuit применяется **не только** к read-Check (`Autho
 ### Bootstrap (chicken-egg + separation of duties)
 
 Первый cluster-admin сидится на инсталле через internal-only
-`InternalClusterService` (env `KACHO_IAM_BOOTSTRAP_ROOT_EMAIL`): в одной tx —
+`InternalClusterService` (env `KANAME_BOOTSTRAP_ROOT_EMAIL`): в одной tx —
 строка `cluster_admin_grants` + fga-outbox tuple `system_admin` + audit-событие.
 Идемпотентно: повторный рестарт ловит partial-unique (SQLSTATE 23505) и тихо
 пропускает. **Self-grant через публичный API невозможен** — нет публичного пути к
@@ -309,7 +309,7 @@ false)`, затем `Delete`.
 - **leaf-объекты**: прямые `v_*` relation-tuple (+ tier для write-authz-якоря).
 - **`account` / `project`**: verb-bearing + tier (admin/editor/viewer) как
   write-authz-якорь.
-- **`cluster:cluster_kacho_root`**: `system_admin` — плоский cluster super-admin.
+- **`cluster:cluster_root`**: `system_admin` — плоский cluster super-admin.
 - **`type organization` / любые `… from organization` / `… from account|project|
   cluster` каскады доступа / `scope_grant`** — **удалены**.
 

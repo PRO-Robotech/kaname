@@ -53,12 +53,12 @@ package domain_test
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // polarity — что предложение утверждает об ЯРУСЕ.
@@ -487,14 +487,23 @@ func ruleContractFields(t *testing.T) []string {
 	return fields
 }
 
+// rolePageRel — координата страницы арендатора ОТ КОРНЯ ДЕРЕВА ПЛАТФОРМЫ.
+//
+// Записана от корня платформы, хотя страница живёт ВНУТРИ модуля, и это не
+// избыточность: `platformtree.RequirePath` снимает приставку модуля в
+// самостоятельном клоне и оставляет её в монорепо. Одна запись верна в ОБЕИХ
+// посадках, тогда как подъём до `go.mod` был верен по совпадению — он объявлял
+// условие созданным по НАЛИЧИЮ каталога, а не по посадке.
+const rolePageRel = "services/iam/docs/content/api/role.mdx"
+
 // readRolePage читает страницу арендатора о роли.
 //
-// Координата объявлена ЗДЕСЬ и одна. Страница живёт В МОДУЛЕ сервиса (в отличие
-// от контракта, который остаётся в корне), поэтому подъём до ближайшего
-// `go.mod` даёт её и в монорепо, и при выносе iam отдельным репозиторием.
+// Пропуска здесь не бывает: страница ЕДЕТ с модулем, поэтому координата
+// резолвится и в монорепо, и в клоне. Третий исход остаётся у контракта — он в
+// поставку не входит (см. `readRoleContract`).
 func readRolePage(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(moduleRootDir(t), "docs", "content", "api", "role.mdx")
+	path := platformtree.RequirePath(t, rolePageRel)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("страница роли не прочитана (%s): %v", path, err)

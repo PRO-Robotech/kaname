@@ -1,12 +1,12 @@
-# 00. Обзор сервиса kacho-iam
+# 00. Обзор сервиса kaname
 
 ## Назначение
 
-`kacho-iam` — **identity & access management** сервис платформы Kachō. Он владеет
+`kaname` — **identity & access management** сервис платформы Kachō. Он владеет
 полной ресурсной моделью identity и поверх нее реализует runtime-авторизацию для
 всего кластера.
 
-**Ресурсная модель** (схема `kacho_iam`, источник истины для всех сервисов):
+**Ресурсная модель** (схема `kaname`, источник истины для всех сервисов):
 
 - **Account** — top-level tenant (организация). Глобально-уникальное имя; владелец —
   единственный User (`owner_user_id`).
@@ -23,8 +23,8 @@
 
 **Плоскость авторизации** (живет поверх ресурсной модели):
 
-- **Реляционная форма** (`internal/repo/kacho/pg/relverdict`) — единственный источник
-  решения. Вердикт складывается запросом к собственной базе `kacho_iam` из четырёх
+- **Реляционная форма** (`internal/repo/kaname/pg/relverdict`) — единственный источник
+  решения. Вердикт складывается запросом к собственной базе `kaname` из четырёх
   источников: прямой факт, выдача роли на область, выдача по меткам, членство в группе.
   Вывод отношений компилируется из модели прав (`services/iam/internal/authzplan`). Внешнего движка
   отношений нет — см. [`29-relational-verdict.md`](29-relational-verdict.md).
@@ -58,21 +58,21 @@
 
 - не валидирует JWT — это работа `api-gateway` (Hydra JWKS) и самой Ory Hydra;
 - не управляет паролями пользователей — Ory Kratos;
-- не хранит OAuth `client_secret` в plaintext — Hydra хранит, kacho-iam отдает один раз
+- не хранит OAuth `client_secret` в plaintext — Hydra хранит, kaname отдает один раз
   и redact'ит;
 - не выносит решение о доступе за пределы своей базы — вердикт складывается там же,
   где лежат выдачи, одной транзакцией с ними.
 
 ## Топология процесса
 
-`kacho-iam` (бинарник `cmd/kacho-iam`) поднимает четыре сетевых слушателя и набор
+`kaname` (бинарник `cmd/kaname`) поднимает четыре сетевых слушателя и набор
 фоновых worker'ов в одном процессе. Параллельный запуск — через
 `golang.org/x/sync/errgroup` с общим shutdown-триггером
 (SIGTERM / SIGINT или первая ошибка задачи).
 
 ```mermaid
 flowchart LR
-    subgraph iam[kacho-iam process]
+    subgraph iam[kaname process]
         direction TB
         gRPCpub[":9090 public gRPC<br/>TLS-terminated<br/>tenant API"]
         gRPCint[":9091 internal gRPC<br/>mTLS<br/>admin/peer API"]
@@ -95,7 +95,7 @@ flowchart LR
     Hydra[Ory Hydra] -- token / refresh hook --> hooks
     Kratos[Ory Kratos] -- provision hook --> hooks
 
-    iam --- Postgres[("Postgres<br/>schema kacho_iam")]
+    iam --- Postgres[("Postgres<br/>schema kaname")]
 ```
 
 Фоновые worker'ы:
@@ -103,7 +103,7 @@ flowchart LR
 - **LRO operations worker** — гоняет async-мутации к терминалу; orphan-reconciler
   закрывает осиротевшие `done=false`-операции умершего процесса по committed-реальности.
 - **bootstrap-admin reconciler** — выдает `system_admin@cluster` пользователю из
-  `KACHO_IAM_BOOTSTRAP_ROOT_EMAIL` (best-effort, no-op при пустом env).
+  `KANAME_BOOTSTRAP_ROOT_EMAIL` (best-effort, no-op при пустом env).
 - **binding reconciler-worker** — пере-материализует label-selector и by-name гранты
   при смене меток ресурса, доводит PENDING→ACTIVE и истекает TTL-гранты.
 
@@ -129,7 +129,7 @@ production: internal :9091 и public :9090 обязаны нести mTLS/TLS, �
 
 ```mermaid
 C4Context
-    title kacho-iam — C4 Context
+    title kaname — C4 Context
 
     Person(tenant, "Tenant user / Service account", "Через api-gateway")
     Person(admin, "Cluster admin / oncall", "Через internal-tooling")
@@ -138,11 +138,11 @@ C4Context
 
     System_Boundary(kacho, "Kachō cluster") {
         System(apigw, "kacho-api-gateway", "Edge REST/gRPC, JWT")
-        System(iam, "kacho-iam", "Identity & access")
+        System(iam, "kaname", "Identity & access")
         System(vpc, "kacho-vpc", "Network")
         System(compute, "kacho-compute", "Compute")
         System(nlb, "kacho-nlb", "Load balancing")
-        SystemDb(pg, "Postgres", "schema kacho_iam")
+        SystemDb(pg, "Postgres", "schema kaname")
     }
 
     Rel(tenant, apigw, "HTTPS")
@@ -159,7 +159,7 @@ C4Context
 
 ## Плоскость авторизации (как принимается решение)
 
-1. **Грант** — `AccessBindingService.Create` пишет 5-tuple в `kacho_iam` И в той же
+1. **Грант** — `AccessBindingService.Create` пишет 5-tuple в `kaname` И в той же
    транзакции кладёт намерение об отношении в журнал `fga_outbox`. Триггер журнала
    складывает из строки прямой факт **в той же транзакции**, поэтому «закоммичено» и
    «действует» совпадают.
@@ -172,7 +172,7 @@ C4Context
    - публичный путь: api-gateway зовёт `AuthorizeService.Check`;
    - peer-путь: `kacho-vpc` / `kacho-compute` / `kacho-nlb` / `kacho-geo` зовут
      `InternalIAMService.Check` перед мутацией (mTLS, fail-closed).
-   - Оба упираются в один вердикт реляционной формы над строками `kacho_iam`.
+   - Оба упираются в один вердикт реляционной формы над строками `kaname`.
 4. **Условие на выдаче** — модель прав объявляет условия (`mfa_fresh` и другие), и форма
    вычисляет их на каждой проверке по контексту запроса, собранному на крае. Ключ условия
    задаёт сервер; тенантской поверхности управления условиями нет.
@@ -189,12 +189,12 @@ C4Context
 
 ```
 domain/              # entities + newtypes + Validate(). stdlib + multierr only.
-apps/kacho/
+apps/kaname/
   api/<resource>/    # use-cases per RPC (slice-per-RPC).
   config/            # viper YAML config + env-resolvers.
   seed/              # system-role seed, bootstrap-admin, backfill/verify, workers.
-repo/kacho/          # Reader/Writer port-interfaces (CQRS).
-repo/kacho/pg/       # pgxpool + dto-mapping. Реализует Reader/Writer.
+repo/kaname/          # Reader/Writer port-interfaces (CQRS).
+repo/kaname/pg/       # pgxpool + dto-mapping. Реализует Reader/Writer.
 clients/             # peer-clients (Hydra, api-gateway authz-cache).
 handler/             # тонкий gRPC transport (operation handler).
 handler/iamhooks/    # HTTP-хуки Ory (token / refresh / provision) + health.
@@ -236,7 +236,7 @@ errors/              # sentinel + WrapPgErr.
 **Состав таблицы держит гейт, а не внимание.** Перечень уже расходился с деревом —
 и расходился на ОБОИХ слушателях сразу. `services/iam/internal/check`
 `TestOverviewPortTableMatchesRegistration` берёт регистрации РАЗБОРОМ
-`cmd/kacho-iam/grpc_register.go` (узлами дерева, а не поиском по образцу: имя
+`cmd/kaname/grpc_register.go` (узлами дерева, а не поиском по образцу: имя
 `Register…ServiceServer` законно стоит и в прозе) и требует совпадения по каждому
 слушателю в обе стороны — служба без строки и строка без службы одинаково красные.
 
@@ -253,7 +253,7 @@ errors/              # sentinel + WrapPgErr.
 sequenceDiagram
     participant Cli as Tenant CLI / UI
     participant GW as api-gateway
-    participant IAM as kacho-iam :9090
+    participant IAM as kaname :9090
     participant DB as Postgres
 
     Cli->>GW: POST /iam/v1/accounts<br/>Authorization: Bearer <JWT>
@@ -285,7 +285,7 @@ sequenceDiagram
 - `github.com/PRO-Robotech/kacho/pkg` — ids, operations (LRO table + worker),
   db (pgxpool), grpcsrv, observability, outbox/drainer, safeconv; а также shared-proto
   stubs (operation/validation/authz_options).
-- `github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1` — собственные
+- `github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1` — собственные
   доменные proto-stubs (генерируются локально из `proto/`).
 - `github.com/jackc/pgx/v5` — Postgres driver.
 - `github.com/spf13/viper` — конфиг.
@@ -294,7 +294,7 @@ sequenceDiagram
 
 **Runtime-зависимости (peer):**
 
-- Postgres 16 — schema `kacho_iam`.
+- Postgres 16 — schema `kaname`.
 - Ory Hydra — OAuth2/OIDC tokens, backing-клиенты ServiceAccount, SA-ключи.
 - Ory Kratos — identity / login (provision-хук).
 - api-gateway — edge JWT-валидация и REST-проекция.
@@ -305,6 +305,6 @@ sequenceDiagram
 - Authz-плоскость → [`19-authorize.md`](19-authorize.md),
   [`21-internal-iam.md`](21-internal-iam.md),
   [`29-relational-verdict.md`](29-relational-verdict.md).
-- Conditions (CEL ABAC) — Отдельной главы про условия в этом каталоге нет, и это не пропуск оформления: поля условия сняты с контракта привязки (`reserved 6, 7` в `proto/kacho/cloud/iam/v1/access_binding_service.proto` — их никто не вычислял, и запрос обещал гейт, которого нет). Имя ненаписанной главы не воспроизводится как ссылка: она читается как существующая.
+- Conditions (CEL ABAC) — Отдельной главы про условия в этом каталоге нет, и это не пропуск оформления: поля условия сняты с контракта привязки (`reserved 6, 7` в `proto/kaname/cloud/iam/v1/access_binding_service.proto` — их никто не вычислял, и запрос обещал гейт, которого нет). Имя ненаписанной главы не воспроизводится как ссылка: она читается как существующая.
 - Production deploy / эксплуатация → [`31-deployment.md`](31-deployment.md),
   [`32-observability.md`](32-observability.md), [`33-runbook.md`](33-runbook.md).

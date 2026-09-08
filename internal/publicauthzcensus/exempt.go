@@ -65,6 +65,7 @@ package publicauthzcensus
 import (
 	"fmt"
 	"go/ast"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -73,7 +74,7 @@ import (
 
 	authzv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/iam/authz/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 )
 
 // Причины освобождения, которые перепись умеет судить. Перечень ЗАКРЫТ:
@@ -122,6 +123,42 @@ func modelQuestionMatcher(call *ast.CallExpr) string {
 	return ""
 }
 
+// ownershipScopedReadArity — (ctx, идентификатор, владелец): предикат владения
+// стоит доводом ЗАПРОСА, а не проверкой после чтения.
+const ownershipScopedReadArity = 3
+
+// handlerDecidesMatcher — распознаватель решателя, требуемого причиной
+// `HANDLER_DECIDES`.
+//
+// # Форм решателя ДВЕ, и вторая сильнее первой
+//
+// Первая — вопрос к модели: обработчик спрашивает «можно ли этому субъекту».
+//
+// Вторая — ЧТЕНИЕ, СУЖЕННОЕ ВЛАДЕЛЬЦЕМ: предикат владения уходит доводом в сам
+// запрос к хранилищу (`GetOwned(ctx, id, owner)`), поэтому чужая строка не
+// читается вовсе. Это строго сильнее вопроса после чтения: нет окна между
+// «прочитал» и «проверил», и «есть, но не твоя» неотличимо от «нет такой» —
+// то есть ответ не служит оракулом существования.
+//
+// Распознаватель, знающий только первую, МОЛЧИТ на второй: он не даёт ни
+// красного, ни зелёного, а освобождённый RPC уезжает в «без двери», хотя его
+// решатель на пути обслуживания есть и он крепче требуемого. Так и было со
+// службой операций.
+func handlerDecidesMatcher(call *ast.CallExpr) string {
+	if ev := modelQuestionMatcher(call); ev != "" {
+		return ev
+	}
+	sel, isSel := call.Fun.(*ast.SelectorExpr)
+	if !isSel || !strings.HasSuffix(sel.Sel.Name, "Owned") {
+		return ""
+	}
+	if len(call.Args) < ownershipScopedReadArity {
+		return ""
+	}
+	return "решатель: " + sel.Sel.Name + " (чтение, суженное владельцем: предикат " +
+		"владения — довод запроса, а не проверка после чтения)"
+}
+
 // callerBindingMatcher — распознаватель связывания с личностью вызывающего.
 //
 // Вопрос к модели засчитывается и здесь: он строго сильнее связывания.
@@ -143,7 +180,7 @@ func callerBindingMatcher(call *ast.CallExpr) string {
 func matcherForReason(reason string) (callMatcher, bool) {
 	switch reason {
 	case reasonHandlerDecides:
-		return modelQuestionMatcher, true
+		return handlerDecidesMatcher, true
 	case reasonSelfService:
 		return callerBindingMatcher, true
 	default:

@@ -25,9 +25,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // compactManifest — законный документ, испорченный по одному месту в каждой
@@ -50,7 +50,7 @@ seed:
         - {type: group, name: vpc-internal-consumers}
       roleId: vpc.internal_consumer
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope
   joins:
     - serviceAccount: {account: system, name: kacho-vpc}
@@ -185,7 +185,7 @@ func TestMODMF01RealManifestPassesTheLoader(t *testing.T) {
 	}
 	b := m.Seed.AccessBindings[0]
 	if b.RoleID != "vpc.internal_consumer" || b.ScopeType != "iam.cluster" ||
-		b.ScopeID != "cluster_kacho_root" || b.Target != "allInScope" {
+		b.ScopeID != "cluster_root" || b.Target != "allInScope" {
 		t.Errorf("выдача прочитана неверно: %+v", b)
 	}
 	if len(b.Subjects) != 1 || b.Subjects[0].Type != "group" || b.Subjects[0].Name != "vpc-internal-consumers" {

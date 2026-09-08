@@ -184,20 +184,20 @@ func seedBaseline(t *testing.T, ctx context.Context, conn *pgx.Conn, extra ...fu
 	t.Helper()
 	seedTx(t, ctx, conn, func(tx pgx.Tx) {
 		// Строка журнала — ЕДИНСТВЕННЫМ производителем проекции: триггер на
-		// kacho_iam.fga_outbox. Посев прямо в relation_fact обошёл бы его и
+		// kaname.fga_outbox. Посев прямо в relation_fact обошёл бы его и
 		// доказывал бы работу на данных, которые продукт произвести не может.
 		mustExec(t, ctx, tx, `
-			INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
+			INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
 			VALUES ('fga.tuple.write',
-			        jsonb_build_object('user', 'cluster:' || (SELECT id FROM kacho_iam.clusters LIMIT 1),
+			        jsonb_build_object('user', 'cluster:' || (SELECT id FROM kaname.clusters LIMIT 1),
 			                           'relation', 'cluster',
 			                           'object', 'project:' || $1::text), now())`, "prj-census-1")
 		// Аккаунт и его владелец — пара со взаимными отложенными ссылками.
 		mustExec(t, ctx, tx, `
-			INSERT INTO kacho_iam.accounts (id, name, owner_user_id, created_at)
+			INSERT INTO kaname.accounts (id, name, owner_user_id, created_at)
 			VALUES ($1, 'census', $2, now())`, "acc-census-1", "usr-census-owner")
 		mustExec(t, ctx, tx, `
-			INSERT INTO kacho_iam.users (id, external_id, email, account_id, created_at)
+			INSERT INTO kaname.users (id, external_id, email, account_id, created_at)
 			VALUES ($1, 'ext-census-owner', 'owner@example.invalid', $2, now())`,
 			"usr-census-owner", "acc-census-1")
 		for _, f := range extra {
@@ -304,29 +304,29 @@ func TestR7_4_02_LegitimatelyParentlessIsCountedApartFromLost(t *testing.T) {
 		// быть НЕ ДОЛЖНО: строка без владеющего аккаунта не может стать
 		// достижимой ни из одного аккаунта.
 		mustExec(t, ctx, tx, `
-		INSERT INTO kacho_iam.roles (id, name, permissions, rules, cluster_id, created_at)
+		INSERT INTO kaname.roles (id, name, permissions, rules, cluster_id, created_at)
 		VALUES ($1, 'census.system', '["storage.volumes.*.get"]'::jsonb,
 		        '[{"verbs": ["get"], "module": "storage", "resources": ["volumes"]}]'::jsonb,
-		        (SELECT id FROM kacho_iam.clusters LIMIT 1), now())`,
+		        (SELECT id FROM kaname.clusters LIMIT 1), now())`,
 			"rol-census-sys")
 		// АККАУНТНАЯ роль — ПОЛОЖИТЕЛЬНЫЙ БЛИЗНЕЦ: у неё предок обязан быть.
 		// Без него «законно без предка» поглотило бы настоящую потерю, и
 		// перепись выглядела бы ЧИЩЕ, чем есть.
 		mustExec(t, ctx, tx, `
-		INSERT INTO kacho_iam.roles (id, name, permissions, rules, account_id, created_at)
+		INSERT INTO kaname.roles (id, name, permissions, rules, account_id, created_at)
 		VALUES ($1, 'census_account', '["storage.volumes.*.get"]'::jsonb,
 		        '[{"verbs": ["get"], "module": "storage", "resources": ["volumes"]}]'::jsonb,
 		        $2, now())`,
 			"rol-census-acc", "acc-census-1")
 		// Привязка с областью ВНЕ закрытого набора — тоже законно без предка.
 		mustExec(t, ctx, tx, `
-		INSERT INTO kacho_iam.access_bindings (id, resource_type, resource_id, role_id,
+		INSERT INTO kaname.access_bindings (id, resource_type, resource_id, role_id,
 		                                       subject_type, subject_id, scope, created_at)
 		VALUES ($1, 'vpc_network', 'net-census-1', $2, 'user', 'usr-census-owner', 3, now())`,
 			"abn-census-res", "rol-census-acc")
 		// Привязка с областью В наборе — положительный близнец.
 		mustExec(t, ctx, tx, `
-		INSERT INTO kacho_iam.access_bindings (id, resource_type, resource_id, role_id,
+		INSERT INTO kaname.access_bindings (id, resource_type, resource_id, role_id,
 		                                       subject_type, subject_id, scope, created_at)
 		VALUES ($1, 'account', $2, $3, 'user', 'usr-census-owner', 2, now())`,
 			"abn-census-acc", "acc-census-1", "rol-census-acc")
@@ -434,21 +434,21 @@ func TestR7_4_11_CensusIsZeroInBothDirections(t *testing.T) {
 		// По одному объекту КАЖДОГО из пяти типов, у всех источник предка непуст —
 		// то есть у всех предок ОБЯЗАН быть.
 		mustExec(t, ctx, tx, `
-		INSERT INTO kacho_iam.users (id, external_id, email, account_id, created_at)
+		INSERT INTO kaname.users (id, external_id, email, account_id, created_at)
 		VALUES ($1, 'ext-census-1', 'census@example.invalid', $2, now())`, "usr-census-1", "acc-census-1")
 		mustExec(t, ctx, tx, `
-		INSERT INTO kacho_iam.groups (id, name, account_id, created_at)
+		INSERT INTO kaname.groups (id, name, account_id, created_at)
 		VALUES ($1, 'census', $2, now())`, "grp-census-1", "acc-census-1")
 		mustExec(t, ctx, tx, `
-		INSERT INTO kacho_iam.service_accounts (id, name, account_id, created_at)
+		INSERT INTO kaname.service_accounts (id, name, account_id, created_at)
 		VALUES ($1, 'census', $2, now())`, "sac-census-1", "acc-census-1")
 		mustExec(t, ctx, tx, `
-		INSERT INTO kacho_iam.roles (id, name, permissions, rules, account_id, created_at)
+		INSERT INTO kaname.roles (id, name, permissions, rules, account_id, created_at)
 		VALUES ($1, 'census_role', '["storage.volumes.*.get"]'::jsonb,
 		        '[{"verbs": ["get"], "module": "storage", "resources": ["volumes"]}]'::jsonb,
 		        $2, now())`, "rol-census-1", "acc-census-1")
 		mustExec(t, ctx, tx, `
-		INSERT INTO kacho_iam.access_bindings (id, resource_type, resource_id, role_id,
+		INSERT INTO kaname.access_bindings (id, resource_type, resource_id, role_id,
 		                                       subject_type, subject_id, scope, created_at)
 		VALUES ($1, 'account', $2, $3, 'user', $4, 2, now())`,
 			"abn-census-1", "acc-census-1", "rol-census-1", "usr-census-1")

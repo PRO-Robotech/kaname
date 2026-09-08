@@ -34,7 +34,7 @@ CRUD fixture dependency:
 
 Operation envelope:
   All mutations return `operation.Operation` with id prefix `iop`.
-  Poll hits /operations/{id} via OpsProxy (iop* → kacho-iam).
+  Poll hits /operations/{id} via OpsProxy (iop* → kaname).
 
 Gotchas:
   - AddMember with non-existent user/SA → FailedPrecondition (9) via
@@ -80,7 +80,7 @@ Acceptance scenarios:
 
 Test-first note (strict TDD):
   These cases are written RED-first. They will fail until the corresponding
-  GroupService RPCs are correctly implemented in kacho-iam. Do not weaken
+  GroupService RPCs are correctly implemented in kaname. Do not weaken
   assertions — fix the implementation instead.
 """
 
@@ -738,7 +738,7 @@ CASES.append(Case(
 # accountBId»), но она ЕСТЬ: посев даёт `jwtInvitee` роль `admin` на account-B
 # (tests/authz-fixtures/prodseed_matrix.py — subject с ROLE_ADMIN на acctB), а
 # модель прав выводит на группе `super_admin: admin from account` → `v_update`
-# (proto/kacho/cloud/iam/v1/fga_model.fga, type iam_group). То есть предмет
+# (proto/kaname/cloud/iam/v1/fga_model.fga, type iam_group). То есть предмет
 # конструируем публичным API целиком, и его отсутствие было не ограничением
 # фикстуры, а незакрытым долгом.
 # ---------------------------------------------------------------------------

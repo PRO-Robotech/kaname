@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // mockRelations — minimal Authorizer for unit tests.
@@ -227,7 +227,7 @@ func TestAuthorize_CheckRelation_RichDenyAlso(t *testing.T) {
 	res, err := svc.CheckRelation(context.Background(), CheckRelationRequest{
 		Subject:  "user:usr_dave",
 		Relation: "system_admin",
-		Object:   "cluster:cluster_kacho_root",
+		Object:   "cluster:cluster_root",
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -239,7 +239,7 @@ func TestAuthorize_CheckRelation_RichDenyAlso(t *testing.T) {
 	for _, want := range []string{
 		"user:usr_dave",
 		`lacks relation "system_admin"`,
-		"cluster:cluster_kacho_root",
+		"cluster:cluster_root",
 		"current direct relations:",
 		"viewer",
 	} {
@@ -309,8 +309,8 @@ func TestAuthorize_BatchCheck_PerItemFailureDoesNotAbort(t *testing.T) {
 // фикстура прячет дефект, который сама же и кормит, поэтому подставляется та
 // форма, которую производит настоящий отказ.
 func TestAuthorize_BatchCheck_UnavailableFailsWholeBatchNoLeak(t *testing.T) {
-	const storeTransportLeak = "failed to connect to host=kacho-iam-pg.kacho.svc user=kacho_iam " +
-		"database=kacho_iam: dial error (dial tcp 10.0.0.5:5432: connect: connection refused)"
+	const storeTransportLeak = "failed to connect to host=kaname-pg.kacho.svc user=kaname " +
+		"database=kaname: dial error (dial tcp 10.0.0.5:5432: connect: connection refused)"
 	svc := NewAuthorizeService(AuthorizeServiceConfig{
 		Relations: &mockRelations{checkErr: errors.New(storeTransportLeak)},
 	})
@@ -328,7 +328,7 @@ func TestAuthorize_BatchCheck_UnavailableFailsWholeBatchNoLeak(t *testing.T) {
 	}
 	for _, r := range results {
 		for _, dr := range r.DenyReasons {
-			if strings.Contains(dr, "kacho-iam-pg") || strings.Contains(dr, "10.0.0.5") {
+			if strings.Contains(dr, "kaname-pg") || strings.Contains(dr, "10.0.0.5") {
 				t.Errorf("УТЕЧКА: текст отказа несёт координаты хранилища: %q", dr)
 			}
 		}

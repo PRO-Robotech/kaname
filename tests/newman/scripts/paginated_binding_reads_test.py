@@ -51,6 +51,13 @@ directory or a moved case file turns «no offenders» into «nothing was read»,
 the two are indistinguishable in a green run. One probe here had already decayed
 that way — its subject (a binding read in the fixture seed) was removed from the
 tree while the probe kept passing.
+
+КТО ЭТУ ПРОБУ ИСПОЛНЯЕТ: `.github/scripts/run-python-probes.py`. Состав он
+собирает ОБХОДОМ дерева по образцу `services/*/tests/newman/scripts/*_test.py` и
+НИ ОДИН файл проб по имени не называет — поэтому отдельного шага в конвейере файл
+не требует, а искать вызывающего предикатом `git grep <имя файла>` бесполезно:
+вызова по имени нет ни у кого. Код возврата при этом доезжает до вердикта шага.
+Проводку держит `tools/pythonprobes`.
 """
 from __future__ import annotations
 

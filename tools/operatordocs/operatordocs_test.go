@@ -30,7 +30,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
 // iamRoot — корень дерева iam относительно каталога этой пробы
@@ -114,7 +114,7 @@ func TestOperatorDocsGate_CanFail_OnDriftedTable(t *testing.T) {
 		{
 			name: "новая обязательная величина заведена, документ о ней молчит",
 			table: append(mutated(nil), config.RequiredSetting{
-				Key: "authn.brand-new-knob", Env: "KACHO_IAM_AUTHN__BRAND_NEW_KNOB",
+				Key: "authn.brand-new-knob", Env: "KANAME_AUTHN__BRAND_NEW_KNOB",
 				Supply: config.SupplyEnv, Sample: "x", Why: "заведена сегодня", Refusal: "authn.brand-new-knob",
 			}),
 			want:  ExitFinding,

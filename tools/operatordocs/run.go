@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
 // Коды возврата. Читаются вызывающим; вид вывода вердиктом не является.

@@ -40,7 +40,7 @@ import (
 // PerRPCCredentials.
 func Test_Authzguard_ListSubjects_AnonymousCaller_AllowedByWhitelist(t *testing.T) {
 	iceptor := AntiAnonymousUnary(slog.Default())
-	fm := "/kacho.cloud.iam.v1.AuthorizeService/ListSubjects"
+	fm := "/kaname.cloud.iam.v1.AuthorizeService/ListSubjects"
 	_, err := iceptor(anonCtx(), nil,
 		&grpc.UnaryServerInfo{FullMethod: fm}, fakeHandler)
 	if err != nil {
@@ -55,7 +55,7 @@ func Test_Authzguard_ListSubjects_AnonymousCaller_AllowedByWhitelist(t *testing.
 // мутирующий RPC; анонимный вызывающий обязан получить PermissionDenied.
 func Test_Authzguard_OtherMethod_AnonymousCaller_StillBlocked(t *testing.T) {
 	iceptor := AntiAnonymousUnary(slog.Default())
-	fm := "/kacho.cloud.iam.v1.UserService/Create"
+	fm := "/kaname.cloud.iam.v1.UserService/Create"
 	_, err := iceptor(anonCtx(), nil,
 		&grpc.UnaryServerInfo{FullMethod: fm}, fakeHandler)
 	if status.Code(err) != codes.PermissionDenied {

@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// main_test.go — разбор командной строки мигратора kacho-iam. БД не
+// main_test.go — разбор командной строки мигратора kaname. БД не
 // открывается: пробы быстрые и не зависят от docker. Настоящий накат — предмет
 // integration-проб репозитория.
 package main
@@ -137,7 +137,7 @@ func TestUnknownCommandIsStillNamed(t *testing.T) {
 // а не совпадение с литералом: литерал был бы второй редакцией того же текста и
 // разошёлся бы с первой молча.
 func TestRefusalTextsComeFromTheSharedProducer(t *testing.T) {
-	const binary = "kacho-migrator"
+	const binary = "kaname-migrator"
 	for _, tc := range []struct {
 		args []string
 		want string
@@ -211,7 +211,7 @@ func TestHelpSubcommandWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("help объявлен отказом: %v", err)
 	}
-	if !strings.Contains(stdout, "kacho-migrator") {
+	if !strings.Contains(stdout, "kaname-migrator") {
 		t.Fatalf("help не напечатал форму вызова: %q", stdout)
 	}
 }

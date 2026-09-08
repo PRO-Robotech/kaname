@@ -36,7 +36,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // reObjectTypeFormCheck — объявление ограничения формы имени типа в миграции.

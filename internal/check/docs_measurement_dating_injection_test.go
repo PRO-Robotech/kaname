@@ -31,6 +31,24 @@ const (
 		"> только раскопками. Оборот «замер на ревизии записи» назван, чтобы его узнавали.\n"
 	// synthNoMarker — соседний документ без предмета.
 	synthNoMarker = "## 1. Норма\n\nПеречень выводится из дерева, а не выписывается.\n"
+
+	// synthCalloutDeclaration — НОВАЯ ФОРМА, которой образец прежде НЕ ВИДЕЛ:
+	// объявление замера внутри выноски. Знак `>` уводил такую строку в счётчик
+	// прозы, и находка внутри неё была невидима — ни красного, ни зелёного.
+	// Датирована ЧУЖОЙ линией: снято РОВНО одно свойство — видимость формы.
+	synthCalloutDeclaration = "> [!note] Разбор расхождения\n" +
+		"> Замер на ревизии `deadbee` (единица счёта — вызовы): таких мест **2**.\n"
+
+	// synthCalloutLawful — ЗАКОННЫЙ БЛИЗНЕЦ той же формы: та же выноска, тот же
+	// знак `>`, ревизия названа хешем и в историю входит. Гейт обязан молчать —
+	// иначе он ловит выноску, а не негодную датировку.
+	synthCalloutLawful = "> [!note] Разбор расхождения\n" +
+		"> Замер на ревизии `1234abc` (единица счёта — вызовы): таких мест **2**.\n"
+
+	// synthCalloutProse — ЗАКОННЫЙ БЛИЗНЕЦ второго рода: та же выноска, но оборот
+	// взят в ёлочки, то есть это разговор О ФОРМЕ. Величина переписи, не находка.
+	synthCalloutProse = "> [!note] Здесь стояло «замер на ревизии записи» — самоссылкой,\n" +
+		"> восстановимой только раскопками по истории.\n"
 )
 
 // ancestryAll — все ревизии в истории (законное дерево).
@@ -145,4 +163,56 @@ func TestDatingGateCountsUnjudgedAncestrySeparately(t *testing.T) {
 	require.Empty(t, findings, "невынесенный вердикт о предке подан как находка")
 	require.Equal(t, 1, c.ancestryUnjudged, "невынесенный вердикт обязан быть НАЗВАН, а не проглочен")
 	require.Equal(t, 1, c.dated, "хеш назван — эта ось пройдена независимо от вердикта о предке")
+}
+
+// --- Слепая зона выноски: расширение образца доказывается тремя прогонами ---
+//
+// Прежний образец выводил из-под суда ВСЯКУЮ строку, открытую знаком `>`.
+// Выноска — обычная форма этого корпуса, поэтому объявление внутри неё было
+// невидимо: не находка и не тишина, а отсутствие вопроса. Ниже — контроль,
+// инъекция и законный близнец той же формы.
+
+// TestDatingGateIsSilentOnALawfulCalloutDeclaration — КОНТРОЛЬ.
+// Объявление в выноске, датированное годно, обязано быть УВИДЕНО и пропущено.
+func TestDatingGateIsSilentOnALawfulCalloutDeclaration(t *testing.T) {
+	docs := synthDocs()
+	docs["acceptance/roles.md"] = synthNoMarker + synthCalloutLawful
+
+	findings, c := auditMeasurementDating(docs, map[string]string{}, ancestryAll)
+
+	require.Empty(t, findings, "гейт краснеет на годном объявлении в выноске")
+	require.Equal(t, 2, c.markers, "объявление в выноске обязано быть УВИДЕНО, а не сочтено прозой")
+	require.Equal(t, 2, c.dated)
+	require.Zero(t, c.quoted, "ёлочек здесь нет — прозой это не является")
+}
+
+// TestDatingGateRedsOnAForeignRevisionInsideACallout — ИНЪЕКЦИЯ НОВОЙ ФОРМЫ.
+// Ровно тот случай, что жил в дереве незамеченным: приёмка ролей манифеста
+// датировала замер ревизией чужой линии внутри выноски.
+func TestDatingGateRedsOnAForeignRevisionInsideACallout(t *testing.T) {
+	docs := synthDocs()
+	docs["acceptance/roles.md"] = synthNoMarker + synthCalloutDeclaration
+
+	findings, c := auditMeasurementDating(docs, map[string]string{}, ancestryForeign)
+
+	require.Len(t, findings, 1, "объявление внутри выноски осталось невидимым — слепая зона вернулась")
+	require.Contains(t, findings[0], "ЧУЖАЯ ЛИНИЯ")
+	require.Contains(t, findings[0], "acceptance/roles.md", "находка обязана НАЗВАТЬ координату")
+	require.Contains(t, findings[0], "deadbee")
+	require.Equal(t, 1, c.foreign)
+	require.Zero(t, c.undated, "соседние оси целы: красное пришло РОВНО от снятого")
+}
+
+// TestDatingGateIsSilentOnProseInsideACallout — ЗАКОННЫЙ БЛИЗНЕЦ.
+// Та же выноска, тот же знак `>` — но оборот в ёлочках. Проверка, краснеющая на
+// собственном объяснении, и есть ловимый здесь класс.
+func TestDatingGateIsSilentOnProseInsideACallout(t *testing.T) {
+	docs := synthDocs()
+	docs["acceptance/roles.md"] = synthNoMarker + synthCalloutProse
+
+	findings, c := auditMeasurementDating(docs, map[string]string{}, ancestryAll)
+
+	require.Empty(t, findings, "гейт покраснел на прозе О ФОРМЕ — он судит знак цитаты, а не объявление")
+	require.Equal(t, 1, c.quoted, "цитата обязана быть СОСЧИТАНА, а не невидима")
+	require.Equal(t, 1, c.markers, "объявление соседнего документа осталось видимым")
 }

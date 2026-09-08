@@ -92,7 +92,6 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -100,8 +99,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // relPair — (тип объекта модели, имя отношения).
@@ -298,7 +299,8 @@ func diffAgainstLedger(dead []relPair, ledger map[relPair]string) (unknown, stal
 // Читается вшитая копия iam (см. шапку про побайтовое равенство копий).
 func iamCatalogRequiredRelations(t *testing.T, root string) (map[string]map[string]bool, int) {
 	t.Helper()
-	path := filepath.Join(root, filepath.FromSlash(catalogRelPath))
+	// Координата приводится к ПОСАДКЕ: файл едет вместе с модулем.
+	path := platformtree.RequirePath(t, catalogRelPath)
 	raw, err := os.ReadFile(path) // #nosec G304 -- фиксированный путь в дереве, только для проб
 	require.NoErrorf(t, err, "каталог прав %s недоступен — гейт обязан быть громким, а не пропущенным", path)
 
@@ -332,7 +334,9 @@ func iamCatalogRequiredRelations(t *testing.T, root string) (map[string]map[stri
 // отчёты прогонов, и найденный в них литерал сошёл бы за читателя.
 func prodCodeStringLiterals(t *testing.T, root string) (map[string]bool, int) {
 	t.Helper()
-	files, err := treecorpus.UnderWithSuffix(filepath.Join(root, "services"), ".go")
+	// Файл живёт у ПЛАТФОРМЫ: в поставку модуля он не входит, и его
+	// отсутствие — «условие не создано», а не находка.
+	files, err := treecorpus.UnderWithSuffix(platformtree.RequirePath(t, "services"), ".go")
 	require.NoError(t, err, "индекс отслеживаемых файлов под services/")
 
 	out := map[string]bool{}

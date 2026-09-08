@@ -3,7 +3,7 @@
 ## Назначение
 
 **Operation** — это envelope над long-running async-операцией. Все мутирующие
-RPC в kacho-iam возвращают `*operation.Operation` (никогда не сам ресурс) —
+RPC в kaname возвращают `*operation.Operation` (никогда не сам ресурс) —
 это API-contract `flat-resources + Operations`: мутации возвращают
 `Operation` (async), не ресурс синхронно.
 
@@ -30,15 +30,15 @@ RPC в kacho-iam возвращают `*operation.Operation` (никогда н�
 | `created_at`               | TIMESTAMPTZ          | да (server)  | да        | UTC.                                           |
 | `modified_at`              | TIMESTAMPTZ          | да (server)  | нет       | На каждое UPDATE.                              |
 | `done`                     | bool                 | да           | нет       | false→true (one-way).                          |
-| `metadata_type`            | TEXT (proto type URL)| —            | —         | `kacho.cloud.iam.v1.CreateAccountMetadata`.    |
+| `metadata_type`            | TEXT (proto type URL)| —            | —         | `kaname.cloud.iam.v1.CreateAccountMetadata`.    |
 | `metadata`                 | BYTEA (proto-Any)    | нет          | —         | `{account_id:"acc_..."}` etc.                  |
 | `response_type` / `_data`  | TEXT / BYTEA         | нет          | редактируется секрет-redactor| Любая proto-message.       |
 | `error_code` / `_message`  | int / TEXT           | нет          | —         | gRPC code + текст.                             |
 | `principal_type`           | TEXT (IAM-extension) | да           | да        | `user | service_account | system`.             |
 | `principal_id`             | TEXT (IAM-extension) | да           | да        | id или `bootstrap`.                            |
-| `principal_display_name`   | TEXT (IAM-extension) | да           | да        | Email / SA-name / `kacho-iam-bootstrap`.       |
+| `principal_display_name`   | TEXT (IAM-extension) | да           | да        | Email / SA-name / `kaname-bootstrap`.       |
 
-**DB table:** `kacho_iam.operations` (`CREATE TABLE kacho_iam.operations` в `0001_initial.sql`).
+**DB table:** `kaname.operations` (`CREATE TABLE kaname.operations` в `0001_initial.sql`).
 
 ## Sequence diagram — типичный async RPC
 
@@ -47,7 +47,7 @@ sequenceDiagram
     autonumber
     participant Cli
     participant GW as api-gateway
-    participant IAM as kacho-iam
+    participant IAM as kaname
     participant DB as Postgres
     participant Worker as Operations worker
 
@@ -89,7 +89,7 @@ sequenceDiagram
     IAM->>IAM: grpcsrv.UnaryPrincipalExtract interceptor<br/>→ ctx с operations.Principal{type,id,name}
     IAM->>Op: operations.NewFromContext(ctx, "iop", desc, metadata)
     Op-->>IAM: Operation{principal_type=user, principal_id=usr_alice, ...}
-    Note over IAM,Op: Если metadata пуст (bootstrap-path) →<br/>principal = ('system','bootstrap','kacho-iam-bootstrap')
+    Note over IAM,Op: Если metadata пуст (bootstrap-path) →<br/>principal = ('system','bootstrap','kaname-bootstrap')
 ```
 
 ## API surface (`OperationService` через corelib)
@@ -135,7 +135,7 @@ id (`iop` → iam) в `gateway/internal/opsproxy/proxy.go`.
 ## Конфигурация
 
 **Настраиваемых снаружи ручек у этой подсистемы в iam нет.** Предикат:
-`grep -rhoE 'KACHO_IAM_OPS_[A-Z0-9]*'` по всему дереву даёт **ноль** вхождений
+`grep -rhoE 'KANAME_OPS_[A-Z0-9]*'` по всему дереву даёт **ноль** вхождений
 (замер 2026-08-06). Параметры берутся из умолчаний общего пакета — период
 фонового обхода бесхозных операций задан `operations.ReconcilerConfig` (30 s,
 `pkg/operations/reconciler.go`), а сама постановка идёт в `pkg/operations`
@@ -210,8 +210,8 @@ curl "http://localhost:18080/iam/v1/accounts/$ACC_ID/operations:all?pageSize=20"
 ```bash
 # psql:
 make -C deploy psql SVC=iam
-# > SELECT id, description, done, principal_type, principal_id, principal_display_name FROM kacho_iam.operations LIMIT 20;
-# > SELECT count(*) FROM kacho_iam.operations WHERE done=false;     -- in-flight
+# > SELECT id, description, done, principal_type, principal_id, principal_display_name FROM kaname.operations LIMIT 20;
+# > SELECT count(*) FROM kaname.operations WHERE done=false;     -- in-flight
 
 # Anti-leak: полоса владения операцией сведена в общий слой, и пробы живут там же
 # — pkg/operations/operationspb/handler_test.go. Прежде здесь стояла команда,
@@ -228,15 +228,15 @@ go test -short -count=1 -timeout 60s \
 ## Подробности реализации
 
 - **Repo:** общий `pkg/operations` (`repo.go`); iam добавляет поверх него редактор
-  секретов в ответе — `internal/repo/kacho/pg/ops_response_redactor.go`. Отдельного
+  секретов в ответе — `internal/repo/kaname/pg/ops_response_redactor.go`. Отдельного
   файла-репозитория операций у iam нет.
 - **Handler:** `pkg/operations/operationspb/handler.go` + `handler_test.go` (общий слой).
-- **Wiring:** `cmd/kacho-iam/serve.go::operations.NewRepo(pool, "kacho_iam")`.
+- **Wiring:** `cmd/kaname/serve.go::operations.NewRepo(pool, "kaname")`.
 - **Исполнение:** use-case зовёт `operations.Run` (`pkg/operations`) сразу после
   writer-TX; IAM-операции в основном завершаются тут же (sync-ish). Бэкстопом стоит
-  реконсайлер бесхозных операций — `cmd/kacho-iam/recovery.go` (`startLROReconciler`),
+  реконсайлер бесхозных операций — `cmd/kaname/recovery.go` (`startLROReconciler`),
   boot-обход плюс периодический.
-- **Migration extension:** `internal/repo/kacho/pg/migrations_iam_extensions_integration_test.go`
+- **Migration extension:** `internal/repo/kaname/pg/migrations_iam_extensions_integration_test.go`
   гарантирует, что `principal_*` колонки добавлены поверх corelib baseline.
 - **Principal sources:**
   - Public-API: api-gateway interceptor → metadata headers → `UnaryPrincipalExtract`.
@@ -253,7 +253,7 @@ go test -short -count=1 -timeout 60s \
   удалит. Это открытый долг, а не поведение; audit-trail при этом живёт отдельно
   в `audit_outbox`.
 - **Anonymous bootstrap path** — при первом `UpsertFromIdentity` у Account
-  еще нет owner'а, principal = `('system','bootstrap','kacho-iam-bootstrap')`.
+  еще нет owner'а, principal = `('system','bootstrap','kaname-bootstrap')`.
 
 ## Связанные компоненты
 
@@ -264,8 +264,8 @@ go test -short -count=1 -timeout 60s \
 ## Ссылки на код
 
 - `pkg/operations/operationspb/handler.go`
-- `internal/repo/kacho/pg/ops_response_redactor.go`
+- `internal/repo/kaname/pg/ops_response_redactor.go`
 - `internal/migrations/0001_initial.sql` (IAM extension — колонки принципала)
-- `cmd/kacho-iam/serve.go` (`operations.NewRepo(pool, "kacho_iam")`)
-- `cmd/kacho-iam/recovery.go` (реконсайлер бесхозных операций)
+- `cmd/kaname/serve.go` (`operations.NewRepo(pool, "kaname")`)
+- `cmd/kaname/recovery.go` (реконсайлер бесхозных операций)
 - `pkg/operations/`

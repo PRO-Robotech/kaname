@@ -75,7 +75,7 @@ audit-метаданные.
 <table>
   <thead><tr><th><code>scopeType</code></th><th><code>scopeId</code></th><th>Смысл</th></tr></thead>
   <tbody>
-    <tr><td><code>iam.cluster</code></td><td><code>cluster_kacho_root</code></td><td>Весь кластер (платформенный уровень)</td></tr>
+    <tr><td><code>iam.cluster</code></td><td><code>cluster_root</code></td><td>Весь кластер (платформенный уровень)</td></tr>
     <tr><td><code>iam.account</code></td><td><code>acc…</code></td><td>Аккаунт и всё под ним</td></tr>
     <tr><td><code>iam.project</code></td><td><code>prj…</code></td><td>Конкретный проект</td></tr>
   </tbody>
@@ -133,7 +133,7 @@ concrete-правила (`resourceNames`) эмитят прямые пообъе
     <tr><td><code>subjects</code></td><td>Subject[]</td><td>immutable</td><td>1–32 субъекта: <code>&#123; type, id &#125;</code> (USER / SERVICE_ACCOUNT / GROUP)</td></tr>
     <tr><td><code>roleId</code></td><td>string</td><td>immutable</td><td>Привязанная роль</td></tr>
     <tr><td><code>scopeType</code></td><td>string</td><td>immutable</td><td>Уровень-якорь в точечной форме: <code>iam.cluster</code> / <code>iam.account</code> / <code>iam.project</code></td></tr>
-    <tr><td><code>scopeId</code></td><td>string</td><td>immutable</td><td>Идентификатор якоря: <code>cluster_kacho_root</code> / <code>acc…</code> / <code>prj…</code></td></tr>
+    <tr><td><code>scopeId</code></td><td>string</td><td>immutable</td><td>Идентификатор якоря: <code>cluster_root</code> / <code>acc…</code> / <code>prj…</code></td></tr>
     <tr><td><code>target</code></td><td>AccessTarget</td><td>immutable</td><td>Охват под якорем: <code>allInScope</code> либо перечень <code>resources</code>. <strong>Обязателен на Create</strong></td></tr>
     <tr><td><code>status</code></td><td>enum</td><td>lifecycle</td><td><code>PENDING</code> / <code>ACTIVE</code> / <code>REVOKED</code> (REVOKED — терминальный)</td></tr>
     <tr><td><code>expiresAt</code></td><td>timestamp</td><td>immutable</td><td>Опц. жёсткий TTL; при истечении грант перестаёт действовать</td></tr>

@@ -43,7 +43,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
 )
 
 // edgeObjectTypeDictionaryConstraint — ограничение, которым держится граница.
@@ -62,7 +62,7 @@ func TestIntegration_BuildTypeDictionaryAgreesWithTheSeededCatalog(t *testing.T)
 
 	rows, err := db.Query(`
 		SELECT dotted, object_type, live
-		  FROM kacho_iam.catalog_resource
+		  FROM kaname.catalog_resource
 		 ORDER BY dotted`)
 	require.NoError(t, err, "чтение посеянного каталога ресурсов")
 	defer func() { _ = rows.Close() }()
@@ -146,7 +146,7 @@ func TestIntegration_UnknownDottedTypeIsRefusedByTheSchemaNotMeasuredQuietly(t *
 	insertEdge := func(t *testing.T, db *sql.DB, objectType string) error {
 		t.Helper()
 		_, err := db.Exec(`
-			INSERT INTO kacho_iam.resource_parent_edge
+			INSERT INTO kaname.resource_parent_edge
 			       (object_type, object_id, parent_type, parent_id, depth)
 			VALUES ($1, 'obj-1995', 'project', 'prj-1995', 1)`, objectType)
 		return err

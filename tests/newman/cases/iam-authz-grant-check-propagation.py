@@ -666,7 +666,7 @@ CASES.append(Case(
 #
 # The case posted to `/iam/v1/accessReviewCampaigns/{id}/items/{item}:approve`
 # and accepted 401/403/404. There is no such RPC: `AccessReviewCampaign` exists
-# nowhere in this product — no service in proto/kacho/cloud/iam/v1/, no entry in
+# nowhere in this product — no service in proto/kaname/cloud/iam/v1/, no entry in
 # the gateway route table or either embedded permission catalog, no handler, and
 # no table (`access_review_campaigns` is named only inside the dedup loop of
 # migration 0002, which this schema never creates — see the report note). The
@@ -1215,7 +1215,7 @@ CASES.append(Case(
 # REMOVED by migration 0006_drop_scim_saml_break_glass.sql ("Break-Glass
 # (cluster_break_glass_grants + post-incident reviews) is removed as part of the
 # RBAC v2 simplification"), with the residual condition kind dropped by 0013.
-# There is no `BreakGlassService` in proto/kacho/cloud/iam/v1/, no route in the
+# There is no `BreakGlassService` in proto/kaname/cloud/iam/v1/, no route in the
 # gateway table, no catalog entry and no handler. (The `BreakGlassService/...`
 # strings in internal/authzguard/interceptor_anonymous_table_test.go are
 # synthetic FullMethod fixtures for the suffix matcher, alongside an invented

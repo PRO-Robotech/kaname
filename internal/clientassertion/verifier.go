@@ -54,8 +54,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // presenterResponse — опознавательное слово стандартной формы, которое видит

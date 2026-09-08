@@ -30,7 +30,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // subordinateFindings — судья записей подчинённых ресурсов.
@@ -137,7 +137,7 @@ func TestSubordinateResourceGateCanFail(t *testing.T) {
 	lawful := domain.SubordinateResource{
 		Kind:    "iam.credential",
 		Parents: []domain.LimitKind{"iam.user", "iam.serviceAccount"},
-		Tables:  []string{"kacho_iam.user_oauth_clients"},
+		Tables:  []string{"kaname.user_oauth_clients"},
 		Why:     "право вычисляется от принципала",
 	}
 	lawfulCatalogue := []domain.CountableKind{{Kind: "iam.user.credential", Carrier: "iam.user"}}

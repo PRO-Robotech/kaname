@@ -53,7 +53,7 @@
 
 ## Решение
 
-`kacho_iam.provider_compensation_outbox` (миграция 0079) — очередь
+`kaname.provider_compensation_outbox` (миграция 0079) — очередь
 компенсирующих намерений; дренаж — общий corelib `outbox/drainer`
 (`provider_compensation_wiring.go`). Предмет намерения РОВНО ОДИН — снять
 OAuth-клиента у провайдера.
@@ -101,11 +101,11 @@ OAuth-клиента у провайдера.
 
 | Метрика | На какой вопрос отвечает |
 |---|---|
-| `kacho_iam_provider_compensations_emitted_total{origin,outcome}` | провязано ли вообще; сколько раз пришлось компенсировать; сколько раз не удалось даже записать намерение |
-| `kacho_iam_provider_compensations_applied_total{origin}` | доезжает ли; расхождение с `emitted` — то, что ещё в очереди |
-| `kacho_iam_outbox_backlog_depth{table}` | глубина очереди |
-| `kacho_iam_outbox_oldest_pending_age_seconds{table}` | висит ли строка дольше N |
-| `kacho_iam_outbox_poisoned_count{table}` | есть ли строки, которые не применятся никогда |
+| `kaname_provider_compensations_emitted_total{origin,outcome}` | провязано ли вообще; сколько раз пришлось компенсировать; сколько раз не удалось даже записать намерение |
+| `kaname_provider_compensations_applied_total{origin}` | доезжает ли; расхождение с `emitted` — то, что ещё в очереди |
+| `kaname_outbox_backlog_depth{table}` | глубина очереди |
+| `kaname_outbox_oldest_pending_age_seconds{table}` | висит ли строка дольше N |
+| `kaname_outbox_poisoned_count{table}` | есть ли строки, которые не применятся никогда |
 
 Отсутствие серии `..._emitted_total` целиком означает «механизм не провязан» —
 это отличимо от нулевого значения.

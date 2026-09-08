@@ -6,7 +6,7 @@ title: Модель данных
 
 # Модель данных
 
-Эта страница описывает, **как IAM хранит личности и права** в PostgreSQL. Схема `kacho_iam`
+Эта страница описывает, **как IAM хранит личности и права** в PostgreSQL. Схема `kaname`
 принадлежит только этому сервису (database-per-service); within-service инварианты выражены на
 уровне БД — FK, UNIQUE, partial-UNIQUE, CHECK, атомарный CAS и OCC (`xmin`), — а не
 software-проверками. Наружу утечки SQL нет: SQLSTATE маппится в стабильные gRPC-коды.

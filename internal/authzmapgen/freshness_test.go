@@ -32,11 +32,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmapgen"
-)
+	"github.com/PRO-Robotech/kaname/internal/authzmapgen"
 
-// repoRoot — корень репозитория от каталога этого пакета.
-const repoRoot = "../../../.."
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+)
 
 func renderTree(t *testing.T, root string) ([]byte, authzmapgen.Census) {
 	t.Helper()
@@ -55,7 +54,10 @@ func renderTree(t *testing.T, root string) ([]byte, authzmapgen.Census) {
 // TestGeneratedTablesAreFresh — файл в дереве побайтово равен тому, что даёт
 // производитель СЕГОДНЯ.
 func TestGeneratedTablesAreFresh(t *testing.T) {
-	census, err := authzmapgen.CheckFresh(repoRoot)
+	// Читается ДЕРЕВО ПЛАТФОРМЫ: манифесты соседних модулей, каталог
+	// контрактов и канон модели в поставку нашего модуля не входят by
+	// construction. Их отсутствие — «условие не создано», а не находка.
+	census, err := authzmapgen.CheckFresh(platformtree.Require(t))
 	t.Logf("осмотрено: %s", census.Summary())
 	if census.Resources == 0 {
 		t.Fatal("ресурсов ноль — «файл свеж» здесь означало бы «сверять было нечего»")

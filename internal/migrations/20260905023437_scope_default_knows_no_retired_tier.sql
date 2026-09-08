@@ -9,7 +9,7 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- ЧТО НЕВЕРНО СЕГОДНЯ
 --
--- Функция `kacho_iam.access_bindings_scope_default()` проставляет `scope`, когда
+-- Функция `kaname.access_bindings_scope_default()` проставляет `scope`, когда
 -- писатель его не назвал, разбирая `resource_type` оператором `CASE`. Среди
 -- ветвей стоит `organization` → кластерный ярус. Яруса с таким именем в словаре
 -- нет: якорь привязки — три яруса (`cluster` / `account` / `project`), публичный
@@ -50,7 +50,7 @@
 
 -- +goose Up
 -- +goose StatementBegin
-CREATE OR REPLACE FUNCTION kacho_iam.access_bindings_scope_default() RETURNS trigger
+CREATE OR REPLACE FUNCTION kaname.access_bindings_scope_default() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
@@ -69,7 +69,7 @@ END;
 $$;
 -- +goose StatementEnd
 
-COMMENT ON FUNCTION kacho_iam.access_bindings_scope_default() IS
+COMMENT ON FUNCTION kaname.access_bindings_scope_default() IS
     'Умолчание яруса, когда писатель его не назвал. Словарь ветвей держится встречным объявлением домена (DeriveFromResourceType); вида без встречного объявления здесь не бывает. Явно названный ярус не перезаписывается.';
 
 -- +goose Down

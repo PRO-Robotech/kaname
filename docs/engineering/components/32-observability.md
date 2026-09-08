@@ -2,7 +2,7 @@
 
 ## Назначение
 
-Гайд по metrics и logs для kacho-iam. Две плоскости:
+Гайд по metrics и logs для kaname. Две плоскости:
 
 - **Logs** — структурированный slog (JSON), общий пакет `pkg/observability`.
 - **Metrics** — Prometheus (`client_golang`), собственный adapter
@@ -47,10 +47,10 @@
 
 ```bash
 # Tail подов.
-kubectl -n kacho logs -l app=kacho-iam -f --max-log-requests 10
+kubectl -n kacho logs -l app=kaname -f --max-log-requests 10
 
 # Loki query — только записи дренажа сброса кэша уровня WARN и выше.
-{namespace="kacho",app="kacho-iam"} |= "subject_change_drainer" | json | level="WARN"
+{namespace="kacho",app="kaname"} |= "subject_change_drainer" | json | level="WARN"
 ```
 
 ## Metrics
@@ -58,7 +58,7 @@ kubectl -n kacho logs -l app=kacho-iam -f --max-log-requests 10
 ### Экспорт
 
 Метрики отдаются `promhttp`-хендлером на **отдельном cluster-internal HTTP-listener**
-(`KACHO_IAM_API_SERVER__METRICS_ENDPOINT` — ключ `api-server.metrics-endpoint`,
+(`KANAME_API_SERVER__METRICS_ENDPOINT` — ключ `api-server.metrics-endpoint`,
 точка → `__`, дефис → `_`; default `tcp://0.0.0.0:9095`; `metrics.enable`,
 default `true`). Это не публичная gRPC-поверхность: кардинальность внутренних
 лейблов не должна светиться наружу. Listener по умолчанию plaintext; включается
@@ -72,8 +72,8 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
 
 ### Задержка обслуженного вызова — ПЛАТФОРМЕННАЯ серия, не своя
 
-Свои серии `kacho_iam_grpc_server_handled_total` и
-`kacho_iam_grpc_server_handling_seconds` **сняты**. Их предмет — тот же, что у
+Свои серии `kaname_grpc_server_handled_total` и
+`kaname_grpc_server_handling_seconds` **сняты**. Их предмет — тот же, что у
 платформенного измерителя `pkg/grpcsrv.ServerLatency`, а два места об одном
 предмете расходятся: снятая пара смешивала отказ с успехом в одном ряду, не
 различала полосу слушателя и брала сетку корзин по умолчанию (первая граница —
@@ -92,7 +92,7 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
 {public, internal, unknown} различает два слушателя: `OperationService` и пара
 `Internal*` служатся обоими, и слитый ряд был бы средним двух разных величин.
 
-Провязка — в композиционном корне (`cmd/kacho-iam/serve.go`): слушателей iam
+Провязка — в композиционном корне (`cmd/kaname/serve.go`): слушателей iam
 строит сам, минуя носитель входящего пути, поэтому отказ старта О13
 (`servicecontract.New`) сюда не достаёт. Свойство держит обход дерева
 `internal/repohygiene.TestEveryGRPCListenerObservesItsLatency`.
@@ -103,16 +103,16 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
 
 | Metric                                          | Type      | Labels                              | Описание                                                       |
 |-------------------------------------------------|-----------|-------------------------------------|----------------------------------------------------------------|
-| `kacho_iam_authz_check_duration_seconds`        | histogram | rpc, allowed                        | Latency authz Check hot-path (FGA Check + транспорт). SLO ≤30ms p95. |
-| `kacho_iam_authz_check_decisions_total`         | counter   | rpc, decision                       | Решения Check по полосе и исходу (`allow`/`deny`/`error`).    |
-| `kacho_iam_lro_inflight`                         | gauge     | —                                   | Операции, выданные пулу воркеров прямо сейчас.                 |
-| `kacho_iam_lro_terminal_write_retries_total`    | counter   | op_type                             | Retry durable terminal-write (`MarkDone`/`MarkError`).        |
-| `kacho_iam_lro_terminal_write_failures_total`   | counter   | op_type                             | Terminal-write, исчерпавший retry-бюджет (зависшая операция). |
-| `kacho_iam_lro_orphans_recovered_total`         | counter   | outcome                             | Осиротевшие операции, поднятые reconciler'ом.                 |
-| `kacho_iam_lro_reconcile_runs_total`            | counter   | —                                   | Проходы reconciler-sweep.                                     |
-| `kacho_iam_lro_reconcile_errors_total`          | counter   | —                                   | Проходы reconciler-sweep, завершившиеся ошибкой.             |
-| `kacho_iam_identities_total`                    | counter   | —                                   | Личности, которых платформа видела за всё время (журнал `kacho_iam.identity_journal`). |
-| `kacho_iam_identity_ledger_samples_total`       | counter   | outcome                             | Исходы фонового замера журнала (`ok`/`error`) — то, чем ноль в предыдущем ряду отличается от неснятого замера. |
+| `kaname_authz_check_duration_seconds`        | histogram | rpc, allowed                        | Latency authz Check hot-path (FGA Check + транспорт). SLO ≤30ms p95. |
+| `kaname_authz_check_decisions_total`         | counter   | rpc, decision                       | Решения Check по полосе и исходу (`allow`/`deny`/`error`).    |
+| `kaname_lro_inflight`                         | gauge     | —                                   | Операции, выданные пулу воркеров прямо сейчас.                 |
+| `kaname_lro_terminal_write_retries_total`    | counter   | op_type                             | Retry durable terminal-write (`MarkDone`/`MarkError`).        |
+| `kaname_lro_terminal_write_failures_total`   | counter   | op_type                             | Terminal-write, исчерпавший retry-бюджет (зависшая операция). |
+| `kaname_lro_orphans_recovered_total`         | counter   | outcome                             | Осиротевшие операции, поднятые reconciler'ом.                 |
+| `kaname_lro_reconcile_runs_total`            | counter   | —                                   | Проходы reconciler-sweep.                                     |
+| `kaname_lro_reconcile_errors_total`          | counter   | —                                   | Проходы reconciler-sweep, завершившиеся ошибкой.             |
+| `kaname_identities_total`                    | counter   | —                                   | Личности, которых платформа видела за всё время (журнал `kaname.identity_journal`). |
+| `kaname_identity_ledger_samples_total`       | counter   | outcome                             | Исходы фонового замера журнала (`ok`/`error`) — то, чем ноль в предыдущем ряду отличается от неснятого замера. |
 
 ### Метка `rpc` — ЗАКРЫТЫЙ словарь из трёх полос
 
@@ -157,13 +157,13 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
 личностей немонотонен: человек уходит, и величина падает. На падающем ряде рост
 не определён — `increase()` молчит там, где рост и был, — а «личностей ноль»
 перестаёт быть утверждением о всей жизни платформы и становится утверждением о
-текущем мгновении. Журнал `kacho_iam.identity_journal` рядов не снимает никогда,
+текущем мгновении. Журнал `kaname.identity_journal` рядов не снимает никогда,
 в том числе при уходе человека.
 
-**Почему рядов ДВА.** `kacho_iam_identities_total` читается фоновым замером и до
+**Почему рядов ДВА.** `kaname_identities_total` читается фоновым замером и до
 первого успешного замера равен нулю — то есть «личностей за всё время ноль» и
 «замер не работает» дают на витрине одну и ту же картину. Различает их только
-`kacho_iam_identity_ledger_samples_total{outcome="ok"}`: пока он растёт, ноль в
+`kaname_identity_ledger_samples_total{outcome="ok"}`: пока он растёт, ноль в
 первом ряду означает ноль.
 
 ### Где они снимаются
@@ -183,32 +183,32 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
 
 ```yaml
 - alert: KachoIAMAuthzCheckSlow
-  expr: histogram_quantile(0.95, sum by (le) (rate(kacho_iam_authz_check_duration_seconds_bucket[5m]))) > 0.03
+  expr: histogram_quantile(0.95, sum by (le) (rate(kaname_authz_check_duration_seconds_bucket[5m]))) > 0.03
   for: 5m
   annotations:
     summary: "authz Check p95 > 30ms — превышен SLO hot-path авторизации"
 
 - alert: KachoIAMAuthzCheckErrors
-  expr: rate(kacho_iam_authz_check_decisions_total{decision="error"}[5m]) > 1
+  expr: rate(kaname_authz_check_decisions_total{decision="error"}[5m]) > 1
   for: 10m
   annotations:
-    summary: "authz Check возвращает error — база kacho_iam недоступна или деградирует"
+    summary: "authz Check возвращает error — база kaname недоступна или деградирует"
     description: "Вердикт складывается реляционной формой в собственной базе службы;
       отказ означает fail-closed по всем доменам — см. engineering/architecture/failure-domains.md"
 
 - alert: KachoIAMLROStranded
-  expr: increase(kacho_iam_lro_terminal_write_failures_total[15m]) > 0
+  expr: increase(kaname_lro_terminal_write_failures_total[15m]) > 0
   annotations:
     summary: "LRO terminal-write исчерпал retry-бюджет — операция зависла (op_type={{ $labels.op_type }})"
 
 - alert: KachoIAMLROBacklog
-  expr: kacho_iam_lro_inflight > 1000
+  expr: kaname_lro_inflight > 1000
   for: 5m
   annotations:
     summary: "LRO inflight > 1000 — backlog воркер-пула"
 
 - alert: KachoIAMReconcileErrors
-  expr: rate(kacho_iam_lro_reconcile_errors_total[10m]) > 0
+  expr: rate(kaname_lro_reconcile_errors_total[10m]) > 0
   for: 10m
   annotations:
     summary: "reconciler-sweep падает — осиротевшие операции не подбираются"
@@ -217,7 +217,7 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
   # Порог наблюдения, а не отказа: превышение НЕ отвергает регистрацию, оно
   # зовёт человека посмотреть. Величина порога — продуктовая; она названа здесь
   # и меняется здесь же, потому что читателя у ряда ровно один.
-  expr: increase(kacho_iam_identities_total[1h]) > 100
+  expr: increase(kaname_identities_total[1h]) > 100
   for: 15m
   annotations:
     summary: "личностей за час прибавилось больше 100 — потолок на аккаунты личности обходится заведением личностей"
@@ -226,13 +226,13 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
       прежде, чем менять пороги."
 
 - alert: KachoIAMIdentityLedgerUnsampled
-  # Ноль в kacho_iam_identities_total законен: платформа могла не увидеть ни
+  # Ноль в kaname_identities_total законен: платформа могла не увидеть ни
   # одной личности. Незаконно — НЕ ЗНАТЬ, ноль это или неснятый замер. Тревога
   # звонит именно на второе: успешных замеров не прибавляется.
-  expr: increase(kacho_iam_identity_ledger_samples_total{outcome="ok"}[10m]) == 0
+  expr: increase(kaname_identity_ledger_samples_total{outcome="ok"}[10m]) == 0
   for: 10m
   annotations:
-    summary: "журнал личностей не замеряется — kacho_iam_identities_total перестал что-либо утверждать"
+    summary: "журнал личностей не замеряется — kaname_identities_total перестал что-либо утверждать"
     description: "Пока успешные замеры не идут, ноль и любое застывшее число в ряду
       роста неотличимы от действительности. Смотреть outcome=\"error\" того же
       семейства и журнал службы."
@@ -259,7 +259,7 @@ HTTP-пробы поднимаются на cluster-internal hooks-listener (`:9
 | `GET /readyz`    | Readiness — ping БД и поднятый LRO-worker; при падении → 503.     |
 
 ```bash
-curl http://kacho-iam:9092/healthz
+curl http://kaname:9092/healthz
 # → 200 OK
 ```
 
@@ -270,16 +270,16 @@ gRPC-порт (`:9090`); HTTP `/healthz` и `/readyz` доступны для р
 ## Подробности реализации
 
 - **Logger:** `observability.NewSloggerLevel(os.Stdout, level)` (corelib) — JSON,
-  `slog.SetDefault` в `cmd/kacho-iam/serve.go`.
+  `slog.SetDefault` в `cmd/kaname/serve.go`.
 - **Metrics:** `internal/observability/metrics` (Prometheus `client_golang`,
   приватный registry); HTTP-listener и интерсепторы — в composition root
-  `cmd/kacho-iam/serve.go`.
+  `cmd/kaname/serve.go`.
 - **Health:** живость и готовность строит ОБЩИЙ носитель `pkg/observability/health`
   (#1752) — тот же, что у шести остальных сервисов; `internal/handler/iamhooks/http_server.go`
   только монтирует его обработчики на `/healthz` и `/readyz`. Набор именованных
   проверок (`health.Checker`: база, версия схемы, LRO-worker) собирается в
-  композиционном корне `cmd/kacho-iam/hooks_mux.go`, а `SetShuttingDown` дёргается
-  из `cmd/kacho-iam/serve.go` — готовность уходит в 503 ДО остановки серверов.
+  композиционном корне `cmd/kaname/hooks_mux.go`, а `SetShuttingDown` дёргается
+  из `cmd/kaname/serve.go` — готовность уходит в 503 ДО остановки серверов.
 
   Прежде здесь стоял свой тип `ReadinessChecker` той же формы, объявленный в
   handler-слое: об одном предмете высказывались два места, и одно из них
@@ -296,5 +296,5 @@ gRPC-порт (`:9090`); HTTP `/healthz` и `/readyz` доступны для р
 
 - общий фундамент: `pkg/observability/` (slog + OTel), `pkg/operations/` (Recorder).
 - `internal/observability/metrics/{metrics,lro_recorder,authz_decorator}.go`
-- `cmd/kacho-iam/serve.go` — wiring logger / metrics-listener / интерсепторов.
+- `cmd/kaname/serve.go` — wiring logger / metrics-listener / интерсепторов.
 - `internal/handler/iamhooks/http_server.go` — `/healthz` / `/readyz`.

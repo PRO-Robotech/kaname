@@ -15,7 +15,7 @@ package service
 //
 // # Почему обе стороны спрашиваются на ОДНОМ экземпляре и одним прогоном
 //
-// В составе есть величина, зависящая от часов (`kacho_issued_at`). Два
+// В составе есть величина, зависящая от часов (`kaname_issued_at`). Два
 // экземпляра службы с двумя источниками времени разошлись бы по ней — и
 // расхождение это было бы свойством пробы, а не продукта. Один экземпляр с
 // одними часами оставляет расходиться только тому, что действительно
@@ -35,9 +35,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // stubOwnClientPort — чтение строки реестра по НАШЕМУ идентификатору.

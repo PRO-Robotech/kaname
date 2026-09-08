@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/jwksproxyhttp"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/registrytokenhttp"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
+	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 )
 
 // twoRecordBinding — привязка публикатора с ДВУМЯ записями: наша (проекция
@@ -28,7 +28,7 @@ func twoRecordBinding(t *testing.T) jwksproxyhttp.Binding {
 	})
 	mirror := jwksproxyhttp.NewHandler(jwksproxyhttp.Config{UpstreamURL: "https://provider.invalid/jwks"})
 	b, err := jwksproxyhttp.NewBinding([]jwksproxyhttp.Record{
-		{Issuer: "https://iam.kacho.local", Path: "/.well-known/kacho/jwks.json", Handler: ours},
+		{Issuer: "https://kaname.kacho.local", Path: "/.well-known/kaname/jwks.json", Handler: ours},
 		{Issuer: "https://provider.kacho.local", Path: jwksproxyhttp.WellKnownJWKSPath, Handler: mirror},
 	})
 	if err != nil {
@@ -93,11 +93,11 @@ func TestBinding_F1_44_EveryPublicationPathIsInternalOnly(t *testing.T) {
 	leaky := registrytokenhttp.NewMux(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
-	leaky.Handle("/.well-known/kacho/jwks.json", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	leaky.Handle("/.well-known/kaname/jwks.json", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	res := httptest.NewRecorder()
-	leaky.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/.well-known/kacho/jwks.json", nil))
+	leaky.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/.well-known/kaname/jwks.json", nil))
 	if res.Code == http.StatusNotFound {
 		t.Fatalf("контроль инъекции сам неверен: путь, зарегистрированный снаружи, обязан резолвиться")
 	}
@@ -113,7 +113,7 @@ func TestBinding_F1_46_RecordsAreDeclaredNotDerived(t *testing.T) {
 		t.Fatalf("mux: %v", err)
 	}
 	res := httptest.NewRecorder()
-	internal.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/.well-known/kacho/jwks.json", nil))
+	internal.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/.well-known/kaname/jwks.json", nil))
 	body := res.Body.String()
 	if !strings.Contains(body, "kacho-a") {
 		t.Fatalf("наша запись обязана содержать наш ключ: %s", body)
@@ -128,15 +128,15 @@ func TestBinding_F1_46_RecordsAreDeclaredNotDerived(t *testing.T) {
 		t.Fatalf("издатель вне перечня резолвится в путь — путь ВЫВОДИТСЯ, а не объявлен")
 	}
 	// Положительный контроль: объявленный издатель резолвится.
-	if p, ok := b.PathOf("https://iam.kacho.local"); !ok || p != "/.well-known/kacho/jwks.json" {
+	if p, ok := b.PathOf("https://kaname.kacho.local"); !ok || p != "/.well-known/kaname/jwks.json" {
 		t.Fatalf("объявленный издатель обязан резолвиться в свой путь, получено %q/%v", p, ok)
 	}
 
 	// And — объявленный издатель есть НЕДОВЕРЕННЫЙ ВХОД: произвольная строка в
 	// нём не попадает ни в путь, ни в исходящий адрес.
 	for _, hostile := range []string{
-		"../../../etc/passwd", "https://iam.kacho.local/../x", "\x00", "<script>",
-		"https://iam.kacho.local\nX-Injected: 1", strings.Repeat("a", 4096),
+		"../../../etc/passwd", "https://kaname.kacho.local/../x", "\x00", "<script>",
+		"https://kaname.kacho.local\nX-Injected: 1", strings.Repeat("a", 4096),
 	} {
 		if p, ok := b.PathOf(hostile); ok {
 			t.Fatalf("враждебный издатель %q резолвился в путь %q", hostile, p)
@@ -150,13 +150,13 @@ func TestBinding_F1_46_BootGuardRefusesIncompleteBinding(t *testing.T) {
 
 	cases := map[string][]jwksproxyhttp.Record{
 		"издатель объявлен, записи источника нет": {
-			{Issuer: "https://iam.kacho.local", Path: "", Handler: ours},
+			{Issuer: "https://kaname.kacho.local", Path: "", Handler: ours},
 		},
 		"путь вырожден — одни разделители": {
-			{Issuer: "https://iam.kacho.local", Path: "///", Handler: ours},
+			{Issuer: "https://kaname.kacho.local", Path: "///", Handler: ours},
 		},
 		"путь вырожден — пробелы": {
-			{Issuer: "https://iam.kacho.local", Path: "   ", Handler: ours},
+			{Issuer: "https://kaname.kacho.local", Path: "   ", Handler: ours},
 		},
 		"издатель пуст": {
 			{Issuer: "", Path: "/a.json", Handler: ours},
@@ -207,7 +207,7 @@ func TestBinding_F1_46_OneRecordFailingDoesNotCloseTheOther(t *testing.T) {
 		Source: stubKeySet{err: errors.New("provider is unavailable")},
 	})
 	b, err := jwksproxyhttp.NewBinding([]jwksproxyhttp.Record{
-		{Issuer: "https://iam.kacho.local", Path: "/ours.json", Handler: ours},
+		{Issuer: "https://kaname.kacho.local", Path: "/ours.json", Handler: ours},
 		{Issuer: "https://provider", Path: "/mirror.json", Handler: brokenMirror},
 	})
 	if err != nil {

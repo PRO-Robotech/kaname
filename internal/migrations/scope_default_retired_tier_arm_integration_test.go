@@ -71,7 +71,7 @@ func TestIntegration_ScopeDefaultKnowsNoRetiredTier(t *testing.T) {
 	// Без неё всё нижеследующее зеленело бы на пустой схеме: «ветви нет» верно
 	// и там, где нет самой функции.
 	require.NotEmpty(t, src,
-		"функция %s не найдена среди триггерных функций kacho_iam.access_bindings: "+
+		"функция %s не найдена среди триггерных функций kaname.access_bindings: "+
 			"цепь миграций не накатилась либо триггер снят — тогда утверждения ниже "+
 			"беспредметны, а не выполнены", scopeDefaultFunc)
 
@@ -128,7 +128,7 @@ func TestIntegration_ScopeDefaultKnowsNoRetiredTier(t *testing.T) {
 }
 
 // scopeDefaultLiveSource — тело функции умолчания, взятое из каталога и ТОЛЬКО
-// если она висит триггером на `kacho_iam.access_bindings`.
+// если она висит триггером на `kaname.access_bindings`.
 //
 // Спрашивается связка триггер→функция, а не функция по имени: функция без
 // триггера ничего не проставляет, и судить её текст значило бы судить мёртвый код.
@@ -142,7 +142,7 @@ func scopeDefaultLiveSource(t *testing.T, db *sql.DB) string {
 		  JOIN pg_class c ON c.oid = tg.tgrelid
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
 		 WHERE NOT tg.tgisinternal
-		   AND n.nspname = 'kacho_iam'
+		   AND n.nspname = 'kaname'
 		   AND c.relname = 'access_bindings'
 		   AND p.proname = $1`, scopeDefaultFunc).Scan(&src)
 	if err == sql.ErrNoRows {
@@ -156,14 +156,14 @@ func scopeDefaultLiveSource(t *testing.T, db *sql.DB) string {
 // Возвращает её полное имя.
 func attachScopeDefaultTo(t *testing.T, db *sql.DB) string {
 	t.Helper()
-	const tbl = "kacho_iam.scope_default_probe"
+	const tbl = "kaname.scope_default_probe"
 	_, err := db.Exec(`CREATE TABLE ` + tbl + ` (
 		resource_type text NOT NULL,
 		scope         smallint)`)
 	require.NoError(t, err)
 	_, err = db.Exec(`CREATE TRIGGER scope_default_probe_trg
 		BEFORE INSERT ON ` + tbl + ` FOR EACH ROW
-		EXECUTE FUNCTION kacho_iam.` + scopeDefaultFunc + `()`)
+		EXECUTE FUNCTION kaname.` + scopeDefaultFunc + `()`)
 	require.NoError(t, err,
 		"живая функция не навесилась на черновую таблицу — предмет пробы не создан")
 	return tbl

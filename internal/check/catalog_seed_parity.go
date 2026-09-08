@@ -28,14 +28,14 @@ package check
 // Рука пишет один оператор на много кортежей, перечисляя лишь те колонки, что
 // отличаются от умолчания:
 //
-//	INSERT INTO kacho_iam.catalog_verb (module, resource, verb) VALUES
+//	INSERT INTO kaname.catalog_verb (module, resource, verb) VALUES
 //	  ('alpha', 'thing', 'get'),
 //	  ('beta', 'other', 'list');
 //
 // `pg_dump --column-inserts` — по оператору на строку, ВСЕ колонки, готовые
 // значения:
 //
-//	INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at,
+//	INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at,
 //	  retired_reason, live, per_object) VALUES ('compute', 'instance', 'get',
 //	  NULL, NULL, true, true);
 //
@@ -330,15 +330,15 @@ func auditCatalogSeed(body string, wantModules, wantResources, wantVerbs []strin
 	var c catalogSeedCensus
 	var findings []string
 
-	mods, err := parseInsertRows(body, "kacho_iam.catalog_module")
+	mods, err := parseInsertRows(body, "kaname.catalog_module")
 	if err != nil {
 		return c, nil, err
 	}
-	res, err := parseInsertRows(body, "kacho_iam.catalog_resource")
+	res, err := parseInsertRows(body, "kaname.catalog_resource")
 	if err != nil {
 		return c, nil, err
 	}
-	verbs, err := parseInsertRows(body, "kacho_iam.catalog_verb")
+	verbs, err := parseInsertRows(body, "kaname.catalog_verb")
 	if err != nil {
 		return c, nil, err
 	}
@@ -559,7 +559,7 @@ func stripSQLComments(s string) string {
 // литерал объявил ярусной, признак обязан быть `false`. Пообъектные строки судит
 // `auditCatalogSeed` — вместе две сверки покрывают таблицу целиком.
 func auditTierOnlyVerbSeed(body string, want []string) (seeded int, findings []string, err error) {
-	rows, err := parseInsertRows(body, "kacho_iam.catalog_verb")
+	rows, err := parseInsertRows(body, "kaname.catalog_verb")
 	if err != nil {
 		return 0, nil, err
 	}

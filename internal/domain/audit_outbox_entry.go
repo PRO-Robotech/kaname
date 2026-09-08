@@ -12,17 +12,17 @@ import (
 	"go.uber.org/multierr"
 )
 
-// AuditOutboxEntry — строка журнала аудита `kacho_iam.audit_outbox` (заведён
+// AuditOutboxEntry — строка журнала аудита `kaname.audit_outbox` (заведён
 // миграцией `0001_initial.sql`), дописываемая только вперёд.
 //
 // # Что происходит на самом деле
 //
 // Строка ложится в ТУ ЖЕ транзакцию, что и мутация домена, и оттуда вывозится в
 // приёмник журнала — поток структурных записей службы
-// (`services/iam/cmd/kacho-iam/audit_shipper_wiring.go`, механизм — `pkg/audit`).
+// (`services/iam/cmd/kaname/audit_shipper_wiring.go`, механизм — `pkg/audit`).
 // Состояние строки после этого помечено доставленным, а состояние очереди
 // целиком снимает периодический сканер
-// (`services/iam/cmd/kacho-iam/outbox_metrics_wiring.go`).
+// (`services/iam/cmd/kaname/outbox_metrics_wiring.go`).
 //
 // # Здесь было описано ОТСУТСТВИЕ доставки — у него больше нет предмета
 //

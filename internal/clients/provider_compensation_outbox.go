@@ -32,9 +32,9 @@ import (
 
 const (
 	// ProviderCompensationTable — полное имя очереди компенсаций.
-	ProviderCompensationTable = "kacho_iam.provider_compensation_outbox"
+	ProviderCompensationTable = "kaname.provider_compensation_outbox"
 	// ProviderCompensationChannel — LISTEN-канал (триггер миграции 0079).
-	ProviderCompensationChannel = "kacho_iam_provider_compensation_outbox"
+	ProviderCompensationChannel = "kaname_provider_compensation_outbox"
 	// EventProviderOAuthClientDelete — снять OAuth-клиента у провайдера.
 	// Словарь закрыт CHECK'ом в миграции: расширение требует и кода, и миграции.
 	EventProviderOAuthClientDelete = "provider.oauth_client.delete"

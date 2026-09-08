@@ -10,9 +10,9 @@ import (
 	"go.uber.org/multierr"
 )
 
-// Cluster — singleton (id = `cluster_kacho_root`). Корень
+// Cluster — singleton (id = `cluster_root`). Корень
 // иерархии cluster → account → project → resource.
-// Используется как объект модели прав для `cluster:cluster_kacho_root#system_admin@user:usr_xxx`.
+// Используется как объект модели прав для `cluster:cluster_root#system_admin@user:usr_xxx`.
 type Cluster struct {
 	ID          ClusterID
 	Name        ClusterName
@@ -28,7 +28,7 @@ func (c Cluster) Validate() error {
 	return errs
 }
 
-// ClusterID — fixed literal `cluster_kacho_root` (singleton constraint в DB).
+// ClusterID — fixed literal `cluster_root` (singleton constraint в DB).
 type ClusterID string
 
 func (id ClusterID) Validate() error {

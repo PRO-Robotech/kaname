@@ -20,9 +20,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // fakeRevocations — the revoke-all cutoff store, as both hooks read it.
@@ -117,8 +117,8 @@ func TestRefreshHook_HappyPath(t *testing.T) {
 	}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	claims := resp.Session.AccessToken["ext_claims"].(map[string]any)
-	assert.Equal(t, "kratos-uuid-1", claims["kacho_external_id"])
-	assert.Equal(t, "attested", claims["kacho_device_compliance"])
+	assert.Equal(t, "kratos-uuid-1", claims["kaname_external_id"])
+	assert.Equal(t, "attested", claims["kaname_device_compliance"])
 	// One audit row.
 	events := audit.Events()
 	require.Len(t, events, 1)

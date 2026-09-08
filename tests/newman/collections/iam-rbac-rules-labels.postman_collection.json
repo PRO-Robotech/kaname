@@ -1,7 +1,7 @@
 {
   "info": {
-    "_postman_id": "07b15994-3f09-5411-aea2-5da8374e7318",
-    "name": "kacho-iam / newman / iam-rbac-rules-labels",
+    "_postman_id": "8683c94a-c33a-56ae-a60d-ab7f068c4345",
+    "name": "kaname / newman / iam-rbac-rules-labels",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -90,7 +90,7 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
@@ -166,7 +166,7 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
@@ -265,7 +265,7 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",
@@ -341,7 +341,7 @@
                   "if (__t) {",
                   "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
                   "} else {",
-                  "  pm.test('harness config: jwtAccountAdminA is set (subject under test)', () => {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtAccountAdminA is set (subject under test)', () => {",
                   "    pm.expect.fail('jwtAccountAdminA is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
                   "  });",
                   "  pm.execution.skipRequest();",

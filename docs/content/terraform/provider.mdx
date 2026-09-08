@@ -6,23 +6,73 @@ title: Провайдер Terraform
 
 # Провайдер Terraform: ресурсы IAM
 
-Провайдер `kacho` один на всю платформу — установка и настройка описаны на
+Провайдер один на всю платформу — установка и настройка описаны на
 странице «Провайдер Terraform» в документации VPC. Здесь только то,
 что относится к IAM.
+
+## Приставка типов — `kaname`, и локальное имя провайдера тоже
+
+Служба доступа называет себя своим именем, поэтому её типы начинаются с `kaname_`.
+Провайдер при этом тот же самый — меняется **локальное имя**, под которым он объявлен:
+
+```hcl
+terraform {
+  required_providers {
+    kaname = { source = "PRO-Robotech/kacho" }
+  }
+}
+
+provider "kaname" {
+  endpoint = "https://api.kacho.example"   # либо KACHO_ENDPOINT
+  token    = var.kacho_token               # либо KACHO_TOKEN
+}
+```
+
+Если та же конфигурация заводит и ресурсы платформы (`kacho_vpc_*` и прочие), объявите
+**оба** локальных имени и **оба** блока настройки. Локальное имя, оставшееся без своего
+блока `provider`, получает ненастроенный провайдер, и план отказывает словами
+«requires explicit configuration». На два локальных имени одного источника исполнитель
+предупреждает «A provider can only be required once» — предупреждение ожидаемо и плану
+не мешает.
+
+## Переезд состояния с прежних имён
+
+Прежде типы назывались `kacho_iam_*`. Имя типа — адрес записи в вашем состоянии, поэтому
+переименование само по себе означало бы удаление живой записи и создание новой. Чтобы
+этого не произошло, объявите переезд:
+
+```hcl
+moved {
+  from = kacho_iam_project.prod
+  to   = kaname_project.prod
+}
+```
+
+План после этого не создаёт и не удаляет ничего, а идентификаторы ресурсов остаются
+прежними: переезд меняет адрес записи, а не сам ресурс. Модули платформы
+(`iam-project`, `iam-access`, `iam-machine-identity`) объявления переезда несут сами —
+для ресурсов внутри них ничего писать не нужно.
+
+Два исхода, в которые попасть НЕ надо, названы заранее:
+
+| что сделал оператор | что он увидит |
+|---|---|
+| ничего: настройка осталась на `kacho_iam_*` | план **отказывает**: «does not support resource type». Бездействие безопасно — ничего не удаляется |
+| переписал тип, переезд не объявил | план **останавливается** на прежней записи состояния: её тип провайдер больше не обслуживает. Удаления не планируется; допишите блок `moved` |
 
 ## Ресурсы
 
 | Ресурс | Что описывает | Область |
 |---|---|---|
-| `kacho_iam_account` | Аккаунт — корень тенантности | — |
-| `kacho_iam_project` | Проект — область, внутри которой живут ресурсы платформы | аккаунт |
-| `kacho_iam_group` | Группа субъектов | аккаунт |
-| `kacho_iam_service_account` | Служебная учётка — принципал машинного доступа | аккаунт |
-| `kacho_iam_role` | Пользовательская роль — набор прав | аккаунт или проект |
-| `kacho_iam_access_binding` | Привязка: кому, какая роль, где и на что | кластер, аккаунт или проект |
-| `kacho_iam_user_invitation` | Приглашение человека в аккаунт и его строка членства | аккаунт |
-| `kacho_iam_user_token` | Личный токен пользователя | пользователь |
-| `kacho_iam_service_account_key` | Ключ служебной учётки | служебная учётка |
+| `kaname_account` | Аккаунт — корень тенантности | — |
+| `kaname_project` | Проект — область, внутри которой живут ресурсы платформы | аккаунт |
+| `kaname_group` | Группа субъектов | аккаунт |
+| `kaname_service_account` | Служебная учётка — принципал машинного доступа | аккаунт |
+| `kaname_role` | Пользовательская роль — набор прав | аккаунт или проект |
+| `kaname_access_binding` | Привязка: кому, какая роль, где и на что | кластер, аккаунт или проект |
+| `kaname_user_invitation` | Приглашение человека в аккаунт и его строка членства | аккаунт |
+| `kaname_user_token` | Личный токен пользователя | пользователь |
+| `kaname_service_account_key` | Ключ служебной учётки | служебная учётка |
 
 Проект, группа и служебная учётка — **аккаунтные**: они принимают `account_id`, а не
 `project_id`. Служебная учётка тоже: сузить её до проекта можно только выдачей прав, а не
@@ -43,7 +93,7 @@ title: Провайдер Terraform
 будет (служебная учётка модуля, чья личность и есть предмет выдачи).
 
 :::warning Состав группы провайдером НЕ управляется
-Ресурса членства в группе у провайдера нет, и `kacho_iam_group` состава не принимает: у
+Ресурса членства в группе у провайдера нет, и `kaname_group` состава не принимает: у
 него есть только аккаунт, имя, описание и метки. Группу Terraform заводит, права ей
 выдаёт — а кто в ней состоит, задаётся вне Terraform.
 
@@ -82,19 +132,19 @@ title: Провайдер Terraform
 ## Проект, группа, служебная учётка
 
 ```hcl
-resource "kacho_iam_project" "prod" {
+resource "kaname_project" "prod" {
   account_id  = var.account_id
   name        = "production"
   description = "боевой контур"
   labels      = { env = "prod" }
 }
 
-resource "kacho_iam_group" "admins" {
+resource "kaname_group" "admins" {
   account_id = var.account_id
   name       = "prod-admins"
 }
 
-resource "kacho_iam_service_account" "ci" {
+resource "kaname_service_account" "ci" {
   account_id = var.account_id
   name       = "ci-deployer"
 }
@@ -102,7 +152,7 @@ resource "kacho_iam_service_account" "ci" {
 
 У всех трёх изменяемы имя, описание и метки; `account_id` пересоздаёт ресурс.
 
-## `kacho_iam_account`
+## `kaname_account`
 
 Аккаунт — корень тенантности: под ним лежат все проекты и вся выданная в них поверхность.
 Обычная работа идёт в существующем аккаунте, а не заводит новый на каждую задачу.
@@ -111,13 +161,13 @@ resource "kacho_iam_service_account" "ci" {
 выводит владельца из применившего и присланное значение отвергает. Владелец — **структурный**
 источник прав на свой аккаунт: он создаёт и сносит его сам, не дожидаясь выдачи.
 
-## `kacho_iam_role`
+## `kaname_role`
 
 ```hcl
-resource "kacho_iam_role" "vpc_operator" {
+resource "kaname_role" "vpc_operator" {
   definition_tier = {
     tier_type = "iam.project"
-    tier_id   = kacho_iam_project.prod.id
+    tier_id   = kaname_project.prod.id
   }
 
   name        = "vpc-operator"
@@ -209,17 +259,17 @@ resource "kacho_iam_role" "vpc_operator" {
 имя, совпадающее с системной ролью, отвергает как занятое. Втянув системную роль импортом,
 вы получите ресурс с `is_system = true`, у которого не работает ни `apply`, ни `destroy`.
 
-## `kacho_iam_access_binding`
+## `kaname_access_binding`
 
 ```hcl
-resource "kacho_iam_access_binding" "prod_admins" {
-  role_id = kacho_iam_role.vpc_operator.id
+resource "kaname_access_binding" "prod_admins" {
+  role_id = kaname_role.vpc_operator.id
 
   scope_type = "iam.project"
-  scope_id   = kacho_iam_project.prod.id
+  scope_id   = kaname_project.prod.id
 
   subjects = [
-    { type = "SUBJECT_TYPE_GROUP", id = kacho_iam_group.admins.id },
+    { type = "SUBJECT_TYPE_GROUP", id = kaname_group.admins.id },
   ]
 
   target = { all_in_scope = true }
@@ -278,10 +328,10 @@ RFC 3339, не меньше пяти минут вперёд: доступ ма�
 материализовать пообъектно» (выдача на уровне кластера) — но никогда «выдача не работает».
 Пока поле пусто, отказ доступа у получателя может быть временным.
 
-## `kacho_iam_user_invitation`
+## `kaname_user_invitation`
 
 ```hcl
-resource "kacho_iam_user_invitation" "alice" {
+resource "kaname_user_invitation" "alice" {
   account_id   = var.account_id
   email        = "alice@example.com"
   display_name = "Алиса"
@@ -338,7 +388,7 @@ resource "kacho_iam_user_invitation" "alice" {
 `project_id` + `role_id` создают привязку прав одной транзакцией с приглашением —
 приглашённый входит уже с доступом. Прочитать её обратно или снять этот ресурс не может:
 край не возвращает её идентификатор, а удаление строки членства привязку не убирает. Если
-выдаче нужен жизненный цикл — заводите её отдельным `kacho_iam_access_binding`, а эти два
+выдаче нужен жизненный цикл — заводите её отдельным `kaname_access_binding`, а эти два
 поля не задавайте.
 
 Практическое следствие: приглашение со стартовой выдачей по умолчанию **не уничтожается**,
@@ -351,14 +401,14 @@ resource "kacho_iam_user_invitation" "alice" {
 пересоздающему полю и предложит снять человека с аккаунта и пригласить заново. Импортируя
 существующее членство, эти три поля не задавайте — управляйте метками и запретом входа.
 
-## `kacho_iam_user_token` и `kacho_iam_service_account_key`
+## `kaname_user_token` и `kaname_service_account_key`
 
 Личный токен — то, чем человек ходит в платформу неинтерактивно. Ключ учётки — то, чем
 входит машина. Устроены они одинаково в том, что важно.
 
 ```hcl
-resource "kacho_iam_service_account_key" "ci" {
-  service_account_id = kacho_iam_service_account.ci.id
+resource "kaname_service_account_key" "ci" {
+  service_account_id = kaname_service_account.ci.id
   created_by_user_id = var.my_user_id
   name               = "ci-deployer-default"
   ttl_seconds        = 7776000
@@ -447,8 +497,8 @@ resource "kacho_iam_service_account_key" "ci" {
 
 | Ресурс | Вызывающий — человек | Вызывающий — служебная учётка |
 |---|---|---|
-| `kacho_iam_user_token` | вызывающего | **целевого пользователя** — тот самый `user_id`, что назван запросом |
-| `kacho_iam_service_account_key` | вызывающего | владельца аккаунта целевой учётки |
+| `kaname_user_token` | вызывающего | **целевого пользователя** — тот самый `user_id`, что назван запросом |
+| `kaname_service_account_key` | вызывающего | владельца аккаунта целевой учётки |
 
 Служебная учётка ответственным не бывает ни на одной полосе: её идентификатор строкой
 пользователей не является, и запись такого ответственного отвергла бы сама база.
@@ -469,10 +519,10 @@ resource "kacho_iam_service_account_key" "ci" {
 контрактная, `63072000` (два года).
 
 **У ключа `0` — «взять умолчание установки»**: величина конечна, настраивается
-(`KACHO_IAM_SAKEY_DEFAULT_TTL`, чарт платформы ставит 90 дней) и в конфигурации не видна.
+(`KANAME_SAKEY_DEFAULT_TTL`, чарт платформы ставит 90 дней) и в конфигурации не видна.
 Бессрочный ключ получается ровно на установке, где умолчание не настроено вовсе, — и это тот
 исход, о котором никто не узнает. Сверх контрактной границы у ключа есть ещё и **потолок
-установки** (`KACHO_IAM_SAKEY_MAX_TTL`, чарт платформы — год): запрос выше него край
+установки** (`KANAME_SAKEY_MAX_TTL`, чарт платформы — год): запрос выше него край
 отвергает до регистрации клиента.
 
 В обоих случаях задавайте срок явно.
@@ -501,13 +551,13 @@ resource "kacho_iam_service_account_key" "ci" {
 ## Импорт
 
 ```bash
-tofu import kacho_iam_account.main         acc...
-tofu import kacho_iam_project.prod         prj...
-tofu import kacho_iam_group.admins         grp...
-tofu import kacho_iam_service_account.ci   sva...
-tofu import kacho_iam_role.vpc_operator    rol...
-tofu import kacho_iam_access_binding.pa    acb...
-tofu import kacho_iam_user_invitation.alice usr...
+tofu import kaname_account.main         acc...
+tofu import kaname_project.prod         prj...
+tofu import kaname_group.admins         grp...
+tofu import kaname_service_account.ci   sva...
+tofu import kaname_role.vpc_operator    rol...
+tofu import kaname_access_binding.pa    acb...
+tofu import kaname_user_invitation.alice usr...
 ```
 
 Формат проверяется по общему каталогу префиксов платформы до обращения к краю. Токен и ключ

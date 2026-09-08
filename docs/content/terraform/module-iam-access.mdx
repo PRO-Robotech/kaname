@@ -18,7 +18,7 @@ module "prod_access" {
 
   scope = {
     type = "iam.project"
-    id   = kacho_iam_project.prod.id
+    id   = kaname_project.prod.id
   }
 
   labels = { origin = "terraform" }
@@ -38,7 +38,7 @@ module "prod_access" {
 
   group_grants = {
     "prod-admins" = {
-      group_id = kacho_iam_group.admins.id
+      group_id = kaname_group.admins.id
       role     = "vpc-operator"
       target   = { all_in_scope = true }
     }

@@ -48,7 +48,7 @@ import "x/reconciler"
 
 func wire(pool any) {
 	rc, _ := reconciler.NewRedriveOnly(pool, reconciler.Config{
-		Table:           "kacho_iam.resource_reconcile_outbox",
+		Table:           "kaname.resource_reconcile_outbox",
 		PartitionColumn: "object_id",
 	})
 	_ = rc
@@ -63,7 +63,7 @@ import "x/mailer"
 
 func wire(pool any) {
 	rc, _ := mailer.NewRedriveOnly(pool, mailer.Config{
-		Table: "kacho_iam.resource_reconcile_outbox",
+		Table: "kaname.resource_reconcile_outbox",
 	})
 	_ = rc
 }

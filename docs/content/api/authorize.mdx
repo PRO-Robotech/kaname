@@ -28,7 +28,7 @@ gateway, а внутри handler'а — defense-in-depth (self ∨ cluster-admin
 ## AuthorizeService
 
 Все методы, кроме `WhoAmI`, — POST на `/iam/v1/authorize:*` и синхронны (это read-запросы к
-решению доступа). Гейтятся `viewer` на singleton-объекте `cluster:cluster_kacho_root`, а точное
+решению доступа). Гейтятся `viewer` на singleton-объекте `cluster:cluster_root`, а точное
 per-subject/per-resource решение принимает handler.
 
 ### Check — одиночная проверка

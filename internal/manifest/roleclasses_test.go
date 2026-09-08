@@ -31,7 +31,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // roleManifest — манифест с одним правилом роли, записанным дословно.
@@ -256,7 +256,7 @@ func TestMODRC11UnknownKeyInsideARoleRuleIsStillRefused(t *testing.T) {
 // колонки перечислены, значения готовы. Захватываются ИМЯ (третье значение) и
 // правило — единственный на строке массив объектов JSON.
 var reSeededRole = regexp.MustCompile(
-	`INSERT INTO kacho_iam\.roles \([^)]*\) VALUES \('[^']*', [^,]*, '([^']*)'.*?'(\[\{.*?\}\])'`)
+	`INSERT INTO kaname\.roles \([^)]*\) VALUES \('[^']*', [^,]*, '([^']*)'.*?'(\[\{.*?\}\])'`)
 
 // roleRulesFromSeed — правило роли по её ИМЕНИ, из посева сведённой миграции.
 //

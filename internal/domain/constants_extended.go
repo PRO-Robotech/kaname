@@ -11,7 +11,7 @@
 // формату per-таблица (например `^cag_[0-9a-hjkmnp-tv-z]{17}$`).
 package domain
 
-// id-префиксы. Singleton (`cluster_kacho_root`) — литерал, не генерируется.
+// id-префиксы. Singleton (`cluster_root`) — литерал, не генерируется.
 // Outbox events (`evt_`) — ULID-based, длина 20..30.
 const (
 	PrefixClusterAdminGrant = "cag"
@@ -21,7 +21,7 @@ const (
 	PrefixAuditEvent        = "evt"
 
 	// ClusterSingletonID — единственный валидный id для кластера.
-	ClusterSingletonID = "cluster_kacho_root"
+	ClusterSingletonID = "cluster_root"
 
 	// OwnerRoleID — deterministic id of the net-new `owner` system-role
 	// (RBAC explicit-model 2026), seeded by migration 0035 as

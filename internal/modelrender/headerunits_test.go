@@ -34,8 +34,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmodel"
-	"github.com/PRO-Robotech/kacho-iam/internal/modelrender"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/modelrender"
 )
 
 // canonFile — файл, чью шапку сверяем.

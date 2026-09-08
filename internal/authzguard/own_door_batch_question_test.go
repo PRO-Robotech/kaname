@@ -56,11 +56,11 @@ import (
 
 	"google.golang.org/grpc"
 
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 )
 
 // batchQuestion — RPC сужателя списочной выдачи.
-const batchQuestion = "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck"
+const batchQuestion = "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck"
 
 // pageQuestion — вопрос о странице, какой задаёт сужатель: элементы про
 // ЧУЖИЕ объекты, `scope_id` не заполнен (его не заполняет ни один вызывающий).
@@ -110,7 +110,7 @@ func TestOwnDoor_NamedCallerStaysRefusedOnAnObjectScopedRpc(t *testing.T) {
 	_, err := doorUnder(t, store)(
 		tenantCtx(strangerUser),
 		&iamv1.DeleteProjectRequest{ProjectId: victimProject},
-		&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.ProjectService/Delete"},
+		&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.ProjectService/Delete"},
 		reached(&hit),
 	)
 	if hit || err == nil {
@@ -132,7 +132,7 @@ func TestOwnDoor_BothQuestionRpcsTreatANamedCallerAlike(t *testing.T) {
 		method string
 		req    any
 	}{
-		{"/kacho.cloud.iam.v1.AuthorizeService/Check",
+		{"/kaname.cloud.iam.v1.AuthorizeService/Check",
 			&iamv1.AuthorizeCheckRequest{Subject: "user:" + ownerUser}},
 		{batchQuestion, pageQuestion("user:" + ownerUser)},
 	}

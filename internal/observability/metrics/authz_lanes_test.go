@@ -37,9 +37,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // fakeSubjectAuthorizer — решатель полос края и сужателя.
@@ -102,11 +102,11 @@ func TestEdgeLaneCheckIsObserved(t *testing.T) {
 	}
 
 	dump := dumpMetrics(t, reg)
-	if got := counterValue(t, dump, `kacho_iam_authz_check_decisions_total{decision="allow",rpc="Check"}`); got != calls {
+	if got := counterValue(t, dump, `kaname_authz_check_decisions_total{decision="allow",rpc="Check"}`); got != calls {
 		t.Fatalf("полоса края = %v, ждали %d.\n\nСчётчик, не видящий полосу края, занижает "+
 			"«проверок в секунду» вдвое на пути чтения по идентификатору.\n%s", got, calls, dump)
 	}
-	if got := counterValue(t, dump, `kacho_iam_authz_check_duration_seconds_count{allowed="true",rpc="Check"}`); got != calls {
+	if got := counterValue(t, dump, `kaname_authz_check_duration_seconds_count{allowed="true",rpc="Check"}`); got != calls {
 		t.Fatalf("длительность полосы края = %v, ждали %d", got, calls)
 	}
 	// Полоса модулей не тронута: полосы обязаны быть РАЗНЫМИ сериями.
@@ -134,10 +134,10 @@ func TestEdgeLaneCountsADenyAndAnError(t *testing.T) {
 	}
 
 	dump := dumpMetrics(t, reg)
-	if got := counterValue(t, dump, `kacho_iam_authz_check_decisions_total{decision="deny",rpc="Check"}`); got != 1 {
+	if got := counterValue(t, dump, `kaname_authz_check_decisions_total{decision="deny",rpc="Check"}`); got != 1 {
 		t.Fatalf("отказ полосы края = %v, ждали 1:\n%s", got, dump)
 	}
-	if got := counterValue(t, dump, `kacho_iam_authz_check_decisions_total{decision="error",rpc="Check"}`); got != 1 {
+	if got := counterValue(t, dump, `kaname_authz_check_decisions_total{decision="error",rpc="Check"}`); got != 1 {
 		t.Fatalf("сбой полосы края = %v, ждали 1:\n%s", got, dump)
 	}
 }
@@ -161,15 +161,15 @@ func TestBatchLaneCountsEveryQuestion(t *testing.T) {
 	}
 
 	dump := dumpMetrics(t, reg)
-	if got := counterValue(t, dump, `kacho_iam_authz_check_decisions_total{decision="allow",rpc="BatchCheck"}`); got != 2 {
+	if got := counterValue(t, dump, `kaname_authz_check_decisions_total{decision="allow",rpc="BatchCheck"}`); got != 2 {
 		t.Fatalf("разрешений полосы сужателя = %v, ждали 2 (вопросов в пачке три):\n%s", got, dump)
 	}
-	if got := counterValue(t, dump, `kacho_iam_authz_check_decisions_total{decision="deny",rpc="BatchCheck"}`); got != 1 {
+	if got := counterValue(t, dump, `kaname_authz_check_decisions_total{decision="deny",rpc="BatchCheck"}`); got != 1 {
 		t.Fatalf("отказов полосы сужателя = %v, ждали 1:\n%s", got, dump)
 	}
 	// Длительность принадлежит ВЫЗОВУ, а не вопросу: делить её на вопросы значило
 	// бы утверждать про каждый то, чего никто не измерял.
-	if got := counterValue(t, dump, `kacho_iam_authz_check_duration_seconds_count{allowed="true",rpc="BatchCheck"}`); got != 1 {
+	if got := counterValue(t, dump, `kaname_authz_check_duration_seconds_count{allowed="true",rpc="BatchCheck"}`); got != 1 {
 		t.Fatalf("наблюдений длительности пачки = %v, ждали 1 (одно на вызов):\n%s", got, dump)
 	}
 }
@@ -234,7 +234,7 @@ func TestServedCheckCountsAgreeWithTheAuthzCounter(t *testing.T) {
 	const calls = 5
 	for i := 0; i < calls; i++ {
 		_, err := intr(context.Background(), nil,
-			&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.AuthorizeService/Check"},
+			&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.AuthorizeService/Check"},
 			func(ctx context.Context, _ any) (any, error) {
 				return dec.Check(ctx, service.CheckRequest{Subject: "user:usr_x"})
 			})
@@ -246,8 +246,8 @@ func TestServedCheckCountsAgreeWithTheAuthzCounter(t *testing.T) {
 	dump := dumpMetrics(t, reg)
 	served := counterValue(t, dump,
 		`kacho_grpc_server_handled_total{grpc_code="OK",grpc_method="Check",`+
-			`grpc_service="kacho.cloud.iam.v1.AuthorizeService",listener="public"}`)
-	decided := counterValue(t, dump, `kacho_iam_authz_check_decisions_total{decision="allow",rpc="Check"}`)
+			`grpc_service="kaname.cloud.iam.v1.AuthorizeService",listener="public"}`)
+	decided := counterValue(t, dump, `kaname_authz_check_decisions_total{decision="allow",rpc="Check"}`)
 	if served != calls || decided != calls {
 		t.Fatalf("обслужено %v, решений %v, вызовов %d — счётчики разошлись:\n%s",
 			served, decided, calls, dump)
@@ -274,7 +274,7 @@ func counterValue(t *testing.T, dump, series string) float64 {
 	return 0
 }
 
-var laneLabel = regexp.MustCompile(`kacho_iam_authz_check_decisions_total\{[^}]*rpc="([^"]+)"`)
+var laneLabel = regexp.MustCompile(`kaname_authz_check_decisions_total\{[^}]*rpc="([^"]+)"`)
 
 // lanesInDump — множество полос, ФАКТИЧЕСКИ появившихся в выгрузке.
 func lanesInDump(dump string) []string {

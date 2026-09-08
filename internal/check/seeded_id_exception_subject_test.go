@@ -36,8 +36,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // exceptionCensus — объём осмотренного.
@@ -129,8 +131,7 @@ func auditSeededIDExceptions(migrations map[string]string, pinned []string) ([]s
 
 // TestSeededIDExceptionsHaveASubject — несущее утверждение по НАСТОЯЩЕМУ дереву.
 func TestSeededIDExceptionsHaveASubject(t *testing.T) {
-	root := monorepoRoot(t)
-	paths, err := treecorpus.UnderWithSuffix(root+"/"+iamMigrationsDir, ".sql")
+	paths, err := treecorpus.UnderWithSuffix(platformtree.RequirePath(t, iamMigrationsDir), ".sql")
 	require.NoError(t, err)
 
 	migrations := map[string]string{}

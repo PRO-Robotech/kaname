@@ -62,8 +62,8 @@ func writeSyntheticReach(t *testing.T, files []injectedFile) (root string, paths
 const usecaseWithCanon = `package role
 
 import (
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 func validate(r domain.Rules) error {
@@ -74,8 +74,8 @@ func validate(r domain.Rules) error {
 const usecaseWithAliasedCanon = `package role
 
 import (
-	am "github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	am "github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 func validate(r domain.Rules) error {
@@ -109,7 +109,7 @@ func IsKnownModule(m string) bool {
 
 const usecaseWithVariadicNames = `package role
 
-import "github.com/PRO-Robotech/kacho-iam/internal/domain"
+import "github.com/PRO-Robotech/kaname/internal/domain"
 
 func known() domain.ModuleSet {
 	return domain.ModuleSetOf("iam", "vpc", "compute", "loadbalancer", "registry", "storage")
@@ -123,7 +123,7 @@ func known() domain.ModuleSet {
 // нарушителя.
 const usecaseNamingCanonInProse = `package role
 
-import "github.com/PRO-Robotech/kacho-iam/internal/domain"
+import "github.com/PRO-Robotech/kaname/internal/domain"
 
 // Набор модулей — ЖИВЫЕ строки каталога, а не канон authzmap.CatalogSeedModules:
 // снятый модуль обязан перестать приниматься без перезапуска службы (#1927).
@@ -143,7 +143,7 @@ func labelSelectable() []string { return []string{"vpc", "compute"} }
 // набора не читает.
 const usecaseWithBlankImport = `package role
 
-import _ "github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+import _ "github.com/PRO-Robotech/kaname/internal/authzmap"
 
 func nothing() {}
 `
@@ -152,7 +152,7 @@ func nothing() {}
 // запроса она не является: фикстура вправе называть канон.
 const probeOnTheRequestPath = `package role
 
-import "github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+import "github.com/PRO-Robotech/kaname/internal/authzmap"
 
 func canon() []string { return authzmap.CatalogSeedModules() }
 `
@@ -165,7 +165,7 @@ const applierOutsideTheReach = probeOnTheRequestPath
 func TestIAM1927_InjectionRedsTheCompiledSetAndKeepsQuietOnItsLawfulTwins(t *testing.T) {
 	// Каждый случай — ОДИН файл в досягаемости плюс её законный сосед, чтобы
 	// обход не был пуст и перепись не вырождалась.
-	const neighbour = "services/iam/internal/apps/kacho/api/role/read.go"
+	const neighbour = "services/iam/internal/apps/kaname/api/role/read.go"
 	const neighbourBody = `package role
 
 func read() string { return "ok" }
@@ -179,15 +179,15 @@ func read() string { return "ok" }
 		reason string // подстрока, которую находка обязана НАЗВАТЬ
 	}{
 		{
-			name: "канон на пути запроса — находка", rel: "services/iam/internal/apps/kacho/api/role/create.go",
+			name: "канон на пути запроса — находка", rel: "services/iam/internal/apps/kaname/api/role/create.go",
 			body: usecaseWithCanon, finds: true, reason: "канон дерева authzmap.CatalogSeedModules",
 		},
 		{
-			name: "канон под псевдонимом — находка", rel: "services/iam/internal/apps/kacho/api/role/create.go",
+			name: "канон под псевдонимом — находка", rel: "services/iam/internal/apps/kaname/api/role/create.go",
 			body: usecaseWithAliasedCanon, finds: true, reason: "канон дерева am.CatalogSeedModules",
 		},
 		{
-			name: "словарь написаний — находка", rel: "services/iam/internal/apps/kacho/api/role/create.go",
+			name: "словарь написаний — находка", rel: "services/iam/internal/apps/kaname/api/role/create.go",
 			body: usecaseWithSpellings, finds: true, reason: "словарь написаний модулей платформы",
 		},
 		{
@@ -195,27 +195,27 @@ func read() string { return "ok" }
 			body: domainWithReturnedLiteral, finds: true, reason: "перечень из 6 имён модулей",
 		},
 		{
-			name: "имена аргументами вариадического вызова — находка", rel: "services/iam/internal/apps/kacho/api/role/create.go",
+			name: "имена аргументами вариадического вызова — находка", rel: "services/iam/internal/apps/kaname/api/role/create.go",
 			body: usecaseWithVariadicNames, finds: true, reason: "перечень из 6 имён модулей",
 		},
 		{
-			name: "канон ТОЛЬКО в комментарии — молчание", rel: "services/iam/internal/apps/kacho/api/role/create.go",
+			name: "канон ТОЛЬКО в комментарии — молчание", rel: "services/iam/internal/apps/kaname/api/role/create.go",
 			body: usecaseNamingCanonInProse, finds: false,
 		},
 		{
-			name: "пара имён — молчание", rel: "services/iam/internal/apps/kacho/api/role/create.go",
+			name: "пара имён — молчание", rel: "services/iam/internal/apps/kaname/api/role/create.go",
 			body: usecaseWithAPairOfNames, finds: false,
 		},
 		{
-			name: "пустой импорт канона — молчание", rel: "services/iam/internal/apps/kacho/api/role/create.go",
+			name: "пустой импорт канона — молчание", rel: "services/iam/internal/apps/kaname/api/role/create.go",
 			body: usecaseWithBlankImport, finds: false,
 		},
 		{
-			name: "проба в досягаемости — молчание", rel: "services/iam/internal/apps/kacho/api/role/create_test.go",
+			name: "проба в досягаемости — молчание", rel: "services/iam/internal/apps/kaname/api/role/create_test.go",
 			body: probeOnTheRequestPath, finds: false,
 		},
 		{
-			name: "применитель вне досягаемости — молчание", rel: "services/iam/internal/apps/kacho/moduleroles/apply.go",
+			name: "применитель вне досягаемости — молчание", rel: "services/iam/internal/apps/kaname/moduleroles/apply.go",
 			body: applierOutsideTheReach, finds: false,
 		},
 		{
@@ -223,7 +223,7 @@ func read() string { return "ok" }
 			body: applierOutsideTheReach, finds: false,
 		},
 		{
-			name: "страж паритета вне досягаемости — молчание", rel: "services/iam/internal/apps/kacho/seed/catalog_parity.go",
+			name: "страж паритета вне досягаемости — молчание", rel: "services/iam/internal/apps/kaname/seed/catalog_parity.go",
 			body: applierOutsideTheReach, finds: false,
 		},
 		{
@@ -320,7 +320,7 @@ func TestIAM1927_InjectionProvesTheEmptyWalkIsRefused(t *testing.T) {
 // Тот же файл, что молчит у разбора, предикатом по подстроке был бы находкой.
 func TestIAM1927_InjectionProvesTheWordPredicateWouldRedOnItsOwnExplanation(t *testing.T) {
 	root, paths := writeSyntheticReach(t, []injectedFile{
-		{rel: "services/iam/internal/apps/kacho/api/role/create.go", body: usecaseNamingCanonInProse},
+		{rel: "services/iam/internal/apps/kaname/api/role/create.go", body: usecaseNamingCanonInProse},
 	})
 	uses, census, err := compiledModuleSetUses(root, paths)
 	if err != nil {

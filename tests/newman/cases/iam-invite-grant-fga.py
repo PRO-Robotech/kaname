@@ -26,7 +26,7 @@ Three independent facts made that a NON-test:
      own account, NEVER on a project (STRICT — no hierarchy-down). So
      AccessBinding.Create on `project:A1` MUST fail with the Operation carrying
      `error` FAILED_PRECONDITION (code 9) "role <id> is not assignable on
-     project:A1" (internal/apps/kacho/api/access_binding/create.go doCreate).
+     project:A1" (internal/apps/kaname/api/access_binding/create.go doCreate).
      The bind the old suite relied on was contractually dead.
 
   2. FGA CASCADE (kacho-proto fga_model.fga): `project.viewer = … or viewer
@@ -47,7 +47,7 @@ HOW THIS SUITE IS GREEN BY THE RIGHT REASON
 * CLEAN SUBJECT — each case creates a FRESH ServiceAccount on account A as the
   grant subject (sa_setup). A just-created SA has ZERO `…#viewer` grants: SA.Create
   emits only the reverse hierarchy pointer `account:A#account@iam_service_account:SA`
-  (internal/apps/kacho/api/service_account/create.go), which gives the account
+  (internal/apps/kaname/api/service_account/create.go), which gives the account
   OWNER a path TO the SA — it does NOT make the SA a viewer of the account. So no
   fixture-pollution path can mask a failed grant.
 
@@ -519,7 +519,7 @@ CASES.append(Case(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RC-2 invite-activation member edge — NOT BLACK-BOX-TESTABLE HERE; covered at
-# integration level (T-I3, internal/repo/kacho/pg/upsert_invite_grant_fga_integration_test.go,
+# integration level (T-I3, internal/repo/kaname/pg/upsert_invite_grant_fga_integration_test.go,
 # GREEN). RC-2 co-commits `account:<A>#account@iam_user:<invitee>` ONLY on genuine
 # activation through the Kratos provision-hook flow
 # (InternalUserService.UpsertFromIdentity). The black-box api-gateway harness has

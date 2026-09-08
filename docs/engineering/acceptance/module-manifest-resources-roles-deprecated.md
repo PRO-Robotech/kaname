@@ -14,6 +14,16 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   названным предметом и без дублирования (§16.4); объём сценариев не изменился:
   **30 → 30**, «Тогда»-клауз **73**, ни один Given/When/Then не тронут.
   Реализация ведётся по этому документу; чего он **не** покрывает — §10
+- **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Правок 2, строк 2: `b81adf2760` имя службы (1) ·
+  `93ef852fe9` идентификатор лицензии (1). Дельта целиком — подстановка токена
+  (`kacho-iam→kaname` · `BUSL-1.1→AGPL-3.0-or-later`); непарных строк 0, пар с
+  изменившимся числом токенов 0; ни один сценарий, производитель, признак
+  готовности и клауза не тронуты. Одобрение относится к **содержимому**, а не к
+  имени файла: APPROVED выше есть вердикт о редакции, прочитанной проверяющим.
+  Вердикт на нынешнюю редакцию ставит `acceptance-reviewer` своим кругом, а не
+  эта строка. Решение, замер и цена обоих отвергнутых исходов —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 - **Ревизия измерения:** круг 1 — `9f13101a7`; круг 2 — `9a531cbe9`; **круг 3 —
   `ab771fe83`** (ветка `lane/1778-acceptance`, `git status --porcelain` пуст,
   `git ls-remote --heads origin` → 0 — на origin не отправлено). **Все** числа
@@ -29,9 +39,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   держателем быть не может, и до этого круга ни один из названных не был
   прогнан
 - **Задача:** `PRO-Robotech/kacho#1778`
-- **Состояние после вердикта:** предикат пересмотра, названный §2.6а для
-  ключа `classes`, СРАБОТАЛ — ключ заведён, разбор во врезке §2.6а
-  (задача `#1876`). Решения кругов не переписаны: они верны на своих
+- **Состояние после вердикта:** сработали ДВА предиката пересмотра, названные
+  самим документом. Первый — §2.6а, ключ `classes`: ключ заведён, разбор во
+  врезке §2.6а (задача `#1876`). Второй — §17.4, ключ `internal`: ключ заведён
+  вместе с раскрывателем `classes → verbs`, чьё отсутствие раздел и называл
+  условием своей устарелости; разбор и состояние всех четырёх ключей — во
+  врезке §17.4 (задача `#2072`), и с этого круга состояние **держится гейтом**,
+  а не прозой. Решения кругов не переписаны: они верны на своих
   ревизиях, и слово APPROVED покрывает именно их текст
 - **Предшественник:** `#1088` (раздел `seed`, APPROVED, посажен) — её приёмка
   `module-manifest-seed-contract.md` служит образцом формы и **источником шести
@@ -52,7 +66,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   (§2.10). Ни один существующий вход не меняет смысла; **шесть файлов** дерева
   держат послабления, истекающие вместе с этой задачей, и правятся тем же
   изменением (§2.9)
-- **Сервис:** `kacho-iam` — предмет. Затрагивает `services/iam/internal/manifest/`
+- **Сервис:** `kaname` — предмет. Затрагивает `services/iam/internal/manifest/`
   (структуры, разбор, связность), `services/iam/schema/` (опубликованный
   контракт), `internal/repohygiene/` (держатель `#1813` и гейт устарелости),
   `services/iam/Makefile`. **`proto/` НЕ затрагивает:** манифест есть YAML, поля
@@ -60,6 +74,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 - **Предмет приёмки — ВЫБОР.** Что каждый из трёх разделов принимает, что
   отвергает **с именем поля**, и чего он не вправе принять молча. Реализация
   заводится этой же задачей
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2212`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **8**. Правка одна и
+  механическая — приставка пути контракта `proto/kacho/cloud/iam/` →
+  `proto/kaname/cloud/iam/`: домен доступа переехал (`d46aaa7280`), и прежний
+  корень в дереве **не существует** (`git ls-files 'proto/kacho/cloud/iam/**'`
+  → 0). До правки координата не резолвилась, то есть **молчала**: читатель уходил
+  за ней и не находил. **НЕ тронуты** ни один сценарий, производитель, признак
+  готовности, клауза и ни одно число: непарных строк 0, пар с изменившимся числом
+  токенов 0. Записи замера, привязанные к ревизии, где прежний путь ЖИВ, оставлены
+  как есть намеренно — их перечень и предикат в теле задачи. Одобрение относится к
+  **содержимому**, а не к имени файла: APPROVED выше есть вердикт о редакции,
+  прочитанной проверяющим. Вердикт на нынешнюю редакцию ставит
+  `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 
 ---
 
@@ -94,7 +122,7 @@ python3 -c "import json;print(list(json.load(open(
 grep -cE '^\s+"vpc\.' services/iam/internal/authzmap/fga_types.go   # 9 — привязка к
 #   началу строки ОБЯЗАТЕЛЬНА: без неё предикат даёт 10, считая godoc-пример
 #   в комментарии той же функции (§1.2)
-grep -c '^type vpc_'  proto/kacho/cloud/iam/v1/fga_model.fga
+grep -c '^type vpc_'  proto/kaname/cloud/iam/v1/fga_model.fga
 # строки каталога домена vpc
 python3 -c "import json;d=json.load(open('gateway/internal/middleware/embed/permission_catalog.json'));\
 print(sum(1 for e in d if e['permission'].startswith('vpc.')))"
@@ -430,9 +458,9 @@ grep -rhoE "'[a-z]+\.[a-zA-Z_]+\.(admin|edit|view)'" services/iam/internal/migra
 ```sh
 sed -n '/^type Rule struct/,/^}/p' services/iam/internal/domain/rule.go
   → Module · Resources · Verbs · ResourceNames · MatchLabels
-git grep -n '\bclasses\b' -- 'proto/kacho/cloud/iam/v1/*.proto' 'services/iam/internal/domain/*.go'
+git grep -n '\bclasses\b' -- 'proto/kaname/cloud/iam/v1/*.proto' 'services/iam/internal/domain/*.go'
   → пусто
-grep -n 'repeated Rule\|message Role' proto/kacho/cloud/iam/v1/role.proto
+grep -n 'repeated Rule\|message Role' proto/kaname/cloud/iam/v1/role.proto
   → 42: message Role     93:   repeated Rule rules = 11;
 ```
 
@@ -527,7 +555,7 @@ construction, а манифест системных ролей не объяв�
 названо, и оно тоже изоморфно контракту:
 
 ```sh
-sed -n '148,160p' proto/kacho/cloud/iam/v1/role.proto
+sed -n '148,160p' proto/kaname/cloud/iam/v1/role.proto
   → DefinitionTier: tier_type (`iam.cluster` | `iam.account` | `iam.project`) + tier_id
   → «`is_system` (tag 6) is DERIVED from the tier (tier_type == `iam.cluster`)»
 ```
@@ -1349,7 +1377,7 @@ git show c59525c66:<файл> | grep -cE '^\*\*MOD-MR-[0-9]+а? —'   # → 29
 # MOD-MR-09 — отношения без единого RPC и их дом
 python3 - <<'P'
 import re,json,collections
-model=open('proto/kacho/cloud/iam/v1/fga_model.fga').read()
+model=open('proto/kaname/cloud/iam/v1/fga_model.fga').read()
 cat=json.load(open('gateway/internal/middleware/embed/permission_catalog.json'))
 used={e.get('required_relation','') for e in cat}
 std={'project','account','cluster','super_admin','admin','editor','viewer','member','parent'}
@@ -1367,7 +1395,7 @@ python3 - <<'P'
 import re
 G={'user','service_account','group#member'}; T={'admin','editor','viewer'}
 hits=set()
-for b in re.split(r'^type ',open('proto/kacho/cloud/iam/v1/fga_model.fga').read(),flags=re.M)[1:]:
+for b in re.split(r'^type ',open('proto/kaname/cloud/iam/v1/fga_model.fga').read(),flags=re.M)[1:]:
     n=b.split('\n')[0].strip(); t=set(); odd=False
     for line in b.split('\n'):
         m=re.match(r'\s*define ([a-z_]+):\s*(.*)$',line)
@@ -1708,9 +1736,9 @@ MOD-MR-12 и MOD-MR-13 делают `classes` несущим ключом `grant
 ```sh
 sed -n '/^type Rule struct/,/^}/p' services/iam/internal/domain/rule.go
   → Module · Resources · Verbs · ResourceNames · MatchLabels
-grep -rn '\bclasses\b' proto/kacho/cloud/iam/v1/*.proto services/iam/internal/domain/*.go
+grep -rn '\bclasses\b' proto/kaname/cloud/iam/v1/*.proto services/iam/internal/domain/*.go
   → пусто
-sed -n '172,200p' proto/kacho/cloud/iam/v1/role.proto
+sed -n '172,200p' proto/kaname/cloud/iam/v1/role.proto
   → resources = 2 · verbs = 3 · resource_names = 4 · match_labels
 ```
 
@@ -2543,6 +2571,56 @@ print(sorted({e['permission'] for e in d if e['permission'].startswith('vpc.netw
 Раздел `roles` этой приёмки классов не несёт вовсе (§2.6а), поэтому запрет
 сегодня беспредметен; он станет предметом вместе с раскрывателем `classes →
 verbs` у `#1090`. Заведено задачей `#1835`.
+
+> [!important] СОСТОЯНИЕ четырёх ключей на ревизии `975512cbd` — предикат,
+> названный этим же разделом, СРАБОТАЛ (задача продукта `#2072`)
+>
+> Запись круга выше **не переписана и не отзывается**: она верна на своей
+> ревизии `ab771fe83`, и рецензент круга 3 читал именно её. Здесь дописано
+> состояние — тем же порядком, каким §2.6а записала сработавший предикат
+> пересмотра ключа `classes`.
+>
+> Раздел назвал условие своей устарелости прямо: «запрет сегодня беспредметен;
+> он станет предметом вместе с раскрывателем `classes → verbs` у `#1090`.
+> Заведено задачей `#1835`». **Оба номера закрыты**, раскрыватель существует
+> (`roleexport`), и вместе с ним заведён ключ, которым плоскость исполнения
+> объявляется. То есть раздел устарел **дважды** — и в отрицании ключа, и в
+> оценке беспредметности запрета.
+>
+> Состояние по каждому из четырёх ключей, названных заголовком:
+>
+> | ключ | состояние | читатель |
+> |---|---|---|
+> | `internal` | **есть** в контракте — заведён `8efed38acf` (линия modules-5, `#1888`) | `manifest.VerbProducesRelation` (`internal/manifest/resources.go`), поле `Verb.Internal` там же, `roleexport.Action.Internal` (`attribution.go`) и покрытие класса `roleexport.Covers` (`producibility.go`, `#1835`) |
+> | `catalog` | **нет** в контракте | — |
+> | `acr` | **нет** в контракте | — |
+> | `exempt` | **нет** в контракте | — |
+>
+> Предикат состояния — рекурсивный обход `properties` схемы; путь к ключу
+> глагола выписывать нельзя, он переедет вместе с формой:
+>
+> ```sh
+> python3 -c "import json;d=json.load(open('services/iam/schema/module-manifest.schema.json'));
+> n=set()
+> def w(x):
+>  if isinstance(x,dict):
+>   n.update((x.get('properties') or {}).keys())
+>   [w(v) for v in x.values()]
+>  elif isinstance(x,list): [w(v) for v in x]
+> w(d);print(sorted(k for k in ('internal','catalog','acr','exempt') if k in n))"
+> ```
+> → `['internal']`
+>
+> **Чем держится впредь — гейтом, а не этой врезкой.**
+> `TestAcceptanceSectionKeyStateMatchesTheSchema`
+> (`internal/manifest/acceptancekeystate_test.go`) читает эту таблицу и сверяет
+> её со схемой в обе стороны: «нет» при наличии — находка, «есть» при
+> отсутствии — тоже; заведённый ключ обязан назвать читателя, и читатель обязан
+> существовать в не-тестовом Go модуля. Проза круга выше законна ровно пока её
+> перекрывает строка этой таблицы: исчезнет строка — заголовок снова станет
+> находкой, то есть послабление **истекает само**. Способность падать и молчать
+> доказана инъекцией по каждой оси с законным близнецом
+> (`TestAcceptanceSectionKeyState_CanFailAndStaysSilent`).
 
 ### 17.5. Форма `verbs` потребовала СВОЕЙ проверки неизвестного ключа
 

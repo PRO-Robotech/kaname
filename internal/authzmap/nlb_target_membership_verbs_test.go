@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // nlb_target_membership_verbs_test.go — NLB-TGT-1: управление СОСТАВОМ группы целей
@@ -208,11 +208,11 @@ func seedTargetGroupWorld(t *testing.T, ctx context.Context, tx pgx.Tx) tmWorld 
 		grp  = "tgr-tmprobe"
 	)
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.accounts (id, name, owner_user_id) VALUES ($1, 'account-tm', $2)`,
+		`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, 'account-tm', $2)`,
 		acc, root)
 	saUser(t, ctx, tx, root, acc)
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.projects (id, account_id, name) VALUES ($1, $2, 'project-tm')`,
+		`INSERT INTO kaname.projects (id, account_id, name) VALUES ($1, $2, 'project-tm')`,
 		prj, acc)
 	saPointer(t, ctx, tx, "project", prj, "account", "account:"+acc)
 	saEdge(t, ctx, tx, tmType, grp, "project", prj)
@@ -253,27 +253,27 @@ func tmGrant(t *testing.T, ctx context.Context, tx pgx.Tx, account, project, sub
 	canonical := strings.ToLower(strings.TrimSpace(verb))
 
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.roles (id, account_id, name, permissions)
+		`INSERT INTO kaname.roles (id, account_id, name, permissions)
 		 VALUES ($1, $2, $3, '["loadbalancer.targetGroups.*.get"]'::jsonb)
 		 ON CONFLICT DO NOTHING`,
 		role, account, "tm_"+canonical)
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)
+		`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)
 		 ON CONFLICT DO NOTHING`,
 		role, catalogType, canonical)
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.role_rule_selectors
+		`INSERT INTO kaname.role_rule_selectors
 		   (role_id, rule_fp, arm, object_types, match_labels)
 		 VALUES ($1, 'fp-tm', 'anchor', ARRAY[$2::text], '{}'::jsonb)
 		 ON CONFLICT DO NOTHING`,
 		role, catalogType)
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.access_bindings
+		`INSERT INTO kaname.access_bindings
 		   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 		 VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
 		binding, subjectID, role, project)
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
+		`INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
 		 VALUES ($1, 'user', $2)`, binding, subjectID)
 }
 

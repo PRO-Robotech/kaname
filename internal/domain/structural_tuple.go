@@ -14,7 +14,7 @@ import "strings"
 //
 //   - the emitter — access_binding/tuples.go::hierarchyParentTuple,
 //     account/create.go::ownerTuples, project/create.go::projectStructuralTuples —
-//     enqueues the triple into kacho_iam.fga_outbox inside the writer transaction,
+//     enqueues the triple into kaname.fga_outbox inside the writer transaction,
 //     out of which a trigger folds the direct fact in the SAME commit;
 //   - the resolver — it supplied the SAME triple as a request-scoped tuple, so the
 //     cascade resolved from committed state instead of waiting for a delivery.

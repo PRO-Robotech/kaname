@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // resourceforms_test.go — ФОРМЫ раздела `resources`, заведённые ради блоков,

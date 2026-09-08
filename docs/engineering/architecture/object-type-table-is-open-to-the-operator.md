@@ -128,7 +128,7 @@ YAML-манифестом **на установку**, и её даёт опер
 | охрана образа снята ровно в порождающем проходе | `internal/manifest/typereferent_test.go` |
 | снятые типы обхода равны разобранным | `internal/manifest/peekobjecttypes_internal_test.go` |
 | образец формы Go равен ограничению базы | `internal/migrations/object_type_form_agrees_with_domain_test.go` (инъекция в обе стороны) |
-| вся цепочка старта проходит, и следующий старт тоже | `internal/apps/kacho/modulecatalog/operator_type_chain_test.go` |
+| вся цепочка старта проходит, и следующий старт тоже | `internal/apps/kaname/modulecatalog/operator_type_chain_test.go` |
 
 ## Что этим решением НЕ размыкается
 

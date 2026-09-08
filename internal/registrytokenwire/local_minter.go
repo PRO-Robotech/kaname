@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
-	"github.com/PRO-Robotech/kacho-iam/internal/tokensigner"
+	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
+	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
 // LocalMintAdapter — НАШ подписант с точки зрения контура выдачи докер-токена.

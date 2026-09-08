@@ -1,5 +1,5 @@
 apiVersion: v2
-name: iam-docs
+name: kaname-docs
 version: 0.1.0
 appVersion: 0.1.0
-description: Kachō IAM docs — Docusaurus (AntD-flavored) static site, nginx-served
+description: Kaname docs — Docusaurus (AntD-flavored) static site, nginx-served

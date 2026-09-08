@@ -2,9 +2,9 @@
 
 ## Назначение
 
-Гайд по развертыванию `kacho-iam`: образ и бинарники, listener-порты,
+Гайд по развертыванию `kaname`: образ и бинарники, listener-порты,
 helm-chart, config + секреты, миграции и порядок запуска. Все факты сверены
-с `deploy/` и `cmd/kacho-iam/`.
+с `deploy/` и `cmd/kaname/`.
 
 ## Состав образа
 
@@ -12,16 +12,16 @@ helm-chart, config + секреты, миграции и порядок запу
 
 | Бинарник | Назначение |
 |---|---|
-| `kacho-iam` | gRPC API-сервер (`serve`) — основной процесс Deployment'а |
-| `kacho-migrator` | CLI миграций БД (`up`/`down`/`status`/`create`), запускается init-контейнером |
+| `kaname` | gRPC API-сервер (`serve`) — основной процесс Deployment'а |
+| `kaname-migrator` | CLI миграций БД (`up`/`down`/`status`/`create`), запускается init-контейнером |
 
-`kacho-iam` обслуживает только `serve` — миграции вынесены в отдельный
-`kacho-migrator` (cmd-binary не смешивает обязанности). Попытка
-`kacho-iam migrate ...` падает с подсказкой использовать `kacho-migrator`.
+`kaname` обслуживает только `serve` — миграции вынесены в отдельный
+`kaname-migrator` (cmd-binary не смешивает обязанности). Попытка
+`kaname migrate ...` падает с подсказкой использовать `kaname-migrator`.
 
 ## Listener-порты
 
-`kacho-iam serve` поднимает шесть независимых listener'ов:
+`kaname serve` поднимает шесть независимых listener'ов:
 
 | Порт | Протокол | Назначение | TLS |
 |---|---|---|---|
@@ -67,7 +67,7 @@ taxonomy), `SAKeyService` (SA OAuth-ключи через Ory Hydra).
 | маршрут | что отдаёт | кто спрашивает |
 |---|---|---|
 | канонический well-known | **зеркало** публичного набора прежнего издателя, дословно | всякий, кто сегодня пиннут на прежнего издателя |
-| `authn.token-signing.key-set-path` (умолчание `/.well-known/kacho/jwks.json`) | **НАША** запись: публичные половины ключей ключницы | тот, кто проверяет токен НАШЕЙ чеканки |
+| `authn.token-signing.key-set-path` (умолчание `/.well-known/kaname/jwks.json`) | **НАША** запись: публичные половины ключей ключницы | тот, кто проверяет токен НАШЕЙ чеканки |
 | `/internal/tokens/introspect` | действительность предъявленного НАШЕГО токена — суждение `active`, и только оно | поверхность приёма — на КАЖДОМ предъявлении |
 
 **Почему записей две, а не одна объединённая.** Объединение наборов дешевле и
@@ -94,19 +94,19 @@ taxonomy), `SAKeyService` (SA OAuth-ключи через Ory Hydra).
 
 ## Архитектура deployment'а
 
-`kacho-iam` — Deployment в namespace `kacho` (одна реплика на dev-стенде,
+`kaname` — Deployment в namespace `kacho` (одна реплика на dev-стенде,
 несколько на production).
 
 ```mermaid
 flowchart TB
     Tenant -- HTTPS/REST --> APIGW[api-gateway]
     subgraph KachoNS[Namespace kacho]
-        APIGW -- gRPC :9090 / :9091 --> IAM[Deployment kacho-iam]
-        IAM -- pgx master + read-replica --> PG[(Postgres kacho_iam)]
+        APIGW -- gRPC :9090 / :9091 --> IAM[Deployment kaname]
+        IAM -- pgx master + read-replica --> PG[(Postgres kaname)]
         Kratos[Ory Kratos] -- provision-hook :9092 --> IAM
         Hydra[Ory Hydra] -- token/refresh-hook :9092 --> IAM
         IAM -- admin API: JWKS --> Hydra
-        Migrate[initContainer kacho-migrator] -. goose up .-> PG
+        Migrate[initContainer kaname-migrator] -. goose up .-> PG
         Prom[Prometheus] -- scrape :9095 --> IAM
     end
 ```
@@ -127,7 +127,7 @@ helm upgrade --install iam ./deploy -n kacho --create-namespace \
 ```yaml
 name: iam
 replicas: 1
-image: kacho-iam:dev
+image: kaname:dev
 imagePullPolicy: IfNotPresent
 ports:
   grpc: 9090
@@ -137,7 +137,7 @@ db:
   host: kacho-umbrella-pg-iam
   port: "5432"
   user: iam
-  name: kacho_iam
+  name: kaname
   passwordSecretName: kacho-umbrella-pg-iam
   passwordSecretKey: password
 logger:
@@ -157,7 +157,7 @@ authn:
 ```
 
 `templates/deployment.yaml` запускает init-контейнер `migrate`
-(`kacho-migrator up`) перед основным контейнером `iam` (`kacho-iam serve`).
+(`kaname-migrator up`) перед основным контейнером `iam` (`kaname serve`).
 Pod hardened: `runAsNonRoot` (uid 65532), `readOnlyRootFilesystem`,
 `drop: ["ALL"]`, `seccompProfile: RuntimeDefault`. Readiness/liveness — TCP-probe
 на gRPC-порт. `Service` публикует `grpc` (9090) и `grpc-internal` (9091).
@@ -165,15 +165,15 @@ Pod hardened: `runAsNonRoot` (uid 65532), `readOnlyRootFilesystem`,
 База chart'а — dev-профиль для локального kind-стенда (`authn.mode: dev`,
 `sslMode: disable`, mTLS выключен). Production-деплой обязан переопределить:
 `authn.mode: production` (или `production-strict`), включить server-side mTLS
-обоих gRPC-listener'ов (иначе `kacho-iam` fail-fast'ит на старте и отказывается
+обоих gRPC-listener'ов (иначе `kaname` fail-fast'ит на старте и отказывается
 подниматься на незащищенных `:9090`/`:9091`) и задать `sslMode: require` (или
 `verify-full`).
 
 ## Config + ENV-override
 
-`kacho-iam` читает YAML-config из `/etc/kacho-iam/config.yaml` (рендерится
+`kaname` читает YAML-config из `/etc/kaname/config.yaml` (рендерится
 `templates/configmap.yaml`). Любой ключ переопределяется ENV по схеме
-`KACHO_IAM_<SECTION>__<KEY>` (двойное подчеркивание между секцией и ключом).
+`KANAME_<SECTION>__<KEY>` (двойное подчеркивание между секцией и ключом).
 Отрендеренный config:
 
 ```yaml
@@ -194,19 +194,19 @@ healthcheck:
 repository:
   type: POSTGRES
   postgres:
-    url: "postgres://iam@kacho-umbrella-pg-iam:5432/kacho_iam"
+    url: "postgres://iam@kacho-umbrella-pg-iam:5432/kaname"
     slave-url: ""                  # опц. read-replica; пусто → Reader-TX на master
     max-conns: 80
     ssl-mode: disable
-    password-from-env: KACHO_IAM_DB_PASSWORD
+    password-from-env: KANAME_DB_PASSWORD
 
 authn:
   mode: dev                        # dev | production | production-strict
   domain: api.kacho.cloud
   hydra-issuer: ""                 # пусто → выводится из domain
-  hook-shared-secret-env: KACHO_IAM_HOOK_TOKEN
+  hook-shared-secret-env: KANAME_HOOK_TOKEN
   # Ключ ОБЁРТКИ приватной половины подписного ключа (см. ниже).
-  jwks-encryption-key-hex-env: KACHO_IAM_JWKS_ENC_KEY
+  jwks-encryption-key-hex-env: KANAME_JWKS_ENC_KEY
   hooks-http-endpoint: "tcp://0.0.0.0:9092"
   # Своя чеканка токенов. Блок рендерится ТОЛЬКО при enabled: пока чеканка
   # выключена, её настройки не требуются — страж, требующий того, чем не
@@ -216,14 +216,14 @@ authn:
     issuer: ""                                    # пусто при enabled ⇒ отказ в старте
     algorithm: ""                                 # RS256 | ES256 | EdDSA
     allowed-algorithms: ""                        # через запятую; считаются ЭЛЕМЕНТЫ
-    key-set-path: "/.well-known/kacho/jwks.json"  # путь НАШЕЙ записи набора
+    key-set-path: "/.well-known/kaname/jwks.json"  # путь НАШЕЙ записи набора
     key-lifetime: "2160h"                         # срок ключа ключницы
 ```
 
 `authn.mode` безопасен по умолчанию (`production` в дефолтах кода —
 anonymous fail-closed); dev-стенд явно опускает его до `dev` через
 `values.dev.yaml`. DSN автоматически дополняется `sslmode=<mode>` и
-`options=-c search_path=kacho_iam,public`.
+`options=-c search_path=kaname,public`.
 
 ### Секреты и env-переменные
 
@@ -232,25 +232,25 @@ anonymous fail-closed); dev-стенд явно опускает его до `de
 
 | ENV | Назначение |
 |---|---|
-| `KACHO_IAM_DB_PASSWORD` | пароль Postgres (`password-from-env`) |
-| `KACHO_IAM_HOOK_TOKEN` | shared secret HMAC для Ory-webhooks |
-| `KACHO_IAM_JWKS_ENC_KEY` | 32-байтный ключ (hex) ОБЁРТКИ приватной половины подписного ключа в ключнице (смысл ручки сменился, имя — нет; см. ниже) |
-| `KACHO_IAM_HYDRA_ADMIN_TOKEN` | Bearer для Hydra admin API (опц.) |
-| `KACHO_IAM_BOOTSTRAP_ROOT_EMAIL` | если задан — bootstrap-admin reconciler выдает `system_admin@cluster` этому юзеру (опц.) |
+| `KANAME_DB_PASSWORD` | пароль Postgres (`password-from-env`) |
+| `KANAME_HOOK_TOKEN` | shared secret HMAC для Ory-webhooks |
+| `KANAME_JWKS_ENC_KEY` | 32-байтный ключ (hex) ОБЁРТКИ приватной половины подписного ключа в ключнице (смысл ручки сменился, имя — нет; см. ниже) |
+| `KANAME_HYDRA_ADMIN_TOKEN` | Bearer для Hydra admin API (опц.) |
+| `KANAME_BOOTSTRAP_ROOT_EMAIL` | если задан — bootstrap-admin reconciler выдает `system_admin@cluster` этому юзеру (опц.) |
 
 > [!note] До стадии S6 здесь стояли четыре переменные внешнего движка прав
-> `KACHO_IAM_OPENFGA_ENDPOINT`, `KACHO_IAM_OPENFGA_STORE_ID`,
-> `KACHO_IAM_OPENFGA_MODEL_ID`, `KACHO_IAM_AUTHZ_PROVIDER` и три срока
-> (`KACHO_IAM_FGA_CHECK_TIMEOUT_MS`, `…_LIST_OBJECTS_…`, `…_WRITE_…`). Ни у одной
+> `KANAME_OPENFGA_ENDPOINT`, `KANAME_OPENFGA_STORE_ID`,
+> `KANAME_OPENFGA_MODEL_ID`, `KANAME_AUTHZ_PROVIDER` и три срока
+> (`KANAME_FGA_CHECK_TIMEOUT_MS`, `…_LIST_OBJECTS_…`, `…_WRITE_…`). Ни у одной
 > не осталось читателя: движок снят вместе со своим клиентом. Выставлять их не
 > нужно и бессмысленно — процесс их не читает.
 
 Вердикт о доступе складывается **той же базой**, что и остальное состояние службы,
-и настраивается общими `KACHO_IAM_DB_*`. Отдельного бэкенда авторизации нет.
+и настраивается общими `KANAME_DB_*`. Отдельного бэкенда авторизации нет.
 
 ## Внешние зависимости
 
-- **Postgres** (`kacho_iam`) — master-pool обязателен; read-replica (`slave-url`)
+- **Postgres** (`kaname`) — master-pool обязателен; read-replica (`slave-url`)
   опциональна (CQRS Reader-TX, иначе fallback на master).
 - **Ory Kratos** — identity-provider; `provision`-хук создает/активирует
   Account/Project/AccessBinding для нового identity (`UpsertFromIdentity`).
@@ -259,7 +259,7 @@ anonymous fail-closed); dev-стенд явно опускает его до `de
 
 ## In-process worker'ы
 
-`kacho-iam serve` поднимает фоновые задачи параллельно с listener'ами; падение
+`kaname serve` поднимает фоновые задачи параллельно с listener'ами; падение
 критичной задачи триггерит graceful-shutdown всего пода:
 
 - **LRO worker** (`operations`-таблица из corelib) — async-исполнение мутаций +
@@ -277,23 +277,23 @@ anonymous fail-closed); dev-стенд явно опускает его до `de
 
 ## Миграции
 
-Миграции исполняет отдельный `kacho-migrator` (init-контейнер
-`templates/deployment.yaml`), а не основной бинарник. Схема — `kacho_iam`,
+Миграции исполняет отдельный `kaname-migrator` (init-контейнер
+`templates/deployment.yaml`), а не основной бинарник. Схема — `kaname`,
 набор goose-миграций (`internal/migrations/0001_initial.sql` и далее по
 возрастанию).
 
 ```bash
 # Применить до latest.
-kacho-migrator up
+kaname-migrator up
 
 # Статус (applied / pending).
-kacho-migrator status
+kaname-migrator status
 
 # Откат на одну версию назад.
-kacho-migrator down
+kaname-migrator down
 
-# Источник DSN: --dsn > ENV KACHO_MIGRATOR_DSN > viper-config kacho-iam.
-KACHO_IAM_DB_PASSWORD=secret kacho-migrator up
+# Источник DSN: --dsn > ENV KACHO_MIGRATOR_DSN > viper-config kaname.
+KANAME_DB_PASSWORD=secret kaname-migrator up
 ```
 
 ## Своя чеканка токенов: ключница, ротация, публикация, отзыв
@@ -335,7 +335,7 @@ KACHO_IAM_DB_PASSWORD=secret kacho-migrator up
 
 ### Ключ обёртки: смысл сменился, имя — нет
 
-`KACHO_IAM_JWKS_ENC_KEY` (`authn.jwks-encryption-key-hex-env`) остаётся
+`KANAME_JWKS_ENC_KEY` (`authn.jwks-encryption-key-hex-env`) остаётся
 обязательным в production-режиме, и теперь у него **есть потребитель, причём
 единственный**: им оборачивается приватная половина подписного ключа в ключнице.
 Приватная половина ложится в базу, класть её открытым текстом нельзя — значит ключ
@@ -359,7 +359,7 @@ KACHO_IAM_DB_PASSWORD=secret kacho-migrator up
 ключей, и ни одной новой строки не заводится:
 
 ```
-подписывающий ключ: ручка authn.jwks-encryption-key-hex (ENV KACHO_IAM_JWKS_ENC_KEY)
+подписывающий ключ: ручка authn.jwks-encryption-key-hex (ENV KANAME_JWKS_ENC_KEY)
 не открывает уже записанные подписные ключи. Служба ОТКАЗЫВАЕТСЯ стартовать: …
 Верните прежнее значение ручки: signingkeys: the wrapping key does not open the
 stored signing keys: 1 of 1 keys in the key set do not open (kacho-…)
@@ -424,7 +424,7 @@ stored signing keys: 1 of 1 keys in the key set do not open (kacho-…)
 declared keys=N`), чтобы рост был виден снаружи, а не обнаруживался при разборе.
 
 Порядок смены для оператора и то, что происходит при смене значения внешним
-источником, — README чарта `kacho-iam`, раздел «Changing the wrapping key».
+источником, — README чарта `kaname`, раздел «Changing the wrapping key».
 
 ### Ротация: порядок, который обязан соблюдаться
 
@@ -499,14 +499,14 @@ RPC отчёта о состоянии JWKS **снят с контракта ц�
 sequenceDiagram
     autonumber
     participant Helm
-    participant Init as initContainer kacho-migrator
+    participant Init as initContainer kaname-migrator
     participant PG as Postgres
-    participant Pod as kacho-iam Pod
+    participant Pod as kaname Pod
 
     Helm->>Init: start init-container
-    Init->>PG: goose up (схема kacho_iam)
+    Init->>PG: goose up (схема kaname)
     PG-->>Init: success
-    Init-->>Pod: init complete → старт kacho-iam serve
+    Init-->>Pod: init complete → старт kaname serve
     Pod->>Pod: load config.yaml + ENV-override
     Pod->>PG: pgxpool master (+ опц. read-replica)
     Pod->>Pod: gRPC :9090/:9091 + HTTP :9092/:9095 + worker'ы
@@ -526,12 +526,12 @@ kubectl -n kacho exec deploy/iam -- wget -qO- http://localhost:9092/readyz
 
 # 3. gRPC reflection публичного API (через api-gateway).
 kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
-grpcurl -plaintext localhost:18080 list | grep kacho.cloud.iam.v1
+grpcurl -plaintext localhost:18080 list | grep kaname.cloud.iam.v1
 
 # 4. Bootstrap-юзер через UpsertFromIdentity (internal-порт).
 kubectl -n kacho port-forward svc/iam 9091:9091 &
 grpcurl -plaintext -d '{"external_id":"bootstrap-admin","email":"admin@kacho.cloud","display_name":"bootstrap"}' \
-  localhost:9091 kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity
+  localhost:9091 kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity
 ```
 
 ## Связанные компоненты
@@ -542,9 +542,9 @@ grpcurl -plaintext -d '{"external_id":"bootstrap-admin","email":"admin@kacho.clo
 
 ## Ссылки на код
 
-- `cmd/kacho-iam/{main,serve,wiring,env,grpc_register,hooks_mux}.go`
+- `cmd/kaname/{main,serve,wiring,env,grpc_register,hooks_mux}.go`
 - `cmd/migrator/main.go`
-- `internal/apps/kacho/config/`
+- `internal/apps/kaname/config/`
 - `internal/migrations/0001_initial.sql`
 - `deploy/Chart.yaml`, `deploy/values.yaml`, `deploy/templates/`
 - `Dockerfile`, `Makefile`

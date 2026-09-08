@@ -36,7 +36,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
 )
 
 // hookStub — обработчик-отметчик: проба спрашивает про маршрут, а не про логику.

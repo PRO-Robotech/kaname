@@ -32,12 +32,12 @@ import (
 	// единственный способ влинковать дескрипторы в бинарь переписи; перечень
 	// обязан совпадать с authzguard.OwnDoorProtoPackages, и расхождение
 	// немедленно роняет Derive, а не проходит молча.
-	_ "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
 	_ "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
 	_ "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/quota/v1"
+	_ "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
 	"github.com/PRO-Robotech/kacho/pkg/authz/catalogderive"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 )
 
 // doorKind — что карта прав говорит об одном RPC.
@@ -59,7 +59,7 @@ var (
 // doorCoverage возвращает вердикт карты по каждому RPC, который дверь знает.
 //
 // Ключ — та же пара «служба/метод», что и у переписи: полное имя метода из
-// карты («/kacho.cloud.iam.v1.ProjectService/Get») разбирается обратно, чтобы
+// карты («/kaname.cloud.iam.v1.ProjectService/Get») разбирается обратно, чтобы
 // единица счёта осталась одна на весь пакет.
 func doorCoverage() (map[RPC]doorKind, error) {
 	m, err := catalogderive.Derive(authzguard.OwnDoorProtoPackages()...)

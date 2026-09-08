@@ -81,7 +81,7 @@ func TestGoverningTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 	// Сам человек. Кортеж пишется на заведении пользователя (internal_upsert.go).
 	w.factThroughJournal(t, "user:"+invitee, "subject", "iam_user", invitee)
 	// Уровень 1.
-	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_kacho_root")
+	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_root")
 
 	// Выдача, живущая В АККАУНТЕ пригласившего, — предмет его законной власти.
 	w.seedRole(t, "rol-govid2", acc)
@@ -91,11 +91,11 @@ func TestGoverningTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 	// Гейты спрашиваются У КАТАЛОГА, а не пишутся литералом: каталог порождается
 	// из proto и есть единственный источник per-RPC решения края. Литерал означал
 	// бы, что проба утверждает о СВОЁМ представлении гейта, а не о действующем.
-	editRel, editType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserService/Update")
-	blockRel, blockType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserService/Block")
-	unblockRel, unblockType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserService/Unblock")
-	readRel, readType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserService/Get")
-	grantRel, grantType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.AccessBindingService/Delete")
+	editRel, editType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Update")
+	blockRel, blockType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Block")
+	unblockRel, unblockType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Unblock")
+	readRel, readType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Get")
+	grantRel, grantType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.AccessBindingService/Delete")
 	for _, c := range []struct{ what, got string }{
 		{"правка записи", editType}, {"запрет", blockType},
 		{"снятие запрета", unblockType}, {"чтение записи", readType},

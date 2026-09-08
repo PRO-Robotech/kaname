@@ -3,7 +3,7 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# tests/newman/scripts/run.sh — прогон newman коллекций kacho-iam.
+# tests/newman/scripts/run.sh — прогон newman коллекций kaname.
 #
 # Usage:
 #   ./scripts/run.sh                       # все коллекции, сводный отчет
@@ -372,7 +372,7 @@ else
   # and assert visibility (InternalIAMService.Check v_list) appears on Create and
   # is REVOKED when the matching label is removed/changed on the resource. They
   # are CROSS-SERVICE: they require kacho-vpc / kacho-compute / kacho-nlb deployed
-  # alongside kacho-iam behind the gateway (the `*→iam` RegisterResource edge that
+  # alongside kaname behind the gateway (the `*→iam` RegisterResource edge that
   # feeds resource_mirror with labels). The newman-e2e of EVERY repo (iam / vpc /
   # compute / nlb / deploy) brings up the FULL kacho-deploy umbrella (all services)
   # and runs this shared iam suite, so these run against a complete stack — GREEN
@@ -633,12 +633,12 @@ if command -v python3 >/dev/null 2>&1 && [ -f scripts/coverage.py ]; then
   PROTO_GLOB="${COVERAGE_PROTO_GLOB:-}"
   if [ -z "$PROTO_GLOB" ]; then
     for _cand in \
-      '../../../../proto/kacho/cloud/iam/v1/*.proto' \
-      '../../../kacho-proto/proto/kacho/cloud/iam/v1/*.proto'; do
+      '../../../../proto/kaname/cloud/iam/v1/*.proto' \
+      '../../../kacho-proto/proto/kaname/cloud/iam/v1/*.proto'; do
       # shellcheck disable=SC2086
       if compgen -G "$_cand" >/dev/null 2>&1; then PROTO_GLOB="$_cand"; break; fi
     done
-    PROTO_GLOB="${PROTO_GLOB:-../../../../proto/kacho/cloud/iam/v1/*.proto}"
+    PROTO_GLOB="${PROTO_GLOB:-../../../../proto/kaname/cloud/iam/v1/*.proto}"
   fi
   echo "proto-glob: $PROTO_GLOB"
   if python3 scripts/coverage.py \

@@ -15,8 +15,8 @@ package toproto
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // roleWithStates — роль в форме, какой её отдаёт чтение.

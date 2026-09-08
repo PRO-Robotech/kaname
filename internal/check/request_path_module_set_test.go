@@ -41,7 +41,7 @@ package check
 // # Досягаемость пути запроса — ДВА поддерева, и они названы слоем
 //
 //	services/iam/internal/domain            чистый домен: его достигает КАЖДЫЙ RPC
-//	services/iam/internal/apps/kacho/api    слой use-case, обслуживающий RPC
+//	services/iam/internal/apps/kaname/api    слой use-case, обслуживающий RPC
 //
 // Это имена СЛОЁВ (`architecture.md`), а не перечень файлов, поэтому список не
 // стареет вместе с деревом. Переедет слой — обход опустеет, и гейт откажет, а не
@@ -49,8 +49,8 @@ package check
 //
 // # Чего гейт НЕ судит, и это решение, а не пропуск
 //
-// Вне досягаемости — применитель ролей модуля (`apps/kacho/moduleroles`), страж
-// паритета (`apps/kacho/seed`), загрузчик манифеста (`manifest`) и оснастка
+// Вне досягаемости — применитель ролей модуля (`apps/kaname/moduleroles`), страж
+// паритета (`apps/kaname/seed`), загрузчик манифеста (`manifest`) и оснастка
 // дерева (`modelrender`). Все они спрашивают канон ЗАКОННО: их вопрос — «объявлен
 // ли модуль платформой», и ответ обязан быть воспроизводим ИЗ ДЕРЕВА, потому что
 // у них базы нет by construction. Разведение двух вопросов — решение #1927,
@@ -89,17 +89,19 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // requestPathReach — поддеревья, которые достигает путь запроса. Пути от корня
 // монорепо.
 var requestPathReach = []string{
 	"services/iam/internal/domain",
-	"services/iam/internal/apps/kacho/api",
+	"services/iam/internal/apps/kaname/api",
 }
 
 // canonImportPath — пакет, чей канон набора модулей выводится ИЗ ДЕРЕВА.
-const canonImportPath = "github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+const canonImportPath = "github.com/PRO-Robotech/kaname/internal/authzmap"
 
 // canonModuleSymbol — производитель канона. Один символ, а не набор: остальные
 // экспортированные имена пакета отвечают на другие вопросы, и запрещать их
@@ -310,7 +312,13 @@ func localNameOfImportPath(file *ast.File, path string) string {
 func requestPathFiles(root string) ([]string, error) {
 	var all []string
 	for _, rel := range requestPathReach {
-		files, err := treecorpus.UnderWithSuffix(filepath.Join(root, rel), ".go")
+		// Координата приводится к ПОСАДКЕ названного корня: перечисленные
+		// каталоги — собственные каталоги модуля, они едут вместе с ним.
+		dir, perr := treeposture.PathUnder(root, rel)
+		if perr != nil {
+			return nil, perr
+		}
+		files, err := treecorpus.UnderWithSuffix(dir, ".go")
 		if err != nil {
 			return nil, err
 		}

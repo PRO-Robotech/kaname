@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/invite_mail_outbox"
+	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/invite_mail_outbox"
 )
 
 // Test_ParseMailTLSMode_NeverYieldsThePlaintextMode — ban #16 построением, а не

@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// interceptor.go — gRPC unary/stream interceptor for kacho-iam, a
+// interceptor.go — gRPC unary/stream interceptor for kaname, a
 // defence-in-depth anti-anonymous floor in front of every mutating RPC.
 //
 // This is NOT the platform's per-user PDP: the api-gateway is the single
@@ -67,12 +67,12 @@ var whitelistFullMethod = map[string]struct{}{
 	// at that moment the Principal is still anonymous. This is a legitimate
 	// "register-myself" operation. (In production-strict deployments it is
 	// additionally protected by mTLS / NetworkPolicy.)
-	"/kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity": {},
+	"/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity": {},
 	// LookupSubject — internal helper, invoked by api-gateway without an
 	// auth-context.
-	"/kacho.cloud.iam.v1.InternalIAMService/LookupSubject": {},
+	"/kaname.cloud.iam.v1.InternalIAMService/LookupSubject": {},
 	// Check — internal RPC.
-	"/kacho.cloud.iam.v1.InternalIAMService/Check": {},
+	"/kaname.cloud.iam.v1.InternalIAMService/Check": {},
 	// AuthorizeService.ListSubjects bypass: cluster-internal peer calls arrive
 	// with NO PerRPCCredentials — they are not user-requests but preflight
 	// authz-queries ("who may <verb> this resource?"). The suffix matcher on
@@ -85,7 +85,7 @@ var whitelistFullMethod = map[string]struct{}{
 	// Записи для перечисления ОБЪЕКТОВ здесь больше нет: RPC снят с контракта
 	// стадией S6 (эпик #747). Послабление, пережившее свой метод, не истекает
 	// само — оно достаётся следующему RPC, который назовут этим именем.
-	"/kacho.cloud.iam.v1.AuthorizeService/ListSubjects": {},
+	"/kaname.cloud.iam.v1.AuthorizeService/ListSubjects": {},
 }
 
 // isReadOnly — true iff method-name ends in one of the readonlySuffixes.

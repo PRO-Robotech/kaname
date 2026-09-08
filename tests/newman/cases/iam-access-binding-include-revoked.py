@@ -11,7 +11,7 @@
 
 ПЕРЕЧЕНЬ ПОВЕРХНОСТЕЙ ВЫВЕДЕН ИЗ КОНТРАКТА, А НЕ ВЫПИСАН ПО ПАМЯТИ:
 
-    grep -c 'bool include_revoked' proto/kacho/cloud/iam/v1/access_binding_service.proto   → 3
+    grep -c 'bool include_revoked' proto/kaname/cloud/iam/v1/access_binding_service.proto   → 3
 
     ListAccessBindingsRequest          → GET /iam/v1/accessBindings
     ListAccessBindingsByAccountRequest → GET /iam/v1/accounts/{account_id}/accessBindings

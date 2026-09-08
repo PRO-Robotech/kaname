@@ -21,13 +21,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/client_token"
-	"github.com/PRO-Robotech/kacho-iam/internal/clientassertion"
-	"github.com/PRO-Robotech/kacho-iam/internal/clienttokenwire"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
-	"github.com/PRO-Robotech/kacho-iam/internal/tokensigner"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
+	"github.com/PRO-Robotech/kaname/internal/clientassertion"
+	"github.com/PRO-Robotech/kaname/internal/clienttokenwire"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
 // ── дублёры портов ──────────────────────────────────────────────────────────
@@ -80,11 +80,11 @@ type stubSigner struct{}
 func (stubSigner) Sign(context.Context, tokensigner.Request) (tokensigner.Token, error) {
 	return tokensigner.Token{}, nil
 }
-func (stubSigner) Issuer() string { return "https://iam.kacho.local" }
+func (stubSigner) Issuer() string { return "https://kaname.kacho.local" }
 
 func full() clienttokenwire.BuildConfig {
 	return clienttokenwire.BuildConfig{
-		ExpectedAudience:         "https://iam.kacho.local",
+		ExpectedAudience:         "https://kaname.kacho.local",
 		AssertionLifetimeCeiling: tokenpolicy.MaxAssertionLifetime,
 		FederatedLifetimeCeiling: tokenpolicy.MaxFederatedAssertionLifetime,
 		ClockSkew:                tokenpolicy.ClockSkew,

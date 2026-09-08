@@ -26,7 +26,7 @@ equally authorized to **see** the roles already held by members. "Who may grant"
 Cross-account reads (caller has neither self nor admin on the subject's home
 account) are rejected with `PERMISSION_DENIED` — no privilege data is returned
 (cross-account isolation). The subject's home account is resolved via a
-within-`kacho_iam` `Users().Get` / `ServiceAccounts().Get` (same-schema read,
+within-`kaname` `Users().Get` / `ServiceAccounts().Get` (same-schema read,
 **not** a new cross-domain edge).
 
 ## Допуск и сужение — разные вещи (пересмотрено, задача #1354)
@@ -87,7 +87,7 @@ within-`kacho_iam` `Users().Get` / `ServiceAccounts().Get` (same-schema read,
 
 ### Чем держится
 
-`services/iam/internal/apps/kacho/api/access_binding/list_subject_privileges_narrowing_test.go`
+`services/iam/internal/apps/kaname/api/access_binding/list_subject_privileges_narrowing_test.go`
 — семь проб, у отрицания в каждой стоит положительная половина на том же ответе.
 Объявление поверхности — `rowFilter` в `services/iam/tools/auditlistfilter/profile.go`,
 и оно проверяемо: `make -C services/iam audit-list-filter` доходит до
@@ -105,7 +105,7 @@ within-`kacho_iam` `Users().Get` / `ServiceAccounts().Get` (same-schema read,
 > читал выдачи сотрудника своего аккаунта одним глаголом и не читал вторым.
 
 Оба чтения решают допуск **одним** предикатом
-(`services/iam/internal/apps/kacho/api/access_binding/subject_read_authority.go`).
+(`services/iam/internal/apps/kaname/api/access_binding/subject_read_authority.go`).
 Полосы и что каждая видит:
 
 | полоса | что видит |
@@ -126,7 +126,7 @@ within-`kacho_iam` `Users().Get` / `ServiceAccounts().Get` (same-schema read,
 вправе субъекта читать.
 
 **Чем держится.**
-`services/iam/internal/apps/kacho/api/access_binding/subject_read_authority_test.go`
+`services/iam/internal/apps/kaname/api/access_binding/subject_read_authority_test.go`
 — проба сравнивает полосы **между собой**: исход снимается с обоих глаголов на
 одном вызывающем и одной фикстуре, и утверждается их совпадение. Односторонняя
 проба зеленела бы при любом расхождении. Перепись печатает две величины —

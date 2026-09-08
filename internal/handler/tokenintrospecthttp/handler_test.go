@@ -19,12 +19,12 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/tokenintrospecthttp"
-	"github.com/PRO-Robotech/kacho-iam/internal/signingkeygen"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
+	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
 )
 
-const testIssuer = "https://iam.kacho.local"
+const testIssuer = "https://kaname.kacho.local"
 
 // stubKeys — публикуемый набор, которым проверяется подпись.
 type stubKeys struct {

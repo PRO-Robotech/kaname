@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // --- Rule.Validate cardinality + XOR + empties (scalar module) ---

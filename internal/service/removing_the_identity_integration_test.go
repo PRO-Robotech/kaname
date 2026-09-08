@@ -89,7 +89,7 @@ func TestRemovingTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 	// Указатель принадлежности — им цепь областей доводит аккаунт до личности.
 	w.factThroughJournal(t, "account:"+acc, "account", "iam_user", invitee)
 	// Уровень 1.
-	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_kacho_root")
+	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_root")
 
 	// Выдача, живущая В АККАУНТЕ пригласившего, — предмет его законной власти.
 	w.seedRole(t, "rol-rmid2", acc)
@@ -98,9 +98,9 @@ func TestRemovingTheIdentityIsNotReachableFromInsideTheAccount(t *testing.T) {
 
 	// Гейты спрашиваются У КАТАЛОГА, а не пишутся литералом: каталог порождается
 	// из proto и есть единственный источник per-RPC решения края.
-	removeRel, removeType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserService/Delete")
-	readRel, readType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserService/Get")
-	grantRel, grantType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.AccessBindingService/Delete")
+	removeRel, removeType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Delete")
+	readRel, readType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Get")
+	grantRel, grantType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.AccessBindingService/Delete")
 	require.Equalf(t, "iam_user", removeType,
 		"снятие личности гейтится не на объекте личности (%s) — предмет пробы сменился", removeType)
 	require.Equalf(t, "iam_user", readType,
@@ -216,14 +216,14 @@ func TestRemovingAnIdentityWithNoAccountScopeReachesOnlyTheCloud(t *testing.T) {
 	// и исключением из аккаунта не снимается — он про личность, а не про участие.
 	w.factThroughJournal(t, "user:"+orphan, "subject", "iam_user", orphan)
 	// Уровень 1.
-	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_kacho_root")
+	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_root")
 
 	// Исключение из аккаунта: ровно тот оператор, каким его делает продукт
 	// (`RemoveMembership`). Указателя области в журнале эта личность не получала
 	// вовсе, поэтому снимать нечего — и это утверждается ниже, а не подразумевается.
-	w.exec(t, `DELETE FROM kacho_iam.memberships WHERE user_id = $1`, orphan)
+	w.exec(t, `DELETE FROM kaname.memberships WHERE user_id = $1`, orphan)
 
-	removeRel, removeType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserService/Delete")
+	removeRel, removeType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserService/Delete")
 	require.Equalf(t, "iam_user", removeType,
 		"снятие личности гейтится не на объекте личности (%s) — предмет пробы сменился", removeType)
 
@@ -233,7 +233,7 @@ func TestRemovingAnIdentityWithNoAccountScopeReachesOnlyTheCloud(t *testing.T) {
 	// разворот `super_admin from account`.
 	var parents int
 	require.NoError(t, w.pool.QueryRow(context.Background(),
-		`SELECT count(*)::int FROM kacho_iam.resource_scope_edge
+		`SELECT count(*)::int FROM kaname.resource_scope_edge
 		  WHERE object_type = 'iam_user' AND object_id = $1 AND parent_type = 'account'`,
 		orphan).Scan(&parents))
 	require.Zerof(t, parents,
@@ -245,7 +245,7 @@ func TestRemovingAnIdentityWithNoAccountScopeReachesOnlyTheCloud(t *testing.T) {
 	// ничего не отдаёт, и предпосылка была бы выполнена на сломанном посеве.
 	var neighbourParents int
 	require.NoError(t, w.pool.QueryRow(context.Background(),
-		`SELECT count(*)::int FROM kacho_iam.resource_scope_edge
+		`SELECT count(*)::int FROM kaname.resource_scope_edge
 		  WHERE object_type = 'iam_user' AND object_id = $1 AND parent_type = 'account'`,
 		stranger).Scan(&neighbourParents))
 	require.Positivef(t, neighbourParents,

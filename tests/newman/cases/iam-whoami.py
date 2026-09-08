@@ -37,7 +37,7 @@ Contract:
         userId: "<usr>",         // user_id without prefix; empty for SA
         email: "<lowercased>",
         displayName: "<...>",
-        systemAdmin: bool,        // true iff system_admin on cluster:cluster_kacho_root
+        systemAdmin: bool,        // true iff system_admin on cluster:cluster_root
         clusterViewer: bool,      // true iff viewer cascade on cluster (typ. true for any authenticated)
         accounts: [ { accountId, accountName, roles: [...] } ],
         checkedAt: "<rfc3339 truncated to seconds>"

@@ -32,7 +32,7 @@ unknown-type, gate-FP, malformed) НЕ оборачиваются; authz-first �
 gateway scope_extractor короткозамыкает недоступный/absent target; per-case self-seed
 свежей custom-роли (run-unique tuple → нет UNIQUE-коллизии на повторном прогоне) + cleanup.
 
-Grounded в landed-коде (services/iam/internal/apps/kacho/api/access_binding):
+Grounded в landed-коде (services/iam/internal/apps/kaname/api/access_binding):
   delta_input.go:27 target required · :47 unknown target type · :63 scopeType required ·
   structural_gates.go:73 IsRoleAssignable · :100 RoleCoversType · :144 invalid scope id ·
   update.go:56-75 immutable per-field · revoke.go status REVOKED+revokedAt · get.go:63

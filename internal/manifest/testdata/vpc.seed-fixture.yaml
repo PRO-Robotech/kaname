@@ -22,18 +22,18 @@ seed:
   # Здесь довод подпирался числом модулей в настоящем времени, и число было
   # ложно ОБЕИМИ половинами: закрытый набор несёт ШЕСТЬ модулей, а служебная
   # учётка этой формы заведена применёнными миграциями у ПЯТИ из них —
-  # `kacho-iam` нет вовсе. Довод от этого числа не зависел никогда: он о схеме,
+  # `kaname` нет вовсе. Довод от этого числа не зависел никогда: он о схеме,
   # а не о переписи. Понадобится число как основание — оно называется вместе
   # с предикатом и ревизией, как это сделано в §0.4 приёмки
   # `model-generated-from-manifest.md`.
   #
   # ПЕРВЫЙ предикат #1928 ПЕРЕЖИЛ СВОЙ ПРЕДМЕТ и заменён (#1927). Набор был
   # литералом домена; литерал снят, шесть имён живут строками
-  # `kacho_iam.catalog_module`, канон дерева выводит authzmap.CatalogSeedModules().
+  # `kaname.catalog_module`, канон дерева выводит authzmap.CatalogSeedModules().
   # Прежний предикат (чтение объявления литерала) даёт пусто; больше того, поиск
   # по одному имени даёт попадание в комментарий о СНЯТИИ — то есть отчитался бы
   # успехом о предмете, которого нет. Второй предикат жив и половину про ПЯТЬ
-  # подтверждает дословно: `kacho-iam-bootstrap` есть, `kacho-iam` — нет.
+  # подтверждает дословно: `kaname-bootstrap` есть, `kaname` — нет.
   # Предикаты обеих половин:
   #   go test -C services/iam ./internal/authzmap/ -run TestModuleSet_PinnedComposition -count=1
   #   git grep -ohE "'kacho-[a-z-]+'" -- 'services/iam/internal/migrations/*.sql' | sort -u
@@ -86,14 +86,14 @@ seed:
         - {type: group, name: vpc-internal-consumers}
       roleId: vpc.internal_consumer
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope        # и будущие интерфейсы с адресами тоже
 
     - subjects:
         - {type: group, name: cloud-network-admins}
       roleId: vpc.address_pool_admin
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: allInScope        # и будущие пулы тоже
 
   # ── Чужие группы, в которые вступает служебная запись vpc ────────────────

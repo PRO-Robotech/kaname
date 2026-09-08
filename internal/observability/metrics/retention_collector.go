@@ -40,19 +40,19 @@ type RetentionCounts struct {
 // считает в никуда, и его ноль не утверждает ничего.
 func (r *Registry) NewRetentionCollector(read func() RetentionCounts) {
 	passes := prometheus.NewDesc(
-		"kacho_iam_retention_passes_total",
+		"kaname_retention_passes_total",
 		"Retention sweep passes executed since process start. Zero here means the loop is not "+
 			"running at all — which is a different state from 'nothing to remove', and the two "+
 			"must not share one silence.",
 		nil, nil)
 	removed := prometheus.NewDesc(
-		"kacho_iam_retention_rows_removed_total",
+		"kaname_retention_rows_removed_total",
 		"Rows removed by the retention sweep since process start, BY SUBJECT (one label value per "+
 			"table whose growth an outsider sets the pace of). Reported per subject because zero on "+
 			"one table means either 'nothing expired' or 'the sweep never reaches this registry entry'.",
 		[]string{"subject"}, nil)
 	failures := prometheus.NewDesc(
-		"kacho_iam_retention_pass_failures_total",
+		"kaname_retention_pass_failures_total",
 		"Retention sweep passes that failed, BY SUBJECT. A lagging sweep is not fatal — the row "+
 			"stays longer than needed while the reader's predicate keeps holding — but a sweep that "+
 			"has failed every pass of its life must not be silent.",

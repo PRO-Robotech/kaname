@@ -13,7 +13,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 func sortedCopy(in []string) []string {

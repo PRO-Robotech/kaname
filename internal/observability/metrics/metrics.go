@@ -1,10 +1,10 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package metrics is the kacho-iam Prometheus observability adapter.
+// Package metrics is the kaname Prometheus observability adapter.
 //
 // It lives at the cmd/adapter boundary (Clean Architecture): the prometheus
-// client is imported ONLY here and in the composition root (cmd/kacho-iam) —
+// client is imported ONLY here and in the composition root (cmd/kaname) —
 // never in domain/ or in the AuthorizeService use-case. The use-case stays a
 // pure FGA-Check pipeline; instrumentation is layered on via the
 // InstrumentedAuthorizer decorator (authz_decorator.go) and a gRPC server
@@ -12,7 +12,7 @@
 //
 // Surfaces:
 //   - Registry.Handler() — promhttp.Handler served on a SEPARATE internal port
-//     (KACHO_IAM_METRICS_ENDPOINT, default :9095). Never on the public tenant
+//     (KANAME_METRICS_ENDPOINT, default :9095). Never on the public tenant
 //     gRPC surface (it would expose internal cardinality — security.md).
 //   - Registry.ObserveAuthz — the authz Check hot-path histogram + decision
 //     counter (the documented ≤30ms p95 budget on AuthorizeService.Check /
@@ -39,7 +39,7 @@ import (
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 )
 
-// Registry owns a private *prometheus.Registry and the kacho-iam collectors.
+// Registry owns a private *prometheus.Registry and the kaname collectors.
 // It is created once in the composition root and shared by the metrics HTTP
 // listener, the authz decorator and the gRPC interceptors. A private registry
 // (not the global default) keeps tests hermetic and avoids duplicate-register
@@ -69,7 +69,7 @@ type Registry struct {
 	compensation     *CompensationRecorder
 
 	// outboxOnce/outbox — единственный экземпляр коллекторов состояния очередей.
-	// Очередей у kacho-iam три (fga_outbox, subject_change_outbox,
+	// Очередей у kaname три (fga_outbox, subject_change_outbox,
 	// provider_compensation_outbox), их сканеры собираются в разных местах
 	// композиционного корня, а серии у них ОБЩИЕ и различаются лейблом `table`.
 	// Второй конструктор уронил бы старт на duplicate-register.
@@ -102,7 +102,7 @@ type Registry struct {
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime
-// collectors and the kacho-iam collectors.
+// collectors and the kaname collectors.
 func NewRegistry() *Registry {
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
@@ -113,7 +113,7 @@ func NewRegistry() *Registry {
 	r := &Registry{
 		reg: reg,
 		authzDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name: "kacho_iam_authz_check_duration_seconds",
+			Name: Namespace + "_authz_check_duration_seconds",
 			Help: "Latency of the authz Check hot path (FGA Check + transport), by rpc lane and outcome. " +
 				"SLO budget: <=30ms p95. On the BatchCheck lane `allowed` means the CALL completed, not that a " +
 				"question was allowed: one batch carries many answers, and a single label over all of them would " +
@@ -123,11 +123,11 @@ func NewRegistry() *Registry {
 			Buckets: []float64{0.001, 0.0025, 0.005, 0.01, 0.02, 0.03, 0.05, 0.1, 0.25, 0.5, 1},
 		}, []string{"rpc", "allowed"}),
 		authzDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_authz_check_decisions_total",
+			Name: Namespace + "_authz_check_decisions_total",
 			Help: "Authz Check decisions by rpc and outcome (allow|deny|error).",
 		}, []string{"rpc", "decision"}),
 		authzStoreAttempts: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_authz_store_attempts_total",
+			Name: Namespace + "_authz_store_attempts_total",
 			Help: "Attempts against the authorization store by operation, outcome " +
 				"(ok|store_rejected|store_error|store_unreachable|pooled_conn_dropped|" +
 				"conn_dropped|store_timeout|decode_failed) and whether the connection " +
@@ -142,7 +142,7 @@ func NewRegistry() *Registry {
 // Namespace — префикс имён ВСЕХ серий этого сервиса. Отдельная константа, а не
 // литерал по месту: имя серии — контракт с панелями и правилами тревог, и
 // собранное в двух местах оно разъедется на первом переименовании.
-const Namespace = "kacho_iam"
+const Namespace = "kaname"
 
 // RegisterPoolStats подключает к этому реестру состояние ОДНОГО пула соединений
 // под именем `poolName` (`primary`, `replica`).
@@ -266,8 +266,8 @@ func (r *Registry) ObserveAuthzStoreAttempt(op, outcome string, reused bool) {
 
 // Задержка обслуженного вызова наблюдается НЕ ЗДЕСЬ.
 //
-// Здесь стояла своя пара серий (`kacho_iam_grpc_server_handling_seconds` и
-// `kacho_iam_grpc_server_handled_total`) со своим интерсептором и своим
+// Здесь стояла своя пара серий (`kaname_grpc_server_handling_seconds` и
+// `kaname_grpc_server_handled_total`) со своим интерсептором и своим
 // разбором полного имени метода. Предмет у неё тот же, что у платформенного
 // измерителя `pkg/grpcsrv.ServerLatency`, — а два места об одном предмете
 // расходятся: эта пара смешивала отказ с успехом в одном ряду (быстрый отказ
@@ -278,5 +278,5 @@ func (r *Registry) ObserveAuthzStoreAttempt(op, outcome string, reused bool) {
 // Теперь iam берёт тот же измеритель, что и остальные шесть сервисов, и его
 // ряды лежат в общем семействе платформы: вопрос «где во всей платформе вырос
 // хвост» стал одним запросом, а не семью. Провязка — в композиционном корне
-// (`cmd/kacho-iam/serve.go`), потому что слушателей iam строит сам, минуя
+// (`cmd/kaname/serve.go`), потому что слушателей iam строит сам, минуя
 // носитель входящего пути.

@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // baseRolesDoc — оболочка с одним ресурсом; %s подставляет тело ресурса.

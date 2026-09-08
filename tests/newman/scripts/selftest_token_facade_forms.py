@@ -9,7 +9,7 @@
 `cases/iam-token-facade-conformance.py` был написан под ОДНУ полосу выдачи —
 внешнего поставщика. Когда платформа завела собственного подписанта, каждый
 литерал полосы стал ложью о верном мире: алгоритм (`RS256`), запись публикатора
-(одна), форма утверждений (вложенная) и контроль `sub !== kacho_principal_id`.
+(одна), форма утверждений (вложенная) и контроль `sub !== kaname_principal_id`.
 Пять кейсов из восьми покраснели на исправной платформе, причём два — чистым
 каскадом: падал шаг, делавший ровно то, что положено делать с величиной, которую
 суита не захватила.
@@ -32,7 +32,7 @@
 | kid ровно в ОДНОЙ записи         | как есть                | один kid в обеих записях                   |
 | alg записи = alg заголовка       | как есть                | запись объявляет другой алгоритм           |
 | материал ключа для подделки      | RSA `n` / EC `x`+`y`    | запись без публичного материала            |
-| состав ≠ пересказ субъекта       | `soc_…` ≠ `sva…`        | `kacho_sa_key_id` = `kacho_principal_id`   |
+| состав ≠ пересказ субъекта       | `soc_…` ≠ `sva…`        | `kaname_sa_key_id` = `kaname_principal_id`   |
 | ответ платформы = состав         | совпадает               | платформа называет другого принципала      |
 | публикатор — только открытое     | нет приватных членов    | в записи появился приватный член ключа     |
 | запись на объявленном адресе     | 200                     | 404 — запись переехала                     |
@@ -69,7 +69,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COLLECTION = ROOT / "collections" / "iam-token-facade-conformance.postman_collection.json"
 
 MIRROR_PATH = "/.well-known/jwks.json"
-OWN_PATH = "/.well-known/kacho/jwks.json"
+OWN_PATH = "/.well-known/kaname/jwks.json"
 
 # Публичный материал ниже — синтетический и никем не проверяется: подставной
 # сервер ничего не подписывает. Форма взята с живого публикатора (RSA-запись
@@ -106,10 +106,10 @@ def jwt(header: dict, payload: dict) -> str:
 
 def base_claims() -> dict:
     return {
-        "kacho_principal_type": PRINCIPAL_TYPE,
-        "kacho_principal_id": PRINCIPAL_ID,
-        "kacho_sa_key_id": SA_KEY_ID,
-        "kacho_account_id": ACCOUNT_ID,
+        "kaname_principal_type": PRINCIPAL_TYPE,
+        "kaname_principal_id": PRINCIPAL_ID,
+        "kaname_sa_key_id": SA_KEY_ID,
+        "kaname_account_id": ACCOUNT_ID,
     }
 
 
@@ -117,7 +117,7 @@ def own_lane_bearer(**over) -> str:
     """Полоса ПЛАТФОРМЫ: ES256, свой kid, состав ПЛОСКО, `sub` = принципал."""
     claims = base_claims()
     claims.update(over.pop("claims", {}))
-    payload = {"iss": "https://iam.kacho.local", "aud": ["https://api.kacho.cloud"],
+    payload = {"iss": "https://kaname.kacho.local", "aud": ["https://api.kacho.cloud"],
                "sub": PRINCIPAL_ID, "exp": 4102444800, **claims}
     payload.update(over.pop("payload", {}))
     header = {"alg": "ES256", "kid": OWN_KEY["kid"], "typ": "at+jwt"}
@@ -268,7 +268,7 @@ def main() -> int:
          lambda: Stand(provider_lane_bearer(), subject=SUBJECT), False, None),
         ("форма: ни одной — падает и называет три формы", ibt13,
          lambda: Stand(jwt({"alg": "ES256", "kid": OWN_KEY["kid"], "typ": "at+jwt"},
-                           {"iss": "https://iam.kacho.local", "sub": PRINCIPAL_ID,
+                           {"iss": "https://kaname.kacho.local", "sub": PRINCIPAL_ID,
                             "aud": ["https://api.kacho.cloud"], "exp": 4102444800})),
          True, "composed platform claims"),
 
@@ -276,13 +276,13 @@ def main() -> int:
         ("состав: `soc_…` ≠ принципала — молчит", ibt13,
          lambda: Stand(own_lane_bearer()), False, None),
         ("состав: sa_key_id = principal_id — падает", ibt13,
-         lambda: Stand(own_lane_bearer(claims={"kacho_sa_key_id": PRINCIPAL_ID})),
+         lambda: Stand(own_lane_bearer(claims={"kaname_sa_key_id": PRINCIPAL_ID})),
          True, "SUBJECT cannot supply"),
         ("состав: sa_key_id = sub — падает", ibt13,
-         lambda: Stand(provider_lane_bearer(claims={"kacho_sa_key_id": "kacho-bootstrap-admin"})),
+         lambda: Stand(provider_lane_bearer(claims={"kaname_sa_key_id": "kacho-bootstrap-admin"})),
          True, "SUBJECT cannot supply"),
-        ("состав: нет kacho_account_id — падает", ibt13,
-         lambda: Stand(own_lane_bearer(claims={"kacho_account_id": ""})),
+        ("состав: нет kaname_account_id — падает", ibt13,
+         lambda: Stand(own_lane_bearer(claims={"kaname_account_id": ""})),
          True, "SUBJECT cannot supply"),
         ("ответ платформы: называет ДРУГОГО принципала — падает", ibt13,
          lambda: Stand(own_lane_bearer(), subject="service_account:svaSOMEONEELSE0000"),

@@ -9,6 +9,19 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   отказ (три блокирующих, четыре уточняющих); все семь проверены заново
   экспериментом на `f7e11a76b` — шесть устранены, одно (В3) опровергнуто автором
   верно. Разбор круга 2 — §13. Кодирование начинается по §9 (запрет #1 снят)
+- **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Правок 3, строк 49: `5504f44a7f` каталоги службы
+  (45) · `b81adf2760` имя службы (3) · `93ef852fe9` идентификатор лицензии (1).
+  Дельта целиком — подстановка токена (`kacho→kaname` ·
+  `kachorepo.Writer→kanamerepo.Writer` · `kacho-iam→kaname` и ещё 4); непарных
+  строк 0, пар с изменившимся числом токенов 0; ни один сценарий,
+  производитель, признак готовности и клауза не тронуты. **Одна запись этой
+  правкой стала ЛОЖНОЙ и починена здесь же** — §2.1.2: написание пути, не
+  верное ни в один момент времени. Одобрение относится к **содержимому**, а не
+  к имени файла: APPROVED выше есть вердикт о редакции, прочитанной
+  проверяющим. Вердикт на нынешнюю редакцию ставит `acceptance-reviewer` своим
+  кругом, а не эта строка. Решение, замер и цена обоих отвергнутых исходов —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 - **Ревизия измерения:** `f7e11a76b` (ветка `release/modules-2`; впереди `origin/main`
   на **1**, позади — **0**; `git status --porcelain` — только этот неотслеживаемый
   документ). **Все** числа и координаты о дереве продукта сняты на ней и **перемерены
@@ -23,7 +36,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 - **Тип изменения:** СНИМАЮЩЕЕ + НАБЛЮДАЕМОСТЬ. Ни одного нового входа, ни одного
   нового поля контракта. Снимается вторая реализация записи в таблицу; полоса отказа
   досева меняет уровень и обретает перепись
-- **Сервис:** `kacho-iam` — предмет целиком внутри него, поэтому документ живёт рядом
+- **Сервис:** `kaname` — предмет целиком внутри него, поэтому документ живёт рядом
   с кодом, а не в воркспейсе. **`proto/` НЕ затрагивается**: у проекции роли нет ни
   одного поля контракта — она внутреннее состояние, читаемое цепью вердикта
 - **Миграции:** изменение их **не требует** (§2.6). Заведёт реализация миграцию —
@@ -48,7 +61,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 | # | утверждение задачи | чем подтверждено |
 |---|---|---|
-| **П1** | третий писатель работает на **каждом старте** | цепь вызова прочитана целиком: `services/iam/cmd/kacho-iam/serve.go:1305` → `seed.BackfillOwnerBindings` (`migrate_backfill.go:168`) → `syncAllSystemRoleSelectorsTx` (там же, `:188`) → `replaceRoleVerbsTx` (`:345`). Вызов безусловный |
+| **П1** | третий писатель работает на **каждом старте** | цепь вызова прочитана целиком: `services/iam/cmd/kaname/serve.go:1305` → `seed.BackfillOwnerBindings` (`migrate_backfill.go:168`) → `syncAllSystemRoleSelectorsTx` (там же, `:188`) → `replaceRoleVerbsTx` (`:345`). Вызов безусловный |
 | **П2** | отказ глотается `logger.Warn` в `serve.go` | `serve.go:1306` дословно: `logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))`. Ошибка из `:345` доходит сюда обёрнутой и не меняет ни кода возврата задачи старта, ни исхода процесса |
 | **П3** | сценарий (б): отказ на одной паре откатывает **всю** транзакцию досева | `BackfillOwnerBindings` держит в ОДНОЙ транзакции четыре операции: выдачи владельцу · их субъектные строки · намерение иерархии в журнал · селекторы и глаголы системных ролей. Отказ последней откатывает первые три. Прочитано в теле функции, `migrate_backfill.go:168…196` |
 
@@ -66,12 +79,12 @@ git grep -n 'ReplaceRoleVerbs' -- 'services/iam/**' ':!*_test.go'   → 8 стр
 
 | координата | что это на самом деле |
 |---|---|
-| `apps/kacho/api/role/create.go:189` | **вызов** |
-| `apps/kacho/api/role/update.go:291` | **вызов** |
-| `repo/kacho/pg/role_repo.go:514`, `:524` | шапка и **объявление** метода |
-| `repo/kacho/role/iface.go:72`, `:79` | шапка и объявление **интерфейса** |
-| `apps/kacho/seed/migrate_backfill.go:332` | строка **комментария** |
-| `apps/kacho/seed/migrate_backfill.go:356` | строка **комментария** внутри шапки функции |
+| `apps/kaname/api/role/create.go:189` | **вызов** |
+| `apps/kaname/api/role/update.go:291` | **вызов** |
+| `repo/kaname/pg/role_repo.go:514`, `:524` | шапка и **объявление** метода |
+| `repo/kaname/role/iface.go:72`, `:79` | шапка и объявление **интерфейса** |
+| `apps/kaname/seed/migrate_backfill.go:332` | строка **комментария** |
+| `apps/kaname/seed/migrate_backfill.go:356` | строка **комментария** внутри шапки функции |
 
 Названная задачей координата третьего писателя (`:356`) — комментарий, цитирующий
 имя метода в объяснении. Третий писатель **существует**, но зовётся иначе:
@@ -92,7 +105,7 @@ SQL, метода `ReplaceRoleVerbs` не зовущая ни разу.
 
 ```
 git grep -n 'SyncAllSystemRoleSelectors' -- 'services/iam/**' ':!*_test.go' \
-    ':!services/iam/internal/migrations/*' ':!services/iam/internal/apps/kacho/seed/*'
+    ':!services/iam/internal/migrations/*' ':!services/iam/internal/apps/kaname/seed/*'
   → 1 строка, и та комментарий (internal/domain/feed_registry.go:75)
 ```
 
@@ -230,10 +243,10 @@ git grep -n 'INTO kacho_iam.role_verb\|FROM kacho_iam.role_verb' \
 
 | место | операторы | кто зовёт |
 |---|---|---|
-| `internal/repo/kacho/pg/role_repo.go` — `ReplaceRoleVerbs` | `DELETE` (`:526`), `INSERT` (`:538`) | `Role.Create`, `Role.Update` |
-| `internal/apps/kacho/seed/migrate_backfill.go` — `replaceRoleVerbsTx` | `DELETE` (`:362`), `INSERT` (`:374`) | `syncAllSystemRoleSelectorsTx` (старт) |
-| `internal/repo/kacho/pg/scalegrid/census.go:140` | — | **`SELECT count(*)`**, не писатель |
-| `internal/repo/kacho/pg/scalegrid/strength_census.go:171` | — | **`SELECT count(*)`**, не писатель |
+| `internal/repo/kaname/pg/role_repo.go` — `ReplaceRoleVerbs` | `DELETE` (`:526`), `INSERT` (`:538`) | `Role.Create`, `Role.Update` |
+| `internal/apps/kaname/seed/migrate_backfill.go` — `replaceRoleVerbsTx` | `DELETE` (`:362`), `INSERT` (`:374`) | `syncAllSystemRoleSelectorsTx` (старт) |
+| `internal/repo/kaname/pg/scalegrid/census.go:140` | — | **`SELECT count(*)`**, не писатель |
+| `internal/repo/kaname/pg/scalegrid/strength_census.go:171` | — | **`SELECT count(*)`**, не писатель |
 
 **Писателей — 2 функции, 4 оператора. Читателей — 2**, и оба названы намеренно: они
 служат **законными близнецами** гейта единственности (§7), а близнец, названный не
@@ -262,7 +275,7 @@ git grep -n 'INTO kacho_iam.role_verb\|FROM kacho_iam.role_verb' \
 ### 2.1. Писатель остаётся ОДИН, и досев зовёт его ЧЕРЕЗ ПОРТ
 
 Требование: **в непроверочном коде Go ровно одна функция пишет `kacho_iam.role_verb`**,
-и это метод `roleWriter.ReplaceRoleVerbs` (пакет `internal/repo/kacho/pg`).
+и это метод `roleWriter.ReplaceRoleVerbs` (пакет `internal/repo/kaname/pg`).
 `replaceRoleVerbsTx` снимается вместе со своим SQL.
 
 Круг 1 записал это как «досев зовёт тот же метод» и **был неисполним**: прямой вызов
@@ -285,50 +298,70 @@ adapter их реализует).
    `role_repo.go:534`), тогда как копия возвращает голую обёртку `fmt.Errorf`
    (`migrate_backfill.go:363,370,378`);
 2. он лежит в слое, которому по раскладке принадлежит SQL (`repo/`), тогда как копия
-   держит SQL в `apps/kacho/seed` — то есть в слое use-case;
+   держит SQL в `apps/kaname/seed` — то есть в слое use-case;
 3. у него **два** вызывающих против одного, и оба на горячем пути записи роли.
 
 #### 2.1.2. КАКОЙ порт и КТО внедряет — названо поимённо
 
 | ось | что именно |
 |---|---|
-| **порт** | `kachorepo.Writer` (пакет `internal/repo/kacho`), метод `RolesW() role.WriterIface`; на нём — `ReplaceRoleVerbs(ctx, roleID, pairs)` (`role/iface.go:79`) |
-| **как берётся транзакция** | `shared.DoWithWriteTxVoid(ctx, repo, func(ctx, w kachorepo.Writer) error {…})` (`apps/kacho/shared/txworker.go:77`) |
-| **кто внедряет** | композиционный корень `cmd/kacho-iam/serve.go` — он уже строит конкретный `pg`-репозиторий и передаёт его прочим потребителям |
+| **порт** | `kanamerepo.Writer` (пакет `internal/repo/kaname`), метод `RolesW() role.WriterIface`; на нём — `ReplaceRoleVerbs(ctx, roleID, pairs)` (`role/iface.go:79`) |
+| **как берётся транзакция** | `shared.DoWithWriteTxVoid(ctx, repo, func(ctx, w kanamerepo.Writer) error {…})` (`apps/kaname/shared/txworker.go:77`) |
+| **кто внедряет** | композиционный корень `cmd/kaname/serve.go` — он уже строит конкретный `pg`-репозиторий и передаёт его прочим потребителям |
 | **новый порт объявлять НЕ надо** | оба типа уже существуют и уже импортируются пакетом `seed` |
 
 **Ключевой факт, делающий это дешёвым: `seed` уже импортирует порт.** Предикат
-(единица — **файл пакета `seed`**, импортирующий `internal/repo/kacho`):
+(единица — **файл пакета `seed`**, импортирующий `internal/repo/kaname`):
 
 ```
-git grep -ln '"github.com/PRO-Robotech/kacho/services/iam/internal/repo/kacho"' \
-  -- 'services/iam/internal/apps/kacho/seed/*.go' ':!*_test.go'
-  → 1 файл: seed/orphan_scope_sweep.go
+git grep -ln '"github.com/PRO-Robotech/kaname/internal/repo/kaname"' \
+  -- 'services/iam/internal/apps/kaname/seed/*.go' ':!*_test.go'
+  → 3 файла: orphan_scope_sweep.go · role_verb_reseed.go · role_rule_ref_reseed.go
 ```
+
+> [!warning] Здесь стояло число **1** и написание пути, не верное НИКОГДА (`#2214`)
+> **Что с числом.** Круг 2 измерил **1** на ревизии измерения `f7e11a76b` — до
+> реализации этой приёмки. Сегодня их **3**, и два лишних завела **она сама**
+> (`role_verb_reseed.go` — `c7467b210f`, тем же коммитом, что и вердикт;
+> `role_rule_ref_reseed.go` — `2171a6690a`). Единица счёта у обоих чисел одна,
+> различаются ревизии; довод «приём уже применяется, мы его распространяем» от
+> этого только крепче. Прежний предикат **дословно здесь не воспроизводится**: на
+> той ревизии служба жила в модуле платформы, а её каталоги звались отставленным
+> именем, и цитата такой формы — находка держателя имён каталогов
+> (`internal/supplyhygiene`, `TestServiceDirectoriesAreNamedForTheirOwnProduct`),
+> справедливая. Кому нужен исходный текст — он в истории этого файла до `#2214`.
+>
+> **Что с написанием.** Массовое переименование каталогов (`5504f44a7f`) сменило
+> последний сегмент пути и не тронуло сегмент модуля, а модуль службы получил своё
+> имя **сутками позже** (`62fe701108`). Получившееся написание не было верно ни в
+> один момент времени и, прогнанное дословно, давало **0** вместо объявленного 1:
+> запись была верна на своей ревизии и стала ложью **от механической правки**, не
+> изменившей ни одного утверждения диффом. Класс и решение —
+> `../architecture/verdict-names-a-revision-not-a-file.md` §1.2.
 
 и он же уже применяет ровно эту форму получения транзакции —
-`shared.DoWithWriteTxVoid(ctx, s.repo, func(ctx, w kachorepo.Writer) error {…})`
+`shared.DoWithWriteTxVoid(ctx, s.repo, func(ctx, w kanamerepo.Writer) error {…})`
 (`orphan_scope_sweep.go:236`). То есть приёмка не заводит новый приём, а **распространяет
 существующий** на соседний досев.
 
 > Круг 1 утверждал в скобках, что **ни один** из двух портов пакет `seed` не
-> импортирует. Для `internal/repo/kacho/role` это верно (**0**), для
-> `internal/repo/kacho` — **неверно** (**1** непроверочный файл). Опровержение
+> импортирует. Для `internal/repo/kaname/role` это верно (**0**), для
+> `internal/repo/kaname` — **неверно** (**1** непроверочный файл). Опровержение
 > удешевляет предложенное рецензентом же решение, а не отменяет его — разбор §12.1 Б1.
 
 #### 2.1.3. Цикла нет — и это ДВУСТОРОННИЙ предикат
 
 ```
 # pg → seed: ребро есть (оно и делает наивную форму циклом)
-git grep -ln 'apps/kacho/seed' -- 'services/iam/internal/repo/kacho/pg/*.go' ':!*_test.go'
+git grep -ln 'apps/kaname/seed' -- 'services/iam/internal/repo/kaname/pg/*.go' ':!*_test.go'
   → 2 файла: backfill_adapter.go, orphan_scope_adapter.go
 
 # порт → seed: ребра нет, и завести его нечем
-git grep -c 'apps/kacho/seed' \
-  -- 'services/iam/internal/repo/kacho/iface.go' 'services/iam/internal/repo/kacho/role/*.go'
+git grep -c 'apps/kaname/seed' \
+  -- 'services/iam/internal/repo/kaname/iface.go' 'services/iam/internal/repo/kaname/role/*.go'
   → 0
 # shared → seed: тоже ноль
-git grep -c 'apps/kacho/seed' -- 'services/iam/internal/apps/kacho/shared/*.go'   → 0
+git grep -c 'apps/kaname/seed' -- 'services/iam/internal/apps/kaname/shared/*.go'   → 0
 ```
 
 Ребро `pg → seed` существует потому, что `seed` **объявляет** два порта, которые `pg`
@@ -344,8 +377,8 @@ git grep -c 'apps/kacho/seed' -- 'services/iam/internal/apps/kacho/shared/*.go' 
 
 | форма | что подано | исход |
 |---|---|---|
-| **выбранная** — вызов через порт: `shared.DoWithWriteTxVoid(ctx, repo, func(ctx, w kachorepo.Writer) error { return w.RolesW().ReplaceRoleVerbs(ctx, roleID, pairs) })` | сборка пакета `seed` | `go build ./services/iam/internal/apps/kacho/seed/` → **код 0**; `go vet` того же пакета → **код 0**; `go build ./services/iam/...` (весь сервис) → **код 0** |
-| **контроль в обратную сторону** — наивная форма круга 1: прямой импорт `repo/kacho/pg` из `seed` | та же сборка | **код 1**, дословно: `imports …/repo/kacho/pg from zz_probe_naive.go` → `imports …/apps/kacho/seed from backfill_adapter.go: import cycle not allowed` |
+| **выбранная** — вызов через порт: `shared.DoWithWriteTxVoid(ctx, repo, func(ctx, w kanamerepo.Writer) error { return w.RolesW().ReplaceRoleVerbs(ctx, roleID, pairs) })` | сборка пакета `seed` | `go build ./services/iam/internal/apps/kaname/seed/` → **код 0**; `go vet` того же пакета → **код 0**; `go build ./services/iam/...` (весь сервис) → **код 0** |
+| **контроль в обратную сторону** — наивная форма круга 1: прямой импорт `repo/kaname/pg` из `seed` | та же сборка | **код 1**, дословно: `imports …/repo/kaname/pg from zz_probe_naive.go` → `imports …/apps/kaname/seed from backfill_adapter.go: import cycle not allowed` |
 
 Контроль обязателен: без него «выбранная форма собирается» не отличалось бы от «в этом
 дереве собирается что угодно».
@@ -354,7 +387,7 @@ git grep -c 'apps/kacho/seed' -- 'services/iam/internal/apps/kacho/shared/*.go' 
 
 | вариант | цена | исход |
 |---|---|---|
-| **порт `kachorepo.Writer`** *(выбран)* | ноль новых объявлений: тип уже есть, уже импортируется `seed`, форма транзакции уже применяется соседним досевом | **принят** |
+| **порт `kanamerepo.Writer`** *(выбран)* | ноль новых объявлений: тип уже есть, уже импортируется `seed`, форма транзакции уже применяется соседним досевом | **принят** |
 | новый узкий порт в `seed` (по образцу `OrphanScopeStore`), реализуемый `pg` | новый интерфейс + новый адаптер + провязка в корне; и он **воспроизводит** то самое ребро `pg → seed`, из-за которого наивная форма и оказалась циклом | отвергнут: дороже при том же исходе |
 | инверсия зависимости — снять импорт `seed` из `pg` | переселить **2** непроверочных файла-адаптера, чей предмет (`#810`, `#792`) к проекции роли отношения не имеет | отвергнут: цена платится на **чужом** предмете |
 | вынести писателя в третий пакет | лишний слой при готовом порте; SQL уезжает из `repo/`, то есть нарушает раскладку ради обхода задачи, которой нет | отвергнут |
@@ -374,7 +407,7 @@ git grep -c 'apps/kacho/seed' -- 'services/iam/internal/apps/kacho/shared/*.go' 
 |---|---|---|
 | `seed.BackfillOwnerBindings(ctx, pool)` | **не меняется** | **0** из 33 |
 | `seed.SyncAllSystemRoleSelectors(ctx, pool)` | **не меняется** (обёртка «operational re-seed», §4) | **0** из 12 |
-| новый досев проекции — принимает `kachorepo.Repository` | новая | новые |
+| новый досев проекции — принимает `kanamerepo.Repository` | новая | новые |
 
 **Единица счёта — строка вызова**, тем же предикатом, что у круга 1. Заявление «одним
 изменением» (§2.7) тем самым сохраняется, но теперь оно **обосновано**, а не объявлено:
@@ -910,8 +943,8 @@ gh issue view 1028 -R PRO-Robotech/kacho --json title
 вероятными местами своей ошибки, названными **до** рецензии, а не после.
 
 1. **§2.1.4 — сборка.** Прогнать самостоятельно: временный файл в пакете `seed` с
-   вызовом через порт → `go build ./services/iam/internal/apps/kacho/seed/` обязан дать
-   **0**; он же с прямым импортом `repo/kacho/pg` — **1** с текстом `import cycle not
+   вызовом через порт → `go build ./services/iam/internal/apps/kaname/seed/` обязан дать
+   **0**; он же с прямым импортом `repo/kaname/pg` — **1** с текстом `import cycle not
    allowed`. Если хоть один исход иной, неверен весь §2.1.
 2. **§2.1.6 — рябь ноль.** Довод держится на том, что пересчёт **выносится** из
    `BackfillOwnerBindings`, поэтому её сигнатура не меняется. Если рецензент видит
@@ -953,16 +986,16 @@ gh issue view 1028 -R PRO-Robotech/kacho --json title
 Замечание верно. Наивная форма §2.1 круга 1 не компилируется:
 
 ```
-go build ./services/iam/internal/apps/kacho/seed/   # с прямым импортом repo/kacho/pg
-  → imports …/repo/kacho/pg from zz_probe_naive.go
-    imports …/apps/kacho/seed from backfill_adapter.go: import cycle not allowed
+go build ./services/iam/internal/apps/kaname/seed/   # с прямым импортом repo/kaname/pg
+  → imports …/repo/kaname/pg from zz_probe_naive.go
+    imports …/apps/kaname/seed from backfill_adapter.go: import cycle not allowed
   код возврата 1
 ```
 
 Ребро подтверждено предикатом рецензента (2 непроверочных файла `pg`, импортирующих
 `seed`), обратного ребра нет.
 
-**Устранено портом** — §2.1.2: `kachorepo.Writer` → `RolesW().ReplaceRoleVerbs`,
+**Устранено портом** — §2.1.2: `kanamerepo.Writer` → `RolesW().ReplaceRoleVerbs`,
 транзакция через `shared.DoWithWriteTxVoid`, внедряет композиционный корень.
 Проверено сборкой: пакет — код **0**, `go vet` — **0**, весь сервис
 `go build ./services/iam/...` — **0** (§2.1.4). Цена трёх отвергнутых вариантов
@@ -973,13 +1006,13 @@ go build ./services/iam/internal/apps/kacho/seed/   # с прямым импор
 не импортирует. Перемер по одному:
 
 ```
-git grep -ln '"…/services/iam/internal/repo/kacho"' \
-  -- 'services/iam/internal/apps/kacho/seed/*.go' ':!*_test.go'   → 1  (orphan_scope_sweep.go)
-git grep -c  '…/repo/kacho/role"' -- 'services/iam/internal/apps/kacho/seed/*.go'  → 0
+git grep -ln '"…/services/iam/internal/repo/kaname"' \
+  -- 'services/iam/internal/apps/kaname/seed/*.go' ':!*_test.go'   → 1  (orphan_scope_sweep.go)
+git grep -c  '…/repo/kaname/role"' -- 'services/iam/internal/apps/kaname/seed/*.go'  → 0
 ```
 
-Для `repo/kacho/role` — верно (0). Для `repo/kacho` — **неверно**: импорт есть, и тот же
-файл уже применяет `shared.DoWithWriteTxVoid` с `kachorepo.Writer` (`:236`). То есть порт
+Для `repo/kaname/role` — верно (0). Для `repo/kaname` — **неверно**: импорт есть, и тот же
+файл уже применяет `shared.DoWithWriteTxVoid` с `kanamerepo.Writer` (`:236`). То есть порт
 не нужно ни объявлять, ни впервые импортировать — приём в пакете уже живёт. Опровержение
 **усиливает** вывод рецензента, а не отменяет его.
 
@@ -1045,7 +1078,7 @@ ls internal/repohygiene/acceptanceledger*.go
 **В1 — §9 требует RED по всем сценариям, часть зелена. ПРИНЯТО.**
 
 ```
-grep -n '^func Test' services/iam/internal/apps/kacho/seed/system_role_verbs_integration_test.go
+grep -n '^func Test' services/iam/internal/apps/kaname/seed/system_role_verbs_integration_test.go
   → :62 TestSystemRoleVerbProjectionIsSeededAlongsideItsSelectors
     :143 TestSystemRoleWithoutMaterializingRulesGetsNoVerbs
 ```
@@ -1180,22 +1213,22 @@ git grep -n 'FROM kacho_iam.role_verb' -- 'services/iam/**/*.go' ':!*_test.go'
 
 | форма | исход у рецензента |
 |---|---|
-| **выбранная** — `shared.DoWithWriteTxVoid(ctx, repo, func(ctx, w kachorepo.Writer) error { return w.RolesW().ReplaceRoleVerbs(ctx, roleID, pairs) })` | `go build ./services/iam/internal/apps/kacho/seed/` → **0**; `go vet` того же пакета → **0**; `go build ./services/iam/...` → **0** |
-| **контроль** — наивная форма круга 1, прямой импорт `repo/kacho/pg` | **1**, дословно: `imports …/repo/kacho/pg from zz_reviewer_probe_naive.go` → `imports …/apps/kacho/seed from backfill_adapter.go: import cycle not allowed` |
+| **выбранная** — `shared.DoWithWriteTxVoid(ctx, repo, func(ctx, w kanamerepo.Writer) error { return w.RolesW().ReplaceRoleVerbs(ctx, roleID, pairs) })` | `go build ./services/iam/internal/apps/kaname/seed/` → **0**; `go vet` того же пакета → **0**; `go build ./services/iam/...` → **0** |
+| **контроль** — наивная форма круга 1, прямой импорт `repo/kaname/pg` | **1**, дословно: `imports …/repo/kaname/pg from zz_reviewer_probe_naive.go` → `imports …/apps/kaname/seed from backfill_adapter.go: import cycle not allowed` |
 
 Контроль обязателен: без него «выбранная форма собирается» не отличалось бы от «здесь
 собирается что угодно».
 
 **Опровержение автора (§12.1) проверено и принято.** Рецензент круга 1 писал, что
 пакет `seed` не импортирует **ни один** из двух портов. Перемер: для
-`repo/kacho/role` — **0** (верно), для `repo/kacho` — **1** непроверочный файл
+`repo/kaname/role` — **0** (верно), для `repo/kaname` — **1** непроверочный файл
 (`orphan_scope_sweep.go`), и он уже применяет ровно ту же форму транзакции
 (`:236`). Опровержение **удешевляет** предложенное рецензентом решение, а не отменяет
 его.
 
 **Последнее звено §2.1.2 проверено отдельно**, потому что сборка его не покрывает:
 композиционный корень действительно держит конкретный репозиторий **в той же
-области видимости**, что и вызов досева — `kachoRepo := kachopg.New(pool, slavePool)`
+области видимости**, что и вызов досева — `kanameRepo := kanamepg.New(pool, slavePool)`
 (`serve.go:161`), передан в `seed.NewOrphanScopeSweeper` на `:1296`, а
 `seed.BackfillOwnerBindings(ctx, pool)` стоит на `:1305` в **том же** замыкании.
 Провязка нового досева не требует ни одного нового объявления в корне.

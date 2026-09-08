@@ -13,7 +13,7 @@ package domain_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // Утверждение «registry — модуль платформы» ЗДЕСЬ СНЯТО ВМЕСТЕ С ПРЕДМЕТОМ

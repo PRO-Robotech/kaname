@@ -3,7 +3,7 @@
 ## Назначение
 
 **User** — mirror identity-сущности из внешнего IdP (Ory Kratos). В Kachō
-у User'а нет паролей и MFA-настроек — этим занимается IdP. Сервис `kacho-iam`
+у User'а нет паролей и MFA-настроек — этим занимается IdP. Сервис `kaname`
 хранит только то, что нужно для авторизации и audit'a: `external_id` (subject
 из OIDC-токена), `email`, `display_name`, `account_id`, `invite_status`.
 
@@ -47,7 +47,7 @@ PENDING ⇔ external_id = '';  ACTIVE/BLOCKED ⇔ external_id <> ''
 **Partial UNIQUE:** `users_account_external_id_unique ON (account_id, external_id) WHERE external_id <> ''`.
 
 **ID prefix:** `usr`.
-**DB table:** `kacho_iam.users` (`CREATE TABLE kacho_iam.users` в `0001_initial.sql`).
+**DB table:** `kaname.users` (`CREATE TABLE kaname.users` в `0001_initial.sql`).
 
 **FK contract:**
 
@@ -64,7 +64,7 @@ sequenceDiagram
     autonumber
     participant Admin as Tenant admin
     participant GW as api-gateway
-    participant IAM as kacho-iam :9090
+    participant IAM as kaname :9090
     participant DB as Postgres
     participant Kratos as Kratos
     participant Invitee as Invitee inbox
@@ -106,7 +106,7 @@ sequenceDiagram
     participant User as Browser
     participant GW as api-gateway
     participant Ory
-    participant IAM as kacho-iam :9091
+    participant IAM as kaname :9091
     participant DB as Postgres
 
     User->>Ory: OIDC login (first time)
@@ -207,14 +207,14 @@ Account'а (`super_admin: admin from account`) и, каскадом, админ�
 
 ## Конфигурация
 
-**Своих ручек у приглашения нет.** Предикат: `grep -rhoE 'KACHO_IAM_KRATOS_[A-Z0-9]*'`
+**Своих ручек у приглашения нет.** Предикат: `grep -rhoE 'KANAME_KRATOS_[A-Z0-9]*'`
 по всему дереву даёт **ноль** вхождений (замер 2026-08-06).
 
 > [!note] Здесь стояли две переменные под админ-API поставщика личности — их нет
 > Прежняя редакция объявляла адрес и токен админского API Kratos с YAML-двойниками
 > и описывала dev-заглушку клиента. Ни переменных, ни YAML-ключей, ни самого клиента
 > в дереве нет: клиент удалён, и об этом прямо сказано в шапке
-> `internal/apps/kacho/api/user/invite.go`. Приглашение создаёт строку пользователя в
+> `internal/apps/kaname/api/user/invite.go`. Приглашение создаёт строку пользователя в
 > состоянии PENDING и (опционально) привязку доступа; **чем именно** приглашённый
 > активирует строку — вход через поставщика личности, ссылка, помощь администратора —
 > вынесено за пределы сервиса. Имена переменных не воспроизводятся: в обратных кавычках
@@ -252,7 +252,7 @@ grpcurl -plaintext -d '{
   "external_id":"ory-sub-xyz",
   "email":"alice@example.com",
   "display_name":"Alice"
-}' localhost:9091 kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity
+}' localhost:9091 kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity
 ```
 
 ### Идемпотентность
@@ -285,22 +285,22 @@ kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
 # psql:
 make -C deploy psql SVC=iam
-# > SELECT id, account_id, email, invite_status, external_id FROM kacho_iam.users LIMIT 10;
+# > SELECT id, account_id, email, invite_status, external_id FROM kaname.users LIMIT 10;
 
 # Integration: invite-flow + UpsertFromIdentity.
 go test -short -count=1 -timeout 120s \
   -run "TestUser|TestUpsertFromIdentity|TestInvite" \
-  ./services/iam/internal/repo/kacho/pg/...
+  ./services/iam/internal/repo/kaname/pg/...
 ```
 
 ## Подробности реализации
 
-- **Use-cases:** `internal/apps/kacho/api/user/` (`get.go`, `list.go`, `delete.go`,
+- **Use-cases:** `internal/apps/kaname/api/user/` (`get.go`, `list.go`, `delete.go`,
   `invite.go`, `internal_upsert.go`, `set_blocked.go`, `update.go`, `audit.go`).
-- **Handler:** `internal/apps/kacho/api/user/handler.go` (public); internal-полоса —
+- **Handler:** `internal/apps/kaname/api/user/handler.go` (public); internal-полоса —
   `internal_upsert.go` и `internal_on_recovery.go` в том же каталоге (отдельного файла
   с обобщённым именем внутреннего обработчика здесь нет).
-- **Repo:** `internal/repo/kacho/pg/user_repo.go` + `user_pool_repo.go` (Hydra hooks).
+- **Repo:** `internal/repo/kaname/pg/user_repo.go` + `user_pool_repo.go` (Hydra hooks).
 - **Bootstrap path:** `UpsertFromIdentity` создает User + Account + Project +
   AccessBindings в одной transaction, минуя per-resource `CreateUseCase`.
   FGA tuples — все в одном `fga_outbox` batch.
@@ -338,7 +338,7 @@ go test -short -count=1 -timeout 120s \
 ## Ссылки на код
 
 - `internal/domain/user.go`
-- `internal/apps/kacho/api/user/`
-- `internal/repo/kacho/pg/user_repo.go`, `user_pool_repo.go`
+- `internal/apps/kaname/api/user/`
+- `internal/repo/kaname/pg/user_repo.go`, `user_pool_repo.go`
 - `internal/migrations/0001_initial.sql` (таблица пользователей)
 - `tests/newman/cases/iam-user.py`

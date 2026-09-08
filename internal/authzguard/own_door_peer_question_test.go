@@ -26,7 +26,7 @@ package authzguard_test
 // раньше обработчика. Тогда край, задавая вопрос о правах, получает отказ на
 // САМ ВОПРОС — и всякое решение о доступе на стенде становится отказом.
 // Наблюдалось: пять шардов сквозных проб, у каждого 40+ записей
-// `authz_no_principal` с `rpc=/kacho.cloud.iam.v1.AuthorizeService/Check`, при
+// `authz_no_principal` с `rpc=/kaname.cloud.iam.v1.AuthorizeService/Check`, при
 // НУЛЕ таких записей на стволе.
 //
 // Отрицание идёт В ПАРЕ: послабление обязано покрывать РОВНО вопросы о правах,
@@ -38,10 +38,10 @@ import (
 
 	"google.golang.org/grpc"
 
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/pkg/authz/catalogderive"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 )
 
 // ВОПРОС О ПРАВАХ ДОХОДИТ ДО ОБРАБОТЧИКА без личности арендатора.
@@ -83,10 +83,10 @@ func TestOwnDoor_QuestionExemptionCoversNothingElse(t *testing.T) {
 		method string
 		req    any
 	}{
-		{"/kacho.cloud.iam.v1.AuthorizeService/ListSubjects", &iamv1.ListSubjectsRequest{}},
-		{"/kacho.cloud.iam.v1.AuthorizeService/ExpandRelations", &iamv1.ExpandRelationsRequest{}},
-		{"/kacho.cloud.iam.v1.ProjectService/Get", &iamv1.GetProjectRequest{ProjectId: victimProject}},
-		{"/kacho.cloud.iam.v1.ProjectService/Delete", &iamv1.DeleteProjectRequest{ProjectId: victimProject}},
+		{"/kaname.cloud.iam.v1.AuthorizeService/ListSubjects", &iamv1.ListSubjectsRequest{}},
+		{"/kaname.cloud.iam.v1.AuthorizeService/ExpandRelations", &iamv1.ExpandRelationsRequest{}},
+		{"/kaname.cloud.iam.v1.ProjectService/Get", &iamv1.GetProjectRequest{ProjectId: victimProject}},
+		{"/kaname.cloud.iam.v1.ProjectService/Delete", &iamv1.DeleteProjectRequest{ProjectId: victimProject}},
 	}
 	for _, c := range cases {
 		store := &grantStore{allow: map[string]bool{}}
@@ -113,7 +113,7 @@ func TestOwnDoor_TenantAsksTheSameQuestionAndPasses(t *testing.T) {
 	_, err := doorUnder(t, store)(
 		tenantCtx(ownerUser),
 		&iamv1.AuthorizeCheckRequest{Subject: "user:" + ownerUser},
-		&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.AuthorizeService/Check"},
+		&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.AuthorizeService/Check"},
 		reached(&hit),
 	)
 	if err != nil || !hit {

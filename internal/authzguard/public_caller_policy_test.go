@@ -32,6 +32,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 const (
@@ -55,27 +57,27 @@ const (
 	// projectGetMethod — единственный публичный RPC, который зовут ВСЕ
 	// consumer-модули (vpc/compute/nlb/storage/registry): существование проекта
 	// и его аккаунт на пути запроса Create.
-	projectGetMethod = "/kacho.cloud.iam.v1.ProjectService/Get"
+	projectGetMethod = "/kaname.cloud.iam.v1.ProjectService/Get"
 	// projectListMethod / accountListMethod — два списочных RPC, которые прежде
 	// стояли в таблице под веер снятого оператора. Соседо-вызываемыми они больше
 	// не объявлены; остаются здесь как предмет отрицания и как часть поверхности,
 	// доступной парадной двери.
-	projectListMethod = "/kacho.cloud.iam.v1.ProjectService/List"
-	accountListMethod = "/kacho.cloud.iam.v1.AccountService/List"
+	projectListMethod = "/kaname.cloud.iam.v1.ProjectService/List"
+	accountListMethod = "/kaname.cloud.iam.v1.AccountService/List"
 
 	// userTokenIssueMethod — представитель того, что ДОЛЖНО остаться только за
 	// парадной дверью: чеканка личного токена пользователя. Ровно этот RPC
 	// показывает цену дыры — сосед выпускал бы носитель прав от чужого имени.
-	userTokenIssueMethod = "/kacho.cloud.iam.v1.UserTokenService/Issue"
+	userTokenIssueMethod = "/kaname.cloud.iam.v1.UserTokenService/Issue"
 	// accessBindingCreateMethod — второй представитель: выдача прав.
-	accessBindingCreateMethod = "/kacho.cloud.iam.v1.AccessBindingService/Create"
+	accessBindingCreateMethod = "/kaname.cloud.iam.v1.AccessBindingService/Create"
 	// projectDeleteMethod — третий: необратимая мутация тенантского ресурса.
-	projectDeleteMethod = "/kacho.cloud.iam.v1.ProjectService/Delete"
+	projectDeleteMethod = "/kaname.cloud.iam.v1.ProjectService/Delete"
 
 	// batchCheckMethod — пер-страничный фильтр видимости List у vpc/compute/nlb/
 	// storage (internal/authzfilter). Единственный метод AuthorizeService, который
 	// кто-либо из них зовёт.
-	batchCheckMethod = "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck"
+	batchCheckMethod = "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck"
 
 	// registrySAN — живой модуль, который вправе спросить ProjectService.Get и
 	// НЕ вправе спросить BatchCheck (фильтра страницы у него нет). Пара
@@ -85,15 +87,15 @@ const (
 )
 
 func newStorageCtx() context.Context {
-	return grpcsrv.WithCertIdentity(context.Background(), storageSAN, true)
+	return grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), storageSAN, true)
 }
 
 func newOperatorCtx() context.Context {
-	return grpcsrv.WithCertIdentity(context.Background(), operatorSAN, true)
+	return grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), operatorSAN, true)
 }
 
 func testPublicPolicy(prod bool) *PublicCallerPolicy {
-	return NewPublicCallerPolicy(prod, PublicPeerCallableRPCs())
+	return NewPublicCallerPolicy(prod, PublicPeerCallableRPCs(), nil, nil)
 }
 
 // ── сердце правки: сосед не зовёт то, что за парадной дверью ────────────────
@@ -108,7 +110,7 @@ func TestPublicCallerPolicy_NeighbourDeniedOnGatewayOnlyRPC(t *testing.T) {
 			for name, ctx := range map[string]context.Context{
 				"storage":  newStorageCtx(),
 				"vpc":      newVPCCtx(),
-				"registry": grpcsrv.WithCertIdentity(context.Background(), registrySAN, true),
+				"registry": grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), registrySAN, true),
 			} {
 				err := p.allow(ctx, method)
 				if err == nil {
@@ -157,7 +159,7 @@ func TestPublicCallerPolicy_PeerReadEdgesKeepWorking(t *testing.T) {
 		"spiffe://kacho.cloud/ns/kacho/sa/kacho-storage",
 		registrySAN,
 	} {
-		ctx := grpcsrv.WithCertIdentity(context.Background(), san, true)
+		ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true)
 		if err := p.allow(ctx, projectGetMethod); err != nil {
 			t.Fatalf("%s denied on %s: %v — this is the request-path project validation of Create", san, projectGetMethod, err)
 		}
@@ -170,7 +172,7 @@ func TestPublicCallerPolicy_PeerReadEdgesKeepWorking(t *testing.T) {
 		"spiffe://kacho.cloud/ns/kacho/sa/kacho-nlb",
 		storageSAN,
 	} {
-		ctx := grpcsrv.WithCertIdentity(context.Background(), san, true)
+		ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true)
 		if err := p.allow(ctx, batchCheckMethod); err != nil {
 			t.Fatalf("%s denied on %s: %v — это пер-страничный фильтр видимости List", san, batchCheckMethod, err)
 		}
@@ -196,7 +198,7 @@ func TestPublicCallerPolicy_PeerReadEdgeIsPerRPCNotPerCaller(t *testing.T) {
 // пообъектного фильтра у него нет, и допуск об этом знает.
 func TestPublicCallerPolicy_PeerReadEdgeIsPerCallerNotOpenToAll(t *testing.T) {
 	p := testPublicPolicy(true)
-	registryCtx := grpcsrv.WithCertIdentity(context.Background(), registrySAN, true)
+	registryCtx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), registrySAN, true)
 	if err := p.allow(registryCtx, projectGetMethod); err != nil {
 		t.Fatalf("контроль: registry отвергнут на своём ребре %s: %v", projectGetMethod, err)
 	}
@@ -213,8 +215,8 @@ func TestPublicCallerPolicy_NoVerifiedCert_Prod(t *testing.T) {
 	p := testPublicPolicy(true)
 	for _, ctx := range []context.Context{
 		context.Background(),
-		grpcsrv.WithCertIdentity(context.Background(), gatewaySAN, false), // предъявлен, но не проверен
-		grpcsrv.WithCertIdentity(context.Background(), "spiffe://kacho.cloud/ns/kacho/sa/hydra", true),
+		grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), gatewaySAN, false), // предъявлен, но не проверен
+		grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), "spiffe://kacho.cloud/ns/kacho/sa/hydra", true),
 	} {
 		if err := p.allow(ctx, projectGetMethod); err == nil {
 			t.Fatal("a caller without a verified kacho module certificate passed the public floor")
@@ -286,7 +288,10 @@ func TestPublicPeerCallableRPCs_CarryNoMutation(t *testing.T) {
 // источника истины контракта, а не из копии, которую пришлось бы поддерживать.
 func protoReturnTypes(t *testing.T) map[string]string {
 	t.Helper()
-	dir := filepath.Join("..", "..", "..", "..", "proto", "kacho", "cloud", "iam", "v1")
+	// Каталог контрактов в поставку модуля не входит: контракты приезжают
+	// зависимостью. Координата берётся от корня платформы, а её отсутствие —
+	// «условие не создано», а не «нет файла».
+	dir := platformtree.RequirePath(t, "proto/kaname/cloud/iam/v1")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read proto dir %s: %v", dir, err)
@@ -309,7 +314,7 @@ func protoReturnTypes(t *testing.T) map[string]string {
 				continue
 			}
 			if m := rpcRe.FindStringSubmatch(ln); m != nil && svc != "" {
-				out["/kacho.cloud.iam.v1."+svc+"/"+m[1]] = m[2]
+				out["/kaname.cloud.iam.v1."+svc+"/"+m[1]] = m[2]
 			}
 		}
 	}
@@ -377,7 +382,7 @@ func TestPublicPeerCallableRPCs_EveryCallerHasAModuleInTheTree(t *testing.T) {
 // `services/*`, а не по списку в коде: список разошёлся бы с деревом молча.
 func serviceModulesInTree(t *testing.T) map[string]struct{} {
 	t.Helper()
-	dir := filepath.Join("..", "..", "..", "..", "services")
+	dir := platformtree.RequirePath(t, "services")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read services dir %s: %v", dir, err)
@@ -459,7 +464,7 @@ func TestPublicCallerPolicy_RetiredOperatorFanoutIsNotCallable(t *testing.T) {
 	// Контроль формы: ключ с ПУСТЫМ списком отвергает ровно так же. Значит выбор
 	// «снять запись» сделан не ради исхода, а ради правдивости таблицы, — и
 	// «починка» дописыванием пустой строки этот гейт не обойдёт.
-	empty := NewPublicCallerPolicy(true, map[string][]string{accountListMethod: {}})
+	empty := NewPublicCallerPolicy(true, map[string][]string{accountListMethod: {}}, nil, nil)
 	if err := empty.allow(newOperatorCtx(), accountListMethod); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("контроль формы: пустой список вызывающих дал код %v, ожидался PermissionDenied — "+
 			"объяснение в шапке о неразличимости исходов неверно и его надо переписать",

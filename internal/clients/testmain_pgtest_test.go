@@ -10,13 +10,13 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // TestMain hands this package one Postgres instead of one per test.
 //
 // Оба дренажных набора этого пакета — очередь смены субъекта
-// (`kacho_iam.subject_change_outbox`) и очередь компенсации у поставщика
+// (`kaname.subject_change_outbox`) и очередь компенсации у поставщика
 // (`clients.ProviderCompensationTable`) — поднимали контейнер и проигрывали всю
 // цепочку миграций iam на КАЖДУЮ пробу. Контейнер принадлежит тестовому БИНАРЮ,
 // поэтому провязка обязана жить в пакете, которому этот бинарь принадлежит.
@@ -35,7 +35,7 @@ func TestMain(m *testing.M) {
 		// Прежде его приписывал каждый вызывающий своей копией; забывший
 		// получал `relation … does not exist` — отказ, читающийся как дефект
 		// продукта. Довод целиком — `pkg/pgtest` §searchpath.
-		SearchPath: "kacho_iam,public",
+		SearchPath: "kaname,public",
 		Name:       "iam",
 		Migrate:    pgtest.Goose(migrations.FS),
 	}))

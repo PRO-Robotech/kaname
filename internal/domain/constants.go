@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package domain — entities + value-types for kacho-iam.
+// Package domain — entities + value-types for kaname.
 //
 // The domain layer depends on stdlib + multierr only — never on pgx,
 // grpc-stubs, or sqlc. `kacho-proto` is permitted strictly for envelope
@@ -9,8 +9,8 @@
 // `internal/dto/toproto`.
 package domain
 
-// ID prefixes for kacho-iam resources. Mirrors the canonical prefix
-// constants in `kacho-corelib/ids` so the use-case layer can refer to short
+// ID prefixes for kaname resources. Mirrors the canonical prefix
+// constants in `pkg/ids` so the use-case layer can refer to short
 // names locally (`PrefixAccount`, `PrefixProject`, …) without re-importing
 // corelib for trivial id construction.
 const (
@@ -28,17 +28,17 @@ const (
 	PrefixOperationIAM = "iop"
 )
 
-// ShortIDLen — full id length (prefix + body); matches kacho-corelib/ids.
+// ShortIDLen — full id length (prefix + body); matches pkg/ids.
 const ShortIDLen = 20
 
-// PrincipalType — allowed values for kacho_iam.operations.principal_type.
-// 'system' / 'kacho-iam-bootstrap' are used for internal/background flows;
+// PrincipalType — allowed values for kaname.operations.principal_type.
+// 'system' / 'kaname-bootstrap' are used for internal/background flows;
 // 'user' / 'service_account' come from OIDC at the api-gateway edge.
 const (
 	PrincipalTypeSystem         = "system"
 	PrincipalTypeAnonymous      = "anonymous"
 	PrincipalTypeUser           = "user"
 	PrincipalTypeServiceAccount = "service_account"
-	PrincipalDisplayBootstrap   = "kacho-iam-bootstrap"
+	PrincipalDisplayBootstrap   = "kaname-bootstrap"
 	PrincipalIDBootstrap        = "bootstrap"
 )

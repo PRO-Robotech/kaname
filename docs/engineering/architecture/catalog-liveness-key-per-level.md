@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 # Живость родителя в каталоге прав держится КЛЮЧОМ на каждом уровне
 
 Решение по задаче продукта `#1868`. Предмет — трёхуровневый каталог
-`kacho_iam.catalog_module` → `catalog_resource` → `catalog_verb`: чем на каждом
+`kaname.catalog_module` → `catalog_resource` → `catalog_verb`: чем на каждом
 уровне удержано «мой родитель жив».
 
 ## Решение
@@ -27,7 +27,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | `catalog_verb` → `catalog_resource` | **ничем**: `catalog_verb_resource_fk (module, resource)` идёт на ПЕРВИЧНЫЙ ключ ресурса |
 
 > [!note] У `catalog_module` есть ЧЕТВЁРТЫЙ ссылающийся, и он не уровень каталога
-> `kacho_iam.roles.owner_module` — потребитель, а не ступень трёхуровневой цепи,
+> `kaname.roles.owner_module` — потребитель, а не ступень трёхуровневой цепи,
 > поэтому в таблице выше его строки нет и быть не должно. Но живость родителя он
 > держит **той же формой**: `roles_owner_module_live_fk (owner_module,
 > owner_module_live)` → `catalog_module (module, live)` `MATCH SIMPLE`
@@ -39,7 +39,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > на `catalog_module` ссылаются **4 ключа** из **2 таблиц**
 > (`catalog_resource` — безусловный и живостный, `roles` — те же два), тогда как
 > таблица выше перечисляет **уровни цепи**, и `roles` уровнем не является.
-> Предикат: `grep -n 'REFERENCES kacho_iam.catalog_module'
+> Предикат: `grep -n 'REFERENCES kaname.catalog_module'
 > services/iam/internal/migrations/*.sql`. Без этой оговорки второй
 > ссылающийся выглядел бы пропущенным.
 >
@@ -47,7 +47,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > §«Что это решение РАЗМЫКАЕТ»; здесь оно не пересказывается.
 
 ```sh
-grep -rn "REFERENCES kacho_iam.catalog_" services/iam/internal/migrations/*.sql
+grep -rn "REFERENCES kaname.catalog_" services/iam/internal/migrations/*.sql
 ```
 
 Три числа, от которых зависит форма работы:

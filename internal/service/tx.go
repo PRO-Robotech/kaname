@@ -9,7 +9,7 @@
 // `Tx` is an opaque transaction handle. The service layer drives its lifecycle
 // (Begin via TxBeginner, Commit/Rollback here) but never inspects the concrete
 // type. The concrete pgx transaction is materialized only inside repo/pg
-// adapters via a type assertion (see repo/kacho/pg/service_tx.go::txAsPgx).
+// adapters via a type assertion (see repo/kaname/pg/service_tx.go::txAsPgx).
 package service
 
 import "context"

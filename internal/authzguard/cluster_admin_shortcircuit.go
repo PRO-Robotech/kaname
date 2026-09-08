@@ -10,7 +10,7 @@ package authzguard
 // write-authz gates: requireGrantAuthority / fgaHoldsAdmin). It answers ONE
 // question with ONE relation Check:
 //
-//	cluster:cluster_kacho_root # system_admin @ <subject>
+//	cluster:cluster_root # system_admin @ <subject>
 //
 // This is a plain super-gate ("is the subject cluster-admin?"), NOT a hierarchical
 // `<rel> from cluster` cascade — exactly one tuple = one fact = one audit row. The

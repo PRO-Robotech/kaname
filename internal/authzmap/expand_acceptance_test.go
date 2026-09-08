@@ -7,7 +7,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 )
 
 // expand_acceptance_test.go — приём и компиляция судят ОДИН набор (#1290).

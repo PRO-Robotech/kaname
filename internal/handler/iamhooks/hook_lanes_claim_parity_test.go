@@ -19,7 +19,7 @@ package iamhooks_test
 //
 // # Почему обе полосы спрашиваются ОДНИМ прогоном и на ОДНИХ часах
 //
-// В составе есть величина, произведённая часами (`kacho_issued_at`). Две
+// В составе есть величина, произведённая часами (`kaname_issued_at`). Две
 // службы с двумя источниками времени разошлись бы по ней, и расхождение было
 // бы свойством пробы, а не продукта. Один экземпляр службы, одни часы, обе
 // полосы: расходиться остаётся ровно тому, что принадлежит полосам.
@@ -42,9 +42,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // parityUserPort — одна и та же строка обеим полосам.
@@ -83,7 +83,7 @@ func TestIssuanceAndRefreshLanesMintTheSameClaimSet(t *testing.T) {
 		x5t        = "x5t-thumb-parity"
 	)
 	// Момент аутентификации сессии — НЕПУСТОЙ: он попадает в состав
-	// (`kacho_mfa_at`), и на нуле расхождение по нему было бы неотличимо от
+	// (`kaname_mfa_at`), и на нуле расхождение по нему было бы неотличимо от
 	// совпадения.
 	authTime := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	fixed := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
@@ -151,7 +151,7 @@ func TestIssuanceAndRefreshLanesMintTheSameClaimSet(t *testing.T) {
 	// Положительный контроль номер два: производная, ради которой задача
 	// заводилась, ДЕЙСТВИТЕЛЬНО сработала на этом входе. Без него равенство
 	// двух составов, у обоих одинаково не сработавшей производной, зелено.
-	require.Equal(t, "attested", issued["kacho_device_compliance"],
+	require.Equal(t, "attested", issued["kaname_device_compliance"],
 		"область webauthn не дала attested — вход пробы не задевает производную согласия устройства")
 
 	// Множество ИМЁН — отдельным утверждением, чтобы отказ называл потерянное

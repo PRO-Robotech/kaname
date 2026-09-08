@@ -5,8 +5,8 @@
 Это самый важный сквозной поток: **как именно** `AccessBinding.Create`
 превращается в `allowed=true` для последующего `Check` на затронутую область.
 
-Решение о доступе вычисляет **реляционная форма в собственной базе `kacho-iam`**
-(`internal/repo/kacho/pg/relverdict`). Внешнего движка отношений, к которому
+Решение о доступе вычисляет **реляционная форма в собственной базе `kaname`**
+(`internal/repo/kaname/pg/relverdict`). Внешнего движка отношений, к которому
 прежде уходил вопрос, **нет**: ни клиента, ни его хранилища, ни очереди к нему,
 ни окна рассогласования между «выдача закоммичена» и «выдача действует».
 
@@ -22,7 +22,7 @@
 
 Форма отвечает на один вопрос — «может ли ЭТОТ субъект сделать ЭТОТ глагол над
 ЭТИМ объектом» — и складывает ответ из **четырёх** источников. Все четыре живут
-в схеме `kacho_iam`:
+в схеме `kaname`:
 
 | # | Источник | Таблицы |
 |---|---|---|
@@ -54,7 +54,7 @@
 
 ## Журнал намерений остался — исчез его потребитель
 
-`kacho_iam.fga_outbox` — **живая таблица**, и она по-прежнему принимает каждое
+`kaname.fga_outbox` — **живая таблица**, и она по-прежнему принимает каждое
 намерение об отношении в той же транзакции, что и сама мутация. Изменилось то,
 что происходит со строкой дальше: её больше **никто не вывозит наружу**.
 
@@ -80,7 +80,7 @@
 
 ## Таблицы
 
-- `kacho_iam.fga_outbox(id, event_type, payload, created_at)` — журнал намерений; ключ
+- `kaname.fga_outbox(id, event_type, payload, created_at)` — журнал намерений; ключ
   кортежа лежит **внутри** `payload` (jsonb), отдельных колонок `user`/`relation`/`object`
   у таблицы нет. DDL — `0001_initial.sql`. Четыре колонки, и это весь журнал: величин
   доставки (`sent_at` / `attempt_count` / `last_error`) и ключа упорядочивания
@@ -93,8 +93,8 @@
   «непринятые» строки **нечем и не нужно** — потребитель у него один, триггер проекции, и
   он складывает прямой факт В ТОЙ ЖЕ транзакции, что и вставку. Право действует **с
   коммита**, а не «когда доедет»; запрос `WHERE sent_at IS NULL` отвергается базой.
-- `kacho_iam.relation_fact` — проекция журнала, из которой форма читает прямой факт.
-- `kacho_iam.subject_change_outbox(id, subject_id, op, created_at, event_type, payload)`
+- `kaname.relation_fact` — проекция журнала, из которой форма читает прямой факт.
+- `kaname.subject_change_outbox(id, subject_id, op, created_at, event_type, payload)`
   — **журнал** смены субъекта, который край читает курсором по возрастанию `id`;
   DDL — `0001_initial.sql`. Шесть колонок, и это весь журнал: величин доставки у него
   **больше нет**.
@@ -111,7 +111,7 @@
   Практическое следствие: считать по этому журналу отставание **нечем и не нужно** —
   колонки `sent_at` нет, а запрос по ней теперь отвергается базой, а не возвращает
   весь журнал молча. Отставание живёт у читателя (см. `33-runbook.md`).
-- `kacho_iam.resource_scope_edge` — представление цепи областей (см.
+- `kaname.resource_scope_edge` — представление цепи областей (см.
   [`../architecture/scope-chain-reaches-the-root.md`](../architecture/scope-chain-reaches-the-root.md)).
 
 `subject_change_outbox` **своего канала `NOTIFY` не несёт**: журнал читается курсором по
@@ -136,8 +136,8 @@
 sequenceDiagram
     autonumber
     participant Admin as Admin tool
-    participant IAM as kacho-iam :9090
-    participant DB as Postgres kacho_iam
+    participant IAM as kaname :9090
+    participant DB as Postgres kaname
     participant GW as api-gateway authz-cache
     participant Caller
 
@@ -184,7 +184,7 @@ iam_access_binding:<id>  #project  @project:<project_id>
 > [!warning] Здесь стояло «без него шлюз НИКОГДА не авторизует пообъектный
 > `Get`/`Update`/`Delete`» — и это перестало быть верным вместе со снятием внешнего движка
 > Указатель был ребром, пока цепь читалась из графа движка. Сегодня недостающие звенья
-> **достраивает представление** `kacho_iam.resource_scope_edge`, и берёт оно их из СХЕМЫ:
+> **достраивает представление** `kaname.resource_scope_edge`, и берёт оно их из СХЕМЫ:
 > у личности — из таблицы членств (`kacho#944`), у группы, служебной учётки и роли — из
 > колонки их собственной строки, у привязки — из пары колонок области (`kacho#785`).
 > То есть пообъектное чтение авторизуется и без строки указателя в журнале.
@@ -221,12 +221,12 @@ iam_access_binding:<id>  #project  @project:<project_id>
 
 ```sql
 -- 1. Убедиться, что указателя нет.
-SELECT * FROM kacho_iam.relation_fact
+SELECT * FROM kaname.relation_fact
  WHERE object_type = 'iam_user' AND object_id = '<user_id>';
 
 -- 2. Посмотреть, дошло ли намерение до журнала.
 SELECT id, event_type, payload, created_at
-  FROM kacho_iam.fga_outbox
+  FROM kaname.fga_outbox
  WHERE payload::text LIKE '%<user_id>%'
  ORDER BY id DESC LIMIT 10;
 ```
@@ -278,26 +278,26 @@ iam о крае не знает и на этот срок не влияет. П�
 `writerSession.AccessBindingsW().EmitRelationWrite(ctx, …)` внутри writer-tx —
 это `INSERT` в `fga_outbox`, из которого триггер тут же складывает факт.
 Аналогично `EmitSubjectChangeEvent()`
-(`internal/repo/kacho/pg/access_binding_repo.go`) — `INSERT` в
+(`internal/repo/kaname/pg/access_binding_repo.go`) — `INSERT` в
 `subject_change_outbox`.
 
 ### Вердикт — запрос
 
-`internal/repo/kacho/pg/relverdict`: `query.go` (прямой вердикт), `list.go`
+`internal/repo/kaname/pg/relverdict`: `query.go` (прямой вердикт), `list.go`
 (перечисление объектов), `subjects.go` (перечисление субъектов), `expand.go`
 (разбор оснований), `labelaxis.go` (меточная ветвь), `condition.go` (условия).
 План вывода компилируется из модели — `services/iam/internal/authzplan`.
 
-Дверь решения для собственных стражей `kacho-iam` — `internal/authzcascade`:
+Дверь решения для собственных стражей `kaname` — `internal/authzcascade`:
 композиционный корень выдаёт **одно** значение каждому стражу, поэтому страж не
 может спросить мимо формы.
 
 ### Сброс кэша края — со стороны iam его НЕТ
 
 iam только **дописывает** строку в `subject_change_outbox` (`EmitSubjectChangeEvent`,
-`internal/repo/kacho/pg/access_binding_repo.go`) и отдаёт журнал по запросу:
+`internal/repo/kaname/pg/access_binding_repo.go`) и отдаёт журнал по запросу:
 `InternalIAMService.PollSubjectChanges(since_id, limit)` →
-`internal/service/subject_change_service.go` → `internal/repo/kacho/pg/subject_change_repo.go`.
+`internal/service/subject_change_service.go` → `internal/repo/kaname/pg/subject_change_repo.go`.
 Ни клиента к краю, ни дренажа, ни апплаера у iam нет.
 
 Читатель — сам край: `gateway/internal/watcher/subject_change_watcher.go` держит курсор в
@@ -308,7 +308,7 @@ iam только **дописывает** строку в `subject_change_outbox
 
 > [!note] Здесь стояла настройка дренажа — параметров больше нет
 > Раздел перечислял размер партии, запасной опрос, число повторов, отступ и срок применения
-> (`drainer.Config`), а рядом — шесть ручек `KACHO_IAM_GATEWAY_INTERNAL*` с адресом края и
+> (`drainer.Config`), а рядом — шесть ручек `KANAME_GATEWAY_INTERNAL*` с адресом края и
 > клиентским mTLS до него. Всё снято вместе с дренажом: ни одной из этих величин не
 > существует. Единственная величина, задающая сходимость, живёт **у края**, а не здесь.
 >
@@ -316,7 +316,7 @@ iam только **дописывает** строку в `subject_change_outbox
 > края нет вовсе, — именно это делало вынос iam отдельным продуктом невыразимым.
 
 Отдельных переменных окружения под вердикт **нет**: сроки движка
-(`KACHO_IAM_FGA_CHECK_TIMEOUT_MS`, `…_LIST_OBJECTS_…`, `…_WRITE_…`), адрес
+(`KANAME_FGA_CHECK_TIMEOUT_MS`, `…_LIST_OBJECTS_…`, `…_WRITE_…`), адрес
 движка и идентификаторы его хранилища сняты вместе с движком.
 
 ## Известные ограничения
@@ -337,7 +337,7 @@ iam только **дописывает** строку в `subject_change_outbox
   (`pkg/subjectchange`, `JournalRetention`); разбор —
   [`../architecture/journal-retention-is-a-policy.md`](../architecture/journal-retention-is-a-policy.md).
 - **Журнал растёт** — строки намерений остаются как след выдачи. Наблюдать
-  `count(*) FROM kacho_iam.fga_outbox`, но «строки копятся» здесь больше **не
+  `count(*) FROM kaname.fga_outbox`, но «строки копятся» здесь больше **не
   означает** «право не доехало»: право доезжает фиксацией, а не вывозом строки.
 
 ## Связанные компоненты
@@ -350,11 +350,11 @@ iam только **дописывает** строку в `subject_change_outbox
 
 ## Ссылки на код
 
-- `internal/repo/kacho/pg/relverdict/` — реляционная форма
+- `internal/repo/kaname/pg/relverdict/` — реляционная форма
 - `internal/authzcascade/` — дверь решения
 - `services/iam/internal/authzplan/` — компиляция плана вывода из модели
-- `internal/repo/kacho/pg/fga_outbox/` — эмиссия намерения
-- `internal/repo/kacho/pg/creator_tuple_writer.go` — кортеж создателя строкой журнала
+- `internal/repo/kaname/pg/fga_outbox/` — эмиссия намерения
+- `internal/repo/kaname/pg/creator_tuple_writer.go` — кортеж создателя строкой журнала
 - `internal/clients/cache_invalidation_applier.go`
 - `internal/migrations/0001_initial.sql` — DDL обеих очередей
 - `internal/migrations/0098_relation_fact_follows_the_journal.sql` — триггер проекции

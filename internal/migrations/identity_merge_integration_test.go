@@ -63,13 +63,13 @@ func seedAccountWithOwner(t *testing.T, db *sql.DB, tag string) (ownerID, accoun
 	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.Exec(`
-		INSERT INTO kacho_iam.users (id, external_id, email, display_name, account_id, invite_status)
+		INSERT INTO kaname.users (id, external_id, email, display_name, account_id, invite_status)
 		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
 		ownerID, "ext-own-"+tag, "owner-"+tag+"@example.test", "Owner "+tag, accountID)
 	require.NoError(t, err)
 
 	_, err = tx.Exec(`
-		INSERT INTO kacho_iam.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
+		INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		accountID, "acc-"+tag, ownerID)
 	require.NoError(t, err)
 
@@ -87,7 +87,7 @@ func seedRowInAccount(t *testing.T, db *sql.DB, id, email, accountID, inviteStat
 		externalID = ""
 	}
 	_, err := db.Exec(`
-		INSERT INTO kacho_iam.users (id, external_id, email, display_name, account_id, invite_status)
+		INSERT INTO kaname.users (id, external_id, email, display_name, account_id, invite_status)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
 		id, externalID, email, "Person", accountID, inviteStatus)
 	require.NoError(t, err, "посев строки %s в аккаунте %s", id, accountID)
@@ -101,7 +101,7 @@ func anyAssignableRole(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	var id string
 	require.NoError(t, db.QueryRow(`
-		SELECT id FROM kacho_iam.roles WHERE is_system ORDER BY id LIMIT 1`).Scan(&id))
+		SELECT id FROM kaname.roles WHERE is_system ORDER BY id LIMIT 1`).Scan(&id))
 	require.NotEmpty(t, id, "ПРЕДПОСЫЛКА: в дереве обязана быть системная роль — "+
 		"триггер назначаемости принимает её на любой области, поэтому фикстура "+
 		"не спорит с продуктом о праве роли стоять на этой выдаче")
@@ -114,13 +114,13 @@ func anyAssignableRole(t *testing.T, db *sql.DB) string {
 func grantOn(t *testing.T, db *sql.DB, bindingID, subjectUserID, roleID, resType, resID string) string {
 	t.Helper()
 	_, err := db.Exec(`
-		INSERT INTO kacho_iam.access_bindings
+		INSERT INTO kaname.access_bindings
 		    (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 		VALUES ($1, 'user', $2, $3, $4, $5, 'ACTIVE')`,
 		bindingID, subjectUserID, roleID, resType, resID)
 	require.NoError(t, err, "посев выдачи %s", bindingID)
 	_, err = db.Exec(`
-		INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
+		INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id, ordinal)
 		VALUES ($1, 'user', $2, 0)`, bindingID, subjectUserID)
 	require.NoError(t, err, "посев субъекта выдачи %s", bindingID)
 	return bindingID
@@ -148,7 +148,7 @@ func scopeParentsOf(t *testing.T, db *sql.DB, objectType, objectID string) []str
 	t.Helper()
 	return queryStrings(t, db, `
 		SELECT DISTINCT e.parent_type || ':' || e.parent_id
-		  FROM kacho_iam.resource_scope_edge e
+		  FROM kaname.resource_scope_edge e
 		 WHERE e.object_type = $1 AND e.object_id = $2
 		 ORDER BY 1`, objectType, objectID)
 }
@@ -158,7 +158,7 @@ func scopeParentsOf(t *testing.T, db *sql.DB, objectType, objectID string) []str
 func canonicalModelText(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join("..", "..", "..", "..",
-		"proto", "kacho", "cloud", "iam", "v1", "fga_model.fga")
+		"proto", "kaname", "cloud", "iam", "v1", "fga_model.fga")
 	b, err := os.ReadFile(path)
 	require.NoError(t, err,
 		"ПРЕДПОСЫЛКА: канонический текст модели прав обязан читаться — его отсутствие "+
@@ -169,7 +169,7 @@ func canonicalModelText(t *testing.T) string {
 func membershipAccountsOf(t *testing.T, db *sql.DB, userID string) []string {
 	t.Helper()
 	rows, err := db.Query(`
-		SELECT account_id FROM kacho_iam.memberships WHERE user_id = $1 ORDER BY account_id`, userID)
+		SELECT account_id FROM kaname.memberships WHERE user_id = $1 ORDER BY account_id`, userID)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	out := []string{}
@@ -211,8 +211,8 @@ func TestIntegration_MirrorKeepsMembershipsItDidNotCreate(t *testing.T) {
 
 	// Второе членство — то, которое переносу и предстоит завести.
 	_, err := db.ExecContext(ctx, `
-		INSERT INTO kacho_iam.memberships (id, user_id, account_id, state)
-		VALUES (kacho_iam.membership_mirror_id($1, $2), $1, $2, 'ACTIVE')`, person, accB)
+		INSERT INTO kaname.memberships (id, user_id, account_id, state)
+		VALUES (kaname.membership_mirror_id($1, $2), $1, $2, 'ACTIVE')`, person, accB)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{accA, accB}, membershipAccountsOf(t, db, person),
@@ -221,7 +221,7 @@ func TestIntegration_MirrorKeepsMembershipsItDidNotCreate(t *testing.T) {
 
 	// Первый вход: строка активируется. Ровно то, что делает `ActivateInvite`.
 	_, err = db.ExecContext(ctx, `
-		UPDATE kacho_iam.users
+		UPDATE kaname.users
 		   SET invite_status = 'ACTIVE', external_id = $2
 		 WHERE id = $1`, person, "ext-mirror")
 	require.NoError(t, err)
@@ -309,8 +309,8 @@ func TestIntegration_TheIdentityScopeChainNamesExactlyTheAccountsOfItsMembership
 
 	// ── второе членство: то, которого зеркало не заводит ни при каком входе ──
 	_, err := db.Exec(`
-		INSERT INTO kacho_iam.memberships (id, user_id, account_id, state)
-		VALUES (kacho_iam.membership_mirror_id($1, $2), $1, $2, 'ACTIVE')`, person, accB)
+		INSERT INTO kaname.memberships (id, user_id, account_id, state)
+		VALUES (kaname.membership_mirror_id($1, $2), $1, $2, 'ACTIVE')`, person, accB)
 	require.NoError(t, err, "посев второго членства в аккаунте %s", accB)
 
 	after := scopeParentsOf(t, db, "iam_user", person)
@@ -343,7 +343,7 @@ func TestIntegration_TheIdentityScopeChainNamesExactlyTheAccountsOfItsMembership
 	// накапливает: администратор аккаунта, из которого человека вывели, сохранял
 	// бы власть над его личностью, и заметить это было бы нечем.
 	_, err = db.Exec(`
-		DELETE FROM kacho_iam.memberships WHERE user_id = $1 AND account_id = $2`, person, accB)
+		DELETE FROM kaname.memberships WHERE user_id = $1 AND account_id = $2`, person, accB)
 	require.NoError(t, err)
 	require.Equal(t, []string{"account:" + accA}, scopeParentsOf(t, db, "iam_user", person),
 		"аккаунт-предок пережил снятие членства, которым он держался: цепь предков "+
@@ -387,9 +387,9 @@ func TestIntegration_TheGuardAgainstOrphanedGrantsIsTheSubjectRef(t *testing.T) 
 	// ── форма А: снятие членства, затем строки. Говорит 0050, и НА СТЕЙТМЕНТЕ ──
 	tx, err := db.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	_, err = tx.ExecContext(ctx, `DELETE FROM kacho_iam.memberships WHERE user_id = $1`, person)
+	_, err = tx.ExecContext(ctx, `DELETE FROM kaname.memberships WHERE user_id = $1`, person)
 	require.NoError(t, err, "снятие членства само по себе не отвергается")
-	_, err = tx.ExecContext(ctx, `DELETE FROM kacho_iam.users WHERE id = $1`, person)
+	_, err = tx.ExecContext(ctx, `DELETE FROM kaname.users WHERE id = $1`, person)
 	require.Error(t, err,
 		"снятие строки человека, названной субъектом выдачи, обязано быть отвергнуто: "+
 			"иначе право осталось бы без субъекта — выглядит выданным и не действует ни для кого")
@@ -400,7 +400,7 @@ func TestIntegration_TheGuardAgainstOrphanedGrantsIsTheSubjectRef(t *testing.T) 
 	// ── форма Б: 472002 ЖИВ — он говорит, пока строка человека остаётся ──────
 	tx, err = db.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	_, err = tx.ExecContext(ctx, `DELETE FROM kacho_iam.memberships WHERE user_id = $1`, person)
+	_, err = tx.ExecContext(ctx, `DELETE FROM kaname.memberships WHERE user_id = $1`, person)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.Error(t, err,
@@ -415,14 +415,14 @@ func TestIntegration_TheGuardAgainstOrphanedGrantsIsTheSubjectRef(t *testing.T) 
 	// им. Строим состояние, где 0050 промолчать обязан (субъектной строки нет),
 	// и смотрим, поймает ли 472002 осиротевшую легаси-проекцию.
 	_, err = db.ExecContext(ctx, `
-		DELETE FROM kacho_iam.access_binding_subjects WHERE binding_id = $1`, binding)
+		DELETE FROM kaname.access_binding_subjects WHERE binding_id = $1`, binding)
 	require.NoError(t, err)
 
 	tx, err = db.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	_, err = tx.ExecContext(ctx, `DELETE FROM kacho_iam.memberships WHERE user_id = $1`, person)
+	_, err = tx.ExecContext(ctx, `DELETE FROM kaname.memberships WHERE user_id = $1`, person)
 	require.NoError(t, err)
-	_, err = tx.ExecContext(ctx, `DELETE FROM kacho_iam.users WHERE id = $1`, person)
+	_, err = tx.ExecContext(ctx, `DELETE FROM kaname.users WHERE id = $1`, person)
 	require.NoError(t, err, "субъектной строки больше нет — 0050 молчит по построению")
 	require.NoError(t, tx.Commit(),
 		"сторож 472002 на этой форме МОЛЧИТ: к COMMIT строки человека нет, и он коротко "+
@@ -431,7 +431,7 @@ func TestIntegration_TheGuardAgainstOrphanedGrantsIsTheSubjectRef(t *testing.T) 
 
 	var orphaned int
 	require.NoError(t, db.QueryRow(`
-		SELECT count(*) FROM kacho_iam.access_bindings
+		SELECT count(*) FROM kaname.access_bindings
 		 WHERE status = 'ACTIVE' AND subject_type = 'user' AND subject_id = $1`, person).Scan(&orphaned))
 	require.Equal(t, 1, orphaned,
 		"легаси-проекция осталась указывать на снятую строку, и ни один сторож этого не "+

@@ -15,7 +15,7 @@ package authzmap_test
 // существуют: при отставшем или сломанном конвейере человек, обязанный всё
 // починить, сам оказывается без прав. Эти три разрешаются в момент вопроса:
 //
-//  1. администратор облака — cluster:cluster_kacho_root#system_admin, достаёт до всего;
+//  1. администратор облака — cluster:cluster_root#system_admin, достаёт до всего;
 //  2. учётка первичной установки — то же отношение (её сеет старт), то есть тот
 //     же источник; отдельного носителя нет;
 //  3. администратор аккаунта — account:<id>#admin, достаёт ВНУТРЬ своего аккаунта.
@@ -32,7 +32,7 @@ package authzmap_test
 // Прежде эти пробы поднимали движок контейнером, грузили в него заготовку модели
 // из карты чарта и спрашивали его. Ни движка, ни карты, ни подчарта в дереве
 // нет. Исход теперь считает форма вердикта поверх СОБСТВЕННОЙ базы iam
-// (`internal/repo/kacho/pg/relverdict`), а вывод отношений она берёт из той же
+// (`internal/repo/kaname/pg/relverdict`), а вывод отношений она берёт из той же
 // модели, что разбирают структурные пробы этого пакета.
 //
 // Утверждения при этом НЕ ослаблены. План вывода, скомпилированный из модели,
@@ -54,15 +54,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/relverdict"
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
 // Мир каскада. Идентификаторы короткие и говорящие: в тексте отказа они и есть
 // адрес.
 const (
-	saClusterID = "cluster_kacho_root"
+	saClusterID = "cluster_root"
 
 	saAccA = "acc-cascadea"
 	saAccB = "acc-cascadeb"
@@ -185,7 +185,7 @@ func saExec(t *testing.T, ctx context.Context, tx pgx.Tx, sql string, args ...an
 func saUser(t *testing.T, ctx context.Context, tx pgx.Tx, id, account string) {
 	t.Helper()
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.users (id, external_id, email, account_id, invite_status)
+		`INSERT INTO kaname.users (id, external_id, email, account_id, invite_status)
 		 VALUES ($1, $2, $3, $4, 'ACTIVE')`,
 		id, "ext-"+id, id+"@kacho.local", account)
 }
@@ -197,7 +197,7 @@ func saUser(t *testing.T, ctx context.Context, tx pgx.Tx, id, account string) {
 func saPointer(t *testing.T, ctx context.Context, tx pgx.Tx, objectType, objectID, relation, subject string) {
 	t.Helper()
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.fga_outbox (event_type, payload, created_at)
+		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
 		 VALUES ('fga.tuple.write',
 		         jsonb_build_object('user', $1::text, 'relation', $2::text,
 		                            'object', $3::text || ':' || $4::text),
@@ -205,7 +205,7 @@ func saPointer(t *testing.T, ctx context.Context, tx pgx.Tx, objectType, objectI
 		subject, relation, objectType, objectID)
 	var landed int
 	require.NoError(t, tx.QueryRow(ctx,
-		`SELECT count(*)::int FROM kacho_iam.relation_fact
+		`SELECT count(*)::int FROM kaname.relation_fact
 		  WHERE object_type = $1 AND object_id = $2 AND relation = $3 AND subject = $4`,
 		objectType, objectID, relation, subject).Scan(&landed), "перепись проекции журнала")
 	require.Equalf(t, 1, landed,
@@ -218,7 +218,7 @@ func saPointer(t *testing.T, ctx context.Context, tx pgx.Tx, objectType, objectI
 func saEdge(t *testing.T, ctx context.Context, tx pgx.Tx, objectType, objectID, parentType, parentID string) {
 	t.Helper()
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.resource_parent_edge
+		`INSERT INTO kaname.resource_parent_edge
 		   (object_type, object_id, parent_type, parent_id, depth)
 		 VALUES ($1, $2, $3, $4, 1)`, objectType, objectID, parentType, parentID)
 }
@@ -238,7 +238,7 @@ func seedSuperAdminWorld(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	// и ссылается на ещё не существующего владельца — ключ отложенный.
 	for _, p := range [][2]string{{saAccA, saOwnerRowA}, {saAccB, saOwnerRowB}} {
 		saExec(t, ctx, tx,
-			`INSERT INTO kacho_iam.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
+			`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 			p[0], "account-"+p[0], p[1])
 		saUser(t, ctx, tx, p[1], p[0])
 	}
@@ -248,7 +248,7 @@ func seedSuperAdminWorld(t *testing.T, ctx context.Context, tx pgx.Tx) {
 		saUser(t, ctx, tx, strings.TrimPrefix(s, "user:"), saAccA)
 	}
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.service_accounts (id, account_id, name, enabled)
+		`INSERT INTO kaname.service_accounts (id, account_id, name, enabled)
 		 VALUES ($1, $2, 'bootstrap', true)`,
 		strings.TrimPrefix(subjBootstrapSA, "service_account:"), saAccA)
 
@@ -256,14 +256,14 @@ func seedSuperAdminWorld(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	// колонки account_id — писать его руками значило бы завести второй источник.
 	saUser(t, ctx, tx, saUserA, saAccA)
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.groups (id, account_id, name) VALUES ($1, $2, 'devs')`,
+		`INSERT INTO kaname.groups (id, account_id, name) VALUES ($1, $2, 'devs')`,
 		saGroupA, saAccA)
 
 	// Проекты. Указатель на аккаунт — В ЖУРНАЛ: его туда со-коммитит создание
 	// проекта, и оттуда же его берёт цепь областей.
 	for _, p := range [][2]string{{saPrjA, saAccA}, {saPrjB, saAccB}} {
 		saExec(t, ctx, tx,
-			`INSERT INTO kacho_iam.projects (id, account_id, name) VALUES ($1, $2, $3)`,
+			`INSERT INTO kaname.projects (id, account_id, name) VALUES ($1, $2, $3)`,
 			p[0], p[1], "project-"+p[0])
 		saPointer(t, ctx, tx, "project", p[0], "account", "account:"+p[1])
 	}
@@ -283,7 +283,7 @@ func seedSuperAdminWorld(t *testing.T, ctx context.Context, tx pgx.Tx) {
 		{"rol-cascadeinertb", saAccB, saOwnerRowB},
 	} {
 		saExec(t, ctx, tx,
-			`INSERT INTO kacho_iam.roles (id, account_id, name, permissions)
+			`INSERT INTO kaname.roles (id, account_id, name, permissions)
 			 VALUES ($1, $2, $3, '["iam.project.*.get"]'::jsonb)`, r[0], r[1], "inert_"+strings.ReplaceAll(r[1], "-", "_"))
 	}
 	for _, b := range [][4]string{
@@ -291,12 +291,12 @@ func seedSuperAdminWorld(t *testing.T, ctx context.Context, tx pgx.Tx) {
 		{saBindingB, saPrjB, "rol-cascadeinertb", saOwnerRowB},
 	} {
 		saExec(t, ctx, tx,
-			`INSERT INTO kacho_iam.access_bindings
+			`INSERT INTO kaname.access_bindings
 			   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 			 VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
 			b[0], b[3], b[2], b[1])
 		saExec(t, ctx, tx,
-			`INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
+			`INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
 			 VALUES ($1, 'user', $2)`, b[0], b[3])
 	}
 

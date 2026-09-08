@@ -34,9 +34,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest/roleexport"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest/roleexport"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // minManifestsRead — пол переписи: не про размер дерева, а про то, что обход
@@ -46,7 +48,10 @@ const minManifestsRead = 5
 
 func TestPlaneAgreementJudgesADifferingInputOnTheTree(t *testing.T) {
 	// `../../../..` от этого пакета — каталог `services` монорепо.
-	paths, err := filepath.Glob(filepath.Join("../../../..", "*", "manifest.yaml"))
+	// Читается ДЕРЕВО ПЛАТФОРМЫ: манифесты соседних модулей, каталог
+	// контрактов и канон модели в поставку нашего модуля не входят by
+	// construction. Их отсутствие — «условие не создано», а не находка.
+	paths, err := filepath.Glob(filepath.Join(platformtree.RequirePath(t, "services"), "*", "manifest.yaml"))
 	if err != nil {
 		t.Fatalf("обход дерева: %v", err)
 	}
@@ -148,8 +153,11 @@ var namedByMODRL19 = []struct{ resource, verb string }{
 // они объявляют ещё и РОЛЬ с поимённым правом, которой поставляемый манифест не
 // несёт. Утверждается ровно то, что оси не выдуманы — их действия в дереве есть.
 func TestMODRL19InternalAxesHaveAnInputInTheTree(t *testing.T) {
-	const rel = "../../../../vpc/manifest.yaml"
-	body, err := os.ReadFile(rel)
+	// Манифест СОСЕДНЕГО модуля — координатой от корня платформы, а не подъёмом
+	// каталогами: в поставку нашего модуля он не входит, и его отсутствие есть
+	// «условие не создано».
+	const rel = "services/vpc/manifest.yaml"
+	body, err := os.ReadFile(platformtree.RequirePath(t, rel))
 	if err != nil {
 		t.Fatalf("поставляемый манифест vpc не прочитан: %v", err)
 	}

@@ -96,7 +96,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
 )
 
 // sessionHistoryRPC — RPC, чей предмет есть ЧТЕНИЕ ИСТОРИИ СЕССИЙ человека.
@@ -105,19 +105,19 @@ import (
 // написания. Отношение спрашивается у каталога: литерал имени превратил бы гейт
 // в проверку написания и остался бы зелёным, верни кто-то чтение на широкое
 // отношение под другим именем.
-const sessionHistoryRPC = "kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser"
+const sessionHistoryRPC = "kaname.cloud.iam.v1.InternalSessionRevocationsService/ListByUser"
 
 // credentialListRPC — вторая сторона той же личности: перечень удостоверений
 // (#1133). Круг держателей у неё и у истории сессий обязан совпадать.
-const credentialListRPC = "kacho.cloud.iam.v1.UserTokenService/List"
+const credentialListRPC = "kaname.cloud.iam.v1.UserTokenService/List"
 
 // sessionTerminatingRPCs — глаголы, ЗАВЕРШАЮЩИЕ сессию. Перечислены, чтобы
 // размен, на котором стоит сужение чтения, был утверждением, а не пересказом:
 // ни один из них не гейтится отношением на строке личности, поэтому сужение
 // чтения не отнимает завершения ни у кого.
 var sessionTerminatingRPCs = []string{
-	"kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
-	"kacho.cloud.iam.v1.InternalIAMService/ForceLogout",
+	"kaname.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
+	"kaname.cloud.iam.v1.InternalIAMService/ForceLogout",
 }
 
 // TestReadingAPersonsSessionHistoryHasNoAccountLevelSource — гейт класса.

@@ -36,7 +36,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // Значения метки `rpc` — ЗАКРЫТЫЙ словарь. Именованные константы, а не литералы

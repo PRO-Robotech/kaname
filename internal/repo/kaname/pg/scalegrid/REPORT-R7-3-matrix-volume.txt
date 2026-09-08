@@ -1,0 +1,314 @@
+R7-3 — ПРИБОР ОБЪЁМА: ОДНА ОПЕРАЦИЯ ПРОТИВ НАЛИТОЙ МАТРИЦЫ
+==========================================================
+
+ПРОВЕНАНС
+  снято               2026-09-05 18:53:15 MSK
+  ревизия дерева      b4b84500f8b554b101a95af3f55e116387e84475
+  состояние дерева    чистое (несохранённых правок нет) — ревизия описывает
+                      исполнявшееся дерево целиком
+  машина              AMD Ryzen 9 5950X 16-Core Processor, ядер 32
+  Postgres            16.15
+
+ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА (гейт свежести сверяет его с текущим деревом)
+  отпечаток состава     55357f47a4fd3180
+  отпечаток содержимого b40f95a969543dba
+  файлов под отпечатком 19, таблиц выведено 18 (kaname.access_binding_subjects, kaname.access_bindings, kaname.accounts, kaname.catalog_resource, kaname.clusters, kaname.group_members, kaname.groups, kaname.memberships, kaname.projects, kaname.relation_fact, kaname.resource_mirror, kaname.resource_parent_edge, kaname.resource_scope_edge, kaname.role_rule_selectors, kaname.role_verb, kaname.roles, kaname.service_accounts, kaname.users)
+  предикат отпечатка    все не-тестовые .go каталогов services/iam/internal/repo/kaname/pg/relverdict и services/iam/internal/repo/kaname/pg/scalegrid; те .sql каталога services/iam/internal/migrations, что МЕНЯЮТ СТРУКТУРУ (CREATE/ALTER/DROP вне комментариев) хотя бы одной таблицы, которую читает запрос вердикта (имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kaname.", а не выписаны); БЕЗ файлов, объявленных оснасткой отпечатка (они не касаются базы — проверяется разбором, а не перечнем); у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев (директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ обесценивает; строковая лексема, называющая КООРДИНАТУ собственного дерева (путь импорта своего модуля либо путь, начинающийся с каталога верхнего уровня репозитория), заменяется постоянной меткой — адрес кода не есть его поведение, поэтому переезд каталога замер тоже НЕ обесценивает; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора (-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала; файл опознаётся ТОЖДЕСТВОМ «роль каталога/имя файла», а не путём, и в этом же порядке считается содержимое — поэтому оба плеча неподвижны при переименовании каталога by construction
+  ПЕРЕШТАМПОВАН БЕЗ ПЕРЕСЪЁМКИ (задача продукта #2039). Сменилось ПРАВИЛО
+  отпечатка: координата собственного дерева вынесена из значащего содержимого, а
+  файл опознаётся тождеством, а не путём. Замер не повторялся, и это доказано, а
+  не заявлено: под новым правилом дерево ревизии b4b84500 и дерево после переезда
+  каталогов дают ОДИН И ТОТ ЖЕ отпечаток — 19 совпадений из 19 пофайлово. Позже
+  сдвинулся ровно один файл, `сетка/strength.go`: из него вынесена машинерия
+  самого отпечатка, ни один оператор замера не тронут.
+  ФАЙЛЫ ПОД ОТПЕЧАТКОМ (хэш · тождество · путь на момент замера)
+    28ccc0b674e6ac55  вердикт/asker.go  services/iam/internal/repo/kaname/pg/relverdict/asker.go
+    8a5df9cd8d0a346e  вердикт/asker_gate.go  services/iam/internal/repo/kaname/pg/relverdict/asker_gate.go
+    44feeb9469eb14bc  вердикт/catalogtype.go  services/iam/internal/repo/kaname/pg/relverdict/catalogtype.go
+    26004fc4746102cd  вердикт/condition.go  services/iam/internal/repo/kaname/pg/relverdict/condition.go
+    0a456f44bf28d9d2  вердикт/expand.go  services/iam/internal/repo/kaname/pg/relverdict/expand.go
+    80e119935fa750c3  вердикт/labelaxis.go  services/iam/internal/repo/kaname/pg/relverdict/labelaxis.go
+    ea23896d20b684b9  вердикт/list.go  services/iam/internal/repo/kaname/pg/relverdict/list.go
+    3b3ea697e22783c0  вердикт/membership.go  services/iam/internal/repo/kaname/pg/relverdict/membership.go
+    9be00171f7f5dad4  вердикт/query.go  services/iam/internal/repo/kaname/pg/relverdict/query.go
+    6911db75df41e8f6  вердикт/subjects.go  services/iam/internal/repo/kaname/pg/relverdict/subjects.go
+    5ed0b860ed8e8607  миграции/0001_initial.sql  services/iam/internal/migrations/0001_initial.sql
+    ee18772d31c05f47  миграции/20260904135459_role_owner_module_needs_a_liveness_key.sql  services/iam/internal/migrations/20260904135459_role_owner_module_needs_a_liveness_key.sql
+    390bfdb71548b903  миграции/20260905020423_roles_carry_a_time_of_last_edit.sql  services/iam/internal/migrations/20260905020423_roles_carry_a_time_of_last_edit.sql
+    cba312c09c5cc18f  сетка/census.go  services/iam/internal/repo/kaname/pg/scalegrid/census.go
+    58879bd6de1a3d96  сетка/dictionary.go  services/iam/internal/repo/kaname/pg/scalegrid/dictionary.go
+    a4344ef691609535  сетка/grid.go  services/iam/internal/repo/kaname/pg/scalegrid/grid.go
+    90e89714c215b4e7  сетка/seed.go  services/iam/internal/repo/kaname/pg/scalegrid/seed.go
+    59456362d14ce8a3  сетка/strength.go  services/iam/internal/repo/kaname/pg/scalegrid/strength.go
+    f6e9c85169896050  сетка/strength_census.go  services/iam/internal/repo/kaname/pg/scalegrid/strength_census.go
+
+СЕТКА (константа в коде, ниоткуда не переопределяется)
+  матрица (объекты и выдачи растут ВМЕСТЕ, неподвижных осей нет):
+    малая        объектов     1000 · выдач     1000 · выдач на спрашиваемого 9 · фактов 1
+    средняя      объектов    10000 · выдач    10000 · выдач на спрашиваемого 9 · фактов 1
+    большая      объектов   100000 · выдач   100000 · выдач на спрашиваемого 9 · фактов 1
+    предельная   объектов  1000000 · выдач  1000000 · выдач на спрашиваемого 9 · фактов 1
+  циклов из четырёх операций на точку: 11 (нулевой прогревочный, в выборку не входит)
+
+ВОСПРОИЗВЕДЕНИЕ (дословно)
+  KACHO_MATRIX_VOLUME=1 go test -C services/iam ./internal/repo/kacho/pg/relverdict/ -run TestMatrixVolume_Report -count=1 -v -timeout 120m
+
+ЧТО ЭТОТ ОТЧЁТ ИЗМЕРЯЕТ И ЧЕГО НЕ ИЗМЕРЯЕТ (дословно)
+  ИЗМЕРЯЕТ   стоимость ОДНОЙ операции при налитой матрице прав: объекты и
+             выдачи растут ВМЕСТЕ, операций делается по одной. Четыре
+             операции: запись выдачи · вердикт (allow) · отзыв выдачи ·
+             вердикт после отзыва (deny). Запись и отзыв идут ПРОДУКТОВЫМ
+             путём (repo.Writer → AccessBindingsW), вердикт — реляционной
+             формой relverdict поверх настоящего Postgres.
+  НЕ ИЗМЕРЯЕТ материализацию прав (reconcile.Reconciler) — она не
+             запускается, и это не пропуск: отзыв даёт отказ немедленно,
+             потому что ветвь выдач вердикта читает состояние строки;
+             сеть, край и кэши вердиктов.
+  НЕ МЕРИТ ОСЬ ПРЯМЫХ ФАКТОВ, и это надо знать при чтении вердиктов ниже.
+             Сетка растит объекты и выдачи; таблица прямых фактов
+             (kaname.relation_fact) держится на ОДНОЙ строке во всех
+             четырёх точках — это видно в разбивке по таблицам выше.
+             Между тем безусловное основание вердикта читается именно из
+             неё, а наполняет её триггер журнала намерений, то есть её
+             размер растёт со всяким владением и всяким указателем области.
+             Значит «плоско» и «логарифмически» ниже сказаны про ОСИ ЭТОЙ
+             СЕТКИ, а не про все. Предикат снятия оговорки: завести точку,
+             где растёт число фактов, и снять её тем же прибором.
+             Прежде здесь стояла строка про внешний движок отношений («его
+             здесь нет, он требует поднятого стенда»). Движка нет нигде —
+             он снят стадией S6 эпика #747, — и оговорка о нём стала бы
+             утверждением о существовании снятого.
+  Числа этого отчёта НЕЛЬЗЯ складывать с числами приборов R7-1 и R7-2:
+  у R7-1 варьируется ОДНА ось при неподвижных остальных, у R7-2 — размер
+  одной выдачи. Единицы совпадают, предметы — нет.
+
+ЧЕМ СНЯТА КАЖДАЯ КОЛОНКА (единицы не складываются между собой)
+  строк(несущая)  — Actual Rows × Actual Loops листовых узлов плана
+                    (EXPLAIN ANALYZE BUFFERS VERBOSE FORMAT JSON, pg/planrows)
+  отброшено       — Rows Removed by Filter/Index Recheck/Join Filter, тем же прибором
+  тронуто         — несущая + отброшено; вердикт о стоимости выносится по НЕЙ
+  сверочная       — pg_stat_xact_all_tables (seq_tup_read + idx_tup_fetch),
+                    считает Postgres. Снимается ТОЛЬКО на чтениях: запись и
+                    отзыв идут в собственной транзакции продукта, изнутри
+                    которой прибор не спрашивает. Прочерк здесь означает
+                    «не спрашивали», а НЕ «ноль прочитано».
+  обращений       — круговых обращений к БД на ОДНУ операцию, трассировщиком
+                    pgx. Счёт идёт ОТ ПЕРВОГО СТЕЙТМЕНТА операции: открытие
+                    транзакции пулом в него не входит, как и собственные
+                    запросы прибора. Отсюда 3 у записи (вставка выдачи ·
+                    вставка её субъектов · фиксация) и 2 у отзыва
+                    (обновление · фиксация) — числа полные, а не усечённые.
+  p50/p95         — часы; нулевой цикл прогревочный и в выборку не входит.
+                    НАБЛЮДЕНИЕ, не вердикт: миллисекунда на этой машине
+                    устаревает раньше, чем свойство запроса.
+
+ПЛАН ЗАПИСИ И ОТЗЫВА СНЯТ НА ДВОЙНИКЕ — сказано, а не спрятано
+  `EXPLAIN ANALYZE` ИСПОЛНЯЕТ то, что планирует. Повторить настоящую вставку
+  значило бы нарушить уникальность действующей выдачи, а повторить отзыв —
+  получить отказ по состоянию. Поэтому планы записи и отзыва сняты на ТОМ ЖЕ
+  захваченном операторе с другим идентификатором, в транзакции, которая
+  затем откачена. Настоящие операции закоммичены; их часы и обращения сняты
+  отдельно, на них самих. Планы чтений сняты на настоящем состоянии —
+  вопрос идемпотентен, и повторять его безопасно.
+
+
+ОБЪЁМ БАЗЫ ПО ТОЧКАМ (перепись по каждой таблице порознь, счётом ПО ФАКТУ)
+------------------------------------------------------------------------------------------------------------------------------
+точка            объектов          рёбер          выдач    строк ВСЕГО        места
+малая                1002           3003           1017           7142      2.9 МиБ
+средняя             10002          30003          10029          61193     16.4 МиБ
+большая            100002         300003         100041         601487    147.7 МиБ
+предельная        1000002        3000003        1000053        6004211     1.41 ГиБ
+
+ПЕРЕПИСЬ ПО ТАБЛИЦАМ (строк / места) — по каждой точке
+  малая (объектов 1000 × выдач 1000, R=9 F=1) · посев 1.053s
+    resource_mirror                    1002 строк    304.0 КиБ
+    resource_parent_edge               3003 строк    568.0 КиБ
+    access_bindings                    1017 строк    696.0 КиБ
+    access_binding_subjects            1017 строк    312.0 КиБ
+    group_members                        11 строк     48.0 КиБ
+    roles                                60 строк    208.0 КиБ
+    role_verb                            12 строк     48.0 КиБ
+    role_rule_selectors                  16 строк     56.0 КиБ
+    relation_fact                         1 строк     56.0 КиБ
+    users                              1003 строк    720.0 КиБ
+    ИТОГО                              7142 строк      2.9 МиБ
+    выдач, называющих спрашиваемого 10 · членств в группах 11 · ролей/глаголов/правил 60/12/16 · фактов 1
+  средняя (объектов 10000 × выдач 10000, R=9 F=1) · посев 5.258s
+    resource_mirror                   10002 строк      2.2 МиБ
+    resource_parent_edge              30003 строк      4.9 МиБ
+    access_bindings                   10029 строк      5.7 МиБ
+    access_binding_subjects           10029 строк      2.5 МиБ
+    group_members                        11 строк     48.0 КиБ
+    roles                                69 строк    208.0 КиБ
+    role_verb                            21 строк     48.0 КиБ
+    role_rule_selectors                  25 строк     56.0 КиБ
+    relation_fact                         1 строк     56.0 КиБ
+    users                              1003 строк    720.0 КиБ
+    ИТОГО                             61193 строк     16.4 МиБ
+    выдач, называющих спрашиваемого 10 · членств в группах 11 · ролей/глаголов/правил 69/21/25 · фактов 1
+  большая (объектов 100000 × выдач 100000, R=9 F=1) · посев 52.311s
+    resource_mirror                  100002 строк     21.6 МиБ
+    resource_parent_edge             300003 строк     48.4 МиБ
+    access_bindings                  100041 строк     52.2 МиБ
+    access_binding_subjects          100041 строк     24.3 МиБ
+    group_members                        11 строк     48.0 КиБ
+    roles                               159 строк    240.0 КиБ
+    role_verb                           111 строк     48.0 КиБ
+    role_rule_selectors                 115 строк     96.0 КиБ
+    relation_fact                         1 строк     56.0 КиБ
+    users                              1003 строк    752.0 КиБ
+    ИТОГО                            601487 строк    147.7 МиБ
+    выдач, называющих спрашиваемого 10 · членств в группах 11 · ролей/глаголов/правил 159/111/115 · фактов 1
+  предельная (объектов 1000000 × выдач 1000000, R=9 F=1) · посев 9m31.277s
+    resource_mirror                 1000002 строк    180.2 МиБ
+    resource_parent_edge            3000003 строк    483.2 МиБ
+    access_bindings                 1000053 строк    539.4 МиБ
+    access_binding_subjects         1000053 строк    242.5 МиБ
+    group_members                        11 строк     48.0 КиБ
+    roles                              1059 строк    720.0 КиБ
+    role_verb                          1011 строк    200.0 КиБ
+    role_rule_selectors                1015 строк    296.0 КиБ
+    relation_fact                         1 строк     56.0 КиБ
+    users                              1003 строк    752.0 КиБ
+    ИТОГО                           6004211 строк     1.41 ГиБ
+    выдач, называющих спрашиваемого 10 · членств в группах 11 · ролей/глаголов/правил 1059/1011/1015 · фактов 1
+
+
+СТОИМОСТЬ ОДНОЙ ОПЕРАЦИИ ПО ТОЧКАМ ОБЪЁМА
+
+ЗАПИСЬ (СОЗДАТЬ ВЫДАЧУ)
+------------------------------------------------------------------------------------------------------------------------------
+точка           строк ВСЕГО      строк    отброш.    тронуто   сверочная   обращ.          p50          p95
+малая                  7142          1          0          1           —        3        910µs        990µs
+средняя               61193          1          0          1           —        3        781µs        790µs
+большая              601487          1          0          1           —        3        815µs        897µs
+предельная          6004211          1          0          1           —        3        949µs      1.097ms
+
+  отношение верхней точки к нижней:
+    строк(несущая) 1.00 · тронуто 1.00 · p50 1.04
+    при росте объёма базы в 841 раз
+  ВЕРДИКТ по несущей величине: НЕ РАСТЁТ (плоско)
+  план по точкам:
+    малая        [ModifyTable→access_bindings]
+    средняя      [ModifyTable→access_bindings]
+    большая      [ModifyTable→access_bindings]
+    предельная   [ModifyTable→access_bindings]
+
+ЧТЕНИЕ (ВЕРДИКТ, ALLOW)
+------------------------------------------------------------------------------------------------------------------------------
+точка           строк ВСЕГО      строк    отброш.    тронуто   сверочная   обращ.          p50          p95
+малая                  7142         32         22         54          85        2        997µs       4.85ms
+средняя               61193         43         46         89         109        2        851µs        889µs
+большая              601487         55         58        113         133        2        915µs        985µs
+предельная          6004211         67         70        137         165        2      4.796ms      5.233ms
+
+  отношение верхней точки к нижней:
+    строк(несущая) 2.09 · тронуто 2.54 · p50 4.81
+    при росте объёма базы в 841 раз
+  ВЕРДИКТ по несущей величине: растёт ЛОГАРИФМИЧЕСКИ
+  исход вердикта по точкам: малая→allow средняя→allow большая→allow предельная→allow  (утверждается, а не печатается: несовпадение роняет прогон)
+  план по точкам:
+    малая        [Index Only Scan→memberships Index Only Scan→resource_parent_edge Index Only Scan→role_verb Index Scan→access_binding_subjects Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→relation_fact Seq Scan→roles Seq Scan→service_accounts]
+    средняя      [Index Only Scan→memberships Index Only Scan→resource_parent_edge Index Only Scan→role_verb Index Scan→access_binding_subjects Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→relation_fact Seq Scan→roles Seq Scan→service_accounts]
+    большая      [Index Only Scan→memberships Index Only Scan→resource_parent_edge Index Only Scan→role_verb Index Scan→access_binding_subjects Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Index Scan→roles Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→relation_fact Seq Scan→service_accounts]
+    предельная   [Index Only Scan→memberships Index Only Scan→resource_parent_edge Index Only Scan→role_verb Index Scan→access_binding_subjects Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Index Scan→roles Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→relation_fact Seq Scan→service_accounts]
+
+УДАЛЕНИЕ (ОТОЗВАТЬ ВЫДАЧУ)
+------------------------------------------------------------------------------------------------------------------------------
+точка           строк ВСЕГО      строк    отброш.    тронуто   сверочная   обращ.          p50          p95
+малая                  7142          2          0          2           —        2        516µs        569µs
+средняя               61193          2          0          2           —        2        436µs        509µs
+большая              601487          2          0          2           —        2        443µs        496µs
+предельная          6004211          2          0          2           —        2        500µs        901µs
+
+  отношение верхней точки к нижней:
+    строк(несущая) 1.00 · тронуто 1.00 · p50 0.97
+    при росте объёма базы в 841 раз
+  ВЕРДИКТ по несущей величине: НЕ РАСТЁТ (плоско)
+  план по точкам:
+    малая        [Index Scan→access_bindings ModifyTable→access_bindings]
+    средняя      [Index Scan→access_bindings ModifyTable→access_bindings]
+    большая      [Index Scan→access_bindings ModifyTable→access_bindings]
+    предельная   [Index Scan→access_bindings ModifyTable→access_bindings]
+
+ПРОВЕРКА ОТЗЫВА (ВЕРДИКТ, DENY)
+------------------------------------------------------------------------------------------------------------------------------
+точка           строк ВСЕГО      строк    отброш.    тронуто   сверочная   обращ.          p50          p95
+малая                  7142         28         34         62          84        2        943µs       4.43ms
+средняя               61193         40         46         86         108        2        848µs        903µs
+большая              601487         52         58        110         132        2        908µs        996µs
+предельная          6004211         64         70        134         164        2      5.054ms      6.664ms
+
+  отношение верхней точки к нижней:
+    строк(несущая) 2.29 · тронуто 2.16 · p50 5.36
+    при росте объёма базы в 841 раз
+  ВЕРДИКТ по несущей величине: растёт ЛОГАРИФМИЧЕСКИ
+  исход вердикта по точкам: малая→deny средняя→deny большая→deny предельная→deny  (утверждается, а не печатается: несовпадение роняет прогон)
+  план по точкам:
+    малая        [Index Only Scan→memberships Index Only Scan→resource_parent_edge Index Only Scan→role_verb Index Scan→access_binding_subjects Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→relation_fact Seq Scan→roles Seq Scan→service_accounts]
+    средняя      [Index Only Scan→memberships Index Only Scan→resource_parent_edge Index Only Scan→role_verb Index Scan→access_binding_subjects Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→relation_fact Seq Scan→roles Seq Scan→service_accounts]
+    большая      [Index Only Scan→memberships Index Only Scan→resource_parent_edge Index Only Scan→role_verb Index Scan→access_binding_subjects Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Index Scan→roles Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→relation_fact Seq Scan→service_accounts]
+    предельная   [Index Only Scan→memberships Index Only Scan→resource_parent_edge Index Only Scan→role_verb Index Scan→access_binding_subjects Index Scan→access_bindings Index Scan→resource_mirror Index Scan→resource_parent_edge Index Scan→role_rule_selectors Index Scan→roles Seq Scan→accounts Seq Scan→clusters Seq Scan→group_members Seq Scan→groups Seq Scan→relation_fact Seq Scan→service_accounts]
+
+
+ГЛАВНЫЙ ВОПРОС: РАСТЁТ ЛИ СТОИМОСТЬ ОДНОЙ ОПЕРАЦИИ С ОБЪЁМОМ БАЗЫ
+------------------------------------------------------------------------------------------------------------------------------
+  объём базы вырос в 841 раз (7142 → 6004211 строк, 2.9 МиБ → 1.41 ГиБ)
+
+операция                                несущая ×      тронуто ×          p50 ×        вердикт
+запись (создать выдачу)                      1.00           1.00           1.04   НЕ РАСТЁТ (плоско)
+чтение (вердикт, allow)                      2.09           2.54           4.81   растёт ЛОГАРИФМИЧЕСКИ
+удаление (отозвать выдачу)                   1.00           1.00           0.97   НЕ РАСТЁТ (плоско)
+проверка отзыва (вердикт, deny)              2.29           2.16           5.36   растёт ЛОГАРИФМИЧЕСКИ
+
+  Потолки объявлены ДО прогона и стоят константами в коде:
+    «не растёт» — отношение несущей ≤ 2.0
+    «логарифмически» — отношение несущей ≤ 16.5 при этой кратности объёма
+  Потолок, подобранный ПОСЛЕ прогона, описывал бы полученное число, а не
+  свойство запроса, — поэтому он здесь, а не в выводах.
+
+
+ЧАСЫ РАСХОДЯТСЯ С НЕСУЩЕЙ ВЕЛИЧИНОЙ — И ЭТО РЕЗУЛЬТАТ, А НЕ ПОГРЕШНОСТЬ
+------------------------------------------------------------------------------------------------------------------------------
+  На отрицательном чтении несущая величина выросла в 2.29 раза, а p50 —
+  в 5.36 раза. План при этом НЕ МЕНЯЛСЯ ни в одной точке (отпечатки выше
+  совпадают дословно), то есть запрос делает ту же работу тем же способом.
+  Значит разница часов — НЕ про алгоритм: это цена того, что рабочее
+  множество перестало помещаться в память, отведённую под кэш страниц.
+  Различать эти две вещи обязательно: первая чинится запросом и индексом,
+  вторая — памятью и профилем развёртывания, и лечить одну средствами
+  другой значит не вылечить ни одной.
+  Величина, на которой это видно: место под таблицами замера выросло с 2.9 МиБ
+  до 1.41 ГиБ.
+  ЧАСЫ ОСТАЮТСЯ НАБЛЮДЕНИЕМ. Вердикт о стоимости вынесен по несущей
+  величине — она свойство запроса и верна на любой машине; миллисекунда
+  верна только на этой и только сегодня.
+
+
+ЧЕГО ЭТОТ ЗАМЕР НЕ ДОСТИГ — названо числом, а не умолчанием
+------------------------------------------------------------------------------------------------------------------------------
+  РАЗЛИЧНЫХ СУБЪЕКТОВ — 1003, а не 10 000.
+    Предел заведён посевщиком, которым прибор пользуется (пул на 1000
+    различных пользователей), и причина названа в его коде: сторож
+    существования субъекта берёт блокировку строки НА КАЖДУЮ вставку обеих
+    таблиц выдачи, и миллион различных субъектов означает миллион различных
+    блокировок в одной транзакции — измерено соседом: 58 минут без
+    завершения. Поднимать предел значило бы завести ВТОРУЮ копию посевщика,
+    которая разошлась бы с первой молча. Ось субъектов остаётся НЕ
+    ИЗМЕРЕННОЙ; на стоимость вердикта она, по устройству запроса, влияет
+    через ЧИСЛО СТРОК выдач (оно измерено), а не через число различных
+    значений в них.
+  ОТПЕЧАТОК ПРЕДМЕТА покрывает путь ЧТЕНИЯ, но не путь ЗАПИСИ.
+    Он вычисляется общей с прибором R7-1 функцией и охватывает не-тестовые
+    файлы relverdict и scalegrid плюс миграции. Файлы продуктового писателя
+    выдач (`access_binding_repo.go` и соседние) под него НЕ попадают, значит
+    их правка НЕ сделает этот отчёт несвежим автоматически. Заводить второй
+    отпечаток здесь было бы двумя местами об одном предмете; предмет назван,
+    чтобы следующий читатель не принял молчание гейта за неизменность
+    пути записи.
+
+
+ОБЪЁМ ОСМОТРЕННОГО
+  точек исполнено 4, операций на точку 4, полных циклов на точку 11
+  всего операций исполнено 176, настенное время 10m37s

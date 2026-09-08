@@ -17,7 +17,7 @@ import (
 // различие между работающим контролем и мёртвым.
 const (
 	// KeySetOutcomesMetric — исходы НАШЕЙ записи публикуемого набора.
-	KeySetOutcomesMetric = "kacho_iam_own_keyset_outcomes_total"
+	KeySetOutcomesMetric = "kaname_own_keyset_outcomes_total"
 	// KeySetOutcomeServed — набор отдан целиком.
 	KeySetOutcomeServed = "served"
 	// KeySetOutcomeUnavailable — источник набора не ответил (лечится временем).
@@ -27,7 +27,7 @@ const (
 	KeySetOutcomeEmpty = "empty"
 
 	// IntrospectOutcomesMetric — исходы авторитета отзыва.
-	IntrospectOutcomesMetric = "kacho_iam_token_introspection_outcomes_total"
+	IntrospectOutcomesMetric = "kaname_token_introspection_outcomes_total"
 	// IntrospectOutcomeActive — токен признан действительным.
 	IntrospectOutcomeActive = "active"
 	// IntrospectOutcomeInactive — токен признан недействительным.
@@ -38,7 +38,7 @@ const (
 	IntrospectOutcomeUnavailable = "unavailable"
 
 	// SigningKeyEventsMetric — события жизненного цикла подписного ключа.
-	SigningKeyEventsMetric = "kacho_iam_signing_key_events_total"
+	SigningKeyEventsMetric = "kaname_signing_key_events_total"
 	// SigningKeyEventGenerated — ключ порождён и положен в набор.
 	SigningKeyEventGenerated = "generated"
 	// SigningKeyEventActivated — ключ стал подписывающим.

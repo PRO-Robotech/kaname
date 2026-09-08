@@ -13,9 +13,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // Форма идентификатора в контракте iam обязана совпадать с той, которую продукт
@@ -130,7 +132,7 @@ var legacyAcceptedForms = []legacyAcceptedForm{
 	{"uoc", "_", "'^uoc_?[0-9a-hjkmnp-tv-z]{17}$'"},
 }
 
-const iamContractDir = "proto/kacho/cloud/iam/v1"
+const iamContractDir = "proto/kaname/cloud/iam/v1"
 
 // TestMintedFormsAreProvenByExecution — форма каждой строки таблицы доказывается
 // ВЫЗОВОМ генератора, а не объявлением рядом с ним.
@@ -186,7 +188,9 @@ func prefixesWithoutAProducer(t *testing.T, root string, rows []mintedPrefix) ([
 	for _, m := range rows {
 		found := false
 		for _, sub := range m.producerRoots {
-			n, hit := grepTree(t, filepath.Join(root, sub), m.producer)
+			// Координата приводится к ПОСАДКЕ: перечисленные каталоги —
+			// собственные каталоги модуля, они едут вместе с ним.
+			n, hit := grepTree(t, platformtree.RequirePath(t, sub), m.producer)
 			filesRead += n
 			if hit {
 				found = true
@@ -216,7 +220,7 @@ func TestLegacyAcceptedFormsStillHaveASubject(t *testing.T) {
 // legacyFormsWithoutASubject — записи послаблений, чей принимающий предикат исчез.
 func legacyFormsWithoutASubject(t *testing.T, root string, rows []legacyAcceptedForm) ([]string, int) {
 	t.Helper()
-	migrations := filepath.Join(root, "services", "iam", "internal", "migrations")
+	migrations := platformtree.RequirePath(t, "services/iam/internal/migrations")
 	var expired []string
 	filesRead := 0
 	for _, l := range rows {
@@ -231,8 +235,7 @@ func legacyFormsWithoutASubject(t *testing.T, root string, rows []legacyAccepted
 
 // TestContractIdFormMatchesWhatTheProductMints — несущее утверждение.
 func TestContractIdFormMatchesWhatTheProductMints(t *testing.T) {
-	root := monorepoRoot(t)
-	dir := filepath.Join(root, iamContractDir)
+	dir := treePath(t, iamContractDir)
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 

@@ -108,7 +108,7 @@ XC-12, Ф5: ПЕРЕЗАМЕР стоимости полномодельной �
 `speaker` в `listSQL` обходит таблицу ДВАЖДЫ (две ветви UNION), а строка в ней
 появилась миграцией `0093_quota_reader_group` — единственной во всём дереве,
 кто в эту таблицу сеет (предикат:
-`grep -l 'INSERT INTO kacho_iam.group_members' services/iam/internal/migrations/*.sql`
+`grep -l 'INSERT INTO kaname.group_members' services/iam/internal/migrations/*.sql`
 → один файл, одна строка). У #226 таблица была пуста, поэтому 8 008.
 
 
@@ -259,7 +259,7 @@ D1 («форма E вдвое дешевле движка на прямом ве
                     числа Ф5 и #226
   движок            openfga/openfga:v1.8.4 над postgres:16-alpine
   трансформ DSL     openfga/cli:v0.7.13
-  форма E           postgres:16-alpine, схема kacho_iam, миграции применены
+  форма E           postgres:16-alpine, схема kaname, миграции применены
                     мигратором продукта (до 0093 включительно)
   модель            proto/kacho/cloud/iam/v1/fga_model.fga (sha256/16 8540084d07a29179)
   сценарий          тип vpc_network · N ∈ {10, 100, 1000, 10000} · M=4 · S=5

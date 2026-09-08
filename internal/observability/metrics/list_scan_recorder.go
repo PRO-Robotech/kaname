@@ -40,14 +40,14 @@ type ListScanRecorder struct {
 func (r *Registry) NewListScanRecorder() *ListScanRecorder {
 	rec := &ListScanRecorder{
 		rows: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name: "kacho_iam_list_rows_scanned",
+			Name: Namespace + "_list_rows_scanned",
 			Help: "Rows examined while assembling one returned page of a list, by resource. " +
 				"The page is assembled by cursor and re-filled until it is full, so this counts " +
 				"ALL re-fills together — a page that costs many re-fills is legitimate but must be visible.",
 			Buckets: []float64{50, 100, 250, 500, 1000, 2000, 5000, 10000},
 		}, []string{"resource"}),
 		checks: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name: "kacho_iam_list_permission_checks",
+			Name: Namespace + "_list_permission_checks",
 			Help: "Permission-model calls made while assembling one returned page of a list, by resource. " +
 				"One call per re-fill by construction: a value that grows with the size of the cloud " +
 				"means the batch discipline was lost somewhere.",

@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/publicauthzcensus"
+	"github.com/PRO-Robotech/kaname/internal/publicauthzcensus"
 )
 
 // synthTree кладёт синтетический контракт и точку регистрации в свой каталог и
@@ -37,7 +37,7 @@ func synthTree(t *testing.T, service, method string) (protoDir, cmdDir string) {
 			t.Fatalf("создать %s: %v", d, err)
 		}
 	}
-	proto := "syntax = \"proto3\";\npackage kacho.cloud.iam.v1;\n\n" +
+	proto := "syntax = \"proto3\";\npackage kaname.cloud.iam.v1;\n\n" +
 		"service " + service + " {\n  rpc " + method + "(Req) returns (Res);\n}\n"
 	if err := os.WriteFile(filepath.Join(protoDir, "synth.proto"), []byte(proto), 0o644); err != nil {
 		t.Fatalf("записать контракт: %v", err)
@@ -47,7 +47,7 @@ func synthTree(t *testing.T, service, method string) (protoDir, cmdDir string) {
 		// Импорт обязателен: перепись разрешает поле сборки в каталог пакета
 		// через алиас, и без него обработчик не резолвится — то есть фикстура
 		// подала бы «не разрешилось» вместо предмета инъекции.
-		"import (\n\tsynthapp \"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/project\"\n)\n\n" +
+		"import (\n\tsynthapp \"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/project\"\n)\n\n" +
 		"type services struct {\n\tsynthHandler *synthapp.Handler\n}\n\n" +
 		"func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services) {\n" +
 		"\tiamv1.Register" + service + "Server(srv, svcs.synthHandler)\n}\n"

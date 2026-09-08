@@ -24,7 +24,7 @@ import (
 	"testing"
 )
 
-// sharedUseCaseDir locates internal/apps/kacho/shared relative to this file.
+// sharedUseCaseDir locates internal/apps/kaname/shared relative to this file.
 func sharedUseCaseDir(t *testing.T) string {
 	t.Helper()
 	_, self, _, ok := runtime.Caller(0)
@@ -33,7 +33,7 @@ func sharedUseCaseDir(t *testing.T) string {
 	}
 	// services/iam/tools/auditlistfilter → services/iam
 	svc := filepath.Dir(filepath.Dir(filepath.Dir(self)))
-	dir := filepath.Join(svc, "internal", "apps", "kacho", "shared")
+	dir := filepath.Join(svc, "internal", "apps", "kaname", "shared")
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		t.Fatalf("shared use-case package not found at %s — the delegation this profile "+
 			"accepts as evidence points at a package that is not there", dir)

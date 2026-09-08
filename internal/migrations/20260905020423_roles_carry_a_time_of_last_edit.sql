@@ -9,7 +9,7 @@
 -- ЧТО НЕВЕРНО СЕГОДНЯ
 --
 -- Контракт `iam.v1.Role` объявляет `updated_at`, и цепочка обрывается на КАЖДОМ
--- звене сразу: столбца у `kacho_iam.roles` нет, писатель его не присваивает,
+-- звене сразу: столбца у `kaname.roles` нет, писатель его не присваивает,
 -- проекция чтения не выбирает, а перевод в контракт стоит под условием
 -- непустоты — то есть не срабатывает НИКОГДА. Арендатор видит поле в контракте
 -- и в сгенерированных клиентах и не может получить его ни одним вызовом.
@@ -63,25 +63,25 @@
 
 -- +goose Up
 
--- +kacho point-of-no-return: NOT NULL на kacho_iam.roles.updated_at — прежний образ вставляет роль без этой колонки и получает отказ на первой же записи; откат образа через эту версию неисполним
+-- +kacho point-of-no-return: NOT NULL на kaname.roles.updated_at — прежний образ вставляет роль без этой колонки и получает отказ на первой же записи; откат образа через эту версию неисполним
 
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
     ADD COLUMN updated_at timestamp with time zone;
 
-UPDATE kacho_iam.roles
+UPDATE kaname.roles
    SET updated_at = created_at
  WHERE updated_at IS NULL;
 
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
     ALTER COLUMN updated_at SET DEFAULT now();
 
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
     ALTER COLUMN updated_at SET NOT NULL;
 
-COMMENT ON COLUMN kacho_iam.roles.updated_at IS
+COMMENT ON COLUMN kaname.roles.updated_at IS
     'Время последней применённой правки строки. У роли, которую никто не правил, равно created_at. Двигают писатели явным присваиванием, триггера нет.';
 
 -- +goose Down
 
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
     DROP COLUMN updated_at;

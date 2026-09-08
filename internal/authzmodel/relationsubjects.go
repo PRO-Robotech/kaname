@@ -48,7 +48,7 @@ package authzmodel
 import (
 	"sort"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
 )
 
 // Виды получателя В НАПИСАНИИ МАНИФЕСТА. Перечень закрыт: манифест берёт его у

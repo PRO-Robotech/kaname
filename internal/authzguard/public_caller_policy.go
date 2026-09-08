@@ -65,7 +65,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"strings"
+
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/kacho/pkg/operations"
+
+	"github.com/PRO-Robotech/kaname/internal/callerorigin"
 )
 
 // Public RPC full-methods that a non-gateway module legitimately calls. Named
@@ -74,7 +79,7 @@ const (
 	// publicProjectGetMethod — the request-path project validation every
 	// consumer performs before creating a placement-scoped resource
 	// (services/*/internal/clients/iam*: ProjectServiceClient.Get).
-	publicProjectGetMethod = "/kacho.cloud.iam.v1.ProjectService/Get"
+	publicProjectGetMethod = "/kaname.cloud.iam.v1.ProjectService/Get"
 	// publicBatchCheckMethod — the per-object visibility filter every List
 	// handler in vpc/compute/nlb/storage runs (internal/authzfilter): it asks,
 	// for the ids of ONE page, which the end user may see. The service→service
@@ -82,8 +87,30 @@ const (
 	// there — but at least one deployment profile points it at the public
 	// address, so the public listener must admit it or the filter fails closed
 	// and tenants lose their own List results.
-	publicBatchCheckMethod = "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck"
+	publicBatchCheckMethod = "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck"
 )
+
+// UnnamedCallerMessage — ЕДИНСТВЕННЫЙ текст отказа тому, кто не назвался ничем.
+//
+// # Почему отдельный текст, а не «permission denied»
+//
+// Отказ существует затем, чтобы вызывающий построил следующий шаг. «Не пускают»
+// предлагает просить прав; «назовись» называет действие, которое вызывающий
+// может совершить сам. Для арендатора чужого облака, у которого нашего края нет
+// by construction, второе — единственный исполнимый ответ: прав он попросить не
+// у кого, а удостоверение выдаём мы.
+//
+// # Почему это не оракул
+//
+// Различаются здесь два состояния ЗАПРОСА, а не сервера, и оба известны самому
+// вызывающему до ответа: он либо приложил удостоверение, либо нет. Отказ
+// ПРЕДЪЯВИВШЕМУ негодное остаётся единственным побайтово равным текстом
+// (`presentedcred.RefusalMessage`) — там различимость и правда сообщила бы, какая
+// половина предъявленного неверна.
+//
+// Текст — часть контракта, и он экспортирован затем, чтобы проба утверждала ЕГО,
+// а не свою копию.
+const UnnamedCallerMessage = "no credential presented; authenticate with authorization: Bearer <token>"
 
 // Module service short-names (as ServiceNameFromSAN resolves them) that appear in
 // the peer-callable table.
@@ -128,6 +155,11 @@ func PublicPeerCallableRPCs() map[string][]string {
 // PublicCallerPolicy enforces the per-RPC caller policy on the public listener.
 // Construct via NewPublicCallerPolicy.
 type PublicCallerPolicy struct {
+	// acrCatalog — FQN → объявленный порог доверия. Читается ТОЛЬКО полосой
+	// предъявленного удостоверения: на ней порог не производит никто, и
+	// признать вызывающего законным, не спросив каталог, значило бы снять
+	// требование, которое каталог продолжает объявлять.
+	acrCatalog ACRRequirementLookup
 	// prodMode = cfg.AuthN.Mode.IsProduction(). dev (false) is a pass-through
 	// (insecure back-compat: the newman stand has no mTLS at all, so there is no
 	// verified certificate to decide on); production is fail-closed.
@@ -135,12 +167,37 @@ type PublicCallerPolicy struct {
 	// peerCallable — full-method → the set of non-gateway module service
 	// short-names permitted to call it.
 	peerCallable map[string]map[string]struct{}
+	// presented — ПОРТ: приложил ли вызывающий удостоверение к этому запросу.
+	//
+	// Порт, а не прямой вызов читателя, и это НЕ оформление. Носитель
+	// происхождения личности объявлен нейтральным намеренно: «его пишет читатель
+	// предъявленного, а читает политика вызывающего, и ни один из них не обязан
+	// знать про другого» — прямая зависимость связала бы решение о ПРАВЕ ЗВАТЬ с
+	// реализацией проверки удостоверения, то есть два предмета, которые меняются
+	// порознь. Реализацию подставляет композиционный корень.
+	presented CredentialPresence
 }
+
+// CredentialPresence — приложил ли вызывающий удостоверение к ЭТОМУ запросу.
+//
+// Предикат отвечает о ЗАПРОСЕ, а не о его годности: «предъявил и не сошлось»
+// сюда не доходит — читатель отвергает такое выше по цепочке. Различие нужно
+// ровно затем, чтобы не советовать назваться тому, кто уже назвался.
+type CredentialPresence func(ctx context.Context) bool
 
 // NewPublicCallerPolicy builds the policy. peerCallable is the per-RPC table of
 // non-gateway callers (see PublicPeerCallableRPCs); prodMode comes from
 // cfg.AuthN.Mode.IsProduction().
-func NewPublicCallerPolicy(prodMode bool, peerCallable map[string][]string) *PublicCallerPolicy {
+//
+// presented — реализация порта [CredentialPresence]. Параметр ОБЯЗАТЕЛЕН и
+// позиционен: сборка, забывшая его подставить, не соберётся вовсе — тогда как
+// умолчание сделало бы её молча отвечающей «назовись» тому, кто назвался.
+func NewPublicCallerPolicy(
+	prodMode bool,
+	peerCallable map[string][]string,
+	acrCatalog ACRRequirementLookup,
+	presented CredentialPresence,
+) *PublicCallerPolicy {
 	m := make(map[string]map[string]struct{}, len(peerCallable))
 	for method, svcs := range peerCallable {
 		set := make(map[string]struct{}, len(svcs))
@@ -149,29 +206,121 @@ func NewPublicCallerPolicy(prodMode bool, peerCallable map[string][]string) *Pub
 		}
 		m[method] = set
 	}
-	return &PublicCallerPolicy{prodMode: prodMode, peerCallable: m}
+	return &PublicCallerPolicy{prodMode: prodMode, peerCallable: m, acrCatalog: acrCatalog, presented: presented}
 }
 
 // allow returns nil iff the call may proceed past the policy for fullMethod:
-//   - no verified module cert: prod → PermissionDenied (floor fail-closed);
-//     dev → nil (insecure back-compat).
+//   - the caller was named by a credential it PRESENTED and we verified in full
+//     → nil (a tenant of a foreign cloud has no module certificate by
+//     construction; see the branch itself for why this is not a widening).
+//   - no verified module cert: dev → nil (insecure back-compat); prod →
+//     fail-closed, и КОД ЗДЕСЬ РАЗНЫЙ. Вызывающий, не назвавшийся ничем —
+//     ни сертификатом, ни предъявленным удостоверением, ни переданной
+//     личностью, — получает `Unauthenticated` с [UnnamedCallerMessage]:
+//     «назовись». Всякий, кто назвался и не подошёл, получает прежний
+//     `PermissionDenied`. Разница — про следующий шаг вызывающего, а не про
+//     строгость: просить прав некому там, где края нет (#2103).
 //   - api-gateway → nil (the front door, where per-user ReBAC happens).
 //   - another module on an RPC that names it in the peer-callable table → nil.
 //   - any other module: prod → PermissionDenied; dev → nil.
 //
-// Message text is the verbatim, non-leaking "permission denied" — identical to
-// the internal policy, so a denial reveals nothing about which arm produced it.
+// Отказ НАЗВАВШЕМУСЯ — дословный, не текущий "permission denied", тот же, что у
+// внутренней политики: по нему не узнать, какая из ветвей его произвела. Ветвь
+// безымянного вызывающего отвечает иначе, и это не послабление — она отличает
+// два состояния ЗАПРОСА, известные самому вызывающему до ответа (он либо
+// приложил удостоверение, либо нет), а не два состояния сервера.
 func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error {
+	// Вызывающий, названный ПРЕДЪЯВЛЕННЫМ им удостоверением, — законный
+	// публичный вызывающий (задача продукта #2077).
+	//
+	// Без этой ветки объём приёмки KAN-AUTHN-1 закрыт наполовину: читатель
+	// называет арендатора, а здесь его отвергают за отсутствие МОДУЛЬНОГО
+	// сертификата — которого у арендатора чужого облака нет и быть не может, он
+	// приходит обычным клиентом. Тогда «вызов доходит до обработчика»
+	// недостижимо ни при каком токене, и это ровно тот класс, где два правила об
+	// одном запросе делают исполнимый вход несуществующим.
+	//
+	// Расширением поверхности это не является. Пометку ставит ТОЛЬКО читатель и
+	// ТОЛЬКО после того, как проверил предъявленное целиком — подпись
+	// собственным реестром, издателя, адресат, тип, срок, момент начала
+	// действия и отзыв на пути запроса. До этой ветки доходит запрос, который
+	// уже доказал, за кого говорит; всё остальное читатель отверг раньше и
+	// побайтово одинаковым отказом.
+	//
+	// ПРАВО ЗВАТЬ этим не выдаётся: ниже по цепочке стоят отсечка анонима и
+	// пообъектный вопрос к модели доступа, и оба задаются о названном субъекте.
+	// Здесь решается лишь «этот вызывающий вправе быть на этом слушателе».
+	if callerorigin.IsPresentedCredential(ctx) {
+		// ...НО только там, где каталог не объявил порога доверия.
+		//
+		// Порог (`required_acr_min`) на публичном пути производит КРАЙ, и до
+		// этого перехода край стоял на пути всякого публичного вызывающего by
+		// construction: без модульного сертификата дальше не пускали. Полоса
+		// предъявленного проходит МИМО края — значит вместе с краем исчезает и
+		// единственный производитель порога, а каталог продолжает его
+		// объявлять. Пустить такой вызов значило бы снять требование, которого
+		// никто не отменял.
+		//
+		// Отказ здесь — ТОТ ЖЕ, что у соседних ветвей, и это не небрежность:
+		// «сертификата нет» и «доверия недостаточно» суть один ответ «сюда
+		// нельзя», и различать их наружу — оракул.
+		//
+		// Полоса не теряет ничего, что имела: машинный принципал освобождён
+		// общим правилом (у машины нет интерактивной церемонии), а человеку
+		// решает тот же порог, что решал бы на крае.
+		required := p.requiredACRMin(fullMethod)
+		if required == "" || !p.prodMode {
+			return nil
+		}
+		// Решает ОБЩЕЕ правило платформы, а не эта ветвь: ранжирование уровней и
+		// освобождение машинного принципала здесь НЕ ПЕРЕВЫВОДЯТСЯ. Именно такой
+		// раскол однажды пропустил машину через парадную дверь и навсегда
+		// отверг её за ней.
+		//
+		// Оба входа приходят из удостоверения, проверенного ЦЕЛИКОМ, — то есть
+		// уже отфильтрованы доверием, как того требует правило: подделать
+		// «служебная учётка» и купить освобождение нельзя, не подделав подпись.
+		acr, _ := callerorigin.AssuranceFrom(ctx)
+		principalType := ""
+		if pr, named := operations.PrincipalFromContextOK(ctx); named {
+			principalType = pr.Type
+		}
+		if grpcsrv.EvaluateStepUp(grpcsrv.StepUpInput{
+			PrincipalType: principalType,
+			PresentedACR:  acr,
+			RequiredACR:   required,
+		}) != grpcsrv.StepUpAllow {
+			return status.Error(codes.PermissionDenied, "permission denied")
+		}
+		return nil
+	}
+
 	san, verified := grpcsrv.CertIdentityFromContext(ctx)
 
 	svc, ok := "", false
 	if verified && san != "" {
-		svc, ok = ServiceNameFromSAN(san)
+		svc, ok = ServiceNameFromSAN(grpcsrv.CertIdentityDomainFromContext(ctx), san)
 	}
 	if !ok {
 		// No verified module cert. Dev → no-op; prod → fail-closed.
 		if !p.prodMode {
 			return nil
+		}
+		// Вызывающий, не назвавшийся НИЧЕМ, получает «назовись», а не «не
+		// пускают» (задача продукта #2103).
+		//
+		// Условие — конъюнкция трёх «нет», и каждое обязательно: нет
+		// проверенного сертификата (сюда мы уже дошли по этой причине), нет
+		// предъявленного удостоверения и нет переданной личности. Одного «нет
+		// сертификата» мало: предъявивший назвался, и посылать его называться
+		// заново значило бы предлагать повторить уже сделанное.
+		//
+		// Предъявленное НЕГОДНОЕ сюда не доходит: читатель отвергает его выше по
+		// цепочке единственным побайтово равным отказом. Значит эта ветвь
+		// отвечает ровно тому, кто не предъявлял, — и различает она состояния
+		// ЗАПРОСА, известные самому вызывающему, а не состояния сервера.
+		if !verified && !p.presentedCredential(ctx) && !namedPrincipal(ctx) {
+			return status.Error(codes.Unauthenticated, UnnamedCallerMessage)
 		}
 		return status.Error(codes.PermissionDenied, "permission denied")
 	}
@@ -188,6 +337,42 @@ func (p *PublicCallerPolicy) allow(ctx context.Context, fullMethod string) error
 		return nil
 	}
 	return status.Error(codes.PermissionDenied, "permission denied")
+}
+
+// presentedCredential — вердикт порта. Неподставленный порт означает «не знаем»,
+// и отвечает он КОНСЕРВАТИВНО: «назовись» не советуется. Ошибиться здесь можно в
+// две стороны, и они не равны — сказать назвавшемуся «назовись» значит послать
+// его повторять сделанное, а сказать безымянному «не пускают» лишь оставляет
+// прежний ответ.
+func (p *PublicCallerPolicy) presentedCredential(ctx context.Context) bool {
+	if p.presented == nil {
+		return true
+	}
+	return p.presented(ctx)
+}
+
+// namedPrincipal — личность вызывающего названа хоть чем-то.
+//
+// Спрашивается ОБЩИМ предикатом носителя, а не своей проверкой полей: «личности
+// нет» и «личность есть и пуста» — разные состояния, и своя копия различала бы
+// их иначе, чем платформа.
+func namedPrincipal(ctx context.Context) bool {
+	p, named := operations.PrincipalFromContextOK(ctx)
+	return named && !p.IsAnonymous()
+}
+
+// requiredACRMin — объявленный каталогом порог доверия для полного имени метода.
+//
+// Каталог ключуется полным именем без ведущей косой черты — та же нормализация,
+// что у порога внутреннего слушателя; своей копии разбора имени здесь нет.
+func (p *PublicCallerPolicy) requiredACRMin(fullMethod string) string {
+	if p.acrCatalog == nil {
+		// Каталога нет ⇒ порог не объявлен ни у одного метода. Это состояние
+		// дев-посадки; в боевой каталог обязателен, и его отсутствие отвергает
+		// страж старта, а не эта ветвь.
+		return ""
+	}
+	return p.acrCatalog.RequiredACRMin(strings.TrimPrefix(fullMethod, "/"))
 }
 
 // Unary returns the unary interceptor enforcing the public caller policy.

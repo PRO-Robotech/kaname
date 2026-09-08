@@ -29,7 +29,7 @@ CRUD fixture dependency:
 
 Operation envelope:
   All mutations return `operation.Operation` with id prefix `iop`.
-  Poll hits /operations/{id} via OpsProxy (iop* → kacho-iam).
+  Poll hits /operations/{id} via OpsProxy (iop* → kaname).
 
 Gotchas:
   - ServiceAccount.List is a scope-filter RPC (like User.List): non-member

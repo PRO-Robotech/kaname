@@ -8,8 +8,8 @@ import (
 	"errors"
 	"testing"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
+	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
 // Проб обратного резолва ключа служебной учётки здесь больше нет: адаптер снят

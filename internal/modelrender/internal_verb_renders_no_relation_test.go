@@ -35,8 +35,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho-iam/internal/modelrender"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/modelrender"
 )
 
 const internalPlaneDoc = `apiVersion: iam/v1

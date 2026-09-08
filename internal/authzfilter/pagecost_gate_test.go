@@ -181,7 +181,7 @@ type entryPointShape struct {
 // go wrong are asserted below rather than hoped about:
 //
 // The question no longer leaves the process for another pod: it is resolved by the
-// service's own database (repo/kacho/pg/relverdict) behind authzcascade.Client. That
+// service's own database (repo/kaname/pg/relverdict) behind authzcascade.Client. That
 // makes each question cheaper and changes NOTHING about why this gate exists —
 // per-row still means one query per row, and a query per row is a cost that grows
 // with the page and that nothing here measures.
@@ -279,7 +279,7 @@ var relationQuestionEntryPoints = map[string]entryPointShape{
 // the wider question, and a report once cited this gate as proof about a file
 // that lay outside it.
 const (
-	useCaseTreeRoot = "../apps/kacho/api"
+	useCaseTreeRoot = "../apps/kaname/api"
 	serviceTreeRoot = ".."
 	// relationClientRoot points at `authzcascade`, not at `clients`, and that
 	// difference is what premise 2 exists to catch. `clients` declares the PORTS
@@ -485,24 +485,33 @@ func TestRelationQuestionsStayInsideTheMeasuredPath(t *testing.T) {
 // and it is bounded both ways — an undeclared site fails, and a declaration whose
 // site is gone fails too.
 //
-// Keyed by file + calling name, no line number: a declaration must not expire
-// because the function moved down its own file.
+// Keyed by file + CALLED name, no line number, and both halves of that are
+// deliberate. No line, so a declaration does not expire because the site moved
+// down its own file. The called name, so it DOES expire when the site starts
+// asking through a different function — which is not a false alarm but the point:
+// a renamed callee means the shape of the question changed, and the standing
+// prose about its cost has to be re-read rather than carried over. That has now
+// fired for real (#2054): the loop below moved from `requireGrantAuthority` to
+// `pageAuthority.verdict`, and the declaration it orphaned was still claiming a
+// per-page cost that the same commit had already halved.
 var declaredPerRowQuestions = map[string]string{
-	"../apps/kacho/api/access_binding/list_by_role.go: requireGrantAuthority": "" +
-		"Per-row scope filter over a LIST page: up to TWO relation questions per " +
-		"binding whose subject is not the caller — a cluster-administrator question " +
-		"that is subject-scoped and therefore constant across the page, plus a " +
-		"per-scope admin question — so up to 2000 per contract-sized page, plus " +
-		"per-row DB reads for hierarchy scopes. THE BLOCKER THIS DECLARATION USED " +
-		"TO NAME IS GONE: it read 'converging it needs the batched question tracked " +
-		"in known-divergences §11', and that question exists and is wired " +
-		"(authzcascade.Client.BatchCheckWithContext, resolved by ONE read " +
-		"transaction over the service's own relational form). What remains is that " +
-		"the value here is a clients.RelationStore, whose narrowed method set does " +
-		"not carry it, and that the loop interleaves relation questions with DB " +
-		"reads — a request-path change to an authorization surface, with its own " +
-		"acceptance.",
-	"../apps/kacho/api/authorize/handler.go: authorizeCaller": "" +
+	"../apps/kaname/api/access_binding/list_by_role.go: grantAuthorityVerdict": "" +
+		"Scope filter over a LIST page, asked once per DISTINCT scope rather than " +
+		"once per row: pageAuthority remembers the cluster-administrator verdict " +
+		"for the whole request and the per-scope admin verdict per scope, so a page " +
+		"costs 1 + distinct scopes relation questions plus per-distinct-scope DB " +
+		"reads for hierarchy scopes. THE COUNT STILL GROWS WITH THE PAGE, which is " +
+		"why this stays declared: a page whose rows are all on different scopes is " +
+		"ordinary, and it costs one question per row again — 1001 on a " +
+		"contract-sized page. The measured figures and the decision behind them " +
+		"live in docs/engineering/architecture/page-cost-belongs-to-the-request.md " +
+		"and are not restated here, so the two cannot drift apart. What keeps this " +
+		"site off the batched question is unchanged: " +
+		"the value here is a clients.RelationStore, whose narrowed method set " +
+		"carries only Check (BatchCheckWithContext is on RelationQueries), and the " +
+		"loop interleaves relation questions with DB reads — a request-path change " +
+		"to an authorization surface, with its own acceptance.",
+	"../apps/kaname/api/authorize/handler.go: authorizeCaller": "" +
 		"Per-item caller authority in BatchCheck, bounded by the contract at 100 " +
 		"items (rejected above that). SAME CORRECTION: this declaration used to say " +
 		"it 'converges with the same batched question' as a thing not yet available. " +

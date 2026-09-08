@@ -25,8 +25,8 @@
 package catalogfixture
 
 import (
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 )
 
 // Facts — каталожный факт, равный посеянному миграцией.

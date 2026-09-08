@@ -29,7 +29,7 @@ import (
 
 // JWK — JSON Web Key (RFC 7517), the subset relevant to Hydra client
 // registration. Only EC keys are required (ES256); RS256 / OKP
-// fields are reserved but not populated by kacho-iam.
+// fields are reserved but not populated by kaname.
 type JWK struct {
 	Kty string `json:"kty"`           // "EC"
 	Crv string `json:"crv,omitempty"` // "P-256"
@@ -78,7 +78,7 @@ type HydraOAuthClient struct {
 	DPoPBoundAccessTokens bool `json:"dpop_bound_access_tokens,omitempty"`
 	// TLSClientCertificateBoundAccessTokens — RFC 8705 §3.4 counterpart: binds
 	// minted tokens to the client's TLS certificate (`cnf.x5t#S256`). Reserved
-	// for mTLS-authenticating clients; kacho-iam SA keys use DPoP.
+	// for mTLS-authenticating clients; kaname SA keys use DPoP.
 	TLSClientCertificateBoundAccessTokens bool `json:"tls_client_certificate_bound_access_tokens,omitempty"`
 	// RedirectURIs — where the provider may deliver an authorization code.
 	// Meaningful ONLY for the interactive-login client (IAM-INT-1): the
@@ -96,7 +96,7 @@ type CreateOAuthClientRequest struct {
 	ClientID string
 	// ClientName is a human-readable identifier (e.g. "kacho-sak-XYZ").
 	ClientName string
-	// Owner is the kacho-iam ServiceAccount id (used by Hydra's `owner`
+	// Owner is the kaname ServiceAccount id (used by Hydra's `owner`
 	// filter for List by SA).
 	Owner string
 	// Scope — space-separated set granted to this client.
@@ -116,7 +116,7 @@ type CreateOAuthClientRequest struct {
 	// TokenEndpointAuthSigningAlg — JOSE-alg client_assertion ("ES256" для SA-ключей).
 	TokenEndpointAuthSigningAlg string
 	// JWKS — embedded public-key set published with the client (private_key_jwt:
-	// kacho-iam mints the keypair and registers the
+	// kaname mints the keypair and registers the
 	// public JWK here). Hydra stores it, validates `client_assertion`
 	// signatures against it, and never sees the private half.
 	JWKS *JWKS

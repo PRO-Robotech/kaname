@@ -31,13 +31,13 @@ import "testing"
 // interactiveClientRPCs — the five RPCs, split by the band each belongs to.
 var (
 	interactiveClientReads = []string{
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Get",
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/List",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Get",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/List",
 	}
 	interactiveClientMutations = []string{
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Create",
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Update",
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Delete",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Create",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Update",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Delete",
 	}
 )
 

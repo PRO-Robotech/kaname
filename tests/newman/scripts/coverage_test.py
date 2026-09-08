@@ -1,7 +1,15 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Test coverage.py against synthetic proto + collection."""
+"""Test coverage.py against synthetic proto + collection.
+
+КТО ЭТУ ПРОБУ ИСПОЛНЯЕТ: `.github/scripts/run-python-probes.py`. Состав он
+собирает ОБХОДОМ дерева по образцу `services/*/tests/newman/scripts/*_test.py` и
+НИ ОДИН файл проб по имени не называет — поэтому отдельного шага в конвейере файл
+не требует, а искать вызывающего предикатом `git grep <имя файла>` бесполезно:
+вызова по имени нет ни у кого. Код возврата при этом доезжает до вердикта шага.
+Проводку держит `tools/pythonprobes`.
+"""
 import json
 import subprocess
 import sys
@@ -34,7 +42,7 @@ def test_full_coverage_passes_min_100(tmp_path):
     proto_dir = tmp_path / "proto"; proto_dir.mkdir()
     _write_proto(proto_dir, """
 syntax = "proto3";
-package kacho.cloud.iam.v1;
+package kaname.cloud.iam.v1;
 service FooService {
   rpc Bar (BarRequest) returns (BarResponse);
 }
@@ -55,7 +63,7 @@ def test_partial_coverage_fails_min_100(tmp_path):
     proto_dir = tmp_path / "proto"; proto_dir.mkdir()
     _write_proto(proto_dir, """
 syntax = "proto3";
-package kacho.cloud.iam.v1;
+package kaname.cloud.iam.v1;
 service FooService {
   rpc Bar (BarRequest) returns (BarResponse);
   rpc Baz (BazRequest) returns (BazResponse);
@@ -75,7 +83,7 @@ def test_http_annotation_overrides_heuristic(tmp_path):
     proto_dir = tmp_path / "proto"; proto_dir.mkdir()
     _write_proto(proto_dir, """
 syntax = "proto3";
-package kacho.cloud.iam.v1;
+package kaname.cloud.iam.v1;
 import "google/api/annotations.proto";
 service AccountService {
   rpc Create (CreateAccountRequest) returns (Operation) {
@@ -103,7 +111,7 @@ def test_path_param_template_matches_concrete_url(tmp_path):
     proto_dir = tmp_path / "proto"; proto_dir.mkdir()
     _write_proto(proto_dir, """
 syntax = "proto3";
-package kacho.cloud.iam.v1;
+package kaname.cloud.iam.v1;
 import "google/api/annotations.proto";
 service AccountService {
   rpc Get (GetAccountRequest) returns (Account) {
@@ -128,7 +136,7 @@ def test_commented_out_rpc_not_counted(tmp_path):
     proto_dir.mkdir()
     _write_proto(proto_dir, """
 syntax = "proto3";
-package kacho.cloud.iam.v1;
+package kaname.cloud.iam.v1;
 service FooService {
   // rpc CommentedOut (X) returns (Y);
   /* rpc AlsoCommented (X) returns (Y); */

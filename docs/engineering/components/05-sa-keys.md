@@ -9,9 +9,9 @@
 Каждый ключ — это **kacho-выпущенная** пара (`private_key`, `public_jwk`):
 
 - **`private_key_pem`** — отдается клиенту ОДИН РАЗ в ответе `IssueSAKey`,
-  никогда не хранится в kacho-iam.
+  никогда не хранится в kaname.
 - **`public_key`** — регистрируется в Hydra как JWK при создании OAuth-клиента
-  (`jwks={keys:[...]}`); kacho-iam держит SPKI-PEM-копию в
+  (`jwks={keys:[...]}`); kaname держит SPKI-PEM-копию в
   `service_account_oauth_clients.public_key_pem` для диагностики ротаций.
 
 Hydra **не получает** `client_secret` — его в системе больше нет. Запрос
@@ -21,7 +21,7 @@ access_token: клиент сам подписывает JWT-assertion прив�
 
 **Защита приватного ключа:** `private_key_pem` показывается **один раз** в
 ответе `IssueSAKey`. После этого `OpsResponseRedactor`
-(`internal/repo/kacho/pg/ops_response_redactor.go`) выполняет single-statement
+(`internal/repo/kaname/pg/ops_response_redactor.go`) выполняет single-statement
 UPDATE на `operations.response_data`, замещая поле `private_key_pem` на
 `"<redacted>"` (а также legacy `client_secret`, который теперь всегда пустой).
 Повторный `GET /operations/{id}` после redaction даст response без ключа.
@@ -77,7 +77,7 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 > издателей числом —
 > [`../architecture/sa-key-issuance-leaves-the-provider.md`](../architecture/sa-key-issuance-leaves-the-provider.md).
 
-**DB table:** `kacho_iam.service_account_oauth_clients` (squashed baseline
+**DB table:** `kaname.service_account_oauth_clients` (squashed baseline
 `internal/migrations/0001_initial.sql`).
 
 **FK contract:** CASCADE delete при удалении SA (в БД); но Hydra clients
@@ -85,8 +85,8 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 
 ### Срок жизни ключа (`expires_at`)
 
-Выставляется на Issue: явный `ttl_seconds` → иначе `KACHO_IAM_SAKEY_DEFAULT_TTL`
-(90d) → иначе NULL. Потолок — `KACHO_IAM_SAKEY_MAX_TTL` (365d), запрос сверх него
+Выставляется на Issue: явный `ttl_seconds` → иначе `KANAME_SAKEY_DEFAULT_TTL`
+(90d) → иначе NULL. Потолок — `KANAME_SAKEY_MAX_TTL` (365d), запрос сверх него
 отвергается `InvalidArgument` до регистрации клиента в Hydra.
 
 Энфорсится на пути обмена ключа на токен одним предикатом
@@ -108,7 +108,7 @@ UPDATE на `operations.response_data`, замещая поле `private_key_pem
 а не проверяющей.
 
 Уже выданный access-token переживает истечение ключа: он живёт свой
-`access_token_lifespan` (per-client, `KACHO_IAM_SAKEY_ACCESS_TOKEN_TTL`). Гейт
+`access_token_lifespan` (per-client, `KANAME_SAKEY_ACCESS_TOKEN_TTL`). Гейт
 закрывает выдачу НОВЫХ токенов, не отзывает старые. Жнеца просроченных строк нет —
 строка остаётся, ключ просто перестаёт работать.
 
@@ -119,7 +119,7 @@ sequenceDiagram
     autonumber
     participant Admin
     participant GW as api-gateway
-    participant IAM as kacho-iam :9090
+    participant IAM as kaname :9090
     participant DB as Postgres
     participant Hydra as Ory Hydra
     participant Redactor as OpsResponseRedactor
@@ -206,8 +206,8 @@ sequenceDiagram
 
 | Env var                                | YAML key                                  | Default | Описание                          |
 |----------------------------------------|-------------------------------------------|---------|-----------------------------------|
-| `KACHO_IAM_HYDRA_ADMIN_URL`            | `extapi.hydra.admin-url`                  | —       | URL Hydra admin API.              |
-| `KACHO_IAM_HYDRA_ADMIN_TOKEN`          | `extapi.hydra.admin-token`                | —       | Bearer для Hydra admin.           |
+| `KANAME_HYDRA_ADMIN_URL`            | `extapi.hydra.admin-url`                  | —       | URL Hydra admin API.              |
+| `KANAME_HYDRA_ADMIN_TOKEN`          | `extapi.hydra.admin-token`                | —       | Bearer для Hydra admin.           |
 
 ## Как пользоваться
 
@@ -313,7 +313,7 @@ kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 # Integration (testcontainers + Hydra stub):
 go test -short -count=1 -timeout 120s \
   -run "TestSAKey|TestOpsResponseRedactor|TestIssueSAKey" \
-  ./services/iam/internal/clients/ ./services/iam/internal/apps/kacho/api/sa_keys/
+  ./services/iam/internal/clients/ ./services/iam/internal/apps/kaname/api/sa_keys/
 ```
 
 > [!note] Прежняя команда звала набор, которого нет, и передавала имя набора
@@ -325,12 +325,12 @@ go test -short -count=1 -timeout 120s \
 
 ## Подробности реализации
 
-- **Handler и use-case живут в одном пакете** `internal/apps/kacho/api/sa_keys/`: точки входа
+- **Handler и use-case живут в одном пакете** `internal/apps/kaname/api/sa_keys/`: точки входа
   `Handler.Issue` / `Handler.List` / `Handler.Revoke` в `handler.go`, выпуск ключа — `keys.go`,
   журналирование — `audit.go`. Отдельного файла со сводкой use-case'ов у пакета нет.
 - **Hydra клиент:** `internal/clients/hydra_admin_client.go` + `hydra_oauth_clients.go`.
-- **Repo:** SA-OAuth-clients-репо в `internal/repo/kacho/pg/` (через `NewSAOAuthClientRepo`).
-- **Redactor:** `internal/repo/kacho/pg/ops_response_redactor.go`. SELECT
+- **Repo:** SA-OAuth-clients-репо в `internal/repo/kaname/pg/` (через `NewSAOAuthClientRepo`).
+- **Redactor:** `internal/repo/kaname/pg/ops_response_redactor.go`. SELECT
   `(response_type, response_data)` из `operations`, unmarshal `Any` →
   `IssueSAKeyResponse`, reflect-clear поле `private_key_pem` (+ legacy
   `client_secret`), UPDATE обратно. Idempotent (повторный clear no-op).
@@ -354,11 +354,11 @@ go test -short -count=1 -timeout 120s \
   `response.client_secret` всегда пуст и тоже редактируется
   для wire-compat.
 - **Hydra restart loses clients?** — нет, Hydra хранит в собственной БД;
-  kacho-iam держит `hydra_client_id` для ссылки + `public_key_pem` для
+  kaname держит `hydra_client_id` для ссылки + `public_key_pem` для
   диагностики ротаций.
 - **Алгоритм фиксирован `ES256`** — domain.Validate допускает RS256/EdDSA
   для будущих расширений, но текущая ECDSA P-256-only генерация
-  (`internal/apps/kacho/api/sa_keys/keys.go`) выставляет только `ES256`.
+  (`internal/apps/kaname/api/sa_keys/keys.go`) выставляет только `ES256`.
 - **Legacy `client_secret` rows** — миграция в `0001_initial.sql` ставит
   DEFAULT '' для `public_key_pem` / `key_algorithm`, поэтому rows,
   выпущенные до перехода на private_key_jwt (если такие существуют в
@@ -373,20 +373,20 @@ go test -short -count=1 -timeout 120s \
 
 ## Ссылки на код
 
-- `internal/apps/kacho/api/sa_keys/usecases.go` — `IssueSAKeyUseCase` /
+- `internal/apps/kaname/api/sa_keys/usecases.go` — `IssueSAKeyUseCase` /
   `RevokeSAKeyUseCase` / `ListSAKeysUseCase`.
-- `internal/apps/kacho/api/sa_keys/keys.go` — `generateES256Key` (ECDSA P-256
+- `internal/apps/kaname/api/sa_keys/keys.go` — `generateES256Key` (ECDSA P-256
   keypair → PKCS#8 / SPKI PEM + JWK).
-- `internal/apps/kacho/api/sa_keys/handler.go`.
+- `internal/apps/kaname/api/sa_keys/handler.go`.
 - `internal/clients/hydra_admin_client.go`,
   `hydra_oauth_clients.go` — `CreateOAuthClient` с `jwks` /
   `token_endpoint_auth_method=private_key_jwt`.
-- `internal/repo/kacho/pg/ops_response_redactor.go` (тот же файл, что назван выше — прежде
+- `internal/repo/kaname/pg/ops_response_redactor.go` (тот же файл, что назван выше — прежде
   здесь стоял другой каталог, и две ссылки об одном предмете расходились).
 - `internal/migrations/0001_initial.sql` — таблица
   `service_account_oauth_clients` (`public_key_pem`, `key_algorithm`).
 - `pkg/operations/operationspb/handler_test.go` (полоса сведена в общий слой).
 - `internal/service/token_enrichment_service.go` — SA-claims path
-  (`kacho_principal_type=service_account`, `kacho_principal_id`,
-  `kacho_account_id`).
-- `cmd/kacho-iam/hooks_mux.go` — `tokenEnrichSAAdapter` wiring.
+  (`kaname_principal_type=service_account`, `kaname_principal_id`,
+  `kaname_account_id`).
+- `cmd/kaname/hooks_mux.go` — `tokenEnrichSAAdapter` wiring.

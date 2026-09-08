@@ -27,6 +27,15 @@ package publicauthzcensus
 // «поле → тип» склеил бы разные use-case'ы. Приёмник берётся у объявления
 // метода (`func (h *Handler) …` → Handler), поэтому `h.get` разрешается в поле
 // ИМЕННО Handler'а.
+//
+// # Локальная переменная — тоже приёмник, и её тип берётся из объявления
+//
+// Вопрос о доступе зовут и через локальную переменную пакетного типа
+// (`authority := &pageAuthority{…}` → `authority.verdict(…)`). Записи
+// `u.Метод(…)` и `v.Метод(…)` синтаксически неразличимы, поэтому тип получателя
+// решает `localVarTypes`: имя, объявленное в теле, принадлежит ЕЙ, и откат к
+// приёмнику по совпадению имени метода не допускается. Подробности и цена
+// незнания этой формы — у `resolveCall`.
 
 import (
 	"go/ast"
@@ -195,6 +204,7 @@ func (p *pkgIndex) walk(fn *ast.FuncDecl, recv string, seen map[token.Pos]bool, 
 	if fn == nil || fn.Body == nil || depth > maxDepth {
 		return ""
 	}
+	locals := localVarTypes(fn)
 	evidence := ""
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		if evidence != "" {
@@ -208,7 +218,7 @@ func (p *pkgIndex) walk(fn *ast.FuncDecl, recv string, seen map[token.Pos]bool, 
 			evidence = ev
 			return false
 		}
-		if next, nrecv, okNext := p.resolveCall(call.Fun, recv); okNext {
+		if next, nrecv, okNext := p.resolveCall(call.Fun, recv, locals); okNext {
 			key := next.Pos()
 			if !seen[key] {
 				seen[key] = true
@@ -225,11 +235,32 @@ func (p *pkgIndex) walk(fn *ast.FuncDecl, recv string, seen map[token.Pos]bool, 
 
 // resolveCall разрешает вызов в объявление внутри пакета.
 //
-// Разбираются две формы, покрывающие раскладку слоёв этого дерева:
+// Разбираются три формы, покрывающие раскладку слоёв этого дерева:
 //
 //	f(...)            — функция уровня пакета;
-//	h.поле.Метод(...) — метод use-case'а, лежащего в поле приёмника.
-func (p *pkgIndex) resolveCall(fun ast.Expr, recv string) (*ast.FuncDecl, string, bool) {
+//	h.поле.Метод(...) — метод use-case'а, лежащего в поле приёмника;
+//	v.Метод(...)      — метод приёмника ЛИБО метод локальной переменной
+//	                    пакетного типа; какой именно, решает locals.
+//
+// ЛОКАЛЬНАЯ ПЕРЕМЕННАЯ — ТРЕТЬЯ ЗАКОННАЯ ФОРМА, И НЕЗНАНИЕ ЕЁ МОЛЧАЛИВО.
+//
+// Прежде обе записи `v.Метод(...)` разрешались ОДИНАКОВО — в метод приёмника, —
+// поэтому вызов у локальной переменной пакетного типа не разрешался вовсе:
+// метода с таким именем у приёмника нет, обход в него не входил, и всё, что за
+// ним стояло, уходило из-под наблюдения. Не красное и не зелёное — молчание.
+//
+// Цена измерена: `ListByRole` спрашивал право построчно через функцию уровня
+// пакета и распознавался («порт отношений: Check(…)»); правка стоимости
+// страницы (#2054) собрала те же вопросы в памятку запроса и стала звать их
+// методом ЛОКАЛЬНОЙ переменной — `authority.verdict(ctx, …)`. Код двери не
+// потерял, а перепись объявила его находкой. Ложная находка обесценивает
+// перепись целиком: инструмент, у которого находка не подтверждается, перестают
+// читать.
+//
+// Приоритет у локальной переменной, и это анти-маска: если имя объявлено в
+// теле, вызов принадлежит ЕЙ, а не приёмнику. Откат к приёмнику здесь означал
+// бы, что метод чужого типа засчитывается по совпадению имени.
+func (p *pkgIndex) resolveCall(fun ast.Expr, recv string, locals map[string]string) (*ast.FuncDecl, string, bool) {
 	switch f := fun.(type) {
 	case *ast.Ident:
 		if fn, ok := p.funcs[f.Name]; ok {
@@ -239,9 +270,21 @@ func (p *pkgIndex) resolveCall(fun ast.Expr, recv string) (*ast.FuncDecl, string
 		// h.поле.Метод(...)
 		inner, ok := f.X.(*ast.SelectorExpr)
 		if !ok {
+			ident, isIdent := f.X.(*ast.Ident)
+			if !isIdent {
+				return nil, "", false
+			}
+			// v.Метод(...) — локальная переменная пакетного типа.
+			if local, isLocal := locals[ident.Name]; isLocal && local != "" {
+				if fn, hit := p.methods[local+"."+f.Sel.Name]; hit {
+					return fn, local, true
+				}
+				// Тип известен, метода у него нет: вызов чужой, и приписывать
+				// его приёмнику по совпадению имени нельзя.
+				return nil, "", false
+			}
 			// приёмник.Метод(...) — метод того же типа.
-			if ident, isIdent := f.X.(*ast.Ident); isIdent && recv != "" {
-				_ = ident
+			if recv != "" {
 				if fn, hit := p.methods[recv+"."+f.Sel.Name]; hit {
 					return fn, recv, true
 				}
@@ -300,4 +343,97 @@ func bareTypeName(t ast.Expr) (string, bool) {
 		return "", false
 	}
 	return ident.Name, true
+}
+
+// localVarTypes — типы ЛОКАЛЬНЫХ переменных функции, объявленных так, что тип
+// читается СИНТАКСИЧЕСКИ, без проверки типов всего дерева.
+//
+// Разбираются формы, которыми в этом дереве заводят значение пакетного типа:
+//
+//	v := &T{...}   v := T{...}   v := new(T)   var v T   var v *T
+//
+// Форма, о которой распознаватель не знает, даёт не красное и не зелёное, а
+// молчание, поэтому граница названа честно: значение, полученное из вызова
+// (`v := newAuthority()`), из поля или из аргумента, здесь НЕ разрешается —
+// такой вызов остаётся неразрешённым ровно как прежде. Расширять перечень
+// вперёд предмета нельзя: запас есть слепая зона, выданная авансом, и он не
+// истечёт сам.
+//
+// НЕОДНОЗНАЧНОЕ ИМЯ СНИМАЕТСЯ, А НЕ УГАДЫВАЕТСЯ. Если одно имя связано в теле с
+// РАЗНЫМИ типами (переприсваивание, затенение в блоке), значение становится
+// пустым, и вызов через него не разрешается вовсе. Выбор «последнего» дал бы
+// вердикт, зависящий от порядка обхода, — то есть неповторимый.
+func localVarTypes(fn *ast.FuncDecl) map[string]string {
+	out := map[string]string{}
+	bind := func(name, typ string) {
+		if name == "" || name == "_" || typ == "" {
+			return
+		}
+		if prev, seen := out[name]; seen && prev != typ {
+			out[name] = "" // неоднозначно — не разрешаем
+			return
+		}
+		out[name] = typ
+	}
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch s := n.(type) {
+		case *ast.AssignStmt:
+			if s.Tok != token.DEFINE || len(s.Lhs) != len(s.Rhs) {
+				return true
+			}
+			for i, lhs := range s.Lhs {
+				ident, ok := lhs.(*ast.Ident)
+				if !ok {
+					continue
+				}
+				bind(ident.Name, localTypeOfExpr(s.Rhs[i]))
+			}
+		case *ast.DeclStmt:
+			gd, ok := s.Decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.VAR {
+				return true
+			}
+			for _, spec := range gd.Specs {
+				vs, isVS := spec.(*ast.ValueSpec)
+				if !isVS || vs.Type == nil {
+					continue
+				}
+				typ, okT := bareTypeName(vs.Type)
+				if !okT {
+					continue
+				}
+				for _, nm := range vs.Names {
+					bind(nm.Name, typ)
+				}
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// localTypeOfExpr — имя пакетного типа, если правая часть определения его
+// называет прямо. Пустая строка означает «тип синтаксически не назван».
+func localTypeOfExpr(rhs ast.Expr) string {
+	switch e := rhs.(type) {
+	case *ast.UnaryExpr:
+		if e.Op == token.AND {
+			return localTypeOfExpr(e.X)
+		}
+	case *ast.CompositeLit:
+		if e.Type == nil {
+			return ""
+		}
+		if name, ok := bareTypeName(e.Type); ok {
+			return name
+		}
+	case *ast.CallExpr:
+		// new(T) — единственная форма вызова, называющая тип синтаксически.
+		if ident, ok := e.Fun.(*ast.Ident); ok && ident.Name == "new" && len(e.Args) == 1 {
+			if name, okT := bareTypeName(e.Args[0]); okT {
+				return name
+			}
+		}
+	}
+	return ""
 }

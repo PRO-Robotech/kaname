@@ -5,6 +5,39 @@ It reports the counts newman reported — assertions failed, script crashes, una
 requests, reports with no assertions — and any of them above zero fires it. Outstanding
 red is carried here, as a number and a case list, never as a deduction in the gate.
 
+## Собственный REST-фронт: 7 утверждений перестали зеленеть на пустом множестве (2026-09-07)
+
+Набор `kaname-own-rest-front` красен целиком, пока не закрыт `#2191`: собственная
+поверхность службы не назначает субъекта, поэтому всё, что доходит до полосы
+обработчика, отвечает одним и тем же отказом. Из **55** утверждений набора зелёными
+были **20**.
+
+**Семь из этих двадцати зеленели ВАКУУМНО.** Все семь — отрицания: «побайтово тот
+же отказ», «неотличимо от нет-такой», «ответ не сообщает, существует ли объект»,
+«субъект не тот, кем вызывающий назвал себя», «запрос НЕ обслужен». Утверждение об
+одинаковости тривиально истинно там, где одинаково всё: множество, на котором оно
+проверяется, пусто. Опаснее сегодняшнего было завтрашнее — когда полоса начнёт
+отвечать различимо, эти семь перевернулись бы МОЛЧА: либо покраснели бы по чужому
+предмету, либо остались бы зелёными по новой причине.
+
+**Сделано — не ослабление и не маска.** Ни одно утверждение не снято и не смягчено;
+рядом с каждым поставлен ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — наблюдение, различимое на той же
+поверхности, — и стоит он ВНУТРИ того же `pm.test`: соседним утверждением контроль
+не работает, упавшее не мешает следующему пройти.
+
+**Следствие для вердикта — предсказание, а не замер стенда:** зелёных станет **13**
+вместо 20. Основание — модель, воспроизводящая прогон стенда ЭЛЕМЕНТ В ЭЛЕМЕНТ
+(20 зелёных у стенда, 20 у модели, пересечение 20); свой замер даст следующий прогон.
+Семь красных — по предмету `#2191`, снимаются его закрытием.
+
+**Держится исполнением, а не прозой** — `scripts/own_front_vacuum_control_test.py`
+гоняет тот же JavaScript коллекции настоящим движком под тремя мирами: где
+одинаково всё (обязаны падать), где отказы одинаковы законно (обязаны проходить), и
+где нарушено свойство ровно одной цели (обязана падать ровно она). Способность гейта
+упасть и смолчать — `own_front_vacuum_control_injection_test.py`, 33 утверждения по
+восьми осям (число печатает сам прогон). Полнота распознавателя не словарём, а переписью: всякое НОВОЕ утверждение,
+зеленеющее на одинаковых ответах, — находка.
+
 ## Самочтение записи пользователя: ALLOW-полоса перенесена к своему производителю (2026-08-18)
 
 Последние **4** упавших утверждения релиза `gates-verdict` — **2** шага набора
@@ -17,7 +50,7 @@ red is carried here, as a number and a case list, never as a deduction in the ga
 
 | факт | предикат |
 |---|---|
-| читать свою запись разрешает отношение, принимающее ТОЛЬКО тип `user` | `awk '/^type iam_user/,/^type [^i]/' proto/kacho/cloud/iam/v1/fga_model.fga \| grep 'define subject'` → `[user]` |
+| читать свою запись разрешает отношение, принимающее ТОЛЬКО тип `user` | `awk '/^type iam_user/,/^type [^i]/' proto/kaname/cloud/iam/v1/fga_model.fga \| grep 'define subject'` → `[user]` |
 | каждый предъявитель матрицы — служебная учётка | `tests/authz-fixtures/principal_pairings.py`, раздел про то, что `userNOBId` / `userINVId` / `userPureNoBindingsId` — ТОЛЬКО цели привязки |
 | человеческий предъявитель не проходит порог повышения | `tests/authz-fixtures/mint_rs256.py`, раздел `user_platform_token`: `acr` не несётся, а от порога освобождена только машина. Прежняя редакция называла второй причиной жёсткий kacho-внутренний `aud` — этой причины больше нет: выпуск персонального токена не объявляет адресата у внешнего поставщика (#1121) |
 
@@ -654,7 +687,7 @@ the **ungated** behavior and do NOT assert the gated part:
   projection lives on the internal listener (`InternalIAMService.GetRoleCompiled`, :9091),
   which is not reachable from this public-gateway newman env. Newman covers the **public**
   side (two-projection field-ABSENCE on public `Role.Get`/`List`); the internal-positive is
-  covered by `services/iam/internal/apps/kacho/api/role/f5_compiled_projection_test.go`.
+  covered by `services/iam/internal/apps/kaname/api/role/f5_compiled_projection_test.go`.
 - **IAM-1-33 (INTERNAL never echoes pgx/SQL)** — requires injecting an uncategorized DB
   error on the write path (not reproducible black-box). Integration-covered
   (INTERNAL-opaque mapping tests). Documented here, not a newman case.

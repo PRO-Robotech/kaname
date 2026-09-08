@@ -37,19 +37,19 @@ import (
 var catalogActionsFixture = map[string]bool{"get": true, "list": true, "delete": true}
 
 const (
-	insertBad = `INSERT INTO kacho_iam.roles (id, name, permissions) VALUES ` +
+	insertBad = `INSERT INTO kaname.roles (id, name, permissions) VALUES ` +
 		`('rol0000000000000bad', 'vpc.network.view', '["vpc.network.*.read"]')`
-	insertGood = `INSERT INTO kacho_iam.roles (id, name, permissions) VALUES ` +
+	insertGood = `INSERT INTO kaname.roles (id, name, permissions) VALUES ` +
 		`('rol0000000000000bad', 'vpc.network.view', '["vpc.network.*.get"]')`
-	updateGood = `UPDATE kacho_iam.roles SET permissions = '["vpc.network.*.get"]'::jsonb ` +
+	updateGood = `UPDATE kaname.roles SET permissions = '["vpc.network.*.get"]'::jsonb ` +
 		`WHERE id = 'rol0000000000000bad'`
-	updateBad = `UPDATE kacho_iam.roles SET permissions = '["vpc.network.*.read"]'::jsonb ` +
+	updateBad = `UPDATE kaname.roles SET permissions = '["vpc.network.*.read"]'::jsonb ` +
 		`WHERE id = 'rol0000000000000bad'`
-	updateUnknownForm = `UPDATE kacho_iam.roles SET permissions = permissions - 'vpc.network.*.read' ` +
+	updateUnknownForm = `UPDATE kaname.roles SET permissions = permissions - 'vpc.network.*.read' ` +
 		`WHERE id = 'rol0000000000000bad'`
 	// Объявление таблицы называет и таблицу, и столбец — и присвоением НЕ является.
 	// Без этой стороны находка формы зеленела бы на любом DDL.
-	createTable = `CREATE TABLE kacho_iam.roles (id text NOT NULL, permissions jsonb NOT NULL)`
+	createTable = `CREATE TABLE kaname.roles (id text NOT NULL, permissions jsonb NOT NULL)`
 )
 
 func judge(t *testing.T, files ...[2]string) (findings, unknown []string, roles int) {

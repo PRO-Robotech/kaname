@@ -15,6 +15,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   перемерен кругом 2 **четвёртым** маршрутом (полная симуляция цепочки миграций) и
   устоял: 14 `read` · 4 `listoperations` · 2 `gettargetstates`. Сценариев было
   **16**, осталось **16**; реализацию начинать **можно** (запрет #1 снят)
+- **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Правок 3, строк 30: `5504f44a7f` каталоги службы
+  (28) · `b81adf2760` имя службы (1) · `93ef852fe9` идентификатор лицензии (1).
+  Дельта целиком — подстановка токена (`kacho→kaname` · `kacho-iam→kaname` ·
+  `BUSL-1.1→AGPL-3.0-or-later`); непарных строк 0, пар с изменившимся числом
+  токенов 0; ни один сценарий, производитель, признак готовности и клауза не
+  тронуты. Одобрение относится к **содержимому**, а не к имени файла: APPROVED
+  выше есть вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю
+  редакцию ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение,
+  замер и цена обоих отвергнутых исходов —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 - **Круг 2 (автор):** обе блокирующие круга 1 **перемерены самостоятельно и
   подтвердились**; ни одна не опровергнута. Числа круга 1 (**20** троек, **7**
   глаголов каталога, **109** пар, **346**/**88** каталога прав, **13** авторских
@@ -41,9 +52,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 - **Линия:** `release:modules`
 - **Тип изменения:** ДАННЫЕ существующих системных ролей + новый гейт дерева.
   Схема не меняется ни одной колонкой; ни один публичный контракт не затрагивается
-- **Сервис:** `kacho-iam` — предмет целиком. Затрагивает
+- **Сервис:** `kaname` — предмет целиком. Затрагивает
   `services/iam/internal/migrations/` (одна новая миграция) и
-  `services/iam/internal/repo/kacho/pg/` (один новый гейт). **`proto/` не
+  `services/iam/internal/repo/kaname/pg/` (один новый гейт). **`proto/` не
   затрагивает**, **`gateway/` не затрагивает**
 - **Предмет приёмки — ВЫБОР** (каким из трёх исходов закрывается класс, что
   происходит с уже выданными правами, чем свойство держится впредь) **и
@@ -67,19 +78,19 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | П2 | проекция объявленных сегментов существует | `kacho_iam.role_rule_ref` + ключи `role_rule_ref_res_fk` / `role_rule_ref_verb_fk` | `grep -n 'ADD CONSTRAINT role_rule_ref_' services/iam/internal/migrations/20260901113757_*.sql` |
 | П3 | словарь глаголов платформы существует **строками**, а не литералом | `kacho_iam.catalog_verb`, **пообъектная** половина — **109** пар (живых строк всего **135**, врезка ниже) | `awk '/^INSERT INTO kacho_iam.catalog_verb/,/;$/' services/iam/internal/migrations/20260901113757_*.sql \| grep -c "^  ('"` → **109** |
 | П4 | набор глаголов ТИПА читается из Go | `authzmap.VerbsOfType`, `authzmap.AllVerbVocabulary` | `grep -n 'func VerbsOfType\|func AllVerbVocabulary' services/iam/internal/authzmap/fga_types.go` |
-| П5 | глагол вне набора типа **отбрасывается** обеими полосами эмиссии | `domain.IsVerbOfType`, зовётся из `authzmap.GrantedVerbs` и напрямую | `grep -n 'GrantedVerbs\|IsVerbOfType' services/iam/internal/apps/kacho/api/access_binding/reconcile/tuples.go` → строки **68** и **182** |
+| П5 | глагол вне набора типа **отбрасывается** обеими полосами эмиссии | `domain.IsVerbOfType`, зовётся из `authzmap.GrantedVerbs` и напрямую | `grep -n 'GrantedVerbs\|IsVerbOfType' services/iam/internal/apps/kaname/api/access_binding/reconcile/tuples.go` → строки **68** и **182** |
 | П6 | проекция вердикта считается тем же предикатом | `authzmap.RoleVerbsFromSelectors` → `GrantedVerbs` | `grep -n 'func RoleVerbsFromSelectors' -A 20 services/iam/internal/authzmap/role_verbs.go` |
 | П7 | ярус читается по классу глагола, и все три спорных — наблюдательские | `domain.verbBackCompatTier` (`read`, `gettargetstates`, `listoperations` → `viewer`) | `grep -n 'gettargetstates' services/iam/internal/domain/rule_verbs.go` |
 | П8 | проверка **на пути запроса** спрашивает `v_get` / `v_list`, а не эти глаголы | каталог прав края | команда в §2.2 |
-| П9 | ярусный паритет правил и прав держится пробой | `TestTierParity_AllSystemRoles_F53` | `grep -n 'func TestTierParity_AllSystemRoles_F53' services/iam/internal/repo/kacho/pg/tier_parity_integration_test.go` |
-| П10 | **половина сегмента про РЕСУРС** уже стережётся гейтом | `TestSeededRoleRulesResolveOrArePinned` | `grep -n 'func TestSeededRoleRulesResolveOrArePinned' services/iam/internal/repo/kacho/pg/seed_rule_resolvability_integration_test.go` |
-| П11 | селекторы системных ролей догоняют правила на старте | `SyncAllSystemRoleSelectors`, проба `TestSystemRoleVerbProjectionIsSeededAlongsideItsSelectors` | `grep -n 'func TestSystemRoleVerbProjectionIsSeededAlongsideItsSelectors' services/iam/internal/apps/kacho/seed/system_role_verbs_integration_test.go` |
-| П12 | проекция вердикта пересевается на старте | `seed.ReseedSystemRoleVerbs` | `grep -n 'func ReseedSystemRoleVerbs' services/iam/internal/apps/kacho/seed/role_verb_reseed.go` → строка **129** |
+| П9 | ярусный паритет правил и прав держится пробой | `TestTierParity_AllSystemRoles_F53` | `grep -n 'func TestTierParity_AllSystemRoles_F53' services/iam/internal/repo/kaname/pg/tier_parity_integration_test.go` |
+| П10 | **половина сегмента про РЕСУРС** уже стережётся гейтом | `TestSeededRoleRulesResolveOrArePinned` | `grep -n 'func TestSeededRoleRulesResolveOrArePinned' services/iam/internal/repo/kaname/pg/seed_rule_resolvability_integration_test.go` |
+| П11 | селекторы системных ролей догоняют правила на старте | `SyncAllSystemRoleSelectors`, проба `TestSystemRoleVerbProjectionIsSeededAlongsideItsSelectors` | `grep -n 'func TestSystemRoleVerbProjectionIsSeededAlongsideItsSelectors' services/iam/internal/apps/kaname/seed/system_role_verbs_integration_test.go` |
+| П12 | проекция вердикта пересевается на старте | `seed.ReseedSystemRoleVerbs` | `grep -n 'func ReseedSystemRoleVerbs' services/iam/internal/apps/kaname/seed/role_verb_reseed.go` → строка **129** |
 | П13 | образец миграции, приводящей правила к словарю | `513001_system_role_rules_speak_the_catalog_dictionary.sql` | `sed -n '1,120p' services/iam/internal/migrations/513001_*.sql` |
 | П14 | образец самопроверки исхода миграции | блок `САМОПРОВЕРКА ИСХОДА` в 1030001 | `sed -n '600,662p' services/iam/internal/migrations/20260901113757_*.sql` |
 | П15 | образец миграции **без обратного пути**, с названной причиной | `0077_retire_module_sa_dead_roles.sql` | `sed -n '110,130p' services/iam/internal/migrations/0077_*.sql` |
 | П16 | форма имени новой миграции объявлена в ОДНОМ месте | `docs/architecture/migration-version-namespace.md` | `grep -n 'YYYYMMDDHHMMSS' docs/architecture/migration-version-namespace.md` |
-| П17 | образец инъекции против семантики миграции на синтетической схеме | `TestIAMCT107_InjectionOneCompositeKeyLetsTheAnchorThrough` | `grep -n 'func TestIAMCT107_Injection' services/iam/internal/repo/kacho/pg/catalog_referent_integration_test.go` |
+| П17 | образец инъекции против семантики миграции на синтетической схеме | `TestIAMCT107_InjectionOneCompositeKeyLetsTheAnchorThrough` | `grep -n 'func TestIAMCT107_Injection' services/iam/internal/repo/kaname/pg/catalog_referent_integration_test.go` |
 
 > [!note] Перемерено 2026-09-02: «109 живых пар» — число, верное для ДРУГОГО предиката
 > Здесь (П3) и в строке самопроверки §5 стояло «живых пар глаголов **109**» без
@@ -126,7 +137,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 ```sh
 # кто вообще спрашивает набор глаголов у типа в пробах хранилища
-git grep -ln 'IsVerbOfType\|VerbsOfType' -- services/iam/internal/repo/kacho/pg
+git grep -ln 'IsVerbOfType\|VerbsOfType' -- services/iam/internal/repo/kaname/pg
 #   catalog_referent · owner_role_seed · owner_tier_on_type · reconcile_adapter
 #   · scope_anchor_tier · tier_parity
 # ни один из шести не читает roles.rules и не судит АВТОРСКИЙ глагол посева
@@ -139,7 +150,7 @@ git grep -n 'func TestSeededRoleRuleVerbs' -- services/iam ':!*.md'   # пуст
 Предикат Н4:
 
 ```sh
-grep -n 'func validateRuleCatalog' -A 30 services/iam/internal/apps/kacho/api/role/rules_catalog.go
+grep -n 'func validateRuleCatalog' -A 30 services/iam/internal/apps/kaname/api/role/rules_catalog.go
 # ветвление только по r.Module / res; authzmap.ObjectType(r.Module, res); глагол не читается
 ```
 
@@ -189,7 +200,7 @@ awk '/^INSERT INTO kacho_iam.catalog_verb/,/;$/' \
 - **Не прогонял штатный предикат задачи** (`SELECT count(*) FROM
   kacho_iam.role_grant_orphan WHERE source = 'rule_ref'` на применённой цепочке).
   Причина: соседняя сессия держала очередь сборки (`go test
-  ./services/iam/internal/repo/kacho/pg/relverdict/ … -timeout 120m`, 203 с на момент
+  ./services/iam/internal/repo/kaname/pg/relverdict/ … -timeout 120m`, 203 с на момент
   проверки), а свободного места на диске было **6.0 ГБ**. Это «не выполнилось», а не
   подтверждение и не опровержение: **рецензент обязан прогнать его сам**, и §11
   ставит это первым пунктом;
@@ -454,7 +465,7 @@ grep -n "lower(btrim(vrb.value" services/iam/internal/migrations/20260901113757_
 **Ярусный паритет от выбора не зависит, и это проверено с обеих сторон шва**, а не
 предположено: оба классификатора приводят регистр сами — `verbBackCompatTier`
 (`services/iam/internal/domain/rule_verbs.go:158`, через `NormalizeVerb`) и
-`legacyVerbTier` (`services/iam/internal/repo/kacho/pg/tier_parity_integration_test.go:182`,
+`legacyVerbTier` (`services/iam/internal/repo/kaname/pg/tier_parity_integration_test.go:182`,
 через `strings.ToLower`). То же у `domain.RuleRefsOf` (`rule_verbs.go:254`), поэтому
 IAM-SV-1-07 сравнивает множества одинаково при любом написании в правиле.
 
@@ -573,7 +584,7 @@ IAM-SV-1-16). Образец — П14. Проверяются четыре ве�
 только глаголы, объявленные платформой» — свойство **дерева**, и его держит
 гейт-близнец П10, заводимый этой задачей:
 
-`services/iam/internal/repo/kacho/pg/seed_rule_verb_resolvability_integration_test.go`,
+`services/iam/internal/repo/kaname/pg/seed_rule_verb_resolvability_integration_test.go`,
 `TestSeededRoleRuleVerbsAreDeclaredByTheType`.
 
 Форма — дословно как у П10, включая четыре свойства, за которые тот отвечает:
@@ -637,7 +648,7 @@ IAM-SV-1-16). Образец — П14. Проверяются четыре ве�
 >
 > Действующая проба названа рядом координатой и резолвится:
 > `TestTierParity_AllSystemRoles_F53`,
-> `services/iam/internal/repo/kacho/pg/tier_parity_integration_test.go`. Предмет — проза
+> `services/iam/internal/repo/kaname/pg/tier_parity_integration_test.go`. Предмет — проза
 > применённой миграции — остаётся за `#1822` и здесь не чинится. Класс держит гейт
 > `internal/repohygiene` `TestAcceptanceProbeCoordinateResolves`.
 
@@ -762,13 +773,13 @@ IAM-SV-1-08 … IAM-SV-1-13.
 правила не остаётся ни одной.
 *Производитель «Тогда» — РАЗНЫЙ у трёх утверждений, и это надо было сказать сразу:*
 первые два держит П11; третье — **код, а не проба**: `syncAllSystemRoleSelectorsTx`
-(`services/iam/internal/apps/kacho/seed/migrate_backfill.go:286`) снимает строки, чей
+(`services/iam/internal/apps/kaname/seed/migrate_backfill.go:286`) снимает строки, чей
 `rule_fp` не производит ни одно текущее правило (шапка функции, `:276`). Утверждения
 о снятом отпечатке П11 не несёт — проверено, а не предположено:
 
 ```sh
 grep -c 'stale\|rule_fp' \
-  services/iam/internal/apps/kacho/seed/system_role_verbs_integration_test.go
+  services/iam/internal/apps/kaname/seed/system_role_verbs_integration_test.go
 #   0
 ```
 
@@ -1096,7 +1107,7 @@ print(_lib.verdict(open('services/iam/docs/engineering/acceptance/system-role-se
   `services/iam/docs/engineering/architecture/verb-create-withdrawal.md`
 - форма имени миграции: `docs/architecture/migration-version-namespace.md`
 - гейт-близнец по ресурсной половине:
-  `services/iam/internal/repo/kacho/pg/seed_rule_resolvability_integration_test.go`
+  `services/iam/internal/repo/kaname/pg/seed_rule_resolvability_integration_test.go`
 
 ---
 
@@ -1244,7 +1255,7 @@ done | sort -n | head -1
 `role_verb` — и всё.
 
 ```sh
-grep -n 'require\.' services/iam/internal/apps/kacho/seed/system_role_verbs_integration_test.go
+grep -n 'require\.' services/iam/internal/apps/kaname/seed/system_role_verbs_integration_test.go
 #   ни одного утверждения о снятом отпечатке
 ```
 
@@ -1252,7 +1263,7 @@ grep -n 'require\.' services/iam/internal/apps/kacho/seed/system_role_verbs_inte
 не пробу:
 
 ```sh
-grep -n 'DELETEs stale selector rows' services/iam/internal/apps/kacho/seed/migrate_backfill.go
+grep -n 'DELETEs stale selector rows' services/iam/internal/apps/kaname/seed/migrate_backfill.go
 ```
 
 Правка — назвать в `IAM-SV-1-06` производителем `syncAllSystemRoleSelectorsTx`
@@ -1320,7 +1331,7 @@ awk '/^INSERT INTO kacho_iam.catalog_verb/,/;$/' \
 `get`/`list`:
 
 ```sh
-sed -n '182,194p' services/iam/internal/repo/kacho/pg/tier_parity_integration_test.go  # legacyVerbTier
+sed -n '182,194p' services/iam/internal/repo/kaname/pg/tier_parity_integration_test.go  # legacyVerbTier
 sed -n '158,168p' services/iam/internal/domain/rule_verbs.go                            # verbBackCompatTier
 ```
 
@@ -1357,7 +1368,7 @@ sed -n '158,168p' services/iam/internal/domain/rule_verbs.go                    
   kacho_iam.role_grant_orphan WHERE source = 'rule_ref'` на применённой цепочке).
   Причина измерена, а не названа общими словами: `df -h /` → **5.9 ГБ** свободного
   при заполнении **98 %**, и `pgrep -x go` → **1** (соседний прогон держит очередь
-  сборки). Прогон пакета `services/iam/internal/repo/kacho/pg` с контейнерами
+  сборки). Прогон пакета `services/iam/internal/repo/kaname/pg` с контейнерами
   отращивает кэш сборки на гигабайты, а исчерпание диска повреждает незавершённые
   операции git — цена ошибки здесь выше цены неизмеренного. Это **«не выполнилось»**,
   а не подтверждение и не опровержение: §11 п. 1 остаётся открытым для того, у кого
@@ -1458,7 +1469,7 @@ grep -rn '\.verb"' services/iam/internal/migrations/*.sql
 **Проверено сверх заказанного, потому что от этого зависит выбор:** ярусный паритет от
 написания не зависит — оба классификатора приводят регистр сами
 (`domain/rule_verbs.go:158` через `NormalizeVerb`;
-`repo/kacho/pg/tier_parity_integration_test.go:182` через `strings.ToLower`), и
+`repo/kaname/pg/tier_parity_integration_test.go:182` через `strings.ToLower`), и
 `domain.RuleRefsOf` тоже (`rule_verbs.go:254`). Значит выбор «приводить сравнение»
 безопасен для П9 и для `IAM-SV-1-07`, а не только дешевле.
 
@@ -1486,7 +1497,7 @@ grep -rn '\.verb"' services/iam/internal/migrations/*.sql
 - **Штатного предиката задачи не прогонял** (`SELECT count(*) FROM
   kacho_iam.role_grant_orphan WHERE source = 'rule_ref'` на применённой цепочке).
   Причина измерена: `df -h /` → **5.8 ГБ** свободного при заполнении **98 %**,
-  `pgrep -x go` → **1**. Прогон пакета `services/iam/internal/repo/kacho/pg` с
+  `pgrep -x go` → **1**. Прогон пакета `services/iam/internal/repo/kaname/pg` с
   контейнерами отращивает кэш сборки на гигабайты, а исчерпание диска повреждает
   незавершённые операции git. Это **«не выполнилось»**, а не подтверждение и не
   опровержение: §11 п. 1 остаётся открытым — теперь для **обеих** сторон, и это надо
@@ -1639,7 +1650,7 @@ grep -n 'CONSTRAINT catalog_verb_canonical' services/iam/internal/migrations/202
 **Проверено сверх заказанного, потому что от этого зависит вывод «ничего не отнято»:**
 оба классификатора яруса приводят регистр сами и относят все три спорных глагола к
 наблюдателю вместе с `get`/`list` (`domain/rule_verbs.go:158`,
-`repo/kacho/pg/tier_parity_integration_test.go:182`); `domain.RuleRefsOf` приводит
+`repo/kaname/pg/tier_parity_integration_test.go:182`); `domain.RuleRefsOf` приводит
 (`rule_verbs.go:254`); `domain.IsVerbOfType` приводит **обе** стороны
 (`rule_verbs.go:24,29`), а `authzmap.GrantedVerbs` фильтрует через него и возвращает
 канонические имена (`role_verbs.go:51…95`). Значит `IAM-SV-1-04` («проекция вердикта
@@ -1705,7 +1716,7 @@ gh issue view 1827 -R PRO-Robotech/kacho     # OPEN · P2 · size:M · area:iam 
 
 - **Штатный предикат задачи (§11 п. 1) не прогонял.** Причина измерена:
   `df -h /` → **6.2 ГБ** свободного при заполнении **98 %**. Прогон пакета
-  `services/iam/internal/repo/kacho/pg` с контейнерами отращивает кэш сборки на
+  `services/iam/internal/repo/kaname/pg` с контейнерами отращивает кэш сборки на
   гигабайты, а исчерпание диска повреждает незавершённые операции git. Это
   **«не выполнилось»**, а не подтверждение и не опровержение. Отмечу, однако, что мой
   статический маршрут §Р2.2 — **четвёртый независимый** и он воспроизводит не только
@@ -1911,7 +1922,7 @@ ERROR: полуподстановка среди правил системных
 он живёт в пробе. Прогон до правки:
 
 ```
-services/iam/internal/repo/kacho/pg: комментарий называет IsVerbOfType действующей
+services/iam/internal/repo/kaname/pg: комментарий называет IsVerbOfType действующей
 защитой (…seed_rule_verb_resolvability_integration_test.go:19, :38), но в прод-коде
 этого пакета такого идентификатора НЕТ.
 ```
@@ -2083,7 +2094,7 @@ tablegrowth_test.go:968: …20260901231022_…sql:338 services/iam/_trace_drop
 `compute.instance`), `listoperations` — 4, `gettargetstates` — 2.
 
 Прогоны, которых просит §9.1, зелены **без правки самих проб**:
-`go test ./services/iam/internal/repo/kacho/pg/ ./services/iam/internal/apps/kacho/seed/
+`go test ./services/iam/internal/repo/kaname/pg/ ./services/iam/internal/apps/kaname/seed/
 ./services/iam/internal/check/ -count=1` → `ok · ok · ok` (112 с · 13 с · 0.02 с).
 Сюда входят `TestTierParity_AllSystemRoles_F53` (П9),
 `TestSeededRoleRulesResolveOrArePinned` (П10),
@@ -2319,7 +2330,7 @@ grep -rn 'ScanMigrationSQL' --include='*.go' . | grep -v tablegrowth
 
 - **контейнерных проб не запускалось ни одной**: свободного места на диске около
   3 ГБ при 99 % занятости. Это **«не выполнилось»**, а не зелёное и не красное.
-  Не прогонялись `./services/iam/internal/repo/kacho/pg/`, `…/seed/`, `…/check/` —
+  Не прогонялись `./services/iam/internal/repo/kaname/pg/`, `…/seed/`, `…/check/` —
   то есть §9.1 круга реализации остаётся **неперепрогнанным** после правки
   восьми мест закрытия пула. Правка механическая и компилируется (`go vet` чист),
   но вердикта у неё нет;
@@ -2346,7 +2357,7 @@ go test ./internal/repohygiene/... -count=1
 | ось «самоистечение пина» без инъекции (`НИ1`) | инъекция зовёт перечень пинов и краснеет на записи без предмета | **#1841** |
 | `#1821` несёт метку `blocked` (`НИ2`) | `gh issue view 1821` не содержит `blocked` | снять В МОМЕНТ посадки |
 | отпечаток берёт `CREATE TEMP TABLE … AS SELECT` за правку структуры | слитная форма под отпечаток не попадает; обе стороны инъекцией | **#1833** |
-| §9.1: интеграционные пробы iam после правки закрытия пула | `go test ./services/iam/internal/repo/kacho/pg/ -count=1` зелёный | круг посадки, стенд с местом на диске |
+| §9.1: интеграционные пробы iam после правки закрытия пула | `go test ./services/iam/internal/repo/kaname/pg/ -count=1` зелёный | круг посадки, стенд с местом на диске |
 
 ---
 

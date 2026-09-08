@@ -12,9 +12,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/signingkeygen"
-	"github.com/PRO-Robotech/kacho-iam/internal/tokensigner"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
+	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
 // stubKeys — подставной источник подписного материала.
@@ -48,7 +48,7 @@ func fixedClock(at time.Time) tokensigner.Clock { return func() time.Time { retu
 func mustSigner(t *testing.T, keys tokensigner.KeyProvider, clock tokensigner.Clock) *tokensigner.Signer {
 	t.Helper()
 	s, err := tokensigner.New(tokensigner.Config{
-		Issuer:      "https://iam.kacho.local",
+		Issuer:      "https://kaname.kacho.local",
 		Clock:       clock,
 		MaxTokenTTL: time.Hour,
 	}, keys)
@@ -213,7 +213,7 @@ func TestSigner_MandatoryClaimsAndIssuer(t *testing.T) {
 	header, claims := parseHeaderAndClaims(t, out.Token)
 	require.Equal(t, "RS256", header["alg"])
 	require.Equal(t, "at+jwt", header["typ"])
-	require.Equal(t, "https://iam.kacho.local", claims["iss"])
+	require.Equal(t, "https://kaname.kacho.local", claims["iss"])
 	require.Equal(t, "sva-1", claims["sub"])
 	require.NotEmpty(t, claims["jti"], "у токена обязан быть идентификатор: без него отзыв не адресуется")
 
@@ -260,15 +260,15 @@ func TestSigner_RefusesToBuildWithoutClockOrIssuer(t *testing.T) {
 	_, err := tokensigner.New(tokensigner.Config{Clock: fixedClock(time.Now()), MaxTokenTTL: time.Hour}, keys)
 	require.Error(t, err, "издатель обязателен: незаданный означает «не сужаем»")
 
-	_, err = tokensigner.New(tokensigner.Config{Issuer: "https://iam.kacho.local", MaxTokenTTL: time.Hour}, keys)
+	_, err = tokensigner.New(tokensigner.Config{Issuer: "https://kaname.kacho.local", MaxTokenTTL: time.Hour}, keys)
 	require.Error(t, err, "часы — вход, а не системное время")
 
-	_, err = tokensigner.New(tokensigner.Config{Issuer: "https://iam.kacho.local", Clock: fixedClock(time.Now())}, keys)
+	_, err = tokensigner.New(tokensigner.Config{Issuer: "https://kaname.kacho.local", Clock: fixedClock(time.Now())}, keys)
 	require.Error(t, err, "потолок срока обязан быть объявлен числом")
 
 	// Положительный контроль — с полным набором подписант строится.
 	_, err = tokensigner.New(tokensigner.Config{
-		Issuer: "https://iam.kacho.local", Clock: fixedClock(time.Now()), MaxTokenTTL: time.Hour,
+		Issuer: "https://kaname.kacho.local", Clock: fixedClock(time.Now()), MaxTokenTTL: time.Hour,
 	}, keys)
 	require.NoError(t, err)
 }

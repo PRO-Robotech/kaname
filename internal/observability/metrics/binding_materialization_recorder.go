@@ -49,12 +49,12 @@ var bindingSizeBuckets = []float64{1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 250
 func (r *Registry) NewBindingMaterializationRecorder() *BindingMaterializationRecorder {
 	rec := &BindingMaterializationRecorder{
 		objects: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name:    "kacho_iam_binding_materialization_objects",
+			Name:    Namespace + "_binding_materialization_objects",
 			Help:    "Objects matched by one access binding's selectors during a reconcile pass.",
 			Buckets: bindingSizeBuckets,
 		}),
 		tuples: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name: "kacho_iam_binding_materialization_tuples",
+			Name: Namespace + "_binding_materialization_tuples",
 			Help: "Authorization tuples one access binding's reconcile pass materializes " +
 				"(objects × the verbs of the rule that matched them).",
 			Buckets: bindingSizeBuckets,

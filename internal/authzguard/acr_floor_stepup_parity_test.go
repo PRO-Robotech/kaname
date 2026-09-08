@@ -38,7 +38,7 @@ import (
 // gatewayCallerCtx builds the ctx as the trust-aware extract leaves it for a
 // VERIFIED api-gateway peer forwarding a principal of the given type and acr.
 func gatewayCallerCtx(principalType, acr string) context.Context {
-	ctx := grpcsrv.WithCertIdentity(context.Background(), gatewaySAN, true)
+	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), gatewaySAN, true)
 	ctx = grpcsrv.WithTrustedPrincipal(ctx,
 		operations.Principal{Type: principalType, ID: "sub-parity"}, true)
 	return grpcsrv.WithTrustedACR(ctx, acr, true)
@@ -147,7 +147,7 @@ func TestACRFloor_MachineExemption_RequiresTrustedPrincipal(t *testing.T) {
 	f := newACRFloor(true)
 
 	// A machine principal claimed by an UNTRUSTED peer: same claim, no trust.
-	ctx := grpcsrv.WithCertIdentity(context.Background(), gatewaySAN, true)
+	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), gatewaySAN, true)
 	ctx = grpcsrv.WithTrustedPrincipal(ctx,
 		operations.Principal{Type: grpcsrv.PrincipalTypeServiceAccount, ID: "sva-forged"}, false)
 	ctx = grpcsrv.WithTrustedACR(ctx, "", false)

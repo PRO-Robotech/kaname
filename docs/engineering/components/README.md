@@ -1,6 +1,6 @@
-# kacho-iam — Документация компонентов (RU)
+# kaname — Документация компонентов (RU)
 
-Полная техническая документация всех компонентов сервиса `kacho-iam` —
+Полная техническая документация всех компонентов сервиса `kaname` —
 identity & access management платформы Kachō. Целевая аудитория — оператор,
 devops, архитектор: все, что нужно, чтобы поднять, настроить, обслужить и
 расширить сервис в проде, **без чтения исходников**.
@@ -10,7 +10,7 @@ devops, архитектор: все, что нужно, чтобы поднят
 
 ## Capability map
 
-`kacho-iam` поднимает 4 сетевых слушателя (порты конфигурируются):
+`kaname` поднимает 4 сетевых слушателя (порты конфигурируются):
 
 | Слушатель      | Порт  | Протокол  | Назначение                                                                       |
 |----------------|-------|-----------|----------------------------------------------------------------------------------|
@@ -36,7 +36,7 @@ devops, архитектор: все, что нужно, чтобы поднят
 - [`06-group.md`](06-group.md) — Group + GroupMember (триггер `group_members_member_exists_trg`).
 - [`07-role.md`](07-role.md) — Role (58 system seed; custom per-Account; multi-scope XOR; permissions JSONB).
 - [`08-access-binding.md`](08-access-binding.md) — AccessBinding (5-tuple; idempotent INSERT; эмиссия намерения и сброса кэша в той же транзакции).
-- Условия на привязку (ABAC-overlay) — главы нет. Отдельной главы про условия в этом каталоге нет, и это не пропуск оформления: поля условия сняты с контракта привязки (`reserved 6, 7` в `proto/kacho/cloud/iam/v1/access_binding_service.proto` — их никто не вычислял, и запрос обещал гейт, которого нет). Имя ненаписанной главы не воспроизводится как ссылка: она читается как существующая.
+- Условия на привязку (ABAC-overlay) — главы нет. Отдельной главы про условия в этом каталоге нет, и это не пропуск оформления: поля условия сняты с контракта привязки (`reserved 6, 7` в `proto/kaname/cloud/iam/v1/access_binding_service.proto` — их никто не вычислял, и запрос обещал гейт, которого нет). Имя ненаписанной главы не воспроизводится как ссылка: она читается как существующая.
 - [`10-operations.md`](10-operations.md) — LRO Operations (`iop`-prefix; async-API contract; principal extension).
 
 ### Authorization
@@ -61,9 +61,9 @@ devops, архитектор: все, что нужно, чтобы поднят
 ## Источники истины (для самостоятельной проверки)
 
 - `internal/domain/*.go` — entities, валидация, regex'ы, длины.
-- `internal/repo/kacho/pg/*.go` — SQL, scan-функции, error-mapping.
-- `internal/apps/kacho/api/*/` — use-cases (slice-per-RPC).
-- `internal/handler/*.go` + `internal/apps/kacho/api/*/handler.go` — gRPC transport.
-- `cmd/kacho-iam/{main,wiring,serve,...}.go` — composition root.
+- `internal/repo/kaname/pg/*.go` — SQL, scan-функции, error-mapping.
+- `internal/apps/kaname/api/*/` — use-cases (slice-per-RPC).
+- `internal/handler/*.go` + `internal/apps/kaname/api/*/handler.go` — gRPC transport.
+- `cmd/kaname/{main,wiring,serve,...}.go` — composition root.
 - `internal/migrations/0001_initial.sql` — squashed schema (46 таблиц, 101 индекс, 7 триггеров, 62 FK).
 - `README.md` (корень репозитория) — высокоуровневый overview.

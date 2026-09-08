@@ -162,7 +162,7 @@ def poll_op(op_var, out_id_var=None, auth="jwtAccountAdminA", also_clear_on_erro
         #
         # Замер 2026-07-30 на боевой посадке: `POST /iam/v1/accounts` → 200 + Operation →
         # `done:true` С ошибкой `code 9 "referenced resource not found or still in use"`,
-        # `metadata.accountId = accs403jtr4t654xgg8m`, а `SELECT … FROM kacho_iam.accounts`
+        # `metadata.accountId = accs403jtr4t654xgg8m`, а `SELECT … FROM kaname.accounts`
         # по этому id — ПУСТО. Кейс продолжил работать с фантомом: каждый последующий
         # `POST /iam/v1/projects` в несуществующий аккаунт честно отвечал 403 «no
         # authorization path» (модель права — выдавать не на что), мутации отвергались,

@@ -49,7 +49,7 @@ CRUD fixture dependency:
 Operation envelope:
   All mutations return `operation.Operation` with id prefix `iop` (IAM operations
   are distinct from api-gateway OperationService; the poll step hits `/operations/{id}`
-  via the OpsProxy at api-gateway which routes `iop*` to kacho-iam).
+  via the OpsProxy at api-gateway which routes `iop*` to kaname).
 
 Case IDs follow the IAM-ACC-<RPC>-<CLASS>[-detail] scheme.
 
@@ -60,7 +60,7 @@ Authz cases:
 
 Test-first note (strict TDD):
   These cases are written RED-first. They will fail until the corresponding
-  AccountService RPCs are correctly implemented in kacho-iam. Do not weaken
+  AccountService RPCs are correctly implemented in kaname. Do not weaken
   assertions to make them pass — fix the implementation instead.
 
 verifies: AccountService Create/Get/Update/Delete acceptance scenarios from

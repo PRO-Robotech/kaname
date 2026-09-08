@@ -33,10 +33,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // --- fixture plumbing -------------------------------------------------------
@@ -202,9 +202,9 @@ func TestTokenHook_ReadsSessionAuthTimeWhereProviderPutsIt(t *testing.T) {
 
 	claims, ok := mintedClaims(t, w)
 	require.True(t, ok, "an interactive exchange must mint claims")
-	assert.EqualValues(t, want.Unix(), claims["kacho_mfa_at"],
+	assert.EqualValues(t, want.Unix(), claims["kaname_mfa_at"],
 		"the session's authentication instant must be read from the captured location")
-	assert.Equal(t, "2", claims["kacho_acr"],
+	assert.Equal(t, "2", claims["kaname_acr"],
 		"the session's assurance level must be read from the captured location")
 }
 
@@ -384,7 +384,7 @@ func TestTokenHook_ServiceAccountKey_UnaffectedByUserCutoff(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 	claims, any := mintedClaims(t, w)
 	require.True(t, any)
-	assert.Equal(t, "service_account", claims["kacho_principal_type"])
+	assert.Equal(t, "service_account", claims["kaname_principal_type"])
 }
 
 // --- the refresh path, driven with the body the provider actually posts ------
@@ -455,7 +455,7 @@ func TestRefreshHook_CapturedBody_ReflectsSessionAssurance(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 	claims, ok := mintedClaims(t, w)
 	require.True(t, ok)
-	assert.Equal(t, "2", claims["kacho_acr"])
+	assert.Equal(t, "2", claims["kaname_acr"])
 }
 
 // postCapturedRefresh posts to the refresh hook, whose fixtures use their own

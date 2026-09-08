@@ -6,7 +6,7 @@ package metrics_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/observability/metrics"
+	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 )
 
 // TestRegisterPoolStats_RepeatDoesNotKillTheProcess — повторная регистрация того
@@ -33,7 +33,7 @@ func TestRegisterPoolStats_RepeatDoesNotKillTheProcess(t *testing.T) {
 // выше: второй пул того же сервиса регистрируется.
 //
 // Без него «повтор не роняет» осталось бы зелёным и в случае, когда метод не
-// регистрирует НИЧЕГО: у kacho-iam пулов два (ведущий и реплика для чтений), и
+// регистрирует НИЧЕГО: у kaname пулов два (ведущий и реплика для чтений), и
 // без различающей метки `pool` они схлопнулись бы в одну серию — то есть занятость
 // реплики читалась бы как занятость ведущего.
 func TestRegisterPoolStats_SecondPoolIsAccepted(t *testing.T) {

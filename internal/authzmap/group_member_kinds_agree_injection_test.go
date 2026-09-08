@@ -23,7 +23,7 @@ import (
 func TestSchemaKindReaderTellsDeclarationFromProse(t *testing.T) {
 	// (а) НАСТОЯЩЕЕ ОБЪЯВЛЕНИЕ — виды обязаны быть прочитаны.
 	const decl = `
-CREATE TABLE kacho_iam.group_members (
+CREATE TABLE kaname.group_members (
     group_id text NOT NULL,
     member_type text NOT NULL,
     CONSTRAINT group_members_type_check CHECK ((member_type = ANY (ARRAY['user'::text, 'service_account'::text])))
@@ -38,7 +38,7 @@ CREATE TABLE kacho_iam.group_members (
 	//     миграции литералы соседней вставки и объявляла их видами члена.
 	const prose = `
 -- ('user' / 'service_account', enforced by group_members_type_check), so it maps
-INSERT INTO kacho_iam.fga_outbox (object, relation, subject)
+INSERT INTO kaname.fga_outbox (object, relation, subject)
 VALUES ('group:grp-1', 'member', 'user:usr-1');`
 	_, ok = exportedConstraintCheckBody(exportedStripSQLComments(prose), "group_members_type_check")
 	require.False(t, ok, "имя в комментарии принято за объявление — прибор судит прозу, а не код")
@@ -46,7 +46,7 @@ VALUES ('group:grp-1', 'member', 'user:usr-1');`
 	// (в) ОТМЕНЁННАЯ РЕДАКЦИЯ: разборщик обязан уметь прочитать и вторую форму,
 	//     иначе «последняя касавшаяся миграция» ничего не значит.
 	const redecl = `
-ALTER TABLE kacho_iam.group_members
+ALTER TABLE kaname.group_members
   ADD CONSTRAINT group_members_type_check CHECK (member_type IN ('user', 'service_account', 'robot'));`
 	got, ok = exportedConstraintCheckBody(redecl, "group_members_type_check")
 	require.True(t, ok)

@@ -24,8 +24,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/signingkeygen"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/signingkeygen"
 )
 
 // errAuthorityDown — недоступность источника отсечек.
@@ -79,9 +79,9 @@ func TestF2_32_RevokingTheClientStopsTokensItAlreadyIssued(t *testing.T) {
 	)
 
 	var userPub, saPub, freshPub domain.PublishedKey
-	userToken := mintWithClaims(t, "user-client", owner, iat, map[string]any{"kacho_user_token_id": userClient}, &userPub)
-	saToken := mintWithClaims(t, "sa-client", saOwner, iat, map[string]any{"kacho_sa_key_id": saKeyClient}, &saPub)
-	freshToken := mintWithClaims(t, "fresh-client", owner, iat, map[string]any{"kacho_user_token_id": "uoc_zzzzzzzzzzzzzzzzz"}, &freshPub)
+	userToken := mintWithClaims(t, "user-client", owner, iat, map[string]any{"kaname_user_token_id": userClient}, &userPub)
+	saToken := mintWithClaims(t, "sa-client", saOwner, iat, map[string]any{"kaname_sa_key_id": saKeyClient}, &saPub)
+	freshToken := mintWithClaims(t, "fresh-client", owner, iat, map[string]any{"kaname_user_token_id": "uoc_zzzzzzzzzzzzzzzzz"}, &freshPub)
 
 	keys := stubKeys{keys: []domain.PublishedKey{userPub, saPub, freshPub}}
 

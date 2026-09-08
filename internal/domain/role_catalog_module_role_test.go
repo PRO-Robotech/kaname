@@ -6,7 +6,7 @@
 //
 // `display_name` и `purpose` — поля КАНОНИЧЕСКОГО каталога и ничьи больше. У
 // роли вне каталога отображаемое имя равно идентификатору, а назначение пусто, и
-// это сказано в контракте (`proto/kacho/cloud/iam/v1/role.proto`), а не
+// это сказано в контракте (`proto/kaname/cloud/iam/v1/role.proto`), а не
 // подразумевается. Человеческая проза такой роли живёт в `description`: её
 // пишет автор модуля в манифесте, и загрузчик требует её наличия
 // (`manifest.ErrRoleDescriptionTooShort`).
@@ -61,7 +61,7 @@ func TestCanonicalCatalogLabelsFourNamesAndNoModuleRole(t *testing.T) {
 		t.Fatalf("записей каталога %d, ожидалось %d. Каталог вырос или сжался — значит "+
 			"фраза контракта о том, что вне него отображаемое имя равно идентификатору, "+
 			"перечисляет уже не тот набор, и её надо править ТЕМ ЖЕ изменением "+
-			"(proto/kacho/cloud/iam/v1/role.proto, поля display_name и purpose)",
+			"(proto/kaname/cloud/iam/v1/role.proto, поля display_name и purpose)",
 			len(canonicalCatalog), len(want))
 	}
 	for name, label := range want {

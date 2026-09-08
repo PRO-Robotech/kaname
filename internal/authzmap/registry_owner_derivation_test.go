@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
 )
 
 // registry_owner_derivation_test.go — regression lock for #64 Defect A.
@@ -30,7 +30,7 @@ import (
 // Fix: every `v_*` on registry_registry / registry_repository now derives from
 // `owner` (a per-OBJECT computed relation, NOT a hierarchy cascade — no O(mirror)
 // recompute, consistent with the flat model's `editor: this or admin`). This test
-// parses the CANONICAL model DSL (proto/kacho/cloud/iam/v1/fga_model.fga — the
+// parses the CANONICAL model DSL (proto/kaname/cloud/iam/v1/fga_model.fga — the
 // single source out of which the copy the service embeds is generated, see
 // services/iam/internal/authzmodel) and asserts the derivation exists, so a
 // future edit that re-dangles `owner` fails here rather than silently 404-ing

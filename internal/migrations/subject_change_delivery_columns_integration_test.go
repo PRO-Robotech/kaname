@@ -13,7 +13,7 @@
 //
 // Писателя у них нет ни одного:
 //
-//	вставка         `repo/kacho/pg/access_binding_repo.go` пишет
+//	вставка         `repo/kaname/pg/access_binding_repo.go` пишет
 //	                (subject_id, op, event_type, payload) — и только;
 //	дренаж          снят вместе с адресатом (serve.go, #1024): `UPDATE … SET
 //	                sent_at` не исполняет никто;
@@ -64,9 +64,9 @@ func TestIntegration_SubjectChangeJournalCarriesNoDeliveryColumns(t *testing.T) 
 	}
 	db := freshIamSchema(t)
 
-	columns := columnsOf(t, db, "kacho_iam", "subject_change_outbox")
+	columns := columnsOf(t, db, "kaname", "subject_change_outbox")
 
-	t.Logf("перепись: колонок у kacho_iam.subject_change_outbox — %d (%v)",
+	t.Logf("перепись: колонок у kaname.subject_change_outbox — %d (%v)",
 		len(columns), columns)
 
 	require.NotEmpty(t, columns,
@@ -105,9 +105,9 @@ func TestIntegration_SubjectChangeJournalKeepsNoUnsentTailIndex(t *testing.T) {
 	}
 	db := freshIamSchema(t)
 
-	indexes := indexesOf(t, db, "kacho_iam", "subject_change_outbox")
+	indexes := indexesOf(t, db, "kaname", "subject_change_outbox")
 
-	t.Logf("перепись: индексов у kacho_iam.subject_change_outbox — %d (%v)",
+	t.Logf("перепись: индексов у kaname.subject_change_outbox — %d (%v)",
 		len(indexes), indexes)
 
 	require.NotEmpty(t, indexes,

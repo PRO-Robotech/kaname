@@ -60,13 +60,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // conditionalDecl — объявление отношения, разобранное по двум осям.
@@ -217,7 +218,7 @@ func TestConditionBypassedByAnArmNeedsTheEdgeEnforcer(t *testing.T) {
 // catalogReadersOfAnyRelation — записи каталога, требующие какого-либо отношения.
 func catalogReadersOfAnyRelation(t *testing.T) []catalogReader {
 	t.Helper()
-	path := filepath.Join(monorepoRoot(t), catalogRelPath)
+	path := platformtree.RequirePath(t, catalogRelPath)
 	data, err := os.ReadFile(path)
 	require.NoErrorf(t, err, "каталог прав %s не прочитан", catalogRelPath)
 

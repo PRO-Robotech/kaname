@@ -194,7 +194,7 @@ func NewHandler(cfg Config) *Handler {
 // difference is "every docker pull is 401" versus "everything is fine".
 //
 // WHO READS THIS. The composition root registers a scrape collector over these
-// counters (kacho_iam_jwks_mirror_outcomes_total), so Served is published beside
+// counters (kaname_jwks_mirror_outcomes_total), so Served is published beside
 // the two refusal reasons and "never refused" stays distinguishable from "never
 // reached". Здесь стояло «процесс сообщает их в журнале жизненного цикла» — такого
 // читателя в дереве не было НИ ОДНОГО, то есть комментарий описывал наблюдаемость,
@@ -291,7 +291,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"token verification downstream fails until it is corrected",
 				slog.String("upstream", h.upstreamURL),
 				slog.String("classification", reasonMisconfigured),
-				slog.String("setting", "authn.hydra-jwks-url (env KACHO_IAM_HYDRA_JWKS_URL)"),
+				slog.String("setting", "authn.hydra-jwks-url (env KANAME_HYDRA_JWKS_URL)"),
 				slog.Uint64("misconfigured_total", h.misconfigured.Load()),
 				slog.String("err", err.Error()))
 		} else {

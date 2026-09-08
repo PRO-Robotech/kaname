@@ -25,20 +25,20 @@ import (
 
 // goodSeed — синтетический посев, согласный со своим синтетическим литералом.
 const goodSeed = `
-INSERT INTO kacho_iam.catalog_module (module) VALUES
+INSERT INTO kaname.catalog_module (module) VALUES
   ('alpha'),
   ('beta');
 
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted) VALUES
+INSERT INTO kaname.catalog_resource (module, resource, dotted) VALUES
   ('alpha', 'thing', 'alpha.thing'),
   ('beta', 'other', 'beta.other');
 
-INSERT INTO kacho_iam.catalog_resource
+INSERT INTO kaname.catalog_resource
   (module, resource, dotted, retired_at, retired_reason, superseded_by, live) VALUES
   ('alpha', 'old', 'alpha.old', now(),
    'снято; причина, содержащая запятую', 'beta.other', false);
 
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb) VALUES
+INSERT INTO kaname.catalog_verb (module, resource, verb) VALUES
   ('alpha', 'thing', 'get'),
   ('beta', 'other', 'list');
 `
@@ -118,8 +118,8 @@ func TestIAMCT114_Injection_SuccessorPointingAtNothingIsFound(t *testing.T) {
 
 func TestIAMCT114_Injection_EmptySeedIsNotSilence(t *testing.T) {
 	empty := strings.Replace(goodSeed,
-		"INSERT INTO kacho_iam.catalog_verb (module, resource, verb) VALUES\n  ('alpha', 'thing', 'get'),\n  ('beta', 'other', 'list');",
-		"INSERT INTO kacho_iam.catalog_verb (module, resource, verb) VALUES\n-- посева нет", 1)
+		"INSERT INTO kaname.catalog_verb (module, resource, verb) VALUES\n  ('alpha', 'thing', 'get'),\n  ('beta', 'other', 'list');",
+		"INSERT INTO kaname.catalog_verb (module, resource, verb) VALUES\n-- посева нет", 1)
 	_, _, err := auditCatalogSeed(empty, wantMods, wantRes, wantVerbs)
 	if err == nil {
 		t.Fatal("пустой обход обязан быть ОТКАЗОМ, а не «расхождений нет»: " +
@@ -130,16 +130,16 @@ func TestIAMCT114_Injection_EmptySeedIsNotSilence(t *testing.T) {
 // ── форма ключа ───────────────────────────────────────────────────────────────
 
 const goodKeys = `
-ALTER TABLE kacho_iam.role_rule_ref
+ALTER TABLE kaname.role_rule_ref
   ADD CONSTRAINT role_rule_ref_res_fk
   FOREIGN KEY (module, resource, live)
-  REFERENCES kacho_iam.catalog_resource (module, resource, live)
+  REFERENCES kaname.catalog_resource (module, resource, live)
   ON DELETE NO ACTION ON UPDATE NO ACTION
   DEFERRABLE INITIALLY IMMEDIATE;
 
-ALTER TABLE kacho_iam.other_table
+ALTER TABLE kaname.other_table
   ADD CONSTRAINT other_fk
-  FOREIGN KEY (x) REFERENCES kacho_iam.parent (x)
+  FOREIGN KEY (x) REFERENCES kaname.parent (x)
   DEFERRABLE INITIALLY DEFERRED;
 `
 
@@ -202,7 +202,7 @@ func containsSub(xs []string, sub string) bool {
 
 // goodTierOnlySeed — синтетический ярусный посев, согласный со своим литералом.
 const goodTierOnlySeed = `
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, per_object) VALUES
+INSERT INTO kaname.catalog_verb (module, resource, verb, per_object) VALUES
   ('alpha', 'thing', 'create', false),
   ('beta', 'other', 'create', false);
 `
@@ -283,7 +283,7 @@ func TestTierOnly_Injection_LegitimateTwinIsSilent(t *testing.T) {
 }
 
 func TestTierOnly_Injection_EmptySeedIsNotSilence(t *testing.T) {
-	empty := "INSERT INTO kacho_iam.catalog_verb (module, resource, verb, per_object) VALUES\n-- посева нет\n"
+	empty := "INSERT INTO kaname.catalog_verb (module, resource, verb, per_object) VALUES\n-- посева нет\n"
 	_, _, err := auditTierOnlyVerbSeed(empty, wantTierOnly)
 	if err == nil {
 		t.Fatal("пустой обход обязан быть ОТКАЗОМ, а не «расхождений нет»: " +
@@ -305,15 +305,15 @@ func TestTierOnly_Injection_EmptySeedIsNotSilence(t *testing.T) {
 // значения, дискриминаторы (`live`, `per_object`) значением, а не умолчанием.
 
 const goodSeedDumpForm = `
-INSERT INTO kacho_iam.catalog_module (module, retired_at, retired_reason, live) VALUES ('alpha', NULL, NULL, true);
-INSERT INTO kacho_iam.catalog_module (module, retired_at, retired_reason, live) VALUES ('beta', NULL, NULL, true);
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('alpha', 'thing', 'alpha.thing', NULL, NULL, NULL, true, 'alpha_thing');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('beta', 'other', 'beta.other', NULL, NULL, NULL, true, 'beta_other');
-INSERT INTO kacho_iam.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('alpha', 'old', 'alpha.old', now(), 'снято; причина, содержащая запятую, точку с запятой и (скобки)', 'beta.other', false, 'alpha_old');
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('alpha', 'thing', 'get', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('beta', 'other', 'list', NULL, NULL, true, true);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('alpha', 'thing', 'create', NULL, NULL, true, false);
-INSERT INTO kacho_iam.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('beta', 'other', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_module (module, retired_at, retired_reason, live) VALUES ('alpha', NULL, NULL, true);
+INSERT INTO kaname.catalog_module (module, retired_at, retired_reason, live) VALUES ('beta', NULL, NULL, true);
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('alpha', 'thing', 'alpha.thing', NULL, NULL, NULL, true, 'alpha_thing');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('beta', 'other', 'beta.other', NULL, NULL, NULL, true, 'beta_other');
+INSERT INTO kaname.catalog_resource (module, resource, dotted, retired_at, retired_reason, superseded_by, live, object_type) VALUES ('alpha', 'old', 'alpha.old', now(), 'снято; причина, содержащая запятую, точку с запятой и (скобки)', 'beta.other', false, 'alpha_old');
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('alpha', 'thing', 'get', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('beta', 'other', 'list', NULL, NULL, true, true);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('alpha', 'thing', 'create', NULL, NULL, true, false);
+INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_reason, live, per_object) VALUES ('beta', 'other', 'create', NULL, NULL, true, false);
 `
 
 // TestIAMCT114_Injection_DumpForm_ControlIsSilent — КОНТРОЛЬ второй формы.
@@ -404,7 +404,7 @@ func TestIAMCT114_Injection_DumpForm_RetiredRowIsNotALiveKey(t *testing.T) {
 // несколько и объявил бы кортеж не сходящимся с перечнем колонок — то есть
 // находка была бы о разборе, а не о дереве.
 func TestIAMCT114_Injection_DumpForm_ProseWithSemicolonsIsOneRow(t *testing.T) {
-	rows, err := parseInsertRows(goodSeedDumpForm, "kacho_iam.catalog_resource")
+	rows, err := parseInsertRows(goodSeedDumpForm, "kaname.catalog_resource")
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestIAMCT114_Injection_ArityMismatchIsFound(t *testing.T) {
 // ближайшую скобку где угодно после имени).
 func TestIAMCT114_Injection_TableNameBoundaryIsRespected(t *testing.T) {
 	withNeighbour := goodSeedDumpForm +
-		"INSERT INTO kacho_iam.catalog_verb_history (module, resource, verb, live, per_object) " +
+		"INSERT INTO kaname.catalog_verb_history (module, resource, verb, live, per_object) " +
 		"VALUES ('gamma', 'third', 'get', true, true);\n"
 	c, findings, err := auditCatalogSeed(withNeighbour, wantMods, wantRes, wantVerbs)
 	if err != nil {
@@ -532,11 +532,11 @@ func TestTierOnly_Injection_DumpForm_PerObjectFlagIsTheSubject(t *testing.T) {
 // формы краснеет · запись, которой нечего исключать, краснеет сама.
 
 const keysWithLegacyCycle = `
-ALTER TABLE ONLY kacho_iam.accounts
-    ADD CONSTRAINT accounts_owner_fk FOREIGN KEY (owner_user_id) REFERENCES kacho_iam.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+ALTER TABLE ONLY kaname.accounts
+    ADD CONSTRAINT accounts_owner_fk FOREIGN KEY (owner_user_id) REFERENCES kaname.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
 
-ALTER TABLE ONLY kacho_iam.role_rule_ref
-    ADD CONSTRAINT role_rule_ref_res_fk FOREIGN KEY (module, resource, live) REFERENCES kacho_iam.catalog_resource(module, resource, live) DEFERRABLE;
+ALTER TABLE ONLY kaname.role_rule_ref
+    ADD CONSTRAINT role_rule_ref_res_fk FOREIGN KEY (module, resource, live) REFERENCES kaname.catalog_resource(module, resource, live) DEFERRABLE;
 `
 
 func TestIAMCT113_Injection_ExemptKeyIsSilent(t *testing.T) {

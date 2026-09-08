@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/tokenintrospecthttp"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/tokenintrospecthttp"
 )
 
 func askWithTLS(t *testing.T, h http.Handler, token string, state *tls.ConnectionState) int {

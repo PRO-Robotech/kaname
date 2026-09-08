@@ -39,9 +39,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest/roleexport"
-	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/catalogfixture"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest/roleexport"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // mustLoadManifest — манифест из текста пробы.

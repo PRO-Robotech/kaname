@@ -13,8 +13,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/shared"
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // Идентификатор, ПОСЕЯННЫЙ миграцией, обязан проходить проверку формы, которую
@@ -44,7 +46,7 @@ import (
 // # ЧТО ГЕЙТ НЕ СУДИТ
 //
 // Литерал, чей первый сегмент не назван ни одной строкой таблицы
-// (`cluster_kacho_root`, внешние субъекты входа, идентификаторы чужих доменов),
+// (`cluster_root`, внешние субъекты входа, идентификаторы чужих доменов),
 // — не идентификатор ресурса iam, и форма его этой таблицей не задана. Такие
 // значения считаются отдельной величиной переписи, а не находкой.
 //
@@ -259,8 +261,7 @@ const kac127BodyLen = 17
 
 // TestSeededResourceIDsPassTheServiceOwnFormCheck — несущее утверждение.
 func TestSeededResourceIDsPassTheServiceOwnFormCheck(t *testing.T) {
-	root := monorepoRoot(t)
-	paths, err := treecorpus.UnderWithSuffix(root+"/"+iamMigrationsDir, ".sql")
+	paths, err := treecorpus.UnderWithSuffix(platformtree.RequirePath(t, iamMigrationsDir), ".sql")
 	require.NoError(t, err)
 
 	migrations := map[string]string{}

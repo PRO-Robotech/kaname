@@ -36,6 +36,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/protoadapt"
+
+	"github.com/PRO-Robotech/kaname/internal/contractnaming"
 )
 
 const (
@@ -44,14 +46,19 @@ const (
 	// said no in order to recognise a refusal.
 	denyReason = "AUTHZ_DENIED"
 
-	// denyDomain — likewise identical to the edge's, for the same reason.
-	denyDomain = "kacho.cloud.iam.v1"
-
 	// grantRequiredViolation — the violation type naming the missing grant.
 	// Deliberately shaped like the step-up one ("authz.step_up") so a client
 	// reads both next-step signals through one lookup.
 	grantRequiredViolation = "authz.grant_required"
 )
+
+// denyDomain — the domain a client keys on, identical to the edge's for the same
+// reason as denyReason above.
+//
+// Берётся у ОБЪЯВЛЕННОГО источника имён, а не выписывается: разойдись он с
+// пакетом контракта — ключ клиента перестал бы совпадать молча (#2168).
+// Не константа лишь потому, что источник — ведомость, а не литерал.
+var denyDomain = contractnaming.OwnContractPackage()
 
 // DenyActionLookup — port: full method name (no leading slash) → what the
 // catalog says about that method.

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // role_owner_module_liveness_key_integration_test.go — живость МОДУЛЯ-владельца
-// у `kacho_iam.roles` держится КЛЮЧОМ, а не рассуждением (задача продукта
+// у `kaname.roles` держится КЛЮЧОМ, а не рассуждением (задача продукта
 // #2026).
 //
 // # Предмет
@@ -93,14 +93,14 @@ func seedModuleWithLiveRole(t *testing.T, db *sql.DB) {
 	t.Helper()
 
 	_, err := db.Exec(`
-		INSERT INTO kacho_iam.catalog_module (module, live) VALUES ($1, true)`,
+		INSERT INTO kaname.catalog_module (module, live) VALUES ($1, true)`,
 		livenessTestModule)
 	require.NoError(t, err, "свой модуль каталога")
 
 	_, err = db.Exec(`
-		INSERT INTO kacho_iam.roles
+		INSERT INTO kaname.roles
 		       (id, cluster_id, name, description, permissions, owner_module, created_at)
-		VALUES ($1, 'cluster_kacho_root', $2, 'проба #2026',
+		VALUES ($1, 'cluster_root', $2, 'проба #2026',
 		        '["t2probe.thing.*.get"]'::jsonb, $3, now())`,
 		livenessTestRole, livenessTestModule+".viewer", livenessTestModule)
 	require.NoError(t, err, "живая роль своего модуля")
@@ -109,7 +109,7 @@ func seedModuleWithLiveRole(t *testing.T, db *sql.DB) {
 	// роли отрицание ниже вакуумно.
 	var live int
 	require.NoError(t, db.QueryRow(`
-		SELECT count(*) FROM kacho_iam.roles WHERE owner_module = $1 AND live`,
+		SELECT count(*) FROM kaname.roles WHERE owner_module = $1 AND live`,
 		livenessTestModule).Scan(&live))
 	require.Equalf(t, 1, live,
 		"предпосылка: у модуля %s ровно одна живая роль", livenessTestModule)
@@ -118,7 +118,7 @@ func seedModuleWithLiveRole(t *testing.T, db *sql.DB) {
 // retireModuleRow — снятие модуля тем же оператором, каким его снимает продукт.
 func retireModuleRow(db *sql.DB, reason string) error {
 	_, err := db.Exec(`
-		UPDATE kacho_iam.catalog_module
+		UPDATE kaname.catalog_module
 		   SET live = false, retired_at = now(), retired_reason = $2
 		 WHERE module = $1`, livenessTestModule, reason)
 	return err
@@ -129,7 +129,7 @@ func retireModuleRow(db *sql.DB, reason string) error {
 func withdrawRole(t *testing.T, db *sql.DB) {
 	t.Helper()
 	res, err := db.Exec(`
-		UPDATE kacho_iam.roles
+		UPDATE kaname.roles
 		   SET live = false, retired_at = now(),
 		       retired_reason = 'проба #2026', retired_by = 'probe'
 		 WHERE id = $1 AND live`, livenessTestRole)
@@ -154,11 +154,11 @@ func TestIntegration_RoleOwnerModuleLivenessKeyHasItsForm(t *testing.T) {
 		err := db.QueryRow(`
 			SELECT data_type, generation_expression
 			  FROM information_schema.columns
-			 WHERE table_schema = 'kacho_iam'
+			 WHERE table_schema = 'kaname'
 			   AND table_name   = 'roles'
 			   AND column_name  = 'owner_module_live'`).Scan(&typ, &genExpr)
 		require.NoError(t, err,
-			"колонки kacho_iam.roles.owner_module_live нет: паре ключа не из чего "+
+			"колонки kaname.roles.owner_module_live нет: паре ключа не из чего "+
 				"собраться, и живость владельца схемой не названа")
 		require.Equal(t, "boolean", typ)
 		require.True(t, genExpr.Valid,
@@ -177,7 +177,7 @@ func TestIntegration_RoleOwnerModuleLivenessKeyHasItsForm(t *testing.T) {
 
 		var whenLive sql.NullBool
 		require.NoError(t, db.QueryRow(
-			`SELECT owner_module_live FROM kacho_iam.roles WHERE id = $1`,
+			`SELECT owner_module_live FROM kaname.roles WHERE id = $1`,
 			livenessTestRole).Scan(&whenLive))
 		require.True(t, whenLive.Valid && whenLive.Bool,
 			"у ЖИВОЙ роли составляющая обязана быть true — иначе ключ не проверяется "+
@@ -187,7 +187,7 @@ func TestIntegration_RoleOwnerModuleLivenessKeyHasItsForm(t *testing.T) {
 
 		var whenWithdrawn sql.NullBool
 		require.NoError(t, db.QueryRow(
-			`SELECT owner_module_live FROM kacho_iam.roles WHERE id = $1`,
+			`SELECT owner_module_live FROM kaname.roles WHERE id = $1`,
 			livenessTestRole).Scan(&whenWithdrawn))
 		require.False(t, whenWithdrawn.Valid,
 			"у СНЯТОЙ роли составляющая обязана быть NULL: только так строка "+
@@ -201,7 +201,7 @@ func TestIntegration_RoleOwnerModuleLivenessKeyHasItsForm(t *testing.T) {
 		err := db.QueryRow(`
 			SELECT pg_get_constraintdef(oid), convalidated, confmatchtype
 			  FROM pg_constraint
-			 WHERE conrelid = 'kacho_iam.roles'::regclass AND conname = $1`,
+			 WHERE conrelid = 'kaname.roles'::regclass AND conname = $1`,
 			ownerModuleLivenessFK).Scan(&condef, &validated, &matchType)
 		require.NoErrorf(t, err,
 			"ключа %s нет: живость модуля-владельца не держит ни один объект схемы",
@@ -238,7 +238,7 @@ func TestIntegration_RoleOwnerModuleLivenessKeyHasItsForm(t *testing.T) {
 		err := db.QueryRow(`
 			SELECT pg_get_constraintdef(oid)
 			  FROM pg_constraint
-			 WHERE conrelid = 'kacho_iam.roles'::regclass AND conname = $1`,
+			 WHERE conrelid = 'kaname.roles'::regclass AND conname = $1`,
 			ownerModulePlainFK).Scan(&condef)
 		require.NoErrorf(t, err,
 			"ключ %s снят: утверждение «владелец известен платформе» держалось им "+
@@ -273,7 +273,7 @@ func TestIntegration_RoleOwnerModuleLivenessKeyHoldsBothDirections(t *testing.T)
 
 		var live bool
 		require.NoError(t, db.QueryRow(
-			`SELECT live FROM kacho_iam.catalog_module WHERE module = $1`,
+			`SELECT live FROM kaname.catalog_module WHERE module = $1`,
 			livenessTestModule).Scan(&live))
 		require.True(t, live, "отвергнутое снятие оставляет строку модуля живой")
 	})
@@ -285,7 +285,7 @@ func TestIntegration_RoleOwnerModuleLivenessKeyHoldsBothDirections(t *testing.T)
 		require.NoError(t, retireModuleRow(db, "проба IAM-OM-2-02(в)"))
 
 		_, err := db.Exec(`
-			UPDATE kacho_iam.roles
+			UPDATE kaname.roles
 			   SET live = true, retired_at = NULL, retired_reason = NULL, retired_by = NULL
 			 WHERE id = $1`, livenessTestRole)
 		require.Error(t, err,
@@ -299,12 +299,12 @@ func TestIntegration_RoleOwnerModuleLivenessKeyHoldsBothDirections(t *testing.T)
 		// Законный близнец: сперва модуль, затем роль — проходит. Без него
 		// отрицание выше зеленело бы на схеме, где оживления не бывает вовсе.
 		_, err = db.Exec(`
-			UPDATE kacho_iam.catalog_module
+			UPDATE kaname.catalog_module
 			   SET live = true, retired_at = NULL, retired_reason = NULL
 			 WHERE module = $1`, livenessTestModule)
 		require.NoError(t, err, "оживление модуля")
 		_, err = db.Exec(`
-			UPDATE kacho_iam.roles
+			UPDATE kaname.roles
 			   SET live = true, retired_at = NULL, retired_reason = NULL, retired_by = NULL
 			 WHERE id = $1`, livenessTestRole)
 		require.NoError(t, err, "после оживления модуля роль оживает")
@@ -331,7 +331,7 @@ func TestIntegration_ModuleWithAllRolesWithdrawnIsRetired(t *testing.T) {
 
 	var moduleLive bool
 	require.NoError(t, db.QueryRow(
-		`SELECT live FROM kacho_iam.catalog_module WHERE module = $1`,
+		`SELECT live FROM kaname.catalog_module WHERE module = $1`,
 		livenessTestModule).Scan(&moduleLive))
 	require.False(t, moduleLive)
 
@@ -340,7 +340,7 @@ func TestIntegration_ModuleWithAllRolesWithdrawnIsRetired(t *testing.T) {
 	var roleRows, roleLive int
 	require.NoError(t, db.QueryRow(
 		`SELECT count(*), count(*) FILTER (WHERE live)
-		   FROM kacho_iam.roles WHERE owner_module = $1`,
+		   FROM kaname.roles WHERE owner_module = $1`,
 		livenessTestModule).Scan(&roleRows, &roleLive))
 	t.Logf("перепись: строк роли у снятого модуля %d, из них живых %d", roleRows, roleLive)
 	require.Equal(t, 1, roleRows, "снятие модуля роль НЕ удаляет — она помечена")
@@ -349,7 +349,7 @@ func TestIntegration_ModuleWithAllRolesWithdrawnIsRetired(t *testing.T) {
 	// Соседний модуль не задет: ключ судит СВОЙ модуль, а не каталог целиком.
 	var neighbours int
 	require.NoError(t, db.QueryRow(
-		`SELECT count(*) FROM kacho_iam.catalog_module WHERE live AND module <> $1`,
+		`SELECT count(*) FROM kaname.catalog_module WHERE live AND module <> $1`,
 		livenessTestModule).Scan(&neighbours))
 	require.Positive(t, neighbours, "снятие одного модуля не снимает остальные")
 }
@@ -371,22 +371,22 @@ func TestIntegration_PlatformRoleIsUntouchedByTheLivenessKey(t *testing.T) {
 	// судится — пара `(NULL, …)` под MATCH SIMPLE выполнена by construction.
 	var platform int
 	require.NoError(t, db.QueryRow(
-		`SELECT count(*) FROM kacho_iam.roles WHERE owner_module IS NULL`).Scan(&platform))
+		`SELECT count(*) FROM kaname.roles WHERE owner_module IS NULL`).Scan(&platform))
 	require.Positivef(t, platform,
 		"предпосылка: платформенные роли посеяны — иначе контроль вакуумен")
 	t.Logf("перепись: платформенных ролей %d", platform)
 
 	_, err := db.Exec(`
-		INSERT INTO kacho_iam.roles
+		INSERT INTO kaname.roles
 		       (id, cluster_id, name, description, permissions, created_at)
-		VALUES ('rol_2026_platform_probe', 'cluster_kacho_root', 'probe-platform',
+		VALUES ('rol_2026_platform_probe', 'cluster_root', 'probe-platform',
 		        'платформенная роль пробы', '["iam.role.*.get"]'::jsonb, now())`)
 	require.NoError(t, err,
 		"платформенная роль отвергнута: ключ шире своего предмета — он судит "+
 			"строку, у которой владельца-модуля нет вовсе")
 
 	_, err = db.Exec(`
-		UPDATE kacho_iam.roles
+		UPDATE kaname.roles
 		   SET live = false, retired_at = now(), retired_reason = 'проба IAM-OM-2-04'
 		 WHERE id = 'rol_2026_platform_probe'`)
 	require.NoError(t, err, "снятие платформенной роли ключом живости не судится")

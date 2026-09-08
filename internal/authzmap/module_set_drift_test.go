@@ -35,8 +35,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
 )
 
 // TestModuleSet_PinnedComposition — ПИН точного состава набора.

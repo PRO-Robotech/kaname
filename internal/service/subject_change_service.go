@@ -12,7 +12,7 @@ import (
 	"fmt"
 )
 
-// SubjectChange — a row of kacho_iam.subject_change_outbox, plain Go (no proto).
+// SubjectChange — a row of kaname.subject_change_outbox, plain Go (no proto).
 type SubjectChange struct {
 	ID        int64
 	SubjectID string

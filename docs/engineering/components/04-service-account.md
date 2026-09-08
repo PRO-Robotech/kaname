@@ -7,8 +7,8 @@
 client_credentials** (Ory Hydra) по выпущенным SA-ключам (private_key_jwt,
 см. [`05-sa-keys.md`](05-sa-keys.md)).
 
-Каждый SA backed Hydra OAuth client'ом (хранится в Hydra, не в kacho-iam).
-kacho-iam держит только запись с id, именем и account_id.
+Каждый SA backed Hydra OAuth client'ом (хранится в Hydra, не в kaname).
+kaname держит только запись с id, именем и account_id.
 
 **Use-cases:**
 - Сервисная учетка для CI/CD pipeline (терраформ применяет ресурсы как SA).
@@ -36,7 +36,7 @@ kacho-iam держит только запись с id, именем и account_
 | `created_at`  | `time.Time`               | да (server)  | да        | UTC.                                              |
 
 **ID prefix:** `sva`.
-**DB table:** `kacho_iam.service_accounts` (`CREATE TABLE kacho_iam.service_accounts` в `0001_initial.sql`).
+**DB table:** `kaname.service_accounts` (`CREATE TABLE kaname.service_accounts` в `0001_initial.sql`).
 
 **FK contract:**
 
@@ -53,7 +53,7 @@ sequenceDiagram
     autonumber
     participant Admin
     participant GW as api-gateway
-    participant IAM as kacho-iam :9090
+    participant IAM as kaname :9090
     participant DB as Postgres
     participant Hydra as Ory Hydra
     participant Out as fga_outbox
@@ -134,9 +134,9 @@ SA-ключи — отдельный service (см. [`05-sa-keys.md`](05-sa-keys
 
 | Env var                              | YAML key                              | Default | Описание                                |
 |--------------------------------------|---------------------------------------|---------|-----------------------------------------|
-| `KACHO_IAM_HYDRA_ADMIN_URL`          | `extapi.hydra.admin-url`              | —       | URL Hydra admin API.                    |
-| `KACHO_IAM_HYDRA_ADMIN_TOKEN`        | `extapi.hydra.admin-token`            | —       | Bearer token для Hydra admin.           |
-| `KACHO_IAM_HYDRA_ISSUER`             | `authn.hydra-issuer`                  | `https://hydra.<domain>` | Hydra issuer URL.    |
+| `KANAME_HYDRA_ADMIN_URL`          | `extapi.hydra.admin-url`              | —       | URL Hydra admin API.                    |
+| `KANAME_HYDRA_ADMIN_TOKEN`        | `extapi.hydra.admin-token`            | —       | Bearer token для Hydra admin.           |
+| `KANAME_HYDRA_ISSUER`             | `authn.hydra-issuer`                  | `https://hydra.<domain>` | Hydra issuer URL.    |
 
 ## Как пользоваться
 
@@ -170,7 +170,7 @@ curl -X POST http://localhost:18080/iam/v1/serviceAccounts/$SA_ID:enable \
 ```bash
 grpcurl -plaintext -H "Authorization: Bearer $TOKEN" \
   -d '{"account_id":"acc_xxx","name":"ci-pipeline"}' \
-  localhost:9090 kacho.cloud.iam.v1.ServiceAccountService/Create
+  localhost:9090 kaname.cloud.iam.v1.ServiceAccountService/Create
 ```
 
 ### Идемпотентность
@@ -198,18 +198,18 @@ kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
 # psql:
 make -C deploy psql SVC=iam
-# > SELECT id, account_id, name, enabled FROM kacho_iam.service_accounts;
+# > SELECT id, account_id, name, enabled FROM kaname.service_accounts;
 
 # Integration:
 go test -short -count=1 -timeout 120s -run TestServiceAccount \
-  ./services/iam/internal/repo/kacho/pg/...
+  ./services/iam/internal/repo/kaname/pg/...
 ```
 
 ## Подробности реализации
 
-- **Use-cases:** `internal/apps/kacho/api/service_account/{create,get,list,update,delete,set_enabled}.go`.
-- **Handler:** `internal/apps/kacho/api/service_account/handler.go`.
-- **Repo:** `internal/repo/kacho/pg/service_account_repo.go`.
+- **Use-cases:** `internal/apps/kaname/api/service_account/{create,get,list,update,delete,set_enabled}.go`.
+- **Handler:** `internal/apps/kaname/api/service_account/handler.go`.
+- **Repo:** `internal/repo/kaname/pg/service_account_repo.go`.
 - **Hydra integration:** SA сам по себе не делает запросы в Hydra — только
   IssueSAKey (см. [`05-sa-keys.md`](05-sa-keys.md)). Сам SA — просто запись в БД.
 - **DB:** `service_accounts(id, account_id, name, description, labels, enabled, created_at)`.
@@ -239,6 +239,6 @@ go test -short -count=1 -timeout 120s -run TestServiceAccount \
 ## Ссылки на код
 
 - `internal/domain/service_account.go`
-- `internal/apps/kacho/api/service_account/`
-- `internal/repo/kacho/pg/service_account_repo.go`
+- `internal/apps/kaname/api/service_account/`
+- `internal/repo/kaname/pg/service_account_repo.go`
 - `internal/migrations/0001_initial.sql` — DDL `service_accounts`

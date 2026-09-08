@@ -30,7 +30,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // writeTree — синтетическое дерево: путь относительно корня → содержимое.

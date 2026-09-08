@@ -111,7 +111,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // Отказы различаются не ради красоты: «документ не той формы», «ключ не строка»,
@@ -242,7 +242,7 @@ func (m *Manifest) RolesDeclared() bool { return m.rolesDeclared }
 // судья формы.
 //
 // Ошибиться тут легко и потому опасно: у разделов `resources` и `roles`
-// применитель ЕСТЬ (`apps/kacho/modulecatalog`, `apps/kacho/moduleroles`), и
+// применитель ЕСТЬ (`apps/kaname/modulecatalog`, `apps/kaname/moduleroles`), и
 // читатель вправе достроить его для третьего по аналогии.
 //
 // # Цена названа вслух, а не оставлена неожиданностью

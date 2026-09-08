@@ -65,9 +65,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
 	"github.com/PRO-Robotech/kacho/pkg/modulemanifest"
 	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // configMapMountTimestampDir — имя каталога полезной нагрузки, как его кладёт том

@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
 )
 
 // storageDottedToFGA — the dotted closed-table key (resource_mirror.object_type,

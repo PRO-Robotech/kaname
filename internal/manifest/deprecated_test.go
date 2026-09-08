@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 const deprecatedBase = "apiVersion: iam/v1\nmodule: vpc\ndeprecatedVerbs:\n  read:\n%s"

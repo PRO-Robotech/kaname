@@ -22,6 +22,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   она закрывает названную границу §R2 — приложимость к боевой базе — прогоном
   **всех 157 миграций** дерева на 48 живых ролях вместо фикстуры из трёх, и
   заводит один заказ реализации к §8 п. 2)
+- **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Правок 3, строк 13: `5504f44a7f` каталоги службы
+  (11) · `b81adf2760` имя службы (1) · `93ef852fe9` идентификатор лицензии (1).
+  Дельта целиком — подстановка токена (`kacho→kaname` · `kacho-iam→kaname` ·
+  `BUSL-1.1→AGPL-3.0-or-later`); непарных строк 0, пар с изменившимся числом
+  токенов 0; ни один сценарий, производитель, признак готовности и клауза не
+  тронуты. Одобрение относится к **содержимому**, а не к имени файла: APPROVED
+  выше есть вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю
+  редакцию ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение,
+  замер и цена обоих отвергнутых исходов —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 - **Префикс сценариев:** `IAM-OM-1`
 - **Ревизия измерения (продукт) — их ЧЕТЫРЕ, и каждая названа своей:**
   `d662a9b60` (автор, круг 1 — рабочая копия `/tmp/claude-1000/wt-n1`, ветка
@@ -52,7 +63,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   поля публичного контракта**: `Role`, `Rule`, `RoleService` не трогаются ни
   одной строкой; `owner_module` — колонка хранения и поле домена, наружу не
   проецируется
-- **Сервис:** `kacho-iam` — предмет целиком внутри него, поэтому документ живёт
+- **Сервис:** `kaname` — предмет целиком внутри него, поэтому документ живёт
   рядом с кодом. `proto/` не затрагивает, `gateway/` не затрагивает
 - **Миграции:** ТРЕБУЕТ — ровно одну, новую, по форме метки времени
   (`YYYYMMDDHHMMSS_<имя>.sql`, `services/iam/internal/migrations/README.md`).
@@ -220,7 +231,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > |---|---|---|
 > | выражение живости у соседей | `grep -n 'GENERATED ALWAYS AS' services/iam/internal/migrations/*.sql` | колонок живости **2** (`20260902065414:103`, `20260902174501:146`), обе — `CASE WHEN live THEN true END`; формы §2.1 в дереве **ноль** |
 > | сосед сам предупреждает об этой ошибке | `COMMENT ON COLUMN … catalog_resource.module_live` | дословно: «**Константа `true` сделала бы модуль неснимаемым** — снятые строки каталога не удаляются» |
-> | отпускает ли роль референт | `grep -n 'DELETE FROM roles' services/iam/internal/repo/kacho/pg/role_repo.go` | `DELETE … AND is_system = false` — одна строка, `role_repo.go:580` |
+> | отпускает ли роль референт | `grep -n 'DELETE FROM roles' services/iam/internal/repo/kaname/pg/role_repo.go` | `DELETE … AND is_system = false` — одна строка, `role_repo.go:580` |
 > | объявляет ли применитель роль системной | `sed -n '219,227p' …/moduleroles/apply.go` | `IsSystem: true` безусловно |
 > | пишет ли сверщик | `grep -n 'func Reconcile' …/moduleroles/reconcile.go` | `Reconcile(...) ([]Discrepancy, ReconcileCensus)` — **считает** |
 >
@@ -321,7 +332,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 >
 > | # | утверждение | где стояло | замер |
 > |---|---|---|---|
-> | 1 | «`nameform.IsConstraint` … по пяти чужим схемам, **iam среди них нет**» | §2.4, круг 1 (моё) | **ложно**: iam — один из пяти вызывающих, `services/iam/internal/repo/kacho/pg/pgmaperr.go:138`. Предикат: `git grep -n 'CheckLaneOf' -- 'services/**/*.go' ':!*_test.go'` → **5**, iam в их числе |
+> | 1 | «`nameform.IsConstraint` … по пяти чужим схемам, **iam среди них нет**» | §2.4, круг 1 (моё) | **ложно**: iam — один из пяти вызывающих, `services/iam/internal/repo/kaname/pg/pgmaperr.go:138`. Предикат: `git grep -n 'CheckLaneOf' -- 'services/**/*.go' ':!*_test.go'` → **5**, iam в их числе |
 > | 2 | «полоса «дефект сервиса» **не производится ни для одного** ограничения схемы `kacho_iam`» | §7 п. 2, круг 1 (моё); повторено в Н4 и в разборе круга 1 | **ложно**: производится для **6** — `accounts`, `clusters`, `groups`, `organizations`, `projects`, `service_accounts` (их `<таблица>_name_check` совпадает с конструкцией дословно). Не производится для **5**: `organizations_display_name_check`, `roles_custom_name_check`, `roles_system_name_check`, `scim_groups_display_name_check`, `users_display_name_check` |
 > | 3 | то же утверждение стоит **заголовком задачи `#1903`** | `gh issue view 1903` | посылка задачи опровергнута замером выше; предмет её при этом **жив** — 5 ограничений против объявленного «ни одного». Отчёт ушёл в задачу, заголовок правит её ведущий |
 >
@@ -589,15 +600,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | Е1 | `is_system` вычисляется РОВНО из непустого `cluster_id` | `grep -n 'GENERATED ALWAYS AS (cluster_id' services/iam/internal/migrations/0056_role_definition_tier.sql` | одно попадание, `STORED` |
 | Е2 | послабление подстановки ключуется на `IsSystem` | `git grep -n 'Rules\.Validate(' -- 'services/iam/**/*.go' \| grep -v _test` | **3** вызывающих: `api/role/create.go:131`, `api/role/update.go:178`, `domain/role.go:72` |
 | Е3 | подстановка модуля и ресурса разрешена ровно системным контекстом | `sed -n '215,220p;249,252p' services/iam/internal/domain/rule.go` | `validateModule` и `validateRuleList` — по одной ветке `if !systemCtx` |
-| Е4 | каталожный гейт короткозамыкает на системном контексте ПЕРВОЙ строкой | `sed -n '89,92p' services/iam/internal/apps/kacho/api/role/rules_catalog.go` | `if systemCtx { return nil }` |
-| Е5 | применитель ролей модуля объявляет роль системной **всегда** | `grep -n 'IsSystem:\|ClusterID:' services/iam/internal/apps/kacho/moduleroles/apply.go` | `ClusterID: domain.ClusterSingletonID`, `IsSystem: true` — безусловно, строки 219–227 |
-| Е6 | и тем самым получает послабление | `sed -n '228p' services/iam/internal/apps/kacho/moduleroles/apply.go` + `sed -n '72p' services/iam/internal/domain/role.go` | `r.Validate()` → `r.Rules.Validate(r.IsSystem)` = `Validate(true)` |
+| Е4 | каталожный гейт короткозамыкает на системном контексте ПЕРВОЙ строкой | `sed -n '89,92p' services/iam/internal/apps/kaname/api/role/rules_catalog.go` | `if systemCtx { return nil }` |
+| Е5 | применитель ролей модуля объявляет роль системной **всегда** | `grep -n 'IsSystem:\|ClusterID:' services/iam/internal/apps/kaname/moduleroles/apply.go` | `ClusterID: domain.ClusterSingletonID`, `IsSystem: true` — безусловно, строки 219–227 |
+| Е6 | и тем самым получает послабление | `sed -n '228p' services/iam/internal/apps/kaname/moduleroles/apply.go` + `sed -n '72p' services/iam/internal/domain/role.go` | `r.Validate()` → `r.Rules.Validate(r.IsSystem)` = `Validate(true)` |
 | Е7 | загрузчик манифеста судит те же правила СТРОГОЙ политикой | `grep -n 'DomainRule().Validate' services/iam/internal/manifest/roles.go` | `Validate(false)` — одно попадание, `manifest/roles.go:328` на вершине линии (на закреплённой `d662a9b60` — строка 266; правка круга 2, В5) |
 | Е8 | проверка формы правил в базе судит ТОЛЬКО форму | `sed -n '84,120p' services/iam/internal/migrations/0033_rule_module_scalar.sql` | `iam_rules_valid` не читает ни одной колонки строки, кроме `rules` |
 | Е9 | каталог модулей с ключом живости в дереве есть | `grep -n 'catalog_module_live_uk' services/iam/internal/migrations/*.sql` | `UNIQUE (module, live)` — референт для ключа существует |
 | Е10 | форма ключа «ссылка на ЖИВУЮ строку каталога» уже применена соседом | `grep -n 'catalog_resource_module_live_fk' -A3 services/iam/internal/migrations/20260902065414_module_withdrawal_needs_a_liveness_key.sql` | `FOREIGN KEY (module, module_live) REFERENCES catalog_module (module, live) MATCH SIMPLE` |
-| Е11 | нарушение проверки таблицы разбирается на ДВЕ полосы | `grep -n 'CheckLaneOf' services/iam/internal/repo/kacho/pg/pgmaperr.go` | полоса дефекта сервиса → фиксированный `INTERNAL` + запись в журнал; полоса ввода → `checkText` |
-| Е12 | текст отказа проверки берётся из таблицы по ИМЕНИ ограничения | `sed -n '427,457p' services/iam/internal/repo/kacho/pg/pgmaperr.go` | незнакомое имя → общий текст «Illegal argument: value violates a constraint» |
+| Е11 | нарушение проверки таблицы разбирается на ДВЕ полосы | `grep -n 'CheckLaneOf' services/iam/internal/repo/kaname/pg/pgmaperr.go` | полоса дефекта сервиса → фиксированный `INTERNAL` + запись в журнал; полоса ввода → `checkText` |
+| Е12 | текст отказа проверки берётся из таблицы по ИМЕНИ ограничения | `sed -n '427,457p' services/iam/internal/repo/kaname/pg/pgmaperr.go` | незнакомое имя → общий текст «Illegal argument: value violates a constraint» |
 | Е13 | имя роли манифеста уже обязано быть `<модуль>.<имя>` СВОЕГО модуля | `grep -n 'ErrRoleForeignModule' services/iam/internal/manifest/roles.go` | отказ у `validateRoleIdentity` |
 | Е14 | единственность системного имени держит ключ по паре | `grep -n 'roles_system_unique' services/iam/internal/migrations/0056_role_definition_tier.sql` | `UNIQUE (cluster_id, name) WHERE is_system` |
 | Е15 | ограничений на `roles` сегодня **одиннадцать**, и ни одно не знает владельца | живое ограничение ≠ объявление в истории, поэтому единиц ДВЕ и обе названы: объявлений `ADD CONSTRAINT roles_*` за всю историю (`grep -ohE 'ADD CONSTRAINT roles_[a-z_]+' services/iam/internal/migrations/*.sql \| sort -u \| wc -l`) — **12**; живых на таблице — трассировка `ADD`/`DROP` **только по секциям `Up`** плюс инлайновые из `CREATE TABLE` | **11**: двенадцать минус `roles_scope_xor` (снято `0056:36`) и `roles_organization_fk` (ушло с колонкой, `0008:44`), плюс `roles_description_check` (инлайн `0001:643`, под `ADD CONSTRAINT` не подпадает). Владельца не знает ни одно — это и есть несущая половина, и она верна при обоих счётах |
@@ -612,9 +623,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 |---|---|---|---|
 | Н1 | колонки владельца роли — ни одной, во всём дереве | `git grep -ln owner_module \| wc -l` → **0** | **заказывается** — §2.1, сценарии `IAM-OM-1-06…12` |
 | Н2 | инварианта «подстановка роли модуля не выходит за её модуль» — ни в базе, ни в домене, ни в применителе | `git grep -n 'owner\|Owner' -- services/iam/internal/domain/rule.go` → пусто | **заказывается** — §2.2, сценарии `IAM-OM-1-01…05` |
-| Н3 | сверки модуля ПРАВИЛА с модулем манифеста — ни одной строки | `grep -n '\.Module' services/iam/internal/apps/kacho/moduleroles/apply.go` → четыре попадания, все в текст отказа и перепись; `roleOf(m.Module, mr)` параметр `module` в предикате не участвует | **НЕ заказывается целиком** — §2.5 и §7: закрывается только полоса подстановки, полоса чужого модуля без подстановки остаётся предметом `#1032`-преемника |
-| Н4 | ИМЕНОВАННОГО текста для нового ограничения — записи в таблице `checkText` нет | `sed -n '433,455p' services/iam/internal/repo/kacho/pg/pgmaperr.go` — имени нового ограничения среди записей нет | **НЕ заказывается здесь** (было «заказывается» — правка круга 1, Б3). Производитель «Тогда» у `-13` есть: незнакомое имя даёт общий текст без утечки текста СУБД (Е12). Перевод новых ограничений в полосу дефекта сервиса — предмет `#1903`, названный блокером у сценария |
-| Н5а | пути СНЯТИЯ роли модуля — ни через API, ни через применителя, ни через сверщика | `grep -n 'DELETE FROM roles' services/iam/internal/repo/kacho/pg/role_repo.go` → одна строка, `AND is_system = false`; `grep -n 'func Reconcile' …/moduleroles/reconcile.go` → `([]Discrepancy, ReconcileCensus)`; Е18 | **не заказывается здесь** — предмет `#1913`. Определяет форму ключа §2.1 и исход `-11`, `-12` |
+| Н3 | сверки модуля ПРАВИЛА с модулем манифеста — ни одной строки | `grep -n '\.Module' services/iam/internal/apps/kaname/moduleroles/apply.go` → четыре попадания, все в текст отказа и перепись; `roleOf(m.Module, mr)` параметр `module` в предикате не участвует | **НЕ заказывается целиком** — §2.5 и §7: закрывается только полоса подстановки, полоса чужого модуля без подстановки остаётся предметом `#1032`-преемника |
+| Н4 | ИМЕНОВАННОГО текста для нового ограничения — записи в таблице `checkText` нет | `sed -n '433,455p' services/iam/internal/repo/kaname/pg/pgmaperr.go` — имени нового ограничения среди записей нет | **НЕ заказывается здесь** (было «заказывается» — правка круга 1, Б3). Производитель «Тогда» у `-13` есть: незнакомое имя даёт общий текст без утечки текста СУБД (Е12). Перевод новых ограничений в полосу дефекта сервиса — предмет `#1903`, названный блокером у сценария |
+| Н5а | пути СНЯТИЯ роли модуля — ни через API, ни через применителя, ни через сверщика | `grep -n 'DELETE FROM roles' services/iam/internal/repo/kaname/pg/role_repo.go` → одна строка, `AND is_system = false`; `grep -n 'func Reconcile' …/moduleroles/reconcile.go` → `([]Discrepancy, ReconcileCensus)`; Е18 | **не заказывается здесь** — предмет `#1913`. Определяет форму ключа §2.1 и исход `-11`, `-12` |
 | Н5 | прод-вызывающего у применителя — ни одного | `git grep -ln moduleroles -- 'services/**/*.go' \| grep -v _test` → **5** файлов, все внутри самого применителя, его писателя и его полосы отказа; композиционного корня среди них нет | **не заказывается здесь** — предмет `#1875` (манифест не доезжает до службы). Влияет на §0.3 П3 |
 
 ### 0.3. Замер посылок задачи — в обе стороны
@@ -941,7 +952,7 @@ ALTER TABLE kacho_iam.roles VALIDATE CONSTRAINT roles_owner_module_name_prefix;
 
 **Полосу они получают всё же ВВОДА, и это одна версия, а не две** (было Б3
 круга 1). Разбор `CheckLaneOf` (Е11) в iam провязан
-(`repo/kacho/pg/pgmaperr.go:138`) и отдаёт полосу дефекта сервиса ровно при
+(`repo/kaname/pg/pgmaperr.go:138`) и отдаёт полосу дефекта сервиса ровно при
 `constraint == table + "_name_check"` (`nameform.go:62,92`). Ни
 `roles_rule_wildcards_confined`, ни `roles_owner_module_name_prefix` этой форме
 не отвечают, поэтому обе отвечают `INVALID_ARGUMENT` с общим текстом

@@ -1,6 +1,6 @@
 # Security posture — listeners, AuthN/AuthZ, PDP exposure
 
-Документ фиксирует модель безопасности kacho-iam: какие слушатели существуют, как
+Документ фиксирует модель безопасности kaname: какие слушатели существуют, как
 аутентифицируется и авторизуется каждый запрос, и почему публичный PDP
 (`AuthorizeService`) защищается транспортом и строгим режимом, а не «непубличностью».
 
@@ -100,7 +100,7 @@ PDP, может **перечислять** authz-отношения о чужи�
 
 - **`AuthorizeService.authorizeAnonymousPeer` fail-open в `mode=dev`.** Внутренний
   gate PDP отдаёт allow анонимному/system-принципалу только когда `prodMode==false`
-  (`internal/apps/kacho/api/authorize/caller_authority.go`). Это **тот же** dev-mode
+  (`internal/apps/kaname/api/authorize/caller_authority.go`). Это **тот же** dev-mode
   компромисс, что и общий anonymous-allow: в dev нет mTLS, поэтому public- и
   internal-слушатели неразличимы, и легитимный внутримодульный PDP-вызов в dev тоже
   анонимен — потребовать deny означало бы сломать dev-режим (и inter-module

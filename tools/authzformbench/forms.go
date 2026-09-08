@@ -3,7 +3,11 @@
 
 package authzformbench
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
+)
 
 // Form — форма хранения права, которую прибор измеряет.
 //
@@ -37,7 +41,10 @@ const BenchType = "vpc_network"
 // Fixture ids. Fixed strings, not random: the comparison is between shapes, and a
 // difference in ids would be a difference in the data (requirement 3).
 const (
-	clusterObj = "cluster:cluster_kacho_root"
+	// Якорь кластера берётся из ОБЪЯВЛЕНИЯ продукта, а не повторяется строкой:
+	// фикстура моделирует настоящий мир, и переход написания обязан доехать и
+	// до неё. Соседние идентификаторы синтетические и остаются как есть.
+	clusterObj = "cluster:" + domain.ClusterSingletonID
 	accountObj = "account:acc-bench"
 	projectObj = "project:prj-bench"
 	labelObj   = "label_set:lbl-bench"

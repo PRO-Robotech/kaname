@@ -6,7 +6,7 @@
 // # ЗАЧЕМ ЭТОТ ГЕЙТ ЗАВЕДЁН
 //
 // Регистрация ресурса стала спрашивать каталог: тип объекта обязан иметь ЖИВУЮ
-// строку `kacho_iam.catalog_resource`, иначе запись отвергается. Сверка живёт в
+// строку `kaname.catalog_resource`, иначе запись отвергается. Сверка живёт в
 // базе владельца прав — потребителям она недоступна by construction, — а решение
 // «принимать ли кортеж вообще» они читают из общего правила
 // `pkg/authz/proxytuple`. Значит у одного предмета появились ДВЕ стороны, и
@@ -35,8 +35,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/pkg/authz/proxytuple"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
 )
 
 // TestProxyAdmittedObjectTypesAreInTheCatalog — тип, допущенный правилом приёма,

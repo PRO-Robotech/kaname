@@ -16,7 +16,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // CRED-CAP-25 — оба вида объявлены, и каждый считается в СВОЁМ принципале.
@@ -74,7 +74,7 @@ func TestCredentialCeiling_CredentialIsADeclaredSubordinateResource(t *testing.T
 		"родители подчинённого ресурса названы неверно: удостоверения одного принципала "+
 			"считались бы в другом")
 	require.ElementsMatch(t,
-		[]string{"kacho_iam.user_oauth_clients", "kacho_iam.service_account_oauth_clients"},
+		[]string{"kaname.user_oauth_clients", "kaname.service_account_oauth_clients"},
 		rec.Tables,
 		"таблицы строк не названы: имя вида осталось бы самозаявлением, и опечатка в нём "+
 			"дожила бы до первой выдачи")

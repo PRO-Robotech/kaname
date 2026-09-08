@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
-	"github.com/PRO-Robotech/kacho-iam/internal/tokensigner"
+	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
+	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
 // provider_hop_has_no_subject_test.go — контур докер-токена, переведённый на СВОЮ

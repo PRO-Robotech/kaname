@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // manifestOfSize — годный манифест, дополненный комментарием до РОВНО size байт.
@@ -103,10 +105,6 @@ func TestCheckTreeReadsAManifestExactlyAtTheLimit(t *testing.T) {
 	t.Logf("перепись: %s (предел %d байт)", report.Summary(), manifestSizeLimit)
 }
 
-// treeRootFromPackage — корень дерева относительно каталога пакета. Пробы Go
-// исполняются из каталога своего пакета, поэтому путь относительный.
-const treeRootFromPackage = "../../../.."
-
 // manifestHeadroomDivisor — во сколько раз предел обязан превосходить САМЫЙ
 // БОЛЬШОЙ манифест дерева.
 //
@@ -142,7 +140,7 @@ const manifestHeadroomDivisor = 4
 // Иначе «запас достаточен» стало бы неотличимо от «манифестов не нашлось»:
 // у пустого множества максимума нет, и утверждение о нём тривиально истинно.
 func TestManifestSizeLimitOutgrowsTheBiggestManifestOfThisTree(t *testing.T) {
-	rep := CheckTree(treeRootFromPackage)
+	rep := CheckTree(platformtree.Require(t))
 	if len(rep.Findings) > 0 {
 		t.Fatalf("дерево не прочитано целиком, вердикта о размере нет ни по одному "+
 			"манифесту: %v", rep.Findings)
@@ -181,7 +179,7 @@ func TestManifestSizeLimitOutgrowsTheBiggestManifestOfThisTree(t *testing.T) {
 // относительно корня обхода, поэтому корень возвращается к нему здесь.
 func treeFileSize(t *testing.T, rel string) (int, error) {
 	t.Helper()
-	fi, err := os.Stat(filepath.Join(treeRootFromPackage, rel))
+	fi, err := os.Stat(filepath.Join(platformtree.Require(t), rel))
 	if err != nil {
 		return 0, err
 	}

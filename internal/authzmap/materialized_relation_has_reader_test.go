@@ -74,8 +74,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // typeOwner — сервис, которому принадлежит FGA-тип. Нужен, чтобы искать читателя
@@ -120,7 +122,7 @@ func ownerOfType(fgaType string) string {
 // зелёным). Каждый обязан существовать — исчез файл, значит предикат смотрит не туда.
 var emissionSideFiles = []string{
 	filepath.Join("services", "iam", "internal", "authzmap", "fga_types.go"),
-	filepath.Join("services", "iam", "internal", "apps", "kacho", "api", "access_binding", "reconcile", "tuples.go"),
+	filepath.Join("services", "iam", "internal", "apps", "kaname", "api", "access_binding", "reconcile", "tuples.go"),
 }
 
 // knownUnread — пары (тип, отношение), которые материализация пишет, а НИКТО не
@@ -295,7 +297,7 @@ func catalogRequiredRelations(t *testing.T, root string) map[string]map[string]b
 			ObjectType string `json:"object_type"`
 		} `json:"scope_extractor"`
 	}
-	raw, err := os.ReadFile(filepath.Join(root, "gateway", "internal", "middleware", "embed", "permission_catalog.json"))
+	raw, err := os.ReadFile(platformtree.RequirePath(t, "gateway/internal/middleware/embed/permission_catalog.json"))
 	require.NoError(t, err, "каталог прав недоступен — гейт обязан быть громким, а не пропущенным")
 	require.NoError(t, json.Unmarshal(raw, &entries))
 	out := map[string]map[string]bool{}
@@ -314,7 +316,7 @@ func catalogRequiredRelations(t *testing.T, root string) map[string]map[string]b
 func countCatalogEntries(t *testing.T, root string) int {
 	t.Helper()
 	var entries []json.RawMessage
-	raw, err := os.ReadFile(filepath.Join(root, "gateway", "internal", "middleware", "embed", "permission_catalog.json"))
+	raw, err := os.ReadFile(platformtree.RequirePath(t, "gateway/internal/middleware/embed/permission_catalog.json"))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &entries))
 	return len(entries)
@@ -324,7 +326,7 @@ func countCatalogEntries(t *testing.T, root string) int {
 // отношения того же типа. Такое отношение читается косвенно через вывод модели.
 func modelInternalRelationRefs(t *testing.T, root string) map[string]map[string]bool {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(root, "proto", "kacho", "cloud", "iam", "v1", "fga_model.fga"))
+	raw, err := os.ReadFile(platformtree.RequirePath(t, "proto/kaname/cloud/iam/v1/fga_model.fga"))
 	require.NoError(t, err, "канонической модели нет — предпосылка гейта сломана")
 	reType := regexp.MustCompile(`^type\s+(\S+)`)
 	reDefine := regexp.MustCompile(`^define\s+(\w+)\s*:\s*(.*)$`)
@@ -373,13 +375,13 @@ func ownerServiceRelationLiterals(t *testing.T, root string) (map[string]map[str
 	t.Helper()
 	skip := map[string]bool{}
 	for _, f := range emissionSideFiles {
-		abs := filepath.Join(root, f)
+		abs := platformtree.RequirePath(t, f)
 		_, err := os.Stat(abs)
 		require.NoErrorf(t, err, "файл эмиссии %q не найден: предикат исключает несуществующее, "+
 			"то есть перестал исключать писателя — а тогда писатель зачтётся за читателя", f)
 		skip[abs] = true
 	}
-	servicesDir := filepath.Join(root, "services")
+	servicesDir := platformtree.RequirePath(t, "services")
 	files, err := treecorpus.UnderWithSuffix(servicesDir, ".go")
 	require.NoError(t, err, "индекс отслеживаемых файлов под services/")
 

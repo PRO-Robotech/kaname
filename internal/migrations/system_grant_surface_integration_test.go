@@ -53,8 +53,8 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // membershipRelation — отношение состава группы. Одно из двух, что перепись
@@ -136,12 +136,12 @@ func censusOfEffectiveAccess(t *testing.T, db queryer) grantSurfaceCensus {
 	// Оба вычета названы классом, а не перечнем строк, и оба считаются отдельно.
 	const subjectWhere = `f.relation <> $1 AND f.object_type IN ` + hierarchyAnchors
 
-	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kacho_iam.relation_fact`).Scan(&c.Bases))
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.relation_fact`).Scan(&c.Bases))
 	require.NoError(t, db.QueryRow(
-		`SELECT count(*) FROM kacho_iam.relation_fact WHERE relation = $1`, membershipRelation).
+		`SELECT count(*) FROM kaname.relation_fact WHERE relation = $1`, membershipRelation).
 		Scan(&c.Membership))
 	require.NoError(t, db.QueryRow(
-		`SELECT count(*) FROM kacho_iam.relation_fact f WHERE `+subjectWhere, membershipRelation).
+		`SELECT count(*) FROM kaname.relation_fact f WHERE `+subjectWhere, membershipRelation).
 		Scan(&c.Subject))
 	// Третий класс считается АРИФМЕТИКОЙ, а не отрицательным отбором. Список
 	// «всё, кроме перечисленного» стареет молча: он растёт от работы, к переписи
@@ -150,14 +150,14 @@ func censusOfEffectiveAccess(t *testing.T, db queryer) grantSurfaceCensus {
 	// величин и целого, поэтому слепой зоны нет by construction.
 	c.OffHierarchy = c.Bases - c.Membership - c.Subject
 	require.NoError(t, db.QueryRow(
-		`SELECT count(*) FROM kacho_iam.access_bindings WHERE is_system`).Scan(&c.SystemGrants))
+		`SELECT count(*) FROM kaname.access_bindings WHERE is_system`).Scan(&c.SystemGrants))
 	require.NoError(t, db.QueryRow(
-		`SELECT count(*) FROM kacho_iam.access_bindings WHERE NOT is_system`).Scan(&c.OrdinaryGrants))
+		`SELECT count(*) FROM kaname.access_bindings WHERE NOT is_system`).Scan(&c.OrdinaryGrants))
 	require.NoError(t, db.QueryRow(
-		`SELECT count(*) FROM kacho_iam.cluster_admin_grants`).Scan(&c.ClusterAdmins))
+		`SELECT count(*) FROM kaname.cluster_admin_grants`).Scan(&c.ClusterAdmins))
 
 	matchSQL := `
-		SELECT 1 FROM kacho_iam.access_bindings b
+		SELECT 1 FROM kaname.access_bindings b
 		 WHERE b.is_system
 		   AND b.status = 'ACTIVE'
 		   AND b.revoked_at IS NULL
@@ -167,12 +167,12 @@ func censusOfEffectiveAccess(t *testing.T, db queryer) grantSurfaceCensus {
 		   AND ` + subjectRefSQL + ` = f.subject`
 
 	require.NoError(t, db.QueryRow(`
-		SELECT count(*) FROM kacho_iam.relation_fact f
+		SELECT count(*) FROM kaname.relation_fact f
 		 WHERE `+subjectWhere+` AND EXISTS (`+matchSQL+`)`, membershipRelation).Scan(&c.Matched))
 
 	rows, err := db.Query(`
 		SELECT f.object_type, f.object_id, f.relation, f.subject
-		  FROM kacho_iam.relation_fact f
+		  FROM kaname.relation_fact f
 		 WHERE `+subjectWhere+`
 		   AND NOT EXISTS (`+matchSQL+`)
 		 ORDER BY 1, 2, 3, 4`, membershipRelation)
@@ -265,7 +265,7 @@ func TestIntegration_R893_TheCensusCanFail(t *testing.T) {
 	var id, subject, relation, objType, objID string
 	require.NoError(t, db.QueryRow(`
 		SELECT b.id, `+subjectRefSQL+`, b.granted_relation, b.resource_type, b.resource_id
-		  FROM kacho_iam.access_bindings b
+		  FROM kaname.access_bindings b
 		 WHERE b.is_system AND b.status = 'ACTIVE'
 		 ORDER BY b.id
 		 LIMIT 1`).Scan(&id, &subject, &relation, &objType, &objID),
@@ -279,11 +279,11 @@ func TestIntegration_R893_TheCensusCanFail(t *testing.T) {
 	}{
 		{
 			name: "выдачи нет вовсе",
-			stmt: `DELETE FROM kacho_iam.access_bindings WHERE id = $1`,
+			stmt: `DELETE FROM kaname.access_bindings WHERE id = $1`,
 		},
 		{
 			name: "выдача отозвана",
-			stmt: `UPDATE kacho_iam.access_bindings
+			stmt: `UPDATE kaname.access_bindings
 				   SET status = 'REVOKED', revoked_at = now()
 				 WHERE id = $1`,
 		},

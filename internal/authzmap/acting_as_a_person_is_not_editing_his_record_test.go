@@ -66,13 +66,14 @@ package authzmap_test
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // actingAsRPCs — публичные RPC, чей предмет есть ДЕЙСТВИЕ ОТ ИМЕНИ человека:
@@ -84,8 +85,8 @@ import (
 // Перечень мал и закрыт; каждая запись обязана находиться в каталоге (иначе
 // перечень пережил свой предмет — см. предпосылку в теле пробы).
 var actingAsRPCs = []string{
-	"kacho.cloud.iam.v1.UserTokenService/Issue",
-	"kacho.cloud.iam.v1.UserTokenService/Revoke",
+	"kaname.cloud.iam.v1.UserTokenService/Issue",
+	"kaname.cloud.iam.v1.UserTokenService/Revoke",
 }
 
 // recordReadRPC — чтение ЗАПИСИ человека. Положительный контроль: именно у него
@@ -93,7 +94,7 @@ var actingAsRPCs = []string{
 //
 // Правка записи контролем больше не служит: с #1102 она гейтится отношением, у
 // которого этих источников нет — по тому же основанию, что закрывает и эта проба.
-const recordReadRPC = "kacho.cloud.iam.v1.UserService/Get"
+const recordReadRPC = "kaname.cloud.iam.v1.UserService/Get"
 
 // accountLevelSources — источники разрешения, которых у отношения «действовать от
 // имени» быть не должно.
@@ -244,7 +245,7 @@ type catalogGate struct {
 
 func catalogByFQN(t *testing.T) map[string]catalogGate {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(monorepoRoot(t), catalogRelPath))
+	data, err := os.ReadFile(platformtree.RequirePath(t, catalogRelPath))
 	require.NoErrorf(t, err, "каталог прав %s не прочитан", catalogRelPath)
 
 	var entries []struct {

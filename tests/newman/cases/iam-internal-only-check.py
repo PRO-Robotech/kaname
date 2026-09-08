@@ -28,6 +28,8 @@ Coverage:
                                          external + пин к absent-path контролю. НЕ доказывает
                                          route-изоляцию (см. «TWO FAMILIES» ниже) и прямо это заявляет
   IAM-INT-OK-INT-USER-UPSERT           — UpsertFromIdentity → 200 на internal (positive control)
+  IAM-INT-OK-INT-USER-UPSERT-IDEM      — повторный вызов с тем же externalId возвращает ТОТ ЖЕ
+                                         user id (семантика UPSERT), тоже на internal
   IAM-INT-OK-INT-IAM-LOOKUPSUBJECT     — LookupSubject → РОВНО 200 на internal (positive control;
                                          `oneOf([200,404])` снят — 404 здесь и был бы дефектом)
   IAM-INT-OK-INT-IAM-LOOKUPSUBJECT-UNKNOWN
@@ -44,6 +46,11 @@ Coverage:
   IAM-INT-OK-INT-LIMIT-LIST            — тот же путь на internal → 200 со списком и посеянными
                                          умолчаниями (positive control)
 
+Перечень выше СХОДИТСЯ с тем, что модуль объявляет, и держится это гейтом
+`internal/repohygiene` `TestCaseCoverageBlockMatchesWhatTheModuleDeclares`, а не
+вниманием: выписанный рядом с растущим составом перечень владельца не имеет.
+Одной позиции здесь недоставало (#2207).
+
 Why no black-box POSITIVE revoke→IsRevoked case:
   InternalSessionRevocationsService is gRPC-only on :9091 — the api-gateway does
   NOT front it on its REST mux (its callers are the api-gateway logout handler's
@@ -51,7 +58,7 @@ Why no black-box POSITIVE revoke→IsRevoked case:
   HTTP surface to drive revoke→IsRevoked black-box through Newman. The closed
   loop (Revoke writes session_revocations → refresh-hook IsRevoked denies) is
   covered white-box by the integration test
-  internal/repo/kacho/pg/session_revocation_loop_integration_test.go. The
+  internal/repo/kaname/pg/session_revocation_loop_integration_test.go. The
   black-box-feasible contract here is the external-isolation NEGATIVE: these
   internal RPCs must never appear on the advertised external TLS endpoint.
 
@@ -61,7 +68,7 @@ Why no black-box POSITIVE revoke→IsRevoked case:
   a server-side Hydra webhook with no public HTTP surface. It is covered
   white-box by unit tests (internal/handler/iamhooks/refresh_hook_handler_test.go
   user-level cases; internal/apps/.../{internal_iam,session_revocations}) and the
-  integration test internal/repo/kacho/pg/user_token_revocations_repo_integration_test.go.
+  integration test internal/repo/kaname/pg/user_token_revocations_repo_integration_test.go.
   The black-box contract that remains is the external-isolation NEGATIVE below
   (IAM-INT-NEG-EXT-UNBOUND-NEVER-SUCCEEDS — with the caveat recorded there that it
   witnesses fail-closed refusal, not route isolation).
@@ -207,10 +214,10 @@ CASES = []
 # её вместе с внешним движком прав). Проба по этому адресу стала бы дублем
 # бессмысленного контроля `/zzz` — тем самым «утверждением, которое не может
 # упасть», ради отличия от которого весь этот блок и написан.
-_UNBOUND_SR_REVOKE = "/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke"
-_UNBOUND_SR_ISREVOKED = "/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked"
-_UNBOUND_SR_LISTBYUSER = "/kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser"
-_UNBOUND_FORCE_LOGOUT = "/kacho.cloud.iam.v1.InternalIAMService/ForceLogout"
+_UNBOUND_SR_REVOKE = "/kaname.cloud.iam.v1.InternalSessionRevocationsService/Revoke"
+_UNBOUND_SR_ISREVOKED = "/kaname.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked"
+_UNBOUND_SR_LISTBYUSER = "/kaname.cloud.iam.v1.InternalSessionRevocationsService/ListByUser"
+_UNBOUND_FORCE_LOGOUT = "/kaname.cloud.iam.v1.InternalIAMService/ForceLogout"
 
 # ---------------------------------------------------------------------------
 # Helper: pre_script fragment that overrides the request URL to externalBaseUrl.

@@ -17,7 +17,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/moduleseedparity"
+	"github.com/PRO-Robotech/kaname/internal/moduleseedparity"
 )
 
 func injSA(desc string) moduleseedparity.ServiceAccount {
@@ -127,21 +127,21 @@ func TestInjectionSeedParityFindingNamesTheModule(t *testing.T) {
 func injBindingRole(role string) moduleseedparity.Binding {
 	return moduleseedparity.Binding{
 		SubjectType: "serviceAccount", SubjectName: "kacho-demo",
-		RoleID: role, ScopeType: "iam.cluster", ScopeID: "cluster_kacho_root",
+		RoleID: role, ScopeType: "iam.cluster", ScopeID: "cluster_root",
 	}
 }
 
 func injBindingRelation(relation string) moduleseedparity.Binding {
 	return moduleseedparity.Binding{
 		SubjectType: "serviceAccount", SubjectName: "kacho-demo",
-		Relation: relation, ScopeType: "iam.cluster", ScopeID: "cluster_kacho_root",
+		Relation: relation, ScopeType: "iam.cluster", ScopeID: "cluster_root",
 	}
 }
 
 func injGroupBinding(role, group string) moduleseedparity.Binding {
 	return moduleseedparity.Binding{
 		SubjectType: "group", SubjectName: group,
-		RoleID: role, ScopeType: "iam.cluster", ScopeID: "cluster_kacho_root",
+		RoleID: role, ScopeType: "iam.cluster", ScopeID: "cluster_root",
 	}
 }
 

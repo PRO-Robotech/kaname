@@ -59,9 +59,9 @@ import (
 const (
 	// InviteMailTable — полное имя очереди писем приглашения. ШЕСТАЯ очередь
 	// сервиса; форма не изобретается — она в дереве пятикратна.
-	InviteMailTable = "kacho_iam.invite_mail_outbox"
+	InviteMailTable = "kaname.invite_mail_outbox"
 	// InviteMailChannel — LISTEN-канал (триггер миграции).
-	InviteMailChannel = "kacho_iam_invite_mail_outbox"
+	InviteMailChannel = "kaname_invite_mail_outbox"
 	// EventInviteMailSend — единственный вид события очереди. Словарь закрыт
 	// CHECK'ом миграции: расширение требует и кода, и миграции.
 	EventInviteMailSend = "mail.invite.send"
@@ -560,12 +560,28 @@ func RenderInviteMail(relay MailRelay, ev InviteMailEvent) []byte {
 	var b strings.Builder
 	b.WriteString("From: " + displayFrom + "\r\n")
 	b.WriteString("To: " + addressOnly(ev.To) + "\r\n")
-	b.WriteString("Subject: " + mimeEncodedHeader("Приглашение в Kachō") + "\r\n")
+	// ИМЯ ПРИГЛАШАЮЩЕГО — отображаемое имя отправителя, и другого источника у
+	// письма нет. Литерал с именем платформы стоял здесь, пока служба была её
+	// частью; отдельным продуктом в ЧУЖОМ облаке он сообщает приглашённому имя,
+	// которого тот не покупал. Своим именем службы его тоже не заменить:
+	// приглашают работать не в управление доступом, а в облако (#2076).
+	//
+	// Имя не задано — письмо не называет НИКАКОГО продукта: неверное имя хуже,
+	// чем никакого, а решение «настоящее письмо или обман» приглашённый
+	// принимает именно по узнаваемости отправителя.
+	subject := "Приглашение"
+	invitedTo := "Вас пригласили работать в облаке."
+	if relay.FromName != "" {
+		subject = "Приглашение в " + relay.FromName
+		invitedTo = "Вас пригласили работать в " + relay.FromName + "."
+	}
+
+	b.WriteString("Subject: " + mimeEncodedHeader(subject) + "\r\n")
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
 	b.WriteString("Content-Transfer-Encoding: 8bit\r\n")
 	b.WriteString("\r\n")
-	b.WriteString("Вас пригласили работать в Kachō.\r\n")
+	b.WriteString(invitedTo + "\r\n")
 	b.WriteString("\r\n")
 	if loginURL != "" {
 		b.WriteString("Войдите по адресу: " + loginURL + "\r\n")

@@ -36,11 +36,12 @@ package check
 // дереве, отключают первым, а с ним перестают читать и настоящую находку.
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // compensationOutboxTable — таблица, чью уборку стережёт предпосылка.
@@ -71,7 +72,7 @@ func namesCompensationQueue(table string) bool {
 func TestProviderCompensationRetentionPremiseHolds(t *testing.T) {
 	root := catalogRepoRoot(t)
 
-	files, err := treecorpus.UnderWithSuffix(filepath.Join(root, iamTreeRel), ".go")
+	files, err := treecorpus.UnderWithSuffix(platformtree.RequirePath(t, iamTreeRel), ".go")
 	if err != nil {
 		t.Fatalf("состав индекса поддерева %s: %v", iamTreeRel, err)
 	}

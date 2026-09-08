@@ -22,6 +22,13 @@ assertions ran, they passed — against the wrong subject / the wrong object):
    no-op (IAM-USR-INV-IDEM-REINVITE, IAM-ROL-DL-NEG-SYSTEM).  The capture must
    clear the variable BEFORE it tries to write it, so a rejected mutation leaves
    it empty and the poll fails loudly instead of passing on a foreign object.
+
+КТО ЭТУ ПРОБУ ИСПОЛНЯЕТ: `.github/scripts/run-python-probes.py`. Состав он
+собирает ОБХОДОМ дерева по образцу `services/*/tests/newman/scripts/*_test.py` и
+НИ ОДИН файл проб по имени не называет — поэтому отдельного шага в конвейере файл
+не требует, а искать вызывающего предикатом `git grep <имя файла>` бесполезно:
+вызова по имени нет ни у кого. Код возврата при этом доезжает до вердикта шага.
+Проводку держит `tools/pythonprobes`.
 """
 import json
 import sys

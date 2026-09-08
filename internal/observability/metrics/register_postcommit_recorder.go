@@ -67,7 +67,7 @@ type RegisterPostCommitRecorder struct {
 func (r *Registry) NewRegisterPostCommitRecorder() *RegisterPostCommitRecorder {
 	rec := &RegisterPostCommitRecorder{
 		steps: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_register_postcommit_steps_total",
+			Name: Namespace + "_register_postcommit_steps_total",
 			Help: "Post-commit materialization steps of RegisterResource/UnregisterResource, " +
 				"by step (" + strings.Join(RegisterPostCommitSteps, "|") + ") and outcome (" +
 				strings.Join(RegisterPostCommitOutcomes, "|") + "). Counts runs as well as failures, " +

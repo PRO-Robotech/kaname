@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package authzguard — minimal per-use-case guard for kacho-iam. It answers
+// Package authzguard — minimal per-use-case guard for kaname. It answers
 // "did the caller name itself?", never "is the caller allowed": the per-RPC
 // authorization Check is made against the rights model, at the edge and in the
 // interceptor chain.

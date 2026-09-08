@@ -22,7 +22,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 )
 
 func scopeUserCtx(id string) context.Context {

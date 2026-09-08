@@ -5,15 +5,15 @@ package toproto
 
 // account.go — Transfer domain.Account → *iamv1.Account.
 // Registered via init() (use-cases blank-import the package).
-// Parity with kacho-vpc/internal/dto/toproto/network.go.
+// Parity with services/vpc/internal/dto/toproto/network.go.
 
 import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/dto"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/dto"
 )
 
 type accountObj struct{}

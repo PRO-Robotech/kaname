@@ -6,7 +6,7 @@ on the per-object targets (`resource-scoped-access-binding-alpha.md`) and the
 label selector (`resource-scoped-access-binding-gamma.md`).
 
 > [!warning] Состояние на 2026-08-11: описанный здесь механизм СНЯТ миграцией 0030
-> Заголовок обещает «by-design notes … записывают решения реализации kacho-iam», то есть
+> Заголовок обещает «by-design notes … записывают решения реализации kaname», то есть
 > настоящее время. По дереву это уже не так, и перепись по четырём осям это показывает:
 >
 > - **таблицы**: `access_binding_targets` (заводилась миграцией 0018) и
@@ -65,7 +65,7 @@ deliberate red). Physical removal of the deprecated fields is a future major bum
 The whole change lives in proto + the transport-adjacent layer. `domain` and
 `repo` (the DB row, writer-tx, FGA emit) are NOT touched.
 
-### Input normalization (`internal/apps/kacho/api/access_binding/delta_input.go`)
+### Input normalization (`internal/apps/kaname/api/access_binding/delta_input.go`)
 `Handler.Create` calls, FIRST (before any Operation):
 - `normalizeScopeInput(resource_type, resource_id, scope_ref)` →
   single `(resource_type, resource_id)` pair the rest of the pipeline consumes.

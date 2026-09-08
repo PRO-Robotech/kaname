@@ -12,7 +12,7 @@ package authzguard
 // project-editors authorised by the gateway were then wrongly re-denied
 // inside the use-case.
 //
-// Model: kacho-iam keeps a defense-in-depth check, but it is a *relation*
+// Model: kaname keeps a defense-in-depth check, but it is a *relation*
 // check (the same model the gateway uses), NOT identity-equality:
 //
 //	authority = principal owns the owning Account            (bootstrap path)

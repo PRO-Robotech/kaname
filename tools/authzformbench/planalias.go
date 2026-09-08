@@ -15,7 +15,7 @@ package authzformbench
 //
 // Псевдонимы типов (`=`), а не обёртки: тип взаимозаменяем с источником, никаких
 // преобразований на границе.
-import "github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+import "github.com/PRO-Robotech/kaname/internal/authzplan"
 
 type (
 	Model         = authzplan.Model

@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // linkage.go — соединение «имя действия манифеста ↔ запись каталога прав»

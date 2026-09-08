@@ -5,7 +5,7 @@
 //
 // authorize_service.Check (public AuthZ) AND CheckRelation (InternalIAMService.Check)
 // apply a cluster-admin short-circuit: a subject holding the flat
-// `cluster:cluster_kacho_root#system_admin` relation is ALLOWED on ANY resource
+// `cluster:cluster_root#system_admin` relation is ALLOWED on ANY resource
 // without a per-object grant of its own (D-9 is a flat super-gate, not a
 // `<rel> from cluster` cascade).
 //
@@ -27,7 +27,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // scClusterChecker — a RelationChecker-shaped fake: allows the flat cluster

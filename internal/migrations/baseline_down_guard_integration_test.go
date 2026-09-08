@@ -38,8 +38,8 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // baselineUp применяет свод к чистой базе и отдаёт соединение.
@@ -93,14 +93,14 @@ func seedSecretCredentialOwners(t *testing.T, db *sql.DB) {
 
 	_, err = tx.Exec(`SET CONSTRAINTS ALL DEFERRED`)
 	require.NoError(t, err)
-	_, err = tx.Exec(`INSERT INTO kacho_iam.accounts (id, name, owner_user_id)
+	_, err = tx.Exec(`INSERT INTO kaname.accounts (id, name, owner_user_id)
 	                  VALUES ('acc00000000000000dwn', 'down-guard', 'usr00000000000000dwn')`)
 	require.NoError(t, err, "посев аккаунта")
-	_, err = tx.Exec(`INSERT INTO kacho_iam.users (id, external_id, email, account_id, invite_status)
+	_, err = tx.Exec(`INSERT INTO kaname.users (id, external_id, email, account_id, invite_status)
 	                  VALUES ('usr00000000000000dwn', 'ext-down', 'down@example.invalid',
 	                          'acc00000000000000dwn', 'ACTIVE')`)
 	require.NoError(t, err, "посев человека")
-	_, err = tx.Exec(`INSERT INTO kacho_iam.service_accounts (id, account_id, name)
+	_, err = tx.Exec(`INSERT INTO kaname.service_accounts (id, account_id, name)
 	                  VALUES ('sva00000000000000dwn', 'acc00000000000000dwn', 'down-guard-sa')`)
 	require.NoError(t, err, "посев служебной учётки")
 	require.NoError(t, tx.Commit(), "посев владельцев удостоверений")
@@ -112,7 +112,7 @@ func insertSecretCred(t *testing.T, db *sql.DB) {
 	for i := range hash {
 		hash[i] = byte(i + 3)
 	}
-	_, err := db.Exec(`INSERT INTO kacho_iam.service_account_oauth_clients
+	_, err := db.Exec(`INSERT INTO kaname.service_account_oauth_clients
 	    (id, sva_id, hydra_client_id, created_by_user_id, credential_kind, secret_hash,
 	     public_key_pem, key_algorithm, trusted_subjects, expires_at)
 	  VALUES ('soc_00000000000000dwn', 'sva00000000000000dwn', NULL, 'usr00000000000000dwn',
@@ -159,7 +159,7 @@ func TestBaselineDownRefusesWhileSecretCredentialsExist(t *testing.T) {
 	// оператор чинил бы две беды вместо одной.
 	var n int
 	require.NoError(t, db.QueryRow(
-		`SELECT count(*) FROM kacho_iam.service_account_oauth_clients`).Scan(&n),
+		`SELECT count(*) FROM kaname.service_account_oauth_clients`).Scan(&n),
 		"схема обязана быть цела: отказ наступил ДО единого разрушающего оператора")
 	require.Equal(t, 1, n, "строка вида SECRET обязана уцелеть")
 }
@@ -177,7 +177,7 @@ func TestBaselineDownProceedsWithoutSecretCredentials(t *testing.T) {
 
 	var before int
 	require.NoError(t, db.QueryRow(
-		`SELECT count(*) FROM kacho_iam.service_account_oauth_clients
+		`SELECT count(*) FROM kaname.service_account_oauth_clients
 		  WHERE credential_kind = 'SECRET'`).Scan(&before))
 	require.Zero(t, before, "предпосылка контроля: строк вида SECRET нет")
 
@@ -187,6 +187,6 @@ func TestBaselineDownProceedsWithoutSecretCredentials(t *testing.T) {
 
 	var exists bool
 	require.NoError(t, db.QueryRow(
-		`SELECT to_regclass('kacho_iam.accounts') IS NOT NULL`).Scan(&exists))
+		`SELECT to_regclass('kaname.accounts') IS NOT NULL`).Scan(&exists))
 	require.False(t, exists, "обратный ход обязан снести схему, а не только промолчать")
 }

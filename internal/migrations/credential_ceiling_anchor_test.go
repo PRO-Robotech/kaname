@@ -43,7 +43,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 var (
@@ -156,7 +156,7 @@ func TestCredentialCeilingAnchor_TablesAndChargersExist(t *testing.T) {
 		for _, m := range reCountTrigger.FindAllStringSubmatch(flat, -1) {
 			table := strings.ToLower(m[1])
 			if !strings.Contains(table, ".") {
-				table = "kacho_iam." + table
+				table = "kaname." + table
 			}
 			if charged[table] == nil {
 				charged[table] = map[string]bool{}
@@ -181,13 +181,13 @@ func TestCredentialCeilingAnchor_GateCanFail(t *testing.T) {
 	rec := domain.SubordinateResource{
 		Kind:    "iam.credential",
 		Parents: []domain.LimitKind{"iam.user"},
-		Tables:  []string{"kacho_iam.user_oauth_clients"},
+		Tables:  []string{"kaname.user_oauth_clients"},
 		Why:     "право вычисляется от принципала",
 	}
 	cat := []domain.CountableKind{{Kind: "iam.user.credential", Carrier: "iam.user"}}
-	tables := map[string]bool{"kacho_iam.user_oauth_clients": true}
+	tables := map[string]bool{"kaname.user_oauth_clients": true}
 	charged := map[string]map[string]bool{
-		"kacho_iam.user_oauth_clients": {"iam.user.credential": true},
+		"kaname.user_oauth_clients": {"iam.user.credential": true},
 	}
 
 	t.Run("законный близнец: и таблица, и списание на месте", func(t *testing.T) {
@@ -196,10 +196,10 @@ func TestCredentialCeilingAnchor_GateCanFail(t *testing.T) {
 
 	t.Run("G5: имя таблицы с опечаткой", func(t *testing.T) {
 		bad := rec
-		bad.Tables = []string{"kacho_iam.user_oauth_client"} // единственное число
+		bad.Tables = []string{"kaname.user_oauth_client"} // единственное число
 		found := anchorFindings([]domain.SubordinateResource{bad}, cat, tables, charged)
 		require.Len(t, found, 1)
-		require.Contains(t, found[0], "kacho_iam.user_oauth_client")
+		require.Contains(t, found[0], "kaname.user_oauth_client")
 	})
 
 	t.Run("G6: вид с опечаткой — списания под таким именем нет", func(t *testing.T) {

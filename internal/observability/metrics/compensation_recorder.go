@@ -44,13 +44,13 @@ type CompensationRecorder struct {
 func (r *Registry) NewCompensationRecorder() *CompensationRecorder {
 	rec := &CompensationRecorder{
 		emitted: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_provider_compensations_emitted_total",
+			Name: Namespace + "_provider_compensations_emitted_total",
 			Help: "Компенсирующие намерения, записанные в очередь, по саге-инициатору (origin) " +
 				"и исходу записи (ok|error). error означает, что durable-намерение записать не " +
 				"удалось и путь деградировал в прямое снятие.",
 		}, []string{"origin", "outcome"}),
 		applied: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_provider_compensations_applied_total",
+			Name: Namespace + "_provider_compensations_applied_total",
 			Help: "Компенсации, исполненные дренажом (клиент снят у провайдера либо его уже не было), " +
 				"по саге-инициатору. Расхождение с emitted — то, что ещё не доехало.",
 		}, []string{"origin"}),

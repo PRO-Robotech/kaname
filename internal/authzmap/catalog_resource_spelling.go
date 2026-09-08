@@ -27,7 +27,7 @@ import "sort"
 //
 // Не по вкусу и не по старшинству: у ключа таблицы есть ЧИТАТЕЛЬ НА ПУТИ
 // ЗАПРОСА, а у выведенного нет. Правило роли, назвавшее ресурс, проходит
-// validateRuleCatalog (internal/apps/kacho/api/role/rules_catalog.go), и та
+// validateRuleCatalog (internal/apps/kaname/api/role/rules_catalog.go), и та
 // отвергает пару, которой в закрытой таблице нет:
 // `Illegal argument resources (unknown type '<модуль>.<ресурс>')`. Тем же ключом
 // эмиттер резолвит тип объекта, на котором материализует пообъектные кортежи.

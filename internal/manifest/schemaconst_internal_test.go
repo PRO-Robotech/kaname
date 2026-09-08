@@ -52,6 +52,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // treeManifestGlob — популяция гейта: манифесты модулей ДЕРЕВА.
@@ -61,7 +63,7 @@ import (
 // нарушать то, что проверяется, — и вердикт по ним был бы ложной находкой в
 // каждом прогоне. Схема же описывает поставляемый артефакт, и именно его автор
 // нового модуля берёт образцом.
-const treeManifestGlob = "../../../../services/*/manifest.yaml"
+const treeManifestGlob = "services/*/manifest.yaml"
 
 // schemaConst — одно объявление `const` вместе с тем, как до него дошли.
 type schemaConst struct {
@@ -213,7 +215,7 @@ func splitSchemaPath(path string) []string {
 // readTreeManifests — манифесты дерева, разобранные как YAML.
 func readTreeManifests(t *testing.T) map[string]any {
 	t.Helper()
-	paths, err := filepath.Glob(treeManifestGlob)
+	paths, err := filepath.Glob(platformtree.RequirePath(t, treeManifestGlob))
 	if err != nil {
 		t.Fatalf("обход манифестов дерева не состоялся (%s): %v", treeManifestGlob, err)
 	}

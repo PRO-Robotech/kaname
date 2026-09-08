@@ -177,7 +177,7 @@ XC-12, Ф5: перезамер стоимости ПОЛНОМОДЕЛЬНОЙ �
   машина            dobryKot.global.bcs, linux/amd64, 12 CPU, MemTotal 65 751 792 kB
   движок            openfga/openfga:v1.8.4 над postgres:16-alpine
   трансформ DSL     openfga/cli:v0.7.13
-  форма E           postgres:16-alpine, схема kacho_iam, миграции применены
+  форма E           postgres:16-alpine, схема kaname, миграции применены
                     мигратором продукта (pkg/pgtest + services/iam/…/migrations)
   модель            proto/kacho/cloud/iam/v1/fga_model.fga (sha256/16 e5133ec4c25ce69c)
   сценарий          тип vpc_network · N ∈ {10, 100, 1000, 10000} · M=4 · S=5

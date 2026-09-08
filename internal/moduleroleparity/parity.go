@@ -39,7 +39,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // Role — системная роль в форме, общей для обеих сторон сверки.

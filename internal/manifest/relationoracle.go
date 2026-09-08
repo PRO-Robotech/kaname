@@ -3,7 +3,7 @@
 
 package manifest
 
-import "github.com/PRO-Robotech/kacho-iam/internal/domain"
+import "github.com/PRO-Robotech/kaname/internal/domain"
 
 // relationoracle.go — модель прав ВНОСИТСЯ в загрузчик вызывающим (задача
 // продукта #2002; приёмка

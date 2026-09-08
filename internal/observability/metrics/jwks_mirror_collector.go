@@ -12,7 +12,7 @@ import (
 // JWKSMirrorOutcomesMetric / JWKSMirrorOutcomes — имя семейства и ЗАКРЫТЫЙ набор
 // его клеток зеркала публичных ключей проверки.
 const (
-	JWKSMirrorOutcomesMetric = "kacho_iam_jwks_mirror_outcomes_total"
+	JWKSMirrorOutcomesMetric = "kaname_jwks_mirror_outcomes_total"
 
 	// JWKSMirrorOutcomeServed — обращение к верхнему хопу дало набор ключей.
 	JWKSMirrorOutcomeServed = "served"

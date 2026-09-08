@@ -7,7 +7,7 @@
 // # Что здесь было неверно
 //
 // Опубликованная схема пинила якорь двумя `const` — `scopeType: iam.cluster` и
-// `scopeId: cluster_kacho_root`, — а единственный объявленный судья формы
+// `scopeId: cluster_root`, — а единственный объявленный судья формы
 // (загрузчик, см. шапку пакета) значения не судил: он требовал лишь, чтобы ключ
 // был назван непустым. Схема вторым судьёй не является и судьёй не станет — она
 // КОНТРАКТ для автора манифеста и его редактора, — поэтому `const` без отказа у
@@ -52,7 +52,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // seedGrantAnchorScopeType — ярус, на котором объявляется выдача посева.

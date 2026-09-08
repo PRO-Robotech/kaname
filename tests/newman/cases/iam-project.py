@@ -33,7 +33,7 @@ CRUD fixture dependency:
 
 Operation envelope:
   All mutations return `operation.Operation` with id prefix `iop`.
-  Poll step hits /operations/{id} via OpsProxy at api-gateway (iop* → kacho-iam).
+  Poll step hits /operations/{id} via OpsProxy at api-gateway (iop* → kaname).
 
 Case IDs follow the IAM-PRJ-<RPC>-<CLASS>[-detail] scheme.
 
@@ -42,7 +42,7 @@ caller — it does NOT consult AccessBinding). This is asserted explicitly.
 
 Удаление НЕПУСТОГО проекта (IAM-PRJ-DL-NEG-HAS-CHILDREN) держится внешним ключом
 `roles_project_fk` (запрет удаления родителя): единственный живой ребёнок проекта в
-kacho_iam сегодня — ПРОЕКТНАЯ пользовательская роль. Кейс заводит и снимает его сам
+kaname сегодня — ПРОЕКТНАЯ пользовательская роль. Кейс заводит и снимает его сам
 через публичный API, поэтому общая фикстура не задействована и после прогона ничего
 не остаётся.
 
@@ -981,7 +981,7 @@ CASES.append(Case(
 # был занят дублем под чужим заголовком.
 #
 # ЧЕМ ЗАМЕНЕНО — НАСТОЯЩИЙ РЕБЁНОК, СОЗДАННЫЙ ПУБЛИЧНЫМ API. Единственный живой
-# ребёнок проекта в kacho_iam на сегодня — ПРОЕКТНАЯ пользовательская роль
+# ребёнок проекта в kaname на сегодня — ПРОЕКТНАЯ пользовательская роль
 # (`roles.project_id`, внешний ключ с запретом удаления родителя). Он заводится через
 # публичный `POST /iam/v1/roles` с `projectId` (та же форма, что у
 # IAM-ROL-CR-PROJECT-SCOPED в cases/iam-role.py), поэтому фикстура кейса

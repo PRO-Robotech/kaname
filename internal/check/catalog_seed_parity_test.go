@@ -22,8 +22,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // catalogRepoRoot — корень модуля. Своя копия обхода вверх не заводится: рядом
@@ -149,8 +151,7 @@ func literalTierOnlyVerbs() []string {
 
 // TestIAMCT114_CatalogSeedMatchesTheLiteral — Т6.
 func TestIAMCT114_CatalogSeedMatchesTheLiteral(t *testing.T) {
-	root := catalogRepoRoot(t)
-	body, err := os.ReadFile(filepath.Join(root, catalogMigrationPath))
+	body, err := os.ReadFile(platformtree.RequirePath(t, catalogMigrationPath))
 	if err != nil {
 		t.Fatalf("прочитать миграцию каталога: %v", err)
 	}
@@ -188,8 +189,7 @@ func TestIAMCT114_CatalogSeedMatchesTheLiteral(t *testing.T) {
 
 // TestIAMCT113_CatalogKeysCarryTheDeclaredForm — Т1 и Т2.
 func TestIAMCT113_CatalogKeysCarryTheDeclaredForm(t *testing.T) {
-	root := catalogRepoRoot(t)
-	body, err := os.ReadFile(filepath.Join(root, catalogMigrationPath))
+	body, err := os.ReadFile(platformtree.RequirePath(t, catalogMigrationPath))
 	if err != nil {
 		t.Fatalf("прочитать миграцию каталога: %v", err)
 	}
@@ -236,8 +236,7 @@ func indexOf(hay, needle string) int {
 // открывает авторскому правилу глагол, о котором производитель не знает, — то
 // есть ключ пропускает то, чего в словаре нет.
 func TestTierOnlyVerbSeedMatchesTheLiteral(t *testing.T) {
-	root := catalogRepoRoot(t)
-	body, err := os.ReadFile(filepath.Join(root, catalogMigrationPath))
+	body, err := os.ReadFile(platformtree.RequirePath(t, catalogMigrationPath))
 	if err != nil {
 		t.Fatalf("прочитать миграцию ярусной половины: %v", err)
 	}

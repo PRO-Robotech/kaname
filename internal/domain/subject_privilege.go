@@ -10,7 +10,7 @@ import "time"
 //
 // It is an AccessBinding row JOINed with its Role so the human-readable
 // RoleName is resolved server-side in ONE query (access_bindings ⋈ roles on
-// role_id, same kacho_iam schema, FK access_bindings_role_fk) — no per-row
+// role_id, same kaname schema, FK access_bindings_role_fk) — no per-row
 // N+1 GetRole fan-out. A dangling role (deleted after a revoke) yields an empty
 // RoleName; the consumer (UI) falls back to the raw RoleID (graceful).
 //

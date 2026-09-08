@@ -10,7 +10,7 @@ package accesssnapshot
 // доступ: страницы объектов берутся курсором из НАСТОЯЩЕЙ базы, вопрос о доступе
 // задаётся НАСТОЯЩЕЙ решающей стороне — той же двери, которую композиционный
 // корень выдаёт стражам службы (`authzcascade.Wrap(relverdict.NewAsker(pool))`,
-// см. cmd/kacho-iam/wiring.go).
+// см. cmd/kaname/wiring.go).
 //
 // ЧТО ЗДЕСЬ ИЗМЕНИЛОСЬ И ПОЧЕМУ ЭТО НЕ ОСЛАБЛЕНИЕ. Прежняя редакция спрашивала
 // внешний движок прав, поднятый рядом, и выдавала право записью кортежа. Движка
@@ -33,11 +33,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzcascade"
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg/relverdict"
 	coredb "github.com/PRO-Robotech/kacho/pkg/db"
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/authzcascade"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
 // seedAccountWithProjects заводит аккаунт, его владельца и n проектов.
@@ -52,12 +52,12 @@ func seedAccountWithProjects(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO kacho_iam.users (id, external_id, email, display_name, account_id, invite_status)
+		INSERT INTO kaname.users (id, external_id, email, display_name, account_id, invite_status)
 		VALUES ($1, $2, $3, 'Owner', $4, 'ACTIVE')`,
 		ownerID, "ext-"+tag, tag+"@example.test", accID)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `
-		INSERT INTO kacho_iam.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
+		INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		accID, "acc-"+tag, ownerID)
 	require.NoError(t, err)
 
@@ -65,7 +65,7 @@ func seedAccountWithProjects(t *testing.T, ctx context.Context, pool *pgxpool.Po
 	for i := range n {
 		pid := fmt.Sprintf("prj%014s%03d", tag, i)
 		_, err = tx.Exec(ctx, `
-			INSERT INTO kacho_iam.projects (id, account_id, name) VALUES ($1, $2, $3)`,
+			INSERT INTO kaname.projects (id, account_id, name) VALUES ($1, $2, $3)`,
 			pid, accID, fmt.Sprintf("prj-%s-%d", tag, i))
 		require.NoError(t, err)
 		projects = append(projects, pid)
@@ -81,7 +81,7 @@ func seedAccountWithProjects(t *testing.T, ctx context.Context, pool *pgxpool.Po
 func projectsOfAccount(pool *pgxpool.Pool, accID string) PageFunc {
 	return func(ctx context.Context, after string, limit int) ([]string, error) {
 		rows, err := pool.Query(ctx, `
-			SELECT id FROM kacho_iam.projects
+			SELECT id FROM kaname.projects
 			 WHERE account_id = $1 AND id > $2
 			 ORDER BY id
 			 LIMIT $3`, accID, after, limit)
@@ -124,25 +124,25 @@ func grantProjectRead(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoErrorf(t, err, "посев: %s", sql)
 	}
-	exec(`INSERT INTO kacho_iam.clusters (id, name) VALUES ('cluster_kacho_root', 'kacho')
+	exec(`INSERT INTO kaname.clusters (id, name) VALUES ('cluster_root', 'kacho')
 	      ON CONFLICT DO NOTHING`)
-	exec(`INSERT INTO kacho_iam.roles (id, name, permissions, rules, cluster_id)
+	exec(`INSERT INTO kaname.roles (id, name, permissions, rules, cluster_id)
 	      VALUES ($1, $2, '[]'::jsonb,
 	              jsonb_build_array(jsonb_build_object(
 	                  'module',    'test',
 	                  'resources', jsonb_build_array('*'),
 	                  'verbs',     jsonb_build_array('get'))),
-	              'cluster_kacho_root')`, roleID, "test.snapshot.get")
-	exec(`INSERT INTO kacho_iam.role_verb (role_id, object_type, verb) VALUES ($1, $2, 'get')`,
+	              'cluster_root')`, roleID, "test.snapshot.get")
+	exec(`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, 'get')`,
 		roleID, dotted)
-	exec(`INSERT INTO kacho_iam.role_rule_selectors
+	exec(`INSERT INTO kaname.role_rule_selectors
 	        (role_id, rule_fp, arm, object_types, match_labels)
 	      VALUES ($1, 'fp-1', 'anchor', ARRAY[$2::text], '{}'::jsonb)`, roleID, dotted)
-	exec(`INSERT INTO kacho_iam.access_bindings
+	exec(`INSERT INTO kaname.access_bindings
 	        (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 	      VALUES ($1, 'user', $2, $3, 'project', $4, 'ACTIVE')`,
 		bindingID, userID, roleID, projectID)
-	exec(`INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
+	exec(`INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
 	      VALUES ($1, 'user', $2)`, bindingID, userID)
 }
 
@@ -165,7 +165,7 @@ func TestIntegration_GrantDoesNotReachAcrossAccounts(t *testing.T) {
 	// Субъект выдачи — настоящий пользователь: строка привязки на него ссылается.
 	const subjectUser = "usr0000000000snapusr"
 	_, err = pool.Exec(ctx, `
-		INSERT INTO kacho_iam.users (id, external_id, email, account_id)
+		INSERT INTO kaname.users (id, external_id, email, account_id)
 		VALUES ($1, $1, $1 || '@example.test', $2)`, subjectUser, accA)
 	require.NoError(t, err)
 

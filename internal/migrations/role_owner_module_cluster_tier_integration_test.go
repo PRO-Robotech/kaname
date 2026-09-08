@@ -95,7 +95,7 @@ func TestIntegration_RoleWithAModuleOwnerIsAlwaysClusterTier(t *testing.T) {
 		err := db.QueryRow(`
 			SELECT pg_get_constraintdef(oid), convalidated
 			  FROM pg_constraint
-			 WHERE conrelid = 'kacho_iam.roles'::regclass
+			 WHERE conrelid = 'kaname.roles'::regclass
 			   AND conname  = $1`, ownerTierConstraint).Scan(&condef, &validated)
 		require.NoError(t, err,
 			"ограничения %s нет: инвариант «есть владелец-модуль ⟹ роль системная» "+
@@ -110,9 +110,9 @@ func TestIntegration_RoleWithAModuleOwnerIsAlwaysClusterTier(t *testing.T) {
 
 	t.Run("положительный контроль 1: роль модуля на кластерном ярусе ПРОХОДИТ", func(t *testing.T) {
 		_, err := db.Exec(`
-			INSERT INTO kacho_iam.roles
+			INSERT INTO kaname.roles
 			       (id, cluster_id, name, description, permissions, owner_module, created_at)
-			VALUES ('rol_p2_module_cluster', 'cluster_kacho_root', 'vpc.viewer',
+			VALUES ('rol_p2_module_cluster', 'cluster_root', 'vpc.viewer',
 			        'законная роль модуля', '["vpc.network.*.get"]'::jsonb, 'vpc', now())`)
 		require.NoError(t, err,
 			"законная роль модуля отвергнута: ограничение шире своего предмета — "+
@@ -121,7 +121,7 @@ func TestIntegration_RoleWithAModuleOwnerIsAlwaysClusterTier(t *testing.T) {
 
 	t.Run("положительный контроль 2: роль АРЕНДАТОРА без владельца ПРОХОДИТ", func(t *testing.T) {
 		_, err := db.Exec(`
-			INSERT INTO kacho_iam.roles
+			INSERT INTO kaname.roles
 			       (id, account_id, name, description, permissions, created_at)
 			VALUES ('rol_p2_tenant_plain', ` + systemAccountID + `, 'viewer',
 			        'обычная роль арендатора', '["vpc.network.*.get"]'::jsonb, now())`)
@@ -141,14 +141,14 @@ func TestIntegration_RoleWithAModuleOwnerIsAlwaysClusterTier(t *testing.T) {
 		require.NoError(t, err)
 		defer func() { _ = tx.Rollback() }()
 
-		_, err = tx.Exec(`ALTER TABLE kacho_iam.roles DROP CONSTRAINT ` +
+		_, err = tx.Exec(`ALTER TABLE kaname.roles DROP CONSTRAINT ` +
 			`roles_owner_module_name_prefix`)
 		require.NoError(t, err,
 			"сопутствующее ограничение имени не снялось — изоляция не состоялась, "+
 				"и отказ ниже принадлежал бы ему, а не владению")
 
 		_, err = tx.Exec(`
-			INSERT INTO kacho_iam.roles
+			INSERT INTO kaname.roles
 			       (id, account_id, name, description, permissions, owner_module, created_at)
 			VALUES ('rol_p2_module_at_account', ` + systemAccountID + `, 'auditor',
 			        'роль модуля на чужом ярусе', '["vpc.network.*.get"]'::jsonb, 'vpc', now())`)
@@ -166,10 +166,10 @@ func TestIntegration_RoleWithAModuleOwnerIsAlwaysClusterTier(t *testing.T) {
 	require.NoError(t, db.QueryRow(`
 		SELECT count(*) FILTER (WHERE owner_module IS NOT NULL),
 		       count(*) FILTER (WHERE owner_module IS NULL)
-		  FROM kacho_iam.roles`).Scan(&owned, &platform))
+		  FROM kaname.roles`).Scan(&owned, &platform))
 	require.NoError(t, db.QueryRow(`
 		SELECT count(*) FROM pg_constraint
-		 WHERE conrelid = 'kacho_iam.roles'::regclass AND contype = 'c'`).Scan(&cons))
+		 WHERE conrelid = 'kaname.roles'::regclass AND contype = 'c'`).Scan(&cons))
 	t.Logf("перепись ролей: с владельцем %d, платформенных %d; проверок на таблице %d",
 		owned, platform, cons)
 }
@@ -220,12 +220,12 @@ func TestIntegration_ModuleOwnerAtTenantTierIsUnrepresentableByName(t *testing.T
 			require.NoError(t, err)
 			defer func() { _ = tx.Rollback() }()
 
-			_, err = tx.Exec(`ALTER TABLE kacho_iam.roles ` +
+			_, err = tx.Exec(`ALTER TABLE kaname.roles ` +
 				`DROP CONSTRAINT IF EXISTS ` + ownerTierConstraint)
 			require.NoError(t, err, "ограничение владения не снялось — изоляция не состоялась")
 
 			_, err = tx.Exec(`
-				INSERT INTO kacho_iam.roles
+				INSERT INTO kaname.roles
 				       (id, account_id, name, description, permissions, owner_module, created_at)
 				VALUES ($1, `+systemAccountID+`, $2,
 				        'предпосылка изоляции', '["vpc.network.*.get"]'::jsonb, 'vpc', now())`,

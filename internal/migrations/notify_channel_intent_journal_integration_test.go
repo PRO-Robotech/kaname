@@ -19,7 +19,7 @@
 //
 // Журнал и его свёртка ОБЯЗАНЫ уцелеть, и это половина, ради которой проба
 // нужна больше самого отрицания. Снималось объявление уведомления, а не
-// механизм: из строк `kacho_iam.fga_outbox` триггер `relation_fact_follows_journal`
+// механизм: из строк `kaname.fga_outbox` триггер `relation_fact_follows_journal`
 // (миграция 0098) складывает прямой факт, из которого форма собирает вердикт о
 // доступе — В ТОМ ЖЕ КОММИТЕ, синхронно. Проба, утверждающая только отсутствие
 // канала, зеленела бы и на миграции, снёсшей вместе с ним источник вердикта, —
@@ -38,7 +38,7 @@ import (
 // канала журнала намерений (#1436).
 //
 // Утверждается ПАРА, и вторая половина обязательна: без неё «ни один триггер не
-// шлёт kacho_iam_fga_outbox» зеленело бы и на пустом ответе — на опечатке в
+// шлёт kaname_fga_outbox» зеленело бы и на пустом ответе — на опечатке в
 // запросе, на не накатившейся схеме, на переименованной колонке каталога.
 func TestIntegration_IntentJournalChannelHasNoProducerLeft(t *testing.T) {
 	if testing.Short() {
@@ -53,22 +53,22 @@ func TestIntegration_IntentJournalChannelHasNoProducerLeft(t *testing.T) {
 			"на пустой переписи любое отрицание ниже зеленеет, ничего не проверив")
 
 	// Отрицание — предмет #1436.
-	assert.NotContains(t, channels, "kacho_iam_fga_outbox",
+	assert.NotContains(t, channels, "kaname_fga_outbox",
 		"канал снят вместе с триггером: дренаж, который его слушал, убран вместе с "+
 			"внешним движком отношений, а прямой факт складывается из этого же журнала "+
 			"триггером в ТОМ ЖЕ коммите (0098) — будить уведомлением некого")
 
 	// Положительный контроль на том же запросе, в том же прогоне: канал, чей
 	// потребитель ЖИВ и назван прод-кодом
-	// (`repo/kacho/pg/reconcile_notify.go`, `LISTEN` на reconcileOutboxChannel).
-	assert.Contains(t, channels, "kacho_iam_resource_reconcile_outbox",
+	// (`repo/kaname/pg/reconcile_notify.go`, `LISTEN` на reconcileOutboxChannel).
+	assert.Contains(t, channels, "kaname_resource_reconcile_outbox",
 		"рабочий канал очереди обязан остаться — если пропал и он, снято лишнее, "+
 			"а не только беспотребительское")
 
 	// И третье, ради чего проба нужна больше отрицания: ЖУРНАЛ и его СВЁРТКА целы.
 	var journalExists bool
 	require.NoError(t, db.QueryRow(
-		`SELECT to_regclass('kacho_iam.fga_outbox') IS NOT NULL`).Scan(&journalExists))
+		`SELECT to_regclass('kaname.fga_outbox') IS NOT NULL`).Scan(&journalExists))
 	assert.True(t, journalExists,
 		"журнал намерений обязан остаться: снималось объявление уведомления, а не "+
 			"источник прямого факта")
@@ -81,7 +81,7 @@ func TestIntegration_IntentJournalChannelHasNoProducerLeft(t *testing.T) {
 			  JOIN pg_class c ON c.oid = tg.tgrelid
 			  JOIN pg_namespace n ON n.oid = c.relnamespace
 			 WHERE NOT tg.tgisinternal
-			   AND n.nspname = 'kacho_iam'
+			   AND n.nspname = 'kaname'
 			   AND c.relname = 'fga_outbox'
 			   AND tg.tgname = 'relation_fact_follows_journal')`).Scan(&foldAlive))
 	assert.True(t, foldAlive,

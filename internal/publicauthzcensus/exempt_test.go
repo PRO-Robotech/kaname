@@ -29,11 +29,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/publicauthzcensus"
+	"github.com/PRO-Robotech/kaname/internal/publicauthzcensus"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 func TestEveryExemptPublicRPCNamesItsDecider(t *testing.T) {
-	root := repoRoot(t)
+	// Тот же предмет, что у соседней переписи: читается КАТАЛОГ КОНТРАКТОВ
+	// платформы, а он в поставку модуля не входит.
+	root := platformtree.Require(t)
 	c, err := publicauthzcensus.Collect(root)
 	if err != nil {
 		t.Fatalf("перепись не состоялась: %v", err)

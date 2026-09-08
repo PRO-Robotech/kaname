@@ -17,7 +17,7 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // KeySetSource — источник НАШЕЙ записи публикуемого набора.

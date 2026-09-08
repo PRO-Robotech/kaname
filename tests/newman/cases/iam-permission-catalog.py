@@ -11,7 +11,7 @@ closed verb set + wildcard policy), NOT per-tenant data and NOT infra-sensitive
 authenticated principal may read it, anonymous is fail-closed.
 
 Source of truth (the catalog projects EXACTLY this — never more):
-  kacho-iam authzmap.objectTypes (module.resource keys) + TypeHasVerbRelations
+  kaname authzmap.objectTypes (module.resource keys) + TypeHasVerbRelations
   + authzmap.CommonVerbVocabulary() + a curated hasListEndpoint table. No DB, no migration.
 
 Covered scenarios:
@@ -41,7 +41,7 @@ Test-design techniques:
   - state-transition is N/A — sync read, no Operation envelope.
 
 Test-first (strict TDD): authored RED before the iam handler exists; goes
-GREEN once kacho-iam registers PermissionCatalogService on the public listener
+GREEN once kaname registers PermissionCatalogService on the public listener
 AND kacho-api-gateway registers GET /iam/v1/permissionCatalog on the public mux.
 """
 

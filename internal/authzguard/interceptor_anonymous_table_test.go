@@ -44,12 +44,12 @@ func userCtx(id string) context.Context {
 func TestAntiAnon_ReadOnlySuffixAllowed(t *testing.T) {
 	iceptor := AntiAnonymousUnary(slog.Default())
 	cases := []string{
-		"/kacho.cloud.iam.v1.UserService/Get",
-		"/kacho.cloud.iam.v1.UserService/List",
-		"/kacho.cloud.iam.v1.SomeService/BatchGet",
-		"/kacho.cloud.iam.v1.SomeService/Search",
-		"/kacho.cloud.iam.v1.SomeService/Resolve",
-		"/kacho.cloud.iam.v1.SomeService/Whoami",
+		"/kaname.cloud.iam.v1.UserService/Get",
+		"/kaname.cloud.iam.v1.UserService/List",
+		"/kaname.cloud.iam.v1.SomeService/BatchGet",
+		"/kaname.cloud.iam.v1.SomeService/Search",
+		"/kaname.cloud.iam.v1.SomeService/Resolve",
+		"/kaname.cloud.iam.v1.SomeService/Whoami",
 	}
 	for _, fm := range cases {
 		t.Run(fm, func(t *testing.T) {
@@ -69,11 +69,11 @@ func TestAntiAnon_ReadOnlySuffixAllowed(t *testing.T) {
 func TestAntiAnon_MutatingSuffixDeniedForAnon(t *testing.T) {
 	iceptor := AntiAnonymousUnary(slog.Default())
 	cases := []string{
-		"/kacho.cloud.iam.v1.SAKeyService/Issue",
-		"/kacho.cloud.iam.v1.SAKeyService/Revoke",
-		"/kacho.cloud.iam.v1.BreakGlassService/ApproveBreakGlassA",
-		"/kacho.cloud.iam.v1.BreakGlassService/ApproveBreakGlassB",
-		"/kacho.cloud.iam.v1.BreakGlassService/DenyBreakGlass",
+		"/kaname.cloud.iam.v1.SAKeyService/Issue",
+		"/kaname.cloud.iam.v1.SAKeyService/Revoke",
+		"/kaname.cloud.iam.v1.BreakGlassService/ApproveBreakGlassA",
+		"/kaname.cloud.iam.v1.BreakGlassService/ApproveBreakGlassB",
+		"/kaname.cloud.iam.v1.BreakGlassService/DenyBreakGlass",
 	}
 	for _, fm := range cases {
 		t.Run(fm, func(t *testing.T) {
@@ -95,7 +95,7 @@ func TestAntiAnon_SuffixOnlyNotPrefix(t *testing.T) {
 	iceptor := AntiAnonymousUnary(slog.Default())
 	// Construct a synthetic FullMethod that starts with a read-only token but
 	// ends with a non-read-only suffix.
-	fm := "/kacho.cloud.iam.v1.SomeService/ListAndDelete"
+	fm := "/kaname.cloud.iam.v1.SomeService/ListAndDelete"
 	_, err := iceptor(anonCtx(), nil,
 		&grpc.UnaryServerInfo{FullMethod: fm}, fakeHandler)
 	if status.Code(err) != codes.PermissionDenied {
@@ -122,9 +122,9 @@ func TestAntiAnon_WhitelistFullMethodHonored(t *testing.T) {
 func TestAntiAnon_AuthenticatedAllowedAnywhere(t *testing.T) {
 	iceptor := AntiAnonymousUnary(slog.Default())
 	cases := []string{
-		"/kacho.cloud.iam.v1.SAKeyService/Issue",
-		"/kacho.cloud.iam.v1.UserService/List",
-		"/kacho.cloud.iam.v1.BreakGlassService/DenyBreakGlass",
+		"/kaname.cloud.iam.v1.SAKeyService/Issue",
+		"/kaname.cloud.iam.v1.UserService/List",
+		"/kaname.cloud.iam.v1.BreakGlassService/DenyBreakGlass",
 	}
 	for _, fm := range cases {
 		t.Run(fm, func(t *testing.T) {

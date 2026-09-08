@@ -16,11 +16,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmodel"
-	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho-iam/internal/modelcompose"
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/modelcompose"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 const probeType = "probemod_alpha"
@@ -125,7 +127,9 @@ func TestIAMMB121_ADegenerateTypeNameIsRefusedNotPanicked(t *testing.T) {
 // на СЕГОДНЯШНЕМ дереве, и подставной манифест утверждал бы о другом мире.
 func deliveredManifests(t *testing.T) []*manifest.Manifest {
 	t.Helper()
-	root := repoRoot(t)
+	// Обход читает манифесты СОСЕДНИХ модулей платформы; в поставку нашего они
+	// не входят by construction.
+	root := platformtree.Require(t)
 	// Состав берётся у ИНДЕКСА git, а не у диска: под services/ на всякой
 	// машине, где поднимали стенд, лежит игнорируемое (распаковки чартов,
 	// отчёты прогонов), и обход по диску сделал бы вердикт свойством рабочего

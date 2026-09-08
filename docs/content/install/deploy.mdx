@@ -9,7 +9,7 @@ import dedent from 'ts-dedent'
 
 # Развёртывание
 
-Kachō IAM — Go-сервис, поставляемый Docker-образом и разворачиваемый в Kubernetes через
+Kaname — Go-сервис, поставляемый Docker-образом и разворачиваемый в Kubernetes через
 Helm-чарт (часть umbrella-стенда платформы). Эта страница описывает сборку образа, зависимости
 рантайма и порядок запуска. Полный набор ключей конфигурации — на странице
 [Конфигурация](/install/configuration).
@@ -19,7 +19,7 @@ Helm-чарт (часть umbrella-стенда платформы). Эта ст
 <table>
   <thead><tr><th>Зависимость</th><th>Роль · обязательность</th></tr></thead>
   <tbody>
-    <tr><td><strong>PostgreSQL</strong></td><td>Хранилище <code>kacho_iam</code> — обязательно</td></tr>
+    <tr><td><strong>PostgreSQL</strong></td><td>Хранилище <code>kaname</code> — обязательно</td></tr>
     <tr><td><strong>Ory Kratos</strong></td><td>Личности и интерактивный вход — для user-флоу</td></tr>
     <tr><td><strong>Ory Hydra</strong></td><td>OAuth 2.0 authorization server — для токенов (SAKey / UserToken)</td></tr>
     <tr><td><strong>api-gateway</strong></td><td>Edge для tenant-трафика (TLS + JWT) — для внешнего доступа</td></tr>
@@ -28,7 +28,7 @@ Helm-чарт (часть umbrella-стенда платформы). Эта ст
 
 ## Сборка образа
 
-Двухстадийная сборка: компиляция Go-бинарей (`kacho-iam` + `kacho-migrator`), затем минимальный
+Двухстадийная сборка: компиляция Go-бинарей (`kaname` + `kaname-migrator`), затем минимальный
 рантайм-образ.
 
 <CodeBlock language="bash">
@@ -38,7 +38,7 @@ Helm-чарт (часть umbrella-стенда платформы). Эта ст
     make build-migrator
 
     # docker-образ
-    docker build -t kacho-iam:dev .
+    docker build -t kaname:dev .
   `}
 </CodeBlock>
 
@@ -46,17 +46,41 @@ Helm-чарт (часть umbrella-стенда платформы). Эта ст
 
 ```mermaid
 flowchart LR
-  mig["init: kacho-migrator up"] --> app["kacho-iam serve"]
+  mig["init: kaname-migrator up"] --> app["kaname serve"]
   app -->|"нужен доступ"| deps["PostgreSQL · Kratos · Hydra"]
 ```
 
-1. **Миграции** — `kacho-migrator up` накатывает схему `kacho_iam` (обычно init-container перед
+1. **Миграции** — `kaname-migrator up` накатывает схему `kaname` (обычно init-container перед
    основным подом).
-2. **Сервис** — `kacho-iam serve` поднимает listener'ы (`:9090` public, `:9091` internal,
+2. **Сервис** — `kaname serve` поднимает listener'ы (`:9090` public, `:9091` internal,
    `:9092` hooks, `:9095` metrics).
 3. **Модель авторизации** — вшита в образ сервиса и выводится из неё при проверке; при
    установке сеются system-роли и cluster-объект. Отдельного хранилища, куда модель надо
    «залить», и переменной с её версией больше нет.
+
+## Установка поверх прежней базы — только чистая
+
+Схема службы называется `kaname`. У установок, поднятых до переименования, она называлась
+`kacho_iam`, и **пути перехода нет**: автоматического переноса служба не делает.
+
+Обнаружив в своей базе схему `kacho_iam`, `kaname serve` **отказывает в старте** — до первой
+записи — и называет в тексте отказа найденную схему, базу и следующий шаг. Это состояние
+окружения, а не дефект продукта: чинит его оператор, и заводить задачу на продукт не нужно.
+
+Почему отказ, а не перенос: без него служба увидела бы пустую схему `kaname`, начала бы
+работать с нуля, а прежние строки остались бы рядом невидимыми — потерю арендатор заметил бы
+по последствиям, а не от продукта. Миграция переименования при этом исполнялась бы в чужой
+базе, за исход которой мы отвечать не можем.
+
+Что делать — одно из двух:
+
+1. **чистая база** — направьте `KANAME_REPOSITORY__POSTGRES__URL` на базу без схемы
+   `kacho_iam` и накатите схему: `kaname-migrator up`;
+2. **та же база** — решив судьбу прежних данных самостоятельно, снимите в ней схему
+   `kacho_iam`. Служба такой операции за оператора не делает.
+
+Отказ наступает и тогда, когда в базе есть **обе** схемы: какую из них читает служба, решал бы
+порядок `search_path`, то есть данные выбирались бы молча.
 
 ## Проверка здоровья
 
@@ -101,10 +125,10 @@ initContainer'ом и прогоняются `up` **на каждом старт
 
 ```bash
 # ДО helm rollback, пока в поде ещё НОВЫЙ образ: у него есть down-файл.
-kubectl -n <namespace> exec deploy/<деплой kacho-iam> -- \
-  /usr/local/bin/kacho-migrator status
-kubectl -n <namespace> exec deploy/<деплой kacho-iam> -- \
-  /usr/local/bin/kacho-migrator down --target <версия, до которой откатываем>
+kubectl -n <namespace> exec deploy/<деплой kaname> -- \
+  /usr/local/bin/kaname-migrator status
+kubectl -n <namespace> exec deploy/<деплой kaname> -- \
+  /usr/local/bin/kaname-migrator down --target <версия, до которой откатываем>
 ```
 
 ### Шаг 3. Вернуть образ
@@ -134,6 +158,6 @@ Down-миграция воссоздаёт схему **пустой**. Стро
 | что | чем |
 |---|---|
 | ревизия релиза вернулась | `helm history <релиз>` — последняя запись со статусом `deployed` |
-| под работает нужным образом | `kubectl -n <namespace> get pod -l app=<деплой kacho-iam> -o jsonpath='{..image}'` |
-| схема на ожидаемой версии | `kacho-migrator status` — головная применённая версия |
+| под работает нужным образом | `kubectl -n <namespace> get pod -l app=<деплой kaname> -o jsonpath='{..image}'` |
+| схема на ожидаемой версии | `kaname-migrator status` — головная применённая версия |
 | зависимости сервиса живы | `readinessProbe` спрашивает `/readyz`, поэтому `kubectl get pods` показывает готовность **по зависимостям**, а не по открытому сокету: под в `0/1` — это отказ зависимости, а не «ещё поднимается» |

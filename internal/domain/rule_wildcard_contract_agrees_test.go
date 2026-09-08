@@ -44,12 +44,12 @@ package domain_test
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // wildcardProbe — производитель ПОВЕДЕНИЯ поля: строит правило, у которого
@@ -217,87 +217,38 @@ func TestRuleWildcardContractAgreesWithTheDomain(t *testing.T) {
 	}
 }
 
-// roleContractRel — координата контракта роли ОТНОСИТЕЛЬНО дерева, которое его
-// несёт. Объявлена здесь и одна.
-var roleContractRel = filepath.Join("proto", "kacho", "cloud", "iam", "v1", "role.proto")
+// roleContractRel — координата контракта роли ОТ КОРНЯ ДЕРЕВА ПЛАТФОРМЫ.
+// Объявлена здесь и одна.
+const roleContractRel = "proto/kaname/cloud/iam/v1/role.proto"
 
-// readRoleContract читает контракт роли из дерева продукта.
+// readRoleContract читает контракт роли — ЛИБО называет третий исход.
 //
-// Контракты живут в `proto/` КОРНЯ и остаются там при выносе iam отдельным
-// репозиторием.
+// # Предпосылку назначает ДЕТЕКТОР ПОСАДКИ, а не наличие файла
+//
+// Контракты живут в `proto/` корня платформы и в поставку модуля не входят BY
+// CONSTRUCTION: у арендатора, склонировавшего модуль, их не будет. Значит здесь
+// два законных исхода, и второй — «условие не создано», а не находка о продукте.
+//
+// Кто их различает — вопрос не оформления. Прежняя редакция поднималась по
+// дереву своим циклом и объявляла условие созданным, ЕСЛИ НАХОДИЛА ФАЙЛ. Клон,
+// стоящий под чужим деревом с той же координатой, читал ЧУЖОЙ контракт и
+// печатал находку о нём — измерено: та же посадка, две пробы, соседняя (через
+// `platformtree`) назвала «УСЛОВИЕ НЕ СОЗДАНО» и вышла кодом 0, эта вынесла
+// вердикт о чужом дереве и вышла кодом 1 (задача #2160).
+//
+// `platformtree.RequirePath` спрашивает ПОСАДКУ — лежит ли модуль в каталоге
+// модулей ЭТОГО дерева, — и потому отвечает одинаково при любом соседе сверху.
+// Заодно у метки третьего исхода остаётся ОДИН производитель: перепись
+// `scripts/test-standalone.sh` считает по ней, и вторая её редакция разошлась бы
+// с первой молча.
 func readRoleContract(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(contractTreeRoot(t), roleContractRel)
+	path := platformtree.RequirePath(t, roleContractRel)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("контракт роли не прочитан (%s): %v", path, err)
 	}
 	return string(b)
-}
-
-// contractTreeRoot — ближайший предок, который НЕСЁТ контракт.
-//
-// # Здесь стоял подъём до ближайшего `go.mod`, и он перестал попадать
-//
-// Пока сервис был пакетом монорепо, ближайший `go.mod` и был корнем, несущим
-// `proto/`. С выносом iam отдельным модулем ближайшим стал `services/iam/go.mod`
-// — каталога `proto/` под ним нет, и гейт перестал выносить вердикт вовсе.
-// Прежний комментарий этот случай ПРЕДСКАЗЫВАЛ («путь меняется вместе с
-// зависимостью»), но подъём остался прежним: предупреждение пережило свой
-// предмет и молчало, потому что отказ выглядел как обычное красное.
-//
-// Якорь теперь — САМ КОНТРАКТ, а не признак модуля: он не зависит от того,
-// сколько `go.mod` лежит по дороге.
-//
-// # Граница названа: отдельный клон сервиса контракта НЕ несёт
-//
-// Тогда его придётся брать из кеша модулей, и это другой вопрос — вопрос ЛИНИИ
-// выноса, а не этого гейта. Здесь такой прогон обязан назваться словами, а не
-// притвориться находкой о дереве.
-func contractTreeRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("рабочий каталог: %v", err)
-	}
-	for i := 0; i < 12; i++ {
-		if _, serr := os.Stat(filepath.Join(dir, roleContractRel)); serr == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	t.Fatalf("НЕ ВЫПОЛНИЛОСЬ: над рабочим каталогом нет дерева, несущего %s — "+
-		"в отдельном клоне сервиса контракт приезжает зависимостью, и читать его "+
-		"из дерева нечем. Это не вердикт о продукте", roleContractRel)
-	return ""
-}
-
-// moduleRootDir — ближайший предок с `go.mod`: корень МОДУЛЯ сервиса.
-//
-// Отдельно от `contractTreeRoot` намеренно: якоря разные. Страница арендатора
-// живёт ВНУТРИ модуля, контракт — НАД ним, и один подъём обслужить оба не может.
-func moduleRootDir(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("рабочий каталог: %v", err)
-	}
-	for i := 0; i < 12; i++ {
-		if _, serr := os.Stat(filepath.Join(dir, "go.mod")); serr == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	t.Fatalf("не найден корень модуля (каталог с go.mod) над %s", dir)
-	return ""
 }
 
 // TestTenantRoleVerbWildcard_BothSides — НАБЛЮДАЕМОЕ поведение, которое

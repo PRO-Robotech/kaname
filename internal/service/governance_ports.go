@@ -7,8 +7,8 @@
 // emit their rows inside that same caller-owned transaction, so each side-effect
 // commits atomically with the mutation that produced it.
 //
-// Service layer defines these ports; adapters in repo/kacho/pg and clients/
-// implement them. Composition root (cmd/kacho-iam/main.go) injects concrete
+// Service layer defines these ports; adapters in repo/kaname/pg and clients/
+// implement them. Composition root (cmd/kaname/main.go) injects concrete
 // implementations.
 package service
 
@@ -16,7 +16,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/outboxtypes"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
 // TxBeginner opens a transaction. The returned handle is the opaque service.Tx
@@ -27,11 +27,11 @@ type TxBeginner interface {
 
 // RelationTuple — {User, Relation, Object} triple for fga_outbox writes.
 // Neutral value type owned by internal/outboxtypes so the repo-ports package
-// (internal/repo/kacho) can reference it without importing this use-case package
+// (internal/repo/kaname) can reference it without importing this use-case package
 // (dependency-rule fix); the alias keeps the ergonomic service.RelationTuple name.
 type RelationTuple = outboxtypes.RelationTuple
 
-// RelationOutboxEmitter — port for emitting kacho_iam.fga_outbox grant/revoke
+// RelationOutboxEmitter — port for emitting kaname.fga_outbox grant/revoke
 // rows from writer-tx-owning code paths. Atomic with the surrounding
 // mutation; the drainer applies tuples to the relation backend asynchronously.
 type RelationOutboxEmitter interface {
@@ -39,7 +39,7 @@ type RelationOutboxEmitter interface {
 	EmitDeleteTx(ctx context.Context, tx Tx, tuples []RelationTuple) error
 }
 
-// ResourceMirrorRow — service-layer payload for one kacho_iam.resource_mirror
+// ResourceMirrorRow — service-layer payload for one kaname.resource_mirror
 // row. OUTPUT-ONLY mirror of the labels + parent-scope of a
 // resource owned by another service (source of truth = owner). Labels nil →
 // persisted as JSONB '{}'.
@@ -60,7 +60,7 @@ type ResourceMirrorRow struct {
 	SourceVersion time.Time
 }
 
-// ResourceMirrorEmitter — port for UPSERT/DELETE of a kacho_iam.resource_mirror
+// ResourceMirrorEmitter — port for UPSERT/DELETE of a kaname.resource_mirror
 // row inside a caller-owned writer-tx. Atomic with the
 // owner-tuple fga_outbox emit (one writer-tx): a rolled-back caller-tx leaves
 // neither the mirror row nor the tuple intent. The mirror-fill path only FILLS
@@ -88,7 +88,7 @@ type ResourceMirrorEmitter interface {
 	DeleteTx(ctx context.Context, tx Tx, objectType, objectID string, tombstone time.Time) error
 }
 
-// AuditEvent — service-layer payload for a durable kacho_iam.audit_outbox
+// AuditEvent — service-layer payload for a durable kaname.audit_outbox
 // compliance row. The repo adapter generates the id (evt_<22-char> — bug #126
 // regression-guard), marshals Payload to the event_payload jsonb, and inserts
 // it with status='pending'. EventType must satisfy the audit_outbox_event_type
@@ -103,7 +103,7 @@ type ResourceMirrorEmitter interface {
 // the alias keeps the ergonomic service.AuditEvent name.
 type AuditEvent = outboxtypes.AuditEvent
 
-// AuditOutboxEmitter — port for emitting one durable kacho_iam.audit_outbox row
+// AuditOutboxEmitter — port for emitting one durable kaname.audit_outbox row
 // inside a caller-owned writer-tx. Atomic with the surrounding security-relevant
 // mutation (запрет #10): the audit row commits iff the mutation commits, so a
 // rolled-back mutation leaves no orphan compliance row and a committed mutation

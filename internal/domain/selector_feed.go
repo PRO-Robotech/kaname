@@ -22,7 +22,7 @@ import "strings"
 type FeedSource int8
 
 const (
-	// FeedMirror — candidates read from kacho_iam.resource_mirror (labels @>
+	// FeedMirror — candidates read from kaname.resource_mirror (labels @>
 	// matchLabels); containment from mirror.parent_* (D7). Mirror-fed types can be
 	// PENDING_VERIFICATION (object not yet mirrored). Consumer-owned resources:
 	// compute / vpc / loadbalancer.

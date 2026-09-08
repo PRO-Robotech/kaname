@@ -9,13 +9,14 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // Таблица «Зарегистрированные RPC-сервисы» в обзоре компонентов обязана СХОДИТЬСЯ
@@ -52,7 +53,7 @@ import (
 // вердикта приёмки — оно судит объявление, а не истинность.
 const (
 	// iamRegisterFileRel — единственное место, где службы садятся на слушатели.
-	iamRegisterFileRel = "services/iam/cmd/kacho-iam/grpc_register.go"
+	iamRegisterFileRel = "services/iam/cmd/kaname/grpc_register.go"
 	// iamOverviewDocRel — документ с таблицей портов.
 	iamOverviewDocRel = "services/iam/docs/engineering/components/00-overview.md"
 
@@ -193,11 +194,10 @@ func sortedKeys(m map[string]bool) []string {
 
 // TestOverviewPortTableMatchesRegistration — несущее утверждение.
 func TestOverviewPortTableMatchesRegistration(t *testing.T) {
-	root := monorepoRoot(t)
 
-	registerSrc, err := os.ReadFile(filepath.Join(root, iamRegisterFileRel)) // #nosec G304 -- путь собран из корня собственного модуля
+	registerSrc, err := os.ReadFile(platformtree.RequirePath(t, iamRegisterFileRel)) // #nosec G304 -- путь собран из корня собственного модуля
 	require.NoError(t, err)
-	doc, err := os.ReadFile(filepath.Join(root, iamOverviewDocRel)) // #nosec G304 -- путь собран из корня собственного модуля
+	doc, err := os.ReadFile(platformtree.RequirePath(t, iamOverviewDocRel)) // #nosec G304 -- путь собран из корня собственного модуля
 	require.NoError(t, err)
 
 	findings, c, err := auditPortTable(string(registerSrc), string(doc))

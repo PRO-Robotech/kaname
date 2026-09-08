@@ -42,7 +42,7 @@ import grpc from 'k6/net/grpc';
 import { check } from 'k6';
 import { Trend, Rate, Counter } from 'k6/metrics';
 
-const ADDR        = __ENV.IAM_ADDR    || 'kacho-iam-internal.kacho.svc:9091';
+const ADDR        = __ENV.IAM_ADDR    || 'kaname-internal.kacho.svc:9091';
 const TARGET_RPS  = parseInt(__ENV.TARGET_RPS || '200', 10);
 const DURATION    = __ENV.DURATION    || '60s';
 const ALLOW_RATIO = parseFloat(__ENV.ALLOW_RATIO || '0.9');
@@ -334,7 +334,7 @@ export default function () {
   if (isDeny) denyInput.add(1);
 
   const started = Date.now();
-  const res = client.invoke('kacho.cloud.iam.v1.InternalIAMService/Check', {
+  const res = client.invoke('kaname.cloud.iam.v1.InternalIAMService/Check', {
     subject_id: t.subject,
     relation: t.relation,
     object: object,

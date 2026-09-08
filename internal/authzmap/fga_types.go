@@ -16,7 +16,7 @@
 // переноса стоит внизу этого файла, там, где жил литерал.
 //
 // Тип обязан быть объявлен в канонической модели
-// `proto/kacho/cloud/iam/v1/fga_model.fga` в такт с манифестом: безусловный гейт
+// `proto/kaname/cloud/iam/v1/fga_model.fga` в такт с манифестом: безусловный гейт
 // дрейфа (fga_model_drift_test.go) роняет сборку на расхождении в любую сторону.
 // Таблица намеренно ЗАКРЫТА — неизвестная пара обязана дать ok=false, а не
 // произвольный тип модели.
@@ -292,7 +292,7 @@ func AllVerbVocabulary() []string {
 // форма, в которой глагол попадает в кортеж.
 const VerbRelationPrefix = "v_"
 
-//go:generate go run github.com/PRO-Robotech/kacho-iam/cmd/authzmap-tables -root ../../../..
+//go:generate go run github.com/PRO-Robotech/kaname/cmd/authzmap-tables -root ../../../..
 
 // ─────────────────────────────────────────────────────────────────────────────
 // НАБОРЫ ДЕЙСТВИЙ ПОРОЖДАЮТСЯ ИЗ МАНИФЕСТОВ — ОДНА ТАБЛИЦА ИЗ ДВУХ (#1092)

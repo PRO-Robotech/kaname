@@ -51,9 +51,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // TestIntegration_SessionRevokedChannelHasNoProducerLeft — регрессия на снятие
@@ -128,7 +128,7 @@ func TestIntegration_AuditEventChannelHasNoProducerLeft(t *testing.T) {
 
 	// Положительный контроль на том же запросе, в том же прогоне.
 	//
-	// Здесь стоял `kacho_iam_fga_outbox` с подписью «канал очереди tuple'ов, у
+	// Здесь стоял `kaname_fga_outbox` с подписью «канал очереди tuple'ов, у
 	// которого слушатель ЕСТЬ», и подпись была ЛОЖНОЙ при зелёной пробе: дренаж
 	// журнала намерений снят вместе с внешним движком отношений, а свёртка прямого
 	// факта синхронна (0098) — будить некого. Сам канал снят миграцией
@@ -137,7 +137,7 @@ func TestIntegration_AuditEventChannelHasNoProducerLeft(t *testing.T) {
 	//
 	// Контроль, потерявший предмет, и есть половина, которая доказывает, что
 	// отрицание рядом не вакуумно, — поэтому он перепривязан к каналу, чей
-	// потребитель ЖИВ и назван прод-кодом (`repo/kacho/pg/reconcile_notify.go`,
+	// потребитель ЖИВ и назван прод-кодом (`repo/kaname/pg/reconcile_notify.go`,
 	// `LISTEN` на reconcileOutboxChannel).
 	//
 	// Имя вынесено в [notifyChannelWithAProvenConsumer], а не выписано литералом,
@@ -154,7 +154,7 @@ func TestIntegration_AuditEventChannelHasNoProducerLeft(t *testing.T) {
 	// Снят был канал, а не журнал; проба, утверждающая только отсутствие канала,
 	// зеленела бы и на миграции, снёсшей вместе с ним весь аудит.
 	var exists bool
-	require.NoError(t, db.QueryRow(`SELECT to_regclass('kacho_iam.audit_outbox') IS NOT NULL`).
+	require.NoError(t, db.QueryRow(`SELECT to_regclass('kaname.audit_outbox') IS NOT NULL`).
 		Scan(&exists))
 	assert.True(t, exists,
 		"журнал аудита обязан остаться: снималось объявление уведомления, а не таблица")
@@ -175,7 +175,7 @@ func freshIamSchema(t *testing.T) *sql.DB {
 }
 
 // notifyChannelsProducedBy — каналы, которые шлёт хоть одна функция ЖИВОГО
-// триггера схемы kacho_iam.
+// триггера схемы kaname.
 //
 // Читается каталог, а не файлы: функция без триггера ничего не шлёт, и триггер,
 // снятый поздней миграцией, производителем не является.
@@ -188,7 +188,7 @@ func notifyChannelsProducedBy(t *testing.T, db *sql.DB) []string {
 		  JOIN pg_class c ON c.oid = tg.tgrelid
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
 		 WHERE NOT tg.tgisinternal
-		   AND n.nspname = 'kacho_iam'
+		   AND n.nspname = 'kaname'
 		   AND p.prosrc ILIKE '%pg_notify%'`)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
@@ -236,7 +236,7 @@ func notifyChannelLiterals(src string) []string {
 // [TestIntegration_EveryProducedNotifyChannelIsNamedByAConsumer] требует
 // потребителя от каждого производимого канала, включая этот. Потеряй он
 // потребителя — краснеет тот гейт, а не подпись в комментарии.
-const notifyChannelWithAProvenConsumer = "kacho_iam_resource_reconcile_outbox"
+const notifyChannelWithAProvenConsumer = "kaname_resource_reconcile_outbox"
 
 // TestIntegration_SubjectChangeChannelHasNoProducerLeft — регрессия на снятие
 // канала журнала смены субъекта (#1398).
@@ -277,7 +277,7 @@ func TestIntegration_SubjectChangeChannelHasNoProducerLeft(t *testing.T) {
 	// его читает потребитель, и проба, утверждающая только отсутствие канала,
 	// зеленела бы и на миграции, снёсшей вместе с ним весь журнал.
 	var exists bool
-	require.NoError(t, db.QueryRow(`SELECT to_regclass('kacho_iam.subject_change_outbox') IS NOT NULL`).
+	require.NoError(t, db.QueryRow(`SELECT to_regclass('kaname.subject_change_outbox') IS NOT NULL`).
 		Scan(&exists))
 	assert.True(t, exists,
 		"журнал смены субъекта обязан остаться: его читает край курсором по id")
@@ -296,7 +296,7 @@ func TestIntegration_SubjectChangeChannelHasNoProducerLeft(t *testing.T) {
 //
 // # Сегодня она ПУСТА, и это цель, а не поломка
 //
-// Единственная её запись прощала `kacho_iam_fga_outbox` (#1436) — канал, чей дренаж
+// Единственная её запись прощала `kaname_fga_outbox` (#1436) — канал, чей дренаж
 // был снят вместе с внешним движком отношений. Прощение прожило ровно до того, как
 // предмет сняли: триггер убран миграцией 20260829123045, регрессия —
 // notify_channel_intent_journal_integration_test.go. Схема канала больше не
@@ -326,7 +326,7 @@ var notifyChannelConsumerExemptions = map[string]string{}
 // шапке и имя типа исключены BY CONSTRUCTION.
 //
 // Контроль предиката, ради которого выбрана эта форма: текстовый поиск
-// `"kacho_iam_fga_outbox"` по не-тестовым файлам Go находит ДВА вхождения, и оба —
+// `"kaname_fga_outbox"` по не-тестовым файлам Go находит ДВА вхождения, и оба —
 // комментарии (`pkg/outbox/drainer/doc.go`, пример объявления; `drainer.go`,
 // пояснение поля). Текстовый предикат объявил бы у этого канала потребителя,
 // которого нет, — то есть промолчал бы ровно на предмете гейта.

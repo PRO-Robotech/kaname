@@ -20,16 +20,16 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
 )
 
-const clusterGetMethod = "/kacho.cloud.iam.v1.InternalClusterService/Get"
+const clusterGetMethod = "/kaname.cloud.iam.v1.InternalClusterService/Get"
 
 // refinedCatalog reflects the post-refinement acr values for the gateway-fronted
 // cluster RPCs: GrantAdmin/RevokeAdmin stay "2", Get/ListAdmins downgrade to "1".
 func refinedCatalog() fakeACRCatalog {
 	return fakeACRCatalog{
-		"kacho.cloud.iam.v1.InternalClusterService/GrantAdmin":  "2",
-		"kacho.cloud.iam.v1.InternalClusterService/RevokeAdmin": "2",
-		"kacho.cloud.iam.v1.InternalClusterService/Get":         "1",
-		"kacho.cloud.iam.v1.InternalClusterService/ListAdmins":  "1",
+		"kaname.cloud.iam.v1.InternalClusterService/GrantAdmin":  "2",
+		"kaname.cloud.iam.v1.InternalClusterService/RevokeAdmin": "2",
+		"kaname.cloud.iam.v1.InternalClusterService/Get":         "1",
+		"kaname.cloud.iam.v1.InternalClusterService/ListAdmins":  "1",
 	}
 }
 

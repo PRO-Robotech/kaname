@@ -52,7 +52,7 @@ CRUD fixture dependency:
 
 Operation envelope:
   Mutations return `operation.Operation` with id prefix `iop`.
-  Poll hits /operations/{id} via OpsProxy (iop* → kacho-iam).
+  Poll hits /operations/{id} via OpsProxy (iop* → kaname).
 
 Case IDs follow the IAM-USR-<RPC>-<CLASS>[-detail] scheme.
 
@@ -724,7 +724,7 @@ CASES.append(Case(
 # Пометка означает «кейс ожидаемо КРАСНЫЙ, пока дефект открыт» (ban #13) и выкупает его
 # из «всё обязано быть зелёным». Дефект закрыт (`kacho#105`, COMPLETED 2026-08-07):
 # подсказка мапперу ошибок на вставке выдачи теперь разбирается, и в слот роли попадает
-# сама роль — ветвь FK по роли в `internal/repo/kacho/pg/pgmaperr.go`, регрессия на ТЕКСТ
+# сама роль — ветвь FK по роли в `internal/repo/kaname/pg/pgmaperr.go`, регрессия на ТЕКСТ
 # в `pgmaperr_binding_hint_test.go`. Пометка при этом стояла в одном абзаце с текстом,
 # который сам называл утверждение суженным до идентификатора, — то есть противоречила
 # соседней строке.
@@ -997,7 +997,7 @@ CASES.append(Case(
 # названном объекте. Ярус `viewer` тут был бы слабее и пропустил бы ровно тот
 # дефект, который назван в самом продукте: выдача, эмитировавшая ТОЛЬКО ярус,
 # оставляет приглашённого без `v_get`, то есть с отказом на GET подаренного проекта
-# (services/iam/internal/apps/kacho/api/user/invite.go, порт ObjectReconciler).
+# (services/iam/internal/apps/kaname/api/user/invite.go, порт ObjectReconciler).
 # Роль `view` несёт `read/list/get` на `*.*`, а выдача создаётся без пообъектного
 # сужения (`allInScope`), поэтому глаголы материализуются и НА САМОМ объекте
 # области (reconcile.desiredRuleMembers → scopeSelfMember).
@@ -1411,7 +1411,7 @@ CASES.append(Case(
 # работать, снять запрет он себе не сможет (самостоятельного пути нет
 # by construction), и остаток прогона поедет на сломанной фикстуре. Наблюдаемый
 # исход поэтому закреплён на настоящей базе и настоящих читателях выдачи
-# (services/iam/internal/apps/kacho/api/audit/user_block_integration_test.go), а
+# (services/iam/internal/apps/kaname/api/audit/user_block_integration_test.go), а
 # здесь — то, что через край проверяемо без порчи общего состояния.
 #
 # ПОЧЕМУ ОТКАЗ НА PENDING — НЕ СЛАБАЯ ПРОБА, А РАЗЛИЧАЮЩАЯ. Ответ
@@ -1944,7 +1944,7 @@ CASES.append(Case(
 # судит СНЯТИЕ СТРОКИ, а не то, что видит вызывающий: между стражем и ответом
 # лежат два слоя, каждый со своим способом разъехаться молча, —
 # отображение 23000 → FAILED_PRECONDITION с контракт-тоном
-# (`repo/kacho/pg/pgmaperr.go`) и доставка отказа ИСХОДОМ ОПЕРАЦИИ, а не
+# (`repo/kaname/pg/pgmaperr.go`) и доставка отказа ИСХОДОМ ОПЕРАЦИИ, а не
 # синхронным кодом (страж отложенный, он срабатывает на КОММИТЕ). Проба
 # репозитория остаётся зелёной при любом расхождении в обоих.
 #

@@ -339,7 +339,7 @@ func TestSeededRole_ListGrantImpliesRead_GateDiscriminates(t *testing.T) {
 // каталог, освободил бы от запрета каждую пару и остался бы зелёным.
 func typesGatedByVGet(t *testing.T) map[string]bool {
 	t.Helper()
-	const rel = "../apps/kacho/seed/embedded/permission_catalog.json"
+	const rel = "../apps/kaname/seed/embedded/permission_catalog.json"
 	b, err := os.ReadFile(rel)
 	if err != nil {
 		t.Fatalf("каталог разрешений не прочитан (%s): %v — без него исключение ниже "+

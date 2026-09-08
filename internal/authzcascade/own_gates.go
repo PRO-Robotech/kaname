@@ -29,7 +29,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
 // Asker — реляционная форма, отвечающая на вопрос о доступе своей базой.

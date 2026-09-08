@@ -19,13 +19,13 @@ import (
 const (
 	// RelationVerdictLabelArmGroundsMetric — прямых вердиктов, чьим основанием
 	// оказалась МЕТОЧНАЯ ВЕТВЬ, по каждой оси отдельно.
-	RelationVerdictLabelArmGroundsMetric = "kacho_iam_relation_verdict_label_arm_grounds_total"
+	RelationVerdictLabelArmGroundsMetric = "kaname_relation_verdict_label_arm_grounds_total"
 	// RelationVerdictEarlyStopsMetric — прямых вердиктов, ответивших ДО того,
 	// как набор источников дочитан. Знаменатель к ряду выше.
-	RelationVerdictEarlyStopsMetric = "kacho_iam_relation_verdict_early_stopped_total"
+	RelationVerdictEarlyStopsMetric = "kaname_relation_verdict_early_stopped_total"
 	// RelationVerdictUndeclaredTypeDenialsMetric — отказов, данных по основанию
 	// «типа объекта нет в словаре модели».
-	RelationVerdictUndeclaredTypeDenialsMetric = "kacho_iam_relation_verdict_undeclared_type_denials_total"
+	RelationVerdictUndeclaredTypeDenialsMetric = "kaname_relation_verdict_undeclared_type_denials_total"
 )
 
 // Оси меточной ветви — ЗАКРЫТЫЙ набор клеток своего семейства.

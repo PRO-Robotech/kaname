@@ -14,6 +14,7 @@ package publicauthzcensus
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -182,5 +183,64 @@ func (h *Handler) Create(ctx context.Context) error {
 	if ev == "" {
 		t.Fatal("обход не вошёл в функцию пакета, одноимённую методу приёмника: " +
 			"свидетельство теряется молча")
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ФОРМА РЕШАТЕЛЯ, КОТОРУЮ РАСПОЗНАВАТЕЛЬ ДОЛГО НЕ ЗНАЛ
+//
+// Причина `HANDLER_DECIDES` допускает две формы, и вторая — чтение, суженное
+// владельцем, — сильнее вопроса к модели: предикат владения уходит доводом в
+// сам запрос, поэтому чужая строка не читается вовсе. Пока распознаватель знал
+// только первую, он МОЛЧАЛ на второй, и служба операций уезжала в «без двери»
+// при живом и более крепком решателе.
+
+func TestOwnershipScopedReadCountsAsAHandlerDecider(t *testing.T) {
+	idx := servingPackage(t, `owner, _ := operations.OwnerFromContext(ctx)
+	_, _ = u.store.GetOwned(ctx, "iop-1", owner)`)
+	ev, resolved := idx.findOnServingPath("Create", handlerDecidesMatcher)
+	if !resolved {
+		t.Fatal("метод обработчика не разрешился — вердикта нет ни в одну сторону")
+	}
+	if ev == "" {
+		t.Fatal("чтение, суженное владельцем, не зачтено за решателя: предикат владения " +
+			"стоит доводом запроса, то есть чужая строка не читается вовсе — это строго " +
+			"сильнее вопроса после чтения")
+	}
+	if !strings.Contains(ev, "GetOwned") {
+		t.Fatalf("находка не называет форму решателя: %q", ev)
+	}
+}
+
+// TestABareOwnerReadIsNotADecider — АНТИ-ЗАЧЁТ.
+//
+// Чтение владельца из контекста решения не производит: оно лишь узнаёт, кто
+// звонит. Зачесть его значило бы принять за решателя ту самую аутентификацию,
+// которую шапка пакета отвергает прямо.
+func TestABareOwnerReadIsNotADecider(t *testing.T) {
+	idx := servingPackage(t, `owner, _ := operations.OwnerFromContext(ctx)
+	_ = owner`)
+	ev, resolved := idx.findOnServingPath("Create", handlerDecidesMatcher)
+	if !resolved {
+		t.Fatal("метод обработчика не разрешился — вердикта нет ни в одну сторону")
+	}
+	if ev != "" {
+		t.Fatalf("чтение владельца зачтено за решателя: %q — гейт стал формой без содержания", ev)
+	}
+}
+
+// TestOwnershipScopedReadWithoutTheOwnerArgumentIsNotADecider — ГРАНИЦА ФОРМЫ.
+//
+// Суффикс имени сам по себе решателем не является: предикат владения обязан
+// быть ДОВОДОМ запроса. Чтение без него сужает по чему угодно, только не по
+// владельцу.
+func TestOwnershipScopedReadWithoutTheOwnerArgumentIsNotADecider(t *testing.T) {
+	idx := servingPackage(t, `_, _ = u.store.GetOwned(ctx)`)
+	ev, resolved := idx.findOnServingPath("Create", handlerDecidesMatcher)
+	if !resolved {
+		t.Fatal("метод обработчика не разрешился — вердикта нет ни в одну сторону")
+	}
+	if ev != "" {
+		t.Fatalf("чтение без довода-владельца зачтено за решателя: %q", ev)
 	}
 }

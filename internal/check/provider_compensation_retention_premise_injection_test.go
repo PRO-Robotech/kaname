@@ -30,7 +30,7 @@ import "x/reconciler"
 
 func wire(pool any) {
 	rc, _ := reconciler.NewRedriveOnly(pool, reconciler.Config{
-		Table:           "kacho_iam.provider_compensation_outbox",
+		Table:           "kaname.provider_compensation_outbox",
 		PartitionColumn: "resource_id",
 	})
 	_ = rc

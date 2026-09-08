@@ -34,8 +34,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
 	"github.com/PRO-Robotech/kacho/pkg/ids"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // Отказы выпуска. Каждый — ОТДЕЛЬНЫЙ, потому что вызывающий на них отвечает

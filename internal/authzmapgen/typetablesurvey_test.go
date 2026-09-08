@@ -27,10 +27,11 @@ package authzmapgen_test
 // значения которой суть типы модели, объявленные манифестами.
 
 import (
-	"path/filepath"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmapgen"
+	"github.com/PRO-Robotech/kaname/internal/authzmapgen"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // authzmapPackageDir — каталог продукта от корня репозитория.
@@ -52,14 +53,14 @@ const handWrittenTypeTablesRemaining = 0
 // TestTypeTablesGeneratedCountIsMeasuredNotClaimed — #1092: «порождено две из
 // двух» есть ИЗМЕРЕНИЕ, и вот оно.
 func TestTypeTablesGeneratedCountIsMeasuredNotClaimed(t *testing.T) {
-	tables, err := authzmapgen.Collect(repoRoot)
+	tables, err := authzmapgen.Collect(platformtree.Require(t))
 	if err != nil {
 		t.Fatalf("обход манифестов не состоялся (%v) — предпосылка гейта исчезла, "+
 			"а не дерево стало чистым", err)
 	}
 
 	survey, err := authzmapgen.SurveyTypeTables(
-		filepath.Join(repoRoot, filepath.FromSlash(authzmapPackageDir)), tables.ObjectTypeSet())
+		platformtree.RequirePath(t, authzmapPackageDir), tables.ObjectTypeSet())
 	if err != nil {
 		t.Fatalf("обход пакета продукта: %v", err)
 	}

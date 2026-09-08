@@ -46,14 +46,14 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // CRED-RCL-29 (первая половина) — авторитетные величины умолчания в дереве
 // равны пересмотренным `12` и `24`.
 //
-// Читается АВТОРИТЕТ (`kacho_iam.limits`, область `DEFAULT`, не отозванные), а
+// Читается АВТОРИТЕТ (`kaname.limits`, область `DEFAULT`, не отозванные), а
 // не снимок в строке учёта: снимок правится мутацией и мог бы нести верное число
 // при неверном авторитете — тогда следующий заведённый носитель получил бы
 // прежний предел, и заметить это было бы нечем.
@@ -83,7 +83,7 @@ func TestCredRcl29_CeilingDefaultsInTheTreeAreTheRevisedOnes(t *testing.T) {
 
 	var live int
 	require.NoError(t, db.QueryRow(
-		`SELECT count(*) FROM kacho_iam.limits`+kindsFilter).Scan(&live))
+		`SELECT count(*) FROM kaname.limits`+kindsFilter).Scan(&live))
 	require.Equal(t, 2, live,
 		"живых объявлений умолчания на виды удостоверения обязано быть РОВНО два: "+
 			"меньше — предел на вид не назначен вовсе; больше — рядом лежит второе "+
@@ -91,7 +91,7 @@ func TestCredRcl29_CeilingDefaultsInTheTreeAreTheRevisedOnes(t *testing.T) {
 			"строк, а не решение продукта")
 
 	defaults := map[string]int64{}
-	rows, err := db.Query(`SELECT kind, limit_value FROM kacho_iam.limits` + kindsFilter)
+	rows, err := db.Query(`SELECT kind, limit_value FROM kaname.limits` + kindsFilter)
 	require.NoError(t, err)
 	for rows.Next() {
 		var k string
@@ -144,7 +144,7 @@ func TestCredRcl29_TheRevisedCeilingIsTheOneThatChargingUses(t *testing.T) {
 
 	var used, limit int64
 	require.NoError(t, db.QueryRow(`
-		SELECT used, limit_value FROM kacho_iam.project_resource_quotas
+		SELECT used, limit_value FROM kaname.project_resource_quotas
 		 WHERE carrier_type = 'iam.user' AND carrier_id = 'usr00000000000000bat'
 		   AND kind = 'iam.user.credential'`).Scan(&used, &limit))
 	require.EqualValues(t, 11, used, "списание обязано учесть все одиннадцать")

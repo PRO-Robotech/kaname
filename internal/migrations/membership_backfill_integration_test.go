@@ -45,7 +45,7 @@
 //
 // Она применяла цепочку до `470001`, откатывала ОДИН шаг и требовала, чтобы
 // после него не осталось ни таблицы членств, ни зеркала, ни его функций, а
-// строки людей были целы. Обратный ход свода — `DROP SCHEMA kacho_iam CASCADE`,
+// строки людей были целы. Обратный ход свода — `DROP SCHEMA kaname CASCADE`,
 // и он объявляет это прямо: «свод откатывается только целиком». Пошагового
 // отката, о котором проба говорила, в дереве нет ни в какой форме, поэтому она
 // снята вместе со своим предметом. Сценарий приёмки IAM-ID-1-50 остался без
@@ -84,13 +84,13 @@ func seedUser(t *testing.T, db *sql.DB, tag, inviteStatus string) (userID, accou
 	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.Exec(`
-		INSERT INTO kacho_iam.users (id, external_id, email, display_name, account_id, invite_status)
+		INSERT INTO kaname.users (id, external_id, email, display_name, account_id, invite_status)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
 		userID, externalID, tag+"@example.test", "User "+tag, accountID, inviteStatus)
 	require.NoError(t, err, "посев строки класса %s", inviteStatus)
 
 	_, err = tx.Exec(`
-		INSERT INTO kacho_iam.accounts (id, name, owner_user_id)
+		INSERT INTO kaname.accounts (id, name, owner_user_id)
 		VALUES ($1, $2, $3)`,
 		accountID, "acc-"+tag, userID)
 	require.NoError(t, err, "посев аккаунта для класса %s", inviteStatus)
@@ -120,7 +120,7 @@ func TestIntegration_MembershipBackfillIsBijective(t *testing.T) {
 	// зеленеет, не посмотрев ни на одну строку (issue #510).
 	var seededByMigrations int
 	require.NoError(t, db.QueryRowContext(ctx,
-		`SELECT count(*) FROM kacho_iam.users`).Scan(&seededByMigrations))
+		`SELECT count(*) FROM kaname.users`).Scan(&seededByMigrations))
 	require.Positive(t, seededByMigrations,
 		"посевных строк обязано быть не ноль: на пустой таблице каждое утверждение "+
 			"ниже истинно тождественно, и проба зеленела бы при полностью отсутствующем бэкфилле")
@@ -135,7 +135,7 @@ func TestIntegration_MembershipBackfillIsBijective(t *testing.T) {
 
 	var usersBefore int
 	require.NoError(t, db.QueryRowContext(ctx,
-		`SELECT count(*) FROM kacho_iam.users`).Scan(&usersBefore))
+		`SELECT count(*) FROM kaname.users`).Scan(&usersBefore))
 
 	// Взаимная однозначность «одно членство на строку» — свойство ЭТОГО дерева,
 	// а не вечный инвариант: работа, дающая человеку ВТОРОЕ членство, ведётся
@@ -149,14 +149,14 @@ func TestIntegration_MembershipBackfillIsBijective(t *testing.T) {
 		k1Active, k2Pending, k3Blocked int
 	)
 	require.NoError(t, db.QueryRowContext(ctx,
-		`SELECT count(*) FROM kacho_iam.users`).Scan(&usersAfter))
+		`SELECT count(*) FROM kaname.users`).Scan(&usersAfter))
 	require.NoError(t, db.QueryRowContext(ctx,
-		`SELECT count(*) FROM kacho_iam.memberships`).Scan(&memberships))
+		`SELECT count(*) FROM kaname.memberships`).Scan(&memberships))
 	require.NoError(t, db.QueryRowContext(ctx, `
 		SELECT count(*) FILTER (WHERE invite_status = 'ACTIVE'),
 		       count(*) FILTER (WHERE invite_status = 'PENDING'),
 		       count(*) FILTER (WHERE invite_status = 'BLOCKED')
-		  FROM kacho_iam.users`).Scan(&k1Active, &k2Pending, &k3Blocked)) //nolint:gosec // счётчики переписи
+		  FROM kaname.users`).Scan(&k1Active, &k2Pending, &k3Blocked)) //nolint:gosec // счётчики переписи
 	t.Logf("перепись: строк пользователей %d (К1 активен %d · К2 приглашён %d · К3 заблокирован %d), "+
 		"членств %d, из них посевных строк до пробы %d",
 		usersAfter, k1Active, k2Pending, k3Blocked, memberships, seededByMigrations)
@@ -178,16 +178,16 @@ func TestIntegration_MembershipBackfillIsBijective(t *testing.T) {
 
 	var membershipsWithoutUser int
 	require.NoError(t, db.QueryRowContext(ctx, `
-		SELECT count(*) FROM kacho_iam.memberships m
-		 WHERE NOT EXISTS (SELECT 1 FROM kacho_iam.users u WHERE u.id = m.user_id)`).
+		SELECT count(*) FROM kaname.memberships m
+		 WHERE NOT EXISTS (SELECT 1 FROM kaname.users u WHERE u.id = m.user_id)`).
 		Scan(&membershipsWithoutUser))
 	require.Zero(t, membershipsWithoutUser, "членство без строки пользователя")
 
 	// ── IAM-ID-1-11: членство ведёт В ТОТ ЖЕ аккаунт, что и колонка ──────────
 	var mismatched int
 	require.NoError(t, db.QueryRowContext(ctx, `
-		SELECT count(*) FROM kacho_iam.users u
-		  JOIN kacho_iam.memberships m ON m.user_id = u.id
+		SELECT count(*) FROM kaname.users u
+		  JOIN kaname.memberships m ON m.user_id = u.id
 		 WHERE m.account_id <> u.account_id`).Scan(&mismatched))
 	require.Zero(t, mismatched,
 		"членство обязано вести в тот же аккаунт, что стоит в снимаемой колонке — "+
@@ -218,7 +218,7 @@ func TestIntegration_MembershipBackfillIsBijective(t *testing.T) {
 	// запрос сломан. Снимаем одно членство и требуем, чтобы предикат нашёл
 	// ровно его.
 	_, err := db.ExecContext(ctx,
-		`DELETE FROM kacho_iam.memberships WHERE user_id = $1`, activeUser)
+		`DELETE FROM kaname.memberships WHERE user_id = $1`, activeUser)
 	require.NoError(t, err)
 	found := usersMissingMembership(t, db)
 	require.Equal(t, []string{activeUser}, found,
@@ -229,8 +229,8 @@ func TestIntegration_MembershipBackfillIsBijective(t *testing.T) {
 func usersMissingMembership(t *testing.T, db *sql.DB) []string {
 	t.Helper()
 	rows, err := db.Query(`
-		SELECT u.id FROM kacho_iam.users u
-		 WHERE NOT EXISTS (SELECT 1 FROM kacho_iam.memberships m WHERE m.user_id = u.id)
+		SELECT u.id FROM kaname.users u
+		 WHERE NOT EXISTS (SELECT 1 FROM kaname.memberships m WHERE m.user_id = u.id)
 		 ORDER BY u.id`)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
@@ -248,7 +248,7 @@ func membershipState(t *testing.T, db *sql.DB, userID string) string {
 	t.Helper()
 	var st string
 	require.NoError(t, db.QueryRow(
-		`SELECT state FROM kacho_iam.memberships WHERE user_id = $1`, userID).Scan(&st))
+		`SELECT state FROM kaname.memberships WHERE user_id = $1`, userID).Scan(&st))
 	return st
 }
 
@@ -256,7 +256,7 @@ func membershipAccount(t *testing.T, db *sql.DB, userID string) string {
 	t.Helper()
 	var acc string
 	require.NoError(t, db.QueryRow(
-		`SELECT account_id FROM kacho_iam.memberships WHERE user_id = $1`, userID).Scan(&acc))
+		`SELECT account_id FROM kaname.memberships WHERE user_id = $1`, userID).Scan(&acc))
 	return acc
 }
 
@@ -264,6 +264,6 @@ func inviteStatus(t *testing.T, db *sql.DB, userID string) string {
 	t.Helper()
 	var st string
 	require.NoError(t, db.QueryRow(
-		`SELECT invite_status FROM kacho_iam.users WHERE id = $1`, userID).Scan(&st))
+		`SELECT invite_status FROM kaname.users WHERE id = $1`, userID).Scan(&st))
 	return st
 }

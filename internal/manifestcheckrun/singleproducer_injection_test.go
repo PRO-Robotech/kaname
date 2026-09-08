@@ -84,7 +84,7 @@ func writeTree(t *testing.T, files map[string]string) *treecorpus.Tree {
 // Второе утверждение несущее: молчание на пустом обходе доказывало бы, что
 // гейт ничего не читал, а не что дерево цело.
 func TestSingleProducerGateStaysSilentOnALawfulTree(t *testing.T) {
-	findings, filesRead := auditCallers(t, writeTree(t, lawfulTree()))
+	findings, filesRead := auditCallers(t, writeTree(t, lawfulTree()), "services/iam")
 	if filesRead == 0 {
 		t.Fatal("обход законного близнеца прочитал НОЛЬ файлов — молчание беспредметно")
 	}
@@ -154,7 +154,7 @@ func Collect(root string) int { return manifest.CheckTreeForGeneration(root) }
 		t.Run(tc.name, func(t *testing.T) {
 			files := lawfulTree()
 			tc.mutate(files)
-			findings, filesRead := auditCallers(t, writeTree(t, files))
+			findings, filesRead := auditCallers(t, writeTree(t, files), "services/iam")
 			if filesRead == 0 {
 				t.Fatal("обход прочитал НОЛЬ файлов — вердикт беспредметен")
 			}
@@ -169,4 +169,51 @@ func Collect(root string) int { return manifest.CheckTreeForGeneration(root) }
 			}
 		})
 	}
+}
+
+// TestSingleProducerGateJudgesTheSameTreeInBothPostures — ОСЬ ПОСАДКИ.
+//
+// Дерево то же по существу и отличается РОВНО ОДНИМ фактом: в самостоятельном
+// клоне файлы модуля лежат от его собственного корня, без приставки
+// `services/iam`. Гейт обязан судить их так же — иначе у арендатора он краснел
+// бы на исправной композиции, и красное у КАЖДОГО, кто склонирует, вердиктом о
+// продукте не является.
+//
+// Отрицательная половина рядом обязательна: без неё молчание доказывало бы, что
+// гейт в этой посадке не читает НИЧЕГО.
+func TestSingleProducerGateJudgesTheSameTreeInBothPostures(t *testing.T) {
+	strip := func(in map[string]string) map[string]string {
+		out := map[string]string{}
+		for rel, body := range in {
+			out[strings.TrimPrefix(rel, "services/iam/")] = body
+		}
+		return out
+	}
+
+	t.Run("законный близнец в посадке клона — молчание, обход НЕ пуст", func(t *testing.T) {
+		findings, filesRead := auditCallers(t, writeTree(t, strip(lawfulTree())), "")
+		if filesRead == 0 {
+			t.Fatal("обход прочитал НОЛЬ файлов — молчание беспредметно")
+		}
+		if len(findings) != 0 {
+			t.Fatalf("гейт краснеет на исправной композиции в посадке клона (прочитано %d):\n\t%s",
+				filesRead, strings.Join(findings, "\n\t"))
+		}
+		t.Logf("перепись посадки клона: прочитано файлов Go %d · находок 0", filesRead)
+	})
+
+	t.Run("тот же дефект в посадке клона — находка", func(t *testing.T) {
+		files := strip(lawfulTree())
+		files["cmd/iamctl/main.go"] = "package main\n\nfunc main() {}\n"
+		findings, filesRead := auditCallers(t, writeTree(t, files), "")
+		if filesRead == 0 {
+			t.Fatal("обход прочитал НОЛЬ файлов — вердикт беспредметен")
+		}
+		if len(findings) == 0 {
+			t.Fatalf("гейт МОЛЧИТ на внесённом дефекте в посадке клона (прочитано %d)", filesRead)
+		}
+		if !strings.Contains(strings.Join(findings, " "), "cmd/iamctl") {
+			t.Fatalf("находка не называет предмет:\n\t%s", strings.Join(findings, "\n\t"))
+		}
+	})
 }

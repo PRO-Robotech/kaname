@@ -54,7 +54,7 @@ func TestIntegration_RoleVerbTypeFormAgreesWithItsKey(t *testing.T) {
 	err := db.QueryRow(`
 		SELECT conname, pg_get_constraintdef(oid)
 		  FROM pg_constraint
-		 WHERE conrelid = 'kacho_iam.role_verb'::regclass
+		 WHERE conrelid = 'kaname.role_verb'::regclass
 		   AND contype = 'f'
 		   AND conname = 'role_verb_type_fk'`).Scan(&conname, &condef)
 	require.NoError(t, err,
@@ -71,9 +71,9 @@ func TestIntegration_RoleVerbTypeFormAgreesWithItsKey(t *testing.T) {
 	// ── половина 2: КОММЕНТАРИЙ, который читает человек. ─────────────────────
 	var comment sql.NullString
 	err = db.QueryRow(`
-		SELECT col_description('kacho_iam.role_verb'::regclass, a.attnum)
+		SELECT col_description('kaname.role_verb'::regclass, a.attnum)
 		  FROM pg_attribute a
-		 WHERE a.attrelid = 'kacho_iam.role_verb'::regclass
+		 WHERE a.attrelid = 'kaname.role_verb'::regclass
 		   AND a.attname  = 'object_type'`).Scan(&comment)
 	require.NoError(t, err, "колонки object_type нет вовсе")
 

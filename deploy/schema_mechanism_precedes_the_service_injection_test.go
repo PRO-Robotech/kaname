@@ -42,7 +42,12 @@ type injectionCase struct {
 func copyChartFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	src := filepath.Join("..", "..", "..", "services", "iam")
+	// Источник — СОБСТВЕННЫЙ модуль пробы, найденный подъёмом до маркера
+	// (tree_root_test.go), а не сложенный из `..`: у поставки сегмента
+	// `services/iam` не существует, и фикстура там не собиралась вовсе —
+	// восемь случаев подряд падали «Dockerfile не прочитан», то есть
+	// доказательство способности упасть не исполнялось ни разу.
+	src := serviceRoot(t)
 	dst := filepath.Join(root, "services", "iam")
 
 	for _, rel := range []string{
@@ -97,10 +102,10 @@ func replaceOnce(t *testing.T, body, old, new string) string {
 }
 
 const (
-	migratorCommandLine = `          command: ["/usr/local/bin/kacho-migrator", "up"]`
-	serviceCommandLine  = `          command: ["/usr/local/bin/kacho-iam", "serve"]`
+	migratorCommandLine = `          command: ["/usr/local/bin/kaname-migrator", "up"]`
+	serviceCommandLine  = `          command: ["/usr/local/bin/kaname", "serve"]`
 	initImageLine       = `          image: "{{ .Values.image }}"`
-	dockerfileCopyLine  = `COPY --from=builder /kacho-migrator /usr/local/bin/kacho-migrator`
+	dockerfileCopyLine  = `COPY --from=builder /kaname-migrator /usr/local/bin/kaname-migrator`
 )
 
 func TestSchemaMechanismInjection(t *testing.T) {
@@ -182,6 +187,55 @@ func TestSchemaMechanismInjection(t *testing.T) {
 			wantSubstring: "",
 		},
 		{
+			// Ось ПРОДУКТА (#2245). Накатчик переименован ОБЕИМИ сторонами разом —
+			// чарт зовёт и Dockerfile кладёт одно и то же новое имя. Проба обязана
+			// молчать: её предмет — СВЯЗЬ между сторонами, а не имя, которое она
+			// когда-то выписала у себя. До #2245 здесь стоял литерал на всё дерево,
+			// и этот вход давал ложную находку у пяти чартов платформы из шести.
+			//
+			// Имя подставляется ПОСТОРОННЕЕ, а не имя платформы, и это решение:
+			// предмет случая — независимость от имени, поэтому имя, чем-либо
+			// нагруженное, доказывало бы у́же. Держатель, судящий ИМЯ платформы на
+			// витрине Kaname, — соседний, и его инъекция подставляет именно её.
+			name: "накатчик назван ПОСТОРОННИМ именем обеими сторонами — молчание",
+			mutate: func(t *testing.T, root string) {
+				b := readFixture(t, root, "deploy/templates/deployment.yaml")
+				b = replaceOnce(t, b, migratorCommandLine,
+					`          command: ["/usr/local/bin/legacy-migrator", "up"]`)
+				writeFixture(t, root, "deploy/templates/deployment.yaml", b)
+				d := readFixture(t, root, "Dockerfile")
+				d = replaceOnce(t, d, dockerfileCopyLine,
+					`COPY --from=builder /legacy-migrator /usr/local/bin/legacy-migrator`)
+				writeFixture(t, root, "Dockerfile", d)
+			},
+			wantSubstring: "",
+		},
+		{
+			// Тот же вход, изменён РОВНО ОДИН факт против случая выше — сторону
+			// сборки не переименовали. Связь порвана, и проба обязана назвать это.
+			name: "переименована одна сторона из двух — находка",
+			mutate: func(t *testing.T, root string) {
+				b := readFixture(t, root, "deploy/templates/deployment.yaml")
+				b = replaceOnce(t, b, migratorCommandLine,
+					`          command: ["/usr/local/bin/legacy-migrator", "up"]`)
+				writeFixture(t, root, "deploy/templates/deployment.yaml", b)
+			},
+			wantSubstring: "неисполнимая возможность",
+		},
+		{
+			// Путь, чьё имя на `migrator` НЕ оканчивается, накатчиком не является:
+			// иначе проба засчитала бы механизмом любой init-контейнер, и снятие
+			// наката прошло бы молча.
+			name: "init-контейнер зовёт не накатчик — находка",
+			mutate: func(t *testing.T, root string) {
+				b := readFixture(t, root, "deploy/templates/deployment.yaml")
+				b = replaceOnce(t, b, migratorCommandLine,
+					`          command: ["/usr/local/bin/kaname", "serve"]`)
+				writeFixture(t, root, "deploy/templates/deployment.yaml", b)
+			},
+			wantSubstring: "ни один init-контейнер не зовёт",
+		},
+		{
 			// Тот же вход, изменён РОВНО ОДИН факт против случая выше — умолчание
 			// ручки. Установка с умолчаниями перестаёт создавать схему.
 			name: "та же ручка, умолчание false — находка",
@@ -202,7 +256,7 @@ func TestSchemaMechanismInjection(t *testing.T) {
 			root := copyChartFixture(t)
 			tc.mutate(t, root)
 
-			audits, findings, err := auditSchemaMechanism(root)
+			audits, findings, err := auditSchemaMechanism("", root)
 			if err != nil {
 				t.Fatalf("обход не состоялся: %v", err)
 			}
@@ -244,7 +298,7 @@ func TestSchemaMechanismInjection(t *testing.T) {
 // TestSchemaMechanismEmptyTraversalIsNotGreen — обход, которому нечего читать,
 // обязан быть отличим от обхода без находок.
 func TestSchemaMechanismEmptyTraversalIsNotGreen(t *testing.T) {
-	audits, findings, err := auditSchemaMechanism(t.TempDir())
+	audits, findings, err := auditSchemaMechanism("", t.TempDir())
 	if err != nil {
 		t.Fatalf("обход не состоялся: %v", err)
 	}

@@ -69,13 +69,13 @@ func seedUserInAccount(t *testing.T, db *sql.DB, tag, email, externalID, inviteS
 	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.Exec(`
-		INSERT INTO kacho_iam.users (id, external_id, email, display_name, account_id, invite_status)
+		INSERT INTO kaname.users (id, external_id, email, display_name, account_id, invite_status)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
 		userID, externalID, email, "User "+tag, accountID, inviteStatus)
 	require.NoError(t, err, "посев строки %s", tag)
 
 	_, err = tx.Exec(`
-		INSERT INTO kacho_iam.accounts (id, name, owner_user_id)
+		INSERT INTO kaname.accounts (id, name, owner_user_id)
 		VALUES ($1, $2, $3)`,
 		accountID, "acc-"+tag, userID)
 	require.NoError(t, err, "посев аккаунта для %s", tag)
@@ -97,7 +97,7 @@ func TestIntegration_GlobalUniquenessHoldsAfterMigration(t *testing.T) {
 	// Перепись: на пустой таблице каждое утверждение ниже истинно тождественно.
 	var seeded int
 	require.NoError(t, db.QueryRowContext(ctx,
-		`SELECT count(*) FROM kacho_iam.users`).Scan(&seeded))
+		`SELECT count(*) FROM kaname.users`).Scan(&seeded))
 	require.Positive(t, seeded,
 		"посевных строк обязано быть не ноль — иначе проба зеленеет, не прочитав ничего")
 	t.Logf("перепись: строк пользователей после цепочки %d; ключи глобальны", seeded)
@@ -110,11 +110,11 @@ func TestIntegration_GlobalUniquenessHoldsAfterMigration(t *testing.T) {
 	tx, err := db.Begin()
 	require.NoError(t, err)
 	_, err = tx.Exec(`
-		INSERT INTO kacho_iam.users (id, external_id, email, display_name, account_id, invite_status)
+		INSERT INTO kaname.users (id, external_id, email, display_name, account_id, invite_status)
 		VALUES ($1, '', $2, 'twin', $3, 'PENDING')`,
 		"usr"+fmt.Sprintf("%017s", "twinusr"), "ONE@example.test", twinAcc)
 	if err == nil {
-		_, err = tx.Exec(`INSERT INTO kacho_iam.accounts (id, name, owner_user_id) VALUES ($1,$2,$3)`,
+		_, err = tx.Exec(`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1,$2,$3)`,
 			twinAcc, "acc-twin", "usr"+fmt.Sprintf("%017s", "twinusr"))
 	}
 	if err == nil {
@@ -134,11 +134,11 @@ func TestIntegration_GlobalUniquenessHoldsAfterMigration(t *testing.T) {
 	tx2, err := db.Begin()
 	require.NoError(t, err)
 	_, err = tx2.Exec(`
-		INSERT INTO kacho_iam.users (id, external_id, email, display_name, account_id, invite_status)
+		INSERT INTO kaname.users (id, external_id, email, display_name, account_id, invite_status)
 		VALUES ($1, $2, $3, 'ext twin', $4, 'ACTIVE')`,
 		"usr"+fmt.Sprintf("%017s", "extusr"), "ext-one", "other@example.test", extAcc)
 	if err == nil {
-		_, err = tx2.Exec(`INSERT INTO kacho_iam.accounts (id, name, owner_user_id) VALUES ($1,$2,$3)`,
+		_, err = tx2.Exec(`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1,$2,$3)`,
 			extAcc, "acc-ext", "usr"+fmt.Sprintf("%017s", "extusr"))
 	}
 	if err == nil {

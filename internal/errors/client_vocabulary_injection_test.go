@@ -19,8 +19,8 @@ import (
 )
 
 func TestClientVocabularyGateInjection(t *testing.T) {
-	const clientPkg = "internal/apps/kacho/api/group"
-	const operatorPkg = "internal/apps/kacho/api/internal_iam"
+	const clientPkg = "internal/apps/kaname/api/group"
+	const operatorPkg = "internal/apps/kaname/api/internal_iam"
 
 	t.Run("инъекция: имя слоя в клиентском тексте — находка", func(t *testing.T) {
 		findings, _ := vocabularyFindings([]clientText{

@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // ── MOD-MR-10 ───────────────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ func TestMODMR15RoleIDOfABindingIsResolvedByTheRolesSection(t *testing.T) {
 func TestMODMR36RoleDescriptionIsJudgedByPresenceNotByLength(t *testing.T) {
 	base := "apiVersion: iam/v1\nmodule: iam\nroles:\n" +
 		"  - id: iam.role.edit\n    description: %s\n" +
-		"    tier: {tierType: iam.cluster, tierId: cluster_kacho_root}\n" +
+		"    tier: {tierType: iam.cluster, tierId: cluster_root}\n" +
 		"    rules:\n      - {module: iam, resources: [role], classes: [get, list, update]}\n"
 
 	// Положительный: ДОСЛОВНОЕ назначение живой роли `iam.role.edit` — девять

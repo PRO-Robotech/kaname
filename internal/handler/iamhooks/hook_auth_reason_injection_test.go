@@ -86,7 +86,7 @@ func hookAuthValueDiffers(got, expected string) bool {
 
 // honestRefusal / honestLog — поведение БЕЗ дефекта.
 func honestRefusal(w http.ResponseWriter, _ string) {
-	w.Header().Set("WWW-Authenticate", `Bearer realm="kacho-iam-hooks"`)
+	w.Header().Set("WWW-Authenticate", `Bearer realm="kaname-hooks"`)
 	http.Error(w, `{"error":"invalid_hook_token"}`, http.StatusUnauthorized)
 }
 
@@ -98,7 +98,7 @@ func honestLog(logger *slog.Logger, tag, cause string) {
 
 // oracleRefusal — ИНЪЕКЦИЯ B: причина утекает в ответ (тело различается).
 func oracleRefusal(w http.ResponseWriter, cause string) {
-	w.Header().Set("WWW-Authenticate", `Bearer realm="kacho-iam-hooks"`)
+	w.Header().Set("WWW-Authenticate", `Bearer realm="kaname-hooks"`)
 	http.Error(w, `{"error":"invalid_hook_token","cause":"`+cause+`"}`, http.StatusUnauthorized)
 }
 

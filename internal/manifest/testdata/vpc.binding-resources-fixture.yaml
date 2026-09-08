@@ -28,7 +28,7 @@ seed:
         - {type: group, name: vpc-pool-operators}
       roleId: vpc.addressPoolAdmin
       scopeType: iam.cluster
-      scopeId: cluster_kacho_root
+      scopeId: cluster_root
       target: resources
       resources:
         - {type: vpc.addressPool, id: apl000000000000001}

@@ -80,7 +80,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // GeneratedRelPath — координата порождённого файла от корня репозитория.

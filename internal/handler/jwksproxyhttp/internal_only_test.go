@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/jwksproxyhttp"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/registrytokenhttp"
+	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
+	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 )
 
 // RJU-06 — internal-only lock: the /.well-known/jwks.json route is served ONLY by

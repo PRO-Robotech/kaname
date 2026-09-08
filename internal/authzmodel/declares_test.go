@@ -8,7 +8,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
 )
 
 // declares_test.go — ОДНО суждение на приём и на компиляцию (#1290).

@@ -10,7 +10,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/contractnaming"
 )
 
 // attribution.go — привязка записи каталога прав к ДЕЙСТВИЮ модуля.
@@ -31,8 +32,23 @@ import (
 //     он равен `project`, у административных RPC — `cluster`. То есть ровно у
 //     тех действий, ради которых пакет и написан, он ресурс не называет.
 //
-// Остаётся `fqn`: `kacho.cloud.<модуль>.v1.<Служба>/<Метод>`. Служба называет
-// ресурс, метод — действие, приставка `Internal` — плоскость исполнения.
+// Остаётся `fqn`: `<владелец>.cloud.<модуль>.v1.<Служба>/<Метод>`. Служба
+// называет ресурс, метод — действие, приставка `Internal` — плоскость
+// исполнения.
+//
+// # Владелец пакета НЕ ВЫПИСЫВАЕТСЯ, а спрашивается у объявленного источника
+//
+// До #2168 первый сегмент сверялся с литералом `kacho`. Литерал был верен,
+// пока владелец у всех пакетов был один; служба управления доступом переехала
+// в `kaname.cloud.iam.v1`, и разбор перестал ВИДЕТЬ её записи — все 116. Это
+// не отказ: отказа не было вовсе. Семь ключей закрытой таблицы перестали
+// производиться, 119 записей встали вне формы модуля, а проверки манифеста
+// вышли кодом 0.
+//
+// Владельца объявляет `internal/contractnaming` — там же, где объявлена форма
+// имени пакета целиком, и там же она сверяется с дескриптором контракта.
+// Здесь объявлено ТОЛЬКО то, чего у имени пакета нет: как из имени службы и
+// метода получаются ресурс и действие.
 //
 // # Имя службы даёт ресурс, но НЕ ЕГО НАПИСАНИЕ
 //
@@ -66,16 +82,33 @@ import (
 //
 // # Записи вне популяции НАЗЫВАЮТСЯ, а не отбрасываются
 //
-// Три записи каталога из 346 не несут сегмента версии вовсе
+// Три записи каталога из 350 не несут сегмента версии вовсе
 // (`kacho.cloud.operation.OperationService/Get` и рядом): это платформенные
 // службы, ресурсом модуля они не являются. Отбрось их молча — и «ноль находок»
 // станет неотличимо от «ноль прочитанного».
+//
+// Приставка, за которой в дереве НЕ СТОИТ владельца, — находка ОТДЕЛЬНОГО
+// вида, а не та же самая. Слив их в один вид, разбор отвечал бы «вне формы
+// модуля» и на законную платформенную службу, и на запись, чьего владельца
+// никто не объявлял, — то есть посылал бы читателя чинить форму там, где
+// предмет в принадлежности. Ровно так этот дефект и прожил свою жизнь.
 
 var (
 	// ErrEntryOutsideModuleShape — запись каталога не имеет формы
-	// `<модуль>.v1.<Служба>/<Метод>`: ресурсом модуля она не является.
+	// `<владелец>.cloud.<модуль>.v1.<Служба>/<Метод>`: ресурсом модуля она не
+	// является. Каноничный такой случай — платформенная служба, у которой
+	// сегмента версии нет вовсе.
 	ErrEntryOutsideModuleShape = errors.New(
-		"roleexport: запись каталога вне формы `kacho.cloud.<модуль>.v1.<Служба>/<Метод>`")
+		"roleexport: запись каталога вне формы `<владелец>.cloud.<модуль>.v1.<Служба>/<Метод>`")
+	// ErrEntryOwnerNotDeclared — форма у записи есть, а владельца пакета за этим
+	// модулем дерево не объявляло (`internal/contractnaming`).
+	//
+	// Вид находки отдельный намеренно: «форма не та» и «форма та, владелец
+	// чужой» чинятся в РАЗНЫХ местах, и общий отказ отправлял бы читателя не
+	// туда. Сюда же попадает приставка, ОТСТАВШАЯ от переименования модуля, —
+	// её молчаливый приём и был предметом #2168.
+	ErrEntryOwnerNotDeclared = errors.New(
+		"roleexport: владелец пакета контракта не объявлен за этим модулем")
 	// ErrAttributionNotInjective — две записи каталога дали один ключ
 	// (модуль, ресурс, действие). Правило вывода негодно, и молчать об этом
 	// нельзя: одно из двух действий стало бы невидимым.
@@ -132,9 +165,9 @@ func Attribute(entries []CatalogEntry) ([]Action, []error) {
 	seen := make(map[string]string, len(entries))
 
 	for _, e := range entries {
-		module, resource, verb, internal, ok := splitFQN(e.FQN)
-		if !ok {
-			faults = append(faults, fmt.Errorf("%w: %s", ErrEntryOutsideModuleShape, e.FQN))
+		module, resource, verb, internal, err := splitFQN(e.FQN)
+		if err != nil {
+			faults = append(faults, fmt.Errorf("%w: %s", err, e.FQN))
 			continue
 		}
 		key := module + "." + resource + "." + verb
@@ -163,24 +196,32 @@ func Attribute(entries []CatalogEntry) ([]Action, []error) {
 
 // splitFQN — единственное объявление правила «запись каталога → (модуль,
 // ресурс, действие)».
-func splitFQN(fqn string) (module, resource, verb string, internal, ok bool) {
+//
+// Возвращает ПРИЧИНУ, а не «не вышло»: у отказа два вида, и вызывающий обязан
+// уметь их различить (см. объявления ошибок выше).
+func splitFQN(fqn string) (module, resource, verb string, internal bool, err error) {
 	head, method, cut := strings.Cut(fqn, "/")
 	if !cut || method == "" {
-		return "", "", "", false, false
+		return "", "", "", false, ErrEntryOutsideModuleShape
 	}
-	parts := strings.Split(head, ".")
-	// kacho · cloud · <модуль> · v1 · <Служба>
-	if len(parts) != 5 || parts[0] != "kacho" || parts[1] != "cloud" || parts[3] != "v1" {
-		return "", "", "", false, false
+	// Имя пакета контракта — всё, кроме последнего сегмента: форму имени пакета
+	// объявляет contractnaming, здесь она второй раз не объявляется.
+	lastDot := strings.LastIndex(head, ".")
+	if lastDot < 0 {
+		return "", "", "", false, ErrEntryOutsideModuleShape
 	}
-	module, service := parts[2], parts[4]
-	if module == "" {
-		return "", "", "", false, false
+	protoPackage, service := head[:lastDot], head[lastDot+1:]
+	owner, module, shaped := contractnaming.Split(protoPackage)
+	if !shaped || service == "" {
+		return "", "", "", false, ErrEntryOutsideModuleShape
+	}
+	if !contractnaming.OwnsModule(owner, module) {
+		return "", "", "", false, ErrEntryOwnerNotDeclared
 	}
 	internal = strings.HasPrefix(service, "Internal")
 	base := strings.TrimPrefix(service, "Internal")
 	if !strings.HasSuffix(base, "Service") || base == "Service" {
-		return "", "", "", false, false
+		return "", "", "", false, ErrEntryOutsideModuleShape
 	}
 	// Написание ресурса ПРИВОДИТСЯ к тому, которым его называет закрытая таблица
 	// типов. Приведение объявлено ОДИН раз и не здесь
@@ -194,7 +235,7 @@ func splitFQN(fqn string) (module, resource, verb string, internal, ok bool) {
 	if internal {
 		verb = "internal" + upperFirst(verb)
 	}
-	return module, resource, verb, internal, true
+	return module, resource, verb, internal, nil
 }
 
 func lowerFirst(s string) string {

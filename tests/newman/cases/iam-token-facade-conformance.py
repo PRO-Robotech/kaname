@@ -47,7 +47,7 @@ Three lanes and the negatives that make each of them mean something:
                          and the acr-exempt service principal is not step-up-challenged.
   enrichment    IBT-13 — the platform principal the edge reports for a machine token
                          is the one the FACADE's claim composition named. Without the
-                         composition the credential carries no `kacho_*` claim at all
+                         composition the credential carries no `kaname_*` claim at all
                          and names nobody on this platform.
   negatives     IBT-06 — the bootstrap mint has no REST door on any api-gateway listener.
                 IBT-15 — the provider's own surfaces (admin client registration, token
@@ -242,9 +242,9 @@ _JOSE_HELPERS = [
 _CLAIM_READER = [
     "function _claimForm(pl) {",
     "  if (!pl || typeof pl !== 'object') { return 'none'; }",
-    "  if (pl.kacho_principal_id) { return 'top-level'; }",
-    "  if (pl.ext && pl.ext.ext_claims && pl.ext.ext_claims.kacho_principal_id) { return 'ext.ext_claims'; }",
-    "  if (pl.ext_claims && pl.ext_claims.kacho_principal_id) { return 'ext_claims'; }",
+    "  if (pl.kaname_principal_id) { return 'top-level'; }",
+    "  if (pl.ext && pl.ext.ext_claims && pl.ext.ext_claims.kaname_principal_id) { return 'ext.ext_claims'; }",
+    "  if (pl.ext_claims && pl.ext_claims.kaname_principal_id) { return 'ext_claims'; }",
     "  return 'none';",
     "}",
     "function _claim(pl, k) {",
@@ -278,7 +278,7 @@ _CLAIM_READER = [
 # ---------------------------------------------------------------------------
 
 _MIRROR_JWKS_PATH = "/.well-known/jwks.json"
-_OWN_JWKS_PATH = "/.well-known/kacho/jwks.json"
+_OWN_JWKS_PATH = "/.well-known/kaname/jwks.json"
 
 
 def _jwks_step(name, why, path=_MIRROR_JWKS_PATH, record="mirror",
@@ -660,9 +660,9 @@ _ACCOUNT_FROM_CALLER = [
     "    while (_t.length % 4 !== 0) { _t += '='; }",
     "    const _c = JSON.parse(CryptoJS.enc.Base64.parse(_t).toString(CryptoJS.enc.Utf8));",
     "    pm.environment.set('ibtCallerClaimForm', _claimForm(_c));",
-    "    const _acct = _claim(_c, 'kacho_account_id');",
-    "    const _pid = _claim(_c, 'kacho_principal_id');",
-    "    const _ptype = _claim(_c, 'kacho_principal_type');",
+    "    const _acct = _claim(_c, 'kaname_account_id');",
+    "    const _pid = _claim(_c, 'kaname_principal_id');",
+    "    const _ptype = _claim(_c, 'kaname_principal_type');",
     "    if (_acct) pm.environment.set('ibtAccountId', _acct);",
     "    if (_pid) pm.environment.set('ibtCallerPrincipalId', _pid);",
     "    if (_ptype) pm.environment.set('ibtCallerPrincipalType', _ptype);",
@@ -693,15 +693,15 @@ CASES.append(Case(
                 # input nobody had captured.
                 "pm.test('the caller Bearer carried the composed claims this suite reads', () => {",
                 "  const _form = pm.environment.get('ibtCallerClaimForm') || 'none';",
-                "  pm.expect(_form, 'no kacho_* claims in ANY of the three declared forms"
+                "  pm.expect(_form, 'no kaname_* claims in ANY of the three declared forms"
                 " (top-level / ext.ext_claims / ext_claims)').to.not.eql('none');",
-                "  pm.expect(pm.environment.get('ibtAccountId'), 'kacho_account_id claim (form: ' + _form + ')')",
+                "  pm.expect(pm.environment.get('ibtAccountId'), 'kaname_account_id claim (form: ' + _form + ')')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
                 "  pm.expect(pm.environment.get('ibtCallerPrincipalId'),",
-                "    'kacho_principal_id claim (form: ' + _form + ') — read by IBT-06')",
+                "    'kaname_principal_id claim (form: ' + _form + ') — read by IBT-06')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
                 "  pm.expect(pm.environment.get('ibtCallerPrincipalType'),",
-                "    'kacho_principal_type claim (form: ' + _form + ')')",
+                "    'kaname_principal_type claim (form: ' + _form + ')')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
                 "});",
                 *assert_status(200),
@@ -901,7 +901,7 @@ CASES.append(Case(
 # comment say what is actually asserted.
 #
 # WHAT REPLACED THE ANTI-TAUTOLOGY CONTROL, AND WHY IT IS NOT A RELAXATION.
-# The case used to require `sub !== kacho_principal_id`, reasoning that if they
+# The case used to require `sub !== kaname_principal_id`, reasoning that if they
 # were equal the case could not tell an enriched token from a bare one. That
 # control was a property of the provider's lane, where `sub` is an OAuth client
 # id. The platform's own signer makes the principal the subject BY CONSTRUCTION,
@@ -910,15 +910,15 @@ CASES.append(Case(
 #
 # The replacement asserts the same thing the old one was reaching for, on an
 # axis both lanes share: the composition put values in this token that the
-# SUBJECT cannot supply. `kacho_sa_key_id` is the id of the credential-registry
-# row; `kacho_account_id` is the owning account. A bare client-credentials token
+# SUBJECT cannot supply. `kaname_sa_key_id` is the id of the credential-registry
+# row; `kaname_account_id` is the owning account. A bare client-credentials token
 # — the artefact of the exchange without the composition — carries neither, and
 # neither is a restatement of `sub`. The case asserts they are present, and that
-# `kacho_sa_key_id` differs from BOTH `sub` and `kacho_principal_id`: a
+# `kaname_sa_key_id` differs from BOTH `sub` and `kaname_principal_id`: a
 # composition that merely echoed the subject back would fail there.
 #
 # WHAT IS NO LONGER WITNESSABLE HERE, SAID PLAINLY SO "GREEN" IS NOT READ WIDER.
-# On the platform's own lane `sub` and `kacho_principal_id` are the same string,
+# On the platform's own lane `sub` and `kaname_principal_id` are the same string,
 # so no black-box case can prove the platform resolved the caller FROM THE CLAIMS
 # rather than from `sub` — the two inputs are indistinguishable in the answer.
 # That half is held one level down, by the probes over the claim composer and the
@@ -929,7 +929,7 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IBT-13-PRINCIPAL-CLAIMS-STAMPED-BY-THE-FACADE-HOOK",
-    title="The machine Bearer carries the facade-composed kacho_* claims — in either lane's form — and they resolve to exactly the subject the platform reports for the caller",
+    title="The machine Bearer carries the facade-composed kaname_* claims — in either lane's form — and they resolve to exactly the subject the platform reports for the caller",
     classes=["SEC", "CONF"],
     priority="P0",
     steps=[
@@ -947,39 +947,39 @@ CASES.append(Case(
                 "const _pl = JSON.parse(_b64urlToText(_sent.split('.')[1]));",
                 "const _form = _claimForm(_pl);",
                 "pm.test('the presented token carries the facade-composed platform claims', () => {",
-                "  pm.expect(_form, 'no kacho_* claim in ANY of the three declared forms"
+                "  pm.expect(_form, 'no kaname_* claim in ANY of the three declared forms"
                 " (top-level / ext.ext_claims / ext_claims) — this credential was signed without the'",
                 "    + ' facade composition, and on its own it names nobody on this platform')",
                 "    .to.not.eql('none');",
-                "  pm.expect(_claim(_pl, 'kacho_principal_type'), 'kacho_principal_type (form: ' + _form + ')')",
+                "  pm.expect(_claim(_pl, 'kaname_principal_type'), 'kaname_principal_type (form: ' + _form + ')')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
-                "  pm.expect(_claim(_pl, 'kacho_principal_id'), 'kacho_principal_id (form: ' + _form + ')')",
+                "  pm.expect(_claim(_pl, 'kaname_principal_id'), 'kaname_principal_id (form: ' + _form + ')')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
                 "});",
                 # THE ANTI-TAUTOLOGY CONTROL. Read the case comment before touching it:
-                # it replaced `sub !== kacho_principal_id`, which the platform's own
+                # it replaced `sub !== kaname_principal_id`, which the platform's own
                 # signer makes false by construction, with the axis both lanes share.
                 "pm.test('the composition carried values the SUBJECT cannot supply — this is what "
                 "tells an enriched credential from a bare one', () => {",
                 "  pm.expect(_pl.sub, JSON.stringify(_pl)).to.be.a('string').with.length.greaterThan(0);",
-                "  const _keyId = _claim(_pl, 'kacho_sa_key_id');",
-                "  const _acct = _claim(_pl, 'kacho_account_id');",
-                "  const _pid = _claim(_pl, 'kacho_principal_id');",
-                "  pm.expect(_keyId, 'kacho_sa_key_id (form: ' + _form + ') — the credential-registry"
+                "  const _keyId = _claim(_pl, 'kaname_sa_key_id');",
+                "  const _acct = _claim(_pl, 'kaname_account_id');",
+                "  const _pid = _claim(_pl, 'kaname_principal_id');",
+                "  pm.expect(_keyId, 'kaname_sa_key_id (form: ' + _form + ') — the credential-registry"
                 " row this token was issued against; a bare client-credentials token has no such claim')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
-                "  pm.expect(_acct, 'kacho_account_id (form: ' + _form + ') — the owning account;"
+                "  pm.expect(_acct, 'kaname_account_id (form: ' + _form + ') — the owning account;"
                 " it is resolved by the composition, not carried by the exchange')",
                 "    .to.be.a('string').with.length.greaterThan(0);",
-                "  pm.expect(_keyId, 'kacho_sa_key_id equals kacho_principal_id — the composition"
+                "  pm.expect(_keyId, 'kaname_sa_key_id equals kaname_principal_id — the composition"
                 " restated the principal and added nothing, so this case could no longer tell an"
                 " enriched credential from a bare one').to.not.eql(_pid);",
-                "  pm.expect(_keyId, 'kacho_sa_key_id equals sub — same reason, on the other side:"
+                "  pm.expect(_keyId, 'kaname_sa_key_id equals sub — same reason, on the other side:"
                 " the composition would be a restatement of the subject').to.not.eql(_pl.sub);",
                 "});",
                 "const _j = pm.response.json();",
                 "pm.test('the platform reports EXACTLY the principal the composition names', () => {",
-                "  const want = _claim(_pl, 'kacho_principal_type') + ':' + _claim(_pl, 'kacho_principal_id');",
+                "  const want = _claim(_pl, 'kaname_principal_type') + ':' + _claim(_pl, 'kaname_principal_id');",
                 "  pm.expect(_j.subject, JSON.stringify(_j) + ' vs claims ' + want).to.eql(want);",
                 "});",
                 "pm.test('the reported subject is a platform id, not an OAuth client id', () => {",
@@ -1013,7 +1013,7 @@ CASES.append(Case(
 # platform still has no REST door to the mint".
 # ===========================================================================
 
-_MINT_UNBOUND = "/kacho.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken"
+_MINT_UNBOUND = "/kaname.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken"
 _MINT_ACCEPTANCE_PATH = "/iam/v1/internal/bootstrapToken:mint"
 
 

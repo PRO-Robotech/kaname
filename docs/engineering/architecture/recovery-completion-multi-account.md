@@ -17,7 +17,7 @@ stricter **GLOBAL** partial unique index:
 
 ```sql
 CREATE UNIQUE INDEX users_active_external_id_uniq
-    ON kacho_iam.users (external_id)
+    ON kaname.users (external_id)
     WHERE invite_status = 'ACTIVE' AND external_id <> '';
 ```
 
@@ -39,7 +39,7 @@ multi-account collision case is **BLOCKED + ACTIVE across Accounts**.
 
 Recovery matches the identity's ACTIVE/BLOCKED rows by `(external_id, email)` and works
 on both statuses in one writer-tx — the matched set is `recoveryStatuses` in
-`internal/apps/kacho/api/user/internal_on_recovery.go`. Re-enabling a BLOCKED row beside
+`internal/apps/kaname/api/user/internal_on_recovery.go`. Re-enabling a BLOCKED row beside
 an already-ACTIVE sibling would collide with `users_active_external_id_uniq` and raise
 SQLSTATE `23505`.
 
@@ -83,11 +83,11 @@ SQLSTATE `23505`.
 
 ## Tests
 
-- `internal/repo/kacho/pg/recovery_completions_integration_test.go` —
+- `internal/repo/kaname/pg/recovery_completions_integration_test.go` —
   `TestOnRecoveryCompleted_S09_MultiAccountIdentity_RevokeAll` (канонический случай
   BLOCKED + PENDING-сосед), плюс сценарии S01-S05 и S07 в том же файле; конкурентность
   покрыта `TestOnRecoveryCompleted_S05_DuplicateJTI_IdempotentNoop`.
-- `internal/repo/kacho/pg/recovery_keeps_block_integration_test.go` —
+- `internal/repo/kaname/pg/recovery_keeps_block_integration_test.go` —
   `TestOnRecoveryCompleted_BlockedStaysBlocked` / `_ActiveStaysActive`.
 
 > [!warning] Здесь были перечислены ещё две пробы — их нет

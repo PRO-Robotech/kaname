@@ -164,7 +164,7 @@ func ScopeTierByKind() map[string]Scope {
 // ValidateAgainst checks that the Scope is consistent with the binding's
 // (resource_type, resource_id). Returns ErrScopeMismatch if not.
 //
-// CLUSTER ⇒ resource_type='cluster', resource_id='cluster_kacho_root'
+// CLUSTER ⇒ resource_type='cluster', resource_id='cluster_root'
 // ACCOUNT ⇒ resource_type='account', resource_id starts with 'acc'
 // PROJECT ⇒ resource_type='project', resource_id starts with 'prj'
 //

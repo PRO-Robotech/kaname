@@ -108,6 +108,6 @@ func requireHookAuth(w http.ResponseWriter, r *http.Request, expected string, lo
 // разведёт молча. Всякая новая причина отказа обязана звать её, а не писать
 // свой ответ.
 func writeHookAuthRefusal(w http.ResponseWriter) {
-	w.Header().Set("WWW-Authenticate", `Bearer realm="kacho-iam-hooks"`)
+	w.Header().Set("WWW-Authenticate", `Bearer realm="kaname-hooks"`)
 	http.Error(w, `{"error":"invalid_hook_token"}`, http.StatusUnauthorized)
 }

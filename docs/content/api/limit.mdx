@@ -183,7 +183,7 @@ grep -A14 'var countableKinds' services/iam/internal/domain/limit.go
 Действующие умолчания читаются посевом миграции — сверяйте им, а не таблицей выше:
 
 ```bash
-grep -A12 "INSERT INTO kacho_iam.limits" \
+grep -A12 "INSERT INTO kaname.limits" \
   services/iam/internal/migrations/0092_resource_count_limits.sql
 ```
 

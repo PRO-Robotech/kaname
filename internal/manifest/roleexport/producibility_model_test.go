@@ -18,11 +18,13 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // modelPath — канон модели прав. Отсюда же порождается конфигурация модели, то
 // есть это ИСТОЧНИК, а не его копия.
-const modelPath = "../../../../../proto/kacho/cloud/iam/v1/fga_model.fga"
+const modelPath = "proto/kaname/cloud/iam/v1/fga_model.fga"
 
 var (
 	typeLineRe     = regexp.MustCompile(`^type\s+([a-z0-9_]+)\s*$`)
@@ -31,7 +33,10 @@ var (
 
 // TestTierCascadeMatchesTheModel — каскад ярусов объявлен моделью именно так.
 func TestTierCascadeMatchesTheModel(t *testing.T) {
-	data, err := os.ReadFile(modelPath)
+	// Канон модели живёт у ПЛАТФОРМЫ: модуль везёт свою побайтовую копию
+	// (`internal/authzmodel`), но СВЕРКА с каноном требует его самого, а в
+	// поставку он не входит.
+	data, err := os.ReadFile(platformtree.RequirePath(t, modelPath))
 	if err != nil {
 		t.Fatalf("канон модели прав не прочитан: %v", err)
 	}

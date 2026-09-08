@@ -118,22 +118,22 @@
 -- меняла» замером, а не выписанным числом. Выписанное число устарело бы молча:
 -- ролей у арендаторов тем больше, чем дольше живёт кластер.
 CREATE TEMP TABLE _roles_before ON COMMIT DROP AS
-SELECT (SELECT count(*) FROM kacho_iam.roles)                              AS roles_all,
-       (SELECT count(*) FROM kacho_iam.roles WHERE live)                   AS roles_live,
-       (SELECT count(*) FROM kacho_iam.roles WHERE owner_module IS NOT NULL) AS roles_owned,
-       (SELECT count(*) FROM kacho_iam.catalog_module WHERE live)          AS modules_live;
+SELECT (SELECT count(*) FROM kaname.roles)                              AS roles_all,
+       (SELECT count(*) FROM kaname.roles WHERE live)                   AS roles_live,
+       (SELECT count(*) FROM kaname.roles WHERE owner_module IS NOT NULL) AS roles_owned,
+       (SELECT count(*) FROM kaname.catalog_module WHERE live)          AS modules_live;
 
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
   ADD COLUMN owner_module_live boolean
     GENERATED ALWAYS AS (CASE WHEN live THEN true END) STORED;
 
-COMMENT ON COLUMN kacho_iam.roles.owner_module_live IS
+COMMENT ON COLUMN kaname.roles.owner_module_live IS
   'Составляющая ключа «мой модуль-владелец ЖИВ». У живой роли — true, у снятой — NULL, и NULL здесь означает «эта строка модуль не удерживает», а не «значение не задано»: ключ с пустой составляющей считается выполненным (MATCH SIMPLE). Константа true сделала бы модуль неснимаемым навсегда — строка снятой роли не удаляется, на этом стоит обратимость (#1913).';
 
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
   ADD CONSTRAINT roles_owner_module_live_fk
     FOREIGN KEY (owner_module, owner_module_live)
-    REFERENCES kacho_iam.catalog_module (module, live) MATCH SIMPLE
+    REFERENCES kaname.catalog_module (module, live) MATCH SIMPLE
     ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- ── САМОПРОВЕРКА ИСХОДА И ПЕРЕПИСЬ ───────────────────────────────────────────
@@ -166,7 +166,7 @@ BEGIN
     SELECT count(*) INTO key_present
       FROM pg_constraint
      WHERE conname = 'roles_owner_module_live_fk'
-       AND conrelid = 'kacho_iam.roles'::regclass;
+       AND conrelid = 'kaname.roles'::regclass;
     IF key_present <> 1 THEN
         RAISE EXCEPTION
             'ключ roles_owner_module_live_fk не заведён (найдено %): без него '
@@ -177,7 +177,7 @@ BEGIN
     SELECT convalidated INTO key_valid
       FROM pg_constraint
      WHERE conname = 'roles_owner_module_live_fk'
-       AND conrelid = 'kacho_iam.roles'::regclass;
+       AND conrelid = 'kaname.roles'::regclass;
     IF NOT key_valid THEN
         RAISE EXCEPTION
             'ключ roles_owner_module_live_fk не проверен: строки, лежавшие до '
@@ -189,7 +189,7 @@ BEGIN
     SELECT count(*) INTO key_present
       FROM pg_constraint
      WHERE conname = 'roles_owner_module_fk'
-       AND conrelid = 'kacho_iam.roles'::regclass;
+       AND conrelid = 'kaname.roles'::regclass;
     IF key_present <> 1 THEN
         RAISE EXCEPTION
             'прежний ключ roles_owner_module_fk снят (найдено %): ключ живости '
@@ -197,10 +197,10 @@ BEGIN
             '(kacho#2026)', key_present;
     END IF;
 
-    SELECT count(*) INTO after_all   FROM kacho_iam.roles;
-    SELECT count(*) INTO after_live  FROM kacho_iam.roles WHERE live;
-    SELECT count(*) INTO after_owned FROM kacho_iam.roles WHERE owner_module IS NOT NULL;
-    SELECT count(*) INTO after_mods  FROM kacho_iam.catalog_module WHERE live;
+    SELECT count(*) INTO after_all   FROM kaname.roles;
+    SELECT count(*) INTO after_live  FROM kaname.roles WHERE live;
+    SELECT count(*) INTO after_owned FROM kaname.roles WHERE owner_module IS NOT NULL;
+    SELECT count(*) INTO after_mods  FROM kaname.catalog_module WHERE live;
 
     IF (after_all, after_live, after_owned, after_mods)
        IS DISTINCT FROM (before_all, before_live, before_owned, before_mods) THEN
@@ -216,8 +216,8 @@ BEGIN
     -- называла ОБЕ величины: «нарушений 0» при «прочитано 0» неотличимо от
     -- исправной работы.
     SELECT count(*) INTO contradicted
-      FROM kacho_iam.roles r
-      JOIN kacho_iam.catalog_module cm ON cm.module = r.owner_module
+      FROM kaname.roles r
+      JOIN kaname.catalog_module cm ON cm.module = r.owner_module
      WHERE r.live AND NOT cm.live;
     IF contradicted <> 0 THEN
         RAISE EXCEPTION
@@ -238,8 +238,8 @@ $$;
 -- Откат снимает ПОРЯДОК, а не данные: ни одна строка не меняется. После него
 -- состояние «модуль снят, его роли живы и грантуют» снова становится
 -- представимым — и это надо знать тому, кто откат применяет.
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
   DROP CONSTRAINT roles_owner_module_live_fk;
 
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
   DROP COLUMN owner_module_live;

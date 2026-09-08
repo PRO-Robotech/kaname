@@ -54,7 +54,7 @@ import (
 func actingAsGateFromCatalog(t *testing.T, fqn string) (relation, objectType string) {
 	t.Helper()
 	root := monorepoRootForActingAs(t)
-	const rel = "services/iam/internal/apps/kacho/seed/embedded/permission_catalog.json"
+	const rel = "services/iam/internal/apps/kaname/seed/embedded/permission_catalog.json"
 	data, err := os.ReadFile(filepath.Join(root, rel))
 	require.NoErrorf(t, err, "каталог прав %s не прочитан — у пробы нет источника гейта", rel)
 
@@ -132,10 +132,10 @@ func TestIssuingAPersonalTokenIsNotReachableFromInsideTheAccount(t *testing.T) {
 	// Сам человек. Кортеж пишется на заведении пользователя (internal_upsert.go).
 	w.factThroughJournal(t, "user:"+invitee, "subject", "iam_user", invitee)
 	// Уровень 1.
-	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_kacho_root")
+	w.factThroughJournal(t, "user:"+cloudAdmin, "system_admin", "cluster", "cluster_root")
 
-	issueRel, issueType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserTokenService/Issue")
-	revokeRel, revokeType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserTokenService/Revoke")
+	issueRel, issueType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserTokenService/Issue")
+	revokeRel, revokeType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserTokenService/Revoke")
 	require.Equalf(t, "iam_user", issueType, "выпуск токена гейтится не на объекте личности (%s)", issueType)
 	require.Equalf(t, "iam_user", revokeType, "отзыв токена гейтится не на объекте личности (%s)", revokeType)
 
@@ -209,7 +209,7 @@ func TestIssuingAPersonalTokenIsNotReachableFromInsideTheAccount(t *testing.T) {
 	// Различающая пара — ниже целиком: людей своего аккаунта распорядитель
 	// перечисляет по-прежнему (`v_list` на `iam_user` источники уровня аккаунта
 	// сохраняет намеренно), их удостоверения — нет.
-	listRel, listType := actingAsGateFromCatalog(t, "kacho.cloud.iam.v1.UserTokenService/List")
+	listRel, listType := actingAsGateFromCatalog(t, "kaname.cloud.iam.v1.UserTokenService/List")
 	require.Equalf(t, "iam_user", listType, "перечень токенов гейтится не на объекте личности (%s)", listType)
 	require.True(t, w.allowed(t, "user:"+invitee, listRel, obj),
 		"сам человек обязан видеть перечень СВОИХ удостоверений — иначе потерянный "+
@@ -272,23 +272,23 @@ func TestIssuingAPersonalTokenIsNotReachableFromInsideTheAccount(t *testing.T) {
 // и контроль на нём утверждает живой посев, а не выдуманный.
 func seedRoleGrantingUserRead(t *testing.T, w *ciWorld, roleID, bindingID, subjectID, accountID string) {
 	t.Helper()
-	w.exec(t, `INSERT INTO kacho_iam.roles (id, name, permissions, rules, cluster_id)
+	w.exec(t, `INSERT INTO kaname.roles (id, name, permissions, rules, cluster_id)
 	           VALUES ($1, 'test.userread', '[]'::jsonb,
 	                   jsonb_build_array(jsonb_build_object(
 	                       'module', 'iam', 'resources', jsonb_build_array('user'),
 	                       'verbs',  jsonb_build_array('get'))),
-	                   'cluster_kacho_root')`, roleID)
+	                   'cluster_root')`, roleID)
 	// Тип — в ТОЧЕЧНОЙ форме каталога: именно так его кладёт прод, и именно так
 	// его читает вопрос о доступе.
-	w.exec(t, `INSERT INTO kacho_iam.role_verb (role_id, object_type, verb)
+	w.exec(t, `INSERT INTO kaname.role_verb (role_id, object_type, verb)
 	           VALUES ($1, 'iam.user', 'get')`, roleID)
-	w.exec(t, `INSERT INTO kacho_iam.role_rule_selectors
+	w.exec(t, `INSERT INTO kaname.role_rule_selectors
 	             (role_id, rule_fp, arm, object_types, match_labels)
 	           VALUES ($1, 'fp-actas', 'anchor', ARRAY['iam.user'::text], '{}'::jsonb)`, roleID)
-	w.exec(t, `INSERT INTO kacho_iam.access_bindings
+	w.exec(t, `INSERT INTO kaname.access_bindings
 	             (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 	           VALUES ($1, 'user', $2, $3, 'account', $4, 'ACTIVE')`,
 		bindingID, subjectID, roleID, accountID)
-	w.exec(t, `INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
+	w.exec(t, `INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
 	           VALUES ($1, 'user', $2)`, bindingID, subjectID)
 }

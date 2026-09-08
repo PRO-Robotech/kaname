@@ -7,7 +7,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // render.go — порождение блока типа из ресурса манифеста (Н-01 приёмки).

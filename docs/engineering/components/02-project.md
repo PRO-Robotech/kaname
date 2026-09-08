@@ -38,7 +38,7 @@ prod / staging / dev — это три Project одного Account).
 - **Имя уникально per-Account** (`UNIQUE projects_account_name_unique`).
 - Удаление RESTRICT — нельзя удалить Project, пока в нем есть workload
   (это проверяется на стороне Compute/VPC через peer-API; на DB-уровне
-  Project — leaf-ресурс в `kacho_iam`).
+  Project — leaf-ресурс в `kaname`).
 - `account_id` **hard-immutable**: в `updateMask` отвергается `INVALID_ARGUMENT`
   (`"accountId is immutable after Project.Create"`). Операции переноса проекта между
   аккаунтами в дереве нет.
@@ -55,7 +55,7 @@ prod / staging / dev — это три Project одного Account).
 | `created_at`  | `time.Time`               | да (server)  | да        | UTC.                                                   |
 
 **ID prefix:** `prj` (`domain.PrefixProject`).
-**DB table:** `kacho_iam.projects` (`CREATE TABLE kacho_iam.projects` в `0001_initial.sql`).
+**DB table:** `kaname.projects` (`CREATE TABLE kaname.projects` в `0001_initial.sql`).
 
 **Sentinel errors:**
 
@@ -81,7 +81,7 @@ sequenceDiagram
     autonumber
     participant Cli
     participant GW as api-gateway
-    participant IAM as kacho-iam
+    participant IAM as kaname
     participant DB as Postgres
 
     Cli->>GW: POST /iam/v1/projects<br/>{"account_id":"acc_..","name":"prod"}
@@ -149,7 +149,7 @@ curl "http://localhost:18080/iam/v1/projects?account_id=acc_xxx" \
 ```bash
 grpcurl -plaintext -H "Authorization: Bearer $TOKEN" \
   -d '{"account_id":"acc_xxx","name":"prod"}' \
-  localhost:9090 kacho.cloud.iam.v1.ProjectService/Create
+  localhost:9090 kaname.cloud.iam.v1.ProjectService/Create
 ```
 
 ### Идемпотентность
@@ -180,19 +180,19 @@ kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
 # psql.
 make -C deploy psql SVC=iam
-# > SELECT id, account_id, name FROM kacho_iam.projects;
+# > SELECT id, account_id, name FROM kaname.projects;
 
 # Integration tests.
 go test -short -count=1 -timeout 120s -run TestProject \
-  ./services/iam/internal/repo/kacho/pg/...
+  ./services/iam/internal/repo/kaname/pg/...
 ```
 
 ## Подробности реализации
 
-- **Use-cases:** `internal/apps/kacho/api/project/{create,get,list,update,delete}.go`.
-- **Handler:** `internal/apps/kacho/api/project/handler.go`.
-- **Repo iface:** `internal/repo/kacho/project/iface.go`.
-- **Repo impl:** `internal/repo/kacho/pg/project_repo.go`.
+- **Use-cases:** `internal/apps/kaname/api/project/{create,get,list,update,delete}.go`.
+- **Handler:** `internal/apps/kaname/api/project/handler.go`.
+- **Repo iface:** `internal/repo/kaname/project/iface.go`.
+- **Repo impl:** `internal/repo/kaname/pg/project_repo.go`.
 - **DB:** таблица `projects` со столбцами `id, account_id, name, description, labels JSONB, created_at`.
 - **Indexes:** PK `projects_pkey(id)`, UNIQUE `projects_account_name_unique(account_id, name)`,
   INDEX `projects_account_idx(account_id)`.
@@ -204,7 +204,7 @@ go test -short -count=1 -timeout 120s -run TestProject \
 ## Gotchas / известные ограничения
 
 - **Delete не cascade'ит cross-service** — Compute / VPC / LB будут сообщать
-  «project имеет workload»; на стороне kacho-iam Delete пройдет без проблем,
+  «project имеет workload»; на стороне kaname Delete пройдет без проблем,
   но workload останется orphan-ed (consumer-сервис обязан грациозно переживать
   dangling-ref — деградированный статус, не паника).
 
@@ -218,6 +218,6 @@ go test -short -count=1 -timeout 120s -run TestProject \
 ## Ссылки на код
 
 - `internal/domain/project.go`
-- `internal/apps/kacho/api/project/`
-- `internal/repo/kacho/pg/project_repo.go`
+- `internal/apps/kaname/api/project/`
+- `internal/repo/kaname/pg/project_repo.go`
 - `internal/migrations/0001_initial.sql` — DDL `projects`

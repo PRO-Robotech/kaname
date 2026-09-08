@@ -7,7 +7,7 @@ package domain
 // target (selector byLabel or resources[] byName) + the pure containment
 // predicate. Pure domain (stdlib only): no pgx/grpc.
 //
-// Membership rows live in kacho_iam.access_binding_target_members; each carries a
+// Membership rows live in kaname.access_binding_target_members; each carries a
 // VerificationStatus. The reconciler computes the desired set from
 // resource_mirror, applies the containment predicate below, and diffs it against
 // the materialized rows.
@@ -109,7 +109,7 @@ type MirrorObject struct {
 // столько, сколько у человека членств (#1172): выдача аккаунта B накрывает его
 // потому, что он состоит в B, и НИ ОДИН чужой аккаунт от этого его не накрывает
 // — набор перечисляет ровно те аккаунты, связь с которыми существует строкой
-// `kacho_iam.memberships`.
+// `kaname.memberships`.
 //
 // Пустая область (scope.ID == "") не совпадает ни с чем: набор пустых строк не
 // содержит by construction (см. комментарий поля), но проверка стоит здесь же —

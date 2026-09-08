@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmapgen"
+	"github.com/PRO-Robotech/kaname/internal/authzmapgen"
 )
 
 // syntheticManifest — минимальный годный манифест модуля.

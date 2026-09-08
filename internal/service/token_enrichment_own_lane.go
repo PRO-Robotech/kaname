@@ -36,7 +36,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // TokenEnrichmentOwnClientPort — чтение строки реестра по НАШЕМУ идентификатору.

@@ -9,7 +9,7 @@
 | сторона | что говорит | где |
 |---|---|---|
 | **схема** | `user`, `service_account` | `group_members_type_check`, `services/iam/internal/migrations/0001_initial.sql` |
-| **модель прав** | `user`, `service_account`, `federated_subject`, **`group#member`** | `type group` / `define member`, `proto/kacho/cloud/iam/v1/fga_model.fga` |
+| **модель прав** | `user`, `service_account`, `federated_subject`, **`group#member`** | `type group` / `define member`, `proto/kaname/cloud/iam/v1/fga_model.fga` |
 
 Предикаты, которыми это установлено (повторяемы):
 
@@ -45,7 +45,7 @@ git grep -l federated_subject -- '*.go' | grep -v _test | wc -l   # → 0
 своей ценой**, а не починка расхождения:
 
 1. **Движок отношений её не реализует.** Членство читается **одним нерекурсивным
-   обращением** (`services/iam/internal/repo/kacho/pg/relverdict/query.go`,
+   обращением** (`services/iam/internal/repo/kaname/pg/relverdict/query.go`,
    `.../list.go`). Транзитивность потребовала бы рекурсии ровно на том пути, который
    сейчас переключает стадия S5, — то есть работы в занятом коде и в чужой линии.
 2. **Она двигает объявленный потолок.** Приёмка R7-1 (`§1.4а`, `§7 п. 5`) выводит

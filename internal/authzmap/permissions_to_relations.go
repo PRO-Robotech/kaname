@@ -10,7 +10,7 @@
 // a deduplicated set of FGA relations.
 //
 // Replaces the name-based name→relation collapse that lived in
-// `internal/apps/kacho/api/access_binding/tuples.go::roleNameToRelation`.
+// `internal/apps/kaname/api/access_binding/tuples.go::roleNameToRelation`.
 //
 // Strategy (conservative — granular FGA model is out of scope for this mapper):
 //

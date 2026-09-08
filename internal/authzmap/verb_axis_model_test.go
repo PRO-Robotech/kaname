@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
 )
 
 // emitterVerbRelations — какие `v_*` эмиттер написал бы НА ЭТОМ типе.

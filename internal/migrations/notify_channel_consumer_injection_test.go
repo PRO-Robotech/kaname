@@ -37,13 +37,13 @@ import (
 func TestChannelNamesBoundIn_FindsEveryLegitimateForm(t *testing.T) {
 	const src = `package x
 
-const reconcileOutboxChannel = "kacho_iam_resource_reconcile_outbox"
+const reconcileOutboxChannel = "kaname_resource_reconcile_outbox"
 
-var ProviderCompensationChannel = "kacho_iam_provider_compensation_outbox"
+var ProviderCompensationChannel = "kaname_provider_compensation_outbox"
 
 func wire() any {
 	return drainer.Config{
-		Table:   "kacho_iam.provider_compensation_outbox",
+		Table:   "kaname.provider_compensation_outbox",
 		Channel: "kacho_iam_inline_named_channel",
 	}
 }
@@ -53,9 +53,9 @@ func wire() any {
 	require.NotZero(t, literals, "литералов осмотрено ноль — разбор не увидел предмет вовсе")
 
 	for _, want := range []string{
-		"kacho_iam_resource_reconcile_outbox",    // (1) const
-		"kacho_iam_provider_compensation_outbox", // (1) var
-		"kacho_iam_inline_named_channel",         // (2) поле Channel
+		"kaname_resource_reconcile_outbox",    // (1) const
+		"kaname_provider_compensation_outbox", // (1) var
+		"kacho_iam_inline_named_channel",      // (2) поле Channel
 	} {
 		assert.Contains(t, names, want,
 			"форма связывания имени канала не распознана — всё, записанное в ней, "+
@@ -67,7 +67,7 @@ func wire() any {
 // там, где предмета нет.
 //
 // Ось (3) несущая, и она не умозрительная: у соседнего канала
-// (`kacho_iam_fga_outbox`) ОБА вхождения имени в не-тестовых файлах Go — именно
+// (`kaname_fga_outbox`) ОБА вхождения имени в не-тестовых файлах Go — именно
 // комментарии. Предикат по подстроке объявил бы у него потребителя, которого нет,
 // то есть промолчал бы ровно на предмете гейта.
 func TestChannelNamesBoundIn_IsSilentOnLegitimateTwins(t *testing.T) {
@@ -76,28 +76,28 @@ func TestChannelNamesBoundIn_IsSilentOnLegitimateTwins(t *testing.T) {
 // Пример объявления в шапке — имя канала стоит здесь ПРОЗОЙ:
 //
 //	drainer.Config{
-//	    Channel: "kacho_iam_fga_outbox",
+//	    Channel: "kaname_fga_outbox",
 //	}
 type Config struct {
-	// Channel — имя LISTEN-канала, e.g. "kacho_iam_fga_outbox".
+	// Channel — имя LISTEN-канала, e.g. "kaname_fga_outbox".
 	Channel string
 }
 
-const outboxTable = "kacho_iam.fga_outbox"
+const outboxTable = "kaname.fga_outbox"
 
-func label() string { return "kacho_iam_fga_outbox_pending" }
+func label() string { return "kaname_fga_outbox_pending" }
 `
 	names, literals, err := channelNamesBoundIn("synthetic.go", []byte(src))
 	require.NoError(t, err)
 	require.NotZero(t, literals,
 		"литералов осмотрено ноль — тогда молчание сказано ни о чём, а не о предмете")
 
-	assert.NotContains(t, names, "kacho_iam_fga_outbox",
+	assert.NotContains(t, names, "kaname_fga_outbox",
 		"имя канала связано из КОММЕНТАРИЯ — разбор судит текст, а не узел, и объявит "+
 			"потребителя там, где его нет")
-	assert.NotContains(t, names, "kacho_iam.fga_outbox",
+	assert.NotContains(t, names, "kaname.fga_outbox",
 		"имя ТАБЛИЦЫ принято за имя канала: объявление названо не на Channel")
-	assert.NotContains(t, names, "kacho_iam_fga_outbox_pending",
+	assert.NotContains(t, names, "kaname_fga_outbox_pending",
 		"посторонний литерал принят за имя канала — он ничем не связан как имя канала")
 }
 
@@ -136,17 +136,17 @@ func TestIntegration_ProducedChannelWithoutAConsumerIsFound(t *testing.T) {
 		"на нетронутой схеме уже есть беспотребительский канал — инъекция ниже "+
 			"доказывала бы не себя")
 
-	const injected = "kacho_iam_channel_nobody_names"
+	const injected = "kaname_channel_nobody_names"
 	for _, stmt := range []string{
-		`CREATE FUNCTION kacho_iam.injected_notify() RETURNS trigger LANGUAGE plpgsql AS $$
+		`CREATE FUNCTION kaname.injected_notify() RETURNS trigger LANGUAGE plpgsql AS $$
 		 BEGIN PERFORM pg_notify('` + injected + `', ''); RETURN NEW; END; $$`,
 		// Законный близнец: тот же вид триггера, но канал с потребителем.
-		`CREATE FUNCTION kacho_iam.injected_twin_notify() RETURNS trigger LANGUAGE plpgsql AS $$
+		`CREATE FUNCTION kaname.injected_twin_notify() RETURNS trigger LANGUAGE plpgsql AS $$
 		 BEGIN PERFORM pg_notify('` + notifyChannelWithAProvenConsumer + `', ''); RETURN NEW; END; $$`,
-		`CREATE TRIGGER injected_notify_trg AFTER INSERT ON kacho_iam.subject_change_outbox
-		   FOR EACH ROW EXECUTE FUNCTION kacho_iam.injected_notify()`,
-		`CREATE TRIGGER injected_twin_notify_trg AFTER INSERT ON kacho_iam.subject_change_outbox
-		   FOR EACH ROW EXECUTE FUNCTION kacho_iam.injected_twin_notify()`,
+		`CREATE TRIGGER injected_notify_trg AFTER INSERT ON kaname.subject_change_outbox
+		   FOR EACH ROW EXECUTE FUNCTION kaname.injected_notify()`,
+		`CREATE TRIGGER injected_twin_notify_trg AFTER INSERT ON kaname.subject_change_outbox
+		   FOR EACH ROW EXECUTE FUNCTION kaname.injected_twin_notify()`,
 	} {
 		_, err := db.Exec(stmt)
 		require.NoError(t, err, "инъекция не встала: %s", stmt)

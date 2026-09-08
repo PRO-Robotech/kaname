@@ -34,11 +34,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/client_token"
-	"github.com/PRO-Robotech/kacho-iam/internal/clientassertion"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/clienttokenhttp"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
+	"github.com/PRO-Robotech/kaname/internal/clientassertion"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
 // BuildConfig — вход сборки. Каждая величина обязательна.
@@ -157,9 +157,9 @@ func FromPool(
 		return nil, fmt.Errorf("clienttokenwire: pool is required")
 	}
 	return New(cfg,
-		kachopg.NewAssertionClientRepo(pool),
-		kachopg.NewTrustedIssuerRepo(pool),
-		kachopg.NewClientAssertionReplayRepo(pool),
+		kanamepg.NewAssertionClientRepo(pool),
+		kanamepg.NewTrustedIssuerRepo(pool),
+		kanamepg.NewClientAssertionReplayRepo(pool),
 		signer, claims)
 }
 

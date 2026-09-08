@@ -66,7 +66,7 @@ var invitedByFields = []invitedByField{
 
 // TestBothInvitedByFieldsDeclareTheirScope — несущее утверждение.
 func TestBothInvitedByFieldsDeclareTheirScope(t *testing.T) {
-	dir := filepath.Join(monorepoRoot(t), iamContractDir)
+	dir := treePath(t, iamContractDir)
 	read := func(name string) (string, error) {
 		raw, err := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- путь собран из корня собственного модуля
 		return string(raw), err                           //nolint:wrapcheck // ошибка чтения возвращается вызывающему как есть
@@ -114,7 +114,7 @@ func auditInvitedByScopes(
 // TestNoThirdInvitedByFieldSlippedIn — предпосылка таблицы: полей «кто пригласил»
 // в контракте ровно столько, сколько названо. Третье появилось бы вне наблюдения.
 func TestNoThirdInvitedByFieldSlippedIn(t *testing.T) {
-	dir := filepath.Join(monorepoRoot(t), iamContractDir)
+	dir := treePath(t, iamContractDir)
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 

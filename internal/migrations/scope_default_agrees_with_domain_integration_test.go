@@ -38,7 +38,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // TestIntegration_ScopeDefaultAgreesWithTheDomainVocabulary — ветви живого
@@ -51,7 +51,7 @@ func TestIntegration_ScopeDefaultAgreesWithTheDomainVocabulary(t *testing.T) {
 
 	src := scopeDefaultLiveSource(t, db)
 	require.NotEmpty(t, src,
-		"функция %s не висит на kacho_iam.access_bindings: сверять нечего, "+
+		"функция %s не висит на kaname.access_bindings: сверять нечего, "+
 			"и «расхождений нет» означало бы «ничего не прочитано»", scopeDefaultFunc)
 
 	arms, fallback, ok := scopeArmsOfBody(src)
@@ -96,7 +96,7 @@ func TestIntegration_ScopeAgreementCanSeeADivergenceInTheLiveSchema(t *testing.T
 
 	// Внесён РОВНО ОДИН факт: у схемы появляется ветвь, которой домен не знает.
 	_, err := db.Exec(`
-		CREATE OR REPLACE FUNCTION kacho_iam.` + scopeDefaultFunc + `() RETURNS trigger
+		CREATE OR REPLACE FUNCTION kaname.` + scopeDefaultFunc + `() RETURNS trigger
 		    LANGUAGE plpgsql AS $$
 		BEGIN
 		    IF NEW.scope IS NULL THEN

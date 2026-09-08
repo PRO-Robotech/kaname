@@ -30,8 +30,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/clients"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/jwksproxyhttp"
+	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/handler/jwksproxyhttp"
 )
 
 // legitKeyset / substitutedKeyset — well-formed, non-empty JWKS documents. The

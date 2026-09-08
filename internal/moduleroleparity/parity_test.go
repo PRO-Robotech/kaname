@@ -51,12 +51,12 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/moduleroles"
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho-iam/internal/moduleroleparity"
-	"github.com/PRO-Robotech/kacho-iam/internal/testsupport/rightsfixture"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleroles"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/moduleroleparity"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/rightsfixture"
 )
 
 // liveRoleFloor — системных ролей кластерного яруса, ниже которого чтение
@@ -199,7 +199,7 @@ func readLiveSystemRoles(ctx context.Context, t *testing.T, pool *pgxpool.Pool) 
 	t.Helper()
 	rows, err := pool.Query(ctx,
 		`SELECT id, name, description, rules
-		   FROM kacho_iam.roles
+		   FROM kaname.roles
 		  WHERE cluster_id IS NOT NULL
 		  ORDER BY name`)
 	require.NoError(t, err)
@@ -320,7 +320,7 @@ func manifestFiles(t *testing.T, root string) []string {
 // repoRoot — корень монорепо: САМЫЙ ВНЕШНИЙ каталог с go.mod.
 //
 // Не «ближайший вверх»: у службы теперь СВОЙ модуль (`services/iam`,
-// github.com/PRO-Robotech/kacho-iam), и подъём до первого встречного
+// github.com/PRO-Robotech/kaname), и подъём до первого встречного
 // останавливался бы в её каталоге. Ниже к этому корню приклеивается `services`,
 // то есть путь В ДЕРЕВЕ МОНОРЕПО от корня, — остановка внутри службы удваивала
 // сегмент, и обход искал `services/iam/services`, которого не существует. Отказ

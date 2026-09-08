@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 {{/*
-ConfigMap с YAML-конфигом kacho-iam.
+ConfigMap с YAML-конфигом kaname.
 
-Сервис читает config из /etc/kacho-iam/config.yaml; конкретные поля можно
-override'ить через ENV (`KACHO_IAM_REPOSITORY__POSTGRES__URL` и т.п.).
+Сервис читает config из /etc/kaname/config.yaml; конкретные поля можно
+override'ить через ENV (`KANAME_REPOSITORY__POSTGRES__URL` и т.п.).
 
 DB-пароль НЕ кладется сюда (secret); подтягивается через
-`repository.postgres.password-from-env: KACHO_IAM_DB_PASSWORD` и Secret-ENV
+`repository.postgres.password-from-env: KANAME_DB_PASSWORD` и Secret-ENV
 в deployment.yaml.
 
 Здесь только те секции, которые сервис ДЕЙСТВИТЕЛЬНО разбирает: logger,
@@ -16,6 +16,10 @@ api-server, repository, authn. Секции, которой нет в Config, в
 она выглядит настройкой и ею не является: оператор правит ключ, рендер зелёный,
 поведение прежнее. Держит это deploy/service_config_sections_test.go.
 */}}
+{{/* ОТКАЗ ОДНИМ ПЕРЕЧНЕМ, когда не названы объекты, которых чарт не создаёт.
+Зовётся из ОБОИХ шаблонов, ссылающихся на такие объекты: какой из них
+отрендерится первым, решает helm, а перечень обязан быть полным в любом. */}}
+{{- include "kaname-svc.requireOperatorSuppliedNames" . -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,6 +34,15 @@ data:
       endpoint: {{ printf "tcp://0.0.0.0:%v" .Values.ports.grpc | quote }}
       internal-endpoint: {{ printf "tcp://0.0.0.0:%v" .Values.ports.internalGrpc | quote }}
       graceful-shutdown: {{ default "10s" .Values.apiServer.gracefulShutdown | quote }}
+      # Собственные REST-фронты. Умолчания у этих адресов НЕТ намеренно: адрес,
+      # приходящий умолчанием процесса, непуст всегда — профиль, о ребре
+      # умолчавший, поднимал бы его молча.
+      {{- if .Values.apiServer.restEndpoint }}
+      rest-endpoint: {{ .Values.apiServer.restEndpoint | quote }}
+      {{- end }}
+      {{- if .Values.apiServer.internalRestEndpoint }}
+      internal-rest-endpoint: {{ .Values.apiServer.internalRestEndpoint | quote }}
+      {{- end }}
       {{- $rt := .Values.apiServer.registryToken | default dict }}
       {{- if or $rt.issuer $rt.service }}
       # Docker Registry v2 token shim. `service` также whitelist'ится как audience в
@@ -56,11 +69,27 @@ data:
         # deploy/dbtls_declaration_test.go — тем важнее, что он не производит
         # открытый текст сам.
         ssl-mode: {{ required "repository.postgres.sslMode не задан: канал к Postgres обязан быть объявлен явно (disable|require|verify-ca|verify-full); пустое значение молча дало бы открытый текст" .Values.repository.postgres.sslMode | quote }}
-        password-from-env: KACHO_IAM_DB_PASSWORD
+        password-from-env: KANAME_DB_PASSWORD
 
     authn:
-      mode: {{ default "production" (include "kacho-iam-svc.authMode" .) | quote }}
+      mode: {{ default "production" (include "kaname-svc.authMode" .) | quote }}
       {{- $authn := .Values.authn | default dict }}
+      {{- with $authn.domain }}
+      # АДРЕСАТ ВЫПУСКАЕМЫХ УДОСТОВЕРЕНИЙ (задача #2127).
+      #
+      # Из него выводится клеймо адресата, уезжающее в КАЖДОМ выпущенном токене и
+      # читаемое всяким, кто токен разбирает, — без нашего исходного кода.
+      #
+      # Прежде значение подставляло ПОСТРОЕНИЕ, и подставляло доменное имя чужого
+      # продукта: этого ключа здесь не было вовсе, ни один профиль его не
+      # объявлял, поэтому адресат каждого удостоверения выбирал не оператор.
+      #
+      # Умолчания нет намеренно ни здесь, ни в `defaults.go` службы: величина,
+      # которую построение подставляет молча, предметом стража быть не может — он
+      # зелен при любом входе. Незаданное доезжает до стража старта, и он
+      # отказывает в пуске, называя настройку и переменную.
+      domain: {{ . | quote }}
+      {{- end }}
       {{- with $authn.identityProvider }}
       # ПОСАДКА ЛИЧНОСТИ. Умолчания у ключа нет намеренно (см. defaults.go службы):
       # подстановка в одну сторону потребовала бы адресов поставщика у профиля, у
@@ -74,7 +103,7 @@ data:
       # ЗДЕСЬ СТОЯЛО «ключ обязан приехать файлом, а не переменной окружения»:
       # у него не было ни умолчания в `defaults.go`, ни привязки в `load.go`, а
       # `AutomaticEnv` разрешает переменную только для ключа, который випер УЖЕ
-      # знает, — поэтому `KACHO_IAM_AUTHN__TRUSTED_FORWARDER_SANS`, та самая, что
+      # знает, — поэтому `KANAME_AUTHN__TRUSTED_FORWARDER_SANS`, та самая, что
       # называет текст отказа стража, до поля не доезжала. Ключ привязан задачей
       # #2040, и оба пути теперь работают.
       #
@@ -90,4 +119,23 @@ data:
         {{- range . }}
         - {{ . | quote }}
         {{- end }}
+      {{- end }}
+
+      {{- with (include "kaname-svc.trustDomain" .) }}
+      # Домен доверия установки: то, чьи сертификаты процесс признаёт своими.
+      # Круг выше называет, КОМУ позволено говорить за пользователя; домен
+      # отвечает на предыдущий вопрос — чьи предъявители вообще наши.
+      #
+      # Берётся из объявления чарта, а не пишется здесь: величина, взятая своей
+      # рукой в месте употребления, становится вторым адресом одного предмета и
+      # расходится с чеканкой сертификата молча — законный отправитель перестаёт
+      # опознаваться, а отказ выглядит как вызов без личности.
+      #
+      # ВЕТВЬ, А НЕ СКВОЗНАЯ ПОДСТАВКА, и это та же форма, что у трёх ключей
+      # выше. Умолчания у величины нет намеренно (см. помощника): незаданная
+      # обязана доехать до стража старта незаданной, иначе стража нет вовсе.
+      # Пустая строка, подставленная «как есть», дала бы манифест с пустой
+      # величиной — отказ тот же, но БЕЗ ИМЕНИ: оператор не узнал бы даже, чего
+      # не хватает.
+      trust-domain: {{ . | quote }}
       {{- end }}

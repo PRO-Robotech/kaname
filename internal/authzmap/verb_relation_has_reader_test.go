@@ -44,19 +44,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // catalogRelPath — встроенная копия каталога прав на стороне iam. Вторая копия
 // (gateway/internal/middleware/embed/) байт-идентична ей — это отдельный,
 // уже существующий гейт (`make permission-catalog-check`), поэтому читать здесь
 // обе значило бы дублировать его утверждение, а не усиливать своё.
-const catalogRelPath = "services/iam/internal/apps/kacho/seed/embedded/permission_catalog.json"
+const catalogRelPath = "services/iam/internal/apps/kaname/seed/embedded/permission_catalog.json"
 
 // verbPair — (FGA object type, имя глагольного отношения).
 type verbPair struct {
@@ -127,7 +128,7 @@ var declaredWithoutReader = map[verbPair]string{
 	// `*`, разворачиваемую в набор ТИПА). То есть мёртвое право раздавалось по факту,
 	// а не в теории. Наблюдаемо это держат две пробы:
 	// `api/permission_catalog/resource_verbs_iam_user_test.go` (редактор больше не
-	// предлагает глагол) и `repo/kacho/pg/role_iam_user_delete_grants_nothing_integration_test.go`
+	// предлагает глагол) и `repo/kaname/pg/role_iam_user_delete_grants_nothing_integration_test.go`
 	// (проекция, которую читает вердикт, больше не несёт пары).
 	//
 	// РОЛИ `iam.user.delete` НЕ СУЩЕСТВОВАЛО, и это записано, чтобы обиход не вернулся:
@@ -334,7 +335,7 @@ func declaredVerbPairs(t *testing.T) map[verbPair]bool {
 // хендлере перечисляется отдельно, а не «подразумевается».
 func catalogEnforcedPairs(t *testing.T) map[verbPair]bool {
 	t.Helper()
-	path := filepath.Join(monorepoRoot(t), catalogRelPath)
+	path := platformtree.RequirePath(t, catalogRelPath)
 	data, err := os.ReadFile(path)
 	require.NoErrorf(t, err, "каталог прав %s не прочитан — перепись читателей не имеет источника", catalogRelPath)
 

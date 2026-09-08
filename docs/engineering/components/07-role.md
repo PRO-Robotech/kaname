@@ -13,7 +13,7 @@
 > разворачиваются в доступ — см.
 > [`../architecture/explicit-rbac-model.md`](../architecture/explicit-rbac-model.md).
 
-В `kacho-iam` 64 system-роли (58 catalog + 5 module-SA + net-new `owner`)
+В `kaname` 64 system-роли (58 catalog + 5 module-SA + net-new `owner`)
 seed'ятся миграциями с детерминированными id формата `rol<md5(name)[0..17]>` —
 так, что повторное применение миграции дает те же id (parity для
 cross-environment ссылок).
@@ -58,10 +58,10 @@ is_system=false + (account_id XOR project_id) NOT NULL → custom role
 
 **ID prefix:** `rol`. System-role IDs: `rol` + `substr(md5(name), 1, 17)`.
 
-**DB table:** `kacho_iam.roles` (`CREATE TABLE kacho_iam.roles` в `0001_initial.sql` + seed-блок).
+**DB table:** `kaname.roles` (`CREATE TABLE kaname.roles` в `0001_initial.sql` + seed-блок).
 
 **Permissions validation:** через PL/pgSQL функцию
-`kacho_iam.iam_permissions_valid(jsonb)`:
+`kaname.iam_permissions_valid(jsonb)`:
 
 ```
 ALL ELEMENTS должны соответствовать ^([a-z][a-z0-9]*|\*)\.([a-z][a-z0-9_]*|\*)\.([a-zA-Z][a-zA-Z0-9]*|\*)$
@@ -119,7 +119,7 @@ sequenceDiagram
     SQL->>DB: CREATE TABLE roles ...
     Note over SQL,DB: seed-data
     loop 64 system-роли
-        SQL->>DB: INSERT INTO roles<br/>(id='rol'||substr(md5(name),1,17),<br/>name, rules, is_system=true, cluster_id='cluster_kacho_root')<br/>ON CONFLICT DO NOTHING
+        SQL->>DB: INSERT INTO roles<br/>(id='rol'||substr(md5(name),1,17),<br/>name, rules, is_system=true, cluster_id='cluster_root')<br/>ON CONFLICT DO NOTHING
     end
     Note over DB: Детерминированные id → повторный apply parity
 ```
@@ -213,19 +213,19 @@ kubectl -n kacho port-forward svc/api-gateway 18080:8080 &
 
 # psql — посмотреть system-роли:
 make -C deploy psql SVC=iam
-# > SELECT id, name, jsonb_array_length(permissions) FROM kacho_iam.roles WHERE is_system=true ORDER BY name;
+# > SELECT id, name, jsonb_array_length(permissions) FROM kaname.roles WHERE is_system=true ORDER BY name;
 
 # Integration: seed determinism + permissions CHECK.
 go test -short -count=1 -timeout 120s \
   -run "TestRole|TestSeedRoleIds|TestSeedNlbRoles|TestRolesPermissionsValid" \
-  ./services/iam/internal/repo/kacho/pg/...
+  ./services/iam/internal/repo/kaname/pg/...
 ```
 
 ## Подробности реализации
 
-- **Use-cases:** `internal/apps/kacho/api/role/{create,get,list,update,delete}.go`.
-- **Handler:** `internal/apps/kacho/api/role/handler.go`.
-- **Repo:** `internal/repo/kacho/pg/role_repo.go`. Отдельного файла-порта только на
+- **Use-cases:** `internal/apps/kaname/api/role/{create,get,list,update,delete}.go`.
+- **Handler:** `internal/apps/kaname/api/role/handler.go`.
+- **Repo:** `internal/repo/kaname/pg/role_repo.go`. Отдельного файла-порта только на
   чтение здесь нет: вывод отношений из списка прав живёт в
   `internal/authzmap/permissions_to_relations.go` (`PermissionsToRelations`) и репозитория
   не требует.
@@ -249,7 +249,7 @@ go test -short -count=1 -timeout 120s \
 - **Permissions validation — PL/pgSQL функция**, NOT regex string в CHECK —
   при ошибке выдается `Illegal argument permissions: invalid format` без
   указания, какая именно permission невалидна. Для debug — psql проверка
-  `SELECT kacho_iam.iam_permissions_valid('["foo.bar"]'::jsonb)`.
+  `SELECT kaname.iam_permissions_valid('["foo.bar"]'::jsonb)`.
 - **Deterministic seed-ids** — НЕ менять `name` системной роли, иначе id
   пересчитается и все существующие AccessBinding'и сломаются. Если нужно
   переименование — отдельная роль + миграция AccessBinding'ов.
@@ -267,8 +267,8 @@ go test -short -count=1 -timeout 120s \
 ## Ссылки на код
 
 - `internal/domain/role.go`
-- `internal/apps/kacho/api/role/`
-- `internal/repo/kacho/pg/role_repo.go`, `seed_role_ids_test.go`, `seed_nlb_roles_integration_test.go`
+- `internal/apps/kaname/api/role/`
+- `internal/repo/kaname/pg/role_repo.go`, `seed_role_ids_test.go`, `seed_nlb_roles_integration_test.go`
 - `internal/authzmap/permissions_to_relations.go`
 - `internal/authzmap/permissions_to_relations.go`
 - `internal/migrations/0001_initial.sql` — DDL `roles` + seed-блок

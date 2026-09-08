@@ -8,7 +8,7 @@ api-gateway REST endpoint (port-forward :18080) using the authz-fixtures dev
 HS256 JWTs. Registered in run.sh so the e2e green-gate
 (scripts/assert-suites-green.sh) discovers out/geo-read.json.
 
-Covered RPCs (public, sync read — gated `viewer`@`cluster:cluster_kacho_root`):
+Covered RPCs (public, sync read — gated `viewer`@`cluster:cluster_root`):
   geo.v1.ZoneService.List    GET /geo/v1/zones    → ListZonesResponse{zones[]}
   geo.v1.RegionService.List  GET /geo/v1/regions  → ListRegionsResponse{regions[]}
 
@@ -29,7 +29,7 @@ The bug — and why no existing case caught it:
 
 Auth mechanism (same as the existing authenticated iam suites):
   Bearer {{jwtBootstrap}} — the shared authz-fixtures HS256 dev token for
-  admin@prorobotech.ru, seeded `system_viewer`@`cluster:cluster_kacho_root`
+  admin@prorobotech.ru, seeded `system_viewer`@`cluster:cluster_root`
   (tests/authz-fixtures/setup.sh). Geo public read gates `viewer`@cluster, and
   the FGA cluster type defines `viewer = ... or system_viewer or any_admin`
   (openfga-model-stub-configmap.yaml), so this subject satisfies the viewer floor.

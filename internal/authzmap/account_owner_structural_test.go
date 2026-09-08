@@ -49,7 +49,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmap"
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
 )
 
 const (
@@ -79,7 +79,7 @@ var (
 var aoVerbs = authzmap.VerbRelationsOfType("account")
 
 // aoSeedFreshAccount кладёт РОВНО то, что со-коммитит `Account.Create` в своей
-// транзакции (apps/kacho/api/account/create.go::ownerTuples), и НИЧЕГО больше:
+// транзакции (apps/kaname/api/account/create.go::ownerTuples), и НИЧЕГО больше:
 //
 //	user:<owner> #owner @ account:<A>  — самовыдача владельца.
 //
@@ -91,7 +91,7 @@ func aoSeedFreshAccount(t *testing.T, ctx context.Context, tx pgx.Tx, account, o
 	t.Helper()
 	ownerID := strings.TrimPrefix(owner, "user:")
 	saExec(t, ctx, tx,
-		`INSERT INTO kacho_iam.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
+		`INSERT INTO kaname.accounts (id, name, owner_user_id) VALUES ($1, $2, $3)`,
 		account, "account-"+account, ownerID)
 	saUser(t, ctx, tx, ownerID, account)
 	saPointer(t, ctx, tx, "account", account, "owner", owner)
@@ -139,19 +139,19 @@ func TestAccountOwner_ScopeIsExactlyHisOwnAccount(t *testing.T) {
 		// Содержимое аккаунта A. Проект указывает на аккаунт через журнал, как
 		// его туда кладёт создание проекта; привязка — своей парой колонок.
 		saExec(t, ctx, tx,
-			`INSERT INTO kacho_iam.projects (id, account_id, name) VALUES ($1, $2, 'project-a')`,
+			`INSERT INTO kaname.projects (id, account_id, name) VALUES ($1, $2, 'project-a')`,
 			aoPrjA, aoAccA)
 		saPointer(t, ctx, tx, "project", aoPrjA, "account", "account:"+aoAccA)
 		saExec(t, ctx, tx,
-			`INSERT INTO kacho_iam.roles (id, account_id, name, permissions)
+			`INSERT INTO kaname.roles (id, account_id, name, permissions)
 			 VALUES ('rol-aoinert', $1, 'inert', '["iam.project.*.get"]'::jsonb)`, aoAccA)
 		saExec(t, ctx, tx,
-			`INSERT INTO kacho_iam.access_bindings
+			`INSERT INTO kaname.access_bindings
 			   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
 			 VALUES ($1, 'user', $2, 'rol-aoinert', 'project', $3, 'ACTIVE')`,
 			aoAbnA, strings.TrimPrefix(aoOwnerA, "user:"), aoPrjA)
 		saExec(t, ctx, tx,
-			`INSERT INTO kacho_iam.access_binding_subjects (binding_id, subject_type, subject_id)
+			`INSERT INTO kaname.access_binding_subjects (binding_id, subject_type, subject_id)
 			 VALUES ($1, 'user', $2)`, aoAbnA, strings.TrimPrefix(aoOwnerA, "user:"))
 
 		// ДЕЛЕГИРОВАННЫЙ администратор аккаунта: прямое отношение `admin`, без владения.

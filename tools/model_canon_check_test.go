@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // model_canon_check_test.go — у побайтовой сверки модели с манифестом есть
@@ -69,7 +71,7 @@ func runCheck(t *testing.T, args ...string) (int, string) {
 func syntheticTree(t *testing.T, vpcResources ...string) string {
 	t.Helper()
 	root := t.TempDir()
-	dir := filepath.Join(root, "proto", "kacho", "cloud", "iam", "v1")
+	dir := filepath.Join(root, "proto", "kaname", "cloud", "iam", "v1")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("каталог канона: %v", err)
 	}
@@ -141,6 +143,16 @@ type vpc_subnet
 // «сверено 0 из 0» есть «ноль прочитанного», и от успеха оно отличается ровно
 // тем, что печатается рядом.
 func TestModelCanonCheckOnTheRealTreeComparesEveryOwnedBlock(t *testing.T) {
+	// СВЕРКА ТРЕБУЕТ МАНИФЕСТОВ ВСЕГО НАБОРА МОДУЛЕЙ, а они лежат у платформы: в
+	// поставку нашего модуля манифесты соседей не входят by construction. В
+	// самостоятельном клоне инструмент честно называет пятерых «модуль без
+	// манифеста» — это свойство поставки, а не находка о продукте.
+	//
+	// Способность инструмента падать доказывают соседние пробы на СИНТЕТИЧЕСКОМ
+	// дереве, и они исполняются в обеих посадках: пропуск здесь не оставляет
+	// сверку без доказательства.
+	platformtree.Require(t)
+
 	code, out := runCheck(t)
 
 	if code != 0 {

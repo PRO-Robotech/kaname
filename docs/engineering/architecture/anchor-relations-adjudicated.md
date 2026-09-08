@@ -15,7 +15,7 @@
 перемерить. Перемер даёт **6**.
 
 Единица счёта — отношение, объявленное на типе `cluster` либо `account` в
-`proto/kacho/cloud/iam/v1/fga_model.fga`, чьё имя не встречается ни в одном
+`proto/kaname/cloud/iam/v1/fga_model.fga`, чьё имя не встречается ни в одном
 `required_relation` встроенного каталога прав. Ревизия — линия
 `integration/standalone-iam`, состояние **до** правки этой задачи.
 
@@ -33,7 +33,7 @@
 | # | пара | исход | читатель |
 |---|---|---|---|
 | 1 | `cluster#any_admin` | **терм вывода** | `cluster#viewer`, `cluster#editor`, `cluster#admin` (через `or any_admin`) и `super_admin` типов `account`, `project`, ресурсных (через `any_admin from cluster`) — **7** ссылок внутри модели |
-| 2 | `cluster#fga_writer` | **читатель в прод-коде** | `services/iam/internal/authzguard/fgaproxy.go` — `RelationWriteGate` проверяет `fga_writer@cluster:cluster_kacho_root` на каждом `RegisterResource`/`UnregisterResource` внутреннего слушателя. Каталог этой пары не выражает by construction: RPC объявлен `<exempt>`, решение принимает сам сервис |
+| 2 | `cluster#fga_writer` | **читатель в прод-коде** | `services/iam/internal/authzguard/fgaproxy.go` — `RelationWriteGate` проверяет `fga_writer@cluster:cluster_root` на каждом `RegisterResource`/`UnregisterResource` внутреннего слушателя. Каталог этой пары не выражает by construction: RPC объявлен `<exempt>`, решение принимает сам сервис |
 | 3 | `account#cluster` | **терм вывода** (указатель) | `account#super_admin` — `any_admin from cluster`; **4** ссылки внутри модели |
 | 4 | `account#super_admin` | **терм вывода** | `account#admin`, `account#v_get`/`v_list`/`v_update`/`v_delete` и `super_admin from account` у нижележащих типов — **139** ссылок внутри модели |
 | 5 | `account#owner` | **терм вывода** | `account#admin` и четыре `account#v_*` (через `or owner`) — **14** ссылок внутри модели |

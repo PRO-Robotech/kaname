@@ -9,9 +9,9 @@
 // the only credential kind this lane accepts, задача #1143 — and issues the
 // registry token), format the Docker-compatible JSON. No business logic.
 //
-// Hydra remains the token issuer/signer; kacho-iam mints NOTHING. The data-plane
+// Hydra remains the token issuer/signer; kaname mints NOTHING. The data-plane
 // verifies the returned token against HYDRA's JWKS — which it now fetches from a
-// cluster-INTERNAL Hydra-JWKS mirror served by kacho-iam (a short-TTL caching
+// cluster-INTERNAL Hydra-JWKS mirror served by kaname (a short-TTL caching
 // reverse-proxy of Hydra's public JWKS at GET /.well-known/jwks.json on the :9097
 // jwks-proxy listener, package internal/handler/jwksproxyhttp), NOT from this
 // external `/iam/token` listener. The mirror keeps the served kids equal to Hydra's
@@ -34,8 +34,8 @@ import (
 	"net/http"
 	"time"
 
-	registrytokenuc "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/registry_token"
 	"github.com/PRO-Robotech/kacho/pkg/credsecret"
+	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 )
 
 // unauthorizedBody — ЕДИНСТВЕННОЕ тело отказа этой полосы, одно на ВСЯКУЮ

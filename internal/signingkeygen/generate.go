@@ -20,7 +20,7 @@ import (
 	"encoding/pem"
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // Material — порождённая пара. Приватная половина живёт здесь ровно до

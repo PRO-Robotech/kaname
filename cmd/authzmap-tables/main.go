@@ -20,7 +20,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzmapgen"
+	"github.com/PRO-Robotech/kaname/internal/authzmapgen"
 )
 
 func main() {

@@ -9,7 +9,7 @@ import (
 	outboxmetrics "github.com/PRO-Robotech/kacho/pkg/outbox/metrics"
 )
 
-// OutboxRecorder — состояние ВСЕХ очередей kacho-iam, снимаемое периодическим
+// OutboxRecorder — состояние ВСЕХ очередей kaname, снимаемое периодическим
 // сканом таблицы, а не логом дренажа.
 //
 // # Почему это отдельный тип, а не поля в CompensationRecorder
@@ -20,7 +20,7 @@ import (
 // комментария молча (в день заведения он говорил «три», и это перестало быть
 // верным задолго до того, как кто-нибудь перечитал строку). Перечень ВЫВОДИТСЯ:
 //
-//	git grep -c 'CREATE TABLE kacho_iam\..*outbox' -- services/iam/internal/migrations
+//	git grep -c 'CREATE TABLE kaname\..*outbox' -- services/iam/internal/migrations
 //	git grep -l 'outboxmetrics.NewCollector' -- services/iam/cmd ':!*_test.go'
 //
 // Первое даёт объявленные очереди, второе — наблюдаемые; расхождение между ними
@@ -42,15 +42,15 @@ import (
 //
 // Сводные серии по таблице:
 //
-//	kacho_iam_outbox_backlog_depth{table}              — недоставленных строк
-//	kacho_iam_outbox_oldest_pending_age_seconds{table} — возраст головы очереди
-//	kacho_iam_outbox_poisoned_count{table}             — отравленных сейчас
+//	kaname_outbox_backlog_depth{table}              — недоставленных строк
+//	kaname_outbox_oldest_pending_age_seconds{table} — возраст головы очереди
+//	kaname_outbox_poisoned_count{table}             — отравленных сейчас
 //
 // Плюс разложение той же очереди ПО НАПРАВЛЕНИЮ:
 //
-//	kacho_iam_outbox_backlog_depth_by_direction{table,direction}
-//	kacho_iam_outbox_oldest_pending_age_by_direction_seconds{table,direction}
-//	kacho_iam_outbox_delivered_total{table,direction}
+//	kaname_outbox_backlog_depth_by_direction{table,direction}
+//	kaname_outbox_oldest_pending_age_by_direction_seconds{table,direction}
+//	kaname_outbox_delivered_total{table,direction}
 //
 // Разложение нужно потому, что сводные серии на очереди с двумя половинами
 // остаются здоровыми при полностью мёртвой второй: выдачи прав идут непрерывно —
@@ -93,29 +93,29 @@ type OutboxRecorder struct {
 func (r *Registry) newOutboxRecorder() *OutboxRecorder {
 	rec := &OutboxRecorder{
 		backlog: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "kacho_iam_outbox_backlog_depth",
+			Name: Namespace + "_outbox_backlog_depth",
 			Help: "Недоставленные строки outbox-таблицы.",
 		}, []string{"table"}),
 		oldest: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "kacho_iam_outbox_oldest_pending_age_seconds",
+			Name: Namespace + "_outbox_oldest_pending_age_seconds",
 			Help: "Возраст самой старой недоставленной строки outbox-таблицы. " +
 				"Отвечает на «висит ли строка дольше N».",
 		}, []string{"table"}),
 		poison: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "kacho_iam_outbox_poisoned_count",
+			Name: Namespace + "_outbox_poisoned_count",
 			Help: "Отравленные (исчерпавшие попытки) строки outbox-таблицы.",
 		}, []string{"table"}),
 		dirBacklog: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "kacho_iam_outbox_backlog_depth_by_direction",
+			Name: Namespace + "_outbox_backlog_depth_by_direction",
 			Help: "Недоставленные строки очереди по направлению (выдача / снятие).",
 		}, []string{"table", "direction"}),
 		dirOldest: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "kacho_iam_outbox_oldest_pending_age_by_direction_seconds",
+			Name: Namespace + "_outbox_oldest_pending_age_by_direction_seconds",
 			Help: "Возраст самой старой недоставленной строки одного направления — " +
 				"отвечает на «как давно это направление перестало доезжать».",
 		}, []string{"table", "direction"}),
 		dirDelivered: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_outbox_delivered_total",
+			Name: Namespace + "_outbox_delivered_total",
 			Help: "Доставленные строки очереди по направлению, считаются В МОМЕНТ " +
 				"доставки. Единственная величина, отличающая «их не было» от «они не " +
 				"доезжают»: ноль по снятию означает, что ни один отзыв прав не был " +
@@ -124,16 +124,16 @@ func (r *Registry) newOutboxRecorder() *OutboxRecorder {
 				"снижает; порог ставить на increase() за окно.",
 		}, []string{"table", "direction"}),
 		scans: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_outbox_scans_total",
+			Name: Namespace + "_outbox_scans_total",
 			Help: "Сканы очереди, ДОШЕДШИЕ ДО ЗНАЧЕНИЙ. Ноль при живом процессе " +
 				"означает, что состояние очереди не снималось ни разу — то есть " +
 				"измерители ниже молчат не потому, что очередь пуста.",
 		}, []string{"table"}),
 		scanFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_outbox_scan_failures_total",
+			Name: Namespace + "_outbox_scan_failures_total",
 			Help: "Отказы скана очереди (неверные права, сломанный запрос, " +
 				"недоступная база). Порог ставить на increase() за окно; пара с " +
-				"kacho_iam_outbox_scans_total отличает «скан не работал ни разу» от " +
+				"kaname_outbox_scans_total отличает «скан не работал ни разу» от " +
 				"«очередь пуста».",
 		}, []string{"table"}),
 	}

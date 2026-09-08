@@ -61,7 +61,7 @@ func TestScannerIsSilentOnTextThatOnlyLOOKSLikeAnID(t *testing.T) {
 		"  map<string, string> labels = 4;",
 		"  repeated string list<string> = 1;",
 		"// TLS endpoint either (the `Internal…Service` name matches `HasInternalSuffix`,",
-		"// Anchor object id (`cluster_kacho_root`).",
+		"// Anchor object id (`cluster_root`).",
 		"// `system:<bootstrap>` — the literal principal of the seeding flow.",
 		"// access_bindings ⋈ roles — a within-DB JOIN.",
 		"// The account is not a request field — it is resolved from the subject.",
@@ -169,7 +169,7 @@ func TestLegacyLedgerEntryExpiresWithItsAcceptor(t *testing.T) {
 // контракта существует и непуст. «Ноль расхождений» на пустом обходе значило бы
 // «ноль прочитанного», а не «ноль находок».
 func TestGateReadsTheContractThatIsActuallyOnDisk(t *testing.T) {
-	entries, err := os.ReadDir(filepath.Join(monorepoRoot(t), iamContractDir))
+	entries, err := os.ReadDir(treePath(t, iamContractDir))
 	require.NoError(t, err)
 	protos := 0
 	for _, e := range entries {

@@ -69,11 +69,11 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
-	"github.com/PRO-Robotech/kacho-iam/internal/catalog"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest/roleexport"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifestoracle"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest/roleexport"
+	"github.com/PRO-Robotech/kaname/internal/manifestoracle"
 )
 
 // ExitNotRun — проверка не исполнялась: вызов разобран не был.

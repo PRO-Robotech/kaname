@@ -18,7 +18,7 @@ package authzguard_test
 // `scope_id`, и контракт называет это поле НЕОБЯЗАТЕЛЬНЫМ дословно: «Optional
 // scope id for authz of the batch as a whole. When set, the gateway gates the
 // entire batch on this scope's permission instead of per-item»
-// (proto/kacho/cloud/iam/v1/authorize_service.proto). Незаданное поле означает
+// (proto/kaname/cloud/iam/v1/authorize_service.proto). Незаданное поле означает
 // «сужения нет, решает служба по данным», а выведенная карта читает его как
 // заданное всегда: извлекатель отдаёт `project:` с пустым идентификатором,
 // модель на такой объект отвечает «нет», и вызывающий получает отказ, к правам
@@ -56,9 +56,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 )
 
 // questionRequestFor — запрос того вида, который по этому RPC шлёт его
@@ -67,10 +67,10 @@ import (
 // растёт, а проверяется по-прежнему один.
 func questionRequestFor(method string) (any, bool) {
 	switch method {
-	case "/kacho.cloud.iam.v1.AuthorizeService/Check":
+	case "/kaname.cloud.iam.v1.AuthorizeService/Check":
 		// Край: вопрос о правах арендатора на пути его же запроса.
 		return &iamv1.AuthorizeCheckRequest{Subject: "user:" + ownerUser}, true
-	case "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck":
+	case "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck":
 		// Сужатель списочной выдачи: страница объектов, БЕЗ `scope_id` —
 		// поле необязательное, и ни один вызывающий его не заполняет.
 		return &iamv1.BatchAuthorizeCheckRequest{
@@ -127,7 +127,7 @@ func TestOwnDoor_NamedAskerIsStillRefusedOutsideTheQuestionRpcs(t *testing.T) {
 	_, err := doorUnder(t, store)(
 		tenantCtx(strangerUser),
 		&iamv1.GetProjectRequest{ProjectId: victimProject},
-		&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.ProjectService/Get"},
+		&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.ProjectService/Get"},
 		reached(&hit),
 	)
 	if hit {
@@ -160,7 +160,7 @@ func TestOwnDoor_ModelIsNotAskedAboutTheQuestionItself(t *testing.T) {
 		&iamv1.BatchAuthorizeCheckRequest{
 			Checks: []*iamv1.AuthorizeCheckRequest{{Subject: "user:" + ownerUser}},
 		},
-		&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck"},
+		&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck"},
 		reached(&hit),
 	)
 	if err != nil || !hit {
@@ -189,7 +189,7 @@ func TestOwnDoor_BatchNamingItsScopeIsStillGated(t *testing.T) {
 			Checks:  []*iamv1.AuthorizeCheckRequest{{Subject: "user:" + strangerUser}},
 			ScopeId: victimProject,
 		},
-		&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck"},
+		&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck"},
 		reached(&hit),
 	)
 	if hit || err == nil {
@@ -211,7 +211,7 @@ func TestOwnDoor_BatchNamingItsScopeIsStillGated(t *testing.T) {
 			Checks:  []*iamv1.AuthorizeCheckRequest{{Subject: "user:" + ownerUser}},
 			ScopeId: victimProject,
 		},
-		&grpc.UnaryServerInfo{FullMethod: "/kacho.cloud.iam.v1.AuthorizeService/BatchCheck"},
+		&grpc.UnaryServerInfo{FullMethod: "/kaname.cloud.iam.v1.AuthorizeService/BatchCheck"},
 		reached(&hit),
 	); err != nil || !hit {
 		t.Fatalf("выданному отказано на названной области: err=%v достигнут=%v (спрошено: %v)",

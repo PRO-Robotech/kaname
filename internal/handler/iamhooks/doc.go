@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package iamhooks — HTTP webhook handlers for the kacho-iam AuthN core
+// Package iamhooks — HTTP webhook handlers for the kaname AuthN core
 // (Hydra OAuth2 token hooks).
 //
 // Все эти handlers слушают только на cluster-internal HTTP listener
@@ -15,5 +15,5 @@
 //   - ProvisionHookHandler POST /iam/v1/hooks/provision (Kratos registration/login → UpsertFromIdentity)
 //
 // Authentication: Bearer X-Kacho-Hook-Token validated против
-// authn.hook-shared-secret (либо ENV KACHO_IAM_HOOK_TOKEN).
+// authn.hook-shared-secret (либо ENV KANAME_HOOK_TOKEN).
 package iamhooks

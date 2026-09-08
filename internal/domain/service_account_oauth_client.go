@@ -20,10 +20,10 @@ import (
 
 // ServiceAccountOAuthClient — Class A workload identity (Hydra static client).
 //
-// private_key_jwt mode: kacho-iam mints an ECDSA P-256 keypair per SA
+// private_key_jwt mode: kaname mints an ECDSA P-256 keypair per SA
 // key, registers the public JWK with Hydra (`token_endpoint_auth_method =
 // private_key_jwt`), and returns the private PEM to the caller exactly once.
-// Hydra stores only the JWK; kacho-iam keeps the SPKI public PEM (for
+// Hydra stores only the JWK; kaname keeps the SPKI public PEM (for
 // rotation diagnostics) plus the algorithm. The legacy
 // `client_secret_basic` flow is dropped: no secret ever exists.
 //
@@ -41,7 +41,7 @@ type ServiceAccountOAuthClient struct {
 	// PublicKeyPEM — SPKI-encoded ECDSA P-256 public key registered with
 	// Hydra as a JWK. Empty for legacy rows that pre-date the private_key_jwt
 	// mode (migrated with DEFAULT '') AND for FEDERATED rows where the
-	// key material lives in the external IdP rather than kacho-iam.
+	// key material lives in the external IdP rather than kaname.
 	PublicKeyPEM string
 	// KeyAlgorithm — JOSE alg of the registered key. One of {"ES256",
 	// "RS256", "EdDSA"}. Empty for legacy rows; new private_key_jwt keys

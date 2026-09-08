@@ -19,7 +19,7 @@ title: Идентичность и токены
   <tbody>
     <tr><td><strong>Ory Kratos</strong></td><td>Хранилище личностей + интерактивный вход (пароль / passkey / recovery). Каждая identity — глобальная запись</td></tr>
     <tr><td><strong>Ory Hydra</strong></td><td>OAuth 2.0 / OIDC authorization server: чеканит kacho-JWT, хранит OAuth-клиентов (JWK)</td></tr>
-    <tr><td><strong>kacho-iam</strong></td><td>Личность платформы (User — одна строка на человека) и её членства в аккаунтах, маппинг OAuth-клиентов, модель прав</td></tr>
+    <tr><td><strong>kaname</strong></td><td>Личность платформы (User — одна строка на человека) и её членства в аккаунтах, маппинг OAuth-клиентов, модель прав</td></tr>
     <tr><td><strong>api-gateway</strong></td><td>Проверяет kacho-JWT на каждом внешнем запросе (Bearer)</td></tr>
   </tbody>
 </table>
@@ -48,12 +48,12 @@ title: Идентичность и токены
 
 ```mermaid
 flowchart LR
-  admin["Админ аккаунта"] -->|"1. Invite(email)"| iam["kacho-iam"]
+  admin["Админ аккаунта"] -->|"1. Invite(email)"| iam["kaname"]
   iam -->|"2. PENDING User-row + magic-link"| admin
   admin -->|"3. передаёт ссылку"| user["Приглашённый"]
   user -->|"4. вход через Kratos"| kratos["Ory Kratos"]
   kratos -->|"5. identity hook (:9092)"| iam
-  iam -->|"6. match email → ACTIVE + externalId"| pg[("kacho_iam")]
+  iam -->|"6. match email → ACTIVE + externalId"| pg[("kaname")]
 ```
 
 1. Админ вызывает `UserService.Invite(email)` — backend создаёт `PENDING`-строку.
@@ -67,7 +67,7 @@ flowchart LR
 (отключён администратором).
 
 :::info Bootstrap-root
-Первый администратор кластера задаётся через `KACHO_IAM_BOOTSTRAP_ROOT_EMAIL`: при первом входе
+Первый администратор кластера задаётся через `KANAME_BOOTSTRAP_ROOT_EMAIL`: при первом входе
 пользователя с этим email ему выдаётся cluster-admin, разрывая «курицу и яйцо» первичной настройки.
 :::
 
@@ -84,8 +84,8 @@ flowchart LR
   </tbody>
 </table>
 
-При выпуске (`Issue`) kacho-iam генерирует пару ECDSA P-256 и возвращает приватный ключ
-**ровно один раз**. Секрет нигде не хранится: у kacho-iam остаётся открытая половина ключа и
+При выпуске (`Issue`) kaname генерирует пару ECDSA P-256 и возвращает приватный ключ
+**ровно один раз**. Секрет нигде не хранится: у kaname остаётся открытая половина ключа и
 строка реестра, по идентификатору которой клиент и разрешается при обмене.
 
 У **персонального** токена (`uoc`) клиента у внешнего поставщика больше не заводится: `clientId`
@@ -101,7 +101,7 @@ flowchart LR
   wl -->|"POST /oauth2/token"| hydra["Ory Hydra"]
   hydra -->|"валидация JWK"| hydra
   hydra -->|"kacho-JWT"| wl
-  wl -->|"Authorization: Bearer"| agw["api-gateway → kacho-iam"]
+  wl -->|"Authorization: Bearer"| agw["api-gateway → kaname"]
 ```
 
 - **`private_key_jwt`** (по умолчанию): клиент подписывает `client_assertion` приватным ключом и

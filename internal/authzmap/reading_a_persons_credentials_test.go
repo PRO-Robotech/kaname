@@ -82,7 +82,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/authzplan"
+	"github.com/PRO-Robotech/kaname/internal/authzplan"
 )
 
 // credentialReadRPCs — публичные RPC, чей предмет есть ЧТЕНИЕ СВЕДЕНИЙ ОБ
@@ -92,7 +92,7 @@ import (
 // RPC, а не его написания. Перечень мал и закрыт; каждая запись обязана
 // находиться в каталоге, иначе перечень пережил свой предмет.
 var credentialReadRPCs = []string{
-	"kacho.cloud.iam.v1.UserTokenService/List",
+	"kaname.cloud.iam.v1.UserTokenService/List",
 }
 
 // personalCredentialSources — круг держателей, в который отношение чтения
@@ -287,8 +287,8 @@ func keysOf(m map[planSource]string) []planSource {
 // saKeyRPCs — RPC ключей служебной учётки: чтение против выпуска и отзыва.
 // По FQN, потому что предмет — смысл RPC, а отношения спрашиваются у каталога.
 var saKeyRPCs = struct{ read, mutate []string }{
-	read:   []string{"kacho.cloud.iam.v1.SAKeyService/List"},
-	mutate: []string{"kacho.cloud.iam.v1.SAKeyService/Issue", "kacho.cloud.iam.v1.SAKeyService/Revoke"},
+	read:   []string{"kaname.cloud.iam.v1.SAKeyService/List"},
+	mutate: []string{"kaname.cloud.iam.v1.SAKeyService/Issue", "kaname.cloud.iam.v1.SAKeyService/Revoke"},
 }
 
 // TestServiceAccountKeyReadingIsNotWiderThanIssuing — смежный предмет #1133.

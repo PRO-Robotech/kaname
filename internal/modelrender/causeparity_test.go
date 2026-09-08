@@ -82,10 +82,50 @@ func causesInSource(name string, src []byte) ([]cause, error) {
 		return nil, err
 	}
 
+	// Находки НЕ-ПЕРВОГО исхода поводом кода 1 не являются, и это надо не
+	// предполагать, а прочитать. Перечень нормы называет поводы ИСХОДА 1;
+	// строка, которой обход объявляет «условие не создано» (исход 3), в него
+	// не входит by construction — её предмет другой. Распознаватель, считающий
+	// всякий литерал Finding, объявил бы её поводом кода 1, и перечень нормы
+	// пришлось бы дописывать утверждением, которого он не делает (kacho#2241).
+	//
+	// Судится ИСХОД возврата, а не текст литерала: имя исхода стоит рядом, в том
+	// же операторе, и читается разбором.
+	notFirstOutcome := map[token.Pos]bool{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		ret, ok := n.(*ast.ReturnStmt)
+		if !ok {
+			return true
+		}
+		outcome := ""
+		for _, r := range ret.Results {
+			if id, isIdent := r.(*ast.Ident); isIdent {
+				outcome = id.Name
+			}
+		}
+		// Судится ТОЛЬКО объявленный исход обхода. Возврат, чей последний
+		// результат — обычная переменная (`err`), об исходе не высказывается, и
+		// принимать его за «не первый» значило бы вычесть поводы, которые норма
+		// перечисляет.
+		if !strings.HasPrefix(outcome, "Sweep") || outcome == "SweepFinding" {
+			return true
+		}
+		ast.Inspect(ret, func(m ast.Node) bool {
+			if lit, isLit := m.(*ast.CompositeLit); isLit {
+				notFirstOutcome[lit.Pos()] = true
+				for _, el := range lit.Elts {
+					notFirstOutcome[el.Pos()] = true
+				}
+			}
+			return true
+		})
+		return true
+	})
+
 	seen := map[token.Pos]bool{}
 	var out []cause
 	add := func(expr ast.Expr) {
-		if seen[expr.Pos()] {
+		if seen[expr.Pos()] || notFirstOutcome[expr.Pos()] {
 			return
 		}
 		seen[expr.Pos()] = true

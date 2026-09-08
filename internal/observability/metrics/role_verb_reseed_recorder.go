@@ -34,7 +34,7 @@ type RoleVerbReseedRecorder struct {
 func (r *Registry) NewRoleVerbReseedRecorder() *RoleVerbReseedRecorder {
 	rec := &RoleVerbReseedRecorder{
 		outcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_role_verb_reseeds_total",
+			Name: Namespace + "_role_verb_reseeds_total",
 			Help: "Исходы пересчёта проекции «роль → тип объекта × глагол» на старте, " +
 				"по одной системной роли: reseeded — транзакция роли закоммичена; " +
 				"failed — откачена. Ноль failed значим только вместе с ненулевым " +

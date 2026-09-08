@@ -49,20 +49,20 @@ const (
 	someOtherSAN       = "spiffe://kacho.cloud/ns/kacho/sa/kacho-someother"
 
 	// readFloorMethod — a representative READ-RPC under the floor.
-	readFloorMethod = "/kacho.cloud.iam.v1.InternalIAMService/LookupSubject"
+	readFloorMethod = "/kaname.cloud.iam.v1.InternalIAMService/LookupSubject"
 	// checkMethod — the PDP, exempt from the floor (INV-FLOOR-5).
-	checkMethod = "/kacho.cloud.iam.v1.InternalIAMService/Check"
+	checkMethod = "/kaname.cloud.iam.v1.InternalIAMService/Check"
 	// recoveryMethod — secret-authed Kratos hook, exempt (INV-FLOOR-6).
-	recoveryMethod = "/kacho.cloud.iam.v1.InternalUserService/OnRecoveryCompleted"
+	recoveryMethod = "/kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted"
 	// isRevokedMethod — hot-path, exempt (INV-FLOOR-6).
-	isRevokedMethod = "/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked"
+	isRevokedMethod = "/kaname.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked"
 	// registerMethod — mutation, exempt from READ-floor (INV-FLOOR-8).
-	registerMethod = "/kacho.cloud.iam.v1.InternalIAMService/RegisterResource"
+	registerMethod = "/kaname.cloud.iam.v1.InternalIAMService/RegisterResource"
 )
 
 // ctxWithSAN returns a ctx carrying a verified module cert SAN.
 func ctxWithSAN(san string) context.Context {
-	return grpcsrv.WithCertIdentity(context.Background(), san, true)
+	return grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true)
 }
 
 // 01-unit — dev-mode (prod=false), READ-FQN → pass; checker NOT consulted.
@@ -92,8 +92,8 @@ func TestSystemViewerFloor_Prod_LegitimateReaderSA_Allowed(t *testing.T) {
 	if ck.relation != "system_viewer" {
 		t.Errorf("Check relation = %q, want %q", ck.relation, "system_viewer")
 	}
-	if ck.object != "cluster:cluster_kacho_root" {
-		t.Errorf("Check object = %q, want %q", ck.object, "cluster:cluster_kacho_root")
+	if ck.object != "cluster:cluster_root" {
+		t.Errorf("Check object = %q, want %q", ck.object, "cluster:cluster_root")
 	}
 }
 
@@ -128,7 +128,7 @@ func TestSystemViewerFloor_Prod_NoCert_Denied(t *testing.T) {
 func TestSystemViewerFloor_Prod_UnverifiedCert_Denied(t *testing.T) {
 	ck := &recordingChecker{allowed: true}
 	f := NewSystemViewerFloor(ck, ReadFloorRPCs()).WithProductionMode(true)
-	ctx := grpcsrv.WithCertIdentity(context.Background(), apiGatewayFloorSAN, false)
+	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), apiGatewayFloorSAN, false)
 	if err := f.allow(ctx, readFloorMethod); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("prod unverified cert: code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -222,10 +222,10 @@ func TestReadFloorRPCs_Membership(t *testing.T) {
 	}
 
 	mustHave := []string{
-		"/kacho.cloud.iam.v1.InternalIAMService/LookupSubject",
-		"/kacho.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
-		"/kacho.cloud.iam.v1.InternalUserService/Get",
-		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
+		"/kaname.cloud.iam.v1.InternalIAMService/LookupSubject",
+		"/kaname.cloud.iam.v1.InternalIAMService/PollSubjectChanges",
+		"/kaname.cloud.iam.v1.InternalUserService/Get",
+		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
 	}
 	for _, m := range mustHave {
 		if _, ok := set[m]; !ok {
@@ -235,24 +235,24 @@ func TestReadFloorRPCs_Membership(t *testing.T) {
 
 	mustNotHave := []string{
 		// PDP — never floor-gated (INV-FLOOR-5).
-		"/kacho.cloud.iam.v1.InternalIAMService/Check",
+		"/kaname.cloud.iam.v1.InternalIAMService/Check",
 		// Retired: iam serves no implementation for it. The floor is a list of
 		// RPCs this service answers; listing one it does not is dead policy that
 		// reads as coverage.
-		"/kacho.cloud.iam.v1.InternalIAMService/GetJWKSStatus",
+		"/kaname.cloud.iam.v1.InternalIAMService/GetJWKSStatus",
 		// secret-authed webhook (INV-FLOOR-6).
-		"/kacho.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
+		"/kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
 		// hot-path chicken-and-egg (INV-FLOOR-6).
-		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked",
+		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/IsRevoked",
 		// mutations — fga_writer-gated in-handler, not READ-floor (INV-FLOOR-8).
-		"/kacho.cloud.iam.v1.InternalIAMService/RegisterResource",
-		"/kacho.cloud.iam.v1.InternalIAMService/UnregisterResource",
+		"/kaname.cloud.iam.v1.InternalIAMService/RegisterResource",
+		"/kaname.cloud.iam.v1.InternalIAMService/UnregisterResource",
 		// gateway-only / admin-tier mutations — not READ-floor.
-		"/kacho.cloud.iam.v1.InternalIAMService/ForceLogout",
-		"/kacho.cloud.iam.v1.InternalClusterService/GrantAdmin",
-		"/kacho.cloud.iam.v1.InternalClusterService/RevokeAdmin",
-		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
-		"/kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
+		"/kaname.cloud.iam.v1.InternalIAMService/ForceLogout",
+		"/kaname.cloud.iam.v1.InternalClusterService/GrantAdmin",
+		"/kaname.cloud.iam.v1.InternalClusterService/RevokeAdmin",
+		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
+		"/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
 	}
 	for _, m := range mustNotHave {
 		if _, ok := set[m]; ok {

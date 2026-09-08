@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // adapters.go — thin shims между port-iface'ами handler-слоя и repo adapter'ами
-// из internal/repo/kacho/pg.
+// из internal/repo/kaname/pg.
 //
 // Эти shim'ы избегают cyclic dependency (handler/internal не импортирует
-// repo/kacho/pg напрямую) и позволяют main.go подключать pg-adapters к
+// repo/kaname/pg напрямую) и позволяют main.go подключать pg-adapters к
 // handler ports.
 package iamhooks
 

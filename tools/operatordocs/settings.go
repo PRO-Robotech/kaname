@@ -36,7 +36,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
 // Метки блока. Порождённое лежит СТРОГО между ними; всё прочее — проза автора.

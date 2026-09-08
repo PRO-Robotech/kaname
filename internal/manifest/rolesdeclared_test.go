@@ -28,7 +28,7 @@ package manifest_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 // TestRolesDeclaredDistinguishesTheThreeStatesOfTheSection — три состояния и
@@ -63,7 +63,7 @@ func TestRolesDeclaredDistinguishesTheThreeStatesOfTheSection(t *testing.T) {
 			doc: head + "roles:\n" +
 				"  - id: vpc.probe1913.admin\n" +
 				"    description: Роль пробы.\n" +
-				"    tier: {tierType: iam.cluster, tierId: cluster_kacho_root}\n" +
+				"    tier: {tierType: iam.cluster, tierId: cluster_root}\n" +
 				"    rules:\n" +
 				"      - {module: vpc, resources: [network], classes: [get]}\n",
 			wantDeclared: true,

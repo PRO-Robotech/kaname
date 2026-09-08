@@ -30,27 +30,27 @@ var _ operations.Recorder = (*LRORecorder)(nil)
 func (r *Registry) NewLRORecorder() *LRORecorder {
 	l := &LRORecorder{
 		terminalRetries: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_lro_terminal_write_retries_total",
+			Name: Namespace + "_lro_terminal_write_retries_total",
 			Help: "Retries of the durable terminal write (MarkDone/MarkError) by operation type.",
 		}, []string{"op_type"}),
 		terminalFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_lro_terminal_write_failures_total",
+			Name: Namespace + "_lro_terminal_write_failures_total",
 			Help: "Terminal writes that exhausted their retry budget by operation type — a stranded operation.",
 		}, []string{"op_type"}),
 		inflight: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "kacho_iam_lro_inflight",
+			Name: Namespace + "_lro_inflight",
 			Help: "Operations currently dispatched to the worker pool.",
 		}),
 		orphansRecovered: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_lro_orphans_recovered_total",
+			Name: Namespace + "_lro_orphans_recovered_total",
 			Help: "Orphaned operations (done=false past their lease) recovered by the reconciler, by outcome.",
 		}, []string{"outcome"}),
 		reconcileRuns: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "kacho_iam_lro_reconcile_runs_total",
+			Name: Namespace + "_lro_reconcile_runs_total",
 			Help: "Reconciler sweep runs.",
 		}),
 		reconcileErrors: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "kacho_iam_lro_reconcile_errors_total",
+			Name: Namespace + "_lro_reconcile_errors_total",
 			Help: "Reconciler sweep runs that ended in error.",
 		}),
 	}

@@ -1,7 +1,7 @@
 <!-- Copyright (c) PRO-Robotech
      SPDX-License-Identifier: AGPL-3.0-or-later -->
 
-# Безопасность Kachō IAM
+# Безопасность Kaname
 
 Документ для того, кто нашёл уязвимость в этой службе или отвечает за её
 эксплуатацию в своём облаке.

@@ -63,64 +63,64 @@
 -- +goose StatementBegin
 DO $$
 BEGIN
-    IF to_regclass('kacho_iam.roles') IS NULL THEN
-        RAISE EXCEPTION 'kacho_iam.roles не существует — цепочка миграций применена не с начала';
+    IF to_regclass('kaname.roles') IS NULL THEN
+        RAISE EXCEPTION 'kaname.roles не существует — цепочка миграций применена не с начала';
     END IF;
 END
 $$;
 -- +goose StatementEnd
 
 -- kacho-system.viewer
-UPDATE kacho_iam.roles SET permissions = '["*.*.*.list", "*.*.*.get"]'::jsonb WHERE id = 'rol000000000sysviewer';
+UPDATE kaname.roles SET permissions = '["*.*.*.list", "*.*.*.get"]'::jsonb WHERE id = 'rol000000000sysviewer';
 -- view
-UPDATE kacho_iam.roles SET permissions = '["*.*.*.list", "*.*.*.get"]'::jsonb WHERE id = 'rol1bda80f2be4d3658e';
+UPDATE kaname.roles SET permissions = '["*.*.*.list", "*.*.*.get"]'::jsonb WHERE id = 'rol1bda80f2be4d3658e';
 -- vpc.address.view
-UPDATE kacho_iam.roles SET permissions = '["vpc.address.*.list", "vpc.address.*.get"]'::jsonb WHERE id = 'rol096a471229217fbcf';
+UPDATE kaname.roles SET permissions = '["vpc.address.*.list", "vpc.address.*.get"]'::jsonb WHERE id = 'rol096a471229217fbcf';
 -- vpc.security_group.view
-UPDATE kacho_iam.roles SET permissions = '["vpc.securityGroup.*.list", "vpc.securityGroup.*.get"]'::jsonb WHERE id = 'rol1469d1a633ceae4b5';
+UPDATE kaname.roles SET permissions = '["vpc.securityGroup.*.list", "vpc.securityGroup.*.get"]'::jsonb WHERE id = 'rol1469d1a633ceae4b5';
 -- vpc.gateway.view
-UPDATE kacho_iam.roles SET permissions = '["vpc.gateway.*.list", "vpc.gateway.*.get"]'::jsonb WHERE id = 'rol26a49318d88632af2';
+UPDATE kaname.roles SET permissions = '["vpc.gateway.*.list", "vpc.gateway.*.get"]'::jsonb WHERE id = 'rol26a49318d88632af2';
 -- vpc.subnet.view
-UPDATE kacho_iam.roles SET permissions = '["vpc.subnet.*.list", "vpc.subnet.*.get"]'::jsonb WHERE id = 'rol31f5c2b4e7b3ee06c';
+UPDATE kaname.roles SET permissions = '["vpc.subnet.*.list", "vpc.subnet.*.get"]'::jsonb WHERE id = 'rol31f5c2b4e7b3ee06c';
 -- iam.account.view
-UPDATE kacho_iam.roles SET permissions = '["iam.account.*.list", "iam.account.*.get"]'::jsonb WHERE id = 'rol41dd066874f699c17';
+UPDATE kaname.roles SET permissions = '["iam.account.*.list", "iam.account.*.get"]'::jsonb WHERE id = 'rol41dd066874f699c17';
 -- compute.instance.view
-UPDATE kacho_iam.roles SET permissions = '["compute.instance.*.list", "compute.instance.*.get"]'::jsonb WHERE id = 'rol6be01c0948936754b';
+UPDATE kaname.roles SET permissions = '["compute.instance.*.list", "compute.instance.*.get"]'::jsonb WHERE id = 'rol6be01c0948936754b';
 -- iam.project.view
-UPDATE kacho_iam.roles SET permissions = '["iam.project.*.list", "iam.project.*.get"]'::jsonb WHERE id = 'rol7ad445624b1d0e9a1';
+UPDATE kaname.roles SET permissions = '["iam.project.*.list", "iam.project.*.get"]'::jsonb WHERE id = 'rol7ad445624b1d0e9a1';
 -- vpc.route_table.view
-UPDATE kacho_iam.roles SET permissions = '["vpc.routeTable.*.list", "vpc.routeTable.*.get"]'::jsonb WHERE id = 'rolab84e08ef4b5e0b22';
+UPDATE kaname.roles SET permissions = '["vpc.routeTable.*.list", "vpc.routeTable.*.get"]'::jsonb WHERE id = 'rolab84e08ef4b5e0b22';
 -- iam.access_binding.view
-UPDATE kacho_iam.roles SET permissions = '["iam.accessBinding.*.list", "iam.accessBinding.*.get"]'::jsonb WHERE id = 'rolb18c533133af2f130';
+UPDATE kaname.roles SET permissions = '["iam.accessBinding.*.list", "iam.accessBinding.*.get"]'::jsonb WHERE id = 'rolb18c533133af2f130';
 -- iam.group.view
-UPDATE kacho_iam.roles SET permissions = '["iam.group.*.list", "iam.group.*.get"]'::jsonb WHERE id = 'rolc98b067591ded99e5';
+UPDATE kaname.roles SET permissions = '["iam.group.*.list", "iam.group.*.get"]'::jsonb WHERE id = 'rolc98b067591ded99e5';
 -- iam.user.view
-UPDATE kacho_iam.roles SET permissions = '["iam.user.*.list", "iam.user.*.get"]'::jsonb WHERE id = 'role2f47108d41b38f39';
+UPDATE kaname.roles SET permissions = '["iam.user.*.list", "iam.user.*.get"]'::jsonb WHERE id = 'role2f47108d41b38f39';
 -- iam.role.view
-UPDATE kacho_iam.roles SET permissions = '["iam.role.*.list", "iam.role.*.get"]'::jsonb WHERE id = 'rolee27bb5ba1efb68cb';
+UPDATE kaname.roles SET permissions = '["iam.role.*.list", "iam.role.*.get"]'::jsonb WHERE id = 'rolee27bb5ba1efb68cb';
 -- iam.service_account.view
-UPDATE kacho_iam.roles SET permissions = '["iam.serviceAccount.*.list", "iam.serviceAccount.*.get"]'::jsonb WHERE id = 'rolfc25814dc6989172d';
+UPDATE kaname.roles SET permissions = '["iam.serviceAccount.*.list", "iam.serviceAccount.*.get"]'::jsonb WHERE id = 'rolfc25814dc6989172d';
 -- vpc.network.view
-UPDATE kacho_iam.roles SET permissions = '["vpc.network.*.list", "vpc.network.*.get"]'::jsonb WHERE id = 'rolfe683216e63311d3f';
+UPDATE kaname.roles SET permissions = '["vpc.network.*.list", "vpc.network.*.get"]'::jsonb WHERE id = 'rolfe683216e63311d3f';
 
 -- +goose Down
 -- +goose StatementBegin
 -- Откат возвращает строки прав дословно такими, какими их посеяла базовая
 -- миграция, — включая снятое действие. Иначе он не откат.
-UPDATE kacho_iam.roles SET permissions = '["*.*.*.read", "*.*.*.list", "*.*.*.get"]'::jsonb WHERE id = 'rol000000000sysviewer';
-UPDATE kacho_iam.roles SET permissions = '["*.*.*.read", "*.*.*.list", "*.*.*.get"]'::jsonb WHERE id = 'rol1bda80f2be4d3658e';
-UPDATE kacho_iam.roles SET permissions = '["vpc.address.*.read", "vpc.address.*.list", "vpc.address.*.get"]'::jsonb WHERE id = 'rol096a471229217fbcf';
-UPDATE kacho_iam.roles SET permissions = '["vpc.securityGroup.*.read", "vpc.securityGroup.*.list", "vpc.securityGroup.*.get"]'::jsonb WHERE id = 'rol1469d1a633ceae4b5';
-UPDATE kacho_iam.roles SET permissions = '["vpc.gateway.*.read", "vpc.gateway.*.list", "vpc.gateway.*.get"]'::jsonb WHERE id = 'rol26a49318d88632af2';
-UPDATE kacho_iam.roles SET permissions = '["vpc.subnet.*.read", "vpc.subnet.*.list", "vpc.subnet.*.get"]'::jsonb WHERE id = 'rol31f5c2b4e7b3ee06c';
-UPDATE kacho_iam.roles SET permissions = '["iam.account.*.read", "iam.account.*.list", "iam.account.*.get"]'::jsonb WHERE id = 'rol41dd066874f699c17';
-UPDATE kacho_iam.roles SET permissions = '["compute.instance.*.read", "compute.instance.*.list", "compute.instance.*.get"]'::jsonb WHERE id = 'rol6be01c0948936754b';
-UPDATE kacho_iam.roles SET permissions = '["iam.project.*.read", "iam.project.*.list", "iam.project.*.get"]'::jsonb WHERE id = 'rol7ad445624b1d0e9a1';
-UPDATE kacho_iam.roles SET permissions = '["vpc.routeTable.*.read", "vpc.routeTable.*.list", "vpc.routeTable.*.get"]'::jsonb WHERE id = 'rolab84e08ef4b5e0b22';
-UPDATE kacho_iam.roles SET permissions = '["iam.accessBinding.*.read", "iam.accessBinding.*.list", "iam.accessBinding.*.get"]'::jsonb WHERE id = 'rolb18c533133af2f130';
-UPDATE kacho_iam.roles SET permissions = '["iam.group.*.read", "iam.group.*.list", "iam.group.*.get"]'::jsonb WHERE id = 'rolc98b067591ded99e5';
-UPDATE kacho_iam.roles SET permissions = '["iam.user.*.read", "iam.user.*.list", "iam.user.*.get"]'::jsonb WHERE id = 'role2f47108d41b38f39';
-UPDATE kacho_iam.roles SET permissions = '["iam.role.*.read", "iam.role.*.list", "iam.role.*.get"]'::jsonb WHERE id = 'rolee27bb5ba1efb68cb';
-UPDATE kacho_iam.roles SET permissions = '["iam.serviceAccount.*.read", "iam.serviceAccount.*.list", "iam.serviceAccount.*.get"]'::jsonb WHERE id = 'rolfc25814dc6989172d';
-UPDATE kacho_iam.roles SET permissions = '["vpc.network.*.read", "vpc.network.*.list", "vpc.network.*.get"]'::jsonb WHERE id = 'rolfe683216e63311d3f';
+UPDATE kaname.roles SET permissions = '["*.*.*.read", "*.*.*.list", "*.*.*.get"]'::jsonb WHERE id = 'rol000000000sysviewer';
+UPDATE kaname.roles SET permissions = '["*.*.*.read", "*.*.*.list", "*.*.*.get"]'::jsonb WHERE id = 'rol1bda80f2be4d3658e';
+UPDATE kaname.roles SET permissions = '["vpc.address.*.read", "vpc.address.*.list", "vpc.address.*.get"]'::jsonb WHERE id = 'rol096a471229217fbcf';
+UPDATE kaname.roles SET permissions = '["vpc.securityGroup.*.read", "vpc.securityGroup.*.list", "vpc.securityGroup.*.get"]'::jsonb WHERE id = 'rol1469d1a633ceae4b5';
+UPDATE kaname.roles SET permissions = '["vpc.gateway.*.read", "vpc.gateway.*.list", "vpc.gateway.*.get"]'::jsonb WHERE id = 'rol26a49318d88632af2';
+UPDATE kaname.roles SET permissions = '["vpc.subnet.*.read", "vpc.subnet.*.list", "vpc.subnet.*.get"]'::jsonb WHERE id = 'rol31f5c2b4e7b3ee06c';
+UPDATE kaname.roles SET permissions = '["iam.account.*.read", "iam.account.*.list", "iam.account.*.get"]'::jsonb WHERE id = 'rol41dd066874f699c17';
+UPDATE kaname.roles SET permissions = '["compute.instance.*.read", "compute.instance.*.list", "compute.instance.*.get"]'::jsonb WHERE id = 'rol6be01c0948936754b';
+UPDATE kaname.roles SET permissions = '["iam.project.*.read", "iam.project.*.list", "iam.project.*.get"]'::jsonb WHERE id = 'rol7ad445624b1d0e9a1';
+UPDATE kaname.roles SET permissions = '["vpc.routeTable.*.read", "vpc.routeTable.*.list", "vpc.routeTable.*.get"]'::jsonb WHERE id = 'rolab84e08ef4b5e0b22';
+UPDATE kaname.roles SET permissions = '["iam.accessBinding.*.read", "iam.accessBinding.*.list", "iam.accessBinding.*.get"]'::jsonb WHERE id = 'rolb18c533133af2f130';
+UPDATE kaname.roles SET permissions = '["iam.group.*.read", "iam.group.*.list", "iam.group.*.get"]'::jsonb WHERE id = 'rolc98b067591ded99e5';
+UPDATE kaname.roles SET permissions = '["iam.user.*.read", "iam.user.*.list", "iam.user.*.get"]'::jsonb WHERE id = 'role2f47108d41b38f39';
+UPDATE kaname.roles SET permissions = '["iam.role.*.read", "iam.role.*.list", "iam.role.*.get"]'::jsonb WHERE id = 'rolee27bb5ba1efb68cb';
+UPDATE kaname.roles SET permissions = '["iam.serviceAccount.*.read", "iam.serviceAccount.*.list", "iam.serviceAccount.*.get"]'::jsonb WHERE id = 'rolfc25814dc6989172d';
+UPDATE kaname.roles SET permissions = '["vpc.network.*.read", "vpc.network.*.list", "vpc.network.*.get"]'::jsonb WHERE id = 'rolfe683216e63311d3f';
 -- +goose StatementEnd

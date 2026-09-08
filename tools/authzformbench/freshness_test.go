@@ -76,6 +76,8 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kacho/pkg/gitenv"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // benchReportMaxAge — предел возраста отчёта.
@@ -317,7 +319,7 @@ func judgeLedger(present []string, ledger []preStampReport,
 // TestBenchReportsAreFreshAndTheirInstrumentHasNotMoved — гейт свежести.
 func TestBenchReportsAreFreshAndTheirInstrumentHasNotMoved(t *testing.T) {
 	root := benchRepoRoot(t)
-	dir := filepath.Join(root, benchDir)
+	dir := platformtree.RequirePath(t, benchDir)
 
 	present, err := benchReportFiles(dir)
 	if err != nil {

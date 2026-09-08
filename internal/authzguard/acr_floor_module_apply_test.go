@@ -39,10 +39,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/seed"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 )
 
-const moduleApplyMethod = "/kacho.cloud.iam.v1.InternalModuleService/Apply"
+const moduleApplyMethod = "/kaname.cloud.iam.v1.InternalModuleService/Apply"
 
 func TestACRFloor_ModuleApply_StepUpIsLiveNotDeclared(t *testing.T) {
 	reg, err := seed.LoadPermissionRegistry(context.Background(),
@@ -53,7 +53,7 @@ func TestACRFloor_ModuleApply_StepUpIsLiveNotDeclared(t *testing.T) {
 
 	// (1) Величину объявляет каталог, и она равна "2". Читается у поставляемого
 	// каталога, а не у литерала рядом: литерал согласился бы с любой редакцией.
-	const fqn = "kacho.cloud.iam.v1.InternalModuleService/Apply"
+	const fqn = "kaname.cloud.iam.v1.InternalModuleService/Apply"
 	if got := reg.RequiredACRMin(fqn); got != "2" {
 		t.Fatalf("каталог объявляет ступень %q у %s, ожидалась \"2\" — предмет пробы исчез: "+
 			"либо требование снято с контракта, либо запись каталога разошлась с ним", got, fqn)

@@ -33,7 +33,7 @@ import (
 
 const (
 	// bootstrapMintMethod — the RPC under test.
-	bootstrapMintMethod = "/kacho.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken"
+	bootstrapMintMethod = "/kaname.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken"
 	// seedRunnerSAN — the allow-listed operator/CI identity.
 	seedRunnerSAN = "spiffe://kacho.cloud/ns/kacho/sa/kacho-bootstrap-seeder"
 )
@@ -49,7 +49,7 @@ func mintPolicy(prod bool, sans ...string) *CallerPolicy {
 func TestCallerPolicy_BootstrapMint_AllowlistedSAN_Allowed(t *testing.T) {
 	for _, prod := range []bool{true, false} {
 		p := mintPolicy(prod, seedRunnerSAN)
-		ctx := grpcsrv.WithCertIdentity(context.Background(), seedRunnerSAN, true)
+		ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), seedRunnerSAN, true)
 		if err := p.allow(ctx, bootstrapMintMethod); err != nil {
 			t.Errorf("prod=%v allow-listed SAN: unexpected error %v", prod, err)
 		}
@@ -63,7 +63,7 @@ func TestCallerPolicy_BootstrapMint_UnlistedSAN_Denied(t *testing.T) {
 	for _, prod := range []bool{true, false} {
 		for _, san := range []string{gatewaySAN, vpcSAN} {
 			p := mintPolicy(prod, seedRunnerSAN)
-			ctx := grpcsrv.WithCertIdentity(context.Background(), san, true)
+			ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), san, true)
 			err := p.allow(ctx, bootstrapMintMethod)
 			if status.Code(err) != codes.PermissionDenied {
 				t.Errorf("prod=%v san=%s: got %v, want PermissionDenied", prod, san, err)
@@ -83,9 +83,9 @@ func TestCallerPolicy_BootstrapMint_NoVerifiedCert_Denied(t *testing.T) {
 		p := mintPolicy(prod, seedRunnerSAN)
 		for name, ctx := range map[string]context.Context{
 			"no cert":       context.Background(),
-			"unverified":    grpcsrv.WithCertIdentity(context.Background(), seedRunnerSAN, false),
-			"empty san":     grpcsrv.WithCertIdentity(context.Background(), "", true),
-			"non-spiffe id": grpcsrv.WithCertIdentity(context.Background(), "cn=whoever", true),
+			"unverified":    grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), seedRunnerSAN, false),
+			"empty san":     grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), "", true),
+			"non-spiffe id": grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), "cn=whoever", true),
 		} {
 			if status.Code(p.allow(ctx, bootstrapMintMethod)) != codes.PermissionDenied {
 				t.Errorf("prod=%v %s: want PermissionDenied", prod, name)
@@ -103,7 +103,7 @@ func TestCallerPolicy_BootstrapMint_EmptyAllowlist_DeniesEveryone(t *testing.T) 
 			NewCallerPolicy(prod, GatewayFrontedInternalRPCs()), // never configured
 			mintPolicy(prod).WithSANAllowlist(nil),              // explicitly cleared
 		} {
-			ctx := grpcsrv.WithCertIdentity(context.Background(), seedRunnerSAN, true)
+			ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), seedRunnerSAN, true)
 			if status.Code(p.allow(ctx, bootstrapMintMethod)) != codes.PermissionDenied {
 				t.Errorf("prod=%v empty allow-list must deny every caller", prod)
 			}
@@ -140,7 +140,7 @@ func TestCallerPolicy_SANAllowlist_DoesNotLeakToOtherRPCs(t *testing.T) {
 	}
 	// And the allow-listed seeder has no special powers elsewhere: it is a
 	// verified module like any other (floor passes, gateway-only denies).
-	seederCtx := grpcsrv.WithCertIdentity(context.Background(), seedRunnerSAN, true)
+	seederCtx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), seedRunnerSAN, true)
 	if status.Code(p.allow(seederCtx, gatewayOnlyMethod)) != codes.PermissionDenied {
 		t.Error("the mint-allow-listed SAN must not gain gateway-fronted access")
 	}
@@ -150,7 +150,7 @@ func TestCallerPolicy_SANAllowlist_DoesNotLeakToOtherRPCs(t *testing.T) {
 // through the interceptor the server actually installs (unary + stream).
 func TestCallerPolicy_BootstrapMint_InterceptorDenies(t *testing.T) {
 	p := mintPolicy(true, seedRunnerSAN)
-	ctx := grpcsrv.WithCertIdentity(context.Background(), vpcSAN, true)
+	ctx := grpcsrv.WithCertIdentityIn(context.Background(), grpcsrv.NewTrustDomain("kacho.cloud"), vpcSAN, true)
 
 	_, err := p.Unary()(ctx, nil, &grpc.UnaryServerInfo{FullMethod: bootstrapMintMethod}, okHandler)
 	if status.Code(err) != codes.PermissionDenied {

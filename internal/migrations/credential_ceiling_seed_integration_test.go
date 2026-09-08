@@ -63,7 +63,7 @@ func TestCredentialCeilingSeed_APrincipalWithoutCredentialsStartsAtZero(t *testi
 	// никогда, — и утверждение о величине ниже зеленело бы, не прочитав ничего.
 	var rows int
 	require.NoError(t, db.QueryRow(`
-		SELECT count(*) FROM kacho_iam.project_resource_quotas
+		SELECT count(*) FROM kaname.project_resource_quotas
 		 WHERE kind IN ('iam.user.credential', 'iam.serviceAccount.credential')`).Scan(&rows))
 	require.Positive(t, rows,
 		"строк учёта у видов удостоверения не заведено ни одной: списанию не с чего "+
@@ -72,14 +72,14 @@ func TestCredentialCeilingSeed_APrincipalWithoutCredentialsStartsAtZero(t *testi
 
 	var used int64
 	require.NoError(t, db.QueryRow(`
-		SELECT used FROM kacho_iam.project_resource_quotas
+		SELECT used FROM kaname.project_resource_quotas
 		 WHERE carrier_type = 'iam.user' AND carrier_id = 'usr00000000000000bat'
 		   AND kind = 'iam.user.credential'`).Scan(&used))
 	require.EqualValues(t, 0, used,
 		"у принципала без удостоверений потребление не ноль: учёт считает не то, что считает списание")
 
 	require.NoError(t, db.QueryRow(`
-		SELECT used FROM kacho_iam.project_resource_quotas
+		SELECT used FROM kaname.project_resource_quotas
 		 WHERE carrier_type = 'iam.serviceAccount' AND carrier_id = 'sva00000000000000bat'
 		   AND kind = 'iam.serviceAccount.credential'`).Scan(&used))
 	require.EqualValues(t, 0, used, "то же у служебной учётки")

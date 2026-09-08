@@ -17,9 +17,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	"github.com/PRO-Robotech/kacho-iam/internal/handler/iamhooks"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
+	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 type fakeUserLookup struct {
@@ -142,14 +142,14 @@ func TestTokenHook_HappyPath_EnrichesClaims(t *testing.T) {
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	claims, ok := resp.Session.AccessToken["ext_claims"].(map[string]any)
 	require.True(t, ok, "ext_claims must be present")
-	assert.Equal(t, "kratos-uuid-1", claims["kacho_external_id"])
-	assert.Equal(t, "usr_01abcdefghjkmnpqr", claims["kacho_user_id"])
-	assert.Equal(t, "acc_01abcdefghjkmnpqr", claims["kacho_active_account"])
-	assert.Equal(t, "user", claims["kacho_principal_type"])
-	assert.Equal(t, "attested", claims["kacho_device_compliance"]) // webauthn scope
-	assert.Equal(t, "abc-thumbprint", claims["kacho_jkt"])
-	assert.Equal(t, "api.test.cloud", claims["kacho_audience"])
-	assert.Equal(t, "https://hydra.test.cloud", claims["kacho_issuer"])
+	assert.Equal(t, "kratos-uuid-1", claims["kaname_external_id"])
+	assert.Equal(t, "usr_01abcdefghjkmnpqr", claims["kaname_user_id"])
+	assert.Equal(t, "acc_01abcdefghjkmnpqr", claims["kaname_active_account"])
+	assert.Equal(t, "user", claims["kaname_principal_type"])
+	assert.Equal(t, "attested", claims["kaname_device_compliance"]) // webauthn scope
+	assert.Equal(t, "abc-thumbprint", claims["kaname_jkt"])
+	assert.Equal(t, "api.test.cloud", claims["kaname_audience"])
+	assert.Equal(t, "https://hydra.test.cloud", claims["kaname_issuer"])
 
 	// Audit emitted.
 	require.Len(t, audit.Events(), 1)
@@ -251,9 +251,9 @@ func TestTokenHook_ClientCredentials_EmptySubject_FallsBackToClientID(t *testing
 		w.Body.String())
 	assert.NotContains(t, w.Body.String(), "missing_subject")
 	claims := extClaimsOf(t, w)
-	assert.Equal(t, "cc-client-uuid", claims["kacho_external_id"],
+	assert.Equal(t, "cc-client-uuid", claims["kaname_external_id"],
 		"the subject the handler proceeded with is the client id it fell back to")
-	assert.Equal(t, "sva_01abcdefghjkmnpqr", claims["kacho_principal_id"],
+	assert.Equal(t, "sva_01abcdefghjkmnpqr", claims["kaname_principal_id"],
 		"only a lookup keyed on the adopted client id could have reached this service account")
 }
 
@@ -299,10 +299,10 @@ func TestTokenHook_UserNotFound_EmitsMinimalClaims(t *testing.T) {
 	}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	claims := resp.Session.AccessToken["ext_claims"].(map[string]any)
-	assert.Equal(t, "unknown-sub", claims["kacho_external_id"])
-	assert.Equal(t, "user", claims["kacho_principal_type"],
+	assert.Equal(t, "unknown-sub", claims["kaname_external_id"])
+	assert.Equal(t, "user", claims["kaname_principal_type"],
 		"the reduced set is for a human whose mirror has not committed yet")
-	assert.Empty(t, claims["kacho_principal_id"],
+	assert.Empty(t, claims["kaname_principal_id"],
 		"it names no kacho principal, which is what makes it authorize nothing")
 }
 

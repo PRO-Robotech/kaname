@@ -52,8 +52,8 @@ var subordinateResources = []SubordinateResource{
 		Kind:    "iam.credential",
 		Parents: []LimitKind{"iam.user", "iam.serviceAccount"},
 		Tables: []string{
-			"kacho_iam.user_oauth_clients",
-			"kacho_iam.service_account_oauth_clients",
+			"kaname.user_oauth_clients",
+			"kaname.service_account_oauth_clients",
 		},
 		Why: "право на удостоверение вычисляется от принципала (`token_issuer: subject` " +
 			"у человека, `v_update` на учётке у машины), поэтому объекта, на который его " +

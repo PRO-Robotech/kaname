@@ -32,8 +32,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 const (
@@ -119,9 +119,9 @@ func TestEnrichClaims_EnabledServiceAccount_StillMints(t *testing.T) {
 	require.NoError(t, err, "an enabled service account must keep minting; refusing it trades "+
 		"one hole for an outage of every machine flow there is")
 	require.NotNil(t, claims)
-	assert.Equal(t, "service_account", claims["kacho_principal_type"])
-	assert.Equal(t, disabledSAID, claims["kacho_principal_id"])
-	assert.Equal(t, disabledSAAccID, claims["kacho_account_id"])
+	assert.Equal(t, "service_account", claims["kaname_principal_type"])
+	assert.Equal(t, disabledSAID, claims["kaname_principal_id"])
+	assert.Equal(t, disabledSAAccID, claims["kaname_account_id"])
 }
 
 // ── jwt-bearer (federated assertion) ────────────────────────────────────────
@@ -152,7 +152,7 @@ func TestEnrichClaims_EnabledFederatedServiceAccount_StillMints(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, claims)
-	assert.Equal(t, disabledSAID, claims["kacho_principal_id"])
+	assert.Equal(t, disabledSAID, claims["kaname_principal_id"])
 }
 
 // ── the account is gone, which is not the same as disabled ──────────────────
@@ -178,6 +178,6 @@ func TestEnrichClaims_ServiceAccountRowMissing_IsNotReportedAsDisabled(t *testin
 		"answered by the caller, not a new refusal invented here")
 	require.NotNil(t, claims)
 	assert.False(t, stderrors.Is(err, ErrServiceAccountDisabled))
-	assert.NotContains(t, claims, "kacho_account_id",
+	assert.NotContains(t, claims, "kaname_account_id",
 		"and it still omits the account it could not resolve")
 }

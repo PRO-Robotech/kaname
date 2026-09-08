@@ -7,10 +7,10 @@ package service
 // (UserOAuthClient) claim-minting branch of TokenEnrichmentService.
 //
 // 5th-audit TEST-medium: userTokenClaims + the user-token lookup branch of
-// EnrichClaims (wired in prod via cmd/kacho-iam/hooks_mux.go .WithUserTokenPort)
+// EnrichClaims (wired in prod via cmd/kaname/hooks_mux.go .WithUserTokenPort)
 // had ZERO test coverage — no test anywhere wired a UserTokenPort into the
 // enrichment service. This is the security-relevant path that stamps
-// kacho_principal_id / kacho_account_id / the DPoP-binding kacho_jkt / x5t_s256
+// kaname_principal_id / kaname_account_id / the DPoP-binding kaname_jkt / x5t_s256
 // confirmation claims onto a token minted from a personal access token. A
 // silent regression here (wrong principal/account, or a dropped cnf binding)
 // would ship green. These tests lock the exact claim map and the error-
@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	iamerr "github.com/PRO-Robotech/kacho-iam/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // stubUserPort — the interactive-user lookup port. The user-token branch returns
@@ -88,21 +88,21 @@ func TestEnrichClaims_UserToken_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]any{
-		"kacho_external_id":       "client-abc",
-		"kacho_hydra_client_id":   "client-abc",
-		"kacho_principal_type":    "user",
-		"kacho_principal_id":      "usr-abc",
-		"kacho_user_id":           "usr-abc",
-		"kacho_user_token_id":     "uoc-123",
-		"kacho_device_compliance": "unknown",
-		"kacho_jkt":               "jkt-thumb",
-		"kacho_x5t_s256":          "x5t-thumb",
-		"kacho_acr":               "3",
-		"kacho_audience":          "kacho.cloud",
-		"kacho_issuer":            "https://hydra.kacho.local",
-		"kacho_issued_at":         fixed.Unix(),
-		"kacho_account_id":        "acc-xyz",
-		"kacho_active_account":    "acc-xyz",
+		"kaname_external_id":       "client-abc",
+		"kaname_hydra_client_id":   "client-abc",
+		"kaname_principal_type":    "user",
+		"kaname_principal_id":      "usr-abc",
+		"kaname_user_id":           "usr-abc",
+		"kaname_user_token_id":     "uoc-123",
+		"kaname_device_compliance": "unknown",
+		"kaname_jkt":               "jkt-thumb",
+		"kaname_x5t_s256":          "x5t-thumb",
+		"kaname_acr":               "3",
+		"kaname_audience":          "kacho.cloud",
+		"kaname_issuer":            "https://hydra.kacho.local",
+		"kaname_issued_at":         fixed.Unix(),
+		"kaname_account_id":        "acc-xyz",
+		"kaname_active_account":    "acc-xyz",
 	}, claims)
 }
 
@@ -120,10 +120,10 @@ func TestEnrichClaims_UserToken_UserGone_OmitsAccount(t *testing.T) {
 
 	claims, _, err := svc.EnrichClaims(context.Background(), "client-gone", TokenHookContext{})
 	require.NoError(t, err)
-	assert.Equal(t, "usr-gone", claims["kacho_principal_id"])
-	assert.Equal(t, "uoc-777", claims["kacho_user_token_id"])
-	assert.NotContains(t, claims, "kacho_account_id", "account omitted when the User row is gone")
-	assert.NotContains(t, claims, "kacho_active_account")
+	assert.Equal(t, "usr-gone", claims["kaname_principal_id"])
+	assert.Equal(t, "uoc-777", claims["kaname_user_token_id"])
+	assert.NotContains(t, claims, "kaname_account_id", "account omitted when the User row is gone")
+	assert.NotContains(t, claims, "kaname_active_account")
 }
 
 // TestEnrichClaims_UserToken_LookupError_Propagates — a non-NotFound error from

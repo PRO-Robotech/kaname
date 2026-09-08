@@ -29,7 +29,7 @@ auto-allocation + kacho-geo for region) deployed behind the gateway so nlb→iam
 RegisterResource feeds resource_mirror. The umbrella e2e brings up the full stack
 and runs this shared iam suite, so these execute against a complete deployment.
 
-REGION DISCOVERY (no env-fixture dependency). The shared kacho-iam newman env does
+REGION DISCOVERY (no env-fixture dependency). The shared kaname newman env does
 NOT define existingRegionId (it is a compute/nlb-suite env var, absent in the iam
 harness the umbrella runs). A LoadBalancer Create with the unsubstituted literal
 "{{existingRegionId}}" failed (region not found) → no LB → no listener → grant

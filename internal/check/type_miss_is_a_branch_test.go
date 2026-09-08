@@ -66,6 +66,9 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // twoValueSymbols — символы `authzmap`, отдающие ПАРУ (значение, известен ли).
@@ -171,7 +174,7 @@ func discardedTypeMisses(root string, files []string, want map[string]bool) (
 // TestIAMCT2_TypeMissIsDecidedByABranch — гейт на дереве.
 func TestIAMCT2_TypeMissIsDecidedByABranch(t *testing.T) {
 	root := catalogRepoRoot(t)
-	files, err := treecorpus.UnderWithSuffix(filepath.Join(root, iamTreeRel), ".go")
+	files, err := treecorpus.UnderWithSuffix(platformtree.RequirePath(t, iamTreeRel), ".go")
 	if err != nil {
 		t.Fatalf("состав дерева: %v", err)
 	}
@@ -199,11 +202,23 @@ func TestIAMCT2_TypeMissIsDecidedByABranch(t *testing.T) {
 			"РАСПОЗНАВАТЕЛЯ, а не чистое дерево", importers)
 	}
 
+	// КЛЮЧИ ВЕДОМОСТИ ПРИВОДЯТСЯ К ПОСАДКЕ. Они записаны координатами дерева
+	// платформы (`services/iam/...`), а обход отдаёт пути от корня ТОГО дерева, в
+	// котором идёт прогон: в самостоятельном клоне приставки у них нет. Без
+	// приведения ни один ключ не совпал бы, и оба утверждения ниже перевернулись
+	// бы разом — «отброшено вне ведомости» на всём и «нечего исключать» по каждой
+	// записи, — то есть гейт краснел бы дважды на исправном дереве.
+	prefix := treeposture.PrefixUnder(root)
+	allow := make(map[string]string, len(decodedMissFiles))
+	for k := range decodedMissFiles {
+		allow[treeposture.Under(prefix, strings.TrimPrefix(k, "services/iam/"))] = k
+	}
+
 	seen := map[string]bool{}
 	var findings []typeMiss
 	for _, m := range misses {
-		if _, allowed := decodedMissFiles[m.File]; allowed {
-			seen[m.File] = true
+		if key, allowed := allow[m.File]; allowed {
+			seen[key] = true
 			continue
 		}
 		findings = append(findings, m)

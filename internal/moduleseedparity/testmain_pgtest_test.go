@@ -9,7 +9,7 @@ import (
 
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // TestMain даёт пакету ОДИН Postgres с уже проигранной цепочкой миграций iam.

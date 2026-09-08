@@ -8,7 +8,7 @@
 // нескольких обращений разошлась бы с собой.
 package operatordocs
 
-import "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/config"
+import "github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 
 // requiredSettings — таблица величин, без которых служба не пускается.
 // Объявлена и доказана прогоном в пакете настройки; второго перечня здесь не

@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // fixtureModules — набор для проб ВНЕШНЕГО пакета. Довод против равенства

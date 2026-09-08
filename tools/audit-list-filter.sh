@@ -2,7 +2,7 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# audit-list-filter.sh — CI gate for kacho-iam's listing surface: every method that
+# audit-list-filter.sh — CI gate for kaname's listing surface: every method that
 # hands a page to a caller must narrow it, and must declare HOW.
 #
 # This is a THIN wrapper. What is checked, and why the analysis parses the tree

@@ -35,19 +35,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest/roleexport"
-)
+	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest/roleexport"
 
-// treeRootFromPackage — корень дерева относительно каталога пакета.
-// Объявлен ОДИН раз: второе объявление разошлось бы с первым при переносе
-// пакета, и неверное отвечало бы «манифестов ноль» — то есть зелёным.
-const treeRootFromPackage = "../../../../.."
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+)
 
 // realManifests — шесть манифестов дерева, прочитанных настоящим загрузчиком.
 func realManifests(t *testing.T) []*manifest.Manifest {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join(treeRootFromPackage, "services", "*", "manifest.yaml"))
+	// Читается ДЕРЕВО ПЛАТФОРМЫ: манифесты соседних модулей, каталог
+	// контрактов и канон модели в поставку нашего модуля не входят by
+	// construction. Их отсутствие — «условие не создано», а не находка.
+	paths, err := filepath.Glob(filepath.Join(platformtree.RequirePath(t, "services"), "*", "manifest.yaml"))
 	if err != nil {
 		t.Fatalf("обход дерева отказал: %v", err)
 	}

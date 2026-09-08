@@ -6,7 +6,7 @@
 //
 // # Предмет (kacho#455)
 //
-// Две очереди kacho-iam — provider_compensation_outbox и subject_change_outbox —
+// Две очереди kaname — provider_compensation_outbox и subject_change_outbox —
 // дренились, травили строки и возврата отравленных не имели. Возврат им не
 // построить и не осмыслить: он собирается вокруг ключа партиции, которого у
 // коммутативного потока нет, а сам смысл травления — разблокировать партицию,
@@ -44,7 +44,7 @@
 // Строка обязана ОПИСЫВАТЬ СЕБЯ телом, а не только колонками: тело непусто, оно
 // объект и оно называет субъекта. Тело — единственное место, откуда живая
 // проекция чтения берёт тип субъекта
-// (`repo/kacho/pg/subject_change_repo.go`: `COALESCE(payload->>'subject_type', ”)`),
+// (`repo/kaname/pg/subject_change_repo.go`: `COALESCE(payload->>'subject_type', ”)`),
 // и единственная форма записи, пережившая обе усушки набора колонок: колонок
 // журнал терял дважды (#1462 — величины предмета, #1396 — величины доставки),
 // тела — ни разу.
@@ -58,8 +58,8 @@
 //
 // И журнала смены субъекта тот гейт НЕ КАСАЕТСЯ: он судит очереди по ПРОВОДКЕ
 // дренажа (`drainer.Config.PermanentPolicy`), а проводки у журнала нет — его
-// перечень сегодня это три очереди (kacho_iam.audit_outbox,
-// kacho_iam.provider_compensation_outbox, public.audit_outbox). Значит для
+// перечень сегодня это три очереди (kaname.audit_outbox,
+// kaname.provider_compensation_outbox, public.audit_outbox). Значит для
 // половины журнала эта проба — не вторая линия обороны, а ЕДИНСТВЕННАЯ:
 // снимут ограничение 0097 — красной станет только она.
 package migrations_test
@@ -73,8 +73,8 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/migrations"
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // poisonCase — одна негодная форма строки вместе с ОСНОВАНИЕМ, по которому она
@@ -114,25 +114,25 @@ func TestIntegration_UndecodableRowCannotBeWritten(t *testing.T) {
 		{
 			name:  "subject_change: тело отсутствует",
 			basis: "0097 subject_change_outbox.payload NOT NULL: строка без тела себя не описывает",
-			insert: `INSERT INTO kacho_iam.subject_change_outbox (subject_id, op, payload)
+			insert: `INSERT INTO kaname.subject_change_outbox (subject_id, op, payload)
 			         VALUES ('usr_a', 'binding_revoke', NULL)`,
 		},
 		{
 			name:  "subject_change: тело не объект",
 			basis: "0097 CHECK subject_change_payload_is_object: тело обязано быть объектом",
-			insert: `INSERT INTO kacho_iam.subject_change_outbox (subject_id, op, payload)
+			insert: `INSERT INTO kaname.subject_change_outbox (subject_id, op, payload)
 			         VALUES ('usr_a', 'binding_revoke', '"не объект"'::jsonb)`,
 		},
 		{
 			name:  "subject_change: тело не называет субъекта",
 			basis: "0097 CHECK subject_change_payload_names_subject: тело обязано называть субъекта",
-			insert: `INSERT INTO kacho_iam.subject_change_outbox (subject_id, op, payload)
+			insert: `INSERT INTO kaname.subject_change_outbox (subject_id, op, payload)
 			         VALUES ('usr_a', 'binding_revoke', '{"event_type":"binding_revoke"}'::jsonb)`,
 		},
 		{
 			name:  "subject_change: субъект в теле пуст",
 			basis: "0097 CHECK subject_change_payload_names_subject: тело обязано называть субъекта",
-			insert: `INSERT INTO kacho_iam.subject_change_outbox (subject_id, op, payload)
+			insert: `INSERT INTO kaname.subject_change_outbox (subject_id, op, payload)
 			         VALUES ('usr_a', 'binding_revoke', '{"subject_id":""}'::jsonb)`,
 		},
 
@@ -140,26 +140,26 @@ func TestIntegration_UndecodableRowCannotBeWritten(t *testing.T) {
 		{
 			name:  "provider_compensation: тело не объект",
 			basis: `DecodeProviderCompensation: "decode … payload"`,
-			insert: `INSERT INTO kacho_iam.provider_compensation_outbox (event_type, payload)
+			insert: `INSERT INTO kaname.provider_compensation_outbox (event_type, payload)
 			         VALUES ('provider.oauth_client.delete', '[]'::jsonb)`,
 		},
 		{
 			name:  "provider_compensation: предмет не назван",
 			basis: `DecodeProviderCompensation: "names no subject"`,
-			insert: `INSERT INTO kacho_iam.provider_compensation_outbox (event_type, payload)
+			insert: `INSERT INTO kaname.provider_compensation_outbox (event_type, payload)
 			         VALUES ('provider.oauth_client.delete', '{"reason":"r"}'::jsonb)`,
 		},
 		{
 			name:  "provider_compensation: предметов названо два",
 			basis: `DecodeProviderCompensation: "names two subjects"`,
-			insert: `INSERT INTO kacho_iam.provider_compensation_outbox (event_type, payload)
+			insert: `INSERT INTO kaname.provider_compensation_outbox (event_type, payload)
 			         VALUES ('provider.trust_grant.delete',
 			                 '{"client_id":"c","grant_id":"g"}'::jsonb)`,
 		},
 		{
 			name:  "provider_compensation: вид события вне словаря",
 			basis: `NewProviderCompensationApplier: "unknown provider compensation event type"`,
-			insert: `INSERT INTO kacho_iam.provider_compensation_outbox (event_type, payload)
+			insert: `INSERT INTO kaname.provider_compensation_outbox (event_type, payload)
 			         VALUES ('provider.something.delete', '{"client_id":"c"}'::jsonb)`,
 		},
 	}
@@ -183,7 +183,7 @@ func TestIntegration_UndecodableRowCannotBeWritten(t *testing.T) {
 	// ВСЁ, — то есть на очереди, в которую нельзя записать ни одного намерения.
 	t.Run("контроль: законная строка принимается", func(t *testing.T) {
 		_, err := db.ExecContext(ctx,
-			`INSERT INTO kacho_iam.subject_change_outbox (subject_id, op, payload)
+			`INSERT INTO kaname.subject_change_outbox (subject_id, op, payload)
 			 VALUES ('usr_a', 'binding_revoke',
 			         '{"subject_id":"usr_a","event_type":"binding_revoke"}'::jsonb)`)
 		require.NoError(t, err,
@@ -191,13 +191,13 @@ func TestIntegration_UndecodableRowCannotBeWritten(t *testing.T) {
 				"и очередь перестала принимать то, ради чего заведена")
 
 		_, err = db.ExecContext(ctx,
-			`INSERT INTO kacho_iam.provider_compensation_outbox (event_type, payload)
+			`INSERT INTO kaname.provider_compensation_outbox (event_type, payload)
 			 VALUES ('provider.oauth_client.delete',
 			         '{"client_id":"c-1","origin":"sa_key","reason":"commit failed"}'::jsonb)`)
 		require.NoError(t, err, "законная компенсация отвергнута")
 
 		_, err = db.ExecContext(ctx,
-			`INSERT INTO kacho_iam.provider_compensation_outbox (event_type, payload)
+			`INSERT INTO kaname.provider_compensation_outbox (event_type, payload)
 			 VALUES ('provider.trust_grant.delete',
 			         '{"grant_id":"g-1","origin":"sa_key","reason":"commit failed"}'::jsonb)`)
 		require.NoError(t, err, "законная компенсация доверительного гранта отвергнута")

@@ -4,7 +4,7 @@
 // Package bootstraptokenwire — composition-root wiring for the
 // InternalBootstrapTokenService handler (#58). Assembles the bootstrap-token
 // mint use-case (BootstrapStore pg adapter + НАШ подписант) and its thin gRPC
-// handler. Single wire-up call for cmd/kacho-iam.
+// handler. Single wire-up call for cmd/kaname.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ЗДЕСЬ ИЗМЕНИЛОСЬ И ПОЧЕМУ ЭТО ГЛАВНОЕ (задача #1119, Ф4б эпика #896)
@@ -28,12 +28,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	bootstraptoken "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/bootstrap_token"
-	"github.com/PRO-Robotech/kacho-iam/internal/domain"
-	kachopg "github.com/PRO-Robotech/kacho-iam/internal/repo/kacho/pg"
-	"github.com/PRO-Robotech/kacho-iam/internal/service"
-	"github.com/PRO-Robotech/kacho-iam/internal/tokensigner"
 	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	bootstraptoken "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token"
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
 // ClaimsComposer — состав утверждений выпускаемого токена.
@@ -125,7 +125,7 @@ func (m localMint) MintToken(ctx context.Context, in bootstraptoken.MintInput) (
 // BuildConfig — composition inputs for the bootstrap-token mint handler.
 type BuildConfig struct {
 	// SigningKeyPEM — the bootstrap ES256 (P-256, PKCS#8) private key PEM,
-	// supplied from a k8s Secret (KACHO_IAM_BOOTSTRAP_SA_PRIVATE_KEY_PEM). Empty →
+	// supplied from a k8s Secret (KANAME_BOOTSTRAP_SA_PRIVATE_KEY_PEM). Empty →
 	// mint disabled (fail-closed).
 	SigningKeyPEM string
 	// Signer — НАШ подписант. Обязателен, когда контур включён: выпускать иначе
@@ -148,8 +148,8 @@ type BuildConfig struct {
 // собранный наполовину контур отвечал бы отказом на первом же запросе, и узнать
 // об этом было бы неоткуда — стенд поднялся бы Ready.
 func Build(pool *pgxpool.Pool, cfg BuildConfig) (*bootstraptoken.Handler, error) {
-	store := kachopg.NewBootstrapStore(pool)
-	txb := kachopg.NewPoolTxBeginner(pool)
+	store := kanamepg.NewBootstrapStore(pool)
+	txb := kanamepg.NewPoolTxBeginner(pool)
 
 	var minter bootstraptoken.LocalMinter
 	if cfg.SigningKeyPEM != "" {

@@ -18,7 +18,7 @@ import (
 	"context"
 	"errors"
 
-	interactiveclient "github.com/PRO-Robotech/kacho-iam/internal/apps/kacho/api/interactive_client"
+	interactiveclient "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/interactive_client"
 )
 
 // InteractiveClientProvider adapts HydraAdminClient to the use-case port.

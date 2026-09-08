@@ -6,6 +6,31 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 # Приёмка: модель процесса собирается на старте из доставленных манифестов
 
 - **Статус:** ✅ **APPROVED** — круг 11 (`acceptance-reviewer`), вердикт вынесен
+- **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Правок 3, строк 23: `5504f44a7f` каталоги службы (3)
+  · `b81adf2760` имя службы (19) · `93ef852fe9` идентификатор лицензии (1).
+  Дельта целиком — подстановка токена (`kacho-iam→kaname` · `kacho→kaname` ·
+  `BUSL-1.1→AGPL-3.0-or-later`); непарных строк 0, пар с изменившимся числом
+  токенов 0; ни один сценарий, производитель, признак готовности и клауза не
+  тронуты. Одобрение относится к **содержимому**, а не к имени файла: APPROVED
+  выше есть вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю
+  редакцию ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение,
+  замер и цена обоих отвергнутых исходов —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
+- **Правка 2026-09-07 после вердикта круга 11, точечная (`#2159`):** в §3.1 строка
+  производителя П-01 приведена к дереву — резолв канона перестал подниматься до
+  корня файловой системы, отказ называет предпосылку, и отказов стало два
+  («лежит выше дерева» / «в дереве нет»). Правлена ОДНА строка таблицы; ни один
+  сценарий, признак готовности и запись замера не тронуты. Вердикт круга 11
+  остаётся вердиктом о **прежнем** содержимом: правка одобренного документа
+  вердикт не переносит
+- **Правка 2026-09-05 после вердикта круга 11, точечная (`#2075`):** в клаузе
+  «Тогда» сценария `IAM-MB-1-01` величина канона приведена к сегодняшней
+  (`110 717` → `112 362`, единица B) и **выведена под держателя** — до этого
+  литерал стоял без машинного читателя и потому протух молча. Ни один сценарий,
+  производитель и признак готовности не тронут; **записи замера не правлены**.
+  Вердикт круга 11 остаётся вердиктом о прежнем содержимом: правка одобренного
+  документа вердикт не переносит
 - **Правка 2026-09-03 после вердикта круга 11, механическая:** §9.3 приведён к живой
   координате — проба переименована ИСПОЛНЕНИЕМ его же предписания («снять вторую
   половину ТЕМ ЖЕ изменением»). Вердикт круга 11 остаётся вердиктом о **прежнем**
@@ -91,6 +116,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   который эта работа делает живым** — падение разборщика блоков на вырожденном
   имени типа (§0.14), потеря законного действия при инъекции (§0.13),
   изменяемая переменная модели без гейта (§0.15)
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2212`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **1**. Правка одна и
+  механическая — приставка пути контракта `proto/kacho/cloud/iam/` →
+  `proto/kaname/cloud/iam/`: домен доступа переехал (`d46aaa7280`), и прежний
+  корень в дереве **не существует** (`git ls-files 'proto/kacho/cloud/iam/**'`
+  → 0). До правки координата не резолвилась, то есть **молчала**: читатель уходил
+  за ней и не находил. **НЕ тронуты** ни один сценарий, производитель, признак
+  готовности, клауза и ни одно число: непарных строк 0, пар с изменившимся числом
+  токенов 0. Записи замера, привязанные к ревизии, где прежний путь ЖИВ, оставлены
+  как есть намеренно — их перечень и предикат в теле задачи. Одобрение относится к
+  **содержимому**, а не к имени файла: APPROVED выше есть вердикт о редакции,
+  прочитанной проверяющим. Вердикт на нынешнюю редакцию ставит
+  `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 
 ---
 
@@ -161,7 +200,7 @@ fga_model.fga`, `:67` — `var DSL string`. Ошибку плана `sourcesOf` 
 ### 0.4 ПОДТВЕРЖДЕНО: манифест В ПРОЦЕССЕ ЕСТЬ
 
 `loadDeliveredManifests(logger, cfg config.ManifestsConfig) ([]*manifest.Manifest, error)`
-— `services/iam/cmd/kacho-iam/module_manifests.go:58`, зовётся из `serve.go:220`,
+— `services/iam/cmd/kaname/module_manifests.go:58`, зовётся из `serve.go:220`,
 то есть ДО применителя (`:240`) и ДО стража паритета (`:245`).
 
 Утверждение задачи #1969 «манифест, применённый в РАБОТАЮЩЕМ процессе, блока не
@@ -178,7 +217,7 @@ $ go run ./services/iam/tools/modelcanoncheck ; echo $?
 0
 ```
 
-Канон объявляет **32** типа (`grep -c '^type ' proto/kacho/cloud/iam/v1/fga_model.fga`);
+Канон объявляет **32** типа (`grep -c '^type ' proto/kaname/cloud/iam/v1/fga_model.fga`);
 манифесты объявляют **27** `objectType`; пересечение — **27**; вне манифестов —
 **5** (`cluster`, `group`, `iam_fgaproxy`, `service_account`, `user`), сверено
 `comm` двух отсортированных списков.
@@ -328,7 +367,7 @@ construction» оказывается шире предиката. Против�
 круге 4**: их нет **в бинаре службы вовсе** —
 
 ```
-$ go list -deps ./services/iam/cmd/kacho-iam | grep -c roleexport
+$ go list -deps ./services/iam/cmd/kaname | grep -c roleexport
 0
 ```
 
@@ -470,7 +509,7 @@ New(...):                        типов=[third]; Shared() по-прежне�
 ### 0.16 ПОДТВЕРЖДЕНО: `modelrender` из бинаря службы НЕДОСТИЖИМ
 
 ```
-$ go list -deps ./services/iam/cmd/kacho-iam | grep -c modelrender
+$ go list -deps ./services/iam/cmd/kaname | grep -c modelrender
 0
 ```
 
@@ -556,7 +595,7 @@ $ go list -deps ./services/iam/cmd/kacho-iam | grep -c modelrender
 **Чем предмет НЕ является.** Это не «модель становится данными в БД» — вариант
 (а) задачи #1029, закрытой `wontfix`. Источник — тот же смонтированный ConfigMap,
 который применитель каталога уже читает на старте (том `module-manifests`,
-`deploy/helm/umbrella/charts/kacho-iam/templates/deployment.yaml:120-123`); чарт
+`deploy/helm/umbrella/charts/kaname/templates/deployment.yaml:120-123`); чарт
 объявляет прямо: «правка его содержимого есть операция над данными и релиза
 службы не требует».
 
@@ -705,13 +744,13 @@ $ go list -deps ./services/iam/cmd/kacho-iam | grep -c modelrender
 
 | # | производитель | координата | что производит |
 |---|---|---|---|
-| П-01 | `authzplan.ResolveCanonicalModel()` | `services/iam/internal/authzplan/canonical.go:31` | путь и байты канона из дерева; отказ — `canonical model %s not found walking up from %s` (`:64`) |
+| П-01 | `authzplan.ResolveCanonicalModel()` | `services/iam/internal/authzplan/canonical.go` | путь и байты канона из дерева, ОГРАНИЧЕННОГО корнем; отказа два и они различаются — `ErrCanonAboveTree` (канон лежит выше дерева, найденный путь назван) и `ErrCanonNotInTree`; дерево устанавливается индексом, не арифметикой пути (`#2159`) |
 | П-02 | `authzmodel.New(dsl string) (*Plans, error)` | `services/iam/internal/authzmodel/authzmodel.go:113` | **разбор НАЗВАННОЙ модели** — шов композиции; `Shared()` выражен через него |
 | П-03 | `modelrender.Render(manifest.Resource) ([]byte, error)` | `services/iam/internal/modelrender/render.go:74` | байты блока типа; ошибок **ровно две** — `ErrObjectTypeEmpty` (`:54`), `ErrParentEmpty` (`:57`) |
 | П-04 | `modelrender.SplitCanon(dsl []byte) []Block` | `services/iam/internal/modelrender/canon.go:55` | разбор на блоки; граница — пустая строка ЛИБО следующий `type ` в нулевой колонке (`:69-72`) |
 | П-05 | `authzplan.ParseModel` | `services/iam/internal/authzplan/compile.go:171` | `len(m.Types)` — **мощность**, растущая на повторе (§0.9) |
 | П-06 | `ParseModel` default-ветвь | `services/iam/internal/authzplan/compile.go:223` | `строка %d: нераспознанная строка внутри типа %q: %q` — fail-closed на `type` с отступом |
-| П-07 | `loadDeliveredManifests` | `services/iam/cmd/kacho-iam/module_manifests.go:58` | `[]*manifest.Manifest`; перепись `slog` (`dir`, `paths_seen`, `dirs_skipped`, `manifests_read`, `findings`, `modules`) печатается **до** ветвления на ошибку |
+| П-07 | `loadDeliveredManifests` | `services/iam/cmd/kaname/module_manifests.go:58` | `[]*manifest.Manifest`; перепись `slog` (`dir`, `paths_seen`, `dirs_skipped`, `manifests_read`, `findings`, `modules`) печатается **до** ветвления на ошибку |
 | П-08 | `manifest.TypeReferent` | `services/iam/internal/manifest/typereferent.go` | два референта. **Предмет сменился (`#2015`):** референт различает не «чем судится существование», а «является ли таблица образом» — `guardsImageOwnership()`; `String()` печатает «порождение …» / «образ …» |
 | П-09 | `ErrMalformedModule` · `ErrObjectTypeMalformed` · `ErrObjectTypeRedefinesImage` · `ErrObjectTypeCollision` | `moduleset.go` · `resources.go` | тексты отказа Д-доставки. **`ErrUnknownModule` и `ErrObjectTypeUnknown` СНЯТЫ вместе со своим предметом** (`#1927`, `#2015`): наборы модулей и типов разомкнуты, членство не спрашивается, и производителя у обоих отказов не осталось ни одного. Пришедшие на их место судят ФОРМУ, ВЛАДЕНИЕ и СТОЛКНОВЕНИЕ — то, что автор манифеста читает в тексте и может исправить; отказ владения **условен** по референту |
 | П-10 | `seed.AssertCatalogParity` | `catalog_parity.go:84`; отказы `:124`, `:129`; `LiteralRows()` `:153` | `ExtraRows`/`MissingRows` + перепись `literal_*`/`row_*`/`missing`/`extra` (`serve.go:247-255`) |
@@ -720,7 +759,7 @@ $ go list -deps ./services/iam/cmd/kacho-iam | grep -c modelrender
 | П-13 | `relverdict.sourcesOf` | `relverdict/query.go:1089` | проброс ошибки плана **без обёртки** |
 | П-14 | `authzmodel.Plans.Plan` | `authzmodel.go:126` | запомненный план (`by map`, `sync.RWMutex`); `authzmodel: %w` поверх `ErrTypeNotDeclared` |
 | П-15 | `Grounds.TypeNotDeclared` | `query.go:478`; выставляется `:634-636` (`Ask`) и `:952-958` (`AskMany`) | основание отказа |
-| П-16 | `Asker.UndeclaredTypeDenials` | поле `asker.go:114`, инкремент `:167-169`, читатель `:145-150`, провязка `wiring.go:248` | счётчик → метрика `kacho_iam_relation_verdict_undeclared_type_denials_total` |
+| П-16 | `Asker.UndeclaredTypeDenials` | поле `asker.go:114`, инкремент `:167-169`, читатель `:145-150`, провязка `wiring.go:248` | счётчик → метрика `kaname_relation_verdict_undeclared_type_denials_total` |
 | П-17 | `tools/modelcanoncheck` | `main.go:95` → `modelrender.Sweep` | побайтовая сверка рендера с каноном + перепись (27/27, 79923 байта, RC=0) |
 | П-18 | проба #1969 | `applied_type_reaches_the_verdict_integration_test.go:419`; ветвление `:477-492`; контроль предпосылки в обе стороны `:425-435` | обе ветви — `deny` с основанием и законная `Allow` без единого `require` |
 | П-19 | `facts := u.cat.Facts()` | `role/create.go:136` | снимок живых строк **уже связан** в той же функции, двенадцатью строками выше Д-роли |
@@ -815,7 +854,17 @@ $ go list -deps ./services/iam/cmd/kacho-iam | grep -c modelrender
   27 ресурсов, каждый `objectType` уже объявлен каноном (§0.5).
 - **Когда:** процесс собирает модель на старте.
 - **Тогда:** собранная модель **побайтово равна** вшитому канону; перепись
-  печатает «блоков сверх канона **0**», «типов **32**», «байт **110717**».
+  печатает «блоков сверх канона **0**», «типов **32**», «байт **112 324**».
+  Величина «байт» есть **функция ревизии канона**, а не константа сценария: её
+  производит `modelrender` (единица B — весь файл, шапка `canon.go`), и `#1820`
+  сдвинул её со **110 717**. Сегодняшнее значение перемерено производителем и
+  **держится гейтом**
+  `TestAcceptanceScenarioCanonValuesAreTodays`
+  (`internal/modelrender/acceptancecanonvalues_test.go`, задача `#2075`):
+  клауза сценария, назвавшая величину, которой ни одна единица канона не
+  производит, — находка. Записи замера этого документа при этом **оставлены как
+  есть намеренно**: они свидетельствуют о замере, верном на своей ревизии, и
+  правка сделала бы ложной верную запись.
 - **Почему это сильнейший положительный контроль, доступный сегодня:** он не
   требует ни нового модуля, ни нового типа, и краснеет от любой ошибки
   композиции, которая что-нибудь добавила бы или потеряла.
@@ -824,7 +873,7 @@ $ go list -deps ./services/iam/cmd/kacho-iam | grep -c modelrender
 **`IAM-MB-1-02` Доставки нет — модель равна канону, старт проходит**
 
 - **Дано:** умолчание чарта `manifests.configMapName: ""`
-  (`deploy/helm/umbrella/charts/kacho-iam/values.yaml:745`) — доставка на
+  (`deploy/helm/umbrella/charts/kaname/values.yaml:745`) — доставка на
   посадке не заведена.
 - **Когда:** старт.
 - **Тогда:** `loadDeliveredManifests` печатает «доставка манифестов модулей не
@@ -853,7 +902,7 @@ $ go list -deps ./services/iam/cmd/kacho-iam | grep -c modelrender
 - **Когда:** вердикт спрашивает план.
 - **Тогда:** `deny`; `Grounds.TypeNotDeclared = true`; счётчик
   `Asker.UndeclaredTypeDenials` растёт; метрика
-  `kacho_iam_relation_verdict_undeclared_type_denials_total` отдаёт прирост;
+  `kaname_relation_verdict_undeclared_type_denials_total` отдаёт прирост;
   текст — `authzmodel: authzplan: тип не объявлен моделью: "<тип>"`.
 - **Почему это сценарий приёмки, а не чужое хозяйство:** #1969 объявляет
   различимость «право не выдано» и «модель типа не знает» тем, что **обязано
@@ -1113,7 +1162,7 @@ $ go list -deps ./services/iam/cmd/kacho-iam | grep -c modelrender
 **`IAM-MB-1-19` Граница ИСТЕКАЕТ САМА**
 
 - **Дано:** проба, утверждающая, что опора стража паритета — литерал
-  (`grep -n LiteralRows services/iam/internal/apps/kacho/seed/catalog_parity.go`
+  (`grep -n LiteralRows services/iam/internal/apps/kaname/seed/catalog_parity.go`
   непуст; сегодня `:153`).
 - **Когда:** #1861 сменит опору на применённые манифесты.
 - **Тогда:** проба **краснеет** и печатает указание перевернуть `-18`: отказ пуска
@@ -1610,7 +1659,7 @@ production-complete не является по признаку отказа о�
 5. **§0.5 — база тождества.** `go run ./services/iam/tools/modelcanoncheck`;
    RC = 0 при 27 из 27. Иначе `-01` теряет вход.
 6. **§0.10 — четвёртая ступень.** `grep -n 'validateRuleCatalog'
-   services/iam/internal/apps/kacho/api/role/*.go`. Вызывающих не два — лестница
+   services/iam/internal/apps/kaname/api/role/*.go`. Вызывающих не два — лестница
    §1 неверна.
 7. **§0.6 — взаимная блокировка.** Убедитесь, что `LoadWithReferent` всегда
    доходит до `authzmodel.Shared()`. Если существует путь разбора, модель не
@@ -1754,7 +1803,7 @@ construction** — потому что они не про изменённые �
 | §0.13 инъекция ОТНИМАЕТ право (несущее) | **ПОДТВЕРЖДЕНА, включая второе следствие** | блоков **2**, `ParseModel` → **34** типа, `probemod_alpha.relations = [project super_admin admin editor viewer authored_rel]` — `v_get` **потерян**; он у `evil_type`. Контроль (однострочное `definition`) → **1** блок |
 | §0.14 `SplitCanon` падает | **ПОДТВЕРЖДЕНА ДОСЛОВНО** | `Render err=<nil>`, первая строка `"type  "`, `SplitCanon ПАНИКУЕТ: runtime error: index out of range [1] with length 1`. Контроль — 1 блок |
 | §0.15 `DSL` подменяется молча | **ПОДТВЕРЖДЕНА** (после починки моей синтетики, §11.0) | `Shared() после подмены: err=<nil>; типов=[user fake_only]`; вторая подмена — тот же объект; `New(...)` даёт третью модель |
-| §0.16 `modelrender` из бинаря недостижим | **ПОДТВЕРЖДЕНА** | `go list -deps ./services/iam/cmd/kacho-iam \| grep -c modelrender` → **0** |
+| §0.16 `modelrender` из бинаря недостижим | **ПОДТВЕРЖДЕНА** | `go list -deps ./services/iam/cmd/kaname \| grep -c modelrender` → **0** |
 | §0.10 ступень Д-роль существует, вызывающих два | **ПОДТВЕРЖДЕНА** | `create.go:148`, `update.go:188`; судья `authzmap.ObjectType` на `:105`; текст отказа найден дословно на `rules_catalog.go:114` |
 | §0.10 ступеней ЧЕТЫРЕ (полнота лестницы) | **ОПРОВЕРГНУТА** | пятое место отказа на пути доставки — **Б2** ниже |
 | §3.3 «строк без производителя — ноль» | **ПОДТВЕРЖДЕНА** | 20 производителей сверены поимённо; ни один «Тогда» не требует того, чего нет и что не заказано номером |
@@ -1931,9 +1980,9 @@ ReferentCanon, указатель на СВОЙ новый тип:
 один сценарий, её не увидит. Одна строка «Положительный контроль: …» в каждом.
 (Отрицание без пары **нигде** ровно одно — `-17`, и оно в Б1.)
 
-**Н3. Координата чарта записана частично.** Документ: `charts/kacho-iam/
+**Н3. Координата чарта записана частично.** Документ: `charts/kaname/
 templates/deployment.yaml:120-123`; в дереве — `deploy/helm/umbrella/charts/
-kacho-iam/templates/deployment.yaml`. Сами строки верны: том `module-manifests`
+kaname/templates/deployment.yaml`. Сами строки верны: том `module-manifests`
 на `:120-123`, `configMapName: ""` на `values.yaml:745`,
 `configMapName: kacho-module-manifests` на `values.dev.yaml:1512` — все три
 сверены.
@@ -2095,7 +2144,7 @@ project 19 · account 6 · cluster 4 · registry_registry 1     всего 30
 |---|---|---|
 | `Н1` | преамбула §0: «восемь / семь» | **9 / 5 / 3** плюс четыре поправки координат, с указанием разделов; прежняя редакция названа ошибкой счёта |
 | `Н2` | пары у `-03`, `-10`, `-13` лежали в других разделах | пара названа **НА МЕСТЕ** у всех трёх; итог — 13 из 13 отрицаний с парой на месте (§3.3) |
-| `Н3` | `charts/kacho-iam/…` | полный путь `deploy/helm/umbrella/charts/kacho-iam/…`, в обоих местах (§1 и `-02`) |
+| `Н3` | `charts/kaname/…` | полный путь `deploy/helm/umbrella/charts/kaname/…`, в обоих местах (§1 и `-02`) |
 | `Н4` | «и только их», колонка `object_type` | семь колонок поимённо; несуществующая снята; разбор сохранён и **усилен** (§12.1) |
 | `Н5` | байты сетки не воспроизводились | синтетический блок **процитирован дословно**; байты помечены **ориентиром**, гейтом объявлено отношение соседних точек (от состава блока не зависит): мои ×7.8 и ×8.76 проверяющего — оба внутри `[8, 13]` |
 | `Н6` | метка `blocked` у #1969 не упомянута | §9.1 называет её прямо, говорит, что условие в теле задачи **не названо**, и разрешает снятие со ссылкой на `git-issues.md` §«Метка „заблокировано"» |
@@ -2385,7 +2434,7 @@ git grep -n 'object_type' -- 'services/iam/internal/migrations/*.sql' | grep 'AD
 | проверено | исход |
 |---|---|
 | `Н2` — отрицаний 13, пара НА МЕСТЕ у всех | ✓ сошлось: `-03` `:636`, `-05` `:670`/`:674`, `-07` `:696`, `-08` (пара с `-06` в прозе), `-09` `:726`, `-10` `:743`, `-11` `:763`, `-12` `:777`, `-13` `:787`/`:789`, `-15` `:811`, `-17` `:831`, `-21` `:857`, `-22` `:873` |
-| `Н3` — координата чарта | ✓ полный путь `deploy/helm/umbrella/charts/kacho-iam/templates/deployment.yaml:120-123`, обе `values` сверены |
+| `Н3` — координата чарта | ✓ полный путь `deploy/helm/umbrella/charts/kaname/templates/deployment.yaml:120-123`, обе `values` сверены |
 | `Н5` — байты сетки | ✓ помечены ориентиром, блок процитирован дословно, гейтом объявлено отношение соседних точек; мои ×8.76 и авторские ×7.8 названы обе |
 | `Н6` — метка `blocked` | ✓ §9.1 называет её, говорит, что условие в теле не названо, и требует от снимающего команду |
 | объём не расширялся (§12.6) | ✓ сценариев 22 = 22, заказов 9 = 9, П-21 добавлен и сверен, новых сценариев ноль |
@@ -2679,7 +2728,7 @@ construction**» шире предиката. Противоядие в корп
 `manifest` не импортируется» говорит о графе сборки. Прямой замер сильнее:
 
 ```
-go list -deps ./services/iam/cmd/kacho-iam | grep -c roleexport → 0
+go list -deps ./services/iam/cmd/kaname | grep -c roleexport → 0
 ```
 
 `roleexport` **не входит в бинарь службы вовсе**, поэтому отвергнуть клиента в
@@ -2709,7 +2758,7 @@ go list -deps ./services/iam/cmd/kacho-iam | grep -c roleexport → 0
 
 1. **Назван ли он в профиле?** — **Нет.** Ни ручки, ни объекта, ни ключа
    значений: `grep -rl 'configmaps' deploy/helm/umbrella/values*.yaml
-   deploy/helm/umbrella/charts/kacho-iam/{values*.yaml,templates/}` → **0**.
+   deploy/helm/umbrella/charts/kaname/{values*.yaml,templates/}` → **0**.
    Единственные упоминания RBAC во всём предмете — три предложения **в этой
    приёмке**.
 2. **Существует ли он сегодня?** — **Нет.** Перепись в две колонки, как требует
@@ -2721,7 +2770,7 @@ go list -deps ./services/iam/cmd/kacho-iam | grep -c roleexport → 0
    | профилей, объявляющих RBAC к ней | **0** |
 
    RBAC-объектов во всём `deploy/` — **два файла**, и оба про другое:
-   `charts/kacho-iam/templates/role.yaml` даёт **служебной учётке самой iam**
+   `charts/kaname/templates/role.yaml` даёт **служебной учётке самой iam**
    `get` на один секрет (`resourceNames: [db.passwordSecretName]`), `rolebinding.yaml`
    привязывает её же. Ни один не говорит, **кто вправе писать** карту манифестов,
    и говорить не может: это Role для личности службы, а не сужение прав оператора.
@@ -2838,7 +2887,7 @@ go list -deps ./services/iam/cmd/kacho-iam | grep -c roleexport → 0
 отрицательные:
 
 ```
-grep -rl 'configmaps' deploy/helm/umbrella/charts/kacho-iam/          → 0
+grep -rl 'configmaps' deploy/helm/umbrella/charts/kaname/          → 0
 профилей, называющих карту манифестов                                 → 3
 grep -rn 'checksum|sha256|signature' по загрузчику доставки           → пусто
 ```
@@ -2926,7 +2975,7 @@ RBAC в `deploy/` описывают **личность службы** (`get` н
 
 Оба слабых отвода выстояли, причём его довод сильнее моего: `roleexport` не
 просто не импортируется из `manifest` — **его нет в бинаре службы вовсе**
-(`go list -deps ./services/iam/cmd/kacho-iam | grep -c roleexport` → **0**,
+(`go list -deps ./services/iam/cmd/kaname | grep -c roleexport` → **0**,
 перемерено мной). В §0.10 теперь стоит этот довод, а не мой.
 
 ### 16.7 Счёт и условие выхода
@@ -3642,8 +3691,8 @@ construction**. Он ищет **завышенный выигрыш** и сле�
 | приёмка допуска **APPROVED** | `scripts/docs-gate/_lib.verdict` над `composed-model-admits-only-what-it-owns.md` | `('APPROVED', '- **Статус:** ✅ APPROVED — круг 4 …')` |
 | допуск — чистая функция в дереве | `grep -c '^func Admit' services/iam/internal/authzmodel/admit.go` | **1** |
 | клауз допуска | `grep -cE '^\tRule[A-Za-z0-9]+ Rule = ' .../admit.go` | **8** |
-| страж старта существует и зовётся | `grep -c 'func (c ManifestsConfig) validateComposition' services/iam/internal/apps/kacho/config/manifests.go` | **1**; цепь `ManifestsConfig.Validate ← Config.Validate ← main → os.Exit(1)` |
-| посадка объявляет допуск | `grep -c 'admission' deploy/helm/umbrella/charts/kacho-iam/values.yaml` | непусто; закрытый набор — `AdmissionByContent = "content"` |
+| страж старта существует и зовётся | `grep -c 'func (c ManifestsConfig) validateComposition' services/iam/internal/apps/kaname/config/manifests.go` | **1**; цепь `ManifestsConfig.Validate ← Config.Validate ← main → os.Exit(1)` |
+| посадка объявляет допуск | `grep -c 'admission' deploy/helm/umbrella/charts/kaname/values.yaml` | непусто; закрытый набор — `AdmissionByContent = "content"` |
 | ни один стенд не включает сборку без допуска | `deploy/iam_module_manifest_composition_admission_test.go` | проба есть, читает **объявление** профилей структурным разбором |
 
 **Кандидат выбран ЧЕТВЁРТЫЙ, которого тело `#1971` не называло.** Три названных
@@ -3785,7 +3834,7 @@ services/vpc/manifest.yaml   load err=<nil> module="vpc"
 | допуск — чистая функция | `grep -c '^func Admit' …/authzmodel/admit.go` | **1**; сигнатура `Admit(composed string) (AdmissionReport, error)` |
 | клауз — 8 | `grep -cE '^\tRule[A-Za-z0-9]+ Rule = ' …/admit.go` | **8**: `Д7(а) Д7(б) Д1 Д3 Д4(а) Д4(б) Д5′ Д8` |
 | страж старта существует и зовётся | цепь пройдена по коду | `validateComposition` ← `ManifestsConfig.Validate` (`manifests.go:170`) ← `Config.Validate` (`validate.go:101`) ← `main.go:48` → `os.Exit(1)` |
-| посадка объявляет допуск | `grep -c 'admission' …/kacho-iam/values.yaml` | **6** — непусто |
+| посадка объявляет допуск | `grep -c 'admission' …/kaname/values.yaml` | **6** — непусто |
 | проба посадки читает объявление | `ls -l deploy/iam_module_manifest_composition_admission_test.go` | файл есть, 40 395 Б |
 
 **Отдельно проверено то, чего §21.1 не утверждает, а я обязан спросить: способен
@@ -3836,7 +3885,7 @@ services/vpc/manifest.yaml   load err=<nil> module="vpc"
 
 | замер | мой предикат | исход |
 |---|---|---|
-| профилей, называющих карту, — **3** | `grep -c '^\s*manifests:'` по всем `values*.yaml` umbrella и чарта iam | **3**: `charts/kacho-iam/values.yaml`, `values.dev.yaml`, `values.prod.yaml` — при **десяти** профилях в каталоге |
+| профилей, называющих карту, — **3** | `grep -c '^\s*manifests:'` по всем `values*.yaml` umbrella и чарта iam | **3**: `charts/kaname/values.yaml`, `values.dev.yaml`, `values.prod.yaml` — при **десяти** профилях в каталоге |
 | объявляющих контроль доступа к ней — **0** | RBAC-объекты чарта iam + их область | объектов **2** (`role.yaml`, `rolebinding.yaml`), но `Role` покрывает `resources: ["secrets"]` с `resourceNames` — **`configmaps` не покрыты ни одной строкой**; единственное попадание по слову RBAC в профилях — комментарий про per-RPC ReBAC в `values.fe3455-prod.yaml:39` |
 | проверки происхождения в загрузчике — **нет** | `grep -cniE 'origin\|provenance\|signature\|подпис\|происхожд'` по `config/manifests.go` | **0** |
 

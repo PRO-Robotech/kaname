@@ -125,9 +125,9 @@ const AttributionRule = `
 // пропущенное уведомление. Объявить период опроса нижней границей окна значило бы
 // назвать числом то, что на штатном пути не выполняется, — придуманная величина
 // в отчёте, чей предмет как раз в том, чтобы величины были измеренными.
-const QueuePredicate = `grep -rn 'KACHO_IAM_RECONCILE_DRAIN_INTERVAL_MS|PollFallback|pg_notify' ` +
-	`services/iam/cmd/kacho-iam/serve.go services/iam/cmd/kacho-iam/fga_outbox_drainer.go ` +
-	`services/iam/internal/repo/kacho/pg/reconcile_notify.go`
+const QueuePredicate = `grep -rn 'KANAME_RECONCILE_DRAIN_INTERVAL_MS|PollFallback|pg_notify' ` +
+	`services/iam/cmd/kaname/serve.go services/iam/cmd/kaname/fga_outbox_drainer.go ` +
+	`services/iam/internal/repo/kaname/pg/reconcile_notify.go`
 
 // ── словарь операций ──────────────────────────────────────────────────────────
 

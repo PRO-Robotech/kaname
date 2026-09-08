@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/keywrap"
+	"github.com/PRO-Robotech/kaname/internal/keywrap"
 )
 
 // TestUnwrapOpensWhatAPreviousWrappingKeyWrapped — записанное прежним ключом

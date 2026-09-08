@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho-iam/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
 func TestSectionRefusalsNameTheirFieldAndKind(t *testing.T) {

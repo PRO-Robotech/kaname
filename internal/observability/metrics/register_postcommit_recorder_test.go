@@ -58,7 +58,7 @@ func TestRegisterPostCommitRecorder_RunsAndFailuresAreBothLive(t *testing.T) {
 	rec.ObserveRegisterPostCommit("forward_guarded", "error")
 	rec.ObserveRegisterPostCommit("residual_read", "ok")
 
-	const name = "kacho_iam_register_postcommit_steps_total"
+	const name = "kaname_register_postcommit_steps_total"
 
 	v, ok := labelledCounter(t, reg, name, map[string]string{"step": "forward_additive", "outcome": "ok"})
 	require.True(t, ok, "a SUCCESSFUL run must produce a series — otherwise a step that "+
@@ -108,7 +108,7 @@ func TestRegisterPostCommitRecorder_ZeroIsVisibleNotAbsent(t *testing.T) {
 	reg := NewRegistry()
 	rec := reg.NewRegisterPostCommitRecorder()
 
-	const name = "kacho_iam_register_postcommit_steps_total"
+	const name = "kaname_register_postcommit_steps_total"
 
 	for _, step := range RegisterPostCommitSteps {
 		for _, outcome := range RegisterPostCommitOutcomes {

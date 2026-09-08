@@ -27,7 +27,7 @@ Two independent reasons, and BOTH are needed:
     tenant-tier fixture subject holds;
   * `Create` / `Update` / `Delete` additionally declare `required_acr_min = "2"`,
     and the step-up floor is evaluated at the edge BEFORE authz. A machine
-    principal (`kacho_principal_type = service_account`) is the ONLY value that
+    principal (`kaname_principal_type = service_account`) is the ONLY value that
     lifts that floor — there was never a ceremony to have an `acr` from.
 
   That second reason is also the shape of scenario 12's POSITIVE half, asserted

@@ -72,7 +72,7 @@ import (
 
 // ACRRequirementLookup — narrow port resolving an RPC's `required_acr_min` from
 // the permission catalog. The key is the catalog FQN (NO leading slash, e.g.
-// "kacho.cloud.iam.v1.InternalClusterService/GrantAdmin"); an unknown FQN or an
+// "kaname.cloud.iam.v1.InternalClusterService/GrantAdmin"); an unknown FQN or an
 // RPC without an acr requirement returns "". Satisfied by an adapter over
 // seed.PermissionRegistry in the composition root; a fake in tests.
 type ACRRequirementLookup interface {

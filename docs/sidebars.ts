@@ -41,6 +41,7 @@ const sidebars: SidebarsConfig = {
         'api/authorize',
         'api/operations',
         'api/quotas',
+        'api/rest-surface',
       ],
     },
     {

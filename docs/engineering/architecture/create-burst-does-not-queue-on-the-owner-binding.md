@@ -38,7 +38,7 @@ git grep -n 'AcquireBindingLock' -- 'services/iam' ':!*_test.go'
 Предикат (кластера не требует, посадку поднимает `testcontainers`):
 
 ```sh
-cd services/iam && go test ./internal/repo/kacho/pg/ \
+cd services/iam && go test ./internal/repo/kaname/pg/ \
   -run TestReconcileForward_BurstOnOneOwnerBindingDoesNotSerialize -count=1 -v
 ```
 

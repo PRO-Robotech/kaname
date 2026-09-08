@@ -32,7 +32,7 @@ type InviteActivationRecorder struct {
 func (r *Registry) NewInviteActivationRecorder() *InviteActivationRecorder {
 	rec := &InviteActivationRecorder{
 		outcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kacho_iam_invite_activations_total",
+			Name: Namespace + "_invite_activations_total",
 			Help: "Исходы активации приглашения на первом входе человека: activated — " +
 				"приглашение активировано; already_active — строку уже активировал " +
 				"конкурент (ожидаемая гонка первого входа, не отказ); failed — активация " +

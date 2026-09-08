@@ -84,10 +84,10 @@ const gatewayServiceName = "api-gateway"
 func GatewayFrontedInternalRPCs() []string {
 	return []string{
 		// InternalClusterService — cluster admin RBAC (admin UI).
-		"/kacho.cloud.iam.v1.InternalClusterService/GrantAdmin",
-		"/kacho.cloud.iam.v1.InternalClusterService/RevokeAdmin",
-		"/kacho.cloud.iam.v1.InternalClusterService/ListAdmins",
-		"/kacho.cloud.iam.v1.InternalClusterService/Get",
+		"/kaname.cloud.iam.v1.InternalClusterService/GrantAdmin",
+		"/kaname.cloud.iam.v1.InternalClusterService/RevokeAdmin",
+		"/kaname.cloud.iam.v1.InternalClusterService/ListAdmins",
+		"/kaname.cloud.iam.v1.InternalClusterService/Get",
 		// InternalInteractiveClientService — lifecycle of the OAuth2 client a
 		// HUMAN signs in through (admin UI / admin tooling). All five are
 		// gateway-fronted: the operator acts through the edge, and no module has
@@ -95,11 +95,11 @@ func GatewayFrontedInternalRPCs() []string {
 		// the catalog step-up floor acr=2 (a redirect target is where an
 		// authorization code is delivered); the acr-floor interceptor reads that
 		// from the catalog, so it is not restated here.
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Get",
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/List",
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Create",
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Update",
-		"/kacho.cloud.iam.v1.InternalInteractiveClientService/Delete",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Get",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/List",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Create",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Update",
+		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Delete",
 		// InternalLimitService — administration of resource-count ceilings
 		// (issue #291). The five CRUD verbs are gateway-fronted: an operator acts
 		// through the edge, and no module has business dialling them.
@@ -110,11 +110,11 @@ func GatewayFrontedInternalRPCs() []string {
 		// api-gateway SA would make the capability unreachable by its only
 		// intended caller. They are gated instead by the narrow `quota_reader`
 		// relation — at the edge catalog and again in-handler.
-		"/kacho.cloud.iam.v1.InternalLimitService/Get",
-		"/kacho.cloud.iam.v1.InternalLimitService/List",
-		"/kacho.cloud.iam.v1.InternalLimitService/Create",
-		"/kacho.cloud.iam.v1.InternalLimitService/Update",
-		"/kacho.cloud.iam.v1.InternalLimitService/Delete",
+		"/kaname.cloud.iam.v1.InternalLimitService/Get",
+		"/kaname.cloud.iam.v1.InternalLimitService/List",
+		"/kaname.cloud.iam.v1.InternalLimitService/Create",
+		"/kaname.cloud.iam.v1.InternalLimitService/Update",
+		"/kaname.cloud.iam.v1.InternalLimitService/Delete",
 		// InternalModuleService — план и применение каталога прав модуля
 		// (kacho#1991). Все четыре фронтируются краем: оператор действует через
 		// него, а НИ ОДИН модуль эти глаголы не зовёт — замер, а не допущение:
@@ -137,10 +137,10 @@ func GatewayFrontedInternalRPCs() []string {
 		//
 		// Величина ступени здесь НЕ повторяется — `ACRFloor` читает её из
 		// каталога прав; второе объявление разошлось бы с первым молча.
-		"/kacho.cloud.iam.v1.InternalModuleService/Plan",
-		"/kacho.cloud.iam.v1.InternalModuleService/Apply",
-		"/kacho.cloud.iam.v1.InternalModuleService/Get",
-		"/kacho.cloud.iam.v1.InternalModuleService/List",
+		"/kaname.cloud.iam.v1.InternalModuleService/Plan",
+		"/kaname.cloud.iam.v1.InternalModuleService/Apply",
+		"/kaname.cloud.iam.v1.InternalModuleService/Get",
+		"/kaname.cloud.iam.v1.InternalModuleService/List",
 		// Четырёх методов администрирования хранилища отношений здесь больше нет:
 		// служба снята вместе с внешним движком (стадия S6 эпика #747). Запись
 		// круга, называющая метод, которого не существует, — не безобидный
@@ -148,24 +148,24 @@ func GatewayFrontedInternalRPCs() []string {
 		// он есть.
 		// InternalIAMService — cluster admin mutation (admin tooling). The
 		// fga-proxy writes are NOT here (module SAs, in-handler gate).
-		"/kacho.cloud.iam.v1.InternalIAMService/ForceLogout",
+		"/kaname.cloud.iam.v1.InternalIAMService/ForceLogout",
 		// InternalOperationsService — cluster-wide admin operations feed
 		// (admin UI). Gateway-fronted: only the api-gateway SA may
 		// dial it, AND the acr-floor enforces the catalog acr_min for it. The
 		// in-handler system_admin@cluster ReBAC Check is the additional per-user
 		// gate (AuthN+AuthZ on every RPC — internal not exempt).
-		"/kacho.cloud.iam.v1.InternalOperationsService/ListIamOperations",
+		"/kaname.cloud.iam.v1.InternalOperationsService/ListIamOperations",
 		// InternalSessionRevocationsService — Revoke is driven by the
 		// api-gateway logout handler on behalf of a user; ListByUser is the
 		// admin-UI revocation history. Both are gateway-fronted. IsRevoked is
 		// the hot-path lookup the gateway makes BEFORE authz can run
 		// (chicken-and-egg) → floor-only, deliberately NOT in this set.
-		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
-		"/kacho.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
+		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/Revoke",
+		"/kaname.cloud.iam.v1.InternalSessionRevocationsService/ListByUser",
 		// InternalUserService — identity provisioning fronted by the gateway
 		// lazy-mirror / recovery flow.
-		"/kacho.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
-		"/kacho.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
+		"/kaname.cloud.iam.v1.InternalUserService/UpsertFromIdentity",
+		"/kaname.cloud.iam.v1.InternalUserService/OnRecoveryCompleted",
 		// NOT here: InternalBootstrapTokenService/MintBootstrapToken. It has no
 		// REST route on the gateway at all (the mint would be credential-free
 		// there — see the proto / restmux comments), so the api-gateway SA is not
@@ -177,7 +177,7 @@ func GatewayFrontedInternalRPCs() []string {
 // BootstrapMintFullMethod — InternalBootstrapTokenService/MintBootstrapToken,
 // the SAN-restricted cluster-admin token mint (arm 3). Exported so the
 // composition root can key its allow-list without re-spelling the FQN.
-const BootstrapMintFullMethod = "/kacho.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken"
+const BootstrapMintFullMethod = "/kaname.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken"
 
 // SANRestrictedInternalRPCs returns the full-method set gated by arm 3 — an
 // explicit client-certificate SPIFFE SAN allow-list.
@@ -238,7 +238,7 @@ func NewCallerPolicy(prodMode bool, gatewayOnlyRPCs []string) *CallerPolicy {
 // are part of the identity.
 //
 // Blank entries are dropped so an accidentally empty config value
-// (`KACHO_IAM_AUTHN__BOOTSTRAP_MINT__ALLOWED_CLIENT_SANS=""` → [""]) can never
+// (`KANAME_AUTHN__BOOTSTRAP_MINT__ALLOWED_CLIENT_SANS=""` → [""]) can never
 // match a caller whose SAN failed to parse.
 func (p *CallerPolicy) WithSANAllowlist(perRPC map[string][]string) *CallerPolicy {
 	if len(perRPC) == 0 {
@@ -291,7 +291,7 @@ func (p *CallerPolicy) allow(ctx context.Context, fullMethod string) error {
 
 	svc, ok := "", false
 	if verified && san != "" {
-		svc, ok = ServiceNameFromSAN(san)
+		svc, ok = ServiceNameFromSAN(grpcsrv.CertIdentityDomainFromContext(ctx), san)
 	}
 	if !ok {
 		// No verified module cert. Dev → no-op; prod → fail-closed.

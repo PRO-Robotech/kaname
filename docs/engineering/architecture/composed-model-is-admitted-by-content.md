@@ -55,9 +55,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 | величина | значение | предикат · единица счёта |
 |---|---:|---|
-| профилей, называющих карту манифестов | **3** | `grep -rln 'manifests:' deploy/helm/umbrella/values*.yaml deploy/helm/umbrella/charts/kacho-iam/values.yaml`; единица — файл профиля |
-| из них объявляющих контроль доступа к ней | **0** | `grep -rl 'configmaps' deploy/helm/umbrella/charts/kacho-iam/` |
-| проверка происхождения в загрузчике | **пусто** | `grep -rn 'checksum\|sha256\|signature' services/iam/internal/manifest/*.go services/iam/cmd/kacho-iam/module_manifests.go` → код 1 |
+| профилей, называющих карту манифестов | **3** | `grep -rln 'manifests:' deploy/helm/umbrella/values*.yaml deploy/helm/umbrella/charts/kaname/values.yaml`; единица — файл профиля |
+| из них объявляющих контроль доступа к ней | **0** | `grep -rl 'configmaps' deploy/helm/umbrella/charts/kaname/` |
+| проверка происхождения в загрузчике | **пусто** | `grep -rn 'checksum\|sha256\|signature' services/iam/internal/manifest/*.go services/iam/cmd/kaname/module_manifests.go` → код 1 |
 | аннотаций целостности в `deployment.yaml` | **3** | про карту манифестов — **ни одной** |
 | объектов RBAC во всём `deploy/` | **2 файла** | предмет — `get` на ОДИН секрет: личность службы, не сужение записи |
 | прод-вызывающих `manifest.LoadDelivered` | **1** | `module_manifests.go:70`, путь старта; перечитывания нет |
@@ -101,7 +101,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 пространства имён установки. Этот принципал **уже сегодня** определяет модель прав
 установки путями, которых мы не контролируем и закрыть не можем: правкой метки
 образа; чтением секрета пароля базы (он в том же пространстве имён) и записью в
-`kacho_iam` напрямую; входом в контейнер; переустановкой релиза. Для него граница
+`kaname` напрямую; входом в контейнер; переустановкой релиза. Для него граница
 доверия **не двигается вовсе**.
 
 Она двигается ровно для одного класса: **принципала, который держит запись в карты
@@ -466,7 +466,7 @@ M», иначе «ноль находок» неотличимо от «ноль
    **Что было неверно.** Сказано «терм с условием доезжает до вердикта как
    безусловный атом (в каноне 3 пары)» — так, будто предмет есть у всех трёх
    канонических пар. Их действительно **три** (предикат:
-   `grep -cE '^\s*define .* with ' proto/kacho/cloud/iam/v1/fga_model.fga` → 3;
+   `grep -cE '^\s*define .* with ' proto/kaname/cloud/iam/v1/fga_model.fga` → 3;
    это `console` и `ssh`, глагола среди них нет), и условие они **НЕ теряют**:
    строка факта несёт его на себе и вычисляется на пути запроса.
    **Где предмет был на самом деле.** Только на **глаголе** и только через

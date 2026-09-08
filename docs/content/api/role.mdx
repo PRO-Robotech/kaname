@@ -19,7 +19,7 @@ import dedent from 'ts-dedent'
 Роли двух видов:
 
 - **system-роли** (`isSystem=true`) — базовый каталог (`viewer` / `editor` / `admin` и т.п.),
-  seed'ятся миграциями, привязаны к кластеру (`cluster_kacho_root`), **read-only** через
+  seed'ятся миграциями, привязаны к кластеру (`cluster_root`), **read-only** через
   публичный API (Update/Delete → `FAILED_PRECONDITION`);
 - **custom-роли** (`isSystem=false`) — создаются тенантом; ровно один из `accountId` /
   `projectId` задан (взаимоисключающе, XOR): роль либо account-scoped, либо project-scoped.
@@ -97,8 +97,8 @@ import dedent from 'ts-dedent'
     <tr><td><code>isSystem</code></td><td>bool</td><td>immutable</td><td>true — system-роль (read-only публично)</td></tr>
     <tr><td><code>accountId</code></td><td>string</td><td>immutable</td><td>Аккаунт-scope (XOR с projectId), только для custom</td></tr>
     <tr><td><code>projectId</code></td><td>string</td><td>immutable</td><td>Project-scope (XOR с accountId), только для custom</td></tr>
-    <tr><td><code>clusterId</code></td><td>string</td><td>immutable</td><td>Непусто только для system-ролей (<code>cluster_kacho_root</code>)</td></tr>
-    <tr><td><code>definitionTier</code></td><td>object</td><td>output-only</td><td>Ярус, на котором роль определена, — проекция трёх колонок области (<code>clusterId</code> / <code>accountId</code> / <code>projectId</code>) в <b>два</b> поля: <code>tierType</code> (<code>iam.cluster</code> / <code>iam.account</code> / <code>iam.project</code>) и <code>tierId</code> — идентификатор якоря этого яруса (<code>cluster_kacho_root</code>, <code>acc…</code> либо <code>prj…</code>). Слово «scope» за ним не закреплено: им называется якорь AccessBinding, а не ярус определения роли. <code>isSystem</code> <b>производен</b> отсюда (ярус <code>iam.cluster</code>), а не хранится отдельным признаком</td></tr>
+    <tr><td><code>clusterId</code></td><td>string</td><td>immutable</td><td>Непусто только для system-ролей (<code>cluster_root</code>)</td></tr>
+    <tr><td><code>definitionTier</code></td><td>object</td><td>output-only</td><td>Ярус, на котором роль определена, — проекция трёх колонок области (<code>clusterId</code> / <code>accountId</code> / <code>projectId</code>) в <b>два</b> поля: <code>tierType</code> (<code>iam.cluster</code> / <code>iam.account</code> / <code>iam.project</code>) и <code>tierId</code> — идентификатор якоря этого яруса (<code>cluster_root</code>, <code>acc…</code> либо <code>prj…</code>). Слово «scope» за ним не закреплено: им называется якорь AccessBinding, а не ярус определения роли. <code>isSystem</code> <b>производен</b> отсюда (ярус <code>iam.cluster</code>), а не хранится отдельным признаком</td></tr>
     <tr><td><code>resourceVersion</code></td><td>string</td><td>OCC-token</td><td>xmin-backed; обязателен при изменении <code>rules</code></td></tr>
     <tr><td><code>createdByUserId</code></td><td>string</td><td>output-only</td><td>Автор роли (governance/audit)</td></tr>
     <tr><td><code>labels</code></td><td>map&lt;string,string&gt;</td><td>mutable</td><td>Метки самого ресурса Role (не путать с <code>Rule.matchLabels</code>)</td></tr>

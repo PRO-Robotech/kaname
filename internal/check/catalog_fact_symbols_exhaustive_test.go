@@ -89,6 +89,8 @@ import (
 	"unicode"
 
 	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // catalogLiteralNames — словари-литералы каталога. Ровно те два, которые называет
@@ -353,8 +355,7 @@ func recognizerVerdictless(pkg string, c readerCensus, literals []string) string
 // перепись и передаёт решение `recognizerVerdictless`/`recognizerFindings`, тем
 // же двум функциям, которые зовёт инъекция.
 func TestIAMCT2_CatalogFactRecognizerKnowsEveryLiteralReader(t *testing.T) {
-	root := catalogRepoRoot(t)
-	files, err := treecorpus.UnderWithSuffix(filepath.Join(root, literalPackageRel), ".go")
+	files, err := treecorpus.UnderWithSuffix(platformtree.RequirePath(t, literalPackageRel), ".go")
 	if err != nil {
 		t.Fatalf("состав пакета-литерала: %v", err)
 	}

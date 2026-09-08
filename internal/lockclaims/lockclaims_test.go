@@ -67,8 +67,8 @@ const serviceRoot = "../.."
 
 // forwardFile / fullPathFile — файлы, из которых ВЫВОДИТСЯ предпосылка.
 const (
-	forwardFile  = "internal/apps/kacho/api/access_binding/reconcile/forward.go"
-	fullPathFile = "internal/apps/kacho/api/access_binding/reconcile/reconcile.go"
+	forwardFile  = "internal/apps/kaname/api/access_binding/reconcile/forward.go"
+	fullPathFile = "internal/apps/kaname/api/access_binding/reconcile/reconcile.go"
 )
 
 // claimForm — оборот, приписывающий блокировку. Регистр не значим: дерево пишет

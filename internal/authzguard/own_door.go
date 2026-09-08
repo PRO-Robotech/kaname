@@ -44,7 +44,7 @@ package authzguard
 // бы их пересечение — то, против чего никто не выдаёт прав. Опечатка в имени
 // поля здесь роняет СТАРТ, а не первый запрос того, кто позовёт этот RPC.
 //
-// Замер на дереве (`Derive("kacho.cloud.iam.v1")`): методов 116 · пообъектных
+// Замер на дереве (`Derive("kaname.cloud.iam.v1")`): методов 116 · пообъектных
 // 82 · авторизуемых по данным 15 · освобождённых 19 · без двери 0. Карта ТОТАЛЬНА
 // над пакетом — неназванного RPC в ней не бывает by construction, поэтому
 // «забыли завести дверь новому RPC» невыразимо: незамапленный отвергается.
@@ -88,7 +88,7 @@ import (
 // намеренно.
 func OwnDoorProtoPackages() []string {
 	return []string{
-		"kacho.cloud.iam.v1",
+		"kaname.cloud.iam.v1",
 		"kacho.cloud.operation",
 		"kacho.cloud.quota.v1",
 	}
@@ -266,8 +266,8 @@ func withPlatformLivenessProbe(m authz.RPCMap) authz.RPCMap {
 // отдельный страж того же слушателя (`acr_floor.go`), а не это звено.
 func CallerAuthorityGatedMethods() []string {
 	return []string{
-		"/kacho.cloud.iam.v1.AuthorizeService/Check",
-		"/kacho.cloud.iam.v1.AuthorizeService/BatchCheck",
+		"/kaname.cloud.iam.v1.AuthorizeService/Check",
+		"/kaname.cloud.iam.v1.AuthorizeService/BatchCheck",
 	}
 }
 
@@ -328,7 +328,7 @@ func NewOwnDoor(opts OwnDoorOptions) (*OwnDoor, error) {
 		bypass[method] = full[method].Extract
 	}
 	return &OwnDoor{inner: authz.NewInterceptor(authz.InterceptorOptions{
-		ServiceName:         "kacho-iam",
+		ServiceName:         "kaname",
 		Map:                 full,
 		Client:              checkAdapter{inner: opts.SelfCheck},
 		Cache:               authz.NewCache(opts.PositiveTTL),
