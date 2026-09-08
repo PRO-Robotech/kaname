@@ -72,15 +72,6 @@ func serviceRoot(t *testing.T) string {
 	return filepath.Dir(filepath.Dir(self))
 }
 
-// repoRoot returns the module root, so the proto tree the profile's EdgeGate
-// declarations are verified against is resolved from the REAL repository. The proto
-// is not what is being injected; pointing the gate at a copy without it would make
-// every run report an unverifiable EdgeGate and hide the property under test.
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	return filepath.Dir(filepath.Dir(serviceRoot(t)))
-}
-
 // runGate runs the production wrapper against the tree rooted at root.
 //
 // The working directory is set to root as well as passing --root: a gate that read

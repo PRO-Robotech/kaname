@@ -31,11 +31,12 @@
 // подъёмом, прочитали ЧУЖОЙ контракт, напечатали НАХОДКУ о нём и вышли кодом 1.
 // Один и тот же исход, два ответа, и машинный неверен.
 //
-// # ТРИ ФОРМЫ ПОДЪЁМА, и распознаватель обязан знать каждую (#2289)
+// # ЧЕТЫРЕ ФОРМЫ ПОДЪЁМА, и распознаватель обязан знать каждую (#2289)
 //
 // Форма, о которой распознаватель не знает, не даёт ни красного, ни зелёного —
-// она МОЛЧИТ, и всё записанное в ней оказывается вне наблюдения. Прежняя
-// редакция знала одну форму из трёх:
+// она МОЛЧИТ, и всё записанное в ней оказывается вне наблюдения. Первая редакция
+// знала одну форму, вторая — три; четвёртую нашла перепись дерева ВТОРЫМ, не
+// зависящим от гейта выражением, и живой экземпляр у неё был (см. ниже):
 //
 //	цикл           — тело цикла зовёт `Dir(x)` и присваивает `x`, а щупает
 //	                 КООРДИНАТУ платформы. Подъём к маркеру модуля (`go.mod`)
@@ -44,7 +45,24 @@
 //	фиксированный  — `Join` с литеральными `..`, число которых БОЛЬШЕ глубины
 //	                 файла под корнем модуля. Ровно этой формой был записан
 //	                 живой экземпляр в `internal/migrations`;
-//	литерал        — одна строка вида `"../../../../proto/…"`. Та же арифметика.
+//	литерал        — одна строка вида `"../../../../proto/…"`. Та же арифметика;
+//	уровневая      — ЦЕПОЧКА `Dir` вне цикла, в том числе через соседнюю функцию
+//	                 того же файла: `Dir(Dir(serviceRoot(t)))`. Ни одного `..`,
+//	                 ни одной координаты — поэтому она молчала у всех трёх форм
+//	                 и у соседнего гейта `internal/supplyhygiene`, который судит
+//	                 литеральные цепочки. Механика — в разделе «ЧЕТВЁРТАЯ ФОРМА»
+//	                 у самого распознавателя.
+//
+// # КАК НАЙДЕНА ЧЕТВЁРТАЯ, и почему не чтением
+//
+// Слепота распознавателя не даёт ни красного, ни зелёного, поэтому перечитыванием
+// он себя не выдаёт. Форма нашлась РАСХОЖДЕНИЕМ ДВУХ ИЗМЕРЕНИЙ: гейт печатал
+// «подъёмов 0», а независимый обход того же дерева — один выход за корень модуля.
+// Живой экземпляр — `tools/audit_list_filter_test.go`, помощник `repoRoot`: он
+// возвращал каталог ДВУМЯ уровнями выше корня модуля, тогда как его собственный
+// комментарий называл возвращаемое корнем модуля. Проверено исполнением, а не
+// чтением. Помощник снят: вызывающих у него не было, а живой сосед в том же файле
+// уже резолвит контракт детектором.
 //
 // # ГЛУБИНА — несущий различитель, а не украшение
 //
@@ -147,17 +165,19 @@ var detectorResolvers = map[string]bool{
 // resolveCensus — объём осмотренного. Печатается всегда: «ноль находок» обязано
 // быть отличимо от «ноль прочитанного».
 type resolveCensus struct {
-	Files    int
-	Coords   int
-	Resolves int
-	Ascents  int
+	Files      int
+	Coords     int
+	Resolves   int
+	Ascents    int
+	RootLevels int // выражений, чей уровень относительно корня модуля ВЫВЕДЕН
 }
 
 func (c resolveCensus) String() string {
 	return fmt.Sprintf(
 		"файлов Go прочитано %d · координат от корня платформы %d · "+
-			"резолвов через детектор посадки %d · собственных подъёмов по дереву %d",
-		c.Files, c.Coords, c.Resolves, c.Ascents)
+			"резолвов через детектор посадки %d · выражений с выводимым уровнем корня %d · "+
+			"собственных подъёмов по дереву %d",
+		c.Files, c.Coords, c.Resolves, c.RootLevels, c.Ascents)
 }
 
 // resolveFindings — находки ДВУХ осей порознь.
@@ -228,6 +248,7 @@ func auditPlatformCoordinateResolve(sources []sourceFile) (resolveFindings, reso
 		one := auditOneSource(file, fset, src.Depth)
 		census.Coords += one.coords
 		census.Resolves += one.resolves
+		census.RootLevels += one.rootLevels
 		census.Ascents += len(one.escapes)
 
 		for _, c := range one.unanchored {
@@ -237,6 +258,18 @@ func auditPlatformCoordinateResolve(sources []sourceFile) (resolveFindings, reso
 				src.Name, c.line, c.what))
 		}
 		for _, e := range one.escapes {
+			// Текст находки — часть свойства, а не украшение: находка, называющая
+			// симптом вместо причины, посылает читателя искать не там. У формы 4
+			// координаты нет вовсе (путь выводится арифметикой), поэтому её
+			// находка называет ВЫСОТУ подъёма, а не несуществующую строку.
+			if e.form == formRootLevel {
+				out.Ascents = append(out.Ascents, fmt.Sprintf(
+					"%s:%d: собственный подъём по дереву (%s): путь поднимается ВЫШЕ "+
+						"корня модуля (%s) — в самостоятельном клоне он указывает на "+
+						"каталог, в который клон распакован, а не на дерево платформы",
+					src.Name, e.line, e.form, e.what))
+				continue
+			}
 			out.Ascents = append(out.Ascents, fmt.Sprintf(
 				"%s:%d: собственный подъём по дереву (%s) к координате %q — исход назначает "+
 					"НАЛИЧИЕ ФАЙЛА, а не посадка модуля",
@@ -258,6 +291,7 @@ type site struct {
 type sourceVerdict struct {
 	coords     int
 	resolves   int
+	rootLevels int
 	unanchored []site
 	escapes    []site
 }
@@ -341,7 +375,258 @@ func auditOneSource(file *ast.File, fset *token.FileSet, depth int) sourceVerdic
 			v.escapes = append(v.escapes, site{line(body.Pos()), probe, "цикл"})
 		}
 	}
+
+	// ЧЕТВЁРТАЯ ФОРМА ПОДЪЁМА: уровневая арифметика корня.
+	//
+	// Считается ПОСЛЕДНЕЙ и дедуплицируется по строке: там, где место уже
+	// названо формой 1-3, второе имя той же строки завысило бы перепись и
+	// удвоило бы находку.
+	levels, escapes := rootLevelEscapes(file, fset, depth)
+	v.rootLevels += levels
+	named := map[int]bool{}
+	for _, e := range v.escapes {
+		named[e.line] = true
+	}
+	for _, e := range escapes {
+		if !named[e.line] {
+			v.escapes = append(v.escapes, e)
+		}
+	}
 	return v
+}
+
+// ── ЧЕТВЁРТАЯ ФОРМА: УРОВНЕВАЯ АРИФМЕТИКА КОРНЯ ─────────────────────────────
+//
+// Формы 1-3 ловят подъём по тому, ЧЕМ он записан: цикл, литеральные `..`,
+// строка-координата. Четвёртая записывается иначе — ЦЕПОЧКОЙ `Dir` вне цикла:
+//
+//	filepath.Dir(filepath.Dir(serviceRoot(t)))
+//
+// Ни одного `..`, ни одной координаты — и потому она молчит у всех трёх, а
+// заодно у соседнего гейта `internal/supplyhygiene`, который судит литеральные
+// цепочки. Между тем это ровно тот же предмет: путь выводится АРИФМЕТИКОЙ и в
+// самостоятельном клоне указывает на каталог, в который клон распаковали.
+//
+// # Что считается и почему точно
+//
+// Каждому выражению приписывается УРОВЕНЬ — на сколько каталогов ВНИЗ от корня
+// модуля оно указывает (корень = 0). Уровень ниже нуля означает выход за корень.
+//
+//	runtime.Caller → ФАЙЛ,    уровень = глубина каталога + 1
+//	os.Getwd()     → КАТАЛОГ, уровень = глубина каталога
+//	Dir(x)         → уровень(x) − 1
+//	Join(x, лит…)  → уровень(x) ± сегменты, с учётом МИНИМУМА по дороге
+//	вызов функции ЭТОГО файла с выведенным уровнем возврата → её уровень
+//
+// Различие «файл против каталога» несущее, а не педантское: `Dir` дважды от
+// `runtime.Caller` в пакете глубины 1 приводит РОВНО в корень модуля, а те же два
+// шага от `os.Getwd()` в том же пакете выводят за него. Один и тот же по виду
+// код, разные исходы — поэтому база читается, а не предполагается.
+//
+// Минимум по дороге нужен потому, что путь способен выйти за корень и вернуться
+// обратно вниз (`Join(wd, "..", "..", "..", "..", "proto", "x")`): по конечному
+// уровню такой путь выглядит невинно, а читает он чужое дерево.
+//
+// Транзитивность внутри файла обязательна: живой экземпляр записан именно через
+// соседнюю функцию, и распознаватель, не входящий в неё, увидел бы «уровень не
+// выводится».
+
+// formRootLevel — имя четвёртой формы в находке. Константой, а не литералом в
+// двух местах: строитель текста ветвится по нему, и разошедшиеся написания дали
+// бы находку с текстом от другой формы.
+const formRootLevel = "уровневая арифметика"
+
+// levelUnknown — уровень не выводится. Отдельным значением, а не парой с флагом:
+// арифметика над ним обязана оставаться «не выводится», и одно значение это
+// свойство несёт само.
+const levelUnknown = -1 << 30
+
+// rootLevelEscapes — сколько уровней ВЫВЕДЕНО и какие из них выходят за корень.
+//
+// Возвращает обе величины, а не только находки: «подъёмов ноль» обязано быть
+// отличимо от «ни одного уровня не выведено», иначе ось молчит и выглядит
+// исправной.
+func rootLevelEscapes(file *ast.File, fset *token.FileSet, depth int) (derived int, out []site) {
+	ev := &rootLevelEval{depth: depth, fnLevel: map[string]int{}}
+
+	// Два прохода: уровни возврата функций обязаны быть известны прежде, чем их
+	// читает вызывающий. Один проход зависел бы от порядка объявлений в файле —
+	// то есть давал бы разный вердикт об одном и том же коде.
+	for pass := 0; pass < 2; pass++ {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			ev.cur = fn.Name.Name
+			ev.varLevel = map[string]int{}
+
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				switch s := n.(type) {
+				case *ast.AssignStmt:
+					ev.bindAssign(s)
+				case *ast.ReturnStmt:
+					if pass != 0 {
+						break
+					}
+					for _, r := range s.Results {
+						if lv := ev.level(r, 0, 1); lv != levelUnknown {
+							if old, seen := ev.fnLevel[fn.Name.Name]; !seen || lv < old {
+								ev.fnLevel[fn.Name.Name] = lv
+							}
+						}
+					}
+				}
+				if pass == 1 {
+					if call, ok := n.(*ast.CallExpr); ok {
+						if lv := ev.level(call, 0, 1); lv != levelUnknown {
+							derived++
+							if lv < 0 {
+								out = append(out, site{
+									fset.Position(call.Pos()).Line,
+									fmt.Sprintf("уровень %d", lv),
+									formRootLevel,
+								})
+							}
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
+
+	// Одна строка называется один раз: вложенная цепочка `Dir(Dir(x))` даёт два
+	// выражения с отрицательным уровнем, а место у них одно.
+	seen := map[int]bool{}
+	uniq := out[:0]
+	for _, e := range out {
+		if !seen[e.line] {
+			seen[e.line] = true
+			uniq = append(uniq, e)
+		}
+	}
+	return derived, uniq
+}
+
+// rootLevelEval — вывод уровня внутри ОДНОГО файла.
+type rootLevelEval struct {
+	depth    int            // глубина каталога файла под корнем модуля
+	cur      string         // имя разбираемой функции: рекурсию не разворачиваем
+	fnLevel  map[string]int // уровень возврата функций этого файла
+	varLevel map[string]int // уровень имён текущей функции
+}
+
+// bindAssign — связывает имена с уровнями правой части.
+func (ev *rootLevelEval) bindAssign(s *ast.AssignStmt) {
+	for i, l := range s.Lhs {
+		id, ok := l.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		var lv int
+		switch {
+		case len(s.Rhs) == 1:
+			lv = ev.level(s.Rhs[0], i, len(s.Lhs))
+		case i < len(s.Rhs):
+			lv = ev.level(s.Rhs[i], 0, 1)
+		default:
+			lv = levelUnknown
+		}
+		if lv != levelUnknown {
+			ev.varLevel[id.Name] = lv
+		}
+	}
+}
+
+// level — уровень выражения либо levelUnknown.
+//
+// idx/n — позиция в многозначном присваивании: у `runtime.Caller` путь стоит
+// ВТОРЫМ результатом, и приписывать уровень первому значило бы утверждать о
+// счётчике кадров.
+func (ev *rootLevelEval) level(e ast.Expr, idx, n int) int {
+	switch x := e.(type) {
+	case *ast.Ident:
+		if lv, ok := ev.varLevel[x.Name]; ok {
+			return lv
+		}
+		return levelUnknown
+	case *ast.CallExpr:
+		return ev.callLevel(x, idx, n)
+	}
+	return levelUnknown
+}
+
+func (ev *rootLevelEval) callLevel(x *ast.CallExpr, idx, n int) int {
+	sel, ok := x.Fun.(*ast.SelectorExpr)
+	if !ok {
+		// Вызов функции ЭТОГО файла: транзитивность, без которой живой экземпляр
+		// не виден. Себя не разворачиваем — рекурсия уровня не имеет.
+		if id, ok := x.Fun.(*ast.Ident); ok && id.Name != ev.cur {
+			if lv, seen := ev.fnLevel[id.Name]; seen {
+				return lv
+			}
+		}
+		return levelUnknown
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return levelUnknown
+	}
+	pathPkg := pkg.Name == "filepath" || pkg.Name == "path"
+	switch {
+	case pkg.Name == "runtime" && sel.Sel.Name == "Caller" && n > 1 && idx == 1:
+		return ev.depth + 1 // ФАЙЛ, а не каталог
+	case pkg.Name == "os" && sel.Sel.Name == "Getwd" && idx == 0:
+		return ev.depth // КАТАЛОГ
+	case pathPkg && sel.Sel.Name == "Dir" && len(x.Args) == 1:
+		base := ev.level(x.Args[0], 0, 1)
+		if base == levelUnknown {
+			return levelUnknown
+		}
+		return base - 1
+	case pathPkg && sel.Sel.Name == "Join" && len(x.Args) > 0:
+		return ev.joinLevel(x)
+	}
+	return levelUnknown
+}
+
+// joinLevel — уровень `Join` с МИНИМУМОМ по дороге.
+//
+// Нелитеральный сегмент делает уровень невыводимым целиком: приписывать шаг
+// выражению, которого мы не прочитали, значило бы утверждать о непрочитанном.
+func (ev *rootLevelEval) joinLevel(x *ast.CallExpr) int {
+	lvl := ev.level(x.Args[0], 0, 1)
+	if lvl == levelUnknown {
+		return levelUnknown
+	}
+	low := lvl
+	for _, a := range x.Args[1:] {
+		lit, ok := a.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return levelUnknown
+		}
+		s, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return levelUnknown
+		}
+		for _, seg := range strings.Split(filepath.ToSlash(s), "/") {
+			switch seg {
+			case "..":
+				lvl--
+			case ".", "":
+			default:
+				lvl++
+			}
+			if lvl < low {
+				low = lvl
+			}
+		}
+	}
+	if low < 0 {
+		return low
+	}
+	return lvl
 }
 
 // joinShape — форма пути, собранного `Join`.
@@ -677,6 +962,13 @@ func TestNoSelfAscentToAPlatformCoordinateInTheModule(t *testing.T) {
 	if census.Resolves == 0 {
 		t.Fatal("резолвов через детектор посадки ноль: распознаватель не увидел ни одного " +
 			"законного якоря — вердикт о подъёмах беспредметен")
+	}
+	// Премиса ЧЕТВЁРТОЙ формы, и она отдельная: ось уровневой арифметики молчит
+	// не только на чистом дереве, но и тогда, когда не вывела НИ ОДНОГО уровня, —
+	// и оба молчания печатают «подъёмов 0». Различает их только эта величина.
+	if census.RootLevels == 0 {
+		t.Fatal("выражений с выводимым уровнем корня ноль: ось уровневой арифметики " +
+			"не прочитала ничего — её «подъёмов 0» ничего не означает")
 	}
 	if skipped != 0 {
 		t.Fatalf("файлов не прочитано: %d — «ноль находок» стало бы «ноль прочитанного»", skipped)

@@ -19,7 +19,10 @@
 //
 //	цикл           — прямая и двухшаговая записи, `filepath` и `path`;
 //	фиксированный  — `Join` с литеральными `..`, обе стороны арифметики глубины;
-//	литерал        — одна строка, обе стороны той же арифметики.
+//	литерал        — одна строка, обе стороны той же арифметики;
+//	уровневая      — цепочка `Dir` вне цикла, прямая и через соседнюю функцию;
+//	                 близнецы по ОБЕИМ базам (файл от `runtime.Caller`, каталог
+//	                 от `os.Getwd`), потому что различает их именно база.
 //
 // # Почему ожидание объявляется ПО ОСЯМ, а не одним списком
 //
@@ -42,8 +45,8 @@ import (
 // заставляло бы каждый случай нести свою шапку — и различие случаев перестало бы
 // быть одним фактом.
 func resolveFixture(body string) string {
-	return "package p\n\nimport (\n\t\"os\"\n\t\"path\"\n\t\"path/filepath\"\n)\n\n" +
-		"var _, _, _ = os.ReadFile, filepath.Join, path.Join\n\n" + body
+	return "package p\n\nimport (\n\t\"os\"\n\t\"path\"\n\t\"path/filepath\"\n\t\"runtime\"\n)\n\n" +
+		"var _, _, _, _ = os.ReadFile, filepath.Join, path.Join, runtime.Caller\n\n" + body
 }
 
 func TestPlatformCoordinateResolveGate_CanFailAndStaysSilent(t *testing.T) {
@@ -329,6 +332,125 @@ func nothing() {}`,
 			body:  "\nvar rel = \"../../internal/repo/kaname/pg\"\n",
 			depth: 2,
 			why:   "подъём сам по себе законен: до чужого дерева он не достаёт",
+		},
+
+		// ── ФОРМА 4: УРОВНЕВАЯ АРИФМЕТИКА ───────────────────────────────────
+		//
+		// Ни одного `..`, ни одной координаты: путь выводится ЦЕПОЧКОЙ `Dir`.
+		// Формы 1-3 такой записи не видят by construction, поэтому близнецы
+		// здесь особенно важны — вся разница между находкой и законным кодом
+		// состоит в ОДНОМ шаге цепочки.
+		{
+			name: "форма 4 (уровневая): цепочка Dir от файла уводит ВЫШЕ корня модуля",
+			body: `
+func repoRoot() string {
+	_, self, _, _ := runtime.Caller(0)
+	return filepath.Dir(filepath.Dir(filepath.Dir(self)))
+}`,
+			depth:       1,
+			wantFinding: "поднимается ВЫШЕ корня модуля (уровень -1)",
+			wantAscents: 1,
+			why: "файл в пакете глубины 1 стоит на уровне 2; три шага вверх дают -1, " +
+				"то есть каталог НАД модулем — в клоне это тот, куда клон распакован",
+		},
+		{
+			name: "ЗАКОННЫЙ БЛИЗНЕЦ: та же цепочка на шаг короче — РОВНО корень модуля",
+			body: `
+func serviceRoot() string {
+	_, self, _, _ := runtime.Caller(0)
+	return filepath.Dir(filepath.Dir(self))
+}`,
+			depth: 1,
+			why: "корень модуля есть в ОБЕИХ посадках, поэтому путь к нему верен в обеих; " +
+				"краснеть на нём значило бы запретить единственный правильный способ",
+		},
+		{
+			name: "форма 4, ТРАНЗИТИВНО: Dir поверх соседней функции, вернувшей корень модуля",
+			body: `
+func serviceRoot() string {
+	_, self, _, _ := runtime.Caller(0)
+	return filepath.Dir(filepath.Dir(self))
+}
+
+func repoRoot() string {
+	return filepath.Dir(filepath.Dir(serviceRoot()))
+}`,
+			depth:       1,
+			wantFinding: "поднимается ВЫШЕ корня модуля (уровень -2)",
+			wantAscents: 1,
+			why: "ЖИВАЯ форма: ровно так был записан экземпляр в tools/audit_list_filter_test.go. " +
+				"Распознаватель, не входящий в соседнюю функцию, сказал бы «уровень не выводится»",
+		},
+		{
+			name: "ЗАКОННЫЙ БЛИЗНЕЦ: та же пара, но вторая функция НЕ поднимается",
+			body: `
+func serviceRoot() string {
+	_, self, _, _ := runtime.Caller(0)
+	return filepath.Dir(filepath.Dir(self))
+}
+
+func toolsDir() string {
+	return filepath.Join(serviceRoot(), "tools")
+}`,
+			depth: 1,
+			why:   "спуск от корня модуля вниз законен в обеих посадках",
+		},
+		{
+			name: "форма 4, база — КАТАЛОГ (os.Getwd), а не файл: тот же шаг уводит за корень",
+			body: `
+func above() string {
+	wd, _ := os.Getwd()
+	return filepath.Dir(filepath.Dir(wd))
+}`,
+			depth:       1,
+			wantFinding: "поднимается ВЫШЕ корня модуля (уровень -1)",
+			wantAscents: 1,
+			why: "различие базы несущее: от Getwd в пакете глубины 1 два шага дают -1, " +
+				"тогда как от runtime.Caller те же два шага дают ровно корень",
+		},
+		{
+			name: "ЗАКОННЫЙ БЛИЗНЕЦ: та же база-каталог, глубина на единицу больше",
+			body: `
+func moduleRoot() string {
+	wd, _ := os.Getwd()
+	return filepath.Dir(filepath.Dir(wd))
+}`,
+			depth: 2,
+			why: "ЖИВАЯ форма: так устроен internal/refusaldomain. Один и тот же по виду код, " +
+				"разные исходы — решает арифметика, а не образец",
+		},
+		{
+			name: "форма 4: Join выходит за корень и ВОЗВРАЩАЕТСЯ вниз — судится МИНИМУМ по дороге",
+			body: `
+func other() string {
+	wd, _ := os.Getwd()
+	return filepath.Join(wd, "..", "..", "..", "neighbour", "tree")
+}`,
+			depth:       2,
+			wantFinding: "поднимается ВЫШЕ корня модуля (уровень -1)",
+			wantAscents: 1,
+			why: "по КОНЕЧНОМУ уровню путь выглядит невинно (-1+2 = +1), а читает он соседа: " +
+				"без минимума по дороге эта форма молчала бы",
+		},
+		{
+			name: "ЗАКОННЫЙ БЛИЗНЕЦ: тот же Join, подъём РАВЕН глубине — остаётся в модуле",
+			body: `
+func own() string {
+	wd, _ := os.Getwd()
+	return filepath.Join(wd, "..", "..", "tools", "bin")
+}`,
+			depth: 2,
+			why:   "путь возвращается в СВОЙ модуль, и в обеих посадках он один и тот же",
+		},
+		{
+			name: "ЗАКОННЫЙ БЛИЗНЕЦ: база НЕ выводится — уровень не приписывается вовсе",
+			body: `
+func fromArg(base string) string {
+	return filepath.Dir(filepath.Dir(filepath.Dir(base)))
+}`,
+			depth: 1,
+			why: "приписывать подъём выражению, которого мы не прочитали, значило бы " +
+				"утверждать о непрочитанном: аргумент может быть уже чем угодно",
 		},
 	}
 
