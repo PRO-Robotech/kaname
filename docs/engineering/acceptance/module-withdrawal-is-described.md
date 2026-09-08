@@ -54,7 +54,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > **Довод «приём уже применён дважды в дереве» не переносится, и это измерено.**
 > У `role_rule_ref`/`role_verb` константа `true` работает потому, что строки
 > проекции **удаляются**: `ReplaceRuleRefs` начинается с
-> `DELETE FROM kacho_iam.role_rule_ref WHERE role_id = $1`
+> `DELETE FROM kaname.role_rule_ref WHERE role_id = $1`
 > (`role_repo.go:591`). Строки каталога не удаляются by construction. Совпадает
 > синтаксис, не ситуация.
 >
@@ -65,7 +65,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > ```sql
 > module_live boolean GENERATED ALWAYS AS (CASE WHEN live THEN true END) STORED,
 > CONSTRAINT ..._module_live_fk FOREIGN KEY (module, module_live)
->   REFERENCES kacho_iam.catalog_module (module, live) MATCH SIMPLE
+>   REFERENCES kaname.catalog_module (module, live) MATCH SIMPLE
 > ```
 > `-07` отвергается · `-08` проходит · `-09` не задет · сверх того оживление
 > ресурса СНЯТОГО модуля отвергается тем же ключом. Форму проверить прогоном, а не
@@ -348,6 +348,24 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `acceptance-reviewer` своим кругом, а не эта строка. Решение —
   `../architecture/verdict-names-a-revision-not-a-file.md`
 
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2305`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **10**. Правка одна и
+  механическая — имя схемы Postgres `kacho_iam.` → `kaname.`: схема названа
+  именем своего продукта, и прежнего имени дерево не производит
+  (`grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql`
+  → 0; под `kaname.` → 47). До правки координата не резолвилась, то есть
+  **молчала**: читатель уходил за ней и не находил — она не краснеет и не
+  зеленеет. **НЕ тронуты** ни один сценарий, производитель, признак готовности,
+  клауза и ни одно число: непарных строк 0, пар с изменившимся числом токенов 0.
+  **Оставлено намеренно: 3.** Это ЗАПИСИ замера — предикат стоит вместе с
+  названным значением, и пара «предикат ↔ число» есть утверждение о своей
+  ревизии, где прежнее имя было живо. Правка имени сделала бы ложным
+  утверждение, которое было верным, — тот же класс, что уже наблюдался при
+  массовом переименовании этого дома.
+  Одобрение относится к **содержимому**, а не к имени файла: APPROVED выше есть
+  вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю редакцию
+  ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 ---
 
 ## 0. Перепись производителей — ДО единого сценария
@@ -395,7 +413,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 ```sh
 # форма 1 — поблочно
-awk '/^INSERT INTO kacho_iam.catalog_module \(module\) VALUES/,/;$/' \
+awk '/^INSERT INTO kaname.catalog_module \(module\) VALUES/,/;$/' \
   services/iam/internal/migrations/20260901113757_*.sql | grep -c "^  ('"   # 6
 # форма 2 — контроль суммой: 6 + 27 + 109 + 3
 grep -c "^  ('" services/iam/internal/migrations/20260901113757_*.sql       # 145
@@ -629,13 +647,13 @@ if _, perr := seed.AssertCatalogParity(ctx, repo); perr == nil {
 **Что заказывается — аддитивно, одной миграцией** (задача-преемник `#1859`):
 
 ```
-ALTER TABLE kacho_iam.catalog_resource
+ALTER TABLE kaname.catalog_resource
   ADD COLUMN module_live boolean GENERATED ALWAYS AS (CASE WHEN live THEN true END) STORED;
 
-ALTER TABLE kacho_iam.catalog_resource
+ALTER TABLE kaname.catalog_resource
   ADD CONSTRAINT catalog_resource_module_live_fk
     FOREIGN KEY (module, module_live)
-    REFERENCES kacho_iam.catalog_module (module, live) MATCH SIMPLE;
+    REFERENCES kaname.catalog_module (module, live) MATCH SIMPLE;
 ```
 
 **Почему именно так, а не проверкой в коде.** Это ban #10 буквально: инвариант внутри
@@ -668,7 +686,7 @@ ALTER TABLE kacho_iam.catalog_resource
 > **Довод «приём уже применён дважды в дереве» СНЯТ, и вот чем он не переносится.**
 > У `role_rule_ref.live` и `role_verb.live` константа `true` работает потому, что
 > строки проекции **удаляются**: `ReplaceRuleRefs` начинается с
-> `DELETE FROM kacho_iam.role_rule_ref WHERE role_id = $1` (`role_repo.go:591`).
+> `DELETE FROM kaname.role_rule_ref WHERE role_id = $1` (`role_repo.go:591`).
 > Строки каталога не удаляются **by construction**. Совпадает синтаксис, не
 > ситуация — и совпадение синтаксиса и было доводом круга 1.
 
@@ -746,7 +764,7 @@ ALTER TABLE kacho_iam.catalog_resource
 таблицу, а не вставляет новые:
 
 ```
-UPDATE kacho_iam.catalog_resource
+UPDATE kaname.catalog_resource
    SET live = true, retired_at = NULL, retired_reason = NULL, superseded_by = NULL
  WHERE module = $1 AND resource = $2 AND NOT live;
 ```
@@ -779,7 +797,7 @@ UPDATE kacho_iam.catalog_resource
 // services/iam/internal/repo/kaname/pg/limit_repo.go:177
 // Withdraw — marks the ceiling as no longer applying and reports whether this call
 // was the one that did it.
-UPDATE kacho_iam.limits SET withdrawn_at = now() WHERE id = $1 AND withdrawn_at IS NULL
+UPDATE kaname.limits SET withdrawn_at = now() WHERE id = $1 AND withdrawn_at IS NULL
 ```
 
 Оттуда же берётся и второе свойство, которое упускают всегда: **отзыв переносится в
@@ -915,7 +933,7 @@ RPC: второй контракт об одном предмете разошё
 
 > [!note] Перемерено 2026-09-02: числа каталога в сценариях — 6/27/**135**
 > Разделение словарей (`#1863`) добавило **26 ярусных** строк к **109 пообъектным**;
-> живых строк `kacho_iam.catalog_verb` — **135**. Приведены два «Тогда»: `IAM-MW-1-09`
+> живых строк `kaname.catalog_verb` — **135**. Приведены два «Тогда»: `IAM-MW-1-09`
 > (перепись живого каталога) и `IAM-MW-1-19` (текст отказа стража — сегодня он печатает
 > `6/27/135`, потому что обе величины выведены из `authzmap.CatalogSeedVerbs()`).
 >

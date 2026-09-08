@@ -81,6 +81,24 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `acceptance-reviewer` своим кругом, а не эта строка. Решение —
   `../architecture/verdict-names-a-revision-not-a-file.md`
 
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2305`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **9**. Правка одна и
+  механическая — имя схемы Postgres `kacho_iam.` → `kaname.`: схема названа
+  именем своего продукта, и прежнего имени дерево не производит
+  (`grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql`
+  → 0; под `kaname.` → 47). До правки координата не резолвилась, то есть
+  **молчала**: читатель уходил за ней и не находил — она не краснеет и не
+  зеленеет. **НЕ тронуты** ни один сценарий, производитель, признак готовности,
+  клауза и ни одно число: непарных строк 0, пар с изменившимся числом токенов 0.
+  **Оставлено намеренно: 1.** Это ЗАПИСИ замера — предикат стоит вместе с
+  названным значением, и пара «предикат ↔ число» есть утверждение о своей
+  ревизии, где прежнее имя было живо. Правка имени сделала бы ложным
+  утверждение, которое было верным, — тот же класс, что уже наблюдался при
+  массовом переименовании этого дома.
+  Одобрение относится к **содержимому**, а не к имени файла: APPROVED выше есть
+  вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю редакцию
+  ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 ---
 
 ## 0. Перепись производителей — ДО единого сценария
@@ -107,11 +125,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | `ServiceAccountIDForService` | детерминированный `sva`+md5 id модульной учётки | `services/iam/internal/authzguard/fgaproxy.go:176` | `git grep -n 'func ServiceAccountIDForService' -- services/iam` |
 | `authzmap.DottedType` / `FGAObjectType` | **единственный** переходник между словарём модели и словарём каталога | `services/iam/internal/authzmap/type_dictionaries.go` | `git grep -n 'Второго переходника' -- services/iam` |
 | `tupleIntent.objectType()` | приведение типа кортежа к ключу зеркала тем же переходником | `register_resource.go:203` | `git grep -n 'func (t tupleIntent) objectType' -- services/iam` |
-| `catalog_module` · `catalog_resource` · `catalog_verb` | словарь **строками**, с ключами `(module, resource, live)` и `(dotted, live)` | `20260901113757_rule_segments_have_a_referent.sql:121,153,242` | `git grep -n 'CREATE TABLE kacho_iam.catalog_' -- services/iam/internal/migrations` |
+| `catalog_module` · `catalog_resource` · `catalog_verb` | словарь **строками**, с ключами `(module, resource, live)` и `(dotted, live)` | `20260901113757_rule_segments_have_a_referent.sql:121,153,242` | `git grep -n 'CREATE TABLE kaname.catalog_' -- services/iam/internal/migrations` |
 | гейт паритета литерала и строк | расхождение посева каталога с `authzmap` | `services/iam/internal/check/catalog_seed_parity.go` | `git grep -n 'catalogSeedCensus' -- services/iam` |
 | гейт сверки намерения с приёмной стороной | тройка **каждого** эмитента прогоняется через `ValidateTuple` на сборке, в обе стороны | `internal/repohygiene/proxytupleintent_test.go` | `git grep -n 'Две половины, и вторая обязательна' -- internal/repohygiene` |
 | замок текста отказа **полосы А** | `PermissionDenied` + **дословно** `"permission denied"`, без причины | `services/iam/internal/apps/kaname/api/internal_iam/proxy_tuple_refusal_transport_test.go:26` | `git grep -n 'func TestProxyTupleRefusalMapsToPermissionDenied' -- services/iam` |
-| модульные учётки строками | `sva` + `substr(md5('kacho-<svc>'),1,17)` в `service_accounts` | `0009_sec_c_module_sa_least_priv.sql:63` | `grep -n "INSERT INTO kacho_iam.service_accounts" services/iam/internal/migrations/0009_sec_c_module_sa_least_priv.sql` |
+| модульные учётки строками | `sva` + `substr(md5('kacho-<svc>'),1,17)` в `service_accounts` | `0009_sec_c_module_sa_least_priv.sql:63` | `grep -n "INSERT INTO kaname.service_accounts" services/iam/internal/migrations/0009_sec_c_module_sa_least_priv.sql` |
 | якорь права записи | `fga_writer` спрашивается на **кластере**, а не на прежнем внеиерархическом объекте | `20260823002000_relation_write_moves_onto_the_cluster.sql` | `git grep -n 'relationWriteObject = clusterRootObject' -- services/iam ':!*.md'` |
 | `<exempt>` в каталоге прав | обе RPC освобождены от пообъектного Check, причина названа `INTERNAL_LISTENER` | `proto/kaname/cloud/iam/v1/internal_iam_service.proto:161` | `grep -n 'exempt_reason' proto/kaname/cloud/iam/v1/internal_iam_service.proto` |
 | **`shared.MapRepoErr`** *(круг 2)* | **единственный** перевод sentinel → gRPC для обеих RPC; SQLSTATE **не читает**, хвост даёт `Internal "internal error"` | `services/iam/internal/apps/kaname/shared/errors.go:47`, хвост `:108` | `git grep -n 'func MapRepoErr' -- services/iam` |
@@ -1148,7 +1166,7 @@ iam») — та же цена на соседней оси. Ни одна из �
 > Замечание §15.4 п. 1 верно, и я перемерил его своей командой:
 >
 > ```sh
-> git grep -n 'INTO kacho_iam.resource_mirror' -- '*.go' | grep -v _test
+> git grep -n 'INTO kaname.resource_mirror' -- '*.go' | grep -v _test
 > # resource_mirror/emitter.go:177   — полоса прокси (предмет приёмки)
 > # backfill_adapter.go:224          — SeedSmokeMirrorObject, страж загрузки
 > # scalegrid/seed.go:180            — посевщик нагрузочного стенда
@@ -2194,7 +2212,7 @@ git grep -l '23503' -- 'services/iam/**/*.go' | grep -v _test.go | wc -l   # →
 форма и её замер:
 
 ```sh
-awk '/INSERT INTO kacho_iam.catalog_verb/,/;/' <миграция> \
+awk '/INSERT INTO kaname.catalog_verb/,/;/' <миграция> \
   | grep -oE "^ *\('[a-zA-Z]+', *'[a-zA-Z]+', *'[a-zA-Z]+'\)" \
   | sed -E "s/.*, *'([a-zA-Z]+)'\)/\1/" | sort | uniq -c
 #   27 list · 27 get · 26 update · 26 delete · 1 removetargets · 1 create · 1 addtargets
@@ -2417,7 +2435,7 @@ identity полагается модулю, у которого есть мод�
 1. **Ключ §2.1 связывает ТРИ писателя `resource_mirror`, а §4 и §9.1 называют
    один.** Предикат и мой замер:
    ```sh
-   git grep -n 'INTO kacho_iam.resource_mirror' -- '*.go' | grep -v _test
+   git grep -n 'INTO kaname.resource_mirror' -- '*.go' | grep -v _test
    # emitter.go:177 (полоса прокси) · backfill_adapter.go:224 · scalegrid/seed.go:180
    ```
    Сегодня **все три совместимы**, и я это измерил, а не предположил: страж
@@ -2642,7 +2660,7 @@ Go**». Заводить вторую задачу об одном предме�
 > [!note] Отвергнутый здесь набор с тех пор СНЯТ ЦЕЛИКОМ — довод Б5 от этого только крепнет (`#1927`)
 > **Вердикт круга не трогается.** Пакетной функции домена, которой §2.10 п. 1 задавал
 > набор носителей identity, в дереве больше нет: литерал снят задачей `#1927`, шесть имён
-> живут строками `kacho_iam.catalog_module`, канон дерева выводится производителем
+> живут строками `kaname.catalog_module`, канон дерева выводится производителем
 > `authzmap.CatalogSeedModules()`. Разборы кругов её называют по имени и остаются верными
 > для своих ревизий — живого адреса здесь не заводится.
 >
@@ -2776,7 +2794,7 @@ Go**». Заводить вторую задачу об одном предме�
 из проксируемых отношений», а мой предикат дал `project → 4`.
 
 ```sh
-sed -n '/INSERT INTO kacho_iam.catalog_verb/,/;$/p' <миграция> | grep -c "'project'"
+sed -n '/INSERT INTO kaname.catalog_verb/,/;$/p' <миграция> | grep -c "'project'"
 # 4
 ```
 
@@ -2786,7 +2804,7 @@ sed -n '/INSERT INTO kacho_iam.catalog_verb/,/;$/p' <миграция> | grep -c
 **глагола**. Перемер по третьему элементу кортежа:
 
 ```sh
-sed -n '/INSERT INTO kacho_iam.catalog_verb/,/;$/p' <миграция> \
+sed -n '/INSERT INTO kaname.catalog_verb/,/;$/p' <миграция> \
   | grep -oE "\('[a-zA-Z]+', *'[a-zA-Z]+', *'[a-zA-Z]+'\)" \
   | sed -E "s/.*, *'([a-zA-Z]+)'\)/\1/" | sort | uniq -c | sort -rn
 #   27 list · 27 get · 26 update · 26 delete · 1 removetargets · 1 create · 1 addtargets   (=109)
@@ -2865,7 +2883,7 @@ member_id)`, поэтому внешний ключ из `catalog_module_identit
    ```sh
    sed -n '571,576p' services/iam/internal/migrations/20260901113757_rule_segments_have_a_referent.sql
    # ADD CONSTRAINT role_verb_live_true CHECK (live);
-   # COMMENT ON COLUMN kacho_iam.role_verb.live IS
+   # COMMENT ON COLUMN kaname.role_verb.live IS
    #   'Константа true. Колонка существует ради ключа role_verb_type_fk: сослаться
    #    на «эту строку каталога И она жива» без неё нечем.';
    ```

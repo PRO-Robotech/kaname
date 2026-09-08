@@ -73,6 +73,19 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `acceptance-reviewer` своим кругом, а не эта строка. Решение —
   `../architecture/verdict-names-a-revision-not-a-file.md`
 
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2305`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **4**. Правка одна и
+  механическая — имя схемы Postgres `kacho_iam.` → `kaname.`: схема названа
+  именем своего продукта, и прежнего имени дерево не производит
+  (`grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql`
+  → 0; под `kaname.` → 47). До правки координата не резолвилась, то есть
+  **молчала**: читатель уходил за ней и не находил — она не краснеет и не
+  зеленеет. **НЕ тронуты** ни один сценарий, производитель, признак готовности,
+  клауза и ни одно число: непарных строк 0, пар с изменившимся числом токенов 0.
+  Одобрение относится к **содержимому**, а не к имени файла: APPROVED выше есть
+  вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю редакцию
+  ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 ---
 
 ## 0. Замер посылок задачи — в обе стороны
@@ -118,8 +131,8 @@ awk '/CREATE TABLE.*catalog_/,/^\);/' services/iam/internal/migrations/*.sql | g
 
 ### П4. «Ведомости несут всё, кроме ревизии» — ПОДТВЕРДИЛАСЬ ЧАСТИЧНО, и различие несущее
 
-`kacho_iam.role_grant_orphan` несёт `object_type, verb, source, reason,
-orphaned_at`; `kacho_iam.role_selector_prune` — `rule_fp, object_type, outcome,
+`kaname.role_grant_orphan` несёт `object_type, verb, source, reason,
+orphaned_at`; `kaname.role_selector_prune` — `rule_fp, object_type, outcome,
 retired_reason, pruned_at`. **Автора не несёт ни одна** — то есть тело задачи
 требует ДВУХ величин, которых нет, а не одной.
 
@@ -316,7 +329,7 @@ go run ./internal/repohygiene/... 2>/dev/null # либо разбор ast.Import
 
 ### 2.3. Состояние ВЫВОДИТСЯ, хранимой колонки у него нет
 
-Источник тот же, что у `health`: строки `kacho_iam.role_verb`, которые читает
+Источник тот же, что у `health`: строки `kaname.role_verb`, которые читает
 вердикт. Ведомость `role_grant_orphan` только **объясняет** и состояния не
 определяет.
 
@@ -411,7 +424,7 @@ go run ./internal/repohygiene/... 2>/dev/null # либо разбор ast.Import
 | # | сценарий | производитель «Тогда» |
 |---|---|---|
 | **MOD-RS-01** | **Дано** роль, все сегменты которой имеют строку проекции. **Когда** `Get`. **Тогда** у каждого правила `RULE_LIFECYCLE_ACTIVE`, `lostSegments = 0` | `domain.RuleStatesOf` (заводится этим изменением) → `(roleObj).toPb`, `services/iam/internal/dto/toproto/role.go` (неэкспортируемый метод, регистрируемый `dto.RegTransfer` в `init()`; **один и тот же** на `Get`, `List` и ответ операции — различает их `attachIntegrity`, а не он) |
-| **MOD-RS-02** | **Дано** роль, у правила 1 сегмент потерян и объяснён ведомостью. **Когда** `Get`. **Тогда** правило 1 — `WITHDRAWN`, правило 0 — `ACTIVE` | `domain.RuleStatesOf`; ведомость `kacho_iam.role_grant_orphan` пишется цепочкой `modulecatalog/apply.go` → `repo/kaname/pg/catalog_writer.go` `ResettleTenantProjections` → `catalog_consequence_sql.go` (`resettleRuleRefSQL`, `resettleRoleVerbSQL`), плюс досев миграцией `20260901113757_rule_segments_have_a_referent.sql` |
+| **MOD-RS-02** | **Дано** роль, у правила 1 сегмент потерян и объяснён ведомостью. **Когда** `Get`. **Тогда** правило 1 — `WITHDRAWN`, правило 0 — `ACTIVE` | `domain.RuleStatesOf`; ведомость `kaname.role_grant_orphan` пишется цепочкой `modulecatalog/apply.go` → `repo/kaname/pg/catalog_writer.go` `ResettleTenantProjections` → `catalog_consequence_sql.go` (`resettleRuleRefSQL`, `resettleRoleVerbSQL`), плюс досев миграцией `20260901113757_rule_segments_have_a_referent.sql` |
 | **MOD-RS-03** | **Дано** роль, у правила сегмент потерян и ведомостью НЕ объяснён. **Когда** `Get`. **Тогда** правило — `UNRESOLVED`, а не `WITHDRAWN` | `domain.RuleStatesOf`; форма инцидента 513001 |
 | **MOD-RS-04** | **Дано** правило, у которого одна потеря объяснена, другая нет. **Когда** `Get`. **Тогда** состояние `UNRESOLVED`, `lostSegments = 2`, `explainedSegments = 1` — состав виден | `domain.RuleStatesOf` |
 | **MOD-RS-05** | **Дано** правило `*.*` (адресуемых сегментов ноль). **Когда** `Get`. **Тогда** `ACTIVE`, `segments = 0` | `domain.RuleRefsByRule` (заводится) — подстановка сегментов не даёт |

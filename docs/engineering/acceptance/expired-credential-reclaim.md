@@ -51,6 +51,19 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `acceptance-reviewer` своим кругом, а не эта строка. Решение —
   `../architecture/verdict-names-a-revision-not-a-file.md`
 
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2305`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **4**. Правка одна и
+  механическая — имя схемы Postgres `kacho_iam.` → `kaname.`: схема названа
+  именем своего продукта, и прежнего имени дерево не производит
+  (`grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql`
+  → 0; под `kaname.` → 47). До правки координата не резолвилась, то есть
+  **молчала**: читатель уходил за ней и не находил — она не краснеет и не
+  зеленеет. **НЕ тронуты** ни один сценарий, производитель, признак готовности,
+  клауза и ни одно число: непарных строк 0, пар с изменившимся числом токенов 0.
+  Одобрение относится к **содержимому**, а не к имени файла: APPROVED выше есть
+  вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю редакцию
+  ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 ---
 
 ## 1. Предмет
@@ -141,7 +154,7 @@ WHEN 'SECRET'  THEN octet_length(secret_hash) = 32
 
 | Объявление | Вызывающих в прод-коде |
 |---|---:|
-| `ClientAssertionReplayRepo.Reap` — `DELETE FROM kacho_iam.client_assertion_replay WHERE expires_at <= $1` (`repo/kaname/pg/client_assertion_replay_repo.go:90`) | **0** |
+| `ClientAssertionReplayRepo.Reap` — `DELETE FROM kaname.client_assertion_replay WHERE expires_at <= $1` (`repo/kaname/pg/client_assertion_replay_repo.go:90`) | **0** |
 | `SessionRevocationRepo.DeleteExpired` — `DELETE FROM session_revocations WHERE ttl_expires_at <= $1` (`repo/kaname/pg/audit_session_revocation_repos.go:139`) | **0** |
 
 Предикат: `grep -rn "\.Reap(\|DeleteExpired" --include='*.go' .` — вне объявлений
@@ -218,7 +231,7 @@ WHEN 'SECRET'  THEN octet_length(secret_hash) = 32
 
 ```sql
 -- 20260824230000_credential_ceiling_per_principal.sql, ветвь TG_OP = 'DELETE'
-UPDATE kacho_iam.project_resource_quotas
+UPDATE kaname.project_resource_quotas
    SET used = GREATEST(used - 1, 0), updated_at = now()
  WHERE carrier_type = v_carrier_type AND carrier_id = v_carrier AND kind = v_kind;
 ```
@@ -684,7 +697,7 @@ type TargetDrainConfig struct {
 
 ```sql
 -- 898002_client_revocation_reaches_presentation.sql:83-89
-INSERT INTO kacho_iam.minted_token_revocations (subject, revoke_before, reason, revoked_by)
+INSERT INTO kaname.minted_token_revocations (subject, revoke_before, reason, revoked_by)
 VALUES (OLD.id, now(), 'client key revoked: registry row removed', ...)
 ```
 
@@ -1401,7 +1414,7 @@ And given первый прогон после выкатки, снимающи�
 | уборщик | по образцу `secretsweep`: порт в use-case, адаптер в `repo/pg`, партиями, с управляемыми часами для проб, не фатален по контракту |
 | его провязка | composition root `cmd/kaname`, рядом с существующим уборщиком секретов; вид развязки реплик — **клейм** (`FOR UPDATE SKIP LOCKED` в отборе партии), объявлен записью `РЕПЛИКИ:` |
 | две величины | `ExpiredCredentialReclaimGrace`, `MinExpiredCredentialReclaimDelay` — в `pkg/tokenpolicy`, там же, где `KeyRemovalGrace`, и по той же форме; обе в перечень гейта величин |
-| **новая** миграция, часть 1 — величины | `UPDATE kacho_iam.limits` до `12` и `24` (§4). Засеяны они применённой миграцией через `INSERT … ON CONFLICT (id) DO NOTHING`, поэтому повторный посев их **не меняет** — нужен явный оператор правки. **Обратного заполнения `project_resource_quotas` не требуется**, и это не догадка: снимок величины в строке учёта обновляется безусловно и ДО списания (функция списания, ветвь принципала), поэтому первая же мутация принесёт действующее значение, а отказ назовёт его же |
+| **новая** миграция, часть 1 — величины | `UPDATE kaname.limits` до `12` и `24` (§4). Засеяны они применённой миграцией через `INSERT … ON CONFLICT (id) DO NOTHING`, поэтому повторный посев их **не меняет** — нужен явный оператор правки. **Обратного заполнения `project_resource_quotas` не требуется**, и это не догадка: снимок величины в строке учёта обновляется безусловно и ДО списания (функция списания, ветвь принципала), поэтому первая же мутация принесёт действующее значение, а отказ назовёт его же |
 | **новая** миграция, часть 2 — схема | частичный индекс по сроку на обеих таблицах; сужение условия **обоих** триггеров отсечки (их два — по одному на таблицу) |
 | аудит | новый тип события на каждое снятое, актор-платформа |
 | перепись прогона | два числа — найдено и снято |

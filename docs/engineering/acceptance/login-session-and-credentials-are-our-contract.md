@@ -6,6 +6,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 # Приёмка: вход человека, сессия и удостоверения как контракт продукта (iam Ф1)
 
 - **Статус:** DRAFT — вердикт не вынесен; санкции на код нет (ban #1)
+- **ПОСЛЕ вердикта документ не рецензировался — он DRAFT; правка объявлена
+  здесь (`#2305`).** Координат приведено к дереву: **3**. Правка одна и
+  механическая — имя схемы Postgres `kacho_iam.` → `kaname.`: схема названа
+  именем своего продукта, и прежнего имени дерево не производит
+  (`grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql`
+  → 0; под `kaname.` → 47). До правки координата не резолвилась, то есть
+  **молчала**: читатель уходил за ней и не находил — она не краснеет и не
+  зеленеет. **НЕ тронуты** ни один сценарий, производитель, признак готовности,
+  клауза и ни одно число: непарных строк 0, пар с изменившимся числом токенов 0.
 - **⚠️ ПОСЛЕ объявления состояния документ правлен МАССОВО (`#2214`).** Правок
   1, строк 3: `b81adf2760` имя службы (3). Дельта целиком — подстановка токена
   (`kacho-iam→kaname`); непарных строк 0, пар с изменившимся числом токенов 0;
@@ -72,13 +81,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 ```sh
 # единица — ОБЪЯВЛЕНИЕ таблицы в базовой миграции
-grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql
+grep -cE 'CREATE TABLE kaname\.' services/iam/internal/migrations/0001_initial.sql
 #   → 47
-grep -oE 'CREATE TABLE kacho_iam\.[a-z_]+' services/iam/internal/migrations/0001_initial.sql \
+grep -oE 'CREATE TABLE kaname\.[a-z_]+' services/iam/internal/migrations/0001_initial.sql \
   | grep -cE 'credential|_sessions|identity_address'
 #   → 0 — ни удостоверения, ни сессии, ни адреса как строки
 # КОНТРОЛЬ в обратную сторону — предикат находить умеет:
-grep -oE 'CREATE TABLE kacho_iam\.[a-z_]+' services/iam/internal/migrations/0001_initial.sql \
+grep -oE 'CREATE TABLE kaname\.[a-z_]+' services/iam/internal/migrations/0001_initial.sql \
   | grep -c session
 #   → 1 — `session_revocations`
 ```

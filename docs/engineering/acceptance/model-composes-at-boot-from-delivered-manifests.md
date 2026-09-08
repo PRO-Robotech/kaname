@@ -131,6 +131,19 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `acceptance-reviewer` своим кругом, а не эта строка. Решение —
   `../architecture/verdict-names-a-revision-not-a-file.md`
 
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2305`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **3**. Правка одна и
+  механическая — имя схемы Postgres `kacho_iam.` → `kaname.`: схема названа
+  именем своего продукта, и прежнего имени дерево не производит
+  (`grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql`
+  → 0; под `kaname.` → 47). До правки координата не резолвилась, то есть
+  **молчала**: читатель уходил за ней и не находил — она не краснеет и не
+  зеленеет. **НЕ тронуты** ни один сценарий, производитель, признак готовности,
+  клауза и ни одно число: непарных строк 0, пар с изменившимся числом токенов 0.
+  Одобрение относится к **содержимому**, а не к имени файла: APPROVED выше есть
+  вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю редакцию
+  ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 ---
 
 ## §0. Перемер посылок — что подтвердилось и что опровергнуто
@@ -169,7 +182,7 @@ fga_model.fga`, `:67` — `var DSL string`. Ошибку плана `sourcesOf` 
 
 ### 0.3 ПОДТВЕРЖДЕНО: строки каталога блока дать не могут
 
-`kacho_iam.catalog_resource`
+`kaname.catalog_resource`
 (`services/iam/internal/migrations/20260901113757_rule_segments_have_a_referent.sql:153`)
 несёт **восемь** колонок: `module`, `resource`, `dotted`, `retired_at`,
 `retired_reason`, `superseded_by`, `live` — плюс `object_type`, добавленную
@@ -1988,7 +2001,7 @@ kaname/templates/deployment.yaml`. Сами строки верны: том `mod
 сверены.
 
 **Н4. §0.3 говорит «и только их», перечислив не все колонки.** Замеренные
-колонки `kacho_iam.catalog_resource`: `module`, `resource`, `dotted`,
+колонки `kaname.catalog_resource`: `module`, `resource`, `dotted`,
 `retired_at`, `retired_reason`, **`superseded_by`**, `live`, плюс `object_type`,
 заведённая `20260903112400_catalog_resource_carries_the_model_type.sql:74`.
 `superseded_by` не назван. Существо утверждения (указателей, ярусов и авторских
@@ -2050,7 +2063,7 @@ kaname/templates/deployment.yaml`. Сами строки верны: том `mod
 ### 12.1 Моя опровергнутая посылка — называется первой, и она моя же
 
 **§0.3 называл колонку, которой в таблице НЕТ.** Круг 1 писал, что
-`kacho_iam.catalog_resource` несёт «`module`, `resource`, `dotted`,
+`kaname.catalog_resource` несёт «`module`, `resource`, `dotted`,
 `object_type`, `live`, `retired_*` — и только их». Колонки `object_type` в
 таблице **не существует**, а перечень вдобавок оборван: не названы
 `retired_reason` и `superseded_by`.
