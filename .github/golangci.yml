@@ -1,0 +1,113 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# golangci-lint config службы — ОТДЕЛЬНОСТОЯЩАЯ форма.
+#
+# Происхождение названо, потому что от него зависит вердикт: это `.golangci.yml`
+# монорепо, из которого служба вынесена. Там она линтуется ДВУМЯ прогонами — из
+# корня монорепо (пути `services/iam/internal/…`) и из своего модуля (пути
+# `internal/…`), — и обе формы записаны в том конфиге явно. Здесь корнем прогона
+# всегда является каталог службы, поэтому остаётся ВТОРАЯ форма, заякоренная в
+# начало пути; первая снята вместе со своим предметом, а не оставлена «на всякий
+# случай»: исключение живёт, пока есть что исключать.
+#
+# Снято по той же причине: правило на `pkg/api/` (сгенерённые стабы приезжают
+# зависимостью платформы и в этом дереве не лежат) и путь `^ui-future/`
+# (консоли здесь нет). Обратная сверка — предикат в шапке ci.yml.
+version: "2"
+
+run:
+  timeout: 3m
+  tests: true
+  # НЕСУЩАЯ СТРОКА, А НЕ НАСТРОЙКА ВЫВОДА. Схема v2 по умолчанию считает пути
+  # ОТ КАТАЛОГА КОНФИГА, а конфиг лежит в `.github/`. Значит без неё линтер
+  # печатает `../internal/domain/...`, и якорные исключения ниже (`^internal/…`)
+  # не совпадают НИ С ЧЕМ — молча, без предупреждения.
+  #
+  # Цена измерена, а не предположена: тот же прогон, то же дерево, различие
+  # только в этой строке — 150 находок против 3. Сто сорок семь «находок»
+  # были исключениями, переставшими применяться.
+  #
+  # `gomod` привязывает отсчёт к корню модуля, то есть к тому же началу пути,
+  # от которого писались якоря. Снять эту строку — вернуть 147 ложных находок.
+  relative-path-mode: gomod
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+    - bodyclose
+    - copyloopvar
+
+  settings:
+    revive:
+      rules:
+        - name: var-naming
+          # acronym-fixes (Ip→IP, Smtp→SMTP, Id→ID) ломают proto-mirror naming
+          # в domain/: поля обязаны совпадать с proto, переименование — слом API.
+        - name: package-comments
+          disabled: true
+        - name: exported
+          disabled: true
+        - name: unused-parameter
+          disabled: true
+        - name: unused-receiver
+          disabled: true
+    errcheck:
+      # defer X.Close() — стандартная практика: мы уже выходим из функции,
+      # и ошибка на закрытии не actionable.
+      exclude-functions:
+        - (*github.com/jackc/pgx/v5/pgxpool.Pool).Close
+        - (*google.golang.org/grpc.ClientConn).Close
+        - (*database/sql.DB).Close
+        - (*os.File).Close
+        - (io.Closer).Close
+
+  exclusions:
+    paths:
+      - (^|/)node_modules($|/)
+    rules:
+      - path: '_test\.go$'
+        linters: [revive, errcheck, unused, staticcheck, bodyclose]
+      # proto-mirror naming (IpVersion / OutgoingSmtpCapability /
+      # SetDefaultSecurityGroupId): поля и методы — точные копии proto.
+      #
+      # Здесь стояли ОБА написания каталога приложения — действующее и
+      # отставленное: конвейер жил снимком, снятым ДО переименования. Тем же
+      # текстом был записан предикат снятия — «истечёт сама, когда каталог
+      # станет один». Он выполнен: `internal/apps/` несёт ровно один каталог, а
+      # конвейер переехал в дерево службы и снимком быть перестал. Отставленное
+      # написание здесь НЕ воспроизводится: цитата мёртвой координаты читается
+      # проверкой имён как живое утверждение — и была ею прочитана.
+      - path: 'internal/(domain|handler|service|apps/kaname/(api|services))/'
+        linters: [revive]
+        text: 'var-naming'
+      - linters: [staticcheck]
+        text: 'QF1008|QF1011'
+      # Слои, зеркалящие proto/доменные имена. ЗАЯКОРЕНО в начало пути: без якоря
+      # правило накрыло бы одноимённые слои где угодно в дереве.
+      - path: '^internal/(domain|errors|repo|service|apps/kaname/api)/'
+        linters: [staticcheck]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  # Форматтеры — ОТДЕЛЬНЫЙ блок: исключения `linters.exclusions` на них НЕ
+  # распространяются.
+  exclusions:
+    paths:
+      - (^|/)node_modules($|/)
+
+issues:
+  # 0 = БЕЗ ОГРАНИЧЕНИЯ. Потолок отбрасывает находки МОЛЧА — в выводе не остаётся
+  # ни числа отброшенных, ни следа их существования, и исчезнуть может ровно та,
+  # ради которой линтер запускался.
+  max-same-issues: 0
+  max-issues-per-linter: 0
