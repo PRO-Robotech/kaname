@@ -25,6 +25,19 @@
 //
 // Миграция читается как ТЕКСТ, а не через базу: вердикт обязан быть свойством
 // коммита, а не состояния чужого стенда.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПОЧЕМУ КРУГ ВЫНЕСЕН ЧИСТОЙ ФУНКЦИЕЙ
+//
+// Способность этой пробы упасть до сих пор держалась ОДНИМ ручным прогоном,
+// описанным в чужом комментарии, — то есть утверждением, которого дерево
+// проверить не может. Круг вынесен в `reconcileSeedWithFormula`, чтобы
+// доказатель по соседству (`module_identity_seed_injection_test.go`) подавал ему
+// синтетику и спрашивал то же самое на КАЖДОМ прогоне.
+//
+// Операнды формулы переданы функции ПАРАМЕТРАМИ ровно ради этого: подменить их
+// может только доказатель, а настоящая проба ниже связывает производителя,
+// которым пользуется страж прав, и приставки, объявленные рядом с ним.
 package authzguard
 
 import (
@@ -44,55 +57,104 @@ const baseMigration = "../migrations/0001_initial.sql"
 var seededServiceAccountRe = regexp.MustCompile(
 	`INSERT INTO kaname\.service_accounts \([^)]*\) VALUES \('([^']*)', '([^']*)', '([^']*)'`)
 
+// seedRow — строка посева, прочитанная как ДАННЫЕ: ничего не вычисляется.
+type seedRow struct{ id, name string }
+
+// seedCensus — объём осмотренного. Печатается всегда, чтобы «ноль расхождений»
+// было отличимо от «ноль прочитанного».
+type seedCensus struct{ rows, modules, others int }
+
+// parseSeededServiceAccounts читает посев как текст.
+func parseSeededServiceAccounts(raw string) []seedRow {
+	matches := seededServiceAccountRe.FindAllStringSubmatch(raw, -1)
+	rows := make([]seedRow, 0, len(matches))
+	for _, m := range matches {
+		rows = append(rows, seedRow{id: m[1], name: m[3]})
+	}
+	return rows
+}
+
+// reconcileSeedWithFormula — КРУГ: сверяет посеянные строки с формулой.
+//
+// Формула подаётся параметрами (`idPrefix`, `namePrefix`, `deriveSuffix`,
+// `moduleID`), чтобы доказатель мог развести операнды поодиночке. Настоящая
+// проба передаёт сюда производителя и приставки ИЗ КОДА, а строки — ИЗ ТЕКСТА
+// миграции; в этом и состоит независимость сторон.
+//
+// Возвращает находки и перепись. Пустой перечень строк находкой НЕ считается —
+// об этом судит вызывающий: у него есть координата прочитанного.
+func reconcileSeedWithFormula(
+	rows []seedRow,
+	idPrefix, namePrefix string,
+	deriveSuffix func(seed string) string,
+	moduleID func(svc string) string,
+) ([]string, seedCensus) {
+	var findings []string
+	census := seedCensus{rows: len(rows)}
+
+	for _, row := range rows {
+		// Круг первый: идентификатор посева выводится из ИМЕНИ посева той же
+		// формулой, которой пользуется код.
+		want := idPrefix + deriveSuffix(row.name)
+		if row.id != want {
+			findings = append(findings, "посев "+quote(row.name)+": идентификатор "+
+				quote(row.id)+", а формула даёт "+quote(want)+" — формула и посев "+
+				"разошлись. Идентификатор остаётся синтаксически верным и просто "+
+				"перестаёт НАХОДИТЬ строку: сервис, назвавшийся собой, не опознаётся")
+			continue
+		}
+
+		// Круг второй: для модульной учётки тот же идентификатор обязан выдать
+		// ПРОИЗВОДИТЕЛЬ, которым пользуется страж прав, — по имени СЛУЖБЫ.
+		svc, isModule := strings.CutPrefix(row.name, namePrefix)
+		if !isModule {
+			census.others++
+			continue
+		}
+		census.modules++
+		if got := moduleID(svc); got != row.id {
+			findings = append(findings, "служба "+quote(svc)+": производитель личности дал "+
+				quote(got)+", посеяно "+quote(row.id)+" — производитель личности и посев "+
+				"разошлись")
+		}
+	}
+
+	return findings, census
+}
+
+// quote — кавычки того же вида, что печатал %q, без обращения к fmt в чистой
+// функции.
+func quote(s string) string { return "\"" + s + "\"" }
+
 // TestSeededModuleIdentityIsReproducedByTheFormula — круговая сверка.
 func TestSeededModuleIdentityIsReproducedByTheFormula(t *testing.T) {
 	raw, err := os.ReadFile(baseMigration)
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: посев %s не прочитан: %v", baseMigration, err)
 	}
-	rows := seededServiceAccountRe.FindAllStringSubmatch(string(raw), -1)
+	rows := parseSeededServiceAccounts(string(raw))
 	if len(rows) == 0 {
 		t.Fatalf("посев служебных учёток не найден ни одной строкой в %s — распознаватель "+
 			"перестал видеть форму посева, и «ноль расхождений» здесь означает «ноль "+
 			"прочитанного»", baseMigration)
 	}
 
-	modules, others := 0, 0
-	for _, row := range rows {
-		id, name := row[1], row[3]
+	// Стороны РАЗНЫЕ: строки — из текста миграции выше, формула — из кода здесь.
+	findings, census := reconcileSeedWithFormula(
+		rows, saPrefix, svcNamePrefix, domain.DerivedIDSuffix, ServiceAccountIDForService)
 
-		// Круг первый: идентификатор посева выводится из ИМЕНИ посева той же
-		// формулой, которой пользуется код.
-		want := saPrefix + domain.DerivedIDSuffix(name)
-		if id != want {
-			t.Errorf("посев %q: идентификатор %q, а формула даёт %q — формула и посев "+
-				"разошлись. Идентификатор остаётся синтаксически верным и просто "+
-				"перестаёт НАХОДИТЬ строку: сервис, назвавшийся собой, не опознаётся",
-				name, id, want)
-			continue
-		}
-
-		// Круг второй: для модульной учётки тот же идентификатор обязан выдать
-		// ПРОИЗВОДИТЕЛЬ, которым пользуется страж прав, — по имени СЛУЖБЫ.
-		svc, isModule := strings.CutPrefix(name, svcNamePrefix)
-		if !isModule {
-			others++
-			continue
-		}
-		modules++
-		if got := ServiceAccountIDForService(svc); got != id {
-			t.Errorf("служба %q: ServiceAccountIDForService дал %q, посеяно %q — "+
-				"производитель личности и посев разошлись", svc, got, id)
-		}
+	for _, f := range findings {
+		t.Error(f)
 	}
 
-	if modules == 0 {
+	if census.modules == 0 {
 		t.Fatalf("модульных учёток в посеве не опознано ни одной при %d прочитанных "+
 			"строках: приставка имени службы (%q) разошлась с посевом, и второй круг "+
-			"сверки не исполнялся вовсе", len(rows), svcNamePrefix)
+			"сверки не исполнялся вовсе", census.rows, svcNamePrefix)
 	}
 
 	t.Logf("перепись: строк посева прочитано %d · сверено формулой %d · из них модульных "+
 		"учёток %d · прочих служебных %d · приставка имени службы %q · приставка "+
-		"идентификатора %q", len(rows), len(rows), modules, others, svcNamePrefix, saPrefix)
+		"идентификатора %q", census.rows, census.rows, census.modules, census.others,
+		svcNamePrefix, saPrefix)
 }
