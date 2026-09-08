@@ -320,12 +320,25 @@ func TestRetiredBlockStorageIsNotInAuthorizationModel(t *testing.T) {
 	// that no longer exists.
 }
 
-// TestRetiredBlockStorageIsNotInPermissionCatalog — both embedded copies of the
-// permission catalog. They are required to be byte-identical, so checking one
-// would let the other drift while this gate stayed green.
+// TestRetiredBlockStorageIsNotInPermissionCatalog — ВШИТАЯ КОПИЯ СЛУЖБЫ.
+//
+// Копий каталога две, и живут они в РАЗНЫХ деревьях: эта уезжает вместе со
+// службой, копия края остаётся у платформы. Прежде здесь судились обе — и после
+// разреза утверждение о копии края объявляло бы третий исход («условие не
+// создано»), то есть копия платформы осталась бы без сторожа, а её молчание не
+// отличалось бы от исправной работы.
+//
+// Поэтому утверждение РАЗДЕЛЕНО (задача продукта #2361): половина края
+// переехала в дерево платформы —
+// `internal/repohygiene` `TestRetiredBlockStorageIsNotInTheEdgePermissionCatalog`
+// плюс её инъекция и проверка живости собственной таблицы. Здесь остаётся
+// половина службы.
+//
+// Байт-идентичность двух копий держит СВОЙ гейт
+// (`make -C gateway permission-catalog-check`), и здесь она не пересказывается:
+// два места об одном предмете разошлись бы молча.
 func TestRetiredBlockStorageIsNotInPermissionCatalog(t *testing.T) {
 	copies := []string{
-		filepath.Join("gateway", "internal", "middleware", "embed", "permission_catalog.json"),
 		filepath.Join("services", "iam", "internal", "apps", "kaname", "seed", "embedded", "permission_catalog.json"),
 	}
 
@@ -338,9 +351,8 @@ func TestRetiredBlockStorageIsNotInPermissionCatalog(t *testing.T) {
 	}
 
 	for _, rel := range copies {
-		// Копия каталога у КРАЯ живёт у платформы, копия модуля едет с ним:
-		// резолвер приводит обе координаты к посадке и в первом случае даёт
-		// «условие не создано», а не «нет файла».
+		// Координата модуля резолвится в ОБЕИХ посадках — файл лежит внутри
+		// службы, — поэтому пропуска здесь не бывает by construction.
 		raw, err := os.ReadFile(platformtree.RequirePath(t, rel))
 		require.NoError(t, err, "permission catalog copy %s is missing", rel)
 		var rows []entry
