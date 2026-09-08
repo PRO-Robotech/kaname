@@ -28,47 +28,35 @@ package newmanverdict
 
 import (
 	"os"
-	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
+// verdictScript — координата ОТ КОРНЯ ПЛАТФОРМЫ, и резолвит её ДЕТЕКТОР
+// ПОСАДКИ, а не подъём по каталогам.
+//
+// Скрипт лежит ВНУТРИ модуля, поэтому координата резолвится в ОБЕИХ посадках:
+// в монорепо это `services/iam/tests/…`, в самостоятельном клоне приставка
+// снимается и остаётся `tests/…`. Пропуска здесь не бывает — предмет входит в
+// поставку модуля, и «условие не создано» означало бы «условие создано».
+//
+// Здесь стоял собственный подъём по дереву в поисках `.github/workflows`, а
+// координата складывалась литералом с приставкой монорепо. Подъём находил
+// корень клона, литерал приставку не снимал — и гейт отказывал «нет файла» на
+// файле, который ЕСТЬ и лежит на два уровня ниже по этому же дереву. Это не
+// «условие не создано»: подъём судит по НАЛИЧИЮ ФАЙЛА, а не по посадке модуля,
+// и под чужим деревом с той же координатой вынес бы вердикт о чужом файле.
 const verdictScript = "services/iam/tests/newman/scripts/assert-suites-green.sh"
-
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	dir := filepath.Dir(self)
-	for range 12 {
-		if fi, err := os.Stat(filepath.Join(dir, ".github", "workflows")); err == nil && fi.IsDir() {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	// ПРОПУСК, А НЕ ОТКАЗ: объявления конвейера — часть дерева платформы, в
-	// поставку модуля они не входят. Красное у каждого, кто склонирует, вердиктом
-	// о продукте не является, а «условие не создано» обязано быть отличимо от
-	// находки.
-	t.Skip("УСЛОВИЕ НЕ СОЗДАНО (не находка): над этим файлом нет дерева с .github/workflows — " +
-		"объявления конвейера живут у платформы и в поставку модуля не входят")
-	return ""
-}
 
 // codeLines — строки скрипта БЕЗ комментариев и без пустых. Разбор грубый и этого
 // достаточно: shell-комментарий начинается с `#`, а внутристрочный `… # …` нас не
 // интересует — искомые конструкции стоят самостоятельными стейтментами.
 func codeLines(t *testing.T) []string {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join(repoRoot(t), verdictScript))
+	body, err := os.ReadFile(platformtree.RequirePath(t, verdictScript)) // #nosec G304 -- путь резолвит детектор посадки
 	if err != nil {
 		t.Fatalf("read %s: %v", verdictScript, err)
 	}

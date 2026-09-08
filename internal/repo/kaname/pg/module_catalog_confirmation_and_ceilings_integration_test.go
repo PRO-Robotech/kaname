@@ -239,7 +239,23 @@ func TestApplyByVerbRequiresConfirmationAndBothCeilings(t *testing.T) {
 
 	before := moduleCatalogSnapshot(t, ctx, pool, anchoredModule)
 	state := moduleStateOf(t, ctx, pool, anchoredModule)
-	m := func() *manifest.Manifest { return shippedManifest(t, anchoredModule, spareResource) }
+	// ПРЕДПОСЫЛКА СПРАШИВАЕТСЯ В ТЕЛЕ РОДИТЕЛЯ, А НЕ ИЗ ПОДПРОБЫ.
+	//
+	// `shippedManifest` читает манифест соседнего модуля, то есть предмет, лежащий
+	// ВНЕ поставки: в самостоятельном клоне его нет by construction, и резолвер
+	// назначает третий исход — `Skipf` на переданной ему пробе.
+	//
+	// Замыкание захватывало РОДИТЕЛЬСКУЮ `t` и звалось из горутины подпробы.
+	// `SkipNow` на родителе оттуда Go превращает в ОТКАЗ («test executed panic(nil)
+	// or runtime.Goexit»), и третий исход приезжал красным — то есть «условие не
+	// создано» подавалось вердиктом о продукте, ровно то, ради предотвращения чего
+	// резолвер и заведён.
+	//
+	// Манифест берётся ОДИН РАЗ здесь: пропуск (если он будет) назначается на
+	// родителе в его собственной горутине, а подпробы получают уже готовое
+	// значение и родительскую `t` не трогают.
+	shipped := shippedManifest(t, anchoredModule, spareResource)
+	m := func() *manifest.Manifest { return shipped }
 
 	t.Run("без подтверждения — отказ по имени поля", func(t *testing.T) {
 		_, aerr := applier.Apply(ctx, modulecatalog.Request{
