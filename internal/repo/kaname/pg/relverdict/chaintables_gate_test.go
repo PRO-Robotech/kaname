@@ -577,7 +577,7 @@ func chainSyntheticRoot(t *testing.T, root, drop string) string {
 				// Приставка ломается точкой: имя перестаёт распознаваться и
 				// прибором, и гейтом — ровно как при уходе файла из каталога.
 				text = strings.ReplaceAll(text, drop,
-					strings.ReplaceAll(drop, chainTableMark, "kacho_iam_INJECTED_"))
+					strings.ReplaceAll(drop, chainTableMark, "kaname_INJECTED_"))
 			}
 			if werr := os.WriteFile(filepath.Join(dst, e.Name()), []byte(text), 0o600); werr != nil {
 				t.Fatalf("синтетический корень, запись %s: %v", e.Name(), werr)

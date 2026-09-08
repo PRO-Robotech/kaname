@@ -327,7 +327,7 @@ func TestTriggerBodyFieldRefsProvenByInjection(t *testing.T) {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
-	const schema = "kacho_iam_trigger_probe"
+	const schema = "kaname_trigger_probe"
 	for _, stmt := range []string{
 		`CREATE SCHEMA ` + schema,
 		`CREATE TABLE ` + schema + `.widgets (id bigserial PRIMARY KEY, payload jsonb, label text)`,
