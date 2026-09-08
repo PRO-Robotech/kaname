@@ -12,7 +12,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	quotav1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/quota/v1"
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
 	"github.com/PRO-Robotech/kacho/pkg/quota/quotaread"
 
@@ -97,7 +96,7 @@ func TestList_ShowsTheCallersOwnCeilingAndUsage(t *testing.T) {
 	require.EqualValues(t, 5, got.GetLimit())
 	require.EqualValues(t, 3, got.GetUsed(),
 		"потребление — половина ответа: без него предел не говорит человеку, сколько у него осталось")
-	require.Equal(t, iamv1.Limit_DEFAULT, got.GetSourceScope())
+	require.Equal(t, quotav1.Quota_DEFAULT, got.GetSourceScope())
 	require.Equal(t, "identity", got.GetCarrierType())
 	require.Equal(t, "ext-mine", got.GetCarrierId())
 

@@ -516,6 +516,16 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("internal REST front mTLS config: %w", err)
 	}
 
+	// ОБЪЯВЛЕНИЕ собственных REST-фронтов — единственное, и читают его двое:
+	// самоотчёт о посадке ниже и профили поверхностей, по которым фронты
+	// поднимаются. Порознь прочитанные, эти двое разошлись бы молча (см.
+	// ownRESTFront).
+	restFront := ownRESTFront{addr: cfg.APIServer.RESTListenAddress(), tls: restTLSConfig}
+	internalRESTFront := ownRESTFront{
+		addr: cfg.APIServer.InternalRESTListenAddress(),
+		tls:  internalRESTTLSConfig,
+	}
+
 	// M1 — startup invariant: production mode MUST run the cluster-internal
 	// listener (:9091) under mTLS RequireAndVerifyClientCert. Without it the
 	// per-RPC caller policy has no verified module SAN to enforce — anyone
@@ -597,7 +607,8 @@ func runServe(cfg config.Config) error {
 	}
 
 	observability.LogBootPosture(logger,
-		bootPosture(posture, cfg, mtlsCfg, svcs.ownGates.FormReachable()))
+		bootPosture(posture, cfg, mtlsCfg, svcs.ownGates.FormReachable(),
+			restFront, internalRESTFront))
 
 	// Per-RPC CALLER policy for the internal listener (audit C1/C3/H3/M1). iam
 	// does NOT re-ReBAC the end user here — the api-gateway is the platform's
@@ -1322,9 +1333,9 @@ func runServe(cfg config.Config) error {
 	}
 	restDialOpts := []grpc.DialOption{restUpstream}
 
-	restAddr := cfg.APIServer.RESTListenAddress()
+	restAddr := restFront.addr
 	var restHandler http.Handler
-	if restAddr != "" {
+	if restFront.Enabled() {
 		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts)
 		if err != nil {
 			return fmt.Errorf("публичный REST-фронт: %w", err)
@@ -1344,15 +1355,15 @@ func runServe(cfg config.Config) error {
 		// стояла константа, и она объявляла работу механизма на посадке, где
 		// его нет (#2194).
 		Auth: restFrontAuthAxis(presentedReader != nil),
-		TLS:  restTLSConfig,
+		TLS:  restFront.tls,
 	})
 	if err != nil {
 		return fmt.Errorf("профиль поверхности публичного REST-фронта: %w", err)
 	}
 
-	internalRESTAddr := cfg.APIServer.InternalRESTListenAddress()
+	internalRESTAddr := internalRESTFront.addr
 	var internalRESTHandler http.Handler
-	if internalRESTAddr != "" {
+	if internalRESTFront.Enabled() {
 		internalRESTHandler, err = restfront.NewInternal(surfaceCtx, restfront.DialTarget(internalAddr), restDialOpts)
 		if err != nil {
 			return fmt.Errorf("внутренний REST-фронт: %w", err)
@@ -1370,7 +1381,7 @@ func runServe(cfg config.Config) error {
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
 			"цепочка внутреннего слушателя: проверенный сертификат модуля и его политика " +
 				"вызывающего — фронт своего рубежа не заводит и ничего к личности не добавляет"),
-		TLS: internalRESTTLSConfig,
+		TLS: internalRESTFront.tls,
 	})
 	if err != nil {
 		return fmt.Errorf("профиль поверхности внутреннего REST-фронта: %w", err)
