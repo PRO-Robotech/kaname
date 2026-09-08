@@ -44,6 +44,14 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 		Jobs: config.JobsConfig{
 			CatalogSnapshot: config.CatalogSnapshotConfig{RefreshInterval: time.Minute},
 		},
+		// Окно отзыва собственной двери — на тех же основаниях, что величины
+		// уборки и обновления снимка выше: страж старта требует его
+		// положительным в ЛЮБОМ режиме (задача #2307), потому что умолчания у
+		// окна отзыва быть не может — кешируется только положительный вердикт,
+		// и срок жизни записи ЕСТЬ время, которое субъект с отобранным правом
+		// продолжает проходить. Пробы, которые ПРО него, значение
+		// перезаписывают (authz_window_test.go).
+		AuthZ: config.AuthZConfig{CacheTTL: 5 * time.Second},
 		APIServer: config.APIServerConfig{
 			Endpoint:         "tcp://0.0.0.0:9090",
 			InternalEndpoint: "tcp://0.0.0.0:9091",

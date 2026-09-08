@@ -117,6 +117,14 @@ func (c Config) Validate() error {
 	// исправным.
 	errs = multierr.Append(errs, c.Jobs.CatalogSnapshot.Validate())
 
+	// Страж окна отзыва СОБСТВЕННОЙ ДВЕРИ (задача #2307). Действует в ЛЮБОМ
+	// режиме по той же причине, что и соседи выше: окно отзыва действует на
+	// всяком поднятом стенде, а «зелёный dev» маскирует именно величину,
+	// которую никто не выбирал. Дверь строит кеш сама, минуя дескриптор
+	// носителя, — значит и страж ей нужен свой, тот же довод у него общий с
+	// `pkg/servicecontract`.
+	errs = multierr.Append(errs, c.AuthZ.Validate())
+
 	// logger.level must be a known level so a typo fails fast at boot rather
 	// than silently degrading observability. SlogLevel reports the allowed set.
 	if _, err := c.Logger.SlogLevel(); err != nil {
