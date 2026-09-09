@@ -44,7 +44,7 @@
 | `go.yaml.in/yaml/v3` | `v3.0.5` | `LICENSE` |
 | `google.golang.org/genproto/googleapis/api` | `v0.0.0-20260803160001-6ac0973c030d` | `LICENSE` |
 | `google.golang.org/genproto/googleapis/rpc` | `v0.0.0-20260803160001-6ac0973c030d` | `LICENSE` |
-| `google.golang.org/grpc` | `v1.83.1` | `LICENSE` |
+| `google.golang.org/grpc` | `v1.83.2` | `LICENSE` |
 | `gopkg.in/yaml.v3` | `v3.0.1` | `LICENSE` |
 
 ## BSD-3-Clause
@@ -65,7 +65,7 @@
 
 | Модуль | Версия | Файл лицензии в модуле |
 |---|---|---|
-| `github.com/PRO-Robotech/kacho` | `v0.0.0-20260906212857-03c890c2da3c` | `LICENSE` |
+| `github.com/PRO-Robotech/kacho` | `v0.0.0-20260909005053-8e7394e6af3e` | `LICENSE` |
 
 ## MIT
 

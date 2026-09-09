@@ -57,8 +57,28 @@ import (
 //     corelib отбрасывает пустые записи, поэтому список из одних пустых записей
 //     вырождается там в «доверяем любому», и рапортовать его как сужение значило
 //     бы отчитываться о намерении вместо исхода.
+//
+//   - own_rest_public_tls / own_rest_internal_tls — СОБСТВЕННЫЕ REST-фронты
+//     службы (публичный :9098 и внутренний :9099, internal/restfront). Под
+//     определение производителя они подпадают буквально: мультиплексор
+//     grpc-gateway поднят НАД СОБСТВЕННЫМИ gRPC-слушателями и дозванивается до
+//     них через сокет, поэтому запрос по HTTP проходит ровно ту цепочку звеньев,
+//     что и тот же запрос по gRPC.
+//
+//     Прочие HTTP-поверхности службы (вебхуки провайдера, выдача docker-токена,
+//     зеркало ключей проверки, скрейп) в эти оси НЕ входят и входить не должны:
+//     они обслуживают собственные обработчики, а не свои же gRPC-службы, — то
+//     есть под определение не подпадают. Ось, назвавшая бы их, отчитывалась бы
+//     о другом предмете.
+//
+//     Величина ВЫВОДИТСЯ из объявления фронта (ownRESTFront), а не вписывается:
+//     по тому же объявлению фронт поднимается, поэтому самоотчёт и профиль
+//     поверхности разойтись не могут. Ось спрашивает про ПРОВОД — «под
+//     транспортом или открытым текстом», — а не про то, требует ли фронт
+//     клиентского сертификата: это отдельное измерение, и в этой оси его нет.
 func bootPosture(posture servicecontract.Descriptor, cfg config.Config,
-	mtlsCfg config.MTLSConfig, authzCheckWired bool) observability.BootPosture {
+	mtlsCfg config.MTLSConfig, authzCheckWired bool,
+	restFront, internalRESTFront observability.OwnRESTFront) observability.BootPosture {
 	// Режим и шифрование до базы берутся из ПРИНЯТОГО дескриптора, а не из
 	// настройки рядом. Разница не косметическая: настройка отвечает намерением,
 	// дескриптор — тем, что прошло отказы старта. Пока их было два места,
@@ -66,13 +86,15 @@ func bootPosture(posture servicecontract.Descriptor, cfg config.Config,
 	accepted := posture.Spec()
 	dbSSLMode, _ := accepted.DBSSLMode.Get()
 	return observability.BootPosture{
-		Service:           "iam",
-		AuthMode:          accepted.Mode.String(),
-		DBSSLMode:         dbSSLMode,
-		PublicMTLS:        mtlsCfg.PublicServerMTLS.Enable,
-		InternalMTLS:      observability.InternalMTLSFrom(mtlsCfg.InternalServerMTLS.Enable),
-		AuthZCheck:        authzCheckWired,
-		TrustedForwarders: cfg.AuthN.TrustedForwarders().IsNarrowed(),
-		IdentityProvider:  cfg.AuthN.IdentityProvider.String(),
+		Service:            "iam",
+		AuthMode:           accepted.Mode.String(),
+		DBSSLMode:          dbSSLMode,
+		PublicMTLS:         mtlsCfg.PublicServerMTLS.Enable,
+		InternalMTLS:       observability.InternalMTLSFrom(mtlsCfg.InternalServerMTLS.Enable),
+		AuthZCheck:         authzCheckWired,
+		TrustedForwarders:  cfg.AuthN.TrustedForwarders().IsNarrowed(),
+		IdentityProvider:   cfg.AuthN.IdentityProvider.String(),
+		OwnRESTPublicTLS:   observability.OwnRESTFrontFrom(restFront),
+		OwnRESTInternalTLS: observability.OwnRESTFrontFrom(internalRESTFront),
 	}
 }

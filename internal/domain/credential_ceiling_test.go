@@ -46,9 +46,13 @@ func TestCredentialCeiling_BothKindsAreInTheCatalogue(t *testing.T) {
 func TestCredentialCeiling_ANeighbourKindIsCarriedElsewhere(t *testing.T) {
 	t.Parallel()
 
-	carrier, known := domain.CarrierOfKind("iam.project")
+	// Соседом был `iam.project` — вид СНЯТ вместе с пятью другими
+	// (`PRO-Robotech/kacho#2117`, сценарий `KAN-Q3-04`). Контроль переведён на
+	// `iam.account`: он живой, того же домена, и носитель у него ДРУГОЙ —
+	// личность, а не принципал. Предмет контроля от замены не изменился.
+	carrier, known := domain.CarrierOfKind("iam.account")
 	require.True(t, known)
-	require.Equal(t, domain.CarrierAccount, carrier,
+	require.Equal(t, domain.CarrierIdentity, carrier,
 		"положительный контроль: у соседнего вида того же домена носитель другой, "+
 			"поэтому совпадение выше — свойство записи, а не одинаковость каталога")
 }

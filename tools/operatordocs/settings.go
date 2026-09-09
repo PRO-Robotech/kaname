@@ -47,12 +47,17 @@ const (
 
 // SettingsCensus — объём осмотренного.
 type SettingsCensus struct {
-	Rows      int
-	ByLane    map[string]int
-	BySupply  map[string]int
-	Anywhere  int
-	FileOnly  int
-	Condition int
+	Rows     int
+	ByLane   map[string]int
+	BySupply map[string]int
+	Anywhere int
+	FileOnly int
+	// OwnPublicFront — строк, обязательных СВЕРХ полос всюду, где поднят
+	// собственный публичный REST-фронт. Печатается отдельной величиной: пока
+	// вторая половина антецедента не была видна в переписи, её отсутствие
+	// нельзя было отличить от нуля.
+	OwnPublicFront int
+	Condition      int
 }
 
 func (c SettingsCensus) String() string {
@@ -65,8 +70,9 @@ func (c SettingsCensus) String() string {
 	for _, l := range lanes {
 		parts = append(parts, fmt.Sprintf("%s %d", l, c.ByLane[l]))
 	}
-	return fmt.Sprintf("строк %d · на любой посадке %d · полосных: %s · подаются только файлом %d · условных %d",
-		c.Rows, c.Anywhere, strings.Join(parts, ", "), c.FileOnly, c.Condition)
+	return fmt.Sprintf("строк %d · на любой посадке %d · полосных: %s · сверх полос при поднятом "+
+		"собственном публичном фронте %d · подаются только файлом %d · условных %d",
+		c.Rows, c.Anywhere, strings.Join(parts, ", "), c.OwnPublicFront, c.FileOnly, c.Condition)
 }
 
 // BuildSettingsBlock рендерит блок обязательных величин из таблицы стража.
@@ -87,15 +93,28 @@ func BuildSettingsBlock(table []config.RequiredSetting) (string, []string, Setti
 	b.WriteString("|---|---|---|---|\n")
 
 	for _, s := range table {
+		// ПРИМЕНИМОСТЬ БЕРЁТСЯ ЦЕЛИКОМ, а не собирается здесь из полос.
+		//
+		// Перечень полос — лишь ПОЛОВИНА антецедента, который судит страж:
+		// вторая половина («поднят собственный публичный REST-фронт») полосой
+		// не выражается вовсе, потому что фронт поднимает объявленный адрес, а
+		// не выбор поставщика личности. Пока столбец собирался из одних полос,
+		// он говорил оператору внешней полосы, что семи величин его посадка не
+		// требует, — а без них процесс не стартует (задачи #2333, #2340).
+		//
+		// Фраза приходит из `Applicability()`: у применимости один автор, и
+		// им остаётся таблица, а не этот цикл.
+		when := s.Applicability()
 		lanes := s.LaneNames()
-		when := "на любой посадке"
 		if len(lanes) > 0 {
-			when = "посадка `" + strings.Join(lanes, "` либо `") + "`"
 			for _, l := range lanes {
 				census.ByLane[l]++
 			}
 		} else {
 			census.Anywhere++
+		}
+		if s.WhenOwnPublicRESTFront {
+			census.OwnPublicFront++
 		}
 		if s.Conditional {
 			when += ", при выполненном условии"

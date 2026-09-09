@@ -516,6 +516,16 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("internal REST front mTLS config: %w", err)
 	}
 
+	// ОБЪЯВЛЕНИЕ собственных REST-фронтов — единственное, и читают его двое:
+	// самоотчёт о посадке ниже и профили поверхностей, по которым фронты
+	// поднимаются. Порознь прочитанные, эти двое разошлись бы молча (см.
+	// ownRESTFront).
+	restFront := ownRESTFront{addr: cfg.APIServer.RESTListenAddress(), tls: restTLSConfig}
+	internalRESTFront := ownRESTFront{
+		addr: cfg.APIServer.InternalRESTListenAddress(),
+		tls:  internalRESTTLSConfig,
+	}
+
 	// M1 — startup invariant: production mode MUST run the cluster-internal
 	// listener (:9091) under mTLS RequireAndVerifyClientCert. Without it the
 	// per-RPC caller policy has no verified module SAN to enforce — anyone
@@ -568,6 +578,30 @@ func runServe(cfg config.Config) error {
 	); err != nil {
 		return err
 	}
+	// Рубеж внутреннего фронта бывает только транспортным: своего он не заводит,
+	// а к собственному слушателю идёт СВОИМ удостоверением — значит «кому позволено
+	// дотянуться» решает рукопожатие и больше ничто (см. internalrestclientauth.go).
+	if err := requireInternalRESTMutualClientAuth(productionMode,
+		cfg.APIServer.InternalRESTListenAddress(), mtlsCfg,
+	); err != nil {
+		return err
+	}
+	// А ЧЕМ фронт называется дальше — предмет отдельный, и решается он здесь.
+	// Рукопожатие выше отвечает «кому позволено дотянуться»; пер-RPC политика
+	// вызывающего спрашивает следующее: чей лист предъявлен её слушателю. Лист
+	// этот — собственный лист службы, и читается он из того файла, который фронт
+	// фактически предъявляет (см. ownfronthop.go).
+	ownFrontSAN, err := ownFrontHopSAN(mtlsCfg, cfg.AuthN.TrustDomain())
+	if err != nil {
+		return err
+	}
+	if err := requireOwnFrontHopIdentity(productionMode,
+		cfg.APIServer.InternalRESTListenAddress(),
+		cfg.APIServer.RESTListenAddress(),
+		mtlsCfg, cfg.AuthN.TrustDomain(), ownFrontSAN,
+	); err != nil {
+		return err
+	}
 	if err := requireDistinctSurfaceAddrs(
 		cfg.APIServer.ListenAddress(),
 		cfg.APIServer.InternalListenAddress(),
@@ -597,7 +631,8 @@ func runServe(cfg config.Config) error {
 	}
 
 	observability.LogBootPosture(logger,
-		bootPosture(posture, cfg, mtlsCfg, svcs.ownGates.FormReachable()))
+		bootPosture(posture, cfg, mtlsCfg, svcs.ownGates.FormReachable(),
+			restFront, internalRESTFront))
 
 	// Per-RPC CALLER policy for the internal listener (audit C1/C3/H3/M1). iam
 	// does NOT re-ReBAC the end user here — the api-gateway is the platform's
@@ -619,10 +654,16 @@ func runServe(cfg config.Config) error {
 	// The fga-proxy writes (Register/Unregister) are NOT in the
 	// gateway-only set and stay gated in-handler by RelationWriteGate (fga_writer)
 	// — their callers are vpc/compute/nlb module SAs, not the gateway.
+	//
+	// Хоп собственного REST-фронта объявляется ЗДЕСЬ и допускается ровно к полу:
+	// круг края он не проходит никогда, потому что краем не является и о том,
+	// кто за ним стоит, ничего не сообщает. Величина взята из сертификата,
+	// который фронт предъявляет, — разойтись с проводом ей нечем.
 	internalCallerPolicy := authzguard.NewCallerPolicy(productionMode, authzguard.GatewayFrontedInternalRPCs()).
 		WithSANAllowlist(map[string][]string{
 			authzguard.BootstrapMintFullMethod: cfg.AuthN.BootstrapMint.AllowedSANs(),
-		})
+		}).
+		WithOwnFrontHop(ownFrontSAN)
 
 	// Per-RPC `system_viewer`-FLOOR on the internal READ-RPC set
 	// (authN+authZ enforced everywhere: read-RPC gate viewer-tier). For
@@ -1322,9 +1363,9 @@ func runServe(cfg config.Config) error {
 	}
 	restDialOpts := []grpc.DialOption{restUpstream}
 
-	restAddr := cfg.APIServer.RESTListenAddress()
+	restAddr := restFront.addr
 	var restHandler http.Handler
-	if restAddr != "" {
+	if restFront.Enabled() {
 		restHandler, err = restfront.NewPublic(surfaceCtx, restfront.DialTarget(publicAddr), restDialOpts)
 		if err != nil {
 			return fmt.Errorf("публичный REST-фронт: %w", err)
@@ -1344,15 +1385,15 @@ func runServe(cfg config.Config) error {
 		// стояла константа, и она объявляла работу механизма на посадке, где
 		// его нет (#2194).
 		Auth: restFrontAuthAxis(presentedReader != nil),
-		TLS:  restTLSConfig,
+		TLS:  restFront.tls,
 	})
 	if err != nil {
 		return fmt.Errorf("профиль поверхности публичного REST-фронта: %w", err)
 	}
 
-	internalRESTAddr := cfg.APIServer.InternalRESTListenAddress()
+	internalRESTAddr := internalRESTFront.addr
 	var internalRESTHandler http.Handler
-	if internalRESTAddr != "" {
+	if internalRESTFront.Enabled() {
 		internalRESTHandler, err = restfront.NewInternal(surfaceCtx, restfront.DialTarget(internalAddr), restDialOpts)
 		if err != nil {
 			return fmt.Errorf("внутренний REST-фронт: %w", err)
@@ -1367,10 +1408,12 @@ func runServe(cfg config.Config) error {
 			"не обслуживаются"),
 		Handler: internalRESTHandler,
 		Reach:   servicecontract.ReachClusterInternal,
-		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
-			"цепочка внутреннего слушателя: проверенный сертификат модуля и его политика " +
-				"вызывающего — фронт своего рубежа не заводит и ничего к личности не добавляет"),
-		TLS: internalRESTTLSConfig,
+		// Ось ВЫВОДИТСЯ из фактического режима ребра, а не вписывается: здесь
+		// стояла константа, называвшая проверенный сертификат модуля механизмом
+		// аутентификации ВЫЗЫВАЮЩЕГО, — а этот сертификат называет ХОП. Тот же
+		// приём, что применён к публичному фронту (#2194).
+		Auth: internalRESTFrontAuthAxis(mtlsCfg.InternalRESTRequiresClientCert()),
+		TLS:  internalRESTFront.tls,
 	})
 	if err != nil {
 		return fmt.Errorf("профиль поверхности внутреннего REST-фронта: %w", err)

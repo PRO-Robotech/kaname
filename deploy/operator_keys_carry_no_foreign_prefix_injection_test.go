@@ -110,6 +110,37 @@ func TestOperatorKeyPrefixesInjection(t *testing.T) {
 			wantSubstring: "не объявлен в values.yaml",
 		},
 		{
+			// ВЕДОМОСТЬ ЧИТАТЕЛЯ — молчание. Ключи объявления сбора называет
+			// СОБИРАТЕЛЬ, и читает он их по этим именам; названные нашим доменом,
+			// они не были бы прочитаны никем (задача #2338).
+			//
+			// Случай стоит ПОЛОЖИТЕЛЬНЫМ КОНТРОЛЕМ записи ведомости: без него
+			// молчание пробы на действующем чарте было бы неотличимо от молчания,
+			// наступившего оттого, что запись прощает лишнее.
+			name: "домен читателя объявления сбора — молчание",
+			mutate: func(t *testing.T, chartDir string) {
+				b := readChartFile(t, chartDir, "templates/deployment.yaml")
+				b = replaceOnceIn(t, b, "prometheus.io/path: /metrics",
+					"prometheus.io/path: /metrics\n        prometheus.io/timeout: 5s")
+				writeChartFile(t, chartDir, "templates/deployment.yaml", b)
+			},
+			wantSubstring: "",
+		},
+		{
+			// ГРАНИЦА ЗАПИСИ: ведомость разрешает ДОМЕН, а не приставку. Домен,
+			// лишь начинающийся с разрешённого, обязан оставаться находкой —
+			// иначе запись стала бы маской для любого чужого имени, начатого
+			// правильными буквами.
+			name: "домен, лишь похожий на разрешённый, — находка",
+			mutate: func(t *testing.T, chartDir string) {
+				b := readChartFile(t, chartDir, "templates/deployment.yaml")
+				b = replaceOnceIn(t, b, "prometheus.io/path: /metrics",
+					"prometheus.io.example.invalid/path: /metrics")
+				writeChartFile(t, chartDir, "templates/deployment.yaml", b)
+			},
+			wantSubstring: "объявлен доменом",
+		},
+		{
 			// ЗАКОННЫЙ БЛИЗНЕЦ отрицания вида А, отличается ровно доменом:
 			// ключ переименован, но домен остался своим.
 			name: "свой домен, другое имя ключа — молчание",

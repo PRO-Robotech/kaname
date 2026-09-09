@@ -189,7 +189,8 @@ func TestBootPosture_ReportsWhetherTheCircleIsNarrowed(t *testing.T) {
 		accepted := fwdCfg(fwdGatewaySAN)
 		accepted.Repository.Postgres.URL = "postgres://u:p@pg-iam:5432/kaname"
 		accepted.Repository.Postgres.SSLMode = "require"
-		return bootPosture(acceptedPosture(t, accepted), cfg, config.MTLSConfig{}, true).TrustedForwarders
+		return bootPosture(acceptedPosture(t, accepted), cfg, config.MTLSConfig{}, true,
+			ownRESTFront{}, ownRESTFront{}).TrustedForwarders
 	}
 	t.Run("pinned", func(t *testing.T) {
 		if !posture(fwdGatewaySAN) {

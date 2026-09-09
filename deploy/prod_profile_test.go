@@ -72,6 +72,15 @@ type bridged struct {
 	valuePath []string // путь в дереве значений чарта; пуст, когда значение выводится
 	derive    func(*valueReader) any
 	omitEmpty bool // пустое значение шаблон не рендерит вовсе
+	// gate — путь ВЫКЛЮЧАТЕЛЯ блока: шаблон рендерит ключ только при истинном
+	// значении по этому пути (`{{- if $ts.enabled }}`).
+	//
+	// Отдельное поле, а не `omitEmpty` на самом выключателе: у блока выключатель
+	// ОДИН, а ключей в нём несколько, и каждый из них при выключенном блоке
+	// отсутствует ЦЕЛИКОМ — включая тот, у которого своё значение непусто.
+	// Без него переложение клало бы ключи выключенного блока, вход оказался бы
+	// шире рендера, и проба стерегла бы величины, которых процесс не получит.
+	gate []string
 }
 
 // valueReader — доступ к дереву значений чарта, ЗАПОМИНАЮЩИЙ прочитанные пути.
@@ -145,6 +154,14 @@ func postureValuePathsOf(bridge []bridged, tree map[string]any) [][]string {
 		if len(b.valuePath) > 0 {
 			out = append(out, b.valuePath)
 		}
+		// ВЫКЛЮЧАТЕЛЬ БЛОКА — тоже поверхность посадки, и более несущая, чем
+		// обычный путь: он решает, доедет ли до процесса блок ЦЕЛИКОМ. Не
+		// назови его здесь — ручка, снятие которой уносит из входа шесть
+		// ключей разом, числилась бы «эксплуатационной», то есть стражем не
+		// судимой, и её снятие прошло бы молча.
+		if len(b.gate) > 0 {
+			out = append(out, b.gate)
+		}
 	}
 	return append(out, derivedValuePathsOf(bridge, tree)...)
 }
@@ -181,7 +198,36 @@ var configBridge = []bridged{
 	{configKey: "authn.identity-provider", valuePath: []string{"authn", "identityProvider"}, omitEmpty: true},
 	{configKey: "authn.trusted-forwarder-sans", valuePath: []string{"authn", "trustedForwarderSANs"}, omitEmpty: true},
 	{configKey: "authn.trust-domain", valuePath: []string{"authn", "trustDomain"}, omitEmpty: true},
+	// СОБСТВЕННЫЕ REST-ФРОНТЫ. Умолчания у адресов нет намеренно: адрес,
+	// приходящий умолчанием процесса, непуст всегда — профиль, о ребре
+	// умолчавший, поднимал бы его молча.
+	//
+	// Обеих записей здесь НЕ БЫЛО, и вход переложения был уже чарта ровно на
+	// них; первая при этом несёт отказ стража старта, поэтому проба боевого
+	// профиля оставалась зелёной при профиле, который не поднимается
+	// (задача #2334). Класс держит `TestConfigBridge_CoversEveryKeyTheChartRenders`.
+	{configKey: "api-server.rest-endpoint", valuePath: []string{"apiServer", "restEndpoint"}, omitEmpty: true},
+	{configKey: "api-server.internal-rest-endpoint", valuePath: []string{"apiServer", "internalRestEndpoint"}, omitEmpty: true},
+	// СВОЯ ЧЕКАНКА ТОКЕНОВ. Блок целиком за выключателем: шаблон не рендерит его
+	// ни одним ключом, пока чеканка выключена.
+	{configKey: "authn.token-signing.enabled", gate: tokenSigningGate, derive: func(*valueReader) any { return true }},
+	{configKey: "authn.token-signing.issuer", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "issuer"}},
+	{configKey: "authn.token-signing.algorithm", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "algorithm"}},
+	{configKey: "authn.token-signing.allowed-algorithms", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "allowedAlgorithms"}},
+	{configKey: "authn.token-signing.key-set-path", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "keySetPath"}},
+	{configKey: "authn.token-signing.key-lifetime", gate: tokenSigningGate, valuePath: []string{"authn", "tokenSigning", "keyLifetime"}},
+	// ЧИТАТЕЛЬ ПРЕДЪЯВЛЕННОГО УДОСТОВЕРЕНИЯ. Тот же выключатель блока.
+	{configKey: "authn.presented-credential.enabled", gate: presentedCredentialGate, derive: func(*valueReader) any { return true }},
+	{configKey: "authn.presented-credential.audience", gate: presentedCredentialGate, valuePath: []string{"authn", "presentedCredential", "audience"}},
+	{configKey: "authn.presented-credential.revocation-cache-ttl", gate: presentedCredentialGate, valuePath: []string{"authn", "presentedCredential", "revocationCacheTtl"}},
 }
+
+// Выключатели блоков — названы ОДИН раз: путь, повторённый у каждого ключа
+// блока, разошёлся бы с шаблоном по одной записи из шести.
+var (
+	tokenSigningGate        = []string{"authn", "tokenSigning", "enabled"}
+	presentedCredentialGate = []string{"authn", "presentedCredential", "enabled"}
+)
 
 // restatedDeliberately — ручки боевого профиля, чьё СНЯТИЕ страж не замечает, и
 // причина, по которой они всё равно объявлены.
@@ -193,6 +239,37 @@ var restatedDeliberately = map[string]string{
 	"authMode": "базовые значения чарта уже несут production, поэтому снятие этой строки " +
 		"посадку не роняет. Строка стоит затем, чтобы будущая правка умолчания чарта не " +
 		"уронила посадку МОЛЧА: профиль называет её сам",
+	// СОБСТВЕННЫЕ REST-ФРОНТЫ. Снятие любой из двух ручек посадку не роняет — и
+	// это верное поведение стража, а не пробел в нём: ручка не НАСТРАИВАЕТ
+	// фронт, она его ПОДНИМАЕТ. Снятая, она фронт опускает, то есть даёт
+	// посадку уже, а не слабее, и требовать от стража отказа на сужении
+	// поверхности значило бы требовать, чтобы служба без REST не поднималась
+	// вовсе.
+	"apiServer.restEndpoint": "ручка НЕСУЩАЯ, и страж её читает — как АНТЕЦЕДЕНТ " +
+		"связывания: поднятый собственный публичный фронт требует читателя предъявленного " +
+		"удостоверения (PresentedCredentialConfig.ValidateBinding), и отказ прямо называет " +
+		"оба выхода — поднять читателя ЛИБО не объявлять фронт. Снятие ручки выбирает " +
+		"второй выход, поэтому отказа и нет. Что снятие меняет: у отдельно поставленной " +
+		"службы исчезает REST-поверхность арендатора — то, ради чего её ставят. Пара " +
+		"«фронт + читатель» держится тем же связыванием и проверяется отсюда: снятие " +
+		"authn.presentedCredential.enabled посадку РОНЯЕТ",
+	"apiServer.internalRestEndpoint": "ручка НЕСУЩАЯ и, как публичный фронт рядом, " +
+		"ПОДНИМАЕТ поверхность, а не настраивает её: снятая, она опускает внутренний " +
+		"REST-фронт. Читателя предъявленного удостоверения этот фронт не требует — до него " +
+		"дотягивается не арендатор, а сосед по кластеру, приходящий со своим сертификатом, " +
+		"— поэтому связывания на нём нет и отказу взяться неоткуда. Транспорт фронта " +
+		"судится ручками env.KANAME_INTERNALREST_* рядом",
+	// Две величины своей чеканки, у которых встроенное умолчание процесса
+	// НЕПУСТО и годно: страж на снятии молчит по построению.
+	"authn.tokenSigning.keySetPath": "встроенное умолчание процесса непусто и годно " +
+		"(/.well-known/kaname/jwks.json), поэтому страж на снятии молчит. Величина объявлена " +
+		"потому, что это АДРЕС, по которому всякий проверяющий наш токен читает набор " +
+		"ключей: оставленный умолчанием, он верен ровно до первого решения сменить путь — и " +
+		"тогда смена окажется невидимой в профиле",
+	"authn.tokenSigning.keyLifetime": "встроенное умолчание процесса непусто (90 суток), " +
+		"поэтому страж на снятии молчит. Величина объявлена потому, что это ПОЛИТИКА " +
+		"РОТАЦИИ ключа подписи — решение установки, а не наше; оставленная умолчанием, она " +
+		"не видна тому, кто ставит, и потому не пересматривается",
 	"apiServer.registryToken.issuer": "встроенное умолчание процесса непусто (локальное имя), " +
 		"поэтому страж на снятии молчит. Величина объявлена потому, что это realm, который " +
 		"докерный клиент слышит от нас: оставленное умолчание отправило бы его на хост, " +
@@ -248,14 +325,27 @@ var restatedDeliberately = map[string]string{
 		"Ребро одностороннее НАМЕРЕННО — арендатор приходит обычным HTTP-клиентом и " +
 		"клиентского сертификата не носит; требование предъявить его отвергло бы каждого " +
 		"на рукопожатии",
-	"env.KANAME_INTERNALREST_SERVER_MTLS_CLIENTAUTHMODE": "исхода не меняет по той же " +
-		"причине, что у публичного фронта: пустое значение и есть server-tls-only",
+	// ЗДЕСЬ СТОЯЛО «исхода не меняет по той же причине, что у публичного фронта».
+	// Довод публичного фронта был перенесён на внутренний целиком, и обе его
+	// половины здесь неверны: вызывающие внутренней поверхности — модули,
+	// называющиеся сертификатом, а предъявленное удостоверение внутренний
+	// слушатель не читает вовсе. Ребро переведено во взаимный режим (#2335).
+	"env.KANAME_INTERNALREST_SERVER_MTLS_CLIENTAUTHMODE": "ручка НЕСУЩАЯ, но её страж " +
+		"живёт в композиционном корне (requireInternalRESTMutualClientAuth в cmd/kaname) " +
+		"и отсюда недостижим — как и у соседней ручки транспорта этого же ребра. Снятие " +
+		"роняет СТАРТ: пустое значение процесс читает как server-tls-only, а на нём " +
+		"вызывающий не назван ничем — рубеж у этой поверхности бывает только транспортный. " +
+		"Держит это TestProductionProfileSatisfiesTheStartupGuards",
 	"env.KANAME_REST_SERVER_MTLS_CLIENTCAFILES": "исхода не меняет: при одностороннем " +
 		"ребре набор корней КЛИЕНТА не требуется — validateServerEdge спрашивает его " +
 		"только у двустороннего. Объявлен затем, чтобы перевод ребра в mutual был правкой " +
 		"одного значения",
-	"env.KANAME_INTERNALREST_SERVER_MTLS_CLIENTCAFILES": "исхода не меняет по той же " +
-		"причине, что у публичного фронта",
+	// Записи про env.KANAME_INTERNALREST_SERVER_MTLS_CLIENTCAFILES здесь БОЛЬШЕ
+	// НЕТ, и это не пропуск: ребро переведено во взаимный режим (#2335), а он
+	// набор корней клиента ТРЕБУЕТ — снятие ручки роняет посадку, и послабление
+	// истекло вместе со своим предметом. Раньше профиль объявлял корни рядом с
+	// односторонним режимом, который их не читает, — то есть ВЫГЛЯДЕЛ взаимным,
+	// не будучи им.
 	"env.KANAME_REGISTRYTOKEN_SERVER_MTLS_ENABLE": "ручка НЕСУЩАЯ, но её страж живёт в " +
 		"композиционном корне (requireRegistryTokenTLS в cmd/kaname), а не в Config.Validate, " +
 		"который зовёт эта проба, — то есть недостижим отсюда by construction: пакет main не " +
@@ -570,8 +660,14 @@ func TestConfigBridge_MirrorsTheChartTemplate(t *testing.T) {
 
 // ── сборка входа и вердикт ───────────────────────────────────────────────────
 
-// evaluatePosture собирает ровно тот вход, что увидит процесс, и возвращает
-// сводный вердикт стражей боевой посадки.
+// bootGuardVerdict — ВЕРДИКТ стражей боевой посадки о СОБРАННОМ входе.
+//
+// Вход приходит параметрами — путь файла настроек и карта окружения, — потому
+// что производителей входа ДВА: переложение значений чарта (быстрое, без helm)
+// и настоящий рендер чарта (`prod_profile_render_test.go`). Вердикт при этом
+// обязан быть ОДИН: два места об одном предмете разошлись бы молча, и тогда
+// сравнивать производителей было бы не с чем — а именно расхождение
+// производителей и есть предмет задачи #2334.
 //
 // Три стража, и каждый зовётся САМ, а не пересказывается:
 //   - `config.Config.Validate` — страж старта службы;
@@ -581,27 +677,29 @@ func TestConfigBridge_MirrorsTheChartTemplate(t *testing.T) {
 //   - `config.LoadMTLS` + `MTLSConfig.Validate` — посадка транспорта обоих
 //     слушателей (О8, поля PublicCreds/InternalCreds).
 //
-// Плюс одно утверждение о ДОСЯГАЕМОСТИ: файл, названный ручкой, обязан лежать
-// под каталогом, который чарт монтирует. Путь к материалу, которого под не
-// несёт, — объявленная и неисполнимая возможность.
-func evaluatePosture(t *testing.T, merged map[string]any) (envCount, keyCount int, verdict error) {
+// # ЗОВЁТСЯ НЕ БОЛЕЕ ОДНОГО РАЗА НА ПРОБУ, и это не стиль
+//
+// `requireCleanEnv` требует, чтобы в окружении не было НИ ОДНОЙ переменной
+// службы: иначе вердикт становится свойством машины, а не профиля. Переменные,
+// поставленные `t.Setenv`, живут до конца ПРОБЫ, а не до конца вызова, — поэтому
+// второй вызов внутри той же пробы падает на предпосылке, и падает сообщением
+// про «окружение прогона», которое на эту причину не указывает.
+//
+// Нужно два вердикта — заводи две пробы. Измерено: цикл по двум профилям внутри
+// одной пробы даёт ровно этот отказ на втором обороте.
+func bootGuardVerdict(t *testing.T, cfgPath string, envs map[string]string) error {
 	t.Helper()
 	requireCleanEnv(t)
-
-	cfgPath, keys := writeRenderedConfig(t, merged)
-	envs := envEntries(merged)
-	secretErr := applySecretStandIns(merged, envs)
 	for k, v := range envs {
 		t.Setenv(k, v)
 	}
 
 	cfg, loadErr := config.Load(cfgPath)
 	if loadErr != nil {
-		return len(envs), keys, fmt.Errorf("конфигурация не загрузилась: %w", loadErr)
+		return fmt.Errorf("конфигурация не загрузилась: %w", loadErr)
 	}
 
 	var errs error
-	errs = multierr.Append(errs, secretErr)
 	errs = multierr.Append(errs, cfg.Validate())
 
 	mode := coredb.SSLModeFromDSN(cfg.DSN())
@@ -627,8 +725,40 @@ func evaluatePosture(t *testing.T, merged map[string]any) (envCount, keyCount in
 					"KANAME_INTERNAL_SERVER_MTLS_ENABLE не объявлен; внутренний периметр не доверенный"))
 		}
 		errs = multierr.Append(errs, mtls.Validate())
-		errs = multierr.Append(errs, filesAreMountable(merged, envs))
 	}
+	return errs
+}
+
+// evaluatePosture собирает вход ПЕРЕЛОЖЕНИЕМ значений чарта и возвращает
+// сводный вердикт стражей боевой посадки.
+//
+// # ЧЕМ ЭТО НЕ ЯВЛЯЕТСЯ — названо первым, чтобы вердикт не читали шире
+//
+// Переложение — не рендер. Оно повторяет шаблон на Go, поэтому о ключе, который
+// шаблон рендерит, а переложение не несёт, эта проба не утверждает НИЧЕГО.
+// Ровно так вход оказался уже чарта на два ключа, и один из них нёс отказ
+// стража (#2334). Авторитетный вердикт даёт `prod_profile_render_test.go`,
+// собирающий вход настоящим `helm template`; здесь переложение остаётся ради
+// шестидесяти прогонов «снятой ручки», которым рендер на каждую итерацию стоил
+// бы helm в PATH и десятка секунд.
+//
+// Верность переложения РЕНДЕРУ держит `TestConfigBridge_CoversEveryKeyTheChartRenders`
+// (там же): перепись «ключей рендера N · записей переложения M» печатается, и
+// расхождение роняет прогон, называя недостающий ключ. Пока она зелена, вход
+// отсюда и вход из рендера совпадают по составу ключей.
+//
+// Плюс одно утверждение о ДОСЯГАЕМОСТИ: файл, названный ручкой, обязан лежать
+// под каталогом, который чарт монтирует. Путь к материалу, которого под не
+// несёт, — объявленная и неисполнимая возможность.
+func evaluatePosture(t *testing.T, merged map[string]any) (envCount, keyCount int, verdict error) {
+	t.Helper()
+
+	cfgPath, keys := writeRenderedConfig(t, merged)
+	envs := envEntries(merged)
+	secretErr := applySecretStandIns(merged, envs)
+
+	errs := multierr.Append(secretErr, bootGuardVerdict(t, cfgPath, envs))
+	errs = multierr.Append(errs, filesAreMountable(merged, envs))
 	return len(envs), keys, errs
 }
 
@@ -793,6 +923,9 @@ func writeRenderedConfig(t *testing.T, merged map[string]any) (string, int) {
 	tree := map[string]any{}
 	keys := 0
 	for _, b := range configBridge {
+		if len(b.gate) > 0 && !isTruthy(at(merged, b.gate...)) {
+			continue
+		}
 		var val any
 		switch {
 		case b.derive != nil:
@@ -929,6 +1062,25 @@ func leafPaths(tree map[string]any, prefix []string) [][]string {
 		out = append(out, path)
 	}
 	return out
+}
+
+// isTruthy — та же истинность, что у `{{- if }}` шаблона: отсутствие, `false`,
+// пустая строка и ноль ложны, прочее истинно.
+func isTruthy(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return t
+	case string:
+		return strings.TrimSpace(t) != ""
+	case int:
+		return t != 0
+	case float64:
+		return t != 0
+	default:
+		return true
+	}
 }
 
 func isEmptyValue(v any) bool {

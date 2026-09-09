@@ -1,34 +1,110 @@
 # Copyright (c) PRO-Robotech
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+{{/*
+ДВА Service, А НЕ ОДИН, И РАЗДЕЛЕНЫ ОНИ ПО ДОСЯГАЕМОСТИ, которую объявляет о
+себе САМ ПРОЦЕСС (`servicecontract.Surface.Reach` в композиционном корне).
+
+ПОЧЕМУ НЕ ОДИН НА ВСЁ. Единственный рычаг, которым оператор выводит службу
+наружу, — тип объекта Service. Пока публичные и служебные двери сидят на одном
+объекте, этот рычаг двигает их ВМЕСТЕ: оператор, выставивший наружу публичный
+gRPC, выставляет тем же движением внутренний gRPC, вебхуки и зеркало ключей.
+Запрет #6 при этом не нарушается ни одной строкой кода — периметр расширяется
+объектом развёртывания, и заметить это по чарту нельзя.
+
+Разделение делает «внутреннее не опубликовано наружу» свойством ОБЪЕКТА, а не
+обещанием: у публичного Service служебных портов нет вовсе, поэтому его тип
+можно менять, ничего не открывая сверх названного.
+
+Форма взята у зонтичного чарта (`deploy/helm/umbrella/charts/kaname`), где та же
+служба разложена ровно так же. Второго идиома об одном предмете здесь не
+заводится: разойтись они могли бы только молча.
+
+ДИАГНОСТИЧЕСКОЙ ПОВЕРХНОСТИ ЗДЕСЬ НЕТ НАМЕРЕННО, и это не пропуск. Её маршрут —
+ОБЪЯВЛЕНИЕ СБОРА в шаблоне пода (`prometheus.io/*`): собиратель платформы ходит
+по подам, а не по Service, и порт Service ему не нужен ни для чего. Порт, никем
+не читаемый, был бы дверью, открытой без потребителя.
+*/}}
+{{- $svc := .Values.service | default dict -}}
+{{- $public := $svc.public | default dict -}}
+{{- $internal := $svc.internal | default dict -}}
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ .Values.name }}
   namespace: {{ .Release.Namespace }}
 spec:
+  # ТИП ОБЪЯВЛЯЕТ ТОТ, КТО СТАВИТ. Умолчание `ClusterIP` не выводит наружу
+  # ничего: как именно публичные двери попадают к арендатору — через вход,
+  # балансировщик или чужой край — решает установка, а не эта строка.
+  type: {{ $public.type | default "ClusterIP" }}
   selector:
     app: {{ .Values.name }}
   ports:
+    # Публичный gRPC арендатора.
     - name: grpc
       port: {{ .Values.ports.grpc }}
       targetPort: grpc
+    # Выдача токенов (`/iam/token`, `/iam/v1/token`). Процесс объявляет эту
+    # поверхность ВНЕШНЕ ДОСЯГАЕМОЙ: по ней приходит `docker login`, и документ
+    # установки обещает оператору именно это.
+    - name: registry-token
+      port: {{ include "kaname-svc.processDefaultPort" "registryToken" }}
+      targetPort: registry-token
+    # Собственный ПУБЛИЧНЫЙ REST-фронт службы. Единственная тенантская
+    # HTTP-дверь отдельно поставленной службы: края платформы у неё нет by
+    # construction, и её HTTP обязан существовать сам.
+    #
+    # Порт ВЫВОДИТСЯ из адреса, который профиль отдаёт процессу: дверь одна, и
+    # ручка у неё одна. Не объявлен адрес — фронт не поднят, и вести к нему
+    # нечем.
+    #
+    # ПУТЬ ЗНАЧЕНИЙ ПИШЕТСЯ ЦЕЛИКОМ, а не через локальный псевдоним: условие
+    # подъёма фронта читает не только helm. Его читает гейт выразимости
+    # (`deploy/own_rest_front_is_profile_expressible_test.go`), сверяя охрану с
+    # ключом, ОБЪЯВЛЯЮЩИМ фронт; за псевдонимом он ключа не видит и справедливо
+    # считает материализацию безусловной. Псевдоним здесь стоял и не давал
+    # ничего, кроме этой слепоты.
+    {{- if .Values.apiServer.restEndpoint }}
+    - name: http-rest
+      port: {{ include "kaname-svc.surfacePort" .Values.apiServer.restEndpoint }}
+      targetPort: http-rest
+    {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.name }}-internal
+  namespace: {{ .Release.Namespace }}
+spec:
+  # ТИП ЗДЕСЬ НЕ ОБЪЯВЛЯЕТСЯ ОПЕРАТОРОМ СЛУЧАЙНО: умолчание `ClusterIP` и есть
+  # назначение объекта. Ключ оставлен, потому что установки бывают разные, но
+  # менять его — решение, а не побочный эффект вывода наружу публичных дверей.
+  type: {{ $internal.type | default "ClusterIP" }}
+  selector:
+    app: {{ .Values.name }}
+  ports:
+    # Внутренний gRPC: его зовут соседние службы. На публичном объекте его НЕТ
+    # и быть не может (запрет #6).
     - name: grpc-internal
       port: {{ .Values.ports.internalGrpc }}
       targetPort: grpc-internal
-    # Собственные REST-фронты службы (KAN-REST-1).
-    #
-    # ОДИН Service здесь несёт оба порта, и это НЕ отменяет раздельность: она
-    # есть свойство СОКЕТА, а не объекта Service. Внутренний фронт слушает свой
-    # порт, и на публичном порту его маршруты не резолвятся ни при каком запросе.
-    # Кто дотянется до какого порта, решает сеть кластера, а не эта запись.
-    {{- if .Values.ports.rest }}
-    - name: http-rest
-      port: {{ .Values.ports.rest }}
-      targetPort: http-rest
-    {{- end }}
-    {{- if .Values.ports.internalRest }}
+    # Хуки поставщика личности: заведение пользователя по первому входу и
+    # обогащение токена. По проводу идёт общий сговор с поставщиком.
+    - name: http-hooks
+      port: {{ include "kaname-svc.processDefaultPort" "hooks" }}
+      targetPort: http-hooks
+    # Зеркало публичных ключей проверки. Его читает плоскость данных реестра;
+    # без маршрута её верификация остаётся закрытой, о чём служба и говорит при
+    # старте.
+    - name: http-jwks
+      port: {{ include "kaname-svc.processDefaultPort" "jwksProxy" }}
+      targetPort: http-jwks
+    # Собственный ВНУТРЕННИЙ REST-фронт. Выставлен ТОЛЬКО здесь: на публичном
+    # объекте его нет, и это свойство сокета, а не решение, принимаемое на
+    # каждом запросе.
+    {{- if .Values.apiServer.internalRestEndpoint }}
     - name: http-rest-int
-      port: {{ .Values.ports.internalRest }}
+      port: {{ include "kaname-svc.surfacePort" .Values.apiServer.internalRestEndpoint }}
       targetPort: http-rest-int
     {{- end }}

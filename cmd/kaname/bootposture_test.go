@@ -76,7 +76,7 @@ func TestBootPosture_Production(t *testing.T) {
 	mtls.PublicServerMTLS.Enable = true
 	mtls.InternalServerMTLS.Enable = true
 
-	requireBootPostureFields(t, captureBootPosture(t, bootPosture(acceptedPosture(t, cfg), cfg, mtls, true)), map[string]any{
+	requireBootPostureFields(t, captureBootPosture(t, bootPosture(acceptedPosture(t, cfg), cfg, mtls, true, restFrontUp(), restFrontUp())), map[string]any{
 		"msg":           observability.BootPostureMsg,
 		"service":       "iam",
 		"auth_mode":     "production",
@@ -84,6 +84,11 @@ func TestBootPosture_Production(t *testing.T) {
 		"public_mtls":   true,
 		"internal_mtls": "true",
 		"authz_check":   true,
+		// Оси собственных REST-фронтов локаются на НАБЛЮДАЕМОЙ строке: её
+		// разбирает гейт посадки, и пустое значение он судит отказом наравне с
+		// отсутствием ключа.
+		"own_rest_public_tls":   "true",
+		"own_rest_internal_tls": "true",
 	})
 }
 
@@ -99,7 +104,7 @@ func TestBootPosture_SSLModeComesFromTheDSNThatReachesThePool(t *testing.T) {
 	// потому что процесс, не назвавший домена, своим не признаёт никого.
 	cfg.AuthN.TrustDomainName = "kacho.cloud"
 
-	requireBootPostureFields(t, captureBootPosture(t, bootPosture(acceptedPosture(t, cfg), cfg, config.MTLSConfig{}, true)), map[string]any{
+	requireBootPostureFields(t, captureBootPosture(t, bootPosture(acceptedPosture(t, cfg), cfg, config.MTLSConfig{}, true, restFrontUp(), restFrontUp())), map[string]any{
 		"auth_mode":  "production-strict",
 		"db_sslmode": "verify-ca",
 	})
@@ -120,13 +125,18 @@ func TestBootPosture_InsecureIsReportedHonestly(t *testing.T) {
 	// домена» означал бы согласие не работать, поэтому домен называется и здесь.
 	cfg.AuthN.TrustDomainName = "kacho.cloud"
 
-	requireBootPostureFields(t, captureBootPosture(t, bootPosture(acceptedPosture(t, cfg), cfg, config.MTLSConfig{}, false)), map[string]any{
+	requireBootPostureFields(t, captureBootPosture(t, bootPosture(acceptedPosture(t, cfg), cfg, config.MTLSConfig{}, false, ownRESTFront{}, ownRESTFront{})), map[string]any{
 		"service":       "iam",
 		"auth_mode":     "dev",
 		"db_sslmode":    "disable",
 		"public_mtls":   false,
 		"internal_mtls": "false",
 		"authz_check":   false,
+		// Фронты профилем не объявлены — «поверхности нет», а не «открытый
+		// текст»: путать эти два значило бы отчитываться о защите того, чего
+		// не существует.
+		"own_rest_public_tls":   "n/a",
+		"own_rest_internal_tls": "n/a",
 	})
 }
 

@@ -73,6 +73,24 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `acceptance-reviewer` своим кругом, а не эта строка. Решение —
   `../architecture/verdict-names-a-revision-not-a-file.md`
 
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2305`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **13**. Правка одна и
+  механическая — имя схемы Postgres `kacho_iam.` → `kaname.`: схема названа
+  именем своего продукта, и прежнего имени дерево не производит
+  (`grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql`
+  → 0; под `kaname.` → 47). До правки координата не резолвилась, то есть
+  **молчала**: читатель уходил за ней и не находил — она не краснеет и не
+  зеленеет. **НЕ тронуты** ни один сценарий, производитель, признак готовности,
+  клауза и ни одно число: непарных строк 0, пар с изменившимся числом токенов 0.
+  **Оставлено намеренно: 4.** Это ЗАПИСИ замера — предикат стоит вместе с
+  названным значением, и пара «предикат ↔ число» есть утверждение о своей
+  ревизии, где прежнее имя было живо. Правка имени сделала бы ложным
+  утверждение, которое было верным, — тот же класс, что уже наблюдался при
+  массовом переименовании этого дома.
+  Одобрение относится к **содержимому**, а не к имени файла: APPROVED выше есть
+  вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю редакцию
+  ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 ---
 
 ## R. Рецензия круга 1 — вердикт CHANGES REQUESTED
@@ -324,7 +342,7 @@ $ for q in "благо продукта" "конкурентоспособн" "�
 > `v_removetargets`, …), `VerbsOfType` срезает приставку `v_`, посев несёт
 > `('loadbalancer','targetGroups','addtargets')` — обе стороны в нижнем регистре
 > **by construction**, паритет 109/109. Предикаты:
-> `awk '/^INSERT INTO kacho_iam.catalog_verb/,/;/' <миграция> | grep -oE "\('[a-zA-Z]+', *'[a-zA-Z]+', *'[a-zA-Z]+'\)" | tr -d "() '" | awk -F, '{print $3}' | sort -u`
+> `awk '/^INSERT INTO kaname.catalog_verb/,/;/' <миграция> | grep -oE "\('[a-zA-Z]+', *'[a-zA-Z]+', *'[a-zA-Z]+'\)" | tr -d "() '" | awk -F, '{print $3}' | sort -u`
 > → `addtargets create delete get list removetargets update`; прогон
 > `TestIAMCT114_CatalogSeedMatchesTheLiteral` → `PASS`, перепись
 > `литерал — модулей 6, ресурсов 27, глаголов 109; посев — 6/27/109, снятых 3`.
@@ -541,9 +559,9 @@ origin/main`), а этот документ живёт на `lane/1816`. Его 
 «Вызов, дошедший до пула за время старта» без отсечки считал бы весь стартовый
 трафик — миграции, прочие посевы, служебные `begin`/`rollback`, — то есть величину,
 зависящую от чего угодно, кроме предмета. Отсечка теперь названа
-(`kacho_iam.catalog_module` / `catalog_resource` / `catalog_verb`) и подкреплена
+(`kaname.catalog_module` / `catalog_resource` / `catalog_verb`) и подкреплена
 переписью прод-читателей этих таблиц:
-`git grep -n 'kacho_iam.catalog_\(module\|resource\|verb\)' -- '*.go' ':!*_test.go'`
+`git grep -n 'kaname.catalog_\(module\|resource\|verb\)' -- '*.go' ':!*_test.go'`
 → **три** строки, все в `catalog_parity.go`. Читатель у трёх таблиц сегодня один —
 сам страж, — и именно это делает `K` измеримым, а не оценочным.
 
@@ -612,9 +630,9 @@ origin/main`), а этот документ живёт на `lane/1816`. Его 
 ### R3.0. Мои опровергнутые гипотезы — названы первыми
 
 > **Гипотеза 1: отсечка по таблице НЕ исключает посевную миграцию, и `N > K` на
-> исправном коде.** `-01` считает операторы к `kacho_iam.catalog_module` /
+> исправном коде.** `-01` считает операторы к `kaname.catalog_module` /
 > `catalog_resource` / `catalog_verb` за время старта. Посевная миграция пишет
-> **в те же три таблицы** (`INSERT INTO kacho_iam.catalog_module …`,
+> **в те же три таблицы** (`INSERT INTO kaname.catalog_module …`,
 > `20260901113757`), поэтому отсечка по имени таблицы её не отсекает: если
 > миграции идут в окне замера, `N = K + <число INSERT>` — то есть проба падает на
 > исправном коде, ровно класс R2.1, внесённый заново.
@@ -691,7 +709,7 @@ git grep -n 'kacho_iam.catalog_\(module\|resource\|verb\)' -- '*.go' ':!*_test.g
 ```sh
 git grep -n 'FROM kacho_iam\.catalog_' -- '*.go' ':!*_test.go'
 # → 3 строки, все в services/iam/internal/apps/kaname/seed/catalog_parity.go
-git grep -nE '(JOIN|UPDATE|INSERT INTO|DELETE FROM) +kacho_iam\.catalog_' -- '*.go' ':!*_test.go'
+git grep -nE '(JOIN|UPDATE|INSERT INTO|DELETE FROM) +kaname\.catalog_' -- '*.go' ':!*_test.go'
 # → только те же три литерала parseSeedBlock: иных форм доступа в прод-коде нет
 ```
 
@@ -705,11 +723,11 @@ git grep -nE '(JOIN|UPDATE|INSERT INTO|DELETE FROM) +kacho_iam\.catalog_' -- '*.
 (запрет #19).
 
 **Правка едет с изменением реализации** — документ и так правится в тот момент
-(§9.3, запись ведомости): заменить предикат на форму `FROM kacho_iam\.catalog_` в
+(§9.3, запись ведомости): заменить предикат на форму `FROM kaname\.catalog_` в
 **обоих** местах, где он утверждается, — **§A2.2** и **§8 п. 4**.
 
 **Радиус адресован секциями, а не номерами строк, и это не педантизм.** Предикат
-`grep -n "git grep -n 'kacho_iam.catalog_" <документ>` даёт сегодня **три**
+`grep -n "git grep -n 'kaname.catalog_" <документ>` даёт сегодня **три**
 вхождения, но третье — **эта самая §R3.2**, цитирующая негодную команду в разборе.
 Считать его четвёртым местом правки значило бы повторить ровно тот класс, который
 здесь и найден: предикат, считающий **прозу о предмете**. Номера строк вдобавок
@@ -974,7 +992,7 @@ git grep -n 'authzmap\.objectTypes\|authzmap\.typeVerbRelations' -- '*.go'
 
 ### 0.5. Таблица не несёт имени типа МОДЕЛИ — переходник из строк неисполним
 
-Колонки `kacho_iam.catalog_resource` (миграция `20260901113757`, полный список):
+Колонки `kaname.catalog_resource` (миграция `20260901113757`, полный список):
 
 ```
 module · resource · dotted · retired_at · retired_reason · superseded_by · live
@@ -1126,7 +1144,7 @@ proto/kaname/cloud/iam/v1/fga_model.fga   (КАНОН — единственны
         │  гейт дерева   TestIAMCT114  (литерал ↔ ТЕКСТ миграции)
         │  страж старта  AssertCatalogParity  (литерал ↔ ЖИВЫЕ строки)
         ▼
-строки kacho_iam.catalog_*
+строки kaname.catalog_*
 ```
 
 Обе проверки паритета двусторонни **потому, что их стороны имеют разное
@@ -1696,11 +1714,11 @@ git grep -c 'AssertCatalogParity' -- 'services/iam/cmd/kaname/serve.go'   # → 
    его шапка называет ту же единицу дословно.
 
    Единица — **оператор к таблицам каталога**, ушедший на сервер за время старта
-   (`kacho_iam.catalog_module` / `catalog_resource` / `catalog_verb`); отсечка по
+   (`kaname.catalog_module` / `catalog_resource` / `catalog_verb`); отсечка по
    таблице обязательна — счёт всего стартового трафика зависел бы от миграций и
    прочих посевов и не был бы величиной о предмете. Прод-читателей у этих трёх
    таблиц сегодня **один** — сам страж; предикат:
-   `git grep -n 'kacho_iam.catalog_\(module\|resource\|verb\)' -- '*.go' ':!*_test.go'`
+   `git grep -n 'kaname.catalog_\(module\|resource\|verb\)' -- '*.go' ':!*_test.go'`
    → три строки, все в `catalog_parity.go`.
 
    Утверждается **равенство двух измеренных величин**, а не константа: `K` —
@@ -2004,7 +2022,7 @@ go test ./internal/repohygiene/ -run TestAcceptanceLedgerEntriesHaveASubject -co
 
 1. **функция ключуется именем типа МОДЕЛИ.** Её сигнатура —
    `PermissionsCoveringType(permissions []string, fgaType string)`, а
-   `kacho_iam.catalog_resource` колонки с именем типа модели не несёт (§0.5 п. 1).
+   `kaname.catalog_resource` колонки с именем типа модели не несёт (§0.5 п. 1).
    Чтобы ответить из строк, надо сперва позвать переходник, которого в строках
    нет;
 2. **`cluster` строки каталога не имеет вовсе** (§0.5 п. 2). Реализация «из

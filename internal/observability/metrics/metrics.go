@@ -20,8 +20,8 @@
 //   - Registry.UnaryServerInterceptor — per-RPC request count + latency + code,
 //     registered on BOTH gRPC listeners (public :9090 + internal :9091).
 //
-// All metric names carry the `kacho_iam_` prefix (naming convention; the env
-// domain segment is IAM).
+// All metric names carry the `kaname_` prefix (the product names itself; the
+// env domain segment stays IAM).
 package metrics
 
 import (

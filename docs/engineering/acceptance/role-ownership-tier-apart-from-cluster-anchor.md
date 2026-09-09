@@ -33,6 +33,19 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   редакцию ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение,
   замер и цена обоих отвергнутых исходов —
   `../architecture/verdict-names-a-revision-not-a-file.md`
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2305`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **21**. Правка одна и
+  механическая — имя схемы Postgres `kacho_iam.` → `kaname.`: схема названа
+  именем своего продукта, и прежнего имени дерево не производит
+  (`grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql`
+  → 0; под `kaname.` → 47). До правки координата не резолвилась, то есть
+  **молчала**: читатель уходил за ней и не находил — она не краснеет и не
+  зеленеет. **НЕ тронуты** ни один сценарий, производитель, признак готовности,
+  клауза и ни одно число: непарных строк 0, пар с изменившимся числом токенов 0.
+  Одобрение относится к **содержимому**, а не к имени файла: APPROVED выше есть
+  вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю редакцию
+  ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 - **Префикс сценариев:** `IAM-OM-1`
 - **Ревизия измерения (продукт) — их ЧЕТЫРЕ, и каждая названа своей:**
   `d662a9b60` (автор, круг 1 — рабочая копия `/tmp/claude-1000/wt-n1`, ветка
@@ -131,7 +144,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > отпустить референт может только `DELETE`, а его нет:
 >
 > ```
-> DELETE FROM kacho_iam.roles WHERE id='rol-vpcviewer' AND is_system = false;  → DELETE 0
+> DELETE FROM kaname.roles WHERE id='rol-vpcviewer' AND is_system = false;  → DELETE 0
 > ```
 > `role_repo.go:580` удаляет только `is_system = false`; применитель объявляет всякую
 > роль манифеста системной безусловно (Е5); `moduleroles/reconcile.go` расхождения
@@ -290,7 +303,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > ограничения — не о форме имени ресурса. Заводить рядом с `checkText`
 > **иной** предикат значило бы завести второе место об одном предмете, которое
 > `#1903` пришлось бы потом сводить. Сегодняшнее поведение новых ограничений
-> **тождественно** поведению пяти существующих ограничений `kacho_iam` того же
+> **тождественно** поведению пяти существующих ограничений `kaname` того же
 > рода, то есть эта задача долга не вносит; §2.4 и §8 приведены к одной версии,
 > прежнее «полосу обязан назвать iam» снято.
 >
@@ -333,7 +346,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > | # | утверждение | где стояло | замер |
 > |---|---|---|---|
 > | 1 | «`nameform.IsConstraint` … по пяти чужим схемам, **iam среди них нет**» | §2.4, круг 1 (моё) | **ложно**: iam — один из пяти вызывающих, `services/iam/internal/repo/kaname/pg/pgmaperr.go:138`. Предикат: `git grep -n 'CheckLaneOf' -- 'services/**/*.go' ':!*_test.go'` → **5**, iam в их числе |
-> | 2 | «полоса «дефект сервиса» **не производится ни для одного** ограничения схемы `kacho_iam`» | §7 п. 2, круг 1 (моё); повторено в Н4 и в разборе круга 1 | **ложно**: производится для **6** — `accounts`, `clusters`, `groups`, `organizations`, `projects`, `service_accounts` (их `<таблица>_name_check` совпадает с конструкцией дословно). Не производится для **5**: `organizations_display_name_check`, `roles_custom_name_check`, `roles_system_name_check`, `scim_groups_display_name_check`, `users_display_name_check` |
+> | 2 | «полоса «дефект сервиса» **не производится ни для одного** ограничения схемы `kaname`» | §7 п. 2, круг 1 (моё); повторено в Н4 и в разборе круга 1 | **ложно**: производится для **6** — `accounts`, `clusters`, `groups`, `organizations`, `projects`, `service_accounts` (их `<таблица>_name_check` совпадает с конструкцией дословно). Не производится для **5**: `organizations_display_name_check`, `roles_custom_name_check`, `roles_system_name_check`, `scim_groups_display_name_check`, `users_display_name_check` |
 > | 3 | то же утверждение стоит **заголовком задачи `#1903`** | `gh issue view 1903` | посылка задачи опровергнута замером выше; предмет её при этом **жив** — 5 ограничений против объявленного «ни одного». Отчёт ушёл в задачу, заголовок правит её ведущий |
 >
 > **Предикат, которым это получено** (адъюдикация по каждой паре, а не счёт
@@ -344,7 +357,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > import re
 > cur=None; res={}
 > for line in open('services/iam/internal/migrations/0001_initial.sql'):
->     m=re.search(r'CREATE TABLE (?:IF NOT EXISTS )?(?:kacho_iam\.)?([a-z_]+)',line)
+>     m=re.search(r'CREATE TABLE (?:IF NOT EXISTS )?(?:kaname\.)?([a-z_]+)',line)
 >     if m: cur=m.group(1)
 >     m2=re.search(r'CONSTRAINT ([a-z_]+_name_check)',line)
 >     if m2 and cur: res.setdefault(cur,[]).append(m2.group(1))
@@ -526,7 +539,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > (порядок — по числовому значению метки, не лексикографический: версии бывают
 > 4-, 6- и 14-значные, и лексикографика ставит `944001` после `2026…`), каждая
 > в своей транзакции — иначе отложенные ключи `0009` не сходятся, и это свойство
-> харнесса, а не дерева. Строк в `kacho_iam.roles` — **48**, а не три, как в
+> харнесса, а не дерева. Строк в `kaname.roles` — **48**, а не три, как в
 > фикстурах обоих кругов; модулей каталога — **6**.
 >
 > **DDL §2.1 / §2.3 / §2.4 приложился к боевой форме таблицы целиком**, и
@@ -556,7 +569,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > ровно как сценарий и объявляет.
 >
 > **Число Е15 перемерено не текстом миграций, а каталогом СУБД** — и это другой
-> предикат, чем у круга 2: `pg_constraint` по `kacho_iam.roles` за вычетом трёх
+> предикат, чем у круга 2: `pg_constraint` по `kaname.roles` за вычетом трёх
 > новых даёт **11** (проверок 7 · ключей 3 · первичный 1). Поправка круга 2 верна.
 >
 > **Координата `manifest/roles.go:328` на закреплённой `1f9facfdc` — точна**
@@ -695,7 +708,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `grep -ohE "'rol'\s*\|\|\s*substr\(md5\('[^']+'\)" services/iam/internal/migrations/*.sql`
   имён **64**, из них с первым сегментом вне закрытого набора модулей — **11**
   (`admin`, `edit`, `view`, `owner` и семь `module.*_sa`). Это имена, ВСТАВЛЕННЫЕ
-  миграциями, а не живые: часть снята позже (`DELETE FROM kacho_iam.roles` — **9**
+  миграциями, а не живые: часть снята позже (`DELETE FROM kaname.roles` — **9**
   миграций). Живое число **48** взято из приёмки `roles-come-as-data-not-migrations.md`
   §3.4 и здесь **не перемерялось** — это чужой замер, названный чужим;
 - **вторым языком предикаты не прогонялись** там, где искал по имени колонки:
@@ -749,22 +762,22 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 ### 2.1. Носитель владения — КОЛОНКА со своим ключом, а не вывод из яруса
 
-Заводится `kacho_iam.roles.owner_module text` — модуль, которому роль
+Заводится `kaname.roles.owner_module text` — модуль, которому роль
 принадлежит. `NULL` означает **платформенную** роль (`admin`, `edit`, `view`,
 `owner`, `kacho-system.*`), непустое значение — роль, объявленную манифестом
 этого модуля.
 
 ```sql
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
   ADD COLUMN owner_module text;
 
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
   ADD CONSTRAINT roles_owner_module_fk
     FOREIGN KEY (owner_module)
-    REFERENCES kacho_iam.catalog_module (module)
+    REFERENCES kaname.catalog_module (module)
     ON DELETE NO ACTION ON UPDATE NO ACTION NOT VALID;
 
-ALTER TABLE kacho_iam.roles VALIDATE CONSTRAINT roles_owner_module_fk;
+ALTER TABLE kaname.roles VALIDATE CONSTRAINT roles_owner_module_fk;
 ```
 
 Ключ идёт на **первичный** ключ каталога (`catalog_module_pkey PRIMARY KEY
@@ -896,7 +909,7 @@ EXCLUSIVE` — форма и оба уровня взяты у применён�
 межстрочных ссылок ей не нужно:
 
 ```sql
-CREATE FUNCTION kacho_iam.iam_rule_wildcards_confined(rules jsonb, owner_module text)
+CREATE FUNCTION kaname.iam_rule_wildcards_confined(rules jsonb, owner_module text)
   RETURNS boolean LANGUAGE plpgsql IMMUTABLE
 -- owner_module IS NULL → true (платформенная роль, политика не менялась)
 -- иначе по каждому правилу:
@@ -905,11 +918,11 @@ CREATE FUNCTION kacho_iam.iam_rule_wildcards_confined(rules jsonb, owner_module 
 ```
 
 ```sql
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
   ADD CONSTRAINT roles_rule_wildcards_confined
-    CHECK (kacho_iam.iam_rule_wildcards_confined(rules, owner_module)) NOT VALID;
+    CHECK (kaname.iam_rule_wildcards_confined(rules, owner_module)) NOT VALID;
 
-ALTER TABLE kacho_iam.roles VALIDATE CONSTRAINT roles_rule_wildcards_confined;
+ALTER TABLE kaname.roles VALIDATE CONSTRAINT roles_rule_wildcards_confined;
 ```
 
 `NOT VALID` + `VALIDATE` — по той же причине, что у ключа §2.1 и у применённой
@@ -932,12 +945,12 @@ ALTER TABLE kacho_iam.roles VALIDATE CONSTRAINT roles_rule_wildcards_confined;
 Оно переносится на строку:
 
 ```sql
-ALTER TABLE kacho_iam.roles
+ALTER TABLE kaname.roles
   ADD CONSTRAINT roles_owner_module_name_prefix
     CHECK (owner_module IS NULL
            OR left(name, length(owner_module) + 1) = owner_module || '.') NOT VALID;
 
-ALTER TABLE kacho_iam.roles VALIDATE CONSTRAINT roles_owner_module_name_prefix;
+ALTER TABLE kaname.roles VALIDATE CONSTRAINT roles_owner_module_name_prefix;
 ```
 
 **`left(...)`, а не `LIKE`** — намеренно: образец `LIKE`, собранный из колонки,
@@ -967,7 +980,7 @@ ALTER TABLE kacho_iam.roles VALIDATE CONSTRAINT roles_owner_module_name_prefix;
 класс, который потом пришлось бы сводить. Предмет принадлежит **`#1903`**
 (OPEN, `P2`, `size:S`), он шире этой задачи, и `-13` несёт его номер блокером.
 Задача при этом долга не вносит: сегодняшнее поведение новых ограничений
-**тождественно** поведению пяти уже существующих ограничений `kacho_iam` того же
+**тождественно** поведению пяти уже существующих ограничений `kaname` того же
 рода (Е17) — их число не растёт качественно, а класс закрывается своим
 изменением.
 
@@ -1201,7 +1214,7 @@ XOR, вычисляемый `is_system`, оба ограничения форм�
   общий текст всем
 - **Что здесь закреплено сознательно:** по существу оба новых ограничения —
   защита последнего рубежа, и их место в полосе дефекта сервиса (§2.4). Сегодня
-  они отвечают ровно так же, как пять уже существующих ограничений `kacho_iam`
+  они отвечают ровно так же, как пять уже существующих ограничений `kaname`
   того же рода, поэтому эта задача долга не вносит; перевод всей пятёрки —
   предмет `#1903`, и он **перевернёт** этот сценарий целиком. Правка круга 1
   (Б3): прежде исход был объявлен двумя местами по-разному — `ЗАКАЗ` этой задачи
@@ -1351,7 +1364,7 @@ XOR, вычисляемый `is_system`, оба ограничения форм�
    (§2.5, Н3; замечание В1 приёмки `roles-come-as-data-not-migrations.md`,
    задачи до сих пор не имевшее). Решение в обе стороны имеет довод, и здесь
    оно не принимается;
-2. **`#1903`** — перевод в полосу «дефект сервиса» тех ограничений `kacho_iam`,
+2. **`#1903`** — перевод в полосу «дефект сервиса» тех ограничений `kaname`,
    которые разбор не узнаёт. **Посылка задачи в её нынешнем заголовке
    опровергнута замером** (§A п. 6): полоса в iam провязана и срабатывает для
    **шести** ограничений, не срабатывает для **пяти** — включая оба

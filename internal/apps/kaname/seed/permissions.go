@@ -62,7 +62,7 @@ type PermissionEntry struct {
 	// ScopeFiltered — the method is authorized over the DATA by its owning
 	// service: the edge runs no per-RPC check and passes the call through, so
 	// the refusal (and the machine-readable reason on it) is iam's to produce.
-	// Mirrors `kacho.iam.authz.v1.scope_filtered` in the proto. Without this
+	// Mirrors `corelib.authz.v1.scope_filtered` in the proto. Without this
 	// field parsed here iam could not even enumerate the band it is responsible
 	// for authorizing.
 	ScopeFiltered bool `json:"scope_filtered,omitempty"`

@@ -26,6 +26,24 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   редакцию ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение,
   замер и цена обоих отвергнутых исходов —
   `../architecture/verdict-names-a-revision-not-a-file.md`
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2305`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **31**. Правка одна и
+  механическая — имя схемы Postgres `kacho_iam.` → `kaname.`: схема названа
+  именем своего продукта, и прежнего имени дерево не производит
+  (`grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql`
+  → 0; под `kaname.` → 47). До правки координата не резолвилась, то есть
+  **молчала**: читатель уходил за ней и не находил — она не краснеет и не
+  зеленеет. **НЕ тронуты** ни один сценарий, производитель, признак готовности,
+  клауза и ни одно число: непарных строк 0, пар с изменившимся числом токенов 0.
+  **Оставлено намеренно: 6.** Это ЗАПИСИ замера — предикат стоит вместе с
+  названным значением, и пара «предикат ↔ число» есть утверждение о своей
+  ревизии, где прежнее имя было живо. Правка имени сделала бы ложным
+  утверждение, которое было верным, — тот же класс, что уже наблюдался при
+  массовом переименовании этого дома.
+  Одобрение относится к **содержимому**, а не к имени файла: APPROVED выше есть
+  вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю редакцию
+  ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 - **Круг 2 (автор):** обе блокирующие круга 1 **перемерены самостоятельно и
   подтвердились**; ни одна не опровергнута. Числа круга 1 (**20** троек, **7**
   глаголов каталога, **109** пар, **346**/**88** каталога прав, **13** авторских
@@ -96,7 +114,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 > Здесь (П3) и в строке самопроверки §5 стояло «живых пар глаголов **109**» без
 > единицы счёта. После разделения словарей (`#1863`, миграция
 > `20260902062000_authored_verb_dictionary_separates_from_the_per_object_one.sql`)
-> живых строк в `kacho_iam.catalog_verb` — **135**: **109 пообъектных** и **26
+> живых строк в `kaname.catalog_verb` — **135**: **109 пообъектных** и **26
 > ярусных**. Оба числа приведены к единице «пообъектная пара», которой они и были
 > получены.
 >
@@ -175,10 +193,10 @@ grep -n 'func validateRuleCatalog' -A 30 services/iam/internal/apps/kaname/api/r
 
 ```sh
 grep -c '"read"' services/iam/internal/migrations/0031_reseed_system_roles_rules.sql   # 19
-grep -n 'DELETE FROM kacho_iam.roles' -A 6 services/iam/internal/migrations/0074_*.sql # 9 ролей
+grep -n 'DELETE FROM kaname.roles' -A 6 services/iam/internal/migrations/0074_*.sql # 9 ролей
 sed -n '25,50p'  services/iam/internal/migrations/0059_nlb_operator_drop_start_stop.sql
 sed -n '100,120p' services/iam/internal/migrations/0031_reseed_system_roles_rules.sql
-awk '/^INSERT INTO kacho_iam.catalog_verb/,/;$/' \
+awk '/^INSERT INTO kaname.catalog_verb/,/;$/' \
   services/iam/internal/migrations/20260901113757_*.sql | grep -o "'[a-z]*')" | tr -d "')" | sort -u
 ```
 
@@ -198,7 +216,7 @@ awk '/^INSERT INTO kacho_iam.catalog_verb/,/;$/' \
 ### 0.5. Граница замера — чего я НЕ мерил
 
 - **Не прогонял штатный предикат задачи** (`SELECT count(*) FROM
-  kacho_iam.role_grant_orphan WHERE source = 'rule_ref'` на применённой цепочке).
+  kaname.role_grant_orphan WHERE source = 'rule_ref'` на применённой цепочке).
   Причина: соседняя сессия держала очередь сборки (`go test
   ./services/iam/internal/repo/kaname/pg/relverdict/ … -timeout 120m`, 203 с на момент
   проверки), а свободного места на диске было **6.0 ГБ**. Это «не выполнилось», а не
@@ -260,7 +278,7 @@ awk '/^INSERT INTO kacho_iam.catalog_verb/,/;$/' \
 
 | словарь | кто владелец | значения | где живёт |
 |---|---|---|---|
-| **глаголы правила** | тип модели прав | 7: `addtargets create delete get list removetargets update` | `authzmap.typeVerbRelations` → строками в `kacho_iam.catalog_verb` |
+| **глаголы правила** | тип модели прав | 7: `addtargets create delete get list removetargets update` | `authzmap.typeVerbRelations` → строками в `kaname.catalog_verb` |
 | **действия каталога прав** | RPC края | 88 различных, включая `listOperations`, `getTargetStates`, `create`, `attach`, … | `gateway/internal/middleware/embed/permission_catalog.json` |
 
 `listOperations` и `getTargetStates` — **законные** значения второго словаря и
@@ -354,7 +372,7 @@ loadbalancer.targetGroups.listOperations          -> v_list
 ### 2.3. Предикат миграции — «глагола нет в каталоге», а не список из трёх
 
 Миграция **не перечисляет** `read`, `listoperations`, `gettargetstates`. Она снимает
-всякий авторский глагол, которого не несёт `kacho_iam.catalog_verb` — та самая
+всякий авторский глагол, которого не несёт `kaname.catalog_verb` — та самая
 таблица, на которую ссылается ключ. Довод не в изяществе:
 
 - список из трёх чинит **экземпляры**; предикат чинит **класс**
@@ -369,7 +387,7 @@ loadbalancer.targetGroups.listOperations          -> v_list
 | полоса | когда | предикат снятия глагола |
 |---|---|---|
 | **конкретная пара** (`module <> '*'` и `resource <> '*'`) | 20 троек задачи | нет живой строки `catalog_verb` на `(module, resource)` с `cv.verb = lower(btrim(<авторский глагол>))` — образец 1030001:490 дословно |
-| **полная подстановка** (`module = '*'` и `resource = '*'`) | 2 правила ролей `view` и `rol000000000sysviewer` | приведённого глагола нет **ни у одного** типа: `lower(btrim(vrb.value #>> '{}')) NOT IN (SELECT DISTINCT verb FROM kacho_iam.catalog_verb WHERE live)` |
+| **полная подстановка** (`module = '*'` и `resource = '*'`) | 2 правила ролей `view` и `rol000000000sysviewer` | приведённого глагола нет **ни у одного** типа: `lower(btrim(vrb.value #>> '{}')) NOT IN (SELECT DISTINCT verb FROM kaname.catalog_verb WHERE live)` |
 
 **Приводится ТОЛЬКО авторская сторона** — у каталога приводить нечего: его столбец
 уже канонический по ограничению таблицы (§2.3.1). Двустороннее приведение было бы не
@@ -427,7 +445,7 @@ print(len(occ), sorted(occ))
 PYX
 # 13 ['*','addTargets','create','delete','get','getTargetStates','list',
 #     'listOperations','read','removeTargets','start','stop','update']
-awk '/^INSERT INTO kacho_iam.catalog_verb/,/;$/' \
+awk '/^INSERT INTO kaname.catalog_verb/,/;$/' \
   services/iam/internal/migrations/20260901113757_*.sql \
   | grep -oE "'[a-z_]+'\)" | tr -d "')" | sort | uniq -c | sort -rn
 #   27 list · 27 get · 26 update · 26 delete · 1 removetargets · 1 create · 1 addtargets
@@ -726,12 +744,12 @@ IAM-SV-1-08 … IAM-SV-1-13.
 
 **IAM-SV-1-01 — следа объявления не остаётся.**
 *Дано:* чистая база, применена вся цепочка миграций.
-*Когда:* `SELECT count(*) FROM kacho_iam.role_grant_orphan WHERE source = 'rule_ref'`.
+*Когда:* `SELECT count(*) FROM kaname.role_grant_orphan WHERE source = 'rule_ref'`.
 *Тогда:* **0**.
 *Производитель «Тогда»:* строки кладёт 1030001 (П1), снимает новая миграция (§2.7).
 
 **IAM-SV-1-02 — глагол конкретного правила объявлен ТИПОМ, на который правило адресовано.**
-*Дано:* та же база; правила читаются из `kacho_iam.roles`.
+*Дано:* та же база; правила читаются из `kaname.roles`.
 *Когда:* для каждого системного правила с конкретной парой берётся
 `authzmap.VerbsOfType(authzmap.ObjectType(module, resource))`.
 *Тогда:* каждый авторский глагол, кроме `*`, принадлежит этому набору; расхождений
@@ -880,8 +898,8 @@ done | sort -n | head -3
 **IAM-SV-1-16 — форма миграции.**
 *Когда:* читается файл миграции.
 *Тогда:* имя вида `YYYYMMDDHHMMSS_<что_делает>.sql` (П16); директивы
-`-- +goose NO TRANSACTION` **нет**; ни одного стейтмента к `kacho_iam.access_bindings`,
-`kacho_iam.roles(id)`, `kacho_iam.roles(name)`, `kacho_iam.role_verb`; перепись
+`-- +goose NO TRANSACTION` **нет**; ни одного стейтмента к `kaname.access_bindings`,
+`kaname.roles(id)`, `kaname.roles(name)`, `kaname.role_verb`; перепись
 `RAISE NOTICE` присутствует; **сравнение авторского глагола с каталогом идёт через
 `lower(btrim(…))` в ОБЕИХ полосах §2.3** (образец — 1030001:490), и авторское
 написание оставшихся глаголов миграцией **не переписывается** (§2.3.1).
@@ -999,9 +1017,9 @@ done | sort -n | head -3
 
 | # | что измерить | ожидание |
 |---|---|---|
-| 8.1 | `SELECT source, object_type, verb, count(*) FROM kacho_iam.role_grant_orphan GROUP BY 1,2,3` **до** новой миграции | 20 строк `rule_ref`: `read` 14, `listoperations` 4, `gettargetstates` 2 — **или** опровержение с числом |
+| 8.1 | `SELECT source, object_type, verb, count(*) FROM kaname.role_grant_orphan GROUP BY 1,2,3` **до** новой миграции | 20 строк `rule_ref`: `read` 14, `listoperations` 4, `gettargetstates` 2 — **или** опровержение с числом |
 | 8.2 | то же **после** | строк `source = 'rule_ref'` — **0** |
-| 8.3 | `SELECT count(*) FROM kacho_iam.role_rule_ref` до и после | **не меняется** (94 на момент замера задачи; величина не несущая, но расхождение — находка) |
+| 8.3 | `SELECT count(*) FROM kaname.role_rule_ref` до и после | **не меняется** (94 на момент замера задачи; величина не несущая, но расхождение — находка) |
 | 8.4 | правил системных ролей с пустым набором глаголов после | **0** |
 | 8.5 | пара RED→GREEN на подготовленной копии для IAM-SV-1-12 и IAM-SV-1-13 | отказ до, проход после |
 | 8.6 | три прогона §7.1 для нового гейта | контроль молчит · новый краснеет один · существующий краснеет один |
@@ -1148,7 +1166,7 @@ grep -ln '"read"' services/iam/internal/migrations/*.sql
 вхождение, и оно в §0.3, где нормализация названа как свойство Go-функции, а НЕ как
 требование к предикату миграции. Обе полосы §2.3 записаны без неё, а полоса
 подстановки приведена дословным SQL: `verb NOT IN (SELECT DISTINCT verb FROM
-kacho_iam.catalog_verb WHERE live)`.
+kaname.catalog_verb WHERE live)`.
 
 **Предмет.** Каталог хранит глагол строго в нижнем регистре, и это не соглашение, а
 ограничение таблицы:
@@ -1157,7 +1175,7 @@ kacho_iam.catalog_verb WHERE live)`.
 grep -n 'CONSTRAINT catalog_verb_canonical' \
   services/iam/internal/migrations/20260901113757_*.sql
 #   CONSTRAINT catalog_verb_canonical CHECK (verb = lower(btrim(verb))),
-awk '/^INSERT INTO kacho_iam.catalog_verb/,/;$/' \
+awk '/^INSERT INTO kaname.catalog_verb/,/;$/' \
   services/iam/internal/migrations/20260901113757_*.sql | grep -E "'(addtargets|removetargets)'"
 #   ('loadbalancer', 'targetGroups', 'addtargets'),
 #   ('loadbalancer', 'targetGroups', 'removetargets'),
@@ -1295,7 +1313,7 @@ grep -o '"verbs":\[[^]]*\]' services/iam/internal/migrations/*.sql \
 #   * addTargets create delete get getTargetStates list listOperations read
 #   removeTargets start stop update
 # что несёт каталог (109 строк)
-awk '/^INSERT INTO kacho_iam.catalog_verb/,/;$/' \
+awk '/^INSERT INTO kaname.catalog_verb/,/;$/' \
   services/iam/internal/migrations/20260901113757_*.sql \
   | grep -o "'[a-z]*')" | tr -d "')" | sort | uniq -c
 #   1 addtargets · 1 create · 26 delete · 27 get · 27 list · 1 removetargets · 26 update
@@ -1365,7 +1383,7 @@ sed -n '158,168p' services/iam/internal/domain/rule_verbs.go                    
 ### Р.5. Граница круга — чего я НЕ мерил
 
 - **Штатного предиката задачи я не прогонял** (`SELECT count(*) FROM
-  kacho_iam.role_grant_orphan WHERE source = 'rule_ref'` на применённой цепочке).
+  kaname.role_grant_orphan WHERE source = 'rule_ref'` на применённой цепочке).
   Причина измерена, а не названа общими словами: `df -h /` → **5.9 ГБ** свободного
   при заполнении **98 %**, и `pgrep -x go` → **1** (соседний прогон держит очередь
   сборки). Прогон пакета `services/iam/internal/repo/kaname/pg` с контейнерами
@@ -1422,7 +1440,7 @@ sed -n '158,168p' services/iam/internal/domain/rule_verbs.go                    
 
 ```sh
 grep -rn '\.verb"' services/iam/internal/migrations/*.sql
-#   0001_initial.sql:20:--   • kacho_iam.iam_permissions_valid(jsonb) — массив "module.resource.verb"
+#   0001_initial.sql:20:--   • kaname.iam_permissions_valid(jsonb) — массив "module.resource.verb"
 ```
 
 То есть мой предикат посчитал **собственное объяснение проверяемого** — ровно
@@ -1450,7 +1468,7 @@ grep -rn '\.verb"' services/iam/internal/migrations/*.sql
 | составляющая | моё число | чем |
 |---|---:|---|
 | правил 0031 с `read` | **19** → **17** конкретных + **2** подстановочных | разбор `{"modules":…,"resources":…,"verbs":…}` в 0031, комментарии сняты |
-| из них снято 0074 вместе с ролями | **3** (`compute.{disk,image,snapshot}.view`) | `DELETE FROM kacho_iam.roles` на девяти именах, `0074:86`; ни одна более поздняя миграция их не пересевает |
+| из них снято 0074 вместе с ролями | **3** (`compute.{disk,image,snapshot}.view`) | `DELETE FROM kaname.roles` на девяти именах, `0074:86`; ни одна более поздняя миграция их не пересевает |
 | троек `read` | **14** | 17 − 3; подстановочные троек не дают (`RuleRefsOf` их пропускает) |
 | троек `listOperations` | **4** | итоговые правила `operator` после `0059` — 3 (`networkLoadBalancers`, `listeners`, `targetGroups`); `target_manager` — 1 (`targetGroups`, `0031:114`) |
 | троек `getTargetStates` | **2** | `operator/networkLoadBalancers` + `target_manager/networkLoadBalancers` |
@@ -1495,7 +1513,7 @@ grep -rn '\.verb"' services/iam/internal/migrations/*.sql
 ### А.4. Граница круга 2 — чего я НЕ мерил
 
 - **Штатного предиката задачи не прогонял** (`SELECT count(*) FROM
-  kacho_iam.role_grant_orphan WHERE source = 'rule_ref'` на применённой цепочке).
+  kaname.role_grant_orphan WHERE source = 'rule_ref'` на применённой цепочке).
   Причина измерена: `df -h /` → **5.8 ГБ** свободного при заполнении **98 %**,
   `pgrep -x go` → **1**. Прогон пакета `services/iam/internal/repo/kaname/pg` с
   контейнерами отращивает кэш сборки на гигабайты, а исчерпание диска повреждает
@@ -1534,8 +1552,8 @@ grep -rn '\.verb"' services/iam/internal/migrations/*.sql
 файлах, и третий из них есть миграция, которая эти роли **удаляет**:
 
 ```sh
-grep -n "DELETE FROM kacho_iam.roles" services/iam/internal/migrations/0074_*.sql
-#   86:  DELETE FROM kacho_iam.roles  (WHERE is_system AND name IN (девять имён))
+grep -n "DELETE FROM kaname.roles" services/iam/internal/migrations/0074_*.sql
+#   86:  DELETE FROM kaname.roles  (WHERE is_system AND name IN (девять имён))
 ```
 
 То есть предикат `#1825` считает **собственное снятие предмета** — тот же класс, что
@@ -1583,7 +1601,7 @@ grep -n "DELETE FROM kacho_iam.roles" services/iam/internal/migrations/0074_*.sq
 
 ```sh
 grep -ln 'rules' services/iam/internal/migrations/*.sql | while read f; do
-  n=$(grep -cE "SET[[:space:]]+rules|rules[[:space:]]*=|INSERT INTO kacho_iam.roles" "$f")
+  n=$(grep -cE "SET[[:space:]]+rules|rules[[:space:]]*=|INSERT INTO kaname.roles" "$f")
   echo "$n $(basename $f)"; done | awk '$1>0'
 #   2 0025_role_rules_and_cap_raise.sql   ← оба вхождения в КОММЕНТАРИИ (строки 16, 101)
 ```
@@ -1633,7 +1651,7 @@ grep -ln 'rules' services/iam/internal/migrations/*.sql | while read f; do
 парой `('loadbalancer', 'targetGroups', …)`, и написание в каталоге строчное:
 
 ```sh
-awk '/^INSERT INTO kacho_iam.catalog_verb/,/;$/' \
+awk '/^INSERT INTO kaname.catalog_verb/,/;$/' \
   services/iam/internal/migrations/20260901113757_*.sql | grep -iE "addtargets|removetargets"
 #   ('loadbalancer', 'targetGroups', 'addtargets'),
 #   ('loadbalancer', 'targetGroups', 'removetargets'),
@@ -1819,7 +1837,7 @@ gh issue view 1827 -R PRO-Robotech/kacho     # OPEN · P2 · size:M · area:iam 
 | `role_grant_orphan WHERE source = 'rule_ref'` (§8.1, §8.2) | **20** | **0** | `TestIAMSV101_RuleRefOrphanTraceIsGone` |
 | из них `read` · `listoperations` · `gettargetstates` | **14 · 4 · 2** | — | тот же прогон, разбивка по `object_type, verb` |
 | `role_grant_orphan WHERE source = 'role_verb'` | **0** | **0** | тот же прогон |
-| строк `kacho_iam.role_rule_ref` (§8.3) | **94** | **94** | `TestIAMSV107_…` — не изменилось, как и обещано |
+| строк `kaname.role_rule_ref` (§8.3) | **94** | **94** | `TestIAMSV107_…` — не изменилось, как и обещано |
 | объявленных сегментов (`domain.RuleRefsOf`) | **114** | **94** | тот же прогон; разница — ровно двадцать |
 | правил системных ролей с пустым набором глаголов (§8.4) | **0** | **0** | самопроверка миграции, блок (в) и пост-проверка |
 | авторских глаголов посева, осмотренных гейтом | **110** | **88** | `TestSeededRoleRuleVerbsAreDeclaredByTheType` |
@@ -1935,12 +1953,12 @@ services/iam/internal/repo/kaname/pg: комментарий называет Is
 
 ### И.6а. Отступление: создание временной таблицы РАЗВЕДЕНО с её наполнением
 
-Форма `CREATE TEMP TABLE … ON COMMIT DROP AS SELECT … FROM kacho_iam.…` заменена
+Форма `CREATE TEMP TABLE … ON COMMIT DROP AS SELECT … FROM kaname.…` заменена
 парой «создать по столбцам · наполнить». Это диктует не вкус, а чужой предикат:
 отпечаток отчётов о стоимости вердикта режет файл по `;` и берёт всякий стейтмент,
 где есть слово `CREATE`/`ALTER`/`DROP` **и** имя измеряемой таблицы. Слитная форма
 несёт оба — `DROP` из `ON COMMIT DROP`, имя из чтения, — и загоняла миграцию под
-отпечаток **ложно**: DDL над `kacho_iam.*` в ней **ноль** (проверено предикатом,
+отпечаток **ложно**: DDL над `kaname.*` в ней **ноль** (проверено предикатом,
 воспроизводящим `migrationTouchesStructure` дословно).
 
 Цена ложного попадания не символическая: пересъёмка отчётов стоит около двух часов
@@ -1958,7 +1976,7 @@ services/iam/internal/repo/kaname/pg: комментарий называет Is
 | строки ПРАВ, называющие действие вне каталога прав | перепись строк `roles.permissions` с действием вне каталога прав → 0 | **#1827** |
 | слепая зона гейта «комментарий называет защиту» на файлах-гейтах | комментарий гейтового файла вправе называть защиту, которую вызывает сам этот файл | **#1831** (заведена этой посадкой) |
 | приёмка соседней линии цитирует `cd` в каталог вне дерева продукта | `go test ./internal/repohygiene/ -run TestDocsCdTargetsExist` зелёный | **#1832** (заведена этой посадкой, предмет чужой) |
-| отпечаток отчётов о стоимости берёт `CREATE TEMP TABLE … AS SELECT` за правку структуры | слитная форма под отпечаток не попадает, `ALTER TABLE kacho_iam.<измеряемая>` — попадает; обе стороны инъекцией | **#1833** (заведена этой посадкой) |
+| отпечаток отчётов о стоимости берёт `CREATE TEMP TABLE … AS SELECT` за правку структуры | слитная форма под отпечаток не попадает, `ALTER TABLE kaname.<измеряемая>` — попадает; обе стороны инъекцией | **#1833** (заведена этой посадкой) |
 
 ### И.7. Граница реализации — чего НЕ измерено
 

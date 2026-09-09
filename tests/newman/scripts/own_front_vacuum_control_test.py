@@ -135,11 +135,38 @@ def _j(obj):
     return json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
 
 
+# ОТВЕТ МИРА — (код, тело) ЛИБО (код, тело, заголовки).
+#
+# Заголовки заведены не для полноты: `WWW-Authenticate` есть ЧАСТЬ ответа, и
+# утверждение о нём в наборе появилось (#2103 завела производителя, #2319 —
+# разбор того, что производится на самом деле). Пока мир заголовков не знал,
+# такое утверждение уронило бы этот гейт «скрипт упал вне утверждения» —
+# подделка `pm.response` бросает на неизвестном члене, и это верно: молчащая
+# подделка снисходительнее продукта. Двойка остаётся законной формой и означает
+# «заголовков нет» — тогда правка не трогает записи, которым заголовки не нужны.
+def _unpack(response):
+    """(код, тело, заголовки) из двойки либо тройки."""
+    if len(response) == 3:
+        return response[0], response[1], response[2]
+    code, body = response
+    return code, body, {}
+
+
+# Подсказка аутентификации — ровно то, что ставит обёртка публичного фронта.
+# Значение выписано и здесь; расхождение с производителем держит проба СО СТОРОНЫ
+# ПРОИЗВОДИТЕЛЯ — `internal/restfront/challengebinding_test.go`: она читает и эту
+# фикстуру тоже, потому что мир, в котором утверждение о подсказке обязано
+# ПРОХОДИТЬ, обязан её производить.
+CHALLENGE = {"WWW-Authenticate": "Bearer"}
+
 MUX_MISS = (404, _j({"code": 5, "message": "Not Found", "details": []}))
 METHOD_MISS = (501, _j({"code": 12, "message": "Method Not Allowed", "details": []}))
 # Единственный отказ полосы обработчика — ровно то, что отдаёт стенд сегодня.
 ONE_REFUSAL = (403, _j({"code": 7, "message": "permission denied", "details": []}))
-CRED_REFUSAL = (401, _j({"code": 16, "message": "credential is not accepted", "details": []}))
+# Отказ аутентификации несёт подсказку: 401 без неё и есть то, что утверждения
+# набора отличают от 401 с ней.
+CRED_REFUSAL = (401, _j({"code": 16, "message": "credential is not accepted", "details": []}),
+                CHALLENGE)
 
 # Маршрутизатор различает и сегодня: промах пути и чужой метод — разные ответы.
 # Поэтому W_today НЕ «всё одинаково»: одинакова полоса ОБРАБОТЧИКА, и вакуум
@@ -206,8 +233,12 @@ TARGETS = {
     ("no-credential-at-all", "ANON: запрос НЕ обслужен"):
         (200, _j({})),
 
+    # Заголовки те же, что у законного отказа: инъекция меняет РОВНО ОДИН факт —
+    # тело. Сними здесь подсказку заодно, и «упало проверяемое» стало бы
+    # неотличимо от «упал сосед», который читает её сходимость с кодом.
     ("no-credential-at-all", "ANON: ответ не сообщает, существует ли запрошенный объект"):
-        (401, _j({"code": 16, "message": "credential is not accepted", "details": _LEAK_ECHO})),
+        (401, _j({"code": 16, "message": "credential is not accepted", "details": _LEAK_ECHO}),
+         CHALLENGE),
 
     ("poll-someone-elses-operation",
      "FOREIGN-OP: «есть, но не твоя» неотличимо от «нет такой» — предикат владения "
@@ -337,7 +368,17 @@ const env = Object.assign({}, job.env);
 const out = [];
 let executed = 0;
 for (const item of job.items) {
-  const resp = { code: item.code, text: () => item.body, json: () => JSON.parse(item.body) };
+  // Заголовки читаются БЕЗ УЧЁТА РЕГИСТРА — так же, как их читает
+  // postman-collection. Подделка, различающая регистр, была бы СТРОЖЕ продукта
+  // и покрасила бы то, что на стенде зелено.
+  const hdr = {};
+  for (const k of Object.keys(item.headers || {})) hdr[k.toLowerCase()] = item.headers[k];
+  const headers = { get: (k) => {
+    const v = hdr[String(k).toLowerCase()];
+    return v === undefined ? null : v;
+  } };
+  const resp = { code: item.code, headers,
+                 text: () => item.body, json: () => JSON.parse(item.body) };
   const pm = {
     response: new Proxy(resp, { get(t, k) {
       if (typeof k === 'symbol') return undefined;
@@ -408,7 +449,8 @@ def run_world(items, world):
         raise VerdictHasNoSubject(
             f"мир не описывает ответы шагам {unknown} — вердикт был бы о части набора")
     job = {"env": ENV_SEED,
-           "items": [{"name": n, "script": s, "code": world[n][0], "body": world[n][1]}
+           "items": [dict(zip(("code", "body", "headers"), _unpack(world[n])),
+                          name=n, script=s)
                      for n, s in items]}
     proc = subprocess.run(["node", "-e", DRIVER, json.dumps(job, ensure_ascii=False)],
                           capture_output=True, text=True, timeout=180)

@@ -187,9 +187,12 @@ func TestAccountKindIsCarriedByTheIdentity(t *testing.T) {
 		"аккаунт считается не в личности: носитель обязан быть ВНЕШНИМ по отношению "+
 			"к предмету счёта, а проект и аккаунт этому не удовлетворяют by construction")
 
-	neighbour, ok := domain.CarrierOfKind("iam.project")
+	// Соседом был `iam.project` — вид СНЯТ (`PRO-Robotech/kacho#2117`, сценарий
+	// `KAN-Q3-04`). Контроль переведён на `iam.user.credential`: он живой, того
+	// же домена, и носитель у него ДРУГОЙ — сам принципал, а не личность.
+	neighbour, ok := domain.CarrierOfKind("iam.user.credential")
 	require.True(t, ok)
-	require.Equal(t, domain.CarrierAccount, neighbour,
+	require.Equal(t, domain.LimitCarrier("iam.user"), neighbour,
 		"положительный контроль: у соседнего вида того же домена носитель другой, "+
 			"поэтому совпадение выше — свойство записи, а не одинаковость каталога")
 }

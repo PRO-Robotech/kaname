@@ -19,7 +19,7 @@
 #
 # Ожидаемый набор для вердикта НЕ дублируется списком: это объединение
 #   (a) реально сгенерированных collections/*.json — ровно то, что грейдит
-#       scripts/assert-suites-green.sh (каждый комментарий ниже требует «MUST run
+#       tests/newman/scripts/assert-suites-green.sh (каждый комментарий ниже требует «MUST run
 #       here, else the gate reports <x>(no-report)»); коллекция, которую run.sh
 #       забыл прогнать, становится MISSING → красный, а не молчаливый пропуск;
 #   (b) stem'ов, для которых run_one написал out/<stem>.rc — так «run.sh зовёт
@@ -71,6 +71,25 @@ _stems_lib() {
 _STEMS_LIB="$(_stems_lib)"
 # shellcheck source=/dev/null
 . "$_STEMS_LIB"
+
+# ВЕРДИКТНЫЙ СЛОЙ ЛЕЖИТ В КОРНЕ ДЕРЕВА, А НЕ В ЭТОМ НАБОРЕ. Он один на все
+# восемь наборов и потому не принадлежит ни одному; ищется тем же подъёмом и по
+# той же причине, что общий слой отбора выше. Прежде `coverage.py` звался как
+# `scripts/coverage.py` — верно ровно пока он лежал здесь и был для этого набора
+# своим.
+_verdict_layer_dir() {
+  local d="$NEWMAN_DIR"
+  while [[ "$d" != "/" ]]; do
+    if [[ -d "$d/tests/newman/scripts" ]]; then
+      printf '%s\n' "$d/tests/newman/scripts"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  echo "вердиктный слой не найден: ожидается <корень>/tests/newman/scripts" >&2
+  echo "Это ОТКАЗ, а не пропуск: без него покрытие не измеряется, а прогон выглядит измеренным." >&2
+  return 1
+}
 
 SERVICE=""
 BAIL=""
@@ -550,7 +569,7 @@ fi
 #
 # DELEGATED — коллекции, которым нужно условие, несовместимое с этим прогоном.
 # Их гоняет ОТДЕЛЬНАЯ ВОЛНА (см. ниже), поэтому здесь они из набора вычитаются —
-# но только из ЭТОГО набора. Авторитетный гейт (scripts/assert-suites-green.sh)
+# но только из ЭТОГО набора. Авторитетный гейт (tests/newman/scripts/assert-suites-green.sh)
 # по-прежнему требует отчёт для КАЖДОЙ collections/*.json и докладывает
 # `<stem>(no-report)`, если волна не отработала. То есть вычитание здесь ничего
 # спрятать не может: оно снимает ложный MISSING у прогонщика, а не проверку.
@@ -626,29 +645,42 @@ fi
 # Both layouts are supported: the first glob that actually matches .proto files wins,
 # so a standalone/polyrepo checkout with a sibling kacho-proto still resolves.
 # COVERAGE_PROTO_GLOB overrides both (CI may pass an absolute path).
-if command -v python3 >/dev/null 2>&1 && [ -f scripts/coverage.py ]; then
-  echo
-  echo "===== coverage ====="
-  COV_MIN="${COVERAGE_MIN:-0}"
-  PROTO_GLOB="${COVERAGE_PROTO_GLOB:-}"
-  if [ -z "$PROTO_GLOB" ]; then
-    for _cand in \
-      '../../../../proto/kaname/cloud/iam/v1/*.proto' \
-      '../../../kacho-proto/proto/kaname/cloud/iam/v1/*.proto'; do
-      # shellcheck disable=SC2086
-      if compgen -G "$_cand" >/dev/null 2>&1; then PROTO_GLOB="$_cand"; break; fi
-    done
-    PROTO_GLOB="${PROTO_GLOB:-../../../../proto/kaname/cloud/iam/v1/*.proto}"
-  fi
-  echo "proto-glob: $PROTO_GLOB"
-  if python3 scripts/coverage.py \
-       --proto-glob "$PROTO_GLOB" \
-       --collections-glob 'collections/*.postman_collection.json' \
-       --min "$COV_MIN" | tee out/coverage.txt; then
-    :
-  else
-    COVERAGE_FAIL=$?
-  fi
+_VERDICT_DIR="$(_verdict_layer_dir)"
+_COVERAGE_PY="$_VERDICT_DIR/coverage.py"
+if ! [ -f "$_COVERAGE_PY" ]; then
+  # ОТСУТСТВИЕ ГЕЙТА — НЕ ПРОПУСК. Прежде здесь стояло `[ -f scripts/coverage.py ]`
+  # в одном условии с наличием python3: гейта нет ⇒ блок молча не исполняется, и
+  # прогон выглядит ровно так же, как прогон с измеренным покрытием. Тот же класс,
+  # что ветвь «файла гейта нет ⇒ пропущено» у прогонщиков наборов.
+  echo "ОТКАЗ: гейта покрытия нет по адресу $_COVERAGE_PY — покрытие НЕ ИЗМЕРЕНО." >&2
+  echo "        Это не «ноль находок»: вердикта о покрытии нет вовсе." >&2
+  exit 2
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ОТКАЗ: python3 недоступен — гейт покрытия НЕ ИСПОЛНЕН, вердикта о покрытии нет." >&2
+  exit 2
+fi
+echo
+echo "===== coverage ====="
+COV_MIN="${COVERAGE_MIN:-0}"
+PROTO_GLOB="${COVERAGE_PROTO_GLOB:-}"
+if [ -z "$PROTO_GLOB" ]; then
+  for _cand in \
+    '../../../../proto/kaname/cloud/iam/v1/*.proto' \
+    '../../../kacho-proto/proto/kaname/cloud/iam/v1/*.proto'; do
+    # shellcheck disable=SC2086
+    if compgen -G "$_cand" >/dev/null 2>&1; then PROTO_GLOB="$_cand"; break; fi
+  done
+  PROTO_GLOB="${PROTO_GLOB:-../../../../proto/kaname/cloud/iam/v1/*.proto}"
+fi
+echo "proto-glob: $PROTO_GLOB"
+if python3 "$_COVERAGE_PY" \
+     --proto-glob "$PROTO_GLOB" \
+     --collections-glob 'collections/*.postman_collection.json' \
+     --min "$COV_MIN" | tee out/coverage.txt; then
+  :
+else
+  COVERAGE_FAIL=$?
 fi
 
 if [ "$SUITE_FAIL" -ne 0 ]; then exit 1; fi

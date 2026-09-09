@@ -35,6 +35,19 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `acceptance-reviewer` своим кругом, а не эта строка. Решение —
   `../architecture/verdict-names-a-revision-not-a-file.md`
 
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2305`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **3**. Правка одна и
+  механическая — имя схемы Postgres `kacho_iam.` → `kaname.`: схема названа
+  именем своего продукта, и прежнего имени дерево не производит
+  (`grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql`
+  → 0; под `kaname.` → 47). До правки координата не резолвилась, то есть
+  **молчала**: читатель уходил за ней и не находил — она не краснеет и не
+  зеленеет. **НЕ тронуты** ни один сценарий, производитель, признак готовности,
+  клауза и ни одно число: непарных строк 0, пар с изменившимся числом токенов 0.
+  Одобрение относится к **содержимому**, а не к имени файла: APPROVED выше есть
+  вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю редакцию
+  ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 ---
 
 ## 1. Предмет
@@ -178,7 +191,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 ### GWT-3 — хранилища наложения нет
 > **Given** база, прогнанная по всей цепочке миграций
-> **When** запрашивается `information_schema` по `kacho_iam`
+> **When** запрашивается `information_schema` по `kaname`
 > **Then** таблиц `conditions` и `access_binding_conditions` нет, колонки
 > `access_bindings.condition_id` нет, триггера и функции синхронизации из `0048` нет.
 
@@ -269,8 +282,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 **Снос измерен на живой базе, а не заявлен:**
 `drop-guard iam: OK — measured 17 of 17 drop(s), 5 observed absent, 0 violation(s)`,
-в том числе `0075/kacho_iam.access_binding_conditions -> 0 row(s)` и
-`0075/kacho_iam.conditions -> 0 row(s)`.
+в том числе `0075/kaname.access_binding_conditions -> 0 row(s)` и
+`0075/kaname.conditions -> 0 row(s)`.
 
 **Каталог прав** (единица — запись каталога): было 300 на `27cc2c4e`, стало 294;
 удалено ровно 6 (`ConditionsService/{Get,List,Create,Update,Delete,Evaluate}`),

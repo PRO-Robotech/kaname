@@ -630,6 +630,9 @@
                   "  pm.expect(j.code, JSON.stringify(j)).to.eql(16));",
                   "pm.test('BAD-CRED: текст ЕДИНСТВЕННЫЙ — различимость сообщила бы предъявителю, какая половина предъявленного неверна', () =>",
                   "  pm.expect(j.message, JSON.stringify(j)).to.eql('credential is not accepted'));",
+                  "pm.test('BAD-CRED: отказ аутентификации несёт подсказку, ЧЕМ назваться (WWW-Authenticate)', () =>",
+                  "  pm.expect(pm.response.headers.get('WWW-Authenticate'), 'подсказка не приложена: у отдельно поставленной службы её производит только собственный фронт — края, производившего её прежде, у неё нет').to.eql('Bearer'));",
+                  "pm.environment.set('ownRestChallenge', pm.response.headers.get('WWW-Authenticate') || '');",
                   "pm.environment.set('ownRestRefusalBody', pm.response.text());"
                 ]
               }
@@ -1548,7 +1551,15 @@
                   "  pm.expect(pm.response.code, pm.response.text()).to.not.eql(200);",
                   "});",
                   "pm.test('ANON: отказ принадлежит производимому множеству', () =>",
-                  "  pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([401, 403, 404]));",
+                  "  pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([401, 403]));",
+                  "pm.test('ANON: подсказка (WWW-Authenticate) приложена ровно к 401 и ни к чему другому', () => {",
+                  "  // >>> контроль непустоты множества, на котором проверяется отрицание",
+                  "  const hinted = pm.environment.get('ownRestChallenge');",
+                  "  pm.expect(hinted, 'подсказка не захвачена у полосы, которая её несёт — «здесь её нет» истинно тривиально: заголовка, которого поверхность не производит вовсе, нет нигде').to.be.a('string').and.not.empty;",
+                  "  // <<< контроль непустоты",
+                  "  const here = pm.response.headers.get('WWW-Authenticate') || '';",
+                  "  pm.expect(here !== '', 'код и подсказка разошлись: код ' + pm.response.code + ', подсказка ' + JSON.stringify(here)).to.eql(pm.response.code === 401);",
+                  "});",
                   "pm.test('ANON: ответ не сообщает, существует ли запрошенный объект', () => {",
                   "  const body = pm.response.text();",
                   "  // >>> контроль непустоты множества, на котором проверяется отрицание",

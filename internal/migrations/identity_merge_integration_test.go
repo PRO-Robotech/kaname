@@ -40,7 +40,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -48,6 +47,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // seedAccountWithOwner заводит аккаунт вместе с его владельцем одной
@@ -153,13 +154,26 @@ func scopeParentsOf(t *testing.T, db *sql.DB, objectType, objectID string) []str
 		 ORDER BY 1`, objectType, objectID)
 }
 
+// canonicalModelRel — координата канонического текста модели прав ОТ КОРНЯ
+// ДЕРЕВА ПЛАТФОРМЫ.
+//
+// Контракты в поставку модуля не входят: у прогона две посадки, и в
+// самостоятельном клоне этого файла нет BY CONSTRUCTION.
+const canonicalModelRel = "proto/kaname/cloud/iam/v1/fga_model.fga"
+
 // canonicalModelText — канонический текст модели прав. Читается файлом, а не
 // пересказывается: предмет проб ниже — что в нём есть и чего в нём нет.
+//
+// Координата приводится к посадке ДЕТЕКТОРОМ, а не подъёмом каталогами (задача
+// #2289). Прежняя редакция поднималась на четыре шага при глубине пакета в два —
+// то есть выходила ЗА КОРЕНЬ МОДУЛЯ и читала то, что окажется над ним. В монорепо
+// это своё дерево, и потому дефект был невидим; в клоне под чужим деревом с той же
+// координатой проба прочитала бы ЧУЖУЮ модель и вынесла бы находку о ней — а без
+// чужого дерева отсутствие файла давало бы КРАСНОЕ через require.NoError там, где
+// причитается третий исход.
 func canonicalModelText(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "..",
-		"proto", "kaname", "cloud", "iam", "v1", "fga_model.fga")
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(platformtree.RequirePath(t, canonicalModelRel))
 	require.NoError(t, err,
 		"ПРЕДПОСЫЛКА: канонический текст модели прав обязан читаться — его отсутствие "+
 			"есть ровно тот дефект, ради которого проба стоит, и молчать о нём нельзя")

@@ -79,7 +79,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   условии. Эта приёмка исполняет то, что запись оставила открытым, и её §«Что это
   решение НЕ решает» — оглавление §2 ниже
 - **Тип изменения:** ВВОДЯЩЕЕ (аддитивное). Заводятся пометка снятия у
-  `kacho_iam.roles`, её производитель и **одно output-only поле контракта**.
+  `kaname.roles`, её производитель и **одно output-only поле контракта**.
   Ни одного нового ВХОДА; смысл ни одного существующего поля не меняется
 - **Сервис:** `kaname` — предмет целиком внутри него, поэтому документ живёт
   рядом с кодом, а не в воркспейсе. `gateway/` не затрагивает
@@ -117,6 +117,19 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   `acceptance-reviewer` своим кругом, а не эта строка. Решение —
   `../architecture/verdict-names-a-revision-not-a-file.md`
 
+- **⚠️ ПОСЛЕ вердикта документ правлен (`#2305`), и вердикт на нынешнюю
+  редакцию НЕ ПЕРЕНЕСЁН.** Координат приведено к дереву: **11**. Правка одна и
+  механическая — имя схемы Postgres `kacho_iam.` → `kaname.`: схема названа
+  именем своего продукта, и прежнего имени дерево не производит
+  (`grep -cE 'CREATE TABLE kacho_iam\.' services/iam/internal/migrations/0001_initial.sql`
+  → 0; под `kaname.` → 47). До правки координата не резолвилась, то есть
+  **молчала**: читатель уходил за ней и не находил — она не краснеет и не
+  зеленеет. **НЕ тронуты** ни один сценарий, производитель, признак готовности,
+  клауза и ни одно число: непарных строк 0, пар с изменившимся числом токенов 0.
+  Одобрение относится к **содержимому**, а не к имени файла: APPROVED выше есть
+  вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю редакцию
+  ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение —
+  `../architecture/verdict-names-a-revision-not-a-file.md`
 ---
 
 ## A. Ответ автора на круг 1 — что исправлено и чем перемерено
@@ -143,7 +156,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | **В2** | **принято; правка УЖЕ посажена родителем** | Мой замер сходится с рецензентом: прод-вызывающих у `moduleroles.Reconcile` — **0**, стража паритета ролей на старте нет. Следствие достижимо другим механизмом: `role_rule_ref_res_fk … ON DELETE NO ACTION ON UPDATE NO ACTION` (`:580-584`) плюс намеренное сужение переселения `is_system = false` (`catalog_consequence_sql.go:72-76`). Диагностика гейта исправлена в `a0e854fd0b` — предикат: `grep -c 'СВЕРЯЕТ и отказывает в старте при расхождении' internal/repohygiene/withdrawalproducerarriveswiththeapplier.go` → **0**. Состояние — §9 Р8 |
 | **В3** | **принято, и находка СИЛЬНЕЕ заявленной** | Предикат §3 на стволе даёт не «0 из-за копирования», а **0 по существу**: полей `#1035` на `origin/main` нет вовсе (`git show origin/main:…/role.proto \| grep -cE '…'` → **0**; на HEAD → **13**). То есть контракт несёт состояние роли **на линии**, а не в стволе. §3 несёт это числом обеих сторон |
 | **В4** | **принято** | `role.proto:230-234` называет источником только «снятие строки каталога». §2.6 использует ведомость для второй причины, которой комментарий не покрывает. Внесено в §2.9 и в §10 шаг 6 |
-| **В5** | **принято** | `iamDirectLabelTable["iam_role"] = "kacho_iam.roles"` (`labelaxis.go:66`) — меточная ветвь отбирает строки `roles` по меткам, а снятая строка метки сохраняет. Вопрос не был решён вслух ни одной строкой, и **сам вопрос законен**. Но ответ круга 1 («сузить ветвь») опирался на ЛОЖНУЮ посылку: меточная выдача роль модуля не достаёт уже сегодня. Опровергнуто ролью после круга 2 — верен третий исход, §2.8 переписан, `-25` перевёрнут; разбор — §B |
+| **В5** | **принято** | `iamDirectLabelTable["iam_role"] = "kaname.roles"` (`labelaxis.go:66`) — меточная ветвь отбирает строки `roles` по меткам, а снятая строка метки сохраняет. Вопрос не был решён вслух ни одной строкой, и **сам вопрос законен**. Но ответ круга 1 («сузить ветвь») опирался на ЛОЖНУЮ посылку: меточная выдача роль модуля не достаёт уже сегодня. Опровергнуто ролью после круга 2 — верен третий исход, §2.8 переписан, `-25` перевёрнут; разбор — §B |
 
 > [!note] Моя ошибка круга 1, названная отдельно
 > Б2 — не промах в числе, а **отступление от довода, который я же и привёл**. §2.1
@@ -295,15 +308,15 @@ SQL); происхождение ложной посылки подтвержд�
 | Е5 | форма пометки объявлена дословно | там же, `catalog_module`: `retired_at timestamptz` · `retired_reason text` · `live boolean NOT NULL DEFAULT true` · `CHECK (live = (retired_at IS NULL))` · `UNIQUE (module, live)` как референт | форма **есть** |
 | Е6 | писатель пометки у каталога | `services/iam/internal/repo/kaname/pg/catalog_writer.go`: `RetireVerb` (`SET retired_at = now(), live = false, retired_reason = $4`), `RetireResource`; обратные — `UpsertModule`/`UpsertResource`/`UpsertVerb` (`SET retired_at = NULL, live = true`) | **2** снятия + **3** оживления |
 | Е7 | путь старта СНИМАЕТ строки каталога и **продолжает пуск**, называя снятое поимённо | `services/iam/cmd/kaname/serve.go:288-290` — условие `len(catalogCensus.WithdrawnRows) > 0` и под ним `logger.Info("строки каталога сняты решением — старт продолжается", slog.Any("rows", …))` | прецедент **есть** |
-| Е8 | ключей, ссылающихся на `roles`, объявлено | `git grep -cE 'REFERENCES kacho_iam\.roles' -- services/iam/internal/migrations/*.sql`; единица — объявление ключа | **8** (из них 1 на дропнутой `organizations`, 0008 → живых **7**) |
+| Е8 | ключей, ссылающихся на `roles`, объявлено | `git grep -cE 'REFERENCES kaname\.roles' -- services/iam/internal/migrations/*.sql`; единица — объявление ключа | **8** (из них 1 на дропнутой `organizations`, 0008 → живых **7**) |
 | Е9 | из них `ON DELETE RESTRICT` · `ON DELETE CASCADE` | тот же вывод, разбор по действию | **1** живой RESTRICT (`access_bindings_role_fk`) · **6** CASCADE |
 | Е10 | `roles` в прод-коде вердикта вне комментария | обход `services/iam/internal/repo/kaname/pg/relverdict/*.go` без `_test.go`; единица — вхождение вне строки-комментария | **1**, и это **ось меток** (`labelaxis.go:66`, `iamDirectLabelTable["iam_role"]`) |
 | Е11 | что вердикт читает как ПРАВО роли | тот же обход; единица — **строка вне комментария** в прод-файле `relverdict/` | `role_verb` **4**, `role_rule_selectors` **4** |
-| Е12 | ведомость отобранного и её читатель | писателей `INSERT INTO kacho_iam.role_grant_orphan` — **3** (`catalog_consequence_sql.go`); читателей `FROM kacho_iam.role_grant_orphan` — **1** (`role_repo.go:198`, `WithdrawnGrants`) | ведомость **читается** |
+| Е12 | ведомость отобранного и её читатель | писателей `INSERT INTO kaname.role_grant_orphan` — **3** (`catalog_consequence_sql.go`); читателей `FROM kaname.role_grant_orphan` — **1** (`role_repo.go:198`, `WithdrawnGrants`) | ведомость **читается** |
 | Е13 | контракт роли уже несёт состояние целости | `proto/kaname/cloud/iam/v1/role.proto`: `health` (22), `declared_segments` (23), `unresolved_segments` (24), `withdrawn_grants` (25) | **4** поля |
 | Е14 | манифестов в дереве · ролей ими объявлено | `ls services/*/manifest.yaml`; роли — счёт `- id:` в разделе `roles:` | **6** манифестов · **42** роли (iam 19, vpc 18, compute 3, nlb 2, registry 0, storage 0) |
-| Е15 | владелец роли и его ключ | `roles.owner_module` + `roles_owner_module_fk FOREIGN KEY (owner_module) REFERENCES kacho_iam.catalog_module (module)` — на ПЕРВИЧНЫЙ ключ, `20260902190500` | **есть** |
-| Е16 | уникальность имени системной роли | `roles_system_unique ON kacho_iam.roles (cluster_id, name) WHERE is_system = true` (`0056`) | **есть**, `live` в ней **нет** |
+| Е15 | владелец роли и его ключ | `roles.owner_module` + `roles_owner_module_fk FOREIGN KEY (owner_module) REFERENCES kaname.catalog_module (module)` — на ПЕРВИЧНЫЙ ключ, `20260902190500` | **есть** |
+| Е16 | уникальность имени системной роли | `roles_system_unique ON kaname.roles (cluster_id, name) WHERE is_system = true` (`0056`) | **есть**, `live` в ней **нет** |
 | Е17 | порядок снятия, исполненный человеком | `20260824002317_role_iam_user_edit_grants_nothing.sql`: (1) `role_rule_selectors` → (2) `role_verb` → (3) `access_bindings` → (4) `roles` | **4** шага |
 | Е18 | снятие строк каталога у применителя — **по одной строке за оператор**, в цикле | `services/iam/internal/apps/kaname/modulecatalog/apply.go:518` (`RetireVerb`) и `:528` (`RetireResource`), оба в `for` | цикл **есть** |
 | Е19 | ОДНИМ оператором над множеством сделано **переселение последствий**, а не пометка | `catalog_writer.go` §`ResettleTenantProjections`: «снятие само СТАЛО отбором. `DELETE … RETURNING`» | отбор **есть**, и он о другом |
@@ -485,7 +498,7 @@ apply.go`, — и до неё я успел написать неверный а
 
 ### 2.1. Пометка снятия у `roles` — форма БЕРЁТСЯ У КАТАЛОГА дословно
 
-`kacho_iam.roles` получает те же четыре элемента, что несут три таблицы каталога
+`kaname.roles` получает те же четыре элемента, что несут три таблицы каталога
 прав (Е4, Е5), и ни одним больше:
 
 | элемент | форма | почему дословно |
@@ -604,7 +617,7 @@ services/iam/internal/manifest/manifest.go` → пусто), а `Apply` полу
 Ключ у всех четырёх один и тот же:
 
 ```
-FOREIGN KEY (role_id, live) REFERENCES kacho_iam.roles (id, live)
+FOREIGN KEY (role_id, live) REFERENCES kaname.roles (id, live)
 ```
 
 Тогда пометка роли, у которой осталась хоть одна живая проекция, отвергается
@@ -1015,7 +1028,7 @@ git show d94d7b9af6:proto/kacho/cloud/iam/v1/role.proto \
 
 **Дано** живая роль `vpc.address.admin`, объявленная манифестом модуля `vpc`, с
 `id`, выведенным из имени
-**И** её строка в `kacho_iam.roles` с `live = true`, `retired_at IS NULL`
+**И** её строка в `kaname.roles` с `live = true`, `retired_at IS NULL`
 **Когда** манифест `vpc` применён без этой роли в разделе `roles:`
 **Тогда** строка **существует**
 **И** `live = false`, `retired_at` непуст, `retired_reason` непуст,
@@ -1033,7 +1046,7 @@ git show d94d7b9af6:proto/kacho/cloud/iam/v1/role.proto \
 **IAM-RW-1-03 — референт живости существует**
 
 **Дано** дерево миграций после применения
-**Когда** спрошен каталог ограничений о `kacho_iam.roles`
+**Когда** спрошен каталог ограничений о `kaname.roles`
 **Тогда** уникальность по `(id, live)` объявлена
 **И** ключ живости хотя бы одной проекции на неё ссылается (положительный
 контроль: без него уникальность была бы заведена «на будущее» и не проверяла бы

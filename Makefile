@@ -36,7 +36,6 @@ MONOREPO_ROOT := $(shell test -n "$(KANAME_TREE_ROOT)" \
 include provenance.mk
 
 .PHONY: test-standalone help build build-migrator test test-short vet lint docker generate audit-list-filter
-.PHONY: proto-install-plugins proto-vendor proto-lint proto-gen
 
 # help — перечень целей. Первая цель файла, поэтому голый `make` печатает её:
 # читатель, впервые открывший модуль, спрашивает «что тут можно запустить», и
@@ -261,6 +260,16 @@ module-manifest-check:
 # tools/operatordocs/present_test.go.
 #
 # Вызов: `make -C services/iam operator-docs` / `... operator-docs-check`
+.PHONY: helm-render-guard
+## helm-render-guard — офлайновый страж рендера чарта: вход, который чарт отдаёт
+## процессу, обязан пройти страж старта.
+##
+## Живёт отдельной целью, а не внутри `test`, потому что требует helm, а тот
+## пришпилен ровно к одной job конвейера (`helm` в .github/workflows/ci.yaml).
+## Провязку держит гейт класса internal/repohygiene/artifactgates/renderguard_test.go.
+helm-render-guard:
+	@bash deploy/render-guard.sh
+
 .PHONY: operator-docs operator-docs-check
 ## operator-docs — порождение операторской документации
 operator-docs:
@@ -396,48 +405,6 @@ migrate-down: build-migrator
 ## migrate-status — состояние миграций
 migrate-status: build-migrator
 	KANAME_DB_PASSWORD=secret bin/$(MIGRATOR_BIN) status
-
-# proto-install-plugins — ставит protoc-плагины в $GOBIN (lookup через $PATH для buf).
-# Доменный proto iam генерируется этими тремя плагинами.
-## proto-install-plugins — плагины генерации из модуля
-proto-install-plugins:
-	go install google.golang.org/protobuf/cmd/protoc-gen-go
-	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc
-	go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway
-
-# proto-vendor — подтягивает универсальные инфра-протосы из kacho-corelib (единственный
-# источник) в proto/ ТОЛЬКО для buf-резолва импортов доменного proto. В git этих файлов
-# нет (gitignored) — их Go-stubs живут в kacho-corelib / canonical genproto, kaname их
-# не владеет и не дублирует. Цель идемпотентна: копирует поверх локальной копии.
-CORELIB_PROTO  := ../kacho-corelib/proto
-VENDORED_PROTOS := \
-	google/api/annotations.proto \
-	google/api/field_behavior.proto \
-	google/api/http.proto \
-	google/rpc/status.proto \
-	kacho/cloud/api/operation.proto \
-	kacho/cloud/operation/operation.proto \
-	kacho/cloud/validation.proto \
-	kacho/iam/authz/v1/authz_options.proto
-
-## proto-vendor — подтянуть общие контракты для резолва импортов [монорепо]
-proto-vendor:
-	@for f in $(VENDORED_PROTOS); do \
-		mkdir -p proto/$$(dirname $$f); \
-		cp $(CORELIB_PROTO)/$$f proto/$$f; \
-	done
-
-## proto-lint — buf lint по контрактам службы [монорепо]
-proto-lint: proto-vendor
-	cd proto && buf lint
-
-# proto-gen — регенерация Go-stubs доменного proto iam (kaname/cloud/iam/v1) из proto/.
-# Универсальная ИНФРА (operation/validation/authz_options/cloud-api/google) подтягивается
-# из corelib через proto-vendor только для buf-резолва импортов и НЕ генерируется (Go-stubs
-# живут в kacho-corelib / canonical genproto) — см. proto/buf.gen.yaml inputs.paths.
-## proto-gen — регенерация Go-стабов доменных контрактов [монорепо]
-proto-gen: proto-vendor
-	cd proto && buf generate
 
 # permission_catalog.json — runtime-embedded grant-catalog для
 # InternalIAMService.ListPermissions / PermissionCatalogService. Файл закоммичен и

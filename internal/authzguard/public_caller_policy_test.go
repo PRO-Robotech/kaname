@@ -21,9 +21,11 @@ package authzguard
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -32,6 +34,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
@@ -349,49 +352,87 @@ func TestPublicPeerCallableRPCs_NamesNoGateway(t *testing.T) {
 // уже находился в кругах доверенных отправителей (ebedae53), и там он держался
 // проверкой, которая лишнюю запись ТРЕБОВАЛА.
 //
-// Предикат — каталог `services/<имя>/`. Он самоистекает: заведут модуль со своим
-// каталогом — гейт пройдёт сам, без чьей-либо памяти. api-gateway в таблице не
-// значится по построению (у него своя ветвь, это держит
-// TestPublicPeerCallableRPCs_NamesNoGateway), поэтому отсутствие у него каталога
-// в `services/` предмета здесь не составляет.
-func TestPublicPeerCallableRPCs_EveryCallerHasAModuleInTheTree(t *testing.T) {
-	modules := serviceModulesInTree(t)
-	seen := 0
-	for method, svcs := range PublicPeerCallableRPCs() {
-		for _, svc := range svcs {
-			seen++
-			if _, ok := modules[svc]; !ok {
-				t.Fatalf("%s допускает %q, а каталога services/%s в дереве нет: допуск выдан "+
-					"предъявителю сертификата, которого мы не выпускаем и не контролируем",
-					method, svc, svc)
-			}
-		}
-	}
+// # ОТКУДА БЕРЁТСЯ ПЕРЕЧЕНЬ — и почему уже не обходом `services/` (#2376)
+//
+// Прежде перечень выводился обходом каталога модулей ПЛАТФОРМЫ. Предикат был
+// верен и самоистекал, но он читал дерево, которого рядом со службой после
+// разреза НЕ БУДЕТ: перечень стал бы невыводимым, проба объявила бы третий исход
+// и замолчала. Круг отправителей — предмет безопасности, и молчащий сторож здесь
+// неотличим от исправного.
+//
+// Перечень взят у ОБЪЯВЛЕНИЯ, а не у дерева: `pkg/platformmodules` — единственное
+// место, где сказано, как один и тот же модуль платформы называется в трёх
+// написаниях, и колонка `Service` там по определению есть «каталог
+// `services/<X>` и короткое имя SAN его mTLS», то есть ровно тот словарь, из
+// которого берёт имена эта таблица. Объявление живёт в ФУНДАМЕНТЕ, а фундамент
+// оба продукта тянут зависимостью, — значит источник доступен службе и в
+// самостоятельном клоне.
+//
+// Сила утверждения при этом НЕ падает, и это надо сказать прямо: согласие
+// объявления с деревом платформы держит платформенный гейт
+// (`internal/repohygiene`, TestPlatformModuleVocabularyMatchesTheTree) — он
+// судит координаты платформы и потому разрез переживает. То есть половина
+// «модуль в дереве есть» осталась у того, у кого есть дерево, а половина «допуск
+// называет объявленный модуль» — у того, у кого есть таблица. Ни одна не
+// замолкает.
+//
+// Разница по существу тоже в пользу объявления: каталог, лежащий в монорепо, о
+// выпуске сертификата не говорит ничего, а колонка `Service` объявлена именно
+// как короткое имя SAN.
+//
+// api-gateway в таблице не значится по построению (у него своя ветвь, это держит
+// TestPublicPeerCallableRPCs_NamesNoGateway) и модулем платформы не является,
+// поэтому его отсутствие в объявлении предмета здесь не составляет.
+func TestPublicPeerCallableRPCs_EveryCallerIsADeclaredPlatformModule(t *testing.T) {
+	table, modules := PublicPeerCallableRPCs(), declaredPlatformModules()
+	found, seen := auditPeerCallableRoster(table, modules)
+
 	// Объём осмотренного: «ноль находок» обязано быть отличимо от «ноль прочитанного».
-	t.Logf("осмотрено: допусков в таблице=%d, модулей в дереве=%d", seen, len(modules))
+	t.Logf("осмотрено: допусков в таблице=%d, объявленных модулей=%d", seen, len(modules))
 	if seen == 0 {
 		t.Fatal("предпосылка гейта нарушена: таблица допусков пуста — проверять нечего")
 	}
 	if len(modules) == 0 {
-		t.Fatal("предпосылка гейта нарушена: в дереве не найдено ни одного модуля — " +
+		t.Fatal("предпосылка гейта нарушена: объявление платформы пусто — " +
 			"любой допуск прошёл бы даром")
+	}
+	if len(found) > 0 {
+		t.Fatalf("допуск не объявленному модулю — %d находка(и):\n  %s",
+			len(found), strings.Join(found, "\n  "))
 	}
 }
 
-// serviceModulesInTree возвращает короткие имена модулей продукта — по каталогам
-// `services/*`, а не по списку в коде: список разошёлся бы с деревом молча.
-func serviceModulesInTree(t *testing.T) map[string]struct{} {
-	t.Helper()
-	dir := platformtree.RequirePath(t, "services")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read services dir %s: %v", dir, err)
+// auditPeerCallableRoster — ПРЕДИКАТ, отделённый от таблицы и от объявления ради
+// инъекции: доказательство подаёт ему настоящий вход, а не правит боевую
+// таблицу. Возвращает находки и объём осмотренного.
+func auditPeerCallableRoster(table map[string][]string, declared map[string]struct{}) (found []string, seen int) {
+	methods := make([]string, 0, len(table))
+	for m := range table {
+		methods = append(methods, m)
 	}
-	out := map[string]struct{}{}
-	for _, e := range entries {
-		if e.IsDir() {
-			out[e.Name()] = struct{}{}
+	sort.Strings(methods)
+	for _, method := range methods {
+		for _, svc := range table[method] {
+			seen++
+			if _, ok := declared[svc]; !ok {
+				found = append(found, fmt.Sprintf(
+					"%s допускает %q, а модуля %q объявление платформы "+
+						"(pkg/platformmodules) не знает: допуск выдан предъявителю "+
+						"сертификата, которого мы не выпускаем и не контролируем",
+					method, svc, svc))
+			}
 		}
+	}
+	return found, seen
+}
+
+// declaredPlatformModules — короткие имена модулей платформы ПО ОБЪЯВЛЕНИЮ
+// фундамента. Не список в этом файле: список разошёлся бы с объявлением молча,
+// а объявление одно на всё дерево и сверяется с ним отдельным гейтом.
+func declaredPlatformModules() map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, m := range platformmodules.All() {
+		out[m.Service] = struct{}{}
 	}
 	return out
 }

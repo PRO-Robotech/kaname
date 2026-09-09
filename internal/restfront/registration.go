@@ -11,7 +11,6 @@ import (
 	"google.golang.org/grpc"
 
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
-	quotav1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/quota/v1"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -95,7 +94,7 @@ func registerPublicRESTServices(
 		{"OperationService", operationpb.RegisterOperationServiceHandlerFromEndpoint},
 		{"AccountService", iamv1.RegisterAccountServiceHandlerFromEndpoint},
 		{"ProjectService", iamv1.RegisterProjectServiceHandlerFromEndpoint},
-		{"IdentityQuotaService", quotav1.RegisterIdentityQuotaServiceHandlerFromEndpoint},
+		{"IdentityQuotaService", iamv1.RegisterIdentityQuotaServiceHandlerFromEndpoint},
 		{"UserService", iamv1.RegisterUserServiceHandlerFromEndpoint},
 		{"ServiceAccountService", iamv1.RegisterServiceAccountServiceHandlerFromEndpoint},
 		{"GroupService", iamv1.RegisterGroupServiceHandlerFromEndpoint},

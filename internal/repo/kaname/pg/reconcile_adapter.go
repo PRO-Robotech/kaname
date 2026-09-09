@@ -389,6 +389,38 @@ func (s *reconcileStore) AcquireBindingLock(ctx context.Context, bindingID domai
 	return nil
 }
 
+// AcquireBindingLocks берёт advisory-замки всего набора ОДНИМ обращением и В
+// ПЕРЕДАННОМ ПОРЯДКЕ.
+//
+// Порядок держится формой запроса, а не надеждой на план: набор разворачивается с
+// порядковым номером в MATERIALIZED-подзапросе, а функция вызывается уже над его
+// строками. Без материализации планировщик вправе вычислить функцию до сортировки,
+// и глобально согласованный порядок захвата — то единственное, ради чего этот метод
+// существует, — исчез бы молча.
+//
+// Одним обращением, а не циклом: у веера объекта p99 = 226 выдач-кандидатов, и
+// поштучный захват стоил бы столько же последовательных обращений внутри одной
+// транзакции. Прежний путь платил ровно это.
+func (s *reconcileStore) AcquireBindingLocks(ctx context.Context, bindingIDs []domain.AccessBindingID) error {
+	if len(bindingIDs) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(bindingIDs))
+	for _, id := range bindingIDs {
+		keys = append(keys, string(id))
+	}
+	if _, err := s.tx.Exec(ctx, `
+		WITH ordered AS MATERIALIZED (
+		    SELECT u.id
+		      FROM unnest($1::text[]) WITH ORDINALITY AS u(id, ord)
+		     ORDER BY u.ord
+		)
+		SELECT pg_advisory_xact_lock(hashtext(id)) FROM ordered`, keys); err != nil {
+		return fmt.Errorf("reconcile: advisory-lock %d bindings: %w", len(keys), err)
+	}
+	return nil
+}
+
 // MatchAllInScope returns the mirror objects of the given types NARROWED to the binding's
 // containment scope (ARM_ANCHOR/`all`, P4) — no label filter. The scope is pushed into the
 // SQL (resource_mirror.AllByTypes) as a PROVEN SUPERSET of the use-case's IsContainedIn

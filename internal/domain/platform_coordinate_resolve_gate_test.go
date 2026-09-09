@@ -2,34 +2,84 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // platform_coordinate_resolve_gate_test.go — координату от корня платформы
-// резолвит ДЕТЕКТОР ПОСАДКИ, а не собственный подъём по дереву (задача #2160).
+// резолвит ДЕТЕКТОР ПОСАДКИ, а не собственный подъём по дереву (задачи #2160,
+// #2282, #2289).
 //
 // # Предмет
 //
-// Пробы этого пакета судят контракт роли и страницу арендатора. Контракт лежит
-// НАД модулем (`proto/…` корня платформы) и в поставку модуля не входит; страница
-// лежит ВНУТРИ него. Значит у прогона две посадки, и в одной из них предмет части
-// проб отсутствует BY CONSTRUCTION — это «условие не создано», третий исход, и он
-// не вычитается из вердикта и не зачитывается в успех.
+// Пробы судят контракт и страницу арендатора. Контракт лежит НАД модулем
+// (`proto/…` корня платформы) и в поставку модуля не входит; страница лежит
+// ВНУТРИ него. Значит у прогона две посадки, и в одной из них предмет части проб
+// отсутствует BY CONSTRUCTION — это «условие не создано», третий исход, и он не
+// вычитается из вердикта и не зачитывается в успех.
 //
 // Назначить этот исход можно двумя способами, и они РАЗНЫЕ:
 //
 //	детектор посадки  — `internal/treeposture` спрашивает, лежит ли модуль в
 //	                    каталоге модулей ЭТОГО дерева, и только потом приводит
 //	                    координату. Чужое дерево над клоном ему не годится;
-//	свой подъём       — цикл, ищущий файл по координате у каждого предка. Он
-//	                    судит по НАЛИЧИЮ ФАЙЛА, поэтому в клоне, стоящем под
-//	                    чужим деревом с той же координатой, находит ЧУЖОЙ файл и
-//	                    выносит вердикт о нём.
+//	свой подъём       — путь, чей якорь выводит ВЫШЕ корня модуля. Он судит по
+//	                    НАЛИЧИЮ ФАЙЛА, поэтому в клоне, стоящем под чужим деревом
+//	                    с той же координатой, находит ЧУЖОЙ файл и выносит
+//	                    вердикт о нём.
 //
 // # Цена измерена, а не предположена
 //
 // Клон модуля положен под дерево, несущее `proto/kaname/cloud/iam/v1/role.proto`
-// с другим содержимым. Проба, резолвящая ту же координату через `platformtree`
-// (`internal/apps/kaname/api/role`), назвала «УСЛОВИЕ НЕ СОЗДАНО» и вышла кодом 0.
-// Пробы этого пакета, резолвившие своим подъёмом, прочитали ЧУЖОЙ контракт,
-// напечатали НАХОДКУ о нём и вышли кодом 1. Один и тот же исход, два ответа, и
-// машинный неверен — ровно класс задачи #2160.
+// с другим содержимым. Проба, резолвящая ту же координату через `platformtree`,
+// назвала «УСЛОВИЕ НЕ СОЗДАНО» и вышла кодом 0. Пробы, резолвившие своим
+// подъёмом, прочитали ЧУЖОЙ контракт, напечатали НАХОДКУ о нём и вышли кодом 1.
+// Один и тот же исход, два ответа, и машинный неверен.
+//
+// # ЧЕТЫРЕ ФОРМЫ ПОДЪЁМА, и распознаватель обязан знать каждую (#2289)
+//
+// Форма, о которой распознаватель не знает, не даёт ни красного, ни зелёного —
+// она МОЛЧИТ, и всё записанное в ней оказывается вне наблюдения. Первая редакция
+// знала одну форму, вторая — три; четвёртую нашла перепись дерева ВТОРЫМ, не
+// зависящим от гейта выражением, и живой экземпляр у неё был (см. ниже):
+//
+//	цикл           — тело цикла зовёт `Dir(x)` и присваивает `x`, а щупает
+//	                 КООРДИНАТУ платформы. Подъём к маркеру модуля (`go.mod`)
+//	                 сюда НЕ относится: он останавливается на своём корне и за
+//	                 него не выходит — так устроен сам детектор;
+//	фиксированный  — `Join` с литеральными `..`, число которых БОЛЬШЕ глубины
+//	                 файла под корнем модуля. Ровно этой формой был записан
+//	                 живой экземпляр в `internal/migrations`;
+//	литерал        — одна строка вида `"../../../../proto/…"`. Та же арифметика;
+//	уровневая      — ЦЕПОЧКА `Dir` вне цикла, в том числе через соседнюю функцию
+//	                 того же файла: `Dir(Dir(serviceRoot(t)))`. Ни одного `..`,
+//	                 ни одной координаты — поэтому она молчала у всех трёх форм
+//	                 и у соседнего гейта `internal/supplyhygiene`, который судит
+//	                 литеральные цепочки. Механика — в разделе «ЧЕТВЁРТАЯ ФОРМА»
+//	                 у самого распознавателя.
+//
+// # КАК НАЙДЕНА ЧЕТВЁРТАЯ, и почему не чтением
+//
+// Слепота распознавателя не даёт ни красного, ни зелёного, поэтому перечитыванием
+// он себя не выдаёт. Форма нашлась РАСХОЖДЕНИЕМ ДВУХ ИЗМЕРЕНИЙ: гейт печатал
+// «подъёмов 0», а независимый обход того же дерева — один выход за корень модуля.
+// Живой экземпляр — `tools/audit_list_filter_test.go`, помощник `repoRoot`: он
+// возвращал каталог ДВУМЯ уровнями выше корня модуля, тогда как его собственный
+// комментарий называл возвращаемое корнем модуля. Проверено исполнением, а не
+// чтением. Помощник снят: вызывающих у него не было, а живой сосед в том же файле
+// уже резолвит контракт детектором.
+//
+// # ГЛУБИНА — несущий различитель, а не украшение
+//
+// `../../deploy` из `cmd/kaname` поднимается на 2 при глубине 2 и попадает в
+// СОБСТВЕННЫЙ каталог поставки модуля. Тот же по виду путь на шаг длиннее выходит
+// за корень модуля и попадает к соседу. Различает их только арифметика, поэтому
+// распознаватель считает подъём и сверяет его с глубиной файла, а не ловит `..`
+// по образцу: ловля по образцу назвала бы находкой верный код.
+//
+// # ОСЬ ЯКОРЯ — ПОКООРДИНАТНАЯ, а не пофайловая (#2289)
+//
+// Прежняя редакция спрашивала «есть ли в ФАЙЛЕ хоть один резолв через детектор».
+// Тогда ОДИН законный `platformtree.Require*` маскировал любое число координат,
+// резолвнутых иначе, — а смешанный файл и есть вероятная будущая регрессия.
+// Теперь якорь спрашивается у КАЖДОЙ координаты: она либо стоит аргументом
+// детектора, либо связана с именем, которое детектору передают, либо приставлена
+// к базе, полученной от детектора.
 //
 // # Что гейт судит и чего не судит
 //
@@ -40,6 +90,17 @@
 // координата встречается и в объяснениях, и в фикстурах соседних гейтов, и
 // проверка по подстроке краснела бы на собственном комментарии.
 //
+// # ДВЕ ПРОБЫ, ДВА ОХВАТА — и граница названа, а не подразумевается
+//
+//	пакет `internal/domain`  — ОБЕ оси. Здесь популяция координат адъюдицирована
+//	                           поимённо, поэтому ось якоря даёт вердикт;
+//	весь модуль              — ТОЛЬКО ось подъёма. Она точна by construction
+//	                           (арифметика глубины и предмет щупания), тогда как
+//	                           ось якоря на модуле упёрлась бы в 54 синтетических
+//	                           корня (`t.TempDir()`), которые якоря не имеют и
+//	                           иметь не должны. Объявлять по ним вердикт значило
+//	                           бы краснеть на верном коде.
+//
 // Способность падать и молчать доказывает не этот прогон, а инъекция
 // (`platform_coordinate_resolve_gate_injection_test.go`).
 package domain_test
@@ -49,6 +110,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -67,6 +129,10 @@ import (
 // здесь не бывает.
 const domainPackageDir = "services/iam/internal/domain"
 
+// domainPackageDepth — глубина этого пакета под корнем модуля
+// (`internal/domain` — два шага).
+const domainPackageDepth = 2
+
 // platformRootSegments — первые сегменты координат, записанных ОТ КОРНЯ ПЛАТФОРМЫ.
 //
 // Перечень закрытый и короткий намеренно: он называет каталоги, которые в дереве
@@ -79,20 +145,58 @@ var platformRootSegments = map[string]bool{
 	".github":  true,
 }
 
+// detectorPackages — имена пакетов, чей вызов и есть детектор посадки.
+//
+// Два, а не один: `platformtree` даёт пробе третий исход, `treeposture` — тот же
+// резолв без `testing`, и его зовёт прод-код модуля. Знать надо оба, иначе
+// законный прод-резолв читался бы как отсутствие якоря.
+var detectorPackages = map[string]bool{"platformtree": true, "treeposture": true}
+
+// detectorResolvers — методы детектора, возвращающие ПУТЬ либо КОРЕНЬ.
+//
+// Перечень закрытый: `ErrNoPlatformTree` и прочие имена того же пакета путей не
+// возвращают, и засчитывать их значило бы считать якорем упоминание.
+var detectorResolvers = map[string]bool{
+	"Require": true, "RequirePath": true, "RequireCorpus": true,
+	"RootFrom": true, "PathOf": true, "PathUnder": true,
+	"CorpusRoot": true, "ModuleRootFrom": true, "Under": true,
+}
+
 // resolveCensus — объём осмотренного. Печатается всегда: «ноль находок» обязано
 // быть отличимо от «ноль прочитанного».
 type resolveCensus struct {
-	Files    int
-	Coords   int
-	Resolves int
-	Ascents  int
+	Files      int
+	Coords     int
+	Resolves   int
+	Ascents    int
+	RootLevels int // выражений, чей уровень относительно корня модуля ВЫВЕДЕН
 }
 
 func (c resolveCensus) String() string {
 	return fmt.Sprintf(
 		"файлов Go прочитано %d · координат от корня платформы %d · "+
-			"резолвов через platformtree %d · собственных подъёмов по дереву %d",
-		c.Files, c.Coords, c.Resolves, c.Ascents)
+			"резолвов через детектор посадки %d · выражений с выводимым уровнем корня %d · "+
+			"собственных подъёмов по дереву %d",
+		c.Files, c.Coords, c.Resolves, c.RootLevels, c.Ascents)
+}
+
+// resolveFindings — находки ДВУХ осей порознь.
+//
+// Порознь, а не одним списком: охваты у осей разные (см. шапку), и слитый список
+// заставил бы модульную пробу судить то, чего она судить не вправе.
+type resolveFindings struct {
+	Unanchored []string // координата без якоря-детектора
+	Ascents    []string // побег: якорь выводит выше корня модуля
+}
+
+// sourceFile — исходник и его ГЛУБИНА под корнем модуля.
+//
+// Глубина — вход распознавателя, а не свойство разбора: без неё `..` не отличить
+// от побега (см. шапку, «ГЛУБИНА — несущий различитель»).
+type sourceFile struct {
+	Name  string
+	Depth int
+	Text  string
 }
 
 // isPlatformCoordinate — строка записана координатой ОТ КОРНЯ ПЛАТФОРМЫ.
@@ -104,71 +208,100 @@ func isPlatformCoordinate(s string) bool {
 	return ok && platformRootSegments[head]
 }
 
-// auditPlatformCoordinateResolve — разбор ИСХОДНИКОВ на две находки.
+// climbOf — сколько шагов вверх делает путь и достаёт ли он до корневого сегмента.
+func climbOf(s string) (climb int, reachesRoot bool) {
+	for _, seg := range strings.Split(filepath.ToSlash(s), "/") {
+		switch {
+		case seg == "..":
+			climb++
+		case platformRootSegments[seg]:
+			reachesRoot = true
+		}
+	}
+	return climb, reachesRoot
+}
+
+// auditPlatformCoordinateResolve — разбор ИСХОДНИКОВ на находки двух осей.
 //
-// Вход — карта «имя файла → его текст», а не каталог: тогда тот же разбор
+// Вход — исходники со своей глубиной, а не каталог: тогда тот же разбор
 // прогоняется инъекцией на синтетике, и способность падать доказывается без
 // правки настоящего дерева.
-func auditPlatformCoordinateResolve(sources map[string]string) ([]string, resolveCensus, error) {
+func auditPlatformCoordinateResolve(sources []sourceFile) (resolveFindings, resolveCensus, error) {
 	var (
-		findings []string
-		census   resolveCensus
+		out    resolveFindings
+		census resolveCensus
 	)
 
-	names := make([]string, 0, len(sources))
-	for name := range sources {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	files := append([]sourceFile(nil), sources...)
+	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
 
-	for _, name := range names {
+	for _, src := range files {
 		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, name, sources[name], parser.SkipObjectResolution)
+		file, err := parser.ParseFile(fset, src.Name, src.Text, parser.SkipObjectResolution)
 		if err != nil {
 			// Неразбираемый исходник — НЕ вердикт: гейт не вправе называть
 			// находкой то, чего он не прочитал.
-			return nil, census, fmt.Errorf("разбор %s не отработал: %w", name, err)
+			return resolveFindings{}, census, fmt.Errorf("разбор %s не отработал: %w", src.Name, err)
 		}
 		census.Files++
 
-		coords, resolves, ascents := auditOneSource(file)
-		census.Coords += coords
-		census.Resolves += resolves
-		census.Ascents += ascents
+		one := auditOneSource(file, fset, src.Depth)
+		census.Coords += one.coords
+		census.Resolves += one.resolves
+		census.RootLevels += one.rootLevels
+		census.Ascents += len(one.escapes)
 
-		// Без координаты предмета нет: подъём сам по себе законен и о посадке
-		// ничего не утверждает.
-		if coords == 0 {
-			continue
+		for _, c := range one.unanchored {
+			out.Unanchored = append(out.Unanchored, fmt.Sprintf(
+				"%s:%d: координата %q не имеет якоря-детектора — предпосылку назначает не "+
+					"посадка модуля, и в клоне под чужим деревом вердикт будет о чужом дереве",
+				src.Name, c.line, c.what))
 		}
-		if resolves == 0 {
-			findings = append(findings, fmt.Sprintf(
-				"%s: координат от корня платформы %d, резолвов через platformtree 0 — "+
-					"предпосылку назначает не детектор посадки, и в клоне под чужим "+
-					"деревом вердикт будет о чужом дереве", name, coords))
-		}
-		if ascents > 0 {
-			findings = append(findings, fmt.Sprintf(
-				"%s: собственных подъёмов по дереву %d рядом с координатой от корня "+
-					"платформы — исход назначает НАЛИЧИЕ ФАЙЛА, а не посадка модуля",
-				name, ascents))
+		for _, e := range one.escapes {
+			// Текст находки — часть свойства, а не украшение: находка, называющая
+			// симптом вместо причины, посылает читателя искать не там. У формы 4
+			// координаты нет вовсе (путь выводится арифметикой), поэтому её
+			// находка называет ВЫСОТУ подъёма, а не несуществующую строку.
+			if e.form == formRootLevel {
+				out.Ascents = append(out.Ascents, fmt.Sprintf(
+					"%s:%d: собственный подъём по дереву (%s): путь поднимается ВЫШЕ "+
+						"корня модуля (%s) — в самостоятельном клоне он указывает на "+
+						"каталог, в который клон распакован, а не на дерево платформы",
+					src.Name, e.line, e.form, e.what))
+				continue
+			}
+			out.Ascents = append(out.Ascents, fmt.Sprintf(
+				"%s:%d: собственный подъём по дереву (%s) к координате %q — исход назначает "+
+					"НАЛИЧИЕ ФАЙЛА, а не посадка модуля",
+				src.Name, e.line, e.form, e.what))
 		}
 	}
 
-	return findings, census, nil
+	return out, census, nil
 }
 
-// auditOneSource — три величины одного файла.
-func auditOneSource(file *ast.File) (coords, resolves, ascents int) {
-	loops := loopBodies(file)
-	inLoop := func(p token.Pos) bool {
-		for _, l := range loops {
-			if p >= l.from && p < l.to {
-				return true
-			}
-		}
-		return false
-	}
+// site — одно место с координатой либо подъёмом.
+type site struct {
+	line int
+	what string
+	form string
+}
+
+// sourceVerdict — три величины и две находки одного файла.
+type sourceVerdict struct {
+	coords     int
+	resolves   int
+	rootLevels int
+	unanchored []site
+	escapes    []site
+}
+
+// auditOneSource — разбор одного файла.
+func auditOneSource(file *ast.File, fset *token.FileSet, depth int) sourceVerdict {
+	var v sourceVerdict
+	line := func(p token.Pos) int { return fset.Position(p).Line }
+
+	litArgs, joinBases := anchorMap(file)
 
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch e := n.(type) {
@@ -176,8 +309,23 @@ func auditOneSource(file *ast.File) (coords, resolves, ascents int) {
 			if e.Kind != token.STRING {
 				return true
 			}
-			if v, uerr := strconv.Unquote(e.Value); uerr == nil && isPlatformCoordinate(v) {
-				coords++
+			s, uerr := strconv.Unquote(e.Value)
+			if uerr != nil {
+				return true
+			}
+			switch {
+			case isPlatformCoordinate(s):
+				v.coords++
+				if !litArgs[e] {
+					v.unanchored = append(v.unanchored, site{line(e.Pos()), s, ""})
+				}
+			case strings.HasPrefix(s, "../"):
+				// ТРЕТЬЯ ФОРМА ПОДЪЁМА: координата и подъём одной строкой.
+				climb, reaches := climbOf(s)
+				if reaches && climb > depth {
+					v.coords++
+					v.escapes = append(v.escapes, site{line(e.Pos()), s, "литерал"})
+				}
 			}
 		case *ast.CallExpr:
 			sel, ok := e.Fun.(*ast.SelectorExpr)
@@ -189,59 +337,553 @@ func auditOneSource(file *ast.File) (coords, resolves, ascents int) {
 				return true
 			}
 			switch {
-			case pkg.Name == "platformtree" && strings.HasPrefix(sel.Sel.Name, "Require"):
-				resolves++
-			case pkg.Name == "filepath" && sel.Sel.Name == "Join":
-				// ВТОРАЯ ЗАКОННАЯ ФОРМА записи координаты, и знать её обязательно:
-				// именно ею она была записана здесь до этой правки. Распознаватель,
-				// знающий одну форму, оставил бы вторую вне наблюдения молча.
-				if len(e.Args) == 0 {
-					return true
+			case detectorPackages[pkg.Name] && detectorResolvers[sel.Sel.Name]:
+				v.resolves++
+			case (pkg.Name == "filepath" || pkg.Name == "path") && sel.Sel.Name == "Join":
+				// ВТОРАЯ ЗАКОННАЯ ФОРМА записи координаты — по сегментам. Знать её
+				// обязательно: именно ею записан живой экземпляр. Сегмент ищется
+				// среди ВСЕХ аргументов, а не только первого: приставка к базе,
+				// полученной от детектора, — обычная и законная форма.
+				sh := joinShape(e)
+				switch {
+				case sh.climb > 0 && sh.reachesRoot && sh.climb > depth:
+					// ВТОРАЯ ФОРМА ПОДЪЁМА: фиксированная глубина.
+					if !sh.hasFullCoord {
+						v.coords++
+					}
+					v.escapes = append(v.escapes, site{line(e.Pos()), sh.rootSeg, "фиксированная глубина"})
+				case sh.climb == 0 && sh.bareRoot != "" && !sh.hasFullCoord:
+					// Целая координата среди аргументов уже сосчитана разбором
+					// литералов: два счёта одного места завысили бы перепись и
+					// удвоили бы находку.
+					v.coords++
+					if !joinBases[e] {
+						v.unanchored = append(v.unanchored, site{line(e.Pos()), sh.bareRoot, ""})
+					}
 				}
-				lit, ok := e.Args[0].(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					return true
-				}
-				if v, uerr := strconv.Unquote(lit.Value); uerr == nil && platformRootSegments[v] {
-					coords++
-				}
-			case pkg.Name == "filepath" && sel.Sel.Name == "Dir" && inLoop(e.Pos()):
-				// ПОДЪЁМ — это ЦИКЛ. Одиночное взятие каталога у пути,
-				// полученного от детектора, подъёмом не является, и требовать
-				// по нему вердикта значило бы краснеть на верном коде.
-				ascents++
 			}
 		}
 		return true
 	})
-	return coords, resolves, ascents
+
+	// ПЕРВАЯ ФОРМА ПОДЪЁМА: цикл.
+	for _, body := range loopBodies(file) {
+		if !climbsInLoop(body) {
+			continue
+		}
+		if probe := loopProbesCoordinate(body); probe != "" {
+			v.escapes = append(v.escapes, site{line(body.Pos()), probe, "цикл"})
+		}
+	}
+
+	// ЧЕТВЁРТАЯ ФОРМА ПОДЪЁМА: уровневая арифметика корня.
+	//
+	// Считается ПОСЛЕДНЕЙ и дедуплицируется по строке: там, где место уже
+	// названо формой 1-3, второе имя той же строки завысило бы перепись и
+	// удвоило бы находку.
+	levels, escapes := rootLevelEscapes(file, fset, depth)
+	v.rootLevels += levels
+	named := map[int]bool{}
+	for _, e := range v.escapes {
+		named[e.line] = true
+	}
+	for _, e := range escapes {
+		if !named[e.line] {
+			v.escapes = append(v.escapes, e)
+		}
+	}
+	return v
 }
 
-// loopSpan — границы тела цикла.
-type loopSpan struct{ from, to token.Pos }
+// ── ЧЕТВЁРТАЯ ФОРМА: УРОВНЕВАЯ АРИФМЕТИКА КОРНЯ ─────────────────────────────
+//
+// Формы 1-3 ловят подъём по тому, ЧЕМ он записан: цикл, литеральные `..`,
+// строка-координата. Четвёртая записывается иначе — ЦЕПОЧКОЙ `Dir` вне цикла:
+//
+//	filepath.Dir(filepath.Dir(serviceRoot(t)))
+//
+// Ни одного `..`, ни одной координаты — и потому она молчит у всех трёх, а
+// заодно у соседнего гейта `internal/supplyhygiene`, который судит литеральные
+// цепочки. Между тем это ровно тот же предмет: путь выводится АРИФМЕТИКОЙ и в
+// самостоятельном клоне указывает на каталог, в который клон распаковали.
+//
+// # Что считается и почему точно
+//
+// Каждому выражению приписывается УРОВЕНЬ — на сколько каталогов ВНИЗ от корня
+// модуля оно указывает (корень = 0). Уровень ниже нуля означает выход за корень.
+//
+//	runtime.Caller → ФАЙЛ,    уровень = глубина каталога + 1
+//	os.Getwd()     → КАТАЛОГ, уровень = глубина каталога
+//	Dir(x)         → уровень(x) − 1
+//	Join(x, лит…)  → уровень(x) ± сегменты, с учётом МИНИМУМА по дороге
+//	вызов функции ЭТОГО файла с выведенным уровнем возврата → её уровень
+//
+// Различие «файл против каталога» несущее, а не педантское: `Dir` дважды от
+// `runtime.Caller` в пакете глубины 1 приводит РОВНО в корень модуля, а те же два
+// шага от `os.Getwd()` в том же пакете выводят за него. Один и тот же по виду
+// код, разные исходы — поэтому база читается, а не предполагается.
+//
+// Минимум по дороге нужен потому, что путь способен выйти за корень и вернуться
+// обратно вниз (`Join(wd, "..", "..", "..", "..", "proto", "x")`): по конечному
+// уровню такой путь выглядит невинно, а читает он чужое дерево.
+//
+// Транзитивность внутри файла обязательна: живой экземпляр записан именно через
+// соседнюю функцию, и распознаватель, не входящий в неё, увидел бы «уровень не
+// выводится».
 
-func loopBodies(file *ast.File) []loopSpan {
-	var out []loopSpan
+// formRootLevel — имя четвёртой формы в находке. Константой, а не литералом в
+// двух местах: строитель текста ветвится по нему, и разошедшиеся написания дали
+// бы находку с текстом от другой формы.
+const formRootLevel = "уровневая арифметика"
+
+// levelUnknown — уровень не выводится. Отдельным значением, а не парой с флагом:
+// арифметика над ним обязана оставаться «не выводится», и одно значение это
+// свойство несёт само.
+const levelUnknown = -1 << 30
+
+// rootLevelEscapes — сколько уровней ВЫВЕДЕНО и какие из них выходят за корень.
+//
+// Возвращает обе величины, а не только находки: «подъёмов ноль» обязано быть
+// отличимо от «ни одного уровня не выведено», иначе ось молчит и выглядит
+// исправной.
+func rootLevelEscapes(file *ast.File, fset *token.FileSet, depth int) (derived int, out []site) {
+	ev := &rootLevelEval{depth: depth, fnLevel: map[string]int{}}
+
+	// Два прохода: уровни возврата функций обязаны быть известны прежде, чем их
+	// читает вызывающий. Один проход зависел бы от порядка объявлений в файле —
+	// то есть давал бы разный вердикт об одном и том же коде.
+	for pass := 0; pass < 2; pass++ {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			ev.cur = fn.Name.Name
+			ev.varLevel = map[string]int{}
+
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				switch s := n.(type) {
+				case *ast.AssignStmt:
+					ev.bindAssign(s)
+				case *ast.ReturnStmt:
+					if pass != 0 {
+						break
+					}
+					for _, r := range s.Results {
+						if lv := ev.level(r, 0, 1); lv != levelUnknown {
+							if old, seen := ev.fnLevel[fn.Name.Name]; !seen || lv < old {
+								ev.fnLevel[fn.Name.Name] = lv
+							}
+						}
+					}
+				}
+				if pass == 1 {
+					if call, ok := n.(*ast.CallExpr); ok {
+						if lv := ev.level(call, 0, 1); lv != levelUnknown {
+							derived++
+							if lv < 0 {
+								out = append(out, site{
+									fset.Position(call.Pos()).Line,
+									fmt.Sprintf("уровень %d", lv),
+									formRootLevel,
+								})
+							}
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
+
+	// Одна строка называется один раз: вложенная цепочка `Dir(Dir(x))` даёт два
+	// выражения с отрицательным уровнем, а место у них одно.
+	seen := map[int]bool{}
+	uniq := out[:0]
+	for _, e := range out {
+		if !seen[e.line] {
+			seen[e.line] = true
+			uniq = append(uniq, e)
+		}
+	}
+	return derived, uniq
+}
+
+// rootLevelEval — вывод уровня внутри ОДНОГО файла.
+type rootLevelEval struct {
+	depth    int            // глубина каталога файла под корнем модуля
+	cur      string         // имя разбираемой функции: рекурсию не разворачиваем
+	fnLevel  map[string]int // уровень возврата функций этого файла
+	varLevel map[string]int // уровень имён текущей функции
+}
+
+// bindAssign — связывает имена с уровнями правой части.
+func (ev *rootLevelEval) bindAssign(s *ast.AssignStmt) {
+	for i, l := range s.Lhs {
+		id, ok := l.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		var lv int
+		switch {
+		case len(s.Rhs) == 1:
+			lv = ev.level(s.Rhs[0], i, len(s.Lhs))
+		case i < len(s.Rhs):
+			lv = ev.level(s.Rhs[i], 0, 1)
+		default:
+			lv = levelUnknown
+		}
+		if lv != levelUnknown {
+			ev.varLevel[id.Name] = lv
+		}
+	}
+}
+
+// level — уровень выражения либо levelUnknown.
+//
+// idx/n — позиция в многозначном присваивании: у `runtime.Caller` путь стоит
+// ВТОРЫМ результатом, и приписывать уровень первому значило бы утверждать о
+// счётчике кадров.
+func (ev *rootLevelEval) level(e ast.Expr, idx, n int) int {
+	switch x := e.(type) {
+	case *ast.Ident:
+		if lv, ok := ev.varLevel[x.Name]; ok {
+			return lv
+		}
+		return levelUnknown
+	case *ast.CallExpr:
+		return ev.callLevel(x, idx, n)
+	}
+	return levelUnknown
+}
+
+func (ev *rootLevelEval) callLevel(x *ast.CallExpr, idx, n int) int {
+	sel, ok := x.Fun.(*ast.SelectorExpr)
+	if !ok {
+		// Вызов функции ЭТОГО файла: транзитивность, без которой живой экземпляр
+		// не виден. Себя не разворачиваем — рекурсия уровня не имеет.
+		if id, ok := x.Fun.(*ast.Ident); ok && id.Name != ev.cur {
+			if lv, seen := ev.fnLevel[id.Name]; seen {
+				return lv
+			}
+		}
+		return levelUnknown
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return levelUnknown
+	}
+	pathPkg := pkg.Name == "filepath" || pkg.Name == "path"
+	switch {
+	case pkg.Name == "runtime" && sel.Sel.Name == "Caller" && n > 1 && idx == 1:
+		return ev.depth + 1 // ФАЙЛ, а не каталог
+	case pkg.Name == "os" && sel.Sel.Name == "Getwd" && idx == 0:
+		return ev.depth // КАТАЛОГ
+	case pathPkg && sel.Sel.Name == "Dir" && len(x.Args) == 1:
+		base := ev.level(x.Args[0], 0, 1)
+		if base == levelUnknown {
+			return levelUnknown
+		}
+		return base - 1
+	case pathPkg && sel.Sel.Name == "Join" && len(x.Args) > 0:
+		return ev.joinLevel(x)
+	}
+	return levelUnknown
+}
+
+// joinLevel — уровень `Join` с МИНИМУМОМ по дороге.
+//
+// Нелитеральный сегмент делает уровень невыводимым целиком: приписывать шаг
+// выражению, которого мы не прочитали, значило бы утверждать о непрочитанном.
+func (ev *rootLevelEval) joinLevel(x *ast.CallExpr) int {
+	lvl := ev.level(x.Args[0], 0, 1)
+	if lvl == levelUnknown {
+		return levelUnknown
+	}
+	low := lvl
+	for _, a := range x.Args[1:] {
+		lit, ok := a.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return levelUnknown
+		}
+		s, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return levelUnknown
+		}
+		for _, seg := range strings.Split(filepath.ToSlash(s), "/") {
+			switch seg {
+			case "..":
+				lvl--
+			case ".", "":
+			default:
+				lvl++
+			}
+			if lvl < low {
+				low = lvl
+			}
+		}
+	}
+	if low < 0 {
+		return low
+	}
+	return lvl
+}
+
+// joinShape — форма пути, собранного `Join`.
+//
+// Считаются ТОЛЬКО литеральные аргументы: выражение может быть чем угодно, и
+// приписывать ему подъём значило бы утверждать о том, что не прочитано.
+type joinForm struct {
+	climb        int    // сколько шагов вверх дают литеральные `..`
+	reachesRoot  bool   // достаёт ли путь до корневого сегмента платформы
+	rootSeg      string // чем именно достаёт — для текста находки
+	bareRoot     string // ГОЛЫЙ корневой сегмент (`"proto"`), если он есть
+	hasFullCoord bool   // среди аргументов есть ЦЕЛАЯ координата (`"proto/…"`)
+}
+
+func joinShape(call *ast.CallExpr) joinForm {
+	var f joinForm
+	for _, a := range call.Args {
+		lit, ok := a.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			continue
+		}
+		s, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			continue
+		}
+		c, r := climbOf(s)
+		f.climb += c
+		if isPlatformCoordinate(s) {
+			f.hasFullCoord = true
+			r = true
+		}
+		if platformRootSegments[s] && f.bareRoot == "" {
+			f.bareRoot = s
+		}
+		if r {
+			f.reachesRoot = true
+			if f.rootSeg == "" {
+				f.rootSeg = s
+			}
+		}
+	}
+	return f
+}
+
+// anchorMap — что в этом файле УЖЕ приведено детектором.
+//
+// Три вида якоря, и все три законны:
+//
+//	литерал стоит аргументом детектора    → platformtree.RequirePath(t, "proto/…")
+//	литерал связан с именем, которое ему  → const rel = "proto/…"; …Require(t, rel)
+//	   передают
+//	`Join` приставлен к базе от детектора → filepath.Join(root, "services", …)
+func anchorMap(file *ast.File) (litArgs map[*ast.BasicLit]bool, joinBases map[*ast.CallExpr]bool) {
+	anchoredIdents := map[string]bool{}
+	litArgs = map[*ast.BasicLit]bool{}
+	joinBases = map[*ast.CallExpr]bool{}
+
+	detectorCall := func(n ast.Node) bool {
+		c, ok := n.(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		sel, ok := c.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return false
+		}
+		id, ok := sel.X.(*ast.Ident)
+		return ok && detectorPackages[id.Name] && detectorResolvers[sel.Sel.Name]
+	}
+
+	// Имена, полученные ОТ детектора, и имена, ПЕРЕДАННЫЕ детектору.
+	derived := map[string]bool{}
+	bind := func(lhs, rhs []ast.Expr) {
+		for i, r := range rhs {
+			if !detectorCall(r) {
+				continue
+			}
+			for j, l := range lhs {
+				id, ok := l.(*ast.Ident)
+				if !ok {
+					continue
+				}
+				if len(rhs) == 1 || i == j {
+					derived[id.Name] = true
+				}
+			}
+		}
+	}
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch s := n.(type) {
+		case *ast.AssignStmt:
+			bind(s.Lhs, s.Rhs)
+		case *ast.ValueSpec:
+			lhs := make([]ast.Expr, 0, len(s.Names))
+			for _, nm := range s.Names {
+				lhs = append(lhs, nm)
+			}
+			bind(lhs, s.Values)
+		}
+		if detectorCall(n) {
+			for _, a := range n.(*ast.CallExpr).Args {
+				switch x := a.(type) {
+				case *ast.BasicLit:
+					litArgs[x] = true
+				case *ast.Ident:
+					anchoredIdents[x.Name] = true
+				}
+			}
+		}
+		return true
+	})
+
+	// Литерал, связанный с якорным именем, якорен вместе с ним.
+	markBound := func(lhs, rhs []ast.Expr) {
+		for i, l := range lhs {
+			id, ok := l.(*ast.Ident)
+			if !ok || !anchoredIdents[id.Name] || i >= len(rhs) {
+				continue
+			}
+			if lit, ok := rhs[i].(*ast.BasicLit); ok {
+				litArgs[lit] = true
+			}
+		}
+	}
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch s := n.(type) {
+		case *ast.AssignStmt:
+			markBound(s.Lhs, s.Rhs)
+		case *ast.ValueSpec:
+			lhs := make([]ast.Expr, 0, len(s.Names))
+			for _, nm := range s.Names {
+				lhs = append(lhs, nm)
+			}
+			markBound(lhs, s.Values)
+		case *ast.CallExpr:
+			sel, ok := s.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			pk, ok := sel.X.(*ast.Ident)
+			if !ok || (pk.Name != "filepath" && pk.Name != "path") || sel.Sel.Name != "Join" || len(s.Args) == 0 {
+				return true
+			}
+			switch base := s.Args[0].(type) {
+			case *ast.Ident:
+				if derived[base.Name] {
+					joinBases[s] = true
+				}
+			case *ast.CallExpr:
+				if detectorCall(base) {
+					joinBases[s] = true
+				}
+			}
+			// База от детектора приводит к посадке ВСЕ сегменты, приставленные к
+			// ней, — включая записанные целой координатой.
+			if joinBases[s] {
+				for _, a := range s.Args {
+					if lit, ok := a.(*ast.BasicLit); ok {
+						litArgs[lit] = true
+					}
+				}
+			}
+		}
+		return true
+	})
+	return litArgs, joinBases
+}
+
+func loopBodies(file *ast.File) []*ast.BlockStmt {
+	var out []*ast.BlockStmt
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch s := n.(type) {
 		case *ast.ForStmt:
-			out = append(out, loopSpan{s.Body.Pos(), s.Body.End()})
+			out = append(out, s.Body)
 		case *ast.RangeStmt:
-			out = append(out, loopSpan{s.Body.Pos(), s.Body.End()})
+			out = append(out, s.Body)
 		}
 		return true
 	})
 	return out
 }
 
+// climbsInLoop — тело цикла ПОДНИМАЕТСЯ, а не просто берёт каталог.
+//
+// Подъём — это `Dir(x)`, где `x` в том же теле ПЕРЕПРИСВАИВАЕТСЯ. Обе живые формы
+// записи покрыты одним признаком: и прямая (`dir = filepath.Dir(dir)`), и
+// двухшаговая (`parent := filepath.Dir(dir); …; dir = parent`), которой записан
+// сам детектор. Одиночное взятие каталога у элемента обхода
+// (`d := filepath.Dir(vp)`) подъёмом НЕ является, и требовать по нему вердикта
+// значило бы краснеть на верном коде — такой код в дереве есть.
+func climbsInLoop(body *ast.BlockStmt) bool {
+	dirArgs := map[string]bool{}
+	assigned := map[string]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch s := n.(type) {
+		case *ast.CallExpr:
+			sel, ok := s.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			pk, ok := sel.X.(*ast.Ident)
+			if !ok || (pk.Name != "filepath" && pk.Name != "path") || sel.Sel.Name != "Dir" || len(s.Args) != 1 {
+				return true
+			}
+			if id, ok := s.Args[0].(*ast.Ident); ok {
+				dirArgs[id.Name] = true
+			}
+		case *ast.AssignStmt:
+			for _, l := range s.Lhs {
+				if id, ok := l.(*ast.Ident); ok {
+					assigned[id.Name] = true
+				}
+			}
+		}
+		return true
+	})
+	for name := range dirArgs {
+		if assigned[name] {
+			return true
+		}
+	}
+	return false
+}
+
+// loopProbesCoordinate — что цикл ЩУПАЕТ.
+//
+// Различитель между побегом и законным подъёмом к маркеру модуля: цикл, ищущий
+// `go.mod`, останавливается на СВОЁМ корне и за него не выходит — так устроен сам
+// детектор, и краснеть на нём значило бы запретить единственный правильный
+// способ. Цикл, ищущий координату ПЛАТФОРМЫ, за корень модуля выходит всегда.
+func loopProbesCoordinate(body *ast.BlockStmt) string {
+	found := ""
+	ast.Inspect(body, func(n ast.Node) bool {
+		lit, ok := n.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING || found != "" {
+			return true
+		}
+		s, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return true
+		}
+		if isPlatformCoordinate(s) || platformRootSegments[s] {
+			found = s
+		}
+		return true
+	})
+	return found
+}
+
 // readGoSources — исходники Go названного каталога (без подкаталогов).
-func readGoSources(t *testing.T, dir string) map[string]string {
+func readGoSources(t *testing.T, dir string, depth int) []sourceFile {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: каталог пакета не прочитан (%s): %v", dir, err)
 	}
-	out := map[string]string{}
+	var out []sourceFile
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
 			continue
@@ -250,21 +892,23 @@ func readGoSources(t *testing.T, dir string) map[string]string {
 		if rerr != nil {
 			t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: исходник не прочитан (%s): %v", e.Name(), rerr)
 		}
-		out[e.Name()] = string(b)
+		out = append(out, sourceFile{Name: e.Name(), Depth: depth, Text: string(b)})
 	}
 	return out
 }
 
 // TestPlatformCoordinatesInThisPackageResolveThroughTheDetector — вердикт о
-// НАСТОЯЩЕМ пакете.
+// НАСТОЯЩЕМ пакете по ОБЕИМ осям.
 func TestPlatformCoordinatesInThisPackageResolveThroughTheDetector(t *testing.T) {
-	sources := readGoSources(t, platformtree.RequirePath(t, domainPackageDir))
+	sources := readGoSources(t, platformtree.RequirePath(t, domainPackageDir), domainPackageDepth)
 
 	findings, census, err := auditPlatformCoordinateResolve(sources)
 	if err != nil {
 		t.Fatalf("разбор не отработал: %v", err)
 	}
-	t.Logf("объём осмотренного: %s", census)
+	t.Logf("осмотрено: %s", census)
+	t.Logf("найдено: координат без якоря %d · подъёмов %d",
+		len(findings.Unanchored), len(findings.Ascents))
 
 	// Премиса: «ноль находок» обязано быть отличимо от «ноль прочитанного».
 	// Числа координат здесь НЕ требуется: ноль координат — законная цель (пробы
@@ -274,7 +918,103 @@ func TestPlatformCoordinatesInThisPackageResolveThroughTheDetector(t *testing.T)
 		t.Fatal("обход пуст: ни одного файла Go не прочитано — вердикт беспредметен")
 	}
 
-	for _, f := range findings {
+	for _, f := range findings.Unanchored {
 		t.Errorf("НАХОДКА: %s", f)
 	}
+	for _, f := range findings.Ascents {
+		t.Errorf("НАХОДКА: %s", f)
+	}
+}
+
+// TestNoSelfAscentToAPlatformCoordinateInTheModule — сплошная перепись по ВСЕМУ
+// модулю по ОСИ ПОДЪЁМА (задача #2282).
+//
+// Ось якоря здесь НЕ судится, и это решение, а не пропуск: на модуле она упёрлась
+// бы в синтетические корни (`t.TempDir()` и его потомки), у которых якоря нет и
+// быть не должно. Ось подъёма точна by construction — её различители
+// арифметические (подъём против глубины) и предметные (что щупает цикл).
+func TestNoSelfAscentToAPlatformCoordinateInTheModule(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: рабочий каталог не установлен: %v", err)
+	}
+	moduleRoot, err := platformtree.ModuleRootFrom(wd)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не установлен: %v", err)
+	}
+
+	sources, skipped := moduleGoSources(t, moduleRoot)
+
+	findings, census, err := auditPlatformCoordinateResolve(sources)
+	if err != nil {
+		t.Fatalf("разбор не отработал: %v", err)
+	}
+	t.Logf("осмотрено по модулю (%s): %s", moduleRoot, census)
+	t.Logf("найдено: подъёмов %d (ось якоря на модуле не судится — см. шапку)",
+		len(findings.Ascents))
+
+	// Обе премисы разом: пустой обход и обход БЕЗ единого резолва одинаково
+	// означают, что распознаватель ничего не прочитал, — и оба обязаны ронять
+	// прогон, а не печатать зелёное (предикат #2282).
+	if census.Files == 0 {
+		t.Fatal("обход пуст: ни одного файла Go не прочитано — вердикт беспредметен")
+	}
+	if census.Resolves == 0 {
+		t.Fatal("резолвов через детектор посадки ноль: распознаватель не увидел ни одного " +
+			"законного якоря — вердикт о подъёмах беспредметен")
+	}
+	// Премиса ЧЕТВЁРТОЙ формы, и она отдельная: ось уровневой арифметики молчит
+	// не только на чистом дереве, но и тогда, когда не вывела НИ ОДНОГО уровня, —
+	// и оба молчания печатают «подъёмов 0». Различает их только эта величина.
+	if census.RootLevels == 0 {
+		t.Fatal("выражений с выводимым уровнем корня ноль: ось уровневой арифметики " +
+			"не прочитала ничего — её «подъёмов 0» ничего не означает")
+	}
+	if skipped != 0 {
+		t.Fatalf("файлов не прочитано: %d — «ноль находок» стало бы «ноль прочитанного»", skipped)
+	}
+
+	for _, f := range findings.Ascents {
+		t.Errorf("НАХОДКА: %s", f)
+	}
+}
+
+// moduleGoSources — все исходники Go модуля со своей глубиной.
+func moduleGoSources(t *testing.T, root string) (out []sourceFile, skipped int) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if d.IsDir() {
+			// Чужие деревья внутри модуля вердикту не подлежат.
+			if n := d.Name(); n == "vendor" || n == "node_modules" || n == ".git" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".go") {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, p)
+		if rerr != nil {
+			skipped++
+			return nil
+		}
+		b, ferr := os.ReadFile(p)
+		if ferr != nil {
+			skipped++
+			return nil
+		}
+		depth := 0
+		if dir := filepath.ToSlash(filepath.Dir(rel)); dir != "." {
+			depth = len(strings.Split(dir, "/"))
+		}
+		out = append(out, sourceFile{Name: filepath.ToSlash(rel), Depth: depth, Text: string(b)})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: обход модуля не отработал: %v", err)
+	}
+	return out, skipped
 }

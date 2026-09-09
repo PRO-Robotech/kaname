@@ -78,6 +78,15 @@ type fakeStore struct {
 	iamDirectSelectorBindings []domain.AccessBindingID
 	lockOrder                 []domain.AccessBindingID
 
+	// wrote / locksAfterFirstWrite — ПОРЯДОК РОДОВ ресурсов внутри одного прохода.
+	// Строки прямого факта общие (ключуются субъектом, объектом и отношением, а не
+	// выдачей), поэтому проход, взявший чужой advisory уже удерживая такую строку,
+	// образует цикл ожидания со снятием выдачи — та берёт свой advisory первым
+	// стейтментом, а общие строки трогает после. Двойник записывает КАЖДЫЙ захват,
+	// случившийся после первой записи: непустой список и есть возвращённый дефект.
+	wrote                bool
+	locksAfterFirstWrite []domain.AccessBindingID
+
 	// scopeSelfVerbs seeds BindingScope.ScopeSelfVerbs — the role's verbs ON the
 	// binding's own scope anchor (account:<X>/project:<X>). Empty ⇒ no scope-self member
 	// (the default for the content-selector slices).
@@ -87,8 +96,24 @@ type fakeStore struct {
 func (f *fakeStore) AcquireBindingLock(ctx context.Context, id domain.AccessBindingID) error {
 	f.locks++
 	f.lockOrder = append(f.lockOrder, id)
+	if f.wrote {
+		f.locksAfterFirstWrite = append(f.locksAfterFirstWrite, id)
+	}
 	return nil
 }
+
+func (f *fakeStore) AcquireBindingLocks(ctx context.Context, ids []domain.AccessBindingID) error {
+	for _, id := range ids {
+		if err := f.AcquireBindingLock(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// note отмечает, что проход что-то ЗАПИСАЛ. Дальше всякий захват advisory попадёт
+// в locksAfterFirstWrite.
+func (f *fakeStore) note() { f.wrote = true }
 
 func (f *fakeStore) LoadBinding(ctx context.Context, id domain.AccessBindingID) (BindingScope, bool, error) {
 	return BindingScope{
@@ -276,10 +301,12 @@ func (f *fakeStore) IAMDirectSelectorBindingsMatchingObject(ctx context.Context,
 	return f.iamDirectSelectorBindings, nil
 }
 func (f *fakeStore) UpsertMember(ctx context.Context, m domain.TargetMember) error {
+	f.note()
 	f.upserts = append(f.upserts, m)
 	return nil
 }
 func (f *fakeStore) DeleteMember(ctx context.Context, id domain.AccessBindingID, ruleFP, ot, oid string) error {
+	f.note()
 	f.deletes = append(f.deletes, memberKey(ot, oid))
 	return nil
 }
@@ -309,14 +336,17 @@ func (f *fakeStore) TuplesStillClaimedByOtherBindings(ctx context.Context, exclu
 	return map[domain.MembershipTuple]struct{}{}, nil
 }
 func (f *fakeStore) EmitTupleWrite(ctx context.Context, ts []domain.MembershipTuple) error {
+	f.note()
 	f.writes = append(f.writes, ts)
 	return nil
 }
 func (f *fakeStore) EmitTupleDelete(ctx context.Context, ts []domain.MembershipTuple) error {
+	f.note()
 	f.tdeletes = append(f.tdeletes, ts)
 	return nil
 }
 func (f *fakeStore) RecordEmittedTuples(ctx context.Context, id domain.AccessBindingID, ts []domain.MembershipTuple) error {
+	f.note()
 	f.recorded = append(f.recorded, ts)
 	return nil
 }
@@ -327,6 +357,7 @@ func (f *fakeStore) RecordEmittedTuples(ctx context.Context, id domain.AccessBin
 // изменившимся предметом наблюдения. Пустой набор ничего не добавляет, чтобы проход,
 // не сделавший ничего, не выглядел сделавшим.
 func (f *fakeStore) UpsertMembers(ctx context.Context, ms []domain.TargetMember) error {
+	f.note()
 	f.upserts = append(f.upserts, ms...)
 	return nil
 }
@@ -335,6 +366,7 @@ func (f *fakeStore) RecordEmittedTuplesBatch(ctx context.Context, refs []Emitted
 	if len(refs) == 0 {
 		return nil
 	}
+	f.note()
 	byBinding := make(map[domain.AccessBindingID][]domain.MembershipTuple, 1)
 	order := make([]domain.AccessBindingID, 0, 1)
 	for _, ref := range refs {
@@ -349,10 +381,12 @@ func (f *fakeStore) RecordEmittedTuplesBatch(ctx context.Context, refs []Emitted
 	return nil
 }
 func (f *fakeStore) ForgetEmittedTuples(ctx context.Context, id domain.AccessBindingID, ts []domain.MembershipTuple) error {
+	f.note()
 	f.forgotten = append(f.forgotten, ts)
 	return nil
 }
 func (f *fakeStore) EmitContainmentAudit(ctx context.Context, id domain.AccessBindingID, ot, oid string, s domain.ScopeAnchor) error {
+	f.note()
 	f.audits = append(f.audits, oid)
 	return nil
 }
@@ -686,4 +720,55 @@ func TestReconcileObject_FanOut_DeterministicLockOrder(t *testing.T) {
 	// Each distinct binding is locked exactly once (dedup) ...
 	assert.Equal(t, []domain.AccessBindingID{"acb-a", "acb-b", "acb-c"}, f.lockOrder,
 		"fan-out must acquire advisory locks in a globally-consistent (sorted ASC, deduped) order to be deadlock-free")
+}
+
+// ── deadlock-class, ВТОРАЯ половина: ВСЕ замки веера берутся ДО ПЕРВОЙ ЗАПИСИ ────
+//
+// Сортировка выше разводит проходы веера МЕЖДУ СОБОЙ: оба спорят за ресурсы одного
+// рода (advisory), и общий порядок их упорядочивает. Со СНЯТИЕМ выдачи она не
+// помогает вовсе — там роды РАЗНЫЕ. Снятие берёт свой advisory первым стейтментом и
+// лишь потом трогает строки прямого факта; те общие — ключуются субъектом, объектом
+// и отношением, а не выдачей. Пока веер брал замок перед работой каждой выдачи, он
+// приходил к очередному advisory, УЖЕ удерживая строку прямого факта предыдущей, и
+// пара сходилась в цикл ожидания (40P01).
+//
+// Проба утверждает порядок РОДОВ, а не исход прогона: после первой записи проход не
+// вправе брать НИ ОДНОГО нового advisory. Утверждение о порядке живёт здесь потому,
+// что это свойство КОДА прохода; что из него следует на живой базе, утверждает
+// интеграционная проба снятия (delete_fanout_deadlock_integration_test.go).
+//
+// RED до починки: захват стоял внутри reconcileBindingForObject, поэтому после
+// записей первой выдачи веер брал ещё два замка — locksAfterFirstWrite = [acb-b, acb-c].
+func TestReconcileObject_FanOut_LocksBeforeAnyWrite(t *testing.T) {
+	rule := domain.Rule{Module: "compute", Resources: []string{"instance"}, Verbs: []string{"get"}}
+	f := &fakeStore{
+		scope:       domain.ScopeAnchor{Type: "project", ID: "prj-1"},
+		subjectType: "user", subjectID: "usr-1", active: true,
+		selectors: []domain.RuleSelector{{
+			Arm: domain.ArmAnchor, RuleFP: rule.Fingerprint(),
+			ObjectTypes: []string{"compute.instance"},
+			Verbs:       []string{"get"},
+		}},
+		mirror: map[string][]domain.MirrorObject{
+			"compute.instance": {
+				{ObjectType: "compute.instance", ObjectID: "iX", ParentProjectID: "prj-1"},
+			},
+		},
+		// Три выдачи одного субъекта на одном объекте — то самое расположение, при
+		// котором строка прямого факта у них ОДНА.
+		bindingsForObject: []domain.AccessBindingID{"acb-c", "acb-a"},
+		selectorBindings:  []domain.AccessBindingID{"acb-b"},
+	}
+	rec := New(fakeRunner{s: f}, nil, catalogfixture.Source())
+	require.NoError(t, rec.ReconcileObject(context.Background(), "compute.instance", "iX"))
+
+	// Положительный контроль: проход действительно ПИСАЛ. Без него утверждение ниже
+	// зеленело бы на проходе, который ничего не делает, — а такой не берёт ни одной
+	// строки прямого факта и потому не может образовать цикл ни при каком порядке.
+	require.True(t, f.wrote, "контроль: проход обязан что-то записать")
+	require.Len(t, f.lockOrder, 3, "контроль: замки взяты на все три выдачи веера")
+
+	assert.Empty(t, f.locksAfterFirstWrite,
+		"веер не вправе брать advisory после первой записи: ожидание чужого замка с "+
+			"удерживаемой строкой прямого факта и есть цикл, снимаемый как 40P01")
 }

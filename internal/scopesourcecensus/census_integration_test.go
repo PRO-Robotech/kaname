@@ -11,9 +11,20 @@ package scopesourcecensus_test
 // Перепись — прибор, и судить надо ЕГО, а не пересказ его логики на Go. Проба,
 // переписавшая запрос и разбор у себя, доказывала бы согласие двух своих же
 // записей и осталась бы зелёной при любой правке скрипта. Поэтому здесь
-// исполняется `deploy/load-tests/iam-scope-source-census.sh` — тот самый файл,
+// исполняется `services/iam/tools/scope-source-census.sh` — тот самый файл,
 // который запускают на стенде, — через переносимый путь `PSQL_DSN`. Оба пути
 // исполняют ОДИН запрос: тот, что печатает генератор.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПОЧЕМУ КООРДИНАТА ПРИБОРА ПРИВОДИТСЯ К ПОСАДКЕ (#2378)
+//
+// Прибор жил под `deploy/` ПЛАТФОРМЫ, а единственный его исполнитель — эта
+// проба — внутри службы. После разреза он остался бы у платформы без единого
+// читателя (инструмент без исполнителя неотличим от исправного: он не падает,
+// потому что его не зовут), а проба уехала бы со службой и объявила третий
+// исход. Прибор перенесён в дерево службы, и координата берётся у резолва
+// посадки, а не у `git rev-parse`: вершина дерева отвечает про МОНОРЕПО в одной
+// посадке и про модуль в другой, то есть склейка от неё дала бы разный путь.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО БЫЛО КРАСНЫМ ДО РАБОТЫ И ПОЧЕМУ
@@ -52,11 +63,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho/pkg/gitenv"
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
-const censusScript = "deploy/load-tests/iam-scope-source-census.sh"
+// censusScript — координата прибора ОТ КОРНЯ ДЕРЕВА ПЛАТФОРМЫ. Она лежит внутри
+// каталога модуля, поэтому резолв посадки (platformtree.RequirePath) возвращает
+// её в ОБЕИХ посадках: в монорепо — от его корня, в самостоятельном клоне —
+// от корня модуля, сняв приставку. Пропуска здесь не бывает by construction.
+const censusScript = "services/iam/tools/scope-source-census.sh"
 
 // censusRun — исход прогона прибора: три категории, и третья не вычитается.
 type censusRun struct {
@@ -67,28 +83,45 @@ type censusRun struct {
 
 func (r censusRun) all() string { return r.stdout + "\n" + r.stderr }
 
-func repoRoot(t *testing.T) string {
+// censusScriptPath — путь прибора, приведённый к посадке, и КАТАЛОГ ЗАПУСКА.
+//
+// Каталог запуска — корень МОДУЛЯ, а не вершина дерева: прибор переходит в него
+// сам, но рабочий каталог пробы задаёт ещё и то, откуда резолвится посадка.
+func censusScriptPath(t *testing.T) (script, dir string) {
 	t.Helper()
-	out, err := gitenv.Command("", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		t.Fatalf("корень дерева не установлен (%v): пробе негде взять прибор, и её "+
-			"молчание не означало бы исправности переписи", err)
+	script = platformtree.RequirePath(t, censusScript)
+	if _, err := os.Stat(script); err != nil {
+		t.Fatalf("прибор %s не найден (%v): это НЕ вердикт переписи, а «условие не "+
+			"создано» на стороне пробы", script, err)
 	}
-	return strings.TrimSpace(string(out))
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("рабочий каталог не установлен: %v", err)
+	}
+	dir, err = platformtree.ModuleRootFrom(wd)
+	if err != nil {
+		t.Fatalf("корень модуля не установлен (%v): прибор зовёт генератор своего "+
+			"модуля, и без корня звать его неоткуда", err)
+	}
+	return script, dir
 }
 
 // runCensus исполняет ПРИБОР против названной базы.
 func runCensus(t *testing.T, dsn string, env ...string) censusRun {
 	t.Helper()
+	// Порядок несущий: сперва РЕЗОЛВ ПРИБОРА, потом проверка окружения.
+	// Отсутствие прибора есть находка о дереве, отсутствие psql — «условие не
+	// создано». Спросив второе первым, мы бы прятали первое за пропуском: на
+	// машине без psql перенос прибора в никуда выглядел бы исправным.
+	script, dir := censusScriptPath(t)
 	if _, err := exec.LookPath("psql"); err != nil {
-		t.Skipf("psql не установлен: прибор исполнить нечем (%v)", err)
+		t.Skipf("psql не установлен: прибор %s найден, исполнить его нечем (%v)", script, err)
 	}
-	root := repoRoot(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", filepath.Join(root, censusScript)) // #nosec G204 -- путь собран из корня СОБСТВЕННОГО дерева и константы пакета, снаружи сюда не приходит ничего
-	cmd.Dir = root
+	cmd := exec.CommandContext(ctx, "bash", script) // #nosec G204 -- путь собран резолвом посадки СОБСТВЕННОГО дерева и константы пакета, снаружи сюда не приходит ничего
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), append([]string{"PSQL_DSN=" + dsn}, env...)...)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
@@ -522,4 +555,43 @@ func TestR7_4_15_WalkLimitIsCheckedNotAssumed(t *testing.T) {
 	if strings.Contains(run.all(), "усекает цепь МОЛЧА") {
 		t.Errorf("перепись отказала по пределу при штатном значении:\n%s", run.all())
 	}
+}
+
+// TestCensusInstrumentLivesBesideItsOnlyExecutor — ПРЕЕМНИК #2378 и единственное
+// утверждение этого файла, не требующее ни базы, ни psql.
+//
+// Предмет. У прибора переписи исполнитель ровно один — пробы этого файла. Пока
+// прибор лежал в дереве платформы, разрез развёл бы их по разным деревьям:
+// прибор остался бы у платформы БЕЗ ЕДИНОГО читателя, а пробы уехали бы со
+// службой и объявили третий исход. Инструмент, которого не зовут, неотличим от
+// исправного — он не падает, потому что его не исполняют.
+//
+// Здесь утверждается ровно то, чего не хватало: прибор и его исполнитель лежат
+// в ОДНОМ дереве, и координата у них одна в обеих посадках. Утверждение
+// исполнимо без Postgres, без psql и без дерева платформы — то есть переживает
+// разрез, ради которого написано.
+func TestCensusInstrumentLivesBesideItsOnlyExecutor(t *testing.T) {
+	script, moduleRoot := censusScriptPath(t)
+
+	rel, err := filepath.Rel(moduleRoot, script)
+	if err != nil {
+		t.Fatalf("прибор %s не выражается от корня модуля %s: %v", script, moduleRoot, err)
+	}
+	if strings.HasPrefix(rel, "..") {
+		t.Fatalf("прибор лежит ВНЕ модуля (%s от %s): после разреза он останется в чужом "+
+			"дереве, а исполнитель уедет с этим — то есть без исполнителя", rel, moduleRoot)
+	}
+
+	info, err := os.Stat(script)
+	if err != nil {
+		t.Fatalf("прибор %s не читается: %v", script, err)
+	}
+	if info.Mode()&0o111 == 0 {
+		t.Fatalf("прибор %s не исполняем (%v): перенос сохранил файл и потерял право "+
+			"запуска", script, info.Mode())
+	}
+
+	// Объём осмотренного: «ноль находок» обязано быть отличимо от «ноль
+	// прочитанного», поэтому посадка и координата печатаются всегда.
+	t.Logf("перепись: корень модуля %s · прибор %s · размер %d Б", moduleRoot, rel, info.Size())
 }

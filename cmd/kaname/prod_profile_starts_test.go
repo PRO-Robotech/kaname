@@ -175,6 +175,8 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 	// ВСЕГДА — и профиль, не объявивший их транспорт, ставит службу открытым
 	// текстом. Ручки этих рёбер задавал зонтичный чарт монорепо; у отдельно
 	// поставленной службы его нет.
+	internalRESTAddr := httpEdgeAddr(t, values, defaults, "api-server.internal-rest-endpoint",
+		"apiServer", "internalRestEndpoint")
 	httpEdges := iamHTTPEdges(
 		httpEdgeAddr(t, values, defaults, "authn.hooks-http-endpoint",
 			"authn", "hooksHttpEndpoint"),
@@ -189,8 +191,7 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		// формой, но без предмета.
 		httpEdgeAddr(t, values, defaults, "api-server.rest-endpoint",
 			"apiServer", "restEndpoint"),
-		httpEdgeAddr(t, values, defaults, "api-server.internal-rest-endpoint",
-			"apiServer", "internalRestEndpoint"),
+		internalRESTAddr,
 		mtlsCfg,
 	)
 	require.NotEmpty(t, httpEdges, "перечень HTTP-рёбер пуст — вердикт беспредметен")
@@ -223,6 +224,23 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 	require.Empty(t, declaredPlaintext,
 		"боевой профиль этого чарта объявил исключение открытого текста: %v", declaredPlaintext)
 	t.Logf("объявленных исключений открытого текста: %d", len(declaredPlaintext))
+
+	// ── РУБЕЖ ВНУТРЕННЕГО REST-ФРОНТА ───────────────────────────────────────
+	//
+	// Транспорт у этого ребра проверен выше, и его мало: шифрование и
+	// аутентификация СЕРВЕРА не говорят о вызывающем ничего. У этой поверхности
+	// рубеж бывает только транспортный — фронт своего не заводит и к собственному
+	// слушателю идёт СВОИМ удостоверением, — поэтому режим проверки клиента
+	// судится отдельным стражем и здесь исполняется дословно тот же (#2335).
+	require.NotEmpty(t, internalRESTAddr,
+		"боевой профиль не объявил адреса внутреннего REST-фронта: страж рубежа "+
+			"пропускает поверхность с пустым адресом by construction, и вердикта о ней "+
+			"не будет вовсе")
+	require.NoError(t, requireInternalRESTMutualClientAuth(productionMode, internalRESTAddr, mtlsCfg),
+		"боевой профиль не проходит стража рубежа внутреннего REST-фронта: объявленная "+
+			"посадка неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
+	t.Logf("рубеж внутреннего REST-фронта: режим %q, требует клиентского сертификата: %v",
+		mtlsCfg.InternalRESTClientAuthModeValue(), mtlsCfg.InternalRESTRequiresClientCert())
 }
 
 // httpEdgeAddr — адрес слушателя: объявленный профилем либо умолчание процесса.

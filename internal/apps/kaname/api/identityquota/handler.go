@@ -15,9 +15,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	quotav1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/quota/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/quota/quotapb"
 	"github.com/PRO-Robotech/kacho/pkg/quota/quotaread"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
@@ -38,13 +37,13 @@ type Reader interface {
 	States(ctx context.Context, identity string) ([]quotaread.State, error)
 }
 
-// Handler — реализация quotav1.IdentityQuotaServiceServer.
+// Handler — реализация iamv1.IdentityQuotaServiceServer.
 //
 // ТОЛЬКО ЧТЕНИЕ, и это граница прав, а не объём работы: величину назначает
 // администратор облака через `InternalLimitService` на внутреннем слушателе.
 // Арендатор, способный поднять свой потолок, потолка не имеет.
 type Handler struct {
-	quotav1.UnimplementedIdentityQuotaServiceServer
+	iamv1.UnimplementedIdentityQuotaServiceServer
 
 	reader Reader
 }
@@ -58,8 +57,8 @@ func NewHandler(reader Reader) *Handler { return &Handler{reader: reader} }
 // которым её можно было бы назвать, не существует: вопрос о чужом потреблении
 // здесь невыразим, а это сильнее проверки, которая обязана срабатывать каждый раз.
 func (h *Handler) List(
-	ctx context.Context, _ *quotav1.ListIdentityQuotasRequest,
-) (*quotav1.ListIdentityQuotasResponse, error) {
+	ctx context.Context, _ *iamv1.ListIdentityQuotasRequest,
+) (*iamv1.ListIdentityQuotasResponse, error) {
 	// Анонимный вызывающий личности не имеет, и отвечать ему нечем. Отказ стоит
 	// ПЕРВЫМ стейтментом: без него пустой принципал уехал бы в чтение и вернулся
 	// бы пустым набором — то есть утверждением «у вас нет пределов», которого
@@ -80,9 +79,10 @@ func (h *Handler) List(
 		return nil, shared.MapRepoErr(err)
 	}
 
-	// Перевод — ОБЩИЙ (`pkg/quota/quotapb`). Он несёт решение, а не механику:
-	// неопознанная область отображается в `SCOPE_UNSPECIFIED`, а не в `DEFAULT`.
-	return &quotav1.ListIdentityQuotasResponse{Quotas: quotapb.Quotas(states)}, nil
+	// Перевод — СВОЙ, потому что своя и форма ответа (решение `Д9`, kacho#2362).
+	// Он несёт то же решение, что общий: неопознанная область отображается в
+	// `SCOPE_UNSPECIFIED`, а не в `DEFAULT`.
+	return &iamv1.ListIdentityQuotasResponse{Quotas: quotas(states)}, nil
 }
 
 // identityOfAuthenticatedCaller — личность ВЫЗЫВАЮЩЕГО, и ничья больше.
@@ -127,4 +127,4 @@ func (h *Handler) identityOfAuthenticatedCaller(ctx context.Context) (string, er
 }
 
 // Гарантия соответствия контракту на этапе сборки.
-var _ quotav1.IdentityQuotaServiceServer = (*Handler)(nil)
+var _ iamv1.IdentityQuotaServiceServer = (*Handler)(nil)

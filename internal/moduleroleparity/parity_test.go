@@ -56,6 +56,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/moduleroleparity"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/modulemanifests"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/rightsfixture"
 )
 
@@ -106,13 +107,15 @@ func TestModuleManifestDeclaresTheSystemRolesTheLiveBaseHolds(t *testing.T) {
 			"а не разбор миграций")
 	}
 	ctx := context.Background()
-	root := repoRoot(t)
+	set := manifestSet(t)
 
-	states, census := moduleStates(ctx, t, root)
+	states, census := moduleStates(ctx, t, set)
 	census.Postponed = len(postponedModules)
 
-	// Перепись — ДО всякого вердикта и независимо от него.
-	t.Logf("перепись: %s", census)
+	// Перепись — ДО всякого вердикта и независимо от него. Посадка называется
+	// ОТДЕЛЬНОЙ строкой: «расхождений 0» на одном прочитанном манифесте и на
+	// шести — разные утверждения, и различить их обязан читатель, а не автор.
+	t.Logf("перепись: %s; %s", set.Census(), census)
 	for _, st := range states {
 		t.Logf("  модуль %-13s объявлено %2d · живых %2d · манифест %s",
 			st.Module, len(st.Declared), len(st.Live), st.ManifestFile)
@@ -135,7 +138,7 @@ func TestModuleManifestDeclaresTheSystemRolesTheLiveBaseHolds(t *testing.T) {
 }
 
 // moduleStates — обе стороны сверки по каждому модулю с манифестом.
-func moduleStates(ctx context.Context, t *testing.T, root string) (
+func moduleStates(ctx context.Context, t *testing.T, set modulemanifests.Set) (
 	[]moduleroleparity.ModuleState, moduleroleparity.Census,
 ) {
 	t.Helper()
@@ -151,8 +154,9 @@ func moduleStates(ctx context.Context, t *testing.T, root string) (
 		census  = moduleroleparity.Census{Live: live, Ownerless: ownerless}
 		claimed = map[string]bool{}
 	)
-	for _, file := range manifestFiles(t, root) {
-		src, rerr := os.ReadFile(filepath.Join(root, filepath.FromSlash(file)))
+	for _, file := range set.Files {
+		// #nosec G304 -- путь получен обходом дерева ЭТОГО прогона, снаружи не приходит
+		src, rerr := os.ReadFile(filepath.Join(set.Root, filepath.FromSlash(file)))
 		require.NoErrorf(t, rerr, "манифест %s не прочитан", file)
 
 		m, lerr := manifest.Load(src)
@@ -170,10 +174,26 @@ func moduleStates(ctx context.Context, t *testing.T, root string) (
 			Live:         liveByOwner[m.Module],
 		})
 	}
-	// Модуль закрытого набора, у которого живые роли есть, а манифеста нет,
+	// Модуль закрытого набора, у которого живой роли есть, а манифеста нет,
 	// молчал бы иначе: его строки не попали бы ни в одно состояние.
+	//
+	// НО ТОЛЬКО В ПОСАДКЕ, ГДЕ МАНИФЕСТ МОГ БЫ БЫТЬ ПРОЧИТАН (#2377). В
+	// самостоятельном клоне манифестов соседей нет BY CONSTRUCTION — они
+	// доезжают доставкой в рантайме, а не деревом сборки, — поэтому КАЖДЫЙ
+	// чужой модуль попадал бы сюда всегда, и сверка краснела бы при любом
+	// дереве. Проверка, краснеющая всегда, перестаёт читаться, и первым снимут
+	// её саму.
+	//
+	// Поэтому чужие модули здесь не судятся, а СЧИТАЮТСЯ: их число печатается
+	// отдельной строкой переписи, и «сверено меньше» остаётся отличимо от
+	// «расхождений нет».
+	outOfPosture := 0
 	for _, mod := range authzmap.CatalogSeedModules() {
 		if claimed[mod] || len(liveByOwner[mod]) == 0 {
+			continue
+		}
+		if set.Posture != modulemanifests.PlatformTree {
+			outOfPosture++
 			continue
 		}
 		states = append(states, moduleroleparity.ModuleState{
@@ -183,6 +203,10 @@ func moduleStates(ctx context.Context, t *testing.T, root string) (
 		})
 	}
 	sort.Slice(states, func(i, j int) bool { return states[i].Module < states[j].Module })
+	if outOfPosture > 0 {
+		t.Logf("вне посадки: модулей с живыми ролями и без манифеста %d — их манифесты "+
+			"доезжают ДОСТАВКОЙ, а не деревом сборки, и здесь они не судятся", outOfPosture)
+	}
 	return states, census
 }
 
@@ -293,56 +317,21 @@ func (r *recordingTx) RetireRole(_ context.Context, id domain.RoleID, _, _, _ st
 
 func (r *recordingTx) ReviveRole(context.Context, domain.RoleID) (bool, error) { return false, nil }
 
-// manifestFiles — манифесты модулей ВЫВОДЯТСЯ обходом дерева, а не выписываются.
+// manifestSet — манифесты, доступные пробе В ЭТОЙ ПОСАДКЕ, и корень, от которого
+// они отсчитаны.
 //
-// Выписанный перечень разошёлся бы с деревом молча в день появления седьмого
-// манифеста — и разошёлся бы в сторону молчания: незнакомый файл просто не
-// осматривался бы.
-func manifestFiles(t *testing.T, root string) []string {
-	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(root, "services"))
-	require.NoError(t, err)
-
-	var out []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		rel := filepath.ToSlash(filepath.Join("services", e.Name(), "manifest.yaml"))
-		if _, serr := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); serr == nil {
-			out = append(out, rel)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// repoRoot — корень монорепо: САМЫЙ ВНЕШНИЙ каталог с go.mod.
-//
-// Не «ближайший вверх»: у службы теперь СВОЙ модуль (`services/iam`,
-// github.com/PRO-Robotech/kaname), и подъём до первого встречного
-// останавливался бы в её каталоге. Ниже к этому корню приклеивается `services`,
-// то есть путь В ДЕРЕВЕ МОНОРЕПО от корня, — остановка внутри службы удваивала
-// сегмент, и обход искал `services/iam/services`, которого не существует. Отказ
-// приходил из os.ReadDir, то есть выглядел поломкой пробы, а не сдвигом корня.
-//
-// Тот же выбор и по той же причине сделан у соседа —
-// `internal/authzmap` monorepoRootForReaders; расходиться им нельзя.
-func repoRoot(t *testing.T) string {
+// Перечень по-прежнему ВЫВОДИТСЯ, а не выписывается: выписанный разошёлся бы с
+// деревом молча в день появления седьмого манифеста. Изменилось одно — обход
+// каталога модулей ПЛАТФОРМЫ заменён источником, который отвечает в ОБЕИХ
+// посадках (#2377): после разреза службы `services/` рядом с модулем нет, и
+// прежний обход отказывал бы из os.ReadDir, то есть выглядел бы поломкой пробы,
+// а не сдвигом дерева. Что именно прочитано и в какой посадке — печатает
+// перепись вызывающего.
+func manifestSet(t *testing.T) modulemanifests.Set {
 	t.Helper()
 	wd, err := os.Getwd()
-	require.NoError(t, err)
-	dir := wd
-	outermost := ""
-	for {
-		if _, serr := os.Stat(filepath.Join(dir, "go.mod")); serr == nil {
-			outermost = dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			require.NotEmptyf(t, outermost, "корень монорепо (go.mod) не найден от %s", wd)
-			return outermost
-		}
-		dir = parent
-	}
+	require.NoError(t, err, "рабочий каталог не установлен: посадку назвать нечем")
+	set, err := modulemanifests.Available(wd)
+	require.NoError(t, err, "перечень манифестов не снят — проверка НЕ ИСПОЛНЯЛАСЬ")
+	return set
 }

@@ -15,7 +15,6 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/operations/operationspb"
 
 	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
-	quotav1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/quota/v1"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -33,7 +32,7 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	// ровно то утверждение, которое контракт запрещает делать.
 	// Незарегистрированный метод отвечает `Unimplemented`, и это честно.
 	if svcs != nil && svcs.identityQuotaHandler != nil {
-		quotav1.RegisterIdentityQuotaServiceServer(srv, svcs.identityQuotaHandler)
+		iamv1.RegisterIdentityQuotaServiceServer(srv, svcs.identityQuotaHandler)
 	}
 	if svcs != nil && svcs.userHandler != nil {
 		iamv1.RegisterUserServiceServer(srv, svcs.userHandler)
