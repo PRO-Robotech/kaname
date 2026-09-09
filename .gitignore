@@ -25,14 +25,6 @@ test-results/
 __pycache__/
 *.pyc
 
-# Vendored corelib-owned infra protos — single source in kacho-corelib/proto.
-# Not committed here; `make proto-vendor` copies them in before `buf generate`
-# (needed only for buf import-resolution of the domain proto; Go-stubs live in corelib).
-/proto/google/
-/proto/kacho/cloud/api/
-/proto/kacho/cloud/operation/
-/proto/kacho/cloud/validation.proto
-/proto/kacho/iam/
 go.work
 go.work.sum
 .claude/

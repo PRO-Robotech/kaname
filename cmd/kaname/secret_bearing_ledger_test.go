@@ -10,7 +10,7 @@
 //
 // Гейт, чей вход выписан там же, где проверяемое, сравнивает перечень САМ С
 // СОБОЙ: новое непомеченное поле-носитель не краснит его никогда. Здесь вход
-// приходит из ДЕСКРИПТОРОВ — из опции `kacho.cloud.api.secret_bearing`,
+// приходит из ДЕСКРИПТОРОВ — из опции `kaname.cloud.iam.v1.secret_bearing`,
 // поставленной в самом контракте, — и перечень подметальщика проверяется
 // против него.
 //
@@ -64,7 +64,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	apiv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/api"
+	apiv1 "github.com/PRO-Robotech/kacho/pkg/api/corelib/api/v1"
+	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 )
 
 // secretBearingFields — все поля дерева контрактов, помеченные носителем
@@ -93,7 +94,7 @@ func secretBearingFields(t *testing.T) map[string][]string {
 // marked читает саму опцию расширения. Именно ЧТЕНИЕ ОПЦИИ, а не совпадение
 // имени: имя — это ось 2, и она про другое.
 func isSecretBearing(f protoreflect.FieldDescriptor) bool {
-	v := proto.GetExtension(f.Options(), apiv1.E_SecretBearing)
+	v := proto.GetExtension(f.Options(), iamv1.E_SecretBearing)
 	b, ok := v.(bool)
 	return ok && b
 }

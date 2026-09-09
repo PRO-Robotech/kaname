@@ -129,6 +129,30 @@ type ReconcileStore interface {
 	// обратно «по аналогии».
 	AcquireBindingLock(ctx context.Context, bindingID domain.AccessBindingID) error
 
+	// AcquireBindingLocks берёт advisory-замки СРАЗУ ВСЕГО набора, в переданном
+	// порядке и ДО первой записи прохода. Набор приходит уже отсортированным по
+	// возрастанию (dedupSortBindingIDs), поэтому порядок глобально согласован между
+	// параллельными проходами.
+	//
+	// ЗАЧЕМ ОТДЕЛЬНЫЙ ПОРТ, А НЕ ЦИКЛ ИЗ AcquireBindingLock. Предмет здесь не в числе
+	// обращений, а в ПОРЯДКЕ РОДОВ ресурсов внутри транзакции. Проход веера трогает
+	// строки ПРЯМОГО ФАКТА, а они общие: ключуются субъектом, объектом и отношением,
+	// а не выдачей, — поэтому две выдачи одного субъекта на одном объекте спорят за
+	// ОДНУ строку. Пока замок брался перед работой КАЖДОЙ выдачи, проход вставал в
+	// очередь за advisory очередной выдачи, УЖЕ удерживая строки прямого факта
+	// предыдущей. Снятие выдачи берёт свой advisory первым стейтментом и трогает
+	// прямой факт после него — то есть порядок родов у двух сторон обратный, и
+	// Postgres выходит из него, снимая одну сторону (40P01).
+	//
+	// Свойство, которое даёт этот порт: пока проход ждёт чужой advisory, он НЕ
+	// удерживает ни одной строки прямого факта. Тогда сторона, держащая этот
+	// advisory, доводит свою работу до конца, и цикла ожидания не существует
+	// by construction — а не «редко случается».
+	//
+	// Идемпотентен внутри транзакции: повторный захват уже удерживаемого ключа
+	// возвращается немедленно.
+	AcquireBindingLocks(ctx context.Context, bindingIDs []domain.AccessBindingID) error
+
 	// LoadBinding loads the minimal scope/selector/role facts for a binding.
 	// ok=false when the binding no longer exists (deleted — the reconciler then
 	// does nothing; the CASCADE already dropped its members).
@@ -678,14 +702,33 @@ func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID s
 		// diff of THIS OBJECT's membership, so reconciling a binding once is enough
 		// regardless of which source it came from.
 		//
-		// DEADLOCK-CLASS: each reconcileBindingForObject takes
-		// pg_advisory_xact_lock(hashtext(binding_id)) inside the ONE writer-tx of this
-		// pass. The two source queries return binding ids in NON-deterministic order,
-		// so locking in arrival order lets two concurrent ReconcileObject passes (on
-		// different objects with overlapping binding-sets) acquire the shared locks in
-		// DIFFERENT orders → ABBA deadlock (40P01). Sorting the deduped union ASC gives
-		// every pass a GLOBALLY-consistent acquisition order, which is deadlock-free.
+		// DEADLOCK-CLASS: the pass takes pg_advisory_xact_lock(hashtext(binding_id))
+		// for every binding of the fan-out inside the ONE writer-tx. The two source
+		// queries return binding ids in NON-deterministic order, so locking in arrival
+		// order lets two concurrent ReconcileObject passes (on different objects with
+		// overlapping binding-sets) acquire the shared locks in DIFFERENT orders → ABBA
+		// deadlock (40P01). Sorting the deduped union ASC gives every pass a
+		// GLOBALLY-consistent acquisition order.
 		union := dedupSortBindingIDs(existing, matching)
+		// ВСЕ advisory-замки — ДО ПЕРВОЙ ЗАПИСИ прохода, в этом же порядке.
+		//
+		// Сортировки одной недостаточно, и это измерено, а не предположено. Она
+		// разводит проходы веера МЕЖДУ СОБОЙ — там оба ресурса одного рода, и общий
+		// порядок их упорядочивает. Но проход спорит ещё и со СНЯТИЕМ выдачи, а у
+		// того ресурсы РАЗНЫХ родов: свой advisory он берёт первым стейтментом, а
+		// общие строки прямого факта трогает после. Пока веер брал замок перед
+		// работой каждой выдачи, он приходил к очередному advisory, уже удерживая
+		// строку прямого факта предыдущей выдачи, — обратный порядок родов, из
+		// которого Postgres выходит, снимая одну сторону как взаимную блокировку
+		// (40P01). Наблюдалось на стороне арендатора: операция снятия завершалась
+		// `done:true` с ABORTED, выдача оставалась жива, и следующее создание того же
+		// набора получало ALREADY_EXISTS.
+		//
+		// Взяв весь набор вперёд, проход ждёт чужой advisory, НЕ удерживая ни одной
+		// общей строки, — и цикла ожидания не существует by construction.
+		if err := s.AcquireBindingLocks(ctx, union); err != nil {
+			return fmt.Errorf("acquire binding locks for object %s:%s: %w", objectType, objectID, err)
+		}
 		for _, bID := range union {
 			if err := r.reconcileBindingForObject(ctx, s, bID, objectType, objectID, obj, objPresent, col); err != nil {
 				return err
@@ -802,10 +845,11 @@ func (r *Reconciler) reconcileBinding(ctx context.Context, s ReconcileStore, bin
 // upsert/delete, a label UPDATE) actually needs — see the ReconcileObject doc for why
 // the narrowing is exact rather than an approximation.
 //
-// It keeps everything the full path does per object: the EXCLUSIVE advisory lock (so a
-// concurrent pass of the same binding cannot interleave with this object's delete-stale
-// diff), the ACTIVE/REJECTED verdict, the containment audit, the eager-revoke of a
-// member that fell out, and the deferred cross-binding delete flush. Only the SIZE of
+// It keeps everything the full path does per object: the ACTIVE/REJECTED verdict, the
+// containment audit, the eager-revoke of a member that fell out, and the deferred
+// cross-binding delete flush. Взаимное исключение с параллельным проходом той же
+// выдачи тоже сохраняется — тем же EXCLUSIVE advisory-замком, — но берёт его
+// ВЫЗЫВАЮЩИЙ, сразу на весь веер и до первой записи прохода (см. тело функции). Only the SIZE of
 // the diffed set changes: O(1) in the scope instead of O(scope). Because the critical
 // section is now a handful of indexed rows rather than a whole-scope recompute, the
 // per-binding lock every sibling registration in the account queues behind is held for
@@ -818,12 +862,13 @@ func (r *Reconciler) reconcileBindingForObject(
 	ctx context.Context, s ReconcileStore, bindingID domain.AccessBindingID,
 	objectType, objectID string, obj domain.MirrorObject, objPresent bool, col *syncFGACollector,
 ) error {
-	// Serialize concurrent passes of the same binding on the xact-scoped advisory lock
-	// BEFORE any read/write (exactly-once materialization under N replicas), acquired in
-	// the caller's globally-sorted binding order (deadlock-free).
-	if err := s.AcquireBindingLock(ctx, bindingID); err != nil {
-		return fmt.Errorf("acquire binding lock %s: %w", bindingID, err)
-	}
+	// ЗАМОК ЭТОЙ ВЫДАЧИ УЖЕ ВЗЯТ ВЫЗЫВАЮЩИМ — вместе со всеми остальными замками
+	// веера и ДО первой записи прохода (ReconcileObject, AcquireBindingLocks).
+	// Serialization против параллельного прохода той же выдачи от этого не слабеет:
+	// ключ и режим те же, меняется только МОМЕНТ захвата. Брать его здесь повторно
+	// нельзя не по стоимости, а по существу: тогда первый замок веера снова
+	// оказывался бы взят после записей предыдущей выдачи, и обратный порядок родов
+	// ресурсов вернулся бы вместе с ним.
 	bs, ok, err := s.LoadBinding(ctx, bindingID)
 	if err != nil {
 		return fmt.Errorf("load binding %s: %w", bindingID, err)
