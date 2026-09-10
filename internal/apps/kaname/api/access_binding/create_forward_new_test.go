@@ -113,7 +113,7 @@ var _ SelectorReconciler = (*recordingReconciler)(nil)
 func TestCreateAccessBinding_ObjectPass_UsesProvenNewEntryPoint(t *testing.T) {
 	const (
 		roleID     = "rol_fwdnew_role"
-		roleName   = "kacho.edit"
+		roleName   = "kaname.edit"
 		subjectID  = "usr_fwdnew_subject"
 		resourceID = "prj_fwdnew_project"
 		ownerID    = "usr_fwdnew_owner"

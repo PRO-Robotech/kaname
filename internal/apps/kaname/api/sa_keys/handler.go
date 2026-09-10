@@ -108,7 +108,7 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 		// Вид удостоверения. Не назван — прежнее поведение дословно.
 		CredentialKind: CredentialKindFromProto(req.GetCredentialKind()),
 		// Federation OUT — caller-supplied external audience(s).
-		// Empty → use-case falls back to AudiencePrefix (kacho-internal).
+		// Empty → use-case falls back to AudiencePrefix (kaname-internal).
 		Audience: req.GetAudience(),
 	})
 	if err != nil {

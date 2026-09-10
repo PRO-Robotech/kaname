@@ -180,7 +180,7 @@ type IssueSAKeyUseCase struct {
 	redactGrace time.Duration
 
 	// HydraClientNamePrefix — used to compose the Hydra `client_name`
-	// (default "kacho-sak-<svaID>"). Configurable via env at wire-time.
+	// (default "kaname-sak-<svaID>"). Configurable via env at wire-time.
 	HydraClientNamePrefix string
 	// DefaultScope — scope granted to issued keys (default empty).
 	DefaultScope string
@@ -285,7 +285,7 @@ func NewIssueSAKeyUseCase(r SAClientRepo, tx service.TxBeginner, h OAuthClientAd
 		hydra:                 h,
 		opsRepo:               ops,
 		now:                   time.Now,
-		HydraClientNamePrefix: "kacho-sak-",
+		HydraClientNamePrefix: "kaname-sak-",
 	}
 }
 
@@ -330,13 +330,13 @@ type IssueInput struct {
 
 	// Audience — Federation OUT. When non-empty, the Hydra OAuth2
 	// client is registered with this exact `audience` list (replacing the
-	// default kacho-internal `AudiencePrefix`-built audience), so every
+	// default kaname-internal `AudiencePrefix`-built audience), so every
 	// access_token minted for this client lands the values in its `aud`
 	// claim. Required for OIDC-trust-federation with external IdPs — the
 	// `audience` value must match exactly what the remote IdP expects (its
 	// token-exchange endpoint or resource URI).
 	// Order preserved; empty entries dropped; duplicates collapsed.
-	// Empty slice = legacy kacho-internal-only audience.
+	// Empty slice = legacy kaname-internal-only audience.
 	Audience []string
 }
 
@@ -722,7 +722,7 @@ func (u *IssueSAKeyUseCase) hydraUnavailable(ctx context.Context, action string,
 	// о них знать не полагается, а знание не даёт ему следующего шага — тот же
 	// довод, которым `shared.MapRepoErr` держит фиксированный текст на признаке
 	// недоступности. Подробность остаётся в цепочке и уходит в журнал.
-	return status.Error(codes.Unavailable, "service unavailable")
+	return status.Error(codes.Unavailable, shared.UnavailableMessage)
 }
 
 // doIssuePrivateKeyJWT — mint ECDSA P-256 keypair, name the client (registering it
@@ -931,7 +931,7 @@ func (u *IssueSAKeyUseCase) nameClient(
 //     External-federation rollout requires the audience to match what the
 //     external IdP expects — those caller values are preserved verbatim.
 //   - in.Audience empty AND AudiencePrefix set → append the legacy
-//     kacho-internal audience `<prefix>/sa/<svaID>`. Backwards-compat for
+//     kaname-internal audience `<prefix>/sa/<svaID>`. Backwards-compat for
 //     callers that do not specify audience. (Skipped when the caller supplied
 //     an explicit audience, keeping the external-federation contract: the
 //     internal default is not force-mixed into a deliberate external list.)
@@ -942,7 +942,7 @@ func (u *IssueSAKeyUseCase) nameClient(
 //     it is additive — it never changes the `aud` a token actually carries
 //     (that is chosen per-exchange by the requested `audience` param).
 //   - everything empty → nil (Hydra mints tokens with no `aud` claim; valid for
-//     the kacho-internal API gateway which doesn't require aud).
+//     the kacho-internal API gateway (ПЛАТФОРМЕННЫЙ край — не наш) which doesn't require aud).
 func (u *IssueSAKeyUseCase) resolveAudience(in IssueInput) []string {
 	seen := make(map[string]struct{}, len(in.Audience)+2)
 	out := make([]string, 0, len(in.Audience)+2)
@@ -960,7 +960,7 @@ func (u *IssueSAKeyUseCase) resolveAudience(in IssueInput) []string {
 	for _, a := range in.Audience {
 		add(a)
 	}
-	// Fall back to the kacho-internal default only when the caller supplied no
+	// Fall back to the kaname-internal default only when the caller supplied no
 	// (non-empty) audience — a deliberate external-federation list is not mixed
 	// with the internal default.
 	if len(out) == 0 && u.AudiencePrefix != "" {
@@ -1053,7 +1053,7 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 	if exp := u.resolveExpiry(in); exp != nil {
 		row.ExpiresAt = exp
 	}
-	// Federated rows carry no kacho-held key material — key_algorithm is "".
+	// Federated rows carry no kaname-held key material — key_algorithm is "".
 	//
 	// Перечень доверенных издателей уезжает в ТУ ЖЕ транзакцию, что строка
 	// ключа: откат снимает оба, полусделанного состояния между ними не бывает.
@@ -1562,7 +1562,23 @@ func mapPGErr(err error) error {
 	case errors.Is(err, iamerr.ErrInvalidArg):
 		return status.Error(codes.InvalidArgument, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrUnavailable):
-		return status.Error(codes.Unavailable, iamerr.StripSentinel(err))
+		// Фиксированный текст, как у INTERNAL ниже, и по той же причине: цепочка
+		// признака недоступности ведёт к ЧУЖОМУ производителю (база, сосед, гейт
+		// прав), и её текст вызывающему не адресован. Прежде здесь стоял разбор
+		// цепочки, то есть обёртка вызывающего доезжала до провода дословно;
+		// утечки не случалось лишь потому, что производители этого признака в
+		// службе опаковы сами — «by construction» на деле означало «пока никто не
+		// обернул» (задача #2464).
+		//
+		// Текст — тот же, что у канонического переводчика, и берётся У НЕГО:
+		// свой литерал здесь был бы вторым местом об одном контракте, и разошлись
+		// бы они ровно так, как разошлись эти переводчики.
+		//
+		// ЧИТАТЕЛЯ у подробности на этой полосе СЕГОДНЯ НЕТ, и это названо, а не
+		// умолчано: переводчик — свободная функция без логгера, а звать её с
+		// проброшенным логгером из тринадцати мест — отдельная работа
+		// (задача-преемник — #2507). Подробность остаётся в цепочке.
+		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	}
 	return status.Error(codes.Internal, "internal SA key error")
 }

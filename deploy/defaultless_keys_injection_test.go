@@ -16,6 +16,8 @@ package deploy_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -177,12 +179,33 @@ func TestDefaultlessKeysEmptyTraversalIsNotGreen(t *testing.T) {
 
 	t.Run("шаблоны без единого действия", func(t *testing.T) {
 		chartDir := copyChartDeliveryFixture(t)
-		for _, rel := range []string{"templates/_helpers.tpl", "templates/configmap.yaml",
-			"templates/deployment.yaml", "templates/service.yaml"} {
-			writeChartFile(t, chartDir, rel, "# шаблон без действий\n")
+
+		// Популяция ВЫВОДИТСЯ из фикстуры, а не перечисляется поимённо — по той
+		// же причине, что и у соседней полосы выше, и цена уже уплачена дважды.
+		// Здесь стоял список из четырёх шаблонов; поставка правил тревоги завела
+		// пятый (`templates/prometheusrule.yaml`), его в списке не было, шаблон
+		// сохранил свои действия — и популяция пустой не стала. Самопроверка
+		// покраснела на ВЕРНОМ чарте, обвинив предмет, к которому отношения не
+		// имеет.
+		entries, err := os.ReadDir(filepath.Join(chartDir, "templates"))
+		if err != nil {
+			t.Fatalf("каталог шаблонов фикстуры не читается: %v", err)
 		}
+		blanked := 0
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			writeChartFile(t, chartDir, filepath.Join("templates", e.Name()), "# шаблон без действий\n")
+			blanked++
+		}
+		if blanked == 0 {
+			t.Fatal("фикстура не дала ни одного шаблона — инъекция беспредметна, " +
+				"и «отказа не было» означало бы «обнулять было нечего»")
+		}
+
 		if _, _, err := auditDefaultlessKeys(chartDir); err == nil {
-			t.Fatal("шаблоны без единого действия дали вердикт вместо отказа")
+			t.Fatalf("шаблоны без единого действия (обнулено %d) дали вердикт вместо отказа", blanked)
 		}
 	})
 

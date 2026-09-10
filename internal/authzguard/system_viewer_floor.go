@@ -38,7 +38,7 @@
 //     would break the core authz path (every downstream Check would deny). It
 //     stays on the mTLS-module floor only.
 //   - InternalUserService.OnRecoveryCompleted — Kratos recovery hook,
-//     HMAC/secret-authed; Kratos is not a kacho-seeded SA → relation-Check
+//     HMAC/secret-authed; Kratos is not a kaname-seeded SA → relation-Check
 //     inapplicable. (Hydra token/refresh hooks live on the separate :9092 HTTP
 //     listener, not this gRPC chain — N/A by construction.)
 //   - InternalSessionRevocationsService.IsRevoked — курица и яйцо (шло бы до

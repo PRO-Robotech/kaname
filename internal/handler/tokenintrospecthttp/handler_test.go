@@ -65,7 +65,7 @@ func mintToken(t *testing.T, sub string, iat time.Time, pub *domain.PublishedKey
 	if err != nil {
 		t.Fatalf("разбор ключа: %v", err)
 	}
-	kid := "kacho-" + sub
+	kid := "kaname-" + sub
 	tok := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
 		"iss": testIssuer, "sub": sub, "aud": []string{"registry.kacho.local"},
 		"iat": iat.Unix(), "nbf": iat.Unix(), "exp": iat.Add(5 * time.Minute).Unix(),
@@ -218,7 +218,7 @@ func mintForeignIssuer(t *testing.T) string {
 		"iss": "https://outsider.example", "sub": "x",
 		"exp": time.Now().Add(time.Hour).Unix(),
 	})
-	tok.Header["kid"] = "kacho-sva-a"
+	tok.Header["kid"] = "kaname-sva-a"
 	raw, err := tok.SignedString(key)
 	if err != nil {
 		t.Fatalf("%v", err)
@@ -231,7 +231,7 @@ func unsignedToken(t *testing.T) string {
 	tok := jwt.NewWithClaims(jwt.SigningMethodNone, jwt.MapClaims{
 		"iss": testIssuer, "sub": "sva-a", "exp": time.Now().Add(time.Hour).Unix(),
 	})
-	tok.Header["kid"] = "kacho-sva-a"
+	tok.Header["kid"] = "kaname-sva-a"
 	raw, err := tok.SignedString(jwt.UnsafeAllowNoneSignatureType)
 	if err != nil {
 		t.Fatalf("%v", err)
@@ -290,7 +290,7 @@ func TestIntrospect_MethodAndShape(t *testing.T) {
 	// Ответ не выносит наружу ни ключей, ни самого токена, ни подробности.
 	_, out := ask(t, h, good.raw)
 	body, _ := json.Marshal(out)
-	for _, forbidden := range []string{"kacho-sva-a", good.raw, "PRIVATE", "keys"} {
+	for _, forbidden := range []string{"kaname-sva-a", good.raw, "PRIVATE", "keys"} {
 		if strings.Contains(string(body), forbidden) {
 			t.Fatalf("ответ авторитета вынес наружу %q: %s", forbidden, body)
 		}

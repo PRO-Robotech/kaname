@@ -450,7 +450,7 @@ CASES.append(Case(
 # набора, и разойдясь, они ничего не сломают. Начни мы публиковать такой ключ —
 # обе стороны скажут об этом громко (прогрев получит 200 вместо 401, кейс ниже
 # покраснеет), поэтому предмета для гейта согласия здесь нет.
-_LANE_PROBE_KID = "kacho-lane-probe-no-such-key"
+_LANE_PROBE_KID = "kaname-lane-probe-no-such-key"
 
 CASES.append(Case(
     id="AUTHZ-FAILCLOSED-EDGE-KEY-SOURCE-LANE",

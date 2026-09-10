@@ -100,7 +100,7 @@ taxonomy), `SAKeyService` (SA OAuth-ключи через Ory Hydra).
 ```mermaid
 flowchart TB
     Tenant -- HTTPS/REST --> APIGW[api-gateway]
-    subgraph KachoNS[Namespace kacho]
+    subgraph PlatformNS[Namespace kacho]
         APIGW -- gRPC :9090 / :9091 --> IAM[Deployment kaname]
         IAM -- pgx master + read-replica --> PG[(Postgres kaname)]
         Kratos[Ory Kratos] -- provision-hook :9092 --> IAM

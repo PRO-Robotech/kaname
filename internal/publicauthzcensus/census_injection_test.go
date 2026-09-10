@@ -13,6 +13,27 @@ package publicauthzcensus_test
 //
 // Обе стороны обязательны. Без законного близнеца «краснеет» было бы неотличимо
 // от гейта, краснеющего на всём; без дефекта — от гейта, молчащего на всём.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПРЕДПОСЫЛКА — ТА ЖЕ, ЧТО У СУДИМЫХ ГЕЙТОВ, И ЭТО ПОЧИНКА (#2479)
+//
+// Синтетическими здесь бывают только контракт и точка регистрации; ОБСЛУЖИВАЮЩИЙ
+// ПАКЕТ разбор резолвит от корня дерева платформы координатой, которой в
+// самостоятельном клоне нет. Корень брался собственным подъёмом до самого
+// внешнего `go.mod`, и в клоне он находился — то есть инъекция ШЛА, но по
+// обеднённому миру: файлов Go разобрано 0, а вердикт всё равно «PASS».
+//
+// Для службы, уезжающей отдельным продуктом, это худший из исходов: снаружи
+// остаётся ЗЕЛЁНОЕ ДОКАЗАТЕЛЬСТВО БЕЗ ПРЕДМЕТА — оно утверждает, что гейт
+// способен упасть, проверив это на входе, которого в той посадке не бывает.
+//
+// Чинится с обеих сторон, и обе половины несущие:
+//
+//	корень берётся `platformtree.Require` — тем же резолвом, что у судимых
+//	гейтов, поэтому в клоне инъекция ПРОПУСКАЕТСЯ вместе с ними, а не идёт
+//	по пустому миру;
+//	обе оси переписи стерегутся — «осмотрено» И «разобрано». Первая одна
+//	молчит ровно о том случае, ради которого перепись печатает обе величины.
 
 import (
 	"os"
@@ -20,6 +41,8 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/publicauthzcensus"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // synthTree кладёт синтетический контракт и точку регистрации в свой каталог и
@@ -61,7 +84,7 @@ func synthTree(t *testing.T, service, method string) (protoDir, cmdDir string) {
 func TestCensusGateFiresOnAnRPCTheDoorDoesNotCover(t *testing.T) {
 	protoDir, cmdDir := synthTree(t, "SynthTenantService", "StealTheNeighboursProject")
 
-	c, err := publicauthzcensus.CollectFrom(protoDir, cmdDir, repoRoot(t))
+	c, err := publicauthzcensus.CollectFrom(protoDir, cmdDir, platformtree.Require(t))
 	if err != nil {
 		t.Fatalf("перепись не состоялась: %v", err)
 	}
@@ -69,6 +92,10 @@ func TestCensusGateFiresOnAnRPCTheDoorDoesNotCover(t *testing.T) {
 
 	if c.Inspected == 0 {
 		t.Fatal("обход пуст: инъекция не подана — вердикт беспредметен")
+	}
+	if c.GoFiles == 0 {
+		t.Fatal("обход пуст: файлов Go разобрано 0 — обслуживающий пакет не резолвится, " +
+			"и красное пришло бы по обеднённому миру, а не по поданному дефекту")
 	}
 	found := false
 	for _, r := range c.InCategory(publicauthzcensus.CategoryUngated) {
@@ -97,7 +124,7 @@ func TestCensusGateFiresOnAnRPCTheDoorDoesNotCover(t *testing.T) {
 func TestCensusGateStaysSilentOnACoveredRPC(t *testing.T) {
 	protoDir, cmdDir := synthTree(t, "ProjectService", "Get")
 
-	c, err := publicauthzcensus.CollectFrom(protoDir, cmdDir, repoRoot(t))
+	c, err := publicauthzcensus.CollectFrom(protoDir, cmdDir, platformtree.Require(t))
 	if err != nil {
 		t.Fatalf("перепись не состоялась: %v", err)
 	}
@@ -105,6 +132,10 @@ func TestCensusGateStaysSilentOnACoveredRPC(t *testing.T) {
 
 	if c.Inspected == 0 {
 		t.Fatal("обход пуст: близнец не подан — молчание беспредметно")
+	}
+	if c.GoFiles == 0 {
+		t.Fatal("обход пуст: файлов Go разобрано 0 — обслуживающий пакет не резолвится, " +
+			"и молчание близнеца доказывало бы лишь то, что судить было нечего")
 	}
 	if n := c.Count(publicauthzcensus.CategoryUngated); n != 0 {
 		t.Errorf("гейт краснеет на покрытом RPC: «БЕЗ двери» = %d (%v)",
@@ -126,7 +157,7 @@ func TestCensusRefusesAnEmptyContract(t *testing.T) {
 	if err := os.MkdirAll(protoDir, 0o755); err != nil {
 		t.Fatalf("создать каталог: %v", err)
 	}
-	_, err := publicauthzcensus.CollectFrom(protoDir, filepath.Join(base, "cmd"), repoRoot(t))
+	_, err := publicauthzcensus.CollectFrom(protoDir, filepath.Join(base, "cmd"), platformtree.Require(t))
 	if err == nil {
 		t.Fatal("перепись без контракта не отказала: пустой обход принят за чистый")
 	}

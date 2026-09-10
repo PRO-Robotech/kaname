@@ -6,7 +6,7 @@
 получает access_token у Ory Hydra по grant'у `client_credentials` с
 `token_endpoint_auth_method = private_key_jwt` (RFC 7521/7523).
 
-Каждый ключ — это **kacho-выпущенная** пара (`private_key`, `public_jwk`):
+Каждый ключ — это пара (`private_key`, `public_jwk`), **выпущенная kaname**:
 
 - **`private_key_pem`** — отдается клиенту ОДИН РАЗ в ответе `IssueSAKey`,
   никогда не хранится в kaname.
@@ -251,8 +251,7 @@ curl -X POST "$HYDRA_PUBLIC_URL/oauth2/token" \
   -d "client_id=$CLIENT_ID" \
   -d "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
   -d "client_assertion=$(cat assertion.txt)" \
-  -d "audience=$AUDIENCE" \
-  -d "scope=kacho.api"
+  -d "audience=$AUDIENCE"
 ```
 
 ### Revoke

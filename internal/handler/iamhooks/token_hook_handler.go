@@ -7,7 +7,7 @@
 //
 // Hydra (configured oauth2.token_hook.url) вызывает этот endpoint каждый раз
 // перед выдачей access_token. Payload содержит session+request; ответ
-// обогащает session.access_token.ext_claims с kacho-specific полями.
+// обогащает session.access_token.ext_claims с kaname-specific полями.
 package iamhooks
 
 import (
@@ -234,7 +234,7 @@ func (h *TokenHookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	endUserSubject := payload.Session.IDToken.Subject
 	subject := endUserSubject
 	// client_credentials (RFC 6749 §4.4) не несёт end-user subject — Hydra
-	// отдаёт его пустым. kacho-принципал такого токена — ServiceAccount за
+	// отдаёт его пустым. Принципал такого токена — ServiceAccount за
 	// OAuth2-клиентом, поэтому fallback на client_id (session, затем request);
 	// enricher резолвит его в SA через LookupByOAuthClientID и штампует
 	// kaname_principal_id = SA-id.

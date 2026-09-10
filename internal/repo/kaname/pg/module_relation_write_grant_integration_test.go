@@ -86,6 +86,7 @@ func TestIntegration_R914_RelationWriteIsAskedOnTheCluster(t *testing.T) {
 	// прогона. Тогда «не выполнилось» приходит к читателю под видом красного, и
 	// вердикта нет ни у одной пробы пакета.
 	pgtest.ClosePoolAtEnd(t, pool)
+	applyPlatformModuleSeed(ctx, t, pool)
 
 	asker := relverdict.NewAsker(pool)
 
@@ -137,6 +138,7 @@ func TestIntegration_R914_RevokingTheClusterGrantClosesTheWrite(t *testing.T) {
 	// прогона. Тогда «не выполнилось» приходит к читателю под видом красного, и
 	// вердикта нет ни у одной пробы пакета.
 	pgtest.ClosePoolAtEnd(t, pool)
+	applyPlatformModuleSeed(ctx, t, pool)
 
 	asker := relverdict.NewAsker(pool)
 	repo := kanamepg.New(pool, nil)

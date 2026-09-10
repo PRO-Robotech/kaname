@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package session_revocations — InternalSessionRevocationsService
-// (kacho-only, gRPC port :9091).
+// (internal-only, gRPC port :9091).
 //
 // Ban #6 (Internal.* not on external endpoint): internal-only service. Registered
 // ONLY on the internal listener (port 9091). gRPC-direct only.

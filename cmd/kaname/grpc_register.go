@@ -109,7 +109,7 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	}
 }
 
-// registerInternalServices — kacho-only/admin RPC на internal listener.
+// registerInternalServices — admin-RPC на internal listener: наружу не публикуются.
 func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *pgxpool.Pool, dsn string, logger *slog.Logger) {
 	_ = pool
 	_ = dsn

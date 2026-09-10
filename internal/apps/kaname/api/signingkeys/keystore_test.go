@@ -275,7 +275,7 @@ func TestKeystore_F1_04_PrivateMaterialNeverLeavesTheProcess(t *testing.T) {
 func TestKeystore_F1_05_PublishedFormCannotCarryThePrivateHalf(t *testing.T) {
 	// Then — положить приватную половину в публикуемый тип НЕ ВЫРАЖАЕТСЯ: у
 	// типа нет такого поля, и это держит компилятор, а не внимание.
-	published := domain.PublishedKey{KID: "kacho-a", Algorithm: domain.SigningAlgRS256, PublicKeyPEM: "pem"}
+	published := domain.PublishedKey{KID: "kaname-a", Algorithm: domain.SigningAlgRS256, PublicKeyPEM: "pem"}
 	require.Equal(t, 3, reflectFieldCount(published), "у публикуемого типа ровно три поля, и все — публичные")
 
 	// And — у гейта есть место, которое он ОБЯЗАН находить: ХРАНИМЫЙ тип поле
@@ -288,7 +288,7 @@ func TestKeystore_F1_05_PublishedFormCannotCarryThePrivateHalf(t *testing.T) {
 	// And — проекция односторонняя: из хранимой формы публикуемая получается,
 	// обратного конструктора нет.
 	rec := domain.SigningKeyRecord{
-		KID: "kacho-a", Algorithm: domain.SigningAlgRS256,
+		KID: "kaname-a", Algorithm: domain.SigningAlgRS256,
 		PublicKeyPEM: "pem", PrivateKeyWrapped: []byte("wrapped"),
 	}
 	require.Equal(t, published, rec.Published())

@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -216,7 +217,18 @@ func (u *MintUseCase) mapErr(ctx context.Context, action string, err error) erro
 	case errors.Is(err, iamerr.ErrInvalidArg):
 		return status.Error(codes.InvalidArgument, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrUnavailable):
-		return status.Error(codes.Unavailable, iamerr.StripSentinel(err))
+		// Фиксированный текст, как у INTERNAL ниже, и по той же причине: цепочка
+		// признака недоступности ведёт к ЧУЖОМУ производителю (база, сосед, гейт
+		// прав), и её текст вызывающему не адресован. Прежде здесь стоял разбор
+		// цепочки, то есть обёртка вызывающего доезжала до провода дословно
+		// (задача #2464).
+		//
+		// Подробность НЕ теряется: она уходит в журнал тем же глаголом, что и на
+		// полосе INTERNAL. Прежняя редакция возвращала ДО записи в журнал —
+		// то есть на этой полосе причина не доставалась вообще никому, кроме
+		// вызывающего, которому она не адресована.
+		u.logErr(ctx, action, err)
+		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	}
 	u.logErr(ctx, action, err)
 	return status.Error(codes.Internal, "internal error")

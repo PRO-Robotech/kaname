@@ -147,10 +147,16 @@ var platformRootSegments = map[string]bool{
 
 // detectorPackages — имена пакетов, чей вызов и есть детектор посадки.
 //
-// Два, а не один: `platformtree` даёт пробе третий исход, `treeposture` — тот же
-// резолв без `testing`, и его зовёт прод-код модуля. Знать надо оба, иначе
-// законный прод-резолв читался бы как отсутствие якоря.
-var detectorPackages = map[string]bool{"platformtree": true, "treeposture": true}
+// ТРИ, а не два: `platformtree` даёт пробе третий исход, `treeposture` — тот же
+// резолв без `testing`, и его зовёт прод-код модуля, `treeroot` называет корень
+// ИНДЕКСОМ git и отдельно проверяет, что найденное дерево отслеживает
+// спрашивающий каталог. Знать надо все три, иначе законный прод-резолв читался бы
+// как отсутствие якоря.
+//
+// Третий дописан замером, а не чтением (#2420): перепись по модулю показала
+// законный резолв `treeroot.Of` в `internal/authzplan`, который распознаватель
+// не узнавал вовсе.
+var detectorPackages = map[string]bool{"platformtree": true, "treeposture": true, "treeroot": true}
 
 // detectorResolvers — методы детектора, возвращающие ПУТЬ либо КОРЕНЬ.
 //
@@ -160,6 +166,8 @@ var detectorResolvers = map[string]bool{
 	"Require": true, "RequirePath": true, "RequireCorpus": true,
 	"RootFrom": true, "PathOf": true, "PathUnder": true,
 	"CorpusRoot": true, "ModuleRootFrom": true, "Under": true,
+	// `treeroot.Of` — корень дерева, которому принадлежит каталог.
+	"Of": true,
 }
 
 // resolveCensus — объём осмотренного. Печатается всегда: «ноль находок» обязано

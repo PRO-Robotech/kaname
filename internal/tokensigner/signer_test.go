@@ -71,21 +71,21 @@ func TestSigner_F1_10_KidAlwaysPresentAndDistinct(t *testing.T) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 
 	// Then — токен несёт kid ВСЕГДА.
-	s := mustSigner(t, stubKeys{mat: newMaterial(t, "kacho-a")}, fixedClock(now))
+	s := mustSigner(t, stubKeys{mat: newMaterial(t, "kaname-a")}, fixedClock(now))
 	out, err := s.Sign(context.Background(), tokensigner.Request{
 		Subject: "sva-1", Audience: []string{"registry.kacho.local"},
 		TokenType: "at+jwt", TTL: time.Minute,
 	})
 	require.NoError(t, err)
 	header, _ := parseHeaderAndClaims(t, out.Token)
-	require.Equal(t, "kacho-a", header["kid"])
+	require.Equal(t, "kaname-a", header["kid"])
 
 	// And — идентификаторы ключей в наборе попарно различны; утверждение на
 	// наборе из ТРЁХ ключей: на одном свойство не измеряется вовсе.
 	set := []string{
-		string(newMaterialKID(t, "kacho-a")),
-		string(newMaterialKID(t, "kacho-b")),
-		string(newMaterialKID(t, "kacho-c")),
+		string(newMaterialKID(t, "kaname-a")),
+		string(newMaterialKID(t, "kaname-b")),
+		string(newMaterialKID(t, "kaname-c")),
 	}
 	seen := map[string]bool{}
 	for _, kid := range set {
@@ -103,7 +103,7 @@ func newMaterialKID(t *testing.T, kid string) domain.KeyID {
 // TestSigner_F1_12_ExpiryIsMandatoryAtIssue — F1-12.
 func TestSigner_F1_12_ExpiryIsMandatoryAtIssue(t *testing.T) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
-	s := mustSigner(t, stubKeys{mat: newMaterial(t, "kacho-a")}, fixedClock(now))
+	s := mustSigner(t, stubKeys{mat: newMaterial(t, "kaname-a")}, fixedClock(now))
 	base := tokensigner.Request{
 		Subject: "sva-1", Audience: []string{"registry.kacho.local"}, TokenType: "at+jwt",
 	}
@@ -132,7 +132,7 @@ func TestSigner_F1_12_ExpiryIsMandatoryAtIssue(t *testing.T) {
 
 // TestSigner_F1_14_ClockIsAnInput — F1-14.
 func TestSigner_F1_14_ClockIsAnInput(t *testing.T) {
-	mat := newMaterial(t, "kacho-a")
+	mat := newMaterial(t, "kaname-a")
 	req := tokensigner.Request{
 		Subject: "sva-1", Audience: []string{"registry.kacho.local"},
 		TokenType: "at+jwt", TTL: time.Minute,
@@ -157,7 +157,7 @@ func TestSigner_F1_14_ClockIsAnInput(t *testing.T) {
 // стороне подписанта; живой контур — в интеграционной пробе выдачи).
 func TestSigner_F1_15_ConfirmationComesFromPresentedMaterial(t *testing.T) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
-	s := mustSigner(t, stubKeys{mat: newMaterial(t, "kacho-a")}, fixedClock(now))
+	s := mustSigner(t, stubKeys{mat: newMaterial(t, "kaname-a")}, fixedClock(now))
 	base := tokensigner.Request{
 		Subject: "sva-1", Audience: []string{"registry.kacho.local"},
 		TokenType: "at+jwt", TTL: time.Minute,
@@ -204,7 +204,7 @@ func TestSigner_F1_15_ConfirmationComesFromPresentedMaterial(t *testing.T) {
 // никогда, а требование без проверки не действует.
 func TestSigner_MandatoryClaimsAndIssuer(t *testing.T) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
-	s := mustSigner(t, stubKeys{mat: newMaterial(t, "kacho-a")}, fixedClock(now))
+	s := mustSigner(t, stubKeys{mat: newMaterial(t, "kaname-a")}, fixedClock(now))
 	out, err := s.Sign(context.Background(), tokensigner.Request{
 		Subject: "sva-1", Audience: []string{"registry.kacho.local"},
 		TokenType: "at+jwt", TTL: time.Minute,
@@ -236,7 +236,7 @@ func TestSigner_MandatoryClaimsAndIssuer(t *testing.T) {
 // проигнорировано», только у величины.
 func TestSigner_TTLIsCappedByDeclaredCeiling(t *testing.T) {
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
-	s := mustSigner(t, stubKeys{mat: newMaterial(t, "kacho-a")}, fixedClock(now))
+	s := mustSigner(t, stubKeys{mat: newMaterial(t, "kaname-a")}, fixedClock(now))
 	_, err := s.Sign(context.Background(), tokensigner.Request{
 		Subject: "sva-1", Audience: []string{"registry.kacho.local"},
 		TokenType: "at+jwt", TTL: 2 * time.Hour,
@@ -256,7 +256,7 @@ func TestSigner_TTLIsCappedByDeclaredCeiling(t *testing.T) {
 // TestSigner_RefusesToBuildWithoutClockOrIssuer — часы и издатель суть входы,
 // а не умолчания: подписант без них не строится.
 func TestSigner_RefusesToBuildWithoutClockOrIssuer(t *testing.T) {
-	keys := stubKeys{mat: newMaterial(t, "kacho-a")}
+	keys := stubKeys{mat: newMaterial(t, "kaname-a")}
 	_, err := tokensigner.New(tokensigner.Config{Clock: fixedClock(time.Now()), MaxTokenTTL: time.Hour}, keys)
 	require.Error(t, err, "издатель обязателен: незаданный означает «не сужаем»")
 

@@ -25,7 +25,7 @@ import (
 )
 
 func TestListByAccount_AccountOwner_Allowed(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
 	uc := NewListByAccountUseCase(repo)
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: "usr_owner"})
@@ -37,7 +37,7 @@ func TestListByAccount_AccountOwner_Allowed(t *testing.T) {
 }
 
 func TestListByAccount_NonOwner_Denied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
 	uc := NewListByAccountUseCase(repo)
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: "usr_stranger"})
@@ -49,7 +49,7 @@ func TestListByAccount_NonOwner_Denied(t *testing.T) {
 }
 
 func TestListByAccount_Anonymous_Denied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
 	uc := NewListByAccountUseCase(repo)
 	ctx := context.Background()
 
@@ -60,7 +60,7 @@ func TestListByAccount_Anonymous_Denied(t *testing.T) {
 }
 
 func TestListByAccount_InvalidAccountID(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
 	uc := NewListByAccountUseCase(repo)
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: "usr_owner"})
@@ -75,7 +75,7 @@ func TestListByAccount_InvalidAccountID(t *testing.T) {
 // owner-allowed path with a recorded binding to confirm the SQL pass-through
 // works as expected (one binding seeded → one returned).
 func TestListByAccount_OwnerSeesAllBindings(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
 	// Pre-seed a fake-account binding so the fake reader returns one row.
 	repo.seedABListByAccount([]domain.AccessBinding{
 		{

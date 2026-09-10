@@ -23,8 +23,61 @@ Helm-чарт (часть umbrella-стенда платформы). Эта ст
     <tr><td><strong>Ory Kratos</strong></td><td>Личности и интерактивный вход — для user-флоу</td></tr>
     <tr><td><strong>Ory Hydra</strong></td><td>OAuth 2.0 authorization server — для токенов (SAKey / UserToken)</td></tr>
     <tr><td><strong>api-gateway</strong></td><td>Edge для tenant-трафика (TLS + JWT) — для внешнего доступа</td></tr>
+    <tr><td><strong>Prometheus Operator</strong></td><td>Определение вида <code>PrometheusRule</code>, которым чарт везёт правила тревоги — <strong>обязателен, пока включена ручка <code>alertRules.enabled</code></strong> (умолчание — включена). Без него <code>helm install</code> отвергает установку целиком; что делать — в разделе «Что чарт создаёт в вашем кластере» ниже</td></tr>
   </tbody>
 </table>
+
+## Что чарт создаёт в вашем кластере
+
+Чарт создаёт только эти объекты и ничего больше. Образ, базу и секреты, на которые он
+ссылается, заводит тот, кто ставит, — координаты им называются в
+[Конфигурации](/install/configuration).
+
+| Объект | `apiVersion` | Вид заводит | Выключается |
+|---|---|---|---|
+| `ConfigMap` | `v1` | кластер сам | — |
+| `Deployment` | `apps/v1` | кластер сам | — |
+| `Service` | `v1` | кластер сам | — |
+| `PrometheusRule` | `monitoring.coreos.com/v1` | **Prometheus Operator** | `alertRules.enabled=false` (умолчание — `true`) |
+
+Три первых вида кластер служит сам: чтобы их создать, ставить заранее ничего не нужно.
+Четвёртый — не служит.
+
+### Если Prometheus Operator в кластере нет
+
+Вид `PrometheusRule` заводит не Kubernetes, а Prometheus Operator. Пока определения этого вида
+в кластере нет, установка отвергается **целиком** — не одна тревога, а весь релиз, — и отвечает
+так:
+
+```text
+Error: INSTALLATION FAILED: unable to build kubernetes objects from release manifest:
+resource mapping not found for name: "kaname" namespace: "" from "":
+no matches for kind "PrometheusRule" in version "monitoring.coreos.com/v1"
+ensure CRDs are installed first
+```
+
+Отказ этот приходит от Helm, а не от службы, и потому не называет ни ручки, ни того, что надо
+поставить. Проверить заранее — одной командой, до `helm install`:
+
+```bash
+kubectl get crd prometheusrules.monitoring.coreos.com
+```
+
+Ответ `NotFound` означает выбор из двух, и оба законны:
+
+1. **поставить Prometheus Operator** — тогда правила тревоги приедут вместе со службой, и
+   переносить их в свою систему мониторинга руками не придётся;
+2. **отказаться от правил тревоги** — `helm install ... --set alertRules.enabled=false`.
+   Установка пройдёт, служба заработает полностью: ручка снимает только доставку правил.
+   Их текст остаётся на странице [Наблюдаемость](/advanced/observability) — перенесите
+   оттуда сами.
+
+:::warning У второго пути есть цена, и она тихая
+Правило, которое не поставлено, не звонит, а молчание неотличимо от исправности. Сильнее всего
+это касается `KanameIdentityLedgerUnsampled`: оно звонит на **отсутствие** события, то есть там,
+где симптома ждать неоткуда. Умолчание ручки стоит на `true` именно поэтому — цену ошибки несёт
+та сторона, которая шумит.
+:::
 
 ## Сборка образа
 

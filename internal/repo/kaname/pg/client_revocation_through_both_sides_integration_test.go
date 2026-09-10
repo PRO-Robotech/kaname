@@ -232,11 +232,11 @@ func seedAssertionClientOfKind(t *testing.T, f assertionFixture, kind domain.Ass
 	switch kind {
 	case domain.AssertionClientUser:
 		clientID = "uoc_mmmmmmmmmmmmmmmmm"
-		f.seedUserClient(t, clientID, "kacho-usr-cutoff", testPublicKeyPEM, "ES256", nil)
+		f.seedUserClient(t, clientID, "kaname-usr-cutoff", testPublicKeyPEM, "ES256", nil)
 		return clientID, f.user
 	case domain.AssertionClientServiceAccount:
 		clientID = "soc_mmmmmmmmmmmmmmmmm"
-		f.seedSAClient(t, clientID, "kacho-sak-cutoff", testPublicKeyPEM, "ES256")
+		f.seedSAClient(t, clientID, "kaname-sak-cutoff", testPublicKeyPEM, "ES256")
 		return clientID, f.sva
 	default:
 		t.Fatalf("вид клиента вне закрытого словаря: %q", kind)

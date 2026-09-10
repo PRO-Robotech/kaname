@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -132,16 +133,23 @@ func TestEveryDisabledSurfaceSaysWhatItDoesNotServe(t *testing.T) {
 //
 // Утверждение о ДЕРЕВЕ, а не о процессе: поднять его в пробе значило бы поднять
 // базу, слушатели и удостоверения — то есть проверять посадку, а не объявление.
-func TestBothRESTFrontsDeclareTheirAxis(t *testing.T) {
-	src, err := parser.ParseFile(token.NewFileSet(), "serve.go", nil, parser.ParseComments)
+// frontKnobsNamedByAxes — по каждой ожидаемой ручке фронта отвечает, названа ли
+// она текстом какой-нибудь оси адреса ЭТОГО исходника.
+//
+// Источник принимается доводом (имя и байты), а не читается по фиксированной
+// координате: тем же вызовом инъекция подаёт синтетический вход, меняя ровно
+// один факт. До #2479 источник был вписан в тело пробы, и способность её упасть
+// доказать было нечем.
+func frontKnobsNamedByAxes(name string, src []byte, knobs []string) (map[string]bool, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), name, src, parser.ParseComments)
 	if err != nil {
-		t.Fatalf("serve.go не разбирается: %v", err)
+		return nil, err
 	}
-	want := map[string]bool{
-		"KANAME_API_SERVER__REST_ENDPOINT":          false,
-		"KANAME_API_SERVER__INTERNAL_REST_ENDPOINT": false,
+	named := make(map[string]bool, len(knobs))
+	for _, knob := range knobs {
+		named[knob] = false
 	}
-	ast.Inspect(src, func(n ast.Node) bool {
+	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -151,13 +159,31 @@ func TestBothRESTFrontsDeclareTheirAxis(t *testing.T) {
 			return true
 		}
 		lit := literalText(call.Args[1])
-		for knob := range want {
+		for knob := range named {
 			if strings.Contains(lit, knob) {
-				want[knob] = true
+				named[knob] = true
 			}
 		}
 		return true
 	})
+	return named, nil
+}
+
+// restFrontKnobs — ручки, чьё состояние обязано быть названо осью.
+var restFrontKnobs = []string{
+	"KANAME_API_SERVER__REST_ENDPOINT",
+	"KANAME_API_SERVER__INTERNAL_REST_ENDPOINT",
+}
+
+func TestBothRESTFrontsDeclareTheirAxis(t *testing.T) {
+	src, err := os.ReadFile("serve.go")
+	if err != nil {
+		t.Fatalf("serve.go не прочитан: %v", err)
+	}
+	want, err := frontKnobsNamedByAxes("serve.go", src, restFrontKnobs)
+	if err != nil {
+		t.Fatalf("serve.go не разбирается: %v", err)
+	}
 	for knob, found := range want {
 		if !found {
 			t.Errorf("ручка %s не названа ни одной осью адреса: состояние этого фронта "+

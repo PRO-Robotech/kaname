@@ -125,7 +125,7 @@ func newRbacFixture(t *testing.T, ctx context.Context, suffix string) *rbacFixtu
 	// роль проекта ограничена своей. Имя обязано пройти roles_system_name_check.
 	exec(`INSERT INTO kaname.roles (id, name, permissions, cluster_id)
 	      VALUES ($1, $2, '["compute.instance.*.get"]'::jsonb, 'cluster_root')`,
-		roleID, "kacho.probe"+suffix)
+		roleID, "kaname.probe"+suffix)
 	require.NoError(t, tx.Commit(ctx))
 
 	return &rbacFixture{pool: pool, roleID: roleID}
@@ -154,7 +154,7 @@ func TestRbacV2Grammar_FourSegmentPermissionIsAccepted(t *testing.T) {
 	ctx := context.Background()
 	f := newRbacFixture(t, ctx, "g4a")
 
-	require.NoError(t, f.insertRole(ctx, "rol0000000000000g4ab", "kacho.probeg4ab",
+	require.NoError(t, f.insertRole(ctx, "rol0000000000000g4ab", "kaname.probeg4ab",
 		`["compute.instance.inst-abc.update","vpc.network.*.create"]`),
 		"четырёхсегментная запись обязана приниматься — и именованным ресурсом, и подстановкой")
 
@@ -187,7 +187,7 @@ func TestRbacV2Grammar_MalformedPermissionIsRejected(t *testing.T) {
 	}
 	for i, c := range bad {
 		id := fmt.Sprintf("rol0000000000000g4b%d", i)
-		err := f.insertRole(ctx, id, fmt.Sprintf("kacho.probeg4b%d", i), c.perms)
+		err := f.insertRole(ctx, id, fmt.Sprintf("kaname.probeg4b%d", i), c.perms)
 		require.Error(t, err, "%s: %s обязано отвергаться", c.why, c.perms)
 
 		pgErr := unwrapPgErr(err)
@@ -207,7 +207,7 @@ func TestRbacV2Grammar_WildcardOnlyIsAccepted(t *testing.T) {
 	ctx := context.Background()
 	f := newRbacFixture(t, ctx, "g4c")
 
-	require.NoError(t, f.insertRole(ctx, "rol0000000000000g4cw", "kacho.probeg4cw", `["*.*.*.*"]`),
+	require.NoError(t, f.insertRole(ctx, "rol0000000000000g4cw", "kaname.probeg4cw", `["*.*.*.*"]`),
 		"подстановка во всех четырёх сегментах законна: это и есть форма роли «может всё»")
 }
 

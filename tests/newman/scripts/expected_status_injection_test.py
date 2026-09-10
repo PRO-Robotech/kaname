@@ -47,9 +47,18 @@ def audit_source(body):
 
 def main():
     print("ось 1 — форма `assert_status`")
-    census, findings = audit_source("CASES = []\nx = assert_status(405)\n")
-    check("инъекция: 405 — находка", len(findings) == 1 and "405" in findings[0], str(findings))
-    check("находка называет причину", findings and "501" in findings[0], str(findings))
+    # Здесь инъекцией стоял 405. Он перестал быть невозможным: фронт отвечает им
+    # на промах глагола решением задачи #2493, — и ось замолчала бы, оставшись на
+    # вид рабочей. Предмет заменён на статус, который дерево не производит и
+    # сегодня; форма оси при этом та же, потому что оси здесь про ФОРМЫ
+    # объявления, а не про конкретные статусы.
+    census, findings = audit_source("CASES = []\nx = assert_status(412)\n")
+    check("инъекция: 412 — находка", len(findings) == 1 and "412" in findings[0], str(findings))
+    check("находка называет причину", findings and "400" in findings[0], str(findings))
+    # Контроль в обратную сторону: сведённый статус находкой БОЛЬШЕ НЕ является.
+    _, findings405 = audit_source("CASES = []\nx = assert_status(405)\n")
+    check("контроль: 405 — молчание (статус производится фронтом)",
+          not findings405, str(findings405))
     census, findings = audit_source("CASES = []\nx = assert_status(400)\n")
     check("контроль: 400 — молчание", not findings, str(findings))
     check("контроль: предмет осмотрен", census["assert_status"] == 1, str(census))

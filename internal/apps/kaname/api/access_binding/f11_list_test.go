@@ -52,7 +52,7 @@ func newListHandlerWithStore(repo *abFakeRepo, fga *abQueriesStub, rs clients.Re
 // IAM-1-32: garbage page_token → INVALID_ARGUMENT, and the FGA floor is NOT consulted
 // (format-validate happens BEFORE the listauthz short-circuit).
 func TestABList_IAM_1_32_GarbageTokenBeforeAuthz(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_l32", "", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_l32", "", "rol_v", "kaname.view", nil)
 	fga := newABQueriesStub()
 	h := newListHandler(repo, fga)
 
@@ -65,7 +65,7 @@ func TestABList_IAM_1_32_GarbageTokenBeforeAuthz(t *testing.T) {
 
 // IAM-1-32: page_size>1000 → INVALID_ARGUMENT (rejected, not clamped).
 func TestABList_IAM_1_32_PageSizeTooLarge(t *testing.T) {
-	h := newListHandler(newABFakeRepo("usr_o", "acc_l32b", "", "rol_v", "kacho.view", nil), newABQueriesStub())
+	h := newListHandler(newABFakeRepo("usr_o", "acc_l32b", "", "rol_v", "kaname.view", nil), newABQueriesStub())
 	_, err := h.List(newOwnerContext("usr_x"), &iamv1.ListAccessBindingsRequest{PageSize: 1001})
 	require.Error(t, err)
 	st, _ := status.FromError(err)
@@ -75,7 +75,7 @@ func TestABList_IAM_1_32_PageSizeTooLarge(t *testing.T) {
 // IAM-1-32: an unknown filter key → INVALID_ARGUMENT; a known dotted `scope` maps
 // to the bare within-service anchor kind.
 func TestABList_IAM_1_32_FilterWhitelist(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_l32c", "", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_l32c", "", "rol_v", "kaname.view", nil)
 	fga := newABQueriesStub()
 	fga.set("v_get", "user:usr_x", []string{"acb000000000000keep1"})
 	h := newListHandler(repo, fga)
@@ -107,7 +107,7 @@ func TestABList_IAM_1_32_FilterWhitelist(t *testing.T) {
 // IAM-1-32: visibility is the read relation applied per-object to the page — a caller
 // sees exactly the bindings it may read by id, not the whole set.
 func TestABList_IAM_1_32_VisibilityFilteredPerObject(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_l32d", "", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_l32d", "", "rol_v", "kaname.view", nil)
 	acbKeep := domain.AccessBinding{ID: "acb000000000000keep1", ResourceType: "account", ResourceID: "acc_l32d", SubjectID: "usr_a"}
 	acbHide := domain.AccessBinding{ID: "acb000000000000hide2", ResourceType: "account", ResourceID: "acc_l32d", SubjectID: "usr_b"}
 	seedABListByScope(repo, []domain.AccessBinding{acbKeep, acbHide})
@@ -129,7 +129,7 @@ func TestABList_IAM_1_32_VisibilityFilteredPerObject(t *testing.T) {
 
 // IAM-1-32: anonymous → empty page (no leak, no error); FGA error → UNAVAILABLE.
 func TestABList_IAM_1_32_AnonEmpty_FGAErrorUnavailable(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_l32e", "", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_l32e", "", "rol_v", "kaname.view", nil)
 	seedABListByScope(repo, []domain.AccessBinding{{ID: "acb0000000000000any1", ResourceType: "account", ResourceID: "acc_l32e"}})
 
 	t.Run("anonymous → empty", func(t *testing.T) {
@@ -157,7 +157,7 @@ func TestABList_IAM_1_32_AnonEmpty_FGAErrorUnavailable(t *testing.T) {
 // unified List must carry the same super-gate: the page is UNFILTERED (VisibleIDs
 // push-down dropped, not an empty slice) while the declarative predicates still apply.
 func TestABList_IAM_1_32_ClusterAdminUnfiltered(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_l32f", "", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_l32f", "", "rol_v", "kaname.view", nil)
 	acbA := domain.AccessBinding{ID: "acb00000000000000ca1", ResourceType: "account", ResourceID: "acc_l32f", SubjectID: "usr_a"}
 	acbB := domain.AccessBinding{ID: "acb00000000000000ca2", ResourceType: "account", ResourceID: "acc_l32f", SubjectID: "usr_b"}
 	seedABListByScope(repo, []domain.AccessBinding{acbA, acbB})

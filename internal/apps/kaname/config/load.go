@@ -123,6 +123,16 @@ func Load(path string) (Config, error) {
 		}
 	}
 
+	// ТРИ СОБСТВЕННЫХ ПОТОЛКА привязываются здесь по той же причине, что три
+	// ручки выше, и перечень ВЫВОДИТСЯ из таблицы величин, а не выписывается
+	// вторым списком (`own_ceilings.go`): выписанный разошёлся бы с ней молча,
+	// и переменная, названная текстом отказа, перестала бы доезжать до поля.
+	for _, k := range OwnCeilingKnobs {
+		if err := v.BindEnv(k.Key, k.Env); err != nil {
+			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
+		}
+	}
+
 	// YAML file (optional).
 	if path != "" {
 		v.SetConfigFile(path)
@@ -132,7 +142,9 @@ func Load(path string) (Config, error) {
 	}
 
 	// Legacy ENV → new keys (backward-compat).
-	applyLegacyEnv(v)
+	if err := applyLegacyEnv(v); err != nil {
+		return Config{}, err
+	}
 
 	// Inject the password from password-from-env (when set) into both the
 	// master URL and the slave URL.
@@ -164,54 +176,63 @@ func Load(path string) (Config, error) {
 }
 
 // applyLegacyEnv — bridge from legacy ENV names to new viper keys. Applied
-// AFTER AutomaticEnv: if the new KANAME_REPOSITORY__POSTGRES__URL is set
-// it has already been picked up via ENV-binding and legacy is ignored.
+// AFTER AutomaticEnv, and it writes at viper's `override` level, which is
+// SENIOR to `env` — so whatever it sets wins over the documented key.
+//
+// Прежняя редакция этой шапки утверждала обратное — «если задан новый
+// KANAME_REPOSITORY__POSTGRES__URL, легаси игнорируется». Код делал ровно
+// противоположное: сборка по полям звала `v.Set` безусловно и перебивала
+// объявленную оператором строку, отбрасывая из неё всё, кроме четырёх полей,
+// — включая параметры запроса. Два места об одном предмете, и верным было НЕ
+// написанное (задача #2475).
 //
 // If at least one of KANAME_DB_HOST/PORT/USER/NAME is set we assemble a
-// DSN from them and override repository.postgres.url. This is required
-// because the current values.yaml sets ENV vars exactly that way (parity
-// with kacho-vpc).
+// DSN from them and override repository.postgres.url — но ТОЛЬКО когда
+// объявленной строки нет. Обе формы разом — отказ, см. refuseAmbiguousDSN.
 //
 // KANAME_DB_PASSWORD stays a separate mechanism (see password-from-env).
-func applyLegacyEnv(v *viper.Viper) {
-	type mapping struct {
-		env string
-		key string
+func applyLegacyEnv(v *viper.Viper) error {
+	// ФОРМА ЗНАЧЕНИЯ ПРОВЕРЯЕТСЯ ДО ЛЮБОЙ СБОРКИ.
+	//
+	// Плоское имя переменной у части этих ручек совпадает с формой, которой
+	// Kubernetes сам объявляет поду адреса служб своего пространства имён
+	// (`<СЛУЖБА>_PORT` и соседние — см. service_link_collision.go). Подстановка
+	// кластера попадает в СВОЁ ЖЕ пространство имён настроек службы и перебивает
+	// не умолчание, а то, что задал оператор.
+	//
+	// Проверка стоит здесь — перед сборкой, — потому что собранное значение
+	// доезжает до отказа лишь на ОТКРЫТИИ слушателя: последним шагом старта,
+	// после отчёта о всей посадке, отказом от библиотеки, не называющим ни ручки,
+	// ни того, откуда взялось значение.
+	if err := refuseCollidingFlatEnv(os.LookupEnv); err != nil {
+		return err
 	}
-	simple := []mapping{
-		{"KANAME_DB_SSLMODE", "repository.postgres.ssl-mode"},
-		{"KANAME_DB_MAX_CONNS", "repository.postgres.max-conns"},
-		{"KANAME_GRPC_PORT", "_legacy.grpc-port"},
-		{"KANAME_INTERNAL_PORT", "_legacy.internal-port"},
-		{"KANAME_AUTH_MODE", "authn.mode"},
-		// Flat alias for the SA-key redact grace window — the deploy chart sets
-		// the short KANAME_SAKEY_REDACT_GRACE rather than the namespaced
-		// KANAME_AUTHN__SAKEY_REDACT_GRACE. Value is a Go duration ("120s").
-		{"KANAME_SAKEY_REDACT_GRACE", "authn.sakey-redact-grace"},
-		// Flat alias for the User-token redact grace window — mirror of the SA-key
-		// alias above. Value is a Go duration ("120s").
-		{"KANAME_USERTOKEN_REDACT_GRACE", "authn.usertoken-redact-grace"},
-		// SA-key lifetime discipline — flat aliases the deploy chart sets.
-		// Values are Go durations ("2160h" / "8760h" / "15m").
-		{"KANAME_SAKEY_DEFAULT_TTL", "authn.sakey-default-ttl"},
-		{"KANAME_SAKEY_MAX_TTL", "authn.sakey-max-ttl"},
-		{"KANAME_SAKEY_ACCESS_TOKEN_TTL", "authn.sakey-access-token-ttl"},
-		{"KANAME_SAKEY_BIND_DPOP", "authn.sakey-bind-dpop"},
-		// Окно отзыва собственной двери. Величина Go-длительности ("5s").
-		{"KANAME_AUTHZ_CACHE_TTL", "authz.cache-ttl"},
-	}
-	for _, m := range simple {
-		if val, ok := os.LookupEnv(m.env); ok {
-			v.Set(m.key, val)
+
+	// Плоские псевдонимы читаются из ОБЩЕГО объявления (flatEnvKnobs): его же
+	// читают проверка формы выше и перепись гейта класса. Второй список
+	// разошёлся бы с первым молча.
+	for _, k := range flatEnvKnobs {
+		if k.Key == "" {
+			continue // значение собирается вручную — поля адреса базы ниже
+		}
+		if val, ok := os.LookupEnv(k.Env); ok {
+			v.Set(k.Key, val)
 		}
 	}
 
 	// DB DSN composition from split-env (KANAME_DB_HOST/PORT/USER/NAME).
-	host, hasHost := os.LookupEnv("KANAME_DB_HOST")
-	port, hasPort := os.LookupEnv("KANAME_DB_PORT")
-	user, hasUser := os.LookupEnv("KANAME_DB_USER")
-	db, hasDB := os.LookupEnv("KANAME_DB_NAME")
+	//
+	// Имена берутся из ОБЩЕГО объявления (см. splitDSNEnvNames ниже): текст
+	// отказа читает то же самое, поэтому «ручку сборка читает, а отказ её не
+	// называет» невыразимо by construction.
+	host, hasHost := os.LookupEnv(envDBHost)
+	port, hasPort := os.LookupEnv(envDBPort)
+	user, hasUser := os.LookupEnv(envDBUser)
+	db, hasDB := os.LookupEnv(envDBName)
 	if hasHost || hasPort || hasUser || hasDB {
+		if err := refuseAmbiguousDSN(); err != nil {
+			return err
+		}
 		if host == "" {
 			host = "localhost"
 		}
@@ -234,6 +255,74 @@ func applyLegacyEnv(v *viper.Viper) {
 	if p := v.GetString("_legacy.internal-port"); p != "" {
 		v.Set("api-server.internal-endpoint", "tcp://0.0.0.0:"+p)
 	}
+
+	return nil
+}
+
+// Расщеплённые ручки адреса базы. Объявлены ОДИН раз: их читает и сборка
+// строки выше, и текст отказа ниже, поэтому «ручку сборка читает, а отказ её не
+// называет» невыразимо by construction.
+//
+// Это НЕ противоречит соседней пробе documented-env-имён: там речь о ключах,
+// чьё имя переменной viper ВЫВОДИТ из пути ключа. У этих четырёх пути ключа
+// нет — они легаси-псевдонимы, и вывести их не из чего.
+const (
+	envDBHost = "KANAME_DB_HOST"
+	envDBPort = "KANAME_DB_PORT"
+	envDBUser = "KANAME_DB_USER"
+	envDBName = "KANAME_DB_NAME"
+)
+
+// splitDSNEnvNames — те же четыре ручки в порядке клиентской страницы
+// настройки. Выводится из объявлений выше, а не выписывается вторым списком.
+var splitDSNEnvNames = []string{envDBHost, envDBPort, envDBUser, envDBName}
+
+// postgresURLKey — путь ключа полного DSN. Имя переменной из него ВЫВОДИТСЯ
+// (см. envNameOf), а не пишется вторым литералом: переименуй ключ — и текст
+// отказа переедет вместе с ним, вместо того чтобы назвать имя, которого нет.
+const postgresURLKey = "repository.postgres.url"
+
+// envNameOf повторяет вывод имени переменной, который делает viper из пути
+// ключа: префикс службы, точка → `__`, дефис → `_`, верхний регистр
+// (см. SetEnvPrefix + SetEnvKeyReplacer в Load).
+func envNameOf(key string) string {
+	return EnvPrefix + "_" + strings.ToUpper(strings.NewReplacer(".", "__", "-", "_").Replace(key))
+}
+
+// refuseAmbiguousDSN отвергает старт, когда адрес базы объявлен ОБЕИМИ формами
+// сразу: строкой целиком и по полям.
+//
+// Почему отказ, а не старшинство. У величины два документированных входа, и
+// главного из них не называл никто. Молчаливое старшинство негодно в ЛЮБУЮ
+// сторону: «поля старше строки» отбрасывает у оператора параметры запроса, а
+// потом посадочный страж отказывает, называя ровно ту величину, которую
+// оператор как раз задал; «строка старше полей» принимает ручки и выбрасывает
+// их — отдельно запрещённый класс «принято-и-проигнорировано».
+//
+// Отказ не выбирает за оператора и восстанавливает следующий шаг: он называет
+// ОБЕ спорящие стороны — ручку строки и каждую ЗАДАННУЮ ручку поля. Незаданные
+// не называются: иначе оператор пойдёт искать то, чего не задавал.
+func refuseAmbiguousDSN() error {
+	urlEnv := envNameOf(postgresURLKey)
+	if _, ok := os.LookupEnv(urlEnv); !ok {
+		return nil
+	}
+
+	set := make([]string, 0, len(splitDSNEnvNames))
+	for _, name := range splitDSNEnvNames {
+		if _, ok := os.LookupEnv(name); ok {
+			set = append(set, name)
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"адрес базы объявлен дважды, и старшинство форм не решено: %s задаёт "+
+			"строку подключения целиком, а %s — её же по полям. Оставьте одну "+
+			"форму: либо %s, либо перечисленные ручки полей",
+		urlEnv, strings.Join(set, ", "), urlEnv)
 }
 
 // injectPasswordIntoDSN adds the password to the DSN (postgres://user@host →

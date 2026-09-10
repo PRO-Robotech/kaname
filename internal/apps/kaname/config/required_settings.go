@@ -63,6 +63,8 @@ import (
 	"strings"
 
 	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // SupplyPath — каким путём оператор подаёт величину процессу.
@@ -348,6 +350,19 @@ var RequiredSettings = []RequiredSetting{
 			"останавливается",
 		Refusal: "authn.trust-domain",
 	},
+	// ТРИ СОБСТВЕННЫХ ПОТОЛКА (приёмка `KAN-QUOTA-1`, `П25`; задача #2117).
+	//
+	// Строки ПОРОЖДАЮТСЯ из таблицы величин (`own_ceilings.go`), а не выписываются
+	// здесь второй раз: ключ, переменная и объяснение живут в одном месте, и
+	// разойтись им негде. Согласие множеств держит проба
+	// `TestOwnCeilingKnobsAllHaveARequiredSettingRow` — обе стороны, а не одна.
+	//
+	// Образцы выбраны заведомо ТЕСНЫМИ (1/2/2), а не щедрыми: профиль есть
+	// объявление посадки, и величину под свою установку выбирает тот, кто ставит.
+	// Правдоподобно-большое число читалось бы как «уже настроено».
+	ownCeilingRequirement("iam.account", "1"),
+	ownCeilingRequirement("iam.user.credential", "2"),
+	ownCeilingRequirement("iam.serviceAccount.credential", "2"),
 	{
 		Key:    "authn.hook-shared-secret",
 		Env:    "KANAME_HOOK_TOKEN",
@@ -521,4 +536,34 @@ var RequiredSettings = []RequiredSetting{
 			"намеренно — окно, выбранное за оператора, он не увидит и не пересмотрит",
 		Refusal: "authn.presented-credential.revocation-cache-ttl is not declared",
 	},
+}
+
+// ownCeilingRequirement — строка таблицы обязательных величин, ПОРОЖДЁННАЯ из
+// таблицы собственных потолков.
+//
+// Ключ, переменная и объяснение берутся у неё, а не пишутся здесь второй раз:
+// второе написание разошлось бы с первым молча — переменную правят коммитом в
+// один файл, документ порождается из другого.
+//
+// Подстрока отказа — сам КЛЮЧ: он стоит в тексте обеих ветвей стража (незаданное
+// и отрицательное), поэтому ведёт оператора от сообщения к строке документа в
+// любом случае.
+func ownCeilingRequirement(kind domain.LimitKind, sample string) RequiredSetting {
+	for _, k := range OwnCeilingKnobs {
+		if k.Kind != kind {
+			continue
+		}
+		return RequiredSetting{
+			Key:     k.Key,
+			Env:     k.Env,
+			Supply:  SupplyEnv,
+			Sample:  sample,
+			Why:     k.Why + ". Величину объявляет ПОСАДКА: внешнего авторитета величин в самостоятельной установке нет by construction, и спросить её не у кого. Умолчания нет намеренно — подставленное построением означало бы выбор за оператора, сделанный молча; 0 законен и означает «ресурсов этого вида не заводить»",
+			Refusal: k.Key,
+		}
+	}
+	// Вид, которого в таблице величин нет, — не «пустая строка», а расхождение
+	// двух объявлений. Паника здесь законна: это инициализация пакета, и
+	// молчаливая пустая строка дала бы документ без величины при живом страже.
+	panic("own ceiling knob for kind " + string(kind) + " is not declared")
 }

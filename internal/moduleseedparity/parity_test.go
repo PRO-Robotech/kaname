@@ -6,12 +6,32 @@
 //
 // # Почему прогон против базы, а не разбор миграций
 //
-// Так требует предикат снятия задачи, и требует по существу. Действующий посев
-// есть НАЛОЖЕНИЕ применённых миграций: запись, заведённая одной, снимается
-// другой (служебная запись сетевого оператора была заведена и снята, и в базе
-// её нет). Разбор SQL — распознаватель: форму записи, которой он не знает, он
-// пропускает МОЛЧА, и его молчание неотличимо от согласия. Здесь миграции
-// исполняются, а строки читаются оттуда, где лежат.
+// Так требует предикат снятия задачи, и требует по существу. Разбор SQL —
+// распознаватель: форму записи, которой он не знает, он пропускает МОЛЧА, и его
+// молчание неотличимо от согласия. Здесь миграции исполняются, применитель
+// зовётся, а строки читаются оттуда, где лежат.
+//
+// # ЖИВУЮ сторону производит ПРИМЕНИТЕЛЬ, а не миграция (#2452)
+//
+// Здесь стояло «действующий посев есть НАЛОЖЕНИЕ применённых миграций», и это
+// перестало быть верным вместе со своим предметом: служебные учётки модулей
+// платформы ушли из цепочки миграций службы доступа
+// (`20260909202745_module_identities_leave_the_baseline.sql`) — самостоятельная
+// установка заводила пять личностей чужого продукта. Строки заводит применитель
+// `internal/apps/kaname/moduleseed` из ТОГО ЖЕ раздела `seed`, который эта
+// сверка и судит.
+//
+// Из этого следует, ЧТО ИМЕННО гейт держит теперь, и это сильнее прежнего:
+// прежде он сверял два независимых объявления (манифест и миграцию), и его
+// зелёный означал «два места об одном предмете ещё не разошлись». Теперь
+// объявление ОДНО, а сверяется, доезжает ли оно до базы: применитель зовётся
+// здесь ровно так, как его зовёт композиционный корень, и расхождение означает
+// «объявленное не применилось», а не «две копии разъехались».
+//
+// Цена названа честно: сверка перестала быть независимой от применителя —
+// красное у неё теперь бывает и от его дефекта. Это правильный размен: копии,
+// которая могла бы разойтись, больше нет, а дефект применителя обязан быть
+// виден кому-то, и до этой задачи он не был виден никому.
 //
 // # Почему НЕ общий стенд
 //
@@ -57,10 +77,12 @@ import (
 	"github.com/PRO-Robotech/kacho/pkg/pgtest"
 	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/moduleseed"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/moduleseedparity"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/modulemanifests"
 )
 
@@ -154,6 +176,11 @@ func moduleStates(ctx context.Context, t *testing.T, set modulemanifests.Set) (
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
+	// Манифесты разбираются ДО чтения живого: их же получает применитель, и
+	// второго разбора здесь не заводится — он разошёлся бы с первым молча.
+	loaded := loadManifests(t, set)
+	applyDeliveredSeed(ctx, t, pool, loaded)
+
 	liveSA, saByOwner, ownerlessSA := readLiveServiceAccounts(ctx, t, pool)
 	liveJoin, joinByOwner, ownerlessJoin := readLiveJoins(ctx, t, pool)
 	liveGroup, groupByOwner, ownerlessGroup := readLiveGroups(ctx, t, pool)
@@ -170,14 +197,8 @@ func moduleStates(ctx context.Context, t *testing.T, set modulemanifests.Set) (
 		states  []moduleseedparity.ModuleState
 		claimed = map[string]bool{}
 	)
-	for _, file := range set.Files {
-		// #nosec G304 -- путь получен обходом дерева ЭТОГО прогона, снаружи не приходит
-		src, rerr := os.ReadFile(filepath.Join(set.Root, filepath.FromSlash(file)))
-		require.NoErrorf(t, rerr, "манифест %s не прочитан", file)
-
-		m, lerr := manifest.Load(src)
-		require.NoErrorf(t, lerr, "манифест %s не разобран: сверять нечем", file)
-
+	for i, file := range set.Files {
+		m := loaded[i]
 		census.Manifests++
 		claimed[m.Module] = true
 		states = append(states, stateOf(m.Module, file, m,
@@ -228,6 +249,38 @@ func moduleStates(ctx context.Context, t *testing.T, set modulemanifests.Set) (
 		census.Bindings.Owned += len(st.LiveBinding)
 	}
 	return states, census
+}
+
+// loadManifests разбирает манифесты перечня В ТОМ ЖЕ ПОРЯДКЕ, в каком они в нём
+// стоят: применитель и сверка обязаны говорить об одних документах, а не о двух
+// независимо собранных множествах.
+func loadManifests(t *testing.T, set modulemanifests.Set) []*manifest.Manifest {
+	t.Helper()
+	out := make([]*manifest.Manifest, 0, len(set.Files))
+	for _, file := range set.Files {
+		// #nosec G304 -- путь получен обходом дерева ЭТОГО прогона, снаружи не приходит
+		src, rerr := os.ReadFile(filepath.Join(set.Root, filepath.FromSlash(file)))
+		require.NoErrorf(t, rerr, "манифест %s не прочитан", file)
+
+		m, lerr := manifest.Load(src)
+		require.NoErrorf(t, lerr, "манифест %s не разобран: сверять нечем", file)
+		out = append(out, m)
+	}
+	return out
+}
+
+// applyDeliveredSeed зовёт применитель посева ровно так, как его зовёт
+// композиционный корень, и печатает перепись — ВСЕГДА, независимо от исхода.
+//
+// Перепись здесь несущая, а не украшение: «расхождений нет» на применителе,
+// который не записал НИ ОДНОЙ строки, читалось бы как согласие, а означало бы,
+// что сверять было нечего с обеих сторон.
+func applyDeliveredSeed(ctx context.Context, t *testing.T, pool *pgxpool.Pool, manifests []*manifest.Manifest) {
+	t.Helper()
+	applier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
+	census, err := applier.ApplyAll(ctx, manifests)
+	t.Logf("перепись применения посева: %s", census)
+	require.NoError(t, err, "применитель посева отказал — живой стороны сверки не существует")
 }
 
 // stateOf — обе стороны одного модуля. Объявленное считается ЗДЕСЬ же, поэтому

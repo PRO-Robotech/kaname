@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	disabledSAClientID = "kacho-sak-disabled"
+	disabledSAClientID = "kaname-sak-disabled"
 	disabledSAID       = "sva01disabledsa001"
 	disabledSocID      = "soc_01disabledsa001"
 	disabledSAAccID    = "acc01disabledsa001"

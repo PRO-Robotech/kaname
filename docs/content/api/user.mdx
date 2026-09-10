@@ -185,9 +185,10 @@ import dedent from 'ts-dedent'
   `}
 </CodeBlock>
 
-`Operation.metadata` (`InviteUserMetadata`) несёт `magicLinkUrl` — recovery/magic-link Kratos,
-который админ передаёт приглашённому вручную (автоотправка email не интегрирована). Для
-повторного приглашения уже активного пользователя ссылка пустая.
+`Operation.metadata` (`InviteUserMetadata`) несёт `magicLinkUrl` — recovery/magic-link Kratos.
+Автоотправка письма существует; пока не объявлены `inviteMail.relay` и `inviteMail.from`,
+письмо не уходит и ссылку передаёт админ вручную. Для повторного приглашения уже активного
+пользователя ссылка пустая.
 
 </ApiOperation>
 

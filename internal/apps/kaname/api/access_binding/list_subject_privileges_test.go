@@ -56,7 +56,7 @@ const (
 // seeds the subject (user / SA) with the given home account. relations defaults
 // to a denying FGA unless overridden.
 func spRepo() *abFakeRepo {
-	repo := newABFakeRepo(spOwnerID, spAccA, "prj00000000000proj01", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo(spOwnerID, spAccA, "prj00000000000proj01", "rol_v", "kaname.view", nil)
 	repo.AddUser(spMemberID, spAccA)
 	repo.AddUser(spOwnerID, spAccA)
 	repo.AddUser(spAdminID, spAccB) // admin lives in another account but holds FGA admin on acc-A

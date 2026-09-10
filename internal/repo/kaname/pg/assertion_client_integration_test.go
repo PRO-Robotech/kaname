@@ -117,7 +117,7 @@ func TestF2_14_MirrorIdentifierDoesNotResolveTheClient(t *testing.T) {
 	f := newAssertionFixture(t)
 
 	const ourID = "uoc_bbbbbbbbbbbbbbbbb"
-	const mirrorID = "kacho-usr-mirror-0001"
+	const mirrorID = "kaname-usr-mirror-0001"
 	f.seedUserClient(t, ourID, mirrorID, testPublicKeyPEM, "ES256", nil)
 
 	// Зеркальное значение НЕ резолвится. Проба заполняет колонку — иначе она
@@ -166,7 +166,7 @@ func TestF2_44_InteractiveClientDoesNotResolveAtAll(t *testing.T) {
 	// утверждению, резолвится. Без него проба зелена на разрешении, не
 	// находящем никого.
 	const ourID = "soc_ddddddddddddddddd"
-	f.seedSAClient(t, ourID, "kacho-sak-mirror-0001", testPublicKeyPEM, "ES256")
+	f.seedSAClient(t, ourID, "kaname-sak-mirror-0001", testPublicKeyPEM, "ES256")
 	row, err := f.repo.ResolveAssertionClient(ctx, ourID)
 	require.NoError(t, err)
 	require.Equal(t, domain.AssertionClientServiceAccount, row.Kind)
@@ -184,14 +184,14 @@ func TestF2_10_EmptyRegisteredAlgorithmIsALegalSchemaStateAndMeansNoKey(t *testi
 
 	// Схема допускает пустой алгоритм и пустой ключ — это её умолчание.
 	const bare = "uoc_eeeeeeeeeeeeeeeee"
-	f.seedUserClient(t, bare, "kacho-usr-bare", "", "", nil)
+	f.seedUserClient(t, bare, "kaname-usr-bare", "", "", nil)
 	row, err := f.repo.ResolveAssertionClient(ctx, bare)
 	require.NoError(t, err, "строка существует; отказывать обязан вызывающий, а не чтение")
 	require.False(t, row.CanPresentAssertion(), "пустое означает «ключа нет», а не «любой алгоритм»")
 
 	// Положительный контроль на том же прогоне.
 	const armed = "uoc_fffffffffffffffff"
-	f.seedUserClient(t, armed, "kacho-usr-armed", testPublicKeyPEM, "ES256", nil)
+	f.seedUserClient(t, armed, "kaname-usr-armed", testPublicKeyPEM, "ES256", nil)
 	row, err = f.repo.ResolveAssertionClient(ctx, armed)
 	require.NoError(t, err)
 	require.True(t, row.CanPresentAssertion())
@@ -209,7 +209,7 @@ func TestF2_30_OwnerStateReachesTheCallerForBothNonActiveValues(t *testing.T) {
 	f := newAssertionFixture(t)
 
 	const clientID = "uoc_ggggggggggggggggg"
-	f.seedUserClient(t, clientID, "kacho-usr-owner-state", testPublicKeyPEM, "ES256", nil)
+	f.seedUserClient(t, clientID, "kaname-usr-owner-state", testPublicKeyPEM, "ES256", nil)
 
 	// ACTIVE — положительный контроль.
 	row, err := f.repo.ResolveAssertionClient(ctx, clientID)
@@ -246,14 +246,14 @@ func TestF2_29_ClientExpiryReachesTheCallerAndAbsentMeansForever(t *testing.T) {
 	// Срок задан.
 	at := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
 	const dated = "uoc_hhhhhhhhhhhhhhhhh"
-	f.seedUserClient(t, dated, "kacho-usr-dated", testPublicKeyPEM, "ES256", &at)
+	f.seedUserClient(t, dated, "kaname-usr-dated", testPublicKeyPEM, "ES256", &at)
 	row, err := f.repo.ResolveAssertionClient(ctx, dated)
 	require.NoError(t, err)
 	require.Equal(t, at.Unix(), row.ExpiresAt)
 
 	// Срок НЕ задан — ноль, и это «бессрочно», а не «истёк в начале эпохи».
 	const forever = "uoc_jjjjjjjjjjjjjjjjj"
-	f.seedUserClient(t, forever, "kacho-usr-forever", testPublicKeyPEM, "ES256", nil)
+	f.seedUserClient(t, forever, "kaname-usr-forever", testPublicKeyPEM, "ES256", nil)
 	row, err = f.repo.ResolveAssertionClient(ctx, forever)
 	require.NoError(t, err)
 	require.Zero(t, row.ExpiresAt)

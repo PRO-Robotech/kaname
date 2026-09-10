@@ -81,7 +81,7 @@ func kidsIn(t *testing.T, body string) []string {
 func TestKeySet_F1_32_WholeRecordOrNothing(t *testing.T) {
 	// Given (первое состояние) — набор отдаётся целиком.
 	h := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{
-		Source: stubKeySet{keys: []domain.PublishedKey{ourKey(t, "kacho-a"), ourKey(t, "kacho-b")}},
+		Source: stubKeySet{keys: []domain.PublishedKey{ourKey(t, "kaname-a"), ourKey(t, "kaname-b")}},
 	})
 	res, body := getPath(t, h, http.MethodGet, "/x")
 
@@ -95,7 +95,7 @@ func TestKeySet_F1_32_WholeRecordOrNothing(t *testing.T) {
 	if len(kids) != 2 {
 		t.Fatalf("ожидалось два наших ключа, получено %v", kids)
 	}
-	for _, want := range []string{"kacho-a", "kacho-b"} {
+	for _, want := range []string{"kaname-a", "kaname-b"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("наш ключ %q отсутствует в НАШЕЙ записи набора: %s", want, body)
 		}
@@ -118,7 +118,7 @@ func TestKeySet_F1_32_WholeRecordOrNothing(t *testing.T) {
 	if strings.Contains(bodyDown, `"keys"`) {
 		t.Fatalf("тело отказа не несёт ключей ВОВСЕ, включая наши: %s", bodyDown)
 	}
-	for _, kid := range []string{"kacho-a", "kacho-b"} {
+	for _, kid := range []string{"kaname-a", "kaname-b"} {
 		if strings.Contains(bodyDown, kid) {
 			t.Fatalf("тело отказа вынесло наружу идентификатор ключа %q: %s", kid, bodyDown)
 		}
@@ -141,13 +141,13 @@ func TestKeySet_F1_32_WholeRecordOrNothing(t *testing.T) {
 
 // TestKeySet_F1_36_SourceUnavailableIsARefusal — F1-36.
 func TestKeySet_F1_36_SourceUnavailableIsARefusal(t *testing.T) {
-	src := &togglableSource{keys: []domain.PublishedKey{ourKey(t, "kacho-a")}}
+	src := &togglableSource{keys: []domain.PublishedKey{ourKey(t, "kaname-a")}}
 	h := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{Source: src})
 
 	// Положительный контроль — при доступном источнике тот же запрос отдаёт
 	// полный набор.
 	res, body := getPath(t, h, http.MethodGet, "/x")
-	if res.StatusCode != http.StatusOK || !strings.Contains(body, "kacho-a") {
+	if res.StatusCode != http.StatusOK || !strings.Contains(body, "kaname-a") {
 		t.Fatalf("доступный источник обязан отдавать набор: %d %s", res.StatusCode, body)
 	}
 
@@ -158,14 +158,14 @@ func TestKeySet_F1_36_SourceUnavailableIsARefusal(t *testing.T) {
 	if res.StatusCode == http.StatusOK {
 		t.Fatalf("недоступный источник обязан давать отказ: %s", body)
 	}
-	if strings.Contains(body, "kacho-a") {
+	if strings.Contains(body, "kaname-a") {
 		t.Fatalf("отказ отдал набор из прежнего чтения — у нашей записи кэша нет by construction: %s", body)
 	}
 
 	// …и восстановление источника снова отдаёт набор: отказ не залипает.
 	src.err = nil
 	res, body = getPath(t, h, http.MethodGet, "/x")
-	if res.StatusCode != http.StatusOK || !strings.Contains(body, "kacho-a") {
+	if res.StatusCode != http.StatusOK || !strings.Contains(body, "kaname-a") {
 		t.Fatalf("восстановившийся источник обязан снова отдавать набор: %d %s", res.StatusCode, body)
 	}
 }
@@ -185,7 +185,7 @@ func (s *togglableSource) PublishedSet(context.Context) ([]domain.PublishedKey, 
 // TestKeySet_F1_37_CountersPerOutcomeAndMethodRestriction — F1-37 (у каждого
 // исхода свой счётчик) и сужение метода.
 func TestKeySet_F1_37_CountersPerOutcomeAndMethodRestriction(t *testing.T) {
-	src := &togglableSource{keys: []domain.PublishedKey{ourKey(t, "kacho-a")}}
+	src := &togglableSource{keys: []domain.PublishedKey{ourKey(t, "kaname-a")}}
 	h := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{Source: src})
 
 	// «Ноль отказов за всё время жизни» отличимо от «контроль не исполнялся»:
@@ -221,7 +221,7 @@ func TestKeySet_F1_37_CountersPerOutcomeAndMethodRestriction(t *testing.T) {
 // НА ОТВЕТЕ ЭНДПОИНТА, а не на строке в базе.
 func TestKeySet_F1_29_EndpointAnswerFollowsState(t *testing.T) {
 	// Given — ключ получил состояние PUBLISHED и ещё не подписывает.
-	src := &togglableSource{keys: []domain.PublishedKey{ourKey(t, "kacho-published")}}
+	src := &togglableSource{keys: []domain.PublishedKey{ourKey(t, "kaname-published")}}
 	h := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{Source: src})
 
 	// Then — ОТВЕТ ЭНДПОИНТА уже содержит этот ключ.
@@ -229,7 +229,7 @@ func TestKeySet_F1_29_EndpointAnswerFollowsState(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("ответ обязан отдавать опубликованный ключ: %d", res.StatusCode)
 	}
-	if !strings.Contains(body, "kacho-published") {
+	if !strings.Contains(body, "kaname-published") {
 		t.Fatalf("опубликованный ключ отсутствует в ответе эндпоинта: %s", body)
 	}
 

@@ -46,7 +46,7 @@ const (
 // Not-found stays PermissionDenied (existence-hiding is intentional).
 func TestAccessBinding_Update_GetNotFound_MapsToPermissionDenied(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_geterr_upd_nf", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	// No binding seeded ⇒ fakeABRdr.Get returns iamerr.ErrNotFound.
 	uc := NewUpdateAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
 
@@ -63,7 +63,7 @@ func TestAccessBinding_Update_GetNotFound_MapsToPermissionDenied(t *testing.T) {
 // forbidden, forever".
 func TestAccessBinding_Update_GetTransientError_MapsToRetriable(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_geterr_upd_tr", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	repo.forceGetErr = iamerr.Wrapf(iamerr.ErrUnavailable, "access_bindings: statement timeout")
 	uc := NewUpdateAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
 
@@ -79,7 +79,7 @@ func TestAccessBinding_Update_GetTransientError_MapsToRetriable(t *testing.T) {
 
 func TestAccessBinding_Delete_GetNotFound_MapsToPermissionDenied(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_geterr_del_nf", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	uc := NewDeleteAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
 
 	_, err := uc.Execute(newOwnerContext(ownerID), nonexistentABID3)
@@ -90,7 +90,7 @@ func TestAccessBinding_Delete_GetNotFound_MapsToPermissionDenied(t *testing.T) {
 
 func TestAccessBinding_Delete_GetTransientError_MapsToRetriable(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_geterr_del_tr", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	repo.forceGetErr = iamerr.Wrapf(iamerr.ErrInternal, "access_bindings: conn reset")
 	uc := NewDeleteAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
 

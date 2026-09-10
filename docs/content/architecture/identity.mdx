@@ -18,9 +18,9 @@ title: Идентичность и токены
   <thead><tr><th>Компонент</th><th>Роль</th></tr></thead>
   <tbody>
     <tr><td><strong>Ory Kratos</strong></td><td>Хранилище личностей + интерактивный вход (пароль / passkey / recovery). Каждая identity — глобальная запись</td></tr>
-    <tr><td><strong>Ory Hydra</strong></td><td>OAuth 2.0 / OIDC authorization server: чеканит kacho-JWT, хранит OAuth-клиентов (JWK)</td></tr>
+    <tr><td><strong>Ory Hydra</strong></td><td>OAuth 2.0 / OIDC authorization server: чеканит JWT доступа, хранит OAuth-клиентов (JWK)</td></tr>
     <tr><td><strong>kaname</strong></td><td>Личность платформы (User — одна строка на человека) и её членства в аккаунтах, маппинг OAuth-клиентов, модель прав</td></tr>
-    <tr><td><strong>api-gateway</strong></td><td>Проверяет kacho-JWT на каждом внешнем запросе (Bearer)</td></tr>
+    <tr><td><strong>api-gateway</strong></td><td>Проверяет JWT доступа на каждом внешнем запросе (Bearer)</td></tr>
   </tbody>
 </table>
 
@@ -57,8 +57,9 @@ flowchart LR
 ```
 
 1. Админ вызывает `UserService.Invite(email)` — backend создаёт `PENDING`-строку.
-2. `Operation.metadata` несёт `magicLinkUrl` (recovery/magic-link Kratos); админ передаёт ссылку
-   вручную (автоотправка email не интегрирована).
+2. `Operation.metadata` несёт `magicLinkUrl` (recovery/magic-link Kratos). Автоотправка письма
+   со ссылкой существует; пока почтовый узел не объявлен (`inviteMail.relay`,
+   `inviteMail.from`), письмо не уходит и ссылку передаёт админ.
 3. Приглашённый входит через Kratos.
 4. При успешном входе Kratos дёргает **identity-hook** IAM (listener `:9092`, mTLS): IAM
    сопоставляет email с `PENDING`-строкой, переводит её в `ACTIVE` и заполняет `externalId`.
@@ -93,31 +94,31 @@ flowchart LR
 выпуска поле `hydraClientId` непусто, и отчеканенные для них внешним поставщиком access-токены
 действительны до собственного истечения.
 
-### Обмен ключа на kacho-JWT
+### Обмен ключа на JWT доступа
 
 ```mermaid
 flowchart LR
   wl["Нагрузка (SA / CLI)"] -->|"подпись client_assertion (ES256, kid)"| wl
   wl -->|"POST /oauth2/token"| hydra["Ory Hydra"]
   hydra -->|"валидация JWK"| hydra
-  hydra -->|"kacho-JWT"| wl
+  hydra -->|"JWT доступа"| wl
   wl -->|"Authorization: Bearer"| agw["api-gateway → kaname"]
 ```
 
 - **`private_key_jwt`** (по умолчанию): клиент подписывает `client_assertion` приватным ключом и
-  обменивает его в Hydra `/oauth2/token` на kacho-JWT.
+  обменивает его в Hydra `/oauth2/token` на JWT доступа.
 - **`jwt-bearer` (федерация)**: внешняя нагрузка (CI-runner, k8s-под, внешний OIDC IdP) предъявляет
   **свой** OIDC-JWT токен-эндпоинту платформы. Ключ выдаётся с `trustedSubjects[]` — записями
   `(issuer, subjectPattern, publicKeyPem, keyAlgorithm)`, которые ложатся в **наш** перечень
   доверенных издателей и ограничивают, какие внешние `iss`/`sub` вправе представлять этот SA.
   Подпись внешнего утверждения проверяется ключом издателя **из этого перечня**: решение о
   доверии постороннему принимаем мы, и принимается оно на пути запроса. `audience[]` управляет
-  `aud`-claim'ом kacho-JWT для внешних consumer'ов (STS, workload-identity-federation) — и тем
+  `aud`-claim'ом JWT доступа для внешних consumer'ов (STS, workload-identity-federation) — и тем
   же полем **сужает ключ**: адресаты, не названные в нём, по этому ключу не выдаются.
 
 ## Проверка на gateway
 
-Все внешние запросы несут kacho-JWT в `Authorization: Bearer`. `api-gateway` валидирует токен
+Все внешние запросы несут JWT доступа в `Authorization: Bearer`. `api-gateway` валидирует токен
 (подпись, срок, issuer) и извлекает принципала до того, как запрос дойдёт до доменного сервиса.
 Отсутствующий/невалидный токен → `UNAUTHENTICATED` (401). Далее принципал участвует в per-RPC
 authz-Check (см. [Модель авторизации](/architecture/authz)).

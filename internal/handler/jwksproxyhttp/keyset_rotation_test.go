@@ -21,24 +21,24 @@ import (
 )
 
 func TestKeySet_AfterRotationOurRecordCarriesTheNewKey(t *testing.T) {
-	before := ourKey(t, "kacho-before")
+	before := ourKey(t, "kaname-before")
 	src := &togglableSource{keys: []domain.PublishedKey{before}}
 	h := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{Source: src})
 
 	_, body := getPath(t, h, http.MethodGet, "/keys")
-	if !strings.Contains(body, "kacho-before") {
+	if !strings.Contains(body, "kaname-before") {
 		t.Fatalf("до ротации наша запись обязана нести действующий ключ: %s", body)
 	}
 
 	// Ротация: новый ключ ПОЯВЛЯЕТСЯ в наборе, прежний из него ещё не уходит.
-	after := ourKey(t, "kacho-after")
+	after := ourKey(t, "kaname-after")
 	src.keys = []domain.PublishedKey{before, after}
 	_, body = getPath(t, h, http.MethodGet, "/keys")
 	kids := kidsIn(t, body)
 	if len(kids) != 2 {
 		t.Fatalf("после ротации в наборе ожидались оба ключа, получено %v", kids)
 	}
-	for _, want := range []string{"kacho-after", "kacho-before"} {
+	for _, want := range []string{"kaname-after", "kaname-before"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("после ротации ключ %q отсутствует в нашей записи: %s", want, body)
 		}

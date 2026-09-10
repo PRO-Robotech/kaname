@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package internal_iam — InternalIAMService (kacho-only, gRPC port :9091).
+// Package internal_iam — InternalIAMService (internal-only, gRPC port :9091).
 //
 // Ban #6 (Internal.* не публикуется на external endpoint): internal-only сервис.
 // Регистрируется ТОЛЬКО на internal listener (port 9091).
@@ -300,9 +300,22 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 		case strings.HasPrefix(err.Error(), "Illegal argument"):
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		case stderrors.Is(err, iamerr.ErrUnavailable):
-			// Backend-unavailable classified by the typed sentinel (robust to
-			// error-text rewording), not an error-string prefix.
-			return nil, status.Error(codes.Unavailable, iamerr.StripSentinel(err))
+			// Полоса классифицируется ТИПИЗИРОВАННЫМ признаком (устойчиво к
+			// переписыванию текста), а не префиксом строки.
+			//
+			// Текст ФИКСИРОВАН — как у INTERNAL ниже и по той же причине: цепочка
+			// признака недоступности ведёт к ЧУЖОМУ производителю (база, сосед,
+			// гейт прав), и её текст вызывающему не адресован. Прежде здесь стоял
+			// разбор цепочки, то есть обёртка вызывающего доезжала до провода
+			// дословно (задача #2464).
+			//
+			// Подробность уходит в ЖУРНАЛ: у глагола есть логгер, и «ноль отказов
+			// за всю жизнь контроля» обязано быть заметно.
+			if h.logger != nil {
+				h.logger.WarnContext(ctx, "authorization verdict unavailable",
+					slog.Any("error", err))
+			}
+			return nil, status.Error(codes.Unavailable, shared.UnavailableMessage)
 		default:
 			// Opaque INTERNAL — unmapped errors must not echo err.Error() (would
 			// leak pgx/DB driver text: host/port/user/db).

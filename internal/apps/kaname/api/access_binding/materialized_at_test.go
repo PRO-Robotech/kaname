@@ -25,7 +25,7 @@ import (
 )
 
 func TestABList_MaterializedAt_ProjectedOnReadPath(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_mat", "", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_mat", "", "rol_v", "kaname.view", nil)
 	live := domain.AccessBinding{ID: "acb00000000000live1", ResourceType: "account", ResourceID: "acc_mat", SubjectID: "usr_a"}
 	fresh := domain.AccessBinding{ID: "acb0000000000fresh2", ResourceType: "account", ResourceID: "acc_mat", SubjectID: "usr_b"}
 	seedABListByScope(repo, []domain.AccessBinding{live, fresh})

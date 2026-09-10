@@ -33,7 +33,7 @@ import (
 func TestABList_460_ContainsRefusedByName(t *testing.T) {
 	for _, field := range abListFilterFields {
 		t.Run(field+" CONTAINS refused", func(t *testing.T) {
-			repo := newABFakeRepo("usr_o", "acc_l460", "", "rol_v", "kacho.view", nil)
+			repo := newABFakeRepo("usr_o", "acc_l460", "", "rol_v", "kaname.view", nil)
 			fga := newABQueriesStub()
 			h := newListHandler(repo, fga)
 
@@ -55,7 +55,7 @@ func TestABList_460_ContainsRefusedByName(t *testing.T) {
 // test above stays green on a parser that refuses every filter, including the one
 // this resource does support.
 func TestABList_460_EqualsStillHonoured(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_l460b", "", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_l460b", "", "rol_v", "kaname.view", nil)
 	fga := newABQueriesStub()
 	h := newListHandler(repo, fga)
 
@@ -70,7 +70,7 @@ func TestABList_460_EqualsStillHonoured(t *testing.T) {
 // assertion above is about the caller's error; this one is about the repo never
 // having been asked the wrong question.
 func TestABList_460_ContainsNeverReachesTheRepo(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_l460c", "", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_l460c", "", "rol_v", "kaname.view", nil)
 	fga := newABQueriesStub()
 	h := newListHandler(repo, fga)
 

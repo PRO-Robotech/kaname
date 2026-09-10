@@ -80,7 +80,7 @@ import (
 func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 	const (
 		roleID     = "rol_viewer_test_001"
-		roleName   = "kacho.view" // legacy name kept for context; mapping is permission-based
+		roleName   = "kaname.view" // legacy name kept for context; mapping is permission-based
 		subjectID  = "usr_test_subject"
 		resourceID = "prj_test_project"
 		ownerID    = "usr_test_owner"

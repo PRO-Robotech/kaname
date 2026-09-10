@@ -44,7 +44,7 @@ const (
 	testSubject     = "usr-01hzzzzzzzzzzzzzzz"
 	testPrincipalID = "usr-01hzzzzzzzzzzzzzzz"
 	testDisplay     = "alice@example.test"
-	testKID         = "kacho-2026-09-a"
+	testKID         = "kaname-2026-09-a"
 )
 
 // keyMaterial — пара ключей и её публикуемая половина.

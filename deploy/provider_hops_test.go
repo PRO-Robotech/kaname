@@ -56,6 +56,7 @@
 package deploy_test
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -113,8 +114,21 @@ var umbrellaChains = map[string][]string{
 // chartChains — the `-f` chains the shipped chart itself offers. `values.yaml` is
 // named first in every chain because helm merges it first whether or not anybody
 // passes it.
+//
+// THE `dev` CHAIN IS GONE, and its removal is the subject rather than tidying up
+// (issue #2473). The chart used to offer `values.yaml + values.dev.yaml` for
+// installation, and that chain declared `authMode: dev` while leaving the
+// database channel at the base's insecure value. ban #16 allows an insecure
+// posture only in in-process fixtures and forbids it on a raised cluster, and a
+// helm profile is about a raised cluster by construction. The chain had no
+// consumer in this tree, so its only possible consumer was the client the chart
+// ships to.
+//
+// `values.dev.yaml` itself STAYS in the delivery: two shipped gates need a
+// plaintext end of their axis (see the register in
+// offered_chains_declare_production_posture_test.go, which reads this map and is
+// what keeps a dev-posture chain from being offered again).
 var chartChains = map[string][]string{
-	"dev":  {"values.yaml", "values.dev.yaml"},
 	"prod": {"values.yaml", "values.prod.yaml"},
 }
 
@@ -244,46 +258,13 @@ func TestStacks_ProviderHopsAreDeclaredAndTheirTransportIsAccountedFor(t *testin
 					}
 					examinedStacks++
 					perSource++
-					for _, h := range providerHops {
-						examinedHops++
-						addr, ok := declaredAddress(merged, src.prefix, h)
-						if !ok {
-							t.Errorf("%s/%s: the %s address is not declared (neither %s nor env %s) — iam then "+
-								"DERIVES it from the issuer, which names the public ingress host and does not "+
-								"resolve inside the cluster; the derivation is never empty, so the facade reads "+
-								"as configured while addressing a host nobody chose, and a production-class iam "+
-								"refuses to start", src.label, name, h.name,
-								strings.Join(append(append([]string{}, src.prefix...), h.knob...), "."), h.env)
-							continue
-						}
-						u, err := url.Parse(addr)
-						if err != nil || u.Scheme == "" || u.Host == "" {
-							t.Errorf("%s/%s: the %s address %q is not an absolute http(s) URL", src.label, name, h.name, addr)
-							continue
-						}
-						switch u.Scheme {
-						case "https":
-							if _, ok := declaredAnchor(merged, src.prefix, h); !ok {
-								t.Errorf("%s/%s: the %s address is https (%q) but no anchor is declared "+
-									"(neither %s nor env %s) — the provider's in-cluster certificate is issued "+
-									"by the internal CA and iam trusts the system roots, so every call on the "+
-									"hop fails with an unknown authority while the address reads as hardened",
-									src.label, name, h.name, addr,
-									strings.Join(append(append([]string{}, src.prefix...), h.anchor...), "."), h.anchorEnv)
-							}
-						case "http":
-							if src.carriesPlaintextRegister {
-								plaintextSeen[h.name] = true
-							}
-							if _, allowed := plaintextPendingProviderTLS[h.name]; !allowed || !src.carriesPlaintextRegister {
-								t.Errorf("%s/%s: the %s address is in the clear (%q) and is not one of the hops "+
-									"pending the provider's public-listener TLS change — a credential or a "+
-									"verification anchor on this hop is readable by anything on the path",
-									src.label, name, h.name, addr)
-							}
-						default:
-							t.Errorf("%s/%s: the %s address has scheme %q, want http or https", src.label, name, h.name, u.Scheme)
-						}
+					findings, plaintext, hops := auditProviderHopsStack(src, name, merged)
+					examinedHops += hops
+					for _, hopName := range plaintext {
+						plaintextSeen[hopName] = true
+					}
+					for _, f := range findings {
+						t.Error(f)
 					}
 				})
 			}
@@ -330,6 +311,69 @@ func TestStacks_ProviderHopsAreDeclaredAndTheirTransportIsAccountedFor(t *testin
 	t.Logf("census: %d profile sources (%s) → %d production-class stacks × %d provider hops = "+
 		"%d declarations examined; plaintext register %s",
 		len(sources), strings.Join(labels, ", "), examinedStacks, len(providerHops), examinedHops, registerNote)
+}
+
+// ── the judgement, extracted so it can be proved able to fail ────────────────
+
+// auditProviderHopsStack judges ONE production-class stack and returns its
+// findings, the hop names it saw addressed in the clear, and how many
+// declarations it examined.
+//
+// WHY THE JUDGEMENT IS A FUNCTION AND NOT A TEST BODY. Written inline it took its
+// input from the tree and its verdict from `t.Errorf`, so nothing could feed it a
+// stack and read back what it said — that is, its ability to fail rested on
+// attention, and a gate that has lost that ability looks EXACTLY the same on a
+// clean tree (#2479). As a function it takes the stack as an argument, so
+// provider_hops_injection_test.go hands it a synthetic one and changes exactly one
+// fact against a lawful twin. The real profiles are not touched at all.
+func auditProviderHopsStack(src profileSource, name string, merged map[string]any) (findings, plaintext []string, hops int) {
+	for _, h := range providerHops {
+		hops++
+		addr, ok := declaredAddress(merged, src.prefix, h)
+		if !ok {
+			findings = append(findings, fmt.Sprintf(
+				"%s/%s: the %s address is not declared (neither %s nor env %s) — iam then "+
+					"DERIVES it from the issuer, which names the public ingress host and does not "+
+					"resolve inside the cluster; the derivation is never empty, so the facade reads "+
+					"as configured while addressing a host nobody chose, and a production-class iam "+
+					"refuses to start", src.label, name, h.name,
+				strings.Join(append(append([]string{}, src.prefix...), h.knob...), "."), h.env))
+			continue
+		}
+		u, err := url.Parse(addr)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			findings = append(findings, fmt.Sprintf(
+				"%s/%s: the %s address %q is not an absolute http(s) URL", src.label, name, h.name, addr))
+			continue
+		}
+		switch u.Scheme {
+		case "https":
+			if _, ok := declaredAnchor(merged, src.prefix, h); !ok {
+				findings = append(findings, fmt.Sprintf(
+					"%s/%s: the %s address is https (%q) but no anchor is declared "+
+						"(neither %s nor env %s) — the provider's in-cluster certificate is issued "+
+						"by the internal CA and iam trusts the system roots, so every call on the "+
+						"hop fails with an unknown authority while the address reads as hardened",
+					src.label, name, h.name, addr,
+					strings.Join(append(append([]string{}, src.prefix...), h.anchor...), "."), h.anchorEnv))
+			}
+		case "http":
+			if src.carriesPlaintextRegister {
+				plaintext = append(plaintext, h.name)
+			}
+			if _, allowed := plaintextPendingProviderTLS[h.name]; !allowed || !src.carriesPlaintextRegister {
+				findings = append(findings, fmt.Sprintf(
+					"%s/%s: the %s address is in the clear (%q) and is not one of the hops "+
+						"pending the provider's public-listener TLS change — a credential or a "+
+						"verification anchor on this hop is readable by anything on the path",
+					src.label, name, h.name, addr))
+			}
+		default:
+			findings = append(findings, fmt.Sprintf(
+				"%s/%s: the %s address has scheme %q, want http or https", src.label, name, h.name, u.Scheme))
+		}
+	}
+	return findings, plaintext, hops
 }
 
 // ── profile reading ──────────────────────────────────────────────────────────
