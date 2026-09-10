@@ -31,11 +31,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧТО ИМЕННО УТВЕРЖДАЕТСЯ — три оси, и каждая закрывает свой отказ
 //
-//  1. ПРИСУТСТВИЕ. Объявление процесса и все файлы, которые оно зовёт, лежат в
-//     дереве службы. Снятие любого — находка.
-//  2. РАЗБИРАЕМОСТЬ. Объявление разбирается и несёт хотя бы одно задание.
+//  1. ПРИСУТСТВИЕ. Объявления процессов и все файлы, которые они зовут, лежат в
+//     дереве службы. Снятие любого — находка. Объявлений ДВА: проверка дерева и
+//     ПРОИЗВОДИТЕЛЬ ОБРАЗА, чьё отсутствие означало бы, что образ, требуемый
+//     профилем посадки безусловно, не производится вовсе.
+//  2. РАЗБИРАЕМОСТЬ. КАЖДОЕ объявление разбирается и несёт хотя бы одно задание.
 //     Неразбираемое объявление даёт НОЛЬ прогонов, а ноль прогонов на запросе
-//     слияния читается как «замечаний нет».
+//     слияния читается как «замечаний нет». Перепись называет разобранные
+//     отдельным числом: одного разобранного довольно, чтобы заданий было больше
+//     нуля, и без второй величины «дошёл» не отличалось бы от «дошёл не везде».
 //  3. МАШИНОЧИТАЕМОСТЬ ИДЕНТИФИКАТОРА (ban #17). Ключ под `jobs:` и `id` шага —
 //     латиница; подпись `name:` и комментарий кириллицей ЗАКОННЫ и под запрет не
 //     подпадают. Кириллический ключ разбирается как YAML и отвергается
@@ -82,8 +86,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// deliveredWorkflow — объявление процесса относительно корня службы.
+// deliveredWorkflow — объявление процесса ПРОВЕРКИ относительно корня службы.
 const deliveredWorkflow = ".github/workflows/ci.yml"
+
+// deliveredImageWorkflow — объявление процесса, ПРОИЗВОДЯЩЕГО ОБРАЗ службы.
+//
+// Он заведён отдельным объявлением, а не заданием внутри соседнего, и это
+// решение, а не раскладка. Предметы у них разные и триггеры разные: проверка
+// спрашивается на запросе слияния и на стволе, а образ публикуется ещё и на
+// ССЫЛКЕ ВЕРСИИ — событие, которого у соседа в триггерах нет и быть не должно
+// (проверка на теге ничего нового не спрашивает и заняла бы ранер впустую).
+// Слить их значило бы дать одному объявлению два предмета и триггер шире, чем
+// нужен каждому.
+const deliveredImageWorkflow = ".github/workflows/docker-build.yml"
+
+// deliveredWorkflows — ВСЕ объявления процессов поставки. Разбираемость и форма
+// идентификатора судятся у КАЖДОГО: объявление, которого распознаватель не
+// знает, не даёт ни красного, ни зелёного — оно молчит, и его поломка
+// обнаруживается только у провайдера, нулём прогонов.
+var deliveredWorkflows = []string{deliveredWorkflow, deliveredImageWorkflow}
 
 // deliveredPipelineFiles — всё, что поставка обязана нести, чтобы конвейер
 // исполнился у постороннего. Перечень ВЫПИСАН, а не выведен обходом: обход
@@ -91,6 +112,7 @@ const deliveredWorkflow = ".github/workflows/ci.yml"
 // Пустой каталог обход прошёл бы молча.
 var deliveredPipelineFiles = []string{
 	deliveredWorkflow,
+	deliveredImageWorkflow,
 	".github/golangci.yml",
 	".github/scripts/classify-integration-outcome.sh",
 	".github/scripts/go-test-verdict.py",
@@ -106,8 +128,12 @@ var deliveredIdentifierForm = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 type pipelineCensus struct {
 	filesWanted int
 	filesFound  int
-	jobs        int
-	stepIDs     int
+	// workflowsParsed — объявлений, ДОШЕДШИХ до разбора заданий. Величина
+	// отдельная от `jobs`: одно неразобранное объявление при живом соседе даёт
+	// непустой `jobs` — и «разбор дошёл» стало бы неотличимо от «дошёл не везде».
+	workflowsParsed int
+	jobs            int
+	stepIDs         int
 }
 
 // scanDeliveredPipeline — разбор над ПРОИЗВОЛЬНЫМ корнем. Вынесено из пробы
@@ -132,56 +158,59 @@ func scanDeliveredPipeline(root string) (pipelineCensus, []string) {
 		census.filesFound++
 	}
 
-	raw, err := os.ReadFile(filepath.Join(root, deliveredWorkflow))
-	if err != nil {
-		sort.Strings(findings)
-		return census, findings
-	}
-
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		findings = append(findings, deliveredWorkflow+": не разобран YAML: "+err.Error()+
-			" — объявление НЕ проверено, а у провайдера оно дало бы ноль прогонов")
-		sort.Strings(findings)
-		return census, findings
-	}
-
-	body := &doc
-	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
-		body = doc.Content[0]
-	}
-	jobs := pipelineMappingValue(body, "jobs")
-	if jobs == nil || jobs.Kind != yaml.MappingNode {
-		findings = append(findings, deliveredWorkflow+": заданий не объявлено ни одного — "+
-			"объявление без `jobs:` создаёт прогон, который ничего не проверяет")
-		sort.Strings(findings)
-		return census, findings
-	}
-
-	for i := 0; i+1 < len(jobs.Content); i += 2 {
-		key, job := jobs.Content[i], jobs.Content[i+1]
-		census.jobs++
-		if !deliveredIdentifierForm.MatchString(key.Value) {
-			findings = append(findings, pipelineIdentifierFinding(key.Line, "задания", key.Value))
+	// Разбор идёт по КАЖДОМУ объявлению, и отказ на одном не прекращает обхода:
+	// ранний возврат оставил бы соседа непрочитанным, а перепись — молчащей о
+	// том, что она его не читала.
+	for _, wf := range deliveredWorkflows {
+		raw, err := os.ReadFile(filepath.Join(root, wf))
+		if err != nil {
+			continue // отсутствие уже названо осью присутствия выше
 		}
-		if job == nil || job.Kind != yaml.MappingNode {
+
+		var doc yaml.Node
+		if err := yaml.Unmarshal(raw, &doc); err != nil {
+			findings = append(findings, wf+": не разобран YAML: "+err.Error()+
+				" — объявление НЕ проверено, а у провайдера оно дало бы ноль прогонов")
 			continue
 		}
-		steps := pipelineMappingValue(job, "steps")
-		if steps == nil || steps.Kind != yaml.SequenceNode {
+
+		body := &doc
+		if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+			body = doc.Content[0]
+		}
+		jobs := pipelineMappingValue(body, "jobs")
+		if jobs == nil || jobs.Kind != yaml.MappingNode {
+			findings = append(findings, wf+": заданий не объявлено ни одного — "+
+				"объявление без `jobs:` создаёт прогон, который ничего не проверяет")
 			continue
 		}
-		for _, step := range steps.Content {
-			if step.Kind != yaml.MappingNode {
+		census.workflowsParsed++
+
+		for i := 0; i+1 < len(jobs.Content); i += 2 {
+			key, job := jobs.Content[i], jobs.Content[i+1]
+			census.jobs++
+			if !deliveredIdentifierForm.MatchString(key.Value) {
+				findings = append(findings, pipelineIdentifierFinding(wf, key.Line, "задания", key.Value))
+			}
+			if job == nil || job.Kind != yaml.MappingNode {
 				continue
 			}
-			id := pipelineMappingValue(step, "id")
-			if id == nil || id.Kind != yaml.ScalarNode {
+			steps := pipelineMappingValue(job, "steps")
+			if steps == nil || steps.Kind != yaml.SequenceNode {
 				continue
 			}
-			census.stepIDs++
-			if !deliveredIdentifierForm.MatchString(id.Value) {
-				findings = append(findings, pipelineIdentifierFinding(id.Line, "шага", id.Value))
+			for _, step := range steps.Content {
+				if step.Kind != yaml.MappingNode {
+					continue
+				}
+				id := pipelineMappingValue(step, "id")
+				if id == nil || id.Kind != yaml.ScalarNode {
+					continue
+				}
+				census.stepIDs++
+				if !deliveredIdentifierForm.MatchString(id.Value) {
+					findings = append(findings, pipelineIdentifierFinding(wf, id.Line, "шага", id.Value))
+				}
 			}
 		}
 	}
@@ -193,8 +222,8 @@ func scanDeliveredPipeline(root string) (pipelineCensus, []string) {
 // pipelineIdentifierFinding — текст находки. Называет предмет прямо: сообщение
 // падения есть описание защищаемого свойства, и выхолащивать его нельзя —
 // непонятную проверку следующий читатель снимет.
-func pipelineIdentifierFinding(line int, what, id string) string {
-	return deliveredWorkflow + ":" + strconv.Itoa(line) + ": идентификатор " + what + " `" + id +
+func pipelineIdentifierFinding(wf string, line int, what, id string) string {
+	return wf + ":" + strconv.Itoa(line) + ": идентификатор " + what + " `" + id +
 		"` вне машиночитаемой формы " + deliveredIdentifierForm.String() + ". Провайдер проверяет " +
 		"форму ДО исполнения: объявление с таким ключом не разбирается ЦЕЛИКОМ, поэтому прогон " +
 		"получает ноль заданий, а поле `name` в ответе API приходит путём к файлу. Переименуй КЛЮЧ " +
@@ -219,9 +248,10 @@ func TestDeliveryCarriesItsOwnPipeline(t *testing.T) {
 
 	census, findings := scanDeliveredPipeline(serviceRoot)
 
-	t.Logf("перепись: файлов конвейера требуется %d · найдено %d · заданий осмотрено %d · "+
-		"шагов с объявленным id %d · находок %d",
-		census.filesWanted, census.filesFound, census.jobs, census.stepIDs, len(findings))
+	t.Logf("перепись: файлов конвейера требуется %d · найдено %d · объявлений процессов %d · "+
+		"из них разобрано %d · заданий осмотрено %d · шагов с объявленным id %d · находок %d",
+		census.filesWanted, census.filesFound, len(deliveredWorkflows), census.workflowsParsed,
+		census.jobs, census.stepIDs, len(findings))
 
 	// Пустой обход — поломка гейта, а не чистота дерева.
 	if census.filesWanted == 0 {
@@ -237,5 +267,14 @@ func TestDeliveryCarriesItsOwnPipeline(t *testing.T) {
 	if len(findings) == 0 && census.jobs == 0 {
 		t.Fatal("находок ноль и заданий осмотрено ноль — разбор не дошёл до `jobs:`, " +
 			"и зелёное здесь означало бы «ноль прочитанного», а не «ноль находок»")
+	}
+
+	// И отдельно — что разбор дошёл до КАЖДОГО объявления. Одного разобранного
+	// довольно, чтобы `jobs` был непуст: без этой строки объявление, которого
+	// распознаватель не читал, оставалось бы невидимым при зелёном вердикте —
+	// ровно тот класс, ради которого перепись и печатается.
+	if len(findings) == 0 && census.workflowsParsed != len(deliveredWorkflows) {
+		t.Fatalf("находок ноль, а разобрано объявлений %d из %d — о нечитанных не сказано ничего",
+			census.workflowsParsed, len(deliveredWorkflows))
 	}
 }
