@@ -120,7 +120,7 @@ func TestIntegration_Issue2003_ScopeKeysComeFromTranslationNotTruncation(t *test
 		            'resources', jsonb_build_array('*'),
 		            'verbs',     jsonb_build_array('get'))),
 		        'cluster_root')`,
-		roleID, "kacho.d2003.viewer")
+		roleID, "kaname.d2003.viewer")
 	require.NoError(t, err, "seed role")
 
 	// Выдача, чьим субъектом назван наш человек. Её СОБСТВЕННАЯ область названа

@@ -9,8 +9,13 @@
 //     the network operator's identity was retired by migration 0081 together with
 //     everything granted to it, its role and binding having gone in 0076;
 //   - no backing role and no AccessBinding for any of them (0076 + 0077);
-//   - FGA relation-tuples `<sva>#fga_writer@iam_fgaproxy:system` in fga_outbox
-//     for vpc/compute/nlb only (api-gateway has none);
+//   - the LIVE right to write relation tuples for vpc/compute/nlb only
+//     (api-gateway has none) — asked of `relation_fact` as the chain «SA is a
+//     member of `module-relation-writers`» + «that group carries `fga_writer` on
+//     the cluster anchor». It used to be asked of the fga_outbox JOURNAL on the
+//     retired `iam_fgaproxy:system` anchor, counting writes and ignoring their
+//     deletes; the doc comment on requireFGAWriterTuple says what that measured
+//     and why it stopped (#2452);
 //   - immutable system role; idempotent ON CONFLICT re-apply.
 //
 // The permission strings the backing roles once carried are deliberately NOT
@@ -95,6 +100,7 @@ func TestSeedModuleSA_B01_ModuleIdentitiesCreated(t *testing.T) {
 	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
+	applyPlatformModuleSeed(ctx, t, pool)
 
 	wantSvcs := []string{"vpc", "compute", "nlb", "api-gateway"}
 	for _, svc := range wantSvcs {
@@ -127,9 +133,11 @@ func TestSeedModuleSA_B01_ModuleIdentitiesCreated(t *testing.T) {
 // возвращения — а возвращение рулесс-строкой выдало бы compute
 // system_admin@cluster (см. tuples_module_sa_branch_test.go).
 //
-// Право ЗАПИСИ, которым compute действительно пользуется, — кортеж fga_writer, и
-// он остаётся: это положительная половина пары, без неё «ноль» выше был бы
-// получен из пустой базы.
+// Право ЗАПИСИ, которым compute действительно пользуется, — `fga_writer`, и оно
+// остаётся: это положительная половина пары, без неё «ноль» выше был бы получен
+// из пустой базы. Спрашивается оно у ПРЯМОГО ФАКТА цепью «член группы писателей
+// отношений» + «группа несёт отношение на кластере», а не у строки журнала на
+// снятом якоре (#2452, см. requireFGAWriterTuple).
 func TestSeedModuleSA_B02_ComputeRoleRetiredWriteCapabilityKept(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -138,6 +146,7 @@ func TestSeedModuleSA_B02_ComputeRoleRetiredWriteCapabilityKept(t *testing.T) {
 	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
+	applyPlatformModuleSeed(ctx, t, pool)
 
 	requireRoleRetired(t, ctx, pool, "compute")
 	requireFGAWriterTuple(t, ctx, pool, svaID("compute"), true)
@@ -154,6 +163,7 @@ func TestSeedModuleSA_B03_VpcRoleRetiredWriteCapabilityKept(t *testing.T) {
 	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
+	applyPlatformModuleSeed(ctx, t, pool)
 
 	requireRoleRetired(t, ctx, pool, "vpc")
 	requireFGAWriterTuple(t, ctx, pool, svaID("vpc"), true)
@@ -170,6 +180,7 @@ func TestSeedModuleSA_B04_NlbRoleRetiredIdentityAndWriteKept(t *testing.T) {
 	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
+	applyPlatformModuleSeed(ctx, t, pool)
 
 	requireRoleRetired(t, ctx, pool, "nlb")
 	requireFGAWriterTuple(t, ctx, pool, svaID("nlb"), true)
@@ -226,6 +237,7 @@ func TestSeedModuleSA_B05_OperatorFullyRetired(t *testing.T) {
 	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
+	applyPlatformModuleSeed(ctx, t, pool)
 
 	// Роль снята — вместе с правами, правилами и привязкой (0076).
 	var roleCnt int
@@ -269,6 +281,7 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	defer pool.Close()
+	applyPlatformModuleSeed(ctx, t, pool)
 
 	// НИ ОДНА служебная учётка модуля больше не несёт выдачи В ФОРМЕ РОЛИ: все семь
 	// backing-ролей сняты (0076 — оператор сети, 0077 — остальные шесть). Прежняя
@@ -402,21 +415,75 @@ func readRolePermissions(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	return perms
 }
 
+// requireFGAWriterTuple — есть ли у служебной записи ДЕЙСТВУЮЩЕЕ право писать
+// кортежи отношений.
+//
+// # Здесь считались строки ЖУРНАЛА, и это измеряло не то (#2452)
+//
+// Прежняя редакция считала в `kaname.fga_outbox` строки события записи с
+// отношением `fga_writer` на объекте `iam_fgaproxy:system` — и считала ТОЛЬКО
+// записи, не глядя на события снятия. У неё было две беды сразу, и обе тихие.
+//
+//  1. ЯКОРЬ СНЯТ. Право модуля писать кортежи ПЕРЕЕХАЛО с того служебного
+//     синглтона на кластерное отношение (`20260823002000_relation_write_moves_onto_the_cluster`):
+//     объект вне иерархии не имел ни яруса, ни владельца, поэтому перечисление
+//     выдач о нём молчало, а отзыв работал над выдачей, которой нет. Прежние
+//     строки журнала на прежнем якоре — ИСТОРИЯ, и рядом с каждой лежит её
+//     событие снятия.
+//
+//  2. ЖУРНАЛ — НЕ ПРАВО. Решение о доступе принимает прямой факт
+//     (`kaname.relation_fact`), который триггер складывает из журнала. Считая
+//     одни записи и не глядя на снятия, проба оставалась зелёной над отозванным
+//     правом — форма проверки без содержания.
+//
+// # Что спрашивается теперь — ЦЕПЬ, а не звено
+//
+// Право у модуля есть тогда и только тогда, когда выполняются ОБА звена:
+// служебная запись состоит в группе писателей отношений, И эта группа несёт
+// `fga_writer` на якоре кластера. Один запрос на обе половины оси: «ноль»
+// зеркальной клетки иначе был бы получен из опечатки во втором запросе.
 func requireFGAWriterTuple(t *testing.T, ctx context.Context, pool *pgxpool.Pool, sva string, want bool) {
 	t.Helper()
-	var count int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kaname.fga_outbox
-		  WHERE event_type='fga.tuple.write'
-		    AND payload->>'user'     = $1
-		    AND payload->>'relation' = 'fga_writer'
-		    AND payload->>'object'   = 'iam_fgaproxy:system'`,
-		"service_account:"+sva).Scan(&count))
+	count := countLiveRelationThroughGroup(t, ctx, pool, sva, relationWritersGroup, "fga_writer")
 	if want {
-		require.GreaterOrEqual(t, count, 1, "fga_writer tuple must be seeded for %s", sva)
+		require.GreaterOrEqualf(t, count, 1,
+			"у %s нет ДЕЙСТВУЮЩЕГО права писать кортежи: цепь «член группы %q» + «группа несёт "+
+				"fga_writer на кластере» разорвана, и владение, поставленное при создании, "+
+				"не запишется ни для одного арендатора", sva, relationWritersGroup)
 	} else {
-		require.Equal(t, 0, count, "no fga_writer tuple must be seeded for %s", sva)
+		require.Equalf(t, 0, count,
+			"у %s права писать кортежи быть не должно, а цепь сомкнута (%d)", sva, count)
 	}
+}
+
+// relationWritersGroup — группа, членством в которой модуль получает право
+// писать кортежи отношений. Имя берётся у той же строки, что объявляют разделы
+// `joins` манифестов модулей.
+const relationWritersGroup = "module-relation-writers"
+
+// countLiveRelationThroughGroup — сомкнута ли цепь «служебная запись → член
+// группы → группа несёт отношение на якоре кластера».
+//
+// Спрашивается ПРЯМОЙ ФАКТ, а не журнал: журнал есть последовательность
+// указаний, факт — их итог, и решение о доступе принимает итог.
+func countLiveRelationThroughGroup(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
+	sva, groupName, relation string) int {
+	t.Helper()
+	var count int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*)
+		  FROM kaname.relation_fact member
+		  JOIN kaname.groups g
+		    ON g.id = member.object_id AND g.name = $2
+		  JOIN kaname.relation_fact granted
+		    ON granted.object_type = 'cluster'
+		   AND granted.relation    = $3
+		   AND granted.subject     = 'group:' || g.id || '#member'
+		 WHERE member.object_type = 'group'
+		   AND member.relation    = 'member'
+		   AND member.subject     = $1`,
+		"service_account:"+sva, groupName, relation).Scan(&count))
+	return count
 }
 
 // reapplySeed re-executes the seed body (idempotency assertion). It calls

@@ -41,9 +41,17 @@ const compensationMaxAttempts = 10
 // намерения копятся, а занятое у провайдера не освобождается — при этом всё
 // выглядит работающим (запись-то проходит). Молчаливо поднятый сервис с мёртвым
 // дренажом — ровно тот класс, который мы ловим в коде.
+//
+// # СРОК ЖИЗНИ ЗАДАЧИ ВЫБИРАЕТ ВЫЗЫВАЮЩИЙ, И ЭТО ЧАСТЬ ФОРМЫ ВОЗВРАТА
+//
+// Возвращается `func(context.Context) error`, а не `func() error`. Разбор — у
+// сборщика дренажа писем (`invite_mail_wiring.go`), где он и живёт одним
+// экземпляром; здесь важно следствие: неотменяемый контекст сборщику взять
+// неоткуда, поэтому задача возвращается по гашению процесса, а снятие клиента у
+// провайдера не рвётся посреди разговора.
 func buildProviderCompensationDrainer(
 	pool *pgxpool.Pool, cfg config.Config, obs clients.CompensationObserver, logger *slog.Logger,
-) (func() error, error) {
+) (func(context.Context) error, error) {
 	releaser := mustProviderAdminClient(cfg)
 
 	drainerLogger := logger.With(slog.String("component", "provider_compensation_drainer"))
@@ -91,11 +99,11 @@ func buildProviderCompensationDrainer(
 		return nil, fmt.Errorf("init provider compensation drainer: %w", err)
 	}
 
-	return func() error {
+	return func(ctx context.Context) error {
 		logger.Info("kaname provider compensation drainer starting",
 			"table", clients.ProviderCompensationTable,
 			"channel", clients.ProviderCompensationChannel)
-		return d.Run(context.Background())
+		return d.Run(ctx)
 	}, nil
 }
 

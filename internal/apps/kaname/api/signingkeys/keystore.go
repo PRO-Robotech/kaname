@@ -444,7 +444,7 @@ func newKeyID() (domain.KeyID, error) {
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", fmt.Errorf("signingkeys: key id entropy: %w", err)
 	}
-	kid := domain.KeyID("kacho-" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw[:])))
+	kid := domain.KeyID("kaname-" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw[:])))
 	if err := kid.Validate(); err != nil {
 		return "", fmt.Errorf("signingkeys: generated key id: %w", err)
 	}

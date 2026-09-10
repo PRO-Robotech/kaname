@@ -896,7 +896,22 @@ func mapPGErr(err error) error {
 	case errors.Is(err, iamerr.ErrInvalidArg):
 		return status.Error(codes.InvalidArgument, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrUnavailable):
-		return status.Error(codes.Unavailable, iamerr.StripSentinel(err))
+		// Фиксированный текст, как у INTERNAL ниже, и по той же причине: цепочка
+		// признака недоступности ведёт к ЧУЖОМУ производителю (база, сосед, гейт
+		// прав), и её текст вызывающему не адресован. Прежде здесь стоял разбор
+		// цепочки, то есть обёртка вызывающего доезжала до провода дословно;
+		// утечки не случалось лишь потому, что производители этого признака в
+		// службе опаковы сами — «by construction» на деле означало «пока никто не
+		// обернул» (задача #2464).
+		//
+		// Текст берётся у канонического переводчика: свой литерал здесь был бы
+		// вторым местом об одном контракте.
+		//
+		// ЧИТАТЕЛЯ у подробности на этой полосе СЕГОДНЯ НЕТ, и это названо, а не
+		// умолчано: переводчик — свободная функция без логгера, а звать её с
+		// проброшенным логгером из двенадцати мест — отдельная работа
+		// (задача-преемник — #2507). Подробность остаётся в цепочке.
+		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	}
 	return status.Error(codes.Internal, "internal user token error")
 }

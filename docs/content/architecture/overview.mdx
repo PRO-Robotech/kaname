@@ -78,7 +78,7 @@ IAM — не только владелец модели прав, но и **то
 ## Идентичность — Ory Kratos + Ory Hydra
 
 Аутентификация вынесена в Ory-стек: **Kratos** хранит личности и обслуживает интерактивный вход
-(пароль / passkey), **Hydra** — OAuth 2.0 authorization server, чеканящий kacho-JWT. IAM
+(пароль / passkey), **Hydra** — OAuth 2.0 authorization server, чеканящий JWT доступа. IAM
 интегрируется с ними через hook-listener (активация User при первом входе) и клиент Hydra
 (регистрация OAuth-клиентов для ключей и токенов). User — проекция Kratos-identity; SAKey /
 UserToken — маппинг на Hydra-клиентов. Детали и потоки — [Идентичность и токены](/architecture/identity).

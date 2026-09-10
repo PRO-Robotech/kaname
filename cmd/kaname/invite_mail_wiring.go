@@ -71,9 +71,27 @@ const applyTimeoutHeadroom = 5 * time.Second
 // намерения копятся, а письма не уходят — при этом всё выглядит работающим,
 // потому что приглашение-то создаётся. Молчаливо поднятый сервис с мёртвым
 // дренажом — ровно тот класс, который мы ловим в чужом коде.
+//
+// # СРОК ЖИЗНИ ЗАДАЧИ ВЫБИРАЕТ ВЫЗЫВАЮЩИЙ, И ЭТО ЧАСТЬ ФОРМЫ ВОЗВРАТА
+//
+// Возвращается `func(context.Context) error`, а не `func() error`: контекст —
+// параметр задачи, а не величина, зашитая сборщиком. Прежняя форма позволяла
+// сборщику взять `context.Background()`, и он его брал: `Drainer.Run` возвращает
+// управление ТОЛЬКО по `ctx.Done()` (так сказано его собственной шапкой), а на
+// неотменяемом контексте `Done()` не срабатывает никогда. Задача не
+// возвращалась ⇒ `group.Wait()` в `runServe` не возвращался ⇒ процесс не выходил
+// по сигналу вовсе, и его снимала среда по истечении окна мягкого гашения:
+// посреди сессии с почтовым узлом, оставив строки заклеймёнными и не
+// применёнными (kacho#2465).
+//
+// Теперь неотменяемый контекст здесь НЕВЫРАЗИМ by construction: сборщику
+// неоткуда его взять, а корень отдаёт тот же сигнальный контекст, что и
+// остальным своим задачам. По его отмене дренаж дозавершает текущую партию с
+// внутренней отсрочкой — то есть исходящий разговор доживает до конца, а не
+// рвётся снятием процесса.
 func buildInviteMailDrainer(
 	pool *pgxpool.Pool, cfg config.Config, obs clients.InviteMailObserver, logger *slog.Logger,
-) (func() error, error) {
+) (func(context.Context) error, error) {
 	relay, err := buildMailRelay(cfg.InviteMail)
 	if err != nil {
 		return nil, err
@@ -91,7 +109,7 @@ func buildInviteMailDrainer(
 		return nil, fmt.Errorf("init invite mail drainer: %w", derr)
 	}
 
-	return func() error {
+	return func(ctx context.Context) error {
 		logger.Info("kaname invite mail drainer starting",
 			"table", clients.InviteMailTable,
 			"channel", clients.InviteMailChannel,
@@ -100,7 +118,7 @@ func buildInviteMailDrainer(
 			"attempt_timeout", relay.AttemptTimeout,
 			"max_attempts", cfg.InviteMail.MaxAttemptsOrDefault(),
 			"relay_configured", cfg.InviteMail.RelayConfigured())
-		return d.Run(context.Background())
+		return d.Run(ctx)
 	}, nil
 }
 

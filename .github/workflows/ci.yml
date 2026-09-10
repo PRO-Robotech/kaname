@@ -310,6 +310,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # Модуль платформы тянется ЯВНО: `go list -m` его не скачивает, и без этого
+      # шага проверка выходит кодом 2 («не исполнялась»), а не вердиктом о дереве.
+      # Соседние джобы этого конвейера тянут модули тем же шагом.
+      - run: go mod download
       - name: audit-list-filter
         run: ./tools/audit-list-filter.sh
 

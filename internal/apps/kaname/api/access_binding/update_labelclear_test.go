@@ -23,7 +23,7 @@ import (
 
 func TestAccessBinding_Update_LabelClearViaMask(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_lblclear", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, false)
 	repo.mu.Lock()
 	repo.ab.Labels = domain.Labels{"stage": "prod"} // у binding есть метки

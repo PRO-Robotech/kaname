@@ -47,7 +47,7 @@ type auditEmitter interface {
 //   - service_account_id — the SA the key belongs to.
 //   - key_id            — the kaname SA-OAuth-client id (soc_…), NOT a secret.
 //   - key_algorithm     — JOSE alg of the registered public key ("ES256", or ""
-//     for a federated key that carries no kacho-held material).
+//     for a federated key that carries no kaname-held material).
 //
 // NEVER carries private_key_pem / client_secret / any token — SAKey credential
 // material stays out of the audit trail (acceptance 5.2-36).

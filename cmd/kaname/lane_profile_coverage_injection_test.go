@@ -14,6 +14,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -87,5 +89,123 @@ func TestInjection_AnEmptyWalkProducesNothingToJudge(t *testing.T) {
 	if len(findings) != 0 || profiled != 0 || reachable != 0 {
 		t.Fatalf("пустой вход обязан не производить ничего: находок %v, объявлено %d, поднимается %d",
 			findings, profiled, reachable)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ЧТЕНИЕ ОБЪЯВЛЕНИЙ: корней два, и слепота на одном из них — тихая (задача #2101)
+//
+// Инъекции ниже зовут readLaneDeclarations — ТО ЖЕ тело, что исполняется на
+// дереве. Оси разведены по одному факту: корень · значение · читаемость файла.
+//
+// Живая инъекция, которой эти оси выведены, названа здесь, чтобы её можно было
+// повторить: посадка `own`, вписанная в боевой профиль ЧАРТА ПРОДУКТА, до
+// правки оставляла гейт зелёным (профилей он читал 11, все — зонтичные), после
+// правки даёт находку, НАЗЫВАЮЩУЮ координату этого профиля.
+
+// writeValues — файл значений с названным содержимым.
+func writeValues(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "values.prod.yaml")
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
+	}
+	return p
+}
+
+// productSource — источник корня ПРОДУКТА с ключами чарта продукта.
+func productSource(path, label string) profileSource {
+	return profileSource{
+		Root: productRootName, Label: label, Path: path,
+		Keys: []string{"authn", "identityProvider"},
+	}
+}
+
+// Дефект: профиль ЧАРТА ПРОДУКТА объявил посадку. До правки этот корень не
+// читался вовсе, и объявление не доезжало до судьи ни при каком значении.
+func TestInjection_AProductChartProfileDeclaringALaneIsRead(t *testing.T) {
+	src := productSource(writeValues(t, "authn:\n  identityProvider: own\n"),
+		"services/iam/deploy/values.prod.yaml")
+
+	declared, census := readLaneDeclarations([]profileSource{src})
+	if got := declared["own"]; len(got) != 1 || got[0] != src.Label {
+		t.Fatalf("объявление продуктового профиля не доехало до судьи: %v", declared)
+	}
+	if len(census) != 1 || census[0].Root != productRootName || census[0].Parsed != 1 {
+		t.Fatalf("перепись не назвала корень продукта: %+v", census)
+	}
+
+	_, _, findings := judgeLaneCoverage([]laneFact{{
+		Lane: "own", Reachable: false, Profiled: true,
+		ProfileNames: declared["own"], Refusal: "нечем впустить человека",
+	}})
+	if len(findings) != 1 || !strings.Contains(findings[0], src.Label) {
+		t.Fatalf("находка не назвала КООРДИНАТУ продуктового профиля: %v", findings)
+	}
+}
+
+// Законный близнец: тот же файл того же корня с ПОДЪЁМНЫМ значением — полоса
+// `own` не объявлена никем, судить нечего. Отличается ровно одним фактом.
+func TestInjection_AProductChartProfileDeclaringARaisableLaneIsSilent(t *testing.T) {
+	src := productSource(writeValues(t, "authn:\n  identityProvider: external\n"),
+		"services/iam/deploy/values.prod.yaml")
+
+	declared, _ := readLaneDeclarations([]profileSource{src})
+	if len(declared["own"]) != 0 {
+		t.Fatalf("подъёмное значение прочитано как неподъёмное: %v", declared)
+	}
+	if got := declared["external"]; len(got) != 1 || got[0] != src.Label {
+		t.Fatalf("подъёмная полоса не засчитана объявленной: %v", declared)
+	}
+}
+
+// Ось КЛЮЧЕЙ: у корней они разные, и ключи зонта на файле продукта не находят
+// ничего. Без этой оси перепутанные местами ключи дали бы «полосу не объявляет»
+// — то есть слепоту, неотличимую от исправной работы.
+func TestInjection_UmbrellaKeysDoNotReadAProductChartProfile(t *testing.T) {
+	path := writeValues(t, "authn:\n  identityProvider: own\n")
+	wrong := profileSource{
+		Root: umbrellaRootName, Label: "values.prod.yaml", Path: path,
+		Keys: []string{"kaname", "config", "authn", "identityProvider"},
+	}
+	declared, census := readLaneDeclarations([]profileSource{wrong})
+	if len(declared) != 0 {
+		t.Fatalf("ключи чужого корня прочитали объявление: %v", declared)
+	}
+	if census[0].Parsed != 1 || len(census[0].Unreadable) != 0 {
+		t.Fatalf("файл разобран, но объявления в нём нет — перепись обязана это показать: %+v", census)
+	}
+}
+
+// «НЕ ПРОЧИТАН» НЕ ОЗНАЧАЕТ «ПОЛОСУ НЕ ОБЪЯВЛЯЕТ», и различает их только
+// перепись: оба случая дают ноль объявлений.
+func TestInjection_AnUnparsableProfileIsCountedApartFromOneDeclaringNothing(t *testing.T) {
+	broken := productSource(filepath.Join(t.TempDir(), "нет-такого.yaml"), "нет-такого.yaml")
+	_, census := readLaneDeclarations([]profileSource{broken})
+	if len(census) != 1 || census[0].Parsed != 0 || len(census[0].Unreadable) != 1 {
+		t.Fatalf("неразобранный файл не отделён от необъявляющего: %+v", census)
+	}
+}
+
+// Перепись ведётся ПО КОРНЯМ. Одно сводное число скрыло бы корень, который не
+// читали вовсе, — ровно ту слепоту, ради которой правка.
+func TestInjection_CensusSeparatesTheTwoRoots(t *testing.T) {
+	product := productSource(writeValues(t, "authn:\n  identityProvider: external\n"), "чарт-продукта")
+	umbrella := profileSource{
+		Root:  umbrellaRootName,
+		Label: "зонт",
+		Path:  writeValues(t, "kaname:\n  config:\n    authn:\n      identityProvider: external\n"),
+		Keys:  []string{"kaname", "config", "authn", "identityProvider"},
+	}
+	_, census := readLaneDeclarations([]profileSource{product, umbrella})
+	if len(census) != 2 {
+		t.Fatalf("перепись слила корни в один: %+v", census)
+	}
+	seen := map[string]int{}
+	for _, c := range census {
+		seen[c.Root] = c.Parsed
+	}
+	if seen[productRootName] != 1 || seen[umbrellaRootName] != 1 {
+		t.Fatalf("перепись не назвала оба корня порознь: %v", seen)
 	}
 }

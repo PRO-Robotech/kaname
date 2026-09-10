@@ -161,10 +161,14 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 	)
 
 	// ── СТРАЖИ СТАРТА, ДОСЛОВНО ТЕ ЖЕ, ЧТО В `serve` ────────────────────────
-	require.True(t, mtlsCfg.InternalServerMTLS.Enable,
-		"боевой режим требует взаимного TLS внутреннего слушателя (:9091): профиль его не объявляет, и процесс откажется стартовать")
-	require.True(t, mtlsCfg.PublicServerMTLS.Enable,
-		"боевой режим требует TLS публичного слушателя (:9090): профиль его не объявляет, и процесс откажется стартовать")
+	//
+	// Зовутся САМИ стражи, а не повторяются их условия. Здесь стояли два
+	// собственных утверждения про gRPC-слушатели — второе место об одном
+	// предмете, расходящееся молча: подъём обзавёлся бы новым условием, а
+	// утверждения о нём не знали бы (задача #2514).
+	require.NoError(t, requireGRPCListenerMTLS(productionMode, mtlsCfg),
+		"боевой профиль не проходит стража старта gRPC-слушателей: объявленная посадка "+
+			"неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
 	require.NoError(t, requireRegistryTokenTLS(productionMode, registryTokenAddr, mtlsCfg),
 		"боевой профиль не проходит стража старта докерной полосы: объявленная посадка неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
 
@@ -177,20 +181,26 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 	// поставленной службы его нет.
 	internalRESTAddr := httpEdgeAddr(t, values, defaults, "api-server.internal-rest-endpoint",
 		"apiServer", "internalRestEndpoint")
+	restAddr := httpEdgeAddr(t, values, defaults, "api-server.rest-endpoint",
+		"apiServer", "restEndpoint")
+	jwksProxyAddr := httpEdgeAddr(t, values, defaults, "api-server.jwks-proxy.endpoint",
+		"apiServer", "jwksProxy", "endpoint")
+	publicGRPCAddr := httpEdgeAddr(t, values, defaults, "api-server.endpoint",
+		"apiServer", "endpoint")
+	internalGRPCAddr := httpEdgeAddr(t, values, defaults, "api-server.internal-endpoint",
+		"apiServer", "internalEndpoint")
 	httpEdges := iamHTTPEdges(
 		httpEdgeAddr(t, values, defaults, "authn.hooks-http-endpoint",
 			"authn", "hooksHttpEndpoint"),
 		httpEdgeAddr(t, values, defaults, "api-server.metrics-endpoint",
 			"apiServer", "metricsEndpoint"),
-		httpEdgeAddr(t, values, defaults, "api-server.jwks-proxy.endpoint",
-			"apiServer", "jwksProxy", "endpoint"),
+		jwksProxyAddr,
 		// Адрес фронтов профиль объявляет ПОРТОМ, и шаблон выводит эндпоинт из
 		// него же. Читать здесь `apiServer.restEndpoint` значило бы судить путь,
 		// которым адрес не приходит: у этих рёбер умолчания процесса НЕТ (Р5),
 		// поэтому проба получила бы пустое и не судила бы их вовсе — проверка с
 		// формой, но без предмета.
-		httpEdgeAddr(t, values, defaults, "api-server.rest-endpoint",
-			"apiServer", "restEndpoint"),
+		restAddr,
 		internalRESTAddr,
 		mtlsCfg,
 	)
@@ -241,6 +251,56 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 			"посадка неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
 	t.Logf("рубеж внутреннего REST-фронта: режим %q, требует клиентского сертификата: %v",
 		mtlsCfg.InternalRESTClientAuthModeValue(), mtlsCfg.InternalRESTRequiresClientCert())
+
+	// ── АВТОРИТЕТ ОТЗЫВА НАШИХ ТОКЕНОВ ──────────────────────────────────────
+	//
+	// Предмет приносит СВОЯ ЧЕКАНКА, а не выбор посадки: включив её, профиль
+	// получает поверхность, которой присылают предъявленный токен, — и она
+	// обязана уметь установить, кто спрашивает. Условие жило встроенной ветвью
+	// подъёма и потому не судилось здесь ничем: перечисление стражей по именам
+	// оставляло дверь открытой ровно для безымянного условия (задача #2476).
+	mintingRaw, mintingDeclared := dig(values, "authn", "tokenSigning", "enabled")
+	ownMinting := false
+	if mintingDeclared {
+		ownMinting, ok = mintingRaw.(bool)
+		require.True(t, ok, "своя чеканка объявлена не булевым: %T", mintingRaw)
+	}
+	require.NoError(t,
+		requireRevocationAuthorityCallerAuth(ownMinting, jwksProxyAddr, mtlsCfg),
+		"боевой профиль не проходит стража авторитета отзыва: объявленная посадка "+
+			"неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
+	t.Logf("своя чеканка: %v · слушатель зеркала ключей %q, режим проверки клиента %q, устанавливает вызывающего: %v",
+		ownMinting, jwksProxyAddr, mtlsCfg.JWKSProxyClientAuthModeValue(),
+		mtlsCfg.JWKSProxyVerifiesCaller())
+
+	// ── РАЗЛИЧИМОСТЬ АДРЕСОВ ЧЕТЫРЁХ ПОВЕРХНОСТЕЙ ───────────────────────────
+	require.NoError(t,
+		requireDistinctSurfaceAddrs(publicGRPCAddr, internalGRPCAddr, restAddr, internalRESTAddr),
+		"боевой профиль не проходит стража различимости адресов поверхностей")
+
+	// ── УДОСТОВЕРЕНИЕ ФРОНТА ДЛЯ СОБСТВЕННОГО СЛУШАТЕЛЯ ─────────────────────
+	require.NoError(t,
+		requireRESTUpstreamCredential(productionMode, restAddr, internalRESTAddr, mtlsCfg),
+		"боевой профиль не проходит стража удостоверения фронта: объявленная посадка "+
+			"неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
+
+	// ── ПАРА «АДРЕС + УДОСТОВЕРЕНИЕ» АДМИНИСТРАТИВНОГО КОНТУРА ──────────────
+	//
+	// Адрес приходит картой `env` профиля (она уже разложена в окружение выше),
+	// а ВЫБОР способа — ключом настроек: он уезжает поду файлом, а не
+	// переменной, поэтому читается из значений профиля, а не из окружения.
+	// Прочитать его отсюда переменной значило бы судить путь, которым величина
+	// не приходит (задача #2471).
+	adminAuth := ""
+	if raw, found := dig(values, "authn", "providerAdminAuth"); found {
+		adminAuth = valueAsString(t, "authn.providerAdminAuth", raw)
+	}
+	adminHop := config.AuthNConfig{ProviderAdminAuth: adminAuth}
+	require.NoError(t, requireProviderAdminCredentialPair(adminHop),
+		"боевой профиль не проходит стража пары административного контура: объявленная "+
+			"посадка неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
+	t.Logf("административный контур: адрес %q · способ аутентификации %q",
+		adminHop.DeclaredHydraAdminURL(), adminHop.ProviderAdminAuthValue())
 }
 
 // httpEdgeAddr — адрес слушателя: объявленный профилем либо умолчание процесса.

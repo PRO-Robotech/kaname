@@ -349,3 +349,30 @@ func (c AuthNConfig) HydraAdminTokenEnvName() string {
 func (c AuthNConfig) ResolveHydraAdminToken() string {
 	return strings.TrimSpace(os.Getenv(c.HydraAdminTokenEnvName()))
 }
+
+// Значения ручки «чем административный контур аутентифицирует нас». Объявлены
+// ОДНИМ местом: их называют резолв, страж старта и текст его отказа. Три копии
+// разошлись бы молча — на той, которую забыли поправить.
+const (
+	// ProviderAdminAuthBearer — контур возит административный предъявитель.
+	ProviderAdminAuthBearer = "bearer"
+	// ProviderAdminAuthNone — административный порт поставщика не
+	// аутентифицирует никого. Значение ОБЪЯВЛЯЕТСЯ оператором, а не
+	// подразумевается нами: это утверждение о ЕГО поставщике.
+	ProviderAdminAuthNone = "none"
+)
+
+// ProviderAdminAuthValue — объявленный способ аутентификации административного
+// контура, как его прочитал процесс.
+//
+// Пустая строка означает «оператор не объявлял», и это ОТДЕЛЬНОЕ состояние, не
+// сводимое ни к `none`, ни к `bearer`: страж обязан различать «сказано, что не
+// нужен» и «не сказано ничего».
+func (c AuthNConfig) ProviderAdminAuthValue() string {
+	return strings.ToLower(strings.TrimSpace(c.ProviderAdminAuth))
+}
+
+// ProviderAdminAuthValues — закрытый словарь значений ручки, для текста отказа.
+func ProviderAdminAuthValues() []string {
+	return []string{ProviderAdminAuthBearer, ProviderAdminAuthNone}
+}

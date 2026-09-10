@@ -39,7 +39,7 @@ import (
 )
 
 const (
-	expiryClientID = "kacho-sak-expiry"
+	expiryClientID = "kaname-sak-expiry"
 	expirySvaID    = "sva01abcdefghjkmnp"
 	expirySocID    = "soc_01abcdefghjkmnp"
 	expiryAccID    = "acc01abcdefghjkmnp"

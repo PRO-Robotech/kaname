@@ -546,12 +546,12 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/kacho-no-such-route-{{runId}}",
+              "raw": "{{baseUrl}}/kaname-no-such-route-{{runId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "kacho-no-such-route-{{runId}}"
+                "kaname-no-such-route-{{runId}}"
               ]
             }
           },
@@ -578,7 +578,7 @@
                   "// Missing value = misconfigured harness, NOT a legal mode: FAIL, then skip.",
                   "const __cfgUrl = pm.environment.get('externalBaseUrl') || pm.variables.get('externalBaseUrl') || '';",
                   "if (__cfgUrl) {",
-                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/kacho-no-such-route-{{runId}}');",
+                  "  pm.request.url = __cfgUrl + pm.variables.replaceIn('/kaname-no-such-route-{{runId}}');",
                   "} else {",
                   "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: externalBaseUrl is set — external-isolation negative — Internal* paths must not be reachable on the advertised external TLS listener', () => {",
                   "    pm.expect.fail('externalBaseUrl is not set — the newman runner (deploy/scripts/newman-e2e.sh / newman-parallel.sh --env-var) did not inject it. This step cannot run, and a check that cannot run MUST NOT be silently dropped.');",

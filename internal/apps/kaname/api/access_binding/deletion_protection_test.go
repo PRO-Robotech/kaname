@@ -46,7 +46,7 @@ func seedAccountBinding(repo *abFakeRepo, accountID, roleID string, protected bo
 // C-02: Delete on a protected binding → sync FAILED_PRECONDITION (before Operation).
 func TestAccessBinding_Delete_Protected_SyncFailedPrecondition(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_p6_del", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true)
 
 	uc := NewDeleteAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
@@ -66,7 +66,7 @@ func TestAccessBinding_Delete_Protected_SyncFailedPrecondition(t *testing.T) {
 // regressing the uniform-403 existence-leak protection the not-found branch enforces.
 func TestAccessBinding_Delete_Protected_Unauthorized_NoLeak(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_p6_leak", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true) // protected
 
 	// Caller is NOT the owner and the FGA grants no admin → no grant-authority.
@@ -88,7 +88,7 @@ func TestAccessBinding_Delete_Protected_Unauthorized_NoLeak(t *testing.T) {
 // (returns an Operation).
 func TestAccessBinding_Delete_Unprotected_NoSyncBlock(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_p6_del2", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, false)
 
 	uc := NewDeleteAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
@@ -103,7 +103,7 @@ func TestAccessBinding_Delete_Unprotected_NoSyncBlock(t *testing.T) {
 // C-03: Update(update_mask=["deletion_protection"], false) clears the flag.
 func TestAccessBinding_Update_ClearsDeletionProtection(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_p6_upd", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true)
 
 	uc := NewUpdateAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
@@ -124,7 +124,7 @@ func TestAccessBinding_Update_ClearsDeletionProtection(t *testing.T) {
 // INVALID_ARGUMENT.
 func TestAccessBinding_Update_RejectsUnknownMaskField(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_p6_mask", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true)
 
 	uc := NewUpdateAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)

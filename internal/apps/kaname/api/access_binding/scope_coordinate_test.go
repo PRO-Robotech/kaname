@@ -69,7 +69,7 @@ func TestScopeCoordinate_UnknownDottedRejected(t *testing.T) {
 // ── request side wired through the handler (ListByScope) ─────────────────────────
 
 func TestABListByScope_AcceptsDottedScopePair(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_sc1", "", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_sc1", "", "rol_v", "kaname.view", nil)
 	seedABListByScope(repo, []domain.AccessBinding{
 		{ID: "acb00000000000scope1", ResourceType: "account", ResourceID: "acc_sc1", SubjectID: "usr_a"},
 	})
@@ -86,7 +86,7 @@ func TestABListByScope_AcceptsDottedScopePair(t *testing.T) {
 }
 
 func TestABListByScope_LegacyResourcePairStillWorks(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_sc2", "", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_sc2", "", "rol_v", "kaname.view", nil)
 	seedABListByScope(repo, []domain.AccessBinding{
 		{ID: "acb00000000000scope2", ResourceType: "account", ResourceID: "acc_sc2", SubjectID: "usr_a"},
 	})

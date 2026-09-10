@@ -64,7 +64,7 @@ func newExpiryTokenHook(t *testing.T, expiresAt *time.Time, audit *fakeAudit) *i
 			CredentialKind: domain.CredentialKindKeypair,
 			ID:             "soc_01abcdefghjkmnpqr",
 			SvaID:          "sva_01abcdefghjkmnpqr",
-			OAuthClientID:  "kacho-sak-expiry",
+			OAuthClientID:  "kaname-sak-expiry",
 			ExpiresAt:      expiresAt,
 		},
 		sa: domain.ServiceAccount{
@@ -137,7 +137,7 @@ func TestTokenHook_ExpiredSAKey_Denied(t *testing.T) {
 	audit := &fakeAudit{}
 	h := newExpiryTokenHook(t, &expired, audit)
 
-	rec := postTokenHook(t, h, clientCredentialsHookBody(t, "kacho-sak-expiry"))
+	rec := postTokenHook(t, h, clientCredentialsHookBody(t, "kaname-sak-expiry"))
 
 	require.Equal(t, http.StatusForbidden, rec.Code,
 		"Hydra denies the token request only on 403; anything else mints the token or 500s")
@@ -160,7 +160,7 @@ func TestTokenHook_LiveSAKey_Issues(t *testing.T) {
 	audit := &fakeAudit{}
 	h := newExpiryTokenHook(t, &live, audit)
 
-	rec := postTokenHook(t, h, clientCredentialsHookBody(t, "kacho-sak-expiry"))
+	rec := postTokenHook(t, h, clientCredentialsHookBody(t, "kaname-sak-expiry"))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	var resp struct {
@@ -182,7 +182,7 @@ func TestTokenHook_NonExpiringSAKey_Issues(t *testing.T) {
 	audit := &fakeAudit{}
 	h := newExpiryTokenHook(t, nil, audit)
 
-	rec := postTokenHook(t, h, clientCredentialsHookBody(t, "kacho-sak-expiry"))
+	rec := postTokenHook(t, h, clientCredentialsHookBody(t, "kaname-sak-expiry"))
 
 	require.Equal(t, http.StatusOK, rec.Code,
 		"a key with no stated expiry must keep working (bootstrap-admin / pre-TTL rows)")

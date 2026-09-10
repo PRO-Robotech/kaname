@@ -110,9 +110,21 @@ import dedent from 'ts-dedent'
   <thead><tr><th>Владелец</th><th>Виды</th></tr></thead>
   <tbody>
     <tr><td><code>vpc</code></td><td><code>vpc.network</code>, <code>vpc.subnet</code>, <code>vpc.address</code>, <code>vpc.networkInterface</code>, <code>vpc.securityGroup</code>, <code>vpc.routeTable</code>, <code>vpc.gateway</code>, <code>vpc.cidrGroup</code></td></tr>
-    <tr><td><code>iam</code></td><td><code>iam.project</code></td></tr>
   </tbody>
 </table>
+
+:::warning Виды самой службы доступа этим сервисом НЕ объявляются
+Здесь стояла строка `iam` с видом `iam.project`, и она пережила свой предмет дважды.
+
+`iam.project` **снят с каталога**: величина на нём принималась, сохранялась и не применялась
+ни разу — списывающего триггера у него не было. Вместе с ним сняты `iam.user`,
+`iam.serviceAccount`, `iam.group`, `iam.role`, `iam.accessBinding`.
+
+Три вида, которые служба доступа **считает** — `iam.account`, `iam.user.credential`,
+`iam.serviceAccount.credential`, — здесь тоже не объявляются: их величину задаёт **посадка
+установки**, а не этот сервис. Попытка назначить любой из трёх отвергается **по имени вида**.
+Причина и поверхность чтения — [Квоты](/api/quotas).
+:::
 
 Форма токена (`domain.resource`) проверяется ограничением БД, **членство** в каталоге —
 доменом. Разделение осознанное: форма переживёт любой новый домен, а перечень видов растёт —
@@ -144,10 +156,18 @@ grep -A14 'var countableKinds' services/iam/internal/domain/limit.go
     <tr><td><code>vpc.subnet</code></td><td>64</td><td><code>vpc.routeTable</code></td><td>32</td></tr>
     <tr><td><code>vpc.address</code></td><td>256</td><td><code>vpc.gateway</code></td><td>16</td></tr>
     <tr><td><code>vpc.networkInterface</code></td><td>128</td><td><code>vpc.cidrGroup</code></td><td>64</td></tr>
-    <tr><td><code>iam.project</code></td><td>16</td><td></td><td></td></tr>
-    <tr><td><code>iam.user.credential</code></td><td>12</td><td><code>iam.serviceAccount.credential</code></td><td>24</td></tr>
   </tbody>
 </table>
+
+:::note Умолчаний на виды службы доступа здесь больше нет
+Строки `iam.project`, `iam.user.credential` и `iam.serviceAccount.credential` стояли здесь,
+пока их величину назначал этот сервис. Первый вид снят с каталога; величину двух остальных —
+и величину `iam.account` — объявляет **посадка службы доступа**, и там у неё нет умолчания
+вовсе: незаданная величина останавливает старт, называя вид.
+
+Разложение чисел удостоверений ниже остаётся в силе дословно: сменился источник величины, а не
+её обоснование. Действующие значения посадки читаются в её профиле, а не на этой странице.
+:::
 
 Числа удостоверений разложены, а не выбраны на глаз: **назначения × 2 + разовые**. Множитель `×2` —
 это правильная ротация: новое удостоверение заводят **до** того, как истекло прежнее (иначе доступ

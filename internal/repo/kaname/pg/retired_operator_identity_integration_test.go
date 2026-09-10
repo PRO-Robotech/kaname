@@ -63,6 +63,7 @@ func TestRetiredOperatorIdentityIsAbsentFromTheAppliedSchema(t *testing.T) {
 	pool, err := pgxpool.New(ctx, setupTestDB(t))
 	require.NoError(t, err, "соединение с применённой схемой")
 	defer pool.Close()
+	applyPlatformModuleSeed(ctx, t, pool)
 
 	// ── ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ. Отрицание без него ничего не утверждает:
 	//    на пустой схеме «оператора нет» верно тождественно.

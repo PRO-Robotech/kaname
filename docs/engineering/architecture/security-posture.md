@@ -43,7 +43,7 @@ verified consumer-модуль (`kacho-vpc`/`compute`/`nlb`/`geo`) дозван�
 `ProjectService.Get` и форвардит end-user principal ради tenant scope-filter. Пин
 «только gateway» сломал бы эту кросс-сервисную валидацию проектов. Достаточная защита —
 internal-CA + `RequireAndVerifyClientCert` на `:9090` (слушатель доступен только
-verified kacho-модулям) + trust-gate выше (unverified peer не может подделать
+verified consumer-модулям) + trust-gate выше (unverified peer не может подделать
 principal). Остаточный риск (скомпрометированный verified-модуль подделывает
 произвольного user'а) присущ модели «доверенного форвардера» и митигируется
 scope'ом internal-CA + NetworkPolicy + hardening'ом pod'ов модулей.

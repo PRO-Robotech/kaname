@@ -77,7 +77,7 @@ docker login registry.kacho.local -u <id удостоверения> -p <стр�
 
 Виды `KEYPAIR` и `FEDERATED` работают подписанным утверждением. При выпуске kaname генерирует
 пару ключей ECDSA P-256 и возвращает **приватный ключ ровно один раз**. Владелец подписывает им
-`client_assertion` (RFC 7521/7523) и обменивает его на kacho-JWT, принципалом которого становится
+`client_assertion` (RFC 7521/7523) и обменивает его на JWT доступа, принципалом которого становится
 сам субъект. Приватная половина не хранится нигде: у платформы остаётся открытая половина и строка
 реестра, по идентификатору которой клиент и разрешается при обмене. Где именно идёт обмен, зависит
 от посадки: на переведённой — токен-эндпоинт платформы (`POST /iam/v1/token`), на непереведённой
@@ -248,7 +248,7 @@ docker login registry.kacho.local -u <id удостоверения> -p <стр�
   **Потолок длительности внешнего утверждения — 1 час** (`exp − iat`); он шире
   потолка полосы `private_key_jwt` (5 минут) потому, что срок своему токену
   назначает внешний издатель.
-- **`audience[]`** (federation OUT) — kacho-JWT чеканится с этими значениями в claim `aud`,
+- **`audience[]`** (federation OUT) — JWT доступа чеканится с этими значениями в claim `aud`,
   чтобы токен принимали внешние STS / workload-identity-federation провайдеры. Это же поле
   **сужает ключ**: токен по нему выдаётся только названным здесь адресатам, и ключ,
   выданный «для реестра», токена для края платформы не получит. Сужение действует
@@ -456,23 +456,23 @@ RevokeUserTokenResponse` с `revokedAt`).
 подписывалось прежним, требует перенастройки. Конвейер с воротами по расхождению получит на этом
 новый класс срабатываний.
 
-## Как получить kacho-JWT из ключа
+## Как получить JWT доступа из ключа
 
 ```mermaid
 flowchart LR
   wl["Рабочая нагрузка<br/>(SA / CLI пользователя)"] -->|"1. подпись client_assertion (ES256)"| wl
   wl -->|"2. POST /oauth2/token"| hydra["Ory Hydra"]
   hydra -->|"3. валидация JWK / assertion"| hydra
-  hydra -->|"4. kacho-JWT (access_token)"| wl
-  wl -->|"5. Authorization: Bearer kacho-JWT"| agw["api-gateway → kaname"]
+  hydra -->|"4. JWT доступа (access_token)"| wl
+  wl -->|"5. Authorization: Bearer JWT"| agw["api-gateway → kaname"]
 ```
 
 1. Клиент подписывает `client_assertion` приватным ключом (заголовок `kid` = `keyId` из ответа
    `Issue`).
 2. Отправляет его в Hydra `/oauth2/token` (grant `client_credentials` для `private_key_jwt`,
    либо `jwt-bearer` для федерации).
-3. Hydra валидирует подпись по зарегистрированному JWK и чеканит kacho-JWT.
-4. Клиент шлёт kacho-JWT как `Authorization: Bearer` во все API Kachō.
+3. Hydra валидирует подпись по зарегистрированному JWK и чеканит JWT доступа.
+4. Клиент шлёт JWT доступа как `Authorization: Bearer` во все API Kachō.
 
 ## Ошибки и граничные случаи
 

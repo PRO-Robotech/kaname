@@ -11,7 +11,7 @@ package internal_iam
 //   - allowed=false (deny path)                     → CheckResponse{Allowed:false, Reason}
 //   - missing subject_id / relation / object        → InvalidArgument
 //   - authorizer == nil (решатель не провязан)      → Unavailable (fail-closed)
-//   - CheckRelation -> "authz unavailable"          → Unavailable
+//   - CheckRelation -> ErrUnavailable               → Unavailable, ФИКСИРОВАННЫЙ текст
 //   - CheckRelation -> "Illegal argument ..."       → InvalidArgument
 //   - CheckRelation -> generic error                → Internal
 
@@ -28,6 +28,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
@@ -152,8 +153,14 @@ func TestInternalIAM_Check_ErrorMapping(t *testing.T) {
 	}{
 		// Backend-unavailable is classified by the typed iamerr.ErrUnavailable
 		// sentinel (robust to error-text rewording), not an error-string prefix.
-		{"unavailable sentinel", iamerr.Wrapf(iamerr.ErrUnavailable, "authz unavailable: read relation_fact: conn refused"), codes.Unavailable, ""},
-		{"unavailable sentinel other text", iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable"), codes.Unavailable, ""},
+		//
+		// Текст УТВЕРЖДАЕТСЯ, а не пропускается. Пустое ожидание здесь и было
+		// предметом задачи #2464: проба на одном коде остаётся зелёной при
+		// вернувшемся эхе, потому что код `UNAVAILABLE` верен в обоих случаях.
+		// Две подачи различаются текстом ЦЕПОЧКИ и обязаны дать ОДИН ответ —
+		// именно это и значит «умолчание фиксировано».
+		{"unavailable sentinel", iamerr.Wrapf(iamerr.ErrUnavailable, "authz unavailable: read relation_fact: conn refused"), codes.Unavailable, shared.UnavailableMessage},
+		{"unavailable sentinel other text", iamerr.Wrapf(iamerr.ErrUnavailable, "iam datastore unavailable"), codes.Unavailable, shared.UnavailableMessage},
 		{"illegal argument", errors.New("Illegal argument relation: required"), codes.InvalidArgument, ""},
 		// Leak-lock (audit r3): the Internal default must be the OPAQUE fixed text,
 		// never err.Error() — an un-sentineled pgx/DB error carries driver text

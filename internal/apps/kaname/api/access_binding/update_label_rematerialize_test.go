@@ -69,7 +69,7 @@ func seedLabelledBinding(repo *abFakeRepo, accountID, roleID string) domain.Acce
 // the global reconcile backlog, while the durable event stays co-committed.
 func TestUpdateAccessBinding_LabelChange_RematerializesObjectInProcess(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_lblremat", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedLabelledBinding(repo, accountID, roleID)
 
 	rec := &recordingReconciler{}
@@ -102,7 +102,7 @@ func TestUpdateAccessBinding_LabelChange_RematerializesObjectInProcess(t *testin
 // O(scope) pass nor enqueue a reconcile event.
 func TestUpdateAccessBinding_DeletionProtectionOnly_NoRematerialization(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_dponly", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true)
 
 	rec := &recordingReconciler{}
@@ -133,7 +133,7 @@ func TestUpdateAccessBinding_DeletionProtectionOnly_NoRematerialization(t *testi
 // behaviour exactly as it was: the durable event is still emitted and nothing panics.
 func TestUpdateAccessBinding_LabelChange_NilReconciler_DurableEventStillEmitted(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_nilremat", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedLabelledBinding(repo, accountID, roleID)
 
 	// No WithObjectReconciler — the queue-only wiring every existing test builds.

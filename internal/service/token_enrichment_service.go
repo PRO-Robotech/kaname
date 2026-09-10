@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// token_enrichment_service.go — use-case: assemble kacho-specific ext_claims
+// token_enrichment_service.go — use-case: assemble kaname-specific ext_claims
 // for an OAuth2 access_token.
 //
 // Clean Architecture requires the Hydra token-hook HTTP handler
@@ -269,7 +269,7 @@ func (s *TokenEnrichmentService) WithUserTokenPort(p TokenEnrichmentUserTokenPor
 	return s
 }
 
-// EnrichClaims assembles the kacho-specific ext_claims map for an access_token,
+// EnrichClaims assembles the kaname-specific ext_claims map for an access_token,
 // and states WHO it resolved the subject to.
 //
 // The second return is not a summary of the first. The claim set is what the
@@ -298,7 +298,7 @@ func (s *TokenEnrichmentService) WithUserTokenPort(p TokenEnrichmentUserTokenPor
 //     committed yet.
 func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject string, hookCtx TokenHookContext) (map[string]any, ResolvedPrincipal, error) {
 	// 1. Federated SA path (Phase 3b). `subject` here is the EXTERNAL
-	//    assertion sub; `hookCtx.OAuthClientID` is the kacho-issued client.
+	//    assertion sub; `hookCtx.OAuthClientID` is the kaname-issued client.
 	//    We only enter this branch when Hydra signalled jwt-bearer — falling
 	//    back to user/SA paths otherwise keeps Phase 3a behaviour intact for
 	//    callers whose handler does not yet populate the new fields.

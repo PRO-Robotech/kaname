@@ -50,10 +50,10 @@ func TestF2_31_RevokedRegisteredKeyGetsNoToken(t *testing.T) {
 			switch kind {
 			case domain.AssertionClientUser:
 				clientID = "uoc_kkkkkkkkkkkkkkkkk"
-				f.seedUserClient(t, clientID, "kacho-usr-revoked-key", testPublicKeyPEM, "ES256", nil)
+				f.seedUserClient(t, clientID, "kaname-usr-revoked-key", testPublicKeyPEM, "ES256", nil)
 			case domain.AssertionClientServiceAccount:
 				clientID = "soc_kkkkkkkkkkkkkkkkk"
-				f.seedSAClient(t, clientID, "kacho-sak-revoked-key", testPublicKeyPEM, "ES256")
+				f.seedSAClient(t, clientID, "kaname-sak-revoked-key", testPublicKeyPEM, "ES256")
 			}
 
 			// ── Положительный контроль: ДО отзыва тот же клиент токен получает.

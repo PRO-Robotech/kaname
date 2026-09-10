@@ -27,7 +27,7 @@ func TestResolveAudience(t *testing.T) {
 	}{
 		{
 			name:           "external audience verbatim",
-			audiencePrefix: "kacho:iam:",
+			audiencePrefix: "kaname:iam:",
 			in: IssueInput{
 				ServiceAccountID: "sva_abc0000000000000",
 				Audience:         []string{"sts.example.com"},
@@ -36,7 +36,7 @@ func TestResolveAudience(t *testing.T) {
 		},
 		{
 			name:           "multi-audience preserves order",
-			audiencePrefix: "kacho:iam:",
+			audiencePrefix: "kaname:iam:",
 			in: IssueInput{
 				ServiceAccountID: "sva_abc0000000000000",
 				Audience: []string{
@@ -53,7 +53,7 @@ func TestResolveAudience(t *testing.T) {
 		},
 		{
 			name:           "dedup + empty drop",
-			audiencePrefix: "kacho:iam:",
+			audiencePrefix: "kaname:iam:",
 			in: IssueInput{
 				ServiceAccountID: "sva_abc0000000000000",
 				Audience:         []string{"sts.example.com", "", "sts.example.com", "api://x"},
@@ -62,19 +62,19 @@ func TestResolveAudience(t *testing.T) {
 		},
 		{
 			name:           "fallback to internal prefix when caller omits audience",
-			audiencePrefix: "kacho:iam:",
+			audiencePrefix: "kaname:iam:",
 			in: IssueInput{
 				ServiceAccountID: "sva_xyz0000000000000",
 			},
-			want: []string{"kacho:iam:/sa/sva_xyz0000000000000"},
+			want: []string{"kaname:iam:/sa/sva_xyz0000000000000"},
 		},
 		{
 			name:           "fallback also trims trailing slashes from prefix",
-			audiencePrefix: "kacho:iam:////",
+			audiencePrefix: "kaname:iam:////",
 			in: IssueInput{
 				ServiceAccountID: "sva_xyz0000000000000",
 			},
-			want: []string{"kacho:iam:/sa/sva_xyz0000000000000"},
+			want: []string{"kaname:iam:/sa/sva_xyz0000000000000"},
 		},
 		{
 			name:           "no prefix + no audience → nil",
@@ -86,12 +86,12 @@ func TestResolveAudience(t *testing.T) {
 		},
 		{
 			name:           "audience containing only empty entries → fallback",
-			audiencePrefix: "kacho:iam:",
+			audiencePrefix: "kaname:iam:",
 			in: IssueInput{
 				ServiceAccountID: "sva_abc0000000000000",
 				Audience:         []string{"", ""},
 			},
-			want: []string{"kacho:iam:/sa/sva_abc0000000000000"},
+			want: []string{"kaname:iam:/sa/sva_abc0000000000000"},
 		},
 	}
 	for _, tc := range cases {
@@ -115,7 +115,7 @@ func TestResolveAudience(t *testing.T) {
 // resolution; trusted_subjects do not override audience semantics.
 func TestResolveAudienceFederatedPath(t *testing.T) {
 	t.Parallel()
-	u := &IssueSAKeyUseCase{AudiencePrefix: "kacho:iam:"}
+	u := &IssueSAKeyUseCase{AudiencePrefix: "kaname:iam:"}
 	in := IssueInput{
 		ServiceAccountID: "sva_fed0000000000000",
 		TrustedSubjects: []domain.TrustedSubject{{

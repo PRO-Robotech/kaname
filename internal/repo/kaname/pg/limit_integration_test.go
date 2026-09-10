@@ -295,7 +295,8 @@ func TestLimit_08_PrecedenceAndFallback(t *testing.T) {
 	//
 	// ПРЕДМЕТ ИМЕННО ЭТОЙ ПРОБЫ — что до резолва доезжает ПОСЕВ: виды берутся из
 	// каталога, величины из базы, и ни один вид каталога в ответе не пропущен.
-	// Что посев покрывает каждый вид, держит TestLimit_SeedCoversEveryCatalogueKind;
+	// Что посев покрывает каждый АВТОРИТЕТНЫЙ вид (и ни одного вида посадки),
+	// держит TestLimit_SeedCoversTheAuthorityKindsAndOnlyThem;
 	// что резолв не путает носителя на синтетике — пробы домена.
 	wantCarrier := map[domain.LimitKind]domain.LimitCarrier{}
 	nested := 0
@@ -441,9 +442,25 @@ func TestLimit_12_ProjectDeleteWithdrawsItsLimits(t *testing.T) {
 	require.Equal(t, int64(8), stillThere.Value)
 
 	// The platform defaults are untouched — measured, not assumed.
+	//
+	// СВЕРЯЕТСЯ С АВТОРИТЕТНОЙ ПОЛОВИНОЙ каталога, а не с ним целиком (`П25`,
+	// задача продукта #2117): у трёх видов, чей владелец — сама служба доступа,
+	// величина приходит из посадки, и посева у них нет НАМЕРЕННО.
+	//
+	// Здесь стояло `len(domain.CountableKinds())`, и разница ровно в эти три вида
+	// — перемерено предикатом, а не на глаз: каталог 27 = авторитетных 24 +
+	// посадки 3, и три недостающих в отказе назывались поимённо теми же тремя.
+	//
+	// Утверждение НЕ ослаблено: оно по-прежнему требует, чтобы снос арендатора не
+	// задел НИ ОДНОГО умолчания платформы. Сузилось множество, о котором оно
+	// делается, — и сузилось до того, которое посев вообще заводит. Что множество
+	// это полно и не содержит лишнего, держит соседняя
+	// `TestLimit_SeedCoversTheAuthorityKindsAndOnlyThem`.
 	rows, _, err := repo.List(ctx, 100, "", domain.LimitFilter{Scope: domain.LimitScopeDefault})
 	require.NoError(t, err)
-	require.Len(t, rows, len(domain.CountableKinds()),
+	require.NotEmpty(t, domain.AuthorityStatedKinds(),
+		"авторитетных видов ноль — утверждение о выживании умолчаний стало вакуумным")
+	require.Len(t, rows, len(domain.AuthorityStatedKinds()),
 		"every seeded default must survive a tenant teardown")
 }
 
@@ -575,27 +592,189 @@ func reasonToken(t *testing.T, st *grpcstatus.Status) string {
 	return ""
 }
 
-// TestLimit_SeedCoversEveryCatalogueKind — у КАЖДОГО вида каталога есть
-// посеянное умолчание, и проверяется это ПОИМЁННО, а не счётом.
+// TestLimit_SeedCoversTheAuthorityKindsAndOnlyThem — посев покрывает КАЖДЫЙ вид,
+// чью величину назначает АВТОРИТЕТ, и НИ ОДНОГО вида, чью величину объявляет
+// посадка.
 //
-// # Почему поимённо
+// ─────────────────────────────────────────────────────────────────────────────
+// ЗДЕСЬ СТОЯЛО «у каждого вида каталога есть посеянное умолчание» — предмет уехал
 //
-// Счёт строк («сколько посеяно» == «сколько видов») зелёный и тогда, когда один
-// вид потерян, а другой посеян дважды. Разница не теоретическая: правило V2-3
-// «не сказано = ОТКАЗ» превращает потерянный посев в запрет создавать ресурсы
-// этого вида — то есть в отказ, который выглядит как исправная работа квоты.
+// Утверждение было верно, пока величину всех видов назначал авторитет. Решение
+// `П25` (приёмка `KAN-QUOTA-1`, задача продукта #2117) развело две роли: у трёх
+// видов, чей владелец — сама служба доступа, величина приходит из ПОСАДКИ, и
+// посев у них снят намеренно, новой миграцией.
 //
-// # Почему это проба, а не комментарий в миграции
+// Проба не ослаблена и не расширена: вопрос задан ТОЧНЕЕ. «Каждый вид каталога»
+// после `П25` неверно by construction, а «хотя бы один вид» перестало бы отличать
+// полный посев от пустого. Обе половины утверждаются ПОИМЁННО и раздельно.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПОЧЕМУ ВТОРАЯ ПОЛОВИНА — УТВЕРЖДЕНИЕ, А НЕ УМОЛЧАНИЕ
+//
+// «У трёх видов посева нет» обязано быть сказано ЯВНО. Вернувшаяся посевная
+// строка на вид посадки — это класс «принято-и-проигнорировано»: администратор
+// увидел бы величину, а списание её не читает, потому что читает проекцию
+// посадки. Молчаливо такая строка не отличается от исправной работы.
+//
+// И ровно эта половина стережёт обратный случай, о котором иначе некому сказать:
+// пропади посев у ЧЕТВЁРТОГО вида — он остаётся авторитетным, значит попадает в
+// `Missing` и роняет пробу. Разбиение по роли не заводит слепой зоны.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// ПОЧЕМУ ПОИМЁННО, А НЕ СЧЁТОМ (довод прежней редакции, он не устарел)
+//
+// Счёт строк зелёный и тогда, когда один вид потерян, а другой посеян дважды.
+// Правило V2-3 «не сказано = ОТКАЗ» превращает потерянный посев в запрет
+// создавать ресурсы этого вида — отказ, снаружи неотличимый от исправно
+// работающей квоты.
 //
 // Посев живёт в миграции, каталог — в коде, и разъезжаются они молча: каталог
-// растёт правкой Go-файла, а посев требует НОВОЙ миграции, потому что
-// применённую править нельзя. Ровно этот шов и стережёт проба.
-func TestLimit_SeedCoversEveryCatalogueKind(t *testing.T) {
+// растёт правкой Go-файла, а посев требует НОВОЙ миграции. Ровно этот шов и
+// стережёт проба.
+func TestLimit_SeedCoversTheAuthorityKindsAndOnlyThem(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
 	repo, _, ctx := newLimitRepo(t)
 
+	c := seedCoverageByRole(t, ctx, repo)
+	t.Logf("перепись: видов каталога %d — авторитетных %d, посадки %d; "+
+		"посеяно строк DEFAULT %d; без посева %d, задвоенных %d, лишних у посадки %d, вне каталога %d",
+		len(domain.CountableKinds()), len(domain.AuthorityStatedKinds()),
+		len(domain.PostureStatedKinds()), c.SeededRows,
+		len(c.Missing), len(c.Duplicated), len(c.Unexpected), len(c.Orphan))
+
+	// Предпосылка: обе половины НЕПУСТЫ. На пустой любая из двух проверок ниже
+	// выполняется тривиально, и «покрытие сошлось» перестаёт что-либо значить.
+	require.NotEmpty(t, domain.AuthorityStatedKinds(),
+		"авторитетных видов ноль — утверждение о покрытии посевом стало вакуумным")
+	require.NotEmpty(t, domain.PostureStatedKinds(),
+		"видов посадки ноль — вторая половина утверждения стала вакуумной")
+	require.NotZero(t, c.SeededRows,
+		"строк DEFAULT не прочитано ни одной: посев не применился, и «лишних нет» "+
+			"здесь означало бы «ничего не осмотрено»")
+
+	require.Emptyf(t, c.Missing,
+		"АВТОРИТЕТНЫЙ вид каталога без посеянного умолчания: %v.\n"+
+			"    По правилу «не сказано = ОТКАЗ» это запрет создавать ресурсы этого вида,\n"+
+			"    неотличимый снаружи от исправно работающей квоты. Посев живёт в миграции,\n"+
+			"    каталог — в коде; новый вид требует НОВОЙ миграции (применённую не правим).",
+		c.Missing)
+	require.Empty(t, c.Duplicated,
+		"вид с двумя действующими умолчаниями: частичный UNIQUE обязан был это запретить")
+
+	require.Emptyf(t, c.Unexpected,
+		"у вида ПОСАДКИ есть посеянное умолчание: %v.\n"+
+			"    Величину этих видов объявляет посадка службы, и списание читает ЕЁ.\n"+
+			"    Посеянная строка была бы принята, сохранена и НЕ ПРИМЕНЕНА ни разу —\n"+
+			"    администратор увидел бы величину, а арендатор прежний потолок (`П25`).",
+		c.Unexpected)
+
+	// Обратное направление: посеяно ровно то, что каталог называет, и ничего
+	// сверх. Умолчание на вид вне каталога — потолок, который никто не читает.
+	require.Emptyf(t, c.Orphan,
+		"посеяно умолчание на вид вне каталога: %v — потолок, которого никто не применит",
+		c.Orphan)
+}
+
+// TestLimit_SeedCoverageProbeCanFailInBothDirections — ДВЕ инъекции, у каждой
+// свой законный близнец.
+//
+// Проба покрытия сама по себе не доказывает своей способности упасть: на
+// исправной базе она зелёная, и зелёной же осталась бы, если бы читала не то.
+//
+// НАПРАВЛЕНИЙ ДВА, и одного мало. Прежняя редакция кормила пробу ровно одним
+// дефектом — снятым посевом, — а второе утверждение («у вида посадки посева нет»)
+// осталось бы без доказательства падаемости вовсе: оно молчаливо верно на всякой
+// базе, где посева нет ни у кого.
+//
+// Близнецы РАЗВЕДЕНЫ по направлениям намеренно. Прежний близнец наследовал ту же
+// предпосылку, что и его проба, — «недостающих нет по ВСЕМУ каталогу», — и потому
+// упал вместе с ней, когда предмет уехал. Теперь каждый близнец утверждает свою
+// половину и на чужой инъекции молчит.
+func TestLimit_SeedCoverageProbeCanFailInBothDirections(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	t.Run("снятый посев авторитетного вида — находка с ИМЕНЕМ", func(t *testing.T) {
+		repo, pool, ctx := newLimitRepo(t)
+		const victim = domain.LimitKind("registry.repositories")
+		require.True(t, domain.IsCountableKind(victim) && !domain.IsPostureStatedKind(victim),
+			"жертва инъекции обязана быть АВТОРИТЕТНЫМ видом каталога, иначе инъекция "+
+				"вносит не тот дефект, который проверяет")
+
+		// Законный близнец СВОЕЙ половины: недостающих авторитетных нет.
+		base := seedCoverageByRole(t, ctx, repo)
+		require.Empty(t, base.Missing,
+			"законный близнец: на посеянной базе авторитетный вид без посева не найден")
+		require.Empty(t, base.Unexpected,
+			"контроль: инъекция первой половины не должна задевать вторую")
+
+		_, err := pool.Exec(ctx,
+			`DELETE FROM kaname.limits WHERE scope = 'DEFAULT' AND kind = $1`, string(victim))
+		require.NoError(t, err)
+
+		after := seedCoverageByRole(t, ctx, repo)
+		require.Equal(t, []string{string(victim)}, after.Missing,
+			"гейт обязан НАЗВАТЬ вид, чьё умолчание снято, а не просто покраснеть числом")
+		require.Empty(t, after.Unexpected,
+			"инъекция уронила ЧУЖУЮ половину: значит красное могло прийти не от "+
+				"внесённого дефекта")
+	})
+
+	t.Run("вернувшийся посев вида посадки — находка с ИМЕНЕМ", func(t *testing.T) {
+		repo, pool, ctx := newLimitRepo(t)
+		victim := domain.PostureStatedKinds()[0]
+
+		// Законный близнец СВОЕЙ половины: лишних у посадки нет.
+		base := seedCoverageByRole(t, ctx, repo)
+		require.Empty(t, base.Unexpected,
+			"законный близнец: на посеянной базе посева на вид посадки нет")
+		require.Empty(t, base.Missing,
+			"контроль: инъекция второй половины не должна задевать первую")
+
+		// Строка заводится ПРЯМО В ТАБЛИЦУ: предмет инъекции — что проба увидит
+		// вернувшийся посев, а не что вход авторитета его отвергает (последнее
+		// держит проба домена).
+		_, err := pool.Exec(ctx, `
+			INSERT INTO kaname.limits (id, scope, scope_id, kind, limit_value)
+			VALUES ('lim-0000000000000000b', 'DEFAULT', '', $1, 7)`, string(victim))
+		require.NoError(t, err)
+
+		after := seedCoverageByRole(t, ctx, repo)
+		require.Equal(t, []string{string(victim)}, after.Unexpected,
+			"гейт обязан НАЗВАТЬ вид посадки, которому вернули посев: величина была бы "+
+				"принята и не применена ни разу")
+		require.Empty(t, after.Missing,
+			"инъекция уронила ЧУЖУЮ половину: значит красное могло прийти не от "+
+				"внесённого дефекта")
+	})
+}
+
+// seedCoverage — покрытие посевом, разобранное ПО РОЛИ вида.
+//
+// Одна структура на оба направления: два обхода одной таблицы разошлись бы на
+// первом же уточнении вопроса, и разошлись бы молча.
+type seedCoverage struct {
+	// Missing — АВТОРИТЕТНЫЙ вид без посеянного умолчания.
+	Missing []string
+	// Duplicated — вид с двумя действующими умолчаниями.
+	Duplicated []string
+	// Unexpected — вид ПОСАДКИ, которому посев вернули.
+	Unexpected []string
+	// Orphan — посеяно на вид вне каталога.
+	Orphan []string
+	// SeededRows — сколько строк DEFAULT прочитано. Без этого числа «лишних нет»
+	// неотличимо от «ничего не осмотрено».
+	SeededRows int
+}
+
+// seedCoverageByRole — предикат покрытия, вынесенный отдельно ровно затем, чтобы
+// его можно было прогнать на повреждённой базе. Проверка, которую нельзя
+// покормить настоящим дефектом, о своей способности упасть не утверждает ничего.
+func seedCoverageByRole(t *testing.T, ctx context.Context, repo *kanamepg.LimitRepo) seedCoverage {
+	t.Helper()
 	rows, _, err := repo.List(ctx, 1000, "", domain.LimitFilter{Scope: domain.LimitScopeDefault})
 	require.NoError(t, err)
 
@@ -604,86 +783,33 @@ func TestLimit_SeedCoversEveryCatalogueKind(t *testing.T) {
 		seeded[r.Kind]++
 	}
 
-	var missing, duplicated []string
+	c := seedCoverage{SeededRows: len(rows)}
 	for _, k := range domain.CountableKinds() {
-		switch seeded[k] {
+		n := seeded[k]
+		if domain.IsPostureStatedKind(k) {
+			if n > 0 {
+				c.Unexpected = append(c.Unexpected, string(k))
+			}
+			continue
+		}
+		switch n {
 		case 1:
 		case 0:
-			missing = append(missing, string(k))
+			c.Missing = append(c.Missing, string(k))
 		default:
-			duplicated = append(duplicated, string(k))
+			c.Duplicated = append(c.Duplicated, string(k))
 		}
 	}
-	require.Emptyf(t, missing,
-		"вид каталога без посеянного умолчания: %v.\n"+
-			"    По правилу «не сказано = ОТКАЗ» это запрет создавать ресурсы этого вида,\n"+
-			"    неотличимый снаружи от исправно работающей квоты. Посев живёт в миграции,\n"+
-			"    каталог — в коде; новый вид требует НОВОЙ миграции (применённую не правим).",
-		missing)
-	require.Empty(t, duplicated,
-		"вид с двумя действующими умолчаниями: частичный UNIQUE обязан был это запретить")
-
-	// Обратное направление: посеяно ровно то, что каталог называет, и ничего
-	// сверх. Умолчание на вид вне каталога — потолок, который никто не читает.
-	var orphan []string
 	for k := range seeded {
 		if !domain.IsCountableKind(k) {
-			orphan = append(orphan, string(k))
+			c.Orphan = append(c.Orphan, string(k))
 		}
 	}
-	require.Empty(t, orphan,
-		"посеяно умолчание на вид вне каталога: %v — потолок, которого никто не применит", orphan)
-
-	t.Logf("перепись: видов каталога %d, посеяно строк DEFAULT %d, лишних 0",
-		len(domain.CountableKinds()), len(rows))
-}
-
-// TestLimit_SeedCoverageProbeCanFail — инъекция: снятие ОДНОЙ посевной строки
-// обязано ронять пробу выше и НАЗЫВАТЬ недостающий вид.
-//
-// Проба покрытия сама по себе не доказывает своей способности упасть: на
-// исправной базе она зелёная, и зелёной же осталась бы, если бы читала не то.
-// Здесь у неё отнимают ровно один вид и требуют находку — а рядом стоит законный
-// близнец, на котором тот же предикат молчит.
-func TestLimit_SeedCoverageProbeCanFail(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-	repo, pool, ctx := newLimitRepo(t)
-
-	const victim = domain.LimitKind("registry.repositories")
-
-	// Законный близнец — сегодняшняя база: недостающих нет.
-	require.Empty(t, missingSeededKinds(t, ctx, repo),
-		"законный близнец: на посеянной базе недостающих видов нет")
-
-	_, err := pool.Exec(ctx,
-		`DELETE FROM kaname.limits WHERE scope = 'DEFAULT' AND kind = $1`, string(victim))
-	require.NoError(t, err)
-
-	require.Equal(t, []string{string(victim)}, missingSeededKinds(t, ctx, repo),
-		"гейт обязан НАЗВАТЬ вид, чьё умолчание снято, а не просто покраснеть числом")
-}
-
-// missingSeededKinds — предикат покрытия, вынесенный отдельно ровно затем, чтобы
-// его можно было прогнать на повреждённой базе. Проверка, которую нельзя
-// покормить настоящим дефектом, о своей способности упасть не утверждает ничего.
-func missingSeededKinds(t *testing.T, ctx context.Context, repo *kanamepg.LimitRepo) []string {
-	t.Helper()
-	rows, _, err := repo.List(ctx, 1000, "", domain.LimitFilter{Scope: domain.LimitScopeDefault})
-	require.NoError(t, err)
-	seeded := map[domain.LimitKind]bool{}
-	for _, r := range rows {
-		seeded[r.Kind] = true
-	}
-	var missing []string
-	for _, k := range domain.CountableKinds() {
-		if !seeded[k] {
-			missing = append(missing, string(k))
-		}
-	}
-	sort.Strings(missing)
-	return missing
+	sort.Strings(c.Missing)
+	sort.Strings(c.Duplicated)
+	sort.Strings(c.Unexpected)
+	sort.Strings(c.Orphan)
+	return c
 }
 
 // TestLimit_NestedKindFormIsAccepted — схема принимает трёхчастный вид и

@@ -24,7 +24,7 @@ import (
 func twoRecordBinding(t *testing.T) jwksproxyhttp.Binding {
 	t.Helper()
 	ours := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{
-		Source: stubKeySet{keys: []domain.PublishedKey{ourKey(t, "kacho-a")}},
+		Source: stubKeySet{keys: []domain.PublishedKey{ourKey(t, "kaname-a")}},
 	})
 	mirror := jwksproxyhttp.NewHandler(jwksproxyhttp.Config{UpstreamURL: "https://provider.invalid/jwks"})
 	b, err := jwksproxyhttp.NewBinding([]jwksproxyhttp.Record{
@@ -115,7 +115,7 @@ func TestBinding_F1_46_RecordsAreDeclaredNotDerived(t *testing.T) {
 	res := httptest.NewRecorder()
 	internal.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/.well-known/kaname/jwks.json", nil))
 	body := res.Body.String()
-	if !strings.Contains(body, "kacho-a") {
+	if !strings.Contains(body, "kaname-a") {
 		t.Fatalf("наша запись обязана содержать наш ключ: %s", body)
 	}
 
@@ -201,7 +201,7 @@ func TestBinding_F1_46_BootGuardRefusesIncompleteBinding(t *testing.T) {
 // токенов — то есть усилила бы зависимость, ради снятия которой фаза делается.
 func TestBinding_F1_46_OneRecordFailingDoesNotCloseTheOther(t *testing.T) {
 	ours := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{
-		Source: stubKeySet{keys: []domain.PublishedKey{ourKey(t, "kacho-a")}},
+		Source: stubKeySet{keys: []domain.PublishedKey{ourKey(t, "kaname-a")}},
 	})
 	brokenMirror := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{
 		Source: stubKeySet{err: errors.New("provider is unavailable")},

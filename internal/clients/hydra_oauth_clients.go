@@ -94,7 +94,7 @@ type HydraOAuthClient struct {
 type CreateOAuthClientRequest struct {
 	// ClientID is optional — if empty, Hydra auto-generates.
 	ClientID string
-	// ClientName is a human-readable identifier (e.g. "kacho-sak-XYZ").
+	// ClientName is a human-readable identifier (e.g. "kaname-sak-XYZ").
 	ClientName string
 	// Owner is the kaname ServiceAccount id (used by Hydra's `owner`
 	// filter for List by SA).

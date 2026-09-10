@@ -56,6 +56,21 @@ func observeLaneWiring(ctx context.Context, signer *tokensigner.Signer, logger *
 		HumanCredentialsWired: false,
 		HumanSessionsWired:    false,
 
+		// ДОРОГА К ВНЕШНЕМУ ПОСТАВЩИКУ И ЗАПИСЬ ЗЕРКАЛА ЕГО КЛЮЧЕЙ СТРОЯТСЯ
+		// БЕЗУСЛОВНО, и это НАБЛЮДЕНИЕ дерева, а не намерение профиля
+		// (задача #2489). Строитель административного клиента зовётся из
+		// четырёх мест этого корня, и ни одно не ветвится по посадке личности;
+		// резолв адреса пустого не возвращает никогда — при незаданной ручке он
+		// выводит адрес из доменного имени; запись зеркала добавляется в
+		// перечень публикуемых наборов без единого условия.
+		//
+		// ПРЕДИКАТ СМЕНЫ тот же, что у двух полей выше: как только у полосы
+		// `own` появятся собственные потребители административного контура, обе
+		// стройки станут условными — и оба поля начнут читать провязку, а строки
+		// таблицы требований начнут проходить, не меняясь.
+		ProviderAdminHopBuilt:         true,
+		ProviderKeySetMirrorPublished: true,
+
 		// Уровни, которые полоса `own` умеет предъявить ЧЕЛОВЕКУ. Пока своих
 		// способов входа нет — ни одного; «ни одного» отличимо от «не
 		// заполнено» тем, что перечень пуст осознанно (см. выше).
@@ -107,5 +122,7 @@ func laneWiringCensus(w config.LaneWiring) []any {
 		"own_mint_signer_wired", w.OwnMintSignerWired,
 		"human_credentials_wired", w.HumanCredentialsWired,
 		"human_sessions_wired", w.HumanSessionsWired,
+		"provider_admin_hop_built", w.ProviderAdminHopBuilt,
+		"provider_keyset_mirror_published", w.ProviderKeySetMirrorPublished,
 	}
 }
