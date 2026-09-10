@@ -108,7 +108,8 @@ func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueSAKeyRequest) (*ope
 		// Вид удостоверения. Не назван — прежнее поведение дословно.
 		CredentialKind: CredentialKindFromProto(req.GetCredentialKind()),
 		// Federation OUT — caller-supplied external audience(s).
-		// Empty → use-case falls back to AudiencePrefix (kaname-internal).
+		// Пусто → адресата не назвали. Приставка не провязана (решение #2575),
+		// поэтому умолчание приходит от посадки, а не отсюда.
 		Audience: req.GetAudience(),
 	})
 	if err != nil {
