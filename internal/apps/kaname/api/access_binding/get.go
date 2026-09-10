@@ -7,12 +7,14 @@ package access_binding
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 type GetAccessBindingUseCase struct {
@@ -61,12 +63,25 @@ func (u *GetAccessBindingUseCase) Execute(ctx context.Context, id domain.AccessB
 	defer func() { _ = rd.Rollback(ctx) }()
 	got, err := rd.AccessBindings().Get(ctx, id)
 	if err != nil {
-		// When an AB does not exist we return PermissionDenied, not
-		// NotFound. This prevents existence-leakage (garbage-id probe cannot
-		// distinguish "doesn't exist" from "exists but you lack access").
-		// The authz-deny test `garbage-perresource` relies on 403 for all
-		// subjects including authenticated non-owners.
-		return domain.AccessBinding{}, authzguard.PermissionDenied()
+		if stderrors.Is(err, iamerr.ErrNotFound) {
+			// When an AB does not exist we return PermissionDenied, not
+			// NotFound. This prevents existence-leakage (garbage-id probe cannot
+			// distinguish "doesn't exist" from "exists but you lack access").
+			// The authz-deny test `garbage-perresource` relies on 403 for all
+			// subjects including authenticated non-owners.
+			return domain.AccessBinding{}, authzguard.PermissionDenied()
+		}
+		// Всякий ИНОЙ отказ чтения — не скрытие существования, а преходящая беда
+		// (таймаут оператора, сброс соединения). Отказ в правах ТЕРМИНАЛЕН: он
+		// говорит, что повтор бессмыслен, потому что решение зависит от тройки
+		// (субъект, отношение, объект) и одинаковый повтор не меняет ни одной.
+		// Временный отказ о правах не говорит ничего — тот же вопрос мгновением
+		// позже получает ответ. Схлопнув их, чтение выдаёт терминальный вердикт на
+		// преходящую беду, и вызывающий, классифицирующий ответы соседа по полосе
+		// (дренаж, реконсайлер, клиент соседа), пометит намерение окончательно
+		// провалившимся. Паритет с правкой и удалением, где та же развилка стоит с
+		// раунда r5; асимметрия трёх глаголов снята задачей #2577.
+		return domain.AccessBinding{}, shared.MapRepoErr(err)
 	}
 	// RBAC rules-model 2026: AccessBinding no longer carries
 	// a resource-scoped target dimension (the "what object" decision lives on

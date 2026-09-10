@@ -41,10 +41,12 @@ func pipelineWorld(t *testing.T) string {
 	return root
 }
 
-// writeWorkflow — подменяет объявление процесса в мире, оставляя всё прочее.
-func writeWorkflow(t *testing.T, root, body string) {
+// writeWorkflow — подменяет ОДНО названное объявление процесса, оставляя всё
+// прочее. Путь приходит доводом, а не берётся константой: объявлений в поставке
+// больше одного, и подмена «того самого» скрыла бы, читает ли гейт остальные.
+func writeWorkflow(t *testing.T, root, rel, body string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, deliveredWorkflow), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o644); err != nil {
 		t.Fatalf("объявление не записано: %v", err)
 	}
 }
@@ -77,6 +79,11 @@ func TestPipelineInjectionControl_UntouchedWorldIsSilent(t *testing.T) {
 	}
 	if census.jobs == 0 {
 		t.Fatal("контроль не прошёл: заданий осмотрено ноль — разбор не дошёл до `jobs:`")
+	}
+	if census.workflowsParsed != len(deliveredWorkflows) {
+		t.Fatalf("контроль не прошёл: разобрано объявлений %d из %d — красное ниже приходило бы "+
+			"от нечитанного объявления, а не от внесённого дефекта",
+			census.workflowsParsed, len(deliveredWorkflows))
 	}
 }
 
@@ -116,12 +123,26 @@ func TestPipelineInjection_EmptyFileIsFound(t *testing.T) {
 	requireFindingMentions(t, findings, victim)
 }
 
+// ПРОИЗВОДИТЕЛЬ ОБРАЗА — отдельный предмет присутствия, а не «ещё один файл в
+// перечне». Его отсутствие означает, что образ, которого профиль посадки требует
+// безусловно, не производится ВОВСЕ; заметить это по дереву нечем — требование
+// остаётся, а производителя нет.
+func TestPipelineInjection_MissingImageProducerIsFound(t *testing.T) {
+	t.Parallel()
+	root := pipelineWorld(t)
+	if err := os.Remove(filepath.Join(root, deliveredImageWorkflow)); err != nil {
+		t.Fatalf("подготовка не удалась: %v", err)
+	}
+	_, findings := scanDeliveredPipeline(root)
+	requireFindingMentions(t, findings, deliveredImageWorkflow)
+}
+
 // ── ОСЬ 2: разбираемость ────────────────────────────────────────────────────
 
 func TestPipelineInjection_UnparseableDeclarationIsFound(t *testing.T) {
 	t.Parallel()
 	root := pipelineWorld(t)
-	writeWorkflow(t, root, "jobs:\n  build:\n   - это: не отображение\n  \tтабуляция: рвёт разбор\n")
+	writeWorkflow(t, root, deliveredWorkflow, "jobs:\n  build:\n   - это: не отображение\n  \tтабуляция: рвёт разбор\n")
 	_, findings := scanDeliveredPipeline(root)
 	requireFindingMentions(t, findings, "не разобран YAML")
 }
@@ -129,7 +150,7 @@ func TestPipelineInjection_UnparseableDeclarationIsFound(t *testing.T) {
 func TestPipelineInjection_DeclarationWithoutJobsIsFound(t *testing.T) {
 	t.Parallel()
 	root := pipelineWorld(t)
-	writeWorkflow(t, root, "name: ci\non:\n  push:\n    branches: [main]\n")
+	writeWorkflow(t, root, deliveredWorkflow, "name: ci\non:\n  push:\n    branches: [main]\n")
 	_, findings := scanDeliveredPipeline(root)
 	requireFindingMentions(t, findings, "заданий не объявлено")
 }
@@ -139,7 +160,7 @@ func TestPipelineInjection_DeclarationWithoutJobsIsFound(t *testing.T) {
 func TestPipelineInjection_CyrillicJobKeyIsFound(t *testing.T) {
 	t.Parallel()
 	root := pipelineWorld(t)
-	writeWorkflow(t, root, "name: ci\non:\n  push:\n    branches: [main]\njobs:\n"+
+	writeWorkflow(t, root, deliveredWorkflow, "name: ci\non:\n  push:\n    branches: [main]\njobs:\n"+
 		"  сборка:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n")
 	_, findings := scanDeliveredPipeline(root)
 	requireFindingMentions(t, findings, "идентификатор задания")
@@ -148,7 +169,7 @@ func TestPipelineInjection_CyrillicJobKeyIsFound(t *testing.T) {
 func TestPipelineInjection_CyrillicStepIDIsFound(t *testing.T) {
 	t.Parallel()
 	root := pipelineWorld(t)
-	writeWorkflow(t, root, "name: ci\non:\n  push:\n    branches: [main]\njobs:\n"+
+	writeWorkflow(t, root, deliveredWorkflow, "name: ci\non:\n  push:\n    branches: [main]\njobs:\n"+
 		"  build:\n    runs-on: ubuntu-latest\n    steps:\n      - id: шаг\n        run: echo\n")
 	_, findings := scanDeliveredPipeline(root)
 	requireFindingMentions(t, findings, "идентификатор шага")
@@ -162,7 +183,7 @@ func TestPipelineInjection_CyrillicStepIDIsFound(t *testing.T) {
 func TestPipelineInjection_CyrillicNameAndCommentStaySilent(t *testing.T) {
 	t.Parallel()
 	root := pipelineWorld(t)
-	writeWorkflow(t, root, "name: сборка и пробы\non:\n  push:\n    branches: [main]\njobs:\n"+
+	writeWorkflow(t, root, deliveredWorkflow, "name: сборка и пробы\non:\n  push:\n    branches: [main]\njobs:\n"+
 		"  # задание собирает службу\n"+
 		"  build:\n    name: сборка\n    runs-on: ubuntu-latest\n    steps:\n"+
 		"      - id: compile\n        name: компиляция\n        run: echo\n")
@@ -171,6 +192,34 @@ func TestPipelineInjection_CyrillicNameAndCommentStaySilent(t *testing.T) {
 		t.Fatalf("гейт покраснел на ЗАКОННОМ близнеце — он судит язык, а не идентификатор:\n%s",
 			strings.Join(findings, "\n"))
 	}
+}
+
+// НЕСУЩАЯ ПРОБА ВСЕГО РАСШИРЕНИЯ. Дефект внесён во ВТОРОЕ объявление, а первое
+// цело — то есть заданий по-прежнему больше нуля и «разбор дошёл» выглядит
+// исполненным. Распознаватель, знающий одно объявление, здесь МОЛЧИТ, и молчание
+// его неотличимо от чистого дерева.
+func TestPipelineInjection_UnparseableImageProducerIsFound(t *testing.T) {
+	t.Parallel()
+	root := pipelineWorld(t)
+	writeWorkflow(t, root, deliveredImageWorkflow,
+		"jobs:\n  image:\n   - это: не отображение\n  \tтабуляция: рвёт разбор\n")
+	census, findings := scanDeliveredPipeline(root)
+	requireFindingMentions(t, findings, deliveredImageWorkflow)
+	if census.jobs == 0 {
+		t.Fatal("предпосылка пробы не выполняется: заданий ноль — значит красное могло прийти " +
+			"от первого объявления, и одно-фактность не доказана")
+	}
+}
+
+func TestPipelineInjection_CyrillicJobKeyInImageProducerIsFound(t *testing.T) {
+	t.Parallel()
+	root := pipelineWorld(t)
+	writeWorkflow(t, root, deliveredImageWorkflow,
+		"name: образ службы\non:\n  push:\n    branches: [main]\njobs:\n"+
+			"  образ:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n")
+	_, findings := scanDeliveredPipeline(root)
+	requireFindingMentions(t, findings, "идентификатор задания")
+	requireFindingMentions(t, findings, deliveredImageWorkflow)
 }
 
 // ── Пустой обход отличим от чистого дерева ──────────────────────────────────

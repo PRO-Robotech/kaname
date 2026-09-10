@@ -182,7 +182,20 @@ type IssueSAKeyUseCase struct {
 	// HydraClientNamePrefix — used to compose the Hydra `client_name`
 	// (default "kaname-sak-<svaID>"). Configurable via env at wire-time.
 	HydraClientNamePrefix string
-	// AudiencePrefix — appended with `/<svaID>` as Hydra audience.
+	// AudiencePrefix — приставка достроенного адресата `<приставка>/sa/<svaID>`.
+	//
+	// НЕ ПРОВЯЗАНА, и это РЕШЕНИЕ (задача #2575), а не забывчивость: умолчание
+	// адресата живёт у ПОСАДКИ (`authn.client-token.allowed-audiences` и
+	// `declared_audiences` строки ключа), а не здесь. Композиционный корень её
+	// не присваивает — из семи экспортируемых ручек этой структуры она
+	// единственная такая, — поэтому на поднятом стенде ветка достройки ниже
+	// НЕДОСТИЖИМА, и достроенного адресата не выпускал никогда ни один стенд.
+	//
+	// Отсюда «окна двух написаний нет»: у обоих написаний приставки нет
+	// производителя, значит и принимать второе не у кого.
+	//
+	// Держатель решения — `cmd/kaname/sakey_audience_prefix_unwired_test.go`:
+	// провязка краснит его, и решение придётся пересмотреть тем же изменением.
 	AudiencePrefix string
 	// MaxTTL — inclusive ceiling on `ttl_seconds`. A request above it is
 	// refused with InvalidArgument before any Hydra client is registered.
@@ -328,13 +341,15 @@ type IssueInput struct {
 
 	// Audience — Federation OUT. When non-empty, the Hydra OAuth2
 	// client is registered with this exact `audience` list (replacing the
-	// default kaname-internal `AudiencePrefix`-built audience), so every
+	// `AudiencePrefix`-built audience, которой на стенде нет), so every
 	// access_token minted for this client lands the values in its `aud`
 	// claim. Required for OIDC-trust-federation with external IdPs — the
 	// `audience` value must match exactly what the remote IdP expects (its
 	// token-exchange endpoint or resource URI).
 	// Order preserved; empty entries dropped; duplicates collapsed.
-	// Empty slice = legacy kaname-internal-only audience.
+	// Пустой перечень = адресата не назвали; на поднятом стенде это НЕ
+	// «внутренний адресат по умолчанию» (приставка не провязана, см. её
+	// объявление), а перечень из одного адресата реестра либо пустой.
 	Audience []string
 }
 
@@ -928,10 +943,12 @@ func (u *IssueSAKeyUseCase) nameClient(
 //     External-federation rollout requires the audience to match what the
 //     external IdP expects — those caller values are preserved verbatim.
 //   - in.Audience empty AND AudiencePrefix set → append the legacy
-//     kaname-internal audience `<prefix>/sa/<svaID>`. Backwards-compat for
-//     callers that do not specify audience. (Skipped when the caller supplied
-//     an explicit audience, keeping the external-federation contract: the
-//     internal default is not force-mixed into a deliberate external list.)
+//     kaname-internal audience `<prefix>/sa/<svaID>`. НА ПОДНЯТОМ СТЕНДЕ ЭТА
+//     ПОЛОСА НЕ ИСПОЛНЯЕТСЯ: приставку не присваивает ни один прод-файл
+//     (решение #2575, держатель — `cmd/kaname/sakey_audience_prefix_unwired_test.go`).
+//     Полоса остаётся достижимой только из проб. (Skipped when the caller
+//     supplied an explicit audience, keeping the external-federation contract:
+//     the internal default is not force-mixed into a deliberate external list.)
 //   - RegistryAudience set → ALWAYS appended so a docker/registry SA-key works
 //     out of the box. The `/iam/token` shim requests `audience=<registry
 //     service>` during the client_credentials exchange; Hydra rejects that
@@ -957,9 +974,9 @@ func (u *IssueSAKeyUseCase) resolveAudience(in IssueInput) []string {
 	for _, a := range in.Audience {
 		add(a)
 	}
-	// Fall back to the kaname-internal default only when the caller supplied no
-	// (non-empty) audience — a deliberate external-federation list is not mixed
-	// with the internal default.
+	// Ветка достройки. На поднятом стенде условие ниже ложно ВСЕГДА: приставка
+	// не провязана (решение #2575). Ветка сохранена достижимой из проб и снята
+	// не будет молча — её провязку стережёт держатель решения.
 	if len(out) == 0 && u.AudiencePrefix != "" {
 		add(strings.TrimRight(u.AudiencePrefix, "/") + "/sa/" + string(in.ServiceAccountID))
 	}
