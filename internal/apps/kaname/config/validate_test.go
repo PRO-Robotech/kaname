@@ -52,6 +52,17 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 		// продолжает проходить. Пробы, которые ПРО него, значение
 		// перезаписывают (authz_window_test.go).
 		AuthZ: config.AuthZConfig{CacheTTL: 5 * time.Second},
+		// Три собственных потолка — на тех же основаниях, что величины выше:
+		// страж старта требует их объявленными в ЛЮБОМ режиме (приёмка
+		// `KAN-QUOTA-1`, `П25`), потому что умолчания у них быть не может —
+		// внешнего авторитета в самостоятельной установке нет, и спросить
+		// величину не у кого. Пробы, которые ПРО них, значения перезаписывают
+		// (own_ceilings_test.go).
+		OwnCeilings: config.OwnCeilingsConfig{
+			AccountsPerIdentity:          ptrInt64(5),
+			CredentialsPerUser:           ptrInt64(12),
+			CredentialsPerServiceAccount: ptrInt64(24),
+		},
 		APIServer: config.APIServerConfig{
 			Endpoint:         "tcp://0.0.0.0:9090",
 			InternalEndpoint: "tcp://0.0.0.0:9091",
@@ -197,3 +208,7 @@ func TestValidate_Dev_EmptySecrets_OK(t *testing.T) {
 		t.Fatalf("Validate() = %v, want nil for dev mode with empty secrets", err)
 	}
 }
+
+// ptrInt64 — указатель на величину посадки. Ноль от «не объявлено» отличается
+// именно указателем, поэтому литерал здесь не годится.
+func ptrInt64(v int64) *int64 { return &v }

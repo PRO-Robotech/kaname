@@ -62,7 +62,7 @@ func siaRows() []domain.AccessBinding {
 // newSIARepo — репозиторий с тремя строками выше и объявленной принадлежностью
 // проекта домашнему аккаунту.
 func newSIARepo() *abFakeRepo {
-	repo := newABFakeRepo("usr_o", siaAccountHome, siaProjectHome, "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", siaAccountHome, siaProjectHome, "rol_v", "kaname.view", nil)
 	seedABListByScope(repo, siaRows())
 	seedProjectAccount(repo, siaProjectHome, siaAccountHome)
 	return repo

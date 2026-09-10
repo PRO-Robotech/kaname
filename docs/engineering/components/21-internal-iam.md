@@ -57,12 +57,12 @@ sequenceDiagram
     autonumber
     participant Cli
     participant GW as api-gateway
-    participant Zit as Ory Hydra JWKS
+    participant Zit as набор ключей издателя<br/>(публикатор kaname :9097)
     participant IAM as InternalIAMService :9091
     participant DB
 
     Cli->>GW: HTTPS with Bearer JWT
-    GW->>Zit: Validate signature (cached JWKS)
+    GW->>Zit: Validate signature (запись по издателю из токена, кэш)
     Zit-->>GW: OK
     GW->>GW: Extract claims (sub, email)
     GW->>IAM: LookupSubject {external_id: sub}

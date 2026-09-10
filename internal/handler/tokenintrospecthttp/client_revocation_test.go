@@ -45,7 +45,7 @@ func mintWithClaims(t *testing.T, label, sub string, iat time.Time, extra map[st
 	// Идентификатор ключа обязан быть РАЗНЫМ у каждого токена пробы: два
 	// токена одного субъекта с одним kid перетёрли бы друг друга в наборе, и
 	// проба покраснела бы на подписи, ничего не сказав о предмете.
-	kid := "kacho-" + label
+	kid := "kaname-" + label
 	claims := jwt.MapClaims{
 		"iss": testIssuer, "sub": sub, "aud": []string{"registry.kacho.local"},
 		"iat": iat.Unix(), "nbf": iat.Unix(), "exp": iat.Add(5 * time.Minute).Unix(),
@@ -168,7 +168,7 @@ func TestTokenWithoutIssuedAtIsRefusedBecauseItCannotBeRevoked(t *testing.T) {
 		"iss": testIssuer, "sub": "usr_0123456789abcdefg", "aud": []string{"registry.kacho.local"},
 		"exp": now.Add(5 * time.Minute).Unix(), "jti": "tok-no-iat",
 	})
-	tok.Header["kid"] = "kacho-no-iat"
+	tok.Header["kid"] = "kaname-no-iat"
 	tok.Header["typ"] = "at+jwt"
 	raw, err := tok.SignedString(key)
 	if err != nil {
@@ -176,7 +176,7 @@ func TestTokenWithoutIssuedAtIsRefusedBecauseItCannotBeRevoked(t *testing.T) {
 	}
 
 	keys := stubKeys{keys: []domain.PublishedKey{{
-		KID: "kacho-no-iat", Algorithm: domain.SigningAlgES256, PublicKeyPEM: mat.PublicKeyPEM,
+		KID: "kaname-no-iat", Algorithm: domain.SigningAlgES256, PublicKeyPEM: mat.PublicKeyPEM,
 	}}}
 	// Отсечек нет вовсе — и всё же токен отвергается: предмет не в отсечке, а
 	// в невозможности его когда-либо отозвать.

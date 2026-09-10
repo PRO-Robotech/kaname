@@ -68,7 +68,7 @@ func seedMultiSubjectBinding(repo *abFakeRepo) domain.AccessBindingID {
 // отказывающем праве выдавать и непровязанном перечислении.
 func getAsPrincipal(t *testing.T, principalID string) (domain.AccessBinding, error) {
 	t.Helper()
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
 	id := seedMultiSubjectBinding(repo)
 	uc := NewGetAccessBindingUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
 	ctx := operations.WithPrincipal(context.Background(),
@@ -123,7 +123,7 @@ func TestGetAccessBinding_SelfCheckRejectsASubjectOutsideTheSet(t *testing.T) {
 // «судится весь набор» зеленело бы на реализации, принимающей любого, кто стоит
 // в субъектах хоть одной выдачи дерева.
 func TestGetAccessBinding_SelfCheckIgnoresTheSubjectsOfAnotherBinding(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
 	id := seedMultiSubjectBinding(repo)
 	// Чужая выдача со своим набором — её субъект к предмету запроса отношения
 	// не имеет.

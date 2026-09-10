@@ -125,6 +125,15 @@ func (c Config) Validate() error {
 	// `pkg/servicecontract`.
 	errs = multierr.Append(errs, c.AuthZ.Validate())
 
+	// ТРИ СОБСТВЕННЫХ ПОТОЛКА — БЕЗУСЛОВНО, а не только в боевом режиме
+	// (приёмка `KAN-QUOTA-1`, `П25`; own_ceilings.go).
+	//
+	// Послабление по режиму завело бы посадку, в которой объявленный потолок не
+	// исполняется, — то есть режим, годный только для стенда. Величина нужна
+	// службе всегда: без неё списание не знает, с чем сравнивать, и первый же
+	// приём аккаунта отвергается отказом «потолок не назван».
+	errs = multierr.Append(errs, c.OwnCeilings.Validate())
+
 	// logger.level must be a known level so a typo fails fast at boot rather
 	// than silently degrading observability. SlogLevel reports the allowed set.
 	if _, err := c.Logger.SlogLevel(); err != nil {

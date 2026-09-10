@@ -88,6 +88,26 @@ spec:
         kaname.cloud/metrics-scrape-disabled-because: {{ required "metricsScrape.disabledBecause не задан при metricsScrape.enabled=false: выключение сбора обязано нести причину — иначе «сбора здесь нет намеренно» неотличимо от «забыли объявить»" .Values.metricsScrape.disabledBecause | quote }}
         {{- end }}
     spec:
+      # ПОДСТАНОВКА АДРЕСОВ СЛУЖБ ГАСИТСЯ: она перебивает величины оператора.
+      #
+      # Kubernetes объявляет поду адреса всех служб пространства имён
+      # переменными, выводя имя из имени службы (верхний регистр, дефис →
+      # подчёркивание). Корневой сегмент ВСЕХ переменных этой службы — тот же
+      # `KANAME`, что и имя её собственной службы, поэтому служба
+      # `{{ .Values.name }}-internal` объявляет `KANAME_INTERNAL_PORT` со
+      # значением `tcp://<адрес>:<порт>` — прямо в пространство имён настроек
+      # процесса, где это имя есть РУЧКА ПОРТА внутреннего слушателя.
+      #
+      # Ничто в этом чарте адресов служб из окружения не читает: каждый сосед
+      # адресуется объявленной величиной (проверяется декларативной пробой
+      # рядом). Значит подстановка не нужна вовсе, а её вред измерен — поставка
+      # не поднималась: процесс проходил все миграции, отчитывался о посадке и
+      # падал последним шагом, на открытии слушателя.
+      #
+      # Процесс с тех пор отвергает такое значение сам, называя ручку (см.
+      # config/service_link_collision.go) — то есть отказ стал диагностируемым.
+      # Здесь снимается ПРИЧИНА, там — молчание: одно другого не заменяет.
+      enableServiceLinks: false
       # Hardened pod security context (trivy AVD-KSV-0118): run as a
       # non-root user, drop the default ambient context.
       securityContext:
@@ -131,6 +151,14 @@ spec:
         - name: tls-client
           secret:
             secretName: {{ $tls.clientSecretName | quote }}
+        {{- end }}
+        {{/* ЯКОРЬ ПОСТАВЩИКА — ТРЕТИЙ ТОМ, а не ключ в чужом секрете: «чьим
+        сертификатам сервера я верю у соседа» и «кто вправе прийти ко мне
+        клиентом» суть разные вопросы, и координата у каждого своя (#2487). */}}
+        {{- if $tls.providerSecretName }}
+        - name: tls-provider
+          secret:
+            secretName: {{ $tls.providerSecretName | quote }}
         {{- end }}
       initContainers:
         # Миграции БД исполняет отдельный binary `kaname-migrator`
@@ -224,6 +252,11 @@ spec:
             {{- if $tls.clientSecretName }}
             - name: tls-client
               mountPath: {{ printf "%s/client" (required "tls.mountPath не задан при объявленном tls.clientSecretName: путь монтирования обязан быть назван явно — иначе удостоверение исходящего вызова называет файл, которого в поде нет" $tls.mountPath) | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if $tls.providerSecretName }}
+            - name: tls-provider
+              mountPath: {{ printf "%s/provider" (required "tls.mountPath не задан при объявленном tls.providerSecretName: путь монтирования обязан быть назван явно — иначе якорь поставщика личности называет файл, которого в поде нет" $tls.mountPath) | quote }}
               readOnly: true
             {{- end }}
           env:

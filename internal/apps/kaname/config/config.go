@@ -67,6 +67,16 @@ type Config struct {
 	// величину платформе значило бы, что на конкретном стенде это окно нельзя ни
 	// сузить, ни даже прочитать в конфигурации.
 	AuthZ AuthZConfig `mapstructure:"authz"`
+	// OwnCeilings — ТРИ СОБСТВЕННЫХ ПОТОЛКА службы доступа: сколько аккаунтов
+	// заводит одна личность и сколько путей входа держит человек и машина
+	// (приёмка `KAN-QUOTA-1`, `П25`; задача продукта #2117).
+	//
+	// Секция заведена своей, а не подсекцией `authn`: предмет у неё — потолок
+	// ЧИСЛА ресурсов, а не проверка предъявленного. Умолчания у всех трёх нет
+	// намеренно, и отказ старта при незаданной величине — не строгость, а
+	// единственный способ, которым служба может иметь потолок, не имея
+	// авторитета величин: спросить её больше не у кого. См. own_ceilings.go.
+	OwnCeilings OwnCeilingsConfig `mapstructure:"own-ceilings"`
 }
 
 // AuthZConfig — окно вердикта собственной двери.
@@ -134,12 +144,19 @@ type APIServerConfig struct {
 	//
 	// Умолчания нет по той же причине, что у публичного.
 	InternalRESTEndpoint string `mapstructure:"internal-rest-endpoint"`
-	// JWKSProxy — the cluster-INTERNAL Hydra-JWKS proxy HTTP listener
-	// (`GET /.well-known/jwks.json`; default `tcp://0.0.0.0:9097`). A short-TTL
-	// caching reverse-proxy of Hydra's PUBLIC JWKS: the data-plane fetches its
-	// verification keys from iam (never dialing Hydra directly) while Hydra stays
-	// the issuer/signer. Served ONLY on the cluster-internal `kaname-internal`
-	// Service (never external, ban #6) over one-way server-TLS. Empty disables it.
+	// JWKSProxy — the cluster-INTERNAL key-set publisher HTTP listener (default
+	// `tcp://0.0.0.0:9097`). Записей у него ДВЕ, каждая по своему объявленному
+	// пути: зеркало ПУБЛИЧНОГО набора провайдера на каноническом
+	// `GET /.well-known/jwks.json` и НАША — проекция ключницы iam по
+	// `authn.token-signing.key-set-path`. Плоскость данных берёт ключи проверки у
+	// iam и никогда не звонит провайдеру напрямую.
+	//
+	// Здесь стояло «while Hydra stays the issuer/signer» — утверждение верно про
+	// ЗАПИСЬ ЗЕРКАЛА и неверно про платформу: свои токены она подписывает сама.
+	// Разбор — в шапке jwks_proxy.go, второго места об этом предмете здесь нет.
+	//
+	// Served ONLY on the cluster-internal `kaname-internal` Service (never
+	// external, ban #6) over one-way server-TLS. Empty disables it.
 	JWKSProxy JWKSProxyConfig `mapstructure:"jwks-proxy"`
 
 	// RateLimit — ПОТОЛОК ТЕМПА и ОДНОВРЕМЕННОСТИ на вызывающего, по одному
@@ -215,8 +232,12 @@ type PostgresConfig struct {
 //
 // AuthN core fields:
 //
-//	Domain                — public Kachō domain, default `api.kacho.cloud`.
-//	                        Used by token_hook to build issuer/audience.
+//	Domain                — доменное имя посадки, объявленное оператором.
+//	                        Умолчания НЕТ — незаданное значение доезжает
+//	                        до стража, а не замещается построением
+//	                        (см. ResolveDomain; свойство держит проба
+//	                        TestDomainHasNoCompiledInDefault). Из него
+//	                        token_hook выводит издателя и адресата.
 //	HydraIssuer           — Ory Hydra issuer (default `https://hydra.<Domain>`).
 //	HookSharedSecret      — Bearer-token Hydra uses to authenticate calls to
 //	                        token_hook/refresh_hook. Пустое значение обхода НЕ
@@ -291,7 +312,26 @@ type AuthNConfig struct {
 	// неполная ровно на ту ручку, которую проверка не видит, — это тот же
 	// класс, что чинила подфаза Ф4б-0.
 	HydraAdminTokenEnv string `mapstructure:"hydra-admin-token-env"`
-	HydraTokenURL      string `mapstructure:"hydra-token-url"`
+	// ProviderAdminAuth — ЧЕМ административный контур поставщика личности
+	// аутентифицирует нас: `bearer` (возит административный предъявитель) либо
+	// `none` (административный порт не аутентифицирует никого).
+	//
+	// ПОЧЕМУ ЭТО РЕШЕНИЕ ОПЕРАТОРА, А НЕ НАШЕ УМОЛЧАНИЕ. Прежде вопрос решался
+	// молча: пустой предъявитель считался законным значением с обоснованием
+	// «административный порт поставщика в этой посадке не аутентифицирует
+	// никого». Это утверждение о НАШЕМ стенде, перенесённое в продукт, который
+	// ставят у себя другие. Оператор в чужом облаке, чей поставщик свой
+	// административный доступ аутентифицирует, получал отказ на КАЖДОЙ
+	// административной операции фасада и НИ ОДНОЙ строки при старте о причине.
+	//
+	// Умолчания у поля нет намеренно: величина, которую построение подставляет
+	// молча, предметом стража быть не может. Незаданное поле оставляет прежнее
+	// поведение (предъявитель не требуется) — это НЕ выбор за оператора, а
+	// область: страж судит ПОЛОВИНУ ПАРЫ, то есть объявленный `bearer` без
+	// пришедшего предъявителя. Выбор требует ЧАРТ, у которого есть, с кого
+	// спросить (задача #2471).
+	ProviderAdminAuth string `mapstructure:"provider-admin-auth"`
+	HydraTokenURL     string `mapstructure:"hydra-token-url"`
 	// HydraTokenCAFile / HydraJWKSCAFile — the same anchor discipline for the two
 	// hops to the provider's PUBLIC listener: the token exchange (a signed client
 	// assertion out, the minted bearer back) and the JWKS upstream (the keyset the

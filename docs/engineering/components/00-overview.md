@@ -13,7 +13,9 @@
 - **Project** — рабочее пространство-контейнер ресурсов внутри Account; уникальное имя
   per-Account; операция Move (atomic CAS).
 - **User** — mirror identity, заполняется AuthN-хуком при первом входе.
-- **ServiceAccount** — машинная identity; backing OAuth2-клиент в Ory Hydra.
+- **ServiceAccount** — машинная identity. Ключ к ней — своя строка реестра; зеркало
+  OAuth2-клиента у внешнего поставщика заводится только там, где своя чеканка не объявлена
+  (`architecture/sa-key-issuance-leaves-the-provider.md`).
 - **Group** — набор субъектов (User / ServiceAccount) для group-grant.
 - **Role** — набор permission'ов формата `<module>.<resource>.<verb>`; system-роли
   (seed с детерминированными id) + custom-роли per-Account.
@@ -42,8 +44,9 @@
 - **Hooks-listener** принимает webhooks Ory Hydra (`token` / `refresh`) и Ory Kratos
   (`provision`): на регистрации/входе вызывается `UpsertFromIdentity` — bootstrap
   Account/Project/AccessBinding для нового identity либо активация PENDING-invite.
-- **SAKeyService** выдает Class A static service-account-ключи через OAuth2
-  client-credentials Ory Hydra.
+- **SAKeyService** выдаёт Class A static service-account-ключи. Токен по такому ключу
+  выпускает НАШ подписант на переведённом контуре и внешний поставщик — на непереведённом;
+  признак перевода — объявленный токен-эндпоинт платформы.
 
 **Что делает:**
 
@@ -56,10 +59,11 @@
 
 **Что НЕ делает:**
 
-- не валидирует JWT — это работа `api-gateway` (Hydra JWKS) и самой Ory Hydra;
+- не валидирует JWT — это работа `api-gateway`, который сверяет подпись по набору ключей
+  ОБЪЯВЛЕННОГО издателя (издателей принимается несколько);
 - не управляет паролями пользователей — Ory Kratos;
-- не хранит OAuth `client_secret` в plaintext — Hydra хранит, kaname отдает один раз
-  и redact'ит;
+- не хранит OAuth `client_secret` в plaintext — отдаёт один раз и redact'ит; приватную
+  половину подписной пары не хранит вовсе;
 - не выносит решение о доступе за пределы своей базы — вердикт складывается там же,
   где лежат выдачи, одной транзакцией с ними.
 
@@ -120,8 +124,8 @@ flowchart LR
 production: internal :9091 и public :9090 обязаны нести mTLS/TLS, иначе процесс не
 стартует).
 
-`api-gateway` (отдельный сервис) — единственная внешняя точка входа: он валидирует JWT
-(Hydra JWKS), резолвит principal и проксирует JSON/REST `/iam/v1/<resource>` в `:9090`
+`api-gateway` (отдельный сервис) — единственная внешняя точка входа: он валидирует JWT по
+набору ключей объявленного издателя, резолвит principal и проксирует JSON/REST `/iam/v1/<resource>` в `:9090`
 через grpc-gateway. Tenant-вызовы из CLI/UI всегда идут через api-gateway, не напрямую в
 порт 9090.
 
@@ -134,7 +138,7 @@ C4Context
     Person(tenant, "Tenant user / Service account", "Через api-gateway")
     Person(admin, "Cluster admin / oncall", "Через internal-tooling")
     System_Ext(kratos, "Ory Kratos", "Identity / login")
-    System_Ext(hydra, "Ory Hydra", "OAuth2 / OIDC tokens, SA keys")
+    System_Ext(hydra, "Ory Hydra", "Interactive login; issuer where own minting is off")
 
     System_Boundary(kacho, "Kachō cluster") {
         System(apigw, "kacho-api-gateway", "Edge REST/gRPC, JWT")
@@ -153,7 +157,7 @@ C4Context
     Rel(nlb, iam, "Check / RegisterResource :9091")
     Rel(kratos, iam, "provision hook")
     Rel(hydra, iam, "token / refresh hook")
-    Rel(iam, hydra, "OAuth2 client (SA key issue)")
+    Rel(iam, hydra, "OAuth2 client (interactive; mirror where own minting is off)")
     Rel(iam, pg, "pgxpool (master + read-replica)")
 ```
 
@@ -211,7 +215,7 @@ errors/              # sentinel + WrapPgErr.
 | `:9090`   | `ProjectService`                | CRUD Project + Move                                     |
 | `:9090`   | `UserService`                   | read/CRUD User (mirror)                                 |
 | `:9090`   | `ServiceAccountService`         | CRUD ServiceAccount                                     |
-| `:9090`   | `SAKeyService`                  | Issue / List / Revoke SA-ключей (Hydra)                |
+| `:9090`   | `SAKeyService`                  | Issue / List / Revoke SA-ключей                        |
 | `:9090`   | `GroupService`                  | CRUD Group + member-операции                           |
 | `:9090`   | `RoleService`                   | CRUD Role (system seed + custom)                       |
 | `:9090`   | `AccessBindingService`          | Create / Delete (immutable)                            |
@@ -257,7 +261,7 @@ sequenceDiagram
     participant DB as Postgres
 
     Cli->>GW: POST /iam/v1/accounts<br/>Authorization: Bearer <JWT>
-    GW->>GW: Validate JWT (Hydra JWKS)
+    GW->>GW: Validate JWT (набор ключей объявленного издателя)
     GW->>GW: Resolve principal (InternalIAMService.LookupSubject)
     GW->>IAM: gRPC AccountService.Create<br/>+ x-kacho-principal-* metadata
     IAM->>IAM: PrincipalExtract + AntiAnonymous guard
@@ -295,7 +299,8 @@ sequenceDiagram
 **Runtime-зависимости (peer):**
 
 - Postgres 16 — schema `kaname`.
-- Ory Hydra — OAuth2/OIDC tokens, backing-клиенты ServiceAccount, SA-ключи.
+- Ory Hydra — интерактивный вход человека (`authorization_code`) на любой посадке; на
+  непереведённом контуре ещё и издатель программных токенов с зеркалами клиентов.
 - Ory Kratos — identity / login (provision-хук).
 - api-gateway — edge JWT-валидация и REST-проекция.
 

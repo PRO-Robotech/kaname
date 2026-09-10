@@ -50,6 +50,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -65,13 +66,32 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
-// umbrellaDirFromCmd — каталог зонтичного чарта относительно этого пакета.
-// umbrellaDirRel — зонтичный чарт стенда, координатой от корня ПЛАТФОРМЫ.
+// КОРНЕЙ, ОБЪЯВЛЯЮЩИХ ПОСАДКУ, ДВА — И ЭТО НЕ УДВОЕНИЕ (задача #2101).
+//
+// Профиль объявляет посадку в ДВУХ разных поставках, и правит их РАЗНЫЙ человек:
+//
+//	чарт продукта   — уезжает тому, кто ставит службу отдельно, без платформы;
+//	                  его профили правит оператор чужого облака;
+//	зонтичный чарт  — часть нашего стенда; его профили правим мы.
+//
+// До этой правки гейт читал ТОЛЬКО второй. Следствие измерено, а не
+// предположено: посадка `own`, вписанная в боевой профиль ЧАРТА ПРОДУКТА,
+// оставляла гейт зелёным — то есть слепая зона приходилась ровно на ту
+// поставку, ради которой служба выносится отдельным продуктом.
 //
 // Подъёма каталогами здесь нет: число шагов вверх верно ровно для одной посадки.
-// Чарт в поставку модуля не входит by construction, поэтому его отсутствие —
-// «условие не создано», а не находка.
-const umbrellaDirRel = "deploy/helm/umbrella"
+const (
+	// productChartDirRel — чарт ПРОДУКТА, координатой от корня МОДУЛЯ. Входит в
+	// поставку модуля, поэтому читается в обеих посадках и пропуска не имеет.
+	productChartDirRel = "deploy"
+	// umbrellaDirRel — зонтичный чарт стенда, координатой от корня ПЛАТФОРМЫ. В
+	// поставку модуля не входит by construction, поэтому его отсутствие —
+	// «условие не создано», и оно НАЗЫВАЕТСЯ словами.
+	umbrellaDirRel = "deploy/helm/umbrella"
+
+	productRootName  = "чарт продукта"
+	umbrellaRootName = "зонт платформы"
+)
 
 // laneFact — что известно об ОДНОЙ полосе.
 type laneFact struct {
@@ -198,72 +218,188 @@ func bestCaseWiring(t *testing.T) config.LaneWiring {
 	return w
 }
 
-// profilesDeclaringALane — «полоса → профили, её объявляющие».
+// profileSource — ОДИН файл значений, объявляющий полосу службе прав.
 //
-// Читаются ОБЪЯВЛЕНИЯ, а не рендер: рендер зонта требует загруженных
-// зависимостей и сети, а проба, умеющая пропускаться, гейтом не является.
-// Базовое значение подчарта считается профилем — оно и есть умолчание всякого
-// стенда, не назвавшего полосу сам.
-func profilesDeclaringALane(t *testing.T) map[string][]string {
+// Путь и КЛЮЧИ у корней разные: чарт продукта несёт `authn.identityProvider`
+// верхним уровнем, зонтичный — под секцией службы. Второй перечень ключей рядом
+// с первым разошёлся бы молча, поэтому ключи едут ВМЕСТЕ с путём, а не выбираются
+// по имени корня в месте чтения.
+type profileSource struct {
+	// Root — имя корня. Печатается переписью: «ноль прочитанного у корня»
+	// обязано быть отличимо от «корень ничего не объявляет».
+	Root string
+	// Label — КООРДИНАТА файла, по которой читатель находки его найдёт. Имена
+	// файлов у корней совпадают (`values.prod.yaml` есть у обоих), поэтому голое
+	// имя адресом не является и в находку идти не вправе.
+	Label string
+	Path  string
+	Keys  []string
+}
+
+// rootCensus — объём осмотренного ПО КАЖДОМУ корню отдельно.
+//
+// Одно сводное число скрыло бы ровно тот случай, ради которого правка: корень,
+// который не читали ВОВСЕ, даёт ту же сумму, что корень, ничего не объявивший.
+type rootCensus struct {
+	Root       string
+	Seen       int
+	Parsed     int
+	Unreadable []string
+}
+
+// valuesFilesIn — файлы значений каталога, по возрастанию имени.
+func valuesFilesIn(t *testing.T, dir string) []string {
 	t.Helper()
-	out := map[string][]string{}
-
-	add := func(lane, profile string) {
-		if lane == "" {
-			return
-		}
-		out[lane] = append(out[lane], profile)
-	}
-
-	entries, err := os.ReadDir(platformtree.RequirePath(t, umbrellaDirRel))
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("каталог зонтичного чарта не прочитан: %v", err)
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: каталог значений %s не прочитан: %v", dir, err)
 	}
-	seen, parsed := 0, 0
-	var unreadable []string
+	var out []string
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.HasPrefix(name, "values") || !strings.HasSuffix(name, ".yaml") {
 			continue
 		}
-		seen++
-		lane, ok := nestedString(filepath.Join(platformtree.RequirePath(t, umbrellaDirRel), name),
-			"kaname", "config", "authn", "identityProvider")
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// laneProfileSources — файлы значений ОБОИХ корней плюс оговорка о втором.
+//
+// Чарт продукта читается ВСЕГДА. Зонтичный — только там, где он есть; его
+// отсутствие гасит ВТОРОЙ КОРЕНЬ, а не пробу целиком: погашенная проба
+// перестала бы судить и продуктовый корень, то есть ровно тот, ради которого
+// написана, — и в самостоятельном клоне у класса не осталось бы держателя
+// вовсе.
+func laneProfileSources(t *testing.T) (sources []profileSource, umbrellaNote string) {
+	t.Helper()
+
+	root, prefix := platformtree.RequireCorpus(t)
+	productDir := filepath.Join(root, filepath.FromSlash(platformtree.Under(prefix, productChartDirRel)))
+	for _, name := range valuesFilesIn(t, productDir) {
+		sources = append(sources, profileSource{
+			Root:  productRootName,
+			Label: platformtree.Under(prefix, productChartDirRel+"/"+name),
+			Path:  filepath.Join(productDir, name),
+			Keys:  []string{"authn", "identityProvider"},
+		})
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: рабочий каталог не установлен: %v", err)
+	}
+	umbrellaDir, err := platformtree.PathOf(wd, umbrellaDirRel)
+	switch {
+	case errors.Is(err, platformtree.ErrNoPlatformTree):
+		return sources, "УСЛОВИЕ НЕ СОЗДАНО (не находка): " + err.Error()
+	case err != nil:
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: зонтичный чарт не резолвится: %v", err)
+	}
+	for _, name := range valuesFilesIn(t, umbrellaDir) {
+		sources = append(sources, profileSource{
+			Root:  umbrellaRootName,
+			Label: umbrellaDirRel + "/" + name,
+			Path:  filepath.Join(umbrellaDir, name),
+			Keys:  []string{"kaname", "config", "authn", "identityProvider"},
+		})
+	}
+	// Базовое значение подчарта считается профилем — оно и есть умолчание
+	// всякого стенда, не назвавшего полосу сам.
+	const subchart = "charts/kaname/values.yaml"
+	sources = append(sources, profileSource{
+		Root:  umbrellaRootName,
+		Label: umbrellaDirRel + "/" + subchart,
+		Path:  filepath.Join(umbrellaDir, filepath.FromSlash(subchart)),
+		Keys:  []string{"config", "authn", "identityProvider"},
+	})
+	return sources, ""
+}
+
+// readLaneDeclarations — «полоса → профили, её объявляющие» плюс перепись по
+// корням.
+//
+// ТЕЛО чтения, вынесенное отдельно, чтобы инъекция звала то же, что исполняется
+// на дереве: своя копия предиката разошлась бы с настоящим гейтом молча.
+//
+// Читаются ОБЪЯВЛЕНИЯ, а не рендер: рендер требует загруженных зависимостей и
+// сети, а проба, умеющая пропускаться, гейтом не является.
+func readLaneDeclarations(sources []profileSource) (map[string][]string, []rootCensus) {
+	out := map[string][]string{}
+	var census []rootCensus
+	at := map[string]int{}
+
+	for _, s := range sources {
+		i, ok := at[s.Root]
 		if !ok {
-			unreadable = append(unreadable, name)
+			i = len(census)
+			at[s.Root] = i
+			census = append(census, rootCensus{Root: s.Root})
+		}
+		census[i].Seen++
+		lane, readable := nestedString(s.Path, s.Keys...)
+		if !readable {
+			census[i].Unreadable = append(census[i].Unreadable, s.Label)
 			continue
 		}
-		parsed++
-		add(lane, name)
+		census[i].Parsed++
+		if lane == "" {
+			continue
+		}
+		out[lane] = append(out[lane], s.Label)
 	}
-
-	const subchart = "charts/kaname/values.yaml"
-	seen++
-	if lane, ok := nestedString(filepath.Join(platformtree.RequirePath(t, umbrellaDirRel), subchart),
-		"config", "authn", "identityProvider"); ok {
-		parsed++
-		add(lane, subchart)
-	} else {
-		unreadable = append(unreadable, subchart)
-	}
-
-	// ОБЪЁМ ОСМОТРЕННОГО, и обе его величины. Одно число «профилей N» скрыло бы
-	// ровно тот случай, на котором эта проверка сама и обожглась: профиль,
-	// который РАЗОБРАТЬ НЕ УДАЛОСЬ, молча читался как «полосу не объявляет», и
-	// инъекция настоящим дефектом осталась зелёной, ничего об этом не сказав.
-	t.Logf("перепись профилей: осмотрено %d · разобрано %d · не разобрано %d %v",
-		seen, parsed, len(unreadable), unreadable)
-	if parsed == 0 {
-		t.Fatal("обход пуст: ни один файл значений не разобран — гейт судил бы о непрочитанном")
-	}
-	if len(unreadable) > 0 {
-		t.Errorf("профили не разобраны %v — «не прочитан» НЕ означает «полосу не объявляет», "+
-			"и молчаливое приравнивание одного к другому делает гейт слепым на этих файлах",
-			unreadable)
-	}
-
 	for lane := range out {
 		sort.Strings(out[lane])
+	}
+	return out, census
+}
+
+// profilesDeclaringALane — «полоса → профили» по дереву, с переписью и отказом
+// на пустом обходе.
+func profilesDeclaringALane(t *testing.T) map[string][]string {
+	t.Helper()
+
+	sources, umbrellaNote := laneProfileSources(t)
+	if umbrellaNote != "" {
+		t.Logf("%s: %s", umbrellaRootName, umbrellaNote)
+	}
+	out, census := readLaneDeclarations(sources)
+
+	// ОБЪЁМ ОСМОТРЕННОГО, и обе его величины ПО КАЖДОМУ корню. На одном сводном
+	// числе эта проверка уже обжигалась: профиль, который РАЗОБРАТЬ НЕ УДАЛОСЬ,
+	// молча читался как «полосу не объявляет», и инъекция настоящим дефектом
+	// осталась зелёной, ничего об этом не сказав.
+	totalSeen, totalParsed, productParsed := 0, 0, 0
+	for _, c := range census {
+		totalSeen += c.Seen
+		totalParsed += c.Parsed
+		if c.Root == productRootName {
+			productParsed += c.Parsed
+		}
+		t.Logf("перепись профилей [%s]: осмотрено %d · разобрано %d · не разобрано %d %v",
+			c.Root, c.Seen, c.Parsed, len(c.Unreadable), c.Unreadable)
+		if len(c.Unreadable) > 0 {
+			t.Errorf("профили не разобраны %v — «не прочитан» НЕ означает «полосу не объявляет», "+
+				"и молчаливое приравнивание одного к другому делает гейт слепым на этих файлах",
+				c.Unreadable)
+		}
+	}
+	t.Logf("перепись профилей ВСЕГО: корней %d · осмотрено %d · разобрано %d",
+		len(census), totalSeen, totalParsed)
+
+	if totalParsed == 0 {
+		t.Fatal("обход пуст: ни один файл значений не разобран — гейт судил бы о непрочитанном")
+	}
+	// ПРЕДПОСЫЛКА, названная отдельно: продуктовый корень в поставку модуля
+	// входит, поэтому «его не читали» — находка, а не посадка. Без этой строки
+	// пропажа корня вернула бы слепую зону молча: зонтичных профилей хватило бы,
+	// чтобы обход пустым не выглядел.
+	if productParsed == 0 {
+		t.Fatalf("обход чарта продукта пуст: ни один его файл значений не разобран, "+
+			"а он входит в поставку модуля — гейт был бы слеп ровно на той поставке, "+
+			"ради которой служба выносится отдельным продуктом (корень %q)", productRootName)
 	}
 	return out
 }

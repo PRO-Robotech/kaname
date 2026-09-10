@@ -7,12 +7,21 @@
 // Hydra admin surfaces iam actually drives, each in its own file:
 //   - hydra_oauth_clients.go — OAuth2 client lifecycle (/admin/clients).
 //
-// It no longer publishes or deletes JWKs. iam owns no signing keyset: it mints
-// nothing, Hydra is the issuer and signer, and iam only serves a byte-identical
-// read-only MIRROR of Hydra's public keyset on :9097. The PublishKey/DeleteKey
-// pair existed solely for the nightly JWKSRotationService, which was retired
-// (713f7e1) together with the key store it rotated (migration 0065) — the
-// service.JWKSPublisher interface they implemented no longer exists.
+// It no longer publishes or deletes JWKs, и причина — НЕ в том, что своих
+// ключей у платформы нет.
+//
+// Здесь стояло «iam owns no signing keyset: it mints nothing, Hydra is the
+// issuer and signer». Утверждение пережило свой предмет: ключница у платформы
+// есть (`kaname.token_signing_keys`, package internal/signingkeygen), свои
+// токены она подписывает сама (internal/tokensigner), а публикатор :9097
+// отдаёт ДВЕ записи — байт-в-байт зеркало набора провайдера и НАШУ, каждая по
+// своему объявленному пути.
+//
+// Настоящая причина снятия: пара PublishKey/DeleteKey писала ключи В ЧУЖОЕ
+// хранилище — она существовала исключительно ради ночной JWKSRotationService,
+// снятой (713f7e1) вместе с хранилищем, которое ротировала (миграция 0065).
+// Наша ротация живёт ВНУТРИ службы и админ-API провайдера не касается вовсе,
+// поэтому интерфейс service.JWKSPublisher не имеет здесь предмета.
 //
 // Authentication: if HYDRA_ADMIN_TOKEN env is set — Bearer; otherwise
 // anonymous (default Hydra config in the kind dev-stand exposes an

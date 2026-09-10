@@ -43,7 +43,8 @@ gRPC-поверхности — иначе утекла бы внутрення�
 `AccountService`, `ProjectService`, `UserService`, `ServiceAccountService`,
 `GroupService`, `RoleService`, `AccessBindingService`, `AuthorizeService`
 (`Check`/`BatchCheck`/`ListSubjects`/`ExpandRelations`/`WhoAmI`), `PermissionCatalogService` (grantable `<module>.<resource>.<verb>`
-taxonomy), `SAKeyService` (SA OAuth-ключи через Ory Hydra).
+taxonomy), `SAKeyService` (ключи служебных учёток; зеркало у внешнего поставщика — только
+на непереведённом контуре).
 
 **Internal `:9091`** (`registerInternalServices`, только cluster-internal —
 запрет #6): `InternalIAMService` (`Check` + `RegisterResource`/`UnregisterResource`
@@ -100,12 +101,12 @@ taxonomy), `SAKeyService` (SA OAuth-ключи через Ory Hydra).
 ```mermaid
 flowchart TB
     Tenant -- HTTPS/REST --> APIGW[api-gateway]
-    subgraph KachoNS[Namespace kacho]
+    subgraph PlatformNS[Namespace kacho]
         APIGW -- gRPC :9090 / :9091 --> IAM[Deployment kaname]
         IAM -- pgx master + read-replica --> PG[(Postgres kaname)]
         Kratos[Ory Kratos] -- provision-hook :9092 --> IAM
         Hydra[Ory Hydra] -- token/refresh-hook :9092 --> IAM
-        IAM -- admin API: JWKS --> Hydra
+        IAM -- admin API: OAuth-клиенты --> Hydra
         Migrate[initContainer kaname-migrator] -. goose up .-> PG
         Prom[Prometheus] -- scrape :9095 --> IAM
     end
@@ -254,7 +255,8 @@ anonymous fail-closed); dev-стенд явно опускает его до `de
   опциональна (CQRS Reader-TX, иначе fallback на master).
 - **Ory Kratos** — identity-provider; `provision`-хук создает/активирует
   Account/Project/AccessBinding для нового identity (`UpsertFromIdentity`).
-- **Ory Hydra** — OAuth2/OIDC; `token`/`refresh`-хуки обогащают claims и проверяют
+- **Ory Hydra** — OAuth2/OIDC: интерактивный вход человека, а на непереведённом контуре ещё
+  и издатель программных токенов. `token`/`refresh`-хуки обогащают claims и проверяют
   ревокации; admin API публикует ротируемые JWKS.
 
 ## In-process worker'ы

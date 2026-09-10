@@ -78,7 +78,7 @@ func TestIssuanceAndRefreshLanesMintTheSameClaimSet(t *testing.T) {
 		secret     = "parity-hook-secret"
 		externalID = "kratos-sub-parity"
 		clientID   = "client-parity"
-		acr        = "urn:kacho:acr:2fa"
+		acr        = "urn:kaname:acr:2fa"
 		jkt        = "jkt-thumb-parity"
 		x5t        = "x5t-thumb-parity"
 	)

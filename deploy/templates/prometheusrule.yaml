@@ -1,0 +1,94 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+{{/*
+ПРАВИЛА ТРЕВОГИ ПОСТАВЛЯЮТСЯ ОБЪЕКТОМ, А НЕ ТЕКСТОМ СТРАНИЦЫ.
+
+Восемь правил существовали прозой: тот, кто ставит продукт, их видел, а
+переносить в свою систему мониторинга должен был руками. Правило, которое надо
+перепечатать, не перепечатает никто, — и первым не сработает то, ради чего
+замер и делался: `KanameIdentityLedgerUnsampled` звонит на ОТСУТСТВИЕ события,
+то есть ровно там, где ждать симптома неоткуда.
+
+ВЫКЛЮЧАТЕЛЬ ОБЯЗАТЕЛЕН, И ВОТ ПОЧЕМУ. `PrometheusRule` — вид ЧУЖОГО оператора.
+Там, где оператора Prometheus нет, объект отвергнет схема кластера, и отвергнет
+она ВСЮ установку, а не одну тревогу. Без ручки чарт перестал бы ставиться
+там, где ставился.
+
+Умолчание — `true`, и это осознанно ОБРАТНОЕ решение к «пусто — не сужаем»:
+правило, поставленное молча, звонит; правило, НЕ поставленное молча, молчит, а
+молчание неотличимо от исправности. Цену ошибки несёт та сторона, которая
+шумит, — поэтому умолчание стоит на ней.
+
+ВЫРАЖЕНИЯ ЗДЕСЬ — КОПИЯ ОПУБЛИКОВАННОЙ СТРАНИЦЫ, и это два места об одном
+предмете. Разъехаться молча они не могут: `TestDeliveredAlertRulesMatchThePublishedPage`
+сверяет набор объекта с набором страницы В ОБЕ СТОРОНЫ — и обещанное без
+поставки, и поставленное без объяснения одинаково красные. Правя одну сторону,
+правьте обе; вывести объект из страницы на рендере нельзя — helm не читает mdx.
+
+`{{ $labels.<метка> }}` ниже принадлежит Prometheus, а не helm, поэтому
+экранировано: без экранирования helm вычислил бы его сам и отказал на
+неизвестной переменной.
+*/}}
+{{- if .Values.alertRules.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.name }}
+spec:
+  groups:
+    - name: {{ .Values.name }}
+      rules:
+        - alert: KanameAuthzSlow
+          expr: histogram_quantile(0.95, sum by (le) (rate(kaname_authz_check_duration_seconds_bucket[5m]))) > 0.03
+          for: 5m
+          annotations:
+            summary: "ответ о доступе медленнее 30 мс на 95-м процентиле"
+
+        - alert: KanameAuthzErrors
+          expr: rate(kaname_authz_check_decisions_total{decision="error"}[5m]) > 1
+          for: 10m
+          annotations:
+            summary: "служба не может получить вердикт — отказано будет всем"
+
+        - alert: KanameLROStranded
+          expr: increase(kaname_lro_terminal_write_failures_total[15m]) > 0
+          annotations:
+            summary: "операция не записала свой исход и зависла"
+
+        - alert: KanameLROBacklog
+          expr: kaname_lro_inflight > 1000
+          for: 5m
+          annotations:
+            summary: "накопились невыполненные операции"
+
+        - alert: KanamePoolSaturated
+          expr: rate(kaname_db_pool_empty_acquire_total[5m]) > 0
+          for: 10m
+          annotations:
+            summary: "запросы ждут свободного соединения с базой (pool={{ "{{ $labels.pool }}" }})"
+
+        - alert: KanameOutboxStuck
+          expr: kaname_outbox_oldest_pending_age_seconds > 900
+          for: 10m
+          annotations:
+            summary: "строка очереди {{ "{{ $labels.table }}" }} висит больше 15 минут"
+
+        - alert: KanameIdentityLedgerUnsampled
+          # Ноль личностей законен. Незаконно НЕ ЗНАТЬ, ноль это или неснятый замер.
+          expr: increase(kaname_identity_ledger_samples_total{outcome="ok"}[10m]) == 0
+          for: 10m
+          annotations:
+            summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
+
+        - alert: KanameRPCErrorRate
+          expr: |
+            sum(rate(kacho_grpc_server_handled_total{grpc_code!="OK"}[5m]))
+              / sum(rate(kacho_grpc_server_handled_total[5m])) > 0.05
+          for: 10m
+          annotations:
+            summary: "доля неуспешных ответов выше 5%"
+{{- end }}

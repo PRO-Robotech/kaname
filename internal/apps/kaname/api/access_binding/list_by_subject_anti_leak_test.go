@@ -43,7 +43,7 @@ func userCtxAB(id string) context.Context {
 
 // service-account subject must be self-only.
 func TestListBySubject_ServiceAccountSubject_StrangerDenied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kaname.view", nil)
 	uc := NewListBySubjectUseCase(repo)
 	ctx := userCtxAB("usr_random")
 
@@ -55,7 +55,7 @@ func TestListBySubject_ServiceAccountSubject_StrangerDenied(t *testing.T) {
 
 // group subject: non-member caller denied.
 func TestListBySubject_GroupSubject_NonMemberDenied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kaname.view", nil)
 	uc := NewListBySubjectUseCase(repo)
 
 	// No membership rows seeded → caller is NOT a member → must 403.
@@ -68,7 +68,7 @@ func TestListBySubject_GroupSubject_NonMemberDenied(t *testing.T) {
 
 // group subject: member caller allowed.
 func TestListBySubject_GroupSubject_MemberAllowed(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kaname.view", nil)
 	// Seed: usr_alice is a member of grp_target.
 	repo.AddGroupMember("grp_target", "user", "usr_alice")
 	uc := NewListBySubjectUseCase(repo)
@@ -82,7 +82,7 @@ func TestListBySubject_GroupSubject_MemberAllowed(t *testing.T) {
 
 // group subject: SA member also allowed.
 func TestListBySubject_GroupSubject_SAMemberAllowed(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kaname.view", nil)
 	repo.AddGroupMember("grp_target", "service_account", "sva_bot")
 	uc := NewListBySubjectUseCase(repo)
 
@@ -98,7 +98,7 @@ func TestListBySubject_GroupSubject_SAMemberAllowed(t *testing.T) {
 // collision with the group exists (system/bootstrap can never be a
 // group member by DB CHECK).
 func TestListBySubject_GroupSubject_SystemPrincipalDenied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kaname.view", nil)
 	uc := NewListBySubjectUseCase(repo)
 
 	ctx := operations.WithPrincipal(context.Background(),
@@ -111,7 +111,7 @@ func TestListBySubject_GroupSubject_SystemPrincipalDenied(t *testing.T) {
 
 // user subject self-listing still works (regression guard).
 func TestListBySubject_UserSubject_SelfAllowed(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kaname.view", nil)
 	uc := NewListBySubjectUseCase(repo)
 	ctx := userCtxAB("usr_alice")
 
@@ -123,7 +123,7 @@ func TestListBySubject_UserSubject_SelfAllowed(t *testing.T) {
 
 // user subject cross-listing still denied.
 func TestListBySubject_UserSubject_StrangerDenied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kaname.view", nil)
 	uc := NewListBySubjectUseCase(repo)
 	ctx := userCtxAB("usr_bob")
 
@@ -135,7 +135,7 @@ func TestListBySubject_UserSubject_StrangerDenied(t *testing.T) {
 
 // service-account subject self-listing works.
 func TestListBySubject_ServiceAccountSubject_SelfAllowed(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_owner", "acc_test", "prj_test", "rol_v", "kaname.view", nil)
 	uc := NewListBySubjectUseCase(repo)
 	ctx := operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "service_account", ID: "sva_self"})

@@ -53,7 +53,7 @@ func TestSigningKeyStore_F1_08_ReadBackPrivateHalfIsFitToSign(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	rec := domain.SigningKeyRecord{
-		KID:               "kacho-f108",
+		KID:               "kaname-f108",
 		Algorithm:         domain.SigningAlgRS256,
 		State:             domain.SigningKeyPublished,
 		PublicKeyPEM:      material.PublicKeyPEM,

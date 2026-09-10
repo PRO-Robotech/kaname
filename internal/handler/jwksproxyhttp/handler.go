@@ -451,7 +451,7 @@ func parseMaxAge(cc string) (time.Duration, bool) {
 }
 
 // writeFailClosed emits a fixed opaque JSON error (no upstream/pgx text leak, no
-// keys, never a kacho-* kid).
+// keys, never a kid of iam's own minting — in EITHER of its two live forms).
 func writeFailClosed(w http.ResponseWriter, status int, reason string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

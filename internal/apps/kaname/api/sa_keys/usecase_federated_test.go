@@ -182,7 +182,7 @@ func TestIssue_FederatedPath_HydraRequestShape(t *testing.T) {
 	ops := &stubOpsRepo{}
 	u := NewIssueSAKeyUseCase(repo, &stubTx{}, hydra, ops).
 		WithTrustedIssuerWriter(&fakeTrustedIssuers{})
-	u.HydraClientNamePrefix = "kacho-sak-"
+	u.HydraClientNamePrefix = "kaname-sak-"
 	u.AudiencePrefix = "https://example/api"
 
 	in := IssueInput{

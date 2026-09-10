@@ -435,7 +435,7 @@ _unbound_steps = [
     _external_step(
         name="nonsense-path-control-on-external",
         method="GET",
-        path="/kacho-no-such-route-{{runId}}",
+        path="/kaname-no-such-route-{{runId}}",
         test_script=[
             *assert_answered("EXT-CONTROL"),
             "// A path that certainly does not exist, on the same listener, with the same",

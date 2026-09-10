@@ -74,7 +74,7 @@ sequenceDiagram
     participant Out as fga_outbox (журнал намерений)
 
     Cli->>GW: POST /iam/v1/accounts<br/>{"name":"acme"}
-    GW->>GW: Validate Bearer JWT (Ory Hydra JWKS)
+    GW->>GW: Validate Bearer JWT (набор ключей объявленного издателя)
     GW->>GW: PrincipalExtract
     GW->>IAM: gRPC AccountService.Create<br/>+ x-kacho-principal-*
     IAM->>IAM: AntiAnonymous (production-mode)
@@ -134,12 +134,24 @@ Account как ресурс не имеет отдельных env-vars — ко
 ### REST (curl)
 
 ```bash
-# 1. Получить JWT через Ory Hydra client_credentials (OAuth2 token endpoint).
-TOKEN=$(curl -s -X POST "$HYDRA_TOKEN_URL" \
-  -d "grant_type=client_credentials" \
-  -d "client_id=$HYDRA_CLIENT_ID" \
-  -d "client_secret=$HYDRA_CLIENT_SECRET" \
-  -d "scope=openid profile" | jq -r .access_token)
+# 1. Взять удостоверение.
+#
+# ЗДЕСЬ СТОЯЛ РЕЦЕПТ С `client_secret` — вида удостоверения, которого в системе
+# больше нет ни на одном контуре (см. 05-sa-keys.md §Назначение). Рецепт был
+# неисполним: скопировавший его получал отказ аутентификации.
+#
+# Сегодня исполнимы два пути, и первый короче:
+#
+#   (а) БАЗОВЫЙ ТОКЕН ДОСТУПА (`CREDENTIAL_KIND_SECRET`) — одна строка, годная
+#       как Bearer напрямую, без обмена:
+TOKEN="$ACCESS_TOKEN"   # одна строка вида `<марка>_<id>_<32 знака>`
+#
+#   (б) КЛЮЧЕВАЯ ПАРА (`CREDENTIAL_KIND_KEYPAIR`) — подписать `client_assertion`
+#       и обменять его на токен. Адрес обмена зависит от посадки: токен-эндпоинт
+#       платформы (`POST /iam/v1/token`) на переведённом контуре, токен-эндпоинт
+#       внешнего поставщика — на непереведённом. Форма запроса и требования к
+#       членам утверждения — на странице токен-эндпоинта в опубликованной
+#       документации сервиса.
 
 # 2. Create Account.
 RESP=$(curl -s -X POST http://localhost:18080/iam/v1/accounts \

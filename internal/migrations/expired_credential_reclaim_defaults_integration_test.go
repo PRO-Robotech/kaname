@@ -77,21 +77,42 @@ func TestCredRcl29_CeilingDefaultsInTheTreeAreTheRevisedOnes(t *testing.T) {
 	require.NoError(t, goose.SetDialect("postgres"))
 	require.NoError(t, goose.Up(db, "."), "цепочка миграций обязана примениться целиком")
 
+	// ИСТОЧНИК ВЕЛИЧИНЫ ПЕРЕЕХАЛ (приёмка `KAN-QUOTA-1`, `П25`; задача #2117).
+	//
+	// Здесь стояло чтение `kaname.limits`, и предмет утверждения СМЕНИЛСЯ:
+	// величину этих двух видов больше не назначает авторитет — её объявляет
+	// посадка службы, а миграция перенесла объявленное в проекцию. Утверждение о
+	// САМИХ ВЕЛИЧИНАХ при этом не ослаблено: они обязаны нести тот же пересмотр
+	// §4, потому что накат не меняет наблюдаемого.
+	//
+	// Второе утверждение стало СИЛЬНЕЕ, а не слабее. «Ровно два объявления»
+	// защищало от второй строки того же вида, чью старшинство решал бы порядок
+	// строк; в проекции вид — ПЕРВИЧНЫЙ КЛЮЧ, и второй строки не бывает by
+	// construction. Проверка сохранена: она стережёт ЧИСЛО видов, у которых
+	// величина вообще есть, — меньше двух означает, что предел не назначен вовсе.
 	const kindsFilter = `
-		 WHERE kind IN ('iam.user.credential', 'iam.serviceAccount.credential')
-		   AND scope = 'DEFAULT' AND withdrawn_at IS NULL`
+		 WHERE kind IN ('iam.user.credential', 'iam.serviceAccount.credential')`
 
 	var live int
 	require.NoError(t, db.QueryRow(
-		`SELECT count(*) FROM kaname.limits`+kindsFilter).Scan(&live))
+		`SELECT count(*) FROM kaname.own_ceilings`+kindsFilter).Scan(&live))
 	require.Equal(t, 2, live,
-		"живых объявлений умолчания на виды удостоверения обязано быть РОВНО два: "+
-			"меньше — предел на вид не назначен вовсе; больше — рядом лежит второе "+
-			"объявление того же вида, и какое из них возьмёт носитель, решает порядок "+
-			"строк, а не решение продукта")
+		"объявленных посадкой величин на виды удостоверения обязано быть РОВНО два: "+
+			"меньше — предел на вид не назначен вовсе, и списание отвергнет первое же "+
+			"создание отказом «потолок не назван»")
+
+	// И у АВТОРИТЕТА этих величин больше нет: оставленная строка была бы
+	// принята-и-проигнорирована — администратор назначил бы её, продукт сохранил
+	// бы, а списание читает проекцию посадки.
+	var atAuthority int
+	require.NoError(t, db.QueryRow(
+		`SELECT count(*) FROM kaname.limits`+kindsFilter).Scan(&atAuthority))
+	require.Zero(t, atAuthority,
+		"величина видов удостоверения осталась у авторитета: она больше ни на что не "+
+			"влияет, и её наличие обещает администратору управление, которого нет")
 
 	defaults := map[string]int64{}
-	rows, err := db.Query(`SELECT kind, limit_value FROM kaname.limits` + kindsFilter)
+	rows, err := db.Query(`SELECT kind, limit_value FROM kaname.own_ceilings` + kindsFilter)
 	require.NoError(t, err)
 	for rows.Next() {
 		var k string
@@ -107,9 +128,11 @@ func TestCredRcl29_CeilingDefaultsInTheTreeAreTheRevisedOnes(t *testing.T) {
 		"iam.user.credential": 12,
 		// 10 назначений × 2 + 4 разовых — §4.1а.
 		"iam.serviceAccount.credential": 24,
-	}, defaults, "величины умолчания обязаны нести пересмотр §4")
+	}, defaults, "величины обязаны нести пересмотр §4: перенос источника не даёт "+
+		"права изменить величину, и накат не меняет наблюдаемого")
 
-	t.Logf("перепись: живых объявлений умолчания %d, величины %v", live, defaults)
+	t.Logf("перепись: объявленных посадкой величин %d, у авторитета %d, величины %v",
+		live, atAuthority, defaults)
 }
 
 // CRED-RCL-29 (вторая половина) — новая величина ДЕЙСТВУЕТ, а не лежит.

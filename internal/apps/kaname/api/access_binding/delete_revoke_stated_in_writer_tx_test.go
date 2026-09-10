@@ -72,7 +72,7 @@ func indexOfTxOp(trace []string, want string) int {
 func TestDeleteAccessBinding_RevokeSetIsStatedBeforeTheWriterTxCommits(t *testing.T) {
 	const (
 		roleID     = "rol_viewer_sync_001"
-		roleName   = "kacho.view"
+		roleName   = "kaname.view"
 		subjectID  = "usr_sync_subject"
 		resourceID = "prj_sync_project"
 		ownerID    = "usr_sync_owner"

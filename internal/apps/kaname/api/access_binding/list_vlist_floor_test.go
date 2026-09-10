@@ -114,7 +114,7 @@ func seedABListByScope(repo *abFakeRepo, rows []domain.AccessBinding) {
 
 func TestABListByScope_T33AB01_VListUnionFloor(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_ab01", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	acb1 := domain.AccessBinding{ID: "acb000000000000prod1", ResourceType: "account", ResourceID: accountID, SubjectID: "usr_x", Labels: domain.Labels{"stage": "prod"}}
 	acb2 := domain.AccessBinding{ID: "acb0000000000000dev2", ResourceType: "account", ResourceID: accountID, SubjectID: "usr_y", Labels: domain.Labels{"stage": "dev"}}
 	seedABListByScope(repo, []domain.AccessBinding{acb1, acb2})
@@ -142,7 +142,7 @@ func TestABListByScope_T33AB01_VListUnionFloor(t *testing.T) {
 // any label grant — the union must NOT shrink the existing owner floor (D-6 not-negotiable).
 func TestABListByScope_T33AB01_OwnerFloorPreserved(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_ab01o", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	acb1 := domain.AccessBinding{ID: "acb000000000000prod1", ResourceType: "account", ResourceID: accountID, Labels: domain.Labels{"stage": "prod"}}
 	acb2 := domain.AccessBinding{ID: "acb0000000000000dev2", ResourceType: "account", ResourceID: accountID, Labels: domain.Labels{"stage": "dev"}}
 	seedABListByScope(repo, []domain.AccessBinding{acb1, acb2})
@@ -166,7 +166,7 @@ func TestABListByScope_T33AB01_OwnerFloorPreserved(t *testing.T) {
 // empty list). RED if the use-case were to return (nil, nil) here instead of deny.
 func TestABListByScope_T33AB01_StrangerNoVisibilityDenied(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_ab01s", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	acb1 := domain.AccessBinding{ID: "acb000000000000prod1", ResourceType: "account", ResourceID: accountID, Labels: domain.Labels{"stage": "prod"}}
 	seedABListByScope(repo, []domain.AccessBinding{acb1})
 
@@ -190,7 +190,7 @@ func TestABListByScope_T33AB01_StrangerNoVisibilityDenied(t *testing.T) {
 // (fail-closed; never unfiltered leak, never owner-only fallback).
 func TestABListByScope_T33AUTHZ02_FGAErrorUnavailable(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_ab02", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	seedABListByScope(repo, []domain.AccessBinding{{ID: "acb000000000000prod1", ResourceType: "account", ResourceID: accountID}})
 
 	fga := newABQueriesStub()

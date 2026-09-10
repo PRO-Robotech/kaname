@@ -6,6 +6,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"log/slog"
 	"os"
@@ -142,27 +145,84 @@ func TestBootPosture_InsecureIsReportedHonestly(t *testing.T) {
 
 // TestBootPosture_EmittedFromTheLiveBootPath — статический guard размещения:
 // строка обязана эмититься ИЗ composition root'а реальным логгером, ПОСЛЕ
-// listener-mTLS boot-guard'ов и ДО подъёма листенеров.
+// listener-mTLS boot-guard'а и ДО подъёма листенеров.
+//
+// # СУДИТСЯ ПОРЯДОК ВЫЗОВОВ, А НЕ ПОЛОЖЕНИЕ ТЕКСТА В ФАЙЛЕ (задача #2514)
+//
+// Здесь сравнивались СМЕЩЕНИЯ ПОДСТРОК: страж находился по тексту своего
+// отказа, и «после стража» означало «ниже по файлу». Предикат верен ровно пока
+// условие живёт встроенной ветвью: вынесенное в именованного стража, оно
+// уезжает в конец файла — вызов остаётся на прежнем месте потока, а текст
+// отказа оказывается НИЖЕ строки посадки, и проба краснеет на изменении,
+// которое порядка исполнения не трогало вовсе.
+//
+// Поэтому читается синтаксическое дерево: положение ВЫЗОВОВ внутри тела
+// подъёма. Оно и есть предмет — «после» здесь про поток, а не про строки.
+//
+// Отсутствие любого из трёх вызовов — НАХОДКА, а не молчание: переименуют
+// страж, и предикат по имени перестал бы находить предмет, оставаясь зелёным.
 func TestBootPosture_EmittedFromTheLiveBootPath(t *testing.T) {
 	src, err := os.ReadFile("serve.go")
 	if err != nil {
 		t.Fatalf("read composition root: %v", err)
 	}
-	root := string(src)
-
-	call := strings.Index(root, "observability.LogBootPosture(logger,")
-	if call < 0 {
-		t.Fatal("composition root must emit the posture line via observability.LogBootPosture(logger, bootPosture(…))")
-	}
-	if !strings.Contains(root[call:], "bootPosture(posture, cfg, mtlsCfg,") {
+	if !strings.Contains(string(src), "bootPosture(posture, cfg, mtlsCfg,") {
 		t.Fatal("posture line must be built from the accepted config + the per-listener mTLS config")
 	}
-	guard := strings.Index(root, "production mode requires public listener mTLS")
-	if guard < 0 || call < guard {
+
+	fset := token.NewFileSet()
+	file, perr := parser.ParseFile(fset, "serve.go", src, 0)
+	if perr != nil {
+		t.Fatalf("composition root не разбирается: %v", perr)
+	}
+
+	// Искомые вызовы: страж транспорта gRPC-слушателей, эмиссия строки посадки
+	// и построение слушателя. Каждый называется ОДИН раз.
+	const (
+		guardCall   = "requireGRPCListenerMTLS"
+		postureCall = "LogBootPosture"
+		serverCall  = "NewServer"
+	)
+	at := map[string]int{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "runServe" || fn.Body == nil {
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			name := ""
+			switch f := call.Fun.(type) {
+			case *ast.Ident:
+				name = f.Name
+			case *ast.SelectorExpr:
+				name = f.Sel.Name
+			}
+			if name == "" {
+				return true
+			}
+			if _, seen := at[name]; !seen {
+				at[name] = fset.Position(call.Pos()).Offset
+			}
+			return true
+		})
+	}
+
+	for _, want := range []string{guardCall, postureCall, serverCall} {
+		if _, found := at[want]; !found {
+			t.Fatalf("тело подъёма не зовёт %s — предикат размещения потерял предмет: "+
+				"переименование сделало бы его зелёным, ничего не проверяя", want)
+		}
+	}
+	if at[postureCall] < at[guardCall] {
 		t.Fatal("posture line must be emitted AFTER the production listener-mTLS boot guard")
 	}
-	listener := strings.Index(root, "grpcSrv := grpcsrv.NewServer(")
-	if listener < 0 || call > listener {
+	if at[postureCall] > at[serverCall] {
 		t.Fatal("posture line must be emitted BEFORE the gRPC listeners are built")
 	}
+	t.Logf("осмотрено: порядок вызовов в теле подъёма — %s(%d) → %s(%d) → %s(%d)",
+		guardCall, at[guardCall], postureCall, at[postureCall], serverCall, at[serverCall])
 }

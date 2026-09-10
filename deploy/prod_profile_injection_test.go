@@ -185,7 +185,13 @@ func TestRenderRefusalPathsAreDerivedFromTheTemplate(t *testing.T) {
 		start := strings.Index(b, `{{- define "kaname-svc.requireOperatorSuppliedNames" -}}`)
 		require.GreaterOrEqual(t, start, 0)
 		head, body := b[:start], b[start:]
+		// ФОРМ ВЕТВИ ДВЕ, и обезврежены обязаны быть ОБЕ: безусловная
+		// (`if not <ключ>`) и условная — «обязательна от антецедента»
+		// (`if and <антецедент> (not <ключ>)`, задача #2488). Оставив вторую,
+		// инъекция подменяла бы не тот факт: распознаватель по-прежнему находил
+		// бы ветви, и проба зеленела бы, ничего не доказав.
 		body = strings.ReplaceAll(body, "{{- if not ", "{{- unless ")
+		body = strings.ReplaceAll(body, "{{- if and ", "{{- unless and ")
 		writeChartFile(t, chartDir, "templates/_helpers.tpl", head+body)
 
 		_, _, injErr := renderRefusalPaths(chartDir)
@@ -257,7 +263,8 @@ func TestMountGuardDistinguishesTheLeaves(t *testing.T) {
 		})
 		require.Error(t, err, "переименует шаблон подкаталог — путь под неизвестным именем "+
 			"обязан стать находкой, а не пройти молча")
-		require.Contains(t, err.Error(), "client, server")
+		// Листов три с задачи #2487: якорь поставщика — своя координата.
+		require.Contains(t, err.Error(), "client, provider, server")
 	})
 
 	t.Run("ПУТЬ ВНЕ МОНТИРОВАНИЯ — прежняя ось не потеряна", func(t *testing.T) {
@@ -267,4 +274,93 @@ func TestMountGuardDistinguishesTheLeaves(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "вне каталога")
 	})
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// РАСПОЗНАВАТЕЛЬ ПУТЕЙ К МАТЕРИАЛУ — знает ли он ВСЕ законные формы (#2479)
+//
+// Форма, о которой распознаватель не знает, не даёт ни красного, ни зелёного:
+// всё записанное в ней уходит из-под наблюдения МОЛЧА. Здесь эта слепота
+// утверждается прямо — подачей ручки в форме, которой прежний выписанный
+// перечень не знал.
+//
+// ДВЕ ВЕЛИЧИНЫ ПЕРЕПИСИ, названные честно: форм выведено 8 против 5 выписанных,
+// а путей в боевом профиле осмотрено 27 и до расширения, и после. Прибавка —
+// СЛЕПАЯ ЗОНА, а не найденное нарушение: ни один профиль этой ручки сегодня не
+// объявляет. Расширение не холостое ровно потому, что объявит — и путь будет
+// проверен, а не пропущен.
+
+// writtenOutMaterialSuffixes — перечень, стоявший здесь до #2479. Живёт только
+// в этой пробе и только затем, чтобы слепоту можно было ПОКАЗАТЬ, а не описать.
+var writtenOutMaterialSuffixes = []string{"_CERTFILE", "_KEYFILE", "_CLIENTCAFILES", "_CA_FILE", "_CAFILES"}
+
+func matchedByWrittenOutList(knob string) bool {
+	for _, s := range writtenOutMaterialSuffixes {
+		if strings.HasSuffix(knob, s) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestMaterialPathRecogniser_KnowsTheFormTheWrittenOutListMissed(t *testing.T) {
+	const knob = "KANAME_INVITE_MAIL__CA_BUNDLE_FILE"
+
+	require.False(t, matchedByWrittenOutList(knob),
+		"предпосылка инъекции неверна: прежний выписанный перечень эту форму знал, "+
+			"и показывать нечего")
+	require.True(t, namesAMaterialPath(knob),
+		"выведенный перечень не знает формы %s — якорь доверия отправителя письма "+
+			"остаётся вне наблюдения: путь в поде может отсутствовать, а профиль "+
+			"читается настроенным", knob)
+
+	// Тот же путь, что и у соседей, но вне монтирования — находка обязана прийти.
+	err := filesAreMountable(map[string]any{"tls": map[string]any{
+		"mountPath": "/etc/kaname/tls", "secretName": "kaname-tls", "clientSecretName": "kaname-client-tls",
+	}}, map[string]string{knob: "/чужой/каталог/ca.crt"})
+	require.Error(t, err, "путь к материалу в форме, которую распознаватель теперь знает, "+
+		"обязан судиться наравне с остальными")
+	require.Contains(t, err.Error(), knob)
+}
+
+func TestMaterialPathRecogniser_LawfulTwinsStaySilent(t *testing.T) {
+	// Законный близнец формы: ручка, оканчивающаяся на слово, которого среди
+	// выведенных форм нет. Распознаватель обязан МОЛЧАТЬ — иначе он судил бы
+	// адреса и режимы наравне с путями, и первый же ложный срабат снял бы
+	// проверку.
+	for _, knob := range []string{
+		"KANAME_HYDRA_ADMIN_URL",
+		"KANAME_AUTHN__TRUST_DOMAIN",
+		"KANAME_INVITE_MAIL__RELAY",
+		// Окончание `FILE` внутри слова, а не суффиксом имени.
+		"KANAME_PROFILE",
+	} {
+		require.False(t, namesAMaterialPath(knob),
+			"ручка %s принята за путь к материалу — распознаватель судит не то, что называет", knob)
+	}
+
+	// Обратная сторона: каждая форма прежнего перечня обязана быть узнана и
+	// теперь. Расширение, потерявшее прежнюю форму, есть СУЖЕНИЕ под видом
+	// прибавки, и на исправном дереве оно выглядит точно так же.
+	for _, knob := range []string{
+		"KANAME_PUBLIC_SERVER_MTLS_CERTFILE",
+		"KANAME_PUBLIC_SERVER_MTLS_KEYFILE",
+		"KANAME_PUBLIC_SERVER_MTLS_CLIENTCAFILES",
+		"KANAME_REST_UPSTREAM_MTLS_CAFILES",
+		"KANAME_HYDRA_ADMIN_CA_FILE",
+	} {
+		require.True(t, namesAMaterialPath(knob),
+			"форма %s, которую знал прежний перечень, выведенным не узнаётся — сужение", knob)
+	}
+}
+
+func TestMaterialPathRecogniser_DerivationIsNotEmpty(t *testing.T) {
+	suffixes := materialPathSuffixes()
+	require.NotEmpty(t, suffixes,
+		"форм не выведено ни одной — «путей к материалу нет» стало бы верным тривиально, "+
+			"и проверка досягаемости молчала бы обо всём")
+	require.GreaterOrEqual(t, len(suffixes), len(writtenOutMaterialSuffixes),
+		"выведено форм меньше, чем было выписано (%d против %d): вывод потерял предмет",
+		len(suffixes), len(writtenOutMaterialSuffixes))
+	t.Logf("перепись: форм пути к материалу выведено %d: %s", len(suffixes), strings.Join(suffixes, ", "))
 }

@@ -97,9 +97,20 @@ func TestGate_IamHistoryIsConfirmed(t *testing.T) {
 	require.Greater(t, rep.Waived, 0,
 		"ни одна объявленная машинная личность не встретилась: ветка исключения не исполнялась")
 
-	require.Empty(t, rep.UnusedEntries,
-		"записи ведомости, которым больше нечего покрывать: %v — исключение живёт, пока у него есть предмет",
-		rep.UnusedEntries)
+	// Запись без предмета судится ТАМ, ГДЕ ИСТОРИЯ АВТОРИТЕТНА. Ведомость едет с
+	// модулем, её предметы — нет: история артефакта есть перепубликация, и
+	// коммитов дерева платформы в ней не бывает by construction. Разводит исходы
+	// ClassifyStale; в клоне число ПЕЧАТАЕТСЯ, иначе пропуск неотличим от
+	// заглушенной пробы.
+	switch outcome, why := clagate.ClassifyStale(rep, inPlatformTree); outcome {
+	case clagate.OutcomeUnmetPremise:
+		t.Logf("записи без предмета в этой посадке НЕ судятся (не находка): %s.\n"+
+			"Их %d: %v", why, len(rep.UnusedEntries), rep.UnusedEntries)
+	default:
+		require.Empty(t, rep.UnusedEntries,
+			"записи ведомости, которым больше нечего покрывать: %v — исключение живёт, пока у него есть предмет",
+			rep.UnusedEntries)
+	}
 
 	// Посадка печатается ВМЕСТЕ с числами: те же величины в двух посадках
 	// означают разное, и вердикт, не назвавший посадки, сказан неизвестно о чём.
@@ -776,4 +787,62 @@ func TestClassify_ASnapshotRepositoryIsNotDomainHistory(t *testing.T) {
 	platform, _ := clagate.Classify(rep, true)
 	require.Equal(t, clagate.OutcomeBlindWalk, platform,
 		"тот же отчёт в дереве платформы обязан быть НАХОДКОЙ — иначе дискриминатором служит не посадка")
+}
+
+// --- Запись без предмета: где она НАХОДКА, а где свойство посадки -----------
+//
+// ПРЕДМЕТ. Ведомость ЕДЕТ с модулем (`scope: .` заведена ровно ради этого), а
+// её ПРЕДМЕТЫ не едут: история артефакта — цепочка ПЕРЕПУБЛИКАЦИЙ, и коммита
+// платформы в ней нет by construction. Запись, покрывающая коммит платформы,
+// в самостоятельном клоне поэтому «нечего покрывать» ВСЕГДА, а не однажды.
+//
+// Наблюдалось на живой поставке: запись про трейлер машинной личности имеет
+// предмет в стволе платформы (коммит 23424a1f2e55 остаётся там навсегда — сама
+// ведомость это и объявляет) и не имеет его в артефакте. Прогон артефакта
+// краснел бы КАЖДОЙ поставкой, и красное это — о посадке, а не о продукте.
+//
+// ЧТО ИМЕННО ЧИНИТСЯ. Самоистечение послабления остаётся несущим и остаётся
+// строгим — но там, где история АВТОРИТЕТНА, то есть в дереве платформы. В
+// самостоятельном клоне число записей без предмета ПЕЧАТАЕТСЯ и не роняет:
+// «ноль находок» обязано быть отличимо от «ноль прочитанного», поэтому вердикт
+// не выносится молча, а называется.
+
+// TestClassifyStale_InThePlatformTreeAStaleEntryIsAFinding — ПОЛОЖИТЕЛЬНЫЙ
+// КОНТРОЛЬ несущего свойства: самоистечение послабления НЕ СНЯТО.
+func TestClassifyStale_InThePlatformTreeAStaleEntryIsAFinding(t *testing.T) {
+	rep := domainHistory()
+	rep.UnusedEntries = []string{"waivers: bot@example.org — записи больше нечего покрывать"}
+
+	outcome, why := clagate.ClassifyStale(rep, true)
+
+	require.Equal(t, clagate.OutcomeJudge, outcome,
+		"в дереве платформы история авторитетна: запись без предмета обязана оставаться находкой")
+	require.Empty(t, why, "у вынесенного вердикта нет причины отказа")
+}
+
+// TestClassifyStale_InAStandaloneCloneAStaleEntryIsNotAFinding — ИНЪЕКЦИЯ.
+// Отличие от близнеца выше РОВНО ОДНО: посадка.
+func TestClassifyStale_InAStandaloneCloneAStaleEntryIsNotAFinding(t *testing.T) {
+	rep := domainHistory()
+	rep.UnusedEntries = []string{"waivers: bot@example.org — записи больше нечего покрывать"}
+
+	outcome, why := clagate.ClassifyStale(rep, false)
+
+	require.Equal(t, clagate.OutcomeUnmetPremise, outcome,
+		"в самостоятельном клоне история — перепубликация: предмет записи туда не едет by construction")
+	require.Contains(t, why, "перепублик",
+		"пропуск обязан НАЗЫВАТЬ непостроенную предпосылку, а не молчать")
+	require.Contains(t, why, "1", "пропуск обязан называть ЧИСЛО записей — иначе он неотличим от «не смотрели»")
+}
+
+// TestClassifyStale_WithNothingStaleTheVerdictIsTheSameInBothPostures — второй
+// положительный контроль: на чистой ведомости посадка не меняет НИЧЕГО, значит
+// различение выше не вырождается в «в клоне не судим вовсе».
+func TestClassifyStale_WithNothingStaleTheVerdictIsTheSameInBothPostures(t *testing.T) {
+	for _, inPlatformTree := range []bool{true, false} {
+		outcome, why := clagate.ClassifyStale(domainHistory(), inPlatformTree)
+		require.Equal(t, clagate.OutcomeJudge, outcome,
+			"чистая ведомость (посадка платформы: %t) обязана давать вердикт", inPlatformTree)
+		require.Empty(t, why)
+	}
 }

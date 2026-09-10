@@ -72,13 +72,13 @@ func TestSigningKey_F1_06_ExactlyOneSignerUnderConcurrency(t *testing.T) {
 	pool, repo := signingKeyPool(t)
 
 	// Given — в ключнице есть подписывающий ключ.
-	seedKey(t, repo, "kacho-f106-active", domain.SigningKeyActive)
+	seedKey(t, repo, "kaname-f106-active", domain.SigningKeyActive)
 
 	// When — N параллельных попыток сделать подписывающим ДРУГОЙ ключ.
 	const n = 8
 	kids := make([]domain.KeyID, n)
 	for i := range kids {
-		kids[i] = domain.KeyID("kacho-f106-cand" + string(rune('a'+i)))
+		kids[i] = domain.KeyID("kaname-f106-cand" + string(rune('a'+i)))
 		seedKey(t, repo, string(kids[i]), domain.SigningKeyPublished)
 	}
 	var wg sync.WaitGroup
@@ -164,9 +164,9 @@ func TestSigningKey_F1_07_SwapIsAtomic(t *testing.T) {
 	ctx := context.Background()
 	pool, repo := signingKeyPool(t)
 
-	seedKey(t, repo, "kacho-f107-a", domain.SigningKeyActive)
-	seedKey(t, repo, "kacho-f107-b", domain.SigningKeyPublished)
-	seedKey(t, repo, "kacho-f107-c", domain.SigningKeyPublished)
+	seedKey(t, repo, "kaname-f107-a", domain.SigningKeyActive)
+	seedKey(t, repo, "kaname-f107-b", domain.SigningKeyPublished)
+	seedKey(t, repo, "kaname-f107-c", domain.SigningKeyPublished)
 
 	// Читатель наблюдает состояние ПОКА идёт конкурентная смена: момента, в
 	// котором подписывающих ноль или два, не существует.
@@ -188,7 +188,7 @@ func TestSigningKey_F1_07_SwapIsAtomic(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
-	for i, kid := range []domain.KeyID{"kacho-f107-b", "kacho-f107-c"} {
+	for i, kid := range []domain.KeyID{"kaname-f107-b", "kaname-f107-c"} {
 		wg.Add(1)
 		go func(i int, kid domain.KeyID) {
 			defer wg.Done()
@@ -224,11 +224,11 @@ func TestSigningKey_F1_29_KeySetFollowsStateAndActivationIsNotExpressible(t *tes
 	ctx := context.Background()
 	_, repo := signingKeyPool(t)
 
-	published := seedKey(t, repo, "kacho-f129-pub", domain.SigningKeyPublished)
-	active := seedKey(t, repo, "kacho-f129-act", domain.SigningKeyActive)
-	retired := seedKey(t, repo, "kacho-f129-ret", domain.SigningKeyRetired)
-	removed := seedKey(t, repo, "kacho-f129-rem", domain.SigningKeyRemoved)
-	compromised := seedKey(t, repo, "kacho-f129-cmp", domain.SigningKeyCompromised)
+	published := seedKey(t, repo, "kaname-f129-pub", domain.SigningKeyPublished)
+	active := seedKey(t, repo, "kaname-f129-act", domain.SigningKeyActive)
+	retired := seedKey(t, repo, "kaname-f129-ret", domain.SigningKeyRetired)
+	removed := seedKey(t, repo, "kaname-f129-rem", domain.SigningKeyRemoved)
+	compromised := seedKey(t, repo, "kaname-f129-cmp", domain.SigningKeyCompromised)
 
 	set, err := repo.KeySet(ctx)
 	require.NoError(t, err)
@@ -264,7 +264,7 @@ func TestSigningKey_F1_31_CompromisedLeavesTheKeySetImmediately(t *testing.T) {
 	}
 	ctx := context.Background()
 	_, repo := signingKeyPool(t)
-	rec := seedKey(t, repo, "kacho-f131", domain.SigningKeyActive)
+	rec := seedKey(t, repo, "kaname-f131", domain.SigningKeyActive)
 
 	// Given (зеркало F1-29) — ДО глагола тот же ключ в наборе ПРИСУТСТВУЕТ.
 	// Без этой половины проба зелена и на наборе, который не отдаёт ничего.
@@ -282,7 +282,7 @@ func TestSigningKey_F1_31_CompromisedLeavesTheKeySetImmediately(t *testing.T) {
 
 	// And — глагол ОТДЕЛЁН от вывода из ротации: вывод оставил бы ключ в
 	// наборе, объявление утёкшим — нет.
-	other := seedKey(t, repo, "kacho-f131-ret", domain.SigningKeyActive)
+	other := seedKey(t, repo, "kaname-f131-ret", domain.SigningKeyActive)
 	require.NoError(t, repo.Retire(ctx, other.KID, time.Now().UTC()))
 	set, err = repo.KeySet(ctx)
 	require.NoError(t, err)
@@ -309,7 +309,7 @@ func TestSigningKey_StateStampsAreEnforcedByTheSchema(t *testing.T) {
 	pool, _ := signingKeyPool(t)
 	_, err := pool.Exec(ctx, `INSERT INTO kaname.token_signing_keys
 		(kid, algorithm, state, public_key_pem, private_key_wrapped, created_at, not_after)
-		VALUES ('kacho-nostamp','RS256','RETIRED','pem','\x01', now(), now() + interval '1 day')`)
+		VALUES ('kaname-nostamp','RS256','RETIRED','pem','\x01', now(), now() + interval '1 day')`)
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "23514"),
 		"отметка состояния обязана требоваться схемой: %v", err)

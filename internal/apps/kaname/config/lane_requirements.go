@@ -111,6 +111,16 @@ type LaneWiring struct {
 	HumanCredentialsWired bool
 	// HumanSessionsWired — хранилище СВОЕЙ сессии человека доступно.
 	HumanSessionsWired bool
+	// ProviderAdminHopBuilt — административная дорога к ВНЕШНЕМУ поставщику
+	// собрана этим корнем. Наблюдение, а не намерение профиля: адрес хопа
+	// резолвится всегда (при незаданной ручке — деривацией из доменного имени),
+	// поэтому «дороги нет» настройкой невыразимо и читается только отсюда.
+	ProviderAdminHopBuilt bool
+	// ProviderKeySetMirrorPublished — запись зеркала ЧУЖОГО набора проверочных
+	// ключей опубликована. Тот же довод, что у дороги выше: путь записи
+	// объявлен, издатель резолвится всегда, и пустым это поле настройка сделать
+	// не может.
+	ProviderKeySetMirrorPublished bool
 	// PresentableACRs — уровни доверия, которые полоса УМЕЕТ предъявить
 	// человеку. Пустой перечень означает «полоса не предъявляет ни одного»; это
 	// законное наблюдаемое состояние, а не «не заполнено».
@@ -267,6 +277,55 @@ var LaneRequirements = []LaneRequirement{
 		Stage:   LaneStageWiring,
 		Check: func(c Config, w LaneWiring) error {
 			return unreachableFloorsComplaint(w)
+		},
+	},
+	// ДВЕ СТРОКИ НИЖЕ ТРЕБУЮТ ОТСУТСТВИЯ, а не наличия, и это единственные
+	// такие в таблице (задача #2489). Требование отрицательное потому, что
+	// предмет у него — зависимость наружу: на посадке, где внешнего поставщика
+	// нет вовсе, дорога к нему и запись зеркала его ключей суть провязка к
+	// тому, чего не существует.
+	//
+	// ПОЧЕМУ СТАДИЯ ПРОВЯЗКИ. Настройкой это невыразимо by construction: оба
+	// резолва деривируют значение из доменного имени и пустого не возвращают
+	// никогда, поэтому «под own адрес пуст» не выполнимо ни при каком профиле,
+	// а требование, которого нельзя выполнить, требованием не является.
+	//
+	// ЧЕМ ДЕРЖИТСЯ НАБЛЮДЕНИЕ — ВНИМАНИЕМ, и это сказано прямо. Значение полей
+	// проставляет композиционный корень тем же способом, что и у двух соседних
+	// строк выше: наблюдением, записанным литералом, с названным предикатом
+	// смены. Механизма, отличающего честное наблюдение от подставленного, здесь
+	// нет — как нет его и у соседей; заводить его этой строке в одиночку значило
+	// бы требовать от неё большего, чем от остальной таблицы.
+	{
+		Lanes:   laneOwn,
+		Element: "дорога к внешнему поставщику не строится",
+		Stage:   LaneStageWiring,
+		Check: func(_ Config, w LaneWiring) error {
+			if !w.ProviderAdminHopBuilt {
+				return nil
+			}
+			return fmt.Errorf(
+				"%s=%s, but the composition root still builds the admin road to an EXTERNAL "+
+					"identity provider — on this posture there is no such provider, and the "+
+					"address it dials is not even declared: it is derived from the domain name, "+
+					"so the road looks configured on a stand that never configured one",
+				IdentityProviderSetting, IdentityProviderOwn)
+		},
+	},
+	{
+		Lanes:   laneOwn,
+		Element: "запись зеркала чужого набора ключей не публикуется",
+		Stage:   LaneStageWiring,
+		Check: func(_ Config, w LaneWiring) error {
+			if !w.ProviderKeySetMirrorPublished {
+				return nil
+			}
+			return fmt.Errorf(
+				"%s=%s, but the publisher still carries the mirror record of an EXTERNAL "+
+					"provider key set — a record whose issuer is derived, whose upstream does "+
+					"not exist on this posture, and which would answer every caller that asks "+
+					"for it with an unavailable upstream instead of an honest refusal",
+				IdentityProviderSetting, IdentityProviderOwn)
 		},
 	},
 }

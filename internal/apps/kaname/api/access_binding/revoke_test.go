@@ -33,7 +33,7 @@ import (
 // IAM-1-28 sync-gate: malformed AB id → INVALID_ARGUMENT first statement (before repo).
 func TestAccessBinding_Revoke_MalformedID_SyncInvalidArgument(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_rev_bad", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 
 	uc := NewRevokeAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
 	op, err := uc.Execute(newOwnerContext(ownerID), domain.AccessBindingID("not-an-acb-id"))
@@ -47,7 +47,7 @@ func TestAccessBinding_Revoke_MalformedID_SyncInvalidArgument(t *testing.T) {
 // IAM-1-28 edge (delete-parity): Revoke on a protected binding → sync FAILED_PRECONDITION.
 func TestAccessBinding_Revoke_Protected_SyncFailedPrecondition(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_rev_prot", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true) // protected
 
 	uc := NewRevokeAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
@@ -66,7 +66,7 @@ func TestAccessBinding_Revoke_Protected_SyncFailedPrecondition(t *testing.T) {
 // must not leak to a non-owner). Exact mirror of the Delete anti-leak invariant.
 func TestAccessBinding_Revoke_Protected_Unauthorized_NoLeak(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_rev_leak", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true) // protected
 
 	rs := &scopedFGA{allow: map[string]bool{}} // no admin → no grant-authority
@@ -87,7 +87,7 @@ func TestAccessBinding_Revoke_Protected_Unauthorized_NoLeak(t *testing.T) {
 // row is RETAINED with status=REVOKED (soft), contrast with Delete=hard.
 func TestAccessBinding_Revoke_Unprotected_SoftRevoke_OpDone(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_rev_ok", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, false) // unprotected
 
 	uc := NewRevokeAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
@@ -129,7 +129,7 @@ func TestAccessBinding_Revoke_Unprotected_SoftRevoke_OpDone(t *testing.T) {
 // no-ops).
 func TestAccessBinding_Revoke_TakesExclusiveBindingLockBeforeLedgerRead(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_rev_lock", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, false)
 
 	uc := NewRevokeAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)

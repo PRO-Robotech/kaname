@@ -13,9 +13,22 @@ import (
 	"time"
 )
 
-// Hydra-mirrored JWKS fixtures. The whole point of the proxy is that the served
-// kids are Hydra's ACTUAL signing kids — never a `kacho-*` kid of iam's own (iam
-// has no keyset; such a kid would be a guaranteed kid-miss / fail-closed reject).
+// Hydra-mirrored JWKS fixtures. Смысл зеркала в том, что отдаются НАСТОЯЩИЕ
+// подписные kid провайдера — и никогда наш собственный.
+//
+// Здесь стояло «iam has no keyset». Ключница у платформы ЕСТЬ, и её набор
+// публикуется этим же слушателем — ВТОРОЙ записью по своему пути. Неверен был
+// не запрет, а его довод: наш kid не имеет права попасть в запись ЗЕРКАЛА,
+// потому что для потребителя, пиннутого на прежнего издателя, он не совпадёт
+// никогда — гарантированный промах по kid и отказ fail-closed. Именно эту
+// развязку зеркало и держит.
+//
+// Своих форм у идентификатора ДВЕ, и страж обязан стеречь ОБЕ (задача #2556).
+// Чеканка переведена на имя службы, но идентификаторы прежней чеканки хранятся,
+// публикуются и подписывают живые токены до конца обычной ротации, — то есть
+// служба владеет обеими формами одновременно. Страж, суженный до новой,
+// перестал бы покрывать ключи, которые ЕЩЁ СУЩЕСТВУЮТ, и сузился бы он молча:
+// на зелёном прогоне это неотличимо от исправной работы.
 const (
 	hydraJWKS1 = `{"keys":[{"kty":"RSA","use":"sig","kid":"hydra-kid-1","alg":"RS256","n":"sbjXaaaa","e":"AQAB"}]}`
 	hydraJWKS2 = `{"keys":[{"kty":"RSA","use":"sig","kid":"hydra-kid-1","alg":"RS256","n":"sbjXaaaa","e":"AQAB"},{"kty":"RSA","use":"sig","kid":"hydra-kid-2","alg":"RS256","n":"ZZZdefff","e":"AQAB"}]}`
@@ -79,6 +92,21 @@ func newUpstream(body string) *upstream {
 }
 
 // kidsOf extracts the kid values from a JWKS document body.
+// ownMintedKidPrefixes — формы идентификатора, которые чеканит САМА служба.
+// Обе законны одновременно: вторая — прежняя чеканка, доживающая до ротации.
+var ownMintedKidPrefixes = []string{"kaname-", "kacho-"}
+
+// ownMintedKid отвечает, наш ли это идентификатор, — по ЛЮБОЙ из своих форм.
+// Один предикат на три места: три копии приставки разошлись бы молча.
+func ownMintedKid(kid string) bool {
+	for _, p := range ownMintedKidPrefixes {
+		if strings.HasPrefix(kid, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func kidsOf(t *testing.T, body []byte) []string {
 	t.Helper()
 	var doc struct {
@@ -105,7 +133,7 @@ func doGet(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 }
 
 // RJU-01 — happy: iam serves a BYTE-IDENTICAL mirror of Hydra's JWKS with
-// Cache-Control, and the served kids are Hydra's kids (not any kacho-* kid).
+// Cache-Control, and the served kids are Hydra's kids (not any iam-minted kid).
 func TestJWKSProxy_RJU01_ByteIdenticalMirror(t *testing.T) {
 	up := newUpstream(hydraJWKS1)
 	srv := httptest.NewServer(up)
@@ -128,8 +156,8 @@ func TestJWKSProxy_RJU01_ByteIdenticalMirror(t *testing.T) {
 		t.Fatalf("served kids = %v; want [hydra-kid-1]", kids)
 	}
 	for _, k := range kids {
-		if strings.HasPrefix(k, "kacho-") {
-			t.Fatalf("served an iam kacho-* kid %q — proxy must mirror Hydra kids only", k)
+		if ownMintedKid(k) {
+			t.Fatalf("served an iam-minted kid %q — proxy must mirror Hydra kids only", k)
 		}
 	}
 }
@@ -169,7 +197,7 @@ func TestJWKSProxy_RJU02_PerCallTimeoutNotDefaultClient(t *testing.T) {
 }
 
 // RJU-03 — fail-closed: a COLD cache + an unavailable Hydra (5xx / unreachable /
-// empty keyset) must yield 502/503 — never an empty 200, never iam's own kacho-*
+// empty keyset) must yield 502/503 — never an empty 200, never iam's own minted
 // kids as a substitute.
 func TestJWKSProxy_RJU03_FailClosedColdUpstreamDown(t *testing.T) {
 	cases := []struct {
@@ -217,12 +245,14 @@ func TestJWKSProxy_RJU03_FailClosedColdUpstreamDown(t *testing.T) {
 			if rec.Code == http.StatusOK {
 				t.Fatalf("served 200 on a cold cache + down upstream (fail-open)")
 			}
-			// Never a non-empty Hydra-shaped keyset, and never a kacho-* kid.
+			// Never a non-empty Hydra-shaped keyset, and never an iam-minted kid.
 			if kids := kidsOf(t, rec.Body.Bytes()); len(kids) > 0 {
 				t.Fatalf("fail-closed body carried keys %v; must serve no keys", kids)
 			}
-			if strings.Contains(rec.Body.String(), "kacho-") {
-				t.Fatalf("fail-closed body leaked an iam kacho-* kid: %q", rec.Body.String())
+			for _, p := range ownMintedKidPrefixes {
+				if strings.Contains(rec.Body.String(), p) {
+					t.Fatalf("fail-closed body leaked an iam-minted kid (%s*): %q", p, rec.Body.String())
+				}
 			}
 		})
 	}
@@ -325,7 +355,7 @@ func TestJWKSProxy_Cache_TTLRefetch(t *testing.T) {
 }
 
 // RJU-05 — rotation: Hydra publishes a new kid; after TTL iam refetches and serves
-// the updated keyset containing the new Hydra kid (still never a kacho-* kid).
+// the updated keyset containing the new Hydra kid (still never an iam-minted kid).
 func TestJWKSProxy_RJU05_RotationNewKid(t *testing.T) {
 	up := newUpstream(hydraJWKS1)
 	up.cc = ""
@@ -350,8 +380,8 @@ func TestJWKSProxy_RJU05_RotationNewKid(t *testing.T) {
 		if k == "hydra-kid-2" {
 			found = true
 		}
-		if strings.HasPrefix(k, "kacho-") {
-			t.Fatalf("rotation served a kacho-* kid %q", k)
+		if ownMintedKid(k) {
+			t.Fatalf("rotation served an iam-minted kid %q", k)
 		}
 	}
 	if !found {

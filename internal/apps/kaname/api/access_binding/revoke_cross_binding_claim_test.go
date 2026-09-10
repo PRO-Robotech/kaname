@@ -113,7 +113,7 @@ func newCrossClaimFixture(t *testing.T) crossClaimFixture {
 	t.Helper()
 	const (
 		roleID     = "rol_edit_cross_claim"
-		roleName   = "kacho.edit"
+		roleName   = "kaname.edit"
 		subjectID  = "usr_cross_claim_subject"
 		resourceID = "prj_cross_claim_project"
 		ownerID    = "usr_cross_claim_owner"

@@ -161,11 +161,25 @@ func TestHydraTokenClient_PinnedAnchor_CompletesTheExchange(t *testing.T) {
 // Moving the address to https WITHOUT an anchor does not half-work: it fails on an
 // unknown authority. This is the trap the boot guard refuses, asserted here as
 // behaviour so nobody "simplifies" the guard away.
+//
+// КЛИЕНТ СТРОИТСЯ ТЕМ ЖЕ ПОСТРОИТЕЛЕМ, ЧТО И В ПРОДЕ, и это несущая часть пробы,
+// а не стиль. Прежняя редакция звала `NewHydraTokenClient` — построитель, у
+// которого в дереве НОЛЬ производственных вызывающих: полосу «без якоря» в проде
+// строит `NewHydraTokenClientWithCA` с пустым якорем (`provider_hop.go`).
+// Проба тем самым утверждала о дороге, по которой процесс не идёт ни разу, и
+// оставалась ЗЕЛЁНОЙ, когда производственная ветка пустого якоря переставала
+// проверять пира вовсе. Замер: мутация этой ветки на `InsecureSkipVerify` не
+// роняла эту пробу — краснел только сосед ниже, и краснел он на СТРУКТУРНОМ
+// признаке («транспорт остался умолчанием»), а не на том свойстве, которое
+// названо здесь.
 func TestHydraTokenClient_NoAnchor_RefusesTheInternalCAPeer(t *testing.T) {
 	ca := newTestCA(t, "kacho-internal-ca")
 	srv := tlsServer(t, ca, tokenHandler())
 
-	c := clients.NewHydraTokenClient(srv.URL)
+	c, err := clients.NewHydraTokenClientWithCA(srv.URL, "")
+	if err != nil {
+		t.Fatalf("пустой якорь — законный вход производственного построителя, получено: %v", err)
+	}
 	if _, err := c.ClientCredentials(context.Background(), clients.ClientCredentialsRequest{ClientAssertion: "assertion"}); err == nil {
 		t.Fatal("an internal-CA peer must not be accepted on the system roots, got nil error")
 	}

@@ -107,9 +107,20 @@ type CredentialValidator interface {
 // бы предъявителю, как именно разобран его вход, то есть была бы оракулом.
 var ErrCredentialKindNotAccepted = errors.New("registry token: the presented credential kind is not accepted on this lane")
 
-// ErrIssuerUnavailable — Hydra (the token issuer, a hard mint-path dependency)
-// is unreachable / misbehaving. The handler maps it to 503 (fail-closed): peer
-// unavailability must NOT yield a token and must NOT open-fail.
+// ErrIssuerUnavailable — издатель токена не ответил. Обработчик отображает это
+// в 503 (fail-closed): недоступность издателя НЕ даёт токена и НЕ открывает
+// проход.
+//
+// ЧЕЙ ЭТО ОТКАЗ — ЗАВИСИТ ОТ ПОСАДКИ, и здесь стояло обратное. Прежняя редакция
+// называла внешнего поставщика «жёсткой зависимостью пути чеканки», при том что
+// на переведённом контуре (`BuildConfig.Signer` подключён) до обменника дело не
+// доходит вовсе: четыре из шести производственных мест этого признака ниже
+// оборачивают ошибку НАШЕГО подписанта, а не ответ постороннего.
+//
+// Цена ошибки — не стиль: эту строку читают в момент 503, и она отправляла
+// чинить чужой процесс там, где отказала своя чеканка. Тот же класс уже назван
+// у соседа своим именем — `bootstrap_token/local_mint.go`, врезка «ЗАМЕНА, А НЕ
+// ПЕРЕИМЕНОВАНИЕ».
 var ErrIssuerUnavailable = errors.New("registry token: issuer unavailable")
 
 // AssertionInput — the RFC 7523 client_assertion parameters.

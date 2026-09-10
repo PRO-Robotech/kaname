@@ -97,7 +97,7 @@ var gsExpectedGroups = map[string]string{
 // проходит зелёным по всему пакету.
 func newGrantSurfaceFixture(t *testing.T) (*abFakeRepo, *abQueriesStub) {
 	t.Helper()
-	repo := newABFakeRepo("usr_o", gsAccount, "", "rol_v", "kacho.view", nil)
+	repo := newABFakeRepo("usr_o", gsAccount, "", "rol_v", "kaname.view", nil)
 	seedABListByScope(repo, []domain.AccessBinding{
 		// Плоская пара без строк набора: так выглядит выдача, у которой
 		// канонический набор не спроецирован. Единственный путь к её группе —

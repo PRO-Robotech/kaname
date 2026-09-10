@@ -39,10 +39,11 @@ package service_test
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // actingAsGateFromCatalog — отношение и тип объекта, которыми край гейтит выпуск
@@ -53,9 +54,11 @@ import (
 // бы, что проба утверждает о СВОЁМ представлении гейта, а не о действующем.
 func actingAsGateFromCatalog(t *testing.T, fqn string) (relation, objectType string) {
 	t.Helper()
-	root := monorepoRootForActingAs(t)
 	const rel = "services/iam/internal/apps/kaname/seed/embedded/permission_catalog.json"
-	data, err := os.ReadFile(filepath.Join(root, rel))
+	// Координата приводится ДЕТЕКТОРОМ ПОСАДКИ, а не собственным подъёмом.
+	// Файл лежит ВНУТРИ каталога модуля и едет вместе с ним, поэтому резолв
+	// отвечает в ОБЕИХ посадках и пропуска здесь не бывает by construction.
+	data, err := os.ReadFile(platformtree.RequirePath(t, rel))
 	require.NoErrorf(t, err, "каталог прав %s не прочитан — у пробы нет источника гейта", rel)
 
 	var entries []struct {
@@ -76,28 +79,6 @@ func actingAsGateFromCatalog(t *testing.T, fqn string) (relation, objectType str
 	}
 	t.Fatalf("каталог не знает %s — проба утверждала бы о несуществующем гейте", fqn)
 	return "", ""
-}
-
-func monorepoRootForActingAs(t *testing.T) string {
-	t.Helper()
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-	dir := wd
-	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
-	// теперь СВОЙ модуль, и подъём «до первого» останавливался бы в её каталоге,
-	// а пути ниже называют место В ДЕРЕВЕ МОНОРЕПО — от корня.
-	outermost := ""
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			outermost = dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			require.NotEmptyf(t, outermost, "корень монорепо (go.mod) не найден от %s", wd)
-			return outermost
-		}
-		dir = parent
-	}
 }
 
 // TestIssuingAPersonalTokenIsNotReachableFromInsideTheAccount — вердикт по

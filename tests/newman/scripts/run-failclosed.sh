@@ -134,7 +134,7 @@ if len(parts) != 3:
 hdr = json.loads(d(parts[0]))
 if not isinstance(hdr.get("alg"), str) or not hdr["alg"]:
     sys.exit("в заголовке jwtAccountAdminA нет alg")
-hdr["kid"] = "kacho-lane-probe-no-such-key"
+hdr["kid"] = "kaname-lane-probe-no-such-key"
 parts[0] = e(json.dumps(hdr, separators=(",", ":")).encode())
 print(".".join(parts))
 PY

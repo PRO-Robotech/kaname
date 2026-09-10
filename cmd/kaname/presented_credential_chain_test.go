@@ -48,7 +48,7 @@ const (
 	chainIssuer   = "https://kaname.chain.test"
 	chainAudience = "kaname-public"
 	chainSubject  = "usr-01hchainchainchain"
-	chainKID      = "kacho-chain-a"
+	chainKID      = "kaname-chain-a"
 	chainRPC      = "/kaname.cloud.iam.v1.ProjectService/Get"
 )
 

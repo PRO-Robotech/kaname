@@ -8,7 +8,7 @@
 // exchange; Hydra rejects that exchange unless the SA-key's OAuth2 client
 // whitelists that audience. So SA-key issuance MUST ALWAYS include the
 // configured registry service audience in the Hydra client's `audience`
-// whitelist — in addition to the default kacho-internal audience and any
+// whitelist — in addition to the default kaname-internal audience and any
 // caller-supplied audience (union, deduplicated).
 //
 // RED-then-GREEN, test-first: these fail without the RegistryAudience field +
@@ -58,14 +58,14 @@ func TestResolveAudience_AlwaysIncludesRegistryAudience(t *testing.T) {
 	}{
 		{
 			name:           "caller omits audience → internal default + registry audience",
-			audiencePrefix: "kacho:iam:",
+			audiencePrefix: "kaname:iam:",
 			registryAud:    testRegistryAud,
 			in:             IssueInput{ServiceAccountID: "sva_docker0000000000"},
-			wantContains:   []string{"kacho:iam:/sa/sva_docker0000000000", testRegistryAud},
+			wantContains:   []string{"kaname:iam:/sa/sva_docker0000000000", testRegistryAud},
 		},
 		{
 			name:           "caller-supplied audience is unioned with registry audience",
-			audiencePrefix: "kacho:iam:",
+			audiencePrefix: "kaname:iam:",
 			registryAud:    testRegistryAud,
 			in: IssueInput{
 				ServiceAccountID: "sva_ext0000000000000",
@@ -75,7 +75,7 @@ func TestResolveAudience_AlwaysIncludesRegistryAudience(t *testing.T) {
 		},
 		{
 			name:           "registry audience already supplied by caller → no duplicate",
-			audiencePrefix: "kacho:iam:",
+			audiencePrefix: "kaname:iam:",
 			registryAud:    testRegistryAud,
 			in: IssueInput{
 				ServiceAccountID: "sva_ext0000000000000",
@@ -145,7 +145,7 @@ func TestIssue_PrivateKeyJWT_WhitelistsRegistryAudienceByDefault(t *testing.T) {
 			hydra.gotReq.Audience, testRegistryAud)
 	}
 	if !containsStr(hydra.gotReq.Audience, "https://internal.example/iam/sa/sva_docker0000000000") {
-		t.Errorf("Hydra audience = %v, must still contain the kacho-internal default", hydra.gotReq.Audience)
+		t.Errorf("Hydra audience = %v, must still contain the kaname-internal default", hydra.gotReq.Audience)
 	}
 
 	resp := &iamv1.IssueSAKeyResponse{}

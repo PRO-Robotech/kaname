@@ -307,10 +307,18 @@ func (c AuthNConfig) ResolveHydraJWKSCAFile() string {
 // ResolveHydraTokenURL: the explicit `authn.hydra-jwks-url` / ENV
 // KANAME_HYDRA_JWKS_URL override (a cluster-internal Service, e.g.
 // http://kacho-umbrella-hydra-public.<ns>.svc:4444/.well-known/jwks.json), then the
-// derived `<issuer>/.well-known/jwks.json` (back-compat). Hydra remains the signer;
-// iam serves a byte-identical mirror so the served kids are Hydra's real signing
-// kids (iam has no keyset of its own — it mints nothing). Only the network target
-// differs — the `iss` of a verified token stays the external Hydra issuer.
+// derived `<issuer>/.well-known/jwks.json` (back-compat).
+//
+// Провайдер остаётся подписантом СВОЕЙ записи, и зеркало байт-в-байт: отдаются
+// его настоящие подписные kid. Меняется только сетевая цель — `iss`
+// проверенного токена остаётся внешним издателем.
+//
+// Здесь стояло «iam has no keyset of its own — it mints nothing». Это верно про
+// ЗЕРКАЛО и неверно про платформу: у неё своя ключница (`authn.token-signing`),
+// и её набор публикуется ВТОРОЙ записью по своему пути
+// (`authn.token-signing.key-set-path`). Утверждение об исключительности,
+// сказанное у одной записи, читается как свойство всей выдачи — и посылает
+// разбирающего искать причину не там.
 func (c AuthNConfig) ResolveHydraJWKSURL() string {
 	if v := c.DeclaredHydraJWKSURL(); v != "" {
 		return v
@@ -348,4 +356,31 @@ func (c AuthNConfig) HydraAdminTokenEnvName() string {
 // читаемая в корне сборки, — нет.
 func (c AuthNConfig) ResolveHydraAdminToken() string {
 	return strings.TrimSpace(os.Getenv(c.HydraAdminTokenEnvName()))
+}
+
+// Значения ручки «чем административный контур аутентифицирует нас». Объявлены
+// ОДНИМ местом: их называют резолв, страж старта и текст его отказа. Три копии
+// разошлись бы молча — на той, которую забыли поправить.
+const (
+	// ProviderAdminAuthBearer — контур возит административный предъявитель.
+	ProviderAdminAuthBearer = "bearer"
+	// ProviderAdminAuthNone — административный порт поставщика не
+	// аутентифицирует никого. Значение ОБЪЯВЛЯЕТСЯ оператором, а не
+	// подразумевается нами: это утверждение о ЕГО поставщике.
+	ProviderAdminAuthNone = "none"
+)
+
+// ProviderAdminAuthValue — объявленный способ аутентификации административного
+// контура, как его прочитал процесс.
+//
+// Пустая строка означает «оператор не объявлял», и это ОТДЕЛЬНОЕ состояние, не
+// сводимое ни к `none`, ни к `bearer`: страж обязан различать «сказано, что не
+// нужен» и «не сказано ничего».
+func (c AuthNConfig) ProviderAdminAuthValue() string {
+	return strings.ToLower(strings.TrimSpace(c.ProviderAdminAuth))
+}
+
+// ProviderAdminAuthValues — закрытый словарь значений ручки, для текста отказа.
+func ProviderAdminAuthValues() []string {
+	return []string{ProviderAdminAuthBearer, ProviderAdminAuthNone}
 }

@@ -29,7 +29,7 @@ func TestAccessBinding_Delete_OwnerCanRevokeAnyBindingOnOwnResource(t *testing.T
 		accountID = "acc_test_account"
 		projectID = "prj_test_project"
 		roleID    = "rol_viewer_test_001"
-		roleName  = "kacho.view"
+		roleName  = "kaname.view"
 		subjectID = "usr_strang_subject"
 	)
 
@@ -72,7 +72,7 @@ func TestAccessBinding_Delete_StrangerDenied(t *testing.T) {
 		accountID = "acc_test_account"
 		projectID = "prj_test_project"
 		roleID    = "rol_viewer_test_001"
-		roleName  = "kacho.view"
+		roleName  = "kaname.view"
 		subjectID = "usr_strang_subject"
 	)
 
@@ -124,7 +124,7 @@ func TestAccessBinding_Delete_SubjectIsOwner_Allowed(t *testing.T) {
 		accountID = "acc_test_account"
 		projectID = "prj_test_project"
 		roleID    = "rol_viewer_test_001"
-		roleName  = "kacho.view"
+		roleName  = "kaname.view"
 	)
 	// owner of the account IS the subject.
 	repo := newABFakeRepo(ownerID, accountID, projectID, roleID, roleName, nil)

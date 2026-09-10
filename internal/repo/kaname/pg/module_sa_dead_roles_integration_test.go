@@ -59,6 +59,8 @@ package pg_test
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"testing"
 
@@ -99,6 +101,7 @@ func TestModuleSARoles_RetiredAndGrantNothing(t *testing.T) {
 	pool, err := pgxpool.New(ctx, setupTestDB(t))
 	require.NoError(t, err)
 	defer pool.Close()
+	applyPlatformModuleSeed(ctx, t, pool)
 
 	// Селекторы системных ролей проецируются самолечащим посевом (в проде — на
 	// загрузке). Зовём его явно, иначе «ноль селекторов» был бы получен из того,
@@ -168,6 +171,7 @@ func TestModuleSACapabilitiesSurviveRetirement(t *testing.T) {
 	pool, err := pgxpool.New(ctx, setupTestDB(t))
 	require.NoError(t, err)
 	defer pool.Close()
+	applyPlatformModuleSeed(ctx, t, pool)
 
 	// Личность — у всех шести.
 	for _, m := range retiredModuleSA {
@@ -180,13 +184,20 @@ func TestModuleSACapabilitiesSurviveRetirement(t *testing.T) {
 
 	// Право ЗАПИСИ в хранилище отношений — ровно у пяти, кто его имел (у шлюза
 	// его не было и не появляется).
+	//
+	// Спрашивается ДЕЙСТВУЮЩЕЕ право, а не строка журнала на снятом якоре: право
+	// переехало на кластерное отношение (`20260823002000`), и прежние записи
+	// журнала лежат рядом со своими событиями снятия. Разбор — доккомментарий
+	// `requireFGAWriterTuple` (#2452); здесь он не пересказывается.
 	fgaWriters := []string{"vpc", "compute", "nlb", "registry", "storage"}
 	for _, svc := range fgaWriters {
-		require.Equal(t, 1, countClusterTuple(t, ctx, pool, svc, "fga_writer", "iam_fgaproxy:system"),
-			"кортеж fga_writer учётки kacho-%s обязан ОСТАТЬСЯ: им авторизована запись "+
-				"owner-кортежей (заголовок 0044 говорит это прямо), и роль тут ни при чём", svc)
+		require.Equal(t, 1,
+			countLiveRelationThroughGroup(t, ctx, pool, svaOfModule(svc), relationWritersGroup, "fga_writer"),
+			"право fga_writer учётки kacho-%s обязано ОСТАТЬСЯ: им авторизована запись "+
+				"owner-кортежей, и роль тут ни при чём", svc)
 	}
-	require.Zero(t, countClusterTuple(t, ctx, pool, "api-gateway", "fga_writer", "iam_fgaproxy:system"),
+	require.Zero(t,
+		countLiveRelationThroughGroup(t, ctx, pool, svaOfModule("api-gateway"), relationWritersGroup, "fga_writer"),
 		"зеркальная клетка: у шлюза права записи не было — снятие роли не должно его ПОЯВИТЬ")
 
 	// Право ЧТЕНИЯ внутреннего листенера — ровно у трёх, кто его имел.
@@ -205,6 +216,14 @@ func TestModuleSACapabilitiesSurviveRetirement(t *testing.T) {
 				"объявления не смеет его выдать: ровно это сделала бы правка, снимающая "+
 				"правила и оставляющая строки прав", svc)
 	}
+}
+
+// svaOfModule — идентификатор служебной записи модуля, выведенный тем же
+// выражением, каким его выводит хранилище (`'sva' || substr(md5(<имя>), 1, 17)`).
+// Второе выражение здесь разошлось бы с первым молча.
+func svaOfModule(svc string) string {
+	sum := md5.Sum([]byte("kacho-" + svc))
+	return "sva" + hex.EncodeToString(sum[:])[:17]
 }
 
 // countClusterTuple считает посеянные в fga_outbox кортежи одной учётки по паре

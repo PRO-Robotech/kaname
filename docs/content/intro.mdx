@@ -50,10 +50,11 @@ API следует **конвенциям Kachō**: плоские (flat) рес
 мутации — асинхронные через `Operation` с поллингом.
 
 :::info Control-plane only
-Kaname управляет **описанием личностей и прав**. Хранение паролей / passkey и интерактивный
-вход вынесены в интеграцию с Ory Kratos, а выпуск и валидация OAuth 2.0-токенов — в Ory Hydra
-(см. [Идентичность и токены](/architecture/identity)). IAM хранит *проекцию* личности
-(User-row) и модель авторизации.
+Kaname управляет **описанием личностей и прав**. Хранение паролей / passkey и интерактивный вход
+вынесены в интеграцию с Ory Kratos и Ory Hydra. **Программные** токены платформа выпускает сама
+там, где объявлен её токен-эндпоинт, — своим подписантом и своей ключницей; где не объявлен, их
+по-прежнему выпускает Hydra (см. [Идентичность и токены](/architecture/identity)). IAM хранит
+*проекцию* личности (User-row) и модель авторизации.
 :::
 
 :::tip С чего начать
@@ -93,7 +94,9 @@ Kaname управляет **описанием личностей и прав**.
 </table>
 
 Кроме tenant-ресурсов IAM выдаёт **креды доступа**: статические ключи сервис-аккаунтов
-(`SAKey`) и персональные токены пользователя (`UserToken`) — оба через OAuth 2.0-клиенты Hydra.
+(`SAKey`) и персональные токены пользователя (`UserToken`) — оба по стандарту OAuth 2.0. Токен по
+такому кроду выпускает платформа там, где объявлен её токен-эндпоинт, и OAuth-клиент Hydra там,
+где не объявлен.
 
 ### Иерархия и привязки
 
@@ -138,7 +141,7 @@ flowchart LR
   end
   subgraph idp["Identity providers"]
     kratos["Ory Kratos<br/>login / identity"]
-    hydra["Ory Hydra<br/>OAuth2 tokens"]
+    hydra["Ory Hydra<br/>интерактивный вход,<br/>токены на непереведённой установке"]
   end
   subgraph store["Хранилище"]
     pg[("PostgreSQL<br/>kaname · права · outbox")]
@@ -183,7 +186,7 @@ flowchart LR
   <div className={hero.featureCard}>
     <span className={hero.featureIcon}>🎫</span>
     <span className={hero.featureTitle}>OAuth 2.0-креды</span>
-    <span className={hero.featureBody}>Ключи сервис-аккаунтов и токены пользователей через Ory Hydra (private_key_jwt + jwt-bearer федерация).</span>
+    <span className={hero.featureBody}>Ключи сервис-аккаунтов и токены пользователей по стандарту OAuth 2.0 (private_key_jwt + jwt-bearer федерация); выпуск — свой либо через Ory Hydra, по установке.</span>
   </div>
   <div className={hero.featureCard}>
     <span className={hero.featureIcon}>📓</span>
@@ -201,7 +204,7 @@ flowchart LR
     <tr><td>Protocol Buffers / Buf</td><td>Контракт API (<code>proto/</code>, домен <code>kaname.cloud.iam.v1</code>)</td></tr>
     <tr><td>PostgreSQL / pgx v5</td><td>Хранилище <code>kaname</code> — и данные, и права, и вердикт (без ORM — sqlc + handwritten pgx)</td></tr>
     <tr><td>Ory Kratos</td><td>Аутентификация и хранение личностей (login / passkey); User — проекция identity</td></tr>
-    <tr><td>Ory Hydra</td><td>OAuth 2.0 authorization server: токены сервис-аккаунтов и пользователей</td></tr>
+    <tr><td>Ory Hydra</td><td>OAuth 2.0 authorization server: интерактивный вход человека; программные токены — там, где токен-эндпоинт платформы не объявлен</td></tr>
     <tr><td>Goose</td><td>Версионирование схемы (набор миграций <code>0001…</code>)</td></tr>
     <tr><td>grpc-gateway</td><td>REST-проекция gRPC</td></tr>
   </tbody>

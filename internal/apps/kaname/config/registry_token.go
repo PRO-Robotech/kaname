@@ -2,11 +2,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // registry_token.go — config for the Docker Registry v2 `/iam/token`
-// auth-server HTTP listener (the `/iam/token` endpoint only). There is NO JWKS
-// endpoint on this listener: the data-plane's Hydra-JWKS verification keys are
-// served separately by the cluster-INTERNAL jwks-proxy listener (a caching mirror
-// of Hydra's public JWKS — see jwks_proxy.go / internal/handler/jwksproxyhttp).
-// Hydra stays the issuer/signer; iam mints nothing here.
+// auth-server HTTP listener (the `/iam/token` endpoint only). There is NO
+// key-set endpoint on this listener: ключи проверки плоскости данных отдаёт
+// ОТДЕЛЬНЫЙ внутренний публикатор (jwks_proxy.go /
+// internal/handler/jwksproxyhttp), и записей у него две — зеркало провайдера и
+// наша.
+//
+// ЗДЕСЬ СТОЯЛО «Hydra stays the issuer/signer; iam mints nothing here» — и
+// противоречило соседнему абзацу этого же комментария, который говорит про
+// «the minted identity-JWT». Верно второе: на переведённом контуре докерный
+// токен чеканит НАШ подписант (`internal/registrytokenwire`, LocalMintAdapter
+// поверх tokensigner). Признак перевода — объявленная своя чеканка; там, где её
+// не объявляли, полоса по-прежнему брокерит токен у провайдера.
 //
 // The listener is EXTERNAL-reachable (docker clients hit `/iam/token` through
 // the edge); TLS is terminated at the ingress, so the process binds plaintext —

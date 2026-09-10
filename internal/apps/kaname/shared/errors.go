@@ -23,6 +23,24 @@ import (
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
+// UnavailableMessage — текст, который получает вызывающий на признаке
+// недоступности. ЕДИНСТВЕННЫЙ производитель этого текста в службе.
+//
+// # Почему константа, а не литерал у каждого переводчика
+//
+// Переводчик отказа в этой службе не один, и предмет у них общий. Пока текст
+// стоял литералом, копии разошлись с каноном молча: канон был переведён на
+// фиксированный текст, копии остались на тексте цепочки, и решения об этом
+// расхождении никто не принимал (задача #2464). Второе место об одном предмете
+// расходится на первом же уточнении — здесь оно расходилось полтора месяца.
+//
+// # Почему текст НЕ называет подсистему
+//
+// Признак недоступности ставит и база, и сосед, и гейт прав, поэтому
+// «database unavailable» на проводе был бы собственной маленькой ложью в двух
+// случаях из трёх. Вызывающему довольно кода и того, что повтор осмыслен.
+const UnavailableMessage = "service unavailable"
+
 // MapRepoErr — sentinel → gRPC status. Возвращает nil на nil-input.
 //
 // Полное покрытие 8 sentinel'ов (включая ErrPermissionDenied /
@@ -99,7 +117,7 @@ func MapRepoErr(err error) error {
 		// Текст НЕ называет подсистему: признак недоступности ставит и база, и
 		// сосед, и гейт прав, поэтому «database unavailable» на проводе был бы
 		// собственной маленькой ложью в двух случаях из трёх.
-		return status.Error(codes.Unavailable, "service unavailable")
+		return status.Error(codes.Unavailable, UnavailableMessage)
 	case stderrors.Is(err, iamerr.ErrInternal):
 		// hardening-invariant #1: INTERNAL carries a FIXED opaque text, never the
 		// wrapped detail (a wrapped ErrInternal may embed subject/principal ids,

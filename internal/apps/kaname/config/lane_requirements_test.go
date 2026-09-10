@@ -170,6 +170,11 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		w.HumanSessionsWired = false
 	case "каждый уровень доверия каталога предъявим":
 		w.PresentableACRs = nil
+	// Две строки ниже требуют ОТСУТСТВИЯ, поэтому ломаются наличием.
+	case "дорога к внешнему поставщику не строится":
+		w.ProviderAdminHopBuilt = true
+	case "запись зеркала чужого набора ключей не публикуется":
+		w.ProviderKeySetMirrorPublished = true
 	default:
 		// Новая строка таблицы без способа её сломать — НАХОДКА, а не пропуск:
 		// иначе клетка была бы «покрыта» случаем, который ничего не проверяет.
@@ -186,7 +191,12 @@ func wiredLane() config.LaneWiring {
 		OwnMintSignerWired:    true,
 		HumanCredentialsWired: true,
 		HumanSessionsWired:    true,
-		PresentableACRs:       []string{"1", "2"},
+		// Полностью провязанная полоса `own` — это в том числе полоса, у
+		// которой дороги к внешнему поставщику НЕТ: два поля ниже требуются
+		// отсутствующими, поэтому «всё выполнено» для них означает false.
+		ProviderAdminHopBuilt:         false,
+		ProviderKeySetMirrorPublished: false,
+		PresentableACRs:               []string{"1", "2"},
 		CatalogFloors: config.CatalogFloors{
 			Readable: true,
 			ByLevel:  map[string]int{"1": 285, "2": 32},

@@ -131,7 +131,7 @@ func TestKAN_VER_05_ClockSkewIsThePlatformOne(t *testing.T) {
 // именно то, ради чего заведено: решение принимается по перечню установки, а не
 // по тому, что заявлено в самом токене.
 func TestKAN_VER_06_AlgorithmOutsideTheDeclaredListIsRefused(t *testing.T) {
-	edKey := newKey(t, "kacho-2026-09-ed", domain.SigningAlgEdDSA)
+	edKey := newKey(t, "kaname-2026-09-ed", domain.SigningAlgEdDSA)
 	m := goodMint(edKey, time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC))
 	raw := m.sign(t)
 
@@ -213,7 +213,7 @@ func TestKAN_VER_10_KeyIDThatDoesNotResolveIsRefused(t *testing.T) {
 	s := newStand(t)
 
 	unknown := goodMint(s.key, s.now)
-	unknown.kid = "kacho-2026-09-unknown"
+	unknown.kid = "kaname-2026-09-unknown"
 	unknownErr := assertRefused(t, s, unknown.sign(t))
 
 	malformed := goodMint(s.key, s.now)
@@ -234,8 +234,8 @@ func TestKAN_VER_10_KeyIDThatDoesNotResolveIsRefused(t *testing.T) {
 func TestKAN_VER_11_CriticalHeaderNotUnderstoodRefusesTheWholeToken(t *testing.T) {
 	s := newStand(t)
 	m := goodMint(s.key, s.now)
-	m.crit = []string{"kacho-not-implemented"}
-	m.extraHdr = map[string]any{"kacho-not-implemented": "whatever"}
+	m.crit = []string{"kaname-not-implemented"}
+	m.extraHdr = map[string]any{"kaname-not-implemented": "whatever"}
 	assertRefused(t, s, m.sign(t))
 }
 
@@ -463,7 +463,7 @@ func TestKAN_DENY_01_EveryAuthenticationRefusalIsByteIdentical(t *testing.T) {
 	refusals["время не наступило"] = mustRefuse(t, s, m.sign(t))
 
 	// 5 — подпись вне перечня
-	edKey := newKey(t, "kacho-2026-09-ed", domain.SigningAlgEdDSA)
+	edKey := newKey(t, "kaname-2026-09-ed", domain.SigningAlgEdDSA)
 	s = newStand(t, withAllowedAlgorithms(tokenpolicy.AlgES256), withExtraPublishedKeys(edKey.published))
 	refusals["подпись вне перечня"] = mustRefuse(t, s, goodMint(edKey, s.now).sign(t))
 
@@ -488,13 +488,13 @@ func TestKAN_DENY_01_EveryAuthenticationRefusalIsByteIdentical(t *testing.T) {
 	// 9 — идентификатор ключа не резолвится
 	s = newStand(t)
 	m = goodMint(s.key, s.now)
-	m.kid = "kacho-2026-09-unknown"
+	m.kid = "kaname-2026-09-unknown"
 	refusals["идентификатор ключа не резолвится"] = mustRefuse(t, s, m.sign(t))
 
 	// 10 — помеченный обязательным параметр не исполняется
 	s = newStand(t)
 	m = goodMint(s.key, s.now)
-	m.crit = []string{"kacho-not-implemented"}
+	m.crit = []string{"kaname-not-implemented"}
 	refusals["критический параметр не исполняется"] = mustRefuse(t, s, m.sign(t))
 
 	// 11 — отозван
@@ -776,7 +776,7 @@ func TestPresented_UnknownKeyIDForcesARefreshWithinItsOwnInterval(t *testing.T) 
 	}
 
 	// Ротация: в реестре новый ключ, снимок о нём не знает.
-	rotated := newKey(t, "kacho-2026-09-b", domain.SigningAlgES256)
+	rotated := newKey(t, "kaname-2026-09-b", domain.SigningAlgES256)
 	s.keys.set(s.key.published, rotated.published)
 	rawRotated := goodMint(rotated, s.now).sign(t)
 
@@ -793,7 +793,7 @@ func TestPresented_UnknownKeyIDForcesARefreshWithinItsOwnInterval(t *testing.T) 
 	// запросов к хранилищу.
 	for i := 0; i < 10; i++ {
 		m := goodMint(s.key, s.now)
-		m.kid = "kacho-2026-09-unknown"
+		m.kid = "kaname-2026-09-unknown"
 		assertRefused(t, s, m.sign(t))
 	}
 	if got := s.keys.askedTimes(); got != afterForced {

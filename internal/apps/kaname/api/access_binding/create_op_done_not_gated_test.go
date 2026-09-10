@@ -94,7 +94,7 @@ var _ SelectorReconciler = (*blockingReconciler)(nil)
 func TestCreateAccessBinding_OperationDoneNotGatedOnMaterialization(t *testing.T) {
 	const (
 		roleID     = "rol_opgate_role"
-		roleName   = "kacho.admin"
+		roleName   = "kaname.admin"
 		subjectID  = "usr_opgate_subject"
 		resourceID = "prj_opgate_project"
 		ownerID    = "usr_opgate_owner"

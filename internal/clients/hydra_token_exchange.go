@@ -4,11 +4,18 @@
 // hydra_token_exchange.go — client for the Ory Hydra PUBLIC OAuth2 token
 // endpoint (`POST /oauth2/token`). Used by the Docker Registry v2 `/iam/token`
 // shim: the shim signs an ES256 client_assertion from the presented SA-key and
-// brokers a `client_credentials` + `private_key_jwt` exchange, returning Hydra's
-// access_token to the docker client. kaname no longer mints registry tokens
-// itself — Hydra is the issuer/signer. (The data-plane verifies that token against
-// Hydra's JWKS, which iam mirrors on a separate cluster-internal jwks-proxy
-// listener — internal/handler/jwksproxyhttp — never re-signing anything.)
+// brokers a `client_credentials` + `private_key_jwt` exchange, returning the
+// provider's access_token to the docker client.
+//
+// ЭТОТ КЛИЕНТ — ПОЛОСА НЕПЕРЕВЕДЁННОГО КОНТУРА, и только она. Здесь стояло
+// «kaname no longer mints registry tokens itself», сказанное о платформе; верно
+// это ровно про путь, идущий через ЭТОТ файл. Там, где своя чеканка объявлена,
+// докерный токен выпускает наш подписант (internal/registrytokenwire,
+// LocalMintAdapter), и до этого клиента запрос не доходит вовсе.
+//
+// (Плоскость данных сверяет полученный токен по записи набора ключей ЕГО
+// издателя; обе записи отдаёт публикатор iam — internal/handler/jwksproxyhttp,
+// зеркало ничего не переподписывает.)
 //
 // Failure classification (fail-closed, no-leak):
 //   - network failure / timeout / 5xx / malformed 2xx  → ErrHydraUnavailable
@@ -45,17 +52,6 @@ type HydraTokenClient struct {
 	// in production, e.g. http://kacho-umbrella-hydra-public.<ns>.svc:4444/oauth2/token).
 	TokenURL   string
 	HTTPClient *http.Client
-}
-
-// NewHydraTokenClient — constructor without a pinned trust anchor (default
-// timeout 10s). Kept for the call sites that address the provider's public
-// listener over plaintext http in-cluster; production must use
-// NewHydraTokenClientWithCA once that listener is served over TLS.
-func NewHydraTokenClient(tokenURL string) *HydraTokenClient {
-	return &HydraTokenClient{
-		TokenURL:   tokenURL,
-		HTTPClient: &http.Client{Timeout: tokenHopTimeout},
-	}
 }
 
 // NewHydraTokenClientWithCA builds the client and, when an anchor is configured,

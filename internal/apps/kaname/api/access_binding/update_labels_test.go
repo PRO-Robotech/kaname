@@ -33,7 +33,7 @@ import (
 // reconcile event on iam.accessBinding.
 func TestAccessBinding_Update_T33IMM01_LabelsMutable(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_t33_lbl", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, false)
 
 	uc := NewUpdateAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
@@ -57,7 +57,7 @@ func TestAccessBinding_Update_T33IMM01_LabelsMutable(t *testing.T) {
 // set NOT weakened — only labels was added).
 func TestAccessBinding_Update_T33IMM01_RoleIDImmutable(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_t33_imm", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true)
 
 	uc := NewUpdateAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)
@@ -74,7 +74,7 @@ func TestAccessBinding_Update_T33IMM01_RoleIDImmutable(t *testing.T) {
 // deletion_protection remains mutable alongside labels (set not weakened).
 func TestAccessBinding_Update_T33IMM01_DeletionProtectionStillMutable(t *testing.T) {
 	const ownerID, accountID, roleID = "usr_acct_owner", "acc_t33_dp", "rol_viewer_test_001"
-	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kacho.view", nil)
+	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true)
 
 	uc := NewUpdateAccessBindingUseCase(repo, newFakeOpsRepo()).WithRelationStore(newRecordingFGA(), nil)

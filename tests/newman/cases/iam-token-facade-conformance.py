@@ -40,8 +40,10 @@ Three lanes and the negatives that make each of them mean something:
                          facade's key-set records), and the edge answers 200 — neither
                          401 nor 403.
                 IBT-12 — the MIRROR record is faithful to the provider's public keyset
-                         (same kids, same moduli): on that record iam proxies, iam
-                         mints nothing.
+                         (same kids, same moduli): on that record iam is a proxy and
+                         not an issuer. Сказано про ЗАПИСЬ, а не про платформу: своя
+                         ключница у неё есть, и её набор отдаёт ВТОРАЯ запись того же
+                         публикатора.
   issuance      IBT-05 — a credential is issued AND revoked through iam's own RPCs
                          (SAKeyService.Issue/Revoke, UserTokenService.Issue/Revoke),
                          and the acr-exempt service principal is not step-up-challenged.

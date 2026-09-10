@@ -111,8 +111,36 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
 | `kaname_lro_orphans_recovered_total`         | counter   | outcome                             | Осиротевшие операции, поднятые reconciler'ом.                 |
 | `kaname_lro_reconcile_runs_total`            | counter   | —                                   | Проходы reconciler-sweep.                                     |
 | `kaname_lro_reconcile_errors_total`          | counter   | —                                   | Проходы reconciler-sweep, завершившиеся ошибкой.             |
+| `kaname_build_info`                          | gauge     | version, revision                   | Метаданные сборки (постоянная 1). Значения ставит СБОРКА (`-ldflags -X`, из тех же аргументов, что клеймо образа), а не ручка профиля. `unstamped` в метке — не версия, а отсутствие штампа. |
 | `kaname_identities_total`                    | counter   | —                                   | Личности, которых платформа видела за всё время (журнал `kaname.identity_journal`). |
 | `kaname_identity_ledger_samples_total`       | counter   | outcome                             | Исходы фонового замера журнала (`ok`/`error`) — то, чем ноль в предыдущем ряду отличается от неснятого замера. |
+
+### Версия сборки — со ШТАМПА, а не с ручки
+
+`kaname_build_info` кормится переменными `buildVersion`/`buildRevision`
+(`cmd/kaname/buildstamp.go`), которые подставляет компоновщик:
+
+```
+go build -ldflags "-X main.buildVersion=$KACHO_IMAGE_VERSION -X main.buildRevision=$KACHO_IMAGE_REVISION"
+```
+
+Обе величины сборка берёт из ТЕХ ЖЕ аргументов, из которых делает клеймо образа
+(`org.opencontainers.image.version` / `.revision`) и файл `/etc/kacho/image-revision`.
+Источник один, поэтому витрина и образ разойтись не могут, а оператор сверяет
+строки дословно.
+
+Ручкой профиля величина не является намеренно: объявленную оператором он вправе
+объявить любой, и первый же откат выкатки, забывший её поправить, сделал бы ряд
+лживым ровно тогда, ради чего он заведён.
+
+Незаданный штамп называет себя словом `unstamped`, а не `dev` и не пустой
+меткой: и то и другое читалось бы как ответ, а это отсутствие измерения.
+
+Держат это две пробы: `TestBuildStampReachesTheBinaryItLabels` разбирает
+ИСПОЛНЯЕМУЮ часть `Dockerfile` и требует, чтобы у каждой подстановки была цель —
+переменная уровня пакета (компоновщик о промахе `-X` молчит); соседний файл
+инъекций доказывает, что она краснеет, когда `-ldflags` осталось обещанием в
+комментарии.
 
 ### Метка `rpc` — ЗАКРЫТЫЙ словарь из трёх полос
 
@@ -182,13 +210,13 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
 ### Рекомендуемые alert-правила
 
 ```yaml
-- alert: KachoIAMAuthzCheckSlow
+- alert: KanameAuthzCheckSlow
   expr: histogram_quantile(0.95, sum by (le) (rate(kaname_authz_check_duration_seconds_bucket[5m]))) > 0.03
   for: 5m
   annotations:
     summary: "authz Check p95 > 30ms — превышен SLO hot-path авторизации"
 
-- alert: KachoIAMAuthzCheckErrors
+- alert: KanameAuthzCheckErrors
   expr: rate(kaname_authz_check_decisions_total{decision="error"}[5m]) > 1
   for: 10m
   annotations:
@@ -196,24 +224,24 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
     description: "Вердикт складывается реляционной формой в собственной базе службы;
       отказ означает fail-closed по всем доменам — см. engineering/architecture/failure-domains.md"
 
-- alert: KachoIAMLROStranded
+- alert: KanameLROStranded
   expr: increase(kaname_lro_terminal_write_failures_total[15m]) > 0
   annotations:
     summary: "LRO terminal-write исчерпал retry-бюджет — операция зависла (op_type={{ $labels.op_type }})"
 
-- alert: KachoIAMLROBacklog
+- alert: KanameLROBacklog
   expr: kaname_lro_inflight > 1000
   for: 5m
   annotations:
     summary: "LRO inflight > 1000 — backlog воркер-пула"
 
-- alert: KachoIAMReconcileErrors
+- alert: KanameReconcileErrors
   expr: rate(kaname_lro_reconcile_errors_total[10m]) > 0
   for: 10m
   annotations:
     summary: "reconciler-sweep падает — осиротевшие операции не подбираются"
 
-- alert: KachoIAMIdentityGrowthSpike
+- alert: KanameIdentityGrowthSpike
   # Порог наблюдения, а не отказа: превышение НЕ отвергает регистрацию, оно
   # зовёт человека посмотреть. Величина порога — продуктовая; она названа здесь
   # и меняется здесь же, потому что читателя у ряда ровно один.
@@ -225,7 +253,7 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
       именно появление, а не перезапуск счётчика. Проверить источник регистраций
       прежде, чем менять пороги."
 
-- alert: KachoIAMIdentityLedgerUnsampled
+- alert: KanameIdentityLedgerUnsampled
   # Ноль в kaname_identities_total законен: платформа могла не увидеть ни
   # одной личности. Незаконно — НЕ ЗНАТЬ, ноль это или неснятый замер. Тревога
   # звонит именно на второе: успешных замеров не прибавляется.
@@ -237,12 +265,26 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
       роста неотличимы от действительности. Смотреть outcome=\"error\" того же
       семейства и журнал службы."
 
-- alert: KachoIAMRPCErrorRate
+- alert: KanameRPCErrorRate
   # Отбор по grpc_service, а не по имени серии: серия теперь общая на платформу,
   # и без отбора тревога считала бы долю по всем семи сервисам сразу.
+  #
+  # ИМЯ В ОТБОРЕ — ИМЯ КОНТРАКТА, А НЕ ИМЯ ПРОДУКТА, и переезд контракта его
+  # меняет. Здесь стояла приставка ПРЕЖНЕГО пакета, снятого переездом (#2133);
+  # дословно она тут не воспроизводится — цитата мёртвой координаты читается
+  # как живое утверждение, и держатель остатка имени справедливо считает её
+  # находкой. Следствие было такое: отбор не совпадал ни с одним контрактом,
+  # ряд был пуст И в числителе, И в знаменателе, поэтому порог не превышался
+  # ни при каком состоянии продукта, а молчание такой тревоги неотличимо от
+  # «доля не-OK ответов в норме».
+  #
+  # Держит это `TestAlertSelectorsNameAContractTheTreeProduces`: он сверяет
+  # отбор с `ServiceDesc.ServiceName` сгенерированных стабов — с той самой
+  # строкой, которую слушатель кладёт в метку. Сверять с пакетом `.proto`
+  # значило бы сверять с половиной предмета: метка несёт пакет И имя службы.
   expr: |
-    sum(rate(kacho_grpc_server_handled_total{grpc_service=~"kacho\\.cloud\\.iam\\..*",grpc_code!="OK"}[5m]))
-      / sum(rate(kacho_grpc_server_handled_total{grpc_service=~"kacho\\.cloud\\.iam\\..*"}[5m])) > 0.05
+    sum(rate(kacho_grpc_server_handled_total{grpc_service=~"kaname\\.cloud\\.iam\\..*",grpc_code!="OK"}[5m]))
+      / sum(rate(kacho_grpc_server_handled_total{grpc_service=~"kaname\\.cloud\\.iam\\..*"}[5m])) > 0.05
   for: 10m
   annotations:
     summary: "доля не-OK gRPC-ответов iam > 5%"
@@ -289,6 +331,18 @@ gRPC-порт (`:9090`); HTTP `/healthz` и `/readyz` доступны для р
 ## Связанные компоненты
 
 - [`33-runbook.md`](33-runbook.md) — что делать при alert.
+- `docs/content/advanced/observability.mdx` — ОПУБЛИКОВАННАЯ страница: то же,
+  но для того, кто поставил продукт и кода не читает. Она обязана называть только
+  ряды, у которых есть производитель, и нести порядок разбора, исполнимый без
+  остальных компонентов платформы; держит это `TestObservabilityPagePromisesOnlyWhatTheServiceProduces`.
+  Её правила тревоги ВЕЗЁТ ЧАРТ объектом `PrometheusRule` (ручка `alertRules.enabled`),
+  а не переносит руками оператор; совпадение объекта со страницей сверяется в обе
+  стороны — `TestDeliveredAlertRulesMatchThePublishedPage`.
+
+  Набор правил ЗДЕСЬ и набор правил ТАМ сегодня РАЗНЫЕ — и по составу, и по именам
+  (`KanameAuthzCheckSlow` против `KanameAuthzSlow`). Это два места об одном предмете,
+  и сведение их — отдельная работа: поставку везёт опубликованная страница, поэтому
+  расхождение сегодня стоит дежурному не мёртвой тревоги, а разного словаря.
 - [`31-deployment.md`](31-deployment.md) — env vars, порты и mTLS для observability.
 - [`29-relational-verdict.md`](29-relational-verdict.md) — latency-бюджет authz Check hot-path.
 

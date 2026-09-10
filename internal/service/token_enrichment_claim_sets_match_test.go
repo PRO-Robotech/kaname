@@ -118,8 +118,8 @@ func TestF2_42_ClaimSetsOfBothIssuancePathsMatchForTheSamePrincipal(t *testing.T
 	const (
 		ourUserClientID = "uoc_0123456789abcdefg"
 		ourSAClientID   = "soc_0123456789abcdefg"
-		mirrorUser      = "kacho-usr-mirror-0001"
-		mirrorSA        = "kacho-sak-mirror-0001"
+		mirrorUser      = "kaname-usr-mirror-0001"
+		mirrorSA        = "kaname-sak-mirror-0001"
 		ownerUser       = "usr_0123456789abcdefg"
 		ownerSA         = "sva_0123456789abcdefg"
 		accountID       = "acc_0123456789abcdefg"

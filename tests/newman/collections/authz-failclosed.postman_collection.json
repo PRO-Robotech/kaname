@@ -918,7 +918,7 @@
                   "  });",
                   "  pm.execution.skipRequest();",
                   "} else {",
-                  "  _hdr.kid = 'kacho-lane-probe-no-such-key';",
+                  "  _hdr.kid = 'kaname-lane-probe-no-such-key';",
                   "  _parts[0] = _b64urlFromText(JSON.stringify(_hdr));",
                   "  pm.request.headers.upsert({",
                   "    key: 'Authorization', value: 'Bearer ' + _parts.join('.')",
