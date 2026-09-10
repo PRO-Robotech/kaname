@@ -21,7 +21,7 @@ Helm-чарт (часть umbrella-стенда платформы). Эта ст
   <tbody>
     <tr><td><strong>PostgreSQL</strong></td><td>Хранилище <code>kaname</code> — обязательно</td></tr>
     <tr><td><strong>Ory Kratos</strong></td><td>Личности и интерактивный вход — для user-флоу</td></tr>
-    <tr><td><strong>Ory Hydra</strong></td><td>OAuth 2.0 authorization server — для токенов (SAKey / UserToken)</td></tr>
+    <tr><td><strong>Ory Hydra</strong></td><td>OAuth 2.0 authorization server. <strong>Обязателен под посадкой личности <code>external</code></strong> (умолчание чарта): им входит человек и им же выпускаются программные токены, пока не объявлена своя чеканка. Что именно требуется от посадки — <a href="/install/configuration">Конфигурация</a></td></tr>
     <tr><td><strong>api-gateway</strong></td><td>Edge для tenant-трафика (TLS + JWT) — для внешнего доступа</td></tr>
     <tr><td><strong>Prometheus Operator</strong></td><td>Определение вида <code>PrometheusRule</code>, которым чарт везёт правила тревоги — <strong>обязателен, пока включена ручка <code>alertRules.enabled</code></strong> (умолчание — включена). Без него <code>helm install</code> отвергает установку целиком; что делать — в разделе «Что чарт создаёт в вашем кластере» ниже</td></tr>
   </tbody>
@@ -100,7 +100,7 @@ kubectl get crd prometheusrules.monitoring.coreos.com
 ```mermaid
 flowchart LR
   mig["init: kaname-migrator up"] --> app["kaname serve"]
-  app -->|"нужен доступ"| deps["PostgreSQL · Kratos · Hydra"]
+  app -->|"нужен доступ"| deps["PostgreSQL · Kratos · Hydra<br/>(последние два — под посадкой external)"]
 ```
 
 1. **Миграции** — `kaname-migrator up` накатывает схему `kaname` (обычно init-container перед

@@ -111,12 +111,23 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 		assert.True(t, exists, "table kaname.%s must exist", table)
 	}
 
-	// Retired tables — must NOT come back. 0065 drops the signing-key store:
-	// iam owns no keyset (it mints nothing; Hydra is the issuer and signer),
-	// the table's only writers died with the nightly rotation (713f7e1), and it
-	// held zero rows on a fully working stand. 0075 drops the tenant-facing
-	// condition surface: the resource table and the per-binding overlay, the
-	// latter with no production writer at any point in its life.
+	// Retired tables — must NOT come back.
+	//
+	// 0065 drops `oidc_jwks_keys` — ПРЕЖНЕЕ хранилище подписных ключей: его
+	// единственные писатели умерли вместе с ночной ротацией (713f7e1), а на
+	// полностью рабочем стенде оно держало ноль строк, то есть выглядело
+	// исправным всю свою жизнь.
+	//
+	// Здесь стояло «iam owns no keyset (it mints nothing)» как ДОВОД в пользу
+	// этого удаления. Довод пережил свой предмет и стал прямо ложным: ключница
+	// у платформы есть, живёт в `kaname.token_signing_keys` (0001) и читается
+	// подписантом. Снятая таблица — не «отсутствие ключницы», а её
+	// ПРЕДШЕСТВЕННИК; смешивать их особенно дорого именно здесь, где перечень
+	// снятого стоит рядом с живым.
+	//
+	// 0075 drops the tenant-facing condition surface: the resource table and the
+	// per-binding overlay, the latter with no production writer at any point in
+	// its life.
 	for _, table := range []string{
 		"oidc_jwks_keys",
 		"conditions",

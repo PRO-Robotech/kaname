@@ -125,9 +125,11 @@ import dedent from 'ts-dedent'
 ## Аутентификация
 
 Все внешние запросы проходят через **`api-gateway`**, который проверяет **JWT** в заголовке
-`Authorization: Bearer <token>`. Токен выдаёт слой идентичности (интерактивный вход через Ory
-Kratos → Hydra, либо OAuth 2.0 client_credentials для машин, см.
-[Идентичность и токены](/architecture/identity)). Отсутствующий или невалидный токен →
+`Authorization: Bearer <token>`. Токен выдаёт слой идентичности: человеку — интерактивный вход
+через Ory Kratos → Hydra, машине — `client_credentials` либо `jwt-bearer` на токен-эндпоинте
+платформы, а на установке без него у внешнего OAuth-сервера (см.
+[Идентичность и токены](/architecture/identity)). Край принимает **оба** издателя, и какой из них
+выпустил токен, записано в самом токене. Отсутствующий или невалидный токен →
 `UNAUTHENTICATED` (HTTP `401`) — до того, как запрос дойдёт до IAM. Транспорт service→service —
 **mTLS** (verified client-cert).
 
@@ -215,7 +217,7 @@ by construction.
     <tr><td><code>ALREADY_EXISTS</code></td><td>409</td><td>Нарушение UNIQUE (например, дублирующее имя роли)</td></tr>
     <tr><td><code>FAILED_PRECONDITION</code></td><td>400</td><td>Состояние не позволяет (удаление аккаунта с проектами; system-роль; deletion_protection); потолок квоты на вид не назван ни на одной области видимости (признак <code>QUOTA_NOT_PROVISIONED</code>)</td></tr>
     <tr><td><code>RESOURCE_EXHAUSTED</code></td><td>429</td><td>Исчерпана квота на число ресурсов вида: потолок назван и выбран полностью (признак <code>QUOTA_EXCEEDED</code>) — см. <a href="/api/quotas">Квоты</a></td></tr>
-    <tr><td><code>UNAVAILABLE</code></td><td>503</td><td>База IAM или peer (Hydra) недоступны — fail-closed для мутаций</td></tr>
+    <tr><td><code>UNAVAILABLE</code></td><td>503</td><td>База IAM или сосед на пути запроса (внешний поставщик удостоверений, домен величин) недоступны — fail-closed для мутаций</td></tr>
     <tr><td><code>UNAUTHENTICATED</code></td><td>401</td><td>Нет / невалиден JWT (или анонимный запрос)</td></tr>
     <tr><td><code>PERMISSION_DENIED</code></td><td>403</td><td>Нет нужного отношения в authz-Check</td></tr>
     <tr><td><code>INTERNAL</code></td><td>500</td><td>Внутренняя ошибка (фиксированный текст, без утечки SQL)</td></tr>

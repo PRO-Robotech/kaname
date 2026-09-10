@@ -100,16 +100,25 @@ type profileSource struct {
 	carriesPlaintextRegister bool
 }
 
-// umbrellaChains — the `-f` chains our stands are actually rolled with, in order.
-// Kept in step with deploy/Makefile and helm/umbrella/cutover-fe3455.sh, and
-// identical to the table in gateway/deploy/revocation_endpoint_test.go.
-var umbrellaChains = map[string][]string{
-	"dev":         {"values.dev.yaml"},
-	"dev-prod":    {"values.dev.yaml", "values.dev-prod.yaml"},
-	"prod":        {"values.prod.yaml"},
-	"fe3455":      {"values.prod.yaml", "values.fe3455.yaml", "values.fe3455-prod.yaml"},
-	"prorobotech": {"values.dev.yaml", "values.prorobotech.yaml"},
-}
+// HERE STOOD A HAND-WRITTEN COPY of the `-f` chains our stands are rolled with,
+// and it had already drifted from the table that declares them.
+//
+// The chains are READ from `deploy/stacks.txt` — the single place in the outer
+// tree where a chain is written out, and the same file the platform-side readers
+// use (`deploy/dbtls_declaration_test.go` deployStacks, `tests/helm/stacks.sh`).
+// See umbrellaChainsFromTable in stack_chains_read_the_table_test.go, and that
+// file's header for the measurement: the copy disagreed with the table on THREE
+// stacks of six, and the disagreement was invisible from here because the gate
+// that forbids second copies walks `deploy`, `gateway` and `.github/workflows`
+// only — never `services/`.
+//
+// What the drift cost, stated by this file's own census rather than by argument:
+// it printed "4 production-class stacks × 3 provider hops = 12 declarations
+// examined" while six stacks were declared and five of them are production-class.
+// One stack was absent from the copy outright, one was missing the middle layer
+// and therefore SKIPPED as dev-class, and a third was read three layers deep
+// instead of four — missing exactly the layer that declares the identity
+// provider's own posture, which is what this file is about.
 
 // chartChains — the `-f` chains the shipped chart itself offers. `values.yaml` is
 // named first in every chain because helm merges it first whether or not anybody
@@ -147,13 +156,18 @@ func profileSources(t *testing.T) []profileSource {
 		chains: chartChains,
 	}}
 
+	// The umbrella source needs BOTH its profiles and the table that declares the
+	// chains over them. Either one missing means the outer tree is not here — the
+	// shipped chart is rolled without an umbrella — and that is a source we do not
+	// have, never a source we read as empty.
 	umbrella := filepath.Join(outerRoot(t), "deploy", "helm", "umbrella")
-	if st, err := os.Stat(umbrella); err == nil && st.IsDir() {
+	chains, tablePresent := umbrellaChainsFromTable(t, outerRoot(t))
+	if st, err := os.Stat(umbrella); err == nil && st.IsDir() && tablePresent {
 		sources = append(sources, profileSource{
 			label:                    "umbrella",
 			dir:                      umbrella,
 			prefix:                   []string{"kaname"},
-			chains:                   umbrellaChains,
+			chains:                   chains,
 			carriesPlaintextRegister: true,
 		})
 	}

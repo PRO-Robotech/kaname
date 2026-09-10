@@ -144,12 +144,19 @@ type APIServerConfig struct {
 	//
 	// Умолчания нет по той же причине, что у публичного.
 	InternalRESTEndpoint string `mapstructure:"internal-rest-endpoint"`
-	// JWKSProxy — the cluster-INTERNAL Hydra-JWKS proxy HTTP listener
-	// (`GET /.well-known/jwks.json`; default `tcp://0.0.0.0:9097`). A short-TTL
-	// caching reverse-proxy of Hydra's PUBLIC JWKS: the data-plane fetches its
-	// verification keys from iam (never dialing Hydra directly) while Hydra stays
-	// the issuer/signer. Served ONLY on the cluster-internal `kaname-internal`
-	// Service (never external, ban #6) over one-way server-TLS. Empty disables it.
+	// JWKSProxy — the cluster-INTERNAL key-set publisher HTTP listener (default
+	// `tcp://0.0.0.0:9097`). Записей у него ДВЕ, каждая по своему объявленному
+	// пути: зеркало ПУБЛИЧНОГО набора провайдера на каноническом
+	// `GET /.well-known/jwks.json` и НАША — проекция ключницы iam по
+	// `authn.token-signing.key-set-path`. Плоскость данных берёт ключи проверки у
+	// iam и никогда не звонит провайдеру напрямую.
+	//
+	// Здесь стояло «while Hydra stays the issuer/signer» — утверждение верно про
+	// ЗАПИСЬ ЗЕРКАЛА и неверно про платформу: свои токены она подписывает сама.
+	// Разбор — в шапке jwks_proxy.go, второго места об этом предмете здесь нет.
+	//
+	// Served ONLY on the cluster-internal `kaname-internal` Service (never
+	// external, ban #6) over one-way server-TLS. Empty disables it.
 	JWKSProxy JWKSProxyConfig `mapstructure:"jwks-proxy"`
 
 	// RateLimit — ПОТОЛОК ТЕМПА и ОДНОВРЕМЕННОСТИ на вызывающего, по одному

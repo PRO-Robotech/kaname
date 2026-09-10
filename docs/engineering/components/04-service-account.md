@@ -4,10 +4,13 @@
 
 **ServiceAccount** (SA) — это machine identity внутри Account / Project. SA
 получает токены не через интерактивный OIDC login, а через **OAuth2
-client_credentials** (Ory Hydra) по выпущенным SA-ключам (private_key_jwt,
+client_credentials** по выпущенным SA-ключам (private_key_jwt,
 см. [`05-sa-keys.md`](05-sa-keys.md)).
 
-Каждый SA backed Hydra OAuth client'ом (хранится в Hydra, не в kaname).
+У каждого SA-ключа есть своя строка реестра в kaname. Зеркало OAuth-клиента у
+внешнего поставщика заводится **только на непереведённом контуре** — см.
+[`architecture/sa-key-issuance-leaves-the-provider.md`](../architecture/sa-key-issuance-leaves-the-provider.md);
+на переведённом обмен идёт на токен-эндпоинте платформы, и зеркала нет вовсе.
 kaname держит только запись с id, именем и account_id.
 
 **Use-cases:**
@@ -210,7 +213,7 @@ go test -short -count=1 -timeout 120s -run TestServiceAccount \
 - **Use-cases:** `internal/apps/kaname/api/service_account/{create,get,list,update,delete,set_enabled}.go`.
 - **Handler:** `internal/apps/kaname/api/service_account/handler.go`.
 - **Repo:** `internal/repo/kaname/pg/service_account_repo.go`.
-- **Hydra integration:** SA сам по себе не делает запросы в Hydra — только
+- **Интеграция с поставщиком:** SA сам по себе к поставщику не ходит — только
   IssueSAKey (см. [`05-sa-keys.md`](05-sa-keys.md)). Сам SA — просто запись в БД.
 - **DB:** `service_accounts(id, account_id, name, description, labels, enabled, created_at)`.
 - **Indexes:** PK, UNIQUE `service_accounts_account_name_unique`, INDEX по account/project.

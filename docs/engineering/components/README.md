@@ -31,8 +31,8 @@ devops, архитектор: все, что нужно, чтобы поднят
 - [`01-account.md`](01-account.md) — Account (top-level tenant; глобально-уникальное имя; owner_user_id RESTRICT).
 - [`02-project.md`](02-project.md) — Project (child Account-а; Move через atomic CAS; уникальность per-Account).
 - [`03-user.md`](03-user.md) — User (mirror Ory Kratos identity; Invite-flow; immutable external_id).
-- [`04-service-account.md`](04-service-account.md) — ServiceAccount (Hydra OAuth-client backing).
-- [`05-sa-keys.md`](05-sa-keys.md) — SA Keys (Hydra OAuth client_id/secret; OpsResponseRedactor; ротация Delete+Create).
+- [`04-service-account.md`](04-service-account.md) — ServiceAccount (машинная identity).
+- [`05-sa-keys.md`](05-sa-keys.md) — SA Keys (ключевая пара и строка реестра; OpsResponseRedactor; ротация Delete+Create). `client_secret` как вида удостоверения в системе нет.
 - [`06-group.md`](06-group.md) — Group + GroupMember (триггер `group_members_member_exists_trg`).
 - [`07-role.md`](07-role.md) — Role (58 system seed; custom per-Account; multi-scope XOR; permissions JSONB).
 - [`08-access-binding.md`](08-access-binding.md) — AccessBinding (5-tuple; idempotent INSERT; эмиссия намерения и сброса кэша в той же транзакции).

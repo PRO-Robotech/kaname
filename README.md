@@ -14,7 +14,8 @@ IAM-сервис Kachō: control-plane для identity & access. Управля�
   тем же writer-tx, что меняет выдачу, — журнал остался, снят его прежний
   потребитель.
 - **Permission catalog** — `PermissionCatalogService`: грантуемая таксономия `<module>.<resource>.<verb>`.
-- **Service-account keys** — `SAKeyService` (static SA-ключи через Ory Hydra).
+- **Service-account keys** — `SAKeyService` (статические ключи служебных учёток; токен по ключу
+  выпускает наш подписант там, где объявлена своя чеканка, иначе внешний поставщик).
 - **Cluster-admin grants** — internal `InternalClusterService` (time-bombed/permanent).
 - **AuthN-интеграция** — webhooks Ory Kratos (provision) + Hydra (token/refresh);
   User mirror через `InternalUserService.UpsertFromIdentity`.

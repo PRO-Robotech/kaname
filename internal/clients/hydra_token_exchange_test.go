@@ -25,7 +25,7 @@ func TestHydraTokenClient_ClientCredentials_Happy(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewHydraTokenClient(srv.URL)
+	c := tokenClient(t, srv.URL)
 	out, err := c.ClientCredentials(context.Background(), ClientCredentialsRequest{
 		ClientAssertion: "assertion.jws.value",
 		Audience:        "registry.kacho.local",
@@ -75,7 +75,7 @@ func TestHydraTokenClient_Rejected(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			_, err := NewHydraTokenClient(srv.URL).ClientCredentials(context.Background(),
+			_, err := tokenClient(t, srv.URL).ClientCredentials(context.Background(),
 				ClientCredentialsRequest{ClientAssertion: "a"})
 			if !errors.Is(err, ErrHydraRejected) {
 				t.Fatalf("err = %v; want ErrHydraRejected", err)
@@ -96,7 +96,7 @@ func TestHydraTokenClient_Unavailable(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		url := srv.URL
 		srv.Close() // nothing is listening now.
-		_, err := NewHydraTokenClient(url).ClientCredentials(context.Background(),
+		_, err := tokenClient(t, url).ClientCredentials(context.Background(),
 			ClientCredentialsRequest{ClientAssertion: "a"})
 		if !errors.Is(err, ErrHydraUnavailable) {
 			t.Fatalf("err = %v; want ErrHydraUnavailable", err)
@@ -107,7 +107,7 @@ func TestHydraTokenClient_Unavailable(t *testing.T) {
 			w.WriteHeader(http.StatusBadGateway)
 		}))
 		defer srv.Close()
-		_, err := NewHydraTokenClient(srv.URL).ClientCredentials(context.Background(),
+		_, err := tokenClient(t, srv.URL).ClientCredentials(context.Background(),
 			ClientCredentialsRequest{ClientAssertion: "a"})
 		if !errors.Is(err, ErrHydraUnavailable) {
 			t.Fatalf("err = %v; want ErrHydraUnavailable", err)
@@ -118,7 +118,7 @@ func TestHydraTokenClient_Unavailable(t *testing.T) {
 			_, _ = w.Write([]byte(`not-json`))
 		}))
 		defer srv.Close()
-		_, err := NewHydraTokenClient(srv.URL).ClientCredentials(context.Background(),
+		_, err := tokenClient(t, srv.URL).ClientCredentials(context.Background(),
 			ClientCredentialsRequest{ClientAssertion: "a"})
 		if !errors.Is(err, ErrHydraUnavailable) {
 			t.Fatalf("err = %v; want ErrHydraUnavailable", err)
@@ -129,7 +129,7 @@ func TestHydraTokenClient_Unavailable(t *testing.T) {
 			_, _ = w.Write([]byte(`{"token_type":"bearer","expires_in":60}`))
 		}))
 		defer srv.Close()
-		_, err := NewHydraTokenClient(srv.URL).ClientCredentials(context.Background(),
+		_, err := tokenClient(t, srv.URL).ClientCredentials(context.Background(),
 			ClientCredentialsRequest{ClientAssertion: "a"})
 		if !errors.Is(err, ErrHydraUnavailable) {
 			t.Fatalf("err = %v; want ErrHydraUnavailable", err)
@@ -144,4 +144,21 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// tokenClient — построитель, которым полосу «без якоря» строит ПРОД
+// (`registrytokenwire.providerExchangeFor` → `NewHydraTokenClientWithCA`).
+//
+// Отдельного построителя «без якоря» в дереве больше нет намеренно: пустой якорь
+// у `ProviderHopHTTPClient` даёт ровно `&http.Client{Timeout: …}` с умолчательным
+// транспортом, то есть тот же объект, — а лишний построитель был ловушкой. Проба
+// дороги к издателю по нему уже один раз оказалась ЗЕЛЁНОЙ при производственной
+// ветке, переставшей проверять пира (см. provider_hop_tls_test.go).
+func tokenClient(t *testing.T, tokenURL string) *HydraTokenClient {
+	t.Helper()
+	c, err := NewHydraTokenClientWithCA(tokenURL, "")
+	if err != nil {
+		t.Fatalf("пустой якорь — законный вход построителя, получено: %v", err)
+	}
+	return c
 }

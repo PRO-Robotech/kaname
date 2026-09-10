@@ -182,8 +182,6 @@ type IssueSAKeyUseCase struct {
 	// HydraClientNamePrefix — used to compose the Hydra `client_name`
 	// (default "kaname-sak-<svaID>"). Configurable via env at wire-time.
 	HydraClientNamePrefix string
-	// DefaultScope — scope granted to issued keys (default empty).
-	DefaultScope string
 	// AudiencePrefix — appended with `/<svaID>` as Hydra audience.
 	AudiencePrefix string
 	// MaxTTL — inclusive ceiling on `ttl_seconds`. A request above it is
@@ -751,7 +749,6 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 	hydraReq := clients.CreateOAuthClientRequest{
 		ClientName:              clientName,
 		Owner:                   string(in.ServiceAccountID),
-		Scope:                   u.DefaultScope,
 		GrantTypes:              []string{"client_credentials"},
 		TokenEndpointAuthMethod: "private_key_jwt",
 		// Hydra обязан проверять client_assertion тем же alg, что несёт ключ (ES256);
@@ -996,7 +993,6 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 	hydraReq := clients.CreateOAuthClientRequest{
 		ClientName: clientName,
 		Owner:      string(in.ServiceAccountID),
-		Scope:      u.DefaultScope,
 		// Вид выдачи по RFC 7521/7523. Запрос СТРОИТСЯ всегда, а отправляется
 		// не всегда: на переведённом контуре зеркала нет, и решает это
 		// nameClient. Перечень адресатов уезжает из него в ответ выдачи на

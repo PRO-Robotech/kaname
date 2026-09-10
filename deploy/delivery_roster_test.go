@@ -101,6 +101,8 @@ var deliveryRoster = []string{
 	"prod_profile_test.go",
 	"provider_hops_injection_test.go",
 	"provider_hops_test.go",
+	"stack_chains_read_the_table_injection_test.go",
+	"stack_chains_read_the_table_test.go",
 	"release_namespace_test.go",
 	"render-guard.sh",
 	"schema_mechanism_precedes_the_service_injection_test.go",

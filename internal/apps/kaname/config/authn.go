@@ -307,10 +307,18 @@ func (c AuthNConfig) ResolveHydraJWKSCAFile() string {
 // ResolveHydraTokenURL: the explicit `authn.hydra-jwks-url` / ENV
 // KANAME_HYDRA_JWKS_URL override (a cluster-internal Service, e.g.
 // http://kacho-umbrella-hydra-public.<ns>.svc:4444/.well-known/jwks.json), then the
-// derived `<issuer>/.well-known/jwks.json` (back-compat). Hydra remains the signer;
-// iam serves a byte-identical mirror so the served kids are Hydra's real signing
-// kids (iam has no keyset of its own — it mints nothing). Only the network target
-// differs — the `iss` of a verified token stays the external Hydra issuer.
+// derived `<issuer>/.well-known/jwks.json` (back-compat).
+//
+// Провайдер остаётся подписантом СВОЕЙ записи, и зеркало байт-в-байт: отдаются
+// его настоящие подписные kid. Меняется только сетевая цель — `iss`
+// проверенного токена остаётся внешним издателем.
+//
+// Здесь стояло «iam has no keyset of its own — it mints nothing». Это верно про
+// ЗЕРКАЛО и неверно про платформу: у неё своя ключница (`authn.token-signing`),
+// и её набор публикуется ВТОРОЙ записью по своему пути
+// (`authn.token-signing.key-set-path`). Утверждение об исключительности,
+// сказанное у одной записи, читается как свойство всей выдачи — и посылает
+// разбирающего искать причину не там.
 func (c AuthNConfig) ResolveHydraJWKSURL() string {
 	if v := c.DeclaredHydraJWKSURL(); v != "" {
 		return v

@@ -2,25 +2,40 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package registrytokenhttp — thin HTTP transport for the IAM Docker Registry v2
-// auth-server: the `/iam/token` endpoint (Basic-auth → Hydra-brokered token).
+// auth-server: the `/iam/token` endpoint.
 //
 // Transport only: parse the Docker token-auth request, delegate to the
 // registry_token use-case (which verifies the presented BASIC ACCESS TOKEN —
 // the only credential kind this lane accepts, задача #1143 — and issues the
 // registry token), format the Docker-compatible JSON. No business logic.
 //
-// Hydra remains the token issuer/signer; kaname mints NOTHING. The data-plane
-// verifies the returned token against HYDRA's JWKS — which it now fetches from a
-// cluster-INTERNAL Hydra-JWKS mirror served by kaname (a short-TTL caching
-// reverse-proxy of Hydra's public JWKS at GET /.well-known/jwks.json on the :9097
-// jwks-proxy listener, package internal/handler/jwksproxyhttp), NOT from this
-// external `/iam/token` listener. The mirror keeps the served kids equal to Hydra's
-// real signing kids; iam has no keyset of its own to serve (it mints nothing). This
-// `/iam/token` mux therefore carries no JWKS endpoint of its own.
+// ─────────────────────────────────────────────────────────────────────────────
+// КТО ЧЕКАНИТ ТОКЕН ЭТОЙ ПОЛОСЫ — ЗАВИСИТ ОТ ПОСАДКИ, И ЭТО НАДО ЗНАТЬ ПЕРВЫМ
+//
+// Здесь стояло «Hydra remains the token issuer/signer; kaname mints NOTHING».
+// Утверждение ПЕРЕЖИЛО СВОЙ ПРЕДМЕТ:
+//
+//	своя чеканка объявлена   → чеканит НАШ подписант
+//	                           (internal/registrytokenwire.LocalMintAdapter
+//	                           поверх internal/tokensigner)
+//	не объявлена             → полоса брокерит токен у провайдера, как прежде
+//
+// Различать обязательно: при разборе «почему плоскость данных отвергла токен»
+// первый вопрос — ЧЕЙ это токен, и по ответу выбирается сторона, на которой
+// чинить.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// КЛЮЧИ ПРОВЕРКИ ЖИВУТ НЕ ЗДЕСЬ
+//
+// Своего эндпоинта набора ключей у этого mux нет: плоскость данных берёт ключи
+// у внутреннего публикатора (:9097, package internal/handler/jwksproxyhttp), и
+// записей у него ДВЕ — зеркало провайдера на каноническом well-known и НАША по
+// пути `authn.token-signing.key-set-path`. Потребитель выбирает запись по
+// объявленному издателю токена, а не перебором.
 //
 // Endpoint:
 //
-//	GET|POST /iam/token — Docker Registry v2 token endpoint (Basic → Hydra token).
+//	GET|POST /iam/token — Docker Registry v2 token endpoint.
 package registrytokenhttp
 
 import (
