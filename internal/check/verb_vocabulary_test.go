@@ -172,7 +172,6 @@ func TestVerbVocabularyLiteralsMatchModel(t *testing.T) {
 	}
 
 	for _, lit := range verbLiteralRoster {
-		lit := lit
 		t.Run(lit.path+":"+lit.varName, func(t *testing.T) {
 			p := platformtree.Under(prefix, lit.path)
 			got, ok := parseStringSliceVar(t, filepath.Join(root, filepath.FromSlash(p)), lit.varName)

@@ -17,8 +17,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/check"
 )
 
-const withdrawalApplierBinding = "moduleroles"
-
 // withdrawalDrivenSrc — форма, действительно стоящая в дереве kaname
 // (`cmd/kaname/serve.go`): применитель ПРИВОДИТСЯ В ДЕЙСТВИЕ.
 const withdrawalDrivenSrc = `package main
