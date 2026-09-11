@@ -1,44 +1,32 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// verdict_subject_glue_test.go — субъект выдачи остаётся индексируемым входом:
-// на пути принятия решения он сравнивается ПАРОЙ КОЛОНОК, а не склейкой
-// (держатель, названный `docs/engineering/acceptance/seed-identity-names-its-own-service.md`
-// §6 — `TestVerdictSubjectIsComparedByColumnPairNotByGlue`).
+// verdict_subject_glue_test.go — СУБЪЕКТ ВЫДАЧИ ОСТАЁТСЯ ИНДЕКСИРУЕМЫМ ВХОДОМ
+// (порт с монорепо `internal/repohygiene/verdictsubjectglue_test.go`,
+// держатель `TestVerdictSubjectIsComparedByColumnPairNotByGlue`, снят
+// вынесением службы доступа — `kacho#2597`; Г3 приёмки R7-1).
 //
 // # Предмет
 //
 // Склейка `subject_type || ':' || subject_id` в предикате отбора выводит обе
 // колонки из-под любого индекса: сравнивать приходится ВЫЧИСЛЕННОЕ значение, а
-// вычисленное значение отбирает строки только после того, как они прочитаны.
-// Пока склейка стоит на пути принятия решения, «выдача называет этого
-// субъекта» перестаёт быть сужением и становится фильтром — то есть работа
-// растёт с числом выдач в облаке, а не с числом выдач спрашиваемому.
-//
-// # Граница, и она намеренная
-//
-// Предмет — склейка СУБЪЕКТА ВЫДАЧИ, и только она. Склейка ЧЛЕНА ГРУППЫ
-// (`member_type || ':' || member_id`) в границы этого гейта не входит: на пути
-// принятия решения её нет вовсе — членство ищется парой колонок, — а
-// оставшиеся места суть проекция обратных вопросов. Гейт на них обязан
-// молчать: покраснев, он дал бы находку вне предмета.
+// оно отбирает строки только после того, как они прочитаны. Пока склейка
+// стоит на пути принятия решения, «выдача называет этого субъекта» перестаёт
+// быть сужением и становится фильтром — работа растёт с числом выдач в
+// облаке, а не с числом выдач спрашиваемому.
 //
 // # Что считается находкой, а что законным близнецом
 //
-// Находка — склейка в предикате (`ON`, `WHERE`, `HAVING`, `AND`, `OR`): там
-// она отбирает строки. Законный близнец — та же склейка в списке выборки: там
+// Находка — склейка в ПРЕДИКАТЕ (`ON`, `WHERE`, `HAVING`, `AND`, `OR`): там
+// она отбирает строки. Законный близнец — та же склейка в СПИСКЕ ВЫБОРКИ: там
 // она ничего не отбирает, а называет ответ.
 //
-// # Объём и его граница, названная честно
+// # Что изменилось при переносе, а что осталось дословно
 //
-// Гейт читает строковые литералы прод-кода пути вердикта, разбирая Go по
-// синтаксическому дереву: иначе SQL внутри Go-комментария читался бы как код.
-// Внутри литерала снимаются SQL-комментарии — комментарий, объясняющий запрет,
-// не должен считаться его нарушением. Собранный на лету SQL и миграции не
-// покрыты, и это сказано здесь, а не подразумевается.
-//
-// Способность гейта упасть и смолчать доказана инъекцией —
-// `verdict_subject_glue_injection_test.go`.
+// Изменилось: пакет (`repohygiene` → `check`), путь-константа обхода (без
+// префикса `services/iam/`). Осталось дословно: обе константы колонок, разбор
+// клаузы по ближайшему справа ключевому слову, снятие SQL-комментариев,
+// граница объёма (собранный на лету SQL и миграции не покрыты), имя держателя.
 package check_test
 
 import (
@@ -54,18 +42,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
-// verdictGlueRoot — путь принятия решения, ОТНОСИТЕЛЬНО корня СВОЕГО модуля.
-//
-// Перечень объявлен здесь, потому что он и есть ОБЪЁМ гейта, и печатается в
-// переписи вместе с числом прочитанных файлов.
-const verdictGlueRoot = "internal/repo/kaname/pg/relverdict"
+// verdictGlueRootRel — путь принятия решения и обратных вопросов к нему, от
+// корня модуля. Перечень объявлен здесь, потому что он и есть ОБЪЁМ гейта.
+const verdictGlueRootRel = "internal/repo/kaname/pg/relverdict"
 
-// gluePattern — склейка субъекта выдачи в любой форме написания алиаса.
-//
-// Ищется по ЯДРУ (`|| ':' ||` между двумя колонками субъекта), а не по точной
-// строке с алиасом: алиас таблицы свободен, и предикат, привязанный к нему,
-// нашёл бы ноль на первом же переименовании — то есть молчал бы ровно там, где
-// должен говорить.
 const (
 	glueLeft  = "subject_type"
 	glueRight = "subject_id"
@@ -80,31 +60,17 @@ type glueFinding struct {
 type glueCensus struct {
 	files      int
 	literals   int
-	occurrence int // склеек субъекта встречено всего
-	projection int // из них в списке выборки — законные близнецы
-}
-
-func verdictGlueModuleRoot(t *testing.T) string {
-	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: рабочий каталог не установлен: %v", err)
-	}
-	root, err := platformtree.ModuleRootFrom(wd)
-	if err != nil {
-		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не установлен: %v", err)
-	}
-	return root
+	occurrence int
+	projection int
 }
 
 func TestVerdictSubjectIsComparedByColumnPairNotByGlue(t *testing.T) {
 	t.Parallel()
-	dir := filepath.Join(verdictGlueModuleRoot(t), filepath.FromSlash(verdictGlueRoot))
+	root, prefix := platformtree.RequireCorpus(t)
+	dir := filepath.Join(root, filepath.FromSlash(platformtree.Under(prefix, verdictGlueRootRel)))
+
 	findings, c := collectSubjectGlue(t, dir)
 
-	// ПРОВЕРКА СВОЕЙ ПРЕДПОСЫЛКИ. Запрет обоснован тем, что в этих файлах есть
-	// SQL и в нём есть колонки субъекта. Перестанет разбор их узнавать — «ноль
-	// находок» будет означать «ноль прочитанного», и гейт станет зелен навсегда.
 	if c.files == 0 || c.literals == 0 {
 		t.Fatalf("предпосылка гейта не выполнена: файлов %d, литералов с SQL %d. "+
 			"Либо каталог переехал, либо разбор перестал узнавать запросы — в обоих "+
@@ -138,9 +104,9 @@ func collectSubjectGlue(t *testing.T, dir string) ([]glueFinding, glueCensus) {
 		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		body, err := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- путь-константа своего дерева
-		if err != nil {
-			t.Fatalf("файл %s: %v", name, err)
+		body, rerr := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- путь из перечня каталога этого модуля
+		if rerr != nil {
+			t.Fatalf("файл %s: %v", name, rerr)
 		}
 		c.files++
 		f, cc := auditFileForSubjectGlue(name, body)
@@ -167,13 +133,13 @@ func auditFileForSubjectGlue(name string, body []byte) ([]glueFinding, glueCensu
 		if !ok || lit.Kind != token.STRING {
 			return true
 		}
-		sql, err := strconv.Unquote(lit.Value)
-		if err != nil || !strings.Contains(sql, glueLeft) {
+		sql, uerr := strconv.Unquote(lit.Value)
+		if uerr != nil || !strings.Contains(sql, glueLeft) {
 			return true
 		}
 		c.literals++
 		base := fset.Position(lit.Pos()).Line
-		f, cc := auditSQLForSubjectGlue(name, base, stripSQLLineComments(sql))
+		f, cc := auditSQLForSubjectGlue(name, base, stripGlueSQLLineComments(sql))
 		out = append(out, f...)
 		c.occurrence += cc.occurrence
 		c.projection += cc.projection
@@ -182,8 +148,6 @@ func auditFileForSubjectGlue(name string, body []byte) ([]glueFinding, glueCensu
 	return out, c
 }
 
-// auditSQLForSubjectGlue — разбор ИСПОЛНЯЕМОЙ части: комментарии сняты
-// вызывающим, а положение склейки определяется КЛАУЗОЙ, в которой она стоит.
 func auditSQLForSubjectGlue(file string, baseLine int, sql string) ([]glueFinding, glueCensus) {
 	var (
 		out []glueFinding
@@ -197,9 +161,6 @@ func auditSQLForSubjectGlue(file string, baseLine int, sql string) ([]glueFindin
 		at := off + i
 		off = at + len(glueLeft)
 
-		// Склейка — это `subject_type || ':' || …subject_id`. Хвост берётся
-		// коротким окном: длиннее склейки он не бывает, а брать до конца строки
-		// значило бы засчитать соседнее упоминание колонки за склейку.
 		end := at + 64
 		if end > len(sql) {
 			end = len(sql)
@@ -222,18 +183,9 @@ func auditSQLForSubjectGlue(file string, baseLine int, sql string) ([]glueFindin
 	return out, c
 }
 
-// clauseAt — в какой клаузе стоит смещение: в списке выборки или в предикате.
-//
-// Разбор идёт НАЗАД по ключевым словам: ближайшее слева определяет клаузу.
-// Полноценного разбора SQL в дереве нет, и объявлять его здесь значило бы
-// обещать больше, чем сделано; этого различения запрету достаточно, потому что
-// оно отделяет ровно два состояния — «отбирает строки» и «называет ответ».
 func clauseAt(sql string, off int) string {
 	head := strings.ToUpper(sql[:off])
-	type kw struct {
-		word, clause string
-	}
-	// Порядок не важен: берётся САМОЕ ПРАВОЕ вхождение любого из них.
+	type kw struct{ word, clause string }
 	words := []kw{
 		{"SELECT", "projection"},
 		{" ON ", "predicate"}, {"\nON ", "predicate"},
@@ -250,12 +202,9 @@ func clauseAt(sql string, off int) string {
 	return clause
 }
 
-// stripSQLLineComments убирает комментарии SQL.
-//
-// Иначе гейт читал бы объяснение защиты как саму защиту: слово-предмет запрета
-// в комментарии, разбирающем этот же класс, сделало бы находку неотличимой от
-// собственного объяснения.
-func stripSQLLineComments(s string) string {
+// stripGlueSQLLineComments убирает комментарии SQL — иначе гейт читал бы
+// объяснение защиты как саму защиту.
+func stripGlueSQLLineComments(s string) string {
 	var b strings.Builder
 	for _, line := range strings.Split(s, "\n") {
 		if i := strings.Index(line, "--"); i >= 0 {
