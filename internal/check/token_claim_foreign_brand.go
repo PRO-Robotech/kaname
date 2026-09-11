@@ -66,12 +66,20 @@ var tokenClaimNameShape = regexp.MustCompile(`^([a-z]+)_([a-z0-9_]+)$`)
 // TokenClaimForm — в какой позиции стоит имя.
 type TokenClaimForm string
 
+// Значения — ПРОЗА для человека, читающего находку, а не материал
+// удостоверения. Сканер безопасности видит здесь форму «имя с `token`/`claim`
+// получает строковый литерал» и по ней подозревает вшитое удостоверение
+// (G101, уверенность LOW). Подозрение снимается предметом: перечисляется
+// ПОЗИЦИЯ имени в разборе (ключ состава · чтение · разбор · аргумент ·
+// объявление), и ни одно значение не участвует ни в одной проверке подлинности
+// — они попадают только в текст находки. Подавление названо поимённо, на
+// блоке, и не распространяется ни на что за его пределами.
 const (
-	TokenClaimFormKey   TokenClaimForm = "ключ состава"
-	TokenClaimFormRead  TokenClaimForm = "чтение по имени"
-	TokenClaimFormCase  TokenClaimForm = "разбор по имени"
-	TokenClaimFormArg   TokenClaimForm = "имя в вызове"
-	TokenClaimFormConst TokenClaimForm = "объявление константы"
+	TokenClaimFormKey   TokenClaimForm = "ключ состава"         // #nosec G101 -- подпись позиции разбора, не удостоверение
+	TokenClaimFormRead  TokenClaimForm = "чтение по имени"      // #nosec G101 -- подпись позиции разбора, не удостоверение
+	TokenClaimFormCase  TokenClaimForm = "разбор по имени"      // #nosec G101 -- подпись позиции разбора, не удостоверение
+	TokenClaimFormArg   TokenClaimForm = "имя в вызове"         // #nosec G101 -- подпись позиции разбора, не удостоверение
+	TokenClaimFormConst TokenClaimForm = "объявление константы" // #nosec G101 -- подпись позиции разбора, не удостоверение
 )
 
 // TokenClaimUse — одно употребление имени клейма чужого словаря.
