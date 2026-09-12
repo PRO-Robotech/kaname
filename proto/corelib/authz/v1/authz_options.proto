@@ -26,9 +26,18 @@ option go_package = "github.com/PRO-Robotech/corelib/api/corelib/authz/v1;authzv
 // The file names no consumer of its own on purpose: a neutral vocabulary that
 // spells out who uses it stops being neutral the day the list changes.
 //
-// The Go import path still carries the monorepo module, because the foundation has
-// not been published as its own module yet. When it is, only `go_package` below
-// changes; the proto coordinate every importer writes down is already final.
+// THE FOUNDATION IS PUBLISHED, AND `go_package` ABOVE ALREADY NAMES IT. The module
+// is `github.com/PRO-Robotech/corelib`, pinned by the platform's `go.mod`; the stubs
+// for this file are CONSUMED from that module and are not regenerated here
+// (`proto/buf.gen.yaml` excludes the foundation class from its inputs, so no second
+// package registers this file name).
+//
+// Here stood "the Go import path still carries the monorepo module, because the
+// foundation has not been published as its own module yet". The sentence outlived its
+// subject on the day the module was published, and it is the ONLY place a reader
+// learns whether this coordinate is final — so a reader checking before writing the
+// import down got the opposite of the truth. The proto coordinate every importer
+// writes down did not change and is final.
 //
 // Usage on an RPC:
 //

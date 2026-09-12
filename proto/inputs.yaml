@@ -39,14 +39,14 @@
 # ствол» перестал бы быть адресом на следующем же вливании.
 source:
   repo: PRO-Robotech/kacho
-  revision: 96c5c6e10b995f09f4fe4bfa396fccdd414fbb4e
+  revision: ba27afe77715de935d528c15c769775f3e46977a
 
 inputs:
   - path: corelib/api/v1/operation.proto
-    sha256: 874c228ce57c22db4323e1a3f56650a30cbeedf9dc08f3a743972c262b33d8e8
+    sha256: d0124a4431dece27900865201e5e5c1f27ab682b7f71838d273e309e1aa910fe
     stubs: github.com/PRO-Robotech/corelib/api/corelib/api/v1
   - path: corelib/authz/v1/authz_options.proto
-    sha256: bcbd067c74762848505ad09a11ec27694d1a3c6988022bc0ea2c90a8caf8c99a
+    sha256: ed734abfcb1e7d5e23abf2d2c1737b6189fa848848fdc725f0bdeec4dea074f3
     stubs: github.com/PRO-Robotech/corelib/api/corelib/authz/v1
   - path: kacho/cloud/operation/operation.proto
     sha256: f322eb06dcbced2b5d5a656fa7ba4f6368baeae5b3ebda04cab8457e532e135f
