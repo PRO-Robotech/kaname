@@ -99,6 +99,25 @@ type Registry struct {
 	// целиком.
 	inviteMailOnce sync.Once
 	inviteMail     *InviteMailRecorder
+
+	// readinessOnce/readiness — единственный экземпляр приёмника исхода
+	// готовности (#2494). Носитель готовности собирается в прогоне не единожды
+	// (интеграционные пробы поднимают поверхность заново в том же процессе), а
+	// второй конструктор уронил бы старт на повторной регистрации семейства с
+	// тем же именем.
+	readinessOnce sync.Once
+	readiness     *ReadinessRecorder
+
+	// authnHooksOnce/authnHooks — единственный экземпляр приёмника исходов
+	// полосы хуков поставщика личности (#2495). Полоса собирается в прогоне не
+	// единожды, а второй конструктор уронил бы старт на повторной регистрации.
+	authnHooksOnce sync.Once
+	authnHooks     *AuthnHooksRecorder
+
+	// expiredCredSweepOnce/expiredCredSweep — единственный экземпляр приёмника
+	// величин второго уборщика по сроку (#2499).
+	expiredCredSweepOnce sync.Once
+	expiredCredSweep     *ExpiredCredentialSweepRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

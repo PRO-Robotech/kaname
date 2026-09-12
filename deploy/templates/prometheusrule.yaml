@@ -84,6 +84,68 @@ spec:
           annotations:
             summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
 
+        - alert: KanameReadinessDependencyUnready
+          expr: increase(kaname_readiness_dependency_checks_total{outcome="unready"}[5m]) > 0
+          for: 5m
+          annotations:
+            summary: "зависимость готовности {{ "{{ $labels.dependency }}" }} отвечает «не готов» — под снят из ротации"
+
+        - alert: KanameReadinessUnprobed
+          # Ноль неготовых законен. Незаконно НЕ ЗНАТЬ, ноль это или неспрошенная проба.
+          expr: sum(increase(kaname_readiness_dependency_checks_total[15m])) == 0
+          for: 15m
+          annotations:
+            summary: "готовность не оценивалась ни разу за 15 минут — пробу никто не спрашивает"
+
+        - alert: KanameAuthnHooksSilent
+          # Отсутствие обращений невидимо в журнале by construction: строк нет вовсе.
+          expr: sum(increase(kaname_authn_hook_requests_total[1h])) == 0
+          for: 30m
+          annotations:
+            summary: "за час ни одного обращения к хукам поставщика личности — вход человека не работает"
+
+        - alert: KanameAuthnHookRefused
+          expr: increase(kaname_authn_hook_requests_total{outcome="refused"}[15m]) > 0
+          for: 15m
+          annotations:
+            summary: "хук {{ "{{ $labels.route }}" }} отвергает обращения поставщика — провязка на его стороне неверна"
+
+        - alert: KanameAuthnHookFailing
+          expr: increase(kaname_authn_hook_requests_total{outcome="failed"}[10m]) > 0
+          annotations:
+            summary: "хук {{ "{{ $labels.route }}" }} не смог ответить — вход человека отказывает"
+
+        - alert: KanameExpiredCredentialReclaimStalled
+          # Включён и не крутится. Выключенный НЕ звонит: это решение оператора, а не отказ.
+          expr: |
+            sum(increase(kaname_expired_credential_reclaim_passes_total[2h])) == 0
+              and on() kaname_expired_credential_reclaim_enabled == 1
+          for: 10m
+          annotations:
+            summary: "снятие истёкших удостоверений включено и не делает проходов — места под потолком не возвращаются"
+
+        - alert: KanameExpiredCredentialReclaimFailing
+          expr: increase(kaname_expired_credential_reclaim_passes_total{outcome="failed"}[1h]) > 0
+          for: 10m
+          annotations:
+            summary: "снятие истёкших удостоверений отказывает — места под потолком не возвращаются"
+
+        - alert: KanameClientTokenRefusalRate
+          expr: |
+            sum(rate(kaname_client_token_outcomes_total{outcome!="accepted"}[10m]))
+              / sum(rate(kaname_client_token_outcomes_total[10m])) > 0.5
+          for: 10m
+          annotations:
+            summary: "больше половины обращений за токеном по учётным данным клиента отвергнуто"
+
+        - alert: KanameClientTokenIssuanceBroken
+          # Отказы НАШЕЙ стороны: реестр, склад однократности, подписант.
+          expr: |
+            sum(increase(kaname_client_token_outcomes_total{outcome=~"registry-unavailable|replay-store-unavailable|issuance-failed"}[10m])) > 0
+          for: 5m
+          annotations:
+            summary: "выдача токенов по учётным данным клиента отказывает на НАШЕЙ стороне"
+
         - alert: KanameRPCErrorRate
           expr: |
             sum(rate(kacho_grpc_server_handled_total{grpc_code!="OK"}[5m]))

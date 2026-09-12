@@ -46,6 +46,30 @@ kaname_build_info
 Отдельно это нужно, когда `/readyz` отвечает, что образ не может обслужить схему базы: одну из
 двух сравниваемых величин даёт этот ряд, вторую — таблица версий схемы в базе.
 
+## Готовность: какая именно зависимость отказала
+
+```promql
+# ряды по каждой зависимости готовности
+sum by (dependency, outcome) (kaname_readiness_dependency_checks_total)
+```
+
+| Ряд | Метки | Что значит |
+|---|---|---|
+| `kaname_readiness_dependency_checks_total` | `dependency`, `outcome` | оценки готовности по каждой зависимости. `outcome` ∈ `ready`, `unready` |
+
+Метка `dependency` и есть ответ на «продукт сломан или условие не создано» — читать её надо так:
+
+| `dependency="…"` с `outcome="unready"` | Что чинить |
+|---|---|
+| `database` | база недоступна: сломан продукт либо среда |
+| `schema-version` | образ не той версии, что схема, — **условие не создано**: накат не прогнан либо откат поставил прежний образ на новую схему. Сверять с меткой `revision` из `kaname_build_info` |
+| `lro-worker` | исполнитель операций ещё не поднялся: идёт старт |
+
+**Все ряды на нуле — третье состояние, а не исправность.** Клетки заводятся при регистрации, до
+первой оценки, поэтому ноль во всех означает, что готовность не оценивалась **ни разу**: пробу
+никто не спрашивает. Под при этом получает трафик, и отказавшая зависимость никого не снимает из
+ротации.
+
 ## Проверки доступа — главная величина службы
 
 ```promql
@@ -143,6 +167,74 @@ rate(kaname_db_pool_acquire_wait_seconds_total[5m]) / rate(kaname_db_pool_empty_
 | `kaname_retention_passes_total` | проходы фоновой уборки |
 | `kaname_retention_rows_removed_total` (`subject`) | снято строк, по каждому предмету отдельно |
 | `kaname_retention_pass_failures_total` (`subject`) | отказавшие проходы уборки |
+| `kaname_expired_credential_reclaim_enabled` | включено ли снятие истёкших удостоверений: `1` / `0`. Выключенный уборщик до этого ряда объявлял о себе единожды при старте и уходил вместе со сроком хранения журнала |
+| `kaname_expired_credential_reclaim_passes_total` (`outcome`) | прогоны снятия истёкших удостоверений: `ok`, `dry-run`, `failed`. Ряд прогонов и отличает «нечего снимать» от «петля не крутится» |
+| `kaname_expired_credential_reclaim_rows_found_total` | строк найдено подлежащими снятию |
+| `kaname_expired_credential_reclaim_rows_reclaimed_total` | строк снято: каждая возвращает место под потолком числа удостоверений на принципала |
+
+Найденное и снятое — **два** ряда потому, что «снято 0» само по себе не отличает «нечего снимать»
+от «нашёл и не снял»; второе бывает при показе без снятия и при отказе посреди партии.
+
+Полоса величин у обоих уборщиков по сроку **одна и та же**: прогоны · найденные и снятые строки ·
+отказавшие прогоны. Две разные полосы наблюдения об одном виде механизма — расхождение, которому
+нечем себя выдать.
+
+## Вход человека: хуки поставщика личности
+
+Живой путь входа. Поставщик личности зовёт четыре маршрута, и звать их его настраивает **оператор**
+— на своей стороне.
+
+```promql
+# обращения по маршрутам и исходам
+sum by (route, outcome) (rate(kaname_authn_hook_requests_total[5m]))
+```
+
+| Ряд | Метки | Что значит |
+|---|---|---|
+| `kaname_authn_hook_requests_total` | `route`, `outcome` | обращения поставщика к полосе хуков. `route` ∈ `token`, `refresh`, `provision`, `recovery`; `outcome` ∈ `ok`, `refused`, `failed` |
+
+У трёх исходов **три разных владельца починки**, и смешивать их нельзя:
+
+| `outcome="…"` | Кто чинит |
+|---|---|
+| `ok` | хук сделал работу |
+| `refused` | обращение отвергнуто до работы — общий секрет, форма тела, метод. Провязка **на стороне поставщика** не создана либо неверна, и чинит её оператор |
+| `failed` | ответить не смогли: сломан продукт |
+
+**Все ряды на нуле — не тишина, а находка.** Клетки заводятся при провязке, поэтому ноль во всех
+означает, что за окно наблюдения не пришло **ни одного** обращения: поставщик не настроен звать
+хуки, и вход человека не работает. До появления этого ряда состояние было невидимо — отсутствие
+строк журнала тревогой не бывает.
+
+Если поставщик личности в установке не настроен вовсе, правило `KanameAuthnHooksSilent` звонит
+именно об этом, и это верный ответ, а не шум.
+
+## Выдача токенов по учётным данным клиента
+
+Полоса, через которую в отдельной установке выдаётся **всякое** арендаторское удостоверение.
+
+```promql
+# исходы обращений за токеном
+sum by (outcome) (rate(kaname_client_token_outcomes_total[5m]))
+```
+
+| Ряд | Метки | Что значит |
+|---|---|---|
+| `kaname_client_token_outcomes_total` | `outcome` | исходы обращений к токен-эндпоинту. Набор значений закрытый: `accepted` и по одному значению на каждый вид отказа |
+
+Наружу все отказы отдают побайтово один и тот же ответ — иначе различимый отказ стал бы оракулом:
+по нему устанавливают, существует ли клиент, жив ли он и какие идентификаторы однократности уже
+заняты. Различимость для оператора живёт **здесь**, в метке `outcome`.
+
+Разделять отказы надо по владельцу починки:
+
+| `outcome="…"` | Кто чинит |
+|---|---|
+| `registry-unavailable`, `replay-store-unavailable`, `issuance-failed` | наша сторона: реестр, склад однократности, подписант |
+| остальные значения | предъявитель либо его настройка: не тот алгоритм, истёкшее утверждение, недоверенный издатель, неразрешённый адресат |
+
+**Печатаются все объявленные исходы, включая нулевые.** Поэтому «ноль отказов» отличимо от «полоса
+не исполнялась ни разу»: во втором случае на нуле и `accepted`.
 
 ## Чего служба НЕ измеряет — и что делать вместо
 
@@ -183,6 +275,15 @@ kubectl exec deploy/kaname -- wget -qO- --server-response http://127.0.0.1:9092/
 
 `503` называет неготовую зависимость по имени. «База недоступна» и «образ не той версии, что
 схема» — разные имена и разные починки; вторую сверяют с меткой `revision` из шага 1.
+
+То же имя видно и с витрины, без запроса к пробе:
+
+```bash
+kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
+  | grep '^kaname_readiness_dependency_checks_total'
+```
+
+Все ряды на нуле — готовность не оценивалась ни разу: пробу никто не спрашивает.
 
 ### Шаг 3 — отвечает ли служба и чем
 
@@ -274,6 +375,68 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   for: 10m
   annotations:
     summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
+
+- alert: KanameReadinessDependencyUnready
+  expr: increase(kaname_readiness_dependency_checks_total{outcome="unready"}[5m]) > 0
+  for: 5m
+  annotations:
+    summary: "зависимость готовности {{ $labels.dependency }} отвечает «не готов» — под снят из ротации"
+
+- alert: KanameReadinessUnprobed
+  # Ноль неготовых законен. Незаконно НЕ ЗНАТЬ, ноль это или неспрошенная проба.
+  expr: sum(increase(kaname_readiness_dependency_checks_total[15m])) == 0
+  for: 15m
+  annotations:
+    summary: "готовность не оценивалась ни разу за 15 минут — пробу никто не спрашивает"
+
+- alert: KanameAuthnHooksSilent
+  # Отсутствие обращений невидимо в журнале by construction: строк нет вовсе.
+  expr: sum(increase(kaname_authn_hook_requests_total[1h])) == 0
+  for: 30m
+  annotations:
+    summary: "за час ни одного обращения к хукам поставщика личности — вход человека не работает"
+
+- alert: KanameAuthnHookRefused
+  expr: increase(kaname_authn_hook_requests_total{outcome="refused"}[15m]) > 0
+  for: 15m
+  annotations:
+    summary: "хук {{ $labels.route }} отвергает обращения поставщика — провязка на его стороне неверна"
+
+- alert: KanameAuthnHookFailing
+  expr: increase(kaname_authn_hook_requests_total{outcome="failed"}[10m]) > 0
+  annotations:
+    summary: "хук {{ $labels.route }} не смог ответить — вход человека отказывает"
+
+- alert: KanameExpiredCredentialReclaimStalled
+  # Включён и не крутится. Выключенный НЕ звонит: это решение оператора, а не отказ.
+  expr: |
+    sum(increase(kaname_expired_credential_reclaim_passes_total[2h])) == 0
+      and on() kaname_expired_credential_reclaim_enabled == 1
+  for: 10m
+  annotations:
+    summary: "снятие истёкших удостоверений включено и не делает проходов — места под потолком не возвращаются"
+
+- alert: KanameExpiredCredentialReclaimFailing
+  expr: increase(kaname_expired_credential_reclaim_passes_total{outcome="failed"}[1h]) > 0
+  for: 10m
+  annotations:
+    summary: "снятие истёкших удостоверений отказывает — места под потолком не возвращаются"
+
+- alert: KanameClientTokenRefusalRate
+  expr: |
+    sum(rate(kaname_client_token_outcomes_total{outcome!="accepted"}[10m]))
+      / sum(rate(kaname_client_token_outcomes_total[10m])) > 0.5
+  for: 10m
+  annotations:
+    summary: "больше половины обращений за токеном по учётным данным клиента отвергнуто"
+
+- alert: KanameClientTokenIssuanceBroken
+  # Отказы НАШЕЙ стороны: реестр, склад однократности, подписант.
+  expr: |
+    sum(increase(kaname_client_token_outcomes_total{outcome=~"registry-unavailable|replay-store-unavailable|issuance-failed"}[10m])) > 0
+  for: 5m
+  annotations:
+    summary: "выдача токенов по учётным данным клиента отказывает на НАШЕЙ стороне"
 
 - alert: KanameRPCErrorRate
   expr: |

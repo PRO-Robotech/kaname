@@ -84,12 +84,44 @@ type Result struct {
 	ByKind map[string]int
 }
 
+// Исходы одного прогона. Набор ЗАКРЫТ и объявлен ЗДЕСЬ, а не выписан у приёмника
+// величин: перечень, собранный вторым местом, разошёлся бы с производителем
+// молча — исход без клетки присутствовал бы нулём и выглядел бы исправным
+// наблюдением.
+const (
+	// OutcomeOK — прогон дошёл до предмета и снял то, что нашёл.
+	OutcomeOK = "ok"
+	// OutcomeDryRun — показ без снятия. Законный исход, а не ошибочный.
+	OutcomeDryRun = "dry-run"
+	// OutcomeFailed — прогон отказал: места под потолком НЕ возвращены.
+	OutcomeFailed = "failed"
+)
+
+// Outcomes — закрытый набор исходов в порядке объявления.
+func Outcomes() []string { return []string{OutcomeOK, OutcomeDryRun, OutcomeFailed} }
+
+// OutcomeFor — исход прогона по двум признакам.
+//
+// Функция ПОЛНАЯ: у неё четыре входа, и ни на одном она не возвращает значения
+// вне [Outcomes]. Именно это делает набор закрытым by construction, а не по
+// договорённости, — и позволяет пробе перечислить входы все.
+func OutcomeFor(failed, dryRun bool) string {
+	switch {
+	case failed:
+		return OutcomeFailed
+	case dryRun:
+		return OutcomeDryRun
+	default:
+		return OutcomeOK
+	}
+}
+
 // Observer — приёмник рядов величин. Журнал сверху, не вместо: мёртвая петля не
 // печатает НИЧЕГО, а отсутствие строки правилом тревоги не выражается. Ряд
 // прогонов, переставший расти, наблюдаем без чтения журнала.
 type Observer interface {
-	// SweepObserved принимает исход одного прогона: outcome — закрытый набор
-	// ("ok" | "failed" | "dry-run"), found/reclaimed — числа переписи.
+	// SweepObserved принимает исход одного прогона: outcome — значение из
+	// закрытого набора [Outcomes], found/reclaimed — числа переписи.
 	SweepObserved(outcome string, found, reclaimed int)
 }
 
@@ -239,13 +271,10 @@ func (s *Sweeper) SweepOnce(ctx context.Context) Result {
 		// Отказ — СВОЙ исход, и «снято 0» на нём не печатается как успех.
 		s.logger.ErrorContext(ctx, "снятие истёкших удостоверений: прогон отказал — места под потолком не возвращены",
 			slog.Any("err", err), slog.Int("found", res.Found), slog.Int("reclaimed", res.Reclaimed))
-		s.observe("failed", res)
+		s.observe(OutcomeFor(true, s.spec.DryRun), res)
 		return res
 	}
-	outcome := "ok"
-	if s.spec.DryRun {
-		outcome = "dry-run"
-	}
+	outcome := OutcomeFor(false, s.spec.DryRun)
 	s.logger.InfoContext(ctx, "снятие истёкших удостоверений: прогон",
 		slog.String("outcome", outcome),
 		slog.Int("found", res.Found),

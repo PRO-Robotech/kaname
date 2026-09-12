@@ -75,6 +75,15 @@ type Handlers struct {
 	// nil означает «корень не провязал» и даёт fail-closed готовность, а не
 	// молчаливые 200 (см. errHealthCarrierNotWired).
 	Health *health.Aggregator
+	// LaneObserver — приёмник исходов полосы (#2495). Без него у живого пути
+	// входа человека нет ни одной величины, и «полоса отказывает» неотличимо от
+	// «поставщик не настроен звать хук»: в первом случае растут строки журнала,
+	// во втором их нет вовсе, а отсутствие строк тревогой не бывает.
+	//
+	// Порт, а не готовый счётчик: этот пакет не знает ни реестра величин, ни
+	// prometheus. Нулевое значение — законное состояние пробы пакета, и полоса
+	// при нём обслуживает вход как обычно.
+	LaneObserver LaneObserver
 }
 
 // NewMux собирает Handlers в один http.ServeMux. Каждый handler уже несет
@@ -93,17 +102,21 @@ func NewMux(h Handlers) *http.ServeMux {
 	// в обработчике не нужна.
 	mux.Handle("GET /healthz", agg.LiveHandler())
 	mux.Handle("GET /readyz", agg.ReadyHandler())
+	// Съём исхода надевается ПО МАРШРУТУ, а не общей обёрткой вокруг
+	// мультиплексора: общая обёртка знала бы только путь запроса, и обращение по
+	// пути, которого полоса не несёт, пришло бы в ряд несуществующего маршрута —
+	// то есть метка перестала бы утверждать что-либо о самих маршрутах.
 	if h.TokenHook != nil {
-		mux.Handle("/iam/v1/hooks/token", h.TokenHook)
+		mux.Handle("/iam/v1/hooks/token", observeRoute(RouteToken, h.TokenHook, h.LaneObserver))
 	}
 	if h.RefreshHook != nil {
-		mux.Handle("/iam/v1/hooks/refresh", h.RefreshHook)
+		mux.Handle("/iam/v1/hooks/refresh", observeRoute(RouteRefresh, h.RefreshHook, h.LaneObserver))
 	}
 	if h.ProvisionHook != nil {
-		mux.Handle("/iam/v1/hooks/provision", h.ProvisionHook)
+		mux.Handle("/iam/v1/hooks/provision", observeRoute(RouteProvision, h.ProvisionHook, h.LaneObserver))
 	}
 	if h.RecoveryHook != nil {
-		mux.Handle("/iam/v1/hooks/recovery", h.RecoveryHook)
+		mux.Handle("/iam/v1/hooks/recovery", observeRoute(RouteRecovery, h.RecoveryHook, h.LaneObserver))
 	}
 	return mux
 }

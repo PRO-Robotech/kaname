@@ -154,6 +154,20 @@ func (h *Handler) Outcomes() map[clientassertion.Outcome]uint64 {
 	return out
 }
 
+// DeclaredOutcomes — закрытый словарь исходов этой полосы строками.
+//
+// Отдаётся наружу ради читателя величин: набор рядов витрины обязан совпадать с
+// набором клеток переписи by construction. Выведен из того же [clientassertion.Outcomes],
+// которым засеяна перепись, поэтому второй копией словаря не является.
+func DeclaredOutcomes() []string {
+	declared := clientassertion.Outcomes()
+	out := make([]string, 0, len(declared))
+	for _, o := range declared {
+		out = append(out, string(o))
+	}
+	return out
+}
+
 func (h *Handler) count(o clientassertion.Outcome) {
 	h.mu.Lock()
 	h.outcomes[o]++
