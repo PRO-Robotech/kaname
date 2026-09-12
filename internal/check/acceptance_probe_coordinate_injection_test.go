@@ -222,3 +222,85 @@ func TestAcceptanceProbeCoordinateNamedHomeInjection(t *testing.T) {
 			c.Coordinates, len(c.Findings), c.Findings)
 	}
 }
+
+// TestAcceptanceProbeCoordinateHomeCensusInjection — оси ПЕРЕПИСИ чужих домов и
+// обоих сторожей гейта.
+//
+// Сторожа живут в самом гейте (`acceptance_probe_coordinate_test.go`), потому что
+// им нужен дом ЭТОГО дерева, а ядро судит значения. Способность сторожа
+// сработать доказывается здесь: предпосылка каждого — величина переписи, и она
+// подаётся значениями.
+func TestAcceptanceProbeCoordinateHomeCensusInjection(t *testing.T) {
+	judge := func(body string) check.ProbeCoordinateCensus {
+		return check.JudgeProbeCoordinates(
+			map[string]string{"docs/engineering/acceptance/x.md": body},
+			liveProbeNames, nil)
+	}
+
+	// ── Ось 5. Дома ПЕЧАТАЮТСЯ и различаются, ревизия в дом не входит ──────────
+	c := judge("`PRO-Robotech/kacho:TestOne` и `PRO-Robotech/kacho@d941344bd9:TestTwo` " +
+		"и `PRO-Robotech/corelib:TestThree`\n")
+	if c.Foreign != 3 {
+		t.Errorf("чужих координат %d, ожидалось 3", c.Foreign)
+	}
+	want := "PRO-Robotech/corelib · PRO-Robotech/kacho"
+	if got := strings.Join(c.ForeignHomes, " · "); got != want {
+		t.Errorf("перепись домов %q, ожидалась %q: ревизия в имя дома не входит, "+
+			"иначе один дом двоится на каждую названную ревизию", got, want)
+	}
+
+	// ── Ось 6. ПРЕДПОСЫЛКА сторожа 1: корпус, где судить нечего ───────────────
+	if c.Coordinates != c.Foreign {
+		t.Errorf("корпус из одних чужих координат: координат %d, чужих %d — сторож, "+
+			"отвергающий такой корпус, не смог бы сработать", c.Coordinates, c.Foreign)
+	}
+	// Обратная сторона: хотя бы одна МЕСТНАЯ координата снимает предпосылку.
+	c = judge("`TestMODMR10RolesSectionLoads` и `PRO-Robotech/kacho:TestOne`\n")
+	if c.Coordinates == c.Foreign {
+		t.Errorf("местная координата в корпусе есть, а предпосылка сторожа 1 держится: "+
+			"координат %d, чужих %d — сторож ронял бы верный корпус",
+			c.Coordinates, c.Foreign)
+	}
+
+	// ── Ось 7. ПРЕДПОСЫЛКА сторожа 2: свой дом виден в переписи ───────────────
+	c = judge("`PRO-Robotech/kaname:TestNotHereAtAll`\n")
+	if len(c.ForeignHomes) != 1 || c.ForeignHomes[0] != "PRO-Robotech/kaname" {
+		t.Errorf("перепись домов %v — сторож 2 сверяет её со своим домом и без записи "+
+			"сработать не может", c.ForeignHomes)
+	}
+	if len(c.Findings) != 0 {
+		t.Errorf("ядро о СВОЁМ доме не знает и находки давать не должно — её даёт "+
+			"сторож гейта: %v", c.Findings)
+	}
+}
+
+// TestAcceptanceProbeCoordinateOwnHomeInjection — обходчик дома дерева.
+//
+// Три исхода, и каждый обязан быть отличим: дом выведен · строки `module` нет ·
+// путь модуля короче трёх сегментов. Второй и третий — ОТКАЗ, а не пустая
+// строка: пустой дом сделал бы сторожа 2 всеразрешающим.
+func TestAcceptanceProbeCoordinateOwnHomeInjection(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+
+	got, err := check.OwnHomeOfTree(write(t, "module github.com/PRO-Robotech/kaname\n\ngo 1.26.0\n"))
+	if err != nil || got != "PRO-Robotech/kaname" {
+		t.Errorf("дом выведен как %q при ошибке %v, ожидалось PRO-Robotech/kaname", got, err)
+	}
+	if _, err = check.OwnHomeOfTree(write(t, "go 1.26.0\n")); err == nil {
+		t.Error("go.mod без строки module обязан быть ОТКАЗОМ: пустой дом сделал бы " +
+			"сторожа своего дома всеразрешающим")
+	}
+	if _, err = check.OwnHomeOfTree(write(t, "module kaname\n")); err == nil {
+		t.Error("путь модуля из одного сегмента дома не даёт — обязан быть отказ")
+	}
+	if _, err = check.OwnHomeOfTree(t.TempDir()); err == nil {
+		t.Error("дерево без go.mod обязано быть ОТКАЗОМ, а не пустым домом")
+	}
+}
