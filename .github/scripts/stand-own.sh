@@ -454,7 +454,7 @@ if [ "${1:-}" = "--self-test" ]; then
 
     mkdir -p "$TMP/empty" "$TMP/toolbin" "$TMP/gobin-ok" "$TMP/gobin-fail" \
              "$TMP/mig-unmet" "$TMP/mig-echo" "$TMP/mig-conn" "$TMP/mig-config" \
-             "$TMP/mig-ok" "$TMP/build-bin" \
+             "$TMP/mig-ok" "$TMP/mig-ok-noisy" "$TMP/build-bin" \
              "$TMP/svc-up" "$TMP/svc-guard" "$TMP/chain-ok" "$TMP/chain-guard"
 
     # Подложные средства подъёма: их НИКОГДА не исполняют, `need_tool` смотрит лишь
@@ -529,6 +529,16 @@ echo 'OK    0001_init.sql'
 echo 'goose: no migrations to run'
 exit 0
 EOF
+    # УСПЕХ, чей вывод НЕСЁТ слова прежнего образца: уведомления сервера
+    # доезжают до оператора дословно, и имя столбца с паролем — законная строка
+    # в них. Третий вход задачи: эхо есть, отказа нет. Исход обязан быть успехом.
+    cat > "$TMP/mig-ok-noisy/kaname-migrator" <<'EOF'
+#!/bin/sh
+echo 'kaname NOTICE: column "password_hash" already exists, skipping' >&2
+echo 'OK    20260101000000_init.sql'
+echo 'goose: successfully migrated database'
+exit 0
+EOF
     cp "$TMP/mig-ok/kaname-migrator" "$TMP/chain-ok/kaname-migrator"
     cp "$TMP/mig-ok/kaname-migrator" "$TMP/chain-guard/kaname-migrator"
 
@@ -567,6 +577,7 @@ PYEOF
              "$TMP/gobin-fail/go" "$TMP/mig-unmet/kaname-migrator" \
              "$TMP/mig-echo/kaname-migrator" "$TMP/mig-conn/kaname-migrator" \
              "$TMP/mig-config/kaname-migrator" "$TMP/mig-ok/kaname-migrator" \
+             "$TMP/mig-ok-noisy/kaname-migrator" \
              "$TMP/chain-ok/kaname-migrator" "$TMP/chain-guard/kaname-migrator" \
              "$TMP/svc-guard/kaname" "$TMP/chain-guard/kaname" \
              "$TMP/svc-up/kaname" "$TMP/chain-ok/kaname"
@@ -594,11 +605,12 @@ EOF
     world_docker_present()  { ( PATH="$TMP/toolbin"; need_tool docker ); }
     world_go_missing()      { ( PATH="$TMP/empty";   need_tool go ); }
 
-    world_migrate_unmet()   { ( BIN="$TMP/mig-unmet";  migrate ); }
-    world_migrate_echo()    { ( BIN="$TMP/mig-echo";   migrate ); }
-    world_migrate_conn()    { ( BIN="$TMP/mig-conn";   migrate ); }
-    world_migrate_config()  { ( BIN="$TMP/mig-config"; migrate ); }
-    world_migrate_ok()      { ( BIN="$TMP/mig-ok";     migrate ); }
+    world_migrate_unmet()   { ( BIN="$TMP/mig-unmet";    migrate ); }
+    world_migrate_echo()    { ( BIN="$TMP/mig-echo";     migrate ); }
+    world_migrate_conn()    { ( BIN="$TMP/mig-conn";     migrate ); }
+    world_migrate_config()  { ( BIN="$TMP/mig-config";   migrate ); }
+    world_migrate_ok()      { ( BIN="$TMP/mig-ok";       migrate ); }
+    world_migrate_ok_noisy(){ ( BIN="$TMP/mig-ok-noisy"; migrate ); }
 
     world_build_no_go()     { ( PATH="$TMP/empty";               BIN="$TMP/build-bin"; build_binaries ); }
     world_build_fail()      { ( PATH="$TMP/gobin-fail:$PATH";    BIN="$TMP/build-bin"; build_binaries ); }
@@ -689,6 +701,9 @@ EOF
     assert 1  "(+) проза о соединении при коде находки — 1"         world_migrate_conn   "накатчик отказал" "connection refused" "УСЛОВИЕ НЕ СОЗДАНО"
     # (+) отказ, к базе не относящийся вовсе: причина обязана доехать дословно.
     assert 1  "(+) строка подключения не собралась — 1"             world_migrate_config "накатчик отказал" "dsn unset" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (−) третий вход: эхо прежнего образца в выводе ЕСТЬ, а отказа нет. Успех
+    # обязан остаться успехом, и уведомление сервера обязано доехать до читателя.
+    assert 0  "(−) эхо в выводе при коде 0 — 0, и текст доехал"     world_migrate_ok_noisy "миграции накачены" "password_hash" "УСЛОВИЕ НЕ СОЗДАНО"
 
     echo "--- ось 3: сборка — отсутствие средства и отказ сборки НЕ один исход"
     assert 0  "(−) сборка прошла — 0"                              world_build_ok       "собрано" "-" "УСЛОВИЕ НЕ СОЗДАНО"
