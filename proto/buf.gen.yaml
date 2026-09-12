@@ -1,0 +1,47 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: Apache-2.0
+
+# buf.gen.yaml — что порождается в модуль СЛУЖБЫ.
+#
+# ПОРОЖДАЕТСЯ РОВНО ОДИН КОРЕНЬ — `kaname`, и это не сужение охвата, а
+# ЕДИНСТВЕННОСТЬ РЕГИСТРАЦИИ.
+#
+# Под `proto/` лежат файлы двух видов. Собственные контракты службы
+# (`kaname/…`) — её предмет, их заглушки порождаются здесь. Остальные
+# (`corelib/…`, `kacho/…`, `google/…`) лежат в дереве потому, что оператор
+# `import` резолвится ФАЙЛОМ: без них контракты службы не компилируются нигде.
+# Их заглушки публикуют их собственные модули, и второе порождение сюда дало бы
+# двоичное, слинковавшее ДВА пакета, каждый из которых регистрирует одно и то же
+# имя файла контракта.
+#
+# Отказ приходит не сборкой, а паникой инициализации — и приходит ТРАНЗИТИВНО, у
+# потребителя, который ни одного из двух путей не называл. Замерено на двоичном
+# из двух импортов (вывод дословно в шапке
+# `internal/contracthome/generation_roots_test.go`).
+#
+# Свойство «порождается только свой корень» держит гейт
+# `TestGenerationProducesOnlyThisServicesOwnContracts`, а не этот комментарий: он
+# судит ЭТО объявление и дерево заглушек в обе стороны.
+#
+# Плагины зовутся через `go run <пакет>`, то есть версией из `go.mod` службы.
+# Предустановленная копия в PATH не исполняется — и это несущее свойство: иначе
+# вердикт генерации зависел бы от машины, а не от дерева.
+version: v2
+plugins:
+  - local: [go, run, google.golang.org/protobuf/cmd/protoc-gen-go]
+    out: ../pkg/api
+    opt: paths=source_relative
+  - local: [go, run, google.golang.org/grpc/cmd/protoc-gen-go-grpc]
+    out: ../pkg/api
+    opt:
+      - paths=source_relative
+      - require_unimplemented_servers=true
+  - local: [go, run, github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway]
+    out: ../pkg/api
+    opt:
+      - paths=source_relative
+      - generate_unbound_methods=true
+inputs:
+  - directory: .
+    paths:
+      - kaname

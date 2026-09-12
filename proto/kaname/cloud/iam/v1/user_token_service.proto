@@ -1,0 +1,247 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/credential_kind.proto";
+import "kaname/cloud/iam/v1/user_oauth_client.proto";
+import "kaname/cloud/iam/v1/secret_options.proto";
+import "kacho/cloud/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// UserTokenService — публичный CRUD для персональных access-токенов
+// пользователя (private_key_jwt). Каждый токен маппится на Hydra OAuth 2.0
+// client (`grant_types=[client_credentials]`, `token_endpoint_auth_method =
+// private_key_jwt`); клиент сам подписывает `client_assertion` (ES256) и
+// обменивает его в Hydra `/oauth2/token` на JWT доступа, принципалом которого
+// становится `user:<user_id>`.
+//
+// Приватный ключ (`private_key_pem`) возвращается РОВНО ОДИН РАЗ в ответе Issue
+// и не хранится нигде — kaname держит только публичную часть в
+// `user_oauth_clients`; подпись проверяется по публичному ключу в OAuth2-обмене.
+//
+// authz: parent-scoped на `iam_user`. Мутации требуют `token_issuer`, чтение —
+// `token_reader`. У ОБОИХ круг держателей один и тот же: сам человек и надзор
+// администратора облака. Права уровня аккаунта — делегированного распорядителя,
+// владельца аккаунта, пообъектной выдачи на строку личности — нет ни у того, ни
+// у другого, и это намеренно (#1086 — выпуск и отзыв, #1133 — чтение).
+//
+// Оба отношения ВЫЧИСЛЯЕМЫЕ (`token_issuer: subject`, `token_reader: subject or
+// super_admin from account`), то есть их нельзя выдать ни кортежем, ни выдачей,
+// ни материализацией: единственный способ обладать ими — БЫТЬ этим человеком.
+// Так и должно быть: персональный токен делает предъявителя самим человеком
+// ВЕЗДЕ, где действует он, включая аккаунты, к которым выдавший отношения не
+// имеет — личность в этом дереве глобальна, одна строка на все аккаунты человека.
+//
+// Чтение сужено ПО ТОМУ ЖЕ ОСНОВАНИЮ, что и мутации, а не «заодно»: перечень
+// удостоверений — не право на аккаунт, а сведения о личности (сколько живо, когда
+// выпущены, когда истекают). Раскрытие сведений — тоже действие за человека.
+// Здесь стояло «надмножество `v_list`: прежние держатели перечисления видят
+// перечень как и раньше» — это была третья сторона того же дефекта.
+//
+// Право «править запись» (`UserService.Update`/`Block`/`Unblock`) и право
+// «действовать от имени» — РАЗНЫЕ права, и отношение у них поэтому разное. Одно
+// отношение на оба означало бы, что второе следует из первого (#1102).
+//
+// SAKeyService на `iam_service_account` этому НЕ зеркалит и зеркалить не обязан:
+// служебная учётка — ресурс аккаунта, а не глобальная личность, и «действовать от
+// её имени» границы аккаунта не покидает. Проверено, а не унаследовано (#1133):
+// у неё нет отношения `subject` — «самой себя» у машины не бывает, — а чтение
+// перечня ключей (`v_list`) и их выпуск с отзывом (`v_update`) раскрываются в
+// ОДИН И ТОТ ЖЕ круг из пяти источников. Класс «чтение шире выпуска», ради
+// которого сужалось чтение у человека, здесь отсутствует by construction: сужать
+// чтение ниже выпуска значило бы сделать отзыв недостижимым тому, кто вправе
+// выпускать.
+//
+// Step-up (`required_acr_min`) — НЕ на всех трёх, и разница намеренна:
+// `Issue` и `Revoke` требуют `"2"`, `List` — `"1"`. Повышенный уровень
+// полагается тому, что МЕНЯЕТ посадку доступа: выпуск креденшала и его отзыв.
+// Перечисление своих токенов посадку не меняет и лишним требованием отсекало бы
+// владельца от обзора собственных ключей — то есть мешало бы ровно тому, кто
+// должен заметить чужой.
+//
+// Здесь стояло «на ВСЕХ трёх RPC», и это было неверно с той же строки, где
+// объявлено `"1"` двадцатью строками ниже: два места об одном предмете, из
+// которых верно одно. Комментарий у контроля безопасности, противоречащий коду,
+// провоцирует «починку» кода под неверный комментарий — то есть привёл бы к
+// повышению уровня на чтении, а не к правке текста.
+service UserTokenService {
+  rpc Issue (IssueUserTokenRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/users/{user_id}/tokens"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "IssueUserTokenMetadata"
+      response: "IssueUserTokenResponse"
+    };
+    option (corelib.authz.v1.permission)        = "iam.issue_user_tokens.issue";
+    option (corelib.authz.v1.required_relation) = "token_issuer";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  rpc List (ListUserTokensRequest) returns (ListUserTokensResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/users/{user_id}/tokens"
+    };
+    option (corelib.authz.v1.permission)        = "iam.user_tokens.list";
+    option (corelib.authz.v1.required_relation) = "token_reader";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  rpc Revoke (RevokeUserTokenRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      delete: "/iam/v1/users/{user_id}/tokens/{token_id}"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "RevokeUserTokenMetadata"
+      response: "RevokeUserTokenResponse"
+    };
+    option (corelib.authz.v1.permission)        = "iam.revoke_user_tokens.revoke";
+    option (corelib.authz.v1.required_relation) = "token_issuer";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+}
+
+message IssueUserTokenRequest {
+  // ID of the User.
+  string user_id = 1;
+  // Description of the UserToken.
+  string description = 2;
+  // Опциональный TTL в секундах. Смысл ЗНАЧЕНИЯ 0 ЗАВИСИТ ОТ ВИДА, и это
+  // сказано здесь, потому что комментарий у контроля, противоречащий коду,
+  // провоцирует «починку» кода под неверный комментарий:
+  //   * KEYPAIR — 0 означает БЕССРОЧНО (прежнее поведение, дословно);
+  //   * SECRET  — 0 означает «срок не назван», применяется умолчание политики;
+  //     БЕССРОЧНОГО СЕКРЕТА НЕ БЫВАЕТ НИ В КАКОМ НАПИСАНИИ, и срок сверх
+  //     потолка политики ОТВЕРГАЕТСЯ, а не урезается молча.
+  int64 ttl_seconds = 3;
+  // Ответственный за выпуск. ОБЯЗАТЕЛЬНЫМ НЕ ОБЪЯВЛЯЕТСЯ И НЕ ЯВЛЯЕТСЯ: край
+  // подставляет его сам — вызывающему-человеку его собственный принципал,
+  // вызывающей машине целевого пользователя (`user_id` этого же запроса).
+  // Присланное значение сверяется с тем, которое будет записано, и совпавшее
+  // применяется дословно; несовпавшее отвергается `INVALID_ARGUMENT` с именем
+  // поля.
+  //
+  // Обязательным это поле НЕ ЯВЛЯЕТСЯ, и объявлять его таким нечем: семейство
+  // расширений, которым обязательность выражалась, снято с контрактов целиком
+  // (kacho#1255) — исполнителя на пути запроса у него не было ни одного. Здесь
+  // оно стояло и утверждало ОБРАТНОЕ действительному: отказа не давало никогда,
+  // а генератор клиента объявлял бы параметр обязательным при сервисе, который
+  // просит его не слать.
+  string created_by_user_id = 4;
+  // Tenant-facing имя токена (человекочитаемая метка). Задаётся при выпуске, immutable.
+  string name = 5;
+  // Пользовательские метки токена. Задаются при выпуске, immutable.
+  map<string, string> labels = 6;
+
+  // Вид выдаваемого удостоверения (§2.5 приёмки BAT-1).
+  //
+  // Не назван — СОХРАНЯЕТСЯ ПРЕЖНЕЕ ПОВЕДЕНИЕ ДОСЛОВНО: пустой перечень
+  // доверенных субъектов даёт KEYPAIR, непустой — FEDERATED. Названный явно вид
+  // АВТОРИТЕТЕН, и несогласие с перечнем отвергается с именем поля.
+  //
+  // LEGACY, названный явно, отвергается ВСЕГДА: его не производит ни один
+  // глагол.
+  CredentialKind credential_kind = 7;
+}
+
+message IssueUserTokenResponse {
+  UserOAuthClient token = 1;
+  // OAuth client_id выпущенного удостоверения — идентификатор строки реестра,
+  // то есть `token.id`. Им заполняются `iss` и `sub` подписанного
+  // `client_assertion`; именно его разрешает издатель платформы.
+  //
+  // Совпадает с `key_id` дословно, и это не избыточность: одно и то же имя
+  // называет и клиента, и ключ, потому что второго имени у удостоверения нет.
+  string client_id = 2;
+  // PEM-encoded PKCS#8 ECDSA P-256 приватный ключ — ПОКАЗЫВАЕТСЯ ОДИН РАЗ;
+  // невосстановим. Вызывающий подписывает им `client_assertion`
+  // (RFC 7521/7523) при обмене на access-токен.
+  //
+  // Помечен носителем секрета: приватная половина — предъявительский секрет
+  // ровно в том же смысле, что и однострочный базовый.
+  string private_key_pem = 3 [(kaname.cloud.iam.v1.secret_bearing) = true];
+  // PEM-encoded SPKI публичный ключ (информационно; каноническая копия — в
+  // строке реестра, по ней и проверяется подпись утверждения).
+  string public_key_pem = 4;
+  // JOSE signing algorithm приватного ключа. Всегда "ES256".
+  string algorithm = 5;
+  // JWK `kid` публичного ключа. Вызывающий ОБЯЗАН выставить `kid`-header
+  // подписанных assertion'ов в это значение. Совпадает с `client_id`.
+  string key_id = 6;
+
+  // Базовый секрет — ПОКАЗЫВАЕТСЯ ОДИН РАЗ и невосстановим. Заполнен ТОЛЬКО у
+  // вида SECRET; у KEYPAIR и FEDERATED пуст.
+  //
+  // Предъявляется КАК ЕСТЬ: `Authorization: Bearer <строка>` на крае и полем
+  // пароля `docker login -p`. Ни библиотеки JOSE, ни сборки утверждения, ни
+  // обмена.
+  //
+  // Помечен носителем секрета: значение не имеет права осесть НИ В СТРОКЕ
+  // ОПЕРАЦИИ, ни в журнале аудита, ни в ленте подписки, ни в строке ресурса.
+  string secret = 7 [(kaname.cloud.iam.v1.secret_bearing) = true];
+}
+
+message IssueUserTokenMetadata {
+  string user_id = 1;
+  string key_id = 2;
+  // Read by exact field name `account_id` by corelib operations (extractAccountID)
+  // → операция попадает в account-scoped фид `/iam/operations`.
+  string account_id = 3;
+}
+
+message ListUserTokensRequest {
+  // ID of the User.
+  string user_id    = 1;
+  // Maximum number of results per page. 0 selects the service default (50);
+  // a value above 1000 is rejected with INVALID_ARGUMENT rather than clamped.
+  int64  page_size  = 2;
+  // Page token. To get the next page of results, set [page_token] to the
+  // [ListUserTokensResponse.next_page_token] returned by a previous list request.
+  string page_token = 3;
+}
+
+message ListUserTokensResponse {
+  repeated UserOAuthClient tokens = 1;
+  string next_page_token = 2;
+}
+
+message RevokeUserTokenRequest {
+  // ID of the User.
+  string user_id  = 1;
+  // ID of the UserToken.
+  string token_id = 2;
+}
+
+message RevokeUserTokenResponse {
+  string token_id = 1;
+  google.protobuf.Timestamp revoked_at = 2;
+}
+
+message RevokeUserTokenMetadata {
+  string user_id = 1;
+  string token_id = 2;
+  // Read by exact field name `account_id` by corelib operations → revoke-операция
+  // тоже попадает в account-scoped фид `/iam/operations`.
+  string account_id = 3;
+}

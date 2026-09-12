@@ -1,0 +1,113 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// An InteractiveClient resource — the OAuth2 client through which a HUMAN
+// completes an interactive sign-in ceremony and ends up holding a bearer the
+// edge accepts.
+//
+// WHY THIS RESOURCE EXISTS. The platform could issue a bearer to a MACHINE and
+// could not issue one to a HUMAN: every client the identity provider knows was
+// registered by one of three iam use-cases, and all three hard-code
+// `client_credentials` / `jwt-bearer`. There was no creator of an
+// `authorization_code` client at all, so the ceremony had nothing to run
+// against. This resource is that creator's subject.
+//
+// WHY IT IS ADMIN-ONLY AND INTERNAL. Registering a client at the identity
+// provider is a credential-lifecycle act: whoever holds it decides where
+// authorization codes may be redirected. The provider's administrative API
+// authenticates nobody by design, so the capability is expressed as an
+// `Internal*` service on the cluster-internal listener (:9091) and never on
+// the external endpoint (ban #6). iam remains the single facade to the
+// identity provider (core rule #16) — no other workload registers clients.
+//
+// Resource id prefix: `ic-` (hyphen canon, `ids.PrefixInteractiveClientHyphen`).
+// The id is immutable for the life of the resource and is the ONLY externally
+// addressable identity (core rule #15); `name` is a cosmetic, mutable label.
+message InteractiveClient {
+  // ID of the interactive client. Form `ic-<17 crockford-base32>` (20 chars),
+  // assigned at Create and immutable for the life of the resource.
+  string id = 1;
+
+  // Creation timestamp. Truncated to seconds on the wire (api-conventions).
+  google.protobuf.Timestamp created_at = 2;
+
+  // Human-readable name. Unique cluster-wide among interactive clients
+  // (enforced by a DB UNIQUE constraint, not a software check-then-act).
+  // 1-63 characters.
+  string name = 3;
+
+  // Optional description.
+  string description = 4;
+
+  // Resource labels as `key:value` pairs.
+  map<string, string> labels = 5;
+
+  // Where the identity provider may redirect the authorization code. At least
+  // one entry is required and every entry must be an absolute `https://` URL:
+  // a redirect target is where the code — a credential — is delivered, so a
+  // plaintext or relative target hands it to whoever is listening.
+  repeated string redirect_uris = 6;
+
+  // Optional post-logout redirect targets. Same `https://` rule as
+  // `redirect_uris` when present.
+  repeated string post_logout_redirect_uris = 7;
+
+  // Client id at the identity provider. Output-only — assigned by the
+  // provider, echoed here so the ceremony can be started against it.
+  string client_id = 8;
+
+  // Audiences stamped into bearers issued through this client. Output-only
+  // (decision Р2): the caller does not supply an audience, iam stamps the
+  // edge's own audience from its configuration. A field that can be set but
+  // cannot be set correctly is a field without a reader; a field that CAN be
+  // set incorrectly breaks the edge silently.
+  repeated string audiences = 9;
+
+  // OAuth2 grant types the provider will honour for this client. Output-only —
+  // always exactly `["authorization_code", "refresh_token"]`; this resource
+  // exists to create that shape and offers no other.
+  repeated string grant_types = 10;
+
+  // Token-endpoint authentication method at the provider. Output-only.
+  string token_endpoint_auth_method = 11;
+
+  // Lifecycle status of the client.
+  Status status = 12;
+
+  // Status of an InteractiveClient.
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+
+    // The client is registered at the provider and may run ceremonies.
+    ACTIVE = 1;
+
+    // Delete has been accepted; the client is being removed at the provider.
+    DELETING = 2;
+  }
+}
+
+// Metadata of the Create operation.
+message CreateInteractiveClientMetadata {
+  // ID of the InteractiveClient being created.
+  string interactive_client_id = 1;
+}
+
+// Metadata of the Update operation.
+message UpdateInteractiveClientMetadata {
+  // ID of the InteractiveClient being updated.
+  string interactive_client_id = 1;
+}
+
+// Metadata of the Delete operation.
+message DeleteInteractiveClientMetadata {
+  // ID of the InteractiveClient being deleted.
+  string interactive_client_id = 1;
+}

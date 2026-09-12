@@ -1,0 +1,553 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+// InternalModuleService — Internal-only.
+//
+// WHAT IT MANAGES. The rows of the permission-module catalog
+// (`kaname.catalog_module` / `catalog_resource` / `catalog_verb`) of ONE
+// module: what a delivered manifest would write and withdraw (`Plan`), the act
+// of bringing those rows to the declared state (`Apply`), and two reads over the
+// live set (`Get`, `List`).
+//
+// WHY THE SURFACE EXISTS AT ALL. The boot path applies the same manifests and
+// the boot-time parity guard (`seed.AssertCatalogParity`) refuses to start when
+// the rows diverge from the anchor. So a divergence that appears in a RUNNING
+// process is repaired by the very thing it blocks — and the only remaining path
+// today is hand-written SQL on a live database. These four verbs are that path,
+// made administrable, confirmable and audited.
+//
+// BAN #6 — THE `Internal` PREFIX IS THE DISCRIMINATOR, NOT A NAMING HABIT. A
+// method of a service so named never reaches the external router: the edge
+// allowlist is computed from descriptors and asserts `AllowedMethods ∩ Internal*
+// = ∅`, and the service is registered on the cluster-internal listener of iam
+// only.
+//
+// REST ROUTES ON THE EDGE INTERNAL MUX — LANDED BY THE NAMED SUCCESSOR (#1991).
+// Here stood "no REST binding in this sub-phase", and it was true when written:
+// the routes were deliberately out of scope so that the route table would not
+// move together with the contract. They are in scope now, and all four verbs
+// carry a `google.api.http` annotation under `/iam/v1/internal/modules`, the
+// prefix `InternalClusterService` already uses for the same gate.
+//
+// THE PLANE DOES NOT CHANGE WITH THE ROUTE. The `Internal` prefix keeps the
+// verbs off the external router by construction (see BAN #6 above): the edge
+// mounts these bindings on its INTERNAL mux only, and the descriptor-computed
+// gates assert both sides — every internal binding is routable there, and none
+// of them is reachable on the external listener.
+//
+// WHY GET FOR `Plan`. It writes nothing — not a catalog row, not an orphan row,
+// not an audit record — and its whole input is the module name, which the path
+// carries. A verb that changes nothing and reads one named thing is a read.
+// `Apply` takes the confirmed fingerprint and the two ceilings, so it is a POST
+// with a body.
+//
+// THE INPUT IS A MODULE NAME, NEVER A MANIFEST BODY. `Plan` and `Apply` re-read
+// the manifest from the DELIVERY directory at request time. A manifest carried
+// in the request body would be a second delivery path that diverges from the
+// first silently, and — decisively — it would turn `Apply` into a brick: a
+// successful application of an arbitrary body makes the NEXT boot impossible,
+// because the boot path applies the delivered manifests and the parity guard
+// refuses to start on the difference. For the same reason no request here names
+// an actor: the audit record takes the actor from the VERIFIED identity of the
+// call and from nowhere else.
+//
+// AUTHORIZATION GATE. Every RPC requires the relation `system_admin` on the
+// singleton `cluster` object (`scope_extractor.object_type = "cluster"`,
+// `from_request_field = "*"`), the same gate `InternalClusterService` carries. No
+// new relation and no new model type is introduced. `viewer` on `cluster` would
+// NOT do: that relation is satisfiable by a wildcard tuple written for the global
+// catalogs, so it answers "yes" to every authenticated caller and would mean
+// "authenticated", not "authorized" (security.md §«Отношение, выполнимое
+// подстановочным знаком, не сужает НИЧЕГО»). The `<exempt>` band would be worse
+// still: access granted by it is not visible in an enumeration of grants and is
+// revoked by nothing short of a redeploy.
+//
+// AUTHENTICATION FLOOR — DECLARED EXPLICITLY ON ALL FOUR. `Apply` declares
+// `required_acr_min = "2"`: applying WITHDRAWS TENANT RIGHTS — resettling moves a
+// row of the live projection out, and no reader of the orphan ledger exists — so
+// it is a change of the security posture, not routine editing. The three reads
+// declare `"1"` EXPLICITLY, because the catalog generator stamps `"2"` when the
+// option is omitted: an unstated floor would arrive as sensitive by accident
+// rather than by decision.
+//
+// THE FLOOR OF `Apply` IS NO LONGER INERT (#1991). Here stood the opposite, and
+// it named its own removal predicate: the floor is enforced by an interceptor
+// reading a hand-written roster of gateway-fronted internal RPCs, the same entry
+// ALSO declares that only the edge may dial the method, and the edge had no REST
+// route — so entering the roster would have produced a surface reachable by no
+// one. The route landed above, the predicate fired, and all four verbs entered
+// the roster in the same change (`authzguard.GatewayFrontedInternalRPCs`).
+//
+// Two consequences, and the second is the point: dialling these verbs directly
+// from any module is now refused — the operator acts through the edge, and the
+// measured set of module callers was empty — and the declared step-up floor is
+// applied, because the interceptor applies it to roster members ONLY.
+//
+// ASYNC CONTRACT — `Operation`, AND THE ENVELOPE IS TERMINAL. `Apply` returns
+// `Operation` (ban #9). The row is saved `done = false` before the mutation so
+// that its id is always queryable, the mutation runs synchronously, and the
+// caller receives the envelope already carrying `done = true`, its metadata and
+// its response. NO POLL IS REQUIRED, and every refusal of `Apply` is a
+// SYNCHRONOUS gRPC error rather than an `Operation` carrying an error inside.
+// This is the shape of the whole service, measured and not chosen for
+// convenience: iam has no asynchronous worker at all.
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "corelib/api/v1/operation.proto";
+import "kacho/cloud/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// InternalModuleService — four verbs of one capability over the permission-module
+// catalog. See the file-level comment for the gate, the envelope and the reason
+// the surface exists.
+service InternalModuleService {
+  // Plan — what applying the delivered manifest of this module WOULD write and
+  // withdraw: named, counted, and accompanied by the state fingerprint that
+  // `Apply` confirms.
+  //
+  // Sync read; no Operation envelope. Plan WRITES NOTHING — neither catalog rows,
+  // nor orphan rows, nor an audit record.
+  //
+  // Refusals (each one restores the caller's next step): empty `module` is
+  // `INVALID_ARGUMENT`; a delivery the deployment never declared, a declared
+  // delivery that failed to read, and a delivery with no manifest for this module
+  // are three DIFFERENT refusals, because they are repaired in three different
+  // places — the deployment, the manifest source, and the manifest itself. The
+  // last one says outright that a missing manifest is NOT a withdrawal of the
+  // module.
+  rpc Plan (PlanModuleRequest) returns (PlanModuleResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/internal/modules/{module}:plan"
+    };
+    option (corelib.authz.v1.permission)        = "iam.modules.plan";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "1";
+  }
+
+  // Apply — brings the catalog rows of this module to the state the delivered
+  // manifest declares, exactly if the module state has not moved since the plan.
+  //
+  // Returns a TERMINAL `Operation` (see the file-level comment): `done = true`
+  // arrives in the response itself, and refusals arrive as synchronous gRPC
+  // errors.
+  //
+  // TWO GUARDS RUN INSIDE THE SAME TRANSACTION, BEFORE THE COMMIT.
+  //
+  //  1. the application must not step OUTSIDE THE ANCHOR of the parity guard.
+  //     The buckets are three and the anchor is NOT symmetric: leaving a row the
+  //     anchor does not declare refuses the next boot, and so does a row that is
+  //     neither live nor withdrawn — but a row WITHDRAWN with evidence
+  //     (`live = false`, `retired_at` set) is lawful, the guard accepts it in its
+  //     own bucket, and the next boot proceeds. Therefore narrowing the catalog
+  //     by editing the source works today; declaring a NEW resource does not, and
+  //     is refused as `FAILED_PRECONDITION` naming the divergence and the repair
+  //     path (edit the source — retrying will not help);
+  //  2. neither consequence ceiling may be exceeded (see `ApplyModuleRequest`).
+  //
+  // Any refusal rolls the whole transaction back: nothing is written and no audit
+  // record appears.
+  rpc Apply (ApplyModuleRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/internal/modules/{module}:apply"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "ApplyModuleMetadata"
+      response: "ApplyModuleResponse"
+    };
+    option (corelib.authz.v1.permission)        = "iam.modules.apply";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Get — the LIVE rows of one module and nothing beyond them. Sync read.
+  //
+  // Withdrawn rows and their successor are deliberately NOT shown: presenting the
+  // withdrawn together with what supersedes it is already assigned, with its own
+  // predicate, to a successor task.
+  //
+  // A module with no live row is `NOT_FOUND` — this is iam's own resource, so the
+  // direct-read lane applies.
+  rpc Get (GetModuleRequest) returns (ModuleCatalog) {
+    option (google.api.http) = {
+      get: "/iam/v1/internal/modules/{module}"
+    };
+    option (corelib.authz.v1.permission)        = "iam.modules.get";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "1";
+  }
+
+  // List — the live modules of the catalog with their counts. Sync read.
+  //
+  // NO PAGINATION, AND THAT IS A DECISION. The population is the platform's own
+  // catalog — six modules, tens of resources, a low hundred of verbs — and it is
+  // not written by tenants at all. A cursor over such a population is a mechanism
+  // without a subject; the request therefore carries no `page_size` / `page_token`
+  // rather than accepting them and ignoring them.
+  rpc List (ListModulesRequest) returns (ListModulesResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/internal/modules"
+    };
+    option (corelib.authz.v1.permission)        = "iam.modules.list";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "1";
+  }
+}
+
+// ModulePlanVerdict — what `Apply` would do with this plan, as far as the parity
+// anchor is concerned.
+//
+// The verdict is NOT a second expression of the lists below it: it is the
+// existing accessor of the parity census (`MissingRows` or `ExtraRows` non-empty),
+// so there is nothing for it to diverge from. Note in particular that
+// `withdrawn_rows` does NOT enter it — a withdrawal that leaves evidence is
+// lawful by construction.
+enum ModulePlanVerdict {
+  MODULE_PLAN_VERDICT_UNSPECIFIED = 0;
+
+  // Applying converges with the anchor: the next boot proceeds.
+  MODULE_PLAN_VERDICT_WOULD_APPLY = 1;
+
+  // Applying would step outside the anchor and is refused inside the transaction,
+  // before the commit. Repaired by editing the source, not by retrying.
+  MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR = 2;
+}
+
+// PlanModuleRequest — payload for `Plan`.
+message PlanModuleRequest {
+  // Module name of the permission catalog (`vpc`, `iam`, `storage`, …). Required;
+  // an empty value is `INVALID_ARGUMENT` `"module: required"`.
+  //
+  // The manifest itself is NOT a field of this request — it is re-read from the
+  // delivery (see the file-level comment).
+  string module = 1;
+}
+
+// PlanModuleResponse — what applying would do, named and counted, plus the
+// fingerprint `Apply` confirms.
+//
+// EVERY NUMBER HERE IS AN ESTIMATE AT PLAN TIME, and two of them are estimates of
+// something the fingerprint deliberately does NOT guard: tenants create and drop
+// roles continuously, so the resettlement and pruning figures may legitimately
+// differ by the time `Apply` runs. That is why they are named apart from the
+// actual figures of `ApplyModuleResponse` — reading one for the other is exactly
+// the mistake the suffix prevents.
+message PlanModuleResponse {
+  // Module the plan is about, echoed so a stored or forwarded plan stays
+  // self-describing.
+  string module = 1;
+
+  // Catalog rows this application WOULD WITHDRAW: live now, not declared by the
+  // manifest. Withdrawal leaves evidence — the row survives with `live = false`
+  // and a reason — so this is the price of a LAWFUL outcome, not an unlawful one.
+  //
+  // ORDER IS SIGNIFICANT: both lists are sorted lexicographically. This is not
+  // decoration — the lists are CAPPED (see `withdrawn_list_truncated`), and
+  // without a defined order truncation would hand back an arbitrary subset that
+  // differs between two calls on the same state.
+  repeated string withdrawn_resources = 2;
+
+  // Verbs this application would withdraw. Sorted lexicographically, capped —
+  // same reasoning as `withdrawn_resources`.
+  repeated string withdrawn_verbs = 3;
+
+  // How many resources / verbs would be withdrawn IN FACT. Exact even when the
+  // lists above are truncated: the count is the number, the list is the sample.
+  int32 withdrawn_resource_count = 4;
+  int32 withdrawn_verb_count = 5;
+
+  // The two lists above were cut at their ceiling. A truncated list without this
+  // flag would be a lie about the module: an empty tail is indistinguishable from
+  // "nothing further to withdraw". Machine-readable on purpose — an operator must
+  // not have to parse ">= N" out of prose.
+  bool withdrawn_list_truncated = 6;
+
+  // How many resources / verbs would be written — created, or revived from a
+  // withdrawn state.
+  int32 written_resource_count = 7;
+  int32 written_verb_count = 8;
+
+  // Tenant projections that would be RESETTLED into the orphan ledger, one figure
+  // per population. Two figures and never their sum: "a right was taken away"
+  // (`role_verb`) and "a rule stopped resolving" (`role_rule_ref`) are different
+  // events for whoever investigates the consequences, and adding them up would
+  // lose exactly that difference — which is also why `Apply` takes two ceilings
+  // and not one.
+  //
+  // ESTIMATES. The fingerprint does not guard them (see the message comment).
+  int32 resettled_rule_refs_at_plan_time = 9;
+  int32 resettled_role_verbs_at_plan_time = 10;
+
+  // The THIRD projection brought to the catalog fact: elements naming no live row
+  // are cut out of the selector rows. Three figures, because the events differ —
+  // a row shortened, a row dropped whole (no live element remained, and an empty
+  // array is forbidden by the schema), and elements cut in total across both
+  // branches.
+  //
+  // This population carries NO CEILING in `Apply`, deliberately: its size depends
+  // on the history of the installation rather than on the edit being applied, and
+  // refusing on it would leave BOTH the dangling element and the tenant's
+  // inability to edit that selector row in place — a ceiling that forbids the
+  // repair while protecting nothing. Visibility replaces the ceiling, and that is
+  // what these three figures are for: an irreversible consequence that is not
+  // bounded by a number must at least be NAMED before the act.
+  //
+  // ESTIMATES, on the same footing as the two above.
+  int32 pruned_selector_rows_at_plan_time = 11;
+  int32 pruned_selector_rows_dropped_at_plan_time = 12;
+  int32 pruned_selector_types_at_plan_time = 13;
+
+  // Fingerprint of this module's catalog state, opaque to the client and passed
+  // back verbatim as `ApplyModuleRequest.expected_state`. The contract is EQUALITY
+  // and nothing else — how it is computed is an implementation detail and may
+  // change without a change here.
+  //
+  // What it covers is chosen, not incidental: exactly the columns whose value
+  // decides the OUTCOME of applying. Tenant role projections are outside it on
+  // purpose — any tenant moves them by creating and deleting roles, so including
+  // them would invalidate every plan for reasons that change nothing about what
+  // applying would do.
+  string expected_state = 14;
+
+  // Rows the application would leave LIVE that the anchor does not declare.
+  // Non-empty means the next boot is refused. Sorted lexicographically — the
+  // producing census sorts them itself.
+  //
+  // Not capped and complete: catalog rows are written by the migration and by
+  // this applier only, never by a tenant, so the population is bounded by the
+  // catalog itself. The asymmetry with the withdrawal lists above is decided, not
+  // accidental: those are capped because they are the operator's working list,
+  // while these three carry the verdict, and a verdict computed from a truncated
+  // list would be worthless.
+  repeated string beyond_anchor_extra = 15;
+
+  // Rows that after the application would exist NEITHER live NOR withdrawn, while
+  // the anchor declares them. Non-empty means the next boot is refused. Sorted
+  // lexicographically; not capped, same reasoning as `beyond_anchor_extra`.
+  repeated string beyond_anchor_missing = 16;
+
+  // Rows the application would WITHDRAW LEAVING EVIDENCE — lawful narrowing, and
+  // therefore NOT part of the verdict.
+  //
+  // This field is not decoration and not a duplicate of `withdrawn_resources`:
+  // that one is what THIS application takes out of the live set, this one is the
+  // parity bucket over the hypothetical post-application state — the rows the
+  // anchor declares and finds withdrawn, EARLIER withdrawals included. Without
+  // it an operator cannot tell "I narrowed the catalog, lawfully" from "I changed
+  // nothing": both give empty divergence lists and `WOULD_APPLY`, while their
+  // consequences are opposite — in one case a tenant has lost projections
+  // irreversibly, in the other nothing was taken.
+  //
+  // Sorted lexicographically; not capped, same reasoning as the two above.
+  repeated string withdrawn_rows = 17;
+
+  // Verdict of the parity anchor over the hypothetical post-application state.
+  ModulePlanVerdict verdict = 18;
+}
+
+// ApplyModuleRequest — payload for `Apply`.
+message ApplyModuleRequest {
+  // Module name of the permission catalog. Required; empty is `INVALID_ARGUMENT`
+  // `"module: required"`. The manifest is re-read from the delivery, exactly as
+  // for `Plan`.
+  string module = 1;
+
+  // Fingerprint taken from `PlanModuleResponse.expected_state`, verbatim.
+  // Required; empty is `INVALID_ARGUMENT` `"expected_state: required"`.
+  //
+  // A divergence is `FAILED_PRECONDITION` telling the caller to repeat `Plan`.
+  // This is not a software check-then-act: the comparison runs as ONE statement
+  // whose cardinality IS the verdict, after the advisory lock the same
+  // transaction takes as its first statement — so no second writer fits between
+  // reading and deciding.
+  string expected_state = 2;
+
+  // Ceilings on the two RESETTLEMENT populations — the consequences that are
+  // IRREVERSIBLE. Exceeding either is refused inside the transaction, before the
+  // commit, naming WHICH population, its ceiling and the actual figure.
+  //
+  // Two ceilings and never one on the sum: a single ceiling would let one
+  // consequence be traded for the other silently, and the two are different
+  // events (see `PlanModuleResponse.resettled_rule_refs_at_plan_time`).
+  //
+  // BOTH ARE REQUIRED, and both carry explicit presence because ZERO is a lawful
+  // and in fact the commonest value: "I confirm this application takes no
+  // projection away". Without presence separate from value, zero would mean "not
+  // set", and "not set" would mean "do not narrow" (security.md). Absence of
+  // either is `INVALID_ARGUMENT` naming the very field that is missing.
+  //
+  // 32 bits are enough by two orders of magnitude: the statement-timeout budget
+  // of one application is exhausted around hundreds of thousands of rows.
+  optional int32 max_resettled_rule_refs = 3;
+  optional int32 max_resettled_role_verbs = 4;
+}
+
+// ApplyModuleMetadata — `Operation.metadata` payload.
+//
+// The identity of an application is the MODULE: unlike the neighbouring internal
+// services, this act creates no resource row with an id of its own, so there is
+// no id to capture. Carried anyway, so that an operation read back later says
+// what it was about without a second lookup.
+message ApplyModuleMetadata {
+  // Module the application was about.
+  string module = 1;
+}
+
+// ApplyModuleResponse — `Operation.response` payload: the FACTUAL census of what
+// the application did, beside the planned figure for each resettlement
+// population.
+//
+// THERE ARE NO "unchanged" FIGURES HERE, deliberately. With them, "all the
+// numbers are zero" would stop being an exact statement about an idempotent
+// application — a second application in a row leaves every row untouched and
+// would report tens of unchanged rows. Everything declared here is a CHANGE, so
+// all-zero and `changed = false` say the same thing twice on purpose: one for a
+// human, one for a machine.
+message ApplyModuleResponse {
+  // Module the application was about.
+  string module = 1;
+
+  // The application changed at least one row. FALSE on a repeat application —
+  // "went through without an error" would be answered the same way by an
+  // application that did nothing at all, which is why the flag is not derived
+  // from the absence of an error.
+  bool changed = 2;
+
+  // The module row itself was created or revived.
+  bool module_written = 3;
+
+  // Rows created or revived.
+  int32 written_resources = 4;
+  int32 written_verbs = 5;
+
+  // Rows marked withdrawn. The row is NOT deleted: it survives with
+  // `live = false`, a timestamp and a reason, and that evidence is what makes the
+  // narrowing lawful for the boot-time parity guard.
+  int32 retired_resources = 6;
+  int32 retired_verbs = 7;
+
+  // Tenant projections ACTUALLY resettled into the orphan ledger, one figure per
+  // population — the same split, and for the same reason, as in the plan.
+  int32 resettled_rule_refs = 8;
+  int32 resettled_role_verbs = 9;
+
+  // What the plan promised for each population, computed by the SAME expression
+  // as on the `Plan` path, inside this transaction, before the resettlement runs.
+  //
+  // Deliberately not echoed from the request: a figure supplied by the caller
+  // would make "the plan promised N" a statement of the caller about itself.
+  // Tenants move roles between plan and application, so a difference here is
+  // lawful and is precisely what these two fields make visible.
+  int32 planned_resettled_rule_refs = 10;
+  int32 planned_resettled_role_verbs = 11;
+
+  // The third projection, actual figures: selector rows shortened, selector rows
+  // dropped whole, elements cut in total. Unbounded by any ceiling — see the plan
+  // message for why a ceiling here would forbid the repair while protecting
+  // nothing.
+  int32 pruned_selector_rows = 12;
+  int32 pruned_selector_rows_dropped = 13;
+  int32 pruned_selector_types = 14;
+}
+
+// GetModuleRequest — payload for `Get`.
+message GetModuleRequest {
+  // Module name of the permission catalog. Required; empty is `INVALID_ARGUMENT`
+  // `"module: required"`. A well-formed name with no live row is `NOT_FOUND`
+  // `"Module <m> not found"`.
+  string module = 1;
+}
+
+// ModuleResourceRow — one LIVE row of `kaname.catalog_resource`, as the
+// catalog serves it.
+message ModuleResourceRow {
+  // Resource name within the module (`gateway`, `network`), without the module
+  // prefix — the module is named once, by the enclosing message.
+  string resource = 1;
+
+  // Name of the authorization-model type addressed by the `v_<verb>` relations of
+  // this resource (`vpc_network`, `account`).
+  //
+  // It TRAVELS as a value and is not derived from the pair: no derivation rule
+  // holds across the tree — some modules name resources in the plural while the
+  // type is singular, and the tiers above a hierarchy carry no module prefix at
+  // all.
+  string object_type = 2;
+}
+
+// ModuleVerbRow — one LIVE row of `kaname.catalog_verb`.
+message ModuleVerbRow {
+  // Resource this verb belongs to, within the module.
+  string resource = 1;
+
+  // Canonical verb form WITHOUT the relation prefix — the same form the role
+  // projection speaks.
+  string verb = 2;
+
+  // The row produces the per-object relation `v_<verb>`. False means a verb that
+  // is lawful for an author and yields a tuple on no object: its effect is
+  // carried by a tier on the parent.
+  bool per_object = 3;
+}
+
+// ModuleCatalog — the LIVE set of one module: what `Get` answers.
+//
+// Withdrawn rows are absent by construction, not filtered out on the way to the
+// client; see the `Get` comment for who shows them instead.
+message ModuleCatalog {
+  // Module name.
+  string module = 1;
+
+  // Live resources of the module. A SET: the order is not significant and is not
+  // preserved — compare by membership, not by index.
+  repeated ModuleResourceRow resources = 2;
+
+  // Live verbs of the module. A SET, on the same terms as `resources`.
+  repeated ModuleVerbRow verbs = 3;
+}
+
+// ListModulesRequest — no fields.
+//
+// No `page_size` / `page_token`: the population is the platform's own catalog and
+// is not written by tenants (see the `List` comment). A field accepted and never
+// read would be worse than no field at all.
+message ListModulesRequest {}
+
+// ModuleSummary — one live module with its counts.
+message ModuleSummary {
+  // Module name.
+  string module = 1;
+
+  // Live resources / verbs of this module. Counts and not the rows themselves:
+  // the rows are what `Get` is for.
+  int32 live_resource_count = 2;
+  int32 live_verb_count = 3;
+}
+
+// ListModulesResponse — the live modules of the catalog.
+message ListModulesResponse {
+  // Live modules. A SET: the order is not significant and is not preserved —
+  // compare by membership, not by index.
+  repeated ModuleSummary modules = 1;
+}

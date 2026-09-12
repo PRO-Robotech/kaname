@@ -1,0 +1,156 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// A Limit resource — the ceiling on how many resources of one KIND a tenant may
+// hold.
+//
+// WHY THIS RESOURCE EXISTS. The number of networks, subnets, addresses,
+// interfaces, rule groups, route tables, gateways and prefix sets one tenant
+// creates was bounded by nothing at all. Every row spends a shared resource — an
+// isolation coordinate, a place in the executor's intent projection, a record in
+// another service's authorization store — so one project could make the platform
+// unusable for everyone else without breaking a single rule.
+//
+// WHY THE VALUE LIVES IN iam AND THE COUNTING DOES NOT. A ceiling is a property
+// of the TENANT: it is created with the project and dies with it. iam owns
+// Account/Project, is already a leaf domain, and every service already calls it —
+// so the authority costs zero new runtime edges and zero new security surface. The
+// COUNTING and the REFUSAL live with the owner of the resource type, because a
+// count must be debited by the very statement that inserts the row (ban #10); a
+// "read the neighbour, then write here" would be check-then-act across a network.
+//
+// PRECEDENCE. Three scopes, most specific first: PROJECT overrides ACCOUNT
+// overrides DEFAULT. A missing row at one scope is not "no ceiling" — it is
+// "nothing said here", and the next scope answers.
+//
+// Resource id prefix: `lim-` (hyphen canon, `ids.PrefixLimitHyphen`). The id is
+// immutable for the life of the resource and is the ONLY externally addressable
+// identity (core rule #15); a Limit has no `name` at all — it is addressed by the
+// triple it governs, and a cosmetic label would be a second way to name one thing.
+message Limit {
+  // ID of the limit. Form `lim-<17 crockford-base32>` (21 chars), assigned at
+  // Create and immutable for the life of the resource.
+  string id = 1;
+
+  // Creation timestamp. Truncated to seconds on the wire (api-conventions).
+  google.protobuf.Timestamp created_at = 2;
+
+  // Scope this limit is stated at.
+  Scope scope = 3;
+
+  // Id of the object the scope names: an account id for ACCOUNT, a project id
+  // for PROJECT. EMPTY for DEFAULT, and empty ONLY for DEFAULT — the pairing is
+  // enforced by a DB CHECK, not by a convention, so a scoped row without a
+  // subject is not expressible.
+  string scope_id = 4;
+
+  // The kind of resource this limit governs. A dotted `domain.resource` token
+  // from the platform's CLOSED catalogue (`vpc.network`, `iam.project`, …).
+  // A kind outside the catalogue is refused BY NAME at Create: a ceiling on a
+  // kind nobody counts would be accepted and never applied, and the
+  // administrator would see success where the tenant sees no effect.
+  string kind = 5;
+
+  // The ceiling. Zero is a legal, meaningful value — "none of this kind may be
+  // created" — and is therefore NOT treated as "unset". Negative is refused.
+  int64 value = 6;
+
+  // Monotonic revision, output-only. It advances when the VALUE changes and when
+  // the limit is withdrawn, and does NOT advance when a write restates the value
+  // it already had. Owners pull deltas by it (`ListChangedSince`), so a
+  // no-op write must not make every puller re-read the world.
+  int64 revision = 7;
+
+  // Scope of a Limit — where the value is stated.
+  //
+  // The three arms are ordered by specificity, and the numbers are part of that
+  // reading: PROJECT (3) beats ACCOUNT (2) beats DEFAULT (1).
+  enum Scope {
+    SCOPE_UNSPECIFIED = 0;
+
+    // Platform-wide fallback. Exactly one row per kind; `scope_id` is empty.
+    DEFAULT = 1;
+
+    // Stated for one account; applies to every project of that account unless
+    // the project states its own.
+    ACCOUNT = 2;
+
+    // Stated for one project. The most specific arm.
+    PROJECT = 3;
+  }
+}
+
+// EffectiveLimit — one resolved ceiling, as an owner-service sees it.
+//
+// It carries WHERE the winning value came from, not only the number. Without the
+// source an operator debugging "why does this project stop at four" cannot tell a
+// project override from an account one from the platform default, and would have
+// to guess by re-reading all three scopes.
+message EffectiveLimit {
+  // Kind this ceiling governs (dotted `domain.resource`).
+  string kind = 1;
+
+  // The effective ceiling.
+  int64 value = 2;
+
+  // Scope the winning value was stated at.
+  Limit.Scope source_scope = 3;
+
+  // Id of the object the winning scope names; empty when the winner is DEFAULT.
+  string source_scope_id = 4;
+
+  // WHERE this kind is counted: a tenancy root (`project` / `account`) or the
+  // two-part token of the parent type a nested kind is counted within.
+  //
+  // Stated rather than left to the reader, because the shape of the kind does
+  // NOT determine it: `iam.project` has two parts and is counted in an ACCOUNT.
+  // A consumer that guessed would file the accounting row under the wrong
+  // owner — and that failure is silent, because the row is created, returned
+  // and simply never charged.
+  //
+  // Never empty in an answer: a kind outside the catalogue never reaches here.
+  string carrier = 5;
+}
+
+// LimitChange — one entry of the delta an owner-service pulls.
+//
+// A withdrawal is carried EXPLICITLY rather than by omission. A puller that only
+// ever learns about writes can never lower or drop a projection row, so a removed
+// project override would keep overriding forever — the projection would be a
+// record of everything that was ever true rather than of what is true.
+message LimitChange {
+  // The limit as it stands. On a withdrawal the row is still described (scope,
+  // scope_id, kind), because the puller needs the TRIPLE to know what to drop;
+  // `value` on a withdrawn entry is the value it had and must not be applied.
+  Limit limit = 1;
+
+  // True when the limit no longer applies. The puller drops the projection row
+  // for this triple and falls back to the next scope.
+  bool withdrawn = 2;
+}
+
+// Metadata of the Create operation.
+message CreateLimitMetadata {
+  // ID of the Limit being created.
+  string limit_id = 1;
+}
+
+// Metadata of the Update operation.
+message UpdateLimitMetadata {
+  // ID of the Limit being updated.
+  string limit_id = 1;
+}
+
+// Metadata of the Delete operation.
+message DeleteLimitMetadata {
+  // ID of the Limit being deleted.
+  string limit_id = 1;
+}

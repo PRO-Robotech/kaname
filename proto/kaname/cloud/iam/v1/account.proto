@@ -1,0 +1,81 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// An Account resource. Top-level tenant container in kaname.
+//
+// Account groups Projects and owns custom Roles/Groups/ServiceAccounts. Each Account
+// has a single owner_user_id° (User id), which is OUTPUT-ONLY derived-from-caller
+// (redesign-2026 F1): not accepted in the Create body (supplying it →
+// INVALID_ARGUMENT) and immutable after Create (not in UpdateAccountRequest.update_mask
+// → "ownerUserId is immutable after Account.Create").
+//
+// Resource id prefix: `acc` (concatenated form, `ids.NewID`).
+message Account {
+  // ID of the account.
+  string id = 1;
+
+  // Name of the account.
+  // The name is unique within the IAM domain. 1-63 characters long.
+  // Value must match the regular expression `[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?` —
+  // RFC 1123 DNS label: lowercase letters, digits and hyphens, 1..63 characters.
+  // Empty on Create means "server, name it": a name derived from the id is
+  // substituted. Empty on Update is rejected — a resource has no nameless state.
+  string name = 2;
+
+  // Optional description of the account. 0-256 characters long.
+  string description = 3;
+
+  // Resource labels as `key:value` pairs.
+  // No more than 64 per resource.
+  map<string, string> labels = 4;
+
+  // ID of the User who owns this Account (account-administrator). OUTPUT-ONLY,
+  // derived-from-caller (mirror of the owner AccessBinding subject). Not accepted
+  // in Create (F1) and immutable after Account.Create — including it in
+  // UpdateAccount.update_mask returns InvalidArgument
+  // ("ownerUserId is immutable after Account.Create").
+  string owner_user_id = 5;
+
+  // Creation timestamp.
+  google.protobuf.Timestamp created_at = 6;
+
+  // TOMBSTONE (B2B Organization fully removed). The
+  // `organization_id` field (tag 7) is dropped; tag & name are reserved and
+  // never reused. Держатель — адъюдикация `buf breaking` против ствола
+  // (категория FILE, правила RESERVED_FIELD_NO_DELETE / RESERVED_ENUM_NO_DELETE);
+  // вызывается заданием конвейера «buf lint · breaking · generate-diff» и
+  // локально scripts/ci-local.sh. Снятие `reserved 7` либо `reserved
+  // "organization_id"` — разрыв, и он либо стоит в proto/declared-breaks.yaml
+  // решением, либо роняет прогон. The DB column was already dropped in iam
+  // migration 0008_drop_organizations.sql.
+  reserved 7;
+  reserved "organization_id";
+}
+
+message CreateAccountMetadata {
+  // ID of the Account that is being created.
+  string account_id = 1;
+
+  // ID of the default Project ("default") co-created by the one-shot Create saga
+  // (redesign-2026 F2). Available before the Operation is done, so the client
+  // does not have to List the default project. Append-only tag.
+  string default_project_id = 2;
+}
+
+message UpdateAccountMetadata {
+  // ID of the Account that is being updated.
+  string account_id = 1;
+}
+
+message DeleteAccountMetadata {
+  // ID of the Account that is being deleted.
+  string account_id = 1;
+}

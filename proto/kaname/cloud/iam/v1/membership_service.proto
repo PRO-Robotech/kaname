@@ -1,0 +1,128 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "kaname/cloud/iam/v1/membership.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// MembershipService — чтение принадлежности человека аккаунту.
+//
+// # Аккаунт в пути ОБЯЗАТЕЛЕН, и это несущее свойство, а не удобство
+//
+// Оба чтения отвечают ТОЛЬКО про названный аккаунт: он приходит входом и стоит в
+// условии отбора запроса к хранилищу, а не в проверке после чтения. Рассказать о
+// чужих аккаунтах эта поверхность не может by construction — она их не
+// спрашивает. Это сильнее фильтрации: фильтр можно забыть, отсутствующий
+// параметр забыть нельзя.
+//
+// Перечень аккаунтов человека — факт о ТРЕТЬИХ СТОРОНАХ (в каких организациях он
+// работает, куда его позвали), и права видеть его у распорядителя одного аккаунта
+// нет. Чтение «все мои членства» существует отдельно, гейтится личностью и
+// параметра человека не имеет вовсе.
+//
+// # Полоса разграничения — ПООБЪЕКТНЫЙ ГЕЙТ КРАЯ, а не сужение на данных
+//
+// У запроса есть ОДИН объект, про который можно задать ОДИН вопрос — аккаунт из
+// пути, — поэтому применим пообъектный гейт края. Полоса `scope_filtered` здесь
+// НЕ объявляется: она означала бы снятие пообъектной проверки края и замену её
+// кодом, который можно забыть в следующей ветке, — второй замок к уже закрытой
+// двери, ведь строки и так отбираются по аккаунту из пути.
+//
+// Наблюдаемое следствие, названное, а не умолчанное: у вызывающего БЕЗ права на
+// аккаунт край отвечает РАНЬШЕ сервиса, поэтому негодная пагинация даёт отказ
+// прав, а не 400. Это задокументированная authz-first полоса.
+//
+// # Отношение — `viewer` на объекте аккаунта, и выбор доказан контролем ПО ТИРУ
+//
+// `viewer` выводится через `editor` и `admin`, то есть накрывает ДЕЛЕГИРОВАННОГО
+// распорядителя аккаунта — адресата, ради которого чтение и заводится.
+// Глагольные отношения объекта аккаунта (`v_get`/`v_list`) тир распорядителя
+// НАМЕРЕННО не читают: они про сам объект аккаунта, границу его области. Выбор
+// `v_list` прошёл бы все прочие проверки каталога и оставил бы делегированного
+// распорядителя без чтения членств в своём аккаунте.
+//
+// Подстановочным кортежем `viewer` @ `account` НЕ выполняется: тип объявляет
+// `[user, service_account, group#member] or editor`, члена `user:*` в нём нет.
+service MembershipService {
+  // Returns the specified Membership within the named Account.
+  //
+  // Well-formed идентификатор членства ЧУЖОГО аккаунта неотличим от
+  // несуществующего: оба — `NOT_FOUND` с одним и тем же текстом контракт-тона.
+  // Различимый ответ выдал бы ровно то, что сокрытие и должно было закрыть —
+  // тем более что идентификатор членства вычислим офлайн из пары
+  // «человек × аккаунт», то есть перебирать для оракула ничего не надо.
+  rpc Get (GetMembershipRequest) returns (Membership) {
+    option (google.api.http) = { get: "/iam/v1/accounts/{account_id}/memberships/{membership_id}" };
+    option (corelib.authz.v1.permission)        = "iam.memberships.get";
+    option (corelib.authz.v1.required_relation) = "viewer";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "account"
+      from_request_field: "account_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Retrieves the list of Memberships within the named Account.
+  rpc List (ListMembershipsRequest) returns (ListMembershipsResponse) {
+    option (google.api.http) = { get: "/iam/v1/accounts/{account_id}/memberships" };
+    option (corelib.authz.v1.permission)        = "iam.memberships.list";
+    option (corelib.authz.v1.required_relation) = "viewer";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "account"
+      from_request_field: "account_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+}
+
+message GetMembershipRequest {
+  // Аккаунт, в котором читается членство. ОБЯЗАТЕЛЕН: он и есть объект, про
+  // который край спрашивает модель прав, и он же стоит в условии отбора.
+  string account_id = 1;
+
+  // Идентификатор членства, форма `mbr-<17>`.
+  string membership_id = 2;
+}
+
+message ListMembershipsRequest {
+  // Аккаунт, чьи членства перечисляются. ОБЯЗАТЕЛЕН — см. комментарий службы.
+  string account_id = 1;
+
+  // The maximum number of results per page to return. Default value: 50.
+  // Значение вне [0..1000] ОТВЕРГАЕТСЯ, а не подрезается.
+  int64 page_size = 2;
+
+  // Page token, opaque. Негодный токен отвергается, а не игнорируется.
+  string page_token = 3;
+
+  // Ровно один терм из белого списка: `userId="usr…"`.
+  //
+  // Оператор — только равенство. Подстрочный поиск (`CONTAINS`) грамматика
+  // разбирает, но эта поверхность его ОТВЕРГАЕТ явно: возможности искать
+  // человека по части идентификатора никто не заводил, у неё нет ни кейса, ни
+  // индекса, и молча свести её к равенству значило бы ответить уверенно и
+  // неверно.
+  //
+  // Терм действует ВНУТРИ названного аккаунта — оракула из него не возникает.
+  string filter = 4;
+}
+
+message ListMembershipsResponse {
+  // Членства названного аккаунта.
+  //
+  // Это НАБОР: порядок элементов определяется курсором `(created_at, id)` и
+  // значимым НЕ является. Вызывающий обязан сверять состав, а не индексы.
+  repeated Membership memberships = 1;
+
+  // Токен следующей страницы; пусто — страница последняя.
+  //
+  // Вычисляется ТОЛЬКО по строкам названного аккаунта: существование строк вне
+  // него он не различает ничем.
+  string next_page_token = 2;
+}

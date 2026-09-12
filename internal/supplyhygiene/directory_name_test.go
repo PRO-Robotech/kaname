@@ -99,6 +99,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/treecorpus"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // canonicalSegment — имя, которым служба зовёт свои каталоги. ОДНО объявление
@@ -127,6 +128,51 @@ var dirNameCheckOwnFiles = map[string]bool{
 // appliedMigrationDir — каталог применённых миграций. Их шапки правке не
 // подлежат (ban #5), поэтому полоса пропускается и считается отдельно.
 const appliedMigrationDir = "internal/migrations/"
+
+// contractInputLedger — ведомость ВХОДНЫХ контрактов службы. Читается здесь ради
+// ОДНОГО вопроса: является ли путь с отставленным сегментом координатой ЧУЖОГО
+// контракта, а не каталогом, который продукт назвал своим именем.
+//
+// ПОЧЕМУ ЭТО НЕ ПОСЛАБЛЕНИЕ. После переезда контрактов (решение владельца
+// 2026-09-13, kacho#2616) под `proto/` лежат файлы, чей путь ЗАДАН оператором
+// `import` соседнего контракта, а не нами: `kacho/cloud/operation/operation.proto`
+// назван так восемнадцатью операторами службы, и переименовать его здесь
+// значит не собрать контракты вовсе. Предмет axis 1 — «чем продукт зовёт СВОИ
+// каталоги»; чужая координата к нему не относится.
+//
+// ПЕРЕЧЕНЬ НЕ ВЫПИСАН ЛИТЕРАЛОМ, а прочитан из ведомости, по которой эти файлы и
+// живут в дереве (`proto/inputs.yaml`, гейт `internal/contracthome`
+// TestVendoredInputContractsMatchTheirLedger). Литерал разошёлся бы с ведомостью
+// молча — на входе, заведённом после; а вход, ушедший из ведомости, теряет
+// послабление автоматически.
+const contractInputLedger = "proto/inputs.yaml"
+
+// contractInputPaths — пути входных контрактов ОТНОСИТЕЛЬНО корня дерева.
+//
+// Отсутствие ведомости — не отказ: у синтетического корня инъекции её нет by
+// construction, и там множество законно пусто (то есть послаблений ноль, и
+// доказанное на синтетике верно для дерева тем же кодом).
+func contractInputPaths(root string) (map[string]bool, error) {
+	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(contractInputLedger)))
+	if err != nil {
+		return map[string]bool{}, nil
+	}
+	var ledger struct {
+		Inputs []struct {
+			Path string `yaml:"path"`
+		} `yaml:"inputs"`
+	}
+	if err := yaml.Unmarshal(raw, &ledger); err != nil {
+		return nil, fmt.Errorf("%s: разбор ведомости входных контрактов: %w", contractInputLedger, err)
+	}
+	out := make(map[string]bool, len(ledger.Inputs))
+	for _, in := range ledger.Inputs {
+		if in.Path != "" {
+			out["proto/"+in.Path] = true
+		}
+	}
+	return out, nil
+}
 
 // isCapturedReport — файл есть захваченный вывод прогона: отчёт замера либо
 // результат нагрузочной пробы. Свидетельствует о том, что было.
@@ -174,6 +220,7 @@ type dirNameCensus struct {
 	filesReport       int // файлов отчётов пропущено целиком
 	skippedOwn        int // пропущено: сама проверка и её доказательство
 	filesOwn          int // файлов перечня «предмет = это переименование»
+	skippedInputPath  int // пропущено: путь ВХОДНОГО контракта (координата задана чужим оператором)
 }
 
 // dirNameFinding — одно вхождение отставленного имени.
@@ -248,17 +295,27 @@ func scanDirectoryNames(tree *treecorpus.Tree) (dirNameCensus, []dirNameFinding,
 	var findings []dirNameFinding
 
 	root := tree.Root()
+	inputPaths, err := contractInputPaths(root)
+	if err != nil {
+		return census, nil, err
+	}
 	for _, rel := range tree.SortedFiles() {
 		slash := filepath.ToSlash(rel)
 
-		// Ось 1 — САМ ПУТЬ. Судится у каждого файла без исключений: каталог,
-		// названный чужим именем, есть находка независимо от содержимого.
+		// Ось 1 — САМ ПУТЬ. Исключение РОВНО ОДНО, и оно про чужую координату, а
+		// не про наш каталог: путь входного контракта задан оператором `import`
+		// соседнего контракта, и переименовать его здесь нельзя, не сломав сборку
+		// контрактов. Всё остальное судится без исключений.
 		if hasSegment(slash, canonicalSegment) {
 			census.canonicalSegments++
 		}
 		if hasSegment(slash, retiredSegment) {
 			census.retiredSegments++
-			findings = append(findings, dirNameFinding{file: slash})
+			if inputPaths[slash] {
+				census.skippedInputPath++
+			} else {
+				findings = append(findings, dirNameFinding{file: slash})
+			}
 		}
 
 		raw, err := os.ReadFile(filepath.Join(root, rel))
@@ -327,7 +384,7 @@ func TestServiceDirectoriesAreNamedForTheirOwnProduct(t *testing.T) {
 	t.Logf("перепись: файлов прочитано %d · двоичных пропущено %d · "+
 		"путей с сегментом %q %d · с сегментом %q %d · "+
 		"ссылок на %q %d · на %q %d · "+
-		"пропущено соседних служб %d · применённых миграций %d файлов (%d ссылок) · "+
+		"пропущено соседних служб %d · входных контрактов %d путей · применённых миграций %d файлов (%d ссылок) · "+
 		"отчётов %d файлов (%d ссылок) · файлов самой проверки %d (%d ссылок)",
 		census.filesRead, census.filesBinary,
 		canonicalSegment, census.canonicalSegments,
@@ -335,6 +392,7 @@ func TestServiceDirectoriesAreNamedForTheirOwnProduct(t *testing.T) {
 		canonicalSegment, census.canonicalRefs,
 		retiredSegment, census.retiredRefs,
 		census.skippedForeign,
+		census.skippedInputPath,
 		census.filesMigration, census.skippedMigration,
 		census.filesReport, census.skippedReport,
 		census.filesOwn, census.skippedOwn)

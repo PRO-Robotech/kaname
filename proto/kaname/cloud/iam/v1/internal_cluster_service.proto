@@ -1,0 +1,240 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+// InternalClusterService — Internal-only.
+// Registered exclusively on the api-gateway internal mux (cluster-internal listener)
+// under `/iam/v1/internal/cluster/...`; never on the external TLS endpoint.
+//
+// Manages cluster-RBAC admin grants on the singleton `cluster:cluster_root`
+// FGA object. Replaces the prior `kubectl exec`-into-openfga workflow for
+// granting / revoking `system_admin` to humans. All mutations follow the
+// `Operation` async envelope: the handler
+// inserts `cluster_admin_grants` + `fga_outbox` + `audit_outbox` rows in a
+// single transaction, then the existing `FGAOutboxDrainer` worker pushes the
+// tuple as a journal intent and flips the Operation to `done=true` within ≤2s.
+//
+// Read RPCs (`Get`, `ListAdmins`) are synchronous; they hit the local
+// `kaname` schema only.
+//
+// Authorization gate:
+// every RPC requires the FGA relation `system_admin` on
+// `cluster:cluster_root` (resolved via `scope_extractor.object_type =
+// "cluster"`, `from_request_field = "*"` ⇒ the singleton cluster id). The
+// api-gateway authz middleware reads `permission_catalog.json` and enforces
+// this before the request reaches the handler. Non-admin subjects MUST NOT
+// be able to even observe these RPCs — `Get` / `ListAdmins` would otherwise
+// leak the existence and roster of cluster admins.
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/cluster.proto";
+import "kaname/cloud/iam/v1/cluster_admin_grant.proto";
+import "kacho/cloud/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// InternalClusterService — admin-tooling for the singleton
+// `cluster:cluster_root` FGA object. See file-level comment for the
+// gate and the outbox contract.
+service InternalClusterService {
+  // Returns the singleton Cluster resource (`id = "cluster_root"`).
+  // Sync read; no Operation envelope.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc Get (GetClusterRequest) returns (Cluster) {
+    option (google.api.http) = {
+      get: "/iam/v1/internal/cluster"
+    };
+    option (corelib.authz.v1.permission)        = "iam.cluster_admins.get";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Grants permanent cluster-admin (relation `system_admin` on
+  // `cluster:cluster_root`) to the requested subject. Idempotent —
+  // re-granting an already-active subject returns success with the existing
+  // grant id.
+  //
+  // The handler validates user existence (`kaname.users` SELECT in the
+  // same TX) and then atomically inserts a `cluster_admin_grants` row
+  // (`INSERT … ON CONFLICT (subject_type, subject_id) WHERE granted_until IS
+  // NULL DO NOTHING`), an `fga_outbox` write-tuple row, and an
+  // `audit_outbox` row in one transaction.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc GrantAdmin (GrantClusterAdminRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/internal/cluster/admins"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "GrantClusterAdminMetadata"
+      response: "ClusterAdminGrant"
+    };
+    option (corelib.authz.v1.permission)        = "iam.cluster_admins.grant";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Revokes cluster-admin from the requested subject. Soft revoke —
+  // sets `granted_until = now()` on the active row, keeping history.
+  //
+  // Two CAS guards run as part of a single atomic UPDATE:
+  // self-revoke is rejected (FailedPrecondition
+  // `"cannot revoke own cluster admin grant"`) and last-admin revoke is
+  // rejected (FailedPrecondition `"cannot revoke last active cluster
+  // admin"`). Revoking a non-existent or already-revoked admin returns
+  // NotFound (asymmetric with GrantAdmin idempotency).
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc RevokeAdmin (RevokeClusterAdminRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      delete: "/iam/v1/internal/cluster/admins/{subject_id}"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "RevokeClusterAdminMetadata"
+      response: "ClusterAdminGrant"
+    };
+    option (corelib.authz.v1.permission)        = "iam.cluster_admins.revoke";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Lists currently-active cluster admins. Sync read; joins
+  // `kaname.cluster_admin_grants` (`WHERE granted_until IS NULL`) with
+  // `kaname.users` to enrich each entry with subject email / display
+  // name and the granter's email. No pagination — admins are expected to be
+  // ≤50 in practice.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc ListAdmins (ListClusterAdminsRequest) returns (ListClusterAdminsResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/internal/cluster/admins"
+    };
+    option (corelib.authz.v1.permission)        = "iam.cluster_admins.list";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+}
+
+// GetClusterRequest — singleton; no fields. Cluster id is implicit
+// (`cluster_root`).
+message GetClusterRequest {}
+
+// GrantClusterAdminRequest — payload for `GrantAdmin`.
+message GrantClusterAdminRequest {
+  // Subject type. Only `USER` is accepted in this version; other values
+  // return InvalidArgument `"Illegal argument subject_type: only 'user' supported in this version"`.
+  ClusterGrantSubjectType subject_type = 1;
+
+  // User id of the new admin. Must match `^usr[0-9a-hjkmnp-tv-z]{17}$` and
+  // exist in `kaname.users` (missing user returns InvalidArgument).
+  string subject_id = 2;
+}
+
+// GrantClusterAdminMetadata — Operation.metadata payload. Captures the
+// `ClusterAdminGrant.id` immediately so callers can correlate the Operation
+// with the row even before `done=true`.
+message GrantClusterAdminMetadata {
+  // ID of the `cluster_admin_grants` row (existing one when the grant was
+  // idempotent, freshly-inserted otherwise).
+  string cluster_admin_grant_id = 1;
+
+  // Subject id from the request, echoed for client convenience.
+  string subject_id = 2;
+}
+
+// RevokeClusterAdminRequest — payload for `RevokeAdmin`.
+message RevokeClusterAdminRequest {
+  // Subject type. Only `USER` is accepted in this version.
+  ClusterGrantSubjectType subject_type = 1;
+
+  // User id of the admin being revoked. Must match
+  // `^usr[0-9a-hjkmnp-tv-z]{17}$`. Self-revoke is rejected
+  // (FailedPrecondition); last-admin revoke is rejected
+  // (FailedPrecondition); non-existent / already-revoked admin returns
+  // NotFound.
+  string subject_id = 2;
+}
+
+// RevokeClusterAdminMetadata — Operation.metadata payload. Mirror of
+// `GrantClusterAdminMetadata` for the revoke flow.
+message RevokeClusterAdminMetadata {
+  // ID of the `cluster_admin_grants` row whose `granted_until` was set.
+  string cluster_admin_grant_id = 1;
+
+  // Subject id from the request, echoed for client convenience.
+  string subject_id = 2;
+}
+
+// ListClusterAdminsRequest — no fields. The list is filtered server-side to
+// active grants (`granted_until IS NULL`) and ordered by `granted_at ASC`.
+message ListClusterAdminsRequest {}
+
+// ListClusterAdminsResponse — denormalized snapshot of currently-active
+// admins, ready for direct UI rendering.
+message ListClusterAdminsResponse {
+  // Active admins, ordered by `granted_at ASC`.
+  repeated ClusterAdminEntry admins = 1;
+}
+
+// ClusterAdminEntry — denormalized projection of one active
+// `cluster_admin_grants` row joined with `kaname.users` for the subject
+// and the granter. Used exclusively by `ListAdmins` — the underlying source
+// of truth is still `ClusterAdminGrant` (see `cluster_admin_grant.proto`).
+//
+// `subject_email` / `subject_display_name` / `granted_by_email` are mirror
+// fields kept in sync via the join at read time; they are output-only
+// (clients must not echo them back as inputs).
+message ClusterAdminEntry {
+  // ID of the underlying `cluster_admin_grants` row (`cag_<17>`).
+  string cluster_admin_grant_id = 1;
+
+  // Subject type (`USER` only in this version).
+  ClusterGrantSubjectType subject_type = 2;
+
+  // User id of the admin (`usr<17>`).
+  string subject_id = 3;
+
+  // Subject email enriched from `kaname.users`. Empty string when the
+  // user row is absent (dangling reference; should not happen, surfaced as
+  // empty for graceful UI degradation).
+  string subject_email = 4;
+
+  // Subject display name enriched from `kaname.users`. Empty string when
+  // the user row is absent.
+  string subject_display_name = 5;
+
+  // User id of the granter (`usr<17>` for a regular admin, or the literal
+  // `"bootstrap"` for the initial bootstrap-seeded admin).
+  string granted_by_user_id = 6;
+
+  // Granter email enriched from `kaname.users`. Empty string when
+  // `granted_by_user_id == "bootstrap"` or when the granter user row is
+  // absent.
+  string granted_by_email = 7;
+
+  // Timestamp when the grant was created.
+  google.protobuf.Timestamp granted_at = 8;
+}

@@ -30,6 +30,38 @@ import (
 // grpcDial — синтаксическая форма исходящего дозвона.
 var grpcDial = regexp.MustCompile(`grpc\.(NewClient|Dial)\(`)
 
+// generatedStubDir — каталог ПОРОЖДЁННЫХ заглушек контрактов службы, появившийся
+// в этом дереве вместе с контрактами (решение владельца 2026-09-13, kacho#2616).
+//
+// ПОЧЕМУ ОН ИСКЛЮЧЁН ИЗ ОСИ ДОЗВОНА, И ПОЧЕМУ ЭТО НЕ ОСЛАБЛЕНИЕ.
+//
+// Транскодер REST порождает у каждой службы функцию `Register…HandlerFromEndpoint`,
+// и внутри неё стоит `grpc.NewClient`. Адрес ей передаёт ВЫЗЫВАЮЩИЙ: сама заглушка
+// не выбирает, куда звонить, и ребра графа не заводит — она предлагает форму.
+// В этом дереве вызывающий один — собственный фронт REST службы
+// (`internal/restfront`), и он направляет транскодер на СВОЙ же gRPC-слушатель.
+// Внутрипроцессная петля ребром графа рёбер не является: ребро описывает, кто из
+// служб зовёт кого на пути запроса.
+//
+// Свойство «вызывающий только один и только такой» здесь НЕ подразумевается — оно
+// проверяется осью ниже: обращение к `…HandlerFromEndpoint` вне фронта REST есть
+// находка. Без этой оси исключение было бы маской: новый исходящий дозвон,
+// сделанный через порождённый помощник, прошёл бы молча.
+//
+// Прежде этой полосы не требовалось, и вот почему: заглушки лежали в модуле
+// платформы, то есть ВНЕ корня обхода, — «дозвонов ноль» было свойством поставки,
+// а не дерева. Переезд контрактов сделал прежнее умолчание видимым.
+const generatedStubDir = "pkg/api/"
+
+// restFrontDir — единственное место, откуда законно зовётся порождённый
+// транскодер: фронт REST самой службы. Перечень обязан истекать сам — обращение
+// без предмета роняет ось вместе с настоящей находкой.
+const restFrontDir = "internal/restfront/"
+
+// endpointRegistrar — обращение к порождённому транскодеру, открывающему
+// соединение по переданному адресу.
+var endpointRegistrar = regexp.MustCompile(`HandlerFromEndpoint\b`)
+
 // TestIamIsALeafAndCallsNobodyByGRPC — владелец прав НЕ дозванивается ни до кого.
 //
 // # Предмет
@@ -67,9 +99,13 @@ func TestIamIsALeafAndCallsNobodyByGRPC(t *testing.T) {
 	}
 
 	var (
-		filesRead int
-		toolFiles int
-		dials     []string
+		filesRead     int
+		toolFiles     int
+		stubFiles     int
+		stubDials     int
+		dials         []string
+		outsideFront  []string
+		frontCallSite int
 	)
 	for _, path := range files {
 		if strings.HasSuffix(path, "_test.go") {
@@ -89,6 +125,15 @@ func TestIamIsALeafAndCallsNobodyByGRPC(t *testing.T) {
 			toolFiles++
 			continue
 		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			t.Fatalf("путь %s не приведён к корню %s: %v", path, root, relErr)
+		}
+		rel = filepath.ToSlash(rel)
+		generated := strings.HasPrefix(rel, generatedStubDir)
+		if generated {
+			stubFiles++
+		}
 		filesRead++
 		b, rerr := os.ReadFile(path) // #nosec G304 -- путь производится индексом git
 		if rerr != nil {
@@ -101,10 +146,22 @@ func TestIamIsALeafAndCallsNobodyByGRPC(t *testing.T) {
 			if idx := strings.Index(code, "//"); idx >= 0 {
 				code = code[:idx]
 			}
-			if grpcDial.MatchString(code) {
-				rel, _ := filepath.Rel(root, path)
-				dials = append(dials, rel+":"+itoa(i+1))
+			if endpointRegistrar.MatchString(code) && !generated {
+				switch {
+				case strings.HasPrefix(rel, restFrontDir):
+					frontCallSite++
+				default:
+					outsideFront = append(outsideFront, rel+":"+itoa(i+1))
+				}
 			}
+			if !grpcDial.MatchString(code) {
+				continue
+			}
+			if generated {
+				stubDials++
+				continue
+			}
+			dials = append(dials, rel+":"+itoa(i+1))
 		}
 	}
 
@@ -117,7 +174,10 @@ func TestIamIsALeafAndCallsNobodyByGRPC(t *testing.T) {
 	// которого гейт заведён, — «дозвонов ноль» стало бы неотличимо от «весь дозвон
 	// уехал под исключение».
 	t.Logf("перепись: файлов серверного процесса прочитано %d · дозвонов %d · "+
-		"файлов инструмента оператора исключено %d", filesRead, len(dials), toolFiles)
+		"файлов инструмента оператора исключено %d · файлов порождённых заглушек %d "+
+		"(дозвонов транскодера в них %d) · обращений к транскодеру во фронте REST %d · "+
+		"вне фронта %d",
+		filesRead, len(dials), toolFiles, stubFiles, stubDials, frontCallSite, len(outsideFront))
 
 	// Самоистечение: перечень, которому нечего исключать, — находка. Инструмент
 	// сняли или перенесли — запись обязана уйти тем же изменением.
@@ -126,6 +186,35 @@ func TestIamIsALeafAndCallsNobodyByGRPC(t *testing.T) {
 			"его предмет исчез. Снимите запись тем же изменением, которым сняли "+
 			"инструмент, — иначе она переживёт то, ради чего заведена (перечень: %v)",
 			operatorToolPrefixes)
+	}
+
+	// Самоистечение полосы заглушек: исключению обязано быть что исключать.
+	// Заглушки уехали из дерева — полоса уходит тем же изменением, иначе она
+	// переживёт свой предмет и начнёт прятать настоящий дозвон.
+	if stubFiles == 0 {
+		t.Fatalf("полоса порождённых заглушек (%s) не исключила НИ ОДНОГО файла: её предмет "+
+			"исчез. Снимите полосу тем же изменением, которым сняли заглушки из дерева",
+			generatedStubDir)
+	}
+	if stubDials == 0 {
+		t.Fatalf("в порождённых заглушках (%d файлов) не найдено ни одного дозвона транскодера: "+
+			"либо транскодер больше не порождается, либо его форма сменилась — и тогда полоса "+
+			"исключает не то, что называет", stubFiles)
+	}
+	// Ось вызывающего: порождённый транскодер зовётся ТОЛЬКО фронтом REST службы.
+	// Она и делает полосу выше послаблением с предметом, а не маской на каталог.
+	if frontCallSite == 0 {
+		t.Fatalf("обращений к транскодеру во фронте REST (%s) не найдено ни одного: ось "+
+			"вызывающего беспредметна, и полоса заглушек перестала быть проверяемой",
+			restFrontDir)
+	}
+	if len(outsideFront) > 0 {
+		t.Fatalf("порождённый транскодер зовётся ВНЕ фронта REST — %d место(а): %s\n\n"+
+			"Внутри транскодера стоит `grpc.NewClient` по переданному адресу. Во фронте REST "+
+			"этот адрес — собственный слушатель службы, то есть внутрипроцессная петля. "+
+			"Обращение из другого места означает дозвон по ЧУЖОМУ адресу, то есть НОВОЕ РЕБРО "+
+			"графа, и оно обязано быть записано в перечень рёбер рантайма вместе с проверкой "+
+			"ацикличности.", len(outsideFront), strings.Join(outsideFront, ", "))
 	}
 
 	if len(dials) > 0 {

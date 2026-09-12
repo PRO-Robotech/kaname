@@ -1,0 +1,39 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// A Cluster resource — singleton root of the Kachō identity hierarchy.
+//
+// Exactly one Cluster row exists, with literal id `cluster_root` (enforced
+// by DB-level CHECK + BEFORE INSERT trigger).
+// Used as the root object of the authorization model for cluster-admin grants
+// (`cluster:cluster_root#system_admin@user:...`).
+//
+// Identity hierarchy: cluster → account → project → resource. Each downstream
+// level is owned by `kaname` (account / project) or by domain services
+// (vpc / compute / loadbalancer).
+//
+// Resource id: literal `cluster_root` (not a Crockford-postfix id).
+message Cluster {
+  // ID of the cluster. Must be the literal `cluster_root`.
+  string id = 1;
+
+  // Display name of the cluster singleton. Output-only: the value is written by
+  // the seed migration and no RPC of this service changes it.
+  // Free-form, 1-64 characters — this is NOT the platform resource-name form
+  // (`corelib/validate/nameform`), because the field is not a client-set name.
+  string name = 2;
+
+  // Description. 0-256 characters.
+  string description = 3;
+
+  // Creation timestamp (seed migration time).
+  google.protobuf.Timestamp created_at = 4;
+}

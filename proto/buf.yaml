@@ -1,0 +1,32 @@
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: Apache-2.0
+
+# buf.yaml — объявление модуля контрактов СЛУЖБЫ.
+#
+# Решением владельца 2026-09-13 контракты службы живут в её репозитории
+# (kacho#2616): «прото так же должно уехать в канаме то что к нему относится в
+# качо их не должно быть».
+#
+# Набор правил перенесён из объявления монорепо ДОСЛОВНО, и это не копирование
+# по инерции: те же сорок один контракт судились им до переезда, а смена набора
+# вместе с переездом дала бы находки, неотличимые от находок переезда.
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - ENUM_VALUE_PREFIX
+    - ENUM_ZERO_VALUE_SUFFIX
+  ignore:
+    - google
+breaking:
+  use:
+    - FILE
+  ignore:
+    - google

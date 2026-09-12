@@ -1,0 +1,197 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// IdentityQuotaService — the ceilings carried by the CALLER THEMSELVES.
+//
+// # Why this service is declared HERE, in the access service's own contract
+//
+// It answers about a ceiling this service enforces, in a row of this service's
+// own database, and it calls nobody. A tenant-facing surface of a product being
+// carved out into its own must be declared in that product's contract —
+// otherwise the module it was declared inside takes the surface with it when it
+// leaves, though the subject of the surface stays (kacho#2362, decision `Д9`).
+//
+// A PREVIOUS COMMENT HERE SAID THE OPPOSITE, AND ITS PREMISE HAD DIED. It read:
+// the shared answer shape imports `kaname.cloud.iam.v1`, so declaring the
+// service inside `iam.v1` would close a package cycle. That was true when it was
+// written and is no longer: the shared shape has NO imports at all today — it
+// states the scope arm itself, precisely so the platform keeps building once
+// this contract is removed. The dependency runs one way and only one way, and
+// this file adds an edge in the direction that already exists.
+//
+// This is NOT the "single summary endpoint" the shared shape's doc rules out.
+// That one is refused because it would need `iam -> owner` calls to learn what is
+// spent elsewhere, closing a cycle in the service graph. This service answers
+// about ONE kind, counted in this service's own database, and calls nobody.
+//
+// # Why the subject is a human and not a project
+//
+// The account is the root of tenancy, so a ceiling over accounts is carried by
+// the identity that creates them — the only thing that exists before an account
+// and outlives it. There is no project to name here, and naming one would be a
+// question about the wrong subject.
+//
+// # Why the tenant must be able to read this
+//
+// Account creation is self-service. Until this service existed the ceiling over
+// it was invisible: a human who had reached it saw a refusal on the one action
+// the platform invites them to perform first, with no way to learn their ceiling,
+// their consumption, or that a ceiling exists at all — indistinguishable, from
+// their side, from a broken platform.
+//
+// READ ONLY. A tenant who can raise their own ceiling does not have one.
+service IdentityQuotaService {
+  // List the quotas carried by the calling identity.
+  //
+  // NO REQUEST FIELDS, AND THAT IS THE POINT. The subject is the authenticated
+  // caller and nobody else: there is no id to supply, so there is no id to
+  // substitute. One identity cannot ask about another's consumption because the
+  // question is not expressible — a stronger guarantee than a check that would
+  // have to be right every time.
+  //
+  // NO PAGINATION, DELIBERATELY. One kind is carried by the identity today, and
+  // the catalogue that could add more is closed and bounded by a migration.
+  //
+  // THE HTTP PATH IS UNCHANGED BY THE MOVE, and that is the point of the move
+  // being a move: the tenant's URL, the response shape, and every field name and
+  // number are what they have always been. What changed is which contract
+  // declares them.
+  rpc List (ListIdentityQuotasRequest) returns (ListIdentityQuotasResponse) {
+    option (google.api.http) = { get: "/iam/v1/quotas" };
+
+    // EXEMPT from the per-RPC scope Check, for the same reason `Account.Create`
+    // is: there is no parent object to check against. The answer is derived from
+    // the verified principal, never from a caller-supplied id, so the only
+    // question that could be asked here — "may this caller see this?" — is
+    // answered by authentication alone.
+    //
+    // A cluster-scoped relation would be WORSE than exempt, not stricter: `viewer
+    // @ cluster` is satisfiable by the wildcard tuple the platform writes for its
+    // global catalogues, so it would answer "yes" to every authenticated caller
+    // while looking like a gate. Exempt says the same thing and says it honestly.
+    //
+    // authN is NOT waived: the edge's exempt branch still requires a valid
+    // principal, and an anonymous call has no identity to answer about.
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "SELF_SERVICE";
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+}
+
+// Request for IdentityQuotaService.List.
+//
+// Empty, and it stays empty: a field naming whose quotas to read would turn a
+// question about oneself into a question about someone else.
+message ListIdentityQuotasRequest {}
+
+// Response for IdentityQuotaService.List.
+message ListIdentityQuotasResponse {
+  // Every kind carried by the identity, always — never a subset and never an
+  // empty array.
+  //
+  // A human who has created nothing reads the full set with `used = 0`. The empty
+  // array is reserved for a statement this service never makes: "you have no
+  // quotas". A tenant given `[]` would conclude they are unlimited, and they are
+  // not (api-conventions, "an empty value must mean empty").
+  //
+  // `carrier_type` is `identity` and `carrier_id` is the caller's own login
+  // subject: the row describes the carrier it is counted against, and here that
+  // carrier is the reader.
+  repeated Quota quotas = 1;
+}
+
+// Quota — one ceiling as the tenant sees it: the limit, what is already spent
+// against it, and WHERE the limit came from.
+//
+// # Why this service states its OWN shape instead of borrowing the platform's
+//
+// The shared shape exists so that owners of resource types do not drift into
+// dialects of the same three numbers. This service is not one of those owners:
+// its ceiling is self-protection stated by the deployment, not a quota assigned
+// by an authority. Borrowing the platform's shape would make the public contract
+// of a standalone product fail to build without the platform's quota package —
+// and would keep that package from being removable while the import lives.
+//
+// This is the MIRROR of the argument the platform already used in this very
+// place: the shared shape stopped taking the scope arm from this contract so its
+// own build would not depend on a contract that is to be removed.
+//
+// EVERY FIELD NAME AND NUMBER IS WHAT IT HAS ALWAYS BEEN, deliberately and to
+// the byte: the wire encodes a field by its NUMBER and JSON by its NAME, so a
+// rename or a renumber would be a breaking change for every tenant already
+// reading this. The move is a move, not a redesign.
+//
+// READ-ONLY BY CONSTRUCTION. This message never appears in a request body.
+message Quota {
+  // The kind this row governs — a dotted `domain.resource` token
+  // (`iam.account`). The same token an administrator states a ceiling on, so the
+  // two are joinable without a translation table.
+  string kind = 1;
+
+  // The effective ceiling: how many of this kind the carrier may hold. Zero is a
+  // legal, meaningful value — "none of this kind may be created" — and is NOT to
+  // be read as "unset".
+  int64 limit = 2;
+
+  // How many are held right now. Counted in the very statement that inserts or
+  // deletes the row, so it cannot drift from the rows it counts.
+  int64 used = 3;
+
+  // Scope the winning value was stated at — PROJECT beats ACCOUNT beats DEFAULT.
+  //
+  // Without it "you are at 16 of 16" does not tell the tenant whether the number
+  // is their own override, their account's, or the platform's, and therefore does
+  // not tell them who can change it.
+  Scope source_scope = 4;
+
+  // Id of the object the winning scope names: an account id for ACCOUNT, a
+  // project id for PROJECT. Empty when the winner is DEFAULT, and empty ONLY
+  // then.
+  string source_scope_id = 5;
+
+  // What the count is kept against. For the kinds this service answers about the
+  // carrier is the login identity, so this reads `identity`.
+  //
+  // Stated rather than assumed, because "quota is per project" is true of the
+  // platform's catalogue and not of the mechanism: reading it off the request
+  // would make the response describe the question instead of the resource.
+  string carrier_type = 6;
+
+  // Id of the carrier — the caller's own login subject when `carrier_type` is
+  // `identity`.
+  string carrier_id = 7;
+
+  // Scope — where the winning value was stated, ordered by specificity:
+  // PROJECT beats ACCOUNT beats DEFAULT.
+  //
+  // Names and numbers are the ones this field has carried since it was
+  // introduced, and they are not free to change: JSON encodes an enum by its
+  // NAME and the wire by its NUMBER, so a rename or a renumber is a breaking
+  // change for every tenant already reading the field.
+  //
+  // `SCOPE_UNSPECIFIED` is not a fourth place a value may be stated at — it is
+  // what an unreadable stored row maps to. Mapping such a row to `DEFAULT`
+  // instead would assert "the platform stated this", which is a claim about who
+  // can raise the ceiling, made on a row nobody managed to read.
+  enum Scope {
+    SCOPE_UNSPECIFIED = 0;
+
+    // Platform-wide fallback. Exactly one value per kind.
+    DEFAULT = 1;
+
+    // Stated for one account.
+    ACCOUNT = 2;
+
+    // Stated for one project. The most specific arm.
+    PROJECT = 3;
+  }
+}

@@ -1,0 +1,156 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+// InternalBootstrapTokenService — Internal-only (cluster-internal :9091, mTLS).
+// Reachable ONLY by a DIRECT mTLS gRPC dial to kaname-internal :9091. It carries NO
+// `google.api.http` binding and is NOT registered on the api-gateway REST mux —
+// deliberately, and this is a SECURITY invariant, not a style choice: the
+// gateway's cluster-internal REST listener is plain HTTP/1.1 (no TLS, no client
+// cert) and the authz middleware admits `<exempt>` Internal* RPCs arriving there
+// WITHOUT extracting a principal, so a REST route would make this a
+// credential-free cluster-admin token mint for anything that can reach the
+// `internal-rest` Service port (or hold a port-forward). Never on the external
+// TLS endpoint either (the `Internal…Service` name matches `HasInternalSuffix`,
+// so the gRPC router 404s it on the public listener — ban #6).
+//
+// Purpose (#58): a NON-INTERACTIVE entry point to a first real asymmetric Bearer
+// for production-mode seed. Production authN (`api-gateway
+// authn.mode=production-strict`) verifies the signature against the key-set
+// record of the issuer NAMED IN THE TOKEN (the gateway reads both records from
+// the iam publisher on :9097) and requires `aud=https://{API_DOMAIN}`.
+// Newman/e2e seed mints HS256 dev JWTs → inert against a production stand, and a
+// fresh stand has no seeded machine credential at all, so without this service
+// the only path to a first token is a human browser ceremony at the identity
+// provider — which blocks ALL production e2e.
+//
+// This service idempotently provisions a SINGLE bootstrap-admin ServiceAccount
+// (cluster `system_admin`) and mints a short-lived access-token for it.
+//
+// WHO SIGNS THAT TOKEN DEPENDS ON THE DEPLOYMENT, and this line used to claim
+// otherwise. It said "Hydra remains the issuer / signer; iam only brokers the
+// exchange (never re-signs)" — the claim outlived its subject (#1119). Today:
+//
+//   own minting declared → the PLATFORM signer mints it (internal/tokensigner,
+//                          wired through internal/bootstraptokenwire);
+//   not declared         → the provider mints it, brokered through the existing
+//                          client_credentials exchange, and the bootstrap-admin
+//                          gets a mirrored OAuth client (client_credentials +
+//                          private_key_jwt) as before.
+//
+// Only the requested `audience` differs from the registry lane —
+// `https://{API_DOMAIN}` vs the registry service.
+//
+// Principal = a ServiceAccount, NOT a User, because service principals are
+// acr-EXEMPT by design (security.md §4.1.2; iam authzguard/fgaproxy): the minted
+// token then satisfies the acr>=2-gated seed RPCs
+// (`UserTokenService.Issue` / `SAKeyService.Issue`) without any acr injection.
+//
+// Scope discipline: mints ONLY the bootstrap-admin SA. There is deliberately NO
+// subject/principal field in the request — a "mint token for any principal"
+// skeleton-key is rejected by construction (acceptance IBT-11 / D-2).
+//
+// Authorization gate: an EXPLICIT per-RPC allow-list of client-certificate
+// SPIFFE SANs, enforced on the :9091 listener by
+// `authzguard.CallerPolicy` (`authn.bootstrap-mint.allowed-client-sans`). The
+// gate is the caller's VERIFIED CLIENT CERTIFICATE — a named identity — NOT its
+// network position: "internal = trusted" / "the listener boundary is the gate"
+// are FORBIDDEN premises (security.md §authN-everywhere). An empty allow-list
+// denies every caller (fail-closed, no default caller), and an ENABLED mint
+// (signing key present) with an empty allow-list REFUSES TO BOOT in production
+// (`Config.Validate`, core rule #16).
+//
+// `permission = "<exempt>"` marks only that there is no per-RPC FGA/ReBAC Check:
+// this RPC exists to obtain the FIRST token on a stand where no token — and
+// therefore no relation to check — exists yet (chicken-and-egg). `<exempt>` is
+// NOT an authentication exemption; the cert allow-list above is the authN+authZ
+// gate.
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+import "kaname/cloud/iam/v1/secret_options.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// InternalBootstrapTokenService — mints the non-interactive bootstrap RS256
+// Bearer. See file-level comment for the provisioning + exchange contract.
+service InternalBootstrapTokenService {
+  // MintBootstrapToken idempotently provisions the singleton bootstrap-admin
+  // ServiceAccount (if absent) and mints a short-lived RS256 access-token for
+  // it via the Hydra client_credentials exchange (aud = `https://{API_DOMAIN}`).
+  //
+  // SYNCHRONOUS request/response — NOT an `Operation` (declared deviation from
+  // mutations→Operation, D-2): the mint is a read-shaped derivation (a single
+  // round-trip to Hydra → `{accessToken, expiresIn}`), exactly like the
+  // token-hooks and the registry `/iam/token` shim. The only durable part is the
+  // idempotent provisioning, which is not the subject of the mint and is safe to
+  // repeat (D-3). The token is returned in the response body, not in an
+  // `Operation.response`.
+  //
+  // Fail-closed: Hydra unreachable/misbehaving → UNAVAILABLE (no token; raw Hydra
+  // body never leaks — no auth-oracle).
+  //
+  // NO `google.api.http` binding — gRPC-over-mTLS only, by design (see the
+  // file-level comment: a REST route on the plain-HTTP internal listener would be
+  // a credential-free cluster-admin mint). Do not add one.
+  rpc MintBootstrapToken (MintBootstrapTokenRequest) returns (MintBootstrapTokenResponse) {
+    // No per-RPC FGA Check is possible here (the RPC exists to obtain the FIRST
+    // token, before any relation exists). The caller gate is the explicit
+    // client-certificate SAN allow-list enforced by authzguard.CallerPolicy on
+    // :9091 — see the file-level comment.
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+  }
+}
+
+// MintBootstrapTokenRequest — inputs for MintBootstrapToken.
+//
+// There is DELIBERATELY no subject/principal field: the RPC mints exclusively
+// for the bootstrap-admin SA (IBT-11). Any unknown key a client sends is ignored
+// by grpc-gateway and cannot influence the principal.
+message MintBootstrapTokenRequest {
+  // TOMBSTONE. Tag 1 held `ttl_seconds`, a requested token lifetime. It could
+  // not be honoured: the token is signed by the issuer and its lifetime comes
+  // from the issuer's client configuration, so a per-request value only ever
+  // changed the number in the RESPONSE — a privileged bearer reported as
+  // expiring sooner than it actually did. Removed rather than left standing: an
+  // understated expiry on a cluster-admin credential is worse than no parameter,
+  // because nobody revokes or rotates a token they believe is already dead. The
+  // response now reports the lifetime the token really has (see `expires_in`).
+  // Tag 1 and the name `ttl_seconds` are RESERVED.
+  reserved 1;
+  reserved "ttl_seconds";
+}
+
+// MintBootstrapTokenResponse — the minted bootstrap Bearer.
+message MintBootstrapTokenResponse {
+  // The RS256 JWT access-token (Hydra-signed; `alg=RS256`, Hydra `kid`). The
+  // gateway accepts it as a valid production-mode Bearer.
+  //
+  // Помечен носителем секрета: это привилегированный предъявитель. Ответ
+  // СИНХРОННЫЙ, в строку операции не попадает вовсе — поэтому перечня
+  // подметальщика он не требует (ось 1 гейта сужена типами-ответами операций).
+  // Пометка здесь объявляет ВИД поля: любой заведённый завтра путь записи
+  // увидит её, не зная про этот глагол.
+  string access_token = 1 [(kaname.cloud.iam.v1.secret_bearing) = true];
+
+  // OAuth2 token type — always `"Bearer"`.
+  string token_type = 2;
+
+  // Seconds until expiry (`expires_at - issued_at`) — the lifetime the issuer
+  // gave the token. Never understated: the bearer is accepted for exactly this
+  // long, so the holder can rely on it to revoke or rotate in time.
+  int64 expires_in = 3;
+
+  // Absolute expiry (truncated to seconds).
+  google.protobuf.Timestamp expires_at = 4;
+
+  // The bootstrap ServiceAccount id (`sva…`) this token authenticates as —
+  // equals the token's `kaname_principal_id` claim.
+  string principal_id = 5;
+
+  // Absolute issuance time (truncated to seconds).
+  google.protobuf.Timestamp issued_at = 6;
+}
