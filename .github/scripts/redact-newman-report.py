@@ -214,6 +214,36 @@ DOTTED_TRIPLE_RE = re.compile(
     r"[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{8,}")
 # Непрерывный пробег алфавита секретов: непрозрачное удостоверение без точек.
 LONG_OPAQUE_RE = re.compile(r"[A-Za-z0-9_-]{40,}")
+DIGIT_RE = re.compile(r"[0-9]")
+LETTER_RE = re.compile(r"[A-Za-z]")
+
+
+def _opaque_credential(text: str) -> bool:
+    """Пробег 40+ ЕСТЬ удостоверение? Требуется смешение букв и цифр.
+
+    ПОРОГ ОДНОЙ ДЛИНЫ НЕ РАБОТАЕТ, И ЭТО ЗАМЕР, А НЕ ОПАСЕНИЕ. Первая редакция
+    считала удостоверением любой пробег 40+ и покраснела на ПЕРВОМ ЖЕ прогоне
+    конвейера: в журнале службы стоит имя поля
+    `catalog_entries_demanding_a_raised_floor` — ровно 40 знаков алфавита
+    `[A-Za-z0-9_-]`, и ни одного из них секретом не делает ничто. Строка взята в
+    самопроверку ниже ЗАКОННЫМ БЛИЗНЕЦОМ — та самая, из артефакта прогона
+    34689147074, а не придуманная похожей.
+
+    Что различает: у непрозрачного удостоверения алфавит смешан. Шанс, что в 40
+    знаках base64url не встретится ни одной цифры, — около 0,25 %; имя поля и
+    путь, напротив, цифр обычно не несут вовсе. Предикат поэтому требует И букву,
+    И цифру, оставаясь независимым от предикатов ЧИСТКИ (ни `eyJ`, ни `Bearer`).
+
+    ЦЕНА ОСТАЁТСЯ И НАЗВАНА: длинный шестнадцатеричный отпечаток в журнале
+    (например `sha256:` и 64 знака) под этот предикат подпадёт. Исход — отказ шага
+    и НЕВЫЛОЖЕННЫЙ артефакт, то есть громко; список прощённых не заводится, потому
+    что каждая его запись — место, куда секрет проедет незамеченным.
+    """
+    for m in LONG_OPAQUE_RE.finditer(text):
+        run = m.group(0)
+        if DIGIT_RE.search(run) and LETTER_RE.search(run):
+            return True
+    return False
 
 
 def residue_shaped(text: str) -> str | None:
@@ -223,8 +253,8 @@ def residue_shaped(text: str) -> str | None:
     m = DOTTED_TRIPLE_RE.search(text)
     if m and len(m.group(0)) >= 60:
         return "тройка через точку с длинными частями"
-    if LONG_OPAQUE_RE.search(text):
-        return "непрерывный пробег алфавита секретов (40+)"
+    if _opaque_credential(text):
+        return "непрерывный пробег алфавита секретов (40+, буквы и цифры)"
     return None
 
 
@@ -282,7 +312,9 @@ def process(src: pathlib.Path, dst: pathlib.Path, c: Census) -> list[str]:
     # если бы у отчёта не было формы 6.
     raw = src.read_text(encoding="utf-8", errors="replace")
     clean, n = scrub_text(raw)
-    c.strings += 1
+    # Единица счёта у текстового файла — СТРОКА, а не файл: «строк осмотрено 1» на
+    # журнале из ста двенадцати строк называет объём, которого не читали.
+    c.strings += len(raw.splitlines()) or 1
     c.redacted_by_shape += n
     dst.write_text(clean, encoding="utf-8")
     found = []
@@ -522,6 +554,22 @@ def self_test() -> int:
            not (dst / "wrapping.key").exists())
         _c("и он НАЗВАН в переписи, а не выпал молча",
            "wrapping.key" in out and "В АРТЕФАКТ НЕ ПОПАДУТ" in out, out[:600])
+
+    # ── ОСЬ: ЗАКОННЫЙ ДЛИННЫЙ ПРОБЕГ ПРОТИВ НЕПРОЗРАЧНОГО УДОСТОВЕРЕНИЯ ─────
+    #
+    # Вход ЗАХВАЧЕН, а не придуман: строка журнала — из артефакта прогона
+    # 34689147074, на котором первая редакция предиката и покраснела. Без второй
+    # половины пары «не краснеет» означало бы «не смотрит».
+    real_log_line = ('{"level":"INFO","msg":"identity posture lane wiring",'
+                     '"catalog_readable":true,'
+                     '"catalog_entries_demanding_a_raised_floor":0}')
+    _c("имя поля из НАСТОЯЩЕГО журнала (40 знаков, без цифр) — НЕ удостоверение",
+       residue_shaped(real_log_line) is None, f"{residue_shaped(real_log_line)}")
+    opaque = "kt9f3Ac71Qd0Ze8Bx2Yv5Nm4Kj6Hg1Fs3Dp7Lw0Rt2Uq"
+    _c("непрозрачный пробег той же длины С ЦИФРАМИ — удостоверение",
+       residue_shaped(opaque) is not None, f"{residue_shaped(opaque)}")
+    _c("и чистка сама его не режет: ловит ВТОРОЙ взгляд, а не первый",
+       scrub_text(opaque)[1] == 0, f"{scrub_text(opaque)}")
 
     # ── ОСЬ: ОСТАТОК ЛОВИТСЯ, А НЕ ОБЕЩАЕТСЯ ────────────────────────────────
     #

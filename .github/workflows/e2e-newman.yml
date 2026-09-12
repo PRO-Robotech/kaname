@@ -421,6 +421,11 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             echo "::error title=Артефакт НЕ выложен::чистка отчёта не сошлась (код $rc) — выкладывать отчёт с удостоверениями в ПУБЛИЧНЫЙ репозиторий нельзя"
             rm -rf tests/newman/out-public
+            mkdir -p tests/newman/out-public
+            echo 'ЧИСТКА НЕ СОШЛАСЬ: отчёт НЕ выложен. Смотрите шаг чистки выше — он' \
+              > tests/newman/out-public/redaction-failed.txt
+            echo 'печатает ПУТИ, где удостоверение осталось, но не сами значения.' \
+              >> tests/newman/out-public/redaction-failed.txt
             exit 1
           fi
 
@@ -480,6 +485,11 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             echo "::error title=Журнал НЕ выложен::чистка журнала не сошлась (код $rc) — выкладывать его в ПУБЛИЧНЫЙ репозиторий нельзя"
             rm -rf .stand/log-public
+            mkdir -p .stand/log-public
+            echo 'ЧИСТКА НЕ СОШЛАСЬ: журнал НЕ выложен. Смотрите шаг чистки выше — он' \
+              > .stand/log-public/redaction-failed.txt
+            echo 'печатает ПУТИ, где удостоверение осталось, но не сами значения.' \
+              >> .stand/log-public/redaction-failed.txt
             exit 1
           fi
 
