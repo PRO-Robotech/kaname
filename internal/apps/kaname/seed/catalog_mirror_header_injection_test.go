@@ -36,6 +36,7 @@ func mirrorFactsFromTree(t *testing.T) (catalogHeaderFacts, *treecorpus.Tree) {
 		Comments: comments, ProdReaders: prod, FixtureReaders: fixture,
 		Entries: entries, NoPermission: noPerm, NoRelation: noRel,
 		DocPaths: docPathsIn(comments, tree),
+		OwnRefs:  ownRefsIn(comments, packageDeclarations(t, tree, mirrorPackageDir)),
 	}, tree
 }
 
@@ -183,4 +184,67 @@ func requireMirrorFinding(t *testing.T, found []string, want string) {
 	require.NotEmptyf(t, found, "порча не найдена: гейт молчит там, где обязан назвать величину (%s)", want)
 	require.Truef(t, strings.Contains(strings.Join(found, "\n"), want),
 		"находка есть, но не та: ждали %q, получили %v", want, found)
+}
+
+// TestCatalogMirrorHeaderGate_FallsOnANameThePackageDoesNotDeclare — пятая ось, и
+// у неё ОБЕ половины.
+//
+// Без положительной половины ось зеленела бы на предикате, объявляющем
+// ненайденным всё: «имён не названо» стало бы неотличимо от «названное объявлено».
+func TestCatalogMirrorHeaderGate_FallsOnANameThePackageDoesNotDeclare(t *testing.T) {
+	base, tree := mirrorFactsFromTree(t)
+	declared := packageDeclarations(t, tree, mirrorPackageDir)
+
+	require.True(t, declared[registryLoader],
+		"ПРЕДПОСЫЛКА ОПЫТА: загрузчик реестра обязан быть в перечне объявлений")
+
+	t.Run("названное имя объявлено — молчание", func(t *testing.T) {
+		f := base
+		f.Comments = base.Comments + "\nвход — " + mirrorPackageQualifier + "." + registryLoader + "\n"
+		f.OwnRefs = ownRefsIn(f.Comments, declared)
+		require.Empty(t, auditCatalogMirrorHeader(f),
+			"объявленное имя названо находкой — ось отключила бы всякую ссылку шапки на свой пакет")
+	})
+
+	t.Run("названного имени пакет не объявляет — находка", func(t *testing.T) {
+		f := base
+		f.Comments = base.Comments + "\nвход — " + mirrorPackageQualifier + ".RunTheWholeSeed()\n"
+		f.OwnRefs = ownRefsIn(f.Comments, declared)
+		requireMirrorFinding(t, auditCatalogMirrorHeader(f), "чего пакет не объявляет")
+	})
+
+	t.Run("чужой квалификатор с тем же хвостом — молчание", func(t *testing.T) {
+		// `myseed.X` нашим пакетом не является: левая граница распознавателя
+		// закрыта, и без этой пробы она бы молча разошлась с прозой.
+		f := base
+		f.Comments = base.Comments + "\nсосед зовёт my" + mirrorPackageQualifier + ".RunTheWholeSeed()\n"
+		f.OwnRefs = ownRefsIn(f.Comments, declared)
+		require.Empty(t, auditCatalogMirrorHeader(f),
+			"чужой пакет с тем же хвостом имени зачтён за наш — распознаватель судит подстроку")
+	})
+}
+
+// TestCatalogMirrorHeaderGate_MethodIsNotAddressableByPackageQualifier — почему
+// перечень объявлений НЕ содержит методов.
+//
+// Это опыт над собственной ошибкой: первая редакция перечня методы считала, и
+// находка про точку входа пропала молча — в пакете есть метод с тем же именем у
+// совсем другого типа. Ссылкой `seed.X` метод адресовать нельзя, поэтому метод в
+// перечне означал бы, что ось молчит ровно на том дефекте, ради которого заведена.
+func TestCatalogMirrorHeaderGate_MethodIsNotAddressableByPackageQualifier(t *testing.T) {
+	_, tree := mirrorFactsFromTree(t)
+	declared := packageDeclarations(t, tree, mirrorPackageDir)
+
+	const methodOnlyName = "Run"
+	require.False(t, declared[methodOnlyName],
+		"метод %q попал в перечень объявлений верхнего уровня — ссылка %s.%s «нашлась» бы, "+
+			"хотя адресовать метод так нельзя",
+		methodOnlyName, mirrorPackageQualifier, methodOnlyName)
+
+	// Положительный контроль к тому же перечню: тип верхнего уровня в нём есть.
+	require.True(t, declared["PermissionRegistry"],
+		"тип верхнего уровня в перечне отсутствует — перечень собран не по тому каталогу, "+
+			"и отрицание выше вакуумно")
+	t.Logf("перепись: объявлений верхнего уровня в пакете %d; метод %q в перечне: %t",
+		len(declared), methodOnlyName, declared[methodOnlyName])
 }

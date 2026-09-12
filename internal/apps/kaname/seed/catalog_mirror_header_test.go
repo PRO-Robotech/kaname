@@ -50,6 +50,16 @@ package seed_test
 //  4. КООРДИНАТА ДОКУМЕНТА. Всякий путь `*.md`, названный в комментариях файла,
 //     обязан резолвиться в дереве. Ровно этой осью ловится шестое снятое
 //     утверждение — ссылка в документ, которого нет.
+//  5. ИМЯ СВОЕГО ПАКЕТА. Всякая ссылка вида `seed.<Имя>` в комментариях файла
+//     обязана быть ОБЪЯВЛЕНА пакетом. Шапка называла точку входа `seed.Run()`,
+//     которой в пакете нет ни одной, и тип с именем, которого в пакете нет тоже:
+//     читатель шёл по ним и не находил ничего.
+//
+//     Форма взята КВАЛИФИЦИРОВАННАЯ намеренно. Голое имя в обратных кавычках
+//     несут и переменные окружения, и имена полей JSON, и имена чужих пакетов —
+//     предикат по ним давал бы ложные находки там, где проза законна. С
+//     квалификатором двусмысленности нет by construction: `seed.` называет ровно
+//     этот пакет.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧЕГО ЭТА ПРОВЕРКА НЕ ЗАКРЫВАЕТ — сказано прямо
@@ -91,6 +101,13 @@ const mirrorCatalogFile = "internal/apps/kaname/seed/embedded/permission_catalog
 // registryLoader — имя функции, чьих вызывающих считает перепись.
 const registryLoader = "LoadPermissionRegistry"
 
+// mirrorPackageDir — каталог пакета, чьи объявления сверяются с прозой шапки
+// (от корня дерева).
+const mirrorPackageDir = "internal/apps/kaname/seed"
+
+// mirrorPackageQualifier — квалификатор этого пакета в прозе.
+const mirrorPackageQualifier = "seed"
+
 // fixtureReaderPrefix — оснастка проб. Её читатели считаются отдельно от
 // прод-читателей: слить их значило бы потерять предмет первой оси.
 const fixtureReaderPrefix = "internal/testsupport/"
@@ -120,6 +137,10 @@ var mirrorMarkers = []struct {
 // судит координаты документов, а не всякую строку с точкой.
 var docCoordinate = regexp.MustCompile(`[A-Za-z0-9_][A-Za-z0-9_./-]*\.md\b`)
 
+// ownPackageRef — ссылка на имя СВОЕГО пакета: `seed.<Заглавная>`. Левая граница
+// закрыта, чтобы `myseed.X` не засчитался нашим пакетом.
+var ownPackageRef = regexp.MustCompile(`(?:^|[^\w.])` + mirrorPackageQualifier + `\.([A-Z][A-Za-z0-9_]*)`)
+
 // catalogHeaderFacts — вход предиката. Собран так, чтобы предикат можно было
 // прогнать инъекцией, не трогая дерево.
 type catalogHeaderFacts struct {
@@ -133,6 +154,8 @@ type catalogHeaderFacts struct {
 	Entries, NoPermission, NoRelation int
 	// DocPaths — координата документа → резолвится ли она в дереве.
 	DocPaths map[string]bool
+	// OwnRefs — имя своего пакета, названное прозой → объявлено ли оно пакетом.
+	OwnRefs map[string]bool
 }
 
 // auditCatalogMirrorHeader — предикат всех осей. Возвращает находки; пусто = норма.
@@ -166,6 +189,13 @@ func auditCatalogMirrorHeader(f catalogHeaderFacts) []string {
 		}
 	}
 
+	for _, name := range sortedDocPaths(f.OwnRefs) {
+		if !f.OwnRefs[name] {
+			found = append(found, "шапка называет "+mirrorPackageQualifier+"."+name+
+				", чего пакет не объявляет — читатель пойдёт по имени и не найдёт ничего")
+		}
+	}
+
 	return found
 }
 
@@ -188,6 +218,8 @@ func TestCatalogMirrorHeaderDescribesTheTree(t *testing.T) {
 	prod, fixture, scanned, parsed := registryReaders(t, tree, true)
 	entries, noPerm, noRel := catalogComposition(t, filepath.Join(root, filepath.FromSlash(mirrorCatalogFile)))
 	docs := docPathsIn(comments, tree)
+	declared := packageDeclarations(t, tree, mirrorPackageDir)
+	ownRefs := ownRefsIn(comments, declared)
 
 	// ПРЕДПОСЫЛКИ. «Ноль находок» обязано быть отличимо от «ноль прочитанного».
 	require.Positive(t, scanned, "не осмотрено ни одного файла Go — предпосылка переписи сломана")
@@ -196,18 +228,26 @@ func TestCatalogMirrorHeaderDescribesTheTree(t *testing.T) {
 	require.NotEmpty(t, prod,
 		"разбор не нашёл НИ ОДНОГО прод-читателя реестра вне оснастки проб — предикат "+
 			"меряет не то, и всякое утверждение о числе читателей было бы вакуумным")
+	require.Contains(t, declared, registryLoader,
+		"разбор не нашёл в пакете даже загрузчика реестра — перечень объявлений собран не по "+
+			"тому каталогу, и пятая ось объявила бы ненайденным всё")
+	require.NotEmpty(t, ownRefs,
+		"шапка не называет НИ ОДНОГО имени своего пакета — пятая ось не проверяет ничего, "+
+			"и «имён не названо» стало бы неотличимо от «названное на месте»")
 
 	facts := catalogHeaderFacts{
 		Comments: comments, ProdReaders: prod, FixtureReaders: fixture,
-		Entries: entries, NoPermission: noPerm, NoRelation: noRel, DocPaths: docs,
+		Entries: entries, NoPermission: noPerm, NoRelation: noRel,
+		DocPaths: docs, OwnRefs: ownRefs,
 	}
 	found := auditCatalogMirrorHeader(facts)
 
 	t.Logf("перепись: файлов Go осмотрено %d, разобрано %d; читателей %s в прод-коде %d (%s), "+
 		"в оснастке проб %d (%s); записей каталога %d (без права %d · без отношения %d); "+
-		"координат документов в шапке %d",
+		"координат документов в шапке %d; объявлений пакета %d, имён своего пакета в шапке %d",
 		scanned, parsed, registryLoader, len(prod), strings.Join(prod, ", "),
-		len(fixture), strings.Join(fixture, ", "), entries, noPerm, noRel, len(docs))
+		len(fixture), strings.Join(fixture, ", "), entries, noPerm, noRel, len(docs),
+		len(declared), len(ownRefs))
 
 	require.Emptyf(t, found,
 		"шапка зеркала каталога прав расходится с деревом:\n  %s\n\n"+
@@ -325,6 +365,72 @@ func docPathsIn(comments string, tree *treecorpus.Tree) map[string]bool {
 	out := map[string]bool{}
 	for _, p := range docCoordinate.FindAllString(comments, -1) {
 		out[p] = tree.HasFile(p)
+	}
+	return out
+}
+
+// packageDeclarations — имена, ОБЪЯВЛЕННЫЕ пакетом на ВЕРХНЕМ УРОВНЕ: функции,
+// типы, константы, переменные.
+//
+// Методы в перечень НЕ входят, и это не упрощение: ссылкой `seed.X` метод
+// адресовать нельзя вовсе — квалификатор пакета разрешается только в объявление
+// верхнего уровня. Первая редакция этой функции метод считала, и находка
+// пропала молча: шапка называла точку входа `seed.Run()`, а в пакете есть метод
+// `Run` у совсем другого типа, поэтому имя «нашлось».
+//
+// Пробы в перечень не входят тоже: проза шапки говорит о прод-поверхности
+// пакета, и имя, живущее только в пробе, поверхностью не является.
+func packageDeclarations(t *testing.T, tree *treecorpus.Tree, dir string) map[string]bool {
+	t.Helper()
+	out := map[string]bool{}
+	fset := token.NewFileSet()
+	files := 0
+	for _, rel := range tree.SortedFiles() {
+		slash := filepath.ToSlash(rel)
+		if filepath.ToSlash(filepath.Dir(slash)) != dir || !strings.HasSuffix(slash, ".go") {
+			continue
+		}
+		if strings.HasSuffix(slash, "_test.go") {
+			continue
+		}
+		files++
+		f, err := parser.ParseFile(fset, slash, nil, 0)
+		if err != nil {
+			f, err = parser.ParseFile(fset, filepath.Join(tree.Root(), filepath.FromSlash(slash)), nil, 0)
+		}
+		require.NoErrorf(t, err, "разбор %s", slash)
+		for _, d := range f.Decls {
+			switch decl := d.(type) {
+			case *ast.FuncDecl:
+				if decl.Name != nil && decl.Recv == nil {
+					out[decl.Name.Name] = true
+				}
+			case *ast.GenDecl:
+				for _, spec := range decl.Specs {
+					switch sp := spec.(type) {
+					case *ast.TypeSpec:
+						if sp.Name != nil {
+							out[sp.Name.Name] = true
+						}
+					case *ast.ValueSpec:
+						for _, n := range sp.Names {
+							out[n.Name] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	require.Positivef(t, files, "в каталоге %s не прочитано ни одного прод-файла Go — "+
+		"перечень объявлений пуст, и пятая ось объявила бы ненайденным всё", dir)
+	return out
+}
+
+// ownRefsIn — имена своего пакета, названные прозой, и объявлено ли каждое.
+func ownRefsIn(comments string, declared map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range ownPackageRef.FindAllStringSubmatch(comments, -1) {
+		out[m[1]] = declared[m[1]]
 	}
 	return out
 }
