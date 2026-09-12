@@ -7,7 +7,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/PRO-Robotech/kacho/pkg/observability/health"
+	"github.com/PRO-Robotech/corelib/observability/health"
 )
 
 // named / muxWithReadiness — ЕДИНСТВЕННОЕ место, знающее, каким носителем

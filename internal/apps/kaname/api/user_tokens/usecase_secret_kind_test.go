@@ -16,9 +16,9 @@ import (
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/corelib/credsecret"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-	"github.com/PRO-Robotech/kacho/pkg/credsecret"
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )

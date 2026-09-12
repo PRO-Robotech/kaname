@@ -57,8 +57,8 @@ import (
 
 	"go.uber.org/multierr"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
-	"github.com/PRO-Robotech/kacho/pkg/identityposture"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/identityposture"
 )
 
 // LaneStage — на какой стадии старта требование проверяется.

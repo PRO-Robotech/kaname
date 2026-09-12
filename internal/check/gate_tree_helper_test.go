@@ -11,7 +11,7 @@ package check_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 // gateFileTree — состав дерева, прочитанный ИНДЕКСОМ git.

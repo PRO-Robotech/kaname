@@ -13,8 +13,8 @@ package shared
 // short-circuit"). The repo's decodePageToken stays the authoritative backstop.
 
 import (
-	"github.com/PRO-Robotech/kacho/pkg/pagetoken"
-	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
+	"github.com/PRO-Robotech/corelib/pagetoken"
+	corevalidate "github.com/PRO-Robotech/corelib/validate"
 )
 
 // ValidatePageToken returns InvalidArgument when a non-empty token is not a

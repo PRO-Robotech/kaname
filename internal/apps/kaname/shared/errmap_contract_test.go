@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	coreerrors "github.com/PRO-Robotech/kacho/pkg/errors"
+	coreerrors "github.com/PRO-Robotech/corelib/errors"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )

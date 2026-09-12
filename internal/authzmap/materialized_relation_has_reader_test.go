@@ -74,8 +74,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/pkg/moduleselfgating"
-	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/corelib/moduleselfgating"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"

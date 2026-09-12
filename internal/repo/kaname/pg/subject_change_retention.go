@@ -56,7 +56,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/pkg/subscription"
+	"github.com/PRO-Robotech/corelib/subscription"
 )
 
 // subjectChangeSweepSQL — предикат уборки журнала смены субъекта.

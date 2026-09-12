@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 )
 
 // SigningAlgorithm — алгоритм подписи токена. Словарь ЗАКРЫТ: значение вне

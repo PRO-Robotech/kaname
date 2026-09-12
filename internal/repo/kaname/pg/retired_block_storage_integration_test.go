@@ -49,7 +49,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 )
 
 // retiredDottedTypes / retiredRoleNames — the block-storage identities iam has

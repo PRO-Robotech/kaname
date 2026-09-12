@@ -17,7 +17,7 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
 
 ОТПЕЧАТОК ПРЕДМЕТА ЗАМЕРА (гейт свежести сверяет его с текущим деревом)
   отпечаток состава     55357f47a4fd3180
-  отпечаток содержимого b40f95a969543dba
+  отпечаток содержимого 90aa3a4856b60bc1
   файлов под отпечатком 19, таблиц выведено 18 (kaname.access_binding_subjects, kaname.access_bindings, kaname.accounts, kaname.catalog_resource, kaname.clusters, kaname.group_members, kaname.groups, kaname.memberships, kaname.projects, kaname.relation_fact, kaname.resource_mirror, kaname.resource_parent_edge, kaname.resource_scope_edge, kaname.role_rule_selectors, kaname.role_verb, kaname.roles, kaname.service_accounts, kaname.users)
   предикат отпечатка    все не-тестовые .go каталогов services/iam/internal/repo/kaname/pg/relverdict и services/iam/internal/repo/kaname/pg/scalegrid; те .sql каталога services/iam/internal/migrations, что МЕНЯЮТ СТРУКТУРУ (CREATE/ALTER/DROP вне комментариев) хотя бы одной таблицы, которую читает запрос вердикта (имена таблиц ВЫВЕДЕНЫ из кода вердикта по приставке "kaname.", а не выписаны); БЕЗ файлов, объявленных оснасткой отпечатка (они не касаются базы — проверяется разбором, а не перечнем); у .go под отпечаток идёт ЗНАЧАЩЕЕ содержимое — поток лексем БЕЗ комментариев (директивы //go: сохранены), поэтому смена заголовка лицензии или прозы замер НЕ обесценивает; строковая лексема, называющая КООРДИНАТУ собственного дерева (путь импорта своего модуля либо путь, начинающийся с каталога верхнего уровня репозитория), заменяется постоянной меткой — адрес кода не есть его поведение, поэтому переезд каталога замер тоже НЕ обесценивает; .sql берётся ПОБАЙТОВО — в его комментариях живут директивы мигратора (-- +goose), а отделить их текстом нельзя: две дефиса встречаются и внутри литерала; файл опознаётся ТОЖДЕСТВОМ «роль каталога/имя файла», а не путём, и в этом же порядке считается содержимое — поэтому оба плеча неподвижны при переименовании каталога by construction
   ПЕРЕШТАМПОВАН БЕЗ ПЕРЕСЪЁМКИ (задача продукта #2039). Сменилось ПРАВИЛО
@@ -27,6 +27,18 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
   каталогов дают ОДИН И ТОТ ЖЕ отпечаток — 19 совпадений из 19 пофайлово. Позже
   сдвинулся ровно один файл, `сетка/strength.go`: из него вынесена машинерия
   самого отпечатка, ни один оператор замера не тронут.
+  ПЕРЕШТАМПОВАН ВТОРОЙ РАЗ, ТЕМ ЖЕ ПОРЯДКОМ И БЕЗ ПЕРЕСЪЁМКИ (задача продукта
+  #2131). Из `сетка/strength.go` вынесен разрешитель пути артефакта `AbsPathOf` —
+  он оснастка отчёта, а не предмет замера, и живёт теперь в `сетка/report.go`,
+  который отпечатком не покрыт by construction (`fingerprintScaffolding`, признак
+  проверяется разбором). Замер не повторялся, и это доказано, а не заявлено:
+  сдвинулся РОВНО ОДИН файл из 19 — `сетка/strength.go`, 59456362d14ce8a3 ->
+  521cb8174a079a16, — остальные 18 совпали пофайлово, ни один оператор замера не
+  тронут. Почему вынесен: пока разрешитель лежал в предмете, предмет нёс АДРЕС
+  пакета оснастки (`gitenv`), и переезд этого пакета из модуля платформы в модуль
+  фундамента объявлял три отчёта несвежими — до двух часов пересъёмки на поднятой
+  базе за правку без единого оператора. Ровно тот класс, против которого заведено
+  само исключение оснастки.
   ФАЙЛЫ ПОД ОТПЕЧАТКОМ (хэш · тождество · путь на момент замера)
     28ccc0b674e6ac55  вердикт/asker.go  services/iam/internal/repo/kaname/pg/relverdict/asker.go
     8a5df9cd8d0a346e  вердикт/asker_gate.go  services/iam/internal/repo/kaname/pg/relverdict/asker_gate.go
@@ -45,7 +57,7 @@ R7-1 · S2 — ПРИБОР ПОРЯДКОВ: СЕТКА ЧЕТЫРЁХ ОСЕЙ
     58879bd6de1a3d96  сетка/dictionary.go  services/iam/internal/repo/kaname/pg/scalegrid/dictionary.go
     a4344ef691609535  сетка/grid.go  services/iam/internal/repo/kaname/pg/scalegrid/grid.go
     90e89714c215b4e7  сетка/seed.go  services/iam/internal/repo/kaname/pg/scalegrid/seed.go
-    59456362d14ce8a3  сетка/strength.go  services/iam/internal/repo/kaname/pg/scalegrid/strength.go
+    521cb8174a079a16  сетка/strength.go  services/iam/internal/repo/kaname/pg/scalegrid/strength.go
     f6e9c85169896050  сетка/strength_census.go  services/iam/internal/repo/kaname/pg/scalegrid/strength_census.go
 
 СЕТКА (константа в коде, ниоткуда не переопределяется)

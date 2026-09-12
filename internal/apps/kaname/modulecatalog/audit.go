@@ -52,7 +52,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 )
 
 // AppliedEventType — вид события следа применения.

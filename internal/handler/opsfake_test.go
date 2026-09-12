@@ -17,7 +17,7 @@ import (
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 )
 
 // fakeOpsRepoW16 — minimal operations.Repo WITHOUT the ownership-scoped port.

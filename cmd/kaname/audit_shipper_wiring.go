@@ -27,8 +27,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/pkg/audit"
-	outboxmetrics "github.com/PRO-Robotech/kacho/pkg/outbox/metrics"
+	"github.com/PRO-Robotech/corelib/audit"
+	outboxmetrics "github.com/PRO-Robotech/corelib/outbox/metrics"
 )
 
 // buildAuditShipper строит вывоз журнала аудита.

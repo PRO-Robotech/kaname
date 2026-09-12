@@ -6,7 +6,7 @@ package identityquota
 import (
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/pkg/quota/quotaread"
+	"github.com/PRO-Robotech/corelib/quota/quotaread"
 )
 
 // Перевод строк учёта в СВОЙ контракт службы доступа.

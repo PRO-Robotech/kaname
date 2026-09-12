@@ -73,7 +73,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 )
@@ -374,25 +374,55 @@ func scanObservabilityPage(pagePath string, producerRoots []string) (pageCensus,
 	return census, findings, nil
 }
 
-// platformModuleDir — каталог модуля фундамента, который служба пинит версией.
-// Пустая строка означает, что модуль не разрешился; корень тогда не читается, и
-// проба об этом ОТКАЗЫВАЕТ, а не молчит.
-func platformModuleDir(t *testing.T) string {
+// externalModuleDir — каталог внешнего модуля, который служба пинит версией.
+// Отказ разрешения роняет пробу, а не читается как «корня нет»: производители
+// живут во внешних модулях, и молчание здесь объявило бы вымыслом каждое имя,
+// которое они производят.
+func externalModuleDir(t *testing.T, modulePath string) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	require.NoError(t, err)
-	// Каталог модуля фундамента лежит в кэше модулей; путь к нему объявлен
-	// файлом go.sum службы и разрешается сборкой, поэтому спрашивается он у
-	// сборки, а не собирается из частей.
-	cmd := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "github.com/PRO-Robotech/kacho")
+	// Каталог модуля лежит в кэше модулей; путь к нему объявлен файлом go.sum
+	// службы и разрешается сборкой, поэтому спрашивается он у сборки, а не
+	// собирается из частей.
+	cmd := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", modulePath)
 	cmd.Dir = filepath.Join(dir, serviceRoot)
 	out, err := cmd.CombinedOutput()
-	require.NoErrorf(t, err, "каталог модуля фундамента не разрешился: %s", out)
+	require.NoErrorf(t, err, "каталог модуля %s не разрешился: %s", modulePath, out)
 	return strings.TrimSpace(string(out))
 }
 
+// producerRootCount — сколько корней даёт producerRoots. Число стоит РЯДОМ со
+// своим производителем, чтобы проба сверяла объём осмотренного с тем же
+// источником, из которого он получен, а не с рукописной копией.
+const producerRootCount = 3
+
+// producerRoots — где ищутся ПРОИЗВОДИТЕЛИ имён, названных документацией: ряды
+// наблюдаемости, контракты gRPC. Корней ТРИ, и ни один не лишний:
+//
+//	дерево службы                — то, что она объявляет сама;
+//	модуль фундамента            — `grpcsrv`, `observability`, `operations`: всё,
+//	                               что производит ряды транспорта и хранения;
+//	остаток платформенного модуля — контракты, которые служба ещё берёт оттуда.
+//
+// Прежняя редакция знала ДВА корня — дерево и `<платформа>/pkg`, — и на день
+// заведения это было верно: фундамент физически лежал там. После выделения
+// фундамента отдельным модулем прежний адрес стал давать остаток платформы, где
+// `grpcsrv` уже нет: страница наблюдаемости назвала три ряда
+// `kacho_grpc_server_*`, а указатель их не нашёл — «названо то, чего нет»
+// прозвучало о существующем. Третий корень заведён тем же замером: контракты
+// доступа остаются у платформы, и без него ослеп бы отбор тревог.
+func producerRoots(t *testing.T) []string {
+	t.Helper()
+	return []string{
+		serviceRoot,
+		externalModuleDir(t, foundationModulePath),
+		filepath.Join(externalModuleDir(t, platformModulePath), "pkg"),
+	}
+}
+
 func TestObservabilityPagePromisesOnlyWhatTheServiceProduces(t *testing.T) {
-	roots := []string{serviceRoot, filepath.Join(platformModuleDir(t), "pkg")}
+	roots := producerRoots(t)
 
 	census, findings, err := scanObservabilityPage(filepath.Join(serviceRoot, observabilityPage), roots)
 	require.NoErrorf(t, err, "разбор страницы: %s", filepath.Join(serviceRoot, observabilityPage))
@@ -408,8 +438,9 @@ func TestObservabilityPagePromisesOnlyWhatTheServiceProduces(t *testing.T) {
 	require.NotZero(t, census.pageLines, "обход пуст: страница не прочитана — вердикт беспредметен")
 	require.NotZero(t, census.producerFiles, "обход пуст: файлов Go не прочитано ни одного — "+
 		"«производителя нет» означало бы «не искали»")
-	require.Equal(t, 2, census.producerModules, "прочитан не тот набор модулей: "+
-		"указатель производителей обязан покрывать И дерево службы, И фундамент, который она пинит")
+	require.Equal(t, producerRootCount, census.producerModules, "прочитан не тот набор модулей: "+
+		"указатель производителей обязан покрывать дерево службы, модуль фундамента И остаток "+
+		"платформенного модуля — см. producerRoots")
 	require.NotZero(t, census.producerSeries, "обход пуст: производителей не собрано ни одного — "+
 		"распознаватель ослеп, вердикт беспредметен")
 

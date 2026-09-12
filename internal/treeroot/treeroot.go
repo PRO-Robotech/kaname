@@ -44,7 +44,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/pkg/gitenv"
+	"github.com/PRO-Robotech/corelib/gitenv"
 )
 
 // ErrTreeNotResolved — дерево назвать нечем: проверка НЕ ИСПОЛНЯЛАСЬ.

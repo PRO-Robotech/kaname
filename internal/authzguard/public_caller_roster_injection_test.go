@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
+	"github.com/PRO-Robotech/corelib/platformmodules"
 )
 
 // rosterTwin — законный близнец: таблица допусков и объявление, сходящиеся между

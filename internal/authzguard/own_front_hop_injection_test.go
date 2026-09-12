@@ -28,7 +28,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 )
 
 // revertedHopDecision — дерево ДО правки: хоп полом не признаётся.

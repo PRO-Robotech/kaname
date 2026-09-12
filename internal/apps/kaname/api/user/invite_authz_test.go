@@ -7,7 +7,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 )
 
 // recordingChecker captures the subject strings the cascade asks about, so a test

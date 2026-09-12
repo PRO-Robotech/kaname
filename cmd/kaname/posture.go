@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	"github.com/PRO-Robotech/kacho/pkg/servicecontract"
+	coredb "github.com/PRO-Robotech/corelib/db"
+	"github.com/PRO-Robotech/corelib/servicecontract"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )

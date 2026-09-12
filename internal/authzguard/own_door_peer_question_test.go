@@ -38,8 +38,8 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/PRO-Robotech/corelib/authz/catalogderive"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-	"github.com/PRO-Robotech/kacho/pkg/authz/catalogderive"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 )

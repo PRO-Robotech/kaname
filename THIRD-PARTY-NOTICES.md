@@ -24,16 +24,17 @@
 
 | Лицензия | Модулей |
 |---|---:|
-| Apache-2.0 | 12 |
+| Apache-2.0 | 13 |
 | BSD-3-Clause | 9 |
 | BUSL-1.1 | 1 |
 | MIT | 19 |
-| **всего** | **41** |
+| **всего** | **42** |
 
 ## Apache-2.0
 
 | Модуль | Версия | Файл лицензии в модуле |
 |---|---|---|
+| `github.com/PRO-Robotech/corelib` | `v1.4.0` | `LICENSE` |
 | `github.com/prometheus/client_golang` | `v1.24.1` | `LICENSE` |
 | `github.com/prometheus/client_model` | `v0.6.2` | `LICENSE` |
 | `github.com/prometheus/common` | `v0.70.1` | `LICENSE` |
@@ -65,7 +66,7 @@
 
 | Модуль | Версия | Файл лицензии в модуле |
 |---|---|---|
-| `github.com/PRO-Robotech/kacho` | `v0.1.0` | `LICENSE` |
+| `github.com/PRO-Robotech/kacho` | `v0.1.1-0.20260912212223-96c5c6e10b99` | `LICENSE` |
 
 ## MIT
 

@@ -28,7 +28,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 )
 
 // deniedByChain — сколько маршрутов отвергает данная цепочка в боевой посадке.

@@ -37,7 +37,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/credsecret"
+	"github.com/PRO-Robotech/corelib/credsecret"
 )
 
 // fakeKeyMaterialValidator — авторитет прежней полосы. Признаёт РОВНО одну

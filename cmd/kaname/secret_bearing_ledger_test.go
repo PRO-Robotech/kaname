@@ -64,7 +64,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	apiv1 "github.com/PRO-Robotech/kacho/pkg/api/corelib/api/v1"
+	apiv1 "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 )
 

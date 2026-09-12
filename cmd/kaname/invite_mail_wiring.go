@@ -36,12 +36,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/pkg/outbox"
-	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
-	outboxmetrics "github.com/PRO-Robotech/kacho/pkg/outbox/metrics"
+	"github.com/PRO-Robotech/corelib/outbox"
+	"github.com/PRO-Robotech/corelib/outbox/drainer"
+	outboxmetrics "github.com/PRO-Robotech/corelib/outbox/metrics"
 
-	"github.com/PRO-Robotech/kacho/pkg/outbox/reconciler"
-	"github.com/PRO-Robotech/kacho/pkg/retention"
+	"github.com/PRO-Robotech/corelib/outbox/reconciler"
+	"github.com/PRO-Robotech/corelib/retention"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"

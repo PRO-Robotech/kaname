@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 )
 
 // Ровно та посадка, на которой это и намерили: пул 100 на реплику, пять реплик,

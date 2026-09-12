@@ -36,8 +36,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/pagetoken"
-	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
+	"github.com/PRO-Robotech/corelib/pagetoken"
+	corevalidate "github.com/PRO-Robotech/corelib/validate"
 )
 
 // visibleTokenPrefix marks the visible-page cursor form. It is part of the wire

@@ -33,7 +33,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/pkg/gitenv"
+	"github.com/PRO-Robotech/corelib/gitenv"
 )
 
 // AcceptanceEditFinding — приёмка, правленая ПОСЛЕ объявления своего состояния,

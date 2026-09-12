@@ -61,7 +61,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 )
 
 // TestFGAOutbox_CarriesNoIndexWithoutAReader — перепись индексов журнала.

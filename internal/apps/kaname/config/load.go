@@ -13,7 +13,7 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 
-	"github.com/PRO-Robotech/kacho/pkg/identityposture"
+	"github.com/PRO-Robotech/corelib/identityposture"
 )
 
 // Load reads configuration from a YAML file (if path != "") + applies

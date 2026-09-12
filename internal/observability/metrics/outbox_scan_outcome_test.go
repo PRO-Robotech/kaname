@@ -45,8 +45,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	outboxmetrics "github.com/PRO-Robotech/kacho/pkg/outbox/metrics"
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	outboxmetrics "github.com/PRO-Robotech/corelib/outbox/metrics"
+	"github.com/PRO-Robotech/corelib/pgtest"
 )
 
 // probedOutboxTable — очередь, на которой снимается картина. Любая очередь

@@ -33,7 +33,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/credsecret"
+	"github.com/PRO-Robotech/corelib/credsecret"
 )
 
 // pemLikeKeyMaterial — то, чем докер-вход пользовался до этой работы:

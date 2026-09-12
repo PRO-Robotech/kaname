@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 )
 
 func TestOperationToProto_TruncatesTimestampsToSeconds(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/observability"
-	"github.com/PRO-Robotech/kacho/pkg/servicecontract"
+	"github.com/PRO-Robotech/corelib/observability"
+	"github.com/PRO-Robotech/corelib/servicecontract"
 )
 
 // restFrontUp — объявление поднятого фронта под транспортом. Помощник, а не

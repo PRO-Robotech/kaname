@@ -29,7 +29,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 )
 
 // testKey — ключ клиента вместе с его зарегистрированной формой.

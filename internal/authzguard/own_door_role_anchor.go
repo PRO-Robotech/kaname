@@ -57,7 +57,7 @@ package authzguard
 // нет, не существует и подставить его нельзя.
 
 import (
-	"github.com/PRO-Robotech/kacho/pkg/authz"
+	"github.com/PRO-Robotech/corelib/authz"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 

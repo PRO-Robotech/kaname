@@ -31,7 +31,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/servicecontract"
+	"github.com/PRO-Robotech/corelib/servicecontract"
 )
 
 // authAxisProducer — то, что проверяется: производитель оси по режиму ребра.

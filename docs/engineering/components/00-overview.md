@@ -286,11 +286,18 @@ sequenceDiagram
 
 **Build-зависимости (Go):**
 
-- `github.com/PRO-Robotech/kacho/pkg` — ids, operations (LRO table + worker),
-  db (pgxpool), grpcsrv, observability, outbox/drainer, safeconv; а также shared-proto
-  stubs (operation/validation/authz_options).
-- `github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1` — собственные
-  доменные proto-stubs (генерируются локально из `proto/`).
+- `github.com/PRO-Robotech/corelib` — общий ФУНДАМЕНТ, от которого зависят и служба,
+  и платформа: ids, operations (LRO table + worker), db (pgxpool), grpcsrv,
+  observability, outbox/drainer, safeconv; а также общие proto-stubs
+  (operation/validation/authz_options). Целевое направление зависимостей —
+  `corelib ← kaname ← kacho`, то есть ребро идёт в фундамент, а не в платформу.
+- `github.com/PRO-Robotech/kacho` — ОСТАТОК зависимости от платформы, и он сходится
+  к пустоте. Сегодня в нём три пути, и каждый назван ведомостью гейта
+  `internal/supplyhygiene` (`platformResidual`): `pkg/api/kaname/cloud/iam/v1` —
+  собственные доменные proto-stubs службы, чей дом этот репозиторий (переезд идёт
+  своей полосой); `pkg/ownerregister` и `pkg/subjectchange` — производители,
+  отнесённые приёмкой K3-1 к классу `kaname`, до переезда которых платформа
+  остаётся их домом. Чего в остатке нет, гейт объявляет находкой.
 - `github.com/jackc/pgx/v5` — Postgres driver.
 - `github.com/spf13/viper` — конфиг.
 - `golang.org/x/sync/errgroup` — параллельный запуск задач.

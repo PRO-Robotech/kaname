@@ -87,8 +87,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
-	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/corelib/platformmodules"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 
 	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
@@ -111,7 +111,7 @@ const canonModuleSymbol = "CatalogSeedModules"
 // spellingsImportPath — словарь написаний модулей платформы. Тот же класс, что
 // канон: набор, вкомпилированный в двоичный файл. На пути запроса не читается ни
 // одним файлом (перепись это печатает), и запрет вооружает наблюдение вперёд.
-const spellingsImportPath = "github.com/PRO-Robotech/kacho/pkg/platformmodules"
+const spellingsImportPath = "github.com/PRO-Robotech/corelib/platformmodules"
 
 // namesInARowIsASet — сколько имён модулей подряд в ОДНОЙ последовательности
 // выражений считать объявлением набора.
