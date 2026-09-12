@@ -28,6 +28,11 @@
 # добавили), а неподнявшийся Postgres — расписание. Перепутать их значит либо
 # спрятать дефект, либо объявить дефектом чужую сеть.
 #
+# У НАКАТА КЛАСС НАЗЫВАЕТ САМ НАКАТ, тем же кодом 75: `cmd/migrator/main.go`
+# судит цепочку отказа предикатом, которым решает, имеет ли смысл ждать базу.
+# Этот скрипт код передаёт и текста отказа НЕ РАЗБИРАЕТ — разбор текста судил бы
+# эхо ввода, потому что сообщения наката вкладывают в себя строку подключения.
+#
 # ─────────────────────────────────────────────────────────────────────────────
 # ПОЧЕМУ POSTGRES ПОДНИМАЕТСЯ `docker run`, А НЕ `services:` КОНВЕЙЕРА
 #
@@ -267,20 +272,48 @@ build_binaries() {
   say "собрано: kaname, kaname-migrator"
 }
 
+# КЛАСС ОТКАЗА НАКАТА НАЗЫВАЕТ САМ НАКАТ — СВОИМ КОДОМ ВЫХОДА.
+#
+# Здесь стоял поиск слов `connect|dial|refused|sslmode|password` в выводе
+# накатчика, и он судил ЭХО ВВОДА, а не причину отказа: сообщения накатчика
+# вкладывают в себя обеззараженную строку подключения, обеззараживание сохраняет
+# запрос, а посадка стенда экспортирует `sslmode=require` всегда. Значит слово из
+# образца стояло в выводе ГАРАНТИРОВАННО, и совпадение ничего не означало.
+#
+# Цена измерена и она в стороне ошибки: отказ «адрес базы не называет хоста» —
+# тот, о котором накат прямо говорит, что ожидание не сойдётся НИКОГДА, —
+# получал 75, а шаг конвейера переводит 75 в «прогон недействителен, это НЕ
+# дефект кода». Неверная посадка не краснела НИ РАЗУ.
+#
+# Второго словаря здесь больше нет by construction: класс объявлен ровно там, где
+# накат им же решает, имеет ли смысл ждать (`cmd/migrator/main.go`, `exitCodeFor`
+# через `dbready.IsNotReady`), а этот шаг лишь передаёт названное. Вывод
+# печатается читателю и в вердикт НЕ входит.
+#
+# Прежний комментарий на этом месте говорил ещё и то, что накатчик грузит полный
+# конфиг службы, и потому отказ бывает находкой «требование стража добавили». Это
+# завышало класс: полного стража накат НЕ ЗОВЁТ намеренно — в боевом режиме тот
+# требует секретов, которых init-контейнер не несёт. Накат судит ровно ту
+# величину, которую употребляет.
 migrate() {
+  # `local out rc` ОТДЕЛЬНОЙ строкой, а присваивание — следующей: у `local
+  # out="$(…)"` код возврата принадлежит самому `local`, то есть равен нулю
+  # всегда, и отказ накатчика исчез бы вместе с величиной.
   local out rc
   out="$("$BIN/kaname-migrator" up 2>&1)"; rc=$?
   printf '%s\n' "$out" | tail -3
-  if [ "$rc" -ne 0 ]; then
-    # Накатчик грузит ПОЛНЫЙ конфиг службы, поэтому его отказ бывает и находкой
-    # (требование стража добавили), и несозданным условием (база не отвечает).
-    # Различает адресат жалобы: строка подключения — условие, всё прочее — находка.
-    if printf '%s' "$out" | grep -qiE 'connect|dial|refused|sslmode|password'; then
-      unmet "накатчик не дотянулся до базы"; exit "$RC_UNMET"
-    fi
-    fail "накатчик отказал: $(printf '%s' "$out" | tail -1)"; exit 1
+  if [ "$rc" -eq 0 ]; then
+    say "миграции накачены"
+    return 0
   fi
-  say "миграции накачены"
+  if [ "$rc" -eq "$RC_UNMET" ]; then
+    unmet "накатчик не дотянулся до базы (он назвал это кодом $rc)"
+    printf '%s\n' "$out" | tail -1 >&2
+    exit "$RC_UNMET"
+  fi
+  fail "накатчик отказал (код $rc):"
+  printf '%s\n' "$out" | tail -1 >&2
+  exit 1
 }
 
 start_service() {
@@ -420,7 +453,8 @@ if [ "${1:-}" = "--self-test" ]; then
     }
 
     mkdir -p "$TMP/empty" "$TMP/toolbin" "$TMP/gobin-ok" "$TMP/gobin-fail" \
-             "$TMP/mig-conn" "$TMP/mig-guard" "$TMP/mig-ok" "$TMP/build-bin" \
+             "$TMP/mig-unmet" "$TMP/mig-echo" "$TMP/mig-conn" "$TMP/mig-config" \
+             "$TMP/mig-ok" "$TMP/mig-ok-noisy" "$TMP/build-bin" \
              "$TMP/svc-up" "$TMP/svc-guard" "$TMP/chain-ok" "$TMP/chain-guard"
 
     # Подложные средства подъёма: их НИКОГДА не исполняют, `need_tool` смотрит лишь
@@ -446,23 +480,63 @@ echo 'internal/apps/kaname/api/x.go:12:5: undefined: Foo' >&2
 exit 1
 EOF
 
-    # Накатчик, не дотянувшийся до базы: жалоба на СОЕДИНЕНИЕ.
-    cat > "$TMP/mig-conn/kaname-migrator" <<'EOF'
+    # ─── ПОДСТАВНЫЕ НАКАТЧИКИ: КОД ПРОТИВ ПРОЗЫ ─────────────────────────────
+    #
+    # Класс различает САМ накатчик и называет его КОДОМ ВЫХОДА (75 — база
+    # недостижима, о миграциях не известно ничего; иной ненулевой — находка о
+    # дереве). Поэтому проза в этих четырёх подставных умышленно ПЕРЕКРЁЩЕНА с
+    # кодом: пара несёт слова прежнего образца при коде находки, пара — код
+    # несозданного условия без единого такого слова. Различить их поиском слов
+    # нельзя НИ ПРИ КАКОМ образце — на этом и держится проба.
+    #
+    # Прежний читатель искал в выводе `connect|dial|refused|sslmode|password` и
+    # зеленел на ЭХЕ ВВОДА: обеззараженная строка подключения сохраняет запрос, а
+    # посадка стенда экспортирует `sslmode=require` всегда.
+
+    # База НЕДОСТИЖИМА: код 75, и ни одного слова прежнего образца в тексте.
+    cat > "$TMP/mig-unmet/kaname-migrator" <<'EOF'
 #!/bin/sh
-echo 'dial tcp 127.0.0.1:15432: connect: connection refused' >&2
+echo 'Error: database not ready after 2m0s: the database system is starting up (SQLSTATE 57P03)' >&2
+exit 75
+EOF
+    # НЕВЕРНАЯ ПОСАДКА: адрес базы не называет хоста, ожидание не сойдётся НИКОГДА.
+    # Текст — дословный вывод продукта (`cmd/migrator/main.go`, обеззараживание
+    # `config.RedactDSN`): именно он несёт `sslmode` из ЭХА ВВОДА при коде находки.
+    cat > "$TMP/mig-echo/kaname-migrator" <<'EOF'
+#!/bin/sh
+cat >&2 <<'MSG'
+Error: database address "postgres://kaname:xxxxx@:5432/kaname?sslmode=require" names no host: it is not set, and waiting for the database would never converge; set --dsn, ENV KACHO_MIGRATOR_DSN, or the chart's db.host
+MSG
 exit 1
 EOF
-    # Накатчик, отвергнутый ПРОВЕРКОЙ НАСТРОЕК: тот же ненулевой код, другой
-    # адресат жалобы. Это и есть один факт, различающий 75 и 1 на этом месте.
-    cat > "$TMP/mig-guard/kaname-migrator" <<'EOF'
+    # ПЕРЕКРЁСТНАЯ ИНЪЕКЦИЯ, самая резкая: проза ТА ЖЕ, что у недостижимой базы,
+    # код — находки. Читатель, судящий текст, ответил бы здесь 75 и спрятал бы
+    # дефект; судящий код обязан ответить 1.
+    cat > "$TMP/mig-conn/kaname-migrator" <<'EOF'
 #!/bin/sh
-echo 'config: authn.trusted-forwarder-sans must not be empty in production mode' >&2
+echo 'Error: database connection check failed: dial tcp 127.0.0.1:15432: connect: connection refused' >&2
+exit 1
+EOF
+    # Отказ, к базе не относящийся вовсе: строка подключения не собралась.
+    cat > "$TMP/mig-config/kaname-migrator" <<'EOF'
+#!/bin/sh
+echo 'Error: dsn unset (--dsn / KACHO_MIGRATOR_DSN) and service config produced an empty DSN' >&2
 exit 1
 EOF
     cat > "$TMP/mig-ok/kaname-migrator" <<'EOF'
 #!/bin/sh
 echo 'OK    0001_init.sql'
 echo 'goose: no migrations to run'
+exit 0
+EOF
+    # УСПЕХ, чей вывод НЕСЁТ слова прежнего образца: уведомления сервера
+    # доезжают до оператора дословно, и имя столбца с паролем — законная строка
+    # в них. Третий вход задачи: эхо есть, отказа нет. Исход обязан быть успехом.
+    cat > "$TMP/mig-ok-noisy/kaname-migrator" <<'EOF'
+#!/bin/sh
+echo 'kaname NOTICE: column "password_hash" already exists, skipping' >&2
+echo 'OK    20260101000000_init.sql'
+echo 'goose: successfully migrated database'
 exit 0
 EOF
     cp "$TMP/mig-ok/kaname-migrator" "$TMP/chain-ok/kaname-migrator"
@@ -500,8 +574,10 @@ PYEOF
     cp "$TMP/svc-up/kaname" "$TMP/chain-ok/kaname"
 
     chmod +x "$TMP/toolbin/docker" "$TMP/toolbin/go" "$TMP/gobin-ok/go" \
-             "$TMP/gobin-fail/go" "$TMP/mig-conn/kaname-migrator" \
-             "$TMP/mig-guard/kaname-migrator" "$TMP/mig-ok/kaname-migrator" \
+             "$TMP/gobin-fail/go" "$TMP/mig-unmet/kaname-migrator" \
+             "$TMP/mig-echo/kaname-migrator" "$TMP/mig-conn/kaname-migrator" \
+             "$TMP/mig-config/kaname-migrator" "$TMP/mig-ok/kaname-migrator" \
+             "$TMP/mig-ok-noisy/kaname-migrator" \
              "$TMP/chain-ok/kaname-migrator" "$TMP/chain-guard/kaname-migrator" \
              "$TMP/svc-guard/kaname" "$TMP/chain-guard/kaname" \
              "$TMP/svc-up/kaname" "$TMP/chain-ok/kaname"
@@ -529,9 +605,12 @@ EOF
     world_docker_present()  { ( PATH="$TMP/toolbin"; need_tool docker ); }
     world_go_missing()      { ( PATH="$TMP/empty";   need_tool go ); }
 
-    world_migrate_conn()    { ( BIN="$TMP/mig-conn";  migrate ); }
-    world_migrate_guard()   { ( BIN="$TMP/mig-guard"; migrate ); }
-    world_migrate_ok()      { ( BIN="$TMP/mig-ok";    migrate ); }
+    world_migrate_unmet()   { ( BIN="$TMP/mig-unmet";    migrate ); }
+    world_migrate_echo()    { ( BIN="$TMP/mig-echo";     migrate ); }
+    world_migrate_conn()    { ( BIN="$TMP/mig-conn";     migrate ); }
+    world_migrate_config()  { ( BIN="$TMP/mig-config";   migrate ); }
+    world_migrate_ok()      { ( BIN="$TMP/mig-ok";       migrate ); }
+    world_migrate_ok_noisy(){ ( BIN="$TMP/mig-ok-noisy"; migrate ); }
 
     world_build_no_go()     { ( PATH="$TMP/empty";               BIN="$TMP/build-bin"; build_binaries ); }
     world_build_fail()      { ( PATH="$TMP/gobin-fail:$PATH";    BIN="$TMP/build-bin"; build_binaries ); }
@@ -610,10 +689,21 @@ EOF
     # бы неотличимо от постоянной строки.
     assert 75 "(+) иное средство — то же 75, но имя иное"           world_go_missing     "инструмента нет: go" "-" "НАХОДКА"
 
-    echo "--- ось 2: накатчик отказал — адресат жалобы решает, условие это или находка"
+    echo "--- ось 2: накатчик отказал — класс называет ЕГО КОД, а не слова в выводе"
     assert 0  "(−) накат прошёл — 0"                               world_migrate_ok     "миграции накачены" "-" "УСЛОВИЕ НЕ СОЗДАНО"
-    assert 75 "(+) жалоба на СОЕДИНЕНИЕ — 75, не дефект дерева"     world_migrate_conn   "накатчик не дотянулся до базы" "-" "НАХОДКА"
-    assert 1  "(+) жалоба на НАСТРОЙКИ — 1, и причина названа"      world_migrate_guard  "накатчик отказал" "trusted-forwarder-sans" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (+) код 75 при тексте БЕЗ единого слова прежнего образца: читатель, судящий
+    # текст, назвал бы это находкой и послал бы чинить чужое расписание.
+    assert 75 "(+) накатчик назвал базу недостижимой — 75"          world_migrate_unmet  "накатчик не дотянулся до базы" "-" "НАХОДКА"
+    # (+) КЛАСС ЗАДАЧИ #22: код 1 при `sslmode` в эхе ввода. Прежний читатель
+    # отвечал здесь 75, и неверная посадка не краснела ни разу.
+    assert 1  "(+) эхо ввода несёт sslmode, а предмет — посадка — 1" world_migrate_echo   "накатчик отказал" "names no host" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (+) перекрёстная инъекция: проза ТА ЖЕ, что у недостижимой базы, код иной.
+    assert 1  "(+) проза о соединении при коде находки — 1"         world_migrate_conn   "накатчик отказал" "connection refused" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (+) отказ, к базе не относящийся вовсе: причина обязана доехать дословно.
+    assert 1  "(+) строка подключения не собралась — 1"             world_migrate_config "накатчик отказал" "dsn unset" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (−) третий вход: эхо прежнего образца в выводе ЕСТЬ, а отказа нет. Успех
+    # обязан остаться успехом, и уведомление сервера обязано доехать до читателя.
+    assert 0  "(−) эхо в выводе при коде 0 — 0, и текст доехал"     world_migrate_ok_noisy "миграции накачены" "password_hash" "УСЛОВИЕ НЕ СОЗДАНО"
 
     echo "--- ось 3: сборка — отсутствие средства и отказ сборки НЕ один исход"
     assert 0  "(−) сборка прошла — 0"                              world_build_ok       "собрано" "-" "УСЛОВИЕ НЕ СОЗДАНО"
