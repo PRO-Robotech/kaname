@@ -649,6 +649,106 @@ def self_test() -> int:
         _c("и текст называет несозданное условие",
            "УСЛОВИЕ НЕ СОЗДАНО" in buf.getvalue(), buf.getvalue()[-300:])
 
+        # ── Ось 7: ПРИРОДА КЛЮЧА РАЗЛИЧАЕТСЯ, И «ЧЕЛОВЕК» НЕ ЗОВЁТ МАШИНУ ───
+        #
+        # ЗАМЕР, А НЕ ИМЯ. `humanAccCrudUserId` читается кейсом как идентификатор
+        # ТОГО ЖЕ вызывающего, чей предъявитель — `jwtHumanAccCrud`: утверждение
+        # кейса — «ownerUserId == caller», и образец требует префикса `usr`.
+        # Значит ключ производит ЦЕРЕМОНИЯ, а машинный посев не производит его ни
+        # при каком устройстве: служебная учётка человеком не является, её
+        # идентификатор несёт префикс `sva`, и подставленное значение дало бы
+        # кейс, проверивший подстановку.
+        #
+        # ЦЕНА ПРЕЖНЕГО УЧЁТА НАЗВАНА: строка долга звала читателя завести
+        # машинный посев тому, чего машинный посев не производит, — то есть
+        # ОБЪЯВЛЯЛА возможность, неисполнимую by construction.
+        #
+        # ЗАКОННЫЙ БЛИЗНЕЦ РЯДОМ и отличается ОДНИМ фактом: `svaInviteeId` —
+        # идентификатор СЛУЖЕБНОЙ учётки (кейсы читают его при
+        # `subjectType=service_account`), и он обязан остаться машинным.
+        for lane, key, want_ceremony in (("human-id", "humanAccCrudUserId", True),
+                                         ("machine-id", "svaInviteeId", False)):
+            base = tmp / f"nature-{lane}"
+            body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                    '"{{baseUrl}}/iam/v1/x"}},'
+                    '"event":[{"listen":"test","script":{"exec":['
+                    f'"pm.environment.get(\'{key}\')"]}}}}]}}]}}')
+            t7 = _mk(base, {"nature": body},
+                     {"baseUrl": "http://edge", key: "", "runId": ""})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                run(t7, workflows=_wf(base, runs=["nature"]))
+            out = buf.getvalue()
+            _c(f"{key}: препятствие названо "
+               f"{'ЦЕРЕМОНИЕЙ ЧЕЛОВЕКА' if want_ceremony else 'машинным посевом'}",
+               ("ЦЕРЕМОНИЯ ЧЕЛОВЕКА" in out) == want_ceremony
+               and ("машинный посев" in out) != want_ceremony, out[:700])
+
+        # ── Ось 8: АДРЕС — НЕ ПОСЕВ, И ЕГО ПРОИЗВОДИТ СТЕНД ──────────────────
+        #
+        # Тот же класс, что уже назван в шапке `blockers`: из шести пустых ключей
+        # своей поверхности два были АДРЕСАМИ, и прежняя редакция звала их
+        # удостоверениями. Ключи `iamJwksBaseUrl` и `providerPublicBaseUrl` — того
+        # же рода: их не выпускает ни один подписант, их НАЗЫВАЕТ посадка.
+        # Законный близнец — предъявитель той же коллекции: он обязан остаться
+        # машинным посевом.
+        for lane, key, want_address in (("addr", "iamJwksBaseUrl", True),
+                                        ("cred", "jwtBootstrap", False)):
+            base = tmp / f"addrnature-{lane}"
+            body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                    '"{{baseUrl}}/iam/v1/x"}},'
+                    '"event":[{"listen":"test","script":{"exec":['
+                    f'"pm.environment.get(\'{key}\')"]}}}}]}}]}}')
+            t8 = _mk(base, {"nature": body},
+                     {"baseUrl": "http://edge", key: "", "runId": ""})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                run(t8, workflows=_wf(base, runs=["nature"]))
+            out = buf.getvalue()
+            _c(f"{key}: препятствие названо "
+               f"{'АДРЕСОМ' if want_address else 'машинным посевом'}",
+               ("нужен АДРЕС" in out) == want_address
+               and ("машинный посев" in out) != want_address, out[:700])
+
+        # ── Ось 9: СТРОКА ДОЛГА НАЗЫВАЕТ ПОВЕРХНОСТЬ, ЧЕЙ ПОСЕВ ТРЕБУЕТСЯ ────
+        #
+        # ЦЕНА ИЗМЕРЕНА И ОНА — ПЛАН ЦЕЛОЙ ПОЛОСЫ. Учёт поклюсевой и по
+        # поверхности стоит здесь с самого начала (оси 3б и 3г), а вот СТРОКА про
+        # него молчала: она говорила «которых не пишет ни один посев ЭТОЙ
+        # поверхности», не называя, КАКОЙ. Читатель печатного долга видел 39
+        # коллекций с препятствием «нужен машинный посев» и заводил полосу
+        # «расширить посев» — при том что все 39 суть коллекции КРАЯ, и посев
+        # собственного фронта им не зачитывается НИ ОДНИМ ключом by construction.
+        # То есть число, на которое ставился план, сдвинуть было нечем.
+        #
+        # Инъекция: коллекция КРАЯ и посев СВОЕЙ поверхности в одном дереве.
+        # Строка обязана назвать «край платформы» — производителя, которого нет, —
+        # а не поверхность посева, который в дереве лежит.
+        base = tmp / "surface-named"
+        edge_seeded = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                       '"{{baseUrl}}/iam/v1/x"}},'
+                       '"event":[{"listen":"test","script":{"exec":['
+                       '"pm.environment.get(\'jwtAccountAdminA\')"]}}]}]}')
+        t9 = _mk(base, {"edge-seeded": edge_seeded},
+                 {"baseUrl": "http://edge", "jwtAccountAdminA": "", "runId": ""})
+        fx9 = t9.parent / "authz-fixtures"
+        fx9.mkdir(parents=True, exist_ok=True)
+        (fx9 / "seed_probe.py").write_text(
+            "import sys\n"
+            "if '--minted-keys' in sys.argv:\n"
+            "    print('jwtAccountAdminA')\n"
+            "elif '--minted-surface' in sys.argv:\n"
+            "    print('служба (собственный REST-фронт)')\n",
+            encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(t9, workflows=_wf(base, runs=["edge-seeded"]))
+        out = buf.getvalue()
+        _c("строка машинного посева НАЗЫВАЕТ поверхность, чей посев требуется",
+           "машинный посев поверхности «край платформы»" in out, out[:800])
+        _c("и НЕ называет поверхность посева, который в дереве лежит",
+           "машинный посев поверхности «служба" not in out, out[:800])
+
         # Ось 4: коллекция края попадает в «не гоняется» с причиной про край.
         edge = ('{"item":[{"name":"s","request":{"url":{"raw":"{{baseUrl}}/iam/v1/x"}}}]}')
         t4 = _mk(tmp / "edge", {"edge-only": edge}, {"baseUrl": "http://x", "runId": ""})
