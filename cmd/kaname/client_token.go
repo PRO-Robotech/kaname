@@ -90,6 +90,22 @@ func buildClientTokenEndpoint(
 	}, signer, claims)
 }
 
+// clientTokenOutcomeReader — переходник от переписи обработчика к читателю
+// величин.
+//
+// Живёт в корне, а не в одном из двух пакетов: обработчик не знает реестра
+// величин, а реестр не знает типа исхода. Перевод — работа того, кто знает обоих.
+func clientTokenOutcomeReader(h *clienttokenhttp.Handler) func() map[string]uint64 {
+	return func() map[string]uint64 {
+		census := h.Outcomes()
+		out := make(map[string]uint64, len(census))
+		for outcome, count := range census {
+			out[string(outcome)] = count
+		}
+		return out
+	}
+}
+
 // ownClientAdapter — чтение строки реестра по НАШЕМУ идентификатору.
 //
 // Отдельный адаптер, а не расширение прежних: те резолвят по зеркальному

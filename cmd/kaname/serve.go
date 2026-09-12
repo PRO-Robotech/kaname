@@ -1209,6 +1209,18 @@ func runServe(cfg config.Config) error {
 		}
 		if clientTokenHandler != nil {
 			mux.Handle(clienttokenhttp.TokenPath, clientTokenHandler)
+			// ЧИТАТЕЛЬ ПЕРЕПИСИ ИСХОДОВ — ВПЛОТНУЮ К МОНТИРОВАНИЮ (#2501), как у
+			// двух соседних поверхностей выдачи. Обработчик несёт перепись с
+			// пред-засевом по каждому объявленному исходу; без читателя она
+			// оставалась в памяти процесса, и «ноль отказов за всю жизнь полосы»
+			// было неотличимо от «полоса не исполнялась ни разу» — при том, что
+			// через эту полосу в отдельной установке выдаётся ВСЯКОЕ
+			// арендаторское удостоверение.
+			//
+			// Набор исходов приходит из того же закрытого словаря, которым засеяна
+			// перепись: полнота витрины тогда не зависит от чужого засева.
+			metricsReg.NewClientTokenOutcomeCollector(
+				clienttokenhttp.DeclaredOutcomes(), clientTokenOutcomeReader(clientTokenHandler))
 		}
 		registryTokenHandler = mux
 	}

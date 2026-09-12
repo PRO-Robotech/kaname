@@ -130,6 +130,22 @@ spec:
           annotations:
             summary: "снятие истёкших удостоверений отказывает — места под потолком не возвращаются"
 
+        - alert: KanameClientTokenRefusalRate
+          expr: |
+            sum(rate(kaname_client_token_outcomes_total{outcome!="accepted"}[10m]))
+              / sum(rate(kaname_client_token_outcomes_total[10m])) > 0.5
+          for: 10m
+          annotations:
+            summary: "больше половины обращений за токеном по учётным данным клиента отвергнуто"
+
+        - alert: KanameClientTokenIssuanceBroken
+          # Отказы НАШЕЙ стороны: реестр, склад однократности, подписант.
+          expr: |
+            sum(increase(kaname_client_token_outcomes_total{outcome=~"registry-unavailable|replay-store-unavailable|issuance-failed"}[10m])) > 0
+          for: 5m
+          annotations:
+            summary: "выдача токенов по учётным данным клиента отказывает на НАШЕЙ стороне"
+
         - alert: KanameRPCErrorRate
           expr: |
             sum(rate(kacho_grpc_server_handled_total{grpc_code!="OK"}[5m]))
