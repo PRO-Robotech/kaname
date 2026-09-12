@@ -46,6 +46,11 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 RC_UNMET=75
 
+# Бюджет ожидания готовности службы — ЧИСЛОМ попыток по секунде. Ручка нужна
+# самопроверке ниже: она доказывает исход «слушатель не появился», а шестьдесят
+# секунд ожидания там были бы платой за уже известный ответ. Умолчание прежнее.
+SERVICE_TRIES="${KANAME_STAND_SERVICE_TRIES:-60}"
+
 PG_NAME="${KANAME_STAND_PG_NAME:-kaname-stand-pg}"
 PG_PORT="${KANAME_STAND_PG_PORT:-15432}"
 PG_IMAGE="${KANAME_STAND_PG_IMAGE:-postgres:16-alpine}"
@@ -236,7 +241,7 @@ start_service() {
   nohup "$BIN/kaname" > "$RUNDIR/kaname.log" 2>&1 &
   echo $! > "$RUNDIR/kaname.pid"
   local i alive
-  for i in $(seq 1 60); do
+  for i in $(seq 1 "$SERVICE_TRIES"); do
     alive=0; kill -0 "$(cat "$RUNDIR/kaname.pid")" 2>/dev/null && alive=1
     if [ "$alive" -eq 0 ]; then
       # ОТКАЗ СТАРТА — НАХОДКА, а не расписание: страж посадки назвал причину, и
@@ -246,23 +251,50 @@ start_service() {
       exit 1
     fi
     if listeners_up; then
-      say "служба поднята: все восемь слушателей отвечают, попытка $i"
+      say "служба поднята: все $(ports_count) слушателей отвечают, попытка $i"
       return 0
     fi
     sleep 1
   done
-  fail "служба жива, но за 60 с подняла не все слушатели"
+  fail "служба жива, но за $SERVICE_TRIES с подняла не все слушатели"
   listeners_report >&2
   exit 1
 }
 
-PORTS="9090 9091 9092 9095 9096 9097 9098 9099"
+# Порты собственных слушателей службы. Перечень — ручка, потому что самопроверка
+# ниже подставляет свою пару: судить готовность на восьми боевых номерах значило бы
+# мерить, свободны ли они на этой машине, а не различает ли скрипт исходы.
+PORTS="${KANAME_STAND_PORTS:-9090 9091 9092 9095 9096 9097 9098 9099}"
 
+# Счёт слушателей ВЫВОДИТСЯ из перечня: выписанное число разошлось бы с ним молча,
+# и сообщение об успехе стало бы утверждать о стенде неправду.
+ports_count() { set -- $PORTS; printf '%s' "$#"; }
+
+# Закрывать fd 3 здесь НЕЧЕГО и НЕЛЬЗЯ, и второе важнее первого.
+#
+# Нечего: проба порта идёт в ПОДОБОЛОЧКЕ `( … )`, поэтому дескриптор закрывается
+# вместе с ней, а в этой оболочке он не открывался ни разу.
+#
+# Нельзя: `exec` без команды применяет свои перенаправления к текущей оболочке
+# НАВСЕГДА. Стоявший здесь `exec 3<&- 2>/dev/null` не закрывал дескриптор (его не
+# было), а ГЛУШИЛ stderr всего скрипта — начиная с той секунды, когда ответил
+# ПЕРВЫЙ слушатель. Дальше `fail`, `unmet`, `listeners_report >&2`, `tail … >&2` и
+# `docker logs … >&2` уходили в пустоту.
+#
+# Цена измерена, и она ровно в том исходе, ради которого этот скрипт написан:
+# «служба жива, но подняла не все слушатели» возвращало КОД 1 и НИ ОДНОГО СЛОВА о
+# причине, а перечень портов с недостающим не печатался вовсе. Читатель получал
+# находку о дереве без её предмета. Отказ до первого слушателя (страж посадки
+# отверг старт) при этом печатался — там `|| return 1` срабатывал раньше, — поэтому
+# дефект прятался ровно за той половиной, которая работала.
+#
+# Найдено самопроверкой этого файла (ось «слушатель не появился»): проба назвала
+# код верным, а сообщение пустым. Чтением не находится — `2>/dev/null` на строке
+# закрытия дескриптора выглядит подавлением жалобы самого закрытия.
 listeners_up() {
   local p
   for p in $PORTS; do
     (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null || return 1
-    exec 3<&- 2>/dev/null
   done
   return 0
 }
@@ -270,7 +302,7 @@ listeners_up() {
 listeners_report() {
   local p
   for p in $PORTS; do
-    if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then exec 3<&-; printf '  :%s слушает\n' "$p"
+    if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then printf '  :%s слушает\n' "$p"
     else printf '  :%s НЕ слушает\n' "$p"; fi
   done
 }
@@ -283,6 +315,290 @@ down() {
   command -v docker >/dev/null 2>&1 && docker rm -f "$PG_NAME" >/dev/null 2>&1
   say "стенд снесён"
 }
+
+# --- самопроверка: доказательство инъекцией в обе стороны ---------------------
+#
+# Живёт ФЛАГОМ этого же файла, а не соседним: отдельный файл в перечень шагов
+# конвейера не попал бы сам, то есть не исполнялся бы никогда. Форма — та же, что
+# у `gosec-gate.sh` и `classify-integration-outcome.sh`: подставной мир на пробу,
+# ожидаемый код, законный близнец рядом с инъекцией, перепись в конце и код 2 на
+# пустом обходе.
+#
+# ПРЕДМЕТ САМОПРОВЕРКИ — РАЗЛИЧЕНИЕ, А НЕ ПОДЪЁМ. Она не поднимает ни базы, ни
+# службы и НЕ ТРЕБУЕТ docker: требуй она движка — молчала бы ровно на той машине,
+# где её вердикт и нужен, то есть сама стала бы тем третьим исходом, который этот
+# скрипт учит отличать. Подставной каталог инструментов существует затем, чтобы
+# «средство есть» не зависело от того, стоит ли docker на машине: `need_tool`
+# спрашивает НАЛИЧИЕ, и подложный файл отвечает на этот вопрос полностью.
+#
+# ПУТАНИЦА ЗДЕСЬ ДВУСТОРОННЯЯ, поэтому каждая проба утверждает КОД И ТЕКСТ сразу:
+# 75, выданный за отказ стража посадки, ПРЯЧЕТ дефект — служба не поднялась, а
+# прогон говорит «условие не создано» и никого не роняет; 1, выданный за чужую
+# сеть, объявляет дефектом дерева расписание — и такое красное перестают читать.
+# Отсюда запрет на слово-близнец: у исхода 75 в выводе не должно быть «НАХОДКА»,
+# у исхода 1 — «УСЛОВИЕ НЕ СОЗДАНО». Кода без текста мало: перепутать классы можно
+# и сохранив код.
+if [ "${1:-}" = "--self-test" ]; then
+    # Подставной слушатель — единственное, что самопроверке нужно извне. Требование
+    # честное: тремя соседними самопроверками этого процесса python3 уже нужен, и
+    # его отсутствие здесь — НЕ зелёное, а отсутствие доказательства.
+    PY="$(command -v python3 2>/dev/null)"
+    if [ -z "$PY" ]; then
+        echo "ОТКАЗ: python3 недоступен — подставного слушателя не поднять." >&2
+        echo "Ни одной пробы не исполнено, доказательства нет. Это не зелёное." >&2
+        exit 2
+    fi
+
+    TMP="$(mktemp -d)"
+    stop_fakes() {
+        local f
+        for f in "$TMP"/run-*/kaname.pid; do
+            [ -f "$f" ] || continue
+            kill "$(cat "$f")" 2>/dev/null
+            rm -f "$f"
+        done
+        return 0
+    }
+    trap 'stop_fakes; rm -rf "$TMP"' EXIT
+
+    # Порт освобождается АСИНХРОННО: следующая проба, взяв тот же номер слишком
+    # рано, померила бы чужой — ещё живой — слушатель и позеленела бы не на своём.
+    wait_port_free() {
+        local port="$1" i
+        for i in $(seq 1 100); do
+            ( exec 3<>"/dev/tcp/127.0.0.1/$port" ) 2>/dev/null || return 0
+            sleep 0.1
+        done
+        return 1
+    }
+
+    mkdir -p "$TMP/empty" "$TMP/toolbin" "$TMP/gobin-ok" "$TMP/gobin-fail" \
+             "$TMP/mig-conn" "$TMP/mig-guard" "$TMP/mig-ok" "$TMP/build-bin" \
+             "$TMP/svc-up" "$TMP/svc-guard" "$TMP/chain-ok" "$TMP/chain-guard"
+
+    # Подложные средства подъёма: их НИКОГДА не исполняют, `need_tool` смотрит лишь
+    # наличие. Поэтому ни один прогон самопроверки не трогает настоящий docker.
+    printf '#!/bin/sh\nexit 0\n' > "$TMP/toolbin/docker"
+    printf '#!/bin/sh\nexit 0\n' > "$TMP/toolbin/go"
+
+    # Подложный `go`, который СОБИРАЕТ: понимает `build -o <путь>` и создаёт файл.
+    cat > "$TMP/gobin-ok/go" <<'EOF'
+#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-o" ]; then out="$2"; shift; fi
+  shift
+done
+[ -n "$out" ] && { : > "$out"; chmod +x "$out"; }
+exit 0
+EOF
+    # …и подложный `go`, который НЕ собирает. Один факт против близнеца выше.
+    cat > "$TMP/gobin-fail/go" <<'EOF'
+#!/bin/sh
+echo 'internal/apps/kaname/api/x.go:12:5: undefined: Foo' >&2
+exit 1
+EOF
+
+    # Накатчик, не дотянувшийся до базы: жалоба на СОЕДИНЕНИЕ.
+    cat > "$TMP/mig-conn/kaname-migrator" <<'EOF'
+#!/bin/sh
+echo 'dial tcp 127.0.0.1:15432: connect: connection refused' >&2
+exit 1
+EOF
+    # Накатчик, отвергнутый ПРОВЕРКОЙ НАСТРОЕК: тот же ненулевой код, другой
+    # адресат жалобы. Это и есть один факт, различающий 75 и 1 на этом месте.
+    cat > "$TMP/mig-guard/kaname-migrator" <<'EOF'
+#!/bin/sh
+echo 'config: authn.trusted-forwarder-sans must not be empty in production mode' >&2
+exit 1
+EOF
+    cat > "$TMP/mig-ok/kaname-migrator" <<'EOF'
+#!/bin/sh
+echo 'OK    0001_init.sql'
+echo 'goose: no migrations to run'
+exit 0
+EOF
+    cp "$TMP/mig-ok/kaname-migrator" "$TMP/chain-ok/kaname-migrator"
+    cp "$TMP/mig-ok/kaname-migrator" "$TMP/chain-guard/kaname-migrator"
+
+    # Подставная служба, ОТВЕРГНУТАЯ стражем посадки: называет причину и уходит.
+    cat > "$TMP/svc-guard/kaname" <<'EOF'
+#!/bin/sh
+echo 'boot refused: authn.trusted-forwarder-sans (env KANAME_AUTHN__TRUSTED_FORWARDER_SANS) is empty' >&2
+exit 1
+EOF
+    cp "$TMP/svc-guard/kaname" "$TMP/chain-guard/kaname"
+
+    # Подставная служба, КОТОРАЯ ПОДНЯЛАСЬ: держит ровно те порты, что ей назвали.
+    # Один и тот же файл служит и близнецом «все слушатели на месте», и инъекцией
+    # «слушатель не появился» — различает их ТОЛЬКО перечень связываемых портов.
+    cat > "$TMP/svc-up/kaname" <<PYEOF
+#!$PY
+import os
+import socket
+import time
+
+ports = os.environ.get("SELFTEST_BIND_PORTS", "").split()
+held = []
+for port in ports:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", int(port)))
+    sock.listen(16)
+    held.append(sock)
+print("подставная служба слушает: " + " ".join(ports), flush=True)
+while True:
+    time.sleep(1)
+PYEOF
+    cp "$TMP/svc-up/kaname" "$TMP/chain-ok/kaname"
+
+    chmod +x "$TMP/toolbin/docker" "$TMP/toolbin/go" "$TMP/gobin-ok/go" \
+             "$TMP/gobin-fail/go" "$TMP/mig-conn/kaname-migrator" \
+             "$TMP/mig-guard/kaname-migrator" "$TMP/mig-ok/kaname-migrator" \
+             "$TMP/chain-ok/kaname-migrator" "$TMP/chain-guard/kaname-migrator" \
+             "$TMP/svc-guard/kaname" "$TMP/chain-guard/kaname" \
+             "$TMP/svc-up/kaname" "$TMP/chain-ok/kaname"
+
+    # Порты берутся СВОБОДНЫМИ у ядра, а не выписываются: судить готовность на
+    # восьми боевых номерах значило бы мерить, заняты ли они на этой машине.
+    SELFTEST_FREE_PORTS="$("$PY" -c '
+import socket
+held = []
+for _ in range(4):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    held.append(sock)
+print(" ".join(str(s.getsockname()[1]) for s in held))
+')"
+    read -r PORT_A PORT_B PORT_C PORT_D <<EOF
+$SELFTEST_FREE_PORTS
+EOF
+    PAIR_SVC="$PORT_A $PORT_B"
+    PAIR_CHAIN="$PORT_C $PORT_D"
+
+    # ─── миры проб: каждый в СВОЁМ подоболочке, потому что различающие ветки
+    # скрипта завершаются `exit`, и вызванные напрямую унесли бы саму самопроверку.
+    world_docker_missing()  { ( PATH="$TMP/empty";   need_tool docker ); }
+    world_docker_present()  { ( PATH="$TMP/toolbin"; need_tool docker ); }
+    world_go_missing()      { ( PATH="$TMP/empty";   need_tool go ); }
+
+    world_migrate_conn()    { ( BIN="$TMP/mig-conn";  migrate ); }
+    world_migrate_guard()   { ( BIN="$TMP/mig-guard"; migrate ); }
+    world_migrate_ok()      { ( BIN="$TMP/mig-ok";    migrate ); }
+
+    world_build_no_go()     { ( PATH="$TMP/empty";               BIN="$TMP/build-bin"; build_binaries ); }
+    world_build_fail()      { ( PATH="$TMP/gobin-fail:$PATH";    BIN="$TMP/build-bin"; build_binaries ); }
+    world_build_ok()        { ( PATH="$TMP/gobin-ok:$PATH";      BIN="$TMP/build-bin"; build_binaries ); }
+
+    world_service_up() {
+        ( BIN="$TMP/svc-up"; RUNDIR="$TMP/run-svc"; PORTS="$PAIR_SVC"
+          SERVICE_TRIES=20; export SELFTEST_BIND_PORTS="$PAIR_SVC"
+          start_service )
+    }
+    world_service_partial() {
+        ( BIN="$TMP/svc-up"; RUNDIR="$TMP/run-svc"; PORTS="$PAIR_SVC"
+          SERVICE_TRIES=3;  export SELFTEST_BIND_PORTS="$PORT_A"
+          start_service )
+    }
+    world_service_guard() {
+        ( BIN="$TMP/svc-guard"; RUNDIR="$TMP/run-svc"; PORTS="$PAIR_SVC"
+          SERVICE_TRIES=5;  export SELFTEST_BIND_PORTS=""
+          start_service )
+    }
+    world_chain_up() {
+        ( PATH="$TMP/toolbin:$PATH"; BIN="$TMP/chain-ok"; RUNDIR="$TMP/run-chain"
+          PORTS="$PAIR_CHAIN"; SERVICE_TRIES=20
+          export SELFTEST_BIND_PORTS="$PAIR_CHAIN"
+          need_tool docker; need_tool go; migrate; start_service )
+    }
+    world_chain_guard() {
+        ( PATH="$TMP/toolbin:$PATH"; BIN="$TMP/chain-guard"; RUNDIR="$TMP/run-chain"
+          PORTS="$PAIR_CHAIN"; SERVICE_TRIES=5
+          export SELFTEST_BIND_PORTS=""
+          need_tool docker; need_tool go; migrate; start_service )
+    }
+
+    probes=0; failed=0; checks=0
+    OUT="$TMP/out"
+
+    # assert <ожидаемый-код> <имя> <мир> <обязательная|-> <обязательная|-> <запрещённая|->
+    assert() {
+        local want="$1" name="$2" world="$3" must_one="$4" must_two="$5" forbid="$6"
+        local got=0 bad=""
+        probes=$((probes + 1))
+        : > "$OUT"
+        "$world" > "$OUT" 2>&1 || got=$?
+        checks=$((checks + 1))
+        [ "$got" -eq "$want" ] || bad="ждали код $want, получили $got"
+        local m
+        for m in "$must_one" "$must_two"; do
+            [ "$m" = "-" ] && continue
+            checks=$((checks + 1))
+            grep -qF -- "$m" "$OUT" || bad="${bad:+$bad; }вывод не называет «$m»"
+        done
+        if [ "$forbid" != "-" ]; then
+            checks=$((checks + 1))
+            if grep -qF -- "$forbid" "$OUT"; then
+                bad="${bad:+$bad; }вывод несёт слово ДРУГОГО исхода «$forbid»"
+            fi
+        fi
+        if [ -n "$bad" ]; then
+            echo "  ПРОВАЛ $name — $bad" >&2
+            sed 's/^/       | /' "$OUT" >&2
+            failed=$((failed + 1))
+            return 0
+        fi
+        echo "  ok   $name (код $got)"
+    }
+
+    echo "=== стенд: различение «условие не создано» (75) и «находка о дереве» (1) ==="
+
+    echo "--- ось 1: средства подъёма нет — 75, и сообщение называет СРЕДСТВО"
+    # (−) ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ первым: без него всё нижеследующее зеленело бы на
+    # проверке, которая отвечает 75 всегда.
+    assert 0  "(−) средство есть — 75 не выдаётся"                 world_docker_present "-" "-" "УСЛОВИЕ НЕ СОЗДАНО"
+    # (+) один факт против близнеца: того же средства на PATH нет.
+    assert 75 "(+) docker недоступен — 75, названо средство"        world_docker_missing "инструмента нет: docker" "стенд не поднимался" "НАХОДКА"
+    # (+) ДРУГОЕ средство обязано дать ДРУГОЕ имя: иначе «называет средство» было
+    # бы неотличимо от постоянной строки.
+    assert 75 "(+) иное средство — то же 75, но имя иное"           world_go_missing     "инструмента нет: go" "-" "НАХОДКА"
+
+    echo "--- ось 2: накатчик отказал — адресат жалобы решает, условие это или находка"
+    assert 0  "(−) накат прошёл — 0"                               world_migrate_ok     "миграции накачены" "-" "УСЛОВИЕ НЕ СОЗДАНО"
+    assert 75 "(+) жалоба на СОЕДИНЕНИЕ — 75, не дефект дерева"     world_migrate_conn   "накатчик не дотянулся до базы" "-" "НАХОДКА"
+    assert 1  "(+) жалоба на НАСТРОЙКИ — 1, и причина названа"      world_migrate_guard  "накатчик отказал" "trusted-forwarder-sans" "УСЛОВИЕ НЕ СОЗДАНО"
+
+    echo "--- ось 3: сборка — отсутствие средства и отказ сборки НЕ один исход"
+    assert 0  "(−) сборка прошла — 0"                              world_build_ok       "собрано" "-" "УСЛОВИЕ НЕ СОЗДАНО"
+    assert 1  "(+) сборка отказала — 1, а не 75"                    world_build_fail     "сборка kaname не прошла" "-" "УСЛОВИЕ НЕ СОЗДАНО"
+    assert 75 "(+) средства сборки нет вовсе — 75, а не 1"          world_build_no_go    "инструмента нет: go" "-" "НАХОДКА"
+
+    echo "--- ось 4: служба не поднялась — 1, и сказано ЧТО именно не сошлось"
+    assert 0  "(−) все слушатели на месте — 0"                     world_service_up     "служба поднята" "все 2 слушателей отвечают" "УСЛОВИЕ НЕ СОЗДАНО"
+    stop_fakes; wait_port_free "$PORT_A"; wait_port_free "$PORT_B"
+    # (+) один факт против близнеца выше: тот же файл, те же порты, связан ТОЛЬКО
+    # первый. Ожидание готовности не сходится — и это вердикт о дереве.
+    assert 1  "(+) слушатель не появился — 1, назван недостающий"   world_service_partial "подняла не все слушатели" ":$PORT_B НЕ слушает" "УСЛОВИЕ НЕ СОЗДАНО"
+    stop_fakes; wait_port_free "$PORT_A"
+    # (+) другой факт: процесс ушёл сам, назвав причину. Она обязана доехать до
+    # читателя дословно — «не смогли поднять» посылало бы его искать наугад.
+    assert 1  "(+) страж посадки отказал — 1, причина дословно"     world_service_guard  "служба не поднялась" "KANAME_AUTHN__TRUSTED_FORWARDER_SANS" "УСЛОВИЕ НЕ СОЗДАНО"
+
+    echo "--- ось 5: обратный контроль — в работающем мире 75 не выдаётся НИ ПРИ ЧЁМ"
+    # Мир целиком: средства есть, накат прошёл, служба поднялась. Если бы 75 был
+    # запасным исходом «что-то не вышло», он всплыл бы здесь.
+    assert 0  "(−) средства есть и служба поднялась — 0, не 75"     world_chain_up       "миграции накачены" "служба поднята" "УСЛОВИЕ НЕ СОЗДАНО"
+    stop_fakes; wait_port_free "$PORT_C"; wait_port_free "$PORT_D"
+    # (+) тот же мир, один факт: служба отвергнута стражем. Средства на месте —
+    # значит 75 здесь был бы маской настоящего отказа.
+    assert 1  "(+) тот же мир, служба отвергнута — 1, а не 75"      world_chain_guard    "служба не поднялась" "KANAME_AUTHN__TRUSTED_FORWARDER_SANS" "УСЛОВИЕ НЕ СОЗДАНО"
+
+    echo
+    echo "stand-own --self-test: проб исполнено $probes, утверждений $checks, провалов $failed"
+    [ "$probes" -eq 0 ] && { echo "ПРОВАЛ: ни одной пробы не исполнено" >&2; exit 2; }
+    [ "$failed" -gt 0 ] && exit 1
+    exit 0
+fi
 
 case "${1:-}" in
   up)
@@ -301,7 +617,7 @@ case "${1:-}" in
     ;;
   down) down; exit 0 ;;
   *)
-    printf 'использование: %s {up|env|down}\n' "$0" >&2
+    printf 'использование: %s {up|env|down|--self-test}\n' "$0" >&2
     exit 2
     ;;
 esac
