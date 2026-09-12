@@ -34,7 +34,7 @@
 # ПАДАЕТ и отчётов не оставляет, поэтому авторитетный гейт докладывает `(no-report)`.
 # «Не смогли создать условие» — открытый долг, а не зелёная суита.
 #
-# Запуск: cwd = services/iam/tests/newman
+# Запуск: cwd = tests/newman
 #   [SETUP_NS=kacho] [SKEW_S=30] [EXPIRED_BEARER_TTL_S=20] [DELAY=…] ./scripts/run-expired-bearer.sh
 #   DRY_PROBE=1 ./scripts/run-expired-bearer.sh   — самопроверка пути БЕЗ ожидания:
 #       доказывает, что выпуск и проба края живые и что проба читает настоящий вердикт;

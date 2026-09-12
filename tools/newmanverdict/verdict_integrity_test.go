@@ -39,6 +39,7 @@ package newmanverdict
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -67,9 +68,45 @@ const verdictScript = "tests/newman/scripts/assert-suites-green.sh"
 // codeLines — строки скрипта БЕЗ комментариев и без пустых. Разбор грубый и этого
 // достаточно: shell-комментарий начинается с `#`, а внутристрочный `… # …` нас не
 // интересует — искомые конструкции стоят самостоятельными стейтментами.
+// verdictScriptPath — путь к вердиктному гейту, и порядок здесь НЕСУЩИЙ.
+//
+// ПЕРВЫМ спрашивается СОБСТВЕННОЕ дерево модуля, и только потом — дерево
+// платформы. Причина не в удобстве: вердиктный слой ВЕНДОРЕН в этот репозиторий
+// (`tests/newman/vendor-provenance.json`), потому что подъём за общим слоем из
+// отдельного репозитория корня монорепо не достаёт, и без слоя прогонщик набора
+// отказывает первой строкой. То есть файл теперь ЧАСТЬ поставки модуля.
+//
+// Детектор посадки решает по ФОРМЕ ПУТИ («лежит ли он под `services/iam/`»), а не
+// по наличию файла. Форма верна для контрактов и зонтичного чарта — их тут нет и
+// не будет. Для этого файла она стала ЛОЖНОЙ: он здесь есть, а гейт объявлял
+// «условие не создано» и пропускался. Пропуск, чья предпосылка перестала быть
+// верной, — не третий исход, а слепота, и заметить её по выводу нельзя: она
+// выглядит ровно как честный пропуск у арендатора.
+//
+// Обратный порядок оставил бы гейт пропущенным в обеих посадках сразу.
+func verdictScriptPath(t *testing.T) string {
+	t.Helper()
+	// Подъём начинается с АБСОЛЮТНОГО каталога: `filepath.Dir(".")` равен ".",
+	// поэтому подъём от относительного пути заканчивается на первом же шаге и
+	// отвечает «маркер не найден» — то есть ветвь ниже исполнялась бы всегда.
+	if cwd, err := os.Getwd(); err == nil {
+		if root, err := platformtree.ModuleRootFrom(cwd); err == nil {
+			if own := filepath.Join(root, verdictScript); fileExists(own) {
+				return own
+			}
+		}
+	}
+	return platformtree.RequirePath(t, verdictScript)
+}
+
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
+}
+
 func codeLines(t *testing.T) []string {
 	t.Helper()
-	body, err := os.ReadFile(platformtree.RequirePath(t, verdictScript))
+	body, err := os.ReadFile(verdictScriptPath(t))
 	if err != nil {
 		t.Fatalf("read %s: %v", verdictScript, err)
 	}

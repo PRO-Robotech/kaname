@@ -28,7 +28,7 @@
 # `authz-failclosed(no-report)` и роняет прогон. «Не смогли создать условие» —
 # это открытый долг, а не зелёная суита.
 #
-# Запуск: cwd = services/iam/tests/newman
+# Запуск: cwd = tests/newman
 #   [SETUP_NS=kacho] [GW_PORT=18080] ./scripts/run-failclosed.sh
 
 set -euo pipefail

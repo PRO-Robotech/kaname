@@ -91,7 +91,7 @@ REPO_ROOT = ROOT.parents[3]
 # Служба несёт СВОЙ модуль, поэтому путь чеканки называется ОТНОСИТЕЛЬНО его
 # корня, а go зовётся с `-C`. Прежняя форма — путь от корня монорепо — отказывала
 # на каждом прогоне: «main module (github.com/PRO-Robotech/kacho) does not
-# contain package …/services/iam/tests/newman/scripts/credsecretmint», и отказ
+# contain package …/tests/newman/scripts/credsecretmint», и отказ
 # приходил ПРЕДПОСЫЛКОЙ, то есть выглядел несозданным условием, а не сломанным
 # путём.
 MINT_MODULE_DIR = REPO_ROOT / "services" / "iam"
