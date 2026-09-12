@@ -277,6 +277,22 @@ def _mk(tmp: pathlib.Path, cols: dict[str, str], tmpl: dict[str, str]) -> pathli
     return newman
 
 
+def _wf(tmp: pathlib.Path, runs: list[str]) -> pathlib.Path:
+    """Синтетическое объявление конвейера: по шагу на каждую гоняемую коллекцию."""
+    wf = tmp / ".github" / "workflows"
+    wf.mkdir(parents=True, exist_ok=True)
+    steps = "".join(
+        f"      - name: коллекция {r} гоняется\n"
+        f"        run: |\n"
+        f"          cd tests/newman\n"
+        f"          ./scripts/run.sh --service {r}\n"
+        for r in runs) or "      - run: echo нечего\n"
+    (wf / "e2e-newman.yml").write_text(
+        "name: proof\non: [push]\njobs:\n  stand:\n    steps:\n" + steps,
+        encoding="utf-8")
+    return wf
+
+
 def self_test() -> int:
     import io
     import contextlib
@@ -366,6 +382,117 @@ def self_test() -> int:
         _c("молчащий посев не снимает препятствия", "НЕ гоняется здесь: 1" in out,
            out[:400])
         _c("и назван отдельной строкой", "НЕ НАЗВАЛ СВОИХ КЛЮЧЕЙ" in out, out[:600])
+
+        # ── Ось 3г: ПОСЕВ СНИМАЕТ ПРЕПЯТСТВИЕ ТОЛЬКО НА СВОЕЙ ПОВЕРХНОСТИ ───
+        #
+        # Совпадение ИМЕНИ ключа через два разных стенда — не производство ключа.
+        # Посев этого дерева куёт `jwtAccountAdminA` на СОБСТВЕННОМ фронте службы;
+        # коллекция КРАЯ читает ключ того же имени, но её предъявителя производит
+        # чужой посев чужого стенда. Различие ровно в поверхности, и оно обязано
+        # двигать коллекцию между половинами переписи.
+        for lane, surface_decl, edge_runs in (
+                ("own-surface", "служба (собственный REST-фронт)", False),
+                ("edge-surface", "край платформы", True)):
+            base = tmp / f"surface-{lane}"
+            edge_seeded = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                           '"{{baseUrl}}/iam/v1/x"}},'
+                           '"event":[{"listen":"test","script":{"exec":['
+                           '"pm.environment.get(\'jwtAccountAdminA\')"]}}]}]}')
+            t3g = _mk(base, {"edge-seeded": edge_seeded},
+                      {"baseUrl": "http://edge", "jwtAccountAdminA": "", "runId": ""})
+            fixtures = t3g.parent / "authz-fixtures"
+            fixtures.mkdir(parents=True, exist_ok=True)
+            (fixtures / "seed_probe.py").write_text(
+                "import sys\n"
+                "if '--minted-keys' in sys.argv:\n"
+                "    print('jwtAccountAdminA')\n"
+                "elif '--minted-surface' in sys.argv:\n"
+                f"    print({surface_decl!r})\n",
+                encoding="utf-8")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                run(t3g, workflows=_wf(base, runs=["edge-seeded"]))
+            out = buf.getvalue()
+            _c(f"посев поверхности «{surface_decl}»: препятствие посева у коллекции "
+               f"КРАЯ {'снято' if edge_runs else 'ОСТАЛОСЬ'}",
+               ("машинный посев" in out) != edge_runs, out[:600])
+
+        # Ось 3д: посев, не объявивший ПОВЕРХНОСТЬ, в счёт не идёт и назван.
+        # Fail-closed: «ключи назвал, поверхность нет» и «поверхность края» ведут
+        # читателя в разные места, а молча зачесть — значит вернуть совпадение имён.
+        base = tmp / "surface-mute"
+        own_seeded_edge = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                           '"{{ownRestBaseUrl}}/x"}},'
+                           '"event":[{"listen":"test","script":{"exec":['
+                           '"pm.environment.get(\'jwtAccountAdminA\')"]}}]}]}')
+        t3d = _mk(base, {"own-seeded": own_seeded_edge},
+                  {"ownRestBaseUrl": "https://localhost:9098",
+                   "jwtAccountAdminA": "", "runId": ""})
+        fx = t3d.parent / "authz-fixtures"
+        fx.mkdir(parents=True, exist_ok=True)
+        (fx / "seed_probe.py").write_text(
+            "import sys\n"
+            "if '--minted-keys' in sys.argv:\n"
+            "    print('jwtAccountAdminA')\n",
+            encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(t3d, workflows=_wf(base, runs=["own-seeded"]))
+        out = buf.getvalue()
+        _c("посев без объявленной поверхности не снимает препятствия",
+           "машинный посев" in out, out[:600])
+        _c("и назван отдельной строкой", "НЕ НАЗВАЛ СВОЕЙ ПОВЕРХНОСТИ" in out, out[:700])
+
+        # ── Ось 6: «ГОНЯЕТСЯ» ЧИТАЕТСЯ ИЗ ОБЪЯВЛЕНИЯ КОНВЕЙЕРА ──────────────
+        #
+        # Величина обязана измерять то, что называет. Прежняя редакция печатала
+        # «гоняется здесь: N», не читая конвейер ВОВСЕ: снятие шага прогона из
+        # `e2e-newman.yml` её не меняло, то есть она измеряла «ничто не мешает
+        # гонять». Ось доказывает обратное ПАРОЙ: тот же тракт, шаг снят — и
+        # коллекция уезжает в другую половину переписи.
+        clean = ('{"item":[{"name":"s","request":{"url":{"raw":"{{ownRestBaseUrl}}/x"}}}]}')
+        for lane, runs, expect in (("declared", ["own-only"], 1), ("removed", [], 0)):
+            base = tmp / f"pipeline-{lane}"
+            t6 = _mk(base, {"own-only": clean},
+                     {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = run(t6, workflows=_wf(base, runs=runs))
+            out = buf.getvalue()
+            _c(f"шаг прогона {'объявлен' if runs else 'СНЯТ'} — гоняется {expect}",
+               f"гоняется здесь:    {expect}" in out, out[:500])
+            if not runs:
+                _c("и причина названа отсутствием шага конвейера",
+                   "ни один шаг конвейера" in out, out[:700])
+
+        # Ось 6б: `--service` В КОММЕНТАРИИ не считается шагом. Разбор читает
+        # разобранный YAML; проверка по подстроке краснела бы на объяснении.
+        base = tmp / "pipeline-comment"
+        t6b = _mk(base, {"own-only": clean},
+                  {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+        wf = _wf(base, runs=[])
+        (wf / "e2e-newman.yml").write_text(
+            "name: proof\non: [push]\njobs:\n  stand:\n    steps:\n"
+            "      # ./scripts/run.sh --service own-only  (когда-то гонялось здесь)\n"
+            "      - run: echo нечего\n", encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(t6b, workflows=wf)
+        out = buf.getvalue()
+        _c("`--service` только в комментарии — НЕ шаг прогона",
+           "гоняется здесь:    0" in out, out[:500])
+
+        # Ось 6в: объявлений конвейера НЕТ — третий исход, а не «гоняется 0».
+        base = tmp / "pipeline-absent"
+        t6c = _mk(base, {"own-only": clean},
+                  {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = run(t6c, workflows=base / "нет-такого-каталога")
+        _c("каталога объявлений нет — код 75, а НЕ 0 и не 1", rc == 75,
+           buf.getvalue()[-300:])
+        _c("и текст называет несозданное условие",
+           "УСЛОВИЕ НЕ СОЗДАНО" in buf.getvalue(), buf.getvalue()[-300:])
 
         # Ось 4: коллекция края попадает в «не гоняется» с причиной про край.
         edge = ('{"item":[{"name":"s","request":{"url":{"raw":"{{baseUrl}}/iam/v1/x"}}}]}')

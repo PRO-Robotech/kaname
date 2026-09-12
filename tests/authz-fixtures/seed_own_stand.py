@@ -788,6 +788,25 @@ def self_test() -> int:
     except KeyError:
         _c("ключ, объявленный и НЕ добытый, роняет запись", True)
 
+    # Ось 1б: ПОСЕВ ОБЪЯВЛЯЕТ ПОВЕРХНОСТЬ, ДЛЯ КОТОРОЙ КУЁТ.
+    #
+    # Перечня ключей НЕДОСТАТОЧНО, и это замер: восемь коллекций потеряли
+    # препятствие «нужен машинный посев» от одного этого посева, и СЕМЬ из восьми
+    # — коллекции КРАЯ платформы, чьих предъявителей производит чужой посев чужого
+    # стенда. Совпало только ИМЯ ключа. Поэтому посев называет и поверхность, а
+    # перепись зачитывает его ключи ТОЛЬКО коллекциям этой поверхности.
+    proc = subprocess.run(
+        [sys.executable, str(pathlib.Path(__file__).resolve()), "--minted-surface"],
+        capture_output=True, text=True, timeout=60)
+    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+    _c("`--minted-surface` отвечает кодом 0 и ровно одной непустой строкой",
+       proc.returncode == 0 and len(lines) == 1,
+       f"код {proc.returncode}, строк {len(lines)}: {lines!r} "
+       f"{(proc.stderr or '')[-200:]!r}")
+    _c("и названная поверхность — собственный фронт службы, а не край платформы",
+       bool(lines) and lines[0] == MINTED_SURFACE,
+       f"объявлено {lines[0] if lines else None!r}, ожидалось {MINTED_SURFACE!r}")
+
     # Ось 2: «нет слушателя» — код 75, а НЕ находка и не ноль.
     free = socket.socket()
     free.bind(("127.0.0.1", 0))
@@ -807,6 +826,44 @@ def self_test() -> int:
        "УСЛОВИЕ НЕ СОЗДАНО" in (proc.stdout + proc.stderr)
        and "НАХОДКА" not in (proc.stdout + proc.stderr),
        (proc.stdout + proc.stderr)[-300:])
+
+    # Ось 2б: РАСХОЖДЕНИЕ СЕКРЕТА ХУКА — «условие не создано», а НЕ находка.
+    #
+    # Отказ хука един намеренно: `writeHookAuthRefusal` отвечает побайтово
+    # одинаково и на «заголовка нет», и на «величина не та» — различимый снаружи
+    # отказ был бы ОРАКУЛОМ по стерегомому секрету. Отсюда следствие для посева:
+    # из 401 `invalid_hook_token` вердикт о дереве НЕ ВЫВОДИМ ни при каком чтении.
+    # Он означает ровно то, что секрет посева и секрет посадки — две копии одной
+    # величины — разошлись; это код 75, и конвейер обязан прочесть его как «нет
+    # вердикта», а не как дефект продукта.
+    #
+    # Законный близнец рядом и отличается ОДНИМ фактом: тот же не-200, но отказ НЕ
+    # про аутентификацию хука — это находка, и она обязана остаться находкой.
+    class _Hook:
+        def __init__(self, code, text):
+            self.code, self.text = code, text
+
+        def ask(self, url, **kw):
+            return self.code, self.text
+
+    for label, code, text, want in (
+            ("401 invalid_hook_token — УСЛОВИЕ НЕ СОЗДАНО (75), а не находка",
+             401, '{"error":"invalid_hook_token"}', Unmet),
+            ("500 hook_secret_not_configured — тоже условие не создано",
+             500, '{"error":"hook_secret_not_configured"}', Unmet),
+            ("409 при живом хуке — НАХОДКА (вердикт о дереве)",
+             409, '{"error":"user_already_exists"}', Finding),
+            ("200 — молчит", 200, "{}", None)):
+        try:
+            provision_identity(_Hook(code, text), "https://h", "s", "who@x")
+            got = None
+        except Unmet:
+            got = Unmet
+        except Finding:
+            got = Finding
+        _c(label, got is want,
+           f"ожидалось {want.__name__ if want else 'молчание'}, "
+           f"получено {got.__name__ if got else 'молчание'}")
 
     # Ось 3: успешный статус с ПУСТЫМ захватом — находка, а не проход.
     # Законный близнец рядом: тот же код, но захват на месте — молчит.
