@@ -21,10 +21,25 @@
 ПЕЧАТАЮТСЯ ОБЕ ВЕЛИЧИНЫ. «Гоняется здесь N» без «не гоняется M» скрывает ровно тот
 случай, ради которого перепись и делается.
 
+«ГОНЯЕТСЯ» ЧИТАЕТСЯ ИЗ ОБЪЯВЛЕНИЯ КОНВЕЙЕРА, А НЕ ВЫВОДИТСЯ ИЗ ОТСУТСТВИЯ
+ПРЕПЯТСТВИЙ. Прежняя редакция печатала «гоняется здесь: 1», не читая конвейер
+ВОВСЕ: снятие шага прогона из `.github/workflows/e2e-newman.yml` величину не
+меняло. То есть она утверждала «гоняется», а измеряла «ничто не мешает гонять» —
+две разные вещи, и расходятся они именно в том случае, ради которого перепись
+делается. Теперь у коллекции два независимых условия, и оба названы по каждой
+позиции: препятствия по дереву И шаг конвейера, который её гоняет.
+
+Объявление читается РАЗОБРАННЫМ (`yaml.safe_load`), а не подстрокой: имя
+коллекции встречается в комментариях объявления десятки раз, и проверка по
+подстроке считала бы собственное объяснение.
+
 ИСХОДЫ:
     0  — перепись напечатана (долг — не отказ: он именно объявляется);
     1  — перепись беспредметна: коллекций либо шаблона окружения нет, разбор дал
-         ноль. «Ноль находок» здесь означало бы «ноль прочитанного».
+         ноль. «Ноль находок» здесь означало бы «ноль прочитанного»;
+   75  — УСЛОВИЕ НЕ СОЗДАНО: объявлений конвейера не прочитано ни одного либо нет
+         разборщика YAML. Величина «гоняется» тогда не измерена, и печатать ноль
+         значило бы выдать несозданное условие за вердикт.
 
 САМОПРОВЕРКА — `--self-test`: синтетическое дерево, где коллекция БЕЗ препятствий
 обязана попасть в «гоняется», с препятствием — в «не гоняется», а пустой обход
@@ -37,10 +52,13 @@ import argparse
 import json
 import pathlib
 import re
+import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
+
+RC_UNMET = 75
 
 VAR_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}")
 GET_RE = re.compile(r"pm\.environment\.get\(\s*['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]")
@@ -96,39 +114,192 @@ def surface_of(text: str, keys: set[str]) -> str:
 
 
 def blockers(surface: str, keys: set[str], empty: set[str],
-             seed_present: bool) -> list[str]:
+             minted_by_surface: dict[str, set[str]],
+             runs: list[str] | None = None) -> list[str]:
+    """Препятствия коллекции. `minted` — ключи, которые посев дерева УМЕЕТ писать.
+
+    ПРЕДМЕТ СЧИТАЕТСЯ ПОКЛЮЧЕВО, А НЕ ОДНИМ ФЛАГОМ «посев есть». Флаг снимал
+    препятствие у ВСЕХ сразу: первый заведённый посев объявил бы посеянными и те
+    сорок коллекций, чьих удостоверений он не куёт, — и объявил бы молча. Разница
+    наблюдаема: у коллекции края остаётся и своё препятствие края, и непокрытые
+    ключи, а у собственной поверхности не остаётся ни одного.
+
+    СЛОВО «удостоверение» ЗДЕСЬ НЕ УПОТРЕБЛЯЕТСЯ, и это замер: из шести пустых
+    ключей единственной коллекции своей поверхности два (`ownRestBaseUrl`,
+    `ownInternalRestBaseUrl`) — АДРЕСА собственных фронтов, которые производит
+    сам стенд. Прежняя редакция называла удостоверениями все шесть.
+
+    КЛЮЧ ЗАЧИТЫВАЕТСЯ ТОЛЬКО СВОЕЙ ПОВЕРХНОСТИ, И ЭТО ЗАМЕР. Учёт по одному
+    перечню имён снял препятствие посева у ВОСЬМИ коллекций, из которых СЕМЬ —
+    коллекции КРАЯ платформы: их `jwtAccountAdmin*` производит чужой посев чужого
+    стенда, а совпало только ИМЯ ключа. Предъявитель, выкованный на собственном
+    фронте службы, краю не годится ничем — ни издателем, ни адресатом, ни
+    арендатором. Поэтому `minted_by_surface` — отображение «поверхность → ключи»,
+    и посев, своей поверхности не объявивший, не зачитывается НИКОМУ.
+    """
     out = []
+    if runs is not None and not runs:
+        out.append("ни один шаг конвейера её не гоняет "
+                   "(объявление читается разобранным YAML)")
     if surface == "край платформы":
         out.append("нужен край платформы (его производитель — чужой стенд)")
+    minted = minted_by_surface.get(surface, set())
     need = sorted(k for k in keys if k in empty and k != "runId")
     ceremony = [k for k in need if k.startswith(CEREMONY_PREFIXES)]
-    machine = [k for k in need if k not in ceremony]
+    machine = [k for k in need if k not in ceremony and k not in minted]
     if ceremony:
         out.append(f"нужен ЧЕЛОВЕЧЕСКИЙ предъявитель ({len(ceremony)}: "
                    f"{', '.join(ceremony[:3])}{'…' if len(ceremony) > 3 else ''})")
-    if machine and not seed_present:
-        out.append(f"нужен машинный посев ({len(machine)} удостоверени(й)/id: "
+    if machine:
+        out.append(f"нужен машинный посев ({len(machine)} ключ(ей) окружения, "
+                   f"которых не пишет ни один посев ЭТОЙ поверхности: "
                    f"{', '.join(machine[:3])}{'…' if len(machine) > 3 else ''})")
     return out
 
 
-def run(newman: pathlib.Path) -> int:
+# Коллекция, которую гоняет шаг конвейера: `run.sh --service <stem>`.
+SERVICE_ARG_RE = re.compile(r"--service\s+([A-Za-z0-9._-]+)")
+
+
+def pipeline_runs(workflows: pathlib.Path) -> dict[str, list[str]]:
+    """{stem: [«задание/шаг», …]} — какие коллекции гоняет объявление конвейера.
+
+    Читается РАЗОБРАННЫЙ YAML: ключи `jobs:`, их `steps[]`, тело `run:`. Имя
+    коллекции стоит в комментариях объявления десятки раз, поэтому подстрочный
+    предикат считал бы собственное объяснение — тот же порядок, что требует ban #17
+    от гейта на кириллический ключ задания.
+
+    Пустой словарь означает РОВНО «ни один шаг не гоняет ни одной коллекции».
+    Отличить это от «объявлений не прочитано» — забота вызывающего: он спрашивает
+    `workflow_files` отдельно.
+    """
+    import yaml  # локально: его отсутствие — третий исход, а не отказ разбора
+
+    out: dict[str, list[str]] = {}
+    for f in workflow_files(workflows):
+        try:
+            doc = yaml.safe_load(f.read_text(encoding="utf-8"))
+        except yaml.YAMLError as e:
+            raise Unmet(f"{f.name} не разбирается как YAML: {e}") from e
+        if not isinstance(doc, dict):
+            continue
+        jobs = doc.get("jobs")
+        if not isinstance(jobs, dict):
+            continue
+        for job_id, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            for i, stepv in enumerate(job.get("steps") or []):
+                if not isinstance(stepv, dict):
+                    continue
+                body = stepv.get("run")
+                if not isinstance(body, str):
+                    continue
+                label = f"{f.name}:{job_id}/{stepv.get('name') or f'шаг {i + 1}'}"
+                for stem in SERVICE_ARG_RE.findall(body):
+                    out.setdefault(stem, []).append(label)
+    return out
+
+
+def workflow_files(workflows: pathlib.Path) -> list[pathlib.Path]:
+    if not workflows.is_dir():
+        return []
+    return sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml"))
+
+
+class Unmet(Exception):
+    """Условие не создано: величина не измерена, и ноль вместо неё — ложь."""
+
+
+def seed_scripts(seed_dir: pathlib.Path) -> list[pathlib.Path]:
+    """Посевы дерева — ОТБОРОМ по имени, а не перечнем и не перечнем исключений.
+
+    Отбор глобом, потому что альтернативы хуже обе: выписанный перечень посевов
+    разошёлся бы с деревом в одну сторону (новый посев в него не попал бы), а
+    «любой .py/.sh, кроме названного» заставлял бы ИСПОЛНЯТЬ соседние файлы
+    каталога ради вопроса, посев ли это. Прежняя редакция несла именно такое
+    исключение по имени — у него не было предмета, кроме одного файла.
+    """
+    if not seed_dir.is_dir():
+        return []
+    out = sorted(p for p in seed_dir.glob("seed_*.py") if p.is_file())
+    out += sorted(p for p in seed_dir.glob("seed-*.sh") if p.is_file())
+    return out
+
+
+def _ask(script: pathlib.Path, flag: str) -> tuple[int, list[str]]:
+    cmd = ([sys.executable, str(script), flag] if script.suffix == ".py"
+           else [str(script), flag])
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    return proc.returncode, [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+
+
+def minted_by_seeds(scripts: list[pathlib.Path]
+                    ) -> tuple[dict[str, set[str]], list[str]]:
+    """Спросить у КАЖДОГО посева, какие ключи он пишет И ДЛЯ КАКОЙ ПОВЕРХНОСТИ.
+
+    Перепись не держит второй копии ни перечня, ни поверхности: копия разошлась бы
+    с посевом молча и разошлась бы в одну сторону. Посев, который на вопрос не
+    отвечает, в счёт НЕ идёт и называется отдельной строкой — «посев есть, а что он
+    пишет, неизвестно» и «посева нет» ведут читателя в разные места.
+
+    ПОВЕРХНОСТЬ СПРАШИВАЕТСЯ ОТДЕЛЬНЫМ ВОПРОСОМ И FAIL-CLOSED. Посев, назвавший
+    ключи и НЕ назвавший поверхность, не зачитывается никому: молча зачесть его
+    значило бы вернуть учёт по совпадению имён, который и дал 40 → 32 через два
+    разных стенда.
+    """
+    minted: dict[str, set[str]] = {}
+    mute: list[str] = []
+    for script in scripts:
+        try:
+            rc_keys, keys = _ask(script, "--minted-keys")
+        except (OSError, subprocess.SubprocessError) as e:
+            mute.append(f"{script.name}: не запустился ({e})")
+            continue
+        if rc_keys != 0 or not keys:
+            mute.append(f"{script.name}: не назвал ни одного ключа "
+                        f"(код {rc_keys})")
+            continue
+        try:
+            rc_surf, surf = _ask(script, "--minted-surface")
+        except (OSError, subprocess.SubprocessError) as e:
+            mute.append(f"{script.name}: НЕ НАЗВАЛ СВОЕЙ ПОВЕРХНОСТИ "
+                        f"(не запустился: {e})")
+            continue
+        if rc_surf != 0 or len(surf) != 1:
+            mute.append(f"{script.name}: НЕ НАЗВАЛ СВОЕЙ ПОВЕРХНОСТИ "
+                        f"(код {rc_surf}, строк {len(surf)}) — его {len(keys)} "
+                        f"ключ(ей) не зачтены НИКОМУ: имя ключа совпадает через "
+                        f"разные стенды, а предъявитель не переносится")
+            continue
+        minted.setdefault(surf[0], set()).update(keys)
+    return minted, mute
+
+
+def survey(newman: pathlib.Path, workflows: pathlib.Path):
+    """Разрез дерева: (гоняемые, заблокированные, по поверхности, по препятствию, …).
+
+    Вынесен отдельной функцией затем, чтобы держатель согласованности
+    (`tests/newman/scripts/pipeline_claims_test.py`) спрашивал ТУ ЖЕ величину, а не
+    считал свою: второй счётчик того же предмета расходится с первым молча.
+    """
     cols = collections(newman)
     allk, empty = template_keys(newman)
     if not cols:
-        print(f"ОТКАЗ: в {newman/'collections'} не прочитано ни одной коллекции — "
-              f"перепись беспредметна, а не пуста.", file=sys.stderr)
-        return 1
+        raise ValueError(f"в {newman/'collections'} не прочитано ни одной коллекции — "
+                         f"перепись беспредметна, а не пуста")
     if not allk:
-        print(f"ОТКАЗ: шаблона окружения нет — препятствия вывести не из чего.",
-              file=sys.stderr)
-        return 1
+        raise ValueError("шаблона окружения нет — препятствия вывести не из чего")
+
+    wfs = workflow_files(workflows)
+    if not wfs:
+        raise Unmet(f"в {workflows} не прочитано ни одного объявления конвейера — "
+                    f"величина «гоняется» НЕ ИЗМЕРЕНА, и ноль вместо неё был бы ложью")
+    runs = pipeline_runs(workflows)
 
     seed_dir = newman.parent / "authz-fixtures"
-    seed_scripts = sorted(p for p in seed_dir.iterdir()
-                          if p.is_file() and p.suffix in (".sh", ".py")
-                          and p.name != "principal_pairings.py") if seed_dir.is_dir() else []
-    seed_present = bool(seed_scripts)
+    scripts = seed_scripts(seed_dir)
+    minted, mute = minted_by_seeds(scripts)
 
     runnable, blocked = [], []
     by_surface: dict[str, int] = {}
@@ -141,19 +312,53 @@ def run(newman: pathlib.Path) -> int:
         # Имя коллекции — БЕЗ приставки формата: `Path.stem` снимает только `.json`,
         # оставляя `.postman_collection`, и перепись читалась бы шумом.
         stem = col.name[: -len(".postman_collection.json")]
-        bl = blockers(surface, keys, empty, seed_present)
+        bl = blockers(surface, keys, empty, minted, runs.get(stem, []))
         if bl:
             blocked.append((stem, surface, bl))
             for b in bl:
                 head = b.split(" (")[0]
                 by_blocker[head] = by_blocker.get(head, 0) + 1
         else:
-            runnable.append((stem, surface))
+            runnable.append((stem, surface, runs.get(stem, [])))
+    return (cols, wfs, runs, scripts, minted, mute, runnable, blocked,
+            by_surface, by_blocker)
+
+
+def blocked_stems(newman: pathlib.Path, workflows: pathlib.Path) -> dict[str, list[str]]:
+    """{stem: [препятствие, …]} — для держателя согласованности дерева."""
+    _, _, _, _, _, _, _, blocked, _, _ = survey(newman, workflows)
+    return {stem: bl for stem, _, bl in blocked}
+
+
+def run(newman: pathlib.Path, workflows: pathlib.Path | None = None) -> int:
+    if workflows is None:
+        workflows = ROOT / ".github" / "workflows"
+    try:
+        (cols, wfs, runs, scripts, minted, mute, runnable, blocked,
+         by_surface, by_blocker) = survey(newman, workflows)
+    except ValueError as e:
+        print(f"ОТКАЗ: {e}.", file=sys.stderr)
+        return 1
+    except ModuleNotFoundError as e:
+        print(f"УСЛОВИЕ НЕ СОЗДАНО: нет разборщика YAML ({e}) — объявление конвейера "
+              f"не прочитано, величина «гоняется» НЕ ИЗМЕРЕНА.", file=sys.stderr)
+        return RC_UNMET
+    except Unmet as e:
+        print(f"УСЛОВИЕ НЕ СОЗДАНО: {e}.", file=sys.stderr)
+        return RC_UNMET
 
     print("===== сквозной набор на АВТОНОМНОМ стенде: что гоняется, а что нет =====")
     print(f"коллекций в дереве: {len(cols)}")
     print(f"  гоняется здесь:    {len(runnable)}")
     print(f"  НЕ гоняется здесь: {len(blocked)}")
+    print()
+    # ОБЪЁМ ОСМОТРЕННОГО — рядом с величиной: «гоняется N», напечатанное
+    # переписью, которая конвейер не читает, измеряет не то, что называет.
+    print(f"объявлений конвейера прочитано: {len(wfs)} "
+          f"({', '.join(f.name for f in wfs)})")
+    print(f"коллекций гоняют шаги конвейера: {len(runs)}")
+    for stem, where in sorted(runs.items()):
+        print(f"  · {stem} ← {'; '.join(where)}")
     print()
     print("по поверхности (чей производитель отвечает):")
     for s, n in sorted(by_surface.items(), key=lambda kv: -kv[1]):
@@ -163,13 +368,22 @@ def run(newman: pathlib.Path) -> int:
     for b, n in sorted(by_blocker.items(), key=lambda kv: -kv[1]):
         print(f"  {n:3d}  {b}")
     print()
-    print(f"посев общих фикстур: {'есть' if seed_present else 'ОТСУТСТВУЕТ'} "
-          f"({len(seed_scripts)} скрипт(ов) в {seed_dir.name}/)")
+    print(f"посев общих фикстур: {'есть' if scripts else 'ОТСУТСТВУЕТ'} "
+          f"({len(scripts)} скрипт(ов) в authz-fixtures/), "
+          f"ключей окружения он пишет: {sum(len(v) for v in minted.values())}")
+    for surface, keys in sorted(minted.items()):
+        print(f"  · для поверхности «{surface}»: {len(keys)} ключ(ей)")
+    for script in scripts:
+        print(f"  · {script.name}")
+    for m in mute:
+        print(f"  · НЕ НАЗВАЛ СВОИХ КЛЮЧЕЙ — {m}")
     print()
     if runnable:
-        print("ГОНЯЕТСЯ ЗДЕСЬ:")
-        for stem, surface in runnable:
+        print("ГОНЯЕТСЯ ЗДЕСЬ (и КАКИМ шагом конвейера):")
+        for stem, surface, where in runnable:
             print(f"  · {stem} — {surface}")
+            for w in where:
+                print(f"      ← {w}")
         print()
     print("НЕ ГОНЯЕТСЯ ЗДЕСЬ (по каждой позиции — причина):")
     for stem, surface, bl in blocked:
@@ -216,6 +430,22 @@ def _mk(tmp: pathlib.Path, cols: dict[str, str], tmpl: dict[str, str]) -> pathli
     return newman
 
 
+def _wf(tmp: pathlib.Path, runs: list[str]) -> pathlib.Path:
+    """Синтетическое объявление конвейера: по шагу на каждую гоняемую коллекцию."""
+    wf = tmp / ".github" / "workflows"
+    wf.mkdir(parents=True, exist_ok=True)
+    steps = "".join(
+        f"      - name: коллекция {r} гоняется\n"
+        f"        run: |\n"
+        f"          cd tests/newman\n"
+        f"          ./scripts/run.sh --service {r}\n"
+        for r in runs) or "      - run: echo нечего\n"
+    (wf / "e2e-newman.yml").write_text(
+        "name: proof\non: [push]\njobs:\n  stand:\n    steps:\n" + steps,
+        encoding="utf-8")
+    return wf
+
+
 def self_test() -> int:
     import io
     import contextlib
@@ -228,7 +458,7 @@ def self_test() -> int:
         empty = _mk(tmp / "empty", {}, {"baseUrl": "http://x"})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-            rc = run(empty)
+            rc = run(empty, workflows=_wf(tmp / "empty", runs=[]))
         _c("ноль коллекций — код 1, а НЕ 0", rc == 1, buf.getvalue()[-200:])
         _c("и отказ называет беспредметность", "беспредметна" in buf.getvalue())
 
@@ -238,7 +468,7 @@ def self_test() -> int:
                  {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            rc = run(t2)
+            rc = run(t2, workflows=_wf(tmp / "own", runs=["own-only"]))
         out = buf.getvalue()
         _c("коллекция без препятствий — код 0", rc == 0)
         _c("она в «гоняется здесь»", "гоняется здесь:    1" in out, out[:400])
@@ -253,18 +483,178 @@ def self_test() -> int:
                   "runId": ""})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(t3)
+            run(t3, workflows=_wf(tmp / "own-seeded", runs=["own-seeded"]))
         out = buf.getvalue()
         _c("та же коллекция с пустым ключом посева — в «НЕ гоняется»",
            "НЕ гоняется здесь: 1" in out, out[:400])
         _c("и причина названа посевом", "машинный посев" in out, out[:600])
+
+        # Ось 3б: ПОСЕВ СНИМАЕТ ПРЕПЯТСТВИЕ ПОКЛЮЧЕВО, а не одним флагом.
+        # Два синтетических посева: один пишет ИМЕННО тот ключ, что читает
+        # коллекция, второй — соседний. Различие ровно в одном факте, и оно
+        # обязано двигать коллекцию между половинами переписи.
+        for lane, minted_key, expect_runs in (("covered", "jwtAccountAdminA", True),
+                                              ("other", "jwtSomethingElse", False)):
+            base = tmp / f"seed-{lane}"
+            t3b = _mk(base, {"own-seeded": own2},
+                      {"ownRestBaseUrl": "https://localhost:9098",
+                       "jwtAccountAdminA": "", "runId": ""})
+            fixtures = t3b.parent / "authz-fixtures"
+            fixtures.mkdir(parents=True, exist_ok=True)
+            script = fixtures / "seed_probe.py"
+            script.write_text(
+                "import sys\n"
+                "if '--minted-keys' in sys.argv:\n"
+                f"    print({minted_key!r})\n"
+                "elif '--minted-surface' in sys.argv:\n"
+                "    print('служба (собственный REST-фронт)')\n",
+                encoding="utf-8")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                run(t3b, workflows=_wf(base, runs=["own-seeded"]))
+            out = buf.getvalue()
+            _c(f"посев, пишущий {minted_key}: коллекция "
+               f"{'ГОНЯЕТСЯ' if expect_runs else 'НЕ гоняется'}",
+               (f"гоняется здесь:    {1 if expect_runs else 0}" in out
+                and f"НЕ гоняется здесь: {0 if expect_runs else 1}" in out),
+               out[:500])
+
+        # Ось 3в: посев, который на вопрос НЕ ОТВЕЧАЕТ, в счёт не идёт и
+        # называется отдельно — «посев есть, а что пишет, неизвестно» и «посева
+        # нет» ведут читателя в разные места.
+        mute_base = tmp / "seed-mute"
+        t3c = _mk(mute_base, {"own-seeded": own2},
+                  {"ownRestBaseUrl": "https://localhost:9098",
+                   "jwtAccountAdminA": "", "runId": ""})
+        mute_fixtures = t3c.parent / "authz-fixtures"
+        mute_fixtures.mkdir(parents=True, exist_ok=True)
+        (mute_fixtures / "seed_probe.py").write_text(
+            "import sys\nsys.exit(2)\n", encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(t3c, workflows=_wf(mute_base, runs=["own-seeded"]))
+        out = buf.getvalue()
+        _c("молчащий посев не снимает препятствия", "НЕ гоняется здесь: 1" in out,
+           out[:400])
+        _c("и назван отдельной строкой", "НЕ НАЗВАЛ СВОИХ КЛЮЧЕЙ" in out, out[:600])
+
+        # ── Ось 3г: ПОСЕВ СНИМАЕТ ПРЕПЯТСТВИЕ ТОЛЬКО НА СВОЕЙ ПОВЕРХНОСТИ ───
+        #
+        # Совпадение ИМЕНИ ключа через два разных стенда — не производство ключа.
+        # Посев этого дерева куёт `jwtAccountAdminA` на СОБСТВЕННОМ фронте службы;
+        # коллекция КРАЯ читает ключ того же имени, но её предъявителя производит
+        # чужой посев чужого стенда. Различие ровно в поверхности, и оно обязано
+        # двигать коллекцию между половинами переписи.
+        for lane, surface_decl, edge_runs in (
+                ("own-surface", "служба (собственный REST-фронт)", False),
+                ("edge-surface", "край платформы", True)):
+            base = tmp / f"surface-{lane}"
+            edge_seeded = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                           '"{{baseUrl}}/iam/v1/x"}},'
+                           '"event":[{"listen":"test","script":{"exec":['
+                           '"pm.environment.get(\'jwtAccountAdminA\')"]}}]}]}')
+            t3g = _mk(base, {"edge-seeded": edge_seeded},
+                      {"baseUrl": "http://edge", "jwtAccountAdminA": "", "runId": ""})
+            fixtures = t3g.parent / "authz-fixtures"
+            fixtures.mkdir(parents=True, exist_ok=True)
+            (fixtures / "seed_probe.py").write_text(
+                "import sys\n"
+                "if '--minted-keys' in sys.argv:\n"
+                "    print('jwtAccountAdminA')\n"
+                "elif '--minted-surface' in sys.argv:\n"
+                f"    print({surface_decl!r})\n",
+                encoding="utf-8")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                run(t3g, workflows=_wf(base, runs=["edge-seeded"]))
+            out = buf.getvalue()
+            _c(f"посев поверхности «{surface_decl}»: препятствие посева у коллекции "
+               f"КРАЯ {'снято' if edge_runs else 'ОСТАЛОСЬ'}",
+               ("машинный посев" in out) != edge_runs, out[:600])
+
+        # Ось 3д: посев, не объявивший ПОВЕРХНОСТЬ, в счёт не идёт и назван.
+        # Fail-closed: «ключи назвал, поверхность нет» и «поверхность края» ведут
+        # читателя в разные места, а молча зачесть — значит вернуть совпадение имён.
+        base = tmp / "surface-mute"
+        own_seeded_edge = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                           '"{{ownRestBaseUrl}}/x"}},'
+                           '"event":[{"listen":"test","script":{"exec":['
+                           '"pm.environment.get(\'jwtAccountAdminA\')"]}}]}]}')
+        t3d = _mk(base, {"own-seeded": own_seeded_edge},
+                  {"ownRestBaseUrl": "https://localhost:9098",
+                   "jwtAccountAdminA": "", "runId": ""})
+        fx = t3d.parent / "authz-fixtures"
+        fx.mkdir(parents=True, exist_ok=True)
+        (fx / "seed_probe.py").write_text(
+            "import sys\n"
+            "if '--minted-keys' in sys.argv:\n"
+            "    print('jwtAccountAdminA')\n",
+            encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(t3d, workflows=_wf(base, runs=["own-seeded"]))
+        out = buf.getvalue()
+        _c("посев без объявленной поверхности не снимает препятствия",
+           "машинный посев" in out, out[:600])
+        _c("и назван отдельной строкой", "НЕ НАЗВАЛ СВОЕЙ ПОВЕРХНОСТИ" in out, out[:700])
+
+        # ── Ось 6: «ГОНЯЕТСЯ» ЧИТАЕТСЯ ИЗ ОБЪЯВЛЕНИЯ КОНВЕЙЕРА ──────────────
+        #
+        # Величина обязана измерять то, что называет. Прежняя редакция печатала
+        # «гоняется здесь: N», не читая конвейер ВОВСЕ: снятие шага прогона из
+        # `e2e-newman.yml` её не меняло, то есть она измеряла «ничто не мешает
+        # гонять». Ось доказывает обратное ПАРОЙ: тот же тракт, шаг снят — и
+        # коллекция уезжает в другую половину переписи.
+        clean = ('{"item":[{"name":"s","request":{"url":{"raw":"{{ownRestBaseUrl}}/x"}}}]}')
+        for lane, runs, expect in (("declared", ["own-only"], 1), ("removed", [], 0)):
+            base = tmp / f"pipeline-{lane}"
+            t6 = _mk(base, {"own-only": clean},
+                     {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = run(t6, workflows=_wf(base, runs=runs))
+            out = buf.getvalue()
+            _c(f"шаг прогона {'объявлен' if runs else 'СНЯТ'} — гоняется {expect}",
+               f"гоняется здесь:    {expect}" in out, out[:500])
+            if not runs:
+                _c("и причина названа отсутствием шага конвейера",
+                   "ни один шаг конвейера" in out, out[:700])
+
+        # Ось 6б: `--service` В КОММЕНТАРИИ не считается шагом. Разбор читает
+        # разобранный YAML; проверка по подстроке краснела бы на объяснении.
+        base = tmp / "pipeline-comment"
+        t6b = _mk(base, {"own-only": clean},
+                  {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+        wf = _wf(base, runs=[])
+        (wf / "e2e-newman.yml").write_text(
+            "name: proof\non: [push]\njobs:\n  stand:\n    steps:\n"
+            "      # ./scripts/run.sh --service own-only  (когда-то гонялось здесь)\n"
+            "      - run: echo нечего\n", encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(t6b, workflows=wf)
+        out = buf.getvalue()
+        _c("`--service` только в комментарии — НЕ шаг прогона",
+           "гоняется здесь:    0" in out, out[:500])
+
+        # Ось 6в: объявлений конвейера НЕТ — третий исход, а не «гоняется 0».
+        base = tmp / "pipeline-absent"
+        t6c = _mk(base, {"own-only": clean},
+                  {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = run(t6c, workflows=base / "нет-такого-каталога")
+        _c("каталога объявлений нет — код 75, а НЕ 0 и не 1", rc == 75,
+           buf.getvalue()[-300:])
+        _c("и текст называет несозданное условие",
+           "УСЛОВИЕ НЕ СОЗДАНО" in buf.getvalue(), buf.getvalue()[-300:])
 
         # Ось 4: коллекция края попадает в «не гоняется» с причиной про край.
         edge = ('{"item":[{"name":"s","request":{"url":{"raw":"{{baseUrl}}/iam/v1/x"}}}]}')
         t4 = _mk(tmp / "edge", {"edge-only": edge}, {"baseUrl": "http://x", "runId": ""})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(t4)
+            run(t4, workflows=_wf(tmp / "edge", runs=["edge-only"]))
         out = buf.getvalue()
         _c("коллекция края — в «НЕ гоняется»", "НЕ гоняется здесь: 1" in out, out[:400])
         _c("и причина названа краем", "нужен край платформы" in out)
@@ -286,11 +676,12 @@ def self_test() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--newman", default=str(ROOT / "tests" / "newman"))
+    ap.add_argument("--workflows", default=str(ROOT / ".github" / "workflows"))
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
-    return run(pathlib.Path(args.newman))
+    return run(pathlib.Path(args.newman), pathlib.Path(args.workflows))
 
 
 if __name__ == "__main__":

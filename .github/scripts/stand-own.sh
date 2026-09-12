@@ -65,6 +65,18 @@ HOSTNAME_FOR_TLS="${KANAME_STAND_HOST:-localhost}"
 # Случайный на каждый запуск процесса ломал бы второй же старт.
 WRAPKEY_FILE="$RUNDIR/wrapping.key"
 
+# Ключ БУТСТРАП-контура — тоже файл и тоже постоянен, и по той же причине: строка
+# соответствия бутстрап-клиента заводится в базе ОДИН раз, открытой половиной
+# этого ключа. Новый ключ на каждый запуск означал бы, что второй старт не
+# признаёт запись первого, и отказ приходил бы не там, где причина.
+BOOTSTRAP_KEY_FILE="$RUNDIR/bootstrap-sa.key"
+
+# SPIFFE-имя, которым стенд зовёт чеканку бутстрап-удостоверения. Это ТО ЖЕ имя,
+# что стоит в SAN сертификата стенда (см. make_pki): круг вызывающих у чеканки
+# задаётся ИМЕНАМИ, а не сетевым положением, поэтому «кто вправе» на этом стенде
+# выражено ровно одним значением и оно здесь одно.
+BOOTSTRAP_CALLER_SAN="${KANAME_STAND_BOOTSTRAP_SAN:-spiffe://kaname.local/ns/kaname/sa/kaname}"
+
 say()  { printf '%s\n' "$*"; }
 fail() { printf 'НАХОДКА: %s\n' "$*" >&2; }
 unmet() { printf 'УСЛОВИЕ НЕ СОЗДАНО: %s\n' "$*" >&2; }
@@ -149,6 +161,28 @@ start_pg() {
 stand_env() {
   mkdir -p "$RUNDIR"
   [ -f "$WRAPKEY_FILE" ] || openssl rand -hex 32 > "$WRAPKEY_FILE"
+  # КОНТУР БУТСТРАПА ВКЛЮЧЁН НА СТЕНДЕ, И БЕЗ НЕГО СТЕНД НЕ ПРОВЕРЯЕТ НИЧЕГО
+  # СВЕРХ РУБЕЖА.
+  #
+  # Он единственный вход на дерево, где нет ни одной личности: всякая другая
+  # выдача требует УЖЕ выданного удостоверения, а первого не выдаёт никто.
+  # Отсюда и вид ключа — P-256 (PKCS#8): его открытой половиной заводится строка
+  # соответствия бутстрап-клиента, и подписант службы чеканит удостоверение сам,
+  # без внешнего поставщика.
+  #
+  # Круг вызывающих — ИМЕНА, а не сеть: страж пускает ровно перечисленные SPIFFE
+  # SAN и на ПУСТОМ перечне отказывает всем, в любом режиме. Пустой перечень при
+  # включённой чеканке роняет СТАРТ в боевой посадке, поэтому «включили и забыли
+  # назвать круг» здесь не выражается.
+  if [ ! -f "$BOOTSTRAP_KEY_FILE" ]; then
+    openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 \
+      -out "$BOOTSTRAP_KEY_FILE" >/dev/null 2>&1 || {
+        unmet "ключ бутстрап-контура не выпустился (openssl)"; exit "$RC_UNMET"; }
+  fi
+  KANAME_BOOTSTRAP_SA_PRIVATE_KEY_PEM="$(cat "$BOOTSTRAP_KEY_FILE")"
+  export KANAME_BOOTSTRAP_SA_PRIVATE_KEY_PEM
+  export KANAME_BOOTSTRAP_TOKEN_AUDIENCE=https://kaname.local
+  export KANAME_AUTHN__BOOTSTRAP_MINT__ALLOWED_CLIENT_SANS="$BOOTSTRAP_CALLER_SAN"
   export KANAME_DB_HOST=127.0.0.1 KANAME_DB_PORT="$PG_PORT"
   export KANAME_DB_USER=kaname KANAME_DB_NAME=kaname KANAME_DB_PASSWORD=stand
   export KANAME_DB_SSLMODE=require
@@ -195,6 +229,19 @@ stand_env() {
   export KANAME_AUTHN__TOKEN_SIGNING__ISSUER=https://kaname.local
   export KANAME_AUTHN__TOKEN_SIGNING__ALGORITHM=RS256
   export KANAME_AUTHN__TOKEN_SIGNING__ALLOWED_ALGORITHMS=RS256
+  # ПОЛОСА ОБМЕНА ПОДПИСАННОГО УТВЕРЖДЕНИЯ — БЕЗ НЕЁ ВЫДАННЫЙ КЛЮЧ НЕ ОБМЕНЯТЬ.
+  #
+  # `Issue` отдаёт приватный ключ ОДИН раз, и превратить его в предъявителя можно
+  # только здесь: `POST /iam/v1/token` на поверхности выдачи. Выключенный
+  # эндпоинт отвечает 404, то есть «ключ выдан и негоден» — состояние, по ответу
+  # неотличимое от опечатки в пути.
+  #
+  # Адресат утверждения — ИДЕНТИФИКАТОР издателя, а не адрес эндпоинта, поэтому
+  # перечень несёт `https://kaname.local`; второй элемент — адресат докерной
+  # полосы, и страж старта требует, чтобы он был ВНУТРИ перечня.
+  export KANAME_AUTHN__CLIENT_TOKEN__ENABLED=true
+  export KANAME_AUTHN__CLIENT_TOKEN__ALLOWED_AUDIENCES='https://kaname.local,registry.kaname.local'
+  export KANAME_AUTHN__CLIENT_TOKEN__DEFAULT_AUDIENCE='https://kaname.local'
   local l u
   for l in INTERNAL INTERNALREST HOOKS METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN; do
     eval "export KANAME_${l}_SERVER_MTLS_ENABLE=true \
