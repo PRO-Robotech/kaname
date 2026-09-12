@@ -99,6 +99,14 @@ type Registry struct {
 	// целиком.
 	inviteMailOnce sync.Once
 	inviteMail     *InviteMailRecorder
+
+	// readinessOnce/readiness — единственный экземпляр приёмника исхода
+	// готовности (#2494). Носитель готовности собирается в прогоне не единожды
+	// (интеграционные пробы поднимают поверхность заново в том же процессе), а
+	// второй конструктор уронил бы старт на повторной регистрации семейства с
+	// тем же именем.
+	readinessOnce sync.Once
+	readiness     *ReadinessRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

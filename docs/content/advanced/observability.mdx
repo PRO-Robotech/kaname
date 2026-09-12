@@ -46,6 +46,30 @@ kaname_build_info
 Отдельно это нужно, когда `/readyz` отвечает, что образ не может обслужить схему базы: одну из
 двух сравниваемых величин даёт этот ряд, вторую — таблица версий схемы в базе.
 
+## Готовность: какая именно зависимость отказала
+
+```promql
+# ряды по каждой зависимости готовности
+sum by (dependency, outcome) (kaname_readiness_dependency_checks_total)
+```
+
+| Ряд | Метки | Что значит |
+|---|---|---|
+| `kaname_readiness_dependency_checks_total` | `dependency`, `outcome` | оценки готовности по каждой зависимости. `outcome` ∈ `ready`, `unready` |
+
+Метка `dependency` и есть ответ на «продукт сломан или условие не создано» — читать её надо так:
+
+| `dependency="…"` с `outcome="unready"` | Что чинить |
+|---|---|
+| `database` | база недоступна: сломан продукт либо среда |
+| `schema-version` | образ не той версии, что схема, — **условие не создано**: накат не прогнан либо откат поставил прежний образ на новую схему. Сверять с меткой `revision` из `kaname_build_info` |
+| `lro-worker` | исполнитель операций ещё не поднялся: идёт старт |
+
+**Все ряды на нуле — третье состояние, а не исправность.** Клетки заводятся при регистрации, до
+первой оценки, поэтому ноль во всех означает, что готовность не оценивалась **ни разу**: пробу
+никто не спрашивает. Под при этом получает трафик, и отказавшая зависимость никого не снимает из
+ротации.
+
 ## Проверки доступа — главная величина службы
 
 ```promql
@@ -184,6 +208,15 @@ kubectl exec deploy/kaname -- wget -qO- --server-response http://127.0.0.1:9092/
 `503` называет неготовую зависимость по имени. «База недоступна» и «образ не той версии, что
 схема» — разные имена и разные починки; вторую сверяют с меткой `revision` из шага 1.
 
+То же имя видно и с витрины, без запроса к пробе:
+
+```bash
+kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
+  | grep '^kaname_readiness_dependency_checks_total'
+```
+
+Все ряды на нуле — готовность не оценивалась ни разу: пробу никто не спрашивает.
+
 ### Шаг 3 — отвечает ли служба и чем
 
 ```bash
@@ -274,6 +307,19 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   for: 10m
   annotations:
     summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
+
+- alert: KanameReadinessDependencyUnready
+  expr: increase(kaname_readiness_dependency_checks_total{outcome="unready"}[5m]) > 0
+  for: 5m
+  annotations:
+    summary: "зависимость готовности {{ $labels.dependency }} отвечает «не готов» — под снят из ротации"
+
+- alert: KanameReadinessUnprobed
+  # Ноль неготовых законен. Незаконно НЕ ЗНАТЬ, ноль это или неспрошенная проба.
+  expr: sum(increase(kaname_readiness_dependency_checks_total[15m])) == 0
+  for: 15m
+  annotations:
+    summary: "готовность не оценивалась ни разу за 15 минут — пробу никто не спрашивает"
 
 - alert: KanameRPCErrorRate
   expr: |

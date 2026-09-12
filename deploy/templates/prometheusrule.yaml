@@ -84,6 +84,19 @@ spec:
           annotations:
             summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
 
+        - alert: KanameReadinessDependencyUnready
+          expr: increase(kaname_readiness_dependency_checks_total{outcome="unready"}[5m]) > 0
+          for: 5m
+          annotations:
+            summary: "зависимость готовности {{ "{{ $labels.dependency }}" }} отвечает «не готов» — под снят из ротации"
+
+        - alert: KanameReadinessUnprobed
+          # Ноль неготовых законен. Незаконно НЕ ЗНАТЬ, ноль это или неспрошенная проба.
+          expr: sum(increase(kaname_readiness_dependency_checks_total[15m])) == 0
+          for: 15m
+          annotations:
+            summary: "готовность не оценивалась ни разу за 15 минут — пробу никто не спрашивает"
+
         - alert: KanameRPCErrorRate
           expr: |
             sum(rate(kacho_grpc_server_handled_total{grpc_code!="OK"}[5m]))

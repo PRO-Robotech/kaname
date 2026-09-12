@@ -153,7 +153,7 @@ func buildHooksMux(
 	//
 	// ЧТО именно проверяется — по-прежнему решает композиционный корень: он один
 	// знает, какая база своя и к кому сервис ходит.
-	healthAgg := health.New([]health.Checker{
+	readinessCheckers := []health.Checker{
 		{Name: "database", Check: pool.Ping},
 		// ВЕРСИЯ СХЕМЫ — ОТДЕЛЬНАЯ ИМЕНОВАННАЯ ЗАВИСИМОСТЬ, а не часть
 		// проверки базы. Мигратор идёт при каждом раскате, поэтому откат
@@ -174,7 +174,21 @@ func buildHooksMux(
 			}
 			return errors.New("lro worker not ready")
 		}},
-	})
+	}
+	// ИСХОД ГОТОВНОСТИ ЗЕРКАЛИТСЯ В ВЕЛИЧИНУ, и это не украшение витрины
+	// (#2494). Без зеркала наружу выходит ОДИН БИТ: имена трёх зависимостей
+	// остаются в теле пробы, поднятой по TLS на внутреннем порту, и прочесть их
+	// можно только пробросом порта в обход проверки сертификата. Дежурный
+	// чужой установки — а kaname поставляется именно так, отдельно — не
+	// отличает «база недоступна» (сломан продукт) от «образ не той версии, что
+	// схема» (условие не создано).
+	//
+	// Набор зависимостей выводится ИЗ ТОГО ЖЕ среза, которым построен носитель:
+	// второй перечень отстал бы от первого молча, и отставший чекер остался бы
+	// без рядов — то есть невидимым ровно так же, как до этой провязки.
+	readinessValues := metricsReg.ReadinessRecorder(readinessDependencyNames(readinessCheckers))
+	healthAgg := health.New(readinessCheckers,
+		health.WithResultObserver(readinessValues.Observe))
 
 	mux := handlerinternal.NewMux(handlerinternal.Handlers{
 		TokenHook:     tokenHook,
@@ -187,6 +201,19 @@ func buildHooksMux(
 		logger.Info("hooks http", "method", method, "path", path, "status", status)
 	})
 	return wrapped, healthAgg
+}
+
+// readinessDependencyNames — имена объявленных чекеров в порядке объявления.
+//
+// Выведение, а не второй перечень: набор рядов величины обязан совпадать с
+// набором зависимостей by construction, иначе добавленный чекер остаётся без
+// рядов и не наблюдаем — тот же дефект, который эта провязка и снимает.
+func readinessDependencyNames(checkers []health.Checker) []string {
+	names := make([]string, 0, len(checkers))
+	for _, c := range checkers {
+		names = append(names, c.Name)
+	}
+	return names
 }
 
 // userProvisionAdapter maps the iamhooks.UserProvisioner port to the
