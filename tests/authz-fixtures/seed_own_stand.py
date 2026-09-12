@@ -6,10 +6,28 @@
 """МАШИННЫЙ ПОСЕВ для АВТОНОМНОГО стенда службы: удостоверения своей чеканки.
 
 ПРЕДМЕТ. На автономном стенде нет ни края платформы, ни внешнего поставщика
-личности. Сквозной набор при этом читает из окружения четыре предъявителя и два
-адреса, и пока их не пишет никто, коллекция `kaname-own-rest-front` — та
-единственная, чья поверхность принадлежит САМОЙ службе, — не гоняется ни разу.
-Это не «нет покрытия», а покрытие ОБЪЯВЛЕННОЕ И НЕИСПОЛНИМОЕ.
+личности. Сквозной набор при этом читает из окружения предъявителей, адреса и
+идентификаторы субъектов, и пока их не пишет никто, коллекция
+`kaname-own-rest-front` — та единственная, чья поверхность принадлежит САМОЙ
+службе, — не гоняется ни разу. Это не «нет покрытия», а покрытие ОБЪЯВЛЕННОЕ И
+НЕИСПОЛНИМОЕ.
+
+ЧТО ЗДЕСЬ ЧЕКАНИТСЯ И ЧЕГО ЗДЕСЬ НЕ ЧЕКАНИТСЯ — СКАЗАНО ЧИСЛОМ. Посев пишет 23
+ключа окружения: восемь предъявителей, одно удостоверение в ЗАКОННО-ДЕФЕКТНОМ
+состоянии (отозванное), три адреса собственных поверхностей и одиннадцать
+идентификаторов, которые вернул продукт. Не чеканится ничего из трёх других
+природ, и каждая названа отказом, а не обойдена:
+
+  · ЦЕРЕМОНИЯ ЧЕЛОВЕКА — `jwtHuman*`, `ceremony*` и идентификаторы человека
+    церемонии (`humanAcc*UserId`). Полоса личности `own` не поднимается вовсе
+    (врезка в `.github/scripts/stand-own.sh`), а машинно выпущенный токен человека
+    приезжает с ПУСТЫМ уровнем подтверждения при пороге `required_acr_min>=1` —
+    и поднять его нечем: `acr` приходит только из сессии поставщика, службой он
+    лишь читается. То же и про `*StepUp`: набор сам объявляет их неподделываемыми;
+  · АДРЕС НЕДОСТИЖИМОГО СОСЕДА — `providerPublicBaseUrl`: внешнего поставщика на
+    этом стенде нет ВООБЩЕ, и адрес, назначенный на собственный слушатель, был бы
+    ложью о том, чей ответ проверяется;
+  · ИСТЁКШЕЕ и ПОВРЕЖДЁННОЕ удостоверения — причины у самого шага отзыва ниже.
 
 ВСЁ, ЧТО ЗДЕСЬ ДЕЛАЕТСЯ, ДЕЛАЕТСЯ ЕДИНСТВЕННЫМ ГЛАГОЛОМ ПРОДУКТА. Ни одной
 записи в базу, ни одной подписи чужим ключом, ни одного обхода рубежа:
@@ -54,9 +72,12 @@ gRPC `UpsertFromIdentity`, доступный в боевой посадке Т�
 САМОПРОВЕРКА — `--self-test`: доказывает инъекцией, что «нет слушателя» отличимо
 от находки КОДОМ, что успешный статус с пустым захватом даёт находку, что
 объявленный перечень записываемых ключей сходится с тем, что запись действительно
-производит (в обе стороны), что `--minted-surface` отвечает ровно одной строкой и
+производит (в обе стороны), что `--minted-surface` отвечает ровно одной строкой,
 что 401 `invalid_hook_token` — код 75, а не находка, при живом законном близнеце
-рядом (409 от того же хука обязан остаться находкой).
+рядом (409 от того же хука обязан остаться находкой), что ни одна объявленная пара
+«идентификатор ↔ предъявитель» не покрыта ПОЛОВИНОЙ, что фронт, который после
+отзыва всё ещё принимает предъявителя, даёт находку, и что пустой набор ключей
+собственной чеканки даёт находку.
 """
 
 from __future__ import annotations
@@ -84,6 +105,34 @@ RC_UNMET = 75
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
+# АВТОРИТЕТ ПАР «идентификатор ↔ предъявитель» лежит РЯДОМ и ничего не сеет
+# (`paginated_binding_reads_test.py`, `_AUTHORITY_ONLY`). Импорт по каталогу файла,
+# а не по пакету: каталог фикстур пакетом не является, и посев зовётся из разных
+# рабочих каталогов. Модуль не трогает ни сети, ни файла, ни часов — это условие
+# его собственной шапки, и потому его можно звать и в самопроверке.
+sys.path.insert(0, str(HERE))
+try:
+    import principal_pairings  # noqa: E402
+except ImportError as e:
+    # НЕПРОЧИТАННЫЙ АВТОРИТЕТ — «условие не создано», А НЕ ОТКАЗ ПРОДУКТА, и это
+    # различие ценой одной строки. Непокрытый `import` уронил бы посев кодом 1, а
+    # конвейер печатает на rc≠75 «Посев отвергнут продуктом» и посылает читателя
+    # чинить службу, которая ни при чём: предмет отказа — рабочая копия.
+    principal_pairings = None
+    PAIRINGS_IMPORT_ERROR = str(e)
+else:
+    PAIRINGS_IMPORT_ERROR = ""
+
+
+def require_pairings():
+    """Авторитет пар или «условие не создано» с названной причиной."""
+    if principal_pairings is None:
+        raise Unmet(
+            f"модуль-авторитет пар не прочитан ({PAIRINGS_IMPORT_ERROR}) — "
+            f"объявленные пары «идентификатор ↔ предъявитель» проверить нечем, "
+            f"и вердикта о продукте здесь нет НИ ОДНОГО")
+    return principal_pairings
+
 # Издатель и адресат стенда. Величины объявлены ОДИН раз и совпадают с посадкой
 # (`.github/scripts/stand-own.sh`): расхождение здесь дало бы отказ обмена с
 # текстом про несовпадение адресата, то есть находку о дереве на месте опечатки.
@@ -98,6 +147,12 @@ HOOK_HEADER = "X-Kacho-Hook-Token"
 BOOTSTRAP_METHOD = (
     "kaname.cloud.iam.v1.InternalBootstrapTokenService/MintBootstrapToken")
 BOOTSTRAP_PROTO = "kaname/cloud/iam/v1/internal_bootstrap_token_service.proto"
+
+# Путь набора ключей СОБСТВЕННОЙ чеканки на слушателе :9097. Дефолт посадки —
+# `authn.token-signing.key-set-path` (`internal/apps/kaname/config/token_signing.go`).
+# Зеркало прежнего издателя (`/.well-known/jwks.json`) лежит на том же слушателе и
+# на автономном стенде отвечать не может: поставщика нет ВООБЩЕ.
+OWN_JWKS_PATH = "/.well-known/kaname/jwks.json"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # КЛЮЧИ ОКРУЖЕНИЯ, КОТОРЫЕ ЭТОТ ПОСЕВ ПИШЕТ
@@ -116,8 +171,19 @@ BOOTSTRAP_PROTO = "kaname/cloud/iam/v1/internal_bootstrap_token_service.proto"
 MINTED_CREDENTIALS = (
     "jwtAccountAdminA",
     "jwtAccountAdminB",
+    "jwtBootstrap",
+    "jwtInvitee",
+    "jwtProjectAdminA1",
     "jwtPureNoBindings",
     "jwtSAA",
+    "jwtSANoGrant",
+)
+# Удостоверение в ЗАКОННО-ДЕФЕКТНОМ состоянии. Названо отдельной группой, потому
+# что у него ДВА утверждения вместо одного: выпущенное настоящим глаголом принято
+# фронтом ДО приведения в состояние и отвергнуто ПОСЛЕ. Одного «отозвали» мало —
+# отозванное удостоверение, которое фронт всё ещё принимает, не отозвано.
+MINTED_DEFECTIVE = (
+    "apiTokenRevoked",
 )
 # Адреса собственных фронтов: их производит САМ стенд, и удостоверениями они не
 # являются. Названы отдельной группой намеренно — перепись долга считала все
@@ -125,6 +191,7 @@ MINTED_CREDENTIALS = (
 MINTED_ADDRESSES = (
     "ownRestBaseUrl",
     "ownInternalRestBaseUrl",
+    "iamJwksBaseUrl",
 )
 # Идентификаторы, которые в шаблоне стоят ПРАВДОПОДОБНЫМИ ЛИТЕРАЛАМИ с чужого
 # стенда. Они непусты, поэтому перепись долга их препятствием не считает, — а
@@ -136,7 +203,11 @@ MINTED_IDENTIFIERS = (
     "existingAccountId",
     "existingProjectId",
     "existingProjectCrossId",
+    "projectA1Id",
     "svaAId",
+    "svaInviteeId",
+    "svaNoGrantId",
+    "svaPureNoGrantId",
     "runId",
 )
 
@@ -146,7 +217,7 @@ MINTED_IDENTIFIERS = (
 # поверхности.
 #
 # ПОЧЕМУ НЕДОСТАТОЧНО ПЕРЕЧНЯ ИМЁН — ЗАМЕРЕНО. Учёт по одним именам снял
-# препятствие «нужен машинный посев» у ВОСЬМИ коллекций, и СЕМЬ из восьми —
+# препятствие машинного посева у ВОСЬМИ коллекций, и СЕМЬ из восьми —
 # коллекции КРАЯ платформы: их `jwtAccountAdminA`/`jwtAccountAdminB` производит
 # чужой посев чужого стенда, а совпало только ИМЯ ключа. Предъявитель этой чеканки
 # краю не годится ничем: другой издатель, другой адресат, другой арендатор.
@@ -160,7 +231,8 @@ MINTED_SURFACE = "служба (собственный REST-фронт)"
 
 
 def minted_keys() -> tuple[str, ...]:
-    return MINTED_ADDRESSES + MINTED_CREDENTIALS + MINTED_IDENTIFIERS
+    return (MINTED_ADDRESSES + MINTED_CREDENTIALS + MINTED_DEFECTIVE
+            + MINTED_IDENTIFIERS)
 
 
 # ─────────────────────────── исходы и учёт ───────────────────────────────────
@@ -529,9 +601,15 @@ def builtin_role_id(http: Http, public: str, token: str, name: str) -> str:
     return roles[0]["id"]
 
 
-def grant_account_admin(http: Http, public: str, token: str, sva_id: str,
-                        role_id: str, account_id: str) -> str:
-    """Выдача: служебная учётка получает роль на СВОЁМ аккаунте.
+def grant_role(http: Http, public: str, token: str, sva_id: str, role_id: str,
+               scope_type: str, scope_id: str) -> str:
+    """Выдача: служебная учётка получает роль на НАЗВАННОЙ области.
+
+    ОБЛАСТЬ — ПАРАМЕТР, А НЕ ЛИТЕРАЛ, и это не обобщение ради обобщения: словарь
+    якорей ровно трёхчленный (`iam.cluster` · `iam.account` · `iam.project`,
+    `internal/domain/access_binding_scope.go`), и посев заводит субъектов и на
+    аккаунте, и на проекте. Вторая копия этой функции с другим литералом
+    разошлась бы с первой молча — в утверждении о статусе, например.
 
     Отказ ГРОМКИЙ. Посев без выдачи готовит субъекта БЕЗ ПРАВА, и всякое
     утверждение о доступе после этого проверяет не продукт, а собственную
@@ -541,9 +619,9 @@ def grant_account_admin(http: Http, public: str, token: str, sva_id: str,
     resp = post_operation(
         http, public, token, "/iam/v1/accessBindings",
         {"subjectType": "service_account", "subjectId": sva_id,
-         "roleId": role_id, "scopeType": "iam.account", "scopeId": account_id,
+         "roleId": role_id, "scopeType": scope_type, "scopeId": scope_id,
          "target": {"allInScope": {}}},
-        f"выдача роли {role_id} учётке {sva_id} на аккаунте {account_id}")
+        f"выдача роли {role_id} учётке {sva_id} на {scope_type}:{scope_id}")
     binding_id = resp.get("id") or ""
     if not binding_id:
         raise Finding(f"выдача учётке {sva_id} прошла без идентификатора привязки: "
@@ -596,6 +674,150 @@ def assert_serves(http: Http, public: str, token: str, path: str,
             f"готовит субъекта, на котором кейсы падали бы, называя виновником "
             f"невиновного")
 
+
+
+def assert_refused(http: Http, public: str, token: str, path: str,
+                   what: str) -> None:
+    """Фронт обязан ОТВЕРГНУТЬ этого предъявителя на этом пути.
+
+    Утверждение об отказе стоит рядом с утверждением о доступе и по той же
+    причине. Выдача, оказавшаяся ШИРЕ объявленной, готовит субъекта, на котором
+    отрицательный кейс зеленеет по неверной причине: он ждёт отказа, а получил бы
+    его и от опечатки в пути. Различает их только пара «здесь принят — там
+    отвергнут», и обе половины утверждаются.
+    """
+    code, body = http.json_ask(public + path, token=token)
+    if code == 200:
+        raise Finding(
+            f"{what}: фронт ОТВЕТИЛ 200 на {path}, а выдача этого не давала — "
+            f"значит область выдачи шире объявленной: "
+            f"{json.dumps(body, ensure_ascii=False)[:300]}")
+
+
+def await_refusal(http: Http, public: str, token: str, path: str, what: str,
+                  budget_s: float = 90.0) -> None:
+    """ДОЖДАТЬСЯ отказа фронта — доказательство, что состояние ДОСТИГНУТО.
+
+    ЖДЁТ, а не спрашивает раз, и это свойство посадки, а не осторожность:
+    `authn.presented-credential.revocation-cache-ttl` объявлен 30 с
+    (`.github/scripts/stand-own.sh`), поэтому отзыв доходит до читателя
+    предъявленного удостоверения не мгновенно. Единственный ответ «ещё принимает»
+    неотличим от «принимать не перестанет», поэтому ожидание идёт до ПРЕДМЕТА.
+
+    Исчерпанный бюджет — НАХОДКА, а не несозданное условие: удостоверение выпущено
+    настоящим глаголом, отозвано настоящим глаголом, и то, что фронт его всё ещё
+    принимает, есть вердикт о дереве.
+    """
+    deadline = time.time() + budget_s
+    last_code, last_body = None, {}
+    while True:
+        last_code, last_body = http.json_ask(public + path, token=token)
+        if last_code != 200:
+            return
+        if time.time() >= deadline:
+            break
+        time.sleep(1)
+    raise Finding(
+        f"{what}: фронт ПРИНИМАЕТ предъявителя спустя {budget_s:.0f} с после "
+        f"приведения в дефектное состояние (код {last_code} на {path}, тело "
+        f"{json.dumps(last_body, ensure_ascii=False)[:200]}). Кэш отзыва посадки — "
+        f"30 с, то есть бюджет исчерпан с запасом: состояние НЕ ДОСТИГНУТО, а "
+        f"кейс про отозванное удостоверение зеленел бы на живом токене")
+
+
+def assert_own_jwks(http: Http, jwks_base: str) -> dict:
+    """Набор ключей СВОЕЙ чеканки не пуст — и это утверждается, а не адресуется.
+
+    Адрес, за которым лежит ПУСТОЙ перечень, от ненаписанного адреса не отличается
+    ничем: сверяющий подпись сосед получит 200 и не найдёт ключа, то есть отказ
+    приедет как «подпись не сверяется», а не как «ключей нет».
+
+    ПУТЬ — НАШ, А НЕ ЗЕРКАЛО. На слушателе :9097 их два: зеркало прежнего издателя
+    (`/.well-known/jwks.json`) и набор собственной чеканки
+    (`authn.token-signing.key-set-path`, по умолчанию
+    `/.well-known/kaname/jwks.json`). На автономном стенде внешнего поставщика нет
+    ВООБЩЕ, поэтому зеркало отвечать не может by construction, а собственный набор
+    обязан: своя чеканка на этой посадке включена, и ею подписаны все
+    предъявители, которые посев выдаёт.
+    """
+    code, body = http.json_ask(jwks_base + OWN_JWKS_PATH)
+    keys = body.get("keys") if isinstance(body, dict) else None
+    if code != 200 or not isinstance(keys, list) or not keys:
+        raise Finding(
+            f"набор ключей собственной чеканки не отдан: код {code}, ключей "
+            f"{len(keys) if isinstance(keys, list) else 'нет поля'} на "
+            f"{jwks_base}{OWN_JWKS_PATH}. Служба — ЕДИНСТВЕННЫЙ фасад к поставщику, "
+            f"и подписи её предъявителей сверять нечем: "
+            f"{json.dumps(body, ensure_ascii=False)[:200]}")
+    return body
+
+
+def assert_binding_scopes(http: Http, public: str, token: str, subject_id: str,
+                          want: set[tuple[str, str]]) -> None:
+    """У субъекта РОВНО названные области выдач — спрошено у продукта.
+
+    Утверждается перечень, а не число: субъект, у которого две выдачи, но обе в
+    домашнем аккаунте, от объявленного отличается ровно тем свойством, ради
+    которого он и заводится, — и по счёту это не видно.
+    """
+    code, body = http.json_ask(
+        f"{public}/iam/v1/accessBindings:listBySubject"
+        f"?subjectType=service_account&subjectId={subject_id}&pageSize=100",
+        token=token)
+    if code != 200:
+        raise Finding(f"выдачи субъекта {subject_id} не читаются: код {code}, "
+                      f"тело {json.dumps(body, ensure_ascii=False)[:200]}")
+    got = {(b.get("scopeType") or "", b.get("scopeId") or "")
+           for b in (body.get("accessBindings") or [])}
+    if got != want:
+        raise Finding(
+            f"субъект {subject_id} заведён с выдачами {sorted(want)}, а продукт "
+            f"вернул {sorted(got)} — кейсы про сужение страницы по ДОМАШНЕМУ "
+            f"аккаунту проверяли бы другую форму субъекта")
+
+
+def revoke_sa_key(http: Http, public: str, token: str, sva_id: str,
+                  key_id: str) -> None:
+    """Отзыв ключа — настоящим глаголом службы (`SAKeyService/Revoke`).
+
+    Отзыв идемпотентен НАМЕРЕННО: чужой и несуществующий ключ дают тот же успех,
+    чтобы не давать оракула по чужим ключам. Значит из успеха отзыва СОСТОЯНИЕ НЕ
+    ВЫВОДИМО — его доказывает только отказ фронта, и он утверждается отдельно.
+    """
+    code, resp = http.json_ask(
+        f"{public}/iam/v1/serviceAccounts/{sva_id}/keys/{key_id}",
+        method="DELETE", token=token)
+    if code != 200:
+        raise Finding(f"отзыв ключа {key_id} учётки {sva_id} отказал: код {code}, "
+                      f"тело {json.dumps(resp, ensure_ascii=False)[:300]}")
+    op_id = resp.get("id") or ""
+    if op_id:
+        await_operation(http, public, token, op_id)
+
+
+def revoked_sa_token(http: Http, public: str, token_url: str, token: str,
+                     sva_id: str, run_id: str) -> str:
+    """Удостоверение в состоянии ОТОЗВАНО — заведённое настоящим путём.
+
+    ТРИ ШАГА, И НИ ОДИН НЕ ЛИШНИЙ: выпуск ключа, обмен в предъявителя, отзыв
+    ключа, — а между вторым и третьим утверждение, что фронт его ПРИНИМАЛ. Без
+    этого утверждения отказ после отзыва неотличим от отказа по любой другой
+    причине (негодный обмен, неверный адресат, опечатка в пути), и кейс про
+    отозванное удостоверение проверял бы что угодно.
+    """
+    resp = post_operation(
+        http, public, token, f"/iam/v1/serviceAccounts/{sva_id}/keys",
+        {"description": f"посев автономного стенда, под отзыв, прогон {run_id}"},
+        "выпуск ключа под отзыв")
+    client_id, key_pem, key_id = key_material(resp, "ключ под отзыв")
+    access = exchange(http, token_url, client_id, key_pem, key_id,
+                      "удостоверение под отзыв")
+    assert_serves(http, public, access, "/iam/v1/me",
+                  "удостоверение ДО отзыва (иначе отказ после ничего не значит)")
+    revoke_sa_key(http, public, token, sva_id, key_id)
+    await_refusal(http, public, access, "/iam/v1/me",
+                  "удостоверение ПОСЛЕ отзыва")
+    return access
 
 
 def assert_no_bindings(http: Http, public: str, token: str, subject_id: str) -> None:
@@ -670,6 +892,7 @@ def run(args: argparse.Namespace) -> int:
     internal = f"https://{host}:{args.port_internal}"
     hooks = f"https://{host}:{args.port_hooks}"
     token_url = f"https://{host}:{args.port_token}/iam/v1/token"
+    jwks_base = f"https://{host}:{args.port_jwks}"
 
     # Признак прогона: он уезжает в ИМЕНА заводимых предметов, поэтому повторный
     # прогон не встречает 409 — и заодно по нему видно, какой прогон что завёл.
@@ -679,6 +902,7 @@ def run(args: argparse.Namespace) -> int:
                        (args.port_internal, "собственный внутренний REST"),
                        (args.port_hooks, "хуки поставщика"),
                        (args.port_token, "выдача токенов"),
+                       (args.port_jwks, "публикатор набора ключей"),
                        (args.port_grpc, "внутренний gRPC")):
         require_listener(host, port, what)
 
@@ -737,7 +961,7 @@ def run(args: argparse.Namespace) -> int:
         sva = make_service_account(http, public, boot, account_id,
                                    f"seed-{run_id}-adm-{lane}", run_id,
                                    f"создание распорядителя аккаунта {lane.upper()}")
-        grant_account_admin(http, public, boot, sva, role_admin, account_id)
+        grant_role(http, public, boot, sva, role_admin, "iam.account", account_id)
         step(f"распорядитель аккаунта {lane.upper()} заведён и получил роль: {sva}")
         creds[var] = sa_token(http, public, token_url, boot, sva, run_id,
                               f"распорядитель аккаунта {lane.upper()}")
@@ -768,6 +992,128 @@ def run(args: argparse.Namespace) -> int:
                   "jwtPureNoBindings (рубеж проходит, права не имеет)")
     step("jwtPureNoBindings получен обменом и ПРИНЯТ рубежом (права при этом нет)")
 
+    say("── бутстрап-предъявитель: тот, кем посев и работал всё это время ─────")
+    #
+    # ПОЧЕМУ ОН ЗАПИСЫВАЕТСЯ, А НЕ ВЫБРАСЫВАЕТСЯ. Посев чеканил его настоящим
+    # глаголом на первом шаге и там же УТВЕРДИЛ, что собственный фронт его
+    # принимает (200 на перечне аккаунтов), — то есть самое доказанное
+    # удостоверение всего прогона уезжало в мусор, а ключ окружения того же
+    # предмета стоял пустым. Своего шага здесь нет намеренно: второй выпуск дал бы
+    # ВТОРОЕ удостоверение, и утверждение первого шага относилось бы не к нему.
+    creds["jwtBootstrap"] = boot
+    step("jwtBootstrap — удостоверение шага 1, уже предъявленное фронту")
+
+    say("── набор ключей: его публикует САМА служба, поставщика нет ВООБЩЕ ─────")
+    jwks = assert_own_jwks(http, jwks_base)
+    step(f"собственный набор ключей отдан и НЕ ПУСТ: ключей "
+         f"{len(jwks.get('keys', []))} на {jwks_base}{OWN_JWKS_PATH}")
+
+    say("── вторая учётка БЕЗ выдач: своя у каждого объявленного слота ─────────")
+    #
+    # ПОЧЕМУ ВТОРАЯ, А НЕ ПЕРЕИСПОЛЬЗОВАНИЕ ПЕРВОЙ. Набор объявляет ДВА слота
+    # «никогда не грантится», и у них разные владельцы:
+    # `svaPureNoGrantId`/`jwtPureNoBindings` — выделенный субъект leak-guard'ов
+    # (шапка `cases/iam-subject-privileges-read.py`: «никогда не грантится»), а
+    # `svaNoGrantId`/`jwtSANoGrant` — непривилегированная учётка набора
+    # эквивалентности каналов. Один субъект на два слота сделал бы свойство
+    # «никогда не грантится» ЗАВИСИМЫМ от того, что делает соседний набор.
+    sva_nogrant = make_service_account(http, public, boot, tenants["a"]["accountId"],
+                                       f"seed-{run_id}-nogrant", run_id,
+                                       "создание учётки без выдач (слот канала)")
+    assert_no_bindings(http, public, boot, sva_nogrant)
+    step(f"учётка без выдач (слот канала) заведена, перечень выдач ПУСТ: "
+         f"{sva_nogrant}")
+    creds["jwtSANoGrant"] = sa_token(http, public, token_url, boot, sva_nogrant,
+                                     run_id, "учётка без выдач (слот канала)")
+    assert_serves(http, public, creds["jwtSANoGrant"], "/iam/v1/me",
+                  "jwtSANoGrant (рубеж проходит, права не имеет)")
+    step("jwtSANoGrant получен обменом и ПРИНЯТ рубежом")
+
+    say("── распорядитель ПРОЕКТА: допуск в проекте есть, на аккаунте НЕТ ──────")
+    #
+    # ОБЕ ПОЛОВИНЫ УТВЕРЖДАЮТСЯ. Кейсы про него (`AUTHZ-ACCT-GT-OWN-PA1` и
+    # соседние) ждут ОТКАЗА на аккаунте — то есть проверяют ровно то, что выдача
+    # проектная, а не аккаунтная. Субъект, которому выдали шире, оставил бы их
+    # зелёными по неверной причине: 403 они ждут и получили бы его от чего угодно.
+    role_prj_admin = builtin_role_id(http, public, boot, "iam.project.admin")
+    step(f"встроенная роль iam.project.admin спрошена у продукта: {role_prj_admin}")
+    sva_pa1 = make_service_account(http, public, boot, tenants["a"]["accountId"],
+                                   f"seed-{run_id}-pa1", run_id,
+                                   "создание распорядителя проекта A1")
+    grant_role(http, public, boot, sva_pa1, role_prj_admin, "iam.project",
+               tenants["a"]["projectId"])
+    step(f"распорядитель проекта A1 заведён и получил роль на проекте: {sva_pa1}")
+    creds["jwtProjectAdminA1"] = sa_token(http, public, token_url, boot, sva_pa1,
+                                          run_id, "распорядитель проекта A1")
+    assert_serves(http, public, creds["jwtProjectAdminA1"],
+                  f"/iam/v1/projects/{tenants['a']['projectId']}",
+                  "jwtProjectAdminA1 (читает СВОЙ проект)")
+    assert_refused(http, public, creds["jwtProjectAdminA1"],
+                   f"/iam/v1/accounts/{tenants['a']['accountId']}",
+                   "jwtProjectAdminA1 (аккаунт ему НЕ выдавали)")
+    step("jwtProjectAdminA1 принят на своём проекте и ОТВЕРГНУТ на аккаунте")
+
+    say("── субъект с выдачами в ДВУХ аккаунтах: домашний A, чужой B ───────────")
+    #
+    # ФОРМА ОБЪЯВЛЕНА НАБОРОМ, А НЕ ВЫБРАНА ЗДЕСЬ. Шапка
+    # `cases/iam-subject-privileges-read.py` называет её дословно: служебная
+    # учётка, домашний аккаунт которой — A, а выдачи лежат в ДВУХ аккаунтах —
+    # `edit` на проекте A1 (внутри A) и `admin` на АККАУНТЕ B (снаружи). Ради неё
+    # сужение страницы и заведено: допуск решается по ДОМАШНЕМУ аккаунту, а строки
+    # называют область каждой выдачи.
+    #
+    # ОТКАЗ ПРОДУКТА НА ВЫДАЧЕ В ЧУЖОМ АККАУНТЕ БУДЕТ НАХОДКОЙ, И ЭТО СКАЗАНО
+    # ПРЯМО: посев предъявляет бутстрап-удостоверение, которому открыто дерево, и
+    # форму, которую набор объявляет своей фикстурой. Если такая выдача не
+    # создаётся, расходятся набор и продукт — вердикт о дереве, а не о посеве.
+    role_prj_edit = builtin_role_id(http, public, boot, "iam.project.edit")
+    step(f"встроенная роль iam.project.edit спрошена у продукта: {role_prj_edit}")
+    sva_inv = make_service_account(http, public, boot, tenants["a"]["accountId"],
+                                   f"seed-{run_id}-inv", run_id,
+                                   "создание субъекта с выдачами в двух аккаунтах")
+    grant_role(http, public, boot, sva_inv, role_prj_edit, "iam.project",
+               tenants["a"]["projectId"])
+    grant_role(http, public, boot, sva_inv, role_admin, "iam.account",
+               tenants["b"]["accountId"])
+    assert_binding_scopes(http, public, boot, sva_inv, {
+        ("iam.project", tenants["a"]["projectId"]),
+        ("iam.account", tenants["b"]["accountId"])})
+    step(f"субъект заведён, и продукт вернул РОВНО две области выдач: {sva_inv}")
+    creds["jwtInvitee"] = sa_token(http, public, token_url, boot, sva_inv, run_id,
+                                   "субъект с выдачами в двух аккаунтах")
+    assert_serves(http, public, creds["jwtInvitee"],
+                  f"/iam/v1/projects/{tenants['a']['projectId']}",
+                  "jwtInvitee (читает проект своей выдачи)")
+    step("jwtInvitee получен обменом и ПРИНЯТ на проекте своей выдачи")
+
+    say("── ОТОЗВАННОЕ удостоверение: принято ДО отзыва, отвергнуто ПОСЛЕ ──────")
+    #
+    # ЕДИНСТВЕННОЕ ДЕФЕКТНОЕ СОСТОЯНИЕ, КОТОРОЕ ЭТОТ СТЕНД ДОКАЗЫВАЕТ, И ОСТАЛЬНЫЕ
+    # НАЗВАНЫ ОТКАЗОМ, А НЕ ОБОЙДЕНЫ:
+    #
+    #   · ИСТЁКШЕЕ — `IssueSAKeyRequest.ttl_seconds` принимает только `>= 0`
+    #     (`internal/apps/kaname/api/sa_keys/usecases.go`, отказ
+    #     «ttl_seconds must be >= 0»), абсолютного `expires_at` в запросе нет, а
+    #     срок САМОГО предъявителя назначает издатель. Значит истёкшего
+    #     предъявителя настоящим глаголом не родить, а подписать его самим —
+    #     подделка, которую кейс и проверил бы;
+    #   · ПОВРЕЖДЁННОЕ — по определению не выпускается никем: «не JWS, 2 сегмента»
+    #     (шапка `cases/authz-sa-apitoken.py`). Это ВХОД, а не удостоверение, и
+    #     производителя у него нет — ни у посева, ни у службы;
+    #   · ГОДНОЕ В ОБЛАСТИ (`apiTokenValid`) — объявлено как «in-scope vpc.* на
+    #     проекте A1». Выдачу такой формы iam создаёт, а УПРАЖНЯТЬ её здесь нечем:
+    #     соседа vpc на автономном стенде нет, и предъявитель, чьё свойство ни один
+    #     шаг не трогает, доказан ровно наполовину.
+    sva_rvk = make_service_account(http, public, boot, tenants["a"]["accountId"],
+                                   f"seed-{run_id}-rvk", run_id,
+                                   "создание учётки под отзыв удостоверения")
+    step(f"учётка под отзыв заведена (своя, чтобы отзыв не задел соседей): "
+         f"{sva_rvk}")
+    creds["apiTokenRevoked"] = revoked_sa_token(http, public, token_url, boot,
+                                                sva_rvk, run_id)
+    step("apiTokenRevoked: принят фронтом ДО отзыва и ОТВЕРГНУТ после — "
+         "состояние достигнуто, а не объявлено")
+
     fixtures = {
         "ownRestBaseUrl": public,
         "ownInternalRestBaseUrl": internal,
@@ -776,10 +1122,35 @@ def run(args: argparse.Namespace) -> int:
         "existingAccountId": tenants["a"]["accountId"],
         "existingProjectId": tenants["a"]["projectId"],
         "existingProjectCrossId": tenants["b"]["projectId"],
+        "iamJwksBaseUrl": jwks_base,
+        "projectA1Id": tenants["a"]["projectId"],
         "svaAId": sva_a,
+        "svaInviteeId": sva_inv,
+        "svaNoGrantId": sva_nogrant,
+        "svaPureNoGrantId": sva_pure,
         "runId": run_id,
         **creds,
     }
+    # ОБЪЯВЛЕННЫЕ ПАРЫ ПРОВЕРЯЮТСЯ ЗДЕСЬ — В ЕДИНСТВЕННОМ МЕСТЕ, ГДЕ ФИКСТУРЫ
+    # СУЩЕСТВУЮТ. `principal_pairings` объявляет данными, чей идентификатор
+    # аутентифицирует какой предъявитель, и до этой правки его `unpaired_principals`
+    # не звал НИКТО: проверка без вызывающего от ненаписанной не отличается ничем.
+    # Вердикт при этом читается из САМОГО предъявителя — из claim
+    # `kaname_principal_id`, который кладёт наш издатель, — а не из того, что посев
+    # о нём думает.
+    pairings = require_pairings()
+    broken = pairings.unpaired_principals(fixtures)
+    if broken:
+        raise Finding(
+            "объявленные пары «идентификатор ↔ предъявитель» НЕ ДЕРЖАТСЯ: "
+            + "; ".join(broken)
+            + ". Набор привязывает роль к идентификатору и читает под "
+              "предъявителем, поэтому расхождение здесь приезжает в кейс "
+              "таймаутом на шесть шагов позже причины")
+    covered = sum(1 for i, t in pairings.PRINCIPAL_PAIRINGS.items()
+                  if i in fixtures and t in fixtures)
+    step(f"объявленные пары проверены по claim предъявителя: покрыто этим посевом "
+         f"{covered} из {len(pairings.PRINCIPAL_PAIRINGS)}, расхождений нет")
     patch = env_patch(fixtures)
     env_file = pathlib.Path(args.env_file)
     replaced = write_env(patch, env_file, pathlib.Path(args.env_template))
@@ -830,7 +1201,7 @@ def self_test() -> int:
     # Ось 1б: ПОСЕВ ОБЪЯВЛЯЕТ ПОВЕРХНОСТЬ, ДЛЯ КОТОРОЙ КУЁТ.
     #
     # Перечня ключей НЕДОСТАТОЧНО, и это замер: восемь коллекций потеряли
-    # препятствие «нужен машинный посев» от одного этого посева, и СЕМЬ из восьми
+    # препятствие машинного посева от одного этого посева, и СЕМЬ из восьми
     # — коллекции КРАЯ платформы, чьих предъявителей производит чужой посев чужого
     # стенда. Совпало только ИМЯ ключа. Поэтому посев называет и поверхность, а
     # перепись зачитывает его ключи ТОЛЬКО коллекциям этой поверхности.
@@ -955,6 +1326,124 @@ def self_test() -> int:
             failed = True
         _c(label, failed == must_fail, f"ожидалось={must_fail}, получено={failed}")
 
+    # ── Ось 7: ОБЪЯВЛЕННАЯ ПАРА «ИДЕНТИФИКАТОР ↔ ПРЕДЪЯВИТЕЛЬ» ДЕРЖИТСЯ ────
+    #
+    # ПРЕДМЕТ. `tests/authz-fixtures/principal_pairings.py` объявляет ДАННЫМИ, чей
+    # идентификатор аутентифицирует какой предъявитель, и его собственная шапка
+    # называет цену несоблюдения: набор привязывает роль к `{{<id>}}`, читает под
+    # `{{<token>}}`, и при расхождении отказ неотличим от «выдача ещё не
+    # материализовалась» — то есть приезжает таймаутом, не там, где причина, и на
+    # шесть шагов позже.
+    #
+    # ПОЧЕМУ ЭТО ОСЬ ПОСЕВА, А НЕ АВТОРИТЕТА. У `unpaired_principals` в этом
+    # репозитории НЕТ НИ ОДНОГО вызывающего: `git grep -n unpaired_principals`
+    # находит только объявление. Проверка, которую никто не зовёт, отличается от
+    # ненаписанной ровно ничем, а единственное место, где фикстуры существуют, —
+    # посев. Шапка кейсов при этом утверждает «и там же проверяется»
+    # (`cases/iam-subject-privileges-read.py`) — то есть два места об одном
+    # предмете, и верно одно.
+    #
+    # ПОЛОВИНА КАНАЛА — НАХОДКА, И ОНА В ДЕРЕВЕ СЕЙЧАС: посев пишет
+    # `jwtPureNoBindings` и НЕ пишет `svaPureNoGrantId`, с которым тот объявлен в
+    # паре. Это ровно та форма, из-за которой авторитет и написан.
+    if principal_pairings is None:
+        _c("ни одна объявленная пара не покрыта ПОЛОВИНОЙ", False,
+           f"модуль-авторитет не прочитан ({PAIRINGS_IMPORT_ERROR}) — "
+           f"предпосылки у оси нет, и молчание здесь объявило бы её проверенной")
+        _c("предъявитель называет ЧУЖОГО принципала — расхождение", False,
+           "тот же непрочитанный авторитет")
+        return _finish_self_test()
+    declared_pairs = principal_pairings.PRINCIPAL_PAIRINGS
+    keys_declared = set(minted_keys())
+    half = sorted(f"{i} ↔ {t}" for i, t in declared_pairs.items()
+                  if (i in keys_declared) != (t in keys_declared))
+    _c("ни одна объявленная пара не покрыта ПОЛОВИНОЙ", not half,
+       f"половин {len(half)}: {', '.join(half)}")
+
+    # Ось 7б: ВЕРДИКТ ПАРЫ НАСТОЯЩИЙ — инъекция в обе стороны на одном факте.
+    # Предъявитель, назвавший ЧУЖОГО принципала, обязан дать находку; тот же
+    # предъявитель, назвавший своего, обязан молчать.
+    table = {"svaXId": "jwtX"}
+    for label, claimed, must_break in (
+            ("предъявитель называет ЧУЖОГО принципала — расхождение", "svaOther", True),
+            ("тот же предъявитель называет своего — молчит", "svaXId-value", False)):
+        got = principal_pairings.unpaired_principals(
+            {"svaXId": "svaXId-value",
+             "jwtX": principal_pairings.make_token(claimed)}, table)
+        _c(label, bool(got) == must_break, f"получено {got}")
+
+    # ── Ось 8: ДЕФЕКТНОЕ СОСТОЯНИЕ ДОКАЗАНО, А НЕ ОБЪЯВЛЕНО ──────────────────
+    #
+    # ПРЕДМЕТ. Отозванное удостоверение, у которого фронт по-прежнему принимает
+    # предъявителя, — не отозванное. Кейс про него («[UNAUTH] … revoked token»)
+    # тогда зеленеет на живом токене по неверной причине, и отличить это снаружи
+    # нельзя: ответ 401 он и ждёт, а получил бы его от любой опечатки в пути.
+    #
+    # Отзыв на этой посадке доходит НЕ МГНОВЕННО: `presented-credential`
+    # объявляет кэш отзыва 30 с (`stand-own.sh`), поэтому утверждение обязано
+    # ЖДАТЬ отказа, а не спрашивать один раз. Ждать при этом до ПРЕДМЕТА:
+    # единственный ответ «ещё принимает» неотличим от «принимать не перестанет».
+    #
+    # Инъекция в обе стороны на одном факте: фронт, который после отзыва отвечает
+    # 200, обязан дать находку; тот же фронт с 401 — молчать.
+    await_refusal = globals().get("await_refusal")
+    if await_refusal is None:
+        _c("отозванное удостоверение: отказ фронта ДОЖИДАЕТСЯ, а не объявляется",
+           False, "в посеве нет шага, утверждающего отказ после отзыва — "
+                  "предмета у оси не существует")
+    else:
+        class _Front:
+            def __init__(self, code):
+                self.code = code
+
+            def json_ask(self, url, **kw):
+                return self.code, {"error": "x"} if self.code != 200 else {"ok": 1}
+
+        for label, code, must_fail in (
+                ("после отзыва фронт всё ещё принимает — находка", 200, True),
+                ("после отзыва фронт отвергает — молчит", 401, False)):
+            try:
+                await_refusal(_Front(code), "https://x", "t", "/iam/v1/me",
+                              "проба", budget_s=0.5)
+                failed = False
+            except Finding:
+                failed = True
+            _c(label, failed == must_fail,
+               f"ожидалось падение={must_fail}, получено={failed}")
+
+    # ── Ось 9: НАБОР КЛЮЧЕЙ ПУБЛИКУЕТ САМА СЛУЖБА, И ОН НЕ ПУСТ ──────────────
+    #
+    # ПРЕДМЕТ. `iamJwksBaseUrl` — АДРЕС, а не удостоверение: его называет посадка.
+    # Но адрес, за которым лежит ПУСТОЙ набор ключей, от ненаписанного адреса не
+    # отличается ничем: проверяющий подпись сосед получит 200 и не найдёт ключа,
+    # то есть отказ приедет как «подпись не сверяется», а не как «ключей нет».
+    #
+    # Инъекция в обе стороны на одном факте: пустой перечень — находка, непустой —
+    # молчание.
+    assert_own_jwks = globals().get("assert_own_jwks")
+    if assert_own_jwks is None:
+        _c("набор ключей собственной чеканки НЕ ПУСТ — утверждается", False,
+           "в посеве нет шага, утверждающего набор ключей — предмета у оси нет")
+    else:
+        class _Jwks:
+            def __init__(self, doc):
+                self.doc = doc
+
+            def json_ask(self, url, **kw):
+                return 200, self.doc
+
+        for label, doc, must_fail in (
+                ("набор ключей ПУСТ — находка", {"keys": []}, True),
+                ("набор ключей несёт ключ — молчит",
+                 {"keys": [{"kty": "RSA", "kid": "k1"}]}, False)):
+            try:
+                assert_own_jwks(_Jwks(doc), "https://x")
+                failed = False
+            except Finding:
+                failed = True
+            _c(label, failed == must_fail,
+               f"ожидалось падение={must_fail}, получено={failed}")
+
     # Ось 6: запись окружения ДОБАВЛЯЕТ ключ, которого в шаблоне нет.
     import tempfile
     with tempfile.TemporaryDirectory(prefix="seed-selftest-") as td:
@@ -971,6 +1460,10 @@ def self_test() -> int:
            replaced == 1 and got == {"jwtSAA": "x", "ownRestBaseUrl": "https://y"},
            f"заменено {replaced}, получено {got}")
 
+    return _finish_self_test()
+
+
+def _finish_self_test() -> int:
     print()
     if _SELF:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_SELF)} — {', '.join(_SELF)}",
@@ -990,6 +1483,7 @@ def main() -> int:
     ap.add_argument("--port-internal", type=int, default=9099)
     ap.add_argument("--port-hooks", type=int, default=9092)
     ap.add_argument("--port-token", type=int, default=9096)
+    ap.add_argument("--port-jwks", type=int, default=9097)
     ap.add_argument("--port-grpc", type=int, default=9091)
     ap.add_argument("--run-id", default="")
     ap.add_argument("--env-file",

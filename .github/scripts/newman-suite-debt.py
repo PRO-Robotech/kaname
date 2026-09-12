@@ -77,6 +77,37 @@ NEIGHBOUR_VARS = frozenset({"iamJwksBaseUrl", "iamRegistryTokenBaseUrl",
                             "providerPublicBaseUrl", "registryDataPlaneBaseUrl"})
 # Предъявитель, которого машинный посев не производит: он требует ЧЕЛОВЕКА.
 CEREMONY_PREFIXES = ("jwtHuman", "ceremony")
+# ИДЕНТИФИКАТОР ЧЕЛОВЕКА ЦЕРЕМОНИИ — та же природа, что у его предъявителя, и тот
+# же производитель. Выведено ЗАМЕРОМ по кейсам, а не по имени: `humanAccCrudUserId`
+# читается в папке, чей предъявитель — `jwtHumanAccCrud`, утверждением
+# «ownerUserId == caller», и образец требует префикса `usr`. То есть ключ есть
+# идентификатор ТОГО ЖЕ вызывающего, и машинный посев не производит его ни при
+# каком устройстве: служебная учётка человеком не является, её идентификатор несёт
+# префикс `sva`, а подставленное значение дало бы кейс, проверивший подстановку.
+#
+# ИМЯ ВРЁТ В ОБЕ СТОРОНЫ, поэтому образец узкий. `svaInviteeId` по имени похож на
+# приглашённого человека, а кейсы читают его при `subjectType=service_account` —
+# это МАШИННЫЙ ключ, и он обязан остаться в машинном препятствии.
+CEREMONY_ID_RE = re.compile(r"^human[A-Z][A-Za-z0-9]*UserId$")
+# ПРЕДЪЯВИТЕЛЬ ПОВЫШЕННОГО УРОВНЯ — тоже церемония, под каким бы именем слот ни
+# стоял. Сходится из двух независимых мест: набор объявляет
+# `jwtAccountAdminAStepUp` НЕПОДДЕЛЫВАЕМЫМ посевом (шапка
+# `cases/iam-interactive-client.py`), а продукт берёт `kaname_acr` только из сессии
+# поставщика (`token_enrichment_service.go` кладёт пробросом,
+# `authzguard/acr_floor.go` читает) — служебная учётка от порога освобождена, то
+# есть поднять уровень машине нечем.
+CEREMONY_STEPUP_SUFFIX = "StepUp"
+# АДРЕС ПОВЕРХНОСТИ — не удостоверение и не предмет посева: его НАЗЫВАЕТ посадка.
+# Объединение всех трёх наборов адресов выше; своя поверхность здесь тоже нужна —
+# посев её адреса пишет, и тогда ключ отсеется как покрытый, а не как адрес.
+ADDRESS_VARS = EDGE_VARS | OWN_VARS | NEIGHBOUR_VARS
+
+
+def is_ceremony_key(key: str) -> bool:
+    """Ключ, производимый ЦЕРЕМОНИЕЙ человека: предъявитель либо его идентификатор."""
+    return (key.startswith(CEREMONY_PREFIXES)
+            or key.endswith(CEREMONY_STEPUP_SUFFIX)
+            or bool(CEREMONY_ID_RE.match(key)))
 
 
 def collections(newman: pathlib.Path) -> list[pathlib.Path]:
@@ -129,6 +160,28 @@ def blockers(surface: str, keys: set[str], empty: set[str],
     `ownInternalRestBaseUrl`) — АДРЕСА собственных фронтов, которые производит
     сам стенд. Прежняя редакция называла удостоверениями все шесть.
 
+    ПРИРОД У НЕПОКРЫТОГО КЛЮЧА ТРИ, И РАЗНЫЕ У НИХ ПРОИЗВОДИТЕЛИ. Прежняя
+    редакция сваливала их в одно препятствие «нужен машинный посев», и это не
+    неточность формулировки, а ОБЪЯВЛЕНИЕ НЕИСПОЛНИМОЙ ВОЗМОЖНОСТИ: строка звала
+    читателя завести машинный посев тому, чего машинный посев не производит.
+    Перепись по стволу 37ace71de4 дала на 20 ключей машинного препятствия 4 ключа
+    природы «человек» (`humanAccCrudUserId`, `humanAccRdDeriveUserId`,
+    `humanAccRdSagaUserId`, `jwtAccountAdminAStepUp`) и 2 природы «адрес»
+    (`iamJwksBaseUrl`, `providerPublicBaseUrl`) — то есть каждый третий.
+
+      · ЦЕРЕМОНИЯ ЧЕЛОВЕКА — предъявитель человека либо его идентификатор;
+      · АДРЕС поверхности — его называет посадка, не подписант;
+      · машинный посев — удостоверение, которое чеканит сама служба.
+
+    И ПОВЕРХНОСТЬ НАЗЫВАЕТСЯ В СТРОКЕ, А НЕ ТОЛЬКО СЧИТАЕТСЯ. Учёт по
+    поверхности здесь с самого начала, а строка про него молчала: «не пишет ни
+    один посев ЭТОЙ поверхности» не называла, КАКОЙ. Цена измерена и это план
+    целой полосы: печатный долг показывал 39 коллекций с препятствием «нужен
+    машинный посев», под него заводилась полоса «расширить посев», — а все 39
+    суть коллекции КРАЯ, которым посев собственного фронта не зачитывается НИ
+    ОДНИМ ключом by construction (ось 3г). Число, на которое ставился план,
+    сдвинуть было нечем, и увидеть это по печатному долгу читатель не мог.
+
     КЛЮЧ ЗАЧИТЫВАЕТСЯ ТОЛЬКО СВОЕЙ ПОВЕРХНОСТИ, И ЭТО ЗАМЕР. Учёт по одному
     перечню имён снял препятствие посева у ВОСЬМИ коллекций, из которых СЕМЬ —
     коллекции КРАЯ платформы: их `jwtAccountAdmin*` производит чужой посев чужого
@@ -145,14 +198,24 @@ def blockers(surface: str, keys: set[str], empty: set[str],
         out.append("нужен край платформы (его производитель — чужой стенд)")
     minted = minted_by_surface.get(surface, set())
     need = sorted(k for k in keys if k in empty and k != "runId")
-    ceremony = [k for k in need if k.startswith(CEREMONY_PREFIXES)]
-    machine = [k for k in need if k not in ceremony and k not in minted]
+    ceremony = [k for k in need if is_ceremony_key(k)]
+    rest = [k for k in need if k not in ceremony and k not in minted]
+    address = [k for k in rest if k in ADDRESS_VARS]
+    machine = [k for k in rest if k not in ADDRESS_VARS]
     if ceremony:
-        out.append(f"нужен ЧЕЛОВЕЧЕСКИЙ предъявитель ({len(ceremony)}: "
+        out.append(f"нужна ЦЕРЕМОНИЯ ЧЕЛОВЕКА ({len(ceremony)} ключ(ей) — "
+                   f"предъявитель человека либо его идентификатор, производит их "
+                   f"одна и та же церемония, а машинный посев не производит ни "
+                   f"одного: "
                    f"{', '.join(ceremony[:3])}{'…' if len(ceremony) > 3 else ''})")
+    if address:
+        out.append(f"нужен АДРЕС поверхности «{surface}» ({len(address)} ключ(ей) — "
+                   f"его НАЗЫВАЕТ посадка, ни один подписант его не выпускает: "
+                   f"{', '.join(address[:3])}{'…' if len(address) > 3 else ''})")
     if machine:
-        out.append(f"нужен машинный посев ({len(machine)} ключ(ей) окружения, "
-                   f"которых не пишет ни один посев ЭТОЙ поверхности: "
+        out.append(f"нужен машинный посев поверхности «{surface}» "
+                   f"({len(machine)} ключ(ей) окружения, которых не пишет ни один "
+                   f"посев ЭТОЙ поверхности: "
                    f"{', '.join(machine[:3])}{'…' if len(machine) > 3 else ''})")
     return out
 
@@ -648,6 +711,148 @@ def self_test() -> int:
            buf.getvalue()[-300:])
         _c("и текст называет несозданное условие",
            "УСЛОВИЕ НЕ СОЗДАНО" in buf.getvalue(), buf.getvalue()[-300:])
+
+        # ── Ось 7: ПРИРОДА КЛЮЧА РАЗЛИЧАЕТСЯ, И «ЧЕЛОВЕК» НЕ ЗОВЁТ МАШИНУ ───
+        #
+        # ЗАМЕР, А НЕ ИМЯ. `humanAccCrudUserId` читается кейсом как идентификатор
+        # ТОГО ЖЕ вызывающего, чей предъявитель — `jwtHumanAccCrud`: утверждение
+        # кейса — «ownerUserId == caller», и образец требует префикса `usr`.
+        # Значит ключ производит ЦЕРЕМОНИЯ, а машинный посев не производит его ни
+        # при каком устройстве: служебная учётка человеком не является, её
+        # идентификатор несёт префикс `sva`, и подставленное значение дало бы
+        # кейс, проверивший подстановку.
+        #
+        # ЦЕНА ПРЕЖНЕГО УЧЁТА НАЗВАНА: строка долга звала читателя завести
+        # машинный посев тому, чего машинный посев не производит, — то есть
+        # ОБЪЯВЛЯЛА возможность, неисполнимую by construction.
+        #
+        # ЗАКОННЫЙ БЛИЗНЕЦ РЯДОМ и отличается ОДНИМ фактом: `svaInviteeId` —
+        # идентификатор СЛУЖЕБНОЙ учётки (кейсы читают его при
+        # `subjectType=service_account`), и он обязан остаться машинным.
+        for lane, key, want_ceremony in (("human-id", "humanAccCrudUserId", True),
+                                         ("machine-id", "svaInviteeId", False)):
+            base = tmp / f"nature-{lane}"
+            body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                    '"{{baseUrl}}/iam/v1/x"}},'
+                    '"event":[{"listen":"test","script":{"exec":['
+                    f'"pm.environment.get(\'{key}\')"]}}}}]}}]}}')
+            t7 = _mk(base, {"nature": body},
+                     {"baseUrl": "http://edge", key: "", "runId": ""})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                run(t7, workflows=_wf(base, runs=["nature"]))
+            out = buf.getvalue()
+            # СУДИТСЯ ГОЛОВА ПРЕПЯТСТВИЯ, А НЕ ПОДСТРОКА ВЫВОДА, и это не
+            # педантизм: первая редакция этой оси искала «машинный посев» по
+            # всему выводу и краснела на СОБСТВЕННОМ объяснении препятствия
+            # церемонии («…машинный посев не производит ни одного»). Тот самый
+            # класс, который шапка `pipeline_runs` называет про грепанье
+            # комментариев, применённый не к конвейеру, а к самой переписи.
+            _c(f"{key}: препятствие названо "
+               f"{'ЦЕРЕМОНИЕЙ ЧЕЛОВЕКА' if want_ceremony else 'машинным посевом'}",
+               ("нужна ЦЕРЕМОНИЯ ЧЕЛОВЕКА" in out) == want_ceremony
+               and ("нужен машинный посев поверхности" in out) != want_ceremony,
+               out[:900])
+
+        # ── Ось 7б: ПРЕДЪЯВИТЕЛЬ ПОВЫШЕННОГО УРОВНЯ — ТОЖЕ ЦЕРЕМОНИЯ ─────────
+        #
+        # ЗАМЕР, И ОН СХОДИТСЯ ИЗ ДВУХ НЕЗАВИСИМЫХ МЕСТ. Шапка
+        # `cases/iam-interactive-client.py` говорит дословно:
+        # «`jwtAccountAdminAStepUp` is declared unforgeable by the seed itself …
+        # and every other `jwt*` fixture is a ServiceAccount token, i.e.
+        # acr-exempt». И это подтверждается устройством продукта: `kaname_acr`
+        # приходит ТОЛЬКО из сессии поставщика (`token_enrichment_service.go`
+        # кладёт его пробросом, `authzguard/acr_floor.go` читает), а служебная
+        # учётка от порога ОСВОБОЖДЕНА — то есть поднять уровень машине нечем.
+        #
+        # Значит приставки `jwtHuman` недостаточно: `*StepUp` — предъявитель, чей
+        # производитель церемония, под каким бы именем слот ни стоял.
+        # Законный близнец отличается ОДНИМ фактом: `jwtAccountAdminA` без
+        # повышения — служебная учётка, и он обязан остаться машинным.
+        for lane, key, want_ceremony in (("stepup", "jwtAccountAdminAStepUp", True),
+                                         ("plain", "jwtAccountAdminA", False)):
+            base = tmp / f"stepup-{lane}"
+            body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                    '"{{baseUrl}}/iam/v1/x"}},'
+                    '"event":[{"listen":"test","script":{"exec":['
+                    f'"pm.environment.get(\'{key}\')"]}}}}]}}]}}')
+            t7b = _mk(base, {"stepup": body},
+                      {"baseUrl": "http://edge", key: "", "runId": ""})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                run(t7b, workflows=_wf(base, runs=["stepup"]))
+            out = buf.getvalue()
+            _c(f"{key}: препятствие названо "
+               f"{'ЦЕРЕМОНИЕЙ ЧЕЛОВЕКА' if want_ceremony else 'машинным посевом'}",
+               ("нужна ЦЕРЕМОНИЯ ЧЕЛОВЕКА" in out) == want_ceremony
+               and ("нужен машинный посев поверхности" in out) != want_ceremony,
+               out[:900])
+
+        # ── Ось 8: АДРЕС — НЕ ПОСЕВ, И ЕГО ПРОИЗВОДИТ СТЕНД ──────────────────
+        #
+        # Тот же класс, что уже назван в шапке `blockers`: из шести пустых ключей
+        # своей поверхности два были АДРЕСАМИ, и прежняя редакция звала их
+        # удостоверениями. Ключи `iamJwksBaseUrl` и `providerPublicBaseUrl` — того
+        # же рода: их не выпускает ни один подписант, их НАЗЫВАЕТ посадка.
+        # Законный близнец — предъявитель той же коллекции: он обязан остаться
+        # машинным посевом.
+        for lane, key, want_address in (("addr", "iamJwksBaseUrl", True),
+                                        ("cred", "jwtBootstrap", False)):
+            base = tmp / f"addrnature-{lane}"
+            body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                    '"{{baseUrl}}/iam/v1/x"}},'
+                    '"event":[{"listen":"test","script":{"exec":['
+                    f'"pm.environment.get(\'{key}\')"]}}}}]}}]}}')
+            t8 = _mk(base, {"nature": body},
+                     {"baseUrl": "http://edge", key: "", "runId": ""})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                run(t8, workflows=_wf(base, runs=["nature"]))
+            out = buf.getvalue()
+            _c(f"{key}: препятствие названо "
+               f"{'АДРЕСОМ' if want_address else 'машинным посевом'}",
+               ("нужен АДРЕС поверхности" in out) == want_address
+               and ("нужен машинный посев поверхности" in out) != want_address,
+               out[:900])
+
+        # ── Ось 9: СТРОКА ДОЛГА НАЗЫВАЕТ ПОВЕРХНОСТЬ, ЧЕЙ ПОСЕВ ТРЕБУЕТСЯ ────
+        #
+        # ЦЕНА ИЗМЕРЕНА И ОНА — ПЛАН ЦЕЛОЙ ПОЛОСЫ. Учёт поклюсевой и по
+        # поверхности стоит здесь с самого начала (оси 3б и 3г), а вот СТРОКА про
+        # него молчала: она говорила «которых не пишет ни один посев ЭТОЙ
+        # поверхности», не называя, КАКОЙ. Читатель печатного долга видел 39
+        # коллекций с препятствием «нужен машинный посев» и заводил полосу
+        # «расширить посев» — при том что все 39 суть коллекции КРАЯ, и посев
+        # собственного фронта им не зачитывается НИ ОДНИМ ключом by construction.
+        # То есть число, на которое ставился план, сдвинуть было нечем.
+        #
+        # Инъекция: коллекция КРАЯ и посев СВОЕЙ поверхности в одном дереве.
+        # Строка обязана назвать «край платформы» — производителя, которого нет, —
+        # а не поверхность посева, который в дереве лежит.
+        base = tmp / "surface-named"
+        edge_seeded = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                       '"{{baseUrl}}/iam/v1/x"}},'
+                       '"event":[{"listen":"test","script":{"exec":['
+                       '"pm.environment.get(\'jwtAccountAdminA\')"]}}]}]}')
+        t9 = _mk(base, {"edge-seeded": edge_seeded},
+                 {"baseUrl": "http://edge", "jwtAccountAdminA": "", "runId": ""})
+        fx9 = t9.parent / "authz-fixtures"
+        fx9.mkdir(parents=True, exist_ok=True)
+        (fx9 / "seed_probe.py").write_text(
+            "import sys\n"
+            "if '--minted-keys' in sys.argv:\n"
+            "    print('jwtAccountAdminA')\n"
+            "elif '--minted-surface' in sys.argv:\n"
+            "    print('служба (собственный REST-фронт)')\n",
+            encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(t9, workflows=_wf(base, runs=["edge-seeded"]))
+        out = buf.getvalue()
+        _c("строка машинного посева НАЗЫВАЕТ поверхность, чей посев требуется",
+           "машинный посев поверхности «край платформы»" in out, out[:800])
+        _c("и НЕ называет поверхность посева, который в дереве лежит",
+           "машинный посев поверхности «служба" not in out, out[:800])
 
         # Ось 4: коллекция края попадает в «не гоняется» с причиной про край.
         edge = ('{"item":[{"name":"s","request":{"url":{"raw":"{{baseUrl}}/iam/v1/x"}}}]}')
