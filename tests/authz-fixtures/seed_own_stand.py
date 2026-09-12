@@ -111,7 +111,27 @@ ROOT = HERE.parents[1]
 # рабочих каталогов. Модуль не трогает ни сети, ни файла, ни часов — это условие
 # его собственной шапки, и потому его можно звать и в самопроверке.
 sys.path.insert(0, str(HERE))
-import principal_pairings  # noqa: E402
+try:
+    import principal_pairings  # noqa: E402
+except ImportError as e:
+    # НЕПРОЧИТАННЫЙ АВТОРИТЕТ — «условие не создано», А НЕ ОТКАЗ ПРОДУКТА, и это
+    # различие ценой одной строки. Непокрытый `import` уронил бы посев кодом 1, а
+    # конвейер печатает на rc≠75 «Посев отвергнут продуктом» и посылает читателя
+    # чинить службу, которая ни при чём: предмет отказа — рабочая копия.
+    principal_pairings = None
+    PAIRINGS_IMPORT_ERROR = str(e)
+else:
+    PAIRINGS_IMPORT_ERROR = ""
+
+
+def require_pairings():
+    """Авторитет пар или «условие не создано» с названной причиной."""
+    if principal_pairings is None:
+        raise Unmet(
+            f"модуль-авторитет пар не прочитан ({PAIRINGS_IMPORT_ERROR}) — "
+            f"объявленные пары «идентификатор ↔ предъявитель» проверить нечем, "
+            f"и вердикта о продукте здесь нет НИ ОДНОГО")
+    return principal_pairings
 
 # Издатель и адресат стенда. Величины объявлены ОДИН раз и совпадают с посадкой
 # (`.github/scripts/stand-own.sh`): расхождение здесь дало бы отказ обмена с
@@ -1118,7 +1138,8 @@ def run(args: argparse.Namespace) -> int:
     # Вердикт при этом читается из САМОГО предъявителя — из claim
     # `kaname_principal_id`, который кладёт наш издатель, — а не из того, что посев
     # о нём думает.
-    broken = principal_pairings.unpaired_principals(fixtures)
+    pairings = require_pairings()
+    broken = pairings.unpaired_principals(fixtures)
     if broken:
         raise Finding(
             "объявленные пары «идентификатор ↔ предъявитель» НЕ ДЕРЖАТСЯ: "
@@ -1126,10 +1147,10 @@ def run(args: argparse.Namespace) -> int:
             + ". Набор привязывает роль к идентификатору и читает под "
               "предъявителем, поэтому расхождение здесь приезжает в кейс "
               "таймаутом на шесть шагов позже причины")
-    covered = sum(1 for i, t in principal_pairings.PRINCIPAL_PAIRINGS.items()
+    covered = sum(1 for i, t in pairings.PRINCIPAL_PAIRINGS.items()
                   if i in fixtures and t in fixtures)
     step(f"объявленные пары проверены по claim предъявителя: покрыто этим посевом "
-         f"{covered} из {len(principal_pairings.PRINCIPAL_PAIRINGS)}, расхождений нет")
+         f"{covered} из {len(pairings.PRINCIPAL_PAIRINGS)}, расхождений нет")
     patch = env_patch(fixtures)
     env_file = pathlib.Path(args.env_file)
     replaced = write_env(patch, env_file, pathlib.Path(args.env_template))
@@ -1325,6 +1346,13 @@ def self_test() -> int:
     # ПОЛОВИНА КАНАЛА — НАХОДКА, И ОНА В ДЕРЕВЕ СЕЙЧАС: посев пишет
     # `jwtPureNoBindings` и НЕ пишет `svaPureNoGrantId`, с которым тот объявлен в
     # паре. Это ровно та форма, из-за которой авторитет и написан.
+    if principal_pairings is None:
+        _c("ни одна объявленная пара не покрыта ПОЛОВИНОЙ", False,
+           f"модуль-авторитет не прочитан ({PAIRINGS_IMPORT_ERROR}) — "
+           f"предпосылки у оси нет, и молчание здесь объявило бы её проверенной")
+        _c("предъявитель называет ЧУЖОГО принципала — расхождение", False,
+           "тот же непрочитанный авторитет")
+        return _finish_self_test()
     declared_pairs = principal_pairings.PRINCIPAL_PAIRINGS
     keys_declared = set(minted_keys())
     half = sorted(f"{i} ↔ {t}" for i, t in declared_pairs.items()
@@ -1432,6 +1460,10 @@ def self_test() -> int:
            replaced == 1 and got == {"jwtSAA": "x", "ownRestBaseUrl": "https://y"},
            f"заменено {replaced}, получено {got}")
 
+    return _finish_self_test()
+
+
+def _finish_self_test() -> int:
     print()
     if _SELF:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_SELF)} — {', '.join(_SELF)}",
