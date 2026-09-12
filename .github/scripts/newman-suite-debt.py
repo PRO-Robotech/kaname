@@ -37,6 +37,7 @@ import argparse
 import json
 import pathlib
 import re
+import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -96,20 +97,77 @@ def surface_of(text: str, keys: set[str]) -> str:
 
 
 def blockers(surface: str, keys: set[str], empty: set[str],
-             seed_present: bool) -> list[str]:
+             minted: set[str]) -> list[str]:
+    """Препятствия коллекции. `minted` — ключи, которые посев дерева УМЕЕТ писать.
+
+    ПРЕДМЕТ СЧИТАЕТСЯ ПОКЛЮЧЕВО, А НЕ ОДНИМ ФЛАГОМ «посев есть». Флаг снимал
+    препятствие у ВСЕХ сразу: первый заведённый посев объявил бы посеянными и те
+    сорок коллекций, чьих удостоверений он не куёт, — и объявил бы молча. Разница
+    наблюдаема: у коллекции края остаётся и своё препятствие края, и непокрытые
+    ключи, а у собственной поверхности не остаётся ни одного.
+
+    СЛОВО «удостоверение» ЗДЕСЬ НЕ УПОТРЕБЛЯЕТСЯ, и это замер: из шести пустых
+    ключей единственной коллекции своей поверхности два (`ownRestBaseUrl`,
+    `ownInternalRestBaseUrl`) — АДРЕСА собственных фронтов, которые производит
+    сам стенд. Прежняя редакция называла удостоверениями все шесть.
+    """
     out = []
     if surface == "край платформы":
         out.append("нужен край платформы (его производитель — чужой стенд)")
     need = sorted(k for k in keys if k in empty and k != "runId")
     ceremony = [k for k in need if k.startswith(CEREMONY_PREFIXES)]
-    machine = [k for k in need if k not in ceremony]
+    machine = [k for k in need if k not in ceremony and k not in minted]
     if ceremony:
         out.append(f"нужен ЧЕЛОВЕЧЕСКИЙ предъявитель ({len(ceremony)}: "
                    f"{', '.join(ceremony[:3])}{'…' if len(ceremony) > 3 else ''})")
-    if machine and not seed_present:
-        out.append(f"нужен машинный посев ({len(machine)} удостоверени(й)/id: "
+    if machine:
+        out.append(f"нужен машинный посев ({len(machine)} ключ(ей) окружения, "
+                   f"которых не пишет ни один посев дерева: "
                    f"{', '.join(machine[:3])}{'…' if len(machine) > 3 else ''})")
     return out
+
+
+def seed_scripts(seed_dir: pathlib.Path) -> list[pathlib.Path]:
+    """Посевы дерева — ОТБОРОМ по имени, а не перечнем и не перечнем исключений.
+
+    Отбор глобом, потому что альтернативы хуже обе: выписанный перечень посевов
+    разошёлся бы с деревом в одну сторону (новый посев в него не попал бы), а
+    «любой .py/.sh, кроме названного» заставлял бы ИСПОЛНЯТЬ соседние файлы
+    каталога ради вопроса, посев ли это. Прежняя редакция несла именно такое
+    исключение по имени — у него не было предмета, кроме одного файла.
+    """
+    if not seed_dir.is_dir():
+        return []
+    out = sorted(p for p in seed_dir.glob("seed_*.py") if p.is_file())
+    out += sorted(p for p in seed_dir.glob("seed-*.sh") if p.is_file())
+    return out
+
+
+def minted_by_seeds(scripts: list[pathlib.Path]) -> tuple[set[str], list[str]]:
+    """Спросить у КАЖДОГО посева, какие ключи окружения он пишет.
+
+    Перепись не держит второй копии перечня: копия разошлась бы с посевом молча и
+    разошлась бы в одну сторону. Посев, который на вопрос не отвечает, в счёт НЕ
+    идёт и называется отдельной строкой — «посев есть, а что он пишет, неизвестно»
+    и «посева нет» ведут читателя в разные места.
+    """
+    minted: set[str] = set()
+    mute: list[str] = []
+    for script in scripts:
+        cmd = ([sys.executable, str(script), "--minted-keys"] if script.suffix == ".py"
+               else [str(script), "--minted-keys"])
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            mute.append(f"{script.name}: не запустился ({e})")
+            continue
+        keys = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+        if proc.returncode != 0 or not keys:
+            mute.append(f"{script.name}: не назвал ни одного ключа "
+                        f"(код {proc.returncode})")
+            continue
+        minted.update(keys)
+    return minted, mute
 
 
 def run(newman: pathlib.Path) -> int:
@@ -125,10 +183,8 @@ def run(newman: pathlib.Path) -> int:
         return 1
 
     seed_dir = newman.parent / "authz-fixtures"
-    seed_scripts = sorted(p for p in seed_dir.iterdir()
-                          if p.is_file() and p.suffix in (".sh", ".py")
-                          and p.name != "principal_pairings.py") if seed_dir.is_dir() else []
-    seed_present = bool(seed_scripts)
+    scripts = seed_scripts(seed_dir)
+    minted, mute = minted_by_seeds(scripts)
 
     runnable, blocked = [], []
     by_surface: dict[str, int] = {}
@@ -141,7 +197,7 @@ def run(newman: pathlib.Path) -> int:
         # Имя коллекции — БЕЗ приставки формата: `Path.stem` снимает только `.json`,
         # оставляя `.postman_collection`, и перепись читалась бы шумом.
         stem = col.name[: -len(".postman_collection.json")]
-        bl = blockers(surface, keys, empty, seed_present)
+        bl = blockers(surface, keys, empty, minted)
         if bl:
             blocked.append((stem, surface, bl))
             for b in bl:
@@ -163,8 +219,13 @@ def run(newman: pathlib.Path) -> int:
     for b, n in sorted(by_blocker.items(), key=lambda kv: -kv[1]):
         print(f"  {n:3d}  {b}")
     print()
-    print(f"посев общих фикстур: {'есть' if seed_present else 'ОТСУТСТВУЕТ'} "
-          f"({len(seed_scripts)} скрипт(ов) в {seed_dir.name}/)")
+    print(f"посев общих фикстур: {'есть' if scripts else 'ОТСУТСТВУЕТ'} "
+          f"({len(scripts)} скрипт(ов) в {seed_dir.name}/), "
+          f"ключей окружения он пишет: {len(minted)}")
+    for script in scripts:
+        print(f"  · {script.name}")
+    for m in mute:
+        print(f"  · НЕ НАЗВАЛ СВОИХ КЛЮЧЕЙ — {m}")
     print()
     if runnable:
         print("ГОНЯЕТСЯ ЗДЕСЬ:")
@@ -258,6 +319,53 @@ def self_test() -> int:
         _c("та же коллекция с пустым ключом посева — в «НЕ гоняется»",
            "НЕ гоняется здесь: 1" in out, out[:400])
         _c("и причина названа посевом", "машинный посев" in out, out[:600])
+
+        # Ось 3б: ПОСЕВ СНИМАЕТ ПРЕПЯТСТВИЕ ПОКЛЮЧЕВО, а не одним флагом.
+        # Два синтетических посева: один пишет ИМЕННО тот ключ, что читает
+        # коллекция, второй — соседний. Различие ровно в одном факте, и оно
+        # обязано двигать коллекцию между половинами переписи.
+        for lane, minted_key, expect_runs in (("covered", "jwtAccountAdminA", True),
+                                              ("other", "jwtSomethingElse", False)):
+            base = tmp / f"seed-{lane}"
+            t3b = _mk(base, {"own-seeded": own2},
+                      {"ownRestBaseUrl": "https://localhost:9098",
+                       "jwtAccountAdminA": "", "runId": ""})
+            fixtures = t3b.parent / "authz-fixtures"
+            fixtures.mkdir(parents=True, exist_ok=True)
+            script = fixtures / "seed_probe.py"
+            script.write_text(
+                "import sys\n"
+                "if '--minted-keys' in sys.argv:\n"
+                f"    print({minted_key!r})\n",
+                encoding="utf-8")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                run(t3b)
+            out = buf.getvalue()
+            _c(f"посев, пишущий {minted_key}: коллекция "
+               f"{'ГОНЯЕТСЯ' if expect_runs else 'НЕ гоняется'}",
+               (f"гоняется здесь:    {1 if expect_runs else 0}" in out
+                and f"НЕ гоняется здесь: {0 if expect_runs else 1}" in out),
+               out[:500])
+
+        # Ось 3в: посев, который на вопрос НЕ ОТВЕЧАЕТ, в счёт не идёт и
+        # называется отдельно — «посев есть, а что пишет, неизвестно» и «посева
+        # нет» ведут читателя в разные места.
+        mute_base = tmp / "seed-mute"
+        t3c = _mk(mute_base, {"own-seeded": own2},
+                  {"ownRestBaseUrl": "https://localhost:9098",
+                   "jwtAccountAdminA": "", "runId": ""})
+        mute_fixtures = t3c.parent / "authz-fixtures"
+        mute_fixtures.mkdir(parents=True, exist_ok=True)
+        (mute_fixtures / "seed_probe.py").write_text(
+            "import sys\nsys.exit(2)\n", encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(t3c)
+        out = buf.getvalue()
+        _c("молчащий посев не снимает препятствия", "НЕ гоняется здесь: 1" in out,
+           out[:400])
+        _c("и назван отдельной строкой", "НЕ НАЗВАЛ СВОИХ КЛЮЧЕЙ" in out, out[:600])
 
         # Ось 4: коллекция края попадает в «не гоняется» с причиной про край.
         edge = ('{"item":[{"name":"s","request":{"url":{"raw":"{{baseUrl}}/iam/v1/x"}}}]}')
