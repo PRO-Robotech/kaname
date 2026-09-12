@@ -1398,13 +1398,36 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 		// key can obtain NOTHING FURTHER, and that no longer waits on the
 		// provider being reachable.
 		//
-		// What it does not do is reach back for what was already handed out. An
-		// access token minted before this commit is self-contained and stays
-		// valid until it expires; revocation bounds the credential, not the
-		// tokens already in flight. The window is therefore the access-token
-		// lifetime — minutes in production, deliberately wider on the local
-		// stand — and that is the property to state when someone asks how fast
-		// a revoke takes effect.
+		// СКОЛЬКО ЖИВЁТ УЖЕ ВЫДАННОЕ — ответ РАЗНЫЙ ДЛЯ ДВУХ ПОЛОС ВЫДАЧИ, и
+		// раньше здесь стоял только один из двух.
+		//
+		// ПОВЕРХНОСТЕЙ, ЧИТАЮЩИХ ОТСЕЧКУ: 2
+		//
+		// НАША ЧЕКАНКА. Снятие этой строки порождает отсечку ТОЙ ЖЕ
+		// транзакцией: триггер `sa_oauth_client_removal_cuts_minted_tokens`
+		// кладёт запись отзыва, адресованную идентификатором нашей строки.
+		// Состав утверждений нашего токена несёт этот идентификатор
+		// (`kaname_sa_key_id`), он же входит в закрытый перечень ключей
+		// отсечки правила отзыва, и обе принимающие поверхности спрашивают
+		// правило НА ПУТИ ЗАПРОСА — авторитет отзыва на внутреннем слушателе и
+		// читатель предъявленного на публичном. Поэтому остаточное окно здесь
+		// задаёт срок кеша положительного вердикта у читателя — величина,
+		// которую ОБЪЯВЛЯЕТ ОПЕРАТОР и видит у себя, — а не срок самого
+		// удостоверения. Число поверхностей выше сверяет с деревом гейт
+		// `revoke_window_doc_test.go` разбором: он считает узлы вызова сам.
+		//
+		// ПОЛОСА ПРЕЖНЕГО ИЗДАТЕЛЯ. Там токен выпускает он, наша отсечка на
+		// его пути проверки не стоит, и выданное действует до собственного
+		// истечения: отзыв ограничивает удостоверение, а не то, что уже в
+		// пути. Какая из двух полос действует на посадке — свойство посадки, а
+		// не этого вызова; разбор — `nameClient` выше и
+		// `docs/engineering/architecture/sa-key-issuance-leaves-the-provider.md`.
+		//
+		// Прежняя редакция этого абзаца называла второй ответ единственным и
+		// предписывала называть ИМЕННО его, когда спрашивают о скорости
+		// отзыва. Для нашей чеканки это было неверно, и цена ошибки
+		// несимметрична: следующий читатель вправе счесть отсечку избыточной и
+		// снять либо триггер, либо её чтение (#2484).
 		//
 		// A compensating outbox or sweeper was considered and rejected: both
 		// are EVENTUAL, so neither would have closed the window the hook closes
