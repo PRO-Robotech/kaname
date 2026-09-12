@@ -12,6 +12,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   дереве; перечень с командами — в разделе «Круг 2 … вердикт ПРОВЕРЯЮЩЕГО» ниже.
   **Одобрение `#1088` не отзывалось ни одним кругом**: предмет приёмки принят и
   реализован, оба круга судили полноту самой правки
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
+  ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
+  читался адресом В ЭТОМ репозитории, где такой функции нет: следующий шёл по нему, не
+  находил ничего и делал вывод О ДЕРЕВЕ, а не о документе. Там, где стояло одно имя,
+  теперь стоит дом — `PRO-Robotech/kacho:` (гейт жив в монорепо) ·
+  `PRO-Robotech/corelib:` (уехал в общий фундамент) · `PRO-Robotech/kacho@d941344bd9:`
+  (снят самим вынесением — `PRO-Robotech/kacho@0cc1cd54c3`). **Следствие для читателя,
+  и оно несущее:** зелёный такого гейта о дереве `PRO-Robotech/kaname` не говорит
+  НИЧЕГО — он судит ЧУЖОЕ дерево, и держателя у названного класса здесь может не быть
+  вовсе. Дельта правки — только приставка дома: ни один сценарий, вердикт,
+  производитель, признак готовности и ни одно число не тронуты. Держит форму гейт
+  `TestAcceptanceProbeCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
   редакцию НЕ ПЕРЕНЕСЁН.** Правок 3, строк 3: `5504f44a7f` каталоги службы (1)
   · `b81adf2760` имя службы (1) · `93ef852fe9` идентификатор лицензии (1).
@@ -621,12 +635,12 @@ gh issue list -R PRO-Robotech/kacho --state open --search 'манифест' --l
 | §2.7, цена п.2: гейт дерева тоже не сможет импортировать домен iam | пробный пакет в `internal/` → `use of internal package … not allowed` | **верно** |
 | §8: область гейта лицензионных шапок — `.json` и `.md` вне её, `Makefile` по базовому имени внутри | `sed -n '45,82p' internal/repohygiene/license_test.go` | **верно** — схема `.json` шапки не требует |
 | §2.6: `gateway/Makefile` несёт тройку `permission-catalog` на строках 68 · 75 · 86 | `grep -nE '^permission-catalog' gateway/Makefile` | **верно** |
-| §5.5, §6: `TestNamedMakeTargetExists` — строка 190 | `grep -n '^func TestNamedMakeTargetExists'` | **верно** |
+| §5.5, §6: `PRO-Robotech/kacho:TestNamedMakeTargetExists` — строка 190 | `grep -n '^func TestNamedMakeTargetExists'` | **верно** |
 | §3: `catalogparity_test.go` несёт три утверждения на строках 132 · 244 · 354 | `grep -n '^func Test'` | **верно** |
 | §8: `pkg/treecorpus` `cachedverdictmain` существует | `git ls-files pkg/treecorpus` | **верно** (`cachedverdictmain_test.go`) |
 | §4: манифестов в дереве ноль | `git ls-files \| grep -cE '/manifest\.yaml$'` → **0** | **верно** |
 | вердикт читается машинно | `_lib.verdict` на этой шапке → `('APPROVED', …)` | **верно** |
-| §8: `TestNoDeferredWorkInTheTree` зелёный со staged-документом | `go test ./internal/repohygiene -run 'TestNoDeferredWorkInTheTree\|TestNamedMakeTargetExists' -count=1` → **ok** | **верно** |
+| §8: `PRO-Robotech/kacho:TestNoDeferredWorkInTheTree` зелёный со staged-документом | `go test ./internal/repohygiene -run 'TestNoDeferredWorkInTheTree\|TestNamedMakeTargetExists' -count=1` → **ok** | **верно** |
 
 > **Ошибка самого рецензента, названная здесь, чтобы её не повторили.** Проверяя число
 > «манифестов, объявляющих `module-quota-readers`, — 0», я сперва взял
@@ -977,7 +991,7 @@ Go-структуры плюс `Decoder.KnownFields(true)`. Схема `.json` �
 
 Рядом стоит гейт, чьё второе утверждение прямо ловит возврат второго объявления —
 `internal/repohygiene/catalogparity_test.go`,
-`TestNoServiceDeclaresItsPermissionsASecondTime` (предикат:
+`PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime` (предикат:
 `grep -n '^func Test' internal/repohygiene/catalogparity_test.go` → три утверждения,
 строки 132, 244, 354).
 
@@ -1291,7 +1305,7 @@ Go-структуры плюс `Decoder.KnownFields(true)`. Схема `.json` �
 ### 5.5. Цель сборки: три исхода, не два
 
 > **Почему цель здесь названа именем, а не готовой командой — и почему это НЕ подгонка
-> под инструмент.** Гейт `TestNamedMakeTargetExists` считает предметом **только** вызов
+> под инструмент.** Гейт `PRO-Robotech/kacho:TestNamedMakeTargetExists` считает предметом **только** вызов
 > вида `make <цель>` внутри обратных кавычек (`mentionsInSpan`: вызов обязан начинать
 > команду). Приёмка садится по ban #1 **прежде** кода, значит на момент её посадки цели
 > в дереве нет, и три готовых команды дали бы три находки — измерено, не предположено:
@@ -1345,7 +1359,7 @@ Go-структуры плюс `Decoder.KnownFields(true)`. Схема `.json` �
 **MOD-MF-20 — изменение, заводящее цель, заводит и её ГОТОВУЮ КОМАНДУ**
 
 **Given** изменение, вносящее цель `module-manifest-check` в `Makefile`
-**When** исполняется `internal/repohygiene` `TestNamedMakeTargetExists`
+**When** исполняется `internal/repohygiene` `PRO-Robotech/kacho:TestNamedMakeTargetExists`
 **Then** прогон зелёный
 **And** в том же изменении есть **хотя бы одно** упоминание готовой командой
 (вызов `make` с этой целью внутри обратных кавычек) — иначе гейт держит **ноль**
@@ -1361,7 +1375,7 @@ Go-структуры плюс `Decoder.KnownFields(true)`. Схема `.json` �
 >
 > Гейт существует (предикат:
 > `grep -n '^func Test' internal/repohygiene/namedmaketarget_test.go` →
-> `TestNamedMakeTargetExists`, строка 190).
+> `PRO-Robotech/kacho:TestNamedMakeTargetExists`, строка 190).
 
 ### 5.6. Согласие схемы и структур
 
@@ -1512,7 +1526,7 @@ MOD-MF-16. Замер — §0.2; коротко: вступают в **чужу�
 | три свойства связности | MOD-MF-13, 14, 15 + контроль 16 | **посажено**: `linkage_internal_test.go` (13), `linkage_test.go` (14, 15, 16) |
 | нераспознанный раздел отвергается явно | MOD-MF-07 | **посажено**: `manifest_test.go` |
 | три исхода цели сборки | MOD-MF-17, 18, 19 | **посажено**: `check_test.go` |
-| названная цель существует | `internal/repohygiene` `TestNamedMakeTargetExists` | **гейт существует** (строка 190); предмета у него **сегодня нет** — приёмка называет цель именем, а не готовой командой (§5.5), и производителя входа заводит MOD-MF-20 вместе с самой целью |
+| названная цель существует | `internal/repohygiene` `PRO-Robotech/kacho:TestNamedMakeTargetExists` | **гейт существует** (строка 190); предмета у него **сегодня нет** — приёмка называет цель именем, а не готовой командой (§5.5), и производителя входа заводит MOD-MF-20 вместе с самой целью |
 | SPDX-шапка у `.yaml`-артефактов | `internal/repohygiene/license_test.go` | **гейт существует**; область измерена (§8) |
 | вердикт этой приёмки читается машинно | `scripts/docs-gate/check-04` | **гейт существует** |
 | «манифест не третье объявление прав» (§3) | **ничем**: `catalogparity_test.go` читает только `.go` и на YAML молчит by construction | **держится вниманием и вердиктом рецензента** |
@@ -1570,9 +1584,9 @@ MOD-MF-16. Замер — §0.2; коротко: вступают в **чужу�
 | гейт | что потребует |
 |---|---|
 | `internal/repohygiene/license_test.go` | SPDX у нового `.go` и у `Makefile`, если он заводится файлом |
-| `internal/repohygiene` `TestIdentifiersAreASCII` | имена в Go — латиницей (ban #17); комментарии по-русски законны |
-| `internal/repohygiene` `TestNoDeferredWorkInTheTree` | ни одного маркера отсрочки (ban #11) |
-| `internal/repohygiene` `TestNamedMakeTargetExists` | цель `module-manifest-check` существует **к моменту, когда её называют готовой командой**. Приёмка садится первой и называет цель именем, поэтому предмета гейту не даёт; готовую команду вносит изменение, заводящее цель (§5.5, MOD-MF-20). Измерено: три готовые команды в приёмке дают **три** находки |
+| `internal/repohygiene` `PRO-Robotech/kacho:TestIdentifiersAreASCII` | имена в Go — латиницей (ban #17); комментарии по-русски законны |
+| `internal/repohygiene` `PRO-Robotech/kacho:TestNoDeferredWorkInTheTree` | ни одного маркера отсрочки (ban #11) |
+| `internal/repohygiene` `PRO-Robotech/kacho:TestNamedMakeTargetExists` | цель `module-manifest-check` существует **к моменту, когда её называют готовой командой**. Приёмка садится первой и называет цель именем, поэтому предмета гейту не даёт; готовую команду вносит изменение, заводящее цель (§5.5, MOD-MF-20). Измерено: три готовые команды в приёмке дают **три** находки |
 | `internal/repohygiene/catalogparity_test.go` | **не увидит манифест by construction** (§3) — назван, чтобы его молчание не приняли за подтверждение |
 | `scripts/docs-gate/check-04` | вердикт этой приёмки читается машинно |
 | `pkg/treecorpus` `cachedverdictmain` | всякий новый гейт дерева наследует `-count=1`: состав берётся у индекса git подпроцессом, которого инструмент кэширования не видит |

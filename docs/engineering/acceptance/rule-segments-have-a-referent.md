@@ -17,6 +17,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   того же класса, найденный автором сверх замечания (`-09`), проверен и снят верно.
   Четыре уточняющих (`З3`–`З6`) перемерены рецензентом — **все четыре сходятся**.
   Сценариев было **16**, осталось **16**: объём не расширен
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
+  ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
+  читался адресом В ЭТОМ репозитории, где такой функции нет: следующий шёл по нему, не
+  находил ничего и делал вывод О ДЕРЕВЕ, а не о документе. Там, где стояло одно имя,
+  теперь стоит дом — `PRO-Robotech/kacho:` (гейт жив в монорепо) ·
+  `PRO-Robotech/corelib:` (уехал в общий фундамент) · `PRO-Robotech/kacho@d941344bd9:`
+  (снят самим вынесением — `PRO-Robotech/kacho@0cc1cd54c3`). **Следствие для читателя,
+  и оно несущее:** зелёный такого гейта о дереве `PRO-Robotech/kaname` не говорит
+  НИЧЕГО — он судит ЧУЖОЕ дерево, и держателя у названного класса здесь может не быть
+  вовсе. Дельта правки — только приставка дома: ни один сценарий, вердикт,
+  производитель, признак готовности и ни одно число не тронуты. Держит форму гейт
+  `TestAcceptanceProbeCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
   редакцию НЕ ПЕРЕНЕСЁН.** Правок 3, строк 11: `5504f44a7f` каталоги службы (9)
   · `b81adf2760` имя службы (1) · `93ef852fe9` идентификатор лицензии (1).
@@ -691,7 +705,7 @@ resource`, — то есть согласие держит конструкци�
 **Чего в этих таблицах НЕТ и почему.** Восьмидесяти восьми ресурсов и восьмидесяти
 семи глаголов каталога **прав** здесь нет: это другая популяция, другой словарь и
 другой предмет (какой RPC каким отношением гейтится), и её согласие с аннотациями
-уже держит `TestCatalogMatchesTheAnnotationsItWasGeneratedFrom` — **346 = 346**,
+уже держит `PRO-Robotech/kacho:TestCatalogMatchesTheAnnotationsItWasGeneratedFrom` — **346 = 346**,
 число перемерено мной. Смешать две популяции значило бы дать правилу референт, по
 которому оно резолвится, а проекция — нет.
 
@@ -1110,7 +1124,7 @@ not found or still in use» вместо названного сегмента.
 | Т8 | третье написание не заводится | существующие проверки `NOT LIKE '%.%'` (5 штук, `0091`+`0098`) распространяются на новые колонки словаря каталога — сегодня у них таких проверок **0** | частично — расширяется |
 | Т9 | снятие переселяет, а не отбирает молча | `IAM-CT-1-09` плюс счётчик непустоты `role_grant_orphan` наружу | нет — заводится |
 | Т10 | конкуренция не оставляет висячей выдачи | `IAM-CT-1-12`, оба чередования, с `pg_sleep` в ведущей транзакции | нет — заводится |
-| Т11 | миграция цитирует APPROVED-приёмку | гейт `TestNewMigrationCitesAnApprovedAcceptance` — **есть**, и у него неназванная трудность (§9.2) | есть |
+| Т11 | миграция цитирует APPROVED-приёмку | гейт `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` — **есть**, и у него неназванная трудность (§9.2) | есть |
 
 **Требований без держащего артефакта — ДВА, и оба названы:** Т2 (`RESTRICT …
 DEFERRABLE` не отвергается ничем, кроме обзора) и Т12 (фикстура, отменяющая
@@ -1254,12 +1268,12 @@ SELECT * FROM (VALUES ('vpc','network','v_get'), … ) AS catalog(m,r,verb);
 | `TestIAMRV107_*`, `TestIAMRV108_*` | `roleverbreseedbootlane_test.go`, `roleverbstructuralfatal_test.go` | посев каталога встаёт на ту же полосу старта; уровень отказа и структурная ветвь обязаны остаться |
 | `TestReseedWiring_*` | `roleverbreseedwiring_test.go` | посев каталога — новая точка входа; провязка судится этим гейтом |
 | `TestVerbVocabularyLiteralsMatchModel`, `…RosterCoversEveryLiteral`, `…RosterEntriesStillHaveSubject` | `internal/repohygiene/verbvocabulary_test.go` | реестр литеральных словарей глаголов: литерал, ставший источником посева, обязан **остаться** в реестре с новым основанием, а не выпасть из него |
-| `TestClientTruthIAMModuleSetEnumerationsAreComplete` | `internal/repohygiene/clienttruth_iam_moduleset.go` | читает литерал модулей и сверяет с клиентской прозой |
+| `PRO-Robotech/kacho@d941344bd9:TestClientTruthIAMModuleSetEnumerationsAreComplete` | `internal/repohygiene/clienttruth_iam_moduleset.go` | читает литерал модулей и сверяет с клиентской прозой |
 | проба дрейфа набора модулей (имя прозой — врезка ниже) | `services/iam/internal/authzmap/module_set_drift_test.go` | согласие двух наборов модулей |
 | `TestDrift_ObjectTypesExistInModel`, `TestDrift_TypeVerbSetsMatchModelExactly`, `TestDrift_NonCatalogTypesCarryNoVerbs` | `authzmap/fga_model_drift_test.go` | источник посева обязан остаться согласным с моделью |
 | `TestCatalogTypesExistInTheCanonicalModel` | `authzmap/canonical_model_drift_test.go` | то же с другой стороны |
-| `TestCatalogMatchesTheAnnotationsItWasGeneratedFrom` | `internal/repohygiene/catalogparity_test.go` | **346 = 346**, каталог прав; эта приёмка его не трогает, и он обязан **остаться зелёным** — если покраснел, значит популяции смешали (§2.5) |
-| `TestNewMigrationCitesAnApprovedAcceptance`, `TestAcceptanceLedgerEntriesHaveASubject` | `internal/repohygiene/acceptanceledger_test.go` | миграция обязана цитировать APPROVED-приёмку — §9.2 |
+| `PRO-Robotech/kacho:TestCatalogMatchesTheAnnotationsItWasGeneratedFrom` | `internal/repohygiene/catalogparity_test.go` | **346 = 346**, каталог прав; эта приёмка его не трогает, и он обязан **остаться зелёным** — если покраснел, значит популяции смешали (§2.5) |
+| `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance`, `PRO-Robotech/kacho:TestAcceptanceLedgerEntriesHaveASubject` | `internal/repohygiene/acceptanceledger_test.go` | миграция обязана цитировать APPROVED-приёмку — §9.2 |
 | `retired_block_storage_test.go` | `services/iam/internal/check/` | синхронность снятия: три снятых типа переезжают строками, и гейт обязан судить **новый** носитель |
 
 > [!note] Имя пробы дрейфа написано ПРОЗОЙ — её предмет снят `#1927`
@@ -1281,7 +1295,7 @@ SELECT * FROM (VALUES ('vpc','network','v_get'), … ) AS catalog(m,r,verb);
 
 ### 9.2. Трудность ведомости приёмок — названа, а не обойдена
 
-Гейт `TestNewMigrationCitesAnApprovedAcceptance` находит цитату приёмки **двумя**
+Гейт `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` находит цитату приёмки **двумя**
 образцами: имя документа `sub-phase-…-acceptance\.md` и код сценария
 `[A-Z]{2,8}(-[A-Z]{2,4})?-[0-9]+-[0-9]{2}`. Имя **этого** документа под первый
 образец не подходит **by construction** — приёмки, живущие в дереве продукта,
@@ -1290,7 +1304,7 @@ SELECT * FROM (VALUES ('vpc','network','v_get'), … ) AS catalog(m,r,verb);
 `IAM-CT-1-01` и далее. Это и есть причина, по которой префикс объявлен в шапке.
 
 Вторая трудность: запись ведомости несёт обязательное поле `workspace_revision`, и
-гейт `TestAcceptanceLedgerEntriesHaveASubject` отвергает пустое. Но эта приёмка
+гейт `PRO-Robotech/kacho:TestAcceptanceLedgerEntriesHaveASubject` отвергает пустое. Но эта приёмка
 живёт **не** в воркспейсе, и ревизия у неё — продуктовая. Сегодня в ведомости
 **шесть** записей, все на документы воркспейса (`grep -n 'prefix:'
 docs/acceptance-ledger.yaml` → `QUOTA-V2`, `IAM-1`, `IAM-ID-1`, `NLB-4.0`, `BAT-1`,

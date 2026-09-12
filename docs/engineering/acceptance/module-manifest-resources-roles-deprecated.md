@@ -14,6 +14,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   названным предметом и без дублирования (§16.4); объём сценариев не изменился:
   **30 → 30**, «Тогда»-клауз **73**, ни один Given/When/Then не тронут.
   Реализация ведётся по этому документу; чего он **не** покрывает — §10
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
+  ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
+  читался адресом В ЭТОМ репозитории, где такой функции нет: следующий шёл по нему, не
+  находил ничего и делал вывод О ДЕРЕВЕ, а не о документе. Там, где стояло одно имя,
+  теперь стоит дом — `PRO-Robotech/kacho:` (гейт жив в монорепо) ·
+  `PRO-Robotech/corelib:` (уехал в общий фундамент) · `PRO-Robotech/kacho@d941344bd9:`
+  (снят самим вынесением — `PRO-Robotech/kacho@0cc1cd54c3`). **Следствие для читателя,
+  и оно несущее:** зелёный такого гейта о дереве `PRO-Robotech/kaname` не говорит
+  НИЧЕГО — он судит ЧУЖОЕ дерево, и держателя у названного класса здесь может не быть
+  вовсе. Дельта правки — только приставка дома: ни один сценарий, вердикт,
+  производитель, признак готовности и ни одно число не тронуты. Держит форму гейт
+  `TestAcceptanceProbeCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
   редакцию НЕ ПЕРЕНЕСЁН.** Правок 2, строк 2: `b81adf2760` имя службы (1) ·
   `93ef852fe9` идентификатор лицензии (1). Дельта целиком — подстановка токена
@@ -522,7 +536,7 @@ grep -n 'repeated Rule\|message Role' proto/kaname/cloud/iam/v1/role.proto
 > неверный документ. Стереть её значило бы сделать вердикт круга 3
 > непрослеживаемым — слово APPROVED перестало бы покрывать то, что стоит в
 > тексте. Держится гейтом `internal/repohygiene`
-> `TestAcceptanceDoesNotDenyALiveManifestKey`: живой ключ манифеста, объявленный
+> `PRO-Robotech/kacho@d941344bd9:TestAcceptanceDoesNotDenyALiveManifestKey`: живой ключ манифеста, объявленный
 > приёмкой незаводимым, — находка; маркер, чей ключ манифест больше не несёт, —
 > тоже находка.
 
@@ -629,7 +643,7 @@ grep -ci yaml internal/repohygiene/catalogparity_test.go
   → 0
 ```
 
-Гейт `TestNoServiceDeclaresItsPermissionsASecondTime` обходит **только**
+Гейт `PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime` обходит **только**
 не-тестовые файлы Go и YAML не читает **ни при каком условии**. Сегодня он не
 лжёт — раздела `resources` нет, искать нечего. Он начнёт лгать **в момент**,
 когда это изменение заведёт раздел, и молчание будет выглядеть исправной работой.
@@ -1165,7 +1179,7 @@ TestMODMF13RoleSetStaysUnwiredOnlyWhileTheSectionIsRefused
 
 **Given** синтетическое дерево с манифестом, чей `resources[].verbs` несёт
 глагол, которого нет **ни в одной** аннотации контрактов
-**When** прогнан `TestNoServiceDeclaresItsPermissionsASecondTime`
+**When** прогнан `PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime`
 **Then** находка, называющая **файл, строку и токен права**
 **And** законный близнец: манифест, чьи глаголы **все** выводятся из аннотаций,
 — **молчание**
@@ -1365,7 +1379,7 @@ git show c59525c66:<файл> | grep -cE '^\*\*MOD-MR-[0-9]+а? —'   # → 29
 | **всякий НОВЫЙ ключ трёх разделов**, включая `producer` | `TestMODMF22EverySchemaKeyHasAReader` (`schemaagreement_internal_test.go:285`) | **ГЕЙТ СУЩЕСТВУЕТ и прогнан кругом 2** (`PASS`). Требует у **каждого** ключа схемы читателя в прод-файлах загрузчика — машинный держатель запрета «принято-и-проигнорировано», который §2.6 цитирует прозой. Круг 1 его **не назвал** (замечание Н6): реализация узнала бы о нём от прогона |
 | MOD-MR-21 | предикат `grep` + переписанный `MOD-MF-07` | **проба существует** (`manifest_test.go:381`), переписывается |
 | MOD-MR-22 | предикат `git grep -c` | **предикат существует**, сегодня даёт 6 |
-| MOD-MR-23, 24, 24а | **обе половины** (замечание Н8): (а) `TestNoServiceDeclaresItsPermissionsASecondTime` — гейт; (б) `newSyntheticTree` (`internal/repohygiene/trackedtree_test.go:80`) — механизм, дающий ему синтетическое дерево | **гейт существует** (`catalogparity_test.go:244` — строка объявления), **YAML не читает** (`:258` — фильтр `.go`; `grep -ci yaml` → 0) и корень берёт из `repoRoot(t)` (`:245`), то есть синтетики **сегодня не принимает**; расширение распознавателя **и** разложение под синтетику — предмет `#1813`, заводится этим изменением |
+| MOD-MR-23, 24, 24а | **обе половины** (замечание Н8): (а) `PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime` — гейт; (б) `newSyntheticTree` (`internal/repohygiene/trackedtree_test.go:80`) — механизм, дающий ему синтетическое дерево | **гейт существует** (`catalogparity_test.go:244` — строка объявления), **YAML не читает** (`:258` — фильтр `.go`; `grep -ci yaml` → 0) и корень берёт из `repoRoot(t)` (`:245`), то есть синтетики **сегодня не принимает**; расширение распознавателя **и** разложение под синтетику — предмет `#1813`, заводится этим изменением |
 | MOD-MR-25, 26 | гейт устарелости + `catalogderive` (аннотации уже читаются) | **половина есть**: `pkg/authz/catalogderive` строит карту прав из дескрипторов; гейт сверки — заказан |
 | MOD-MR-27 | структуры `Resource` (ключ `producer`, закрытый набор) + `TestMODMF22EverySchemaKeyHasAReader` | **держатель ключа ЕСТЬ и прогнан** (`schemaagreement_internal_test.go:285`, `PASS`); сам ключ, закрытый набор и текст отказа — заказаны |
 | MOD-MR-28 | `manifest.CheckTree` + `tools/module-manifest-check.sh` + цель `module-manifest-check` | **ВСЁ СУЩЕСТВУЕТ** (`services/iam/Makefile:105`), поведение сохраняется |
@@ -1685,7 +1699,7 @@ git grep -c 'module-manifest-seed\.schema\.json'
 дословно; неверен был мой предикат — он не отличал имя схемы от имени документа.
 
 **Вторая: «MOD-MR-23 требует входа, которого гейт принять не может».** Гейт
-`TestNoServiceDeclaresItsPermissionsASecondTime` берёт корень из `repoRoot(t)` и
+`PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime` берёт корень из `repoRoot(t)` и
 синтетического дерева не принимает — это верно (`catalogparity_test.go:245`).
 Вывод «производителя нет» **неверен**: механизм в дереве есть.
 
@@ -2024,7 +2038,7 @@ TestMODMF13RoleSetStaysUnwiredOnlyWhileTheSectionIsRefused (прозой — §2
 
 **Область этого зелёного названа, и она уже, чем кажется.** Прогнан **один
 пакет**. Гейты `internal/repohygiene` (в том числе
-`TestNoServiceDeclaresItsPermissionsASecondTime`, вокруг которого весь `#1813`)
+`PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime`, вокруг которого весь `#1813`)
 **не прогонялись**, дерево не собиралось, стенд не поднимался. «Держатель
 прогнан» верно ровно для четырёх названных проб.
 
@@ -2132,7 +2146,7 @@ TestMODMF13RoleSetStaysUnwiredOnlyWhileTheSectionIsRefused (прозой — §2
 
 **Чем эта рецензия отличается от круга 1.** Круг 1 не прогнал ни одной пробы и
 сказал это прямо. Круг 2 прогнал пакет `manifest`. Эта рецензия прогнала **то же
-плюс гейт, который автор назвал непрогнанным**, — `TestNoServiceDeclaresItsPermissionsASecondTime`
+плюс гейт, который автор назвал непрогнанным**, — `PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime`
 (§15.2), то есть закрыла ту границу зелёного, которую автор честно объявил
 открытой.
 
@@ -2178,7 +2192,7 @@ ids6=set(re.findall(r'MOD-MR-\d+[аa]?', sec6))     # ← негодно
 |---|---|---|
 | `go test ./services/iam/internal/manifest/... -count=1` | `ok`, код **0**, `--- FAIL` **0** | да |
 | четыре названных держателя поимённо | все **PASS** | да |
-| `TestNoServiceDeclaresItsPermissionsASecondTime` (**автор не прогонял**) | **PASS**; перепись — «не-тестовых файлов **1647**, выводов карты 5, литеральных карт 0» | — |
+| `PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime` (**автор не прогонял**) | **PASS**; перепись — «не-тестовых файлов **1647**, выводов карты 5, литеральных карт 0» | — |
 | `MODMF21`/`MODMF22` на пустом наборе | **не вакуумны**: оба `t.Fatal` при `len==0` | ось 8 закрыта |
 | `docs-gate/run-all.sh` | **6/6**, код 0 | да |
 | `_lib.verdict` | `CHANGES REQUESTED` — читается машинно | да |
@@ -2525,7 +2539,7 @@ sed -n '/^func verbClass/,/^}/p' services/iam/internal/authzmap/permissions_to_r
 | `services/iam/internal/manifest` | ФОРМУ | загрузчик остаётся единственным судьёй формы |
 
 Перепись «файлов Go N · манифестов M» стоит **в названном приёмкой гейте**
-(`TestNoServiceDeclaresItsPermissionsASecondTime`), как и требует `MOD-MR-24`.
+(`PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime`), как и требует `MOD-MR-24`.
 
 ### 17.3. `MOD-MR-25` исполнен НЕ пословно — и это опровержение, а не сужение
 
@@ -2665,7 +2679,7 @@ verbs` у `#1090`. Заведено задачей `#1835`.
 **Первая: «в новом коде есть кириллический идентификатор».** Мой самодельный
 стриппер комментариев искалечил сырую строку регулярного выражения
 (`internal/repohygiene/modulemanifestrights_test.go`) и выдал её за имя. Гейт продукта отвечает
-предикатом: `TestIdentifiersAreASCII` → «файлов Go прочитано 5161, имён
+предикатом: `PRO-Robotech/kacho:TestIdentifiersAreASCII` → «файлов Go прочитано 5161, имён
 осмотрено 2007573, находок 0». Ban #17 не нарушен; нарушен был мой предикат.
 
 **Вторая, дороже: «число 95 неверно — неканонических строк 127».** Я построил
@@ -2783,7 +2797,7 @@ verbs` у `#1090`. Заведено задачей `#1835`.
   прогнаны `gofmt`, `go build`, `go vet`, пакеты `manifest` и `repohygiene`
   целиком;
 - **предсуществующее красное подтверждено чужим**:
-  `TestDocsDoNotChangeIntoADirectoryTheTreeDoesNotHave` падает и на базе —
+  `PRO-Robotech/kacho:TestDocsDoNotChangeIntoADirectoryTheTreeDoesNotHave` падает и на базе —
   `git merge-base --is-ancestor f80cb065a release/modules-4` отвечает успехом,
   а `git diff release/modules-4..HEAD --name-only | grep -c model-generated-from-manifest`
   даёт **0**. Атрибуция реализации (`#1837`) верна.

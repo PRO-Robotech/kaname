@@ -9,6 +9,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   отказ (три блокирующих, четыре уточняющих); все семь проверены заново
   экспериментом на `f7e11a76b` — шесть устранены, одно (В3) опровергнуто автором
   верно. Разбор круга 2 — §13. Кодирование начинается по §9 (запрет #1 снят)
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
+  ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
+  читался адресом В ЭТОМ репозитории, где такой функции нет: следующий шёл по нему, не
+  находил ничего и делал вывод О ДЕРЕВЕ, а не о документе. Там, где стояло одно имя,
+  теперь стоит дом — `PRO-Robotech/kacho:` (гейт жив в монорепо) ·
+  `PRO-Robotech/corelib:` (уехал в общий фундамент) · `PRO-Robotech/kacho@d941344bd9:`
+  (снят самим вынесением — `PRO-Robotech/kacho@0cc1cd54c3`). **Следствие для читателя,
+  и оно несущее:** зелёный такого гейта о дереве `PRO-Robotech/kaname` не говорит
+  НИЧЕГО — он судит ЧУЖОЕ дерево, и держателя у названного класса здесь может не быть
+  вовсе. Дельта правки — только приставка дома: ни один сценарий, вердикт,
+  производитель, признак готовности и ни одно число не тронуты. Держит форму гейт
+  `TestAcceptanceProbeCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
   редакцию НЕ ПЕРЕНЕСЁН.** Правок 3, строк 49: `5504f44a7f` каталоги службы
   (45) · `b81adf2760` имя службы (3) · `93ef852fe9` идентификатор лицензии (1).
@@ -521,7 +535,7 @@ git grep -c 'apps/kaname/seed' -- 'services/iam/internal/apps/kaname/shared/*.go
 Ни таблица, ни её ограничения не меняются: снимается **код**. Внешний ключ — предмет
 `#1030`. Если реализация всё же заведёт миграцию, она обязана цитировать эту приёмку и
 получить запись в `docs/acceptance-ledger.yaml` (§8) — иначе гейт
-`TestNewMigrationCitesAnApprovedAcceptance` красен, и это правильно.
+`PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` красен, и это правильно.
 
 ### 2.7. Production-complete в своих границах
 
@@ -798,8 +812,8 @@ gh issue view 1028 -R PRO-Robotech/kacho --json title
 | пустая пара отвергается | ветка отказа в `role_repo.go` держит поведение; пробы-контракта — **НЕТ** (`IAM-RV-1-09`) | частично |
 | конкуренция не оставляет пустого окна внутри роли | новая интеграционная проба `IAM-RV-1-11` | НЕТ |
 | роли арендатора досев не трогает | новая проба `IAM-RV-1-05` | НЕТ |
-| имена латиницей, комментарии по-русски | `internal/repohygiene` `TestIdentifiersAreASCII` | **ЕСТЬ** |
-| ни одного маркера отсрочки | `internal/repohygiene` `TestNoDeferredWorkInTheTree` | **ЕСТЬ** |
+| имена латиницей, комментарии по-русски | `internal/repohygiene` `PRO-Robotech/kacho:TestIdentifiersAreASCII` | **ЕСТЬ** |
+| ни одного маркера отсрочки | `internal/repohygiene` `PRO-Robotech/kacho:TestNoDeferredWorkInTheTree` | **ЕСТЬ** |
 | SPDX у новых `.go` | `internal/repohygiene/license_test.go` | **ЕСТЬ** |
 
 **Строка «НЕТ» здесь — не долг, а объём работы:** проба заводится тем же изменением,
@@ -876,11 +890,11 @@ gh issue view 1028 -R PRO-Robotech/kacho --json title
 | гейт | репозиторий | что потребует | вывод проверки |
 |---|---|---|---|
 | `internal/repohygiene/license_test.go` | продукт `f7e11a76b` | SPDX у нового `.go` | `ls` → файл есть |
-| `internal/repohygiene` `TestIdentifiersAreASCII` | продукт `f7e11a76b` | имена латиницей (запрет #17); русские комментарии законны | объявление одно |
-| `internal/repohygiene` `TestNoDeferredWorkInTheTree` | продукт `f7e11a76b` | ни одного маркера отсрочки (запрет #11) | объявление одно |
-| `internal/repohygiene` `TestNamedMakeTargetExists` | продукт `f7e11a76b` | эта приёмка **готовых команд сборки не называет** ⇒ предмета гейту не даёт. Назван, чтобы его молчание не приняли за подтверждение | объявление одно |
+| `internal/repohygiene` `PRO-Robotech/kacho:TestIdentifiersAreASCII` | продукт `f7e11a76b` | имена латиницей (запрет #17); русские комментарии законны | объявление одно |
+| `internal/repohygiene` `PRO-Robotech/kacho:TestNoDeferredWorkInTheTree` | продукт `f7e11a76b` | ни одного маркера отсрочки (запрет #11) | объявление одно |
+| `internal/repohygiene` `PRO-Robotech/kacho:TestNamedMakeTargetExists` | продукт `f7e11a76b` | эта приёмка **готовых команд сборки не называет** ⇒ предмета гейту не даёт. Назван, чтобы его молчание не приняли за подтверждение | объявление одно |
 | `pkg/treecorpus` | продукт `f7e11a76b` | новый гейт дерева наследует `-count=1`: состав берётся у индекса git подпроцессом, которого кэш не видит | `ls` → каталог есть |
-| **`internal/repohygiene/acceptanceledger_test.go`** | продукт `f7e11a76b` | дом `reScenarioCode` (`:47`) и гейта `TestNewMigrationCitesAnApprovedAcceptance` (`:116`). Запись в ведомость нужна **только если** изменение заведёт миграцию (§2.6) | `git ls-files … \| grep acceptanceledger` → `acceptanceledger_test.go`, `acceptanceledger_injection_test.go` |
+| **`internal/repohygiene/acceptanceledger_test.go`** | продукт `f7e11a76b` | дом `reScenarioCode` (`:47`) и гейта `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` (`:116`). Запись в ведомость нужна **только если** изменение заведёт миграцию (§2.6) | `git ls-files … \| grep acceptanceledger` → `acceptanceledger_test.go`, `acceptanceledger_injection_test.go` |
 | `docs/acceptance-ledger.yaml` | продукт `f7e11a76b` | сама ведомость | `ls` → файл есть |
 | `internal/repohygiene/verbvocabulary_test.go` | продукт `f7e11a76b` | **предмета ему это изменение не даёт** — он судит словарь глаголов, не писателей. Назван, чтобы зелёный не прочитали как подтверждение единственности | `ls` → файл есть |
 | `internal/repohygiene/relationfactsolewriter_test.go` | продукт `f7e11a76b` | образец конструкции нового гейта (§6) | `ls` → файл есть |
@@ -1060,7 +1074,7 @@ ls internal/repohygiene/acceptanceledger*.go
 
 Координата `internal/repohygiene/acceptanceledger.go` стояла **дважды** (§5 и §8) и не
 резолвится. Предмет существует по другому адресу: `reScenarioCode` —
-`acceptanceledger_test.go:47`, гейт `TestNewMigrationCitesAnApprovedAcceptance` — там же
+`acceptanceledger_test.go:47`, гейт `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` — там же
 `:116`. Обе ссылки исправлены.
 
 Вторая половина принята тоже: `check-04-product-acceptance-verdict.py` и `_lib.py` живут
