@@ -1,0 +1,312 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/credential_kind.proto";
+import "kaname/cloud/iam/v1/service_account_oauth_client.proto";
+import "kaname/cloud/iam/v1/secret_options.proto";
+import "kacho/cloud/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// SAKeyService — public-facing CRUD for static ServiceAccount OAuth keys
+// (Class A workload identity). Each key maps to an OAuth 2.0 client registered
+// with `grant_types=[client_credentials]`; external workloads exchange it for a
+// Kachō-issued JWT at the provider's standard token endpoint.
+//
+// AUTHENTICATION IS `private_key_jwt`, NOT A SHARED SECRET. The workload holds
+// the PKCS#8 EC private key returned in `private_key_pem` and signs an RFC-7523
+// client assertion with it; nothing symmetric is exchanged, and kaname stores
+// only the public half plus the `hydra_client_id` → ServiceAccount mapping in
+// `service_account_oauth_clients`.
+//
+// `private_key_pem` is returned EXACTLY ONCE in the Issue response and is never
+// persisted by kaname. `client_secret` is `[deprecated = true]` and is always
+// empty for keys issued today — see the field's own comment.
+//
+// This header used to describe basic-auth `<client_id>:<client_secret>` and
+// promised the plaintext secret «exactly once». That outlived its subject when
+// the flow moved to `private_key_jwt`, and it sat two lines above the field
+// marking the same secret deprecated — two statements about one thing, of which
+// one was true. It is corrected here rather than deleted, because a reader who
+// followed it would look for a field the contract no longer carries and would
+// put the wrong value in the docker username (that is `client_id`, not the
+// Kachō-side `key_id`).
+service SAKeyService {
+  rpc Issue (IssueSAKeyRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/serviceAccounts/{service_account_id}/keys"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "IssueSAKeyMetadata"
+      response: "IssueSAKeyResponse"
+    };
+    option (corelib.authz.v1.permission)        = "iam.issue_s_a_keies.issue";
+    option (corelib.authz.v1.required_relation) = "v_update";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_service_account"
+      from_request_field: "service_account_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  rpc List (ListSAKeysRequest) returns (ListSAKeysResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/serviceAccounts/{service_account_id}/keys"
+    };
+    option (corelib.authz.v1.permission)        = "iam.s_a_keyses.list";
+    option (corelib.authz.v1.required_relation) = "v_list";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_service_account"
+      from_request_field: "service_account_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  rpc Revoke (RevokeSAKeyRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      delete: "/iam/v1/serviceAccounts/{service_account_id}/keys/{key_id}"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "RevokeSAKeyMetadata"
+      response: "RevokeSAKeyResponse"
+    };
+    option (corelib.authz.v1.permission)        = "iam.revoke_s_a_keies.revoke";
+    option (corelib.authz.v1.required_relation) = "v_update";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_service_account"
+      from_request_field: "service_account_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+}
+
+message IssueSAKeyRequest {
+  // ID of the ServiceAccount.
+  string service_account_id = 1;
+  // Description of the SAKey.
+  string description = 2;
+  // Optional ISO duration in seconds. Смысл ЗНАЧЕНИЯ 0 ЗАВИСИТ ОТ ВИДА:
+  //   * KEYPAIR / FEDERATED — 0 означает БЕССРОЧНО (прежнее поведение);
+  //   * SECRET — 0 означает «срок не назван», применяется умолчание политики;
+  //     БЕССРОЧНОГО СЕКРЕТА НЕ БЫВАЕТ НИ В КАКОМ НАПИСАНИИ, и срок сверх
+  //     потолка политики ОТВЕРГАЕТСЯ, а не урезается молча.
+  int64 ttl_seconds = 3;
+  // Ответственный за выпуск. ОБЯЗАТЕЛЬНЫМ НЕ ОБЪЯВЛЯЕТСЯ И НЕ ЯВЛЯЕТСЯ: край
+  // подставляет его сам — вызывающему-человеку его собственный принципал,
+  // вызывающей машине владельца аккаунта целевой учётки. Присланное значение
+  // сверяется с тем, которое будет записано; у вызывающего-машины поле обязано
+  // быть ПУСТЫМ, потому что записываемое значение краю недоступно (резолв идёт
+  // в use-case, из репозитория), и несовпавшее отвергается `INVALID_ARGUMENT`
+  // с именем поля.
+  //
+  // Обязательным это поле НЕ ЯВЛЯЕТСЯ, и объявлять его таким нечем: семейство
+  // расширений, которым обязательность выражалась, снято с контрактов целиком
+  // (kacho#1255) — исполнителя на пути запроса у него не было ни одного. Здесь
+  // оно стояло и утверждало ОБРАТНОЕ действительному: отказа не давало никогда,
+  // а генератор клиента объявлял бы параметр обязательным при сервисе, который
+  // просит его не слать.
+  string created_by_user_id = 4;
+
+  // Федеративный вид ключа. Непустой перечень означает: ключевой пары мы не
+  // чеканим, а удостоверение предъявляет ВНЕШНИЙ издатель — ответ выдачи не
+  // несёт ни `private_key_pem`, ни `public_key_pem`.
+  //
+  // Внешняя нагрузка (сборочный конвейер, под кластера, издатель арендатора)
+  // подписывает СВОЁ утверждение и предъявляет его нашему токен-эндпоинту с
+  // видом выдачи `urn:ietf:params:oauth:grant-type:jwt-bearer` (RFC 7523 §2.1).
+  // Мы принимаем его тогда и только тогда, когда пара `(iss, sub)` есть в
+  // НАШЕМ перечне доверенных издателей и подпись сошлась с записанным там
+  // ключом издателя (задача #1124).
+  //
+  // Каждый элемент сужает, какая внешняя пара вправе выступать за этот ключ.
+  // Пустой перечень — обычный вид с ключевым материалом.
+  repeated TrustedSubject trusted_subjects = 5;
+
+  // Federation OUT — и СУЖЕНИЕ адресатов этого ключа (задача #1136).
+  //
+  // Непустой перечень называет, для чего заведён ключ: токен по нему выдаётся
+  // ТОЛЬКО тем адресатам, которые здесь названы. Это нужно внешней федерации —
+  // внешние службы обмена и провайдеры федеративной идентичности требуют в
+  // `aud` строго своего значения, — и одновременно ограничивает ключ: выданный
+  // «для реестра» не получит токена, адресованного краю платформы.
+  //
+  // ПЕРЕЧНЕЙ В ТРАКТЕ ДВА, И ЭТОТ — ВНУТРЕННИЙ. Внешняя граница объявлена
+  // посадкой (`authn.client-token.allowed-audiences`) и говорит, каким
+  // поверхностям платформа вообще чеканит удостоверения. Здешний перечень
+  // действует ВНУТРИ неё и никогда её не расширяет: адресат, которого посадка
+  // не объявила, не выдаётся ни одному ключу, как бы он ни объявился. Ключ,
+  // чей перечень не пересекается с объявленным посадкой, токена не получит —
+  // отказ наступает на обмене, потому что перечень посадки меняет оператор и
+  // после выдачи ключа.
+  //
+  // Пустой перечень означает «сужения не объявлено»: действует перечень
+  // посадки целиком, как было до появления этого читателя. Порядок
+  // сохраняется, пустые элементы снимаются, повторы схлопываются; первый
+  // объявленный (из числа допущенных посадкой) становится адресатом обмена,
+  // не назвавшего адресата явно.
+  // Examples:
+  //   audience: ["sts.example.com"]
+  //   audience: ["//iam.example.com/projects/123/locations/global/workloadIdentityPools/kacho/providers/main"]
+  //   audience: ["api://acme-prod"]          // external federated credential
+  repeated string audience = 6;
+
+  // Tenant-facing имя токена (человекочитаемая метка ключа). Задаётся один раз при
+  // выпуске, immutable (у токена нет Update RPC). Пусто допустимо.
+  string name = 7;
+
+  // Пользовательские метки токена. Задаются при выпуске, immutable.
+  map<string, string> labels = 8;
+
+  // Вид выдаваемого удостоверения (§2.5 приёмки BAT-1).
+  //
+  // Не назван — СОХРАНЯЕТСЯ ПРЕЖНЕЕ ПОВЕДЕНИЕ ДОСЛОВНО: пустой перечень
+  // доверенных субъектов даёт KEYPAIR, непустой — FEDERATED. Названный явно вид
+  // АВТОРИТЕТЕН, и несогласие с перечнем отвергается с именем поля.
+  //
+  // LEGACY, названный явно, отвергается ВСЕГДА: его не производит ни один
+  // глагол.
+  CredentialKind credential_kind = 9;
+}
+
+// TrustedSubject — one (issuer, subject_pattern) tuple allowed to assert this
+// SA under the RFC 7523 jwt-bearer grant.
+message TrustedSubject {
+  // External OIDC issuer URL (matches the `iss` claim of the assertion).
+  // Examples:
+  //   https://token.actions.githubusercontent.com   (GitHub Actions)
+  //   https://gitlab.com                            (GitLab CI)
+  //   https://kubernetes.default.svc.cluster.local  (in-cluster k8s SAs)
+  //   https://idp.example.com/<tenant>/v2.0          (external OIDC IdP)
+  string issuer = 1;
+
+  // RE2 regex the external `sub` claim must match. Anchor with ^ and $ to
+  // avoid substring footguns. Examples:
+  //   ^repo:acme/infra:ref:refs/heads/main$
+  //   ^system:serviceaccount:kacho-prod:ci-runner$
+  string subject_pattern = 2;
+
+  // Открытый ключ ИЗДАТЕЛЯ в форме SPKI PEM — тот, которым подписано внешнее
+  // утверждение (задача #1124).
+  //
+  // ПОЧЕМУ КЛЮЧ, А НЕ АДРЕС НАБОРА КЛЮЧЕЙ. Перечень доверенных издателей — наша
+  // таблица, и читает её наша проверка утверждения на пути запроса. Адрес
+  // означал бы обращение к постороннему хосту, выбранному арендатором, из
+  // процесса, принимающего решение о доступе: поверхность запросов наружу,
+  // выбираемая тем, кого мы проверяем. Ключ, названный при выдаче, решения о
+  // доступе никуда не выносит.
+  //
+  // Цена названа: смена ключа издателем требует новой выдачи. Она та же, что
+  // была у прежнего перечня, — он тоже хранил ключ, а не адрес.
+  string public_key_pem = 3;
+
+  // JOSE-алгоритм ключа издателя: один из {"RS256", "ES256", "EdDSA"}.
+  //
+  // Обязателен, и пустое значение означает «ключа нет», а НЕ «любой алгоритм»:
+  // перечень допустимых алгоритмов строится из ЭТОЙ записи, поэтому подмена
+  // параметра внутри одного семейства тоже отвергается.
+  string key_algorithm = 4;
+}
+
+message IssueSAKeyResponse {
+  ServiceAccountOAuthClient key = 1;
+  // Plaintext OAuth client_id (Hydra-registered).
+  string client_id = 2;
+  // DEPRECATED — with private_key_jwt client auth the secret no
+  // longer exists; this field is always empty for new keys. Kept for wire
+  // compatibility only. Removed in a future major.
+  //
+  // Помечен носителем секрета: пока поле стоит на проводе, ЛЮБОЙ путь записи
+  // может положить в него значение, и подметальщик обязан его знать. Пометка
+  // говорит о ВИДЕ поля, а не о том, заполняется ли оно сегодня.
+  string client_secret = 3 [deprecated = true, (kaname.cloud.iam.v1.secret_bearing) = true];
+  // PEM-encoded PKCS#8 ECDSA P-256 private key — SHOWN ONCE; never
+  // recoverable. Caller uses it to sign `client_assertion` (RFC 7521/7523)
+  // in OAuth2 client_credentials requests against Hydra.
+  //
+  // Помечен носителем секрета: приватная половина — предъявительский секрет
+  // ровно в том же смысле, что и однострочный базовый, и оседать в строке
+  // операции, журнале аудита, ленте подписки или строке ресурса не имеет права.
+  string private_key_pem = 4 [(kaname.cloud.iam.v1.secret_bearing) = true];
+  // PEM-encoded SPKI public key (informational; Hydra holds the canonical
+  // copy as a JWK in the registered client metadata).
+  string public_key_pem = 5;
+  // JOSE signing algorithm used by the private key. Always "ES256".
+  string algorithm = 6;
+  // JWK `kid` of the registered public key. Caller MUST set the `kid`
+  // header of signed assertions to this value so Hydra picks the right key.
+  string key_id = 7;
+  // Перечень адресатов, которые этот ключ вправе заказать.
+  //
+  // Величина зависит от контура выдачи, и это не деталь реализации, а ответ на
+  // вопрос «что этот ключ сможет заказать». Пока клиент зеркалится у прежнего
+  // издателя, решает перечень зеркала — обмен идёт у него, и он сверяет с ним.
+  // На переведённом контуре зеркала нет вовсе, и решает записанное на ключе
+  // сужение (`audience` запроса, задача #1136).
+  //
+  // Пустой перечень на переведённом контуре — утверждение, а не умолчание:
+  // сужения ключ не объявлял, действует перечень посадки.
+  repeated string audiences = 8;
+
+  // Базовый секрет — ПОКАЗЫВАЕТСЯ ОДИН РАЗ и невосстановим. Заполнен ТОЛЬКО у
+  // вида SECRET; у KEYPAIR и FEDERATED пуст.
+  //
+  // Предъявляется КАК ЕСТЬ: `Authorization: Bearer <строка>` на крае и полем
+  // пароля `docker login -p`.
+  //
+  // Помечен носителем секрета: значение не имеет права осесть НИ В СТРОКЕ
+  // ОПЕРАЦИИ, ни в журнале аудита, ни в ленте подписки, ни в строке ресурса.
+  string secret = 9 [(kaname.cloud.iam.v1.secret_bearing) = true];
+}
+
+message IssueSAKeyMetadata {
+  string service_account_id = 1;
+  string key_id = 2;
+  // Read by exact field name `account_id` by corelib operations (extractAccountID)
+  // → операция попадает в account-scoped фид `/iam/operations`.
+  string account_id = 3;
+}
+
+message ListSAKeysRequest {
+  // ID of the ServiceAccount.
+  string service_account_id = 1;
+  // Maximum number of results per page. 0 selects the service default (50);
+  // a value above 1000 is rejected with INVALID_ARGUMENT rather than clamped.
+  int64  page_size           = 2;
+  // Page token. To get the next page of results, set [page_token] to the
+  // [ListSAKeysResponse.next_page_token] returned by a previous list request.
+  string page_token          = 3;
+}
+
+message ListSAKeysResponse {
+  repeated ServiceAccountOAuthClient keys = 1;
+  string next_page_token = 2;
+}
+
+message RevokeSAKeyRequest {
+  // ID of the ServiceAccount.
+  string service_account_id = 1;
+  // ID of the SAKey.
+  string key_id              = 2;
+}
+
+message RevokeSAKeyResponse {
+  string key_id = 1;
+  google.protobuf.Timestamp revoked_at = 2;
+}
+
+message RevokeSAKeyMetadata {
+  string service_account_id = 1;
+  string key_id = 2;
+  // Read by exact field name `account_id` by corelib operations → revoke-операция
+  // тоже попадает в account-scoped фид `/iam/operations`.
+  string account_id = 3;
+}

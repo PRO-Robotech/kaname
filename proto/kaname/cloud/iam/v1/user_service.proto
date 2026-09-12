@@ -1,0 +1,515 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/user.proto";
+import "kacho/cloud/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// A set of methods for managing User resources per-Account scope.
+//
+// Модель User (per-Account):
+// - User per-Account: каждый User-row принадлежит ровно одному Account.
+// - Invite RPC — admin Account'а приглашает email; backend создает PENDING-row.
+// - Activate-on-first-login — при первом login через Kratos с матчингом email
+//   PENDING → ACTIVE через InternalUserService.UpsertFromIdentity.
+// - Create RPC — DEPRECATED; возвращает FailedPrecondition «Use Invite».
+service UserService {
+  // Returns the specified User resource.
+  rpc Get (GetUserRequest) returns (User) {
+    option (google.api.http) = { get: "/iam/v1/users/{user_id}" };
+    option (corelib.authz.v1.permission)        = "iam.users.get";
+    option (corelib.authz.v1.required_relation) = "v_get";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Retrieves the list of User resources scoped by Account.
+  rpc List (ListUsersRequest) returns (ListUsersResponse) {
+    option (google.api.http) = { get: "/iam/v1/users" };
+    // User.List is default-deny via a SCOPE-FILTER, not
+    // a PermissionDenied. The kaname handler returns 200 with only the
+    // Users in Accounts where the principal is a member (EMPTY list when the
+    // caller is not a member of the requested Account — never 403). The
+    // handler is the authoritative scope-filter gate, so the gateway
+    // middleware exempts this RPC. Anonymous is still rejected by the IAM
+    // anti-anonymous interceptor.
+    // Сужение происходит НА ДАННЫХ, и это объявлено машинно, а не прозой:
+    // обработчик читает страницу курсором и спрашивает модель про идентификаторы
+    // ЭТОЙ страницы. Единого объекта, про который край мог бы спросить заранее,
+    // у такого чтения нет by construction.
+    //
+    // Полоса `scope_filtered`, а НЕ `<exempt>`: последняя несёт второй смысл,
+    // которому здесь не место — она допускает вызов внутреннего слушателя
+    // ВООБЩЕ БЕЗ ПРИНЦИПАЛА, на основании сетевого положения. Пообъектный фильтр
+    // ниже по стеку без принципала бессмыслен, поэтому лоток обязан быть тот,
+    // который идёт ПОСЛЕ его извлечения.
+    option (corelib.authz.v1.permission)     = "iam.users.list";
+    option (corelib.authz.v1.scope_filtered) = true;
+  }
+
+  // Invite a user by email. Если user уже invited в этот Account
+  // (idempotent re-invite) — Operation возвращается, AB опционально создается.
+  // Permission: requires `admin` OR `editor` relation на account_id.
+  rpc Invite (InviteUserRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/users:invite"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "InviteUserMetadata"
+      response: "User"
+    };
+    // CanInviteUsers == `editor` on the target Account.
+    option (corelib.authz.v1.permission)        = "iam.users.invite";
+    option (corelib.authz.v1.required_relation) = "editor";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "account"
+      from_request_field: "account_id"
+    };
+    // Step-up (acr=2) — Invite is a PRIVILEGE-GRANT surface, not routine
+    // lifecycle: `project_id` + `role_id` make it create an AccessBinding
+    // ATOMICALLY with the invite row (see the Invite use-case), i.e. it hands
+    // out exactly what AccessBindingService/Create hands out. Leaving it at the
+    // AAL1 floor while Create demands acr=2 would be a step-up BYPASS — the same
+    // grant issued through the cheaper door. Step-up stays sensitive-only (the
+    // routine User lifecycle Get/Update/Delete keeps "1").
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+
+  // Updates the specified User. Единственное mutable-поле — `labels` (User —
+  // label-selectable наравне с account/project). Identity-поля (`external_id`
+  // — IdP `sub`, и иные IdP-projected identity-ключи) hard-immutable: их наличие
+  // в update_mask → INVALID_ARGUMENT "<field> is immutable after User.Create".
+  // Async — возвращает Operation (как Update всех iam-ресурсов).
+  //
+  // WHO may call it is `record_writer` on `iam_user`, and it carries NO
+  // account-level source (#1102). The row is a GLOBAL identity — one per person
+  // for the whole platform — so `labels`, its only mutable field, decides which
+  // selector grants match the person in EVERY Account, not just the one the label
+  // was set from. A label being per-Account in meaning while living on a global
+  // row is its own subject (#1126); the right to write it stopped being an
+  // account-level one already.
+  //
+  // Reading the record keeps its account-level sources on purpose: seeing the
+  // people of your own Account is the Account's business (`v_get` / `v_list`).
+  rpc Update (UpdateUserRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = { patch: "/iam/v1/users/{user_id}" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "UpdateUserMetadata"
+      response: "User"
+    };
+    option (corelib.authz.v1.permission)        = "iam.users.update";
+    option (corelib.authz.v1.required_relation) = "record_writer";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Deletes the specified person: the identity row itself, everywhere.
+  //
+  // WHAT IT IS SCOPED TO, because getting this wrong is irreversible. A `users`
+  // row is NO LONGER a membership. One person is ONE row for the whole platform
+  // (global keys `users_identity_email_uniq` /
+  // `users_identity_external_id_uniq`, migration 20260823050000), and belonging
+  // to Accounts is expressed by `memberships` rows, of which there may be many.
+  // Deleting the row from Account A therefore erases the person in Account B as
+  // well: he loses the identity itself, not his participation in one tenant.
+  //
+  // WHO may call it is `identity_remover` on `iam_user` — the person himself and
+  // the cloud, and nobody else. It used to be `v_delete`, which carried THREE
+  // account-level sources: the per-object grant the reconciler materializes on
+  // an invitee's row, the delegated Account administrator, and the Account
+  // owner. That is strictly worse than the block #1102 already took out of the
+  // Account's hands — a block is reversible, a deletion is not (#1131).
+  //
+  // WHAT THE PERSON WHO INVITED HIM KEEPS is what the owner's directive names —
+  // adding and removing rights in his own Account (`iam_access_binding`), seeing
+  // his people (`v_get` / `v_list` keep their account-level sources
+  // deliberately), and now REMOVING A PERSON FROM HIS ACCOUNT
+  // (`RemoveFromAccount` below, #1127). The last one is what he actually wanted
+  // when he reached for Delete: it drops the membership and leaves the identity
+  // alone.
+  //
+  // SELF-DELETION IS UNAFFECTED and stays permitted: `subject` is a source here.
+  // The narrowing takes away the right to erase SOMEONE ELSE, never one's own
+  // row.
+  //
+  // Deleting an identity that still owns Accounts is refused by the database
+  // (`accounts_owner_fk`) → FAILED_PRECONDITION "User <id> owns accounts and
+  // cannot be deleted"; that is unchanged.
+  rpc Delete (DeleteUserRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = { delete: "/iam/v1/users/{user_id}" };
+    option (corelib.api.v1.operation) = {
+      metadata: "DeleteUserMetadata"
+      response: "google.protobuf.Empty"
+    };
+    option (corelib.authz.v1.permission)        = "iam.users.delete";
+    option (corelib.authz.v1.required_relation) = "identity_remover";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Removes the specified person from the specified Account: the MEMBERSHIP
+  // goes, the identity stays.
+  //
+  // THE COUNTERPART OF Invite, and the second row of the scope table the owner's
+  // directive (2026-08-23) drew: the person's own fields are his, the block of an
+  // IDENTITY is the cloud's, and who takes part in MY Account is the Account's.
+  // Until this RPC existed the third row had no action at all — `memberships`
+  // carries no suspended state and had no removal verb — so "block him in my
+  // Account" could only be expressed by withdrawing the grants. That is NOT an
+  // exclusion, and the difference is observable: the membership stayed, the
+  // person stayed in the Account's people list, and `account_admission_rate` kept
+  // counting him (#1127).
+  //
+  // WHAT IT MUST NOT TOUCH, stated as a boundary rather than a hope: not one
+  // field of the `iam_user` row. A person removed from Account A goes on working
+  // in Account B with his record unchanged — same id, same email, same state,
+  // same labels. If you need the identity itself gone, that is Delete above, and
+  // it is not an Account-level right.
+  //
+  // ORDER IS ENFORCED BY THE DATABASE, not by the caller's memory: the deferred
+  // constraint trigger `membership_carrying_rights_is_kept` (migration 472002)
+  // refuses to drop a membership that still carries an ACTIVE access binding in
+  // that Account. So "withdraw the rights first, then exclude" is a constraint,
+  // and the refusal is FAILED_PRECONDITION with the grants named, never a silent
+  // orphaning of a right whose bearer is gone.
+  //
+  // IDEMPOTENT: the argument is the ABSENCE of the membership, not a transition.
+  // Excluding a person who is not in that Account succeeds and reports him
+  // absent — the safe direction of this control must never be the one that fails
+  // on retry.
+  //
+  // THE LAST MEMBERSHIP MAY GO TOO. An identity with no memberships is a legal
+  // state in this tree (the row exists, it belongs to no Account) and it is what
+  // a person who has been removed from everywhere IS. Refusing the last removal
+  // would make the Account unable to finish the job it is entitled to do, and
+  // would leave the identity attached to a tenant that no longer wants it.
+  //
+  // WHO may call it is `member_remover` on `account` — by definition the same
+  // circle that may `Invite` into it. Whoever may bring a person in must be able
+  // to take him out; an Account that can only accumulate people is the state this
+  // RPC exists to leave. The two are separate relation NAMES so that narrowing
+  // one without the other is a red gate rather than a silent drift.
+  //
+  // Step-up (acr=2) — same floor as its two neighbours on this surface: Invite,
+  // which admits a person, and AccessBindingService/Revoke, which withdraws a
+  // right. Changing who takes part in an Account is a membership-posture change,
+  // not routine lifecycle.
+  rpc RemoveFromAccount (RemoveUserFromAccountRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/users/{user_id}:removeFromAccount"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "RemoveUserFromAccountMetadata"
+      response: "google.protobuf.Empty"
+    };
+    option (corelib.authz.v1.permission)        = "iam.users.removeFromAccount";
+    option (corelib.authz.v1.required_relation) = "member_remover";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "account"
+      from_request_field: "account_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Blocks the specified person: the identity may no longer authenticate
+  // anywhere on the platform.
+  //
+  // WHAT IT IS SCOPED TO, because getting this wrong is a cross-tenant outage.
+  // A `users` row is NO LONGER a membership. One person is ONE row for the whole
+  // platform (global keys `users_identity_email_uniq` /
+  // `users_identity_external_id_uniq`, migration 20260823050000), and belonging
+  // to Accounts is expressed by `memberships` rows, of which there may be many.
+  // The state written here therefore reaches EVERY Account the person is in:
+  // token issuance walks the membership set and serves the first row that may
+  // authenticate, and now "none can" arrives at once, because the state is one
+  // per person. This is the owner's decision "a block is a property of the
+  // identity" (question В-8 of the IAM-ID-1 acceptance), not a side effect.
+  //
+  // > This paragraph used to say the opposite — that a block belonged to the
+  // > Account that issued it and that the admin of Account A could not switch a
+  // > person off in Account B. That was true until the row stopped being a
+  // > membership, and it outlived its subject. It is restated here rather than
+  // > deleted because it reads as an active security boundary: the next reader
+  // > looking for the radius of a block would have taken it for a fact. The code
+  // > side of the same correction is in the Block use-case
+  // > (`api/user/set_blocked.go`); the observable one is
+  // > `api/audit/user_block_integration_test.go`.
+  //
+  // WHY AN ACTION AND NOT A FIELD ON Update. This is the reason the state was
+  // never ADDED to UpdateUserRequest, not a description of a bug that was there:
+  // an empty `update_mask` means full-object replacement by platform convention,
+  // and a proto3 enum cannot say "not sent", so the obvious design — one more
+  // maskable field — would let a client block a membership by simply not filling
+  // it in. The state that decides whether a person still has access must not be
+  // reachable by forgetting something. It is also an EVENT ("this membership was
+  // suspended"), not the editing of an attribute, and the audit trail has to be
+  // able to say so.
+  //
+  // Step-up (acr=2) — this is a security-posture change, not routine lifecycle,
+  // and it is classified with the credential surface for the same reason
+  // ServiceAccountService/Disable is: it decides whether a principal may
+  // authenticate at all. The floor is INTERACTIVE-ONLY: a service-account
+  // principal is exempt from it by platform rule, so for machine callers this
+  // RPC costs exactly what Update costs. It raises assurance for people; it is
+  // not a second authorization gate.
+  //
+  // WHO may call it is `identity_suspender` on `iam_user` — a relation of its
+  // own, with NO account-level source: neither a per-object grant, nor the
+  // delegated Account administrator, nor the Account owner (#1102).
+  //
+  // It used to be `v_update`, shared with Update, and the argument for sharing
+  // was that whoever may rename a membership may also suspend it. That argument
+  // died with the membership: the state now switches the person off on the whole
+  // platform, so an Account administrator holding it decides for Accounts he has
+  // nothing to do with. What the person who invited him keeps is what the owner's
+  // directive names — adding and removing rights in his own Account
+  // (`iam_access_binding`), plus reading his people (`v_get` / `v_list` keep
+  // their account-level sources deliberately).
+  //
+  // An ordinary member does NOT hold it on their own row, and neither does the
+  // person himself: `subject` is not a source here, so self-lifting is
+  // impossible by construction.
+  //
+  // Per-account exclusion as an ACTION now EXISTS, and that changes who this
+  // paragraph points at. It used to say that no such action existed and that
+  // "block within my Account" therefore had to be expressed by withdrawing the
+  // grants. `RemoveFromAccount` (above, #1127) is that action: it drops the
+  // membership row, leaves the identity untouched, and is gated by
+  // `member_remover` on the ACCOUNT — the same circle that may invite into it.
+  // The sentence is rewritten rather than deleted because the reason it gave is
+  // still true: an Account administrator has no business switching a person off
+  // platform-wide. He simply has his own verb now instead of a substitute.
+  //
+  // IDEMPOTENT: the argument is the STATE, not a transition. Blocking a
+  // membership that is already blocked succeeds and reports it blocked — the
+  // safe direction of this control must never be the one that fails on retry.
+  //
+  // A PENDING invitation cannot be blocked: it carries no external identity yet
+  // (DB CHECK `users_invite_status_consistency`), so there is nothing to refuse
+  // — FAILED_PRECONDITION.
+  //
+  // WHAT TO DO INSTEAD, said as the OUTCOME rather than as a verb name, because
+  // a name in prose goes stale silently while an outcome survives renaming: to
+  // keep an invited person from ever taking part in this Account, withdraw the
+  // membership his invitation created. That IS the revocation of an unaccepted
+  // invitation, and the path to it is RemoveFromAccount above — the counterpart
+  // of Invite and the Account's own right (`member_remover`). Invite writes the
+  // `memberships` row in PENDING state, removal drops it, and a later first
+  // login does not bring it back: the mirror trigger updates an existing
+  // membership and never inserts one on an edit of the identity row (migration
+  // 20260824010000).
+  //
+  // Delete is NOT that path. It erases the GLOBAL identity row — the person in
+  // every Account at once — and is not an Account-level right at all
+  // (`identity_remover` reaches the person himself or the cloud, never the
+  // Account that issued the invitation).
+  //
+  // Already-issued access tokens are NOT invalidated by this call; they expire
+  // on their own schedule. What stops immediately is every path that mints a
+  // NEW one (token hook, refresh hook, personal-token issuance, subject
+  // resolution at the edge).
+  rpc Block (BlockUserRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = { post: "/iam/v1/users/{user_id}:block" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "BlockUserMetadata"
+      response: "User"
+    };
+    option (corelib.authz.v1.permission)        = "iam.users.block";
+    option (corelib.authz.v1.required_relation) = "identity_suspender";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Unblocks the specified User membership: it may authenticate into that
+  // Account again.
+  //
+  // The counterpart of Block, and it exists for the same reason the state is a
+  // column rather than a deletion — a suspended membership has to be able to
+  // come back. A one-way control is one an operator will not reach for, and a
+  // person with no administrative way back is locked out permanently: self-serve
+  // password recovery deliberately does NOT lift a block (it proves ownership of
+  // a mailbox, which is not what the administrator called into question).
+  //
+  // Same shape throughout: action not field, Operation, step-up, idempotent
+  // (unblocking an active membership succeeds). A PENDING invitation is refused
+  // here too — turning an unconfirmed invitee into an active member is
+  // activation-on-first-login, a different path with a different subject.
+  rpc Unblock (UnblockUserRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = { post: "/iam/v1/users/{user_id}:unblock" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "UnblockUserMetadata"
+      response: "User"
+    };
+    option (corelib.authz.v1.permission)        = "iam.users.unblock";
+    option (corelib.authz.v1.required_relation) = "identity_suspender";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Lists operations for the specified user.
+  rpc ListOperations (ListUserOperationsRequest) returns (ListUserOperationsResponse) {
+    option (google.api.http) = { get: "/iam/v1/users/{user_id}/operations" };
+    option (corelib.authz.v1.permission)        = "iam.user_operationses.listOperations";
+    option (corelib.authz.v1.required_relation) = "v_list";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+}
+
+message GetUserRequest {
+  // ID of the User resource to return.
+  string user_id = 1;
+}
+
+message ListUsersRequest {
+  // Account-scope filter. Required для регулярного user (default-deny
+  // фильтрует Users по Account). system-admin может оставить пустым (видит всех).
+  string account_id = 4;
+
+  // The maximum number of results per page to return. Default value: 100.
+  int64 page_size = 1;
+
+  // Page token.
+  string page_token = 2;
+
+  // A filter expression. Exactly one term, in the form `field="value"`.
+  //
+  //   email="a@b.io"          exact match, case-insensitive
+  //   external_id="..."       exact match
+  //   invite_status="ACTIVE"  exact match
+  //   search="min.ops"        case-insensitive SUBSTRING over email AND id
+  //
+  // `search` is the term a console types into: a User has no `name`, and the
+  // exact-match terms above only answer someone who already knows the whole
+  // value. `%` and `_` in its value are matched literally, not as wildcards.
+  string filter = 3;
+}
+
+message ListUsersResponse {
+  // List of User resources.
+  repeated User users = 1;
+
+  // This token allows you to get the next page of results for list requests.
+  string next_page_token = 2;
+}
+
+// Invite a user by email.
+message InviteUserRequest {
+  // Account where the user is invited. Required.
+  string account_id = 1;
+
+  // Email of the invitee. Required, case-insensitive lookup.
+  string email = 2;
+
+  // Display name to seed the User-row (optional; will be overwritten on first
+  // login from Kratos identity traits).
+  string display_name = 3;
+
+  // Optional: project_id + role_id pair to create AccessBinding atomically.
+  // Если оба не заполнены — только invite-row создается (admin позже выдает роли
+  // через AccessBindingService.Create).
+  string project_id = 4;
+  // ID of the Role granted to the invited user on acceptance. Empty grants nothing.
+  string role_id = 5;
+}
+
+message UpdateUserRequest {
+  // Flat-форма request'а (паритет с UpdateRole/ServiceAccount/AccessBinding/...):
+  // mutable-поля лежат на верхнем уровне, без вложенного ресурса.
+  reserved 3;
+  reserved "user";
+
+  // ID of the User resource to update.
+  string user_id = 1;
+
+  // Field mask. Allowed field: `labels` (единственное mutable-поле).
+  // external_id и иные IdP-projected identity-поля immutable: их наличие в
+  // update_mask → INVALID_ARGUMENT. Пустой mask → full-PATCH над mutable
+  // `labels` (immutable-поля resource-пути silently игнорируются).
+  google.protobuf.FieldMask update_mask = 2;
+
+  // Tenant-facing метки самого ресурса User (mutable; `labels` в update_mask).
+  // Единственное применяемое mutable-поле; identity-поля (`external_id` и иные
+  // IdP-projected) hard-immutable и в request не переносятся. Аннотации
+  // (size/key/value pattern) — паритет account/project/group/role request `labels`.
+  map<string, string> labels = 4;
+}
+
+message DeleteUserRequest {
+  // ID of the User resource to delete.
+  string user_id = 1;
+}
+
+// Removes a person from one Account. Both ids are required: the membership is
+// the PAIR, and neither half may be inferred. Deriving the Account from the
+// person's row would pick `users.account_id` — the column that names ONE of his
+// Accounts and is a leftover of the time when the row WAS the membership; the
+// caller would then remove a membership he did not name.
+message RemoveUserFromAccountRequest {
+  // ID of the person whose membership is removed. The identity row is not
+  // touched by this call.
+  string user_id = 1;
+
+  // ID of the Account the person is removed from. This is also the scope of the
+  // authorization decision (`member_remover` on this Account).
+  string account_id = 2;
+}
+
+message BlockUserRequest {
+  // ID of the User membership row to block. The only input: the state is the
+  // verb, so there is no field that could be forgotten.
+  string user_id = 1;
+}
+
+message UnblockUserRequest {
+  // ID of the User membership row to unblock.
+  string user_id = 1;
+}
+
+message ListUserOperationsRequest {
+  // ID of the User resource to list operations for.
+  string user_id = 1;
+
+  // The maximum number of results per page that should be returned.
+  int64 page_size = 2;
+
+  // Page token.
+  string page_token = 3;
+}
+
+message ListUserOperationsResponse {
+  // List of operations for the specified user.
+  repeated kacho.cloud.operation.Operation operations = 1;
+
+  // This token allows you to get the next page of results for list requests.
+  string next_page_token = 2;
+}

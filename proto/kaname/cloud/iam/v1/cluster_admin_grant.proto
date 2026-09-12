@@ -1,0 +1,47 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// Subject type for cluster-admin grants.
+enum ClusterGrantSubjectType {
+  CLUSTER_GRANT_SUBJECT_TYPE_UNSPECIFIED = 0;
+  USER = 1;
+  SERVICE_ACCOUNT = 2;
+}
+
+// A ClusterAdminGrant resource — permanent grant of cluster-admin authority.
+//
+// Single source of truth for the relation tuple
+// `cluster:cluster_root#system_admin@user:<id>` (or `@service_account:<id>`).
+// Removed via soft revoke (CAEP push); hard delete is reserved for
+// GDPR erasure. DB FK `ON DELETE RESTRICT` preserves audit trail.
+//
+// Resource id prefix: `cag_` (underscore form, `domain.NewKac127ID`).
+message ClusterAdminGrant {
+  // ID of the grant.
+  string id = 1;
+
+  // Type of the granted subject.
+  ClusterGrantSubjectType subject_type = 2;
+
+  // ID of the subject (User id when subject_type=USER, ServiceAccount id when
+  // subject_type=SERVICE_ACCOUNT). Cross-service ref — no DB FK.
+  string subject_id = 3;
+
+  // ID of the User who granted this admin role. Recorded for audit.
+  string granted_by_user_id = 4;
+
+  // Free-form rationale string. 0-512 characters. Recorded for audit /
+  // periodic access review.
+  string rationale = 5;
+
+  // Timestamp when the grant was created.
+  google.protobuf.Timestamp granted_at = 6;
+}

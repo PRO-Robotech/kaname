@@ -1,0 +1,87 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+import "kaname/cloud/iam/v1/credential_kind.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// UserOAuthClient — персональный access-токен пользователя (поток
+// private_key_jwt).
+//
+// kaname генерирует пару ключей ECDSA P-256 на каждый токен и возвращает
+// приватный PEM вызывающему ровно один раз; у себя держит SPKI public PEM плюс
+// алгоритм. Секрет (private key) не хранится нигде.
+//
+// Клиентом это удостоверение называется по `id` ЭТОЙ строки: им подписывается
+// `client_assertion`, и по нему же издатель платформы разрешает клиента.
+// Второго имени у него нет.
+//
+// N:1 — у одного User может быть несколько токенов (в отличие от 1:1 SA-key до
+// релакса).
+//
+// FK на `users(id) ON DELETE CASCADE` — при удалении пользователя его токены
+// снимаются вместе с ним.
+//
+// Resource id prefix: `uoc`.
+message UserOAuthClient {
+  // ID строки-маппинга (он же key_id / JWK `kid`).
+  // Конвенция Kachō: новый формат `uoc<17-crockford>` (ids.NewID, без underscore);
+  // legacy `uoc_<body>` принимается для существующих строк (credential-id/JWK kid,
+  // неизменяем). Оба формата валидны.
+  string id = 1;
+
+  // ID пользователя, которому принадлежит токен.
+  string user_id = 2;
+
+  // Идентификатор клиента у ВНЕШНЕГО поставщика удостоверений.
+  //
+  // ПУСТО у токенов, выпущенных платформой: она больше не заводит клиента у
+  // внешнего поставщика, и пустое значение здесь означает ровно это —
+  // регистрации нет. Непустое значение принадлежит токену прежнего выпуска;
+  // отчеканенные для него поставщиком токены действительны до собственного
+  // истечения.
+  //
+  // Адресацией НЕ является ни в каком случае: подписывать `client_assertion`
+  // надо `id` строки.
+  string hydra_client_id = 3;
+
+  // Свободное описание (например `laptop CLI`). 0-256 символов.
+  string description = 4;
+
+  // Опциональный срок действия. Не заполнен = бессрочный токен.
+  google.protobuf.Timestamp expires_at = 5;
+
+  // Время последнего успешного выпуска токена. Не заполнено до первого
+  // использования.
+  google.protobuf.Timestamp last_used_at = 6;
+
+  // ID пользователя, создавшего токен (audit).
+  string created_by_user_id = 7;
+
+  // Время создания.
+  google.protobuf.Timestamp created_at = 8;
+
+  // SPKI-encoded ECDSA P-256 публичный ключ удостоверения. По нему проверяется
+  // подпись `client_assertion`.
+  string public_key_pem = 9;
+
+  // JOSE alg зарегистрированного ключа. Всегда "ES256" для новых токенов.
+  string key_algorithm = 10;
+
+  // Tenant-facing имя токена (задаётся при выпуске, immutable). Пусто → в UI
+  // показывается description/id. Человекочитаемая метка токена, не идентификатор.
+  string name = 11;
+
+  // Пользовательские метки токена (задаются при выпуске, immutable).
+  map<string, string> labels = 12;
+
+  // Вид удостоверения — ЧЕМ ОНО СЕБЯ ПРЕДЪЯВЛЯЕТ. Записывается при вставке;
+  // читателем НЕ вычисляется и из состава прочих полей не выводится. По нему
+  // читатель узнаёт, какое поле ответа выдачи было заполнено.
+  CredentialKind credential_kind = 13;
+}

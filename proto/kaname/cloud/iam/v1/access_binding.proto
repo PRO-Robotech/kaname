@@ -1,0 +1,421 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+import "kaname/cloud/iam/v1/authorize_service.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// An AccessBinding resource. Связывает (subject_type, subject_id) с (role_id) на
+// scope-anchor (scope_type, scope_id) — redesign-2026 F7 rename (было
+// resource_type/resource_id; слово «resource» отдано target'у).
+//
+// NB: это канонический AccessBinding из kaname.cloud.iam.v1 — единственный
+// источник истины для grant-привязок домена IAM.
+//
+// Runtime-Check грантов выполняется реляционным вычислением по модели прав
+// (InternalIAMService.Check); tuple-sync — через fga_outbox drainer.
+//
+// Ресурс несет lifecycle (`status`), TTL (`expires_at`) и audit-метаданные
+// (`granted_by_user_id` / `revoked_at` / `revoked_by_user_id`). State machine
+// (PENDING → ACTIVE → REVOKED, REVOKED terminal); transitions
+// only via conditional CAS UPDATE.
+//
+// Constraint (DB-level): UNIQUE (subject_type, subject_id, role_id, resource_type,
+// resource_id) — идемпотентный INSERT (дубль возвращает existing).
+//
+// Resource id prefix: `acb` (concatenated form, `ids.NewID`).
+message AccessBinding {
+  // Lifecycle status. PENDING is reserved for a JIT approval workflow;
+  // ACTIVE is the steady state; REVOKED is terminal.
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    PENDING            = 1;
+    ACTIVE             = 2;
+    REVOKED            = 3;
+  }
+
+  // ID of the access binding.
+  string id = 1;
+
+  // Тип subject'а: "user" | "service_account" | "group".
+  string subject_type = 2;
+
+  // ID subject'а (User id / ServiceAccount id / Group id).
+  string subject_id = 3;
+
+  // ID of the Role assigned to the subject.
+  string role_id = 4;
+
+  // Scope-anchor TYPE — the hierarchy tier this binding anchors at, in dotted
+  // form: `iam.cluster` | `iam.account` | `iam.project` (redesign-2026 F7). The
+  // word "resource" is reserved for the `target` (F8); the anchor the grant applies
+  // AT is the scope. The within-service storage keeps the bare kind
+  // (cluster/account/project); the dotted form is the API projection. Immutable
+  // after Create.
+  string scope_type = 5;
+
+  // Scope-anchor ID — the anchor object id (`cluster_root` | `acc…` | `prj…`).
+  // Immutable after Create.
+  string scope_id = 6;
+
+  // Creation timestamp.
+  google.protobuf.Timestamp created_at = 7;
+
+  // Lifecycle status. Backfill DEFAULT 'ACTIVE' for legacy rows.
+  Status status = 8;
+
+  // TOMBSTONE. Tags 9/14 held the tenant-facing condition overlay of the binding
+  // (`condition_id` / `builtin_condition`). The matching request fields were taken
+  // off Create earlier; what stayed here was their projection, and it projected
+  // nothing: no decision path read either field, tag 9 pointed at a table in a
+  // different id space from the Condition resource, and that table never received
+  // a single production row. A field a caller can read but nothing can ever fill
+  // is a promise about a capability that does not exist. Tags 9/14 and the names
+  // `condition_id` / `builtin_condition` are RESERVED so a future design starts
+  // from a clean number instead of inheriting a meaning nobody implemented.
+  //
+  // Conditions on a tuple remain first-class and untouched: the model declares
+  // them, and the internal listener carries them on `Tuple.condition`.
+  reserved 9, 14;
+  reserved "condition_id", "builtin_condition";
+
+  // Optional hard-expiry timestamp. Unset = no TTL. When set, OPA
+  // gates evaluation by `now() < expires_at`.
+  google.protobuf.Timestamp expires_at = 10;
+
+  // ID of the User who created this binding (audit). Required at INSERT time
+  // for new bindings; NULL for legacy rows.
+  string granted_by_user_id = 11;
+
+  // Timestamp when the binding transitioned to REVOKED. Unset while not yet
+  // revoked.
+  google.protobuf.Timestamp revoked_at = 12;
+
+  // ID of the User who revoked the binding (audit). Unset until revoked.
+  string revoked_by_user_id = 13;
+
+  // Scope tier enum — the level of the cluster ▶ account ▶ project hierarchy at
+  // which a binding anchors. Retained as the projection type of
+  // `SubjectPrivilege.scope`; the AccessBinding itself now carries the flattened
+  // dotted `scope_type`/`scope_id` (redesign-2026 F7) instead of a separate tier
+  // field.
+  enum Scope {
+    SCOPE_UNSPECIFIED = 0;
+    CLUSTER           = 1;
+    ACCOUNT           = 2;
+    PROJECT           = 3;
+  }
+
+  // TOMBSTONE. Tag 15 (`Scope scope`) and tag 17 (`ScopeRef scope_ref`) held the
+  // legacy triple-redundant scope projection; redesign-2026 F7 flattens them into
+  // `scope_type` (tag 5, dotted) + `scope_id` (tag 6). Tags 15/17 and names
+  // `scope`/`scope_ref` are RESERVED tombstones — never reused (append-only).
+  //
+  // Tags 16/18 held the earlier `target`/`target_ref`/`selector` object-selection
+  // machinery (dropped in a prior clean-cut); F8 REINTRODUCES `target` at a NEW tag
+  // (`target = 22`) — tags 16/18 stay tombstoned (never reused as tag numbers), while
+  // the NAME `target` is reused at the new tag (append-only: tag-tombstone, not
+  // name-tombstone).
+  reserved 15, 16, 17, 18;
+  reserved "scope", "scope_ref", "target_ref", "selector";
+
+  // Multi-subject set. A binding may
+  // grant the same role+scope to 1..32 subjects at once. Each subject yields an
+  // INDEPENDENT FGA tuple-set and an independent emitted-tuple ledger lineage,
+  // so per-subject revoke/audit never touches another subject's tuples (no
+  // double-grant anomaly when, e.g., a user and a group containing that user
+  // are both listed).
+  //
+  // Two-way read-projection with the legacy single `subject_type`/`subject_id`,
+  // active during the back-compat window:
+  //   - On Create the canonical input is `subjects[]` (preferred); when only the
+  //     legacy single pair is set the server projects it to a one-element
+  //     `subjects[]`. If BOTH `subjects[]` AND the legacy single pair are set
+  //     and the single is NOT subjects[0], that is INVALID_ARGUMENT.
+  //   - On read the server fills BOTH: `subjects[]` (full set) AND the legacy
+  //     `subject_type`/`subject_id` (= the FIRST subject) so pre-existing clients
+  //     do not break. The projection is output-only, not the source of truth.
+  // A future cleanup drops the legacy single fields and the projection.
+  repeated Subject subjects = 19;
+
+  // Specifies if the binding is protected from deletion (modeled after
+  // `vpc.address.deletion_protection`).
+  // Default false. The owner auto-binding created on `Account.Create` sets this
+  // to `true`, so the account creator cannot accidentally delete
+  // their own owner grant. `DeleteAccessBinding` on a binding with
+  // `deletion_protection=true` is rejected sync with FAILED_PRECONDITION
+  // ("access binding <id> has deletion_protection enabled; clear it via Update
+  // before Delete"), plus an atomic CAS-backstop `DELETE … WHERE
+  // deletion_protection=false` against TOCTOU. To delete, clear the
+  // flag first via `Update(update_mask=["deletion_protection"])`, then Delete.
+  // Settable on input and populated on every read.
+  bool deletion_protection = 20;
+
+  // Tenant-facing метки самого ресурса AccessBinding. Единая модель видимости
+  // IAM-ресурсов: AccessBinding — label-selectable, как account/project;
+  // ARM_LABELS-грант на iam.accessBinding материализует глаголы своей роли на
+  // объектах, чьи `labels` покрывают `matchLabels` (iam-direct same-DB), а
+  // страница List сужается тем же отношением, которым каталог гейтит одиночное
+  // чтение — `v_get`; строка попадает в выдачу ровно тогда, когда вызывающий
+  // вправе прочитать её по id. Mutable через Update (`labels` в update_mask).
+  map<string, string> labels = 21;
+
+  // Which objects UNDER the scope-anchor the grant applies to (redesign-2026 F8,
+  // least-privilege spine). REQUIRED on Create — the broadest grant (all objects
+  // under the anchor, including future) is reachable ONLY via explicit
+  // `target.allInScope{}` opt-in; there is no default sentinel. NEW tag — the
+  // earlier target/target_ref (tags 16/18) stay tombstoned.
+  AccessTarget target = 22;
+
+  // OUTPUT-ONLY. When this binding's per-object access last became live —
+  // `MAX(updated_at)` over the binding's ACTIVE materialized members. Ignored on
+  // input.
+  //
+  // WHY it exists. Kachō is eventually-consistent by design: `Operation.done`
+  // means the binding row is DURABLE, never that the FGA tuples carrying the
+  // access are visible (gating `done` on downstream visibility is forbidden —
+  // it re-defines the Operation contract and mints phantom resources). In the
+  // materialization window the grantee therefore gets a `403` that is
+  // BYTE-IDENTICAL to a genuine denial, and the administrator who just granted
+  // has no way to tell "still propagating" from "granted the wrong thing" — and
+  // nothing to poll. This field is that signal, WITHOUT a server-side barrier:
+  //
+  //   unset → nothing has materialized yet (still propagating, OR the binding
+  //           materializes nothing per-object — see below);
+  //   set   → per-object access was live as of this instant.
+  //
+  // Reading it is a plain `Get`/`List`, so a client can poll it in exactly the
+  // same bounded-retry loop it already runs against the transient 403 — the
+  // retry stops being blind.
+  //
+  // Legitimately unset forever for a binding that materializes no per-object
+  // membership: a CLUSTER-scoped grant (served by the flat cluster short-circuit,
+  // never per-object) and a legacy permissions-only role (no authored rules[]).
+  // Unset therefore means "no ACTIVE per-object member", NOT "the grant does not
+  // work".
+  //
+  // Truncated to seconds (api-conventions).
+  google.protobuf.Timestamp materialized_at = 23;
+
+  // OUTPUT-ONLY. ВТОРАЯ ФОРМА выдачи: имя отношения модели прав, выдаваемое
+  // напрямую на области выдачи. Взаимоисключающе с `role_id` — ровно одно из
+  // двух непусто.
+  //
+  // ЗАЧЕМ она есть. Роль раздаёт ГЛАГОЛЫ (`v_get`…`v_delete`) через свои правила,
+  // а встроенные права платформы выражены ИМЕНОВАННЫМИ отношениями
+  // (`system_viewer` — чтение внутренней поверхности служебной учёткой,
+  // `quota_reader` — чтение действующих пределов, `viewer` на кластере —
+  // публичное чтение глобального справочника размещения). Подобрать роль под
+  // каждое означало бы завести роли с пустыми правилами, то есть форму без
+  // содержания.
+  //
+  // Непусто ТОЛЬКО у системной выдачи (`system = true`). На вход создания это
+  // поле НЕ принимается: его нет ни в одном запросе, поэтому «принято и
+  // проигнорировано» здесь невозможно by construction — отношение это внутреннее
+  // имя, от которого зависит решение о доступе, и выдавать его вправе только
+  // платформа.
+  string granted_relation = 24;
+
+  // OUTPUT-ONLY. Выдача заведена ПЛАТФОРМОЙ: встроенный доступ, который прежде
+  // существовал помимо этой поверхности (права служебных учёток, публичное
+  // чтение справочников). Такая выдача видна перечислением наравне с обычной и
+  // отзывается штатно — снять защиту от удаления правкой, затем удалить.
+  //
+  // У неё пуст `granted_by_user_id`, и это не пробел аудита, а его содержание:
+  // выдал не человек, а платформа, и признак `system` отвечает на вопрос «кто
+  // выдал» точнее, чем любая подставленная учётка.
+  //
+  // Субъектом такой выдачи может быть подстановка «любой аутентифицированный»
+  // (`subject_type = "user"`, `subject_id = "*"`) — единственный субъект, которого
+  // нельзя ни назвать, ни отозвать поимённо, поэтому у обычной выдачи он
+  // отвергается.
+  bool system = 25;
+}
+
+// AccessTarget selects which objects, under the binding's scope-anchor, the grant
+// applies to (redesign-2026 F8). Exactly one arm is set.
+message AccessTarget {
+  oneof target {
+    // Per-object grant: a closed set of ResourceRef{type,id}.
+    AccessTargetResources resources = 1;
+
+    // Explicit opt-in: the grant applies to ALL objects under the anchor,
+    // including future ones — the broadest grant, never a default.
+    AccessTargetAllInScope all_in_scope = 2;
+  }
+}
+
+// AccessTargetResources is the per-object arm of AccessTarget: a closed set of
+// polymorphic ResourceRef{type,id} (graceful-dangling; `type` is dotted from the
+// closed type-registry, e.g. `compute.instance`).
+message AccessTargetResources {
+  repeated ResourceRef resources = 1;
+}
+
+// AccessTargetAllInScope is the whole-anchor arm of AccessTarget (empty payload).
+message AccessTargetAllInScope {}
+
+// Subject is one grantee of an AccessBinding. `type` is the closed
+// `SubjectType` (USER / SERVICE_ACCOUNT /
+// GROUP); `id` is the subject id whose prefix matches the type (`usr…` /
+// `sva…` / `grp…`). A GROUP subject grants the role to every member (userset),
+// which `ExpandAccess` resolves to concrete principals and which, for
+// admin/editor-tier roles, requires `requireGrantAuthority` on the scope
+// (group-amplification guard).
+message Subject {
+  // Type of the subject (USER / SERVICE_ACCOUNT / GROUP).
+  SubjectType type = 1;
+
+  // Subject id (`usr…` | `sva…` | `grp…`), prefix-consistent with `type`.
+  string id = 2;
+}
+
+// SubjectType is the closed set of AccessBinding grantee kinds.
+// Value names are enum-prefixed (SUBJECT_TYPE_*) because proto3 enum values
+// share the enclosing C++ scope (package level here) — bare USER/
+// SERVICE_ACCOUNT collide with ClusterGrantSubjectType and GROUP with
+// Derivation.
+enum SubjectType {
+  SUBJECT_TYPE_UNSPECIFIED       = 0;
+  SUBJECT_TYPE_USER              = 1;
+  SUBJECT_TYPE_SERVICE_ACCOUNT   = 2;
+  SUBJECT_TYPE_GROUP             = 3;
+}
+
+// GrantSurfaceKind — ВИД записи поверхности выдач (#914, решение 2).
+//
+// Поверхностей ВЫДАЧИ три, и они остаются раздельными: выдача заводится и
+// отзывается своим глаголом, состав группы — своим, кластерный администратор —
+// своим. Сводить их в одну поверхность было бы неверно: у членства нет ни роли,
+// ни области, ни срока, а у кластерного администратора свой порядок выдачи —
+// это единственный доступ, обязанный работать, когда сломано всё остальное.
+//
+// Раздельными остаются ПОВЕРХНОСТИ, но не ЧТЕНИЕ. Две поверхности об одном
+// предмете расходятся молча: спрашивающий «кто имеет доступ» получает ответ с
+// одной из них и считает его полным. Поэтому перечисление выдач возвращает
+// записи всех трёх видов, называя вид каждой.
+//
+// Решение и его обоснование записаны в инженерной документации СЛУЖБЫ. Её
+// координата здесь намеренно не приводится: служба вынесена отдельным
+// репозиторием, и путь, резолвящийся в другом дереве, читается как
+// резолвящийся в этом.
+enum GrantSurfaceKind {
+  GRANT_SURFACE_KIND_UNSPECIFIED = 0;
+
+  // Выдача: обычная (роль на области) либо системная (именованное отношение).
+  GRANT_SURFACE_KIND_ACCESS_BINDING = 1;
+
+  // Состав группы: членство доносит до члена то, что выдано группе.
+  GRANT_SURFACE_KIND_GROUP_MEMBERSHIP = 2;
+
+  // Кластерный администратор: верхний ярус супер-доступа, действующий каскадом.
+  GRANT_SURFACE_KIND_CLUSTER_ADMIN = 3;
+}
+
+// GroupMembershipRecord — одно членство в группе.
+//
+// Это НЕ выдача, и полей выдачи у него нет: роли, области и срока у членства не
+// бывает. Пустые поля читатель принимает за «не задано», а не за «неприменимо»,
+// — поэтому у вида своя форма, а не общая с вырезанной серединой.
+message GroupMembershipRecord {
+  // ID группы, чей это состав.
+  string group_id = 1;
+
+  // Тип члена: "user" | "service_account".
+  string member_type = 2;
+
+  // ID члена.
+  string member_id = 3;
+
+  // Когда член добавлен.
+  google.protobuf.Timestamp added_at = 4;
+}
+
+// ClusterAdminRecord — один действующий кластерный администратор.
+//
+// Форма своя по той же причине: выдаётся и отзывается он собственным глаголом,
+// роли у него нет, а область — весь кластер по построению.
+message ClusterAdminRecord {
+  // ID записи о выдаче администраторских прав на кластере.
+  string id = 1;
+
+  // Тип субъекта: "user" | "service_account".
+  string subject_type = 2;
+
+  // ID субъекта.
+  string subject_id = 3;
+
+  // Когда выдано.
+  google.protobuf.Timestamp granted_at = 4;
+}
+
+// GrantSurfaceRecord — одна запись поверхности выдач вместе со своим ВИДОМ.
+//
+// Вид назван ДВАЖДЫ — полем `kind` и ветвью `record`, — и это осознанно: ветвь
+// читает тот, кто разбирает запись по её форме, `kind` — тот, кто раскладывает
+// перечисление по видам, не заглядывая внутрь. Согласие двух прочтений — не
+// пожелание: его держит проба
+// (`services/iam/internal/apps/kaname/api/access_binding`), потому что запись, чей
+// `kind` разошёлся с ветвью, читается разными вызывающими по-разному.
+message GrantSurfaceRecord {
+  // Вид записи. UNSPECIFIED не производится: запись без вида означала бы, что
+  // перечисление вернуло что-то, чего само назвать не может.
+  GrantSurfaceKind kind = 1;
+
+  oneof record {
+    // Вид ACCESS_BINDING.
+    AccessBinding binding = 2;
+
+    // Вид GROUP_MEMBERSHIP.
+    GroupMembershipRecord group_membership = 3;
+
+    // Вид CLUSTER_ADMIN.
+    ClusterAdminRecord cluster_admin = 4;
+  }
+}
+
+message CreateAccessBindingMetadata {
+  // ID of the AccessBinding that is being created.
+  string access_binding_id = 1;
+
+  // ID of the owning Account (denormalized for account-scoped operations
+  // listing — AccountService.ListAllOperations). Non-first field so the
+  // corelib resource_id extractor (first `_id`-suffix match) still picks
+  // `access_binding_id`. Read by exact field name `account_id` by corelib.
+  // Populated ONLY for account-scoped bindings (resource_type=="account");
+  // project/cluster/cross-service bindings leave it empty
+  // (SQL NULL — excluded from the account-scoped list).
+  string account_id = 2;
+}
+
+message DeleteAccessBindingMetadata {
+  // ID of the AccessBinding that is being deleted.
+  string access_binding_id = 1;
+
+  // ID of the owning Account (denormalized; non-first, populated only for
+  // account-scoped bindings — see CreateAccessBindingMetadata).
+  string account_id = 2;
+}
+
+message UpdateAccessBindingMetadata {
+  // ID of the AccessBinding that is being updated.
+  string access_binding_id = 1;
+
+  // ID of the owning Account (denormalized; non-first, populated only for
+  // account-scoped bindings — see CreateAccessBindingMetadata).
+  string account_id = 2;
+}
+
+message RevokeAccessBindingMetadata {
+  // ID of the AccessBinding that is being soft-revoked (status ACTIVE→REVOKED).
+  string access_binding_id = 1;
+
+  // ID of the owning Account (denormalized; non-first, populated only for
+  // account-scoped bindings — see CreateAccessBindingMetadata).
+  string account_id = 2;
+}

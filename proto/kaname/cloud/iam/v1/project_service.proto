@@ -1,0 +1,235 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/project.proto";
+import "kacho/cloud/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// A set of methods for managing Project resources.
+service ProjectService {
+  // Returns the specified Project resource.
+  rpc Get (GetProjectRequest) returns (Project) {
+    option (google.api.http) = { get: "/iam/v1/projects/{project_id}" };
+    option (corelib.authz.v1.permission)        = "iam.projects.get";
+    option (corelib.authz.v1.required_relation) = "v_get";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "project"
+      from_request_field: "project_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Retrieves the list of Project resources within an Account.
+  //
+  // Default-deny реализован SCOPE-FILTER'ом, а не PermissionDenied: in-handler
+  // фильтр — авторитетный гейт видимости. Handler возвращает 200 и оставляет
+  // только проекты, видимые вызывающему через объединение FGA-отношений
+  // viewer и v_list (пустой список, если ничего не видно — никогда 403).
+  // Поэтому gateway-middleware exempt'ит этот RPC от per-RPC FGA-Check.
+  // `<exempt>` снимает authz, но не аутентификацию — валидный JWT обязателен,
+  // anonymous отвергается anti-anonymous интерсептором IAM. Без ACR
+  // step-up-floor — паритет с остальными account-scoped List
+  // (user / serviceAccount / role).
+  rpc List (ListProjectsRequest) returns (ListProjectsResponse) {
+    option (google.api.http) = { get: "/iam/v1/projects" };
+    // Сужение происходит НА ДАННЫХ, и это объявлено машинно, а не прозой:
+    // обработчик читает страницу курсором и спрашивает модель про идентификаторы
+    // ЭТОЙ страницы. Единого объекта, про который край мог бы спросить заранее,
+    // у такого чтения нет by construction.
+    //
+    // Полоса `scope_filtered`, а НЕ `<exempt>`: последняя несёт второй смысл,
+    // которому здесь не место — она допускает вызов внутреннего слушателя
+    // ВООБЩЕ БЕЗ ПРИНЦИПАЛА, на основании сетевого положения. Пообъектный фильтр
+    // ниже по стеку без принципала бессмыслен, поэтому лоток обязан быть тот,
+    // который идёт ПОСЛЕ его извлечения.
+    option (corelib.authz.v1.permission)     = "iam.projects.list";
+    option (corelib.authz.v1.scope_filtered) = true;
+  }
+
+  // Creates a project within the specified account.
+  rpc Create (CreateProjectRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = { post: "/iam/v1/projects" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "CreateProjectMetadata"
+      response: "Project"
+    };
+    option (corelib.authz.v1.permission)        = "iam.projects.create";
+    option (corelib.authz.v1.required_relation) = "editor";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "account"
+      from_request_field: "account_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Updates the specified project.
+  rpc Update (UpdateProjectRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = { patch: "/iam/v1/projects/{project_id}" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "UpdateProjectMetadata"
+      response: "Project"
+    };
+    option (corelib.authz.v1.permission)        = "iam.projects.update";
+    option (corelib.authz.v1.required_relation) = "v_update";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "project"
+      from_request_field: "project_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Deletes the specified project.
+  //
+  // NOT BLOCKED BY LIVE RESOURCES, and this is a consequence for the caller, not
+  // a detail of our implementation. Unlike Network.Delete — which refuses a
+  // non-empty network and lists what blocks it — this verb performs NO reference
+  // check across services. After it succeeds:
+  //
+  //   * resources of other services (Network, Instance, Volume, ...) keep
+  //     existing and keep consuming limits — there is no cross-service cascade;
+  //   * no NEW resource can be created in the project: consumers validate
+  //     project_id against IAM on the create path, and the id stops resolving;
+  //   * every access binding scoped to the project is revoked in the same
+  //     transaction as the row removal;
+  //   * there is no supported way left to enumerate what remains: the List verbs
+  //     of the owning services require project_id, and ProjectService.List no
+  //     longer returns this project.
+  //
+  // So: delete the project LAST. Remove the resources it holds first, or record
+  // their ids beforehand.
+  //
+  // Blocking a non-empty project is decided and specified — the live tally must
+  // reach IAM from the resource owners, because IAM is a leaf of the call graph
+  // and may not call them back. See docs/architecture/project-deletion-and-live-resources.md;
+  // the OPEN successor carrying the mechanism is PRO-Robotech/kacho#1231.
+  // (The decision itself was taken under #1594, which is closed — a reader sent
+  // there would read "closed" as "done".)
+  rpc Delete (DeleteProjectRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = { delete: "/iam/v1/projects/{project_id}" };
+    option (corelib.api.v1.operation) = {
+      metadata: "DeleteProjectMetadata"
+      response: "google.protobuf.Empty"
+    };
+    option (corelib.authz.v1.permission)        = "iam.projects.delete";
+    option (corelib.authz.v1.required_relation) = "v_delete";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "project"
+      from_request_field: "project_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Lists operations for the specified project.
+  rpc ListOperations (ListProjectOperationsRequest) returns (ListProjectOperationsResponse) {
+    option (google.api.http) = { get: "/iam/v1/projects/{project_id}/operations" };
+    option (corelib.authz.v1.permission)        = "iam.project_operationses.listOperations";
+    option (corelib.authz.v1.required_relation) = "v_list";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "project"
+      from_request_field: "project_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+}
+
+message GetProjectRequest {
+  // ID of the Project resource to return.
+  string project_id = 1;
+}
+
+message ListProjectsRequest {
+  // ID of the Account to list projects in.
+  string account_id = 1;
+
+  // The maximum number of results per page to return. Default value: 100.
+  int64 page_size = 2;
+
+  // Page token.
+  string page_token = 3;
+
+  // A filter expression. Currently supports filtering by [Project.name].
+  string filter = 4;
+}
+
+message ListProjectsResponse {
+  // List of Project resources.
+  repeated Project projects = 1;
+
+  // This token allows you to get the next page of results for list requests.
+  string next_page_token = 2;
+}
+
+message CreateProjectRequest {
+  // ID of the Account that the Project will belong to.
+  string account_id = 1;
+
+  // Name of the project. Must be unique within an Account. 1-63 characters long.
+  string name = 2;
+
+  // Description of the project.
+  string description = 3;
+
+  // Resource labels as `key:value` pairs.
+  map<string, string> labels = 4;
+}
+
+message UpdateProjectRequest {
+  // ID of the Project resource to update.
+  string project_id = 1;
+
+  // Field mask. Allowed fields: name, description, labels.
+  //
+  // account_id is NOT mutable — not by Update, and not by any other call: this
+  // service carries no transfer verb, and Project.account_id documents why it
+  // is not going to get one. Update rejects account_id in the mask with
+  // "accountId is immutable after Project.Create".
+  //
+  // WHAT TO DO INSTEAD, said as the OUTCOME rather than as a verb name, because
+  // a name in prose goes stale silently while an outcome survives renaming: to
+  // end up with a Project under a different Account, use Create above with the
+  // target account_id. Nothing follows it across, and that is the reason the
+  // transfer does not exist rather than a gap in the surface.
+  google.protobuf.FieldMask update_mask = 2;
+
+  // Name of the project.
+  string name = 3;
+
+  // Description of the project.
+  string description = 4;
+
+  // Resource labels as `key:value` pairs.
+  map<string, string> labels = 5;
+}
+
+message DeleteProjectRequest {
+  // ID of the Project resource to delete.
+  string project_id = 1;
+}
+
+message ListProjectOperationsRequest {
+  // ID of the Project resource to list operations for.
+  string project_id = 1;
+
+  // The maximum number of results per page that should be returned.
+  int64 page_size = 2;
+
+  // Page token.
+  string page_token = 3;
+}
+
+message ListProjectOperationsResponse {
+  // List of operations for the specified project.
+  repeated kacho.cloud.operation.Operation operations = 1;
+
+  // This token allows you to get the next page of results for list requests.
+  string next_page_token = 2;
+}

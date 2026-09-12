@@ -1,0 +1,39 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// A SessionRevocation resource — fast-lookup row keyed by `token_jti`, used by
+// api-gateway and CAEP drainer to know which active tokens have been revoked.
+//
+// PK = `token_jti` directly (lookup pattern is
+// `WHERE token_jti = $1`, no other consumers, surrogate id is overhead).
+// Each row TTLs at `ttl_expires_at` (default 30d); background cron prunes.
+//
+// Admin-only read access via `Internal*` API; no public surface.
+//
+// No `id` prefix (PK is raw `token_jti`).
+message SessionRevocation {
+  // JWT `jti` claim (RFC 7519). Format chosen by the issuer (UUIDv7).
+  // Primary key.
+  string token_jti = 1;
+
+  // User whose session is revoked.
+  string user_id = 2;
+
+  // Revocation timestamp.
+  google.protobuf.Timestamp revoked_at = 3;
+
+  // After this timestamp the row may be pruned (token would naturally expire).
+  google.protobuf.Timestamp ttl_expires_at = 4;
+
+  // Free-form reason (e.g. `user-logout`, `password-change`, `caep-event`,
+  // `admin-revoke`). 1-128 chars.
+  string reason = 5;
+}

@@ -1,0 +1,81 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// A Project resource. Mid-level tenant container within an Account.
+//
+// Project — заменитель Folder из kacho-resource-manager в IAM-модели.
+//
+// Строго два уровня аренды: Account → Project (Project — leaf-workspace, без
+// вложенности). Constraint: (account_id, name) — UNIQUE per-account.
+//
+// `account_id` — hard-immutable после Create, и переноса проекта между
+// аккаунтами не делает НИ ОДИН вызов. Это решение, а не пробел поверхности:
+// projectId — scope-координата, которую хранит у себя каждый downstream-ресурс,
+// поэтому смена родителя молча обесценила бы выдачи и ссылки, резолвящиеся
+// через неё. Update отвергает account_id в update_mask с
+// "accountId is immutable after Project.Create".
+//
+// Нужен проект в другом аккаунте — он там СОЗДАЁТСЯ: Create принимает целевой
+// account_id. За ним ничего не переносится, и это то же самое решение, а не
+// отдельное ограничение.
+//
+// Resource id prefix: `prj` (concatenated form, `ids.NewID`).
+message Project {
+  // ID of the project.
+  string id = 1;
+
+  // ID of the Account that this Project belongs to.
+  //
+  // Immutable after Project.Create, and no call moves a Project between
+  // Accounts — the message doc above says why, and it is the single place that
+  // says it. Update rejects account_id in update_mask with "accountId is
+  // immutable after Project.Create".
+  string account_id = 2;
+
+  // Name of the project. Unique within an Account. 1-63 characters long.
+  string name = 3;
+
+  // Optional description of the project. 0-256 characters long.
+  string description = 4;
+
+  // Resource labels as `key:value` pairs.
+  map<string, string> labels = 5;
+
+  // Creation timestamp.
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message CreateProjectMetadata {
+  // ID of the Project that is being created.
+  string project_id = 1;
+
+  // ID of the owning Account (denormalized for account-scoped operations
+  // listing — AccountService.ListAllOperations). Non-first field so the
+  // corelib resource_id extractor (first `_id`-suffix match) still picks
+  // `project_id`. Read by exact field name `account_id` by corelib.
+  string account_id = 2;
+}
+
+message UpdateProjectMetadata {
+  // ID of the Project that is being updated.
+  string project_id = 1;
+
+  // ID of the owning Account (denormalized; non-first, see CreateProjectMetadata).
+  string account_id = 2;
+}
+
+message DeleteProjectMetadata {
+  // ID of the Project that is being deleted.
+  string project_id = 1;
+
+  // ID of the owning Account (denormalized; non-first, see CreateProjectMetadata).
+  string account_id = 2;
+}

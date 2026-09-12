@@ -1,0 +1,225 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// A User resource. Человек — ГЛОБАЛЬНАЯ личность платформы: одна строка на всё
+// облако, в скольких бы аккаунтах он ни состоял. Активируется при первом входе
+// через поставщика удостоверений с матчингом по почте.
+//
+// > Здесь стояла ПРЕЖНЯЯ модель — «один Kratos identity = N User-rows, по одному
+// > per Account, куда invited; external_id уникален per-Account, не глобально».
+// > Она снята: ключи `users_identity_email_uniq` и
+// > `users_identity_external_id_uniq` (миграция 20260823050000) ГЛОБАЛЬНЫ, а
+// > принадлежность аккаунтам выражают строки `memberships` (`membership.proto`).
+// > Утверждение не удалено, а перевёрнуто на месте: оно стояло ПЕРВЫМ абзацем
+// > определения ресурса, то есть читалось раньше всего остального, — и из него
+// > выводили, что аккаунт человека один, а запрет или приглашение действуют в
+// > пределах одного аккаунта. Ниже это же поправлено у `account_id` (снят) и у
+// > `invite_status` (состояние принадлежит личности).
+//
+// Resource id prefix: `usr` (concatenated form, `ids.NewID`).
+message User {
+  // Аккаунт снят с ресурса пользователя (kacho#471, IAM-ID-1-19).
+  //
+  // Поле объявляло, что у человека РОВНО ОДИН аккаунт, — так было, пока человек
+  // был строкой В аккаунте. После отрыва принадлежность выражается членствами,
+  // которых у него может быть несколько, и одно значение из множества читалось
+  // бы вызывающим как факт о человеке.
+  //
+  // Резервируются И номер, И имя: номер — чтобы следующее поле не переиспользовало
+  // его и старый клиент не прочитал чужое значение как аккаунт; имя — потому что
+  // JSON разбирается по имени, и один резерв номера от воскрешения имени не спасает.
+  //
+  // «Кто состоит в этом аккаунте» спрашивается списком пользователей, суженным
+  // аккаунтом: этот фильтр читает членства, а не снятую колонку.
+  reserved 6;
+  reserved "account_id";
+
+  // ID of the user (kaname internal id).
+  string id = 1;
+
+  // External identity provider id (Kratos `sub` claim). Может быть пустым для
+  // PENDING (invited but never logged in).
+  string external_id = 2;
+
+  // Email (case-insensitive lookup). При Invite — email указывается admin'ом;
+  // при first-login через Kratos — матчится с identity email.
+  string email = 3;
+
+  // Human-readable display name (snapshot из Kratos identity traits).
+  string display_name = 4;
+
+  // Creation timestamp.
+  google.protobuf.Timestamp created_at = 5;
+
+  // invite-status.
+  // PENDING — invited, еще не login'нулся.
+  // ACTIVE  — login'нулся через Kratos, external_id заполнен.
+  // BLOCKED — вход на платформу запрещён (`UserService.Block`; снимается
+  //   `UserService.Unblock`).
+  //
+  // Состояние принадлежит ЛИЧНОСТИ, и действует оно ВЕЗДЕ, где человек состоит.
+  //
+  // > Здесь стояло обратное — «состояние принадлежит СТРОКЕ ЧЛЕНСТВА… запрет в
+  // > одном Account'е не отключает её в остальных». Это было верно, пока строка
+  // > `users` и была членством, и пережило свой предмет: строк у человека теперь
+  // > одна на всю платформу (глобальные ключи `users_identity_email_uniq` /
+  // > `users_identity_external_id_uniq`, миграция 20260823050000), а
+  // > принадлежность аккаунтам выражают строки `memberships`. Утверждение не
+  // > удалено, а перевёрнуто на месте: оно читалось как ГРАНИЦА БЕЗОПАСНОСТИ, и
+  // > следующий, кто пришёл бы за радиусом запрета, принял бы его за факт. Ту же
+  // > правку с той же причиной несёт проза `UserService.Block`.
+  //
+  // Пер-аккаунтное исключение — ОТДЕЛЬНОЕ действие и отдельное поле не занимает:
+  // `UserService.RemoveFromAccount` снимает строку членства и этого состояния не
+  // касается (#1127).
+  //
+  // НЕ ИЗМЕНЯЕТСЯ через Update: у пустой `update_mask` семантика полной замены
+  // объекта, а enum в proto3 неотличим от незаданного — клиент, не приславший
+  // поле, запретил бы участие каждому, кого коснулся. Поэтому состояние меняют
+  // ДЕЙСТВИЯ, у которых маски нет.
+  InviteStatus invite_status = 7;
+
+  // Кто завёл ЛИЧНОСТЬ на платформе — `User.id` пригласившего. Пусто у строки,
+  // появившейся самозаписью.
+  //
+  // ОБЛАСТЬ — ПЛАТФОРМА, а не аккаунт, и различие названо здесь потому, что по
+  // самому ответу его не увидеть. Значение пишется ОДИН РАЗ, при первом
+  // появлении человека в облаке, и последующие приглашения его НЕ МЕНЯЮТ: у
+  // человека одна строка личности на все его аккаунты. Поэтому у сотрудника,
+  // которого позвал сначала один арендатор, а потом другой, здесь навсегда
+  // остаётся поручитель ПЕРВОГО — то есть, с точки зрения второго, человек из
+  // чужой организации.
+  //
+  // НЕ ПУТАТЬ с `Membership.invited_by`: у того область — АККАУНТ, и именно он
+  // отвечает на вопрос «кто ввёл человека В ЭТУ организацию», на который
+  // ключуются согласование и отчётность. Ошибка здесь тиха: значение верно, а
+  // смысл, который ему приписывают, — нет.
+  string invited_by = 8;
+
+  // Метки человека — ПЛАТФОРМЕННАЯ величина, и владелец у них назван (#1126).
+  //
+  // КТО ИХ ПИШЕТ. Только надзор облака: `UserService.Update` гейтится
+  // `iam_user.record_writer`, у которого источников уровня аккаунта нет ни
+  // одного (#1102). Распорядитель аккаунта своих людей размечать НЕ МОЖЕТ, и это
+  // решение, а не недоделка: строка `iam_user` — глобальная личность, одна на все
+  // аккаунты человека, поэтому метка, поставленная из одного аккаунта, была бы
+  // фактом о нём во всех.
+  //
+  // ЧЕМ ОНИ НЕ ЯВЛЯЮТСЯ. Не «как МОЙ аккаунт помечает этого человека». Такому
+  // прочтению негде жить: носитель метки ровно один и он не пер-аккаунтный
+  // (проба `repo/kaname/pg/person_labels_are_a_platform_value_integration_test.go`
+  // краснеет на появлении второго). Пер-аккаунтная разметка людей — исход 1
+  // задачи #1126, и она требует ресурса членства (#1085): пока у чтения нет
+  // аргумента аккаунта, «метки этого человека в этом аккаунте» нечем адресовать.
+  //
+  // ЧТО ОНИ ДЕЛАЮТ. User — label-selectable наравне с account/project:
+  // ARM_LABELS-грант на iam.user материализует глаголы своей роли на объектах,
+  // чьи `labels` покрывают `matchLabels` (iam-direct same-DB), а страница List
+  // сужается тем же отношением, которым каталог гейтит одиночное чтение —
+  // `v_get`; строка попадает в выдачу ровно тогда, когда вызывающий вправе
+  // прочитать её по id. Роль, дающая только `list` без `get`, объект в списке не
+  // показывает — иначе выдача раскрывала бы содержимое, которое чтение по id
+  // отказывает (List возвращает то же сообщение ресурса, что и Get).
+  //
+  // Mutable через UserService.Update (`labels` в update_mask). Аннотации
+  // (size/key/value pattern) энфорсят sync-INVALID_ARGUMENT на request-layer —
+  // паритет account/project/group request `labels`.
+  map<string, string> labels = 9;
+
+  enum InviteStatus {
+    INVITE_STATUS_UNSPECIFIED = 0;
+    PENDING = 1;
+    ACTIVE = 2;
+    BLOCKED = 3;
+  }
+}
+
+message DeleteUserMetadata {
+  // ID of the User that is being deleted.
+  string user_id = 1;
+
+  // ID of the owning Account (denormalized for account-scoped operations
+  // listing — AccountService.ListAllOperations). Non-first field so the
+  // corelib resource_id extractor (first `_id`-suffix match) still picks
+  // `user_id`. Read by exact field name `account_id` by corelib. May be
+  // empty for account-less users (written as SQL NULL — excluded from the
+  // account-scoped list).
+  string account_id = 2;
+}
+
+message UpdateUserMetadata {
+  // ID of the User that is being updated.
+  string user_id = 1;
+
+  // ID of the owning Account (denormalized for account-scoped operations
+  // listing — AccountService.ListAllOperations). Non-first field so the
+  // corelib resource_id extractor (first `_id`-suffix match) still picks
+  // `user_id`. Read by exact field name `account_id` by corelib. May be empty
+  // for account-less users (written as SQL NULL — excluded from the
+  // account-scoped list).
+  string account_id = 2;
+}
+
+message BlockUserMetadata {
+  // ID of the User membership row that is being blocked.
+  string user_id = 1;
+
+  // ID of the owning Account (denormalized; non-first, see UpdateUserMetadata).
+  // Never empty here: a membership row always has an account, and the block is
+  // an act OF that account.
+  string account_id = 2;
+}
+
+message UnblockUserMetadata {
+  // ID of the User membership row that is being unblocked.
+  string user_id = 1;
+
+  // ID of the owning Account (denormalized; non-first, see UpdateUserMetadata).
+  string account_id = 2;
+}
+
+// Invite-flow.
+message RemoveUserFromAccountMetadata {
+  // ID of the person whose membership is being removed. First field so the
+  // corelib resource_id extractor (first `_id`-suffix match) picks it.
+  string user_id = 1;
+
+  // ID of the Account the person is being removed from. Never empty: the
+  // membership is the pair, and the call names both halves.
+  string account_id = 2;
+}
+
+message InviteUserMetadata {
+  string user_id = 1;
+  string account_id = 2;
+  // ВСЕГДА ПУСТО — производителя у поля нет НИ ОДНОГО.
+  //
+  // Предикат: `git grep -n MagicLinkUrl -- services/` → пусто. Use-case,
+  // строящий это сообщение, заполняет только `user_id` и `account_id`:
+  // шаг выпуска ссылки снят вместе с клиентом провайдера входа.
+  //
+  // Пустая строка здесь означает «ссылки НЕ БУДЕТ», а НЕ «ссылки пока
+  // нет»: ветвиться на значении нельзя ни при каком входе.
+  //
+  // Письмо приглашения отправляет НАШ код через очередь
+  // `kaname.invite_mail_outbox`, и ссылки-предъявителя оно не несёт
+  // намеренно: письмо даёт призыв и адрес страницы входа, а не доступ.
+  //
+  // Здесь стояло «админ копирует и отправляет вручную, email-sending не
+  // интегрирован» — неверно обеими половинами и по-разному: отправитель
+  // посажен, а копировать было нечего и до него. Клиент, поверивший первой
+  // половине, строил бы обходной путь на значении, которого не бывает.
+  //
+  // Поле снимается с контракта с резервированием НОМЕРА И ИМЕНИ — решение
+  // владельца, записанное лентой приёмки почты (задача продукта #1774).
+  // До того момента комментарий называет то, что верно СЕГОДНЯ.
+  string magic_link_url = 3;
+}

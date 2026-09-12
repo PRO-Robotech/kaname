@@ -1,0 +1,621 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/service_account.proto";
+import "kaname/cloud/iam/v1/user.proto";
+import "kaname/cloud/iam/v1/secret_options.proto";
+import "kacho/cloud/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// InternalIAMService — cluster-internal RPCs (port 9091).
+//
+// НЕ публикуется на external TLS listener. Регистрируется в api-gateway internal mux
+// (внутренний listener) — нужен auth-interceptor api-gateway (звать LookupSubject
+// из interceptor'а после валидации JWT (Ory Hydra)).
+//
+// Вызывается из admin-tooling (grpcurl) и authz-interceptor api-gateway.
+service InternalIAMService {
+  // Резолв subject'а по одному из ключей (external_id / id / email).
+  //
+  // REST exposed ONLY on the cluster-internal listener;
+  // api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
+  // and authz-public-allowlist permits the <exempt> catalog entry.
+  rpc LookupSubject (LookupSubjectRequest) returns (LookupSubjectResponse) {
+    option (google.api.http) = {
+      post: "/iam/v1/internal/iam:lookupSubject"
+      body: "*"
+    };
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+  }
+
+  // TOMBSTONE. The false-assurance stub
+  // `ListPermissions` RPC is REMOVED: it ignored its required subject/resource
+  // fields and unconditionally returned the whole catalog, had zero real
+  // consumers (internal listener only; the UI merely referenced it in a
+  // comment), and operated on compiled `module.resource.verb` permission
+  // strings — NOT rule-tokens. The honest grantable catalog is the public
+  // `PermissionCatalogService.ListPermissionCatalog`; per-subject "who can do X"
+  // is answered by `AccessBindingService.ExpandAccess`. The method name
+  // `ListPermissions` is a tombstone — never re-add an RPC under that name.
+  // Intentional breaking change (documented in buf.yaml).
+
+  // Check — single-tuple authorization check.
+  // Вердикт о паре «субъект — отношение — объект». Складывает его реляционная
+  // форма в собственной базе iam: внешний движок отношений, поверх которого этот
+  // метод стоял прежде, снят стадией S6 эпика #747.
+  // Используется per-service authz-interceptor'ами kacho-vpc / kacho-compute /
+  // kacho-loadbalancer / self (kaname) для проверки прав на write/read RPC.
+  // Latency budget: ≤20ms p95. Сетевого перехода к соседу больше нет — вопрос
+  // задаётся той же базе, что и остальные чтения службы.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc Check (CheckRequest) returns (CheckResponse) {
+    option (google.api.http) = {
+      post: "/iam/v1/internal/iam:check"
+      body: "*"
+    };
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+  }
+
+  // TOMBSTONE. `WriteCreatorTuple` — synchronous own-creator tuple write — is
+  // REMOVED (#788). Its comment described callers in vpc / compute / nlb; all
+  // five neighbours had long since moved to `RegisterResource` (nlb says so
+  // verbatim: «Replaces the former direct WriteCreatorTuple»), leaving zero.
+  // What remained was a door writing straight into the relation store, past
+  // `kaname.fga_outbox` — a tuple the `relation_fact` projection (migration
+  // 0098) would never see. Never re-add an RPC under that name: the live path
+  // is RegisterResource / UnregisterResource, where the intent lands in the
+  // journal first and the direct write is only an accelerator.
+  // Intentional breaking change (proto/declared-breaks.yaml).
+
+  // GetJWKSStatus снят с контракта. Он отчитывался о таблице ключей, которую
+  // дропнула миграция 0065, и после этого мог отвечать только пустым набором —
+  // навсегда. Ни один вызывающий его не звал: ни сервис, ни шлюз, ни консоль, ни
+  // один чёрный ящик. Read-RPC, который ничего не решает и никому не нужен, не
+  // «оставляют на будущее»: это обещание, за которое никто не отвечает.
+  // Верификация подписи живёт в JWKS-проксировании iam, а не здесь.
+  //
+  // Резервировать нечего: protobuf не знает `reserved` ни для методов сервиса,
+  // ни для имён сообщений верхнего уровня — только для номеров и имён ПОЛЕЙ.
+  // Защита от повторного использования имени — гейт `buf breaking` и объявление
+  // ломающего изменения в сообщении коммита.
+
+  // admin force-logout of a user. Writes
+  // `session_revocations` rows for every active access token (enumerated via
+  // Hydra introspection) + a `caep_outbox` row so federated downstream RPs
+  // get notified. Async: returns Operation; the LISTEN/NOTIFY fan-out then
+  // updates every api-gateway pod's revocation cache ≤ 1s.
+  rpc ForceLogout (ForceLogoutRequest) returns (kacho.cloud.operation.Operation) {
+    option (corelib.api.v1.operation) = {
+      metadata: "ForceLogoutMetadata"
+      response: "ForceLogoutResult"
+    };
+    // Cluster-internal listener-protected; admin authz gate enforced at
+    // the api-gateway internal mux layer (system_admin role required).
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+  }
+
+  // PollSubjectChanges drains subject_change_outbox by ascending id cursor,
+  // over the window `(since_id, settled]` — never "everything above the cursor".
+  // Internal-only (cluster-internal listener) — drives api-gateway authz
+  // decision-cache invalidation.
+  //
+  // UNAVAILABLE while the journal has no settled position yet (cold start): the
+  // caller retries on its next tick. This is a state, not a failure — the
+  // settled flag is monotone and never withdrawn once raised.
+  //
+  // OUT_OF_RANGE when `since_id` sits BELOW the journal floor — the rows between
+  // them have been removed and will never be delivered. The refusal carries
+  // `google.rpc.ErrorInfo` with reason `SUBJECT_CHANGE_POSITION_LOST`, domain
+  // `iam.kacho.cloud` and metadata `earliest_resumable_position` (decimal), and
+  // the caller keys on that token, never on the prose of the message.
+  //
+  // The two refusals advise OPPOSITE actions and must never be merged. UNAVAILABLE
+  // says "ask again from the same position"; OUT_OF_RANGE says "that retry will
+  // never succeed — flush your decision cache, close your open streams and resume
+  // from the named position". A caller that read the second as the first would
+  // retry from a lost position forever, and its cache would keep answering from
+  // rights that are already gone — silently.
+  //
+  // Why an explicit refusal exists at all: the read window is
+  // `id > since_id AND id <= settled`, and a removed row simply does not appear
+  // in it. The cursor rolls past it on the last row read, so "no rows" becomes
+  // indistinguishable from "rows were swept" — an unapplied revocation nobody
+  // observes. Until this refusal existed, sweeping the journal was impossible
+  // by construction, not by preference.
+  rpc PollSubjectChanges (PollSubjectChangesRequest) returns (PollSubjectChangesResponse) {
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+  }
+
+  // RegisterResource — Internal FGA-proxy: apply an owner-hierarchy tuple
+  // (subject holds `relation` on `object`) on behalf of the resource-owning
+  // module. Called by the vpc/compute/nlb outbox-drainer over mTLS so
+  // those modules никогда не ходят в FGA напрямую — только через IAM.
+  //
+  // ИДЕМПОТЕНТНО (контракт): повтор того же (subject_id, relation, object) →
+  // gRPC OK, НЕ AlreadyExists. От этого зависит at-least-once outbox-retry —
+  // drainer может ретраить безопасно.
+  //
+  // Sync unary (как Check), НЕ async через Operation: ретрай и at-least-once
+  // обеспечивает сам drainer.
+  //
+  // authz: `<exempt>` на уровне permission-каталога (как все Internal IAM RPC).
+  // Least-priv энфорсится в IAM-handler через ReBAC: mTLS client-cert →
+  // ServiceAccount → relation `fga_writer` на системном объекте
+  // `cluster:cluster_root`. Нет relation → PermissionDenied. cluster-internal
+  // listener :9091 only — нет google.api.http.
+  rpc RegisterResource (RegisterResourceRequest) returns (RegisterResourceResponse) {
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+  }
+
+  // UnregisterResource — Internal FGA-proxy: снять owner-hierarchy tuple
+  // (зеркально RegisterResource; вызывается drainer'ом при Delete ресурса).
+  //
+  // ИДЕМПОТЕНТНО (контракт): снятие отсутствующего/уже снятого tuple → gRPC OK,
+  // НЕ NotFound — drainer ретраит безопасно.
+  //
+  // Sync unary, НЕ Operation. authz: `<exempt>` + ReBAC `fga_writer` @
+  // `cluster:cluster_root` (см. RegisterResource). cluster-internal :9091 only,
+  // нет google.api.http.
+  rpc UnregisterResource (UnregisterResourceRequest) returns (UnregisterResourceResponse) {
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+  }
+
+  // GetRoleCompiled — Internal two-projection read (redesign-2026 F5): returns a
+  // Role's COMPILED permission set (`module.resource.resourceName.verb` 4-segment
+  // form) that backs FGA emission. This authz-topology projection is Internal-ONLY
+  // (:9091) — the public RoleService.Get/List never carry compiled `permissions`
+  // (they expose only authored `rules[]`). A label-only role compiles to an empty
+  // set (all rules ARM_LABELS are not compiled). cluster-internal listener only —
+  // no google.api.http; admin-UI authz gating happens at the internal mux layer.
+  // ResolveBasicCredential — АВТОРИТЕТ О ПРЕДЪЯВЛЕННОМ БАЗОВОМ СЕКРЕТЕ
+  // (задача #1142, приёмка BAT-1 §5.3, §6).
+  //
+  // Край зовёт этот глагол на промахе своего кэша вердикта и получает ответ на
+  // ОДИН вопрос: годно ли предъявленное СЕЙЧАС и чей это принципал.
+  //
+  // ОТЗЫВ ДОХОДИТ ДО ПРЕДЪЯВЛЕНИЯ КОНСТРУКЦИЕЙ, А НЕ ВТОРЫМ МЕХАНИЗМОМ. Отзыв
+  // есть СНЯТИЕ строки; резолв ищет строку по первичному ключу, и предикат его
+  // единственного оператора включает существование строки, вид, непросроченность
+  // и активность владельца. Нет строки — нет удостоверения. Поэтому под отзыв
+  // попадают и поводы, о которых глагол отзыва не знает: снятие владельца,
+  // снятие участия, перевод владельца в неактивное состояние — повод привязан к
+  // САМОМУ поводу, а не к перечню обязанных писать.
+  //
+  // ОТКАЗ ЕДИНЫЙ. Неизвестный идентификатор, неверный секрет, истёкший срок,
+  // отозванное удостоверение, неактивный владелец — ОДИН И ТОТ ЖЕ код и ОДИН И
+  // ТОТ ЖЕ текст. Различимый текст есть оракул: по нему отличают «нет такого» от
+  // «есть, но не ваш». Различимость живёт ВНУТРЬ — в счётчиках по причинам.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc ResolveBasicCredential (ResolveBasicCredentialRequest) returns (ResolveBasicCredentialResponse) {
+    option (google.api.http) = {
+      post: "/iam/v1/internal/iam:resolveBasicCredential"
+      body: "*"
+    };
+    option (corelib.authz.v1.permission)    = "<exempt>";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
+  }
+
+  rpc GetRoleCompiled (GetRoleCompiledRequest) returns (GetRoleCompiledResponse) {
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "INTERNAL_LISTENER";
+  }
+
+  // CheckBasicCredentialLive — ЖИВО ЛИ УДОСТОВЕРЕНИЕ, СПРОШЕННОЕ ПО ЕГО
+  // ИДЕНТИФИКАТОРУ, БЕЗ ПРЕДЪЯВЛЕНИЯ СЕКРЕТА (задача #1450).
+  //
+  // ЗАЧЕМ ВТОРОЙ ВОПРОС, ЕСЛИ РЯДОМ ЕСТЬ `ResolveBasicCredential`. Тот отвечает
+  // ПРЕДЪЯВИТЕЛЮ и потому требует самой предъявленной строки. Спрашивающий с
+  // ОТКРЫТОГО соединения предъявителем не является: секрет он видел однажды, при
+  // открытии, и держать его живым весь срок соединения значило бы завести
+  // поверхность хранения ради контроля — то есть платить за отзыв тем самым, что
+  // отзыв защищает.
+  //
+  // Поэтому вопрос задаётся по идентификатору СТРОКИ удостоверения. Предикат
+  // живости у него ТОТ ЖЕ, что у резолва: существование строки, вид `SECRET`,
+  // непросроченность и активность владельца. Разойтись они не могут — оператор
+  // один, и сверка хеша в нём не участвует by construction.
+  //
+  // ОТВЕТ — ОТКАЗ, А НЕ ПОЛЕ. Живое удостоверение даёт `OK`, неживое —
+  // `UNAUTHENTICATED` с тем же единым текстом, что у резолва; «спросить не
+  // удалось» — `UNAVAILABLE`. Поле-признак означало бы, что вызывающий вправе его
+  // не прочитать, и тогда контроль присутствует, провязан и не отказывает ни разу.
+  // Ровно тот довод, что записан у `ResolveBasicCredentialResponse`.
+  //
+  // ОТКАЗ ЕДИНЫЙ И ЗДЕСЬ. Неизвестный идентификатор, истёкший срок, отозванное
+  // удостоверение, неактивный владелец — один код и один текст: различимый
+  // отличал бы «нет такого» от «есть, но не действует».
+  //
+  // БЕЗ `google.api.http` НАМЕРЕННО — как у `GetRoleCompiled`. Вызывающий ходит
+  // gRPC; дружелюбного пути под этот вопрос не заводится, чтобы его нельзя было
+  // выставить наружу опечаткой в таблице маршрутов края.
+  rpc CheckBasicCredentialLive (CheckBasicCredentialLiveRequest) returns (CheckBasicCredentialLiveResponse) {
+    option (corelib.authz.v1.permission)    = "<exempt>";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
+  }
+}
+
+message LookupSubjectRequest {
+  // Один из ключей идентификации subject'а. Exactly one должен быть выставлен.
+  oneof key {
+    // OIDC `sub` claim (Ory).
+    string external_id = 1;
+    // kaname internal id (`usr-...` или `sva-...`).
+    string id = 2;
+    // Case-insensitive email lookup.
+    string email = 3;
+  }
+}
+
+message LookupSubjectResponse {
+  // Возвращенный subject — User или ServiceAccount.
+  oneof subject {
+    User           user            = 1;
+    ServiceAccount service_account = 2;
+  }
+}
+
+// TOMBSTONE: `ListPermissionsRequest` and
+// `ListPermissionsResponse` were removed together with the false-assurance
+// `ListPermissions` stub RPC. Never re-add messages under these names.
+
+// CheckRequest — single-tuple authorization check.
+message CheckRequest {
+  // FGA-style subject string. Допустимые форматы:
+  //   "user:<usr…>"
+  //   "service_account:<sva…>"
+  //   "group:<grp…>#member"
+  string subject_id = 1;
+
+  // FGA-relation: "viewer" | "editor" | "admin" | "use" | "member" | etc.
+  // Допустимые значения зависят от authorization-model.
+  string relation = 2;
+
+  // FGA-object string. Формат "<type>:<id>", например:
+  //   "project:<prj…>"
+  //   "vpc_network:<net…>"
+  //   "account:<acc…>"
+  string object = 3;
+
+  // Trace-id для correlation в логах (optional).
+  string trace_id = 4;
+
+  // consistency — how fresh the caller needs the answer to be.
+  //
+  // THE STRONGER GUARANTEE IS NOW GIVEN UNCONDITIONALLY, and that is a statement
+  // about the source, not a field nobody reads. The preference used to be
+  // forwarded to an external relations engine that answered from its own replicas
+  // and read caches, so a default read could serve a stale negative for seconds.
+  // That engine was retired: the verdict is computed from the service's own
+  // primary database, in which a caller's committed write is visible to the very
+  // next read by construction.
+  //
+  // The field stays on the contract because it states the caller's REQUIREMENT,
+  // not the mechanism that meets it. Should a read path over a lagging replica
+  // ever be introduced, the requirement becomes discriminating again — and
+  // discriminating on it is the job of whoever introduces that path.
+  Consistency consistency = 5;
+
+  // Consistency — read-freshness preference.
+  enum Consistency {
+    // Unset — no explicit requirement. Answered from the primary all the same.
+    CONSISTENCY_UNSPECIFIED = 0;
+    // Latency-first. No read path currently trades freshness for latency, so the
+    // answer is identical to the one below; the value keeps its meaning for a
+    // caller that is willing to accept a lagging read if one ever exists.
+    MINIMIZE_LATENCY = 1;
+    // The answer must not lag the caller's own committed write. Held by
+    // construction: the verdict reads the primary.
+    HIGHER_CONSISTENCY = 2;
+  }
+}
+
+// CheckResponse — результат authorization check.
+message CheckResponse {
+  // true — subject имеет relation на object'е (либо direct, либо через computed cascade).
+  bool allowed = 1;
+  // Human-readable reason on deny (для логов; не для UI).
+  string reason = 2;
+}
+
+// TOMBSTONE: `WriteCreatorTupleRequest` and `WriteCreatorTupleResponse` were
+// removed together with the `WriteCreatorTuple` RPC (#788). Never re-add
+// messages under these names.
+// RegisterResourceRequest — Internal FGA-proxy register-owner-tuple payload.
+// Форма симметрична CheckRequest.
+message RegisterResourceRequest {
+  // FGA-subject string. Формат "<type>:<id>", напр.:
+  //   "user:<usr…>"
+  //   "service_account:<sva…>"
+  //   "<owner-type>:<id>"
+  string subject_id = 1;
+
+  // FGA-relation для owner-tuple (как правило "admin" / "parent").
+  string relation = 2;
+
+  // Объект решения. Формат "<type>:<id>" словарём МОДЕЛИ прав
+  // (НЕ permission-каталог), напр. "vpc_network:<net…>",
+  // "compute_instance:<...>".
+  string object = 3;
+
+  // Trace-id для correlation в логах (модуль ↔ IAM ↔ FGA). Optional.
+  string trace_id = 4;
+
+  // Tenant labels зеркала ресурса. Output-only mirror в
+  // `kaname.resource_mirror`; source of truth = owner-сервис. Питает
+  // `bySelector` (matchLabels) и containment. Пусто для legacy-caller'ов
+  // (graceful). IAM делает минимальную sanity-валидацию, не дублируя owner-pattern.
+  map<string, string> labels = 5;
+
+  // Parent project id ресурса (`prj…`), если ресурс project-scoped.
+  // Кладется в mirror ради containment (объект «под scope») SAME-DB, без ребра
+  // iam→owner. Пусто для не-project-scoped объектов.
+  string parent_project_id = 6;
+
+  // Parent account id ресурса (`acc…`), если применимо. Mirror /
+  // containment на account-scope.
+  string parent_account_id = 7;
+
+  // Монотонный per-object source-version. Маркер «версии
+  // состояния» ресурса у владельца (compute), проставляемый в момент эмита
+  // register-intent внутри writer-tx источника. IAM применяет register в mirror
+  // ТОЛЬКО если этот source_version строго новее уже хранимого (last-source-
+  // state-wins, НЕ last-applier-wins): под HA-drainer reorder двух register одного
+  // object (реплика применяет v2, затем stale v1) устаревший intent → no-op, а не
+  // перезапись свежих labels. Пусто/нулевой → legacy-caller (graceful): IAM
+  // трактует как «-infinity», т.е. любой register применяется (back-compat).
+  google.protobuf.Timestamp source_version = 8;
+
+  // Цепь родительства регистрируемого объекта, от БЛИЖАЙШЕГО предка к дальнему.
+  //
+  // Каждый элемент — объект в форме `"<type>:<id>"`, той же, что `object` выше:
+  //   ["registry_registry:reg…", "project:prj…", "account:acc…"]
+  //
+  // ЗАЧЕМ ОТДЕЛЬНОЕ ПОЛЕ ПРИ ДВУХ УЖЕ СУЩЕСТВУЮЩИХ. `parent_project_id` и
+  // `parent_account_id` несут ровно двух предков и ровно этих. Модель прав
+  // требует цепи ПРОИЗВОЛЬНОЙ формы: репозиторий → реестр → проект → аккаунт →
+  // кластер — глубина четыре. Объект, чей предок не проект и не аккаунт, сегодня
+  // регистрируется без предка вовсе, а объект без предка МОЛЧА выпадает из
+  // области выдачи и из каскада: вопрос о нём задаётся, ответ «нет», и это
+  // неотличимо от честного отказа.
+  //
+  // АДДИТИВНО: старые вызывающие остаются валидными, номера не переиспользуются.
+  //
+  // ПУСТАЯ ЦЕПЬ — ЭТО УТВЕРЖДЕНИЕ «ПРЕДКОВ НЕТ», А НЕ УМОЛЧАНИЕ. Здесь стояло
+  // обратное — что iam при пустом поле выведет предков из двух прежних, «ровно
+  // как раньше». Он этого не делает и делать не должен: цепь есть СОСТОЯНИЕ, и
+  // применённая регистрация заменяет набор рёбер объекта целиком, иначе право
+  // пережило бы перенос объекта в другую область. Следствие, названное прямо:
+  // регистрация без цепи не «ничего не меняет», а СТИРАЕТ уже записанных
+  // предков. Вывод из двух полей области делает ВЛАДЕЛЕЦ на своей стороне
+  // (pkg/ownerregister.ParentChain) — тот, кто знает, глубже ли его иерархия;
+  // iam чужой формы не додумывает. Свойство «каждый потребитель называет цепь»
+  // держится гейтом по дереву (internal/repohygiene), а не этим абзацем.
+  //
+  // ПРИНЯТЬ И НЕ ЗАПИСАТЬ — ЗАПРЕЩЕНО (`api-conventions.md`). Поле обязано иметь
+  // читателя в прод-коде iam с той же фазы, в которой появилось: иначе продукт
+  // обещает возможность, которой нет, а форма E получает объект без предка —
+  // то есть ровно тот дефект, ради которого поле и заводится.
+  repeated string parent_chain = 9;
+}
+
+// RegisterResourceResponse — пусто; success implicit (gRPC OK). Идемпотентность
+// контракта (повтор → OK) опирается на пустой ответ без уникального id.
+message RegisterResourceResponse {}
+
+// UnregisterResourceRequest — Internal FGA-proxy unregister-owner-tuple payload.
+// Поля — те же, ЗА ИСКЛЮЧЕНИЕМ `parent_chain`: снятие адресуется объектом, и
+// цепь предков ему не нужна. Прежняя редакция говорила «идентичны», и это стало
+// бы ложью в момент появления девятого поля у соседа — правится здесь же, а не
+// «когда-нибудь», потому что расхождение в прозе не даёт конфликта слияния.
+message UnregisterResourceRequest {
+  // FGA-subject string (см. RegisterResourceRequest.subject_id).
+  string subject_id = 1;
+
+  // FGA-relation owner-tuple (см. RegisterResourceRequest.relation).
+  string relation = 2;
+
+  // FGA-object string (см. RegisterResourceRequest.object).
+  string object = 3;
+
+  // Trace-id для correlation в логах. Optional.
+  string trace_id = 4;
+
+  // Поля 5/6/7 зарезервированы под форму-симметрию с RegisterResourceRequest.
+  // Unregister удаляет mirror-строку по `object`; эти поля
+  // игнорируются на приеме (симметрия shape, не семантики).
+  map<string, string> labels = 5;
+  // Project the resource belonged to. Empty when the resource is not project-scoped.
+  string parent_project_id = 6;
+  // Account the resource belonged to. Empty when the resource is not account-scoped.
+  string parent_account_id = 7;
+
+  // Tombstone-version: момент Delete у владельца (now() на
+  // эмите unregister-intent). IAM удаляет mirror-строку ТОЛЬКО если этот
+  // source_version >= хранимого (tombstone не старше последнего примененного
+  // register) — Delete-после-Update reorder (unregister(v2) затем stale что-либо)
+  // не теряет свежее состояние. Пусто/нулевой → legacy (graceful): безусловный
+  // DELETE (back-compat). Остаточный edge (stale register ПОСЛЕ unregister →
+  // возможный dangling) чистит reconcile-sweep — см. docs/architecture.
+  google.protobuf.Timestamp source_version = 8;
+}
+
+// UnregisterResourceResponse — пусто; success implicit (gRPC OK). Удаление
+// отсутствующего tuple → OK (контракт идемпотентности).
+message UnregisterResourceResponse {}
+
+// ForceLogoutRequest — admin force-logout payload.
+message ForceLogoutRequest {
+  // User to log out from every active session. Required.
+  string user_id = 1;
+
+  // Free-form reason recorded in audit_outbox + each session_revocations row
+  // (default "admin-force-logout").
+  string reason = 2;
+
+  // ID of the admin user (or service account) triggering the force-logout.
+  // Captured for audit; the authz check itself is performed at the gateway
+  // (admin must hold `iam.users.forceLogout` permission on the user's account).
+  string actor_id = 3;
+}
+
+// ForceLogoutMetadata — Operation.metadata payload.
+message ForceLogoutMetadata {
+  // User that was force-logged-out.
+  string user_id = 1;
+}
+
+// ForceLogoutResult — Operation.response payload.
+message ForceLogoutResult {
+  // Number of session_revocations rows newly inserted (i.e. number of
+  // active tokens that were just revoked).
+  int32 revoked_count = 1;
+}
+
+// PollSubjectChangesRequest — cursor-based drain of subject_change_outbox.
+message PollSubjectChangesRequest {
+  // since_id — return rows with id > since_id. 0 on first call.
+  //
+  // Zero means "I hold no position", and it is never refused with
+  // OUT_OF_RANGE: a caller cannot lose a position it does not have, and the
+  // caller sending zero discards the page and adopts `head_id`. Refusing it
+  // would send a fresh replica to replay the retained tail instead of jumping
+  // to the head — a worse outcome for no safety gain.
+  int64 since_id = 1;
+  // limit — max rows; server clamps to [1, 1000], default 256.
+  int32 limit = 2;
+}
+
+// SubjectChange — one row from subject_change_outbox.
+message SubjectChange {
+  int64  id         = 1;
+  string subject_id = 2;
+  string op         = 3; // binding_upsert | binding_delete | group_member_change
+
+  // subject_type — тип субъекта в словаре модели прав: `user` |
+  // `service_account` | `group`.
+  //
+  // ПОЧЕМУ ЭТО ПОЛЕ ЕСТЬ. `subject_id` — голый идентификатор (`usrXXXX`), а
+  // субъектом модели он становится только в паре с типом (`user:usrXXXX`).
+  // Пару обязан собрать ЧИТАЮЩИЙ, и собрать её ему больше нечем: перепрос
+  // `payload` строки не возвращает, поэтому без этого поля вызывающий назвать
+  // субъекта не может. Пока единственным потребителем перепроса был сплошной
+  // сброс кэша, это не было видно: сброс имени не спрашивает. Как только по
+  // этому же чтению понадобилось закрыть открытый поток НАЗВАННОГО субъекта
+  // (kacho#1022), полоса оказалась неисполнимой — не по ошибке вызывающего, а
+  // потому, что контракт не нёс половины имени.
+  //
+  // Прежде пару собирал ТОЛЧОК из iam в край, потому что читал `payload`
+  // напрямую. Толчок снят вместе со своим пакетом контракта (задача #1024):
+  // соединение открывает потребитель, и край читает этот журнал курсором сам.
+  // Поле осталось потому, что предмет его пережил механизм — имя субъекта
+  // нужно ЧИТАЮЩЕМУ, кем бы он ни был.
+  //
+  // Пусто у строк, записанных до того, как производители начали проставлять тип.
+  // Вызывающий обязан считать такую строку НЕИМЕНОВАННОЙ и не собирать субъекта
+  // из префикса идентификатора: вывод типа из написания уже давал совпадение с
+  // тем, чего продукт не производит.
+  string subject_type = 4;
+}
+
+// PollSubjectChangesResponse — result of PollSubjectChanges.
+message PollSubjectChangesResponse {
+  repeated SubjectChange changes = 1;
+  // head_id — the position the caller may adopt as its cursor: the SETTLED
+  // boundary of the journal, narrowed to the last delivered row when the page
+  // was cut by `limit`. Lets a freshly started gateway initialise its cursor
+  // without replaying history.
+  //
+  // It is NOT `MAX(id)`. A journal number is issued by the counter on INSERT and
+  // becomes visible on COMMIT, so a caller that adopted the largest visible
+  // number would jump over a writer still in flight, and that row would never
+  // come back — re-reading is strictly "greater than the cursor". The same holds
+  // for a full page: beyond its last row the window still holds rows nobody read.
+  //
+  // The guarantee and its price are stated once:
+  // docs/architecture/journal-position-settled-watermark.md.
+  int64 head_id = 2;
+}
+
+// GetRoleCompiledRequest — the role whose compiled permissions to read (F5).
+message GetRoleCompiledRequest {
+  // ID of the Role.
+  string role_id = 1;
+}
+
+// GetRoleCompiledResponse — the Internal-only compiled permission projection (F5).
+message GetRoleCompiledResponse {
+  // ID of the Role.
+  string role_id = 1;
+
+  // Compiled permission set (`module.resource.resourceName.verb` 4-segment form)
+  // backing FGA emission. Empty for a label-only role (all rules ARM_LABELS).
+  repeated string permissions = 2;
+}
+
+// ResolveBasicCredentialRequest — предъявленная строка целиком.
+message ResolveBasicCredentialRequest {
+  // Строка как её предъявил клиент, без разбора вызывающим: разбор и сверка
+  // контрольной суммы живут в ОДНОМ объявленном месте, и край зовёт его же.
+  //
+  // Помечена носителем секрета: значение не имеет права осесть ни в строке
+  // операции, ни в журнале, ни в ленте.
+  string presented = 1 [(kaname.cloud.iam.v1.secret_bearing) = true];
+}
+
+// ResolveBasicCredentialResponse — вердикт о годном удостоверении.
+//
+// Отрицательного варианта у сообщения НЕТ намеренно: негодное удостоверение —
+// это ОТКАЗ RPC (UNAUTHENTICATED), а не успешный ответ с полем «не годится».
+// Поле-признак означало бы, что вызывающий вправе его не прочитать, и тогда
+// проверка присутствует, провязана и не отказывает ни разу.
+message ResolveBasicCredentialResponse {
+  // "user" | "service_account".
+  string principal_type = 1;
+  // Идентификатор принципала (`usr…` / `sva…`).
+  string principal_id = 2;
+  // Отображаемое имя принципала. Пусто допустимо.
+  string display_name = 3;
+  // Идентификатор СТРОКИ удостоверения — им адресуется отзыв. Второго имени у
+  // удостоверения нет.
+  string credential_id = 4;
+  // Срок действия удостоверения. Заполнен ВСЕГДА: бессрочного секрета не бывает.
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+// CheckBasicCredentialLiveRequest — идентификатор СТРОКИ удостоверения.
+message CheckBasicCredentialLiveRequest {
+  // Идентификатор удостоверения — тот самый, который резолв вернул в
+  // `ResolveBasicCredentialResponse.credential_id`. Секрет сюда не кладётся и
+  // класться не может: весь смысл вопроса в том, что спрашивающий секрета не
+  // хранит. Поэтому поле НЕ помечено носителем секрета — и это утверждение о
+  // значении, а не о форме.
+  string credential_id = 1;
+}
+
+// CheckBasicCredentialLiveResponse — ПУСТО, и это решение, а не заготовка.
+//
+// Вопрос один и ответ на него бинарен: `OK` означает «живо», отказ — всё
+// остальное. Любое поле здесь было бы сведениями, добытыми ПО ИДЕНТИФИКАТОРУ,
+// без предъявления секрета, — то есть оракулом: спрашивающий узнавал бы про
+// чужое удостоверение больше, чем знал до вопроса.
+//
+// Спрашивающему сверх этого ничего не нужно by construction: чей это поток, он
+// знает — он его и открыл.
+message CheckBasicCredentialLiveResponse {}

@@ -1,0 +1,330 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+// InternalLimitService — Internal-only.
+// Registered exclusively on the api-gateway internal mux (cluster-internal
+// listener) under `/iam/v1/internal/limits`; never on the external TLS endpoint
+// (ban #6). The dispatcher — not the absence of a route — is what keeps it
+// outside: `isInternalRoute` is keyed on the (method, path) pair and answers 404
+// for external origin, hiding existence.
+//
+// WHAT IT MANAGES. The ceiling on how many resources of one kind a tenant may
+// hold. Assigning one is an administrative act about a tenant's share of a shared
+// platform, and there is no tenant-facing subject in "how large may your ceiling
+// be" — the tenant reads its OWN effective ceiling and consumption from the owner
+// of the resource type, not from here.
+//
+// TWO AUDIENCES, TWO GATES. The five CRUD verbs are ADMIN surface, fronted by the
+// api-gateway on behalf of an operator: `system_admin` on the cluster object. The
+// two read verbs below them — `Resolve` and `ListChangedSince` — are SERVICE
+// surface, dialled by the owner services that do the counting, and they carry a
+// NARROW relation of their own (`quota_reader`) rather than the cluster read
+// tier. The distinction is least-privilege, not taxonomy: `system_viewer` would
+// hand an owner service the whole cluster-scoped read surface to learn two
+// numbers, and a relation satisfiable by a wildcard tuple would hand it to every
+// authenticated tenant (security.md §«Отношение, выполнимое подстановочным
+// знаком»).
+//
+// AUTHENTICATION FLOOR. `Create` / `Update` / `Delete` declare
+// `required_acr_min = "2"`: raising or lowering a ceiling changes what a tenant
+// may do to a shared resource. The four reads declare `"1"`. Every RPC declares
+// its floor EXPLICITLY, because the generator's default is "2" and an unstated
+// floor would arrive as sensitive by accident rather than by decision.
+//
+// ASYNC CONTRACT. Mutations return `Operation` (ban #9); `done` means the subject
+// of the mutation is durable and is never gated on the visibility of anything
+// downstream — an owner's projection catches up by pulling the delta.
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/limit.proto";
+import "kacho/cloud/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// InternalLimitService — administration of resource-count ceilings plus the two
+// reads owner-services live on. See the file-level comment for the gates.
+service InternalLimitService {
+  // Returns the requested Limit. Sync read; no Operation envelope.
+  //
+  // A malformed id is rejected synchronously as `INVALID_ARGUMENT` by the first
+  // statement of the RPC; a well-formed id with no row is `NOT_FOUND` (direct-read
+  // lane — this is iam's own resource).
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc Get (GetLimitRequest) returns (Limit) {
+    option (google.api.http) = {
+      get: "/iam/v1/internal/limits/{limit_id}"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.get";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Lists Limits, optionally narrowed to one scope / scope object / kind. Sync
+  // read, cursor-paginated on `(created_at, id)`.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc List (ListLimitsRequest) returns (ListLimitsResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/internal/limits"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.list";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // States a ceiling for one (scope, scope object, kind) triple.
+  //
+  // The triple is unique among the limits in force: a second Create on the same
+  // triple is `ALREADY_EXISTS`, and that promise is a database constraint rather
+  // than a read-then-write check, so two concurrent Creates produce one row and
+  // one refusal.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc Create (CreateLimitRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/internal/limits"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "CreateLimitMetadata"
+      response: "Limit"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.create";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+
+  // Changes the ceiling. `value` is the only mutable field: the triple a limit
+  // governs IS its identity, so "moving" a limit to another project or kind is a
+  // different limit, created and withdrawn explicitly.
+  //
+  // Lowering a ceiling BELOW current consumption is legal and is the point: it
+  // freezes creation while leaving what exists readable and deletable. A schema
+  // that forbade the state would make the ordinary administrative act
+  // inexpressible.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc Update (UpdateLimitRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      patch: "/iam/v1/internal/limits/{limit_id}"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "UpdateLimitMetadata"
+      response: "Limit"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.update";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+
+  // Withdraws a ceiling. The triple falls back to the next scope; withdrawing a
+  // DEFAULT leaves the kind with no ceiling stated anywhere, which owner services
+  // treat as a refusal to guess rather than as "unbounded".
+  //
+  // Idempotent — withdrawing an already-withdrawn limit does not differ in code
+  // from the first withdrawal.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc Delete (DeleteLimitRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      delete: "/iam/v1/internal/limits/{limit_id}"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "DeleteLimitMetadata"
+      response: "Limit"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.delete";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+
+  // Returns the ceilings in force for one scope object, for every kind one
+  // service owns. Sync read; the owner service calls it when its own projection
+  // has nothing to say about a tenant.
+  //
+  // Precedence is applied here, once: PROJECT over ACCOUNT over DEFAULT. Making
+  // each owner re-implement the precedence would put the same three-way rule in
+  // as many places as there are owners, and they would disagree the first time
+  // one of them was extended.
+  //
+  // Gated by the narrow `quota_reader` relation — see the file-level comment.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc Resolve (ResolveLimitsRequest) returns (ResolveLimitsResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/internal/limits:resolve"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.resolve";
+    option (corelib.authz.v1.required_relation) = "quota_reader";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Returns limits whose value changed (or which were withdrawn) after the
+  // caller's cursor. Sync read; this is how an owner keeps its projection fresh
+  // without asking about every tenant it has ever seen.
+  //
+  // A write that restates the value a limit already had does NOT appear here: the
+  // revision advances on CHANGE, so an idempotent re-assignment cannot make every
+  // puller re-read the world.
+  //
+  // Gated by the narrow `quota_reader` relation — see the file-level comment.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc ListChangedSince (ListChangedLimitsRequest) returns (ListChangedLimitsResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/internal/limits:changedSince"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.listChangedSince";
+    option (corelib.authz.v1.required_relation) = "quota_reader";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+}
+
+message GetLimitRequest {
+  // ID of the Limit to return. Form `lim-<17 crockford-base32>` (21 chars).
+  string limit_id = 1;
+}
+
+message ListLimitsRequest {
+  // The maximum number of results per page. 0 → default; >1000 is REJECTED,
+  // not clamped (api-conventions).
+  int64 page_size = 1;
+
+  // Opaque cursor from a previous response.
+  string page_token = 2;
+
+  // Narrow to one scope. SCOPE_UNSPECIFIED → every scope.
+  Limit.Scope scope = 3;
+
+  // Narrow to the limits stated for one account / project. Empty → no narrowing
+  // by object. Supplying it WITHOUT `scope` is legal and means "wherever this
+  // object is named".
+  string scope_id = 4;
+
+  // Narrow to one kind. Empty → every kind.
+  //
+  // The three narrowing fields are typed request fields rather than a filter
+  // expression on purpose: the vocabulary here is closed and three-valued, and a
+  // parser would introduce a second grammar whose only job is to be told the same
+  // three things.
+  string kind = 5;
+}
+
+message ListLimitsResponse {
+  // The page of limits.
+  repeated Limit limits = 1;
+
+  // Cursor for the next page; empty when the page is the last one.
+  string next_page_token = 2;
+}
+
+message CreateLimitRequest {
+  // Scope this limit is stated at. Required — SCOPE_UNSPECIFIED is refused by
+  // name rather than defaulted, because every default here would be a guess
+  // about the blast radius of the ceiling.
+  Limit.Scope scope = 1;
+
+  // Id of the account (ACCOUNT) or project (PROJECT) the scope names. MUST be
+  // empty for DEFAULT and non-empty otherwise; the pairing is refused by name.
+  string scope_id = 2;
+
+  // Kind this limit governs. Must be a member of the platform's closed
+  // catalogue of countable kinds.
+  string kind = 3;
+
+  // The ceiling. Zero is legal ("none of this kind"); negative is refused by
+  // name.
+  int64 value = 4;
+}
+
+message UpdateLimitRequest {
+  // ID of the Limit to update.
+  string limit_id = 1;
+
+  // Fields to update. Empty mask → full-object PATCH over mutable fields;
+  // immutable fields present in the body are silently ignored. A mask naming an
+  // immutable field is rejected BY NAME; a mask naming an unknown field is
+  // rejected against the known-set.
+  google.protobuf.FieldMask update_mask = 2;
+
+  // The new ceiling.
+  int64 value = 3;
+}
+
+message DeleteLimitRequest {
+  // ID of the Limit to withdraw.
+  string limit_id = 1;
+}
+
+message ResolveLimitsRequest {
+  // Id of the object the ceilings are wanted for: a project id (the usual case)
+  // or an account id. The kind of object is established by LOOKING IT UP, never
+  // by reading its prefix — a prefix is a routing hint, not a statement about
+  // what exists.
+  string scope_id = 1;
+
+  // Service whose kinds are wanted (`vpc`, `iam`, …). The answer carries one row
+  // per kind that service owns, so the caller never has to know which kinds
+  // exist — that catalogue is the platform's, not the caller's copy of it.
+  string service = 2;
+}
+
+message ResolveLimitsResponse {
+  // One row per kind of the requested service, in the catalogue's order.
+  repeated EffectiveLimit limits = 1;
+}
+
+message ListChangedLimitsRequest {
+  // Opaque cursor from a previous response. Empty → from the beginning of time,
+  // which is what a projection that has never synchronised needs.
+  string cursor = 1;
+
+  // The maximum number of entries per page. 0 → default; >1000 is REJECTED.
+  int64 page_size = 2;
+}
+
+message ListChangedLimitsResponse {
+  // Entries whose revision is greater than the cursor, in revision order.
+  repeated LimitChange changes = 1;
+
+  // Cursor to pass next time. Always returned, INCLUDING on an empty page: a
+  // puller that only advanced on non-empty pages would re-scan the same tail
+  // forever once it caught up.
+  string next_cursor = 2;
+}

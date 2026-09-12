@@ -1,0 +1,474 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// AuthorizeService — public RPCs for FGA-backed authorization
+// queries.
+//
+// This is the **public** projection of the authz layer — callers query
+// "can my subject do X on Y" using their **own** access token (DPoP /
+// mTLS). The internal `InternalIAMService.Check` (port 9091) is for
+// server-side per-RPC gating; AuthorizeService is for explicit
+// tenant-facing queries (UI permission previews, SDK `auth_simulate` style
+// helpers).
+//
+// **Subject binding** — every RPC takes a subject identifier in the form
+// `user:<usr…>` / `service_account:<sva…>` / `group:<grp…>#member`.
+// **Who may ask about whom is decided HERE, in this service, not at the
+// api-gateway.** The edge authenticates the caller and stops: the subject and the
+// queried resource arrive as request fields (the resource as a nested
+// `ResourceRef` whose type is itself a field), and neither can be turned into a
+// single object the edge could check before the call runs — which is why these
+// RPCs declare `scope_filtered`.
+//
+// The gate this service applies admits a caller who is the subject being asked
+// about, or is a cluster administrator, or holds `admin` on the very resource
+// named in the request. Everything else — including a caller with no principal
+// that is not a verified cluster-internal peer — is denied, and the denial is the
+// default on every degraded path.
+//
+// An earlier revision of this comment claimed the gateway admitted only callers
+// holding `iam.subjects.checkAuthorization` on the subject or resource. No such
+// permission is issued by the permission catalog and no such relation exists in
+// the authorization model, so nothing ever enforced it; what the catalog asked for
+// was `viewer` on the cluster singleton, a relation the cluster bootstrap grants
+// to `user:*` so every tenant can read the global reference catalogue. The
+// sentence described a control that did not exist, over a surface that answers
+// "who can reach what" for the whole platform.
+//
+// **Latency budget** — `Check` ≤ 30ms p95; `BatchCheck` linear in batch size,
+// paying a full `Check` per item.
+//
+// The line for `BatchCheck` previously read "≤ 5ms per tuple amortised after the
+// first". Nothing amortises it: the implementation resolves a batch with a
+// sequential loop, one relation-store round-trip per item, and the only thing
+// shared across the pass is the cluster-administrator verdict on the deny path.
+// A number describing a cost model the code does not have is worse than no
+// number — a reader budgeting against it concludes this surface is already the
+// fast path and goes optimising something else.
+service AuthorizeService {
+  // Check — single-tuple authorization check.
+  //
+  // Returns `allowed=true` iff the FGA model resolves the relation between
+  // `subject` and `resource` AND every condition along the resolution path
+  // evaluates to true given `context`.
+  //
+  // Returns `allowed=false` with `deny_reasons` containing a short ordered
+  // list of which conditions failed (`["mfa_fresh: acr=2 (need 3)"]`); empty
+  // list on a "no path" deny.
+  rpc Check (AuthorizeCheckRequest) returns (AuthorizeCheckResponse) {
+    option (google.api.http) = { post: "/iam/v1/authorize:check" body: "*" };
+    option (corelib.authz.v1.permission) = "iam.authorize.check";
+    // The subject's type is embedded in its ARN and the queried resource is a
+    // nested ResourceRef carrying its own type, so neither yields an object the
+    // edge can name before the call. kaname decides: self-query ∨ cluster-admin
+    // ∨ `admin` on the resource actually named in the request.
+    //
+    // Until this was made explicit the row declared `viewer` on the cluster
+    // singleton and called it a "coarse outer gate". It is not a gate: the cluster
+    // bootstrap grants that relation to `user:*` for the global reference
+    // catalogue, so it passed for every authenticated principal.
+    option (corelib.authz.v1.scope_filtered)   = true;
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // BatchCheck — multiple checks bundled in one RPC.
+  //
+  // What the server does with them, stated as it is rather than as it was
+  // described: it resolves them ONE AT A TIME, in request order, each a separate
+  // round-trip to the relation store. The previous sentence here claimed a
+  // concurrent server-side fan-out "capped at server-side `max_parallel`"; there
+  // is no fan-out, and no `max_parallel` — the identifier appears nowhere in this
+  // repository except in the sentence that named it.
+  //
+  // This matters to a caller and not only to a reviewer. A sibling service splits
+  // its page into batches of 100 precisely because bundling is supposed to be
+  // cheaper than asking 100 times, and at this boundary it is not: the saving is
+  // one gRPC hop, while the 100 relation-store round-trips are still paid, in
+  // sequence. The relation store itself does serve a batched question (that is
+  // what internal/authzfilter uses for iam's own pages); routing this RPC through
+  // it is open work, tracked as a number in the service's own engineering
+  // documentation (its coordinate is deliberately not quoted here: the service
+  // was carved out into its own repository, and a path that resolves in another
+  // tree reads as one that resolves in this one).
+  //
+  // Order of results matches the order of `checks` in the request. Per-item
+  // failures (e.g. malformed subject) are surfaced as `allowed=false` with
+  // a per-item `deny_reasons` containing the parse error — the whole batch
+  // does NOT fail.
+  //
+  // Hard cap: ≤ 100 checks per batch (InvalidArgument otherwise).
+  rpc BatchCheck (BatchAuthorizeCheckRequest) returns (BatchAuthorizeCheckResponse) {
+    option (google.api.http) = { post: "/iam/v1/authorize:batchCheck" body: "*" };
+    option (corelib.authz.v1.permission)        = "iam.authorize.batchCheck";
+    option (corelib.authz.v1.required_relation) = "viewer";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "project"
+      from_request_field: "scope_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // TOMBSTONE: `ListObjects` ("enumerate every id of `resource_type` the subject
+  // can reach") is REMOVED, together with its `ListObjectsRequest` /
+  // `ListObjectsResponse` messages. Never re-add an RPC under that name.
+  //
+  // It was not paginated by construction: `page_token` was rejected outright and
+  // `next_page_token` was never populated, so the truncation the response
+  // advertised had no continuation — objects past the cap were unreachable while
+  // the grants that covered them were live. "Enumerate the universe, then filter"
+  // is the shape the platform forbids; "read a page, then check that page" is the
+  // one it requires.
+  //
+  // No replacement is introduced here. "What can I see" is answered by the
+  // paginated `List` of the owning resource service, which narrows a page by
+  // checking the ids on it.
+
+  // ListSubjects — return all subjects holding `action` on a given resource.
+  // Used by the admin-UI "who can access this" widget.
+  //
+  // Hard cap: page size ≤ 1000 (InvalidArgument otherwise).
+  rpc ListSubjects (ListSubjectsRequest) returns (ListSubjectsResponse) {
+    option (google.api.http) = { post: "/iam/v1/authorize:listSubjects" body: "*" };
+    option (corelib.authz.v1.permission) = "iam.authorize.listSubjects";
+    // The queried resource may be of any type (vpc_network / account / …). The
+    // edge can read the nested ResourceRef.id but not its .type, so it cannot
+    // build the object at all. kaname decides: cluster-admin ∨ `admin` on the
+    // real `<resource.type>:<resource.id>`. See AuthorizeService.Check for why the
+    // previous `viewer`-on-cluster row was not a gate.
+    option (corelib.authz.v1.scope_filtered)   = true;
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // ExpandRelations — return the subjects that resolve `relation` on `resource`,
+  // as recorded by the relational form that decides access. Used by audit
+  // tooling to explain a deny / allow decision.
+  //
+  // The answer is ONE LEVEL and carries no edges: the source is a set of flat
+  // records, not a graph, so there is no subtree to descend into and no depth to
+  // bound. The response is read-only.
+  rpc ExpandRelations (ExpandRelationsRequest) returns (ExpandRelationsResponse) {
+    option (google.api.http) = { post: "/iam/v1/authorize:expandRelations" body: "*" };
+    option (corelib.authz.v1.permission) = "iam.authorize.expand";
+    // Same shape as AuthorizeService.ListSubjects: the resource type is a field of
+    // the nested ResourceRef, so the edge cannot build the object. kaname
+    // decides: cluster-admin ∨ `admin` on the real
+    // `<resource.type>:<resource.id>`.
+    option (corelib.authz.v1.scope_filtered)   = true;
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // WhoAmI — return the authenticated caller's identity + a permission
+  // snapshot (cluster-level flags + per-account roles).
+  //
+  // Designed for UI bootstrap ("who am I, what can I see") and for CLI tools
+  // that want to surface permission previews without performing a per-RPC
+  // Check round-trip per visible button. The response is **per-request fresh**
+  // (no caching) but is intentionally coarse — full per-RPC gating still
+  // happens at the api-gateway authz middleware.
+  //
+  // Permission: `<exempt>` — any authenticated principal can call WhoAmI on
+  // itself (subject is taken from the auth context, not from the request
+  // body, so there is no cross-tenant snooping vector).
+  //
+  // Returns Unauthenticated when called with no principal in context.
+  rpc WhoAmI (WhoAmIRequest) returns (WhoAmIResponse) {
+    option (google.api.http) = { get: "/iam/v1/me" };
+    // <exempt> — handler reads principal from auth context; anonymous
+    // callers are rejected by the handler with Unauthenticated. No
+    // scope_extractor / relation is required because there is no
+    // tenant-scoped object to gate on.
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "SELF_SERVICE";
+  }
+}
+
+// ResourceRef — typed resource pointer used across AuthorizeService.
+//
+// `type` mirrors the object-type vocabulary of the authorization model
+// (`cluster` / `account` / `project` / `vpc_network` /
+// `vpc_subnet` / `compute_instance` / …). `id` is the resource id WITHOUT
+// the type prefix (i.e. `net…`, not `vpc_network:net…`).
+message ResourceRef {
+  // FGA object type. 1-32 chars.
+  string type = 1;
+
+  // Bare resource id (no type prefix). 1-64 chars.
+  string id = 2;
+}
+
+message AuthorizeCheckRequest {
+  // FGA-style subject string ("user:<usr…>" / "service_account:<sva…>"
+  // / "group:<grp…>#member"). Required.
+  string subject = 1;
+
+  // Resource the action is being checked against.
+  ResourceRef resource = 2;
+
+  // Permission string in `<domain>.<resource>.<verb>` form
+  // ("vpc.networks.create"). Resolved to an FGA relation server-side
+  // when `required_relation` is empty (verb → relation: get/list → viewer,
+  // create/update → editor, delete → admin). 1-128 chars.
+  string action = 3;
+
+  // Optional opaque condition-evaluation context.
+  // Reserved keys:
+  //   acr_value           string  ("1" / "2" / "3")
+  //   amr_claims          list<string>  (["webauthn", "pwd"])
+  //   mfa_at              timestamp seconds
+  //   current_time        timestamp seconds (server overwrites with now())
+  //   client_ip           string  (IPv4/IPv6 literal)
+  //   device_attestation  string
+  // Unknown keys are passed through to FGA Conditions and ignored if no
+  // condition consumes them.
+  google.protobuf.Struct context = 4;
+
+  // Correlation id for downstream logs / traces. ≤ 64 chars.
+  string trace_id = 5;
+
+  // Explicit FGA relation override. When set, the
+  // server uses this relation verbatim instead of deriving from `action`'s
+  // verb. Required for admin-only RPCs whose verb (`get`/`list`) would
+  // otherwise resolve to `viewer` — letting any authenticated user through
+  // the cluster.viewer (`user:*`) cascade. The api-gateway authz middleware
+  // populates this from the permission catalog's `required_relation` field,
+  // which proto annotations declare per-RPC. Empty = legacy behaviour
+  // (action-verb derivation). 1-32 chars.
+  string required_relation = 6;
+}
+
+message AuthorizeCheckResponse {
+  // True when authorization grants the action.
+  bool allowed = 1;
+
+  // Short ordered list of reasons for a deny. Empty on allow.
+  // Examples:
+  //   ["mfa_fresh: acr=2 (need 3)"]
+  //   ["non_expired: now() >= expires_at(2026-05-01T00:00:00Z)"]
+  //   ["no path"]
+  repeated string deny_reasons = 2;
+
+  // `authorization_model_id` carried the version id that the EXTERNAL engine
+  // minted for the model it held in its own store. That engine is gone, so
+  // nothing mints such an id and nothing could fill the field — it would answer
+  // every caller with a permanent empty string. Number AND name are reserved.
+  //
+  // The authorization MODEL itself is not gone: it is still the source the
+  // relational form is derived from. What is gone is the version id of a store
+  // that no longer exists.
+  reserved 3;
+  reserved "authorization_model_id";
+
+  // Timestamp at which the decision was made (truncated to seconds).
+  google.protobuf.Timestamp checked_at = 4;
+}
+
+message BatchAuthorizeCheckRequest {
+  // Batched checks. ≤ 100 entries.
+  repeated AuthorizeCheckRequest checks = 1;
+
+  // Optional scope id for authz of the batch as a whole. When set, the
+  // gateway gates the entire batch on this scope's `iam.authorize.batchCheck`
+  // permission instead of per-item.
+  string scope_id = 2;
+
+  // Correlation id; ≤ 64 chars.
+  string trace_id = 3;
+}
+
+message BatchAuthorizeCheckResponse {
+  // Per-item responses, same order as request. Length == request.checks
+  // length.
+  repeated AuthorizeCheckResponse responses = 1;
+}
+
+message ListSubjectsRequest {
+  // Resource for which to enumerate subjects.
+  ResourceRef resource = 1;
+
+  // Action string. 1-128 chars.
+  string action = 2;
+
+  // Page size; default 100, max 1000.
+  int64 page_size = 3;
+
+  // Page token.
+  string page_token = 4;
+
+  // Subject-type filter — when set, only return subjects of this type
+  // ("user" / "service_account" / "group"). Empty = no filter.
+  string subject_type_filter = 5;
+}
+
+message ListSubjectsResponse {
+  // FGA-style subject strings.
+  repeated string subjects = 1;
+
+  // Continuation token.
+  string next_page_token = 2;
+}
+
+message ExpandRelationsRequest {
+  // Resource whose subjects to list.
+  ResourceRef resource = 1;
+
+  // Relation name (`viewer` / `editor` / `admin` / domain-specific).
+  // 1-32 chars.
+  string relation = 2;
+
+  // `max_depth` bounded how far the answer descended while the answer was a
+  // TREE. It is one level now — the basis of a right is a flat record — so depth
+  // is not defined for this answer and nothing reads the field. Accepting a
+  // number the server never looks at would promise a knob that does not exist,
+  // so it is gone rather than ignored. Number AND name are reserved.
+  reserved 3;
+  reserved "max_depth";
+}
+
+// UsersetTree — FLAT listing of the subjects that resolve a relation.
+//
+// The name is historical and the shape is not a tree: the source is the
+// relational form that decides access, and its records are flat. There is
+// exactly one level, and the two edge fields that used to descend into
+// sub-usersets are reserved below — nothing would ever fill them.
+//
+// `ComputedUsersetEdge` and `TupleToUsersetEdge` were removed with them. Never
+// re-add messages under those names.
+message UsersetTree {
+  // Subjects that resolve the relation, as recorded by the relational form.
+  repeated string leaves = 1;
+
+  // Edge fields of the retired graph shape. Numbers AND names are reserved so a
+  // later message cannot silently reuse either.
+  reserved 2, 3;
+  reserved "computed", "tuple_to_userset";
+
+  // True when the listing was cut short by the server-side cap and is therefore
+  // incomplete.
+  bool truncated = 4;
+}
+
+message ExpandRelationsResponse {
+  // Resource whose subjects were listed (echo of request).
+  ResourceRef resource = 1;
+
+  // Relation that was expanded (echo of request).
+  string relation = 2;
+
+  // The subjects that resolve the relation.
+  UsersetTree tree = 3;
+
+  // `authorization_model_id` carried the pinned model id of the external
+  // authorization engine. There is no such engine and nothing to put here, so
+  // the field is gone rather than answered with a permanent empty string.
+  // Number AND name are reserved.
+  reserved 4;
+  reserved "authorization_model_id";
+}
+
+// WhoAmIRequest — empty; the subject is derived from the auth context.
+message WhoAmIRequest {}
+
+// WhoAmIResponse — caller identity + permission snapshot. All fields are
+// read-only and reflect the state at `checked_at`.
+message WhoAmIResponse {
+  // FGA-style subject of the authenticated caller. Format:
+  // `user:<usr…>` / `service_account:<sva…>` / `system:<bootstrap>`.
+  // Empty for anonymous (but anonymous callers receive Unauthenticated
+  // before reaching this field).
+  string subject = 1;
+
+  // User id without the `user:` prefix. Empty for service_account / system
+  // principals.
+  string user_id = 2;
+
+  // Email of the user (lower-cased). Empty for service_account / system.
+  string email = 3;
+
+  // Human-readable display name. Falls back to local-part of email when
+  // the user row has no explicit display name.
+  string display_name = 4;
+
+  // True when the caller holds `system_admin` on the singleton cluster
+  // object (`cluster:cluster_root`). Bypasses every per-resource
+  // authz check at the api-gateway middleware (internal
+  // admin RPCs gate on this).
+  bool system_admin = 5;
+
+  // True when the caller resolves `viewer` on the singleton cluster object
+  // — typically `true` for every authenticated principal via the
+  // `cluster.viewer = user:*` cascade. Surfaced explicitly so the UI can
+  // distinguish "authenticated tenant" from "system admin" without a
+  // second Check round-trip.
+  bool cluster_viewer = 6;
+
+  // The caller's accounts — the tenant switcher of the console reads THIS
+  // field, so its definition is a client-facing contract, not a note.
+  //
+  // An account is listed when AT LEAST ONE of three holds, and each is an
+  // independent source rather than a consequence of another:
+  //
+  //   - the caller holds an ACTIVE MEMBERSHIP of it AND his identity is itself
+  //     ACTIVE. The second half is not redundant: blocking is a property of the
+  //     identity and leaves the memberships ACTIVE by design, so without it a
+  //     blocked person would keep being told which accounts he belongs to. It
+  //     narrows THIS source only — the two below carry no identity-state
+  //     condition, so an account a blocked person owns is still listed to him;
+  //   - the caller OWNS it (`Account.owner_user_id`) — owning is not being a
+  //     member, so it is asked separately;
+  //   - the caller holds an ACTIVE account-scoped AccessBinding on it. This is
+  //     the source that can list an account to an invited person BEFORE his
+  //     first login, whose membership is still PENDING — but only when the
+  //     invitation actually granted a role; an invitation with an empty role
+  //     grants nothing, and then nothing lists the account until he logs in.
+  //
+  // THE PREDICATE USED TO BE STATED AS "has an ACTIVE user row", and that
+  // outlived the model it came from. While a person was a ROW IN an account,
+  // such a row did select one; after the identity was detached there is ONE
+  // global row per person, so the condition is now either true for every account
+  // or for none — it selects nothing at all. The wording stayed and read as
+  // current, and a client building a mental model from it expected the list to
+  // be narrowed by his participation. Membership is what narrows it, and the
+  // word was missing from the definition entirely.
+  //
+  // EMPTY IS VALID AND MEANS TWO DIFFERENT THINGS, both stated rather than left
+  // to be discovered: a person with no memberships, no owned account and no
+  // account-scoped grant; and ANY service-account principal — this snapshot is
+  // filled for `user` principals only, and a service account relies on per-RPC
+  // authorization instead.
+  repeated AccountMembership accounts = 7;
+
+  // Timestamp at which the snapshot was computed (truncated to seconds).
+  google.protobuf.Timestamp checked_at = 8;
+}
+
+// AccountMembership — caller's membership of a single account. Roles are
+// derived from ACTIVE AccessBindings on the account object (best-effort
+// classification — see WhoAmIResponse).
+message AccountMembership {
+  // Account id (`acc…`).
+  string account_id = 1;
+
+  // Account display name (may be empty when the account row was created
+  // but the name was not set).
+  string account_name = 2;
+
+  // Coarse role classification derived from ACTIVE AccessBindings on the
+  // account. Values: `owner` (caller is `accounts.owner_user_id`),
+  // `admin` / `editor` / `viewer` (last segment of the role id / role name
+  // — same mapping as `UserService.Invite::resolveRoleRelation`).
+  // Unrecognised roles fall back to `viewer`. Empty list is valid when
+  // the caller has implicit visibility (e.g. owner without explicit
+  // AccessBinding row) — UI should treat empty == `viewer`.
+  repeated string roles = 3;
+}

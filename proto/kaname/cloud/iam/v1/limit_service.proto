@@ -1,0 +1,164 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+// LimitService — административная поверхность пределов на ПУБЛИЧНОМ бэкенде
+// (ADM-1 S1, #878). Пять глаголов управления величиной, каждый под
+// `system_admin` @ `cluster`.
+//
+// ЗАЧЕМ ЭТОТ ФАЙЛ СУЩЕСТВУЕТ. Величину назначает администратор облака, и
+// назначает он её ЧЕРЕЗ КРАЙ: страница пределов консоли — единственный
+// пользователь этих глаголов. Пока они объявлены только внутренним сервисом,
+// внешний край их не отдаёт, и администратор получает **404** — отказ,
+// неотличимый от «такого раздела нет вовсе». Сервис при этом исправен: класс
+// живёт целиком на крае и ни одной пробой сервиса не виден by construction.
+//
+// ЗАПРЕТ 6 НЕ СМЯГЧЁН. Наружу выставлен `LimitService`, а не
+// `InternalLimitService`; предикат `HasInternalSuffix`, который ловит второе, не
+// тронут. Переезжает ГЛАГОЛ, а не разрешение для внутреннего сервиса — тот же
+// приём, каким ADM-1 S1 опубликовал административную поверхность пула адресов.
+//
+// ЧТО ЗАКРЫВАЕТ ДОСТУП. Не место вызова, а отношение: `system_admin` @ `cluster`
+// — то, которое подстановочный кортеж `user:*` НЕ выполняет (security.md
+// §«Отношение, выполнимое подстановочным знаком, не сужает НИЧЕГО»). Поэтому
+// публикация адреса не расширяет круг: она делает отказ ЧЕСТНЫМ — 403 вместо
+// 404, — и тем отличает «нет права» от «нет продукта».
+//
+// ЧЕГО ЗДЕСЬ НЕТ И ПОЧЕМУ. `Resolve` и `ListChangedSince` остаются внутренними:
+// это СЕРВИСНАЯ поверхность под узким `quota_reader`, её зовут владельцы типов,
+// а не человек. Публиковать их значило бы расширить поверхность ради предмета,
+// которого у арендатора нет.
+//
+// ЧТО АРЕНДАТОР ВИДИТ И БЕЗ ЭТОГО ФАЙЛА. Свой предел и свой расход он читает
+// публично у владельца типа — `Quota{kind, limit, used, source_scope}` по
+// `/{домен}/v1/quotas`, гейт `viewer` @ `project`. «Видеть своё» и «править
+// чужое» — разные вопросы, и разводит их отношение, а не адрес.
+//
+// ДВА АДРЕСА СОСУЩЕСТВУЮТ ДО S3. Внутренний путь несёт сегмент `/internal/`,
+// поэтому публичный не может совпасть с ним дословно — в отличие от пула
+// адресов, где оба глагола объявляли ОДИН путь и согласие их записей стерёг
+// `TestSharedRestPair_CannotChangeAnAccessDecision`. Здесь пары нет, и согласие
+// решения о доступе держит собственная проба
+// `TestLimits_AdminSurfaceIsReachableFromOutside` — тем же предикатом
+// `accessDecisionDiffers`, а не своей копией.
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/internal_limit_service.proto";
+import "kaname/cloud/iam/v1/limit.proto";
+import "kacho/cloud/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// LimitService — управление потолками числа ресурсов. Публичный адрес, гейт
+// `system_admin` @ `cluster` на каждом глаголе.
+//
+// Сообщения запросов переиспользуются, а не переобъявляются: они уже описаны
+// внутренним сервисом того же пакета. Второе объявление той же формы дало бы два
+// типа, которые разойдутся на первом же добавленном поле, — и разойдутся молча,
+// потому что оба останутся валидными.
+service LimitService {
+  // Отдаёт предел по идентификатору. Синхронное чтение.
+  //
+  // Ошибочный идентификатор отвергается синхронно первым же оператором
+  // (`INVALID_ARGUMENT`); правильный по форме, но отсутствующий — `NOT_FOUND`:
+  // это собственный ресурс iam, полоса прямого чтения.
+  rpc Get (GetLimitRequest) returns (Limit) {
+    option (google.api.http) = {
+      get: "/iam/v1/limits/{limit_id}"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.get";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Перечисляет пределы, при желании сужая до одной области, объекта области
+  // или вида. Синхронное чтение, страница курсором по `(created_at, id)`.
+  rpc List (ListLimitsRequest) returns (ListLimitsResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/limits"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.list";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Объявляет потолок для тройки (область, объект области, вид).
+  //
+  // Тройка уникальна среди действующих пределов, и это обещание — ограничение
+  // базы, а не проверка-перед-записью: две одновременные постановки дают одну
+  // строку и один отказ.
+  rpc Create (CreateLimitRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/limits"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "CreateLimitMetadata"
+      response: "Limit"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.create";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+
+  // Меняет величину потолка. `value` — единственное изменяемое поле: тройка,
+  // которой предел управляет, И ЕСТЬ его идентичность.
+  //
+  // Опустить потолок НИЖЕ текущего расхода законно и в этом весь смысл: создание
+  // замирает, а созданное остаётся читаемым и удаляемым.
+  rpc Update (UpdateLimitRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      patch: "/iam/v1/limits/{limit_id}"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "UpdateLimitMetadata"
+      response: "Limit"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.update";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+
+  // Снимает потолок. Тройка проваливается к следующей области; снятие
+  // умолчания оставляет вид без объявленного потолка нигде — и владельцы типов
+  // читают это как отказ угадывать, а не как «без предела».
+  //
+  // Идемпотентно: снятие уже снятого не отличается кодом от первого снятия.
+  rpc Delete (DeleteLimitRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = {
+      delete: "/iam/v1/limits/{limit_id}"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "DeleteLimitMetadata"
+      response: "Limit"
+    };
+    option (corelib.authz.v1.permission)        = "iam.limits.delete";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+}

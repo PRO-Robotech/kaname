@@ -241,3 +241,39 @@ func TestDirNameInjection_CanonicalInsideALongerSegmentDoesNotSatisfyTheControl(
 	require.Zero(t, census.canonicalRefs,
 		"`apps/kanamex` засчитан канонической ссылкой: правая граница не проверяется")
 }
+
+// ── Полоса входного контракта: в ведомости — молчит, вне ведомости — находка ──
+//
+// Пара, а не одна проба: без второй половины послабление было бы маской. Ровно
+// один факт различает половины — присутствие пути в ведомости входов.
+
+// inputLedgerTree — корень с ОДНИМ входным контрактом, чей путь несёт
+// отставленный сегмент. Ведомость подаётся отдельно, чтобы её присутствие и было
+// единственным различием пары.
+func inputLedgerTree(withLedger bool) map[string]string {
+	files := soundTree()
+	files["proto/kacho/cloud/operation/operation.proto"] = "syntax = \"proto3\";\n"
+	if withLedger {
+		files["proto/inputs.yaml"] = "inputs:\n  - path: kacho/cloud/operation/operation.proto\n" +
+			"    sha256: 0\n    stubs: github.com/PRO-Robotech/corelib/api/kacho/cloud/operation\n"
+	}
+	return files
+}
+
+func TestDirNameInjection_InputContractPathInTheLedgerIsSilent(t *testing.T) {
+	census, findings, err := scanDirectoryNames(syntheticCorpus(t, dirRootWith(t, inputLedgerTree(true))))
+	require.NoError(t, err)
+	require.Empty(t, findings, "путь ВХОДНОГО контракта объявлен находкой: его координату задаёт "+
+		"оператор import соседнего контракта, и переименовать её здесь значит не собрать контракты")
+	require.Equal(t, 1, census.retiredSegments, "предпосылка сдвинулась: отставленного сегмента в пути нет")
+	require.Equal(t, 1, census.skippedInputPath, "полоса не сработала: пропуск не зачтён")
+}
+
+func TestDirNameInjection_SamePathOutsideTheLedgerIsFound(t *testing.T) {
+	census, findings, err := scanDirectoryNames(syntheticCorpus(t, dirRootWith(t, inputLedgerTree(false))))
+	require.NoError(t, err)
+	require.Len(t, findings, 1, "тот же путь ВНЕ ведомости не найден: тогда полоса выше была бы "+
+		"маской на весь каталог контрактов, а не послаблением с предметом")
+	require.Equal(t, "proto/kacho/cloud/operation/operation.proto", findings[0].file)
+	require.Zero(t, census.skippedInputPath)
+}

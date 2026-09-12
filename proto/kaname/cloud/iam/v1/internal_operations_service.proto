@@ -1,0 +1,82 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+// InternalOperationsService — IAM operations visibility.
+// Internal-only. Registered exclusively
+// on the api-gateway internal mux (cluster-internal listener) under
+// `/iam/v1/internal/operations`; never on the external TLS endpoint. The
+// `Internal*` service-name suffix is what the gateway external-isolation
+// predicate (`HasInternalSuffix`) keys off to keep this off external.
+//
+// ListIamOperations is the cluster-wide admin feed of ALL IAM operations in
+// the cluster — the only surface that aggregates genuine cluster IAM ops,
+// including category (II) rows (cluster-global Role, project/cluster-scoped
+// AccessBinding, SAKey-Issue/Revoke, Conditions-CUD) and Internal-only
+// op-producers (GrantClusterAdmin / ForceLogout / WriteTuples / Upsert) whose
+// metadata carry no `account_id` and therefore never appear in any
+// account-scoped public list.
+//
+// Sync read; cursor `(created_at,id)` ASC; `page_size` clamped to max 1000
+// (no single-shot cluster-wide dump). Hits the local `kaname` operations
+// table only — asks no authorization question on the request path.
+//
+// Authorization gate: admin-tier enforced by the
+// api-gateway permission-catalog entry — `required_relation = "system_admin"`,
+// `scope_extractor.object_type = "cluster"` (⇒ singleton `cluster_root`),
+// `required_acr_min = "2"` — parity with `InternalClusterService/*`. The
+// gateway authz middleware performs a real per-user FGA Check before the
+// request reaches the handler (the listener-origin gate does NOT bypass gated
+// Internal RPCs — bypass is only for `<exempt>` entries). The iam internal
+// listener also runs authz-Check so a caller bypassing the gateway and hitting
+// :9091 directly is rejected without `system_admin`.
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "kacho/cloud/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// InternalOperationsService — cluster-wide admin feed of all IAM operations.
+// See file-level comment for the gate and the Internal-only contract.
+service InternalOperationsService {
+  // Lists ALL IAM operations across the cluster (optionally filtered by
+  // account_id). Sync read; cursor `(created_at,id)` ASC.
+  //
+  // REST exposed ONLY on the cluster-internal listener.
+  rpc ListIamOperations (ListIamOperationsRequest) returns (ListIamOperationsResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/internal/operations"
+    };
+    option (corelib.authz.v1.permission)        = "iam.internal_operationses.listIamOperations";
+    option (corelib.authz.v1.required_relation) = "system_admin";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "cluster"
+      from_request_field: "*"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+}
+
+message ListIamOperationsRequest {
+  // The maximum number of results per page that should be returned. Default
+  // value: 100. Clamped to a max of 1000 (no single-shot cluster-wide dump).
+  int64 page_size = 1;
+
+  // Page token. To get the next page of results, set [page_token] to the
+  // [ListIamOperationsResponse.next_page_token] returned by a previous list request.
+  string page_token = 2;
+
+  // Optional: filter by owning account_id. Empty = no filter (all clusters).
+  string account_id = 3;
+}
+
+message ListIamOperationsResponse {
+  // List of IAM operations across the cluster.
+  repeated kacho.cloud.operation.Operation operations = 1;
+
+  // This token allows you to get the next page of results for list requests.
+  string next_page_token = 2;
+}

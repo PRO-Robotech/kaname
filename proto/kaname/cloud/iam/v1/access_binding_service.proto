@@ -1,0 +1,1035 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/access_binding.proto";
+import "kacho/cloud/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// A set of methods for managing AccessBinding resources.
+//
+// kaname ведет собственный ресурс AccessBinding в пакете
+// kaname.cloud.iam.v1 — это канонический AccessBinding домена IAM,
+// единственный источник истины для grant-привязок.
+service AccessBindingService {
+  // Returns the specified AccessBinding resource.
+  rpc Get (GetAccessBindingRequest) returns (AccessBinding) {
+    option (google.api.http) = { get: "/iam/v1/accessBindings/{access_binding_id}" };
+    option (corelib.authz.v1.permission)        = "iam.access_bindings.get";
+    option (corelib.authz.v1.required_relation) = "v_get";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_access_binding"
+      from_request_field: "access_binding_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Creates an access binding.
+  // Strict INSERT — дубль активного гранта (subject, role_id, scope_type,
+  // scope_id) → ALREADY_EXISTS (partial UNIQUE WHERE revoked_at IS NULL).
+  rpc Create (CreateAccessBindingRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = { post: "/iam/v1/accessBindings" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "CreateAccessBindingMetadata"
+      response: "AccessBinding"
+    };
+    // AccessBinding.Create grants a role on an ARBITRARY scope anchor
+    // — the FGA object type varies per request (`scope_type` is a
+    // request field: iam.account / iam.project / iam.cluster). The api-gateway
+    // permission catalog can only carry a STATIC object_type, so it cannot
+    // build the correct `<type>:<id>` Check object here. Therefore the
+    // middleware exempts this RPC and the kaname handler is the
+    // authoritative gate: `requireGrantAuthority` performs the precise
+    // per-resource_type check (owner of the owning Account OR FGA `admin` on
+    // the actual scope object). Anonymous is still rejected by the IAM
+    // anti-anonymous interceptor.
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason)  = "HANDLER_DECIDES";
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+
+  // Deletes the specified access binding.
+  rpc Delete (DeleteAccessBindingRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = { delete: "/iam/v1/accessBindings/{access_binding_id}" };
+    option (corelib.api.v1.operation) = {
+      metadata: "DeleteAccessBindingMetadata"
+      response: "google.protobuf.Empty"
+    };
+    option (corelib.authz.v1.permission)        = "iam.access_bindings.delete";
+    option (corelib.authz.v1.required_relation) = "v_delete";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_access_binding"
+      from_request_field: "access_binding_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Updates mutable fields of the specified access binding. The ONLY mutable
+  // field is `deletion_protection`:
+  // an owner / admin clears the flag (`update_mask=["deletion_protection"]`,
+  // `deletion_protection=false`) so a protected binding can subsequently be
+  // deleted. All other fields are immutable (AccessBinding is otherwise
+  // Delete+Create); an `update_mask` referencing any non-mutable field →
+  // INVALID_ARGUMENT. Async (returns Operation), like the other mutations.
+  rpc Update (UpdateAccessBindingRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = { patch: "/iam/v1/accessBindings/{access_binding_id}" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "UpdateAccessBindingMetadata"
+      response: "AccessBinding"
+    };
+    option (corelib.authz.v1.permission)        = "iam.access_bindings.update";
+    option (corelib.authz.v1.required_relation) = "v_update";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_access_binding"
+      from_request_field: "access_binding_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+  // Lists access bindings (redesign-2026 F11). The single, plain List that
+  // supersedes the legacy `ListByScope`/`ListBySubject`/`ListByRole`/`ListByAccount`
+  // family: one paginated read with an OPTIONAL whitelist `filter`
+  // (`subject="…"` | `role="…"` | `scope="iam.…"` | `scopeId="…"`; an unknown filter
+  // key → INVALID_ARGUMENT). Page format (`page_token`/`page_size`) is validated
+  // BEFORE the listauthz row-filter, so a garbage token / `page_size>1000` is
+  // INVALID_ARGUMENT regardless of grant state. The result is the set of bindings
+  // on `iam_access_binding` the caller may read by id — the page predicate is the
+  // relation the permission catalog gates a single-object read on, `v_get`, so the
+  // page can never be wider than the read (anonymous → empty; an authorization
+  // error → UNAVAILABLE, never an unfiltered leak). Introspection-merge
+  // (ListSubjectPrivileges/ExpandAccess) stays separate (IAM-4).
+  //
+  // Two narrowings compose with `filter` and are NOT filter keys, because the
+  // expression carries exactly one predicate: `include_revoked` (lifecycle) and
+  // `account_id` (the account⇒child-project fan-out). Together they let the one
+  // question this read exists for be asked in ONE call — "what does THIS subject
+  // hold in THIS account":
+  //
+  //     GET /iam/v1/accessBindings?filter=subject%3D%22usr…%22&accountId=acc…
+  rpc List (ListAccessBindingsRequest) returns (ListAccessBindingsResponse) {
+    option (google.api.http) = { get: "/iam/v1/accessBindings" };
+    // Authorized at the level of the data: kaname reads the page by cursor and
+    // then narrows it per row, in batches, on `v_get` on `iam_access_binding:<id>`
+    // — the same relation that gates the single-object read, so a row is on the
+    // page exactly when its holder may read it by id. There is no single object
+    // for the edge to check — the answer is a page of bindings attached to
+    // different scopes.
+    //
+    // It used to declare `viewer` on the cluster singleton and call that a
+    // "cluster-scoped catalog gate". `viewer` on the cluster is the relation of the
+    // global reference catalogue, granted to `user:*` by the bootstrap, so the
+    // check admitted every authenticated subject and narrowed nothing.
+    option (corelib.authz.v1.permission)       = "iam.access_bindings.list";
+    option (corelib.authz.v1.scope_filtered)   = true;
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // DEPRECATED — use `List` with `filter=scope="iam.<tier>"` +
+  // `filter=scopeId="<id>"`. Retained for back-compat.
+  //
+  // Lists access bindings attached to the specified scope (renamed from the
+  // legacy `ListByResource`, whose wire-name is removed). The scope anchor
+  // (project|account|cluster) is named by `scope_type`/`scope_id`; the legacy
+  // `resource_type`/`resource_id` pair remains accepted as the fallback.
+  rpc ListByScope (ListAccessBindingsByScopeRequest) returns (ListAccessBindingsResponse) {
+    option (google.api.http) = { get: "/iam/v1/accessBindings:listByScope" };
+    option (corelib.authz.v1.permission)        = "iam.access_bindings_by_resources.listByScope";
+    option (corelib.authz.v1.required_relation) = "viewer";
+    // Scope-polymorphic: the FGA object type is carried by the request's
+    // `resource_type` field (project|account|cluster). `object_type` is only
+    // the fallback; `object_type_from_request_field` makes the gateway derive
+    // the real type per request (a static `project` made account/
+    // cluster-scoped reads check `project:<id>` → 403).
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:                    "project"
+      from_request_field:             "resource_id"
+      object_type_from_request_field: "resource_type"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // DEPRECATED — use `List` with `filter=subject="<id>"`. Retained for
+  // back-compat.
+  //
+  // Lists access bindings assigned to the specified subject. Authorized by
+  // kaname against the subject NAMED IN THE REQUEST, which the edge cannot turn
+  // into an object of any type it knows.
+  //
+  // Admission is the SAME predicate `ListSubjectPrivileges` uses — the two verbs
+  // answer one question and had answered it differently, so a delegated account
+  // administrator could read an employee's grants through one and not the other
+  // (task #1352). The lanes, and what each sees:
+  //
+  //   - the subject itself (for a group subject — a member of it) — all of its
+  //     own grants, unnarrowed;
+  //   - the owner or a delegated administrator of the subject's HOME account —
+  //     the subject's grants WITHIN THAT ACCOUNT only. The page is read by
+  //     cursor and then narrowed PER ROW on `v_get` on `iam_access_binding:<id>`
+  //     — the same relation that gates the single-object read — so the reply
+  //     never names a scope in an account the caller has nothing to do with
+  //     (task #1354, same class as the membership-listing decision in #1085);
+  //   - the cluster administrator — everything, unnarrowed.
+  //
+  // Existence is NEVER reported: a subject that does not resolve answers with an
+  // empty page to its own reader and PERMISSION_DENIED to everyone else — the
+  // same answer a subject in a foreign account gets.
+  //
+  // Consequences of narrowing, named rather than left to be discovered: on the
+  // administrator lane the page can be SHORTER than requested, and an empty
+  // `accessBindings` with a NON-EMPTY `next_page_token` means "nothing visible on
+  // THIS page", not "no bindings" — keep walking the cursor. The rights model
+  // unreachable → UNAVAILABLE; an unnarrowed reply is never produced by any
+  // failure.
+  rpc ListBySubject (ListAccessBindingsBySubjectRequest) returns (ListAccessBindingsResponse) {
+    option (google.api.http) = { get: "/iam/v1/accessBindings:listBySubject" };
+    option (corelib.authz.v1.permission)       = "iam.access_bindings_by_subjects.listBySubject";
+    option (corelib.authz.v1.scope_filtered)   = true;
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Lists the privileges (enriched access bindings) attached to the specified
+  // subject (User or ServiceAccount). Sync read (NOT an Operation). It shares
+  // admission with `ListBySubject` — ONE predicate, see there. What it does that
+  // `ListBySubject` does not (that verb returns raw bindings and never resolves
+  // existence):
+  //   - resolves the human-readable `role_name` server-side via a within-DB
+  //     JOIN `access_bindings ⋈ roles` (no N+1 client round-trips);
+  //   - returns NOT_FOUND for a well-formed-but-missing subject to a caller who
+  //     may read it (existence-resolve is required for authz), where
+  //     `ListBySubject` reports nothing about existence at all.
+  //
+  // THE ANSWER INCLUDES GROUP-DERIVED GRANTS, and this line used to say the
+  // opposite — "DIRECT-only in v1; GROUP-derived roles are reserved
+  // forward-compat". That reservation was lifted and the sentence outlived its
+  // subject: for `user` and `service_account` the reply carries BOTH the direct
+  // grants (`derivation=DIRECT`) and the ones held through membership in a group
+  // (`derivation=GROUP`, `via_group_id` names the group), and the request field
+  // twenty lines below said so the whole time. Two statements about one subject,
+  // one of them true, and the reader could not tell which.
+  //
+  // The stale half was the DANGEROUS one to believe: the platform's own rule is
+  // to grant to a GROUP rather than to a list of subjects, so a reader who
+  // trusted "DIRECT-only" would read an empty page for exactly the case we
+  // recommend — and an access review would conclude "nothing to revoke" from a
+  // `200` that means the opposite. For `group` the reply is the grants of the
+  // group itself (DIRECT); groups do not nest.
+  //
+  // Authorized by kaname: self (for a group subject — a member of it), or
+  // `admin`/owner of the HOME ACCOUNT of the subject named in the request, or the
+  // cluster administrator — ONE predicate, shared with `ListBySubject`. That
+  // account is not a request field — it is resolved from the subject — so the edge
+  // has no object to check and declares `scope_filtered`. `subject_type ∈
+  // {"user","service_account","group"}`; malformed subject_id / prefix↔type
+  // mismatch → INVALID_ARGUMENT.
+  //
+  // ДОПУСК НЕ ЕСТЬ ПОЛНОТА ОТВЕТА. Допуск решается по ДОМАШНЕМУ аккаунту
+  // субъекта, а строки называют ОБЛАСТЬ каждой выдачи, и области одного человека
+  // бывают в разных аккаунтах. Поэтому страница СУЖАЕТСЯ построчно: строка
+  // остаётся тогда, когда вызывающий вправе прочитать её выдачу по
+  // идентификатору. Распорядитель аккаунта видит всё внутри своего аккаунта и
+  // ничего снаружи — состав чужих арендаторов по этому ответу не картируется.
+  // Несужёнными проходят две полосы: собственное чтение (ответ не шире того, что
+  // вызывающему и так принадлежит) и надзор облака.
+  //
+  // Следствия для вызывающего, названные, а не умолчанные: страница бывает
+  // КОРОЧЕ запрошенной, а пустой `privileges` при НЕПУСТОМ `next_page_token`
+  // означает «на этой странице ничего видимого», а НЕ «привилегий нет» — обход
+  // продолжается по курсору. Модель прав недоступна → `UNAVAILABLE`; несужённого
+  // ответа не бывает ни при каком отказе.
+  //
+  // ЧТО ЭТА ПРОЕКЦИЯ НЕ ЗАПОЛНЯЕТ — и это сказано, а не умолчано. Ответ строится
+  // по паре «выдача × роль», поэтому СИСТЕМНЫЕ выдачи в него не попадают: у них
+  // роли нет by construction — они выдают именованное отношение (`grantedRelation`).
+  // Пустой ответ для служебной учётки означает «роль ей не выдана», а НЕ «прав у
+  // неё нет»: встроенный доступ виден полным перечислением выдач (`List`), где
+  // такие строки помечены `system`.
+  rpc ListSubjectPrivileges (ListSubjectPrivilegesRequest) returns (ListSubjectPrivilegesResponse) {
+    option (google.api.http) = { get: "/iam/v1/accessBindings:listSubjectPrivileges" };
+    option (corelib.authz.v1.permission)       = "iam.access_bindings_by_subjects.listSubjectPrivileges";
+    option (corelib.authz.v1.scope_filtered)   = true;
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Lists the roles that are assignable on the specified resource.
+  // Sync read (NOT an Operation). Returns ONLY the roles that
+  // `AccessBinding.Create` would accept on (resource_type, resource_id) — the
+  // single `isRoleAssignable` predicate is shared by this RPC (WHERE-filter)
+  // and by Create-enforcement, so "what can be shown" == "what can be
+  // created" (no bypass via direct API). Each returned `AssignableRole` is
+  // annotated with a server-computed `scope_group` (SYSTEM / ACCOUNT /
+  // PROJECT) so the UI groups without any client-side scope logic.
+  //
+  //   - `resource_type ∈ {"account","project","cluster"}` for v1; otherwise
+  //     INVALID_ARGUMENT. `resource_id` must match the type's prefix
+  //     (account⇒acc, project⇒prj; cluster⇒exactly cluster_root) —
+  //     mismatch → INVALID_ARGUMENT.
+  //   - well-formed-but-missing resource → NOT_FOUND (existence-resolve is
+  //     required for authz); existing resource with 0 assignable roles →
+  //     empty `roles` (not an error).
+  //   - lean picker: `AssignableRole` carries no `permissions`.
+  //
+  // Scope-polymorphic catalog gate (anti-anon + ACR floor, parity with
+  // `ListByScope`); the precise grant-authority policy is enforced
+  // authoritatively in the kaname handler via `requireGrantAuthority`
+  // (owner of the owning Account/Project OR FGA `admin` on the scope object) —
+  // same gate as `AccessBinding.Create` on this resource.
+  rpc ListAssignableRoles (ListAssignableRolesRequest) returns (ListAssignableRolesResponse) {
+    option (google.api.http) = { get: "/iam/v1/accessBindings:listAssignableRoles" };
+    option (corelib.authz.v1.permission)        = "iam.access_bindings_by_resources.listAssignableRoles";
+    option (corelib.authz.v1.required_relation) = "viewer";
+    // Scope-polymorphic: the FGA object type is carried by the request's
+    // `resource_type` field (account|project|cluster). `object_type` is only
+    // the fallback; `object_type_from_request_field` makes the gateway derive
+    // the real type per request (parity with `ListByScope` —
+    // a static `project` would make account/cluster-scoped reads check
+    // `project:<id>` → 403).
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:                    "project"
+      from_request_field:             "resource_id"
+      object_type_from_request_field: "resource_type"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Lists the access bindings that carry a given Role (audit "who holds role R").
+  // Sync read (NOT an Operation).
+  // Each returned `AccessBinding` is the full dual-projection: both the
+  // new `subjects[]`/`scope_ref` and the legacy `subject_type`/`subject_id`/
+  // `resource_type`/`resource_id`/`scope`. Scope-filtered like the other List
+  // RPCs — a caller sees only bindings on scope objects they may read.
+  //
+  // DEPRECATED — use `List` with `filter=role="<roleId>"`
+  // (+ `include_revoked` for the audit-retention read). Retained for back-compat.
+  //
+  // Authorized at the level of the data: kaname reads the page and keeps only
+  // the rows whose OWN scope the caller has grant authority over (or whose subject
+  // is the caller). Each row can sit on a different scope, so there is no single
+  // object for the edge to check. Ordered by (created_at, id) ASC; keyset
+  // paginated.
+  rpc ListByRole (ListAccessBindingsByRoleRequest) returns (ListAccessBindingsResponse) {
+    option (google.api.http) = { get: "/iam/v1/accessBindings:listByRole" };
+    option (corelib.authz.v1.permission)       = "iam.access_bindings_by_roles.listByRole";
+    option (corelib.authz.v1.scope_filtered)   = true;
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Expands a userset on an object+relation into the concrete principals that
+  // hold it. Sync read (NOT an
+  // Operation). Answers "who can actually do X on this object" by resolving FGA
+  // group-membership usersets (group → members) to concrete USER/SERVICE_ACCOUNT
+  // principals — closing the effective-principal audit gap (a binding on a GROUP
+  // subject otherwise only shows "group G", not its current members).
+  //
+  // Authorized by kaname against the object NAMED IN THE REQUEST: the caller
+  // must hold grant authority over `<object_type>:<object_id>` (or own the account
+  // that contains it, or be a cluster administrator). The object's type is itself a
+  // request field, so the edge cannot build the object — hence `scope_filtered`. A
+  // caller without authority gets the same answer for an object that does not
+  // exist and for one that belongs to someone else.
+  rpc ExpandAccess (ExpandAccessRequest) returns (ExpandAccessResponse) {
+    option (google.api.http) = { get: "/iam/v1/accessBindings:expandAccess" };
+    option (corelib.authz.v1.permission)       = "iam.access_bindings_by_resources.expandAccess";
+    option (corelib.authz.v1.scope_filtered)   = true;
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Lists access bindings in an account (all subjects). Requires `admin`
+  // relation on the account (account-admin sees all who has access to the
+  // account, including subjects he didn't grant himself). Returns:
+  //
+  //   - bindings directly attached to the account (resource_type='account',
+  //     resource_id=<accountId>); plus
+  //   - bindings on every project whose account_id matches.
+  //
+  // Filter by subject_type (optional) and include_revoked (default false).
+  // Ordered by (created_at DESC, id ASC); keyset paginated.
+  //
+  // DEPRECATED — use `List` with `accountId="<id>"` (plus `include_revoked`, and
+  // `filter=subject="<id>"` to ask about one subject).
+  //
+  // The reason this RPC used to be retained is GONE: it said "`List` does not
+  // reproduce this RPC's account⇒child-project fan-out in one call". `List` now
+  // does — `ListAccessBindingsRequest.account_id` carries exactly that fan-out,
+  // and the two answer with the SAME set of bindings for a caller who administers
+  // the account. Retained now only for back-compat; two differences remain, both
+  // deliberate and neither a reason to keep using it:
+  //
+  //   - ordering — this RPC is created_at DESC, `List` is created_at ASC (part of
+  //     `List`'s contract and not forked for one field), so compare the two BY
+  //     MEMBERSHIP, never by index;
+  //   - `subject_type_filter` — `List` narrows a subject by its exact id, not by
+  //     its class.
+  rpc ListByAccount (ListAccessBindingsByAccountRequest) returns (ListAccessBindingsResponse) {
+    option (google.api.http) = { get: "/iam/v1/accounts/{account_id}/accessBindings" };
+    option (corelib.authz.v1.permission)        = "iam.access_bindings_by_account.list";
+    option (corelib.authz.v1.required_relation) = "v_list";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "account"
+      from_request_field: "account_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Lists operations for the specified access binding.
+  rpc ListOperations (ListAccessBindingOperationsRequest) returns (ListAccessBindingOperationsResponse) {
+    option (google.api.http) = { get: "/iam/v1/accessBindings/{access_binding_id}/operations" };
+    option (corelib.authz.v1.permission)        = "iam.access_binding_operationses.listOperations";
+    option (corelib.authz.v1.required_relation) = "v_list";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_access_binding"
+      from_request_field: "access_binding_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Soft-revokes the specified access binding (redesign-2026 F10 IAM-1-28).
+  //
+  // Two distinct removal outcomes coexist (product-spine parity):
+  //   - Delete = HARD: the row is physically removed; a subsequent Get → NOT_FOUND.
+  //   - Revoke = SOFT: the row is RETAINED with status transitioned ACTIVE→REVOKED
+  //     (terminal), revoked_at / revoked_by_user_id set for audit-retention; a
+  //     subsequent Get still returns the row (status=REVOKED). Either way the
+  //     emitted FGA-tuple set (persisted access_binding_emitted_tuples ledger) is
+  //     removed in the same writer-tx, so access is denied once the Operation is
+  //     done. Re-granting the same (subject, role, scope) after a revoke yields a
+  //     NEW ACTIVE row (the partial active-grant UNIQUE excludes revoked rows).
+  //
+  // deletion_protection is honored (owner auto-binding): revoking a protected
+  // binding is rejected sync FAILED_PRECONDITION plus an atomic CAS-backstop
+  // (`UPDATE … WHERE status='ACTIVE' AND deletion_protection=false`) against
+  // TOCTOU — clear the flag via Update first, exactly like Delete.
+  // Async (returns Operation), like the other mutations.
+  rpc Revoke (RevokeAccessBindingRequest) returns (kacho.cloud.operation.Operation) {
+    option (google.api.http) = { post: "/iam/v1/accessBindings/{access_binding_id}:revoke" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "RevokeAccessBindingMetadata"
+      response: "AccessBinding"
+    };
+    option (corelib.authz.v1.permission)        = "iam.access_bindings.revoke";
+    option (corelib.authz.v1.required_relation) = "v_delete";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_access_binding"
+      from_request_field: "access_binding_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
+}
+
+message GetAccessBindingRequest {
+  // ID of the AccessBinding resource to return.
+  string access_binding_id = 1;
+}
+
+message CreateAccessBindingRequest {
+  // Тип subject'а: "user" | "service_account" | "group".
+  string subject_type = 1;
+
+  // ID subject'а.
+  string subject_id = 2;
+
+  // ID of the Role to assign.
+  string role_id = 3;
+
+  // Scope-anchor TYPE in dotted form: `iam.cluster` | `iam.account` |
+  // `iam.project` (redesign-2026 F7 — renamed from `resource_type`; «resource» is
+  // reserved for `target`). REQUIRED (pre-Phase-0: prefix-derivation from scope_id
+  // is B3-gated, so the tier must be given explicitly). An empty / non-dotted /
+  // unknown value → sync INVALID_ARGUMENT.
+  string scope_type = 4;
+
+  // Scope-anchor ID — the anchor object id (`cluster_root` | `acc…` | `prj…`).
+  string scope_id = 5;
+
+  // TOMBSTONE. Tags 6/7 held an ABAC condition overlay on the binding
+  // (`condition_id` / `builtin_condition`). Nothing evaluated it: no decision
+  // path read the field, the row a `condition_id` had to reference could not be
+  // created through any API, and the builtin variant had no storage at all — so
+  // the request offered a gate that did not exist and the caller was told the
+  // grant succeeded either way. Removed rather than left standing; conditions
+  // remain a first-class resource with their own service (ConditionsService),
+  // which is where such a capability belongs. Tags 6/7 and the names
+  // `condition_id` / `builtin_condition` are RESERVED so a future design starts
+  // from a clean number instead of inheriting a meaning nobody implemented.
+  reserved 6, 7;
+  reserved "condition_id", "builtin_condition";
+
+  // Optional lifetime. Unset = the grant does not expire. When set it must be at
+  // least 5 minutes in the future (otherwise INVALID_ARGUMENT, synchronously and
+  // by name): access materialises asynchronously within a bounded window, so a
+  // shorter lifetime could be revoked before it is ever usable. Enforcement is
+  // the reconcile sweep — an elapsed binding is eager-revoked (status REVOKED and
+  // its tuples removed), so the lifetime the caller asks for is the lifetime the
+  // grant has.
+  google.protobuf.Timestamp expires_at = 8;
+
+  // TOMBSTONE. Tag 9 (`AccessTarget target`) / tag 11 (`AccessTargetRef target_ref`)
+  // held the earlier per-object target machinery; tag 10 (`ScopeRef scope_ref`) held
+  // the canonical scope pair now flattened into `scope_type`/`scope_id`
+  // (redesign-2026 F7). Tags 9/10/11 and names `target`/`target_ref`/`scope_ref` are
+  // RESERVED tombstones — tags 9/10/11 never reused as tag numbers (append-only).
+  // F8 REINTRODUCES `target` at a NEW tag (`target = 15`); the NAME `target` is reused
+  // at the new tag (tag-tombstone, not name-tombstone).
+  reserved 9, 10, 11;
+  reserved "target_ref", "scope_ref";
+
+  // Multi-subject set. 1..32
+  // subjects; each yields an INDEPENDENT FGA tuple-set + emitted-tuple ledger
+  // lineage (per-subject revoke/audit). This is the canonical (preferred) input;
+  // when only the legacy single `subject_type`/`subject_id` (fields 1/2) is set
+  // the server projects it to a one-element `subjects[]`. If BOTH this AND the
+  // legacy single pair are set and the single is NOT subjects[0],
+  // INVALID_ARGUMENT. Empty `subjects[]` with no legacy single → also
+  // INVALID_ARGUMENT ("Illegal argument subjects (must be 1..32)"); >32 → same.
+  // admin/editor-tier role + a GROUP subject requires `requireGrantAuthority` on
+  // the scope (group-amplification guard).
+  repeated Subject subjects = 12;
+
+  // Optional deletion-protection flag for the created binding. Default
+  // false. Set `true` so the
+  // owner auto-binding and admins can protect a binding from accidental
+  // `DeleteAccessBinding` at creation time. Once set, Delete is rejected sync
+  // (FAILED_PRECONDITION) until cleared via `Update(update_mask=
+  // ["deletion_protection"])` — see `AccessBinding.deletion_protection`.
+  bool deletion_protection = 13;
+
+  // Tenant-facing метки самого ресурса AccessBinding (делают binding
+  // label-selectable наравне с account/project). Аннотации (size/key/value
+  // pattern) — паритет account/project/group request `labels`. Tags 9/10/11
+  // зарезервированы (target/target_ref/scope_ref tombstone) — 14 первый свободный.
+  map<string, string> labels = 14;
+
+  // Which objects UNDER the scope-anchor the grant applies to (redesign-2026 F8,
+  // least-privilege spine). REQUIRED — a Create with no `target` (neither
+  // `resources` nor `allInScope`) → sync INVALID_ARGUMENT
+  // "target is required; use target.allInScope{} to grant all objects under the
+  // anchor". NEW tag (tags 9/11 stay tombstoned).
+  AccessTarget target = 15;
+}
+
+message DeleteAccessBindingRequest {
+  // ID of the AccessBinding resource to delete.
+  string access_binding_id = 1;
+}
+
+message RevokeAccessBindingRequest {
+  // ID of the AccessBinding resource to soft-revoke (status ACTIVE→REVOKED).
+  string access_binding_id = 1;
+}
+
+// UpdateAccessBindingRequest carries the mutable-field update for an
+// AccessBinding. Mutable
+// fields: `deletion_protection`, `labels`. Все прочие поля immutable
+// (role/subjects/scope/resource_type/resource_id — Delete+Create).
+message UpdateAccessBindingRequest {
+  // ID of the AccessBinding resource to update.
+  string access_binding_id = 1;
+
+  // Field mask of fields to update. Allowed fields: `deletion_protection`,
+  // `labels`. Any other field referenced in the mask → INVALID_ARGUMENT. An
+  // empty mask applies the mutable fields present in the body (full-object
+  // PATCH over the mutable fields).
+  google.protobuf.FieldMask update_mask = 2;
+
+  // New deletion-protection value (clears it to `false` so a protected
+  // owner-binding can be deleted).
+  bool deletion_protection = 3;
+
+  // Tenant-facing метки самого ресурса AccessBinding (mutable; `labels` в
+  // update_mask). Аннотации (size/key/value pattern) — паритет
+  // account/project/group request `labels`.
+  map<string, string> labels = 4;
+}
+
+message ListAccessBindingsRequest {
+  // The maximum number of results per page to return. Default 100; >1000 →
+  // INVALID_ARGUMENT (rejected, not clamped).
+  int64 page_size = 1;
+
+  // Page token. A malformed token → INVALID_ARGUMENT (validated before the
+  // listauthz row-filter).
+  string page_token = 2;
+
+  // Optional whitelist filter expression (redesign-2026 F11). Exactly one
+  // predicate of the form `<key>="<value>"`, key ∈ {subject, role, scope, scopeId}
+  // (`scope` is the dotted scope-type `iam.account|iam.project|iam.cluster`). An
+  // unknown key → INVALID_ARGUMENT. Empty → no filter (all visible bindings).
+  //
+  // Lifecycle status is NOT a filter key — it is the dedicated
+  // `include_revoked` flag below, so it composes with any predicate (the filter
+  // expression carries exactly ONE predicate).
+  string filter = 3;
+
+  // Optional: include soft-revoked bindings (`status='REVOKED'`). Default false
+  // (only PENDING/ACTIVE are returned).
+  //
+  // `List` is the canonical read that supersedes the legacy
+  // `ListByScope`/`ListBySubject`/`ListByRole`/`ListByAccount` family, so it must
+  // be able to answer everything they answer. Soft-revoke (F10) DELIBERATELY
+  // retains the row for audit — without this flag the retained row was reachable
+  // only through the legacy `ListByAccount`/`ListByRole`, i.e. the recommended
+  // path could not show what the deprecated paths could. Semantics and default
+  // are identical to those two (isomorphic), and it composes with `filter`
+  // (e.g. `filter=subject="usr…"` + `include_revoked=true` audits one subject's
+  // revoked grants).
+  bool include_revoked = 4;
+
+  // Optional: narrow the page to the bindings that lie in the scope of ONE
+  // account — those attached to the account itself PLUS those attached to every
+  // project of that account. Empty means "do not narrow" and is a legal input;
+  // it is NOT "an account whose id is the empty string".
+  //
+  // WHY A FIELD AND NOT A FILTER KEY. `filter` carries exactly ONE predicate,
+  // and the question this answers — "what does THIS subject hold in THIS
+  // account" — needs two axes at once. The dedicated field composes with
+  // `filter` and with `include_revoked`, which is the same shape already chosen
+  // once for `include_revoked` above:
+  //
+  //     GET /iam/v1/accessBindings?filter=subject%3D%22usr…%22&accountId=acc…
+  //
+  // WHY IT IS NOT `scopeId`. `scopeId` matches the row's `resource_id`, so
+  // `scope="iam.account"` + `scopeId="<acct>"` returns the bindings attached to
+  // the account ITSELF and none of those on its projects. That is a different
+  // answer, not a narrower one — this field carries the account⇒child-project
+  // fan-out, the one thing `List` could not reproduce and the sole stated reason
+  // the deprecated `ListByAccount` was still being retained.
+  //
+  // IT NARROWS, IT NEVER WIDENS. The field is applied as a row predicate AFTER
+  // the admission decision, which it does not touch: the permission-catalog entry
+  // for `List` is unchanged, and every row still passes the same per-object read
+  // verdict. Naming an account the caller has nothing to do with therefore yields
+  // an EMPTY page — never PERMISSION_DENIED and never NOT_FOUND, so the reply
+  // cannot be used to probe whether an account exists. A well-formed id of a
+  // non-existent account answers byte-identically to one of a foreign account.
+  //
+  // A malformed id, or a well-formed id carrying another resource's prefix, is
+  // rejected synchronously with INVALID_ARGUMENT — by the same producer, with
+  // the same message, that `ListByAccount` uses on its own `account_id`.
+  string account_id = 5;
+}
+
+message ListAccessBindingsByScopeRequest {
+  // DEPRECATED — use `scope_type` (field 5). Bare scope-anchor kind
+  // ("account" | "project" | "cluster"). The name is legacy and MISLEADING:
+  // `AccessBinding` (access_binding.proto) reserves the word "resource" for the
+  // `target` (which objects UNDER the anchor a grant applies to), while this
+  // pair names the ANCHOR — the exact opposite. Still accepted and still the
+  // fallback when `scope_type` is empty.
+  string resource_type = 1;
+
+  // DEPRECATED — use `scope_id` (field 6). Scope-anchor id.
+  string resource_id = 2;
+
+  // The maximum number of results per page to return. Default value: 100.
+  int64 page_size = 3;
+
+  // Page token.
+  string page_token = 4;
+
+  // Scope-anchor TYPE in the canonical DOTTED form — `iam.cluster` |
+  // `iam.account` | `iam.project` — identical in name, form and meaning to
+  // `CreateAccessBindingRequest.scope_type` and `AccessBinding.scope_type`, so
+  // one coordinate has ONE name across write and read. When set it WINS over the
+  // legacy bare `resource_type`; when empty the legacy pair is used. An unknown
+  // dotted value → INVALID_ARGUMENT.
+  //
+  // MIGRATION CAVEAT (honest, do not remove until it is false): this RPC's
+  // api-gateway `scope_extractor` below still keys the per-request FGA scope on
+  // the LEGACY `resource_id`/`resource_type`. A REST caller that sends ONLY the
+  // new pair therefore resolves no scope at the edge and is denied BEFORE
+  // reaching kaname. Until the gateway extractor learns these field names,
+  // send BOTH pairs over REST. The kaname handler itself is already
+  // new-pair-first (it prefers scope_type/scope_id and falls back to the legacy
+  // pair), so the backend needs no further change.
+  string scope_type = 5;
+
+  // Scope-anchor ID (`cluster_root` | `acc…` | `prj…`). Paired with
+  // `scope_type`; supersedes the legacy `resource_id`. Same migration caveat.
+  string scope_id = 6;
+}
+
+message ListAccessBindingsBySubjectRequest {
+  // Тип subject'а.
+  string subject_type = 1;
+
+  // ID subject'а.
+  string subject_id = 2;
+
+  // The maximum number of results per page to return. Default value: 100.
+  int64 page_size = 3;
+
+  // Page token.
+  string page_token = 4;
+}
+
+message ListAccessBindingsByAccountRequest {
+  // ID of the Account whose access bindings are listed. Includes bindings
+  // directly attached to the account AND bindings on every project owned by
+  // the account.
+  string account_id = 1;
+
+  // The maximum number of results per page to return. Default value: 100.
+  int64 page_size = 2;
+
+  // Page token.
+  string page_token = 3;
+
+  // Optional: filter by subject_type ("user" | "service_account" | "group").
+  // Empty = no filter.
+  string subject_type_filter = 4;
+
+  // Optional: include revoked bindings (status='REVOKED'). Default false
+  // (only PENDING/ACTIVE are returned).
+  bool include_revoked = 5;
+}
+
+message ListAccessBindingsResponse {
+  // List of AccessBinding resources.
+  repeated AccessBinding access_bindings = 1;
+
+  // This token allows you to get the next page of results for list requests.
+  string next_page_token = 2;
+
+  // ПОЛНОЕ перечисление поверхности выдач для этой страницы: сами выдачи плюс
+  // записи двух соседних поверхностей — состава групп и кластерных
+  // администраторов (#914, решение 2). Каждая запись называет свой ВИД.
+  //
+  // ЧТО СЮДА ПОПАДАЕТ И ПОЧЕМУ ИМЕННО ЭТО:
+  //   * выдачи — ровно те, что в `access_bindings`, вид ACCESS_BINDING;
+  //   * членство — состав ТЕХ групп, что названы субъектами выдач НА ЭТОЙ
+  //     странице. Членство в группе без выдачи доступа не даёт и к вопросу
+  //     «кто имеет доступ» не относится; видимость наследуется от выдачи,
+  //     которую вызывающий и так видит. Состав ОГРАНИЧЕН СВЕРХУ: страница
+  //     ограничивает число ГРУПП, но не число ЧЛЕНОВ, а членство неограниченно
+  //     by construction. Упёршись в предел, ответ называет группы поимённо в
+  //     `incomplete_membership_group_ids` — молча усечённый состав читался бы
+  //     как «в группе больше никого»;
+  //   * кластерные администраторы — ВСЕ действующие, и только тому, кто сам
+  //     кластерный администратор. Верхний ярус супер-доступа обязан быть виден
+  //     целиком тому, кто им распоряжается, и не обязан — арендатору.
+  //
+  // КАКИЕ ЧТЕНИЯ ЭТО ПОЛЕ ЗАПОЛНЯЮТ: только `List`. Устаревшее семейство
+  // (`ListByScope`/`ListBySubject`/`ListByRole`/`ListByAccount`) делит с ним
+  // это сообщение и поле НЕ заполняет — там оно пусто ВСЕГДА, и это сказано
+  // здесь, а не оставлено читателю как «ничего не найдено».
+  repeated GrantSurfaceRecord records = 3;
+
+  // Группы, чей состав в `records` НЕПОЛОН: предел ответа достигнут, и дальше
+  // членство не читалось. Полный состав такой группы берётся её собственным
+  // пагинированным глаголом (`GroupService.ListMembers`) — он для того и есть.
+  //
+  // Пусто = состав всех названных групп возвращён целиком. Это утверждение, а
+  // не умолчание: непустое значение говорит «дальше мы не читали», пустое —
+  // «дальше читать нечего».
+  repeated string incomplete_membership_group_ids = 4;
+}
+
+message ListAccessBindingOperationsRequest {
+  // ID of the AccessBinding resource to list operations for.
+  string access_binding_id = 1;
+
+  // The maximum number of results per page that should be returned.
+  int64 page_size = 2;
+
+  // Page token.
+  string page_token = 3;
+}
+
+message ListAccessBindingOperationsResponse {
+  // List of operations for the specified access binding.
+  repeated kacho.cloud.operation.Operation operations = 1;
+
+  // This token allows you to get the next page of results for list requests.
+  string next_page_token = 2;
+}
+
+message ListSubjectPrivilegesRequest {
+  // Тип subject'а: "user" | "service_account" | "group" — всё остальное
+  // InvalidArgument. Несоответствие prefix(subject_id)↔type → InvalidArgument.
+  //
+  // (Раньше комментарий утверждал, что group вне scope; код принимал group с
+  // самого начала — комментарий описывал намерение, а не поведение.)
+  //
+  // Для "user" | "service_account" ответ включает И прямые гранты
+  // (`derivation=DIRECT`), И гранты, полученные через членство в группе
+  // (`derivation=GROUP`, `via_group_id` называет группу). Для "group" ответ —
+  // гранты самой группы (DIRECT); группы не вкладываются друг в друга.
+  string subject_type = 1;
+
+  // ID subject'а (User id `usr…` / ServiceAccount id `sva…`).
+  string subject_id = 2;
+
+  // The maximum number of results per page to return. Default value: 50,
+  // max 1000.
+  int64 page_size = 3;
+
+  // Opaque base64 cursor (created_at, id) для следующей страницы.
+  string page_token = 4;
+}
+
+message ListSubjectPrivilegesResponse {
+  // Subject privileges (enriched access bindings), ordered by (created_at, id)
+  // ASC.
+  repeated SubjectPrivilege privileges = 1;
+
+  // This token allows you to get the next page of results for list requests.
+  string next_page_token = 2;
+}
+
+// How a subject obtained the privilege.
+enum Derivation {
+  DERIVATION_UNSPECIFIED = 0;
+  // The binding's subject_id is literally the requested subject (direct grant).
+  DIRECT = 1;
+  // The privilege is derived from the subject's membership in a GROUP that
+  // carries the binding. `SubjectPrivilege.via_group_id` names that group.
+  //
+  // This value IS emitted. Previously it was reserved and the read resolved
+  // DIRECT bindings only, which made the answer to "what can this user do"
+  // WRONG rather than merely incomplete: an administrator who put a user in a
+  // group and granted the group saw an EMPTY privilege list while the user
+  // demonstrably held the access.
+  GROUP = 2;
+}
+
+// SubjectPrivilege is the enriched, public-safe projection of an AccessBinding
+// for the subject-privileges view. The `role_name` is resolved
+// server-side via a within-DB JOIN `access_bindings ⋈ roles`; a dangling
+// role yields an empty `role_name` (UI falls back to raw `role_id`). Carries
+// only tenant-facing, publicly-safe fields — никаких инфра-чувствительных
+// данных и никаких condition/builtin_condition-internals (вне scope v1).
+message SubjectPrivilege {
+  // ID of the underlying AccessBinding (`acb…`).
+  string binding_id = 1;
+
+  // ID of the Role granted (`rol…`).
+  string role_id = 2;
+
+  // Human-readable Role name, resolved server-side (output-only; empty for a
+  // dangling/deleted role).
+  string role_name = 3;
+
+  // DEPRECATED — use `scope_type` (field 12). Bare scope-anchor kind
+  // ("account" | "project" | "cluster") the binding is anchored at. Legacy name
+  // (the word "resource" belongs to `AccessBinding.target`); still populated on
+  // every read for back-compat.
+  string resource_type = 4;
+
+  // DEPRECATED — use `scope_id` (field 13). Scope-anchor id. Still populated on
+  // every read for back-compat.
+  string resource_id = 5;
+
+  // Scope tier of the binding (CLUSTER / ACCOUNT / PROJECT). Reuses the
+  // AccessBinding.Scope enum.
+  AccessBinding.Scope scope = 6;
+
+  // Lifecycle status (PENDING / ACTIVE / REVOKED). Reuses the
+  // AccessBinding.Status enum.
+  AccessBinding.Status status = 7;
+
+  // Creation timestamp (truncated to seconds per api-conventions).
+  google.protobuf.Timestamp created_at = 8;
+
+  // ID of the User who granted this privilege (audit).
+  string granted_by_user_id = 9;
+
+  // Optional hard-expiry timestamp. Unset = no TTL.
+  google.protobuf.Timestamp expires_at = 10;
+
+  // How the subject obtained this privilege — DIRECT (the binding names the
+  // subject itself) or GROUP (the binding names a group the subject belongs to).
+  Derivation derivation = 11;
+
+  // Scope-anchor TYPE in the canonical DOTTED form (`iam.cluster` |
+  // `iam.account` | `iam.project`) — identical in name, form and meaning to
+  // `AccessBinding.scope_type`, so the coordinate reads the same here as on the
+  // resource it projects. Always populated; the legacy bare
+  // `resource_type` (field 4) is populated alongside it.
+  string scope_type = 12;
+
+  // Scope-anchor ID (`cluster_root` | `acc…` | `prj…`). Always populated
+  // alongside the legacy `resource_id` (field 5).
+  string scope_id = 13;
+
+  // The GROUP through which the subject holds this privilege (`grp…`), when
+  // `derivation == GROUP`. Empty for a DIRECT grant. Without it a GROUP-derived
+  // row would be un-actionable: an administrator revoking the access has to know
+  // WHICH group carries it (the binding's own subject is the group, not the
+  // user, so the row alone does not say which membership to remove).
+  string via_group_id = 14;
+}
+
+message ListAssignableRolesRequest {
+  // DEPRECATED — use `scope_type` (field 5). Bare scope-anchor kind on which
+  // assignable roles are picked: "account" | "project" | "cluster" — anything
+  // else → INVALID_ARGUMENT. Legacy name (see
+  // ListAccessBindingsByScopeRequest.resource_type); still accepted as the
+  // fallback when `scope_type` is empty.
+  string resource_type = 1;
+
+  // DEPRECATED — use `scope_id` (field 6). Scope-anchor id; must match the
+  // type's prefix (account⇒acc, project⇒prj; cluster⇒exactly
+  // cluster_root) — otherwise INVALID_ARGUMENT.
+  string resource_id = 2;
+
+  // The maximum number of results per page to return. Default value: 50,
+  // max 1000.
+  int64 page_size = 3;
+
+  // Opaque base64 cursor (created_at, id) для следующей страницы.
+  string page_token = 4;
+
+  // Scope-anchor TYPE in the canonical DOTTED form (`iam.cluster` |
+  // `iam.account` | `iam.project`) — same name/form/meaning as
+  // `CreateAccessBindingRequest.scope_type`, so the role picker and the grant it
+  // feeds speak ONE vocabulary. Wins over the legacy bare `resource_type`; an
+  // unknown dotted value → INVALID_ARGUMENT.
+  //
+  // MIGRATION CAVEAT — identical to ListAccessBindingsByScopeRequest.scope_type:
+  // this RPC's api-gateway `scope_extractor` still keys the per-request FGA scope
+  // on the LEGACY `resource_id`/`resource_type`, so a REST caller sending ONLY
+  // the new pair is denied at the edge. Send BOTH pairs over REST until the
+  // gateway extractor learns these names; the kaname handler is already
+  // new-pair-first.
+  string scope_type = 5;
+
+  // Scope-anchor ID; paired with `scope_type`, supersedes `resource_id`. Same
+  // migration caveat.
+  string scope_id = 6;
+}
+
+message ListAssignableRolesResponse {
+  // Roles assignable on the requested resource, ordered by (created_at, id)
+  // ASC. Each carries a server-computed `scope_group`.
+  repeated AssignableRole roles = 1;
+
+  // This token allows you to get the next page of results for list requests.
+  string next_page_token = 2;
+}
+
+// The scope tier of a Role as projected for the assignable-roles view.
+// Computed server-side from the Role's scope columns
+// (is_system / account_id / project_id) — the UI groups the picker by this
+// field without any client-side scope logic. A custom role is scoped to
+// exactly one of {account, project} (Organization scope fully removed —
+// enforced by `roles_scope_xor`).
+enum ScopeGroup {
+  SCOPE_GROUP_UNSPECIFIED = 0;
+  // System role (is_system, cluster-scoped) — assignable everywhere.
+  SYSTEM = 1;
+  // Account-scoped custom role (account_id set) — assignable on its own account.
+  ACCOUNT = 2;
+  // Project-scoped custom role (project_id set) — assignable on its own project.
+  PROJECT = 3;
+}
+
+// AssignableRole is the lean, public-safe projection of a Role for the grant
+// form's role picker. It carries only the fields the picker
+// needs (id / resolved name / description / is_system / server-computed
+// scope_group / created_at) — NO `permissions` array (picker ≠
+// role-detail) and no infra-sensitive fields. The
+// `scope_group` is derived server-side via the shared `isRoleAssignable`
+// predicate domain, so the client never computes scope.
+message AssignableRole {
+  // ID of the Role (`rol…`).
+  string role_id = 1;
+
+  // Human-readable Role name, resolved server-side (no separate
+  // `GET /roles/{id}` round-trip needed).
+  string name = 2;
+
+  // Role description.
+  string description = 3;
+
+  // Whether this is a built-in system role (is_system).
+  bool is_system = 4;
+
+  // Server-computed scope tier (SYSTEM / ACCOUNT / PROJECT) — the UI groups by
+  // this field directly.
+  ScopeGroup scope_group = 5;
+
+  // Creation timestamp (truncated to seconds per api-conventions).
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message ListAccessBindingsByRoleRequest {
+  // ID of the Role whose bindings are listed (`rol…`). Audit "who holds role
+  // R". Malformed id → INVALID_ARGUMENT.
+  string role_id = 1;
+
+  // The maximum number of results per page to return. Default value: 50,
+  // max 1000.
+  int64 page_size = 2;
+
+  // Opaque base64 cursor (created_at, id) для следующей страницы.
+  string page_token = 3;
+
+  // Optional: include revoked bindings (status='REVOKED'). Default false
+  // (only PENDING/ACTIVE are returned).
+  bool include_revoked = 4;
+}
+
+// ExpandAccessRequest asks "who can perform <relation> on <object_type>:<object_id>".
+// `object_type` is a closed `<module>.<resource>` key or an FGA
+// object type (e.g. "compute.instance", "iam_access_binding").
+//
+// `relation` is NOT any FGA relation and NOT a free verb: принимается ВЫВОДИМОЕ
+// множество — объединение наборов `v_*` всех типов каталога ∪ ярусные
+// (viewer/editor/admin) ∪ членство (member). Внутренняя машинерия модели
+// (переносчики охвата, подтягивающие резолверы, платформенные роли) отвергается:
+// пересылка произвольной строки дала бы возможность прощупывать внутренний граф
+// отношений. Множество ВЫВОДИТСЯ из наборов типов, а не перечисляется, поэтому
+// новое отношение у типа появляется здесь само и отставать не может.
+//
+// The server resolves the userset (direct grants + group memberships) into
+// concrete principals.
+message ExpandAccessRequest {
+  // Object type to expand access on — closed `<module>.<resource>` key or FGA
+  // object type. Unknown type → INVALID_ARGUMENT.
+  string object_type = 1;
+
+  // Object id to expand access on. Format-validated only (soft-ref).
+  string object_id = 2;
+
+  // Relation to expand (e.g. "v_delete", "viewer"). Принимается выводимое
+  // множество (см. описание сообщения выше); всё остальное — INVALID_ARGUMENT.
+  string relation = 3;
+
+  // The maximum number of concrete principals to return. Default 1000, max
+  // 10000 (fan-out limit). Truncation sets `truncated=true`.
+  int64 max_results = 4;
+}
+
+// Principal is a concrete grantee resolved by ExpandAccess — a USER or
+// SERVICE_ACCOUNT (never a GROUP; groups are expanded to their members).
+message Principal {
+  // Type of the principal (USER / SERVICE_ACCOUNT). Reuses SubjectType.
+  SubjectType type = 1;
+
+  // Principal id (`usr…` | `sva…`).
+  string id = 2;
+}
+
+message ExpandAccessResponse {
+  // Concrete principals who hold <relation> on the object (group-expanded).
+  // Deduplicated; a principal granted both directly and via a group appears
+  // once (no double-grant anomaly).
+  repeated Principal principals = 1;
+
+  // True when `principals` is a LOWER BOUND rather than the whole grantee set.
+  // Two reasons, and neither is continuable: the grant store cut its own
+  // enumeration at its server-side ceiling — it offers no continuation token, so
+  // the rest is unreachable — or the resolved set exceeded `max_results` and was
+  // trimmed. Either way: narrow the query. Raising `max_results` does not lift
+  // the store's ceiling.
+  bool truncated = 2;
+}
