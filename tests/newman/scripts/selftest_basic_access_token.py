@@ -87,14 +87,41 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 COLLECTION = ROOT / "collections" / "basic-access-token.postman_collection.json"
-REPO_ROOT = ROOT.parents[3]
-# Служба несёт СВОЙ модуль, поэтому путь чеканки называется ОТНОСИТЕЛЬНО его
-# корня, а go зовётся с `-C`. Прежняя форма — путь от корня монорепо — отказывала
-# на каждом прогоне: «main module (github.com/PRO-Robotech/kacho) does not
-# contain package …/tests/newman/scripts/credsecretmint», и отказ
-# приходил ПРЕДПОСЫЛКОЙ, то есть выглядел несозданным условием, а не сломанным
-# путём.
-MINT_MODULE_DIR = REPO_ROOT / "services" / "iam"
+
+
+def _module_root() -> Path:
+    """Корень СВОЕГО модуля Go — по маркеру `go.mod`, а не отсчётом уровней.
+
+    Служба несёт свой модуль, поэтому путь чеканки называется ОТНОСИТЕЛЬНО его
+    корня, а go зовётся с `-C`. Обе прежние формы адресовали корень ОТСЧЁТОМ и
+    отказывали каждая в своей посадке, причём отказ приходил ПРЕДПОСЫЛКОЙ — то
+    есть выглядел несозданным условием, а не сломанным путём:
+
+      * путь от корня монорепо без `-C` — «main module
+        (github.com/PRO-Robotech/kacho) does not contain package
+        …/tests/newman/scripts/credsecretmint»;
+      * `parents[3]` плюс литерал `services/iam` — верно ровно пока набор лежал
+        под `<монорепо>/services/iam`. В отдельном репозитории службы тех двух
+        уровней нет, и координата уезжает ВЫШЕ корня клона: прогнано и получено
+        «go: chdir …/services/iam: no such file or directory» — то есть проба не
+        исполнялась НИ РАЗУ с тех пор, как модуль переехал.
+
+    Маркер — БЛИЖАЙШИЙ вверх `go.mod`: в монорепо он лежит у службы
+    (`services/iam/go.mod`), в отдельном клоне — в корне, и в обеих посадках это
+    один и тот же модуль. Подъём до `.git` здесь был бы НЕВЕРЕН в монорепо: он
+    нашёл бы корень дерева, чей модуль — платформа, то есть ровно первый отказ
+    выше.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "go.mod").is_file():
+            return parent
+    raise SystemExit(
+        f"ПРЕДПОСЫЛКА: корень модуля не найден подъёмом от {here} — ни одного "
+        f"`go.mod`. Чеканить нечем, и это «не выполнилось», а не находка")
+
+
+MINT_MODULE_DIR = _module_root()
 MINT_PKG = "./tests/newman/scripts/credsecretmint"
 
 CASE_PREFIX = "IAM-BAT-SECRET-LIFECYCLE-OK"
@@ -115,7 +142,7 @@ def mint(prefix: str = "uoc") -> tuple[str, str]:
     """
     out = subprocess.run(
         ["go", "run", "-C", str(MINT_MODULE_DIR), MINT_PKG, "-prefix", prefix],
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=600)
+        cwd=MINT_MODULE_DIR, capture_output=True, text=True, timeout=600)
     if out.returncode != 0:
         raise SystemExit(
             f"ПРЕДПОСЫЛКА: чеканка продуктом не состоялась (rc={out.returncode}):\n{out.stderr}")
