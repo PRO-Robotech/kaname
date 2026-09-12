@@ -38,6 +38,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import io
+import json
 import pathlib
 import re
 import sys
@@ -49,6 +50,36 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 WORKFLOWS = ROOT / ".github" / "workflows"
 FIXTURES = ROOT / "tests" / "authz-fixtures"
 PROBE_RUNNER = ROOT / ".github" / "scripts" / "run-python-probes.py"
+# Запись вендоринга — ТРЕТЬЕ место того же утверждения: прогонщик проб вендорен, и
+# его местная правка объявлена в записи ДОСЛОВНО (поля `local` и `why`). Ложное
+# утверждение живёт поэтому в двух файлах сразу, и правка только одного оставила бы
+# запись расходящейся с копией — это ловит держатель вендоринга, но уже не по
+# предмету утверждения, а по отпечатку.
+VENDOR_RECORD = ROOT / "tests" / "newman" / "vendor-provenance.json"
+
+
+def authored_prose_of_record(path: pathlib.Path) -> list[tuple[str, str]]:
+    """Проза, авторская ДЛЯ ЗАПИСИ и только для неё: поля `why`.
+
+    ПОЧЕМУ НЕ `local`. Это дословная копия текста, который лежит в самом файле, и
+    держатель вендоринга проверяет вхождение (`local` обязано встречаться в копии
+    ровно один раз). Значит всякое ПРОЗАИЧЕСКОЕ утверждение из `local` уже судится
+    по узлу — там, где различимы шапка, комментарий и строковый литерал. В записи
+    эта различимость потеряна: синтетика инъекции («посев не приехал в этот
+    репозиторий» внутри фикстуры) выглядит в `local` так же, как шапка, и запрет по
+    `local` требовал бы переписать законную пробу.
+
+    ПОЧЕМУ НЕ `upstream`. Это проза дерева платформы; её здесь не правят, и судить
+    её значило бы требовать правки чужого файла в чужом репозитории.
+    """
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    out: list[tuple[str, str]] = []
+    for entry in doc.get("files", []):
+        for rw in entry.get("rewrites", []):
+            if isinstance(rw.get("why"), str):
+                out.append((f"{entry['path']} подстановка строки {rw.get('line')} "
+                            f"поле why", rw["why"]))
+    return out
 
 
 def _debt_module():
@@ -155,11 +186,16 @@ def test_seed_arrived_and_nobody_claims_it_absent():
     if not seeds:
         pytest.skip("УСЛОВИЕ НЕ СОЗДАНО: посева в дереве нет — утверждение о его "
                     "отсутствии ВЕРНО и запрету не подлежит")
-    hits = claims_no_seed(PROBE_RUNNER)
+    hits = [f"{PROBE_RUNNER.relative_to(ROOT)} {h}" for h in claims_no_seed(PROBE_RUNNER)]
+    record_chunks = authored_prose_of_record(VENDOR_RECORD)
+    for where, chunk in record_chunks:
+        for h in claims_no_seed(chunk):
+            hits.append(f"{VENDOR_RECORD.relative_to(ROOT)} {where}: {h!r}")
+    print(f"осмотрено: проза {PROBE_RUNNER.name} и {len(record_chunks)} авторских "
+          f"полей записи вендоринга")
     assert not hits, (
-        f"посев приехал ({len(seeds)}: {[p.name for p in seeds]}), а "
-        f"{PROBE_RUNNER.relative_to(ROOT)} в {len(hits)} мест(ах) утверждает обратное:\n  "
-        + "\n  ".join(hits))
+        f"посев приехал ({len(seeds)}: {[p.name for p in seeds]}), а дерево в "
+        f"{len(hits)} мест(ах) утверждает обратное:\n  " + "\n  ".join(hits))
 
 
 # ── ПРЕДМЕТ 3: конвейер гоняет ТО, что перепись считает гоняемым ─────────────

@@ -90,6 +90,13 @@ SECRET_NAME_RE = re.compile(
 
 REDACTED = "«ВЫРЕЗАНО ПЕРЕД ПУБЛИКАЦИЕЙ»"
 
+# ВИДЫ ФАЙЛОВ, КОТОРЫЕ ЧИСТКА БЕРЁТСЯ ПРОЧЕСТЬ. Перечень, а не «всё подряд»:
+# двоичный файл, вычищенный как текст, портится молча, и судить его содержимое всё
+# равно нечем. Файл незнакомого вида НЕ КОПИРУЕТСЯ в каталог выкладывания вовсе —
+# то есть пропуск здесь fail-closed, — но НАЗЫВАЕТСЯ в переписи: тихо выпавший из
+# артефакта файл и вычищенный файл ведут читателя в разные места.
+TEXT_SUFFIXES = (".json", ".cli", ".txt", ".rc", ".log")
+
 
 def shaped_credential(text: str) -> str | None:
     """Форма значения выдаёт удостоверение? Возвращает имя формы или None."""
@@ -139,34 +146,43 @@ class Census:
 
 
 def _walk(node: object, key_hint: str | None, c: Census) -> object:
-    """ПЕРВАЯ РЕДАКЦИЯ: чистится ТОЛЬКО окружение прогона (форма 1).
-
-    Написано так намеренно и ненадолго: перечень позиций — ровно тот способ,
-    которым чистка расходится с newman молча. Самопроверка ниже требует все семь
-    замеренных форм, значит эта редакция обязана быть КРАСНОЙ по шести из семи.
-    """
+    """Обойти ВЕСЬ документ. Перечня позиций здесь нет намеренно: неизвестная
+    форма покрывается обходом, а перечень разошёлся бы с newman молча."""
     c.nodes += 1
     if isinstance(node, dict):
+        # Форма `{"key": …, "value": …}` — окружение, заголовок, параметр адреса.
+        # Имя ключа остаётся, значение чистится ПО ИМЕНИ, даже если формы нет.
+        name = node.get("key") if isinstance(node.get("key"), str) else None
+        # Байтовый массив: декодировать → вычистить → собрать обратно. Без этого
+        # тело ответа уезжает в артефакт целиком, и текстовый греп его не видит.
+        if node.get("type") == "Buffer" and isinstance(node.get("data"), list):
+            c.buffers += 1
+            try:
+                raw = bytes(int(b) & 0xFF for b in node["data"]).decode("utf-8", "replace")
+            except (TypeError, ValueError):
+                return node
+            clean, n = scrub_text(raw)
+            if n:
+                c.redacted_by_shape += n
+                return {"type": "Buffer", "data": list(clean.encode("utf-8"))}
+            return node
         out: dict = {}
         for k, v in node.items():
-            if k == "values" and isinstance(v, list):
-                vals = []
-                for item in v:
-                    c.nodes += 1
-                    if isinstance(item, dict) and isinstance(item.get("key"), str):
-                        c.strings += 1
-                        if SECRET_NAME_RE.search(item["key"]) and item.get("value"):
-                            c.redacted_by_name += 1
-                            item = dict(item, value=REDACTED)
-                    vals.append(item)
-                out[k] = vals
-            else:
-                out[k] = _walk(v, None, c)
+            hint = name if (k == "value" and name) else (k if isinstance(k, str) else None)
+            out[k] = _walk(v, hint, c)
         return out
     if isinstance(node, list):
         return [_walk(v, key_hint, c) for v in node]
     if isinstance(node, str):
         c.strings += 1
+        if key_hint and SECRET_NAME_RE.search(key_hint) and node:
+            c.redacted_by_name += 1
+            return REDACTED
+        clean, n = scrub_text(node)
+        if n:
+            c.redacted_by_shape += n
+            return clean
+        return node
     return node
 
 
@@ -174,10 +190,46 @@ def redact_document(doc: object, c: Census) -> object:
     return _walk(doc, None, c)
 
 
-# ── ПОВТОРНЫЙ ОБХОД ВЫХОДА: ОСТАТОК ИЩЕТСЯ, А НЕ ОБЕЩАЕТСЯ ──────────────────
+# ── ПОВТОРНЫЙ ОБХОД ВЫХОДА: ОСТАТОК ИЩЕТСЯ НЕЗАВИСИМЫМ ПРЕДИКАТОМ ──────────
+#
+# ВТОРОЙ ВЗГЛЯД ОБЯЗАН БЫТЬ ВТОРЫМ. Если остаток искать тем же предикатом, каким
+# чистили, он не найдёт НИЧЕГО по построению: форма, неизвестная чистке,
+# неизвестна и проверке, и «чисто» будет значить «мы искали ровно то, что уже
+# вырезали». Это ловится инъекцией — ослепи предикат чистки, и проверка обязана
+# всё равно покраснеть, — и первая редакция здесь именно провалилась.
+#
+# Поэтому у остатка СВОЙ предикат, и он грубее: не «похоже на JWT нашей чеканки»,
+# а «в тексте стоит длинная непрерывная строка из алфавита секретов». Он не знает
+# ни приставки `eyJ`, ни слова `Bearer`.
+#
+# ЦЕНА НАЗВАНА: предикат заведомо даёт ложные находки на законной длинной строке
+# (отпечаток образа, длинный идентификатор). Исход такой находки — отказ шага и
+# НЕВЫЛОЖЕННЫЙ артефакт, то есть громко и починяемо. Обратный выбор — тихая
+# публикация — необратим: выложенное опубликовано.
+
+# Тройка, разделённая точками, с длинными частями: форма подписанного
+# удостоверения БЕЗ знания его приставки. Границы длин выбраны так, чтобы имя
+# файла (`kaname-own-rest-front.postman_collection.json`) под неё не подпадало.
+DOTTED_TRIPLE_RE = re.compile(
+    r"[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{8,}")
+# Непрерывный пробег алфавита секретов: непрозрачное удостоверение без точек.
+LONG_OPAQUE_RE = re.compile(r"[A-Za-z0-9_-]{40,}")
 
 
-def residue(node: object, path: str, found: list[str]) -> None:
+def residue_shaped(text: str) -> str | None:
+    """НЕЗАВИСИМЫЙ предикат остатка. Возвращает имя формы или None."""
+    if PEM_RE.search(text):
+        return "приватный ключ PEM"
+    m = DOTTED_TRIPLE_RE.search(text)
+    if m and len(m.group(0)) >= 60:
+        return "тройка через точку с длинными частями"
+    if LONG_OPAQUE_RE.search(text):
+        return "непрерывный пробег алфавита секретов (40+)"
+    return None
+
+
+def residue(node: object, path: str, found: list[str],
+            key_hint: str | None = None) -> None:
     """Пути (НЕ значения!) мест, где удостоверение осталось."""
     if isinstance(node, dict):
         if node.get("type") == "Buffer" and isinstance(node.get("data"), list):
@@ -185,19 +237,28 @@ def residue(node: object, path: str, found: list[str]) -> None:
                 raw = bytes(int(b) & 0xFF for b in node["data"]).decode("utf-8", "replace")
             except (TypeError, ValueError):
                 raw = ""
-            form = shaped_credential(raw)
+            form = residue_shaped(raw)
             if form:
-                found.append(f"{path}.stream[байтовый массив] — {form}")
+                found.append(f"{path}[байтовый массив] — {form}")
             return
+        name = node.get("key") if isinstance(node.get("key"), str) else None
         for k, v in node.items():
-            residue(v, f"{path}.{k}", found)
+            residue(v, f"{path}.{k}", found,
+                    name if (k == "value" and name) else
+                    (k if isinstance(k, str) else None))
         return
     if isinstance(node, list):
         for i, v in enumerate(node):
-            residue(v, f"{path}[{i}]", found)
+            residue(v, f"{path}[{i}]", found, key_hint)
         return
     if isinstance(node, str):
-        form = shaped_credential(node)
+        # Имя ключа названо секретом, а значение не вырезано — остаток по ИМЕНИ.
+        # Эта половина ловит секрет без формы: у общего секрета хука формы нет.
+        if key_hint and SECRET_NAME_RE.search(key_hint) and node and node != REDACTED:
+            found.append(f"{path} — значение ключа {key_hint!r} не вырезано "
+                         f"(длина {len(node)})")
+            return
+        form = residue_shaped(node)
         if form:
             found.append(f"{path} — {form} (длина {len(node)})")
 
@@ -225,9 +286,10 @@ def process(src: pathlib.Path, dst: pathlib.Path, c: Census) -> list[str]:
     c.redacted_by_shape += n
     dst.write_text(clean, encoding="utf-8")
     found = []
-    form = shaped_credential(clean)
-    if form:
-        found.append(f"{src.name} — {form}")
+    for lineno, line in enumerate(clean.splitlines(), 1):
+        form = residue_shaped(line)
+        if form:
+            found.append(f"{src.name}:{lineno} — {form}")
     return found
 
 
@@ -237,7 +299,9 @@ def run(src_dir: pathlib.Path, dst_dir: pathlib.Path) -> int:
               file=sys.stderr)
         return 1
     files = sorted(p for p in src_dir.iterdir()
-                   if p.is_file() and p.suffix in (".json", ".cli", ".txt", ".rc"))
+                   if p.is_file() and p.suffix in TEXT_SUFFIXES)
+    skipped = sorted(p.name for p in src_dir.iterdir()
+                     if p.is_file() and p.suffix not in TEXT_SUFFIXES)
     c = Census()
     leftovers: list[str] = []
     for f in files:
@@ -251,6 +315,8 @@ def run(src_dir: pathlib.Path, dst_dir: pathlib.Path) -> int:
     print(f"вырезано по имени ключа: {c.redacted_by_name}")
     print(f"вырезано по форме:       {c.redacted_by_shape}")
     print(f"ВСЕГО вырезано:          {c.redacted}")
+    print(f"пропущено (вид неизвестен, В АРТЕФАКТ НЕ ПОПАДУТ): {len(skipped)}"
+          + (f" — {', '.join(skipped)}" if skipped else ""))
     print(f"выход:                   {dst_dir}")
 
     if not c.files or not c.strings:
@@ -287,7 +353,12 @@ def _c(label: str, ok: bool, detail: str = "") -> None:
 # Маркеры вида JWT: настоящая форма, а не слово. Первая часть обязана начинаться
 # на `eyJ` — это base64url от `{"`, то есть форма, а не совпадение.
 def _jwt(mark: str) -> str:
-    return f"eyJhbGciOiJSUzI1NiJ9.{mark}xxxxxxxx.sigsigsig"
+    # Длины частей — как у настоящего RS256: 36 · 48 · 44. Короткий маркер
+    # («eyJ…».«LEFT»…) не подпадал бы под НЕЗАВИСИМЫЙ предикат остатка, и ось
+    # ослеплённого предиката доказывала бы не то, что называет.
+    return (f"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9"
+            f".eyJzdWIiOiJ{mark}AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            f".{mark}c2lnbmF0dXJlc2lnbmF0dXJlc2lnbmF0dXJlc2ln")
 
 
 def _report(mark_env: str, mark_reqh: str, mark_resh: str, mark_body: str,
@@ -340,6 +411,8 @@ def _report(mark_env: str, mark_reqh: str, mark_resh: str, mark_body: str,
 
 
 def self_test() -> int:
+    import contextlib
+    import io
     import tempfile
     print("redact-newman-report: доказательство способности упасть")
     marks = ("ENVV", "REQH", "RESH", "BODY", "QUER", "STRM", "SCRP")
@@ -421,6 +494,35 @@ def self_test() -> int:
         _c("а строка про упавшее утверждение в нём осталась",
            "1 assertion failed" in cli, cli)
 
+    # ── ОСЬ: ЖУРНАЛ СЛУЖБЫ ЧИСТИТСЯ ТЕМ ЖЕ, А ЧУЖОЙ ВИД НЕ УЕЗЖАЕТ МОЛЧА ────
+    #
+    # Журнал выкладывается вторым артефактом того же задания, и замер на нём дал
+    # ноль удостоверений — СЕГОДНЯ. Выкладывается КОД, поэтому журнал идёт через ту
+    # же чистку; ось доказывает, что `.log` она вообще читает (первая редакция не
+    # читала: перечень видов файла её не знал, и шаг падал «обход пуст»).
+    with tempfile.TemporaryDirectory(prefix="redact-log-") as td:
+        tmp = pathlib.Path(td)
+        src, dst = tmp / "log-src", tmp / "log-public"
+        src.mkdir()
+        (src / "kaname.log").write_text(
+            "уровень=INFO рубеж пропустил\n"
+            f"уровень=WARN предъявитель {_jwt('LOGT')} отклонён\n", encoding="utf-8")
+        # Файл незнакомого вида рядом: он обязан быть НАЗВАН и НЕ скопирован.
+        (src / "wrapping.key").write_bytes(b"\x00\x01binary-key-material")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = run(src, dst)
+        out = buf.getvalue()
+        _c("журнал службы вычищен (код 0)", rc == 0, out[-300:])
+        log = (dst / "kaname.log").read_text(encoding="utf-8")
+        _c("удостоверения в журнале нет", "LOGT" not in log, log)
+        _c("а строки уровня и текст отказа остались",
+           "уровень=WARN" in log and "отклонён" in log, log)
+        _c("файл незнакомого вида НЕ скопирован в выкладывание",
+           not (dst / "wrapping.key").exists())
+        _c("и он НАЗВАН в переписи, а не выпал молча",
+           "wrapping.key" in out and "В АРТЕФАКТ НЕ ПОПАДУТ" in out, out[:600])
+
     # ── ОСЬ: ОСТАТОК ЛОВИТСЯ, А НЕ ОБЕЩАЕТСЯ ────────────────────────────────
     #
     # Инъекция в сам предикат: если форма значения предикату неизвестна, отказ
@@ -431,13 +533,15 @@ def self_test() -> int:
         src.mkdir()
         (src / "r.json").write_text(json.dumps(
             {"run": {"executions": [{"leftover": _jwt("LEFT")}]}}), encoding="utf-8")
-        saved = globals()["JWT_RE"]
-        globals()["JWT_RE"] = re.compile(r"\bZZZ_NEVER_MATCHES_ZZZ\b")
+        never = re.compile(r"ZZZ_NEVER_MATCHES_ZZZ")
+        saved = {k: globals()[k] for k in ("JWT_RE", "PEM_RE", "BEARER_RE")}
+        for k in saved:
+            globals()[k] = never
         try:
             rc = run(src, dst)
         finally:
-            globals()["JWT_RE"] = saved
-        _c("предикат ослеплён — отказ по ОСТАТКУ, а не зелёное", rc == 1)
+            globals().update(saved)
+        _c("предикаты ЧИСТКИ ослеплены — отказ по ОСТАТКУ, а не зелёное", rc == 1)
 
     # ── ОСЬ: ПУСТОЙ ОБХОД — ОТКАЗ, А НЕ «ЧИСТО» ────────────────────────────
     with tempfile.TemporaryDirectory(prefix="redact-empty-") as td:
