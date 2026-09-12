@@ -349,10 +349,24 @@ def audit(files, out=sys.stdout) -> int:
 
 
 def _tracked_collections(root: Path):
+    """Коллекции — по индексу git, ДВУМЯ образцами раскладки.
+
+    Прежде образец был один — `*/tests/newman/collections/*.…`, — и он верен в
+    дереве платформы, где набор лежит под `services/<имя>/`. В отдельном
+    репозитории службы набор лежит прямо в `tests/newman`, образец не совпадает ни
+    с одной коллекцией, и проба честно объявляла обход пустым: «ноль находок»
+    здесь означало «ноль прочитанного» при 41 коллекции в дереве.
+
+    Образцы объединяются, а не выбираются: файл, попавший под оба, считается один
+    раз, иначе перепись назвала бы больше, чем есть.
+    """
     res = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "*/tests/newman/collections/*.postman_collection.json"],
+        ["git", "-C", str(root), "ls-files",
+         "tests/newman/collections/*.postman_collection.json",
+         "*/tests/newman/collections/*.postman_collection.json"],
         capture_output=True, text=True, check=False)
-    return [root / line for line in res.stdout.splitlines() if line.strip()]
+    seen = sorted({line for line in res.stdout.splitlines() if line.strip()})
+    return [root / line for line in seen]
 
 
 def _repo_root() -> Path:

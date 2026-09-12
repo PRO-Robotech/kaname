@@ -997,7 +997,7 @@ CASES.append(Case(
 # названном объекте. Ярус `viewer` тут был бы слабее и пропустил бы ровно тот
 # дефект, который назван в самом продукте: выдача, эмитировавшая ТОЛЬКО ярус,
 # оставляет приглашённого без `v_get`, то есть с отказом на GET подаренного проекта
-# (services/iam/internal/apps/kaname/api/user/invite.go, порт ObjectReconciler).
+# (internal/apps/kaname/api/user/invite.go, порт ObjectReconciler).
 # Роль `view` несёт `read/list/get` на `*.*`, а выдача создаётся без пообъектного
 # сужения (`allInScope`), поэтому глаголы материализуются и НА САМОМ объекте
 # области (reconcile.desiredRuleMembers → scopeSelfMember).
@@ -1411,7 +1411,7 @@ CASES.append(Case(
 # работать, снять запрет он себе не сможет (самостоятельного пути нет
 # by construction), и остаток прогона поедет на сломанной фикстуре. Наблюдаемый
 # исход поэтому закреплён на настоящей базе и настоящих читателях выдачи
-# (services/iam/internal/apps/kaname/api/audit/user_block_integration_test.go), а
+# (internal/apps/kaname/api/audit/user_block_integration_test.go), а
 # здесь — то, что через край проверяемо без порчи общего состояния.
 #
 # ПОЧЕМУ ОТКАЗ НА PENDING — НЕ СЛАБАЯ ПРОБА, А РАЗЛИЧАЮЩАЯ. Ответ

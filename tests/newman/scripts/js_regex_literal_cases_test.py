@@ -98,9 +98,48 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import newman_js_lexer as jslex  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parents[5]
-CASE_GLOBS = ("services/*/tests/newman/cases/*.py",
+def _repo_root() -> Path:
+    """Корень репозитория — ПО МАРКЕРУ, а не отсчётом уровней (как у близнецов).
+
+    `parents[5]` было верно ровно пока набор лежал под
+    `<корень>/tests/newman/scripts`. В отдельном репозитории службы
+    он уезжает ВЫШЕ корня — в каталог, где лежат рабочие копии, — и обход
+    становится не пустым, а ПОСТОРОННИМ: проба вынесла бы вердикт о чужом дереве.
+    Наблюдалось: путь резолвился в каталог воркспейса, и все шесть ведомостей
+    осиротели разом.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / ".git").exists():
+            return parent
+    for parent in here.parents:
+        if (parent / "go.mod").is_file() and (parent / "tests" / "newman").is_dir():
+            return parent
+    raise AssertionError(
+        f"корень репозитория не найден подъёмом от {here} — обходить нечего")
+
+
+REPO_ROOT = _repo_root()
+# КОРНЕВОЙ НАБОР идёт ПЕРВЫМ — форма отдельного репозитория службы.
+CASE_GLOBS = ("tests/newman/cases/*.py",
+              "services/*/tests/newman/cases/*.py",
               "gateway/tests/newman/cases/*.py")
+
+# ИМЯ НАБОРА ДЛЯ КОРНЕВОЙ РАСКЛАДКИ — см. близнецов: ведомости ниже ключуются
+# именем набора и заведены, когда набор лежал в `services/iam/`. Вывод «первый
+# сегмент пути» дал бы `tests`, и каждая запись осиротела бы разом.
+ROOT_SUITE_NAME = "iam"
+
+
+# ИМЯ НАБОРА ПО СТРОКЕ ПУТИ — тот же вывод, что у `_suite_name`, но для ключей
+# ведомостей: они хранят путь строкой, а не объектом.
+def _suite_of_relpath(rel: str) -> str:
+    head = rel.split("/")
+    if head and head[0] == "services":
+        return head[1]
+    if head and head[0] == "tests":
+        return ROOT_SUITE_NAME
+    return head[0] if head else ROOT_SUITE_NAME
 
 CODE, TEXT = "код", "текст"
 # Помощники, ЗАВЕРШАЮЩИЕ подстановку своим исходом. Признак членства один и
@@ -121,29 +160,55 @@ _ALL_SANITISERS = tuple(h for hs in SANITISER.values() for h in hs)
 # на сериализатор (`js_str`) в двух декларациях — края и хранения. Минус ЧЕТЫРЕ,
 # а не три: у стража предъявителя края в тот же литерал вклеивалось и имя
 # переменной окружения, и подпись целиком уехала помощнику вместе с ним.
-STRING_LITERAL_CEILING = 472
+#
+# 472 -> 326 ОПУЩЕН ПО ЗАМЕРУ, А НЕ ПОДОГНАН. Прежние числа измерены в дереве
+# ПЛАТФОРМЫ, где обход видел декларации восьми наборов; здесь набор ОДИН (41
+# декларация), и оставить 472 значило бы держать запас в 146 мест, под который
+# можно внести новые молча. Потолок, который не может покраснеть, храповиком не
+# является. Число взято из переписи самой пробы («подстановок в литерал строки
+# либо комментария 326»).
+STRING_LITERAL_CEILING = 326
 
 # ВЕДОМОСТЬ ИСХОДОВ. Ключ — (файл, что подставляется); номер строки не годится,
 # он двигается от чужой правки. Запись без места в дереве и место без записи —
 # обе находки, и каждая своим утверждением.
 RECORDED = {
-    ("services/iam/tests/newman/cases/authz-sa-apitoken.py", "op_id_pattern"): CODE,
-    ("services/registry/tests/newman/cases/registry.py", "op_envelope"): CODE,
-    ("services/storage/tests/newman/cases/sec-d.py", "id_pattern"): CODE,
-    ("services/vpc/tests/newman/cases/vpc1.py", "msg_text"): TEXT,
+    # ЗАПИСИ ОСТАЛЬНЫХ НАБОРОВ СНЯТЫ ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ: кейсы
+    # `services/{registry,storage,vpc}/tests/newman/cases/…` живут в дереве
+    # платформы, а здесь их нет ни одного файла. Запись, которой нечего
+    # проверять, — находка по правилу самой ведомости.
+    #
+    # Вместе с ними ушёл и единственный носитель исхода «текст»: в этом
+    # репозитории таких подстановок ноль, и `TEXT_SEAMS` пуст НАМЕРЕННО —
+    # перепись называет это числом, а не молчанием.
+    ("tests/newman/cases/authz-sa-apitoken.py", "op_id_pattern"): CODE,
     # Форма секрета удостоверения: образец приходит из общего объявления
     # (`credential-secret-form.json`), а не выписан в кейсе. Вторая сторона,
     # читающая то же объявление, чеканит значения кодом продукта и требует,
     # чтобы образец их принимал, а подделки отвергал (#1253).
-    ("services/iam/tests/newman/cases/basic-access-token.py", "'userToken'"): CODE,
-    ("services/iam/tests/newman/cases/docker-lane-credential-kind.py",
+    ("tests/newman/cases/basic-access-token.py", "'userToken'"): CODE,
+    ("tests/newman/cases/docker-lane-credential-kind.py",
      "'serviceAccountKey'"): CODE,
 }
 
 
+def _suite_dir(service: str) -> Path:
+    """Каталог набора по его имени. Раскладок ДВЕ, и обе названы.
+
+    У платформы набор лежит под `services/<имя>/tests/newman`; в отдельном
+    репозитории службы — прямо в `tests/newman`, и `services/` здесь нет ни одним
+    файлом. Прежняя редакция знала только первую форму и утверждала «генератора
+    сюиты iam в дереве нет» на дереве, где генератор один и он на месте.
+    """
+    platform = REPO_ROOT / "services" / service / "tests/newman"
+    if (platform / "scripts" / "gen.py").is_file():
+        return platform
+    return REPO_ROOT / "tests" / "newman"
+
+
 def _generator(service: str):
     """Модуль `gen.py` сюиты — он несёт и помощников, и загрузчик деклараций."""
-    path = REPO_ROOT / "services" / service / "tests/newman/scripts/gen.py"
+    path = _suite_dir(service) / "scripts" / "gen.py"
     assert path.is_file(), f"генератора сюиты {service} в дереве нет: {path}"
     name = f"kacho_cases_gen_{service}"
     if name in sys.modules:
@@ -166,7 +231,7 @@ def _declaration(service: str, stem: str):
     судит ту самую сборку, которая порождает коллекцию, а не свою копию.
     """
     gen = _generator(service)
-    path = REPO_ROOT / "services" / service / "tests/newman/cases" / f"{stem}.py"
+    path = _suite_dir(service) / "cases" / f"{stem}.py"
     assert path.is_file(), f"декларации {service}/{stem}.py в дереве нет"
     return gen._RUN.load(path)
 
@@ -359,25 +424,21 @@ def _with_attr(module, name, value, produce):
 # не весь образец, а ЕГО КУСОК (`^{prefix}[a-z0-9]+$`). Положительный контроль
 # обязан искать в скрипте то, что там и окажется, иначе он ловил бы форму вызова.
 CODE_SEAMS = [
+    # ЗАПИСИ ОСТАЛЬНЫХ НАБОРОВ СНЯТЫ ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ: их генераторы и
+    # кейсы живут в дереве платформы, а в этом репозитории их нет ни одного файла.
+    # Запись, которой нечего проверять, — находка по правилу самой ведомости, а не
+    # мелочь. В дереве платформы они остались при своих наборах.
     ("iam", "authz-sa-apitoken", "iam/allow_asserts/operation-id",
      lambda m, p: _with_attr(m, "_VPC_OPERATION_PREFIX", p,
                              lambda: m.allow_asserts("PROBE", "POST", "/vpc/v1/networks")),
      lambda p: f"/^{p}[a-z0-9]+$/"),
-    ("registry", "registry", "registry/_delete_idempotent_op_match/op_envelope",
-     lambda m, p: [m._delete_idempotent_op_match(p)],
-     lambda p: f"/{p}/"),
-    ("storage", "sec-d", "storage/_lifecycle_case/id_prefix",
-     lambda m, p: m._lifecycle_case(case_id="PROBE", title="проба",
-                                    base_path="/storage/v1/volumes",
-                                    obj_type="storage_volume", id_var="volumeId",
-                                    id_prefix=p, create_body=_STORAGE_BODY),
-     lambda p: f"/^{p}/"),
 ]
 
 TEXT_SEAMS = [
-    ("vpc", "vpc1", "vpc/_assert_op_error/msg_text",
-     lambda m, t: m._assert_op_error(3, "INVALID_ARGUMENT", t),
-     lambda esc: f"/{esc}$/"),
+    # ЗАПИСИ ОСТАЛЬНЫХ НАБОРОВ СНЯТЫ ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ: их генераторы и
+    # кейсы живут в дереве платформы, а в этом репозитории их нет ни одного файла.
+    # Запись, которой нечего проверять, — находка по правилу самой ведомости, а не
+    # мелочь. В дереве платформы они остались при своих наборах.
 ]
 
 ALL_SEAMS = [(svc, stem, label, call) for svc, stem, label, call, _w
@@ -479,7 +540,7 @@ def test_every_recorded_place_has_a_seam_of_its_own_outcome():
     kinds.update({svc: TEXT for svc, _s, _l, _c, _w in TEXT_SEAMS})
     wrong = []
     for (path, expr), outcome in sorted(RECORDED.items()):
-        svc = path.split("/")[1] if path.startswith("services/") else path.split("/")[0]
+        svc = _suite_of_relpath(path)
         if svc not in kinds:
             wrong.append(f"{path}: {{{expr}}} «{outcome}» — шва нет вовсе")
         elif kinds[svc] != outcome:

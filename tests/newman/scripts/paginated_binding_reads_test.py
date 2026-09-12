@@ -65,28 +65,55 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 HERE = Path(__file__).resolve().parent
 NEWMAN_DIR = HERE.parent
 CASES_DIR = NEWMAN_DIR / "cases"
 COLLECTIONS_DIR = NEWMAN_DIR / "collections"
-REPO_ROOT = HERE.parents[4]
+
+
+def _repo_root() -> Path:
+    """Корень репозитория — ПО МАРКЕРУ, а не отсчётом уровней.
+
+    `parents[4]` было верно ровно пока набор лежал под
+    `<корень>/tests/newman/scripts`. В отдельном репозитории службы
+    он уезжает ВЫШЕ корня — в каталог рабочих копий, — и проба искала посев в
+    ЧУЖОМ дереве. Наблюдалось: путь резолвился в каталог воркспейса.
+    """
+    for parent in HERE.parents:
+        if (parent / ".git").exists():
+            return parent
+    for parent in HERE.parents:
+        if (parent / "go.mod").is_file() and (parent / "tests" / "newman").is_dir():
+            return parent
+    raise AssertionError(f"корень репозитория не найден подъёмом от {HERE}")
+
+
+REPO_ROOT = _repo_root()
 AUTHZ_FIXTURE_DIR = REPO_ROOT / "tests" / "authz-fixtures"
 
+# МЕТКА ТРЕТЬЕГО ИСХОДА — та же, что у Go-проб этого репозитория и у переписи
+# `scripts/test-standalone.sh`. Контракт между пробой и прогонщиком — ТЕКСТ метки:
+# прогонщик считает помеченные пропуски отдельным числом и НЕ засчитывает их ни в
+# проход, ни в отказ.
+PRECONDITION_MARK = "УСЛОВИЕ НЕ СОЗДАНО"
+
+# ЧТО СЧИТАЕТСЯ ПОСЕВОМ. Каталог посева может существовать, не нося ни одного
+# скрипта: сюда вендорен ОДИН модуль-авторитет (`principal_pairings.py`), который
+# читают пробы шапок кейсов. Авторитет посевом не является — он ничего не сеет.
+_AUTHORITY_ONLY = frozenset({"principal_pairings.py"})
+
+
+def _seed_scripts() -> list[Path]:
+    """Скрипты посева — без модулей-авторитетов, которые ничего не сеют."""
+    if not AUTHZ_FIXTURE_DIR.is_dir():
+        return []
+    return sorted(p for p in AUTHZ_FIXTURE_DIR.iterdir()
+                  if p.is_file() and p.suffix in (".sh", ".py")
+                  and p.name not in _AUTHORITY_ONLY)
+
 LIST_BY_SCOPE = "accessBindings:listByScope"
-
-
-def _fixture_seed_sources():
-    """Скрипты посева общих authz-фикстур — по МЕСТУ, а не по имени файла.
-
-    Прежняя редакция пинила один файл (`setup.sh`) и функцию в нём. Функции в
-    дереве больше нет, чтения привязок в этом файле тоже: проба искала образец,
-    встречающийся ноль раз, и проходила при любом состоянии посева. Обход
-    каталога переживает переименование файла и перенос чтения к соседу.
-    """
-    return sorted(
-        p for p in AUTHZ_FIXTURE_DIR.iterdir()
-        if p.is_file() and p.suffix in (".sh", ".py")
-    )
 
 
 def _iter_collection_urls():
@@ -207,12 +234,25 @@ def test_authz_fixture_seeds_paginate_list_by_scope():
     (ровно так эта проба и прожила без предмета: она пинила один файл и функцию
     в нём, которых в дереве уже нет).
     """
-    assert AUTHZ_FIXTURE_DIR.is_dir(), (
-        f"нет каталога {AUTHZ_FIXTURE_DIR} — посев общих фикстур переехал, "
-        f"и проба смотрит в пустоту")
-    sources = _fixture_seed_sources()
-    assert sources, (
-        f"в {AUTHZ_FIXTURE_DIR} не прочитано ни одного *.sh/*.py — обход сломан")
+    # ПРЕМИССА НАЗЫВАЕТСЯ ТРЕТЬИМ ИСХОДОМ, А НЕ НАХОДКОЙ. Предмет этой пробы —
+    # СКРИПТЫ ПОСЕВА, а не код службы. В репозиторий службы посев не приехал ни
+    # одним файлом (предикат:
+    # `git log --oneline --all -- tests/authz-fixtures | wc -l` → 0 за всю его
+    # историю), и объявить это находкой значило бы посылать читателя чинить то,
+    # чего здесь не ломали: посев живёт в дереве платформы и приедет своей
+    # задачей вместе со сквозным прогоном.
+    #
+    # Молчаливый проход здесь запрещён ровно так же: он объявил бы правило
+    # проверенным. Поэтому — помеченный пропуск, который прогонщик считает
+    # ОТДЕЛЬНЫМ числом и не засчитывает в проход.
+    sources = _seed_scripts()
+    if not sources:
+        pytest.skip(
+            f"{PRECONDITION_MARK}: скриптов посева в {AUTHZ_FIXTURE_DIR} нет "
+            f"(каталог {'есть' if AUTHZ_FIXTURE_DIR.is_dir() else 'отсутствует'}); "
+            f"посев не приехал в репозиторий службы вместе с набором, и правило "
+            f"«чтение привязок постранично» проверять не на чем",
+            allow_module_level=False)
 
     offenders = []
     reads = 0

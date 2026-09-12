@@ -67,7 +67,7 @@ newman записывает исключение скрипта в `testScripts`
    вызывающего среди них нет. Предикат, чтобы перемерить:
 
        python3 - <<'PY'
-       import sys; sys.path.insert(0, "services/iam/tests/newman/scripts")
+       import sys; sys.path.insert(0, "tests/newman/scripts")
        from pathlib import Path
        import newman_js_lexer as L
        _p, _t, places = L.scan_tree(Path("."), (
@@ -87,8 +87,61 @@ import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[5]
-GEN_GLOBS = ("services/*/tests/newman/scripts/gen.py",
+def _repo_root() -> Path:
+    """Корень репозитория — ПО МАРКЕРУ, а не отсчётом уровней.
+
+    Прежде стояло `parents[5]` — верно ровно пока набор лежал под
+    `<корень>/tests/newman/scripts`. В отдельном репозитории службы
+    набор лежит двумя уровнями выше, и `parents[5]` уезжает ВЫШЕ корня — в чужой
+    каталог файловой системы. Обход тогда не пуст, он ПОСТОРОННИЙ, и это хуже:
+    пустой обход проба объявляет беспредметным, а посторонний вынесет вердикт о
+    чужом дереве.
+
+    Маркер — `.git` (в рабочей копии он бывает файлом, поэтому `exists`, а не
+    `is_dir`); запасной — `go.mod` рядом с каталогом набора.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / ".git").exists():
+            return parent
+    for parent in here.parents:
+        if (parent / "go.mod").is_file() and (parent / "tests" / "newman").is_dir():
+            return parent
+    raise AssertionError(
+        f"корень репозитория не найден подъёмом от {here}: ни `.git`, ни `go.mod` "
+        f"рядом с каталогом набора. Обходить нечего, и это не «ноль находок»")
+
+
+REPO_ROOT = _repo_root()
+
+# ИМЯ НАБОРА ДЛЯ КОРНЕВОЙ РАСКЛАДКИ. Ведомости ниже ключуются именем набора, и
+# заведены они, когда набор лежал в `services/iam/`. В отдельном репозитории
+# службы набор лежит в корне, и вывод «первый сегмент пути» дал бы `tests` —
+# ключ, которого нет ни в одной ведомости: каждая запись осиротела бы разом, и
+# выглядело бы это как шесть находок вместо одной смены раскладки.
+#
+# Имя объявлено КОНСТАНТОЙ, а не выведено: набор здесь один, и он тот самый —
+# домен `kaname.cloud.iam.v1`. Выводить его из чего-либо значило бы завести
+# второе место об одном предмете.
+ROOT_SUITE_NAME = "iam"
+
+
+def _suite_name(path, root) -> str:
+    """Имя набора по пути его генератора/кейса. Раскладок ДВЕ, и обе названы."""
+    rel = path.parts[len(root.parts):]
+    if rel and rel[0] == "services":
+        return rel[1]
+    if rel and rel[0] == "tests":
+        return ROOT_SUITE_NAME
+    return rel[0] if rel else ROOT_SUITE_NAME
+
+# КОРНЕВОЙ НАБОР идёт ПЕРВЫМ: это форма отдельного репозитория службы, где набор
+# лежит прямо в `tests/newman`. Образцы платформы оставлены — в её дереве они
+# находят семь остальных генераторов, а здесь не находят ничего, и это не
+# послабление: обход пуст только если не нашлось НИ ОДНОГО, и тогда проба
+# объявляет себя беспредметной.
+GEN_GLOBS = ("tests/newman/scripts/gen.py",
+             "services/*/tests/newman/scripts/gen.py",
              "gateway/tests/newman/scripts/gen.py")
 
 # Враждебная фраза: каждый знак закрывает свой контекст. Апостроф — литерал в
@@ -114,9 +167,7 @@ def _generators() -> dict:
     mods = {}
     for glob in GEN_GLOBS:
         for path in sorted(REPO_ROOT.glob(glob)):
-            name = path.parts[len(REPO_ROOT.parts)]
-            if name == "services":
-                name = path.parts[len(REPO_ROOT.parts) + 1]
+            name = _suite_name(path, REPO_ROOT)
             spec = importlib.util.spec_from_file_location(f"kacho_gen_{name}", path)
             module = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = module
@@ -259,6 +310,10 @@ def test_no_caller_text_is_pasted_between_quotes_anywhere_in_the_tree():
 # (сервис, подпись, вызов). Вызов получает модуль генератора и текст, который
 # подставляется в проверяемый параметр.
 SEAMS = [
+    # ЗАПИСИ ОСТАЛЬНЫХ НАБОРОВ СНЯТЫ ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ: их генераторы и
+    # кейсы живут в дереве платформы, а в этом репозитории их нет ни одного файла.
+    # Запись, которой нечего проверять, — находка по правилу самой ведомости, а не
+    # мелочь. В дереве платформы они остались при своих наборах.
     ("iam", "require_env_url/why",
      lambda g, t: g.require_env_url("internalBaseUrl", "/iam/v1/internal/x", t)),
     ("iam", "require_env_url/var",
@@ -268,46 +323,6 @@ SEAMS = [
     ("iam", "assert_op_error/msg_substr",
      lambda g, t: g.assert_op_error(3, "INVALID_ARGUMENT", msg_substr=t)),
     ("iam", "assert_answered/label", lambda g, t: g.assert_answered(t)),
-    ("registry", "require_env_url/why",
-     lambda g, t: g.require_env_url("internalBaseUrl", "/registry/v1/x", t)),
-    ("registry", "require_env_url/var",
-     lambda g, t: g.require_env_url(t, "/registry/v1/x", "why")),
-    ("registry", "require_env_url/path",
-     lambda g, t: g.require_env_url("internalBaseUrl", t, "why")),
-    ("registry", "assert_answered/label", lambda g, t: g.assert_answered(t)),
-    ("gateway", "require_env_url/why",
-     lambda g, t: g.require_env_url("internalBaseUrl", "/v1/x", t)),
-    ("gateway", "require_env_url/var",
-     lambda g, t: g.require_env_url(t, "/v1/x", "why")),
-    ("gateway", "require_env_url/path",
-     lambda g, t: g.require_env_url("internalBaseUrl", t, "why")),
-    ("compute", "assert_op_error/msg_substr",
-     lambda g, t: g.assert_op_error(3, "INVALID_ARGUMENT", msg_substr=t)),
-    ("compute", "assert_op_error_oneof/msg_substr",
-     lambda g, t: g.assert_op_error_oneof([3, 5], "INVALID_ARGUMENT/NOT_FOUND",
-                                          msg_substr=t)),
-    ("storage", "assert_op_error/msg_substr",
-     lambda g, t: g.assert_op_error(3, "INVALID_ARGUMENT", msg_substr=t)),
-    ("storage", "assert_op_error_oneof/msg_substr",
-     lambda g, t: g.assert_op_error_oneof([3, 5], "INVALID_ARGUMENT/NOT_FOUND",
-                                          msg_substr=t)),
-    ("storage", "wait_until_ready/subject",
-     lambda g, t: g.wait_until_ready(
-         g.Step(name="get-volume", method="GET", path="/storage/v1/volumes/{{v}}"),
-         ready="READY", subject=t)),
-    ("geo", "assert_operation_failed/message_substr",
-     lambda g, t: g.assert_operation_failed(6, "ALREADY_EXISTS", message_substr=t)),
-    ("vpc", "assert_cleanup_delete/what",
-     lambda g, t: g.assert_cleanup_delete(t, "адрес занят интерфейсом")),
-    ("vpc", "assert_cleanup_delete/refusal",
-     lambda g, t: g.assert_cleanup_delete("адрес A", t)),
-    ("vpc", "assert_empty_page/why", lambda g, t: g.assert_empty_page(t)),
-    # Помощники, кодировавшие текст ещё до #1181, — положительный контроль: они
-    # обязаны ОСТАТЬСЯ кодирующими.
-    ("nlb", "assert_refused_sync_or_async/what",
-     lambda g, t: g.assert_refused_sync_or_async(t)),
-    ("vpc", "assert_refused_sync_or_async/what",
-     lambda g, t: g.assert_refused_sync_or_async(t)),
 ]
 
 

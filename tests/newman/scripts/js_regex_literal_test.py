@@ -66,7 +66,7 @@
 тянет за собой оба числа сразу. Предикат, чтобы перемерить:
 
     python3 - <<'PY'
-    import sys; sys.path.insert(0, "services/iam/tests/newman/scripts")
+    import sys; sys.path.insert(0, "tests/newman/scripts")
     from pathlib import Path
     import newman_js_lexer as L
     _p, _t, pl = L.scan_tree(Path("."), ("services/*/tests/newman/cases/*.py",
@@ -102,7 +102,7 @@
     python3 - <<'PY'
     import ast, sys
     from pathlib import Path
-    sys.path.insert(0, "services/iam/tests/newman/scripts")
+    sys.path.insert(0, "tests/newman/scripts")
     import newman_js_lexer as L
     OPEN = ("to.match(/", ".test(/", "RegExp(", "match(/")
     pct = cat = fmt = skipped = hits = 0
@@ -149,8 +149,68 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import newman_js_lexer as jslex  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parents[5]
-GEN_GLOBS = ("services/*/tests/newman/scripts/gen.py",
+def _repo_root() -> Path:
+    """Корень репозитория — ПО МАРКЕРУ, а не отсчётом уровней.
+
+    Прежде стояло `parents[5]` — верно ровно пока набор лежал под
+    `<корень>/tests/newman/scripts`. В отдельном репозитории службы
+    набор лежит двумя уровнями выше, и `parents[5]` уезжает ВЫШЕ корня — в чужой
+    каталог файловой системы. Обход тогда не пуст, он ПОСТОРОННИЙ, и это хуже:
+    пустой обход проба объявляет беспредметным, а посторонний вынесет вердикт о
+    чужом дереве.
+
+    Маркер — `.git` (в рабочей копии он бывает файлом, поэтому `exists`, а не
+    `is_dir`); запасной — `go.mod` рядом с каталогом набора.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / ".git").exists():
+            return parent
+    for parent in here.parents:
+        if (parent / "go.mod").is_file() and (parent / "tests" / "newman").is_dir():
+            return parent
+    raise AssertionError(
+        f"корень репозитория не найден подъёмом от {here}: ни `.git`, ни `go.mod` "
+        f"рядом с каталогом набора. Обходить нечего, и это не «ноль находок»")
+
+
+REPO_ROOT = _repo_root()
+
+# ИМЯ НАБОРА ДЛЯ КОРНЕВОЙ РАСКЛАДКИ. Ведомости ниже ключуются именем набора, и
+# заведены они, когда набор лежал в `services/iam/`. В отдельном репозитории
+# службы набор лежит в корне, и вывод «первый сегмент пути» дал бы `tests` —
+# ключ, которого нет ни в одной ведомости: каждая запись осиротела бы разом, и
+# выглядело бы это как шесть находок вместо одной смены раскладки.
+#
+# Имя объявлено КОНСТАНТОЙ, а не выведено: набор здесь один, и он тот самый —
+# домен `kaname.cloud.iam.v1`. Выводить его из чего-либо значило бы завести
+# второе место об одном предмете.
+ROOT_SUITE_NAME = "iam"
+
+
+def _suite_name(path, root) -> str:
+    """Имя набора по пути его генератора/кейса. Раскладок ДВЕ, и обе названы."""
+    rel = path.parts[len(root.parts):]
+    if rel and rel[0] == "services":
+        return rel[1]
+    if rel and rel[0] == "tests":
+        return ROOT_SUITE_NAME
+    return rel[0] if rel else ROOT_SUITE_NAME
+
+
+# ИМЯ НАБОРА ПО СТРОКЕ ПУТИ — тот же вывод, что у `_suite_name`, но для ключей
+# ведомостей: они хранят путь строкой, а не объектом.
+def _suite_of_relpath(rel: str) -> str:
+    head = rel.split("/")
+    if head and head[0] == "services":
+        return head[1]
+    if head and head[0] == "tests":
+        return ROOT_SUITE_NAME
+    return head[0] if head else ROOT_SUITE_NAME
+
+# КОРНЕВОЙ НАБОР идёт ПЕРВЫМ — форма отдельного репозитория службы (см. близнеца).
+GEN_GLOBS = ("tests/newman/scripts/gen.py",
+             "services/*/tests/newman/scripts/gen.py",
              "gateway/tests/newman/scripts/gen.py")
 
 CODE, TEXT = "код", "текст"
@@ -159,14 +219,14 @@ SANITISER = {CODE: "js_regex_src(", TEXT: "js_regex_literal_text("}
 # ВЕДОМОСТЬ ИСХОДОВ. Ключ — (файл, что подставляется); номер строки не годится,
 # он двигается от чужой правки. Запись без места в дереве и место без записи —
 # обе находки, и каждая своим утверждением.
+#
+# ЗАПИСИ ОСТАЛЬНЫХ СЕМИ НАБОРОВ СНЯТЫ ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ. Они адресовали
+# генераторы `services/{compute,nlb,registry,storage,vpc}` и `gateway` — в этом
+# репозитории таких файлов нет ни одного, то есть исключать им нечего, а запись,
+# которой нечего исключать, есть находка по собственному правилу ведомости выше.
+# В дереве платформы они остались при своих генераторах.
 RECORDED = {
-    ("services/compute/tests/newman/scripts/gen.py", "msg_regex"): CODE,
-    ("services/iam/tests/newman/scripts/gen.py", "msg_regex"): CODE,
-    ("services/nlb/tests/newman/scripts/gen.py", "prefix_regex"): CODE,
-    ("services/nlb/tests/newman/scripts/gen.py", "retry_when"): CODE,
-    ("services/registry/tests/newman/scripts/gen.py", "prefix_regex"): CODE,
-    ("services/storage/tests/newman/scripts/gen.py", "msg_regex"): CODE,
-    ("services/vpc/tests/newman/scripts/gen.py", "resource_name"): TEXT,
+    ("tests/newman/scripts/gen.py", "msg_regex"): CODE,
 }
 
 
@@ -175,9 +235,7 @@ def _generators() -> dict:
     mods = {}
     for glob in GEN_GLOBS:
         for path in sorted(REPO_ROOT.glob(glob)):
-            name = path.parts[len(REPO_ROOT.parts)]
-            if name == "services":
-                name = path.parts[len(REPO_ROOT.parts) + 1]
+            name = _suite_name(path, REPO_ROOT)
             spec = importlib.util.spec_from_file_location(f"kacho_regex_gen_{name}", path)
             module = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = module
@@ -355,23 +413,19 @@ def test_the_census_discriminates_wrapped_from_unwrapped():
 
 # (сервис, подпись места, вызов). Вызов получает модуль генератора и образец.
 CODE_SEAMS = [
-    ("compute", "assert_op_error/msg_regex",
-     lambda g, p: g.assert_op_error(3, "INVALID_ARGUMENT", msg_regex=p)),
+    # ЗАПИСИ ОСТАЛЬНЫХ НАБОРОВ СНЯТЫ ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ: их генераторы и
+    # кейсы живут в дереве платформы, а в этом репозитории их нет ни одного файла.
+    # Запись, которой нечего проверять, — находка по правилу самой ведомости, а не
+    # мелочь. В дереве платформы они остались при своих наборах.
     ("iam", "assert_op_error/msg_regex",
      lambda g, p: g.assert_op_error(3, "INVALID_ARGUMENT", msg_regex=p)),
-    ("storage", "assert_op_error/msg_regex",
-     lambda g, p: g.assert_op_error(3, "INVALID_ARGUMENT", msg_regex=p)),
-    ("nlb", "assert_operation_envelope/prefix_regex",
-     lambda g, p: g.assert_operation_envelope(prefix_regex=p)),
-    ("registry", "assert_operation_envelope/prefix_regex",
-     lambda g, p: g.assert_operation_envelope(prefix_regex=p)),
-    ("nlb", "poll_operation_until_done/retry_when",
-     lambda g, p: g.poll_operation_until_done(retry_from="create-lb", retry_when=p)),
 ]
 
 TEXT_SEAMS = [
-    ("vpc", "conf_not_found_text/resource_name",
-     lambda g, t: g.conf_not_found_text("NET", "/vpc/v1/networks", t)),
+    # ЗАПИСИ ОСТАЛЬНЫХ НАБОРОВ СНЯТЫ ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ: их генераторы и
+    # кейсы живут в дереве платформы, а в этом репозитории их нет ни одного файла.
+    # Запись, которой нечего проверять, — находка по правилу самой ведомости, а не
+    # мелочь. В дереве платформы они остались при своих наборах.
 ]
 
 # Негодные образцы. Каждый ломает СИНТАКСИС порождаемого файла, и ни один не
@@ -440,7 +494,7 @@ def test_every_recorded_place_has_a_seam():
     seamed = {(svc, label.split("/")[-1]) for svc, label, _ in CODE_SEAMS + TEXT_SEAMS}
     missing = []
     for (path, expr), outcome in sorted(RECORDED.items()):
-        svc = path.split("/")[1] if path.startswith("services/") else path.split("/")[0]
+        svc = _suite_of_relpath(path)
         if (svc, expr) not in seamed:
             missing.append(f"{path}: {{{expr}}} «{outcome}»")
     assert not missing, (

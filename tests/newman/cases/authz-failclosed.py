@@ -119,7 +119,7 @@ Pre-conditions: `tests/authz-fixtures/setup.sh` (jwtAccountAdminA, accountAId).
     `TestAuthz_GRPC_CheckerError_FailClosed` — с законным близнецом
     `TestAuthz_GRPC_CheckerError_FailOpen` рядом;
   * что САМ СЕРВИС отвечает отказом, а не пустой страницей, когда его базы нет.
-    Механизм держит `services/iam/internal/repo/kaname/pg/pgmaperr_test.go`
+    Механизм держит `internal/repo/kaname/pg/pgmaperr_test.go`
     (`TestWrapPgErr_ConnectionRefusals_AreUnavailable` и соседи по файлу);
     поверхностной пробы по семи спискам сегодня нет НИ ОДНОЙ.
 

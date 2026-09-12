@@ -38,7 +38,7 @@
 # гейт (tests/newman/scripts/assert-suites-green.sh) докладывает `<stem>(no-report)` и роняет
 # прогон. «Не смогли создать условие» — открытый долг, а не зелёная суита.
 #
-# Запуск: cwd = services/iam/tests/newman
+# Запуск: cwd = tests/newman
 #   [SETUP_NS=kacho] [DELAY=…] ./scripts/run-ceremony.sh
 
 set -uo pipefail
@@ -79,7 +79,7 @@ if ! SETUP_NS="${SETUP_NS:-kacho}" python3 "$SEED"; then
 fi
 
 # ─── 2. набор волны — ВЫВОДИТСЯ из дерева ────────────────────────────────────
-mapfile -t STEMS < <(python3 "$DECL" --root "$ROOT" --suite "services/iam/tests/newman" --stems)
+mapfile -t STEMS < <(python3 "$DECL" --root "$ROOT" --suite "tests/newman" --stems)
 if [ "${#STEMS[@]}" -eq 0 ]; then
   echo "FATAL: набор волны вывелся ПУСТЫМ." >&2
   echo "  Это не 'церемония больше не нужна' — это 'ничего не прочитано': коллекции" >&2

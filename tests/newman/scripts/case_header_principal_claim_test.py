@@ -39,12 +39,25 @@ from pathlib import Path
 import pytest
 
 
-def _services_root() -> Path:
-    """Корень каталога сервисов — вверх по дереву, не отсчётом уровней."""
+def _cases_root() -> Path:
+    """Корень, ОТ КОТОРОГО обходятся наборы кейсов. Форм раскладки ДВЕ.
+
+    В дереве платформы наборы лежат под `services/<имя>/tests/newman/cases`, и
+    корнем обхода служит `services/`. В отдельном репозитории службы набор ОДИН и
+    лежит прямо в `tests/newman/cases` — каталога `services/` здесь нет ни одного
+    файла, и прежний подъём объявлял «обходить нечего» на дереве, где кейсов 41.
+
+    Признак посадки — наличие `services/`, а не догадка: вторая форма выбирается
+    только когда первой нет, поэтому в дереве платформы поведение не меняется.
+    """
     for parent in Path(__file__).resolve().parents:
         if (parent / "services").is_dir() and (parent / "tests" / "authz-fixtures").is_dir():
             return parent / "services"
-    raise AssertionError("корень `services/` не найден — обходить нечего")
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "tests" / "newman" / "cases").is_dir():
+            return parent
+    raise AssertionError(
+        "ни `services/`, ни `tests/newman/cases` не найдены подъёмом — обходить нечего")
 
 
 def _fixtures_dir() -> Path:
@@ -78,7 +91,10 @@ def _case_files() -> list[Path]:
     экземпляр, а не класс: следующий набор завёл бы ту же пару, и никто бы не
     заметил.
     """
-    return sorted(_services_root().glob("*/tests/newman/cases/*.py"))
+    root = _cases_root()
+    if root.name == "services":
+        return sorted(root.glob("*/tests/newman/cases/*.py"))
+    return sorted((root / "tests" / "newman" / "cases").glob("*.py"))
 
 
 def _headers() -> list[tuple[Path, str]]:
@@ -95,11 +111,15 @@ def test_no_case_header_claims_a_binding_target_as_a_principal(capsys):
     findings = []
     for path, doc in headers:
         for lineno, slot, ident in pp.header_principal_claims(doc):
-            findings.append(f"{path.relative_to(_services_root())}: шапка+{lineno}: {slot} объявлен предъявителем {ident}")
+            findings.append(f"{path.relative_to(_cases_root())}: шапка+{lineno}: {slot} объявлен предъявителем {ident}")
 
     # Объём осмотренного печатается ВСЕГДА: «ноль находок» обязано быть отличимо
     # от «ноль прочитанного».
-    suites = {p.parents[2].parent.name for p in _case_files()}
+    # Имя набора: у платформы это каталог сервиса, у отдельного репозитория —
+    # сам репозиторий. Считается по ОДНОМУ правилу от корня обхода, а не двумя.
+    root = _cases_root()
+    suites = ({p.parents[2].parent.name for p in _case_files()} if root.name == "services"
+              else {root.name})
     with capsys.disabled():
         print(f"\nперепись: наборов {len(suites)}, файлов кейсов {len(_case_files())}, "
               f"шапок прочитано {len(headers)}, "
