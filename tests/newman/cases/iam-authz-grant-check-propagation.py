@@ -587,7 +587,7 @@ CASES.append(Case(
         # `sakey-redact-grace` window (default 120s — the one-shot client's read+save
         # budget) and only then cleared to "<redacted>". A fast e2e cannot observe the
         # 120s-delayed redaction, so that timing behavior is unit-covered
-        # (services/iam/.../sa_keys/usecase_redaction_grace_test.go, short injected grace
+        # (.../sa_keys/usecase_redaction_grace_test.go, short injected grace
         # — the correct layer for timing). Here we lock the black-box observable: the
         # credential is delivered (privateKeyPem is a real PEM) and the identifier is
         # present (clientId) — never over-redacted away.

@@ -31,8 +31,21 @@
 #   out/<resource>.rc   — exit-код newman конкретной коллекции
 #   out/summary.txt     — итоговая сводка
 #
-# Требует: api-gateway доступен по baseUrl из env (локально — port-forward на 18080);
-#          newman установлен (`npm install -g newman`); jq для сводки.
+# ТРЕБУЕТ СТЕНДА, И СТЕНД ЭТОТ — ПЛАТФОРМЕННЫЙ. Перепись адресатов (её печатает
+# `scripts/own_front_env_test.py`): из 41 модуля кейсов к собственным фронтам
+# службы адресуется ОДИН, остальные идут к краю платформы — через умолчание
+# `baseUrl` либо через `internalBaseUrl`/`externalBaseUrl`. Край не транспорт: он
+# ПРОИЗВОДИТ проверяемые свойства (разбор доступа с извлечением области, скрытие
+# существования побайтово равное промаху, отображение кода gRPC в HTTP-статус).
+#
+# Поэтому наведение переменных края на собственный фронт ЗАПРЕЩЕНО и держится
+# гейтом `scripts/own_front_env_test.py`: те же кейсы, тот же зелёный отчёт,
+# проверено РАЗНОЕ — и по отчёту это не видно никак.
+#
+# Требует: newman (`npm install -g newman`); jq для сводки; python3 для гейта
+#          покрытия; контракты iam — из модуля-пина платформы (`go mod download`);
+#          и стенд по адресам из env: край платформы для 40 модулей кейсов,
+#          собственные фронты службы (:9098/:9099) для одного.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -96,8 +109,19 @@ BAIL=""
 DELAY="100"
 EXTRA=()
 
+# `--help` ОТВЕЧАЕТ И НЕ ГОНЯЕТ. Прежде его не было вовсе, и неизвестный флаг
+# уезжал в EXTRA: `run.sh --help` доходил до `newman run` и пытался обратиться к
+# стенду. То есть у прогонщика не было ни одного способа сказать о себе, не
+# требуя стенда, — а именно этим его провязку и проверяют.
+_usage() {
+  sed -n '6,48p' "$0" | sed 's/^# \{0,1\}//'
+  echo
+  echo "Флаги: --service <stem> | --bail | --delay <мс> | --jobs <n> (принимается и игнорируется) | --help"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --help|-h) _usage; exit 0 ;;
     --service) SERVICE="$2"; shift 2 ;;
     --bail)    BAIL="--bail"; shift ;;
     --delay)   DELAY="$2"; shift 2 ;;
@@ -281,7 +305,7 @@ if [[ -f "$_CEREMONY_DECL" ]] && command -v python3 >/dev/null 2>&1 \
   while IFS= read -r _cs; do
     [[ -n "$_cs" ]] && DELEGATED+=("$_cs")
   done < <(python3 "$_CEREMONY_DECL" --root "$_CEREMONY_ROOT" \
-             --suite services/iam/tests/newman --stems 2>/dev/null)
+             --suite tests/newman --stems 2>/dev/null)
   echo "[ceremony] волна церемонии активна — делегировано коллекций: $(( ${#DELEGATED[@]} - _n_before ))"
 fi
 _is_delegated() {
@@ -636,15 +660,29 @@ fi
 # COVERAGE_MIN is set AND coverage% drops below it (set this in CI to enforce a
 # floor).
 #
-# The .proto live at the MONOREPO ROOT (<root>/proto/kacho/cloud/<domain>/v1) — this
-# suite sits at <root>/services/iam/tests/newman, so the default glob is four levels
-# up. The previous default (`../../../kacho-proto/proto/…`) addressed the polyrepo
-# layout where kacho-proto was a sibling CHECKOUT; in the monorepo it resolves to
-# services/kacho-proto/… which does not exist → coverage.py exits 2 ("no RPCs
-# discovered") → the whole iam suite went red with zero failing assertions.
-# Both layouts are supported: the first glob that actually matches .proto files wins,
-# so a standalone/polyrepo checkout with a sibling kacho-proto still resolves.
-# COVERAGE_PROTO_GLOB overrides both (CI may pass an absolute path).
+# ГДЕ ЛЕЖАТ КОНТРАКТЫ — РАЗНОЕ В ДВУХ ДЕРЕВЬЯХ, И ЗДЕСЬ ИХ НЕТ ВОВСЕ.
+#
+# В дереве платформы `.proto` лежат в её корне (`<корень>/proto/kaname/cloud/iam/v1`),
+# а набор — под `<корень>/tests/newman`, отсюда подъём на четыре уровня.
+# В репозитории СЛУЖБЫ файлов `.proto` НОЛЬ (предикат: `git ls-files | grep -c
+# '\.proto$'`): контракты приезжают МОДУЛЕМ платформы, и модуль их несёт — 41 файл
+# под `proto/kaname/cloud/iam/v1/` внутри своего каталога в кэше модулей.
+#
+# Значит источник контрактов здесь — ПИН, а не чужая рабочая копия. Это и есть
+# разница, ради которой служба вынесена: прогон не становится функцией ревизии,
+# которой служба не управляет, — версию контрактов выбирает её собственный `go.mod`.
+#
+# ПОРЯДОК КАНДИДАТОВ и почему он такой: ручка (её задаёт конвейер) → модуль-пин →
+# раскладка дерева платформы. Модуль впереди дерева намеренно: если набор когда-нибудь
+# окажется внутри платформы рядом с её `proto/`, версия контрактов всё равно обязана
+# быть та, на которую служба запинена, иначе покрытие мерилось бы по контрактам,
+# против которых код не собран.
+#
+# НЕ НАЙТИ НИ ОДНОГО КАНДИДАТА — ОТКАЗ, А НЕ «НОЛЬ RPC». Прежде последняя строка
+# подставляла путь платформы БЕЗУСЛОВНО, поэтому в этом репозитории гейт доходил до
+# `coverage.py` и выходил кодом 2 со словами «no RPCs discovered» — то есть жаловался
+# на предикат отбора там, где не было предмета. Отказ обязан называть, чего не
+# хватает: модуль не скачан (`go mod download`) либо дерева платформы рядом нет.
 _VERDICT_DIR="$(_verdict_layer_dir)"
 _COVERAGE_PY="$_VERDICT_DIR/coverage.py"
 if ! [ -f "$_COVERAGE_PY" ]; then
@@ -664,14 +702,35 @@ echo
 echo "===== coverage ====="
 COV_MIN="${COVERAGE_MIN:-0}"
 PROTO_GLOB="${COVERAGE_PROTO_GLOB:-}"
+_PLATFORM_MODULE="github.com/PRO-Robotech/kacho"
+_MODULE_DIR=""
 if [ -z "$PROTO_GLOB" ]; then
+  # Каталог модуля-пина. Код возврата берётся ДАННЫМИ: под `set -e` ненулевой
+  # оборвал бы прогонщик до развилки, и «модуль не скачан» стало бы неотличимо
+  # от «модуля нет в объявлении».
+  if command -v go >/dev/null 2>&1; then
+    _MODULE_DIR="$(cd "$NEWMAN_DIR" && GOFLAGS=-mod=mod go list -m -f '{{.Dir}}' \
+                    "$_PLATFORM_MODULE" 2>/dev/null || true)"
+  fi
   for _cand in \
-    '../../../../proto/kaname/cloud/iam/v1/*.proto' \
-    '../../../kacho-proto/proto/kaname/cloud/iam/v1/*.proto'; do
+    "${_MODULE_DIR:+$_MODULE_DIR/proto/kaname/cloud/iam/v1/*.proto}" \
+    '../../../../proto/kaname/cloud/iam/v1/*.proto'; do
+    [ -n "$_cand" ] || continue
     # shellcheck disable=SC2086
     if compgen -G "$_cand" >/dev/null 2>&1; then PROTO_GLOB="$_cand"; break; fi
   done
-  PROTO_GLOB="${PROTO_GLOB:-../../../../proto/kaname/cloud/iam/v1/*.proto}"
+fi
+if [ -z "$PROTO_GLOB" ]; then
+  echo "ОТКАЗ: контрактов iam не найдено ни по одному кандидату — покрытие НЕ ИЗМЕРЕНО." >&2
+  echo "        Это не «ноль RPC»: предмета у гейта нет вовсе." >&2
+  if [ -z "$_MODULE_DIR" ]; then
+    echo "        Модуль $_PLATFORM_MODULE не разрешён: позовите 'go mod download'" >&2
+    echo "        (без него 'go list -m' каталога не называет, и контракты взять негде)." >&2
+  else
+    echo "        Каталог модуля есть ($_MODULE_DIR), но контрактов iam в нём нет." >&2
+  fi
+  echo "        Либо задайте COVERAGE_PROTO_GLOB явно." >&2
+  exit 2
 fi
 echo "proto-glob: $PROTO_GLOB"
 if python3 "$_COVERAGE_PY" \

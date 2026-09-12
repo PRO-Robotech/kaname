@@ -1476,7 +1476,7 @@ CASES.append(Case(
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                # Текст владельца целиком (services/iam/internal/domain/rule.go), а не
+                # Текст владельца целиком (internal/domain/rule.go), а не
                 # часть «system-only»: её несут ДВА разных отказа iam — про модуль и про
                 # произвольное поле, — и подмену одного другим шаг не различал (#1520).
                 # Вхождением, а не равенством: `Validate` накапливает нарушения, и число
@@ -1637,7 +1637,7 @@ CASES.append(Case(
             test_script=[
                 *assert_status(400),
                 *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                # Текст владельца целиком (services/iam/internal/domain/rule.go), а не
+                # Текст владельца целиком (internal/domain/rule.go), а не
                 # часть «mutually exclusive»: её несёт и отказ про цель привязки
                 # (`allInScope and resources`), то есть о ДРУГОМ предмете (#1520).
                 *assert_refusal_message_contains(

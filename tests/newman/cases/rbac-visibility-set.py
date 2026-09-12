@@ -31,7 +31,7 @@ List call. Единственный гейт — пообъектный филь
 метке даёт 200+отфильтровано (никогда 403). Прежнее якорное правило `{iam.account list}`
 (эмитировало `account#v_list`, чтобы авторизовать САМ ВЫЗОВ Project/Group List) больше не
 нужно и снято. ПРЕДИКАТ ЭТОГО ФИЛЬТРА — НЕ союз `viewer ∪ v_list`, а отношение чтения типа
-(`services/iam/internal/authzfilter/visibility.go` → `pageRelations`): `v_get` для
+(`internal/authzfilter/visibility.go` → `pageRelations`): `v_get` для
 account/project/iam_user/iam_group/iam_service_account/iam_access_binding и `{viewer,
 v_list}` для iam_role. Союз был убран решением
 `docs/architecture/list-page-membership-equals-read-relation.md`.
@@ -49,7 +49,7 @@ WHAT THIS PROVES (black-box through api-gateway → IAM → OpenFGA, camelCase R
   Членство в странице равно чтению — IAM-SET-PRJ-LIST-READ-PARITY.
     Выдача `verbs:[list]` БЕЗ `get` материализует `v_list` и ярусный кортеж, но НЕ
     `v_get`. Предикат страницы `project`/`group`/`serviceAccount` — именно `v_get`
-    (`services/iam/internal/authzfilter/visibility.go` → `pageRelations`), тот же, чем
+    (`internal/authzfilter/visibility.go` → `pageRelations`), тот же, чем
     гейтится одиночный Get. Значит такая выдача НЕ показывает объект в списке И не
     открывает его по id: строка попадает в страницу тогда и только тогда, когда
     вызывающий вправе прочитать её одиночным Get. Решение и его принятые следствия —
@@ -434,7 +434,7 @@ def grant_bylabel_role(role_var, acb_var, role_op, bind_op, verbs, role_name, ac
                     # `account:<id>#v_list` — единственный гейт это пообъектный фильтр
                     # страницы в хендлере. Отдельное якорное правило не нужно.
                     # Предикат страницы `project` — `v_get`
-                    # (`services/iam/internal/authzfilter/visibility.go` → `pageRelations`),
+                    # (`internal/authzfilter/visibility.go` → `pageRelations`),
                     # то есть то же отношение, которым гейтится одиночный Get; решение —
                     # `docs/architecture/list-page-membership-equals-read-relation.md`.
                     {"module": "iam", "resources": ["project"], "verbs": verbs,
@@ -657,7 +657,7 @@ CASES.append(Case(
         #
         # Кейс ПЕРЕНАЦЕЛЕН, а не ослаблен. Он требовал снятого инварианта — «объект с
         # выдачей на один лишь `list` виден в списке, но его Get 404». Предикат страницы
-        # `project` — `v_get` (`services/iam/internal/authzfilter/visibility.go`,
+        # `project` — `v_get` (`internal/authzfilter/visibility.go`,
         # `pageRelations`), то есть ровно то отношение, которым гейтится одиночный Get;
         # принятое следствие «роль с одним лишь `list` больше не показывает объект»
         # записано в решении. Разбор — в докстроке `list_read_parity_case_steps`.
@@ -816,7 +816,7 @@ def grant_bylabel_generic(spec, role_var, acb_var, role_op, bind_op, verbs, role
                    # now <exempt> too — no account#v_list anchor needed. The per-object by-label
                    # rule is the only grant; each type's in-handler page filter narrows the List
                    # to the matched set. Предикат страницы — ОТНОШЕНИЕ ЧТЕНИЯ типа
-                   # (`services/iam/internal/authzfilter/visibility.go` → `pageRelations`),
+                   # (`internal/authzfilter/visibility.go` → `pageRelations`),
                    # а не союз `viewer ∪ v_list`: см. решение
                    # `docs/architecture/list-page-membership-equals-read-relation.md`.
                    "rules": [{"module": "iam", "resources": [spec["rule_res"]],
@@ -919,7 +919,7 @@ def list_read_parity_case_steps(kind, pfx, role_name):
     `List` возвращает то же самое сообщение ресурса, что и `Get`, поэтому «видеть в
     списке без содержимого» на такой выдаче нереализуемо — членство в странице и есть
     содержимое. Предикат страницы приведён к ОТНОШЕНИЮ ЧТЕНИЯ типа
-    (`services/iam/internal/authzfilter/visibility.go` → `pageRelations`; для
+    (`internal/authzfilter/visibility.go` → `pageRelations`; для
     group/serviceAccount/project это `v_get`), и принятое следствие записано там же
     дословно: «роль с одним лишь глаголом `list` больше не показывает объект».
     Кейс, продолжающий требовать снятое, закрепляет прошлое поведение и краснеет на
@@ -1001,7 +1001,7 @@ def list_read_parity_case_steps(kind, pfx, role_name):
 
 
 # Per-type case selection is NOT uniform, и решает это ПРЕДИКАТ СТРАНИЦЫ ТИПА —
-# `services/iam/internal/authzfilter/visibility.go` → `pageRelations` (сверено с деревом
+# `internal/authzfilter/visibility.go` → `pageRelations` (сверено с деревом
 # и с гейтом `internal/repohygiene/listreadrelationparity_test.go`, который читает
 # отношение чтения из сгенерированного каталога прав):
 #   - serviceAccount / group / project — предикат страницы `v_get`, то есть ТОТ ЖЕ, чем

@@ -118,7 +118,7 @@ red is carried here, as a number and a case list, never as a deduction in the ga
   `AUTHZ-USR-GT-SELF-CEREMONY`, человеческим предъявителем волны церемонии
   (`jwtHumanCeremonyNoBindings` + `ceremonyNoBindingsUserId`). Коллекция `authz-deny`
   в эту волну входит уже, проверяется машинно:
-  `python3 tests/authz-fixtures/ceremony_credentials.py --stems --suite services/iam/tests/newman`.
+  `python3 tests/authz-fixtures/ceremony_credentials.py --stems --suite tests/newman`.
 
 Без этого переноса строки `USR-GT-*` стали бы сплошным отрицанием, и полностью
 отказавший `UserService.Get` оставил бы матрицу зелёной.
@@ -451,7 +451,7 @@ domain and `metadata.action` to a refusal it decides itself — for every method
 scope-filtered band, where the edge runs no per-RPC check and therefore names no action.
 A method with no catalog row still gets nothing, so a catalog miss stays distinguishable,
 which is the discriminator the case asserts. Unit coverage enumerates the band from the
-catalog itself: `services/iam/internal/authzguard/deny_details_test.go`. The case is
+catalog itself: `internal/authzguard/deny_details_test.go`. The case is
 expected green on the next stand run; this row stays until a run observes it, because the
 fix is proven in-process and not yet end to end.
 
@@ -574,7 +574,7 @@ not authN). This is exercised black-box by `AUTHZ-ULG04-NONMEMBER-PRJGRP-LIST-EM
 `authz-deny.py`, and the `IAM-SET-PRJ/GRP-LABEL-EXACT-OK` exact-set cases in `rbac-visibility-set.py`.
 
 The page predicate is the type's READ relation, not the union `viewer ∪ v_list`:
-`services/iam/internal/authzfilter/visibility.go` → `pageRelations` gives `v_get` for
+`internal/authzfilter/visibility.go` → `pageRelations` gives `v_get` for
 account / project / iam_user / iam_group / iam_service_account / iam_access_binding, and
 `{viewer, v_list}` for iam_role alone (role reads have no catalog relation). A row is on the
 page **iff** its holder may read it by id — decision
@@ -736,7 +736,7 @@ the **ungated** behavior and do NOT assert the gated part:
   projection lives on the internal listener (`InternalIAMService.GetRoleCompiled`, :9091),
   which is not reachable from this public-gateway newman env. Newman covers the **public**
   side (two-projection field-ABSENCE on public `Role.Get`/`List`); the internal-positive is
-  covered by `services/iam/internal/apps/kaname/api/role/f5_compiled_projection_test.go`.
+  covered by `internal/apps/kaname/api/role/f5_compiled_projection_test.go`.
 - **IAM-1-33 (INTERNAL never echoes pgx/SQL)** — requires injecting an uncategorized DB
   error on the write path (not reproducible black-box). Integration-covered
   (INTERNAL-opaque mapping tests). Documented here, not a newman case.

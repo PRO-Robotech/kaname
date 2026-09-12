@@ -7,7 +7,7 @@
 области ОДНОГО аккаунта, то есть выдачи на самом аккаунте ПЛЮС выдачи на каждом
 его проекте. Композируется с `filter` (один предикат) и с `includeRevoked`.
 
-Приёмка: services/iam/docs/engineering/acceptance/subject-grants-within-an-account.md
+Приёмка: docs/engineering/acceptance/subject-grants-within-an-account.md
 (§5 сценарии IAM-AB-SIA-NN, §8 предикат готовности).
 
 ЧТО ЗДЕСЬ УТВЕРЖДАЕТСЯ И ЧЕГО НЕ ВИДЯТ ПРОБЫ GO. Пробы уровня use-case знают

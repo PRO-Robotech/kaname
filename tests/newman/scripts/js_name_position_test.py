@@ -98,10 +98,71 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import newman_js_lexer as jslex  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parents[5]
-CASE_GLOBS = ("services/*/tests/newman/cases/*.py",
+def _repo_root() -> Path:
+    """Корень репозитория — ПО МАРКЕРУ, а не отсчётом уровней.
+
+    Прежде стояло `parents[5]` — верно ровно пока набор лежал под
+    `<корень>/tests/newman/scripts`. В отдельном репозитории службы
+    набор лежит двумя уровнями выше, и `parents[5]` уезжает ВЫШЕ корня — в чужой
+    каталог файловой системы. Обход тогда не пуст, он ПОСТОРОННИЙ, и это хуже:
+    пустой обход проба объявляет беспредметным, а посторонний вынесет вердикт о
+    чужом дереве.
+
+    Маркер — `.git` (в рабочей копии он бывает файлом, поэтому `exists`, а не
+    `is_dir`); запасной — `go.mod` рядом с каталогом набора.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / ".git").exists():
+            return parent
+    for parent in here.parents:
+        if (parent / "go.mod").is_file() and (parent / "tests" / "newman").is_dir():
+            return parent
+    raise AssertionError(
+        f"корень репозитория не найден подъёмом от {here}: ни `.git`, ни `go.mod` "
+        f"рядом с каталогом набора. Обходить нечего, и это не «ноль находок»")
+
+
+REPO_ROOT = _repo_root()
+
+# ИМЯ НАБОРА ДЛЯ КОРНЕВОЙ РАСКЛАДКИ. Ведомости ниже ключуются именем набора, и
+# заведены они, когда набор лежал в `services/iam/`. В отдельном репозитории
+# службы набор лежит в корне, и вывод «первый сегмент пути» дал бы `tests` —
+# ключ, которого нет ни в одной ведомости: каждая запись осиротела бы разом, и
+# выглядело бы это как шесть находок вместо одной смены раскладки.
+#
+# Имя объявлено КОНСТАНТОЙ, а не выведено: набор здесь один, и он тот самый —
+# домен `kaname.cloud.iam.v1`. Выводить его из чего-либо значило бы завести
+# второе место об одном предмете.
+ROOT_SUITE_NAME = "iam"
+
+
+def _suite_name(path, root) -> str:
+    """Имя набора по пути его генератора/кейса. Раскладок ДВЕ, и обе названы."""
+    rel = path.parts[len(root.parts):]
+    if rel and rel[0] == "services":
+        return rel[1]
+    if rel and rel[0] == "tests":
+        return ROOT_SUITE_NAME
+    return rel[0] if rel else ROOT_SUITE_NAME
+
+
+# ИМЯ НАБОРА ПО СТРОКЕ ПУТИ — тот же вывод, что у `_suite_name`, но для ключей
+# ведомостей: они хранят путь строкой, а не объектом.
+def _suite_of_relpath(rel: str) -> str:
+    head = rel.split("/")
+    if head and head[0] == "services":
+        return head[1]
+    if head and head[0] == "tests":
+        return ROOT_SUITE_NAME
+    return head[0] if head else ROOT_SUITE_NAME
+
+# КОРНЕВОЙ НАБОР идёт ПЕРВЫМ — форма отдельного репозитория службы (см. близнеца).
+CASE_GLOBS = ("tests/newman/cases/*.py",
+              "services/*/tests/newman/cases/*.py",
               "gateway/tests/newman/cases/*.py")
-GEN_GLOBS = ("services/*/tests/newman/scripts/gen.py",
+GEN_GLOBS = ("tests/newman/scripts/gen.py",
+             "services/*/tests/newman/scripts/gen.py",
              "gateway/tests/newman/scripts/gen.py")
 ALL_GLOBS = CASE_GLOBS + GEN_GLOBS
 
@@ -122,39 +183,46 @@ _ACCESSOR = re.compile(
 # файл» разрешила бы вторую из них молча.
 RECORDED = {
     # ИМЯ: значение сплавляется в ключ переменной прогона → проверка при генерации.
-    ("services/iam/tests/newman/cases/iam-rbac-scope-grant.py",
+    ("tests/newman/cases/iam-rbac-scope-grant.py",
      "revoke_binding_steps", "acb_var"): NAME,
-    ("services/iam/tests/newman/cases/iam-rbac-subjects.py",
+    ("tests/newman/cases/iam-rbac-subjects.py",
      "teardown_delete", "op_var"): NAME,
-    ("services/iam/tests/newman/cases/rbac-subject-channel-equivalence.py",
+    ("tests/newman/cases/rbac-subject-channel-equivalence.py",
      "poll_op", "op_var"): NAME,
-    ("services/iam/tests/newman/cases/rbac-subject-channel-equivalence.py",
+    ("tests/newman/cases/rbac-subject-channel-equivalence.py",
      "pre_clean", "tag"): NAME,
-    ("services/iam/tests/newman/cases/rbac-subject-channel-equivalence.py",
+    ("tests/newman/cases/rbac-subject-channel-equivalence.py",
      "_revoke_phantom", "grant_op_var"): NAME,
-    ("services/iam/tests/newman/cases/rbac-subject-channel-equivalence.py",
+    ("tests/newman/cases/rbac-subject-channel-equivalence.py",
      "revoke_await", "rev_op_var"): NAME,
-    ("services/iam/tests/newman/cases/rbac-subject-channel-equivalence.py",
+    ("tests/newman/cases/rbac-subject-channel-equivalence.py",
      "member_op", "op_var"): NAME,
-    ("services/iam/tests/newman/cases/rbac-visibility-set.py",
+    ("tests/newman/cases/rbac-visibility-set.py",
      "preclean_account_loop", "tag"): NAME,
-    ("services/storage/tests/newman/cases/sec-d.py",
-     "_check_step", "counter"): NAME,
+    # ЗАПИСЬ НАБОРА storage СНЯТА ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ: файла
+    # `services/storage/tests/newman/cases/sec-d.py` в этом репозитории нет, и
+    # исключать ей нечего. Запись без места — находка по правилу этой же
+    # ведомости; в дереве платформы она осталась при своём кейсе.
     # НЕ ИМЯ: здесь подставляется КОД — готовый фрагмент условия
     # (`" && b.roleId === '…'"`), и шов это объявляет. В позицию склейки он
     # попадает лишь потому, что фрагмент НАЧИНАЕТСЯ разделителем; знаки самого
     # фрагмента — предмет другого корпуса (подстановка кода), не #1220.
     # Запись самоистекает: перестанет шов быть склеенным — она потеряет предмет
     # и станет находкой утверждения «запись без места».
-    ("services/iam/tests/newman/cases/iam-authz-grant-check-propagation.py",
+    ("tests/newman/cases/iam-authz-grant-check-propagation.py",
      "resolve_binding_id_step", "role_filter"): CODE,
 }
 
 # Потолок соседней формы: подстановок, где значение — ИМЯ ЦЕЛИКОМ (весь ключ).
-# Замер 2026-08-24 на `f091a8026` + эта правка. Расти нельзя; закрыли место —
-# опустите число тем же изменением. Ноль означает, что форма кончилась и храповик
-# пора снять вместе с ней.
-WHOLE_NAME_CEILING = 157
+# Расти нельзя; закрыли место — опустите число тем же изменением. Ноль означает,
+# что форма кончилась и храповик пора снять вместе с ней.
+#
+# 157 -> 125 ОПУЩЕН ПО ЗАМЕРУ, А НЕ ПОДОГНАН. Прежнее число измерено в дереве
+# ПЛАТФОРМЫ (2026-08-24, `f091a8026`), где обход видел восемь наборов; здесь набор
+# ОДИН, и оставить 157 значило бы держать храповик, под который можно молча внести
+# тридцать два новых места. Потолок, который не может покраснеть, храповиком не
+# является. Число взято из переписи самой пробы («подстановок „имя целиком" 125»).
+WHOLE_NAME_CEILING = 125
 
 
 # ------------------------------------------------------------------ разбор
@@ -250,9 +318,7 @@ def _generators() -> dict:
     mods = {}
     for glob in GEN_GLOBS:
         for path in sorted(REPO_ROOT.glob(glob)):
-            name = path.parts[len(REPO_ROOT.parts)]
-            if name == "services":
-                name = path.parts[len(REPO_ROOT.parts) + 1]
+            name = _suite_name(path, REPO_ROOT)
             spec = importlib.util.spec_from_file_location(f"kacho_name_gen_{name}", path)
             module = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = module
@@ -359,7 +425,7 @@ def test_every_fragment_recorded_as_a_name_is_checked_at_generation():
 
     # Помощник обязан ПРИЕЗЖАТЬ в декларацию: объявленная проверка, которой в
     # пространстве имён нет, роняла бы генерацию `NameError`, а не отказом.
-    suites = sorted({p.split("/")[1] for p, _f, _e in seams
+    suites = sorted({_suite_of_relpath(p) for p, _f, _e in seams
                      if RECORDED.get((p, _f, _e)) == NAME})
     missing = [s for s in suites if not hasattr(GENERATORS.get(s), "js_name")]
     assert not missing, (
@@ -510,19 +576,56 @@ def test_the_shape_check_catches_what_a_parse_check_would_miss():
           f"{len(HOSTILE_TO_THE_NAME)} — их ловит только проверка формы имени")
 
 
+# НАСТОЯЩИЙ ШОВ ЭТОГО ДЕРЕВА, на котором стоят оба контроля ниже.
+#
+# Прежде им служил шов набора storage (`services/storage/…/sec-d.py::_check_step`):
+# подпись шага склеивалась в ключ переменной прогона. В этом репозитории такого
+# файла нет ни одного, и обе пробы падали `KeyError: 'storage'` — то есть контроль
+# потерял ПРЕДМЕТ, а не ослаб.
+#
+# Предмет здесь есть, и он тот же по существу: `teardown_delete` набора
+# `iam-rbac-subjects` сплавляет значение вызывающего в ИМЯ переменной прогона
+# (`js_name(f"_{acb_var}RevOp")`) и то же имя уезжает в адрес `{{…}}`, который
+# JavaScript'ом не является вовсе. Ведомость выше эту запись и несёт.
+_IAM_SEAM_CASE = "iam-rbac-subjects"
+_IAM_SEAM_FUNC = "teardown_delete"
+
+
+def _iam_seam_module():
+    """Декларация со швом, загруженная ТЕМ ЖЕ загрузчиком, что при генерации."""
+    gen = GENERATORS[ROOT_SUITE_NAME]
+    for root in (REPO_ROOT / "tests/newman/cases",
+                 REPO_ROOT / "tests/newman/cases"):
+        path = root / f"{_IAM_SEAM_CASE}.py"
+        if path.is_file():
+            return gen._RUN.load(path)
+    raise AssertionError(
+        f"декларации со швом ({_IAM_SEAM_CASE}.py) в дереве нет — контроль "
+        f"беспредметен, а не зелен")
+
+
+def _seam_keys(step) -> set:
+    """Имена переменных прогона, которые шаг несёт."""
+    return {m for line in step.test_script
+            for m in re.findall(r"_[A-Za-z0-9_]*RevOp", line)}
+
+
 def test_a_legitimate_name_passes_verbatim_and_the_step_parses():
-    """ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ на настоящем шве: подпись → ключ → разбор."""
-    gen = GENERATORS["storage"]
-    mod = gen._RUN.load(
-        REPO_ROOT / "services/storage/tests/newman/cases/sec-d.py")
-    step = mod._check_step("tuple-present-vol", "storage_volume", "volumeId",
-                           expect_allowed=True)
-    body = "\n".join(step.test_script)
-    assert "_ck_volumeId_present" in body, (
+    """ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ на настоящем шве: значение → ключ → разбор."""
+    mod = _iam_seam_module()
+    steps = getattr(mod, _IAM_SEAM_FUNC)("acbLegit")
+    assert steps, "шов не вернул ни одного шага — контроль беспредметен"
+    body = "\n".join(line for s in steps for line in s.test_script)
+    assert "_acbLegitRevOp" in body, (
         "законное имя перестало доходить до ключа ДОСЛОВНО — помощник "
         f"переписывает значение, а не проверяет его: {body[:300]}")
-    ok, answer = _parses(body)
-    assert ok, f"законный шаг не разбирается: {answer}"
+    # РАЗБИРАЕТСЯ КАЖДЫЙ ШАГ ПО ОТДЕЛЬНОСТИ, а не их склейка: newman исполняет
+    # скрипт шага в СВОЁМ окружении, и склейка двух законных шагов даёт
+    # `Identifier 'j' has already been declared` — отказ сборки пробы, а не
+    # находка о продукте. Наблюдалось здесь же.
+    for step in steps:
+        ok, answer = _parses("\n".join(step.test_script))
+        assert ok, f"законный шаг {step.name!r} не разбирается: {answer}"
     for svc, m in sorted(GENERATORS.items()):
         js_name = getattr(m, "js_name", None)
         if js_name is None:
@@ -532,9 +635,14 @@ def test_a_legitimate_name_passes_verbatim_and_the_step_parses():
             assert got == value, (
                 f"{svc}: законное имя {value!r} вернулось как {got!r} — помощник "
                 f"переписывает имя, и писатель разойдётся с читателем")
-    print(f"осмотрено: законных имён {len(BENIGN_NAMES)} на "
-          f"{sum(1 for m in GENERATORS.values() if hasattr(m, 'js_name'))} "
-          f"генераторах, плюс настоящий шаг storage")
+    # Перепись обязана назвать, что цикл выше НЕ был пуст: ноль генераторов с
+    # `js_name` дал бы зелёное на пустом множестве.
+    with_helper = sum(1 for m in GENERATORS.values() if hasattr(m, "js_name"))
+    assert with_helper, (
+        "ни один генератор дерева не несёт `js_name` — цикл выше ничего не "
+        "проверил, и его молчание ничего не значит")
+    print(f"осмотрено: законных имён {len(BENIGN_NAMES)} на {with_helper} "
+          f"генераторах, плюс настоящий шов {ROOT_SUITE_NAME}/{_IAM_SEAM_CASE}")
 
 
 def test_the_name_no_longer_derives_from_the_step_title():
@@ -552,39 +660,35 @@ def test_the_name_no_longer_derives_from_the_step_title():
         "прежняя сборка перестала сводить две подписи в один ключ — утверждение "
         "потеряло предмет, и вместе с ним отпадает довод в пользу снятия")
 
-    gen = GENERATORS["storage"]
-    mod = gen._RUN.load(
-        REPO_ROOT / "services/storage/tests/newman/cases/sec-d.py")
+    # ШОВ ЭТОГО ДЕРЕВА (прежний, storage, уехал вместе со своим набором — см.
+    # врезку у положительного контроля выше). Свойство то же: ключ выводится из
+    # ЗНАЧЕНИЯ вызывающего, а подпись шага на него не влияет вовсе.
+    mod = _iam_seam_module()
+    seam = getattr(mod, _IAM_SEAM_FUNC)
 
-    def key_of(title):
-        step = mod._check_step(title, "storage_volume", "volumeId",
-                               expect_allowed=True)
-        keys = {m for line in step.test_script
-                for m in re.findall(r"_ck_[A-Za-z0-9_]+", line)}
-        assert keys, f"шаг перестал нести ключ переменной прогона: {step.test_script}"
+    def keys_of(value):
+        keys = set()
+        for step in seam(value):
+            keys |= _seam_keys(step)
+        assert keys, f"шов перестал нести ключ переменной прогона: {value!r}"
         return keys
 
-    a = key_of("tuple-present-vol")
-    b = key_of("совсем другая подпись — и с апострофом'")
-    assert a == b, (
-        f"ключ по-прежнему зависит от ПОДПИСИ шага: {sorted(a)} против "
-        f"{sorted(b)}. Пока зависит — подпись остаётся источником имени, и вред "
-        f"снят не был")
-    assert all("volumeId" in k for k in a), (
-        f"ключ выводится не из `id_var`: {sorted(a)}. Тогда неизвестно, из чего "
-        f"он выводится, и утверждение о снятии прозы вакуумно")
-
-    # Две пробы одного ресурса обязаны остаться РАЗЛИЧИМЫМИ: общий ключ вернул бы
-    # тот самый вред, ради которого подстановку снимали.
-    withdrawn = mod._check_step("tuple-withdrawn-vol", "storage_volume", "volumeId",
-                                expect_allowed=False)
-    wk = {m for line in withdrawn.test_script
-          for m in re.findall(r"_ck_[A-Za-z0-9_]+", line)}
-    assert wk.isdisjoint(a), (
-        f"проба «применён» и проба «снят» делят ключ {sorted(wk & a)} — общий "
-        f"счётчик означает общий бюджет повторов")
-    print(f"осмотрено: подписей 2 → ключ один и тот же {sorted(a)}; "
-          f"ожиданий 2 → ключи различны")
+    a = keys_of("acbOne")
+    b = keys_of("acbTwo")
+    assert a != b, (
+        f"РАЗНЫЕ значения дают ОДИН ключ ({sorted(a)}) — две пробы делят счётчик, "
+        f"а с ним бюджет повторов: это тот самый вред, ради которого подстановку "
+        f"прозы снимали")
+    assert all("acbOne" in k for k in a), (
+        f"ключ выводится не из значения вызывающего: {sorted(a)}. Тогда неизвестно, "
+        f"из чего он выводится, и утверждение о снятии прозы вакуумно")
+    # Подпись шага в ключ не попадает: у обоих вызовов подписи РАЗНЫЕ
+    # (`teardown-acbOne` против `teardown-acbTwo`), и это видно в самом шаге, а
+    # ключ при этом производится только из значения.
+    titles = {s.name for s in seam("acbOne")}
+    assert titles, "шов перестал называть шаги — сравнивать подписи нечем"
+    print(f"осмотрено: значений 2 → ключи различны ({sorted(a)} против "
+          f"{sorted(b)}); подписей шагов {len(titles)}")
 
 
 # ------------------------------------------------- способность упасть и смолчать
