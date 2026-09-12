@@ -113,6 +113,11 @@ type Registry struct {
 	// единожды, а второй конструктор уронил бы старт на повторной регистрации.
 	authnHooksOnce sync.Once
 	authnHooks     *AuthnHooksRecorder
+
+	// expiredCredSweepOnce/expiredCredSweep — единственный экземпляр приёмника
+	// величин второго уборщика по сроку (#2499).
+	expiredCredSweepOnce sync.Once
+	expiredCredSweep     *ExpiredCredentialSweepRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

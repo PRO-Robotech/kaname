@@ -17,7 +17,15 @@ package main
 // # Что здесь считается провязкой
 //
 // Вызов `WithObserver` НА ТОМ ЖЕ идентификаторе, который связан
-// `expiredcredsweep.New`. Не «слово встречается в файле».
+// `expiredcredsweep.New`, — либо в той же цепочке присваивания. Не «слово
+// встречается в файле»: имя метода стоит и в комментарии объявляющего пакета, и
+// гейт по подстроке зеленел бы на собственном объяснении.
+//
+// Цепочка учитывается НАМЕРЕННО, и это не послабление: первая редакция искала
+// конструктор только прямым правым значением присваивания, и на провязке
+// `New(...).WithObserver(...)` она потеряла ЛЕВУЮ половину — связываний стало
+// ноль, и гейт упал на собственной предпосылке, а не на предмете. Предпосылка
+// там и стоит ради этого.
 
 import (
 	"go/ast"
@@ -71,20 +79,33 @@ func TestTheExpiredCredentialSweeperReportsToValues(t *testing.T) {
 				if local == "" || len(x.Rhs) != 1 || len(x.Lhs) == 0 {
 					return true
 				}
-				call, ok := x.Rhs[0].(*ast.CallExpr)
-				if !ok {
+				constructed, chained := false, false
+				ast.Inspect(x.Rhs[0], func(inner ast.Node) bool {
+					sel, ok := inner.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					if sel.Sel.Name == "WithObserver" {
+						chained = true
+					}
+					if sel.Sel.Name != "New" {
+						return true
+					}
+					if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == local {
+						constructed = true
+					}
+					return true
+				})
+				if !constructed {
 					return true
 				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || sel.Sel.Name != "New" {
+				id, ok := x.Lhs[0].(*ast.Ident)
+				if !ok || id.Name == "_" {
 					return true
 				}
-				pkg, ok := sel.X.(*ast.Ident)
-				if !ok || pkg.Name != local {
-					return true
-				}
-				if id, ok := x.Lhs[0].(*ast.Ident); ok && id.Name != "_" {
-					bound = append(bound, id.Name)
+				bound = append(bound, id.Name)
+				if chained {
+					observed[id.Name] = name
 				}
 			case *ast.CallExpr:
 				sel, ok := x.Fun.(*ast.SelectorExpr)

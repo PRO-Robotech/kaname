@@ -115,6 +115,21 @@ spec:
           annotations:
             summary: "хук {{ "{{ $labels.route }}" }} не смог ответить — вход человека отказывает"
 
+        - alert: KanameExpiredCredentialReclaimStalled
+          # Включён и не крутится. Выключенный НЕ звонит: это решение оператора, а не отказ.
+          expr: |
+            sum(increase(kaname_expired_credential_reclaim_passes_total[2h])) == 0
+              and on() kaname_expired_credential_reclaim_enabled == 1
+          for: 10m
+          annotations:
+            summary: "снятие истёкших удостоверений включено и не делает проходов — места под потолком не возвращаются"
+
+        - alert: KanameExpiredCredentialReclaimFailing
+          expr: increase(kaname_expired_credential_reclaim_passes_total{outcome="failed"}[1h]) > 0
+          for: 10m
+          annotations:
+            summary: "снятие истёкших удостоверений отказывает — места под потолком не возвращаются"
+
         - alert: KanameRPCErrorRate
           expr: |
             sum(rate(kacho_grpc_server_handled_total{grpc_code!="OK"}[5m]))

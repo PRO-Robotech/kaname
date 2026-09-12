@@ -167,6 +167,17 @@ rate(kaname_db_pool_acquire_wait_seconds_total[5m]) / rate(kaname_db_pool_empty_
 | `kaname_retention_passes_total` | проходы фоновой уборки |
 | `kaname_retention_rows_removed_total` (`subject`) | снято строк, по каждому предмету отдельно |
 | `kaname_retention_pass_failures_total` (`subject`) | отказавшие проходы уборки |
+| `kaname_expired_credential_reclaim_enabled` | включено ли снятие истёкших удостоверений: `1` / `0`. Выключенный уборщик до этого ряда объявлял о себе единожды при старте и уходил вместе со сроком хранения журнала |
+| `kaname_expired_credential_reclaim_passes_total` (`outcome`) | прогоны снятия истёкших удостоверений: `ok`, `dry-run`, `failed`. Ряд прогонов и отличает «нечего снимать» от «петля не крутится» |
+| `kaname_expired_credential_reclaim_rows_found_total` | строк найдено подлежащими снятию |
+| `kaname_expired_credential_reclaim_rows_reclaimed_total` | строк снято: каждая возвращает место под потолком числа удостоверений на принципала |
+
+Найденное и снятое — **два** ряда потому, что «снято 0» само по себе не отличает «нечего снимать»
+от «нашёл и не снял»; второе бывает при показе без снятия и при отказе посреди партии.
+
+Полоса величин у обоих уборщиков по сроку **одна и та же**: прогоны · найденные и снятые строки ·
+отказавшие прогоны. Две разные полосы наблюдения об одном виде механизма — расхождение, которому
+нечем себя выдать.
 
 ## Вход человека: хуки поставщика личности
 
@@ -368,6 +379,21 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   expr: increase(kaname_authn_hook_requests_total{outcome="failed"}[10m]) > 0
   annotations:
     summary: "хук {{ $labels.route }} не смог ответить — вход человека отказывает"
+
+- alert: KanameExpiredCredentialReclaimStalled
+  # Включён и не крутится. Выключенный НЕ звонит: это решение оператора, а не отказ.
+  expr: |
+    sum(increase(kaname_expired_credential_reclaim_passes_total[2h])) == 0
+      and on() kaname_expired_credential_reclaim_enabled == 1
+  for: 10m
+  annotations:
+    summary: "снятие истёкших удостоверений включено и не делает проходов — места под потолком не возвращаются"
+
+- alert: KanameExpiredCredentialReclaimFailing
+  expr: increase(kaname_expired_credential_reclaim_passes_total{outcome="failed"}[1h]) > 0
+  for: 10m
+  annotations:
+    summary: "снятие истёкших удостоверений отказывает — места под потолком не возвращаются"
 
 - alert: KanameRPCErrorRate
   expr: |

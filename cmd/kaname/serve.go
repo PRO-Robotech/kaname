@@ -459,7 +459,7 @@ func runServe(cfg config.Config) error {
 	// стоит рядом с уборщиком секретов: уборщик без вызывающего — механизм,
 	// который выглядит существующим и не делает ничего, а таких в этом сервисе
 	// уже два.
-	startExpiredCredentialReclaim(ctx, pool, cfg, logger)
+	startExpiredCredentialReclaim(ctx, pool, cfg, metricsReg, logger)
 
 	// Своя чеканка токенов (задача #897): ключница, подписывающий ключ и
 	// подписант. Собирается ДО поверхностей, потому что от неё зависят обе —
