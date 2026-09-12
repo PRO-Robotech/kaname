@@ -40,10 +40,11 @@ func TestAcceptanceProbeCoordinateResolves(t *testing.T) {
 	c := check.JudgeProbeCoordinates(docs, declared, check.AcceptanceProbeCoordinateExemptions)
 
 	t.Logf("осмотрено: приёмок %d · объявлений проб в дереве %d · координат %d · "+
-		"резолвится %d · в чужом доме %d (из них связаны ревизией %d): %s · "+
+		"резолвится %d · в чужом доме %d [дома: %s] · из них связаны ревизией %d · "+
 		"по ведомости %d · находок %d · дом этого дерева %s",
-		c.Docs, c.Declared, c.Coordinates, c.Resolved, c.Foreign, c.RevisionBound,
-		strings.Join(c.ForeignHomes, " · "), c.Exempted, len(c.Findings), ownHome)
+		c.Docs, c.Declared, c.Coordinates, c.Resolved, c.Foreign,
+		strings.Join(c.ForeignHomes, ", "), c.RevisionBound, c.Exempted,
+		len(c.Findings), ownHome)
 
 	// Пустой обход — ОТКАЗ, а не пустой успех: «ноль находок» на «ноль
 	// прочитанного» неотличимо от чистого дерева.
