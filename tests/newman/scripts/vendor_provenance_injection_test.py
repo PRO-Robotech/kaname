@@ -65,13 +65,14 @@ def build_tree(dst: pathlib.Path, only_identical: bool = False) -> None:
                                   encoding="utf-8")
 
 
-def run(tree: pathlib.Path, env_extra: dict | None = None) -> subprocess.CompletedProcess:
+def run(tree: pathlib.Path, env_extra: dict | None = None,
+        flags: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
     import os
     env = dict(os.environ)
     env.pop("KANAME_VENDOR_UPSTREAM", None)
     if env_extra:
         env.update(env_extra)
-    return subprocess.run([sys.executable, str(tree / GATE_REL)],
+    return subprocess.run([sys.executable, str(tree / GATE_REL), *flags],
                           capture_output=True, text=True, env=env)
 
 
@@ -212,9 +213,98 @@ def main() -> int:
               "перепись: файлов по записи")
 
         # ── ОСЬ 8: сверка не выполнялась — сказано словами, а не умолчанием.
+        #    ДВА утверждения, а не одно: строка в ПЕРЕПИСИ и строка в ИТОГЕ. Прежде
+        #    здесь стояло только первое, и итог при «сверено 0» дословно утверждал
+        #    «различие с оригиналом ровно объявленное» — то есть ровно ту ось,
+        #    которой не измерял. Утверждение шире сделанного ловится только так:
+        #    предикатом на текст итога.
         t = base / "no-upstream"; build_tree(t)
-        check("несверенное названо прямо", 0, run(t),
+        r = run(t)
+        check("несверенное названо прямо в переписи", 0, r,
               "KANAME_VENDOR_UPSTREAM не задан")
+        check("и ИТОГ не утверждает сверки, которой не было", 0, r,
+              "СВЕРКИ С ОРИГИНАЛОМ НЕ БЫЛО")
+
+        # ── ОСЬ 9: СВЕРКА ПОТРЕБОВАНА, А РУЧКИ НЕТ — третий исход, а не проход.
+        #    Предмет всего изменения: конвейер читает КОД, а не прозу. Код 0 при
+        #    «сверено 0» делает неизмеренную ось неотличимой от измеренной, и
+        #    именно так она прожила в конвейере, ни разу не измерившись.
+        t = base / "required-but-unset"; build_tree(t)
+        r = run(t, flags=("--require-upstream",))
+        check("сверка потребована, ручки нет — код 3, а НЕ 0 и НЕ 1", 3, r,
+              "ВЕРДИКТА О СВЕРКЕ НЕТ")
+        check("и причина названа ручкой, а не общими словами", 3, r,
+              "KANAME_VENDOR_UPSTREAM не задан")
+
+        # ── ОСЬ 10: ЗАКОННЫЙ БЛИЗНЕЦ той же оси — требование ВЫПОЛНЕНО.
+        #    Без него код 3 мог бы приходить от флага, а не от отсутствия сверки.
+        t = base / "required-and-same"; build_tree(t, only_identical=True)
+        up_req = base / "required-and-same-up"; build_tree(up_req, only_identical=True)
+        r = run(t, {"KANAME_VENDOR_UPSTREAM": str(up_req)}, flags=("--require-upstream",))
+        check("сверка потребована и ВЫПОЛНЕНА — код 0", 0, r, "СВЕРКА С ОРИГИНАЛОМ ВЫПОЛНЕНА")
+        check("и число сверенного названо числом", 0, r,
+              f"сверено с оригиналом {n_identical}")
+
+        # ── ОСЬ 11: при требовании РАСХОЖДЕНИЕ остаётся находкой (1), а не 3.
+        #    Иначе третий исход съел бы красное: «вердикта нет» и «вердикт красный»
+        #    не одно и то же, и подменять второе первым — то же молчание.
+        t = base / "required-and-moved"; build_tree(t, only_identical=True)
+        up_moved = base / "required-and-moved-up"; build_tree(up_moved, only_identical=True)
+        q = up_moved / "tests/newman/kacholib/stems.sh"
+        q.write_text(q.read_text(encoding="utf-8") + "\n# оригинал ушёл вперёд\n",
+                     encoding="utf-8")
+        check("расхождение при требовании — код 1 (находка), а не 3", 1,
+              run(t, {"KANAME_VENDOR_UPSTREAM": str(up_moved)}, flags=("--require-upstream",)),
+              "ОРИГИНАЛ УШЁЛ ВПЕРЁД")
+
+        # ── ОСЬ 12: ручка задана, а дерева по ней НЕТ — третий исход, а не 14 находок.
+        #    Диагноз по тексту: «оригинала нет по каждому файлу» послал бы читателя
+        #    чинить копию, тогда как не создано УСЛОВИЕ. Флаг тут не при чём: ручку
+        #    задали, значит сверку хотели.
+        t = base / "upstream-absent"; build_tree(t)
+        r = run(t, {"KANAME_VENDOR_UPSTREAM": str(base / "no-such-upstream-tree")})
+        check("ручка задана, дерева нет — код 3, а НЕ 1", 3, r, "ВЕРДИКТА О СВЕРКЕ НЕТ")
+        check("и путь, по которому дерева нет, НАЗВАН", 3, r, "no-such-upstream-tree")
+
+        #    ЗАКОННЫЙ БЛИЗНЕЦ: каталог по ручке есть, но это НЕ дерево платформы —
+        #    ни одного файла записи в нём. Тоже третий исход, и по той же причине.
+        t = base / "upstream-alien"; build_tree(t)
+        alien = base / "alien-dir"; alien.mkdir()
+        r = run(t, {"KANAME_VENDOR_UPSTREAM": str(alien)})
+        check("каталог есть, но файлов оригинала в нём ноль — код 3", 3, r,
+              "ВЕРДИКТА О СВЕРКЕ НЕТ")
+
+        # ── ОСЬ 13: ОРИГИНАЛ ПРИЕХАЛ ЧАСТИЧНО — находка, а не тихая сверка
+        #    остатка. Разрежённая выборка чужого дерева отдаёт часть каталогов при
+        #    зелёном исходе шага, и тогда «сверено» называет число МЕНЬШЕ записи.
+        #    Прежде эту ветку не держало ни одно из 24 утверждений: её снятие
+        #    давало код 0 с текстом «СВЕРКА С ОРИГИНАЛОМ ВЫПОЛНЕНА — сверено 4»
+        #    при пяти файлах записи, то есть ложное зелёное, вслух утверждающее
+        #    выполненную сверку.
+        t = base / "upstream-partial"; build_tree(t, only_identical=True)
+        up_part = base / "upstream-partial-up"; build_tree(up_part, only_identical=True)
+        gone = up_part / "tests/newman/kacholib/stems.sh"
+        gone.unlink()
+        r = run(t, {"KANAME_VENDOR_UPSTREAM": str(up_part)})
+        check("оригинал приехал частично — находка с именем файла", 1, r,
+              "kacholib/stems.sh")
+        check("и находка названа отсутствием ОРИГИНАЛА, а не дефектом копии", 1, r,
+              "файла оригинала там нет")
+
+        #    И при ТРЕБОВАНИИ сверки это по-прежнему находка (1), а не третий
+        #    исход (3): часть оригинала приехала, значит спросить было чем.
+        check("частичный оригинал при требовании — код 1, а не 3", 1,
+              run(t, {"KANAME_VENDOR_UPSTREAM": str(up_part)},
+                  flags=("--require-upstream",)),
+              "файла оригинала там нет")
+
+        #    ЗАКОННЫЙ БЛИЗНЕЦ: тот же прогон на ПОЛНОМ оригинале — молчит.
+        t = base / "upstream-whole"; build_tree(t, only_identical=True)
+        up_whole = base / "upstream-whole-up"; build_tree(up_whole, only_identical=True)
+        check("оригинал приехал целиком — НЕ находка", 0,
+              run(t, {"KANAME_VENDOR_UPSTREAM": str(up_whole)},
+                  flags=("--require-upstream",)),
+              f"сверено с оригиналом {n_identical}")
 
     if FAILURES:
         print(f"\nПРОВАЛЕНО утверждений: {len(FAILURES)}", file=sys.stderr)
