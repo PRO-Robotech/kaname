@@ -4,9 +4,9 @@
 package handler
 
 import (
-	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
-	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/operations/operationspb"
+	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/corelib/operations/operationspb"
 )
 
 // operationToProto — прослойка к общему слою: перевод строки операции в контракт

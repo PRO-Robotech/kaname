@@ -33,10 +33,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/safeconv"
+	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/corelib/safeconv"
 
-	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
+	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"

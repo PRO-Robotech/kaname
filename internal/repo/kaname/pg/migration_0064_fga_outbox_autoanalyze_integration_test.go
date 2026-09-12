@@ -56,7 +56,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 )
 
 // TestMigration0064_FGAOutbox_KeepsStatisticsFresh закрепляет per-table настройки

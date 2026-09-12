@@ -39,7 +39,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/observability"
+	"github.com/PRO-Robotech/corelib/observability"
 
 	"github.com/PRO-Robotech/kaname/internal/check"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"

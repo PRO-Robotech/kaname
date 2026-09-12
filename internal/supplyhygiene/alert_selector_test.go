@@ -303,7 +303,7 @@ func scanAlertSelectors(docRoot string, producerRoots []string) (selectorCensus,
 }
 
 func TestAlertSelectorsNameAContractTheTreeProduces(t *testing.T) {
-	roots := []string{serviceRoot, filepath.Join(platformModuleDir(t), "pkg")}
+	roots := producerRoots(t)
 
 	census, findings, err := scanAlertSelectors(filepath.Join(serviceRoot, docsDir), roots)
 	require.NoError(t, err, "разбор дерева документации")
@@ -319,8 +319,9 @@ func TestAlertSelectorsNameAContractTheTreeProduces(t *testing.T) {
 	require.NotZero(t, census.docFiles, "обход пуст: страниц не прочитано ни одной — вердикт беспредметен")
 	require.NotZero(t, census.producerFiles, "обход пуст: файлов Go не прочитано ни одного — "+
 		"«контракта нет» означало бы «не искали»")
-	require.Equal(t, 2, census.producerMods, "прочитан не тот набор модулей: указатель контрактов "+
-		"обязан покрывать И дерево службы, И фундамент, который она пинит")
+	require.Equal(t, producerRootCount, census.producerMods, "прочитан не тот набор модулей: "+
+		"указатель контрактов обязан покрывать дерево службы, модуль фундамента И остаток "+
+		"платформенного модуля, где живут контракты доступа — см. producerRoots")
 	require.NotZero(t, census.contracts, "обход пуст: контрактов не собрано ни одного — "+
 		"распознаватель ослеп, вердикт беспредметен")
 

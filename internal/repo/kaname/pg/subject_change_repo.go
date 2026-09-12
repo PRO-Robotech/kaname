@@ -35,7 +35,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/pkg/subscription"
+	"github.com/PRO-Robotech/corelib/subscription"
 
 	"github.com/PRO-Robotech/kaname/internal/service"
 )

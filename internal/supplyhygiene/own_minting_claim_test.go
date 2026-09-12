@@ -80,7 +80,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/pkg/gitenv"
+	"github.com/PRO-Robotech/corelib/gitenv"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )

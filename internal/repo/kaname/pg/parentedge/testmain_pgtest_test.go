@@ -13,7 +13,7 @@ package parentedge_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 

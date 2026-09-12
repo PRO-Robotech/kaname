@@ -42,9 +42,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )

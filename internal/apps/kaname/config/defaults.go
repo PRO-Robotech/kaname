@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/viper"
 
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 )
 
 // RegisterDefaults sets default values for every config key (defaults are

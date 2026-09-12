@@ -38,7 +38,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcclient"
+	"github.com/PRO-Robotech/corelib/grpcclient"
 )
 
 // restUpstreamOnly — посадка, где включено РОВНО одно ребро: удостоверение

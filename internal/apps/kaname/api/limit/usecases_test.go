@@ -23,10 +23,10 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/operations"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
-	"github.com/PRO-Robotech/kacho/pkg/ids"
-	"github.com/PRO-Robotech/kacho/pkg/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"

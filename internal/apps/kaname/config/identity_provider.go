@@ -15,7 +15,7 @@
 // строке.
 package config
 
-import "github.com/PRO-Robotech/kacho/pkg/identityposture"
+import "github.com/PRO-Robotech/corelib/identityposture"
 
 // IdentityProvider — посадка личности. Псевдоним общего типа, не второй тип.
 type IdentityProvider = identityposture.Provider

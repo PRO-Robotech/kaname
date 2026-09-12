@@ -37,7 +37,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"

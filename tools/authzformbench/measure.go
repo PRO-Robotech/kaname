@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/gitenv"
+	"github.com/PRO-Robotech/corelib/gitenv"
 )
 
 // Outcome — три категории, никогда не две.

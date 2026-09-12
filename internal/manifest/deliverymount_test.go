@@ -65,8 +65,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/modulemanifest"
-	"github.com/PRO-Robotech/kacho/pkg/platformmodules"
+	"github.com/PRO-Robotech/corelib/modulemanifest"
+	"github.com/PRO-Robotech/corelib/platformmodules"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 

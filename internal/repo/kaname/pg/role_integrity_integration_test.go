@@ -19,14 +19,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/corelib/pgtest"
 	// Закрытие С ПРЕДЕЛОМ, а не «когда-нибудь»: отложенное `pool.Close()` ждёт
 	// возврата ВСЕХ соединений, а проба, упавшая внутри открытой транзакции, своё
 	// не вернёт — её горутину завершает `FailNow`. Пакет тогда упирается в
 	// `-timeout` и печатает FAIL, под которым нет вердикта НИ У ОДНОЙ пробы,
 	// включая прошедшие: «не выполнилось» приезжает к читателю под видом красного.
 	// Требование дерева, держится гейтом `TestPoolCloseInTestsIsBounded`.
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"

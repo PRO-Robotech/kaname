@@ -20,7 +20,7 @@ import (
 	"crypto/tls"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/servicecontract"
+	"github.com/PRO-Robotech/corelib/servicecontract"
 )
 
 // Сроки не-gRPC поверхностей iam. Величины взяты у прежних четырёх серверов

@@ -34,7 +34,7 @@ import (
 
 	"go.uber.org/multierr"
 
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 )
 
 // JobsConfig — фоновые задания.

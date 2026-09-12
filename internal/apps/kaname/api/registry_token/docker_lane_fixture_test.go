@@ -17,7 +17,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/credsecret"
+	"github.com/PRO-Robotech/corelib/credsecret"
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )

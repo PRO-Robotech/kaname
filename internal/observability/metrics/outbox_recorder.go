@@ -6,7 +6,7 @@ package metrics
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
-	outboxmetrics "github.com/PRO-Robotech/kacho/pkg/outbox/metrics"
+	outboxmetrics "github.com/PRO-Robotech/corelib/outbox/metrics"
 )
 
 // OutboxRecorder — состояние ВСЕХ очередей kaname, снимаемое периодическим

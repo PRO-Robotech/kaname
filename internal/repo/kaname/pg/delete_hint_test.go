@@ -34,7 +34,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/gitenv"
+	"github.com/PRO-Robotech/corelib/gitenv"
 )
 
 // deletingMethodPrefixes — имена методов, чья работа есть снятие строки.

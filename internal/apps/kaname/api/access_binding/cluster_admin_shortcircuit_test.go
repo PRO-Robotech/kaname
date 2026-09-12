@@ -14,7 +14,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"

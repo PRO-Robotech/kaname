@@ -18,7 +18,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"

@@ -59,7 +59,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 // nonCancellableCtors — конструкторы контекста, который не отменяется НИКОГДА.

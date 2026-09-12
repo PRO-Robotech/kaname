@@ -53,7 +53,7 @@ import (
 	"go.uber.org/multierr"
 	"gopkg.in/yaml.v3"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 

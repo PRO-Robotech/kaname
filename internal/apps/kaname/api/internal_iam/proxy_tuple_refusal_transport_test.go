@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho/pkg/authz/proxytuple"
+	"github.com/PRO-Robotech/corelib/authz/proxytuple"
 )
 
 // The proxy-write rule is transport-free so a consumer's domain layer can import it

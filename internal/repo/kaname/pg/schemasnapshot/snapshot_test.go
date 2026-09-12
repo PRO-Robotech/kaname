@@ -52,7 +52,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 

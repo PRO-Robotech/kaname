@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/observability/health"
+	"github.com/PRO-Robotech/corelib/observability/health"
 )
 
 // readinessBudget — сколько проба даёт обработчику готовности на ответ.

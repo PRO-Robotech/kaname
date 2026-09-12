@@ -29,7 +29,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 )
 
 // connBudgetComplaint — то, что страж скажет оператору, или пустая ошибка.

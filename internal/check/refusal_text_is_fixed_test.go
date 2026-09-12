@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 
 	"github.com/PRO-Robotech/kaname/internal/check"
 )

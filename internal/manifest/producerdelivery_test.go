@@ -60,8 +60,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	manifestproducer "github.com/PRO-Robotech/kacho/pkg/modulemanifest/producer"
-	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	manifestproducer "github.com/PRO-Robotech/corelib/modulemanifest/producer"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"

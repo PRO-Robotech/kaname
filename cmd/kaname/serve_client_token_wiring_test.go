@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/client_token"
 	"github.com/PRO-Robotech/kaname/internal/clientassertion"
 	"github.com/PRO-Robotech/kaname/internal/clienttokenwire"

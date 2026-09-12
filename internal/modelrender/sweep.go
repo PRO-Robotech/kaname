@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/PRO-Robotech/kacho/pkg/modulemanifest"
+	"github.com/PRO-Robotech/corelib/modulemanifest"
 	"github.com/PRO-Robotech/kaname/internal/authzplan"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"

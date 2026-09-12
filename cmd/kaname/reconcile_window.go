@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/authz"
+	"github.com/PRO-Robotech/corelib/authz"
 )
 
 // Вторая ступень цепочки отзыва гранта — пересчёт производного пообъектного

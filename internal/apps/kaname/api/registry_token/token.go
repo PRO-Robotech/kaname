@@ -35,7 +35,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/credsecret"
+	"github.com/PRO-Robotech/corelib/credsecret"
 	"github.com/PRO-Robotech/kaname/internal/audiencepolicy"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/registrytoken"

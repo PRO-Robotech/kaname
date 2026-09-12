@@ -19,7 +19,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"

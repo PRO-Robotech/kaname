@@ -14,7 +14,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/domain"

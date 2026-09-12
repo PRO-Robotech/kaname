@@ -30,7 +30,7 @@ import (
 const (
 	ownDomainImport = "github.com/PRO-Robotech/kaname/internal/domain"
 	sharedImport    = "github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
-	foreignImport   = "github.com/PRO-Robotech/kacho/pkg/ids"
+	foreignImport   = "github.com/PRO-Robotech/corelib/ids"
 )
 
 // domainFixture — собственный пакет domain: источник, из которого гейт ВЫВОДИТ

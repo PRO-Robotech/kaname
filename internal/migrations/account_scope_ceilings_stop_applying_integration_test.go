@@ -116,9 +116,9 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	"github.com/PRO-Robotech/kacho/pkg/ids"
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	coredb "github.com/PRO-Robotech/corelib/db"
+	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/migrations"

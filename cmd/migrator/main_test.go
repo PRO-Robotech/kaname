@@ -13,7 +13,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/PRO-Robotech/kacho/pkg/migratorcli"
+	"github.com/PRO-Robotech/corelib/migratorcli"
 )
 
 func emptyFS() fs.FS { return fstest.MapFS{} }

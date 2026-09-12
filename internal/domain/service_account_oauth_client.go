@@ -15,7 +15,7 @@ import (
 
 	"go.uber.org/multierr"
 
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 )
 
 // ServiceAccountOAuthClient — Class A workload identity (Hydra static client).

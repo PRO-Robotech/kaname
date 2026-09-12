@@ -10,9 +10,9 @@ import (
 
 	"google.golang.org/grpc"
 
-	operationv1 "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
+	operationv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	"github.com/PRO-Robotech/corelib/grpcclient"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-	"github.com/PRO-Robotech/kacho/pkg/grpcclient"
 )
 
 // dial.go — переходник от сгенерированного gRPC-клиента к порту ModuleService.

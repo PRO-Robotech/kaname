@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 )
 
 // Config — root configuration struct for kaname.

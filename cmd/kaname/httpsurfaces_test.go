@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/servicecontract"
-	"github.com/PRO-Robotech/kacho/pkg/servicehost"
+	"github.com/PRO-Robotech/corelib/servicecontract"
+	"github.com/PRO-Robotech/corelib/servicehost"
 )
 
 // freeSurfaceAddr занимает и тут же отпускает порт: «порт освобождён»

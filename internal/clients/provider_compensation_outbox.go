@@ -26,8 +26,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/pkg/outbox"
-	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
+	"github.com/PRO-Robotech/corelib/outbox"
+	"github.com/PRO-Robotech/corelib/outbox/drainer"
 )
 
 const (

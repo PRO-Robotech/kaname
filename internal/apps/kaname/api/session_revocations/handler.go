@@ -44,10 +44,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/PRO-Robotech/kacho/pkg/safeconv"
-	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
+	"github.com/PRO-Robotech/corelib/safeconv"
+	corevalidate "github.com/PRO-Robotech/corelib/validate"
 
-	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
+	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"

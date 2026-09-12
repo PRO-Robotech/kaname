@@ -27,7 +27,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )

@@ -13,7 +13,7 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 
-	"github.com/PRO-Robotech/kacho/pkg/safeconv"
+	"github.com/PRO-Robotech/corelib/safeconv"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/dto"

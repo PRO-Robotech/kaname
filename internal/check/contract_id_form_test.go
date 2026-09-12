@@ -13,8 +13,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/pkg/ids"
-	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"

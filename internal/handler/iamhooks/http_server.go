@@ -46,7 +46,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/PRO-Robotech/kacho/pkg/observability/health"
+	"github.com/PRO-Robotech/corelib/observability/health"
 )
 
 // errHealthCarrierNotWired — носитель готовности не передан композиционным

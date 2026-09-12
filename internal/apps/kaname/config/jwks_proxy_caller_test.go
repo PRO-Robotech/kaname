@@ -13,7 +13,7 @@ package config
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 )
 
 func TestJWKSProxyVerifiesCaller(t *testing.T) {

@@ -21,7 +21,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 )
 
 func TestAuthorize_Check_StripsForgedSecurityContext(t *testing.T) {

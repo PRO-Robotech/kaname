@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 )
 
 // TestClientAssertionAgreesWithThePolicy — состав проверок четвёртого

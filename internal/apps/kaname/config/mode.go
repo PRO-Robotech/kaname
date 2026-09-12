@@ -18,7 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/PRO-Robotech/kacho/pkg/servicecontract"
+	"github.com/PRO-Robotech/corelib/servicecontract"
 )
 
 // Mode — overall service mode.

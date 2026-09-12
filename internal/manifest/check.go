@@ -13,8 +13,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/PRO-Robotech/kacho/pkg/modulemanifest"
-	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/corelib/modulemanifest"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 // check.go — проверка ДЕРЕВА: каждый найденный манифест разбирается тем же

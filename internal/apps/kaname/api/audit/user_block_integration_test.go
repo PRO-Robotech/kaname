@@ -36,7 +36,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho/pkg/ids"
+	"github.com/PRO-Robotech/corelib/ids"
 
 	internaliam "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"

@@ -43,8 +43,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )

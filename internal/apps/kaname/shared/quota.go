@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho/pkg/quota/quotadetail"
+	"github.com/PRO-Robotech/corelib/quota/quotadetail"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 

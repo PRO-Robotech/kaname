@@ -28,7 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 )
 
 // cursorOrderedTables reads the repository sources and returns every table whose

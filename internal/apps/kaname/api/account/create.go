@@ -27,9 +27,9 @@ import (
 
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/PRO-Robotech/kacho/pkg/ids"
-	"github.com/PRO-Robotech/kacho/pkg/operations"
-	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
+	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/operations"
+	corevalidate "github.com/PRO-Robotech/corelib/validate"
 
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 

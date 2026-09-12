@@ -32,7 +32,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )

@@ -29,9 +29,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	coredb "github.com/PRO-Robotech/corelib/db"
+	"github.com/PRO-Robotech/corelib/pgtest"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/signingkeys"
 	"github.com/PRO-Robotech/kaname/internal/domain"

@@ -42,8 +42,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	coredb "github.com/PRO-Robotech/corelib/db"
+	"github.com/PRO-Robotech/corelib/pgtest"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"

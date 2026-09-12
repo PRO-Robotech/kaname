@@ -16,7 +16,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
+	coredb "github.com/PRO-Robotech/corelib/db"
 
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"

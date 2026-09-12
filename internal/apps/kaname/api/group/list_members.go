@@ -8,7 +8,7 @@ package group
 import (
 	"context"
 
-	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
+	corevalidate "github.com/PRO-Robotech/corelib/validate"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"

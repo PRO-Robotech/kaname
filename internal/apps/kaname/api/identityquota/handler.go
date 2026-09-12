@@ -15,9 +15,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/corelib/quota/quotaread"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/quota/quotaread"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"

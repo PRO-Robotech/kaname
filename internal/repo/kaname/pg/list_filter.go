@@ -4,7 +4,7 @@
 package pg
 
 import (
-	"github.com/PRO-Robotech/kacho/pkg/filter"
+	"github.com/PRO-Robotech/corelib/filter"
 
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )

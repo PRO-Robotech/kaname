@@ -13,8 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/pkg/observability/health"
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/observability/health"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
@@ -28,7 +28,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/service"
 
-	"github.com/PRO-Robotech/kacho/pkg/schemaguard"
+	"github.com/PRO-Robotech/corelib/schemaguard"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 

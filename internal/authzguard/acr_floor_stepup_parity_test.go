@@ -31,8 +31,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/operations"
 )
 
 // gatewayCallerCtx builds the ctx as the trust-aware extract leaves it for a

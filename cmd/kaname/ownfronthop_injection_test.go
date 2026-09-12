@@ -40,7 +40,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 )
 
 // writeChartValues кладёт файл значений с объявленным листом и отдаёт путь.

@@ -23,8 +23,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/PRO-Robotech/kacho/pkg/db/pgfault"
-	"github.com/PRO-Robotech/kacho/pkg/quota/quotadetail"
+	"github.com/PRO-Robotech/corelib/db/pgfault"
+	"github.com/PRO-Robotech/corelib/quota/quotadetail"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 

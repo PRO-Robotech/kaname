@@ -17,7 +17,7 @@ package cursorplan_test
 import (
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/listcursorplan"
+	"github.com/PRO-Robotech/corelib/listcursorplan"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 

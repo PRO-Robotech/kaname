@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/validate/nameform"
+	"github.com/PRO-Robotech/corelib/validate/nameform"
 )
 
 // resource_name_canon_test.go — шесть именуемых типов iam судятся ЕДИНСТВЕННОЙ

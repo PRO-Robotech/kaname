@@ -3,7 +3,7 @@
 
 package clientassertion
 
-import "github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+import "github.com/PRO-Robotech/corelib/tokenpolicy"
 
 // DeclaredChecks возвращает состав проверок ЭТОГО проверяющего.
 //

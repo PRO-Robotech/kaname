@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/PRO-Robotech/kacho/pkg/listfiltergate"
+	"github.com/PRO-Robotech/corelib/listfiltergate"
 	"github.com/PRO-Robotech/kaname/tools/auditlistfilter"
 )
 

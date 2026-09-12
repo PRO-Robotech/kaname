@@ -9,8 +9,8 @@ package membership
 import (
 	"context"
 
+	"github.com/PRO-Robotech/corelib/safeconv"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-	"github.com/PRO-Robotech/kacho/pkg/safeconv"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"

@@ -39,7 +39,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/pkg/gitenv"
+	"github.com/PRO-Robotech/corelib/gitenv"
 )
 
 // anchorWiredGo — композиционный корень, ПУБЛИКУЮЩИЙ наш набор. Якорь стоит

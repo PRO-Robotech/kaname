@@ -24,7 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/pkg/outbox"
+	"github.com/PRO-Robotech/corelib/outbox"
 
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )

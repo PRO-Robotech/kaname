@@ -14,7 +14,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 )
 
 // fgaReservedChars — characters that carry meaning inside an FGA subject string

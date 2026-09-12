@@ -57,11 +57,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/corelib/pgtest"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	"github.com/PRO-Robotech/kacho/pkg/ids"
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	coredb "github.com/PRO-Robotech/corelib/db"
+	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/authzmap"

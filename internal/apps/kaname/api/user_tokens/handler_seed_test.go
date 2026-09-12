@@ -18,8 +18,8 @@ import (
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/corelib/operations"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-	"github.com/PRO-Robotech/kacho/pkg/operations"
 )
 
 func TestHandlerIssue_SAPrincipal_CreatedByIsTargetUser(t *testing.T) {

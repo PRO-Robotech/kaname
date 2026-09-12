@@ -45,7 +45,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/pkg/authz/catalogderive"
+	"github.com/PRO-Robotech/corelib/authz/catalogderive"
 )
 
 // PermissionEntry — one row from permission_catalog.json.

@@ -48,7 +48,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	outboxmetrics "github.com/PRO-Robotech/kacho/pkg/outbox/metrics"
+	outboxmetrics "github.com/PRO-Robotech/corelib/outbox/metrics"
 
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	reconcileoutbox "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/reconcile_outbox"

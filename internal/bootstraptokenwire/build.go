@@ -28,7 +28,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	bootstraptoken "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"

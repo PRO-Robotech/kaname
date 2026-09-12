@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 )
 
 // ListOperationsUseCase lists the operations recorded for a single resource id.

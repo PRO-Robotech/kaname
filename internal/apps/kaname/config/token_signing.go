@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 	"go.uber.org/multierr"
 )
 

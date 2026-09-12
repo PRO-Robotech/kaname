@@ -25,8 +25,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho/pkg/db/pgfault"
-	"github.com/PRO-Robotech/kacho/pkg/pagetoken"
+	"github.com/PRO-Robotech/corelib/db/pgfault"
+	"github.com/PRO-Robotech/corelib/pagetoken"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/account"

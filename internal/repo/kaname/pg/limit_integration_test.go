@@ -34,10 +34,10 @@ import (
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/corelib/pgtest"
 
-	coredb "github.com/PRO-Robotech/kacho/pkg/db"
-	"github.com/PRO-Robotech/kacho/pkg/ids"
+	coredb "github.com/PRO-Robotech/corelib/db"
+	"github.com/PRO-Robotech/corelib/ids"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"

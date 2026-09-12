@@ -53,7 +53,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PRO-Robotech/kacho/pkg/outbox/drainer"
+	"github.com/PRO-Robotech/corelib/outbox/drainer"
 )
 
 const (

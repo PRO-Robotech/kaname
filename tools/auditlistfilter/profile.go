@@ -78,7 +78,7 @@
 // subject.
 package auditlistfilter
 
-import "github.com/PRO-Robotech/kacho/pkg/listfiltergate"
+import "github.com/PRO-Robotech/corelib/listfiltergate"
 
 // subjectGate is the shape of a listing whose containing object is checked in the
 // use-case before the page is read.

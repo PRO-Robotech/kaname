@@ -85,7 +85,7 @@ func validate(r domain.Rules) error {
 
 const usecaseWithSpellings = `package role
 
-import "github.com/PRO-Robotech/kacho/pkg/platformmodules"
+import "github.com/PRO-Robotech/corelib/platformmodules"
 
 func modules() int { return len(platformmodules.All()) }
 `

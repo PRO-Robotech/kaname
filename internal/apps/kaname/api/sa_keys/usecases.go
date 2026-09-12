@@ -48,12 +48,12 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/PRO-Robotech/corelib/credsecret"
+	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
+	corevalidate "github.com/PRO-Robotech/corelib/validate"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-	"github.com/PRO-Robotech/kacho/pkg/credsecret"
-	"github.com/PRO-Robotech/kacho/pkg/ids"
-	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
-	corevalidate "github.com/PRO-Robotech/kacho/pkg/validate"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"

@@ -11,10 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/operations/operationspb"
+	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/corelib/operations/operationspb"
 
-	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
+	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 )
 

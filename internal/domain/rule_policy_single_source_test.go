@@ -55,7 +55,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 // rulePolicyTypeName — имя типа политики.

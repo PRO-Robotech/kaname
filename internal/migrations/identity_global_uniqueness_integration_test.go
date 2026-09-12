@@ -50,7 +50,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/pkg/pgtest"
+	"github.com/PRO-Robotech/corelib/pgtest"
 )
 
 // seedUserInAccount сеет строку пользователя вместе с её аккаунтом одной

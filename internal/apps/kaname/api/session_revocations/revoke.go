@@ -29,10 +29,10 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
-	"github.com/PRO-Robotech/kacho/pkg/tokenpolicy"
+	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
-	operationpb "github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/operation"
+	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
 	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"

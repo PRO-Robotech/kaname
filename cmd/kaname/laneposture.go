@@ -26,7 +26,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"

@@ -18,7 +18,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/PRO-Robotech/kacho/pkg/httpbody"
+	"github.com/PRO-Robotech/corelib/httpbody"
 )
 
 // maxHookBodyBytes — hard cap on a hook request body. The real payloads

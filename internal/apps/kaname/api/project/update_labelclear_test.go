@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"

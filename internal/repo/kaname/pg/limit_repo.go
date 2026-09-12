@@ -21,7 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	kerrors "github.com/PRO-Robotech/kacho/pkg/errors"
+	kerrors "github.com/PRO-Robotech/corelib/errors"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"

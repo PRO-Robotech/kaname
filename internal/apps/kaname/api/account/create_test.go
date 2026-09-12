@@ -30,7 +30,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"

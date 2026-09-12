@@ -67,8 +67,8 @@ import (
 
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/callerorigin"
 )

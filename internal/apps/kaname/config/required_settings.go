@@ -62,7 +62,7 @@ package config
 import (
 	"strings"
 
-	"github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )

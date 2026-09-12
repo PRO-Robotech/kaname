@@ -8,8 +8,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
-
-	"github.com/PRO-Robotech/kacho/pkg/gitenv"
 )
 
 // СЕТКА ПРЕДЕЛА ПРОЧНОСТИ — ПЯТЬ НОВЫХ ОСЕЙ И ИСХОД ВЕРДИКТА НА КАЖДОЙ ТОЧКЕ
@@ -319,24 +317,6 @@ func joinModes(ms []AskMode) string {
 		out = append(out, string(m))
 	}
 	return strings.Join(out, " · ")
-}
-
-// AbsPathOf — абсолютный путь артефакта, разрешённый ОТ КОРНЯ ДЕРЕВА.
-//
-// Тот же довод, что у ReportAbsPath: `go test` исполняется в каталоге пакета,
-// поэтому относительный путь лёг бы внутрь `relverdict/`, а гейт свежести искал
-// бы артефакт у корня и НЕ НАШЁЛ БЫ — то есть печатал бы «отчёта нет» при
-// существующем отчёте. Корень спрашивается у git, а не собирается из `..`:
-// число шагов вверх зависит от того, кто зовёт.
-//
-// Отдельной функцией, а не вторым `ReportAbsPath`: артефактов у прибора стало
-// два, и копия разрешителя разошлась бы с оригиналом молча.
-func AbsPathOf(rel string) (string, error) {
-	out, err := gitenv.Command("", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", fmt.Errorf("scalegrid: корень дерева не установлен, писать %s некуда: %w", rel, err)
-	}
-	return strings.TrimSpace(string(out)) + "/" + rel, nil
 }
 
 // WriteDeleteReportPath — куда ложится отчёт записи и удаления.

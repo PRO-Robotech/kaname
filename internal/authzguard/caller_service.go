@@ -10,7 +10,7 @@
 // has been superseded by the per-RPC CallerPolicy and removed.
 package authzguard
 
-import "github.com/PRO-Robotech/kacho/pkg/grpcsrv"
+import "github.com/PRO-Robotech/corelib/grpcsrv"
 
 // ServiceNameFromSAN extracts the module service short-name from a verified SPIRE
 // SAN (`spiffe://<trust-domain>/ns/<ns>/sa/kacho-<svc>` → `<svc>`). Returns

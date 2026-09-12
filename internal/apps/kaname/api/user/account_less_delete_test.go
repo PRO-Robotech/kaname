@@ -39,7 +39,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/PRO-Robotech/kacho/pkg/operations"
+	"github.com/PRO-Robotech/corelib/operations"
 )
 
 // accountLessOversightCtxs — принципалы, которых край пропускает к этому RPC

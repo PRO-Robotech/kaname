@@ -13,7 +13,7 @@ package membership
 // проявилось бы только на негодном, то есть там, где его никто не смотрит.
 
 import (
-	"github.com/PRO-Robotech/kacho/pkg/filter"
+	"github.com/PRO-Robotech/corelib/filter"
 
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )

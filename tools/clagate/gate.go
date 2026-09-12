@@ -54,7 +54,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/PRO-Robotech/kacho/pkg/gitenv"
+	"github.com/PRO-Robotech/corelib/gitenv"
 )
 
 // Entry — одна личность в ведомости.

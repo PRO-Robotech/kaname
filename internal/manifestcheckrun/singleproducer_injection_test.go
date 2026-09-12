@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PRO-Robotech/kacho/pkg/treecorpus"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 // singleproducer_injection_test.go — доказательство, что гейт единственной
