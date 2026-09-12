@@ -243,6 +243,11 @@ func TestAcceptanceProbeCoordinateHomeCensusInjection(t *testing.T) {
 	if c.Foreign != 3 {
 		t.Errorf("чужих координат %d, ожидалось 3", c.Foreign)
 	}
+	// Связанных ревизией ровно одна из трёх: величина отвечает на другой вопрос —
+	// сколько координат указывает в ПРОШЛОЕ состояние чужого дерева.
+	if c.RevisionBound != 1 {
+		t.Errorf("связанных ревизией %d, ожидалась 1 из трёх", c.RevisionBound)
+	}
 	want := "PRO-Robotech/corelib · PRO-Robotech/kacho"
 	if got := strings.Join(c.ForeignHomes, " · "); got != want {
 		t.Errorf("перепись домов %q, ожидалась %q: ревизия в имя дома не входит, "+

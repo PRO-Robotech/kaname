@@ -210,6 +210,10 @@ type ProbeCoordinateCensus struct {
 	Exempted    int
 	// Foreign — координаты, назвавшие ЧУЖОЙ дом: вне суждения, но в переписи.
 	Foreign int
+	// RevisionBound — из них связанные РЕВИЗИЕЙ чужого дома. Величина отдельная,
+	// потому что отвечает на другой вопрос: сколько координат указывает в ПРОШЛОЕ
+	// состояние чужого дерева, то есть не проверяемо даже там, где дерево есть.
+	RevisionBound int
 	// ForeignHomes — различные названные дома, по алфавиту. Печатаются, чтобы дом,
 	// стоящий в корпусе один раз, был виден: опечатка в имени репозитория иначе
 	// уходит молча.
@@ -254,6 +258,9 @@ func JudgeProbeCoordinates(docs map[string]string, declared []string, exemptions
 			}
 			if co.Home != "" {
 				c.Foreign++
+				if co.Rev != "" {
+					c.RevisionBound++
+				}
 				homes[co.Home] = true
 				continue
 			}
@@ -323,6 +330,9 @@ func AcceptanceDocsOfTree(root string) (map[string]string, error) {
 		if rerr != nil {
 			return nil, rerr
 		}
+		// #nosec G304 -- путь пришёл из ИНДЕКСА git своего репозитория
+		// (`treecorpus.UnderWithSuffix`), а не из ввода снаружи. Та же оговорка и по
+		// той же причине стоит у соседа-порта — `acceptance_edit_after_verdict.go`.
 		body, rerr := os.ReadFile(abs)
 		if rerr != nil {
 			return nil, rerr
@@ -371,7 +381,7 @@ func DeclaredProbesOfTree(root string) ([]string, error) {
 	}
 	seen := map[string]bool{}
 	for _, abs := range all {
-		body, rerr := os.ReadFile(abs)
+		body, rerr := os.ReadFile(abs) // #nosec G304 -- путь из индекса git своего дерева
 		if rerr != nil {
 			return nil, rerr
 		}
