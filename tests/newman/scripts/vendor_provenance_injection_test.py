@@ -274,6 +274,38 @@ def main() -> int:
         check("каталог есть, но файлов оригинала в нём ноль — код 3", 3, r,
               "ВЕРДИКТА О СВЕРКЕ НЕТ")
 
+        # ── ОСЬ 13: ОРИГИНАЛ ПРИЕХАЛ ЧАСТИЧНО — находка, а не тихая сверка
+        #    остатка. Разрежённая выборка чужого дерева отдаёт часть каталогов при
+        #    зелёном исходе шага, и тогда «сверено» называет число МЕНЬШЕ записи.
+        #    Прежде эту ветку не держало ни одно из 24 утверждений: её снятие
+        #    давало код 0 с текстом «СВЕРКА С ОРИГИНАЛОМ ВЫПОЛНЕНА — сверено 4»
+        #    при пяти файлах записи, то есть ложное зелёное, вслух утверждающее
+        #    выполненную сверку.
+        t = base / "upstream-partial"; build_tree(t, only_identical=True)
+        up_part = base / "upstream-partial-up"; build_tree(up_part, only_identical=True)
+        gone = up_part / "tests/newman/kacholib/stems.sh"
+        gone.unlink()
+        r = run(t, {"KANAME_VENDOR_UPSTREAM": str(up_part)})
+        check("оригинал приехал частично — находка с именем файла", 1, r,
+              "kacholib/stems.sh")
+        check("и находка названа отсутствием ОРИГИНАЛА, а не дефектом копии", 1, r,
+              "файла оригинала там нет")
+
+        #    И при ТРЕБОВАНИИ сверки это по-прежнему находка (1), а не третий
+        #    исход (3): часть оригинала приехала, значит спросить было чем.
+        check("частичный оригинал при требовании — код 1, а не 3", 1,
+              run(t, {"KANAME_VENDOR_UPSTREAM": str(up_part)},
+                  flags=("--require-upstream",)),
+              "файла оригинала там нет")
+
+        #    ЗАКОННЫЙ БЛИЗНЕЦ: тот же прогон на ПОЛНОМ оригинале — молчит.
+        t = base / "upstream-whole"; build_tree(t, only_identical=True)
+        up_whole = base / "upstream-whole-up"; build_tree(up_whole, only_identical=True)
+        check("оригинал приехал целиком — НЕ находка", 0,
+              run(t, {"KANAME_VENDOR_UPSTREAM": str(up_whole)},
+                  flags=("--require-upstream",)),
+              f"сверено с оригиналом {n_identical}")
+
     if FAILURES:
         print(f"\nПРОВАЛЕНО утверждений: {len(FAILURES)}", file=sys.stderr)
         for f in FAILURES:

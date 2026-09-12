@@ -329,22 +329,77 @@ def _build(root: pathlib.Path, *, revision: str = REV_A, repo: str = "PRO-Robote
 
 
 FAILURES: list[str] = []
+UNMET: list[tuple[str, str]] = []
+PASSED = [0]
+_MISSING = object()
 
 
-def _check(name: str, want: int, root: pathlib.Path, needle: str = "") -> None:
+def _plain(name: str, ok: bool, text: str) -> None:
+    """Утверждение без прогона вердикта: о тексте, уже полученном выше."""
+    print(f"  {'ok  ' if ok else 'FAIL'} {name}")
+    if ok:
+        PASSED[0] += 1
+        return
+    FAILURES.append(f"{name}: утверждение не сошлось")
+    for line in text.splitlines()[:10]:
+        print(f"    {line}")
+
+
+def _unmet(name: str, why: str) -> None:
+    """Третий исход у оси самопробы: условие не создано, и это не проход."""
+    print(f"  НЕ ВЫПОЛНИЛОСЬ {name} — {why}")
+    UNMET.append((name, why))
+
+
+def _run_verdict(root: pathlib.Path) -> tuple[int, str]:
     import contextlib
     import io
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         rc = verdict(root)
-    text = out.getvalue() + err.getvalue()
-    ok = rc == want and (not needle or needle in text)
+    return rc, out.getvalue() + err.getvalue()
+
+
+def _check(name: str, want: int, root: pathlib.Path, needle: str = "",
+           absent: str = "") -> None:
+    """Утверждение об исходе. `absent` — щуп того, чего в выводе быть НЕ ДОЛЖНО.
+
+    Без `absent` утверждение о беспредметности принимает ЧУЖОЙ МИР: щуп
+    «БЕСПРЕДМЕТНО» сходится и тогда, когда предмет на месте, а спросить нечем, —
+    а это разные исходы, и второй есть третья категория.
+    """
+    rc, text = _run_verdict(root)
+    ok = rc == want and (not needle or needle in text) and (not absent or absent not in text)
     print(f"  {'ok  ' if ok else 'FAIL'} {name} (код {rc})")
+    if ok:
+        PASSED[0] += 1
     if not ok:
-        FAILURES.append(f"{name}: " + (f"ожидался код {want}, получен {rc}"
-                                       if rc != want else f"в выводе нет «{needle}»"))
+        if rc != want:
+            why = f"ожидался код {want}, получен {rc}"
+        elif needle and needle not in text:
+            why = f"в выводе нет «{needle}»"
+        else:
+            why = f"в выводе ЕСТЬ «{absent}», а его там быть не должно"
+        FAILURES.append(f"{name}: {why}")
         for line in text.splitlines()[:10]:
             print(f"    {line}")
+
+
+def _git_tree(root: pathlib.Path, tracked: tuple[str, ...]) -> bool:
+    """Синтетическое дерево ПОД GIT: перепись второго объявления идёт по индексу.
+
+    Возвращает False, когда git недоступен, — тогда оси, чей предмет сам индекс,
+    не исполнялись, и это третий исход, а не проход.
+    """
+    import shutil
+    import subprocess
+    if shutil.which("git") is None:
+        return False
+    quiet = {"capture_output": True, "text": True, "timeout": 120, "check": True}
+    subprocess.run(["git", "-C", str(root), "init", "-q"], **quiet)
+    if tracked:
+        subprocess.run(["git", "-C", str(root), "add", "--", *tracked], **quiet)
+    return True
 
 
 def self_test() -> int:
@@ -452,21 +507,174 @@ def self_test() -> int:
         _check("ревизия коротким хэшем — находка", 1, t, "не в форме полного хэша")
 
         t = base / "no-record"; _build(t); (t / RECORD_REL).unlink()
-        _check("записи нет — код 2, а НЕ 1 и НЕ 0", 2, t, "БЕСПРЕДМЕТНО")
+        _check("записи нет — код 2, а НЕ 1 и НЕ 0", 2, t,
+               "записи вендоринга нет по адресу")
 
+        #    ЩУП НАЗЫВАЕТ ПРЕДМЕТ, а не слово «БЕСПРЕДМЕТНО»: беспредметностей
+        #    здесь пять, и одна из них — «описание есть, спросить нечем». Щуп по
+        #    слову сходился бы на любой из пяти, то есть принимал бы ЧУЖОЙ МИР.
         t = base / "no-workflow"; _build(t); (t / WORKFLOW_REL).unlink()
-        _check("описания процесса нет — код 2", 2, t, "БЕСПРЕДМЕТНО")
+        _check("описания процесса нет — код 2", 2, t,
+               "описания процесса нет по адресу", absent="разбор")
 
         t = base / "no-steps"
         _build(t, workflow="name: x\njobs:\n  suite:\n    runs-on: ubuntu-latest\n    steps: []\n")
         _check("обход не дал ни одного шага — код 2, а НЕ 0", 2, t, "ни одного шага")
 
+        # ── ОСЬ: ЗАПИСЬ НЕ НАЗЫВАЕТ РЕПОЗИТОРИЙ ОРИГИНАЛА. Шапка обещала форму
+        #    пина ДВУМЯ полями, а держалась одна: снятие проверки `repo` не ронял
+        #    ни одного из 18 утверждений.
+        t = base / "no-repo"; _build(t, repo="")
+        _check("запись без repo оригинала — находка", 1, t,
+               "не называет репозиторий оригинала")
+
+        # ── ОСЬ: ПИН ОБЪЯВЛЕН ОДИН РАЗ, НО НЕ В ЗАПИСИ. Вторая половина оси 2, и
+        #    она держалась тем же ничем. Предмет — ОТСЛЕЖИВАЕМЫЙ состав: запись
+        #    вне индекса объявляет пин там, где его никто не версионирует.
+        t = base / "pin-not-at-home"
+        _build(t, extra={"docs/wiring.md": f"пин {REV_A}\n"})
+        if _git_tree(t, ("docs/wiring.md", WORKFLOW_REL)):
+            _check("пин объявлен вне записи (запись не отслеживается) — находка", 1, t,
+                   "а не в записи вендоринга")
+        else:
+            _unmet("пин объявлен вне записи", "git недоступен")
+
+        #    ЗАКОННЫЙ БЛИЗНЕЦ: та же раскладка, но запись ОТСЛЕЖИВАЕТСЯ — молчит,
+        #    и перепись называет источник состава индексом, а не обходом ФС.
+        t = base / "pin-at-home-twin"; _build(t)
+        if _git_tree(t, (RECORD_REL, WORKFLOW_REL)):
+            _check("пин в отслеживаемой записи — НЕ находка", 0, t,
+                   "источник состава индекс git")
+        else:
+            _unmet("пин в отслеживаемой записи", "git недоступен")
+
+        # ── ОСЬ: ПУСТОЙ ОБХОД — тот самый страж «ноль находок при ноль
+        #    прочитанного». Его снятие тоже не ронял ни одного утверждения.
+        t = base / "empty-index"; _build(t)
+        if _git_tree(t, ()):
+            _check("по индексу ноль файлов — код 2, а НЕ 0", 2, t,
+                   "не прочитано ни одного файла")
+        else:
+            _unmet("пустой обход", "git недоступен")
+
+        # ── ОСЬ: КОД ДЕРЖАТЕЛЯ ДОЕЗЖАЕТ ДО ВЕРДИКТА ШАГА.
+        #    Предмет — МАСКА `continue-on-error` у выборки оригинала. Она защитима
+        #    ровно тем, что отказ ловит шаг сверки ниже; а ловит он его одной
+        #    строкой выхода в развилке, которую не держало НИЧТО. Снятие той строки
+        #    возвращало молчаливый проход, ради закрытия которого всё и делалось.
+        t = base / "swallowed-rc"
+        _build(t, workflow=GOOD_WORKFLOW.replace(
+            "        run: python3 tests/newman/scripts/vendor_provenance_test.py --require-upstream",
+            "        run: |\n"
+            "          rc=0\n"
+            "          python3 tests/newman/scripts/vendor_provenance_test.py --require-upstream || rc=$?\n"
+            "          case \"$rc\" in\n"
+            "            3) echo \"третий исход\" ;;\n"
+            "          esac"))
+        _check("шаг сверки перехватывает код держателя — находка", 1, t,
+               "код держателя не доезжает")
+
+        # ── ОСЬ: ПОСЛАБЛЕНИЕ НА САМОМ ШАГЕ СВЕРКИ. Тогда ненулевой код держателя
+        #    задания не роняет, и третий исход снова неотличим от прохода.
+        t = base / "masked-verdict"
+        _build(t, workflow=GOOD_WORKFLOW.replace(
+            "      - name: вендоренный слой сходится с записью и с оригиналом",
+            "      - name: вендоренный слой сходится с записью и с оригиналом\n"
+            "        continue-on-error: true"))
+        _check("послабление на шаге сверки — находка", 1, t,
+               "послабление на шаге сверки")
+
+        # ── ОСЬ: ПОСЛАБЛЕНИЕ У ВЫБОРКИ, ЗА КОТОРЫМ НИКТО НЕ ЛОВИТ ОТКАЗ.
+        t = base / "mask-unpaired"
+        _build(t, workflow=GOOD_WORKFLOW.replace(
+            "      - uses: actions/checkout@v7\n        with:\n"
+            "          repository: ${{ steps.vendor-pin.outputs.repo }}",
+            "      - uses: actions/checkout@v7\n        continue-on-error: true\n"
+            "        with:\n"
+            "          repository: ${{ steps.vendor-pin.outputs.repo }}").replace(
+            "        run: python3 tests/newman/scripts/vendor_provenance_test.py --require-upstream",
+            "        run: echo сверки нет"))
+        _check("послабление у выборки, а сверки ниже нет — находка", 1, t,
+               "послабление у выборки оригинала")
+
+        #    ЗАКОННЫЙ БЛИЗНЕЦ: послабление есть, и сверка ниже его ловит — молчит.
+        t = base / "mask-paired-twin"
+        _build(t, workflow=GOOD_WORKFLOW.replace(
+            "      - uses: actions/checkout@v7\n        with:\n"
+            "          repository: ${{ steps.vendor-pin.outputs.repo }}",
+            "      - uses: actions/checkout@v7\n        continue-on-error: true\n"
+            "        with:\n"
+            "          repository: ${{ steps.vendor-pin.outputs.repo }}"))
+        _check("послабление, спаренное со сверкой ниже — НЕ находка", 0, t, "ЧИСТО")
+
+        # ── ОСЬ: ВЕРДИКТ ЕСТЬ И БЕЗ pyyaml. Пробу зовёт общий прогонщик, у
+        #    которого третьего исхода для гейта нет: любой ненулевой код он считает
+        #    красным. Обязательная зависимость означала бы КРАСНОЕ О ДЕРЕВЕ там, где
+        #    вердикта нет вовсе.
+        t = base / "no-pyyaml"; _build(t)
+        saved = sys.modules.get("yaml", _MISSING)
+        sys.modules["yaml"] = None
+        try:
+            _check("pyyaml нет, а вердикт ЕСТЬ — код 0", 0, t, "ЧИСТО")
+            rc_lite, text_lite = _run_verdict(t)
+        finally:
+            if saved is _MISSING:
+                del sys.modules["yaml"]
+            else:
+                sys.modules["yaml"] = saved
+        _plain("и перепись называет сверку разборщиков НЕ ВЫПОЛНЕННОЙ",
+               "сверка разборщиков НЕ ВЫПОЛНЕНА" in text_lite, text_lite)
+
+        # ── ОСЬ: СВЕРКА ДВУХ РАЗБОРЩИКОВ — и её способность упасть.
+        t = base / "parsers-agree"; _build(t)
+        rc_both, text_both = _run_verdict(t)
+        _plain("при обоих разборщиках сверка ВЫПОЛНЕНА и названа",
+               rc_both == 0 and "сверка разборщиков выполнена" in text_both, text_both)
+
+        t = base / "parsers-diverge"; _build(t)
+        original = globals().get("_parse_workflow_lite")
+        if original is None:
+            _plain("разборщики разошлись — находка, а не молчание", False,
+                   "своего разбора нет: функции _parse_workflow_lite не существует")
+        else:
+            def _parse_short(text: str) -> dict:
+                doc = original(text)
+                doc["jobs"]["suite"]["steps"] = doc["jobs"]["suite"]["steps"][:1]
+                return doc
+
+            globals()["_parse_workflow_lite"] = _parse_short
+            try:
+                _check("разборщики разошлись — находка, а не молчание", 1, t,
+                       "разборщики разошлись")
+            finally:
+                globals()["_parse_workflow_lite"] = original
+
+        # ── ОСЬ: РАЗБОР ОТКАЗЫВАЕТСЯ УГАДЫВАТЬ. Узел, которого он не знает, даёт
+        #    беспредметность с ИМЕНЕМ узла — а не тихий разбор наугад и не
+        #    сообщение про отсутствующее описание.
+        t = base / "folded-scalar"
+        _build(t, workflow=GOOD_WORKFLOW.replace(
+            "        run: python3 tests/newman/scripts/vendor_provenance_test.py --require-upstream",
+            "        run: >\n          python3 tests/newman/scripts/vendor_provenance_test.py\n"
+            "          --require-upstream"))
+        _check("узел, не поддержанный разбором — код 2 с именем узла", 2, t,
+               "свёрнутый блочный скаляр", absent="описания процесса нет")
+
+    print(f"\nутверждений {len(FAILURES) + PASSED[0]} · провалено {len(FAILURES)} · "
+          f"НЕ ВЫПОЛНИЛОСЬ {len(UNMET)}")
+    if UNMET:
+        for name, why in UNMET:
+            print(f"  НЕ ВЫПОЛНИЛОСЬ: {name} — {why}", file=sys.stderr)
+        print("Это третий исход: он не зачтён в проход и не назван красным.",
+              file=sys.stderr)
     if FAILURES:
-        print(f"\nПРОВАЛЕНО утверждений: {len(FAILURES)}", file=sys.stderr)
+        print(f"ПРОВАЛЕНО утверждений: {len(FAILURES)}", file=sys.stderr)
         for f in FAILURES:
             print(f"  · {f}", file=sys.stderr)
         return 1
-    print("\nВСЕ утверждения сошлись: проба провязки падает там, где должна, "
+    if UNMET:
+        return 2
+    print("ВСЕ утверждения сошлись: проба провязки падает там, где должна, "
           "и молчит на законных близнецах.")
     return 0
 
