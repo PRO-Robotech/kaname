@@ -744,6 +744,40 @@ def self_test() -> int:
                and ("нужен машинный посев поверхности" in out) != want_ceremony,
                out[:900])
 
+        # ── Ось 7б: ПРЕДЪЯВИТЕЛЬ ПОВЫШЕННОГО УРОВНЯ — ТОЖЕ ЦЕРЕМОНИЯ ─────────
+        #
+        # ЗАМЕР, И ОН СХОДИТСЯ ИЗ ДВУХ НЕЗАВИСИМЫХ МЕСТ. Шапка
+        # `cases/iam-interactive-client.py` говорит дословно:
+        # «`jwtAccountAdminAStepUp` is declared unforgeable by the seed itself …
+        # and every other `jwt*` fixture is a ServiceAccount token, i.e.
+        # acr-exempt». И это подтверждается устройством продукта: `kaname_acr`
+        # приходит ТОЛЬКО из сессии поставщика (`token_enrichment_service.go`
+        # кладёт его пробросом, `authzguard/acr_floor.go` читает), а служебная
+        # учётка от порога ОСВОБОЖДЕНА — то есть поднять уровень машине нечем.
+        #
+        # Значит приставки `jwtHuman` недостаточно: `*StepUp` — предъявитель, чей
+        # производитель церемония, под каким бы именем слот ни стоял.
+        # Законный близнец отличается ОДНИМ фактом: `jwtAccountAdminA` без
+        # повышения — служебная учётка, и он обязан остаться машинным.
+        for lane, key, want_ceremony in (("stepup", "jwtAccountAdminAStepUp", True),
+                                         ("plain", "jwtAccountAdminA", False)):
+            base = tmp / f"stepup-{lane}"
+            body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                    '"{{baseUrl}}/iam/v1/x"}},'
+                    '"event":[{"listen":"test","script":{"exec":['
+                    f'"pm.environment.get(\'{key}\')"]}}}}]}}]}}')
+            t7b = _mk(base, {"stepup": body},
+                      {"baseUrl": "http://edge", key: "", "runId": ""})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                run(t7b, workflows=_wf(base, runs=["stepup"]))
+            out = buf.getvalue()
+            _c(f"{key}: препятствие названо "
+               f"{'ЦЕРЕМОНИЕЙ ЧЕЛОВЕКА' if want_ceremony else 'машинным посевом'}",
+               ("нужна ЦЕРЕМОНИЯ ЧЕЛОВЕКА" in out) == want_ceremony
+               and ("нужен машинный посев поверхности" in out) != want_ceremony,
+               out[:900])
+
         # ── Ось 8: АДРЕС — НЕ ПОСЕВ, И ЕГО ПРОИЗВОДИТ СТЕНД ──────────────────
         #
         # Тот же класс, что уже назван в шапке `blockers`: из шести пустых ключей
