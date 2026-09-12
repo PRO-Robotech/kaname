@@ -89,6 +89,14 @@ CEREMONY_PREFIXES = ("jwtHuman", "ceremony")
 # приглашённого человека, а кейсы читают его при `subjectType=service_account` —
 # это МАШИННЫЙ ключ, и он обязан остаться в машинном препятствии.
 CEREMONY_ID_RE = re.compile(r"^human[A-Z][A-Za-z0-9]*UserId$")
+# ПРЕДЪЯВИТЕЛЬ ПОВЫШЕННОГО УРОВНЯ — тоже церемония, под каким бы именем слот ни
+# стоял. Сходится из двух независимых мест: набор объявляет
+# `jwtAccountAdminAStepUp` НЕПОДДЕЛЫВАЕМЫМ посевом (шапка
+# `cases/iam-interactive-client.py`), а продукт берёт `kaname_acr` только из сессии
+# поставщика (`token_enrichment_service.go` кладёт пробросом,
+# `authzguard/acr_floor.go` читает) — служебная учётка от порога освобождена, то
+# есть поднять уровень машине нечем.
+CEREMONY_STEPUP_SUFFIX = "StepUp"
 # АДРЕС ПОВЕРХНОСТИ — не удостоверение и не предмет посева: его НАЗЫВАЕТ посадка.
 # Объединение всех трёх наборов адресов выше; своя поверхность здесь тоже нужна —
 # посев её адреса пишет, и тогда ключ отсеется как покрытый, а не как адрес.
@@ -97,7 +105,9 @@ ADDRESS_VARS = EDGE_VARS | OWN_VARS | NEIGHBOUR_VARS
 
 def is_ceremony_key(key: str) -> bool:
     """Ключ, производимый ЦЕРЕМОНИЕЙ человека: предъявитель либо его идентификатор."""
-    return key.startswith(CEREMONY_PREFIXES) or bool(CEREMONY_ID_RE.match(key))
+    return (key.startswith(CEREMONY_PREFIXES)
+            or key.endswith(CEREMONY_STEPUP_SUFFIX)
+            or bool(CEREMONY_ID_RE.match(key)))
 
 
 def collections(newman: pathlib.Path) -> list[pathlib.Path]:
@@ -154,10 +164,10 @@ def blockers(surface: str, keys: set[str], empty: set[str],
     редакция сваливала их в одно препятствие «нужен машинный посев», и это не
     неточность формулировки, а ОБЪЯВЛЕНИЕ НЕИСПОЛНИМОЙ ВОЗМОЖНОСТИ: строка звала
     читателя завести машинный посев тому, чего машинный посев не производит.
-    Перепись по стволу 37ace71de4 дала на 20 ключей машинного препятствия 3
-    ключа природы «человек» (`humanAccCrudUserId`, `humanAccRdDeriveUserId`,
-    `humanAccRdSagaUserId`) и 2 природы «адрес» (`iamJwksBaseUrl`,
-    `providerPublicBaseUrl`) — то есть каждый четвёртый.
+    Перепись по стволу 37ace71de4 дала на 20 ключей машинного препятствия 4 ключа
+    природы «человек» (`humanAccCrudUserId`, `humanAccRdDeriveUserId`,
+    `humanAccRdSagaUserId`, `jwtAccountAdminAStepUp`) и 2 природы «адрес»
+    (`iamJwksBaseUrl`, `providerPublicBaseUrl`) — то есть каждый третий.
 
       · ЦЕРЕМОНИЯ ЧЕЛОВЕКА — предъявитель человека либо его идентификатор;
       · АДРЕС поверхности — его называет посадка, не подписант;
