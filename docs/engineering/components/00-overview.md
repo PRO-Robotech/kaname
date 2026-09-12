@@ -308,7 +308,8 @@ sequenceDiagram
   транзитивно — `go build` даёт 0, запуск даёт панику регистрации. Класс держит
   гейт `internal/contracthome` `TestBothCopiesOfAContractNeverReachOneBinary`: он
   обходит исходники платформы в кэше модулей и называет оба носителя по именам.
-  Снятие — kacho#2614 вместе с переносом этих двух пакетов.
+  Снятие — kacho#2614 вместе с переносом этих двух пакетов; порядок и предикат
+  переключения — kaname#36.
 - `github.com/jackc/pgx/v5` — Postgres driver.
 - `github.com/spf13/viper` — конфиг.
 - `golang.org/x/sync/errgroup` — параллельный запуск задач.
