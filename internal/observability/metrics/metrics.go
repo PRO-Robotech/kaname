@@ -107,6 +107,12 @@ type Registry struct {
 	// тем же именем.
 	readinessOnce sync.Once
 	readiness     *ReadinessRecorder
+
+	// authnHooksOnce/authnHooks — единственный экземпляр приёмника исходов
+	// полосы хуков поставщика личности (#2495). Полоса собирается в прогоне не
+	// единожды, а второй конструктор уронил бы старт на повторной регистрации.
+	authnHooksOnce sync.Once
+	authnHooks     *AuthnHooksRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

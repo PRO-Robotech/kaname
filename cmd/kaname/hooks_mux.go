@@ -196,6 +196,17 @@ func buildHooksMux(
 		ProvisionHook: provisionHook,
 		RecoveryHook:  recoveryHook,
 		Health:        healthAgg,
+		// ИСХОД КАЖДОГО ОБРАЩЕНИЯ СТАНОВИТСЯ ВЕЛИЧИНОЙ (#2495). До этой провязки
+		// живой путь входа человека не производил ни одной: «полоса отказывает»
+		// и «поставщик не настроен звать хук» давали одинаково ненаблюдаемые
+		// картины — в первом случае росли строки журнала, во втором их не было
+		// вовсе, а отсутствие строк тревогой не бывает.
+		//
+		// Наборы приходят ИЗ ОБЪЯВЛЯЮЩЕГО ПАКЕТА: он один держит соответствие
+		// пути и обработчика и разбор состояния ответа. Перевод делает корень —
+		// единственное место, которое знает и полосу, и реестр величин.
+		LaneObserver: metricsReg.AuthnHooksRecorder(
+			handlerinternal.Routes(), handlerinternal.LaneOutcomes()),
 	})
 	wrapped := handlerinternal.LoggerMiddleware(mux, func(method, path string, status int) {
 		logger.Info("hooks http", "method", method, "path", path, "status", status)

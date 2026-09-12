@@ -168,6 +168,36 @@ rate(kaname_db_pool_acquire_wait_seconds_total[5m]) / rate(kaname_db_pool_empty_
 | `kaname_retention_rows_removed_total` (`subject`) | снято строк, по каждому предмету отдельно |
 | `kaname_retention_pass_failures_total` (`subject`) | отказавшие проходы уборки |
 
+## Вход человека: хуки поставщика личности
+
+Живой путь входа. Поставщик личности зовёт четыре маршрута, и звать их его настраивает **оператор**
+— на своей стороне.
+
+```promql
+# обращения по маршрутам и исходам
+sum by (route, outcome) (rate(kaname_authn_hook_requests_total[5m]))
+```
+
+| Ряд | Метки | Что значит |
+|---|---|---|
+| `kaname_authn_hook_requests_total` | `route`, `outcome` | обращения поставщика к полосе хуков. `route` ∈ `token`, `refresh`, `provision`, `recovery`; `outcome` ∈ `ok`, `refused`, `failed` |
+
+У трёх исходов **три разных владельца починки**, и смешивать их нельзя:
+
+| `outcome="…"` | Кто чинит |
+|---|---|
+| `ok` | хук сделал работу |
+| `refused` | обращение отвергнуто до работы — общий секрет, форма тела, метод. Провязка **на стороне поставщика** не создана либо неверна, и чинит её оператор |
+| `failed` | ответить не смогли: сломан продукт |
+
+**Все ряды на нуле — не тишина, а находка.** Клетки заводятся при провязке, поэтому ноль во всех
+означает, что за окно наблюдения не пришло **ни одного** обращения: поставщик не настроен звать
+хуки, и вход человека не работает. До появления этого ряда состояние было невидимо — отсутствие
+строк журнала тревогой не бывает.
+
+Если поставщик личности в установке не настроен вовсе, правило `KanameAuthnHooksSilent` звонит
+именно об этом, и это верный ответ, а не шум.
+
 ## Чего служба НЕ измеряет — и что делать вместо
 
 Названо прямо, потому что построенный по несуществующему ряду запрос вернёт пустоту, а пустота
@@ -320,6 +350,24 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   for: 15m
   annotations:
     summary: "готовность не оценивалась ни разу за 15 минут — пробу никто не спрашивает"
+
+- alert: KanameAuthnHooksSilent
+  # Отсутствие обращений невидимо в журнале by construction: строк нет вовсе.
+  expr: sum(increase(kaname_authn_hook_requests_total[1h])) == 0
+  for: 30m
+  annotations:
+    summary: "за час ни одного обращения к хукам поставщика личности — вход человека не работает"
+
+- alert: KanameAuthnHookRefused
+  expr: increase(kaname_authn_hook_requests_total{outcome="refused"}[15m]) > 0
+  for: 15m
+  annotations:
+    summary: "хук {{ $labels.route }} отвергает обращения поставщика — провязка на его стороне неверна"
+
+- alert: KanameAuthnHookFailing
+  expr: increase(kaname_authn_hook_requests_total{outcome="failed"}[10m]) > 0
+  annotations:
+    summary: "хук {{ $labels.route }} не смог ответить — вход человека отказывает"
 
 - alert: KanameRPCErrorRate
   expr: |
