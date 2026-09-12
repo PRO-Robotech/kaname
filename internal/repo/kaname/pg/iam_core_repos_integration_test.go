@@ -704,15 +704,15 @@ func TestIamExtRepos_PermissionRegistry_Load_Idempotent(t *testing.T) {
 	assert.Equal(t, []string{"*.*.*.*"}, adminPerms)
 }
 
-// TestIamExtRepos_PermissionCatalog_AllEmpty_Sanity — expected state:
-// ≥99% catalog entries имеют пустое `permission` поле (proto annotations
-// еще не наполнены).
+// TestIamExtRepos_PermissionCatalog_IsAnnotated_Sanity — состав каталога
+// НЕ вырожден: право названо у большей части записей, а роль
+// читающего разворачивается в непустой перечень.
 //
-// **Этот тест fail'ится** когда catalog generator наполнит annotations.
-// При наполнении: переименуй в `TestIamExtRepos_PermissionCatalog_AllPopulated`
-// + поменяй assert на `assert.False(t, reg.IsPhase1Bootstrap(), ...)`.
-// `IsPhase1Bootstrap()` — heuristic name preserved for call-site stability.
-func TestIamExtRepos_PermissionCatalog_AllEmpty_Sanity(t *testing.T) {
+// Здесь стояла инструкция будущему себе: «этот тест fail'ится, когда
+// аннотации наполнят; переименуй его и поменяй assert на False». Оба
+// шага были сделаны с тех пор, а инструкция продолжала объявлять их
+// предстоящими — и читалась наряду с телом пробы, где оба уже стояли.
+func TestIamExtRepos_PermissionCatalog_IsAnnotated_Sanity(t *testing.T) {
 	ctx := context.Background()
 	reg, err := seedpkg.LoadPermissionRegistry(ctx, slog.Default())
 	require.NoError(t, err)
@@ -735,7 +735,7 @@ func TestIamExtRepos_PermissionCatalog_AllEmpty_Sanity(t *testing.T) {
 	// catalog generator emits 4-segment strings (a kacho-proto follow-up),
 	// permission values stay 3-segment but the runtime is tier-tolerant
 	// (authzmap.verbClass takes the last segment, ignoring grammar shape).
-	assert.False(t, reg.IsPhase1Bootstrap(),
+	assert.False(t, reg.CatalogIsUnannotated(),
 		"post-RBAC-v2 expected: catalog populated (got %d empty / %d total = %.2f%% empty)",
 		emptyCount, len(entries), ratio*100)
 	assert.Greater(t, len(entries)-emptyCount, 100,

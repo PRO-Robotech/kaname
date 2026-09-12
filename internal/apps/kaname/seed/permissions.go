@@ -1,39 +1,77 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package seed — startup-time idempotent seed for kaname.
+// Package seed — приведение состояния при старте, идемпотентное.
 //
-// Provides:
-//   - PermissionRegistry: in-memory permissions catalog, loaded via embed
-//     from `embedded/permission_catalog.json`. The registry is in-memory and
-//     embed-binary self-contained — no DB-table backing it.
-//   - BootstrapAdminRunner: creates cluster_admin_grant + fga_outbox when
-//     KANAME_BOOTSTRAP_ROOT_EMAIL env is set.
+// Точки входа, которыми пакет пользуются извне (перечень не полон — пакет несёт
+// 109 объявлений верхнего уровня; названы те, о которых говорит эта шапка):
+//   - `seed.LoadPermissionRegistry` — зеркало каталога прав из embed в память.
+//     Реестр живёт в памяти и самодостаточен в образе: таблицы за ним нет;
+//   - `seed.RunBootstrapAdmin` — выдача первому администратору кластера, когда
+//     объявлен `KANAME_BOOTSTRAP_ROOT_EMAIL`;
+//   - `seed.NewBootstrapReconciler` — тот же предмет петлёй, а не одним вызовом
+//     (довод — шапка `bootstrap_reconciler.go`).
 //
-// The composition root (cmd/kaname/main.go) invokes seed.Run() after
-// `migrator.Up()` and before the gRPC listener starts.
+// Единой функции «выполнить весь посев» в пакете НЕТ, и это не пропуск: порядок
+// шагов принадлежит композиционному корню (`cmd/kaname/serve.go`), потому что
+// между ними стоят чужие условия — приведение схемы, страж паритета каталога,
+// доставленные манифесты. Прежняя редакция этой шапки называла такую функцию и
+// объявляла корнем `cmd/kaname/main.go`; ни того, ни другого в дереве нет.
 //
-// ─── Bootstrap-state expectation: empty annotation fields ────────────────────
+// ─── ЗЕРКАЛО КАТАЛОГА ПРАВ: КТО ЕГО ЧИТАЕТ ──────────────────────────────────
 //
-// While catalog-generator annotation rollout is incomplete,
-// permission_catalog.json ships with **most entries having
-// `"permission": ""` and `"required_relation": ""`** — this is the expected
-// bootstrap state. Once per-RPC proto annotations are added through the
-// catalog-generator pipeline, this expectation flips to "fully populated".
+// ЧИТАТЕЛЕЙ РЕЕСТРА В ПРОД-КОДЕ: 3
+// ЧИТАТЕЛЕЙ РЕЕСТРА В ОСНАСТКЕ ПРОБ: 1
 //
-// Consequence:
-//   - `LookupPermission(...)` for most known permissions returns an empty
-//     slice until annotation rollout completes.
-//   - `PermissionsForRole("kacho-system.admin")` returns `["*.*.*"]`
-//     (hard-coded wildcard, independent of the catalog).
-//   - `PermissionsForRole("kacho-system.viewer")` returns an empty slice
-//     in the bootstrap state because catalog entries don't yet carry
-//     `permission`-strings with read-verbs. The post-rollout catalog will
-//     populate viewer-permissions.
+// Оба числа сверяет с деревом гейт `catalog_mirror_header_test.go` разбором, а не
+// подстрокой: он считает узлы вызова сам. Читатели оснастки считаются отдельно —
+// слив их с прод-читателями, нельзя было бы отличить «зеркало читает рантайм» от
+// «зеркало читает фикстура», а это и есть предмет числа.
 //
-// The sanity helper `IsPhase1Bootstrap` (preserved as an exported identifier)
-// reflects this state and is asserted by integration tests; once annotation
-// rollout completes it returns false.
+// Зеркало читается НА ПУТИ ЗАПРОСА, а не только при сборке процесса: порог
+// доверия для внутренних RPC, вынесенных на край (`authzguard.ACRFloor`),
+// политика вызывающего на публичном слушателе (`authzguard.PublicCallerPolicy`) и
+// производитель подробности отказа (`authzguard.DenyDetailUnary`) спрашивают его
+// на каждом вызове. При сборке его же читают производитель правил роли модуля и
+// перепись порогов каталога для самоотчёта о посадке.
+//
+// Прежняя редакция объявляла обратное — «зеркало, НЕ источник истины рантайма,
+// используется ТОЛЬКО интеграционными пробами» — и двумя абзацами ниже сама себе
+// противоречила, объявляя lookup-API, читаемое обработчиком проверки доступа.
+// Цена такой шапки не в числе неверных утверждений: это каталог ПРАВ, и читатель,
+// поверивший ей, вправе снять либо чтение, либо его источник.
+//
+// ─── СОСТАВ КАТАЛОГА ────────────────────────────────────────────────────────
+//
+// ЗАПИСЕЙ КАТАЛОГА: 350
+// ЗАПИСЕЙ БЕЗ ПРАВА: 0
+// ЗАПИСЕЙ БЕЗ ОТНОШЕНИЯ: 53
+//
+// Три числа, каждое из embed-файла, каждое своим маркером и каждое сверяется тем
+// же гейтом. Аннотации наполнены: записи без права нет ни одной, поэтому
+// `PermissionsForRole("kacho-system.viewer")` разворачивается в права
+// читающего класса, а не в пустой список. Право записывается тремя сегментами
+// (`<домен>.<ресурс>.<глагол>`); 22 записи вместо права несут литерал изъятия
+// `catalogderive.ExemptPermission`, и это НЕ пустое поле: изъятие объявлено, а
+// не забыто.
+//
+// Прежняя редакция описывала обратное состояние — «бо́льшая часть записей с двумя
+// пустыми полями, это ожидаемо; как только раскатка аннотаций завершится, признак
+// вернёт false, проба инвертируется синхронно». Раскатка завершилась, признак
+// возвращает false, и проба инвертирована с тех пор, как это произошло.
+//
+// ─── КОПИЯ КРАЯ: ЧЕГО ЗДЕСЬ НЕ УТВЕРЖДАЕТСЯ ─────────────────────────────────
+//
+// Каталог прав — ОДИН, и копия края обязана совпадать с этой байт в байт. Но
+// СВЕРИТЬ их в этом дереве нечем: второй операнд уехал вместе с вынесенной
+// службой, и его отсутствие сделало бы «сверено» неотличимым от «нечего было
+// сверять». Поэтому здесь не утверждается ни того, что копии совпадают, ни того,
+// что расхождение безопасно: свойство «служба исполняет ту же копию» стало
+// предметом дерева платформы, и утверждать его отсюда было бы нечем.
+//
+// Прежняя редакция объявляла расхождение версий «НЕ инцидентом» и отправляла за
+// подробностями в документ архитектуры, которого нет ни в одном из двух
+// репозиториев. Читатель, поверивший первому, счёл бы копии независимыми.
 package seed
 
 import (
@@ -68,28 +106,25 @@ type PermissionEntry struct {
 	ScopeFiltered bool `json:"scope_filtered,omitempty"`
 }
 
-// permissionCatalogJSON — embedded catalog (primary path: embed).
+// permissionCatalogJSON — каталог прав, встроенный в образ.
 //
-// ⚠️ **MIRROR — NOT runtime source-of-truth.**
-// The runtime catalog consumed by the api-gateway authz-interceptor lives in
-// `gateway/internal/middleware/embed/permission_catalog.json` and
-// is read by api-gateway middleware. This mirror is used ONLY by kaname
-// integration tests (verifying JSON-schema and embed-parsing infrastructure);
-// it is NOT used by the kaname runtime (there is no per-RPC catalog lookup
-// inside the IAM service — that responsibility lives in api-gateway).
+// Файл закоммичен и встраивается напрямую, поэтому служба собирается и
+// поднимается самостоятельно. Полный каталог по транзитивному набору всех
+// доменных service.proto собирает конвейер края; сюда он приезжает копией.
 //
-// The file is committed and embedded directly; the full catalog over the
-// transitive set of all domain service.proto is assembled by the api-gateway
-// catalog pipeline, and this mirror is refreshed from there as integration-test
-// needs demand. Version skew between this mirror and the api-gateway runtime is
-// NOT an incident; see kacho-workspace
-// docs/architecture/09-permission-catalog-source-of-truth.md.
+// Кто читает эту копию и чего о совпадении с копией края здесь НЕ утверждается —
+// шапка пакета. Прежде на этом месте стояло «зеркало, не читаемое рантаймом» и
+// ссылка в несуществующий документ; предмета у обоих утверждений не было.
 //
 //go:embed embedded/permission_catalog.json
 var permissionCatalogJSON []byte
 
-// PermissionRegistry — in-memory registry. Loaded from embed at startup;
-// provides lookup-API used by the Check-handler / ListObjects flows.
+// PermissionRegistry — реестр в памяти, загружаемый из embed при старте.
+//
+// Что именно у него спрашивают на пути запроса — шапка пакета, §«кто его
+// читает». Здесь это не повторяется: два места об одном предмете расходятся
+// молча, и ровно так разошлась прежняя редакция, объявившая читателем
+// обработчик проверки доступа.
 type PermissionRegistry struct {
 	entries []PermissionEntry
 	byFQN   map[string]PermissionEntry
@@ -100,9 +135,11 @@ type PermissionRegistry struct {
 // invoke it multiple times). Guarantees deterministic ordering (entries
 // sorted by FQN).
 //
-// Catalog source: embedded/permission_catalog.json (committed).
-// Planned override env: `KANAME_PERMISSION_CATALOG_PATH` — ConfigMap
-// mount path for emergency hotfix (fallback path); currently embed only.
+// Источник каталога один — встроенный `embedded/permission_catalog.json`.
+// Второго пути НЕТ, и переопределяющей ручки тоже: прежняя редакция называла
+// «планируемую» переменную окружения, которой в дереве не было ни одного
+// вхождения. Объявленная и неисполнимая возможность хуже отсутствующей — по ней
+// оператор строит план и обнаруживает отказ на стенде.
 func LoadPermissionRegistry(ctx context.Context, logger *slog.Logger) (*PermissionRegistry, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -149,13 +186,6 @@ func (r *PermissionRegistry) LookupFQN(fqn string) (PermissionEntry, bool) {
 	return e, ok
 }
 
-// LookupPermission — all RPCs annotated with the given permission-string.
-func (r *PermissionRegistry) LookupPermission(perm string) []PermissionEntry {
-	out := make([]PermissionEntry, len(r.byPerm[perm]))
-	copy(out, r.byPerm[perm])
-	return out
-}
-
 // RequiredACRMin returns the catalog `required_acr_min` for the given RPC FQN
 // (e.g. "kaname.cloud.iam.v1.InternalClusterService/GrantAdmin"), or "" if the
 // FQN is unknown or carries no acr requirement. Satisfies the
@@ -169,13 +199,14 @@ func (r *PermissionRegistry) RequiredACRMin(fqn string) string {
 	return ""
 }
 
-// PermissionsForRole — list of permissions semantically assigned to a role.
-// kacho-system.admin → ["*.*.*.*"] (no catalog filter needed; runtime does the
-// pattern match). kacho-system.viewer → permissions ending in `.read` /
-// `.list` / `.get`. The Check-handler uses this function for grant-check.
+// PermissionsForRole — права, семантически приписанные роли.
 //
-// The strict 4-segment grammar applies; the admin shortcut uses four
-// wildcard segments.
+// `kacho-system.admin` → `["*.*.*.*"]`: маску сопоставляет рантайм, фильтр по
+// каталогу здесь не нужен. `kacho-system.viewer` → права каталога, чей последний
+// сегмент читающий (`read` / `list` / `get`).
+//
+// Маска администратора четырёхсегментная, а права каталога трёхсегментные, и это
+// НЕ расхождение: сопоставление берёт последний сегмент и формы не требует.
 func (r *PermissionRegistry) PermissionsForRole(roleName string) []string {
 	switch roleName {
 	case "kacho-system.admin":
@@ -204,13 +235,18 @@ func (r *PermissionRegistry) PermissionsForRole(roleName string) []string {
 	}
 }
 
-// IsPhase1Bootstrap — sanity heuristic: returns true if ≥99% of catalog
-// entries have an empty `permission` field. This is the expected bootstrap
-// state (see package docstring). Once per-RPC annotation rollout completes
-// this method will return false; the sanity test inverts in lockstep.
+// CatalogIsUnannotated — признак ВЫРОЖДЕНИЯ каталога: true, когда право не
+// названо у ≥99 % записей.
 //
-// Used by tests to validate the expected bootstrap state.
-func (r *PermissionRegistry) IsPhase1Bootstrap() bool {
+// Сегодня он возвращает false, и проба состава каталога утверждает именно false.
+// True здесь означал бы, что каталог уехал назад в состояние, из которого
+// аннотации ещё не раскатаны, — то есть регрессию конвейера, а не ожидаемое
+// начальное состояние.
+//
+// Имя прежде говорило о «первой фазе начальной раскатки». Фазы нет, а имя
+// продолжало объявлять её действующей, поэтому имя названо по предмету: признак
+// меряет, названо ли право, а не то, какая фаза на дворе.
+func (r *PermissionRegistry) CatalogIsUnannotated() bool {
 	if len(r.entries) == 0 {
 		return false
 	}
@@ -220,13 +256,15 @@ func (r *PermissionRegistry) IsPhase1Bootstrap() bool {
 			emptyCount++
 		}
 	}
-	// 99% threshold: tolerates the 2-3 hard-coded system-role entries
-	// (kacho-system.admin "*.*.*"-mapping etc.) if they end up in the catalog.
+	// Порог 99 %, а не 100 %: он терпит единичные записи системных ролей,
+	// если те окажутся в каталоге, и при этом отличает их от невыполненной
+	// раскатки аннотаций.
 	return float64(emptyCount)/float64(len(r.entries)) >= 0.99
 }
 
 func isReadVerb(perm string) bool {
-	// permission format `<domain>.<resource>.<verb>`. Tail-segment after last `.`.
+	// Форма права — `<домен>.<ресурс>.<глагол>`; берётся хвост после последней
+	// точки. Литерал изъятия точки не несёт и читающим не признаётся.
 	idx := strings.LastIndexByte(perm, '.')
 	if idx < 0 || idx == len(perm)-1 {
 		return false
