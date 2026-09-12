@@ -21,6 +21,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   Сценариев было **33**, стало **33**; производитель назван у **всех 33** (§12.3).
   Кодирование разрешено (ban #1) — но порядок §10 остаётся: реализация после посадки
   `#1778` (п. 5) и по перечню п. 9
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
+  ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
+  читался адресом В ЭТОМ репозитории, где такой функции нет: следующий шёл по нему, не
+  находил ничего и делал вывод О ДЕРЕВЕ, а не о документе. Там, где стояло одно имя,
+  теперь стоит дом — `PRO-Robotech/kacho:` (гейт жив в монорепо) ·
+  `PRO-Robotech/corelib:` (уехал в общий фундамент) · `PRO-Robotech/kacho@d941344bd9:`
+  (снят самим вынесением — `PRO-Robotech/kacho@0cc1cd54c3`). **Следствие для читателя,
+  и оно несущее:** зелёный такого гейта о дереве `PRO-Robotech/kaname` не говорит
+  НИЧЕГО — он судит ЧУЖОЕ дерево, и держателя у названного класса здесь может не быть
+  вовсе. Дельта правки — только приставка дома: ни один сценарий, вердикт,
+  производитель, признак готовности и ни одно число не тронуты. Держит форму гейт
+  `TestAcceptanceProbeCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
   редакцию НЕ ПЕРЕНЕСЁН.** Правок 3, строк 8: `5504f44a7f` каталоги службы (6)
   · `b81adf2760` имя службы (1) · `93ef852fe9` идентификатор лицензии (1).
@@ -59,7 +73,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   рядом с кодом
 - **Миграции:** изменение их **ТРЕБУЕТ** — см. §7. Новая миграция обязана
   цитировать эту приёмку, а `docs/acceptance-ledger.yaml` — нести запись с её
-  вердиктом (гейт `TestNewMigrationCitesAnApprovedAcceptance`)
+  вердиктом (гейт `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance`)
 - **Расширение относительно заголовка задачи:** тело `#1090` называет путь
   «через существующий API, без правки Go». Замер §2 показывает, что этот путь
   **неисполним ни для одной из шести ролей черновика**; §3 фиксирует исход,
@@ -2386,7 +2400,7 @@ MOD-RL-05 «пригодные классы `network` — `get`, `list`, `update
 
 | # | утверждение | предикат | итог |
 |---|---|---|---|
-| П1 | «разделы `roles` и `seed` остаются авторскими, второго объявления не возникает» | `internal/repohygiene/catalogparity_test.go:244` — гейт `TestNoServiceDeclaresItsPermissionsASecondTime` читает **только** не-тестовые `.go` и ловит литеральную сборку карты прав; ролей и посева не касается | **подтверждено** |
+| П1 | «разделы `roles` и `seed` остаются авторскими, второго объявления не возникает» | `internal/repohygiene/catalogparity_test.go:244` — гейт `PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime` читает **только** не-тестовые `.go` и ловит литеральную сборку карты прав; ролей и посева не касается | **подтверждено** |
 | П2 | «`grants` изоморфен `Rule`» | `proto/kaname/cloud/iam/v1/role.proto:172` | **НЕ подтверждено** — §2.4 |
 | П3 | «прототип ловит шесть перечисленных нарушений» | прогон `roles.py` + чтение | **НЕ подтверждено**: ловит **3 из 6** — §2.5 |
 | П4 | «валидатор роняет 12 инъекций и молчит на законном близнеце» | `bash roles-inject.sh ../vpc.manifest.yaml` | **НЕ подтверждено**: утверждений **38** — 30 инъекций и 8 законных близнецов, все зелены |
@@ -2435,7 +2449,7 @@ MOD-RL-05 «пригодные классы `network` — `get`, `list`, `update
 ### 1.3. Почему предмет чист — и в чём оговорка
 
 **Чист.** Единственный источник прав в дереве — аннотации контрактов; второе
-объявление ловит гейт `TestNoServiceDeclaresItsPermissionsASecondTime`. Аннотации
+объявление ловит гейт `PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime`. Аннотации
 не говорят о ролях и о посеве **ничего**, поэтому разделы `roles` и `seed`
 второго объявления не заводят: они не объявляют право, они на него **ссылаются**.
 
@@ -4022,7 +4036,7 @@ listOperations, listUsedAddresses]}` — все семь гейтятся `v_*` 
 **Then** заводится **новая** миграция; ни одна применённая не правится (ban #5)
 **And** миграция цитирует эту приёмку по имени либо префиксом `MOD-RL-NN`
 **And** `docs/acceptance-ledger.yaml` несёт запись с её вердиктом — иначе
-`TestNewMigrationCitesAnApprovedAcceptance` роняет прогон
+`PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` роняет прогон
 
 ---
 
@@ -4138,7 +4152,7 @@ listOperations, listUsedAddresses]}` — все семь гейтятся `v_*` 
 | роль выдачи резолвится в **своём** манифесте | MOD-RL-13 + положительный |
 | \* роль выдачи резолвится в **чужом** манифесте | **проверки нет — нулевая популяция** (манифестов в дереве 0). Предикат заведения: манифестов ≥2 и хотя бы один ссылается на чужую роль (§3.4) |
 | группа заведена и кому-то выдана | MOD-RL-14 + положительный |
-| применение — новой миграцией с цитатой | `internal/repohygiene` `TestNewMigrationCitesAnApprovedAcceptance` (§8) |
+| применение — новой миграцией с цитатой | `internal/repohygiene` `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` (§8) |
 | миграция не пишет проекции роли | `TestIAMRV112_RoleVerbProjectionHasASoleWriter` (§8) + MOD-RL-16 |
 | \* черновик `docs/manifest-dcl/` не отслеживается git | **держится вниманием**: гейт по неотслеживаемому каталогу **чужого** репозитория невыразим (тот же предел, что назван в `#1088` §9) |
 | \* умолчание набора инъекций прототипа негодно | **держится вниманием** до переноса набора в дерево продукта; в дереве умолчания не будет — путь придёт от цели сборки |
@@ -4212,11 +4226,11 @@ MOD-RL-21 (полнота относительно живого); заведен
 
 | гейт | предикат существования | что обязан сделать |
 |---|---|---|
-| `TestNoServiceDeclaresItsPermissionsASecondTime` | `git grep -c 'func TestNoServiceDeclaresItsPermissionsASecondTime(' -- internal/repohygiene` → **1** (`catalogparity_test.go:244`) | **остаться зелёным**: манифест не собирает карту прав литералом. Покраснение означало бы, что экспортёр завёл второе объявление права |
-| `TestNewMigrationCitesAnApprovedAcceptance` | `git grep -c 'func TestNewMigrationCitesAnApprovedAcceptance(' -- internal/repohygiene` → **1** (`acceptanceledger_test.go:116`) | **увидеть новую миграцию** и потребовать цитаты этой приёмки плюс записи в ведомости |
+| `PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime` | `git grep -c 'func TestNoServiceDeclaresItsPermissionsASecondTime(' -- internal/repohygiene` → **1** (`catalogparity_test.go:244`) | **остаться зелёным**: манифест не собирает карту прав литералом. Покраснение означало бы, что экспортёр завёл второе объявление права |
+| `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` | `git grep -c 'func TestNewMigrationCitesAnApprovedAcceptance(' -- internal/repohygiene` → **1** (`acceptanceledger_test.go:116`) | **увидеть новую миграцию** и потребовать цитаты этой приёмки плюс записи в ведомости |
 | `TestIAMRV112_RoleVerbProjectionHasASoleWriter` | `git grep -c 'func TestIAMRV112_RoleVerbProjectionHasASoleWriter(' -- internal/repohygiene` → **1** | **остаться зелёным**: миграция роли не пишет проекцию глаголов |
 | `TestRoleVerbReseedHasOneReferenceInTheTreeAndItIsTheBootRoot` | `git grep -c 'func TestRoleVerbReseedHasOneReferenceInTheTreeAndItIsTheBootRoot(' -- internal/repohygiene` → **1** | то же по числу вызывающих |
-| `TestCatalogMatchesTheAnnotationsItWasGeneratedFrom` | `git grep -c 'func TestCatalogMatchesTheAnnotationsItWasGeneratedFrom(' -- internal/repohygiene` → **1** | **остаться зелёным**: раздел `resources` порождается из аннотаций (исход B эпика), экспортёр ролей его не переписывает |
+| `PRO-Robotech/kacho:TestCatalogMatchesTheAnnotationsItWasGeneratedFrom` | `git grep -c 'func TestCatalogMatchesTheAnnotationsItWasGeneratedFrom(' -- internal/repohygiene` → **1** | **остаться зелёным**: раздел `resources` порождается из аннотаций (исход B эпика), экспортёр ролей его не переписывает |
 | `check-04-product-acceptance-verdict` (воркспейс) | `KACHO_MONOREPO=<копия> python3 scripts/docs-gate/check-04-product-acceptance-verdict.py` → `приёмок осмотрено 7 … вердикты — APPROVED 7`, код 0 | **увидеть этот документ восьмым** и прочитать его вердикт. Число **7** — состояние ДО посадки: гейт читает `origin/main` (`ls-tree -r origin/main`, `check-04:88`), а не рабочую копию, поэтому незакоммиченный документ ему невидим **by construction**. Распознавание вердикта проверено отдельно и не ждёт посадки: `_lib.verdict` на этом файле даёт **`('CHANGES REQUESTED', …)`** (перемерено кругом 2; круг 1 записал здесь `('DRAFT', …)` — верно для своей редакции шапки и неверно для этой) |
 
 **Гейт, который эта работа ПОТРЕБУЕТ** (добавлен кругом 2 по Р2 — рецензент верно
@@ -4439,7 +4453,7 @@ MOD-RL-21 (полнота относительно живого); заведен
 | сверка `roleId` выдачи | `manifest/linkage.go` — `roleIDs`, `rolesDeclared`, `RoleRefsChecked/Read` | MOD-RL-13 — **провязка**, не новый код |
 | послабление на раздел `roles` | `manifest/manifest.go:108,230`; гейт `TestMODMF13…` (`linkage_internal_test.go:152`) | момент, когда разбор перестанет отвергать раздел |
 | проекции роли | `SyncAllSystemRoleSelectors` (`seed/migrate_backfill.go:231`) + гейт единственного писателя `#1028` | MOD-RL-16 |
-| ведомость приёмок | гейт `TestNewMigrationCitesAnApprovedAcceptance` (`acceptanceledger_test.go:116`) | MOD-RL-15 |
+| ведомость приёмок | гейт `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` (`acceptanceledger_test.go:116`) | MOD-RL-15 |
 | перечень живых ролей vpc | перепись по миграциям (`md5('vpc.…')`), **18** | MOD-RL-10, 21 |
 
 ### 12.2. Производители, заводимые ЭТОЙ работой — и кем
@@ -4476,7 +4490,7 @@ MOD-RL-21 (полнота относительно живого); заведен
 | 13 | `linkage.go` — `roleIDs`, `RoleRefsChecked` | **есть**, нужна провязка (`#1778`) |
 | 13a | второй манифест в дереве | **НЕТ — популяция нулевая**; названо долгом §6, предикат заведения там же |
 | 14 | связность группы и выдачи (`linkage.go`) | есть |
-| 15 | `TestNewMigrationCitesAnApprovedAcceptance` | есть |
+| 15 | `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` | есть |
 | 16 | гейт единственного писателя (`#1028`) | есть |
 | 17, 17a | сверка с живым состоянием | заводится |
 | **18, 18a** | классы действий раздела `resources` | **заводится** |

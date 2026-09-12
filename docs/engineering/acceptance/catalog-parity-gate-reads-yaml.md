@@ -14,6 +14,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   формами, нулевая популяция тремя формами, отсутствие вызывающего у цели тремя формами —
   сошлись дословно. Три замечания — **важные, не блокирующие**, каждое закрывается одной
   фразой и пропускается вперёд (§12.3)
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
+  ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
+  читался адресом В ЭТОМ репозитории, где такой функции нет: следующий шёл по нему, не
+  находил ничего и делал вывод О ДЕРЕВЕ, а не о документе. Там, где стояло одно имя,
+  теперь стоит дом — `PRO-Robotech/kacho:` (гейт жив в монорепо) ·
+  `PRO-Robotech/corelib:` (уехал в общий фундамент) · `PRO-Robotech/kacho@d941344bd9:`
+  (снят самим вынесением — `PRO-Robotech/kacho@0cc1cd54c3`). **Следствие для читателя,
+  и оно несущее:** зелёный такого гейта о дереве `PRO-Robotech/kaname` не говорит
+  НИЧЕГО — он судит ЧУЖОЕ дерево, и держателя у названного класса здесь может не быть
+  вовсе. Дельта правки — только приставка дома: ни один сценарий, вердикт,
+  производитель, признак готовности и ни одно число не тронуты. Держит форму гейт
+  `TestAcceptanceProbeCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
   редакцию НЕ ПЕРЕНЕСЁН.** Правок 2, строк 2: `b81adf2760` имя службы (1) ·
   `93ef852fe9` идентификатор лицензии (1). Дельта целиком — подстановка токена
@@ -48,7 +62,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 ## 1. Постановка задачи ОПРОВЕРГНУТА в двух пунктах из трёх
 
 Задача утверждает: «держателем ограничения назван гейт
-`TestNoServiceDeclaresItsPermissionsASecondTime`; он его **не держит и не может**».
+`PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime`; он его **не держит и не может**».
 Первая половина верна, вывод — нет: держатель существует, он **другой**, и он приехал
 тем самым изменением, которого задача требовала («тем же изменением, что заводит
 раздел»).
@@ -57,9 +71,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 |---|---|---|
 | `catalogparity_test.go` обходит только не-тестовые `.go` | `:258` — фильтр по суффиксу; `grep -c 'yaml\.'` → **0** | **ВЕРНО** |
 | раздел `resources` в схеме есть | `services/iam/internal/manifest/manifest.go:119` | **ВЕРНО** |
-| **держателя у решения B нет** | `TestManifestIsNotASecondDeclarationOfARight` — `internal/repohygiene/modulemanifestrights_test.go:296`; читает YAML (`gopkg.in/yaml.v3`, отбор по имени `:151`), цитирует `#1813` в шапке `:5` | **НЕВЕРНО** |
+| **держателя у решения B нет** | `PRO-Robotech/kacho:TestManifestIsNotASecondDeclarationOfARight` — `internal/repohygiene/modulemanifestrights_test.go:296`; читает YAML (`gopkg.in/yaml.v3`, отбор по имени `:151`), цитирует `#1813` в шапке `:5` | **НЕВЕРНО** |
 | перепись по формам отсутствует (предикат 2 задачи) | обе переписи печатают формы **раздельно**: `catalogparity_test.go:316`, `modulemanifestrights_test.go:312` | **НЕВЕРНО** |
-| расширение не доказано (предикат 3 задачи) | `TestManifestRightsRecognizerChangedWhatIsInspected` (`modulemanifestrights_injection_test.go:159`) | **НЕВЕРНО** |
+| расширение не доказано (предикат 3 задачи) | `PRO-Robotech/kacho:TestManifestRightsRecognizerChangedWhatIsInspected` (`modulemanifestrights_injection_test.go:159`) | **НЕВЕРНО** |
 
 Проверено вторым способом, а не только чтением: набор инъекции прогнан целиком.
 
@@ -117,7 +131,7 @@ go test ./internal/repohygiene/ -count=1 -run TestManifestRights -v   # RC=0, 7 
 
 | проба | сторона |
 |---|---|
-| `TestManifestRightsGateControlIsSilent` | **положительный контроль** — целый манифест молчит |
+| `PRO-Robotech/kacho:TestManifestRightsGateControlIsSilent` | **положительный контроль** — целый манифест молчит |
 | `…FindsDerivedWithoutAProducer` | отрицание |
 | `…FindsAuthoredThatOutlivedItsSubject` | отрицание |
 | `…FindsATypeTheModelDoesNotDeclare` | отрицание |
@@ -221,14 +235,14 @@ go test ./internal/repohygiene/ -count=1 -run TestManifestRights -v   # RC=0, 7 
 
 | сценарий | производитель | координата | состояние |
 |---|---|---|---|
-| MOD-2D-01 | `TestManifestRightsGateFindsDerivedWithoutAProducer` | `…injection_test.go:117` | ✅ PASS |
-| MOD-2D-02 | `TestManifestRightsGateControlIsSilent` | `:108` | ✅ PASS |
+| MOD-2D-01 | `PRO-Robotech/kacho:TestManifestRightsGateFindsDerivedWithoutAProducer` | `…injection_test.go:117` | ✅ PASS |
+| MOD-2D-02 | `PRO-Robotech/kacho:TestManifestRightsGateControlIsSilent` | `:108` | ✅ PASS |
 | MOD-2D-03 | `…FindsAuthoredThatOutlivedItsSubject` | `:125` | ✅ PASS |
 | MOD-2D-04 | `…FindsATypeTheModelDoesNotDeclare` | `:132` | ✅ PASS |
 | MOD-2D-05 | `…FindsADeprecatedVerbThatIsProducedAgain` | `:139` | ✅ PASS |
 | MOD-2D-06 | `…FindsADeprecatedVerbWithoutASubject` | `:148` | ✅ PASS |
-| MOD-2D-07 | `TestManifestRightsGateControlIsSilent` | `:108` | ✅ PASS |
-| MOD-2D-08 | `TestManifestIsNotASecondDeclarationOfARight` + `TestNoServiceDeclaresItsPermissionsASecondTime` | `modulemanifestrights_test.go:296` · `catalogparity_test.go:244` | ✅ PASS |
+| MOD-2D-07 | `PRO-Robotech/kacho:TestManifestRightsGateControlIsSilent` | `:108` | ✅ PASS |
+| MOD-2D-08 | `PRO-Robotech/kacho:TestManifestIsNotASecondDeclarationOfARight` + `PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime` | `modulemanifestrights_test.go:296` · `catalogparity_test.go:244` | ✅ PASS |
 | MOD-2D-09 | `…RecognizerChangedWhatIsInspected` | `:159` | ✅ PASS |
 | **MOD-2D-10** | — | — | **производителя НЕТ** → `#1851` |
 | **MOD-2D-11** | — | — | **производителя НЕТ** → `#1852` |

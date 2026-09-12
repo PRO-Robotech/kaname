@@ -10,6 +10,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   замечания вносятся тем же изменением и вердикта не меняют. Круг 5 отработал правку
   РЕШЕНИЯ (§2.6, третья популяция потолка не получает) — принята, довод проверен
   прогоном против живой Postgres, а не прочтением
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
+  ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
+  читался адресом В ЭТОМ репозитории, где такой функции нет: следующий шёл по нему, не
+  находил ничего и делал вывод О ДЕРЕВЕ, а не о документе. Там, где стояло одно имя,
+  теперь стоит дом — `PRO-Robotech/kacho:` (гейт жив в монорепо) ·
+  `PRO-Robotech/corelib:` (уехал в общий фундамент) · `PRO-Robotech/kacho@d941344bd9:`
+  (снят самим вынесением — `PRO-Robotech/kacho@0cc1cd54c3`). **Следствие для читателя,
+  и оно несущее:** зелёный такого гейта о дереве `PRO-Robotech/kaname` не говорит
+  НИЧЕГО — он судит ЧУЖОЕ дерево, и держателя у названного класса здесь может не быть
+  вовсе. Дельта правки — только приставка дома: ни один сценарий, вердикт,
+  производитель, признак готовности и ни одно число не тронуты. Держит форму гейт
+  `TestAcceptanceProbeCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ ПОСЛЕ вердикта документ правлен МАССОВО (`#2214`), и вердикт на нынешнюю
   редакцию НЕ ПЕРЕНЕСЁН.** Правок 3, строк 31: `5504f44a7f` каталоги службы
   (25) · `b81adf2760` имя службы (5) · `93ef852fe9` идентификатор лицензии (1).
@@ -1392,14 +1406,14 @@ item(s), but has 33`).
 
 | гейт | почему краснеет | молчит от |
 |---|---|---|
-| `TestGRPCMountParity_EveryDeclaredServiceIsMounted` (`internal/repohygiene/grpcmountparity_test.go:69`) | служба объявлена контрактом и не смонтирована ни в одном композиционном корне | О4 |
-| `TestCatalogReachability_EveryRowResolvesToAServedMethod` (`catalogreachability_test.go:76`) | четыре строки каталога прав не резолвятся в обслуживаемый метод | О4 |
-| `TestCatalogReachability_InertRowsAreExactlyTheAllowedServices` (`:130`) | инвентарь инертных строк изменился — он был **пуст** | О4 |
+| `PRO-Robotech/kacho:TestGRPCMountParity_EveryDeclaredServiceIsMounted` (`internal/repohygiene/grpcmountparity_test.go:69`) | служба объявлена контрактом и не смонтирована ни в одном композиционном корне | О4 |
+| `PRO-Robotech/kacho:TestCatalogReachability_EveryRowResolvesToAServedMethod` (`catalogreachability_test.go:76`) | четыре строки каталога прав не резолвятся в обслуживаемый метод | О4 |
+| `PRO-Robotech/kacho:TestCatalogReachability_InertRowsAreExactlyTheAllowedServices` (`:130`) | инвентарь инертных строк изменился — он был **пуст** | О4 |
 
 **Переждать это записью в перечень нельзя by construction.** Оба перечня —
 `mountAllow` (`grpcmountparity_test.go:54`) и `knownInertCatalogRows`
 (`catalogreachability_test.go:56`) — **пусты**, запись, которой больше нечего
-исключать, сама есть находка (`TestGRPCMountParity_AStaleAllowIsItselfAFinding`), а
+исключать, сама есть находка (`PRO-Robotech/kacho:TestGRPCMountParity_AStaleAllowIsItselfAFinding`), а
 вторая ведомость обязана быть **следствием** записи первой, а не самостоятельным
 разрешением. То есть послабление пришлось бы внести и снять в пределах одной линии
 — работа ради красноты, которой не должно быть.
@@ -2451,7 +2465,7 @@ sed -n '1,/^## §R\. /p' <этот файл> | grep -nE \
 | сценариев прочитано | **34 из 34**; разобрано на конструируемость Given — 12 |
 | прогонов против живой Postgres | **3** (E1, E2, E3) |
 | инъекций в существующий гейт | **1** (каталог прав, ступень ACR) |
-| прогонов проб дерева | **3** (`TestManifestRowsReproduceTheSeededCatalog`, `TestWithdrawalProducerArrivesWithTheApplier`, `TestPermissionCatalog_ACR_SetInvariant`) |
+| прогонов проб дерева | **3** (`TestManifestRowsReproduceTheSeededCatalog`, `TestWithdrawalProducerArrivesWithTheApplier`, `PRO-Robotech/kacho:TestPermissionCatalog_ACR_SetInvariant`) |
 
 **Что прогнано и с каким исходом.** Пробы рецензента заводились временным файлом
 в `services/iam/internal/repo/kaname/pg/`, прогонялись и **сняты**; дерево после
