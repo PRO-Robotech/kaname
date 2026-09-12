@@ -158,7 +158,6 @@ import _ "github.com/PRO-Robotech/kacho/internal/dropguard"
 func TestPlatformImportRecognizer_SilentOnTheNamedResidual(t *testing.T) {
 	t.Parallel()
 	for _, e := range platformResidual {
-		e := e
 		t.Run(e.Path, func(t *testing.T) {
 			t.Parallel()
 			body := "package probe\n\nimport _ \"" + platformModulePath + "/" + e.Path + "\"\n"
