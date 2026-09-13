@@ -27,15 +27,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   редакцию ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение,
   замер и цена обоих отвергнутых исходов —
   `../architecture/verdict-names-a-revision-not-a-file.md`
-- **Ревизия измерения (продукт):** `73c04318ad642eff41d7be2f8b28b88e03ae9a5f` —
-  ветка `lane/1849`, впереди `origin/main` (`2fb27446e`) на **15**, позади на
+- **Ревизия измерения (продукт):** `PRO-Robotech/kacho@73c04318ad642eff41d7be2f8b28b88e03ae9a5f` —
+  ветка `lane/1849`, впереди `origin/main` (`PRO-Robotech/kacho@2fb27446e`) на **15**, позади на
   **0**; `git status --porcelain` пуст (перемерено `git rev-list --count`). Все
   числа и координаты о дереве продукта сняты на ней. **Читателю: пакет
-  `services/iam/internal/manifest/roleexport` посажен коммитом `73c04318ad` этой
+  `services/iam/internal/manifest/roleexport` посажен коммитом `PRO-Robotech/kacho@73c04318ad` этой
   же ветки и в `origin/main` ЕЩЁ НЕ ВЛИТ** — координаты в него резолвятся на
   ветке и не резолвятся в стволе; проверка свежести документации судит по стволу
   и назовёт это отставанием числом.
-- **Ревизия измерения (воркспейс):** `eafd100`. Черновик манифеста ревизией **не
+- **Ревизия измерения (воркспейс):** `PRO-Robotech/kacho-workspace@eafd100`. Черновик манифеста ревизией **не
   накрывается** — он не отслеживается ни одним из двух репозиториев
   (`git ls-files docs/manifest-dcl/` → **0**), поэтому адресуется отпечатком
   содержимого: `sha256sum docs/manifest-dcl/vpc.manifest.yaml` →

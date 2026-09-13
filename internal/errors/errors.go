@@ -13,7 +13,7 @@
 // deliberately lives in the ADAPTER layer (internal/repo/kaname/pg/pgmaperr.go),
 // NOT here: this package stays pgx-free so the ~40 use-case/handler files that
 // import it for the sentinels never pull pgx into their build closure
-// (architecture.md dependency-rule).
+// (the dependency rule of clean architecture).
 package errors
 
 import (

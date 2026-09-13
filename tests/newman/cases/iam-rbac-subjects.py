@@ -46,7 +46,7 @@ Test-design techniques applied:
   - Conformance: response shapes vs the proto contract (subjects[], principals[],
     accessBindings[]); error text "Illegal argument subjects (must be 1..32)".
 
-Fixture dependency (tests/authz-fixtures/setup.sh → prodseed_all.py): jwtAccountAdminA,
+Fixture dependency (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh → prodseed_all.py): jwtAccountAdminA,
 jwtNoBindings, accountAId, userAAAId, userAABId, userNOBId. AccessBinding subjects
 must reference an EXISTING user/service_account/group in the iam DB — migration 0049
 (subject_ref_exists BEFORE INSERT/UPDATE trigger) closes the (subject_type,
@@ -73,6 +73,11 @@ GroupName.Validate → the single resource-name form of the tree (parity with Ac
 SvcAccount). An underscore in the name is rejected sync 400 INVALID_ARGUMENT
 before the Operation is created — keep this name hyphenated, never `rbac_e31_*`.
 """
+
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
 
 CASES = []
 

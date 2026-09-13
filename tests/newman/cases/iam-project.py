@@ -54,6 +54,11 @@ verifies: ProjectService Create/Update/Delete/duplicate-name acceptance scenario
 from iam-project.py spec.
 """
 
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
+
 CASES = []
 
 # ---------------------------------------------------------------------------
@@ -495,7 +500,7 @@ CASES.append(Case(
             # asserts "this subject sees nothing" was therefore asserting it
             # against a subject that is genuinely authorised — a fixture artifact,
             # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
-            # subject seeded for exactly this (tests/authz-fixtures/setup.sh; it is
+            # subject seeded for exactly this (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh; it is
             # never a grant TARGET anywhere in the tree).
             auth="jwtPureNoBindings",
             test_script=[

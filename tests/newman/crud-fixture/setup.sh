@@ -8,7 +8,7 @@
 # Exports (via environments/local.postman_environment.json):
 #   jwtAccountAdminA / jwtAccountAdminB / jwtNoBindings / jwtInvitee / jwtBootstrap,
 #   userAAAId / userAABId / userNOBId / userINVId, accountAId / accountBId.
-# Every one of them is a strict subset of what tests/authz-fixtures/setup.sh produces —
+# Every one of them is a strict subset of what PRO-Robotech/kacho:tests/authz-fixtures/setup.sh produces —
 # that was already written in this file's own header before the change below.
 #
 # ЭТОТ ФАЙЛ БОЛЬШЕ НЕ ЧЕКАНИТ ТОКЕНЫ. Раньше он был «минимальной альтернативой»
@@ -19,7 +19,7 @@
 # токенов — а записывался и патчился молча, как удачный. Отказ всплывал позже, на
 # первом же кейсе, и читался как дефект продукта.
 #
-# Альтернативы больше нет: посадку опознаёт ОДИН вход — tests/authz-fixtures/setup.sh —
+# Альтернативы больше нет: посадку опознаёт ОДИН вход — PRO-Robotech/kacho:tests/authz-fixtures/setup.sh —
 # и он отдаёт выдачу iam. Здесь осталось то, ради чего файл существует: получить набор
 # и пропатчить им окружение сьюты.
 set -euo pipefail

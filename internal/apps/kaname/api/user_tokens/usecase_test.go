@@ -47,11 +47,18 @@ type stubUserClientRepo struct {
 	// (#1191): решение о потолке принимает атомарный оператор вставки, поэтому
 	// подать его в use-case можно только отказом самой записи.
 	insertErr error
+	// accountErr — хранилище НЕ ОТВЕТИЛО на резолв аккаунта. Отдельно от
+	// `getErr`: там «строки нет» (ответ), здесь ответа нет вовсе, и разводить
+	// эти два состояния — предмет пробы наблюдаемости (#2507).
+	accountErr error
 }
 
 // AccountForUser — резолвер account'а User (порт UserClientRepo). Дефолт —
 // фиксированный account; тесты account_id-стемпинга подставляют свой.
 func (s *stubUserClientRepo) AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, bool, error) {
+	if s.accountErr != nil {
+		return "", false, s.accountErr
+	}
 	may := !s.blocked
 	if s.blockedIDs != nil {
 		may = !s.blockedIDs[id]

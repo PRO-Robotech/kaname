@@ -119,7 +119,8 @@ func TestIAM2465_DrainerTasksReturnWhenTheShutdownContextIsCancelled(t *testing.
 	})
 
 	t.Run("компенсации провайдера", func(t *testing.T) {
-		task, err := buildProviderCompensationDrainer(pool, config.Config{}, reg.CompensationRecorder(), logger)
+		task, err := buildProviderCompensationDrainer(pool, config.Config{},
+			reg.CompensationRecorder(), reg.ProviderRoadRecorder(), logger)
 		if err != nil {
 			t.Fatalf("сборка дренажа компенсаций: %v", err)
 		}

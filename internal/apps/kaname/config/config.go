@@ -114,7 +114,7 @@ type APIServerConfig struct {
 	// MetricsEndpoint — Prometheus /metrics HTTP listener. A SEPARATE
 	// cluster-internal port (default `tcp://0.0.0.0:9095`), never the public
 	// tenant gRPC surface — exposing the registry there would leak internal
-	// cardinality (security.md). Empty disables the metrics listener.
+	// cardinality. Empty disables the metrics listener.
 	MetricsEndpoint string `mapstructure:"metrics-endpoint"`
 	// RegistryToken — the Docker Registry v2 `/iam/token` auth-server HTTP
 	// listener. A SEPARATE, EXTERNAL-reachable plaintext port (default
@@ -510,7 +510,7 @@ func (b BootstrapMintConfig) ResolveSigningKeyEnv() string {
 // ResolveSigningKeyPEM reads the bootstrap SA private key PEM from its env var.
 // Empty → the mint is disabled. Only os.Getenv is read (no other side-effects),
 // consistent with the other Resolve* methods; the VALUE is never logged or
-// echoed in an error (security.md).
+// echoed in an error.
 func (b BootstrapMintConfig) ResolveSigningKeyPEM() string {
 	return strings.TrimSpace(os.Getenv(b.ResolveSigningKeyEnv()))
 }

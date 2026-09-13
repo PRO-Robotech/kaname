@@ -52,6 +52,20 @@ type HydraTokenClient struct {
 	// in production, e.g. http://kacho-umbrella-hydra-public.<ns>.svc:4444/oauth2/token).
 	TokenURL   string
 	HTTPClient *http.Client
+
+	// roadObserver — счётчик исходов ЭТОЙ дороги. nil законен.
+	roadObserver ProviderRoadObserver
+}
+
+// WithRoadObserver подключает счётчик исходов дороги обмена. Composition-root only.
+func (c *HydraTokenClient) WithRoadObserver(obs ProviderRoadObserver) *HydraTokenClient {
+	c.roadObserver = obs
+	return c
+}
+
+// observeRoad — единая точка учёта исхода обмена.
+func (c *HydraTokenClient) observeRoad(outcome string) {
+	observeProviderRoad(c.roadObserver, ProviderRoadTokenExchange, outcome)
 }
 
 // NewHydraTokenClientWithCA builds the client and, when an anchor is configured,
@@ -71,7 +85,7 @@ func NewHydraTokenClientWithCA(tokenURL, caFile string) (*HydraTokenClient, erro
 }
 
 // tokenHopTimeout — per-call ceiling on the exchange. Named so both constructors
-// cannot drift apart (architecture.md: every outbound call carries its own).
+// cannot drift apart (every outbound call carries its own).
 const tokenHopTimeout = 10 * time.Second
 
 // ClientCredentialsRequest — inputs for the private_key_jwt exchange.
@@ -116,11 +130,19 @@ func (c *HydraTokenClient) ClientCredentials(ctx context.Context, req ClientCred
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
 		// Network failure / timeout / connection refused — issuer down.
+		c.observeRoad(ProviderRoadOutcomeUnavailable)
 		return TokenResponse{}, fmt.Errorf("%w: %v", ErrHydraUnavailable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 
+	// КЛЕТКА СЧЁТЧИКА И ВОЗВРАЩАЕМЫЙ СЕНТИНЕЛ — РАЗНЫЕ ВЕЛИЧИНЫ, и это решение.
+	//
+	// Клетка отвечает ОПЕРАТОРУ на вопрос «лечится ли это временем»: «по адресу
+	// не тот эндпоинт» не лечится никогда, «издатель лёг» лечится. Сентинел
+	// отвечает ДОКЕРНОМУ КЛИЕНТУ, и его расщепление сменило бы код ответа
+	// полосы — то есть перестало бы быть правкой наблюдаемости. Поэтому
+	// расщепляются клетки, а сентинелы остаются прежними (kacho#2491).
 	switch resp.StatusCode / 100 {
 	case 2:
 		var parsed struct {
@@ -130,15 +152,22 @@ func (c *HydraTokenClient) ClientCredentials(ctx context.Context, req ClientCred
 		if err := json.Unmarshal(body, &parsed); err != nil || parsed.AccessToken == "" {
 			// A 2xx that is not a well-formed token response is treated as a
 			// misbehaving issuer (fail-closed), never a silent empty token.
+			//
+			// Клетка здесь — НАСТРОЙКА, а не сбой: тело, не разбираемое по
+			// контракту токен-эндпоинта, доказывает, что по адресу стоит не он.
+			c.observeRoad(ProviderRoadOutcomeMisconfigured)
 			return TokenResponse{}, fmt.Errorf("%w: malformed token response", ErrHydraUnavailable)
 		}
+		c.observeRoad(ProviderRoadOutcomeOK)
 		return TokenResponse{AccessToken: parsed.AccessToken, ExpiresIn: parsed.ExpiresIn}, nil
 	case 4:
 		// OAuth2 client/grant rejection — invalid/expired/revoked credential.
 		// The raw body is intentionally NOT included (no auth oracle).
+		c.observeRoad(classifyProviderRoadStatus(resp.StatusCode))
 		return TokenResponse{}, ErrHydraRejected
 	default:
 		// 5xx and anything else — issuer failure.
+		c.observeRoad(classifyProviderRoadStatus(resp.StatusCode))
 		return TokenResponse{}, fmt.Errorf("%w: token endpoint status %d", ErrHydraUnavailable, resp.StatusCode)
 	}
 }

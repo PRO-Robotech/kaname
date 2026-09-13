@@ -13,7 +13,7 @@
 // Surfaces:
 //   - Registry.Handler() — promhttp.Handler served on a SEPARATE internal port
 //     (KANAME_METRICS_ENDPOINT, default :9095). Never on the public tenant
-//     gRPC surface (it would expose internal cardinality — security.md).
+//     gRPC surface (it would expose internal cardinality).
 //   - Registry.ObserveAuthz — the authz Check hot-path histogram + decision
 //     counter (the documented ≤30ms p95 budget on AuthorizeService.Check /
 //     CheckRelation was previously un-instrumented).
@@ -69,10 +69,20 @@ type Registry struct {
 	compensation     *CompensationRecorder
 
 	// outboxOnce/outbox — единственный экземпляр коллекторов состояния очередей.
-	// Очередей у kaname три (fga_outbox, subject_change_outbox,
-	// provider_compensation_outbox), их сканеры собираются в разных местах
-	// композиционного корня, а серии у них ОБЩИЕ и различаются лейблом `table`.
-	// Второй конструктор уронил бы старт на duplicate-register.
+	//
+	// Перечня очередей здесь НЕТ намеренно (kacho#2480). Прежняя редакция
+	// называла три и называла их поимённо; сканеров в корне четыре, а один из
+	// перечисленных (`subject_change_outbox`) сканера не имеет ВОВСЕ — он снят
+	// осознанно вместе с величинами доставки, которых у журнала с курсором не
+	// бывает. То есть перечень был неверен в обе стороны сразу.
+	//
+	// Предикат вместо перечня:
+	//
+	//	git grep -c 'outboxmetrics.NewCollector' -- cmd/kaname ':!*_test.go'
+	//
+	// Сканеры собираются в разных местах композиционного корня, а серии у них
+	// ОБЩИЕ и различаются лейблом `table`; второй конструктор уронил бы старт
+	// на повторной регистрации.
 	outboxOnce sync.Once
 	outbox     *OutboxRecorder
 
@@ -118,6 +128,13 @@ type Registry struct {
 	// величин второго уборщика по сроку (#2499).
 	expiredCredSweepOnce sync.Once
 	expiredCredSweep     *ExpiredCredentialSweepRecorder
+
+	// providerRoadOnce/providerRoad — единственный экземпляр счётчика исходов
+	// дорог к внешнему поставщику (#2491). Потребители собираются в разных
+	// местах корня, а второй конструктор уронил бы старт на повторной
+	// регистрации семейства с тем же именем.
+	providerRoadOnce sync.Once
+	providerRoad     *ProviderRoadRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime
@@ -154,9 +171,41 @@ func NewRegistry() *Registry {
 				"pooled connection — indistinguishable from the caller's side.",
 		}, []string{"op", "outcome", "reused"}),
 	}
+	// Клетки закрытого набора заводятся нулём ПРИ РЕГИСТРАЦИИ: вектор без детей
+	// не отдаёт на провод ничего, и «механизм не провязан» становится неотличим
+	// от «механизм провязан и ни разу не сработал».
+	//
+	// Полосы решения о доступе — ЗАКРЫТЫЙ словарь ([DeclaredAuthzLanes]), поэтому
+	// перечислить клетки можно здесь. У счётчика попыток к хранилищу набор `op` не
+	// перечислим (и производителя у него сегодня нет ни одного) — он заводится
+	// первым событием; это названо в ведомости пробы пакета.
+	for _, lane := range DeclaredAuthzLanes() {
+		for _, allowed := range []string{"false", "true"} {
+			r.authzDuration.WithLabelValues(lane, allowed)
+		}
+		for _, decision := range AuthzDecisions {
+			r.authzDecisions.WithLabelValues(lane, decision)
+		}
+	}
 	reg.MustRegister(r.authzDuration, r.authzDecisions, r.authzStoreAttempts)
 	return r
 }
+
+// Клетки ЗАКРЫТОГО набора решений о доступе.
+//
+// Производитель — [Registry.ObserveAuthzDecision] в ЭТОМ ЖЕ файле, поэтому
+// второго места об этом предмете не заводится: он читает те же константы.
+const (
+	// AuthzDecisionAllow — вопрос разрешён.
+	AuthzDecisionAllow = "allow"
+	// AuthzDecisionDeny — вопрос отвергнут.
+	AuthzDecisionDeny = "deny"
+	// AuthzDecisionError — решения нет: отказ хранилища либо валидации.
+	AuthzDecisionError = "error"
+)
+
+// AuthzDecisions — ЗАКРЫТЫЙ набор клеток счётчика решений.
+var AuthzDecisions = []string{AuthzDecisionAllow, AuthzDecisionDeny, AuthzDecisionError}
 
 // Namespace — префикс имён ВСЕХ серий этого сервиса. Отдельная константа, а не
 // литерал по месту: имя серии — контракт с панелями и правилами тревог, и
@@ -258,12 +307,12 @@ func (r *Registry) ObserveAuthzDuration(rpc string, allowed bool, seconds float6
 
 // ObserveAuthzDecision записывает ТОЛЬКО исход одного вопроса.
 func (r *Registry) ObserveAuthzDecision(rpc string, allowed, failed bool) {
-	decision := "allow"
+	decision := AuthzDecisionAllow
 	switch {
 	case failed:
-		decision = "error"
+		decision = AuthzDecisionError
 	case !allowed:
-		decision = "deny"
+		decision = AuthzDecisionDeny
 	}
 	r.authzDecisions.WithLabelValues(rpc, decision).Inc()
 }

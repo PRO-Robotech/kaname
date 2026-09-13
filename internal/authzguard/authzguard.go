@@ -78,8 +78,8 @@ func PermissionDenied() error {
 // Fail-closed is unchanged either way: the request is refused, nothing runs. Only
 // the code differs, and the code is the whole signal.
 //
-// The text carries no detail of the backend failure (security.md
-// §Hardening-инварианты п.1 — no leak); the raw error is logged, not surfaced.
+// The text carries no detail of the backend failure
+// (§Hardening-инварианты п.1 — no leak); the raw error is logged, not surfaced.
 // Single source for the three gates that already answered this way inline
 // (RelationWriteGate, SystemViewerFloor, scope) and for those that used to
 // collapse it into a refusal.
@@ -111,7 +111,7 @@ func AuthzBackendUnavailable() error {
 //     construction — answering with InvalidArgument naming a field the caller
 //     never sent.
 //
-// See security.md «Авторизация живёт в МОДЕЛИ, а не в самодельных проверках».
+// See §«Авторизация живёт в МОДЕЛИ, а не в самодельных проверках».
 // Do not reintroduce an identity-equality gate next to a catalog entry: express
 // the policy as a relation in the model instead.
 

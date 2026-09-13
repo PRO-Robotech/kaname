@@ -143,15 +143,6 @@ func (h *Handler) Stats() Stats {
 	return Stats{Active: h.active.Load(), Inactive: h.inactive.Load(), Unavailable: h.unavailable.Load()}
 }
 
-// NewMux монтирует авторитет на его путь.
-func NewMux(h http.Handler) *http.ServeMux {
-	mux := http.NewServeMux()
-	if h != nil {
-		mux.Handle(IntrospectPath, h)
-	}
-	return mux
-}
-
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.cfg.RequireClientCert && !clientCertVerified(r) {
 		// Наружу — опознавательное слово и ничего сверх: спрашивающий без

@@ -166,3 +166,64 @@ func TestAcceptanceEditAfterVerdictInjection(t *testing.T) {
 		}
 	})
 }
+
+// TestAcceptanceEditGateTellsAShallowTreeFromACleanOne — предпосылка гейта:
+// глубина истории отличает «нечего сравнивать» от «сравнили и не нашли».
+//
+// Два мира отличаются РОВНО ОДНИМ фактом — числом коммитов над тем же
+// содержимым. Содержимое документа в обоих одинаково, поэтому объяснить разницу
+// вердикта больше нечем.
+//
+// Предмет: в дереве из одного коммита отметка строки состояния и отметка файла
+// равны у каждого документа by construction, и признак «правлено после вердикта»
+// невыразим. Гейт обязан назвать это ТРЕТЬИМ ИСХОДОМ, а не находкой о продукте
+// (#43: ровно так `make test-standalone` краснела в фикстуре гейта целей, где
+// клон собирается из состава одного коммита).
+func TestAcceptanceEditGateTellsAShallowTreeFromACleanOne(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const body = "# Приёмка\n\n**Статус:** APPROVED\n\nТело.\n"
+
+	// ── МИР A: один коммит. Признак невыразим — глубина ниже порога.
+	t.Run("один коммит — условие не создано", func(t *testing.T) {
+		t.Parallel()
+		r := newSynthAcceptanceRepo(t)
+		r.write(t, "docs/engineering/acceptance/live.md", body)
+		r.commit(t, base, "приёмка")
+
+		_, census, err := check.AuditAcceptanceEditsAfterVerdict(r.root, "docs/engineering/acceptance")
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+		if census.DocsRead != 1 {
+			t.Fatalf("ожидался 1 документ, получено %d", census.DocsRead)
+		}
+		if census.HistoryDepth >= check.AcceptanceHistoryFloor {
+			t.Fatalf("глубина истории %d при одном коммите — порог %d не различает "+
+				"дерево, в котором сравнивать нечего, и гейт объявит находкой то, "+
+				"что невыразимо (%s)",
+				census.HistoryDepth, check.AcceptanceHistoryFloor, census)
+		}
+	})
+
+	// ── МИР Б: ТО ЖЕ содержимое, но два коммита. Признак выразим — глубина
+	// достигла порога, и молчание гейта снова что-то означает.
+	t.Run("два коммита — условие создано", func(t *testing.T) {
+		t.Parallel()
+		r := newSynthAcceptanceRepo(t)
+		r.write(t, "docs/engineering/acceptance/live.md", body)
+		r.commit(t, base, "приёмка")
+		r.write(t, "docs/engineering/acceptance/second.md", body)
+		r.commit(t, base.Add(24*time.Hour), "вторая приёмка")
+
+		_, census, err := check.AuditAcceptanceEditsAfterVerdict(r.root, "docs/engineering/acceptance")
+		if err != nil {
+			t.Fatalf("%v", err)
+		}
+		if census.HistoryDepth < check.AcceptanceHistoryFloor {
+			t.Fatalf("глубина истории %d при двух коммитах — предпосылка объявлена "+
+				"непостроенной там, где она построена, и гейт молча пропустит "+
+				"настоящую находку (%s)", census.HistoryDepth, census)
+		}
+	})
+}

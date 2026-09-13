@@ -276,7 +276,7 @@ func RelabelMany(f Form, sc Scenario, objs []string) []Tuple {
 //
 // Отзыв меряется отдельно от выдачи намеренно: путь материализации, умеющий
 // только ДОБАВЛЯТЬ, зелен на каждом утверждении «было ли выдано» и неверен ровно
-// на той операции, ради которой отзыв существует (см. .claude/rules/testing.md
+// на той операции, ради которой отзыв существует (см.
 // §«Параллельный newman», дискриминатор create-vs-update).
 func RevokeSubject(f Form, sc Scenario, subject string) []Tuple {
 	if f != FormE {

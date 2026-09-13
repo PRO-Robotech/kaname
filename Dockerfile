@@ -74,7 +74,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go list -deps ./cmd/kaname ./cmd/migrator >/dev/null
 # Skill evgeniy §9 K.1 / AP-9: независимые binary в одном образе.
 # kaname          — gRPC API-сервер (единственный subcommand — `serve`).
-# kaname-migrator — CLI миграций (cobra: up|down|status|create), используется
+# kaname-migrator — CLI миграций (cobra: up|down|status), используется
 #                   init-container'ом перед стартом основного pod'а.
 #
 # JWKS-ротатора здесь НЕТ и быть не должно: служба не чеканит токены провайдера и

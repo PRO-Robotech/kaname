@@ -29,16 +29,35 @@ import (
 // LogRepoErr переводит ошибку хранилища в gRPC-статус и, если перевод СТИРАЕТ
 // причину, называет её журналу сервера.
 //
+// Перевод делает канонический `MapRepoErr`. Домену, у которого перевод СВОЙ
+// (текст INTERNAL — часть его контракта и отличается от общего), предназначен
+// `LogMappedErr` ниже: он принимает уже переведённый статус, а решение о том,
+// что называть журналу, остаётся здесь в единственном экземпляре.
+func LogRepoErr(ctx context.Context, logger *slog.Logger, op string, err error) error {
+	return LogMappedErr(ctx, logger, op, err, MapRepoErr(err))
+}
+
+// LogMappedErr называет журналу причину отказа, чей текст на проводе её НЕ
+// несёт, и возвращает переданный статус без изменений.
+//
+// # Почему перевод приходит СНАРУЖИ, а решение остаётся ЗДЕСЬ
+//
+// Переводчик у домена бывает свой: `sa_keys` отвечает «internal SA key error»,
+// `user_tokens` — «internal user token error», и эти тексты часть контракта, а
+// не стиль. Подменить их общим переводом значило бы сменить контракт двадцати
+// пяти мест мимо приёмки. А вот ВОПРОС «какие исходы называть журналу» ответа
+// на домен не имеет: разойдясь в нём, домены разойдутся в том, что считается
+// заметным, — поэтому он решается тут и только тут.
+//
 // # Какие исходы пишутся и почему не все
 //
 // Пишутся ровно те, чьё сообщение на проводе причины НЕ несёт:
 //
-//   - `INTERNAL` — текст фиксирован («internal error») by construction, иначе
-//     наружу уехал бы текст драйвера;
-//   - `UNAVAILABLE` — текст тоже фиксирован («service unavailable»), по той же
-//     причине: цепочка ведёт к драйверу. До этой правки он собирался из цепочки,
-//     и обёртка вызывающего уезжала на провод дословно. Подсистему текст не
-//     называет: признак ставит и база, и сосед, и гейт прав.
+//   - `INTERNAL` — текст фиксирован by construction, иначе наружу уехал бы
+//     текст драйвера;
+//   - `UNAVAILABLE` — текст тоже фиксирован, по той же причине: цепочка ведёт к
+//     драйверу. Подсистему текст не называет: признак ставит и база, и сосед, и
+//     гейт прав.
 //
 // Остальные отказы называют свою причину САМИ и адресованы вызывающему: «Project
 // %s not found», «Illegal argument …». Дублировать их в журнале значило бы
@@ -53,21 +72,25 @@ import (
 // потому что отказ, не несущий строки состояния вовсе (не дозвонились до базы),
 // цепочкой не отличим от прочих, а типом — отличим сразу.
 //
+// Сообщение подсистемы НЕ называет — её называет `op`. Прежде здесь стояло
+// «limit read failed»: единственным вызывающим был домен пределов, и текст был
+// верен. Став общим, он лгал бы про всякого следующего — тот же класс, который
+// соседний файл называет у текста `UNAVAILABLE`.
+//
 // Журнал — серверный, на провод из него не идёт ничего: возвращаемый статус
-// собирает `MapRepoErr`, и он остаётся единственным местом перевода.
-func LogRepoErr(ctx context.Context, logger *slog.Logger, op string, err error) error {
-	gerr := MapRepoErr(err)
+// собирает вызывающий, и он остаётся единственным местом перевода.
+func LogMappedErr(ctx context.Context, logger *slog.Logger, op string, err, gerr error) error {
 	if err == nil || logger == nil {
 		return gerr
 	}
 	switch status.Code(gerr) {
 	case codes.Internal:
-		logger.ErrorContext(ctx, "limit read failed",
+		logger.ErrorContext(ctx, "repository call failed",
 			slog.String("op", op),
 			slog.String("err", err.Error()),
 			slog.String("err_type", fmt.Sprintf("%T", err)))
 	case codes.Unavailable:
-		logger.WarnContext(ctx, "limit read unavailable",
+		logger.WarnContext(ctx, "repository call unavailable",
 			slog.String("op", op),
 			slog.String("err", err.Error()),
 			slog.String("err_type", fmt.Sprintf("%T", err)))

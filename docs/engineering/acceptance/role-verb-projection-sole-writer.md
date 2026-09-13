@@ -54,7 +54,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   вердикт о редакции, прочитанной проверяющим. Вердикт на нынешнюю редакцию
   ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение —
   `../architecture/verdict-names-a-revision-not-a-file.md`
-- **Ревизия измерения:** `f7e11a76b` (ветка `release/modules-2`; впереди `origin/main`
+- **Ревизия измерения:** `PRO-Robotech/kacho@f7e11a76b` (ветка `release/modules-2`; впереди `origin/main`
   на **1**, позади — **0**; `git status --porcelain` — только этот неотслеживаемый
   документ). **Все** числа и координаты о дереве продукта сняты на ней и **перемерены
   заново**, а не перенесены из круга 1 (§12.2 В2)

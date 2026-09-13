@@ -65,7 +65,7 @@ func (u *ListBySubjectUseCase) Execute(ctx context.Context, subjectType domain.S
 	// который до репозитория доходит, — замыкание до него не доходит by
 	// construction. Соседний глагол того же чтения (ListSubjectPrivileges) нёс
 	// эту проверку, а здесь её не было: полосы одного механизма обязаны
-	// сверяться между собой (`architecture.md`).
+	// сверяться между собой.
 	//
 	// Разбор — ТОТ ЖЕ, что исполняется на пути чтения (`pagetoken` внутри
 	// `shared.ValidatePagination`): второй кодек курсора разошёлся бы с первым

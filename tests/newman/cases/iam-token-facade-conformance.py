@@ -129,7 +129,7 @@ WHAT IS DELIBERATELY *NOT* ASSERTED, SO NOBODY LOOKS FOR IT HERE
 The legitimate direct path — the final OAuth2 `client_assertion` → token exchange at
 the provider — is not exercised as a black-box case: signing an ES256 assertion needs
 the private key handed out once by Issue, and a Postman script signing JOSE would be a
-second implementation of `tests/authz-fixtures/mint_rs256.py` that could drift from it
+second implementation of `PRO-Robotech/kacho:tests/authz-fixtures/mint_rs256.py` that could drift from it
 silently.
 
 It used to be exercised on every run anyway, one level down — the Bearer these cases
@@ -180,6 +180,11 @@ substituted for the facade-issued one, IBT-04/IBT-13 go RED naming the lane; wit
 real Bearer they are GREEN. Do not weaken an assertion here; a red case means the
 property moved.
 """
+
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
 
 import json  # only for safely quoting case text into JS string literals
 

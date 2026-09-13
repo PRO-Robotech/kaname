@@ -25,7 +25,7 @@
 //     неаутентифицированный слушатель открытым текстом, чьи ключи плоскость
 //     данных реестра принимает как решающие, чью подпись верить;
 //   - СКРЕЙП. Счётчики процесса — внутренняя кардинальность, которую
-//     `security.md` держит вне публичной поверхности; открытый текст выносит её
+//     регламент держит вне публичной поверхности; открытый текст выносит её
 //     всякому, кто слушает сеть пода.
 //
 // # Почему у докерной полосы страж СВОЙ, а не эта функция
@@ -197,7 +197,7 @@ func iamHTTPEdges(hooksAddr, metricsAddr, jwksProxyAddr, restAddr, internalRESTA
 			name: "metrics scrape", knob: "KANAME_METRICS_SERVER_MTLS_ENABLE",
 			addr: metricsAddr, enabled: mtlsCfg.MetricsTLSEnabled(),
 			why: "process counters are internal cardinality, kept off any surface a stranger " +
-				"can read (security.md)",
+				"can read",
 		},
 	}
 }

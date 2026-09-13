@@ -18,7 +18,7 @@
 условие ⇒ отчёта нет ⇒ гейт докладывает ``authz-failclosed(no-report)`` и
 краснеет. «Здесь не запустить» — факт расписания, а не вердикт.
 
-Pre-conditions: `tests/authz-fixtures/setup.sh` (jwtAccountAdminA, accountAId).
+Pre-conditions: `PRO-Robotech/kacho:tests/authz-fixtures/setup.sh` (jwtAccountAdminA, accountAId).
 
 
 ПОЧЕМУ У КАЖДОГО КЕЙСА УТВЕРЖДАЕТСЯ ПРОИЗВОДИТЕЛЬ ОТКАЗА (задача #1198)
@@ -139,6 +139,11 @@ Pre-conditions: `tests/authz-fixtures/setup.sh` (jwtAccountAdminA, accountAId).
 что ответ сервиса различитель опознаёт как `service`. Не сошлось — волна не
 стартует, отчёта нет, гейт называет `authz-failclosed(no-report)`.
 """
+
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
 
 CASES = []
 

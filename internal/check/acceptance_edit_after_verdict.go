@@ -67,13 +67,35 @@ type AcceptanceEditCensus struct {
 	NoHistory    []string
 	EditedAfter  int
 	CarryingNote int
+	// HistoryDepth — сколько коммитов трогали дом приёмок, со ЗНАЧЕНИЕМ,
+	// обрезанным сверху на AcceptanceHistoryFloor.
+	//
+	// Величина несущая, а не справочная: признак «правлено ПОСЛЕ вердикта»
+	// есть СРАВНЕНИЕ двух отметок git, и в дереве с одним коммитом обе отметки
+	// совпадают у каждого документа BY CONSTRUCTION. Там EditedAfter равен нулю
+	// не потому, что приёмки не правили, а потому, что сравнивать нечего, — и
+	// без этой величины два состояния неотличимы.
+	//
+	// Обрезается намеренно: вопрос к ней один — «есть ли чему сравниваться», а
+	// полный счёт стоил бы обхода всей истории дома приёмок на каждом прогоне.
+	HistoryDepth int
 }
+
+// AcceptanceHistoryFloor — глубина истории дома приёмок, ниже которой признак
+// «правлено после вердикта» НЕВЫРАЗИМ.
+//
+// Два коммита — минимум, при котором отметка строки состояния и отметка файла
+// МОГУТ разойтись. При одном они равны у каждого документа, поэтому ветвь
+// сравнения не исполняется ни разу, и её молчание не означает ничего.
+const AcceptanceHistoryFloor = 2
 
 func (c AcceptanceEditCensus) String() string {
 	return fmt.Sprintf(
 		"приёмок прочитано %d · правлено после объявления состояния %d · из них с "+
-			"записью о правке %d · без строки состояния %d · без построчной истории %d",
-		c.DocsRead, c.EditedAfter, c.CarryingNote, len(c.NoStateLine), len(c.NoHistory))
+			"записью о правке %d · без строки состояния %d · без построчной истории %d · "+
+			"глубина истории дома приёмок %d (обрезана на %d)",
+		c.DocsRead, c.EditedAfter, c.CarryingNote, len(c.NoStateLine), len(c.NoHistory),
+		c.HistoryDepth, AcceptanceHistoryFloor)
 }
 
 // acceptanceStateMarkers — начало строки, объявляющей состояние документа.
@@ -106,6 +128,27 @@ func gitEpoch(root string, args ...string) (int64, bool) {
 	return v, true
 }
 
+// gitHistoryDepth — сколько коммитов трогали каталог, не больше AcceptanceHistoryFloor.
+//
+// Спрашивается у git, а не выводится из отметок документов: «все отметки равны»
+// бывает и у дерева с историей (все приёмки заведены одним изменением), а
+// предмет здесь другой — МОЖЕТ ли отметка файла вообще оказаться позже отметки
+// строки. Ответ на это даёт только глубина.
+func gitHistoryDepth(root, dir string) int {
+	out, err := gitenv.Command(root, "log",
+		"-n", strconv.Itoa(AcceptanceHistoryFloor), "--format=%H", "--", dir).Output()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
+}
+
 // AuditAcceptanceEditsAfterVerdict — вердикт о доме приёмок.
 func AuditAcceptanceEditsAfterVerdict(root, dir string) ([]AcceptanceEditFinding, AcceptanceEditCensus, error) {
 	var (
@@ -118,6 +161,8 @@ func AuditAcceptanceEditsAfterVerdict(root, dir string) ([]AcceptanceEditFinding
 		return nil, census, fmt.Errorf("дом приёмок %s не прочитан: %w — «ноль находок» "+
 			"здесь означало бы «ноль прочитанного»", dir, err)
 	}
+
+	census.HistoryDepth = gitHistoryDepth(root, dir)
 
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {

@@ -105,7 +105,7 @@ func (u *setEnabledServiceAccountUseCase) Execute(ctx context.Context, id domain
 	// Anti-anonymous floor only. WHO may take this service account out of
 	// service is decided by the MODEL: the api-gateway Checks
 	// `v_update@iam_service_account:<service_account_id>` (plus the step-up
-	// floor) before iam is dialed — security.md «Авторизация живёт в МОДЕЛИ, а
+	// floor) before iam is dialed — §«Авторизация живёт в МОДЕЛИ, а
 	// не в самодельных проверках». A second, hand-rolled rule here would not be
 	// grantable, scopable, revocable or auditable, and it would lock machine
 	// principals out of a control they are entitled to operate.

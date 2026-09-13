@@ -151,7 +151,7 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	// MODEL: the api-gateway Checks `v_update@iam_role:<role_id>` before iam is
 	// dialed. The former in-service owner-equality check against the owning
 	// account's owner_user_id was narrower than that per-object relation and
-	// unsatisfiable by a machine principal — security.md «Авторизация живёт в
+	// unsatisfiable by a machine principal — §«Авторизация живёт в
 	// МОДЕЛИ, а не в самодельных проверках». (The is-system refusal above is a
 	// resource-STATE check, not authz, and stays.)
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {

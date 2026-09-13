@@ -13,7 +13,7 @@
             Project / Group возвращают 200 c пустым списком для non-member, никогда 403 —
             все 5 account-scoped IAM List унифицированы в <exempt>)
 
-Pre-conditions: `tests/authz-fixtures/setup.sh`. Env-var'ы те же что у vpc/compute.
+Pre-conditions: `PRO-Robotech/kacho:tests/authz-fixtures/setup.sh`. Env-var'ы те же что у vpc/compute.
 
 The ALLOW cases for INV (invitee→admin@account-B) and PA1 (proj-adm→edit@project-A1)
 require a system-role grant on an account/project scope to emit FGA tier-tuples.
@@ -21,6 +21,11 @@ emitAnchorRule materializes a wildcard *.* anchor rule as a tier-tuple on the ba
 account/project/cluster object (the permissions-path grant), so the fixture
 viewer/editor tuple lands in OpenFGA and the ALLOW assertions pass.
 """
+
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
 
 CASES = []
 
@@ -41,7 +46,7 @@ ROLE_VIEW  = "rol1bda80f2be4d3658e"   # md5('view')[:17]  — global read-only
 # rows stay ACTIVE in Postgres/OpenFGA across runs. Every DENY/EMPTY expectation for
 # this subject was therefore being asserted against a principal that genuinely holds
 # a live grant (AUTHZ-USR-LS-A-NOB / -B-NOB over-showed real users for exactly that
-# reason). userPureNoBindingsId is seeded by tests/authz-fixtures/setup.sh and is
+# reason). userPureNoBindingsId is seeded by PRO-Robotech/kacho:tests/authz-fixtures/setup.sh and is
 # never a grant target anywhere in the tree, so the matrix rows below mean what they
 # say. (Parity with services/vpc/tests/newman/cases/authz-deny.py, kacho-iam#276.)
 SUBJECTS = [
@@ -85,7 +90,7 @@ EXPECT = {
     "sa-list-account-B":      {"ANON":"DENY","NOB":"EMPTY","PA1":"EMPTY","AAA":"EMPTY","AAB":"ALLOW","INV":"ALLOW"},
     # Project/Group List are in the scope-filter family (List = <exempt>):
     # non-member → 200 + empty, never 403; ANON → 401. Membership truth
-    # from tests/authz-fixtures/setup.sh (PA1=editor@project-A1[in A]; AAA=admin@account-A;
+    # from PRO-Robotech/kacho:tests/authz-fixtures/setup.sh (PA1=editor@project-A1[in A]; AAA=admin@account-A;
     # AAB=admin@account-B; INV=admin@account-B + editor@project-A1[in A]; NOB=nothing):
     #   ProjectService.List filters owner-via-account ∪ viewer ∪ v_list on `project`:
     #     acc-A → PA1/INV see project-A1 (editor⊇viewer), AAA owns A → ALLOW; NOB/AAB → EMPTY.
@@ -132,7 +137,7 @@ EXPECT = {
     #     `userNOBId` / `userINVId` / `userPureNoBindingsId` — ТОЛЬКО цели
     #     привязки, и «ни один выдаваемый токен ими не аутентифицируется и не
     #     может»: машинный посев добывает `client_credentials`, то есть
-    #     служебную учётку (почему именно так — tests/authz-fixtures/mint_rs256.py,
+    #     служебную учётку (почему именно так — PRO-Robotech/kacho:tests/authz-fixtures/mint_rs256.py,
     #     раздел `user_platform_token`: человеческий предъявитель не несёт `acr` и
     #     не проходит порог повышения, от которого машина освобождена, а человек —
     #     нет). Прежняя редакция называла второй причиной жёсткий внутренний
@@ -1005,7 +1010,7 @@ for subj in SUBJECTS:
 # который действительно принадлежит человеку. Он добывается настоящим входом
 # паролем у провайдера личности (волна церемонии), и коллекция authz-deny в эту
 # волну уже входит — проверяется машинно:
-#     python3 tests/authz-fixtures/ceremony_credentials.py --stems \
+#     python3 PRO-Robotech/kacho:tests/authz-fixtures/ceremony_credentials.py --stems \
 #         --suite tests/newman
 # то есть credential здесь доступен, а не заведён «на будущее».
 #

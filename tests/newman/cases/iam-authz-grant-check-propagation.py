@@ -28,7 +28,7 @@ within outbox-drainer latency. Also covers the surrounding anti-leak /
 anti-spoofing contracts on the affected RPCs (Operations.Get/Cancel as anonymous,
 SAKey.Issue plaintext redaction, SAKey createdBy spoofing).
 
-Fixture dependency (tests/authz-fixtures/setup.sh exports these env vars):
+Fixture dependency (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh exports these env vars):
   jwtBootstrap           — cluster bootstrap (system principal)
   jwtAccountAdminA       — owner of accountAId
   jwtAccountAdminB       — owner of accountBId
@@ -51,6 +51,11 @@ Style note:
   Cases assert ONLY public/black-box behaviour; they do not poke internal
   data-plane state.
 """
+
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
 
 CASES = []
 
@@ -743,7 +748,13 @@ CASES.append(Case(
             # denied on accountA, not on some other anchor.
             test_script=assert_scoped_authz_deny(
                 "iam.access_bindings_by_resources.listByScope",
-                "'account:' + pm.environment.get('accountAId')",
+                # ЯРУС СТРОКИ КАТАЛОГА, А НЕ ТИП, КОТОРЫЙ РАЗРЕШИЛ КРАЙ. RPC полиморфен
+                # по области (`object_type_from_request_field: resource_type`): край берёт
+                # тип ИЗ ЗАПРОСА и отдавал `account:<id>`, служба же читает статический
+                # `object_type` строки — `project`. Оба верны о своей двери; здесь набор
+                # службы, поэтому стоит её ярус. Единственная из одиннадцати позиций, где
+                # тип у двух дверей расходится — см. шапку помощника.
+                "project",
             ),
         ),
     ],

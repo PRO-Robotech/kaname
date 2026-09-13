@@ -54,7 +54,7 @@ import (
 // on the PUBLIC listener and the inner caller-authority gate allows a self-query,
 // so a tenant could otherwise set these in `req.Context` and forge satisfaction
 // of a security condition (mfa_fresh / source_ip_in_range / non_expired /
-// device_compliant) it does not actually hold (CWE-807 / security.md "no
+// device_compliant) it does not actually hold (CWE-807 / §"no
 // reliance on untrusted inputs in a security decision").
 var serverAuthoritativeCondKeys = []string{
 	"current_time",       // server clock (always forced below)
@@ -848,7 +848,7 @@ func (s *AuthorizeService) BatchCheck(ctx context.Context, reqs []CheckRequest) 
 					// with a fixed redacted message). Collapsing it into a
 					// deny_reason would leak the raw resolver error onto a
 					// user-facing surface AND mis-signal a transient outage as a
-					// permanent 403 (security.md hardening-invariant #1).
+					// permanent 403 (hardening-invariant #1).
 					mu.Lock()
 					if firstEr == nil {
 						firstEr = err
@@ -1067,7 +1067,7 @@ func (s *AuthorizeService) resolveRun(ctx context.Context, run *batchRun, caMemo
 // Оно отвечало ОГРАНИЧЕННЫМ ПРЕФИКСОМ без продолжения: потолок ставила чужая
 // сторона, признак усечения отдавался честно, а получить остаток было нельзя
 // НИКАК. Значит объекты сверх потолка оставались недостижимы при живых правах —
-// ровно то, что `security.md` §«Фильтрация» запрещает формулой «страница →
+// ровно то, что §«Фильтрация» запрещает формулой «страница →
 // проверка страницы, НИКОГДА перечисли вселенную → отфильтруй».
 //
 // Заменителя не введено намеренно. «Что мне видно» получают постраничным `List`

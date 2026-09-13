@@ -37,10 +37,15 @@ CLEAN SUBJECT: each case mints a FRESH ServiceAccount on account A —
 zero `#v_list` grants, so no account-viewer cascade can pre-satisfy the probe; every
 case asserts pre-grant DENY before the bind.
 
-Fixtures (tests/authz-fixtures/setup.sh): jwtBootstrap,
+Fixtures (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh): jwtBootstrap,
 jwtAccountAdminA, accountAId. Resources are self-seeded per case with
 {{runId}}-suffixed names (self-contained, no cross-case collision).
 """
+
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
 
 CASES = []
 

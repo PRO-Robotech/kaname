@@ -245,13 +245,6 @@ type opResult struct {
 	verdict string
 }
 
-func (r opResult) ratio() float64 {
-	if r.rows == 0 || !r.tuplesTaken {
-		return 0
-	}
-	return float64(r.tuples) / float64(r.rows)
-}
-
 // tableCount — строка переписи объёма: таблица, строк, байт.
 type tableCount struct {
 	table string

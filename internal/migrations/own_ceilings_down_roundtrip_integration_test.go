@@ -50,7 +50,33 @@ func TestOwnCeilings_DownRestoresTheAuthorityAndTheReapplyConverges(t *testing.T
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.own_ceilings`).Scan(&before))
 	require.Equal(t, 3, before)
 
-	require.NoError(t, goose.Down(db, "."), "откат обязан проходить")
+	// Откат идёт ДО СВОЕЙ миграции, а не «на один шаг».
+	//
+	// Прежняя редакция звала `goose.Down` однажды и тем самым утверждала, что
+	// предмет этой пробы — ПОСЛЕДНЯЯ миграция дерева. Утверждение было верно в
+	// день записи и переставало быть верным от появления любой следующей: проба
+	// откатывала ЧУЖУЮ миграцию и падала на «таблица проекции не снята откатом»,
+	// то есть обвиняла свой предмет в чужом изменении. Наблюдалось на #2554, где
+	// следующей оказалась миграция имени кластера.
+	//
+	// Версия названа ЧИСЛОМ, а не выведена из положения в каталоге: положение и
+	// есть то допущение, которое сломалось.
+	const ownCeilingsVersion int64 = 20260910120000
+	steps := 0
+	for {
+		v, verr := goose.GetDBVersion(db)
+		require.NoError(t, verr)
+		if v < ownCeilingsVersion {
+			break
+		}
+		require.NoError(t, goose.Down(db, "."), "откат обязан проходить")
+		steps++
+	}
+	// Перепись, а не украшение: без неё цикл, не сделавший НИ ОДНОГО шага,
+	// прошёл бы дальше, и все три утверждения ниже зеленели бы на базе, где
+	// предмет отката просто не применялся.
+	require.Positive(t, steps, "откат не сделал ни шага — утверждения ниже беспредметны")
+	t.Logf("откат: миграций снято %d (до версии ниже %d)", steps, ownCeilingsVersion)
 
 	var tbl int
 	require.NoError(t, db.QueryRow(

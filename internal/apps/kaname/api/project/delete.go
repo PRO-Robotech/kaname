@@ -38,7 +38,7 @@ func (u *DeleteProjectUseCase) Execute(ctx context.Context, id domain.ProjectID)
 	// the api-gateway Checks `v_delete@project:<id>` before iam is dialed. The
 	// former in-service owner-equality check against the OWNING ACCOUNT's
 	// owner_user_id was both coarser than that per-object relation and
-	// unsatisfiable by any machine principal — security.md «Авторизация живёт в
+	// unsatisfiable by any machine principal — §«Авторизация живёт в
 	// МОДЕЛИ, а не в самодельных проверках».
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err

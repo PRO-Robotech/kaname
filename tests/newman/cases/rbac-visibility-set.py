@@ -110,12 +110,17 @@ path {List, single-Get}), state-transition (grant → materialize → visible), 
 (other-label vs no-label both excluded; v_list-only must not leak content).
 """
 
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
+
 CASES = []
 
 POLL_CAP = 50
 
 # Предъявитель, ПРИНАДЛЕЖАЩИЙ ЧЕЛОВЕКУ, — его производит волна церемонии
-# (`scripts/run-ceremony.sh` → `tests/authz-fixtures/prodseed_ceremony.py`).
+# (`scripts/run-ceremony.sh` → `PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py`).
 # Имя вынесено в константу, потому что оно называется здесь в тринадцати местах
 # одного кейса, и разъехавшаяся половина означала бы отказ в правах посреди
 # фикстуры — симптом, неотличимый на вид от продуктового дефекта видимости.

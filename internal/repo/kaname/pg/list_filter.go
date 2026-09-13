@@ -17,7 +17,7 @@ import (
 // with no else, so an expression the service could not honour added no WHERE
 // condition at all and List answered with the FULL page: the caller asked to
 // narrow, got everything back, and had no way to tell that from a genuine result
-// (#445). api-conventions.md §"Принято-и-проигнорировано — ЗАПРЕЩЕНО" allows three
+// (#445). §"Принято-и-проигнорировано — ЗАПРЕЩЕНО" allows three
 // outcomes — implement, refuse explicitly, drop from the contract — and silently
 // accepting is not among them. Refusing names the offending field, so a caller who
 // misspells `name` learns which token was wrong instead of reading a full table as

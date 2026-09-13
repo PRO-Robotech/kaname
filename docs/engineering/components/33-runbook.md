@@ -331,7 +331,7 @@ Cluster-admin-привязки выдаются через internal-only `Intern
 
 ```bash
 # Текущие активные cluster-admin (denormalized snapshot).
-grpcurl -d '{}' <mTLS-flags> kaname:9091 \
+grpcurl -d '{}' <mTLS-flags> kaname-internal:9091 \
   kaname.cloud.iam.v1.InternalClusterService/ListAdmins
 
 # Либо напрямую в БД.

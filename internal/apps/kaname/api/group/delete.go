@@ -46,7 +46,7 @@ func (u *DeleteGroupUseCase) Execute(ctx context.Context, id domain.GroupID) (*o
 		return nil, shared.MapRepoErr(err)
 	}
 	// WHO may delete this group is decided by the MODEL: the api-gateway Checks
-	// `v_delete@iam_group:<id>` before iam is dialed (security.md «Авторизация
+	// `v_delete@iam_group:<id>` before iam is dialed (§«Авторизация
 	// живёт в МОДЕЛИ»). The read below is existence/metadata only, not authz.
 	g, err := rd.Groups().Get(ctx, id)
 	_ = rd.Rollback(ctx)

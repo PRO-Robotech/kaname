@@ -50,47 +50,18 @@ const compensationMaxAttempts = 10
 // неоткуда, поэтому задача возвращается по гашению процесса, а снятие клиента у
 // провайдера не рвётся посреди разговора.
 func buildProviderCompensationDrainer(
-	pool *pgxpool.Pool, cfg config.Config, obs clients.CompensationObserver, logger *slog.Logger,
+	pool *pgxpool.Pool, cfg config.Config, obs clients.CompensationObserver,
+	roadObs clients.ProviderRoadObserver, logger *slog.Logger,
 ) (func(context.Context) error, error) {
-	releaser := mustProviderAdminClient(cfg)
+	// Дорога СНЯТИЯ у поставщика — та самая, где ответ «не найдено» читался как
+	// успех и помечал строку доставленной. Счётчик здесь и есть то, что делает
+	// её неразличимость видимой (kacho#2492).
+	releaser := mustProviderAdminClient(cfg, roadObs)
 
 	drainerLogger := logger.With(slog.String("component", "provider_compensation_drainer"))
 	d, err := drainer.New[clients.ProviderCompensationEvent](
 		pool,
-		drainer.Config{
-			Table:        clients.ProviderCompensationTable,
-			Channel:      clients.ProviderCompensationChannel,
-			BatchSize:    32,
-			PollFallback: 30 * time.Second,
-			MaxAttempts:  compensationMaxAttempts,
-			BackoffMin:   time.Second,
-			BackoffMax:   30 * time.Second,
-			ApplyTimeout: 5 * time.Second,
-			// PartitionColumn намеренно пуст: поток коммутативен, сериализовать
-			// порядок нечем и незачем (условие (а) из drainer.Config.PartitionColumn).
-			// Перечень видов события и вывод из него здесь НЕ повторяются: они живут
-			// одним экземпляром в записи repohygiene.commutativeDrainExempt, где
-			// перечень машинно сверяется со словарём, закрытым миграцией, — и тот же
-			// гейт покраснеет, если очередь получит вид события, ломающий
-			// коммутативность. Прежняя редакция этого комментария перечень
-			// пересказывала — «единственный вид события: снять клиента» — и была
-			// ложна уже в день написания: словарь к тому дню допускал два вида, а
-			// коммутативность обосновывалась ключом, которого у второго вида нет by
-			// construction. Вывод уцелел, основание — нет.
-
-			// Постоянный отказ применения НЕ травится (kacho#455). Травление
-			// покупает разблокировку партиции, а её тут нет — значит покупает
-			// ничего, платя потерей намерения: недоставленное снятие означает, что
-			// снятое у нас осталось выданным у провайдера.
-			//
-			// Отказ разбора травится по-прежнему, и это безопасно: КАЖДОЕ его
-			// условие закрыто ограничением миграций 0079/0080 — тело обязано быть
-			// объектом jsonb, вид события взят из закрытого CHECK'ом словаря, и
-			// ровно один предмет из двух непуст. То есть строки, на которой разбор
-			// откажет, записать НЕЛЬЗЯ; проверяется это пробой
-			// TestPoisonPathHasNoProducer.
-			PermanentPolicy: drainer.RetryPermanent,
-		},
+		providerCompensationDrainerConfig(clients.ProviderAdminHopTimeout),
 		clients.DecodeProviderCompensation,
 		clients.NewProviderCompensationApplier(releaser, obs),
 		drainerLogger,
@@ -105,6 +76,54 @@ func buildProviderCompensationDrainer(
 			"channel", clients.ProviderCompensationChannel)
 		return d.Run(ctx)
 	}, nil
+}
+
+// providerCompensationDrainerConfig собирает проводку дренажа из объявленных
+// величин.
+//
+// ВЫНЕСЕНО ОТДЕЛЬНОЙ ФУНКЦИЕЙ РАДИ ПРОВЕРЯЕМОСТИ — тем же ходом и по той же
+// причине, что у почтовой полосы (`invite_mail_wiring.go`): связь двух величин
+// есть ТРЕБОВАНИЕ, а требование, живущее только в комментарии, проверить нечем.
+func providerCompensationDrainerConfig(attemptTimeout time.Duration) drainer.Config {
+	return drainer.Config{
+		Table:        clients.ProviderCompensationTable,
+		Channel:      clients.ProviderCompensationChannel,
+		BatchSize:    32,
+		PollFallback: 30 * time.Second,
+		MaxAttempts:  compensationMaxAttempts,
+		BackoffMin:   time.Second,
+		BackoffMax:   30 * time.Second,
+		// ТЕРПЕНИЕ ДРЕНАЖА ВЫВОДИТСЯ из предела попытки клиента, а не
+		// назначается рядом: два независимо выбранных числа разошлись бы молча —
+		// и разошлись (kacho#2490). Стояло 5 с при пределе клиента 10 с, то есть
+		// разговор обрывал ВСЕГДА дренаж, и предел клиента не фигурировал ни в
+		// одном исходе. Запас объявлен ОДНАЖДЫ и применяется обеими полосами.
+		ApplyTimeout: attemptTimeout + applyTimeoutHeadroom,
+		// PartitionColumn намеренно пуст: поток коммутативен, сериализовать
+		// порядок нечем и незачем (условие (а) из drainer.Config.PartitionColumn).
+		// Перечень видов события и вывод из него здесь НЕ повторяются: они живут
+		// одним экземпляром в записи repohygiene.commutativeDrainExempt, где
+		// перечень машинно сверяется со словарём, закрытым миграцией, — и тот же
+		// гейт покраснеет, если очередь получит вид события, ломающий
+		// коммутативность. Прежняя редакция этого комментария перечень
+		// пересказывала — «единственный вид события: снять клиента» — и была
+		// ложна уже в день написания: словарь к тому дню допускал два вида, а
+		// коммутативность обосновывалась ключом, которого у второго вида нет by
+		// construction. Вывод уцелел, основание — нет.
+
+		// Постоянный отказ применения НЕ травится (kacho#455). Травление
+		// покупает разблокировку партиции, а её тут нет — значит покупает
+		// ничего, платя потерей намерения: недоставленное снятие означает, что
+		// снятое у нас осталось выданным у провайдера.
+		//
+		// Отказ разбора травится по-прежнему, и это безопасно: КАЖДОЕ его
+		// условие закрыто ограничением миграций 0079/0080 — тело обязано быть
+		// объектом jsonb, вид события взят из закрытого CHECK'ом словаря, и
+		// ровно один предмет из двух непуст. То есть строки, на которой разбор
+		// откажет, записать НЕЛЬЗЯ; проверяется это пробой
+		// TestPoisonPathHasNoProducer.
+		PermanentPolicy: drainer.RetryPermanent,
+	}
 }
 
 // runProviderCompensationMetrics — периодический скан очереди: глубина, возраст

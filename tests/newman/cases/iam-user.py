@@ -75,6 +75,11 @@ verifies: UserService.List scope-filter and UserService.Invite acceptance
 scenarios from iam-user.py spec.
 """
 
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
+
 CASES = []
 
 # System role ids — deterministic catalog (`rol` + md5(<name>)[:17]).
@@ -985,7 +990,7 @@ CASES.append(Case(
 # ПОЧЕМУ ДОСТУП ПРОВЕРЯЕТСЯ ПРОБОЙ МОДЕЛИ, А НЕ ЗАПРОСОМ ОТ ПРИГЛАШЁННОГО. Токена
 # приглашённого не существует и получить его харнесс не может: машинный посев
 # получает только `client_credentials`, то есть служебную учётку (шапка
-# tests/authz-fixtures/mint_rs256.py), а приглашение по построению адресовано
+# PRO-Robotech/kacho:tests/authz-fixtures/mint_rs256.py), а приглашение по построению адресовано
 # человеку, который ЕЩЁ НЕ ВХОДИЛ. Прежняя шапка называла это «TODO: нужен живой
 # JWT» — но ждать тут нечего, предмет недостижим. Наблюдаемая величина, которая
 # ЕСТЬ, — вердикт самой модели прав: `InternalIAMService.Check` спрашивает про
@@ -1089,7 +1094,7 @@ CASES.append(Case(
 #  (b) Underneath it, the delete NEVER SUCCEEDED. `userINVId` is a shared fixture
 #      user that by construction holds active AccessBindings — the owner grant on
 #      its own personal account, admin on its default project, plus admin@account-B
-#      from tests/authz-fixtures/setup.sh — and User.Delete is guarded by the
+#      from PRO-Robotech/kacho:tests/authz-fixtures/setup.sh — and User.Delete is guarded by the
 #      access-binding RESTRICT: `FAILED_PRECONDITION: User <id> has active access
 #      bindings and cannot be deleted` (product behaviour, deliberate, locked by
 #      pgmaperr_test.go). The old case never noticed because it asserted only
@@ -1650,7 +1655,7 @@ CASES.append(Case(
                 *assert_answered("cross-account-block-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.block",
-                    "'iam_user:' + pm.environment.get('crossVictimId')",
+                    "resource",
                 ),
             ],
         ),
@@ -1720,7 +1725,7 @@ CASES.append(Case(
                 *assert_answered("record-edit-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.update",
-                    "'iam_user:' + pm.environment.get('govVictimId')",
+                    "resource",
                 ),
             ],
         ),
@@ -1737,7 +1742,7 @@ CASES.append(Case(
                 *assert_answered("identity-block-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.block",
-                    "'iam_user:' + pm.environment.get('govVictimId')",
+                    "resource",
                 ),
             ],
         ),
@@ -1926,7 +1931,7 @@ CASES.append(Case(
                 *assert_answered("cross-account-exclusion-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.removeFromAccount",
-                    "'account:' + pm.environment.get('accountBId')",
+                    "account",
                 ),
             ],
         ),
@@ -2207,7 +2212,7 @@ CASES.append(Case(
                 *assert_answered("identity-delete-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.delete",
-                    "'iam_user:' + pm.environment.get('rmidVictimId')",
+                    "resource",
                 ),
             ],
         ),
@@ -2428,7 +2433,7 @@ CASES.append(Case(
 # сломанной чеканке: «никто не может» неотличимо от «никому и не положено».
 # Поэтому рядом — положительная половина: сам человек выпускает и отзывает свой
 # токен. Ей нужен предъявитель, принадлежащий ЧЕЛОВЕКУ, поэтому она идёт волной
-# церемонии (`tests/authz-fixtures/ceremony_credentials.py`) — как и остальные
+# церемонии (`PRO-Robotech/kacho:tests/authz-fixtures/ceremony_credentials.py`) — как и остальные
 # кейсы этого файла, которым нужен `jwtHumanCeremony*`.
 #
 # ЧТО ЭТИ КЕЙСЫ НЕ УТВЕРЖДАЮТ. Правку ЗАПИСИ приглашённого (имя, метки,

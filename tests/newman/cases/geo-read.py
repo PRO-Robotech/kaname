@@ -30,7 +30,7 @@ The bug — and why no existing case caught it:
 Auth mechanism (same as the existing authenticated iam suites):
   Bearer {{jwtBootstrap}} — the shared authz-fixtures HS256 dev token for
   admin@prorobotech.ru, seeded `system_viewer`@`cluster:cluster_root`
-  (tests/authz-fixtures/setup.sh). Geo public read gates `viewer`@cluster, and
+  (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh). Geo public read gates `viewer`@cluster, and
   the FGA cluster type defines `viewer = ... or system_viewer or any_admin`
   (openfga-model-stub-configmap.yaml), so this subject satisfies the viewer floor.
   jwtBootstrap is patched into environments/local.postman_environment.json by the
@@ -56,6 +56,15 @@ Per positive (authenticated read) there is a matched negative (anonymous → 401
 Test-first (strict TDD): authored to go RED on the 503 before the dial fix.
 Test-only — no prod code touched.
 """
+
+# ДОМ МОДУЛЯ — ПЛАТФОРМА: его предмет не сущности службы (e2e-flow.md §7а).
+# Здесь он не исполним и конвейером службы не гоняется; `HOME_REASON` называет,
+# поведение какого домена утверждается. Сверяет `scripts/case_home_test.py`.
+HOME = "kacho"
+HOME_REASON = (
+    "предмет — публичные чтения каталога размещения geo через край платформы. Службы не "
+    "касается вовсе: домен iam не трогается ни одним шагом."
+)
 
 CASES = []
 

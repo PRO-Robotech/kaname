@@ -146,6 +146,12 @@ type CreateOAuthClientRequest struct {
 // returns NO `client_secret`. Otherwise (legacy `client_secret_basic`)
 // Hydra mints + returns the plaintext `client_secret` exactly once.
 func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAuthClientRequest) (HydraOAuthClient, error) {
+	// ДОРОГА, КОТОРОЙ НЕТ, ОТКАЗЫВАЕТ ПЕРВОЙ (kaname#21). На посадке без
+	// внешнего поставщика адрес не собран вовсе, и разбирать вход некуда:
+	// отказ здесь терминальный и опознаётся `errors.Is`.
+	if !c.roadIsBuilt() {
+		return HydraOAuthClient{}, c.refuseAbsentRoad("create-client")
+	}
 	authMethod := req.TokenEndpointAuthMethod
 	if authMethod == "" {
 		authMethod = defaultStr(req.AuthMethod, "client_secret_basic")
@@ -192,9 +198,11 @@ func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAut
 	}
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
+		c.observeTransportFailure()
 		return HydraOAuthClient{}, fmt.Errorf("hydra create-client: %w", err)
 	}
 	defer resp.Body.Close()
+	c.observeStatus(resp.StatusCode)
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if resp.StatusCode/100 != 2 {
 		return HydraOAuthClient{}, hydraAPIError(resp.StatusCode, respBody)
@@ -212,6 +220,12 @@ func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAut
 // DeleteOAuthClient revokes an OAuth2 client. Returns nil on success or if
 // Hydra returns 404 (idempotent).
 func (c *HydraAdminClient) DeleteOAuthClient(ctx context.Context, clientID string) error {
+	// ДОРОГА, КОТОРОЙ НЕТ, ОТКАЗЫВАЕТ ПЕРВОЙ (kaname#21). На посадке без
+	// внешнего поставщика адрес не собран вовсе, и разбирать вход некуда:
+	// отказ здесь терминальный и опознаётся `errors.Is`.
+	if !c.roadIsBuilt() {
+		return c.refuseAbsentRoad("delete-client")
+	}
 	url := c.BaseURL + "/admin/clients/" + clientID
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
@@ -222,9 +236,14 @@ func (c *HydraAdminClient) DeleteOAuthClient(ctx context.Context, clientID strin
 	}
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
+		c.observeTransportFailure()
 		return fmt.Errorf("hydra delete-client: %w", err)
 	}
 	defer resp.Body.Close()
+	// Учёт стоит ДО развилки: 404 здесь остаётся успехом вызова (см. разбор
+	// размена в provider_road.go), и без учёта он был бы НЕВИДИМ — а именно он
+	// отличает идемпотентное снятие от адреса, по которому наших клиентов нет.
+	c.observeStatus(resp.StatusCode)
 	if resp.StatusCode == http.StatusNotFound {
 		return nil
 	}
@@ -243,15 +262,6 @@ type HydraAPIError struct {
 
 func (e *HydraAPIError) Error() string {
 	return fmt.Sprintf("hydra admin api: status %d: %s", e.StatusCode, e.Body)
-}
-
-// IsConflict reports whether err is a Hydra Admin 409 Conflict (e.g. a
-// CreateOAuthClient for an already-registered client_id). Callers with a
-// deterministic client_id treat this as idempotent success — the client already
-// exists. Keeps HTTP-status semantics inside the adapter package.
-func IsConflict(err error) bool {
-	var apiErr *HydraAPIError
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict
 }
 
 func hydraAPIError(status int, body []byte) error {

@@ -37,6 +37,12 @@ import (
 // operation and the caller retries the whole force-logout, so a second call
 // finding nothing left is the desired state reached, not a failure.
 func (c *HydraAdminClient) DeleteLoginSessions(ctx context.Context, subject string) error {
+	// ДОРОГА, КОТОРОЙ НЕТ, ОТКАЗЫВАЕТ ПЕРВОЙ (kaname#21). На посадке без
+	// внешнего поставщика адрес не собран вовсе, и разбирать вход некуда:
+	// отказ здесь терминальный и опознаётся `errors.Is`.
+	if !c.roadIsBuilt() {
+		return c.refuseAbsentRoad("delete login sessions")
+	}
 	if subject == "" {
 		return fmt.Errorf("hydra: delete login sessions: empty subject")
 	}
@@ -66,9 +72,11 @@ func (c *HydraAdminClient) DeleteLoginSessions(ctx context.Context, subject stri
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		c.observeTransportFailure()
 		return fmt.Errorf("hydra: delete login sessions: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	c.observeStatus(resp.StatusCode)
 
 	switch resp.StatusCode {
 	case http.StatusNoContent, http.StatusOK, http.StatusNotFound:

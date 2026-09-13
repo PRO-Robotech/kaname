@@ -54,7 +54,7 @@ func (u *AddMemberUseCase) Execute(ctx context.Context, in AddMemberInput) (*ope
 	// group's update verb — before iam is dialed. The former in-service
 	// owner-equality check re-decided that from the owning account's
 	// owner_user_id, denying owner-granted delegates and every machine principal
-	// (security.md «Авторизация живёт в МОДЕЛИ, а не в самодельных проверках»).
+	// (§«Авторизация живёт в МОДЕЛИ, а не в самодельных проверках»).
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}

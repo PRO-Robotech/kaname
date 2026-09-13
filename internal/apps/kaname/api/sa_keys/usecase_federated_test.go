@@ -48,6 +48,10 @@ type stubSAClientRepo struct {
 	deleted bool
 	// disabled — the owning account may not authenticate.
 	disabled bool
+	// accountErr — хранилище НЕ ОТВЕТИЛО на резолв аккаунта. Отдельно от
+	// `getErr`: там «строки нет» (ответ), здесь ответа нет вовсе, и разводить
+	// эти два состояния — предмет пробы наблюдаемости (#2507).
+	accountErr error
 }
 
 func (s *stubSAClientRepo) Insert(ctx context.Context, tx service.Tx, c domain.ServiceAccountOAuthClient) (domain.ServiceAccountOAuthClient, error) {

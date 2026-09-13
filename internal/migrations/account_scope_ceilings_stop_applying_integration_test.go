@@ -51,7 +51,7 @@
 // задан — обработчик заведён в фундаменте (`pkg/migratorcli/notice.go`), а служба
 // доступа отдельный Go-модуль и увидит его с бампом пина, не раньше. Предикат:
 //
-//	grep -n 'PRO-Robotech/kacho v0' services/iam/go.mod
+//	grep -n 'PRO-Robotech/kacho v0' go.mod
 //	git log -1 --format=%cI -- pkg/migratorcli/notice.go
 //
 // Поэтому утверждение «ОПЕРАТОР это видит» здесь НЕ делается и в прохождение не
@@ -74,7 +74,7 @@
 // девятью вхождениями, и все они позже объявления порога; у остальных шести
 // служб порог сводом не глушится. Предикаты:
 //
-//	git grep -c 'RAISE NOTICE' -- 'services/iam/internal/migrations/*.sql'
+//	git grep -c 'RAISE NOTICE' -- 'internal/migrations/*.sql'
 //	git grep -n 'SET client_min_messages' -- 'services/*/internal/migrations/*.sql'
 //
 // Правку `П35` исход не выбирал: она ПРИМЕНЕНА (лежит в стволе продукта), а
@@ -139,9 +139,9 @@ const scopeLossKind = "iam.serviceAccount.credential"
 //
 // Предикат производителя четвёртой:
 //
-//	grep -n -A3 '^ownCeilings:' services/iam/deploy/values.prod.yaml
+//	grep -n -A3 '^ownCeilings:' deploy/values.prod.yaml
 //
-// и она же пинится `services/iam/deploy/prod_profile_test.go`. Здесь число
+// и она же пинится `deploy/prod_profile_test.go`. Здесь число
 // воспроизведено, а не прочитано из профиля намеренно: проба судит МЕХАНИЗМ
 // (жёстче посадки → ослабло; слабее посадки → ужесточилось), и смена профиля не
 // вправе её ронять — за профиль отвечает его собственный пин.
@@ -252,11 +252,11 @@ func scopeLossChain(t *testing.T, before int64) (*sql.DB, string, *scopeLossNoti
 	// на всю сессию, и всякое `RAISE NOTICE` последующих миграций гаснет НА
 	// СЕРВЕРЕ — обработчик выше тут бессилен, сообщение не отправлено вовсе.
 	//
-	// Воспроизведение, а не вызов общей функции: `services/iam` — отдельный
+	// Воспроизведение, а не вызов общей функции: служба доступа — отдельный
 	// Go-модуль и тянет платформу ПИНОМ, поэтому возврата из неё здесь ещё нет.
 	// Строка уедет вместе с бампом пина; до него это ЕДИНСТВЕННОЕ место службы
 	// доступа, где уведомления вообще наблюдаются (предикат:
-	// `LC_ALL=C git grep -rn OnNotice -- services/iam` → 1).
+	// `LC_ALL=C git grep -rn OnNotice` → 1).
 	//
 	// `RESET`, а не `SET … = notice`: возвращается величина, с которой соединение
 	// НАЧАЛОСЬ, то есть выбор оператора, а не подстановка наката. Параметр один:

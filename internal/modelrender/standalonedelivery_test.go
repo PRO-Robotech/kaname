@@ -108,14 +108,3 @@ func TestStandaloneDeliveryStillReportsARealMismatch(t *testing.T) {
 			code, modelrender.SweepFinding, findings)
 	}
 }
-
-func contains(s, sub string) bool { return len(sub) == 0 || indexOf(s, sub) >= 0 }
-func hasPrefix(s, p string) bool  { return len(s) >= len(p) && s[:len(p)] == p }
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
-}

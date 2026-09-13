@@ -129,7 +129,7 @@ func MapRepoErr(err error) error {
 	}
 	// Defense-in-depth: an unexpected non-sentinel error must never surface its
 	// raw text (could carry pgx/SQL detail) as the gRPC INTERNAL message
-	// (api-conventions.md: INTERNAL = fixed text, no leak). The detail stays in
+	// (INTERNAL = fixed text, no leak). The detail stays in
 	// the error chain for server-side logging.
 	return status.Error(codes.Internal, "internal error")
 }

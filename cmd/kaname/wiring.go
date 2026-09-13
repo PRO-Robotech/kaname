@@ -705,7 +705,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// refused forever, with nothing prompting a re-login. Same lever the
 		// self-service logout at the edge already pulls for its own caller.
 		WithProviderSessions(
-			mustProviderAdminClient(cfg),
+			mustProviderAdminClient(cfg, metricsReg.ProviderRoadRecorder()),
 			&forceLogoutSubjectResolver{users: kanamepg.NewUserPoolRepo(pool)},
 		).
 		// ForceLogout returns an Operation — the row it names is persisted here,
@@ -713,7 +713,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// admin gets back is queryable and the force-logout shows up in the
 		// operation list like every other mutation.
 		WithOperations(opsRepo).
-		// Defense-in-depth ReBAC gate for ForceLogout (security.md "AuthN+AuthZ
+		// Defense-in-depth ReBAC gate for ForceLogout (§"AuthN+AuthZ
 		// ВЕЗДЕ"): require the authenticated principal hold system_admin@cluster.
 		// relationStore satisfies authzguard.RelationChecker; nil-safe fail-closed.
 		WithAdminChecker(relationStore).
@@ -741,7 +741,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithCutoffReader(kanamepg.NewUserTokenRevocationRepo(pool))
 
 	// ── SAKey wiring (Class A static SA keys via Hydra) ───────────────────
-	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, metricsReg.CompensationRecorder(), logger)
+	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg,
+		metricsReg.CompensationRecorder(), metricsReg.ProviderRoadRecorder(), logger)
 
 	// ── UserToken wiring (персональные access-токены пользователя via Hydra) ──
 	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, logger)
@@ -771,7 +772,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// iam.cluster_admin.{granted,revoked} compliance row atomically inside the
 	// grant/revoke writer-tx (запрет #10). Shared stateless adapter.
 	clusterAuditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
-	// Defense-in-depth ReBAC gate (security.md "AuthN+AuthZ ВЕЗДЕ"): the
+	// Defense-in-depth ReBAC gate (§"AuthN+AuthZ ВЕЗДЕ"): the
 	// highest-blast cluster-admin RPCs must run their OWN per-RPC system_admin
 	// Check, not rely solely on the gateway caller-policy. relationStore
 	// (the decision door) satisfies authzguard.RelationChecker. nil-safe
@@ -798,7 +799,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		interactiveAudience = "https://" + cfg.AuthN.ResolveDomain()
 	}
 	interactiveRepo := kanamepg.NewInteractiveClientRepo(pool)
-	interactiveProvider := clients.NewInteractiveClientProvider(mustProviderAdminClient(cfg))
+	interactiveProvider := clients.NewInteractiveClientProvider(
+		mustProviderAdminClient(cfg, metricsReg.ProviderRoadRecorder()))
 	interactiveClientHandler := interactiveclientapp.NewHandler(
 		interactiveclientapp.NewGetUseCase(interactiveRepo),
 		interactiveclientapp.NewListUseCase(interactiveRepo),
@@ -813,7 +815,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	)
 
 	// ── InternalOperationsService — cluster-wide admin op feed ────────────────
-	// security.md "AuthN+AuthZ ВЕЗДЕ": the in-handler ReBAC gate (relationStore
+	// §"AuthN+AuthZ ВЕЗДЕ": the in-handler ReBAC gate (relationStore
 	// satisfies authzguard.RelationChecker) enforces system_admin@cluster even
 	// when the caller bypasses the api-gateway and dials :9091 directly. nil-safe
 	// fail-closed inside the use-case if ever unwired.
@@ -940,8 +942,20 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	}
 }
 
-// mustProviderAdminClient builds the single client every provider-admin consumer
-// in this process shares, resolving the hop's trust anchor once.
+// mustProviderAdminClient строит клиента административной дороги к поставщику,
+// резолвя якорь доверия хопа.
+//
+// КЛИЕНТ НЕ ОДИН, и прежняя редакция утверждала обратное: «строит единственный
+// клиент, который делят все потребители». Помощник зовётся каждым потребителем
+// и каждый раз отдаёт НОВЫЙ экземпляр — предикат рядом, а не число в прозе:
+//
+//	git grep -c 'mustProviderAdminClient(' -- cmd/kaname ':!*_test.go'
+//
+// Следствие у утверждения было: якорь резолвится не «однажды», а на каждом
+// вызове, и «разделяемое состояние», которого нет, читалось как основание
+// ничего не провязывать по месту. Сводить экземпляры в один — отдельное
+// решение с иной ценой (общий клиент делит транспорт и его пул соединений);
+// здесь текст приведён к тому, что код делает.
 //
 // Fatal on an unusable anchor, deliberately and at the composition root: the
 // alternative — carrying on against the system root store — is the state nobody
@@ -950,7 +964,37 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 // rotates. Config.Validate has already refused a production configuration that
 // omits the anchor while addressing the hop over TLS; this catches the anchor
 // that is named but unreadable, which only opening the file can tell.
-func mustProviderAdminClient(cfg config.Config) *clients.HydraAdminClient {
+// providerAdminHopIsBuilt — СТРОИТ ЛИ этот корень административную дорогу к
+// внешнему поставщику (задача kaname#21).
+//
+// Живёт ВПЛОТНУЮ к строителю и читается им же: наблюдатель провязки берёт ответ
+// отсюда, а не повторяет условие у себя. Второе место об одном предмете
+// разошлось бы с первым молча — и разошлось бы именно там, где расхождение не
+// видно: на посадке, которая сегодня не поднимается по другим строкам таблицы.
+func providerAdminHopIsBuilt(cfg config.Config) bool {
+	return cfg.AuthN.HasExternalIdentityProvider()
+}
+
+// Наблюдатель дороги приходит ДОВОДОМ, а не берётся здесь: счётчик принадлежит
+// реестру величин, а этот помощник о нём не знает и знать ему нечем. nil
+// законен — счёта нет, решения дороги это не меняет (kacho#2491).
+func mustProviderAdminClient(cfg config.Config, roadObs clients.ProviderRoadObserver) *clients.HydraAdminClient {
+	// ПОСАДКА БЕЗ ВНЕШНЕГО ПОСТАВЩИКА ДОРОГИ НЕ ПОЛУЧАЕТ — И ЭТО ПРО АДРЕС, А НЕ
+	// ПРО ОТВЕТ (задача kaname#21, преемник kacho#2489).
+	//
+	// Резолв адреса пустого не возвращает НИКОГДА: при незаданной ручке он
+	// выводит адрес из доменного имени. Поэтому «поставщика нет» отсюда было
+	// невыразимо, дорога читалась как настроенная на стенде, который её не
+	// настраивал, и уходила звонить в публичный ингресс с административным
+	// предъявителем в заголовке.
+	//
+	// Отказ в СТАРТЕ здесь был бы хуже: он пришёл бы РАНЬШЕ стража посадки и
+	// вместо перечня причин полосы читатель получил бы одну, не ту и без имени
+	// полосы. Поэтому потребители получают клиента без дороги, а решение о
+	// старте остаётся у стража, который называет все причины разом.
+	if !providerAdminHopIsBuilt(cfg) {
+		return clients.NewAbsentProviderAdminClient().WithRoadObserver(roadObs)
+	}
 	c, err := clients.NewHydraAdminClientWithCA(
 		cfg.AuthN.ResolveHydraAdminURL(),
 		// Читается ЧЕРЕЗ НАСТРОЙКУ, а не прямым обращением к окружению: ручка,
@@ -962,7 +1006,7 @@ func mustProviderAdminClient(cfg config.Config) *clients.HydraAdminClient {
 	if err != nil {
 		log.Fatalf("provider-admin client: %v", err)
 	}
-	return c
+	return c.WithRoadObserver(roadObs)
 }
 
 // saKeyIssuanceIsOurs — переведён ли контур выдачи ключей служебных учёток на
@@ -989,11 +1033,12 @@ func saKeyIssuanceIsOurs(cfg config.Config) bool {
 // buildSAKeysHandler wires the SAKeyService handler — Class A static SA-keys
 // via Hydra OAuth2 client_credentials.
 func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config,
-	compObs clients.CompensationEmitObserver, logger *slog.Logger) *sakeysapp.Handler {
+	compObs clients.CompensationEmitObserver, roadObs clients.ProviderRoadObserver,
+	logger *slog.Logger) *sakeysapp.Handler {
 	saClientRepo := kanamepg.NewSAOAuthClientRepo(pool)
 
 	hydraAdminURL := cfg.AuthN.ResolveHydraAdminURL()
-	hydraAdmin := mustProviderAdminClient(cfg)
+	hydraAdmin := mustProviderAdminClient(cfg, roadObs)
 
 	// Durable audit_outbox emitter — emits iam.sa_key.issued /
 	// iam.sa_key.revoked rows inside the SAKey worker-tx, atomic with the

@@ -89,5 +89,5 @@ func providerExchangeFor(cfg BuildConfig) (registrytokenuc.TokenExchanger, error
 	if err != nil {
 		return nil, err
 	}
-	return NewHydraExchange(tokenClient), nil
+	return NewHydraExchange(tokenClient.WithRoadObserver(cfg.ProviderRoadObserver)), nil
 }

@@ -3,7 +3,20 @@
 
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+)
+
+// RoleVerbReseedOutcomes — ЗАКРЫТЫЙ набор клеток семейства.
+//
+// Собран из констант производителя ([seed.RoleVerbReseedOutcomeReseeded],
+// [seed.RoleVerbReseedOutcomeFailed]), а не выписан здесь литералами.
+var RoleVerbReseedOutcomes = []string{
+	seed.RoleVerbReseedOutcomeReseeded,
+	seed.RoleVerbReseedOutcomeFailed,
+}
 
 // RoleVerbReseedRecorder — исходы пересчёта проекции «роль → тип объекта ×
 // глагол» на старте, по одной системной роли.
@@ -40,6 +53,12 @@ func (r *Registry) NewRoleVerbReseedRecorder() *RoleVerbReseedRecorder {
 				"failed — откачена. Ноль failed значим только вместе с ненулевым " +
 				"reseeded: без него ноль означает, что пересчёта не было вовсе.",
 		}, []string{"outcome"}),
+	}
+	// Клетки закрытого набора заводятся нулём ПРИ РЕГИСТРАЦИИ: вектор без детей
+	// не отдаёт на провод ничего, и «механизм не провязан» становится неотличим
+	// от «механизм провязан и ни разу не сработал».
+	for _, outcome := range RoleVerbReseedOutcomes {
+		rec.outcomes.WithLabelValues(outcome)
 	}
 	r.reg.MustRegister(rec.outcomes)
 	return rec

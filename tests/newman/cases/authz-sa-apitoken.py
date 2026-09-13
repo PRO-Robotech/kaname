@@ -45,7 +45,7 @@ grant), so these ALLOW cases pass (200).
   So the no-project-grant NET-LS probes below are DENY (403), while the no-grant
   IAM SA-LS probe stays EMPTY (200).
 
-Pre-conditions: `tests/authz-fixtures/setup.sh` (шаги 9-10: issue SA-key
+Pre-conditions: `PRO-Robotech/kacho:tests/authz-fixtures/setup.sh` (шаги 9-10: issue SA-key
 через SAKeyService + Hydra OAuth client; mint SA-JWT; issue/revoke
 API-token). Env-var'ы:
   jwtSAA            — Service Account A токен (Hydra client_credentials,
@@ -72,11 +72,21 @@ SA-keys → private_key_jwt — NOTE FOR SETUP HARNESS:
     4. Использовать выданный access_token как `jwtSAA`.
   Postman-CLI/newman нативно JWT ES256 не подписывает — нужна
   pre-request script с jsrsasign / отдельный CLI-helper в setup-harness'е.
-  Миграция оснастки СОСТОЯЛАСЬ: `tests/authz-fixtures/mint_rs256.py` подписывает
+  Миграция оснастки СОСТОЯЛАСЬ: `PRO-Robotech/kacho:tests/authz-fixtures/mint_rs256.py` подписывает
   `client_assertion` (ES256, `client-assertion-type:jwt-bearer`) и обменивает его на
   токен. Прежнее объявление «кейсы остаются красными до миграции» снято вместе с
   предметом — освобождений у этих кейсов нет.
 """
+
+# ДОМ МОДУЛЯ — ПЛАТФОРМА: его предмет не сущности службы (e2e-flow.md §7а).
+# Здесь он не исполним и конвейером службы не гоняется; `HOME_REASON` называет,
+# поведение какого домена утверждается. Сверяет `scripts/case_home_test.py`.
+HOME = "kacho"
+HOME_REASON = (
+    "связка: предмет — доступ НЕ-человеческого субъекта (служебная учётка, api-токен) к "
+    "ресурсам vpc через край. Утверждается поведение vpc под выдачей службы, а не сама "
+    "выдача."
+)
 
 CASES = []
 

@@ -6,9 +6,15 @@
 # hands a page to a caller must narrow it, and must declare HOW.
 #
 # This is a THIN wrapper. What is checked, and why the analysis parses the tree
-# instead of searching its text, is documented on pkg/listfiltergate; how this
-# service is laid out is documented on services/iam/tools/auditlistfilter. Only the
+# instead of searching its text, is documented on the foundation package that
+# performs the analysis (`PRO-Robotech/corelib:listfiltergate`); how this service is
+# laid out is documented on `tools/auditlistfilter` OF THIS TREE. Only the
 # invocation lives here.
+#
+# Обе координаты правлены вместе с переездом: первая называла путь монорепо
+# (`pkg/listfiltergate`), вторая — путь службы ВНУТРИ него
+# (`services/iam/tools/auditlistfilter`). Ни одна не резолвилась в этом дереве,
+# то есть читатель уходил за ними и не находил.
 #
 # Why this file is new. iam had no gate of this class at all, while having the widest
 # listing surface in the repository — 30 methods. Nothing was red because the set of
@@ -64,6 +70,17 @@ if [ ! -d "$PROTO_ROOT" ]; then
   echo "  Это НЕ вердикт о дереве: проверка НЕ ИСПОЛНЯЛАСЬ." >&2
   exit 2
 fi
+
+# ПЕРЕПИСЬ НАЗЫВАЕТ КАТАЛОГ, ИЗ КОТОРОГО ПРОЧИТАНЫ КОНТРАКТЫ.
+#
+# «Контракты прочитаны» и «прочитаны СВОИ» — два разных утверждения, и вердикт
+# аудитора отвечает только на первое: он печатает, сколько файлов осмотрел, и
+# молчит о том, чьи они. Пока развилка по посадке выбирала между своим деревом и
+# каталогом модуля-пина, разница между ними была невидима вовсе — копии
+# совпадали побайтово всюду, кроме строки `go_package`, и вердикт был верен
+# СЛУЧАЙНО. Печатает это обёртка, а не аудитор: каталог резолвит она, и
+# сообщать о своём решении обязана она же.
+echo "audit-list-filter[iam]: контракты читаются из $PROTO_ROOT" >&2
 
 exec go run ./tools/auditlistfilter/cmd/audit-list-filter \
   --root="$SERVICE_ROOT" --proto-root="$PROTO_ROOT" "$@"

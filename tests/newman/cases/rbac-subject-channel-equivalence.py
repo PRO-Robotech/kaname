@@ -19,7 +19,7 @@
 ║ a user token needs an interactive Kratos→Hydra login. That was true of the        ║
 ║ harness AS IT WAS, and it named its own remedy — «its own wave that CREATES the   ║
 ║ condition». That wave now exists (`scripts/run-ceremony.sh`, seed                 ║
-║ `tests/authz-fixtures/prodseed_ceremony.py`), so the user channel here reads as   ║
+║ `PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py`), so the user channel here reads as   ║
 ║ `jwtHumanCeremony`: a bearer obtained by a REAL password login, subject           ║
 ║ `user:<id>`. «Здесь его не запустить» was a fact of scheduling, and the schedule  ║
 ║ changed.                                                                          ║
@@ -101,6 +101,11 @@ Test-design techniques: decision-table (subject-channel × access-set), state-tr
 user/group-member/SA; granted vs never-granted principal), error-guessing (principal
 isolation — grant for X does not leak to Y).
 """
+
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
 
 CASES = []
 

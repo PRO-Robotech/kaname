@@ -40,7 +40,7 @@ const iamServiceDomain = "iam"
 // the capability. It is not `viewer` either — `viewer` on the cluster object is
 // satisfied by a wildcard tuple by DESIGN (the global placement catalogue must be
 // readable by every authenticated tenant), so a check against it would answer
-// "yes" to everyone and look exactly like a gate (security.md §«Отношение,
+// "yes" to everyone and look exactly like a gate (§«Отношение,
 // выполнимое подстановочным знаком»).
 const quotaReaderRelation = "quota_reader"
 
@@ -368,7 +368,7 @@ func (uc *ResolveUseCase) Execute(ctx context.Context, scopeID, service string) 
 		// Перевод СТИРАЕТ причину (текст INTERNAL фиксирован, текст недоступности
 		// опаковый), поэтому она называется журналу здесь — в том единственном
 		// месте, где ещё цела.
-		return nil, shared.LogRepoErr(ctx, uc.logger, "Resolve", err)
+		return nil, shared.LogRepoErr(ctx, uc.logger, "limit.Resolve", err)
 	}
 	if !ok {
 		// Direct-read lane: accounts and projects are iam's OWN rows.
@@ -440,7 +440,7 @@ func (uc *ListChangedUseCase) Execute(ctx context.Context, cursor string, pageSi
 		// Единственная полоса, на которой тянущий узнаёт об отказе. Без строки
 		// здесь причину назвать нечем: клиенту достаётся фиксированный текст, а
 		// журнала доступа у сервиса нет.
-		return ChangedResult{}, shared.LogRepoErr(ctx, uc.logger, "ListChangedSince", err)
+		return ChangedResult{}, shared.LogRepoErr(ctx, uc.logger, "limit.ListChangedSince", err)
 	}
 	return ChangedResult{Changes: rows, NextCursor: uc.cursors.Encode(next)}, nil
 }
@@ -542,7 +542,7 @@ func requireQuotaReader(ctx context.Context, checker authzguard.RelationChecker)
 	// отказа, а неотличимость и есть предмет. Та же форма — у соседнего гейта
 	// пакета (`authzguard.AllowsVerb`).
 	//
-	// Сырая ошибка наружу не идёт (`security.md` §Hardening #1): текст
+	// Сырая ошибка наружу не идёт (§Hardening #1): текст
 	// хранилища отношений может нести адрес и диагностику движка.
 	if unanswered != nil {
 		return authzguard.AuthzBackendUnavailable()

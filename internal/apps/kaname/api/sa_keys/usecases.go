@@ -426,7 +426,7 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	// the account-scoped /iam/operations feed otherwise excludes token operations.
 	accountID, mayAuthenticate, err := u.repo.AccountForServiceAccount(ctx, in.ServiceAccountID)
 	if err != nil {
-		return nil, mapPGErr(err)
+		return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Issue.accountForServiceAccount", err)
 	}
 	// An account that may not authenticate does not get a new credential either.
 	// Refusing only the token would leave the key itself issued, handed over and
@@ -452,7 +452,7 @@ func (u *IssueSAKeyUseCase) Execute(ctx context.Context, in IssueInput) (*operat
 	if in.CallerIsServiceAccount {
 		owner, oerr := u.repo.OwnerUserForServiceAccount(ctx, in.ServiceAccountID)
 		if oerr != nil {
-			return nil, mapPGErr(oerr)
+			return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Issue.ownerUserForServiceAccount", oerr)
 		}
 		in.CreatedByUserID = string(owner)
 	}
@@ -1192,7 +1192,7 @@ func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.Servic
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
 		u.releaseProviderClient(ctx, hydraClientID, "mapping tx could not be started")
-		return domain.ServiceAccountOAuthClient{}, mapPGErr(err)
+		return domain.ServiceAccountOAuthClient{}, mapPGErrLogged(ctx, u.logger, "sa_keys.Issue.mappingTxBegin", err)
 	}
 	committed := false
 	defer func() {
@@ -1203,7 +1203,7 @@ func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.Servic
 	}()
 	persisted, err := u.repo.Insert(ctx, tx, row)
 	if err != nil {
-		return domain.ServiceAccountOAuthClient{}, mapPGErr(err)
+		return domain.ServiceAccountOAuthClient{}, mapPGErrLogged(ctx, u.logger, "sa_keys.Issue.insert", err)
 	}
 	// Перечень доверенных издателей — в ТОЙ ЖЕ транзакции, что строка ключа
 	// (#1124). Ключ без перечня не примет никого; перечень без ключа ручался бы
@@ -1214,7 +1214,7 @@ func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.Servic
 		if terr := u.trustedIssuers.InsertTrustedIssuers(
 			ctx, tx, persisted.ID, row.TrustedSubjects, row.ExpiresAt,
 		); terr != nil {
-			return domain.ServiceAccountOAuthClient{}, mapPGErr(terr)
+			return domain.ServiceAccountOAuthClient{}, mapPGErrLogged(ctx, u.logger, "sa_keys.Issue.replaceTrustedSubjects", terr)
 		}
 	}
 	// Emit the durable audit row in the SAME tx (atomic with the Insert).
@@ -1226,11 +1226,11 @@ func (u *IssueSAKeyUseCase) commitMapping(ctx context.Context, row domain.Servic
 			Payload: saKeyAuditPayload(
 				actor, string(row.SvaID), string(persisted.ID), keyAlgorithm),
 		}); aerr != nil {
-			return domain.ServiceAccountOAuthClient{}, mapPGErr(aerr)
+			return domain.ServiceAccountOAuthClient{}, mapPGErrLogged(ctx, u.logger, "sa_keys.Issue.emitAudit", aerr)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return domain.ServiceAccountOAuthClient{}, mapPGErr(err)
+		return domain.ServiceAccountOAuthClient{}, mapPGErrLogged(ctx, u.logger, "sa_keys.Issue.commit", err)
 	}
 	committed = true
 	return persisted, nil
@@ -1294,7 +1294,7 @@ func (u *RevokeSAKeyUseCase) Execute(ctx context.Context, in RevokeInput) (*oper
 	// ровно там, где их нужнее всего снять.
 	accountID, _, err := u.repo.AccountForServiceAccount(ctx, in.ServiceAccountID)
 	if err != nil {
-		return nil, mapPGErr(err)
+		return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Revoke.accountForServiceAccount", err)
 	}
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
@@ -1325,8 +1325,8 @@ func (u *RevokeSAKeyUseCase) Execute(ctx context.Context, in RevokeInput) (*oper
 // outcome — success with nothing removed.
 //
 // Why one outcome and not three. The basic-access-token acceptance (BAT-1-44)
-// requires a repeat revoke to answer success. Hide-existence (security.md
-// §Hardening #6) requires a refusal on a foreign credential to be
+// requires a repeat revoke to answer success. Hide-existence
+// (§Hardening #6) requires a refusal on a foreign credential to be
 // indistinguishable from a genuine miss. The two pull apart only while there is
 // more than one outcome: the moment "already revoked" answers success and
 // "foreign" answers a refusal, the caller learns from the difference whether
@@ -1346,7 +1346,7 @@ func (u *RevokeSAKeyUseCase) Execute(ctx context.Context, in RevokeInput) (*oper
 func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor string) (*anypb.Any, error) {
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
-		return nil, mapPGErr(err)
+		return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Revoke.txBegin", err)
 	}
 	committed := false
 	defer func() {
@@ -1356,7 +1356,7 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 	}()
 	cur, found, err := u.repo.DeleteOwnedByID(ctx, tx, in.ServiceAccountID, in.KeyID)
 	if err != nil {
-		return nil, mapPGErr(err)
+		return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Revoke.deleteOwnedByID", err)
 	}
 	if !found {
 		// Nothing to remove. The tx rolls back (there is no removal to persist),
@@ -1374,11 +1374,11 @@ func (u *RevokeSAKeyUseCase) doRevoke(ctx context.Context, in RevokeInput, actor
 			Payload: saKeyAuditPayload(
 				actor, string(cur.SvaID), string(in.KeyID), cur.KeyAlgorithm),
 		}); aerr != nil {
-			return nil, mapPGErr(aerr)
+			return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Revoke.emitAudit", aerr)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, mapPGErr(err)
+		return nil, mapPGErrLogged(ctx, u.logger, "sa_keys.Revoke.commit", err)
 	}
 	committed = true
 	// Delete from Hydra (idempotent — 404 OK).
@@ -1567,6 +1567,27 @@ func CredentialKindFromProto(k iamv1.CredentialKind) domain.CredentialKind {
 	}
 }
 
+// mapPGErrLogged — тот же перевод, что `mapPGErr`, и ЧИТАТЕЛЬ у подробности.
+//
+// Переводчик остаётся свободной функцией: его текст `INTERNAL` — часть
+// контракта ЭТОГО домена («internal SA key error»), и подменить его общим
+// значило бы сменить контракт мимо приёмки. Читателя даёт
+// `shared.LogMappedErr`, у которого решение «какие исходы называть журналу»
+// живёт в единственном экземпляре: разойдясь в нём, домены разошлись бы в том,
+// что считается заметным (задача #2507).
+//
+// Логгер берётся у вызывающего, а если у того его нет — у умолчания процесса.
+// Умолчание ЗАДАНО композиционным корнем (`slog.SetDefault`, cmd/kaname), так
+// что запись доезжает до того же приёмника, а не уходит в никуда: провязка «на
+// всякий случай», у которой нет читателя, была бы ровно тем мёртвым глаголом,
+// который эта задача и снимает.
+func mapPGErrLogged(ctx context.Context, logger *slog.Logger, op string, err error) error {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return shared.LogMappedErr(ctx, logger, op, err, mapPGErr(err))
+}
+
 func mapPGErr(err error) error {
 	if err == nil {
 		return nil
@@ -1610,10 +1631,8 @@ func mapPGErr(err error) error {
 		// свой литерал здесь был бы вторым местом об одном контракте, и разошлись
 		// бы они ровно так, как разошлись эти переводчики.
 		//
-		// ЧИТАТЕЛЯ у подробности на этой полосе СЕГОДНЯ НЕТ, и это названо, а не
-		// умолчано: переводчик — свободная функция без логгера, а звать её с
-		// проброшенным логгером из тринадцати мест — отдельная работа
-		// (задача-преемник — #2507). Подробность остаётся в цепочке.
+		// Подробность остаётся в цепочке, и у неё ЕСТЬ читатель: вызывающие зовут
+		// `mapPGErrLogged`, который называет причину журналу (задача #2507).
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	}
 	return status.Error(codes.Internal, "internal SA key error")

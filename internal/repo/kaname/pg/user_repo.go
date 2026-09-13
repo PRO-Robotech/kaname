@@ -379,7 +379,7 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 			// so before #460 `email CONTAINS "acme"` was answered as `email = "acme"`:
 			// the caller asked for everyone at that domain and got the single exact
 			// match under a 200, with nothing in the response to tell the two apart.
-			// api-conventions.md §"Принято-и-проигнорировано — ЗАПРЕЩЕНО" allows
+			// §"Принято-и-проигнорировано — ЗАПРЕЩЕНО" allows
 			// implement, refuse by name, or drop from the contract; this is the second.
 			//
 			// Refusing rather than implementing is the deliberate choice, not the cheap

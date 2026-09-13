@@ -453,3 +453,134 @@ func TestDeclaredServiceHistoryRootIsCarriedByThisTree(t *testing.T) {
 	t.Logf("объявленная история сверена с деревом: корень %s не имеет родителей и является предком HEAD, "+
 		"вердикт об отсутствующей ревизии ВЫНОСИТСЯ", serviceHistoryRoot)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ИНЪЕКЦИЯ ПО КАЖДОЙ ФОРМЕ ОБЪЯВЛЕНИЯ ОТДЕЛЬНО (задача #23)
+//
+// Расширение, доказанное только на ОДНОЙ форме, оставляет остальные
+// непроверенными: распознаватель мог узнать их «почти» — например, поймать
+// оборот и потерять хеш, — и разница между «не нашёл» и «нечего искать» снова
+// стала бы невидимой. Поэтому каждая из трёх форм получает свою пару: дефект
+// находится с координатой, законный близнец молчит.
+//
+// ЗАЧЕМ ЕЩЁ ОСЬ ПЕРЕПИСИ. Числа по формам печатаются ПО ОТДЕЛЬНОСТИ, и это
+// проверяется здесь же: одно суммарное число скрывает ровно тот случай, ради
+// которого расширение делалось — полоса прежней формы не изменилась, а перепись
+// выросла.
+
+// declOfForm — объявление датировки заданной формой, с хешем или без.
+func declOfForm(phrase, tail string) string {
+	return "## 4. Полосы\n\n- **" + phrase + ":** " + tail + "\n\nпроза ниже\n"
+}
+
+// TestDatingGateSeesEachDeclaredFormAndCountsItApart — ИНЪЕКЦИЯ по каждой форме.
+func TestDatingGateSeesEachDeclaredFormAndCountsItApart(t *testing.T) {
+	for _, phrase := range datingPhrases {
+		t.Run(phrase, func(t *testing.T) {
+			// ДЕФЕКТ: та же форма, ревизия в этой истории отсутствует.
+			docs := map[string]string{
+				"architecture/known-divergences.md": declOfForm(phrase, "`deadbee` (ствол)"),
+			}
+			findings, c := auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+			require.Len(t, findings, 1,
+				"форма %q оставила гейт зелёным — она вне распознавателя, и всё "+
+					"записанное ею вне наблюдения", phrase)
+			require.Contains(t, findings[0], "deadbee", "находка обязана НАЗВАТЬ ревизию")
+			require.Equal(t, 1, c.markers, "объявление формы %q не сосчитано", phrase)
+			require.Equal(t, 1, c.byForm[phrase],
+				"перепись не отнесла объявление к своей форме: %v", c.byForm)
+
+			// ЗАКОННЫЙ БЛИЗНЕЦ: та же форма, дом назван — молчание.
+			docs["architecture/known-divergences.md"] =
+				declOfForm(phrase, "`PRO-Robotech/kacho@deadbee` (ствол монорепо)")
+			findings, c = auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+			require.Empty(t, findings,
+				"гейт краснеет на ЗАКОННОЙ квалифицированной датировке формой %q", phrase)
+			require.Equal(t, 1, c.inherited, "унаследованная датировка не сосчитана")
+			require.Equal(t, 1, c.byForm[phrase], "перепись потеряла форму на законном входе")
+		})
+	}
+}
+
+// TestDatingCensusNamesEveryDeclaredFormEvenWhenAbsent — форма, которой в корпусе
+// НЕТ, обязана печататься нулём. Исчезнувшая из переписи строка неотличима от
+// строки, которую никто не искал.
+func TestDatingCensusNamesEveryDeclaredFormEvenWhenAbsent(t *testing.T) {
+	docs := map[string]string{
+		"architecture/known-divergences.md": declOfForm(datingPhrases[0], "`PRO-Robotech/kacho@deadbee`"),
+	}
+	_, c := auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	for _, phrase := range datingPhrases {
+		require.Contains(t, c.byForm, phrase,
+			"форма %q исчезла из переписи — её ноль неотличим от «не искали»", phrase)
+	}
+	require.Equal(t, 1, c.byForm[datingPhrases[0]])
+	require.Zero(t, c.byForm[datingPhrases[1]])
+	require.Zero(t, c.byForm[datingPhrases[2]])
+}
+
+// TestDatingGateAcceptsBothDeclaredPredecessors — ИНЪЕКЦИЯ по каждому дому.
+//
+// Предшественников ДВА, и второй не выразим, пока объявлен один: пять замеров
+// воркспейса называли свой дом ПРОЗОЙ, потому что объявленной формы для него не
+// было. Проверяется каждый дом отдельно и чужой — отдельно.
+func TestDatingGateAcceptsBothDeclaredPredecessors(t *testing.T) {
+	for repo := range predecessorRepos {
+		t.Run(repo, func(t *testing.T) {
+			docs := map[string]string{
+				"architecture/known-divergences.md": declOfForm(
+					"Ревизия измерения", "`"+repo+"@deadbee` (замер оттуда)"),
+			}
+			findings, c := auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+			require.Emptyf(t, findings,
+				"объявленный предшественник %s не принят — половина корпуса невыразима", repo)
+			require.Equal(t, 1, c.inherited)
+			require.Zero(t, c.dated, "квалифицированная цитата ушла в половину «предок»")
+		})
+	}
+
+	// ЗАКОННЫЙ БЛИЗНЕЦ НАОБОРОТ: дом, которого в объявлении нет, — находка.
+	docs := map[string]string{
+		"architecture/known-divergences.md": declOfForm(
+			"Ревизия измерения", "`PRO-Robotech/kacho-legacy@deadbee`"),
+	}
+	findings, _ := auditMeasurementDating(docs, map[string]string{}, ancestryAbsentFor)
+	require.Len(t, findings, 1, "необъявленный дом принят — форма стала способом сослаться куда угодно")
+	require.Contains(t, findings[0], "НЕОБЪЯВЛЕННАЯ ИСТОРИЯ")
+}
+
+// TestDatingDeclarationSurvivesALineWrap — ИНЪЕКЦИЯ единицы счёта.
+//
+// Проза корпуса переносится по ширине, и хеш законно уезжает на следующую строку.
+// Единица «строка» объявляла такое САМОССЫЛКОЙ — находкой там, где ревизия названа.
+// На стволе таких мест было ЧЕТЫРЕ из сорока шести.
+func TestDatingDeclarationSurvivesALineWrap(t *testing.T) {
+	wrapped := "## 4\n\n- **Ревизия измерения (продукт) — их ЧЕТЫРЕ:**\n" +
+		"  `PRO-Robotech/kacho@d662a9b60` (автор, круг 1),\n" +
+		"  `PRO-Robotech/kacho@0e5758e580` (проверяющий).\n\nпроза\n"
+	findings, c := auditMeasurementDating(
+		map[string]string{"a.md": wrapped}, map[string]string{}, ancestryAbsentFor)
+	require.Empty(t, findings, "перенесённое по ширине объявление принято за самоссылку")
+	require.Equal(t, 1, c.markers)
+	require.Equal(t, 1, c.inherited)
+	require.Zero(t, c.undated)
+
+	// ЗАКОННЫЙ БЛИЗНЕЦ: продолжения нет — объявление и правда без хеша.
+	findings, c = auditMeasurementDating(
+		map[string]string{"a.md": "## 4\n\n- **Ревизия измерения:** ветка `lane/x`\n\nпроза\n"},
+		map[string]string{}, ancestryAbsentFor)
+	require.Len(t, findings, 1, "самоссылка без хеша перестала быть находкой")
+	require.Contains(t, findings[0], "САМОССЫЛКА")
+	require.Equal(t, 1, c.undated)
+
+	// ГРАНИЦА ПРОДОЛЖЕНИЯ: следующий ПУНКТ СПИСКА в объявление не входит, иначе
+	// находка цитировала бы чужой хеш и называла бы неверную причину.
+	findings, _ = auditMeasurementDating(
+		map[string]string{"a.md": "## 4\n\n- **Ревизия измерения:** ветка `lane/x`\n" +
+			"- **Задача:** `deadbee`\n\nпроза\n"},
+		map[string]string{}, ancestryAbsentFor)
+	require.Len(t, findings, 1)
+	require.Contains(t, findings[0], "САМОССЫЛКА")
+	require.NotContains(t, findings[0], "deadbee",
+		"продолжение затянуло соседний пункт списка — находка цитирует чужую ревизию")
+}

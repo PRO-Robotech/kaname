@@ -83,7 +83,7 @@ func NewHandler(issue *IssueUserTokenUseCase, revoke *RevokeUserTokenUseCase, li
 // Присланное на этой полосе значение БОЛЬШЕ НЕ ВЫБРАСЫВАЕТСЯ МОЛЧА (#1245).
 // Прежде правило против подлога стояло только в ветке вызывающего-человека, и
 // вызывающая машина получала успех при неприменённом параметре — запрещённый
-// третий исход (api-conventions.md «Принято-и-проигнорировано»). Теперь
+// третий исход (§«Принято-и-проигнорировано»). Теперь
 // совпавшее с записываемым значение применяется, любое другое отвергается
 // синхронно, с именем поля.
 func (h *Handler) Issue(ctx context.Context, req *iamv1.IssueUserTokenRequest) (*operationpb.Operation, error) {
@@ -162,7 +162,9 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListUserTokensRequest) (*
 		PageToken: req.GetPageToken(),
 	})
 	if err != nil {
-		return nil, mapPGErr(err)
+		// Логгера у обработчика нет — умолчание процесса задано композиционным
+		// корнем, и запись доезжает до того же приёмника (задача #2507).
+		return nil, mapPGErrLogged(ctx, nil, "user_tokens.List", err)
 	}
 	out := make([]*iamv1.UserOAuthClient, 0, len(rows))
 	for _, c := range rows {

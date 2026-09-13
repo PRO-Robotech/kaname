@@ -30,7 +30,7 @@ package shared
 // short-circuit on identity. An anonymous caller never reaches the repository, so
 // a refusal that lived only there would not be reached either, and the same
 // malformed token would get different answers depending on what the caller has
-// been granted (api-conventions.md: формат → authz → repo).
+// been granted (формат → authz → repo).
 
 import (
 	"strings"

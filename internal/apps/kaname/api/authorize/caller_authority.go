@@ -133,7 +133,7 @@ func (h *Handler) authorizeCaller(ctx context.Context, subject string, res *iamv
 		}
 	}
 	// Отказ — решение ТОЛЬКО когда каждый заданный вопрос получил ответ.
-	// Сырая ошибка наружу не идёт (`security.md` §Hardening #1): текст хранилища
+	// Сырая ошибка наружу не идёт (§Hardening #1): текст хранилища
 	// отношений может нести адрес и диагностику движка.
 	if unanswered != nil {
 		return authzguard.AuthzBackendUnavailable()

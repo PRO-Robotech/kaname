@@ -122,6 +122,33 @@ func TestWrapPgErr_SerializationFailure_Aborted(t *testing.T) {
 	assertNoLeak(t, out)
 }
 
+// TestWrapPgErr_Deadlock_Aborted — ВТОРАЯ половина того же класса, и она —
+// та, которая в этом дереве действительно случалась.
+//
+// `pgfault.SerializationConflict` — это 40001 ЛИБО 40P01 (deadlock_detected).
+// Пришпилена была только первая: 40P01 не называла ни одна проба переводчика,
+// при том что именно она наблюдалась на стороне арендатора (инверсия порядка
+// родов между веером материализации и снятием выдачи — разбор в
+// `internal/apps/kaname/api/access_binding/reconcile/reconcile.go`). Половина
+// класса без пробы — это половина, которую сузят, не заметив.
+//
+// Взаимная блокировка поднимается при ЛЮБОМ уровне изоляции, поэтому довод
+// «у нас READ COMMITTED» её не исключает (задача #2439).
+func TestWrapPgErr_Deadlock_Aborted(t *testing.T) {
+	err := wrapPgErr(mkPgErr("40P01", secretConstraint), "", "")
+	if !stderrors.Is(err, iamerr.ErrAborted) {
+		t.Fatalf("40P01: want ErrAborted (retryable), got %v", err)
+	}
+	if stderrors.Is(err, iamerr.ErrFailedPrecondition) {
+		t.Fatalf("40P01: must NOT be FailedPrecondition (non-retryable)")
+	}
+	out := iamerr.StripSentinel(err)
+	if out != "conflicting concurrent change, retry the request" {
+		t.Errorf("text = %q; want %q", out, "conflicting concurrent change, retry the request")
+	}
+	assertNoLeak(t, out)
+}
+
 // TestWrapPgErr_ConnFamily_Unavailable — an 08xxx connection-family SQLSTATE maps
 // to a retryable ErrUnavailable with a generic, schema-free message.
 func TestWrapPgErr_ConnFamily_Unavailable(t *testing.T) {

@@ -6,7 +6,7 @@ package pg
 // pgmaperr.go — SQLSTATE → sentinel bridge (the pgx-aware half of error
 // mapping). This lives in the repo/pg ADAPTER layer, not in internal/errors,
 // so the pgx dependency (github.com/jackc/pgx/v5/pgconn) stays out of the pure
-// sentinel package that ~40 use-case/handler files import (architecture.md
+// sentinel package that ~40 use-case/handler files import (the
 // dependency-rule: use-case/domain must not pull pgx into their build closure).
 //
 // internal/errors keeps ONLY the pgx-free sentinel family + Wrapf/StripSentinel;
@@ -181,17 +181,40 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// No EXCLUDE constraints in kaname today; map generically WITHOUT
 		// pgErr.Message (which would leak the constraint/range to the client).
 		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "resource conflicts with an existing reservation")
-	case pgfault.SerializationConflict: // serialization_failure
-		// A transient write-write serialization conflict — the transaction can
-		// succeed on retry. gRPC ABORTED is the idiomatic "retry the transaction"
-		// code (FAILED_PRECONDITION would tell a well-behaved client NOT to retry,
-		// contradicting the retryable nature). Unreachable under the current
-		// READ COMMITTED regime (within-service invariants use single-statement
-		// CAS / advisory locks / triggers, none of which raise 40001); mapped
-		// correctly so a future SERIALIZABLE path surfaces a retryable code.
+	case pgfault.SerializationConflict: // 40001 serialization_failure ЛИБО 40P01 deadlock_detected
+		// A transient write-write conflict — the transaction can succeed on retry.
+		// gRPC ABORTED is the idiomatic "retry the transaction" code
+		// (FAILED_PRECONDITION would tell a well-behaved client NOT to retry,
+		// contradicting the retryable nature).
+		//
 		// Текст называет ДЕЙСТВИЕ вызывающего, а не уровень изоляции СУБД:
 		// «serialization» — термин нашего хранилища, и арендатор по нему сделать
 		// не может ничего. Код (ABORTED) и смысл «повтори» сохранены дословно.
+		//
+		// ЗДЕСЬ СТОЯЛО «Unreachable under the current READ COMMITTED regime … none
+		// of which raise 40001» — и это НЕВЕРНО о классе, который ветвь стережёт.
+		// Класс `pgfault.SerializationConflict` — это 40001 ЛИБО **40P01
+		// (deadlock_detected)**, а взаимная блокировка поднимается при ЛЮБОМ уровне
+		// изоляции: достаточно двух транзакций, берущих замки в обратном порядке.
+		// Утверждение было верно ровно про свою половину и читалось как про весь
+		// класс — то есть как довод не чинить.
+		//
+		// Опровергается не рассуждением, а СОБСТВЕННЫМ деревом: 40P01 наблюдалась
+		// на стороне арендатора — inversion порядка родов между веером
+		// материализации и снятием выдачи (`internal/apps/kaname/api/access_binding/
+		// reconcile/reconcile.go`, разбор у `AcquireBindingLocks`). Тот случай
+		// починен упорядочиванием, но реализуемость класса он доказал.
+		//
+		// ОТКРЫТЫЙ ОСТАТОК (задача #2439): на АСИНХРОННОЙ мутации этот текст
+		// советует повтор тому, кого нет. Исполнитель операции повторяет с отступом
+		// ТОЛЬКО терминальную запись; тело мутации исполняется один раз, и его отказ
+		// становится терминальным исходом — вызывающий получает `done:true` с
+		// ABORTED и указанием повторить, при том что внутри платформы повтора не
+		// происходит, а повторить обязан он сам, целиком, заводя новую операцию.
+		// Наблюдалось там же: «операция снятия завершалась `done:true` с ABORTED».
+		// Синхронный путь этим не задет — там текст верен. Выбор исхода продуктовый
+		// (он меняет наблюдаемый `Operation.result.error`) и требует приёмки,
+		// поэтому текст здесь НЕ правится мимо неё.
 		return iamerr.Wrapf(iamerr.ErrAborted, "conflicting concurrent change, retry the request")
 	}
 	// connection family 08xxx
@@ -215,7 +238,7 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 	}
 	// Unmapped SQLSTATE — never return the raw *pgconn.PgError: its Error()
 	// carries table/constraint/column/SQLSTATE and would surface verbatim as the
-	// gRPC INTERNAL message (data-integrity.md: no pgx leak, fixed INTERNAL text).
+	// gRPC INTERNAL message (no pgx leak, fixed INTERNAL text).
 	// A new constraint that should produce a tenant-facing message must be added
 	// to the constraint-aware switches above.
 	//
@@ -336,7 +359,7 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 		// #2048 ветви не было вовсе: человек, которого только что вернул
 		// `ListUsers`, получал утверждение о собственном отсутствии, а клиент,
 		// ведущий состояние, снимал его строку у себя. Тон обеих сторон — часть
-		// контракта (api-conventions.md §Error-format); код у них ОДИН
+		// контракта (§Error-format); код у них ОДИН
 		// (`ErrFailedPrecondition`), различает их только сообщение.
 		//
 		// Полоса сужена до снятия ИМЕННО человека: это единственный глагол,
@@ -389,7 +412,7 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 		// получал «Role <субъект>|project:<область> not found» — сообщение,
 		// называющее сущности, о которых он не спрашивал, и НЕ называющее ту,
 		// из-за которой отказ. Клиент уходил искать причину в субъекте и проекте.
-		// Тексты отказов — часть контракта (api-conventions.md §Error-format),
+		// Тексты отказов — часть контракта (§Error-format),
 		// поэтому берётся именно роль (issue #105).
 		if _, _, role := splitBindingHint(idHint); role != "" {
 			return fmt.Sprintf("Role %s not found", role), iamerr.ErrReferenceMissing
@@ -691,7 +714,7 @@ func checkText(pgErr *pgconn.PgError) string {
 // notNullText — client-facing text for 23502 (not_null_violation). The raw
 // pgErr.ColumnName is deliberately NOT echoed: it is an internal schema
 // identifier that differs from the public proto field name and aids schema
-// reconnaissance (data-integrity.md: no pgx leak). A 23502 reaching the DB is
+// reconnaissance (no pgx leak). A 23502 reaching the DB is
 // normally caught earlier by domain validation, so a generic message suffices.
 func notNullText(_ *pgconn.PgError) string {
 	return "a required field is missing"

@@ -255,21 +255,6 @@ func TestKAN_VER_01_CallerNamedByAPresentedCredentialIsALegitimatePublicCaller(t
 	}
 }
 
-// mergeIncoming — метаданные контекста плюс добавленные.
-func mergeIncoming(ctx context.Context, add metadata.MD) metadata.MD {
-	base, _ := metadata.FromIncomingContext(ctx)
-	out := base.Copy()
-	if out == nil {
-		out = metadata.MD{}
-	}
-	for k, vs := range add {
-		for _, v := range vs {
-			out.Append(k, v)
-		}
-	}
-	return out
-}
-
 // noFloorCatalog / floorCatalog — каталог порогов доверия для проб.
 //
 // Подставной намеренно: предмет здесь — ВЕТВЬ политики, а не состав боевого

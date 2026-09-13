@@ -321,7 +321,7 @@ func (r *SAOAuthClientRepo) List(ctx context.Context, svaID domain.ServiceAccoun
 // row never existed, the row was already removed, the row belongs to another owner.
 // They cannot be told apart from here BY CONSTRUCTION — which is the requirement,
 // not an omission: a caller handed different outcomes would learn from the
-// difference whether SOMEONE ELSE'S credential exists (security.md §Hardening #6).
+// difference whether SOMEONE ELSE'S credential exists (§Hardening #6).
 // The branch on which they could diverge simply does not exist.
 func (r *SAOAuthClientRepo) DeleteOwnedByID(
 	ctx context.Context, txh service.Tx,

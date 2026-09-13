@@ -45,9 +45,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   указатель, ярус вне цепочки),
   [#1860](https://github.com/PRO-Robotech/kacho/issues/1860) (имя указателя ≠ тип),
   [#1862](https://github.com/PRO-Robotech/kacho/issues/1862) (порядок отношений)
-- **Ревизия измерения — ОДНА, и она названа:** `73c04318ad642eff41d7be2f8b28b88e03ae9a5f`,
+- **Ревизия измерения — ОДНА, и она названа:** `PRO-Robotech/kacho@73c04318ad642eff41d7be2f8b28b88e03ae9a5f`,
   линия `release/modules-4`, копия `/tmp/claude-1000/wt-1845`, ветка `lane/1845`.
-  Канон — `proto/kaname/cloud/iam/v1/fga_model.fga`, последняя правка `b25cb9e3a9`
+  Канон — `proto/kaname/cloud/iam/v1/fga_model.fga`, последняя правка `PRO-Robotech/kacho@b25cb9e3a9`
   (2026-08-25), `md5 438d2cbf00ad219b97b082bc2b7fffa4`. **Все** числа этого
   документа сняты на ней, и рядом с каждым стоит своя команда
 

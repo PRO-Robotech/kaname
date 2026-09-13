@@ -39,18 +39,54 @@ type HydraAdminClient struct {
 	BaseURL     string
 	BearerToken string
 	HTTPClient  *http.Client
+
+	// roadObserver — счётчик исходов ЭТОЙ дороги. nil законен: счёта нет,
+	// решения дороги это не меняет (разбор клеток — provider_road.go).
+	roadObserver ProviderRoadObserver
 }
 
-// NewHydraAdminClient — constructor without a pinned trust anchor. Default
-// timeout 10s. Kept for call sites that address a plaintext in-cluster admin API
-// (a developer stand); production addresses it over TLS and must therefore use
+// WithRoadObserver подключает счётчик исходов административной дороги.
+// Composition-root only; возвращает того же клиента, чтобы провязка читалась
+// одной строкой у места сборки.
+func (c *HydraAdminClient) WithRoadObserver(obs ProviderRoadObserver) *HydraAdminClient {
+	c.roadObserver = obs
+	return c
+}
+
+// observeStatus — учёт исхода по коду ответа поставщика. Единая точка, чтобы ни
+// одна ветка возврата не осталась непосчитанной.
+func (c *HydraAdminClient) observeStatus(status int) {
+	observeProviderRoad(c.roadObserver, ProviderRoadAdmin, classifyProviderRoadStatus(status))
+}
+
+// observeTransportFailure — учёт исхода, когда ответа не было вовсе. Сеть и срок
+// лечатся временем, поэтому клетка отдельная от настройки.
+func (c *HydraAdminClient) observeTransportFailure() {
+	observeProviderRoad(c.roadObserver, ProviderRoadAdmin, ProviderRoadOutcomeUnavailable)
+}
+
+// ProviderAdminHopTimeout — per-call ceiling on one admin conversation with the
+// provider. Named, not inlined, for the same reason tokenHopTimeout is: a value
+// nobody can reference is a value every consumer re-guesses.
+//
+// Здесь имя покупает ещё одно, и оно несущее. Терпение дренажа компенсаций
+// ВЫВОДИТСЯ из этой величины (`cmd/kaname/provider_compensation_wiring.go`):
+// при обратном соотношении разговор обрывал бы всегда дренаж, и предел клиента
+// не фигурировал бы ни в одном исходе — величина была бы объявлена и не
+// исполнялась бы никогда (kacho#2490). Вывести её можно только из имени;
+// литерал потребитель обязан был бы угадать, а угаданные числа расходятся молча.
+const ProviderAdminHopTimeout = 10 * time.Second
+
+// NewHydraAdminClient — constructor without a pinned trust anchor. Kept for call
+// sites that address a plaintext in-cluster admin API (a developer stand);
+// production addresses it over TLS and must therefore use
 // NewHydraAdminClientWithCA.
 func NewHydraAdminClient(baseURL, bearerToken string) *HydraAdminClient {
 	return &HydraAdminClient{
 		BaseURL:     strings.TrimRight(baseURL, "/"),
 		BearerToken: bearerToken,
 		HTTPClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: ProviderAdminHopTimeout,
 		},
 	}
 }

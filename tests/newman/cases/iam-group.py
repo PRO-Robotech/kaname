@@ -84,6 +84,11 @@ Test-first note (strict TDD):
   assertions — fix the implementation instead.
 """
 
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
+
 CASES = []
 
 # Garbage id for negative probes.
@@ -105,13 +110,13 @@ def assert_iam_operation_envelope():
 
 
 # ---------------------------------------------------------------------------
-# `assert_scoped_authz_deny(action, resource_expr=None)` — "a 403 must be the
+# `assert_scoped_authz_deny(action, scope=None)` — "a 403 must be the
 # deny we are actually testing, not a permission-catalog miss" — was defined
 # here; it now lives in scripts/gen.py next to its sibling
 # `assert_unscoped_rejected` (same discriminator, different shape) and is
 # injected into every case module, so there is exactly ONE implementation for
-# all iam cases to reuse. Rationale and the `resource_expr` contract are in the
-# gen.py docstring.
+# all iam cases to reuse. Rationale and the `scope` contract — какая поверхность
+# какой ключ производит и что при смене пина потеряно — в шапке gen.py.
 # ---------------------------------------------------------------------------
 
 # Permission + FGA object type of GroupService/ListMembers (permission_catalog.json).
@@ -450,7 +455,7 @@ CASES.append(Case(
             # asserts "this subject sees nothing" was therefore asserting it
             # against a subject that is genuinely authorised — a fixture artifact,
             # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
-            # subject seeded for exactly this (tests/authz-fixtures/setup.sh; it is
+            # subject seeded for exactly this (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh; it is
             # never a grant TARGET anywhere in the tree).
             auth="jwtPureNoBindings",
             test_script=[
@@ -545,7 +550,7 @@ CASES.append(Case(
             # asserts "this subject sees nothing" was therefore asserting it
             # against a subject that is genuinely authorised — a fixture artifact,
             # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
-            # subject seeded for exactly this (tests/authz-fixtures/setup.sh; it is
+            # subject seeded for exactly this (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh; it is
             # never a grant TARGET anywhere in the tree).
             auth="jwtPureNoBindings",
             test_script=[
@@ -736,7 +741,7 @@ CASES.append(Case(
 # ОСНОВАНИЕ ЗАВЕСТИ КЕЙС, А НЕ СНЯТЬ ШАПКУ. Шапка объявляла предпосылку
 # отсутствующей («нужна выдача, дающая jwtInvitee editor на группу или на
 # accountBId»), но она ЕСТЬ: посев даёт `jwtInvitee` роль `admin` на account-B
-# (tests/authz-fixtures/prodseed_matrix.py — subject с ROLE_ADMIN на acctB), а
+# (PRO-Robotech/kacho:tests/authz-fixtures/prodseed_matrix.py — subject с ROLE_ADMIN на acctB), а
 # модель прав выводит на группе `super_admin: admin from account` → `v_update`
 # (proto/kaname/cloud/iam/v1/fga_model.fga, type iam_group). То есть предмет
 # конструируем публичным API целиком, и его отсутствие было не ограничением
@@ -1254,7 +1259,7 @@ CASES.append(Case(
             path=f"/iam/v1/groups/{GARBAGE_GRP}:listMembers",
             auth="jwtAccountAdminA",
             test_script=[
-                *assert_scoped_authz_deny(LM_ACTION, f"'iam_group:{GARBAGE_GRP}'"),
+                *assert_scoped_authz_deny(LM_ACTION, "resource"),
             ],
         ),
     ],
@@ -1289,12 +1294,12 @@ CASES.append(Case(
             # asserts "this subject sees nothing" was therefore asserting it
             # against a subject that is genuinely authorised — a fixture artifact,
             # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
-            # subject seeded for exactly this (tests/authz-fixtures/setup.sh; it is
+            # subject seeded for exactly this (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh; it is
             # never a grant TARGET anywhere in the tree).
             auth="jwtPureNoBindings",
             test_script=[
                 *assert_scoped_authz_deny(
-                    LM_ACTION, "'iam_group:' + pm.environment.get('crudGroupId')"),
+                    LM_ACTION, "resource"),
             ],
         ),
     ],

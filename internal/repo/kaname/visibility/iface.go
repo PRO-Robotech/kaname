@@ -16,7 +16,7 @@
 // construction: it names accounts and objects the caller's own grants reach,
 // WITHOUT deciding whether any particular grant authors a read. That decision
 // belongs to the authorization model and to nothing else
-// (`security.md` §«Авторизация живёт в МОДЕЛИ»); this package must never become
+// (§«Авторизация живёт в МОДЕЛИ»); this package must never become
 // a second, home-grown rights system. Over-inclusion here is harmless — the
 // model rejects the extra rows; under-inclusion is the original defect wearing a
 // new address, because a path the candidate selection forgets produces an

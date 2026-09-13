@@ -92,7 +92,7 @@ ECP (label match vs no-match), error-guessing (full-PATCH empty-mask zeroing
 labels; non-label Update no-op; IAM-down intent durability), use-case (invite →
 grant → revoke end-to-end). One thought per pm.test().
 
-Fixtures (tests/authz-fixtures/setup.sh): jwtBootstrap, jwtAccountAdminA,
+Fixtures (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh): jwtBootstrap, jwtAccountAdminA,
 accountAId. The PROJECT is self-seeded per case (create_suite_project → {{_t31Proj}})
 rather than read from the shared {{projectA1Id}} fixture: that fixture var could
 resolve to a PHANTOM project (an id whose IAM row never committed — the fixture's
@@ -103,6 +103,15 @@ A freshly-created, op-poll-confirmed project is guaranteed to exist for the peer
 All resources (project, SA, network, SG, role, binding) are self-seeded per case with
 {{runId}}-suffixed names (self-contained, no cross-case / cross-suite collision).
 """
+
+# ДОМ МОДУЛЯ — ПЛАТФОРМА: его предмет не сущности службы (e2e-flow.md §7а).
+# Здесь он не исполним и конвейером службы не гоняется; `HOME_REASON` называет,
+# поведение какого домена утверждается. Сверяет `scripts/case_home_test.py`.
+HOME = "kacho"
+HOME_REASON = (
+    "связка: предмет — отзыв выдачи ARM_LABELS при смене меток на ресурсе vpc. Утверждается "
+    "поведение vpc, опирающееся на службу."
+)
 
 CASES = []
 
