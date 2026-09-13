@@ -50,9 +50,13 @@ const compensationMaxAttempts = 10
 // неоткуда, поэтому задача возвращается по гашению процесса, а снятие клиента у
 // провайдера не рвётся посреди разговора.
 func buildProviderCompensationDrainer(
-	pool *pgxpool.Pool, cfg config.Config, obs clients.CompensationObserver, logger *slog.Logger,
+	pool *pgxpool.Pool, cfg config.Config, obs clients.CompensationObserver,
+	roadObs clients.ProviderRoadObserver, logger *slog.Logger,
 ) (func(context.Context) error, error) {
-	releaser := mustProviderAdminClient(cfg)
+	// Дорога СНЯТИЯ у поставщика — та самая, где ответ «не найдено» читался как
+	// успех и помечал строку доставленной. Счётчик здесь и есть то, что делает
+	// её неразличимость видимой (kacho#2492).
+	releaser := mustProviderAdminClient(cfg, roadObs)
 
 	drainerLogger := logger.With(slog.String("component", "provider_compensation_drainer"))
 	d, err := drainer.New[clients.ProviderCompensationEvent](

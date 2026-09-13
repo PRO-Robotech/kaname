@@ -72,9 +72,11 @@ func (c *HydraAdminClient) DeleteLoginSessions(ctx context.Context, subject stri
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		c.observeTransportFailure()
 		return fmt.Errorf("hydra: delete login sessions: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	c.observeStatus(resp.StatusCode)
 
 	switch resp.StatusCode {
 	case http.StatusNoContent, http.StatusOK, http.StatusNotFound:

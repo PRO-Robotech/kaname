@@ -147,7 +147,3 @@ func Contains(list []string, want string) bool {
 	}
 	return false
 }
-
-// DefaultWithin проверяет, что объявленное умолчание входит в объявленный
-// посадкой перечень. Предикат стража построения, а не выдачи.
-func DefaultWithin(landing []string, def string) bool { return Contains(landing, def) }

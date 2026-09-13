@@ -39,6 +39,30 @@ type HydraAdminClient struct {
 	BaseURL     string
 	BearerToken string
 	HTTPClient  *http.Client
+
+	// roadObserver — счётчик исходов ЭТОЙ дороги. nil законен: счёта нет,
+	// решения дороги это не меняет (разбор клеток — provider_road.go).
+	roadObserver ProviderRoadObserver
+}
+
+// WithRoadObserver подключает счётчик исходов административной дороги.
+// Composition-root only; возвращает того же клиента, чтобы провязка читалась
+// одной строкой у места сборки.
+func (c *HydraAdminClient) WithRoadObserver(obs ProviderRoadObserver) *HydraAdminClient {
+	c.roadObserver = obs
+	return c
+}
+
+// observeStatus — учёт исхода по коду ответа поставщика. Единая точка, чтобы ни
+// одна ветка возврата не осталась непосчитанной.
+func (c *HydraAdminClient) observeStatus(status int) {
+	observeProviderRoad(c.roadObserver, ProviderRoadAdmin, classifyProviderRoadStatus(status))
+}
+
+// observeTransportFailure — учёт исхода, когда ответа не было вовсе. Сеть и срок
+// лечатся временем, поэтому клетка отдельная от настройки.
+func (c *HydraAdminClient) observeTransportFailure() {
+	observeProviderRoad(c.roadObserver, ProviderRoadAdmin, ProviderRoadOutcomeUnavailable)
 }
 
 // ProviderAdminHopTimeout — per-call ceiling on one admin conversation with the

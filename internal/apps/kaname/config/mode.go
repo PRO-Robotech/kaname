@@ -29,9 +29,20 @@ import (
 //	                       logged.
 //	ModeProduction       — fail-closed: every request must carry a non-empty
 //	                       principal-ctx. Anonymous → PermissionDenied.
-//	ModeProductionStrict — production + additionally validates extapi.*.tls.*
-//	                       and repository.postgres.ssl-mode
-//	                       (require|verify-ca|verify-full).
+//	ModeProductionStrict — production; СЕГОДНЯ отличается от ModeProduction
+//	                       только именем.
+//
+// СТРОГИЙ РЕЖИМ НЕ ПРОВЕРЯЕТ НИЧЕГО СВЕРХ ОБЫЧНОГО, и прежняя редакция
+// утверждала обратное (kacho#2480): она называла дополнительной проверку группы
+// `extapi.*.tls.*` — группы, которой в настройке НЕТ ни одной ручки, — и
+// проверку режима шифрования к базе, которую судит ЛЮБАЯ боевая посадка, потому
+// что предикат посадки [Mode.IsProduction] верен для обоих значений.
+//
+// Читатель, взявший текст за правду, выбирал бы строгий режим ради защиты,
+// которой тот не добавляет. Отличие названо тем, чем оно является: именем,
+// доезжающим до дескриптора посадки. Появится у строгого режима собственная
+// проверка — она и опишется здесь, и предикатом ей станет расхождение с
+// [Mode.IsProduction].
 type Mode int
 
 // ENUM values. iota order is stable; don't change without a values.yaml

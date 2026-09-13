@@ -47,14 +47,6 @@ type iamJournalStub struct {
 	release chan struct{}
 }
 
-func newIamJournalStub(batches ...[]*iamv1.SubjectChange) *iamJournalStub {
-	return &iamJournalStub{
-		batches: batches,
-		primed:  make(chan struct{}),
-		release: make(chan struct{}),
-	}
-}
-
 func (s *iamJournalStub) PollSubjectChanges(
 	_ context.Context, _ *iamv1.PollSubjectChangesRequest,
 ) (*iamv1.PollSubjectChangesResponse, error) {

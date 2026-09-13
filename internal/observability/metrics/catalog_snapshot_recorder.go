@@ -3,7 +3,22 @@
 
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/PRO-Robotech/kaname/internal/catalog"
+)
+
+// CatalogSnapshotOutcomes — ЗАКРЫТЫЙ набор клеток семейства.
+//
+// Собран из констант производителя ([catalog.RefreshOutcomeRefreshed],
+// [catalog.RefreshOutcomeFailed]), а не выписан здесь литералами: второе место
+// об одном предмете разошлось бы на первом же новом исходе, и разошлось бы
+// молча — незнакомая клетка просто не завелась бы.
+var CatalogSnapshotOutcomes = []string{
+	catalog.RefreshOutcomeRefreshed,
+	catalog.RefreshOutcomeFailed,
+}
 
 // CatalogSnapshotRecorder — исходы ОБНОВЛЕНИЯ снимка каталога модуля
 // (kacho#1816, IAM-CT-2-03 / -04).
@@ -47,6 +62,12 @@ func (r *Registry) NewCatalogSnapshotRecorder() *CatalogSnapshotRecorder {
 				"другим. Ноль failed значим только вместе с ненулевым refreshed: без него " +
 				"ноль означает, что обновлений не было вовсе.",
 		}, []string{"outcome"}),
+	}
+	// Клетки закрытого набора заводятся нулём ПРИ РЕГИСТРАЦИИ: вектор без детей
+	// не отдаёт на провод ничего, и «механизм не провязан» становится неотличим
+	// от «механизм провязан и ни разу не сработал».
+	for _, outcome := range CatalogSnapshotOutcomes {
+		rec.outcomes.WithLabelValues(outcome)
 	}
 	r.reg.MustRegister(rec.outcomes)
 	return rec

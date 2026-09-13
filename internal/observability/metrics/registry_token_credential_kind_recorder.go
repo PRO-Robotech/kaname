@@ -3,7 +3,22 @@
 
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+
+	registrytoken "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
+)
+
+// RegistryTokenCredentialKindOutcomes — ЗАКРЫТЫЙ набор клеток семейства.
+//
+// Собран из констант производителя (`registry_token.Outcome*`), а не выписан
+// здесь: клетка окна перехода — ПРЕДИКАТ его закрытия, и разойдись набор с
+// производителем, предикат отвечал бы «переведены все» на непереведённых.
+var RegistryTokenCredentialKindOutcomes = []string{
+	registrytoken.OutcomeBasicAccepted,
+	registrytoken.OutcomeKeyMaterialAcceptedInWindow,
+	registrytoken.OutcomeKeyMaterialRefused,
+}
 
 // RegistryTokenCredentialKindRecorder — исходы полос предъявленного
 // удостоверения докерной полосы `/iam/token`.
@@ -59,6 +74,12 @@ func (r *Registry) NewRegistryTokenCredentialKindRecorder() *RegistryTokenCreden
 				"растёт, переведены не все, и ручку " +
 				"api-server.registry-token.key-material-window-until снимать рано.",
 		}, []string{"outcome"}),
+	}
+	// Клетки закрытого набора заводятся нулём ПРИ РЕГИСТРАЦИИ: вектор без детей
+	// не отдаёт на провод ничего, и «механизм не провязан» становится неотличим
+	// от «механизм провязан и ни разу не сработал».
+	for _, outcome := range RegistryTokenCredentialKindOutcomes {
+		rec.outcomes.WithLabelValues(outcome)
 	}
 	r.reg.MustRegister(rec.outcomes)
 	return rec

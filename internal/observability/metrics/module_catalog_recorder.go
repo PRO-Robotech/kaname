@@ -3,7 +3,34 @@
 
 package metrics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
+)
+
+// ЗАКРЫТЫЕ наборы клеток трёх семейств применителя каталога.
+//
+// Собраны из констант производителя (`modulecatalog`), а не выписаны здесь:
+// второе место об одном предмете разошлось бы молча — незнакомая клетка просто
+// не завелась бы, и её появление стало бы неотличимо от её отсутствия.
+var (
+	// ModuleCatalogApplyOutcomes — исходы применения манифеста.
+	ModuleCatalogApplyOutcomes = []string{
+		modulecatalog.ApplyOutcomeApplied,
+		modulecatalog.ApplyOutcomeFailed,
+	}
+	// ModuleCatalogRetiredKinds — виды снятой строки каталога.
+	ModuleCatalogRetiredKinds = []string{
+		modulecatalog.RetiredKindResource,
+		modulecatalog.RetiredKindVerb,
+	}
+	// ModuleCatalogResettledPopulations — популяции переселённых проекций.
+	ModuleCatalogResettledPopulations = []string{
+		modulecatalog.ResettledPopulationRuleRef,
+		modulecatalog.ResettledPopulationRoleVerb,
+	}
+)
 
 // ModuleCatalogRecorder — что сделало ПРИМЕНЕНИЕ каталога модуля
 // (`modulecatalog.Applier`, задача продукта #1963).
@@ -75,6 +102,18 @@ func (r *Registry) NewModuleCatalogRecorder() *ModuleCatalogRecorder {
 				"различает. Ноль при ненулевом retired_rows значим сам по себе: снятие " +
 				"было и ни одной роли не задело.",
 		}, []string{"population"}),
+	}
+	// Клетки закрытого набора заводятся нулём ПРИ РЕГИСТРАЦИИ: вектор без детей
+	// не отдаёт на провод ничего, и «механизм не провязан» становится неотличим
+	// от «механизм провязан и ни разу не сработал».
+	for _, outcome := range ModuleCatalogApplyOutcomes {
+		rec.applies.WithLabelValues(outcome)
+	}
+	for _, kind := range ModuleCatalogRetiredKinds {
+		rec.retired.WithLabelValues(kind)
+	}
+	for _, population := range ModuleCatalogResettledPopulations {
+		rec.resettled.WithLabelValues(population)
 	}
 	r.reg.MustRegister(rec.applies, rec.retired, rec.resettled)
 	return rec

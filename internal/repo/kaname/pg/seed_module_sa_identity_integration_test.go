@@ -30,8 +30,6 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
-	"encoding/json"
-	"sort"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -402,18 +400,6 @@ func TestSeedModuleSA_B06_AccessBindingScopeAndIdempotency(t *testing.T) {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-
-func readRolePermissions(t *testing.T, ctx context.Context, pool *pgxpool.Pool, roleID string) []string {
-	t.Helper()
-	var raw string
-	err := pool.QueryRow(ctx,
-		`SELECT permissions::text FROM kaname.roles WHERE id = $1`, roleID).Scan(&raw)
-	require.NoError(t, err, "backing role %s must exist", roleID)
-	var perms []string
-	require.NoError(t, json.Unmarshal([]byte(raw), &perms))
-	sort.Strings(perms)
-	return perms
-}
 
 // requireFGAWriterTuple — есть ли у служебной записи ДЕЙСТВУЮЩЕЕ право писать
 // кортежи отношений.

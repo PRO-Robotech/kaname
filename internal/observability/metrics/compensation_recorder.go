@@ -32,9 +32,48 @@ import (
 // заменяет другую: расхождение записанных и исполненных говорит «доезжает ли
 // вообще», возраст — «застряла ли конкретная».
 //
-// Набор меток ЗАКРЫТ: origin приходит из констант use-case'ов
-// (sa_key|user_token|interactive_client), никогда из запроса, поэтому
-// кардинальность не растёт с трафиком.
+// Набор меток ЗАКРЫТ: origin приходит из констант use-case'ов, никогда из
+// запроса, поэтому кардинальность не растёт с трафиком. Перечень саг стоит
+// ОДИН РАЗ — в [CompensationOrigins]; прежняя редакция этой строки называла
+// три саги, из которых производителя имели две (задача #2500 нашла это, сверяя
+// объявленный набор с засеваемым).
+// Клетки ЗАКРЫТЫХ наборов компенсации.
+//
+// Значения дословно повторяют константы производителей
+// (`internal/apps/kaname/api/sa_keys` — `compensationOriginSAKey`,
+// `internal/apps/kaname/api/interactive_client` —
+// `compensationOriginInteractiveClient`): они неэкспортируемы, и адаптеру
+// величин незачем импортировать use-case ради двух строк.
+//
+// САГ ДВЕ, А НЕ ТРИ. Третья (`user_token`) была названа прозой и производителя
+// не имела ни одного: её клетка была бы вечным нулём, то есть утверждением о
+// саге, которой нет.
+const (
+	// CompensationOriginSAKey — сага выдачи ключа служебной учётки.
+	CompensationOriginSAKey = "sa_key"
+	// CompensationOriginInteractiveClient — сага заведения интерактивного клиента.
+	CompensationOriginInteractiveClient = "interactive_client"
+
+	// CompensationEmitOutcomeOK — durable-намерение записано.
+	CompensationEmitOutcomeOK = "ok"
+	// CompensationEmitOutcomeError — записать не удалось, путь деградировал
+	// в прямое снятие.
+	CompensationEmitOutcomeError = "error"
+)
+
+var (
+	// CompensationOrigins — ЗАКРЫТЫЙ набор саг-инициаторов.
+	CompensationOrigins = []string{
+		CompensationOriginSAKey,
+		CompensationOriginInteractiveClient,
+	}
+	// CompensationEmitOutcomes — ЗАКРЫТЫЙ набор исходов ЗАПИСИ намерения.
+	CompensationEmitOutcomes = []string{
+		CompensationEmitOutcomeOK,
+		CompensationEmitOutcomeError,
+	}
+)
+
 type CompensationRecorder struct {
 	emitted *prometheus.CounterVec
 	applied *prometheus.CounterVec
@@ -54,6 +93,15 @@ func (r *Registry) NewCompensationRecorder() *CompensationRecorder {
 			Help: "Компенсации, исполненные дренажом (клиент снят у провайдера либо его уже не было), " +
 				"по саге-инициатору. Расхождение с emitted — то, что ещё не доехало.",
 		}, []string{"origin"}),
+	}
+	// Клетки закрытого набора заводятся нулём ПРИ РЕГИСТРАЦИИ: вектор без детей
+	// не отдаёт на провод ничего, и «механизм не провязан» становится неотличим
+	// от «механизм провязан и ни разу не сработал».
+	for _, origin := range CompensationOrigins {
+		rec.applied.WithLabelValues(origin)
+		for _, outcome := range CompensationEmitOutcomes {
+			rec.emitted.WithLabelValues(origin, outcome)
+		}
 	}
 	r.reg.MustRegister(rec.emitted, rec.applied)
 	return rec
