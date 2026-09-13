@@ -47,14 +47,29 @@ func TestUserAudit_5_2_14_UpsertInsertEmitsCreated(t *testing.T) {
 	r := requireOneAuditRow(ctx, t, env.pool, "iam.user.created", usrID)
 	require.Equal(t, "user", r.payload["resource_type"])
 	require.Equal(t, usrID, r.payload["resource_id"])
-	require.Equal(t, "u-5214-insert@example.com", r.payload["email"])
-	require.Equal(t, "Upsert Insert", r.payload["display_name"])
 	// Kratos-provision has no user principal → IsAnonymous(bootstrap)=true →
 	// PrincipalUserID="" → the use-case records the non-fabricated system
 	// identity "system" (never an invented user id). 5.2-14.
 	require.Equal(t, "system", r.payload["actor"],
 		"Kratos-provision actor is the system identity, never fabricated")
 	require.Regexp(t, evtIDFormat, r.id)
+
+	// Здесь стояло требование, чтобы нагрузка НЕСЛА почту и отображаемое имя.
+	// Требование пришпиливало утечку: приёмник журнала кладёт все поля как есть,
+	// шага сокрытия нет ни одного, и оба поля уезжали в поток службы
+	// (`kacho#2483`). Проба не ослаблена, а ПЕРЕВЁРНУТА — утверждает теперь
+	// отсутствие, — и утверждает его НА ЧИТАЕМОМ СЛЕДЕ, а не о коде.
+	//
+	// Положительный контроль выше обязателен: без него отрицание зеленело бы на
+	// пустой нагрузке и на неэмитированном событии.
+	for _, k := range []string{"email", "display_name", "displayName", "external_id"} {
+		require.NotContains(t, r.payload, k,
+			"личные данные в поток аудита не уезжают: %s", k)
+	}
+	// И их там нет НЕ потому, что значения пусты: субъект в следе назван, просто
+	// назван идентификатором. Корреляция сохранена, срок хранения потока больше
+	// не есть срок хранения личных данных.
+	require.NotEmpty(t, r.payload["resource_id"], "субъект назван — идентификатором, а не почтой")
 }
 
 func TestUserAudit_5_2_14_UpsertActivateEmitsUpdated(t *testing.T) {
