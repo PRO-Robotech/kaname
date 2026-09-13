@@ -12,7 +12,7 @@ import (
 
 	operationv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
 	"github.com/PRO-Robotech/corelib/grpcclient"
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // dial.go — переходник от сгенерированного gRPC-клиента к порту ModuleService.

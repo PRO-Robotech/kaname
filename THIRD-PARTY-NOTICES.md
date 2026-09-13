@@ -26,9 +26,8 @@
 |---|---:|
 | Apache-2.0 | 13 |
 | BSD-3-Clause | 9 |
-| BUSL-1.1 | 1 |
 | MIT | 19 |
-| **всего** | **42** |
+| **всего** | **41** |
 
 ## Apache-2.0
 
@@ -61,12 +60,6 @@
 | `golang.org/x/sys` | `v0.47.0` | `LICENSE` |
 | `golang.org/x/text` | `v0.41.0` | `LICENSE` |
 | `google.golang.org/protobuf` | `v1.36.11` | `LICENSE` |
-
-## BUSL-1.1
-
-| Модуль | Версия | Файл лицензии в модуле |
-|---|---|---|
-| `github.com/PRO-Robotech/kacho` | `v0.1.1-0.20260912212223-96c5c6e10b99` | `LICENSE` |
 
 ## MIT
 

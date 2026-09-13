@@ -33,7 +33,7 @@ import (
 	// обязан совпадать с authzguard.OwnDoorProtoPackages, и расхождение
 	// немедленно роняет Derive, а не проходит молча.
 	_ "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
-	_ "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	_ "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/corelib/authz/catalogderive"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"

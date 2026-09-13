@@ -22,7 +22,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	// Дверь выводит карту из дескрипторов, ВЛИНКОВАННЫХ в бинарь. Процесс iam
 	// линкует все три пакета (grpc_register.go регистрирует их службы), поэтому
 	// проба обязана линковать их тоже: иначе она судила бы карту, которой в

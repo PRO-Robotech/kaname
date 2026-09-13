@@ -8,8 +8,6 @@ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERo
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/PRO-Robotech/corelib v1.4.0 h1:gO2HTr1fuvp9AtsoRL7QzTBnS2qnOm8pShKQ++drHIo=
 github.com/PRO-Robotech/corelib v1.4.0/go.mod h1:q8r4k3+ip391S0T4LHOkcQxz8UbWqUKmmxzXzZP39jA=
-github.com/PRO-Robotech/kacho v0.1.1-0.20260912212223-96c5c6e10b99 h1:qSYKgOqFLIwNZndMl4t6MzfdHqT55f3NW4AV6AeFAZw=
-github.com/PRO-Robotech/kacho v0.1.1-0.20260912212223-96c5c6e10b99/go.mod h1:csbJqifKV+iEqErx/r1XmXZy8HNDyzpDY4NicaXRz9c=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=

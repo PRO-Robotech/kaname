@@ -80,6 +80,24 @@ const subjectChangeJournalTable = "subject_change_outbox"
 // найденных производителей, а не молчаливым мимо.
 const subjectChangeReasonToken = "SUBJECT_CHANGE_POSITION_LOST"
 
+// subjectChangeReasonConst / subjectChangeReasonPackage — КАНОНИЧЕСКОЕ
+// объявление признака: имя константы и пакет, где она объявлена.
+//
+// ЗАЧЕМ ОНИ ПОЯВИЛИСЬ, СКАЗАНО ПРЯМО. Предикат «строковый литерал с этим
+// значением есть дубль» был верен ровно пока объявление лежало ВНЕ этого дерева:
+// пакет `subjectchange` жил в модуле платформы, и в дереве службы всякое такое
+// вхождение действительно было второй сборкой признака. Ступень S0a
+// (kacho#2617, исход C) перенесла пакет сюда — и гейт назвал дублем САМО
+// объявление, то есть стал считать собственный предмет находкой.
+//
+// Исключение выражено ПО ИДЕНТИЧНОСТИ, а не по пути файла: судится узел
+// объявления (`ValueSpec` с этим именем) в пакете-владельце словаря. Путь
+// сравнивать нельзя — файл переименуют, и дубль снова станет законным молча.
+const (
+	subjectChangeReasonConst   = "ReasonPositionLost"
+	subjectChangeReasonPackage = "subjectchange"
+)
+
 const (
 	floorSelector        = "Floor"
 	observeFloorSelector = "ObserveFloor"
@@ -101,6 +119,10 @@ type subjectChangeGapCensus struct {
 	WindowsAskFloor []string
 	Producers       []string
 	TokenDuplicates []string
+	// CanonicalDeclarations — где найдено КАНОНИЧЕСКОЕ объявление признака.
+	// Величина парного контроля: ноль здесь означает, что объявления в дереве
+	// нет вовсе, и тогда «дублей ноль» ничего не доказывает — ссылаться не на что.
+	CanonicalDeclarations []string
 }
 
 type subjectChangeGapFinding struct{ What string }
@@ -112,6 +134,10 @@ func auditSubjectChangeGapDetection(files []string, root string) ([]subjectChang
 		findings []subjectChangeGapFinding
 		census   subjectChangeGapCensus
 	)
+	// canonicalLiterals — узлы литералов канонического объявления, найденные по
+	// идентичности. Отбор идёт по УЗЛУ, а не по значению: значение у дубля и у
+	// объявления одно и то же by construction, ради этого гейт и написан.
+	canonicalLiterals := map[*ast.BasicLit]bool{}
 	for _, abs := range files {
 		if strings.HasSuffix(abs, "_test.go") {
 			continue
@@ -131,7 +157,28 @@ func auditSubjectChangeGapDetection(files []string, root string) ([]subjectChang
 		at := func(p token.Pos) string { return fmt.Sprintf("%s:%d", rel, fset.Position(p).Line) }
 
 		// ── ТОКЕН: раздублирован ли признак полосы литералом ────────────────
+		//
+		// Каноническое объявление признака собственным дублем не является, и
+		// узнаётся оно ПО ИДЕНТИЧНОСТИ: пакет-владелец словаря плюс имя
+		// константы. Отбор идёт до обхода литералов — иначе гейт краснел бы на
+		// том самом объявлении, ссылаться на которое он и требует.
+		canonicalHere := file.Name != nil && file.Name.Name == subjectChangeReasonPackage
 		ast.Inspect(file, func(n ast.Node) bool {
+			if spec, isSpec := n.(*ast.ValueSpec); isSpec && canonicalHere {
+				for i, name := range spec.Names {
+					if name.Name != subjectChangeReasonConst || i >= len(spec.Values) {
+						continue
+					}
+					lit, isLit := spec.Values[i].(*ast.BasicLit)
+					if !isLit || lit.Kind != token.STRING {
+						continue
+					}
+					if v, uerr := strconv.Unquote(lit.Value); uerr == nil && v == subjectChangeReasonToken {
+						census.CanonicalDeclarations = append(census.CanonicalDeclarations, at(lit.Pos()))
+						canonicalLiterals[lit] = true
+					}
+				}
+			}
 			lit, ok := n.(*ast.BasicLit)
 			if !ok || lit.Kind != token.STRING {
 				return true
@@ -140,7 +187,7 @@ func auditSubjectChangeGapDetection(files []string, root string) ([]subjectChang
 			if uerr != nil {
 				return true
 			}
-			if s == subjectChangeReasonToken {
+			if s == subjectChangeReasonToken && !canonicalLiterals[lit] {
 				census.TokenDuplicates = append(census.TokenDuplicates, at(lit.Pos()))
 			}
 			if strings.Contains(s, subjectChangeJournalTable) {
@@ -313,12 +360,23 @@ func TestSubjectChangeJournalDetectsAGapOnBothSides(t *testing.T) {
 	}
 
 	t.Logf("перепись: файлов Go %d, литералов, называющих журнал %d; окон чтения %d, из "+
-		"них спрашивают пол %d; производителей отказа %d; литералов-дублей признака полосы %d",
+		"них спрашивают пол %d; производителей отказа %d; канонических объявлений признака %d; "+
+		"литералов-дублей признака полосы %d",
 		census.GoFiles, census.JournalLiterals, len(census.Windows), len(census.WindowsAskFloor),
-		len(census.Producers), len(census.TokenDuplicates))
+		len(census.Producers), len(census.CanonicalDeclarations), len(census.TokenDuplicates))
 
 	if census.GoFiles == 0 {
 		t.Fatalf("обход не прочитал ни одного файла Go — вердикт был бы беспредметен")
+	}
+	// ПАРНЫЙ КОНТРОЛЬ. «Дублей ноль» неотличимо от «разбор не видит признака
+	// вовсе», поэтому рядом стоит число КАНОНИЧЕСКИХ объявлений. Ноль здесь
+	// означает, что ссылаться не на что: либо словарь уехал из дерева (тогда
+	// предикат дубля снова становится прежним, и это правка гейта), либо имя
+	// константы сменилось.
+	if len(census.CanonicalDeclarations) == 0 {
+		t.Errorf("канонического объявления признака (%s.%s) в дереве не найдено ни одного: "+
+			"требовать ссылки не на что, и «дублей ноль» ничего не доказывает",
+			subjectChangeReasonPackage, subjectChangeReasonConst)
 	}
 	if len(census.Windows) == 0 {
 		t.Fatalf("ни одного чтения журнала %s окном по позиции не найдено при %d "+

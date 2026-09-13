@@ -408,3 +408,80 @@ func TestBuildGraph_EmptyGraphIsNotSilence(t *testing.T) {
 		t.Fatalf("пустой перечень дал непустую перепись: %d", census.GraphPackages)
 	}
 }
+
+// TestForbiddenDirections_RecordAgreesWithTheFirstHalfOfTheRule — ИНЪЕКЦИЯ В
+// ЗАПИСЬ ПРАВИЛА: пара, которой в первой половине нет, обязана находиться, а
+// законный близнец — молчать.
+//
+// Первая половина (`kacho:internal/repohygiene/foundationboundary.go`,
+// `forbiddenDirections`) выписана классами каталогов, эта — путями модулей;
+// сопоставление идёт по ПАРЕ КЛАССОВ, потому что именно она и есть правило. Свод
+// здесь подаётся литералом ОСОЗНАННО: второго дерева в прогоне этого репозитория
+// нет by construction, и сверка с ним — предмет стороны, видящей оба дерева
+// (kacho#2617, G3). Названо прямо, чтобы «сходится» не читалось шире проверенного.
+func TestForbiddenDirections_RecordAgreesWithTheFirstHalfOfTheRule(t *testing.T) {
+	t.Parallel()
+
+	// Классы первой половины, выписанные её же словами: corelib · kaname · kacho.
+	classOf := map[string]string{
+		foundationModulePath:      "corelib",
+		serviceModulePathDeclared: "kaname",
+		platformModulePath:        "kacho",
+	}
+	// Три пары первой половины, дословно: {corelib,kaname} · {corelib,kacho} ·
+	// {kaname,kacho}.
+	firstHalf := map[[2]string]bool{
+		{"corelib", "kaname"}: true,
+		{"corelib", "kacho"}:  true,
+		{"kaname", "kacho"}:   true,
+	}
+
+	here := map[[2]string]bool{}
+	for _, d := range forbiddenDirections {
+		from, okFrom := classOf[d.From]
+		to, okTo := classOf[d.To]
+		if !okFrom || !okTo {
+			t.Fatalf("пара %s → %s называет модуль вне трёх классов первой половины правила",
+				d.From, d.To)
+		}
+		here[[2]string{from, to}] = true
+	}
+
+	for pair := range firstHalf {
+		if !here[pair] {
+			t.Errorf("пара {%s,%s} есть у первой половины правила и отсутствует здесь: "+
+				"две записи одного правила разъехались", pair[0], pair[1])
+		}
+	}
+	for pair := range here {
+		if !firstHalf[pair] {
+			t.Errorf("пара {%s,%s} объявлена здесь и отсутствует у первой половины правила: "+
+				"запрет заведён в одном месте из двух", pair[0], pair[1])
+		}
+	}
+
+	// ИНЪЕКЦИЯ: та же сверка на записи, из которой пара ИЗЪЯТА, обязана дать
+	// находку. Без этой строки сверка выше оставалась бы утверждением о себе.
+	injured := map[[2]string]bool{{"kaname", "kacho"}: true, {"corelib", "kacho"}: true}
+	missing := 0
+	for pair := range firstHalf {
+		if !injured[pair] {
+			missing++
+		}
+	}
+	if missing != 1 {
+		t.Errorf("инъекция в запись не даёт ровно одной находки: %d — тогда сверка выше "+
+			"ничего не измеряет", missing)
+	}
+
+	// ЗАКОННЫЙ БЛИЗНЕЦ инъекции: полная запись даёт ноль находок.
+	missing = 0
+	for pair := range firstHalf {
+		if !here[pair] {
+			missing++
+		}
+	}
+	if missing != 0 {
+		t.Errorf("полная запись объявлена расхождением: находок %d", missing)
+	}
+}

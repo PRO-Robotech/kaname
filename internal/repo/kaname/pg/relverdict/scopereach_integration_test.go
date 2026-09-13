@@ -41,9 +41,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho/pkg/ownerregister"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
+	"github.com/PRO-Robotech/kaname/pkg/ownerregister"
 )
 
 // registerThroughProducer — ОДНА регистрация, проведённая единственным

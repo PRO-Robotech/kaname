@@ -218,3 +218,85 @@ func explain() {}
 		t.Errorf("гейт краснеет на КОММЕНТАРИИ, объясняющем проверку: %v", findings)
 	}
 }
+
+// subjectChangeCanonicalSrc — КАНОНИЧЕСКОЕ объявление признака, как оно стоит в
+// `pkg/subjectchange/positionlost.go` после ступени S0a (kacho#2617, исход C).
+// До переезда пакет жил в модуле платформы, и этой формы в дереве не было вовсе.
+const subjectChangeCanonicalSrc = `package subjectchange
+
+const ReasonPositionLost = "SUBJECT_CHANGE_POSITION_LOST"
+`
+
+// subjectChangeCanonicalTwinSrc — ОТРИЦАТЕЛЬНЫЙ близнец канонического
+// объявления, отличающийся РОВНО ОДНИМ фактом: пакет не тот. Значение, имя
+// константы и форма объявления те же.
+const subjectChangeCanonicalTwinSrc = `package pg
+
+const ReasonPositionLost = "SUBJECT_CHANGE_POSITION_LOST"
+`
+
+// subjectChangeCanonicalNameTwinSrc — второй отрицательный близнец: пакет тот,
+// а ИМЯ константы другое. Без этой пробы исключение покрывало бы любую
+// константу пакета-владельца, то есть вернуло бы дубль через заднюю дверь.
+const subjectChangeCanonicalNameTwinSrc = `package subjectchange
+
+const reasonPositionLostCopy = "SUBJECT_CHANGE_POSITION_LOST"
+`
+
+// TestSubjectChangeGap_SilentOnTheCanonicalDeclaration — ЗАКОННЫЙ БЛИЗНЕЦ:
+// каноническое объявление признака собственным дублем не является. Прежний
+// предикат («любой литерал с этим значением — дубль») был верен ровно пока
+// объявление лежало ВНЕ дерева; после переезда пакета он назвал находкой сам
+// предмет гейта.
+func TestSubjectChangeGap_SilentOnTheCanonicalDeclaration(t *testing.T) {
+	t.Parallel()
+	files, root := subjectChangeFixture(t, "pkg/subjectchange/positionlost.go", subjectChangeCanonicalSrc)
+	_, census, err := auditSubjectChangeGapDetection(files, root)
+	if err != nil {
+		t.Fatalf("обход: %v", err)
+	}
+	if len(census.CanonicalDeclarations) != 1 {
+		t.Fatalf("каноническое объявление не распознано: %+v", census)
+	}
+	if len(census.TokenDuplicates) != 0 {
+		t.Errorf("каноническое объявление зачтено дублем: %+v", census.TokenDuplicates)
+	}
+}
+
+// TestSubjectChangeGap_RedOnTheSameFormInAForeignPackage — ОТРИЦАТЕЛЬНЫЙ
+// близнец: та же форма объявления в ЧУЖОМ пакете остаётся дублем. Исключение
+// узнаёт владельца словаря, а не форму записи.
+func TestSubjectChangeGap_RedOnTheSameFormInAForeignPackage(t *testing.T) {
+	t.Parallel()
+	files, root := subjectChangeFixture(t, "internal/repo/kaname/pg/copy.go", subjectChangeCanonicalTwinSrc)
+	_, census, err := auditSubjectChangeGapDetection(files, root)
+	if err != nil {
+		t.Fatalf("обход: %v", err)
+	}
+	if len(census.CanonicalDeclarations) != 0 {
+		t.Errorf("объявление в чужом пакете принято за каноническое: %+v", census.CanonicalDeclarations)
+	}
+	if len(census.TokenDuplicates) != 1 {
+		t.Fatalf("дубль в чужом пакете не найден: %+v", census)
+	}
+}
+
+// TestSubjectChangeGap_RedOnASecondConstantInTheOwnerPackage — второй
+// ОТРИЦАТЕЛЬНЫЙ близнец: пакет-владелец, но имя константы другое. Вторая
+// константа с тем же значением расходится с первой так же молча, как копия в
+// чужом пакете.
+func TestSubjectChangeGap_RedOnASecondConstantInTheOwnerPackage(t *testing.T) {
+	t.Parallel()
+	files, root := subjectChangeFixture(t, "pkg/subjectchange/copy.go", subjectChangeCanonicalNameTwinSrc)
+	_, census, err := auditSubjectChangeGapDetection(files, root)
+	if err != nil {
+		t.Fatalf("обход: %v", err)
+	}
+	if len(census.CanonicalDeclarations) != 0 {
+		t.Errorf("вторая константа пакета-владельца принята за каноническую: %+v",
+			census.CanonicalDeclarations)
+	}
+	if len(census.TokenDuplicates) != 1 {
+		t.Fatalf("вторая константа пакета-владельца не названа дублем: %+v", census)
+	}
+}

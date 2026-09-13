@@ -16,7 +16,7 @@ import (
 
 	operationv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
 	quotav1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/quota/v1"
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/PRO-Robotech/kaname/internal/contractnaming"

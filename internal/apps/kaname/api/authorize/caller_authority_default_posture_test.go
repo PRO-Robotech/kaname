@@ -23,7 +23,7 @@ import (
 	"context"
 	"testing"
 
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // TestCallerAuthority_DefaultPosture_NoPrincipalNoCert_Denied — a handler built
