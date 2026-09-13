@@ -36,6 +36,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/corelib/ids"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
@@ -307,4 +310,99 @@ func TestOwnCeiling_TenantReadTakesTheValueFromThePostureNotTheStaleSnapshot(t *
 	require.True(t, found,
 		"вида `iam.account` в ответе нет вовсе: потолок, который наступает, стал "+
 			"невидим арендатору — отказ по нему читался бы как поломка платформы")
+}
+
+// TestOwnCeiling_IdentityWithoutACountingRowStillReadsItsCeiling — ДОБОР
+// недостающего, и он берётся у ПОСАДКИ.
+//
+// # Предмет
+//
+// Строка учёта заводится триггером на первом аккаунте. До него её нет — и ответ
+// обязан быть НЕ ПУСТЫМ: пустой прочитался бы как «предела нет», ровно наоборот
+// действительности, и человек, которому первый же аккаунт откажут, не нашёл бы в
+// продукте ни числа, ни причины.
+//
+// # Почему проба заведена ИМЕННО ЭТИМ изменением
+//
+// Ветвь добора перевязана стадией S4 (`PRO-Robotech/kacho#2117`): прежде перечень
+// видов носителя брался из закрытого каталога авторитета величин, а величина —
+// из `kaname.limits` для всякого не-посадочного вида. Каталог снят, ветвь читает
+// словарь посадки, и другого источника у неё не осталось ни одного.
+//
+// НАБЛЮДАЕМОЕ ПОВЕДЕНИЕ ПРИ ЭТОМ НЕ МЕНЯЛОСЬ, и это сказано прямо, а не
+// умолчано: единственный вид носителя — `iam.account` — объявлялся посадкой и до
+// перевязки, поэтому проба НЕ была бы красной на прежнем коде. Она заведена не
+// как доказательство исправления, а как держатель ветви, у которой держателя не
+// было: до неё добор не исполнялся ни одной пробой дерева, и его отказ был бы
+// виден только арендатору, у которого ещё нет ни одного аккаунта.
+//
+// # Отрицание в паре с положительным
+//
+// Величина посадки ставится ОТЛИЧНОЙ от умолчания цепи (5), иначе «прочитано из
+// посадки» и «прочитано из посева» давали бы одно число и проба не различала бы
+// источники.
+func TestOwnCeiling_IdentityWithoutACountingRowStillReadsItsCeiling(t *testing.T) {
+	pool, ctx := newAccountQuotaDB(t)
+	liftRateCeilingOutOfTheWay(t, ctx, pool)
+
+	// Величина, которой нет ни в посеве цепи, ни в снимке: совпади она с
+	// умолчанием — ответ не сказал бы, откуда взят.
+	const stated int64 = 7
+	setOwnCeiling(t, ctx, pool, "iam.account", stated)
+
+	// ЛИЧНОСТЬ, НЕ ЗАВОДИВШАЯ НИ ОДНОГО АККАУНТА, — и такая бывает не в теории:
+	// это приглашённый участник чужого аккаунта. Строка пользователя есть
+	// ЧЛЕНСТВО в одном аккаунте, поэтому личность без членства в схеме
+	// невыразима вовсе (внешний ключ `users_account_fk`), а вот членство без
+	// СВОЕГО аккаунта — обычное состояние.
+	//
+	// Прежняя редакция этой фикстуры заводила пользователя с несуществующим
+	// аккаунтом и падала на внешнем ключе. Мир, которого не бывает, — негодная
+	// предпосылка: проба о нём утверждала бы что угодно.
+	_, ownerID := accountQuotaFixture(t, ctx, pool, "host-of-the-invited")
+	var hostAccount string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT account_id FROM users WHERE id = $1`, ownerID).Scan(&hostAccount))
+
+	external := "ext-quota-no-row-" + ids.NewID(domain.PrefixUser)
+	_, err := pool.Exec(ctx, `
+		INSERT INTO users (id, account_id, external_id, email, display_name, invite_status)
+		VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+		ids.NewID(domain.PrefixUser), hostAccount, external,
+		"quota-no-row@example.com", "Quota No Row")
+	require.NoError(t, err, "seed invited member")
+
+	var rows int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM kaname.project_resource_quotas
+		  WHERE carrier_type = 'identity' AND carrier_id = $1`, external).Scan(&rows))
+	require.Zerof(t, rows, "у личности уже есть строка учёта: ветвь ДОБОРА не исполнится, "+
+		"и проба утверждала бы о соседней полосе")
+
+	states, err := pg.NewIdentityQuotaRepo(pool).States(ctx, external)
+	require.NoError(t, err)
+	require.NotEmpty(t, states,
+		"ответ пуст при отсутствующей строке учёта: арендатор заключил бы, что он не "+
+			"ограничен, — и упёрся бы в отказ на первом же аккаунте, не найдя ни числа, "+
+			"ни причины")
+
+	var found bool
+	for _, st := range states {
+		if st.Kind != "iam.account" {
+			continue
+		}
+		found = true
+		require.EqualValues(t, stated, st.Limit,
+			"добор взял величину не из посадки: другого источника у него больше нет, "+
+				"значит прочитано что-то, чего не существует")
+		require.Zero(t, st.Used,
+			"потребление ненулевое при отсутствующей строке учёта: ни одна вставка ещё "+
+				"не списывала место")
+		require.Equal(t, "DEFAULT", st.SourceScope,
+			"область ответа обязана называть установку: величина объявлена посадкой")
+		require.Empty(t, st.SourceScopeID)
+	}
+	require.True(t, found,
+		"вида `iam.account` в ответе нет: перечень видов носителя разошёлся со словарём "+
+			"посадки, и потолок стал невидим ровно тому, кто в него упрётся первым")
 }
