@@ -37,7 +37,12 @@ func TestGet_Singleton(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, domain.ClusterID(domain.ClusterSingletonID), c.ID)
-	require.Equal(t, domain.ClusterName("kacho-root"), c.Name)
+	// Имя переведено миграцией `…_cluster_name_leaves_the_platform_brand.sql`
+	// (задача #2554, класс A приёмки посевной идентичности): корневой кластер
+	// называет УСТАНОВКУ, а не продукт. Литерал здесь намеренный — читатель
+	// обязан утверждать то, что видит арендатор, а не то, что вычислит из той
+	// же константы, из которой читает продукт.
+	require.Equal(t, domain.ClusterName("root"), c.Name)
 	require.NotEmpty(t, c.Description)
 	require.False(t, c.CreatedAt.IsZero())
 }
