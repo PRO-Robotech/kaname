@@ -16,6 +16,7 @@
 package check_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -174,4 +175,70 @@ const B = "kaname_identity_ledger_samples_total"
 	if len(foreign) != 0 {
 		t.Errorf("ряд чужого словаря принят за свой: %v", foreign)
 	}
+}
+
+// --- #17: премисы обеих сторон доказаны ИСПОЛНЕНИЕМ --------------------------
+
+// TestJudgeIdentityGrowthReaders_EmptySideIsRefused — ни одна сторона не вправе
+// прийти пустой молча.
+//
+// Прежде обе премисы стояли в теле гейта, входом им служили два файла, читаемых
+// от корня своего модуля, и подать им пустую сторону было НЕЧЕМ: ветви отказа
+// читались глазами и не исполнялись ни разу.
+func TestJudgeIdentityGrowthReaders_EmptySideIsRefused(t *testing.T) {
+	t.Parallel()
+
+	const collector = "const IdentitiesTotalMetric = \"kaname_identities_total\"\n"
+	const doc = "    - alert: IdentitiesStalled\n      expr: kaname_identities_total > 0\n"
+
+	// ── КОНТРОЛЬ: обе стороны непусты, ряд читается — гейт молчит ────────────
+	//
+	// Стоит первым: без него оба отказа ниже объяснялись бы разбором, который не
+	// находит ничего никогда.
+	c, findings, err := check.JudgeIdentityGrowthReaders(collector, doc)
+	if err != nil {
+		t.Fatalf("КОНТРОЛЬ: на непустых сторонах предпосылка не выполнена: %v", err)
+	}
+	if len(c.Metrics) != 1 || c.Expressions != 1 {
+		t.Fatalf("КОНТРОЛЬ: рядов %d, выражений %d — ожидалось по одному; разбор берёт не то, "+
+			"и «пусто» ниже значило бы «разбор сломан»", len(c.Metrics), c.Expressions)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("КОНТРОЛЬ: у прочитанного ряда читатель ЕСТЬ, а гейт нашёл %d: %v",
+			len(findings), findings)
+	}
+
+	// ── ОСЬ 1: сторона ОБЪЯВЛЕНИЯ пуста — отказ ─────────────────────────────
+	if _, _, err := check.JudgeIdentityGrowthReaders("package metrics\n", doc); !errors.Is(err, check.ErrEmptyTraversal) {
+		t.Fatalf("коллектор без рядов не дал отказа: %v — гейт судил бы пустоту, и "+
+			"«читатель есть у всех» получено даром", err)
+	}
+
+	// ── ОСЬ 2: сторона ЧИТАТЕЛЯ пуста — отказ ДРУГОЙ ────────────────────────
+	//
+	// Отличается от оси 1 ровно одним фактом: какая сторона пуста. Слив их в
+	// один текст, гейт посылал бы чинить разбор коллектора там, где ослеп
+	// разбор правил.
+	_, _, err = check.JudgeIdentityGrowthReaders(collector, "# правил нет\n")
+	if !errors.Is(err, check.ErrEmptyTraversal) {
+		t.Fatalf("документ без выражений не дал отказа: %v", err)
+	}
+	if !strings.Contains(err.Error(), "выражения правила") {
+		t.Errorf("отказ не называет ОСЛЕПШУЮ сторону (%v) — починку будут искать не там", err)
+	}
+
+	// ── ОСЬ 3: обе стороны непусты, читателя НЕТ — находка ──────────────────
+	//
+	// Положительный контроль отрицания: без неё зелёное выше означало бы лишь
+	// то, что гейт не находит ничего ни при каком входе.
+	_, findings, err = check.JudgeIdentityGrowthReaders(collector, "      expr: up > 0\n")
+	if err != nil {
+		t.Fatalf("ось «читателя нет»: предпосылка не выполнена: %v", err)
+	}
+	if len(findings) != 1 || !strings.Contains(findings[0], "kaname_identities_total") {
+		t.Fatalf("ряд без читателя не дал находки с его именем: %v", findings)
+	}
+
+	t.Log("осей 4: контроль · пуста сторона объявления · пуста сторона читателя · " +
+		"читателя нет (отказы двух разных видов, находка одна)")
 }

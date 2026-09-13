@@ -50,6 +50,7 @@
 package check
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -161,6 +162,22 @@ func ReadPathGoFiles(root string) (files []ReadPathFile, dirs []string, err erro
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Rel < files[j].Rel })
 	sort.Strings(dirs)
+
+	// ПРЕМИСЫ ОБХОДА ЖИВУТ ЗДЕСЬ, а не в теле пробы (задача #17).
+	//
+	// Прежде обе стояли в гейте, ниже этого вызова, и корень им приходил от
+	// своего модуля — то есть подать им дерево без предмета было НЕЧЕМ, и обе
+	// ветви читались глазами, ни разу не исполнившись. Переехав к корню,
+	// который уже является параметром, они стали проверяемы синтетикой.
+	if len(dirs) == 0 {
+		return nil, nil, fmt.Errorf("%w: в %s не объявлено НИ ОДНОГО каталога предмета "+
+			"замера — объём гейта вывести не из чего", ErrEmptyTraversal, FingerprintSourceRel)
+	}
+	if len(files) == 0 {
+		return nil, dirs, fmt.Errorf("%w: каталоги предмета замера (%s) не дали НИ ОДНОГО "+
+			"не-тестового .go — судить нечего, и молчание гейта означало бы свойство, "+
+			"которого никто не проверял", ErrEmptyTraversal, strings.Join(dirs, ", "))
+	}
 	return files, dirs, nil
 }
 
