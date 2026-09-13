@@ -21,7 +21,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   редакцию ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение,
   замер и цена обоих отвергнутых исходов —
   `../architecture/verdict-names-a-revision-not-a-file.md`
-- **Ревизия измерения (продукт):** `872ef7170` — ветка `lane/z3`, впереди
+- **Ревизия измерения (продукт):** `PRO-Robotech/kacho@872ef7170` — ветка `lane/z3`, впереди
   `origin/release/modules-6` на **0**, позади на **0** (`git rev-list --count`).
   Все числа и координаты сняты на ней; канон модели прав адресуется отпечатком
   содержимого `sha256sum proto/kaname/cloud/iam/v1/fga_model.fga` → `a87e29e03f3c…`

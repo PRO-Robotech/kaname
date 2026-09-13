@@ -24,7 +24,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   редакцию ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение,
   замер и цена обоих отвергнутых исходов —
   `../architecture/verdict-names-a-revision-not-a-file.md`
-- **Ревизия измерения:** `0da754d118` (ветка `lane/v2`, вровень с
+- **Ревизия измерения:** `PRO-Robotech/kacho@0da754d118` (ветка `lane/v2`, вровень с
   `release/modules-6`; `git status --porcelain` — только этот неотслеживаемый
   документ). **Все** числа и координаты о дереве продукта сняты на ней
 - **Ревизия воркспейса:** `4c4ce24e` — отдельный репозиторий
