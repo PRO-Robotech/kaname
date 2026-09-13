@@ -298,7 +298,7 @@ func (w *ClusterAdminGrantWriter) Reactivate(
 // (scanCAG lives in iam_core_repos.go and is shared between repos.)
 
 // subjectDisplayName renders the subject type for the NOT_FOUND message tone
-// ("<Resource> <id> not found" family, api-conventions.md). The stored value is
+// ("<Resource> <id> not found" family). The stored value is
 // a snake_case token; the message says "User"/"ServiceAccount" so the text
 // stays in the established contract tone for both subject types.
 func subjectDisplayName(t domain.GrantSubjectType) string {

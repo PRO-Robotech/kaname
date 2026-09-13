@@ -51,7 +51,7 @@ func (u *RemoveMemberUseCase) Execute(ctx context.Context, in RemoveMemberInput)
 	}
 	// Anti-anon floor only. WHO may change this group's membership is decided by
 	// the MODEL: the api-gateway Checks `v_update@iam_group:<group_id>` before
-	// iam is dialed (security.md «Авторизация живёт в МОДЕЛИ, а не в самодельных
+	// iam is dialed (§«Авторизация живёт в МОДЕЛИ, а не в самодельных
 	// проверках»).
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err

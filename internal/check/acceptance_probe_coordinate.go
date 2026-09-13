@@ -340,8 +340,8 @@ func JudgeProbeCoordinates(docs map[string]string, declared []string, exemptions
 // служб под `services/*/docs/engineering/acceptance/`, а самостоятельный клон
 // службы несёт СВОЙ единственный каталог прямо у корня —
 // `docs/engineering/acceptance/`. Сужение измерено, а не предположено: в
-// дереве продукта второго дома приёмок не было никогда (`polyrepo.md`
-// §«У приёмки домов ДВА» — второй дом был именно этот, iam-only).
+// дереве продукта второго дома приёмок не было никогда
+// (§«У приёмки домов ДВА» — второй дом был именно этот, iam-only).
 func AcceptanceDocsOfTree(root string) (map[string]string, error) {
 	dir := filepath.Join(root, "docs", "engineering", "acceptance")
 	all, err := treecorpus.UnderWithSuffix(dir, ".md")

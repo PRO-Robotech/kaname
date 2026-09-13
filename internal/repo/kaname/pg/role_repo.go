@@ -626,7 +626,7 @@ func (w *roleWriter) Insert(ctx context.Context, r domain.Role) (domain.Role, er
 //
 // Появилось присваивание не само: его породил комментарий соседнего писателя,
 // утверждавший «`updated_at` is bumped on every applied mutation». Это класс
-// `architecture.md` §doc-truthfulness в чистом виде — следующий читатель чинит
+// §doc-truthfulness в чистом виде — следующий читатель чинит
 // КОД под неверный текст.
 //
 // Столбец с тех пор ЗАВЕДЁН — новой миграцией, как этот абзац и предписывал

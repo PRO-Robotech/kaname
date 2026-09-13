@@ -36,7 +36,7 @@ var (
 // exactly what makes a permanently broken one invisible — one WARN per occurrence, a
 // product that keeps working more slowly, and nothing that says so. A control that has
 // never refused in its whole life is indistinguishable from one that was never reached
-// unless RUNS are counted alongside OUTCOMES (security.md §Hardening-инвариант 8, the
+// unless RUNS are counted alongside OUTCOMES (§Hardening-инвариант 8, the
 // same requirement as "zero rows ever delivered" for a queue).
 //
 // WHY EVERY CELL STARTS AT ZERO RATHER THAN APPEARING ON FIRST USE. An absent series

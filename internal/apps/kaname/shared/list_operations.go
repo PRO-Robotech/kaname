@@ -11,8 +11,8 @@
 // `operations` table by the denormalized `resource_id` column with
 // (created_at, id) cursor pagination (corelib operations.Repo). The query lives
 // in the repo layer (corelib); this use-case is the thin reuse point so the four
-// handlers stay transport-only (architecture.md clean-arch) and the no-op
-// placeholders are replaced by one shared implementation.
+// handlers stay transport-only (the dependency rule of clean architecture)
+// and the no-op placeholders are replaced by one shared implementation.
 package shared
 
 import (

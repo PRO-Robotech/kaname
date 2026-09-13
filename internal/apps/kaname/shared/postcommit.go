@@ -7,7 +7,7 @@ package shared
 //
 // WHY THIS EXISTS. `Operation.done` means one thing: the subject of the mutation is
 // DURABLE — the writer-tx committed. It must NEVER mean "the eventually-consistent
-// downstream side-effect is visible" (api-conventions.md, ban #9): the FGA owner /
+// downstream side-effect is visible" (ban #9): the FGA owner /
 // grant tuples, the mirror, the outbox drain. A mutation whose worker-fn performs the
 // materialization inline gates `done` on exactly that side-effect, and the gate is
 // unbounded: the passes are O(objects-in-scope × verbs-per-object), so a broad role

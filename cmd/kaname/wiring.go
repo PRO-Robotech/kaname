@@ -713,7 +713,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// admin gets back is queryable and the force-logout shows up in the
 		// operation list like every other mutation.
 		WithOperations(opsRepo).
-		// Defense-in-depth ReBAC gate for ForceLogout (security.md "AuthN+AuthZ
+		// Defense-in-depth ReBAC gate for ForceLogout (§"AuthN+AuthZ
 		// ВЕЗДЕ"): require the authenticated principal hold system_admin@cluster.
 		// relationStore satisfies authzguard.RelationChecker; nil-safe fail-closed.
 		WithAdminChecker(relationStore).
@@ -771,7 +771,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// iam.cluster_admin.{granted,revoked} compliance row atomically inside the
 	// grant/revoke writer-tx (запрет #10). Shared stateless adapter.
 	clusterAuditEmitter := kanamepg.NewAuditOutboxEmitter(pool)
-	// Defense-in-depth ReBAC gate (security.md "AuthN+AuthZ ВЕЗДЕ"): the
+	// Defense-in-depth ReBAC gate (§"AuthN+AuthZ ВЕЗДЕ"): the
 	// highest-blast cluster-admin RPCs must run their OWN per-RPC system_admin
 	// Check, not rely solely on the gateway caller-policy. relationStore
 	// (the decision door) satisfies authzguard.RelationChecker. nil-safe
@@ -813,7 +813,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	)
 
 	// ── InternalOperationsService — cluster-wide admin op feed ────────────────
-	// security.md "AuthN+AuthZ ВЕЗДЕ": the in-handler ReBAC gate (relationStore
+	// §"AuthN+AuthZ ВЕЗДЕ": the in-handler ReBAC gate (relationStore
 	// satisfies authzguard.RelationChecker) enforces system_admin@cluster even
 	// when the caller bypasses the api-gateway and dials :9091 directly. nil-safe
 	// fail-closed inside the use-case if ever unwired.

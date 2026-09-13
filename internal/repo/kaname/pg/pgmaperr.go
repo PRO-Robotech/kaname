@@ -6,7 +6,7 @@ package pg
 // pgmaperr.go — SQLSTATE → sentinel bridge (the pgx-aware half of error
 // mapping). This lives in the repo/pg ADAPTER layer, not in internal/errors,
 // so the pgx dependency (github.com/jackc/pgx/v5/pgconn) stays out of the pure
-// sentinel package that ~40 use-case/handler files import (architecture.md
+// sentinel package that ~40 use-case/handler files import (the
 // dependency-rule: use-case/domain must not pull pgx into their build closure).
 //
 // internal/errors keeps ONLY the pgx-free sentinel family + Wrapf/StripSentinel;
@@ -215,7 +215,7 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 	}
 	// Unmapped SQLSTATE — never return the raw *pgconn.PgError: its Error()
 	// carries table/constraint/column/SQLSTATE and would surface verbatim as the
-	// gRPC INTERNAL message (data-integrity.md: no pgx leak, fixed INTERNAL text).
+	// gRPC INTERNAL message (no pgx leak, fixed INTERNAL text).
 	// A new constraint that should produce a tenant-facing message must be added
 	// to the constraint-aware switches above.
 	//
@@ -336,7 +336,7 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 		// #2048 ветви не было вовсе: человек, которого только что вернул
 		// `ListUsers`, получал утверждение о собственном отсутствии, а клиент,
 		// ведущий состояние, снимал его строку у себя. Тон обеих сторон — часть
-		// контракта (api-conventions.md §Error-format); код у них ОДИН
+		// контракта (§Error-format); код у них ОДИН
 		// (`ErrFailedPrecondition`), различает их только сообщение.
 		//
 		// Полоса сужена до снятия ИМЕННО человека: это единственный глагол,
@@ -389,7 +389,7 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 		// получал «Role <субъект>|project:<область> not found» — сообщение,
 		// называющее сущности, о которых он не спрашивал, и НЕ называющее ту,
 		// из-за которой отказ. Клиент уходил искать причину в субъекте и проекте.
-		// Тексты отказов — часть контракта (api-conventions.md §Error-format),
+		// Тексты отказов — часть контракта (§Error-format),
 		// поэтому берётся именно роль (issue #105).
 		if _, _, role := splitBindingHint(idHint); role != "" {
 			return fmt.Sprintf("Role %s not found", role), iamerr.ErrReferenceMissing
@@ -691,7 +691,7 @@ func checkText(pgErr *pgconn.PgError) string {
 // notNullText — client-facing text for 23502 (not_null_violation). The raw
 // pgErr.ColumnName is deliberately NOT echoed: it is an internal schema
 // identifier that differs from the public proto field name and aids schema
-// reconnaissance (data-integrity.md: no pgx leak). A 23502 reaching the DB is
+// reconnaissance (no pgx leak). A 23502 reaching the DB is
 // normally caught earlier by domain validation, so a generic message suffices.
 func notNullText(_ *pgconn.PgError) string {
 	return "a required field is missing"

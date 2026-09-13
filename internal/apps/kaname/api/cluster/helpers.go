@@ -33,8 +33,8 @@ var saSubjectIDRe = regexp.MustCompile(`^sva[0-9a-hjkmnp-tv-z]{17}$`)
 // `cluster:…#system_admin@service_account:<id>` and the platform SEEDS exactly
 // such a grant for the bootstrap-admin ServiceAccount (migration 0058).
 // Refusing the machine type here made that seeded grant impossible to take back
-// through the interface — granted authority that cannot be revoked (security.md
-// "Авторизация живёт в МОДЕЛИ": a machine is a first-class principal, not an
+// through the interface — granted authority that cannot be revoked
+// (§"Авторизация живёт в МОДЕЛИ"): a machine is a first-class principal, not an
 // exception, and "exempt from step-up" must mean "protected differently", never
 // "unprotected").
 //

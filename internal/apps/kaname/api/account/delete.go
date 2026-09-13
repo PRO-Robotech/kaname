@@ -44,8 +44,8 @@ func (u *DeleteAccountUseCase) Execute(ctx context.Context, id domain.AccountID)
 	// dialed (permission catalog). The former in-service
 	// `RequireOwnerMatchesPrincipal(existing.OwnerUserID)` re-decided that from
 	// a DB column — narrower than the model, unrevocable, invisible to audit,
-	// and unsatisfiable by any machine principal — see security.md
-	// «Авторизация живёт в МОДЕЛИ, а не в самодельных проверках».
+	// and unsatisfiable by any machine principal — see
+	// §«Авторизация живёт в МОДЕЛИ, а не в самодельных проверках».
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}

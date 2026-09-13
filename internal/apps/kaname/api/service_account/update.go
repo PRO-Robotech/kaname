@@ -91,7 +91,7 @@ func (u *UpdateServiceAccountUseCase) Execute(ctx context.Context, in UpdateServ
 	// `v_update@iam_service_account:<service_account_id>` before iam is dialed.
 	// The former in-service owner-equality check against the owning account's
 	// owner_user_id made managing service accounts unreachable for the very
-	// automation principals they exist to serve — security.md «Авторизация живёт
+	// automation principals they exist to serve — §«Авторизация живёт
 	// в МОДЕЛИ, а не в самодельных проверках».
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err

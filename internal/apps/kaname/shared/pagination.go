@@ -9,7 +9,7 @@ package shared
 // codec in repo/kaname/pg). Validating the FORMAT in the handler — as the first
 // statement, BEFORE any listauthz empty-grant short-circuit — makes a garbage token
 // deterministically INVALID_ARGUMENT regardless of the caller's grant state
-// (api-conventions.md: "валидация pagination — ДО listauthz empty-grant
+// ("валидация pagination — ДО listauthz empty-grant
 // short-circuit"). The repo's decodePageToken stays the authoritative backstop.
 
 import (
@@ -77,7 +77,7 @@ func ValidatePagination(pageToken string, pageSize int32) error {
 //
 // Порядок тоже её предмет. Вопрос «правильно ли составлен запрос» имеет ОДИН ответ
 // для всех вызывающих, поэтому отвечать на него надо раньше, чем на вопрос «что
-// этому вызывающему видно» (api-conventions.md: формат → authz → repo). Иначе один
+// этому вызывающему видно» (формат → authz → repo). Иначе один
 // и тот же мусорный курсор даёт InvalidArgument тому, у кого грант есть, и отказ
 // либо пустую страницу тому, у кого его нет.
 //

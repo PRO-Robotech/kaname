@@ -25,7 +25,7 @@ package project
 //  2. VERDICT — pronounced by the authorization MODEL, per candidate, with the
 //     same predicate as before (internal/authzfilter). The SQL selects; it never
 //     decides. Making it decide would put a second, home-grown rights system
-//     beside the model, which is what `security.md` §«Авторизация живёт в МОДЕЛИ»
+//     beside the model, which is what §«Авторизация живёт в МОДЕЛИ»
 //     forbids. The one exception is the ownership FLOOR — see below.
 //  3. REFILL — if the verdict leaves fewer than `page_size` visible rows and the
 //     candidates are not exhausted, more candidates are read. Bounded by the page

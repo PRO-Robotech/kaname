@@ -15,7 +15,7 @@ import (
 
 // tsTruncate — the single truncation granularity for every proto timestamp in
 // kaname: the API contract truncates created_at/added_at to whole SECONDS
-// (api-conventions.md: "в proto-ответе truncate до секунд"); the DB keeps
+// ("в proto-ответе truncate до секунд"); the DB keeps
 // microseconds. Use this constant for all `.Truncate(...)` calls in this
 // package instead of a hardcoded `1_000_000_000` ns literal (DRY — the literal
 // IS time.Second, so this is semantically identical).

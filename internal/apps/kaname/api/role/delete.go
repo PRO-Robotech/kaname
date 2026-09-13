@@ -54,7 +54,7 @@ func (u *DeleteRoleUseCase) Execute(ctx context.Context, id domain.RoleID) (*ope
 	// the MODEL: the api-gateway Checks `v_delete@iam_role:<role_id>` before iam
 	// is dialed. The former in-service owner-equality check against the owning
 	// account's owner_user_id re-decided that more coarsely and could never be
-	// satisfied by a machine principal — security.md «Авторизация живёт в
+	// satisfied by a machine principal — §«Авторизация живёт в
 	// МОДЕЛИ, а не в самодельных проверках».
 	_ = rd.Rollback(ctx)
 	op, err := operations.NewFromContext(ctx,

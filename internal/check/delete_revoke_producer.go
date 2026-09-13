@@ -66,7 +66,7 @@ const (
 	// upsertConstName / deleteConstName — имена констант вида события
 	// (`shared.ReconcileEventUpsert` / `…Delete`). Судятся вместе с их
 	// строковыми значениями: код называет вид обоими способами, и знать надо оба
-	// (правило testing.md §«Распознаватель обязан знать ВСЕ законные формы»).
+	// (правило §«Распознаватель обязан знать ВСЕ законные формы»).
 	upsertConstName = "ReconcileEventUpsert"
 	deleteConstName = "ReconcileEventDelete"
 

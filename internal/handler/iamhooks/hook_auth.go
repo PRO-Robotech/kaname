@@ -50,7 +50,7 @@ func requireHookAuth(w http.ResponseWriter, r *http.Request, expected string, lo
 		// Пишем в журнал: до #1747 эта полоса не оставляла НИЧЕГО, то есть
 		// операторская ошибка нашей стороны была ненаблюдаема — «ноль отказов за
 		// всю жизнь контроля» неотличимо от «контроль не сработал ни разу»
-		// (`security.md` §Hardening п.8).
+		// (§Hardening п.8).
 		if logger != nil {
 			logger.Error(tag + ": hook secret is not configured; refusing closed")
 		}

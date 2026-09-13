@@ -71,7 +71,7 @@ func NewHydraTokenClientWithCA(tokenURL, caFile string) (*HydraTokenClient, erro
 }
 
 // tokenHopTimeout — per-call ceiling on the exchange. Named so both constructors
-// cannot drift apart (architecture.md: every outbound call carries its own).
+// cannot drift apart (every outbound call carries its own).
 const tokenHopTimeout = 10 * time.Second
 
 // ClientCredentialsRequest — inputs for the private_key_jwt exchange.

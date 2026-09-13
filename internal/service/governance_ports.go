@@ -96,7 +96,7 @@ type ResourceMirrorEmitter interface {
 //
 // Payload carries the compliance dimensions (actor / subject / resource / key
 // domain fields). It MUST NOT contain secret material (no tokens, no key PEM,
-// no client_secret) — see security.md / acceptance 5.2-36.
+// no client_secret) — see acceptance 5.2-36.
 //
 // Neutral value type owned by internal/outboxtypes so the repo-ports package can
 // reference it without importing this use-case package (dependency-rule fix);

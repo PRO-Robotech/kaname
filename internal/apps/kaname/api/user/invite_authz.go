@@ -78,8 +78,8 @@ func cascadeCheck(ctx context.Context, c AuthzChecker, subject, rel, object stri
 //     cannot exist. The store answered a well-formed "no", so the account's own
 //     administrator was refused whenever the caller was non-interactive — which on a
 //     production-posture stand is every caller, since tokens there are issued to
-//     service accounts. `security.md` is explicit that a service account is a
-//     first-class principal, not an exception.
+//     service accounts. The platform standard is explicit that a service
+//     account is a first-class principal, not an exception.
 //   - The same spelling ADMITTED an unknown principal type, because it produced a
 //     "user:" subject for it regardless. That is the latent over-grant
 //     SubjectFromPrincipal documents in its own comment; here it is closed by

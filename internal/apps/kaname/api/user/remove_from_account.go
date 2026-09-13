@@ -84,7 +84,7 @@ func NewRemoveFromAccountUseCase(r Repo, opsRepo operations.Repo) *RemoveFromAcc
 func (uc *RemoveFromAccountUseCase) Execute(ctx context.Context, userID domain.UserID, accountID domain.AccountID) (*operations.Operation, error) {
 	// Пол против анонима — и только он. КТО вправе исключать, решает МОДЕЛЬ:
 	// край спрашивает `member_remover@account:<account_id>` до того, как наберёт
-	// iam (`security.md` §«Авторизация живёт в МОДЕЛИ, а не в самодельных
+	// iam (§«Авторизация живёт в МОДЕЛИ, а не в самодельных
 	// проверках»). Вторая, рукописная проверка здесь не выдавалась бы, не
 	// ограничивалась областью, не отзывалась и не понимала бы машинных
 	// принципалов.

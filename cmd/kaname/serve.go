@@ -958,7 +958,7 @@ func runServe(cfg config.Config) error {
 		grpc.ChainStreamInterceptor(publicStream...),
 	)
 	// Internal listener (port 9091) — network-segregated, but NOT trusted:
-	// authN+authZ are enforced on EVERY internal RPC (security.md "authN+authZ
+	// authN+authZ are enforced on EVERY internal RPC (§"authN+authZ
 	// everywhere"; closes audit C1/C3/H3/M1).
 	//
 	// Interceptor chain order (each runs before the next):
@@ -1132,7 +1132,7 @@ func runServe(cfg config.Config) error {
 	}
 
 	// (2) Скрейп. Никогда не публичная gRPC-поверхность: внутренняя
-	// кардинальность туда не выносится (security.md).
+	// кардинальность туда не выносится.
 	metricsAddr := cfg.APIServer.MetricsListenAddress()
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", metricsReg.Handler())
@@ -1271,7 +1271,7 @@ func runServe(cfg config.Config) error {
 	// (4) Зеркало ПУБЛИЧНЫХ ключей проверки (`GET /.well-known/jwks.json`).
 	//
 	// Здесь аутентификация снята — и это ЗАДОКУМЕНТИРОВАННОЕ исключение, а не
-	// упущение (security.md §AuthN+AuthZ ВЕЗДЕ): поверхность выставлена только на
+	// упущение (§AuthN+AuthZ ВЕЗДЕ): поверхность выставлена только на
 	// внутренний Service, идёт по односторонней TLS и несёт исключительно
 	// публичный материал. Профиль требует, чтобы это было СКАЗАНО — и говорит это
 	// в журнале на каждом старте, а не только в чужом документе.
@@ -1322,7 +1322,7 @@ func runServe(cfg config.Config) error {
 				Logger:      logger.With(slog.String("component", "jwks_proxy")),
 			})
 			// Читатель счётчиков зеркала. Выданные считаются наравне с отказами
-			// (security.md §Hardening-инвариант 8), а причина отказа держится отдельно:
+			// (§Hardening-инвариант 8), а причина отказа держится отдельно:
 			// «не ответил» проходит со временем, «по адресу не то» — никогда.
 			// Свойство «читатель есть» держит гейт по дереву
 			// TestDeclaredAccumulatorsHaveANonTestReader.
@@ -1420,7 +1420,7 @@ func runServe(cfg config.Config) error {
 		Handler: jwksProxyHandler,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.NotApplicable[servicecontract.SurfaceAuthMech](
-			"снята ОСОЗНАННО и задокументированно (security.md §AuthN+AuthZ ВЕЗДЕ): внутренний " +
+			"снята ОСОЗНАННО и задокументированно (§AuthN+AuthZ ВЕЗДЕ): внутренний " +
 				"Service, односторонняя TLS, на проводе только публичный материал проверки " +
 				"подписи — ни секретов, ни данных арендатора"),
 		TLS: jwksProxyTLSConfig,
