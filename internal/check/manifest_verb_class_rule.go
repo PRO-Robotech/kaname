@@ -41,10 +41,12 @@ package check
 
 import (
 	"fmt"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"strconv"
+	"strings"
 )
 
 // ManifestLoaderDir — прод-файлы загрузчика манифеста. Гейт читает их как ТЕКСТ
@@ -115,6 +117,33 @@ func answersClassAndOK(fn *ast.FuncDecl) bool {
 //
 // Неразбираемый исходник отдаёт признак, а не пустой перечень: «объявлений ноль»
 // иначе означало бы и «их нет», и «разбор не состоялся».
+// GeneratedStubsPrefix — каталог сгенерированных стабов: правило, найденное
+// там, принадлежало бы генератору, а не дереву.
+const GeneratedStubsPrefix = "pkg/api/"
+
+// IsVerbClassRuleSource — файл, в котором правило «класс глагола» вправе быть
+// объявлено. Тестовый корпус вычитается намеренно: фикстура инъекции обязана
+// уметь написать форму дефекта, иначе гейт нельзя проверить.
+func IsVerbClassRuleSource(rel string) bool {
+	return ProductionGoFile(rel) && !strings.HasPrefix(rel, GeneratedStubsPrefix)
+}
+
+// VerbClassRuleCorpus — корпус, в котором ищется объявление правила.
+//
+// Дерево параметром, отбор объявлен здесь, пустой обход — отказ (#17): прежде
+// обход строился в теле пробы от корня своего модуля, и его премиса «обход не
+// прочитал ни одного файла» не исполнялась ни разу.
+func VerbClassRuleCorpus(tree *treecorpus.Tree) (TreeCorpus, error) {
+	return CorpusFrom(tree, IsVerbClassRuleSource)
+}
+
+// ManifestLoaderCorpus — прод-файлы ЗАГРУЗЧИКА манифеста.
+func ManifestLoaderCorpus(tree *treecorpus.Tree) (TreeCorpus, error) {
+	return CorpusFrom(tree, func(rel string) bool {
+		return IsVerbClassRuleSource(rel) && strings.HasPrefix(rel, ManifestLoaderDir+"/")
+	})
+}
+
 func ScanClassRuleDeclarations(rel string, src []byte) ([]string, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, rel, src, 0)

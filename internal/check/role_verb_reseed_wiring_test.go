@@ -55,17 +55,10 @@ const useCaseLayerMarker = "/internal/apps/"
 // roleVerbSeedPackageDir — каталог досева, чьи вызовы считает ось 2.
 const roleVerbSeedPackageDir = "internal/apps/kaname/seed"
 
-// skipPath — пути вне области обхода: VCS, синканная AI-оснастка, документация,
-// вендоренное и build-артефакты.
-func skipPath(rel string) bool {
-	for _, seg := range strings.Split(rel, "/") {
-		switch seg {
-		case ".git", ".claude", "docs", "node_modules", "vendor", "bin":
-			return true
-		}
-	}
-	return false
-}
+// skipPath — пути вне области обхода. Держатель перечня ОДИН —
+// `check.OutsideTraversal`; здесь осталось только имя, которым его зовут
+// соседние строки этого файла.
+func skipPath(rel string) bool { return check.OutsideTraversal(rel) }
 
 // kanameModulePath — путь импорта модуля kaname. Один модуль — одна константа,
 // в отличие от монорепо, где `importOfTreeRel` различала iam-префикс и

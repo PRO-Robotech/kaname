@@ -43,37 +43,38 @@ func TestClientTruthKanameExclusionFormMatchesTheTree(t *testing.T) {
 		t.Fatalf("состав дерева не установлен: %v — «ноль находок» здесь означало бы "+
 			"«ноль прочитанного»", err)
 	}
-	read := func(rel string) string {
-		b, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if readErr != nil {
-			t.Fatalf("чтение %s: %v", rel, readErr)
-		}
-		return string(b)
-	}
-
-	in := check.ExclusionFormInput{
-		GuideRel:    check.ExclusionGuideRel,
-		ReaderFiles: map[string]string{},
-		WrapFiles:   map[string]string{},
-	}
 	if !tree.HasFile(check.ExclusionGuideRel) {
 		t.Fatalf("страницы установки %s нет в составе дерева — судить не о чем",
 			check.ExclusionGuideRel)
 	}
-	in.GuideBody = read(check.ExclusionGuideRel)
+	guide, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(check.ExclusionGuideRel)))
+	if err != nil {
+		t.Fatalf("чтение %s: %v", check.ExclusionGuideRel, err)
+	}
 
-	for _, rel := range tree.SortedFiles() {
-		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
-			continue
-		}
+	// Обход и его отказ на пустоте держит ОДНА функция — `ExclusionFormGoCorpus`
+	// (задача #17): прежде он строился здесь, и его премиса стояла ниже разбора,
+	// то есть не исполнялась ни разу.
+	corpus, err := check.ExclusionFormGoCorpus(tree)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
+	}
+
+	in := check.ExclusionFormInput{
+		GuideRel:    check.ExclusionGuideRel,
+		GuideBody:   string(guide),
+		ReaderFiles: map[string]string{},
+		WrapFiles:   map[string]string{},
+	}
+	for _, rel := range corpus.Rels() {
 		if strings.HasPrefix(rel, check.ExclusionReaderDirRel+"/") {
-			in.ReaderFiles[rel] = read(rel)
+			in.ReaderFiles[rel] = corpus[rel]
 		}
 		// Обёртку ищем по ВСЕМУ не-тестовому дереву, а не в названном каталоге:
 		// провязка уже переезжала между файлами, и привязка к имени файла дала
 		// бы «построение мертво» вместо вердикта — то есть находку по причине,
 		// к предмету отношения не имеющей.
-		in.WrapFiles[rel] = read(rel)
+		in.WrapFiles[rel] = corpus[rel]
 	}
 
 	findings, census, err := check.AuditExclusionForm(in)

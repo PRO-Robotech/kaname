@@ -21,8 +21,6 @@ package check_test
 
 import (
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/PRO-Robotech/corelib/treecorpus"
@@ -30,9 +28,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/check"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
-
-// installGuideSuffix — по чему инструкции опознаются в составе дерева.
-const installGuideSuffix = "INSTALL.md"
 
 // requiredExportProcedures — таблицы, чья выгрузка обязана быть записана, и где.
 //
@@ -60,35 +55,26 @@ func TestUpgradeGuideCarriesTheExportProcedureVerbatim(t *testing.T) {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не найден: %v", err)
 	}
 
-	tracked, err := treecorpus.Under(root)
+	tree, err := treecorpus.NewTree(root)
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: состав дерева: %v", err)
 	}
 
-	guides := map[string]string{}
-	for _, abs := range tracked {
-		rel, rerr := filepath.Rel(root, abs)
-		if rerr != nil {
-			t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: относительный путь для %s: %v", abs, rerr)
-		}
-		rel = filepath.ToSlash(rel)
-		if !strings.HasSuffix(rel, installGuideSuffix) {
-			continue
-		}
-		body, berr := os.ReadFile(abs) // #nosec G304 -- путь из индекса git ЭТОГО дерева
-		if berr != nil {
-			t.Fatalf("чтение %s: %v — гейт не вправе судить документ, которого он не прочитал",
-				rel, berr)
-		}
-		guides[rel] = string(body)
+	// Обход и его отказ на пустоте держит ОДНА функция — `ExportProcedureGuides`.
+	// Прежде он строился здесь, в теле пробы, и премиса «прочитано ноль» стояла
+	// НИЖЕ разбора: ветвь читалась глазами и не исполнялась ни разу, потому что
+	// корнем ей служил корень своего модуля и подать ей пустое дерево было нечем.
+	guides, err := check.ExportProcedureGuides(tree)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
 	}
 
 	census, findings := check.JudgeExportProcedure(guides, requiredExportProcedures)
 	t.Log(census.String())
 
-	if census.Guides == 0 || census.Lines == 0 {
-		t.Fatalf("обход пуст (%s): инструкций в дереве не прочитано ни одной, и «находок "+
-			"ноль» здесь означало бы «прочитано ноль», а не «годно»", census.String())
+	if census.Lines == 0 {
+		t.Fatalf("инструкции прочитаны, но строк в них ноль (%s) — судить нечего, и "+
+			"«находок ноль» означало бы «прочитано ноль»", census.String())
 	}
 	for _, f := range findings {
 		t.Errorf("%s", f)

@@ -14,8 +14,6 @@ package check_test
 
 import (
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -30,7 +28,7 @@ import (
 //
 // Общая для обоих гейтов: два обхода одного дерева разошлись бы по области
 // молча, и вердикты стали бы о разных множествах файлов.
-func verbClassProdGoFiles(t *testing.T) (root string, files map[string][]byte) {
+func verbClassTree(t *testing.T) (root string, tree *treecorpus.Tree) {
 	t.Helper()
 	wd, err := os.Getwd()
 	if err != nil {
@@ -40,30 +38,11 @@ func verbClassProdGoFiles(t *testing.T) (root string, files map[string][]byte) {
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не найден: %v", err)
 	}
-	tracked, err := treecorpus.UnderWithSuffix(root, ".go")
+	tree, err = treecorpus.NewTree(root)
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: состав дерева: %v", err)
 	}
-	files = map[string][]byte{}
-	for _, abs := range tracked {
-		rel, rerr := filepath.Rel(root, abs)
-		if rerr != nil {
-			t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: относительный путь для %s: %v", abs, rerr)
-		}
-		rel = filepath.ToSlash(rel)
-		// Сгенерированное вычитается: правило там принадлежало бы генератору.
-		// Тестовый корпус — тоже: фикстура инъекции обязана уметь написать форму
-		// дефекта, иначе гейт нельзя проверить.
-		if strings.HasSuffix(rel, "_test.go") || strings.HasPrefix(rel, "pkg/api/") {
-			continue
-		}
-		src, berr := os.ReadFile(abs) // #nosec G304 -- путь из индекса git ЭТОГО дерева
-		if berr != nil {
-			t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: чтение %s: %v", rel, berr)
-		}
-		files[rel] = src
-	}
-	return root, files
+	return root, tree
 }
 
 // TestVerbClassRuleIsDeclaredOnce — правило объявлено РОВНО ОДИН РАЗ.
@@ -72,18 +51,19 @@ func verbClassProdGoFiles(t *testing.T) (root string, files map[string][]byte) {
 // означало бы, что гейт ослеп, а не что правило исчезло.
 func TestVerbClassRuleIsDeclaredOnce(t *testing.T) {
 	t.Parallel()
-	_, files := verbClassProdGoFiles(t)
+	_, tree := verbClassTree(t)
 
-	rels := make([]string, 0, len(files))
-	for rel := range files {
-		rels = append(rels, rel)
+	// Обход и его отказ на пустоте держит ОДНА функция — `VerbClassRuleCorpus`
+	// (задача #17).
+	corpus, err := check.VerbClassRuleCorpus(tree)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
 	}
-	sort.Strings(rels)
 
 	var declarations []string
 	scanned := 0
-	for _, rel := range rels {
-		found, err := check.ScanClassRuleDeclarations(rel, files[rel])
+	for _, rel := range corpus.Rels() {
+		found, err := check.ScanClassRuleDeclarations(rel, []byte(corpus[rel]))
 		if err != nil {
 			// Неразбираемый файл — не находка: он и собраться не может. Но и в
 			// объём осмотренного он не засчитывается.
@@ -95,8 +75,8 @@ func TestVerbClassRuleIsDeclaredOnce(t *testing.T) {
 	}
 
 	if scanned == 0 {
-		t.Fatal("обход не прочитал ни одного не-тестового файла Go — вердикт был бы " +
-			"свойством обхода, а не дерева")
+		t.Fatal("ни один прочитанный файл Go не РАЗОБРАЛСЯ — вердикт был бы свойством " +
+			"разбора, а не дерева")
 	}
 	switch {
 	case len(declarations) == 0:
@@ -124,20 +104,20 @@ func TestVerbClassRuleIsDeclaredOnce(t *testing.T) {
 // в исключение.
 func TestObjectTypeIsNeverDerivedFromTheResourceName(t *testing.T) {
 	t.Parallel()
-	_, files := verbClassProdGoFiles(t)
+	_, tree := verbClassTree(t)
 
-	rels := make([]string, 0, len(files))
-	for rel := range files {
-		if strings.HasPrefix(rel, check.ManifestLoaderDir+"/") {
-			rels = append(rels, rel)
-		}
+	// Обход загрузчика и его отказ на пустоте держит ОДНА функция —
+	// `ManifestLoaderCorpus` (задача #17): прежде премиса «прод-файлов
+	// загрузчика не прочитано ни одного» стояла в теле пробы и не исполнялась.
+	loader, err := check.ManifestLoaderCorpus(tree)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: загрузчик %s: %v", check.ManifestLoaderDir, err)
 	}
-	sort.Strings(rels)
 
 	parsed, reads := 0, 0
 	var writes []string
-	for _, rel := range rels {
-		r, w, err := check.ScanObjectTypeUses(rel, files[rel])
+	for _, rel := range loader.Rels() {
+		r, w, err := check.ScanObjectTypeUses(rel, []byte(loader[rel]))
 		if err != nil {
 			t.Fatalf("%v", err)
 		}

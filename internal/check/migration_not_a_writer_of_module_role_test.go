@@ -67,26 +67,23 @@ func TestMODRD23MigrationDoesNotWriteARoleOfAManifestBearingModule(t *testing.T)
 
 	bearing, yamlScanned := manifestBearingModules(t, root, tree)
 
+	// Обход миграций и его отказ на пустоте держит ОДНА функция —
+	// `MigrationCorpus` (задача #17): прежде премиса «миграций прочитано ноль»
+	// стояла в теле пробы, корнем ей служил корень своего модуля, и подать ей
+	// пустое дерево было нечем.
+	migs, err := check.MigrationCorpus(tree.tree)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v — каталог %s переехал, и гейт стережёт "+
+			"координату, которой больше нет", err, check.MigrationsDirRel)
+	}
+
 	var (
-		rels                      []string
 		blocks, names, unreadable int
 		sites                     []check.MigrationRoleSite
-		parsedMigrated            int
+		parsedMigrated            = len(migs)
 	)
-	for rel := range tree.files {
-		if strings.HasPrefix(rel, check.MigrationsDirRel+"/") && strings.HasSuffix(rel, ".sql") {
-			rels = append(rels, rel)
-		}
-	}
-	sort.Strings(rels)
-	for _, rel := range rels {
-		src, rerr := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if rerr != nil {
-			t.Errorf("%s не прочитан: %v — файл НЕ осмотрен", rel, rerr)
-			continue
-		}
-		parsedMigrated++
-		s, census := check.ScanMigrationRoleInserts(rel, src)
+	for _, rel := range migs.Rels() {
+		s, census := check.ScanMigrationRoleInserts(rel, []byte(migs[rel]))
 		blocks += census.Blocks
 		names += census.Names
 		unreadable += census.Unreadable
@@ -102,10 +99,6 @@ func TestMODRD23MigrationDoesNotWriteARoleOfAManifestBearingModule(t *testing.T)
 		yamlScanned, len(bearing), manifestModuleNames(bearing), parsedMigrated,
 		blocks, names, unreadable)
 
-	if parsedMigrated == 0 {
-		t.Fatalf("миграций прочитано ноль — каталог %s переехал, и гейт стережёт "+
-			"координату, которой больше нет", check.MigrationsDirRel)
-	}
 	if blocks < migrationRoleCensusFloor {
 		t.Fatalf("блоков вставки роли прочитано %d при пороге %d — разбор перестал видеть "+
 			"предмет, и его молчание сказано ни о чём", blocks, migrationRoleCensusFloor)

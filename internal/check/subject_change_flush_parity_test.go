@@ -81,34 +81,32 @@ func TestSelfFlushCoversEveryProducerOfTheSubjectChangeQueue(t *testing.T) {
 			"«ноль прочитанного»", err)
 	}
 
-	var (
-		filesRead int
-		producers []check.SubjectChangeProducer
-	)
-	for _, rel := range tree.SortedFiles() {
-		if !check.IsSubjectChangeProducerFile(rel) {
+	// Обход и его отказ на пустоте держит ОДНА функция —
+	// `SubjectChangeProducerCorpus`. Прежде он строился здесь, в теле пробы, и
+	// премиса «прочитано ноль» стояла НИЖЕ разбора: ветвь читалась глазами и не
+	// исполнялась ни разу — корнем ей служил корень своего модуля, и подать ей
+	// пустое дерево было нечем (задача #17).
+	corpus, err := check.SubjectChangeProducerCorpus(tree)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: под %s %v", check.SubjectChangeProducerRootRel, err)
+	}
+	filesRead := len(corpus)
+
+	var producers []check.SubjectChangeProducer
+	for _, rel := range corpus.Rels() {
+		body := corpus[rel]
+		if !strings.Contains(body, check.EmitSubjectChangeSelector) {
 			continue
 		}
-		b, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if readErr != nil {
-			t.Fatalf("чтение %s: %v", rel, readErr)
-		}
-		filesRead++
-		if !strings.Contains(string(b), check.EmitSubjectChangeSelector) {
-			continue
-		}
-		p, perr := check.SubjectChangeProducersIn(rel, string(b))
+		p, perr := check.SubjectChangeProducersIn(rel, body)
 		if perr != nil {
 			t.Fatalf("%v — файл не разобран, и его молчание ничего не значит", perr)
 		}
 		producers = append(producers, p...)
 	}
 
-	// ── премисы: «ноль находок» отличимо от «ноль прочитанного» ─────────────
-	if filesRead == 0 {
-		t.Fatalf("под %s не прочитано НИ ОДНОГО непроверочного файла — слой переехал, "+
-			"и обход пуст: вердикт беспредметен", check.SubjectChangeProducerRootRel)
-	}
+	// Премиса ВТОРОЙ половины остаётся здесь: она не про обход, а про то, что
+	// распознаватель ещё видит предмет в прочитанном.
 	if len(producers) == 0 {
 		t.Fatalf("обращений к %s не найдено НИ ОДНОГО при %d прочитанных файлах — либо очередь "+
 			"перестала писаться вовсе, либо распознаватель ослеп; и то и другое означает, "+
