@@ -7858,7 +7858,7 @@
                   "    pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
                   "    const md = info.metadata || {};",
                   "    pm.expect(md.action, 'empty action = permission-catalog miss, not a scope refusal: ' + JSON.stringify(j)).to.eql('iam.roles.create');",
-                  "    pm.expect(md.resource, JSON.stringify(j)).to.eql('account:*');",
+                  "    pm.expect(md.scope, JSON.stringify(j)).to.eql('account');",
                   "  } else {",
                   "    pm.expect((j.message || '').toLowerCase(), JSON.stringify(j))",
                   "      .to.satisfy(m => m.includes('scope') || m.includes('account') || m.includes('project'));",

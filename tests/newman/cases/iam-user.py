@@ -75,6 +75,11 @@ verifies: UserService.List scope-filter and UserService.Invite acceptance
 scenarios from iam-user.py spec.
 """
 
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
+
 CASES = []
 
 # System role ids — deterministic catalog (`rol` + md5(<name>)[:17]).
@@ -1650,7 +1655,7 @@ CASES.append(Case(
                 *assert_answered("cross-account-block-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.block",
-                    "'iam_user:' + pm.environment.get('crossVictimId')",
+                    "resource",
                 ),
             ],
         ),
@@ -1720,7 +1725,7 @@ CASES.append(Case(
                 *assert_answered("record-edit-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.update",
-                    "'iam_user:' + pm.environment.get('govVictimId')",
+                    "resource",
                 ),
             ],
         ),
@@ -1737,7 +1742,7 @@ CASES.append(Case(
                 *assert_answered("identity-block-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.block",
-                    "'iam_user:' + pm.environment.get('govVictimId')",
+                    "resource",
                 ),
             ],
         ),
@@ -1926,7 +1931,7 @@ CASES.append(Case(
                 *assert_answered("cross-account-exclusion-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.removeFromAccount",
-                    "'account:' + pm.environment.get('accountBId')",
+                    "account",
                 ),
             ],
         ),
@@ -2207,7 +2212,7 @@ CASES.append(Case(
                 *assert_answered("identity-delete-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.delete",
-                    "'iam_user:' + pm.environment.get('rmidVictimId')",
+                    "resource",
                 ),
             ],
         ),

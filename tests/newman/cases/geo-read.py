@@ -57,6 +57,15 @@ Test-first (strict TDD): authored to go RED on the 503 before the dial fix.
 Test-only — no prod code touched.
 """
 
+# ДОМ МОДУЛЯ — ПЛАТФОРМА: его предмет не сущности службы (e2e-flow.md §7а).
+# Здесь он не исполним и конвейером службы не гоняется; `HOME_REASON` называет,
+# поведение какого домена утверждается. Сверяет `scripts/case_home_test.py`.
+HOME = "kacho"
+HOME_REASON = (
+    "предмет — публичные чтения каталога размещения geo через край платформы. Службы не "
+    "касается вовсе: домен iam не трогается ни одним шагом."
+)
+
 CASES = []
 
 

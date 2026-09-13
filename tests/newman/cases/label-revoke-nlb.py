@@ -43,6 +43,15 @@ DISCOVERED at runtime (see above), not read from env. Test-design: state-transit
 + ECP + the double-bug Create-emit anchor. One thought per pm.test().
 """
 
+# ДОМ МОДУЛЯ — ПЛАТФОРМА: его предмет не сущности службы (e2e-flow.md §7а).
+# Здесь он не исполним и конвейером службы не гоняется; `HOME_REASON` называет,
+# поведение какого домена утверждается. Сверяет `scripts/case_home_test.py`.
+HOME = "kacho"
+HOME_REASON = (
+    "связка: предмет — отзыв выдачи ARM_LABELS при смене меток на nlb.listener. "
+    "Утверждается поведение nlb, опирающееся на службу."
+)
+
 CASES = []
 
 POLL_CAP = 30

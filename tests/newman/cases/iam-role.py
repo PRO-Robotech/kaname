@@ -60,6 +60,11 @@ iam-role.py spec (custom-role CRUD, system-role read-only, FailedPrecondition
 on deleting a system role).
 """
 
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
+
 CASES = []
 
 # System role ids — deterministic catalog (`rol` + md5(<name>)[:17]).
@@ -1969,7 +1974,7 @@ CASES.append(Case(
             },
             auth="jwtAccountAdminA",
             test_script=[
-                *assert_unscoped_rejected("iam.roles.create", "account:*"),
+                *assert_unscoped_rejected("iam.roles.create", "account"),
                 # And the role must NOT have been created either way.
                 "pm.test('no Operation was minted for an unscoped create', () => {",
                 "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
