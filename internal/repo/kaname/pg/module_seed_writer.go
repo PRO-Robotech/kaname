@@ -44,6 +44,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -83,13 +84,72 @@ type moduleSeedWriter struct{ tx pgx.Tx }
 // Отказ, а не пустой результат: вставка, чей `SELECT` не дал строк, прошла бы
 // нулём затронутых строк и выглядела бы применённой. Это ровно тот класс, из-за
 // которого заведена эта задача, — данные, объявленные и не доехавшие молча.
+//
+// # ОКНО ДВУХ НАПИСАНИЙ (задача продукта #2554, §2.4 приёмки)
+//
+// Имя системного аккаунта переводится, а манифесты пяти ЧУЖИХ продуктов правит
+// не эта служба (П3 приёмки): до их перевода они присылают прежнее написание, а
+// после — объявленное. Резолв идёт по ОБОИМ, потому что строка одна: окно
+// расширяет ПРИЁМ, а не заводит второй аккаунт.
+//
+// Кардинальность проверяется явно. `QueryRow` над множеством молча берёт первую
+// строку, поэтому два аккаунта с двумя написаниями — сегодня невозможные по
+// `accounts_name_unique`, но возможные, если оператор заведёт второй сам —
+// уехали бы в резолв по жребию.
 func (w moduleSeedWriter) accountID(ctx context.Context, name string) (string, error) {
-	var id string
-	err := w.tx.QueryRow(ctx, `SELECT id FROM kaname.accounts WHERE name = $1`, name).Scan(&id)
+	ids, err := w.resolveBySpellings(ctx,
+		`SELECT id FROM kaname.accounts WHERE name = ANY($1)`, name)
 	if err != nil {
 		return "", fmt.Errorf("аккаунт %q не резолвится: %w", name, err)
 	}
-	return id, nil
+	return ids, nil
+}
+
+// resolveBySpellings — общий резолв ПО ОКНУ: запрос получает все написания,
+// которыми сегодня адресуется тот же объект, и обязан дать РОВНО ОДНУ строку.
+//
+// Помощник один на три резолва намеренно: три копии проверки кардинальности
+// разошлись бы молча — каждая по отдельности осталась бы верной на однозначном
+// входе, то есть на всяком входе, кроме того, ради которого проверка написана.
+func (w moduleSeedWriter) resolveBySpellings(
+	ctx context.Context, query string, args ...any,
+) (string, error) {
+	if len(args) == 0 {
+		return "", errors.New("резолв без имени: окно расширять нечего")
+	}
+	// Первый довод — имя, читаемое окном; остальные уходят как есть.
+	name, _ := args[0].(string)
+	widened := append([]any{domain.SeedIdentitySpellings(name)}, args[1:]...)
+
+	rows, err := w.tx.Query(ctx, query, widened...)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var found []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return "", err
+		}
+		found = append(found, id)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+
+	switch len(found) {
+	case 1:
+		return found[0], nil
+	case 0:
+		return "", pgx.ErrNoRows
+	default:
+		return "", fmt.Errorf(
+			"написаниям %v отвечает строк %d, а не одна: окно объявлено переходным, "+
+				"и резолв по жребию выдал бы посев за применённый",
+			domain.SeedIdentitySpellings(name), len(found))
+	}
 }
 
 // UpsertServiceAccount заводит личность модуля либо приводит её назначение.
@@ -295,11 +355,10 @@ func (w moduleSeedWriter) subjectRef(
 // serviceAccountID резолвит служебную запись ПАРОЙ (аккаунт, имя) и отказывает,
 // когда её нет.
 func (w moduleSeedWriter) serviceAccountID(ctx context.Context, account, name string) (string, error) {
-	var id string
-	err := w.tx.QueryRow(ctx, `
+	id, err := w.resolveBySpellings(ctx, `
 		SELECT sa.id FROM kaname.service_accounts sa
 		  JOIN kaname.accounts a ON a.id = sa.account_id
-		 WHERE a.name = $1 AND sa.name = $2`, account, name).Scan(&id)
+		 WHERE a.name = ANY($1) AND sa.name = ANY($2)`, account, domain.SeedIdentitySpellings(name))
 	if err != nil {
 		return "", fmt.Errorf("служебная запись %s/%s не резолвится: %w", account, name, err)
 	}
@@ -313,11 +372,10 @@ func (w moduleSeedWriter) serviceAccountID(ctx context.Context, account, name st
 // «группы нет» есть состояние установки, а не ошибка манифеста, и текст обязан
 // назвать пару, чтобы оператор искал не в манифесте.
 func (w moduleSeedWriter) groupID(ctx context.Context, account, name string) (string, error) {
-	var id string
-	err := w.tx.QueryRow(ctx, `
+	id, err := w.resolveBySpellings(ctx, `
 		SELECT g.id FROM kaname.groups g
 		  JOIN kaname.accounts a ON a.id = g.account_id
-		 WHERE a.name = $1 AND g.name = $2`, account, name).Scan(&id)
+		 WHERE a.name = ANY($1) AND g.name = $2`, account, name)
 	if err != nil {
 		return "", fmt.Errorf("группа %s/%s не резолвится: %w", account, name, err)
 	}

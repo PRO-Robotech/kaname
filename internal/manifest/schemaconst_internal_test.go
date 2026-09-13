@@ -65,11 +65,37 @@ import (
 // нового модуля берёт образцом.
 const treeManifestGlob = "services/*/manifest.yaml"
 
-// schemaConst — одно объявление `const` вместе с тем, как до него дошли.
+// schemaConst — одно объявление ЗНАЧЕНИЯ схемы вместе с тем, как до него дошли.
+//
+// Значений у требования БОЛЬШЕ ОДНОГО, и это не обобщение про запас: окно двух
+// написаний посевной идентичности (задача продукта #2554, §2.4 приёмки
+// `seed-identity-names-its-own-service.md`) объявляет в схеме `enum` из пары —
+// прежнего написания и объявленного, — потому что манифесты пяти чужих
+// продуктов переводятся своим порядком (П3) и до перевода законны оба.
+//
+// Форма `const` остаётся частным случаем: одно допустимое значение.
 type schemaConst struct {
-	path        string // путь в нотации стороны структур: `seed.groups[].account`
-	value       string
-	conditional bool // достигнут через `if`/`not`
+	path        string   // путь в нотации стороны структур: `seed.groups[].account`
+	values      []string // допустимые значения; у `const` ровно одно
+	conditional bool     // достигнут через `if`/`not`
+}
+
+// String — как требование называется в переписи и в находке.
+func (c schemaConst) String() string {
+	if len(c.values) == 1 {
+		return fmt.Sprintf("%s = %q", c.path, c.values[0])
+	}
+	return fmt.Sprintf("%s ∈ %q", c.path, c.values)
+}
+
+// allows — отвечает ли требованию конкретное значение документа.
+func (c schemaConst) allows(got string) bool {
+	for _, v := range c.values {
+		if v == got {
+			return true
+		}
+	}
+	return false
 }
 
 // walkSchemaConsts — все `const` схемы, ВЫВЕДЕННЫЕ обходом.
@@ -100,7 +126,36 @@ func walkSchemaConsts(node any, prefix, at string, cond bool, out *[]schemaConst
 				*unknown = append(*unknown, at+": const не строка — сверять нечем")
 				continue
 			}
-			*out = append(*out, schemaConst{path: prefix, value: s, conditional: cond})
+			*out = append(*out, schemaConst{path: prefix, values: []string{s}, conditional: cond})
+		case keyword == "enum":
+			// `enum` ограничивает значение ЗАКРЫТЫМ перечнем — то же утверждение,
+			// что `const`, только допустимых значений больше одного. Пока обход
+			// его не знал, всякое требование, записанное этой формой, было ВНЕ
+			// наблюдения: ни красного, ни зелёного, молчание
+			// (`testing.md` §«Гейт на класс», п. 7).
+			list, isList := value.([]any)
+			if !isList {
+				*unknown = append(*unknown, at+": enum не список — сверять нечем")
+				continue
+			}
+			if len(list) == 0 {
+				*unknown = append(*unknown, at+": enum пуст — требование без единого допустимого значения")
+				continue
+			}
+			values := make([]string, 0, len(list))
+			for _, item := range list {
+				s, isString := item.(string)
+				if !isString {
+					values = nil
+					break
+				}
+				values = append(values, s)
+			}
+			if values == nil {
+				*unknown = append(*unknown, at+": enum несёт нестроковое значение — сверять нечем")
+				continue
+			}
+			*out = append(*out, schemaConst{path: prefix, values: values, conditional: cond})
 		case keyword == "properties":
 			props, ok := value.(map[string]any)
 			if !ok {
@@ -274,8 +329,9 @@ func collectSchemaConsts(t *testing.T) []schemaConst {
 			len(unknown), strings.Join(unknown, "\n  "))
 	}
 	if len(consts) == 0 {
-		t.Fatalf("в схеме не прочитано ни одного const — обход пуст, и вердикт беспредметен: "+
-			"«ноль находок» неотличимо от «ноль прочитанного» (схема %s)", publishedSchemaPath)
+		t.Fatalf("в схеме не прочитано ни одного требования к значению — обход пуст, и вердикт "+
+			"беспредметен: «ноль находок» неотличимо от «ноль прочитанного» (схема %s)",
+			publishedSchemaPath)
 	}
 	sort.Slice(consts, func(a, b int) bool { return consts[a].path < consts[b].path })
 	return consts
@@ -356,7 +412,7 @@ func auditSchemaConsts(consts []schemaConst, manifests map[string]any) schemaCon
 	var out schemaConstAudit
 	for _, c := range consts {
 		if c.conditional {
-			out.discriminators = append(out.discriminators, fmt.Sprintf("%s = %q", c.path, c.value))
+			out.discriminators = append(out.discriminators, c.String())
 			continue
 		}
 		out.requirements++
@@ -366,16 +422,16 @@ func auditSchemaConsts(consts []schemaConst, manifests map[string]any) schemaCon
 			for _, got := range resolveSchemaPath(manifests[file], segments) {
 				out.compared++
 				hits++
-				if fmt.Sprint(got) == c.value {
+				if c.allows(fmt.Sprint(got)) {
 					out.agreeing++
 					continue
 				}
 				out.findings = append(out.findings, fmt.Sprintf(
-					"%s: %s = %v, а схема пинит const %q", file, c.path, got, c.value))
+					"%s: %s = %v, а схема допускает только %q", file, c.path, got, c.values))
 			}
 		}
 		if hits == 0 {
-			out.unexercised = append(out.unexercised, fmt.Sprintf("%s = %q", c.path, c.value))
+			out.unexercised = append(out.unexercised, c.String())
 		}
 	}
 	sort.Strings(out.findings)
@@ -407,12 +463,17 @@ func TestSchemaAnchorConstAgreesWithTheLoaderConstants(t *testing.T) {
 			continue
 		}
 		if _, pinnedHere := pinned[c.path]; pinnedHere {
-			seen[c.path] = c.value
+			if len(c.values) != 1 {
+				t.Fatalf("%s объявлен перечнем из %d значений: якорь выдачи ПИНИТСЯ, "+
+					"а перечень допускает второе значение, которое отказ загрузчика "+
+					"отвергнет — два объявления разошлись бы молча", c.path, len(c.values))
+			}
+			seen[c.path] = c.values[0]
 		}
 	}
 
-	t.Logf("перепись: const объявлено %d · из них пиннутых загрузчиком ожидается %d · найдено %d",
-		len(consts), len(pinned), len(seen))
+	t.Logf("перепись: требований к значению объявлено %d · из них пиннутых загрузчиком "+
+		"ожидается %d · найдено %d", len(consts), len(pinned), len(seen))
 
 	if len(seen) != len(pinned) {
 		var missing []string
