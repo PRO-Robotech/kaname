@@ -10,6 +10,26 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   четыре блокирующих круга 1 (§14) устранены кругом 2 (§15) и **перепроверены
   проверяющим независимо** — §16. Круг 1 дал CHANGES REQUESTED; история кругов
   сохранена целиком и не переписывается
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-14, `kaname#71`): путевые координаты приведены
+  к дереву.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  пути, названные ПРЕДИКАТОМ (`git grep … -- <путь>`), остались монорепными. Предикат,
+  чей путь в дереве не существует, даёт пустоту **по построению**: «ноль находок»
+  становится неотличимо от «ноль прочитанного», и читатель делает вывод О ДЕРЕВЕ по
+  замеру, который ничего не измерял. Координат приведено: **12**. Исходов три, и все
+  три применены по корпусу: путь службы потерял приставку `services/iam/` — дерево
+  службы теперь корень, и в монорепо этого пути **тоже больше нет** (`git ls-tree -r
+  origin/main --name-only | grep -c '^services/iam/'` → 0), поэтому «назвать дом» было
+  бы координатой, мёртвой в ОБОИХ деревьях; путь, чей держатель остался в монорепо,
+  назвал ДОМ — `PRO-Robotech/kacho:` (форма взята у имён проб, `kaname#11`); путь
+  фундамента переписан на ПРОИЗВОДИТЕЛЯ — каталог берётся пином из `go.mod`
+  (`go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib`), а не выписывается.
+  **Следствие для читателя, и оно несущее:** предикат снова ИСПОЛНЯЕТСЯ, но ЧИСЛО,
+  стоящее рядом с ним, снималось на монорепо до выноса и здесь **НЕ ПЕРЕМЕРЯЛОСЬ** —
+  расхождение прогона с этим числом есть вопрос к ЧИСЛУ, а не к дереву, и закрывается
+  своим кругом, а не этой правкой. Дельта правки — только координата: ни один сценарий,
+  вердикт, производитель, признак готовности и ни одно число не тронуты. Держит форму
+  гейт `TestAcceptancePathCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
   ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
   гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
@@ -129,8 +149,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | **П7** | идентичность системной роли — функция её имени | текст миграций: `'rol' \|\| substr(md5('<имя>'), 1, 17)` | `grep -c "substr(md5(" services/iam/internal/migrations/0001_initial.sql` → `58` (число включает не-ролевые сущности; ролевая единица — §2.1) |
 | **П8** | **Go-близнец** этой деривации уже существует и объявлен обязанным совпадать | `services/iam/internal/apps/kaname/api/bootstrap_token/ids.go:45` — `md5Suffix`, godoc: «identical to Postgres `substr(md5(s),1,17)`»; `DeriveIdentity` — чистая функция | `grep -n 'func md5Suffix' services/iam/internal/apps/kaname/api/bootstrap_token/ids.go` → `45` |
 | **П9** | роль с выдачами **нельзя удалить** — это инвариант БД, а не проверка кода | `access_bindings_role_fk … REFERENCES kacho_iam.roles(id) ON DELETE RESTRICT`, `0001_initial.sql:1733` | `grep -n 'access_bindings_role_fk' services/iam/internal/migrations/0001_initial.sql` |
-| **П10** | проекции роли снимаются каскадом вместе с ролью | `ON DELETE CASCADE` в `0026:41` (селекторы), `0027:59` (материализованные члены цели выдачи), `0085:35` (проекция глаголов), `20260901113757:390` и `:430` (сегменты правила и их глаголы, П19) — **пять** | `git grep -n 'REFERENCES kacho_iam.roles' -- 'services/iam/internal/migrations/*.sql'` → **7** строк: **5** `CASCADE` (проекции) и **2** `RESTRICT` — `access_bindings_role_fk` (`0001:1733`, **выдача**, П9) и `organizations_initial_role_fk` (`0001:1849`, **начальная роль организации**, а не выдача) |
-| **П11** | проекция глаголов **самолечится на старте** для КАЖДОЙ системной роли, читая `roles.rules` | `seed.ReseedSystemRoleVerbs` (`role_verb_reseed.go:134`), вызов — `services/iam/cmd/kaname/serve.go:1380` | `git grep -n 'seed.ReseedSystemRoleVerbs' -- 'services/iam/cmd'` |
+| **П10** | проекции роли снимаются каскадом вместе с ролью | `ON DELETE CASCADE` в `0026:41` (селекторы), `0027:59` (материализованные члены цели выдачи), `0085:35` (проекция глаголов), `20260901113757:390` и `:430` (сегменты правила и их глаголы, П19) — **пять** | `git grep -n 'REFERENCES kacho_iam.roles' -- 'internal/migrations/*.sql'` → **7** строк: **5** `CASCADE` (проекции) и **2** `RESTRICT` — `access_bindings_role_fk` (`0001:1733`, **выдача**, П9) и `organizations_initial_role_fk` (`0001:1849`, **начальная роль организации**, а не выдача) |
+| **П11** | проекция глаголов **самолечится на старте** для КАЖДОЙ системной роли, читая `roles.rules` | `seed.ReseedSystemRoleVerbs` (`role_verb_reseed.go:134`), вызов — `services/iam/cmd/kaname/serve.go:1380` | `git grep -n 'seed.ReseedSystemRoleVerbs' -- 'cmd'` |
 | **П12** | то же для селекторов | `seed.SyncAllSystemRoleSelectors` (`migrate_backfill.go:231`) | `grep -n 'func SyncAllSystemRoleSelectors' services/iam/internal/apps/kaname/seed/migrate_backfill.go` |
 | **П13** | **системная роль путём пользовательской роли не проходит НИКОГДА** — это сказано в дереве, а не выведено мной | `role_verb_reseed.go:13-14`, дословно: «системная роль заводится сырым SQL миграции и этим путём не проходит НИКОГДА» | `sed -n '11,18p' services/iam/internal/apps/kaname/seed/role_verb_reseed.go` |
 | **П14** | каталог ресурсов существует **строками** (`#1030`) | `kaname.catalog_resource`, посев — `20260901113757_rule_segments_have_a_referent.sql:198` и `:231` | §2.3 — перепись по **обеим** формам |
@@ -138,7 +158,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | **П16** | новая миграция обязана цитировать APPROVED-приёмку | `internal/repohygiene/acceptanceledger_test.go:116`, ведомость `docs/acceptance-ledger.yaml` (8 записей, ключ `entries`) | `grep -n 'func TestNewMigrationCitesAnApprovedAcceptance' internal/repohygiene/acceptanceledger_test.go` |
 | **П17** | вердикт приёмки дерева продукта читается машинно | `scripts/docs-gate/_lib.py` `verdict` + `check-04-product-acceptance-verdict.py` (судит по `origin/main` продукта, отставание копии называет числом) | §10 п. 1 |
 | **П18** | опубликованная схема несёт **значения** формы, которых Go-судья не сверяет | `services/iam/schema/module-manifest.schema.json`: `roles[].id.pattern` = `^[a-z][a-z0-9-]*\.[a-zA-Z][a-zA-Z0-9]*$` и `roles[].tier.tierType.enum` = `["iam.account","iam.project"]`. Проба согласия `schemaagreement_internal_test.go` сверяет **множества ключей**, а `pattern` и `enum` стоят у неё в `annotationKeywords` — то есть значения вне наблюдения | `python3 -c "import json;s=json.load(open('services/iam/schema/module-manifest.schema.json'))['properties']['roles']['items']['properties'];print(s['id']['pattern'], s['tier']['properties']['tierType']['enum'])"` |
-| **П19** | **третья** проекция правила роли существует, у неё ключи в каталог и **один** писатель | таблица `kacho_iam.role_rule_ref` (`20260901113757:462` — разовое обратное заполнение); ключи `role_rule_ref_res_fk` (`:580`, на `(module, resource, live)`) и `role_rule_ref_verb_fk` (`:587`); писатель — `role_repo.ReplaceRuleRefs` (`role_repo.go:590`), ссылки производит `domain.RuleRefsOf` (`rule_verbs.go:221`); тексты отказов — `pgmaperr.go:337` и `:355` | `git grep -n 'RolesW()\.ReplaceRuleRefs' -- 'services/iam/**/*.go' ':!*_test.go'` → **два** вызывающих: `role/create.go:208`, `role/update.go:309`. *(Без сужения до вызова тот же `git grep` даёт **7** строк — объявление, интерфейс, комментарии; это упоминания, а не вызывающие.)* |
+| **П19** | **третья** проекция правила роли существует, у неё ключи в каталог и **один** писатель | таблица `kacho_iam.role_rule_ref` (`20260901113757:462` — разовое обратное заполнение); ключи `role_rule_ref_res_fk` (`:580`, на `(module, resource, live)`) и `role_rule_ref_verb_fk` (`:587`); писатель — `role_repo.ReplaceRuleRefs` (`role_repo.go:590`), ссылки производит `domain.RuleRefsOf` (`rule_verbs.go:221`); тексты отказов — `pgmaperr.go:337` и `:355` | `git grep -n 'RolesW()\.ReplaceRuleRefs' -- '**/*.go' ':!*_test.go'` → **два** вызывающих: `role/create.go:208`, `role/update.go:309`. *(Без сужения до вызова тот же `git grep` даёт **7** строк — объявление, интерфейс, комментарии; это упоминания, а не вызывающие.)* |
 | **П20** | набор модулей платформы **закрыт**, и членство в нём — функция | **производитель сменился — врезка под таблицей.** На ревизии измерения им были литерал домена из шести имён и одноимённая пакетная функция; сегодня членство — **порт** `domain.ModuleSet`, а шесть имён живут строками `kaname.catalog_module`. Состав тот же: `{iam, vpc, compute, loadbalancer, registry, storage}`; `geo` отсутствует намеренно, токен балансировщика — `loadbalancer` | `go test ./services/iam/internal/authzmap/ -run TestModuleSet_PinnedComposition -count=1` |
 | **П21** | паритет ярусов судит **ВСЕ системные роли базы**, кем бы они ни были записаны | `tier_parity_integration_test.go:266` — `SELECT name, permissions, rules FROM kaname.roles WHERE is_system ORDER BY name`; свойство «ярус, которому нечем быть, не должен существовать» названо держателем самой миграцией снятия (`20260825003504`, раздел «ЧЕМ ЭТО ДЕРЖИТСЯ») | `grep -n 'WHERE is_system ORDER BY name' services/iam/internal/repo/kaname/pg/tier_parity_integration_test.go` |
 
@@ -186,7 +206,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 | # | отсутствующий производитель | предикат | следствие для сценариев |
 |---|---|---|---|
-| **О1** | **применитель манифеста**: `manifest.Load` не зовёт **ни одна** строка прод-кода | `git grep -c 'manifest\.Load' -- 'services/**/*.go' 'gateway/**/*.go' 'pkg/**/*.go' 'tools/**/*.go' ':!*_test.go'` → **0**; в пробах — 86 вызовов в 6 файлах | всякий сценарий применения сегодня **без входа**; заводится здесь (§12.2) |
+| **О1** | **применитель манифеста**: `manifest.Load` не зовёт **ни одна** строка прод-кода | `git grep -c 'manifest\.Load' -- 'PRO-Robotech/kacho:services/**/*.go' 'PRO-Robotech/kacho:gateway/**/*.go' 'pkg/**/*.go' 'tools/**/*.go' ':!*_test.go'` → **0**; в пробах — 86 вызовов в 6 файлах | всякий сценарий применения сегодня **без входа**; заводится здесь (§12.2) |
 | **О2** | **манифест модуля в дереве продукта** | `git ls-files \| grep -ci 'manifest.*\.ya\?ml$'` → **2**, и обе — фикстуры проб (`internal/manifest/testdata/`) | манифест — вход сценариев; его производитель — `#1091`, здесь принимается фикстурой (§7) |
 | **О3** | `iamctl` | `git ls-files \| grep -ci iamctl` → **0** | форма поставки применителя решается `#1036`; здесь решается **что** он пишет, не **чем** его зовут |
 | **О4** | признак ресурса, отличающий ресурс с ярусами от ресурса без них (`baseRoles` из `#1090` §3.3) | `git grep -c baseRoles` вне приёмок → **0** | порождение ярусов неисполнимо; §3.6 отвергает его **как способ** и называет предикат пересмотра |
@@ -202,7 +222,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | # | утверждение | предикат | итог |
 |---|---|---|---|
 | **З1** | признак `#1824`: «раздела `roles` нет» — `python3 … open('services/iam/schema/module-manifest-seed.schema.json')` → `['apiVersion','module','seed']` | файла с таким именем в дереве **нет**: `git ls-files services/iam/schema/` → одна строка, `module-manifest.schema.json`. Дословная команда задачи падает `FileNotFoundError` | **НЕ подтверждено, и способ ошибки назван**: текст отказа команды был прочитан как вердикт о дереве. Исправленный предикат даёт **шесть** разделов, включая `roles` |
-| **З2** | «роли живут в миграциях iam» | `git grep -ln 'INSERT INTO kacho_iam.roles' -- 'services/iam/internal/migrations/*.sql'` → **5** файлов, 10 операторов | **подтверждено** |
+| **З2** | «роли живут в миграциях iam» | `git grep -ln 'INSERT INTO kacho_iam.roles' -- 'internal/migrations/*.sql'` → **5** файлов, 10 операторов | **подтверждено** |
 | **З3** | «новый модуль требует релиза iam» | П15: миграции встроены `//go:embed`, исполняет initContainer **того же образа** ⇒ новый `.sql` = новый бинарь = новый образ | **подтверждено, и доказано построением**, а не наблюдением |
 | **З4** | брифинг: «роль `<м>.<р>.<ярус>` **полностью выводима** из ресурса; правило механическое» | §2.3 и §2.4 | **НЕ подтверждено, трижды**: (а) нет дискриминатора — наивный вывод даёт **81** при живых **40**; (б) нет правила перевода имени — 4 пары из 14 не совпадают дословно; (в) само правило устарело — см. З5 |
 | **З5** | брифинг: «`edit` → `["<м>.<р>.update"]`» | `0040_edit_roles_include_read_verbs.sql:58` — все правила с `verbs == ["update"]` заменены на `["get","list","update"]` одним `DO`-блоком | **НЕ подтверждено**: правило отстало на миграцию. Ярус правки читает то, что меняет, и это решено, а не забыто |
@@ -420,7 +440,7 @@ construction**, а не по недосмотру.
 (строки `87`, `94`, `101`, `108`: `"service_account"→"serviceAccount"`,
 `"access_binding"→"accessBinding"`, `"security_group"→"securityGroup"`,
 `"route_table"→"routeTable"`), а **имя роли не трогает ни одна миграция дерева**
-(`git grep -n 'roles' -- 'services/iam/internal/migrations/*.sql' | grep -i 'SET name'` → пусто).
+(`git grep -n 'roles' -- 'internal/migrations/*.sql' | grep -i 'SET name'` → пусто).
 
 Причина названа П7 и П9: имя — аргумент хеша, дающего `id`; переименование меняет
 `id`, а `id` держит `access_bindings_role_fk`. То есть имя роли **неизменяемо не по
@@ -474,7 +494,7 @@ construction**, а не по недосмотру.
 её ловит MOD-RD-17.
 
 **Досева `role_rule_ref` на старте нет, и это измерено, а не предположено:**
-`git grep -n 'role_rule_ref\|RuleRef' -- 'services/iam/internal/apps/kaname/seed/'`
+`git grep -n 'role_rule_ref\|RuleRef' -- 'internal/apps/kaname/seed/'`
 → **пусто**; системным ролям проекция залита **разово** обратным заполнением
 миграции `20260901113757:462`. Значит опереться на самолечение, как это делают
 глаголы и селекторы, здесь **не на что** — рассчитывать на него значило бы
@@ -1347,7 +1367,7 @@ print(bool(rx.match('vpc.network.admin')), bool(rx.match('iam.access_binding.vie
 **Кто её заполняет сегодня.** Писателей в Go **два, и оба — путь ПОЛЬЗОВАТЕЛЬСКОЙ роли**:
 `role/create.go:208` и `role/update.go:309`. Системным ролям проекция залита **разово**
 backfill'ом миграции (`20260901113757:462`). **Досева на старте у неё нет**:
-`git grep -rn 'role_rule_ref\|RuleRef' -- 'services/iam/internal/apps/kaname/seed/'` →
+`git grep -rn 'role_rule_ref\|RuleRef' -- 'internal/apps/kaname/seed/'` →
 **пусто** (старт досевает глаголы — `serve.go:1380` — и селекторы, П11/П12).
 
 **Три следствия, каждое самостоятельно достаточное.**
@@ -1401,9 +1421,9 @@ kaname.roles` таких колонок ноль, снятие — `DELETE`. §1
 | # | замечание | предикат |
 |---|---|---|
 | Н1 | шапка: «**Миграции:** изменение их **ТРЕБУЕТ** — ровно одну» против §5: «от него зависит, **нужна ли миграция вообще**». Два места об одном предмете | сверка двух строк |
-| Н2 | §6 Г1а: проба «сверяет с `id`, **записанным в тексте миграции**». Литеральных `id` роли в миграциях — **0**, выражений `'rol' \|\| substr(md5(` — **209**. §12.3 это говорит верно; §6 отстала | `git grep -oh "'rol[0-9a-f]\{17\}'" -- 'services/iam/internal/migrations/*.sql' \| sort -u \| wc -l` → 0 |
+| Н2 | §6 Г1а: проба «сверяет с `id`, **записанным в тексте миграции**». Литеральных `id` роли в миграциях — **0**, выражений `'rol' \|\| substr(md5(` — **209**. §12.3 это говорит верно; §6 отстала | `git grep -oh "'rol[0-9a-f]\{17\}'" -- 'internal/migrations/*.sql' \| sort -u \| wc -l` → 0 |
 | Н3 | §12.3 «двадцать три из двадцати четырёх без исполнимого входа» **завышено**: MOD-RD-02 и MOD-RD-05 исполнимы **сегодня** — `roles_test.go` несёт `TestMODMR11RoleIDOfAForeignModuleIsRefused` с парным положительным `vpc.viewer` и `TestMODMR10…`, грузящий роль яруса проекта; `manifest.Load` зовётся в этом файле **11** раз. О2 считает **файлы** манифестов, а загрузчик принимает **байты**. §12.3 сама себя поправляет двумя абзацами ниже | `grep -c 'manifest\.Load' services/iam/internal/manifest/roles_test.go` → 11 |
-| Н4 | §0.1 П10: оба ключа `RESTRICT` названы «выдача». Второй — `organizations_initial_role_fk` (`0001:1849`). Числа 7 / 5 / 2 верны | `git grep -n 'REFERENCES kaname.roles' -- 'services/iam/internal/migrations/*.sql'` |
+| Н4 | §0.1 П10: оба ключа `RESTRICT` названы «выдача». Второй — `organizations_initial_role_fk` (`0001:1849`). Числа 7 / 5 / 2 верны | `git grep -n 'REFERENCES kaname.roles' -- 'internal/migrations/*.sql'` |
 | Н5 | «`check-04` — код 0» верно и **беспредметно** для этого документа: гейт судит `origin/main` дерева продукта (осмотрено 7 приёмок, APPROVED 7), а файл лежит в `lane/1824` и в их число не входит | прогон `check-04`, строка `[CENSUS]` |
 | Н6 | §2.1 описывает разборщик без упоминания блоков `+goose Up`/`Down`. На этом дереве безвредно (см. §14.6), но описание неполно | — |
 
@@ -1692,7 +1712,7 @@ EOF
 |---|---|---|
 | **Б1** схема отвергает форму имени | **устранено** | прогон образцов по **моему** живому набору: схема принимает **3** из 48 (`kacho-system.admin`, `kacho-system.viewer`, `loadbalancer.operator`), образец §3.2.1 принимает **44** и отвергает **ровно** `admin`, `edit`, `view`, `owner`; `roles_system_name_check` принимает **48 из 48**. Два независимо полученных множества («отвергнутые образцом» и «третий класс §3.4») совпали — граница проведена там, где сказано. Предикат §10 п. 8 прогнан дословно → `False False False`, то есть развилка снята не будет, пока схема не правлена |
 | **Б2** MOD-RD-03/04 без производителя | **устранено** | чтением исполняемого кода **и** прогоном: `validateRoleIdentity` (`roles.go:150`) судит непустоту владельца, `owner == module` и повтор; регулярных выражений в не-тестовом разборе — ноль. Производитель заказан §12.2 отдельной строкой, §11 разведена: «форма имени» больше не значится за Г7 и П4. Ссылка на §12.4 из §4 приведена к §12.3; живых упоминаний §12.4 вне записи круга 1 — **ноль** |
-| **Б3** третья проекция `role_rule_ref` | **устранено** | `git grep -n 'RolesW()\.ReplaceRuleRefs' -- 'services/iam/**/*.go' ':!*_test.go'` → **2** (`role/create.go:208`, `role/update.go:309`); без сужения — **7**, как и сказано. Ключ `role_rule_ref_res_fk` — `FOREIGN KEY (module, resource, live) REFERENCES catalog_resource(module, resource, live)` (`20260901113757:580`), колонка `live` константна ограничением `role_rule_ref_live_true`, поэтому снятая строка каталога отвергается **by construction**; текст `resources: %s is not a live platform resource` — `pgmaperr.go:351`, метка полосы — `:337`. Досева в `seed/` — **ноль строк**. §11 называет держателем MOD-RD-06 ключ, а не П14 |
+| **Б3** третья проекция `role_rule_ref` | **устранено** | `git grep -n 'RolesW()\.ReplaceRuleRefs' -- '**/*.go' ':!*_test.go'` → **2** (`role/create.go:208`, `role/update.go:309`); без сужения — **7**, как и сказано. Ключ `role_rule_ref_res_fk` — `FOREIGN KEY (module, resource, live) REFERENCES catalog_resource(module, resource, live)` (`20260901113757:580`), колонка `live` константна ограничением `role_rule_ref_live_true`, поэтому снятая строка каталога отвергается **by construction**; текст `resources: %s is not a live platform resource` — `pgmaperr.go:351`, метка полосы — `:337`. Досева в `seed/` — **ноль строк**. §11 называет держателем MOD-RD-06 ключ, а не П14 |
 | **Б4** воскрешение снятого имени | **устранено** | **своя** перепись снятых: 18 имён, три класса — 9 `compute.{disk,image,snapshot}.{admin,edit,view}`, 2 `iam.user.{admin,edit}`, 7 `module.*_sa`; сумма сходится. Каталог: 27 живых + 3 снятых (`compute.disk`, `compute.image`, `compute.snapshot`) — те самые, чьи девять ролей сняты. Решение «ведомость не заводится» проверено на исполнимость: у каждого класса производитель отказа **существует сегодня**, ни один не есть память автора манифеста. Граница («девять отвергает база, два — проба») названа в §5.1 и §13 и верна |
 
 ### 16.3. Что перемерено СВОИМ разборщиком — и что вышло

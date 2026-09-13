@@ -17,6 +17,26 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   того же класса, найденный автором сверх замечания (`-09`), проверен и снят верно.
   Четыре уточняющих (`З3`–`З6`) перемерены рецензентом — **все четыре сходятся**.
   Сценариев было **16**, осталось **16**: объём не расширен
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-14, `kaname#71`): путевые координаты приведены
+  к дереву.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  пути, названные ПРЕДИКАТОМ (`git grep … -- <путь>`), остались монорепными. Предикат,
+  чей путь в дереве не существует, даёт пустоту **по построению**: «ноль находок»
+  становится неотличимо от «ноль прочитанного», и читатель делает вывод О ДЕРЕВЕ по
+  замеру, который ничего не измерял. Координат приведено: **19**. Исходов три, и все
+  три применены по корпусу: путь службы потерял приставку `services/iam/` — дерево
+  службы теперь корень, и в монорепо этого пути **тоже больше нет** (`git ls-tree -r
+  origin/main --name-only | grep -c '^services/iam/'` → 0), поэтому «назвать дом» было
+  бы координатой, мёртвой в ОБОИХ деревьях; путь, чей держатель остался в монорепо,
+  назвал ДОМ — `PRO-Robotech/kacho:` (форма взята у имён проб, `kaname#11`); путь
+  фундамента переписан на ПРОИЗВОДИТЕЛЯ — каталог берётся пином из `go.mod`
+  (`go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib`), а не выписывается.
+  **Следствие для читателя, и оно несущее:** предикат снова ИСПОЛНЯЕТСЯ, но ЧИСЛО,
+  стоящее рядом с ним, снималось на монорепо до выноса и здесь **НЕ ПЕРЕМЕРЯЛОСЬ** —
+  расхождение прогона с этим числом есть вопрос к ЧИСЛУ, а не к дереву, и закрывается
+  своим кругом, а не этой правкой. Дельта правки — только координата: ни один сценарий,
+  вердикт, производитель, признак готовности и ни одно число не тронуты. Держит форму
+  гейт `TestAcceptancePathCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
   ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
   гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
@@ -80,7 +100,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   сняты на ней предикатами, названными рядом с каждым
 - **Ревизия проб хранилища:** PostgreSQL **16.15** во временном контейнере
   `postgres:16-alpine`, снятом после прогона. Версия — та, что исполняет дерево
-  (`git grep -hoE 'postgres:[0-9][0-9.a-z-]*' -- deploy services` → `postgres:16*`)
+  (`git grep -hoE 'postgres:[0-9][0-9.a-z-]*' -- deploy PRO-Robotech/kacho:services` → `postgres:16*`)
 - **Задача:** `PRO-Robotech/kacho#1030` (`P0`, `size:XL`, `area:iam`,
   `release:modules`) — метки перемерены `gh issue view`
 - **Эпик:** `PRO-Robotech/kacho#1027` — каталог модуля как данные. Предшественники
@@ -144,8 +164,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 | # | утверждение задачи | предикат · единица счёта |
 |---|---|---|
-| **П1** | таблицы-словаря в БД нет; «48 имён» | `git grep -hoE 'CREATE TABLE kacho_iam\.[a-z_0-9]+' -- 'services/iam/internal/migrations/*.sql' \| sed 's/.*\.//' \| sort -u \| wc -l` → **48**. Единица — различное имя таблицы |
-| **П2** | словаря нет ни у кого, не только у iam | `git grep -hoiE 'CREATE TABLE (IF NOT EXISTS )?[a-z_]+\.(catalog\|dict)[a-z_]*' -- 'services/*/internal/migrations/*.sql'` → **0** |
+| **П1** | таблицы-словаря в БД нет; «48 имён» | `git grep -hoE 'CREATE TABLE kacho_iam\.[a-z_0-9]+' -- 'internal/migrations/*.sql' \| sed 's/.*\.//' \| sort -u \| wc -l` → **48**. Единица — различное имя таблицы |
+| **П2** | словаря нет ни у кого, не только у iam | `git grep -hoiE 'CREATE TABLE (IF NOT EXISTS )?[a-z_]+\.(catalog\|dict)[a-z_]*' -- 'PRO-Robotech/kacho:services/*/internal/migrations/*.sql'` → **0** |
 | **П3** | числа литералов: 6 / 27 / 27 | `sed -n '/^var objectTypes/,/^}/p' …/authzmap/fga_types.go \| grep -cE '^\s*"'` → **27**; тот же по `typeVerbRelations` → **27**; `knownModules` → **6** (`domain/module_set.go`). `labelSelectableTypes` → **25**, `retiredTypes` → **3** |
 | **П4** | у внешнего ключа нет референта — и это **точнее**, чем сказано | три сегмента правила закрыты НЕОДИНАКОВО: `validateModule` зовёт `IsKnownModule` (`domain/rule.go:224`), а `validateVerbs` и `validateRuleList` словаря не зовут **вовсе** — только грамматику `ruleResRe`/`ruleVerbRe` = `^[a-z][a-zA-Z0-9_-]*$` (`rule.go:59-62`). То есть асимметрия внутри одного правила, а не сплошное отсутствие |
 | **П5** | проба конкуренции держится | измерено мной на PG 16.15, оба чередования — §5.4 |
@@ -437,7 +457,7 @@ DDL среди них ноль (перемерено кругом 3 тем же 
 конструктива, и это осознанный размен: у прежней формы объявленное поведение
 сценариев неисполнимо, у новой — исполнимо. Отдельно: `SET CONSTRAINTS` в дереве
 сегодня встречается в **6** файлах и **все шесть — фикстуры проб**
-(`git grep -ln 'SET CONSTRAINTS' -- services pkg | grep -v acceptance` → 6, из них
+(`git grep -ln 'SET CONSTRAINTS' -- PRO-Robotech/kacho:services pkg | grep -v acceptance` → 6, из них
 `_test.go` — 6, прод-кода — **0**). Значит административный путь станет **первым
 прод-производителем** этого оператора, и он обязан прийти со своим гейтом (§9.3),
 а не «по образцу, который уже есть».
@@ -527,12 +547,12 @@ if !ok {
 |---|---:|---|
 | различных имён таблиц `kacho_iam` | **57** | объединение двух форм `CREATE TABLE`, `sed 's/.*\.//' \| sort -u` |
 | из них словарей каталога | **0** | адъюдикация по имени |
-| таблиц-словаря во **всех** сервисах | **0** | `git grep -hoiE 'CREATE TABLE (IF NOT EXISTS )?[a-z_]+\.(catalog\|dict)[a-z_]*' -- 'services/*/internal/migrations/*.sql'` |
-| миграций iam (`.sql`) | **150** | `git ls-files 'services/iam/internal/migrations/*.sql' \| wc -l` |
-| составных внешних ключей в iam | **1** | `git grep -nE 'FOREIGN KEY *\([^)]*,' -- services/iam/internal/migrations/` → `732001:196` |
-| файлов миграций iam с `DEFERRABLE` | **7** | `git grep -rln 'DEFERRABLE' -- 'services/iam/internal/migrations/*.sql'` |
+| таблиц-словаря во **всех** сервисах | **0** | `git grep -hoiE 'CREATE TABLE (IF NOT EXISTS )?[a-z_]+\.(catalog\|dict)[a-z_]*' -- 'PRO-Robotech/kacho:services/*/internal/migrations/*.sql'` |
+| миграций iam (`.sql`) | **150** | `git ls-files 'internal/migrations/*.sql' \| wc -l` |
+| составных внешних ключей в iam | **1** | `git grep -nE 'FOREIGN KEY *\([^)]*,' -- internal/migrations/` → `732001:196` |
+| файлов миграций iam с `DEFERRABLE` | **7** | `git grep -rln 'DEFERRABLE' -- 'internal/migrations/*.sql'` |
 | соединений `role_verb` на пути ВЕРДИКТА | **4** | `git grep -n 'JOIN kacho_iam.role_verb' -- …/pg/relverdict/` → `query.go:515`, `list.go:295`, `expand.go:170`, `subjects.go:151` |
-| прод-читателей `role_verb` | **14** | `git grep -ln 'role_verb' -- 'services/iam/internal/**/*.go' \| grep -v _test \| wc -l` |
+| прод-читателей `role_verb` | **14** | `git grep -ln 'role_verb' -- 'internal/**/*.go' \| grep -v _test \| wc -l` |
 | прод-читателей `authzmap` | **27** по стволу, **25** внутри сервиса | `git grep -ln 'authzmap\.' -- '*.go' \| grep -v _test \| wc -l`; тот же с `services/iam/**` |
 | точечных типов | **27**, точек в ключе у всех **1** | `awk` по блоку `objectTypes`, счёт точек |
 | пар (тип, отношение) | **109** | `objectVerbRelations`(4)×24 + `registryNamespace`(5)×1 + `identity`(2)×1 + `targetGroup`(6)×1 |
@@ -873,7 +893,7 @@ resource`, — то есть согласие держит конструкци�
 **Условие годности всей отрицательной полосы — фикстура НЕ отменяет немедленность.**
 Найдено кругом 2 и названо здесь, потому что иначе `-05`/`-06`/`-07` доказывали бы
 не то, что утверждают. В дереве **шесть** фикстур открывают транзакцию оператором
-`SET CONSTRAINTS ALL DEFERRED` (`git grep -ln 'SET CONSTRAINTS' -- services pkg |
+`SET CONSTRAINTS ALL DEFERRED` (`git grep -ln 'SET CONSTRAINTS' -- PRO-Robotech/kacho:services pkg |
 grep -v acceptance` → 6, все `_test.go`; например
 `repo/kaname/pg/iam_core_repos_integration_test.go:81`). Что `ALL` накрывает и
 `INITIALLY IMMEDIATE`, **измерено, а не предположено** (`P12`, §0.6): вставка
@@ -1182,7 +1202,7 @@ DEFERRABLE` не отвергается ничем, кроме обзора) и 
 > [!important] Круг 1 читал здесь `kaname.catalog_verb` — запрос был НЕИСПОЛНИМ
 > в объявленный момент (`Б2`)
 > Таблицу заводит **та же** миграция, готовность которой запрос гейтит:
-> `git grep -l 'catalog_verb' -- 'services/iam/internal/migrations/*.sql'` → **0**
+> `git grep -l 'catalog_verb' -- 'internal/migrations/*.sql'` → **0**
 > (перемерено мной; по `catalog_resource`/`catalog_module` — тоже 0). До посадки
 > запрос отвечал бы `42P01 undefined_table`, а величина нужна **раньше**
 > необратимого `ADD CONSTRAINT` (запрет #5). Самопроверка §8.2 этого не заменяет:
@@ -1564,7 +1584,7 @@ undefined_table`.
 | # | исход | чем |
 |---|---|---|
 | **Б1** | **принято, форма ключа сменена**; механизм при этом **уточнён замером** | `INITIALLY DEFERRED` → `DEFERRABLE INITIALLY IMMEDIATE` + `SET CONSTRAINTS … DEFERRED` в административном пути (§2.1). Правлены §2.1, §2.3, §2.6, сценарии `-05`/`-07`/`-14`, §6 Т1, §7. Пробы `P1`–`P3`, `P6`–`P11` (§0.6) |
-| **Б2** | **принято, предикат переписан** | правая часть разности берётся из `authzmap.Catalog()` — источника, существующего **до** миграции, — а не из таблицы, которую та же миграция заводит (§8.1). Перемерено: `git grep -l 'catalog_verb' -- 'services/iam/internal/migrations/*.sql'` → **0** |
+| **Б2** | **принято, предикат переписан** | правая часть разности берётся из `authzmap.Catalog()` — источника, существующего **до** миграции, — а не из таблицы, которую та же миграция заводит (§8.1). Перемерено: `git grep -l 'catalog_verb' -- 'internal/migrations/*.sql'` → **0** |
 | **З1** | **принято, число снято как невоспроизводимое** | «25 из 27» не даёт ни один нормализатор: мои пять дают **8 / 18 / 24 / 26 / 27** (§0.3). Снято и утверждение о двух несходящихся типах `loadbalancer.*` — под названным нормализатором они сходятся оба. Оставлено воспроизводимое **8 из 27** плюс обратная асимметрия **62 из 88** |
 | **З2** | **принято** | `role_verbs.go:133` → `129-132`; правились **два места документа** (§1.1), тогда как в исходнике вхождение **одно**: `grep -c 'FGAObjectType(dotted)' …/role_verbs.go` → **1**, строка 129. Формулировка круга 2 читалась как «два вхождения в коде» — уточнено кругом 3 (`З6`) |
 
@@ -1651,7 +1671,7 @@ not found or still in use» и зелёный вердикт при неиспо
 | **Б1** | **устранено** | форма `DEFERRABLE INITIALLY IMMEDIATE` принята DDL; отказ приходит **из оператора** с `CONSTRAINT NAME: rri_res_fk` (`R1`), тогда как `INITIALLY DEFERRED` на том же входе даёт `INSERT 0 1` и отказ на `COMMIT` (`R2`). Производители обеих половин текста существуют в дереве: ветвь по имени ограничения — `fkText` (`pgmaperr.go:274`), пооператорная подсказка — `mapErr(err, kind, idHint)`, **211** вызовов в прод-коде iam, и `ReplaceRoleVerbs` (`role_repo.go:544`) вставляет **по строке в цикле**, то есть в момент отказа держит ровно один сегмент |
 | **Б1** — механизм | **уточнение автора принято** | `DETAIL` и `CONSTRAINT NAME` сервер сообщает у **обеих** форм дословно одинаково (`R1` против `R2`) — рецензент круга 1 был неточен, автор прав. Недостижим токен у нас: `fkText` не читает `Detail` намеренно (`pgmaperr.go:351`), и подсказка `writeTx` — **одна на транзакцию**, две объявлены взаимоисключающими (`tx.go:66-79`, `tx.go:118-128`) |
 | **Б1** — цена | **подтверждена** | `SET CONSTRAINTS … DEFERRED` даёт порядок «снять родителя → переселить» (`R4`: `UPDATE 1` · `DELETE 1` · `COMMIT`, строка снята, выдач 0); контроль без переселения отказывает на `COMMIT` и строка остаётся **живой** (`R5`); контроль без `SET CONSTRAINTS` отказывает на **первом операторе** (`R6`) |
-| **Б2** | **устранено** | `git grep -l 'catalog_verb' -- 'services/iam/internal/migrations/*.sql'` → **0** (по `catalog_resource`/`catalog_module` — тоже 0): запрос круга 1 был неисполним. Правая часть теперь `authzmap.Catalog()` — `fga_types.go:95`, координата **точна**, комментарий дословно «the SINGLE exported source of the grantable taxonomy»; `VerbsOfType` — `fga_types.go:204`. Левая часть — `role_verb`, заводится `0085_role_verb_projection.sql`, то есть существует **до** этой миграции. Предикат исполним, пока `ADD CONSTRAINT` ещё не сделан, — то есть пока решение обратимо |
+| **Б2** | **устранено** | `git grep -l 'catalog_verb' -- 'internal/migrations/*.sql'` → **0** (по `catalog_resource`/`catalog_module` — тоже 0): запрос круга 1 был неисполним. Правая часть теперь `authzmap.Catalog()` — `fga_types.go:95`, координата **точна**, комментарий дословно «the SINGLE exported source of the grantable taxonomy»; `VerbsOfType` — `fga_types.go:204`. Левая часть — `role_verb`, заводится `0085_role_verb_projection.sql`, то есть существует **до** этой миграции. Предикат исполним, пока `ADD CONSTRAINT` ещё не сделан, — то есть пока решение обратимо |
 | **З1** | **устранено** | «25 из 27» снято; оставшееся воспроизведено моим предикатом: записей каталога прав **346**, различных `permission` **305**, пар `(module, resource)` **88**, глаголов **87**, модулей **8**, точечных типов **27**, пересечение как есть — **8 из 27** |
 | **З2** | **устранено** | `grep -n 'FGAObjectType(dotted)' services/iam/internal/authzmap/role_verbs.go` → **129**, вхождение в этом файле единственное |
 
@@ -1737,7 +1757,7 @@ Go-сторона его тоже не несёт: `domain.retiredTypes` — `ma
 | # | замечание | предикат |
 |---|---|---|
 | З3 | §2.3: «так уже устроены **четыре** существующие ветви `fkText`; пятая приходит тем же способом» — веток **девять**, `return`-ов семнадцать; новых будет две, то есть десятая и одиннадцатая | `awk '/^func fkText/,/^}$/' services/iam/internal/repo/kaname/pg/pgmaperr.go \| grep -c '^\tcase '` → **9**. Довод от этого только крепнет: способ не единичный, а рутинный |
-| З4 | §0.6 цитирует вывод `uniq -c` **одной** строкой, а команда печатает **две**: `4 DEFERRABLE` и `11 DEFERRABLE INITIALLY DEFERRED`. Вывод «`INITIALLY IMMEDIATE` — 0» верен: все четыре голых вхождения — **проза комментариев** (`0072:72`, `470001:128`, storage `0003:17`, `0007:23`), объявлений DDL среди них ноль. Цитата обязана воспроизводиться дословно либо нести оговорку | та же команда из §0.6 плюс `git grep -nE 'DEFERRABLE' -- 'services/*/internal/migrations/*.sql'` |
+| З4 | §0.6 цитирует вывод `uniq -c` **одной** строкой, а команда печатает **две**: `4 DEFERRABLE` и `11 DEFERRABLE INITIALLY DEFERRED`. Вывод «`INITIALLY IMMEDIATE` — 0» верен: все четыре голых вхождения — **проза комментариев** (`0072:72`, `470001:128`, storage `0003:17`, `0007:23`), объявлений DDL среди них ноль. Цитата обязана воспроизводиться дословно либо нести оговорку | та же команда из §0.6 плюс `git grep -nE 'DEFERRABLE' -- 'PRO-Robotech/kacho:services/*/internal/migrations/*.sql'` |
 | З5 | §0.3: «под **любым** из пяти нормализаторов у **62 из 88** пар каталога прав нет типа вовсе» — «под любым» читается как «при каждом», тогда как 62 отвечает самому благоприятному; как есть у меня **80 из 88**. Вывод (популяции разные и в обратную сторону) от этого только крепнет, но число обязано нести свой нормализатор | разбор `permission` по первым двум сегментам против ключей `objectTypes`, единица — пара `(module, resource)` |
 | З6 | §Р2.1, строка `З2`: «`role_verbs.go:133` → `129-132`, **два вхождения**» читается как два вхождения в исходнике, тогда как §Р.3 круга 1 говорит «вхождение единственное», и оно единственное; правились два места **документа** | `grep -c 'FGAObjectType(dotted)' services/iam/internal/authzmap/role_verbs.go` → **1** |
 
@@ -1784,7 +1804,7 @@ Go-сторона его тоже не несёт: `domain.retiredTypes` — `ma
 | что проверял | предикат | исход |
 |---|---|---|
 | носитель преемника в Go | `retired_types.go:52` — тип `retiredTypes` | `map[string]struct{}`: **значений нет**; преемники названы комментарием `:46-51`, а комментарий не читает ни одна функция |
-| производитель `superseded_by` где-либо в дереве | `git grep -rn 'superseded_by' -- services/iam` | **0** вне этого документа — колонки сегодня не существует, значит и писателя нет |
+| производитель `superseded_by` где-либо в дереве | `git grep -rn 'superseded_by' -- .` | **0** вне этого документа — колонки сегодня не существует, значит и писателя нет |
 | ветви `fkText` | `awk '/^func fkText/,/^}$/' …/pgmaperr.go \| grep -c '^\tcase '` | **9** ветвей, **17** `return`-ов; преемника среди читаемого нет — только `ConstraintName` и подсказки |
 | чтение после отказа | мой прогон, проба `A` | отказ `23503 … CONSTRAINT NAME: rri_res_fk` из **оператора**, следующий запрос той же транзакции — `25P02 current transaction is aborted`: `superseded_by` прочитать **нельзя** |
 
@@ -1848,7 +1868,7 @@ superseded_by` вернул `storage.volumes`. То есть исход 2 тех
 | # | было → стало | команда |
 |---|---|---|
 | З3 | §2.3: «четыре существующие ветви» → **девять** (и новых две — десятая и одиннадцатая) | `awk '/^func fkText/,/^}$/' services/iam/internal/repo/kaname/pg/pgmaperr.go \| grep -c '^\tcase '` → **9**; тот же с `grep -c 'return '` → **17** |
-| З4 | §0.6: цитата `uniq -c` одной строкой → **обе**: `4 DEFERRABLE` и `11 DEFERRABLE INITIALLY DEFERRED`; вывод «`INITIALLY IMMEDIATE` — 0» устоял, четыре голых вхождения — проза комментариев | `git grep -hoE 'DEFERRABLE( INITIALLY (DEFERRED\|IMMEDIATE))?' -- 'services/*/internal/migrations/*.sql' \| sort \| uniq -c`; и `git grep -nE 'DEFERRABLE' -- 'services/*/internal/migrations/*.sql'` — четыре строки-комментария (`0072:72`, `470001:128`, storage `0003:17`, `0007:23`) |
+| З4 | §0.6: цитата `uniq -c` одной строкой → **обе**: `4 DEFERRABLE` и `11 DEFERRABLE INITIALLY DEFERRED`; вывод «`INITIALLY IMMEDIATE` — 0» устоял, четыре голых вхождения — проза комментариев | `git grep -hoE 'DEFERRABLE( INITIALLY (DEFERRED\|IMMEDIATE))?' -- 'PRO-Robotech/kacho:services/*/internal/migrations/*.sql' \| sort \| uniq -c`; и `git grep -nE 'DEFERRABLE' -- 'PRO-Robotech/kacho:services/*/internal/migrations/*.sql'` — четыре строки-комментария (`0072:72`, `470001:128`, storage `0003:17`, `0007:23`) |
 | З5 | §0.3: «под любым из пяти нормализаторов **62 из 88**» → **как есть 80 из 88**, с названным предикатом | разбор `permission` по первым двум сегментам против ключей `objectTypes`; мой прогон: записей **346**, `permission` **305**, пар **88**, `objectTypes` **27**, пересечение **8 из 27**, без типа **80 из 88** |
 | З6 | §Р2.1: «два вхождения» → «два места **документа**»; в исходнике вхождение одно | `grep -c 'FGAObjectType(dotted)' services/iam/internal/authzmap/role_verbs.go` → **1**, строка **129** |
 
@@ -1942,7 +1962,7 @@ PostgreSQL **16.15** (`postgres:16-alpine`, контейнер `pg1030r5`, сн�
 исход 2 отвергнут **ценой**, а не невозможностью, и цена названа числами — писатель
 вставляет **по строке в цикле** (`role_repo.go:544` — прочитано, цикл
 `for _, pv := range pairs` с `Exec` внутри), точек сохранения в прод-коде iam
-сегодня **0** (`git grep -in savepoint -- 'services/iam/internal/**/*.go'` без
+сегодня **0** (`git grep -in savepoint -- 'internal/**/*.go'` без
 тестов → **0**). Моя формулировка круга 2 («прочитать нельзя без точки сохранения,
 которой документ не называет») была верна буквально и **шире по впечатлению**, чем
 по существу: она читалась как невозможность. Это моя неточность, и она названа
@@ -1977,7 +1997,7 @@ PostgreSQL **16.15** (`postgres:16-alpine`, контейнер `pg1030r5`, сн�
 
 Попутно проверено и сошлось: `retiredTypes` — `map[string]struct{}` с **тремя**
 записями, преемники названы комментарием `retired_types.go:46-51`;
-`git grep -rn 'superseded_by' -- services/iam` вне этого документа → **0**;
+`git grep -rn 'superseded_by' -- .` вне этого документа → **0**;
 `domain.KnownModules()` → **6** (`compute iam loadbalancer registry storage vpc`) —
 как утверждает `-04`; цитата `-13` воспроизводится дословно
 (`domain/rule.go:224`: `fmt.Errorf("Illegal argument module (unknown module '%s')", module)`);
