@@ -63,11 +63,29 @@ type InternalIAMServiceClient interface {
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	Check(ctx context.Context, in *CheckRequest, opts ...grpc.CallOption) (*CheckResponse, error)
-	// admin force-logout of a user. Writes
-	// `session_revocations` rows for every active access token (enumerated via
-	// Hydra introspection) + a `caep_outbox` row so federated downstream RPs
-	// get notified. Async: returns Operation; the LISTEN/NOTIFY fan-out then
-	// updates every api-gateway pod's revocation cache ≤ 1s.
+	// admin force-logout of a user. Records a USER-LEVEL revoke-all cutoff in the
+	// `user_token_revocations` table and the durable `audit_outbox` row for it in
+	// ONE transaction, then ends the subject's login sessions at the identity
+	// provider.
+	//
+	// The cutoff is the gate the refresh-hook enforces: it denies every token
+	// whose session authenticated at or before that instant. Nothing is
+	// enumerated per token, and no `session_revocations` row is written — a
+	// per-jti row cannot name a token this call has never seen. Once the person
+	// re-authenticates, auth_time advances past the cutoff and new sessions are
+	// issued again: the refusal is protective, not a permanent lockout.
+	//
+	// Async by envelope: returns an Operation, persisted before the mutation and
+	// completed after it, so the id handed back is always queryable.
+	//
+	// FEDERATED NOTIFICATION IS NOT PRODUCED — a recorded decision, not an
+	// omission. This comment used to promise a queue row "so federated downstream
+	// RPs get notified" and a fan-out that refreshed every edge cache within a
+	// second. Both were retired with their migrations and have no producer left;
+	// the reasons are written down in
+	// docs/engineering/architecture/known-divergences.md. An integrator has
+	// neither our history nor a way to re-measure, so the promise is withdrawn
+	// here rather than left standing.
 	ForceLogout(ctx context.Context, in *ForceLogoutRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// PollSubjectChanges drains subject_change_outbox by ascending id cursor,
 	// over the window `(since_id, settled]` — never "everything above the cursor".
@@ -313,11 +331,29 @@ type InternalIAMServiceServer interface {
 	//
 	// REST exposed ONLY on the cluster-internal listener.
 	Check(context.Context, *CheckRequest) (*CheckResponse, error)
-	// admin force-logout of a user. Writes
-	// `session_revocations` rows for every active access token (enumerated via
-	// Hydra introspection) + a `caep_outbox` row so federated downstream RPs
-	// get notified. Async: returns Operation; the LISTEN/NOTIFY fan-out then
-	// updates every api-gateway pod's revocation cache ≤ 1s.
+	// admin force-logout of a user. Records a USER-LEVEL revoke-all cutoff in the
+	// `user_token_revocations` table and the durable `audit_outbox` row for it in
+	// ONE transaction, then ends the subject's login sessions at the identity
+	// provider.
+	//
+	// The cutoff is the gate the refresh-hook enforces: it denies every token
+	// whose session authenticated at or before that instant. Nothing is
+	// enumerated per token, and no `session_revocations` row is written — a
+	// per-jti row cannot name a token this call has never seen. Once the person
+	// re-authenticates, auth_time advances past the cutoff and new sessions are
+	// issued again: the refusal is protective, not a permanent lockout.
+	//
+	// Async by envelope: returns an Operation, persisted before the mutation and
+	// completed after it, so the id handed back is always queryable.
+	//
+	// FEDERATED NOTIFICATION IS NOT PRODUCED — a recorded decision, not an
+	// omission. This comment used to promise a queue row "so federated downstream
+	// RPs get notified" and a fan-out that refreshed every edge cache within a
+	// second. Both were retired with their migrations and have no producer left;
+	// the reasons are written down in
+	// docs/engineering/architecture/known-divergences.md. An integrator has
+	// neither our history nor a way to re-measure, so the promise is withdrawn
+	// here rather than left standing.
 	ForceLogout(context.Context, *ForceLogoutRequest) (*operation.Operation, error)
 	// PollSubjectChanges drains subject_change_outbox by ascending id cursor,
 	// over the window `(since_id, settled]` — never "everything above the cursor".

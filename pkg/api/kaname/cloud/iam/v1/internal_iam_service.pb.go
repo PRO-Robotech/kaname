@@ -804,8 +804,9 @@ type ForceLogoutRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// User to log out from every active session. Required.
 	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// Free-form reason recorded in audit_outbox + each session_revocations row
-	// (default "admin-force-logout").
+	// Free-form reason recorded on the cutoff row and in the `audit_outbox` row
+	// committed with it (default "admin-force-logout"). No per-token row carries
+	// it — this call writes none (see the rpc comment).
 	Reason string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
 	// ID of the admin user (or service account) triggering the force-logout.
 	// Captured for audit; the authz check itself is performed at the gateway
@@ -915,8 +916,16 @@ func (x *ForceLogoutMetadata) GetUserId() string {
 // ForceLogoutResult — Operation.response payload.
 type ForceLogoutResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Number of session_revocations rows newly inserted (i.e. number of
-	// active tokens that were just revoked).
+	// Number of revocation records this call committed — exactly one, the
+	// user-level cutoff.
+	//
+	// IT IS NOT A COUNT OF TOKENS, and saying so is the point of this comment.
+	// The cutoff denies every token whose session predates it; how many that is
+	// cannot be answered here, because the call never enumerates them. The field
+	// used to be documented as "session_revocations rows newly inserted", which
+	// described a per-jti implementation this RPC no longer has: a reader who
+	// believed it would treat 1 as "one token was logged out" and conclude the
+	// rest are still live.
 	RevokedCount  int32 `protobuf:"varint,1,opt,name=revoked_count,json=revokedCount,proto3" json:"revoked_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

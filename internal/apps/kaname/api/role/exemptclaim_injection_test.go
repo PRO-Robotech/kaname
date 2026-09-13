@@ -13,6 +13,8 @@
 package role_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -139,4 +141,98 @@ func TestExemptClaim_UnparsableSourceIsNotAVerdict(t *testing.T) {
 		t.Fatal("неразобранный исходник принят за годный: ноль комментариев был бы засчитан")
 	}
 	t.Logf("отказ разбора, как и должно: %v", err)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ОСЬ ЗАКРЫТОГО НАБОРА (kacho#1922)
+//
+// Радиус гейта расширен с одного каталога до каталога ПЛЮС поимённо названные
+// файлы вне его — там, где то же утверждение пережило починку соседей. У такого
+// набора своя цена: имя, чей файл переехал, перестало бы наблюдаться МОЛЧА.
+//
+// Поэтому сборщик — чистая функция от корней, и ниже доказано, что исчезнувший
+// файл набора даёт ОТКАЗ, а не тишину. Дельта миров — ОДИН факт: есть файл или
+// нет его.
+
+func TestExemptClaim_ClosedSet_MissingNamedFileIsAFindingNotSilence(t *testing.T) {
+	dir := t.TempDir()
+	useCase := filepath.Join(dir, "role")
+	if err := os.MkdirAll(useCase, 0o750); err != nil {
+		t.Fatalf("фикстура не построена: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(useCase, "get.go"),
+		[]byte("package role\n"), 0o600); err != nil {
+		t.Fatalf("фикстура не построена: %v", err)
+	}
+
+	_, err := collectRoleLaneSources(useCase, dir, []string{"internal/gone/visibility.go"})
+	if err == nil {
+		t.Fatal("исчезнувший файл набора обязан быть ОТКАЗОМ: приняв его за пустой " +
+			"вклад, гейт молчал бы ровно тогда, когда утверждение уехало из-под наблюдения")
+	}
+	if !strings.Contains(err.Error(), "internal/gone/visibility.go") {
+		t.Errorf("отказ обязан НАЗВАТЬ файл, иначе читателю нечего чинить: %v", err)
+	}
+}
+
+// TestExemptClaim_ClosedSet_PresentNamedFileIsRead — ЗАКОННЫЙ БЛИЗНЕЦ: тот же
+// мир, файл на месте.
+func TestExemptClaim_ClosedSet_PresentNamedFileIsRead(t *testing.T) {
+	dir := t.TempDir()
+	useCase := filepath.Join(dir, "role")
+	if err := os.MkdirAll(filepath.Join(dir, "internal", "gone"), 0o750); err != nil {
+		t.Fatalf("фикстура не построена: %v", err)
+	}
+	if err := os.MkdirAll(useCase, 0o750); err != nil {
+		t.Fatalf("фикстура не построена: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(useCase, "get.go"),
+		[]byte("package role\n"), 0o600); err != nil {
+		t.Fatalf("фикстура не построена: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal", "gone", "visibility.go"),
+		[]byte("// claim\npackage authzfilter\n"), 0o600); err != nil {
+		t.Fatalf("фикстура не построена: %v", err)
+	}
+
+	got, err := collectRoleLaneSources(useCase, dir, []string{"internal/gone/visibility.go"})
+	if err != nil {
+		t.Fatalf("файл на месте — сбор обязан пройти: %v", err)
+	}
+	if _, ok := got["internal/gone/visibility.go"]; !ok {
+		t.Error("названный файл обязан ПОПАСТЬ в судимый набор: не попав, он остался бы " +
+			"вне наблюдения при зелёном гейте — ровно тот исход, ради которого набор закрыт")
+	}
+	if _, ok := got["get.go"]; !ok {
+		t.Error("файл каталога use-case обязан остаться в наборе: расширение радиуса не " +
+			"вправе сузить прежний охват")
+	}
+}
+
+// TestExemptClaim_ClosedSet_TestFilesStayOutside — граница, названная в шапке
+// гейта: тестовое дерево не судится, иначе гейт краснел бы на собственном
+// объяснении.
+func TestExemptClaim_ClosedSet_TestFilesStayOutside(t *testing.T) {
+	dir := t.TempDir()
+	useCase := filepath.Join(dir, "role")
+	if err := os.MkdirAll(useCase, 0o750); err != nil {
+		t.Fatalf("фикстура не построена: %v", err)
+	}
+	for name, body := range map[string]string{
+		"get.go":      "package role\n",
+		"get_test.go": "// говорит про полосу <exempt>\npackage role\n",
+	} {
+		if err := os.WriteFile(filepath.Join(useCase, name), []byte(body), 0o600); err != nil {
+			t.Fatalf("фикстура не построена: %v", err)
+		}
+	}
+
+	got, err := collectRoleLaneSources(useCase, dir, nil)
+	if err != nil {
+		t.Fatalf("сбор обязан пройти: %v", err)
+	}
+	if _, ok := got["get_test.go"]; ok {
+		t.Error("тестовый файл попал в судимый набор — гейт нашёл бы собственное " +
+			"объяснение и объявил бы его находкой")
+	}
 }

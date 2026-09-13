@@ -25,8 +25,10 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// A SessionRevocation resource — fast-lookup row keyed by `token_jti`, used by
-// api-gateway and CAEP drainer to know which active tokens have been revoked.
+// A SessionRevocation resource — fast-lookup row keyed by `token_jti`, asked by
+// api-gateway on the request path to know whether a presented token has been
+// revoked. A CAEP drainer was named here as a second reader; that pipeline was
+// dropped by migration and has no code left.
 //
 // PK = `token_jti` directly (lookup pattern is
 // `WHERE token_jti = $1`, no other consumers, surrogate id is overhead).
@@ -46,8 +48,8 @@ type SessionRevocation struct {
 	RevokedAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=revoked_at,json=revokedAt,proto3" json:"revoked_at,omitempty"`
 	// After this timestamp the row may be pruned (token would naturally expire).
 	TtlExpiresAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=ttl_expires_at,json=ttlExpiresAt,proto3" json:"ttl_expires_at,omitempty"`
-	// Free-form reason (e.g. `user-logout`, `password-change`, `caep-event`,
-	// `admin-revoke`). 1-128 chars.
+	// Free-form reason (e.g. `user-logout`, `password-change`, `admin-revoke`).
+	// 1-128 chars. The vocabulary is not closed and the service does not judge it.
 	Reason        string `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
