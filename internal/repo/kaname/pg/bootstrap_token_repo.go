@@ -22,7 +22,9 @@ import (
 )
 
 // bootstrapSvaID — the deterministic bootstrap ServiceAccount id, byte-identical
-// to migration 0058's `'sva' || substr(md5('kacho-bootstrap-admin'),1,17)` and to
+// to migration 0058's `'sva' || substr(md5('kacho-bootstrap-admin'),1,17)` — свод
+// вывел идентификатор из ПРЕЖНЕГО имени, и после перевода (#2554) он остаётся тем
+// же: идентификатор пиннут литералом, имя строки теперь `bootstrap-admin` — and to
 // bootstrap_token.DeriveIdentity().SvaID (cross-checked by an integration test).
 const bootstrapSvaID = "svab91854890de887e6d"
 

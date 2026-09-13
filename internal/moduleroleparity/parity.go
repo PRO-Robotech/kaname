@@ -76,7 +76,7 @@ type Census struct {
 	// Live — системных ролей прочитано из базы суммарно.
 	Live int
 	// Ownerless — живых ролей, чей первый сегмент НЕ член закрытого набора
-	// модулей (`admin`, `edit`, `view`, `owner`, `kacho-system.*`). Манифестом
+	// модулей (`admin`, `edit`, `view`, `owner`, `system.*`). Манифестом
 	// они невыразимы by construction и находкой быть не могут: сверять их не с
 	// чем, и число названо именно поэтому.
 	Ownerless int

@@ -42,13 +42,15 @@ const (
 	ClusterAdminRoleID = "rol21232f297a57a5a74"
 
 	// SystemAdminRoleID — the hand-rolled deterministic id of the second `*.*.*`
-	// superuser system role (`kacho-system.admin`), seeded by migration 0001 and
+	// superuser system role (`system.admin`; свод посеял её под именем
+	// `kacho-system.admin`, перевод — миграция 20260913143007, #2554), seeded by migration 0001 and
 	// re-seeded with `*.*.*` rules by migration 0031. Also a legitimate
 	// cluster-admin superuser.
 	SystemAdminRoleID = "rol000000000sysadmin"
 
 	// SystemViewerRoleID — рукописный детерминированный id второй системной роли
-	// пола каталога (`kacho-system.viewer`), посеянной миграцией 0001.
+	// пола каталога (`system.viewer`; свод посеял её под именем `kacho-system.viewer`,
+	// перевод — миграция 20260913143007, #2554), посеянной миграцией 0001.
 	//
 	// ДЛИНА ЕГО — 21, а не 20, и это ФАКТ ПРИМЕНЁННОЙ МИГРАЦИИ, а не описка,
 	// которую можно поправить: id неизменяем на всю жизнь ресурса (ban #15,

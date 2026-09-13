@@ -197,11 +197,18 @@ func TestSeedCensusInjection_RealDocumentOneDigitApart(t *testing.T) {
 			"инъекция не докажет ничего, пока настоящий вход не сойдётся")
 	}
 
-	subject, ok := clean.Buckets["ПРЕДМЕТ"]
+	// Портится ЖИВОЕ ведро: оно и есть предмет предиката готовности (§7-П2), и
+	// именно его величина двигается при всякой правке дерева. Замёрзшее ведро
+	// для инъекции не годится — на нём краснеет вторая, антимасочная половина
+	// сверки, и находок стало бы две, то есть «ровно одна» перестало бы
+	// различать испорченное ведро от соседа.
+	const injectedBucket = "ПРЕДМЕТ: живой"
+
+	subject, ok := clean.Buckets[injectedBucket]
 	if !ok {
-		t.Fatalf("предпосылка инъекции не выполнена: ведро ПРЕДМЕТ не объявлено")
+		t.Fatalf("предпосылка инъекции не выполнена: ведро %q не объявлено", injectedBucket)
 	}
-	at, known := clean.LineOf["ПРЕДМЕТ"]
+	at, known := clean.LineOf[injectedBucket]
 	if !known {
 		t.Fatalf("предпосылка инъекции не выполнена: разбор не назвал строку объявления")
 	}
@@ -221,7 +228,7 @@ func TestSeedCensusInjection_RealDocumentOneDigitApart(t *testing.T) {
 	spoiled := strings.Join(lines, "\n")
 
 	f := check.AdjudicateSeedCensus(check.ParseSeedCensusDeclaration(spoiled, rep.Order), rep)
-	if len(f) != 1 || !strings.Contains(f[0], "ПРЕДМЕТ") {
+	if len(f) != 1 || !strings.Contains(f[0], injectedBucket) {
 		t.Fatalf("одна испорченная цифра обязана дать РОВНО одну находку по ведру "+
 			"ПРЕДМЕТ, получено %d: %v", len(f), f)
 	}
