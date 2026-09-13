@@ -585,7 +585,11 @@ jobs:
           repository: PRO-Robotech/kacho
           path: upstream-kacho
           fetch-depth: 1
-          sparse-checkout: services
+          # Выборка РАЗРЕЖЁННАЯ и НЕ конусная: нужны ровно манифесты модулей, а
+          # конусный режим тянет каталог служб целиком — плата за операнд стала
+          # бы больше самого операнда.
+          sparse-checkout: services/*/manifest.yaml
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       # Аннотация о несозданном условии — ОТДЕЛЬНЫМ шагом без падающего пути:
