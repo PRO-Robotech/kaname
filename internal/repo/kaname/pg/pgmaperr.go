@@ -181,17 +181,40 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// No EXCLUDE constraints in kaname today; map generically WITHOUT
 		// pgErr.Message (which would leak the constraint/range to the client).
 		return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "resource conflicts with an existing reservation")
-	case pgfault.SerializationConflict: // serialization_failure
-		// A transient write-write serialization conflict — the transaction can
-		// succeed on retry. gRPC ABORTED is the idiomatic "retry the transaction"
-		// code (FAILED_PRECONDITION would tell a well-behaved client NOT to retry,
-		// contradicting the retryable nature). Unreachable under the current
-		// READ COMMITTED regime (within-service invariants use single-statement
-		// CAS / advisory locks / triggers, none of which raise 40001); mapped
-		// correctly so a future SERIALIZABLE path surfaces a retryable code.
+	case pgfault.SerializationConflict: // 40001 serialization_failure ЛИБО 40P01 deadlock_detected
+		// A transient write-write conflict — the transaction can succeed on retry.
+		// gRPC ABORTED is the idiomatic "retry the transaction" code
+		// (FAILED_PRECONDITION would tell a well-behaved client NOT to retry,
+		// contradicting the retryable nature).
+		//
 		// Текст называет ДЕЙСТВИЕ вызывающего, а не уровень изоляции СУБД:
 		// «serialization» — термин нашего хранилища, и арендатор по нему сделать
 		// не может ничего. Код (ABORTED) и смысл «повтори» сохранены дословно.
+		//
+		// ЗДЕСЬ СТОЯЛО «Unreachable under the current READ COMMITTED regime … none
+		// of which raise 40001» — и это НЕВЕРНО о классе, который ветвь стережёт.
+		// Класс `pgfault.SerializationConflict` — это 40001 ЛИБО **40P01
+		// (deadlock_detected)**, а взаимная блокировка поднимается при ЛЮБОМ уровне
+		// изоляции: достаточно двух транзакций, берущих замки в обратном порядке.
+		// Утверждение было верно ровно про свою половину и читалось как про весь
+		// класс — то есть как довод не чинить.
+		//
+		// Опровергается не рассуждением, а СОБСТВЕННЫМ деревом: 40P01 наблюдалась
+		// на стороне арендатора — inversion порядка родов между веером
+		// материализации и снятием выдачи (`internal/apps/kaname/api/access_binding/
+		// reconcile/reconcile.go`, разбор у `AcquireBindingLocks`). Тот случай
+		// починен упорядочиванием, но реализуемость класса он доказал.
+		//
+		// ОТКРЫТЫЙ ОСТАТОК (задача #2439): на АСИНХРОННОЙ мутации этот текст
+		// советует повтор тому, кого нет. Исполнитель операции повторяет с отступом
+		// ТОЛЬКО терминальную запись; тело мутации исполняется один раз, и его отказ
+		// становится терминальным исходом — вызывающий получает `done:true` с
+		// ABORTED и указанием повторить, при том что внутри платформы повтора не
+		// происходит, а повторить обязан он сам, целиком, заводя новую операцию.
+		// Наблюдалось там же: «операция снятия завершалась `done:true` с ABORTED».
+		// Синхронный путь этим не задет — там текст верен. Выбор исхода продуктовый
+		// (он меняет наблюдаемый `Operation.result.error`) и требует приёмки,
+		// поэтому текст здесь НЕ правится мимо неё.
 		return iamerr.Wrapf(iamerr.ErrAborted, "conflicting concurrent change, retry the request")
 	}
 	// connection family 08xxx
