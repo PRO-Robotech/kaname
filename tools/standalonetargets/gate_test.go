@@ -97,7 +97,6 @@ func TestStandaloneTargetsWorkInAStandaloneClone(t *testing.T) {
 
 	clone := buildStandaloneClone(t, moduleRoot)
 	census.Posture = clone
-	t.Log(census.String())
 
 	// Пустой обход — отказ, а не успех: «ноль находок» обязано быть отличимо от
 	// «ноль прочитанного».
@@ -114,8 +113,23 @@ func TestStandaloneTargetsWorkInAStandaloneClone(t *testing.T) {
 		"записи ведомости, которым больше нечего прощать: %v — послабление живёт, пока у него есть предмет",
 		census.StaleWaiv)
 
-	findings, err := standalonetargets.RunTargets(clone, judged, makeRunner(t))
+	findings, unmet, err := standalonetargets.RunTargets(clone, judged, makeRunner(t))
 	require.NoError(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ")
+
+	// Перепись печатается ПОСЛЕ прогона и несёт ТРИ величины, а не две: без
+	// третьей «судимых 14 · находок 0» читалось бы как вердикт о четырнадцати
+	// целях там, где о трёх из них вердикта нет вовсе.
+	census.Findings = len(findings)
+	census.Unmet = len(unmet)
+	t.Log(census.String())
+
+	// Третий исход НАЗЫВАЕТСЯ ПОИМЁННО и в успех не зачитывается. Он не роняет
+	// прогон: предпосылку такой цели создаёт машина, а не дерево, и красное
+	// здесь говорило бы о поставке, а не о продукте.
+	for _, u := range unmet {
+		t.Logf("%s\n  посадка: %s", u, clone)
+	}
+
 	for _, f := range findings {
 		t.Errorf("%s\n  посадка: %s", f, clone)
 	}
