@@ -42,8 +42,26 @@
 #     reason: служба больше не выдаёт токен этим глаголом, полоса снята целиком
 #     issue: kaname#35
 
+# ПЕРЕЧЕНЬ ПУСТ, И ЭТО ЦЕЛЬ, А НЕ ПРОСТОЙ (2026-09-13).
+#
+# Три записи авторитета величин сняты этим изменением: база сравнения — ствол,
+# контрактов величин там больше нет, `buf breaking` находит НОЛЬ разрывов, и
+# решатель назвал каждую запись потерявшей предмет. Послабление, которому нечего
+# прощать, есть находка — механизм сработал ровно так, как задуман.
+#
+# Предикат перемера (форма конвейера, база — ствол на github):
+#
+#     cd proto && buf breaking \
+#       --against "https://github.com/PRO-Robotech/kaname.git#branch=main,subdir=proto" \
+#       --error-format=json | <решатель> proto/declared-breaks.yaml
+#
+# → «находок разобрано 0 · записей перечня 0 · записей без предмета 0», код 0.
+#
+# Пустой перечень решатель ПРОХОДИТ, а не роняет: отказ на достижении цели
+# подталкивал бы держать запись ради зелёного.
+
 breaks:
-  # АВТОРИТЕТ ВЕЛИЧИН УХОДИТ ИЗ СЛУЖБЫ ДОСТУПА ЦЕЛИКОМ — решение владельца
+  # ИСТОРИЯ, А НЕ ДЕЙСТВУЮЩАЯ ЗАПИСЬ — авторитет величин ушёл из службы целиком — решение владельца
   # 2026-09-06, задача PRO-Robotech/kacho#2117, приёмка KAN-QUOTA-1 стадия S4.
   #
   # Порядок соблюдён и ПРОВЕРЕН ЗАМЕРОМ, а не памятью: снятие отвечающего
@@ -55,26 +73,3 @@ breaks:
   #
   # СНЯТЫ ТРИ ФАЙЛА, А НЕ ОТДЕЛЬНЫЕ СИМВОЛЫ, и `path` совпадает с `symbol`
   # намеренно: предмет находки FILE_NO_DELETE ровно один — сам файл.
-  - rule: FILE_NO_DELETE
-    path: kaname/cloud/iam/v1/limit.proto
-    symbol: kaname/cloud/iam/v1/limit.proto
-    reason: |
-      сообщения авторитета величин (Limit, EffectiveLimit, LimitChange и три
-      метаданных операций) сняты вместе с модулем: служба доступа отвечает
-      «кому что разрешено», а не «сколько чего можно завести»
-    issue: https://github.com/PRO-Robotech/kacho/issues/2117
-  - rule: FILE_NO_DELETE
-    path: kaname/cloud/iam/v1/limit_service.proto
-    symbol: kaname/cloud/iam/v1/limit_service.proto
-    reason: |
-      арендаторская поверхность авторитета величин (LimitService, пять глаголов)
-      снята: назначать потолки службе доступа больше нечем и незачем
-    issue: https://github.com/PRO-Robotech/kacho/issues/2117
-  - rule: FILE_NO_DELETE
-    path: kaname/cloud/iam/v1/internal_limit_service.proto
-    symbol: kaname/cloud/iam/v1/internal_limit_service.proto
-    reason: |
-      служебная поверхность авторитета (InternalLimitService, семь глаголов,
-      включая Resolve и ListChangedSince) снята; пять её вызывающих в платформе
-      перестали спрашивать домен величин до этого изменения (kacho#2596)
-    issue: https://github.com/PRO-Robotech/kacho/issues/2117
