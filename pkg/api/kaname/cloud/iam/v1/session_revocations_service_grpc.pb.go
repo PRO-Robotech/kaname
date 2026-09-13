@@ -44,8 +44,8 @@ const (
 // revocation out to every edge pod within a second. That channel had no
 // listener from the first day of the schema and could not be given one — the
 // edge holds no Postgres driver, and reading this service's database directly
-// is ban #8 — so it was retired with its trigger. The reasoning is in
-// docs/engineering/architecture/known-divergences.md.
+// would break database-per-service — so it was retired with its trigger. The
+// reasoning is in docs/engineering/architecture/known-divergences.md.
 //
 // Revocation sources, as the tree produces them today:
 //   - User-initiated logout (the edge's OAuth2 logout handler fronts `Revoke`).
@@ -203,8 +203,8 @@ func (c *internalSessionRevocationsServiceClient) SessionCutoffOf(ctx context.Co
 // revocation out to every edge pod within a second. That channel had no
 // listener from the first day of the schema and could not be given one — the
 // edge holds no Postgres driver, and reading this service's database directly
-// is ban #8 — so it was retired with its trigger. The reasoning is in
-// docs/engineering/architecture/known-divergences.md.
+// would break database-per-service — so it was retired with its trigger. The
+// reasoning is in docs/engineering/architecture/known-divergences.md.
 //
 // Revocation sources, as the tree produces them today:
 //   - User-initiated logout (the edge's OAuth2 logout handler fronts `Revoke`).
