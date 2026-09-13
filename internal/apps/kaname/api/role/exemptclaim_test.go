@@ -31,14 +31,31 @@
 // (`testing.md` §«Гейт на класс», п. 4), поэтому суждение выносится по
 // РАЗОБРАННЫМ комментариям — узлам дерева разбора, а не по строкам файла.
 //
+// # РАДИУС ВЗЯТ ПО МЕХАНИЗМУ, А НЕ ПО КАТАЛОГУ, ГДЕ ДЕФЕКТ ЗАМЕТИЛИ
+//
+// Прежняя редакция судила ОДИН каталог — тот, в котором дефект нашли. Класс это
+// не закрыло: то же утверждение жило в `internal/authzfilter/visibility.go`,
+// рядом с таблицей предикатов страницы, и пережило починку соседей на полторы
+// недели (kacho#1922). Файл объявлял, что запись каталога для `RoleService/Get`
+// освобождена, — тогда как контракт объявляет `scope_filtered` и САМ объясняет,
+// чем это отличается: освобождённая полоса допускает вызов ВООБЩЕ БЕЗ
+// ПРИНЦИПАЛА, а чтение, сужаемое по вызывающему, без принципала сужать не по
+// кому.
+//
+// Поэтому судится ЗАКРЫТЫЙ НАБОР: каталог use-case плюс поимённо названные
+// файлы вне его, чей предмет — та же полоса чтения роли. Исчезнувший файл
+// набора — НАХОДКА, а не тишина: иначе переезд вывел бы утверждение из-под
+// наблюдения, и заметить это было бы нечем.
+//
 // # Границы, названные честно
 //
-// Судятся только НЕ-ТЕСТОВЫЕ файлы каталога, и это не забывчивость: слово стоит
-// в шапке этого самого гейта и в его инъекции, поэтому охват на тестовое дерево
-// сделал бы гейт красным на собственном объяснении — ровно тот класс, который он
-// и ловит. Комментарий пробы, называвший ту же несуществующую полосу, поправлен
-// тем же изменением ВРУЧНУЮ, и держателя у него нет; сказано, чтобы «ноль
-// находок» не читалось шире, чем есть.
+// Судятся только НЕ-ТЕСТОВЫЕ файлы, и это не забывчивость: слово стоит в шапке
+// этого самого гейта и в его инъекции, поэтому охват на тестовое дерево сделал
+// бы гейт красным на собственном объяснении — ровно тот класс, который он и
+// ловит. Комментарии проб, называвшие ту же несуществующую полосу
+// (`internal/authzfilter/read_parity_test.go`), поправлены тем же изменением
+// ВРУЧНУЮ, и держателя у них нет; сказано, чтобы «ноль находок» не читалось
+// шире, чем есть.
 package role_test
 
 import (
@@ -57,16 +74,30 @@ import (
 const (
 	// exemptToken — как полоса освобождения записывается в контракте и в прозе.
 	exemptToken = "<exempt>"
-	// roleContract — контракт, у которого живёт объявление полос.
+	// roleContract — контракт, у которого живёт объявление полос. Координата от
+	// корня МОДУЛЯ.
 	//
-	// Координата от корня ПЛАТФОРМЫ, а не подъём каталогами: число шагов вверх
-	// верно ровно для одной посадки, и в самостоятельном клоне тот же путь
-	// выводит ВЫШЕ корня клона. Контракты в поставку модуля не входят —
-	// отсутствие каталога здесь «условие не создано», а не находка.
+	// ЗДЕСЬ СТОЯЛА КООРДИНАТА ОТ КОРНЯ ПЛАТФОРМЫ, И ГЕЙТ ИЗ-ЗА НЕЁ НЕ ИСПОЛНЯЛСЯ
+	// НИ РАЗУ. Резолв от платформы отвечает «условие не создано» на всякий путь
+	// вне поставки модуля, а контракты в неё когда-то не входили. Решением
+	// владельца 2026-09-13 они переехали в репозиторий службы (kacho#2616):
+	// `proto/` лежит в ЭТОМ модуле, и посылка резолва пережила свой предмет.
+	// Пропуск при этом выглядит как успех — прогон зелёный, вердикта нет ни
+	// одного.
 	roleContract = "proto/kaname/cloud/iam/v1/role_service.proto"
 	// roleUseCaseDir — каталог use-case, чьи комментарии судятся.
 	roleUseCaseDir = "."
 )
+
+// roleLaneFilesOutsideTheUseCase — файлы ВНЕ каталога use-case, чей предмет — та
+// же полоса чтения роли. Координаты от корня МОДУЛЯ.
+//
+// Набор ЗАКРЫТЫЙ и проверяется на существование: файл, которого нет, — находка,
+// потому что молчание о переехавшем утверждении неотличимо от молчания о
+// починенном.
+var roleLaneFilesOutsideTheUseCase = []string{
+	"internal/authzfilter/visibility.go",
+}
 
 // reExemptOption — объявление освобождённой полосы в контракте.
 var reExemptOption = regexp.MustCompile(`permission\s*\)?\s*=\s*"` + regexp.QuoteMeta(exemptToken) + `"`)
@@ -121,19 +152,25 @@ func auditExemptClaims(contract string, sources map[string]string) ([]string, ex
 					"её НИ У ОДНОГО rpc — обе читающие полосы объявлены `scope_filtered`, и "+
 					"контракт сам объясняет почему.\n"+
 					"    читатель заключит, что пообъектного гейта нет, и либо заведёт его "+
-					"второй раз, либо снимет тот, что стоит",
+					"второй раз, либо снимет тот, что стоит.\n"+
+					"    отдельно: освобождённая полоса допускает вызов ВООБЩЕ БЕЗ ПРИНЦИПАЛА, "+
+					"а чтение, сужаемое по вызывающему, без принципала сужать не по кому",
 				name, fset.Position(group.Pos()).Line, exemptToken))
 		}
 	}
 	return findings, census, nil
 }
 
-// roleUseCaseSources — не-тестовые исходники каталога use-case.
-func roleUseCaseSources(t *testing.T) map[string]string {
-	t.Helper()
-	entries, err := os.ReadDir(roleUseCaseDir)
+// collectRoleLaneSources — не-тестовые исходники каталога use-case ПЛЮС поимённо
+// названные файлы полосы вне его.
+//
+// Чистая функция от двух корней: инъекция подаёт ей синтетическое дерево и
+// доказывает, что исчезнувший файл набора даёт ОТКАЗ, а не тишину. Спрятав это
+// в `t.Fatalf` внутри сборщика, свойство пришлось бы проверять чтением.
+func collectRoleLaneSources(useCaseDir, moduleRoot string, extra []string) (map[string]string, error) {
+	entries, err := os.ReadDir(useCaseDir)
 	if err != nil {
-		t.Fatalf("каталог use-case не прочитан: %v", err)
+		return nil, fmt.Errorf("каталог use-case не прочитан: %w", err)
 	}
 	out := map[string]string{}
 	for _, e := range entries {
@@ -141,13 +178,47 @@ func roleUseCaseSources(t *testing.T) map[string]string {
 		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		b, rerr := os.ReadFile(filepath.Join(roleUseCaseDir, name))
+		b, rerr := os.ReadFile(filepath.Join(useCaseDir, name)) // #nosec G304 -- обход своего каталога
 		if rerr != nil {
-			t.Fatalf("файл %s не прочитан: %v", name, rerr)
+			return nil, fmt.Errorf("файл %s не прочитан: %w", name, rerr)
 		}
 		out[name] = string(b)
 	}
+	for _, rel := range extra {
+		b, rerr := os.ReadFile(filepath.Join(moduleRoot, filepath.FromSlash(rel))) // #nosec G304 -- координата-константа своего дерева
+		if rerr != nil {
+			return nil, fmt.Errorf("файл набора %s не прочитан: %w.\n"+
+				"    Набор ЗАКРЫТЫЙ: исчезнувший файл — НАХОДКА, а не тишина. Переехал? "+
+				"Поправьте координату ЗДЕСЬ — иначе утверждение уедет из-под наблюдения "+
+				"вместе с ним, и заметить это будет нечем", rel, rerr)
+		}
+		out[rel] = string(b)
+	}
+	return out, nil
+}
+
+// roleLaneSources — тот же сбор против НАСТОЯЩЕГО дерева.
+func roleLaneSources(t *testing.T) map[string]string {
+	t.Helper()
+	moduleRoot, merr := platformtree.ModuleRootFrom(mustWD(t))
+	if merr != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не установлен: %v", merr)
+	}
+	out, err := collectRoleLaneSources(roleUseCaseDir, moduleRoot, roleLaneFilesOutsideTheUseCase)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
 	return out
+}
+
+// mustWD — рабочий каталог либо ОТКАЗ: не установлен — судить не о чем.
+func mustWD(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: рабочий каталог не установлен: %v", err)
+	}
+	return dir
 }
 
 // TestUseCaseDoesNotClaimAnExemptLaneTheContractNeverDeclared — вердикт о
@@ -156,11 +227,17 @@ func roleUseCaseSources(t *testing.T) map[string]string {
 // Способность падать доказывает не этот прогон, а инъекция
 // (`exemptclaim_injection_test.go`).
 func TestUseCaseDoesNotClaimAnExemptLaneTheContractNeverDeclared(t *testing.T) {
-	contract, err := os.ReadFile(platformtree.RequirePath(t, roleContract))
-	if err != nil {
-		t.Fatalf("контракт не прочитан (%s): %v", roleContract, err)
+	moduleRoot, merr := platformtree.ModuleRootFrom(mustWD(t))
+	if merr != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не установлен: %v", merr)
 	}
-	findings, census, aerr := auditExemptClaims(string(contract), roleUseCaseSources(t))
+	contract, err := os.ReadFile(filepath.Join(moduleRoot, filepath.FromSlash(roleContract)))
+	if err != nil {
+		t.Fatalf("контракт не прочитан (%s): %v.\n"+
+			"    Это НЕ «условие не создано»: контракты службы лежат в её собственном "+
+			"модуле, поэтому отсутствие файла здесь — находка", roleContract, err)
+	}
+	findings, census, aerr := auditExemptClaims(string(contract), roleLaneSources(t))
 	if aerr != nil {
 		t.Fatalf("сверка не отработала: %v", aerr)
 	}
