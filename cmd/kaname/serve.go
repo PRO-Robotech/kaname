@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/restfront"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
@@ -659,14 +660,10 @@ func runServe(cfg config.Config) error {
 	); err != nil {
 		return err
 	}
-	if err := requireDistinctSurfaceAddrs(
-		cfg.APIServer.ListenAddress(),
-		cfg.APIServer.InternalListenAddress(),
-		cfg.APIServer.RESTListenAddress(),
-		cfg.APIServer.InternalRESTListenAddress(),
-	); err != nil {
-		return err
-	}
+	// Различимость адресов поверхностей судится НЕ ЗДЕСЬ, а там, где собран срез
+	// подъёма: сверять надо ВСЕ поверхности, а адреса не-gRPC приходят профилем
+	// поверхности, которого на этом шаге ещё нет. Прежде страж стоял здесь и
+	// сверял четыре адреса из восьми (#2639).
 	// ПАРА «адрес + удостоверение» административного контура. Половина пары
 	// хуже отсутствия обеих: она выглядит настроенной, отказывая на каждой
 	// административной операции фасада (задача #2471).
@@ -1128,7 +1125,7 @@ func runServe(cfg config.Config) error {
 		Name:    "вебхуки провайдера личности",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(hooksAddr, "KANAME_AUTHN__HOOKS_HTTP_ENDPOINT не задан профилем развёртывания: обогащение токена и заведение пользователя по первому входу на этой посадке не обслуживаются"),
+		Addr:    addrAxis(hooksAddr, knobHooks+" не задан профилем развёртывания: обогащение токена и заведение пользователя по первому входу на этой посадке не обслуживаются"),
 		Handler: hooksHandler,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
@@ -1148,7 +1145,7 @@ func runServe(cfg config.Config) error {
 		Name:    "диагностика (/metrics)",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(metricsAddr, "KANAME_API_SERVER__METRICS_ENDPOINT не задан профилем развёртывания: скрейпа на этой посадке нет"),
+		Addr:    addrAxis(metricsAddr, knobMetrics+" не задан профилем развёртывания: скрейпа на этой посадке нет"),
 		Handler: metricsMux,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.NotApplicable[servicecontract.SurfaceAuthMech](
@@ -1260,7 +1257,7 @@ func runServe(cfg config.Config) error {
 		Name:    "выдача токенов (/iam/token, /iam/v1/token)",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(registryTokenAddr, "KANAME_API_SERVER__REGISTRY_TOKEN__ENDPOINT не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
+		Addr:    addrAxis(registryTokenAddr, knobRegistryToken+" не задан профилем развёртывания: docker login на этой посадке не обслуживается"),
 		Handler: registryTokenHandler,
 		Reach:   servicecontract.ReachExternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](
@@ -1428,7 +1425,7 @@ func runServe(cfg config.Config) error {
 		Name:    "зеркало публичных ключей проверки (/.well-known/jwks.json)",
 		Mode:    surfaceMode,
 		Logger:  logger,
-		Addr:    addrAxis(jwksProxyAddr, "KANAME_API_SERVER__JWKS_PROXY__ENDPOINT не задан профилем развёртывания: плоскости данных реестра неоткуда взять ключи проверки, и её верификация останется закрытой"),
+		Addr:    addrAxis(jwksProxyAddr, knobJWKSProxy+" не задан профилем развёртывания: плоскости данных реестра неоткуда взять ключи проверки, и её верификация останется закрытой"),
 		Handler: jwksProxyHandler,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.NotApplicable[servicecontract.SurfaceAuthMech](
@@ -1468,7 +1465,7 @@ func runServe(cfg config.Config) error {
 		Name:   "собственный публичный REST-фронт",
 		Mode:   surfaceMode,
 		Logger: logger,
-		Addr: addrAxis(restAddr, "KANAME_API_SERVER__REST_ENDPOINT не задан профилем развёртывания: "+
+		Addr: addrAxis(restAddr, knobPublicREST+" не задан профилем развёртывания: "+
 			"собственной HTTP-поверхности у службы на этой посадке нет, и арендатор "+
 			"дотянется до неё только через край платформы, которого у отдельно "+
 			"поставленной службы нет"),
@@ -1496,7 +1493,7 @@ func runServe(cfg config.Config) error {
 		Name:   "собственный внутренний REST-фронт",
 		Mode:   surfaceMode,
 		Logger: logger,
-		Addr: addrAxis(internalRESTAddr, "KANAME_API_SERVER__INTERNAL_REST_ENDPOINT не задан "+
+		Addr: addrAxis(internalRESTAddr, knobInternalREST+" не задан "+
 			"профилем развёртывания: служебные поверхности по HTTP на этой посадке "+
 			"не обслуживаются"),
 		Handler: internalRESTHandler,
@@ -1512,10 +1509,39 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("профиль поверхности внутреннего REST-фронта: %w", err)
 	}
 
-	httpSurfaces := []servicecontract.SurfaceDescriptor{
-		hooksSurface, metricsSurface, registryTokenSurface, jwksProxySurface,
-		restSurface, internalRESTSurface,
+	// Срез подъёма несёт ПАРУ «ручка профиля + принятый профиль»: ручку не
+	// вывести из дескриптора, а страж различимости адресов обязан назвать её в
+	// отказе — иначе оператор знает, что не так, и не знает, где это чинить.
+	httpSurfaces := []raisedSurface{
+		{knobHooks, hooksSurface},
+		{knobMetrics, metricsSurface},
+		{knobRegistryToken, registryTokenSurface},
+		{knobJWKSProxy, jwksProxySurface},
+		{knobPublicREST, restSurface},
+		{knobInternalREST, internalRESTSurface},
 	}
+
+	// ВСЕ поверхности, которые поднимает корень, слушают разные адреса.
+	//
+	// Стоит ЗДЕСЬ, а не среди прочих стражей посадки: перечень берётся из того
+	// самого среза, которым поверхности поднимаются, поэтому «сверено меньше,
+	// чем поднимается» непредставимо. Цена размещения названа честно: сокеты
+	// gRPC-слушателей к этому моменту уже привязаны, зато ни один сокет
+	// поверхности — ещё нет, и отказ приходит до того, как хоть одна начнёт
+	// слушать. Разбор — в шапке `restfrontaddr.go`.
+	surfaceAddrCheck, err := requireDistinctSurfaceAddrs(append(
+		[]surfaceAddr{
+			{knobPublicGRPC, cfg.APIServer.ListenAddress()},
+			{knobInternalGRPC, cfg.APIServer.InternalListenAddress()},
+		},
+		surfaceAddrsOfRaised(httpSurfaces)...,
+	))
+	if err != nil {
+		return err
+	}
+	// Перепись печатается и на успешном старте: «ноль совпадений» обязано быть
+	// отличимо от «ничего не сверяли».
+	logger.Info("раздельность адресов поверхностей", surfaceAddrCheck.Fields()...)
 
 	// Про не-gRPC поверхности здесь больше не сообщается: о себе докладывает
 	// каждая сама при подъёме, и доклад несёт то, чего эта строка не несла
@@ -1634,17 +1660,20 @@ func runServe(cfg config.Config) error {
 	// Условная постановка вернула бы то самое молчание, ради устранения которого
 	// выключение стало объявлением.
 	for _, surface := range httpSurfaces {
-		wait, serr := servicehost.ServeSurface(surfaceCtx, surface)
+		wait, serr := servicehost.ServeSurface(surfaceCtx, surface.desc)
 		if serr != nil {
 			stopSurfaces()
-			return fmt.Errorf("поверхность %q: %w", surface.Spec().Name, serr)
+			return fmt.Errorf("поверхность %q (%s): %w",
+				surface.desc.Spec().Name, surface.knob, serr)
 		}
 		tasks = append(tasks, func() error {
 			if werr := wait(); werr != nil {
 				logger.Error("не-gRPC поверхность остановлена с ошибкой",
-					"surface", string(surface.Spec().Name), "err", werr)
+					"surface", string(surface.desc.Spec().Name),
+					"knob", surface.knob, "err", werr)
 				triggerShutdown()
-				return fmt.Errorf("поверхность %q: %w", surface.Spec().Name, werr)
+				return fmt.Errorf("поверхность %q (%s): %w",
+					surface.desc.Spec().Name, surface.knob, werr)
 			}
 			return nil
 		})
@@ -1978,6 +2007,31 @@ func runServe(cfg config.Config) error {
 		} else if mres.Executed {
 			logger.Info("orphan-mirror sweep: "+mres.Census(),
 				slog.Int("left_to_owner", len(mres.LeftToOwner)))
+		}
+		// Разность зеркала и живого каталога — ЧИТАЕТСЯ, а не чинится
+		// (kacho#1828). Держателем может быть только чтение: ключ на
+		// `(dotted, live)` запретил бы снятие типа, пока у арендатора есть хоть
+		// один такой ресурс, и довод записан у самого оператора вставки.
+		//
+		// Отзыв ОТНИМАЕТ доступ, поэтому проход ничего не отзывает и ничего не
+		// роняет: решение по каждой неразрешимой строке принимает владелец. Чего
+		// ему не хватало — ВЕЛИЧИНЫ: читатель в дереве был, а на поднятом стенде
+		// его не спрашивал никто, и «разности нет» было неотличимо от «не
+		// мерили» ни одной строкой журнала.
+		//
+		// Перепись печатается НА ЛЮБОМ исходе, включая чистый, и называет оба
+		// числа. Уровень выбирается по НЕРАЗРЕШИМОЙ части: снятое с преемником —
+		// объявленное свойство дерева, и жалоба на нём краснела бы после всякого
+		// законного снятия типа.
+		if drows, dscanned, derr := resource_mirror.Divergence(taskCtx, pool); derr != nil {
+			logger.Warn("resource-mirror divergence unread (next boot will retry)",
+				slog.Any("err", derr))
+		} else if census := resource_mirror.DivergenceCensus(drows, dscanned); len(
+			resource_mirror.UnresolvableDivergence(drows)) > 0 {
+			logger.Warn("resource-mirror divergence: "+census,
+				slog.Int("unresolvable", len(resource_mirror.UnresolvableDivergence(drows))))
+		} else {
+			logger.Info("resource-mirror divergence: " + census)
 		}
 		if oerr := seed.BackfillOwnerBindings(taskCtx, pool); oerr != nil {
 			logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))

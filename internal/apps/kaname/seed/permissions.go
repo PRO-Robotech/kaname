@@ -49,7 +49,7 @@
 //
 // Три числа, каждое из embed-файла, каждое своим маркером и каждое сверяется тем
 // же гейтом. Аннотации наполнены: записи без права нет ни одной, поэтому
-// `PermissionsForRole("kacho-system.viewer")` разворачивается в права
+// `PermissionsForRole("system.viewer")` разворачивается в права
 // читающего класса, а не в пустой список. Право записывается тремя сегментами
 // (`<домен>.<ресурс>.<глагол>`); 22 записи вместо права несут литерал изъятия
 // `catalogderive.ExemptPermission`, и это НЕ пустое поле: изъятие объявлено, а
@@ -84,6 +84,8 @@ import (
 	"strings"
 
 	"github.com/PRO-Robotech/corelib/authz/catalogderive"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
 // PermissionEntry — one row from permission_catalog.json.
@@ -201,18 +203,27 @@ func (r *PermissionRegistry) RequiredACRMin(fqn string) string {
 
 // PermissionsForRole — права, семантически приписанные роли.
 //
-// `kacho-system.admin` → `["*.*.*.*"]`: маску сопоставляет рантайм, фильтр по
-// каталогу здесь не нужен. `kacho-system.viewer` → права каталога, чей последний
-// сегмент читающий (`read` / `list` / `get`).
+// Роль администратора установки → `["*.*.*.*"]`: маску сопоставляет рантайм,
+// фильтр по каталогу здесь не нужен. Роль пола каталога → права каталога, чей
+// последний сегмент читающий (`read` / `list` / `get`).
 //
 // Маска администратора четырёхсегментная, а права каталога трёхсегментные, и это
 // НЕ расхождение: сопоставление берёт последний сегмент и формы не требует.
+//
+// # ИМЯ — КЛЮЧ ДИСПЕТЧЕРИЗАЦИИ, И НА ВРЕМЯ ПЕРЕХОДА ЕГО ДВА
+//
+// Написание приводится к объявленному ОДНИМ помощником
+// (`domain.SeedIdentityDeclared`), а не сверяется ветвью на каждое написание:
+// иначе объявлений пары стало бы столько же, сколько ветвей. Пока манифесты
+// чужих продуктов не переведены (П3 приёмки), прежнее написание продолжает
+// приходить сюда и обязано разворачиваться так же — «прав нет» здесь
+// синтаксически верно и неотличимо от честного ответа.
 func (r *PermissionRegistry) PermissionsForRole(roleName string) []string {
-	switch roleName {
-	case "kacho-system.admin":
+	switch domain.SeedIdentityDeclared(roleName) {
+	case domain.SystemAdminRoleName:
 		// Wildcard role: matches anything via Check.
 		return []string{"*.*.*.*"}
-	case "kacho-system.viewer":
+	case domain.SystemViewerRoleName:
 		var perms []string
 		seen := make(map[string]struct{})
 		for _, e := range r.entries {

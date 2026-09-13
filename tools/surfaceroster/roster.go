@@ -132,7 +132,17 @@ func Read(iamRoot string) (Roster, error) {
 	r.FilesRead++
 	r.DefaultsRead = n
 
-	declared, err := readDeclaredSurfaces(filepath.Join(iamRoot, "cmd/kaname/serve.go"))
+	// Константы композиционного корня собираются ПЕРЕД разбором объявлений:
+	// имя ручки профиля объявлено константой и склеивается с текстом причины,
+	// поэтому разбор одного файла её значения не видит (#2639).
+	rootDir := filepath.Join(iamRoot, "cmd/kaname")
+	consts, constFiles, err := readPackageStringConsts(rootDir)
+	if err != nil {
+		return r, err
+	}
+	r.FilesRead += constFiles
+
+	declared, err := readDeclaredSurfaces(filepath.Join(rootDir, "serve.go"), consts)
 	if err != nil {
 		return r, err
 	}
@@ -184,8 +194,13 @@ func readDefaults(path string) (map[string]string, int, error) {
 		if !ok || sel.Sel.Name != "SetDefault" {
 			return true
 		}
-		key, ok1 := stringLit(call.Args[0])
-		val, ok2 := stringLit(call.Args[1])
+		// Таблица констант здесь НЕ подаётся осознанно: таблица умолчаний
+		// объявляет пары литералами, и разрешать по ней константы соседнего
+		// пакета значило бы читать значения, которых в этом файле нет.
+		// Появится умолчание, собранное константой, — оно выпадет из перечня,
+		// и это увидит гейт, сверяющий умолчания с поверхностями.
+		key, ok1 := stringLit(call.Args[0], nil)
+		val, ok2 := stringLit(call.Args[1], nil)
 		if !ok1 || !ok2 {
 			return true
 		}
@@ -198,8 +213,57 @@ func readDefaults(path string) (map[string]string, int, error) {
 	return out, len(out), nil
 }
 
+// readPackageStringConsts собирает строковые константы верхнего уровня
+// НЕ-тестовых файлов каталога.
+//
+// Нужны они ровно для одного: имя ручки профиля объявлено в корне ОДИН раз
+// константой — его требуют и причина выключения поверхности, и отказ стража
+// различимости адресов, — а разбор, знающий только литералы, о такой оси не
+// краснеет и не зеленеет, он МОЛЧИТ. Молчание здесь означает «поверхность без
+// ключа настройки», то есть перечень теряет её вместе с её маршрутом.
+func readPackageStringConsts(dir string) (map[string]string, int, error) {
+	out := map[string]string{}
+	names, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return nil, 0, err
+	}
+	fset := token.NewFileSet()
+	read := 0
+	for _, path := range names {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		f, perr := parser.ParseFile(fset, path, nil, 0)
+		if perr != nil {
+			return nil, 0, fmt.Errorf("корень %s: %w", path, perr)
+		}
+		read++
+		for _, decl := range f.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for i, name := range vs.Names {
+					if i >= len(vs.Values) {
+						continue
+					}
+					if v, ok := stringLit(vs.Values[i], out); ok {
+						out[name.Name] = v
+					}
+				}
+			}
+		}
+	}
+	return out, read, nil
+}
+
 // readDeclaredSurfaces читает объявления поверхностей композиционного корня.
-func readDeclaredSurfaces(path string) ([]Surface, error) {
+func readDeclaredSurfaces(path string, consts map[string]string) ([]Surface, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, 0)
 	if err != nil {
@@ -223,13 +287,13 @@ func readDeclaredSurfaces(path string) ([]Surface, error) {
 			}
 			switch key.Name {
 			case "Name":
-				if v, ok := stringLit(kv.Value); ok {
+				if v, ok := stringLit(kv.Value, consts); ok {
 					s.Name = v
 				}
 			case "Reach":
 				s.Reach = reachOf(kv.Value)
 			case "Addr":
-				s.SettingKey = settingKeyOf(kv.Value)
+				s.SettingKey = settingKeyOf(kv.Value, consts)
 			}
 		}
 		if s.Name != "" {
@@ -273,13 +337,13 @@ func reachOf(e ast.Expr) string {
 // самое, что читает оператор в отказе. Ключ конфигурации выводится из неё по
 // правилу связывания випера, а не выписывается рядом: выписанный разошёлся бы с
 // сообщением молча, и разошёлся бы именно там, где оператор ищет причину.
-func settingKeyOf(e ast.Expr) string {
+func settingKeyOf(e ast.Expr, consts map[string]string) string {
 	call, ok := e.(*ast.CallExpr)
 	if !ok {
 		return ""
 	}
 	for _, a := range call.Args {
-		lit, ok := stringLit(a)
+		lit, ok := stringLit(a, consts)
 		if !ok {
 			continue
 		}
@@ -300,7 +364,10 @@ func settingKeyFromEnv(env string) string {
 	return strings.Join(segs, ".")
 }
 
-func stringLit(e ast.Expr) (string, bool) {
+// stringLit — значение строкового выражения: литерал, склейка либо ИМЕНОВАННАЯ
+// КОНСТАНТА пакета. Константа ПЕРЕМЕННОЙ не является: у переменной значения в
+// объявлении нет, и читать по ней перечень поверхностей было бы гаданием.
+func stringLit(e ast.Expr, consts map[string]string) (string, bool) {
 	switch v := e.(type) {
 	case *ast.BasicLit:
 		if v.Kind != token.STRING {
@@ -308,9 +375,12 @@ func stringLit(e ast.Expr) (string, bool) {
 		}
 		s, err := strconv.Unquote(v.Value)
 		return s, err == nil
+	case *ast.Ident:
+		s, ok := consts[v.Name]
+		return s, ok
 	case *ast.BinaryExpr:
-		l, ok1 := stringLit(v.X)
-		r, ok2 := stringLit(v.Y)
+		l, ok1 := stringLit(v.X, consts)
+		r, ok2 := stringLit(v.Y, consts)
 		if !ok1 || !ok2 {
 			return "", false
 		}

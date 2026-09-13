@@ -11,7 +11,7 @@ import (
 )
 
 // Role — multi-scope. Exactly one scope field is non-NULL:
-//   - is_system=true + ClusterID set: system role (`kacho-system.admin`, ...).
+//   - is_system=true + ClusterID set: system role (`system.admin`, ...).
 //   - is_system=false + AccountID set: account-scoped custom role.
 //   - is_system=false + ProjectID set: project-scoped custom role.
 //
@@ -35,7 +35,7 @@ type Role struct {
 	Permissions Permissions
 	IsSystem    bool
 	// OwnerModule — модуль, которому роль принадлежит. Пусто у ПЛАТФОРМЕННОЙ
-	// роли (admin/edit/view/owner, kacho-system.*), непусто у роли, объявленной
+	// роли (admin/edit/view/owner, system.*), непусто у роли, объявленной
 	// манифестом этого модуля.
 	//
 	// Носит ровно ОДИН смысл — владение, — и потому отделяет послабление

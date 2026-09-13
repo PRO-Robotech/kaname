@@ -31,7 +31,8 @@ package domain
 
 // seededResourceIDs — литералы, посеянные миграциями. Ключ — сам литерал.
 var seededResourceIDs = map[string]struct{}{
-	// `kacho-system.viewer`, посев 0001_initial.sql. Длина 21 при чеканных 20.
+	// `system.viewer` (свод посеял под именем `kacho-system.viewer`), посев
+	// 0001_initial.sql. Длина 21 при чеканных 20.
 	SystemViewerRoleID: {},
 }
 

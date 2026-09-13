@@ -92,9 +92,14 @@ func iamMigrationCorpus(t *testing.T) (bodies map[string]string, read int) {
 //
 // tables — таблицы, объявленные деревом; charged — пары «таблица → вид»,
 // вычитанные из объявлений триггеров.
+//
+// ВИДЫ ПРИХОДЯТ СПИСКОМ ИМЁН, а не парами «вид + носитель». Прежде пара
+// приезжала из закрытого каталога авторитета величин; каталог ушёл вместе с
+// авторитетом (`PRO-Robotech/kacho#2117`, стадия S4), и носитель вложенного вида
+// выводится теперь из его же имени (`ParentKind`).
 func anchorFindings(
 	records []domain.SubordinateResource,
-	catalogue []domain.CountableKind,
+	counted []domain.LimitKind,
 	tables map[string]bool,
 	charged map[string]map[string]bool,
 ) []string {
@@ -102,14 +107,14 @@ func anchorFindings(
 	for _, r := range records {
 		// Виды, опирающиеся на эту запись, — то, что должно списываться.
 		var kinds []domain.LimitKind
-		for _, e := range catalogue {
-			if e.Kind.ChildKind() == r.Kind {
-				kinds = append(kinds, e.Kind)
+		for _, k := range counted {
+			if k.ChildKind() == r.Kind {
+				kinds = append(kinds, k)
 			}
 		}
 		if len(kinds) == 0 {
 			out = append(out, string(r.Kind)+
-				" — подчинённый ресурс объявлен, но ни один вид каталога на него не опирается: "+
+				" — подчинённый ресурс объявлен, но ни один считаемый вид на него не опирается: "+
 				"запись пережила свой предмет")
 			continue
 		}
@@ -168,7 +173,7 @@ func TestCredentialCeilingAnchor_TablesAndChargersExist(t *testing.T) {
 	require.NotEmpty(t, charged, "предикат не нашёл ни одного триггера списания")
 
 	require.Empty(t, anchorFindings(
-		domain.SubordinateResources(), domain.CountableEntries(), tables, charged))
+		domain.SubordinateResources(), domain.PostureStatedKinds(), tables, charged))
 
 	t.Logf("перепись: миграций прочитано %d, таблиц объявлено %d, таблиц со списанием %d, записей подчинённых ресурсов %d",
 		read, len(tables), len(charged), len(domain.SubordinateResources()))
@@ -184,7 +189,7 @@ func TestCredentialCeilingAnchor_GateCanFail(t *testing.T) {
 		Tables:  []string{"kaname.user_oauth_clients"},
 		Why:     "право вычисляется от принципала",
 	}
-	cat := []domain.CountableKind{{Kind: "iam.user.credential", Carrier: "iam.user"}}
+	cat := []domain.LimitKind{"iam.user.credential"}
 	tables := map[string]bool{"kaname.user_oauth_clients": true}
 	charged := map[string]map[string]bool{
 		"kaname.user_oauth_clients": {"iam.user.credential": true},
@@ -204,7 +209,7 @@ func TestCredentialCeilingAnchor_GateCanFail(t *testing.T) {
 
 	t.Run("G6: вид с опечаткой — списания под таким именем нет", func(t *testing.T) {
 		// Ровно контрпример из приёмки: множественное число в имени вида.
-		badCat := []domain.CountableKind{{Kind: "iam.user.credentials", Carrier: "iam.user"}}
+		badCat := []domain.LimitKind{"iam.user.credentials"}
 		badRec := rec
 		badRec.Kind = "iam.credentials"
 		found := anchorFindings([]domain.SubordinateResource{badRec}, badCat,
@@ -331,21 +336,24 @@ func TestCredentialCeilingAnchor_CarrierIsNamedTheSameEverywhere(t *testing.T) {
 	require.NotEmpty(t, chargedKinds, "ни один триггер не называет вида — предикат мерит форму, а не факт")
 
 	checked := 0
-	for _, e := range domain.CountableEntries() {
-		if _, ok := domain.SubordinateResourceOf(e.Kind.ChildKind()); !ok {
+	for _, k := range domain.PostureStatedKinds() {
+		if _, ok := domain.SubordinateResourceOf(k.ChildKind()); !ok {
 			continue
 		}
-		carrier := string(e.Carrier)
+		// НОСИТЕЛЬ ВЫВОДИТСЯ ИЗ ИМЕНИ — и это ровно то, что делает списание.
+		// Прежде он приезжал отдельным полем каталога, и проба сверяла два
+		// объявления между собой; каталог ушёл, и сверять стало нечего: осталось
+		// одно объявление, а вопрос «принимает ли его схема» — прежний.
+		carrier := string(k.ParentKind())
+		require.NotEmptyf(t, carrier,
+			"вид %q опирается на подчинённый ресурс, но родителя не даёт: носитель "+
+				"не выводится ниоткуда, и списание писало бы строки в пустоту", k)
 		require.Truef(t, accepted[carrier],
-			"каталог считает вид %q в носителе %q, а ограничение схемы такого значения НЕ ПРИНИМАЕТ: "+
-				"строка учёта не вставится вовсе, и потолок молча перестанет действовать", e.Kind, carrier)
-		require.Truef(t, chargedKinds[string(e.Kind)],
-			"каталог объявляет вид %q, а триггера списания с таким именем в дереве нет: "+
-				"величина задаётся и не применяется никогда", e.Kind)
-		require.Equalf(t, string(e.Kind.ParentKind()), carrier,
-			"носитель вида %q не совпадает с его родительской частью, а списание ВЫВОДИТ "+
-				"носитель именно из неё: строка учёта заведётся под одним значением, "+
-				"а списание будет искать её под другим", e.Kind)
+			"вид %q считается в носителе %q, а ограничение схемы такого значения НЕ ПРИНИМАЕТ: "+
+				"строка учёта не вставится вовсе, и потолок молча перестанет действовать", k, carrier)
+		require.Truef(t, chargedKinds[string(k)],
+			"словарь объявляет вид %q, а триггера списания с таким именем в дереве нет: "+
+				"величина задаётся и не применяется никогда", k)
 		checked++
 	}
 	require.NotZero(t, checked,

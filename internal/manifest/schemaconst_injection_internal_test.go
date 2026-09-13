@@ -47,8 +47,8 @@ func injectedManifests(account string) map[string]any {
 }
 
 // constRequirement — одно требование схемы, поданное сверке напрямую.
-func constRequirement(path, value string) []schemaConst {
-	return []schemaConst{{path: path, value: value}}
+func constRequirement(path string, values ...string) []schemaConst {
+	return []schemaConst{{path: path, values: values}}
 }
 
 // TestSchemaConstAuditRedensOnAContradictingValue — ОТРИЦАНИЕ: значение, схеме
@@ -63,10 +63,10 @@ func TestSchemaConstAuditRedensOnAContradictingValue(t *testing.T) {
 			"сверка либо слепа, либо считает не то", len(audit.findings), audit.compared)
 	}
 	for _, must := range []string{
-		"services/synthetic/manifest.yaml", // файл
-		"seed.serviceAccounts[].account",   // ключ
-		"kacho-elsewhere",                  // увиденное
-		`const "kacho-system"`,             // объявленное
+		"services/synthetic/manifest.yaml",  // файл
+		"seed.serviceAccounts[].account",    // ключ
+		"kacho-elsewhere",                   // увиденное
+		`допускает только ["kacho-system"]`, // объявленное
 	} {
 		if !strings.Contains(audit.findings[0], must) {
 			t.Errorf("находка не называет %q — читатель не поймёт, что чинить: %s",
@@ -102,7 +102,7 @@ func TestSchemaConstAuditIsSilentOnALegalTwin(t *testing.T) {
 // прибор, у которого находки ложные, перестают читать.
 func TestSchemaConstAuditDoesNotJudgeADiscriminator(t *testing.T) {
 	audit := auditSchemaConsts(
-		[]schemaConst{{path: "seed.serviceAccounts[].account", value: "system", conditional: true}},
+		[]schemaConst{{path: "seed.serviceAccounts[].account", values: []string{"system"}, conditional: true}},
 		injectedManifests("kacho-system"),
 	)
 	if len(audit.findings) != 0 {
@@ -160,5 +160,99 @@ func TestSchemaConstAuditCountsEveryOccurrence(t *testing.T) {
 	if audit.compared != 2 || len(audit.findings) != 2 {
 		t.Fatalf("сверены не все вхождения списка: сверено %d, находок %d, ожидалось 2 и 2",
 			audit.compared, len(audit.findings))
+	}
+}
+
+// TestSchemaConstAuditAcceptsEitherSpellingOfAWindow — ОКНО: требование из двух
+// значений принимает ОБА и не находит ни одного расхождения.
+//
+// Предмет — §2.4 приёмки `seed-identity-names-its-own-service.md`: манифесты
+// пяти чужих продуктов переводятся своим порядком (П3), и до перевода в дереве
+// законны оба написания одного аккаунта.
+func TestSchemaConstAuditAcceptsEitherSpellingOfAWindow(t *testing.T) {
+	for _, spelling := range []string{"kacho-system", "system"} {
+		audit := auditSchemaConsts(
+			constRequirement("seed.serviceAccounts[].account", "kacho-system", "system"),
+			injectedManifests(spelling),
+		)
+		if len(audit.findings) != 0 {
+			t.Fatalf("написание %q объявлено находкой при окне из двух: %s",
+				spelling, strings.Join(audit.findings, "; "))
+		}
+		if audit.agreeing != 1 {
+			t.Fatalf("написание %q не зачтено отвечающим: отвечает %d из %d сверенных",
+				spelling, audit.agreeing, audit.compared)
+		}
+	}
+}
+
+// TestSchemaConstAuditRedensOnAValueOutsideTheWindow — ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ к
+// окну: третье написание остаётся находкой.
+//
+// Без него проба выше зеленела бы на сверке, которая перестала судить вовсе,
+// как только значений стало больше одного.
+func TestSchemaConstAuditRedensOnAValueOutsideTheWindow(t *testing.T) {
+	audit := auditSchemaConsts(
+		constRequirement("seed.serviceAccounts[].account", "kacho-system", "system"),
+		injectedManifests("sistem"),
+	)
+	if len(audit.findings) != 1 {
+		t.Fatalf("значение вне окна не названо находкой: находок %d", len(audit.findings))
+	}
+	if !strings.Contains(audit.findings[0], "sistem") {
+		t.Fatalf("находка не называет значения, которое противоречит: %q", audit.findings[0])
+	}
+}
+
+// TestSchemaWalkReadsTheEnumForm — распознаватель ЗНАЕТ форму `enum`.
+//
+// Это самая тихая половина класса: пока обход её не знал, требование,
+// записанное перечнем, не давало ни красного, ни зелёного — оно просто
+// отсутствовало в наблюдении, и перепись при этом выглядела правдоподобной.
+func TestSchemaWalkReadsTheEnumForm(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{
+			"account": map[string]any{"enum": []any{"kacho-system", "system"}},
+		},
+	}
+	var consts []schemaConst
+	var unknown []string
+	walkSchemaConsts(schema, "", "$", false, &consts, &unknown)
+
+	if len(unknown) != 0 {
+		t.Fatalf("обход объявил форму непознанной: %s", strings.Join(unknown, "; "))
+	}
+	if len(consts) != 1 {
+		t.Fatalf("перечень не прочитан требованием: требований %d", len(consts))
+	}
+	if got := consts[0].values; len(got) != 2 || got[0] != "kacho-system" || got[1] != "system" {
+		t.Fatalf("перечень прочитан как %q", got)
+	}
+}
+
+// TestSchemaWalkNamesAnEnumItCannotJudge — форма, которую обход судить не умеет,
+// называется ВСЛУХ, а не пропускается.
+//
+// Три случая, и каждый — отдельный способ вывести требование из наблюдения:
+// не список, пустой список, нестроковый элемент.
+func TestSchemaWalkNamesAnEnumItCannotJudge(t *testing.T) {
+	for name, enum := range map[string]any{
+		"не список":           "kacho-system",
+		"пустой список":       []any{},
+		"нестроковый элемент": []any{"kacho-system", 17},
+	} {
+		var consts []schemaConst
+		var unknown []string
+		walkSchemaConsts(
+			map[string]any{"properties": map[string]any{"account": map[string]any{"enum": enum}}},
+			"", "$", false, &consts, &unknown)
+
+		if len(unknown) != 1 {
+			t.Errorf("%s: форма не названа непознанной (названо %d) — требование ушло бы "+
+				"из наблюдения молча", name, len(unknown))
+		}
+		if len(consts) != 0 {
+			t.Errorf("%s: непознанная форма сосчитана требованием", name)
+		}
 	}
 }

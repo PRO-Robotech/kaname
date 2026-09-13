@@ -384,7 +384,7 @@ func buildSynthRepo(t *testing.T, dir string) synthRepo {
 // Дерево несёт объявленную историю, и все четыре положения РАЗЛИЧАЮТСЯ.
 func TestGitAncestry_JudgesFourPositionsOnATreeCarryingTheDeclaredHistory(t *testing.T) {
 	r := buildSynthRepo(t, t.TempDir())
-	ancestry := gitAncestry(t, r.dir, r.root)
+	ancestry := gitAncestry(t, r.dir, r.root, "main")
 
 	require.Equal(t, ancestryYes, ancestry(r.middle), "коммит внутри истории HEAD не признан предком")
 	require.Equal(t, ancestryYes, ancestry(r.head), "вершина не признана предком самой себя")
@@ -399,7 +399,7 @@ func TestGitAncestry_JudgesFourPositionsOnATreeCarryingTheDeclaredHistory(t *tes
 // то же, коммиты те же — объявленного корня в нём нет, и это поставка модуля.
 func TestGitAncestry_RendersNoVerdictWithoutTheDeclaredHistory(t *testing.T) {
 	r := buildSynthRepo(t, t.TempDir())
-	ancestry := gitAncestry(t, r.dir, absentRevision)
+	ancestry := gitAncestry(t, r.dir, absentRevision, "main")
 
 	require.Equal(t, ancestryUnjudged, ancestry(absentRevision),
 		"дерево без объявленной истории вынесло вердикт об отсутствующей ревизии — "+
@@ -412,7 +412,7 @@ func TestGitAncestry_RendersNoVerdictWithoutTheDeclaredHistory(t *testing.T) {
 // по-прежнему находка — иначе починка одной оси погасила бы соседнюю молча.
 func TestGitAncestry_AResolvingRevisionIsJudgedEvenWithoutTheDeclaredHistory(t *testing.T) {
 	r := buildSynthRepo(t, t.TempDir())
-	ancestry := gitAncestry(t, r.dir, absentRevision)
+	ancestry := gitAncestry(t, r.dir, absentRevision, "main")
 
 	require.Equal(t, ancestryNo, ancestry(r.aside),
 		"прежняя половина «резолвится, но не предок» погасла вместе с объявлением истории")
@@ -583,4 +583,60 @@ func TestDatingDeclarationSurvivesALineWrap(t *testing.T) {
 	require.Contains(t, findings[0], "САМОССЫЛКА")
 	require.NotContains(t, findings[0], "deadbee",
 		"продолжение затянуло соседний пункт списка — находка цитирует чужую ревизию")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ВЕРШИНА СУДА — СТВОЛ, А НЕ `HEAD`
+//
+// Пара ниже отличается РОВНО ОДНИМ фактом — какая вершина названа, — и на одном
+// и том же дереве даёт ПРОТИВОПОЛОЖНЫЕ вердикты о ТОМ ЖЕ коммите. Это и есть
+// класс, ради которого вершина стала параметром: работа едет в ствол
+// схлопыванием, поэтому коммит ветки, предок рабочей вершины, предком ствола не
+// станет никогда, и вердикт «по HEAD» описывает дерево, которого после посадки
+// не будет.
+
+// TestGitAncestry_JudgesAgainstTheTrunkNotTheWorkingHead — ИНЪЕКЦИЯ.
+func TestGitAncestry_JudgesAgainstTheTrunkNotTheWorkingHead(t *testing.T) {
+	r := buildSynthRepoWithLaneMergedIntoHead(t, t.TempDir())
+
+	require.Equal(t, ancestryNo, gitAncestry(t, r.dir, r.root, "main")(r.aside),
+		"коммит полосы, в ствол НЕ влитый, признан входящим в его историю: "+
+			"вердикт описывает рабочую вершину, а не дерево, в которое работа едет")
+}
+
+// TestGitAncestry_ByWorkingHeadTheSameCommitLooksLanded — ЗАКОННЫЙ БЛИЗНЕЦ.
+// Тот же репозиторий, тот же коммит; различие одно — названа рабочая вершина.
+// Прохождение здесь доказывает, что инъекция выше ловит ИМЕННО подмену вершины,
+// а не поломку предиката.
+func TestGitAncestry_ByWorkingHeadTheSameCommitLooksLanded(t *testing.T) {
+	r := buildSynthRepoWithLaneMergedIntoHead(t, t.TempDir())
+
+	require.Equal(t, ancestryYes, gitAncestry(t, r.dir, r.root, "HEAD")(r.aside),
+		"по рабочей вершине коммит, в неё влитый, обязан быть предком — "+
+			"иначе пара выше ничего не различает")
+}
+
+// buildSynthRepoWithLaneMergedIntoHead — дерево, повторяющее наш порядок работ:
+// ствол `main` стоит на месте, полоса влита в рабочую вершину.
+func buildSynthRepoWithLaneMergedIntoHead(t *testing.T, dir string) synthRepo {
+	t.Helper()
+	r := buildSynthRepo(t, dir)
+	// Окружение — то же, что у близнеца выше: без подписи `git merge` отказывает
+	// кодом 128, и отказ выглядел бы поломкой предиката, а не фикстуры.
+	env := append(gitenv.Env(),
+		"GIT_AUTHOR_NAME=probe", "GIT_AUTHOR_EMAIL=probe@invalid",
+		"GIT_COMMITTER_NAME=probe", "GIT_COMMITTER_EMAIL=probe@invalid")
+	git := func(args ...string) {
+		t.Helper()
+		c := gitenv.Command(dir, args...)
+		c.Env = env
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("проба НЕ ИСПОЛНЯЛАСЬ: git %v: %v\n%s", args, err, out)
+		}
+	}
+	// Рабочая вершина отвязывается от ствола и вбирает полосу: `main` остаётся
+	// там, где был, ровно как ствол остаётся до схлопывания.
+	git("checkout", "--quiet", "--detach", "main")
+	git("merge", "--quiet", "--no-ff", "-m", "слияние полосы в рабочую вершину", r.aside)
+	return r
 }

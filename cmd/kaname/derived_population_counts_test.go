@@ -59,6 +59,7 @@ type populationCensus struct {
 	Parsed            int
 	SurfacesBuilt     int
 	SurfacesServed    int
+	GRPCListeners     int
 	QueueScanners     int
 	ReadinessCheckers int
 }
@@ -66,8 +67,9 @@ type populationCensus struct {
 func (c populationCensus) Summary() string {
 	return fmt.Sprintf(
 		"прод-файлов корня %d · разобрано %d · поверхностей построено %d · "+
-			"обслуживается %d · сканеров очередей %d · чекеров готовности %d",
-		c.Files, c.Parsed, c.SurfacesBuilt, c.SurfacesServed,
+			"обслуживается %d · gRPC-слушателей %d · сканеров очередей %d · "+
+			"чекеров готовности %d",
+		c.Files, c.Parsed, c.SurfacesBuilt, c.SurfacesServed, c.GRPCListeners,
 		c.QueueScanners, c.ReadinessCheckers)
 }
 
@@ -102,6 +104,14 @@ func countRootPopulations(files []string) (c populationCensus, err error) {
 					if fn.Sel.Name == "NewCollector" {
 						if id, ok := fn.X.(*ast.Ident); ok && id.Name == "outboxmetrics" {
 							c.QueueScanners++
+						}
+					}
+					// gRPC-слушатель: привязка сокета корнем. Число их тоже
+					// НЕ выписывается — на нём стоит сверка перечня адресов,
+					// который подаёт стражу проба боевого профиля.
+					if fn.Sel.Name == "Listen" {
+						if id, ok := fn.X.(*ast.Ident); ok && id.Name == "net" {
+							c.GRPCListeners++
 						}
 					}
 				}
@@ -173,6 +183,8 @@ func TestIAM2480_DerivedPopulationCounts(t *testing.T) {
 			"распознаватель сканеров мёртв: он ищет вызовы конструктора коллектора очередей"},
 		{"чекеров готовности", census.ReadinessCheckers,
 			"распознаватель чекеров мёртв: он ищет связывание `readinessCheckers`"},
+		{"gRPC-слушателей", census.GRPCListeners,
+			"распознаватель слушателей мёртв: он ищет вызовы `net.Listen`"},
 	} {
 		if p.got == 0 {
 			t.Fatalf("популяция %q выведена НУЛЁМ — %s. Ноль здесь означает отказ "+

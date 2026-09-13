@@ -87,6 +87,20 @@ def ask(url: str, *, ca: str, cert: str | None, key: str | None,
         return Answer(None, "", False, f"соединение не состоялось: {e}")
 
 
+# INTERNAL_PROBE_PATH — внутренний путь, на котором проверяются ОБА свойства:
+# что внутреннее не резолвится снаружи (ban #6) и что разбор доступа стоит и на
+# внутреннем слушателе.
+#
+# Объявлен ОДНОЙ постоянной намеренно: пока путь стоял литералом в двух местах,
+# снятие подсистемы величин осиротило оба, и одно из них продолжало зеленеть по
+# ДРУГОЙ причине. Постоянная делает такое снятие видимым разом.
+#
+# Выбран админ-путь кластера: он требует уровня, которого у модульного
+# удостоверения нет by construction, поэтому отказ здесь — вердикт разбора
+# доступа, а не следствие пустого ответа.
+INTERNAL_PROBE_PATH = "/iam/v1/internal/cluster/admins"
+
+
 def check(name: str, ok: bool, detail: str) -> None:
     global checked
     checked += 1
@@ -131,19 +145,25 @@ def run(host: str, pki: pathlib.Path, ports: dict[str, int]) -> int:
           f"тело {a.body[:200]!r}")
 
     print("── взаимная непроницаемость двух фронтов (ban #6 и его зеркало) ─────")
-    a_int_on_pub = ask(f"{pub}/iam/v1/internal/limits", ca=ca, cert=cert, key=key)
+    # Путь берётся ЖИВОЙ, и это несущее условие, а не выбор примера. Прежде здесь
+    # стоял путь авторитета величин — он снят вместе с подсистемой, и проверка
+    # продолжала ЗЕЛЕНЕТЬ: снятый путь даёт 404 и на публичном фронте тоже, но уже
+    # не потому, что внутреннее наружу не выставлено, а потому, что его нет нигде.
+    # То есть утверждение о ban #6 перестало различать два разных мира и не могло
+    # упасть ни при каком устройстве маршрутизатора.
+    a_int_on_pub = ask(f"{pub}{INTERNAL_PROBE_PATH}", ca=ca, cert=cert, key=key)
     check("внутренний путь НЕ резолвится на публичном фронте",
           a_int_on_pub.status == 404, f"код {a_int_on_pub.status}")
     check("и это промах МАРШРУТИЗАТОРА, а не сокрытие ресурса "
           "(голое «Not Found», без имени и идентификатора)",
-          "Not Found" in a_int_on_pub.body and "limit" not in a_int_on_pub.body.lower(),
+          "Not Found" in a_int_on_pub.body and "admin" not in a_int_on_pub.body.lower(),
           f"тело {a_int_on_pub.body[:200]!r}")
     a_pub_on_int = ask(f"{intl}/iam/v1/accounts", ca=ca, cert=cert, key=key)
     check("публичный путь НЕ резолвится на внутреннем фронте",
           a_pub_on_int.status == 404, f"код {a_pub_on_int.status}")
 
     print("── разбор доступа стоит и на ВНУТРЕННЕМ слушателе ───────────────────")
-    a_int = ask(f"{intl}/iam/v1/internal/limits", ca=ca, cert=cert, key=key)
+    a_int = ask(f"{intl}{INTERNAL_PROBE_PATH}", ca=ca, cert=cert, key=key)
     check("внутренний метод с модульным сертификатом отвечает 403, а не 200",
           a_int.status == 403, f"код {a_int.status}, тело {a_int.body[:200]!r}")
     check("и отказ несёт МАШИННЫЙ признак полосы, а не только прозу",

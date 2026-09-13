@@ -21,28 +21,31 @@ import (
 
 // CRED-CAP-25 — оба вида объявлены, и каждый считается в СВОЁМ принципале.
 //
-// Совпадение носителя с родительской частью вида здесь НЕ переутверждается: это
-// уже держит действующий гейт каталога для всех вложенных видов, и второе место
-// об одном предмете разошлось бы первым.
+// НОСИТЕЛЬ ВЛОЖЕННОГО ВИДА ВЫВОДИТСЯ, А НЕ ОБЪЯВЛЯЕТСЯ — и после ухода закрытого
+// каталога (`PRO-Robotech/kacho#2117`, стадия S4) это стало ЕДИНСТВЕННЫМ его
+// источником. Прежде проба спрашивала каталог (`CarrierOfKind`); каталог ушёл
+// вместе с авторитетом величин, а свойство осталось: вложенный вид считается в
+// своём родителе, и родитель читается из самого имени вида.
 func TestCredentialCeiling_BothKindsAreInTheCatalogue(t *testing.T) {
 	t.Parallel()
 
-	for kind, wantCarrier := range map[domain.LimitKind]domain.LimitCarrier{
+	for kind, wantCarrier := range map[domain.LimitKind]domain.LimitKind{
 		"iam.user.credential":           "iam.user",
 		"iam.serviceAccount.credential": "iam.serviceAccount",
 	} {
-		carrier, known := domain.CarrierOfKind(kind)
-		require.Truef(t, known,
-			"вида %q в каталоге нет: потолка числа удостоверений не существует, и "+
-				"накопить их можно сколько угодно", kind)
-		require.Equalf(t, wantCarrier, carrier,
+		require.Truef(t, domain.IsPostureStatedKind(kind),
+			"вида %q словарь посадки не знает: потолка числа удостоверений не "+
+				"существует, и накопить их можно сколько угодно", kind)
+		require.Truef(t, kind.Nested(),
+			"вид %q не вложенный: его носитель тогда не выводится ниоткуда", kind)
+		require.Equalf(t, wantCarrier, kind.ParentKind(),
 			"вид %q считается не в своём принципале: списание писало бы строки под одним "+
 				"носителем, а отказ называл бы другого", kind)
 	}
 }
 
 // Отрицание в паре: соседний вид того же домена считается НЕ в принципале.
-// Без него проба выше зеленела бы и на каталоге, где носитель у всех один.
+// Без него проба выше зеленела бы и на словаре, где носитель у всех один.
 func TestCredentialCeiling_ANeighbourKindIsCarriedElsewhere(t *testing.T) {
 	t.Parallel()
 
@@ -50,11 +53,14 @@ func TestCredentialCeiling_ANeighbourKindIsCarriedElsewhere(t *testing.T) {
 	// (`PRO-Robotech/kacho#2117`, сценарий `KAN-Q3-04`). Контроль переведён на
 	// `iam.account`: он живой, того же домена, и носитель у него ДРУГОЙ —
 	// личность, а не принципал. Предмет контроля от замены не изменился.
-	carrier, known := domain.CarrierOfKind("iam.account")
-	require.True(t, known)
-	require.Equal(t, domain.CarrierIdentity, carrier,
+	const neighbour domain.LimitKind = "iam.account"
+	require.True(t, domain.IsPostureStatedKind(neighbour))
+	require.Truef(t, domain.IsIdentityCarriedKind(neighbour),
 		"положительный контроль: у соседнего вида того же домена носитель другой, "+
-			"поэтому совпадение выше — свойство записи, а не одинаковость каталога")
+			"поэтому совпадение выше — свойство записи, а не одинаковость словаря")
+	require.Falsef(t, neighbour.Nested(),
+		"сосед оказался вложенным: тогда его носитель выводился бы так же, как у "+
+			"двух видов выше, и контроль ничего не различал бы")
 }
 
 // CRED-CAP-26 — `iam.credential` объявлен ПОДЧИНЁННЫМ РЕСУРСОМ: два родителя,
@@ -103,7 +109,11 @@ func TestCredentialCeiling_AccountScopeAppliesToTheMachineAndNotToThePerson(t *t
 			"управляла бы числом путей входа, действующих в других его аккаунтах")
 }
 
-// Всякий вид, объявленный област-но, обязан быть видом КАТАЛОГА.
+// Всякий вид, объявленный област-но, обязан быть видом СЛОВАРЯ ПОСАДКИ.
+//
+// Прежде сверка шла с закрытым каталогом авторитета; каталог ушёл стадией S4, и
+// надмножеством стал словарь посадки — по построению, а не по совпадению: после
+// ухода авторитета служба считает ровно те виды, чью величину объявляет посадка.
 // Иначе объявление переживает свой предмет и никем не читается.
 func TestCredentialCeiling_ScopeDeclarationsNameCatalogueKinds(t *testing.T) {
 	t.Parallel()
@@ -112,9 +122,9 @@ func TestCredentialCeiling_ScopeDeclarationsNameCatalogueKinds(t *testing.T) {
 	require.NotEmpty(t, declared,
 		"ни один вид не объявлен област-ным: перепись пуста, и утверждение выше вакуумно")
 	for _, k := range declared {
-		require.Truef(t, domain.IsCountableKind(k),
-			"вид %q объявлен област-ным, но каталог его не знает", k)
+		require.Truef(t, domain.IsPostureStatedKind(k),
+			"вид %q объявлен област-ным, но словарь посадки его не знает", k)
 	}
-	t.Logf("перепись: видов каталога %d, объявленных областью аккаунта %d",
-		len(domain.CountableKinds()), len(declared))
+	t.Logf("перепись: видов словаря посадки %d, объявленных областью аккаунта %d",
+		len(domain.PostureStatedKinds()), len(declared))
 }

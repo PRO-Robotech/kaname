@@ -30,6 +30,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
@@ -91,7 +92,7 @@ func TestIamExt_Migrations_6_1_1_FreshApply(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx,
 		`SELECT count(*) FROM kaname.roles
 		 WHERE is_system = true AND cluster_id = 'cluster_root'
-		 AND name IN ('kacho-system.admin', 'kacho-system.viewer')`).Scan(&sysRoleCount))
+		 AND id IN ($1, $2)`, domain.SystemAdminRoleID, domain.SystemViewerRoleID).Scan(&sysRoleCount))
 	assert.Equal(t, 2, sysRoleCount, "two new system roles seeded")
 
 	// Verify expected tables exist after the extension migrations (sample check).

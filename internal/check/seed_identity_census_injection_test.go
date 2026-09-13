@@ -28,10 +28,18 @@ import (
 const seedCensusSyntheticOutput = "ревизия: рабочее дерево\n" +
 	"осмотрено: в индексе 2848 · прочитано 2848 · двоичных 0\n" +
 	"\n" +
-	"ПРЕДМЕТ                 130 ·  56 ф.\n" +
+	"ПРЕДМЕТ: живой          130 ·  56 ф.\n" +
+	"ПРЕДМЕТ: свод и миграции   28 ·   6 ф.\n" +
 	"ПРЕДМЕТ: манифесты        0 ·   0 ф.\n" +
 	"остаётся: ns             13 ·   2 ф.\n" +
 	"\n"
+
+// seedCensusOutputWithFrozen — тот же вывод, но замёрзшее ведро принимает
+// поданное значение. Инъекция меняет РОВНО ЕГО.
+func seedCensusOutputWithFrozen(frozen string) string {
+	return strings.Replace(seedCensusSyntheticOutput,
+		"ПРЕДМЕТ: свод и миграции   28 ·   6 ф.\n", frozen, 1)
+}
 
 // seedCensusSyntheticDoc собирает приёмку-синтетику: шапка с ревизией и один
 // объявляющий блок в двух столбцах, как в настоящей.
@@ -40,7 +48,8 @@ func seedCensusSyntheticDoc(rev, subject string) string {
 		"- **Ревизия измерения: `" + rev + "`** (пояснение)\n\n" +
 		"> ```\n" +
 		">                        7cd4cc8355 (монорепо)    " + rev + " (это дерево)\n" +
-		"> ПРЕДМЕТ                159 · 63 ф.              " + subject + "\n" +
+		"> ПРЕДМЕТ: живой          159 · 63 ф.              " + subject + "\n" +
+		"> ПРЕДМЕТ: свод и миграции 12 ·  4 ф.               28 ·  6 ф.\n" +
 		"> ПРЕДМЕТ: манифесты      25 ·  5 ф.                0 ·  0 ф.\n" +
 		"> остаётся: ns            39 · 15 ф.               13 ·  2 ф.\n" +
 		"> ```\n"
@@ -111,7 +120,8 @@ func TestSeedCensusInjection_BlockIsFoundByRevisionNotByOrder(t *testing.T) {
 	rep := seedCensusParseSynthetic(t)
 	foreign := "```\n" +
 		"                       7cd4cc8355\n" +
-		"ПРЕДМЕТ                159 · 63 ф.\n" +
+		"ПРЕДМЕТ: живой         159 · 63 ф.\n" +
+		"ПРЕДМЕТ: свод и миграции 12 ·  4 ф.\n" +
 		"ПРЕДМЕТ: манифесты      25 ·  5 ф.\n" +
 		"остаётся: ns            39 · 15 ф.\n" +
 		"```\n\n"
@@ -120,8 +130,8 @@ func TestSeedCensusInjection_BlockIsFoundByRevisionNotByOrder(t *testing.T) {
 		foreign +
 		strings.SplitN(seedCensusSyntheticDoc("abc1234", "130 · 56 ф."), "\n\n", 3)[2]
 	decl := check.ParseSeedCensusDeclaration(doc, rep.Order)
-	if got, ok := decl.Buckets["ПРЕДМЕТ"]; !ok || got.Hits != 130 || got.Files != 56 {
-		t.Fatalf("взят блок ЧУЖОГО дерева: по ведру ПРЕДМЕТ получено %v (ok=%v), "+
+	if got, ok := decl.Buckets["ПРЕДМЕТ: живой"]; !ok || got.Hits != 130 || got.Files != 56 {
+		t.Fatalf("взят блок ЧУЖОГО дерева: по ведру «ПРЕДМЕТ: живой» получено %v (ok=%v), "+
 			"ожидалось 130 · 56 ф.", got, ok)
 	}
 	if f := check.AdjudicateSeedCensus(decl, rep); len(f) != 0 {
@@ -187,11 +197,18 @@ func TestSeedCensusInjection_RealDocumentOneDigitApart(t *testing.T) {
 			"инъекция не докажет ничего, пока настоящий вход не сойдётся")
 	}
 
-	subject, ok := clean.Buckets["ПРЕДМЕТ"]
+	// Портится ЖИВОЕ ведро: оно и есть предмет предиката готовности (§7-П2), и
+	// именно его величина двигается при всякой правке дерева. Замёрзшее ведро
+	// для инъекции не годится — на нём краснеет вторая, антимасочная половина
+	// сверки, и находок стало бы две, то есть «ровно одна» перестало бы
+	// различать испорченное ведро от соседа.
+	const injectedBucket = "ПРЕДМЕТ: живой"
+
+	subject, ok := clean.Buckets[injectedBucket]
 	if !ok {
-		t.Fatalf("предпосылка инъекции не выполнена: ведро ПРЕДМЕТ не объявлено")
+		t.Fatalf("предпосылка инъекции не выполнена: ведро %q не объявлено", injectedBucket)
 	}
-	at, known := clean.LineOf["ПРЕДМЕТ"]
+	at, known := clean.LineOf[injectedBucket]
 	if !known {
 		t.Fatalf("предпосылка инъекции не выполнена: разбор не назвал строку объявления")
 	}
@@ -211,8 +228,83 @@ func TestSeedCensusInjection_RealDocumentOneDigitApart(t *testing.T) {
 	spoiled := strings.Join(lines, "\n")
 
 	f := check.AdjudicateSeedCensus(check.ParseSeedCensusDeclaration(spoiled, rep.Order), rep)
-	if len(f) != 1 || !strings.Contains(f[0], "ПРЕДМЕТ") {
+	if len(f) != 1 || !strings.Contains(f[0], injectedBucket) {
 		t.Fatalf("одна испорченная цифра обязана дать РОВНО одну находку по ведру "+
 			"ПРЕДМЕТ, получено %d: %v", len(f), f)
 	}
+}
+
+// TestSeedCensusInjection_EmptyFrozenBucketIsAFinding — АНТИМАСКА: замёрзшее
+// ведро, давшее ноль, есть находка, а не достигнутая цель.
+//
+// Ноль в нём недостижим by construction: свод посеял написание и правке не
+// подлежит (ban #5). Значит ноль там означает ослепший обход — и без этой
+// проверки он выглядел бы как «переход завершён вообще везде».
+func TestSeedCensusInjection_EmptyFrozenBucketIsAFinding(t *testing.T) {
+	rep, err := check.ParseSeedCensusOutput(
+		seedCensusOutputWithFrozen("ПРЕДМЕТ: свод и миграции    0 ·   0 ф.\n"))
+	if err != nil {
+		t.Fatalf("синтетический вывод не разобран: %v", err)
+	}
+	decl := check.ParseSeedCensusDeclaration(
+		seedCensusSyntheticDoc("abc1234", "130 · 56 ф."), rep.Order)
+
+	findings := check.AdjudicateSeedCensus(decl, rep)
+	if !seedCensusMentions(findings, check.SeedCensusFrozenBucket) {
+		t.Fatalf("пустое замёрзшее ведро не названо находкой: %v", findings)
+	}
+}
+
+// TestSeedCensusInjection_MissingFrozenBucketIsAFinding — второй способ ослепнуть:
+// ведро вовсе перестало печататься.
+//
+// Отличается от предыдущего РОВНО одним фактом — строки нет, а не ноль в ней, —
+// и без отдельного случая переименование ведра у предиката отключило бы
+// антимаску молча.
+func TestSeedCensusInjection_MissingFrozenBucketIsAFinding(t *testing.T) {
+	rep, err := check.ParseSeedCensusOutput(seedCensusOutputWithFrozen(""))
+	if err != nil {
+		t.Fatalf("синтетический вывод не разобран: %v", err)
+	}
+	decl := check.ParseSeedCensusDeclaration(
+		seedCensusSyntheticDoc("abc1234", "130 · 56 ф."), rep.Order)
+
+	findings := check.AdjudicateSeedCensus(decl, rep)
+	if !seedCensusMentions(findings, check.SeedCensusFrozenBucket) {
+		t.Fatalf("отсутствие замёрзшего ведра не названо находкой: %v", findings)
+	}
+}
+
+// TestSeedCensusInjection_ZeroLiveBucketIsNotAFinding — ЗАКОННЫЙ БЛИЗНЕЦ к
+// антимаске: ноль в ЖИВОМ ведре при непустом замёрзшем — это достигнутая цель
+// (§7-П2), и краснеть на ней нельзя.
+//
+// Без этой пробы антимаска могла бы оказаться запретом на успех: проверка,
+// краснеющая на идеале, толкает держать остаток ради зелёного.
+func TestSeedCensusInjection_ZeroLiveBucketIsNotAFinding(t *testing.T) {
+	out := strings.Replace(seedCensusSyntheticOutput,
+		"ПРЕДМЕТ: живой          130 ·  56 ф.\n",
+		"ПРЕДМЕТ: живой            0 ·   0 ф.\n", 1)
+	rep, err := check.ParseSeedCensusOutput(out)
+	if err != nil {
+		t.Fatalf("синтетический вывод не разобран: %v", err)
+	}
+	decl := check.ParseSeedCensusDeclaration(
+		seedCensusSyntheticDoc("abc1234", "0 ·  0 ф."), rep.Order)
+
+	if findings := check.AdjudicateSeedCensus(decl, rep); len(findings) != 0 {
+		t.Fatalf("достигнутая цель объявлена находкой — проверка запрещает успех: %v", findings)
+	}
+}
+
+// seedCensusMentions — находка, называющая предмет. Поиск по существу, а не по
+// точной фразе: текст отказа — диагностика, и привязка к нему сделала бы
+// инъекцию хрупкой по чужой причине.
+func seedCensusMentions(findings []string, what string) bool {
+	for _, f := range findings {
+		if strings.Contains(f, what) {
+			return true
+		}
+	}
+	return false
 }

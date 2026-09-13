@@ -48,10 +48,10 @@ import dedent from 'ts-dedent'
 Отдельно стоит **AuthorizeService** — публичная проекция слоя авторизации («может ли субъект
 сделать X над Y»); см. [Авторизация и каталог](/api/authorize).
 
-Плюс один **административный** ресурс, живущий только на внутреннем слушателе, — **Limit**
-(`lim`): потолок на число ресурсов одного вида у арендатора. Он не tenant-facing: назначает
-его администратор платформы, а владельцы видов ресурсов читают действующую величину служебными
-методами. См. [Limit](/api/limit).
+Административного ресурса **Limit** (`lim`) у службы больше нет: авторитет величин выпилен
+из неё целиком. Свои три потолка она по-прежнему считает, но их величину объявляет посадка
+установки, а не внешний глагол; арендатор читает свой потолок на странице
+[Квоты](/api/quotas).
 
 ## REST-пути
 
@@ -292,7 +292,6 @@ Malformed id → sync `INVALID_ARGUMENT` первым стейтментом RPC
     <tr><td>UserOAuthClient (токен)</td><td><code>uoc&lt;17&gt;</code></td></tr>
     <tr><td>ServiceAccountOAuthClient (ключ)</td><td><code>soc&lt;17&gt;</code></td></tr>
     <tr><td><a href="/api/membership">Membership</a></td><td><code>mbr-&lt;17&gt;</code> — <strong>через дефис</strong></td></tr>
-    <tr><td><a href="/api/limit">Limit</a> <em>(административный)</em></td><td><code>lim-&lt;17&gt;</code> — <strong>через дефис</strong></td></tr>
   </tbody>
 </table>
 

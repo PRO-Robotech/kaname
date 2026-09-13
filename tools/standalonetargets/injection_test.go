@@ -160,10 +160,11 @@ func TestModuleRoot_NoMarkerIsNotRun(t *testing.T) {
 // TestRun_FailingUnmarkedTargetIsAFinding — инъекция.
 func TestRun_FailingUnmarkedTargetIsAFinding(t *testing.T) {
 	targets := []standalonetargets.Target{{Name: "плохая", Desc: "нарочно отказывает"}}
-	findings, err := standalonetargets.RunTargets("посадка", targets,
+	findings, unmet, err := standalonetargets.RunTargets("посадка", targets,
 		func(_, _ string) (int, string, error) { return 2, "нечего собирать\n", nil })
 	require.NoError(t, err)
 	require.Len(t, findings, 1, "отказавшая цель не названа находкой")
+	require.Empty(t, unmet, "отказ без метки зачтён в третий исход — находка стала бы невидимой")
 	require.Contains(t, findings[0].String(), "плохая", "находка не назвала цель")
 	require.Contains(t, findings[0].String(), "нечего собирать",
 		"находка не несёт текст отказа — имя посылает читателя искать причину, текст её называет")
@@ -173,21 +174,124 @@ func TestRun_FailingUnmarkedTargetIsAFinding(t *testing.T) {
 // одним фактом: код возврата цели.
 func TestRun_PassingUnmarkedTargetIsSilent(t *testing.T) {
 	targets := []standalonetargets.Target{{Name: "хорошая", Desc: "работает"}}
-	findings, err := standalonetargets.RunTargets("посадка", targets,
+	findings, unmet, err := standalonetargets.RunTargets("посадка", targets,
 		func(_, _ string) (int, string, error) { return 0, "готово\n", nil })
 	require.NoError(t, err)
 	require.Empty(t, findings, "гейт краснеет на цели, отработавшей кодом 0")
+	require.Empty(t, unmet, "цель, отработавшая кодом 0, зачтена в третий исход")
 }
 
-// TestRun_LauncherFailureIsNotAFinding — третий исход представим отдельно.
+// TestRun_LauncherFailureIsNotAFinding — отказ ЗАПУСКА представим отдельно.
 //
 // «make не нашёлся» и «цель отказала» — разные вердикты. Схлопни их в один, и
 // отсутствие инструмента отчитывалось бы как дефект продукта.
 func TestRun_LauncherFailureIsNotAFinding(t *testing.T) {
 	targets := []standalonetargets.Target{{Name: "любая", Desc: "неважно"}}
-	findings, err := standalonetargets.RunTargets("посадка", targets,
+	findings, unmet, err := standalonetargets.RunTargets("посадка", targets,
 		func(_, _ string) (int, string, error) { return 0, "", os.ErrNotExist })
 	require.ErrorIs(t, err, standalonetargets.ErrPostureNotBuilt,
 		"отказ запуска выдан за находку")
 	require.Empty(t, findings, "отказ запуска подмешан к находкам")
+	require.Empty(t, unmet, "отказ запуска подмешан к третьему исходу")
+}
+
+// --- Инъекция в РАЗВЕДЕНИЕ ТРЁХ ИСХОДОВ (задача #52) -------------------------
+//
+// До этой пары гейт объявлял находкой ЛЮБОЙ ненулевой код. Рецепт при этом
+// объявляет свою договорённость — «условие не создано» печатается словами, — и
+// на машине без `buf` три цели контрактов читались как «цель не работает у
+// арендатора», хотя цель сказала прямо: инструмента нет.
+//
+// Каждая пара ниже меняет против своего близнеца РОВНО ОДИН факт — текст,
+// который печатает цель. Код возврата у всех один и тот же (2), и это не
+// небрежность фикстуры, а воспроизведение того, чем различить нечего: `make`
+// схлопывает любой отказ рецепта в собственную двойку.
+
+// TestRun_TargetNamingItsUnmetPremiseIsNotAFinding — цель НАЗВАЛА предпосылку.
+func TestRun_TargetNamingItsUnmetPremiseIsNotAFinding(t *testing.T) {
+	targets := []standalonetargets.Target{{Name: "proto-lint", Desc: "buf lint по контрактам службы"}}
+	out := "УСЛОВИЕ НЕ СОЗДАНО: цель proto-lint зовёт buf, а его в PATH нет.\n" +
+		"Поставь buf и повтори.\n"
+	findings, unmet, err := standalonetargets.RunTargets("посадка", targets,
+		func(_, _ string) (int, string, error) { return 2, out, nil })
+	require.NoError(t, err)
+	require.Empty(t, findings,
+		"«инструмента нет» подано вердиктом о продукте: у всякого, кто склонирует без buf, "+
+			"гейт объявлял бы три находки о работающих целях")
+	require.Len(t, unmet, 1, "третий исход не назван своим числом")
+	require.Contains(t, unmet[0].String(), "proto-lint", "третий исход не назвал цель")
+	require.Contains(t, unmet[0].String(), "вердикта о ней НЕТ",
+		"третий исход не сказан словами — читатель зачтёт его в успех")
+}
+
+// TestRun_SameTargetWithoutTheMarkIsAFinding — законный близнец предыдущей.
+//
+// Отличается РОВНО ОДНИМ фактом: цель не печатает метку. Без этой половины
+// разведение исходов было бы маской — достаточно было бы кода 2, чтобы цель
+// перестала проверяться где бы то ни было.
+func TestRun_SameTargetWithoutTheMarkIsAFinding(t *testing.T) {
+	targets := []standalonetargets.Target{{Name: "proto-lint", Desc: "buf lint по контрактам службы"}}
+	out := "buf: ошибка разбора контракта proto/kaname/cloud/iam/v1/x.proto:12\n"
+	findings, unmet, err := standalonetargets.RunTargets("посадка", targets,
+		func(_, _ string) (int, string, error) { return 2, out, nil })
+	require.NoError(t, err)
+	require.Empty(t, unmet, "отказ БЕЗ метки зачтён в третий исход — дефект стал бы невидимым")
+	require.Len(t, findings, 1, "настоящий отказ цели перестал быть находкой")
+}
+
+// TestRun_MarkInProseIsStillAFinding — НЕСУЩАЯ ось: слова в прозе меткой не
+// становятся.
+//
+// Слова «условие не создано» встречаются в тексте, который их же объясняет:
+// в комментарии рецепта (его эхо начинается со знака комментария), в разборе
+// класса, в самой находке. Распознаватель, ищущий вхождение подстрокой, зеленел
+// бы на собственном объяснении — то есть цель, честно отказавшая, выпадала бы
+// из наблюдения, и заметить это было бы нечем: третий исход выглядит так же
+// спокойно, как зелёный.
+func TestRun_MarkInProseIsStillAFinding(t *testing.T) {
+	targets := []standalonetargets.Target{{Name: "audit-list-filter", Desc: "списочные методы"}}
+	for name, out := range map[string]string{
+		"эхо комментария рецепта": "# УСЛОВИЕ НЕ СОЗДАНО — так отказывают цели, судящие дерево\n" +
+			"audit-list-filter: два метода не сужают выдачу\n",
+		"упоминание в середине строки": "разбор: это не «УСЛОВИЕ НЕ СОЗДАНО», а настоящий отказ\n",
+		"строчное написание":           "это условие не создано, наверное\n",
+	} {
+		findings, unmet, err := standalonetargets.RunTargets("посадка", targets,
+			func(_, _ string) (int, string, error) { return 2, out, nil })
+		require.NoError(t, err)
+		require.Emptyf(t, unmet,
+			"%s: слова в прозе зачтены за метку — гейт зеленеет оттого, что кто-то их написал", name)
+		require.Lenf(t, findings, 1, "%s: находка потеряна", name)
+	}
+}
+
+// TestRun_MarkIndentedByTheRecipeIsStillTheMark — законный близнец прозы.
+//
+// Рецепт вправе отступать текст отказа, и отступ метки не отменяет. Отличается
+// от прозы выше ровно одним фактом: метка стоит ПЕРВОЙ на своей строке.
+func TestRun_MarkIndentedByTheRecipeIsStillTheMark(t *testing.T) {
+	targets := []standalonetargets.Target{{Name: "model-canon-check", Desc: "канон модели [не важно]"}}
+	findings, unmet, err := standalonetargets.RunTargets("посадка", targets,
+		func(_, _ string) (int, string, error) {
+			return 2, "сверка канона:\n    УСЛОВИЕ НЕ СОЗДАНО: манифестов соседних модулей рядом нет\n", nil
+		})
+	require.NoError(t, err)
+	require.Empty(t, findings, "отступ перед меткой отменил третий исход")
+	require.Len(t, unmet, 1, "метка с отступом не прочитана")
+}
+
+// TestCensus_NamesAllThreeOutcomes — перепись печатает ТРИ величины.
+//
+// «Ноль в ней обязан быть отличим от ненайденного»: без третьего числа
+// «судимых 14 · находок 0» читается как вердикт о четырнадцати целях там, где о
+// трёх из них вердикта нет вовсе.
+func TestCensus_NamesAllThreeOutcomes(t *testing.T) {
+	c := standalonetargets.Census{Declared: 24, Monorepo: 5, Waived: 5, Judged: 14,
+		Findings: 0, Unmet: 3, Posture: "/tmp/клон"}
+	got := c.String()
+	require.Contains(t, got, "судимых 14")
+	require.Contains(t, got, "находок 0")
+	require.Contains(t, got, "условие не создано 3",
+		"третья величина не печатается — зелёный прогон неотличим от прогона, "+
+			"который о части целей ничего не спросил")
 }

@@ -224,7 +224,6 @@ errors/              # sentinel + WrapPgErr.
 | `:9090`   | `OperationService`              | LRO Get / List / Cancel (corelib)                      |
 | `:9090`   | `MembershipService`             | read Membership (Account ↔ User)                       |
 | `:9090`   | `UserTokenService`              | Issue / List / Revoke пользовательских токенов         |
-| `:9090`   | `LimitService`                  | CRUD Limit — величины пределов арендатора              |
 | `:9090`   | `IdentityQuotaService`          | List квот личности (`kaname.cloud.iam.v1`)             |
 | `:9091`   | `InternalIAMService`            | Check + Register/UnregisterResource (fgaproxy)         |
 | `:9091`   | `AuthorizeService`              | тот же обработчик для peer-проверок по mTLS-ребру      |
@@ -233,7 +232,6 @@ errors/              # sentinel + WrapPgErr.
 | `:9091`   | `InternalOperationsService`     | cluster-wide admin operations feed                     |
 | `:9091`   | `InternalSessionRevocationsService` | logout / force-logout + hot-path IsRevoked         |
 | `:9091`   | `InternalInteractiveClientService` | CRUD InteractiveClient (OAuth2-клиенты консоли) |
-| `:9091`   | `InternalLimitService`          | CRUD Limit + `Resolve` / `ListChangedSince` доменам    |
 | `:9091`   | `InternalModuleService`         | `Plan` / `Apply` манифеста модуля + read               |
 | `:9091`   | `InternalBootstrapTokenService` | `MintBootstrapToken` — удостоверение начальной настройки |
 

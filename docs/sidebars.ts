@@ -36,7 +36,6 @@ const sidebars: SidebarsConfig = {
         'api/group',
         'api/role',
         'api/access-binding',
-        'api/limit',
         'api/tokens',
         'api/authorize',
         'api/operations',

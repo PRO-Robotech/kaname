@@ -10,6 +10,8 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 )
 
 // positionlost.go — СЛОВАРЬ ОТКАЗА «позиция утрачена» для журнала смены субъекта.
@@ -40,19 +42,34 @@ import (
 // зовут функции этого файла, и смена канона — правка одной строки здесь.
 // Владелец журнала берёт их отсюда же, хотя пакет живёт у читателя: словарь
 // принадлежит ПОЛОСЕ, а не тому, кто оказался её первым автором.
+//
+// # Почему домен берётся у ОБЪЯВЛЕНИЯ, хотя пакет поставляемый
+//
+// Домен отказа — это ИМЯ, которым продукт называет себя перед клиентом, и дом
+// у этого имени в дереве один: [refusaldomain]. Зашитый здесь литерал был
+// четвёртым местом об одном предмете, и он уже разошёлся с объявлением —
+// служба отвечала `iam.kaname.cloud` по своим полосам и `iam.kacho.cloud` по
+// этой (kaname#48). Расхождение возникло не решением: файл приехал сюда из
+// модуля платформы, где объявление продукта недостижимо, и до переезда его не
+// видел ни один прогон этого репозитория.
+//
+// Отсюда единственное ребро `pkg/` → `internal/` в дереве, и оно названо, а не
+// случилось: имя продукта поставкой НЕ является — его нельзя ни настроить, ни
+// подменить, поэтому оно и живёт в `internal/`. Слово «единственное» здесь не
+// прозой держится: ребро объявлено ведомостью гейта
+// `internal/supplyhygiene` (`TestDeliveredPackagesDeclareTheirInternalEdges`),
+// и второе, заведённое молча, — его находка. Внешний потребитель этого
+// пакета — ЧИТАТЕЛЬ ([AsPositionLost], [Watcher]), и он домена не читает
+// вовсе; производит отказ только владелец журнала, то есть эта служба, чей
+// композиционный корень объявляет суффикс до подъёма слушателей
+// ([refusaldomain.Require]). Пустого домена поэтому не бывает: состояние «не
+// объявлено» отвергается стражем старта, а не умолчанием.
 
 // ReasonPositionLost — машинный признак полосы «позиция больше не возобновима».
 //
 // Клиент ключуется на признак, а не разбирает прозу сообщения: тон сообщения —
 // часть контракта, но не его машинная часть.
 const ReasonPositionLost = "SUBJECT_CHANGE_POSITION_LOST"
-
-// errorDomain — поверхность, произведшая отказ.
-//
-// Полосу называет ТОКЕН; домен называет поверхность
-// (§By-lane code-split: `<service>.kacho.cloud`). Журнал принадлежит владельцу
-// прав, поэтому домен его, а не читательский.
-const errorDomain = "iam.kacho.cloud"
 
 // metaEarliestResumable — ключ, под которым едет возобновимая позиция.
 const metaEarliestResumable = "earliest_resumable_position"
@@ -106,7 +123,7 @@ func PositionLost(earliestResumable int64) error {
 			"from the earliest resumable position")
 	withDetails, err := st.WithDetails(&errdetails.ErrorInfo{
 		Reason: ReasonPositionLost,
-		Domain: errorDomain,
+		Domain: refusaldomain.For(refusaldomain.ServiceIAM),
 		Metadata: map[string]string{
 			metaEarliestResumable: strconv.FormatInt(earliestResumable, 10),
 		},

@@ -84,14 +84,21 @@ type closedLabelSet struct {
 type openLabelSet struct {
 	// Reason — почему перечислить нечем. Проверяется человеком, не машиной.
 	Reason string
-	// ProducerMethod — метод этого пакета, которым семейство наполняется.
-	// Непустое значение делает прощение САМОИСТЕКАЮЩИМ: как только у метода
-	// появляется вызывающий, набор становится перечислимым у него, и запись
-	// обязана быть пересмотрена.
+
+	// Поля `ProducerMethod` здесь больше НЕТ — снято вместе со своим
+	// единственным предметом (#2638).
 	//
-	// Пустая строка означает «производитель есть и набор всё равно открыт»
-	// (имя очереди, имя ресурса, вид операции — их приносит вызывающий).
-	ProducerMethod string
+	// Оно делало прощение самоистекающим у семейства, которому прощали
+	// «засевать нечем, производителя нет вовсе»: появился вызывающий — набор
+	// стал перечислим у него. Такое семейство в пакете было ровно одно, и оно
+	// снято целиком; у остальных записей набор открыт по другой причине —
+	// метку приносит вызывающий, и вызывающий у них есть.
+	//
+	// Класс, ради которого поле стояло, держится теперь ШИРЕ: гейт
+	// `TestIAM2638_EveryDeclaredMetricProducerHasACaller` судит ВСЮ популяцию
+	// производителей фасада, а не одну объявленную запись. Понадобится простить
+	// семейство, у которого производителя нет, — сперва спроси, зачем оно
+	// зарегистрировано.
 }
 
 // closedLabelSetFamilies — семейства с закрытым набором клеток.
@@ -204,12 +211,6 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 // Запись, которой больше нечего прощать, — находка: послабление обязано истекать
 // само, иначе его унаследует следующая слепая зона.
 var openLabelSetFamilies = map[string]openLabelSet{
-	Namespace + "_authz_store_attempts_total": {
-		Reason: "набор `op` не перечислим при сборке И у семейства НЕТ производителя " +
-			"вовсе: `ObserveAuthzStoreAttempt` не зовёт ни одно место дерева. Засевать " +
-			"нечем — перечня операций хранилища прав в этом пакете не существует.",
-		ProducerMethod: "ObserveAuthzStoreAttempt",
-	},
 	Namespace + "_list_rows_scanned": {
 		Reason: "метка `resource` — имя ресурса списочной выдачи; перечень принадлежит " +
 			"каталогу модулей и растёт вместе с ним, а не объявляется здесь.",
@@ -495,47 +496,6 @@ func TestIAM2500_EveryClosedLabelSetSeedsItsCellsAtRegistration(t *testing.T) {
 	}
 }
 
-// TestIAM2500_ForgivenFamilyWithAProducerNoLongerDeservesForgiveness — вторая
-// половина самоистечения: прощение выдано семейству, у которого производителя
-// НЕТ. Появился производитель — набор стал перечислим у него, и запись обязана
-// быть пересмотрена, а не наследоваться.
-func TestIAM2500_ForgivenFamilyWithAProducerNoLongerDeservesForgiveness(t *testing.T) {
-	root := moduleRootFromMetrics(t)
-	files, err := moduleProductionGoFiles(root)
-	if err != nil {
-		t.Fatalf("перечень прод-файлов модуля: %v", err)
-	}
-	if len(files) == 0 {
-		t.Fatalf("обход модуля не дал НИ ОДНОГО прод-файла (корень %s) — "+
-			"вердикт беспредметен", root)
-	}
-	checked := 0
-	for _, name := range sortedKeys(openLabelSetFamilies) {
-		entry := openLabelSetFamilies[name]
-		if entry.ProducerMethod == "" {
-			continue
-		}
-		checked++
-		callers, cerr := countMethodCallers(files, entry.ProducerMethod)
-		if cerr != nil {
-			t.Fatalf("%v", cerr)
-		}
-		if callers > 0 {
-			t.Errorf("ведомость `openLabelSetFamilies`: у семейства %q ПОЯВИЛСЯ "+
-				"производитель — `%s` зовут в %d месте(ах) дерева. Прощение выдавалось "+
-				"под «засевать нечем»; теперь набор перечислим у вызывающего, и семейство "+
-				"обязано заводить свои клетки нулём. Пересмотрите запись.",
-				name, entry.ProducerMethod, callers)
-		}
-	}
-	t.Logf("прод-файлов модуля осмотрено %d · самоистекающих записей ведомости %d",
-		len(files), checked)
-	if checked == 0 {
-		t.Fatalf("ни одна запись ведомости не несёт `ProducerMethod` — проверка " +
-			"самоистечения беспредметна и зеленеет при любом дереве")
-	}
-}
-
 // adjudicateLabelSets разводит объявления на прощённые, закрытые и находки.
 func adjudicateLabelSets(sites []vectorSite, c *closedSetCensus) (findings []vectorSite, staleTable, staleOpen []string) {
 	seen := map[string]bool{}
@@ -659,30 +619,4 @@ func moduleProductionGoFiles(root string) ([]string, error) {
 	})
 	sort.Strings(out)
 	return out, err
-}
-
-// countMethodCallers считает ВЫЗОВЫ метода по разобранному дереву, а не по
-// подстроке: имя метода встречается и в прозе шапок, и предикат по тексту
-// краснел бы на собственном объяснении проверяемого. Объявление метода вызовом
-// не считается.
-func countMethodCallers(files []string, method string) (int, error) {
-	fset := token.NewFileSet()
-	n := 0
-	for _, path := range files {
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-		if err != nil {
-			return 0, fmt.Errorf("разобрать %s: %w", path, err)
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == method {
-				n++
-			}
-			return true
-		})
-	}
-	return n, nil
 }

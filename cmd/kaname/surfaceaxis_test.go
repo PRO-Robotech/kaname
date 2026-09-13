@@ -46,6 +46,12 @@ func axisExplanations(dir string) (calls []string, explained []bool, err error) 
 	if err != nil {
 		return nil, nil, err
 	}
+	// Константы берутся из ТОГО ЖЕ каталога: причина выключения бывает собрана
+	// из имени ручки, объявленного константой пакета (#2639).
+	consts, err := packageStringConsts(dir)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, path := range names {
 		if strings.HasSuffix(path, "_test.go") {
 			continue
@@ -65,39 +71,27 @@ func axisExplanations(dir string) (calls []string, explained []bool, err error) 
 			}
 			pos := fset.Position(call.Pos())
 			calls = append(calls, filepath.Base(pos.Filename)+":"+strconv.Itoa(pos.Line))
-			explained = append(explained, hasNonEmptyText(call, becauseArgIndex))
+			explained = append(explained, hasNonEmptyText(call, becauseArgIndex, consts))
 			return true
 		})
 	}
 	return calls, explained, nil
 }
 
-// hasNonEmptyText — довод под индексом есть непустой текст (литерал либо их
-// склейка). Выражение иной формы за объяснение НЕ засчитывается: причина обязана
-// читаться в месте объявления, а не собираться где-то ещё.
-func hasNonEmptyText(call *ast.CallExpr, idx int) bool {
+// hasNonEmptyText — довод под индексом есть непустой текст: литерал, их склейка
+// либо ИМЕНОВАННАЯ КОНСТАНТА пакета (в том числе склеенная с литералом).
+//
+// Выражение иной формы — переменная, вызов, поле — за объяснение НЕ
+// засчитывается: причина обязана читаться в месте объявления, а не получать
+// значение в рантайме. Константа это требование выполняет, и форма добавлена
+// вместе с ручками поверхностей (#2639); обе стороны границы доказаны
+// инъекцией.
+func hasNonEmptyText(call *ast.CallExpr, idx int, consts map[string]string) bool {
 	if len(call.Args) <= idx {
 		return false
 	}
-	return textLen(call.Args[idx]) > 0
-}
-
-func textLen(e ast.Expr) int {
-	switch v := e.(type) {
-	case *ast.BasicLit:
-		if v.Kind != token.STRING {
-			return 0
-		}
-		// Кавычки в длину не входят: "" обязано читаться как пустое.
-		return len(v.Value) - 2
-	case *ast.BinaryExpr:
-		if v.Op != token.ADD {
-			return 0
-		}
-		return textLen(v.X) + textLen(v.Y)
-	default:
-		return 0
-	}
+	text, ok := resolveStringExpr(call.Args[idx], consts)
+	return ok && text != ""
 }
 
 func TestEveryDisabledSurfaceSaysWhatItDoesNotServe(t *testing.T) {
@@ -140,7 +134,8 @@ func TestEveryDisabledSurfaceSaysWhatItDoesNotServe(t *testing.T) {
 // координате: тем же вызовом инъекция подаёт синтетический вход, меняя ровно
 // один факт. До #2479 источник был вписан в тело пробы, и способность её упасть
 // доказать было нечем.
-func frontKnobsNamedByAxes(name string, src []byte, knobs []string) (map[string]bool, error) {
+func frontKnobsNamedByAxes(name string, src []byte, knobs []string,
+	consts map[string]string) (map[string]bool, error) {
 	file, err := parser.ParseFile(token.NewFileSet(), name, src, parser.ParseComments)
 	if err != nil {
 		return nil, err
@@ -158,7 +153,10 @@ func frontKnobsNamedByAxes(name string, src []byte, knobs []string) (map[string]
 		if !isIdent || ident.Name != "addrAxis" || len(call.Args) < 2 {
 			return true
 		}
-		lit := literalText(call.Args[1])
+		lit, resolved := resolveStringExpr(call.Args[1], consts)
+		if !resolved {
+			return true
+		}
 		for knob := range named {
 			if strings.Contains(lit, knob) {
 				named[knob] = true
@@ -180,7 +178,11 @@ func TestBothRESTFrontsDeclareTheirAxis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("serve.go не прочитан: %v", err)
 	}
-	want, err := frontKnobsNamedByAxes("serve.go", src, restFrontKnobs)
+	consts, err := packageStringConsts(".")
+	if err != nil {
+		t.Fatalf("константы пакета не собраны: %v", err)
+	}
+	want, err := frontKnobsNamedByAxes("serve.go", src, restFrontKnobs, consts)
 	if err != nil {
 		t.Fatalf("serve.go не разбирается: %v", err)
 	}
@@ -201,18 +203,4 @@ func countTrue(m map[string]bool) int {
 		}
 	}
 	return n
-}
-
-func literalText(e ast.Expr) string {
-	switch v := e.(type) {
-	case *ast.BasicLit:
-		if v.Kind != token.STRING {
-			return ""
-		}
-		return strings.Trim(v.Value, "\"`")
-	case *ast.BinaryExpr:
-		return literalText(v.X) + literalText(v.Y)
-	default:
-		return ""
-	}
 }

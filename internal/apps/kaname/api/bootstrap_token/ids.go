@@ -15,52 +15,88 @@
 // persisted in the DB — the secrets-at-rest posture of the platform.
 package bootstrap_token
 
-import (
-	"github.com/PRO-Robotech/kaname/internal/domain"
-)
-
-// Deterministic seed strings — MUST stay byte-identical to migration 0058's
-// `md5('…')` arguments so the Go-computed ids match the seeded rows.
-const (
-	seedBootstrapSA     = "kacho-bootstrap-admin" // → service_accounts.id (sva…)
-	seedBootstrapSoc    = "kacho-bootstrap-soc"   // → service_account_oauth_clients.id (soc_…)
-	seedSystemAccount   = "kacho-system"          // → the system account / owner user md5 suffix
-	bootstrapClientID   = "kacho-bootstrap-admin" // Hydra OAuth2 client_id (fixed, readable)
-	bootstrapClientNm   = "kacho-bootstrap-admin" // Hydra client_name
-	prefixServiceAcct   = "sva"                   // 3-char corelib prefix (no underscore), matches PrefixServiceAccount
-	prefixSAOAuthClient = "soc_"                  // underscore form, matches service_account_oauth_clients_id_check
-	prefixUser          = "usr"
-)
-
-// md5Suffix returns the first 17 hex chars of md5(s) — identical to Postgres
-// `substr(md5(s),1,17)`.
+// ids.go — идентификаторы посевной идентичности, ПИННУТЫЕ литералом.
 //
-// Формула ОБЪЯВЛЕНА ОДИН РАЗ — `domain.DerivedIDSuffix`, — и здесь только
-// зовётся. Прежде объявлений было три (это, `authzguard` и текст миграций), и
-// разошлись бы они молча: полученный идентификатор остаётся синтаксически верным
-// и перестаёт адресовать существующую строку.
-func md5Suffix(s string) string { return domain.DerivedIDSuffix(s) }
+// # ПОЧЕМУ ЛИТЕРАЛ, А НЕ ФОРМУЛА (задача продукта #2554, §2.2 приёмки
+// `docs/engineering/acceptance/seed-identity-names-its-own-service.md`)
+//
+// Прежде все три значения выводились из ИМЁН: `'sva' || substr(md5('<имя>'),1,17)`
+// и далее. Формула была верна, пока имя стояло на месте, — и переставала быть
+// верной в тот момент, когда имя переводили. Переводится оно решением §2.3, а
+// идентификатор двигать нельзя (ban #15: операции смены id не существует) и
+// поправить посев нельзя (ban #5: применённую миграцию не правят).
+//
+// Два требования несовместимы, пока формула хозяин, — значит хозяином
+// перестаёт быть формула. Литерал здесь не «магическое число»: это ТА САМАЯ
+// строка, которую посеял свод, и её единственный источник — текст свода, а не
+// второй расчёт. Пересчёт был бы вторым объявлением одной формулы и сошёлся бы с
+// первым при ЛЮБОМ имени, то есть остался бы зелёным ровно в том случае, ради
+// которого написан.
+//
+// Держит это `TestDeriveIdentity_IDsArePinnedToTheAppliedBaseline`: каждый
+// идентификатор обязан встречаться литералом в тексте применённого свода.
+//
+// # ЧТО ФОРМУЛА ПРОДОЛЖАЕТ ДЕЛАТЬ — ГРАНИЦА, А НЕ ОСТАТОК
+//
+// `domain.DerivedIDSuffix` не снят и снят не будет: служебные учётки модулей
+// (`authzguard`) выводят идентификатор из имени законно — там имя и
+// идентификатор двигаются ВМЕСТЕ, и деривация верна. Единственность её
+// объявления держит `TestDeterministicIDDerivationIsDeclaredOnce`.
+//
+// # ЧТО НЕ ПЕРЕИМЕНОВЫВАЕТСЯ ВОВСЕ
+//
+// `bootstrapClientID` — идентификатор клиента у ВНЕШНЕГО провайдера, а не строка
+// нашей базы. Его переход требует окна у провайдера, цена которого не измерена;
+// предмет вынесен П1 приёмки. Здесь он остаётся прежним намеренно.
 
-// Identity — the deterministic bootstrap identity (derived; matches migration
-// 0058's seeded rows).
+const (
+	// bootstrapClientID — Hydra OAuth2 client_id (fixed, readable). Живёт у
+	// внешнего провайдера; предмет перехода — П1 приёмки, не эта правка.
+	bootstrapClientID = "kacho-bootstrap-admin"
+
+	// pinnedBootstrapSvaID — `service_accounts.id` служебной записи чеканки.
+	// Посеян `0001_initial.sql:3843`.
+	pinnedBootstrapSvaID = "svab91854890de887e6d"
+
+	// pinnedBootstrapSocID — `service_account_oauth_clients.id`, он же `kid`
+	// ключа, которым подписывается утверждение клиента.
+	//
+	// Свод этой строки НЕ сеет — её заводит путь запроса, — но значение обязано
+	// оставаться тем же: по нему провайдер находит зарегистрированный ключ, и
+	// сдвиг сделал бы уже выпущенные утверждения непроверяемыми.
+	pinnedBootstrapSocID = "soc_db27d17291ff453b6"
+
+	// pinnedSystemOwnerUserID — `users.id` владельца системного аккаунта,
+	// внешний ключ строки отображения. Посеян `0001_initial.sql:3880`.
+	pinnedSystemOwnerUserID = "usr1a18042d81fb438d6"
+)
+
+// Identity — the deterministic bootstrap identity (matches migration 0058's
+// seeded rows).
 type Identity struct {
 	// SvaID — the bootstrap ServiceAccount id (`sva…`, seeded by 0058).
 	SvaID string
 	// SocID — the service_account_oauth_clients mapping id (`soc_…`); also the
 	// JWK `kid` registered with Hydra and stamped in the client_assertion header.
 	SocID string
-	// ClientID — the Hydra OAuth2 client_id (`kacho-bootstrap-admin`).
+	// ClientID — the Hydra OAuth2 client_id.
 	ClientID string
 	// CreatedByUserID — the system owner user (`usr…`, FK for the mapping row).
 	CreatedByUserID string
 }
 
-// DeriveIdentity computes the deterministic bootstrap identity. Pure; no I/O.
+// DeriveIdentity возвращает посевную идентичность чеканки. Чистая; ввода-вывода
+// нет.
+//
+// Имя функции сохранено намеренно: у неё 19 вызывающих, и переименование ради
+// точности слова стоило бы правки каждого при нулевом выигрыше для читателя.
+// Что она больше не ВЫЧИСЛЯЕТ, сказано шапкой файла и держится пробой, а не
+// именем.
 func DeriveIdentity() Identity {
 	return Identity{
-		SvaID:           prefixServiceAcct + md5Suffix(seedBootstrapSA),
-		SocID:           prefixSAOAuthClient + md5Suffix(seedBootstrapSoc),
+		SvaID:           pinnedBootstrapSvaID,
+		SocID:           pinnedBootstrapSocID,
 		ClientID:        bootstrapClientID,
-		CreatedByUserID: prefixUser + md5Suffix(seedSystemAccount),
+		CreatedByUserID: pinnedSystemOwnerUserID,
 	}
 }

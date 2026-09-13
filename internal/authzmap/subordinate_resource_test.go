@@ -30,17 +30,54 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
 
+// authzmapResolves — членство двухчастного токена в закрытой таблице типов
+// модели прав.
+//
+// ЖИЛ В `limit_kind_catalog_test.go` — гейте, чей предмет (закрытый каталог
+// видов авторитета величин) снят стадией S4 (`PRO-Robotech/kacho#2117`).
+// Помощник переехал сюда вместе с единственным оставшимся вызывающим: оставить
+// его в снятом файле значило бы удержать файл ради помощника, а завести второй —
+// два места об одном предмете.
+func authzmapResolves(dotted string) bool {
+	module, resource, ok := authzmap.SplitObjectType(dotted)
+	if !ok {
+		return false
+	}
+	_, known := authzmap.ObjectType(module, resource)
+	return known
+}
+
+// resolvesKindPart — токен называет либо тип модели прав, либо ОБЪЯВЛЕННЫЙ
+// подчинённый ресурс.
+//
+// Переехал вместе с `authzmapResolves` из снятого `limit_kind_catalog_test.go`
+// по той же причине.
+func resolvesKindPart(dotted string) bool {
+	if authzmapResolves(dotted) {
+		return true
+	}
+	_, ok := domain.SubordinateResourceOf(domain.LimitKind(dotted))
+	return ok
+}
+
 // subordinateFindings — судья записей подчинённых ресурсов.
 //
-// resolves отвечает, называет ли токен тип модели прав; countable — состоит ли
-// вид в каталоге. Оба переданы параметрами, а не взяты из пакета: инъекция
+// resolves отвечает, называет ли токен тип модели прав; counted — виды, которые
+// служба считает. Оба переданы параметрами, а не взяты из пакета: инъекция
 // подаёт сюда синтетику, и судья, ходящий за фактами сам, на ней бы не работал.
+//
+// НОСИТЕЛЬ ВЫВОДИТСЯ ИЗ ИМЕНИ ВИДА, а не приезжает рядом с ним. Прежде пара
+// «вид + носитель» приходила из закрытого каталога авторитета величин; каталог
+// ушёл вместе с авторитетом (`PRO-Robotech/kacho#2117`, стадия S4), и носителем
+// вложенного вида стал его родитель — `iam.user.credential` считается в
+// `iam.user`, и прочесть это можно из самого имени.
 func subordinateFindings(
 	records []domain.SubordinateResource,
-	catalogue []domain.CountableKind,
+	counted []domain.LimitKind,
 	resolves func(string) bool,
 ) []string {
 	var out []string
@@ -81,8 +118,8 @@ func subordinateFindings(
 	}
 
 	// G4 — вложенный вид, чей ребёнок подчинён, считается в СВОЁМ родителе.
-	for _, e := range catalogue {
-		child := e.Kind.ChildKind()
+	for _, k := range counted {
+		child := k.ChildKind()
 		if child == "" {
 			continue
 		}
@@ -90,9 +127,10 @@ func subordinateFindings(
 		if !ok {
 			continue
 		}
+		carrier := k.ParentKind()
 		var among bool
 		for _, parent := range rec.Parents {
-			if domain.LimitCarrier(parent) == e.Carrier {
+			if parent == carrier {
 				among = true
 				break
 			}
@@ -100,7 +138,7 @@ func subordinateFindings(
 		if !among {
 			out = append(out, fmt.Sprintf(
 				"%s — носитель %q не среди родителей подчинённого ресурса %q: удостоверения "+
-					"одного принципала считались бы в другом", e.Kind, e.Carrier, child))
+					"одного принципала считались бы в другом", k, carrier, child))
 		}
 	}
 	sort.Strings(out)
@@ -116,16 +154,23 @@ func TestSubordinateResourcesAreConsistent(t *testing.T) {
 		"подчинённых ресурсов не объявлено — предпосылка гейта сломана, и его молчание "+
 			"неотличимо от согласия")
 
-	require.Empty(t, subordinateFindings(records, domain.CountableEntries(), authzmapResolves))
+	counted := domain.PostureStatedKinds()
+	require.NotEmpty(t, counted,
+		"служба не считает НИ ОДНОГО вида — предпосылка G4 пуста, и её молчание "+
+			"неотличимо от согласия")
+	require.Empty(t, subordinateFindings(records, counted, authzmapResolves))
 
 	nested := 0
-	for _, e := range domain.CountableEntries() {
-		if _, ok := domain.SubordinateResourceOf(e.Kind.ChildKind()); ok {
+	for _, k := range counted {
+		if _, ok := domain.SubordinateResourceOf(k.ChildKind()); ok {
 			nested++
 		}
 	}
-	t.Logf("перепись: записей подчинённых ресурсов %d, видов каталога %d, из них опирающихся на подчинённый ресурс %d",
-		len(records), len(domain.CountableEntries()), nested)
+	require.NotZero(t, nested,
+		"ни один вид не опирается на подчинённый ресурс: G4 не исполнялась ни разу, "+
+			"и её ноль находок вынесен об обходе, а не о записях")
+	t.Logf("перепись: записей подчинённых ресурсов %d, видов службы %d, из них опирающихся на подчинённый ресурс %d",
+		len(records), len(counted), nested)
 }
 
 // Инъекция в ОБЕ стороны, по одному дефекту на утверждение. Рядом с каждым
@@ -140,7 +185,7 @@ func TestSubordinateResourceGateCanFail(t *testing.T) {
 		Tables:  []string{"kaname.user_oauth_clients"},
 		Why:     "право вычисляется от принципала",
 	}
-	lawfulCatalogue := []domain.CountableKind{{Kind: "iam.user.credential", Carrier: "iam.user"}}
+	lawfulCounted := []domain.LimitKind{"iam.user.credential"}
 
 	t.Run("G1: имя, которое И подчинённый ресурс, И тип модели прав", func(t *testing.T) {
 		bad := lawful
@@ -185,15 +230,22 @@ func TestSubordinateResourceGateCanFail(t *testing.T) {
 	})
 
 	t.Run("G4: носитель вида не среди родителей записи", func(t *testing.T) {
-		// Вид человека объявил носителем служебную учётку — списание писало бы
-		// удостоверения человека в счёт машины.
-		wrong := []domain.CountableKind{{Kind: "iam.user.credential", Carrier: "iam.group"}}
+		// Удостоверения считаются в принципале, которого запись родителем не
+		// называет: списание писало бы их в счёт чужого носителя.
+		//
+		// ДЕФЕКТ ВНОСИТСЯ ИМЕНЕМ ВИДА, а не парой «вид + носитель»: носитель
+		// выводится из имени, и подать «тот же вид с другим носителем» стало
+		// невыразимо by construction. Дельта против близнеца по-прежнему ОДИН
+		// факт — первая часть имени.
+		wrong := []domain.LimitKind{"iam.group.credential"}
 		found := subordinateFindings([]domain.SubordinateResource{lawful}, wrong, authzmapResolves)
 		require.Len(t, found, 1)
-		require.Contains(t, found[0], "iam.user.credential")
+		require.Contains(t, found[0], "iam.group.credential")
+		require.Contains(t, found[0], "iam.group",
+			"находка обязана НАЗВАТЬ носителя, которого нет среди родителей")
 
 		require.Empty(t,
-			subordinateFindings([]domain.SubordinateResource{lawful}, lawfulCatalogue, authzmapResolves),
+			subordinateFindings([]domain.SubordinateResource{lawful}, lawfulCounted, authzmapResolves),
 			"законный близнец: носитель среди родителей — молчание")
 	})
 }

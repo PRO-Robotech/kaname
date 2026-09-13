@@ -59,7 +59,6 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -85,8 +84,10 @@ func (a axisText) String() string { return fmt.Sprintf("%s:%d", a.File, a.Line) 
 //
 // Аргумент, не являющийся строковой константой, осью с ТЕКСТОМ не считается:
 // сама `addrAxis` передаёт свой параметр дальше, и это не место самоотчёта, а
-// его механизм.
-func postureAxisTexts(name string, src []byte) ([]axisText, error) {
+// его механизм. Константа ПАКЕТА при этом константой является — имя ручки
+// объявлено ею один раз и склеивается с текстом причины (#2639); таблица
+// приходит доводом, поэтому инъекция подаёт свою.
+func postureAxisTexts(name string, src []byte, consts map[string]string) ([]axisText, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, name, src, parser.ParseComments)
 	if err != nil {
@@ -103,7 +104,7 @@ func postureAxisTexts(name string, src []byte) ([]axisText, error) {
 		if !ok || idx >= len(call.Args) {
 			return true
 		}
-		text, ok := constantString(call.Args[idx])
+		text, ok := resolveStringExpr(call.Args[idx], consts)
 		if !ok {
 			return true
 		}
@@ -140,32 +141,6 @@ func axisTextArgument(call *ast.CallExpr) (int, bool) {
 		}
 	}
 	return 0, false
-}
-
-// constantString — строковая константа выражения, включая склейку литералов.
-func constantString(expr ast.Expr) (string, bool) {
-	switch e := expr.(type) {
-	case *ast.BasicLit:
-		if e.Kind != token.STRING {
-			return "", false
-		}
-		s, err := strconv.Unquote(e.Value)
-		if err != nil {
-			return "", false
-		}
-		return s, true
-	case *ast.BinaryExpr:
-		if e.Op != token.ADD {
-			return "", false
-		}
-		left, okL := constantString(e.X)
-		right, okR := constantString(e.Y)
-		if !okL || !okR {
-			return "", false
-		}
-		return left + right, true
-	}
-	return "", false
 }
 
 // postureEnvCensus — объём осмотренного. Печатается ВСЕГДА: без него «находок 0»
@@ -320,13 +295,17 @@ func TestPostureSelfReportNamesAReachableEnvVar(t *testing.T) {
 	})
 
 	files := postureRootFiles(t)
+	consts, err := packageStringConsts(".")
+	if err != nil {
+		t.Fatalf("константы пакета не собраны: %v", err)
+	}
 	var axes []axisText
 	for _, name := range files {
 		src, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("%s не прочитан: %v", name, err)
 		}
-		found, err := postureAxisTexts(name, src)
+		found, err := postureAxisTexts(name, src, consts)
 		if err != nil {
 			t.Fatalf("%s не разобран: %v", name, err)
 		}

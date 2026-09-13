@@ -57,6 +57,69 @@ const (
 	iamSurfaceShutdownBudget = 5 * time.Second
 )
 
+// РУЧКИ ПРОФИЛЯ, которыми объявлены адреса поверхностей.
+//
+// Имя ручки нужно в ДВУХ местах: в причине, по которой поверхность выключена
+// (её печатает журнал при подъёме), и в отказе стража различимости адресов —
+// оператор знает, что не так, только если знает, ГДЕ это чинить. Два литерала
+// об одном предмете разошлись бы молча, и разошёлся бы тот, который реже
+// читают, поэтому имя объявлено здесь один раз.
+const (
+	// knobPublicGRPC — публичный gRPC-слушатель.
+	knobPublicGRPC = "KANAME_API_SERVER__ENDPOINT"
+	// knobInternalGRPC — внутренний gRPC-слушатель.
+	knobInternalGRPC = "KANAME_API_SERVER__INTERNAL_ENDPOINT"
+	// knobPublicREST — собственный публичный REST-фронт.
+	knobPublicREST = "KANAME_API_SERVER__REST_ENDPOINT"
+	// knobInternalREST — собственный внутренний REST-фронт.
+	knobInternalREST = "KANAME_API_SERVER__INTERNAL_REST_ENDPOINT"
+	// knobHooks — вебхуки провайдера личности.
+	knobHooks = "KANAME_AUTHN__HOOKS_HTTP_ENDPOINT"
+	// knobMetrics — скрейп величин.
+	knobMetrics = "KANAME_API_SERVER__METRICS_ENDPOINT"
+	// knobRegistryToken — выдача докерного токена.
+	//
+	// #nosec G101 -- это ИМЯ РУЧКИ, которую правит оператор, а не удостоверение:
+	// значение приходит из окружения, здесь стоит только его адрес. Сканер
+	// опознаёт подстроку TOKEN в имени постоянной и иначе решить не может.
+	knobRegistryToken = "KANAME_API_SERVER__REGISTRY_TOKEN__ENDPOINT"
+	// knobJWKSProxy — зеркало набора ключей проверки подписи.
+	knobJWKSProxy = "KANAME_API_SERVER__JWKS_PROXY__ENDPOINT"
+)
+
+// raisedSurface — поверхность, которую поднимает корень, И РУЧКА, которой её
+// адрес объявлен.
+//
+// # Зачем пара, а не голый дескриптор
+//
+// Ручку не вывести из дескриптора: [servicecontract.Surface] её не несёт, а имя
+// поверхности («скрейп величин») оператору адреса не называет. Пара кладётся в
+// ТОТ ЖЕ срез, которым поверхности поднимаются, поэтому страж различимости
+// адресов читает ровно то, что корень поднимает, и второго перечня — который
+// отстал бы молча — не заводится.
+type raisedSurface struct {
+	// knob — ручка профиля, объявившая адрес. Попадает в текст отказа.
+	knob string
+	// desc — принятый профиль поверхности, по которому она поднимается.
+	desc servicecontract.SurfaceDescriptor
+}
+
+// surfaceAddrsOfRaised — адреса поверхностей ИЗ ТОГО ЖЕ среза, которым они
+// поднимаются.
+//
+// Один элемент на элемент, by construction: сверяется ровно то, что поднято, и
+// «сверено меньше, чем поднимается» непредставимо. Выключенная поверхность
+// отдаёт пустой адрес — страж исключает его сам («поверхность не поднята»),
+// и решение об этом принимается в одном месте, а не в двух.
+func surfaceAddrsOfRaised(raised []raisedSurface) []surfaceAddr {
+	out := make([]surfaceAddr, 0, len(raised))
+	for _, s := range raised {
+		addr, _ := s.desc.Spec().Addr.Get()
+		out = append(out, surfaceAddr{knob: s.knob, addr: addr})
+	}
+	return out
+}
+
 // iamHTTPSurface достраивает объявление ОБЩЕЙ частью и отдаёт его конструктору.
 //
 // Аргумент — уже наполовину заполненная [servicecontract.Surface], а не набор

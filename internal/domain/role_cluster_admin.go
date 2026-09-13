@@ -15,7 +15,7 @@ package domain
 //     (A-05b: a finite explicit cluster-wide set).
 //   - Role.IsClusterAdminRole() — is the role THE system cluster-admin superuser,
 //     identified by its PINNED id (ClusterAdminRoleID `admin` / SystemAdminRoleID
-//     `kacho-system.admin`) + is_system + the `*.*.*` shape (defence-in-depth)? It
+//     `system.admin`) + is_system + the `*.*.*` shape (defence-in-depth)? It
 //     is the SINGLE role for which GLOBAL + all is legal (A-05c / D-11a) — served by
 //     the D-9 flat cluster-relation short-circuit, never by per-object
 //     materialization. NOTE: the `owner` role carries the SAME `*.*.*` shape but is
@@ -37,7 +37,7 @@ func (rs Rules) HasAnchorRule() bool {
 // IsClusterAdminRole reports whether r is THE system cluster-admin superuser role.
 //
 // It is identified by its PINNED deterministic id (ClusterAdminRoleID `admin` or
-// SystemAdminRoleID `kacho-system.admin`) AND is_system AND (defence-in-depth) that
+// SystemAdminRoleID `system.admin`) AND is_system AND (defence-in-depth) that
 // it still carries the full `*.*.*` ARM_ANCHOR rule (module:*, `*` resource, `*`
 // verb). Matching by id — NOT by the bare `*.*.*` shape — is load-bearing for #8:
 // the `owner` system role (OwnerRoleID, migration 0035) carries the SAME `*.*.*`
