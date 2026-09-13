@@ -489,7 +489,7 @@ var pyCallForm = regexp.MustCompile(`\[\s*["']git["']`)
 // ею в текстах, печатаемых человеку, выделяют команду. Признав её командной
 // позицией, разбор прочитал бы как вызов каждую такую строку.
 var shellCallForm = regexp.MustCompile(
-	"(^|\\$\\(|\\$\\(shell |\\| |; |&& |\\|\\| |! |then |do )git\\s")
+	`(^|\$\(|\$\(shell |\| |; |&& |\|\| |! |then |do )git\s`)
 
 // lineHistoryQuestions — вопросы об истории в файле не на Go: построчно.
 //
