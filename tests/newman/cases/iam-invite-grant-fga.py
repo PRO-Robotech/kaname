@@ -75,7 +75,7 @@ consumer authz-gate resolves). ALLOW → 200 {"allowed": true}; DENY → 200
 {"reason": "..."} with `allowed` omitted (proto3 false). Mirrors
 cases/iam-rbac-scope-grant.py.
 
-Fixtures (tests/authz-fixtures/setup.sh): jwtBootstrap,
+Fixtures (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh): jwtBootstrap,
 jwtAccountAdminA, accountAId, projectA1Id, projectB1Id (a project under account B
 — the cross-account containment target a fresh account-A subject has NO path to).
 The fresh-SA subject is created per-case via {{runId}}-suffixed names — no

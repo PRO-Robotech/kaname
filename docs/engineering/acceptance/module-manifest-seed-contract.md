@@ -57,7 +57,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   того, как автор завёл названную задачу. Каждое перепроверено рецензентом
   **своим прогоном**, а не чтением — перечень с командами в разделе 0.8. Можно
   начинать реализацию: `superpowers:writing-plans` → `integration-tester`
-- **Ревизия измерения:** `dc607b06f` (ветка `release/modules`, вровень с `origin/main`,
+- **Ревизия измерения:** `PRO-Robotech/kacho@dc607b06f` (ветка `release/modules`, вровень с `origin/main`,
   `git status --porcelain` пуст). Все числа о дереве продукта сняты **на ней**
 - **Ревизия черновика:** её НЕТ by construction — `kacho-workspace/docs/manifest-dcl`
   каталог, которого git не отслеживает. Числа по нему датированы **2026-08-31** и

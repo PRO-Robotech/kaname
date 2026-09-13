@@ -101,7 +101,7 @@ red is carried here, as a number and a case list, never as a deduction in the ga
 |---|---|
 | читать свою запись разрешает отношение, принимающее ТОЛЬКО тип `user` | `awk '/^type iam_user/,/^type [^i]/' proto/kaname/cloud/iam/v1/fga_model.fga \| grep 'define subject'` → `[user]` |
 | каждый предъявитель матрицы — служебная учётка | `tests/authz-fixtures/principal_pairings.py`, раздел про то, что `userNOBId` / `userINVId` / `userPureNoBindingsId` — ТОЛЬКО цели привязки |
-| человеческий предъявитель не проходит порог повышения | `tests/authz-fixtures/mint_rs256.py`, раздел `user_platform_token`: `acr` не несётся, а от порога освобождена только машина. Прежняя редакция называла второй причиной жёсткий внутренний `aud` — этой причины больше нет: выпуск персонального токена не объявляет адресата у внешнего поставщика (#1121) |
+| человеческий предъявитель не проходит порог повышения | `PRO-Robotech/kacho:tests/authz-fixtures/mint_rs256.py`, раздел `user_platform_token`: `acr` не несётся, а от порога освобождена только машина. Прежняя редакция называла второй причиной жёсткий внутренний `aud` — этой причины больше нет: выпуск персонального токена не объявляет адресата у внешнего поставщика (#1121) |
 
 Значит служебная учётка не удовлетворяет это отношение НИ ПРИ КАКОЙ выдаче. Клетка
 стояла ALLOW с 2026-07-26 (`c4960673`, раздел ниже): тогда цель переставили вслед за
@@ -118,7 +118,7 @@ red is carried here, as a number and a case list, never as a deduction in the ga
   `AUTHZ-USR-GT-SELF-CEREMONY`, человеческим предъявителем волны церемонии
   (`jwtHumanCeremonyNoBindings` + `ceremonyNoBindingsUserId`). Коллекция `authz-deny`
   в эту волну входит уже, проверяется машинно:
-  `python3 tests/authz-fixtures/ceremony_credentials.py --stems --suite tests/newman`.
+  `python3 PRO-Robotech/kacho:tests/authz-fixtures/ceremony_credentials.py --stems --suite tests/newman`.
 
 Без этого переноса строки `USR-GT-*` стали бы сплошным отрицанием, и полностью
 отказавший `UserService.Get` оставил бы матрицу зелёной.
@@ -291,7 +291,7 @@ several were strengthened.
   grant it `view` on account-B, and both stay ACTIVE in Postgres across runs. Every
   DENY/EMPTY expectation for it was being asserted against an authorised principal.
   Switched to the DEDICATED never-granted `jwtPureNoBindings` (seeded by
-  `tests/authz-fixtures/setup.sh`, never a grant target anywhere): the `authz-deny` NOB
+  `PRO-Robotech/kacho:tests/authz-fixtures/setup.sh`, never a grant target anywhere): the `authz-deny` NOB
   matrix row, `AUTHZ-ULG04`, and the foreign-Get / scope-filter probes in
   `iam-project` / `iam-group` / `iam-service-account`. The two self-referential rows
   (`USR-GT-A` self-get, `ESC-SELF-ADMIN-*` self-grant) were re-targeted to
@@ -476,7 +476,7 @@ each half was checked separately rather than inferred from the others:
    `cases/` and **46** in the generated collections — the predicate demonstrably finds
    grants when they exist. The 4 occurrences of `userPureNoBindingsId` in collections are
    the `AUTHZ-ESC-SELF-ADMIN-*` must-DENY canaries, which assert 401/anon and 403/no-bind:
-   they assert the subject **stays** ungranted. `tests/authz-fixtures/setup.sh` seeds it
+   they assert the subject **stays** ungranted. `PRO-Robotech/kacho:tests/authz-fixtures/setup.sh` seeds it
    with that contract written down.
 
 The canary itself stays exactly as it is — un-whitelisted, single-shot, no retry — so a
@@ -615,7 +615,7 @@ umbrella run):
 
 - **`label-revoke-{vpc,compute}` — cross-service create against a PHANTOM project
   (round-3 root).** Round-2 fixed the create-`403` by granting AAA an explicit
-  `ROLE_EDIT @ project:A1` in `tests/authz-fixtures/setup.sh` (so the gateway authz gate
+  `ROLE_EDIT @ project:A1` in `PRO-Robotech/kacho:tests/authz-fixtures/setup.sh` (so the gateway authz gate
   passes). Round-3 CI then exposed the deeper root: the create Operation now returns `200`
   but completes `done:true` **with an error** — `create-net` → `{code:5,"Project
   prj3m3q…8ftb not found"}` (vpc), `create-disk` → `{code:5,"Folder with id prj3m3q…8ftb

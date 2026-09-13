@@ -38,8 +38,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   Вердикт на нынешнюю редакцию ставит `acceptance-reviewer` своим кругом, а не
   эта строка. Решение, замер и цена обоих отвергнутых исходов —
   `../architecture/verdict-names-a-revision-not-a-file.md`
-- **Ревизия измерения:** круг 1 — `9f13101a7`; круг 2 — `9a531cbe9`; **круг 3 —
-  `ab771fe83`** (ветка `lane/1778-acceptance`, `git status --porcelain` пуст,
+- **Ревизия измерения:** круг 1 — `PRO-Robotech/kacho@9f13101a7`; круг 2 — `PRO-Robotech/kacho@9a531cbe9`; **круг 3 —
+  `PRO-Robotech/kacho@ab771fe83`** (ветка `lane/1778-acceptance`, `git status --porcelain` пуст,
   `git ls-remote --heads origin` → 0 — на origin не отправлено). **Все** числа
   о дереве продукта сняты на названной ревизии и сопровождаются предикатом —
   повторяйте предикатом, а не памятью

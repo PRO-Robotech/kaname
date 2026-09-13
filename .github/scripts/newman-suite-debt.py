@@ -12,11 +12,33 @@
 ЧИСЛОМ по каждой позиции — иначе зелёный шаг читается шире сделанного, а это брак
 независимо от того, сколько сделано.
 
-РАЗРЕЗ ВЫВОДИТСЯ, А НЕ ОБЪЯВЛЯЕТСЯ ВТОРЫМ СПИСКОМ. Поверхность коллекции читается
-из неё самой — по переменным адреса, которые её шаги действительно используют, — а
-препятствия из того, какие ключи окружения она читает и пусты ли они в шаблоне.
-Выписанный перечень разошёлся бы с деревом молча и разошёлся бы в одну сторону:
-новая коллекция в него просто не попала бы.
+ВЕЛИЧИН ДВЕ, И ОНИ О РАЗНОМ. АДРЕСАЦИЯ выводится из самой коллекции — по
+переменным адреса, которые её шаги действительно используют. РЕШЕНИЕ О
+ПРОИЗВОДИТЕЛЕ выводом не берётся: оно ОБЪЯВЛЕНО ведомостью с доводом по каждой
+позиции, и перепись его читает, а не производит.
+
+ПОЧЕМУ ЭТО НЕ ОТКАЗ ОТ ПРЕЖНЕГО РЕШЕНИЯ, А ЕГО УТОЧНЕНИЕ. Здесь стояло «разрез
+ВЫВОДИТСЯ, а не объявляется вторым списком», и довод — «выписанный перечень
+разошёлся бы с деревом молча: новая коллекция в него просто не попала бы» — верен
+для АДРЕСАЦИИ и остаётся в силе: она по-прежнему выводится. Неверен он оказался
+для ПРОИЗВОДИТЕЛЯ, и вот чем.
+
+Ярлык, выведенный из адреса, НЕОПРОВЕРЖИМ как утверждение о производителе:
+переадресация коллекции меняет адрес И ярлык одним движением, поэтому ярлык не
+может оказаться неверным ни при каком состоянии дерева. Генератор приписывает
+`{{baseUrl}}` каждому шагу автоматически, значит ярлык края получают 40 коллекций
+из 41 BY CONSTRUCTION — включая те, все утверждения которых производит сама
+служба. Разрез #24, читавший ПРОДУКТ, а не адрес, дал по тем же 40: A 18 · B 9 ·
+C 8 · D 5. Для восемнадцати выведенный ярлык ложен.
+
+Довод «перечень разошёлся бы молча» снят МЕХАНИЗМОМ, а не обещанием: ведомость
+сверяется с деревом В ОБЕ СТОРОНЫ — коллекция без записи роняет перепись, запись
+без коллекции роняет её же. Новая коллекция в ведомость не «не попадёт» — она
+уронит прогон, пока решение о ней не записано.
+
+ПЕЧАТАЮТСЯ ОБЕ ВЕЛИЧИНЫ ПО КАЖДОЙ ПОЗИЦИИ, и расхождение между ними видно, а не
+сглажено: адресация говорит, куда коллекция стучится, ведомость — чей
+производитель отвечает на её утверждения.
 
 ПЕЧАТАЮТСЯ ОБЕ ВЕЛИЧИНЫ. «Гоняется здесь N» без «не гоняется M» скрывает ровно тот
 случай, ради которого перепись и делается.
@@ -132,13 +154,30 @@ def used_keys(text: str) -> set[str]:
     return set(VAR_RE.findall(text)) | set(GET_RE.findall(text))
 
 
+# ЯРЛЫК КРАЯ НАЗЫВАЕТ ТО, ЧТО ПРЕДИКАТ СЧИТАЕТ. Прежде он звался «край
+# платформы» — утверждением о ПРОИЗВОДИТЕЛЕ, — а считалась переменная базового
+# адреса. Для восемнадцати коллекций из сорока это утверждение ложно, и отличить
+# ложное от истинного читатель мог только прочитав их содержимое — ту самую
+# работу, которую перепись обещает не требовать.
+#
+# Ярлыки собственной поверхности и соседа НЕ переименованы, и это решение:
+# `--minted-surface` посева — контракт между посевом и переписью, и его ключ
+# `служба (собственный REST-фронт)` сменить здесь в одиночку значило бы развести
+# два места об одном предмете. Предмет задачи — ярлык, читаемый как вердикт о
+# производителе; у собственной поверхности адрес и производитель совпадают.
+SURFACE_EDGE = "адресуется к краю платформы"
+
+
 def surface_of(text: str, keys: set[str]) -> str:
-    """Поверхность коллекции: чей производитель отвечает на её запросы."""
+    """АДРЕСАЦИЯ коллекции: к чьему базовому адресу стучатся её шаги.
+
+    Это НЕ утверждение о производителе: решение о нём объявлено `PRODUCER_LEDGER`.
+    """
     addressed = set(CFG_RE.findall(text)) | (keys & (EDGE_VARS | OWN_VARS | NEIGHBOUR_VARS))
     if addressed & OWN_VARS:
         return "служба (собственный REST-фронт)"
     if addressed & EDGE_VARS or "baseUrl" in keys:
-        return "край платформы"
+        return SURFACE_EDGE
     if addressed & NEIGHBOUR_VARS:
         return "служба + недостижимый сосед"
     return "не определена"
@@ -194,8 +233,8 @@ def blockers(surface: str, keys: set[str], empty: set[str],
     if runs is not None and not runs:
         out.append("ни один шаг конвейера её не гоняет "
                    "(объявление читается разобранным YAML)")
-    if surface == "край платформы":
-        out.append("нужен край платформы (его производитель — чужой стенд)")
+    if surface == SURFACE_EDGE:
+        out.append("адресуется к краю платформы (переменная базового адреса)")
     minted = minted_by_surface.get(surface, set())
     need = sorted(k for k in keys if k in empty and k != "runId")
     ceremony = [k for k in need if is_ceremony_key(k)]
@@ -393,7 +432,118 @@ def blocked_stems(newman: pathlib.Path, workflows: pathlib.Path) -> dict[str, li
     return {stem: bl for stem, _, bl in blocked}
 
 
-def run(newman: pathlib.Path, workflows: pathlib.Path | None = None) -> int:
+# ─────────────────── ВЕДОМОСТЬ ПРОИЗВОДИТЕЛЯ: РЕШЕНИЕ, А НЕ ВЫВОД ───────────
+#
+# Ключ — стебель коллекции, значение — (категория, довод). Источник решения —
+# разрез #24, читавший ПРОДУКТ: какие свойства утверждает коллекция и чей
+# производитель их даёт. Адрес, по которому она сегодня стучится, решения не
+# определяет: генератор приписывает переменную края каждому шагу сам.
+#
+# КАТЕГОРИИ ЗАКРЫТЫ, и у каждой свой исход:
+#   A — производитель СЛУЖБА: переезжает на собственный фронт;
+#   B — служба, но нужен ЧЕЛОВЕЧЕСКИЙ предъявитель: переезжает после полосы личности;
+#   C — производитель КРАЙ платформы: остаётся её предметом;
+#   D — не про сущности службы вовсе: остаётся в монорепо.
+#
+# ВЕДОМОСТЬ СВЕРЯЕТСЯ С ДЕРЕВОМ В ОБЕ СТОРОНЫ, и это то, чем снят довод против
+# второго списка: коллекция без записи роняет перепись, запись без коллекции
+# роняет её же. Перечень поэтому не может ни отстать от дерева, ни пережить его.
+PRODUCER_CATEGORIES = {
+    "A": "служба",
+    "B": "служба + человеческий предъявитель",
+    "C": "край платформы",
+    "D": "чужой домен",
+}
+
+PRODUCER_LEDGER: dict[str, tuple[str, str]] = {
+    "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек"),
+    "authz-failclosed": ("C", "утверждает ПРОИЗВОДИТЕЛЯ отказа и он измерен — край, полоса чтения отзыва; условие создаётся сворачиванием базы и до службы не доходит"),
+    "authz-sa-apitoken": ("D", "20 из 30 запросов — `vpc`; половина ALLOW определена семантикой vpc («project-viewer-GATED List … owned by kacho-vpc»)"),
+    "basic-access-token": ("A", "выдача → предъявление → отзыв → отказ, всё на ручках iam; предъявитель выбран машинный **намеренно** («предъявитель человека добывается волной цере…"),
+    "docker-lane-credential-kind": ("A", "«адрес `:9096` — собственная ручка iam»; предмет — полоса выдачи kaname, не данные реестра"),
+    "geo-read": ("D", "все 4 запроса — `/geo/v1`, путей `iam` ноль"),
+    "iam-access-binding-account-scope": ("A", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель"),
+    "iam-access-binding-include-revoked": ("A", "чтение с отозванными; статусов кроме 200 не утверждает вовсе"),
+    "iam-access-binding-redesign": ("A", "один предъявитель, `iam` целиком, `md.resource` — ноль"),
+    "iam-account": ("B", "9 человеческих предъявителей из 14; аккаунт принадлежит человеку by construction"),
+    "iam-account-redesign": ("B", "7 человеческих предъявителей из 10"),
+    "iam-authz-grant-check-propagation": ("C", "1 утверждение читает `md.resource`"),
+    "iam-flat-authz-vbc": ("A", "вывод типа субъекта из префикса id — предмет службы; на строгий разбор края намеренно НЕ опирается"),
+    "iam-group": ("C", "2 утверждения читают `md.resource`"),
+    "iam-interactive-client": ("B", "Create/Delete регистрируют клиента в ВНЕШНЕМ поставщике (`providerClients`, адаптер `*clients.HydraAdminClient`); на автономном стенде поставщик об…"),
+    "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»"),
+    "iam-invite-grant-fga": ("A", "приглашение → выдача → сходимость модели, всё внутри iam"),
+    "iam-limit": ("A", "пределы личности; 88 обращений к внутреннему фронту. Виды `vpc.*` — записи СВОЕГО каталога пределов, чужой поверхности не требуют"),
+    "iam-list-visibility": ("A", "видимость перечня по членству; один предъявитель, только 200"),
+    "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем"),
+    "iam-permission-catalog": ("A", "каталог прав — данные службы"),
+    "iam-project": ("A", "CRUD проекта + чужой объект неотличим от промаха (404/code 5) — производит своя дверь"),
+    "iam-rbac-rules-labels": ("A", "метки правил роли; один предъявитель, только 200"),
+    "iam-rbac-scope-grant": ("A", "выдача на области; внутренний `iam:check` через внутренний фронт"),
+    "iam-rbac-subjects": ("A", "субъекты выдач; единственное упоминание края — комментарий о том, ГДЕ живёт внутренний RPC"),
+    "iam-read-authz-vget": ("B", "несущий кейс — «выдали не-владельцу ЧЕЛОВЕКУ → читает»"),
+    "iam-role": ("C", "1 утверждение читает `md.resource` (`assert_unscoped_rejected('iam.roles.create','account:*')`)"),
+    "iam-role-redesign": ("A", "форма роли; утверждает ОТСУТСТВИЕ полей области на роли — своя проекция"),
+    "iam-service-account": ("C", "2 утверждения читают `md.resource`"),
+    "iam-subject-privileges-read": ("A", "чтение привилегий субъекта; 403 без `md.resource`"),
+    "iam-system-grant-visibility": ("A", "один запрос, видимость системной выдачи"),
+    "iam-token-facade-conformance": ("C", "утверждает, что КРАЙ принял предъявленное удостоверение, и что поверхности внешнего поставщика недосягаемы ЧЕРЕЗ край; дозванивается до `/admin/cli…"),
+    "iam-user": ("C", "5 утверждений читают `md.resource`. Сверх того нужен человек (`jwtHumanCeremony`) — то есть даже расщепление оставит остаток в B"),
+    "iam-whoami": ("B", "оба предъявителя человеческие; утверждает `subject = user:<id>`"),
+    "label-revoke-iam": ("A", "отзыв по метке ВНУТРИ iam; чужих домéнов ноль"),
+    "label-revoke-nlb": ("D", "`geo` + `nlb` + `iam`; проверяет связку через границу домена"),
+    "label-revoke-storage": ("D", "`geo` + `storage` + `iam`"),
+    "label-revoke-vpc": ("D", "`vpc` + `iam`, 21 запрос в vpc"),
+    "rbac-subject-channel-equivalence": ("B", "равнозначность каналов субъекта требует человека как одного из каналов"),
+    "rbac-visibility-set": ("B", "`jwtHumanRbacVisSet` + `…StepUp`"),
+    # Коллекция СОБСТВЕННОГО фронта: она и есть поверхность службы, поэтому
+    # разрезом #24 не судилась — судить было нечего.
+    "kaname-own-rest-front": ("A", "собственный REST-фронт службы: предмет коллекции и есть эта поверхность"),
+}
+
+
+def _surface_of_stem(stem, runnable, blocked) -> str:
+    """Адресация позиции по её стеблю — для сверки двух величин между собой."""
+    for s, surface, *_ in [*runnable, *blocked]:
+        if s == stem:
+            return surface
+    return ""
+
+
+def producer_of(stem: str, ledger: dict[str, tuple[str, str]] | None = None) -> tuple[str, str]:
+    """Решение о производителе — ЧИТАЕТСЯ, а не выводится.
+
+    Ведомость — ПАРАМЕТР, а не глобаль: самопроверка судит синтетические деревья,
+    и подставить им объявленный перечень значило бы требовать записи о коллекциях,
+    которых в дереве нет. Умолчание — объявленная ведомость.
+    """
+    cat, why = (PRODUCER_LEDGER if ledger is None else ledger)[stem]
+    return cat, why
+
+
+def reconcile_producer_ledger(stems: set[str],
+                              ledger: dict[str, tuple[str, str]] | None = None) -> list[str]:
+    """Сверка ведомости с деревом В ОБЕ СТОРОНЫ."""
+    ledger = PRODUCER_LEDGER if ledger is None else ledger
+    out = []
+    for stem in sorted(stems - set(ledger)):
+        out.append(f"коллекция {stem} есть в дереве, а решения о её производителе "
+                   f"не записано — перепись напечатала бы адрес вместо вердикта")
+    for stem in sorted(set(ledger) - stems):
+        out.append(f"запись про {stem} пережила свой предмет — такой коллекции в "
+                   f"дереве нет, и прощать/объявлять нечего")
+    for stem, (cat, why) in sorted(ledger.items()):
+        if cat not in PRODUCER_CATEGORIES:
+            out.append(f"запись про {stem} называет категорию {cat!r} вне закрытого "
+                       f"словаря {sorted(PRODUCER_CATEGORIES)}")
+        if not why.strip():
+            out.append(f"запись про {stem} без довода — категория без довода есть "
+                       f"мнение, а не решение")
+    return out
+
+
+def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
+        ledger: dict[str, tuple[str, str]] | None = None) -> int:
     if workflows is None:
         workflows = ROOT / ".github" / "workflows"
     try:
@@ -410,6 +560,14 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None) -> int:
         print(f"УСЛОВИЕ НЕ СОЗДАНО: {e}.", file=sys.stderr)
         return RC_UNMET
 
+    drift = reconcile_producer_ledger({stem for stem, *_ in
+                                       [*runnable, *blocked]}, ledger)
+    if drift:
+        print("ОТКАЗ: ведомость производителя разошлась с деревом:", file=sys.stderr)
+        for d in drift:
+            print(f"  · {d}", file=sys.stderr)
+        return 1
+
     print("===== сквозной набор на АВТОНОМНОМ стенде: что гоняется, а что нет =====")
     print(f"коллекций в дереве: {len(cols)}")
     print(f"  гоняется здесь:    {len(runnable)}")
@@ -423,9 +581,26 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None) -> int:
     for stem, where in sorted(runs.items()):
         print(f"  · {stem} ← {'; '.join(where)}")
     print()
-    print("по поверхности (чей производитель отвечает):")
+    print("по АДРЕСАЦИИ (к чьему базовому адресу стучатся шаги):")
     for s, n in sorted(by_surface.items(), key=lambda kv: -kv[1]):
         print(f"  {n:3d}  {s}")
+    print()
+    by_producer: dict[str, int] = {}
+    for stem, *_ in [*runnable, *blocked]:
+        cat, _why = producer_of(stem, ledger)
+        label = f"{cat} — {PRODUCER_CATEGORIES[cat]}"
+        by_producer[label] = by_producer.get(label, 0) + 1
+    print("по ПРОИЗВОДИТЕЛЮ (объявлено ведомостью, разрез #24):")
+    for label, n in sorted(by_producer.items()):
+        print(f"  {n:3d}  {label}")
+    print()
+    # РАСХОЖДЕНИЕ ДВУХ ВЕЛИЧИН — ОТДЕЛЬНОЕ ЧИСЛО, а не то, что читатель обязан
+    # сложить сам: адрес края при производителе-службе и есть предмет переезда.
+    mismatch = [stem for stem, *_ in [*runnable, *blocked]
+                if producer_of(stem, ledger)[0] in ("A", "B")
+                and _surface_of_stem(stem, runnable, blocked) == SURFACE_EDGE]
+    print(f"адресуется к краю, а производитель — служба: {len(mismatch)}")
+    print("  (это и есть предмет переезда; ярлык адреса о производителе не говорит)")
     print()
     print("по препятствию (одна коллекция может иметь несколько):")
     for b, n in sorted(by_blocker.items(), key=lambda kv: -kv[1]):
@@ -444,13 +619,17 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None) -> int:
     if runnable:
         print("ГОНЯЕТСЯ ЗДЕСЬ (и КАКИМ шагом конвейера):")
         for stem, surface, where in runnable:
-            print(f"  · {stem} — {surface}")
+            cat, why = producer_of(stem, ledger)
+            print(f"  · {stem} — адресация: {surface}; производитель: "
+                  f"{cat} ({PRODUCER_CATEGORIES[cat]}) — {why}")
             for w in where:
                 print(f"      ← {w}")
         print()
     print("НЕ ГОНЯЕТСЯ ЗДЕСЬ (по каждой позиции — причина):")
     for stem, surface, bl in blocked:
-        print(f"  · {stem} [{surface}]")
+        cat, why = producer_of(stem, ledger)
+        print(f"  · {stem} [адресация: {surface}; производитель: "
+              f"{cat} ({PRODUCER_CATEGORIES[cat]})] — {why}")
         for b in bl:
             print(f"      — {b}")
     print()
@@ -509,6 +688,25 @@ def _wf(tmp: pathlib.Path, runs: list[str]) -> pathlib.Path:
     return wf
 
 
+def _st_ledger(newman: pathlib.Path) -> dict[str, tuple[str, str]]:
+    """Синтетическая ведомость для синтетического дерева: одна запись на коллекцию.
+
+    Самопроверка судит ДРУГИЕ оси; требовать от неё объявленных решений о
+    коллекциях, которых в дереве нет, значило бы уронить её на предмете, к
+    которому она не относится. Сверку самой ведомости держат оси 10 и 11 ниже —
+    там расхождение вносится НАМЕРЕННО.
+    """
+    cols = sorted(p.name.replace(".postman_collection.json", "")
+                  for p in (newman / "collections").glob("*.postman_collection.json"))
+    return {stem: ("A", "синтетика самопроверки") for stem in cols}
+
+
+def _st_run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
+            ledger: dict[str, tuple[str, str]] | None = None) -> int:
+    return run(newman, workflows=workflows,
+               ledger=_st_ledger(newman) if ledger is None else ledger)
+
+
 def self_test() -> int:
     import io
     import contextlib
@@ -521,7 +719,7 @@ def self_test() -> int:
         empty = _mk(tmp / "empty", {}, {"baseUrl": "http://x"})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-            rc = run(empty, workflows=_wf(tmp / "empty", runs=[]))
+            rc = _st_run(empty, workflows=_wf(tmp / "empty", runs=[]))
         _c("ноль коллекций — код 1, а НЕ 0", rc == 1, buf.getvalue()[-200:])
         _c("и отказ называет беспредметность", "беспредметна" in buf.getvalue())
 
@@ -531,7 +729,7 @@ def self_test() -> int:
                  {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            rc = run(t2, workflows=_wf(tmp / "own", runs=["own-only"]))
+            rc = _st_run(t2, workflows=_wf(tmp / "own", runs=["own-only"]))
         out = buf.getvalue()
         _c("коллекция без препятствий — код 0", rc == 0)
         _c("она в «гоняется здесь»", "гоняется здесь:    1" in out, out[:400])
@@ -546,7 +744,7 @@ def self_test() -> int:
                   "runId": ""})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(t3, workflows=_wf(tmp / "own-seeded", runs=["own-seeded"]))
+            _st_run(t3, workflows=_wf(tmp / "own-seeded", runs=["own-seeded"]))
         out = buf.getvalue()
         _c("та же коллекция с пустым ключом посева — в «НЕ гоняется»",
            "НЕ гоняется здесь: 1" in out, out[:400])
@@ -574,7 +772,7 @@ def self_test() -> int:
                 encoding="utf-8")
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                run(t3b, workflows=_wf(base, runs=["own-seeded"]))
+                _st_run(t3b, workflows=_wf(base, runs=["own-seeded"]))
             out = buf.getvalue()
             _c(f"посев, пишущий {minted_key}: коллекция "
                f"{'ГОНЯЕТСЯ' if expect_runs else 'НЕ гоняется'}",
@@ -595,7 +793,7 @@ def self_test() -> int:
             "import sys\nsys.exit(2)\n", encoding="utf-8")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(t3c, workflows=_wf(mute_base, runs=["own-seeded"]))
+            _st_run(t3c, workflows=_wf(mute_base, runs=["own-seeded"]))
         out = buf.getvalue()
         _c("молчащий посев не снимает препятствия", "НЕ гоняется здесь: 1" in out,
            out[:400])
@@ -610,7 +808,7 @@ def self_test() -> int:
         # двигать коллекцию между половинами переписи.
         for lane, surface_decl, edge_runs in (
                 ("own-surface", "служба (собственный REST-фронт)", False),
-                ("edge-surface", "край платформы", True)):
+                ("edge-surface", SURFACE_EDGE, True)):
             base = tmp / f"surface-{lane}"
             edge_seeded = ('{"item":[{"name":"s","request":{"url":{"raw":'
                            '"{{baseUrl}}/iam/v1/x"}},'
@@ -629,7 +827,7 @@ def self_test() -> int:
                 encoding="utf-8")
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                run(t3g, workflows=_wf(base, runs=["edge-seeded"]))
+                _st_run(t3g, workflows=_wf(base, runs=["edge-seeded"]))
             out = buf.getvalue()
             _c(f"посев поверхности «{surface_decl}»: препятствие посева у коллекции "
                f"КРАЯ {'снято' if edge_runs else 'ОСТАЛОСЬ'}",
@@ -655,7 +853,7 @@ def self_test() -> int:
             encoding="utf-8")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(t3d, workflows=_wf(base, runs=["own-seeded"]))
+            _st_run(t3d, workflows=_wf(base, runs=["own-seeded"]))
         out = buf.getvalue()
         _c("посев без объявленной поверхности не снимает препятствия",
            "машинный посев" in out, out[:600])
@@ -675,7 +873,7 @@ def self_test() -> int:
                      {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                rc = run(t6, workflows=_wf(base, runs=runs))
+                rc = _st_run(t6, workflows=_wf(base, runs=runs))
             out = buf.getvalue()
             _c(f"шаг прогона {'объявлен' if runs else 'СНЯТ'} — гоняется {expect}",
                f"гоняется здесь:    {expect}" in out, out[:500])
@@ -695,7 +893,7 @@ def self_test() -> int:
             "      - run: echo нечего\n", encoding="utf-8")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(t6b, workflows=wf)
+            _st_run(t6b, workflows=wf)
         out = buf.getvalue()
         _c("`--service` только в комментарии — НЕ шаг прогона",
            "гоняется здесь:    0" in out, out[:500])
@@ -706,7 +904,7 @@ def self_test() -> int:
                   {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-            rc = run(t6c, workflows=base / "нет-такого-каталога")
+            rc = _st_run(t6c, workflows=base / "нет-такого-каталога")
         _c("каталога объявлений нет — код 75, а НЕ 0 и не 1", rc == 75,
            buf.getvalue()[-300:])
         _c("и текст называет несозданное условие",
@@ -740,7 +938,7 @@ def self_test() -> int:
                      {"baseUrl": "http://edge", key: "", "runId": ""})
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                run(t7, workflows=_wf(base, runs=["nature"]))
+                _st_run(t7, workflows=_wf(base, runs=["nature"]))
             out = buf.getvalue()
             # СУДИТСЯ ГОЛОВА ПРЕПЯТСТВИЯ, А НЕ ПОДСТРОКА ВЫВОДА, и это не
             # педантизм: первая редакция этой оси искала «машинный посев» по
@@ -780,7 +978,7 @@ def self_test() -> int:
                       {"baseUrl": "http://edge", key: "", "runId": ""})
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                run(t7b, workflows=_wf(base, runs=["stepup"]))
+                _st_run(t7b, workflows=_wf(base, runs=["stepup"]))
             out = buf.getvalue()
             _c(f"{key}: препятствие названо "
                f"{'ЦЕРЕМОНИЕЙ ЧЕЛОВЕКА' if want_ceremony else 'машинным посевом'}",
@@ -807,7 +1005,7 @@ def self_test() -> int:
                      {"baseUrl": "http://edge", key: "", "runId": ""})
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
-                run(t8, workflows=_wf(base, runs=["nature"]))
+                _st_run(t8, workflows=_wf(base, runs=["nature"]))
             out = buf.getvalue()
             _c(f"{key}: препятствие названо "
                f"{'АДРЕСОМ' if want_address else 'машинным посевом'}",
@@ -827,8 +1025,10 @@ def self_test() -> int:
         # То есть число, на которое ставился план, сдвинуть было нечем.
         #
         # Инъекция: коллекция КРАЯ и посев СВОЕЙ поверхности в одном дереве.
-        # Строка обязана назвать «край платформы» — производителя, которого нет, —
-        # а не поверхность посева, который в дереве лежит.
+        # Строка обязана назвать ЯРЛЫК АДРЕСАЦИИ края — поверхность, чьего посева
+        # нет, — а не поверхность посева, который в дереве лежит. Ярлык берётся
+        # КОНСТАНТОЙ: повтори его текстом, и переименование оставило бы эту ось
+        # зелёной на прежнем слове.
         base = tmp / "surface-named"
         edge_seeded = ('{"item":[{"name":"s","request":{"url":{"raw":'
                        '"{{baseUrl}}/iam/v1/x"}},'
@@ -847,10 +1047,10 @@ def self_test() -> int:
             encoding="utf-8")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(t9, workflows=_wf(base, runs=["edge-seeded"]))
+            _st_run(t9, workflows=_wf(base, runs=["edge-seeded"]))
         out = buf.getvalue()
         _c("строка машинного посева НАЗЫВАЕТ поверхность, чей посев требуется",
-           "машинный посев поверхности «край платформы»" in out, out[:800])
+           f"машинный посев поверхности «{SURFACE_EDGE}»" in out, out[:800])
         _c("и НЕ называет поверхность посева, который в дереве лежит",
            "машинный посев поверхности «служба" not in out, out[:800])
 
@@ -859,10 +1059,82 @@ def self_test() -> int:
         t4 = _mk(tmp / "edge", {"edge-only": edge}, {"baseUrl": "http://x", "runId": ""})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            run(t4, workflows=_wf(tmp / "edge", runs=["edge-only"]))
+            _st_run(t4, workflows=_wf(tmp / "edge", runs=["edge-only"]))
         out = buf.getvalue()
         _c("коллекция края — в «НЕ гоняется»", "НЕ гоняется здесь: 1" in out, out[:400])
-        _c("и причина названа краем", "нужен край платформы" in out)
+        _c("и причина названа АДРЕСАЦИЕЙ, а не вердиктом о производителе",
+           "адресуется к краю платформы (переменная базового адреса)" in out, out[:400])
+        _c("причина НЕ утверждает о производителе",
+           "его производитель — чужой стенд" not in out, out[:400])
+
+        # ── Ось 10: ВЕДОМОСТЬ ПРОИЗВОДИТЕЛЯ СВЕРЯЕТСЯ С ДЕРЕВОМ В ОБЕ СТОРОНЫ ─
+        #
+        # Это тот механизм, которым снят довод против второго списка: «выписанный
+        # перечень разошёлся бы с деревом молча». Молча он не разойдётся — он
+        # УРОНИТ прогон, и обе стороны расхождения проверяются здесь по одной.
+        # Без этой оси ведомость была бы ровно тем, чего опасалась прежняя шапка.
+        lt = _mk(tmp / "ledger", {"edge-only": edge},
+                 {"baseUrl": "http://x", "runId": ""})
+        lwf = _wf(tmp / "ledger", runs=["edge-only"])
+
+        buf = io.StringIO()
+        err = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
+            rc = run(lt, workflows=lwf, ledger={})
+        _c("коллекция БЕЗ записи ведомости роняет перепись", rc == 1, f"код {rc}")
+        _c("и находка называет коллекцию",
+           "edge-only" in err.getvalue() and "не записано" in err.getvalue(),
+           err.getvalue()[:300])
+
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            rc = run(lt, workflows=lwf,
+                     ledger={"edge-only": ("C", "довод"), "ушедшая": ("A", "довод")})
+        _c("запись БЕЗ коллекции роняет перепись — перечень не переживает предмет",
+           rc == 1, f"код {rc}")
+        _c("и находка называет запись",
+           "ушедшая" in err.getvalue() and "пережила свой предмет" in err.getvalue(),
+           err.getvalue()[:300])
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = run(lt, workflows=lwf, ledger={"edge-only": ("C", "довод")})
+        _c("ЗАКОННЫЙ БЛИЗНЕЦ: ведомость сходится с деревом — перепись печатается",
+           rc == 0, f"код {rc}")
+
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            rc = run(lt, workflows=lwf, ledger={"edge-only": ("Z", "довод")})
+        _c("категория вне закрытого словаря — находка", rc == 1, f"код {rc}")
+
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            rc = run(lt, workflows=lwf, ledger={"edge-only": ("C", "   ")})
+        _c("категория БЕЗ довода — находка: это мнение, а не решение",
+           rc == 1, f"код {rc}")
+
+        # ── Ось 11: ДВЕ ВЕЛИЧИНЫ РАЗЛИЧИМЫ, и их расхождение названо числом ──
+        #
+        # Ярлык адресации и решение о производителе обязаны РАСХОДИТЬСЯ на том
+        # самом входе, ради которого ведомость и заведена: коллекция стучится к
+        # краю, а утверждения её производит служба. Сойдись они здесь — ведомость
+        # ничего не добавляла бы к выводу из адреса.
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(lt, workflows=lwf, ledger={"edge-only": ("A", "предмет службы")})
+        out = buf.getvalue()
+        _c("адресация и производитель напечатаны ОБЕ",
+           f"адресация: {SURFACE_EDGE}" in out and "производитель: A" in out,
+           out[:600])
+        _c("расхождение названо ОТДЕЛЬНЫМ числом",
+           "адресуется к краю, а производитель — служба: 1" in out, out[:900])
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            run(lt, workflows=lwf, ledger={"edge-only": ("C", "предмет края")})
+        _c("ЗАКОННЫЙ БЛИЗНЕЦ: производитель края — расхождения ноль",
+           "адресуется к краю, а производитель — служба: 0" in buf.getvalue(),
+           buf.getvalue()[:900])
 
         # Ось 5: ОБЕ величины печатаются всегда — и когда вторая ноль.
         _c("печатаются обе величины, а не только одна",

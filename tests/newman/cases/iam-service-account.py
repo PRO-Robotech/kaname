@@ -432,7 +432,7 @@ CASES.append(Case(
             # asserts "this subject sees nothing" was therefore asserting it
             # against a subject that is genuinely authorised — a fixture artifact,
             # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
-            # subject seeded for exactly this (tests/authz-fixtures/setup.sh; it is
+            # subject seeded for exactly this (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh; it is
             # never a grant TARGET anywhere in the tree).
             auth="jwtPureNoBindings",
             test_script=[
@@ -538,7 +538,7 @@ CASES.append(Case(
             # asserts "this subject sees nothing" was therefore asserting it
             # against a subject that is genuinely authorised — a fixture artifact,
             # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
-            # subject seeded for exactly this (tests/authz-fixtures/setup.sh; it is
+            # subject seeded for exactly this (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh; it is
             # never a grant TARGET anywhere in the tree).
             auth="jwtPureNoBindings",
             test_script=[

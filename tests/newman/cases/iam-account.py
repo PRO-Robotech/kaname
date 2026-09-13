@@ -7,7 +7,7 @@ Covered RPCs:  Create, Get, List, Update, Delete, ListOperations.
 
 CRUD fixture dependency:
   This suite requires a seeded owner user + JWT. It reuses the authz-fixtures
-  env vars produced by `tests/authz-fixtures/setup.sh`:
+  env vars produced by `PRO-Robotech/kacho:tests/authz-fixtures/setup.sh`:
     jwtAccountAdminA  — service-account bearer, admin @ accountAId (READ/UPDATE/DELETE
                         of the PRE-SEEDED account and every non-creating probe)
     userAAAId         — the User who owns the pre-seeded accountAId
@@ -23,7 +23,7 @@ CRUD fixture dependency:
   и это правильное поведение продукта, а не дефект (см. account/create.go).
   Все предъявители матричного посева машинные, значит ими аккаунт не создать.
   Условие «предъявитель принадлежит человеку» создаёт ВОЛНА ЦЕРЕМОНИИ
-  (`scripts/run-ceremony.sh` + `tests/authz-fixtures/prodseed_ceremony.py`):
+  (`scripts/run-ceremony.sh` + `PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py`):
     jwtHumanCeremony  — предъявитель ЧЕЛОВЕКА, добытый настоящим входом паролем
     ceremonyUserId    — идентификатор этого человека в iam (ожидаемый владелец)
 

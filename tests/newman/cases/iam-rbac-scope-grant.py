@@ -41,7 +41,7 @@ Check-response shape (proto3 JSON via grpc-gateway):
           j.allowed is `undefined` (NOT false) on a deny. Deny is asserted as
           "allowed !== true" + a positive evidence check on the `reason` carrier.
 
-Fixture dependency (tests/authz-fixtures/setup.sh): jwtBootstrap, jwtAccountAdminA,
+Fixture dependency (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh): jwtBootstrap, jwtAccountAdminA,
 userNOBId, accountAId.
 """
 

@@ -17,7 +17,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   редакцию ставит `acceptance-reviewer` своим кругом, а не эта строка. Решение,
   замер и цена обоих отвергнутых исходов —
   `../architecture/verdict-names-a-revision-not-a-file.md`
-- **Ревизия измерения:** `27cc2c4e` (ствол `redesign/integration`)
+- **Ревизия измерения:** `PRO-Robotech/kacho@27cc2c4e` (ствол `redesign/integration`)
 - **Тип изменения:** ломающее изменение публичного контракта (снятие поверхности)
 - **Сервис:** `kaname`; затрагивает `gateway`, `proto`, `pkg/api`, e2e-набор iam
 - **⚠️ ПОСЛЕ вердикта документ правлен (`#2212`), и вердикт на нынешнюю

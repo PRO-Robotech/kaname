@@ -37,7 +37,7 @@ Two independent reasons, and BOTH are needed:
   insufficient_user_authentication` — is NOT written here, and the reason is a
   measurement rather than a preference: no human principal exists on any stand
   today. `jwtAccountAdminAStepUp` is declared unforgeable by the seed itself
-  (tests/authz-fixtures/prodseed_matrix.py), and every other `jwt*` fixture is a
+  (PRO-Robotech/kacho:tests/authz-fixtures/prodseed_matrix.py), and every other `jwt*` fixture is a
   ServiceAccount token, i.e. acr-exempt — so a probe written now could not tell
   "the floor held" from "the subject was never presented". It belongs to the
   ceremony wave (S2), where a human bearer is produced by the ceremony itself.

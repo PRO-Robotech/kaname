@@ -37,7 +37,7 @@ CLEAN SUBJECT: each case mints a FRESH ServiceAccount on account A —
 zero `#v_list` grants, so no account-viewer cascade can pre-satisfy the probe; every
 case asserts pre-grant DENY before the bind.
 
-Fixtures (tests/authz-fixtures/setup.sh): jwtBootstrap,
+Fixtures (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh): jwtBootstrap,
 jwtAccountAdminA, accountAId. Resources are self-seeded per case with
 {{runId}}-suffixed names (self-contained, no cross-case collision).
 """

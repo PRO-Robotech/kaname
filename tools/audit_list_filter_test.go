@@ -42,6 +42,7 @@
 package tools_regression
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -373,5 +374,91 @@ func TestGate_UnreadableTreeIsAFinding(t *testing.T) {
 	}
 	if !strings.Contains(out, "examined nothing") {
 		t.Fatalf("the finding must say the gate examined nothing; got:\n%s", out)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// РЕЗОЛВ КАТАЛОГА КОНТРАКТОВ — ОСЬ, КОТОРУЮ НЕ ИСПОЛНЯЛА НИ ОДНА ПРОБА (#42)
+//
+// Обёртка резолвит каталог контрактов САМА, и до этих проб её решение не
+// проверялось ничем: все пробы выше передают `--proto-root` явно, то есть
+// обходят ровно ту ветвь, где решение принимается. Пока развилка выбирала между
+// своим деревом и каталогом модуля-пина, вердикт был верен СЛУЧАЙНО — копии
+// контрактов совпадали побайтово всюду, кроме строки `go_package`, которую
+// аудитор не читает. Случайная верность и есть худший вид зелёного: она не
+// выдаёт себя ничем и перестаёт быть верной молча.
+
+// runWrapperResolvingItsOwnProtoRoot зовёт обёртку БЕЗ `--proto-root`: резолв
+// каталога контрактов делает она, и это и есть предмет проверки.
+func runWrapperResolvingItsOwnProtoRoot(t *testing.T, wrapperDir string) (string, error) {
+	t.Helper()
+	cmd := exec.Command("bash", filepath.Join(wrapperDir, "tools", "audit-list-filter.sh"))
+	cmd.Dir = wrapperDir
+	raw, err := cmd.CombinedOutput()
+	return string(raw), err
+}
+
+// TestWrapper_ReadsTheContractsOfItsOwnTreeAndSaysWhichDirectory — ИНЪЕКЦИЯ,
+// сторона «свои контракты на месте».
+func TestWrapper_ReadsTheContractsOfItsOwnTreeAndSaysWhichDirectory(t *testing.T) {
+	root := serviceRoot(t)
+	out, err := runWrapperResolvingItsOwnProtoRoot(t, root)
+	if err != nil {
+		t.Fatalf("обёртка не вынесла вердикта на собственном дереве: %v\n%s", err, out)
+	}
+	want := filepath.Join(root, "proto")
+	if !strings.Contains(out, want) {
+		t.Fatalf("перепись не назвала КАТАЛОГ, из которого прочитаны контракты — "+
+			"«контракты прочитаны» и «прочитаны свои» остаются двумя разными "+
+			"утверждениями. Ожидалось %q; получено:\n%s", want, out)
+	}
+	if !strings.Contains(out, "OK") {
+		t.Fatalf("вердикта нет в выводе:\n%s", out)
+	}
+}
+
+// TestWrapper_WithoutItsContractsRefusesLoudlyInsteadOfReadingAForeignCopy —
+// ИНЪЕКЦИЯ, сторона «своих контрактов нет».
+//
+// ЗАКОННЫЙ БЛИЗНЕЦ ОТЛИЧАЕТСЯ РОВНО ОДНИМ ФАКТОМ: тот же корень, тот же скрипт,
+// разница только в наличии каталога контрактов. Требуется НЕ «отказал», а
+// отказал ТРЕТЬЕЙ КАТЕГОРИЕЙ и сказал словами: молчаливый переход на чужую
+// копию давал бы вердикт о дереве, которого здесь нет, и отличить его от
+// настоящего было бы нечем.
+func TestWrapper_WithoutItsContractsRefusesLoudlyInsteadOfReadingAForeignCopy(t *testing.T) {
+	dir := t.TempDir()
+	tools := filepath.Join(dir, "tools")
+	if err := os.MkdirAll(tools, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(serviceRoot(t), "tools", "audit-list-filter.sh")
+	body, err := os.ReadFile(src) // #nosec G304 -- собственный скрипт этого дерева
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tools, "audit-list-filter.sh"), body, 0o700); err != nil { // #nosec G302
+		t.Fatal(err)
+	}
+
+	out, err := runWrapperResolvingItsOwnProtoRoot(t, dir)
+	if err == nil {
+		t.Fatalf("без собственных контрактов обёртка вынесла ВЕРДИКТ — значит она "+
+			"прочитала чужие:\n%s", out)
+	}
+	var code int
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		code = ee.ExitCode()
+	}
+	if code != 2 {
+		t.Fatalf("исход обязан быть ТРЕТЬЕЙ КАТЕГОРИЕЙ (код 2 — «не исполнялась»), "+
+			"а не находкой о дереве; получен код %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "НЕ ИСПОЛНЯЛАСЬ") {
+		t.Fatalf("отказ не назван словами — «условие не создано» неотличимо от "+
+			"находки:\n%s", out)
+	}
+	if !strings.Contains(out, filepath.Join(dir, "proto")) {
+		t.Fatalf("отказ не назвал путь, по которому контрактов не нашлось:\n%s", out)
 	}
 }

@@ -41,7 +41,7 @@ CRUD fixture dependency:
   jwtAccountAdminA / accountAId — распорядитель аккаунта A. ЭТО СЛУЖЕБНАЯ УЧЁТКА,
       а НЕ человек `userAAAId`: в боевой посадке машинный посев чеканит только
       `client_credentials`, то есть служебные учётки
-      (`tests/authz-fixtures/prodseed_matrix.py` → `subject()` = «Create an SA»).
+      (`PRO-Robotech/kacho:tests/authz-fixtures/prodseed_matrix.py` → `subject()` = «Create an SA»).
   userAAAId / userAABId / userNOBId — РЕАЛЬНЫЕ строки людей, но ТОЛЬКО ЦЕЛИ
       ПРИВЯЗКИ: ни одному из них посев не выдаёт предъявителя и выдать не может
       (`tests/authz-fixtures/principal_pairings.py`, врезка «NOT EVERY EMITTED ID
@@ -53,7 +53,7 @@ CRUD fixture dependency:
       которым он владеет. Единственный человеческий вызывающий набора; условие
       создаётся волной церемонии (`scripts/run-ceremony.sh`, WAVE 4), а сама
       коллекция попадает в неё ВЫВОДОМ ИЗ ДЕРЕВА — по тому, что шаг называет
-      предъявителя из `CEREMONY_ONLY_ENV` (`tests/authz-fixtures/ceremony_credentials.py`).
+      предъявителя из `CEREMONY_ONLY_ENV` (`PRO-Robotech/kacho:tests/authz-fixtures/ceremony_credentials.py`).
 
 verifies: IAM-ID-2-01, -02, -03, -04, -05, -12, -13.
 """
@@ -278,7 +278,7 @@ CASES.append(Case(
             # шагам выше — `UserService/Invite` несёт `required_acr_min: "2"`.
             # Личность та же: `jwtHumanCeremony` и `jwtHumanCeremonyStepUp` —
             # один человек `ceremonyUserId`, различающийся только уровнем входа
-            # (`tests/authz-fixtures/prodseed_ceremony.py`, `lvl1`/`lvl2`),
+            # (`PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py`, `lvl1`/`lvl2`),
             # поэтому допуск `viewer` @ `account` у шага не меняется.
             auth="jwtHumanCeremony",
             test_script=[
