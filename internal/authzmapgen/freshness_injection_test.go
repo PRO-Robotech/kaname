@@ -79,7 +79,7 @@ func regenerate(t *testing.T, root string) {
 // дерево.
 func TestFreshnessGateIsSilentOnASynthesizedFreshTree(t *testing.T) {
 	root := syntheticRoot(t, map[string][]string{"vpc": {"network"}, "iam": {"group"}})
-	census, err := authzmapgen.CheckFreshSynthetic(root)
+	census, err := authzmapgen.CheckFreshSynthetic(root, root)
 	if err != nil {
 		t.Fatalf("свежее дерево объявлено отставшим: %v (%s)", err, census.Summary())
 	}
@@ -106,7 +106,7 @@ func TestFreshnessGateCatchesAHandEditOfTheProduct(t *testing.T) {
 		t.Fatalf("инъекция не записана: %v", err)
 	}
 
-	_, err = authzmapgen.CheckFreshSynthetic(root)
+	_, err = authzmapgen.CheckFreshSynthetic(root, root)
 	if err == nil {
 		t.Fatal("гейт молчит на продукте, правленном руками — «сгенерировано» стало бы " +
 			"словом, за которым никто не следит")
@@ -128,7 +128,7 @@ func TestFreshnessGateCatchesAManifestThatMovedWithoutRegeneration(t *testing.T)
 		t.Fatalf("манифест не переписан: %v", err)
 	}
 
-	census, err := authzmapgen.CheckFreshSynthetic(root)
+	census, err := authzmapgen.CheckFreshSynthetic(root, root)
 	if err == nil {
 		t.Fatal("новый ресурс манифеста не доехал до таблиц, и гейт промолчал — тип не " +
 			"резолвился бы краем, а проверка выглядела бы пройденной")
@@ -140,7 +140,7 @@ func TestFreshnessGateCatchesAManifestThatMovedWithoutRegeneration(t *testing.T)
 	// А после перегенерации — молчит. Без этой половины «краснеет» было бы
 	// неотличимо от «краснеет всегда».
 	regenerate(t, root)
-	if _, err := authzmapgen.CheckFreshSynthetic(root); err != nil {
+	if _, err := authzmapgen.CheckFreshSynthetic(root, root); err != nil {
 		t.Fatalf("перегенерация не сняла находку: %v", err)
 	}
 }
