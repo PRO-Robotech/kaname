@@ -54,96 +54,21 @@ func setOwnCeiling(t *testing.T, ctx context.Context, pool *pgxpool.Pool, kind s
 	require.NoErrorf(t, err, "проекция посадки для вида %s не записана", kind)
 }
 
-// TestOwnCeiling_MigrationCarriedTheAuthorityValueIntoThePosture — накат НЕ
-// МЕНЯЕТ наблюдаемого: величина перенесена, у авторитета её больше нет.
+// ЗДЕСЬ СТОЯЛИ ТРИ ПРОБЫ АВТОРИТЕТА ВЕЛИЧИН — сняты ВМЕСТЕ С ПРЕДМЕТОМ.
 //
-// Пара, а не одно утверждение: «у авторитета нет» зеленело бы на базе, где посев
-// величин не применился вовсе, поэтому рядом стоит перенесённое значение.
-func TestOwnCeiling_MigrationCarriedTheAuthorityValueIntoThePosture(t *testing.T) {
-	pool, ctx := newAccountQuotaDB(t)
-
-	// Величины посева `0001_initial.sql`: их и обязан перенести накат.
-	want := map[string]int64{
-		"iam.account":                   5,
-		"iam.user.credential":           12,
-		"iam.serviceAccount.credential": 24,
-	}
-	for kind, value := range want {
-		var got int64
-		require.NoErrorf(t, pool.QueryRow(ctx,
-			`SELECT limit_value FROM kaname.own_ceilings WHERE kind = $1`, kind).Scan(&got),
-			"величина вида %s не перенесена в проекцию посадки: до первого пуска "+
-				"новой версии создание этого вида отвергалось бы, хотя до наката проходило", kind)
-		require.Equalf(t, value, got,
-			"величина вида %s перенесена искажённой: накат обязан не менять "+
-				"наблюдаемого, а перенести ровно объявленное", kind)
-
-		var atAuthority int
-		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT count(*) FROM kaname.limits WHERE kind = $1`, kind).Scan(&atAuthority))
-		require.Zerof(t, atAuthority,
-			"величина вида %s осталась у авторитета: администратор назначил бы её, "+
-				"продукт сохранил бы и НЕ ПРИМЕНИЛ — списание читает проекцию посадки", kind)
-	}
-
-	// Положительный контроль: у ЧУЖОГО вида величина у авторитета остаётся. Без
-	// него «у авторитета нет» зеленело бы на пустой таблице величин.
-	var foreign int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM kaname.limits WHERE kind = 'vpc.network'`).Scan(&foreign))
-	require.NotZero(t, foreign,
-		"величина чужого вида снята вместе с собственными: роль потребителя сломана, "+
-			"а её снятие — предмет стадии S4, не этой")
-
-	t.Logf("перепись: видов посадки сверено %d, чужих контрольных 1", len(want))
-}
-
-// TestOwnCeiling_PostureBeatsTheAuthorityOnTheChargingPath — РЕШАЮЩАЯ проба.
+// Они утверждали: миграция перенесла величину из авторитета в посадку · посадка
+// бьёт авторитет на пути списания · чужой вид всё ещё берёт величину у
+// авторитета. Последняя была БЛИЗНЕЦОМ всего файла: без неё «величина берётся
+// из проекции» зеленело бы на дереве, где авторитет перестал читаться вовсе.
 //
-// Один изменённый факт против положительного близнеца
-// `TestAccountQuota_SixthAccountOfOneIdentityIsRefused`: у авторитета заведена
-// величина, ОТЛИЧНАЯ от проекции посадки. Отказ обязан назвать величину проекции.
-func TestOwnCeiling_PostureBeatsTheAuthorityOnTheChargingPath(t *testing.T) {
-	pool, ctx := newAccountQuotaDB(t)
-	liftRateCeilingOutOfTheWay(t, ctx, pool)
-
-	// Проекция посадки: одна личность держит два аккаунта.
-	setOwnCeiling(t, ctx, pool, "iam.account", 2)
-
-	// АВТОРИТЕТ ГОВОРИТ ДРУГОЕ. Строка заводится в обход входного отказа — прямо
-	// в таблицу: предмет пробы здесь не вход авторитета, а то, ЧТО ЧИТАЕТ
-	// СПИСАНИЕ. Величина выбрана заведомо щедрой: если списание читает авторитет,
-	// девятый аккаунт пройдёт, и проба покраснеет на своём предмете.
-	_, err := pool.Exec(ctx, `
-		INSERT INTO kaname.limits (id, created_at, scope, scope_id, kind, limit_value, withdrawn_at, revision)
-		VALUES ('lim-0000000000000000a', now(), 'DEFAULT', '', 'iam.account', 9, NULL, 99)`)
-	require.NoError(t, err, "величина авторитета не заведена — расхождения источников нет, "+
-		"и решающее утверждение стало бы вакуумным")
-
-	_, userID := accountQuotaFixture(t, ctx, pool, "posture-wins")
-
-	// Фикстура завела первый аккаунт; проекция говорит «два», значит проходит
-	// ровно один и третий отвергается.
-	require.NoError(t, insertAccount(ctx, pool, "own-ceiling-posture-2", userID),
-		"второй аккаунт обязан пройти: потолок проекции — два, а потолок, "+
-			"отвергающий разрешённое, есть поломка, а не потолок")
-
-	err = insertAccount(ctx, pool, "own-ceiling-posture-3", userID)
-	require.Error(t, err,
-		"третий аккаунт прошёл: значит списание читает величину АВТОРИТЕТА (9), "+
-			"а не проекцию посадки (2) — источник величины не переехал")
-
-	var pgErr *pgconn.PgError
-	require.ErrorAs(t, err, &pgErr)
-	require.Equal(t, "KQ001", pgErr.Code,
-		"отказ обязан приходить единственным производителем платформы")
-	require.Contains(t, pgErr.Message, "has reached its limit of 2 iam.account",
-		"текст отказа обязан называть величину ПРОЕКЦИИ ПОСАДКИ: величина в тексте — "+
-			"часть контракта, и по ней арендатор узнаёт действующий предел")
-	require.NotContains(t, pgErr.Message, "limit of 9",
-		"отказ назвал величину авторитета: она больше не действует, и называть её "+
-			"значило бы отправить арендатора менять то, что ни на что не влияет")
-}
+// Авторитет ушёл из продукта целиком (kacho#2117), таблица снята миграцией. Все
+// три стали недостижимыми: сравнивать источники не с чем, а близнецу нечего
+// различать — источник теперь ОДИН by construction, и это сильнее, чем проба.
+//
+// Что осталось держать свойство: четыре пробы ниже судят величину из посадки —
+// явный ноль, понижение ниже потребления, чтение арендатором и учётная строка.
+// Перенос как исторический факт держит roundtrip миграций, применяющий их до
+// точки снятия и обратно.
 
 // TestOwnCeiling_ExplicitZeroRefusesTheFirstResourceByTheCeiling — явный ноль
 // ОТЛИЧИМ от «величина не названа».
@@ -215,37 +140,6 @@ func TestOwnCeiling_LoweringBelowConsumptionKeepsTheRowsAndRefusesTheNext(t *tes
 	require.Equal(t, "KQ001", pgErr.Code)
 	require.Contains(t, pgErr.Message, "has reached its limit of 1 iam.account",
 		"отказ обязан называть ДЕЙСТВУЮЩУЮ величину, а не ту, при которой ресурсы создавались")
-}
-
-// TestOwnCeiling_ForeignKindStillTakesItsValueFromTheAuthority — ПОЛОЖИТЕЛЬНЫЙ
-// БЛИЗНЕЦ всего файла: роль потребителя не тронута.
-//
-// Без него «величина берётся из проекции» зеленело бы на дереве, где авторитет
-// перестал читаться ВООБЩЕ, — то есть где пять потребителей потеряли свои потолки.
-func TestOwnCeiling_ForeignKindStillTakesItsValueFromTheAuthority(t *testing.T) {
-	pool, ctx := newAccountQuotaDB(t)
-
-	// Чужой вид в проекции посадки НЕВЫРАЗИМ: множество закрыто схемой, а не
-	// соглашением. Это и есть доказательство, что проекция не стала авторитетом.
-	_, err := pool.Exec(ctx, `
-		INSERT INTO kaname.own_ceilings (kind, limit_value) VALUES ('vpc.network', 1)`)
-	require.Error(t, err,
-		"чужой вид принят проекцией посадки: значит она стала вторым авторитетом, "+
-			"и величина на вид, которого служба не считает, была бы принята молча")
-
-	var pgErr *pgconn.PgError
-	require.ErrorAs(t, err, &pgErr)
-	require.Equal(t, "23514", pgErr.Code,
-		"закрытость множества обязана держать СХЕМА (CHECK), а не проверка в коде: "+
-			"вторая пропускает всякого, кто пишет в таблицу мимо неё")
-
-	// И величина чужого вида по-прежнему объявляется авторитетом.
-	var value int64
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT limit_value FROM kaname.limits
-		  WHERE kind = 'vpc.network' AND scope = 'DEFAULT' AND withdrawn_at IS NULL`).Scan(&value))
-	require.NotZero(t, value,
-		"величина чужого вида исчезла: снятие ушло шире своего предмета")
 }
 
 // TestOwnCeiling_TenantReadTakesTheValueFromThePostureNotTheStaleSnapshot —
