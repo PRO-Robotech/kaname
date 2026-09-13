@@ -47,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/presentedcred"
 	"github.com/PRO-Robotech/kaname/internal/registrytokenwire"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/restfront"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
@@ -2006,6 +2007,31 @@ func runServe(cfg config.Config) error {
 		} else if mres.Executed {
 			logger.Info("orphan-mirror sweep: "+mres.Census(),
 				slog.Int("left_to_owner", len(mres.LeftToOwner)))
+		}
+		// Разность зеркала и живого каталога — ЧИТАЕТСЯ, а не чинится
+		// (kacho#1828). Держателем может быть только чтение: ключ на
+		// `(dotted, live)` запретил бы снятие типа, пока у арендатора есть хоть
+		// один такой ресурс, и довод записан у самого оператора вставки.
+		//
+		// Отзыв ОТНИМАЕТ доступ, поэтому проход ничего не отзывает и ничего не
+		// роняет: решение по каждой неразрешимой строке принимает владелец. Чего
+		// ему не хватало — ВЕЛИЧИНЫ: читатель в дереве был, а на поднятом стенде
+		// его не спрашивал никто, и «разности нет» было неотличимо от «не
+		// мерили» ни одной строкой журнала.
+		//
+		// Перепись печатается НА ЛЮБОМ исходе, включая чистый, и называет оба
+		// числа. Уровень выбирается по НЕРАЗРЕШИМОЙ части: снятое с преемником —
+		// объявленное свойство дерева, и жалоба на нём краснела бы после всякого
+		// законного снятия типа.
+		if drows, dscanned, derr := resource_mirror.Divergence(taskCtx, pool); derr != nil {
+			logger.Warn("resource-mirror divergence unread (next boot will retry)",
+				slog.Any("err", derr))
+		} else if census := resource_mirror.DivergenceCensus(drows, dscanned); len(
+			resource_mirror.UnresolvableDivergence(drows)) > 0 {
+			logger.Warn("resource-mirror divergence: "+census,
+				slog.Int("unresolvable", len(resource_mirror.UnresolvableDivergence(drows))))
+		} else {
+			logger.Info("resource-mirror divergence: " + census)
 		}
 		if oerr := seed.BackfillOwnerBindings(taskCtx, pool); oerr != nil {
 			logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))
