@@ -1,7 +1,7 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// dropguard_integration_test.go — iam's chain drops nothing, and that is DECLARED.
+// dropguard_integration_test.go — what iam's chain drops is DECLARED, and counted.
 //
 // # What this file used to assert, and why it stopped being assertable
 //
@@ -26,9 +26,13 @@
 //  2. THE CHAIN REPLAYS TO HEAD against a real Postgres. For a chain squashed out of
 //     171 files this is the load-bearing half: the primary migration is new text, and
 //     "it applies" is a property nothing else in this package establishes.
-//  3. THE MANIFEST STAYS RETIRED. An absent manifest is accepted only for a chain
-//     that drops nothing; reintroduce one with entries and Reconcile refuses each
-//     entry that has no drop behind it.
+//  3. THE MANIFEST IS BACK, BECAUSE ITS SUBJECT IS BACK. It was retired when the
+//     squash left the chain with nothing to declare, and an entry with no drop
+//     behind it is refused as `expired-declaration`. The retirement of the limit
+//     authority's storage (kaname#58) put one drop into the chain, so the manifest
+//     returns carrying exactly that one — and the count in it is measured against
+//     the database, not asserted: declaring 0 where the table holds 24 refuses the
+//     drop with `row-count-mismatch`, which is how the number below was obtained.
 package migrations_test
 
 import (
@@ -39,22 +43,29 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
+// dropsExpected — храповик: сколько снятий объявлено в цепи службы.
+const dropsExpected = 1
+
 func TestIntegration_IamDropsAreMeasured(t *testing.T) {
 	rep := dropguardtest.Run(t, dropguardtest.Options{
 		Service:      "iam",
 		FS:           migrations.FS,
 		ManifestPath: "dropguard.json",
 
-		// See the file header: zero is the declared, ratcheting count of a chain
-		// that is one state rather than a history.
-		DropsExpected: 0,
+		// The ratchet, declared rather than inferred. It moved 0 -> 1 with the
+		// retirement of kaname.limits (kaname#58); adding a second drop moves it
+		// again and turns this red until somebody declares that too.
+		DropsExpected: dropsExpected,
 	})
 
 	if rep.FilesScanned == 0 {
 		t.Fatal("no migration file was read — a chain that drops nothing and a chain that was never read produce the same count of drops, and only this number tells them apart")
 	}
+	// Печатается ОБЪЯВЛЕННОЕ число, а не литерал. Прежняя редакция ставила здесь
+	// `0` рядом с `DropsExpected`, и после сдвига храповика перепись сообщала
+	// «объявлено 0» при объявленной единице — то есть лгала о собственном входе.
 	t.Logf("перепись: прочитано файлов миграций %d, снятий в цепи %d, объявлено %d",
-		rep.FilesScanned, rep.DropsInChain, 0)
+		rep.FilesScanned, rep.DropsInChain, dropsExpected)
 }
 
 // TestIntegration_IamChainNeverBringsBackTheSubscriptionCursorTable — the retire of
