@@ -37,6 +37,11 @@ Test-first note (strict TDD):
   the negative (bad-prefix → 400) — fix the implementation instead.
 """
 
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
+
 CASES = []
 
 ROLE_VIEW = "rol1bda80f2be4d3658e"  # md5('view')[:17] — system viewer, any-scope

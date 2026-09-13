@@ -54,6 +54,11 @@ verifies: ProjectService Create/Update/Delete/duplicate-name acceptance scenario
 from iam-project.py spec.
 """
 
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
+
 CASES = []
 
 # ---------------------------------------------------------------------------

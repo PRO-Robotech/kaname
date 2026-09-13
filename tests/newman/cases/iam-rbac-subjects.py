@@ -74,6 +74,11 @@ SvcAccount). An underscore in the name is rejected sync 400 INVALID_ARGUMENT
 before the Operation is created — keep this name hyphenated, never `rbac_e31_*`.
 """
 
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
+
 CASES = []
 
 POLL_CAP = 30

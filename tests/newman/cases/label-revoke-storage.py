@@ -71,6 +71,15 @@ A red here is a product finding, not a poll budget to widen. See docs/RESULTS.md
 section "Resolved — label-remove on storage revokes".
 """
 
+# ДОМ МОДУЛЯ — ПЛАТФОРМА: его предмет не сущности службы (e2e-flow.md §7а).
+# Здесь он не исполним и конвейером службы не гоняется; `HOME_REASON` называет,
+# поведение какого домена утверждается. Сверяет `scripts/case_home_test.py`.
+HOME = "kacho"
+HOME_REASON = (
+    "связка: предмет — отзыв выдачи ARM_LABELS при смене меток на ресурсах storage "
+    "(volume/snapshot/image). Утверждается поведение storage, опирающееся на службу."
+)
+
 CASES = []
 
 POLL_CAP = 30

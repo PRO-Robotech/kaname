@@ -102,6 +102,11 @@ user/group-member/SA; granted vs never-granted principal), error-guessing (princ
 isolation — grant for X does not leak to Y).
 """
 
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
+
 CASES = []
 
 # Bounded cap for the grant→appears and revoke→gone probes, to poll past the fga_outbox drain

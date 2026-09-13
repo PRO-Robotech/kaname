@@ -104,6 +104,15 @@ All resources (project, SA, network, SG, role, binding) are self-seeded per case
 {{runId}}-suffixed names (self-contained, no cross-case / cross-suite collision).
 """
 
+# ДОМ МОДУЛЯ — ПЛАТФОРМА: его предмет не сущности службы (e2e-flow.md §7а).
+# Здесь он не исполним и конвейером службы не гоняется; `HOME_REASON` называет,
+# поведение какого домена утверждается. Сверяет `scripts/case_home_test.py`.
+HOME = "kacho"
+HOME_REASON = (
+    "связка: предмет — отзыв выдачи ARM_LABELS при смене меток на ресурсе vpc. Утверждается "
+    "поведение vpc, опирающееся на службу."
+)
+
 CASES = []
 
 POLL_CAP = 30

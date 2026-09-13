@@ -42,6 +42,11 @@ jwtAccountAdminA, accountAId. Resources are self-seeded per case with
 {{runId}}-suffixed names (self-contained, no cross-case collision).
 """
 
+# ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
+# 2026-09-12). Сверяется с деревом гейтом `scripts/case_home_test.py`: домены
+# выводятся из REST-путей этого же модуля, и объявление обязано с ними сходиться.
+HOME = "kaname"
+
 CASES = []
 
 POLL_CAP = 30
