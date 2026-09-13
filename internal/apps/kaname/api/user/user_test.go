@@ -322,14 +322,6 @@ func (w *fakeUWtr) EmitFGARelationDelete(_ context.Context, tuples []service.Rel
 	return nil
 }
 
-// fgaDeletedTuples — снимок намерений снятия, эмитированных в writer-tx.
-func (f *fakeUserRepo) fgaDeletedTuples() []service.RelationTuple {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	cp := make([]service.RelationTuple, len(f.fgaDeleted))
-	copy(cp, f.fgaDeleted)
-	return cp
-}
 func (w *fakeUWtr) InsertRecoveryCompletion(context.Context, domain.RecoveryCompletion) (domain.RecoveryCompletion, bool, error) {
 	return domain.RecoveryCompletion{}, false, nil
 }

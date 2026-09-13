@@ -14,12 +14,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/PRO-Robotech/corelib/operations"
-
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	ab_repo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/catalogfixture"
 )
 
 // ─── ordered, deduped emitted-tuple store ────────────────────────────────────
@@ -332,15 +329,6 @@ func (w *fakeRoleWtr) ReplaceRuleRefs(context.Context, domain.RoleID, []domain.R
 }
 
 // ─── Role.Update use-case wiring ─────────────────────────────────────────────
-
-// newRoleUpdateUseCaseForTest builds the REAL UpdateRoleUseCase with the REAL
-// RoleTupleReconciler (the role-update fan-out) over the fake repo, so the test
-// exercises the production reconcile path. fga is wired for backwards-compat
-// surface parity (not used sync).
-func newRoleUpdateUseCaseForTest(repo *abFakeRepo, opsRepo operations.Repo, _ *recordingFGA) *roleapp.UpdateRoleUseCase {
-	return roleapp.NewUpdateRoleUseCase(repo, opsRepo, catalogfixture.Source()).
-		WithTupleReconciler(NewRoleTupleReconciler())
-}
 
 // roleUpdateInput builds an UpdateRoleInput that changes only the role's rules
 // (update_mask=["rules"]). The use-case recompiles rules→permissions, so the

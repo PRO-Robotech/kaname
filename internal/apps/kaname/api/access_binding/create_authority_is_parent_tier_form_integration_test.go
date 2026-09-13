@@ -47,7 +47,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -103,33 +102,6 @@ func createGatesFromCatalog(t *testing.T) []createGate {
 		return out[i].Relation < out[j].Relation
 	})
 	return out
-}
-
-func monorepoRootForCreateAuthority(t *testing.T) string {
-	t.Helper()
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-	dir := wd
-	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
-	// теперь СВОЙ модуль (она выносится отдельным репозиторием), и подъём «до
-	// первого» останавливался бы в её каталоге. Пути, которые ниже склеиваются с
-	// этим корнем, называют место В ДЕРЕВЕ МОНОРЕПО — от корня, — поэтому
-	// остановка внутри службы удваивала сегмент и обход искал `services/iam/
-	// services/iam/…`, которого не существует.
-	outermost := ""
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			outermost = dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			if outermost != "" {
-				return outermost
-			}
-			t.Fatalf("корень монорепо (go.mod) не найден от %s", wd)
-		}
-		dir = parent
-	}
 }
 
 // seedCreateAuthorityFixture кладёт две области — свою и чужую — и ровно тот
