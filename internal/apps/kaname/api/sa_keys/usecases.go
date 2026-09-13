@@ -1325,8 +1325,8 @@ func (u *RevokeSAKeyUseCase) Execute(ctx context.Context, in RevokeInput) (*oper
 // outcome — success with nothing removed.
 //
 // Why one outcome and not three. The basic-access-token acceptance (BAT-1-44)
-// requires a repeat revoke to answer success. Hide-existence (security.md
-// §Hardening #6) requires a refusal on a foreign credential to be
+// requires a repeat revoke to answer success. Hide-existence
+// (§Hardening #6) requires a refusal on a foreign credential to be
 // indistinguishable from a genuine miss. The two pull apart only while there is
 // more than one outcome: the moment "already revoked" answers success and
 // "foreign" answers a refusal, the caller learns from the difference whether

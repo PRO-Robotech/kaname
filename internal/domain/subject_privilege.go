@@ -16,7 +16,7 @@ import "time"
 //
 // Carries only tenant-facing, publicly-safe fields: id / role / scope / status /
 // created_at / granted_by — никаких инфра-чувствительных данных и никаких
-// condition/builtin_condition-internals (вне scope v1, security.md).
+// condition/builtin_condition-internals (вне scope v1).
 //
 // Derivation says HOW the subject holds the privilege: DIRECT (the binding names
 // the subject itself) or GROUP (the binding names a group the subject belongs to,

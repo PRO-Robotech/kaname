@@ -40,7 +40,7 @@ const iamServiceDomain = "iam"
 // the capability. It is not `viewer` either — `viewer` on the cluster object is
 // satisfied by a wildcard tuple by DESIGN (the global placement catalogue must be
 // readable by every authenticated tenant), so a check against it would answer
-// "yes" to everyone and look exactly like a gate (security.md §«Отношение,
+// "yes" to everyone and look exactly like a gate (§«Отношение,
 // выполнимое подстановочным знаком»).
 const quotaReaderRelation = "quota_reader"
 
@@ -542,7 +542,7 @@ func requireQuotaReader(ctx context.Context, checker authzguard.RelationChecker)
 	// отказа, а неотличимость и есть предмет. Та же форма — у соседнего гейта
 	// пакета (`authzguard.AllowsVerb`).
 	//
-	// Сырая ошибка наружу не идёт (`security.md` §Hardening #1): текст
+	// Сырая ошибка наружу не идёт (§Hardening #1): текст
 	// хранилища отношений может нести адрес и диагностику движка.
 	if unanswered != nil {
 		return authzguard.AuthzBackendUnavailable()

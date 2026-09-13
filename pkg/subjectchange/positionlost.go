@@ -49,8 +49,8 @@ const ReasonPositionLost = "SUBJECT_CHANGE_POSITION_LOST"
 
 // errorDomain — поверхность, произведшая отказ.
 //
-// Полосу называет ТОКЕН; домен называет поверхность (`api-conventions.md`
-// §By-lane code-split: `<service>.kacho.cloud`). Журнал принадлежит владельцу
+// Полосу называет ТОКЕН; домен называет поверхность
+// (§By-lane code-split: `<service>.kacho.cloud`). Журнал принадлежит владельцу
 // прав, поэтому домен его, а не читательский.
 const errorDomain = "iam.kacho.cloud"
 

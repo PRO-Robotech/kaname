@@ -105,7 +105,7 @@ type UpsertFromIdentityUseCase struct {
 //
 // Три исхода, а не один: счётчик ОДНИХ ОТКАЗОВ не отличает «отказов не было» от
 // «активаций не было вовсе», и «ноль за всю жизнь» читалось бы как здоровье там,
-// где путь мёртв (security.md §Hardening-инварианты п.8).
+// где путь мёртв (§Hardening-инварианты п.8).
 const (
 	// activationOutcomeActivated — приглашение активировано.
 	activationOutcomeActivated = "activated"

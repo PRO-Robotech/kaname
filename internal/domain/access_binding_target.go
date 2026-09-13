@@ -190,7 +190,7 @@ func (rs Rules) CoversType(dottedType string) bool {
 // construction; it did not, because the two vocabularies answer different questions
 // and are spelled in different conventions. Deriving one name from another instead
 // of resolving it against the one table that owns it is the same mistake as reading
-// a region out of a zone's name (data-integrity.md) — it is silently wrong for every
+// a region out of a zone's name — it is silently wrong for every
 // pair the two conventions disagree on, in BOTH directions: a type the feed emits is
 // refused, so the grant can only be written as the whole anchor and the check widens
 // what it appears to restrict; and a type the feed never emits is accepted, stored

@@ -46,7 +46,7 @@ func (u *DeleteServiceAccountUseCase) Execute(ctx context.Context, id domain.Ser
 	}
 	// WHO may delete this service account is decided by the MODEL: the
 	// api-gateway Checks `v_delete@iam_service_account:<service_account_id>`
-	// before iam is dialed (security.md «Авторизация живёт в МОДЕЛИ, а не в
+	// before iam is dialed (§«Авторизация живёт в МОДЕЛИ, а не в
 	// самодельных проверках»). The read below is existence/metadata only.
 	sa, err := rd.ServiceAccounts().Get(ctx, id)
 	_ = rd.Rollback(ctx)

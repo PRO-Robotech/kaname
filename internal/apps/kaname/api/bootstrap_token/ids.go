@@ -12,7 +12,7 @@
 // service_account_oauth_clients mapping), gated by the UNIQUE(sva_id) mapping
 // index + a transaction-scoped advisory lock (winner-only external create,
 // IBT-03), and mints the token. The signing key is env-held (k8s Secret), NEVER
-// persisted in the DB — security.md secrets-at-rest posture.
+// persisted in the DB — the secrets-at-rest posture of the platform.
 package bootstrap_token
 
 import (

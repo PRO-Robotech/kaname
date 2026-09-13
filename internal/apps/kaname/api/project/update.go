@@ -39,7 +39,7 @@ var projectMutableFields = map[string]struct{}{
 }
 
 var projectImmutableFields = map[string]string{
-	// camelCase contract text (api-conventions.md JSON surface); both mask
+	// camelCase contract text (the JSON surface of the contract); both mask
 	// forms map to the same message. accountId is hard-immutable — there is no
 	// Move RPC, so cross-account transfer is absent by construction (F3).
 	"account_id": "accountId is immutable after Project.Create",

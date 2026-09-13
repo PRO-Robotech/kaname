@@ -210,7 +210,7 @@ func (r *UserOAuthClientRepo) List(ctx context.Context, userID domain.UserID, pa
 // строки не было никогда, строку уже сняли, строка принадлежит другому владельцу.
 // Различить их отсюда нельзя BY CONSTRUCTION, и это не упущение, а требование:
 // вызывающий, которому вернули бы разные исходы, узнавал бы по различию,
-// существует ли ЧУЖОЕ удостоверение (security.md §Hardening #6). Ветки, в
+// существует ли ЧУЖОЕ удостоверение (§Hardening #6). Ветки, в
 // которой они могли бы разойтись, здесь просто нет.
 func (r *UserOAuthClientRepo) DeleteOwnedByID(
 	ctx context.Context, txh service.Tx,

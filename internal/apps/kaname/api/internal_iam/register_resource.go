@@ -157,7 +157,7 @@ type objectReconciler interface {
 // That is exactly what makes a permanently broken one invisible — it logs one WARN and
 // the product keeps working, more slowly, forever. A counter that records BOTH runs and
 // outcomes makes "never failed" distinguishable from "never ran", which a log line alone
-// cannot do (security.md §Hardening-инвариант 8: «ноль отказов за всю жизнь контроля»
+// cannot do (§Hardening-инвариант 8: «ноль отказов за всю жизнь контроля»
 // обязано быть заметно). The `step` label additionally exposes which materialization
 // path was taken, so a regression that silently pushes every registration back onto the
 // EXCLUSIVE recompute shows up as a shift between two counters rather than as latency
@@ -427,7 +427,7 @@ func (uc *RegisterResourceUseCase) Register(ctx context.Context, in registerInpu
 // when a recorder is wired) — the async full ReconcileObject backstop re-converges.
 // Бюджет пост-коммитного прохода. Отвязка снимает ОТМЕНУ вызывающего, но не время:
 // повисший на блокировке проход иначе держал бы горутину всю жизнь процесса
-// (architecture.md — per-call deadline на каждом внешнем вызове). Щедро относительно
+// (§«Per-call deadline на КАЖДОМ внешнем вызове»). Щедро относительно
 // здорового прохода (миллисекунды — низкие секунды) и конечно; исчерпание бюджета —
 // не потеря данных, дренаж и реконсайлер сходятся к тому же состоянию.
 const postCommitForwardBudget = 30 * time.Second
@@ -572,7 +572,7 @@ func (uc *RegisterResourceUseCase) Unregister(ctx context.Context, in unregister
 // original defect and make it permanent AND quiet: the caller would be told the
 // withdrawal succeeded while the access stood. The withdrawal intent is durable in the
 // consumer's own outbox and a repeat is a no-op at the drainer, so refusing here costs a
-// redelivery and nothing else (security.md §Hardening-инвариант 8: a control that
+// redelivery and nothing else (§Hardening-инвариант 8: a control that
 // degrades on failure must distinguish a blip from a standing misconfiguration — here we
 // refuse to take the risk at all, because the failure mode is a standing over-grant).
 func (uc *RegisterResourceUseCase) residualTuples(ctx context.Context, t tupleIntent) ([]service.RelationTuple, error) {

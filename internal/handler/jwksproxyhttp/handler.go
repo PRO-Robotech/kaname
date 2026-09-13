@@ -34,7 +34,7 @@
 // indefinitely-stale.
 //
 // Per-call timeout. The upstream fetch uses a dedicated http.Client WITH a Timeout
-// plus a per-request context deadline — never http.DefaultClient (architecture.md:
+// plus a per-request context deadline — never http.DefaultClient:
 // DefaultClient has no Timeout, so a hung/half-open Hydra would wedge the goroutine
 // forever).
 //

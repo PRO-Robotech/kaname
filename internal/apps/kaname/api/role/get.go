@@ -29,7 +29,7 @@ package role
 // and both halves — the system-role floor and the custom-role gate — live in
 // this use-case, mirroring list.go.
 //
-// Fail-closed (security.md): a nil FGA port or an FGA error on a CUSTOM
+// Fail-closed: a nil FGA port or an FGA error on a CUSTOM
 // role Get → Unavailable; the role body (rules[] — a snapshot of another
 // account's policy) is NEVER returned on the deny/error path.
 

@@ -28,7 +28,7 @@
 //     not be able to mint cluster-admin — nor by a ReBAC relation (it exists to
 //     obtain the FIRST token, when no relation exists yet). The credential is the
 //     caller's verified certificate identity; network position is NOT a
-//     credential (security.md — "internal = trusted" is forbidden).
+//     credential ("internal = trusted" is a forbidden premise).
 //
 // WHY this replaces the former cert-bound ReBAC interceptor: the api-gateway
 // re-dials :9091 with ITS OWN client cert (SAN .../sa/kacho-api-gateway) and

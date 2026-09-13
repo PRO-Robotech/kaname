@@ -43,7 +43,7 @@ func targetFromProto(t *iamv1.AccessTarget) (domain.AccessTarget, error) {
 			return domain.AccessTarget{}, status.Error(codes.InvalidArgument, targetRequiredMsg)
 		}
 		// Cardinality bound BEFORE the slice is allocated and each element scanned —
-		// rejected, never clamped (api-conventions.md). The reconciler intersects the
+		// rejected, never clamped. The reconciler intersects the
 		// target with every rule-matched object through the LINEAR
 		// AccessTarget.Contains, inside the synchronous create writer-tx holding the
 		// binding advisory lock, and re-runs it for every object created cluster-wide;

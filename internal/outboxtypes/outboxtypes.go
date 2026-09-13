@@ -34,7 +34,7 @@ type RelationTuple struct {
 //
 // Payload carries the compliance dimensions (actor / subject / resource / key
 // domain fields). It MUST NOT contain secret material (no tokens, no key PEM, no
-// client_secret) — see security.md / acceptance 5.2-36.
+// client_secret) — see acceptance 5.2-36.
 type AuditEvent struct {
 	// EventType — canonical `iam.<resource>.<action>` taxonomy value.
 	EventType string

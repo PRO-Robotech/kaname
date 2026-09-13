@@ -41,16 +41,28 @@ type HydraAdminClient struct {
 	HTTPClient  *http.Client
 }
 
-// NewHydraAdminClient — constructor without a pinned trust anchor. Default
-// timeout 10s. Kept for call sites that address a plaintext in-cluster admin API
-// (a developer stand); production addresses it over TLS and must therefore use
+// ProviderAdminHopTimeout — per-call ceiling on one admin conversation with the
+// provider. Named, not inlined, for the same reason tokenHopTimeout is: a value
+// nobody can reference is a value every consumer re-guesses.
+//
+// Здесь имя покупает ещё одно, и оно несущее. Терпение дренажа компенсаций
+// ВЫВОДИТСЯ из этой величины (`cmd/kaname/provider_compensation_wiring.go`):
+// при обратном соотношении разговор обрывал бы всегда дренаж, и предел клиента
+// не фигурировал бы ни в одном исходе — величина была бы объявлена и не
+// исполнялась бы никогда (kacho#2490). Вывести её можно только из имени;
+// литерал потребитель обязан был бы угадать, а угаданные числа расходятся молча.
+const ProviderAdminHopTimeout = 10 * time.Second
+
+// NewHydraAdminClient — constructor without a pinned trust anchor. Kept for call
+// sites that address a plaintext in-cluster admin API (a developer stand);
+// production addresses it over TLS and must therefore use
 // NewHydraAdminClientWithCA.
 func NewHydraAdminClient(baseURL, bearerToken string) *HydraAdminClient {
 	return &HydraAdminClient{
 		BaseURL:     strings.TrimRight(baseURL, "/"),
 		BearerToken: bearerToken,
 		HTTPClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: ProviderAdminHopTimeout,
 		},
 	}
 }

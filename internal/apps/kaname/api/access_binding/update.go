@@ -11,8 +11,7 @@ package access_binding
 // can subsequently be deleted (C-02 → C-03 flow), AND sets own-resource `labels`
 // (tenant-facing метки делают binding label-selectable, D-6). Any OTHER mask path
 // (role_id / subject / scope / resource_*) → sync INVALID_ARGUMENT (immutable set NOT
-// weakened). Async (Operation), like the other mutations. update_mask discipline
-// (api-conventions.md):
+// weakened). Async (Operation), like the other mutations. update_mask discipline:
 //   - mask with an UNKNOWN / immutable field → sync INVALID_ARGUMENT.
 //   - empty mask → full-object PATCH over the mutable fields from the body.
 //   - mask with `deletion_protection` / `labels` → applied.

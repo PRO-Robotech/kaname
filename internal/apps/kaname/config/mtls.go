@@ -137,7 +137,7 @@ type MTLSConfig struct {
 	// ONE-WAY server-TLS (internal-CA leaf; NOT mutual — see JWKSProxyClientAuthMode
 	// default server-tls-only). The route is unauthenticated-by-design (public keys,
 	// standard OIDC well-known) — a conscious, documented exception to the
-	// authN-on-every-listener invariant (security.md), justified by internal-only
+	// authN-on-every-listener invariant, justified by internal-only
 	// surface + server-TLS + only-public-material. Default-off (Enable=false) →
 	// plaintext (dev/newman стенд byte-identical). Env:
 	// KANAME_JWKSPROXY_SERVER_MTLS_{ENABLE,CERTFILE,KEYFILE,CLIENTCAFILES}.

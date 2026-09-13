@@ -271,7 +271,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListAccessBindingsRequest
 	//
 	// Its FORMAT is judged by the use-case, not here: the empty-grant
 	// short-circuit lives there, and a guard on this side would leave the second
-	// caller of that use-case unprotected (api-conventions.md §Gotcha'и).
+	// caller of that use-case unprotected (§Gotcha'и).
 	f.AccountID = req.GetAccountId()
 
 	page, err := h.list.Execute(ctx, f)
@@ -302,7 +302,7 @@ func parseABListFilter(expr string) (repoab.ListFilter, error) {
 	// exact identifiers — a subject id, a role id, a scope kind, a scope id — and a
 	// substring of an identifier addresses nothing, so CONTAINS has no meaning here.
 	// Taking ast.Value and building `=` regardless would answer a substring question
-	// with an equality page under a 200, which api-conventions.md
+	// with an equality page under a 200, which
 	// §"Принято-и-проигнорировано — ЗАПРЕЩЕНО" rules out: implement, refuse by name,
 	// or drop from the contract. This is the second outcome, and it names both the
 	// operator and the key so the caller learns which token was not honoured (#460).

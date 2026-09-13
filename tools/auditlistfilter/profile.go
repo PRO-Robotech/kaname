@@ -161,7 +161,7 @@ var Profile = listfiltergate.Profile{
 	// Naming the TYPE instead of the call means the next method of that type is
 	// banned the day it is written.
 	//
-	// Being the service's own tables does not exempt the form. `security.md` refuses
+	// Being the service's own tables does not exempt the form. The standard refuses
 	// "enumerate the universe → filter" because the answer has a ceiling and the page
 	// is taken from the enumeration rather than judged after it is read; iam's tables
 	// have a ceiling too, it is just written in a different file. relverdict is
@@ -346,7 +346,7 @@ var Profile = listfiltergate.Profile{
 				"`cluster`, defined `[service_account, group#member] or system_admin` — no " +
 				"`user:*` member, so it is not satisfiable by a wildcard tuple. The grant is held " +
 				"by a GROUP rather than by enumerated subjects, so revoking one owner service is " +
-				"one membership row (data-integrity.md B18). Narrowing this page per object would " +
+				"one membership row (rule B18). Narrowing this page per object would " +
 				"be wrong, not merely absent: an owner service polls ceilings for every scope it " +
 				"enforces, and a page filtered to what the MACHINE can see would silently drop " +
 				"tenants whose limits it must apply. The exclusion expires with the RPC.",

@@ -13,7 +13,7 @@
 // Surfaces:
 //   - Registry.Handler() — promhttp.Handler served on a SEPARATE internal port
 //     (KANAME_METRICS_ENDPOINT, default :9095). Never on the public tenant
-//     gRPC surface (it would expose internal cardinality — security.md).
+//     gRPC surface (it would expose internal cardinality).
 //   - Registry.ObserveAuthz — the authz Check hot-path histogram + decision
 //     counter (the documented ≤30ms p95 budget on AuthorizeService.Check /
 //     CheckRelation was previously un-instrumented).

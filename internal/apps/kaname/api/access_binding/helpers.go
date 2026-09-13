@@ -111,7 +111,7 @@ func bindingVisibleToCaller(ctx context.Context, rq clients.RelationQueries, id 
 // the answer is never silently truncated (internal/authzfilter package doc).
 //
 // Fail-closed: an FGA error on ANY object → UNAVAILABLE (never an unfiltered
-// leak, never an owner-only fallback; parity with role.List D-47 / security.md).
+// leak, never an owner-only fallback; parity with role.List D-47).
 // An anonymous / empty-subject principal yields an empty set (default-deny).
 func visibleBindingIDsOnPage(ctx context.Context, rq clients.RelationQueries, ids []string) (map[string]bool, bool, error) {
 	if rq == nil {
@@ -187,8 +187,8 @@ func requireGrantAuthority(ctx context.Context, repo Repo, relations clients.Rel
 // он про ЛИЧНОСТЬ вызывающего. На одиночном глаголе (Create / Delete) разницы
 // нет, и там полоса зовётся целиком. На СТРАНИЦЕ разница и есть предмет: вопрос,
 // одинаковый для всех её строк, обязан задаваться однажды за запрос, а не по
-// разу на строку. Стоимость страницы принадлежит ЗАПРОСУ (`security.md`
-// §«Фильтрация — страница → проверка страницы»), а `page_size` доходит до 1000.
+// разу на строку. Стоимость страницы принадлежит ЗАПРОСУ
+// (§«Фильтрация — страница → проверка страницы»), а `page_size` доходит до 1000.
 //
 // Исход этой функции для строки ТОТ ЖЕ, что у requireGrantAuthority, когда
 // супер-гейт ответил «не админ, ошибки нет»: вызывающий обязан воспроизвести

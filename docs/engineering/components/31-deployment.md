@@ -13,7 +13,7 @@ helm-chart, config + секреты, миграции и порядок запу
 | Бинарник | Назначение |
 |---|---|
 | `kaname` | gRPC API-сервер (`serve`) — основной процесс Deployment'а |
-| `kaname-migrator` | CLI миграций БД (`up`/`down`/`status`/`create`), запускается init-контейнером |
+| `kaname-migrator` | CLI миграций БД (`up`/`down`/`status`), запускается init-контейнером |
 
 `kaname` обслуживает только `serve` — миграции вынесены в отдельный
 `kaname-migrator` (cmd-binary не смешивает обязанности). Попытка

@@ -289,7 +289,7 @@ func (c Config) validateDeclaredDomain() error {
 // not use the mint at all and boots unchanged.
 //
 // Only the PRESENCE of the key is read — never its value, and the value never
-// appears in the error (security.md).
+// appears in the error.
 func (c Config) validateProductionBootstrapMint() error {
 	if !c.AuthN.BootstrapMint.Enabled() {
 		return nil
@@ -593,7 +593,7 @@ func (c Config) validateMode() error {
 // the composition root uses (cmd/kaname/hooks_mux.go). Only os.Getenv is read
 // (no other side-effects), consistent with the Resolve* methods.
 //
-// Errors name WHICH setting is missing — never the secret value (security.md).
+// Errors name WHICH setting is missing — never the secret value.
 func (c Config) validateProductionAuthNSecrets() error {
 	var errs error
 	if strings.TrimSpace(c.AuthN.ResolveHookSharedSecret()) == "" {
