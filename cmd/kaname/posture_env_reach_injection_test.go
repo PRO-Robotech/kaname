@@ -131,7 +131,7 @@ func build(addr string) {
 func reason() string { return "KANAME_INDIRECT" }
 func refuse(s string) error { return nil }
 `
-	axes, err := postureAxisTexts("injected.go", []byte(src))
+	axes, err := postureAxisTexts("injected.go", []byte(src), nil)
 	if err != nil {
 		t.Fatalf("инъекция не разобрана: %v", err)
 	}

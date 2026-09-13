@@ -12,78 +12,160 @@ import (
 //
 // # Предмет
 //
-// Раздельность фронтов есть свойство СОКЕТА: «внутреннее не опубликовано»
+// Раздельность поверхностей есть свойство СОКЕТА: «внутреннее не опубликовано»
 // проверяемо ровно тогда, когда оно недосягаемо. Совпавшие адреса делают
-// требование невыполнимым by construction — но не отказом, а ТИШИНОЙ: поднимется
-// то из двух, что успело занять порт, и снаружи это выглядит исправной работой.
+// требование невыполнимым by construction.
 //
-// Поэтому исход — отказ СТАРТА, а не запись в журнал: неверную посадку чинят
-// один раз в профиле, а не ловят потом по симптому.
+// Здесь проверяется, что страж видит ВСЕ поверхности корня, а не четыре из
+// восьми (#2639): совпадение скрейпа с зеркалом ключей — такая же неисполнимая
+// посадка, как совпадение двух фронтов, и до расширения сверки страж о нём
+// молчал.
+//
+// Почему исход — отказ старта, а не запись в журнал, и чего страж НЕ закрывает
+// (привязка судит сокет, а он — строку профиля), разобрано в шапке
+// `restfrontaddr.go`; здесь это не пересказывается.
 
 func TestRefusesToStartWhenSurfaceAddressesCollide(t *testing.T) {
 	const (
-		publicGRPC   = ":9090"
-		internalGRPC = ":9091"
-		publicREST   = ":9098"
-		internalREST = ":9099"
+		publicGRPC    = ":9090"
+		internalGRPC  = ":9091"
+		hooks         = ":9094"
+		metrics       = ":9095"
+		registryToken = ":9096"
+		jwksProxy     = ":9097"
+		publicREST    = ":9098"
+		internalREST  = ":9099"
 	)
+	// allEight — посадка, какой её объявляет боевой профиль: восемь поверхностей,
+	// все на своих адресах.
+	allEight := func() []surfaceAddr {
+		return []surfaceAddr{
+			{knobPublicGRPC, publicGRPC},
+			{knobInternalGRPC, internalGRPC},
+			{knobHooks, hooks},
+			{knobMetrics, metrics},
+			{knobRegistryToken, registryToken},
+			{knobJWKSProxy, jwksProxy},
+			{knobPublicREST, publicREST},
+			{knobInternalREST, internalREST},
+		}
+	}
 
-	t.Run("контроль: все четыре адреса различны — старт разрешён", func(t *testing.T) {
-		if err := requireDistinctSurfaceAddrs(publicGRPC, internalGRPC, publicREST, internalREST); err != nil {
+	t.Run("контроль: восемь адресов различны — старт разрешён", func(t *testing.T) {
+		census, err := requireDistinctSurfaceAddrs(allEight())
+		if err != nil {
 			t.Fatalf("страж отказал на законной посадке: %v", err)
+		}
+		if census.Declared != 8 || census.Addressed != 8 {
+			t.Fatalf("перепись: объявлено %d, с адресом %d — ожидалось 8 и 8. Одно "+
+				"число скрыло бы поверхность, выпавшую из сверки",
+				census.Declared, census.Addressed)
+		}
+		if census.Pairs != 28 {
+			t.Fatalf("сверено пар %d, а восемь адресов дают 28 — часть поверхностей "+
+				"в сверку не вошла", census.Pairs)
 		}
 	})
 
-	t.Run("контроль: фронты не объявлены — судить нечего", func(t *testing.T) {
-		// Пустой адрес означает «фронт не поднят». Два невыставленных фронта
-		// НЕ совпадают: совпасть могут только занятые порты.
-		if err := requireDistinctSurfaceAddrs(publicGRPC, internalGRPC, "", ""); err != nil {
+	t.Run("контроль: поверхность не объявлена — судить нечего", func(t *testing.T) {
+		// Пустой адрес означает «поверхность не поднята». Две неподнятые НЕ
+		// совпадают: совпасть могут только занятые порты.
+		surfaces := append(allEight()[:6:6],
+			surfaceAddr{knobPublicREST, ""}, surfaceAddr{knobInternalREST, ""})
+		census, err := requireDistinctSurfaceAddrs(surfaces)
+		if err != nil {
 			t.Fatalf("страж отказал на посадке без фронтов: %v", err)
+		}
+		if census.Declared != 8 || census.Addressed != 6 {
+			t.Fatalf("перепись: объявлено %d, с адресом %d — ожидалось 8 и 6: "+
+				"выключенная поверхность обязана быть видна объявленной и не сверяемой",
+				census.Declared, census.Addressed)
 		}
 	})
 
 	t.Run("инъекция: адреса двух фронтов совпали", func(t *testing.T) {
-		err := requireDistinctSurfaceAddrs(publicGRPC, internalGRPC, publicREST, publicREST)
+		surfaces := allEight()
+		surfaces[7].addr = publicREST
+		_, err := requireDistinctSurfaceAddrs(surfaces)
 		if err == nil {
 			t.Fatal("страж принял посадку, где оба фронта слушают один адрес: " +
-				"раздельность перестала быть свойством сокета, и это не отказ, а тишина")
+				"раздельность перестала быть свойством сокета")
 		}
 		// Текст отказа — рантайм-диагностика оператору: он обязан назвать ОБЕ
 		// совпавшие ручки, иначе оператор знает, что не так, и не знает, где чинить.
-		for _, want := range []string{"REST_ENDPOINT", "INTERNAL_REST_ENDPOINT", publicREST} {
+		for _, want := range []string{knobPublicREST, knobInternalREST, publicREST} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("отказ не называет %q: %v", want, err)
 			}
 		}
 	})
 
-	t.Run("инъекция: адрес фронта совпал с адресом gRPC-слушателя", func(t *testing.T) {
-		err := requireDistinctSurfaceAddrs(publicGRPC, internalGRPC, publicGRPC, internalREST)
+	t.Run("инъекция: скрейп занял адрес зеркала ключей", func(t *testing.T) {
+		// РАДИ ЭТОГО СЛУЧАЯ сверка и расширена: обе поверхности прежним стражем
+		// не судились вовсе, и совпадение их адресов он принимал молча.
+		surfaces := allEight()
+		surfaces[3].addr = jwksProxy
+		_, err := requireDistinctSurfaceAddrs(surfaces)
 		if err == nil {
-			t.Fatal("страж принял посадку, где REST-фронт слушает адрес gRPC-слушателя")
+			t.Fatal("страж принял посадку, где скрейп и зеркало ключей слушают один " +
+				"адрес: поверхности, которых сверка не знает, и есть её слепая зона")
 		}
-		for _, want := range []string{"REST_ENDPOINT", "ENDPOINT", publicGRPC} {
+		for _, want := range []string{knobMetrics, knobJWKSProxy, jwksProxy} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("отказ не называет %q: %v", want, err)
 			}
 		}
 	})
 
-	t.Run("инъекция: внутренний фронт занял адрес внутреннего слушателя", func(t *testing.T) {
-		if err := requireDistinctSurfaceAddrs(publicGRPC, internalGRPC, publicREST, internalGRPC); err == nil {
-			t.Fatal("страж принял посадку, где внутренний фронт слушает адрес внутреннего слушателя")
+	t.Run("инъекция: вебхуки заняли адрес публичного gRPC", func(t *testing.T) {
+		surfaces := allEight()
+		surfaces[2].addr = publicGRPC
+		_, err := requireDistinctSurfaceAddrs(surfaces)
+		if err == nil {
+			t.Fatal("страж принял посадку, где вебхуки слушают адрес gRPC-слушателя")
+		}
+		for _, want := range []string{knobHooks, knobPublicGRPC} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("отказ не называет %q: %v", want, err)
+			}
+		}
+	})
+
+	t.Run("инъекция: выдача докерного токена заняла адрес внутреннего фронта", func(t *testing.T) {
+		surfaces := allEight()
+		surfaces[4].addr = internalREST
+		if _, err := requireDistinctSurfaceAddrs(surfaces); err == nil {
+			t.Fatal("страж принял посадку, где выдача токена слушает адрес " +
+				"внутреннего REST-фронта")
 		}
 	})
 
 	t.Run("отказ называет ВСЕ совпадения сразу, а не первое", func(t *testing.T) {
 		// Оператор чинит профиль один раз, а не по одному совпадению за
 		// перезапуск: страж, останавливающийся на первом, продаёт круг подъёма.
-		err := requireDistinctSurfaceAddrs(publicGRPC, internalGRPC, publicGRPC, internalGRPC)
+		surfaces := allEight()
+		surfaces[3].addr = jwksProxy  // скрейп ↔ зеркало ключей
+		surfaces[7].addr = publicREST // внутренний фронт ↔ публичный
+		census, err := requireDistinctSurfaceAddrs(surfaces)
 		if err == nil {
 			t.Fatal("страж принял посадку с двумя совпадениями разом")
 		}
-		if strings.Count(err.Error(), "REST_ENDPOINT") < 2 {
-			t.Errorf("отказ назвал не все совпадения: %v", err)
+		if census.Collisions != 2 {
+			t.Errorf("совпадений названо %d, внесено 2: %v", census.Collisions, err)
+		}
+	})
+
+	t.Run("контроль: пустая посадка — вердикт беспредметен и виден переписью", func(t *testing.T) {
+		// Ноль сверенных пар выглядит как чистая посадка, и отличить одно от
+		// другого может только перепись. Страж не падает здесь намеренно:
+		// «поверхностей не объявлено» — состояние корня, а не профиля.
+		census, err := requireDistinctSurfaceAddrs(nil)
+		if err != nil {
+			t.Fatalf("страж отказал на пустом перечне: %v", err)
+		}
+		if census.Declared != 0 || census.Pairs != 0 {
+			t.Fatalf("перепись пустого перечня: объявлено %d, пар %d",
+				census.Declared, census.Pairs)
 		}
 	})
 }

@@ -54,6 +54,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
+	"github.com/PRO-Robotech/corelib/treecorpus"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
@@ -189,11 +190,13 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		"apiServer", "endpoint")
 	internalGRPCAddr := httpEdgeAddr(t, values, defaults, "api-server.internal-endpoint",
 		"apiServer", "internalEndpoint")
+	hooksAddr := httpEdgeAddr(t, values, defaults, "authn.hooks-http-endpoint",
+		"authn", "hooksHttpEndpoint")
+	metricsAddr := httpEdgeAddr(t, values, defaults, "api-server.metrics-endpoint",
+		"apiServer", "metricsEndpoint")
 	httpEdges := iamHTTPEdges(
-		httpEdgeAddr(t, values, defaults, "authn.hooks-http-endpoint",
-			"authn", "hooksHttpEndpoint"),
-		httpEdgeAddr(t, values, defaults, "api-server.metrics-endpoint",
-			"apiServer", "metricsEndpoint"),
+		hooksAddr,
+		metricsAddr,
 		jwksProxyAddr,
 		// Адрес фронтов профиль объявляет ПОРТОМ, и шаблон выводит эндпоинт из
 		// него же. Читать здесь `apiServer.restEndpoint` значило бы судить путь,
@@ -273,10 +276,40 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		ownMinting, jwksProxyAddr, mtlsCfg.JWKSProxyClientAuthModeValue(),
 		mtlsCfg.JWKSProxyVerifiesCaller())
 
-	// ── РАЗЛИЧИМОСТЬ АДРЕСОВ ЧЕТЫРЁХ ПОВЕРХНОСТЕЙ ───────────────────────────
-	require.NoError(t,
-		requireDistinctSurfaceAddrs(publicGRPCAddr, internalGRPCAddr, restAddr, internalRESTAddr),
+	// ── РАЗЛИЧИМОСТЬ АДРЕСОВ ВСЕХ ПОВЕРХНОСТЕЙ ──────────────────────────────
+	//
+	// Перечень здесь — ВТОРОЙ по отношению к срезу подъёма, и потому опасный:
+	// отстань он на одну поверхность, страж судил бы профиль не целиком, а проба
+	// оставалась бы зелёной. Поэтому его длина сверяется с числом, ВЫВЕДЕННЫМ из
+	// дерева корня: поверхностей построено плюс два gRPC-слушателя.
+	profileSurfaceAddrs := []surfaceAddr{
+		{knobPublicGRPC, publicGRPCAddr},
+		{knobInternalGRPC, internalGRPCAddr},
+		{knobHooks, hooksAddr},
+		{knobMetrics, metricsAddr},
+		{knobRegistryToken, registryTokenAddr},
+		{knobJWKSProxy, jwksProxyAddr},
+		{knobPublicREST, restAddr},
+		{knobInternalREST, internalRESTAddr},
+	}
+	rootFiles, err := treecorpus.UnderWithSuffix(filepath.Join(iamServiceRoot(t), "cmd"), ".go")
+	require.NoError(t, err, "перечень файлов композиционного корня")
+	rootPopulations, err := countRootPopulations(rootFiles)
+	require.NoError(t, err)
+	require.Equal(t, rootPopulations.SurfacesBuilt+rootPopulations.GRPCListeners, len(profileSurfaceAddrs),
+		"перечень адресов пробы отстал от дерева: корень строит %d не-gRPC поверхностей "+
+			"плюс %d gRPC-слушателя, а проба подаёт стражу %d адресов. Страж судил бы "+
+			"профиль не целиком, и проба осталась бы зелёной",
+		rootPopulations.SurfacesBuilt, rootPopulations.GRPCListeners, len(profileSurfaceAddrs))
+
+	surfaceCensus, err := requireDistinctSurfaceAddrs(profileSurfaceAddrs)
+	require.NoError(t, err,
 		"боевой профиль не проходит стража различимости адресов поверхностей")
+	t.Logf("различимость адресов: объявлено %d · с адресом %d · сверено пар %d",
+		surfaceCensus.Declared, surfaceCensus.Addressed, surfaceCensus.Pairs)
+	require.Equal(t, len(profileSurfaceAddrs), surfaceCensus.Addressed,
+		"поверхность без адреса в боевом профиле: страж пропускает её by construction "+
+			"(«не поднята»), и профиль, забывший ручку, прошёл бы молча")
 
 	// ── УДОСТОВЕРЕНИЕ ФРОНТА ДЛЯ СОБСТВЕННОГО СЛУШАТЕЛЯ ─────────────────────
 	require.NoError(t,

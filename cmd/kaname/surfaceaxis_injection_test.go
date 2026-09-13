@@ -25,9 +25,12 @@ package main
 //  2. ПУСТОЙ ОБХОД. Каталог без осей обязан читаться как беспредметный вердикт,
 //     а не как «все объясняют». Утверждается ЧИСЛОМ (осей 0), потому что сам
 //     `t.Fatal` живёт в теле гейта и инъекции не поддаётся.
-//  3. ТЕКСТ, СОБИРАЕМЫЙ НЕ ЛИТЕРАЛОМ. Причина, пришедшая переменной, за
+//  3. ТЕКСТ, СОБИРАЕМЫЙ НЕ ЛИТЕРАЛОМ. Причина, пришедшая ПЕРЕМЕННОЙ, за
 //     объяснение НЕ засчитывается — это объявленное свойство разбора, и без
-//     пробы оно неотличимо от недосмотра.
+//     пробы оно неотличимо от недосмотра. Законный близнец у этой оси —
+//     ИМЕНОВАННАЯ КОНСТАНТА пакета: она читается в месте объявления, поэтому
+//     объяснением является, и распознаватель обязан различать эти две формы,
+//     а не мерить их одной меркой «не литерал» (#2639).
 //  4. НЕНАЗВАННАЯ РУЧКА ФРОНТА. Исходник, где ось одного из фронтов не называет
 //     своей ручки, обязан дать `false` по ЭТОЙ ручке и `true` по соседней.
 //     Законный близнец — исходник, называющий обе.
@@ -181,7 +184,7 @@ func frontSource(knobs ...string) string {
 // фронта не называет своей ручки, даёт `false` РОВНО по ней.
 func TestSurfaceAxisInjection_UnnamedFrontKnobIsCaught(t *testing.T) {
 	named, err := frontKnobsNamedByAxes("serve.go",
-		[]byte(frontSource("KANAME_API_SERVER__REST_ENDPOINT")), restFrontKnobs)
+		[]byte(frontSource("KANAME_API_SERVER__REST_ENDPOINT")), restFrontKnobs, nil)
 	if err != nil {
 		t.Fatalf("синтетический исходник не разбирается: %v", err)
 	}
@@ -197,7 +200,8 @@ func TestSurfaceAxisInjection_UnnamedFrontKnobIsCaught(t *testing.T) {
 // TestSurfaceAxisInjection_BothFrontKnobsTwinStaysSilent — законный близнец:
 // исходник, называющий обе ручки, даёт `true` по обеим.
 func TestSurfaceAxisInjection_BothFrontKnobsTwinStaysSilent(t *testing.T) {
-	named, err := frontKnobsNamedByAxes("serve.go", []byte(frontSource(restFrontKnobs...)), restFrontKnobs)
+	named, err := frontKnobsNamedByAxes("serve.go", []byte(frontSource(restFrontKnobs...)),
+		restFrontKnobs, nil)
 	if err != nil {
 		t.Fatalf("синтетический исходник не разбирается: %v", err)
 	}
@@ -214,11 +218,82 @@ func TestSurfaceAxisInjection_BothFrontKnobsTwinStaysSilent(t *testing.T) {
 func TestSurfaceAxisInjection_KnobInACommentIsNotAnAxis(t *testing.T) {
 	body := "package main\n\n// KANAME_API_SERVER__INTERNAL_REST_ENDPOINT — про это ниже.\nfunc f() {\n" +
 		"\t_ = addrAxis(addr, \"KANAME_API_SERVER__REST_ENDPOINT не задан\")\n}\n"
-	named, err := frontKnobsNamedByAxes("serve.go", []byte(body), restFrontKnobs)
+	named, err := frontKnobsNamedByAxes("serve.go", []byte(body), restFrontKnobs, nil)
 	if err != nil {
 		t.Fatalf("синтетический исходник не разбирается: %v", err)
 	}
 	if named["KANAME_API_SERVER__INTERNAL_REST_ENDPOINT"] {
 		t.Fatal("имя ручки из КОММЕНТАРИЯ зачтено осью — гейт судил бы прозу, а не объявление")
+	}
+}
+
+// TestSurfaceAxisInjection_NamedConstantIsAnExplanation — ЗАКОННЫЙ БЛИЗНЕЦ оси
+// «не литерал»: причина, собранная из именованной константы пакета, объяснением
+// ЯВЛЯЕТСЯ.
+//
+// Форма появилась вместе с ручками поверхностей: имя ручки объявлено константой
+// один раз и склеивается с текстом причины. Распознаватель, знающий только
+// литералы, о такой оси МОЛЧИТ — не краснеет и не зеленеет, а перестаёт её
+// видеть. Проба ставит обе формы рядом в одном каталоге: константа зачтена,
+// переменная нет.
+func TestSurfaceAxisInjection_NamedConstantIsAnExplanation(t *testing.T) {
+	dir := t.TempDir()
+	const knobs = "package main\n\nconst knobProbe = \"KANAME_PROBE__ENDPOINT\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "knobs.go"), []byte(knobs), 0o600); err != nil {
+		t.Fatalf("синтетические константы не записаны: %v", err)
+	}
+	body := "package main\n\nfunc f() {\n" +
+		"\t_ = addrAxis(addr, knobProbe+\" не задан профилем развёртывания\")\n" +
+		"\t_ = addrAxis(addr, because)\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "serve.go"), []byte(body), 0o600); err != nil {
+		t.Fatalf("синтетический исходник не записан: %v", err)
+	}
+
+	_, explained, err := axisExplanations(dir)
+	if err != nil {
+		t.Fatalf("обход синтетического каталога не состоялся: %v", err)
+	}
+	if len(explained) != 2 {
+		t.Fatalf("инъекция беспредметна: осей найдено %d, ожидалось 2", len(explained))
+	}
+	if !explained[0] {
+		t.Fatal("ось, чья причина собрана из константы пакета, прочитана как молчащая — " +
+			"распознаватель не знает законной формы и перестаёт видеть всё, что ею записано")
+	}
+	if explained[1] {
+		t.Fatal("причина, пришедшая переменной, зачтена объяснением — граница " +
+			"распознавателя стёрта, и объявленное свойство перестало действовать")
+	}
+}
+
+// TestSurfaceAxisInjection_ConstantKnobIsNamedByTheAxis — та же форма на второй
+// пробе: ручка, склеенная из константы, обязана читаться названной.
+func TestSurfaceAxisInjection_ConstantKnobIsNamedByTheAxis(t *testing.T) {
+	body := "package main\n\nfunc f() {\n" +
+		"\t_ = addrAxis(addr, knobPublicRESTProbe+\" не задан\")\n" +
+		"\t_ = addrAxis(addr, \"KANAME_API_SERVER__INTERNAL_REST_ENDPOINT не задан\")\n}\n"
+	consts := map[string]string{"knobPublicRESTProbe": "KANAME_API_SERVER__REST_ENDPOINT"}
+	named, err := frontKnobsNamedByAxes("serve.go", []byte(body), restFrontKnobs, consts)
+	if err != nil {
+		t.Fatalf("синтетический исходник не разбирается: %v", err)
+	}
+	for knob, found := range named {
+		if !found {
+			t.Fatalf("ручка %s прочитана как неназванная: одна из осей записана "+
+				"константой, и распознаватель её не увидел", knob)
+		}
+	}
+
+	// Без таблицы констант та же ось не разрешается — и это НЕ молчание о
+	// дефекте, а честная граница: проба, не собравшая констант пакета, судит
+	// меньше, чем есть, и обязана это показывать.
+	blind, err := frontKnobsNamedByAxes("serve.go", []byte(body), restFrontKnobs, nil)
+	if err != nil {
+		t.Fatalf("синтетический исходник не разбирается: %v", err)
+	}
+	if blind["KANAME_API_SERVER__REST_ENDPOINT"] {
+		t.Fatal("ось, записанная константой, разрешилась без таблицы констант — " +
+			"значит разрешается она чем-то другим, и граница распознавателя не та, " +
+			"что объявлена")
 	}
 }
