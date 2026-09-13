@@ -4,7 +4,6 @@
 package pg
 
 import (
-	"encoding/base64"
 	"encoding/json"
 
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -32,13 +31,6 @@ func effectivePageSize(pageSize int32) (int64, error) {
 		return defaultListPageSize, nil
 	}
 	return v, nil
-}
-
-// base64URLEncode/Decode — alias'ы под StdEncoding с padding (parity с
-// services/vpc/internal/repo/helpers). Используются для cursor-based page_token.
-func base64URLEncode(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
-func base64URLDecode(s string) ([]byte, error) {
-	return base64.StdEncoding.DecodeString(s)
 }
 
 // jsonBytesOrEmpty — return a non-nil jsonb byte-slice for a Postgres
