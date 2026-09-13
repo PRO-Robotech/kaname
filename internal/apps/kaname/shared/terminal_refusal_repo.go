@@ -166,7 +166,11 @@ func terminalRefusalStatus(st *rpcstatus.Status) *rpcstatus.Status {
 	if st == nil {
 		return nil
 	}
-	if codes.Code(st.GetCode()) != codes.Aborted ||
+	// Сравнение идёт в ЧИСЛАХ контракта, а не приведением кода сообщения к типу
+	// оболочки: `GetCode()` отдаёт int32 из чужого сообщения, и приведение его к
+	// беззнаковому — преобразование с переполнением на неподконтрольном значении.
+	// Обратное направление сворачивается компилятором: `codes.Aborted` — константа.
+	if st.GetCode() != int32(codes.Aborted) ||
 		st.GetMessage() != iamerr.SerializationConflictSyncText {
 		return st
 	}
