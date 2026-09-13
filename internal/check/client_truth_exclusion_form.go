@@ -103,7 +103,6 @@ package check
 
 import (
 	"fmt"
-	"github.com/PRO-Robotech/corelib/treecorpus"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -111,6 +110,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 // ExclusionGuideRel — страница установки: то, что читает оператор.

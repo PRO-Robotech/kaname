@@ -22,10 +22,11 @@ package main
 
 import (
 	"context"
-	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"net"
 	"testing"
 	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"

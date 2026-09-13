@@ -29,12 +29,13 @@ package check_test
 
 import (
 	"fmt"
-	"github.com/PRO-Robotech/corelib/treecorpus"
 	"os"
 	"path"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/corelib/treecorpus"
 
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 

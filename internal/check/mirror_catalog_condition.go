@@ -50,13 +50,14 @@
 package check
 
 import (
-	"github.com/PRO-Robotech/corelib/treecorpus"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 const (

@@ -84,13 +84,14 @@ package check
 
 import (
 	"fmt"
-	"github.com/PRO-Robotech/corelib/treecorpus"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 // EmitSubjectChangeSelector — имя метода порта, которым производится строка

@@ -41,12 +41,13 @@ package check
 
 import (
 	"fmt"
-	"github.com/PRO-Robotech/corelib/treecorpus"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"strconv"
 	"strings"
+
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 // ManifestLoaderDir — прод-файлы загрузчика манифеста. Гейт читает их как ТЕКСТ

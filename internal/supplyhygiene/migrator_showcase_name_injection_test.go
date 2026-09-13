@@ -11,12 +11,13 @@
 package supplyhygiene
 
 import (
-	"github.com/PRO-Robotech/corelib/treecorpus"
-	"github.com/PRO-Robotech/kaname/internal/check"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/corelib/treecorpus"
+	"github.com/PRO-Robotech/kaname/internal/check"
 
 	"github.com/stretchr/testify/require"
 )
