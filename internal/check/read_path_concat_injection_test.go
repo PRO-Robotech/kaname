@@ -35,8 +35,7 @@ func TestReadPathConcatGateCanFailAndCanStaySilent(t *testing.T) {
 	t.Parallel()
 
 	root, _ := platformtree.RequireCorpus(t)
-	resolve := func(rel string) (string, error) { return platformtree.PathUnder(root, rel) }
-	files, _, err := check.ReadPathGoFiles(resolve)
+	files, _, err := check.ReadPathGoFiles(root)
 	if err != nil {
 		t.Fatalf("объём инъекции выведен быть не может: %v", err)
 	}

@@ -26,9 +26,8 @@ func TestReadPathComparesColumnsNotConcatenations(t *testing.T) {
 	t.Parallel()
 
 	root, _ := platformtree.RequireCorpus(t)
-	resolve := func(rel string) (string, error) { return platformtree.PathUnder(root, rel) }
 
-	files, dirs, err := check.ReadPathGoFiles(resolve)
+	files, dirs, err := check.ReadPathGoFiles(root)
 	if err != nil {
 		t.Fatalf("объём гейта выведен быть не может: %v — «ноль находок» означало бы "+
 			"«ноль прочитанного»", err)

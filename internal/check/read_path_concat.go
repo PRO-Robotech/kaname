@@ -59,6 +59,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // FingerprintSourceRel — объявление предмета замера, из которого ВЫВОДИТСЯ
@@ -121,24 +123,27 @@ type ReadPathFile struct {
 
 // ReadPathGoFiles — не-тестовые .go каталогов, составляющих предмет замера.
 //
-// Каталоги объявлены координатами от корня дерева платформы, поэтому резолв
-// подаёт ВЫЗЫВАЮЩИЙ: правило приведения координаты к посадке живёт в одном
-// месте дерева, и второй его копии здесь не заводится.
+// Координаты приводятся к посадке ДЕТЕКТОРОМ дерева (`treeposture.PathUnder`), а
+// не складываются с корнем здесь: правило приведения живёт в одном месте дерева,
+// и второй его копии не заводится. Первая редакция порта складывала путь сама —
+// и её поймал гейт дерева `TestPlatformCoordinatesTouchingTheTreeAreAnchoredInTheModule`
+// двумя находками: под чужим деревом такой путь указал бы на чужой файл, и
+// вердикт был бы о нём.
 //
 // Каталог, в котором таких файлов нет вовсе (каталог миграций), в объём просто
 // не приносит ничего — исключать его СПИСКОМ не нужно, и списка здесь нет.
-func ReadPathGoFiles(resolve func(rel string) (string, error)) (files []ReadPathFile, dirs []string, err error) {
-	src, err := resolve(FingerprintSourceRel)
+func ReadPathGoFiles(root string) (files []ReadPathFile, dirs []string, err error) {
+	src, err := treeposture.PathUnder(root, FingerprintSourceRel)
 	if err != nil {
 		return nil, nil, err
 	}
-	body, err := os.ReadFile(src) // #nosec G304 -- путь получен резолвом координаты СОБСТВЕННОГО дерева
+	body, err := os.ReadFile(src) // #nosec G304 -- путь получен детектором дерева от СВОЕГО корня
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, m := range fingerprintDirDecl.FindAllStringSubmatch(string(body), -1) {
 		dirs = append(dirs, m[2])
-		abs, derr := resolve(m[2])
+		abs, derr := treeposture.PathUnder(root, m[2])
 		if derr != nil {
 			return nil, dirs, derr
 		}
