@@ -242,7 +242,7 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	// иначе account-scoped /iam/operations исключает token-операции.
 	accountID, mayAuthenticate, err := u.repo.AccountForUser(ctx, in.UserID)
 	if err != nil {
-		return nil, mapPGErr(err)
+		return nil, mapPGErrLogged(ctx, u.logger, "user_tokens.Issue.accountForUser", err)
 	}
 	// The hooks already refuse to mint a token for a user in this state. Issuing
 	// them a NEW personal token is a separate act: the secret is handed over and
@@ -271,7 +271,7 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 				return nil, status.Errorf(codes.FailedPrecondition,
 					"created_by_user_id %s is not a known user", in.CreatedByUserID)
 			}
-			return nil, mapPGErr(cerr)
+			return nil, mapPGErrLogged(ctx, u.logger, "user_tokens.Issue.accountForCreatedBy", cerr)
 		}
 	}
 
@@ -556,7 +556,7 @@ func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.Us
 
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
-		return domain.UserOAuthClient{}, mapPGErr(err)
+		return domain.UserOAuthClient{}, mapPGErrLogged(ctx, u.logger, "user_tokens.Issue.mappingTxBegin", err)
 	}
 	committed := false
 	defer func() {
@@ -566,7 +566,7 @@ func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.Us
 	}()
 	persisted, err := u.repo.Insert(ctx, tx, row)
 	if err != nil {
-		return domain.UserOAuthClient{}, mapPGErr(err)
+		return domain.UserOAuthClient{}, mapPGErrLogged(ctx, u.logger, "user_tokens.Issue.insert", err)
 	}
 	// Durable audit-строка в ТОЙ ЖЕ tx (атомарно с Insert). Payload несёт только
 	// не-секретные идентификаторы (нет key material).
@@ -577,11 +577,11 @@ func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.Us
 			Payload: userTokenAuditPayload(
 				actor, string(row.UserID), string(persisted.ID), keyAlgorithm),
 		}); aerr != nil {
-			return domain.UserOAuthClient{}, mapPGErr(aerr)
+			return domain.UserOAuthClient{}, mapPGErrLogged(ctx, u.logger, "user_tokens.Issue.emitAudit", aerr)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return domain.UserOAuthClient{}, mapPGErr(err)
+		return domain.UserOAuthClient{}, mapPGErrLogged(ctx, u.logger, "user_tokens.Issue.commit", err)
 	}
 	committed = true
 	return persisted, nil
@@ -636,7 +636,7 @@ func (u *RevokeUserTokenUseCase) Execute(ctx context.Context, in RevokeInput) (*
 	// всего снять.
 	accountID, _, err := u.repo.AccountForUser(ctx, in.UserID)
 	if err != nil {
-		return nil, mapPGErr(err)
+		return nil, mapPGErrLogged(ctx, nil, "user_tokens.Revoke.accountForUser", err)
 	}
 	op, err := operations.NewFromContext(ctx,
 		domain.PrefixOperationIAM,
@@ -685,7 +685,7 @@ func (u *RevokeUserTokenUseCase) Execute(ctx context.Context, in RevokeInput) (*
 func (u *RevokeUserTokenUseCase) doRevoke(ctx context.Context, in RevokeInput, actor string) (*anypb.Any, error) {
 	tx, err := u.tx.Begin(ctx)
 	if err != nil {
-		return nil, mapPGErr(err)
+		return nil, mapPGErrLogged(ctx, nil, "user_tokens.Revoke.txBegin", err)
 	}
 	committed := false
 	defer func() {
@@ -695,7 +695,7 @@ func (u *RevokeUserTokenUseCase) doRevoke(ctx context.Context, in RevokeInput, a
 	}()
 	cur, found, err := u.repo.DeleteOwnedByID(ctx, tx, in.UserID, in.TokenID)
 	if err != nil {
-		return nil, mapPGErr(err)
+		return nil, mapPGErrLogged(ctx, nil, "user_tokens.Revoke.deleteOwnedByID", err)
 	}
 	if !found {
 		// Снимать было нечего. Транзакция откатывается (снятого нет, писать
@@ -712,11 +712,11 @@ func (u *RevokeUserTokenUseCase) doRevoke(ctx context.Context, in RevokeInput, a
 			Payload: userTokenAuditPayload(
 				actor, string(cur.UserID), string(in.TokenID), cur.KeyAlgorithm),
 		}); aerr != nil {
-			return nil, mapPGErr(aerr)
+			return nil, mapPGErrLogged(ctx, nil, "user_tokens.Revoke.emitAudit", aerr)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, mapPGErr(err)
+		return nil, mapPGErrLogged(ctx, nil, "user_tokens.Revoke.commit", err)
 	}
 	committed = true
 	// Наружу отсюда не ходят. Отзыв состоялся тем, что учётные данные перестали
@@ -865,6 +865,29 @@ func CredentialKindFromProto(k iamv1.CredentialKind) domain.CredentialKind {
 	}
 }
 
+// mapPGErrLogged — тот же перевод, что `mapPGErr`, и ЧИТАТЕЛЬ у подробности.
+//
+// Переводчик остаётся свободной функцией: его текст `INTERNAL` — часть
+// контракта ЭТОГО домена («internal user token error»), и подменить его общим
+// значило бы сменить контракт мимо приёмки. Читателя даёт
+// `shared.LogMappedErr`, у которого решение «какие исходы называть журналу»
+// живёт в единственном экземпляре: разойдясь в нём, домены разошлись бы в том,
+// что считается заметным (задача #2507).
+//
+// Логгер берётся у вызывающего, а если у того его нет — у умолчания процесса.
+// Умолчание ЗАДАНО композиционным корнем (`slog.SetDefault`, cmd/kaname), так
+// что запись доезжает до того же приёмника, а не уходит в никуда: провязка «на
+// всякий случай», у которой нет читателя, была бы ровно тем мёртвым глаголом,
+// который эта задача и снимает. Отзыв личного токена логгера не несёт —
+// провязка его поля идёт через композиционный корень и заведена своим
+// изменением.
+func mapPGErrLogged(ctx context.Context, logger *slog.Logger, op string, err error) error {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return shared.LogMappedErr(ctx, logger, op, err, mapPGErr(err))
+}
+
 func mapPGErr(err error) error {
 	if err == nil {
 		return nil
@@ -907,10 +930,8 @@ func mapPGErr(err error) error {
 		// Текст берётся у канонического переводчика: свой литерал здесь был бы
 		// вторым местом об одном контракте.
 		//
-		// ЧИТАТЕЛЯ у подробности на этой полосе СЕГОДНЯ НЕТ, и это названо, а не
-		// умолчано: переводчик — свободная функция без логгера, а звать её с
-		// проброшенным логгером из двенадцати мест — отдельная работа
-		// (задача-преемник — #2507). Подробность остаётся в цепочке.
+		// Подробность остаётся в цепочке, и у неё ЕСТЬ читатель: вызывающие зовут
+		// `mapPGErrLogged`, который называет причину журналу (задача #2507).
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
 	}
 	return status.Error(codes.Internal, "internal user token error")
