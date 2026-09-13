@@ -66,7 +66,7 @@ func main() {
 		case "serve":
 			// no-op: продолжаем в runServe
 		case "migrate":
-			bootLog.Error("`kaname migrate ...` is not supported — use the separate binary `kaname-migrator {up|down|status|create}`")
+			bootLog.Error("`kaname migrate ...` is not supported — use the separate binary `kaname-migrator {up|down|status}`")
 			os.Exit(1)
 		default:
 			bootLog.Error("unknown command (this binary only serves the API; migrations live in `kaname-migrator`)",
