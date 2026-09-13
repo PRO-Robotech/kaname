@@ -50,6 +50,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/restfront"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 )
@@ -192,7 +193,15 @@ func runServe(cfg config.Config) error {
 	// `options=-c search_path=kaname,public` — unqualified-references из repo-кода
 	// резолвятся в kaname. operations-repo дополнительно передает схему явно
 	// для квалификации SQL-операций.
-	opsRepo := operations.NewRepo(pool, "kaname")
+	//
+	// ОБЁРНУТ надстройкой, выбирающей текст отказа по НОСИТЕЛЮ (приёмка #2439):
+	// совет «повтори запрос» верен там, где вызывающий держит соединение, и не
+	// верен на терминальном исходе операции — там повторять некому, потому что
+	// тело исполняется один раз. Оборачивание здесь, в композиционном корне, и
+	// РОВНО ОДИН раз: сырой репозиторий, попавший в use-case мимо надстройки,
+	// вернул бы синхронный текст в строку операции, и заметить это можно было бы
+	// только у арендатора.
+	opsRepo := shared.NewTerminalRefusalRepo(operations.NewRepo(pool, "kaname"))
 
 	// Фоновая уборка терминальных строк таблицы операций.
 	//

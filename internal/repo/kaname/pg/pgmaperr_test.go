@@ -8,6 +8,11 @@ package pg
 // pgx-free). No DB: exercises wrapPgErr against synthetic *pgconn.PgError values.
 
 import (
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+
 	stderrors "errors"
 	"fmt"
 	"net"
@@ -380,4 +385,44 @@ func TestWrapPgErr_UnmappedSqlstate_KeepsTheCodeForTheLog(t *testing.T) {
 	// Но НЕ ценой утечки: текст сервера, имя ограничения и таблица в цепочку не
 	// попадают, а клиенту достаётся фиксированный текст перевода.
 	assertNoLeak(t, err.Error())
+}
+
+// TestWrapPgErr_KNRTX02_SyncLaneKeepsItsTextAndCode — СИНХРОННАЯ полоса не
+// тронута разведением текстов (приёмка #2439, сценарий KN-RTX-02).
+//
+// # Зачем ещё одна проба рядом с двумя выше
+//
+// Две существующие утверждают ТЕКСТ и сентинел, но не КОД: `ErrAborted` —
+// признак домена, а `ABORTED` — то, что увидит вызывающий, и производит его
+// другое место (`shared.MapRepoErr`). Разведение полос трогает именно пару
+// «код + текст», поэтому пришпилить надо пару, а не половину.
+//
+// # Почему это ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ, а не дубль
+//
+// Проба терминальной полосы утверждает, что текст СМЕНИЛСЯ. Одна она зеленела
+// бы и в мире, где текст сменён у ОБЕИХ полос, — то есть там, где синхронный
+// вызывающий потерял верный совет, который на его полосе истинен. Эта проба
+// делает тот мир красным.
+func TestWrapPgErr_KNRTX02_SyncLaneKeepsItsTextAndCode(t *testing.T) {
+	for _, code := range []string{"40001", "40P01"} {
+		err := wrapPgErr(mkPgErr(code, secretConstraint), "", "")
+
+		// Текст — тот, что объявлен СИНХРОННЫМ, и берётся из общего объявления:
+		// literal здесь завёл бы третью копию рядом с двумя объявленными.
+		if out := iamerr.StripSentinel(err); out != iamerr.SerializationConflictSyncText {
+			t.Errorf("%s: текст синхронной полосы = %q; want %q",
+				code, out, iamerr.SerializationConflictSyncText)
+		}
+		// И он ОТЛИЧЕН от терминального: совпадение означало бы, что полосы не
+		// разведены вовсе, и проба терминальной полосы зеленела бы вакуумно.
+		if iamerr.SerializationConflictSyncText == iamerr.SerializationConflictTerminalText {
+			t.Fatal("тексты полос совпали — разведения не произошло")
+		}
+
+		// Код — тот, что увидит вызывающий. Производит его shared.MapRepoErr,
+		// поэтому утверждается ЗДЕСЬ же, рядом с текстом: пара, а не половина.
+		if got := status.Code(shared.MapRepoErr(err)); got != codes.Aborted {
+			t.Errorf("%s: код синхронной полосы = %v; want %v", code, got, codes.Aborted)
+		}
+	}
 }
