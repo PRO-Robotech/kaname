@@ -31,11 +31,21 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 	"github.com/PRO-Robotech/kaname/pkg/subjectchange"
 )
 
 // TestPositionLostRefusalSurvivesTheWireAndIsRecognisedBack — круговой проход.
+//
+// Суффикс объявляется здесь потому, что производитель берёт домен у объявления
+// продукта, а не у литерала (kaname#48). Мир пробы этим совпадает с миром
+// продукта: композиционный корень объявляет суффикс до подъёма слушателей, и
+// необъявленного процесса, производящего отказы, у службы не бывает.
 func TestPositionLostRefusalSurvivesTheWireAndIsRecognisedBack(t *testing.T) {
+	if derr := refusaldomain.Declare(refusaldomain.ProductSuffix); derr != nil {
+		t.Fatalf("объявление суффикса: %v", derr)
+	}
+
 	err := subjectchange.PositionLost(599)
 
 	// Код — часть полосы, а не украшение: по нему вызывающий, не читающий
@@ -108,10 +118,16 @@ func TestPositionLostIsNotConfusedWithAnyOtherRefusal(t *testing.T) {
 // полосу, где он громкий (жалоба) и безопасный (fail-closed по сроку), а не
 // притворяется полосой контракта.
 func TestPositionLostWithoutAPositionIsNotAPositionLost(t *testing.T) {
+	if derr := refusaldomain.Declare(refusaldomain.ProductSuffix); derr != nil {
+		t.Fatalf("объявление суффикса: %v", derr)
+	}
+
 	st := status.New(codes.OutOfRange, "subject change position is no longer resumable")
 	withDetails, err := st.WithDetails(&errdetails.ErrorInfo{
 		Reason: subjectchange.ReasonPositionLost,
-		Domain: "iam.kacho.cloud",
+		// Домен берётся у объявления, а не пишется строкой: фикстура обязана
+		// быть тем же, что производит продукт, иначе она проверяет не его.
+		Domain: refusaldomain.For(refusaldomain.ServiceIAM),
 		// Метаданных нет: позиция не названа.
 	})
 	if err != nil {

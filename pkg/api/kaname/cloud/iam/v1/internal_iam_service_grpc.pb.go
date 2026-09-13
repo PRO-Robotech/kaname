@@ -99,8 +99,15 @@ type InternalIAMServiceClient interface {
 	// OUT_OF_RANGE when `since_id` sits BELOW the journal floor — the rows between
 	// them have been removed and will never be delivered. The refusal carries
 	// `google.rpc.ErrorInfo` with reason `SUBJECT_CHANGE_POSITION_LOST`, domain
-	// `iam.kacho.cloud` and metadata `earliest_resumable_position` (decimal), and
+	// `iam.kaname.cloud` and metadata `earliest_resumable_position` (decimal), and
 	// the caller keys on that token, never on the prose of the message.
+	//
+	// The domain is the PRODUCT naming itself, and this band says `kaname.cloud`
+	// like every other band this service produces. It used to say
+	// `iam.kacho.cloud` — not by decision, but because this producer lived in the
+	// platform module, where the product's own declaration is out of reach. The
+	// reason token did NOT change with it: a caller keys on the token, and moving
+	// both at once would break that binding twice in one change.
 	//
 	// The two refusals advise OPPOSITE actions and must never be merged. UNAVAILABLE
 	// says "ask again from the same position"; OUT_OF_RANGE says "that retry will
@@ -367,8 +374,15 @@ type InternalIAMServiceServer interface {
 	// OUT_OF_RANGE when `since_id` sits BELOW the journal floor — the rows between
 	// them have been removed and will never be delivered. The refusal carries
 	// `google.rpc.ErrorInfo` with reason `SUBJECT_CHANGE_POSITION_LOST`, domain
-	// `iam.kacho.cloud` and metadata `earliest_resumable_position` (decimal), and
+	// `iam.kaname.cloud` and metadata `earliest_resumable_position` (decimal), and
 	// the caller keys on that token, never on the prose of the message.
+	//
+	// The domain is the PRODUCT naming itself, and this band says `kaname.cloud`
+	// like every other band this service produces. It used to say
+	// `iam.kacho.cloud` — not by decision, but because this producer lived in the
+	// platform module, where the product's own declaration is out of reach. The
+	// reason token did NOT change with it: a caller keys on the token, and moving
+	// both at once would break that binding twice in one change.
 	//
 	// The two refusals advise OPPOSITE actions and must never be merged. UNAVAILABLE
 	// says "ask again from the same position"; OUT_OF_RANGE says "that retry will
