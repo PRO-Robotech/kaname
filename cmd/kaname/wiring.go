@@ -942,8 +942,20 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	}
 }
 
-// mustProviderAdminClient builds the single client every provider-admin consumer
-// in this process shares, resolving the hop's trust anchor once.
+// mustProviderAdminClient строит клиента административной дороги к поставщику,
+// резолвя якорь доверия хопа.
+//
+// КЛИЕНТ НЕ ОДИН, и прежняя редакция утверждала обратное: «строит единственный
+// клиент, который делят все потребители». Помощник зовётся каждым потребителем
+// и каждый раз отдаёт НОВЫЙ экземпляр — предикат рядом, а не число в прозе:
+//
+//	git grep -c 'mustProviderAdminClient(' -- cmd/kaname ':!*_test.go'
+//
+// Следствие у утверждения было: якорь резолвится не «однажды», а на каждом
+// вызове, и «разделяемое состояние», которого нет, читалось как основание
+// ничего не провязывать по месту. Сводить экземпляры в один — отдельное
+// решение с иной ценой (общий клиент делит транспорт и его пул соединений);
+// здесь текст приведён к тому, что код делает.
 //
 // Fatal on an unusable anchor, deliberately and at the composition root: the
 // alternative — carrying on against the system root store — is the state nobody

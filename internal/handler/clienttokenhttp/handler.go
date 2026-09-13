@@ -131,17 +131,18 @@ type requiredError string
 func (e requiredError) Error() string { return "clienttokenhttp: " + string(e) + " is required" }
 func errRequired(what string) error   { return requiredError(what) }
 
-// NewMux монтирует эндпоинт на объявленный путь и НИ НА КАКОЙ другой.
+// ВТОРОГО МОНТИРОВЩИКА ЗДЕСЬ НЕТ — снят вместе со своим утверждением
+// (kacho#2480, kacho#2504).
 //
-// Перечень путей выводится из этой функции, а не выписывается: утверждение о
-// единственном маршруте оставалось бы зелёным, уедь второй не туда.
-func NewMux(h http.Handler) *http.ServeMux {
-	mux := http.NewServeMux()
-	if h != nil {
-		mux.Handle(TokenPath, h)
-	}
-	return mux
-}
+// Стояла `NewMux`, чей godoc утверждал: «перечень путей выводится из этой
+// функции, а не выписывается». Производство её не звало ни разу — композиционный
+// корень монтирует маршрут руками и держит это гейтом
+// (`serve_client_token_wiring_test.go`: `TokenPath` встречается там РОВНО один
+// раз). То есть перечень выводился не отсюда, а утверждение об обратном
+// переживало свой предмет и прикрывало второй монтировщик с единственным
+// вызывающим — собственной пробой.
+//
+// Единственный источник пути остался один: [TokenPath].
 
 // Outcomes — перепись исходов. Читается сборщиком метрик.
 func (h *Handler) Outcomes() map[clientassertion.Outcome]uint64 {

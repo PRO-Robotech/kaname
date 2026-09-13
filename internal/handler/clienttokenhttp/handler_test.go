@@ -156,7 +156,12 @@ func TestF2_45_OnlyTheDeclaredMethodIsServed(t *testing.T) {
 // ВЫВОДИТСЯ из объявления, а не выписывается.
 func TestF2_45_EndpointResolvesOnItsDeclaredPathAndNoOther(t *testing.T) {
 	s := newStand(t)
-	mux := clienttokenhttp.NewMux(s.h)
+	// Монтируется ТЕМ ЖЕ способом, что и в производстве, — руками по
+	// [clienttokenhttp.TokenPath]. Прежде проба звала `NewMux`, которого
+	// производство не звало ни разу: она проверяла второй монтировщик, а не тот,
+	// через который ходят клиенты (kacho#2480).
+	mux := http.NewServeMux()
+	mux.Handle(clienttokenhttp.TokenPath, s.h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, clienttokenhttp.TokenPath, strings.NewReader(goodForm().Encode()))

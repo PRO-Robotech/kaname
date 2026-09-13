@@ -39,7 +39,7 @@ package domain
 // A name leaves this list only when the platform can no longer produce it at all.
 // Re-introducing a resource under a retired name must fail loudly rather than
 // silently regain a grant path, so the list is asserted in lockstep against iam's
-// other vocabularies (services/iam/internal/check/retired_block_storage_test.go).
+// other vocabularies (internal/check/retired_block_storage_test.go).
 
 import "sort"
 
