@@ -16,6 +16,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // sweep.go — обход ЗАКРЫТОГО НАБОРА модулей и сверка порождённого с каноном
@@ -268,7 +269,7 @@ func Sweep(resources []catalog.ResourceRow, root string, waivers []Waiver) (Cens
 	}
 	defer func() { _ = treeRoot.Close() }()
 
-	found, unparsable, ferr := findManifests(treeRoot, root)
+	found, unparsable, siblingsHome, ferr := findManifests(treeRoot, root)
 	if ferr != nil {
 		return census, []Finding{{Detail: "обход дерева отказал: " + ferr.Error()}}, SweepFinding
 	}
@@ -341,30 +342,46 @@ func Sweep(resources []catalog.ResourceRow, root string, waivers []Waiver) (Cens
 
 	// САМОСТОЯТЕЛЬНАЯ ПОСТАВКА МОДУЛЯ — «условие не создано», а не находка.
 	//
-	// Признак ОДИН и его производитель назван: канон прочитан из копии, которую
-	// модуль везёт с собой, а не из дерева контрактов. Резолв обращается ко
-	// второй координате ТОЛЬКО когда первой в дереве нет вовсе — значит контракты
-	// сюда не поставлены, а вместе с ними не поставлены и манифесты соседних
-	// модулей: их дом в дереве платформы. Все находки при этом — ровно об их
-	// отсутствии.
+	// # ПРИЗНАК СМЕНЁН, И ПРЕЖНИЙ БЫЛ НЕДОСТИЖИМ (задача PRO-Robotech/kaname#56)
 	//
-	// В МОНОРЕПО ветвь недостижима: там канон читается из дерева контрактов, и
-	// удалённый манифест соседа остаётся находкой, как и был. То есть послабление
-	// не маскирует поломку — оно истекает от наличия контрактов.
+	// Здесь стояло «канон прочитан из копии, которую модуль везёт с собой».
+	// Признак был КОСВЕННЫМ: из «дерева контрактов нет» выводилось «и манифестов
+	// соседей нет». Вывод держался ровно до переезда контрактов: решением
+	// владельца `proto/kaname/cloud/iam/v1/fga_model.fga` лежит ТЕПЕРЬ В ЭТОМ
+	// дереве, первая ветвь резолва выигрывает всегда, и различитель стал ложен
+	// ПРИ ЛЮБОМ ВХОДЕ. Замер: `go run ./tools/modelcanoncheck` в клоне службы
+	// отдавал 1 (пять находок о модулях, чьи манифесты живут у платформы) там,
+	// где ожидалось 3, — то есть вернулся ровно тот дефект, который закрывал
+	// kacho#2241.
 	//
-	// Прежде исполнитель отдавал здесь единицу, и всякий, кто склонировал модуль
-	// и позвал его напрямую, получал КРАСНОЕ О ПРОДУКТЕ там, где красного нет
-	// (kacho#2241). «Не выполнилось» не вычитается из вердикта, не зачитывается в
-	// успех и не выдаётся за находку.
-	shippedOnly := canonPath == filepath.Join(root, authzplan.ShippedModelRelPath())
-	if shippedOnly && missingManifest > 0 && missingManifest == len(findings) {
+	// # ЧТО ВМЕСТО — ВОПРОС ЗАДАЁТСЯ ПРЯМО
+	//
+	// Предмет послабления — не канон, а МАНИФЕСТЫ СОСЕДЕЙ, и их дом в дереве
+	// платформы есть каталог `services/`. Обход ищет его ТЕМ ЖЕ проходом, каким
+	// ищет манифесты, и отвечает координатой:
+	//
+	//	дом найден  → отсутствие манифеста соседа есть НАХОДКА, как и было;
+	//	дома нет    → манифестов соседей тут нет by construction — условие не создано.
+	//
+	// Признак ПРЯМОЙ: он про то самое, чего не хватает. Имя каталога объявлено
+	// один раз (`treeposture.SiblingsDir`) и той же постоянной, которой детектор
+	// посадки отличает монорепо от клона, — второй копии соглашения не заводится.
+	//
+	// В МОНОРЕПО ветвь недостижима: `services/` лежит в корне. В конвейере службы
+	// условие создаётся выборкой платформы ПОД корень обхода, и дом находится
+	// там; выборка вне корня обходом не видна — её ловит `require_platform_tree`.
+	//
+	// «Не выполнилось» не вычитается из вердикта, не зачитывается в успех и не
+	// выдаётся за находку.
+	if siblingsHome == "" && missingManifest > 0 && missingManifest == len(findings) {
 		return census, []Finding{{Detail: fmt.Sprintf(
-			"условие сверки НЕ СОЗДАНО: канон прочитан из копии, которую везёт сам модуль "+
-				"(%s), а не из дерева контрактов (%s) — значит это САМОСТОЯТЕЛЬНАЯ ПОСТАВКА "+
-				"модуля, и манифестов остальных %d модулей закрытого набора в ней нет by "+
-				"construction: их дом в дереве платформы. Сверять не с чем; в монорепо та же "+
-				"цель зелена",
-			authzplan.ShippedModelRelPath(), authzplan.CanonicalModelRelPath(), missingManifest)}}, SweepNotRun
+			"условие сверки НЕ СОЗДАНО: дома манифестов соседних модулей (каталога %s/) в "+
+				"обходе НЕТ, а все %d находки — ровно об их отсутствии. Значит это дерево "+
+				"манифестов остальных модулей закрытого набора не несёт by construction: их "+
+				"дом в дереве платформы. Сверять не с чем; канон при этом прочитан (%s). "+
+				"Создать условие: положить выборку PRO-Robotech/kacho под корень обхода "+
+				"(`make model-canon-check PLATFORM_TREE=<путь>`)",
+			treeposture.SiblingsDir, missingManifest, census.CanonPath)}}, SweepNotRun
 	}
 
 	switch {
@@ -597,9 +614,15 @@ type unusableManifest struct {
 	Err    error
 }
 
-func findManifests(treeRoot *os.Root, root string) (map[string]string, []unusableManifest, error) {
+func findManifests(treeRoot *os.Root, root string) (map[string]string, []unusableManifest, string, error) {
 	out := map[string]string{}
 	var unparsable []unusableManifest
+	// siblingsHome — ДОМ МАНИФЕСТОВ СОСЕДНИХ МОДУЛЕЙ, найденный ТЕМ ЖЕ обходом.
+	//
+	// Спрашивается здесь, а не вторым читателем дерева: две реализации одного
+	// вопроса разошлись бы молча — например, на выборке платформы, лежащей под
+	// корнем клона, — и разошлись бы там, где обе печатают «совпало».
+	siblingsHome := ""
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -611,6 +634,10 @@ func findManifests(treeRoot *os.Root, root string) (map[string]string, []unusabl
 				return filepath.SkipDir
 			case name == "node_modules" || name == "vendor" || name == "dist" || name == "build":
 				return filepath.SkipDir
+			case name == treeposture.SiblingsDir && siblingsHome == "":
+				if rel, rerr := filepath.Rel(root, path); rerr == nil {
+					siblingsHome = filepath.ToSlash(rel)
+				}
 			}
 			return nil
 		}
@@ -655,7 +682,7 @@ func findManifests(treeRoot *os.Root, root string) (map[string]string, []unusabl
 		return nil
 	})
 	sort.Slice(unparsable, func(i, j int) bool { return unparsable[i].Path < unparsable[j].Path })
-	return out, unparsable, err
+	return out, unparsable, siblingsHome, err
 }
 
 // modulesOf — РАЗЛИЧНЫЕ модули строк ресурсов, отсортированно.

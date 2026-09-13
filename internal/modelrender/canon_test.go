@@ -13,6 +13,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzplan"
 	"github.com/PRO-Robotech/kaname/internal/modelrender"
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // canon_test.go — разбор канона на блоки и вывод перечня типов вне модулей
@@ -125,8 +126,25 @@ func TestB06AKnownTypeIsNotReportedAsOutside(t *testing.T) {
 	}
 }
 
-// helperTree — синтетическое дерево с каноном по каноническому относительному пути.
+// helperTree — синтетическое дерево ПЛАТФОРМЕННОЙ ПОСАДКИ: канон по каноническому
+// относительному пути И дом манифестов соседних модулей.
+//
+// Дом заводится ЗДЕСЬ, а не в отдельных пробах, потому что он и есть предпосылка
+// вопроса «манифест модуля набора отсутствует»: в дереве, которое соседей не
+// несёт, их отсутствие есть свойство поставки, а не находка (задача
+// PRO-Robotech/kaname#56). Проба, чей предмет — самостоятельная поставка,
+// заводит дерево БЕЗ дома (`noSiblingsHomeTree`), и этим одним фактом пара и
+// различается.
 func helperTree(t *testing.T, canon string) string {
+	t.Helper()
+	root := noSiblingsHomeTree(t, canon)
+	withSiblingsHome(t, root)
+	return root
+}
+
+// noSiblingsHomeTree — то же дерево БЕЗ дома манифестов соседей: так выглядит
+// самостоятельный клон службы.
+func noSiblingsHomeTree(t *testing.T, canon string) string {
 	t.Helper()
 	root := t.TempDir()
 	dir := filepath.Join(root, "proto", "kaname", "cloud", "iam", "v1")
@@ -137,4 +155,17 @@ func helperTree(t *testing.T, canon string) string {
 		t.Fatalf("запись канона: %v", err)
 	}
 	return root
+}
+
+// withSiblingsHome — заводит в дереве дом манифестов соседних модулей.
+//
+// Имя каталога берётся у ЕДИНСТВЕННОГО объявления (`treeposture.SiblingsDir`), а
+// не пишется здесь: голый литерал был бы второй копией соглашения, и разошёлся
+// бы он молча — фикстура перестала бы заводить то, что ищет обход, не дав ни
+// одной находки.
+func withSiblingsHome(t *testing.T, root string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, treeposture.SiblingsDir, "vpc"), 0o750); err != nil {
+		t.Fatalf("дом манифестов соседей: %v", err)
+	}
 }

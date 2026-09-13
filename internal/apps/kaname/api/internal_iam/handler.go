@@ -172,7 +172,7 @@ func (h *Handler) WithResourceRegistrar(registrar resourceRegistrar, gate relati
 // validateProxyTuple applies the shared proxy-write rule and maps its verdict to the
 // transport. This is the ONE place the refusal becomes a gRPC status, so the code and
 // the text cannot drift between the three RPCs that share the rule; the rule itself is
-// transport-free by design (pkg/authz/proxytuple.ErrRefused) so a consumer's domain
+// transport-free by design (corelib/authz/proxytuple.ErrRefused) so a consumer's domain
 // layer can import it without taking a dependency on gRPC.
 //
 // The refusal carries no reason: which clause refused is deliberately not observable
