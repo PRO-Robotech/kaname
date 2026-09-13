@@ -79,8 +79,11 @@ func (ClusterGrantSubjectType) EnumDescriptor() ([]byte, []int) {
 //
 // Single source of truth for the relation tuple
 // `cluster:cluster_root#system_admin@user:<id>` (or `@service_account:<id>`).
-// Removed via soft revoke (CAEP push); hard delete is reserved for
-// GDPR erasure. DB FK `ON DELETE RESTRICT` preserves audit trail.
+// Removed via soft revoke — a CAS on the grant row that commits the relation
+// withdrawal and the `audit_outbox` row in the same transaction. Hard delete is
+// reserved for erasure on request. DB FK `ON DELETE RESTRICT` preserves the
+// audit trail. (A CAEP push was named here as the carrier of the revoke; that
+// pipeline was dropped by migration and has no code left.)
 //
 // Resource id prefix: `cag_` (underscore form, `domain.NewKac127ID`).
 type ClusterAdminGrant struct {

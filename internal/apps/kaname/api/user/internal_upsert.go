@@ -749,13 +749,18 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 				if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
 					EventType:       auditEventUserCreated,
 					TenantAccountID: string(accID),
+					// Ни почты, ни отображаемого имени: приёмник журнала кладёт
+					// ВСЕ поля нагрузки как есть — шага сокрытия нет ни одного,
+					// — поэтому личное поле уезжает в поток службы, а срок
+					// хранения потока становится сроком хранения личных данных
+					// (`kacho#2483`). Субъект назван `resource_id`: он
+					// неизменяем и остаётся правдой через год, тогда как оба
+					// снятых поля меняются свободно.
 					Payload: map[string]any{
 						"actor":         actor,
 						"resource_type": "user",
 						"resource_id":   string(user.ID),
 						"account_id":    string(accID),
-						"email":         string(user.Email),
-						"display_name":  string(user.DisplayName),
 					},
 				}); aerr != nil {
 					return domain.User{}, aerr

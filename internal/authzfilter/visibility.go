@@ -93,13 +93,21 @@ import (
 // hidden in a function body is one no gate can see, which is how the previous sweep
 // narrowed four services and left this one.
 //
-// `iam_role` is the single iam type whose catalog entry for Get declares NO relation
-// (`<exempt>`): a custom role's single-object read is enforced IN-SERVICE by the very
-// function that filters the page (role.resolveVisibleRoleIDs, shared by ListRoles and
-// GetRole). Page and read are therefore the same question by construction and cannot
-// diverge — there is nothing here to narrow, and the object-only selector grant
-// (`v_list` without a tier) is that surface's declared contract, which its Get honours
-// identically. Locked by TestVisibleSet_RoleKeepsTheUnionItsOwnGetEnforces.
+// `iam_role` is the single iam type whose catalog entry for Get declares NO relation:
+// it stands on the SCOPE-FILTERED lane (permission `iam.roles.get`), where the edge
+// asks nothing per object and a custom role's single-object read is enforced IN-SERVICE
+// by the very function that filters the page (role.resolveVisibleRoleIDs, shared by
+// ListRoles and GetRole). Page and read are therefore the same question by construction
+// and cannot diverge — there is nothing here to narrow, and the object-only selector
+// grant (`v_list` without a tier) is that surface's declared contract, which its Get
+// honours identically. Locked by TestVisibleSet_RoleKeepsTheUnionItsOwnGetEnforces.
+//
+// THE LANE IS NOT THE EXEMPT ONE, and the distinction is load-bearing rather than
+// pedantic: an exempt entry admits a call with NO PRINCIPAL AT ALL, and a read narrowed
+// BY THE CALLER has nobody to narrow by without one. This comment named that lane for
+// a week and a half after the contract had chosen the other (kacho#1922); the contract
+// spells the reasoning out itself, in the headers of `rpc Get` and `rpc List`. Held now
+// by the role package's lane gate, whose file set names this file.
 var pageRelations = map[string][]string{
 	"": {"v_get"}, // default: the relation the catalog gates `<Service>/Get` on
 

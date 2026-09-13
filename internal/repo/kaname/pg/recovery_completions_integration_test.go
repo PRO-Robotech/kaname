@@ -154,6 +154,27 @@ func TestOnRecoveryCompleted_S01_Blocked_KeepBlocked_Revoke_Audit_Idempotent(t *
 		 WHERE event_payload->>'recovery_jti' = $1`, "rec_flow_001").Scan(&tenant))
 	assert.Equal(t, string(accID), tenant)
 
+	// След восстановления не несёт личных данных (`kacho#2483`).
+	//
+	// Утверждается ЧИТАЕМЫЙ СЛЕД — строка `audit_outbox`, та самая, что уезжает
+	// в поток службы, — а не исходник: приёмник кладёт все поля нагрузки как
+	// есть, шага сокрытия нет ни одного, поэтому о содержимом потока может
+	// сказать только сам поток.
+	//
+	// Положительный контроль стоит ПЕРВЫМ и обязателен: без него отрицание
+	// зеленело бы на нагрузке, которой нет вовсе.
+	var payload map[string]any
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT event_payload FROM kaname.audit_outbox
+		 WHERE event_payload->>'recovery_jti' = $1`, "rec_flow_001").Scan(&payload))
+	assert.Equal(t, string(uid), payload["user_id"],
+		"субъект в следе НАЗВАН — неизменяемым идентификатором")
+	assert.Equal(t, "rec_flow_001", payload["recovery_jti"], "событие корреллируемо")
+	for _, k := range []string{"email", "display_name", "displayName", "external_id"} {
+		assert.NotContains(t, payload, k,
+			"личные данные в поток аудита не уезжают: %s", k)
+	}
+
 	// ledger row exists
 	var ledgerN int
 	require.NoError(t, pool.QueryRow(ctx,

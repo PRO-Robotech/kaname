@@ -213,9 +213,14 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// происходит, а повторить обязан он сам, целиком, заводя новую операцию.
 		// Наблюдалось там же: «операция снятия завершалась `done:true` с ABORTED».
 		// Синхронный путь этим не задет — там текст верен. Выбор исхода продуктовый
-		// (он меняет наблюдаемый `Operation.result.error`) и требует приёмки,
-		// поэтому текст здесь НЕ правится мимо неё.
-		return iamerr.Wrapf(iamerr.ErrAborted, "conflicting concurrent change, retry the request")
+		// (он меняет наблюдаемый `Operation.result.error`) и требует приёмки.
+		//
+		// РАЗВЕДЕНО приёмкой #2439: этот текст остался СИНХРОННОЙ полосой и не
+		// меняется — здесь вызывающий держит соединение, и совет верен. На
+		// терминальном исходе операции его подменяет надстройка над репозиторием
+		// операций. Литерала тут больше НЕТ: оба текста объявлены в одном месте,
+		// потому что две копии разошлись бы молча.
+		return iamerr.Wrapf(iamerr.ErrAborted, "%s", iamerr.SerializationConflictSyncText)
 	}
 	// connection family 08xxx
 	if strings.HasPrefix(pgErr.Code, "08") {
