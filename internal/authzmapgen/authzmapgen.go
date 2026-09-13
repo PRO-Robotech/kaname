@@ -83,11 +83,23 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
-// GeneratedRelPath — координата порождённого файла от корня репозитория.
+// GeneratedRelPath — координата порождённого файла ОТ КОРНЯ МОДУЛЯ.
 //
 // Объявлена ЗДЕСЬ и один раз: её знают команда записи и гейт свежести, и второе
 // объявление развело бы их молча — гейт сверял бы файл, которого никто не пишет.
-const GeneratedRelPath = "services/iam/internal/authzmap/tables_gen.go"
+//
+// ОТСЧЁТ ОТ МОДУЛЯ, А НЕ ОТ КОРНЯ ПЛАТФОРМЫ (#61). Прежняя редакция называла
+// `services/iam/internal/authzmap/tables_gen.go` — координату монорепо, которая
+// вместе со службой не переехала: в этом дереве каталога `services/` нет вовсе,
+// и прогон команды отвечал `no such file or directory` с кодом 2. Порождённый
+// файл живёт в ЭТОМ модуле, значит и координата его — модульная.
+//
+// ОТСЮДА ЖЕ РАЗВЕДЕНЫ ДВА КОРНЯ, которые монорепо позволял считать одним:
+// манифесты обходятся от корня ПЛАТФОРМЫ (`services/*/manifest.yaml`), файл
+// пишется под корнем МОДУЛЯ. Пока служба жила внутри платформы, второй был
+// префиксом первого, и один довод обслуживал оба; после разреза это разные
+// деревья, и функция, берущая один корень, молча означала бы, что они совпали.
+const GeneratedRelPath = "internal/authzmap/tables_gen.go"
 
 // TypeEntry — одна строка обеих таблиц сразу.
 //
@@ -296,23 +308,23 @@ func verbRelationsOf(r manifest.Resource) (rels []string, internalExcluded int) 
 //
 // Отдаёт перепись ВСЕГДА, включая исход отказа: без неё «файл отстал» не
 // отличается от «манифестов не нашлось», а чинятся эти два состояния по-разному.
-func CheckFresh(root string) (Census, error) {
-	tables, err := Collect(root)
+func CheckFresh(manifestsRoot, moduleRoot string) (Census, error) {
+	tables, err := Collect(manifestsRoot)
 	if err != nil {
 		return tables.Census, err
 	}
-	return compareRendered(root, tables)
+	return compareRendered(moduleRoot, tables)
 }
 
 // compareRendered — сверка ПОРОЖДЁННОГО файла с тем, что даёт производитель:
 // общее у обеих полос, потому что предмет сверки от источника перечня не
 // зависит.
-func compareRendered(root string, tables Tables) (Census, error) {
+func compareRendered(moduleRoot string, tables Tables) (Census, error) {
 	want, err := Render(tables)
 	if err != nil {
 		return tables.Census, err
 	}
-	path := filepath.Join(root, GeneratedRelPath)
+	path := filepath.Join(moduleRoot, GeneratedRelPath)
 	got, err := os.ReadFile(path) // #nosec G304 -- корень даёт вызывающий, хвост — константа пакета.
 	if err != nil {
 		return tables.Census, fmt.Errorf(
@@ -322,7 +334,7 @@ func compareRendered(root string, tables Tables) (Census, error) {
 	if !bytes.Equal(got, want) {
 		return tables.Census, fmt.Errorf(
 			"%s отстал от производителя: файл писал не он (в дереве байт %d, порождается %d). "+
-				"Перегенерируйте: go generate ./services/iam/internal/authzmap/... — "+
+				"Перегенерируйте: go generate ./internal/authzmap/... — "+
 				"правка руками бессмысленна, внесённое вернётся первой же перегенерацией",
 			GeneratedRelPath, len(got), len(want))
 	}
