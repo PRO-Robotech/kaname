@@ -21,6 +21,26 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   Сценариев было **33**, стало **33**; производитель назван у **всех 33** (§12.3).
   Кодирование разрешено (ban #1) — но порядок §10 остаётся: реализация после посадки
   `#1778` (п. 5) и по перечню п. 9
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-14, `kaname#71`): путевые координаты приведены
+  к дереву.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  пути, названные ПРЕДИКАТОМ (`git grep … -- <путь>`), остались монорепными. Предикат,
+  чей путь в дереве не существует, даёт пустоту **по построению**: «ноль находок»
+  становится неотличимо от «ноль прочитанного», и читатель делает вывод О ДЕРЕВЕ по
+  замеру, который ничего не измерял. Координат приведено: **6**. Исходов три, и все
+  три применены по корпусу: путь службы потерял приставку `services/iam/` — дерево
+  службы теперь корень, и в монорепо этого пути **тоже больше нет** (`git ls-tree -r
+  origin/main --name-only | grep -c '^services/iam/'` → 0), поэтому «назвать дом» было
+  бы координатой, мёртвой в ОБОИХ деревьях; путь, чей держатель остался в монорепо,
+  назвал ДОМ — `PRO-Robotech/kacho:` (форма взята у имён проб, `kaname#11`); путь
+  фундамента переписан на ПРОИЗВОДИТЕЛЯ — каталог берётся пином из `go.mod`
+  (`go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib`), а не выписывается.
+  **Следствие для читателя, и оно несущее:** предикат снова ИСПОЛНЯЕТСЯ, но ЧИСЛО,
+  стоящее рядом с ним, снималось на монорепо до выноса и здесь **НЕ ПЕРЕМЕРЯЛОСЬ** —
+  расхождение прогона с этим числом есть вопрос к ЧИСЛУ, а не к дереву, и закрывается
+  своим кругом, а не этой правкой. Дельта правки — только координата: ни один сценарий,
+  вердикт, производитель, признак готовности и ни одно число не тронуты. Держит форму
+  гейт `TestAcceptancePathCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
   ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
   гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
@@ -2847,7 +2867,7 @@ vpc (не уникальное имя — вхождение: одно и то �
 > входящую. Объявление стоит внутри выноски, и прежний образец гейта датировки
 > такие строки не судил вовсе — находка пряталась в счётчике прозы):
 > ```sh
-> git grep -n 'ErrSystemRoleNotAuthorable' -- 'services/iam/**/*.go' ':!*_test.go'
+> git grep -n 'ErrSystemRoleNotAuthorable' -- '**/*.go' ':!*_test.go'
 > #   → 1 строка, и та НАДГРОБИЕ в комментарии (roles.go:24); отказа нет
 > grep -n 'ScopeTypeClusterDotted' services/iam/internal/manifest/roles.go
 > #   → 551 (перечень принимаемых ярусов) и 645 (чтение якоря singleton'а)
@@ -4226,11 +4246,11 @@ MOD-RL-21 (полнота относительно живого); заведен
 
 | гейт | предикат существования | что обязан сделать |
 |---|---|---|
-| `PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime` | `git grep -c 'func TestNoServiceDeclaresItsPermissionsASecondTime(' -- internal/repohygiene` → **1** (`catalogparity_test.go:244`) | **остаться зелёным**: манифест не собирает карту прав литералом. Покраснение означало бы, что экспортёр завёл второе объявление права |
-| `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` | `git grep -c 'func TestNewMigrationCitesAnApprovedAcceptance(' -- internal/repohygiene` → **1** (`acceptanceledger_test.go:116`) | **увидеть новую миграцию** и потребовать цитаты этой приёмки плюс записи в ведомости |
-| `TestIAMRV112_RoleVerbProjectionHasASoleWriter` | `git grep -c 'func TestIAMRV112_RoleVerbProjectionHasASoleWriter(' -- internal/repohygiene` → **1** | **остаться зелёным**: миграция роли не пишет проекцию глаголов |
-| `TestRoleVerbReseedHasOneReferenceInTheTreeAndItIsTheBootRoot` | `git grep -c 'func TestRoleVerbReseedHasOneReferenceInTheTreeAndItIsTheBootRoot(' -- internal/repohygiene` → **1** | то же по числу вызывающих |
-| `PRO-Robotech/kacho:TestCatalogMatchesTheAnnotationsItWasGeneratedFrom` | `git grep -c 'func TestCatalogMatchesTheAnnotationsItWasGeneratedFrom(' -- internal/repohygiene` → **1** | **остаться зелёным**: раздел `resources` порождается из аннотаций (исход B эпика), экспортёр ролей его не переписывает |
+| `PRO-Robotech/kacho:TestNoServiceDeclaresItsPermissionsASecondTime` | `git grep -c 'func TestNoServiceDeclaresItsPermissionsASecondTime(' -- PRO-Robotech/kacho:internal/repohygiene` → **1** (`catalogparity_test.go:244`) | **остаться зелёным**: манифест не собирает карту прав литералом. Покраснение означало бы, что экспортёр завёл второе объявление права |
+| `PRO-Robotech/kacho:TestNewMigrationCitesAnApprovedAcceptance` | `git grep -c 'func TestNewMigrationCitesAnApprovedAcceptance(' -- PRO-Robotech/kacho:internal/repohygiene` → **1** (`acceptanceledger_test.go:116`) | **увидеть новую миграцию** и потребовать цитаты этой приёмки плюс записи в ведомости |
+| `TestIAMRV112_RoleVerbProjectionHasASoleWriter` | `git grep -c 'func TestIAMRV112_RoleVerbProjectionHasASoleWriter(' -- internal/check` → **1** | **остаться зелёным**: миграция роли не пишет проекцию глаголов |
+| `TestRoleVerbReseedHasOneReferenceInTheTreeAndItIsTheBootRoot` | `git grep -c 'func TestRoleVerbReseedHasOneReferenceInTheTreeAndItIsTheBootRoot(' -- internal/check` → **1** | то же по числу вызывающих |
+| `PRO-Robotech/kacho:TestCatalogMatchesTheAnnotationsItWasGeneratedFrom` | `git grep -c 'func TestCatalogMatchesTheAnnotationsItWasGeneratedFrom(' -- PRO-Robotech/kacho:internal/repohygiene` → **1** | **остаться зелёным**: раздел `resources` порождается из аннотаций (исход B эпика), экспортёр ролей его не переписывает |
 | `check-04-product-acceptance-verdict` (воркспейс) | `KACHO_MONOREPO=<копия> python3 scripts/docs-gate/check-04-product-acceptance-verdict.py` → `приёмок осмотрено 7 … вердикты — APPROVED 7`, код 0 | **увидеть этот документ восьмым** и прочитать его вердикт. Число **7** — состояние ДО посадки: гейт читает `origin/main` (`ls-tree -r origin/main`, `check-04:88`), а не рабочую копию, поэтому незакоммиченный документ ему невидим **by construction**. Распознавание вердикта проверено отдельно и не ждёт посадки: `_lib.verdict` на этом файле даёт **`('CHANGES REQUESTED', …)`** (перемерено кругом 2; круг 1 записал здесь `('DRAFT', …)` — верно для своей редакции шапки и неверно для этой) |
 
 **Гейт, который эта работа ПОТРЕБУЕТ** (добавлен кругом 2 по Р2 — рецензент верно

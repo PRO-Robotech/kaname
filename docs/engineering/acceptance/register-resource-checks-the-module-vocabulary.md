@@ -16,6 +16,26 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   членство типа в каталоге выражено **условием приёма в операторе**, а не
   постоянным внешним ключом (§2.1) — довод измерен и назван, цена выбора вынесена
   задачей `#1886`. Замечания В1–В5 круга 3 приняты все пять
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-14, `kaname#71`): путевые координаты приведены
+  к дереву.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  пути, названные ПРЕДИКАТОМ (`git grep … -- <путь>`), остались монорепными. Предикат,
+  чей путь в дереве не существует, даёт пустоту **по построению**: «ноль находок»
+  становится неотличимо от «ноль прочитанного», и читатель делает вывод О ДЕРЕВЕ по
+  замеру, который ничего не измерял. Координат приведено: **37**. Исходов три, и все
+  три применены по корпусу: путь службы потерял приставку `services/iam/` — дерево
+  службы теперь корень, и в монорепо этого пути **тоже больше нет** (`git ls-tree -r
+  origin/main --name-only | grep -c '^services/iam/'` → 0), поэтому «назвать дом» было
+  бы координатой, мёртвой в ОБОИХ деревьях; путь, чей держатель остался в монорепо,
+  назвал ДОМ — `PRO-Robotech/kacho:` (форма взята у имён проб, `kaname#11`); путь
+  фундамента переписан на ПРОИЗВОДИТЕЛЯ — каталог берётся пином из `go.mod`
+  (`go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib`), а не выписывается.
+  **Следствие для читателя, и оно несущее:** предикат снова ИСПОЛНЯЕТСЯ, но ЧИСЛО,
+  стоящее рядом с ним, снималось на монорепо до выноса и здесь **НЕ ПЕРЕМЕРЯЛОСЬ** —
+  расхождение прогона с этим числом есть вопрос к ЧИСЛУ, а не к дереву, и закрывается
+  своим кругом, а не этой правкой. Дельта правки — только координата: ни один сценарий,
+  вердикт, производитель, признак готовности и ни одно число не тронуты. Держит форму
+  гейт `TestAcceptancePathCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
   ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
   гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
@@ -169,25 +189,25 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | Производитель | Что производит | Координата | Предикат |
 |---|---|---|---|
 | `proxytuple.ValidateTuple` | вердикт «принять/отвергнуть» по тройке (субъект, отношение, тип объекта) | `PRO-Robotech/corelib:authz/proxytuple/policy.go:222` | `grep -rn 'func ValidateTuple' "$(go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib)/authz/proxytuple"` |
-| `validateProxyTuple` | перевод вердикта в транспорт — `PermissionDenied "permission denied"` | `services/iam/internal/apps/kaname/api/internal_iam/handler.go:180` | `git grep -n 'func validateProxyTuple' -- services/iam` |
-| обе RPC зовут его **до** use-case | сужение стоит на пути запроса, а не в глубине | `handler.go:192` и `handler.go:217` | `git grep -n 'validateProxyTuple(domain' -- services/iam` |
-| `validateTuple` (use-case) | грамматика `<тип>:<id>` → `InvalidArgument` с именем поля | `services/iam/internal/apps/kaname/api/internal_iam/register_resource.go:629` | `git grep -n 'func validateTuple' -- services/iam` |
-| `RelationWriteGate.Authorize` | личность модуля из проверенного SAN + `fga_writer` на кластере; возвращает **домен SAN** | `services/iam/internal/authzguard/fgaproxy.go:97` | `git grep -n 'func (g \*RelationWriteGate) Authorize' -- services/iam` |
-| `ServiceAccountIDForService` | детерминированный `sva`+md5 id модульной учётки | `services/iam/internal/authzguard/fgaproxy.go:176` | `git grep -n 'func ServiceAccountIDForService' -- services/iam` |
-| `authzmap.DottedType` / `FGAObjectType` | **единственный** переходник между словарём модели и словарём каталога | `services/iam/internal/authzmap/type_dictionaries.go` | `git grep -n 'Второго переходника' -- services/iam` |
-| `tupleIntent.objectType()` | приведение типа кортежа к ключу зеркала тем же переходником | `register_resource.go:203` | `git grep -n 'func (t tupleIntent) objectType' -- services/iam` |
-| `catalog_module` · `catalog_resource` · `catalog_verb` | словарь **строками**, с ключами `(module, resource, live)` и `(dotted, live)` | `20260901113757_rule_segments_have_a_referent.sql:121,153,242` | `git grep -n 'CREATE TABLE kaname.catalog_' -- services/iam/internal/migrations` |
-| гейт паритета литерала и строк | расхождение посева каталога с `authzmap` | `services/iam/internal/check/catalog_seed_parity.go` | `git grep -n 'catalogSeedCensus' -- services/iam` |
-| гейт сверки намерения с приёмной стороной | тройка **каждого** эмитента прогоняется через `ValidateTuple` на сборке, в обе стороны | `internal/repohygiene/proxytupleintent_test.go` | `git grep -n 'Две половины, и вторая обязательна' -- internal/repohygiene` |
-| замок текста отказа **полосы А** | `PermissionDenied` + **дословно** `"permission denied"`, без причины | `services/iam/internal/apps/kaname/api/internal_iam/proxy_tuple_refusal_transport_test.go:26` | `git grep -n 'func TestProxyTupleRefusalMapsToPermissionDenied' -- services/iam` |
+| `validateProxyTuple` | перевод вердикта в транспорт — `PermissionDenied "permission denied"` | `services/iam/internal/apps/kaname/api/internal_iam/handler.go:180` | `git grep -n 'func validateProxyTuple' -- .` |
+| обе RPC зовут его **до** use-case | сужение стоит на пути запроса, а не в глубине | `handler.go:192` и `handler.go:217` | `git grep -n 'validateProxyTuple(domain' -- .` |
+| `validateTuple` (use-case) | грамматика `<тип>:<id>` → `InvalidArgument` с именем поля | `services/iam/internal/apps/kaname/api/internal_iam/register_resource.go:629` | `git grep -n 'func validateTuple' -- .` |
+| `RelationWriteGate.Authorize` | личность модуля из проверенного SAN + `fga_writer` на кластере; возвращает **домен SAN** | `services/iam/internal/authzguard/fgaproxy.go:97` | `git grep -n 'func (g \*RelationWriteGate) Authorize' -- .` |
+| `ServiceAccountIDForService` | детерминированный `sva`+md5 id модульной учётки | `services/iam/internal/authzguard/fgaproxy.go:176` | `git grep -n 'func ServiceAccountIDForService' -- .` |
+| `authzmap.DottedType` / `FGAObjectType` | **единственный** переходник между словарём модели и словарём каталога | `services/iam/internal/authzmap/type_dictionaries.go` | `git grep -n 'Второго переходника' -- .` |
+| `tupleIntent.objectType()` | приведение типа кортежа к ключу зеркала тем же переходником | `register_resource.go:203` | `git grep -n 'func (t tupleIntent) objectType' -- .` |
+| `catalog_module` · `catalog_resource` · `catalog_verb` | словарь **строками**, с ключами `(module, resource, live)` и `(dotted, live)` | `20260901113757_rule_segments_have_a_referent.sql:121,153,242` | `git grep -n 'CREATE TABLE kaname.catalog_' -- internal/migrations` |
+| гейт паритета литерала и строк | расхождение посева каталога с `authzmap` | `services/iam/internal/check/catalog_seed_parity.go` | `git grep -n 'catalogSeedCensus' -- .` |
+| гейт сверки намерения с приёмной стороной | тройка **каждого** эмитента прогоняется через `ValidateTuple` на сборке, в обе стороны | `internal/repohygiene/proxytupleintent_test.go` | `git grep -n 'Две половины, и вторая обязательна' -- PRO-Robotech/kacho:internal/repohygiene` |
+| замок текста отказа **полосы А** | `PermissionDenied` + **дословно** `"permission denied"`, без причины | `services/iam/internal/apps/kaname/api/internal_iam/proxy_tuple_refusal_transport_test.go:26` | `git grep -n 'func TestProxyTupleRefusalMapsToPermissionDenied' -- .` |
 | модульные учётки строками | `sva` + `substr(md5('kacho-<svc>'),1,17)` в `service_accounts` | `0009_sec_c_module_sa_least_priv.sql:63` | `grep -n "INSERT INTO kaname.service_accounts" services/iam/internal/migrations/0009_sec_c_module_sa_least_priv.sql` |
-| якорь права записи | `fga_writer` спрашивается на **кластере**, а не на прежнем внеиерархическом объекте | `20260823002000_relation_write_moves_onto_the_cluster.sql` | `git grep -n 'relationWriteObject = clusterRootObject' -- services/iam ':!*.md'` |
+| якорь права записи | `fga_writer` спрашивается на **кластере**, а не на прежнем внеиерархическом объекте | `20260823002000_relation_write_moves_onto_the_cluster.sql` | `git grep -n 'relationWriteObject = clusterRootObject' -- . ':!*.md'` |
 | `<exempt>` в каталоге прав | обе RPC освобождены от пообъектного Check, причина названа `INTERNAL_LISTENER` | `proto/kaname/cloud/iam/v1/internal_iam_service.proto:161` | `grep -n 'exempt_reason' proto/kaname/cloud/iam/v1/internal_iam_service.proto` |
-| **`shared.MapRepoErr`** *(круг 2)* | **единственный** перевод sentinel → gRPC для обеих RPC; SQLSTATE **не читает**, хвост даёт `Internal "internal error"` | `services/iam/internal/apps/kaname/shared/errors.go:47`, хвост `:108` | `git grep -n 'func MapRepoErr' -- services/iam` |
-| **`wrapPgErr`** *(круг 2)* | перевод SQLSTATE → sentinel: `23503` → `ErrFailedPrecondition`, текст по умолчанию `"referenced resource not found or still in use"` | `services/iam/internal/repo/kaname/pg/pgmaperr.go:45`, текст `:383` | `git grep -n 'func wrapPgErr' -- services/iam` |
-| **`drainer.Classify`** *(круг 2)* | **экспортированный** классификатор исхода применения у модуля: постоянный ⟺ `InvalidArgument` либо `PermissionDenied` | `pkg/outbox/drainer/classify.go:82`, предикат `:145` | `git grep -n 'func Classify' -- pkg/outbox/drainer` |
-| **`pkg/errors.Reason`** *(круг 2)* | закрытый **компилятором** словарь токенов полос резолва идентификатора; значений пять | `pkg/errors/reason.go:33`, закрытость `pkg/errors/reason_closed_test.go` | `git grep -n 'func AllReasons' -- pkg/errors` |
-| **`isPureGrant`** *(круг 2)* | публичная выдача — **чистый кортеж**: строки зеркала не пишет вовсе | `register_resource.go:224` | `git grep -n 'func (t tupleIntent) isPureGrant' -- services/iam` |
+| **`shared.MapRepoErr`** *(круг 2)* | **единственный** перевод sentinel → gRPC для обеих RPC; SQLSTATE **не читает**, хвост даёт `Internal "internal error"` | `services/iam/internal/apps/kaname/shared/errors.go:47`, хвост `:108` | `git grep -n 'func MapRepoErr' -- .` |
+| **`wrapPgErr`** *(круг 2)* | перевод SQLSTATE → sentinel: `23503` → `ErrFailedPrecondition`, текст по умолчанию `"referenced resource not found or still in use"` | `services/iam/internal/repo/kaname/pg/pgmaperr.go:45`, текст `:383` | `git grep -n 'func wrapPgErr' -- .` |
+| **`drainer.Classify`** *(круг 2)* | **экспортированный** классификатор исхода применения у модуля: постоянный ⟺ `InvalidArgument` либо `PermissionDenied` | `PRO-Robotech/corelib:outbox/drainer/classify.go:82`, предикат `:145` | `grep -rn 'func Classify' "$(go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib)/outbox/drainer"` |
+| **`pkg/errors.Reason`** *(круг 2)* | закрытый **компилятором** словарь токенов полос резолва идентификатора; значений пять | `PRO-Robotech/corelib:errors/reason.go:33`, закрытость `PRO-Robotech/corelib:errors/reason_closed_test.go` | `grep -rn 'func AllReasons' "$(go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib)/errors"` |
+| **`isPureGrant`** *(круг 2)* | публичная выдача — **чистый кортеж**: строки зеркала не пишет вовсе | `register_resource.go:224` | `git grep -n 'func (t tupleIntent) isPureGrant' -- .` |
 
 ### 0.2. Чего в дереве НЕТ — и что с этим делается
 
@@ -196,7 +216,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | `catalog_module_identity` в любом написании | `git grep -c catalog_module_identity -- . ':!*.md'` → **пусто** | **и не заводится** — вынесена кругом 4 задачей `#1885` (§2.2, §3.6) |
 | колонки, несущей имя типа в словаре **модели**, у `catalog_resource` | DDL `20260901113757:153`—`188`: `module`, `resource`, `dotted`, `retired_at`, `retired_reason`, `superseded_by`, `live` — и всё | **не заводится**: приведение делает единственный переходник (§2.3) |
 | ключа у `resource_mirror.object_type` | `grep -n 'CONSTRAINT' services/iam/internal/migrations/0019_resource_mirror.sql` → PK + три проверки, **ноль** внешних ключей | **и не заводится** — круг 4 выбрал условие приёма в операторе, довод в §2.1 |
-| условия каталога **в операторе записи зеркала** | `git grep -n 'catalog_resource' -- services/iam/internal/repo/kaname/pg/resource_mirror` → пусто | **заводится этой работой** (§2.1) |
+| условия каталога **в операторе записи зеркала** | `git grep -n 'catalog_resource' -- internal/repo/kaname/pg/resource_mirror` → пусто | **заводится этой работой** (§2.1) |
 | записи в журнал на полосе отказа проксируемого кортежа | `grep -n 'h\.logger' services/iam/internal/apps/kaname/api/internal_iam/handler.go` → **одно** попадание, и оно присваивание (строка 146) | **заводится этой работой** (§2.6) |
 | производителя текста «имя типа в отказе» **на полосе А** | замок `proxy_tuple_refusal_transport_test.go:37` требует **дословно** `"permission denied"` | полоса А не трогается; различимость полосы А — в журнал (§2.6) |
 | производителя проверки отношения по `catalog_verb` | `catalog_verb` несёт **109** строк и **ноль** из `project`/`parent`/`owner`/`v_get` | обещание снимается: сверка невыразима (§2.4) |
@@ -1905,7 +1925,7 @@ by construction, а словарь и факт лежат в одной схем
    транспорт — **другой** производитель: `shared.MapRepoErr` (`handler.go:204`,
    `:226`);
 4. что `MapRepoErr` из этого делает — прогнано по дереву: ветки SQLSTATE у него
-   **нет** (`git grep -n '23503' -- services/iam --include='*.go'` → ни одного
+   **нет** (`git grep -n '23503' -- . --include='*.go'` → ни одного
    не-тестового попадания), а эмитент зеркала оборачивает **голым** `fmt.Errorf`
    (`resource_mirror/emitter.go:190`, `:327`). Несентинельная ошибка проваливается
    в хвост `errors.go:108` → **`codes.Internal "internal error"`**.
@@ -2063,7 +2083,7 @@ use-case**, до эмиссии кортежа, а закрытый список
 
 **Предикат, которым Б1 это доказывал, — неверен.** Замечание пишет:
 
-> ветки SQLSTATE у него **нет** (`git grep -n '23503' -- services/iam
+> ветки SQLSTATE у него **нет** (`git grep -n '23503' -- .
 > --include='*.go'` → ни одного не-тестового попадания)
 
 Я прогнал этот предикат **дословно и целиком** — и он опровергается дважды, на
@@ -2087,7 +2107,7 @@ grep` **нет флага `--include`**: это флаг обычного `grep`
 Годная форма и её замер — pathspec вместо флага:
 
 ```sh
-git grep -l '23503' -- 'services/iam/**/*.go' | grep -v _test.go | wc -l   # → 22
+git grep -l '23503' -- '**/*.go' | grep -v _test.go | wc -l   # → 22
 ```
 
 **22 не-тестовых файла Go** в `services/iam` знают `23503`. Существо опровержения
@@ -2108,7 +2128,7 @@ git grep -l '23503' -- 'services/iam/**/*.go' | grep -v _test.go | wc -l   # →
 `wrapPgErr` **неэкспортирована** и живёт в пакете `pg`, а зеркало — в отдельном
 пакете `resource_mirror`, который оборачивает голым `fmt.Errorf`
 (`emitter.go:190`, `:327` — прочитано мной). Экспортированной формы в дереве нет
-(`git grep -rn 'func WrapPgErr\|func MapPgErr' -- 'services/iam/**/*.go' 'pkg/**/*.go'`
+(`git grep -rn 'func WrapPgErr\|func MapPgErr' -- '**/*.go' 'pkg/**/*.go'`
 → пусто — предикат в pathspec-форме, а не с несуществующим флагом).
 
 Расхождение записано, а не сглажено, потому что оно **меняет решение**: раз
@@ -2412,14 +2432,14 @@ iam**. Отказ, называющий действие, которое лом�
 sed -n '22p' services/iam/internal/domain/module_set.go
 # {"iam", "vpc", "compute", "loadbalancer", "registry", "storage"}   ← шесть
 
-git grep -ohE "'kacho-[a-z-]+'" -- services/iam/internal/migrations | sort -u
+git grep -ohE "'kacho-[a-z-]+'" -- internal/migrations | sort -u
 # kacho-api-gateway · kacho-bootstrap-admin · kacho-compute · kacho-iam-bootstrap
 # kacho-nlb · kacho-registry · kacho-root · kacho-storage · kacho-system · kacho-vpc
 
 # модульной учётки с именем службы нет — и предикат судит УЧЁТКУ, а не строку:
-git grep -h "INSERT INTO kaname.service_accounts" -- 'services/iam/internal/migrations/*.sql' \
+git grep -h "INSERT INTO kaname.service_accounts" -- 'internal/migrations/*.sql' \
   | grep -c "'kaname'"                                            # → 0
-git grep -h "INSERT INTO kaname.service_accounts" -- 'services/iam/internal/migrations/*.sql' \
+git grep -h "INSERT INTO kaname.service_accounts" -- 'internal/migrations/*.sql' \
   | grep -c "Module SA"                                           # → 6 (контроль: полоса непуста)
 ```
 
@@ -2988,7 +3008,7 @@ group#member]` (`fga_model.fga:286`) допускает **прямую** выд�
 
 1. **выдачи `fga_writer` живут в трёх миграциях, и все три — на ОТСТАВНОМ якоре.**
    ```sh
-   git grep -l "'fga_writer'" -- services/iam/internal/migrations
+   git grep -l "'fga_writer'" -- internal/migrations
    # 0009_sec_c_module_sa_least_priv.sql · 0044_registry_sa_least_priv.sql
    # 0057_storage_sa_least_priv.sql · 20260823002000_relation_write_moves_onto_the_cluster.sql
    ```
@@ -3003,7 +3023,7 @@ group#member]` (`fga_model.fga:286`) допускает **прямую** выд�
    и «снять одного из группы — одна строка членства»;
 3. **группу трогает ровно одна миграция.**
    ```sh
-   git grep -ln "module.relation_writers" -- services/iam/internal/migrations   # → 1
+   git grep -ln "module.relation_writers" -- internal/migrations   # → 1
    ```
    Значит шестой модуль добавляется **строкой членства**, а новой выдачи
    `fga_writer` не появляется **никогда**: выдача уже сделана — группе.

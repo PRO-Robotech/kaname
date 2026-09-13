@@ -6,6 +6,26 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 # Приёмка: модель процесса собирается на старте из доставленных манифестов
 
 - **Статус:** ✅ **APPROVED** — круг 11 (`acceptance-reviewer`), вердикт вынесен
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-14, `kaname#71`): путевые координаты приведены
+  к дереву.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  пути, названные ПРЕДИКАТОМ (`git grep … -- <путь>`), остались монорепными. Предикат,
+  чей путь в дереве не существует, даёт пустоту **по построению**: «ноль находок»
+  становится неотличимо от «ноль прочитанного», и читатель делает вывод О ДЕРЕВЕ по
+  замеру, который ничего не измерял. Координат приведено: **5**. Исходов три, и все
+  три применены по корпусу: путь службы потерял приставку `services/iam/` — дерево
+  службы теперь корень, и в монорепо этого пути **тоже больше нет** (`git ls-tree -r
+  origin/main --name-only | grep -c '^services/iam/'` → 0), поэтому «назвать дом» было
+  бы координатой, мёртвой в ОБОИХ деревьях; путь, чей держатель остался в монорепо,
+  назвал ДОМ — `PRO-Robotech/kacho:` (форма взята у имён проб, `kaname#11`); путь
+  фундамента переписан на ПРОИЗВОДИТЕЛЯ — каталог берётся пином из `go.mod`
+  (`go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib`), а не выписывается.
+  **Следствие для читателя, и оно несущее:** предикат снова ИСПОЛНЯЕТСЯ, но ЧИСЛО,
+  стоящее рядом с ним, снималось на монорепо до выноса и здесь **НЕ ПЕРЕМЕРЯЛОСЬ** —
+  расхождение прогона с этим числом есть вопрос к ЧИСЛУ, а не к дереву, и закрывается
+  своим кругом, а не этой правкой. Дельта правки — только координата: ни один сценарий,
+  вердикт, производитель, признак готовности и ни одно число не тронуты. Держит форму
+  гейт `TestAcceptancePathCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
   ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
   гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
@@ -439,7 +459,7 @@ $ git grep -n 'func .*KnownModules' -- '*.go' | wc -l
 
 ### 0.12 ОПРОВЕРГНУТО ЧАСТИЧНО: вызовов `Shared()` четыре, попаданий грепа шесть
 
-`git grep -n 'authzmodel\.' -- 'services/**/*.go' ':!*_test.go'` даёт **6** строк;
+`git grep -n 'authzmodel\.' -- 'PRO-Robotech/kacho:services/**/*.go' ':!*_test.go'` даёт **6** строк;
 вызовов `Shared()` среди них **4** (`relverdict/query.go:1090`,
 `authorize/handler.go:306`, `authzmap/expand_acceptance.go:85`,
 `manifest/relationgrant.go:137`), остальные две — **комментарии**. Предикат
@@ -459,7 +479,7 @@ $ git grep -n 'func .*KnownModules' -- '*.go' | wc -l
 (`strings.TrimSpace(rel.Definition) == ""`); проверки перевода строки нет нигде:
 
 ```
-$ git grep -nE 'Definition.*(\\n|Contains|Index|Split)' -- services/iam/internal/manifest services/iam/internal/modelrender | grep -v _test
+$ git grep -nE 'Definition.*(\\n|Contains|Index|Split)' -- internal/manifest internal/modelrender | grep -v _test
 (пусто)
 ```
 
@@ -652,7 +672,7 @@ $ go list -deps ./services/iam/cmd/kaname | grep -c modelrender
 
    **Разбор доставки читает модель НЕ ВСЕГДА, а на ЧАСТИ входов — и это хуже,
    чем „всегда".** Путь из пакета `manifest` в `authzmodel` в прод-коде ровно
-   один (`git grep -c 'authzmodel\.' -- 'services/iam/internal/manifest/*.go'
+   один (`git grep -c 'authzmodel\.' -- 'internal/manifest/*.go'
    ':!*_test.go'` → **1 файл**), и он **условен**: `validateRelationGrant`
    (`relationgrant.go:131`) возвращает `nil` на пустом `GrantedRelation`
    (`:133-134`) **до** вызова `Shared()` на `:137`. Значит модель читается только на
@@ -2423,7 +2443,7 @@ construction).
 (`object_type`)» и «имя типа модели она не хранит **вовсе**». Предикат:
 
 ```sh
-git grep -n 'object_type' -- 'services/iam/internal/migrations/*.sql' | grep 'ADD COLUMN'
+git grep -n 'object_type' -- 'internal/migrations/*.sql' | grep 'ADD COLUMN'
 # → 20260903112400_catalog_resource_carries_the_model_type.sql:74: ADD COLUMN object_type text;
 ```
 
