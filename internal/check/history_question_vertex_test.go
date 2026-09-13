@@ -129,6 +129,12 @@ func vertexLedger() map[string]vertexWaiver {
 		"internal/check/docs_measurement_dating_injection_test.go#cat-file": {Calls: 1,
 			Why: "тот же резолв объявленного корня истории, что и у гейта: предпосылка, а не " +
 				"вхождение"},
+		"internal/check/history_question_vertex_injection_test.go#log": {Calls: 3,
+			Why: "вершина — СИНТЕТИЧЕСКИЙ репозиторий, который фикстура строит сама, и ставит " +
+				"её она переключением ветки: сперва полоса, затем ствол после схлопывания. " +
+				"Вершина здесь и есть предмет замера, а ствола `origin/main` в таком дереве " +
+				"нет вовсе — спрашивать о нём было бы вопросом к тому, чего фикстура не заводит",
+		},
 		"internal/check/probe_home.go#cat-file": {Calls: 1,
 			Why: "судится ЧУЖОЙ дом по НАЗВАННОЙ ревизии, и вершина приходит параметром. " +
 				"Умолчание параметра — ствол чужого дома (`HomeRef` возвращает `origin/main`), " +
@@ -156,11 +162,11 @@ func TestHistoryQuestionsAreAskedOfTheTrunk(t *testing.T) {
 	findings, applied, stale := judgeHistoryVertices(questions, vertexLedger())
 
 	t.Logf("ОБЪЁМ ОСМОТРЕННОГО: файлов прочитано %d · Go разобрано %d · не разобрано %d · "+
-		"строк комментария снято %d · вопросов об истории %d · ствол %d · рабочая вершина %d · "+
-		"вершина не названа %d · по глаголам %s · записей ведомости %d (применено %d, "+
-		"из них отсрочек %d) · находок %d",
-		c.FilesRead, c.GoParsed, len(c.GoUnparsed), c.LinesStripped, c.Questions,
-		c.Trunk, c.Head, c.Unnamed, censusByVerb(c), len(vertexLedger()), applied,
+		"строк комментария снято %d · глагол вне запускателя %d · вопросов об истории %d · "+
+		"ствол %d · рабочая вершина %d · вершина не названа %d · по глаголам %s · "+
+		"записей ведомости %d (применено %d, из них отсрочек %d) · находок %d",
+		c.FilesRead, c.GoParsed, len(c.GoUnparsed), c.LinesStripped, c.VerbOutsideRunner,
+		c.Questions, c.Trunk, c.Head, c.Unnamed, censusByVerb(c), len(vertexLedger()), applied,
 		countDeferrals(vertexLedger()), len(findings))
 
 	// ПРЕДПОСЫЛКИ ГЕЙТА — каждая своим утверждением, а не одной строкой.

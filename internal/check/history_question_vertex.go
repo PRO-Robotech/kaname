@@ -157,6 +157,13 @@ type HistoryCensus struct {
 	// Печатается затем, чтобы «проза о merge-base не сработала» было ЗАМЕРОМ,
 	// а не обещанием.
 	LinesStripped int
+	// VerbOutsideRunner — вызовов, чьи литералы несут глагол, но запускателем
+	// git вызов не является (`require.Contains(t, got, "merge-base")`).
+	//
+	// Величина печатается ОТДЕЛЬНО затем, чтобы сужение до запускателя было
+	// видно числом: ноль здесь означал бы, что сужение ничего не отсекает, а
+	// большое число — что оно отсекает предмет.
+	VerbOutsideRunner int
 	// Questions — вопросов об истории всего; по вершинам — три величины ниже.
 	Questions int
 	Head      int
@@ -178,6 +185,7 @@ type HistoryCensus struct {
 func ScanHistoryQuestions(corpus map[string][]byte, trunkRefs []string) ([]HistoryQuestion, HistoryCensus) {
 	census := HistoryCensus{ByVerb: map[string]int{}}
 	var out []HistoryQuestion
+	outside := 0
 
 	rels := make([]string, 0, len(corpus))
 	for rel := range corpus {
@@ -192,7 +200,9 @@ func ScanHistoryQuestions(corpus map[string][]byte, trunkRefs []string) ([]Histo
 		switch {
 		case strings.HasSuffix(rel, ".go"):
 			var ok bool
-			qs, ok = goHistoryQuestions(rel, src, trunkRefs)
+			var skipped int
+			qs, skipped, ok = goHistoryQuestions(rel, src, trunkRefs)
+			outside += skipped
 			if ok {
 				census.GoParsed++
 			} else {
@@ -217,7 +227,18 @@ func ScanHistoryQuestions(corpus map[string][]byte, trunkRefs []string) ([]Histo
 			out = append(out, q)
 		}
 	}
+	census.VerbOutsideRunner = outside
 	return out, census
+}
+
+// goRunners — вызовы, ЗАПУСКАЮЩИЕ git. Перечень объявлен, а не угадан.
+//
+// `exec.Command`/`exec.CommandContext` считаются запускателем git ТОЛЬКО когда
+// среди их литералов стоит `git`: тем же вызовом запускают tar, openssl и go.
+var goRunners = map[string]bool{
+	"exec.Command":        true,
+	"exec.CommandContext": true,
+	"gitenv.Command":      true,
 }
 
 // goHistoryQuestions — вопросы об истории в одном файле Go.
@@ -225,11 +246,22 @@ func ScanHistoryQuestions(corpus map[string][]byte, trunkRefs []string) ([]Histo
 // Единица — узел-вызов: аргументы берутся у него, поэтому соседний вызов в
 // вопрос не затекает. Второй возвращаемый — разобрался ли файл: неразобранный
 // обязан быть НАЗВАН, а не пропущен молча.
-func goHistoryQuestions(rel string, src []byte, trunkRefs []string) ([]HistoryQuestion, bool) {
+//
+// # ГЛАГОЛ БЕЗ ЗАПУСКАТЕЛЯ — НЕ ВОПРОС, И ЭТО ИЗМЕРЕНО
+//
+// Прежняя редакция считала вопросом ВСЯКИЙ вызов, среди литералов которого
+// нашёлся глагол. Гейт немедленно нашёл на себе самом ложную находку:
+// `require.Contains(t, findings[0], "merge-base")` — утверждение пробы, а не
+// запуск процесса. Слово `merge-base` там есть, git там нет.
+//
+// Предмет — ЗАПУСК, поэтому спрашивается вызываемое. Инструмент, у которого
+// находки ложные, перестают читать, а перестав читать — возвращаются к тому, что
+// было до него.
+func goHistoryQuestions(rel string, src []byte, trunkRefs []string) ([]HistoryQuestion, int, bool) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, rel, src, 0)
 	if err != nil {
-		return nil, false
+		return nil, 0, false
 	}
 
 	// Постоянные файла разрешаются ОДНИМ уровнем: `const trunkRefName =
@@ -238,8 +270,10 @@ func goHistoryQuestions(rel string, src []byte, trunkRefs []string) ([]HistoryQu
 	// произвольного выражения есть интерпретатор, а не разбор, и его молчание
 	// было бы неотличимо от ответа.
 	consts := fileStringConsts(file)
+	forwarders := goForwarders(file)
 
 	var out []HistoryQuestion
+	outside := 0
 	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -249,14 +283,116 @@ func goHistoryQuestions(rel string, src []byte, trunkRefs []string) ([]HistoryQu
 		for _, a := range call.Args {
 			lits = append(lits, stringParts(a, consts)...)
 		}
-		if q, ok := questionOf(lits, trunkRefs); ok {
-			q.File = rel
-			q.Line = fset.Position(call.Lparen).Line
-			out = append(out, q)
+		q, asks := questionOf(lits, trunkRefs)
+		if !asks {
+			return true
 		}
+		if !runsGit(call, lits, forwarders) {
+			outside++
+			return true
+		}
+		q.File = rel
+		q.Line = fset.Position(call.Lparen).Line
+		out = append(out, q)
 		return true
 	})
-	return out, true
+	return out, outside, true
+}
+
+// runsGit — запускает ли этот вызов git.
+func runsGit(call *ast.CallExpr, lits []string, forwarders map[string]bool) bool {
+	name := calleeName(call.Fun)
+	if forwarders[name] {
+		return true
+	}
+	if !goRunners[name] {
+		return false
+	}
+	if name == "gitenv.Command" {
+		return true
+	}
+	for _, l := range lits {
+		if l == "git" {
+			return true
+		}
+	}
+	return false
+}
+
+// goForwarders — ПОМОЩНИКИ ФАЙЛА, переадресующие свои аргументы запускателю.
+//
+// Форма обычна в этом дереве и без неё невидима: `git := func(args ...string)
+// { … gitenv.Command(root, args...) … }`, а дальше `git("merge-base", …)`.
+// Разрешается ОДИН уровень плюс переадресация помощника помощнику (замыкание
+// вокруг замыкания), до неподвижной точки — глубже начинается интерпретатор.
+func goForwarders(file *ast.File) map[string]bool {
+	// Тела помощников по имени: кого они зовут.
+	callsOf := map[string][]string{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		var name string
+		var body *ast.BlockStmt
+		switch v := n.(type) {
+		case *ast.FuncDecl:
+			name, body = v.Name.Name, v.Body
+		case *ast.AssignStmt:
+			if len(v.Lhs) != 1 || len(v.Rhs) != 1 {
+				return true
+			}
+			id, ok := v.Lhs[0].(*ast.Ident)
+			if !ok {
+				return true
+			}
+			fl, ok := v.Rhs[0].(*ast.FuncLit)
+			if !ok {
+				return true
+			}
+			name, body = id.Name, fl.Body
+		default:
+			return true
+		}
+		if name == "" || body == nil {
+			return true
+		}
+		ast.Inspect(body, func(m ast.Node) bool {
+			if c, ok := m.(*ast.CallExpr); ok {
+				callsOf[name] = append(callsOf[name], calleeName(c.Fun))
+			}
+			return true
+		})
+		return true
+	})
+
+	out := map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		for name, callees := range callsOf {
+			if out[name] {
+				continue
+			}
+			for _, c := range callees {
+				if goRunners[c] || out[c] {
+					out[name] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	return out
+}
+
+// calleeName — имя вызываемого в записи `пакет.Имя` либо `Имя`.
+func calleeName(fun ast.Expr) string {
+	switch v := fun.(type) {
+	case *ast.Ident:
+		return v.Name
+	case *ast.SelectorExpr:
+		if x, ok := v.X.(*ast.Ident); ok {
+			return x.Name + "." + v.Sel.Name
+		}
+		return v.Sel.Name
+	}
+	return ""
 }
 
 // fileStringConsts — постоянные и переменные УРОВНЯ ФАЙЛА со строковым

@@ -130,6 +130,17 @@ func TestHistoryVertexGateCanFail(t *testing.T) {
 		require.Contains(t, findings[0], "tools/x.sh:2")
 	})
 
+	t.Run("помощник, переадресующий запускателю, читается как вызов", func(t *testing.T) {
+		src := []byte("package p\n\nimport \"github.com/PRO-Robotech/corelib/gitenv\"\n\n" +
+			"func f(root string) {\n" +
+			"\tgit := func(args ...string) { _, _ = gitenv.Command(root, args...).Output() }\n" +
+			"\tgit(\"merge-base\", \"--is-ancestor\", \"abc\", \"HEAD\")\n}\n")
+		qs, c := scanOne(t, "internal/x/c_test.go", src)
+		require.Equalf(t, 1, c.Head, "помощник-замыкание не опознан запускателем: %v", qs)
+		findings, _, _ := judgeHistoryVertices(qs, map[string]vertexWaiver{})
+		require.Len(t, findings, 1)
+	})
+
 	t.Run("форма python — находка", func(t *testing.T) {
 		src := []byte("import subprocess\nout = subprocess.run([\"git\", \"-C\", root, \"rev-list\", \"--count\", \"HEAD\"])\n")
 		qs, c := scanOne(t, "tools/x.py", src)
@@ -193,6 +204,28 @@ func TestHistoryVertexGateCanStaySilent(t *testing.T) {
 			"if \"git\" not in low or \"log\" not in low:\n    pass\n")
 		qs, c := scanOne(t, "tools/x.py", src)
 		require.Zerof(t, c.Questions, "проза python прочитана как вызов: %v", qs)
+	})
+
+	// ГЛАГОЛ БЕЗ ЗАПУСКАТЕЛЯ. Ось заведена не из осторожности: гейт нашёл на
+	// себе самом ровно такую ложную находку — утверждение пробы, где слово
+	// `merge-base` есть, а git нет.
+	t.Run("глагол вне запускателя — не вызов, и это СОСЧИТАНО", func(t *testing.T) {
+		src := []byte("package p\n\nimport \"testing\"\n\n" +
+			"func f(t *testing.T, got string) {\n" +
+			"\trequire.Contains(t, got, \"merge-base\")\n" +
+			"\trequire.Contains(t, got, \"rev-list\", \"HEAD\")\n}\n")
+		qs, c := scanOne(t, "internal/x/d_test.go", src)
+		require.Zerof(t, c.Questions, "утверждение пробы прочитано как запуск git: %v", qs)
+		require.Equal(t, 2, c.VerbOutsideRunner,
+			"отсечённые вызовы не сосчитаны — тогда сужение до запускателя невидимо, и "+
+				"«ноль находок» неотличимо от «сузили до нуля»")
+	})
+
+	// ЗАПУСКАТЕЛЬ БЕЗ `git` СРЕДИ ЛИТЕРАЛОВ. Тем же вызовом запускают tar и go.
+	t.Run("exec.Command не про git — не вызов git", func(t *testing.T) {
+		_, c := scanOne(t, "internal/x/e.go", goSource(
+			`cmd := exec.Command("go", "test", "-run", "TestLog", "HEAD")`))
+		require.Zero(t, c.Questions)
 	})
 
 	// ГЛАГОЛЫ, ВОПРОСА ОБ ИСТОРИИ НЕ ЗАДАЮЩИЕ. Молчание здесь — не пропуск, а
