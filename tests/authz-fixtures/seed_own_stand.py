@@ -386,24 +386,34 @@ def mint_bootstrap(pki: pathlib.Path, host: str, grpc_port: int) -> str:
 
 
 def module_proto_root() -> pathlib.Path:
-    """Каталог контрактов — из МОДУЛЯ-пина, а не из чужой рабочей копии."""
+    """Каталог контрактов — из СВОЕГО дерева.
+
+    ЗДЕСЬ БРАЛСЯ КАТАЛОГ МОДУЛЯ-ПИНА ПЛАТФОРМЫ (`go list -m -f '{{.Dir}}'`), и
+    это было верно ровно пока контракты службы публиковала платформа. Ступень
+    S0a (kacho#2617, исход C) перенесла их дом сюда и сняла ребро
+    `kaname → kacho` целиком, поэтому запрос к `go list -m` стал НЕИСПОЛНИМ by
+    construction: «module github.com/PRO-Robotech/kacho: not a known dependency».
+    Посев выходил третьим исходом («условие не создано») на каждом прогоне —
+    наблюдалось в конвейере, задание «автономный стенд».
+
+    Что это меняет в посеве — ничего: `proto/kaname/` этого дерева несёт тот же
+    контракт, и от копии платформы он отличается РОВНО строкой `option
+    go_package`, которую разбор дескриптора для чеканки не читает.
+
+    Переопределение средой сохранено: стенд могут поднимать над деревом,
+    собранным иначе.
+    """
     env = os.environ.get("KANAME_STAND_PROTO_ROOT", "").strip()
     if env:
         p = pathlib.Path(env)
         if not (p / BOOTSTRAP_PROTO).is_file():
             raise Unmet(f"KANAME_STAND_PROTO_ROOT={p} не несёт {BOOTSTRAP_PROTO}")
         return p
-    if not shutil.which("go"):
-        raise Unmet("нет go — каталог контрактов модуля-пина назвать нечем")
-    proc = subprocess.run(["go", "list", "-m", "-f", "{{.Dir}}",
-                           "github.com/PRO-Robotech/kacho"],
-                          capture_output=True, text=True, cwd=str(ROOT), timeout=120)
-    if proc.returncode != 0 or not proc.stdout.strip():
-        raise Unmet("модуль-пин платформы не скачан (`go mod download`): "
-                    f"{(proc.stderr or '').strip()[:200]}")
-    root = pathlib.Path(proc.stdout.strip()) / "proto"
+    root = ROOT / "proto"
     if not (root / BOOTSTRAP_PROTO).is_file():
-        raise Unmet(f"{root} не несёт {BOOTSTRAP_PROTO}")
+        raise Unmet(f"{root} не несёт {BOOTSTRAP_PROTO} — контракты службы лежат в её "
+                    "дереве (proto/kaname/), и назвать их больше нечем: ребро к модулю "
+                    "платформы снято ступенью S0a")
     return root
 
 
