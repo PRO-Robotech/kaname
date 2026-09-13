@@ -493,105 +493,23 @@ func TestCredQuota_12_ConcurrentIssueAtTheLastSlotAdmitsExactlyOne(t *testing.T)
 	require.Equal(t, 4, rows, "строк больше предела: списание разошлось с тем, что оно считает")
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ОБЛАСТИ ВЕЛИЧИНЫ У ЭТИХ ДВУХ ВИДОВ БОЛЬШЕ НЕТ, И ЭТО СМЕНА ПРЕДМЕТА
-//
-// Здесь стояли четыре случая про области авторитета — CRED-CAP-13 (величина
-// аккаунта наступает у машины), CRED-CAP-14 (её отзыв возвращает умолчание),
-// CRED-CAP-15/16 (пара: у человека не наступает, у машины наступает) и
-// CRED-CAP-18 (отзыв величины даёт другой код).
-//
-// Их предмет СНЯТ приёмкой `KAN-QUOTA-1`, решением `П25` (задача продукта #2117):
-// величину этих видов больше не назначает авторитет — её объявляет ПОСАДКА службы
-// доступа, у которой областей нет вовсе. «Единственный способ изменить величину —
-// перезапуск с новым значением» (сценарий `KAN-Q3-02`).
-//
-// ЧЕТЫРЕ СЛУЧАЯ НЕ ОСЛАБЛЕНЫ, А ЗАМЕНЕНЫ утверждениями о том же предмете —
-// «откуда берётся величина», — и заменены ПАРАМИ: отрицание («область авторитета
-// не наступает») в одиночку зеленело бы на дереве, где потолок не наступает
-// вовсе, поэтому у каждого стоит положительный контроль на величине посадки.
-//
-// ЦЕНА НАЗВАНА, А НЕ УМОЛЧАНА. Установка, ограничившая ОТДЕЛЬНЫЙ аккаунт
-// величиной области `ACCOUNT`, после наката получает величину посадки — то есть
-// её ограничение перестаёт действовать. Это следствие принятого решения, а не
-// побочный эффект: посадка per-account измерения не имеет и иметь не может.
-// Миграция называет каждую такую строку предупреждением при накате, а не молчит.
-
-// CRED-CAP-13 (пересобран) — величина ОБЛАСТИ АККАУНТА больше не наступает ни у
-// машины, ни у человека: у обоих видов величину объявляет посадка.
-func TestCredQuota_13_AccountScopedAuthorityValueNoLongerBindsEitherOwnKind(t *testing.T) {
-	pool, ctx := newCredQuotaDB(t)
-	userID, svaID, accountID := credQuotaFixture(t, ctx, pool, "acctscope")
-
-	// Посадка объявляет два: столько удостоверений держит и человек, и машина.
-	setCredLimit(t, ctx, pool, kindUserCredential, 2)
-	setCredLimit(t, ctx, pool, kindSACredential, 2)
-
-	// АВТОРИТЕТ ГОВОРИТ ДРУГОЕ — и оба вида получают величину области аккаунта,
-	// заведомо ЩЕДРУЮ: если списание её читает, третье удостоверение пройдёт.
-	for _, kind := range []string{kindUserCredential, kindSACredential} {
-		_, err := pool.Exec(ctx, `
-			INSERT INTO limits (id, scope, scope_id, kind, limit_value)
-			VALUES ($1, 'ACCOUNT', $2, $3, 9)`,
-			ids.NewHyphenID(ids.PrefixLimitHyphen), accountID, kind)
-		require.NoErrorf(t, err, "величина области аккаунта для %s не заведена — "+
-			"расхождения источников нет, и утверждение стало бы вакуумным", kind)
-	}
-
-	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: величина посадки НАСТУПАЕТ у обоих.
-	for i := 0; i < 2; i++ {
-		require.NoErrorf(t, insertUserCredential(ctx, pool, userID, "KEYPAIR", false),
-			"удостоверение человека %d из двух обязано пройти", i+1)
-		require.NoErrorf(t, insertSACredential(ctx, pool, svaID, userID, "KEYPAIR"),
-			"удостоверение машины %d из двух обязано пройти", i+1)
-	}
-	requireQuotaRefusal(t, insertUserCredential(ctx, pool, userID, "KEYPAIR", false),
-		"KQ001", "limit of 2 iam.user.credential")
-	requireQuotaRefusal(t, insertSACredential(ctx, pool, svaID, userID, "KEYPAIR"),
-		"KQ001", "limit of 2 iam.serviceAccount.credential")
-}
-
-// CRED-CAP-14 (пересобран) — ОТЗЫВ величины у авторитета не меняет НИЧЕГО.
-//
-// Прежний случай утверждал, что отзыв величины аккаунта возвращает умолчание.
-// Обеих величин авторитет больше не назначает, поэтому и отзыв на пути списания
-// не читается: положительный контроль ниже показывает, что при этом потолок
-// продолжает наступать — то есть «ничего не изменилось» означает «потолок цел», а
-// не «потолка не стало».
-func TestCredQuota_14_WithdrawingAnAuthorityValueChangesNothing(t *testing.T) {
-	pool, ctx := newCredQuotaDB(t)
-	userID, svaID, accountID := credQuotaFixture(t, ctx, pool, "fallback")
-	setCredLimit(t, ctx, pool, kindSACredential, 1)
-
-	limID := ids.NewHyphenID(ids.PrefixLimitHyphen)
-	_, err := pool.Exec(ctx, `
-		INSERT INTO limits (id, scope, scope_id, kind, limit_value)
-		VALUES ($1, 'ACCOUNT', $2, $3, 9)`, limID, accountID, kindSACredential)
-	require.NoError(t, err)
-
-	require.NoError(t, insertSACredential(ctx, pool, svaID, userID, "KEYPAIR"))
-	requireQuotaRefusal(t, insertSACredential(ctx, pool, svaID, userID, "KEYPAIR"),
-		"KQ001", "limit of 1 iam.serviceAccount.credential")
-
-	_, err = pool.Exec(ctx, `UPDATE limits SET withdrawn_at = now() WHERE id = $1`, limID)
-	require.NoError(t, err)
-
-	requireQuotaRefusal(t, insertSACredential(ctx, pool, svaID, userID, "KEYPAIR"),
-		"KQ001", "limit of 1 iam.serviceAccount.credential")
-
-	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: потолок ПОДВИЖЕН — посадкой, и только ею.
-	setCredLimit(t, ctx, pool, kindSACredential, 2)
-	require.NoError(t, insertSACredential(ctx, pool, svaID, userID, "KEYPAIR"),
-		"после расширения величины ПОСАДКОЙ выпуск не прошёл: потолок держится не "+
-			"величиной, а кодом — и тогда изменить его нельзя вовсе")
-}
-
 // CRED-CAP-15/16 (пересобраны в один) — величина посадки связывает ОБА вида, и
 // связывает их НЕЗАВИСИМО.
 //
 // Прежняя пара различала, у кого наступает область аккаунта. Областей больше нет,
 // и различать нечего; предмет, который остался, — НЕЗАВИСИМОСТЬ двух счётчиков:
 // человек и машина считаются раздельно, и величина одного не расходуется другим.
+// ЗДЕСЬ СТОЯЛИ ДВЕ ПРОБЫ АВТОРИТЕТА ВЕЛИЧИН, и они сняты ВМЕСТЕ С ПРЕДМЕТОМ.
+//
+// Обе утверждали, что списание НЕ читает авторитет: одна — что величина его
+// области не связывает оба вида удостоверения, другая — что отзыв величины
+// ничего не меняет. Авторитет ушёл из продукта целиком (kacho#2117), таблицы
+// величин снята миграцией, и обе пробы стали вакуумными: читать больше нечего,
+// поэтому «не читает» выполняется by construction и упасть не может.
+//
+// Свойство, ради которого они стояли, — величина берётся из ПОСАДКИ — держится
+// пробой ниже, где снятие строки посадки даёт отказ с названным кодом.
+
 func TestCredQuota_16_ThePostureBindsBothOwnKindsIndependently(t *testing.T) {
 	pool, ctx := newCredQuotaDB(t)
 	userID, svaID, _ := credQuotaFixture(t, ctx, pool, "bothscopes")
@@ -638,21 +556,16 @@ func TestCredQuota_18_OnlyThePostureCanLeaveTheCeilingUnstated(t *testing.T) {
 	pool, ctx := newCredQuotaDB(t)
 	userID, _, _ := credQuotaFixture(t, ctx, pool, "withdrawn")
 
-	// Отзыв у авторитета — НИЧЕГО: величина оттуда больше не читается.
-	_, err := pool.Exec(ctx, `
-		UPDATE limits SET withdrawn_at = now()
-		 WHERE kind = $1 AND scope = 'DEFAULT' AND withdrawn_at IS NULL`, kindUserCredential)
-	require.NoError(t, err)
-	require.NoError(t, insertUserCredential(ctx, pool, userID, "KEYPAIR", false),
-		"отзыв величины у АВТОРИТЕТА отобрал потолок: значит списание всё ещё читает "+
-			"его, и посадка не стала источником величины")
+	// ЗДЕСЬ СТОЯЛА ПОЛОВИНА ПРО АВТОРИТЕТ — отзыв величины у него ничего не
+	// менял. Снята вместе с предметом: авторитета нет, отзывать нечего.
+	// Вторая половина осталась и несёт весь предмет пробы.
 
 	// Снятие строки ПОСАДКИ — состояние «потолок не назван», и оно НЕДОСТИЖИМО
 	// после пуска: страж старта не выпускает процесс без всех трёх величин, а
 	// композиционный корень проецирует их до первого слушателя. Здесь оно
 	// воспроизводится оператором базы намеренно — чтобы контракт различения двух
 	// кодов остался проверяемым, а не остался обещанием.
-	_, err = pool.Exec(ctx, `DELETE FROM kaname.own_ceilings WHERE kind = $1`, kindUserCredential)
+	_, err := pool.Exec(ctx, `DELETE FROM kaname.own_ceilings WHERE kind = $1`, kindUserCredential)
 	require.NoError(t, err)
 
 	requireQuotaRefusal(t, insertUserCredential(ctx, pool, userID, "KEYPAIR", false),

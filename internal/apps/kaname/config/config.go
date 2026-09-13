@@ -107,6 +107,27 @@ type LoggerConfig struct {
 //   - `tcp://0.0.0.0:9090` (full URL-style, recommended);
 //   - `9090` (legacy: bare port; preserved for backward-compat
 //     with older values.yaml, see listenAddress in load.go).
+//
+// SubscriptionConfig — посадка потока изменений ресурсов.
+//
+// Каждый поток держит СВОЁ соединение вне пула, поэтому потолок числа потоков —
+// не вкус, а арифметика: число реплик × потолок + непуловые соединения обязаны
+// помещаться в предел владельца базы. Превышение отвечает ОТКАЗОМ, а не
+// молчаливой очередью: очередь превратила бы исчерпание в неограниченное
+// ожидание, неотличимое для клиента от «событий нет».
+type SubscriptionConfig struct {
+	// MaxStreams — потолок числа ОДНОВРЕМЕННЫХ потоков процесса.
+	MaxStreams int `mapstructure:"max-streams"`
+	// StreamBudget — срок жизни одного потока. По истечении поток закрывается
+	// ЧИСТО, а не ошибкой: клиент возобновляется со своей позиции, а обрыв
+	// ошибкой он прочёл бы как сетевой сбой.
+	StreamBudget time.Duration `mapstructure:"stream-budget"`
+	// IdlePoll — холостой перепрос. Он не «на всякий случай»: ОТКАТИВШИЙСЯ
+	// писатель уведомления не шлёт, и подтверждение горизонта приезжает именно
+	// им.
+	IdlePoll time.Duration `mapstructure:"idle-poll"`
+}
+
 type APIServerConfig struct {
 	Endpoint         string        `mapstructure:"endpoint"`
 	InternalEndpoint string        `mapstructure:"internal-endpoint"`
@@ -135,7 +156,14 @@ type APIServerConfig struct {
 	// умолчавший о них, поднимал их открытым текстом, и заметить это было
 	// неоткуда. Здесь пустой адрес означает «фронт не поднят», и это
 	// НАЗЫВАЕТСЯ — осью самоотчёта с объяснением, что именно не обслуживается.
-	RESTEndpoint string `mapstructure:"rest-endpoint"`
+	// Subscription — ВЕЛИЧИНЫ ПОСАДКИ потока изменений ресурсов.
+	//
+	// Они приезжают из объявления сервиса и в механизме умолчаний не имеют:
+	// фундамент отвергает нулевые, потому что величина посадки, которую никто не
+	// выбирал, не обсуждаема и не сужаема. Умолчания стоят ЗДЕСЬ, где их видит
+	// оператор, а не внутри общего сервера, где их не видит никто.
+	Subscription SubscriptionConfig `mapstructure:"subscription"`
+	RESTEndpoint string             `mapstructure:"rest-endpoint"`
 	// InternalRESTEndpoint — собственный ВНУТРЕННИЙ REST-фронт службы.
 	//
 	// Отдельный слушатель, а не разбор пути на общем: раздельность фронтов есть
@@ -586,6 +614,14 @@ func (c Config) DSN() string {
 	}
 	return dsn
 }
+
+// SingleConnDSN — строка подключения для ВЫДЕЛЕННОГО соединения вне пула.
+//
+// Отличается от [Config.DSN] ровно отсутствием параметров пула, и это не
+// оформление: вне пула `pool_max_conns` — неизвестный серверу параметр, и
+// подключение с ним падает FATAL. Отказ наступил бы у КАЖДОЙ подписки в бою, а
+// не на сборке, поэтому композиционный корень сверяет строку стражем.
+func (c Config) SingleConnDSN() string { return c.baseDSN() }
 
 // SlaveDSN — connection string for the slave pool (read-replica). Empty
 // string → no replica configured, caller falls back to master.

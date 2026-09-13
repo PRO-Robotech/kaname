@@ -30,10 +30,12 @@ package check_test
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/corelib/treecorpus"
 
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
 
@@ -99,34 +101,36 @@ func TestKeyAlgorithmDictionaryMatchesTheCode(t *testing.T) {
 		}
 	}
 
-	dir := filepath.Join(root, filepath.FromSlash(check.MigrationsDirRel))
-	entries, err := os.ReadDir(dir)
+	tree, err := treecorpus.NewTree(root)
 	if err != nil {
-		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: каталог миграций не прочитан: %v", err)
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: состав дерева: %v", err)
 	}
-	var files []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
-			files = append(files, e.Name())
-		}
+
+	// Обход миграций и его отказ на пустоте держит ОДНА функция —
+	// `MigrationCorpus` (задача #17): прежде премиса «не прочитано ни одного
+	// файла миграции» стояла в теле пробы и не исполнялась ни разу.
+	//
+	// Заодно обход стал брать состав ИНДЕКСОМ git, а не каталогом на диске:
+	// прежняя редакция читала `os.ReadDir`, то есть судила бы и файл, который
+	// в дереве не отслеживается — чужой черновик рядом с миграциями попадал бы
+	// в вердикт о схеме.
+	migs, err := check.MigrationCorpus(tree)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v — гейт не может назвать схему, "+
+			"о которой он говорит", err)
 	}
 	// Порядок номера — тот же, в котором миграции применяет накат.
+	files := migs.Rels()
 	sort.Slice(files, func(i, j int) bool {
-		return migrationOrdinal(files[i]) < migrationOrdinal(files[j])
+		return migrationOrdinal(path.Base(files[i])) < migrationOrdinal(path.Base(files[j]))
 	})
 
 	var census check.AlgorithmDictionaryCensus
 	live := map[string]check.AlgorithmConstraint{}
-	for _, name := range files {
-		body, rerr := os.ReadFile(filepath.Join(dir, name))
-		if rerr != nil {
-			t.Errorf("%s не прочитан: %v — файл НЕ осмотрен", name, rerr)
-			continue
-		}
+	for _, rel := range files {
 		census.Files++
-		rel := check.MigrationsDirRel + "/" + name
 		found, dropped, c := check.ScanKeyAlgorithmConstraints(
-			rel, migrations.MigrationUpSection(string(body)), keyAlgorithmColumn)
+			rel, migrations.MigrationUpSection(migs[rel]), keyAlgorithmColumn)
 		census.Statements += c.Statements
 		census.Drops += c.Drops
 		for _, f := range found {
@@ -148,10 +152,6 @@ func TestKeyAlgorithmDictionaryMatchesTheCode(t *testing.T) {
 		census.Files, keyAlgorithmColumn, census.Statements, census.Drops,
 		len(live), strings.Join(names, ", "), code)
 
-	if census.Files == 0 {
-		t.Fatalf("в %s не прочитано ни одного файла миграции — гейт не может назвать схему, "+
-			"о которой он говорит", check.MigrationsDirRel)
-	}
 	// Предпосылка: словарь в схеме ВЫРАЖЕН. Ноль ограничений означает, что
 	// столбец больше ничем не сужен, — и это само по себе находка: значение,
 	// которое схема не сужает, означает «любое».

@@ -4,9 +4,11 @@
 // deferred_work_test.go — ГЕЙТ КЛАССА: в не-тестовом дереве службы нет маркеров
 // отложенной работы (ban #11, задача #40).
 //
-// Норма, граница употребления и упоминания, состав форм и виды вычитания — в
-// шапке `deferred_work.go`; здесь они не пересказываются, чтобы два места об
-// одном предмете не разошлись.
+// Норма, граница употребления и упоминания и состав форм живут в фундаменте
+// (`github.com/PRO-Robotech/corelib/treehygiene`); корень обхода и виды
+// вычитания — СВОЯ часть этого дерева, она в шапке `deferred_work.go`. Здесь не
+// пересказывается ни то, ни другое, чтобы два места об одном предмете не
+// разошлись.
 //
 // Способность гейта упасть и смолчать доказана инъекцией —
 // deferred_work_injection_test.go.
@@ -16,6 +18,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/PRO-Robotech/corelib/treehygiene"
 
 	"github.com/PRO-Robotech/kaname/internal/check"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
@@ -89,21 +93,27 @@ func TestNoDeferredWorkInTheTree(t *testing.T) {
 }
 
 // TestEveryDeferralFormIsCaughtThroughTheSieve — КАЖДАЯ объявленная форма
-// доходит до решения, пройдя дешёвый отсев.
+// доходит до решения, пройдя СВЯЗКУ ЭТОГО ДЕРЕВА: отсев, образец и виды
+// вычитания вместе.
 //
-// Отсев по затравке существует ради времени. Но отсев — это место, где форма
-// может исчезнуть молча: образец её ловит, а до образца дело не доходит.
-// Поэтому каждая форма проверяется НА СКВОЗНОМ пути — тем же AuditDeferredWork,
-// что работает по дереву, а не образцом в отрыве от сита.
+// Словарь форм и отсев принадлежат фундаменту, и он же доказывает, что форма
+// проходит его собственное сито. Здесь утверждается ДРУГОЕ и о другом предмете:
+// что ни один вид вычитания ЭТОГО дерева не ослепляет объявленную форму.
+// Фундамент такого сказать не может — видов этого дерева он не знает, а
+// заведённый завтра вид, накрывший прод-каталог, снял бы формы с наблюдения
+// молча: не находкой и не чистотой, а невидимостью.
+//
+// Поэтому каждая форма гонится тем же check.AuditDeferredWork, что работает по
+// дереву, а не образцом в отрыве от сита и не в отрыве от вычитания.
 func TestEveryDeferralFormIsCaughtThroughTheSieve(t *testing.T) {
 	t.Parallel()
-	forms := check.DeferralForms()
+	forms := treehygiene.DeferralForms()
 	if len(forms) == 0 {
 		t.Fatal("осмотрено: форм 0 — «все формы ловятся» здесь означало бы «форм нет»")
 	}
 	for i, f := range forms {
 		t.Run(fmt.Sprintf("%02d-%s", i, f.Seed), func(t *testing.T) {
-			if !check.HasDeferralSeed(f.Example) {
+			if !treehygiene.HasDeferralSeed(f.Example) {
 				t.Fatalf("затравка %q не встречается в примере %q — отсев отсечёт эту "+
 					"форму ДО образца, и она перестанет ловиться, оставаясь на вид "+
 					"объявленной", f.Seed, f.Example)
@@ -124,5 +134,5 @@ func TestEveryDeferralFormIsCaughtThroughTheSieve(t *testing.T) {
 			}
 		})
 	}
-	t.Logf("осмотрено: форм %d, затравок %d", len(forms), len(check.DeferralSeeds()))
+	t.Logf("осмотрено: форм %d, затравок %d", len(forms), len(treehygiene.DeferralSeeds()))
 }

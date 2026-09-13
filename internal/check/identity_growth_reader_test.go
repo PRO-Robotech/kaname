@@ -15,7 +15,6 @@ package check_test
 import (
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -45,39 +44,23 @@ func TestIdentityGrowthMetricsHaveANamedReader(t *testing.T) {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: файл коллектора не прочитан (%s): %v",
 			check.IdentityGrowthCollectorFile, err)
 	}
-	declared := check.IdentityGrowthMetricNamesIn(string(collector))
-	if len(declared) == 0 {
-		t.Fatalf("предпосылка гейта не выполнена: в %s не найдено ни одного имени ряда — "+
-			"форма объявления либо приставка словаря изменились, и гейт судит пустоту",
-			check.IdentityGrowthCollectorFile)
-	}
-
 	doc, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(check.IdentityGrowthReadersFile)))
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: документ наблюдаемости не прочитан (%s): %v",
 			check.IdentityGrowthReadersFile, err)
 	}
-	exprs := check.AlertExpressionsIn(string(doc))
-	if len(exprs) == 0 {
-		t.Fatalf("предпосылка гейта не выполнена: в %s не найдено ни одного выражения "+
-			"правила — разбор перестал их видеть, и гейт судит пустоту",
-			check.IdentityGrowthReadersFile)
+
+	// Премисы обеих сторон держит `JudgeIdentityGrowthReaders`: обе стороны —
+	// параметры, поэтому их отказ доказан синтетикой, а не чтением (#17).
+	c, findings, err := check.JudgeIdentityGrowthReaders(string(collector), string(doc))
+	if err != nil {
+		t.Fatalf("предпосылка гейта не выполнена: %v\n  коллектор: %s\n  документ:  %s",
+			err, check.IdentityGrowthCollectorFile, check.IdentityGrowthReadersFile)
 	}
 
 	t.Logf("перепись: рядов объявлено %d %v; выражений правил прочитано %d",
-		len(declared), declared, len(exprs))
+		len(c.Metrics), c.Metrics, c.Expressions)
 
-	joined := strings.Join(exprs, "\n")
-	var findings []string
-	for _, metric := range declared {
-		if !strings.Contains(joined, metric) {
-			findings = append(findings, "ряд «"+metric+"» объявлен, но его не читает ни одно "+
-				"правило оповещения: величина печатается на витрине, ничего не утверждает "+
-				"и создаёт уверенность, которой нет")
-		}
-	}
-
-	sort.Strings(findings)
 	if len(findings) > 0 {
 		t.Fatalf("у величины роста числа личностей нет читателя (%d):\n  %s",
 			len(findings), strings.Join(findings, "\n  "))

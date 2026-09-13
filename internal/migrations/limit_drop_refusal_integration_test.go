@@ -5,51 +5,48 @@
 // величин и называет оператору процедуру выгрузки (задача #2134, условие 2
 // предиката; приёмка KAN-QUOTA-1 §9 `ПР-3`, сценарий `KAN-Q4-07`).
 //
-// # Что здесь утверждается и почему это не повтор соседних проб
+// # ПРЕДМЕТ ПРОБЫ ОСТАЛСЯ, А ЕЁ МИР ПЕРЕСТАЛ БЫТЬ СИНТЕТИЧЕСКИМ (kaname#58)
 //
-// Условие 2 предиката задачи требует, чтобы процедура выгрузки была названа «в
-// тексте отказа старта, который сообщает о СНЯТИИ». Соседние пробы покрывают
-// половины этого утверждения и ни одна — его целиком:
+// Прежняя редакция накладывала на цепь службы ОДНУ выдуманную миграцию сноса:
+// стадия S4 не была начата, настоящего сноса в дереве не существовало, и проба
+// честно говорила «когда S4 напишет снос ЭТОЙ формой, оператор получит отказ».
+//
+// Стадия наступила. Снос лежит в цепи (`20260914000000`), и вместе с ним исчезла
+// предпосылка прежнего мира — таблица не доживает до головы. Проба поэтому НЕ
+// ослаблена и не снята: она переведена на НАСТОЯЩИЙ снос и настоящую цепь, а
+// база доводится до версии НЕПОСРЕДСТВЕННО ПЕРЕД ним. Это ровно то состояние, в
+// котором оператор встречает отказ, — и утверждение стало сильнее прежнего:
+// оно больше не зависит от того, угадала ли проба форму, которой снос напишут.
+//
+// # ЧТО ЗДЕСЬ УТВЕРЖДАЕТСЯ И ПОЧЕМУ ЭТО НЕ ПОВТОР СОСЕДЕЙ
 //
 //   - `pkg/dropguard` доказывает форму отказа на СИНТЕТИЧЕСКОЙ цепи («widgets»):
 //     сохранение названо, названо прежде уничтожения. О таблице величин и о цепи
 //     службы доступа она не утверждает ничего;
-//   - гейт `internal/repohygiene` сверяет текст инструкции с производителем
-//     ПОБАЙТОВО, но судит текст, а не поведение наката;
+//   - гейт `internal/check` сверяет текст инструкции с производителем ПОБАЙТОВО,
+//     но судит текст, а не поведение наката;
 //   - `limit_export_before_retirement_integration_test.go` доказывает, что
 //     документированный запрос ОТРАБАТЫВАЕТ против живой схемы. Он не спрашивает,
-//     наступит ли отказ, который направит к этому запросу.
+//     наступит ли отказ, который направит к этому запросу;
+//   - `dropguard_integration_test.go` доказывает, что снос ОБЪЯВЛЕН и число строк
+//     сошлось с базой. Он не спрашивает, что происходит, когда объявления НЕТ, —
+//     а именно это состояние и встречает оператор, накатывающий чужой выпуск.
 //
-// Незакрытым оставалось то, что дороже всех трёх: **сработает ли страж на самой
-// `kaname.limits`**. До этой пробы ответ был «by construction» — то есть вывод, а
-// не замер. Вывод опирается на то, что распознаватель снятий узнает форму, в
-// которой стадия S4 напишет снос; форма, которой он не знает, даёт не красное и
-// не зелёное, а МОЛЧАНИЕ (`testing.md` §«Гейт на класс», п. 7). Молчание здесь
-// означает, что накат снесёт таблицу без отказа, а оператор узнает о потере по
-// последствиям — ровно то, ради чего задача #2134 существует.
-//
-// # Почему снос СИНТЕТИЧЕСКИЙ, а не взят из дерева
-//
-// Стадия S4 не начата, и настоящей миграции сноса в цепи нет. Проба подаёт стражу
-// цепь службы плюс ОДНУ ещё не применённую миграцию, снимающую `kaname.limits` в
-// той канонической форме, какой снос записан у соседей (`DROP TABLE IF EXISTS
-// <схема>.<таблица>;` — предикат: `git grep -n 'DROP TABLE' -- 'services/*/internal/migrations/*.sql'`).
-// Применённая миграция при этом не тронута ни байтом: наложение живёт в памяти
-// пробы, дерево не правится.
-//
-// Проба говорит поэтому не «S4 сделана», а «когда S4 напишет снос ЭТОЙ формой,
-// оператор получит отказ с командой выгрузки, а не молчаливую потерю». Напишет
-// другой — покраснеет здесь, и это её работа.
+// Незакрытым без этой пробы остаётся то, что дороже всех четырёх: сработает ли
+// страж на самой `kaname.limits`. Ответ «by construction» был бы выводом, а не
+// замером: распознаватель, не знающий формы сноса, даёт не красное и не зелёное,
+// а МОЛЧАНИЕ (`testing.md` §«Гейт на класс», п. 7). Молчание здесь означает, что
+// накат снесёт таблицу без отказа, а оператор узнает о потере по последствиям.
 package migrations_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
-	"io/fs"
 	"strings"
 	"testing"
-	"testing/fstest"
 
+	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/dropguard"
@@ -57,38 +54,39 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
-// retirementVersion — версия синтетического сноса. Старше всякой применённой:
-// снос, оказавшийся младше, был бы уже применён и предметом стража не стал бы.
-const retirementVersion int64 = 29990101000000
+// limitRetirementVersion — версия НАСТОЯЩЕГО сноса хранилища величин.
+//
+// Число, а не поиск по дереву: проба обязана сломаться, если снос переедет в
+// другую версию, — тогда мир «непосредственно перед ним» строится не там, и
+// вердикт относился бы к другому состоянию схемы.
+const limitRetirementVersion int64 = 20260914000000
 
-// retirementMigration — снос таблицы величин в канонической форме дерева.
-func retirementMigration(table string) string {
-	return "-- +goose Up\nDROP TABLE IF EXISTS " + table + ";\n\n" +
-		"-- +goose Down\nSELECT 1;\n"
-}
-
-// chainWithPendingRetirement — цепь службы плюс один ещё не применённый снос.
-// Дерево не правится: наложение существует только на время прогона.
-func chainWithPendingRetirement(t *testing.T, table string) fs.FS {
+// upToJustBeforeLimitRetirement — цепь службы, доведённая до версии
+// НЕПОСРЕДСТВЕННО ПЕРЕД снятием хранилища величин.
+//
+// Это состояние оператора, а не лаборатория: он стоит на предыдущем выпуске, у
+// него есть таблица со строками, и накат следующего выпуска обязан ему отказать.
+func upToJustBeforeLimitRetirement(t *testing.T, dsn string) *sql.DB {
 	t.Helper()
-
-	overlay := fstest.MapFS{}
-	entries, err := fs.ReadDir(migrations.FS, ".")
+	db, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
-			continue
-		}
-		raw, rerr := fs.ReadFile(migrations.FS, e.Name())
-		require.NoError(t, rerr)
-		overlay[e.Name()] = &fstest.MapFile{Data: raw}
-	}
-	require.NotEmpty(t, overlay, "цепь службы прочитана пустой: наложение говорило бы не о ней")
+	goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.SetDialect("postgres"))
+	require.NoError(t, goose.UpTo(db, ".", limitRetirementVersion-1),
+		"цепь обязана доходить до версии перед снятием: иначе мир пробы — не тот, "+
+			"в котором оператор встречает отказ")
 
-	name := fmt.Sprintf("%d_limit_authority_leaves_iam.sql", retirementVersion)
-	overlay[name] = &fstest.MapFile{Data: []byte(retirementMigration(table))}
-	return overlay
+	// Предпосылка называется ЯВНО: без таблицы всё ниже говорило бы о пустоте.
+	var exists bool
+	require.NoError(t, db.QueryRow(
+		`SELECT to_regclass('kaname.limits') IS NOT NULL`).Scan(&exists))
+	require.True(t, exists, "на версии перед снятием таблицы величин нет — значит "+
+		"остановка пришлась не туда, и отказ ниже свидетельствовал бы не о ней")
+	return db
 }
+
+// pendingRetirement — снос ещё НЕ применён, всё прочее применено.
+func pendingRetirement(version int64) (bool, error) { return version != limitRetirementVersion, nil }
 
 // TestLimitDropRefusal_NamesTheExportProcedureBeforeDestruction — несущая половина.
 func TestLimitDropRefusal_NamesTheExportProcedureBeforeDestruction(t *testing.T) {
@@ -96,7 +94,7 @@ func TestLimitDropRefusal_NamesTheExportProcedureBeforeDestruction(t *testing.T)
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
 
-	db := upAllIAMMigrations(t, pgtest.NewEmptyDB(t))
+	db := upToJustBeforeLimitRetirement(t, pgtest.NewEmptyDB(t))
 	defer db.Close()
 
 	// Таблица непуста БЕЗ помощи пробы: цепь сеет умолчания сама. Это и есть
@@ -105,31 +103,30 @@ func TestLimitDropRefusal_NamesTheExportProcedureBeforeDestruction(t *testing.T)
 	require.Positive(t, seeded, "цепь не посеяла ни одной величины: стражу нечего было бы "+
 		"считать, и отказ ниже зеленел бы на пустоте")
 
-	inv, err := dropguard.Inventory("iam", chainWithPendingRetirement(t, limitsTable))
+	inv, err := dropguard.Inventory("iam", migrations.FS)
 	require.NoError(t, err)
 
-	// Распознаватель обязан УВИДЕТЬ снос. Проверяется отдельным утверждением:
-	// не увидев его, страж промолчит, и «нарушений ноль» ниже было бы неотличимо
-	// от «прочитано ноль».
+	// Распознаватель обязан УВИДЕТЬ снос в цепи. Проверяется отдельным
+	// утверждением: не увидев его, страж промолчит, и «нарушений ноль» ниже было
+	// бы неотличимо от «прочитано ноль».
 	var seenDrop bool
 	for _, d := range inv.Drops {
-		if strings.EqualFold(d.Table, limitsTable) && d.Version == retirementVersion {
+		if strings.EqualFold(d.Table, limitsTable) && d.Version == limitRetirementVersion {
 			seenDrop = true
 		}
 	}
-	require.True(t, seenDrop, "распознаватель снятий не увидел сноса %s в форме "+
-		"`DROP TABLE IF EXISTS`: страж промолчит, накат уничтожит %d строк без отказа, "+
-		"и оператор узнает о потере по последствиям.\nпрочитано файлов: %d, снятий: %+v",
-		limitsTable, seeded, inv.FilesScanned, inv.Drops)
+	require.True(t, seenDrop, "распознаватель снятий не увидел сноса %s версии %d: "+
+		"страж промолчит, накат уничтожит %d строк без отказа, и оператор узнает о "+
+		"потере по последствиям.\nпрочитано файлов: %d, снятий: %+v",
+		limitsTable, limitRetirementVersion, seeded, inv.FilesScanned, inv.Drops)
 
+	// Одобрений НЕТ — это состояние оператора, накатывающего чужой выпуск: у него
+	// объявление автора не спрашивают, у него спрашивают его собственное согласие.
 	rep := dropguard.Preflight(context.Background(),
 		func(ctx context.Context, table string) (int64, error) {
 			return dropguard.Observe(ctx, db, table)
 		},
-		inv,
-		func(version int64) (bool, error) { return version != retirementVersion, nil },
-		nil,
-		dropguard.WholeChain())
+		inv, pendingRetirement, nil, dropguard.WholeChain())
 
 	require.Len(t, rep.Violations, 1,
 		"страж не отказал на сносе непустой %s: %+v", limitsTable, rep.Violations)
@@ -158,8 +155,8 @@ func TestLimitDropRefusal_NamesTheExportProcedureBeforeDestruction(t *testing.T)
 		"отказ не называет числа строк (%d), и оператору не с чем сверить выгрузку:\n%s",
 		seeded, msg)
 
-	t.Logf("перепись: прочитано файлов цепи %d, снятий в наложенной цепи %d, "+
-		"величин в таблице %d, нарушений %d; отказ называет команду выгрузки и число строк",
+	t.Logf("перепись: прочитано файлов цепи %d, снятий в цепи %d, величин в таблице %d, "+
+		"нарушений %d; отказ называет команду выгрузки и число строк",
 		inv.FilesScanned, len(inv.Drops), seeded, len(rep.Violations))
 }
 
@@ -173,30 +170,27 @@ func TestLimitDropRefusal_EmptyTableIsNotRefused(t *testing.T) {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
 
-	db := upAllIAMMigrations(t, pgtest.NewEmptyDB(t))
+	db := upToJustBeforeLimitRetirement(t, pgtest.NewEmptyDB(t))
 	defer db.Close()
 
 	_, err := db.Exec("DELETE FROM " + limitsTable)
 	require.NoError(t, err, "опустошение таблицы величин — единственный различающий факт")
 	require.Zero(t, countLimits(t, db), "таблица обязана быть пуста: иначе миры не различаются")
 
-	inv, err := dropguard.Inventory("iam", chainWithPendingRetirement(t, limitsTable))
+	inv, err := dropguard.Inventory("iam", migrations.FS)
 	require.NoError(t, err)
 
 	rep := dropguard.Preflight(context.Background(),
 		func(ctx context.Context, table string) (int64, error) {
 			return dropguard.Observe(ctx, db, table)
 		},
-		inv,
-		func(version int64) (bool, error) { return version != retirementVersion, nil },
-		nil,
-		dropguard.WholeChain())
+		inv, pendingRetirement, nil, dropguard.WholeChain())
 
 	require.Empty(t, rep.Violations,
 		"страж отказал на ПУСТОЙ таблице величин: тогда его отказ не свидетельствует "+
 			"о живых строках, и несущая половина зеленела бы на страже, отвергающем всё:\n%+v",
 		rep.Violations)
 
-	t.Logf("перепись: величин в таблице 0, снятий в наложенной цепи %d, нарушений 0 — "+
+	t.Logf("перепись: величин в таблице 0, снятий в цепи %d, нарушений 0 — "+
 		"сохранять нечего, отказа нет", len(inv.Drops))
 }

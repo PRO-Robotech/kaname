@@ -34,6 +34,12 @@ func RegisterDefaults(v *viper.Viper) {
 	// Prometheus /metrics HTTP listener — separate cluster-internal port (never
 	// the public tenant gRPC surface). Override via KANAME_API_SERVER__METRICS_ENDPOINT.
 	v.SetDefault("api-server.metrics-endpoint", "tcp://0.0.0.0:9095")
+	// Посадка потока изменений. Умолчания стоят здесь, а не в общем сервере:
+	// фундамент отвергает нулевые намеренно — величину посадки, которую никто не
+	// выбирал, он принимать не вправе, и тогда её обязан назвать тот, кто ставит.
+	v.SetDefault("api-server.subscription.max-streams", 64)
+	v.SetDefault("api-server.subscription.stream-budget", 30*time.Minute)
+	v.SetDefault("api-server.subscription.idle-poll", 5*time.Second)
 	// Docker Registry v2 `/iam/token` auth-server HTTP listener — a SEPARATE,
 	// external-reachable plaintext port (ingress-terminated TLS), distinct from
 	// the hooks (:9092) and metrics (:9095) listeners. Issuer/service/TTL shape
@@ -280,13 +286,6 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("jobs.expired-credential-reclaim.batch-size", 200)
 	v.SetDefault("jobs.expired-credential-reclaim.dry-run", false)
 
-	// Обновление снимка каталога модуля (#1816). Минута — верхняя граница
-	// отставания снимка от базы, то есть столько снятый в работающем процессе
-	// ресурс продолжает считаться живым. Величина выбрана по предмету: строки
-	// каталога сегодня пишет только миграция, а административный путь снятия
-	// заводится отдельной задачей; окно, измеряемое минутой, короче любого
-	// осмысленного окна применения такого снятия.
-	v.SetDefault("jobs.catalog-snapshot.refresh-interval", time.Minute)
 	v.SetDefault("authn.sakey-max-ttl", 365*24*time.Hour)
 	// Per-client access_token_lifespan for the SA-key OAuth2 client. Default 0 =
 	// omit the field and inherit the provider-global TTL, so an existing

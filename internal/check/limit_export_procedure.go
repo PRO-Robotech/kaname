@@ -53,6 +53,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/PRO-Robotech/corelib/treecorpus"
+
 	"github.com/PRO-Robotech/corelib/dropguard"
 )
 
@@ -81,6 +83,21 @@ func (c ExportProcedureCensus) String() string {
 // exportCopyMarker — по чему строка документа опознаётся как процедура выгрузки. Это
 // мета-команда оболочки psql, и в прозе она не встречается: у разбора нет риска
 // принять за процедуру объяснение процедуры.
+// InstallGuideSuffix — по чему инструкции обновления опознаются в составе дерева.
+const InstallGuideSuffix = "INSTALL.md"
+
+// ExportProcedureGuides — корпус инструкций обновления из ДЕРЕВА.
+//
+// Дерево приходит параметром, а отбор объявлен здесь и больше нигде: гейт и
+// инъекция зовут ОДНУ функцию, поэтому синтетика проверяет тот же отбор, что
+// исполняется на боевом прогоне, а не его копию. Пустой обход — отказ
+// (`ErrEmptyTraversal`), а не «находок ноль».
+func ExportProcedureGuides(tree *treecorpus.Tree) (TreeCorpus, error) {
+	return CorpusFrom(tree, func(rel string) bool {
+		return strings.HasSuffix(rel, InstallGuideSuffix)
+	})
+}
+
 const exportCopyMarker = `\copy (`
 
 // JudgeExportProcedure судит корпус инструкций: ключ — путь, значение — текст.

@@ -90,6 +90,8 @@ import (
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 // EmitSubjectChangeSelector — имя метода порта, которым производится строка
@@ -257,6 +259,16 @@ func SubjectChangeRosterTotal(declared map[string]int) int {
 }
 
 // IsSubjectChangeProducerFile — лежит ли координата в слое use-case и не проба ли это.
+// SubjectChangeProducerCorpus — корпус производителей полосы самосброса из ДЕРЕВА.
+//
+// Отбор объявлен `IsSubjectChangeProducerFile` и зовётся отсюда, а дерево
+// приходит параметром: гейт и инъекция ходят ОДНОЙ дорогой, поэтому синтетика
+// проверяет тот же отбор, что исполняется на боевом прогоне. Пустой обход —
+// отказ (`ErrEmptyTraversal`), а не «находок ноль».
+func SubjectChangeProducerCorpus(tree *treecorpus.Tree) (TreeCorpus, error) {
+	return CorpusFrom(tree, IsSubjectChangeProducerFile)
+}
+
 func IsSubjectChangeProducerFile(rel string) bool {
 	return strings.HasPrefix(rel, SubjectChangeProducerRootRel+"/") &&
 		strings.HasSuffix(rel, ".go") && !strings.HasSuffix(rel, "_test.go")

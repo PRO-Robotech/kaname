@@ -23,10 +23,16 @@ func CollectSynthetic(root string) (Tables, error) {
 }
 
 // CheckFreshSynthetic — [CheckFresh] по тому же дереву.
-func CheckFreshSynthetic(root string) (Census, error) {
-	tables, err := CollectSynthetic(root)
+//
+// Корня ДВА, как и у боевой полосы: манифесты обходятся от одного, продукт
+// лежит под другим (#61). У синтетики они совпадают — манифесты ложатся под
+// `services/`, продукт под `internal/`, и столкнуться им негде, — но довода
+// по-прежнему два: полоса с одним доводом молча утверждала бы, что деревья
+// совпадают всегда.
+func CheckFreshSynthetic(manifestsRoot, moduleRoot string) (Census, error) {
+	tables, err := CollectSynthetic(manifestsRoot)
 	if err != nil {
 		return tables.Census, err
 	}
-	return compareRendered(root, tables)
+	return compareRendered(moduleRoot, tables)
 }

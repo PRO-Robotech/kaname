@@ -57,7 +57,19 @@ func TestGeneratedTablesAreFresh(t *testing.T) {
 	// Читается ДЕРЕВО ПЛАТФОРМЫ: манифесты соседних модулей, каталог
 	// контрактов и канон модели в поставку нашего модуля не входят by
 	// construction. Их отсутствие — «условие не создано», а не находка.
-	census, err := authzmapgen.CheckFresh(platformtree.Require(t))
+	// Корня ДВА, и после разреза это разные деревья (#61): манифесты обходятся
+	// от корня платформы, продукт лежит под корнем модуля. Прежде довод был
+	// один — пока служба жила внутри платформы, второй был префиксом первого.
+	wd, werr := os.Getwd()
+	if werr != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", werr)
+	}
+	moduleRoot, merr := platformtree.ModuleRootFrom(wd)
+	if merr != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не установлен: %v", merr)
+	}
+
+	census, err := authzmapgen.CheckFresh(platformtree.Require(t), moduleRoot)
 	t.Logf("осмотрено: %s", census.Summary())
 	if census.Resources == 0 {
 		t.Fatal("ресурсов ноль — «файл свеж» здесь означало бы «сверять было нечего»")

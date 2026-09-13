@@ -11,8 +11,25 @@ closed verb set + wildcard policy), NOT per-tenant data and NOT infra-sensitive
 authenticated principal may read it, anonymous is fail-closed.
 
 Source of truth (the catalog projects EXACTLY this — never more):
-  kaname authzmap.objectTypes (module.resource keys) + TypeHasVerbRelations
-  + authzmap.CommonVerbVocabulary() + a curated hasListEndpoint table. No DB, no migration.
+  ЖИВЫЕ СТРОКИ каталога — `kaname.catalog_resource` / `catalog_verb`, читаемые
+  через снимок `catalog.Snapshot`. Строку заводит ПРИМЕНЕНИЕ МАНИФЕСТА модуля в
+  работающем процессе, снятие (#1861) делает её неживой. За сборкой остался ОДИН
+  факт, и это законно: `hasListEndpoint` — свойство КРАЯ (публичный ли у типа
+  отфильтрованный список), живой строкой оно не объявляется ни одной колонкой.
+
+  ⚠️ ЗДЕСЬ СТОЯЛО «authzmap.objectTypes + TypeHasVerbRelations +
+  authzmap.CommonVerbVocabulary() + curated hasListEndpoint table. No DB, no
+  migration» — перечень, порождённый СБОРКОЙ. Все четыре утверждения были верны
+  в день записи и перестали им быть: витрина переехала на живые строки задачей
+  #1976, и прод-код снял свою прежнюю редакцию с разбором
+  (`internal/apps/kaname/api/permission_catalog/list_catalog.go`, §«ВИТРИНА
+  ОТВЕЧАЕТ ЖИВЫМИ СТРОКАМИ КАТАЛОГА»), а этот кейс унаследовал её дословно.
+
+  Почему правка не косметическая (#2646): «базы нет, миграции нет» означает
+  «расхождения живого и снятого не бывает by construction» — ровно того класса,
+  который #1976 и закрывал. Автор, пишущий сюда соседний кейс по прежней шапке,
+  не стал бы проверять ни снятые строки, ни тип, заведённый применением
+  манифеста в работающем процессе.
 
 Covered scenarios:
   - authenticated GET → 200, modules[]/resources[]/closedVerbs/wildcardPolicy

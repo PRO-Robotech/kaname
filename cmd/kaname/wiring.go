@@ -51,6 +51,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/subscriptionjournal"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -105,6 +106,14 @@ type services struct {
 	// авторизацией этой поверхности: ступень подтверждения личности к ней
 	// сегодня не применяется — решение записано в приёмке, а не умолчание.
 	moduleHandler *moduleapp.Handler
+
+	// subscriptionDoor — ТА ЖЕ дверь решения, что у списков, вынесенная наружу
+	// для сборки сервера потока изменений.
+	//
+	// Полем, а не вторым построением: сужатель подписки обязан спрашивать ровно
+	// то, чем гейтится чтение, и второе значение здесь однажды уже дало два
+	// действующих источника ответа на один вопрос об одном объекте.
+	subscriptionDoor subscriptionjournal.Door
 
 	// identityQuotaHandler — чтение квот, носителем которых является личность
 	// (число аккаунтов). ТОЛЬКО чтение: величину назначает администратор облака.
@@ -870,6 +879,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	)
 
 	return &services{
+		subscriptionDoor:       relationStore,
 		accountHandler:         accountHandler,
 		projectHandler:         projectHandler,
 		userHandler:            userHandler,

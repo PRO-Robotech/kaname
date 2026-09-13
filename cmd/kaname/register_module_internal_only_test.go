@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -54,7 +56,7 @@ func TestInternalModuleService_MA126_InternalOnly_NotOnExternalListener(t *testi
 		registerPublicServices(s, svcs, nil)
 	})
 	intConn := serveBufconn(t, func(s *grpc.Server) {
-		registerInternalServices(s, svcs, nil, "", nil)
+		registerInternalServices(s, svcs, nil, config.Config{}, nil)
 	})
 
 	// Четыре глагола ОДНИМ перечнем: требование к ним одно, и перечислив их

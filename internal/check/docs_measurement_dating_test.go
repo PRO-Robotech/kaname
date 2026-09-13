@@ -506,6 +506,21 @@ func readMarkdownTree(t *testing.T, docsDir string) map[string]string {
 // константы: иначе эту ось нельзя подать синтетическому дереву, и она осталась бы
 // без доказательства падучести — ровно то состояние, в котором она и была. Держатель
 // факта при этом один: `serviceHistoryRoot`, названный в единственной точке вызова.
+// serviceAncestry — ЕДИНСТВЕННЫЙ производственный вход к вопросу о предке.
+//
+// Оба факта о СЛУЖБЕ — какую историю дерево обязано нести и какая вершина
+// считается стволом — названы ЗДЕСЬ и больше нигде. Гейты зовут этот вход, а не
+// `gitAncestry` напрямую: параметры последнего существуют РАДИ ИНЪЕКЦИИ, и
+// открытыми они дают ровно ту дыру, из-за которой заведена задача #65 — второй
+// вызывающий вправе назвать своей вершиной рабочую, и заметить это будет нечем.
+//
+// Так выбор вершины перестаёт быть тем, что нужно проверять: его негде сделать
+// дважды. Проверкой держалось бы совпадение двух мест, а здесь места одно.
+func serviceAncestry(t *testing.T, root string) func(string) ancestryVerdict {
+	t.Helper()
+	return gitAncestry(t, root, serviceHistoryRoot, serviceTrunkRef)
+}
+
 func gitAncestry(t *testing.T, root, historyRoot, trunkRef string) func(string) ancestryVerdict {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -624,7 +639,7 @@ func TestMeasurementRevisionsAreDatedByHashAndBelongToThisHistory(t *testing.T) 
 
 	// Перечень названных ревизий здесь БОЛЬШЕ НЕ СОБИРАЕТСЯ: предпосылкой половины
 	// «предок» служит свойство ДЕРЕВА, а не корпуса (см. шапку `gitAncestry`).
-	findings, c := auditMeasurementDating(docs, datingLedger(), gitAncestry(t, root, serviceHistoryRoot, serviceTrunkRef))
+	findings, c := auditMeasurementDating(docs, datingLedger(), serviceAncestry(t, root))
 
 	forms := make([]string, 0, len(c.byForm))
 	for _, phrase := range datingPhrases {

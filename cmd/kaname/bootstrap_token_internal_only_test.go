@@ -29,6 +29,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -63,7 +65,7 @@ func TestBootstrapToken_InternalOnly_NotOnExternalListener(t *testing.T) {
 	// :9091 the mTLS listener (IBT-07) plus the CallerPolicy SAN allow-list decide
 	// who may actually call it.
 	intConn := serveBufconn(t, func(s *grpc.Server) {
-		registerInternalServices(s, svcs, nil, "", nil)
+		registerInternalServices(s, svcs, nil, config.Config{}, nil)
 	})
 	intClient := iamv1.NewInternalBootstrapTokenServiceClient(intConn)
 	_, err = intClient.MintBootstrapToken(ctx, &iamv1.MintBootstrapTokenRequest{})

@@ -16,6 +16,9 @@ import (
 
 // gateFileTree — состав дерева, прочитанный ИНДЕКСОМ git.
 type gateFileTree struct {
+	// tree — САМО дерево: сборщики корпуса семейств принимают его параметром,
+	// и без него гейт снова строил бы обход у себя в теле (задача #17).
+	tree  *treecorpus.Tree
 	files map[string]bool
 }
 
@@ -29,5 +32,5 @@ func gateTree(t *testing.T, root string) gateFileTree {
 		t.Fatalf("состав дерева %s: %v — гейт не может назвать дерево, о котором "+
 			"он говорит", root, err)
 	}
-	return gateFileTree{files: tree.Files()}
+	return gateFileTree{tree: tree, files: tree.Files()}
 }

@@ -56,6 +56,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/PRO-Robotech/corelib/treecorpus"
 )
 
 const (
@@ -111,6 +113,16 @@ func (w MirrorWrite) Key() string { return w.File + "::" + w.Func }
 // MirrorWritesIn разбирает исходник Go и возвращает записи в зеркало,
 // приписанные объемлющей функции, плюс число литералов, называющих таблицу
 // вообще (перепись предпосылки: читатели тоже считаются).
+// MirrorCandidateCorpus — непроверочные файлы Go дерева, среди которых ищутся
+// писатели зеркала.
+//
+// Дерево приходит параметром, отбор объявлен один раз (`ProductionGoFile`), и
+// пустой обход даёт отказ, а не «находок ноль». Прежде обход строился в теле
+// пробы от корня своего модуля, и его премиса не исполнялась ни разу (#17).
+func MirrorCandidateCorpus(tree *treecorpus.Tree) (TreeCorpus, error) {
+	return CorpusFrom(tree, ProductionGoFile)
+}
+
 func MirrorWritesIn(filename, src string) ([]MirrorWrite, int, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filename, src, 0)

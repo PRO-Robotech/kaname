@@ -15,6 +15,7 @@
 package check_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,4 +172,97 @@ func assertNamesReadPathFile(t *testing.T, got []check.ConcatFinding, want strin
 	}
 	t.Fatalf("гейт нашёл %d находок, но НИ ОДНА не называет %s: координата не та, и по сообщению "+
 		"нельзя понять, что чинить. Находки: %+v", len(got), want, got)
+}
+
+// --- #17: премиса пустого обхода доказана ИСПОЛНЕНИЕМ ------------------------
+//
+// Обе ветви отказа переехали к корню, который уже был параметром, и потому
+// стали проверяемы синтетикой. Прежде они стояли в теле гейта, корень им
+// приходил от своего модуля, и подать им дерево без предмета было НЕЧЕМ:
+// ветви читались глазами и не исполнялись ни разу.
+
+// readPathSynthRoot — синтетический корень: объявление предмета замера по своей
+// координате плюс перечисленные файлы.
+//
+// Координата приводится к посадке тем же детектором, что и на боевом прогоне
+// (`treeposture` снимает приставку платформы у самостоятельного клона), поэтому
+// фикстура кладёт объявление ровно туда, откуда его возьмёт `ReadPathGoFiles`.
+func readPathSynthRoot(t *testing.T, decl string, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	all := map[string]string{
+		strings.TrimPrefix(check.FingerprintSourceRel, "services/iam/"): decl,
+	}
+	for rel, body := range files {
+		all[rel] = body
+	}
+	for rel, body := range all {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatalf("фикстура не собрана: %v", err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatalf("фикстура не собрана: %v", err)
+		}
+	}
+	return root
+}
+
+// TestReadPathGoFiles_EmptyTraversalIsRefused — обе премисы обхода, исполнением.
+func TestReadPathGoFiles_EmptyTraversalIsRefused(t *testing.T) {
+	t.Parallel()
+
+	const decl = "package scalegrid\n\nconst (\n\tverdictDir = \"services/iam/internal/repo/kaname/pg/relverdict\"\n)\n"
+
+	// ── КОНТРОЛЬ: каталог объявлен и непуст — обход даёт объём ───────────────
+	//
+	// Стоит первым: без него оба отказа ниже объяснялись бы обходом, который не
+	// находит ничего никогда.
+	files, dirs, err := check.ReadPathGoFiles(readPathSynthRoot(t, decl, map[string]string{
+		"internal/repo/kaname/pg/relverdict/read.go":      "package relverdict\n",
+		"internal/repo/kaname/pg/relverdict/read_test.go": "package relverdict\n",
+	}))
+	if err != nil {
+		t.Fatalf("КОНТРОЛЬ: на дереве С предметом обход объявлен пустым: %v", err)
+	}
+	if len(dirs) != 1 || len(files) != 1 {
+		t.Fatalf("КОНТРОЛЬ: каталогов %d, файлов %d — ожидалось по одному; проверочный "+
+			"файл обязан вычитаться, иначе отказ ниже значил бы не то", len(dirs), len(files))
+	}
+
+	// ── ОСЬ 1: объявление ЕСТЬ, каталогов в нём НОЛЬ ─────────────────────────
+	//
+	// Утверждается ТЕКСТ отказа, а не только его вид. Обе премисы дают один
+	// `ErrEmptyTraversal`, и на дереве без каталогов пусты ОБА множества —
+	// значит проверка «отказ был» прошла бы и через вторую ветвь, оставив первую
+	// недоказанной. Это выяснилось оглушением: снятая первая ветвь пробу НЕ
+	// покраснила, и проба проходила по причине, к её предмету отношения не
+	// имеющей.
+	_, _, err = check.ReadPathGoFiles(readPathSynthRoot(t, "package scalegrid\n", nil))
+	if !errors.Is(err, check.ErrEmptyTraversal) {
+		t.Fatalf("объявление без каталогов не дало отказа: %v — объём гейта был бы выведен "+
+			"из ничего, и «находок ноль» получено даром", err)
+	}
+	if !strings.Contains(err.Error(), check.FingerprintSourceRel) {
+		t.Fatalf("отказ не называет ОБЪЯВЛЕНИЕ, в котором нет каталогов (%v) — читателя "+
+			"пошлют искать пустой каталог там, где пусто само объявление", err)
+	}
+
+	// ── ОСЬ 2: каталог объявлен и СУЩЕСТВУЕТ, но не-тестовых .go в нём ноль ──
+	//
+	// Отличается от оси 1 ровно одним фактом: каталог есть. Без неё гейт зеленел
+	// бы на каталоге, из которого предмет уехал, — самый частый вид слепоты.
+	_, _, err = check.ReadPathGoFiles(readPathSynthRoot(t, decl, map[string]string{
+		"internal/repo/kaname/pg/relverdict/read_test.go": "package relverdict\n",
+	}))
+	if !errors.Is(err, check.ErrEmptyTraversal) {
+		t.Fatalf("каталог без не-тестовых .go не дал отказа: %v — молчание гейта означало бы "+
+			"свойство, которого никто не проверял", err)
+	}
+	if !strings.Contains(err.Error(), "relverdict") {
+		t.Fatalf("отказ не называет КАТАЛОГ, в котором нет предмета (%v) — две премисы "+
+			"стали бы неразличимы, и снятие любой из них прошло бы молча", err)
+	}
+
+	t.Log("осей 3: контроль · объявление без каталогов · каталог без предмета")
 }
