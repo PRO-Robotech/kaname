@@ -52,6 +52,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzfilter"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	repoaccount "github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
@@ -95,11 +96,21 @@ func (r *acctListFakeReader) Rollback(context.Context) error             { retur
 
 type acctListReader struct{ p *acctListFakeRepo }
 
+// Get — промах обязан отвечать ТЕМ ЖЕ признаком, что и настоящий читатель
+// (`internal/repo/kaname/pg/account_repo.go`: `iamerr.Wrapf(iamerr.ErrNotFound,
+// "Account %s not found", id)`).
+//
+// Прежде здесь стоял голый `stderrors.New("not found")` — дублёр, снисходительнее
+// продукта: он отдавал НЕ-признаковую ошибку там, где продукт отдаёт признак
+// отсутствия. Вызывающий, разводящий промах и неполадку по `errors.Is`, на этом
+// дублёре шёл бы по ветви неполадки, то есть проба судила бы не ту полосу, чьё
+// имя носит (`testing.md` §«Гейт на класс», п. 6: дублёр обязан выполнять
+// контракт настоящего).
 func (a *acctListReader) Get(ctx context.Context, id domain.AccountID) (domain.Account, error) {
 	if acc, ok := a.p.accounts[string(id)]; ok {
 		return acc, nil
 	}
-	return domain.Account{}, stderrors.New("not found")
+	return domain.Account{}, iamerr.Wrapf(iamerr.ErrNotFound, "Account %s not found", id)
 }
 func (a *acctListReader) ExistsByName(context.Context, domain.AccountName) (bool, error) {
 	return false, nil

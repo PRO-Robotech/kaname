@@ -162,7 +162,9 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListUserTokensRequest) (*
 		PageToken: req.GetPageToken(),
 	})
 	if err != nil {
-		return nil, mapPGErr(err)
+		// Логгера у обработчика нет — умолчание процесса задано композиционным
+		// корнем, и запись доезжает до того же приёмника (задача #2507).
+		return nil, mapPGErrLogged(ctx, nil, "user_tokens.List", err)
 	}
 	out := make([]*iamv1.UserOAuthClient, 0, len(rows))
 	for _, c := range rows {

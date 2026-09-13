@@ -22,6 +22,9 @@ import (
 // says otherwise: that is the database default, and it is the case every test
 // that is not ABOUT the state is exercising.
 func (s *stubSAClientRepo) AccountForServiceAccount(ctx context.Context, id domain.ServiceAccountID) (domain.AccountID, bool, error) {
+	if s.accountErr != nil {
+		return "", false, s.accountErr
+	}
 	if s.accountID != "" {
 		return s.accountID, !s.disabled, nil
 	}

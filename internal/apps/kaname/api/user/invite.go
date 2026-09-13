@@ -635,10 +635,15 @@ func (uc *InviteUserUseCase) resolveCanonicalSubjectID(
 	// the invitee's JWT to.
 	canonical := domain.SubjectID(actives[0].ID)
 	if uc.logger != nil && string(canonical) != string(perAccountRow.ID) {
+		// Почты здесь НЕТ намеренно: поток журнала уезжает оператору установки,
+		// чью политику хранения мы не знаем, а личные данные в него не пишутся ни
+		// на успешном пути, ни на отказном (security.md §Hardening п. 2).
+		// Коррелировать есть по чему — обе строки названы своими
+		// идентификаторами, и именно они отвечают на вопрос «почему выдача ушла
+		// не на свежую строку» (задача #2482).
 		uc.logger.Info("invite: project-grant bound to canonical identity row",
 			"per_account_row", string(perAccountRow.ID),
-			"canonical_row", string(canonical),
-			"email", string(email))
+			"canonical_row", string(canonical))
 	}
 	return canonical
 }

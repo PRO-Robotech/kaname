@@ -12,6 +12,7 @@ package interactiveclient
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -303,6 +304,16 @@ func createReq() *iamv1.CreateInteractiveClientRequest {
 // written. "No residue" is the substantive half: if a row were inserted anyway,
 // the name would stay taken by a client that was never registered, and the
 // retry the caller is entitled to make would fail for ever after.
+//
+// # ЧТО ЭТА ПРОБА ДОКАЗЫВАЕТ, А ЧТО НЕТ — сказано, потому что прежде было шире
+//
+// Признак недоступности подаётся ЗДЕСЬ, своей рукой. Значит проба утверждает
+// «признак, если он есть, доезжает кодом», и НЕ утверждает, что его кто-нибудь
+// ставит. Ровно это и было предметом задачи #2481: производитель признака не
+// ставил, отказ уходил внутренней ошибкой, а проба оставалась зелёной — по
+// подделке, а не по продукту. Что признак ставит настоящий производитель,
+// доказывает `internal/clients/hydra_interactive_clients_unavailable_test.go`;
+// две половины вместе и составляют цепь.
 func TestCreate_ProviderUnavailable_LeavesNothingBehind(t *testing.T) {
 	repo := &insertFailsRepo{}
 	prov := &failingProvider{registerErr: iamerr.Wrapf(iamerr.ErrUnavailable, "identity provider unavailable")}
@@ -319,6 +330,35 @@ func TestCreate_ProviderUnavailable_LeavesNothingBehind(t *testing.T) {
 	}
 	if !ops.errMarked {
 		t.Error("the operation must be marked with a terminal error, not left for the caller to poll for ever")
+	}
+}
+
+// Законный близнец к пробе выше: отказ поставщика БЕЗ признака повторимости
+// недоступностью не становится.
+//
+// Без него «признак доезжает кодом» зеленело бы и на реализации, объявляющей
+// повторяемым всякий отказ поставщика, — а это беда той же величины с другой
+// стороны: отвергнутый вход повтором не лечится, потому что одинаковый повтор
+// не меняет ни одного из входов, и вызывающий повторял бы вечно (задача #2481).
+func TestCreate_ProviderRejectedTheInput_IsNotAnnouncedRetryable(t *testing.T) {
+	repo := &insertFailsRepo{}
+	prov := &failingProvider{registerErr: errors.New("hydra admin api: status 400: bad redirect_uri")}
+	ops := &fakeOps{}
+
+	_, err := NewCreateUseCase(repo, prov, ops, []string{"https://api.example"}, nil).
+		Execute(context.Background(), createReq())
+
+	if err == nil {
+		t.Fatal("отвергнутый поставщиком вход обязан дать отказ")
+	}
+	if st, _ := status.FromError(err); st.Code() == codes.Unavailable {
+		t.Fatalf("отвергнутый вход объявлен повторяемым: вызывающий будет повторять вечно (%v)", err)
+	}
+	if repo.inserted {
+		t.Error("строка записана, хотя поставщик клиента не зарегистрировал")
+	}
+	if !ops.errMarked {
+		t.Error("операция обязана быть помечена терминальным отказом")
 	}
 }
 

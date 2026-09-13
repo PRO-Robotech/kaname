@@ -368,7 +368,7 @@ func (uc *ResolveUseCase) Execute(ctx context.Context, scopeID, service string) 
 		// Перевод СТИРАЕТ причину (текст INTERNAL фиксирован, текст недоступности
 		// опаковый), поэтому она называется журналу здесь — в том единственном
 		// месте, где ещё цела.
-		return nil, shared.LogRepoErr(ctx, uc.logger, "Resolve", err)
+		return nil, shared.LogRepoErr(ctx, uc.logger, "limit.Resolve", err)
 	}
 	if !ok {
 		// Direct-read lane: accounts and projects are iam's OWN rows.
@@ -440,7 +440,7 @@ func (uc *ListChangedUseCase) Execute(ctx context.Context, cursor string, pageSi
 		// Единственная полоса, на которой тянущий узнаёт об отказе. Без строки
 		// здесь причину назвать нечем: клиенту достаётся фиксированный текст, а
 		// журнала доступа у сервиса нет.
-		return ChangedResult{}, shared.LogRepoErr(ctx, uc.logger, "ListChangedSince", err)
+		return ChangedResult{}, shared.LogRepoErr(ctx, uc.logger, "limit.ListChangedSince", err)
 	}
 	return ChangedResult{Changes: rows, NextCursor: uc.cursors.Encode(next)}, nil
 }
