@@ -279,11 +279,16 @@ func (uc *OnRecoveryCompletedUseCase) doRecovery(
 			if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
 				EventType:       auditEventUserRecoveryCompleted,
 				TenantAccountID: string(primary.AccountID),
+				// Ни почты, ни субъекта внешнего поставщика: приёмник журнала
+				// кладёт ВСЕ поля нагрузки как есть — шага сокрытия нет ни
+				// одного, — поэтому всякое личное поле уезжает в поток службы, а
+				// срок хранения потока становится сроком хранения личных данных
+				// (`kacho#2483`). Корреляция от этого не страдает: субъект
+				// назван неизменяемым `user_id`, событие — `recovery_jti`, и оба
+				// остаются правдой через год, тогда как почта изменяема.
 				Payload: map[string]any{
 					"actor":                 "system",
 					"user_id":               string(primary.ID),
-					"external_id":           string(in.ExternalID),
-					"email":                 string(in.Email),
 					"recovery_jti":          in.RecoveryJTI,
 					"revoked_session_count": revokedCount,
 				},
