@@ -158,6 +158,13 @@ const iamDocsRelDir = "services/iam/docs"
 // Это свойство ДЕРЕВА, а не хеша: клон его несёт, поставка модуля не несёт.
 const serviceHistoryRoot = "1a4dbb2a79c04f762b4f97ca7f7e446a1db3de90"
 
+// serviceTrunkRef — ссылка на СТВОЛ: вершина, относительно которой судится
+// вхождение ревизии в историю.
+//
+// Не `HEAD`: работа едет в ствол схлопыванием, и вердикт обязан относиться к
+// тому дереву, где документ будет жить, а не к ветке, на которой он написан.
+const serviceTrunkRef = "origin/main"
+
 // predecessorRepos — ЕДИНСТВЕННЫЙ держатель факта «у службы есть предшественники».
 // Документы приёмки и архитектуры переехали сюда вместе со службой, и замеры в них
 // снимались ДО разъезда: их предикаты называют пути `services/iam/**` и гейты
@@ -499,7 +506,7 @@ func readMarkdownTree(t *testing.T, docsDir string) map[string]string {
 // константы: иначе эту ось нельзя подать синтетическому дереву, и она осталась бы
 // без доказательства падучести — ровно то состояние, в котором она и была. Держатель
 // факта при этом один: `serviceHistoryRoot`, названный в единственной точке вызова.
-func gitAncestry(t *testing.T, root, historyRoot string) func(string) ancestryVerdict {
+func gitAncestry(t *testing.T, root, historyRoot, trunkRef string) func(string) ancestryVerdict {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Logf("git недоступен — половина «предок» НЕ ВЫПОЛНЯЛАСЬ")
@@ -548,9 +555,34 @@ func gitAncestry(t *testing.T, root, historyRoot string) func(string) ancestryVe
 	// Вопрос задаётся ТОЛЬКО на полной истории: на усечённой корень недостижим by
 	// construction, и там отсутствие объекта по-прежнему даёт третий исход, а не
 	// «истории нет». Так новое различение ничего не отнимает у усечённой посадки.
+	// СУДИМАЯ ВЕРШИНА — СТВОЛ, А НЕ `HEAD`, и это несущее различие.
+	//
+	// Здесь вливают СХЛОПЫВАНИЕМ: коммит ветки предком ствола не становится
+	// никогда. Пока вершиной был `HEAD`, гейт отвечал о ДВУХ РАЗНЫХ деревьях —
+	// на запросе слияния `HEAD` есть merge-ревизия, и хеш полосы ей предок, а
+	// после посадки тот же хеш предком уже не является. Один и тот же документ
+	// получал зелёное до вливания и красное после, причём второго вердикта никто
+	// не читал: на стволе краснел процесс, чей исход не смотрят.
+	//
+	// Цена измерена, а не предположена: ствол службы был красен по этой пробе
+	// ДВА вливания подряд (`ba43277c`, `c56218b6`), и оба запроса слияния несли
+	// зелёный обязательный контекст.
+	//
+	// Судя по стволу, гейт даёт ОДИН вердикт до и после посадки — то есть говорит
+	// о том дереве, в которое работа и едет. Ствол недостижим (клон без ссылки на
+	// origin, выгрузка) — вершиной остаётся `HEAD`, и перепись называет это прямо:
+	// молчание о подмене вершины было бы тем же классом, что молчание о пропуске.
+	trunk := "HEAD"
+	if _, e := git("rev-parse", "--verify", trunkRef+"^{commit}"); e == nil {
+		trunk = trunkRef
+	} else {
+		t.Logf("ствол %s в этом дереве не разрешается — вершиной взят HEAD: "+
+			"вердикт относится к ветке, а не к стволу, в который она едет", trunkRef)
+	}
+
 	carriesOwnHistory := false
 	if !shallow {
-		if _, e := git("merge-base", "--is-ancestor", historyRoot, "HEAD"); e == nil {
+		if _, e := git("merge-base", "--is-ancestor", historyRoot, trunk); e == nil {
 			carriesOwnHistory = true
 		} else {
 			t.Logf("дерево НЕ несёт объявленную историю (корень %s предком HEAD не является) — "+
@@ -568,7 +600,7 @@ func gitAncestry(t *testing.T, root, historyRoot string) func(string) ancestryVe
 			}
 			return ancestryAbsent
 		}
-		if _, e := git("merge-base", "--is-ancestor", hash, "HEAD"); e == nil {
+		if _, e := git("merge-base", "--is-ancestor", hash, trunk); e == nil {
 			return ancestryYes
 		}
 		if !shallow {
@@ -592,7 +624,7 @@ func TestMeasurementRevisionsAreDatedByHashAndBelongToThisHistory(t *testing.T) 
 
 	// Перечень названных ревизий здесь БОЛЬШЕ НЕ СОБИРАЕТСЯ: предпосылкой половины
 	// «предок» служит свойство ДЕРЕВА, а не корпуса (см. шапку `gitAncestry`).
-	findings, c := auditMeasurementDating(docs, datingLedger(), gitAncestry(t, root, serviceHistoryRoot))
+	findings, c := auditMeasurementDating(docs, datingLedger(), gitAncestry(t, root, serviceHistoryRoot, serviceTrunkRef))
 
 	forms := make([]string, 0, len(c.byForm))
 	for _, phrase := range datingPhrases {
