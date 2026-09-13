@@ -45,7 +45,7 @@ import (
 	// «объявлено ноль» прочтётся как «поднято всё».
 	_ "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
 	_ "github.com/PRO-Robotech/corelib/api/kacho/cloud/quota/v1"
-	_ "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	_ "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )

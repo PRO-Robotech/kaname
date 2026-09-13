@@ -47,9 +47,9 @@ import (
 
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 	sessionrev "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/session_revocations"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // TestRevoke_TTLCeiling — RET-SWP-21.

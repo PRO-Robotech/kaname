@@ -115,7 +115,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"

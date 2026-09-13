@@ -57,8 +57,8 @@ import (
 
 	operationv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
 	"github.com/PRO-Robotech/corelib/safeconv"
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
 	"github.com/PRO-Robotech/kaname/internal/manifestcheckrun"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // Коды возврата. Смысл каждого — в комментарии пакета.

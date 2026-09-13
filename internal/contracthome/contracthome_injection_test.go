@@ -76,21 +76,6 @@ inputs:
       - kaname
 `
 
-// soundGoFile — законный близнец по оси второй копии, и он повторяет СОСТОЯНИЕ
-// НАСТОЯЩЕГО ДЕРЕВА на день переезда: заглушки службы в дереве лежат, но ни
-// один узел импорта их не читает, а из платформы берётся только объявленный
-// остаток (`pkg/ownerregister`, вне её каталога заглушек).
-//
-// Почему близнец именно такой: своя заглушка ВМЕСТЕ с носителем остатка — это
-// уже дефект (обе копии сходятся в одном двоичном), и подать её здесь значило бы
-// сделать контроль неотличимым от инъекции.
-const soundGoFile = `package sample
-
-import (
-	_ "github.com/PRO-Robotech/kacho/pkg/ownerregister"
-)
-`
-
 // soundStub — файл под каталогом заглушек: корень собственный.
 const soundStub = "package iamv1\n"
 
@@ -114,7 +99,6 @@ type contractHomeRoot struct {
 	InputContract string // proto/corelib/authz/v1/authz_options.proto; "" — файла нет
 	OrphanInput   string // proto/kacho/cloud/operation/operation.proto; "" — файла нет
 	BufGen        string // proto/buf.gen.yaml; "" — файла нет
-	GoFile        string // internal/sample/sample.go
 	ForeignStub   string // pkg/api/corelib/authz/v1/authz_options.pb.go; "" — файла нет
 
 	// Ledger — proto/inputs.yaml. Пусто означает НЕ «файла нет», а «собери
@@ -131,7 +115,6 @@ func soundRoot() contractHomeRoot {
 		OwnContract:   soundOwnContract,
 		InputContract: soundInputContract,
 		BufGen:        soundBufGen,
-		GoFile:        soundGoFile,
 	}
 }
 
@@ -160,7 +143,6 @@ func (r contractHomeRoot) build(t *testing.T) *treecorpus.Tree {
 		}
 		write("proto/inputs.yaml", ledger)
 	}
-	write("internal/sample/sample.go", r.GoFile)
 	write("pkg/api/kaname/cloud/iam/v1/account.pb.go", soundStub)
 	write("pkg/api/corelib/authz/v1/authz_options.pb.go", r.ForeignStub)
 
@@ -188,14 +170,6 @@ func TestInjectionControl_SoundRootIsSilentInAllThreeGates(t *testing.T) {
 	require.Equal(t, 2, ccensus.Imports, "оператор в комментарии зачтён импортом — разбор идёт текстом")
 	require.Equal(t, 1, ccensus.WellKnown)
 	require.Equal(t, 1, ccensus.ResolvedInTree)
-
-	scensus, sseeds, sdirect, serr := scanServiceStubUse(tree)
-	require.NoError(t, serr)
-	require.Empty(t, dualHomeFindings(scensus, sdirect, nil),
-		"годное дерево объявлено двойным домом: %s", scensus)
-	require.Equal(t, 1, scensus.PlatformModule, "объявленный остаток платформы не распознан")
-	require.Equal(t, []string{platformModulePath + "/pkg/ownerregister"}, sseeds)
-	require.NotZero(t, scensus.OwnStubFiles, "контроль беспредметен: заглушек в дереве нет")
 
 	gcensus, gfindings, gerr := scanGenerationRoots(tree)
 	require.NoError(t, gerr)
@@ -305,160 +279,6 @@ func TestInjection_OperatorInACommentIsNotAnImport(t *testing.T) {
 	require.Equal(t, closureGroundOrphan, findings[0].Ground,
 		"путь из комментария зачтён импортом: тогда находка была бы другой, а разбор — текстовым")
 	require.Equal(t, 2, census.Imports, "операторов импорта по-прежнему два, третий стоит в комментарии")
-}
-
-// ── Ось 2: обе копии одного контракта в одном двоичном ──────────────────────
-//
-// Инъекция подаёт СИНТЕТИЧЕСКИЙ корень исходников платформы: настоящий лежит в
-// кэше модулей и правке не подлежит, а обход носителей обязан быть доказан
-// настоящим входом — каталогом с файлами Go, а не подстановкой результата.
-
-// platformSourceFixture — синтетический корень платформенного модуля: один
-// пакет, чьё тело задаёт проба.
-func platformSourceFixture(t *testing.T, files map[string]string) string {
-	t.Helper()
-	root := t.TempDir()
-	for rel, body := range files {
-		full := filepath.Join(root, filepath.FromSlash(rel))
-		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o750))
-		require.NoError(t, os.WriteFile(full, []byte(body), 0o600))
-	}
-	return root
-}
-
-// residualSeed — платформенный пакет объявленного остатка, с которого начинается
-// обход носителей.
-const residualSeed = platformModulePath + "/pkg/subjectchange"
-
-func TestInjection_OwnStubsUnusedIsNotADualHome(t *testing.T) {
-	t.Parallel()
-	// Контроль оси: заглушки в дереве ЕСТЬ, носитель платформы ЕСТЬ, а своих
-	// узлов импорта ноль — детонировать нечему, и это ровно промежуточное
-	// состояние переезда.
-	census, _, _, err := scanServiceStubUse(soundRoot().build(t))
-	require.NoError(t, err)
-	require.Zero(t, census.OwnStubNodes, "контроль сдвинулся: дерево уже читает свои заглушки")
-	require.NotZero(t, census.OwnStubFiles, "контроль беспредметен: заглушек в дереве нет")
-
-	carriers := map[string]string{residualSeed: platformModulePath + "/pkg/api/kaname/cloud/iam/v1"}
-	require.Empty(t, dualHomeFindings(census, nil, carriers),
-		"при нуле своих узлов носитель объявлен находкой: тогда гейт краснел бы на верном дереве")
-}
-
-func TestInjection_DirectSecondCopyIsFound(t *testing.T) {
-	t.Parallel()
-	r := soundRoot()
-	// РОВНО ОДИН факт: тот же контракт читается и у службы, и у платформы.
-	r.GoFile = `package sample
-
-import (
-	_ "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-	_ "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-)
-`
-	census, _, direct, err := scanServiceStubUse(r.build(t))
-	require.NoError(t, err)
-	require.Equal(t, 1, census.OwnStubNodes)
-	require.Equal(t, 1, census.PlatformStubs)
-	findings := dualHomeFindings(census, direct, nil)
-	require.Len(t, findings, 1, "прямая вторая копия не найдена")
-	require.Equal(t, dualHomeGroundDirect, findings[0].Ground)
-}
-
-func TestInjection_TransitiveSecondCopyIsFound(t *testing.T) {
-	t.Parallel()
-	r := soundRoot()
-	// РОВНО ОДИН факт против контроля: служба читает СВОИ заглушки. Носитель
-	// остатка при этом тот же, что в контроле.
-	r.GoFile = `package sample
-
-import (
-	_ "github.com/PRO-Robotech/kacho/pkg/subjectchange"
-	_ "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-)
-`
-	census, seeds, direct, err := scanServiceStubUse(r.build(t))
-	require.NoError(t, err)
-	require.Equal(t, []string{residualSeed}, seeds)
-	require.Zero(t, census.PlatformStubs, "инъекция меняет больше одного факта: появился прямой импорт")
-
-	source := platformSourceFixture(t, map[string]string{
-		"pkg/subjectchange/reader.go": `package subjectchange
-
-import _ "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-`,
-	})
-	carriers, pkgs, files, cerr := platformCarriers(source, seeds)
-	require.NoError(t, cerr)
-	require.Equal(t, 1, pkgs)
-	require.Equal(t, 1, files)
-	require.Len(t, carriers, 1, "носитель второй копии не найден: предикат по прямым импортам "+
-		"дал бы здесь ложное зелёное")
-
-	findings := dualHomeFindings(census, direct, carriers)
-	require.Len(t, findings, 1)
-	require.Equal(t, dualHomeGroundTransitive, findings[0].Ground)
-	require.Equal(t, residualSeed, findings[0].Carrier)
-}
-
-func TestInjection_PlatformPackageWithoutTheStubPathIsNotACarrier(t *testing.T) {
-	t.Parallel()
-	// Законный близнец: тот же пакет остатка, но ведёт он к фундаменту, а не к
-	// каталогу заглушек платформы. Носителем он не является.
-	source := platformSourceFixture(t, map[string]string{
-		"pkg/subjectchange/reader.go": `package subjectchange
-
-import (
-	_ "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
-	_ "github.com/PRO-Robotech/kacho/pkg/ids"
-)
-`,
-		"pkg/ids/ids.go": "package ids\n",
-	})
-	carriers, pkgs, files, err := platformCarriers(source, []string{residualSeed})
-	require.NoError(t, err)
-	require.Empty(t, carriers, "пакет без пути к заглушкам объявлен носителем")
-	require.Equal(t, 2, pkgs, "обход не дошёл до второго пакета цепи")
-	require.Equal(t, 2, files)
-}
-
-func TestInjection_StubPathOnlyInAPlatformTestFileIsNotACarrier(t *testing.T) {
-	t.Parallel()
-	// Законный близнец второй: путь к заглушкам стоит ТОЛЬКО в тестовом файле
-	// платформы. В потребителя такой файл не линкуется, поэтому второй копии он
-	// не приносит — и назвать его носителем значило бы краснеть на верном дереве.
-	source := platformSourceFixture(t, map[string]string{
-		"pkg/subjectchange/reader.go": "package subjectchange\n",
-		"pkg/subjectchange/reader_test.go": `package subjectchange
-
-import _ "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-`,
-	})
-	carriers, _, files, err := platformCarriers(source, []string{residualSeed})
-	require.NoError(t, err)
-	require.Empty(t, carriers, "тестовый файл платформы объявлен носителем")
-	require.Equal(t, 1, files, "тестовый файл попал в разбор — тогда близнец и дефект неотличимы")
-}
-
-func TestInjection_CarrierOnTheSecondHopIsFound(t *testing.T) {
-	t.Parallel()
-	// Носитель на ВТОРОЙ позиции цепи: один шаг обхода его не увидел бы, и
-	// «носителей ноль» стало бы свойством глубины обхода, а не дерева.
-	source := platformSourceFixture(t, map[string]string{
-		"pkg/subjectchange/reader.go": `package subjectchange
-
-import _ "github.com/PRO-Robotech/kacho/pkg/ownerregister"
-`,
-		"pkg/ownerregister/ownerregister.go": `package ownerregister
-
-import _ "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
-`,
-	})
-	carriers, pkgs, _, err := platformCarriers(source, []string{residualSeed})
-	require.NoError(t, err)
-	require.Len(t, carriers, 1, "носитель на второй позиции цепи не найден")
-	require.Contains(t, carriers, platformModulePath+"/pkg/ownerregister")
-	require.Equal(t, 2, pkgs)
 }
 
 // ── Ось 3: входы генерации ──────────────────────────────────────────────────

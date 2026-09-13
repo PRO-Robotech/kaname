@@ -47,8 +47,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/PRO-Robotech/kacho/pkg/ownerregister"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/pkg/ownerregister"
 )
 
 // pointerThroughJournal — указатель на предка, положенный ЕДИНСТВЕННЫМ

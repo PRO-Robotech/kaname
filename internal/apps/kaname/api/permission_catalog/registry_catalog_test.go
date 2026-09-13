@@ -11,7 +11,7 @@ package permission_catalog
 import (
 	"testing"
 
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // findModule returns the catalog module by name, or nil.

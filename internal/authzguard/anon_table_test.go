@@ -29,7 +29,7 @@ import (
 	// Blank-import the iam proto package so its FileDescriptors register into
 	// protoregistry.GlobalFiles. Without this the test would only enumerate
 	// protos transitively imported by this package — incomplete.
-	_ "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	_ "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/contractnaming"
 )

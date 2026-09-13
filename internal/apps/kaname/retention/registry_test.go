@@ -47,7 +47,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/outbox"
 	"github.com/PRO-Robotech/corelib/tokenpolicy"
-	"github.com/PRO-Robotech/kacho/pkg/subjectchange"
+	"github.com/PRO-Robotech/kaname/pkg/subjectchange"
 
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/reconcile_outbox"
 )

@@ -38,7 +38,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 
 	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	clusterapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/cluster"
 	"github.com/PRO-Robotech/kaname/internal/domain"

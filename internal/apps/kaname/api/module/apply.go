@@ -37,7 +37,7 @@ import (
 	"github.com/PRO-Robotech/corelib/safeconv"
 
 	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/modulecatalog"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"

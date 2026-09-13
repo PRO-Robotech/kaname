@@ -12,7 +12,7 @@ import (
 	"context"
 
 	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
-	iamv1 "github.com/PRO-Robotech/kacho/pkg/api/kaname/cloud/iam/v1"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
 // Handler implements iamv1.InternalInteractiveClientServiceServer.
