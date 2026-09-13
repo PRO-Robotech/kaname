@@ -17,7 +17,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -1537,23 +1536,38 @@ func runServe(cfg config.Config) error {
 	admissionCtx, stopAdmission := context.WithCancel(context.Background())
 	defer stopAdmission()
 
-	var shutdownOnce sync.Once
-	triggerShutdown := func() {
-		shutdownOnce.Do(func() {
-			// ПЕРВЫМ делом — снять под из ротации: kubelet перестаёт слать
-			// трафик ДО того, как серверы начнут отказывать. Порядок здесь и
-			// есть предмет: флип после остановки не успевает ничего.
-			hooksHealth.SetShuttingDown()
-			stopAdmission()
-			stopGRPCBounded(internalSrv, gracefulTimeout)
-			stopGRPCBounded(grpcSrv, gracefulTimeout)
-			// Четыре не-gRPC поверхности гасятся ОДНОЙ отменой их общего контекста.
-			// Прежде здесь стояли четыре одинаковых блока со своим сроком в каждом,
-			// и каждая новая поверхность требовала пятого — то есть место, где
-			// поверхность забывают погасить, воспроизводилось при каждом добавлении.
-			stopSurfaces()
-		})
-	}
+	// КОРЕНЬ ГАШЕНИЯ — ОДНА РУЧКА НА ОБЕ ПРИЧИНЫ (kacho#2506).
+	//
+	// Причин гашения две: сигнал среды и КРАХ слушателя, дренажа, поверхности.
+	// Сигнальный контекст знает одну — отменить его изнутри нечем, его отмена
+	// стоит `defer`-ом и срабатывает уже ПОСЛЕ `group.Wait()`. Поэтому фоновые
+	// задачи берут контекст ОТСЮДА: он производен от сигнального (сигнал гасит
+	// его транзитивно) и отменяется гашением по краху.
+	//
+	// Разбор цены прежнего устройства — в шапке `root_shutdown.go`; здесь он не
+	// пересказывается.
+	rootShutdown := newRootShutdown(ctx, func() {
+		// ПЕРВЫМ делом — снять под из ротации: kubelet перестаёт слать
+		// трафик ДО того, как серверы начнут отказывать. Порядок здесь и
+		// есть предмет: флип после остановки не успевает ничего.
+		hooksHealth.SetShuttingDown()
+		stopAdmission()
+		stopGRPCBounded(internalSrv, gracefulTimeout)
+		stopGRPCBounded(grpcSrv, gracefulTimeout)
+		// Поверхности гасятся ОДНОЙ отменой их общего контекста. Прежде здесь
+		// стояли одинаковые блоки со своим сроком в каждом, и каждая новая
+		// поверхность требовала следующего — то есть место, где поверхность
+		// забывают погасить, воспроизводилось при каждом добавлении. Числа
+		// здесь нет намеренно: оно росло молча (в день заведения комментарий
+		// говорил «четыре»), а перечень выводится из `httpSurfaces`.
+		stopSurfaces()
+	})
+	defer rootShutdown.Stop()
+	// taskCtx — контекст ФОНОВЫХ ЗАДАЧ. Отдельное имя, а не затенение `ctx`:
+	// одно имя на два контекста читалось бы как один, и следующий взял бы
+	// сигнальный, думая, что берёт корневой.
+	taskCtx := rootShutdown.Context()
+	triggerShutdown := rootShutdown.Trigger
 
 	tasks := []func() error{
 		// Счёт допущенных и отвергнутых по каждому слушателю. Печатается ВСЕГДА,
@@ -1582,10 +1596,12 @@ func runServe(cfg config.Config) error {
 			}
 			return nil
 		},
-		// shutdown waiter: SIGTERM/SIGINT → graceful-stop обоих + дрейн LRO worker'ов.
+		// Задача-ожидатель: ЛЮБАЯ причина гашения → graceful-stop обоих + дрейн
+		// LRO worker'ов. Ждёт КОРНЕВОЙ контекст, а не сигнальный: прежняя
+		// редакция просыпалась только по сигналу, и при крахе слушателя
+		// `group.Wait()` не возвращался вовсе (kacho#2506).
 		func() error {
-			<-ctx.Done()
-			triggerShutdown()
+			rootShutdown.Await()
 			drainCtx, cancelDrain := context.WithTimeout(context.Background(), 3*gracefulTimeout)
 			defer cancelDrain()
 			if err := operations.Wait(drainCtx); err != nil {
@@ -1677,13 +1693,13 @@ func runServe(cfg config.Config) error {
 				triggerShutdown()
 			}
 		}()
-		return compensationDrainerTask(ctx)
+		return compensationDrainerTask(taskCtx)
 	})
 	// Наблюдаемость очереди: глубина, возраст самой старой недоставленной
 	// строки, число отравленных. Скан не мутирует таблицу и не может уронить
 	// под — ошибки логируются.
 	tasks = append(tasks, func() error {
-		runProviderCompensationMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
+		runProviderCompensationMetrics(taskCtx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
 
@@ -1715,13 +1731,13 @@ func runServe(cfg config.Config) error {
 				triggerShutdown()
 			}
 		}()
-		return inviteMailDrainerTask(ctx)
+		return inviteMailDrainerTask(taskCtx)
 	})
 	// Возврат отравленных, наблюдаемость очереди и уборка доставленных строк.
 	// Ошибка сборки останавливает старт: уборка, собранная молча и не
 	// исполняющаяся, оставляет очередь расти вечно.
 	if berr := startInviteMailBackstop(
-		ctx, pool, cfg, metricsReg.OutboxRecorder(), logger); berr != nil {
+		taskCtx, pool, cfg, metricsReg.OutboxRecorder(), logger); berr != nil {
 		_ = listener.Close()
 		_ = internalListener.Close()
 		return fmt.Errorf("invite mail backstop wiring: %w", berr)
@@ -1744,7 +1760,7 @@ func runServe(cfg config.Config) error {
 	// молчание слышимым — растущая глубина и стареющая голова были верным
 	// описанием, а не сигналом сбоя.
 	tasks = append(tasks, func() error {
-		runAuditOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
+		runAuditOutboxMetrics(taskCtx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
 	// Очередь сверки прав: состояние. У неё есть и доставка (дренаж ниже), и
@@ -1752,7 +1768,7 @@ func runServe(cfg config.Config) error {
 	// перешагнувшая порог, из клейма выпадает и перестаёт жаловаться. Разбор —
 	// `reconcile_outbox_metrics_wiring.go`.
 	tasks = append(tasks, func() error {
-		runReconcileOutboxMetrics(ctx, pool, metricsReg.OutboxRecorder(), logger)
+		runReconcileOutboxMetrics(taskCtx, pool, metricsReg.OutboxRecorder(), logger)
 		return nil
 	})
 	// Журнал аудита: вывоз в приёмник. Строится ДО запуска задач, чтобы ошибка
@@ -1765,7 +1781,7 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("audit shipper wiring: %w", err)
 	}
 	tasks = append(tasks, func() error {
-		return auditShipper.Run(ctx)
+		return auditShipper.Run(taskCtx)
 	})
 	// ВОЗВРАТА ОТРАВЛЕННЫХ СТРОК у журнала нет, и это следствие контракта
 	// приёмника, а не упущение: класса «не приму никогда» у него не существует,
@@ -1787,14 +1803,14 @@ func runServe(cfg config.Config) error {
 	// Провязку держит гейт `TestIAM1945_CatalogSnapshotBuiltByTheRootIsAlsoStartedByIt`:
 	// построенный корнем снимок обязан быть им же и запущен.
 	tasks = append(tasks, func() error {
-		catalogSnapshot.Run(ctx, catalogSnapshotRefreshPeriod())
+		catalogSnapshot.Run(taskCtx, catalogSnapshotRefreshPeriod())
 		return nil
 	})
 
 	identityGrowth := newIdentityGrowthSampler(kanamepg.NewIdentityGrowthRepo(pool))
 	metricsReg.NewIdentityGrowthCollector(identityGrowth.Counts)
 	tasks = append(tasks, func() error {
-		identityGrowth.Run(ctx, logger)
+		identityGrowth.Run(taskCtx, logger)
 		return nil
 	})
 
@@ -1828,7 +1844,7 @@ func runServe(cfg config.Config) error {
 		logger.Info("bootstrap admin reconciler starting", "email", bootstrapEmail)
 		// Non-fatal: reconciler errors must not crash the server. It returns
 		// nil on convergence / terminal-skip / shutdown by design.
-		return bootstrapReconciler.Run(ctx)
+		return bootstrapReconciler.Run(taskCtx)
 	})
 
 	// γ reconciler-worker (epic «Resource-scoped AccessBinding», D7). Drains
@@ -1867,7 +1883,7 @@ func runServe(cfg config.Config) error {
 	})
 	tasks = append(tasks, func() error {
 		logger.Info("rsab reconciler-worker starting (selector membership + containment + expiry)")
-		return reconcileWorker.Run(ctx)
+		return reconcileWorker.Run(taskCtx)
 	})
 
 	// RBAC explicit-model 2026 — MIGRATE-phase one-shot backfill
@@ -1923,13 +1939,13 @@ func runServe(cfg config.Config) error {
 	// где перестаёт работать наша собственная проверка (kacho#1821).
 	ruleRefReseed := metricsReg.NewRuleRefReseedRecorder()
 	tasks = append(tasks, func() error {
-		if ores, oerr := orphanScopeSweeper.RunOnce(ctx); oerr != nil {
+		if ores, oerr := orphanScopeSweeper.RunOnce(taskCtx); oerr != nil {
 			logger.Warn("orphan-scope sweep failed (next boot will retry)",
 				slog.Any("err", oerr),
 				slog.Int("scopes_revoked", ores.ScopesRevoked),
 				slog.Int("bindings_revoked", ores.BindingsRevoked))
 		}
-		if oerr := seed.BackfillOwnerBindings(ctx, pool); oerr != nil {
+		if oerr := seed.BackfillOwnerBindings(taskCtx, pool); oerr != nil {
 			logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))
 		}
 		// Страж расхождения литерала и строк каталога отработал РАНЬШЕ — в
@@ -1950,7 +1966,7 @@ func runServe(cfg config.Config) error {
 		// самолечащая, менять ограниченное отставание на полный отказ службы
 		// нельзя); структурная — системные роли есть, пересеяна ни одна —
 		// РОНЯЕТ старт, потому что «повтори позже» на ней есть ложь.
-		verbs, verr := seed.ReseedSystemRoleVerbs(ctx, kanameRepo, pool,
+		verbs, verr := seed.ReseedSystemRoleVerbs(taskCtx, kanameRepo, pool,
 			catalogSnapshot.Facts(), roleVerbReseed)
 		if verr != nil {
 			logger.Error("пересчёт проекции глаголов роли отказал",
@@ -1989,7 +2005,7 @@ func runServe(cfg config.Config) error {
 		// ненаписанного стража значило бы менять ограниченную потерю проверки на
 		// полный отказ. Поэтому здесь `Error` плюс счётчик плюс перепись — и
 		// структурная полоса НАЗВАНА в тексте, а не проглочена.
-		refs, rerr := seed.ReseedSystemRoleRuleRefs(ctx, kanameRepo, pool, ruleRefReseed)
+		refs, rerr := seed.ReseedSystemRoleRuleRefs(taskCtx, kanameRepo, pool, ruleRefReseed)
 		if rerr != nil {
 			logger.Error("пересчёт проекции сегментов правила отказал",
 				slog.Any("err", rerr),
@@ -2008,14 +2024,14 @@ func runServe(cfg config.Config) error {
 		// Перепись встроенного доступа. Системные выдачи можно ОТОЗВАТЬ — это и есть
 		// предмет #893/#895, — поэтому их отсутствие обязано быть видно оператору, а
 		// не выглядеть поломкой продукта.
-		seed.LogSystemGrantCensus(ctx, pool, logger.With(slog.String("component", "system_grants")))
-		res, berr := backfillRunner.RunOnce(ctx)
+		seed.LogSystemGrantCensus(taskCtx, pool, logger.With(slog.String("component", "system_grants")))
+		res, berr := backfillRunner.RunOnce(taskCtx)
 		if berr != nil {
 			logger.Warn("p8 backfill: reconcile-sweep failed (next boot/sweep will retry)", slog.Any("err", berr))
 			return nil // non-fatal — never crash the server on a best-effort backfill
 		}
 		if res.Executed {
-			report, verr := verifyGate.Verify(ctx)
+			report, verr := verifyGate.Verify(taskCtx)
 			if verr != nil {
 				logger.Warn("p8 verify-gate: verify failed", slog.Any("err", verr))
 			} else {
@@ -2030,7 +2046,7 @@ func runServe(cfg config.Config) error {
 			// against an owner-binding (bounded-scope owner-content path). Best-effort,
 			// non-fatal (parity with Verify): a brand-new cluster with no owner-binding
 			// reports ran=false and the gate is logged as smoke-skipped.
-			passed, ran, serr := verifyGate.RunBootForwardSmoke(ctx)
+			passed, ran, serr := verifyGate.RunBootForwardSmoke(taskCtx)
 			switch {
 			case serr != nil:
 				logger.Warn("p8 verify-gate: forward-smoke failed", slog.Any("err", serr))
@@ -2043,7 +2059,7 @@ func runServe(cfg config.Config) error {
 			// Design-B cutover gate (F-12 / VBC-19): relation-satisfies-action — a REAL
 			// FGA Check per active binding's v_* required-relation triple. Logged as the
 			// catalog-flip gate (the flip to v_* is permitted only when 100% resolve).
-			relReport, rerr := verifyGate.VerifyRelationSatisfiesAction(ctx)
+			relReport, rerr := verifyGate.VerifyRelationSatisfiesAction(taskCtx)
 			if rerr != nil {
 				logger.Warn("p8 verify-gate: relation-satisfies-action check failed", slog.Any("err", rerr))
 			} else {
