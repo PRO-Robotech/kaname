@@ -5,6 +5,30 @@ package metrics
 
 import "github.com/prometheus/client_golang/prometheus"
 
+// Клетки ЗАКРЫТОГО набора исходов активации приглашения.
+//
+// Значения дословно повторяют константы производителя
+// (`internal/apps/kaname/api/user/internal_upsert.go`,
+// `activationOutcome*`): они неэкспортируемы, и адаптеру величин незачем
+// импортировать use-case ради трёх строк. Граница названа вслух: расхождение
+// этого набора с набором производителя проба пакета НЕ держит — она держит
+// только то, что объявленные клетки заведены нулём.
+const (
+	// InviteActivationOutcomeActivated — приглашение активировано.
+	InviteActivationOutcomeActivated = "activated"
+	// InviteActivationOutcomeAlreadyActive — строку активировал конкурент.
+	InviteActivationOutcomeAlreadyActive = "already_active"
+	// InviteActivationOutcomeFailed — активация не удалась, вход прерван.
+	InviteActivationOutcomeFailed = "failed"
+)
+
+// InviteActivationOutcomes — ЗАКРЫТЫЙ набор клеток семейства.
+var InviteActivationOutcomes = []string{
+	InviteActivationOutcomeActivated,
+	InviteActivationOutcomeAlreadyActive,
+	InviteActivationOutcomeFailed,
+}
+
 // InviteActivationRecorder — исходы активации приглашения на первом входе.
 //
 // # Зачем считать УСПЕХИ, а не только отказы
@@ -39,6 +63,12 @@ func (r *Registry) NewInviteActivationRecorder() *InviteActivationRecorder {
 				"не удалась и вход прерван. Ноль failed значим только вместе с ненулевой " +
 				"суммой остальных: без них ноль означает, что активаций не было вовсе.",
 		}, []string{"outcome"}),
+	}
+	// Клетки закрытого набора заводятся нулём ПРИ РЕГИСТРАЦИИ: вектор без детей
+	// не отдаёт на провод ничего, и «механизм не провязан» становится неотличим
+	// от «механизм провязан и ни разу не сработал».
+	for _, outcome := range InviteActivationOutcomes {
+		rec.outcomes.WithLabelValues(outcome)
 	}
 	r.reg.MustRegister(rec.outcomes)
 	return rec
