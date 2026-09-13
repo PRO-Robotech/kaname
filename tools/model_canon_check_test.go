@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // model_canon_check_test.go — у побайтовой сверки модели с манифестом есть
@@ -118,6 +119,16 @@ type vpc_subnet
 		if err := os.WriteFile(filepath.Join(md, "manifest.yaml"), []byte(sb.String()), 0o600); err != nil {
 			t.Fatalf("манифест %s: %v", m, err)
 		}
+	}
+	// ДОМ МАНИФЕСТОВ СОСЕДЕЙ — предпосылка вопроса «модуль без манифеста».
+	//
+	// Дерево, которое соседей не несёт, их отсутствием не грешит: там это
+	// свойство поставки, и исполнитель отвечает третьим исходом (задача
+	// PRO-Robotech/kaname#56). Синтетика, где этот вопрос ЗАДАЮТ, обязана
+	// условие создать — иначе проба утверждала бы находку о дереве, у которого
+	// её не бывает. Имя каталога берётся у единственного объявления.
+	if err := os.MkdirAll(filepath.Join(root, treeposture.SiblingsDir, "vpc"), 0o750); err != nil {
+		t.Fatalf("дом манифестов соседей: %v", err)
 	}
 	return root
 }
