@@ -339,25 +339,6 @@ func providerEnvKnobs(t *testing.T, serviceRoot string) envKnobs {
 	return out
 }
 
-// mapstructureName вынимает имя настройки из тега структуры.
-func mapstructureName(tag string) string {
-	const key = `mapstructure:"`
-	i := strings.Index(tag, key)
-	if i < 0 {
-		return ""
-	}
-	rest := tag[i+len(key):]
-	j := strings.Index(rest, `"`)
-	if j < 0 {
-		return ""
-	}
-	name := rest[:j]
-	if c := strings.Index(name, ","); c >= 0 {
-		name = name[:c]
-	}
-	return name
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Чистые тела гейтов. Вынесены, чтобы инъекция звала ТО ЖЕ, что исполняется на
 // дереве: своя копия предиката в пробе инъекции разошлась бы с настоящим гейтом

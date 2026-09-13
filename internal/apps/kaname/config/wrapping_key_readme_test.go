@@ -27,7 +27,6 @@ package config
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -65,35 +64,6 @@ var hexRun = regexp.MustCompile(`(?i)[0-9a-f]{16,}`)
 // `aes_gcm_b64url`: командой оно не является, поэтому прогоном не ловится,
 // а оператор заводит по нему значение ровно той негодной формы.
 var encodingClaim = regexp.MustCompile(`(?i)base64|b64`)
-
-// moduleRoot поднимается от каталога пробы до go.mod модуля.
-func moduleRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("рабочий каталог: %v", err)
-	}
-	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
-	// теперь СВОЙ модуль (она выносится отдельным репозиторием), и подъём «до
-	// первого» останавливался бы в её каталоге. Пути, которые ниже склеиваются с
-	// этим корнем, называют место В ДЕРЕВЕ МОНОРЕПО — от корня, — поэтому
-	// остановка внутри службы удваивала сегмент и обход искал `services/iam/
-	// services/iam/…`, которого не существует.
-	outermost := ""
-	for {
-		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
-			outermost = dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			if outermost != "" {
-				return outermost
-			}
-			t.Fatalf("go.mod не найден вверх от каталога пробы")
-		}
-		dir = parent
-	}
-}
 
 // sealedSecretSection возвращает строки раздела о выдаче секрета.
 func sealedSecretSection(t *testing.T) []string {

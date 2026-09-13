@@ -11,8 +11,6 @@ package publicauthzcensus_test
 // аутентифицированному арендатору.
 
 import (
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -114,32 +112,4 @@ func TestEveryPublicRPCCarriesAnObjectQuestion(t *testing.T) {
 	sort.Strings(names)
 	t.Logf("освобождены контрактом от пообъектного вопроса (%d): %s",
 		len(names), strings.Join(names, ", "))
-}
-
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
-	// теперь СВОЙ модуль (она выносится отдельным репозиторием), и подъём «до
-	// первого» останавливался бы в её каталоге. Пути, которые ниже склеиваются с
-	// этим корнем, называют место В ДЕРЕВЕ МОНОРЕПО — от корня, — поэтому
-	// остановка внутри службы удваивала сегмент и обход искал `services/iam/
-	// services/iam/…`, которого не существует.
-	outermost := ""
-	for {
-		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
-			outermost = dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			if outermost != "" {
-				return outermost
-			}
-			t.Fatal("не найден корень репозитория (каталог с go.mod)")
-		}
-		dir = parent
-	}
 }

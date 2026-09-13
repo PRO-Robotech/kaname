@@ -225,12 +225,6 @@ func (s *stubKeys) set(keys ...domain.PublishedKey) {
 	s.keys = keys
 }
 
-func (s *stubKeys) fail(err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.err = err
-}
-
 // stubRevocations — авторитет отзыва с управляемым числом обращений: без счёта
 // «кеш держит» неотличимо от «читателя отзыва нет вовсе».
 type stubRevocations struct {

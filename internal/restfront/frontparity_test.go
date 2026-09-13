@@ -323,31 +323,6 @@ func routeOf(r *annotations.HttpRule) (route, bool) {
 // ─────────────────────────────────────────────────────────────────────────────
 // КООРДИНАТЫ ДЕРЕВА
 
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("рабочий каталог не читается: %v", err)
-	}
-	// Самый ВНЕШНИЙ go.mod: у службы свой модуль, поэтому первый встречный
-	// остановил бы обход на её границе, а координаты гейта лежат выше.
-	root := ""
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			root = dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	if root == "" {
-		t.Fatal("go.mod не найден ни на одном уровне — дерево не опознано, вердикт беспредметен")
-	}
-	return root
-}
-
 func grpcRegisterDir(t *testing.T) string {
 	t.Helper()
 	return platformtree.RequirePath(t, "services/iam/cmd/kaname")

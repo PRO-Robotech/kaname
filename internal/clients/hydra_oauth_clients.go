@@ -264,15 +264,6 @@ func (e *HydraAPIError) Error() string {
 	return fmt.Sprintf("hydra admin api: status %d: %s", e.StatusCode, e.Body)
 }
 
-// IsConflict reports whether err is a Hydra Admin 409 Conflict (e.g. a
-// CreateOAuthClient for an already-registered client_id). Callers with a
-// deterministic client_id treat this as idempotent success — the client already
-// exists. Keeps HTTP-status semantics inside the adapter package.
-func IsConflict(err error) bool {
-	var apiErr *HydraAPIError
-	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict
-}
-
 func hydraAPIError(status int, body []byte) error {
 	return &HydraAPIError{StatusCode: status, Body: string(body)}
 }

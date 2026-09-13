@@ -134,9 +134,6 @@ func (b Binding) Paths() []string {
 	return out
 }
 
-// Records возвращает записи привязки.
-func (b Binding) Records() []Record { return append([]Record(nil), b.records...) }
-
 // PathOf резолвит объявленного издателя в путь его записи.
 //
 // Издатель употребляется ТОЛЬКО как ключ поиска в объявленной таблице: не
