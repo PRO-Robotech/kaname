@@ -32,23 +32,23 @@ const (
 type RevokeRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// JWT `jti` of the token being revoked. Required when revoking a single
-	// token; may be empty when `revoke_all_user_tokens=true` is set (then the
-	// RPC enumerates active tokens via Hydra introspection and revokes each
-	// individually).
+	// token; may be empty when `revoke_all_user_tokens=true` is set — that path
+	// writes a user-level cutoff and names no token at all.
 	TokenJti string `protobuf:"bytes,1,opt,name=token_jti,json=tokenJti,proto3" json:"token_jti,omitempty"`
 	// User whose token is revoked. Required.
 	UserId string `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// Free-form reason — see SessionRevocation.reason for the canonical
-	// vocabulary (`user-logout`, `password-change`, `caep-event`,
-	// `admin-revoke`, `back-channel-logout`, `force-logout`).
+	// Free-form reason — see SessionRevocation.reason. The values listed there
+	// are examples, not a closed vocabulary: the service records the string as
+	// given.
 	Reason string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	// After this timestamp the revocation row may be pruned (defaults to
 	// `now() + 30d`). Should be ≥ original token's `exp` claim so the cache
 	// stays authoritative for the token's lifetime.
 	TtlExpiresAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=ttl_expires_at,json=ttlExpiresAt,proto3" json:"ttl_expires_at,omitempty"`
-	// When true, kaname enumerates ALL active access tokens for the user
-	// (Hydra introspection) and inserts a row per `jti`. Used by admin
-	// ForceLogout and password-change flows.
+	// When true, record a USER-LEVEL revoke-all cutoff: every token whose
+	// session authenticated at or before now is denied by the refresh-hook.
+	// No enumeration and no row per `jti` — a per-token row cannot name a token
+	// this service has never seen. Shares its writer with admin ForceLogout.
 	RevokeAllUserTokens bool `protobuf:"varint,5,opt,name=revoke_all_user_tokens,json=revokeAllUserTokens,proto3" json:"revoke_all_user_tokens,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
@@ -122,8 +122,10 @@ func (x *RevokeRequest) GetRevokeAllUserTokens() bool {
 // RevokeMetadata — Operation.metadata payload.
 type RevokeMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Number of token_jti rows that were newly inserted (excludes idempotent
-	// no-ops on conflict).
+	// Number of revocation records this call committed: the per-jti row, the
+	// user-level cutoff, or both when the request asked for both. It counts
+	// WRITES, never tokens — a cutoff denies every live token of the subject, and
+	// how many that is the call never learns.
 	RevokedCount int32 `protobuf:"varint,1,opt,name=revoked_count,json=revokedCount,proto3" json:"revoked_count,omitempty"`
 	// User whose session(s) were revoked.
 	UserId        string `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`

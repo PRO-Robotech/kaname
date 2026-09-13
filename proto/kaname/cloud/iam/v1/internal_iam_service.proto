@@ -91,11 +91,29 @@ service InternalIAMService {
   // Защита от повторного использования имени — гейт `buf breaking` и объявление
   // ломающего изменения в сообщении коммита.
 
-  // admin force-logout of a user. Writes
-  // `session_revocations` rows for every active access token (enumerated via
-  // Hydra introspection) + a `caep_outbox` row so federated downstream RPs
-  // get notified. Async: returns Operation; the LISTEN/NOTIFY fan-out then
-  // updates every api-gateway pod's revocation cache ≤ 1s.
+  // admin force-logout of a user. Records a USER-LEVEL revoke-all cutoff in the
+  // `user_token_revocations` table and the durable `audit_outbox` row for it in
+  // ONE transaction, then ends the subject's login sessions at the identity
+  // provider.
+  //
+  // The cutoff is the gate the refresh-hook enforces: it denies every token
+  // whose session authenticated at or before that instant. Nothing is
+  // enumerated per token, and no `session_revocations` row is written — a
+  // per-jti row cannot name a token this call has never seen. Once the person
+  // re-authenticates, auth_time advances past the cutoff and new sessions are
+  // issued again: the refusal is protective, not a permanent lockout.
+  //
+  // Async by envelope: returns an Operation, persisted before the mutation and
+  // completed after it, so the id handed back is always queryable.
+  //
+  // FEDERATED NOTIFICATION IS NOT PRODUCED — a recorded decision, not an
+  // omission. This comment used to promise a queue row "so federated downstream
+  // RPs get notified" and a fan-out that refreshed every edge cache within a
+  // second. Both were retired with their migrations and have no producer left;
+  // the reasons are written down in
+  // docs/engineering/architecture/known-divergences.md. An integrator has
+  // neither our history nor a way to re-measure, so the promise is withdrawn
+  // here rather than left standing.
   rpc ForceLogout (ForceLogoutRequest) returns (kacho.cloud.operation.Operation) {
     option (corelib.api.v1.operation) = {
       metadata: "ForceLogoutMetadata"
@@ -465,8 +483,9 @@ message ForceLogoutRequest {
   // User to log out from every active session. Required.
   string user_id = 1;
 
-  // Free-form reason recorded in audit_outbox + each session_revocations row
-  // (default "admin-force-logout").
+  // Free-form reason recorded on the cutoff row and in the `audit_outbox` row
+  // committed with it (default "admin-force-logout"). No per-token row carries
+  // it — this call writes none (see the rpc comment).
   string reason = 2;
 
   // ID of the admin user (or service account) triggering the force-logout.
@@ -483,8 +502,16 @@ message ForceLogoutMetadata {
 
 // ForceLogoutResult — Operation.response payload.
 message ForceLogoutResult {
-  // Number of session_revocations rows newly inserted (i.e. number of
-  // active tokens that were just revoked).
+  // Number of revocation records this call committed — exactly one, the
+  // user-level cutoff.
+  //
+  // IT IS NOT A COUNT OF TOKENS, and saying so is the point of this comment.
+  // The cutoff denies every token whose session predates it; how many that is
+  // cannot be answered here, because the call never enumerates them. The field
+  // used to be documented as "session_revocations rows newly inserted", which
+  // described a per-jti implementation this RPC no longer has: a reader who
+  // believed it would treat 1 as "one token was logged out" and conclude the
+  // rest are still live.
   int32 revoked_count = 1;
 }
 

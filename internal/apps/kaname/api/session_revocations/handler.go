@@ -10,10 +10,18 @@
 // Revocation sources that drive Revoke:
 //   - User-initiated logout (api-gateway OAuth2 logout handler — fronts Revoke).
 //   - Admin force-logout (InternalIAMService.ForceLogout — uses the same writer).
-//   - Back-channel logout from Hydra.
+//
+// Здесь стояла третья строка — выход по обратному каналу провайдера. Его в
+// дереве нет ни одним производителем, и контракт, на который шапка ссылалась,
+// не лежит ни в одном модуле (kacho#2486). Источник, названный и не
+// существующий, читается как действующий: следующий, отлаживая отзыв, ищет
+// вызывающего, которого никогда не было.
 //
 // Methods:
-//   - Revoke    — async (Operation): write a session_revocations row, NOTIFY.
+//   - Revoke    — async (Operation): по одному токену — строка
+//     session_revocations; revoke_all — ПОЛЬЗОВАТЕЛЬСКАЯ отсечка вместо строки
+//     на токен. Уведомления за записью не следует: канал снят вместе со своим
+//     триггером (#755), а слушателя у него не было и построить его нельзя.
 //   - IsRevoked — sync lookup, и её ЧИТАЮТ НА ПУТИ ЗАПРОСА (#1122): клиент края
 //     спрашивает её на каждом предъявлении удостоверения. Разбор дерева и
 //     согласие этой шапки с ним держит гейт `is_revoked_doc_test.go`.

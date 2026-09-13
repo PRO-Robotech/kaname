@@ -36,36 +36,57 @@ const (
 // InternalSessionRevocationsService — cluster-internal RPCs for the session
 // revocation hot-path (port 9091).
 //
-// `session_revocations` is queryable from api-gateway on
-// every access-token verification: api-gateway maintains an in-memory cache
-// pre-loaded via `ListByUser` + a LISTEN/NOTIFY subscription on
-// `session_revoked`. `IsRevoked` is the slow-path fallback
-// when a token's `jti` is not in cache (e.g. cold start window).
+// `session_revocations` is queryable from api-gateway on every access-token
+// verification: `IsRevoked` is asked on the request path, per presentation.
 //
-// Revocation sources:
-//   - User-initiated logout (kaname OAuth2 logout handler).
+// THERE IS NO PUSH, and the absence is deliberate. This comment used to
+// describe a cache pre-loaded over a notification channel that fanned every
+// revocation out to every edge pod within a second. That channel had no
+// listener from the first day of the schema and could not be given one — the
+// edge holds no Postgres driver, and reading this service's database directly
+// is ban #8 — so it was retired with its trigger. The reasoning is in
+// docs/engineering/architecture/known-divergences.md.
+//
+// Revocation sources, as the tree produces them today:
+//   - User-initiated logout (the edge's OAuth2 logout handler fronts `Revoke`).
 //   - Admin force-logout (InternalIAMService.ForceLogout — see
-//     internal_iam_service.proto extensions).
-//   - CAEP receiver (external IdP signal).
-//   - Back-channel logout from Hydra (see back_channel_logout_service.proto).
+//     internal_iam_service.proto; it shares this service's writer and records a
+//     user-level cutoff, not a row here).
 //
-// All revocations write to the same `session_revocations` table (PK =
-// `token_jti`); LISTEN/NOTIFY fans out to every api-gateway pod ≤ 1s.
+// A CAEP receiver and a Hydra back-channel logout endpoint were named here as
+// sources too. Neither exists: the CAEP pipeline was dropped by migration and
+// the back-channel contract this comment pointed at is in no module. They are
+// named in the negative rather than deleted silently, because an integrator
+// reading the old list would have built against sources that never arrive.
+//
+// Single-token revocations write the `session_revocations` table (PK =
+// `token_jti`); the revoke-all path writes a user-level cutoff instead.
 type InternalSessionRevocationsServiceClient interface {
-	// Revoke — mark a token (and optionally cascade to all user's active tokens
-	// via Hydra introspection) as revoked. Async — writes
-	// `session_revocations` row + `audit_outbox` row in a single TX, then
-	// returns Operation; worker NOTIFY-es `session_revoked` channel.
+	// Revoke — record a revocation. Async by envelope: the Operation row is
+	// persisted before the mutation and completed after it.
 	//
-	// Idempotent on `token_jti` (INSERT ... ON CONFLICT (token_jti) DO NOTHING).
+	// Two shapes, and they write DIFFERENT things:
+	//   - single token — one `session_revocations` row keyed by `token_jti`;
+	//   - `revoke_all_user_tokens` — one USER-LEVEL cutoff row, not a row per
+	//     token. Nothing is enumerated: the refresh-hook compares the token's
+	//     session auth_time against the cutoff.
+	//
+	// Either shape commits its `audit_outbox` row in the SAME transaction.
+	//
+	// No notification follows. The channel this comment used to name was retired
+	// with its trigger (see the service comment above); the edge learns of a
+	// revocation by asking `IsRevoked` on the request path.
+	//
+	// Idempotent on `token_jti` (upsert on conflict).
 	Revoke(ctx context.Context, in *RevokeRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// IsRevoked — sync hot-path lookup for api-gateway: `SELECT 1 FROM
 	// session_revocations WHERE token_jti = $1`. Latency budget ≤ 5ms p95
 	// (PK lookup on indexed table). Called only on cache miss.
 	IsRevoked(ctx context.Context, in *IsRevokedRequest, opts ...grpc.CallOption) (*IsRevokedResponse, error)
 	// ListByUser — admin / audit endpoint: enumerate active revocations for a
-	// user. Used by admin-UI to display "force-logged-out at" history and by
-	// CAEP forwarder to bulk-emit events.
+	// user, e.g. to display "force-logged-out at" history. A CAEP forwarder was
+	// named here as a second consumer; that pipeline was dropped by migration and
+	// has no code left.
 	//
 	// The whole response is about ONE user the CALLER NAMES, so it is authorized
 	// per-object on that user, and kaname enforces that itself in its own tree
@@ -174,36 +195,57 @@ func (c *internalSessionRevocationsServiceClient) SessionCutoffOf(ctx context.Co
 // InternalSessionRevocationsService — cluster-internal RPCs for the session
 // revocation hot-path (port 9091).
 //
-// `session_revocations` is queryable from api-gateway on
-// every access-token verification: api-gateway maintains an in-memory cache
-// pre-loaded via `ListByUser` + a LISTEN/NOTIFY subscription on
-// `session_revoked`. `IsRevoked` is the slow-path fallback
-// when a token's `jti` is not in cache (e.g. cold start window).
+// `session_revocations` is queryable from api-gateway on every access-token
+// verification: `IsRevoked` is asked on the request path, per presentation.
 //
-// Revocation sources:
-//   - User-initiated logout (kaname OAuth2 logout handler).
+// THERE IS NO PUSH, and the absence is deliberate. This comment used to
+// describe a cache pre-loaded over a notification channel that fanned every
+// revocation out to every edge pod within a second. That channel had no
+// listener from the first day of the schema and could not be given one — the
+// edge holds no Postgres driver, and reading this service's database directly
+// is ban #8 — so it was retired with its trigger. The reasoning is in
+// docs/engineering/architecture/known-divergences.md.
+//
+// Revocation sources, as the tree produces them today:
+//   - User-initiated logout (the edge's OAuth2 logout handler fronts `Revoke`).
 //   - Admin force-logout (InternalIAMService.ForceLogout — see
-//     internal_iam_service.proto extensions).
-//   - CAEP receiver (external IdP signal).
-//   - Back-channel logout from Hydra (see back_channel_logout_service.proto).
+//     internal_iam_service.proto; it shares this service's writer and records a
+//     user-level cutoff, not a row here).
 //
-// All revocations write to the same `session_revocations` table (PK =
-// `token_jti`); LISTEN/NOTIFY fans out to every api-gateway pod ≤ 1s.
+// A CAEP receiver and a Hydra back-channel logout endpoint were named here as
+// sources too. Neither exists: the CAEP pipeline was dropped by migration and
+// the back-channel contract this comment pointed at is in no module. They are
+// named in the negative rather than deleted silently, because an integrator
+// reading the old list would have built against sources that never arrive.
+//
+// Single-token revocations write the `session_revocations` table (PK =
+// `token_jti`); the revoke-all path writes a user-level cutoff instead.
 type InternalSessionRevocationsServiceServer interface {
-	// Revoke — mark a token (and optionally cascade to all user's active tokens
-	// via Hydra introspection) as revoked. Async — writes
-	// `session_revocations` row + `audit_outbox` row in a single TX, then
-	// returns Operation; worker NOTIFY-es `session_revoked` channel.
+	// Revoke — record a revocation. Async by envelope: the Operation row is
+	// persisted before the mutation and completed after it.
 	//
-	// Idempotent on `token_jti` (INSERT ... ON CONFLICT (token_jti) DO NOTHING).
+	// Two shapes, and they write DIFFERENT things:
+	//   - single token — one `session_revocations` row keyed by `token_jti`;
+	//   - `revoke_all_user_tokens` — one USER-LEVEL cutoff row, not a row per
+	//     token. Nothing is enumerated: the refresh-hook compares the token's
+	//     session auth_time against the cutoff.
+	//
+	// Either shape commits its `audit_outbox` row in the SAME transaction.
+	//
+	// No notification follows. The channel this comment used to name was retired
+	// with its trigger (see the service comment above); the edge learns of a
+	// revocation by asking `IsRevoked` on the request path.
+	//
+	// Idempotent on `token_jti` (upsert on conflict).
 	Revoke(context.Context, *RevokeRequest) (*operation.Operation, error)
 	// IsRevoked — sync hot-path lookup for api-gateway: `SELECT 1 FROM
 	// session_revocations WHERE token_jti = $1`. Latency budget ≤ 5ms p95
 	// (PK lookup on indexed table). Called only on cache miss.
 	IsRevoked(context.Context, *IsRevokedRequest) (*IsRevokedResponse, error)
 	// ListByUser — admin / audit endpoint: enumerate active revocations for a
-	// user. Used by admin-UI to display "force-logged-out at" history and by
-	// CAEP forwarder to bulk-emit events.
+	// user, e.g. to display "force-logged-out at" history. A CAEP forwarder was
+	// named here as a second consumer; that pipeline was dropped by migration and
+	// has no code left.
 	//
 	// The whole response is about ONE user the CALLER NAMES, so it is authorized
 	// per-object on that user, and kaname enforces that itself in its own tree
