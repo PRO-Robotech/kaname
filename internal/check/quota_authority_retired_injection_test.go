@@ -96,7 +96,7 @@ func TestAuthorityResidueGateCanFail(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			census, findings := check.JudgeAuthorityResidue(map[string]string{tc.file: tc.body})
+			census, findings := check.JudgeAuthorityResidue(map[string]string{tc.file: tc.body}, nil)
 			f, ok := findingOnAxis(findings, tc.axis)
 			if !ok {
 				t.Fatalf("внесённый дефект оси «%s» НЕ найден — гейт не способен упасть.\n%s\nнаходки: %v",
@@ -167,7 +167,7 @@ func TestAuthorityResidueGateStaysSilentOnTheLawfulRemainder(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			census, findings := check.JudgeAuthorityResidue(map[string]string{tc.file: tc.body})
+			census, findings := check.JudgeAuthorityResidue(map[string]string{tc.file: tc.body}, nil)
 			if len(findings) != 0 {
 				t.Fatalf("законный остаток объявлен находкой — гейт ловит форму, а не предмет.\n%s\nнаходки: %v",
 					census, findings)
@@ -196,7 +196,7 @@ func TestAuthorityResidueGateStaysSilentOnTheLawfulRemainder(t *testing.T) {
 func TestAuthorityResidueCensusSeparatesNothingFoundFromNothingRead(t *testing.T) {
 	t.Parallel()
 
-	empty, findings := check.JudgeAuthorityResidue(map[string]string{})
+	empty, findings := check.JudgeAuthorityResidue(map[string]string{}, nil)
 	if len(findings) != 0 {
 		t.Fatalf("пустой корпус дал находки: %v", findings)
 	}
@@ -211,7 +211,7 @@ func TestAuthorityResidueCensusSeparatesNothingFoundFromNothingRead(t *testing.T
 		"proto/kaname/cloud/iam/v1/identity_quota_service.proto": "syntax = \"proto3\";\n" +
 			"service IdentityQuotaService {\n}\n",
 		"internal/authzmodel/fga_model.fga": "model\n  schema 1.1\n",
-	})
+	}, nil)
 	if len(findings) != 0 {
 		t.Fatalf("чистый корпус дал находки: %v", findings)
 	}
@@ -235,7 +235,7 @@ func TestAuthorityResidueUnparsedIsAThirdOutcome(t *testing.T) {
 
 	census, findings := check.JudgeAuthorityResidue(map[string]string{
 		"internal/broken/broken.go": "package broken\n\nfunc ( {\n",
-	})
+	}, nil)
 	if len(findings) != 0 {
 		t.Fatalf("неразобранный файл дал находки: %v", findings)
 	}
@@ -243,6 +243,72 @@ func TestAuthorityResidueUnparsedIsAThirdOutcome(t *testing.T) {
 		t.Fatalf("неразобранный файл не назван третьей категорией: %s", census)
 	}
 	t.Logf("%s", census)
+}
+
+// TestAuthorityResidueLedgerExcusesAndExpires — ведомость отношений модели,
+// обе стороны.
+//
+// Ведомость нужна тому единственному отношению, чьё снятие принадлежит другому
+// предмету: оно ВЫДАНО применённой миграцией и ТРЕБУЕТСЯ каталогом, чья копия
+// принадлежит краю платформы. Разбор причины — в шапке `AuthorityResidueLedger`.
+//
+// Проверяются обе стороны, потому что каждая по отдельности бесполезна:
+// прощающая без истекающей даёт послабление навсегда, истекающая без прощающей
+// не отличается от отсутствия ведомости.
+func TestAuthorityResidueLedgerExcusesAndExpires(t *testing.T) {
+	t.Parallel()
+
+	const model = "internal/authzmodel/fga_model.fga"
+	withRelation := "model\n  schema 1.1\ntype cluster\n  relations\n" +
+		"    define quota_reader: [service_account, group#member] or system_admin\n"
+	withoutRelation := "model\n  schema 1.1\ntype cluster\n  relations\n" +
+		"    define fga_writer: [service_account, group#member] or system_admin\n"
+	ledger := map[string]string{"quota_reader": "причина и предикат снятия"}
+
+	t.Run("прощает названное и говорит об этом ЧИСЛОМ", func(t *testing.T) {
+		census, findings := check.JudgeAuthorityResidue(
+			map[string]string{model: withRelation}, ledger)
+		if len(findings) != 0 {
+			t.Fatalf("объявленное ведомостью отношение стало находкой: %v", findings)
+		}
+		if census.Excused != 1 {
+			t.Fatalf("прощено %d раз вместо одного — послабление, о котором не сказано "+
+				"числом, неотличимо от его отсутствия: %s", census.Excused, census)
+		}
+	})
+
+	t.Run("БЕЗ ведомости то же отношение — находка", func(t *testing.T) {
+		census, findings := check.JudgeAuthorityResidue(
+			map[string]string{model: withRelation}, nil)
+		if _, ok := findingOnAxis(findings, check.AxisModel); !ok {
+			t.Fatalf("без ведомости отношение не найдено — прощение выше ничего не "+
+				"доказывает, ось молчит сама по себе.\n%s", census)
+		}
+	})
+
+	t.Run("ИСТЕКАЕТ САМА: записи нечего прощать — находка", func(t *testing.T) {
+		census, findings := check.JudgeAuthorityResidue(
+			map[string]string{model: withoutRelation}, ledger)
+		f, ok := findingOnAxis(findings, check.AxisModel)
+		if !ok {
+			t.Fatalf("отношение ушло из модели, а запись ведомости молчит — послабление "+
+				"переживает предмет и прикроет следующую находку.\n%s", census)
+		}
+		if f.Where != "AuthorityResidueLedger" {
+			t.Fatalf("истёкшая запись названа координатой %q вместо ведомости", f.Where)
+		}
+	})
+
+	t.Run("на корпусе БЕЗ модели истечения не объявляется", func(t *testing.T) {
+		// Иначе находка была бы вердиктом об обходе, а не о дереве: модель не
+		// прочитана, и о судьбе отношения не известно ничего.
+		census, findings := check.JudgeAuthorityResidue(
+			map[string]string{"internal/x/x.go": "package x\n"}, ledger)
+		if len(findings) != 0 {
+			t.Fatalf("на корпусе без модели ведомость объявлена истёкшей: %v\n%s",
+				findings, census)
+		}
+	})
 }
 
 // TestAuthorityResidueCorpusSelectorReadsWhatItMustAndNothingElse — отбор

@@ -58,7 +58,6 @@ func registerInternalRESTServices(
 		{"InternalClusterService", iamv1.RegisterInternalClusterServiceHandlerFromEndpoint},
 		{"InternalInteractiveClientService", iamv1.RegisterInternalInteractiveClientServiceHandlerFromEndpoint},
 		{"InternalModuleService", iamv1.RegisterInternalModuleServiceHandlerFromEndpoint},
-		{"InternalLimitService", iamv1.RegisterInternalLimitServiceHandlerFromEndpoint},
 		// Привязок ноль: маршрутов не добавляет, но в перечне стоит —
 		// исключение завело бы второй перечень.
 		{"InternalSessionRevocationsService", iamv1.RegisterInternalSessionRevocationsServiceHandlerFromEndpoint},
@@ -105,7 +104,6 @@ func registerPublicRESTServices(
 		{"PermissionCatalogService", iamv1.RegisterPermissionCatalogServiceHandlerFromEndpoint},
 		{"SAKeyService", iamv1.RegisterSAKeyServiceHandlerFromEndpoint},
 		{"UserTokenService", iamv1.RegisterUserTokenServiceHandlerFromEndpoint},
-		{"LimitService", iamv1.RegisterLimitServiceHandlerFromEndpoint},
 	}
 	for _, r := range registrations {
 		if err := r.bind(ctx, mux, endpoint, opts); err != nil {

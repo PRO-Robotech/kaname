@@ -73,7 +73,7 @@ func TestLimitAuthorityIsGoneFromTheTree(t *testing.T) {
 		corpus[slashed] = string(raw)
 	}
 
-	census, findings := check.JudgeAuthorityResidue(corpus)
+	census, findings := check.JudgeAuthorityResidue(corpus, check.AuthorityResidueLedger)
 	t.Logf("%s; находок %d", census, len(findings))
 
 	// ПРЕДПОСЫЛКИ — до вердикта. Пустой обход даёт ноль находок при любом

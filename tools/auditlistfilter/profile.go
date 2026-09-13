@@ -109,17 +109,18 @@ var Profile = listfiltergate.Profile{
 	PerPackage:     true,
 	ReceiverSuffix: "Handler",
 
-	// ExtraReceivers — второй транспортный тип того же ресурса. Сегодня он один:
-	// `limit.PublicHandler`, административная поверхность пределов на публичном
-	// слушателе (ADM-1 S1, #878).
+	// ЗДЕСЬ СТОЯЛ `ExtraReceivers: []string{"PublicHandler"}` — второй
+	// транспортный тип того же ресурса. Он был ровно один: `limit.PublicHandler`,
+	// административная поверхность величин на публичном слушателе.
 	//
-	// ПОЧЕМУ ОБЪЯВЛЕНИЕ, А НЕ ПЕРЕИМЕНОВАНИЕ. Гейт опознаёт транспорт по ТИПУ и
-	// без этой строки честно сказал: «объявление публичного List не привязано ни
-	// к какому ресурсу — его страница остаётся несуженной, пока гейт отчитывается
-	// об исправности». Это ровно тот вид молчания, ради которого гейт и заведён,
-	// поэтому закрывать его следует объявлением намерения, а не подгонкой имени
-	// под предикат.
-	ExtraReceivers: []string{"PublicHandler"},
+	// Авторитет величин выпилен из службы целиком (PRO-Robotech/kacho#2117,
+	// стадия S4), и объявлению стало нечего впускать: ни одно объявление List под
+	// `internal/apps/kaname/api` этого типа-приёмника больше не несёт. Снято
+	// ВМЕСТЕ с предметом — запись, которой нечего допускать, есть послабление без
+	// ответственного, и следующий List с таким приёмником она впустила бы молча.
+	//
+	// Сказал это сам гейт, а не внимание: «Profile.ExtraReceivers names
+	// "PublicHandler", but no List declaration carries that receiver type».
 
 	// iam's per-object question to the model. VisibleSet is the batched form every
 	// page filter reaches; Visible is the single-object form. The two grant-authority
@@ -324,33 +325,18 @@ var Profile = listfiltergate.Profile{
 				"expires with its method: retire the RPC and this entry becomes a finding.",
 		},
 
-		// ---- admin-only internal surface ----
-		"limit.List": {
-			Shape: listfiltergate.ClusterScoped,
-			Reason: "a resource-count ceiling is a CLUSTER-level administrative record: the row " +
-				"carries a scope (DEFAULT/ACCOUNT/PROJECT) but no owner to grant against, so " +
-				"there is no per-object grant to narrow the page to — RowFilter here would state " +
-				"a check whose subject does not exist. What bounds the caller instead is the " +
-				"surface: the RPC lives ONLY on InternalLimitService, is registered ONLY on the " +
-				"cluster-internal listener (ban #6), and its catalog entry demands `system_admin` " +
-				"on `cluster` — a relation defined `[user, service_account]` with NO `user:*` " +
-				"member, so unlike `viewer` it is not satisfiable by a wildcard tuple and does " +
-				"narrow. The exclusion expires with its subject twice over: retire the RPC and " +
-				"this entry becomes a finding, and give the ceiling a per-object owner and the " +
-				"reason above stops being true — at which point this must become RowFilter.",
-		},
-		"limit.ListChangedSince": {
-			Shape: listfiltergate.ClusterScoped,
-			Reason: "the incremental read owner services poll to refresh their ceiling cache. Its " +
-				"caller is a MACHINE, not a tenant: the catalog entry demands `quota_reader` on " +
-				"`cluster`, defined `[service_account, group#member] or system_admin` — no " +
-				"`user:*` member, so it is not satisfiable by a wildcard tuple. The grant is held " +
-				"by a GROUP rather than by enumerated subjects, so revoking one owner service is " +
-				"one membership row (rule B18). Narrowing this page per object would " +
-				"be wrong, not merely absent: an owner service polls ceilings for every scope it " +
-				"enforces, and a page filtered to what the MACHINE can see would silently drop " +
-				"tenants whose limits it must apply. The exclusion expires with the RPC.",
-		},
+		// ---- ЗДЕСЬ СТОЯЛИ ДВА ОСВОБОЖДЕНИЯ АВТОРИТЕТА ВЕЛИЧИН ----
+		//
+		// `limit.List` и `limit.ListChangedSince` объявлялись кластерными: у
+		// записи величины нет владельца, против которого сужать страницу.
+		//
+		// Обе записи САМИ называли свой предикат снятия — «the exclusion expires
+		// with the RPC» — и он наступил: авторитет величин выпилен из службы
+		// целиком (PRO-Robotech/kacho#2117, стадия S4), глаголов больше нет.
+		// Записи сняты ТЕМ ЖЕ изменением, что их предмет: освобождение, которому
+		// нечего освобождать, прикрыло бы следующий List того же имени, и никто
+		// бы не проверил, чем сужается ЕГО страница.
+
 		"module.List": {
 			Shape: listfiltergate.ClusterScoped,
 			Reason: "the module catalog is the platform's own registry of modules, their " +

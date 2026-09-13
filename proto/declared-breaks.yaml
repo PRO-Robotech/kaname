@@ -42,4 +42,39 @@
 #     reason: служба больше не выдаёт токен этим глаголом, полоса снята целиком
 #     issue: kaname#35
 
-breaks: []
+breaks:
+  # АВТОРИТЕТ ВЕЛИЧИН УХОДИТ ИЗ СЛУЖБЫ ДОСТУПА ЦЕЛИКОМ — решение владельца
+  # 2026-09-06, задача PRO-Robotech/kacho#2117, приёмка KAN-QUOTA-1 стадия S4.
+  #
+  # Порядок соблюдён и ПРОВЕРЕН ЗАМЕРОМ, а не памятью: снятие отвечающего
+  # допустимо лишь после того, как потребители перестали спрашивать. На стволе
+  # платформы (PRO-Robotech/kacho@546d5b08d7) все пять — vpc, compute, nlb,
+  # registry, storage — объявляют `quota.authority: "not-deployed"`, а
+  # `quotaAuthority: true` в профилях умбреллы даёт НОЛЬ (было 16). Флип посажен
+  # задачей kacho#2596, закрытой 2026-09-12.
+  #
+  # СНЯТЫ ТРИ ФАЙЛА, А НЕ ОТДЕЛЬНЫЕ СИМВОЛЫ, и `path` совпадает с `symbol`
+  # намеренно: предмет находки FILE_NO_DELETE ровно один — сам файл.
+  - rule: FILE_NO_DELETE
+    path: kaname/cloud/iam/v1/limit.proto
+    symbol: kaname/cloud/iam/v1/limit.proto
+    reason: |
+      сообщения авторитета величин (Limit, EffectiveLimit, LimitChange и три
+      метаданных операций) сняты вместе с модулем: служба доступа отвечает
+      «кому что разрешено», а не «сколько чего можно завести»
+    issue: https://github.com/PRO-Robotech/kacho/issues/2117
+  - rule: FILE_NO_DELETE
+    path: kaname/cloud/iam/v1/limit_service.proto
+    symbol: kaname/cloud/iam/v1/limit_service.proto
+    reason: |
+      арендаторская поверхность авторитета величин (LimitService, пять глаголов)
+      снята: назначать потолки службе доступа больше нечем и незачем
+    issue: https://github.com/PRO-Robotech/kacho/issues/2117
+  - rule: FILE_NO_DELETE
+    path: kaname/cloud/iam/v1/internal_limit_service.proto
+    symbol: kaname/cloud/iam/v1/internal_limit_service.proto
+    reason: |
+      служебная поверхность авторитета (InternalLimitService, семь глаголов,
+      включая Resolve и ListChangedSince) снята; пять её вызывающих в платформе
+      перестали спрашивать домен величин до этого изменения (kacho#2596)
+    issue: https://github.com/PRO-Robotech/kacho/issues/2117

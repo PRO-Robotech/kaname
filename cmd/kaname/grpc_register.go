@@ -92,21 +92,14 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	if svcs != nil && svcs.userTokensHandler != nil {
 		iamv1.RegisterUserTokenServiceServer(srv, svcs.userTokensHandler)
 	}
-	// LimitService — административная поверхность пределов на ПУБЛИЧНОМ
-	// слушателе (ADM-1 S1, #878).
+	// ЗДЕСЬ РЕГИСТРИРОВАЛАСЬ `LimitService` — административная поверхность
+	// величин на публичном слушателе. Авторитет величин выпилен из службы
+	// доступа целиком решением владельца 2026-09-06
+	// (PRO-Robotech/kacho#2117, приёмка KAN-QUOTA-1, стадия S4).
 	//
-	// ЗАПРЕТ 6 НЕ СМЯГЧЁН: наружу выставлен публичный `LimitService`, а не
-	// `InternalLimitService`. Переезжает ГЛАГОЛ, а не разрешение для внутреннего
-	// сервиса, — тем же приёмом, каким ADM-1 S1 опубликовал поверхность пула
-	// адресов. Доступ закрывает не место вызова, а отношение `system_admin` @
-	// `cluster`, которое подстановочный кортеж `user:*` НЕ выполняет.
-	//
-	// ЧТО ЭТО ЧИНИТ: без публичного адреса страница пределов консоли получала
-	// 404 — отказ, неотличимый от «такого раздела нет вовсе». Теперь отказ
-	// честен: 403 у того, кому не положено, и 200 у администратора.
-	if svcs != nil && svcs.limitPublicHandler != nil {
-		iamv1.RegisterLimitServiceServer(srv, svcs.limitPublicHandler)
-	}
+	// Арендаторское чтение СВОЕГО потолка публичный слушатель по-прежнему несёт —
+	// это `IdentityQuotaService` выше, и она осталась намеренно: величину её вида
+	// объявляет посадка службы, а не снятый авторитет.
 }
 
 // registerInternalServices — admin-RPC на internal listener: наружу не публикуются.
@@ -183,14 +176,15 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	if svcs != nil && svcs.moduleHandler != nil {
 		iamv1.RegisterInternalModuleServiceServer(srv, svcs.moduleHandler)
 	}
-	// InternalLimitService — resource-count ceilings (issue #291). Internal-only
-	// (ban #6): NEVER registered on the external listener. The five CRUD verbs are
-	// gateway-fronted admin surface; Resolve / ListChangedSince are dialled
-	// directly by owner services and carry the narrow `quota_reader` relation
-	// both at the edge catalog and in-handler.
-	if svcs != nil && svcs.limitHandler != nil {
-		iamv1.RegisterInternalLimitServiceServer(srv, svcs.limitHandler)
-	}
+	// ЗДЕСЬ РЕГИСТРИРОВАЛАСЬ `InternalLimitService` — семь глаголов авторитета
+	// величин: пять административных и два служебных чтения, которыми владельцы
+	// считаемых типов узнавали действующую величину и её дельту.
+	//
+	// Снята стадией S4 той же задачи. Порядок был вынужденным и соблюдён: пять
+	// потребителей платформы перестали спрашивать домен величин раньше
+	// (`quota.authority: not-deployed`, kacho#2596) — иначе снятие отвечающего
+	// оборвало бы каждую их мутацию, потому что недоступность авторитета на пути
+	// запроса fail-closed.
 	// InternalSessionRevocationsService — token revocation
 	// (logout / force-logout write + IsRevoked hot-path + admin ListByUser).
 	// Internal-only (запрет #6); the api-gateway logout handler + refresh-hook

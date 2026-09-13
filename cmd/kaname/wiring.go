@@ -28,7 +28,6 @@ import (
 	interactiveclientapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/interactive_client"
 	internaliamapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
 	internaloperationsapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_operations"
-	limitapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/limit"
 	membershipapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/membership"
 	moduleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/module"
 	permissioncatalogapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/permission_catalog"
@@ -106,17 +105,6 @@ type services struct {
 	// авторизацией этой поверхности: ступень подтверждения личности к ней
 	// сегодня не применяется — решение записано в приёмке, а не умолчание.
 	moduleHandler *moduleapp.Handler
-
-	// limitHandler — InternalLimitService: the ceiling on how many resources of
-	// one kind a tenant may hold, plus the two reads owner-services live on
-	// (Resolve / ListChangedSince). Internal-only (ban #6), registered on :9091.
-	limitHandler *limitapp.Handler
-
-	// limitPublicHandler — та же административная поверхность пределов на
-	// ПУБЛИЧНОМ слушателе (ADM-1 S1, #878). Тонкий транспорт поверх УЖЕ
-	// собранного `limitHandler`: не копия его зависимостей, а он сам, — поэтому
-	// «оба пути делают одно» держится построением, а не совпадением сборки.
-	limitPublicHandler *limitapp.PublicHandler
 
 	// identityQuotaHandler — чтение квот, носителем которых является личность
 	// (число аккаунтов). ТОЛЬКО чтение: величину назначает администратор облака.
@@ -823,28 +811,19 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithAdminChecker(relationStore)
 	internalOperationsHandler := internaloperationsapp.NewHandler(internalOperationsUC)
 
-	// ── InternalLimitService — resource-count ceilings (issue #291, S1) ───────
-	// Two audiences, two gates. The five CRUD verbs are admin surface and are
-	// gated by the catalog (system_admin @ cluster) at the edge. Resolve /
-	// ListChangedSince are dialled by the OWNER services that do the counting,
-	// so they carry the narrow `quota_reader` relation instead — the same
-	// least-privilege shape the fga-proxy authority uses, and NOT the cluster
-	// read tier, which would hand an owner service the whole cluster-scoped read
-	// surface to learn two numbers.
+	// ЗДЕСЬ СОБИРАЛСЯ АВТОРИТЕТ ВЕЛИЧИН — пять административных глаголов и два
+	// служебных чтения (разрешение действующей величины и её дельта). Модуль
+	// выпилен из службы доступа целиком решением владельца 2026-09-06
+	// (PRO-Robotech/kacho#2117, приёмка KAN-QUOTA-1, стадия S4).
 	//
-	// The checker is wired here and nowhere else: an unwired gate fails CLOSED
-	// inside the use-case, because an unauthorised read of the platform's
-	// ceilings is not a lesser failure than an unauthorised write.
-	limitRepo := kanamepg.NewLimitRepo(pool)
-	limitHandler := limitapp.NewHandler(
-		limitapp.NewGetUseCase(limitRepo),
-		limitapp.NewListUseCase(limitRepo),
-		limitapp.NewCreateUseCase(limitRepo, opsRepo, logger),
-		limitapp.NewUpdateUseCase(limitRepo, opsRepo, logger),
-		limitapp.NewDeleteUseCase(limitRepo, opsRepo, logger),
-		limitapp.NewResolveUseCase(limitRepo).WithQuotaReaderChecker(relationStore),
-		limitapp.NewListChangedUseCase(limitRepo, limitRepo).WithQuotaReaderChecker(relationStore),
-	)
+	// Порядок был вынужденным и соблюдён: сперва пять потребителей платформы
+	// перестали спрашивать домен величин (`quota.authority: not-deployed`,
+	// kacho#2596), и только потом снят отвечающий. Обратный порядок оборвал бы
+	// каждую их мутацию — недоступность авторитета на пути запроса fail-closed.
+	//
+	// СОБСТВЕННЫЕ ТРИ ПОТОЛКА СЛУЖБЫ ОТСЮДА НЕ УХОДИЛИ: их величину объявляет
+	// посадка (`config.OwnCeilingsConfig`, проекция в `kaname.own_ceilings`), и
+	// арендаторское чтение своего потолка собирается ниже.
 
 	// ── IdentityQuotaService — квоты, носителем которых является ЛИЧНОСТЬ ──
 	// Сегодня такой вид один — число аккаунтов, — и он единственный, чей носитель
@@ -908,10 +887,6 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 		// каталог прав одного модуля — план, применение, два чтения.
 		moduleHandler: moduleHandler,
-
-		// resource-count ceilings (admin CRUD + owner-facing resolve/delta).
-		limitHandler:       limitHandler,
-		limitPublicHandler: limitapp.NewPublicHandler(limitHandler),
 
 		// квоты личности — единственная поверхность, читаемая о себе самом.
 		identityQuotaHandler: identityQuotaHandler,
