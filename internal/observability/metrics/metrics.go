@@ -118,6 +118,13 @@ type Registry struct {
 	// величин второго уборщика по сроку (#2499).
 	expiredCredSweepOnce sync.Once
 	expiredCredSweep     *ExpiredCredentialSweepRecorder
+
+	// providerRoadOnce/providerRoad — единственный экземпляр счётчика исходов
+	// дорог к внешнему поставщику (#2491). Потребители собираются в разных
+	// местах корня, а второй конструктор уронил бы старт на повторной
+	// регистрации семейства с тем же именем.
+	providerRoadOnce sync.Once
+	providerRoad     *ProviderRoadRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

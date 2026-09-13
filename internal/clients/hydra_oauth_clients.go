@@ -198,9 +198,11 @@ func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAut
 	}
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
+		c.observeTransportFailure()
 		return HydraOAuthClient{}, fmt.Errorf("hydra create-client: %w", err)
 	}
 	defer resp.Body.Close()
+	c.observeStatus(resp.StatusCode)
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if resp.StatusCode/100 != 2 {
 		return HydraOAuthClient{}, hydraAPIError(resp.StatusCode, respBody)
@@ -234,9 +236,14 @@ func (c *HydraAdminClient) DeleteOAuthClient(ctx context.Context, clientID strin
 	}
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
+		c.observeTransportFailure()
 		return fmt.Errorf("hydra delete-client: %w", err)
 	}
 	defer resp.Body.Close()
+	// Учёт стоит ДО развилки: 404 здесь остаётся успехом вызова (см. разбор
+	// размена в provider_road.go), и без учёта он был бы НЕВИДИМ — а именно он
+	// отличает идемпотентное снятие от адреса, по которому наших клиентов нет.
+	c.observeStatus(resp.StatusCode)
 	if resp.StatusCode == http.StatusNotFound {
 		return nil
 	}

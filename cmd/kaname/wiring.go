@@ -705,7 +705,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// refused forever, with nothing prompting a re-login. Same lever the
 		// self-service logout at the edge already pulls for its own caller.
 		WithProviderSessions(
-			mustProviderAdminClient(cfg),
+			mustProviderAdminClient(cfg, metricsReg.ProviderRoadRecorder()),
 			&forceLogoutSubjectResolver{users: kanamepg.NewUserPoolRepo(pool)},
 		).
 		// ForceLogout returns an Operation — the row it names is persisted here,
@@ -741,7 +741,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithCutoffReader(kanamepg.NewUserTokenRevocationRepo(pool))
 
 	// ── SAKey wiring (Class A static SA keys via Hydra) ───────────────────
-	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg, metricsReg.CompensationRecorder(), logger)
+	saKeysH := buildSAKeysHandler(pool, opsRepo, cfg,
+		metricsReg.CompensationRecorder(), metricsReg.ProviderRoadRecorder(), logger)
 
 	// ── UserToken wiring (персональные access-токены пользователя via Hydra) ──
 	userTokensH := buildUserTokensHandler(pool, opsRepo, cfg, logger)
@@ -798,7 +799,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		interactiveAudience = "https://" + cfg.AuthN.ResolveDomain()
 	}
 	interactiveRepo := kanamepg.NewInteractiveClientRepo(pool)
-	interactiveProvider := clients.NewInteractiveClientProvider(mustProviderAdminClient(cfg))
+	interactiveProvider := clients.NewInteractiveClientProvider(
+		mustProviderAdminClient(cfg, metricsReg.ProviderRoadRecorder()))
 	interactiveClientHandler := interactiveclientapp.NewHandler(
 		interactiveclientapp.NewGetUseCase(interactiveRepo),
 		interactiveclientapp.NewListUseCase(interactiveRepo),
@@ -961,7 +963,10 @@ func providerAdminHopIsBuilt(cfg config.Config) bool {
 	return cfg.AuthN.HasExternalIdentityProvider()
 }
 
-func mustProviderAdminClient(cfg config.Config) *clients.HydraAdminClient {
+// Наблюдатель дороги приходит ДОВОДОМ, а не берётся здесь: счётчик принадлежит
+// реестру величин, а этот помощник о нём не знает и знать ему нечем. nil
+// законен — счёта нет, решения дороги это не меняет (kacho#2491).
+func mustProviderAdminClient(cfg config.Config, roadObs clients.ProviderRoadObserver) *clients.HydraAdminClient {
 	// ПОСАДКА БЕЗ ВНЕШНЕГО ПОСТАВЩИКА ДОРОГИ НЕ ПОЛУЧАЕТ — И ЭТО ПРО АДРЕС, А НЕ
 	// ПРО ОТВЕТ (задача kaname#21, преемник kacho#2489).
 	//
@@ -976,7 +981,7 @@ func mustProviderAdminClient(cfg config.Config) *clients.HydraAdminClient {
 	// полосы. Поэтому потребители получают клиента без дороги, а решение о
 	// старте остаётся у стража, который называет все причины разом.
 	if !providerAdminHopIsBuilt(cfg) {
-		return clients.NewAbsentProviderAdminClient()
+		return clients.NewAbsentProviderAdminClient().WithRoadObserver(roadObs)
 	}
 	c, err := clients.NewHydraAdminClientWithCA(
 		cfg.AuthN.ResolveHydraAdminURL(),
@@ -989,7 +994,7 @@ func mustProviderAdminClient(cfg config.Config) *clients.HydraAdminClient {
 	if err != nil {
 		log.Fatalf("provider-admin client: %v", err)
 	}
-	return c
+	return c.WithRoadObserver(roadObs)
 }
 
 // saKeyIssuanceIsOurs — переведён ли контур выдачи ключей служебных учёток на
@@ -1016,11 +1021,12 @@ func saKeyIssuanceIsOurs(cfg config.Config) bool {
 // buildSAKeysHandler wires the SAKeyService handler — Class A static SA-keys
 // via Hydra OAuth2 client_credentials.
 func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.Config,
-	compObs clients.CompensationEmitObserver, logger *slog.Logger) *sakeysapp.Handler {
+	compObs clients.CompensationEmitObserver, roadObs clients.ProviderRoadObserver,
+	logger *slog.Logger) *sakeysapp.Handler {
 	saClientRepo := kanamepg.NewSAOAuthClientRepo(pool)
 
 	hydraAdminURL := cfg.AuthN.ResolveHydraAdminURL()
-	hydraAdmin := mustProviderAdminClient(cfg)
+	hydraAdmin := mustProviderAdminClient(cfg, roadObs)
 
 	// Durable audit_outbox emitter — emits iam.sa_key.issued /
 	// iam.sa_key.revoked rows inside the SAKey worker-tx, atomic with the

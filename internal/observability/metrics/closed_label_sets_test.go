@@ -165,6 +165,11 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.NewBootstrapAdminRecorder() },
 		Why:   "согласователь встроенного администратора ходит редко — молчание у него штатно",
 	},
+	ProviderRoadOutcomesMetric: {
+		Cells: len(clients.ProviderRoads) * len(clients.ProviderRoadOutcomes),
+		Build: func(r *Registry) { r.NewProviderRoadRecorder() },
+		Why:   "дорога, по которой не ходили, и дорога, которую не провязали, обязаны различаться",
+	},
 	InviteMailOutcomesMetric: {
 		Cells: len(clients.InviteMailOutcomes),
 		Build: func(r *Registry) { r.NewInviteMailRecorder() },

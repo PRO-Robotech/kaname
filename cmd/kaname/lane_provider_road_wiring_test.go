@@ -48,7 +48,7 @@ func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard
 
 // ДОРОГА: под `own` не строится, под `external` строится.
 func TestCompositionRoot_AdminRoadIsBuiltOnlyWhereAProviderExists(t *testing.T) {
-	own := mustProviderAdminClient(roadCfg(config.IdentityProviderOwn, "9097"))
+	own := mustProviderAdminClient(roadCfg(config.IdentityProviderOwn, "9097"), nil)
 	if own == nil {
 		t.Fatal("mustProviderAdminClient() = nil под own; потребителям нужен объект, " +
 			"отказывающий по имени, а не пустой указатель")
@@ -59,7 +59,7 @@ func TestCompositionRoot_AdminRoadIsBuiltOnlyWhereAProviderExists(t *testing.T) 
 	}
 
 	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: под external дорога обязана быть.
-	ext := mustProviderAdminClient(roadCfg(config.IdentityProviderExternal, "9097"))
+	ext := mustProviderAdminClient(roadCfg(config.IdentityProviderExternal, "9097"), nil)
 	if ext == nil || ext.BaseURL == "" {
 		t.Fatal("под external дорога НЕ построена — отрицание выше зеленело бы на " +
 			"корне, который не строит никогда")

@@ -1209,6 +1209,10 @@ func runServe(cfg config.Config) error {
 			// на посадке БЕЗ окна — иначе оператор, у которого обновление
 			// сломало вход арендаторам, узнаёт об этом из жалобы.
 			CredentialKindObserver: metricsReg.RegistryTokenCredentialKindRecorder(),
+			// Счёт исходов ДОРОГИ ОБМЕНА к прежнему издателю (kacho#2491).
+			// Провязывается безусловно: дорога строится лишь на непереведённом
+			// контуре, и на переведённом счётчик обязан молчать сам.
+			ProviderRoadObserver: metricsReg.ProviderRoadRecorder(),
 		})
 		if berr != nil {
 			return fmt.Errorf("registry token shim: %w", berr)
@@ -1655,7 +1659,7 @@ func runServe(cfg config.Config) error {
 	// исполняется ЗДЕСЬ — at-least-once, поэтому оно переживает и смерть
 	// процесса, и недоступность самого провайдера.
 	compensationDrainerTask, cerr := buildProviderCompensationDrainer(
-		pool, cfg, metricsReg.CompensationRecorder(), logger)
+		pool, cfg, metricsReg.CompensationRecorder(), metricsReg.ProviderRoadRecorder(), logger)
 	if cerr != nil {
 		_ = listener.Close()
 		_ = internalListener.Close()

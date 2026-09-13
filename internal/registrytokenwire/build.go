@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	registrytokenuc "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registry_token"
+	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/handler/registrytokenhttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
@@ -79,6 +80,14 @@ type BuildConfig struct {
 	// Без него оператор не знает ни скольких ломает закрытое окно, ни когда
 	// открытое можно закрыть.
 	CredentialKindObserver registrytokenuc.CredentialKindObserver
+
+	// ProviderRoadObserver — счётчик исходов ДОРОГИ ОБМЕНА к прежнему издателю
+	// (kacho#2491). nil → счёта нет; решения полосы это не меняет.
+	//
+	// Заводится ЗДЕСЬ, а не у сборщика дороги, потому что дорога строится лишь
+	// на непереведённом контуре: у переведённого обмена не происходит вовсе, и
+	// счётчик на нём обязан молчать, а не показывать ноль обращений как отказ.
+	ProviderRoadObserver clients.ProviderRoadObserver
 }
 
 // Build assembles the registry `/iam/token` shim from a pgx pool: the authority
