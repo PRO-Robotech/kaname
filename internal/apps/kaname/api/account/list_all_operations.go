@@ -36,6 +36,7 @@ package account
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -46,6 +47,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
 
 // ListAllOperationsUseCase aggregates every IAM operation of one account scope.
@@ -113,7 +115,18 @@ func (u *ListAllOperationsUseCase) requireAccountViewAuthority(ctx context.Conte
 
 	acct, gerr := rd.Accounts().Get(ctx, domain.AccountID(accountID))
 	if gerr != nil {
-		return authzguard.PermissionDenied()
+		// Исходы чтения разведены, и это тот же довод, что у вопроса о правах
+		// ниже: отказ терминален, неполадка — нет. Схлопнув их, надзор выдавал
+		// терминальный вердикт на преходящую беду, и аудитор, читающий операции
+		// аккаунта, на недоступности хранилища заключал, что доступа нет.
+		//
+		// ПРОМАХ остаётся отказом в правах намеренно — это скрытие
+		// существования, и ответ обязан быть ПОБАЙТОВО тем же, что у настоящего
+		// отказа, иначе посторонний отличает «нет» от «нету» (задача #2585).
+		if errors.Is(gerr, iamerr.ErrNotFound) {
+			return authzguard.PermissionDenied()
+		}
+		return shared.MapRepoErr(gerr)
 	}
 
 	// Path 0 — cluster-admin short-circuit: a cluster-admin may audit ANY
