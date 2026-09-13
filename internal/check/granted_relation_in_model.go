@@ -118,7 +118,7 @@ func GrantsFromMigrations(root string) (grants []RelationGrant, migrationsRead, 
 	sort.Strings(names)
 
 	for _, name := range names {
-		raw, rerr := os.ReadFile(filepath.Join(dir, name))
+		raw, rerr := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- имя из перечня собственного каталога
 		if rerr != nil {
 			return nil, 0, 0, fmt.Errorf("чтение %s: %w", name, rerr)
 		}

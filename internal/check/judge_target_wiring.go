@@ -110,7 +110,7 @@ func (w JudgeTargetWiring) Census() string {
 func ReadJudgeTargetWiring(root, target string) (JudgeTargetWiring, error) {
 	w := JudgeTargetWiring{Target: target}
 
-	makefile, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	makefile, err := os.ReadFile(filepath.Join(root, "Makefile")) // #nosec G304 -- имя файла — литерал, корень назвал вызывающий
 	if err != nil {
 		return w, fmt.Errorf("корневой рецепт не прочитан: %w", err)
 	}
@@ -128,7 +128,7 @@ func ReadJudgeTargetWiring(root, target string) (JudgeTargetWiring, error) {
 		}
 		w.WorkflowsRead++
 		rel := WorkflowsDirRel + "/" + name
-		raw, rerr := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		raw, rerr := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel))) // #nosec G304 -- имя из перечня собственного каталога заданий
 		if rerr != nil {
 			w.Unreadable = append(w.Unreadable, rel+": "+rerr.Error())
 			continue

@@ -78,6 +78,10 @@ const (
 	// knobMetrics — скрейп величин.
 	knobMetrics = "KANAME_API_SERVER__METRICS_ENDPOINT"
 	// knobRegistryToken — выдача докерного токена.
+	//
+	// #nosec G101 -- это ИМЯ РУЧКИ, которую правит оператор, а не удостоверение:
+	// значение приходит из окружения, здесь стоит только его адрес. Сканер
+	// опознаёт подстроку TOKEN в имени постоянной и иначе решить не может.
 	knobRegistryToken = "KANAME_API_SERVER__REGISTRY_TOKEN__ENDPOINT"
 	// knobJWKSProxy — зеркало набора ключей проверки подписи.
 	knobJWKSProxy = "KANAME_API_SERVER__JWKS_PROXY__ENDPOINT"
