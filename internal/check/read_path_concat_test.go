@@ -27,19 +27,12 @@ func TestReadPathComparesColumnsNotConcatenations(t *testing.T) {
 
 	root, _ := platformtree.RequireCorpus(t)
 
+	// Премисы обхода держит сам `ReadPathGoFiles`: он принимает корень
+	// параметром, поэтому его отказ доказан синтетикой, а не чтением (#17).
 	files, dirs, err := check.ReadPathGoFiles(root)
 	if err != nil {
 		t.Fatalf("объём гейта выведен быть не может: %v — «ноль находок» означало бы "+
 			"«ноль прочитанного»", err)
-	}
-	if len(dirs) == 0 {
-		t.Fatalf("в %s не нашлось ни одного объявления каталога предмета замера: объём гейта "+
-			"выведен быть не может", check.FingerprintSourceRel)
-	}
-	if len(files) == 0 {
-		t.Fatalf("каталоги предмета замера (%s) не дали НИ ОДНОГО не-тестового .go: судить "+
-			"нечего, и молчание гейта означало бы свойство, которого никто не проверял",
-			strings.Join(dirs, ", "))
 	}
 
 	findings, c, err := check.CollectPredicateConcats(files, os.ReadFile)

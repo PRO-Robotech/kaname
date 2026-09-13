@@ -11,6 +11,10 @@
 package supplyhygiene
 
 import (
+	"github.com/PRO-Robotech/corelib/treecorpus"
+	"github.com/PRO-Robotech/kaname/internal/check"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -179,4 +183,57 @@ func TestMigratorShowcaseLedgerSelfExpiry_InjectionBothWays(t *testing.T) {
 	f, _ = MigratorShowcaseScan(map[string]string{"x.md": withoutForeign}, injProducts, injOwn)
 	require.Empty(t, f, "файлу без чужого токена изымать нечего: запись ведомости о нём "+
 		"пережила бы свой предмет и молча простила СЛЕДУЮЩУЮ находку в этом файле")
+}
+
+// --- #17: премиса пустого обхода доказана ИСПОЛНЕНИЕМ ------------------------
+
+// TestMigratorShowcaseCorpus_EmptyTraversalIsRefused — обход витрины отказывает,
+// когда витрины нет, и берёт её, когда она есть.
+//
+// Дерево строится `SyntheticTree`: временный каталог репозиторием не является,
+// индекса у него нет вовсе. Конструктор выбран ЯВНО — молчаливый откат «нет git,
+// иду по диску» внутри общего читал бы на боевом прогоне игнорируемые каталоги.
+func TestMigratorShowcaseCorpus_EmptyTraversalIsRefused(t *testing.T) {
+	t.Parallel()
+
+	build := func(files map[string]string) *treecorpus.Tree {
+		t.Helper()
+		root := t.TempDir()
+		for rel, body := range files {
+			p := filepath.Join(root, filepath.FromSlash(rel))
+			require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o750), "фикстура не собрана")
+			require.NoError(t, os.WriteFile(p, []byte(body), 0o600), "фикстура не собрана")
+		}
+		tree, err := treecorpus.SyntheticTree(root)
+		require.NoError(t, err, "фикстура не собрана")
+		return tree
+	}
+
+	// ── КОНТРОЛЬ: витрина есть — обход её БЕРЁТ ─────────────────────────────
+	//
+	// Без него отказ ниже доказывал бы лишь то, что обход не берёт ничего
+	// никогда: слепая витрина прошла бы эту пробу насквозь.
+	corpus, err := migratorShowcaseCorpus(build(map[string]string{
+		"deploy/values.yaml": "image: kaname-migrator\n",
+		"internal/x_test.go": "package x\n",
+	}))
+	require.NoError(t, err, "КОНТРОЛЬ: на дереве С витриной обход объявлен пустым")
+	require.Equal(t, []string{"deploy/values.yaml"}, corpus.Rels(),
+		"КОНТРОЛЬ: изъятие по свойству (проба) обязано вычитать _test.go, иначе отказ "+
+			"ниже значил бы не то")
+
+	// ── ИНЪЕКЦИЯ: дерево НЕПУСТО, но всё изъято — ОТКАЗ ─────────────────────
+	//
+	// Дерево непустое намеренно: пустое ловится и грубым предикатом, а самый
+	// частый вид слепоты другой — витрина ушла из-под отбора, а дерево на месте.
+	_, err = migratorShowcaseCorpus(build(map[string]string{"internal/x_test.go": "package x\n"}))
+	require.ErrorIs(t, err, check.ErrEmptyTraversal,
+		"витрина изъята целиком, а обход отказа НЕ ДАЛ — «находок ноль» стало бы неотличимо "+
+			"от «прочитано ноль»")
+
+	// ── ИНЪЕКЦИЯ: дерево ПУСТО — тот же отказ ──────────────────────────────
+	_, err = migratorShowcaseCorpus(build(nil))
+	require.ErrorIs(t, err, check.ErrEmptyTraversal, "пустое дерево прочиталось без отказа")
+
+	t.Log("осей 3: контроль · витрина изъята целиком · дерево пусто")
 }

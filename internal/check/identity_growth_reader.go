@@ -44,6 +44,7 @@
 package check
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -180,4 +181,51 @@ func stripAlertCommentFromLine(line string) string {
 		}
 	}
 	return line
+}
+
+// IdentityGrowthReaderCensus — ОБЪЁМ ОСМОТРЕННОГО обеих сторон сверки.
+type IdentityGrowthReaderCensus struct {
+	// Metrics — ряды, объявленные коллектором.
+	Metrics []string
+	// Expressions — выражения правил оповещения, прочитанные у документа.
+	Expressions int
+}
+
+// JudgeIdentityGrowthReaders — у каждого объявленного ряда есть читатель.
+//
+// ПРЕМИСЫ ЖИВУТ ЗДЕСЬ, а не в теле гейта (задача #17). Прежде обе стояли в
+// пробе, входом им служили два файла, прочитанные от корня своего модуля, и
+// подать им пустую сторону было НЕЧЕМ: ветви читались глазами и не исполнялись
+// ни разу. Приняв обе стороны параметрами, они стали проверяемы синтетикой.
+//
+// Ноль рядов и ноль выражений — РАЗНЫЕ отказы намеренно: первый означает, что
+// ослеп разбор коллектора, второй — что ослеп разбор правил, и чинятся они в
+// разных местах. Слив их в один текст, гейт посылал бы читателя не туда.
+func JudgeIdentityGrowthReaders(collector, doc string) (IdentityGrowthReaderCensus, []string, error) {
+	c := IdentityGrowthReaderCensus{Metrics: IdentityGrowthMetricNamesIn(collector)}
+	if len(c.Metrics) == 0 {
+		return c, nil, fmt.Errorf("%w: в объявлении коллектора не найдено ни одного имени "+
+			"ряда — форма объявления либо приставка словаря изменились, и гейт судит пустоту",
+			ErrEmptyTraversal)
+	}
+
+	exprs := AlertExpressionsIn(doc)
+	c.Expressions = len(exprs)
+	if c.Expressions == 0 {
+		return c, nil, fmt.Errorf("%w: в документе наблюдаемости не найдено ни одного "+
+			"выражения правила — разбор перестал их видеть, и «читатель есть» получено даром",
+			ErrEmptyTraversal)
+	}
+
+	joined := strings.Join(exprs, "\n")
+	var findings []string
+	for _, metric := range c.Metrics {
+		if !strings.Contains(joined, metric) {
+			findings = append(findings, "ряд «"+metric+"» объявлен, но его не читает ни одно "+
+				"правило оповещения: величина печатается на витрине, ничего не утверждает "+
+				"и создаёт уверенность, которой нет")
+		}
+	}
+	sort.Strings(findings)
+	return c, findings, nil
 }

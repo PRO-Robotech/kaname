@@ -32,6 +32,8 @@ import (
 
 	"github.com/PRO-Robotech/corelib/treecorpus"
 
+	"github.com/PRO-Robotech/kaname/internal/check"
+
 	"github.com/PRO-Robotech/kaname/internal/contractnaming"
 )
 
@@ -83,6 +85,25 @@ func migratorShowcaseExemptReason(rel string) (string, bool) {
 	return "", false
 }
 
+// migratorShowcaseCorpus — файлы витрины из ДЕРЕВА, кроме изъятых.
+//
+// Обход и его отказ на пустоте держит ОДНА функция, и её зовут И гейт, И
+// инъекция: копия доказывала бы свойство копии. Дерево приходит параметром,
+// поэтому синтетика подаёт тот же отбор, что исполняется на боевом прогоне
+// (задача #17). Прежде обход строился в теле пробы от корня своего модуля,
+// премиса «прочитано НОЛЬ файлов витрины» стояла ниже разбора, и подать ей
+// дерево без витрины было нечем: ветвь читалась глазами и не исполнялась ни разу.
+//
+// Держатель отказа — общий на оба гейтовых пакета (`check.ErrEmptyTraversal`):
+// вторая его копия разошлась бы с первой молча, а расходится всегда та, которую
+// не считали.
+func migratorShowcaseCorpus(tree *treecorpus.Tree) (check.TreeCorpus, error) {
+	return check.CorpusFrom(tree, func(rel string) bool {
+		_, exempt := migratorShowcaseExemptReason(rel)
+		return !exempt
+	})
+}
+
 func TestKanameShowcaseNamesItsOwnMigrator(t *testing.T) {
 	tree, err := treecorpus.NewTree(serviceRoot)
 	require.NoError(t, err, "состав дерева не прочитан — «ноль находок» здесь означало бы "+
@@ -102,7 +123,10 @@ func TestKanameShowcaseNamesItsOwnMigrator(t *testing.T) {
 	require.GreaterOrEqual(t, len(products), 2, "имён продуктов выведено %d — словарь, "+
 		"знающий одно имя, не отличил бы своего накатчика от чужого", len(products))
 
-	files := map[string]string{}
+	corpus, err := migratorShowcaseCorpus(tree)
+	require.NoError(t, err, "обход витрины: «ноль находок» здесь означало бы "+
+		"«ноль прочитанного»")
+
 	exemptReasons := map[string]int{}
 	tracked, exempt := 0, 0
 	for _, rel := range tree.SortedFiles() {
@@ -110,21 +134,18 @@ func TestKanameShowcaseNamesItsOwnMigrator(t *testing.T) {
 		if reason, ok := migratorShowcaseExemptReason(rel); ok {
 			exempt++
 			exemptReasons[reason]++
-			continue
 		}
-		b, readErr := os.ReadFile(filepath.Join(serviceRoot, filepath.FromSlash(rel)))
-		if readErr != nil {
-			t.Fatalf("файл витрины %s не прочитан: %v", rel, readErr)
-		}
-		files[rel] = string(b)
 	}
+	files := map[string]string(corpus)
 
 	findings, census := MigratorShowcaseScan(files, products, own)
 	census.FilesTracked, census.FilesExempt = tracked, exempt
 	census.ExemptReasons = exemptReasons
 
 	// ── премисы: «ноль находок» отличимо от «ноль прочитанного» ─────────────
-	require.NotZero(t, census.FilesRead, "прочитано НОЛЬ файлов витрины")
+	//
+	// Премиса ОБХОДА переехала в `migratorShowcaseCorpus`; здесь остаются те,
+	// что про РАЗБОР прочитанного, а не про то, что обход что-то принёс.
 	require.NotZero(t, census.TokensSeen, "на витрине НЕ ВСТРЕЧЕНО ни одного токена формы "+
 		"`…%s` — распознаватель либо ослеп, либо витрина перестала называть накат вовсе; "+
 		"и то и другое означает, что зелёный прогон ничего не утверждает", MigratorTokenSuffix)
