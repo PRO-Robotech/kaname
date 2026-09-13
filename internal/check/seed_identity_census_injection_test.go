@@ -174,7 +174,8 @@ func TestSeedCensusInjection_RealDocumentOneDigitApart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не назван: %v", err)
 	}
-	raw, err := os.ReadFile(filepath.Join(root, seedCensusDoc)) // #nosec G304 -- координата константна
+	// Координата константна, от корня модуля.
+	raw, err := os.ReadFile(filepath.Join(root, seedCensusDoc))
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: приёмка не прочитана: %v", err)
 	}

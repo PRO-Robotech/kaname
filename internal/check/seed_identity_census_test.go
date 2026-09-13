@@ -50,7 +50,9 @@ func TestSeedIdentityCensusMatchesItsAcceptance(t *testing.T) {
 	}
 
 	docPath := filepath.Join(root, seedCensusDoc)
-	doc, err := os.ReadFile(docPath) // #nosec G304 -- координата константна, от корня модуля
+	// Координата константна и берётся от корня модуля: чтения по пути из чужого
+	// ввода здесь нет.
+	doc, err := os.ReadFile(docPath)
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: приёмка %s не прочитана: %v", seedCensusDoc, err)
 	}
@@ -114,7 +116,8 @@ func runSeedCensusPredicate(t *testing.T, root string) check.SeedCensusReport {
 			"написан на нём, и без него о числах §0 не известно ничего", err)
 	}
 
-	cmd := exec.Command(python, seedCensusPredicate) // #nosec G204 -- обе части константны
+	// Обе части команды константны — имя интерпретатора и координата предиката.
+	cmd := exec.Command(python, seedCensusPredicate)
 	cmd.Dir = root
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -150,7 +153,9 @@ func runSeedCensusPredicate(t *testing.T, root string) check.SeedCensusReport {
 func requireSeedCensusRevisionIsOurs(t *testing.T, root, rev string) {
 	t.Helper()
 
-	cmd := exec.Command("git", "-C", root, "merge-base", "--is-ancestor", rev, "HEAD") // #nosec G204 -- rev взят из документа и проверен формой
+	// `rev` приходит из документа и уже проверен формой (`revPattern` — только
+	// шестнадцатеричные), поэтому в командную строку уходит хеш, а не чужая строка.
+	cmd := exec.Command("git", "-C", root, "merge-base", "--is-ancestor", rev, "HEAD")
 	err := cmd.Run()
 	if err == nil {
 		return
