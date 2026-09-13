@@ -33,7 +33,7 @@
 
 | Модуль | Версия | Файл лицензии в модуле |
 |---|---|---|
-| `github.com/PRO-Robotech/corelib` | `v1.4.0` | `LICENSE` |
+| `github.com/PRO-Robotech/corelib` | `v1.5.0` | `LICENSE` |
 | `github.com/prometheus/client_golang` | `v1.24.1` | `LICENSE` |
 | `github.com/prometheus/client_model` | `v0.6.2` | `LICENSE` |
 | `github.com/prometheus/common` | `v0.70.1` | `LICENSE` |
