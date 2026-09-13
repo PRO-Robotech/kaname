@@ -72,6 +72,14 @@ type SeedCensusDeclaration struct {
 	// BlockLines — сколько строк объявляющего блока прочитано (перепись:
 	// «ноль находок» обязано быть отличимо от «ноль прочитанного»).
 	BlockLines int
+	// LineOf — НОМЕР СТРОКИ документа (от нуля), на которой объявлено ведро.
+	//
+	// Нужен не разбору, а тому, кто правит объявление точечно — инъекции.
+	// Без него порча «первого вхождения величины в файле» промахивается мимо
+	// объявления, как только та же величина упомянута прозой выше: инъекция
+	// тогда красит текст, которого гейт не судит, и молча ничего не доказывает.
+	// Наблюдалось на этом самом файле.
+	LineOf map[string]int
 }
 
 var (
@@ -134,7 +142,7 @@ func ParseSeedCensusOutput(out string) (SeedCensusReport, error) {
 // Внутри строки берётся ПОСЛЕДНЯЯ клетка: столбцов у блока два — монорепо и
 // это дерево, — и здешний стоит правым.
 func ParseSeedCensusDeclaration(doc string, buckets []string) SeedCensusDeclaration {
-	decl := SeedCensusDeclaration{Buckets: map[string]SeedCensusCell{}}
+	decl := SeedCensusDeclaration{Buckets: map[string]SeedCensusCell{}, LineOf: map[string]int{}}
 
 	lines := strings.Split(doc, "\n")
 	for _, line := range lines {
@@ -155,8 +163,12 @@ func ParseSeedCensusDeclaration(doc string, buckets []string) SeedCensusDeclarat
 	names := append([]string(nil), buckets...)
 	sort.Slice(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
 
-	inBlock, blockLines, matched := false, []string(nil), false
-	for _, raw := range lines {
+	type blockLine struct {
+		at   int
+		text string
+	}
+	inBlock, blockLines, matched := false, []blockLine(nil), false
+	for at, raw := range lines {
 		line := strings.TrimPrefix(strings.TrimSpace(raw), "> ")
 		line = strings.TrimPrefix(line, ">")
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
@@ -172,7 +184,7 @@ func ParseSeedCensusDeclaration(doc string, buckets []string) SeedCensusDeclarat
 		if !inBlock {
 			continue
 		}
-		blockLines = append(blockLines, line)
+		blockLines = append(blockLines, blockLine{at: at, text: line})
 		if strings.Contains(line, decl.Revision) {
 			matched = true
 		}
@@ -181,8 +193,8 @@ func ParseSeedCensusDeclaration(doc string, buckets []string) SeedCensusDeclarat
 		return decl
 	}
 	decl.BlockLines = len(blockLines)
-	for _, line := range blockLines {
-		trimmed := strings.TrimSpace(line)
+	for _, bl := range blockLines {
+		trimmed := strings.TrimSpace(bl.text)
 		for _, name := range names {
 			if !strings.HasPrefix(trimmed, name) {
 				continue
@@ -195,6 +207,7 @@ func ParseSeedCensusDeclaration(doc string, buckets []string) SeedCensusDeclarat
 			hits, _ := strconv.Atoi(last[1])
 			files, _ := strconv.Atoi(last[2])
 			decl.Buckets[name] = SeedCensusCell{Hits: hits, Files: files}
+			decl.LineOf[name] = bl.at
 			break
 		}
 	}

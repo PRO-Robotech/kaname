@@ -191,12 +191,24 @@ func TestSeedCensusInjection_RealDocumentOneDigitApart(t *testing.T) {
 	if !ok {
 		t.Fatalf("предпосылка инъекции не выполнена: ведро ПРЕДМЕТ не объявлено")
 	}
+	at, known := clean.LineOf["ПРЕДМЕТ"]
+	if !known {
+		t.Fatalf("предпосылка инъекции не выполнена: разбор не назвал строку объявления")
+	}
+
+	// Портится ИМЕННО объявляющая строка, найденная разбором, а не первое
+	// вхождение величины в файле. Разница не стилистическая: та же величина
+	// упоминается прозой выше по документу, и порча «первого вхождения»
+	// красила бы текст, которого гейт не судит, — инъекция проходила бы,
+	// ничего не доказав. Так и случилось при первой редакции этой пробы.
 	was := subject.String()
 	now := check.SeedCensusCell{Hits: subject.Hits, Files: subject.Files + 1}.String()
-	spoiled := strings.Replace(string(raw), was, now, 1)
-	if spoiled == string(raw) {
-		t.Fatalf("предпосылка инъекции не выполнена: величина %q в тексте не найдена", was)
+	lines := strings.Split(string(raw), "\n")
+	if at >= len(lines) || !strings.Contains(lines[at], was) {
+		t.Fatalf("предпосылка инъекции не выполнена: в строке %d нет величины %q", at, was)
 	}
+	lines[at] = strings.Replace(lines[at], was, now, 1)
+	spoiled := strings.Join(lines, "\n")
 
 	f := check.AdjudicateSeedCensus(check.ParseSeedCensusDeclaration(spoiled, rep.Order), rep)
 	if len(f) != 1 || !strings.Contains(f[0], "ПРЕДМЕТ") {
