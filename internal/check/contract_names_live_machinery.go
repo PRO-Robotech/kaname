@@ -202,7 +202,7 @@ func machineryResolves(f MachineryFacts, c MachineryClaim) bool {
 // commentBlock — подряд идущие строки комментария, сведённые в один текст.
 //
 // Сведение обязательно: имя переносится на следующую строку вместе с обёрткой
-// (`… subscription on` / `` `session_revoked` ``), и построчный разбор потерял бы
+// (`… subscription on` / “ `session_revoked` “), и построчный разбор потерял бы
 // ровно тот случай, ради которого маркер и заведён.
 type commentBlock struct {
 	// Text — текст блока одной строкой.

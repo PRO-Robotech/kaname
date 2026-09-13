@@ -80,7 +80,7 @@ func TestContractNamesOnlyExistingSiblingContracts(t *testing.T) {
 		census.ByKind[check.MachineryContract]-len(found))
 
 	if census.ByKind[check.MachineryContract] == 0 {
-		t.Fatalf("ни одной ссылки на соседний контракт не распознано: предмета у гейта "+
+		t.Fatalf("ни одной ссылки на соседний контракт не распознано: предмета у гейта " +
 			"нет, и его молчание неотличимо от молчания мёртвой проверки")
 	}
 
