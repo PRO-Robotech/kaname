@@ -28,7 +28,7 @@ within outbox-drainer latency. Also covers the surrounding anti-leak /
 anti-spoofing contracts on the affected RPCs (Operations.Get/Cancel as anonymous,
 SAKey.Issue plaintext redaction, SAKey createdBy spoofing).
 
-Fixture dependency (tests/authz-fixtures/setup.sh exports these env vars):
+Fixture dependency (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh exports these env vars):
   jwtBootstrap           — cluster bootstrap (system principal)
   jwtAccountAdminA       — owner of accountAId
   jwtAccountAdminB       — owner of accountBId

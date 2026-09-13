@@ -18,7 +18,7 @@
 условие ⇒ отчёта нет ⇒ гейт докладывает ``authz-failclosed(no-report)`` и
 краснеет. «Здесь не запустить» — факт расписания, а не вердикт.
 
-Pre-conditions: `tests/authz-fixtures/setup.sh` (jwtAccountAdminA, accountAId).
+Pre-conditions: `PRO-Robotech/kacho:tests/authz-fixtures/setup.sh` (jwtAccountAdminA, accountAId).
 
 
 ПОЧЕМУ У КАЖДОГО КЕЙСА УТВЕРЖДАЕТСЯ ПРОИЗВОДИТЕЛЬ ОТКАЗА (задача #1198)

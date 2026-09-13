@@ -48,7 +48,8 @@ unstable across different builds»). Внутри процесса решени�
   python3 scripts/body_capture_form_test.py               # обход дерева
 
 КТО ЭТУ ПРОБУ ИСПОЛНЯЕТ: `.github/scripts/run-python-probes.py`. Состав он
-собирает обходом дерева по образцу `services/*/tests/newman/scripts/*_test.py` и
+собирает обходом дерева по образцу `tests/newman/scripts/*_test.py` (в дереве
+платформы к нему добавлен `services/*/tests/newman/scripts/*_test.py`) и
 ни один файл проб по имени не называет.
 """
 from __future__ import annotations

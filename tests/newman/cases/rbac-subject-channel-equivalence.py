@@ -19,7 +19,7 @@
 ║ a user token needs an interactive Kratos→Hydra login. That was true of the        ║
 ║ harness AS IT WAS, and it named its own remedy — «its own wave that CREATES the   ║
 ║ condition». That wave now exists (`scripts/run-ceremony.sh`, seed                 ║
-║ `tests/authz-fixtures/prodseed_ceremony.py`), so the user channel here reads as   ║
+║ `PRO-Robotech/kacho:tests/authz-fixtures/prodseed_ceremony.py`), so the user channel here reads as   ║
 ║ `jwtHumanCeremony`: a bearer obtained by a REAL password login, subject           ║
 ║ `user:<id>`. «Здесь его не запустить» was a fact of scheduling, and the schedule  ║
 ║ changed.                                                                          ║

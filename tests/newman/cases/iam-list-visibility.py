@@ -54,7 +54,7 @@ B-стороны в фикстуре нет вовсе, и честный кей
 страницу попала, а собственная строка может лежать сколь угодно далеко за окном.
 Это чёрно-ящичный близнец пробы 645-09 `own_user_row`.
 
-Pre-conditions: `tests/authz-fixtures/setup.sh` (jwtAccountAdminB, accountAId,
+Pre-conditions: `PRO-Robotech/kacho:tests/authz-fixtures/setup.sh` (jwtAccountAdminB, accountAId,
 accountBId, projectA1Id, projectB1Id, userAAAId, userAABId).
 """
 

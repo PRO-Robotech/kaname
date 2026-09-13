@@ -129,7 +129,7 @@ WHAT IS DELIBERATELY *NOT* ASSERTED, SO NOBODY LOOKS FOR IT HERE
 The legitimate direct path — the final OAuth2 `client_assertion` → token exchange at
 the provider — is not exercised as a black-box case: signing an ES256 assertion needs
 the private key handed out once by Issue, and a Postman script signing JOSE would be a
-second implementation of `tests/authz-fixtures/mint_rs256.py` that could drift from it
+second implementation of `PRO-Robotech/kacho:tests/authz-fixtures/mint_rs256.py` that could drift from it
 silently.
 
 It used to be exercised on every run anyway, one level down — the Bearer these cases

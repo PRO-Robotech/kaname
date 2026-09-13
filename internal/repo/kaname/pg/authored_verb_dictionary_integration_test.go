@@ -39,7 +39,7 @@ import (
 // задачи #1863 целиком.
 //
 // Ресурс — `storage.volumes`, и он выбран не наугад: ровно эта пара стоит в
-// посеве матрицы прав (`tests/authz-fixtures/prodseed_matrix.py`,
+// посеве матрицы прав (`PRO-Robotech/kacho:tests/authz-fixtures/prodseed_matrix.py`,
 // предъявитель разреза `AUTHZ-VOL-VERB-CUT-NOT-TIER`), и ровно на ней посев
 // падал отказом `verbs: create is not a live verb of resource volumes`.
 func TestAuthoredCreateIsAcceptedAndProducesNoPerObjectRelation(t *testing.T) {

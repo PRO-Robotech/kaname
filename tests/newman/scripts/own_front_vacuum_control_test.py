@@ -63,10 +63,13 @@ JavaScript из порождённой коллекции исполняется
 КТО ЭТУ ПРОБУ ИСПОЛНЯЕТ — ПУТЕЙ ДВА, И ВТОРОЙ НЕ ОЧЕВИДЕН.
 
 Первый — `.github/scripts/run-python-probes.py`: состав он собирает ОБХОДОМ
-дерева по образцу `services/*/tests/newman/scripts/*_test.py` и ни один файл проб
+дерева по образцу `tests/newman/scripts/*_test.py` (в дереве
+платформы к нему добавлен `services/*/tests/newman/scripts/*_test.py`) и ни один файл проб
 по имени не называет, поэтому отдельного шага в конвейере файл не требует. Вид
 здесь «гейт со своим main»: прогон отдельным процессом, вердикт — код выхода.
-Проводку держит `tools/pythonprobes`.
+Проводку держит `.github/scripts/run-python-probes.py`; одноимённый гейт
+проводки `PRO-Robotech/kacho:tools/pythonprobes` — координата ДЕРЕВА
+ПЛАТФОРМЫ, в этом репозитории его нет.
 
 Второй — ИМПОРТ ПО ИМЕНИ из `own_front_vacuum_control_injection_test.py`: она
 кладёт свой каталог в `sys.path` и делает `import ... as gate`, обращаясь к
