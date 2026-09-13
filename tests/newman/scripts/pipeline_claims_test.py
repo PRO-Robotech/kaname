@@ -63,6 +63,19 @@ import tokenize
 
 import pytest
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "kacholib"))
+
+# РАЗБОР ФОРМ БЕРЁТСЯ У ОБЩЕГО СЛОЯ, А НЕ ПЕРЕПИСЫВАЕТСЯ. Второй разборщик того
+# же предмета расходится с первым молча — ровно тот класс, который эта проба и
+# держит. Вынесен он туда ещё и затем, чтобы его мог взять держатель, написанный
+# ГЕЙТОМ со своим `main`: такой исполняется голым python3, а здесь наверху стоит
+# `import pytest`.
+from prose_forms import (  # noqa: E402
+    prose_of_python,
+    prose_units as _prose_units,
+    tracked_files,
+)
+
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 WORKFLOWS = ROOT / ".github" / "workflows"
 FIXTURES = ROOT / "tests" / "authz-fixtures"
@@ -131,188 +144,12 @@ def claims_no_collection_runs(text: str) -> list[str]:
     return [m.group(0) for m in NO_COLLECTION_RUNS_RE.finditer(text)]
 
 
-def prose_of_python(path: pathlib.Path) -> list[tuple[int, str]]:
-    """ПРОЗА файла на python: строки документации и комментарии. Без литералов.
-
-    Различение обязательно, и оно измерено: у прогонщика проб есть СИНТЕТИКА для
-    инъекции, чья причина пропуска дословно говорит «посев не приехал в этот
-    репозиторий». Это фикстура гипотетического случая, а не утверждение о дереве,
-    и запрет по тексту файла краснел бы на ней — то есть требовал бы переписать
-    законную пробу. Предикат по УЗЛУ различает их построением: проза — это
-    docstring узла и комментарий лексера, литерал внутри кода — нет.
-    """
-    src = path.read_text(encoding="utf-8")
-    out: list[tuple[int, str]] = []
-    tree = ast.parse(src)
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
-                             ast.AsyncFunctionDef)):
-            doc = ast.get_docstring(node, clean=False)
-            if doc:
-                out.append((getattr(node, "lineno", 1), doc))
-    for tok in tokenize.generate_tokens(io.StringIO(src).readline):
-        if tok.type == tokenize.COMMENT:
-            out.append((tok.start[0], tok.string))
-    return out
-
-
-# ── ОБХОД ВСЕГО ДЕРЕВА: ФОРМЫ ПЕРЕЧИСЛЕНЫ ЧИСЛОМ ─────────────────────────────
-#
-# ПОЧЕМУ ОБХОД, А НЕ ПЕРЕЧЕНЬ ФАЙЛОВ. Прежняя редакция читала ДВА пинованных
-# адреса — прогонщик проб и авторские поля записи вендоринга, — и была ЗЕЛЕНА,
-# пока то же утверждение стояло третьим местом в `paginated_binding_reads_test.py`.
-# Молчание держателя было неотличимо от его отсутствия: он не судил файл, а
-# перепись печатала объём, который сам же и был пинован. Пинованный перечень
-# держит ровно свои адреса — а класс приходит НЕ ПО ОДНОМУ: в одной линии он
-# нашёлся четыре раза, и трижды его закрывали как закрытый.
-#
-# ФОРМЫ, В КОТОРЫХ УТВЕРЖДЕНИЕ О ДЕРЕВЕ ЗАПИСЫВАЕТСЯ, — ИХ ОДИННАДЦАТЬ. Форма,
-# о которой выражение не знает, даёт не красное и не зелёное, а МОЛЧАНИЕ, поэтому
-# перечень назван числом и перепись печатает счёт ПО КАЖДОЙ форме:
-#
-#    1 шапка python (модуль · класс · функция)                        судится
-#    2 комментарий python                                             судится
-#    3 строковый литерал python                              НЕ ПОРОЖДАЕТСЯ
-#    4 комментарий C-подобного (go · ts · tsx · js · css): // и /* */  судится
-#    5 комментарий решёткой (sh · yml · yaml · mk · conf · Dockerfile) судится
-#    6 печатаемая строка того же файла — не комментарий                судится
-#    7 проза markdown вне ограды                                      судится
-#    8 текст внутри ограды markdown                                   судится
-#    9 авторское поле записи вендоринга (`why`)                        судится
-#   10 дословная копия в записи вендоринга (`local`/`upstream`) НЕ ПОРОЖДАЕТСЯ
-#   11 комментарий sql (`--`)                                         судится
-#
-# Девять форм из одиннадцати судятся. Две не доходят до отбора вовсе — их не
-# порождают производители, и причина у каждой ЗАМЕРЕНА, а не предположена:
-# `prose_of_python` не отдаёт строковый литерал (форма 3), `authored_prose_of_record`
-# отдаёт только авторское поле записи (форма 10 остаётся у держателя вендоринга,
-# который судит копию по отпечатку). Отбора по имени формы в обходе поэтому НЕТ:
-# ветка, которой нечего отбирать, читалась бы как второй, тайный перечень
-# прощённых. Прочие расширения читаются целиком как форма 6 — файл без известного
-# синтаксиса комментария всё равно обязан быть осмотрен, иначе «ноль находок»
-# означало бы «ноль прочитанного».
-#
-# ПЕРЕПИСЬ ПЕЧАТАЕТ ТОЛЬКО ТЕ ФОРМЫ, КОТОРЫЕ В ДЕРЕВЕ ЕСТЬ, и число файлов на
-# единицу меньше отслеживаемых — ровно на этот файл, см. исключение ниже.
-#
-# ЕДИНСТВЕННОЕ ИСКЛЮЧЕНИЕ — ЭТОТ ФАЙЛ, И ОНО ПО ПОСТРОЕНИЮ, А НЕ ПО ИМЕНИ. Модуль,
-# ОБЪЯВЛЯЮЩИЙ выражение, объясняет класс своей прозой, и проверка, считающая своё
-# объяснение, — тот же дефект, что она ловит. Исключение берётся из `__file__`,
-# поэтому вторым файлом оно стать не может: списка прощённых здесь нет, и завести
-# его нечем. Что исключение не глушит близнеца в ЧУЖОМ файле, доказывает инъекция.
-#
-# ОСТАТОК НАЗВАН ПРЯМО, А НЕ ЗАМОЛЧАН: прозу ЭТОГО файла не держит ничто, и ложь
-# о дереве, внесённая сюда, проедет молча. Снимается это не списком и не вторым
-# выражением, а вторым ЧИТАТЕЛЕМ: предикат снятия — проба в другом файле, которая
-# судит прозу этого. Заводить её здесь нельзя by construction — она оказалась бы
-# в том же файле и унаследовала бы тот же дефект.
 SELF = pathlib.Path(__file__).resolve()
-
-_C_LIKE = {".go", ".ts", ".tsx", ".js", ".css"}
-_HASH_LIKE = {".sh", ".yml", ".yaml", ".mk", ".conf", ".gitignore", ".dockerignore",
-              ".tpl"}
-_MARKDOWN = {".md", ".mdx"}
-
-
-def tracked_files(root: pathlib.Path) -> list[pathlib.Path]:
-    """Состав обхода — ОТСЛЕЖИВАЕМОЕ дерево, а не всё, что лежит на диске.
-
-    Кэш интерпретатора, отчёты прогонов и чужие рабочие копии под тем же корнем
-    предметом утверждений о дереве не являются, и включать их значило бы делать
-    вердикт свойством того, что кто-то забыл убрать.
-    """
-    out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
-                         capture_output=True, check=True)
-    return [root / rel for rel in out.stdout.decode("utf-8").split("\0") if rel]
-
-
-def _c_like_comments(text: str) -> list[tuple[str, int, str]]:
-    """Формы 4: `//` и `/* */`, лексером — строковый литерал в счёт не идёт."""
-    out, i, n, line = [], 0, len(text), 1
-    while i < n:
-        ch = text[i]
-        if ch == "\n":
-            line += 1
-            i += 1
-            continue
-        if ch in ('"', "'", "`"):
-            quote = ch
-            i += 1
-            while i < n and text[i] != quote:
-                if text[i] == "\\" and quote != "`":
-                    i += 1
-                if i < n and text[i] == "\n":
-                    line += 1
-                i += 1
-            i += 1
-            continue
-        if text.startswith("//", i):
-            end = text.find("\n", i)
-            end = n if end < 0 else end
-            out.append(("4-C//", line, text[i:end]))
-            i = end
-            continue
-        if text.startswith("/*", i):
-            end = text.find("*/", i)
-            end = n if end < 0 else end + 2
-            chunk = text[i:end]
-            out.append(("4-C/**/", line, chunk))
-            line += chunk.count("\n")
-            i = end
-            continue
-        i += 1
-    return out
-
-
-def _by_line(text: str, marker: str, tag_comment: str) -> list[tuple[str, int, str]]:
-    """Формы 5 и 11 (комментарий) плюс форма 6 (печатаемая строка того же файла).
-
-    Печатаемое судится наравне с комментарием: текст, который прогон ПЕЧАТАЕТ,
-    читается как действующее состояние дерева — ровно так `::notice` и пережил
-    свой предмет в предмете 1 этой пробы.
-    """
-    out = []
-    for i, ln in enumerate(text.splitlines(), 1):
-        tag = tag_comment if ln.lstrip().startswith(marker) else "6-печатаемое"
-        out.append((tag, i, ln))
-    return out
 
 
 def prose_units(path: pathlib.Path) -> list[tuple[str, int, str]]:
-    """Единицы текста файла по ФОРМЕ. Нечитаемое как utf-8 — не текст."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (UnicodeDecodeError, OSError):
-        return []
-    suffix = path.suffix
-    if suffix == ".py":
-        try:
-            chunks = prose_of_python(path)
-        except (SyntaxError, ValueError):
-            # Файл, который не разбирается, — НЕ «ноль находок»: он читается
-            # целиком как печатаемое, иначе обход молча терял бы предмет.
-            return [("6-печатаемое", 1, text)]
-        # Комментарий отличается от шапки ПО УЗЛУ: `prose_of_python` отдаёт
-        # комментарии токеном лексера, и токен начинается с решётки.
-        return [(("2-комментарий" if chunk.lstrip().startswith("#") else "1-шапка"),
-                 line, chunk) for line, chunk in chunks]
-    if suffix in _C_LIKE:
-        return _c_like_comments(text)
-    if suffix in _HASH_LIKE or path.name in ("Makefile", "Dockerfile"):
-        return _by_line(text, "#", "5-решётка")
-    if suffix == ".sql":
-        return _by_line(text, "--", "11-sql")
-    if suffix in _MARKDOWN:
-        out, fenced = [], False
-        for i, ln in enumerate(text.splitlines(), 1):
-            if ln.lstrip().startswith("```"):
-                fenced = not fenced
-                continue
-            out.append(("8-ограда" if fenced else "7-проза", i, ln))
-        return out
-    if suffix == ".json":
-        return [("9-why", 0, chunk) for _, chunk in _record_why_or_empty(path)]
-    return [("6-печатаемое", i, ln) for i, ln in enumerate(text.splitlines(), 1)]
+    """Единицы текста по форме, с формой 9 этой пробы — записью вендоринга."""
+    return _prose_units(path, why_of=_record_why_or_empty)
 
 
 def _record_why_or_empty(path: pathlib.Path) -> list[tuple[str, str]]:
