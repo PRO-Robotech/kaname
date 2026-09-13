@@ -1650,7 +1650,7 @@ CASES.append(Case(
                 *assert_answered("cross-account-block-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.block",
-                    "'iam_user:' + pm.environment.get('crossVictimId')",
+                    "resource",
                 ),
             ],
         ),
@@ -1720,7 +1720,7 @@ CASES.append(Case(
                 *assert_answered("record-edit-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.update",
-                    "'iam_user:' + pm.environment.get('govVictimId')",
+                    "resource",
                 ),
             ],
         ),
@@ -1737,7 +1737,7 @@ CASES.append(Case(
                 *assert_answered("identity-block-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.block",
-                    "'iam_user:' + pm.environment.get('govVictimId')",
+                    "resource",
                 ),
             ],
         ),
@@ -1926,7 +1926,7 @@ CASES.append(Case(
                 *assert_answered("cross-account-exclusion-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.removeFromAccount",
-                    "'account:' + pm.environment.get('accountBId')",
+                    "account",
                 ),
             ],
         ),
@@ -2207,7 +2207,7 @@ CASES.append(Case(
                 *assert_answered("identity-delete-denied"),
                 *assert_scoped_authz_deny(
                     "iam.users.delete",
-                    "'iam_user:' + pm.environment.get('rmidVictimId')",
+                    "resource",
                 ),
             ],
         ),

@@ -6865,7 +6865,7 @@
                   "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
                   "  const md = info.metadata || {};",
                   "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.users.block');",
-                  "  pm.expect(md.resource, JSON.stringify(j)).to.eql('iam_user:' + pm.environment.get('crossVictimId'));",
+                  "  pm.expect(md.scope, JSON.stringify(j)).to.eql('resource');",
                   "});"
                 ]
               }
@@ -7416,7 +7416,7 @@
                   "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
                   "  const md = info.metadata || {};",
                   "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.users.update');",
-                  "  pm.expect(md.resource, JSON.stringify(j)).to.eql('iam_user:' + pm.environment.get('govVictimId'));",
+                  "  pm.expect(md.scope, JSON.stringify(j)).to.eql('resource');",
                   "});"
                 ]
               }
@@ -7514,7 +7514,7 @@
                   "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
                   "  const md = info.metadata || {};",
                   "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.users.block');",
-                  "  pm.expect(md.resource, JSON.stringify(j)).to.eql('iam_user:' + pm.environment.get('govVictimId'));",
+                  "  pm.expect(md.scope, JSON.stringify(j)).to.eql('resource');",
                   "});"
                 ]
               }
@@ -9077,7 +9077,7 @@
                   "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
                   "  const md = info.metadata || {};",
                   "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.users.removeFromAccount');",
-                  "  pm.expect(md.resource, JSON.stringify(j)).to.eql('account:' + pm.environment.get('accountBId'));",
+                  "  pm.expect(md.scope, JSON.stringify(j)).to.eql('account');",
                   "});"
                 ]
               }
@@ -11128,7 +11128,7 @@
                   "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
                   "  const md = info.metadata || {};",
                   "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.users.delete');",
-                  "  pm.expect(md.resource, JSON.stringify(j)).to.eql('iam_user:' + pm.environment.get('rmidVictimId'));",
+                  "  pm.expect(md.scope, JSON.stringify(j)).to.eql('resource');",
                   "});"
                 ]
               }

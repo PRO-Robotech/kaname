@@ -1969,7 +1969,7 @@ CASES.append(Case(
             },
             auth="jwtAccountAdminA",
             test_script=[
-                *assert_unscoped_rejected("iam.roles.create", "account:*"),
+                *assert_unscoped_rejected("iam.roles.create", "account"),
                 # And the role must NOT have been created either way.
                 "pm.test('no Operation was minted for an unscoped create', () => {",
                 "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",

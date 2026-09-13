@@ -5022,7 +5022,7 @@
                   "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
                   "  const md = info.metadata || {};",
                   "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.group_memberses.listMembers');",
-                  "  pm.expect(md.resource, JSON.stringify(j)).to.eql('iam_group:grp00000000000notfnd');",
+                  "  pm.expect(md.scope, JSON.stringify(j)).to.eql('resource');",
                   "});"
                 ]
               }
@@ -5112,7 +5112,7 @@
                   "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
                   "  const md = info.metadata || {};",
                   "  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql('iam.group_memberses.listMembers');",
-                  "  pm.expect(md.resource, JSON.stringify(j)).to.eql('iam_group:' + pm.environment.get('crudGroupId'));",
+                  "  pm.expect(md.scope, JSON.stringify(j)).to.eql('resource');",
                   "});"
                 ]
               }

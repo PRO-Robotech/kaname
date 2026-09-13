@@ -743,7 +743,13 @@ CASES.append(Case(
             # denied on accountA, not on some other anchor.
             test_script=assert_scoped_authz_deny(
                 "iam.access_bindings_by_resources.listByScope",
-                "'account:' + pm.environment.get('accountAId')",
+                # ЯРУС СТРОКИ КАТАЛОГА, А НЕ ТИП, КОТОРЫЙ РАЗРЕШИЛ КРАЙ. RPC полиморфен
+                # по области (`object_type_from_request_field: resource_type`): край берёт
+                # тип ИЗ ЗАПРОСА и отдавал `account:<id>`, служба же читает статический
+                # `object_type` строки — `project`. Оба верны о своей двери; здесь набор
+                # службы, поэтому стоит её ярус. Единственная из одиннадцати позиций, где
+                # тип у двух дверей расходится — см. шапку помощника.
+                "project",
             ),
         ),
     ],

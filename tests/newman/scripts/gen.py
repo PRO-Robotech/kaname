@@ -485,7 +485,7 @@ def assert_answered(label: str) -> List[str]:
 
 
 def assert_unscoped_rejected(action: Optional[str] = None,
-                             unscoped_resource: Optional[str] = None) -> List[str]:
+                             scope: Optional[str] = None) -> List[str]:
     """An UNSCOPED create (no account/project anchor in the body) is REJECTED.
 
     Two defensible outcomes, both "rejected" — this is the platform-wide
@@ -501,10 +501,15 @@ def assert_unscoped_rejected(action: Optional[str] = None,
     Tolerating both is NOT the whole helper. A bare `403|400` negative passes on ANY
     refusal — a permission-catalog miss, a malformed body, a typo in the path — i.e.
     exactly the "negative that passes for the wrong reason" this suite keeps finding.
-    So pass `action` (+ `unscoped_resource`) to PIN which refusal it is: on the 403
+    So pass `action` (+ `scope`) to PIN which refusal it is: on the 403
     branch the `ErrorInfo` must carry `reason=AUTHZ_DENIED` and that method's action
     (an EMPTY action means the catalog had no entry — a routing/catalog regression,
     not the invariant under test); on the 400 branch the message must name the scope.
+
+    `scope` — ЯРУС собственного фронта службы, не объект края. Почему пин сменил
+    производителя и что при этом потеряно — в шапке `assert_scoped_authz_deny`
+    ниже; здесь это не пересказывается, чтобы не завести второе место об одном
+    предмете.
     """
     out = [
         "pm.test('unscoped rejected (400 InvalidArgument or 403 authz-first)', () => {",
@@ -517,9 +522,9 @@ def assert_unscoped_rejected(action: Optional[str] = None,
     ]
     if action is None:
         return out
-    res_line = (
-        f"    pm.expect(md.resource, JSON.stringify(j)).to.eql({js_str(unscoped_resource)});"
-        if unscoped_resource else "    // resource anchor not pinned for this RPC"
+    scope_line = (
+        f"    pm.expect(md.scope, JSON.stringify(j)).to.eql({js_str(scope)});"
+        if scope else "    // scope tier not pinned: the catalog row for this RPC names none"
     )
     out += [
         f"pm.test({js_str(f'the refusal is about the MISSING SCOPE on {action}, not some other rejection')}, () => {{",
@@ -531,7 +536,7 @@ def assert_unscoped_rejected(action: Optional[str] = None,
         "    const md = info.metadata || {};",
         f"    pm.expect(md.action, 'empty action = permission-catalog miss, not a scope refusal: ' "
         f"+ JSON.stringify(j)).to.eql({js_str(action)});",
-        res_line,
+        scope_line,
         "  } else {",
         "    pm.expect((j.message || '').toLowerCase(), JSON.stringify(j))",
         "      .to.satisfy(m => m.includes('scope') || m.includes('account') || m.includes('project'));",
@@ -542,7 +547,7 @@ def assert_unscoped_rejected(action: Optional[str] = None,
 
 
 def assert_scoped_authz_deny(action: str,
-                             resource_expr: Optional[str] = None) -> List[str]:
+                             scope: Optional[str] = None) -> List[str]:
     """A 403 must be the per-object deny under test, not a permission-catalog miss.
 
     Companion to `assert_unscoped_rejected` above (same discriminator, different
@@ -559,17 +564,51 @@ def assert_scoped_authz_deny(action: str,
     (three such cases were found and removed on 2026-07-26).
 
     The two are distinguishable in the body: a real per-object deny carries the
-    resolved permission and scope in `ErrorInfo.metadata` (`action`, `resource`),
-    whereas the catalog miss carries an EMPTY action — the descriptor is built
-    before the entry is known. Asserting the action pins the deny to the RPC.
+    resolved permission in `ErrorInfo.metadata` (`action`), whereas the catalog
+    miss carries an EMPTY action — the descriptor is built before the entry is
+    known. Asserting the action pins the deny to the RPC, and that discriminator
+    is produced by BOTH surfaces below, so it does not move.
 
-    `resource_expr` is a JS EXPRESSION (not a literal): `{{var}}` is not
-    interpolated inside test scripts, so a variable-bearing scope must be read
-    with `pm.environment.get()`. Pass it whenever the scope the gateway resolves
-    is deterministic — `resourceLabel()` renders `"<object_type>:<id>"`, or
-    `"<object_type>:*"` when the extractor resolves no id. Omit it for RPCs whose
-    scope anchor is a cluster singleton (id not known to a black-box caller); the
-    `action` assertion alone already excludes the catalog miss.
+    КАКАЯ ПОВЕРХНОСТЬ ЧТО ПРОИЗВОДИТ — ЗАПИСАНО ЗДЕСЬ, ПОТОМУ ЧТО РАСХОДИЛОСЬ
+    -------------------------------------------------------------------------
+    Ключи `ErrorInfo.metadata` у двух дверей РАЗНЫЕ, и это решение, а не пропуск:
+
+      ключ        край платформы            собственный фронт службы
+      --------    ----------------------    ----------------------------------
+      reason      AUTHZ_DENIED              AUTHZ_DENIED
+      action      ✔                         ✔
+      fqn         ✔                         ✔
+      resource    ✔ "<object_type>:<id>"    ✘ НИКОГДА
+      scope       ✘                         ✔ ярус
+      subject     ✔                         ✘
+
+    Производители названы дословно: край —
+    `gateway/internal/middleware/permission_denied_response.go` (`resourceLabel`);
+    служба — `internal/authzguard/deny_details.go`, и отсутствие `resource` там
+    ОБЪЯВЛЕНО: «on a data-filtered method there is no single resource by
+    construction; naming one would be a claim the service cannot make».
+
+    ЭТОТ НАБОР — НАБОР СЛУЖБЫ, поэтому пин берётся у службы: `scope`. Это ЯРУС,
+    а не объект — `scopeTier()` пропускает `cluster`/`account`/`project` и
+    сводит ВСЁ остальное в `resource`. Пин поэтому КОЭРЦЕ прежнего, и это
+    названо прямо, а не сглажено: он ловит смену яруса в строке каталога
+    (пер-ресурсное право, ставшее аккаунтным, — класс над-выдачи), но НЕ ловит
+    отказ по чужому объекту. Половина «тот ли это объект» принадлежит краю и на
+    собственном фронте НЕ утверждается ничем — остаток назван числом в отчёте
+    задачи, а не поглощён молча.
+
+    `scope` — ЛИТЕРАЛ яруса, а не JS-выражение, и это следствие того же решения:
+    ярус есть функция МЕТОДА и только его (`TestDenyNextStep_IsAFunctionOfTheMethodOnly`),
+    поэтому читать окружение незачем. Опусти его там, где строка каталога яруса
+    не называет: пин на `action` уже исключает промах каталога.
+
+    ОДНА СТРОКА КАТАЛОГА РАСХОДИТСЯ У ДВУХ ДВЕРЕЙ ПО ПОСТРОЕНИЮ — это измерено:
+    у полиморфных по области RPC (`object_type_from_request_field`, сегодня
+    ровно `iam.access_bindings_by_resources.listByScope`) край берёт тип ИЗ
+    ЗАПРОСА и отдаёт `account:<id>`, а служба — статический `object_type` строки,
+    то есть ярус `project`. Оба верны о своей двери. Перенося сюда утверждение,
+    писавшееся против края, сверь строку каталога, а не подставляй тип из
+    прежнего литерала.
     """
     out = [
         "pm.test('403 PermissionDenied (code 7)', () => {",
@@ -584,8 +623,8 @@ def assert_scoped_authz_deny(action: str,
         "  const md = info.metadata || {};",
         f"  pm.expect(md.action, 'empty action means the catalog had no entry for the method (misrouted path?): ' + JSON.stringify(j)).to.eql({js_str(action)});",
     ]
-    if resource_expr:
-        out.append(f"  pm.expect(md.resource, JSON.stringify(j)).to.eql({resource_expr});")
+    if scope:
+        out.append(f"  pm.expect(md.scope, JSON.stringify(j)).to.eql({js_str(scope)});")
     out.append("});")
     return out
 

@@ -1258,7 +1258,7 @@ CASES.append(Case(
                 *assert_answered("disable-absent"),
                 *assert_scoped_authz_deny(
                     "iam.service_accounts.disable",
-                    f"'iam_service_account:{GARBAGE_SVA}'",
+                    "resource",
                 ),
             ],
         ),
@@ -1312,7 +1312,7 @@ CASES.append(Case(
                 *assert_answered("cross-account-disable-denied"),
                 *assert_scoped_authz_deny(
                     "iam.service_accounts.disable",
-                    "'iam_service_account:' + pm.environment.get('victimSvaId')",
+                    "resource",
                 ),
             ],
         ),
