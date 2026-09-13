@@ -15,7 +15,6 @@ package check_test
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,21 +54,23 @@ func TestMirrorRowCatalogConditionReachesEveryWriter(t *testing.T) {
 			"«ноль прочитанного»", err)
 	}
 
+	// Обход и его отказ на пустоте держит ОДНА функция — `MirrorCandidateCorpus`.
+	// Прежде он строился здесь, в теле пробы, и премиса «осмотрено ноль файлов»
+	// стояла НИЖЕ разбора: ветвь читалась глазами и не исполнялась ни разу —
+	// корнем ей служил корень своего модуля, и подать ей пустое дерево было
+	// нечем (задача #17).
+	corpus, err := check.MirrorCandidateCorpus(tree)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
+	}
+
 	var (
-		filesRead int
+		filesRead = len(corpus)
 		mentions  int
 		writes    []check.MirrorWrite
 	)
-	for _, rel := range tree.SortedFiles() {
-		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") || skipPath(rel) {
-			continue
-		}
-		b, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if readErr != nil {
-			t.Fatalf("чтение %s: %v", rel, readErr)
-		}
-		filesRead++
-		body := string(b)
+	for _, rel := range corpus.Rels() {
+		body := corpus[rel]
 		if !strings.Contains(body, check.ResourceMirrorTable) {
 			continue
 		}
@@ -85,9 +86,8 @@ func TestMirrorRowCatalogConditionReachesEveryWriter(t *testing.T) {
 		}
 	}
 
-	if filesRead == 0 {
-		t.Fatal("осмотрено ноль файлов — гейт не читал дерева, и его молчание ничего не значит")
-	}
+	// Премиса ВТОРОЙ половины остаётся: она не про обход, а про то, что предмет
+	// ещё встречается в прочитанном.
 	if mentions == 0 {
 		t.Fatalf("имя %q не встречается в непроверочном коде НИ РАЗУ — предмета у гейта нет: "+
 			"либо таблица переименована (правь константу вместе с ней), либо её перестали и "+

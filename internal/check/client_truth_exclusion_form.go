@@ -103,6 +103,7 @@ package check
 
 import (
 	"fmt"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -219,6 +220,18 @@ func (f ExclusionFormFinding) String() string {
 
 // AuditExclusionForm сверяет форму взаимоисключения, названную оператору, с той,
 // которой оно держится в этом дереве.
+// ExclusionFormGoCorpus — непроверочные файлы Go дерева: и сторона отказа, и
+// сторона обёртки берутся из одного обхода.
+//
+// Дерево приходит параметром, отбор объявлен один раз, пустой обход — отказ, а
+// не «находок ноль» (задача #17). Отбор сужен `ProductionGoFile`, то есть
+// служебные каталоги (документация, оснастка, вендоренное) из него выпадают;
+// на этом дереве сужение не меняет НИЧЕГО — файлов Go под ними ноль, — а по
+// построению делает обход тем же, каким его видят соседние семейства.
+func ExclusionFormGoCorpus(tree *treecorpus.Tree) (TreeCorpus, error) {
+	return CorpusFrom(tree, ProductionGoFile)
+}
+
 func AuditExclusionForm(in ExclusionFormInput) ([]ExclusionFormFinding, ExclusionFormCensus, error) {
 	var census ExclusionFormCensus
 

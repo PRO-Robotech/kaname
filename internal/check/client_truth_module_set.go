@@ -78,6 +78,7 @@ package check
 
 import (
 	"fmt"
+	"github.com/PRO-Robotech/corelib/treecorpus"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -251,6 +252,34 @@ type ModuleSetScan struct {
 //
 // Возвращает находки и перепись; вызывающий складывает перепись по файлам сам —
 // ему же принадлежит решение, какие файлы читать.
+// ModuleSetDeclCorpus — файлы ПАКЕТА, из разбора которого выводится набор.
+//
+// Дерево параметром, отбор объявлен здесь, пустой обход — отказ (#17).
+func ModuleSetDeclCorpus(tree *treecorpus.Tree) (TreeCorpus, error) {
+	return CorpusFrom(tree, func(rel string) bool {
+		return ProductionGoFile(rel) && path.Dir(rel) == ModuleSetPkgRel
+	})
+}
+
+// IsModuleSetSurfaceFile — лежит ли файл на КЛИЕНТСКОЙ ПОВЕРХНОСТИ, перечни
+// которой сверяются с набором.
+func IsModuleSetSurfaceFile(rel string) bool {
+	if !HasModuleSetSurfaceExt(rel) {
+		return false
+	}
+	for _, s := range ModuleSetSurfaces {
+		if rel == s || strings.HasPrefix(rel, s+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// ModuleSetSurfaceCorpus — файлы клиентской поверхности из ДЕРЕВА.
+func ModuleSetSurfaceCorpus(tree *treecorpus.Tree) (TreeCorpus, error) {
+	return CorpusFrom(tree, IsModuleSetSurfaceFile)
+}
+
 func ScanModuleSetEnumerations(rel, body string, modules []string) ([]ModuleSetFinding, ModuleSetScan) {
 	var scan ModuleSetScan
 

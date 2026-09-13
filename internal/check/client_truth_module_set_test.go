@@ -14,7 +14,6 @@ package check_test
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -45,20 +44,15 @@ func TestClientTruthIAMModuleSetEnumerationsAreComplete(t *testing.T) {
 	}
 
 	// ── сторона объявления: набор выводится разбором пакета ──────────────────
-	pkg := map[string]string{}
-	for _, rel := range tree.SortedFiles() {
-		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
-			continue
-		}
-		if filepath.ToSlash(filepath.Dir(rel)) != check.ModuleSetPkgRel {
-			continue
-		}
-		b, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if readErr != nil {
-			t.Fatalf("чтение %s: %v", rel, readErr)
-		}
-		pkg[rel] = string(b)
+	//
+	// Обход и его отказ на пустоте держит ОДНА функция — `ModuleSetDeclCorpus`
+	// (задача #17): прежде обход строился здесь, от корня своего модуля, и
+	// подать ему пустое дерево было нечем.
+	pkg, err := check.ModuleSetDeclCorpus(tree)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: пакет %s: %v", check.ModuleSetPkgRel, err)
 	}
+
 	modules, decl, err := check.ModuleSetFromDecl(pkg, check.ModuleSetVarName)
 	if err != nil {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
@@ -82,31 +76,19 @@ func TestClientTruthIAMModuleSetEnumerationsAreComplete(t *testing.T) {
 	}
 
 	// ── сторона поверхности ─────────────────────────────────────────────────
+	surface, err := check.ModuleSetSurfaceCorpus(tree)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: клиентская поверхность (%s): %v",
+			strings.Join(check.ModuleSetSurfaces, ", "), err)
+	}
+
 	var (
-		surfaceFiles int
+		surfaceFiles = len(surface)
 		total        check.ModuleSetScan
 		findings     []check.ModuleSetFinding
 	)
-	for _, rel := range tree.SortedFiles() {
-		if !check.HasModuleSetSurfaceExt(rel) {
-			continue
-		}
-		under := false
-		for _, s := range check.ModuleSetSurfaces {
-			if rel == s || strings.HasPrefix(rel, s+"/") {
-				under = true
-				break
-			}
-		}
-		if !under {
-			continue
-		}
-		b, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if readErr != nil {
-			t.Fatalf("чтение %s: %v", rel, readErr)
-		}
-		surfaceFiles++
-		f, scan := check.ScanModuleSetEnumerations(rel, string(b), modules)
+	for _, rel := range surface.Rels() {
+		f, scan := check.ScanModuleSetEnumerations(rel, surface[rel], modules)
 		findings = append(findings, f...)
 		total.Enumerations += scan.Enumerations
 		total.PairSpans += scan.PairSpans
