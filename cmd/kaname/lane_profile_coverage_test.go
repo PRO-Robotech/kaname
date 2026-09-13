@@ -178,7 +178,6 @@ func collectLaneFacts(t *testing.T) []laneFact {
 	sort.Slice(lanes, func(i, j int) bool { return lanes[i].String() < lanes[j].String() })
 
 	declared := profilesDeclaringALane(t)
-	best := bestCaseWiring(t)
 
 	out := make([]laneFact, 0, len(lanes))
 	for _, l := range lanes {
@@ -191,7 +190,7 @@ func collectLaneFacts(t *testing.T) []laneFact {
 
 		f := laneFact{Lane: l.String(), ProfileNames: declared[l.String()]}
 		f.Profiled = len(f.ProfileNames) > 0
-		if err := config.ValidateLaneWiring(cfg, best); err != nil {
+		if err := config.ValidateLaneWiring(cfg, bestCaseWiring(t, cfg)); err != nil {
 			f.Refusal = strings.ReplaceAll(err.Error(), "\n", " | ")
 		} else {
 			f.Reachable = true
@@ -202,7 +201,7 @@ func collectLaneFacts(t *testing.T) []laneFact {
 }
 
 // bestCaseWiring — НАИЛУЧШАЯ проводка, которую композиционный корень способен
-// произвести.
+// произвести ДЛЯ НАЗВАННОЙ ПОСАДКИ.
 //
 // Берётся его собственная функция наблюдения, и ровно один факт подаётся в
 // лучшем виде: подписант своей чеканки. Он — единственная величина проводки,
@@ -210,10 +209,17 @@ func collectLaneFacts(t *testing.T) []laneFact {
 // и оставить её наблюдённой значило бы объявить полосу недостижимой из-за
 // настройки, а не из-за дерева. Остальные величины корень решает один, и они
 // берутся как есть.
-func bestCaseWiring(t *testing.T) config.LaneWiring {
+//
+// ПОСАДКА ПОДАЁТСЯ ПАРАМЕТРОМ, И ЭТО НЕ УДОБСТВО (задача kaname#21). Часть
+// проводки СТАЛА ЗАВИСЕТЬ ОТ ПОСАДКИ: административная дорога к внешнему
+// поставщику и запись зеркала его ключей теперь строятся только там, где
+// поставщик есть. Одна проводка, снятая под чужой посадкой и приложенная ко
+// всем полосам, приписала бы полосе `own` стройки, которых корень под ней не
+// делает, — то есть гейт судил бы о дереве по наблюдению, снятому не о нём.
+func bestCaseWiring(t *testing.T, cfg config.Config) config.LaneWiring {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	w := observeLaneWiring(context.Background(), nil, logger)
+	w := observeLaneWiring(context.Background(), cfg, nil, logger)
 	w.OwnMintSignerWired = true
 	return w
 }

@@ -950,7 +950,34 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 // rotates. Config.Validate has already refused a production configuration that
 // omits the anchor while addressing the hop over TLS; this catches the anchor
 // that is named but unreadable, which only opening the file can tell.
+// providerAdminHopIsBuilt — СТРОИТ ЛИ этот корень административную дорогу к
+// внешнему поставщику (задача kaname#21).
+//
+// Живёт ВПЛОТНУЮ к строителю и читается им же: наблюдатель провязки берёт ответ
+// отсюда, а не повторяет условие у себя. Второе место об одном предмете
+// разошлось бы с первым молча — и разошлось бы именно там, где расхождение не
+// видно: на посадке, которая сегодня не поднимается по другим строкам таблицы.
+func providerAdminHopIsBuilt(cfg config.Config) bool {
+	return cfg.AuthN.HasExternalIdentityProvider()
+}
+
 func mustProviderAdminClient(cfg config.Config) *clients.HydraAdminClient {
+	// ПОСАДКА БЕЗ ВНЕШНЕГО ПОСТАВЩИКА ДОРОГИ НЕ ПОЛУЧАЕТ — И ЭТО ПРО АДРЕС, А НЕ
+	// ПРО ОТВЕТ (задача kaname#21, преемник kacho#2489).
+	//
+	// Резолв адреса пустого не возвращает НИКОГДА: при незаданной ручке он
+	// выводит адрес из доменного имени. Поэтому «поставщика нет» отсюда было
+	// невыразимо, дорога читалась как настроенная на стенде, который её не
+	// настраивал, и уходила звонить в публичный ингресс с административным
+	// предъявителем в заголовке.
+	//
+	// Отказ в СТАРТЕ здесь был бы хуже: он пришёл бы РАНЬШЕ стража посадки и
+	// вместо перечня причин полосы читатель получил бы одну, не ту и без имени
+	// полосы. Поэтому потребители получают клиента без дороги, а решение о
+	// старте остаётся у стража, который называет все причины разом.
+	if !providerAdminHopIsBuilt(cfg) {
+		return clients.NewAbsentProviderAdminClient()
+	}
 	c, err := clients.NewHydraAdminClientWithCA(
 		cfg.AuthN.ResolveHydraAdminURL(),
 		// Читается ЧЕРЕЗ НАСТРОЙКУ, а не прямым обращением к окружению: ручка,

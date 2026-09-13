@@ -146,6 +146,12 @@ type CreateOAuthClientRequest struct {
 // returns NO `client_secret`. Otherwise (legacy `client_secret_basic`)
 // Hydra mints + returns the plaintext `client_secret` exactly once.
 func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAuthClientRequest) (HydraOAuthClient, error) {
+	// ДОРОГА, КОТОРОЙ НЕТ, ОТКАЗЫВАЕТ ПЕРВОЙ (kaname#21). На посадке без
+	// внешнего поставщика адрес не собран вовсе, и разбирать вход некуда:
+	// отказ здесь терминальный и опознаётся `errors.Is`.
+	if !c.roadIsBuilt() {
+		return HydraOAuthClient{}, c.refuseAbsentRoad("create-client")
+	}
 	authMethod := req.TokenEndpointAuthMethod
 	if authMethod == "" {
 		authMethod = defaultStr(req.AuthMethod, "client_secret_basic")
@@ -212,6 +218,12 @@ func (c *HydraAdminClient) CreateOAuthClient(ctx context.Context, req CreateOAut
 // DeleteOAuthClient revokes an OAuth2 client. Returns nil on success or if
 // Hydra returns 404 (idempotent).
 func (c *HydraAdminClient) DeleteOAuthClient(ctx context.Context, clientID string) error {
+	// ДОРОГА, КОТОРОЙ НЕТ, ОТКАЗЫВАЕТ ПЕРВОЙ (kaname#21). На посадке без
+	// внешнего поставщика адрес не собран вовсе, и разбирать вход некуда:
+	// отказ здесь терминальный и опознаётся `errors.Is`.
+	if !c.roadIsBuilt() {
+		return c.refuseAbsentRoad("delete-client")
+	}
 	url := c.BaseURL + "/admin/clients/" + clientID
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {

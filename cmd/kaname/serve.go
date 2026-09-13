@@ -79,6 +79,21 @@ func stopGRPCBounded(srv grpcStopper, timeout time.Duration) {
 	}
 }
 
+// providerKeySetMirrorIsPublished — ПОПАДЁТ ЛИ запись зеркала ЧУЖОГО набора
+// проверочных ключей в перечень публикуемых (задача kaname#21).
+//
+// Читателей ровно два, и оба обязаны получить ОДНО значение: место публикации
+// ниже в этой же функции и наблюдатель провязки, который об этом отчитывается
+// стражу посадки. Своё условие у каждого разошлось бы молча.
+//
+// ДВЕ ОСИ, И ВТОРАЯ БЫЛА УПУЩЕНА ЛИТЕРАЛОМ. Записи нет, когда внешнего
+// поставщика не существует (посадка `own`) — и когда слушателя публикатора не
+// подняли вовсе: блок публикации тогда не исполняется, и добавлять запись
+// некуда. Прежний литерал `true` докладывал её опубликованной в обоих случаях.
+func providerKeySetMirrorIsPublished(cfg config.Config) bool {
+	return cfg.APIServer.JWKSProxy.ListenAddress() != "" && cfg.AuthN.HasExternalIdentityProvider()
+}
+
 func runServe(cfg config.Config) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
@@ -664,7 +679,7 @@ func runServe(cfg config.Config) error {
 	//
 	// Перепись печатается и на успешном старте: «ноль недостижимых записей»
 	// обязано быть отличимо от «каталог не читали».
-	laneWiring := observeLaneWiring(ctx, tokenSigner, logger)
+	laneWiring := observeLaneWiring(ctx, cfg, tokenSigner, logger)
 	logger.Info("identity posture lane wiring", laneWiringCensus(laneWiring)...)
 	if err := config.ValidateLaneWiring(cfg, laneWiring); err != nil {
 		return fmt.Errorf("identity posture lane: %w", err)
@@ -1267,40 +1282,18 @@ func runServe(cfg config.Config) error {
 	jwksProxyAddr := cfg.APIServer.JWKSProxy.ListenAddress()
 	var jwksProxyHandler http.Handler
 	if jwksProxyAddr != "" {
-		// Клиент верхнего хопа собирается ЗДЕСЬ, а не внутри зеркала: якорь хопа —
-		// настройка развёртывания, и непригодная обязана отказать в старте, а не
-		// деградировать зеркало, от которого зависит вся плоскость данных.
-		jwksUpstreamClient, jerr := clients.ProviderHopHTTPClient(
-			jwksUpstreamTimeout, cfg.AuthN.ResolveHydraJWKSCAFile(), clients.JWKSHopCASetting)
-		if jerr != nil {
-			return fmt.Errorf("jwks-proxy upstream: %w", jerr)
-		}
-		// Зеркало собирается ИМЕНОВАННЫМ: построенное прямо в аргументе, оно
-		// никому не отдаёт своих счётчиков, и «отказов не было» тогда неотличимо
-		// от «сюда никто не приходил» — а это разница между работающим зеркалом и
-		// мёртвой плоскостью данных.
-		jwksMirror := jwksproxyhttp.NewHandler(jwksproxyhttp.Config{
-			UpstreamURL: cfg.AuthN.ResolveHydraJWKSURL(),
-			Client:      jwksUpstreamClient,
-			Timeout:     jwksUpstreamTimeout,
-			Logger:      logger.With(slog.String("component", "jwks_proxy")),
-		})
-		// Читатель счётчиков зеркала. Выданные считаются наравне с отказами
-		// (security.md §Hardening-инвариант 8), а причина отказа держится отдельно:
-		// «не ответил» проходит со временем, «по адресу не то» — никогда.
-		// Свойство «читатель есть» держит гейт по дереву
-		// TestDeclaredAccumulatorsHaveANonTestReader.
-		metricsReg.NewJWKSMirrorCollector(func() metrics.JWKSMirrorCounts {
-			stats := jwksMirror.Stats()
-			return metrics.JWKSMirrorCounts{
-				Served:        stats.Served,
-				Unavailable:   stats.Unavailable,
-				Misconfigured: stats.Misconfigured,
-			}
-		})
-		// (4а) НАША запись публикуемого набора — проекция ключницы.
+		// (4а) ЗАПИСЬ ЗЕРКАЛА ЧУЖОГО НАБОРА — ТОЛЬКО ТАМ, ГДЕ ЧУЖОЙ НАБОР ЕСТЬ
+		// (задача kaname#21).
 		//
-		// Записей у публикатора теперь ДВЕ, и у каждой свой ОБЪЯВЛЕННЫЙ путь.
+		// Прежде запись добавлялась БЕЗУСЛОВНО. На посадке без внешнего
+		// поставщика это давало запись, чей издатель ВЫВЕДЕН из доменного имени,
+		// чей верхний хоп не существует, и которая отвечала бы каждому
+		// спросившему «верхний хоп недоступен» вместо честного отказа.
+		//
+		// Условие читается ТЕМ ЖЕ предикатом, которым о нём отчитывается
+		// наблюдатель провязки: доложенное и сделанное — одно значение.
+		//
+		// Записей у публикатора ДВЕ, и у каждой свой ОБЪЯВЛЕННЫЙ путь.
 		// Объединять наборы в один документ было бы дешевле и уничтожило бы
 		// ровно ту защиту, ради которой развязка заводится: ключ одного
 		// издателя проверял бы токен, объявляющий другого.
@@ -1308,11 +1301,45 @@ func runServe(cfg config.Config) error {
 		// Запись зеркала остаётся на своём прежнем пути ДО последней фазы: её
 		// адрес объявлен у каждого сегодняшнего потребителя, и перенос сменил
 		// бы его у всех разом — цена, которой эта фаза не предусматривала.
-		records := []jwksproxyhttp.Record{{
-			Issuer:  cfg.AuthN.ResolveHydraIssuer(),
-			Path:    jwksproxyhttp.WellKnownJWKSPath,
-			Handler: jwksMirror,
-		}}
+		var records []jwksproxyhttp.Record
+		if providerKeySetMirrorIsPublished(cfg) {
+			// Клиент верхнего хопа собирается ЗДЕСЬ, а не внутри зеркала: якорь хопа —
+			// настройка развёртывания, и непригодная обязана отказать в старте, а не
+			// деградировать зеркало, от которого зависит вся плоскость данных.
+			jwksUpstreamClient, jerr := clients.ProviderHopHTTPClient(
+				jwksUpstreamTimeout, cfg.AuthN.ResolveHydraJWKSCAFile(), clients.JWKSHopCASetting)
+			if jerr != nil {
+				return fmt.Errorf("jwks-proxy upstream: %w", jerr)
+			}
+			// Зеркало собирается ИМЕНОВАННЫМ: построенное прямо в аргументе, оно
+			// никому не отдаёт своих счётчиков, и «отказов не было» тогда неотличимо
+			// от «сюда никто не приходил» — а это разница между работающим зеркалом и
+			// мёртвой плоскостью данных.
+			jwksMirror := jwksproxyhttp.NewHandler(jwksproxyhttp.Config{
+				UpstreamURL: cfg.AuthN.ResolveHydraJWKSURL(),
+				Client:      jwksUpstreamClient,
+				Timeout:     jwksUpstreamTimeout,
+				Logger:      logger.With(slog.String("component", "jwks_proxy")),
+			})
+			// Читатель счётчиков зеркала. Выданные считаются наравне с отказами
+			// (security.md §Hardening-инвариант 8), а причина отказа держится отдельно:
+			// «не ответил» проходит со временем, «по адресу не то» — никогда.
+			// Свойство «читатель есть» держит гейт по дереву
+			// TestDeclaredAccumulatorsHaveANonTestReader.
+			metricsReg.NewJWKSMirrorCollector(func() metrics.JWKSMirrorCounts {
+				stats := jwksMirror.Stats()
+				return metrics.JWKSMirrorCounts{
+					Served:        stats.Served,
+					Unavailable:   stats.Unavailable,
+					Misconfigured: stats.Misconfigured,
+				}
+			})
+			records = append(records, jwksproxyhttp.Record{
+				Issuer:  cfg.AuthN.ResolveHydraIssuer(),
+				Path:    jwksproxyhttp.WellKnownJWKSPath,
+				Handler: jwksMirror,
+			})
+		}
 		if signingKeystore != nil {
 			ourKeySet := jwksproxyhttp.NewKeySetHandler(jwksproxyhttp.KeySetConfig{
 				Source: signingKeystore,
