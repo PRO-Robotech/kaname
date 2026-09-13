@@ -1931,6 +1931,19 @@ func runServe(cfg config.Config) error {
 	// прогона, каждая область оставляет событие аудита.
 	orphanScopeSweeper := seed.NewOrphanScopeSweeper(kanameRepo, kanamepg.NewOrphanScopeAdapter(pool),
 		seed.OrphanScopeConfig{Logger: logger.With(slog.String("component", "orphan_scope_sweep"))})
+	// Проход по строкам зеркала, оставшимся БЕЗ РОДИТЕЛЯ (`kacho#2051`).
+	//
+	// Провязан РЯДОМ с уборкой висячих областей и по тем же причинам: обе читают
+	// собственную базу iam, обе идемпотентны, обе берут общий на кластер замок и
+	// ограничены потолком прогона. Ключи замков РАЗНЫЕ ("OSSW" против "OMSW") —
+	// два разных прохода не вправе исключать друг друга.
+	//
+	// Почему на старте, а не по расписанию: осиротевшая строка не лечится сама и
+	// не лечится арендатором — она просто невидима материализации, и чем дольше
+	// живёт, тем дольше владелец не видит своего ресурса. Старт — момент, когда
+	// проход заведомо никому не мешает.
+	orphanMirrorSweeper := seed.NewOrphanMirrorSweeper(kanamepg.NewOrphanMirrorAdapter(pool),
+		seed.OrphanMirrorConfig{Logger: logger.With(slog.String("component", "orphan_mirror_sweep"))})
 	// Счётчик исходов пересчёта проекции глаголов роли — по одной системной роли.
 	// Успехи считаются наравне с отказами: без знаменателя «ноль отказов» не
 	// отличается от «пересчёта не было вовсе».
@@ -1946,6 +1959,16 @@ func runServe(cfg config.Config) error {
 				slog.Any("err", oerr),
 				slog.Int("scopes_revoked", ores.ScopesRevoked),
 				slog.Int("bindings_revoked", ores.BindingsRevoked))
+		}
+		// Перепись прохода по зеркалу печатается НА ЛЮБОМ исходе, включая чистый:
+		// «сирот ноль» обязано быть отличимо от «проход не состоялся», а строки
+		// журнала у этих двух случаев иначе одинаковы — их нет.
+		if mres, merr := orphanMirrorSweeper.RunOnce(taskCtx); merr != nil {
+			logger.Warn("orphan-mirror sweep failed (next boot will retry)",
+				slog.Any("err", merr), slog.String("census", mres.Census()))
+		} else if mres.Executed {
+			logger.Info("orphan-mirror sweep: "+mres.Census(),
+				slog.Int("left_to_owner", len(mres.LeftToOwner)))
 		}
 		if oerr := seed.BackfillOwnerBindings(taskCtx, pool); oerr != nil {
 			logger.Warn("p8 backfill: owner-binding data-backfill failed (sweep/next boot will retry)", slog.Any("err", oerr))
