@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"testing"
 	"time"
 
@@ -59,7 +60,7 @@ func TestSessionRevocations_InternalOnly_NotOnExternalListener(t *testing.T) {
 
 	// INTERNAL server: registered → reachable (NOT Unimplemented).
 	intConn := serveBufconn(t, func(s *grpc.Server) {
-		registerInternalServices(s, svcs, nil, "", nil)
+		registerInternalServices(s, svcs, nil, config.Config{}, nil)
 	})
 	intClient := iamv1.NewInternalSessionRevocationsServiceClient(intConn)
 

@@ -234,6 +234,7 @@ errors/              # sentinel + WrapPgErr.
 | `:9091`   | `InternalInteractiveClientService` | CRUD InteractiveClient (OAuth2-клиенты консоли) |
 | `:9091`   | `InternalModuleService`         | `Plan` / `Apply` манифеста модуля + read               |
 | `:9091`   | `InternalBootstrapTokenService` | `MintBootstrapToken` — удостоверение начальной настройки |
+| `:9091`   | `InternalSubscriptionService`   | `Subscribe` — поток изменений семи собственных видов, сужаемый пообъектно |
 
 **Состав таблицы держит гейт, а не внимание.** Перечень уже расходился с деревом —
 и расходился на ОБОИХ слушателях сразу. `services/iam/internal/check`

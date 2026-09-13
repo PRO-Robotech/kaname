@@ -22,6 +22,7 @@ package main
 
 import (
 	"context"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"net"
 	"testing"
 	"time"
@@ -93,7 +94,7 @@ func TestRegisterResource_A09_InternalOnly_NotOnExternalListener(t *testing.T) {
 	// INTERNAL server: the RPCs ARE registered and reach the handler's
 	// authz gate (fail-closed PermissionDenied here, NOT Unimplemented).
 	intConn := serveBufconn(t, func(s *grpc.Server) {
-		registerInternalServices(s, svcs, nil, "", nil)
+		registerInternalServices(s, svcs, nil, config.Config{}, nil)
 	})
 	intClient := iamv1.NewInternalIAMServiceClient(intConn)
 

@@ -12,9 +12,12 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/PRO-Robotech/corelib/operations"
+
 	"github.com/PRO-Robotech/corelib/operations/operationspb"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 
 	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	subscriptionv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/subscription"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -103,10 +106,29 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 }
 
 // registerInternalServices — admin-RPC на internal listener: наружу не публикуются.
-func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *pgxpool.Pool, dsn string, logger *slog.Logger) {
-	_ = pool
-	_ = dsn
-	_ = logger
+//
+// `cfg` стоит здесь вместо прежней строки подключения, которая не читалась
+// вовсе: поток изменений берёт из объявления сервиса ТРИ величины посадки и
+// строку ОДИНОЧНОГО соединения, и собрать их из одной строки нельзя.
+func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *pgxpool.Pool, cfg config.Config, logger *slog.Logger) {
+	// InternalSubscriptionService — поток изменений СЕМИ собственных видов службы.
+	//
+	// Internal-only (запрет #6), и префикс `Internal` в имени службы —
+	// действующий дискриминатор, а не привычка именования: метод с таким именем
+	// не попадает во внешний маршрутизатор by construction.
+	//
+	// Регистрация УСЛОВНА: без двери решения сервер не собирается, и глагол
+	// отвечает `Unimplemented`. Это честно — за ним нет пообъектной проверки на
+	// крае (он `scope_filtered`), поэтому несужающая подписка была бы выдачей
+	// всего журнала под кодом, который выглядит фильтрующим.
+	if svcs != nil {
+		subscribe, err := buildSubscriptionServer(cfg, pool, svcs.subscriptionDoor, logger)
+		if err != nil && logger != nil {
+			logger.Error("поток изменений не поднят", "err", err)
+		} else if err == nil && subscribe != nil {
+			subscriptionv1.RegisterInternalSubscriptionServiceServer(srv, subscribe)
+		}
+	}
 	if svcs != nil && svcs.internalUserHandler != nil {
 		iamv1.RegisterInternalUserServiceServer(srv, svcs.internalUserHandler)
 	}

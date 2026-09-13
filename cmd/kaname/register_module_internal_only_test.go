@@ -21,6 +21,7 @@ package main
 
 import (
 	"context"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"testing"
 	"time"
 
@@ -54,7 +55,7 @@ func TestInternalModuleService_MA126_InternalOnly_NotOnExternalListener(t *testi
 		registerPublicServices(s, svcs, nil)
 	})
 	intConn := serveBufconn(t, func(s *grpc.Server) {
-		registerInternalServices(s, svcs, nil, "", nil)
+		registerInternalServices(s, svcs, nil, config.Config{}, nil)
 	})
 
 	// Четыре глагола ОДНИМ перечнем: требование к ним одно, и перечислив их
