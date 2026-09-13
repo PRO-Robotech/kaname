@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/PRO-Robotech/kaname/internal/treeroot"
 )
 
 // qualityWorldFiles — что копируется в мир. Гейт читает рецепт, каталог
@@ -43,8 +45,20 @@ const qualityCIInvocation = "golangci-lint run --timeout=10m --config=.github/go
 func qualityWorld(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
+
+	// База ПРИВЕДЁННАЯ, а не выведенная: корень спрашивается у детектора, а не
+	// собирается относительным путём от каталога пакета. Этого требует гейт
+	// координат (`internal/domain`), и требует по существу: выведенная база
+	// зависит от места вызова, поэтому та же координата читалась бы из разных
+	// деревьев в зависимости от того, откуда позвали, — и вердикт стал бы
+	// свойством рабочего каталога, а не коммита.
+	moduleRoot, rootErr := treeroot.ModuleRootFrom(".")
+	if rootErr != nil {
+		t.Fatalf("предпосылка инъекции не выполняется: корень модуля не назван: %v", rootErr)
+	}
+
 	for _, rel := range qualityWorldFiles {
-		raw, err := os.ReadFile(filepath.Join(serviceRoot, rel))
+		raw, err := os.ReadFile(filepath.Join(moduleRoot, rel))
 		if err != nil {
 			t.Fatalf("предпосылка инъекции не выполняется: %s не прочитан у службы: %v", rel, err)
 		}
