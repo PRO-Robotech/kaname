@@ -50,16 +50,6 @@ type Registry struct {
 	authzDuration  *prometheus.HistogramVec
 	authzDecisions *prometheus.CounterVec
 
-	// authzStoreAttempts — исход КАЖДОЙ попытки обращения к хранилищу прав.
-	//
-	// Заведён по #720: до него отказ хранилища был снаружи ОДНИМ событием —
-	// вызывающий получал `unavailable`, и «хранилище перезапускали»,
-	// «хранилище молчит» и «оборвалось соединение из пула» выглядели
-	// одинаково. Различить их можно было только чтением журнала построчно,
-	// уже после того как отказ истолкован; на прогоне из 736 запросов с одним
-	// отказом это означает найти одну строку среди тысяч.
-	authzStoreAttempts *prometheus.CounterVec
-
 	// compensationOnce/compensation — единственный экземпляр коллекторов
 	// компенсации. Их потребители (writer намерений и дренаж) собираются в
 	// разных местах композиционного корня, а prometheus.MustRegister падает на
@@ -162,23 +152,13 @@ func NewRegistry() *Registry {
 			Name: Namespace + "_authz_check_decisions_total",
 			Help: "Authz Check decisions by rpc and outcome (allow|deny|error).",
 		}, []string{"rpc", "decision"}),
-		authzStoreAttempts: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: Namespace + "_authz_store_attempts_total",
-			Help: "Attempts against the authorization store by operation, outcome " +
-				"(ok|store_rejected|store_error|store_unreachable|pooled_conn_dropped|" +
-				"conn_dropped|store_timeout|decode_failed) and whether the connection " +
-				"came from the idle pool. Distinguishes a store outage from a dead " +
-				"pooled connection — indistinguishable from the caller's side.",
-		}, []string{"op", "outcome", "reused"}),
 	}
 	// Клетки закрытого набора заводятся нулём ПРИ РЕГИСТРАЦИИ: вектор без детей
 	// не отдаёт на провод ничего, и «механизм не провязан» становится неотличим
 	// от «механизм провязан и ни разу не сработал».
 	//
 	// Полосы решения о доступе — ЗАКРЫТЫЙ словарь ([DeclaredAuthzLanes]), поэтому
-	// перечислить клетки можно здесь. У счётчика попыток к хранилищу набор `op` не
-	// перечислим (и производителя у него сегодня нет ни одного) — он заводится
-	// первым событием; это названо в ведомости пробы пакета.
+	// перечислить клетки можно здесь.
 	for _, lane := range DeclaredAuthzLanes() {
 		for _, allowed := range []string{"false", "true"} {
 			r.authzDuration.WithLabelValues(lane, allowed)
@@ -187,7 +167,7 @@ func NewRegistry() *Registry {
 			r.authzDecisions.WithLabelValues(lane, decision)
 		}
 	}
-	reg.MustRegister(r.authzDuration, r.authzDecisions, r.authzStoreAttempts)
+	reg.MustRegister(r.authzDuration, r.authzDecisions)
 	return r
 }
 
@@ -317,20 +297,28 @@ func (r *Registry) ObserveAuthzDecision(rpc string, allowed, failed bool) {
 	r.authzDecisions.WithLabelValues(rpc, decision).Inc()
 }
 
-// ObserveAuthzStoreAttempt records ONE attempt against the authorization store.
+// ПОПЫТКИ К ХРАНИЛИЩУ ВЕРДИКТА ЗДЕСЬ БОЛЬШЕ НЕ СЧИТАЮТСЯ — семейство снято
+// вместе со своим предметом (#2638).
 //
-// Принимает плоские значения, а не тип адаптера хранилища: иначе один адаптер
-// импортировал бы другой ради метки счётчика (dependency-rule). Перевод делает
-// композиционный корень — единственное место, которое знает обоих.
-func (r *Registry) ObserveAuthzStoreAttempt(op, outcome string, reused bool) {
-	if op == "" {
-		op = "unknown"
-	}
-	if outcome == "" {
-		outcome = "unknown"
-	}
-	r.authzStoreAttempts.WithLabelValues(op, outcome, strconv.FormatBool(reused)).Inc()
-}
+// Здесь стояло `kaname_authz_store_attempts_total{op,outcome,reused}` и метод
+// `ObserveAuthzStoreAttempt`. Семейство заводилось под ВНЕШНИЙ движок отношений:
+// его текст помощи перечислял восемь исходов и обещал различать «хранилище
+// недоступно», «соединение из пула оказалось мёртвым» и «отказ по времени» —
+// различение, осмысленное для удалённого хранилища с пулом соединений.
+//
+// Движка нет (см. шапку `internal/clients/relations.go`): вердикт складывается
+// из СВОЕЙ базы реляционной формой. Вместе с движком исчезли и производители:
+// ни один из восьми исходов не порождался ничем, вызывающих у метода было
+// НОЛЬ, и семейство не получило бы ни одной строки ни при каком поведении
+// продукта. Пустая панель читалась бы как «к хранилищу не обращались» — при том
+// что обращаются на каждом решении о доступе.
+//
+// Чем измерять доступ теперь: `kaname_authz_check_decisions_total{rpc,decision}`
+// (в том числе `decision="error"` — вердикт получить не удалось) и
+// `kaname_authz_check_duration_seconds`; отказы самой базы — величинами пула и
+// сканеров очередей. Понадобится различать ВИД отказа хранилища — семейство
+// заводится заново ВМЕСТЕ с производителем, а не раньше него: гейт
+// `TestIAM2638_EveryDeclaredMetricProducerHasACaller` держит именно этот порядок.
 
 // Задержка обслуженного вызова наблюдается НЕ ЗДЕСЬ.
 //
