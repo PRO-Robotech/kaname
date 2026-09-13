@@ -506,6 +506,12 @@ func runServe(cfg config.Config) error {
 		return err
 	}
 
+	// Уборка ресурсного журнала подписки — своим уборщиком (см.
+	// `subscription_wiring.go`, там же довод, почему не предметом общего).
+	if err := startJournalRetentionSweep(ctx, pool, logger); err != nil {
+		return err
+	}
+
 	svcs := buildServices(pool, slavePool, opsRepo, kanameRepo, kanameRepo, catalogSnapshot,
 		// Тот же экземпляр читателя, что прочитал строки для стража паритета
 		// и для снимка: третьего чтения каталога на старте не заводится.
@@ -1074,7 +1080,7 @@ func runServe(cfg config.Config) error {
 	admission.arm(logger, cfg)
 
 	registerPublicServices(publicAdmission.Registrar(grpcSrv), svcs, opsRepo)
-	registerInternalServices(internalAdmission.Registrar(internalSrv), svcs, pool, cfg.MigrateDSN(), logger)
+	registerInternalServices(internalAdmission.Registrar(internalSrv), svcs, pool, cfg, logger)
 
 	publicAddr := cfg.APIServer.ListenAddress()
 	internalAddr := cfg.APIServer.InternalListenAddress()

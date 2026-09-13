@@ -35,6 +35,7 @@ package main
 
 import (
 	"context"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"testing"
 	"time"
 
@@ -122,7 +123,7 @@ func TestAuthorizeService_D_ReachableOnInternalListener(t *testing.T) {
 	// ВНУТРЕННИЙ слушатель — то ребро, которое потребители (vpc/compute/nlb) уже
 	// держат ради Check.
 	intConn := serveBufconn(t, func(s *grpc.Server) {
-		registerInternalServices(s, svcs, nil, "", nil)
+		registerInternalServices(s, svcs, nil, config.Config{}, nil)
 	})
 	intClient := iamv1.NewAuthorizeServiceClient(intConn)
 
@@ -172,7 +173,7 @@ func TestAuthorizeService_D_ReachableOnInternalListener(t *testing.T) {
 	// не проверяет». Здесь воспроизводится ровно то состояние, ради которого
 	// регистрация и заведена, — и на нём проба краснеет.
 	bareConn := serveBufconn(t, func(s *grpc.Server) {
-		registerInternalServices(s, &services{}, nil, "", nil)
+		registerInternalServices(s, &services{}, nil, config.Config{}, nil)
 	})
 	_, err = iamv1.NewAuthorizeServiceClient(bareConn).BatchCheck(ctx, batch)
 	require.Equal(t, codes.Unimplemented, status.Code(err),

@@ -67,6 +67,39 @@ func TestMigrationTouchesStructure_ProvenByInjection(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "ТРИГГЕР на измеряемой таблице — не влияет",
+			// DDL идёт над триггером; таблица названа лишь как его хозяин.
+			// Триггер исполняется на ЗАПИСИ, а предмет отчётов — стоимость
+			// запроса вердикта, то есть ЧТЕНИЯ.
+			sql: "CREATE TRIGGER access_bindings_resource_journal_insert_trg " +
+				"AFTER INSERT ON kaname.access_bindings " +
+				"FOR EACH ROW EXECUTE FUNCTION kaname.resource_journal_emit('iam_access_binding');",
+			want: false,
+		},
+		{
+			name: "снятие ТРИГГЕРА с измеряемой таблицы — не влияет",
+			sql:  "DROP TRIGGER IF EXISTS access_bindings_resource_journal_insert_trg ON kaname.access_bindings;",
+			want: false,
+		},
+		{
+			name: "триггер С УСЛОВИЕМ на измеряемой таблице — не влияет",
+			sql: "CREATE TRIGGER role_rule_selectors_trg AFTER UPDATE ON kaname.role_rule_selectors " +
+				"FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) " +
+				"EXECUTE FUNCTION kaname.resource_journal_emit('iam_role');",
+			want: false,
+		},
+		{
+			name: "ЗАКОННЫЙ БЛИЗНЕЦ снятия триггеров: ALTER той же таблицы — ВЛИЯЕТ",
+			// Без этой половины сужение выше нельзя отличить от снятия гейта с
+			// измеряемых таблиц целиком: оно снимает ОБЪЯВЛЕНИЕ ТРИГГЕРА, а не
+			// оператор и не файл.
+			sql: "CREATE TRIGGER access_bindings_resource_journal_insert_trg " +
+				"AFTER INSERT ON kaname.access_bindings " +
+				"FOR EACH ROW EXECUTE FUNCTION kaname.resource_journal_emit('iam_access_binding');\n" +
+				"ALTER TABLE kaname.access_bindings ADD COLUMN journalled boolean NOT NULL DEFAULT false;",
+			want: true,
+		},
+		{
 			name: "временная таблица ИЗ ВЫБОРКИ измеряемой — не влияет",
 			// #1833. `CREATE TEMP TABLE … ON COMMIT DROP AS SELECT … FROM <измеряемая>`
 			// несёт в ОДНОМ операторе и `CREATE`, и `DROP`, и имя измеряемой

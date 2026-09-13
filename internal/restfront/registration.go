@@ -11,6 +11,8 @@ import (
 	"google.golang.org/grpc"
 
 	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	subscriptionv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/subscription"
+
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -64,6 +66,15 @@ func registerInternalRESTServices(
 		{"InternalOperationsService", iamv1.RegisterInternalOperationsServiceHandlerFromEndpoint},
 		// Привязок ноль — по той же причине, что и выше.
 		{"InternalBootstrapTokenService", iamv1.RegisterInternalBootstrapTokenServiceHandlerFromEndpoint},
+		// Поток изменений ресурсов. Стоит здесь ПО ТОЙ ЖЕ причине, что и соседи:
+		// перечень поднимает службы слушателя целиком, и исключение завело бы
+		// второй перечень, расходящийся с первым молча.
+		//
+		// Внешнего пути у метода нет — контракт его не объявляет, — а
+		// сгенерированная привязка даёт непривязанный маршрут под именем службы.
+		// Он внутренний ровно настолько же, насколько сам слушатель: тот же
+		// периметр, та же посадка mTLS. Потребитель ходит gRPC, не HTTP.
+		{"InternalSubscriptionService", subscriptionv1.RegisterInternalSubscriptionServiceHandlerFromEndpoint},
 	}
 	for _, r := range registrations {
 		if err := r.bind(ctx, mux, endpoint, opts); err != nil {
