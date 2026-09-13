@@ -29,6 +29,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/pressly/goose/v3"
+
+	"github.com/PRO-Robotech/kaname/internal/migrations"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -230,4 +234,55 @@ func TestIntegration_RemovalCapturesEveryScopeOfTheSubject(t *testing.T) {
 		string(scopes),
 		"захватываются ВСЕ области предмета: одна принадлежность из двух оставила бы "+
 			"держателей выдач на второй аккаунт без события снятия, и оставила бы тихо")
+}
+
+// TestIntegration_JournalMigrationRollsBack — обратный ход снимает ВСЁ, что
+// прямой завёл, и не оставляет висящих триггеров.
+//
+// Проба нужна не ради самой отмены: применённые триггеры на СЕМИ чужих таблицах
+// переживают снятие журнала молча, если их забыли, — и следующее применение
+// упало бы на «триггер уже существует», то есть на шаге, который к предмету
+// отношения не имеет.
+func TestIntegration_JournalMigrationRollsBack(t *testing.T) {
+	if testing.Short() {
+		t.Skip("пропуск интеграционной пробы (нужен Docker)")
+	}
+	ctx := context.Background()
+	db := freshIamSchema(t)
+
+	countTriggers := func() int {
+		var n int
+		require.NoError(t, db.QueryRowContext(ctx,
+			`SELECT count(*) FROM pg_trigger t
+			   JOIN pg_class c ON c.oid = t.tgrelid
+			   JOIN pg_namespace n ON n.oid = c.relnamespace
+			  WHERE n.nspname = 'kaname' AND NOT t.tgisinternal
+			    AND t.tgname LIKE '%resource_journal%'`).Scan(&n))
+		return n
+	}
+
+	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: прямой ход завёл триггеры, и их СЕМЬ основных
+	// (создание, правка, снятие) плюс ТРИ подтаблицы состава плюс пробуждение.
+	require.Equal(t, 7*3+3+1, countTriggers(),
+		"перепись триггеров журнала: без неё отмена ниже зеленела бы на схеме, "+
+			"где их не было вовсе")
+
+	goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.SetDialect("postgres"))
+	goose.SetLogger(goose.NopLogger())
+	require.NoError(t, goose.Down(db, "."), "обратный ход обязан пройти целиком")
+
+	assert.Equal(t, 0, countTriggers(),
+		"после отмены висящих триггеров журнала не остаётся: забытый пережил бы "+
+			"снятие таблицы и уронил бы следующее применение на чужом шаге")
+
+	var exists bool
+	require.NoError(t, db.QueryRowContext(ctx,
+		`SELECT to_regclass('kaname.resource_journal') IS NOT NULL`).Scan(&exists))
+	assert.False(t, exists, "таблица журнала снимается вместе с триггерами")
+
+	// Прямой ход применяется ЗАНОВО: отмена, после которой не накатить, есть
+	// отмена только по названию.
+	require.NoError(t, goose.Up(db, "."), "после отмены цепь обязана накатиться снова")
+	assert.Equal(t, 7*3+3+1, countTriggers())
 }
