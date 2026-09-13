@@ -63,7 +63,7 @@ import tokenize
 
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "kacholib"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 # РАЗБОР ФОРМ БЕРЁТСЯ У ОБЩЕГО СЛОЯ, А НЕ ПЕРЕПИСЫВАЕТСЯ. Второй разборщик того
 # же предмета расходится с первым молча — ровно тот класс, который эта проба и

@@ -101,13 +101,19 @@
    "path": "tests/newman/scripts/coverage_test.py",
    "upstream_blob": "b698d820df0b9344a4670cb629cb9312b3f216c3",
    "upstream_sha256": "4b44ca598efc6fd662d1b688f7f7a6a8f5860d595d5aa6b41354ec6d13ee1919",
-   "local_sha256": "5604ec83d71e24aa4f38f09ac0ca7d08e241e1fd5d85a5aceb47e89fc46536e6",
+   "local_sha256": "b9497eb673901dc4661a55406b15830c6b28a98a813ab415c5b602ff8eab4dcb",
    "rewrites": [
     {
      "line": 7,
      "upstream": "собирает ОБХОДОМ дерева по образцу `services/*/tests/newman/scripts/*_test.py` и",
      "local": "собирает ОБХОДОМ дерева по образцу `tests/newman/scripts/*_test.py` (в дереве\nплатформы к нему добавлен `services/*/tests/newman/scripts/*_test.py`) и",
      "why": "образец обхода: в этом репозитории набор лежит в корне"
+    },
+    {
+     "line": 11,
+     "upstream": "Проводку держит `tools/pythonprobes`.",
+     "local": "Проводку держит `.github/scripts/run-python-probes.py`; одноимённый гейт\nпроводки `PRO-Robotech/kacho:tools/pythonprobes` — координата ДЕРЕВА\nПЛАТФОРМЫ, в этом репозитории его нет.",
+     "why": "координата держателя проводки: гейт платформы в этом репозитории отсутствует, и его имя названо С ДОМОМ, а не путём своего дерева"
     }
    ]
   },
@@ -136,13 +142,19 @@
    "path": "tests/newman/scripts/exec_coverage_test.py",
    "upstream_blob": "9400e3e23331aec27d07ced8fce86fe007f1f3ed",
    "upstream_sha256": "34fa9a8a10f533003dbc405ce571381551e6e942189c7e9e66c7965408103c0a",
-   "local_sha256": "8fcd679bbc5464e5d04db4ed276a51cf2ef81b64d49b39aab766d6dfb0813bfc",
+   "local_sha256": "1d8bd2c78e33a690f6f05bddf09057b41f311dc5a9ad9f7cc1332d280405de1e",
    "rewrites": [
     {
      "line": 18,
      "upstream": "собирает ОБХОДОМ дерева по образцу `services/*/tests/newman/scripts/*_test.py` и",
      "local": "собирает ОБХОДОМ дерева по образцу `tests/newman/scripts/*_test.py` (в дереве\nплатформы к нему добавлен `services/*/tests/newman/scripts/*_test.py`) и",
      "why": "образец обхода: в этом репозитории набор лежит в корне"
+    },
+    {
+     "line": 22,
+     "upstream": "Проводку держит `tools/pythonprobes`.",
+     "local": "Проводку держит `.github/scripts/run-python-probes.py`; одноимённый гейт\nпроводки `PRO-Robotech/kacho:tools/pythonprobes` — координата ДЕРЕВА\nПЛАТФОРМЫ, в этом репозитории его нет.",
+     "why": "координата держателя проводки: гейт платформы в этом репозитории отсутствует, и его имя названо С ДОМОМ, а не путём своего дерева"
     }
    ]
   },
@@ -150,8 +162,20 @@
    "path": "tests/newman/scripts/precondition_mark_test.py",
    "upstream_blob": "4d22a49f01505cc97bf7b142beef3185f3b922b8",
    "upstream_sha256": "8c29c309467c62827b22f3fa2dc3d68b2d16295bd6a9bcb7ebacd844de446f76",
-   "local_sha256": "56e2f53f9cb575f41580407b3916cd69de18daa9551354b4c7ddad148b74b7f0",
+   "local_sha256": "302694cb74b93cf711a4e06f655aac7b577ff85cc8ceccab77f01944c31d10fa",
    "rewrites": [
+    {
+     "line": 55,
+     "upstream": "собирает ОБХОДОМ дерева по образцам `services/*/tests/newman/scripts/*_test.py`\nи `tests/newman/scripts/*_test.py` (эта проба — во втором) и",
+     "local": "собирает ОБХОДОМ дерева по образцу `tests/newman/scripts/*_test.py` (в дереве\nплатформы к нему добавлен `services/*/tests/newman/scripts/*_test.py`) и",
+     "why": "координата держателя проводки: гейт платформы в этом репозитории отсутствует, и его имя названо С ДОМОМ, а не путём своего дерева"
+    },
+    {
+     "line": 60,
+     "upstream": "Проводку держит `tools/pythonprobes`.",
+     "local": "Проводку держит `.github/scripts/run-python-probes.py`; одноимённый гейт\nпроводки `PRO-Robotech/kacho:tools/pythonprobes` — координата ДЕРЕВА\nПЛАТФОРМЫ, в этом репозитории его нет.",
+     "why": "координата держателя проводки: гейт платформы в этом репозитории отсутствует, и его имя названо С ДОМОМ, а не путём своего дерева"
+    },
     {
      "line": 83,
      "upstream": "    roots = sorted(REPO.glob(\"services/*/tests/newman\"))",
@@ -164,15 +188,40 @@
    "path": "tests/newman/scripts/precondition_mark_injection_test.py",
    "upstream_blob": "2230709c10cd9a49b416bcfdda7c2fa54585a3d9",
    "upstream_sha256": "4f10a5064e44c4eff59873f90aaef7f62d6ab01f429c706ffdae9804917ee57b",
-   "local_sha256": "4f10a5064e44c4eff59873f90aaef7f62d6ab01f429c706ffdae9804917ee57b",
-   "rewrites": []
+   "local_sha256": "171b92cc39bbbf294246825bd167717e3f4c42acc6dbebc53d3fe71180889f3a",
+   "rewrites": [
+    {
+     "line": 17,
+     "upstream": "собирает ОБХОДОМ дерева по образцам `services/*/tests/newman/scripts/*_test.py`\nи `tests/newman/scripts/*_test.py` (эта проба — во втором) и",
+     "local": "собирает ОБХОДОМ дерева по образцу `tests/newman/scripts/*_test.py` (в дереве\nплатформы к нему добавлен `services/*/tests/newman/scripts/*_test.py`) и",
+     "why": "координата держателя проводки: гейт платформы в этом репозитории отсутствует, и его имя названо С ДОМОМ, а не путём своего дерева"
+    },
+    {
+     "line": 22,
+     "upstream": "Проводку держит `tools/pythonprobes`.",
+     "local": "Проводку держит `.github/scripts/run-python-probes.py`; одноимённый гейт\nпроводки `PRO-Robotech/kacho:tools/pythonprobes` — координата ДЕРЕВА\nПЛАТФОРМЫ, в этом репозитории его нет.",
+     "why": "координата держателя проводки: гейт платформы в этом репозитории отсутствует, и его имя названо С ДОМОМ, а не путём своего дерева"
+    }
+   ]
   },
   {
    "path": "tests/newman/scripts/precondition_outcome_test.py",
    "upstream_blob": "8a9db47c0eeaf6faf3172d68f23e7a5ffaa40cae",
    "upstream_sha256": "fe30f4646181758980c301fa7239361c7859d83fba0b6952287412009a549f5d",
-   "local_sha256": "ee9862256ea086b8a455fb36c5bfbd68792893b51d280b68330e330b08f62312",
+   "local_sha256": "993b76d9e37ef0766046fa9ff3c7d7b30b566fc1bdd14ef83f32399eeb8bdb33",
    "rewrites": [
+    {
+     "line": 23,
+     "upstream": "собирает ОБХОДОМ дерева по образцам `services/*/tests/newman/scripts/*_test.py`\nи `tests/newman/scripts/*_test.py` (эта проба — во втором) и",
+     "local": "собирает ОБХОДОМ дерева по образцу `tests/newman/scripts/*_test.py` (в дереве\nплатформы к нему добавлен `services/*/tests/newman/scripts/*_test.py`) и",
+     "why": "координата держателя проводки: гейт платформы в этом репозитории отсутствует, и его имя названо С ДОМОМ, а не путём своего дерева"
+    },
+    {
+     "line": 28,
+     "upstream": "Проводку держит `tools/pythonprobes`.",
+     "local": "Проводку держит `.github/scripts/run-python-probes.py`; одноимённый гейт\nпроводки `PRO-Robotech/kacho:tools/pythonprobes` — координата ДЕРЕВА\nПЛАТФОРМЫ, в этом репозитории его нет.",
+     "why": "координата держателя проводки: гейт платформы в этом репозитории отсутствует, и его имя названо С ДОМОМ, а не путём своего дерева"
+    },
     {
      "line": 57,
      "upstream": "    found = sorted(REPO.glob(\"services/*/tests/newman/scripts/gen.py\"))",

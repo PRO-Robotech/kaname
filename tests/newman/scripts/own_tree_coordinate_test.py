@@ -53,7 +53,7 @@
 ПОЧЕМУ РАЗБОР, А НЕ ПОДСТРОКА. Координаты встречаются в прозе О КЛАССЕ — в этой
 шапке, в README набора, в записи вендоринга. Проверка по подстроке краснела бы
 на собственном объяснении. Судится ЕДИНИЦА ТЕКСТА по форме (общий слой
-`kacholib/prose_forms.py`), и утверждение опознаётся оборотом, а не именем.
+`scripts/prose_forms.py`), и утверждение опознаётся оборотом, а не именем.
 
 КТО ЭТУ ПРОБУ ИСПОЛНЯЕТ: `.github/scripts/run-python-probes.py`, обходом дерева.
 """
@@ -66,7 +66,7 @@ import re
 import subprocess
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "kacholib"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from prose_forms import prose_units, tracked_files  # noqa: E402
 
