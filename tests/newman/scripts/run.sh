@@ -702,19 +702,20 @@ echo
 echo "===== coverage ====="
 COV_MIN="${COVERAGE_MIN:-0}"
 PROTO_GLOB="${COVERAGE_PROTO_GLOB:-}"
-_PLATFORM_MODULE="github.com/PRO-Robotech/kacho"
-_MODULE_DIR=""
 if [ -z "$PROTO_GLOB" ]; then
-  # Каталог модуля-пина. Код возврата берётся ДАННЫМИ: под `set -e` ненулевой
-  # оборвал бы прогонщик до развилки, и «модуль не скачан» стало бы неотличимо
-  # от «модуля нет в объявлении».
-  if command -v go >/dev/null 2>&1; then
-    _MODULE_DIR="$(cd "$NEWMAN_DIR" && GOFLAGS=-mod=mod go list -m -f '{{.Dir}}' \
-                    "$_PLATFORM_MODULE" 2>/dev/null || true)"
-  fi
-  for _cand in \
-    "${_MODULE_DIR:+$_MODULE_DIR/proto/kaname/cloud/iam/v1/*.proto}" \
-    '../../../../proto/kaname/cloud/iam/v1/*.proto'; do
+  # КОНТРАКТЫ БЕРУТСЯ ИЗ СВОЕГО ДЕРЕВА, И КАНДИДАТ ОСТАЛСЯ ОДИН.
+  #
+  # Здесь стоял каталог МОДУЛЯ-пина платформы (`go list -m -f '{{.Dir}}'`) первым
+  # кандидатом и подъём на четыре уровня вторым. Ступень S0a (kacho#2617, исход C)
+  # перенесла дом контрактов службы в этот репозиторий и сняла ребро
+  # `kaname → kacho` целиком, поэтому первый кандидат НЕИСПОЛНИМ by construction
+  # («module github.com/PRO-Robotech/kacho: not a known dependency»), а второй
+  # адресовал дерево платформы, которого рядом нет.
+  #
+  # Координата отсчитывается от каталога НАБОРА (`$NEWMAN_DIR` —
+  # `tests/newman/scripts`), а не от рабочего каталога: прогонщик зовут и из
+  # корня, и из каталога набора.
+  for _cand in "$NEWMAN_DIR/../../../proto/kaname/cloud/iam/v1/*.proto"; do
     [ -n "$_cand" ] || continue
     # shellcheck disable=SC2086
     if compgen -G "$_cand" >/dev/null 2>&1; then PROTO_GLOB="$_cand"; break; fi
@@ -723,12 +724,8 @@ fi
 if [ -z "$PROTO_GLOB" ]; then
   echo "ОТКАЗ: контрактов iam не найдено ни по одному кандидату — покрытие НЕ ИЗМЕРЕНО." >&2
   echo "        Это не «ноль RPC»: предмета у гейта нет вовсе." >&2
-  if [ -z "$_MODULE_DIR" ]; then
-    echo "        Модуль $_PLATFORM_MODULE не разрешён: позовите 'go mod download'" >&2
-    echo "        (без него 'go list -m' каталога не называет, и контракты взять негде)." >&2
-  else
-    echo "        Каталог модуля есть ($_MODULE_DIR), но контрактов iam в нём нет." >&2
-  fi
+  echo "        Контракты службы лежат в её дереве: proto/kaname/cloud/iam/v1/*.proto." >&2
+  echo "        Искали относительно каталога набора: $NEWMAN_DIR/../../../proto/…" >&2
   echo "        Либо задайте COVERAGE_PROTO_GLOB явно." >&2
   exit 2
 fi
