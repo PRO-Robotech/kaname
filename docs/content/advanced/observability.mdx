@@ -304,6 +304,7 @@ sum by (outcome) (rate(kaname_client_token_outcomes_total[5m]))
 
 | Ряд | Метки | Что значит |
 |---|---|---|
+| `kaname_provider_road_outcomes_total` | `road`, `outcome` | исходы обращений по каждому из трёх контуров к поставщику (`ADMIN`, `JWKS`, `TOKEN`). До этого ряда считался ОДИН контур из трёх, и молчание двух других было неотличимо от их исправности |
 | `kaname_provider_compensations_emitted_total` | `origin`, `outcome` | компенсирующие намерения, ЗАПИСАННЫЕ в очередь, по саге-инициатору |
 | `kaname_provider_compensations_applied_total` | `origin` | компенсации, ИСПОЛНЕННЫЕ дренажом. Разрыв между записанными и исполненными и есть незакрытая компенсация |
 

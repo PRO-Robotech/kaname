@@ -164,6 +164,16 @@ func requireSeedCensusRevisionIsOurs(t *testing.T, root, rev string) {
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: git не ответил о ревизии %s: %v", rev, err)
 	}
+	// Дерево БЕЗ ИСТОРИИ — это выгрузка (`git archive` + свежий `git init`), а не
+	// клон арендатора: у неё ровно один коммит и он без родителей. Ни одна ревизия
+	// в ней не разрешается BY CONSTRUCTION, поэтому вопрос «своя ли ревизия»
+	// неотвечаем, и отвечать на него красным значит выдать «не выполнилось» за
+	// вердикт о дереве. Третья категория называется вслух и в проход не идёт.
+	if seedCensusTreeHasNoHistory(root) {
+		t.Skipf("УСЛОВИЕ НЕ СОЗДАНО: дерево не несёт истории (выгрузка, один коммит "+
+			"без родителей) — ревизия измерения %s здесь не разрешается ни при каком "+
+			"её значении. Это не вердикт о числах §0: проверка не исполнялась", rev)
+	}
 	if exitErr.ExitCode() == 1 {
 		t.Fatalf("ревизия измерения %s НЕ ВХОДИТ в историю этого дерева: числа §0 "+
 			"относятся к чужой линии, и перемерить их здесь нельзя.\n"+
@@ -172,4 +182,17 @@ func requireSeedCensusRevisionIsOurs(t *testing.T, root, rev string) {
 	t.Fatalf("ревизия измерения %s не разрешается в этом дереве (git: код %d) — "+
 		"строка, к которой привязаны все числа §0, не является координатой",
 		rev, exitErr.ExitCode())
+}
+
+// seedCensusTreeHasNoHistory — дерево есть ВЫГРУЗКА, а не клон: ровно один коммит,
+// и он без родителей. Признак взят по обеим половинам намеренно: одного коммита
+// мало (свежий репозиторий с одним настоящим коммитом историю всё же начинает), а
+// пустота родителей без счёта не отличает выгрузку от первого коммита живой линии.
+func seedCensusTreeHasNoHistory(root string) bool {
+	n, err := exec.Command("git", "-C", root, "rev-list", "--count", "HEAD").Output()
+	if err != nil || strings.TrimSpace(string(n)) != "1" {
+		return false
+	}
+	p, err := exec.Command("git", "-C", root, "log", "-1", "--format=%P", "HEAD").Output()
+	return err == nil && strings.TrimSpace(string(p)) == ""
 }
