@@ -9,13 +9,13 @@ func TestProtoFieldOfKnowsMapAndOptional(t *testing.T) {
 		line string
 		want string // "" = полем не является
 	}{
-		{"  string name = 1;", "name"},                          // контроль
-		{"  repeated string ids = 2;", "ids"},                    // контроль
-		{"  map<string, string> labels = 5;", "labels"},          // прежде молчал
-		{"  optional int32 max_refs = 3;", "max_refs"},           // прежде молчал
-		{"  map<string, Foo> by_id = 7;", "by_id"},               // прежде молчал
-		{`  option java_package = "x";`, ""},                     // законный близнец
-		{`  option (kacho.api.v1.a) = "b";`, ""},                 // законный близнец
+		{"  string name = 1;", "name"},                  // контроль
+		{"  repeated string ids = 2;", "ids"},           // контроль
+		{"  map<string, string> labels = 5;", "labels"}, // прежде молчал
+		{"  optional int32 max_refs = 3;", "max_refs"},  // прежде молчал
+		{"  map<string, Foo> by_id = 7;", "by_id"},      // прежде молчал
+		{`  option java_package = "x";`, ""},            // законный близнец
+		{`  option (kacho.api.v1.a) = "b";`, ""},        // законный близнец
 	} {
 		got, ok := protoFieldOf(c.line)
 		if c.want == "" {
