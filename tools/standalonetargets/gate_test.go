@@ -38,6 +38,7 @@ var waivers = []standalonetargets.Waiver{
 	{Target: "migrate-up", Reason: "требует живую базу: предпосылку создаёт стенд, а не дерево"},
 	{Target: "migrate-down", Reason: "требует живую базу: предпосылку создаёт стенд, а не дерево"},
 	{Target: "migrate-status", Reason: "требует живую базу: предпосылку создаёт стенд, а не дерево"},
+	{Target: "check-hooks", Reason: "судит НЕ дерево, а провязку конкретного клона в .git/hooks; у синтетического клона пробы её нет by construction, и отказ там — верный ответ цели, а не находка"},
 }
 
 // ЗДЕСЬ СТОЯЛА ЗАПИСЬ ПРО `proto-install-plugins` — снята вместе со своей целью.
