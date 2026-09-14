@@ -70,7 +70,7 @@ func startRetentionSweeper(
 			// (#2069). Её доставленные строки не снимались никогда, и реестр
 			// роста таблиц объявлял её долгом; уборщик СВОЙ, потому что общий
 			// уборщик платформы требует ключа партиции, а он у этой очереди
-			// пуст намеренно — поток коммутативен.
+			// пуст намеренно — обоснование в росписи commutativeDrainExempt.
 			kanamepg.NewProviderCompensationSweeper(pool),
 		),
 		logger.With(slog.String("component", "retention_sweep")),

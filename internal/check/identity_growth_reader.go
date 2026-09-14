@@ -54,7 +54,18 @@ const (
 	// IdentityGrowthCollectorFile — где объявлено семейство величин.
 	IdentityGrowthCollectorFile = "internal/observability/metrics/identity_growth_collector.go"
 	// IdentityGrowthReadersFile — где живут правила оповещений службы.
-	IdentityGrowthReadersFile = "docs/engineering/components/32-observability.md"
+	//
+	// Это ПРОИЗВОДИТЕЛЬ, а не его пересказ, и различие здесь несущее. Прежде
+	// координата называла инженерный документ — то есть КОПИЮ, оставшуюся от
+	// переноса правил на опубликованную страницу. Гейт был зелен, а свойство не
+	// выполнялось: `kaname_identities_total` читало правило, которое жило
+	// только в копии и не поставлялось никому (`kacho#2545`). Читатель, которого
+	// нет у того, кто поставил продукт, читателем не является.
+	//
+	// Наведя гейт сюда, мы получили ЧЕСТНЫЙ красный — «ряд объявлен, но его не
+	// читает ни одно правило», — и он снялся заведением правила в поставку, а не
+	// правкой текста.
+	IdentityGrowthReadersFile = "deploy/templates/prometheusrule.yaml"
 )
 
 // identityGrowthMetricPrefix — приставка рядов СВОЕГО словаря.

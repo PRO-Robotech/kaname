@@ -428,6 +428,15 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   annotations:
     summary: "накопились невыполненные операции"
 
+- alert: KanameReconcileErrors
+  # Брошенную операцию подбирает фоновая уборка, и падает она молча: сама
+  # операция при этом выглядит идущей. Соседнее правило звонит на другое —
+  # на неудачную запись исхода, — поэтому этот случай им не закрыт.
+  expr: rate(kaname_lro_reconcile_errors_total[10m]) > 0
+  for: 10m
+  annotations:
+    summary: "уборка осиротевших операций падает — подбирать их некому"
+
 - alert: KanamePoolSaturated
   expr: rate(kaname_db_pool_empty_acquire_total[5m]) > 0
   for: 10m
@@ -439,6 +448,16 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   for: 10m
   annotations:
     summary: "строка очереди {{ $labels.table }} висит больше 15 минут"
+
+- alert: KanameIdentityGrowthSpike
+  # Порог наблюдения, а не отказа: превышение ничего не запрещает, оно зовёт
+  # посмотреть, откуда взялись личности — предел на аккаунты обходят их
+  # заведением. Счётчик только растёт, поэтому всплеск здесь означает именно
+  # появление, а не перезапуск. Порог свой у каждой установки: меняйте здесь.
+  expr: increase(kaname_identities_total[1h]) > 100
+  for: 15m
+  annotations:
+    summary: "личностей за час прибавилось больше 100 — стоит посмотреть, откуда"
 
 - alert: KanameIdentityLedgerUnsampled
   # Ноль личностей законен. Незаконно НЕ ЗНАТЬ, ноль это или неснятый замер.
