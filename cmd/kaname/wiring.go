@@ -1022,7 +1022,6 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	logger *slog.Logger) *sakeysapp.Handler {
 	saClientRepo := kanamepg.NewSAOAuthClientRepo(pool)
 
-	hydraAdminURL := cfg.AuthN.ResolveHydraAdminURL()
 	hydraAdmin := mustProviderAdminClient(cfg, roadObs)
 
 	// Durable audit_outbox emitter — emits iam.sa_key.issued /
@@ -1090,8 +1089,22 @@ func buildSAKeysHandler(pool *pgxpool.Pool, opsRepo operations.Repo, cfg config.
 	// не заводим» иначе невидимо ниоткуда, а оператору, разбирающему выдачу, это
 	// первое, что нужно знать — у ключа, выданного переведённым контуром, записи у
 	// прежнего издателя нет и искать её негде.
+	//
+	// АДРЕС БЕРЁТСЯ У ПОСТРОЕННОГО КЛИЕНТА, А НЕ РЕЗОЛВИТСЯ ВТОРОЙ РАЗ
+	// (задачи kacho#2573, kaname#21). Здесь стояло отдельное чтение
+	// `cfg.AuthN.ResolveHydraAdminURL()`, и оно не спрашивало полосу: резолвер
+	// пустого не возвращает НИКОГДА — при незаданной ручке он выводит адрес из
+	// доменного имени. На посадке `own`, где внешнего поставщика нет вовсе и
+	// строитель отдаёт отставленного клиента, перепись всё равно печатала
+	// административный адрес — то есть называла настроенной дорогу, по которой
+	// процесс не пойдёт ни разу.
+	//
+	// Клиент несёт адрес ровно тогда, когда дорога построена, поэтому пустое
+	// значение здесь означает «дороги нет», а не «поле не заполнено»; булев
+	// факт о ней печатает перепись полосы (`provider_admin_hop_built`) и здесь
+	// не повторяется — два места об одном предмете разошлись бы молча.
 	logger.Info("sa_keys wired",
-		"hydra_admin", hydraAdminURL,
+		"hydra_admin", hydraAdmin.BaseURL,
 		"own_issuance", ownIssuance)
 
 	return sakeysapp.NewHandler(issueUC, revokeUC, listKeysUC)
