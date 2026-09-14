@@ -200,7 +200,7 @@ func ProtoSurfaceIn(file, src string) (ProtoSurface, error) {
 				skip := trimmed == "" ||
 					strings.HasPrefix(trimmed, "//") ||
 					strings.HasPrefix(trimmed, "reserved") ||
-					strings.HasPrefix(trimmed, "option") ||
+					declaresContractOption(trimmed) ||
 					strings.HasPrefix(trimmed, "}")
 				// поля верхнего уровня и поля внутри `oneof` — и те и другие
 				// получают геттер у сообщения, поэтому глубина `oneof` не
@@ -211,7 +211,7 @@ func ProtoSurfaceIn(file, src string) (ProtoSurface, error) {
 						msg.Fields = append(msg.Fields, f)
 					}
 				}
-				if strings.HasPrefix(trimmed, "option") || depth > 0 {
+				if declaresContractOption(trimmed) || depth > 0 {
 					depth += strings.Count(text, "{") - strings.Count(text, "}")
 					if depth < 0 {
 						depth = 0
@@ -285,6 +285,27 @@ func rpcRequest(line string) string {
 }
 
 // protoFieldOf распознаёт объявление поля: `<тип> <имя> = <номер>`.
+// declaresContractOption — строка объявляет ОПЦИЮ контракта, а не поле `optional`.
+//
+// Прежний предикат брал приставку `option` и потому глотал `optional int32 x = 3;`:
+// слово «optional» начинается с «option». Два поля уходили из-под наблюдения, и
+// вердикт был не красным и не зелёным — он МОЛЧАЛ.
+//
+// Различает следующий знак: у опции за словом идёт пробел либо скобка
+// (`option (kacho.api.v1.foo) = ...`), у поля — буква.
+func declaresContractOption(trimmed string) bool {
+	const kw = "option"
+	if !strings.HasPrefix(trimmed, kw) {
+		return false
+	}
+	rest := trimmed[len(kw):]
+	if rest == "" {
+		return true
+	}
+	c := rest[0]
+	return c == ' ' || c == '\t' || c == '('
+}
+
 func protoFieldOf(line string) (ProtoField, bool) {
 	eq := strings.Index(line, "=")
 	if eq < 0 {
@@ -295,12 +316,20 @@ func protoFieldOf(line string) (ProtoField, bool) {
 	if tail == "" || tail[0] < '0' || tail[0] > '9' {
 		return ProtoField{}, false
 	}
-	// `map<string, string> labels` — запятая внутри типа не делит поля
+	// `map<string, string> labels` — запятая внутри типа не делит поля.
+	// После среза остаётся ОДНО слово — имя поля, и требовать двух здесь нельзя:
+	// именно так девятнадцать полей `labels` уходили из-под наблюдения молча.
+	parametrised := strings.Contains(head, "<")
 	if idx := strings.LastIndex(head, ">"); idx >= 0 {
 		head = strings.TrimSpace(head[idx+1:])
 	}
 	parts := strings.Fields(head)
-	if len(parts) < 2 {
+	switch {
+	case len(parts) == 0:
+		return ProtoField{}, false
+	case len(parts) == 1 && !parametrised:
+		// голое слово без типа полем не является: `option java_package = "x"`
+		// сюда не доходит, но строка вида `foo = 1` — не объявление поля
 		return ProtoField{}, false
 	}
 	name := parts[len(parts)-1]
