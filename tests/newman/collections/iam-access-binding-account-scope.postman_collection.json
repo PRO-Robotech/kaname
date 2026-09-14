@@ -3833,7 +3833,7 @@
       ]
     },
     {
-      "name": "IAM-AB-SIA-10-11-ANTI-ORACLE-OK — IAM-AB-SIA-10/11: ?accountId=<чужой> и ?accountId=<несуществующий, годной формы> отвечают 200 с пустым перечнем и ТЕЛА совпадают — различимый ответ здесь есть оракул существования аккаунта (утверждается равенство тел, а не только кодов)",
+      "name": "IAM-AB-SIA-10-11-ANTI-ORACLE-OK — IAM-AB-SIA-10/11: ?accountId=<чужой> и ?accountId=<несуществующий, годной формы> отвечают 200 с пустым перечнем и ТЕЛА совпадают ПОБАЙТОВО — различимый ответ здесь есть оракул существования аккаунта (сравниваются сырые тела, а не их пересборка, и не только коды)",
       "description": "class:NEG | class:CONF | priority:P0",
       "item": [
         {
@@ -3906,7 +3906,83 @@
                   "  const rows = pm.response.json().accessBindings || [];",
                   "  pm.expect(rows.length, pm.response.text()).to.eql(0);",
                   "});",
-                  "pm.environment.set('siaForeignBody', JSON.stringify(pm.response.json()));"
+                  "pm.environment.set('siaForeignBody', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "IAM-AB-SIA-10-11-ANTI-ORACLE-OK :: sia-discriminating-refusal",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/accessBindings?pageSize=100&accountId=not-an-id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "accessBindings?pageSize=100&accountId=not-an-id"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtPureNoBindings'",
+                  "const __t = pm.environment.get('jwtPureNoBindings') || pm.variables.get('jwtPureNoBindings') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtPureNoBindings is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtPureNoBindings is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(400));",
+                  "pm.test('grpc code 3 (INVALID_ARGUMENT)', () => {",
+                  "  let j; try { j = pm.response.json(); } catch (e) { j = {}; }",
+                  "  pm.expect(j.code, JSON.stringify(j)).to.eql(3);",
+                  "});",
+                  "pm.environment.set('siaDiscriminatingBody', pm.response.text());"
                 ]
               }
             }
@@ -3978,9 +4054,16 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
-                  "pm.test('тела совпадают: существование аккаунта по ответу не читается', () =>",
-                  "  pm.expect(JSON.stringify(pm.response.json()), pm.response.text())",
-                  "    .to.eql(pm.environment.get('siaForeignBody')));"
+                  "pm.test('тела совпадают ПОБАЙТОВО: существование аккаунта по ответу не читается', () => {",
+                  "  const foreign = pm.environment.get('siaForeignBody');",
+                  "  pm.expect(foreign, 'тело ответа на чужой аккаунт не захвачено — сравнивать не с чем').to.be.a('string').and.not.empty;",
+                  "  // >>> контроль непустоты множества, на котором проверяется отрицание",
+                  "  const disc = pm.environment.get('siaDiscriminatingBody');",
+                  "  pm.expect(disc, 'отказ формы не захвачен — контроля непустоты нет, и равенство ниже ни о чём не свидетельствует').to.be.a('string').and.not.empty;",
+                  "  pm.expect(foreign, 'поверхность отвечает ОДИНАКОВО и на годный вход, и на негодную форму: различать нечего, и утверждение ниже истинно тривиально — на пустом множестве').to.not.eql(disc);",
+                  "  // <<< контроль непустоты",
+                  "  pm.expect(pm.response.text()).to.eql(foreign);",
+                  "});"
                 ]
               }
             }
