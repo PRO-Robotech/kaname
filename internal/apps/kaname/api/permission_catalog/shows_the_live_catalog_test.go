@@ -68,10 +68,18 @@ func liveRows() catalog.Rows {
 	}
 }
 
-// catalogOverRows — витрина, провязанная НАЗВАННЫМ каталожным фактом.
+// catalogOverRows — витрина, провязанная НАЗВАННЫМИ ЖИВЫМИ строками; снятой
+// половины у фикстуры нет.
 func catalogOverRows(t *testing.T, rows catalog.Rows) *iamv1.ListPermissionCatalogResponse {
 	t.Helper()
-	f, err := catalog.NewFacts(rows)
+	return catalogOverHalves(t, catalog.Halves{Live: rows})
+}
+
+// catalogOverHalves — витрина, провязанная НАЗВАННЫМ каталожным фактом из ОБЕИХ
+// половин.
+func catalogOverHalves(t *testing.T, halves catalog.Halves) *iamv1.ListPermissionCatalogResponse {
+	t.Helper()
+	f, err := catalog.NewFacts(halves)
 	if err != nil {
 		t.Fatalf("фикстура каталога не собралась: %v", err)
 	}

@@ -78,7 +78,7 @@ func rowsWithAppliedResource() catalog.Rows {
 // производит пар НИКОГДА (`-06` зеленел бы на нём целиком), поэтому направления
 // обязаны утверждаться оба.
 func TestIAMCT2_14_AppliedTypeReachesTheProjection(t *testing.T) {
-	f, err := catalog.NewFacts(rowsWithAppliedResource())
+	f, err := catalog.NewFacts(catalog.Halves{Live: rowsWithAppliedResource()})
 	if err != nil {
 		t.Fatalf("снимок со строкой заведённого ресурса: %v", err)
 	}

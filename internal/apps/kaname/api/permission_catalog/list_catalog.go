@@ -63,6 +63,31 @@ type Catalog struct {
 	ClosedVerbs []string
 	// Wildcard — platform-wide wildcard policy flags.
 	Wildcard WildcardPolicy
+	// Retired — ресурсы, которые платформа СНЯЛА, и живой ресурс взамен каждого.
+	//
+	// Это НЕ перечень грантуемого и лежит отдельно от `Modules` намеренно:
+	// признак снятия внутри `Resource` не научил бы фильтровать клиента,
+	// написанного до его появления, — он увидел бы снятый ресурс как живой.
+	//
+	// Перечень отвечает на вопрос, возникший у клиента вместе с отказом: «что
+	// назвать вместо». Сам отказ ответить на него не может — он приходит из
+	// прерванной транзакции, где чтения нет by construction (kacho#1814).
+	Retired []RetiredResource
+}
+
+// RetiredResource — снятый ресурс и его преемник, в точечной форме.
+//
+// Глаголов запись не несёт: строка глаголов снята вместе с ресурсом, и выдать
+// здесь набор ПРЕЕМНИКА значило бы утверждать совпадение наборов, которого никто
+// не проверял. Набор преемника клиент спрашивает у него самого — преемник жив и
+// стоит в `Modules`.
+type RetiredResource struct {
+	// Resource — точечное имя СНЯТОГО (`compute.disk`), та же форма, какой его
+	// называет отказ.
+	Resource string
+	// SupersededBy — точечное имя ЖИВОГО преемника (`storage.volumes`); пусто
+	// означает «преемник не назван», а не «преемник — пустая строка».
+	SupersededBy string
 }
 
 // Module — a grantable module and the resources grantable within it.
@@ -199,9 +224,27 @@ func (u *ListPermissionCatalogUseCase) Execute(ctx context.Context) (Catalog, er
 	// CommonVerbVocabulary уже возвращает свежую копию — источник истины не алиасится.
 	closedVerbs := domain.OrderVerbsForDisplay(facts.CommonVerbVocabulary())
 
+	// СНЯТАЯ половина берётся у ТОГО ЖЕ факта, что и живая, — не вторым
+	// вопросом. Спроси её отдельно — и в окне обновления арендатор получил бы
+	// ресурс в обоих перечнях сразу либо ни в одном: состояние, которого в базе
+	// не бывает ни при каком порядке применения (IAM-SUC-09).
+	//
+	// Строка БЕЗ преемника не выбрасывается: она остаётся снятой, и промолчать о
+	// ней значило бы скрыть от клиента сам факт снятия. Порядок задан фактом —
+	// по точечному имени.
+	retiredEntries := facts.RetiredResources()
+	retired := make([]RetiredResource, 0, len(retiredEntries))
+	for _, e := range retiredEntries {
+		retired = append(retired, RetiredResource{
+			Resource:     e.Module + "." + e.Resource,
+			SupersededBy: e.SupersededBy,
+		})
+	}
+
 	return Catalog{
 		Modules:     modules,
 		ClosedVerbs: closedVerbs,
+		Retired:     retired,
 		Wildcard: WildcardPolicy{
 			VerbWildcardAllowedCustom:        true, // verb-`*` bounded.
 			ModuleResourceWildcardSystemOnly: true, // module/resource-`*` system-only.

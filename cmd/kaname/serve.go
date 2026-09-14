@@ -391,8 +391,12 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("каталог модуля: %w", catErr)
 	}
 	// Снимок наполняется ТЕМИ ЖЕ строками, которые прочитал страж, — своего
-	// чтения не заводит.
-	catalogSnapshot, csErr := catalog.NewSnapshot(catalogCensus.Live, catalogRepo,
+	// чтения не заводит. ОБЕИМИ половинами: снятые строки страж читает и так, и
+	// до этой правки они здесь выбрасывались — отчего свежезапущенный процесс
+	// отвечал арендатору пустым перечнем снятого до первого обновления
+	// (kacho#1814). Пара берётся одним методом переписи, чтобы её нельзя было
+	// разлучить по дороге.
+	catalogSnapshot, csErr := catalog.NewSnapshot(catalogCensus.Halves(), catalogRepo,
 		logger.With(slog.String("component", "catalog_snapshot")),
 		metricsReg.NewCatalogSnapshotRecorder())
 	if csErr != nil {

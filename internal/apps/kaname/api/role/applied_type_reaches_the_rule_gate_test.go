@@ -92,7 +92,7 @@ func factsWithAppliedType(t *testing.T) *catalog.Facts {
 			Module: appliedModule, Resource: appliedResource, Verb: verb, PerObject: true,
 		})
 	}
-	f, err := catalog.NewFacts(rows)
+	f, err := catalog.NewFacts(catalog.Halves{Live: rows})
 	if err != nil {
 		t.Fatalf("снимок со строкой заведённого ресурса: %v", err)
 	}
@@ -124,7 +124,7 @@ func factsWithoutWithdrawnType(t *testing.T) *catalog.Facts {
 			"вердикт о снятии был бы беспредметен",
 			withdrawnDotted, len(src.Resources), len(rows.Resources))
 	}
-	f, err := catalog.NewFacts(rows)
+	f, err := catalog.NewFacts(catalog.Halves{Live: rows})
 	if err != nil {
 		t.Fatalf("снимок без строки снятого ресурса: %v", err)
 	}

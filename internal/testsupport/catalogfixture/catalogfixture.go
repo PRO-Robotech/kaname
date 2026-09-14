@@ -35,7 +35,7 @@ import (
 // производитель, и тогда любая проба на этой фикстуре утверждала бы о пустом
 // каталоге, ничего об этом не сказав.
 func Facts() *catalog.Facts {
-	f, err := catalog.NewFacts(seed.LiteralRows())
+	f, err := catalog.NewFacts(catalog.Halves{Live: seed.LiteralRows()})
 	if err != nil {
 		panic("catalogfixture: перечень литерала пуст — сломан производитель посева: " + err.Error())
 	}

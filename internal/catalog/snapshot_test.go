@@ -46,26 +46,46 @@ func (o *countingObserver) get(outcome string) int {
 	return o.outcomes[outcome]
 }
 
-// stubSource — источник строк с управляемым исходом.
+// stubSource — источник ПОЛОВИН с управляемым исходом.
+//
+// Отдаёт обе половины одним значением — ровно так же, как порт: подделка, у
+// которой живую половину можно спросить отдельно, была бы снисходительнее
+// продукта в том самом месте, ради которого порт и сведён к одному методу.
 type stubSource struct {
-	mu   sync.Mutex
-	rows catalog.Rows
-	err  error
+	mu     sync.Mutex
+	halves catalog.Halves
+	err    error
+	// calls — сколько раз у источника спросили каталог. Считается затем, чтобы
+	// «обе половины одним чтением» проверялось числом, а не прочтением кода.
+	calls int
 }
 
-func (s *stubSource) ReadLiveCatalog(context.Context) (catalog.Rows, error) {
+func (s *stubSource) ReadCatalogHalves(context.Context) (catalog.Halves, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.calls++
 	if s.err != nil {
-		return catalog.Rows{}, s.err
+		return catalog.Halves{}, s.err
 	}
-	return s.rows, nil
+	return s.halves, nil
 }
 
 func (s *stubSource) set(rows catalog.Rows, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.rows, s.err = rows, err
+	s.halves, s.err = catalog.Halves{Live: rows}, err
+}
+
+func (s *stubSource) setHalves(h catalog.Halves, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.halves, s.err = h, err
+}
+
+func (s *stubSource) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
 }
 
 // logSink — журнал в память: проба утверждает УРОВЕНЬ и ПРЕДМЕТ записи, а не
@@ -93,11 +113,11 @@ func (s *logSink) text() string {
 // TestIAMCT2_03_RefreshFailureIsNeitherFatalNorSilent — `-03`.
 func TestIAMCT2_03_RefreshFailureIsNeitherFatalNorSilent(t *testing.T) {
 	rows := seed.LiteralRows()
-	src := &stubSource{rows: rows}
+	src := &stubSource{halves: catalog.Halves{Live: rows}}
 	obs := newCountingObserver()
 	sink := &logSink{}
 
-	snap, err := catalog.NewSnapshot(rows, src, slog.New(sink), obs)
+	snap, err := catalog.NewSnapshot(catalog.Halves{Live: rows}, src, slog.New(sink), obs)
 	if err != nil {
 		t.Fatalf("снимок на старте: %v", err)
 	}
@@ -143,10 +163,10 @@ func TestIAMCT2_03_RefreshFailureIsNeitherFatalNorSilent(t *testing.T) {
 // процесса» отличимо от исправной работы.
 func TestIAMCT2_04_SuccessfulRefreshesAreCounted(t *testing.T) {
 	rows := seed.LiteralRows()
-	src := &stubSource{rows: rows}
+	src := &stubSource{halves: catalog.Halves{Live: rows}}
 	obs := newCountingObserver()
 
-	snap, err := catalog.NewSnapshot(rows, src, slog.New(&logSink{}), obs)
+	snap, err := catalog.NewSnapshot(catalog.Halves{Live: rows}, src, slog.New(&logSink{}), obs)
 	if err != nil {
 		t.Fatalf("снимок на старте: %v", err)
 	}
@@ -172,9 +192,9 @@ func TestIAMCT2_04_SuccessfulRefreshesAreCounted(t *testing.T) {
 // отмене.
 func TestIAMCT2_04_RunRefreshesOnItsPeriod(t *testing.T) {
 	rows := seed.LiteralRows()
-	src := &stubSource{rows: rows}
+	src := &stubSource{halves: catalog.Halves{Live: rows}}
 	obs := newCountingObserver()
-	snap, err := catalog.NewSnapshot(rows, src, slog.New(&logSink{}), obs)
+	snap, err := catalog.NewSnapshot(catalog.Halves{Live: rows}, src, slog.New(&logSink{}), obs)
 	if err != nil {
 		t.Fatalf("снимок на старте: %v", err)
 	}
