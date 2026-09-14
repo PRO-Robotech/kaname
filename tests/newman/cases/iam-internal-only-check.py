@@ -6,8 +6,8 @@
 Проверка изоляции `Internal*` сервисов от external TLS endpoint
 (Internal*-методы не публикуются на advertised external endpoint).
 
-  InternalIAMService / InternalUserService /
-  InternalBreakGlassService
+  InternalIAMService / InternalUserService / InternalInteractiveClientService /
+  InternalSessionRevocationsService
   должны быть доступны ТОЛЬКО на cluster-internal listener — на api-gateway это
   выделенный `internal-rest` listener (:8081), в local/CI port-forward
   {{internalBaseUrl}} = http://localhost:18081. ПУБЛИЧНЫЙ cmux
@@ -46,10 +46,16 @@ Coverage:
   IAM-INT-OK-INT-LIMIT-LIST            — тот же путь на internal → 200 со списком и посеянными
                                          умолчаниями (positive control)
 
-Перечень выше СХОДИТСЯ с тем, что модуль объявляет, и держится это гейтом
-`internal/repohygiene` `TestCaseCoverageBlockMatchesWhatTheModuleDeclares`, а не
-вниманием: выписанный рядом с растущим составом перечень владельца не имеет.
-Одной позиции здесь недоставало (#2207).
+Перечень выше СХОДИТСЯ с тем, что модуль объявляет, — но ДЕРЖИТСЯ ЭТО ВНИМАНИЕМ,
+и здесь сказано прямо, потому что прежняя редакция утверждала обратное. Гейт
+`TestCaseCoverageBlockMatchesWhatTheModuleDeclares` существует и работает, однако
+живёт он в ДРУГОМ репозитории (`PRO-Robotech/kacho:internal/repohygiene/casecoverageblock_test.go`)
+и обходит `*/tests/newman/cases/*.py` ПО ИНДЕКСУ СВОЕГО дерева — то есть модули
+под `services/<имя>/`. Набор службы после выноса лежит в корне другого
+репозитория и в этот обход не попадает НИ ОДНИМ файлом; своего держателя у блока
+здесь нет. Предикат: `git ls-files internal/repohygiene | wc -l` в этом дереве →
+`0`. Класс тот же, что у самой шапки: утверждение верно в день записи и
+переживает переезд молча.
 
 Why no black-box POSITIVE revoke→IsRevoked case:
   InternalSessionRevocationsService is gRPC-only on :9091 — the api-gateway does
@@ -77,6 +83,51 @@ Note: TrustPolicyService and OpaBundleService have been removed — the
 corresponding negative cases (IAM-INT-NEG-EXT-TRUST-CREATE,
 IAM-INT-NEG-EXT-OPA-GETBUNDLE) are deleted because the underlying RPCs no longer
 exist anywhere.
+
+Note: `InternalBreakGlassService` стоял в перечне выше как служба ПОД ПРОВЕРКОЙ и
+её там нет — ни одного шага, ни одного кейса, ни строки в блоке Coverage
+(`kacho#2104`). Службы не существует и не может: Break-Glass снят ФИЗИЧЕСКИ
+миграцией `0006_drop_scim_saml_break_glass.sql`, остаточный вид условия — `0013`;
+в дереве нет ни объявления в `proto/kaname/cloud/iam/v1/`, ни записи каталога, ни
+обработчика. Перепись имени по дереву: одно вхождение, и оно было этой строкой.
+То же самое соседний набор утверждает прямо (`cases/iam-authz-grant-check-propagation.py`,
+разбор снятого `IAM-FGA-04`) — два места об одном предмете, и ложным было
+ЗДЕСЬ: перечень проверяемых служб читается как объявление покрытия, а `Coverage`
+ниже его не несёт и потому расхождения не показывал.
+
+Note: у трёх кейсов ниже — IAM-INT-NEG-EXT-LIMIT-LIST, -LIMIT-CREATE и
+IAM-INT-OK-INT-LIMIT-LIST — ПРЕДМЕТ СНЯТ, и шапка обязана это называть, пока
+кейсы стоят. `InternalLimitService` выпилена стадией S4 задачи `kacho#2117`
+(надгробие — `cmd/kaname/grpc_register.go`, «ЗДЕСЬ РЕГИСТРИРОВАЛАСЬ
+`InternalLimitService`»; возврат стережёт `internal/check/quota_authority_retired.go`).
+Производителя у `/iam/v1/internal/limits` в дереве НЕ ОСТАЛОСЬ ни одного:
+`git grep -c 'internal/limits' -- ':!tests/newman'` → пусто, при 6 вхождениях в
+этой коллекции и 88 в `iam-limit`.
+
+Следствие для ВЕРДИКТА, и оно разное у трёх кейсов. Два отрицания («404 на
+внешнем») стали ВАКУУМНЫМИ: 404 приходит теперь отовсюду, утверждение зеленеет
+потому, что метода нет, а не потому, что ban #6 держится, — то есть ровно тот
+дефект, который блок ниже (`InternalAuthorizeService/WriteTuples`) называет «the
+form of an isolation check and none of its substance». Положительный контроль
+`IAM-INT-OK-INT-LIMIT-LIST` вакуумным не стал — он КРАСНЕЕТ на поднятом стенде.
+
+Исходов три, и «оставить как есть» не входит: снять три кейса вместе с предметом
+· перевести их на живую поверхность · завести предмет с предикатом снятия. Здесь
+не сделано ни одного намеренно: предмет шире этого набора — те же 11 кейсов несёт
+`cases/iam-limit.py`, их гоняет `scripts/run.sh` (`run_one "iam-limit"`) и
+объявляет долгом `.github/scripts/newman-suite-debt.py`, — и решается он своим
+изменением, а не попутно в правке шапки. Запись ИСТЕКАЕТ САМА: снимут кейсы —
+описывать ей станет нечего, и она сама станет находкой.
+
+Перечень выше приведён к тому, что набор ДЕЛАЕТ: службы выведены из путей шагов
+порождённой коллекции (`InternalIAMService` и `InternalSessionRevocationsService`
+— полной формой gRPC, `InternalUserService` и `InternalInteractiveClientService`
+— REST-путями `/iam/v1/internal/*`). Держится это ВНИМАНИЕМ, и сказано прямо:
+предикат «имя службы в шапке существует в контракте» на этом дереве даёт 8
+кандидатов при одной истинной находке — четыре имени принадлежат контракту
+ПЛАТФОРМЫ (`NetworkService`, `OperationService`, `RegionService`, `ZoneService`),
+которого это дерево не читает, и три суть такие же записи о снятии, как эта.
+Инструмент, у которого семь находок из восьми ложные, перестают читать.
 
 Environment requirements:
   {{baseUrl}}          — PUBLIC api-gateway cmux (http://localhost:18080 in port-forward).
