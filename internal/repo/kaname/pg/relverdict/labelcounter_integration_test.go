@@ -37,7 +37,7 @@ import (
 func TestAskerCountsLabelArmGroundsPerAxis(t *testing.T) {
 	pool, ctx := withCommittedPool(t, func(ctx context.Context, tx pgx.Tx) {
 		seedTenant(t, ctx, tx)
-		seedLabelGrant(t, ctx, tx, "iam_group")
+		seedLabelGrant(t, ctx, tx, "iam_group", "get")
 		exec(t, ctx, tx,
 			`INSERT INTO kaname.groups (id, account_id, name, labels)
 			 VALUES ('grp-9', 'acc-1', 'probe-group', '{"env":"prod"}'::jsonb)`)
@@ -79,7 +79,7 @@ func TestAskerCountsLabelArmGroundsPerAxis(t *testing.T) {
 func TestAskerCountsLabelArmGroundsOnTheMirrorAxis(t *testing.T) {
 	pool, ctx := withCommittedPool(t, func(ctx context.Context, tx pgx.Tx) {
 		seedTenant(t, ctx, tx)
-		seedLabelGrant(t, ctx, tx, "vpc_network")
+		seedLabelGrant(t, ctx, tx, "vpc_network", "get")
 		exec(t, ctx, tx,
 			`INSERT INTO kaname.resource_mirror (object_type, object_id, labels)
 			 VALUES ($1, 'net-9', '{"env":"prod"}'::jsonb)`,

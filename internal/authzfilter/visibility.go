@@ -78,12 +78,17 @@ import (
 // Neither state is hypothetical: a partially reconciled role, or a revoked verb grant
 // whose back-compat tier tuple outlived it, produces exactly them.
 //
-// Narrowing loses no granted access. Every iam type unions `or super_admin` into
-// `v_get` (and `account` also `or owner`), so all three cascading super-levels and the
-// account owner resolve it structurally; the reconciler emits `v_get` for every role
-// authoring the `get` verb; and the floors that never go through this package are
-// untouched (the caller's own user row, an account owner's projects, the system-role
-// catalog).
+// Narrowing loses no granted access. Every iam type THAT DECLARES `v_get` unions
+// `or super_admin` into it (and `account` also `or owner`), so all three cascading
+// super-levels and the account owner resolve it structurally; the reconciler emits
+// `v_get` for every role authoring the `get` verb ON A TYPE THAT DECLARES IT; and the
+// floors that never go through this package are untouched (the caller's own user row,
+// an account owner's projects, the system-role catalog).
+//
+// The qualifier is load-bearing, not pedantry: `iam_role` declares no `v_get` at all
+// since #1922 — the relation had no reader, and `iam.role` no longer offers the `get`
+// verb, so nothing authors it and nothing emits it. Read the sentence without the
+// qualifier and the next contributor looks for an emission that cannot happen.
 //
 // pageRelations — the page-membership predicate BY OBJECT TYPE, TOTAL by construction:
 // the entry under the empty key is the default every type not named here takes, so

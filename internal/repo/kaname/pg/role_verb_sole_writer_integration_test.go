@@ -122,7 +122,7 @@ func TestIAMRV102_RoleWritePathPutsTheProjection(t *testing.T) {
 	acc := seedAccount(t, ctx, repo, "acc-rv102", owner)
 	roleID := seedAccountRole(t, ctx, pool, acc.ID, "rv102_role")
 
-	rules := domain.Rules{{Module: "iam", Resources: []string{"role"}, Verbs: []string{"get", "update"}}}
+	rules := domain.Rules{{Module: "iam", Resources: []string{"role"}, Verbs: []string{"list", "update"}}}
 	pairs := roleVerbPairsOf(rules)
 	require.NotEmptyf(t, pairs, "правило не даёт ни одной пары — утверждение ниже было бы "+
 		"вакуумным: оно выполнялось бы на писателе, не пишущем ничего")
@@ -154,10 +154,10 @@ func TestIAMRV103_UpdateRemovesAVerbAndKeepsTheRest(t *testing.T) {
 	roleID := seedAccountRole(t, ctx, pool, acc.ID, "rv103_role")
 
 	before := roleVerbPairsOf(domain.Rules{
-		{Module: "iam", Resources: []string{"role"}, Verbs: []string{"get", "update"}},
+		{Module: "iam", Resources: []string{"role"}, Verbs: []string{"list", "update"}},
 	})
 	after := roleVerbPairsOf(domain.Rules{
-		{Module: "iam", Resources: []string{"role"}, Verbs: []string{"get"}},
+		{Module: "iam", Resources: []string{"role"}, Verbs: []string{"list"}},
 	})
 	require.NotEmpty(t, after, "правило после правки не даёт ни одной пары — проба не отличила "+
 		"бы снятие ОДНОГО глагола от обнуления проекции")
@@ -230,7 +230,7 @@ func TestIAMRV109_EmptyPairIsRefusedAndNothingIsWritten(t *testing.T) {
 	roleID := seedAccountRole(t, ctx, pool, acc.ID, "rv109_role")
 
 	lawful := roleVerbPairsOf(domain.Rules{
-		{Module: "iam", Resources: []string{"role"}, Verbs: []string{"get"}},
+		{Module: "iam", Resources: []string{"role"}, Verbs: []string{"list"}},
 	})
 	require.NotEmpty(t, lawful, "законный набор пуст — положительный контроль был бы вакуумным")
 
@@ -240,7 +240,7 @@ func TestIAMRV109_EmptyPairIsRefusedAndNothingIsWritten(t *testing.T) {
 	require.Equal(t, pairsAsStrings(lawful), projectionOf(t, ctx, pool, roleID))
 
 	for name, broken := range map[string][]domain.RoleVerb{
-		"пустой тип":    append(append([]domain.RoleVerb{}, lawful...), domain.RoleVerb{ObjectType: "", Verb: "get"}),
+		"пустой тип":    append(append([]domain.RoleVerb{}, lawful...), domain.RoleVerb{ObjectType: "", Verb: "v_list"}),
 		"пустой глагол": append(append([]domain.RoleVerb{}, lawful...), domain.RoleVerb{ObjectType: "iam.role", Verb: ""}),
 	} {
 		t.Run(name, func(t *testing.T) {

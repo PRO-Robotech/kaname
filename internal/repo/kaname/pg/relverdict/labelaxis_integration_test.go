@@ -56,6 +56,31 @@ type iamDirectProbe struct {
 	seedSQL string
 	// relabelSQL — $1 идентификатор, $2 новые метки: смена метки одним UPDATE.
 	relabelSQL string
+	// readVerb — ДЕЙСТВИЕ ЧТЕНИЯ ЭТОГО ТИПА. Пусто означает `get`.
+	//
+	// Действие чтения — свойство ТИПА, а не платформенная константа: у
+	// `iam_role` глагола `get` нет вовсе (kacho#1922 — отношения `v_get` не
+	// спрашивал ни один путь запроса, и оно снято с типа), а чтение роли
+	// выражено `list`. Вопрос про отношение, которого тип не объявляет, вернул
+	// бы ОШИБКУ разбора модели: проба падала бы, не дойдя до своего предмета —
+	// меточной оси, — и это было бы неотличимо от честного отказа.
+	readVerb string
+}
+
+// relation — отношение, которым спрашивается чтение объекта этого типа.
+func (p iamDirectProbe) relation() string {
+	if p.readVerb == "" {
+		return "v_get"
+	}
+	return "v_" + p.readVerb
+}
+
+// verb — действие, которым роль пробы авторит чтение объекта этого типа.
+func (p iamDirectProbe) verb() string {
+	if p.readVerb == "" {
+		return "get"
+	}
+	return p.readVerb
 }
 
 // iamDirectProbes — по одной пробе на каждый собственный тип iam.
@@ -96,7 +121,7 @@ var iamDirectProbes = []iamDirectProbe{
 		relabelSQL: `UPDATE kaname.groups SET labels = $2::jsonb WHERE id = $1`,
 	},
 	{
-		objectType: "iam_role", objectID: "rol-9",
+		objectType: "iam_role", objectID: "rol-9", readVerb: "list",
 		seedSQL: `INSERT INTO kaname.roles (id, name, permissions, rules, cluster_id, labels)
 		          VALUES ($1, 'probe.role', '[]'::jsonb,
 		                  jsonb_build_array(jsonb_build_object(
@@ -133,9 +158,9 @@ func probeTypes() []string {
 // Ветвь одна — меточная: роль, несущая рядом якорную, разрешила бы весь тип в
 // области независимо от меток, и проба зеленела бы на запросе, который метки не
 // читает вовсе.
-func seedLabelGrant(t *testing.T, ctx context.Context, tx pgx.Tx, objectType string) {
+func seedLabelGrant(t *testing.T, ctx context.Context, tx pgx.Tx, objectType, verb string) {
 	t.Helper()
-	seedRole(t, ctx, tx, "rol-lbl", objectType, "get", "labels", `{"env":"prod"}`)
+	seedRole(t, ctx, tx, "rol-lbl", objectType, verb, "labels", `{"env":"prod"}`)
 	exec(t, ctx, tx,
 		`INSERT INTO kaname.access_bindings
 		   (id, subject_type, subject_id, role_id, resource_type, resource_id, status)
@@ -146,10 +171,11 @@ func seedLabelGrant(t *testing.T, ctx context.Context, tx pgx.Tx, objectType str
 }
 
 // askLabelled — вопрос «может ли субъект пробы прочитать объект».
-func askLabelled(t *testing.T, ctx context.Context, tx pgx.Tx, objectType, objectID string) relverdict.Verdict {
+func askLabelled(t *testing.T, ctx context.Context, tx pgx.Tx,
+	objectType, objectID, relation string) relverdict.Verdict {
 	t.Helper()
 	got, _, err := relverdict.Ask(ctx, tx, relverdict.Query{
-		Subject: "user:usr-1", ObjectType: objectType, ObjectID: objectID, Relation: "v_get",
+		Subject: "user:usr-1", ObjectType: objectType, ObjectID: objectID, Relation: relation,
 	})
 	if err != nil {
 		t.Fatalf("вопрос о %s:%s: %v", objectType, objectID, err)
@@ -164,14 +190,14 @@ func TestAsk_LabelGrantReachesEveryIAMDirectType(t *testing.T) {
 		t.Run(p.objectType, func(t *testing.T) {
 			withTx(t, func(ctx context.Context, tx pgx.Tx) {
 				seedTenant(t, ctx, tx)
-				seedLabelGrant(t, ctx, tx, p.objectType)
+				seedLabelGrant(t, ctx, tx, p.objectType, p.verb())
 				exec(t, ctx, tx, p.seedSQL, p.objectID, `{"env":"prod"}`)
 				exec(t, ctx, tx,
 					`INSERT INTO kaname.resource_parent_edge
 					   (object_type, object_id, parent_type, parent_id, depth)
 					 VALUES ($1, $2, 'account', $3, 1)`, p.objectType, p.objectID, labelScopeAccount)
 
-				if got := askLabelled(t, ctx, tx, p.objectType, p.objectID); got != relverdict.Allow {
+				if got := askLabelled(t, ctx, tx, p.objectType, p.objectID, p.relation()); got != relverdict.Allow {
 					t.Fatalf("меточная выдача не достала %s:%s — вердикт %v; на этом типе "+
 						"условие меток не выполняется никогда, если ось ответа выбрана "+
 						"не по типу", p.objectType, p.objectID, got)
@@ -179,7 +205,7 @@ func TestAsk_LabelGrantReachesEveryIAMDirectType(t *testing.T) {
 
 				// Сторона ОТРИЦАНИЯ: метка снята — право обязано уйти.
 				exec(t, ctx, tx, p.relabelSQL, p.objectID, `{"env":"dev"}`)
-				if got := askLabelled(t, ctx, tx, p.objectType, p.objectID); got != relverdict.Deny {
+				if got := askLabelled(t, ctx, tx, p.objectType, p.objectID, p.relation()); got != relverdict.Deny {
 					t.Fatalf("после смены метки право на %s:%s осталось: %v",
 						p.objectType, p.objectID, got)
 				}
@@ -187,7 +213,7 @@ func TestAsk_LabelGrantReachesEveryIAMDirectType(t *testing.T) {
 				// Сторона ПОЛОЖИТЕЛЬНАЯ: метка возвращена — право обязано вернуться.
 				// Без неё отрицание выше зеленеет на мёртвом пути.
 				exec(t, ctx, tx, p.relabelSQL, p.objectID, `{"env":"prod"}`)
-				if got := askLabelled(t, ctx, tx, p.objectType, p.objectID); got != relverdict.Allow {
+				if got := askLabelled(t, ctx, tx, p.objectType, p.objectID, p.relation()); got != relverdict.Allow {
 					t.Fatalf("метка возвращена, а право на %s:%s не вернулось: %v — значит "+
 						"отрицание выше ничего не утверждало", p.objectType, p.objectID, got)
 				}
@@ -205,7 +231,7 @@ func TestAsk_LabelGrantReachesEveryIAMDirectType(t *testing.T) {
 func TestAsk_LabelGrantStillReachesTheMirrorAxis(t *testing.T) {
 	withTx(t, func(ctx context.Context, tx pgx.Tx) {
 		seedTenant(t, ctx, tx)
-		seedLabelGrant(t, ctx, tx, "vpc_network")
+		seedLabelGrant(t, ctx, tx, "vpc_network", "get")
 		exec(t, ctx, tx,
 			`INSERT INTO kaname.resource_mirror (object_type, object_id, labels)
 			 VALUES ($1, 'net-9', '{"env":"prod"}'::jsonb)`,
@@ -215,14 +241,14 @@ func TestAsk_LabelGrantStillReachesTheMirrorAxis(t *testing.T) {
 			   (object_type, object_id, parent_type, parent_id, depth)
 			 VALUES ('vpc_network', 'net-9', 'account', $1, 1)`, labelScopeAccount)
 
-		if got := askLabelled(t, ctx, tx, "vpc_network", "net-9"); got != relverdict.Allow {
+		if got := askLabelled(t, ctx, tx, "vpc_network", "net-9", "v_get"); got != relverdict.Allow {
 			t.Fatalf("меточная выдача перестала доставать объект зеркала: %v", got)
 		}
 		exec(t, ctx, tx,
 			`UPDATE kaname.resource_mirror SET labels = '{"env":"dev"}'::jsonb
 			  WHERE object_type = $1 AND object_id = 'net-9'`,
 			catalogFormOf(t, "vpc_network"))
-		if got := askLabelled(t, ctx, tx, "vpc_network", "net-9"); got != relverdict.Deny {
+		if got := askLabelled(t, ctx, tx, "vpc_network", "net-9", "v_get"); got != relverdict.Deny {
 			t.Fatalf("после смены метки право на объекте зеркала осталось: %v", got)
 		}
 	})
@@ -272,7 +298,7 @@ func TestReverseAnswersReachEveryIAMDirectType(t *testing.T) {
 		t.Run(p.objectType, func(t *testing.T) {
 			withTx(t, func(ctx context.Context, tx pgx.Tx) {
 				seedTenant(t, ctx, tx)
-				seedLabelGrant(t, ctx, tx, p.objectType)
+				seedLabelGrant(t, ctx, tx, p.objectType, p.verb())
 				exec(t, ctx, tx, p.seedSQL, p.objectID, `{"env":"prod"}`)
 				exec(t, ctx, tx,
 					`INSERT INTO kaname.resource_parent_edge
@@ -280,7 +306,7 @@ func TestReverseAnswersReachEveryIAMDirectType(t *testing.T) {
 					 VALUES ($1, $2, 'account', $3, 1)`, p.objectType, p.objectID, labelScopeAccount)
 
 				ids, _, err := relverdict.List(ctx, tx, relverdict.ListQuery{
-					Subject: "user:usr-1", ObjectType: p.objectType, Relation: "v_get",
+					Subject: "user:usr-1", ObjectType: p.objectType, Relation: p.relation(),
 				})
 				if err != nil {
 					t.Fatalf("перечисление объектов %s: %v", p.objectType, err)
@@ -291,7 +317,7 @@ func TestReverseAnswersReachEveryIAMDirectType(t *testing.T) {
 				}
 
 				subjects, _, err := relverdict.Subjects(ctx, tx, relverdict.SubjectsQuery{
-					ObjectType: p.objectType, ObjectID: p.objectID, Relation: "v_get",
+					ObjectType: p.objectType, ObjectID: p.objectID, Relation: p.relation(),
 				})
 				if err != nil {
 					t.Fatalf("перечисление субъектов %s: %v", p.objectType, err)
@@ -301,7 +327,7 @@ func TestReverseAnswersReachEveryIAMDirectType(t *testing.T) {
 						"%s:%s: %v", p.objectType, p.objectID, subjects)
 				}
 
-				sources, err := relverdict.Expand(ctx, tx, p.objectType, p.objectID, "v_get")
+				sources, err := relverdict.Expand(ctx, tx, p.objectType, p.objectID, p.relation())
 				if err != nil {
 					t.Fatalf("разбор оснований %s: %v", p.objectType, err)
 				}
@@ -315,7 +341,7 @@ func TestReverseAnswersReachEveryIAMDirectType(t *testing.T) {
 				// зеленели бы и на запросе, который разрешает всё.
 				exec(t, ctx, tx, p.relabelSQL, p.objectID, `{"env":"dev"}`)
 				ids, _, err = relverdict.List(ctx, tx, relverdict.ListQuery{
-					Subject: "user:usr-1", ObjectType: p.objectType, Relation: "v_get",
+					Subject: "user:usr-1", ObjectType: p.objectType, Relation: p.relation(),
 				})
 				if err != nil {
 					t.Fatalf("перечисление после смены метки: %v", err)
@@ -325,7 +351,7 @@ func TestReverseAnswersReachEveryIAMDirectType(t *testing.T) {
 						p.objectType, p.objectID)
 				}
 				subjects, _, err = relverdict.Subjects(ctx, tx, relverdict.SubjectsQuery{
-					ObjectType: p.objectType, ObjectID: p.objectID, Relation: "v_get",
+					ObjectType: p.objectType, ObjectID: p.objectID, Relation: p.relation(),
 				})
 				if err != nil {
 					t.Fatalf("субъекты после смены метки: %v", err)
@@ -334,7 +360,7 @@ func TestReverseAnswersReachEveryIAMDirectType(t *testing.T) {
 					t.Errorf("после смены метки субъекты всё ещё называют держателя выдачи на %s:%s",
 						p.objectType, p.objectID)
 				}
-				sources, err = relverdict.Expand(ctx, tx, p.objectType, p.objectID, "v_get")
+				sources, err = relverdict.Expand(ctx, tx, p.objectType, p.objectID, p.relation())
 				if err != nil {
 					t.Fatalf("разбор после смены метки: %v", err)
 				}

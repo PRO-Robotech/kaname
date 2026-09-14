@@ -168,7 +168,13 @@ func TestListPermissionCatalog_ClosedVerbsAreTheCommonSetInCanonicalOrder(t *tes
 	// их предлагать, а `loadbalancer.targetGroups` и `registry.registries` предлагают
 	// сверх того свои собственные глаголы. Обе стороны утверждает
 	// resource_verbs_test.go.
-	want := []string{"get", "list"}
+	//
+	// `get` вышло, когда `v_get` был снят с `iam_role` (#1922): читателя у
+	// отношения не было ни одного — чтение роли поимённо энфорсится ТЕМ ЖЕ
+	// предикатом, что страница, и обе поверхности зовут один резолвер. Довод про
+	// отсутствие следствий действует и здесь: у двадцати шести соседних
+	// ресурсов `get` остаётся, и редактор ролей берёт его у них по-прежнему.
+	want := []string{"list"}
 	if len(got) != len(want) {
 		t.Fatalf("closedVerbs=%v, want %v", got, want)
 	}

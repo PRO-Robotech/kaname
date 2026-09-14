@@ -902,7 +902,6 @@ type iam_role
     # union-ятся в tier (Design B развязка, D-6a).
     define editor: [user, service_account, group#member] or admin
     define viewer: [user, service_account, group#member] or editor
-    define v_get: [user, service_account, group#member] or super_admin
     define v_list: [user, service_account, group#member] or super_admin
     define v_update: [user, service_account, group#member] or super_admin
     define v_delete: [user, service_account, group#member] or super_admin

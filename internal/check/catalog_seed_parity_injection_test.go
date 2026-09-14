@@ -50,7 +50,7 @@ var (
 )
 
 func TestIAMCT114_Injection_ControlIsSilent(t *testing.T) {
-	c, findings, err := auditCatalogSeed(goodSeed, wantMods, wantRes, wantVerbs)
+	c, findings, err := auditCatalogSeed(oneMigration(goodSeed), wantMods, wantRes, wantVerbs)
 	if err != nil {
 		t.Fatalf("контроль обязан разбираться: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestIAMCT114_Injection_ControlIsSilent(t *testing.T) {
 }
 
 func TestIAMCT114_Injection_RowMissingFromSeedIsFound(t *testing.T) {
-	_, findings, err := auditCatalogSeed(goodSeed, wantMods,
+	_, findings, err := auditCatalogSeed(oneMigration(goodSeed), wantMods,
 		append(append([]string{}, wantRes...), "alpha.extra"), wantVerbs)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
@@ -79,7 +79,7 @@ func TestIAMCT114_Injection_RowMissingFromSeedIsFound(t *testing.T) {
 }
 
 func TestIAMCT114_Injection_RowBeyondTheLiteralIsFound(t *testing.T) {
-	_, findings, err := auditCatalogSeed(goodSeed, wantMods,
+	_, findings, err := auditCatalogSeed(oneMigration(goodSeed), wantMods,
 		[]string{"alpha.thing"}, wantVerbs)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
@@ -93,7 +93,7 @@ func TestIAMCT114_Injection_RowBeyondTheLiteralIsFound(t *testing.T) {
 func TestIAMCT114_Injection_DottedFormOutOfStepIsFound(t *testing.T) {
 	bad := strings.Replace(goodSeed,
 		"('beta', 'other', 'beta.other')", "('beta', 'other', 'beta.others')", 1)
-	_, findings, err := auditCatalogSeed(bad, wantMods,
+	_, findings, err := auditCatalogSeed(oneMigration(bad), wantMods,
 		[]string{"alpha.thing", "beta.others"}, wantVerbs)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
@@ -106,7 +106,7 @@ func TestIAMCT114_Injection_DottedFormOutOfStepIsFound(t *testing.T) {
 
 func TestIAMCT114_Injection_SuccessorPointingAtNothingIsFound(t *testing.T) {
 	bad := strings.Replace(goodSeed, "'beta.other', false", "'beta.gone', false", 1)
-	_, findings, err := auditCatalogSeed(bad, wantMods, wantRes, wantVerbs)
+	_, findings, err := auditCatalogSeed(oneMigration(bad), wantMods, wantRes, wantVerbs)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestIAMCT114_Injection_EmptySeedIsNotSilence(t *testing.T) {
 	empty := strings.Replace(goodSeed,
 		"INSERT INTO kaname.catalog_verb (module, resource, verb) VALUES\n  ('alpha', 'thing', 'get'),\n  ('beta', 'other', 'list');",
 		"INSERT INTO kaname.catalog_verb (module, resource, verb) VALUES\n-- посева нет", 1)
-	_, _, err := auditCatalogSeed(empty, wantMods, wantRes, wantVerbs)
+	_, _, err := auditCatalogSeed(oneMigration(empty), wantMods, wantRes, wantVerbs)
 	if err == nil {
 		t.Fatal("пустой обход обязан быть ОТКАЗОМ, а не «расхождений нет»: " +
 			"иначе «ноль находок» неотличимо от «ноль прочитанного»")
@@ -210,7 +210,7 @@ INSERT INTO kaname.catalog_verb (module, resource, verb, per_object) VALUES
 var wantTierOnly = []string{"alpha.thing.create", "beta.other.create"}
 
 func TestTierOnly_Injection_ControlIsSilent(t *testing.T) {
-	seeded, findings, err := auditTierOnlyVerbSeed(goodTierOnlySeed, wantTierOnly)
+	seeded, findings, err := auditTierOnlyVerbSeed(oneMigration(goodTierOnlySeed), wantTierOnly)
 	if err != nil {
 		t.Fatalf("контроль обязан разбираться: %v", err)
 	}
@@ -224,8 +224,7 @@ func TestTierOnly_Injection_ControlIsSilent(t *testing.T) {
 }
 
 func TestTierOnly_Injection_RowMissingFromSeedIsFound(t *testing.T) {
-	_, findings, err := auditTierOnlyVerbSeed(goodTierOnlySeed,
-		append(append([]string{}, wantTierOnly...), "gamma.third.create"))
+	_, findings, err := auditTierOnlyVerbSeed(oneMigration(goodTierOnlySeed), append(append([]string{}, wantTierOnly...), "gamma.third.create"))
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -236,7 +235,7 @@ func TestTierOnly_Injection_RowMissingFromSeedIsFound(t *testing.T) {
 }
 
 func TestTierOnly_Injection_RowBeyondTheLiteralIsFound(t *testing.T) {
-	_, findings, err := auditTierOnlyVerbSeed(goodTierOnlySeed, []string{"alpha.thing.create"})
+	_, findings, err := auditTierOnlyVerbSeed(oneMigration(goodTierOnlySeed), []string{"alpha.thing.create"})
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -254,7 +253,7 @@ func TestTierOnly_Injection_RowBeyondTheLiteralIsFound(t *testing.T) {
 func TestTierOnly_Injection_PerObjectFlagIsTheSubject(t *testing.T) {
 	bad := strings.Replace(goodTierOnlySeed,
 		"('beta', 'other', 'create', false)", "('beta', 'other', 'create', true)", 1)
-	_, findings, err := auditTierOnlyVerbSeed(bad, wantTierOnly)
+	_, findings, err := auditTierOnlyVerbSeed(oneMigration(bad), wantTierOnly)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -272,8 +271,7 @@ func TestTierOnly_Injection_PerObjectFlagIsTheSubject(t *testing.T) {
 func TestTierOnly_Injection_LegitimateTwinIsSilent(t *testing.T) {
 	twin := strings.Replace(goodTierOnlySeed,
 		"('beta', 'other', 'create', false)", "('gamma', 'third', 'create', false)", 1)
-	_, findings, err := auditTierOnlyVerbSeed(twin,
-		[]string{"alpha.thing.create", "gamma.third.create"})
+	_, findings, err := auditTierOnlyVerbSeed(oneMigration(twin), []string{"alpha.thing.create", "gamma.third.create"})
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -284,7 +282,7 @@ func TestTierOnly_Injection_LegitimateTwinIsSilent(t *testing.T) {
 
 func TestTierOnly_Injection_EmptySeedIsNotSilence(t *testing.T) {
 	empty := "INSERT INTO kaname.catalog_verb (module, resource, verb, per_object) VALUES\n-- посева нет\n"
-	_, _, err := auditTierOnlyVerbSeed(empty, wantTierOnly)
+	_, _, err := auditTierOnlyVerbSeed(oneMigration(empty), wantTierOnly)
 	if err == nil {
 		t.Fatal("пустой обход обязан быть ОТКАЗОМ, а не «расхождений нет»: " +
 			"иначе «ноль находок» неотличимо от «ноль прочитанного»")
@@ -323,7 +321,7 @@ INSERT INTO kaname.catalog_verb (module, resource, verb, retired_at, retired_rea
 // колонок, а пообъектная и ярусная половины словаря — в одной таблице. Прежняя
 // редакция различала их текстом оператора и здесь не различила бы вовсе.
 func TestIAMCT114_Injection_DumpForm_ControlIsSilent(t *testing.T) {
-	c, findings, err := auditCatalogSeed(goodSeedDumpForm, wantMods, wantRes, wantVerbs)
+	c, findings, err := auditCatalogSeed(oneMigration(goodSeedDumpForm), wantMods, wantRes, wantVerbs)
 	if err != nil {
 		t.Fatalf("контроль второй формы обязан разбираться: %v", err)
 	}
@@ -358,7 +356,7 @@ func TestIAMCT114_Injection_DumpForm_RowBeyondTheLiteralIsFound(t *testing.T) {
 	bad := strings.Replace(goodSeedDumpForm,
 		"VALUES ('alpha', 'thing', 'create', NULL, NULL, true, false)",
 		"VALUES ('alpha', 'thing', 'create', NULL, NULL, true, true)", 1)
-	_, findings, err := auditCatalogSeed(bad, wantMods, wantRes, wantVerbs)
+	_, findings, err := auditCatalogSeed(oneMigration(bad), wantMods, wantRes, wantVerbs)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -376,7 +374,7 @@ func TestIAMCT114_Injection_DumpForm_RowBeyondTheLiteralIsFound(t *testing.T) {
 func TestIAMCT114_Injection_DumpForm_RetiredRowIsNotALiveKey(t *testing.T) {
 	// Литерал НЕ содержит `alpha.old` — и не должен: строка снята. Разбор,
 	// считающий её живой, назовёт её посеянной сверх литерала.
-	_, findings, err := auditCatalogSeed(goodSeedDumpForm, wantMods, wantRes, wantVerbs)
+	_, findings, err := auditCatalogSeed(oneMigration(goodSeedDumpForm), wantMods, wantRes, wantVerbs)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -387,7 +385,7 @@ func TestIAMCT114_Injection_DumpForm_RetiredRowIsNotALiveKey(t *testing.T) {
 	// Обратная сторона: оживи ту же строку — и она обязана стать находкой.
 	revived := strings.Replace(goodSeedDumpForm,
 		"'beta.other', false, 'alpha_old'", "NULL, true, 'alpha_old'", 1)
-	_, findings, err = auditCatalogSeed(revived, wantMods, wantRes, wantVerbs)
+	_, findings, err = auditCatalogSeed(oneMigration(revived), wantMods, wantRes, wantVerbs)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -436,7 +434,7 @@ func TestIAMCT114_Injection_ArityMismatchIsFound(t *testing.T) {
 	bad := strings.Replace(goodSeedDumpForm,
 		"VALUES ('beta', 'other', 'beta.other', NULL, NULL, NULL, true, 'beta_other')",
 		"VALUES ('beta', 'other', 'beta.other', NULL, NULL, NULL, true)", 1)
-	_, findings, err := auditCatalogSeed(bad, wantMods, wantRes, wantVerbs)
+	_, findings, err := auditCatalogSeed(oneMigration(bad), wantMods, wantRes, wantVerbs)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -465,7 +463,7 @@ func TestIAMCT114_Injection_TableNameBoundaryIsRespected(t *testing.T) {
 	withNeighbour := goodSeedDumpForm +
 		"INSERT INTO kaname.catalog_verb_history (module, resource, verb, live, per_object) " +
 		"VALUES ('gamma', 'third', 'get', true, true);\n"
-	c, findings, err := auditCatalogSeed(withNeighbour, wantMods, wantRes, wantVerbs)
+	c, findings, err := auditCatalogSeed(oneMigration(withNeighbour), wantMods, wantRes, wantVerbs)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -481,7 +479,7 @@ func TestIAMCT114_Injection_TableNameBoundaryIsRespected(t *testing.T) {
 // ── ярусная половина во ВТОРОЙ форме ─────────────────────────────────────────
 
 func TestTierOnly_Injection_DumpForm_ControlIsSilent(t *testing.T) {
-	seeded, findings, err := auditTierOnlyVerbSeed(goodSeedDumpForm, wantTierOnly)
+	seeded, findings, err := auditTierOnlyVerbSeed(oneMigration(goodSeedDumpForm), wantTierOnly)
 	if err != nil {
 		t.Fatalf("контроль второй формы обязан разбираться: %v", err)
 	}
@@ -500,7 +498,7 @@ func TestTierOnly_Injection_DumpForm_ControlIsSilent(t *testing.T) {
 // словаря — `true` ЗАКОННО. Требование `false` от всякой прочитанной строки (так
 // было, пока половины сеяли разные миграции) объявило бы находкой каждую из них.
 func TestTierOnly_Injection_DumpForm_PerObjectRowsAreNotFindings(t *testing.T) {
-	_, findings, err := auditTierOnlyVerbSeed(goodSeedDumpForm, wantTierOnly)
+	_, findings, err := auditTierOnlyVerbSeed(oneMigration(goodSeedDumpForm), wantTierOnly)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -516,7 +514,7 @@ func TestTierOnly_Injection_DumpForm_PerObjectFlagIsTheSubject(t *testing.T) {
 	bad := strings.Replace(goodSeedDumpForm,
 		"VALUES ('beta', 'other', 'create', NULL, NULL, true, false)",
 		"VALUES ('beta', 'other', 'create', NULL, NULL, true, true)", 1)
-	_, findings, err := auditTierOnlyVerbSeed(bad, wantTierOnly)
+	_, findings, err := auditTierOnlyVerbSeed(oneMigration(bad), wantTierOnly)
 	if err != nil {
 		t.Fatalf("разбор: %v", err)
 	}
@@ -576,5 +574,229 @@ func TestIAMCT113_Injection_ExemptionWithoutASubjectIsFound(t *testing.T) {
 	// Вторая сторона: запись, у которой предмет ЕСТЬ, находкой не становится.
 	if containsSub(findings, "accounts_owner_fk") {
 		t.Fatalf("запись с живым предметом находкой не является; получено: %v", findings)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// СВОД ЦЕПОЧКИ (kacho#1922) — доказательство по каждой оси, с законным близнецом
+//
+// Ось заведена вместе с предметом: базовая миграция сеет `alpha.thing.get`
+// живым, поздняя помечает его снятым, и литерал этого глагола не называет.
+// До свода такой корпус давал находку «посеян миграцией, нет в литерале» — то
+// есть вердикт о состоянии, которого в базе нет ни секунды.
+
+// retireVerbUp — поздняя миграция В ПРИЗНАННОЙ ФОРМЕ, с разметкой goose и с
+// откатом, оживляющим ту же строку. Откат стоит здесь НАМЕРЕННО: разбор обязан
+// читать только применяемую половину, иначе снятие свелось бы со своим же
+// откатом в ноль — молча.
+const retireVerbUp = `
+-- +goose Up
+UPDATE kaname.catalog_verb
+   SET retired_at = now(), live = false,
+       retired_reason = 'читателя нет ни одного; причина, содержащая точку с запятой; и запятую'
+ WHERE module = 'alpha' AND resource = 'thing' AND verb = 'get' AND live;
+
+-- +goose Down
+UPDATE kaname.catalog_verb
+   SET retired_at = NULL, live = true, retired_reason = NULL
+ WHERE module = 'alpha' AND resource = 'thing' AND verb = 'get' AND NOT live;
+`
+
+// wantVerbsAfterRetire — литерал ПОСЛЕ снятия: `alpha.thing.get` он не называет.
+var wantVerbsAfterRetire = []string{"beta.other.list"}
+
+// TestIAMCT114_Injection_Chain_ControlIsSilent — КОНТРОЛЬ: цепочка из посева и
+// признанного снятия согласна с литералом, который снятого глагола не называет.
+func TestIAMCT114_Injection_Chain_ControlIsSilent(t *testing.T) {
+	corpus := []catalogSeedMigration{
+		{Name: "0001_initial.sql", Body: goodSeed},
+		{Name: "20260914120000_retire.sql", Body: retireVerbUp},
+	}
+	c, findings, err := auditCatalogSeed(corpus, wantMods, wantRes, wantVerbsAfterRetire)
+	if err != nil {
+		t.Fatalf("контроль обязан разбираться: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("контроль обязан молчать, найдено: %v", findings)
+	}
+	if c.MigrationsRead != 2 || c.RetiredLater != 1 {
+		t.Fatalf("перепись обязана называть охват: прочитано %d миграций, снято поздним %d "+
+			"(ждали 2 и 1) — иначе прибавка охвата неотличима от прибавки находок",
+			c.MigrationsRead, c.RetiredLater)
+	}
+}
+
+// TestIAMCT114_Injection_Chain_WithoutTheFoldTheSeedDiverges — ПОЛОЖИТЕЛЬНЫЙ
+// КОНТРОЛЬ САМОГО СВОДА: без поздней миграции тот же литерал даёт находку.
+//
+// Без этой оси зелёный контроля был бы неотличим от «гейт перестал сверять
+// глаголы вовсе».
+func TestIAMCT114_Injection_Chain_WithoutTheFoldTheSeedDiverges(t *testing.T) {
+	_, findings, err := auditCatalogSeed(oneMigration(goodSeed), wantMods, wantRes, wantVerbsAfterRetire)
+	if err != nil {
+		t.Fatalf("разбор: %v", err)
+	}
+	if !containsSub(findings, "alpha.thing.get") || !containsSub(findings, "нет в литерале") {
+		t.Fatalf("посев без снятия обязан расходиться с литералом; получено: %v", findings)
+	}
+}
+
+// TestIAMCT114_Injection_Chain_DownHalfIsNotFolded — ЗАКОННЫЙ БЛИЗНЕЦ формы:
+// оживляющий оператор стоит в откате и в свод НЕ входит.
+//
+// Читай разбор файл целиком — снятие и его откат погасили бы друг друга, и
+// вердикт вернулся бы к досводному, оставаясь на вид исправным.
+func TestIAMCT114_Injection_Chain_DownHalfIsNotFolded(t *testing.T) {
+	corpus := []catalogSeedMigration{
+		{Name: "0001_initial.sql", Body: goodSeed},
+		{Name: "20260914120000_retire.sql", Body: retireVerbUp},
+	}
+	_, retired, findings := catalogCorpus(corpus)
+	if len(findings) != 0 {
+		t.Fatalf("законная форма находкой не является; получено: %v", findings)
+	}
+	if !retired["alpha.thing.get"] || len(retired) != 1 {
+		t.Fatalf("свод обязан прочитать РОВНО снятие применяемой половины; прочитано: %v", retired)
+	}
+}
+
+// TestIAMCT114_Injection_Chain_UnknownFormIsFoundNotSilent — ГЛАВНАЯ ось.
+//
+// Оператор над каталогом, формы которого разбор не знает, обязан быть НАЗВАН.
+// Молчание здесь хуже красного: свод считал бы живой строку, которую цепочка
+// снимает, и посев расходился бы с литералом незамеченным.
+func TestIAMCT114_Injection_Chain_UnknownFormIsFoundNotSilent(t *testing.T) {
+	unknown := `
+-- +goose Up
+DELETE FROM kaname.catalog_verb WHERE module = 'alpha' AND resource = 'thing' AND verb = 'get';
+`
+	corpus := []catalogSeedMigration{
+		{Name: "0001_initial.sql", Body: goodSeed},
+		{Name: "20260914120000_unknown.sql", Body: unknown},
+	}
+	_, findings, err := auditCatalogSeed(corpus, wantMods, wantRes, wantVerbsAfterRetire)
+	if err != nil {
+		t.Fatalf("разбор: %v", err)
+	}
+	if !containsSub(findings, "форма которого разбору НЕИЗВЕСТНА") ||
+		!containsSub(findings, "20260914120000_unknown.sql") {
+		t.Fatalf("неизвестная форма обязана быть находкой С ИМЕНЕМ файла; получено: %v", findings)
+	}
+}
+
+// TestIAMCT114_Injection_Chain_PartialRetireFormIsNotAccepted — форма узкая, и
+// это проверяется с обеих сторон: оператор, снимающий живость БЕЗ отметки
+// времени, признанным снятием не становится.
+//
+// Иначе гейт принял бы за снятие всякий `UPDATE … live = false`, в том числе
+// тот, что правит другие колонки или отбирает больше одной строки.
+func TestIAMCT114_Injection_Chain_PartialRetireFormIsNotAccepted(t *testing.T) {
+	partial := strings.Replace(retireVerbUp, "retired_at = now(), live = false", "live = false", 1)
+	corpus := []catalogSeedMigration{
+		{Name: "0001_initial.sql", Body: goodSeed},
+		{Name: "20260914120000_partial.sql", Body: partial},
+	}
+	_, _, findings := catalogCorpus(corpus)
+	if !containsSub(findings, "форма которого разбору НЕИЗВЕСТНА") {
+		t.Fatalf("неполная форма снятия признанной не является; получено: %v", findings)
+	}
+}
+
+// TestIAMCT114_Injection_Chain_RetireWithoutASubjectIsFound — САМОИСТЕЧЕНИЕ.
+//
+// Снятие строки, которой посев не сеет живой, — оператор, переживший свой
+// предмет: он стоит в цепочке, выглядит работающим и не меняет ничего.
+func TestIAMCT114_Injection_Chain_RetireWithoutASubjectIsFound(t *testing.T) {
+	stale := strings.ReplaceAll(retireVerbUp, "'thing'", "'gone'")
+	corpus := []catalogSeedMigration{
+		{Name: "0001_initial.sql", Body: goodSeed},
+		{Name: "20260914120000_stale.sql", Body: stale},
+	}
+	_, findings, err := auditCatalogSeed(corpus, wantMods, wantRes, wantVerbs)
+	if err != nil {
+		t.Fatalf("разбор: %v", err)
+	}
+	if !containsSub(findings, "alpha.gone.get") || !containsSub(findings, "пережил свой предмет") {
+		t.Fatalf("снятие без предмета обязано быть находкой; получено: %v", findings)
+	}
+}
+
+// TestIAMCT114_Injection_Chain_CommentIsNotAStatement — ЗАКОННЫЙ БЛИЗНЕЦ:
+// та же форма, записанная комментарием, оператором не является.
+//
+// Без этой оси гейт краснел бы на собственном объяснении — ровно тот класс,
+// который ловит `testing.md` §«Гейт на класс» п. 4.
+func TestIAMCT114_Injection_Chain_CommentIsNotAStatement(t *testing.T) {
+	commented := `
+-- +goose Up
+-- Здесь ОБЪЯСНЯЕТСЯ форма снятия, а не производится снятие:
+--   DELETE FROM kaname.catalog_verb WHERE module = 'alpha';
+--   UPDATE kaname.catalog_verb SET live = false WHERE verb = 'get';
+SELECT 1;
+`
+	corpus := []catalogSeedMigration{
+		{Name: "0001_initial.sql", Body: goodSeed},
+		{Name: "20260914120000_prose.sql", Body: commented},
+	}
+	c, findings, err := auditCatalogSeed(corpus, wantMods, wantRes, wantVerbs)
+	if err != nil {
+		t.Fatalf("разбор: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("проза о снятии оператором не является; получено: %v", findings)
+	}
+	if c.RetiredLater != 0 {
+		t.Fatalf("свод обязан прочитать ноль снятий из прозы, прочитано %d", c.RetiredLater)
+	}
+}
+
+// TestIAMCT114_Injection_Chain_DollarBlockHidingAWriteIsNamed — МАСКА НЕ СТАНОВИТСЯ
+// СЛЕПОЙ ЗОНОЙ.
+//
+// Долларовый блок маскируется потому, что точка с запятой внутри границей
+// оператора не является. Запись в каталог, спрятанная внутри, обязана быть
+// НАЗВАНА: иначе маска дала бы ровно то молчание, ради устранения которого
+// заведён свод.
+func TestIAMCT114_Injection_Chain_DollarBlockHidingAWriteIsNamed(t *testing.T) {
+	hidden := `
+-- +goose Up
+DO $$
+BEGIN
+    UPDATE kaname.catalog_verb SET live = false WHERE module = 'alpha';
+END
+$$;
+`
+	corpus := []catalogSeedMigration{
+		{Name: "0001_initial.sql", Body: goodSeed},
+		{Name: "20260914120000_hidden.sql", Body: hidden},
+	}
+	_, _, findings := catalogCorpus(corpus)
+	if !containsSub(findings, "долларового блока") || !containsSub(findings, "20260914120000_hidden.sql") {
+		t.Fatalf("запись, спрятанная в блоке, обязана быть названа; получено: %v", findings)
+	}
+}
+
+// TestIAMCT114_Injection_Chain_DollarBlockWithoutAWriteIsSilent — ЗАКОННЫЙ
+// БЛИЗНЕЦ предыдущей оси: блок, который каталог только ЧИТАЕТ, находкой не
+// является. В дереве такой блок есть (предпосылка миграции 20260904135459
+// считает живые модули), и красное на нём отключило бы гейт первым же прогоном.
+func TestIAMCT114_Injection_Chain_DollarBlockWithoutAWriteIsSilent(t *testing.T) {
+	reading := `
+-- +goose Up
+DO $$
+DECLARE n integer;
+BEGIN
+    SELECT count(*) INTO n FROM kaname.catalog_module WHERE live;
+    IF n = 0 THEN RAISE EXCEPTION 'каталог пуст'; END IF;
+END
+$$;
+`
+	corpus := []catalogSeedMigration{
+		{Name: "0001_initial.sql", Body: goodSeed},
+		{Name: "20260914120000_reading.sql", Body: reading},
+	}
+	_, _, findings := catalogCorpus(corpus)
+	if len(findings) != 0 {
+		t.Fatalf("чтение каталога в блоке находкой не является; получено: %v", findings)
 	}
 }

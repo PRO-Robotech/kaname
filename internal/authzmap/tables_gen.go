@@ -40,7 +40,7 @@ var typeVerbRelations = map[string][]string{
 	"compute_placement_group":   {"v_delete", "v_get", "v_list", "v_update"},
 	"iam_access_binding":        {"v_delete", "v_get", "v_list", "v_update"},
 	"iam_group":                 {"v_delete", "v_get", "v_list", "v_update"},
-	"iam_role":                  {"v_delete", "v_get", "v_list", "v_update"},
+	"iam_role":                  {"v_delete", "v_list", "v_update"},
 	"iam_service_account":       {"v_delete", "v_get", "v_list", "v_update"},
 	"iam_user":                  {"v_get", "v_list"},
 	"nlb_listener":              {"v_delete", "v_get", "v_list", "v_update"},
