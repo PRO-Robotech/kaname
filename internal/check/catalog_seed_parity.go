@@ -83,6 +83,13 @@ type catalogSeedCensus struct {
 	SeededVerbs     int
 	RetiredSeeded   int
 	TierOnlyVerbs   int
+
+	// СВОД ЦЕПОЧКИ. Обе величины печатаются рядом с прочитанным: расширение
+	// охвата обязано двигать объём осмотренного, и без пары «миграций прочитано
+	// N · снято поздним оператором M» прибавка охвата неотличима от прибавки
+	// находок.
+	MigrationsRead int
+	RetiredLater   int
 }
 
 // splitTupleFields — поля одного кортежа, разрезанные по ВЕРХНЕУРОВНЕВОЙ запятой.
@@ -326,9 +333,12 @@ func arityFindings(kind string, rows []insertRow) []string {
 // `auditTierOnlyVerbSeed`. Половины разведены не по операторам (дамп кладёт их
 // одним), а по значению `per_object` — и вместе две сверки покрывают таблицу
 // целиком в обе стороны, дыры между ними нет.
-func auditCatalogSeed(body string, wantModules, wantResources, wantVerbs []string) (catalogSeedCensus, []string, error) {
+func auditCatalogSeed(corpus []catalogSeedMigration, wantModules, wantResources, wantVerbs []string) (catalogSeedCensus, []string, error) {
 	var c catalogSeedCensus
-	var findings []string
+
+	body, retiredLater, findings := catalogCorpus(corpus)
+	c.MigrationsRead = len(corpus)
+	c.RetiredLater = len(retiredLater)
 
 	mods, err := parseInsertRows(body, "kaname.catalog_module")
 	if err != nil {
@@ -376,14 +386,34 @@ func auditCatalogSeed(body string, wantModules, wantResources, wantVerbs []strin
 	}
 
 	gotVerb := map[string]bool{}
+	seededAlive := map[string]bool{}
 	for _, r := range verbs {
 		if !r.boolOrDefault("live", true) {
 			continue // снятый глагол живым ключом каталога не является
 		}
+		key := r.get("module") + "." + r.get("resource") + "." + r.get("verb")
+		seededAlive[key] = true
 		if !r.boolOrDefault("per_object", true) {
 			continue // ярусная половина — предмет auditTierOnlyVerbSeed
 		}
-		gotVerb[r.get("module")+"."+r.get("resource")+"."+r.get("verb")] = true
+		if retiredLater[key] {
+			// Строку посеяла базовая миграция живой, а поздняя пометила снятой.
+			// Живым ключом каталога она не является — ровно так же, как строка,
+			// посеянная снятой сразу.
+			continue
+		}
+		gotVerb[key] = true
+	}
+
+	// Снятие, которому нечего снимать, — находка того же рода, что исключение,
+	// пережившее свой предмет: оператор стоит в цепочке, выглядит работающим и
+	// не меняет ничего.
+	for key := range retiredLater {
+		if !seededAlive[key] {
+			findings = append(findings,
+				"снятие глагола "+key+": цепочка снимает строку, которой посев не сеет живой — "+
+					"оператор пережил свой предмет")
+		}
 	}
 
 	c.SeededModules, c.SeededResources, c.SeededVerbs = len(gotMod), len(gotRes), len(gotVerb)
@@ -558,7 +588,9 @@ func stripSQLComments(s string) string {
 // ничего. Требование сохранено там, где у него есть предмет: у тройки, которую
 // литерал объявил ярусной, признак обязан быть `false`. Пообъектные строки судит
 // `auditCatalogSeed` — вместе две сверки покрывают таблицу целиком.
-func auditTierOnlyVerbSeed(body string, want []string) (seeded int, findings []string, err error) {
+func auditTierOnlyVerbSeed(corpus []catalogSeedMigration, want []string) (seeded int, findings []string, err error) {
+	body, retiredLater, corpusFindings := catalogCorpus(corpus)
+	findings = append(findings, corpusFindings...)
 	rows, err := parseInsertRows(body, "kaname.catalog_verb")
 	if err != nil {
 		return 0, nil, err
@@ -572,6 +604,9 @@ func auditTierOnlyVerbSeed(body string, want []string) (seeded int, findings []s
 			continue // снятый глагол ярусной половиной не является
 		}
 		key := r.get("module") + "." + r.get("resource") + "." + r.get("verb")
+		if retiredLater[key] {
+			continue // снято поздним оператором цепочки
+		}
 		if r.boolOrDefault("per_object", true) {
 			if wantSet[key] {
 				findings = append(findings, fmt.Sprintf(
@@ -585,4 +620,208 @@ func auditTierOnlyVerbSeed(body string, want []string) (seeded int, findings []s
 	}
 	findings = append(findings, symmetricDiff("ярусный глагол", wantSet, got)...)
 	return len(got), findings, nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// СВОД ЦЕПОЧКИ: посев читается ВСЕМ каталогом миграций, а не одной базовой
+
+// catalogSeedMigration — одна миграция корпуса. Порядок в срезе есть порядок
+// ПРИМЕНЕНИЯ (у goose он лексикографический по имени файла).
+//
+// # Почему свод, а не одна базовая миграция
+//
+// Гейт судит, что цепочка ОСТАВЛЯЕТ в каталоге, и до задачи kacho#1922 читал
+// ровно один файл — базовую миграцию. Пока строк каталога не трогала ни одна
+// последующая, разницы не было; в тот день, когда её тронули, односоставный
+// разбор дал бы вердикт о состоянии, которого в базе нет ни секунды.
+//
+// Класс назван на месте, а не ссылкой: форма записи, о которой распознаватель
+// не знает, даёт не красное и не зелёное — она МОЛЧИТ, и отличить такое
+// молчание от чистоты нечем. Отсюда устройство ниже: всякий оператор над
+// таблицей каталога, не опознанный как посев либо как снятие в признанной
+// форме, есть НАХОДКА, а не пропущенная строка.
+//
+// Расширение охвата ничего не меняет на дереве, где поздних операторов нет, —
+// и это ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ, а не довод против: перепись печатает «миграций
+// прочитано N», поэтому прибавка объёма видна отдельно от прибавки находок.
+type catalogSeedMigration struct {
+	Name string
+	Body string
+}
+
+// oneMigration — корпус из одного тела. Форма для инъекции: у неё вход
+// синтетический, и цепочки у него нет.
+func oneMigration(body string) []catalogSeedMigration {
+	return []catalogSeedMigration{{Name: "0001_initial.sql", Body: body}}
+}
+
+// gooseUpSection — та половина миграции, которая ПРИМЕНЯЕТСЯ.
+//
+// Половины разведены намеренно: откат `20260914120000` оживляет ту же строку
+// каталога (`live = true`), и разбор, читающий файл целиком, свёл бы снятие с
+// его собственным откатом в ноль — то есть молча вернул бы прежний вердикт.
+//
+// Тело без разметки goose читается ЦЕЛИКОМ: у синтетического входа инъекции
+// разметки нет, и требовать её значило бы судить форму фикстуры, а не предмет.
+func gooseUpSection(body string) string {
+	const up, down = "-- +goose Up", "-- +goose Down"
+	i := strings.Index(body, up)
+	if i < 0 {
+		return body
+	}
+	rest := body[i+len(up):]
+	if j := strings.Index(rest, down); j >= 0 {
+		return rest[:j]
+	}
+	return rest
+}
+
+// reDollarQuoted — блок, ограниченный долларовыми кавычками (`$$ … $$`,
+// `$tag$ … $tag$`). Его тело — ТЕКСТ ДЛЯ СЕРВЕРА, а не оператор внешнего
+// уровня: точка с запятой внутри границей оператора не является.
+var reDollarQuoted = regexp.MustCompile(`(?s)\$([A-Za-z_][A-Za-z_0-9]*)?\$.*?\$([A-Za-z_][A-Za-z_0-9]*)?\$`)
+
+// reCatalogDML — запись в таблицу каталога. Служит ДВУМ разным вопросам:
+// «оператор внешнего уровня пишет в каталог» и «в долларовом блоке спрятана
+// запись, которой разбор не увидит».
+var reCatalogDML = regexp.MustCompile(
+	`(?is)\b(UPDATE|DELETE\s+FROM|INSERT\s+INTO)\s+kaname\.(catalog_module|catalog_resource|catalog_verb)\b`)
+
+// reRetireVerb — ЕДИНСТВЕННАЯ признанная форма снятия строки словаря глаголов.
+//
+// Форма узкая НАМЕРЕННО: всякий иной оператор над таблицей каталога уходит в
+// находку «форма, неизвестная разбору», а не в молчание. Так новая форма
+// обязана быть ОБЪЯВЛЕНА разбору прежде, чем она пройдёт, — иначе свод считал
+// бы живой строку, которую цепочка снимает.
+var reRetireVerb = regexp.MustCompile(
+	`(?is)^UPDATE\s+kaname\.catalog_verb\s+SET\s+(.+?)\s+WHERE\s+(.+)$`)
+
+// reRetireWhere — отбор ОДНОЙ строки словаря по её первичному ключу.
+var reRetireWhere = regexp.MustCompile(
+	`(?is)^module\s*=\s*'([^']*)'\s+AND\s+resource\s*=\s*'([^']*)'\s+AND\s+verb\s*=\s*'([^']*)'\s+AND\s+live$`)
+
+// splitSQLStatements — операторы внешнего уровня, разрезанные по `;`.
+//
+// Одинарная кавычка учитывается: точка с запятой внутри литерала границей не
+// является, а причина снятия — литерал, который её содержать вправе.
+func splitSQLStatements(s string) []string {
+	var (
+		out     []string
+		cur     strings.Builder
+		inQuote bool
+	)
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == '\'':
+			if inQuote && i+1 < len(s) && s[i+1] == '\'' {
+				cur.WriteByte(ch)
+				cur.WriteByte(s[i+1])
+				i++
+				continue
+			}
+			inQuote = !inQuote
+			cur.WriteByte(ch)
+		case ch == ';' && !inQuote:
+			out = append(out, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteByte(ch)
+		}
+	}
+	out = append(out, cur.String())
+	return out
+}
+
+// normalizeSpace — пробельные последовательности в один пробел, края обрезаны.
+func normalizeSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// catalogCorpus — свод цепочки: что читать как посев и что цепочка сняла ПОСЛЕ
+// него.
+//
+// Возвращает: склеенный в порядке применения исполняемый текст (вход разбора
+// вставок), множество снятых поздним оператором глаголов в форме
+// `модуль.ресурс.глагол`, находки и объём осмотренного.
+func catalogCorpus(corpus []catalogSeedMigration) (seedBody string, retired map[string]bool, findings []string) {
+	retired = map[string]bool{}
+	var body strings.Builder
+	for _, m := range corpus {
+		exec := stripSQLComments(gooseUpSection(m.Body))
+
+		// Долларовый блок маскируется, а не читается: его точка с запятой
+		// оператора не заканчивает. Но запись в каталог, спрятанная внутри,
+		// обязана быть НАЗВАНА — иначе маска стала бы слепой зоной.
+		for _, blk := range reDollarQuoted.FindAllString(exec, -1) {
+			if loc := reCatalogDML.FindString(blk); loc != "" {
+				findings = append(findings, fmt.Sprintf(
+					"%s: запись в каталог внутри долларового блока (%s) — разбор такой формы "+
+						"не читает, и свод цепочки был бы неполон молча",
+					m.Name, normalizeSpace(loc)))
+			}
+		}
+		exec = reDollarQuoted.ReplaceAllStringFunc(exec, func(b string) string {
+			return strings.Repeat(" ", len(b))
+		})
+
+		body.WriteString(exec)
+		body.WriteString("\n")
+
+		for _, raw := range splitSQLStatements(exec) {
+			st := normalizeSpace(raw)
+			if st == "" || !reCatalogDML.MatchString(st) {
+				continue
+			}
+			if strings.HasPrefix(strings.ToUpper(st), "INSERT INTO KANAME.CATALOG_") {
+				continue // посев — предмет разбора вставок
+			}
+			key, ok := retiredVerbOf(st)
+			if !ok {
+				findings = append(findings, fmt.Sprintf(
+					"%s: оператор над каталогом, форма которого разбору НЕИЗВЕСТНА: %s. "+
+						"Свод цепочки обязан знать всякую форму записи: непрочитанный оператор "+
+						"не даёт ни красного, ни зелёного — он молчит, и посев расходится с "+
+						"литералом незамеченным", m.Name, firstRunes(st, 160)))
+				continue
+			}
+			retired[key] = true
+		}
+	}
+	return body.String(), retired, findings
+}
+
+// retiredVerbOf — снимает ли оператор ровно одну строку словаря глаголов.
+//
+// Требуются ВСЕ признаки сразу: пометка неживой, отметка времени снятия,
+// непустая причина и отбор по полному первичному ключу живой строки. Оператор,
+// у которого недостаёт хоть одного, формой снятия НЕ является — он либо правит
+// что-то ещё, либо снимает больше одной строки, и в обоих случаях свод по нему
+// неверен.
+func retiredVerbOf(statement string) (string, bool) {
+	m := reRetireVerb.FindStringSubmatch(statement)
+	if m == nil {
+		return "", false
+	}
+	set := normalizeSpace(m[1])
+	if !strings.Contains(set, "live = false") ||
+		!strings.Contains(set, "retired_at = now()") ||
+		!regexp.MustCompile(`retired_reason\s*=\s*'[^']+'`).MatchString(set) {
+		return "", false
+	}
+	w := reRetireWhere.FindStringSubmatch(normalizeSpace(m[2]))
+	if w == nil {
+		return "", false
+	}
+	return w[1] + "." + w[2] + "." + w[3], true
+}
+
+// firstRunes — начало оператора для текста находки, обрезанное по РУНЕ.
+// Обрезание по байту разрубило бы кириллическую причину снятия посередине.
+func firstRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }

@@ -121,9 +121,15 @@ func TestRoleLabels_T33MAT01_LabelGrantMaterializesMatchingSet(t *testing.T) {
 	rolForeign := seedNativeRole(t, ctx, pool, foreignAcc.ID, "rlmat_f")
 	setRoleLabels(t, ctx, pool, rolForeign, map[string]string{"team": "payments"})
 
-	// Account-scoped rules-role granting iam.role.{get,list} by label team=payments.
+	// Account-scoped rules-role granting iam.role.list by label team=payments.
+	//
+	// Глагол `get` этим правилом БОЛЬШЕ НЕ НАЗЫВАЕТСЯ: он снят с ресурса `role`
+	// (#1922) — отношения `v_get` на типе `iam_role` не спрашивал ни один путь
+	// запроса, — и правило, называющее снятый глагол, отвергается на входе
+	// («get is not a live verb of resource role»). Предмет пробы — отбор по
+	// метке, и от числа глаголов правила он не зависит.
 	rule := domain.Rule{
-		Module: "iam", Resources: []string{"role"}, Verbs: []string{"get", "list"},
+		Module: "iam", Resources: []string{"role"}, Verbs: []string{"list"},
 		MatchLabels: map[string]string{"team": "payments"},
 	}
 	fp := rule.Fingerprint()
@@ -137,7 +143,7 @@ func TestRoleLabels_T33MAT01_LabelGrantMaterializesMatchingSet(t *testing.T) {
 	require.True(t, ok1, "rol1{team:payments} materialized as member (iam-direct ARM_LABELS)")
 	assert.Equal(t, domain.VerificationActive, st1)
 	assert.GreaterOrEqual(t, countFGAOutbox(t, ctx, pool, "fga.tuple.write", "iam_role:"+rol1), 1,
-		"materialized iam.role member emits the v_get/v_list tuple")
+		"materialized iam.role member emits the v_list tuple")
 
 	// rol2 does NOT match {team:billing} → not a member.
 	_, ok2 := memberStatusByRule(t, ctx, pool, bid, fp, "iam.role", rol2)
@@ -171,7 +177,7 @@ func TestRoleLabels_T33REVOKE01_LabelRemovedEagerFallout(t *testing.T) {
 	setRoleLabels(t, ctx, pool, rol1, map[string]string{"team": "payments"})
 
 	rule := domain.Rule{
-		Module: "iam", Resources: []string{"role"}, Verbs: []string{"get", "list"},
+		Module: "iam", Resources: []string{"role"}, Verbs: []string{"list"},
 		MatchLabels: map[string]string{"team": "payments"},
 	}
 	fp := rule.Fingerprint()
@@ -213,7 +219,7 @@ func TestRoleLabels_T33CONC01_ConcurrentUpdateLabels(t *testing.T) {
 	rolC := seedNativeRole(t, ctx, pool, fx.accID, "rlconc_c")
 
 	rule := domain.Rule{
-		Module: "iam", Resources: []string{"role"}, Verbs: []string{"get", "list"},
+		Module: "iam", Resources: []string{"role"}, Verbs: []string{"list"},
 		MatchLabels: map[string]string{"team": "payments"},
 	}
 	fp := rule.Fingerprint()

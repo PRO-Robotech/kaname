@@ -28,13 +28,18 @@ package role
 //     such a grant from its grantee; the viewer ∪ v_list union surfaces it.
 //     Content follows the SAME union rather than a second relation: Get asks the
 //     very question this page asks (read==enforce), so `iam_role` carries no
-//     separate content predicate — `v_get` in particular gates nothing here, no
-//     catalog entry names it for this type. The predicate is declared in ONE
-//     place (`pageRelations`, internal/authzfilter) and held against the
-//     permission catalog type by type by a repo-wide gate; whether this type
-//     ought to carry a content relation at all is an open decision, tracked as
-//     #1922. The owner sees their own role via the viewer branch (account-tier
-//     cascade).
+//     separate content predicate. The predicate is declared in ONE place
+//     (`pageRelations`, internal/authzfilter) and held against the permission
+//     catalog type by type by a repo-wide gate. The owner sees their own role
+//     via the viewer branch (account-tier cascade).
+//
+//     Whether this type ought to carry a content relation at all WAS an open
+//     decision (#1922); it is decided and closed. `v_get` is no longer declared
+//     on `iam_role` at all — not "declared and ungated": no reader ever asked
+//     it, no catalog entry ever named it for this type, and a relation nobody
+//     asks is a promise of a right rather than a right. It was retired from the
+//     manifest, from the canonical model and from the catalog row, so the open
+//     question is gone together with its subject rather than left standing.
 //
 // # A page of this list is a page of the VISIBLE (task #645)
 //

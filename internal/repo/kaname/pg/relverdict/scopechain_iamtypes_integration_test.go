@@ -91,6 +91,31 @@ type r74OwnObject struct {
 	id string
 	// what — чем этот объект является для читателя отчёта.
 	what string
+	// readVerb — ДЕЙСТВИЕ ЧТЕНИЯ ЭТОГО ТИПА. Пусто означает `get`.
+	//
+	// Поле заведено потому, что действие чтения — свойство ТИПА, а не
+	// платформенная константа: у `iam_role` глагола `get` нет вовсе (kacho#1922,
+	// отношения `v_get` не спрашивал ни один путь запроса, и оно снято), а
+	// чтение роли выражено `list`. Вопрос про отношение, которого тип не
+	// объявляет, вернул бы ОШИБКУ разбора модели — то есть проба падала бы, не
+	// дойдя до своего предмета, и отказ был бы неотличим от честного.
+	readVerb string
+}
+
+// relation — отношение, которым спрашивается чтение этого объекта.
+func (o r74OwnObject) relation() string {
+	if o.readVerb == "" {
+		return "v_get"
+	}
+	return "v_" + o.readVerb
+}
+
+// verb — действие, которым роль пробы авторит чтение этого объекта.
+func (o r74OwnObject) verb() string {
+	if o.readVerb == "" {
+		return "get"
+	}
+	return o.readVerb
 }
 
 // r74FiveOwnTypes — пять объектов, по одному на собственный тип iam.
@@ -105,7 +130,7 @@ var r74FiveOwnTypes = []r74OwnObject{
 	{modelType: "iam_user", id: "usr-own", what: "пользователь аккаунта"},
 	{modelType: "iam_group", id: "grp-own", what: "группа аккаунта"},
 	{modelType: "iam_service_account", id: "sac-own", what: "служебная учётка аккаунта"},
-	{modelType: "iam_role", id: "rol-own", what: "роль аккаунта"},
+	{modelType: "iam_role", id: "rol-own", what: "роль аккаунта", readVerb: "list"},
 	{modelType: "iam_access_binding", id: "acb-own", what: "привязка с областью «проект»"},
 }
 
@@ -265,8 +290,8 @@ func r74SeedGrantRole(t *testing.T, ctx context.Context, tx pgx.Tx, roleID strin
 		ct := catalogFormOf(t, o.modelType)
 		catalog = append(catalog, ct)
 		exec(t, ctx, tx,
-			`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, 'get')`,
-			roleID, ct)
+			`INSERT INTO kaname.role_verb (role_id, object_type, verb) VALUES ($1, $2, $3)`,
+			roleID, ct, o.verb())
 	}
 	// Ветвь ОДНА — якорная: она разрешает тип в области независимо от меток,
 	// поэтому исход зависит от того, попал ли объект в ОБЛАСТЬ, а не от меток.
@@ -406,14 +431,14 @@ func TestR7_4_06_AccountGrantReachesIAMsOwnTypes(t *testing.T) {
 			// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ ПЕРВЫМ: вопрос, отвечавший `allow` и до
 			// правки, обязан отвечать так же. Провал здесь означает сломанную
 			// обвязку, и утверждения ниже тогда не говорят ни о чём.
-			if got := r74Ask(t, ctx, tx, "user:usr-s4", o.modelType, o.id, "v_get"); got != relverdict.Allow {
+			if got := r74Ask(t, ctx, tx, "user:usr-s4", o.modelType, o.id, o.relation()); got != relverdict.Allow {
 				t.Fatalf("КОНТРОЛЬ ПРОВАЛЕН: выдача ПРЯМО на объект %s (%s:%s) не дала права: %s. "+
 					"Этот вопрос отвечал allow и до достройки звена, значит сломана обвязка пробы, "+
 					"а не предмет — и утверждения ниже ничего не говорят", o.what, o.modelType, o.id, got)
 			}
 
 			// ПРЕДМЕТ: выдача на АККАУНТ доходит до объекта.
-			if got := r74Ask(t, ctx, tx, "user:usr-s1", o.modelType, o.id, "v_get"); got != relverdict.Allow {
+			if got := r74Ask(t, ctx, tx, "user:usr-s1", o.modelType, o.id, o.relation()); got != relverdict.Allow {
 				t.Errorf("выдача роли на АККАУНТ acc-1 не достала до объекта %s (%s:%s): %s. "+
 					"Указатель на область лежит колонкой собственной строки объекта, а цепь его "+
 					"не читает — область схлопнулась до самого объекта, выдача верхнего яруса "+
@@ -421,14 +446,14 @@ func TestR7_4_06_AccountGrantReachesIAMsOwnTypes(t *testing.T) {
 			}
 
 			// ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ: без выдачи прав нет.
-			if got := r74Ask(t, ctx, tx, "user:usr-s2", o.modelType, o.id, "v_get"); got != relverdict.Deny {
+			if got := r74Ask(t, ctx, tx, "user:usr-s2", o.modelType, o.id, o.relation()); got != relverdict.Deny {
 				t.Errorf("субъект БЕЗ единой выдачи получил доступ к %s (%s:%s): %s — значит "+
 					"утверждение выше зеленело бы на форме, которая разрешает всем",
 					o.what, o.modelType, o.id, got)
 			}
 
 			// КОНТРОЛЬ ПЕРЕСЕЧЕНИЯ АРЕНД: выдача в чужом аккаунте не достаёт.
-			if got := r74Ask(t, ctx, tx, "user:usr-s3", o.modelType, o.id, "v_get"); got != relverdict.Deny {
+			if got := r74Ask(t, ctx, tx, "user:usr-s3", o.modelType, o.id, o.relation()); got != relverdict.Deny {
 				t.Errorf("выдача на ЧУЖОЙ аккаунт acc-9 достала до объекта %s (%s:%s): %s — "+
 					"звено подставляется безусловно, а не читается из колонки объекта",
 					o.what, o.modelType, o.id, got)
@@ -525,19 +550,19 @@ func TestR7_4_07_ProjectGrantReachesTheBindingAndTheProjectRole(t *testing.T) {
 
 		targets := []r74OwnObject{
 			{modelType: "iam_access_binding", id: "acb-proj", what: "привязка с областью «проект»"},
-			{modelType: "iam_role", id: "rol-proj", what: "проектная роль"},
+			{modelType: "iam_role", id: "rol-proj", what: "проектная роль", readVerb: "list"},
 		}
 		for _, o := range targets {
-			if got := r74Ask(t, ctx, tx, "user:usr-p1", o.modelType, o.id, "v_get"); got != relverdict.Allow {
+			if got := r74Ask(t, ctx, tx, "user:usr-p1", o.modelType, o.id, o.relation()); got != relverdict.Allow {
 				t.Errorf("выдача на ПРОЕКТ prj-1 не достала до объекта %s (%s:%s): %s. Область "+
 					"объекта названа колонкой его собственной строки, а цепь её не читает",
 					o.what, o.modelType, o.id, got)
 			}
-			if got := r74Ask(t, ctx, tx, "user:usr-p2", o.modelType, o.id, "v_get"); got != relverdict.Deny {
+			if got := r74Ask(t, ctx, tx, "user:usr-p2", o.modelType, o.id, o.relation()); got != relverdict.Deny {
 				t.Errorf("выдача на ДРУГОЙ проект prj-2 достала до объекта %s (%s:%s): %s — "+
 					"звено ведёт не туда, куда указывает колонка", o.what, o.modelType, o.id, got)
 			}
-			if got := r74Ask(t, ctx, tx, "user:usr-pa", o.modelType, o.id, "v_get"); got != relverdict.Allow {
+			if got := r74Ask(t, ctx, tx, "user:usr-pa", o.modelType, o.id, o.relation()); got != relverdict.Allow {
 				t.Errorf("выдача на АККАУНТ acc-1 не достала до объекта %s (%s:%s): %s. Цепь "+
 					"обязана подниматься ОБХОДОМ «объект → проект → аккаунт»: первое звено даёт "+
 					"схема, второе — проекция журнала; одним чтением сюда не дойти",
@@ -597,12 +622,12 @@ func TestR7_4_08_CloudAdministratorReachesIAMsOwnTypesThroughTheAccount(t *testi
 			"cluster", "cluster_root", "system_admin", "user:usr-cloud")
 
 		for _, o := range r74FiveOwnTypes {
-			if got := r74Ask(t, ctx, tx, "user:usr-cloud", o.modelType, o.id, "v_get"); got != relverdict.Allow {
+			if got := r74Ask(t, ctx, tx, "user:usr-cloud", o.modelType, o.id, o.relation()); got != relverdict.Allow {
 				t.Errorf("администратор облака не достал до объекта %s (%s:%s): %s. Цепь не "+
 					"доходит от объекта до кластера, и аварийный путь §«Три уровня супер-доступа» "+
 					"отвечает отказом, НЕОТЛИЧИМЫМ от честного", o.what, o.modelType, o.id, got)
 			}
-			if got := r74Ask(t, ctx, tx, "user:usr-plain", o.modelType, o.id, "v_get"); got != relverdict.Deny {
+			if got := r74Ask(t, ctx, tx, "user:usr-plain", o.modelType, o.id, o.relation()); got != relverdict.Deny {
 				t.Errorf("субъект БЕЗ факта администратора получил доступ к %s (%s:%s): %s — "+
 					"значит утверждение выше зеленело бы на форме, разрешающей всякому",
 					o.what, o.modelType, o.id, got)

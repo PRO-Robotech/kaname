@@ -19,6 +19,8 @@ package check
 
 import (
 	"os"
+	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
@@ -93,6 +95,52 @@ func wdOf(t *testing.T) string {
 // оператором, а значением `per_object` — см. шапку `catalog_seed_parity.go`.
 const catalogMigrationPath = "services/iam/internal/migrations/0001_initial.sql"
 
+// catalogSeedCorpus — ВЕСЬ каталог миграций, в порядке применения.
+//
+// # Почему цепочка, а не базовая миграция
+//
+// Гейт судит, что цепочка ОСТАВЛЯЕТ в каталоге. Базовая миграция сеет строку
+// живой, поздняя вправе пометить её снятой, и применённую не правят (запрет
+// #5) — значит согласие с литералом достигается ТОЛЬКО поздним оператором, и
+// разбор, читающий один файл, выносил бы вердикт о состоянии, которого в базе
+// нет ни секунды. Первым такой строкой стало снятие `iam.role.get`
+// (kacho#1922).
+//
+// Порядок — лексикографический по имени файла: это и есть порядок применения
+// goose. Он же держит свод в `TestSystemRolePermissionActionExistsInTheCatalog`,
+// и второго правила порядка здесь не заводится.
+//
+// Каталог берётся от БАЗОВОЙ МИГРАЦИИ, а не отдельной константой: два
+// объявления одного дома разошлись бы молча в тот день, когда дом переедет.
+func catalogSeedCorpus(t *testing.T) []catalogSeedMigration {
+	t.Helper()
+	dir := filepath.Dir(platformtree.RequirePath(t, catalogMigrationPath))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: каталог миграций %s не прочитан: %v", dir, err)
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".sql" {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: миграций в %s не прочитано ни одной — "+
+			"обход пуст, и «расхождений нет» означало бы «ничего не прочитано»", dir)
+	}
+	corpus := make([]catalogSeedMigration, 0, len(names))
+	for _, n := range names {
+		raw, rerr := os.ReadFile(filepath.Join(dir, n)) // #nosec G304 -- имя из перечня каталога миграций
+		if rerr != nil {
+			t.Fatalf("чтение миграции %s: %v", n, rerr)
+		}
+		corpus = append(corpus, catalogSeedMigration{Name: n, Body: string(raw)})
+	}
+	return corpus
+}
+
 // restrictDeferrableExempt — ключи, которым форма `RESTRICT … DEFERRABLE`
 // прощена ПОИМЁННО, с причиной и предикатом снятия.
 //
@@ -164,10 +212,7 @@ func literalTierOnlyVerbs() []string {
 
 // TestIAMCT114_CatalogSeedMatchesTheLiteral — Т6.
 func TestIAMCT114_CatalogSeedMatchesTheLiteral(t *testing.T) {
-	body, err := os.ReadFile(platformtree.RequirePath(t, catalogMigrationPath))
-	if err != nil {
-		t.Fatalf("прочитать миграцию каталога: %v", err)
-	}
+	corpus := catalogSeedCorpus(t)
 
 	mods, res, verbs := literalCatalog()
 	if len(mods) == 0 || len(res) == 0 || len(verbs) == 0 {
@@ -176,20 +221,20 @@ func TestIAMCT114_CatalogSeedMatchesTheLiteral(t *testing.T) {
 			len(mods), len(res), len(verbs))
 	}
 
-	c, findings, aerr := auditCatalogSeed(string(body), mods, res, verbs)
+	c, findings, aerr := auditCatalogSeed(corpus, mods, res, verbs)
 	if aerr != nil {
 		t.Fatalf("разобрать посев: %v", aerr)
 	}
 	// Перепись печатает ПРОЧИТАННОЕ и КЛАССИФИЦИРОВАННОЕ ПАРОЙ. Одного числа
 	// мало: расширяя распознаватель, обязан двигаться объём осмотренного, и
 	// именно эта пара отличает «прибавка была слепой зоной» от «дерево выросло».
-	t.Logf("осмотрено: литерал — модулей %d, ресурсов %d, пообъектных глаголов %d; "+
-		"прочитано строк — модуля %d, ресурса %d, глагола %d; "+
+	t.Logf("осмотрено: миграций прочитано %d; литерал — модулей %d, ресурсов %d, "+
+		"пообъектных глаголов %d; прочитано строк — модуля %d, ресурса %d, глагола %d; "+
 		"классифицировано — модулей %d, живых ресурсов %d, снятых ресурсов %d, "+
-		"пообъектных глаголов %d",
-		len(mods), len(res), len(verbs),
+		"пообъектных глаголов %d, снято поздним оператором цепочки %d",
+		c.MigrationsRead, len(mods), len(res), len(verbs),
 		c.ReadModuleRows, c.ReadResourceRows, c.ReadVerbRows,
-		c.SeededModules, c.SeededResources, c.RetiredSeeded, c.SeededVerbs)
+		c.SeededModules, c.SeededResources, c.RetiredSeeded, c.SeededVerbs, c.RetiredLater)
 
 	if c.RetiredSeeded == 0 {
 		t.Error("снятых строк посеяно ноль: снятие выражено запретительным списком в Go, " +
@@ -249,10 +294,7 @@ func indexOf(hay, needle string) int {
 // открывает авторскому правилу глагол, о котором производитель не знает, — то
 // есть ключ пропускает то, чего в словаре нет.
 func TestTierOnlyVerbSeedMatchesTheLiteral(t *testing.T) {
-	body, err := os.ReadFile(platformtree.RequirePath(t, catalogMigrationPath))
-	if err != nil {
-		t.Fatalf("прочитать миграцию ярусной половины: %v", err)
-	}
+	corpus := catalogSeedCorpus(t)
 
 	want := literalTierOnlyVerbs()
 	if len(want) == 0 {
@@ -260,12 +302,13 @@ func TestTierOnlyVerbSeedMatchesTheLiteral(t *testing.T) {
 			"«расхождений нет» означало бы «ничего не прочитано»")
 	}
 
-	seeded, findings, aerr := auditTierOnlyVerbSeed(string(body), want)
+	seeded, findings, aerr := auditTierOnlyVerbSeed(corpus, want)
 	if aerr != nil {
 		t.Fatalf("разобрать ярусный посев: %v", aerr)
 	}
-	t.Logf("осмотрено: литерал — ярусных пар %d; посев — ярусных пар %d "+
-		"(из одной таблицы с пообъектной половиной, различает per_object)", len(want), seeded)
+	t.Logf("осмотрено: миграций прочитано %d; литерал — ярусных пар %d; посев — ярусных пар %d "+
+		"(из одной таблицы с пообъектной половиной, различает per_object)",
+		len(corpus), len(want), seeded)
 	if seeded == 0 {
 		t.Fatal("ярусных пар не посеяно ни одной — обход пуст, вердикт беспредметен")
 	}
