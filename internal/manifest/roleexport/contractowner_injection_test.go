@@ -94,7 +94,7 @@ func TestAttribute_OwnerNobodyDeclaredIsAFindingWithItsCoordinate(t *testing.T) 
 func TestAttribute_PlatformServiceStaysAFindingOfShapeNotOwnership(t *testing.T) {
 	for _, fqn := range []string{
 		"kacho.cloud.operation.OperationService/Get",
-		"kacho.cloud.subscription.InternalSubscriptionService/Subscribe",
+		"corelib.subscription.InternalSubscriptionService/Subscribe",
 	} {
 		_, faults := roleexport.Attribute([]roleexport.CatalogEntry{{FQN: fqn}})
 		if len(faults) != 1 {

@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
+	quotav1 "github.com/PRO-Robotech/corelib/api/corelib/quota/v1"
 	operationv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
-	quotav1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/quota/v1"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"google.golang.org/protobuf/proto"
 
@@ -152,7 +152,7 @@ func TestSplitKnowsTheFormsTheTreeProduces(t *testing.T) {
 		{"kaname.cloud.iam.v1", "kaname", "iam", true},
 		{"evilcorp.cloud.iam.v1", "evilcorp", "iam", true}, // форма годна, принадлежность — отдельный вопрос
 		{"kacho.cloud.operation", "", "", false},
-		{"kacho.cloud.subscription", "", "", false},
+		{"corelib.subscription", "", "", false},
 		{"kacho.cloud.vpc.v2", "", "", false},
 		{"kacho.storage.vpc.v1", "", "", false},
 		{"", "", "", false},

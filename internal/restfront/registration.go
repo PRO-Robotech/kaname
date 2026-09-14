@@ -10,8 +10,8 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 
+	subscriptionv1 "github.com/PRO-Robotech/corelib/api/corelib/subscription"
 	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
-	subscriptionv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/subscription"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )

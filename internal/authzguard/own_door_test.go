@@ -27,8 +27,8 @@ import (
 	// линкует все три пакета (grpc_register.go регистрирует их службы), поэтому
 	// проба обязана линковать их тоже: иначе она судила бы карту, которой в
 	// проде не бывает, и «не выводится» читалось бы как дефект двери.
+	_ "github.com/PRO-Robotech/corelib/api/corelib/quota/v1"
 	_ "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
-	_ "github.com/PRO-Robotech/corelib/api/kacho/cloud/quota/v1"
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 )

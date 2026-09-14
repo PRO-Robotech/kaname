@@ -16,8 +16,8 @@ import (
 	"github.com/PRO-Robotech/corelib/operations/operationspb"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 
+	subscriptionv1 "github.com/PRO-Robotech/corelib/api/corelib/subscription"
 	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
-	subscriptionv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/subscription"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
