@@ -14,7 +14,6 @@ import (
 	"strings"
 	"testing"
 
-	quotav1 "github.com/PRO-Robotech/corelib/api/corelib/quota/v1"
 	operationv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"google.golang.org/protobuf/proto"
@@ -86,16 +85,34 @@ func TestLedgerAgreesWithTheContract(t *testing.T) {
 // разбирается как модуль, `operation` его не несёт вовсе. Один свидетель
 // закрепил бы форму, а не владельца.
 func TestPlatformOwnerIsTheOneTheContractDeclares(t *testing.T) {
-	quotaPkg := declaredPackage((*quotav1.Quota)(nil))
-	owner, module, ok := contractnaming.Split(quotaPkg)
+	// СВИДЕТЕЛЕЙ СТАЛО ДВА РАЗНОГО РОДА, И ЭТО ВЫНУЖДЕНО, а не выбрано.
+	//
+	// Здесь стояли два свидетеля ОДНОГО рода — оба платформенные: пакет учёта
+	// (с сегментом версии, разбираемый формой модуля) и служба операций (без
+	// сегмента). Пакет учёта платформенным быть перестал: он переименован в
+	// `corelib.quota.v1` вместе с формой подписки, потому что им пользуются ОБА
+	// продукта и по существу он принадлежит фундаменту.
+	//
+	// Версионного ПЛАТФОРМЕННОГО контракта в замыкании этой службы не осталось
+	// вовсе: она зависит от платформы ноль раз, а фундамент несёт теперь свои
+	// имена. Поэтому форма модуля свидетельствуется СВОИМ контрактом службы —
+	// он сегмент версии несёт и разбирается тем же разбором, — а объявленный
+	// владелец платформы по-прежнему свидетельствуется службой операций.
+	//
+	// ПРЕДИКАТ ИСТЕЧЕНИЯ НАЗВАН: переименуют `kacho.cloud.operation` — и второго
+	// свидетеля не станет тоже. Тогда у пробы исчезнет предмет целиком, и её
+	// надлежит снять вместе с ним, а не ослабить.
+	ownPkg := declaredPackage((*iamv1.Account)(nil))
+	owner, module, ok := contractnaming.Split(ownPkg)
 	if !ok {
-		t.Fatalf("платформенный пакет %q не разобрался формой модуля", quotaPkg)
-	}
-	if owner != contractnaming.PlatformOwner() {
-		t.Errorf("контракт называет владельцем %q, объявлено %q", owner, contractnaming.PlatformOwner())
+		t.Fatalf("пакет %q не разобрался формой модуля", ownPkg)
 	}
 	if !contractnaming.OwnsModule(owner, module) {
 		t.Errorf("владелец %q не признан владельцем модуля %q", owner, module)
+	}
+	if module != contractnaming.OwnModule {
+		t.Errorf("свой контракт называет модулем %q, объявлено %q",
+			module, contractnaming.OwnModule)
 	}
 
 	opPkg := declaredPackage((*operationv1.Operation)(nil))
@@ -107,8 +124,9 @@ func TestPlatformOwnerIsTheOneTheContractDeclares(t *testing.T) {
 		t.Errorf("платформенная служба %q разобрана как пакет модуля: сегмента версии "+
 			"она не несёт, и ресурсом модуля не является", opPkg)
 	}
-	t.Logf("перепись: свидетелей платформы 2 (%s · %s) · владелец %q",
-		quotaPkg, opPkg, contractnaming.PlatformOwner())
+	t.Logf("перепись: свидетелей 2 — форма модуля %s (свой) · владелец платформы %s; "+
+		"версионных платформенных контрактов в замыкании службы 0",
+		ownPkg, opPkg)
 }
 
 // TestOwnsModuleRefusesAnOwnerNobodyDeclared — отрицание в паре с положительным.
