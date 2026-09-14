@@ -50,6 +50,8 @@ type pruningWriter struct {
 	prunedFor []string
 	// appliedBy — автор, с которым звали вырезание (#2005).
 	appliedBy string
+	// announcedFor — роли, с которыми звали объявление отзыва (#76).
+	announcedFor []string
 }
 
 func (w *pruningWriter) ReadModule(_ context.Context, module string) (catalog.Rows, error) {
@@ -65,6 +67,18 @@ func (w *pruningWriter) PruneRetiredSelectorTypes(_ context.Context,
 		w.prunedFor = append(w.prunedFor, r.Module+"."+r.Resource)
 	}
 	return w.pruned, nil
+}
+
+// AnnounceRoleGrantWithdrawal — объявление отзыва подписчику (#76).
+//
+// Дублёр записывает ВХОД, а не только вызов: «позвали» и «позвали с ролями, у
+// которых отобрано» — разные утверждения, и проба, знающая лишь первое, зеленела
+// бы на объявлении, которому нечего объявлять.
+func (w *pruningWriter) AnnounceRoleGrantWithdrawal(_ context.Context,
+	roleIDs []string) (int, error) {
+	w.calls = append(w.calls, "announce")
+	w.announcedFor = append(w.announcedFor, roleIDs...)
+	return len(roleIDs), nil
 }
 
 type pruningTx struct{ w *pruningWriter }

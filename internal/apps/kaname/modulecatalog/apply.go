@@ -207,6 +207,22 @@ type CatalogWriter interface {
 	// равенство, а выдача значения завела бы вход, на котором вызывающий сверяет
 	// его сам, по частям и не под замком.
 	ConfirmModuleState(ctx context.Context, module, expected string) (bool, error)
+	// AnnounceRoleGrantWithdrawal объявляет ПОДПИСЧИКУ, что у названных ролей
+	// отобрано последствием каталога (#76).
+	//
+	// Три оператора последствий пишут подтаблицы роли, строки роли не трогая, а
+	// журнал подписки эмитит правку роли только со строки роли (решение #73) —
+	// значит событие не рождается, и отзыв для подписчика неотличим от «ничего
+	// не произошло». Порт объявляет ПОТРЕБНОСТЬ («сделать отзыв видимым»), а не
+	// оператор: чем именно он эмитится, знает адаптер.
+	//
+	// Зовётся В ТОЙ ЖЕ транзакции, что и снятие: откат ⇒ события нет, коммит ⇒
+	// отобранное и объявление о нём легли вместе. Второй путь — эмиссия после
+	// коммита — дал бы подписчику отзыв, которого не было, ровно на откате.
+	//
+	// Пустой вход обязан не давать события: «объявлено, когда отбирать было
+	// нечего» и «объявлено об отзыве» подписчик не различает.
+	AnnounceRoleGrantWithdrawal(ctx context.Context, roleIDs []string) (int, error)
 	// EmitApplied записывает след применения В ТОЙ ЖЕ транзакции: откат ⇒ записи
 	// нет, коммит ⇒ след есть. Второго пути записи в чужую транзакцию в дереве не
 	// заводится — он там один.
@@ -228,6 +244,11 @@ type Pruned struct {
 	Dropped int
 	// Elements — элементов массива вырезано суммарно, по обеим ветвям.
 	Elements int
+	// Roles — роли, у которых вырезано: тот же вход объявления отзыва, что у
+	// соседа. Третья популяция отбирает у арендатора сегмент правила так же
+	// необратимо, как первые две отбирают глагол, и подписчику она обязана быть
+	// видна тем же событием.
+	Roles []string
 }
 
 // TxRunner — исполнение под ОДНОЙ транзакцией записи. Все шаги ложатся вместе
@@ -245,6 +266,12 @@ type TxRunner interface {
 type Resettled struct {
 	RuleRefs  int
 	RoleVerbs int
+	// Roles — АРЕНДАТОРСКИЕ роли, у которых отобрано обеими популяциями, ВСТЫК
+	// и без сведения множеств: объявление отзыва отбирает строку по первичному
+	// ключу, поэтому повтор идентификатора события не удваивает. Сведение,
+	// написанное здесь, было бы вторым местом, отвечающим за единственность
+	// события, и разошлось бы с оператором молча.
+	Roles []string
 }
 
 // Report — перепись применения. Печатается числами, потому что «применено» без
@@ -273,6 +300,12 @@ type Report struct {
 	PrunedSelectorRows        int
 	PrunedSelectorRowsDropped int
 	PrunedSelectorTypes       int
+	// AnnouncedRoleWithdrawals — РОЛЕЙ, у которых отобрано и о которых подписчик
+	// извещён событием. Отдельная величина, а не вывод из трёх предыдущих:
+	// популяции считают СТРОКИ, а событие приходится на РОЛЬ, и одна роль
+	// набирает строки во всех трёх сразу. Ноль при ненулевых популяциях означал
+	// бы, что отобрано молча, — и это надо видеть в переписи, а не выводить.
+	AnnouncedRoleWithdrawals int
 }
 
 // Changed — применение изменило хоть одну строку.
@@ -292,13 +325,14 @@ func (r Report) String() string {
 	return fmt.Sprintf(
 		"модуль %s · объявлено ресурсов %d глаголов %d · записано %d/%d · без изменений %d/%d · "+
 			"снято %d/%d · переселено правил %d выдач %d · селекторов укорочено %d "+
-			"снято %d элементов вырезано %d · изменения %t",
+			"снято %d элементов вырезано %d · отзыв объявлен ролям %d · изменения %t",
 		r.Module, r.DeclaredResources, r.DeclaredVerbs,
 		r.WrittenResources, r.WrittenVerbs,
 		r.UnchangedResources, r.UnchangedVerbs,
 		r.RetiredResources, r.RetiredVerbs,
 		r.Resettled.RuleRefs, r.Resettled.RoleVerbs,
 		r.PrunedSelectorRows, r.PrunedSelectorRowsDropped, r.PrunedSelectorTypes,
+		r.AnnouncedRoleWithdrawals,
 		r.Changed())
 }
 
@@ -534,6 +568,13 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 			}
 		}
 
+		// Роли, у которых ОТОБРАНО, копятся по всем трём популяциям: строки
+		// считаются по популяциям, а событие приходится на РОЛЬ, и одна роль
+		// набирает строки в каждой. Сведения множеств здесь нет намеренно —
+		// объявление отзыва отбирает строку по первичному ключу `roles`, и повтор
+		// идентификатора события не удваивает.
+		var withdrawnFrom []string
+
 		staleResources, staleVerbs := Withdrawn(live, declared)
 		if len(staleResources) > 0 || len(staleVerbs) > 0 {
 			resettled, serr := w.ResettleTenantProjections(ctx, staleResources, staleVerbs, reason, who.id)
@@ -541,6 +582,7 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 				return fmt.Errorf("%w: переселение проекций: %w", ErrWriteFailed, serr)
 			}
 			rep.Resettled = resettled
+			withdrawnFrom = append(withdrawnFrom, resettled.Roles...)
 		}
 
 		// Вниз порядок обратный: глагол ссылается на живой ресурс, поэтому ресурс
@@ -579,7 +621,26 @@ func (a *Applier) apply(ctx context.Context, m *manifest.Manifest, conf *confirm
 			rep.PrunedSelectorRows = pruned.Rows
 			rep.PrunedSelectorRowsDropped = pruned.Dropped
 			rep.PrunedSelectorTypes = pruned.Elements
+			withdrawnFrom = append(withdrawnFrom, pruned.Roles...)
 		}
+
+		// Шаг 8а — ОТЗЫВ ОБЪЯВЛЕН ПОДПИСЧИКУ, в ТОЙ ЖЕ транзакции (#76).
+		//
+		// Три оператора выше отобрали у арендаторских ролей глагол либо сегмент,
+		// строки роли не тронув; журнал эмитит правку роли только со строки роли
+		// (решение #73), поэтому без этого шага отзыв для подписчика неотличим от
+		// «ничего не произошло».
+		//
+		// СТОИТ ДО потолков и до сверки опоры — то есть до всякой ветви, которая
+		// откатывает применение. Это не порядок ради порядка: откат уносит
+		// объявление вместе с отобранным, а эмиссия после коммита дала бы
+		// подписчику отзыв, которого не было, ровно на той ветви, где применение
+		// отвергнуто. Пустой вход события не даёт — см. порт.
+		announced, aerr := w.AnnounceRoleGrantWithdrawal(ctx, withdrawnFrom)
+		if aerr != nil {
+			return fmt.Errorf("%w: объявление отзыва подписчику: %w", ErrWriteFailed, aerr)
+		}
+		rep.AnnouncedRoleWithdrawals = announced
 
 		// Шаг 9 — ПОТОЛКИ последствий, до коммита и только на пути глагола.
 		//

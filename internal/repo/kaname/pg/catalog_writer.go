@@ -452,18 +452,50 @@ func (w catalogWriter) ResettleTenantProjections(
 	// между ними помещается состояние «право отобрано и нигде не записано».
 	// Порядок внутри оператора задан ПОТОКОМ ДАННЫХ, а не порядком записи веток:
 	// `moved` читает выход `dropped`, поэтому вставка не может опередить снятие.
+	// Роли, у которых отобрано, собираются ВСТЫК, без сведения множеств: отбор
+	// объявления отзыва идёт по первичному ключу `roles`, поэтому повтор
+	// идентификатора во входе события не удваивает (довод —
+	// `catalog_consequence_sql.go`, §«РОВНО ОДНО событие на роль и транзакцию»).
+	var ruleRefRoles, roleVerbRoles []string
+
 	if err := w.tx.QueryRow(ctx, resettleRuleRefSQL,
 		resModules, resNames, verbModules, verbResources, verbNames, reason, appliedBy,
-	).Scan(&out.RuleRefs); err != nil {
+	).Scan(&out.RuleRefs, &ruleRefRoles); err != nil {
 		return out, fmt.Errorf("переселить объявления правил: %w", err)
 	}
 
 	if err := w.tx.QueryRow(ctx, resettleRoleVerbSQL,
 		resModules, resNames, verbModules, verbResources, verbNames, reason, appliedBy,
-	).Scan(&out.RoleVerbs); err != nil {
+	).Scan(&out.RoleVerbs, &roleVerbRoles); err != nil {
 		return out, fmt.Errorf("переселить выдачи глаголов: %w", err)
 	}
+	out.Roles = append(append(out.Roles, ruleRefRoles...), roleVerbRoles...)
 	return out, nil
+}
+
+// AnnounceRoleGrantWithdrawal объявляет подписчику, что у названных ролей
+// ОТОБРАНО последствием каталога (задача службы #76).
+//
+// Оператор — `announceRoleGrantWithdrawalSQL`; там же названо, почему это
+// эмиссия из пути, а не триггер и не запись строки роли, и почему «ровно одно
+// событие на роль и транзакцию» есть свойство оператора, а не входа.
+//
+// Пустой вход НЕ ДОХОДИТ до базы: событие, которого никто не просил, отличается
+// от события об отзыве только тем, что отбирать было нечего, — а подписчик этого
+// различия не видит. Ранний выход и делает «не даёт его, когда отбирать было
+// нечего» невыразимым иначе.
+func (w catalogWriter) AnnounceRoleGrantWithdrawal(
+	ctx context.Context,
+	roleIDs []string,
+) (int, error) {
+	if len(roleIDs) == 0 {
+		return 0, nil
+	}
+	tag, err := w.tx.Exec(ctx, announceRoleGrantWithdrawalSQL, roleIDs)
+	if err != nil {
+		return 0, fmt.Errorf("объявить отзыв права подписчику: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 // ConfirmModuleState сверяет состояние каталога модуля с подтверждением
@@ -649,9 +681,10 @@ func (w catalogWriter) PruneRetiredSelectorTypes(
 		)
 		SELECT (SELECT count(*) FROM stripped),
 		       (SELECT count(*) FROM emptied),
-		       (SELECT coalesce(sum(cardinality(was) - cardinality(alive)), 0) FROM changed)`,
+		       (SELECT coalesce(sum(cardinality(was) - cardinality(alive)), 0) FROM changed),
+		       (SELECT coalesce(array_agg(DISTINCT role_id), ARRAY[]::text[]) FROM cut)`,
 		resModules, resNames, verbModules, verbResources, verbNames, appliedBy,
-	).Scan(&out.Rows, &out.Dropped, &out.Elements); err != nil {
+	).Scan(&out.Rows, &out.Dropped, &out.Elements, &out.Roles); err != nil {
 		return out, fmt.Errorf("вырезать снятые типы из селекторов: %w", err)
 	}
 	return out, nil

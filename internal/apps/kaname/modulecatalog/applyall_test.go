@@ -131,6 +131,16 @@ func (w *recordingWriter) PruneRetiredSelectorTypes(_ context.Context,
 	return modulecatalog.Pruned{}, nil
 }
 
+// AnnounceRoleGrantWithdrawal — объявление отзыва подписчику (#76). Шаг
+// БЕЗУСЛОВНЫЙ: «объявить нечего» решает адаптер по пустому входу, а не
+// применитель по своему разумению — иначе свойство «нет события, когда отбирать
+// было нечего» жило бы в двух местах.
+func (w *recordingWriter) AnnounceRoleGrantWithdrawal(_ context.Context,
+	roleIDs []string) (int, error) {
+	w.calls = append(w.calls, "announce")
+	return len(roleIDs), nil
+}
+
 // ConfirmModuleState — вход подтверждения (шаг 2 применителя).
 //
 // Эти пробы идут по пути СТАРТА, а он подтверждения не несёт by construction:
