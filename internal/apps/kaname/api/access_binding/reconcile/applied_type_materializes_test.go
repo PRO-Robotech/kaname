@@ -76,7 +76,7 @@ func rowsWithAppliedResource() catalog.Rows {
 // appliedCatalog — источник каталожного факта со заведённым ресурсом.
 func appliedCatalog(t *testing.T) catalog.Source {
 	t.Helper()
-	f, err := catalog.NewFacts(rowsWithAppliedResource())
+	f, err := catalog.NewFacts(catalog.Halves{Live: rowsWithAppliedResource()})
 	require.NoError(t, err, "снимок со строкой заведённого ресурса")
 	return catalog.Fixed{F: f}
 }

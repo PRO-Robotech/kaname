@@ -668,7 +668,7 @@ func TestCreateAccount_NonUserPrincipal_RejectedSynchronously(t *testing.T) {
 // (services/iam/internal/apps/kaname/api/listvisibility). nil здесь означает
 // «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
 // ненаречённое.
-func (_ fakeReader) Visibility() visibility.ReaderIface { return nil }
+func (fakeReader) Visibility() visibility.ReaderIface { return nil }
 
 // Visibility — дублёр структурных фактов о вызывающем не несёт: они читаются
 // живой БД, и пробы, которые их проверяют, гоняют настоящий Postgres

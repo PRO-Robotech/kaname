@@ -84,12 +84,14 @@ type typeCatalog interface {
 	FGAObjectType(dotted string) (string, bool)
 }
 
-// catalogEndpoint — where an author reads the grantable taxonomy. Named in the
-// error because the canonical spelling is deliberately NOT uniform across modules
-// (compute.instance / iam.serviceAccount singular; storage.volumes /
-// registry.registries / loadbalancer.networkLoadBalancers plural), so "guess it"
-// is not a viable instruction.
-const catalogEndpoint = "GET /iam/v1/permissionCatalog"
+// catalogEndpoint — where an author reads the grantable taxonomy.
+//
+// ОБЪЯВЛЕНИЕ ОДНО НА ДЕРЕВО и живёт в домене: тот же адрес называет полоса
+// СНЯТИЯ (`domain.Rule.validateRetirementGate`), и две полосы одного механизма
+// обязаны говорить одно (kacho#1814). Вторая копия литерала разошлась бы с
+// первой молча — обе остались бы «правильными» по отдельности, а клиент получил
+// бы два разных адреса на один вопрос.
+const catalogEndpoint = domain.CatalogEndpoint
 
 // ruleWildcard — the `*` segment. Wildcard module/resource segments are policed by
 // domain.Rule.Validate (system-only) and expanded by the rules compiler; they are

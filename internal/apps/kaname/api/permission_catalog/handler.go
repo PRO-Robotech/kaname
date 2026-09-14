@@ -58,9 +58,20 @@ func catalogToProto(c Catalog) *iamv1.ListPermissionCatalogResponse {
 			Resources: resources,
 		})
 	}
+	// Снятое едет ОТДЕЛЬНЫМ полем верхнего уровня, а не признаком внутри
+	// `CatalogResource`: перечень грантуемого остаётся тем же, каким его читает
+	// клиент, написанный до появления поля.
+	retired := make([]*iamv1.RetiredResource, 0, len(c.Retired))
+	for _, r := range c.Retired {
+		retired = append(retired, &iamv1.RetiredResource{
+			Resource:     r.Resource,
+			SupersededBy: r.SupersededBy,
+		})
+	}
 	return &iamv1.ListPermissionCatalogResponse{
-		Modules:     modules,
-		ClosedVerbs: c.ClosedVerbs,
+		Modules:          modules,
+		RetiredResources: retired,
+		ClosedVerbs:      c.ClosedVerbs,
 		WildcardPolicy: &iamv1.WildcardPolicy{
 			VerbWildcardAllowedCustom:        c.Wildcard.VerbWildcardAllowedCustom,
 			ModuleResourceWildcardSystemOnly: c.Wildcard.ModuleResourceWildcardSystemOnly,

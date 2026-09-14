@@ -274,6 +274,129 @@
           ]
         }
       ]
+    },
+    {
+      "name": "CONF-G-03-catalog-retired-successor — GET /iam/v1/permissionCatalog as jwtBootstrap → 200, retiredResources[] несёт supersededBy, и грантуемое снятого не содержит",
+      "description": "class:CONF | class:CRUD | priority:P1",
+      "item": [
+        {
+          "name": "CONF-G-03-catalog-retired-successor :: list-permission-catalog-retired",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/iam/v1/permissionCatalog",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "iam",
+                "v1",
+                "permissionCatalog"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// per-step auth: bearer from env 'jwtBootstrap'",
+                  "const __t = pm.environment.get('jwtBootstrap') || pm.variables.get('jwtBootstrap') || '';",
+                  "if (__t) {",
+                  "  pm.request.headers.upsert({key: 'Authorization', value: 'Bearer ' + __t});",
+                  "} else {",
+                  "  pm.test('[УСЛОВИЕ НЕ СОЗДАНО] harness config: jwtBootstrap is set (subject under test)', () => {",
+                  "    pm.expect.fail('jwtBootstrap is not set — the authz-fixture seed (tests/authz-fixtures/setup.sh) did not provide this subject. Running the step anonymously would test a DIFFERENT principal and pass for the wrong reason.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "(function () {",
+                  "  var _u = '';",
+                  "  try { _u = pm.request.url.toString(); } catch (e) { return; }",
+                  "  try {",
+                  "    if (pm.request.body && pm.request.body.raw) { _u = _u + ' ' + pm.request.body.raw; }",
+                  "  } catch (e) { /* тела может не быть — это не находка */ }",
+                  "  var _all = _u.match(/\\{\\{[A-Za-z0-9_]+\\}\\}/g);",
+                  "  if (!_all) { return; }",
+                  "  var _n = null;",
+                  "  for (var _i = 0; _i < _all.length; _i++) {",
+                  "    var _c = _all[_i].slice(2, -2);",
+                  "    if (!pm.variables.has(_c)) { _n = _c; break; }",
+                  "  }",
+                  "  if (_n === null) { return; }",
+                  "  pm.test('предусловие: {{' + _n + '}} не было захвачено — запрос не отправлен', function () {",
+                  "    pm.expect.fail(_n + ' не определена ни в одной области. Мутация, которая должна была её захватить, не вернула Operation (была отвергнута), либо захват не состоялся. Отправка ушла бы литералом и повтор не сошёлся бы никогда.');",
+                  "  });",
+                  "  pm.execution.skipRequest();",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.eql(200));",
+                  "pm.test('retiredResources — непустой массив в camelCase на проводе', () => {",
+                  "  const j = pm.response.json();",
+                  "  pm.expect(j.retiredResources, JSON.stringify(j)).to.be.an('array');",
+                  "  pm.expect(j.retiredResources.length, 'снятых записей').to.be.greaterThan(0);",
+                  "});",
+                  "pm.test('compute.disk назван снятым и его преемник — storage.volumes', () => {",
+                  "  const j = pm.response.json();",
+                  "  const disk = (j.retiredResources || []).find(r => r.resource === 'compute.disk');",
+                  "  pm.expect(disk, 'compute.disk в перечне снятого: ' + JSON.stringify(j.retiredResources))",
+                  "    .to.be.an('object');",
+                  "  pm.expect(disk).to.have.property('supersededBy');",
+                  "  pm.expect(disk.supersededBy, 'преемник compute.disk').to.equal('storage.volumes');",
+                  "});",
+                  "pm.test('преемник КАЖДОЙ названной записи — живой ключ ТОГО ЖЕ тела', () => {",
+                  "  const j = pm.response.json();",
+                  "  const grantable = (j.modules || []).reduce((acc, m) => acc.concat(",
+                  "    (m.resources || []).map(r => m.module + '.' + r.resource)), []);",
+                  "  // Положительный контроль: перечень грантуемого непуст, иначе",
+                  "  // членство преемника проверялось бы в пустом множестве.",
+                  "  pm.expect(grantable.length, 'грантуемых пар в теле').to.be.greaterThan(0);",
+                  "  let named = 0;",
+                  "  (j.retiredResources || []).forEach(r => {",
+                  "    if (!r.supersededBy) { return; }",
+                  "    named += 1;",
+                  "    pm.expect(grantable, 'преемник ' + r.supersededBy + ' снятого ' + r.resource +",
+                  "      ' — живой ключ того же ответа').to.include(r.supersededBy);",
+                  "  });",
+                  "  pm.expect(named, 'записей с названным преемником').to.be.greaterThan(0);",
+                  "});",
+                  "pm.test('снятое НЕ попало в перечень ГРАНТУЕМОГО того же тела', () => {",
+                  "  const j = pm.response.json();",
+                  "  const grantable = (j.modules || []).reduce((acc, m) => acc.concat(",
+                  "    (m.resources || []).map(r => m.module + '.' + r.resource)), []);",
+                  "  pm.expect(grantable.length, 'грантуемых пар в теле').to.be.greaterThan(0);",
+                  "  (j.retiredResources || []).forEach(r => {",
+                  "    pm.expect(grantable, 'снятый ' + r.resource + ' НЕ предлагается к выдаче')",
+                  "      .to.not.include(r.resource);",
+                  "  });",
+                  "});",
+                  "pm.test('положительный контроль: три прежних поля на месте и непусты', () => {",
+                  "  const j = pm.response.json();",
+                  "  // Без него «снятого нет в грантуемом» зеленело бы на пустом ответе.",
+                  "  pm.expect(j.modules, 'modules').to.be.an('array').that.is.not.empty;",
+                  "  pm.expect(j.closedVerbs, 'closedVerbs').to.be.an('array').that.is.not.empty;",
+                  "  pm.expect(j.wildcardPolicy, 'wildcardPolicy').to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": []

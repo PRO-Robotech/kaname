@@ -114,7 +114,7 @@ func TestIAMRW110AGrantOnARetiredRoleYieldsNoVerdict(t *testing.T) {
 
 	census, err := seed.AssertCatalogParity(ctx, catRepo, seed.ImageAnchor())
 	require.NoError(t, err, "страж паритета каталога")
-	snap, err := catalog.NewSnapshot(census.Live, catRepo, nil, nil)
+	snap, err := catalog.NewSnapshot(census.Halves(), catRepo, nil, nil)
 	require.NoError(t, err, "снимок каталога")
 
 	mods, res, verbs := liveCatalogCounts(t, ctx, pool)

@@ -58,10 +58,17 @@ import (
 // reseedProbeCluster — якорь, по которому роль считается системной.
 const reseedProbeCluster = "cluster_root"
 
-// materializingRules — правило, дающее непустой набор пар. Модуль и ресурс взяты
-// из каталога платформы: правило вне каталога инертно целиком, и проба на нём
-// зеленела бы, ничего не утверждая.
-const materializingRules = `[{"module":"iam","resources":["role"],"verbs":["get"]}]`
+// materializingRules — правило, дающее непустой набор пар. Модуль, ресурс И
+// ГЛАГОЛ взяты из каталога платформы: правило вне каталога инертно целиком, и
+// проба на нём зеленела бы, ничего не утверждая.
+//
+// Глагол здесь стоял `get`, и он перестал быть глаголом этого ресурса (#1922):
+// отношения `v_get` на типе `iam_role` не спрашивал ни один путь запроса, и оно
+// снято с типа. Фикстура, называющая снятый глагол, ломает СВОЮ ПРЕДПОСЫЛКУ —
+// набор пар становится пустым, — и ловит это положительный контроль каждой
+// пробы, а не молчание. Взят `list`: он остаётся глаголом ресурса, и предмет
+// проб от подмены не зависит.
+const materializingRules = `[{"module":"iam","resources":["role"],"verbs":["list"]}]`
 
 // newReseedPool — своя база на пробу.
 func newReseedPool(t *testing.T) (context.Context, *pgxpool.Pool) {
@@ -339,7 +346,7 @@ func TestIAMRV105_ReseedLeavesTenantRolesAlone(t *testing.T) {
 	require.NoError(t, err, "посев роли арендатора")
 	_, err = pool.Exec(ctx,
 		`INSERT INTO kaname.role_verb (role_id, object_type, verb)
-		 VALUES ('rol-rv105-tenant', 'iam.role', 'v_get')`)
+		 VALUES ('rol-rv105-tenant', 'iam.role', 'v_list')`)
 	require.NoError(t, err, "посев проекции роли арендатора")
 
 	before := projectionSizeOf(t, ctx, pool, "rol-rv105-tenant")

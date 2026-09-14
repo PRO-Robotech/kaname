@@ -24,7 +24,7 @@ import (
 
 func literalFacts(t *testing.T) *catalog.Facts {
 	t.Helper()
-	f, err := catalog.NewFacts(seed.LiteralRows())
+	f, err := catalog.NewFacts(catalog.Halves{Live: seed.LiteralRows()})
 	if err != nil {
 		t.Fatalf("снимок из перечня литерала: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestIAMCT2_06_RetiredResourceProducesNoPairs(t *testing.T) {
 		t.Fatalf("до снятия у %q ноль пар — контроль не выполнен", dotted)
 	}
 
-	retired, err := catalog.NewFacts(withoutResource(seed.LiteralRows(), dotted))
+	retired, err := catalog.NewFacts(catalog.Halves{Live: withoutResource(seed.LiteralRows(), dotted)})
 	if err != nil {
 		t.Fatalf("снимок без снятой строки: %v", err)
 	}
@@ -181,12 +181,12 @@ func withoutResource(rows catalog.Rows, dotted string) catalog.Rows {
 // страж отказывает в пуске, — но порт обязан отвергать пустое множество и сам:
 // он читается ещё и обновлением, у которого стража перед ним нет.
 func TestIAMCT2_02_EmptyRowsAreNotASnapshot(t *testing.T) {
-	if _, err := catalog.NewFacts(catalog.Rows{}); err == nil {
+	if _, err := catalog.NewFacts(catalog.Halves{Live: catalog.Rows{}}); err == nil {
 		t.Fatalf("пустые строки приняты как снимок — пустой снимок отверг бы все правила разом")
 	}
 	// Законный близнец: непустые строки принимаются. Без него отрицание выше
 	// зеленело бы и на конструкторе, отвергающем ВСЁ.
-	if _, err := catalog.NewFacts(seed.LiteralRows()); err != nil {
+	if _, err := catalog.NewFacts(catalog.Halves{Live: seed.LiteralRows()}); err != nil {
 		t.Fatalf("непустые строки отвергнуты: %v", err)
 	}
 }
@@ -219,7 +219,7 @@ func TestTierOnlyRowNeverEntersTheVerbSetOfItsType(t *testing.T) {
 			{Module: "vpc", Resource: "network", Verb: "create"},
 		},
 	}
-	f, err := catalog.NewFacts(rows)
+	f, err := catalog.NewFacts(catalog.Halves{Live: rows})
 	if err != nil {
 		t.Fatalf("снимок: %v", err)
 	}

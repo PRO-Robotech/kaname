@@ -220,12 +220,23 @@ func TestSeededRole_ListGrantImpliesRead(t *testing.T) {
 				// само: появится запись, требующая `v_get` на этом типе, — пара
 				// вернётся под запрет без правки этого файла.
 				//
-				// Замер на дереве: записей каталога 350, из них с
-				// `required_relation = "v_get"` — 27 на 24 типах; `iam_role`
-				// среди них нет, а записей с этим типом — три (Update, Delete,
-				// ListOperations). Это и есть решение kacho#1916, принятое
-				// ИНАЧЕ и с замером, а не пропущенное: у ресурса `role` модуля
-				// `iam` нет ни одного действия, чей гейт спрашивал бы `v_get`.
+				// Замер на дереве (перемерен 2026-09-14): записей каталога
+				// 338, из них с `required_relation = "v_get"` — 27; `iam_role`
+				// среди их типов нет, а записей с этим типом — три (Update,
+				// Delete, ListOperations). Прежняя редакция называла 350 —
+				// величина верна для своей ревизии и с тех пор убыла; предикат
+				// рядом, и перемерять надо им, а не помнить:
+				//
+				//	python3 -c "import json;d=json.load(open(
+				//	  'internal/apps/kaname/seed/embedded/permission_catalog.json'));
+				//	  print(len(d), len([e for e in d
+				//	    if e.get('required_relation')=='v_get']))"
+				//
+				// Это и есть решение kacho#1916, принятое ИНАЧЕ и с замером, а
+				// не пропущенное: у ресурса `role` модуля `iam` нет ни одного
+				// действия, чей гейт спрашивал бы `v_get`. С kacho#1922 его нет
+				// и у типа: отношение снято, и исключение ниже стало для этой
+				// пары беспредметным — оно держится каталогом и истечёт само.
 				if typ, ok := ObjectType(mod, res); ok && !typesGatedByVGet(t)[typ] {
 					exemptNoVGet = append(exemptNoVGet, dotted)
 					continue

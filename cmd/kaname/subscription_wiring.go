@@ -18,7 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	subscriptionv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/subscription"
+	subscriptionv1 "github.com/PRO-Robotech/corelib/api/corelib/subscription"
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/listnarrow"
 	coreretention "github.com/PRO-Robotech/corelib/retention"

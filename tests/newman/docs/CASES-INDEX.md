@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 743
+Всего кейсов: 744
 
 ## Перепись по модулям
 
@@ -53,7 +53,7 @@
 | `cases/iam-limit.py` | 11 |
 | `cases/iam-list-visibility.py` | 3 |
 | `cases/iam-membership-read.py` | 7 |
-| `cases/iam-permission-catalog.py` | 2 |
+| `cases/iam-permission-catalog.py` | 3 |
 | `cases/iam-project.py` | 33 |
 | `cases/iam-rbac-rules-labels.py` | 2 |
 | `cases/iam-rbac-scope-grant.py` | 2 |
@@ -679,11 +679,12 @@
 - `IAM-ID2-ORACLE-EMPTY`
 - `IAM-ID2-ORACLE-GET-404`
 
-## `cases/iam-permission-catalog.py` — 2 кейсов
+## `cases/iam-permission-catalog.py` — 3 кейсов
 
 > Case-set: PermissionCatalogService.ListPermissionCatalog.
 
 - `CONF-G-01-catalog-happy`
+- `CONF-G-03-catalog-retired-successor`
 - `NEG-G-02-catalog-anonymous-unauthenticated`
 
 ## `cases/iam-project.py` — 33 кейсов

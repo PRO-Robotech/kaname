@@ -15,11 +15,25 @@ package role
 // order a cost decision and never a correctness one.
 //
 // Rationale (parity with account/project List, D-6a): on the decoupled model a
-// grant of `iam.roles.{get,list}` with a names/labels selector materializes ONLY
-// an object-only `iam_role:<id> # v_list/v_get @ subj` tuple with NO viewer-tier
-// cascade. The pre-existing viewer-only filter (the stale #193 path) hid such a
-// v_list-only grant from its grantee. The union surfaces it (selector-visible)
-// while content (v_get) remains gated.
+// grant of `iam.roles.list` with a names/labels selector materializes ONLY an
+// object-only `iam_role:<id> # v_list @ subj` tuple with NO viewer-tier cascade.
+// The pre-existing viewer-only filter (the stale #193 path) hid such a v_list-only
+// grant from its grantee. The union surfaces it.
+//
+// The tail of this sentence used to read "while content (v_get) remains gated".
+// That was FALSE when written — no catalog entry ever asked `v_get` on this type,
+// so it gated nothing — and since #1922 it is not even expressible: `iam_role`
+// declares no `v_get`, and `iam.role` offers no `get` verb, so neither the grant
+// nor the tuple in the old sentence can exist. Content is not separately gated on
+// this type at all: the page predicate IS the read predicate, by construction —
+// both surfaces call resolveVisibleRoleIDs.
+//
+// PARITY HAS NO PROBE HOLDER, and that is stated rather than implied. It is held
+// BY CONSTRUCTION: role/get.go and role/list.go call the SAME resolver, so the
+// two cannot disagree. `TestVisibleSet_RoleKeepsTheUnionItsOwnGetEnforces` is
+// NOT that holder — its body never calls Get, so it asserts one side (a page
+// includes the role under a v_list grant) and says nothing about parity. Naming
+// it as the holder would be a title wider than its body.
 //
 // # What this header used to say
 //

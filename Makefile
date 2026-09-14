@@ -202,12 +202,15 @@ lint:
 	  echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)"; \
 	  exit 2; \
 	fi
+	@echo "кэш линтера: $(GOLANGCI_LINT_CACHE)"; \
+	echo "  свой у ЭТОЙ рабочей копии — общий (~/.cache/golangci-lint) ключуется содержимым"; \
+	echo "  пакета, не деревом, и возвращает разбор ЧУЖИХ файлов с чужими путями"
 	golangci-lint run --timeout=10m --config=.github/golangci.yml ./...
 
 # audit-list-filter — CI gate for kaname's listing surface: every method that
 # hands a page to a caller must narrow it, and must declare HOW. What is checked
 # lives in pkg/listfiltergate; how this service is laid out lives in
-# services/iam/tools/auditlistfilter.
+# tools/auditlistfilter.
 #
 # iam carries the widest listing surface in the repository — 30 methods across 21
 # packages, more than compute, nlb, registry and storage together — and for a long
@@ -226,7 +229,7 @@ lint:
 # with nothing left to exclude is a finding too — which is how the `conditions`
 # entry left: its subject was retired, so there was nothing for it to describe.
 #
-# Invoked by CI as `make -C services/iam audit-list-filter`. That it is invoked at
+# Invoked by CI as `make audit-list-filter`. That it is invoked at
 # all is locked twice over: internal/repohygiene/listfiltergatewiring_test.go
 # derives the service list from this Makefile and from the workflow and compares
 # them in both directions, and pkg/listfiltergate/coverage_test.go reports an
@@ -323,7 +326,7 @@ module-manifest-check:
 # предмет и разрешимость ссылок между ними держит проба
 # tools/operatordocs/present_test.go.
 #
-# Вызов: `make -C services/iam operator-docs` / `... operator-docs-check`
+# Вызов: `make operator-docs` / `... operator-docs-check`
 .PHONY: helm-render-guard
 ## helm-render-guard — офлайновый страж рендера чарта: вход, который чарт отдаёт
 ## процессу, обязан пройти страж старта.
@@ -412,10 +415,10 @@ model-canon-check:
 # стоит намеренно — гейт печатает объём осмотренного, и без него «ноль находок»
 # было бы неотличимо от «ноль прочитанного».
 #
-# Текст соглашения и обе формы подтверждения — services/iam/CLA.md;
-# ведомость своих, подписавших и машинных личностей — services/iam/cla-ledger.yaml.
+# Текст соглашения и обе формы подтверждения — CLA.md;
+# ведомость своих, подписавших и машинных личностей — cla-ledger.yaml.
 #
-# Вызов: `make -C services/iam cla-check`
+# Вызов: `make cla-check`
 #
 # Путь — ОТ КОРНЯ МОДУЛЯ СЛУЖБЫ: у неё свой go.mod, и подъём в корень монорепо
 # ради пути `./services/iam/...` отказывает — тот модуль этих пакетов не
@@ -453,7 +456,7 @@ docker:
 	  echo "ВНИМАНИЕ: величина провенанса не объявлена — образ уедет БЕЗ клейма ревизии"; \
 	  echo "  (клеймо образа и файл ревизии внутри него останутся пустыми)."; \
 	  echo "  Так бывает у самостоятельного клона: объявление величины лежит в корне"; \
-	  echo "  монорепо и в поставку модуля не входит — см. services/iam/provenance.mk."; }
+	  echo "  монорепо и в поставку модуля не входит — см. provenance.mk корня монорепо."; }
 	docker build $(IMAGE_BUILD_ARGS) -f Dockerfile -t $(IMAGE) .
 
 .PHONY: migrate-up migrate-down migrate-status
@@ -482,6 +485,14 @@ migrate-status: build-migrator
 # этом же файле: она сверяет ДВЕ ЭТИ копии и ничего не пишет. Провязку держит
 # гейт `internal/check/catalog_check_wiring_test.go` — он требует вызывающего у
 # сверки и запрещает звать из конвейера пишущую форму.
+#
+# ОДНО ИСКЛЮЧЕНИЕ ИЗ «ПОБАЙТОВО» ОБЪЯВЛЕНО, А НЕ ПОДРАЗУМЕВАЕТСЯ (kaname#79):
+# переименование контракта, чей владелец — ФУНДАМЕНТ, пока деревья пинят разные
+# его версии. Такие расхождения перечислены ЗАКРЫТЫМ списком в
+# `internal/check/catalog_copy_parity.go`; всё прочее остаётся находкой, а
+# запись списка, которой больше нечего исключать, — находкой тоже. Перечень
+# печатается на КАЖДОМ прогоне, включая зелёный: послабление, которого не видно
+# в журнале, перестают замечать, и снять его оказывается некому.
 #
 # ЗДЕСЬ НАЗЫВАЛСЯ ГЕЙТ КРАЯ, И ОН ПРОВЕРЯЕТ ДРУГОЕ (kacho#2620). Блок обещал,
 # что расхождение роняет `make -C <дерево платформы>/gateway
@@ -537,8 +548,24 @@ sync-permission-catalog:
 # между пином и головой шлюза цель НЕ видела by construction. Пина больше нет, и
 # называть ревизию неоткуда: второе её объявление в этом дереве было бы вторым
 # домом одного предмета. Конвейер подаёт ГОЛОВУ шлюза, и прежний слепой участок
-# этим ЗАКРЫВАЕТСЯ: сверка краснеет ровно тогда, когда копия отстала от края, —
-# то есть когда синхронизация и требуется.
+# этим ЗАКРЫВАЕТСЯ.
+#
+# НАПРАВЛЕНИЙ У РАСХОЖДЕНИЯ ДВА, И ПРЕЖНЯЯ РЕДАКЦИЯ ЗНАЛА ОДНО (kaname#79).
+# Здесь стояло: «сверка краснеет ровно тогда, когда копия отстала от края, — то
+# есть когда синхронизация и требуется». Первая половина верна, вторая ЛОЖНА:
+# `cmp` симметричен, и он краснеет так же, когда отстала копия КРАЯ. Совет в
+# этом направлении вреден — он вписал бы в наш посев имя метода, которого этот
+# двоичный файл не служит.
+#
+# Отстать край может не по небрежности, а BY CONSTRUCTION: полное имя метода у
+# контракта, живущего в ФУНДАМЕНТЕ, задаёт версия фундамента, которую линкует
+# дерево. Служба и платформа пинят его независимо, переезд контракта неделим по
+# пакету, и промежуточного состояния, где совпали бы обе копии, не существует.
+# Поэтому сравнение делает `tools/catalogparity`: он режет файл на записи
+# ДОСЛОВНО, применяет к копии края ЗАКРЫТЫЙ перечень объявленных переименований
+# фундамента (`internal/check/catalog_copy_parity.go`) и сравнивает остаток
+# побайтово. Норма не ослаблена: всё, что перечнем не объяснено, — находка, а
+# запись перечня, которой больше нечего исключать, — находка тоже.
 #
 # ПОМЕТКА `[монорепо]` ПОЯВИЛАСЬ ВМЕСТЕ С ЭТИМ, и это понижение обещания, а не
 # оговорка: без второго дерева цель выходит третьим исходом, а гейт целей
@@ -569,19 +596,7 @@ check-permission-catalog:
 	  echo "Сверка НЕ ИСПОЛНЯЛАСЬ — сверять нечего."; \
 	  exit 2; \
 	fi; \
-	if cmp -s "$$edge" "$$own"; then \
-	  echo "ЗЕЛЁНЫЙ: копия каталога прав совпадает с копией края побайтово ($$(wc -c < "$$own") байт)"; \
-	  echo "  край: $$edge"; \
-	  echo "  своя: $$own"; \
-	else \
-	  echo "НАХОДКА: копия каталога прав РАЗОШЛАСЬ с копией края."; \
-	  echo "  край: $$edge ($$(wc -c < "$$edge") байт)"; \
-	  echo "  своя: $$own ($$(wc -c < "$$own") байт)"; \
-	  echo "Источник истины ОДИН — копия края. Позвать в полном чекауте монорепо:"; \
-	  echo "  make sync-permission-catalog"; \
-	  cmp "$$edge" "$$own" || true; \
-	  exit 1; \
-	fi
+	go run ./tools/catalogparity -edge="$$edge" -own="$$own"
 
 # ─── КОНТРАКТЫ СЛУЖБЫ ───────────────────────────────────────────────────────
 #

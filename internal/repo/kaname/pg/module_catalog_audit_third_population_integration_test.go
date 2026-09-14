@@ -55,7 +55,7 @@ func TestAppliedAuditRowCarriesAllThreeConsequencePopulations(t *testing.T) {
 
 	census, err := seed.AssertCatalogParity(ctx, catRepo, seed.ImageAnchor())
 	require.NoError(t, err, "предпосылка не создана: посеянный каталог уже разошёлся с опорой")
-	snap, err := catalog.NewSnapshot(census.Live, catRepo, nil, nil)
+	snap, err := catalog.NewSnapshot(census.Halves(), catRepo, nil, nil)
 	require.NoError(t, err, "снимок каталога")
 
 	// Арендаторская роль, чьё правило называет снимаемый ресурс: она даёт вход

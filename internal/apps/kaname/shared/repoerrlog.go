@@ -3,7 +3,7 @@
 
 package shared
 
-// repoerrlog.go — перевод ошибки хранилища в код И запись её ПРИЧИНЫ в журнал.
+// repoerrlog.go — запись ПРИЧИНЫ отказа хранилища в журнал сервера.
 //
 // # Зачем отдельный глагол рядом с MapRepoErr
 //
@@ -25,17 +25,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
-
-// LogRepoErr переводит ошибку хранилища в gRPC-статус и, если перевод СТИРАЕТ
-// причину, называет её журналу сервера.
-//
-// Перевод делает канонический `MapRepoErr`. Домену, у которого перевод СВОЙ
-// (текст INTERNAL — часть его контракта и отличается от общего), предназначен
-// `LogMappedErr` ниже: он принимает уже переведённый статус, а решение о том,
-// что называть журналу, остаётся здесь в единственном экземпляре.
-func LogRepoErr(ctx context.Context, logger *slog.Logger, op string, err error) error {
-	return LogMappedErr(ctx, logger, op, err, MapRepoErr(err))
-}
 
 // LogMappedErr называет журналу причину отказа, чей текст на проводе её НЕ
 // несёт, и возвращает переданный статус без изменений.

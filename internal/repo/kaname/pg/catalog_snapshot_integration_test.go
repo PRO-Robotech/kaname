@@ -128,7 +128,7 @@ func TestIAMCT2_01_SnapshotAddsNoSecondReadOfTheCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("страж паритета на пути старта: %v", err)
 	}
-	snap, err := catalog.NewSnapshot(censusN.Live, repo, nil, nil)
+	snap, err := catalog.NewSnapshot(censusN.Halves(), repo, nil, nil)
 	if err != nil {
 		t.Fatalf("снимок: %v", err)
 	}
@@ -142,6 +142,20 @@ func TestIAMCT2_01_SnapshotAddsNoSecondReadOfTheCatalog(t *testing.T) {
 	// Положительный контроль: снимок не просто «не читал» — он ЗАПОЛНЕН.
 	if got := snap.Facts().AllVerbVocabulary(); len(got) == 0 {
 		t.Errorf("снимок пуст при N==K — равенство выполнено тем, что снимок ничего не взял")
+	}
+	// Контроль на СНЯТОЙ половине — и он не симметрия, а отдельное утверждение
+	// (kacho#1814, IAM-SUC-11). Голое `N == K` истинно и на снимке, который
+	// снятую половину не берёт НИКОГДА: страж читает её безусловно, поэтому
+	// равенство операторов держится независимо от того, доехали ли строки. До
+	// доноса снятой половины свежезапущенный процесс отвечал арендатору пустым
+	// перечнем снятого до первого обновления.
+	if got := snap.Facts().RetiredResources(); len(got) == 0 {
+		t.Errorf("снятая половина снимка ПУСТА при N==K — равенство выполнено тем, что "+
+			"снятые строки страж прочитал и выбросил; перепись стража: снятых ресурсов %d",
+			censusN.RetiredResources)
+	} else {
+		t.Logf("перепись: снятых записей в снимке %d, снятых ресурсов у стража %d",
+			len(got), censusN.RetiredResources)
 	}
 }
 
@@ -182,7 +196,7 @@ func TestIAMCT2_06_07_RetiredAfterStartDoesNotReachTheProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("страж паритета: %v", err)
 	}
-	snap, err := catalog.NewSnapshot(census.Live, repo, nil, nil)
+	snap, err := catalog.NewSnapshot(census.Halves(), repo, nil, nil)
 	if err != nil {
 		t.Fatalf("снимок: %v", err)
 	}
@@ -322,7 +336,7 @@ func TestIAMCT2_14_AppliedAfterStartReachesTheProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("страж паритета: %v", err)
 	}
-	snap, err := catalog.NewSnapshot(census.Live, repo, nil, nil)
+	snap, err := catalog.NewSnapshot(census.Halves(), repo, nil, nil)
 	if err != nil {
 		t.Fatalf("снимок: %v", err)
 	}
@@ -461,7 +475,7 @@ func TestWithdrawnRowDoesNotBlockTheNextBoot(t *testing.T) {
 		len(parity.WithdrawnRows), len(parity.MissingRows), len(parity.ExtraRows))
 
 	// ── звено 2: снимок каталога ────────────────────────────────────────────
-	snap, serr := catalog.NewSnapshot(parity.Live, repo, nil, nil)
+	snap, serr := catalog.NewSnapshot(parity.Halves(), repo, nil, nil)
 	if serr != nil {
 		t.Fatalf("снимок каталога не построился после снятия: %v", serr)
 	}

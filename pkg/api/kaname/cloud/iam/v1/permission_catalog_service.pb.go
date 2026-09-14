@@ -88,8 +88,28 @@ type ListPermissionCatalogResponse struct {
 	ClosedVerbs []string `protobuf:"bytes,2,rep,name=closed_verbs,json=closedVerbs,proto3" json:"closed_verbs,omitempty"`
 	// Platform-wide wildcard policy flags.
 	WildcardPolicy *WildcardPolicy `protobuf:"bytes,3,opt,name=wildcard_policy,json=wildcardPolicy,proto3" json:"wildcard_policy,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Ресурсы, которые платформа СНЯЛА, и живой ресурс взамен каждого.
+	//
+	// ЭТО НЕ ПЕРЕЧЕНЬ ГРАНТУЕМОГО, и поэтому он лежит здесь, наверху, а не
+	// признаком внутри `modules[].resources[]`. Правило роли, называющее ресурс
+	// отсюда, отвергается синхронно — тем же отказом, что и до появления поля:
+	// перечень рассказывает о снятии, а не разрешает его.
+	//
+	// Признаком внутри `CatalogResource` это быть не могло: признак — поле,
+	// добавленное сегодня, и клиент, написанный вчера, не читает его by
+	// construction — он увидел бы снятый ресурс в перечне грантуемого как живой и
+	// предложил бы выдать то, что ключ отвергнет.
+	//
+	// ЗАЧЕМ ПОЛЕ СУЩЕСТВУЕТ. Отказ на снятом ресурсе приходит из ПРЕРВАННОЙ
+	// транзакции, где чтения нет by construction, — поэтому преемника он назвать
+	// не может и не обещает. Восстанавливает следующий шаг клиента это чтение: тот
+	// же единственный вызов, на который отказ уже указывает.
+	//
+	// Порядок ДЕТЕРМИНИРОВАН — по точечному имени снятого: перечень читает
+	// человек, разбирающий отказ.
+	RetiredResources []*RetiredResource `protobuf:"bytes,4,rep,name=retired_resources,json=retiredResources,proto3" json:"retired_resources,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ListPermissionCatalogResponse) Reset() {
@@ -143,6 +163,88 @@ func (x *ListPermissionCatalogResponse) GetWildcardPolicy() *WildcardPolicy {
 	return nil
 }
 
+func (x *ListPermissionCatalogResponse) GetRetiredResources() []*RetiredResource {
+	if x != nil {
+		return x.RetiredResources
+	}
+	return nil
+}
+
+// RetiredResource — ресурс, СНЯТЫЙ платформой, и живой ресурс взамен него.
+//
+// Глаголов запись НЕ несёт, и это решение, а не пропуск: строка глаголов снята
+// вместе с ресурсом, спрашивать набор не у кого, а выдать глаголы ПРЕЕМНИКА под
+// именем снятого значило бы утверждать совпадение наборов, которого никто не
+// проверял. Набор преемника спрашивается у него самого — он в `modules[]`.
+//
+// Причина снятия на провод НЕ выносится: это свободная проза, у которой нет
+// формы контракта и нет гейта, её судящего. Клиенту нужен следующий шаг, а не
+// причина нашего решения.
+type RetiredResource struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Точечное имя СНЯТОГО ресурса — та же форма, какой его называет отказ
+	// (`compute.disk`).
+	Resource string `protobuf:"bytes,1,opt,name=resource,proto3" json:"resource,omitempty"`
+	// Точечное имя ЖИВОГО ресурса взамен снятого (`storage.volumes`).
+	//
+	// ПУСТО означает «преемник не назван», а не «преемник — пустая строка»:
+	// снятый ресурс остаётся снятым и назван здесь в любом случае. Промолчать о
+	// нём вовсе значило бы скрыть от клиента сам факт снятия — то есть ответить
+	// на вопрос «что назвать вместо» отсутствием записи, неотличимым от «такого
+	// ресурса у платформы не было никогда».
+	//
+	// Когда имя непусто, оно ЖИВОЕ: преемник обязан быть ключом живого каталога,
+	// и это держит гейт посева, а не обещание. Значит клиент вправе искать его в
+	// `modules[]` ЭТОГО ЖЕ ответа.
+	SupersededBy  string `protobuf:"bytes,2,opt,name=superseded_by,json=supersededBy,proto3" json:"superseded_by,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RetiredResource) Reset() {
+	*x = RetiredResource{}
+	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RetiredResource) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RetiredResource) ProtoMessage() {}
+
+func (x *RetiredResource) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RetiredResource.ProtoReflect.Descriptor instead.
+func (*RetiredResource) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *RetiredResource) GetResource() string {
+	if x != nil {
+		return x.Resource
+	}
+	return ""
+}
+
+func (x *RetiredResource) GetSupersededBy() string {
+	if x != nil {
+		return x.SupersededBy
+	}
+	return ""
+}
+
 // CatalogModule is a grantable module and the resources grantable within it.
 type CatalogModule struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -156,7 +258,7 @@ type CatalogModule struct {
 
 func (x *CatalogModule) Reset() {
 	*x = CatalogModule{}
-	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[2]
+	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -168,7 +270,7 @@ func (x *CatalogModule) String() string {
 func (*CatalogModule) ProtoMessage() {}
 
 func (x *CatalogModule) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[2]
+	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -181,7 +283,7 @@ func (x *CatalogModule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CatalogModule.ProtoReflect.Descriptor instead.
 func (*CatalogModule) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDescGZIP(), []int{2}
+	return file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CatalogModule) GetModule() string {
@@ -253,7 +355,7 @@ type CatalogResource struct {
 
 func (x *CatalogResource) Reset() {
 	*x = CatalogResource{}
-	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[3]
+	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -265,7 +367,7 @@ func (x *CatalogResource) String() string {
 func (*CatalogResource) ProtoMessage() {}
 
 func (x *CatalogResource) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[3]
+	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -278,7 +380,7 @@ func (x *CatalogResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CatalogResource.ProtoReflect.Descriptor instead.
 func (*CatalogResource) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDescGZIP(), []int{3}
+	return file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CatalogResource) GetResource() string {
@@ -334,7 +436,7 @@ type WildcardPolicy struct {
 
 func (x *WildcardPolicy) Reset() {
 	*x = WildcardPolicy{}
-	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[4]
+	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -346,7 +448,7 @@ func (x *WildcardPolicy) String() string {
 func (*WildcardPolicy) ProtoMessage() {}
 
 func (x *WildcardPolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[4]
+	mi := &file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -359,7 +461,7 @@ func (x *WildcardPolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WildcardPolicy.ProtoReflect.Descriptor instead.
 func (*WildcardPolicy) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDescGZIP(), []int{4}
+	return file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *WildcardPolicy) GetVerbWildcardAllowedCustom() bool {
@@ -381,11 +483,15 @@ var File_kaname_cloud_iam_v1_permission_catalog_service_proto protoreflect.FileD
 const file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDesc = "" +
 	"\n" +
 	"4kaname/cloud/iam/v1/permission_catalog_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a$corelib/authz/v1/authz_options.proto\"\x1e\n" +
-	"\x1cListPermissionCatalogRequest\"\xce\x01\n" +
+	"\x1cListPermissionCatalogRequest\"\xa1\x02\n" +
 	"\x1dListPermissionCatalogResponse\x12<\n" +
 	"\amodules\x18\x01 \x03(\v2\".kaname.cloud.iam.v1.CatalogModuleR\amodules\x12!\n" +
 	"\fclosed_verbs\x18\x02 \x03(\tR\vclosedVerbs\x12L\n" +
-	"\x0fwildcard_policy\x18\x03 \x01(\v2#.kaname.cloud.iam.v1.WildcardPolicyR\x0ewildcardPolicy\"k\n" +
+	"\x0fwildcard_policy\x18\x03 \x01(\v2#.kaname.cloud.iam.v1.WildcardPolicyR\x0ewildcardPolicy\x12Q\n" +
+	"\x11retired_resources\x18\x04 \x03(\v2$.kaname.cloud.iam.v1.RetiredResourceR\x10retiredResources\"R\n" +
+	"\x0fRetiredResource\x12\x1a\n" +
+	"\bresource\x18\x01 \x01(\tR\bresource\x12#\n" +
+	"\rsuperseded_by\x18\x02 \x01(\tR\fsupersededBy\"k\n" +
 	"\rCatalogModule\x12\x16\n" +
 	"\x06module\x18\x01 \x01(\tR\x06module\x12B\n" +
 	"\tresources\x18\x02 \x03(\v2$.kaname.cloud.iam.v1.CatalogResourceR\tresources\"\xc8\x01\n" +
@@ -414,25 +520,27 @@ func file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDescGZIP() []b
 	return file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_kaname_cloud_iam_v1_permission_catalog_service_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_kaname_cloud_iam_v1_permission_catalog_service_proto_goTypes = []any{
 	(*ListPermissionCatalogRequest)(nil),  // 0: kaname.cloud.iam.v1.ListPermissionCatalogRequest
 	(*ListPermissionCatalogResponse)(nil), // 1: kaname.cloud.iam.v1.ListPermissionCatalogResponse
-	(*CatalogModule)(nil),                 // 2: kaname.cloud.iam.v1.CatalogModule
-	(*CatalogResource)(nil),               // 3: kaname.cloud.iam.v1.CatalogResource
-	(*WildcardPolicy)(nil),                // 4: kaname.cloud.iam.v1.WildcardPolicy
+	(*RetiredResource)(nil),               // 2: kaname.cloud.iam.v1.RetiredResource
+	(*CatalogModule)(nil),                 // 3: kaname.cloud.iam.v1.CatalogModule
+	(*CatalogResource)(nil),               // 4: kaname.cloud.iam.v1.CatalogResource
+	(*WildcardPolicy)(nil),                // 5: kaname.cloud.iam.v1.WildcardPolicy
 }
 var file_kaname_cloud_iam_v1_permission_catalog_service_proto_depIdxs = []int32{
-	2, // 0: kaname.cloud.iam.v1.ListPermissionCatalogResponse.modules:type_name -> kaname.cloud.iam.v1.CatalogModule
-	4, // 1: kaname.cloud.iam.v1.ListPermissionCatalogResponse.wildcard_policy:type_name -> kaname.cloud.iam.v1.WildcardPolicy
-	3, // 2: kaname.cloud.iam.v1.CatalogModule.resources:type_name -> kaname.cloud.iam.v1.CatalogResource
-	0, // 3: kaname.cloud.iam.v1.PermissionCatalogService.ListPermissionCatalog:input_type -> kaname.cloud.iam.v1.ListPermissionCatalogRequest
-	1, // 4: kaname.cloud.iam.v1.PermissionCatalogService.ListPermissionCatalog:output_type -> kaname.cloud.iam.v1.ListPermissionCatalogResponse
-	4, // [4:5] is the sub-list for method output_type
-	3, // [3:4] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	3, // 0: kaname.cloud.iam.v1.ListPermissionCatalogResponse.modules:type_name -> kaname.cloud.iam.v1.CatalogModule
+	5, // 1: kaname.cloud.iam.v1.ListPermissionCatalogResponse.wildcard_policy:type_name -> kaname.cloud.iam.v1.WildcardPolicy
+	2, // 2: kaname.cloud.iam.v1.ListPermissionCatalogResponse.retired_resources:type_name -> kaname.cloud.iam.v1.RetiredResource
+	4, // 3: kaname.cloud.iam.v1.CatalogModule.resources:type_name -> kaname.cloud.iam.v1.CatalogResource
+	0, // 4: kaname.cloud.iam.v1.PermissionCatalogService.ListPermissionCatalog:input_type -> kaname.cloud.iam.v1.ListPermissionCatalogRequest
+	1, // 5: kaname.cloud.iam.v1.PermissionCatalogService.ListPermissionCatalog:output_type -> kaname.cloud.iam.v1.ListPermissionCatalogResponse
+	5, // [5:6] is the sub-list for method output_type
+	4, // [4:5] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_permission_catalog_service_proto_init() }
@@ -446,7 +554,7 @@ func file_kaname_cloud_iam_v1_permission_catalog_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_permission_catalog_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

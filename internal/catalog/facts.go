@@ -59,6 +59,28 @@ type Facts struct {
 	// каждого читателя. Второе место, знающее это правило, разошлось бы с первым
 	// на ресурсе, чьё имя содержит точку.
 	resources []ResourceEntry
+	// retired — СНЯТЫЕ пары каталога в порядке точечного ключа, каждая со своим
+	// преемником.
+	//
+	// Хранится В ТОМ ЖЕ значении, что и живые: арендатор видит обе половины
+	// ОДНИМ ответом, и взять их из двух разных фактов значило бы собрать витрину
+	// из двух снимков — ресурс оказался бы в обоих перечнях сразу либо ни в
+	// одном (kacho#1814, IAM-SUC-09).
+	retired []RetiredEntry
+}
+
+// RetiredEntry — одна СНЯТАЯ пара каталога и её преемник.
+//
+// Глаголов запись НЕ несёт, и это решение, а не пропуск: строка `catalog_verb`
+// снята вместе с ресурсом, спрашивать набор не у кого, а выдать глаголы
+// ПРЕЕМНИКА под именем снятого значило бы утверждать совпадение наборов,
+// которого никто не проверял.
+type RetiredEntry struct {
+	Module   string
+	Resource string
+	// SupersededBy — точечное имя ЖИВОГО ресурса взамен снятого; пусто означает
+	// «преемник не назван», а не «преемник — пустая строка».
+	SupersededBy string
 }
 
 // ResourceEntry — одна ЖИВАЯ пара каталога вместе с именем её типа в словаре
@@ -76,14 +98,26 @@ type ResourceEntry struct {
 	ObjectType string
 }
 
-// NewFacts собирает факт из живых строк каталога.
+// NewFacts собирает факт из ОБЕИХ половин каталога.
+//
+// Половины приходят одним значением (`Halves`) и берутся из ОДНОГО снимка:
+// собранный из двух моментов факт показал бы ресурс в обоих перечнях сразу либо
+// ни в одном (kacho#1814).
+//
+// ПУСТАЯ СНЯТАЯ ПОЛОВИНА ЗАКОННА и означает «снятого нет» — в отличие от живой,
+// пустота которой отвергается ниже. Величина эта платформенная: сегодня снятых
+// строк три при двадцати семи живых, и «ноль» здесь честный ответ, а не признак
+// непрочитанного. Отличать непрочитанное обязан ВЫЗЫВАЮЩИЙ, и единственный, кому
+// это важно, — снимок: он берёт обе половины у порта, который иначе как парой их
+// не отдаёт.
 //
 // ПУСТОЕ МНОЖЕСТВО ОТВЕРГАЕТСЯ, и это не перестраховка. Пустой снимок отверг бы
 // ВСЕ правила арендатора разом, и снаружи это читалось бы как «продукт сломан»,
 // а не как «миграции не применены». На старте до этого не доходит — страж
 // отказывает в пуске раньше, — но обновление снимка идёт БЕЗ стража, и пустой
 // ответ там обязан быть отказом обновления, а не новым снимком.
-func NewFacts(rows Rows) (*Facts, error) {
+func NewFacts(h Halves) (*Facts, error) {
+	rows := h.Live
 	if len(rows.Modules) == 0 || len(rows.Resources) == 0 || len(rows.Verbs) == 0 {
 		return nil, fmt.Errorf("каталог модуля пуст: строк модулей/ресурсов/глаголов %d/%d/%d — "+
 			"пустой снимок отверг бы ВСЕ правила разом, и это читалось бы как поломка продукта, "+
@@ -125,7 +159,14 @@ func NewFacts(rows Rows) (*Facts, error) {
 				dotted)
 		}
 		fgaTypeByDotted[dotted] = r.ObjectType
-		resources = append(resources, ResourceEntry(r))
+		// Собирается ПОЛЯМИ, а не преобразованием типа: у строки есть преемник,
+		// у живой записи его не бывает (`CHECK` в схеме), и преобразование
+		// молча внесло бы сюда колонку, которой у живой половины не читают.
+		resources = append(resources, ResourceEntry{
+			Module:     r.Module,
+			Resource:   r.Resource,
+			ObjectType: r.ObjectType,
+		})
 	}
 	sort.Slice(resources, func(i, j int) bool {
 		if resources[i].Module != resources[j].Module {
@@ -159,12 +200,37 @@ func NewFacts(rows Rows) (*Facts, error) {
 		byDotted[dotted] = append(byDotted[dotted], v.Verb)
 	}
 
+	// СНЯТАЯ половина. Строка БЕЗ преемника не выбрасывается: она остаётся
+	// снятой, и промолчать о ней значило бы скрыть от арендатора, что ресурс
+	// снят вовсе. Пустое поле преемника означает «не назван» и отличимо от
+	// отсутствия записи: отсутствие обязано быть представимо ОТДЕЛЬНО от
+	// значения, иначе оно лжёт (kacho#1814, IAM-SUC-05a; приёмка —
+	// docs/engineering/acceptance/retired-resource-names-its-successor.md).
+	retired := make([]RetiredEntry, 0, len(h.Retired.Resources))
+	for _, r := range h.Retired.Resources {
+		retired = append(retired, RetiredEntry{
+			Module:       r.Module,
+			Resource:     r.Resource,
+			SupersededBy: r.SupersededBy,
+		})
+	}
+	// Порядок ЗНАЧИМ и закреплён точечным ключом: перечень читает человек,
+	// разбирающий отказ, а не машина, сверяющая множества. Порядок чтения из
+	// базы им не является — он определяется планом запроса.
+	sort.Slice(retired, func(i, j int) bool {
+		if retired[i].Module != retired[j].Module {
+			return retired[i].Module < retired[j].Module
+		}
+		return retired[i].Resource < retired[j].Resource
+	})
+
 	f := &Facts{
 		verbsByFGAType:  make(map[string][]string, len(byDotted)),
 		modules:         modules,
 		moduleOrder:     moduleOrder,
 		fgaTypeByDotted: fgaTypeByDotted,
 		resources:       resources,
+		retired:         retired,
 	}
 	for dotted, verbs := range byDotted {
 		// Имя типа есть у КАЖДОЙ живой строки: строка без него отвергнута выше,
@@ -270,6 +336,24 @@ func (f *Facts) Modules() []string {
 func (f *Facts) Resources() []ResourceEntry {
 	out := make([]ResourceEntry, len(f.resources))
 	copy(out, f.resources)
+	return out
+}
+
+// RetiredResources — СНЯТЫЕ пары каталога в порядке точечного ключа, каждая со
+// своим преемником.
+//
+// Отдаётся КОПИЯ по той же причине, что у `Resources`: перечень принадлежит
+// неизменяемому факту, и сортировка на месте у вызывающего испортила бы снимок
+// для всех остальных.
+//
+// Пустой перечень означает «снятого нет» — и означает это ТОЛЬКО у факта,
+// собранного из обеих половин. Факт, которому снятую половину не подали (разовый
+// пересчёт, фикстура), о снятии не высказывается вовсе; единственный читатель
+// этого перечня — витрина разрешений, и она берёт факт у снимка, а снимок
+// получает обе половины позиционно.
+func (f *Facts) RetiredResources() []RetiredEntry {
+	out := make([]RetiredEntry, len(f.retired))
+	copy(out, f.retired)
 	return out
 }
 

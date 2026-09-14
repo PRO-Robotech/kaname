@@ -224,7 +224,12 @@ Page size ≤ 1000. Опциональный `subjectTypeFilter`.
       "wildcardPolicy": {
         "verbWildcardAllowedCustom": true,
         "moduleResourceWildcardSystemOnly": true
-      }
+      },
+      "retiredResources": [
+        { "resource": "compute.disk", "supersededBy": "storage.volumes" },
+        { "resource": "compute.image", "supersededBy": "storage.images" },
+        { "resource": "compute.snapshot", "supersededBy": "storage.snapshots" }
+      ]
     }
   `}
 </CodeBlock>
@@ -244,6 +249,34 @@ tier-only ancestor), `hasListEndpoint` (есть ли публичный filtere
 сужается, поэтому строить из него список нельзя ни в одну сторону. Правило, назвавшее
 глагол вне набора своего типа, не даёт на нём ничего — материализация сверяется с тем же
 набором.
+
+### `retiredResources` — что платформа сняла и что назвать вместо
+
+Правило роли, назвавшее снятый ресурс, отвергается синхронно:
+
+```
+INVALID_ARGUMENT
+type compute.disk is retired (no resource of this type exists;
+retired resources and their successors are published by GET /iam/v1/permissionCatalog)
+```
+
+Отказ называет тип и говорит, где узнать замену, но **саму замену не называет** — и это
+не упущение: отказ приходит из прерванной транзакции, в которой чтения нет. Замену
+отдаёт этот же каталог, тем единственным вызовом, на который отказ и указывает.
+
+`retiredResources` — **не перечень грантуемого**. Взяв имя оттуда, правило вы не создадите:
+отказ будет тем же. Перечень отвечает ровно на один вопрос — «что назвать вместо».
+
+- `resource` — точечное имя снятого, в той же форме, какой его называет отказ;
+- `supersededBy` — точечное имя **живого** ресурса взамен. Оно всегда есть в `modules[]`
+  **этого же ответа**, поэтому набор глаголов замены спрашивайте там;
+- `supersededBy` **пусто** — значит замена не назначена: ресурс снят, а преемника у него
+  нет. Это не то же самое, что отсутствие записи: записи нет у ресурса, которого платформа
+  не знала никогда.
+
+Догадываться по имени не следует: написания намеренно не единообразны
+(`compute.instance` в единственном числе, `storage.volumes` во множественном), поэтому
+догадка ошибается ровно там, где нужна.
 
 </ApiOperation>
 

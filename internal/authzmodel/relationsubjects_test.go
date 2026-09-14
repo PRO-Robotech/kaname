@@ -185,16 +185,22 @@ func TestRelationSubjectsOnTheEmbeddedCanon(t *testing.T) {
 		"на этом стоит довод, что путь «через группу» для этих строк неисполним; записи: %v",
 		viewer.Accepts)
 
-	quota, ok := p.RelationSubjects("cluster", "quota_reader")
+	// Вторая ветвь стояла на `quota_reader`, и её предмет СНЯТ (`kaname#59`):
+	// глаголы авторитета величин ушли стадией S4, выдача отозвана, объявление
+	// снято из обеих копий модели. Проба не ослаблена, а ПЕРЕНАЦЕЛЕНА на живого
+	// структурного близнеца: у `fga_writer` та же форма получателя
+	// (`[service_account, group#member]`) и живая выдача группе в посеве, то
+	// есть вход у ветви по-прежнему НЕ синтетический. Утверждение то же.
+	writer, ok := p.RelationSubjects("cluster", "fga_writer")
 	require.True(t, ok)
-	require.Truef(t, quota.AcceptsKind(authzmodel.KindGroup),
+	require.Truef(t, writer.AcceptsKind(authzmodel.KindGroup),
 		"вторая ветвь правила обязана иметь живой вход, иначе отказ по группе вакуумен; записи: %v",
-		quota.Accepts)
+		writer.Accepts)
 
 	names, ok := p.RelationNames("cluster")
 	require.True(t, ok)
 	require.Contains(t, names, "system_viewer")
-	require.Contains(t, names, "quota_reader")
+	require.Contains(t, names, "fga_writer")
 	require.Contains(t, names, "any_admin")
 	t.Logf("перепись: отношений у типа cluster прочитано %d: %v", len(names), names)
 }

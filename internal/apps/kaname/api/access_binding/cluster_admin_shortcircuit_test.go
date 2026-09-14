@@ -24,7 +24,6 @@ import (
 // a test grant ONLY the flat cluster super-admin relation (and nothing on the
 // account-tier) so the short-circuit is the ONLY path that can authorize.
 type scopedFGA struct {
-	recordingFGA
 	allow         map[string]bool // "<relation>|<object>" → allowed
 	sysAdminCheck int             // count of cluster-admin (system_admin@cluster) Checks
 }

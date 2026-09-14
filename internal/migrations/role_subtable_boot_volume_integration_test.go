@@ -194,7 +194,7 @@ func runBootLanes(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	catalogRepo := kanamepg.NewCatalogRepo(pool)
 	parity, err := seed.AssertCatalogParity(ctx, catalogRepo, seed.ImageAnchor())
 	require.NoError(t, err, "страж паритета каталога")
-	snapshot, err := catalog.NewSnapshot(parity.Live, catalogRepo, nil, nil)
+	snapshot, err := catalog.NewSnapshot(parity.Halves(), catalogRepo, nil, nil)
 	require.NoError(t, err, "снимок каталога")
 
 	require.NoError(t, seed.SyncAllSystemRoleSelectors(ctx, pool))

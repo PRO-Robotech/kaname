@@ -82,7 +82,7 @@ func TestLabelGrantDoesNotExpandWithTheObjectCount(t *testing.T) {
 
 	withTx(t, func(ctx context.Context, tx pgx.Tx) {
 		seedTenant(t, ctx, tx)
-		seedLabelGrant(t, ctx, tx, "project")
+		seedLabelGrant(t, ctx, tx, "project", "get")
 
 		base := verdictRows(t, ctx, tx)
 
@@ -104,7 +104,7 @@ func TestLabelGrantDoesNotExpandWithTheObjectCount(t *testing.T) {
 		// прибавляется и там, где меточная ветвь мертва. Спрашиваем объект из
 		// ВТОРОЙ партии — той, что заводилась после первого замера.
 		lastID := fmt.Sprintf("prj-cost-%05d", secondBatch-1)
-		if got := askLabelled(t, ctx, tx, "project", lastID); got != relverdict.Allow {
+		if got := askLabelled(t, ctx, tx, "project", lastID, "v_get"); got != relverdict.Allow {
 			t.Fatalf("меточная выдача не достала project:%s — вердикт %v. Пока это так, "+
 				"утверждение «строк не прибавилось» ничего не значит: на мёртвой ветви "+
 				"их не прибавляется тоже", lastID, got)
@@ -144,7 +144,7 @@ func TestLabelCostGateSeesExpansionWhenItHappens(t *testing.T) {
 
 	withTx(t, func(ctx context.Context, tx pgx.Tx) {
 		seedTenant(t, ctx, tx)
-		seedLabelGrant(t, ctx, tx, "project")
+		seedLabelGrant(t, ctx, tx, "project", "get")
 		seedLabelledProjects(t, ctx, tx, 0, objects)
 
 		before := verdictRows(t, ctx, tx)

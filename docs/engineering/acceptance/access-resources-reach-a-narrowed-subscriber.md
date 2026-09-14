@@ -58,8 +58,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 | что | где | предикат |
 |---|---|---|
 | сервер потока, дренаж, горизонт устоявшегося, позиция, уборка | `corelib/subscription` | `git -C corelib ls-tree -r origin/main --name-only \| grep -c '^subscription/'` → **30** |
-| стабы контракта | `corelib/api/kacho/cloud/subscription` | 4 файла |
-| сам контракт `.proto` | `kacho/proto/kacho/cloud/subscription/` | 2 файла |
+| стабы контракта | `corelib/api/corelib/subscription` | 4 файла |
+| сам контракт `.proto` | `kacho/proto/corelib/subscription/` | 2 файла |
 | сужатель по правам | `corelib/listnarrow` | `listnarrow.New(AuthorizeClient, Config) *Narrower` |
 
 **Интерфейса у владельца НЕТ**, и это свойство обобщения, а не пробел. Владелец приносит
@@ -103,7 +103,7 @@ awk '/^type (account|project|iam_user|iam_group|iam_service_account|iam_role|iam
 проектом и является. У остальных четырёх проектного звена нет **ни при каком значении колонок**.
 
 **Следствие, и оно несущее.** Оболочка события несёт **один** авторизуемый якорь — `project_id`
-(`proto/kacho/cloud/subscription/subscription.proto`, поле 4), и по нему сервер судит
+(`proto/corelib/subscription/subscription.proto`, поле 4), и по нему сервер судит
 **СНЯТИЯ**: `removalsAllowedByAnchor` (`corelib/subscription/drain.go:748`). Довод сервера
 дословен: у снятия «обратиться не к чему — предмета больше нет», и без якоря остаётся выбор из
 двух негодных — «спрашивать модель прав про несуществующий объект либо не показывать удаления
@@ -166,7 +166,7 @@ grep -rn 'ReconcileEventDelete' --include='*.go' internal/ | grep -v _test | gre
 путь не щадит ни одного.
 
 **Это НЕ гипотетическая будущая регрессия, а действующее состояние**, и контракт платформы
-называет его дословно (`kacho/proto/kacho/cloud/subscription/subscription.proto`, поле
+называет его дословно (`kacho/proto/corelib/subscription/subscription.proto`, поле
 `project_id`): «спрашивать модель прав про несуществующий объект либо не показывать удаления
 вовсе… потребитель, снявший поллинг, никогда не узнает об удалении и будет держать удалённые
 строки вечно». Фундамент там же помечает ветвь пустого якоря словом **«невидимой»**, считая её

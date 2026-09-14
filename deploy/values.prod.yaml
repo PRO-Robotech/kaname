@@ -4,7 +4,11 @@
 # values.prod.yaml — БОЕВОЙ ПРОФИЛЬ ЧАРТА СЛУЖБЫ ПРАВ.
 #
 # Подключается поверх базовых значений:
-#   helm install iam services/iam/deploy -f values.yaml -f values.prod.yaml
+#   helm install kaname deploy -f deploy/values.yaml -f deploy/values.prod.yaml
+#
+# Координата ЭТОГО репозитория, а не монорепо платформы. Здесь стояло
+# `services/iam/deploy` — путь дерева, из которого служба вынесена, и
+# ставящий отдельный клон по нему не находит ничего.
 #
 # ── ЗАЧЕМ ОН ЗАВЕДЁН ────────────────────────────────────────────────────────
 #

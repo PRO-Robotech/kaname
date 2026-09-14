@@ -155,7 +155,7 @@ func TestAccessBinding_Delete_SubjectIsOwner_Allowed(t *testing.T) {
 }
 
 // denyingFGA — Check always returns false (no admin), Write/Delete no-op.
-type denyingFGA struct{ recordingFGA }
+type denyingFGA struct{}
 
 func (*denyingFGA) Check(_ context.Context, _, _, _ string) (bool, error) {
 	return false, nil

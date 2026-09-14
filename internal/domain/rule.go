@@ -168,6 +168,21 @@ func (r Rule) Validate(policy RulePolicy, modules ModuleSet) error {
 	return errs
 }
 
+// CatalogEndpoint — where a client reads the grantable taxonomy AND the retired
+// resources with their successors.
+//
+// ОБЪЯВЛЕНИЕ ОДНО НА ДЕРЕВО. Адрес называют ОБЕ полосы отказа на несуществующем
+// ресурсе — снятия (здесь) и грантуемости (`api/role/rules_catalog.go`), — и до
+// kacho#1814 первая молчала: различие никем не решалось, оно побочный эффект
+// того, что гейты писались порознь.
+//
+// Адрес назван в отказе потому, что каноническое написание намеренно НЕ
+// единообразно по модулям (`compute.instance` / `iam.serviceAccount`
+// единственного числа; `storage.volumes` / `registry.registries` /
+// `loadbalancer.networkLoadBalancers` множественного), поэтому «догадайся»
+// исполнимой инструкцией не является.
+const CatalogEndpoint = "GET /iam/v1/permissionCatalog"
+
 // validateRetirementGate rejects a rule naming a resource the platform has
 // retired, on every arm. Without it such a rule is stored and compiled: it grants
 // nothing (the reconciler materializes from a mirror that has no rows of the type,
@@ -184,8 +199,14 @@ func (r Rule) validateRetirementGate() error {
 		}
 		typ := r.Module + "." + res
 		if IsRetiredType(typ) {
+			// Преемника отказ НЕ называет и не обещает: он приходит из
+			// прерванной транзакции, где чтения нет by construction. Он
+			// называет, ГДЕ преемник узнаётся, — тем же адресом, что и соседняя
+			// полоса, одним чтением (kacho#1814).
 			errs = multierr.Append(errs, fmt.Errorf(
-				"type %s is retired (no resource of this type exists)", typ))
+				"type %s is retired (no resource of this type exists; "+
+					"retired resources and their successors are published by %s)",
+				typ, CatalogEndpoint))
 		}
 	}
 	return errs

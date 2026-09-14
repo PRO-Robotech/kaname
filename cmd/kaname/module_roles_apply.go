@@ -151,7 +151,11 @@ func (c moduleRolesCensus) Changed() bool { return c.Written > 0 || c.Retired > 
 func buildModuleRoleRights(live catalog.Rows, reg *seed.PermissionRegistry) (
 	rights moduleroles.RightsExport, actions, unattributed int, err error,
 ) {
-	facts, ferr := catalog.NewFacts(live)
+	// Снятая половина сюда НЕ подаётся, и это решение, а не пропуск: права роли
+	// считаются по ЖИВЫМ строкам, снятый ресурс прав не даёт. Перечень снятого у
+	// такого факта пуст, и читать его здесь некому — читает его только витрина
+	// разрешений, а она берёт факт у снимка, получающего обе половины.
+	facts, ferr := catalog.NewFacts(catalog.Halves{Live: live})
 	if ferr != nil {
 		return nil, 0, 0, fmt.Errorf("каталожный факт для правил роли: %w", ferr)
 	}
