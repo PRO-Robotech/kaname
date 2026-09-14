@@ -42,8 +42,8 @@ func clusterScopeBinding(roleID, userID string) domain.AccessBinding {
 // TestCreate_A05_GlobalAll_NonClusterAdmin_Rejected — GLOBAL + selector all on an
 // ordinary (non-*.*.*) system role → sync INVALID_ARGUMENT, no Operation.
 func TestCreate_A05_GlobalAll_NonClusterAdmin_Rejected(t *testing.T) {
-	const roleID = "rol_a05_anchor"
-	repo := newABFakeRepo("usr_owner", "acc_x", "", roleID, "vpc_reader", nil)
+	const roleID = "rol_a05_anchor------"
+	repo := newABFakeRepo("usr_owner-----------", "acc_x", "", roleID, "vpc_reader", nil)
 	// system role, NOT cluster-admin: an ARM_ANCHOR rule over a concrete module.
 	repo.setRoleRules(domain.Rules{
 		{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get"}}, // selector=all
@@ -53,7 +53,7 @@ func TestCreate_A05_GlobalAll_NonClusterAdmin_Rejected(t *testing.T) {
 	// caller passes grant-authority (recordingFGA.Check → true everywhere).
 	uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(newRecordingFGA(), nil)
 
-	_, err := uc.Execute(clusterAdminCtx("usr_root"), clusterScopeBinding(roleID, "usr_target"))
+	_, err := uc.Execute(clusterAdminCtx("usr_root------------"), clusterScopeBinding(roleID, "usr_target"))
 	require.Error(t, err, "GLOBAL+all on a non-cluster-admin role must be rejected sync")
 	require.Equal(t, codes.InvalidArgument, status.Code(err),
 		"GLOBAL+all non-cluster-admin → INVALID_ARGUMENT (A-05)")
@@ -64,15 +64,15 @@ func TestCreate_A05_GlobalAll_NonClusterAdmin_Rejected(t *testing.T) {
 // TestCreate_A05b_GlobalNames_NonClusterAdmin_OK — GLOBAL + names selector on an
 // ordinary role is legal (finite per-object cluster-wide set).
 func TestCreate_A05b_GlobalNames_NonClusterAdmin_OK(t *testing.T) {
-	const roleID = "rol_a05b_names"
-	repo := newABFakeRepo("usr_owner", "acc_x", "", roleID, "vpc_reader", nil)
+	const roleID = "rol_a05b_names------"
+	repo := newABFakeRepo("usr_owner-----------", "acc_x", "", roleID, "vpc_reader", nil)
 	repo.setRoleRules(domain.Rules{
 		{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get"}, ResourceNames: []string{"net1"}},
 	})
 	opsRepo := newFakeOpsRepo()
 	uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(newRecordingFGA(), nil)
 
-	op, err := uc.Execute(clusterAdminCtx("usr_root"), clusterScopeBinding(roleID, "usr_target"))
+	op, err := uc.Execute(clusterAdminCtx("usr_root------------"), clusterScopeBinding(roleID, "usr_target"))
 	require.NoError(t, err, "GLOBAL+names on an ordinary role is legal (A-05b)")
 	require.NotNil(t, op)
 }
@@ -84,14 +84,14 @@ func TestCreate_A05b_GlobalNames_NonClusterAdmin_OK(t *testing.T) {
 // `owner` role shares that shape (see TestCreate_A05_GlobalAll_OwnerRole_Rejected).
 func TestCreate_A05c_GlobalAll_ClusterAdminRole_OK(t *testing.T) {
 	roleID := domain.ClusterAdminRoleID
-	repo := newABFakeRepo("usr_owner", "acc_x", "", roleID, "admin", nil)
+	repo := newABFakeRepo("usr_owner-----------", "acc_x", "", roleID, "admin", nil)
 	repo.setRoleRules(domain.Rules{
 		{Module: "*", Resources: []string{"*"}, Verbs: []string{"*"}}, // *.*.* superuser
 	})
 	opsRepo := newFakeOpsRepo()
 	uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(newRecordingFGA(), nil)
 
-	op, err := uc.Execute(clusterAdminCtx("usr_root"), clusterScopeBinding(roleID, "usr_target"))
+	op, err := uc.Execute(clusterAdminCtx("usr_root------------"), clusterScopeBinding(roleID, "usr_target"))
 	require.NoError(t, err, "GLOBAL+all on the cluster-admin role is legal (A-05c)")
 	require.NotNil(t, op)
 }
@@ -103,12 +103,12 @@ func TestCreate_A05c_GlobalAll_ClusterAdminRole_OK(t *testing.T) {
 // the cluster-admin role — a GLOBAL+all binding for it must be rejected (A-05).
 func TestCreate_A05_GlobalAll_OwnerRole_Rejected(t *testing.T) {
 	roleID := domain.OwnerRoleID
-	repo := newABFakeRepo("usr_owner", "acc_x", "", roleID, "owner", nil)
+	repo := newABFakeRepo("usr_owner-----------", "acc_x", "", roleID, "owner", nil)
 	repo.setRoleRules(domain.OwnerRoleRules()) // [{module:*,resources:[*],verbs:[*]}] — same shape as cluster-admin
 	opsRepo := newFakeOpsRepo()
 	uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(newRecordingFGA(), nil)
 
-	_, err := uc.Execute(clusterAdminCtx("usr_root"), clusterScopeBinding(roleID, "usr_target"))
+	_, err := uc.Execute(clusterAdminCtx("usr_root------------"), clusterScopeBinding(roleID, "usr_target"))
 	require.Error(t, err, "GLOBAL+all on the owner role must be rejected (owner is not cluster-admin)")
 	require.Equal(t, codes.InvalidArgument, status.Code(err),
 		"owner@GLOBAL+all → INVALID_ARGUMENT (A-05, #8)")

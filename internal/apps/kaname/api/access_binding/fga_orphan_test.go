@@ -102,10 +102,10 @@ func awaitOpDone(t *testing.T, opsRepo operations.Repo, opID string) {
 // orphaned (standing admin = privilege escalation).
 func TestFGAOrphan_178_RevokeAfterRoleDowngrade_NoResidualTuple(t *testing.T) {
 	const (
-		subjectID  = "usr_sub_178a"
-		resourceID = "prj_target_178a"
-		ownerID    = "usr_owner_178a"
-		accountID  = "acc_178a"
+		subjectID  = "usr_sub_178a--------"
+		resourceID = "prj_target_178a-----"
+		ownerID    = "usr_owner_178a------"
+		accountID  = "acc_178a------------"
 	)
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID178a, "admin",
 		domain.Permissions{"iam.access_bindings.admin"})
@@ -168,9 +168,9 @@ func TestFGAOrphan_178_RevokeAfterRoleDowngrade_NoResidualTuple(t *testing.T) {
 // tuple was orphaned.
 func TestFGAOrphan_178_GranularPermissionRemoved_NoResidual(t *testing.T) {
 	const (
-		subjectID = "usr_sub_178c"
-		ownerID   = "usr_owner_178c"
-		accountID = "acc_178c"
+		subjectID = "usr_sub_178c--------"
+		ownerID   = "usr_owner_178c------"
+		accountID = "acc_178c------------"
 	)
 	resourceID := accountID // account-scoped custom role bound on its own account
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID178c, "granular",

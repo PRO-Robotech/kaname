@@ -62,7 +62,7 @@ var _ clients.RelationStore = (*denyStore)(nil)
 // principalCtx — контекст с опознанным вызывающим: без него стражи выходят
 // раньше вопроса, и проба судила бы вырожденный путь.
 func principalCtx() context.Context {
-	return operations.WithPrincipal(context.Background(), operations.Principal{Type: "user", ID: "usr_probe"})
+	return operations.WithPrincipal(context.Background(), operations.Principal{Type: "user", ID: "usr_probe-----------"})
 }
 
 // TestScopeAdminOutageIsNotADenial — сам предикат: три исхода, а не два.

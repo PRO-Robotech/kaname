@@ -31,14 +31,14 @@ func recordingEmitter(out *[]abrepo.SubjectChangeEvent) subjectChangeEmitter {
 // продолжало действовать на открытом соединении.
 func TestRevokeNamesEverySubject(t *testing.T) {
 	binding := domain.AccessBinding{
-		ID: "abn-1", SubjectType: "user", SubjectID: "usr_first",
-		ResourceType: "project", ResourceID: "prj-a",
+		ID: "abn-1", SubjectType: "user", SubjectID: "usr_first-----------",
+		ResourceType: "project", ResourceID: "prj-a---------------",
 	}
 	list := func(context.Context, domain.AccessBindingID) ([]domain.Subject, error) {
 		return []domain.Subject{
-			{Type: "user", ID: "usr_first"},
-			{Type: "user", ID: "usr_second"},
-			{Type: "service_account", ID: "sva_third"},
+			{Type: "user", ID: "usr_first-----------"},
+			{Type: "user", ID: "usr_second----------"},
+			{Type: "service_account", ID: "sva_third-----------"},
 		}, nil
 	}
 
@@ -53,7 +53,7 @@ func TestRevokeNamesEverySubject(t *testing.T) {
 			"их потоки пережили бы отзыв", len(got))
 	}
 	want := []struct{ typ, id string }{
-		{"user", "usr_first"}, {"user", "usr_second"}, {"service_account", "sva_third"},
+		{"user", "usr_first-----------"}, {"user", "usr_second----------"}, {"service_account", "sva_third-----------"},
 	}
 	for i, w := range want {
 		if got[i].SubjectID != w.id || got[i].SubjectType != w.typ {
@@ -64,7 +64,7 @@ func TestRevokeNamesEverySubject(t *testing.T) {
 			t.Errorf("строка %d несёт вид %q/%q", i, got[i].EventType, got[i].Op)
 		}
 		// Здесь утверждалось, что строка несёт предмет привязки
-		// (`ResourceID == "prj-a"`). Утверждение снято ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ,
+		// (`ResourceID == "prj-a---------------"`). Утверждение снято ВМЕСТЕ СО СВОИМ ПРЕДМЕТОМ,
 		// а не ослаблено: величины предмета журнала не читал никто — ни проекция
 		// чтения, ни контракт PollSubjectChanges, ни потребитель на крае, — и они
 		// сняты (миграция 20260829124512, kacho#1462). Предмет ЭТОЙ пробы другой
@@ -80,8 +80,8 @@ func TestRevokeNamesEverySubject(t *testing.T) {
 // бы доезжать вообще.
 func TestRevokeFallsBackToTheLegacySingleSubject(t *testing.T) {
 	binding := domain.AccessBinding{
-		ID: "abn-legacy", SubjectType: "service_account", SubjectID: "sva_only",
-		ResourceType: "project", ResourceID: "prj-b",
+		ID: "abn-legacy", SubjectType: "service_account", SubjectID: "sva_only------------",
+		ResourceType: "project", ResourceID: "prj-b---------------",
 	}
 	empty := func(context.Context, domain.AccessBindingID) ([]domain.Subject, error) {
 		return nil, nil
@@ -92,7 +92,7 @@ func TestRevokeFallsBackToTheLegacySingleSubject(t *testing.T) {
 		recordingEmitter(&got), binding, "binding_revoke", "binding_delete"); err != nil {
 		t.Fatalf("развёртка: %v", err)
 	}
-	if len(got) != 1 || got[0].SubjectID != "sva_only" || got[0].SubjectType != "service_account" {
+	if len(got) != 1 || got[0].SubjectID != "sva_only------------" || got[0].SubjectType != "service_account" {
 		t.Fatalf("на пустом наборе субъектов эмитировано %d строк (%+v) — "+
 			"отзыв старой привязки перестал бы доезжать вовсе", len(got), got)
 	}
@@ -111,7 +111,7 @@ func TestUnreadableSubjectSetIsNotSilentlyNarrowed(t *testing.T) {
 	}
 	var got []abrepo.SubjectChangeEvent
 	err := emitSubjectChangeForEverySubject(context.Background(), failing,
-		recordingEmitter(&got), domain.AccessBinding{ID: "abn-2", SubjectID: "usr_x", SubjectType: "user"},
+		recordingEmitter(&got), domain.AccessBinding{ID: "abn-2", SubjectID: "usr_x---------------", SubjectType: "user"},
 		"binding_revoke", "binding_delete")
 	if !errors.Is(err, boom) {
 		t.Fatalf("отказ чтения набора не доехал наверх: %v", err)

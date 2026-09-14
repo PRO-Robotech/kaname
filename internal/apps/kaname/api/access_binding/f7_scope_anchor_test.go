@@ -63,19 +63,19 @@ func TestAB_IAM_1_18_ScopeTypeToBare(t *testing.T) {
 // as the SOLE scope projection — no legacy resource-named fields on the wire.
 func TestAB_IAM_1_18_DtoEmitsDottedScope(t *testing.T) {
 	b := domain.AccessBinding{
-		ID:           "acb-x",
+		ID:           "acb-x---------------",
 		SubjectType:  "user",
-		SubjectID:    "usr-1",
-		RoleID:       "rol-editor",
+		SubjectID:    "usr-1---------------",
+		RoleID:       "rol-editor----------",
 		ResourceType: "account",
-		ResourceID:   "acc-A",
+		ResourceID:   "acc-A---------------",
 		Scope:        domain.ScopeAccount,
 		Status:       domain.AccessBindingStatusActive,
 	}
 	pb, err := abToPb(b)
 	require.NoError(t, err)
 	assert.Equal(t, "iam.account", pb.GetScopeType())
-	assert.Equal(t, "acc-A", pb.GetScopeId())
+	assert.Equal(t, "acc-A---------------", pb.GetScopeId())
 }
 
 // IAM-1-18: cluster/project round-trip on the dotted projection.
@@ -87,12 +87,12 @@ func TestAB_IAM_1_18_DtoDottedProjection_AllTiers(t *testing.T) {
 		wantDotted string
 	}{
 		{"cluster", domain.ScopeCluster, domain.ClusterSingletonID, "iam.cluster"},
-		{"account", domain.ScopeAccount, "acc-A", "iam.account"},
+		{"account", domain.ScopeAccount, "acc-A---------------", "iam.account"},
 		{"project", domain.ScopeProject, "prj-P", "iam.project"},
 	}
 	for _, tt := range tiers {
 		b := domain.AccessBinding{
-			ID: "acb-x", SubjectType: "user", SubjectID: "usr-1", RoleID: "rol-r",
+			ID: "acb-x---------------", SubjectType: "user", SubjectID: "usr-1---------------", RoleID: "rol-r---------------",
 			ResourceType: domain.ResourceType(tt.bare), ResourceID: tt.rid,
 			Scope: tt.scope, Status: domain.AccessBindingStatusActive,
 		}

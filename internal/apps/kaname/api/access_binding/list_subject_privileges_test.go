@@ -46,23 +46,23 @@ const (
 	spMemberID = "usr0000000000member1"
 	spOtherID  = "usr00000000000other1"
 	spSAID     = "sva0000000000000bot1"
-	spGroupID  = "grp00000000000group1" // group in acc-A
+	spGroupID  = "grp00000000000group1" // group in acc-A---------------
 	spGroupBID = "grp00000000000group2" // group in acc-B
 	spAccA     = "acc00000000000accAaa"
 	spAccB     = "acc00000000000accBbb"
 )
 
-// spRepo builds a fake repo with a home account acc-A owned by usr-OWNER, and
+// spRepo builds a fake repo with a home account acc-A--------------- owned by usr-OWNER, and
 // seeds the subject (user / SA) with the given home account. relations defaults
 // to a denying FGA unless overridden.
 func spRepo() *abFakeRepo {
-	repo := newABFakeRepo(spOwnerID, spAccA, "prj00000000000proj01", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo(spOwnerID, spAccA, "prj00000000000proj01", "rol_v---------------", "kaname.view", nil)
 	repo.AddUser(spMemberID, spAccA)
 	repo.AddUser(spOwnerID, spAccA)
-	repo.AddUser(spAdminID, spAccB) // admin lives in another account but holds FGA admin on acc-A
+	repo.AddUser(spAdminID, spAccB) // admin lives in another account but holds FGA admin on acc-A---------------
 	repo.AddUser(spOtherID, spAccB)
 	repo.AddServiceAccount(spSAID, spAccA)
-	repo.AddGroup(spGroupID, spAccA)  // group home account = acc-A
+	repo.AddGroup(spGroupID, spAccA)  // group home account = acc-A---------------
 	repo.AddGroup(spGroupBID, spAccB) // group home account = acc-B
 	return repo
 }
@@ -85,7 +85,7 @@ func spPriv(bindingID, roleID, roleName, resType, resID string, scope domain.Sco
 func TestListSubjectPrivileges_1_3_03_SelfViewAllowed(t *testing.T) {
 	repo := spRepo()
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
-		spPriv("acb00000000000bind01", "rol_v", "viewer", "account", spAccA, domain.ScopeAccount),
+		spPriv("acb00000000000bind01", "rol_v---------------", "viewer", "account", spAccA, domain.ScopeAccount),
 	})
 	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
 
@@ -172,14 +172,14 @@ func TestListSubjectPrivileges_1_3_01_OwnerSeesMemberEnriched(t *testing.T) {
 		spPriv("acb00000000000bind01", "rol_editor", "editor", "project", "prj00000000000projX1", domain.ScopeProject),
 		spPriv("acb00000000000bind02", "rol_viewer", "viewer", "account", spAccA, domain.ScopeAccount),
 	})
-	// Модель прав: владелец acc-A держит `v_get` на обеих выдачах — он выводится
+	// Модель прав: владелец acc-A--------------- держит `v_get` на обеих выдачах — он выводится
 	// у него через `super_admin from account` / `... from project`. Дублёр не
 	// выводит, поэтому предпосылка сужения названа здесь явно (#1354).
 	uc := NewListSubjectPrivilegesUseCase(repo).
 		WithRelationStore(&denyingFGA{}, nil).
 		WithRelationQueries(spVisibleTo(spOwnerID, "acb00000000000bind01", "acb00000000000bind02"))
 
-	ctx := userCtxAB(spOwnerID) // owner of acc-A (home account of usr-MEMBER)
+	ctx := userCtxAB(spOwnerID) // owner of acc-A--------------- (home account of usr-MEMBER)
 	out, next, err := uc.Execute(ctx, domain.SubjectTypeUser, domain.SubjectID(spMemberID), repoab.PageFilter{})
 	if err != nil {
 		t.Fatalf("owner must see member privileges, got %v", err)
@@ -199,9 +199,9 @@ func TestListSubjectPrivileges_1_3_01_OwnerSeesMemberEnriched(t *testing.T) {
 func TestListSubjectPrivileges_1_3_07_AccountAdminViaFGA_Allowed(t *testing.T) {
 	repo := spRepo()
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
-		spPriv("acb00000000000bind01", "rol_v", "viewer", "account", spAccA, domain.ScopeAccount),
+		spPriv("acb00000000000bind01", "rol_v---------------", "viewer", "account", spAccA, domain.ScopeAccount),
 	})
-	// usr-ADMIN is NOT the owner of acc-A, but holds FGA admin on account:acc-A.
+	// usr-ADMIN is NOT the owner of acc-A---------------, but holds FGA admin on account:acc-A---------------.
 	//
 	// Отношение выдаётся ТОЧЕЧНО, а не дублёром, отвечающим «да» на всё: такой
 	// дублёр делает вызывающего ещё и администратором облака, и проба, названная
@@ -232,7 +232,7 @@ func TestListSubjectPrivileges_1_3_07a_ServiceAccountSubject_OwnerAllowed(t *tes
 		WithRelationStore(&denyingFGA{}, nil).
 		WithRelationQueries(spVisibleTo(spOwnerID, "acb00000000000bind01"))
 
-	ctx := userCtxAB(spOwnerID) // owner of acc-A, home account of sva-BOT
+	ctx := userCtxAB(spOwnerID) // owner of acc-A---------------, home account of sva-BOT
 	out, _, err := uc.Execute(ctx, domain.SubjectTypeServiceAccount, domain.SubjectID(spSAID), repoab.PageFilter{})
 	if err != nil {
 		t.Fatalf("owner must see SA-subject privileges, got %v", err)
@@ -246,9 +246,9 @@ func TestListSubjectPrivileges_1_3_07a_ServiceAccountSubject_OwnerAllowed(t *tes
 func TestListSubjectPrivileges_1_3_08_CrossAccount_PermissionDenied(t *testing.T) {
 	repo := spRepo()
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
-		spPriv("acb00000000000bind01", "rol_v", "viewer", "account", spAccA, domain.ScopeAccount),
+		spPriv("acb00000000000bind01", "rol_v---------------", "viewer", "account", spAccA, domain.ScopeAccount),
 	})
-	// usr-OTHER lives in acc-B, no owner/admin on acc-A → FGA denies.
+	// usr-OTHER lives in acc-B, no owner/admin on acc-A--------------- → FGA denies.
 	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
 
 	ctx := userCtxAB(spOtherID)
@@ -287,7 +287,7 @@ func TestListSubjectPrivileges_1_3_09_ZeroBindings_EmptyList(t *testing.T) {
 func TestListSubjectPrivileges_1_3_10_Anonymous_FailClosed(t *testing.T) {
 	repo := spRepo()
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
-		spPriv("acb00000000000bind01", "rol_v", "viewer", "account", spAccA, domain.ScopeAccount),
+		spPriv("acb00000000000bind01", "rol_v---------------", "viewer", "account", spAccA, domain.ScopeAccount),
 	})
 	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
 
@@ -335,7 +335,7 @@ func TestListSubjectPrivileges_1_3b_01_OwnerSeesGroupEnriched(t *testing.T) {
 		WithRelationStore(&denyingFGA{}, nil).
 		WithRelationQueries(spVisibleTo(spOwnerID, "acb00000000000bind01", "acb00000000000bind02"))
 
-	ctx := userCtxAB(spOwnerID) // owner of acc-A (home account of grp-1)
+	ctx := userCtxAB(spOwnerID) // owner of acc-A--------------- (home account of grp-1)
 	out, next, err := uc.Execute(ctx, domain.SubjectTypeGroup, domain.SubjectID(spGroupID), repoab.PageFilter{})
 	if err != nil {
 		t.Fatalf("owner must see group privileges (DIRECT), got %v", err)
@@ -355,7 +355,7 @@ func TestListSubjectPrivileges_1_3b_01_OwnerSeesGroupEnriched(t *testing.T) {
 func TestListSubjectPrivileges_1_3b_02_AccountAdminViaFGA_Allowed(t *testing.T) {
 	repo := spRepo()
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
-		spPriv("acb00000000000bind01", "rol_v", "viewer", "account", spAccA, domain.ScopeAccount),
+		spPriv("acb00000000000bind01", "rol_v---------------", "viewer", "account", spAccA, domain.ScopeAccount),
 	})
 	// Точечное отношение, а не «да» на всё: см. 1_3_07 — иначе проба съезжает на
 	// полосу надзора облака и о делегированном распорядителе молчит.
@@ -364,7 +364,7 @@ func TestListSubjectPrivileges_1_3b_02_AccountAdminViaFGA_Allowed(t *testing.T) 
 		WithRelationStore(fga, nil).
 		WithRelationQueries(spVisibleTo(spAdminID, "acb00000000000bind01"))
 
-	ctx := userCtxAB(spAdminID) // not owner of acc-A, holds FGA admin on it
+	ctx := userCtxAB(spAdminID) // not owner of acc-A---------------, holds FGA admin on it
 	out, _, err := uc.Execute(ctx, domain.SubjectTypeGroup, domain.SubjectID(spGroupID), repoab.PageFilter{})
 	if err != nil {
 		t.Fatalf("delegated account-admin must see group privileges, got %v", err)
@@ -405,9 +405,9 @@ func TestListSubjectPrivileges_1_3b_04_UnknownGroup_NotFound(t *testing.T) {
 func TestListSubjectPrivileges_1_3b_05_CrossAccount_PermissionDenied(t *testing.T) {
 	repo := spRepo()
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
-		spPriv("acb00000000000bind01", "rol_v", "viewer", "account", spAccA, domain.ScopeAccount),
+		spPriv("acb00000000000bind01", "rol_v---------------", "viewer", "account", spAccA, domain.ScopeAccount),
 	})
-	// usr-OTHER lives in acc-B; grp-1's home account is acc-A → FGA denies.
+	// usr-OTHER lives in acc-B; grp-1's home account is acc-A--------------- → FGA denies.
 	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
 
 	ctx := userCtxAB(spOtherID)

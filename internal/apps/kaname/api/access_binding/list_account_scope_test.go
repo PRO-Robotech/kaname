@@ -62,7 +62,7 @@ func siaRows() []domain.AccessBinding {
 // newSIARepo — репозиторий с тремя строками выше и объявленной принадлежностью
 // проекта домашнему аккаунту.
 func newSIARepo() *abFakeRepo {
-	repo := newABFakeRepo("usr_o", siaAccountHome, siaProjectHome, "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_o", siaAccountHome, siaProjectHome, "rol_v---------------", "kaname.view", nil)
 	seedABListByScope(repo, siaRows())
 	seedProjectAccount(repo, siaProjectHome, siaAccountHome)
 	return repo
@@ -192,7 +192,7 @@ func TestABList_SIA07_ClusterAdminLaneIsNarrowedToo(t *testing.T) {
 	repo := newSIARepo()
 	h := newListHandlerWithStore(repo, newABQueriesStub(), onlyClusterAdmin())
 
-	resp, err := h.List(clusterAdminCtx("usr_root"), &iamv1.ListAccessBindingsRequest{
+	resp, err := h.List(clusterAdminCtx("usr_root------------"), &iamv1.ListAccessBindingsRequest{
 		PageSize: 100, AccountId: siaAccountHome,
 	})
 	require.NoError(t, err)

@@ -42,27 +42,27 @@ func TestAccessBindingListsRejectOutOfRangePageSizeOnTheRawRequest(t *testing.T)
 		}},
 		{"ListBySubject", func(h *Handler, ctx context.Context, size int64) error {
 			_, err := h.ListBySubject(ctx, &iamv1.ListAccessBindingsBySubjectRequest{
-				SubjectType: "user", SubjectId: "usr_probe", PageSize: size})
+				SubjectType: "user", SubjectId: "usr_probe-----------", PageSize: size})
 			return err
 		}},
 		{"ListByAccount", func(h *Handler, ctx context.Context, size int64) error {
 			_, err := h.ListByAccount(ctx, &iamv1.ListAccessBindingsByAccountRequest{
-				AccountId: "acc_probe", PageSize: size})
+				AccountId: "acc_probe-----------", PageSize: size})
 			return err
 		}},
 		{"ListByRole", func(h *Handler, ctx context.Context, size int64) error {
 			_, err := h.ListByRole(ctx, &iamv1.ListAccessBindingsByRoleRequest{
-				RoleId: "rol_probe", PageSize: size})
+				RoleId: "rol_probe-----------", PageSize: size})
 			return err
 		}},
 		{"ListSubjectPrivileges", func(h *Handler, ctx context.Context, size int64) error {
 			_, err := h.ListSubjectPrivileges(ctx, &iamv1.ListSubjectPrivilegesRequest{
-				SubjectType: "user", SubjectId: "usr_probe", PageSize: size})
+				SubjectType: "user", SubjectId: "usr_probe-----------", PageSize: size})
 			return err
 		}},
 		{"ListAssignableRoles", func(h *Handler, ctx context.Context, size int64) error {
 			_, err := h.ListAssignableRoles(ctx, &iamv1.ListAssignableRolesRequest{
-				ScopeType: "iam.account", ScopeId: "acc_probe", PageSize: size})
+				ScopeType: "iam.account", ScopeId: "acc_probe-----------", PageSize: size})
 			return err
 		}},
 	}

@@ -30,29 +30,29 @@ import (
 
 func TestSubjectPrivilegeToProto_GroupDerivationSurfaced(t *testing.T) {
 	got := subjectPrivilegeToProto(domain.SubjectPrivilege{
-		BindingID:    "acb0000000000grp01",
-		RoleID:       "rol0000000000edit1",
+		BindingID:    "acb0000000000grp01--",
+		RoleID:       "rol0000000000edit1--",
 		ResourceType: "project",
-		ResourceID:   "prj-9",
+		ResourceID:   "prj-9---------------",
 		Scope:        domain.ScopeProject,
 		Status:       domain.AccessBindingStatusActive,
 		CreatedAt:    time.Now(),
 		Derivation:   domain.DerivationGroup,
-		ViaGroupID:   "grp0000000000team1",
+		ViaGroupID:   "grp0000000000team1--",
 	})
 
 	assert.Equal(t, iamv1.Derivation_GROUP, got.GetDerivation(),
 		"a group-derived privilege must NOT be reported as DIRECT")
-	assert.Equal(t, "grp0000000000team1", got.GetViaGroupId(),
+	assert.Equal(t, "grp0000000000team1--", got.GetViaGroupId(),
 		"the carrying group must be named so the finding is actionable")
 }
 
 func TestSubjectPrivilegeToProto_DirectDerivationUnchanged(t *testing.T) {
 	got := subjectPrivilegeToProto(domain.SubjectPrivilege{
-		BindingID:    "acb0000000000dir01",
-		RoleID:       "rol0000000000view1",
+		BindingID:    "acb0000000000dir01--",
+		RoleID:       "rol0000000000view1--",
 		ResourceType: "account",
-		ResourceID:   "acc-9",
+		ResourceID:   "acc-9---------------",
 		Scope:        domain.ScopeAccount,
 		Status:       domain.AccessBindingStatusActive,
 		CreatedAt:    time.Now(),
@@ -69,9 +69,9 @@ func TestSubjectPrivilegeToProto_DirectDerivationUnchanged(t *testing.T) {
 // like an unknown derivation.
 func TestSubjectPrivilegeToProto_ZeroDerivationReportsDirect(t *testing.T) {
 	got := subjectPrivilegeToProto(domain.SubjectPrivilege{
-		BindingID:    "acb0000000000zer01",
+		BindingID:    "acb0000000000zer01--",
 		ResourceType: "account",
-		ResourceID:   "acc-0",
+		ResourceID:   "acc-0---------------",
 		Scope:        domain.ScopeAccount,
 		Status:       domain.AccessBindingStatusActive,
 		CreatedAt:    time.Now(),

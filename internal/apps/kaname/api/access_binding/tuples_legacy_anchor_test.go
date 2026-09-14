@@ -50,7 +50,7 @@ func legacyRole(permissions ...string) domain.Role {
 	for i, p := range permissions {
 		perms[i] = domain.Permission(p)
 	}
-	return domain.Role{ID: "rol_legacy_test000001", Permissions: perms}
+	return domain.Role{ID: "rol_legacy_test00000", Permissions: perms}
 }
 
 func bindingOn(resourceType domain.ResourceType, resourceID string) domain.AccessBinding {

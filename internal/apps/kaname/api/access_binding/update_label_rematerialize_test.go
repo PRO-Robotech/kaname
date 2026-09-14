@@ -68,7 +68,7 @@ func seedLabelledBinding(repo *abFakeRepo, accountID, roleID string) domain.Acce
 // runs the object-forward pass for THIS binding, so the revoke does not queue behind
 // the global reconcile backlog, while the durable event stays co-committed.
 func TestUpdateAccessBinding_LabelChange_RematerializesObjectInProcess(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_lblremat", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_lblremat--------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedLabelledBinding(repo, accountID, roleID)
 
@@ -101,7 +101,7 @@ func TestUpdateAccessBinding_LabelChange_RematerializesObjectInProcess(t *testin
 // deletion_protection cannot change selector membership, so it must neither pay the
 // O(scope) pass nor enqueue a reconcile event.
 func TestUpdateAccessBinding_DeletionProtectionOnly_NoRematerialization(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_dponly", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_dponly----------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true)
 
@@ -132,7 +132,7 @@ func TestUpdateAccessBinding_DeletionProtectionOnly_NoRematerialization(t *testi
 // at-least-once backstop and is not. An unwired reconciler must therefore leave today's
 // behaviour exactly as it was: the durable event is still emitted and nothing panics.
 func TestUpdateAccessBinding_LabelChange_NilReconciler_DurableEventStillEmitted(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_nilremat", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_nilremat--------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedLabelledBinding(repo, accountID, roleID)
 

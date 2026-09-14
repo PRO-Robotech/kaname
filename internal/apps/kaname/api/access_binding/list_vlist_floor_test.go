@@ -113,25 +113,25 @@ func seedABListByScope(repo *abFakeRepo, rows []domain.AccessBinding) {
 // owner/admin) is NOT dropped. ───────────────────────────────────────────────────
 
 func TestABListByScope_T33AB01_VListUnionFloor(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_ab01", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_ab01------------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
-	acb1 := domain.AccessBinding{ID: "acb000000000000prod1", ResourceType: "account", ResourceID: accountID, SubjectID: "usr_x", Labels: domain.Labels{"stage": "prod"}}
-	acb2 := domain.AccessBinding{ID: "acb0000000000000dev2", ResourceType: "account", ResourceID: accountID, SubjectID: "usr_y", Labels: domain.Labels{"stage": "dev"}}
+	acb1 := domain.AccessBinding{ID: "acb000000000000prod1", ResourceType: "account", ResourceID: accountID, SubjectID: "usr_x---------------", Labels: domain.Labels{"stage": "prod"}}
+	acb2 := domain.AccessBinding{ID: "acb0000000000000dev2", ResourceType: "account", ResourceID: accountID, SubjectID: "usr_y---------------", Labels: domain.Labels{"stage": "dev"}}
 	seedABListByScope(repo, []domain.AccessBinding{acb1, acb2})
 
-	// usr_member is NOT the owner (no granted-floor here) but holds v_list on acb1.
+	// usr_member---------- is NOT the owner (no granted-floor here) but holds v_list on acb1.
 	fga := newABQueriesStub()
-	fga.set("v_get", "user:usr_member", []string{"acb000000000000prod1"})
+	fga.set("v_get", "user:usr_member----------", []string{"acb000000000000prod1"})
 
-	// Check-stub grants nothing → usr_member is NOT a grant-authority → the union floor
+	// Check-stub grants nothing → usr_member---------- is NOT a grant-authority → the union floor
 	// (v_list) is the sole visibility path under test.
 	uc := NewListByScopeUseCase(repo).
 		WithRelationStore(&scopedFGA{allow: map[string]bool{}}, nil).
 		WithRelationQueries(fga)
 
-	// usr_member passes the catalog/anti-anon guard but is NOT a grant-authority; the
+	// usr_member---------- passes the catalog/anti-anon guard but is NOT a grant-authority; the
 	// scope-list nonetheless surfaces the v_list-matched binding through the union.
-	out, _, err := uc.Execute(newOwnerContext("usr_member"), "account", accountID, repoab.PageFilter{PageSize: 100})
+	out, _, err := uc.Execute(newOwnerContext("usr_member----------"), "account", accountID, repoab.PageFilter{PageSize: 100})
 	require.NoError(t, err)
 	ids := abIDs(out)
 	assert.Contains(t, ids, "acb000000000000prod1", "the label-matched binding this caller may read is visible")
@@ -141,7 +141,7 @@ func TestABListByScope_T33AB01_VListUnionFloor(t *testing.T) {
 // owner keeps full granted-floor visibility (ALL bindings on the scope) even without
 // any label grant — the union must NOT shrink the existing owner floor (D-6 not-negotiable).
 func TestABListByScope_T33AB01_OwnerFloorPreserved(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_ab01o", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_ab01o-----------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	acb1 := domain.AccessBinding{ID: "acb000000000000prod1", ResourceType: "account", ResourceID: accountID, Labels: domain.Labels{"stage": "prod"}}
 	acb2 := domain.AccessBinding{ID: "acb0000000000000dev2", ResourceType: "account", ResourceID: accountID, Labels: domain.Labels{"stage": "dev"}}
@@ -165,19 +165,19 @@ func TestABListByScope_T33AB01_OwnerFloorPreserved(t *testing.T) {
 // scope exists (the union floor collapsing to ∅ falls back to deny, never a leaky
 // empty list). RED if the use-case were to return (nil, nil) here instead of deny.
 func TestABListByScope_T33AB01_StrangerNoVisibilityDenied(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_ab01s", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_ab01s-----------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	acb1 := domain.AccessBinding{ID: "acb000000000000prod1", ResourceType: "account", ResourceID: accountID, Labels: domain.Labels{"stage": "prod"}}
 	seedABListByScope(repo, []domain.AccessBinding{acb1})
 
-	// usr_stranger holds NO v_list on any binding (empty stub) …
+	// usr_stranger-------- holds NO v_list on any binding (empty stub) …
 	fga := newABQueriesStub()
 	uc := NewListByScopeUseCase(repo).
 		// … and is NOT a grant-authority (Check grants nothing).
 		WithRelationStore(&scopedFGA{allow: map[string]bool{}}, nil).
 		WithRelationQueries(fga)
 
-	out, _, err := uc.Execute(newOwnerContext("usr_stranger"), "account", accountID, repoab.PageFilter{PageSize: 100})
+	out, _, err := uc.Execute(newOwnerContext("usr_stranger--------"), "account", accountID, repoab.PageFilter{PageSize: 100})
 	require.Error(t, err, "stranger with no authority and no v_list must NOT get an empty 200")
 	assert.Nil(t, out, "no rows leaked to a denied caller")
 	st, ok := status.FromError(err)
@@ -189,7 +189,7 @@ func TestABListByScope_T33AB01_StrangerNoVisibilityDenied(t *testing.T) {
 // T3.3-AUTHZ-02: FGA ListObjects error on the v_list union branch → UNAVAILABLE
 // (fail-closed; never unfiltered leak, never owner-only fallback).
 func TestABListByScope_T33AUTHZ02_FGAErrorUnavailable(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_ab02", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_ab02------------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	seedABListByScope(repo, []domain.AccessBinding{{ID: "acb000000000000prod1", ResourceType: "account", ResourceID: accountID}})
 
@@ -201,7 +201,7 @@ func TestABListByScope_T33AUTHZ02_FGAErrorUnavailable(t *testing.T) {
 		WithRelationQueries(fga)
 
 	// A non-owner caller relies on the v_list branch; an FGA error must fail closed.
-	_, _, err := uc.Execute(newOwnerContext("usr_member"), "account", accountID, repoab.PageFilter{PageSize: 100})
+	_, _, err := uc.Execute(newOwnerContext("usr_member----------"), "account", accountID, repoab.PageFilter{PageSize: 100})
 	require.Error(t, err)
 	st, ok := status.FromError(err)
 	require.True(t, ok)

@@ -54,7 +54,7 @@ func (f *fakeLister) ListUsers(_ context.Context, objectType, objectID, relation
 }
 
 func authedCtx() context.Context {
-	return operations.WithPrincipal(context.Background(), operations.Principal{ID: "usr_auditor", Type: "user"})
+	return operations.WithPrincipal(context.Background(), operations.Principal{ID: "usr_auditor---------", Type: "user"})
 }
 
 // authorizedUC builds the use-case with an authority that GRANTS the caller
@@ -77,7 +77,7 @@ func TestExpandAccess_E31_GroupExpandedToConcretePrincipals(t *testing.T) {
 			"user:usr_u1",
 			"user:usr_u1", // duplicate (direct + via group) → dedupe (E-30)
 			"user:usr_u2",
-			"service_account:sva_bot",
+			"service_account:sva_bot-------------",
 			"group:grp_g#member", // defensive: not a concrete principal → dropped
 		},
 	}}
@@ -86,7 +86,7 @@ func TestExpandAccess_E31_GroupExpandedToConcretePrincipals(t *testing.T) {
 	res, truncated, err := uc.Execute(authedCtx(), "compute_instance", "inst_x", "v_delete", 0)
 	require.NoError(t, err)
 	assert.False(t, truncated)
-	// Exactly {usr_u1, usr_u2, sva_bot}, no group.
+	// Exactly {usr_u1, usr_u2, sva_bot-------------}, no group.
 	require.Len(t, res, 3)
 	ids := map[string]domain.SubjectType{}
 	for _, p := range res {
@@ -94,7 +94,7 @@ func TestExpandAccess_E31_GroupExpandedToConcretePrincipals(t *testing.T) {
 	}
 	assert.Equal(t, domain.SubjectTypeUser, ids["usr_u1"])
 	assert.Equal(t, domain.SubjectTypeUser, ids["usr_u2"])
-	assert.Equal(t, domain.SubjectTypeServiceAccount, ids["sva_bot"])
+	assert.Equal(t, domain.SubjectTypeServiceAccount, ids["sva_bot-------------"])
 	_, hasGroup := ids["grp_g"]
 	assert.False(t, hasGroup, "group userset must NOT appear as a principal (E-31)")
 
@@ -139,7 +139,7 @@ func TestExpandAccess_ValidatesRequest(t *testing.T) {
 
 func TestExpandAccess_TruncatedWhenOverMax(t *testing.T) {
 	exp := &fakeLister{byNode: map[string][]string{
-		"compute_instance:inst_x#viewer": {"user:usr_a", "user:usr_b", "user:usr_c"},
+		"compute_instance:inst_x#viewer": {"user:usr_a---------------", "user:usr_b---------------", "user:usr_c"},
 	}}
 	uc := authorizedUC(exp)
 	res, truncated, err := uc.Execute(authedCtx(), "compute_instance", "inst_x", "viewer", 2)

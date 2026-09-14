@@ -93,12 +93,12 @@ var _ SelectorReconciler = (*blockingReconciler)(nil)
 // materialization passes are still running.
 func TestCreateAccessBinding_OperationDoneNotGatedOnMaterialization(t *testing.T) {
 	const (
-		roleID     = "rol_opgate_role"
+		roleID     = "rol_opgate_role-----"
 		roleName   = "kaname.admin"
-		subjectID  = "usr_opgate_subject"
-		resourceID = "prj_opgate_project"
-		ownerID    = "usr_opgate_owner"
-		accountID  = "acc_opgate_account"
+		subjectID  = "usr_opgate_subject--"
+		resourceID = "prj_opgate_project--"
+		ownerID    = "usr_opgate_owner----"
+		accountID  = "acc_opgate_account--"
 	)
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID, roleName,
 		domain.Permissions{"iam.access_bindings.get", "iam.access_bindings.update"})

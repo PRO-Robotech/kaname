@@ -97,7 +97,7 @@ var gsExpectedGroups = map[string]string{
 // проходит зелёным по всему пакету.
 func newGrantSurfaceFixture(t *testing.T) (*abFakeRepo, *abQueriesStub) {
 	t.Helper()
-	repo := newABFakeRepo("usr_o", gsAccount, "", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_o", gsAccount, "", "rol_v---------------", "kaname.view", nil)
 	seedABListByScope(repo, []domain.AccessBinding{
 		// Плоская пара без строк набора: так выглядит выдача, у которой
 		// канонический набор не спроецирован. Единственный путь к её группе —
@@ -109,7 +109,7 @@ func newGrantSurfaceFixture(t *testing.T) (*abFakeRepo, *abQueriesStub) {
 		{ID: gsBindMulti, ResourceType: "account", ResourceID: gsAccount,
 			SubjectType: domain.SubjectTypeGroup, SubjectID: gsGroupBoth},
 		{ID: gsBindUser, ResourceType: "account", ResourceID: gsAccount,
-			SubjectType: domain.SubjectTypeUser, SubjectID: "usr_a"},
+			SubjectType: domain.SubjectTypeUser, SubjectID: "usr_a---------------"},
 	})
 	seedABSubjects(repo, gsBindMulti, []domain.Subject{
 		{Type: domain.SubjectTypeGroup, ID: gsGroupBoth},
@@ -183,9 +183,9 @@ func kindCounts(t *testing.T, records []*iamv1.GrantSurfaceRecord) map[iamv1.Gra
 func TestABList_R914_EnumerationReturnsAllThreeKinds(t *testing.T) {
 	repo, fga := newGrantSurfaceFixture(t)
 	admins := &stubClusterAdmins{rows: []domain.ClusterAdminEntry{{
-		ClusterAdminGrantID: "cag_00000000000000001",
+		ClusterAdminGrantID: "cag_0000000000000000",
 		SubjectType:         "user",
-		SubjectID:           "usr_root",
+		SubjectID:           "usr_root------------",
 		GrantedAt:           time.Now().UTC(),
 	}}}
 	var rs clients.RelationStore = onlyClusterAdmin()
@@ -229,9 +229,9 @@ func TestABList_R914_EnumerationReturnsAllThreeKinds(t *testing.T) {
 func TestABList_R914_TenantSeesNoClusterAdmins(t *testing.T) {
 	repo, fga := newGrantSurfaceFixture(t)
 	admins := &stubClusterAdmins{rows: []domain.ClusterAdminEntry{{
-		ClusterAdminGrantID: "cag_00000000000000001",
+		ClusterAdminGrantID: "cag_0000000000000000",
 		SubjectType:         "user",
-		SubjectID:           "usr_root",
+		SubjectID:           "usr_root------------",
 	}}}
 	// Кластерным администратором вызывающий НЕ является: короткое замыкание
 	// D-9 не срабатывает, и страница сужается вердиктом.

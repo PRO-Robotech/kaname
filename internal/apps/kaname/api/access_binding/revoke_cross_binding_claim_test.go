@@ -114,10 +114,10 @@ func newCrossClaimFixture(t *testing.T) crossClaimFixture {
 	const (
 		roleID     = "rol_edit_cross_claim"
 		roleName   = "kaname.edit"
-		subjectID  = "usr_cross_claim_subject"
-		resourceID = "prj_cross_claim_project"
-		ownerID    = "usr_cross_claim_owner"
-		accountID  = "acc_cross_claim_account"
+		subjectID  = "usr_cross_claim_subj"
+		resourceID = "prj_cross_claim_proj"
+		ownerID    = "usr_cross_claim_owne"
+		accountID  = "acc_cross_claim_acco"
 	)
 	perms := domain.Permissions{
 		"iam.access_bindings.get",

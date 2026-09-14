@@ -103,8 +103,8 @@ func TestAB_IAM_1_23_ValidTargetType(t *testing.T) {
 func TestAB_IAM_1_21_DtoEmitsTarget(t *testing.T) {
 	// per-object.
 	pb, err := abToPb(domain.AccessBinding{
-		ID: "acb-x", SubjectType: "user", SubjectID: "usr-1", RoleID: "rol-r",
-		ResourceType: "account", ResourceID: "acc-A", Scope: domain.ScopeAccount,
+		ID: "acb-x---------------", SubjectType: "user", SubjectID: "usr-1---------------", RoleID: "rol-r---------------",
+		ResourceType: "account", ResourceID: "acc-A---------------", Scope: domain.ScopeAccount,
 		Status: domain.AccessBindingStatusActive,
 		Target: domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "compute.instance", ID: "ins-abc"}}},
 	})
@@ -117,8 +117,8 @@ func TestAB_IAM_1_21_DtoEmitsTarget(t *testing.T) {
 
 	// whole-anchor / empty → allInScope projection.
 	pb2, err := abToPb(domain.AccessBinding{
-		ID: "acb-y", SubjectType: "user", SubjectID: "usr-1", RoleID: "rol-r",
-		ResourceType: "account", ResourceID: "acc-A", Scope: domain.ScopeAccount,
+		ID: "acb-y---------------", SubjectType: "user", SubjectID: "usr-1---------------", RoleID: "rol-r---------------",
+		ResourceType: "account", ResourceID: "acc-A---------------", Scope: domain.ScopeAccount,
 		Status: domain.AccessBindingStatusActive,
 	})
 	require.NoError(t, err)
