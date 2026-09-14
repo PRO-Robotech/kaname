@@ -66,12 +66,27 @@ func TestEveryRelationGrantedByMigrationsExistsInTheAppliedModel(t *testing.T) {
 			check.AppliedModelRelPath)
 	}
 
-	t.Logf("перепись: миграций осмотрено %d; блоков кортежа %d; пар «тип+отношение» выдано %d (%s); "+
-		"в применяемой модели типов %d, отношений всего %d",
-		migrationsRead, blocksSeen, len(grants), check.JoinGrants(grants),
-		len(model), check.CountRelations(model))
+	// Отзыв читается ОТДЕЛЬНЫМ разбором: выдача, снятая позднейшей миграцией,
+	// модели больше не требуется, а применённую миграцию, её выдавшую, править
+	// нельзя (запрет #5). Довод и граница — в шапке `granted_relation_in_model.go`
+	// §«ОТЗЫВ ВЫДАЧИ».
+	revoked, revokeRead, err := check.RevokedRelationsFromMigrations(root)
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: %v", err)
+	}
+	if revokeRead == 0 {
+		t.Fatal("разбор отзыва не прочитал НИ ОДНОЙ миграции — его «отзывов ноль» " +
+			"неотличимо от «каталог не прочитан»")
+	}
 
-	for _, m := range check.MissingGrantedRelations(grants, model) {
+	t.Logf("перепись: миграций осмотрено %d; блоков кортежа %d; пар «тип+отношение» выдано %d (%s); "+
+		"в применяемой модели типов %d, отношений всего %d; миграций осмотрено на отзыв %d, "+
+		"отозванных отношений %d (%s)",
+		migrationsRead, blocksSeen, len(grants), check.JoinGrants(grants),
+		len(model), check.CountRelations(model), revokeRead,
+		len(revoked), check.JoinRevoked(revoked))
+
+	for _, m := range check.MissingGrantedRelations(grants, model, revoked) {
 		t.Errorf("миграция выдаёт отношение, которого в применяемой модели нет: строка журнала "+
 			"ляжет прямым фактом, но НИ ОДИН вопрос о доступе её не найдёт — план вывода "+
 			"строится из модели, и отношения, которого в модели нет, он не спрашивает. Право не "+

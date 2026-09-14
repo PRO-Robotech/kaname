@@ -55,6 +55,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 const (
@@ -199,9 +201,18 @@ func RelationsByType(text string) map[string]map[string]bool {
 }
 
 // MissingGrantedRelations — выдачи, у которых в модели нет типа либо отношения.
-func MissingGrantedRelations(grants []RelationGrant, model map[string]map[string]bool) []string {
+//
+// revoked — отношения, чью выдачу снимает позднейшая миграция
+// (`RevokedRelationsFromMigrations`). Передаётся ПАРАМЕТРОМ, а не берётся
+// внутри: инъекция подаёт сюда синтетику, и судья, ходящий за ведомостью сам,
+// на ней бы не работал.
+func MissingGrantedRelations(grants []RelationGrant, model map[string]map[string]bool,
+	revoked map[string]string) []string {
 	var missing []string
 	for _, g := range grants {
+		if _, gone := revoked[g.Relation]; gone {
+			continue
+		}
 		rels, typeKnown := model[g.ObjectType]
 		switch {
 		case !typeKnown:
@@ -247,6 +258,133 @@ func JoinGrants(g []RelationGrant) string {
 			seen[k] = true
 			out = append(out, k)
 		}
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
+
+// ── ОТЗЫВ ВЫДАЧИ ─────────────────────────────────────────────────────────────
+//
+// # Зачем ось вообще
+//
+// Разбор выше читает ТЕКСТ всех миграций и позднейший отзыв не вычитает.
+// Применённую миграцию не правят (запрет #5), поэтому выдача, записанная в
+// сведённом посеве, держала бы своё отношение в модели НАВСЕГДА: снять его
+// стало бы невозможно by construction, а не трудно. Так и вышло с правом
+// читать пределы (`kaname#59`): глаголы сняты, выдача отозвана, а объявление
+// модели держала строка посева, которую править нельзя.
+//
+// # Почему это НЕ послабление
+//
+// Послабление прощает существующее нарушение. Здесь предмета нарушения нет:
+// после отзыва в очереди не остаётся НИ ОДНОЙ строки, называющей отношение, —
+// травиться нечему. Но это утверждение о РАНТАЙМЕ, и текстом оно не
+// проверяется: здесь разбирается НАМЕРЕНИЕ миграции, а исход её наката держит
+// интеграционная проба отзыва (`internal/migrations`,
+// `TestLimitReaderGrant_IsRevokedAndLeavesATrace`, утверждение «очередь не
+// несёт ни одной строки про это отношение»). Обе половины названы с обеих
+// сторон, чтобы снятие одной не осталось незамеченным.
+//
+// # Граница разбора названа честно
+//
+// Отношение берётся ТОЛЬКО там, где его можно разрешить по тексту: литерал,
+// список литералов и локальная константа, объявленная в той же накатной
+// половине. Выражение, которое деревом не разрешается (значение из таблицы,
+// аргумент функции), отзывом НЕ считается — и это верная сторона ошибки:
+// нераспознанный отзыв оставляет находку, а не гасит её.
+
+// reGrantsDeleted — удаление выдач, по которому миграция признаётся отзывающей.
+// Написание терпимое: SQL нечувствителен к регистру и допускает произвольные
+// пробелы, а предикат, узнающий одну запись из многих законных, МОЛЧИТ на
+// остальных — и молчание читается как факт о дереве.
+var reGrantsDeleted = regexp.MustCompile(`(?i)delete\s+from\s+kaname\s*\.\s*access_bindings\b`)
+
+var (
+	// Форма 1 — литерал прямо в сравнении.
+	reRelLiteral = regexp.MustCompile(`(?i)granted_relation\s*=\s*'([a-z_]+)'`)
+	// Форма 2 — список литералов (`IN (…)` и `= ANY (…)`).
+	reRelList = regexp.MustCompile(`(?i)granted_relation\s*(?:=\s*any\s*)?(?:in\s*)?\(([^)]*)\)`)
+	// Форма 3 — локальная переменная; её значение разрешается объявлением ниже.
+	reRelIdent = regexp.MustCompile(`(?i)granted_relation\s*=\s*([a-z_][a-z0-9_]*)\b`)
+	// Литерал внутри списка.
+	reBareLiteral = regexp.MustCompile(`'([a-z_]+)'`)
+)
+
+// declaredConstant — значение локальной константы, объявленной литералом.
+//
+// Образец собирается ПО ИМЕНИ, а не общим: общий нашёл бы объявление соседней
+// переменной и приписал отзыву чужое отношение.
+func declaredConstant(up, ident string) (string, bool) {
+	re, err := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(ident) +
+		`\s+(?:constant\s+)?[a-z]+\s*:=\s*'([a-z_]+)'`)
+	if err != nil {
+		return "", false
+	}
+	if m := re.FindStringSubmatch(up); m != nil {
+		return m[1], true
+	}
+	return "", false
+}
+
+// RevokedRelationsFromMigrations — отношения, чью ВЫДАЧУ снимает накатная
+// половина какой-либо миграции корпуса: имя отношения → координата миграции.
+//
+// Второе возвращаемое — сколько файлов прочитано. Без него «отзывов ноль»
+// неотличимо от «каталог не прочитан», и ось молча перестала бы работать.
+func RevokedRelationsFromMigrations(root string) (map[string]string, int, error) {
+	dir := filepath.Join(root, filepath.FromSlash(MigrationsDirRel))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, 0, fmt.Errorf("обход миграций: %w", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+
+	revoked := map[string]string{}
+	read := 0
+	for _, name := range names {
+		raw, rerr := os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- имя из перечня своего каталога
+		if rerr != nil {
+			return nil, 0, fmt.Errorf("чтение %s: %w", name, rerr)
+		}
+		read++
+		// Комментарии забеливаются: разбор, судящий текст, не отличает оператор
+		// от прозы, которая этот же оператор объясняет, — и гейт краснел бы на
+		// собственной шапке.
+		up := migrations.SQLBlankComments(migrations.MigrationUpSection(string(raw)))
+		if !reGrantsDeleted.MatchString(up) {
+			continue
+		}
+		rel := MigrationsDirRel + "/" + name
+
+		for _, m := range reRelLiteral.FindAllStringSubmatch(up, -1) {
+			revoked[m[1]] = rel
+		}
+		for _, m := range reRelList.FindAllStringSubmatch(up, -1) {
+			for _, lit := range reBareLiteral.FindAllStringSubmatch(m[1], -1) {
+				revoked[lit[1]] = rel
+			}
+		}
+		for _, m := range reRelIdent.FindAllStringSubmatch(up, -1) {
+			if v, ok := declaredConstant(up, m[1]); ok {
+				revoked[v] = rel
+			}
+		}
+	}
+	return revoked, read, nil
+}
+
+// JoinRevoked — отозванные отношения, по порядку. Для переписи: «отзывов N»
+// без перечня не отличает точный отзыв от бланкетного.
+func JoinRevoked(m map[string]string) string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
 	sort.Strings(out)
 	return strings.Join(out, ", ")
