@@ -118,6 +118,18 @@ func corpusFamilies() []corpusFamily {
 			Want:    []string{check.ManifestLoaderDir + "/load.go"},
 		},
 		{
+			// Отбор совпадает с `clienttruth_kaname_exclusion_form` по предикату и
+			// РАЗЛИЧАЕТСЯ по предмету: там судят форму исключения, здесь —
+			// объявление дренажа очередей. Сведение их в один сборщик дало бы имя,
+			// лгущее об одном из двух семейств; общий у них `ProductionGoFile`, и
+			// он объявлен ровно один раз.
+			Name:    "drainorderdeclared",
+			Build:   check.DrainSiteCorpus,
+			Present: map[string]string{"cmd/kaname/wiring.go": goBody, "cmd/kaname/wiring_test.go": goBody},
+			Absent:  map[string]string{"cmd/kaname/wiring_test.go": goBody, "docs/x.go": goBody},
+			Want:    []string{"cmd/kaname/wiring.go"},
+		},
+		{
 			Name:    "migrationnotawriterofmodulerole + keyalgorithmdictionary",
 			Build:   check.MigrationCorpus,
 			Present: map[string]string{check.MigrationsDirRel + "/0001_initial.sql": "-- sql", "internal/x.go": goBody},
