@@ -40,25 +40,30 @@
 // МОЛЧАНИЕ. Поэтому обе стороны перечислены поимённо, и по каждой стоит
 // утверждение инъекции.
 //
+// Формы показаны на ВЫМЫШЛЕННОМ имени GuardedCall, а не на записи
+// действующего реестра, и это не стиль: godoc — тоже комментарий, и пример на
+// живом имени сделал бы ЭТОТ ФАЙЛ находкой собственного гейта. Класс поймал
+// себя сам при первом же прогоне после индексации (kacho#2597).
+//
 // Упоминание в комментарии — четыре формы:
 //
-//	bare       IsVerbOfType              — имя прозой
-//	qualified  domain.IsVerbOfType       — имя с квалификатором пакета
-//	call       IsVerbOfType()            — имя со скобками
-//	backtick   `IsVerbOfType`            — имя в обратных кавычках
+//	bare       GuardedCall              — имя прозой
+//	qualified  domain.GuardedCall       — имя с квалификатором пакета
+//	call       GuardedCall()            — имя со скобками
+//	backtick   `GuardedCall`            — имя в обратных кавычках
 //
 // Наличие в выражении — четыре формы, и все четыре суть узел ast.Ident:
 //
-//	IsVerbOfType(v, t)          прямой вызов
-//	domain.IsVerbOfType(v, t)   вызов с квалификатором (Sel — тот же ast.Ident)
-//	f := IsVerbOfType           значение функции
-//	f := domain.IsVerbOfType    значение с квалификатором
+//	GuardedCall(v, t)          прямой вызов
+//	domain.GuardedCall(v, t)   вызов с квалификатором (Sel — тот же ast.Ident)
+//	f := GuardedCall           значение функции
+//	f := domain.GuardedCall    значение с квалификатором
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ГРАНИЦА ИМЕНИ — НЕСУЩАЯ
 //
 // Совпадение считается по ГРАНИЦЕ идентификатора, а не по вхождению подстроки:
-// иначе `IsVerbOfTypeStrict` засчитывался бы упоминанием `IsVerbOfType`, и
+// иначе `GuardedCallStrict` засчитывался бы упоминанием `GuardedCall`, и
 // находка приходила бы на имя, которого комментарий не называл.
 package check
 
@@ -178,8 +183,8 @@ func guardMentionForm(text, name string) (GuardMentionForm, bool) {
 		at := i + j
 		end := at + len(name)
 		if guardIsIdentByte(text, at-1) || guardIsIdentByte(text, end) {
-			// Часть более длинного идентификатора: `IsVerbOfTypeStrict` —
-			// не упоминание `IsVerbOfType`.
+			// Часть более длинного идентификатора: `GuardedCallStrict` —
+			// не упоминание `GuardedCall`.
 			i = at + 1
 			continue
 		}
