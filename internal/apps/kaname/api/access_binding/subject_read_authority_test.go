@@ -46,7 +46,7 @@ import (
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 )
 
-// Выдачи субъекта usr-MEMBER: одна в его домашнем аккаунте acc-A, вторая — в
+// Выдачи субъекта usr-MEMBER: одна в его домашнем аккаунте acc-A---------------, вторая — в
 // чужом acc-B. Идентификаторы общие для ОБОИХ глаголов: сравнивать полосы можно
 // только на одном и том же предмете.
 const (
@@ -54,12 +54,12 @@ const (
 	srBindForeign = "acb00000000foreign2"
 )
 
-// srRepo — общая фикстура обеих полос: субъект usr-MEMBER (дом acc-A) с двумя
+// srRepo — общая фикстура обеих полос: субъект usr-MEMBER (дом acc-A---------------) с двумя
 // выдачами, видимыми ОБОИМ чтениям — сырым биндингом и обогащённой привилегией.
 func srRepo() *abFakeRepo {
 	repo := spRepo()
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
-		spPriv(srBindHome, "rol_v", "viewer", "account", spAccA, domain.ScopeAccount),
+		spPriv(srBindHome, "rol_v---------------", "viewer", "account", spAccA, domain.ScopeAccount),
 		spPriv(srBindForeign, "rol_e", "editor", "account", spAccB, domain.ScopeAccount),
 	})
 	seedABListBySubject(repo, []domain.AccessBinding{
@@ -107,7 +107,7 @@ func TestSubjectReads_1352_BothVerbsAdmitTheSameCallers(t *testing.T) {
 		cluster   bool
 		admitted  bool
 	}
-	// Модель прав: распорядитель acc-A выводит `v_get` на выдаче в acc-A через
+	// Модель прав: распорядитель acc-A--------------- выводит `v_get` на выдаче в acc-A--------------- через
 	// `super_admin from account`; на выдаче в acc-B — не выводит ниоткуда.
 	adminQueries := func() *abQueriesStub {
 		q := newABQueriesStub()

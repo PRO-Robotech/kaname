@@ -74,7 +74,7 @@ func wantCode(t *testing.T, err error, want codes.Code, what string) {
 // обязана дать UNAVAILABLE. Прежде она давала PERMISSION_DENIED: вызывающий
 // читал «не положено» и повтор считал бессмысленным.
 func TestRequireGrantAuthority_SuperGateOutage_IsUnavailable(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	repo := newABFakeRepo("usr_owner-----------", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	fga := &outageOnSuperGateFGA{}
 
 	err := requireGrantAuthority(clusterAdminCtx("usr_caller"), repo, clients.RelationStore(fga), "account", "acc_foreign")
@@ -88,7 +88,7 @@ func TestRequireGrantAuthority_SuperGateOutage_IsUnavailable(t *testing.T) {
 // TestRequireGrantAuthority_StoreDenies_StaysPermissionDenied — положительный
 // контроль: доступное хранилище, ответившее «нет», по-прежнему даёт отказ в правах.
 func TestRequireGrantAuthority_StoreDenies_StaysPermissionDenied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	repo := newABFakeRepo("usr_owner-----------", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 
 	err := requireGrantAuthority(clusterAdminCtx("usr_caller"), repo, clients.RelationStore(&denyingFGA{}), "account", "acc_foreign")
 
@@ -103,7 +103,7 @@ func TestRequireGrantAuthority_StoreDenies_StaysPermissionDenied(t *testing.T) {
 // TestListSubjectPrivileges_SuperGateOutage_IsUnavailableNotDenied — неполадка
 // обязана ПРЕРВАТЬ выдачу отказом о недоступности, а не отдать отказ в правах.
 func TestListSubjectPrivileges_SuperGateOutage_IsUnavailableNotDenied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_x", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	repo := newABFakeRepo("usr_owner-----------", "acc_x", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	fga := &outageOnSuperGateFGA{}
 	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(fga, nil)
 
@@ -123,7 +123,7 @@ func TestListSubjectPrivileges_SuperGateOutage_IsUnavailableNotDenied(t *testing
 // TestListSubjectPrivileges_StoreDenies_StaysPermissionDenied — положительный
 // контроль.
 func TestListSubjectPrivileges_StoreDenies_StaysPermissionDenied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_x", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	repo := newABFakeRepo("usr_owner-----------", "acc_x", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
 
 	_, _, err := uc.Execute(clusterAdminCtx("usr_caller"),

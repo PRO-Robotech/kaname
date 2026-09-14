@@ -38,7 +38,7 @@ import (
 // principal (passes RequireAuthenticated but fails requireGrantAuthority unless
 // FGA grants admin on the object).
 func foreignCtx() context.Context {
-	return operations.WithPrincipal(context.Background(), operations.Principal{ID: "usr_foreign", Type: "user"})
+	return operations.WithPrincipal(context.Background(), operations.Principal{ID: "usr_foreign---------", Type: "user"})
 }
 
 // ── B3: per-object authz ──────────────────────────────────────────────────────
@@ -48,8 +48,8 @@ func foreignCtx() context.Context {
 // expanded (no leak of effective principals). FGA Check denies (no admin); the
 // owner-account lookup returns a DIFFERENT owner (the caller is not the owner).
 func TestExpandAccess_B3_ForeignObject_Denied(t *testing.T) {
-	// Owner of acc_foreign is usr_owner; caller is usr_foreign (not the owner).
-	repo := newABFakeRepo("usr_owner", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	// Owner of acc_foreign is usr_owner-----------; caller is usr_foreign--------- (not the owner).
+	repo := newABFakeRepo("usr_owner-----------", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	exp := &fakeLister{byNode: map[string][]string{
 		"account:acc_foreign#viewer": {"user:usr_secret_member"},
 	}}
@@ -66,13 +66,13 @@ func TestExpandAccess_B3_ForeignObject_Denied(t *testing.T) {
 // TestExpandAccess_B3_OwnObject_Allowed — the account OWNER (grant-authority via the
 // owner path) may expand their own object's userset.
 func TestExpandAccess_B3_OwnObject_Allowed(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_mine", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	repo := newABFakeRepo("usr_owner-----------", "acc_mine", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	exp := &fakeLister{byNode: map[string][]string{
-		"account:acc_mine#viewer": {"user:usr_a", "user:usr_b"},
+		"account:acc_mine#viewer": {"user:usr_a---------------", "user:usr_b---------------"},
 	}}
 	uc := NewExpandAccessUseCase(exp).WithGrantAuthority(repo, &denyingFGA{}, nil)
 
-	ctx := newOwnerContext("usr_owner")
+	ctx := newOwnerContext("usr_owner-----------")
 	res, _, err := uc.Execute(ctx, "account", "acc_mine", "viewer", 0)
 	require.NoError(t, err, "the owner has grant-authority on their own object")
 	require.Len(t, res, 2)
@@ -81,13 +81,13 @@ func TestExpandAccess_B3_OwnObject_Allowed(t *testing.T) {
 // TestExpandAccess_B3_DelegatedAdmin_Allowed — a non-owner who holds FGA `admin`
 // on the object (delegated administration, Path 2) may expand it.
 func TestExpandAccess_B3_DelegatedAdmin_Allowed(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_x", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	repo := newABFakeRepo("usr_owner-----------", "acc_x", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	// Тип назван так, как его знает МОДЕЛЬ (`compute_instance`). Точечная форма
 	// каталога (`compute.instance`), стоявшая здесь прежде, моделью не объявлена:
 	// проба была снисходительнее продукта — источник подставной, поэтому она
 	// зеленела на паре, по которой настоящая форма не собрала бы плана (#1290).
 	exp := &fakeLister{byNode: map[string][]string{
-		"compute_instance:inst_x#v_delete": {"user:usr_a"},
+		"compute_instance:inst_x#v_delete": {"user:usr_a---------------"},
 	}}
 	// recordingFGA.Check returns true → delegated admin path passes.
 	uc := NewExpandAccessUseCase(exp).WithGrantAuthority(repo, newRecordingFGA(), nil)
@@ -102,11 +102,11 @@ func TestExpandAccess_B3_DelegatedAdmin_Allowed(t *testing.T) {
 // TestExpandAccess_B2_UnknownRelation_Rejected — an unknown relation string must be
 // rejected with INVALID_ARGUMENT, before any FGA probe.
 func TestExpandAccess_B2_UnknownRelation_Rejected(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_mine", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	repo := newABFakeRepo("usr_owner-----------", "acc_mine", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	exp := &fakeLister{byNode: map[string][]string{}}
 	uc := NewExpandAccessUseCase(exp).WithGrantAuthority(repo, newRecordingFGA(), nil)
 
-	ctx := newOwnerContext("usr_owner")
+	ctx := newOwnerContext("usr_owner-----------")
 	for _, rel := range []string{"sg_compute_instance", "owner", "g_admin_compute_instance", "totally_bogus", "v_teleport"} {
 		_, _, err := uc.Execute(ctx, "account", "acc_mine", rel, 0)
 		require.Error(t, err, "unknown relation %q must be rejected", rel)
@@ -128,8 +128,8 @@ func TestExpandAccess_B2_UnknownRelation_Rejected(t *testing.T) {
 // Единица утверждения теперь ПАРА, а не отношение: у каждой строки свой тип, и
 // именно он это отношение объявляет.
 func TestExpandAccess_B2_KnownRelations_Accepted(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_mine", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
-	ctx := newOwnerContext("usr_owner")
+	repo := newABFakeRepo("usr_owner-----------", "acc_mine", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	ctx := newOwnerContext("usr_owner-----------")
 	known := []struct {
 		objectType string
 		objectID   string
@@ -153,7 +153,7 @@ func TestExpandAccess_B2_KnownRelations_Accepted(t *testing.T) {
 	}
 	for _, c := range known {
 		exp := &fakeLister{byNode: map[string][]string{
-			c.objectType + ":" + c.objectID + "#" + c.relation: {"user:usr_a"},
+			c.objectType + ":" + c.objectID + "#" + c.relation: {"user:usr_a---------------"},
 		}}
 		uc := NewExpandAccessUseCase(exp).WithGrantAuthority(repo, newRecordingFGA(), nil)
 		_, _, err := uc.Execute(ctx, c.objectType, c.objectID, c.relation, 0)
@@ -170,8 +170,8 @@ func TestExpandAccess_B2_KnownRelations_Accepted(t *testing.T) {
 // Без этого зеркала положительная проба выше зеленела бы и на приёме, который
 // берёт всё подряд, — то есть ровно на дефекте, который она заводится ловить.
 func TestExpandAccess_B2_SurfaceRelationOnAForeignType_Rejected(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_mine", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
-	ctx := newOwnerContext("usr_owner")
+	repo := newABFakeRepo("usr_owner-----------", "acc_mine", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	ctx := newOwnerContext("usr_owner-----------")
 	foreign := []struct {
 		objectType string
 		objectID   string
@@ -181,7 +181,7 @@ func TestExpandAccess_B2_SurfaceRelationOnAForeignType_Rejected(t *testing.T) {
 		{"account", "acc_mine", "member"},
 		{"account", "acc_mine", "v_addtargets"},
 		{"vpc_network", "vpcn_x", "v_removetargets"},
-		{"iam_user", "usr_x", "v_delete"},
+		{"iam_user", "usr_x---------------", "v_delete"},
 	}
 	for _, c := range foreign {
 		exp := &fakeLister{byNode: map[string][]string{}}

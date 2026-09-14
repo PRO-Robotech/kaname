@@ -89,9 +89,9 @@ func TestExpandAccess_OnlyRelationsWired_StillGated(t *testing.T) {
 // there, so both answers must be the SAME code and the SAME text.
 func TestExpandAccess_AbsentObject_IndistinguishableFromForeign(t *testing.T) {
 	const existingForeign = "acc_foreign"
-	// The fake resolves `acc_foreign` (owned by usr_owner) and reports every other
+	// The fake resolves `acc_foreign` (owned by usr_owner-----------) and reports every other
 	// id as absent.
-	repo := newStrictDupFakeRepo("usr_owner", existingForeign)
+	repo := newStrictDupFakeRepo("usr_owner-----------", existingForeign)
 	exp := &fakeLister{byNode: map[string][]string{
 		"account:" + existingForeign + "#viewer": {"user:usr_secret_member"},
 	}}

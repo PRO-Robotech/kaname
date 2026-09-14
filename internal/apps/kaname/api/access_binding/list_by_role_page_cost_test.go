@@ -93,7 +93,7 @@ func bindingsOnScopes(rows int, scopeIDs []string) []domain.AccessBinding {
 // вызывающим и возвращает выданные строки вместе с числом заданных вопросов.
 func runPageCost(t *testing.T, rows int, scopeIDs []string, adminObjects ...string) ([]domain.AccessBinding, int) {
 	t.Helper()
-	repo := newABFakeRepo("usr_owner", "acc_cost", "prj_cost", pageCostRoleID, "viewer",
+	repo := newABFakeRepo("usr_owner-----------", "acc_cost", "prj_cost", pageCostRoleID, "viewer",
 		domain.Permissions{"iam.access_bindings.get"})
 	repo.lbrRows = bindingsOnScopes(rows, scopeIDs)
 

@@ -79,12 +79,12 @@ import (
 // real Postgres by the relverdict integration suite.
 func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 	const (
-		roleID     = "rol_viewer_test_001"
+		roleID     = "rol_viewer_test_001-"
 		roleName   = "kaname.view" // legacy name kept for context; mapping is permission-based
-		subjectID  = "usr_test_subject"
-		resourceID = "prj_test_project"
-		ownerID    = "usr_test_owner"
-		accountID  = "acc_test_account"
+		subjectID  = "usr_test_subject----"
+		resourceID = "prj_test_project----"
+		ownerID    = "usr_test_owner------"
+		accountID  = "acc_test_account----"
 	)
 
 	// Viewer-class permissions → relation "viewer" via PermissionsToRelations.
@@ -170,12 +170,12 @@ func TestFGASymmetric_CreateWritesTuples_DeleteRevokesSameSet(t *testing.T) {
 // account-scoped binding 403'd on read (newman-e2e iam-access-binding cascade).
 func TestFGASymmetric_AccountBinding_RoleRelationAndHierarchyTuple(t *testing.T) {
 	const (
-		roleID    = "rol_admin_test_002"
+		roleID    = "rol_admin_test_002--"
 		roleName  = "admin"
-		subjectID = "usr_test_admin"
-		resID     = "acc_target_account"
-		ownerID   = "usr_test_owner"
-		accountID = "acc_test_account"
+		subjectID = "usr_test_admin------"
+		resID     = "acc_target_account--"
+		ownerID   = "usr_test_owner------"
+		accountID = "acc_test_account----"
 	)
 
 	// Admin-class permissions → relation "admin". The permission NAMES the account
@@ -954,7 +954,7 @@ func (w *fakeABWtr) Insert(_ context.Context, b domain.AccessBinding) (domain.Ac
 	w.repo.mu.Lock()
 	defer w.repo.mu.Unlock()
 	if b.ID == "" {
-		b.ID = "acbc_fake_ab_test01"
+		b.ID = "acbc_fake_ab_test01-"
 	}
 	cp := b
 	w.repo.ab = &cp

@@ -78,7 +78,7 @@ func (f *failingFanout) called() int {
 // A failing membership pass must not turn a committed rules change into a failed
 // operation.
 func TestRoleUpdate_FailingMembershipPass_StillReportsTheCommittedChangeAsDone(t *testing.T) {
-	const ownerID, accountID, resourceID = "usr_owner_offpath", "acc_offpath", "prj_offpath"
+	const ownerID, accountID, resourceID = "usr_owner_offpath---", "acc_offpath---------", "prj_offpath---------"
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID178b, "viewer",
 		domain.Permissions{"compute.instance.*.get"})
 	repo.setRoleCustom(accountID)

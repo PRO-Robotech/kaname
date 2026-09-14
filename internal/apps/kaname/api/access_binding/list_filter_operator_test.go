@@ -33,11 +33,11 @@ import (
 func TestABList_460_ContainsRefusedByName(t *testing.T) {
 	for _, field := range abListFilterFields {
 		t.Run(field+" CONTAINS refused", func(t *testing.T) {
-			repo := newABFakeRepo("usr_o", "acc_l460", "", "rol_v", "kaname.view", nil)
+			repo := newABFakeRepo("usr_o", "acc_l460", "", "rol_v---------------", "kaname.view", nil)
 			fga := newABQueriesStub()
 			h := newListHandler(repo, fga)
 
-			_, err := h.List(newOwnerContext("usr_x"),
+			_, err := h.List(newOwnerContext("usr_x---------------"),
 				&iamv1.ListAccessBindingsRequest{Filter: field + ` CONTAINS "usr"`})
 
 			require.Error(t, err, "CONTAINS on %q must be refused, not answered as equality", field)
@@ -55,11 +55,11 @@ func TestABList_460_ContainsRefusedByName(t *testing.T) {
 // test above stays green on a parser that refuses every filter, including the one
 // this resource does support.
 func TestABList_460_EqualsStillHonoured(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_l460b", "", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_l460b", "", "rol_v---------------", "kaname.view", nil)
 	fga := newABQueriesStub()
 	h := newListHandler(repo, fga)
 
-	_, err := h.List(newOwnerContext("usr_x"),
+	_, err := h.List(newOwnerContext("usr_x---------------"),
 		&iamv1.ListAccessBindingsRequest{Filter: `subject="usr-42"`})
 	require.NoError(t, err, "= is the operator this resource supports and must keep working")
 	assert.Equal(t, "usr-42", repo.lastListFilter.SubjectID)
@@ -70,11 +70,11 @@ func TestABList_460_EqualsStillHonoured(t *testing.T) {
 // assertion above is about the caller's error; this one is about the repo never
 // having been asked the wrong question.
 func TestABList_460_ContainsNeverReachesTheRepo(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_l460c", "", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_l460c", "", "rol_v---------------", "kaname.view", nil)
 	fga := newABQueriesStub()
 	h := newListHandler(repo, fga)
 
-	_, err := h.List(newOwnerContext("usr_x"),
+	_, err := h.List(newOwnerContext("usr_x---------------"),
 		&iamv1.ListAccessBindingsRequest{Filter: `subject CONTAINS "usr"`})
 	require.Error(t, err)
 	assert.Empty(t, repo.lastListFilter.SubjectID,

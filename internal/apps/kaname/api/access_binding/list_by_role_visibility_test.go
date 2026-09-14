@@ -32,15 +32,15 @@ import (
 func TestListByRole_StrangerSeesNothing(t *testing.T) {
 	const (
 		roleID    = "rol000000000sysadmin"
-		ownerID   = "usr_owner"
-		accountID = "acc_lbr_account"
+		ownerID   = "usr_owner-----------"
+		accountID = "acc_lbr_account-----"
 	)
 	repo := newABFakeRepo(ownerID, accountID, accountID, roleID, "viewer",
 		domain.Permissions{"iam.access_bindings.get"})
 	repo.ab = &domain.AccessBinding{
-		ID:           "acb_lbr_1",
+		ID:           "acb_lbr_1-----------",
 		SubjectType:  domain.SubjectTypeUser,
-		SubjectID:    "usr_member",
+		SubjectID:    "usr_member----------",
 		RoleID:       domain.RoleID(roleID),
 		ResourceType: "account",
 		ResourceID:   accountID,
@@ -62,14 +62,14 @@ func TestListByRole_StrangerSeesNothing(t *testing.T) {
 func TestListByRole_SubjectOfBindingSeesOwnRow(t *testing.T) {
 	const (
 		roleID    = "rol000000000sysadmin"
-		ownerID   = "usr_owner"
-		accountID = "acc_lbr_account"
-		memberID  = "usr_member"
+		ownerID   = "usr_owner-----------"
+		accountID = "acc_lbr_account-----"
+		memberID  = "usr_member----------"
 	)
 	repo := newABFakeRepo(ownerID, accountID, accountID, roleID, "viewer",
 		domain.Permissions{"iam.access_bindings.get"})
 	repo.ab = &domain.AccessBinding{
-		ID:           "acb_lbr_1",
+		ID:           "acb_lbr_1-----------",
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    memberID,
 		RoleID:       domain.RoleID(roleID),

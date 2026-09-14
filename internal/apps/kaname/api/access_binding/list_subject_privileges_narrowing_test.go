@@ -58,18 +58,18 @@ import (
 const (
 	// Выдача, чья область — ДОМАШНИЙ аккаунт субъекта: ровно то, чем распоряжается
 	// допущенный вызывающий.
-	spBindHome = "acb0000000000home01"
+	spBindHome = "acb0000000000home01-"
 	// Выдача, чья область — ЧУЖОЙ аккаунт: предмет утечки. Вызывающий не
 	// распоряжается им и не должен узнать о его существовании.
 	spBindForeign = "acb00000000foreign1"
 )
 
-// spNarrowRepo — субъект usr-MEMBER (дом acc-A) с двумя выдачами: одна в его
+// spNarrowRepo — субъект usr-MEMBER (дом acc-A---------------) с двумя выдачами: одна в его
 // домашнем аккаунте, вторая в чужом acc-B.
 func spNarrowRepo() *abFakeRepo {
 	repo := spRepo()
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
-		spPriv(spBindHome, "rol_v", "viewer", "account", spAccA, domain.ScopeAccount),
+		spPriv(spBindHome, "rol_v---------------", "viewer", "account", spAccA, domain.ScopeAccount),
 		spPriv(spBindForeign, "rol_e", "editor", "account", spAccB, domain.ScopeAccount),
 	})
 	return repo
@@ -150,13 +150,13 @@ func spVisibleTo(callerID string, bindingIDs ...string) *abQueriesStub {
 func TestListSubjectPrivileges_1354_AccountAdminSeesOnlyAdministeredScopes(t *testing.T) {
 	repo := spNarrowRepo()
 
-	// usr-ADMIN держит `admin` на account:acc-A — этим он и допущен к чтению
-	// привилегий usr-MEMBER, чей дом — acc-A. Кластерным администратором он НЕ
+	// usr-ADMIN держит `admin` на account:acc-A--------------- — этим он и допущен к чтению
+	// привилегий usr-MEMBER, чей дом — acc-A---------------. Кластерным администратором он НЕ
 	// является: иначе сужения не было бы вовсе и проба утверждала бы о другой полосе.
 	relations := &scopedFGA{allow: map[string]bool{
 		"admin|account:" + spAccA: true,
 	}}
-	// Модель прав: `v_get` на выдаче в acc-A выводится у него через
+	// Модель прав: `v_get` на выдаче в acc-A--------------- выводится у него через
 	// `super_admin from account`; на выдаче в acc-B — не выводится ниоткуда.
 	queries := newABQueriesStub()
 	queries.set("v_get", "user:"+spAdminID, []string{spBindHome})

@@ -29,13 +29,13 @@ import (
 // both subject child rows; the binding row keeps subjects[0] as the legacy single.
 func TestCreate_E30_MultiSubject_IndependentTupleSets(t *testing.T) {
 	const (
-		roleID     = "rol_e30_test"
+		roleID     = "rol_e30_test--------"
 		roleName   = "viewer"
-		userID     = "usr_e30_user"
-		groupID    = "grp_e30_group"
-		resourceID = "acc_e30_account"
-		ownerID    = "usr_e30_owner"
-		accountID  = "acc_e30_account"
+		userID     = "usr_e30_user--------"
+		groupID    = "grp_e30_group-------"
+		resourceID = "acc_e30_account-----"
+		ownerID    = "usr_e30_owner-------"
+		accountID  = "acc_e30_account-----"
 	)
 	perms := domain.Permissions{"iam.access_bindings.get", "iam.access_bindings.list"}
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID, roleName, perms)
@@ -82,12 +82,12 @@ func TestCreate_E30_MultiSubject_IndependentTupleSets(t *testing.T) {
 // (no Subjects[]) still persists a one-element subjects[] (reverse projection).
 func TestCreate_E34_LegacySingle_ProjectsToSubjects(t *testing.T) {
 	const (
-		roleID     = "rol_e34_test"
+		roleID     = "rol_e34_test--------"
 		roleName   = "viewer"
-		userID     = "usr_e34_user"
-		resourceID = "acc_e34_account"
-		ownerID    = "usr_e34_owner"
-		accountID  = "acc_e34_account"
+		userID     = "usr_e34_user--------"
+		resourceID = "acc_e34_account-----"
+		ownerID    = "usr_e34_owner-------"
+		accountID  = "acc_e34_account-----"
 	)
 	perms := domain.Permissions{"iam.access_bindings.get"}
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID, roleName, perms)
@@ -128,11 +128,11 @@ func TestCreate_E34_LegacySingle_ProjectsToSubjects(t *testing.T) {
 // amplification guard itself.)
 func TestCreate_E32b_GroupSubject_NoGrantAuthority_Denied(t *testing.T) {
 	const (
-		roleID     = "rol_e32b_test"
-		groupID    = "grp_e32b"
-		resourceID = "acc_e32b_account"
-		ownerID    = "usr_e32b_owner"
-		accountID  = "acc_e32b_account"
+		roleID     = "rol_e32b_test-------"
+		groupID    = "grp_e32b------------"
+		resourceID = "acc_e32b_account----"
+		ownerID    = "usr_e32b_owner------"
+		accountID  = "acc_e32b_account----"
 	)
 	// editor-tier role (write verb) granted to a GROUP — the amplifying case.
 	perms := domain.Permissions{"iam.access_bindings.create"}
@@ -142,7 +142,7 @@ func TestCreate_E32b_GroupSubject_NoGrantAuthority_Denied(t *testing.T) {
 	// Caller is a NON-owner, NON-admin authenticated principal; denyingFGA → no
 	// delegated-admin path → requireGrantAuthority must deny.
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{ID: "usr_e32b_attacker", Type: "user"})
+		operations.Principal{ID: "usr_e32b_attacker---", Type: "user"})
 
 	uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(&denyingFGA{}, nil)
 	binding := domain.AccessBinding{
@@ -164,10 +164,10 @@ func TestCreate_E32b_GroupSubject_NoGrantAuthority_Denied(t *testing.T) {
 // that disagrees with subjects[0] → sync INVALID_ARGUMENT before any Operation.
 func TestCreate_E32_SubjectsConflict_Rejected(t *testing.T) {
 	const (
-		roleID     = "rol_e32_test"
-		resourceID = "acc_e32_account"
-		ownerID    = "usr_e32_owner"
-		accountID  = "acc_e32_account"
+		roleID     = "rol_e32_test--------"
+		resourceID = "acc_e32_account-----"
+		ownerID    = "usr_e32_owner-------"
+		accountID  = "acc_e32_account-----"
 	)
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID, "viewer", domain.Permissions{"iam.access_bindings.get"})
 	opsRepo := newFakeOpsRepo()
@@ -175,12 +175,12 @@ func TestCreate_E32_SubjectsConflict_Rejected(t *testing.T) {
 
 	uc := NewCreateAccessBindingUseCase(repo, opsRepo).WithRelationStore(newRecordingFGA(), nil)
 	binding := domain.AccessBinding{
-		SubjectType:  domain.SubjectTypeUser, // legacy single = usr_x
-		SubjectID:    "usr_x",
+		SubjectType:  domain.SubjectTypeUser, // legacy single = usr_x---------------
+		SubjectID:    "usr_x---------------",
 		RoleID:       domain.RoleID(roleID),
 		ResourceType: "account",
 		ResourceID:   resourceID,
-		Subjects:     []domain.Subject{{Type: domain.SubjectTypeGroup, ID: "grp_other"}}, // disagrees
+		Subjects:     []domain.Subject{{Type: domain.SubjectTypeGroup, ID: "grp_other-----------"}}, // disagrees
 	}
 	_, err := uc.Execute(ctx, binding)
 	require.Error(t, err, "conflicting legacy single vs subjects[0] → INVALID_ARGUMENT")

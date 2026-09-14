@@ -98,9 +98,9 @@ func seedExpandFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	// `groups_name_check` (единственная форма имени дерева): подчёркивание в ИМЕНИ
 	// отвергается схемой, в идентификаторе — нет.
 	run(`INSERT INTO kaname.accounts (id, name, owner_user_id)
-	     VALUES ('acc_A', 'home-account', 'usr_owner'), ('acc_B', 'foreign-account', 'usr_owner')
+	     VALUES ('acc_A', 'home-account', 'usr_owner-----------'), ('acc_B', 'foreign-account', 'usr_owner-----------')
 	     ON CONFLICT DO NOTHING`)
-	for _, u := range []string{"usr_owner", "usr_auditor", "usr_m1", "usr_m2", "usr_secret_b"} {
+	for _, u := range []string{"usr_owner-----------", "usr_auditor---------", "usr_m1", "usr_m2", "usr_secret_b"} {
 		run(`INSERT INTO kaname.users (id, external_id, email, account_id)
 		     VALUES ($1, $1, $1 || '@kacho.local', 'acc_A') ON CONFLICT DO NOTHING`, u)
 	}
@@ -118,7 +118,7 @@ func seedExpandFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	     VALUES ('account', 'acc_A', 'viewer', 'group:grp_team#member')`)
 	// Право вызывающего администрировать СВОЙ объект — и только его.
 	run(`INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
-	     VALUES ('account', 'acc_A', 'admin', 'user:usr_auditor')`)
+	     VALUES ('account', 'acc_A', 'admin', 'user:usr_auditor---------')`)
 	// На чужом аккаунте лежит НАСТОЯЩАЯ выдача: без неё отказ ниже был бы
 	// неотличим от «там всё равно никого нет», и утечка не имела бы чего утекать.
 	run(`INSERT INTO kaname.relation_fact (object_type, object_id, relation, subject)
@@ -129,7 +129,7 @@ func seedExpandFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 
 func auditorCtx() context.Context {
 	return operations.WithPrincipal(context.Background(),
-		operations.Principal{ID: "usr_auditor", Type: "user"})
+		operations.Principal{ID: "usr_auditor---------", Type: "user"})
 }
 
 // Выдача, адресованная группе, разворачивается в людей; сама группа принципалом

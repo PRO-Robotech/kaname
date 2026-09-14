@@ -51,11 +51,11 @@ func onlyClusterAdmin() *scopedFGA {
 // is NEITHER the account owner NOR holds an account-tier admin-tuple on acc_foreign
 // must pass requireGrantAuthority via the cluster-admin short-circuit.
 func TestRequireGrantAuthority_D06_ClusterAdmin_ForeignAccount(t *testing.T) {
-	// Owner of acc_foreign is usr_owner; caller is usr_root (cluster-admin, not owner).
-	repo := newABFakeRepo("usr_owner", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	// Owner of acc_foreign is usr_owner-----------; caller is usr_root------------ (cluster-admin, not owner).
+	repo := newABFakeRepo("usr_owner-----------", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	var rs clients.RelationStore = onlyClusterAdmin()
 
-	err := requireGrantAuthority(clusterAdminCtx("usr_root"), repo, rs, "account", "acc_foreign")
+	err := requireGrantAuthority(clusterAdminCtx("usr_root------------"), repo, rs, "account", "acc_foreign")
 	if err != nil {
 		t.Fatalf("cluster-admin must pass requireGrantAuthority on a foreign account (D-06): %v", err)
 	}
@@ -65,12 +65,12 @@ func TestRequireGrantAuthority_D06_ClusterAdmin_ForeignAccount(t *testing.T) {
 // retain authority over iam_access_binding objects (List/Get/Delete) through the
 // short-circuit even with no materialized tuple on the binding.
 func TestRequireGrantAuthority_D07_ClusterAdmin_BindingObject(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_x", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	repo := newABFakeRepo("usr_owner-----------", "acc_x", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	var rs clients.RelationStore = onlyClusterAdmin()
 
 	// requireGrantAuthority on a non-hierarchy object (iam_access_binding) skips the
 	// owner-path entirely → only the short-circuit / FGA-admin path can authorize.
-	err := requireGrantAuthority(clusterAdminCtx("usr_root"), repo, rs, "iam_access_binding", "acb_1")
+	err := requireGrantAuthority(clusterAdminCtx("usr_root------------"), repo, rs, "iam_access_binding", "acb_1")
 	if err != nil {
 		t.Fatalf("cluster-admin must retain authority over binding objects (D-07): %v", err)
 	}
@@ -80,7 +80,7 @@ func TestRequireGrantAuthority_D07_ClusterAdmin_BindingObject(t *testing.T) {
 // a caller who is NOT the owner and holds neither account-tier admin nor the
 // cluster super-admin relation is denied.
 func TestRequireGrantAuthority_NonClusterAdmin_ForeignAccount_Denied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	repo := newABFakeRepo("usr_owner-----------", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	// grants nothing at all.
 	var rs clients.RelationStore = &scopedFGA{allow: map[string]bool{}}
 
@@ -96,7 +96,7 @@ func TestRequireGrantAuthority_NonClusterAdmin_ForeignAccount_Denied(t *testing.
 // inside fgaHoldsAdmin reached on the cluster-admin miss). Correctness is preserved
 // (deny either way) — this pins the round-trip dedup.
 func TestRequireGrantAuthority_NonClusterAdmin_SingleSysAdminCheck(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
+	repo := newABFakeRepo("usr_owner-----------", "acc_foreign", "", "rol_x", "viewer", domain.Permissions{"iam.access_bindings.get"})
 	rs := &scopedFGA{allow: map[string]bool{}} // grants nothing
 
 	err := requireGrantAuthority(clusterAdminCtx("usr_nobody"), repo, rs, "account", "acc_foreign")

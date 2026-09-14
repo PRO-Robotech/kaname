@@ -30,7 +30,7 @@ import (
 // answerFor runs one probe and returns the observable pair (code, message).
 func answerFor(t *testing.T, uc *ListSubjectPrivilegesUseCase, subjectType domain.SubjectType, id string) (codes.Code, string) {
 	t.Helper()
-	ctx := userCtxAB(spOtherID) // acc-B; no authority over acc-A, not a cluster-admin
+	ctx := userCtxAB(spOtherID) // acc-B; no authority over acc-A---------------, not a cluster-admin
 	out, _, err := uc.Execute(ctx, subjectType, domain.SubjectID(id), repoab.PageFilter{})
 	if err == nil {
 		t.Fatalf("probe of %s %s must not succeed for a caller without authority, got %+v", subjectType, id, out)
@@ -60,7 +60,7 @@ func TestListSubjectPrivileges_ExistingAndAbsentSubjectAreIndistinguishable(t *t
 		t.Run(tc.name, func(t *testing.T) {
 			repo := spRepo()
 			repo.seedSubjectPrivileges([]domain.SubjectPrivilege{
-				spPriv("acb00000000000bind01", "rol_v", "viewer", "account", spAccA, domain.ScopeAccount),
+				spPriv("acb00000000000bind01", "rol_v---------------", "viewer", "account", spAccA, domain.ScopeAccount),
 			})
 			uc := NewListSubjectPrivilegesUseCase(repo).WithRelationStore(&denyingFGA{}, nil)
 

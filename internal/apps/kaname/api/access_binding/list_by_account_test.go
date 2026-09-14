@@ -25,10 +25,10 @@ import (
 )
 
 func TestListByAccount_AccountOwner_Allowed(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_owner-----------", "acc00000000000ba01ab", "prj_test", "rol_v---------------", "kaname.view", nil)
 	uc := NewListByAccountUseCase(repo)
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr_owner"})
+		operations.Principal{Type: "user", ID: "usr_owner-----------"})
 
 	_, _, err := uc.Execute(ctx, "acc00000000000ba01ab", repoab.AccountPageFilter{PageSize: 100})
 	if err != nil {
@@ -37,10 +37,10 @@ func TestListByAccount_AccountOwner_Allowed(t *testing.T) {
 }
 
 func TestListByAccount_NonOwner_Denied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_owner-----------", "acc00000000000ba01ab", "prj_test", "rol_v---------------", "kaname.view", nil)
 	uc := NewListByAccountUseCase(repo)
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr_stranger"})
+		operations.Principal{Type: "user", ID: "usr_stranger--------"})
 
 	_, _, err := uc.Execute(ctx, "acc00000000000ba01ab", repoab.AccountPageFilter{PageSize: 100})
 	if status.Code(err) != codes.PermissionDenied {
@@ -49,7 +49,7 @@ func TestListByAccount_NonOwner_Denied(t *testing.T) {
 }
 
 func TestListByAccount_Anonymous_Denied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_owner-----------", "acc00000000000ba01ab", "prj_test", "rol_v---------------", "kaname.view", nil)
 	uc := NewListByAccountUseCase(repo)
 	ctx := context.Background()
 
@@ -60,10 +60,10 @@ func TestListByAccount_Anonymous_Denied(t *testing.T) {
 }
 
 func TestListByAccount_InvalidAccountID(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_owner-----------", "acc00000000000ba01ab", "prj_test", "rol_v---------------", "kaname.view", nil)
 	uc := NewListByAccountUseCase(repo)
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr_owner"})
+		operations.Principal{Type: "user", ID: "usr_owner-----------"})
 
 	_, _, err := uc.Execute(ctx, "not-a-valid-id", repoab.AccountPageFilter{PageSize: 100})
 	if status.Code(err) != codes.InvalidArgument {
@@ -75,13 +75,13 @@ func TestListByAccount_InvalidAccountID(t *testing.T) {
 // owner-allowed path with a recorded binding to confirm the SQL pass-through
 // works as expected (one binding seeded → one returned).
 func TestListByAccount_OwnerSeesAllBindings(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_owner-----------", "acc00000000000ba01ab", "prj_test", "rol_v---------------", "kaname.view", nil)
 	// Pre-seed a fake-account binding so the fake reader returns one row.
 	repo.seedABListByAccount([]domain.AccessBinding{
 		{
 			ID: "acb00000000000ba01ab", SubjectType: domain.SubjectTypeUser,
-			SubjectID:    "usr_other",
-			RoleID:       "rol_v",
+			SubjectID:    "usr_other-----------",
+			RoleID:       "rol_v---------------",
 			ResourceType: "account",
 			ResourceID:   "acc00000000000ba01ab",
 			Status:       domain.AccessBindingStatusActive,
@@ -90,7 +90,7 @@ func TestListByAccount_OwnerSeesAllBindings(t *testing.T) {
 
 	uc := NewListByAccountUseCase(repo)
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr_owner"})
+		operations.Principal{Type: "user", ID: "usr_owner-----------"})
 
 	rows, _, err := uc.Execute(ctx, "acc00000000000ba01ab", repoab.AccountPageFilter{PageSize: 100})
 	if err != nil {
