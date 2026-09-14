@@ -210,7 +210,7 @@ lint:
 # audit-list-filter — CI gate for kaname's listing surface: every method that
 # hands a page to a caller must narrow it, and must declare HOW. What is checked
 # lives in pkg/listfiltergate; how this service is laid out lives in
-# services/iam/tools/auditlistfilter.
+# tools/auditlistfilter.
 #
 # iam carries the widest listing surface in the repository — 30 methods across 21
 # packages, more than compute, nlb, registry and storage together — and for a long
@@ -229,7 +229,7 @@ lint:
 # with nothing left to exclude is a finding too — which is how the `conditions`
 # entry left: its subject was retired, so there was nothing for it to describe.
 #
-# Invoked by CI as `make -C services/iam audit-list-filter`. That it is invoked at
+# Invoked by CI as `make audit-list-filter`. That it is invoked at
 # all is locked twice over: internal/repohygiene/listfiltergatewiring_test.go
 # derives the service list from this Makefile and from the workflow and compares
 # them in both directions, and pkg/listfiltergate/coverage_test.go reports an
@@ -326,7 +326,7 @@ module-manifest-check:
 # предмет и разрешимость ссылок между ними держит проба
 # tools/operatordocs/present_test.go.
 #
-# Вызов: `make -C services/iam operator-docs` / `... operator-docs-check`
+# Вызов: `make operator-docs` / `... operator-docs-check`
 .PHONY: helm-render-guard
 ## helm-render-guard — офлайновый страж рендера чарта: вход, который чарт отдаёт
 ## процессу, обязан пройти страж старта.
@@ -415,10 +415,10 @@ model-canon-check:
 # стоит намеренно — гейт печатает объём осмотренного, и без него «ноль находок»
 # было бы неотличимо от «ноль прочитанного».
 #
-# Текст соглашения и обе формы подтверждения — services/iam/CLA.md;
-# ведомость своих, подписавших и машинных личностей — services/iam/cla-ledger.yaml.
+# Текст соглашения и обе формы подтверждения — CLA.md;
+# ведомость своих, подписавших и машинных личностей — cla-ledger.yaml.
 #
-# Вызов: `make -C services/iam cla-check`
+# Вызов: `make cla-check`
 #
 # Путь — ОТ КОРНЯ МОДУЛЯ СЛУЖБЫ: у неё свой go.mod, и подъём в корень монорепо
 # ради пути `./services/iam/...` отказывает — тот модуль этих пакетов не
@@ -456,7 +456,7 @@ docker:
 	  echo "ВНИМАНИЕ: величина провенанса не объявлена — образ уедет БЕЗ клейма ревизии"; \
 	  echo "  (клеймо образа и файл ревизии внутри него останутся пустыми)."; \
 	  echo "  Так бывает у самостоятельного клона: объявление величины лежит в корне"; \
-	  echo "  монорепо и в поставку модуля не входит — см. services/iam/provenance.mk."; }
+	  echo "  монорепо и в поставку модуля не входит — см. provenance.mk корня монорепо."; }
 	docker build $(IMAGE_BUILD_ARGS) -f Dockerfile -t $(IMAGE) .
 
 .PHONY: migrate-up migrate-down migrate-status
