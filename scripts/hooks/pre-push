@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# Copyright (c) PRO-Robotech
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# pre-push — локальный прогон ПЕРЕД отправкой ветки службы доступа.
+#
+# ЗАЧЕМ ОН ЕСТЬ. До 2026-09-14 `git push` в этом дереве не проверял НИЧЕГО, и
+# установлено это было не чтением, а наблюдением: линия ушла на origin молча, а
+# находки статического анализа нашёл конвейер — то есть первым читателем кода
+# оказался ранер, отвечающий через десятки минут и занимающий место в очереди,
+# которого мало. Прогон здесь — не дубль конвейера, а единственное, что стоит
+# между правкой и стволом.
+#
+# ИСХОДОВ ТРИ, И ТРЕТИЙ НЕ ВЫЧИТАЕТСЯ ИЗ ВЕРДИКТА:
+#
+#   0 — ЗЕЛЁНЫЙ: исполненные группы прошли, неисполненных нет;
+#   1 — КРАСНЫЙ: группа нашла находку — отправка остановлена;
+#   2 — НЕ ВЫПОЛНЕНО: условие группы не создано (нет инструмента, нет второго
+#       дерева). Это НЕ «находок нет»: о предмете такой группы не известно
+#       ничего, и отправка останавливается тоже — молчаливый пропуск проверки
+#       неотличим от её прохождения.
+#
+# ТРЕТИЙ ИСХОД НЕ ИЗОБРЕТЁН ЗДЕСЬ, А ПРОЧИТАН У ДЕРЕВА. Собственные проверки
+# службы уже говорят на коде 2: `make lint` — при отсутствующем либо непином
+# golangci-lint; `go-test-verdict.py` — на пустом обходе; `gosec-gate.sh` — на
+# несостоявшемся сканировании; `check-permission-catalog` — без дерева платформы.
+# Хук эту конвенцию ЧИТАЕТ и своего детектора не заводит: второй детектор об
+# одном предмете разошёлся бы с первым молча.
+#
+# ПИНЫ ИНСТРУМЕНТОВ БЕРУТСЯ ИЗ ОБЪЯВЛЕНИЯ КОНВЕЙЕРА, А НЕ ВЫПИСАНЫ ЗДЕСЬ.
+# Выписанный пин — второе место об одном предмете; он разошёлся бы с конвейером
+# при первом же подъёме версии, и хук отдавал бы вердикт ЧУЖОЙ версии как свой.
+#
+# ОБХОД ЗАКОНЕН И ЯВЕН: `git push --no-verify` либо `KANAME_SKIP_PREPUSH=1`.
+# Хук говорит об этом вслух при каждом отказе: обойти можно, обойти НЕ ЗАМЕТИВ —
+# нельзя. Пропуска по ИМЕНИ ветки здесь нет намеренно: он сработал бы у того, кто
+# его не просил, и был бы ровно тем молчаливым выключателем, против которого хук
+# и заведён.
+set -uo pipefail
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "pre-push: это не рабочая копия git — проверять нечего." >&2
+    exit 2
+}
+cd "$root" || exit 2
+
+wf=".github/workflows/ci.yml"
+
+if [ "${KANAME_SKIP_PREPUSH:-0}" = "1" ]; then
+    echo "pre-push: ПРОПУЩЕН по KANAME_SKIP_PREPUSH=1 — проверок НЕ БЫЛО."
+    echo "  Это заявление о том, что вердикта нет, а не о том, что дерево чисто."
+    exit 0
+fi
+
+# ── группы ───────────────────────────────────────────────────────────────────
+# Состав выведен из заданий конвейера службы, исполнимых БЕЗ стенда и без сети.
+# Что в него намеренно не вошло — печатается ниже строкой «НЕ покрыто».
+groups_all=(gofmt build vet unit lint gosec listfilter manifests proto catalogparity modelcanon)
+
+want="${KANAME_PREPUSH_GROUPS:-}"
+if [ -n "$want" ]; then
+    read -r -a groups <<< "${want//,/ }"
+else
+    groups=("${groups_all[@]}")
+fi
+
+pass=0; fail=0; void=0
+declare -a failed_names=() void_names=()
+
+say() { printf '%s\n' "$*"; }
+
+# run <имя> — исполняет группу, читает КОД ВОЗВРАТА (не вид вывода) и относит
+# исход к одной из трёх категорий. Код 2 группы означает «условие не создано».
+run() {
+    local name="$1" rc=0 log
+    log="$(mktemp)" || return
+    say "── группа $name"
+    "grp_$name" > "$log" 2>&1 || rc=$?
+    case "$rc" in
+        0) pass=$((pass + 1)); say "   ЗЕЛЁНЫЙ" ;;
+        2) void=$((void + 1)); void_names+=("$name")
+           say "   НЕ ВЫПОЛНЕНО — условие не создано:"
+           sed 's/^/     /' "$log" | tail -12 ;;
+        *) fail=$((fail + 1)); failed_names+=("$name")
+           say "   ОТКАЗ (код $rc):"
+           sed 's/^/     /' "$log" | tail -40 ;;
+    esac
+    rm -f "$log"
+}
+
+# пин инструмента из объявления конвейера; пусто = пина не нашли
+pin_of() { sed -n "s|.*$1@\(v[0-9][0-9.]*\).*|\1|p" "$wf" | head -1; }
+
+# фактическая версия МОДУЛЯ у поставленного двоичного файла. Спрашивается именно
+# так, а не `--version`: собранный `go install`-ом gosec печатает «Version: dev»
+# при любом пине, то есть о версии не говорит ничего.
+mod_ver_of() {
+    local bin mod
+    bin="$(command -v "$1" 2>/dev/null)" || return 1
+    [ -n "$bin" ] || return 1
+    mod="$2"
+    go version -m "$bin" 2>/dev/null |
+        awk -v m="$mod" '$1=="mod" && $2==m {print $3; found=1} END{exit !found}'
+}
+
+# ── тела групп ───────────────────────────────────────────────────────────────
+
+grp_gofmt() {
+    local files unformatted
+    files="$(git ls-files '*.go')"
+    if [ -z "$files" ]; then
+        echo "обход пуст — ни одного файла Go не прочитано."
+        echo "«Ноль неотформатированных» означало бы «ноль прочитанного»."
+        return 2
+    fi
+    echo "прочитано файлов Go: $(printf '%s\n' "$files" | wc -l)"
+    unformatted="$(gofmt -l $files 2>/dev/null)"
+    [ -z "$unformatted" ] || { echo "требуется gofmt:"; echo "$unformatted"; return 1; }
+}
+
+grp_build() { go build ./...; }
+
+grp_vet() { go vet ./... && go vet -tags=integration ./...; }
+
+grp_unit() {
+    command -v python3 >/dev/null 2>&1 || {
+        echo "нет python3 — прогонщик вердикта не исполним, о пробах НЕ ИЗВЕСТНО НИЧЕГО."
+        return 2
+    }
+    local json rc=0 vrc=0
+    json="$(mktemp)"
+    go test ./... -race -short -count=1 -timeout 25m -json > "$json" 2>&1 || rc=$?
+    echo "go test завершился с кодом $rc (вердикт выносит прогонщик)"
+    python3 .github/scripts/go-test-verdict.py < "$json" || vrc=$?
+    rm -f "$json"
+    return "$vrc"
+}
+
+# `make lint` сам сверяет версию с пином и сам отдаёт 2 — своей сверки здесь нет.
+grp_lint() { make lint; }
+
+grp_gosec() {
+    local pin have rc=0
+    pin="$(pin_of 'securego/gosec/v2/cmd/gosec')"
+    [ -n "$pin" ] || { echo "в $wf не нашли пина gosec — сверять не с чем."; return 2; }
+    command -v jq >/dev/null 2>&1 || { echo "нет jq — гейт gosec его требует."; return 2; }
+    have="$(mod_ver_of gosec github.com/securego/gosec/v2)" || {
+        echo "gosec не найден в PATH. Поставьте тем же пином, что конвейер:"
+        echo "  go install github.com/securego/gosec/v2/cmd/gosec@$pin"
+        return 2
+    }
+    [ "$have" = "$pin" ] || {
+        echo "в PATH gosec $have, пин конвейера $pin."
+        echo "Вердикты разных версий об одном дереве расходятся МОЛЧА — прогон остановлен."
+        return 2
+    }
+    local sarif sum
+    sarif="$(mktemp)"; sum="$(mktemp)"
+    gosec -exclude-dir=pkg/api -stdout -verbose text -fmt sarif -out "$sarif" ./... > "$sum" 2>&1 || true
+    .github/scripts/gosec-gate.sh "$sarif" "$sum" || rc=$?
+    rm -f "$sarif" "$sum"
+    return "$rc"
+}
+
+grp_listfilter() { ./tools/audit-list-filter.sh; }
+
+grp_manifests() { make module-manifest-check; }
+
+grp_proto() {
+    command -v buf >/dev/null 2>&1 || {
+        echo "нет buf — о контрактах НЕ ИЗВЕСТНО НИЧЕГО."
+        echo "Конвейер ставит его отдельным шагом; поставьте buf и повторите."
+        return 2
+    }
+    buf lint && make proto-gen-diff
+}
+
+# Обе группы ниже требуют ВТОРОГО дерева — чекаута платформы. Его отсутствие
+# есть третий исход: цели сами отвечают кодом 2, и хук этот код читает.
+grp_catalogparity() { make check-permission-catalog; }
+
+grp_modelcanon() {
+    local tree="${PLATFORM_TREE:-${EDGE_TREE:-}}"
+    [ -n "$tree" ] && [ -d "$tree" ] || {
+        echo "дерева платформы нет: PLATFORM_TREE не задан либо не существует."
+        echo "Нужно: PLATFORM_TREE=<чекаут PRO-Robotech/kacho>"
+        return 2
+    }
+    make model-canon-check PLATFORM_TREE="$tree"
+}
+
+# ── прогон ───────────────────────────────────────────────────────────────────
+say "=== pre-push службы доступа: локальный прогон перед отправкой ==="
+say "групп к прогону: ${#groups[@]} (${groups[*]})"
+say ""
+
+for g in "${groups[@]}"; do
+    if ! declare -F "grp_$g" >/dev/null; then
+        void=$((void + 1)); void_names+=("$g")
+        say "── группа $g"
+        say "   НЕ ВЫПОЛНЕНО — такой группы нет; известны: ${groups_all[*]}"
+        continue
+    fi
+    run "$g"
+done
+
+say ""
+say "=== ИТОГ ==="
+say "проверок исполнено $pass, отказов $fail, НЕ выполнено $void"
+[ "$fail" -eq 0 ] || say "  отказали: ${failed_names[*]}"
+[ "$void" -eq 0 ] || say "  не выполнились: ${void_names[*]}"
+
+# Перепись НЕ покрытого — отдельное утверждение, а не украшение. Без неё
+# «локально зелено» читается шире исполненного.
+say ""
+say "ЧЕГО ЭТОТ ПРОГОН НЕ ПОКРЫВАЕТ (вердикта по ним нет ни красного, ни зелёного):"
+say "  · контейнерные пробы (Postgres) — задание integration конвейера;"
+say "  · govulncheck — требует сети;"
+say "  · цели рецепта в самостоятельном клоне — задание standalone, до 25 минут;"
+say "  · вердикт ствола — читает API GitHub;"
+say "  · сквозные пробы newman — требуют поднятого стенда."
+
+if [ "$((pass + fail + void))" -eq 0 ]; then
+    say ""
+    say "ОТКАЗ: не исполнено НИ ОДНОЙ группы — проверок НЕ БЫЛО." >&2
+    say "Пустой прогон неотличим от чистого дерева, поэтому это отказ, а не успех." >&2
+    exit 2
+fi
+
+if [ "$fail" -gt 0 ]; then
+    say ""
+    say "ОТПРАВКА ОСТАНОВЛЕНА: находок $fail." >&2
+    say "Обойти можно явно: git push --no-verify  либо  KANAME_SKIP_PREPUSH=1 git push" >&2
+    exit 1
+fi
+
+if [ "$void" -gt 0 ]; then
+    say ""
+    say "ОТПРАВКА ОСТАНОВЛЕНА: групп НЕ ВЫПОЛНЕНО $void — это не «находок нет»." >&2
+    say "О предмете этих групп не известно ничего; создайте условие (см. их вывод выше)" >&2
+    say "либо обойдите явно: git push --no-verify  либо  KANAME_SKIP_PREPUSH=1 git push" >&2
+    exit 2
+fi
+
+say ""
+say "ЗЕЛЁНЫЙ: исполнено $pass, неисполненных нет. Отправка продолжается."
+exit 0
