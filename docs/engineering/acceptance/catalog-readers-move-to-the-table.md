@@ -15,6 +15,26 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   замечание проверено экспериментом, две гипотезы рецензента опровергнуты
   замером и названы первыми (§R3.0). Вердикт **ни в одном круге не менялся
   автором** — его ставит рецензент
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-14, `kaname#71`): путевые координаты приведены
+  к дереву.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  пути, названные ПРЕДИКАТОМ (`git grep … -- <путь>`), остались монорепными. Предикат,
+  чей путь в дереве не существует, даёт пустоту **по построению**: «ноль находок»
+  становится неотличимо от «ноль прочитанного», и читатель делает вывод О ДЕРЕВЕ по
+  замеру, который ничего не измерял. Координат приведено: **5**. Исходов три, и все
+  три применены по корпусу: путь службы потерял приставку `services/iam/` — дерево
+  службы теперь корень, и в монорепо этого пути **тоже больше нет** (`git ls-tree -r
+  origin/main --name-only | grep -c '^services/iam/'` → 0), поэтому «назвать дом» было
+  бы координатой, мёртвой в ОБОИХ деревьях; путь, чей держатель остался в монорепо,
+  назвал ДОМ — `PRO-Robotech/kacho:` (форма взята у имён проб, `kaname#11`); путь
+  фундамента переписан на ПРОИЗВОДИТЕЛЯ — каталог берётся пином из `go.mod`
+  (`go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib`), а не выписывается.
+  **Следствие для читателя, и оно несущее:** предикат снова ИСПОЛНЯЕТСЯ, но ЧИСЛО,
+  стоящее рядом с ним, снималось на монорепо до выноса и здесь **НЕ ПЕРЕМЕРЯЛОСЬ** —
+  расхождение прогона с этим числом есть вопрос к ЧИСЛУ, а не к дереву, и закрывается
+  своим кругом, а не этой правкой. Дельта правки — только координата: ни один сценарий,
+  вердикт, производитель, признак готовности и ни одно число не тронуты. Держит форму
+  гейт `TestAcceptancePathCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
   ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
   гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
@@ -785,7 +805,7 @@ git grep -nE '(JOIN|UPDATE|INSERT INTO|DELETE FROM) +kaname\.catalog_' -- '*.go'
 
 ```sh
 git grep -ln 'authzmap\.' -- '*.go' | grep -v _test | wc -l   # → 28
-git grep -ln 'authzmap\.' -- 'services/iam/**/*.go' | grep -v _test | wc -l   # → 26
+git grep -ln 'authzmap\.' -- '**/*.go' | grep -v _test | wc -l   # → 26
 ```
 
 Тело называет **27** и **25**. Расхождение на единицу в обеих строках; разбирать
@@ -1036,7 +1056,7 @@ module · resource · dotted · retired_at · retired_reason · superseded_by ·
 ### 0.6. Административного пути снятия строки в прод-коде **НЕТ**
 
 ```sh
-git grep -l 'SET CONSTRAINTS' -- 'services/iam/**/*.go' | grep -vc _test   # → 0
+git grep -l 'SET CONSTRAINTS' -- '**/*.go' | grep -vc _test   # → 0
 git grep -ln 'catalog_resource\|catalog_module\|catalog_verb' -- '*.go' | grep -v _test
 #   seed/catalog_parity.go · authzmap/catalog_seed.go · check/catalog_seed_parity.go
 ```
@@ -1614,7 +1634,7 @@ proto/kaname/cloud/iam/v1/fga_model.fga   (КАНОН — единственны
 ```sh
 # 1. Каталожный факт литерала не спрашивает НИ ОДИН прод-файл.
 #    Единица: файл прод-кода, импортирующий authzmap и называющий символ из набора.
-git grep -l 'authzmap"' -- 'services/iam/**/*.go' | grep -v _test |
+git grep -l 'authzmap"' -- '**/*.go' | grep -v _test |
   xargs grep -lE 'authzmap\.(VerbsOfType|TypeHasVerbRelations|Catalog|CommonVerbVocabulary|AllVerbVocabulary|RoleVerbsFromSelectors|GrantedVerbs)\b' |
   grep -vE 'permission_catalog/list_catalog\.go|dto/toproto/role\.go|role/rules_catalog\.go' | wc -l
 # → 0   (три исключённых файла принадлежат #1814, §4.1)
@@ -1622,7 +1642,7 @@ git grep -l 'authzmap"' -- 'services/iam/**/*.go' | grep -v _test |
 # 2. Гейт истечения послабления СУЩЕСТВУЕТ, прогоняется и осматривает НЕПУСТОЕ множество.
 #    Порядок обязателен, и первая строка — не украшение: `go test -run` с образцом,
 #    которому в дереве ничего не отвечает, выходит УСПЕХОМ («no tests to run», RC=0).
-git grep -c 'func TestIAMCT2_LiteralIsNotAReadSource' -- 'services/iam/internal/check/*_test.go'
+git grep -c 'func TestIAMCT2_LiteralIsNotAReadSource' -- 'internal/check/*_test.go'
 # → не 0   (иначе прогон ниже вакуумен: он зелен и при отсутствующем гейте)
 
 go test ./services/iam/internal/check/ -run '^TestIAMCT2_LiteralIsNotAReadSource$' -v 2>&1 |
@@ -1630,7 +1650,7 @@ go test ./services/iam/internal/check/ -run '^TestIAMCT2_LiteralIsNotAReadSource
 # → строка есть, число импортёров НЕ ноль (перепись гейта, сценарий `-10`)
 
 # 3. Страж и гейт паритета ЖИВЫ — снятию не подлежат (§2.1).
-git grep -c 'AssertCatalogParity' -- 'services/iam/cmd/kaname/serve.go'   # → не 0
+git grep -c 'AssertCatalogParity' -- 'cmd/kaname/serve.go'   # → не 0
 ```
 
 **Первое условие сегодня НЕ выполняется** — предикат даёт **5**, и это ровно пять

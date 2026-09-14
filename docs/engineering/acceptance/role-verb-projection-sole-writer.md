@@ -9,6 +9,26 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   отказ (три блокирующих, четыре уточняющих); все семь проверены заново
   экспериментом на `f7e11a76b` — шесть устранены, одно (В3) опровергнуто автором
   верно. Разбор круга 2 — §13. Кодирование начинается по §9 (запрет #1 снят)
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-14, `kaname#71`): путевые координаты приведены
+  к дереву.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  пути, названные ПРЕДИКАТОМ (`git grep … -- <путь>`), остались монорепными. Предикат,
+  чей путь в дереве не существует, даёт пустоту **по построению**: «ноль находок»
+  становится неотличимо от «ноль прочитанного», и читатель делает вывод О ДЕРЕВЕ по
+  замеру, который ничего не измерял. Координат приведено: **14**. Исходов три, и все
+  три применены по корпусу: путь службы потерял приставку `services/iam/` — дерево
+  службы теперь корень, и в монорепо этого пути **тоже больше нет** (`git ls-tree -r
+  origin/main --name-only | grep -c '^services/iam/'` → 0), поэтому «назвать дом» было
+  бы координатой, мёртвой в ОБОИХ деревьях; путь, чей держатель остался в монорепо,
+  назвал ДОМ — `PRO-Robotech/kacho:` (форма взята у имён проб, `kaname#11`); путь
+  фундамента переписан на ПРОИЗВОДИТЕЛЯ — каталог берётся пином из `go.mod`
+  (`go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib`), а не выписывается.
+  **Следствие для читателя, и оно несущее:** предикат снова ИСПОЛНЯЕТСЯ, но ЧИСЛО,
+  стоящее рядом с ним, снималось на монорепо до выноса и здесь **НЕ ПЕРЕМЕРЯЛОСЬ** —
+  расхождение прогона с этим числом есть вопрос к ЧИСЛУ, а не к дереву, и закрывается
+  своим кругом, а не этой правкой. Дельта правки — только координата: ни один сценарий,
+  вердикт, производитель, признак готовности и ни одно число не тронуты. Держит форму
+  гейт `TestAcceptancePathCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
   ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
   гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
@@ -104,7 +124,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 Предикат задачи прогнан дословно:
 
 ```
-git grep -n 'ReplaceRoleVerbs' -- 'services/iam/**' ':!*_test.go'   → 8 строк
+git grep -n 'ReplaceRoleVerbs' -- '**' ':!*_test.go'   → 8 строк
 ```
 
 Восемь строк — не восемь писателей. Разбор по референту (единица: **вызов**):
@@ -136,13 +156,13 @@ SQL, метода `ReplaceRoleVerbs` не зовущая ни разу.
 **Н2. Экспортированный `SyncAllSystemRoleSelectors` в проде не зовёт никто.**
 
 ```
-git grep -n 'SyncAllSystemRoleSelectors' -- 'services/iam/**' ':!*_test.go' \
+git grep -n 'SyncAllSystemRoleSelectors' -- '**' ':!*_test.go' \
     ':!services/iam/internal/migrations/*' ':!services/iam/internal/apps/kaname/seed/*'
   → 1 строка, и та комментарий (internal/domain/feed_registry.go:75)
 ```
 
 Прод-вызывающих — **ноль**; строк вызова с префиксом пакета — **12**, все в пробах
-(`git grep -c 'seed\.SyncAllSystemRoleSelectors(' -- 'services/iam/**/*.go'` → 12;
+(`git grep -c 'seed\.SyncAllSystemRoleSelectors(' -- '**/*.go'` → 12;
 тот же предикат с `':!*_test.go'` → **0**). Досев на старте идёт через
 `BackfillOwnerBindings`, а экспортированная обёртка, как говорит её собственная шапка,
 «exposed standalone for tests + operational re-seed». П1 при этом верен по существу:
@@ -152,7 +172,7 @@ git grep -n 'SyncAllSystemRoleSelectors' -- 'services/iam/**' ':!*_test.go' \
 **Н3. «Досев берёт пары из `catalog_verb`» — неисполнимо в границах `#1028`.**
 
 ```
-git grep -c 'catalog_verb\|catalog_module\|catalog_resource' -- 'services/iam/**'
+git grep -c 'catalog_verb\|catalog_module\|catalog_resource' -- '**'
   → 2 файла: docs/engineering/acceptance/module-manifest-seed-contract.md (10)
              schema/module-manifest-seed.schema.json (1)
 ```
@@ -385,7 +405,7 @@ git grep -ln '"github.com/PRO-Robotech/kaname/internal/repo/kaname"' \
 
 ```
 # pg → seed: ребро есть (оно и делает наивную форму циклом)
-git grep -ln 'apps/kaname/seed' -- 'services/iam/internal/repo/kaname/pg/*.go' ':!*_test.go'
+git grep -ln 'apps/kaname/seed' -- 'internal/repo/kaname/pg/*.go' ':!*_test.go'
   → 2 файла: backfill_adapter.go, orphan_scope_adapter.go
 
 # порт → seed: ребра нет, и завести его нечем
@@ -393,7 +413,7 @@ git grep -c 'apps/kaname/seed' \
   -- 'services/iam/internal/repo/kaname/iface.go' 'services/iam/internal/repo/kaname/role/*.go'
   → 0
 # shared → seed: тоже ноль
-git grep -c 'apps/kaname/seed' -- 'services/iam/internal/apps/kaname/shared/*.go'   → 0
+git grep -c 'apps/kaname/seed' -- 'internal/apps/kaname/shared/*.go'   → 0
 ```
 
 Ребро `pg → seed` существует потому, что `seed` **объявляет** два порта, которые `pg`
@@ -800,7 +820,7 @@ gh issue view 1028 -R PRO-Robotech/kacho --json title
 
 | требование | чем держится | есть сегодня |
 |---|---|---|
-| писатель в дереве один | **новый** гейт `internal/repohygiene/roleverbsolewriter_test.go` — обход непроверочного Go по операторам записи в таблицу | **НЕТ.** Предикат: `git grep -l 'role_verb' -- 'internal/repohygiene/*.go'` → 1 файл, `verbvocabulary_test.go`, и его предмет — словарь глаголов, не писатели |
+| писатель в дереве один | **новый** гейт `internal/repohygiene/roleverbsolewriter_test.go` — обход непроверочного Go по операторам записи в таблицу | **НЕТ.** Предикат: `git grep -l 'role_verb' -- 'PRO-Robotech/kacho:internal/repohygiene/*.go'` → 1 файл, `verbvocabulary_test.go`, и его предмет — словарь глаголов, не писатели |
 | единственный писатель лежит в `repo/` | тот же гейт, вторая ось | НЕТ |
 | досев зовёт писателя через порт, а не своим SQL | следствие предыдущих двух: свой SQL в `seed/` был бы вторым писателем | НЕТ |
 | проекция системной роли пересеивается | `seed/system_role_verbs_integration_test.go:62` | **ЕСТЬ** |
@@ -994,7 +1014,7 @@ gh issue view 1028 -R PRO-Robotech/kacho --json title
    отнесён к замкам ради избежания красноты. Спорный — `-09`: свойство в дереве есть,
    пробы-контракта нет; автор отнёс его к RED.
 6. **§1.2 и §7 — читателей таблицы два.** Перемерить
-   `git grep -n 'FROM kaname.role_verb' -- 'services/iam/**/*.go' ':!*_test.go'`.
+   `git grep -n 'FROM kaname.role_verb' -- '**/*.go' ':!*_test.go'`.
    Если читателей больше двух, §7 неполон тем же способом, каким был неполон в круге 1.
 
 ---
@@ -1040,7 +1060,7 @@ go build ./services/iam/internal/apps/kaname/seed/   # с прямым импо�
 ```
 git grep -ln '"…/services/iam/internal/repo/kaname"' \
   -- 'services/iam/internal/apps/kaname/seed/*.go' ':!*_test.go'   → 1  (orphan_scope_sweep.go)
-git grep -c  '…/repo/kaname/role"' -- 'services/iam/internal/apps/kaname/seed/*.go'  → 0
+git grep -c  '…/repo/kaname/role"' -- 'internal/apps/kaname/seed/*.go'  → 0
 ```
 
 Для `repo/kaname/role` — верно (0). Для `repo/kaname` — **неверно**: импорт есть, и тот же
@@ -1052,10 +1072,10 @@ git grep -c  '…/repo/kaname/role"' -- 'services/iam/internal/apps/kaname/seed/
 вызова (33 + 12)» перемерена и **сходится**:
 
 ```
-git grep -c 'seed\.BackfillOwnerBindings('      -- 'services/iam/**/*.go'              → 33
-git grep -c 'seed\.BackfillOwnerBindings('      -- 'services/iam/**/*.go' ':!*_test.go' → 1
-git grep -c 'seed\.SyncAllSystemRoleSelectors(' -- 'services/iam/**/*.go'              → 12
-git grep -c 'seed\.SyncAllSystemRoleSelectors(' -- 'services/iam/**/*.go' ':!*_test.go' → 0
+git grep -c 'seed\.BackfillOwnerBindings('      -- '**/*.go'              → 33
+git grep -c 'seed\.BackfillOwnerBindings('      -- '**/*.go' ':!*_test.go' → 1
+git grep -c 'seed\.SyncAllSystemRoleSelectors(' -- '**/*.go'              → 12
+git grep -c 'seed\.SyncAllSystemRoleSelectors(' -- '**/*.go' ':!*_test.go' → 0
 ```
 
 Но рябь возникает **только** при смене сигнатуры `BackfillOwnerBindings`, а §2.2 и без
@@ -1176,7 +1196,7 @@ gh issue view 1028 -R PRO-Robotech/kacho --json title
 называл круг 1:
 
 ```
-git grep -n 'FROM kaname.role_verb' -- 'services/iam/**/*.go' ':!*_test.go'
+git grep -n 'FROM kaname.role_verb' -- '**/*.go' ':!*_test.go'
   → role_repo.go:526              (DELETE — писатель)
     migrate_backfill.go:362       (DELETE — писатель)
     scalegrid/census.go:140       (SELECT count(*) — ЧИТАТЕЛЬ, круг 1 его не назвал)

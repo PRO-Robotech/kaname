@@ -14,6 +14,26 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   названным предметом и без дублирования (§16.4); объём сценариев не изменился:
   **30 → 30**, «Тогда»-клауз **73**, ни один Given/When/Then не тронут.
   Реализация ведётся по этому документу; чего он **не** покрывает — §10
+- **⚠️ Правка ПОСЛЕ вердикта (2026-09-14, `kaname#71`): путевые координаты приведены
+  к дереву.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
+  пути, названные ПРЕДИКАТОМ (`git grep … -- <путь>`), остались монорепными. Предикат,
+  чей путь в дереве не существует, даёт пустоту **по построению**: «ноль находок»
+  становится неотличимо от «ноль прочитанного», и читатель делает вывод О ДЕРЕВЕ по
+  замеру, который ничего не измерял. Координат приведено: **5**. Исходов три, и все
+  три применены по корпусу: путь службы потерял приставку `services/iam/` — дерево
+  службы теперь корень, и в монорепо этого пути **тоже больше нет** (`git ls-tree -r
+  origin/main --name-only | grep -c '^services/iam/'` → 0), поэтому «назвать дом» было
+  бы координатой, мёртвой в ОБОИХ деревьях; путь, чей держатель остался в монорепо,
+  назвал ДОМ — `PRO-Robotech/kacho:` (форма взята у имён проб, `kaname#11`); путь
+  фундамента переписан на ПРОИЗВОДИТЕЛЯ — каталог берётся пином из `go.mod`
+  (`go list -m -f '{{.Dir}}' github.com/PRO-Robotech/corelib`), а не выписывается.
+  **Следствие для читателя, и оно несущее:** предикат снова ИСПОЛНЯЕТСЯ, но ЧИСЛО,
+  стоящее рядом с ним, снималось на монорепо до выноса и здесь **НЕ ПЕРЕМЕРЯЛОСЬ** —
+  расхождение прогона с этим числом есть вопрос к ЧИСЛУ, а не к дереву, и закрывается
+  своим кругом, а не этой правкой. Дельта правки — только координата: ни один сценарий,
+  вердикт, производитель, признак готовности и ни одно число не тронуты. Держит форму
+  гейт `TestAcceptancePathCoordinateResolves` (`internal/check`) — чужие дома он считает
+  переписью и печатает их, а приставку, домом не являющуюся, роняет
 - **⚠️ Правка ПОСЛЕ вердикта (2026-09-13, `kaname#11`): координата держателя названа своим
   ДОМОМ.** Служба вынесена из монорепо (`kacho#2598`), приёмка уехала вместе с ней, а
   гейты дерева остались судить своё дерево. Пролёт, целиком состоявший из имени пробы,
@@ -472,7 +492,7 @@ grep -rhoE "'[a-z]+\.[a-zA-Z_]+\.(admin|edit|view)'" services/iam/internal/migra
 ```sh
 sed -n '/^type Rule struct/,/^}/p' services/iam/internal/domain/rule.go
   → Module · Resources · Verbs · ResourceNames · MatchLabels
-git grep -n '\bclasses\b' -- 'proto/kaname/cloud/iam/v1/*.proto' 'services/iam/internal/domain/*.go'
+git grep -n '\bclasses\b' -- 'proto/kaname/cloud/iam/v1/*.proto' 'internal/domain/*.go'
   → пусто
 grep -n 'repeated Rule\|message Role' proto/kaname/cloud/iam/v1/role.proto
   → 42: message Role     93:   repeated Rule rules = 11;
@@ -512,7 +532,7 @@ grep -n 'repeated Rule\|message Role' proto/kaname/cloud/iam/v1/role.proto
 > Предикаты, повторяйте ими, а не памятью:
 >
 > ```sh
-> git grep -n 'yaml:"classes"' -- services/iam/internal/manifest/roles.go
+> git grep -n 'yaml:"classes"' -- internal/manifest/roles.go
 >   → 212: Classes []string `yaml:"classes"`          # на ab771fe83 — пусто
 > git ls-tree -r <ревизия> --name-only -- services/iam/internal/manifest/roleexport/ | wc -l
 >   → 16                                              # на ab771fe83 — 0
@@ -1680,7 +1700,7 @@ P
 назвал 2.
 
 ```sh
-git grep -n 'module-manifest-seed' -- services/iam/internal services/iam/tools services/iam/schema
+git grep -n 'module-manifest-seed' -- internal tools schema
   → manifest.go:6 · manifest_test.go:5 · schemaagreement_internal_test.go:47
     · schema.json:3 · tools/modulemanifestcheck/main.go:7
 ```
