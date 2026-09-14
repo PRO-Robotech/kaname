@@ -255,7 +255,6 @@ func (r *fakeProjReader) Commit(context.Context) error   { return nil }
 func (r *fakeProjReader) Rollback(context.Context) error { return nil }
 
 type fakeProjWriter struct {
-	fakeProjReader
 	parent *fakeProjRepo
 }
 
