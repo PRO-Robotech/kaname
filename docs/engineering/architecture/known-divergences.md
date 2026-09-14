@@ -841,7 +841,7 @@ git grep -nE "m\.state|memberships\.state|state[ ]*=[ ]*'(PENDING|ACTIVE)'" \
 ведёт себя верно, и запись существует затем, чтобы «решено не заводить»
 перестало быть неотличимым от «ещё не сделано».
 
-**Что.** Глагол `kacho.cloud.subscription.InternalSubscriptionService/Subscribe`
+**Что.** Глагол `corelib.subscription.InternalSubscriptionService/Subscribe`
 (проекция края — `/subscription/v1/events`) служат пять доменов. iam среди них
 нет и не будет. Считающий домены по имени таблицы найдёт у iam **четыре**
 таблицы с суффиксом `_outbox` и заключит, что провязка просто не сделана. Это
