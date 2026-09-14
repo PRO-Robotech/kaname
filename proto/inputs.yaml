@@ -54,7 +54,7 @@ inputs:
     sha256: d0124a4431dece27900865201e5e5c1f27ab682b7f71838d273e309e1aa910fe
     stubs: github.com/PRO-Robotech/corelib/api/corelib/api/v1
   - path: corelib/authz/v1/authz_options.proto
-    sha256: ed734abfcb1e7d5e23abf2d2c1737b6189fa848848fdc725f0bdeec4dea074f3
+    sha256: 26510bf99fc6feca6618c44c37b1a0f007fa8844e2d56bef3076c77e20d7cb5e
     stubs: github.com/PRO-Robotech/corelib/api/corelib/authz/v1
   - path: kacho/cloud/operation/operation.proto
     sha256: f322eb06dcbced2b5d5a656fa7ba4f6368baeae5b3ebda04cab8457e532e135f

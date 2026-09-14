@@ -13,31 +13,55 @@ option go_package = "github.com/PRO-Robotech/corelib/api/corelib/authz/v1;authzv
 // to build the canonical `permission_catalog.json` and by the iam authz
 // middleware at runtime.
 //
-// WHY THIS FILE LIVES UNDER A NEUTRAL ROOT (owner decision Р12, 2026-09-06, #2089)
+// ГДЕ ЭТОТ ФАЙЛ ЖИВЁТ И ПОЧЕМУ ОН ЕЩЁ ЗДЕСЬ (решение владельца 2026-09-13, kacho#2617)
 // -------------------------------------------------------------------------------
-// The vocabulary belongs to NEITHER product: every domain annotates its own
-// methods with it, and the access service is one consumer among the rest. While it
-// sat under a product root, 22 contracts of the access service depended on that
-// product's tree for annotation alone — an arrow against the target layout, in
-// which every product depends on the foundation and none on another product.
-// Under `corelib/` both sides depend on it DOWNWARD, and markup creates no edge
-// between product roots at all.
+// ДЕЙСТВУЮЩЕЕ РЕШЕНИЕ: словарь принадлежит СЛУЖБЕ ДОСТУПА и переезжает в
+// `PRO-Robotech/kaname`. Дословно: «всё, что является владельцем, живёт с
+// владельцем; это прото iam, значит все линкуют его как библиотеку».
 //
-// The file names no consumer of its own on purpose: a neutral vocabulary that
-// spells out who uses it stops being neutral the day the list changes.
+// ПРЕЖНЕЕ РЕШЕНИЕ Р12 (2026-09-06, kacho#2089) — «словарь не принадлежит ни одному
+// продукту и живёт под нейтральным корнем» — ОТМЕНЕНО тем же решением владельца.
+// Здесь оно названо отменённым, а не стёрто: абзац, объявлявший нейтральность,
+// читался как действующее ОСНОВАНИЕ координаты каждым, кто выписывал себе оператор
+// `import`, — а таких операторов в двух деревьях 65.
 //
-// THE FOUNDATION IS PUBLISHED, AND `go_package` ABOVE ALREADY NAMES IT. The module
-// is `github.com/PRO-Robotech/corelib`, pinned by the platform's `go.mod`; the stubs
-// for this file are CONSUMED from that module and are not regenerated here
-// (`proto/buf.gen.yaml` excludes the foundation class from its inputs, so no second
-// package registers this file name).
+// ПЕРЕЕЗД НА СЕГОДНЯ НЕ ИСПОЛНЕН. Это состояние файла, а не намерение, и координата
+// ниже ДЕЙСТВУЮЩАЯ: пакет `corelib.authz.v1`, заглушки —
+// `github.com/PRO-Robotech/corelib/api/corelib/authz/v1`, публикует их модуль
+// фундамента, и второй раз они не порождаются ни в одном дереве (`proto/buf.gen.yaml`
+// обоих репозиториев исключает этот корень из своих входов).
 //
-// Here stood "the Go import path still carries the monorepo module, because the
-// foundation has not been published as its own module yet". The sentence outlived its
-// subject on the day the module was published, and it is the ONLY place a reader
-// learns whether this coordinate is final — so a reader checking before writing the
-// import down got the opposite of the truth. The proto coordinate every importer
-// writes down did not change and is final.
+// ПЕРЕЕЗД АТОМАРЕН BY CONSTRUCTION, и это воспроизведено прогоном, а не выведено.
+// Номера расширений решением не меняются, поэтому двоичное, слинковавшее прежнюю и
+// новую координату разом, падает при регистрации дескрипторов:
+//
+//     panic: proto: extension number 50001 is already registered on message
+//            google.protobuf.MethodOptions
+//
+// Отказ приходит ВРЕМЕНИ ВЫПОЛНЕНИЯ и транзитивно — у потребителя, который ни одного
+// из двух путей не называл; `go build` на том же дереве даёт КОД 0. Промежуточного
+// состояния «пока обе координаты» не существует: все импортёры переключаются одним
+// изменением.
+//
+// ЧЕМ ПЕРЕЕЗД УПЁРСЯ — ЗАМЕРОМ, А НЕ МНЕНИЕМ. Два контракта, чьи заглушки публикует
+// фундамент, сами РАЗМЕЧЕНЫ этим словарём: `kacho/cloud/operation/operation_service.proto`
+// и `corelib/subscription/subscription_service.proto`. Порождённый Go-пакет неделим, а
+// собственные пакеты фундамента их линкуют — `operations/operationspb` и
+// `subscription/`. Значит фундамент обязан линковать словарь; словарь у службы
+// означает ребро `corelib -> kaname`, то есть КОЛЬЦО с пином `kaname -> corelib`,
+// запрещённое ядром правил («разрешены ровно три ребра … кольца запрещены»).
+//
+// Отдельно измерено: словарь НЕ ВПРАВЕ лечь в Go-пакет `kaname.cloud.iam.v1` даже
+// после снятия кольца — заглушки iam импортируют `api/kacho/cloud/operation`, а тот
+// импортировал бы словарь, то есть получился бы ПАКЕТНЫЙ цикл, который не собирается
+// вовсе. Словарю нужен свой Go-пакет.
+//
+// Выбор между «фундамент импортирует службу», «разметка снимается с двух контрактов
+// фундамента» и «эти два контракта тоже уезжают» — решение ВЛАДЕЛЬЦА, а не полосы;
+// предмет и три исхода — kacho#2617 §«Второе следствие».
+//
+// Файл не называет своих потребителей намеренно: перечень устаревает в тот день,
+// когда меняется.
 //
 // Usage on an RPC:
 //
