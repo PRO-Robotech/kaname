@@ -121,7 +121,7 @@ func TestInteractiveProvider_RejectedInput_StaysTerminal(t *testing.T) {
 		var apiErr *HydraAPIError
 		if !errors.As(err, &apiErr) || apiErr.StatusCode != code {
 			t.Fatalf("%d: отказ поставщика перестал быть распознаваемым по коду (%v) — "+
-				"на этом признаке стоит идемпотентность создания (IsConflict)", code, err)
+				"на этом признаке стоит идемпотентность создания (409 у *HydraAPIError)", code, err)
 		}
 	}
 }
