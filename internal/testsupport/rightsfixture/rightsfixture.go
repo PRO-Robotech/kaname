@@ -39,7 +39,7 @@ import (
 // такой фикстуре считала бы полноту перечня по НУЛЮ классов, ничего об этом не
 // сказав.
 func Export() moduleroles.RightsExport {
-	facts, err := catalog.NewFacts(seed.LiteralRows())
+	facts, err := catalog.NewFacts(catalog.Halves{Live: seed.LiteralRows()})
 	if err != nil {
 		panic("rightsfixture: каталожный факт не собран: " + err.Error())
 	}

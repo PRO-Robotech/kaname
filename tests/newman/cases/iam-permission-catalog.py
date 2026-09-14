@@ -201,3 +201,91 @@ CASES.append(Case(
         ),
     ],
 ))
+
+
+# ---------------------------------------------------------------------------
+# CONF-G-03-catalog-retired-successor — СНЯТЫЙ ресурс назван своим перечнем и
+# несёт преемника; перечень ГРАНТУЕМОГО того же тела его не содержит.
+#
+# Предмет (kacho#1814, приёмка
+# `docs/engineering/acceptance/retired-resource-names-its-successor.md`,
+# `IAM-SUC-10`): преемник снятого ресурса существовал ДАННЫМИ и не доезжал до
+# арендатора ни одним путём чтения. Клиент, чьё правило отвергнуто на
+# `compute.disk`, узнать `storage.volumes` мог только чтением исходников —
+# догадка по имени неверна ровно там, где нужна: имена намеренно не
+# единообразны (`compute.instance` единственного числа, `storage.volumes`
+# множественного).
+#
+# ПОЧЕМУ КЕЙС КРАЯ, а не проба слоя use-case. Предикат задачи звучит «арендатор
+# узнаёт преемника ОДНИМ вызовом» — это утверждение о теле ответа ПО ПРОВОДУ.
+# Проба слоя use-case зовёт хендлер напрямую, и мимо неё проходят край,
+# перекодирование в camelCase и пересборка потребителя: неизвестное краю поле он
+# отбрасывает МОЛЧА.
+#
+# ОБЕ половины утверждаются ОДНИМ телом, а не двумя прогонами: состояние
+# «ресурс в обоих перечнях сразу» и «ни в одном» наблюдаемо только так.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="CONF-G-03-catalog-retired-successor",
+    title="GET /iam/v1/permissionCatalog as jwtBootstrap → 200, retiredResources[] несёт supersededBy, и грантуемое снятого не содержит",
+    classes=["CONF", "CRUD"],
+    priority="P1",
+    steps=[
+        Step(
+            name="list-permission-catalog-retired",
+            method="GET",
+            path="/iam/v1/permissionCatalog",
+            auth="jwtBootstrap",
+            test_script=[
+                *assert_status(200),
+                "pm.test('retiredResources — непустой массив в camelCase на проводе', () => {",
+                "  const j = pm.response.json();",
+                "  pm.expect(j.retiredResources, JSON.stringify(j)).to.be.an('array');",
+                "  pm.expect(j.retiredResources.length, 'снятых записей').to.be.greaterThan(0);",
+                "});",
+                "pm.test('compute.disk назван снятым и его преемник — storage.volumes', () => {",
+                "  const j = pm.response.json();",
+                "  const disk = (j.retiredResources || []).find(r => r.resource === 'compute.disk');",
+                "  pm.expect(disk, 'compute.disk в перечне снятого: ' + JSON.stringify(j.retiredResources))",
+                "    .to.be.an('object');",
+                "  pm.expect(disk).to.have.property('supersededBy');",
+                "  pm.expect(disk.supersededBy, 'преемник compute.disk').to.equal('storage.volumes');",
+                "});",
+                "pm.test('преемник КАЖДОЙ названной записи — живой ключ ТОГО ЖЕ тела', () => {",
+                "  const j = pm.response.json();",
+                "  const grantable = (j.modules || []).reduce((acc, m) => acc.concat(",
+                "    (m.resources || []).map(r => m.module + '.' + r.resource)), []);",
+                "  // Положительный контроль: перечень грантуемого непуст, иначе",
+                "  // членство преемника проверялось бы в пустом множестве.",
+                "  pm.expect(grantable.length, 'грантуемых пар в теле').to.be.greaterThan(0);",
+                "  let named = 0;",
+                "  (j.retiredResources || []).forEach(r => {",
+                "    if (!r.supersededBy) { return; }",
+                "    named += 1;",
+                "    pm.expect(grantable, 'преемник ' + r.supersededBy + ' снятого ' + r.resource +",
+                "      ' — живой ключ того же ответа').to.include(r.supersededBy);",
+                "  });",
+                "  pm.expect(named, 'записей с названным преемником').to.be.greaterThan(0);",
+                "});",
+                "pm.test('снятое НЕ попало в перечень ГРАНТУЕМОГО того же тела', () => {",
+                "  const j = pm.response.json();",
+                "  const grantable = (j.modules || []).reduce((acc, m) => acc.concat(",
+                "    (m.resources || []).map(r => m.module + '.' + r.resource)), []);",
+                "  pm.expect(grantable.length, 'грантуемых пар в теле').to.be.greaterThan(0);",
+                "  (j.retiredResources || []).forEach(r => {",
+                "    pm.expect(grantable, 'снятый ' + r.resource + ' НЕ предлагается к выдаче')",
+                "      .to.not.include(r.resource);",
+                "  });",
+                "});",
+                "pm.test('положительный контроль: три прежних поля на месте и непусты', () => {",
+                "  const j = pm.response.json();",
+                "  // Без него «снятого нет в грантуемом» зеленело бы на пустом ответе.",
+                "  pm.expect(j.modules, 'modules').to.be.an('array').that.is.not.empty;",
+                "  pm.expect(j.closedVerbs, 'closedVerbs').to.be.an('array').that.is.not.empty;",
+                "  pm.expect(j.wildcardPolicy, 'wildcardPolicy').to.be.an('object');",
+                "});",
+            ],
+        ),
+    ],
+))

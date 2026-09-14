@@ -84,7 +84,7 @@ func TestAuthoredCreateIsAcceptedAndProducesNoPerObjectRelation(t *testing.T) {
 	// молча.
 	rows, err := kanamepg.NewCatalogRepo(pool).ReadLiveCatalog(ctx)
 	require.NoError(t, err)
-	facts, err := catalog.NewFacts(rows)
+	facts, err := catalog.NewFacts(catalog.Halves{Live: rows})
 	require.NoError(t, err)
 
 	fgaType, ok := authzmap.ObjectType("storage", "volumes")

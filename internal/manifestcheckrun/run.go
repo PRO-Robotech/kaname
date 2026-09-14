@@ -184,7 +184,7 @@ func checkRights(root string, paths []string, relationOracle manifest.RelationOr
 	// того же перечня, которым миграция посеяла строки, поэтому вердикт
 	// команды остаётся воспроизводимым из ДЕРЕВА и базы не требует — иначе
 	// сборочная проверка стала бы функцией состояния чужой базы.
-	facts, ferr := catalog.NewFacts(seed.LiteralRows())
+	facts, ferr := catalog.NewFacts(catalog.Halves{Live: seed.LiteralRows()})
 	if ferr != nil {
 		_, _ = fmt.Fprintf(stderr,
 			"проверка прав НЕ ИСПОЛНЯЛАСЬ: каталожный факт не собран: %v\n", ferr)

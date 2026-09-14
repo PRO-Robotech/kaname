@@ -65,7 +65,7 @@ func factsFromRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool) *catal
 	t.Helper()
 	rows, err := kanamepg.NewCatalogRepo(pool).ReadLiveCatalog(ctx)
 	require.NoError(t, err, "чтение живого каталога портом службы")
-	facts, err := catalog.NewFacts(rows)
+	facts, err := catalog.NewFacts(catalog.Halves{Live: rows})
 	require.NoError(t, err, "сборка каталожного факта из живых строк")
 	return facts
 }

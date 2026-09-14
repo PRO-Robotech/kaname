@@ -45,7 +45,7 @@ import (
 // набор чего попало».
 func appliedTypeFacts(t *testing.T) *catalog.Facts {
 	t.Helper()
-	f, err := catalog.NewFacts(catalog.Rows{
+	f, err := catalog.NewFacts(catalog.Halves{Live: catalog.Rows{
 		Modules: []string{"billing", "vpc"},
 		Resources: []catalog.ResourceRow{
 			{Module: "billing", Resource: "invoice", ObjectType: "billing_invoice"},
@@ -59,7 +59,7 @@ func appliedTypeFacts(t *testing.T) *catalog.Facts {
 			{Module: "vpc", Resource: "network", Verb: "update", PerObject: true},
 			{Module: "vpc", Resource: "network", Verb: "delete", PerObject: true},
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("фикстура каталога не собралась: %v", err)
 	}

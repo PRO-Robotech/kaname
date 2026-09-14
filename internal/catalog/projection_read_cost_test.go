@@ -45,7 +45,7 @@ func benchDotted() []string {
 
 // BenchmarkTranslatorFromRows — переходник ПОСЛЕ правки (словарь снимка).
 func BenchmarkTranslatorFromRows(b *testing.B) {
-	f, err := catalog.NewFacts(seed.LiteralRows())
+	f, err := catalog.NewFacts(catalog.Halves{Live: seed.LiteralRows()})
 	if err != nil {
 		b.Fatalf("снимок: %v", err)
 	}
@@ -80,7 +80,7 @@ func BenchmarkTranslatorFromBuildTable(b *testing.B) {
 // BenchmarkRoleVerbsFromSelectors — раскрытие целиком, на подстановке `*` по
 // всем посеянным типам: это то, что исполняется на создании и правке роли.
 func BenchmarkRoleVerbsFromSelectors(b *testing.B) {
-	f, err := catalog.NewFacts(seed.LiteralRows())
+	f, err := catalog.NewFacts(catalog.Halves{Live: seed.LiteralRows()})
 	if err != nil {
 		b.Fatalf("снимок: %v", err)
 	}
@@ -101,7 +101,7 @@ func BenchmarkNewFacts(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := catalog.NewFacts(rows); err != nil {
+		if _, err := catalog.NewFacts(catalog.Halves{Live: rows}); err != nil {
 			b.Fatalf("снимок: %v", err)
 		}
 	}
