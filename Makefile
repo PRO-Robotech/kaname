@@ -202,6 +202,9 @@ lint:
 	  echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)"; \
 	  exit 2; \
 	fi
+	@echo "кэш линтера: $(GOLANGCI_LINT_CACHE)"; \
+	echo "  свой у ЭТОЙ рабочей копии — общий (~/.cache/golangci-lint) ключуется содержимым"; \
+	echo "  пакета, не деревом, и возвращает разбор ЧУЖИХ файлов с чужими путями"
 	golangci-lint run --timeout=10m --config=.github/golangci.yml ./...
 
 # audit-list-filter — CI gate for kaname's listing surface: every method that

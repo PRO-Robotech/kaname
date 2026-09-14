@@ -192,7 +192,7 @@ func (f *delFakeRepo) Close() {}
 
 type delFakeReader struct{ repo *delFakeRepo }
 
-func (r delFakeReader) Accounts() account.ReaderIface { return delAcctReader{r.repo} }
+func (r delFakeReader) Accounts() account.ReaderIface { return delAcctReader(r) }
 func (r delFakeReader) Projects() project.ReaderIface { return nil }
 func (r delFakeReader) Users() user.ReaderIface       { return nil }
 func (r delFakeReader) ServiceAccounts() service_account.ReaderIface {
@@ -201,7 +201,7 @@ func (r delFakeReader) ServiceAccounts() service_account.ReaderIface {
 func (r delFakeReader) Groups() group.ReaderIface { return nil }
 func (r delFakeReader) Roles() role.ReaderIface   { return nil }
 func (r delFakeReader) AccessBindings() access_binding.ReaderIface {
-	return delABReader{r.repo}
+	return delABReader(r)
 }
 func (r delFakeReader) Commit(context.Context) error   { return nil }
 func (r delFakeReader) Rollback(context.Context) error { return nil }

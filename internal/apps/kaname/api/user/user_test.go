@@ -263,7 +263,7 @@ type fakeURdr struct{ parent *fakeUserRepo }
 
 func (fakeURdr) Accounts() account.ReaderIface                { return fakeUserAccR{} }
 func (fakeURdr) Projects() project.ReaderIface                { return nil }
-func (r fakeURdr) Users() repouser.ReaderIface                { return fakeUserUR{parent: r.parent} }
+func (r fakeURdr) Users() repouser.ReaderIface                { return fakeUserUR(r) }
 func (fakeURdr) ServiceAccounts() service_account.ReaderIface { return nil }
 func (fakeURdr) Groups() group.ReaderIface                    { return nil }
 func (fakeURdr) Roles() role.ReaderIface                      { return nil }
@@ -606,7 +606,7 @@ func (w *fakeUserUW) SetInviteStatus(context.Context, domain.UserID, domain.Invi
 // (services/iam/internal/apps/kaname/api/listvisibility). nil здесь означает
 // «сузить нечем», и списочный use-case обязан на нём ОТКАЗАТЬ, а не листать
 // ненаречённое.
-func (_ fakeURdr) Visibility() visibility.ReaderIface { return nil }
+func (fakeURdr) Visibility() visibility.ReaderIface { return nil }
 
 // Visibility — дублёр структурных фактов о вызывающем не несёт: они читаются
 // живой БД, и пробы, которые их проверяют, гоняют настоящий Postgres
