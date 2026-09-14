@@ -183,7 +183,7 @@ func kindCounts(t *testing.T, records []*iamv1.GrantSurfaceRecord) map[iamv1.Gra
 func TestABList_R914_EnumerationReturnsAllThreeKinds(t *testing.T) {
 	repo, fga := newGrantSurfaceFixture(t)
 	admins := &stubClusterAdmins{rows: []domain.ClusterAdminEntry{{
-		ClusterAdminGrantID: "cag_0000000000000000",
+		ClusterAdminGrantID: "cag_00000000000000000",
 		SubjectType:         "user",
 		SubjectID:           "usr_root------------",
 		GrantedAt:           time.Now().UTC(),
@@ -229,7 +229,7 @@ func TestABList_R914_EnumerationReturnsAllThreeKinds(t *testing.T) {
 func TestABList_R914_TenantSeesNoClusterAdmins(t *testing.T) {
 	repo, fga := newGrantSurfaceFixture(t)
 	admins := &stubClusterAdmins{rows: []domain.ClusterAdminEntry{{
-		ClusterAdminGrantID: "cag_0000000000000000",
+		ClusterAdminGrantID: "cag_00000000000000000",
 		SubjectType:         "user",
 		SubjectID:           "usr_root------------",
 	}}}
