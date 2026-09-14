@@ -5,8 +5,23 @@ package pg
 
 // user_repo.go — pgxpool-impl для user.ReaderIface / WriterIface.
 //
-// User is scoped per-Account (один Kratos identity → N User-row); поля
-// {account_id, invite_status, invited_by} живут в users.
+// Строка человека — ОДНА НА ПЛАТФОРМУ, а не одна на аккаунт. Это свойство
+// ключа, а не соглашения: `users_identity_email_uniq (lower(email))` объявлен
+// БЕЗ условия, `users_identity_external_id_uniq (external_id) WHERE
+// external_id <> ''` — с условием на непустоту. Принадлежность аккаунтам
+// выражают ЧЛЕНСТВА (`memberships`), и их у человека может быть несколько.
+//
+// Здесь стояло «User is scoped per-Account (один Kratos identity → N User-row)»
+// — верное до отрыва идентичности от аккаунта (стадия S4-expand) и ложное
+// после. Утверждение расходилось с перечнем инвариантов НИЖЕ В ЭТОЙ ЖЕ шапке:
+// там уже стояли глобальные ключи. Два места об одном предмете, и неверным было
+// то, которое читают первым.
+//
+// Колонка `users.account_id` при этом ЖИВА и называет ОДИН аккаунт из многих —
+// легаси-поле перехода. Читать её как «аккаунт человека» НЕЛЬЗЯ: у человека их
+// столько, сколько членств, и колонка выбирает из них одно без правила выбора.
+// Её снятие — предмет открытой задачи kacho#1351 (стадия S4-contract), у неё же
+// живёт предикат снятия; здесь он не пересказывается.
 //
 // Within-service refs — DB-level invariants:
 //   - UNIQUE (lower(email))                                  → 23505 / iamerr.ErrAlreadyExists
