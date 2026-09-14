@@ -80,6 +80,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -144,6 +145,8 @@ type fixtureFormCensus struct {
 	TestFiles    int
 	StringLits   int
 	IDPositions  int
+	ByOwnForm    int
+	ByCommon     int
 	Claims       int
 	ByForm       map[idPositionForm]int
 	ScopePkgs    []string
@@ -370,6 +373,7 @@ func inspectFixtureForm(prod []sourceFile, tests []testFile, serviceDir string, 
 	}
 	sort.Strings(c.ScopePkgs)
 
+	ownForms := ownFormOf(filepath.Join(serviceDir, "internal", "domain"))
 	for _, tf := range tests {
 		for _, lit := range collectIDPositions(tf.FSet, tf.Path, tf.AST, &c) {
 			prefix, claims := claimedPrefix(lit.Value, c.Prefixes)
@@ -378,8 +382,17 @@ func inspectFixtureForm(prod []sourceFile, tests []testFile, serviceDir string, 
 			}
 			c.Claims++
 			lit.Prefix = prefix
-			// Вердикт выносит ПРОДУКТ, а не копия предиката.
-			ok := shared.ValidateResourceID(lit.Value, prefix, "id") == nil
+			// Вердикт выносит ПРОДУКТ, а не копия предиката — и тот ЕГО валидатор,
+			// который продукт к этому типу действительно применяет: у
+			// самопроверяющегося newtype своя форма, общий её отвергает.
+			var ok bool
+			if own, has := ownForms[prefix]; has {
+				ok = own.MatchString(lit.Value)
+				c.ByOwnForm++
+			} else {
+				ok = shared.ValidateResourceID(lit.Value, prefix, "id") == nil
+				c.ByCommon++
+			}
 			dir := filepath.ToSlash(filepath.Dir(lit.Path))
 			_, inScope := scope[dir]
 			if !inScope {
@@ -503,6 +516,9 @@ func TestFixtureIdentifiersPassTheProductFormCheck(t *testing.T) {
 	t.Logf("охват (пакеты, чей прод судит форму своего идентификатора): %s",
 		strings.Join(c.ScopePkgs, " "))
 	t.Logf("префиксы, выведенные из собственного пакета domain: %s", strings.Join(c.Prefixes, " "))
+	t.Logf("чем судилось: собственной формой владельца %d · общим валидатором %d "+
+		"(ноль слева значит, что самопроверяющихся типов в фикстурах нет, а НЕ что их не искали)",
+		c.ByOwnForm, c.ByCommon)
 	{
 		byPkg := make([]string, 0, len(c.ByPackage))
 		for k, v := range c.ByPackage {
@@ -541,4 +557,41 @@ func TestFixtureIdentifiersPassTheProductFormCheck(t *testing.T) {
 			"НАМЕРЕННА, пометьте её комментарием «%s: <причина>»:\n%s",
 			deliberateBadFormMark, strings.Join(c.Findings, "\n"))
 	}
+}
+
+// ownFormOf — СОБСТВЕННАЯ форма идентификатора, если владелец её объявил.
+//
+// Продукт судит разные типы РАЗНЫМИ валидаторами, и общий `ValidateResourceID`
+// применим не ко всем: он требует единой чеканной длины, а самопроверяющийся
+// newtype вправе объявить свою. Наблюдалось: выдача админа кластера чеканится
+// как приставка плюс семнадцать знаков тела, её собственная форма это и
+// требует, а общий валидатор такую строку отвергает — и ни одного вызова
+// общего с этой приставкой в прод-коде нет.
+//
+// Судить фикстуру валидатором, которого продукт для её типа НЕ ПРИМЕНЯЕТ,
+// значит требовать формы, которую продукт сам не чеканит. Поэтому перечень
+// выводится из объявлений владельца, а не выписывается: появится новый
+// самопроверяющийся тип — он попадёт сюда сам.
+func ownFormOf(domainDir string) map[string]*regexp.Regexp {
+	out := map[string]*regexp.Regexp{}
+	decl := regexp.MustCompile("`\\^([a-z]{3,4})_\\[[^`]*`")
+	_ = filepath.Walk(domainDir, func(p string, fi fs.FileInfo, err error) error {
+		if err != nil || fi.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		for _, m := range decl.FindAllStringSubmatch(string(b), -1) {
+			body := strings.Trim(m[0], "`")
+			re, err := regexp.Compile(body)
+			if err != nil {
+				continue
+			}
+			out[m[1]] = re
+		}
+		return nil
+	})
+	return out
 }
