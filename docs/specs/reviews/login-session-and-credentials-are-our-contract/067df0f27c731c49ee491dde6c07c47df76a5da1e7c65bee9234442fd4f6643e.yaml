@@ -24,8 +24,13 @@ reviewed_at: '2026-09-15'
 
 # ─── ВЕРДИКТ ВЫНЕСЕН; СОБЫТИЕ ПУБЛИКУЕТ ОРКЕСТРАТОР ────────────────────────
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-14T23:33:08Z'
+  ban1_lifted: true
+  ban1_lifted_note: >-
+    Санкция наступила в момент внешнего события (event выше), а не в момент вынесения
+    вердикта роли. Фазы Ф2…Ф6 эпика отказа от внешнего поставщика личности с этого
+    момента открыты к реализации; остальные фазы своих приёмок не имеют и не открыты.
   verdict_of_the_role: APPROVED
   why_issued_is_false: >-
     Заключение роли и effective approval — РАЗНЫЕ вещи, и круг 2 остановился
@@ -62,12 +67,29 @@ authority:
   allowlisted_for_role: false
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось», а не «да» и не «нет». Публикация
-    ожидается от оркестратора (см. effective_approval.publication_pending);
-    до неё запрет #1 остаётся в силе, и это состояние записи, а не вердикта.
+  type: issue_comment
+  status: performed
+  database_id: 5672288485
+  node_id: IC_kwDOTZqgWM8AAAABUhhA5Q
+  url: https://github.com/PRO-Robotech/kacho/issues/1267#issuecomment-5672288485
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5672288485
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1267
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-14T23:33:08Z'
+  body_sha256: 99d5c29bbe0ac53b1672ec5bd46b28aa0e2d80b57abb23b8aba965d65b7ee2cb
+  subject_sha256: 067df0f27c731c49ee491dde6c07c47df76a5da1e7c65bee9234442fd4f6643e
+  subject_revision: e2cab3cbafade6ff6c786017286749b31037e3af
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; сама запись задним числом
+    не правилась, её прежнее состояние — «не выполнилось» — остаётся в истории
+    неправленным. Отпечаток предмета сверен перед публикацией и совпал с тем, что
+    рецензент объявил в записи. Отпечаток тела снят с СЫРОГО ответа API, без обрезки
+    хвостового перевода строки: на этом уже расходился круг соседней приёмки.
 
 attribution:
   reviewer_kind: claude_agent
