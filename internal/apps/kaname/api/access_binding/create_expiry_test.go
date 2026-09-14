@@ -143,7 +143,7 @@ func TestCreateAccessBinding_ExpiresAt_TooSoon_RejectedByName(t *testing.T) {
 func TestListSubjectPrivileges_ExpiresAt_Surfaces(t *testing.T) {
 	repo := spRepo()
 	at := time.Now().UTC().Add(3 * time.Hour).Truncate(time.Second)
-	p := spPriv("acb00000000000bind01", "rol_v", "viewer", "account", spAccA, domain.ScopeAccount)
+	p := spPriv("acb00000000000bind01", "rol_v---------------", "viewer", "account", spAccA, domain.ScopeAccount)
 	p.ExpiresAt = &at
 	repo.seedSubjectPrivileges([]domain.SubjectPrivilege{p})
 

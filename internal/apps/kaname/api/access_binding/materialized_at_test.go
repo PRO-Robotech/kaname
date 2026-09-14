@@ -25,19 +25,19 @@ import (
 )
 
 func TestABList_MaterializedAt_ProjectedOnReadPath(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_mat", "", "rol_v", "kaname.view", nil)
-	live := domain.AccessBinding{ID: "acb00000000000live1", ResourceType: "account", ResourceID: "acc_mat", SubjectID: "usr_a"}
-	fresh := domain.AccessBinding{ID: "acb0000000000fresh2", ResourceType: "account", ResourceID: "acc_mat", SubjectID: "usr_b"}
+	repo := newABFakeRepo("usr_o", "acc_mat-------------", "", "rol_v---------------", "kaname.view", nil)
+	live := domain.AccessBinding{ID: "acb00000000000live1-", ResourceType: "account", ResourceID: "acc_mat-------------", SubjectID: "usr_a---------------"}
+	fresh := domain.AccessBinding{ID: "acb0000000000fresh2-", ResourceType: "account", ResourceID: "acc_mat-------------", SubjectID: "usr_b---------------"}
 	seedABListByScope(repo, []domain.AccessBinding{live, fresh})
 
 	at := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 	repo.seedMaterializedAt(live.ID, at)
 
 	fga := newABQueriesStub()
-	fga.set("v_get", "user:usr_x", []string{string(live.ID), string(fresh.ID)})
+	fga.set("v_get", "user:usr_x---------------", []string{string(live.ID), string(fresh.ID)})
 	h := newListHandler(repo, fga)
 
-	resp, err := h.List(newOwnerContext("usr_x"), &iamv1.ListAccessBindingsRequest{PageSize: 10})
+	resp, err := h.List(newOwnerContext("usr_x---------------"), &iamv1.ListAccessBindingsRequest{PageSize: 10})
 	require.NoError(t, err)
 
 	byID := map[string]*iamv1.AccessBinding{}

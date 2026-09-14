@@ -34,9 +34,9 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
-// IAM-1-25 (positive hierarchy-down): an account-tier role R∈acc-A bound on a project
-// prj-X∈acc-A passes the IsRoleAssignable gate (account→nested-project) and the binding
-// is created. IAM-1-25 (negative isolation): the SAME role R∈acc-A on a project
+// IAM-1-25 (positive hierarchy-down): an account-tier role R∈acc-A--------------- bound on a project
+// prj-X∈acc-A--------------- passes the IsRoleAssignable gate (account→nested-project) and the binding
+// is created. IAM-1-25 (negative isolation): the SAME role R∈acc-A--------------- on a project
 // prj-Y∈acc-B stays a sync FAILED_PRECONDITION "not assignable".
 func TestAB_IAM_1_25_AccountRoleOnNestedProject_Assignable(t *testing.T) {
 	if testing.Short() {
@@ -53,10 +53,10 @@ func TestAB_IAM_1_25_AccountRoleOnNestedProject_Assignable(t *testing.T) {
 	accA := seedAccountByOwner(t, ctx, pool, "acc-hd25a", ownerA)
 	prjX := seedProjectInAccount(t, ctx, pool, accA, "prj-hd25x")
 	member := mustSeedUser(t, ctx, pool, "hd25m")
-	// account-tier custom role in acc-A (definitionTier iam.account).
+	// account-tier custom role in acc-A--------------- (definitionTier iam.account).
 	roleA := seedAccountCustomRole(t, ctx, pool, accA, "hd25_acc_role")
 
-	// POSITIVE: account-role R∈acc-A on project prj-X∈acc-A → assignable (hierarchy-down).
+	// POSITIVE: account-role R∈acc-A--------------- on project prj-X∈acc-A--------------- → assignable (hierarchy-down).
 	op, err := h.Create(asUser(ctx, ownerA), &iamv1.CreateAccessBindingRequest{
 		SubjectType: "user", SubjectId: string(member), RoleId: string(roleA),
 		ScopeType: "iam.project", ScopeId: string(prjX),
@@ -68,7 +68,7 @@ func TestAB_IAM_1_25_AccountRoleOnNestedProject_Assignable(t *testing.T) {
 	assert.Equal(t, 1, bindingCount(t, ctx, repo, roleA, "project", string(prjX)),
 		"binding materialized on the nested project")
 
-	// NEGATIVE (isolation): the same account-role R∈acc-A on a project prj-Y∈acc-B
+	// NEGATIVE (isolation): the same account-role R∈acc-A--------------- on a project prj-Y∈acc-B
 	// (a DIFFERENT account) stays a sync FAILED_PRECONDITION — hierarchy-down never
 	// crosses the account boundary. LEAST-INFO: the reject is the byte-identical
 	// not-found text of an ABSENT role, never the actionable definitionTier one — a

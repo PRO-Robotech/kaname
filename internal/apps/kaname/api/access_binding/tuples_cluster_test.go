@@ -102,20 +102,20 @@ func TestTuplesForBinding_ClusterScope_EmitsSystemAdmin(t *testing.T) {
 func TestTuplesForBinding_ClusterScope_ServiceAccountSubject(t *testing.T) {
 	b := domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeServiceAccount,
-		SubjectID:    "sva_test_sa00000001",
+		SubjectID:    "sva_test_sa00000001-",
 		ResourceType: "cluster",
 		ResourceID:   domain.ClusterSingletonID,
 	}
 	got := tuplesForBinding(b, []authzmap.Relation{"admin"})
 	require.Len(t, got, 1)
-	assert.Equal(t, "service_account:sva_test_sa00000001", got[0].User)
+	assert.Equal(t, "service_account:sva_test_sa00000001-", got[0].User)
 	assert.Equal(t, "system_admin", got[0].Relation)
 }
 
 func TestTuplesForBinding_ClusterScope_ViewerEmitsSystemViewer(t *testing.T) {
 	b := domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeUser,
-		SubjectID:    "usr_test_viewer0001",
+		SubjectID:    "usr_test_viewer0001-",
 		ResourceType: "cluster",
 		ResourceID:   domain.ClusterSingletonID,
 	}
@@ -132,11 +132,11 @@ func TestTuplesForBinding_NonCluster_UnchangedRelation(t *testing.T) {
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    "usr_test_sub00000001",
 		ResourceType: "account",
-		ResourceID:   "acc_test_account001",
+		ResourceID:   "acc_test_account001-",
 	}
 	got := tuplesForBinding(b, []authzmap.Relation{"admin"})
 	require.Len(t, got, 1)
 	assert.Equal(t, "admin", got[0].Relation,
 		"account scope must NOT remap admin→system_admin")
-	assert.Equal(t, "account:acc_test_account001", got[0].Object)
+	assert.Equal(t, "account:acc_test_account001-", got[0].Object)
 }

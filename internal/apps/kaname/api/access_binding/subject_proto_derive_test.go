@@ -33,27 +33,27 @@ func TestSubjectsFromProto_VBC16_DerivePrefix(t *testing.T) {
 	}{
 		{
 			name: "unspecified + usr prefix → user",
-			in:   &iamv1.Subject{Type: iamv1.SubjectType_SUBJECT_TYPE_UNSPECIFIED, Id: "usr_abc123"},
+			in:   &iamv1.Subject{Type: iamv1.SubjectType_SUBJECT_TYPE_UNSPECIFIED, Id: "usr_abc123----------"},
 			want: domain.SubjectTypeUser,
 		},
 		{
 			name: "unspecified + sva prefix → service_account",
-			in:   &iamv1.Subject{Type: iamv1.SubjectType_SUBJECT_TYPE_UNSPECIFIED, Id: "sva_abc123"},
+			in:   &iamv1.Subject{Type: iamv1.SubjectType_SUBJECT_TYPE_UNSPECIFIED, Id: "sva_abc123----------"},
 			want: domain.SubjectTypeServiceAccount,
 		},
 		{
 			name: "unspecified + grp prefix → group",
-			in:   &iamv1.Subject{Type: iamv1.SubjectType_SUBJECT_TYPE_UNSPECIFIED, Id: "grp_abc123"},
+			in:   &iamv1.Subject{Type: iamv1.SubjectType_SUBJECT_TYPE_UNSPECIFIED, Id: "grp_abc123----------"},
 			want: domain.SubjectTypeGroup,
 		},
 		{
 			name: "explicit USER enum wins over a mismatched id prefix",
-			in:   &iamv1.Subject{Type: iamv1.SubjectType_SUBJECT_TYPE_USER, Id: "sva_abc123"},
+			in:   &iamv1.Subject{Type: iamv1.SubjectType_SUBJECT_TYPE_USER, Id: "sva_abc123----------"},
 			want: domain.SubjectTypeUser,
 		},
 		{
 			name: "unspecified + unknown prefix → empty (validator rejects)",
-			in:   &iamv1.Subject{Type: iamv1.SubjectType_SUBJECT_TYPE_UNSPECIFIED, Id: "rol_bad"},
+			in:   &iamv1.Subject{Type: iamv1.SubjectType_SUBJECT_TYPE_UNSPECIFIED, Id: "rol_bad-------------"},
 			want: domain.SubjectType(""),
 		},
 		{

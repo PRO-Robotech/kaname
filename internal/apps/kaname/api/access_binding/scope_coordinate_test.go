@@ -69,46 +69,46 @@ func TestScopeCoordinate_UnknownDottedRejected(t *testing.T) {
 // ── request side wired through the handler (ListByScope) ─────────────────────────
 
 func TestABListByScope_AcceptsDottedScopePair(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_sc1", "", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_sc1-------------", "", "rol_v---------------", "kaname.view", nil)
 	seedABListByScope(repo, []domain.AccessBinding{
-		{ID: "acb00000000000scope1", ResourceType: "account", ResourceID: "acc_sc1", SubjectID: "usr_a"},
+		{ID: "acb00000000000scope1", ResourceType: "account", ResourceID: "acc_sc1-------------", SubjectID: "usr_a---------------"},
 	})
 	h := NewHandler(nil, nil, nil, NewListByScopeUseCase(repo), nil, nil, nil)
 
 	_, err := h.ListByScope(newOwnerContext("usr_o"), &iamv1.ListAccessBindingsByScopeRequest{
 		ScopeType: "iam.account",
-		ScopeId:   "acc_sc1",
+		ScopeId:   "acc_sc1-------------",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, domain.ResourceType("account"), repo.lastByScopeType,
 		"the dotted scopeType must reach the use-case as the bare anchor kind")
-	assert.Equal(t, "acc_sc1", repo.lastByScopeID)
+	assert.Equal(t, "acc_sc1-------------", repo.lastByScopeID)
 }
 
 func TestABListByScope_LegacyResourcePairStillWorks(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_sc2", "", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_sc2-------------", "", "rol_v---------------", "kaname.view", nil)
 	seedABListByScope(repo, []domain.AccessBinding{
-		{ID: "acb00000000000scope2", ResourceType: "account", ResourceID: "acc_sc2", SubjectID: "usr_a"},
+		{ID: "acb00000000000scope2", ResourceType: "account", ResourceID: "acc_sc2-------------", SubjectID: "usr_a---------------"},
 	})
 	h := NewHandler(nil, nil, nil, NewListByScopeUseCase(repo), nil, nil, nil)
 
 	_, err := h.ListByScope(newOwnerContext("usr_o"), &iamv1.ListAccessBindingsByScopeRequest{
 		ResourceType: "account",
-		ResourceId:   "acc_sc2",
+		ResourceId:   "acc_sc2-------------",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, domain.ResourceType("account"), repo.lastByScopeType)
-	assert.Equal(t, "acc_sc2", repo.lastByScopeID)
+	assert.Equal(t, "acc_sc2-------------", repo.lastByScopeID)
 }
 
 // ── response side: SubjectPrivilege carries BOTH spellings ───────────────────────
 
 func TestSubjectPrivilegeToProto_FillsBothScopeSpellings(t *testing.T) {
 	got := subjectPrivilegeToProto(domain.SubjectPrivilege{
-		BindingID:    "acb00000000000priv1",
-		RoleID:       "rol00000000000view1",
+		BindingID:    "acb00000000000priv1-",
+		RoleID:       "rol00000000000view1-",
 		ResourceType: "project",
-		ResourceID:   "prj-77",
+		ResourceID:   "prj-77--------------",
 		Scope:        domain.ScopeProject,
 		Status:       domain.AccessBindingStatusActive,
 		CreatedAt:    time.Now(),
@@ -116,8 +116,8 @@ func TestSubjectPrivilegeToProto_FillsBothScopeSpellings(t *testing.T) {
 
 	assert.Equal(t, "iam.project", got.GetScopeType(),
 		"canonical dotted scope_type — same spelling as AccessBinding.scope_type")
-	assert.Equal(t, "prj-77", got.GetScopeId())
+	assert.Equal(t, "prj-77--------------", got.GetScopeId())
 	// Back-compat: the legacy pair keeps its exact previous values.
 	assert.Equal(t, "project", got.GetResourceType())
-	assert.Equal(t, "prj-77", got.GetResourceId())
+	assert.Equal(t, "prj-77--------------", got.GetResourceId())
 }

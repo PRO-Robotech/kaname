@@ -66,9 +66,19 @@ var ErrServiceAccountDisabled = stderrors.New("service account disabled")
 // TokenEnrichmentUserPort — read-side dependency: resolve a User mirror by its
 // external identity subject (Kratos `sub`).
 type TokenEnrichmentUserPort interface {
-	// FindByExternalID returns EVERY User row for an identity across every
-	// Account, whatever its state. The first row that may authenticate is the
-	// default active account.
+	// FindByExternalID returns the identity's User row AS IT IS, whatever its
+	// state. A set is returned, not a single row, because the question asked
+	// here is "what state is this subject in", and that question is put to the
+	// rows as they are rather than to a filtered subset.
+	//
+	// Its length is AT MOST ONE for a non-empty subject, and that is a property
+	// of the key, not of the caller: `users_identity_external_id_uniq` is
+	// declared on `external_id` globally, predicated on non-emptiness. Both callers refuse an
+	// empty subject with 400 before reaching here. The plural wording this
+	// comment used to carry ("EVERY row across every Account", "the first row
+	// that may authenticate is the default active account") described the world
+	// before identity was decoupled from the account; belonging is now carried
+	// by memberships, and the identity row says nothing about it.
 	//
 	// An ACTIVE-filtering variant is deliberately absent. That filter answers
 	// "give me the usable rows", which is the wrong question here: a blocked
@@ -421,8 +431,13 @@ func (s *TokenEnrichmentService) EnrichClaims(ctx context.Context, subject strin
 	}
 	for _, u := range users {
 		if u.InviteStatus.MayAuthenticate() {
-			// A membership set may mix states across accounts; the first row that
-			// may authenticate is the default active account.
+			// The loop is a FORM, not a choice among many: for a non-empty
+			// subject the set holds at most one row (global identity key), so
+			// this reads the state of THAT row. The comment here used to say
+			// "a membership set may mix states across accounts; the first row
+			// that may authenticate is the default active account" — true while
+			// a person was one row per account, false since. Cross-account state
+			// lives in `memberships`, which this path does not read.
 			return s.userClaims(u, subject, hookCtx),
 				ResolvedPrincipal{Kind: PrincipalUser, UserID: string(u.ID)}, nil
 		}

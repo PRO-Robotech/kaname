@@ -25,12 +25,12 @@ import (
 // resource they own.
 func TestAccessBinding_Delete_OwnerCanRevokeAnyBindingOnOwnResource(t *testing.T) {
 	const (
-		ownerID   = "usr_acct_owner"
-		accountID = "acc_test_account"
-		projectID = "prj_test_project"
-		roleID    = "rol_viewer_test_001"
+		ownerID   = "usr_acct_owner------"
+		accountID = "acc_test_account----"
+		projectID = "prj_test_project----"
+		roleID    = "rol_viewer_test_001-"
 		roleName  = "kaname.view"
-		subjectID = "usr_strang_subject"
+		subjectID = "usr_strang_subject--"
 	)
 
 	repo := newABFakeRepo(ownerID, accountID, projectID, roleID, roleName, nil)
@@ -68,12 +68,12 @@ func TestAccessBinding_Delete_OwnerCanRevokeAnyBindingOnOwnResource(t *testing.T
 // Stranger (neither owner nor subject nor FGA admin) is denied.
 func TestAccessBinding_Delete_StrangerDenied(t *testing.T) {
 	const (
-		ownerID   = "usr_acct_owner"
-		accountID = "acc_test_account"
-		projectID = "prj_test_project"
-		roleID    = "rol_viewer_test_001"
+		ownerID   = "usr_acct_owner------"
+		accountID = "acc_test_account----"
+		projectID = "prj_test_project----"
+		roleID    = "rol_viewer_test_001-"
 		roleName  = "kaname.view"
-		subjectID = "usr_strang_subject"
+		subjectID = "usr_strang_subject--"
 	)
 
 	repo := newABFakeRepo(ownerID, accountID, projectID, roleID, roleName, nil)
@@ -107,7 +107,7 @@ func TestAccessBinding_Delete_StrangerDenied(t *testing.T) {
 	deleteUC := NewDeleteAccessBindingUseCase(repo, opsRepo).WithRelationStore(denyingFGA, nil)
 
 	ctxStranger := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr_random_outsider"})
+		operations.Principal{Type: "user", ID: "usr_random_outsider-"})
 
 	_, err = deleteUC.Execute(ctxStranger, abID)
 	if status.Code(err) != codes.PermissionDenied {
@@ -120,10 +120,10 @@ func TestAccessBinding_Delete_StrangerDenied(t *testing.T) {
 // test that self-deleting hasn't broken.
 func TestAccessBinding_Delete_SubjectIsOwner_Allowed(t *testing.T) {
 	const (
-		ownerID   = "usr_owner_and_subject"
-		accountID = "acc_test_account"
-		projectID = "prj_test_project"
-		roleID    = "rol_viewer_test_001"
+		ownerID   = "usr_owner_and_subjec"
+		accountID = "acc_test_account----"
+		projectID = "prj_test_project----"
+		roleID    = "rol_viewer_test_001-"
 		roleName  = "kaname.view"
 	)
 	// owner of the account IS the subject.

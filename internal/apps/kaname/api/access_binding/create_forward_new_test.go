@@ -112,12 +112,12 @@ var _ SelectorReconciler = (*recordingReconciler)(nil)
 // and never to the full path directly.
 func TestCreateAccessBinding_ObjectPass_UsesProvenNewEntryPoint(t *testing.T) {
 	const (
-		roleID     = "rol_fwdnew_role"
+		roleID     = "rol_fwdnew_role-----"
 		roleName   = "kaname.edit"
-		subjectID  = "usr_fwdnew_subject"
-		resourceID = "prj_fwdnew_project"
-		ownerID    = "usr_fwdnew_owner"
-		accountID  = "acc_fwdnew_account"
+		subjectID  = "usr_fwdnew_subject--"
+		resourceID = "prj_fwdnew_project--"
+		ownerID    = "usr_fwdnew_owner----"
+		accountID  = "acc_fwdnew_account--"
 	)
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID, roleName,
 		domain.Permissions{"iam.access_bindings.get", "iam.access_bindings.update"})

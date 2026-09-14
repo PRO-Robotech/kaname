@@ -71,12 +71,12 @@ func indexOfTxOp(trace []string, want string) int {
 // facts hold by the time the Operation reports done.
 func TestDeleteAccessBinding_RevokeSetIsStatedBeforeTheWriterTxCommits(t *testing.T) {
 	const (
-		roleID     = "rol_viewer_sync_001"
+		roleID     = "rol_viewer_sync_001-"
 		roleName   = "kaname.view"
-		subjectID  = "usr_sync_subject"
-		resourceID = "prj_sync_project"
-		ownerID    = "usr_sync_owner"
-		accountID  = "acc_sync_account"
+		subjectID  = "usr_sync_subject----"
+		resourceID = "prj_sync_project----"
+		ownerID    = "usr_sync_owner------"
+		accountID  = "acc_sync_account----"
 	)
 
 	perms := domain.Permissions{"iam.access_bindings.get", "iam.access_bindings.list"}

@@ -34,12 +34,12 @@ import (
 
 func TestAuditEmit_CreateEmitsGranted_DeleteEmitsRevoked(t *testing.T) {
 	const (
-		roleID    = "rol_admin_test_aud"
+		roleID    = "rol_admin_test_aud--"
 		roleName  = "admin"
-		subjectID = "usr_audit_subject"
-		resID     = "acc_audit_target"
-		ownerID   = "usr_audit_owner"
-		accountID = "acc_audit_account"
+		subjectID = "usr_audit_subject---"
+		resID     = "acc_audit_target----"
+		ownerID   = "usr_audit_owner-----"
+		accountID = "acc_audit_account---"
 	)
 
 	perms := domain.Permissions{"iam.access_bindings.admin"}

@@ -43,14 +43,14 @@ func seedClusterBinding(repo *abFakeRepo, subjectID string) domain.AccessBinding
 }
 
 func TestGetAccessBinding_ClusterScope_ClusterAdmin_Allowed(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
-	id := seedClusterBinding(repo, "usr_grantee") // binding granted to someone else
-	fga := newRecordingFGA()                      // Check returns true → FGA admin@cluster
+	repo := newABFakeRepo("usr_owner-----------", "acc00000000000ba01ab", "prj_test", "rol_v---------------", "kaname.view", nil)
+	id := seedClusterBinding(repo, "usr_grantee---------") // binding granted to someone else
+	fga := newRecordingFGA()                               // Check returns true → FGA admin@cluster
 	uc := NewGetAccessBindingUseCase(repo).WithRelationStore(fga, nil)
 
 	// Caller is NOT the subject, but holds cluster grant-authority via FGA.
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr_boot"})
+		operations.Principal{Type: "user", ID: "usr_boot------------"})
 
 	got, err := uc.Execute(ctx, id)
 	if err != nil {
@@ -62,13 +62,13 @@ func TestGetAccessBinding_ClusterScope_ClusterAdmin_Allowed(t *testing.T) {
 }
 
 func TestGetAccessBinding_ClusterScope_NonAdmin_Denied(t *testing.T) {
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
-	id := seedClusterBinding(repo, "usr_grantee")
+	repo := newABFakeRepo("usr_owner-----------", "acc00000000000ba01ab", "prj_test", "rol_v---------------", "kaname.view", nil)
+	id := seedClusterBinding(repo, "usr_grantee---------")
 	fga := &denyingFGA{} // FGA Check → false (no cluster admin relation)
 	uc := NewGetAccessBindingUseCase(repo).WithRelationStore(fga, nil)
 
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr_stranger"})
+		operations.Principal{Type: "user", ID: "usr_stranger--------"})
 
 	_, err := uc.Execute(ctx, id)
 	if status.Code(err) != codes.PermissionDenied {
@@ -79,13 +79,13 @@ func TestGetAccessBinding_ClusterScope_NonAdmin_Denied(t *testing.T) {
 func TestGetAccessBinding_ClusterScope_Subject_Allowed(t *testing.T) {
 	// The binding's own subject can always read it (self-grant visibility),
 	// regardless of FGA authority.
-	repo := newABFakeRepo("usr_owner", "acc00000000000ba01ab", "prj_test", "rol_v", "kaname.view", nil)
-	id := seedClusterBinding(repo, "usr_grantee")
+	repo := newABFakeRepo("usr_owner-----------", "acc00000000000ba01ab", "prj_test", "rol_v---------------", "kaname.view", nil)
+	id := seedClusterBinding(repo, "usr_grantee---------")
 	fga := &denyingFGA{}
 	uc := NewGetAccessBindingUseCase(repo).WithRelationStore(fga, nil)
 
 	ctx := operations.WithPrincipal(context.Background(),
-		operations.Principal{Type: "user", ID: "usr_grantee"})
+		operations.Principal{Type: "user", ID: "usr_grantee---------"})
 
 	if _, err := uc.Execute(ctx, id); err != nil {
 		t.Fatalf("subject must read their own cluster-scope binding, got %v", err)

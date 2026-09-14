@@ -29,12 +29,12 @@ import (
 
 // Default (flag unset) keeps hiding revoked rows — a revoked grant is not a grant.
 func TestABList_IncludeRevoked_DefaultsToFalse(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_ir1", "", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_ir1", "", "rol_v---------------", "kaname.view", nil)
 	fga := newABQueriesStub()
-	fga.set("v_list", "user:usr_x", []string{"acb000000000000keep1"})
+	fga.set("v_list", "user:usr_x---------------", []string{"acb000000000000keep1"})
 	h := newListHandler(repo, fga)
 
-	_, err := h.List(newOwnerContext("usr_x"), &iamv1.ListAccessBindingsRequest{PageSize: 10})
+	_, err := h.List(newOwnerContext("usr_x---------------"), &iamv1.ListAccessBindingsRequest{PageSize: 10})
 	require.NoError(t, err)
 	assert.False(t, repo.lastListFilter.IncludeRevoked,
 		"default must stay false — parity with ListByAccount/ListByRole")
@@ -43,12 +43,12 @@ func TestABList_IncludeRevoked_DefaultsToFalse(t *testing.T) {
 // The flag reaches the repo filter, so the audit-retention read is available on
 // the canonical path.
 func TestABList_IncludeRevoked_ReachesRepoFilter(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_ir2", "", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_ir2", "", "rol_v---------------", "kaname.view", nil)
 	fga := newABQueriesStub()
-	fga.set("v_list", "user:usr_x", []string{"acb000000000000keep1"})
+	fga.set("v_list", "user:usr_x---------------", []string{"acb000000000000keep1"})
 	h := newListHandler(repo, fga)
 
-	_, err := h.List(newOwnerContext("usr_x"), &iamv1.ListAccessBindingsRequest{
+	_, err := h.List(newOwnerContext("usr_x---------------"), &iamv1.ListAccessBindingsRequest{
 		PageSize:       10,
 		IncludeRevoked: true,
 	})
@@ -61,12 +61,12 @@ func TestABList_IncludeRevoked_ReachesRepoFilter(t *testing.T) {
 // making it a dedicated field instead of a filter key ("show me subject X's
 // revoked grants" needs both at once).
 func TestABList_IncludeRevoked_ComposesWithFilterPredicate(t *testing.T) {
-	repo := newABFakeRepo("usr_o", "acc_ir3", "", "rol_v", "kaname.view", nil)
+	repo := newABFakeRepo("usr_o", "acc_ir3", "", "rol_v---------------", "kaname.view", nil)
 	fga := newABQueriesStub()
-	fga.set("v_list", "user:usr_x", []string{"acb000000000000keep1"})
+	fga.set("v_list", "user:usr_x---------------", []string{"acb000000000000keep1"})
 	h := newListHandler(repo, fga)
 
-	_, err := h.List(newOwnerContext("usr_x"), &iamv1.ListAccessBindingsRequest{
+	_, err := h.List(newOwnerContext("usr_x---------------"), &iamv1.ListAccessBindingsRequest{
 		PageSize:       10,
 		Filter:         `subject="usr-42"`,
 		IncludeRevoked: true,

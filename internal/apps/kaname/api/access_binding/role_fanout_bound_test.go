@@ -83,7 +83,7 @@ func (f *fakeFanout) awaitReconciled(budget time.Duration) bool {
 }
 
 func TestRoleUpdate_C21_FanoutBoundExceeded_FailedPrecondition(t *testing.T) {
-	const ownerID, accountID, resourceID = "usr_owner_c21a", "acc_c21a", "prj_c21a"
+	const ownerID, accountID, resourceID = "usr_owner_c21a------", "acc_c21a------------", "prj_c21a------------"
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID178a, "viewer",
 		domain.Permissions{"compute.instance.*.get"})
 	repo.setRoleCustom(accountID) // custom role → Role.Update account-owner gate passes
@@ -107,7 +107,7 @@ func TestRoleUpdate_C21_FanoutBoundExceeded_FailedPrecondition(t *testing.T) {
 }
 
 func TestRoleUpdate_C21_FanoutWithinBound_Runs(t *testing.T) {
-	const ownerID, accountID, resourceID = "usr_owner_c21b", "acc_c21b", "prj_c21b"
+	const ownerID, accountID, resourceID = "usr_owner_c21b------", "acc_c21b------------", "prj_c21b------------"
 	repo := newABFakeRepo(ownerID, accountID, resourceID, roleID178b, "viewer",
 		domain.Permissions{"compute.instance.*.get"})
 	repo.setRoleCustom(accountID)

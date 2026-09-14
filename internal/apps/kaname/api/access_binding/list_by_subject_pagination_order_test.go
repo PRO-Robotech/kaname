@@ -70,7 +70,7 @@ const pageOrderGarbageToken = "!!! не base64 !!!"
 func pageOrderLawfulToken() string {
 	return pagetoken.Encode(pagetoken.Cursor{
 		CreatedAt: time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC),
-		ID:        "acb0000000000home01",
+		ID:        "acb0000000000home01-",
 	})
 }
 

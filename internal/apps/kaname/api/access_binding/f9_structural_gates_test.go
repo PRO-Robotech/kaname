@@ -24,7 +24,7 @@ func TestAB_IAM_1_26_ValidateScopeID(t *testing.T) {
 		wantErr bool
 	}{
 		{"account real-shaped id ok", "account", "acc7fq2m8k3rd0xwabc", false},
-		{"account synthetic id ok", "account", "acc_target_account", false},
+		{"account synthetic id ok", "account", "acc_target_account--", false},
 		{"project ok", "project", "prj-staging", false},
 		{"cluster singleton ok", "cluster", domain.ClusterSingletonID, false},
 		{"cluster wrong id rejected", "cluster", "cluster_other", true},

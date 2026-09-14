@@ -31,7 +31,7 @@ func seedAccountBinding(repo *abFakeRepo, accountID, roleID string, protected bo
 	repo.ab = &domain.AccessBinding{
 		ID:                 id,
 		SubjectType:        domain.SubjectTypeUser,
-		SubjectID:          "usr_some_subject01",
+		SubjectID:          "usr_some_subject01--",
 		RoleID:             domain.RoleID(roleID),
 		ResourceType:       "account",
 		ResourceID:         accountID,
@@ -45,7 +45,7 @@ func seedAccountBinding(repo *abFakeRepo, accountID, roleID string, protected bo
 
 // C-02: Delete on a protected binding → sync FAILED_PRECONDITION (before Operation).
 func TestAccessBinding_Delete_Protected_SyncFailedPrecondition(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_p6_del", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_p6_del----------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true)
 
@@ -65,7 +65,7 @@ func TestAccessBinding_Delete_Protected_SyncFailedPrecondition(t *testing.T) {
 // an authenticated non-owner learns (a) the binding exists and (b) it is protected,
 // regressing the uniform-403 existence-leak protection the not-found branch enforces.
 func TestAccessBinding_Delete_Protected_Unauthorized_NoLeak(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_p6_leak", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_p6_leak---------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true) // protected
 
@@ -87,7 +87,7 @@ func TestAccessBinding_Delete_Protected_Unauthorized_NoLeak(t *testing.T) {
 // C-02 negative-control: Delete on an unprotected binding passes the sync gate
 // (returns an Operation).
 func TestAccessBinding_Delete_Unprotected_NoSyncBlock(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_p6_del2", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_p6_del2---------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, false)
 
@@ -102,7 +102,7 @@ func TestAccessBinding_Delete_Unprotected_NoSyncBlock(t *testing.T) {
 
 // C-03: Update(update_mask=["deletion_protection"], false) clears the flag.
 func TestAccessBinding_Update_ClearsDeletionProtection(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_p6_upd", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_p6_upd----------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true)
 
@@ -123,7 +123,7 @@ func TestAccessBinding_Update_ClearsDeletionProtection(t *testing.T) {
 // C-03 update_mask discipline: an unknown / immutable field in the mask → sync
 // INVALID_ARGUMENT.
 func TestAccessBinding_Update_RejectsUnknownMaskField(t *testing.T) {
-	const ownerID, accountID, roleID = "usr_acct_owner", "acc_p6_mask", "rol_viewer_test_001"
+	const ownerID, accountID, roleID = "usr_acct_owner------", "acc_p6_mask---------", "rol_viewer_test_001-"
 	repo := newABFakeRepo(ownerID, accountID, "", roleID, "kaname.view", nil)
 	id := seedAccountBinding(repo, accountID, roleID, true)
 

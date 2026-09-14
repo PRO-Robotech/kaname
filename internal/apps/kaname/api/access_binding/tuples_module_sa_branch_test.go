@@ -68,9 +68,9 @@ func moduleSARules() domain.Rules {
 
 func moduleSABinding() domain.AccessBinding {
 	return domain.AccessBinding{
-		ID:           "acb_module_sa_probe001",
+		ID:           "acb_module_sa_probe0",
 		SubjectType:  domain.SubjectTypeServiceAccount,
-		SubjectID:    "sva_module_sa_probe001",
+		SubjectID:    "sva_module_sa_probe0",
 		ResourceType: "cluster",
 		ResourceID:   "cluster_root",
 	}

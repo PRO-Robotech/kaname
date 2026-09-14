@@ -312,8 +312,13 @@ func (h *Handler) Check(ctx context.Context, req *iamv1.CheckRequest) (*iamv1.Ch
 			// Подробность уходит в ЖУРНАЛ: у глагола есть логгер, и «ноль отказов
 			// за всю жизнь контроля» обязано быть заметно.
 			if h.logger != nil {
+				// Корреляционный идентификатор вызывающего доезжает до записи:
+				// поле `trace_id` объявлено на этой проверке ровно ради того,
+				// чтобы отказ нашёлся по нему, и до kacho#1351 не читалось
+				// ничем. Полоса публичная несла его и прежде — неверна была их
+				// РАЗНИЦА, и решал её никто.
 				h.logger.WarnContext(ctx, "authorization verdict unavailable",
-					slog.Any("error", err))
+					slog.Any("error", err), shared.TraceAttr(req.GetTraceId()))
 			}
 			return nil, status.Error(codes.Unavailable, shared.UnavailableMessage)
 		default:

@@ -50,8 +50,8 @@ import (
 // Insert returns ErrAlreadyExists (verbatim text) → operations worker
 // captures gRPC status with code AlreadyExists in op.Error.
 func TestCreateAccessBinding_DuplicateActive_OperationAlreadyExists(t *testing.T) {
-	const ownerUserID = "usr00000000000000test"
-	const accountID = "acc00000000000000test"
+	const ownerUserID = "usr00000000000000tes"
+	const accountID = "acc00000000000000tes"
 
 	repo := newStrictDupFakeRepo(ownerUserID, accountID)
 	opsRepo := newStrictFakeOpsRepo()
@@ -65,7 +65,7 @@ func TestCreateAccessBinding_DuplicateActive_OperationAlreadyExists(t *testing.T
 	b := domain.AccessBinding{
 		SubjectType:  domain.SubjectTypeUser,
 		SubjectID:    domain.SubjectID(ownerUserID),
-		RoleID:       "rol00000000000000iamvw",
+		RoleID:       "rol00000000000000iam",
 		ResourceType: "account",
 		ResourceID:   accountID,
 	}
