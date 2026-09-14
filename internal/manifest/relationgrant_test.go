@@ -113,7 +113,7 @@ const bindingRelationToServiceAccount = `    - subjects:
 // не тот отказ.
 const bindingRelationToGroup = `    - subjects:
         - {type: group, name: vpc-quota-readers}
-      grantedRelation: quota_reader
+      grantedRelation: fga_writer
       scopeType: iam.cluster
       scopeId: cluster_root
       target: allInScope
@@ -180,9 +180,13 @@ func TestMODRG01RelationGrantToOwnServiceAccountIsAccepted(t *testing.T) {
 // ── MOD-RG-08 · вторая ветвь получателя, положительный контроль к 09 ────────
 
 // TestMODRG08RelationGrantToGroupIsAcceptedWhenTheCanonAdmitsGroup — обе ветви
-// правила о получателе имеют ЖИВОЙ вход: на кластерном якоре отношений,
-// принимающих членство группы, два (`quota_reader`, `fga_writer`), и это не
-// синтетика.
+// правила о получателе имеют ЖИВОЙ вход: на кластерном якоре членство группы
+// принимает `fga_writer`, и это не синтетика.
+//
+// Прежде таких отношений было ДВА, и вторым стояло `quota_reader`; его снятие
+// (`kaname#59`) оставило ветвь с ОДНИМ живым входом. Число здесь не пиннится
+// намеренно — предмет пробы в том, что вход есть, а не в том, сколько их; но
+// убыль названа, чтобы следующий не принял единственность за случайность.
 //
 // Без этой пробы отказ MOD-RG-09 зеленел бы на реализации, отвергающей
 // получателя-группу ВСЕГДА.
@@ -271,7 +275,7 @@ func TestMODRG04NeitherGrantFormNamedIsRefused(t *testing.T) {
 // получателе судится КАНОНОМ, а не вторым перечнем.
 //
 // Положительный контроль — MOD-RG-08: ТА ЖЕ группа того же посева с отношением
-// `quota_reader` проходит.
+// `fga_writer` проходит.
 func TestMODRG09GroupRecipientRefusedWhenTheCanonDoesNotAdmitGroup(t *testing.T) {
 	doc := seedWithGroupAndBinding(`    - subjects:
         - {type: group, name: vpc-quota-readers}
@@ -316,7 +320,7 @@ func TestMODRG10UndeclaredRelationIsRefusedWithTheCanonList(t *testing.T) {
 	// Перечень обязан быть НАСТОЯЩИМ перечнем канона, а не парой имён: проба
 	// называет три далеко отстоящих друг от друга, чтобы обход по одному терму
 	// не прошёл за обход по всем.
-	for _, rel := range []string{"any_admin", "quota_reader", "system_viewer"} {
+	for _, rel := range []string{"any_admin", "fga_writer", "system_viewer"} {
 		if !strings.Contains(msg, rel) {
 			t.Errorf("перечень объявленных не называет %q: %s", rel, msg)
 		}

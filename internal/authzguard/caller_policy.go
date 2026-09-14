@@ -104,21 +104,11 @@ func GatewayFrontedInternalRPCs() []string {
 		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Create",
 		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Update",
 		"/kaname.cloud.iam.v1.InternalInteractiveClientService/Delete",
-		// InternalLimitService — administration of resource-count ceilings
-		// (issue #291). The five CRUD verbs are gateway-fronted: an operator acts
-		// through the edge, and no module has business dialling them.
-		//
-		// Resolve / ListChangedSince are deliberately ABSENT: they are
-		// service→service reads made by the OWNER of the counted resource type
-		// (vpc today, the other owners next), so restricting them to the
-		// api-gateway SA would make the capability unreachable by its only
-		// intended caller. They are gated instead by the narrow `quota_reader`
-		// relation — at the edge catalog and again in-handler.
-		"/kaname.cloud.iam.v1.InternalLimitService/Get",
-		"/kaname.cloud.iam.v1.InternalLimitService/List",
-		"/kaname.cloud.iam.v1.InternalLimitService/Create",
-		"/kaname.cloud.iam.v1.InternalLimitService/Update",
-		"/kaname.cloud.iam.v1.InternalLimitService/Delete",
+		// Пяти глаголов администрирования величин здесь больше нет: модуль снят
+		// целиком (стадия S4 kacho#2117, право читать пределы — kaname#59).
+		// Запись политики для несуществующего метода ничего не гейтит и читается
+		// как объявление живой поверхности — ровно тот класс, ради которого
+		// снималось само отношение.
 		// InternalModuleService — план и применение каталога прав модуля
 		// (kacho#1991). Все четыре фронтируются краем: оператор действует через
 		// него, а НИ ОДИН модуль эти глаголы не зовёт — замер, а не допущение:

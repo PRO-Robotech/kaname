@@ -157,7 +157,10 @@ func TestGrantedRelationGate_InjectionBothWays(t *testing.T) {
 				t.Fatalf("извлечена пара %q вместо %q", got, tc.wantPair)
 			}
 
-			missing := check.MissingGrantedRelations(grants, rels)
+			// Ведомость отозванных ПУСТА намеренно: предмет этой инъекции — извлечение
+			// выдач, а не вычитание отзыва; его доказывает соседний файл
+			// (`granted_relation_revoked_injection_test.go`).
+			missing := check.MissingGrantedRelations(grants, rels, nil)
 			if tc.wantFinding != (len(missing) == 1) {
 				t.Fatalf("инъекция: ожидали находка=%v для пары %s, получено %d:\n  %s",
 					tc.wantFinding, tc.wantPair, len(missing), strings.Join(missing, "\n  "))
