@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 // moduleSAMarker — признак модульной учётки, объявленный самой посеянной
@@ -36,9 +38,8 @@ var (
 		`(?is)^DELETE\s+FROM\s+kaname\.service_accounts\s+WHERE\s+id\s*(?:=|IN)\s*\(?\s*(.+?)\s*\)?$`)
 	reSADeleteByName = regexp.MustCompile(
 		`(?is)^DELETE\s+FROM\s+kaname\.service_accounts\s+WHERE\s+name\s*(?:=|IN)\s*\(?\s*(.+?)\s*\)?$`)
-	reSQLLineComment = regexp.MustCompile(`--.*`)
-	reSQLSpaceRun    = regexp.MustCompile(`\s+`)
-	reSQLLiteral     = regexp.MustCompile(`'((?:[^']|'')*)'`)
+	reSQLSpaceRun = regexp.MustCompile(`\s+`)
+	reSQLLiteral  = regexp.MustCompile(`'((?:[^']|'')*)'`)
 )
 
 // SeededServiceAccount — посеянная служебная учётка.
@@ -75,11 +76,13 @@ func FoldSeededServiceAccounts(ordered []string, bodies map[string]string) (
 	alive = map[string]SeededServiceAccount{}
 	byName := map[string]string{} // имя → id, чтобы снятие по имени находило строку
 	for _, name := range ordered {
-		body := bodies[name]
-		if i := strings.Index(body, "-- +goose Down"); i >= 0 {
-			body = body[:i] // обратный ход возвращает снятое — судится только прямой
-		}
-		code := reSQLLineComment.ReplaceAllString(body, "")
+		// Прямой ход и только он: обратный возвращает снятое, и строки, которых
+		// нет ни в одном развёрнутом дереве, посевом не являются. Разрез и снятие
+		// комментариев берутся у ЕДИНСТВЕННОГО владельца разбора
+		// (`migrations.MigrationUpSection`), а не переписываются здесь: шапка этого
+		// же файла требует переиспользовать общий помощник вместо копии, и копия
+		// разошлась бы с ним молча — на законном входе обе отвечают одинаково.
+		code := migrations.MigrationUpSection(bodies[name])
 		for _, raw := range strings.Split(code, ";") {
 			stmt := strings.TrimSpace(reSQLSpaceRun.ReplaceAllString(raw, " "))
 			if stmt == "" || !strings.Contains(stmt, "kaname.service_accounts") {
