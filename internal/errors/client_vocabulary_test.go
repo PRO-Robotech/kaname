@@ -17,13 +17,40 @@ package errors_test
 //     провод как есть: `shared.MapRepoErr` пропускает готовый статус сквозь
 //     себя (ветвь pass-through), то есть схлопывание в фиксированный текст его
 //     НЕ касается;
-//  2. литерал в `Wrapf(<признак>, …)` для тех признаков, чей текст
-//     `MapRepoErr` доносит до провода (`StripSentinel`).
+//  2. литерал в `Wrapf(<признак>, …)` для тех признаков, чей текст доезжает
+//     до провода (`passThroughSentinels`): `MapRepoErr` либо переводчик своей
+//     полосы кладёт в статус `StripSentinel`.
 //
-// Признаки `ErrInternal` и `ErrUnavailable` в перечень НЕ входят: их ветви
-// отдают фиксированный текст, и что бы автор ни написал в обёртке, арендатор
-// этого не увидит. Включить их значило бы краснеть на строках, которые
-// адресованы журналу.
+// Признаки полос ФИКСИРОВАННОГО текста (`fixedTextSentinels`) в перечень НЕ
+// входят: написанное в их обёртке адресовано журналу, и включить их значило бы
+// краснеть на строках, которых арендатор не увидит.
+//
+// ЭТО ПРЕДПОСЫЛКА, И ГЕЙТ ЕЁ ПРОВЕРЯЕТ, а не объявляет. Исключение верно ровно
+// пока КАЖДЫЙ переводчик отдаёт на этих полосах фиксированный текст; перестанет —
+// и литералы обёрток уедут на провод, выведенные из наблюдения этим же гейтом.
+// Прежде предпосылка стояла здесь прозой и разошлась с деревом молча (задачи
+// PRO-Robotech/kacho#2464, #2478): гейт был зелён, пока она была ложна. Теперь
+// `collectClientTexts` сперва спрашивает разбор `check.ScanFixedRefusalTexts` —
+// того же производителя, что у гейта дерева, на том же корпусе, — и отказывает,
+// если хоть одна конструкция на этих полосах не доказана фиксированной либо если
+// судить было не о чем.
+//
+// Корпус предпосылки — прод-код МОДУЛЯ, а не только `internal/`: переводчик,
+// решающий судьбу текста, вправе жить и в композиционном корне, и корпус более
+// узкий, чем процесс, был бы слеп ровно к нему. Переводчики зависимостей
+// (фундамент) в корпус не входят by construction — это граница, а не покрытие.
+//
+// Предпосылка судится по КОДУ статуса, а не по признаку: разбор без типов
+// цепочки признака не видит. Связь «признак → код полосы» названа в
+// `fixedTextSentinels` и держится инъекцией на каноническом переводчике —
+// `TestClientVocabularyPremiseInjection`. ГРАНИЦА, названная явно: в копиях
+// переводчика эту связь не держит ничто — копия, отдающая на ветви признака
+// недоступности код ЧУЖОЙ полосы, выведет его текст из-под обеих проверок.
+//
+// Вторая ось той же предпосылки — РАЗБИЕНИЕ: каждый признак, который пакет
+// объявляет, отнесён ровно к одному перечню (`sentinelPartition`). Проверка
+// кода доказывает, что полосы фиксированы, но не то, что исключены ИМЕННО их
+// признаки: признак вне обоих перечней выпадает из наблюдения молча.
 //
 // ГРАНИЦА, названная явно: адресат различает, а не слово. Тексты внутреннего
 // слушателя обращены к МОДУЛЮ и его оператору — они называют механизм
@@ -31,12 +58,15 @@ package errors_test
 // САМОИСТЕКАЕТ: запись, у которой не осталось ни одного попадания, — находка.
 //
 // Способность падать и молчать доказана инъекцией —
-// `TestClientVocabularyGateInjection`.
+// `TestClientVocabularyGateInjection` (словарь) и
+// `TestClientVocabularyPremiseInjection` (предпосылка).
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -44,13 +74,22 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/corelib/gitenv"
+
+	"github.com/PRO-Robotech/kaname/internal/check"
 )
 
 // serviceRoot — корень дерева службы относительно этого пакета.
 const serviceRoot = "../.."
 
-// passThroughSentinels — признаки, чей текст доезжает до провода дословно
-// (`shared.MapRepoErr` → `status.Error(code, StripSentinel(err))`).
+// passThroughSentinels — признаки, чей текст доезжает до провода дословно:
+// сам — через `shared.MapRepoErr` → `status.Error(code, StripSentinel(err))`, —
+// либо через переводчик своей полосы, который кладёт в статус тот же
+// `StripSentinel`. Критерий один — ДОЕЗЖАЕТ ЛИ текст обёртки, а не каким путём.
+//
+// Разбиение «каждый объявленный признак — ровно в одном перечне» держит
+// `sentinelPartition`: признак вне обоих перечней прежде выпадал отсюда молча —
+// так выпадали четыре последние записи ниже, пока проверки не было (задача
+// PRO-Robotech/kacho#2478).
 var passThroughSentinels = map[string]bool{
 	"ErrNotFound":            true,
 	"ErrAlreadyExists":       true,
@@ -64,6 +103,246 @@ var passThroughSentinels = map[string]bool{
 	"ErrQuotaRateExceeded":   true,
 	"ErrReferenceMissing":    true,
 	"ErrReferenceInUse":      true,
+	// Снятие права администратора кластера перевёртывает оба признака в
+	// предусловие с их же текстом (`cluster/revoke_admin.go`); что текст на
+	// проводе, утверждает интеграционная проба той же полосы.
+	"ErrSelfRevoke": true,
+	"ErrLastAdmin":  true,
+	// Полоса «членство несёт права» собирает статус из `StripSentinel(err)`
+	// (`shared.membershipRefusal`).
+	"ErrMembershipCarriesRights": true,
+	// Частный случай неверного аргумента: регистрация ресурса отдаёт его текст
+	// отказом по полю (`shared.InvalidArg("object", StripSentinel(err))`), а
+	// общая ветвь канонического переводчика — как любой неверный аргумент.
+	"ErrUnknownResourceType": true,
+}
+
+// fixedTextSentinels — признаки, чей текст на провод НЕ доезжает: их полоса
+// отдаёт фиксированный текст. Каждому назван КОД полосы — по коду судит разбор
+// `check.ScanFixedRefusalTexts`, и именно пара «признак → код» делает проверку
+// кода проверкой признака. Держит её инъекция на каноническом переводчике: для
+// каждой записи она находит ветвь признака, сверяет код и требует красного на
+// тексте цепочки.
+var fixedTextSentinels = map[string]string{
+	"ErrInternal":    "Internal",
+	"ErrUnavailable": "Unavailable",
+}
+
+// premiseOutcome — исход проверки предпосылки. Исходов ТРИ: «не проверена»
+// отдельна от «ложна», потому что чинятся они в разных местах — первая в
+// распознавателе или корпусе, вторая в переводчике.
+type premiseOutcome int
+
+const (
+	premiseHolds     premiseOutcome = iota // каждая конструкция на полосах доказана фиксированной
+	premiseFalse                           // хоть одна не доказана — исключение признаков не обосновано
+	premiseUnchecked                       // судить не о чем — «держится» было бы «не смотрели»
+)
+
+// judgePremise — ЧИСТЫЙ судья предпосылки над переписью разбора. Выделен ради
+// инъекции: доказывать способность падать на живой находке нельзя — такая проба
+// исчезает вместе с находкой, то есть ровно тогда, когда дерево починено.
+//
+// Возвращает исход и текст отказа; на `premiseHolds` текст пуст.
+func judgePremise(census check.RefusalTextCensus, findings []check.RefusalTextFinding) (premiseOutcome, string) {
+	lanes := fixedTextLanes()
+	switch {
+	case census.Files == 0:
+		return premiseUnchecked, fmt.Sprintf(
+			"предпосылка гейта словаря НЕ ПРОВЕРЕНА: обход не разобрал ни одного файла Go — "+
+				"исключение признаков полос %s ничем не обосновано, вердикт словаря беспредметен", lanes)
+	case census.Population == 0:
+		return premiseUnchecked, fmt.Sprintf(
+			"предпосылка гейта словаря НЕ ПРОВЕРЕНА: на полосах %s ноль конструкций при %d "+
+				"разобранных файлах и %d конструкциях статуса — распознаватель перестал их узнавать, "+
+				"и «предпосылка держится» было бы неотличимо от «не смотрели»",
+			lanes, census.Files, census.Constructions)
+	case census.Population != census.Fixed:
+		var b strings.Builder
+		broken := map[string]bool{}
+		for _, f := range findings {
+			fmt.Fprintf(&b, "\n  %s:%d — codes.%s, текст: %s", f.File, f.Line, f.Code, f.Expr)
+			for s, code := range fixedTextSentinels {
+				if code == f.Code {
+					broken[s] = true
+				}
+			}
+		}
+		return premiseFalse, fmt.Sprintf(
+			"предпосылка гейта словаря ЛОЖНА: на полосах %s текст не доказан фиксированным — "+
+				"конструкций %d из %d:%s\n\n"+
+				"Литералы в обёртках признаков %s уезжают на провод, а гейт выводит их из наблюдения. "+
+				"Чинится переводчик: текст полосы — у канонического (shared.UnavailableMessage) либо "+
+				"свой литерал; гейт дерева TestRefusalTextOnForeignCauseLanesIsFixed называет то же место. "+
+				"Если же текст на этой полосе решено доносить — признак переезжает в passThroughSentinels, "+
+				"и его обёртки становятся судимы.",
+			lanes, census.Population-census.Fixed, census.Population, b.String(),
+			strings.Join(sortedKeys(broken), ", "))
+	}
+	return premiseHolds, ""
+}
+
+// fixedTextLanes — коды полос фиксированного текста для текста отказа.
+func fixedTextLanes() string {
+	codes := make([]string, 0, len(fixedTextSentinels))
+	for _, c := range fixedTextSentinels {
+		codes = append(codes, c)
+	}
+	sort.Strings(codes)
+	return strings.Join(codes, "/")
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sentinelPartition — ЧИСТЫЙ судья разбиения: каждый объявленный признак
+// отнесён РОВНО к одному перечню, и каждая запись перечня называет объявленный
+// признак. Запись без признака — находка по той же причине, что послабление без
+// предмета: она переживёт свою причину и достанется следующей слепой зоне.
+func sentinelPartition(declared []string, pass map[string]bool, fixed map[string]string) (premiseOutcome, []string) {
+	if len(declared) == 0 {
+		return premiseUnchecked, []string{"признаков объявлено 0 — распознаватель разошёлся с пакетом, " +
+			"и «каждый отнесён» было бы неотличимо от «не смотрели»"}
+	}
+	isDeclared := map[string]bool{}
+	var findings []string
+	for _, s := range declared {
+		isDeclared[s] = true
+		_, inFixed := fixed[s]
+		switch {
+		case pass[s] && inFixed:
+			findings = append(findings, "признак "+s+" отнесён к обоим перечням сразу — "+
+				"его обёртки одновременно судимы и объявлены невидимыми арендатору")
+		case !pass[s] && !inFixed:
+			findings = append(findings, "признак "+s+" не отнесён ни к доходящим до провода "+
+				"(passThroughSentinels), ни к полосам фиксированного текста (fixedTextSentinels) — "+
+				"литералы его обёрток выпадают из наблюдения молча")
+		}
+	}
+	for _, s := range sortedKeys(pass) {
+		if !isDeclared[s] {
+			findings = append(findings, "запись "+s+" в passThroughSentinels называет признак, "+
+				"которого пакет не объявляет — снимите её")
+		}
+	}
+	for _, s := range sortedKeys(fixed) {
+		if !isDeclared[s] {
+			findings = append(findings, "запись "+s+" в fixedTextSentinels называет признак, "+
+				"которого пакет не объявляет — снимите её")
+		}
+	}
+	sort.Strings(findings)
+	if len(findings) > 0 {
+		return premiseFalse, findings
+	}
+	return premiseHolds, nil
+}
+
+// declaredSentinelsIn — имена признаков, объявленных исходниками пакета:
+// экспортируемые переменные ПАКЕТНОГО уровня с приставкой `Err`.
+//
+// Форма правой части НЕ судится намеренно: пакет объявляет признак тремя
+// способами (`stderrors.New`, `fmt.Errorf` поверх соседа, частный случай с
+// явным типом), и распознаватель, знающий их по форме, пропустил бы четвёртую
+// не нарушением, а невидимостью.
+func declaredSentinelsIn(srcs ...[]byte) ([]string, error) {
+	fset := token.NewFileSet()
+	seen := map[string]bool{}
+	for i, src := range srcs {
+		f, err := parser.ParseFile(fset, "src"+strconv.Itoa(i)+".go", src, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range f.Decls {
+			gd, ok := d.(*ast.GenDecl)
+			if !ok || gd.Tok != token.VAR {
+				continue
+			}
+			for _, sp := range gd.Specs {
+				vs, ok := sp.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for _, n := range vs.Names {
+					if strings.HasPrefix(n.Name, "Err") && n.IsExported() {
+						seen[n.Name] = true
+					}
+				}
+			}
+		}
+	}
+	return sortedKeys(seen), nil
+}
+
+// sentinelPackageRel — пакет, объявляющий признаки.
+const sentinelPackageRel = "internal/errors"
+
+// requireSentinelPartition — разбиение на живом дереве.
+func requireSentinelPartition(t *testing.T) {
+	t.Helper()
+	out, err := gitenv.Command(serviceRoot, "ls-files", "-z", "--", sentinelPackageRel).Output()
+	if err != nil {
+		t.Fatalf("разбиение признаков НЕ ПРОВЕРЕНО: состав пакета не получен: %v", err)
+	}
+	var srcs [][]byte
+	for _, rel := range strings.Split(string(out), "\x00") {
+		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
+			continue
+		}
+		b, rerr := os.ReadFile(path.Join(serviceRoot, rel))
+		if rerr != nil {
+			t.Fatalf("разбиение признаков НЕ ПРОВЕРЕНО: %s не прочитан: %v", rel, rerr)
+		}
+		srcs = append(srcs, b)
+	}
+	declared, err := declaredSentinelsIn(srcs...)
+	if err != nil {
+		t.Fatalf("разбиение признаков НЕ ПРОВЕРЕНО: разбор пакета отказал: %v", err)
+	}
+	t.Logf("разбиение: файлов пакета признаков %d · признаков объявлено %d · доходят до провода %d · "+
+		"полосы фиксированного текста %d", len(srcs), len(declared), len(passThroughSentinels), len(fixedTextSentinels))
+	if outcome, findings := sentinelPartition(declared, passThroughSentinels, fixedTextSentinels); outcome != premiseHolds {
+		t.Fatalf("предпосылка гейта словаря: разбиение признаков не держится (%d):\n  %s",
+			len(findings), strings.Join(findings, "\n  "))
+	}
+}
+
+// requireClientTextPremise — проверка предпосылки на живом дереве, обе оси:
+// разбиение признаков и фиксированность полос. Зовётся из
+// `collectClientTexts`, потому что предпосылка принадлежит ОПРЕДЕЛЕНИЮ
+// клиентского текста, а им пользуются оба гейта пакета: словарь и перепись
+// машинного признака. Вызов из одного теста оставил бы второй на непроверенной
+// посылке, а прогон `-run` по одному имени — без неё вовсе.
+func requireClientTextPremise(t *testing.T) {
+	t.Helper()
+	requireSentinelPartition(t)
+
+	// Корпус — индекс git модуля целиком: тот же, что обходит гейт дерева.
+	out, err := gitenv.Command(serviceRoot, "ls-files", "-z", "--", "*.go").Output()
+	if err != nil {
+		t.Fatalf("предпосылка гейта словаря НЕ ПРОВЕРЕНА: состав модуля не получен: %v", err)
+	}
+	var files []string
+	for _, rel := range strings.Split(string(out), "\x00") {
+		if rel != "" {
+			files = append(files, path.Join(serviceRoot, rel))
+		}
+	}
+	census, findings, err := check.ScanFixedRefusalTexts(serviceRoot, files)
+	if err != nil {
+		t.Fatalf("предпосылка гейта словаря НЕ ПРОВЕРЕНА: разбор корпуса отказал: %v", err)
+	}
+	// Перепись — ДО вердикта и независимо от него.
+	t.Log("предпосылка: " + census.String())
+	if outcome, text := judgePremise(census, findings); outcome != premiseHolds {
+		t.Fatal(text)
+	}
 }
 
 // internalVocabulary — закрытый словарь имён внутренних слоёв. Перечень
@@ -111,6 +390,10 @@ type clientText struct {
 
 func collectClientTexts(t *testing.T) []clientText {
 	t.Helper()
+	// Сперва предпосылка: без неё отбор ниже выводил бы из наблюдения тексты,
+	// которые арендатор читает.
+	requireClientTextPremise(t)
+
 	out, err := gitenv.Command(serviceRoot, "ls-files", "internal").Output()
 	if err != nil {
 		t.Fatalf("перечень файлов службы не получен: %v", err)
