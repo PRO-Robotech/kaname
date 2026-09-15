@@ -86,7 +86,7 @@ import dedent from 'ts-dedent'
 ### Различать полосы машинно, а не разбором текста
 
 Признак приезжает в `details` как `google.rpc.ErrorInfo` с полем `reason` и
-`domain: "iam.kacho.cloud"`. Ключуйтесь на `reason`: тон сообщения стабилен, но не
+`domain: "iam.kaname.cloud"`. Ключуйтесь на `reason`: тон сообщения стабилен, но не
 предназначен для разбора программой.
 
 <CodeBlock language="json">
@@ -98,7 +98,7 @@ import dedent from 'ts-dedent'
         {
           "@type": "type.googleapis.com/google.rpc.ErrorInfo",
           "reason": "QUOTA_EXCEEDED",
-          "domain": "iam.kacho.cloud"
+          "domain": "iam.kaname.cloud"
         }
       ]
     }
@@ -151,7 +151,7 @@ import dedent from 'ts-dedent'
 <CodeBlock language="bash">
   {dedent`
     curl -sS -H "Authorization: Bearer $TOKEN" \\
-      "https://$KACHO_ENDPOINT/iam/v1/quotas"
+      "http://localhost:18080/iam/v1/quotas"
   `}
 </CodeBlock>
 

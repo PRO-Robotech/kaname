@@ -17,6 +17,7 @@ import (
 	"github.com/PRO-Robotech/corelib/quota/quotadetail"
 
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 )
 
 // Величины отказа учёта доезжают до клиента МАШИННО (задача продукта #1605).
@@ -46,6 +47,10 @@ const quotaDetailExceeded = `{"carrier_type": "project", "carrier_id": "prj-1", 
 	`"kind": "iam.project", "limit": 4, "used": 4}`
 
 func TestQuotaRefusalCarriesTheProducerAmounts(t *testing.T) {
+	require.NoError(t, refusaldomain.Declare(refusaldomain.ProductSuffix))
+	wantDomain := refusaldomain.For(refusaldomain.ServiceIAM)
+	require.NotEmpty(t, wantDomain, "суффикс не объявлен — утверждение о домене беспредметно")
+
 	const producer = "project prj-1 has reached its limit of 4 iam.project"
 	err := quotadetail.Attach(
 		fmt.Errorf("%w: %s", iamerr.ErrQuotaExceeded, producer), quotaDetailExceeded)
@@ -59,7 +64,8 @@ func TestQuotaRefusalCarriesTheProducerAmounts(t *testing.T) {
 
 	info := refusalMetadataInfo(t, out)
 	assert.Equal(t, "QUOTA_EXCEEDED", info.GetReason())
-	assert.Equal(t, "iam.kacho.cloud", info.GetDomain())
+	assert.Equal(t, wantDomain, info.GetDomain(),
+		"домен отказа — имя продукта из единственного объявления, а не литерал по месту")
 	assert.Equal(t, map[string]string{
 		"carrier_type": "project",
 		"carrier_id":   "prj-1",
