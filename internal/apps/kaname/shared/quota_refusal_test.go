@@ -14,6 +14,11 @@ package shared_test
 // Проба утверждает ПАРУ (код + токен) и дословный текст: код без токена не
 // отличает «поднять предел» от «завести предел», а токен без кода не проверяет
 // того, что увидит край (`RESOURCE_EXHAUSTED` → 429, `FAILED_PRECONDITION` → 400).
+//
+// Домен отказа — ИМЯ продукта, произведшего отказ, и берётся он у единственного
+// объявления (`refusaldomain`), как у соседних полос (членство, ссылка, позиция
+// журнала). Прежде эта полоса одна отвечала именем платформы — не решением, а
+// литералом, оставшимся по месту (kacho#2076).
 
 import (
 	"testing"
@@ -24,6 +29,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 )
 
 // reasonOf возвращает пару (reason, domain) первого ErrorInfo; пустые строки
@@ -38,6 +44,14 @@ func reasonOf(st *status.Status) (string, string) {
 }
 
 func TestMapRepoErrProducesTheQuotaRefusal(t *testing.T) {
+	if err := refusaldomain.Declare(refusaldomain.ProductSuffix); err != nil {
+		t.Fatalf("объявление суффикса: %v", err)
+	}
+	wantDomain := refusaldomain.For(refusaldomain.ServiceIAM)
+	if wantDomain == "" {
+		t.Fatal("суффикс не объявлен — утверждение о домене беспредметно")
+	}
+
 	const exceeded = "identity ext-42 has reached its limit of 5 iam.account"
 	const notProvisioned = "iam.account has no limit on identity ext-42"
 	const rateExceeded = "identity ext-42 has reached its admission rate of 3 iam.account per 3600 seconds"
@@ -97,9 +111,12 @@ func TestMapRepoErrProducesTheQuotaRefusal(t *testing.T) {
 				t.Errorf("reason = %q, ожидался %q — клиент ключуется на токен, а не на прозу",
 					reason, tc.wantReason)
 			}
-			if domain != "iam.kacho.cloud" {
-				t.Errorf("domain = %q, ожидался %q — источник отказа называется так же, "+
-					"как домен его контракта", domain, "iam.kacho.cloud")
+			if domain != wantDomain {
+				t.Errorf("domain = %q, ожидался %q — источник отказа называется именем "+
+					"продукта, объявленным один раз, как у соседних полос", domain, wantDomain)
+			}
+			if domain == "iam.kacho.cloud" {
+				t.Errorf("домен отказа учёта по-прежнему называет платформу: %q", domain)
 			}
 		})
 	}
