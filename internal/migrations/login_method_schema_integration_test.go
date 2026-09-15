@@ -32,7 +32,9 @@
 //   - присоединение способа не пишет ни в человека, ни в его права и членства
 //     (сторона хранилища Ф1-45/46) — и проверка этого способна покраснеть,
 //     названо внесённым различием (аналог Ф1-47);
-//   - обратный ход миграции ОТКАЗЫВАЕТСЯ уничтожать материал.
+//   - обратный ход миграции ОТКАЗЫВАЕТСЯ уничтожать материал и отметки, не
+//     теряет строку писателя, фиксирующего, пока откат ждёт замка, и, снятый
+//     взаимной блокировкой (`40P01`), данных не трогает — повтор безопасен.
 //
 // # Почему у каждого отрицания стоит положительный контроль
 //
@@ -749,6 +751,124 @@ func TestIntegration_LoginMethodRollbackDoesNotRaceItsWriter(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIntegration_LoginMethodRollbackDeadlockLeavesDataIntact — откат, снятый
+// взаимной блокировкой, данных не трогает, и его повтор безопасен.
+//
+// # Предмет
+//
+// Замок отката берёт таблицы в порядке «способы, люди». Писатель, взявший их в
+// ОБРАТНОМ порядке — сперва строку человека, потом строку способа, — сходится с
+// откатом во взаимной блокировке, и сервер снимает одну из сторон отказом
+// `40P01 deadlock detected`. Этот текст говорит оператору только о самом
+// факте; почему данные целы и что делать дальше, названо здесь:
+//
+//   - откат исполняется ОДНОЙ транзакцией мигратора, и замок — её первый
+//     оператор. Снятая на нём, транзакция откатывается целиком — до подсчёта и
+//     до сноса: сносить нечего, версия схемы не сдвигается;
+//   - писатель доводит свою транзакцию, и его строки на месте;
+//   - повторённый после писателя откат отказывает уже СВОИМ текстом (`23001`),
+//     называющим, что он уничтожил бы. Повтор безопасен.
+//
+// Шапка отката в самой миграции об этом молчит, и это решение, а не пропуск:
+// байты `.sql` входят в отпечаток предмета отчётов замера вердикта, и правка
+// комментария требует пересъёма всех трёх отчётов. Пояснение живёт рядом с
+// доказательством.
+//
+// # Как сцена задаёт жертву, не угадывая время
+//
+// Сервер проверяет взаимную блокировку ОДИН раз, спустя `deadlock_timeout` от
+// начала ожидания, и жертвой становится проверивший. Писатель поднимает свой
+// предел до минуты, откат живёт с умолчанием сервера, и писатель встаёт в
+// очередь сразу после того, как в каталоге замков появился ожидающий запрос
+// отката. Проверка отката приходит первой и находит цикл. Не нашла — жертвой
+// через минуту стал бы писатель, и проба называет это несозданным порядком, а
+// не вердиктом о продукте.
+func TestIntegration_LoginMethodRollbackDeadlockLeavesDataIntact(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: нужен Postgres в контейнере")
+	}
+	db := lmDB(t)
+	owner, _ := lmSeed(t, db, "lmdead")
+	own, previous := loginMethodVersions(t)
+
+	var usersOID int64
+	require.NoError(t, db.QueryRow(`SELECT 'kaname.users'::regclass::oid`).Scan(&usersOID))
+
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.Exec(`SET LOCAL deadlock_timeout = '60s'`)
+	require.NoError(t, err, "писатель обязан поднять свой предел — иначе жертву выбирает время")
+	var writerPID int
+	require.NoError(t, tx.QueryRow(`SELECT pg_backend_pid()`).Scan(&writerPID))
+	// Порядок писателя — ОБРАТНЫЙ замку отката: сперва строка человека.
+	_, err = tx.Exec(`UPDATE kaname.users SET email_verified_at = now() WHERE id = $1`, owner)
+	require.NoError(t, err, "писатель обязан записать — иначе сцена беспредметна")
+
+	goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.SetDialect("postgres"))
+	down := make(chan error, 1)
+	go func() { down <- goose.DownTo(db, ".", previous) }()
+
+	// Ждём УСЛОВИЯ: откат взял таблицу способов и стоит в очереди за людьми.
+	waited := false
+	for deadline := time.Now().Add(60 * time.Second); !waited && time.Now().Before(deadline); {
+		select {
+		case err := <-down:
+			t.Fatalf("откат завершился (%v), не встав в очередь за писателем — порядок не создан", err)
+		default:
+		}
+		var n int
+		require.NoError(t, db.QueryRow(`
+			SELECT count(*) FROM pg_locks WHERE NOT granted AND pid <> $1 AND relation = $2`,
+			writerPID, usersOID).Scan(&n))
+		waited = n > 0
+	}
+	require.True(t, waited, "откат не встал в очередь за писателем за 60 с — порядок не создан")
+
+	// Писатель встаёт в очередь за откатом: цикл замкнут.
+	insert := make(chan error, 1)
+	go func() {
+		_, err := tx.Exec(`INSERT INTO kaname.user_login_methods (user_id, kind, verifier)
+		                   VALUES ($1, 'password', '$2a$12$lmdead.material')`, owner)
+		insert <- err
+	}()
+
+	var downErr error
+	select {
+	case downErr = <-down:
+	case <-time.After(30 * time.Second):
+		t.Fatal("откат не завершился за 30 с — сервер не снял его, порядок не создан")
+	}
+	var pgErr *pgconn.PgError
+	require.ErrorAs(t, downErr, &pgErr, "откат обязан быть снят сервером")
+	require.Equal(t, "40P01", pgErr.Code, "жертва — откат, отказ — взаимная блокировка")
+
+	select {
+	case err := <-insert:
+		require.NoError(t, err, "писатель обязан дописать, когда откат снят")
+	case <-time.After(30 * time.Second):
+		t.Fatal("писатель не дописал за 30 с после снятия отката")
+	}
+	require.NoError(t, tx.Commit())
+
+	version, err := goose.GetDBVersion(db)
+	require.NoError(t, err)
+	require.Equal(t, own, version, "снятый откат не сдвинул версию схемы")
+	var methods, marks int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.user_login_methods`).Scan(&methods))
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.users WHERE email_verified_at IS NOT NULL`).Scan(&marks))
+	t.Logf("исход: откат снят %s; версия %d; строк способа %d; отметок %d", pgErr.Code, version, methods, marks)
+	require.Equal(t, 1, methods, "материал писателя цел")
+	require.Equal(t, 1, marks, "отметка писателя цела")
+
+	// Повтор безопасен: откат отказывает уже своим текстом.
+	err = goose.DownTo(db, ".", previous)
+	require.ErrorAs(t, err, &pgErr, "повторённый откат обязан отказать базой")
+	require.Equal(t, "23001", pgErr.Code, "повторённый откат отказывает текстом, называющим уничтожаемое")
+	require.Contains(t, err.Error(), lmRefusesMaterial)
 }
 
 // lmVerificationTrigger — имя триггера, снимающего отметку при смене адреса.
