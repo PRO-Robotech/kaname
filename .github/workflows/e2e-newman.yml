@@ -566,6 +566,7 @@ jobs:
           ./scripts/run.sh --service kaname-own-rest-front \
             --service iam-permission-catalog \
             --service iam-system-grant-visibility \
+            --service iam-rbac-rules-labels \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt

@@ -27,6 +27,15 @@ a matching resource. This suite asserts the role-side contract that IS black-box
 reachable through the gateway.
 
 Fixture dependency (tests/authz-fixtures): jwtAccountAdminA, accountAId.
+
+ПОВЕРХНОСТЬ — СОБСТВЕННЫЙ ПУБЛИЧНЫЙ REST-ФРОНТ СЛУЖБЫ (`{{ownRestBaseUrl}}`),
+а не край платформы (e2e-flow.md §7а): все шаги переадресованы
+`address_own_front`, предъявителя и аккаунт пишет посев автономного стенда
+(`tests/authz-fixtures/seed_own_stand.py`). Производитель каждого утверждения —
+сама служба: код 200 и конверт операции — use-case создания роли, `done` без
+`error` — её исполнитель; ни область, ни идентификатор объекта в запросе не
+извлекаются краем, поэтому таблица §7а «что производит край» сюда не доходит.
+Утверждения не менялись; изменён глагол второго кейса — причина у самого тела.
 """
 
 # ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
@@ -105,8 +114,16 @@ CASES.append(Case(
             method="GET",
             path="/operations/{{_opLblFed}}",
             auth="jwtAccountAdminA",
-            test_script=poll_op_done("_opLblFed"),
+            test_script=poll_op_done("_opLblFed", out_id_var="lblFedRoleId"),
         ),
+        # УБОРКА. Роль заводится этим кейсом под `{{runId}}` и прежде не
+        # сносилась вовсе: повторный прогон с тем же посевом получал
+        # ALREADY_EXISTS на создании и читал его отказом приёма правила.
+        # Идентификатор берётся из ЗАВЕРШЁННОЙ операции (`response.id`), а не из
+        # предвыделенных метаданных — у упавшей операции он указывал бы на фантом.
+        *reliable_delete("teardown-label-role-fed", "/iam/v1/roles/{{lblFedRoleId}}",
+                         auth="jwtAccountAdminA", op_key="lblFed",
+                         terminal_codes=(200,), require_operation=True),
     ],
 ))
 
@@ -135,9 +152,18 @@ CASES.append(Case(
                 "accountId": "{{accountAId}}",
                 "name": "rbac_lbl_iamtype_{{runId}}",
                 "description": "newman ARM_LABELS iam-content-type probe role",
+                # ГЛАГОЛ — ЖИВОЙ ГЛАГОЛ ТИПА, А НЕ ЛЮБОЙ. Здесь стоял `get`: его
+                # сняли с `iam.role` вместе с отношением без читателя (kacho#1922,
+                # миграция 20260914120000_role_read_relation_leaves_the_catalog),
+                # и операция отвечала «verbs: get is not a live verb of resource
+                # role» (code 9, REFERENCE_MISSING). Кейс этого не видел: его не
+                # гонял ни один конвейер службы, пока он стучался к краю. Предмет
+                # кейса — приём matchLabels на типе iam, а не выбор глагола; живые
+                # глаголы типа — `list`, `update`, `delete` (витрина каталога на
+                # стенде), и `list` — тот, которым поимённо читается роль.
                 "rules": [{
                     "module": "iam", "resources": ["role"],
-                    "verbs": ["get"],
+                    "verbs": ["list"],
                     "matchLabels": {"env": "prod"},
                 }],
             },
@@ -152,7 +178,21 @@ CASES.append(Case(
             method="GET",
             path="/operations/{{_opLblIamType}}",
             auth="jwtAccountAdminA",
-            test_script=poll_op_done("_opLblIamType"),
+            test_script=poll_op_done("_opLblIamType", out_id_var="lblIamTypeRoleId"),
         ),
+        # УБОРКА. Роль заводится этим кейсом под `{{runId}}` и прежде не
+        # сносилась вовсе: повторный прогон с тем же посевом получал
+        # ALREADY_EXISTS на создании и читал его отказом приёма правила.
+        # Идентификатор берётся из ЗАВЕРШЁННОЙ операции (`response.id`), а не из
+        # предвыделенных метаданных — у упавшей операции он указывал бы на фантом.
+        *reliable_delete("teardown-label-role-iamtype", "/iam/v1/roles/{{lblIamTypeRoleId}}",
+                         auth="jwtAccountAdminA", op_key="lblIamType",
+                         terminal_codes=(200,), require_operation=True),
     ],
 ))
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")
