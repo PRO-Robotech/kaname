@@ -549,6 +549,13 @@ jobs:
       # `ownRestBaseUrl`. Прежде её не гонял ни один конвейер службы — кейс был
       # объявлен и не исполнялся нигде.
       #
+      # Коллекции категории A разреза #24 (производитель — служба) переводятся на
+      # собственный фронт по одной: каждая переадресована помощником генератора
+      # `address_own_front`, её ключи пишет посев выше, а утверждения, чей
+      # производитель край, в переведённую не входят (шапка каждого модуля
+      # называет производителя по каждому). Перечень гоняемого — строки
+      # `--service` ниже; сколько осталось, печатает шаг долга.
+      #
       # Взаимный TLS собственных фронтов передаётся прогонщику флагами: без
       # клиентского листа КАЖДЫЙ запрос умер бы на рукопожатии, то есть «без
       # ответа», а не вердиктом о предмете.
@@ -558,6 +565,10 @@ jobs:
           cd tests/newman
           ./scripts/run.sh --service kaname-own-rest-front \
             --service iam-permission-catalog \
+            --service iam-system-grant-visibility \
+            --service iam-rbac-rules-labels \
+            --service iam-role-redesign \
+            --service label-revoke-iam \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt

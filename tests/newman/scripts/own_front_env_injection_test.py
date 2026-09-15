@@ -90,13 +90,30 @@ def main():
     check("перепись называет каждую переменную отдельно",
           c.get("адресуются к baseUrl") == 1 and c.get("адресуются к ownRestBaseUrl") == 1, str(c))
 
+    print("ось 6 — вторая законная форма адресации: помощник генератора")
+    # Модуль, переведённый `address_own_front`, не пишет `require_env_url(
+    # "ownRestBaseUrl"` ни разу — адрес ставит помощник. Распознаватель, не
+    # знающий этой формы, молча недосчитывал бы каждый такой модуль.
+    helper = 'q = require_env_url("ownInternalRestBaseUrl", "/y", "почему")\n' \
+             'CASES = address_own_front(CASES, "почему")\n'
+    c, f = run(GOOD_ENV, helper)
+    check("форма помощника засчитана адресацией к ownRestBaseUrl",
+          c.get("адресуются к ownRestBaseUrl") == 1 and not f, f"{c} {f}")
+    # ЗАКОННЫЙ БЛИЗНЕЦ: то же имя в комментарии — не адресация.
+    twin = 'q = require_env_url("ownInternalRestBaseUrl", "/y", "почему")\n' \
+           '# CASES переадресуются не address_own_front(CASES, …), а поимённо\n'
+    c, f = run(GOOD_ENV, twin)
+    check("близнец: имя помощника в комментарии не засчитано",
+          c.get("адресуются к ownRestBaseUrl") is None
+          and any("ownRestBaseUrl" in x for x in f), f"{c} {f}")
+
     print()
     if FAILURES:
-        print(f"ОТКАЗ: провалено утверждений {len(FAILURES)} из 9", file=sys.stderr)
+        print(f"ОТКАЗ: провалено утверждений {len(FAILURES)} из 11", file=sys.stderr)
         for x in FAILURES:
             print("  " + x, file=sys.stderr)
         return 1
-    print("ЧИСТО: 9 утверждений, гейт способен упасть и способен смолчать по каждой оси")
+    print("ЧИСТО: 11 утверждений, гейт способен упасть и способен смолчать по каждой оси")
     return 0
 
 

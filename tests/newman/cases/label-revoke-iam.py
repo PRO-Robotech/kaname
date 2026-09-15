@@ -40,6 +40,15 @@ case asserts pre-grant DENY before the bind.
 Fixtures (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh): jwtBootstrap,
 jwtAccountAdminA, accountAId. Resources are self-seeded per case with
 {{runId}}-suffixed names (self-contained, no cross-case collision).
+
+ПОВЕРХНОСТЬ — СОБСТВЕННЫЕ REST-ФРОНТЫ СЛУЖБЫ, а не край платформы (e2e-flow.md
+§7а): мутации и чтения — на публичный `{{ownRestBaseUrl}}` (`address_own_front`),
+пробы Check — на собственный ВНУТРЕННИЙ `{{ownInternalRestBaseUrl}}`, где путь
+`/iam/v1/internal/*` обслуживается, а на публичном фронте — нет (ban #6). Производитель
+каждого утверждения — сама служба: снятие меток правкой по маске, отзыв выдачи по
+метке и вердикт Check (`allowed`) — её use-case и её разбор доступа; ни область, ни
+скрытие существования края сюда не доходят. Отрицание Check не вакуумно: в том же
+кейсе тот же субъект получает `allowed: true` после выдачи и `false` после снятия.
 """
 
 # ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
@@ -99,9 +108,9 @@ def _internal_url_override(path):
     guard ASSERTS it (RED, naming the variable) before skipping — see
     gen.py::require_env_url."""
     return require_env_url(
-        "internalBaseUrl", path,
+        "ownInternalRestBaseUrl", path,
         "internal-only Check probe — /iam/v1/internal/* is served ONLY by the "
-        "cluster-internal REST listener")
+        "service's own internal REST front")
 
 
 def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap", poll=False):
@@ -345,3 +354,10 @@ CASES.append(Case(
                    "project:{{_lriamPrj1}}", expect_allowed=False, poll=True),
     ],
 ))
+
+
+# Все шаги, кроме внутренних проб Check (они адресованы выше собственному
+# ВНУТРЕННЕМУ фронту), — на собственный публичный фронт службы (e2e-flow.md §7а).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")
