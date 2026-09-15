@@ -313,7 +313,19 @@ go test -count=1 -v ./internal/authzmap -run 'TestConditionedRelationHasAProduce
 доверенные метаданные через мост — последнее есть правка фундамента (снять краевую пометку у
 двух ключей, свой выпуск `corelib` и подъём пина у обоих продуктов). Ни одна фаза эпика `#1266`
 не несёт ни того, ни другого, как и производителя выдачи с условием и глагола через условное
-отношение.
+отношение, — и открытой задачи ни на одно звено нет ни в одном из трёх репозиториев:
+
+```sh
+# единица — открытая задача, называющая звено; три репозитория × четыре признака
+for r in kacho kaname kacho-workspace; do
+  for q in mfa_fresh amr_claims 'required_relation ssh' unproducedConditionSites; do
+    gh issue list -R PRO-Robotech/$r --state open --search "$q in:title,body" --json number -q length
+  done
+done                                                                                   # → 0 двенадцать раз
+# положительный контроль: тот же поиск по всем состояниям находит закрытую задачу
+gh issue list -R PRO-Robotech/kacho --state all --search 'mfa_fresh in:title,body' \
+  --json number,state -q '.[]|"#\(.number) \(.state)"'                                 # → #2056 CLOSED
+```
 
 **Требование к единственным условным отношениям владелец уже решил иначе.** По задаче `#2056`
 условие входа в машину исполняет **пол края**: запись каталога всякого RPC, требующего `ssh`
