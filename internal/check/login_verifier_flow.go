@@ -52,8 +52,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ГРАНИЦЫ, НАЗВАННЫЕ ВСЛУХ
 //
-//  1. ПСЕВДОНИМ: запись через указатель, взятый на локальную (`p := &out;
-//     p.m = x; return out`), не прослеживается до `out`.
+//  1. ПСЕВДОНИМ ЗНАЧЕНИЕМ: указатель, взятый адресом (`p := &out; p.m = x`), и
+//     его копии прослеживаются до цели; срез либо карта, скопированные
+//     присваиванием (`ys := xs; ys[0] = x; return xs`), — нет: без типов
+//     синтаксис не отличает такую копию от копии значения.
 //  2. ИСТОЧНИК ПОТОКА МАТЕРИАЛА — ВЫХОД `Reveal`. Материал, прочитанный
 //     владельцем из базы до обёртки в тип, — строка, и её путь внутри файла
 //     гейт не видит; держит ревью единственного разрешённого файла.
@@ -124,9 +126,12 @@ type lvFlow struct {
 	consumers map[string]string
 	used      map[string]int
 
-	f          *lvFile
-	roles      map[*ast.Field]lvFieldRole
-	tainted    map[lvVar]bool
+	f       *lvFile
+	roles   map[*ast.Field]lvFieldRole
+	tainted map[lvVar]bool
+	// aliases — указатель, взятый адресом: имя-указатель → имена, чья память
+	// за ним. Запись через указатель — запись в память цели.
+	aliases    map[lvVar][]*ast.Ident
 	litReturns map[*ast.FuncLit]bool
 	seeds      map[*ast.FuncDecl]map[int]bool
 	changed    bool
@@ -141,7 +146,7 @@ type lvFlow struct {
 func lvRunFlow(ix *lvIndex, files []*lvFile, subj lvSubject, consumers map[string]string) ([]string, LoginVerifierFlowCensus, map[string]int) {
 	fl := &lvFlow{
 		ix: ix, subj: subj, consumers: consumers, used: map[string]int{},
-		roles: map[*ast.Field]lvFieldRole{}, tainted: map[lvVar]bool{},
+		roles: map[*ast.Field]lvFieldRole{}, tainted: map[lvVar]bool{}, aliases: map[lvVar][]*ast.Ident{},
 		litReturns: map[*ast.FuncLit]bool{}, seeds: map[*ast.FuncDecl]map[int]bool{},
 		findings: map[string]bool{},
 	}
@@ -297,6 +302,9 @@ func (fl *lvFlow) walk(root ast.Node, ctx lvCtx) {
 			fl.assign(s, ctx)
 		case *ast.ValueSpec:
 			for i, name := range s.Names {
+				if i < len(s.Values) {
+					fl.alias(name, s.Values[i])
+				}
 				if i < len(s.Values) && fl.carries(s.Values[i]) {
 					fl.store(name, ctx, s.Pos(), false)
 				}
@@ -325,6 +333,7 @@ func (fl *lvFlow) walk(root ast.Node, ctx lvCtx) {
 func (fl *lvFlow) assign(s *ast.AssignStmt, ctx lvCtx) {
 	if len(s.Lhs) == len(s.Rhs) {
 		for i, lhs := range s.Lhs {
+			fl.alias(lhs, s.Rhs[i])
 			if fl.carries(s.Rhs[i]) {
 				fl.store(lhs, ctx, s.Pos(), false)
 				continue
@@ -365,6 +374,15 @@ func (fl *lvFlow) store(lhs ast.Expr, ctx lvCtx, pos token.Pos, through bool) {
 	case lvRoleBlank:
 	case lvRoleLocal:
 		fl.taint(id)
+		if !direct {
+			// Запись через указатель, взятый адресом, — запись в память цели:
+			// `p := &out; p.m = x` кладёт x в out.
+			if v, ok := lvVarOf(id); ok {
+				for _, target := range fl.aliases[v] {
+					fl.store(target, ctx, pos, false)
+				}
+			}
+		}
 	case lvRoleParam:
 		if direct {
 			fl.taint(id)
@@ -382,6 +400,50 @@ func (fl *lvFlow) store(lhs ast.Expr, ctx lvCtx, pos token.Pos, through bool) {
 		fl.find(pos, ctx, fmt.Sprintf("присвоен{о} переменной пакета `%s` — её читатели получают его мимо разрешённого файла", id.Name))
 	default:
 		fl.find(pos, ctx, fmt.Sprintf("присвоен{о} `%s`, чьё хранилище гейт не видит", id.Name))
+	}
+}
+
+// alias — lhs становится указателем на память имён, которые называет rhs:
+// `&x`, `&x.f`, `&x[i]` либо копия указателя, уже взятого адресом. Сведения
+// только прибывают, как и у хранилищ с предметом.
+func (fl *lvFlow) alias(lhs, rhs ast.Expr) {
+	id, ok := lvUnparen(lhs).(*ast.Ident)
+	if !ok {
+		return
+	}
+	v, ok := lvVarOf(id)
+	if !ok {
+		return
+	}
+	var targets []*ast.Ident
+	switch r := lvUnparen(rhs).(type) {
+	case *ast.UnaryExpr:
+		if r.Op == token.AND {
+			if root, _ := lvRootIdent(r.X); root != nil {
+				targets = []*ast.Ident{root}
+			}
+		}
+	case *ast.Ident:
+		if src, ok := lvVarOf(r); ok {
+			targets = fl.aliases[src]
+		}
+	}
+	for _, t := range targets {
+		tv, ok := lvVarOf(t)
+		if !ok && fl.ix.resolve(fl.f, t) == nil {
+			continue
+		}
+		seen := false
+		for _, have := range fl.aliases[v] {
+			if hv, _ := lvVarOf(have); have == t || (ok && hv == tv) {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			fl.aliases[v] = append(fl.aliases[v], t)
+			fl.changed = true
+		}
 	}
 }
 
