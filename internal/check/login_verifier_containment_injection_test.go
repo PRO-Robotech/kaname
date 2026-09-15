@@ -789,6 +789,33 @@ const loginMethodsTable = "user_login_methods"
 			wantFinding: "присвоен переменной пакета `lastRune`",
 		},
 		{
+			name: "запись через указатель на локальную, наружу — сама локальная",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\ntype pair struct{ m string }\n\nfunc leakAliasLocal(v interface{ Reveal() string }) pair {\n\tvar out pair\n\tp := &out\n\tp.m = v.Reveal()\n\treturn out\n}\n"
+			},
+			wantFinding: "выносится возвратом из разрешённого файла — вызывающий получает его мимо гейта (функция leakAliasLocal)",
+		},
+		{
+			name: "запись через указатель на переменную пакета",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nvar last string\n\nfunc leakAliasPkg(v interface{ Reveal() string }) {\n\tp := &last\n\t*p = v.Reveal()\n}\n"
+			},
+			wantFinding: "присвоен переменной пакета `last` — её читатели получают его мимо разрешённого файла (функция leakAliasPkg)",
+		},
+		{
+			name: "запись через копию указателя на локальную",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\ntype pair struct{ m string }\n\nfunc leakAliasCopy(v interface{ Reveal() string }) pair {\n\tvar out pair\n\tp := &out\n\tq := p\n\tq.m = v.Reveal()\n\treturn out\n}\n"
+			},
+			wantFinding: "выносится возвратом из разрешённого файла — вызывающий получает его мимо гейта (функция leakAliasCopy)",
+		},
+		{
+			name: "законный близнец: указатель на локальную с материалом, наружу — длина",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\ntype pair struct{ m string }\n\nfunc sizeViaPointer(v interface{ Reveal() string }) int {\n\tvar out pair\n\tp := &out\n\tp.m = v.Reveal()\n\treturn len(out.m)\n}\n"
+			},
+		},
+		{
 			name: "законный близнец: имя поля в литерале структуры совпадает с локальной переменной с материалом",
 			edit: func(c check.TreeCorpus) {
 				c[lvOwner] += "\ntype counted struct{ m int }\n\nfunc fieldName(v interface{ Reveal() string }) counted {\n\tm := v.Reveal()\n\t_ = len(m)\n\treturn counted{m: 1}\n}\n"
