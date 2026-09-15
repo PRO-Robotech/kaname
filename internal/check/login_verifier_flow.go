@@ -15,7 +15,8 @@
 // корпуса, взятие адреса, разыменование, индекс, срез, утверждение типа,
 // составной литерал с несущим элементом (у карты — и с несущим ключом),
 // встроенные `append`/`min`/`max`, замыкание, возвращающее несущее, и его
-// вызов на месте. Хранилище, куда несущее положено, несёт его дальше.
+// вызов на месте. Хранилище, куда несущее положено, несёт его дальше; обход
+// `range` по несущему делает несущими ключ и значение.
 //
 // Вынос — любое место, откуда предмет уходит из файла мимо гейта:
 //
@@ -563,19 +564,15 @@ func (fl *lvFlow) carries(e ast.Expr) bool {
 	case *ast.StarExpr:
 		return fl.carries(n.X)
 	case *ast.UnaryExpr:
-		return (n.Op == token.AND || n.Op == token.ARROW) && fl.carries(n.X)
+		return n.Op == token.AND && fl.carries(n.X)
 	case *ast.BinaryExpr:
 		return n.Op == token.ADD && (fl.carries(n.X) || fl.carries(n.Y))
 	case *ast.IndexExpr:
-		return fl.carries(n.X)
-	case *ast.IndexListExpr:
 		return fl.carries(n.X)
 	case *ast.SliceExpr:
 		return fl.carries(n.X)
 	case *ast.TypeAssertExpr:
 		return fl.carries(n.X)
-	case *ast.KeyValueExpr:
-		return fl.carries(n.Value)
 	case *ast.CompositeLit:
 		_, isMap := n.Type.(*ast.MapType)
 		for _, el := range n.Elts {

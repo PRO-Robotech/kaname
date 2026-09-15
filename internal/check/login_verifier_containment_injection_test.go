@@ -772,6 +772,23 @@ const loginMethodsTable = "user_login_methods"
 			wantFinding: "передано `prepare`, объявленной в internal/repo/kaname/pg/runner.go, — дальше путь идёт вне разрешённого файла (уровень пакета)",
 		},
 		{
+			// Цепочка, где каждое звено необходимо: снятие любого несущего вида
+			// (срез, приведение, адрес, разыменование, утверждение типа, индекс,
+			// встроенный max) рвёт её, и возврат перестаёт нести материал.
+			name: "материал через срез, приведение, адрес, разыменование, утверждение типа, индекс и max",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc leakChain(v interface{ Reveal() string }) byte {\n\tm := v.Reveal()\n\ts := m[1:]\n\tb := []byte(s)\n\tp := &b\n\tvar x any = *p\n\ty := x.([]byte)\n\tc := y[0]\n\treturn max(c, 0)\n}\n"
+			},
+			wantFinding: "выносится возвратом из разрешённого файла — вызывающий получает его мимо гейта (функция leakChain)",
+		},
+		{
+			name: "обход range по материалу, значение — наружу",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nvar lastRune rune\n\nfunc leakRange(v interface{ Reveal() string }) {\n\tfor _, r := range v.Reveal() {\n\t\tlastRune = r\n\t}\n}\n"
+			},
+			wantFinding: "присвоен переменной пакета `lastRune`",
+		},
+		{
 			name: "законный близнец: имя поля в литерале структуры совпадает с локальной переменной с материалом",
 			edit: func(c check.TreeCorpus) {
 				c[lvOwner] += "\ntype counted struct{ m int }\n\nfunc fieldName(v interface{ Reveal() string }) counted {\n\tm := v.Reveal()\n\t_ = len(m)\n\treturn counted{m: 1}\n}\n"
