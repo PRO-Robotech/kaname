@@ -634,6 +634,11 @@ func lmWriteMarks(tx *sql.Tx, owner, member string) error {
 // откат ждёт, материала не оставил — и откат обязан пройти: иначе «откат отказал»
 // было бы верно и о защите, отказывающей всякому, кто ждал замка.
 func TestIntegration_LoginMethodRollbackDoesNotRaceItsWriter(t *testing.T) {
+	if testing.Short() {
+		// Пропуск на уровне пробы, а не только сцен: иначе родитель отчитывался
+		// бы зелёным при всех пропущенных сценах.
+		t.Skip("integration: нужен Postgres в контейнере")
+	}
 	scenes := []rollbackScene{
 		{name: "материал зафиксирован до отката", write: lmWriteMethod, settleBefore: true, commit: true,
 			refuses: lmRefusesMaterial},
