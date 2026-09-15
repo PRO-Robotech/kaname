@@ -207,7 +207,6 @@ func TestClientVocabularyPremiseInjection(t *testing.T) {
 	})
 
 	for _, sentinel := range sortedFixedTextSentinels() {
-		sentinel := sentinel
 		t.Run("ИНЪЕКЦИЯ: ветвь "+sentinel+" канона отдаёт текст цепочки", func(t *testing.T) {
 			b := locateBranch(t, src, sentinel)
 			if want := fixedTextSentinels[sentinel]; b.code != want {
