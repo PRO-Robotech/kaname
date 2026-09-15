@@ -88,6 +88,16 @@ type ResourceMirrorEmitter interface {
 	DeleteTx(ctx context.Context, tx Tx, objectType, objectID string, tombstone time.Time) error
 }
 
+// PublicReadPublisher — применяет намерение владельца о публикации объекта для
+// анонимного чтения (`user:* #v_get`) в транзакции вызывающего, ПОРЯДКОМ ВЕРСИЙ
+// ВЛАДЕЛЬЦА: намерение, не новее последнего применённого по объекту, не меняет
+// ничего и строки журнала не кладёт. `objectType` — словарь модели прав.
+// Нулевая `version` — доставка без маркера (см. public_read.ApplyTx).
+// Реализация — *repo/kaname/pg.PublicReadPublisher (kaname#107).
+type PublicReadPublisher interface {
+	ApplyTx(ctx context.Context, tx Tx, objectType, objectID string, published bool, version time.Time) (applied bool, err error)
+}
+
 // AuditEvent — service-layer payload for a durable kaname.audit_outbox
 // compliance row. The repo adapter generates the id (evt_<22-char> — bug #126
 // regression-guard), marshals Payload to the event_payload jsonb, and inserts

@@ -617,6 +617,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// сборки» молчалив — верный ответ на посеянных типах и неверный на
 		// заведённых применением манифеста в работающем процессе.
 		kanamepg.NewCatalogTypeReader(),
+		// Публикация для анонимного чтения — со СВОИМ порядком: версия владельца,
+		// сравниваемая хранилищем, и надгробие снятия (kaname#107). Параметр, а не
+		// опция: без порта у публикации нет порядка, и запоздавшая доставка открытия
+		// после закрытия вернула бы анонимное чтение приватному объекту.
+		kanamepg.NewPublicReadPublisher(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).
