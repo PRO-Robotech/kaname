@@ -173,6 +173,26 @@ var q = "SELECT verifier FROM " + pg.LoginMethodsTable
 			wantFinding: "reveal",
 		},
 		{
+			name: "владелец присваивает материал переменной пакета",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/login_method_repo.go"] += "\nvar last string\n\nfunc remember(v interface{ Reveal() string }) { last = v.Reveal() }\n"
+			},
+			wantFinding: "переменной пакета `last`",
+		},
+		{
+			name: "владелец отправляет материал в канал",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/login_method_repo.go"] += "\nfunc stream(ch chan<- string, v interface{ Reveal() string }) { ch <- v.Reveal() }\n"
+			},
+			wantFinding: "материал отправлен в канал",
+		},
+		{
+			name: "законный близнец: владелец отдаёт результат сверки, а не материал",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/login_method_repo.go"] += "\nfunc compare(h, p []byte) error { return nil }\n\nfunc check(v interface{ Reveal() string }, p []byte) error { return compare([]byte(v.Reveal()), p) }\n"
+			},
+		},
+		{
 			name: "законный близнец: локальная переменная с именем константы в чужом файле",
 			edit: func(c check.TreeCorpus) {
 				c["internal/repo/kaname/pg/shadow.go"] = `package pg
@@ -183,6 +203,13 @@ func other() string {
 }
 `
 			},
+		},
+		{
+			name: "имя ограничения, собранное из константы владельца в соседнем файле",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/pgmaperr.go"] += "\nconst pkeyName = loginMethodsTable + \"_pkey\"\n"
+			},
+			wantFinding: "internal/repo/kaname/pg/pgmaperr.go:7: таблица секрета",
 		},
 		{
 			name: "законный близнец: склейка, дающая имя ограничения, а не таблицы",

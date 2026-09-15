@@ -25,8 +25,7 @@
 //	r  обычная таблица             — хранит строки;
 //	p  секционированная таблица    — читается через родителя, секции — тоже r;
 //	m  материализованное представление — хранит результат запроса;
-//	v  представление               — копии не хранит, но ОТДАЁТ материал вторым путём;
-//	f  внешняя таблица             — хранит строки на чужом сервере.
+//	v  представление               — копии не хранит, но ОТДАЁТ материал вторым путём.
 //
 // Колонка ЛЮБОГО типа приводится к тексту: копия в составном типе, массиве,
 // JSON — тоже копия; двоичное значение ищется ещё и в шестнадцатеричной форме
@@ -34,7 +33,11 @@
 // судимое: i/I (индекс) копирует колонки СВОЕЙ таблицы — индекс по колонке
 // материала судит ось вторая, индекс чужой таблицы копирует то, что уже нашла
 // перепись её строк; t (хранилище длинных значений) читается через свою
-// таблицу; S (последовательность) и c (составной тип) строк не хранят.
+// таблицу; S (последовательность) и c (составной тип) строк не хранят; f
+// (внешняя таблица) хранит строки на ЧУЖОМ сервере — копия там уже вне этой
+// базы, и доставить её туда может только механизм, который судит ось вторая.
+// Внешнюю таблицу перепись не читает намеренно: чтение было бы сетевым
+// вызовом к чужому серверу посреди пробы.
 //
 // Сверх отношений пользовательских схем — СТАТИСТИКА ПЛАНИРОВЩИКА
 // (`pg_statistic`): после ANALYZE она хранит выборку значений колонки и живёт до
@@ -260,7 +263,7 @@ func lmScanContainment(t *testing.T, pool *pgxpool.Pool, needle string) lmContai
 	rows, err := pool.Query(ctx, `
 		SELECT c.oid, n.nspname, c.relname, c.relkind::text, c.relispopulated
 		  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-		 WHERE c.relkind IN ('r', 'p', 'm', 'v', 'f') AND `+lmUserSchemas+`
+		 WHERE c.relkind IN ('r', 'p', 'm', 'v') AND `+lmUserSchemas+`
 		 ORDER BY n.nspname, c.relname`)
 	require.NoError(t, err)
 	var rels []relation
@@ -611,6 +614,9 @@ func lmInjections() []lmInjection {
 			CREATE RULE lm_probe_rule AS ON INSERT TO kaname.user_login_methods
 			  DO ALSO SELECT pg_notify('lm_probe_rule', NEW.verifier);`,
 			listen: "lm_probe_rule", want: "lm_probe_rule"},
+		{name: "правило на таблице секрета без материала — правило о правилах всё равно срабатывает", before: `
+			CREATE RULE lm_probe_rule_plain AS ON INSERT TO kaname.user_login_methods DO ALSO NOTIFY lm_probe_rule_plain;`,
+			want: "lm_probe_rule_plain"},
 		{name: "законный близнец: правило на соседней таблице таблицы секрета не касается", before: `
 			CREATE RULE lm_probe_neighbour_rule AS ON UPDATE TO kaname.users DO ALSO NOTIFY lm_probe_neighbour_rule;`,
 			after: `UPDATE kaname.users SET display_name = display_name`},
@@ -676,6 +682,12 @@ func lmInjections() []lmInjection {
 			  UPDATE kaname.user_login_methods SET verifier = verifier;
 			  RESET ROLE`,
 			listen: "lm_probe_leak_fn", want: "lm_probe_policy"},
+		{name: "политика строк без материала — правило политик всё равно срабатывает", before: `
+			CREATE POLICY lm_probe_policy_plain ON kaname.user_login_methods USING (true) WITH CHECK (true);`,
+			want: "lm_probe_policy_plain"},
+		{name: "ограничение сверх объявленных, материала не касающееся", before: `
+			ALTER TABLE kaname.user_login_methods ADD CONSTRAINT lm_probe_kind_check CHECK (kind <> 'lm-probe');`,
+			want: "lm_probe_kind_check"},
 		{name: "ограничение проверки зовёт функцию с материалом", before: lmLeakFunction + `
 			ALTER TABLE kaname.user_login_methods ADD CONSTRAINT lm_probe_check CHECK (kaname.lm_probe_leak(verifier));`,
 			listen: "lm_probe_leak_fn", want: "lm_probe_check"},
@@ -719,6 +731,14 @@ func lmInjections() []lmInjection {
 			CREATE SCHEMA lm_probe_other;
 			CREATE TABLE lm_probe_other.copy AS SELECT verifier FROM kaname.user_login_methods`,
 			copyAt: "lm_probe_other.copy.verifier", want: "lm_probe_other.copy"},
+		{name: "копия в секционированной таблице", after: `
+			CREATE TABLE kaname.lm_probe_parted (user_id text, verifier text) PARTITION BY LIST (user_id);
+			CREATE TABLE kaname.lm_probe_parted_all PARTITION OF kaname.lm_probe_parted DEFAULT;
+			INSERT INTO kaname.lm_probe_parted SELECT user_id, verifier FROM kaname.user_login_methods`,
+			copyAt: "lm_probe_parted.verifier", want: "lm_probe_parted_all.verifier"},
+		{name: "колонка типа строки таблицы секрета, ещё пустая", before: `
+			CREATE TABLE kaname.lm_probe_rows_empty (r kaname.user_login_methods);`,
+			want: "lm_probe_rows_empty"},
 		{name: "копия в колонке составного типа строки таблицы секрета", before: `
 			CREATE TABLE kaname.lm_probe_rows (r kaname.user_login_methods);`,
 			after:  `INSERT INTO kaname.lm_probe_rows SELECT m FROM kaname.user_login_methods m`,
