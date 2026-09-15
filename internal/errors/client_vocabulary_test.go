@@ -42,7 +42,14 @@ package errors_test
 // Предпосылка судится по КОДУ статуса, а не по признаку: разбор без типов
 // цепочки признака не видит. Связь «признак → код полосы» названа в
 // `fixedTextSentinels` и держится инъекцией на каноническом переводчике —
-// `TestClientVocabularyPremiseInjection`.
+// `TestClientVocabularyPremiseInjection`. ГРАНИЦА, названная явно: в копиях
+// переводчика эту связь не держит ничто — копия, отдающая на ветви признака
+// недоступности код ЧУЖОЙ полосы, выведет его текст из-под обеих проверок.
+//
+// Вторая ось той же предпосылки — РАЗБИЕНИЕ: каждый признак, который пакет
+// объявляет, отнесён ровно к одному перечню (`sentinelPartition`). Проверка
+// кода доказывает, что полосы фиксированы, но не то, что исключены ИМЕННО их
+// признаки: признак вне обоих перечней выпадает из наблюдения молча.
 //
 // ГРАНИЦА, названная явно: адресат различает, а не слово. Тексты внутреннего
 // слушателя обращены к МОДУЛЮ и его оператору — они называют механизм
@@ -58,6 +65,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -72,8 +80,15 @@ import (
 // serviceRoot — корень дерева службы относительно этого пакета.
 const serviceRoot = "../.."
 
-// passThroughSentinels — признаки, чей текст доезжает до провода дословно
-// (`shared.MapRepoErr` → `status.Error(code, StripSentinel(err))`).
+// passThroughSentinels — признаки, чей текст доезжает до провода дословно:
+// сам — через `shared.MapRepoErr` → `status.Error(code, StripSentinel(err))`, —
+// либо через переводчик своей полосы, который кладёт в статус тот же
+// `StripSentinel`. Критерий один — ДОЕЗЖАЕТ ЛИ текст обёртки, а не каким путём.
+//
+// Разбиение «каждый объявленный признак — ровно в одном перечне» держит
+// `sentinelPartition`: признак вне обоих перечней прежде выпадал отсюда молча,
+// и четыре таких жили в дереве, пока проверки не было (задача
+// PRO-Robotech/kacho#2478).
 var passThroughSentinels = map[string]bool{
 	"ErrNotFound":            true,
 	"ErrAlreadyExists":       true,
@@ -87,6 +102,18 @@ var passThroughSentinels = map[string]bool{
 	"ErrQuotaRateExceeded":   true,
 	"ErrReferenceMissing":    true,
 	"ErrReferenceInUse":      true,
+	// Снятие права администратора кластера перевёртывает оба признака в
+	// предусловие с их же текстом (`cluster/revoke_admin.go`); что текст на
+	// проводе, утверждает интеграционная проба той же полосы.
+	"ErrSelfRevoke": true,
+	"ErrLastAdmin":  true,
+	// Полоса «членство несёт права» собирает статус из `StripSentinel(err)`
+	// (`shared.membershipRefusal`).
+	"ErrMembershipCarriesRights": true,
+	// Частный случай неверного аргумента: регистрация ресурса отдаёт его текст
+	// отказом по полю (`shared.InvalidArg("object", StripSentinel(err))`), а
+	// общая ветвь канонического переводчика — как любой неверный аргумент.
+	"ErrUnknownResourceType": true,
 }
 
 // fixedTextSentinels — признаки, чей текст на провод НЕ доезжает: их полоса
@@ -173,6 +200,118 @@ func sortedKeys[V any](m map[string]V) []string {
 	return out
 }
 
+// sentinelPartition — ЧИСТЫЙ судья разбиения: каждый объявленный признак
+// отнесён РОВНО к одному перечню, и каждая запись перечня называет объявленный
+// признак. Запись без признака — находка по той же причине, что послабление без
+// предмета: она переживёт свою причину и достанется следующей слепой зоне.
+func sentinelPartition(declared []string, pass map[string]bool, fixed map[string]string) (premiseOutcome, []string) {
+	if len(declared) == 0 {
+		return premiseUnchecked, []string{"признаков объявлено 0 — распознаватель разошёлся с пакетом, " +
+			"и «каждый отнесён» было бы неотличимо от «не смотрели»"}
+	}
+	isDeclared := map[string]bool{}
+	var findings []string
+	for _, s := range declared {
+		isDeclared[s] = true
+		_, inFixed := fixed[s]
+		switch {
+		case pass[s] && inFixed:
+			findings = append(findings, "признак "+s+" отнесён к обоим перечням сразу — "+
+				"его обёртки одновременно судимы и объявлены невидимыми арендатору")
+		case !pass[s] && !inFixed:
+			findings = append(findings, "признак "+s+" не отнесён ни к доходящим до провода "+
+				"(passThroughSentinels), ни к полосам фиксированного текста (fixedTextSentinels) — "+
+				"литералы его обёрток выпадают из наблюдения молча")
+		}
+	}
+	for _, s := range sortedKeys(pass) {
+		if !isDeclared[s] {
+			findings = append(findings, "запись "+s+" в passThroughSentinels называет признак, "+
+				"которого пакет не объявляет — снимите её")
+		}
+	}
+	for _, s := range sortedKeys(fixed) {
+		if !isDeclared[s] {
+			findings = append(findings, "запись "+s+" в fixedTextSentinels называет признак, "+
+				"которого пакет не объявляет — снимите её")
+		}
+	}
+	sort.Strings(findings)
+	if len(findings) > 0 {
+		return premiseFalse, findings
+	}
+	return premiseHolds, nil
+}
+
+// declaredSentinelsIn — имена признаков, объявленных исходниками пакета:
+// экспортируемые переменные ПАКЕТНОГО уровня с приставкой `Err`.
+//
+// Форма правой части НЕ судится намеренно: пакет объявляет признак тремя
+// способами (`stderrors.New`, `fmt.Errorf` поверх соседа, частный случай с
+// явным типом), и распознаватель, знающий их по форме, пропустил бы четвёртую
+// не нарушением, а невидимостью.
+func declaredSentinelsIn(srcs ...[]byte) ([]string, error) {
+	fset := token.NewFileSet()
+	seen := map[string]bool{}
+	for i, src := range srcs {
+		f, err := parser.ParseFile(fset, "src"+strconv.Itoa(i)+".go", src, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range f.Decls {
+			gd, ok := d.(*ast.GenDecl)
+			if !ok || gd.Tok != token.VAR {
+				continue
+			}
+			for _, sp := range gd.Specs {
+				vs, ok := sp.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for _, n := range vs.Names {
+					if strings.HasPrefix(n.Name, "Err") && n.IsExported() {
+						seen[n.Name] = true
+					}
+				}
+			}
+		}
+	}
+	return sortedKeys(seen), nil
+}
+
+// sentinelPackageRel — пакет, объявляющий признаки.
+const sentinelPackageRel = "internal/errors"
+
+// requireSentinelPartition — разбиение на живом дереве.
+func requireSentinelPartition(t *testing.T) {
+	t.Helper()
+	out, err := gitenv.Command(serviceRoot, "ls-files", "-z", "--", sentinelPackageRel).Output()
+	if err != nil {
+		t.Fatalf("разбиение признаков НЕ ПРОВЕРЕНО: состав пакета не получен: %v", err)
+	}
+	var srcs [][]byte
+	for _, rel := range strings.Split(string(out), "\x00") {
+		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
+			continue
+		}
+		b, rerr := os.ReadFile(path.Join(serviceRoot, rel))
+		if rerr != nil {
+			t.Fatalf("разбиение признаков НЕ ПРОВЕРЕНО: %s не прочитан: %v", rel, rerr)
+		}
+		srcs = append(srcs, b)
+	}
+	declared, err := declaredSentinelsIn(srcs...)
+	if err != nil {
+		t.Fatalf("разбиение признаков НЕ ПРОВЕРЕНО: разбор пакета отказал: %v", err)
+	}
+	t.Logf("разбиение: файлов пакета признаков %d · признаков объявлено %d · доходят до провода %d · "+
+		"полосы фиксированного текста %d", len(srcs), len(declared), len(passThroughSentinels), len(fixedTextSentinels))
+	if outcome, findings := sentinelPartition(declared, passThroughSentinels, fixedTextSentinels); outcome != premiseHolds {
+		t.Fatalf("предпосылка гейта словаря: разбиение признаков не держится (%d):\n  %s",
+			len(findings), strings.Join(findings, "\n  "))
+	}
+}
+
 // requireFixedTextPremise — проверка предпосылки на живом дереве. Зовётся из
 // `collectClientTexts`, потому что предпосылка принадлежит ОПРЕДЕЛЕНИЮ
 // клиентского текста, а им пользуются оба гейта пакета: словарь и перепись
@@ -180,6 +319,8 @@ func sortedKeys[V any](m map[string]V) []string {
 // посылке, а прогон `-run` по одному имени — без неё вовсе.
 func requireFixedTextPremise(t *testing.T) {
 	t.Helper()
+	requireSentinelPartition(t)
+
 	// Корпус — индекс git модуля целиком: тот же, что обходит гейт дерева.
 	out, err := gitenv.Command(serviceRoot, "ls-files", "-z", "--", "*.go").Output()
 	if err != nil {

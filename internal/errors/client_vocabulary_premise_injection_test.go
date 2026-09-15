@@ -284,3 +284,105 @@ func f() error { return status.Error(codes.NotFound, "Group grp_1 not found") }
 		t.Log(text)
 	})
 }
+
+// TestClientVocabularySentinelPartitionInjection — вторая ось предпосылки:
+// КАЖДЫЙ объявленный признак отнесён ровно к одному перечню. Проверка кода
+// полос выше доказывает, что полосы фиксированного текста фиксированы, но
+// ничего не говорит о том, что исключены ИМЕННО их признаки: признак, не
+// попавший ни в один перечень, выпадает из наблюдения молча, и никакая
+// перепись полос этого не покажет.
+//
+// Оси по одной, каждая против одного и того же контроля: признак не отнесён ·
+// отнесён к обоим · запись называет признак, которого пакет не объявляет ·
+// пакет не объявляет ничего.
+func TestClientVocabularySentinelPartitionInjection(t *testing.T) {
+	pass := map[string]bool{"ErrNotFound": true}
+	fixed := map[string]string{"ErrUnavailable": "Unavailable"}
+
+	t.Run("КОНТРОЛЬ: каждый отнесён ровно к одному — молчание", func(t *testing.T) {
+		outcome, findings := sentinelPartition([]string{"ErrNotFound", "ErrUnavailable"}, pass, fixed)
+		if outcome != premiseHolds || len(findings) != 0 {
+			t.Fatalf("законное разбиение отвергнуто (исход %d): %v", outcome, findings)
+		}
+	})
+
+	cases := []struct {
+		name     string
+		declared []string
+		pass     map[string]bool
+		fixed    map[string]string
+		want     string // имя, которое находка обязана назвать
+	}{
+		{
+			name:     "ИНЪЕКЦИЯ: признак не отнесён ни к одному перечню",
+			declared: []string{"ErrNotFound", "ErrUnavailable", "ErrSelfRevoke"},
+			pass:     pass, fixed: fixed, want: "ErrSelfRevoke",
+		},
+		{
+			name:     "ИНЪЕКЦИЯ: признак отнесён к обоим",
+			declared: []string{"ErrNotFound", "ErrUnavailable"},
+			pass:     map[string]bool{"ErrNotFound": true, "ErrUnavailable": true}, fixed: fixed,
+			want: "ErrUnavailable",
+		},
+		{
+			name:     "ИНЪЕКЦИЯ: запись называет признак, которого пакет не объявляет",
+			declared: []string{"ErrNotFound", "ErrUnavailable"},
+			pass:     map[string]bool{"ErrNotFound": true, "ErrGone": true}, fixed: fixed,
+			want: "ErrGone",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			outcome, findings := sentinelPartition(tc.declared, tc.pass, tc.fixed)
+			if outcome != premiseFalse {
+				t.Fatalf("исход %d, ожидалось «ложна»: %v", outcome, findings)
+			}
+			if len(findings) != 1 || !strings.Contains(findings[0], tc.want) {
+				t.Fatalf("находка обязана быть одна и назвать %s, вернулось %v", tc.want, findings)
+			}
+		})
+	}
+
+	t.Run("ПУСТОЕ ОБЪЯВЛЕНИЕ: не проверена, а не держится", func(t *testing.T) {
+		if outcome, findings := sentinelPartition(nil, pass, fixed); outcome != premiseUnchecked {
+			t.Fatalf("пустой перечень объявленных принят за исход %d: %v", outcome, findings)
+		}
+	})
+
+	t.Run("РАСПОЗНАВАТЕЛЬ: все три формы объявления признака, и только они", func(t *testing.T) {
+		// Три формы, которыми пакет объявляет признак сегодня, плюс соседи,
+		// которые признаком не являются: переменная без приставки, локальная
+		// переменная функции, неэкспортируемое имя.
+		got, err := declaredSentinelsIn([]byte(`package errors
+
+import (
+	stderrors "errors"
+	"fmt"
+)
+
+var (
+	ErrPlain = stderrors.New("plain")
+	ErrNested = fmt.Errorf("%w: nested", ErrPlain)
+	ErrTyped error = specialised{general: ErrPlain}
+	errHidden = stderrors.New("hidden")
+	Registry = []error{ErrPlain}
+)
+
+var ErrLone = stderrors.New("lone")
+
+type specialised struct{ general error }
+
+func (s specialised) Error() string { return s.general.Error() }
+
+func f() { ErrLocal := stderrors.New("local"); _ = ErrLocal }
+`))
+		if err != nil {
+			t.Fatalf("подача НЕ ИСПОЛНЯЛАСЬ: %v", err)
+		}
+		want := "ErrLone,ErrNested,ErrPlain,ErrTyped"
+		if strings.Join(got, ",") != want {
+			t.Fatalf("распознаватель вернул %v, ожидалось %s — форма, которой он не знает, "+
+				"выпадает из разбиения не нарушением, а невидимостью", got, want)
+		}
+	})
+}
