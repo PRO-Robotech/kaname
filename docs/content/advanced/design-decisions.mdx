@@ -85,7 +85,7 @@ Kaname — собственный продукт со своими требов�
 
 ## Инварианты платформы
 
-IAM соблюдает non-negotiables Kachō: без ORM (sqlc + handwritten pgx); within-service инварианты —
+IAM соблюдает non-negotiables Kaname: без ORM (sqlc + handwritten pgx); within-service инварианты —
 на уровне БД (FK/UNIQUE/CHECK/CAS/OCC), не software-проверками; мутации возвращают `Operation`;
 `Internal.*`-методы не публикуются на external endpoint; применённые миграции не редактируются
 (только новые). Модель — secure-by-default.
