@@ -121,7 +121,10 @@ CASES.append(Case(
         # ALREADY_EXISTS на создании и читал его отказом приёма правила.
         # Идентификатор берётся из ЗАВЕРШЁННОЙ операции (`response.id`), а не из
         # предвыделенных метаданных — у упавшей операции он указывал бы на фантом.
-        *reliable_delete("teardown-label-role-fed", "/iam/v1/roles/{{lblFedRoleId}}",
+        # ИМЯ ШАГА КОРОТКОЕ НАМЕРЕННО: из него строится имя переменной опроса
+        # (`_poll200_started_<имя>`), и при 40+ знаках подряд чистка отчёта
+        # принимает его за удостоверение и отказывается выкладывать артефакт.
+        *reliable_delete("teardown-lbl-fed", "/iam/v1/roles/{{lblFedRoleId}}",
                          auth="jwtAccountAdminA", op_key="lblFed",
                          terminal_codes=(200,), require_operation=True),
     ],
@@ -185,7 +188,10 @@ CASES.append(Case(
         # ALREADY_EXISTS на создании и читал его отказом приёма правила.
         # Идентификатор берётся из ЗАВЕРШЁННОЙ операции (`response.id`), а не из
         # предвыделенных метаданных — у упавшей операции он указывал бы на фантом.
-        *reliable_delete("teardown-label-role-iamtype", "/iam/v1/roles/{{lblIamTypeRoleId}}",
+        # ИМЯ ШАГА КОРОТКОЕ НАМЕРЕННО: из него строится имя переменной опроса
+        # (`_poll200_started_<имя>`), и при 40+ знаках подряд чистка отчёта
+        # принимает его за удостоверение и отказывается выкладывать артефакт.
+        *reliable_delete("teardown-lbl-iamtype", "/iam/v1/roles/{{lblIamTypeRoleId}}",
                          auth="jwtAccountAdminA", op_key="lblIamType",
                          terminal_codes=(200,), require_operation=True),
     ],

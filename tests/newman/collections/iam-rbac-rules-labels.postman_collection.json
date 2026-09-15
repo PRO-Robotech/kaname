@@ -240,7 +240,7 @@
           ]
         },
         {
-          "name": "RBACLBL-FED-ACCEPTED :: teardown-label-role-fed",
+          "name": "RBACLBL-FED-ACCEPTED :: teardown-lbl-fed",
           "request": {
             "method": "DELETE",
             "header": [
@@ -291,9 +291,9 @@
                   "}",
                   "// poll-for-propagation counter reset on first entry (request-name-scoped);",
                   "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_poll200_started_teardown_label_role_fed') !== pm.info.requestName) {",
-                  "  pm.environment.set('_poll200_teardown_label_role_fed', '0');",
-                  "  pm.environment.set('_poll200_started_teardown_label_role_fed', pm.info.requestName);",
+                  "if (pm.environment.get('_poll200_started_teardown_lbl_fed') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_lbl_fed', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_lbl_fed', pm.info.requestName);",
                   "}",
                   "(function () {",
                   "  var _u = '';",
@@ -322,18 +322,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_label_role_fed') || '0', 10);",
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_lbl_fed') || '0', 10);",
                   "const _p200retryCode = [403].includes(pm.response.code);",
                   "const _p200retryPred = false;",
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
-                  "  pm.environment.set('_poll200_teardown_label_role_fed', String(_p200c + 1));",
+                  "  pm.environment.set('_poll200_teardown_lbl_fed', String(_p200c + 1));",
                   "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
-                  "pm.environment.unset('_poll200_teardown_label_role_fed');",
-                  "pm.environment.unset('_poll200_started_teardown_label_role_fed');",
+                  "pm.environment.unset('_poll200_teardown_lbl_fed');",
+                  "pm.environment.unset('_poll200_started_teardown_lbl_fed');",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "pm.environment.unset('_lblFedRevOp');",
                   "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
@@ -345,7 +345,7 @@
           ]
         },
         {
-          "name": "RBACLBL-FED-ACCEPTED :: teardown-label-role-fed-await",
+          "name": "RBACLBL-FED-ACCEPTED :: teardown-lbl-fed-await",
           "request": {
             "method": "GET",
             "header": [
@@ -643,7 +643,7 @@
           ]
         },
         {
-          "name": "RBACLBL-IAMTYPE-ACCEPTED :: teardown-label-role-iamtype",
+          "name": "RBACLBL-IAMTYPE-ACCEPTED :: teardown-lbl-iamtype",
           "request": {
             "method": "DELETE",
             "header": [
@@ -694,9 +694,9 @@
                   "}",
                   "// poll-for-propagation counter reset on first entry (request-name-scoped);",
                   "// re-invocations via setNextRequest skip the reset.",
-                  "if (pm.environment.get('_poll200_started_teardown_label_role_iamtype') !== pm.info.requestName) {",
-                  "  pm.environment.set('_poll200_teardown_label_role_iamtype', '0');",
-                  "  pm.environment.set('_poll200_started_teardown_label_role_iamtype', pm.info.requestName);",
+                  "if (pm.environment.get('_poll200_started_teardown_lbl_iamtype') !== pm.info.requestName) {",
+                  "  pm.environment.set('_poll200_teardown_lbl_iamtype', '0');",
+                  "  pm.environment.set('_poll200_started_teardown_lbl_iamtype', pm.info.requestName);",
                   "}",
                   "(function () {",
                   "  var _u = '';",
@@ -725,18 +725,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_label_role_iamtype') || '0', 10);",
+                  "const _p200c = parseInt(pm.environment.get('_poll200_teardown_lbl_iamtype') || '0', 10);",
                   "const _p200retryCode = [403].includes(pm.response.code);",
                   "const _p200retryPred = false;",
                   "if ((_p200retryCode || _p200retryPred) && _p200c < 50) {",
                   "  // access not yet visible at the authz gate (grant→FGA propagation window) — retry.",
-                  "  pm.environment.set('_poll200_teardown_label_role_iamtype', String(_p200c + 1));",
+                  "  pm.environment.set('_poll200_teardown_lbl_iamtype', String(_p200c + 1));",
                   "  const _p200d = Date.now(); while (Date.now() - _p200d < 500) { /* inter-poll delay ~500ms (Koren #1) */ }",
                   "  pm.execution.setNextRequest(pm.info.requestName);",
                   "  return;",
                   "}",
-                  "pm.environment.unset('_poll200_teardown_label_role_iamtype');",
-                  "pm.environment.unset('_poll200_started_teardown_label_role_iamtype');",
+                  "pm.environment.unset('_poll200_teardown_lbl_iamtype');",
+                  "pm.environment.unset('_poll200_started_teardown_lbl_iamtype');",
                   "let j; try { j = pm.response.json(); } catch (e) { j = null; }",
                   "pm.environment.unset('_lblIamTypeRevOp');",
                   "pm.test('teardown: removed or already gone — a persistent 403 means it SURVIVES the run', () => pm.expect(pm.response.code, JSON.stringify(j)).to.be.oneOf([200]));",
@@ -748,7 +748,7 @@
           ]
         },
         {
-          "name": "RBACLBL-IAMTYPE-ACCEPTED :: teardown-label-role-iamtype-await",
+          "name": "RBACLBL-IAMTYPE-ACCEPTED :: teardown-lbl-iamtype-await",
           "request": {
             "method": "GET",
             "header": [
