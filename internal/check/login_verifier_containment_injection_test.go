@@ -34,16 +34,33 @@ type box struct{ material string }
 func (v LoginVerifier) Reveal() string { return v.box.material }
 
 func (v LoginVerifier) String() string { return "Reveal is not called here" }
+
+func NewLoginVerifier(material string) (LoginVerifier, error) { return LoginVerifier{box: &box{material}}, nil }
 `,
-		"internal/repo/kaname/pg/login_method_repo.go": `package pg
+		lvOwner: `package pg
+
+import "github.com/PRO-Robotech/kaname/internal/domain"
 
 const loginMethodsTable = "user_login_methods"
 
-type execer interface{ Exec(q string, args ...any) error }
+type row interface{ Scan(dest ...any) error }
 
-func write(db execer, v interface{ Reveal() string }) error {
-	q := "INSERT INTO " + loginMethodsTable + " (verifier) VALUES ($1)"
-	return db.Exec(q, v.Reveal())
+type pooler interface{ QueryRow(q string, args ...any) row }
+
+type LoginMethodRepo struct{ pool pooler }
+
+func (r *LoginMethodRepo) Create(user string, v interface{ Reveal() string }) error {
+	q := "INSERT INTO " + loginMethodsTable + " (user_id, verifier) VALUES ($1, $2)"
+	return r.pool.QueryRow(q, user, v.Reveal()).Scan()
+}
+
+func (r *LoginMethodRepo) Get(user string) (domain.LoginVerifier, error) {
+	q := "SELECT verifier FROM " + loginMethodsTable + " WHERE user_id = $1"
+	var material string
+	if err := r.pool.QueryRow(q, user).Scan(&material); err != nil {
+		return domain.LoginVerifier{}, err
+	}
+	return domain.NewLoginVerifier(material)
 }
 
 func isLoginMethodsTable(name string) bool { return name == loginMethodsTable }
@@ -61,6 +78,12 @@ func noop() {}
 	}
 }
 
+// lvOwner — файл-владелец таблицы и единственный разрешённый файл выхода.
+const lvOwner = "internal/repo/kaname/pg/login_method_repo.go"
+
+// lvGo — текст файла пакета pkg с телом body: тело начинается со строки 3.
+func lvGo(pkg, body string) string { return "package " + pkg + "\n\n" + body + "\n" }
+
 func auditInjected(t *testing.T, corpus check.TreeCorpus) ([]string, check.LoginVerifierCensus, error) {
 	t.Helper()
 	return check.AuditLoginVerifierContainment(corpus, loginVerifierSpec())
@@ -73,11 +96,12 @@ func TestLoginVerifierGate_LawfulCorpusIsSilent(t *testing.T) {
 	require.Empty(t, findings, "законный корпус обязан молчать — иначе красное в сценах ниже ничего не доказывает")
 	require.Equal(t, 1, census.AccessorDecls)
 	require.Equal(t, 1, census.AllowedUses["internal/repo/kaname/pg/login_method_repo.go"])
-	// У владельца: объявление константы (литерал), склейка запроса с ней и
-	// сравнение в предикате (связанное имя). Имена ограничений у переводчика
-	// отказов таблицей не считаются — вне владельца упоминаний ноль.
-	require.Equal(t, map[string]int{"литерал": 1, "склейка": 1, "связанное имя": 1}, census.TableNamings)
-	require.Equal(t, 3, census.OwnerTableNamings)
+	// У владельца: объявление константы (литерал), две склейки запросов с ней
+	// (вставка и чтение) и сравнение в предикате (связанное имя). Имена
+	// ограничений у переводчика отказов таблицей не считаются — вне владельца
+	// упоминаний ноль.
+	require.Equal(t, map[string]int{"литерал": 1, "склейка": 2, "связанное имя": 1}, census.TableNamings)
+	require.Equal(t, 4, census.OwnerTableNamings)
 	require.Equal(t, []string{"internal/repo/kaname/pg.loginMethodsTable"}, census.Bindings,
 		"перепись связанных имён обязана назвать константу владельца")
 }
@@ -272,6 +296,442 @@ const loginMethodsTable = "user_login_methods"
 `
 			},
 			wantFinding: "разрешение файлу internal/repo/kaname/pg/login_method_repo.go",
+		},
+		// ── ИМЯ ТАБЛИЦЫ: написания внутри литерала (грамматика SQL) ─────────────
+		// Postgres приводит имя без кавычек к нижнему регистру, имя в кавычках
+		// сравнивает побайтово, `U&"…"` раскрывает экранирование; внутри строки
+		// SQL имя живёт ещё раз — `'…'::regclass`, `EXECUTE '…'`, аргумент
+		// `format`. Каждое написание — своя сцена; у каждой различающей оси —
+		// законный близнец, называющий ДРУГОЕ отношение.
+		{
+			name: "литерал: имя без кавычек в верхнем регистре со схемой",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT verifier FROM kaname.USER_LOGIN_METHODS WHERE user_id = $1"`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "литерал: имя без кавычек в смешанном регистре без схемы",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT verifier FROM User_Login_Methods"`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "литерал в обратных кавычках, верхний регистр",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", "const q = `SELECT verifier FROM ONLY KANAME.USER_LOGIN_METHODS AS m`")
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "литерал: имя в кавычках точно, со схемой в кавычках",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT verifier FROM \"kaname\".\"user_login_methods\""`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "литерал: экранирование Go внутри литерала",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT verifier FROM kaname.user\x5flogin_methods"`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "литерал: имя U&\"…\" с экранированием Юникода",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT verifier FROM kaname.U&\"user\\005flogin_methods\""`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "литерал: имя U&\"…\" со своим знаком экранирования UESCAPE",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT verifier FROM kaname.U&\"user!005flogin_methods\" UESCAPE '!'"`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "литерал: имя внутри строки SQL, приводимой к regclass",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT 'KANAME.USER_LOGIN_METHODS'::regclass"`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "литерал: имя внутри E-строки SQL с экранированием",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT E'kaname.user\\x5flogin_methods'::regclass"`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "литерал: строка SQL, продолженная через перевод строки",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT 'kaname.user_login_'\n  'methods'::regclass"`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "литерал: строки SQL, склеенные оператором ||",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "EXECUTE 'SELECT verifier FROM kaname.user_login_' || 'methods'"`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "литерал: имя внутри строки SQL в долларах, верхний регистр",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "EXECUTE $q$SELECT verifier FROM KANAME.USER_LOGIN_METHODS$q$"`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "законный близнец: имя в кавычках в другом регистре — другое отношение",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT verifier FROM kaname.\"USER_LOGIN_METHODS\""`)
+			},
+		},
+		{
+			name: "законный близнец: имя в кавычках внутри строки regclass — другое отношение",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT '\"USER_LOGIN_METHODS\"'::regclass"`)
+			},
+		},
+		{
+			name: "законный близнец: зеркало с общей частью имени",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT verifier FROM kaname.w6_user_login_methods_mirror"`)
+			},
+		},
+		{
+			name: "законный близнец: имя, продолженное знаком доллара, — другой идентификатор",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT verifier FROM kaname.user_login_methods$x"`)
+			},
+		},
+		{
+			name: "законный близнец: имя, продолженное буквой вне ASCII, — другой идентификатор",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT verifier FROM kaname.user_login_methodsé"`)
+			},
+		},
+		{
+			name: "законный близнец: имя в комментарии SQL внутри литерала",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT 1 -- user_login_methods читает только адаптер"`)
+			},
+		},
+
+		// ── ИМЯ ТАБЛИЦЫ: написания склейки и связанного имени (грамматика Go) ────
+		{
+			name: "склейка Go в верхнем регистре",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = "SELECT verifier FROM KANAME.USER_" + "LOGIN_METHODS"`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "склейка через приведение к string",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", `const q = string("SELECT verifier FROM kaname.user_login_") + "methods"`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "склейка через приведение к строковому типу своего пакета",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/types.go"] = lvGo("handler", `type sqlText string`)
+				c["internal/handler/login.go"] = lvGo("handler", `const q = sqlText("SELECT verifier FROM kaname.user_login_") + sqlText("methods")`)
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "склейка локальных констант функции",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = lvGo("handler", "func q() string {\n\tconst a = \"user_login_\"\n\tconst b = \"methods\"\n\treturn \"SELECT verifier FROM \" + a + b\n}")
+			},
+			wantFinding: "internal/handler/login.go:6: таблица секрета",
+		},
+		{
+			name: "константа владельца, повторённая неявно в его группе, в соседнем файле",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] = strings.Replace(c[lvOwner], `const loginMethodsTable = "user_login_methods"`,
+					"const (\n\tloginMethodsTable = \"user_login_methods\"\n\tsecondName\n)", 1)
+				c["internal/repo/kaname/pg/reader.go"] = lvGo("pg", `func q() string { return "SELECT verifier FROM " + secondName }`)
+			},
+			wantFinding: "internal/repo/kaname/pg/reader.go:3: таблица секрета",
+		},
+		{
+			name: "константа другого пакета через импорт с точкой",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nconst LoginMethodsTable = loginMethodsTable\n"
+				c["internal/handler/login.go"] = lvGo("handler", "import . \"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg\"\n\nvar q = \"SELECT verifier FROM \" + LoginMethodsTable")
+			},
+			wantFinding: "internal/handler/login.go:5: таблица секрета",
+		},
+		{
+			name: "константа другого пакета через псевдоним импорта",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nconst LoginMethodsTable = loginMethodsTable\n"
+				c["internal/handler/login.go"] = lvGo("handler", "import store \"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg\"\n\nvar q = \"SELECT verifier FROM \" + store.LoginMethodsTable")
+			},
+			wantFinding: "internal/handler/login.go:5: таблица секрета",
+		},
+
+		// ── ИМЯ ТАБЛИЦЫ: вынос владельцем — те же написания, что у материала ─────
+		{
+			name: "владелец отдаёт имя таблицы именованным результатом",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc tableNamed() (s string) {\n\ts = loginMethodsTable\n\treturn\n}\n"
+			},
+			wantFinding: "tableNamed",
+		},
+		{
+			name: "владелец отдаёт имя таблицы возвратом локальной переменной",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc tableLocal() string {\n\tn := loginMethodsTable\n\treturn n\n}\n"
+			},
+			wantFinding: "tableLocal",
+		},
+		{
+			name: "владелец кладёт имя таблицы в переменную пакета, читаемую соседом",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nvar exportedName string\n\nfunc init() { exportedName = loginMethodsTable }\n"
+				c["internal/repo/kaname/pg/reader.go"] = lvGo("pg", `func q() string { return "SELECT verifier FROM " + exportedName }`)
+			},
+			wantFinding: "exportedName",
+		},
+		{
+			name: "владелец передаёт запрос с именем таблицы функции соседнего файла",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/runner.go"] = lvGo("pg", `func runSQL(q string) {}`)
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) purge() { runSQL(\"DELETE FROM \" + loginMethodsTable) }\n"
+			},
+			wantFinding: "purge",
+		},
+
+		// ── МАТЕРИАЛ: вынос из разрешённого файла — все написания ────────────────
+		{
+			name: "возврат локальной переменной с материалом",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc leakLocal(v interface{ Reveal() string }) string {\n\tm := v.Reveal()\n\treturn m\n}\n"
+			},
+			wantFinding: "leakLocal",
+		},
+		{
+			name: "именованный результат с пустым возвратом",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc leakNamed(v interface{ Reveal() string }) (s string) {\n\ts = v.Reveal()\n\treturn\n}\n"
+			},
+			wantFinding: "leakNamed",
+		},
+		{
+			name: "именованный результат, заполненный отложенным замыканием",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc leakDeferred(v interface{ Reveal() string }) (s string) {\n\tdefer func() { s = v.Reveal() }()\n\treturn \"\"\n}\n"
+			},
+			wantFinding: "leakDeferred",
+		},
+		{
+			name: "именованный результат, дописанный составным присваиванием",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc leakAppended(v interface{ Reveal() string }) (s string) {\n\ts += v.Reveal()\n\treturn\n}\n"
+			},
+			wantFinding: "leakAppended",
+		},
+		{
+			name: "поле возвращаемой структуры, заполненное присваиванием",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\ntype pair struct{ m string }\n\nfunc leakField(v interface{ Reveal() string }) pair {\n\tvar out pair\n\tout.m = v.Reveal()\n\treturn out\n}\n"
+			},
+			wantFinding: "leakField",
+		},
+		{
+			name: "поле возвращаемой структуры в составном литерале по указателю",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\ntype pair struct{ m string }\n\nfunc leakLiteral(v interface{ Reveal() string }) *pair { return &pair{m: v.Reveal()} }\n"
+			},
+			wantFinding: "leakLiteral",
+		},
+		{
+			name: "замыкание, захватившее материал",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc leakClosure(v interface{ Reveal() string }) func() string {\n\tm := v.Reveal()\n\treturn func() string { return m }\n}\n"
+			},
+			wantFinding: "leakClosure",
+		},
+		{
+			name: "замыкание, зовущее выход",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc leakThunk(v interface{ Reveal() string }) func() string {\n\treturn func() string { return v.Reveal() }\n}\n"
+			},
+			wantFinding: "leakThunk",
+		},
+		{
+			name: "присваивание полю переменной пакета",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nvar st struct{ m string }\n\nfunc leakPkgField(v interface{ Reveal() string }) { st.m = v.Reveal() }\n"
+			},
+			wantFinding: "leakPkgField",
+		},
+		{
+			name: "присваивание в карту пакета",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nvar cache = map[string]string{}\n\nfunc leakMap(k string, v interface{ Reveal() string }) { cache[k] = v.Reveal() }\n"
+			},
+			wantFinding: "leakMap",
+		},
+		{
+			name: "материал ключом карты пакета",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nvar seen = map[string]bool{}\n\nfunc leakKey(v interface{ Reveal() string }) { seen[v.Reveal()] = true }\n"
+			},
+			wantFinding: "leakKey",
+		},
+		{
+			name: "присваивание переменной пакета через локальную",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nvar last string\n\nfunc leakViaLocal(v interface{ Reveal() string }) {\n\tm := v.Reveal()\n\tlast = m\n}\n"
+			},
+			wantFinding: "leakViaLocal",
+		},
+		{
+			name: "присваивание переменной другого пакета",
+			edit: func(c check.TreeCorpus) {
+				c["internal/audit/sink.go"] = lvGo("audit", "var Last string\n\nfunc Emit(s string) {}")
+				c[lvOwner] = strings.Replace(c[lvOwner], `import "github.com/PRO-Robotech/kaname/internal/domain"`,
+					"import (\n\t\"github.com/PRO-Robotech/kaname/internal/audit\"\n\t\"github.com/PRO-Robotech/kaname/internal/domain\"\n)", 1)
+				c[lvOwner] += "\nfunc leakForeignVar(v interface{ Reveal() string }) { audit.Last = v.Reveal() }\n"
+			},
+			wantFinding: "leakForeignVar",
+		},
+		{
+			name: "запись через параметр-указатель",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc leakPointer(v interface{ Reveal() string }, dst *string) { *dst = v.Reveal() }\n"
+			},
+			wantFinding: "leakPointer",
+		},
+		{
+			name: "запись в поле получателя",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) leakReceiver(v interface{ Reveal() string }) { r.last = v.Reveal() }\n"
+			},
+			wantFinding: "leakReceiver",
+		},
+		{
+			name: "копирование материала в срез-параметр",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc leakCopy(v interface{ Reveal() string }, buf []byte) { copy(buf, v.Reveal()) }\n"
+			},
+			wantFinding: "leakCopy",
+		},
+		{
+			name: "отправка локальной переменной в канал",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc leakChan(ch chan<- string, v interface{ Reveal() string }) {\n\tm := v.Reveal()\n\tch <- m\n}\n"
+			},
+			wantFinding: "leakChan",
+		},
+		{
+			name: "аргумент функции соседнего файла",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/stash.go"] = lvGo("pg", `func stash(m string) {}`)
+				c[lvOwner] += "\nfunc leakArg(v interface{ Reveal() string }) { stash(v.Reveal()) }\n"
+			},
+			wantFinding: "leakArg",
+		},
+		{
+			name: "локальная переменная с материалом — аргумент функции соседнего файла",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/stash.go"] = lvGo("pg", `func stash(m string) {}`)
+				c[lvOwner] += "\nfunc leakArgLocal(v interface{ Reveal() string }) {\n\tm := v.Reveal()\n\tstash(m)\n}\n"
+			},
+			wantFinding: "leakArgLocal",
+		},
+		{
+			name: "аргумент метода получателя, объявленного в соседнем файле",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/remember.go"] = lvGo("pg", `func (r *LoginMethodRepo) remember(m string) {}`)
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) leakMethod(v interface{ Reveal() string }) { r.remember(v.Reveal()) }\n"
+			},
+			wantFinding: "leakMethod",
+		},
+		{
+			name: "аргумент функции другого пакета корпуса",
+			edit: func(c check.TreeCorpus) {
+				c["internal/audit/sink.go"] = lvGo("audit", "var Last string\n\nfunc Emit(s string) {}")
+				c[lvOwner] = strings.Replace(c[lvOwner], `import "github.com/PRO-Robotech/kaname/internal/domain"`,
+					"import (\n\t\"github.com/PRO-Robotech/kaname/internal/audit\"\n\t\"github.com/PRO-Robotech/kaname/internal/domain\"\n)", 1)
+				c[lvOwner] += "\nfunc leakPkgFunc(v interface{ Reveal() string }) { audit.Emit(v.Reveal()) }\n"
+			},
+			wantFinding: "leakPkgFunc",
+		},
+		{
+			name: "материал через функцию своего файла дальше в переменную пакета",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nvar last string\n\nfunc leakRelay(v interface{ Reveal() string }) { keep(v.Reveal()) }\n\nfunc keep(m string) { last = m }\n"
+			},
+			wantFinding: "keep",
+		},
+		{
+			name: "материал вызову, внутрь которого гейт не видит, не объявленному потребителем",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] = strings.Replace(c[lvOwner], `import "github.com/PRO-Robotech/kaname/internal/domain"`,
+					"import (\n\t\"fmt\"\n\n\t\"github.com/PRO-Robotech/kaname/internal/domain\"\n)", 1)
+				c[lvOwner] += "\nfunc leakFormat(v interface{ Reveal() string }) string { return fmt.Sprintf(\"%s\", v.Reveal()) }\n"
+			},
+			wantFinding: "leakFormat",
+		},
+		{
+			name: "материал строителю строк, не объявленному потребителем",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] = strings.Replace(c[lvOwner], `import "github.com/PRO-Robotech/kaname/internal/domain"`,
+					"import (\n\t\"strings\"\n\n\t\"github.com/PRO-Robotech/kaname/internal/domain\"\n)", 1)
+				c[lvOwner] += "\nfunc leakBuilder(v interface{ Reveal() string }) string {\n\tvar b strings.Builder\n\tb.WriteString(v.Reveal())\n\treturn b.String()\n}\n"
+			},
+			wantFinding: "leakBuilder",
+		},
+		{
+			name: "материал встроенной функции вывода",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc leakPrint(v interface{ Reveal() string }) { println(v.Reveal()) }\n"
+			},
+			wantFinding: "leakPrint",
+		},
+		{
+			name: "материал в оператор базы в функции, где этот оператор не объявлен потребителем",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc (r *LoginMethodRepo) Peek(v interface{ Reveal() string }) { _ = r.pool.QueryRow(\"SELECT 1\", v.Reveal()) }\n"
+			},
+			wantFinding: "Peek",
+		},
+		{
+			name: "законный близнец: локальная переменная с материалом отдана объявленному потребителю",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] = strings.Replace(c[lvOwner], "return r.pool.QueryRow(q, user, v.Reveal()).Scan()",
+					"m := v.Reveal()\n\treturn r.pool.QueryRow(q, user, m).Scan()", 1)
+			},
+		},
+		{
+			name: "законный близнец: материал сравнивается, наружу уходит булево",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc same(v interface{ Reveal() string }, p string) bool { return v.Reveal() == p }\n"
+			},
+		},
+		{
+			name: "законный близнец: замыкание, исполненное на месте, отдаёт материал функции своего файла",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nfunc compare(h, p []byte) error { return nil }\n\nfunc checkInPlace(v interface{ Reveal() string }, p []byte) error {\n\tm := func() string { return v.Reveal() }()\n\treturn compare([]byte(m), p)\n}\n"
+			},
+		},
+		{
+			name: "законный близнец: локальная переменная с именем переменной пакета",
+			edit: func(c check.TreeCorpus) {
+				c[lvOwner] += "\nvar last string\n\nfunc shadowed(v interface{ Reveal() string }) {\n\tlast := v.Reveal()\n\t_ = last\n}\n"
+			},
 		},
 		{
 			name: "премиса: выход объявлен дважды",

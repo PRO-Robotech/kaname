@@ -559,6 +559,10 @@ type lmInjection struct {
 	// listen — канал уведомления. Непусто — сцена ДОКАЗЫВАЕТ утечку: слушатель
 	// обязан получить материал, иначе внесённый факт не сработал.
 	listen string
+	// quietListen — канал законного близнеца: уведомление обязано прийти и НЕ
+	// нести метку — написание, которое близнец читает, база разрешила в другое
+	// отношение.
+	quietListen string
 	// copyAt — где обязана найтись копия (подстрока «таблица.колонка»); пусто —
 	// вне дома метки нет.
 	copyAt string
@@ -770,12 +774,103 @@ func lmInjections() []lmInjection {
 	}
 }
 
+// lmReadsThrough — триггер СОСЕДНЕЙ таблицы читает материал оператором read,
+// где таблица записана испытуемым написанием, и отправляет прочитанное
+// уведомлением в канал fn.
+//
+// Что написание называет — решает БАЗА, а не чтение текста: слушатель получает
+// метку, только если база разрешила написание в таблицу секрета. У законного
+// близнеца (other — отношение-двойник, которое заводится сценой) слушатель
+// получает пустое значение: база разрешила написание в ДРУГОЕ отношение, и
+// находка гейта там была бы ложной.
+func lmReadsThrough(name, fn, other, read string) lmInjection {
+	sc := lmInjection{
+		name: name,
+		before: other + `
+			CREATE FUNCTION kaname.` + fn + `() RETURNS trigger LANGUAGE plpgsql AS $body$
+			DECLARE v text;
+			BEGIN
+			  ` + read + `
+			  PERFORM pg_notify('` + fn + `', coalesce(v, ''));
+			  RETURN NEW;
+			END; $body$;
+			CREATE TRIGGER ` + fn + ` AFTER UPDATE ON kaname.users
+			  FOR EACH ROW EXECUTE FUNCTION kaname.` + fn + `();`,
+		after: `UPDATE kaname.users SET display_name = display_name WHERE id IN (SELECT user_id FROM kaname.user_login_methods)`,
+	}
+	if other == "" {
+		sc.listen, sc.want = fn, fn
+	} else {
+		sc.quietListen = fn
+	}
+	return sc
+}
+
+// lmSpellingInjections — таблица секрета в тексте подпрограммы: по сцене на
+// каждое написание имени, выведенное из грамматики (см. шапку), и законные
+// близнецы по каждой различающей оси.
+func lmSpellingInjections() []lmInjection {
+	const w = ` WHERE user_id = NEW.id LIMIT 1;`
+	const dw = ` WHERE user_id = $1 LIMIT 1`
+	return []lmInjection{
+		// ── имя вне строки ────────────────────────────────────────────────────
+		lmReadsThrough("имя без кавычек в верхнем регистре со схемой", "lm_sp_upper", "",
+			`SELECT verifier INTO v FROM KANAME.USER_LOGIN_METHODS`+w),
+		lmReadsThrough("имя без кавычек в смешанном регистре без схемы (путь поиска)", "lm_sp_mixed", "",
+			`SELECT verifier INTO v FROM User_Login_Methods`+w),
+		lmReadsThrough("имя в кавычках точно, схема в кавычках", "lm_sp_quoted", "",
+			`SELECT verifier INTO v FROM "kaname"."user_login_methods"`+w),
+		lmReadsThrough("ONLY и псевдоним, верхний регистр", "lm_sp_only", "",
+			`SELECT m.verifier INTO v FROM ONLY KANAME.USER_LOGIN_METHODS AS m WHERE m.user_id = NEW.id LIMIT 1;`),
+		lmReadsThrough("имя U&\"…\" с экранированием Юникода", "lm_sp_uident", "",
+			`SELECT verifier INTO v FROM kaname.U&"user\005flogin_methods"`+w),
+		lmReadsThrough("имя U&\"…\" со своим знаком экранирования UESCAPE", "lm_sp_uescape", "",
+			`SELECT verifier INTO v FROM kaname.U&"user!005flogin_methods" UESCAPE '!'`+w),
+		// ── имя внутри строки: динамический SQL и разбор имени ────────────────
+		lmReadsThrough("EXECUTE строки с именем в верхнем регистре", "lm_sp_exec", "",
+			`EXECUTE 'SELECT verifier FROM KANAME.USER_LOGIN_METHODS`+dw+`' INTO v USING NEW.id;`),
+		lmReadsThrough("EXECUTE E-строки с экранированием в имени", "lm_sp_estr", "",
+			`EXECUTE E'SELECT verifier FROM kaname.user\x5flogin_methods`+dw+`' INTO v USING NEW.id;`),
+		lmReadsThrough("EXECUTE строки, продолженной через перевод строки", "lm_sp_cont", "",
+			"EXECUTE 'SELECT verifier FROM kaname.user_login_'\n\t\t\t  'methods"+dw+"' INTO v USING NEW.id;"),
+		lmReadsThrough("EXECUTE строк, склеенных оператором ||", "lm_sp_concat", "",
+			`EXECUTE 'SELECT verifier FROM kaname.user_login_' || 'methods`+dw+`' INTO v USING NEW.id;`),
+		lmReadsThrough("EXECUTE строки в долларах с именем в верхнем регистре", "lm_sp_dollar", "",
+			`EXECUTE $q$SELECT verifier FROM KANAME.USER_LOGIN_METHODS`+dw+`$q$ INTO v USING NEW.id;`),
+		lmReadsThrough("приведение строки с именем в верхнем регистре к regclass", "lm_sp_regclass", "",
+			`EXECUTE format('SELECT verifier FROM %s`+dw+`', 'KANAME.USER_LOGIN_METHODS'::regclass) INTO v USING NEW.id;`),
+		lmReadsThrough("приведение строки U&'…' к regclass", "lm_sp_ustr", "",
+			`EXECUTE format('SELECT verifier FROM %s`+dw+`', U&'kaname.user\005flogin_methods'::regclass) INTO v USING NEW.id;`),
+		lmReadsThrough("format с именем аргументом %I", "lm_sp_format", "",
+			`EXECUTE format('SELECT verifier FROM %I.%I`+dw+`', 'kaname', 'user_login_methods') INTO v USING NEW.id;`),
+		// ── законные близнецы: написание называет ДРУГОЕ отношение ─────────────
+		lmReadsThrough("законный близнец: имя в кавычках в верхнем регистре — другое отношение", "lm_tw_quoted",
+			`CREATE TABLE kaname."USER_LOGIN_METHODS" (user_id text, verifier text);`,
+			`SELECT verifier INTO v FROM kaname."USER_LOGIN_METHODS"`+w),
+		lmReadsThrough("законный близнец: имя в кавычках внутри строки regclass — другое отношение", "lm_tw_regclass",
+			`CREATE TABLE kaname."USER_LOGIN_METHODS" (user_id text, verifier text);`,
+			`EXECUTE format('SELECT verifier FROM %s`+dw+`', '"kaname"."USER_LOGIN_METHODS"'::regclass) INTO v USING NEW.id;`),
+		lmReadsThrough("законный близнец: зеркало с общей частью имени", "lm_tw_mirror",
+			`CREATE TABLE kaname.w6_user_login_methods_mirror (user_id text, verifier text);`,
+			`SELECT verifier INTO v FROM kaname.w6_user_login_methods_mirror`+w),
+		lmReadsThrough("законный близнец: имя, продолженное знаком доллара", "lm_tw_dollar",
+			`CREATE TABLE kaname.user_login_methods$x (user_id text, verifier text);`,
+			`SELECT verifier INTO v FROM kaname.user_login_methods$x`+w),
+		lmReadsThrough("законный близнец: имя, продолженное буквой вне ASCII", "lm_tw_nonascii",
+			`CREATE TABLE kaname.user_login_methodsé (user_id text, verifier text);`,
+			`SELECT verifier INTO v FROM kaname.user_login_methodsé`+w),
+		lmReadsThrough("законный близнец: имя таблицы в комментарии внутри строки EXECUTE", "lm_tw_comment",
+			`CREATE TABLE kaname.lm_probe_twin (user_id text, verifier text);`,
+			`EXECUTE 'SELECT verifier FROM kaname.lm_probe_twin /* не user_login_methods */`+dw+`' INTO v USING NEW.id;`),
+	}
+}
+
 // TestLoginVerifierContainmentGateInjection — способность упасть и смолчать.
 //
 // Каждая сцена — своя база и отличается от чистой ОДНИМ внесённым фактом. Сцена
 // с каналом доказывает, что утечка НАСТОЯЩАЯ: слушатель получил материал.
 func TestLoginVerifierContainmentGateInjection(t *testing.T) {
-	for i, sc := range lmInjections() {
+	for i, sc := range append(lmInjections(), lmSpellingInjections()...) {
 		t.Run(sc.name, func(t *testing.T) {
 			pool := lmPool(t)
 			ctx := context.Background()
@@ -784,12 +879,12 @@ func TestLoginVerifierContainmentGateInjection(t *testing.T) {
 				require.NoError(t, err, "внесённый факт не создан — сцена беспредметна")
 			}
 			var listener *pgxpool.Conn
-			if sc.listen != "" {
+			if channel := sc.listen + sc.quietListen; channel != "" {
 				var err error
 				listener, err = pool.Acquire(ctx)
 				require.NoError(t, err)
 				defer listener.Release()
-				_, err = listener.Exec(ctx, "LISTEN "+pgx.Identifier{sc.listen}.Sanitize())
+				_, err = listener.Exec(ctx, "LISTEN "+pgx.Identifier{channel}.Sanitize())
 				require.NoError(t, err)
 			}
 			lmWriteSentinel(t, pool, fmt.Sprintf("lminj%d", i))
@@ -802,7 +897,12 @@ func TestLoginVerifierContainmentGateInjection(t *testing.T) {
 				defer cancel()
 				n, err := listener.Conn().WaitForNotification(wctx)
 				require.NoError(t, err, "уведомление не пришло — внесённый факт не сработал, сцена беспредметна")
-				require.Contains(t, n.Payload, lmSentinel, "слушатель получил материал: утечка настоящая")
+				if sc.quietListen != "" {
+					require.NotContains(t, n.Payload, lmSentinel,
+						"близнец прочёл материал — написание называет таблицу секрета, и близнецом сцена не является")
+				} else {
+					require.Contains(t, n.Payload, lmSentinel, "слушатель получил материал: утечка настоящая")
+				}
 			}
 
 			c := lmScanContainment(t, pool, lmSentinel)
