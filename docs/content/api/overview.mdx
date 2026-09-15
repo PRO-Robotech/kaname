@@ -81,7 +81,7 @@ import dedent from 'ts-dedent'
   `Issue`, ...) — возвращают `Operation` (long-running operation). Клиент поллит статус
   операции до `done=true`.
 
-`Operation` (`kacho.cloud.operation.v1`) несёт `id` (префикс `iop`), `description`, `createdAt`,
+`Operation` (`corelib.operation`) несёт `id` (префикс `iop`), `description`, `createdAt`,
 `done`, `metadata` (например `CreateAccountMetadata` с `accountId`) и `oneof result` —
 `google.rpc.Status error` при ошибке или итоговый ресурс (`response`) при успехе. Поллинг —
 через `OperationService.Get`; подробнее — [Операции](/api/operations).

@@ -11,7 +11,7 @@ import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/service_account.proto";
 import "kaname/cloud/iam/v1/user.proto";
 import "kaname/cloud/iam/v1/secret_options.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -114,7 +114,7 @@ service InternalIAMService {
   // docs/engineering/architecture/known-divergences.md. An integrator has
   // neither our history nor a way to re-measure, so the promise is withdrawn
   // here rather than left standing.
-  rpc ForceLogout (ForceLogoutRequest) returns (kacho.cloud.operation.Operation) {
+  rpc ForceLogout (ForceLogoutRequest) returns (corelib.operation.Operation) {
     option (corelib.api.v1.operation) = {
       metadata: "ForceLogoutMetadata"
       response: "ForceLogoutResult"

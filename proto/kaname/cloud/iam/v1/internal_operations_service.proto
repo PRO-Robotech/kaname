@@ -34,7 +34,7 @@ syntax = "proto3";
 package kaname.cloud.iam.v1;
 
 import "google/api/annotations.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -75,7 +75,7 @@ message ListIamOperationsRequest {
 
 message ListIamOperationsResponse {
   // List of IAM operations across the cluster.
-  repeated kacho.cloud.operation.Operation operations = 1;
+  repeated corelib.operation.Operation operations = 1;
 
   // This token allows you to get the next page of results for list requests.
   string next_page_token = 2;

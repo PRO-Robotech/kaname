@@ -12,7 +12,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -682,7 +682,7 @@ var File_kaname_cloud_iam_v1_user_service_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_user_service_proto_rawDesc = "" +
 	"\n" +
-	"&kaname/cloud/iam/v1/user_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a\x1ekaname/cloud/iam/v1/user.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\")\n" +
+	"&kaname/cloud/iam/v1/user_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a\x1ekaname/cloud/iam/v1/user.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\")\n" +
 	"\x0eGetUserRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"\x85\x01\n" +
 	"\x10ListUsersRequest\x12\x1d\n" +
@@ -725,34 +725,34 @@ const file_kaname_cloud_iam_v1_user_service_proto_rawDesc = "" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x03R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x03 \x01(\tR\tpageToken\"\x86\x01\n" +
-	"\x1aListUserOperationsResponse\x12@\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"\x82\x01\n" +
+	"\x1aListUserOperationsResponse\x12<\n" +
 	"\n" +
-	"operations\x18\x01 \x03(\v2 .kacho.cloud.operation.OperationR\n" +
+	"operations\x18\x01 \x03(\v2\x1c.corelib.operation.OperationR\n" +
 	"operations\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\xa7\x0f\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\x8f\x0f\n" +
 	"\vUserService\x12\x9c\x01\n" +
 	"\x03Get\x12#.kaname.cloud.iam.v1.GetUserRequest\x1a\x19.kaname.cloud.iam.v1.User\"U\x8a\xb5\x18\riam.users.get\x92\xb5\x18\x05v_get\x9a\xb5\x18\x13\n" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02\x19\x12\x17/iam/v1/users/{user_id}\x12\x82\x01\n" +
-	"\x04List\x12%.kaname.cloud.iam.v1.ListUsersRequest\x1a&.kaname.cloud.iam.v1.ListUsersResponse\"+\x8a\xb5\x18\x0eiam.users.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x0f\x12\r/iam/v1/users\x12\xcd\x01\n" +
-	"\x06Invite\x12&.kaname.cloud.iam.v1.InviteUserRequest\x1a .kacho.cloud.operation.Operation\"y\x8a\xb5\x18\x10iam.users.invite\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
+	"\x04List\x12%.kaname.cloud.iam.v1.ListUsersRequest\x1a&.kaname.cloud.iam.v1.ListUsersResponse\"+\x8a\xb5\x18\x0eiam.users.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x0f\x12\r/iam/v1/users\x12\xc9\x01\n" +
+	"\x06Invite\x12&.kaname.cloud.iam.v1.InviteUserRequest\x1a\x1c.corelib.operation.Operation\"y\x8a\xb5\x18\x10iam.users.invite\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
 	"\aaccount\x12\n" +
 	"account_id\xa2\xb5\x18\x012\xb2\xd2*\x1a\n" +
-	"\x12InviteUserMetadata\x12\x04User\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/iam/v1/users:invite\x12\xd6\x01\n" +
-	"\x06Update\x12&.kaname.cloud.iam.v1.UpdateUserRequest\x1a .kacho.cloud.operation.Operation\"\x81\x01\x8a\xb5\x18\x10iam.users.update\x92\xb5\x18\rrecord_writer\x9a\xb5\x18\x13\n" +
+	"\x12InviteUserMetadata\x12\x04User\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/iam/v1/users:invite\x12\xd2\x01\n" +
+	"\x06Update\x12&.kaname.cloud.iam.v1.UpdateUserRequest\x1a\x1c.corelib.operation.Operation\"\x81\x01\x8a\xb5\x18\x10iam.users.update\x92\xb5\x18\rrecord_writer\x9a\xb5\x18\x13\n" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\xb2\xd2*\x1a\n" +
-	"\x12UpdateUserMetadata\x12\x04User\x82\xd3\xe4\x93\x02\x1c:\x01*2\x17/iam/v1/users/{user_id}\x12\xe7\x01\n" +
-	"\x06Delete\x12&.kaname.cloud.iam.v1.DeleteUserRequest\x1a .kacho.cloud.operation.Operation\"\x92\x01\x8a\xb5\x18\x10iam.users.delete\x92\xb5\x18\x10identity_remover\x9a\xb5\x18\x13\n" +
+	"\x12UpdateUserMetadata\x12\x04User\x82\xd3\xe4\x93\x02\x1c:\x01*2\x17/iam/v1/users/{user_id}\x12\xe3\x01\n" +
+	"\x06Delete\x12&.kaname.cloud.iam.v1.DeleteUserRequest\x1a\x1c.corelib.operation.Operation\"\x92\x01\x8a\xb5\x18\x10iam.users.delete\x92\xb5\x18\x10identity_remover\x9a\xb5\x18\x13\n" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\xb2\xd2*+\n" +
-	"\x12DeleteUserMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02\x19*\x17/iam/v1/users/{user_id}\x12\xa8\x02\n" +
-	"\x11RemoveFromAccount\x121.kaname.cloud.iam.v1.RemoveUserFromAccountRequest\x1a .kacho.cloud.operation.Operation\"\xbd\x01\x8a\xb5\x18\x1biam.users.removeFromAccount\x92\xb5\x18\x0emember_remover\x9a\xb5\x18\x15\n" +
+	"\x12DeleteUserMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02\x19*\x17/iam/v1/users/{user_id}\x12\xa4\x02\n" +
+	"\x11RemoveFromAccount\x121.kaname.cloud.iam.v1.RemoveUserFromAccountRequest\x1a\x1c.corelib.operation.Operation\"\xbd\x01\x8a\xb5\x18\x1biam.users.removeFromAccount\x92\xb5\x18\x0emember_remover\x9a\xb5\x18\x15\n" +
 	"\aaccount\x12\n" +
 	"account_id\xa2\xb5\x18\x012\xb2\xd2*6\n" +
-	"\x1dRemoveUserFromAccountMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02.:\x01*\")/iam/v1/users/{user_id}:removeFromAccount\x12\xdd\x01\n" +
-	"\x05Block\x12%.kaname.cloud.iam.v1.BlockUserRequest\x1a .kacho.cloud.operation.Operation\"\x8a\x01\x8a\xb5\x18\x0fiam.users.block\x92\xb5\x18\x12identity_suspender\x9a\xb5\x18\x13\n" +
+	"\x1dRemoveUserFromAccountMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02.:\x01*\")/iam/v1/users/{user_id}:removeFromAccount\x12\xd9\x01\n" +
+	"\x05Block\x12%.kaname.cloud.iam.v1.BlockUserRequest\x1a\x1c.corelib.operation.Operation\"\x8a\x01\x8a\xb5\x18\x0fiam.users.block\x92\xb5\x18\x12identity_suspender\x9a\xb5\x18\x13\n" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x012\xb2\xd2*\x19\n" +
-	"\x11BlockUserMetadata\x12\x04User\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/iam/v1/users/{user_id}:block\x12\xe7\x01\n" +
-	"\aUnblock\x12'.kaname.cloud.iam.v1.UnblockUserRequest\x1a .kacho.cloud.operation.Operation\"\x90\x01\x8a\xb5\x18\x11iam.users.unblock\x92\xb5\x18\x12identity_suspender\x9a\xb5\x18\x13\n" +
+	"\x11BlockUserMetadata\x12\x04User\x82\xd3\xe4\x93\x02\":\x01*\"\x1d/iam/v1/users/{user_id}:block\x12\xe3\x01\n" +
+	"\aUnblock\x12'.kaname.cloud.iam.v1.UnblockUserRequest\x1a\x1c.corelib.operation.Operation\"\x90\x01\x8a\xb5\x18\x11iam.users.unblock\x92\xb5\x18\x12identity_suspender\x9a\xb5\x18\x13\n" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x012\xb2\xd2*\x1b\n" +
 	"\x13UnblockUserMetadata\x12\x04User\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/iam/v1/users/{user_id}:unblock\x12\xeb\x01\n" +
 	"\x0eListOperations\x12..kaname.cloud.iam.v1.ListUserOperationsRequest\x1a/.kaname.cloud.iam.v1.ListUserOperationsResponse\"x\x8a\xb5\x18$iam.user_operationses.listOperations\x92\xb5\x18\x06v_list\x9a\xb5\x18\x13\n" +
@@ -786,13 +786,13 @@ var file_kaname_cloud_iam_v1_user_service_proto_goTypes = []any{
 	nil,                                  // 11: kaname.cloud.iam.v1.UpdateUserRequest.LabelsEntry
 	(*User)(nil),                         // 12: kaname.cloud.iam.v1.User
 	(*fieldmaskpb.FieldMask)(nil),        // 13: google.protobuf.FieldMask
-	(*operation.Operation)(nil),          // 14: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),          // 14: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_user_service_proto_depIdxs = []int32{
 	12, // 0: kaname.cloud.iam.v1.ListUsersResponse.users:type_name -> kaname.cloud.iam.v1.User
 	13, // 1: kaname.cloud.iam.v1.UpdateUserRequest.update_mask:type_name -> google.protobuf.FieldMask
 	11, // 2: kaname.cloud.iam.v1.UpdateUserRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateUserRequest.LabelsEntry
-	14, // 3: kaname.cloud.iam.v1.ListUserOperationsResponse.operations:type_name -> kacho.cloud.operation.Operation
+	14, // 3: kaname.cloud.iam.v1.ListUserOperationsResponse.operations:type_name -> corelib.operation.Operation
 	0,  // 4: kaname.cloud.iam.v1.UserService.Get:input_type -> kaname.cloud.iam.v1.GetUserRequest
 	1,  // 5: kaname.cloud.iam.v1.UserService.List:input_type -> kaname.cloud.iam.v1.ListUsersRequest
 	3,  // 6: kaname.cloud.iam.v1.UserService.Invite:input_type -> kaname.cloud.iam.v1.InviteUserRequest
@@ -804,12 +804,12 @@ var file_kaname_cloud_iam_v1_user_service_proto_depIdxs = []int32{
 	9,  // 12: kaname.cloud.iam.v1.UserService.ListOperations:input_type -> kaname.cloud.iam.v1.ListUserOperationsRequest
 	12, // 13: kaname.cloud.iam.v1.UserService.Get:output_type -> kaname.cloud.iam.v1.User
 	2,  // 14: kaname.cloud.iam.v1.UserService.List:output_type -> kaname.cloud.iam.v1.ListUsersResponse
-	14, // 15: kaname.cloud.iam.v1.UserService.Invite:output_type -> kacho.cloud.operation.Operation
-	14, // 16: kaname.cloud.iam.v1.UserService.Update:output_type -> kacho.cloud.operation.Operation
-	14, // 17: kaname.cloud.iam.v1.UserService.Delete:output_type -> kacho.cloud.operation.Operation
-	14, // 18: kaname.cloud.iam.v1.UserService.RemoveFromAccount:output_type -> kacho.cloud.operation.Operation
-	14, // 19: kaname.cloud.iam.v1.UserService.Block:output_type -> kacho.cloud.operation.Operation
-	14, // 20: kaname.cloud.iam.v1.UserService.Unblock:output_type -> kacho.cloud.operation.Operation
+	14, // 15: kaname.cloud.iam.v1.UserService.Invite:output_type -> corelib.operation.Operation
+	14, // 16: kaname.cloud.iam.v1.UserService.Update:output_type -> corelib.operation.Operation
+	14, // 17: kaname.cloud.iam.v1.UserService.Delete:output_type -> corelib.operation.Operation
+	14, // 18: kaname.cloud.iam.v1.UserService.RemoveFromAccount:output_type -> corelib.operation.Operation
+	14, // 19: kaname.cloud.iam.v1.UserService.Block:output_type -> corelib.operation.Operation
+	14, // 20: kaname.cloud.iam.v1.UserService.Unblock:output_type -> corelib.operation.Operation
 	10, // 21: kaname.cloud.iam.v1.UserService.ListOperations:output_type -> kaname.cloud.iam.v1.ListUserOperationsResponse
 	13, // [13:22] is the sub-list for method output_type
 	4,  // [4:13] is the sub-list for method input_type

@@ -60,7 +60,451 @@
 # Пустой перечень решатель ПРОХОДИТ, а не роняет: отказ на достижении цели
 # подталкивал бы держать запись ради зелёного.
 
+# ── ЗАПИСИ ЭТОЙ ВЕТКИ — kacho#2601: форма операции переименована в `corelib.operation`.
+#
+# ЧТО СНЯТО И ПОЧЕМУ. Контракт формы операции назван корнем фундамента: пакет
+# `kacho.cloud.operation` → `corelib.operation`, файл
+# `kacho/cloud/operation/operation.proto` → `corelib/operation/operation.proto`.
+# Здесь он лежит ВХОДОМ операторов `import` (ведомость `proto/inputs.yaml`), и
+# снятие прежнего входа — одна находка `FILE_NO_DELETE`. Остальные — смена типа:
+# ответ 43 глаголов службы и поле `operations` девяти сообщений называли прежнее
+# имя типа, теперь называют новое.
+#
+# ПРОВОЛОЧНОЙ НЕСОВМЕСТИМОСТИ У ВЫЗЫВАЮЩЕГО ЭТИ ЗАПИСИ НЕ ПРОЩАЮТ — ЕЁ НЕТ.
+# Полное имя сообщения не участвует ни в двоичном кодировании, ни в JSON, в
+# `google.protobuf.Any` операцию не упаковывает ни одна служба, состав сообщения
+# не изменён ни на поле. Путь gRPC-метода службы операций меняется
+# (`/corelib.operation.OperationService/…`), но служба операций объявлена не
+# этим деревом, и находок о ней здесь нет; её REST-пути не изменились.
+#
+# ЗАПИСИ ИДУТ ПО ТРОЙКЕ «ПРАВИЛО + ФАЙЛ + СИМВОЛ», потому что решатель этого
+# дерева судит символ строгим равенством с ПЕРВЫМ именем в кавычках (у глагола —
+# имя метода, у поля — имя поля), а не вхождением имени типа. Находок 53,
+# записей 52: в `account_service.proto` два сообщения
+# (`ListAccountOperationsResponse`, `ListAllAccountOperationsResponse`) несут поле
+# `operations`, и их находки делят одну тройку.
+#
+# ПРЕДИКАТ СНЯТИЯ — ОБЩИЙ У ВСЕХ: вливание этой ветки в ствол службы. База
+# сравнения поднимется, находок станет ноль, и решатель назовёт каждую запись
+# потерявшей предмет; снимает их изменение, следующее за вливанием.
 breaks:
+  - rule: FILE_NO_DELETE
+    path: kacho/cloud/operation/operation.proto
+    symbol: kacho/cloud/operation/operation.proto
+    reason: >-
+      вход операторов import переехал вместе с контрактом платформы: форма операции
+      называется corelib.operation и лежит под нейтральным корнем
+      corelib/operation/operation.proto; копия и её ведомость переведены тем же
+      изменением
+    issue: kacho#2601
+  - rule: FIELD_SAME_TYPE
+    path: kaname/cloud/iam/v1/access_binding_service.proto
+    symbol: operations
+    reason: >-
+      поле operations в ListAccessBindingOperationsResponse сменило тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/access_binding_service.proto
+    symbol: Create
+    reason: >-
+      ответ глагола Create (AccessBindingService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/access_binding_service.proto
+    symbol: Delete
+    reason: >-
+      ответ глагола Delete (AccessBindingService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/access_binding_service.proto
+    symbol: Revoke
+    reason: >-
+      ответ глагола Revoke (AccessBindingService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/access_binding_service.proto
+    symbol: Update
+    reason: >-
+      ответ глагола Update (AccessBindingService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: FIELD_SAME_TYPE
+    path: kaname/cloud/iam/v1/account_service.proto
+    symbol: operations
+    reason: >-
+      поле operations в ListAccountOperationsResponse, ListAllAccountOperationsResponse сменило тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/account_service.proto
+    symbol: Create
+    reason: >-
+      ответ глагола Create (AccountService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/account_service.proto
+    symbol: Delete
+    reason: >-
+      ответ глагола Delete (AccountService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/account_service.proto
+    symbol: Update
+    reason: >-
+      ответ глагола Update (AccountService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: FIELD_SAME_TYPE
+    path: kaname/cloud/iam/v1/group_service.proto
+    symbol: operations
+    reason: >-
+      поле operations в ListGroupOperationsResponse сменило тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/group_service.proto
+    symbol: AddMember
+    reason: >-
+      ответ глагола AddMember (GroupService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/group_service.proto
+    symbol: Create
+    reason: >-
+      ответ глагола Create (GroupService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/group_service.proto
+    symbol: Delete
+    reason: >-
+      ответ глагола Delete (GroupService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/group_service.proto
+    symbol: RemoveMember
+    reason: >-
+      ответ глагола RemoveMember (GroupService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/group_service.proto
+    symbol: Update
+    reason: >-
+      ответ глагола Update (GroupService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/internal_cluster_service.proto
+    symbol: GrantAdmin
+    reason: >-
+      ответ глагола GrantAdmin (InternalClusterService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/internal_cluster_service.proto
+    symbol: RevokeAdmin
+    reason: >-
+      ответ глагола RevokeAdmin (InternalClusterService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/internal_iam_service.proto
+    symbol: ForceLogout
+    reason: >-
+      ответ глагола ForceLogout (InternalIAMService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/internal_interactive_client_service.proto
+    symbol: Create
+    reason: >-
+      ответ глагола Create (InternalInteractiveClientService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/internal_interactive_client_service.proto
+    symbol: Delete
+    reason: >-
+      ответ глагола Delete (InternalInteractiveClientService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/internal_interactive_client_service.proto
+    symbol: Update
+    reason: >-
+      ответ глагола Update (InternalInteractiveClientService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/internal_module_service.proto
+    symbol: Apply
+    reason: >-
+      ответ глагола Apply (InternalModuleService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: FIELD_SAME_TYPE
+    path: kaname/cloud/iam/v1/internal_operations_service.proto
+    symbol: operations
+    reason: >-
+      поле operations в ListIamOperationsResponse сменило тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/internal_user_service.proto
+    symbol: OnRecoveryCompleted
+    reason: >-
+      ответ глагола OnRecoveryCompleted (InternalUserService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/internal_user_service.proto
+    symbol: UpsertFromIdentity
+    reason: >-
+      ответ глагола UpsertFromIdentity (InternalUserService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: FIELD_SAME_TYPE
+    path: kaname/cloud/iam/v1/project_service.proto
+    symbol: operations
+    reason: >-
+      поле operations в ListProjectOperationsResponse сменило тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/project_service.proto
+    symbol: Create
+    reason: >-
+      ответ глагола Create (ProjectService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/project_service.proto
+    symbol: Delete
+    reason: >-
+      ответ глагола Delete (ProjectService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/project_service.proto
+    symbol: Update
+    reason: >-
+      ответ глагола Update (ProjectService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: FIELD_SAME_TYPE
+    path: kaname/cloud/iam/v1/role_service.proto
+    symbol: operations
+    reason: >-
+      поле operations в ListRoleOperationsResponse сменило тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/role_service.proto
+    symbol: Create
+    reason: >-
+      ответ глагола Create (RoleService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/role_service.proto
+    symbol: Delete
+    reason: >-
+      ответ глагола Delete (RoleService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/role_service.proto
+    symbol: Update
+    reason: >-
+      ответ глагола Update (RoleService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/sa_key_service.proto
+    symbol: Issue
+    reason: >-
+      ответ глагола Issue (SAKeyService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/sa_key_service.proto
+    symbol: Revoke
+    reason: >-
+      ответ глагола Revoke (SAKeyService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: FIELD_SAME_TYPE
+    path: kaname/cloud/iam/v1/service_account_service.proto
+    symbol: operations
+    reason: >-
+      поле operations в ListServiceAccountOperationsResponse сменило тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/service_account_service.proto
+    symbol: Create
+    reason: >-
+      ответ глагола Create (ServiceAccountService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/service_account_service.proto
+    symbol: Delete
+    reason: >-
+      ответ глагола Delete (ServiceAccountService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/service_account_service.proto
+    symbol: Disable
+    reason: >-
+      ответ глагола Disable (ServiceAccountService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/service_account_service.proto
+    symbol: Enable
+    reason: >-
+      ответ глагола Enable (ServiceAccountService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/service_account_service.proto
+    symbol: Update
+    reason: >-
+      ответ глагола Update (ServiceAccountService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/session_revocations_service.proto
+    symbol: Revoke
+    reason: >-
+      ответ глагола Revoke (InternalSessionRevocationsService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: FIELD_SAME_TYPE
+    path: kaname/cloud/iam/v1/user_service.proto
+    symbol: operations
+    reason: >-
+      поле operations в ListUserOperationsResponse сменило тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/user_service.proto
+    symbol: Block
+    reason: >-
+      ответ глагола Block (UserService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/user_service.proto
+    symbol: Delete
+    reason: >-
+      ответ глагола Delete (UserService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/user_service.proto
+    symbol: Invite
+    reason: >-
+      ответ глагола Invite (UserService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/user_service.proto
+    symbol: RemoveFromAccount
+    reason: >-
+      ответ глагола RemoveFromAccount (UserService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/user_service.proto
+    symbol: Unblock
+    reason: >-
+      ответ глагола Unblock (UserService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/user_service.proto
+    symbol: Update
+    reason: >-
+      ответ глагола Update (UserService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/user_token_service.proto
+    symbol: Issue
+    reason: >-
+      ответ глагола Issue (UserTokenService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
+  - rule: RPC_SAME_RESPONSE_TYPE
+    path: kaname/cloud/iam/v1/user_token_service.proto
+    symbol: Revoke
+    reason: >-
+      ответ глагола Revoke (UserTokenService) сменил тип с
+      kacho.cloud.operation.Operation на corelib.operation.Operation; состав
+      сообщения не изменён ни на поле, ни двоичная форма, ни JSON не меняются
+    issue: kacho#2601
   # ИСТОРИЯ, А НЕ ДЕЙСТВУЮЩАЯ ЗАПИСЬ — авторитет величин ушёл из службы целиком — решение владельца
   # 2026-09-06, задача PRO-Robotech/kacho#2117, приёмка KAN-QUOTA-1 стадия S4.
   #

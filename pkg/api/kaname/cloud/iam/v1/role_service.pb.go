@@ -12,7 +12,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -622,7 +622,7 @@ var File_kaname_cloud_iam_v1_role_service_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_role_service_proto_rawDesc = "" +
 	"\n" +
-	"&kaname/cloud/iam/v1/role_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a\x1ekaname/cloud/iam/v1/role.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\")\n" +
+	"&kaname/cloud/iam/v1/role_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a\x1ekaname/cloud/iam/v1/role.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\")\n" +
 	"\x0eGetRoleRequest\x12\x17\n" +
 	"\arole_id\x18\x01 \x01(\tR\x06roleId\"\x85\x01\n" +
 	"\x10ListRolesRequest\x12\x1b\n" +
@@ -668,23 +668,23 @@ const file_kaname_cloud_iam_v1_role_service_proto_rawDesc = "" +
 	"\arole_id\x18\x01 \x01(\tR\x06roleId\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x03R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x03 \x01(\tR\tpageToken\"\x86\x01\n" +
-	"\x1aListRoleOperationsResponse\x12@\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"\x82\x01\n" +
+	"\x1aListRoleOperationsResponse\x12<\n" +
 	"\n" +
-	"operations\x18\x01 \x03(\v2 .kacho.cloud.operation.OperationR\n" +
+	"operations\x18\x01 \x03(\v2\x1c.corelib.operation.OperationR\n" +
 	"operations\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\xfb\b\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\xef\b\n" +
 	"\vRoleService\x12{\n" +
 	"\x03Get\x12#.kaname.cloud.iam.v1.GetRoleRequest\x1a\x19.kaname.cloud.iam.v1.Role\"4\x8a\xb5\x18\riam.roles.get\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x19\x12\x17/iam/v1/roles/{role_id}\x12\x82\x01\n" +
-	"\x04List\x12%.kaname.cloud.iam.v1.ListRolesRequest\x1a&.kaname.cloud.iam.v1.ListRolesResponse\"+\x8a\xb5\x18\x0eiam.roles.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x0f\x12\r/iam/v1/roles\x12\xc6\x01\n" +
-	"\x06Create\x12&.kaname.cloud.iam.v1.CreateRoleRequest\x1a .kacho.cloud.operation.Operation\"r\x8a\xb5\x18\x10iam.roles.create\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
+	"\x04List\x12%.kaname.cloud.iam.v1.ListRolesRequest\x1a&.kaname.cloud.iam.v1.ListRolesResponse\"+\x8a\xb5\x18\x0eiam.roles.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x0f\x12\r/iam/v1/roles\x12\xc2\x01\n" +
+	"\x06Create\x12&.kaname.cloud.iam.v1.CreateRoleRequest\x1a\x1c.corelib.operation.Operation\"r\x8a\xb5\x18\x10iam.roles.create\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
 	"\aaccount\x12\n" +
 	"account_id\xa2\xb5\x18\x011\xb2\xd2*\x1a\n" +
-	"\x12CreateRoleMetadata\x12\x04Role\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/iam/v1/roles\x12\xd0\x01\n" +
-	"\x06Update\x12&.kaname.cloud.iam.v1.UpdateRoleRequest\x1a .kacho.cloud.operation.Operation\"|\x8a\xb5\x18\x10iam.roles.update\x92\xb5\x18\bv_update\x9a\xb5\x18\x13\n" +
+	"\x12CreateRoleMetadata\x12\x04Role\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/iam/v1/roles\x12\xcc\x01\n" +
+	"\x06Update\x12&.kaname.cloud.iam.v1.UpdateRoleRequest\x1a\x1c.corelib.operation.Operation\"|\x8a\xb5\x18\x10iam.roles.update\x92\xb5\x18\bv_update\x9a\xb5\x18\x13\n" +
 	"\biam_role\x12\arole_id\xa2\xb5\x18\x012\xb2\xd2*\x1a\n" +
-	"\x12UpdateRoleMetadata\x12\x04Role\x82\xd3\xe4\x93\x02\x1c:\x01*2\x17/iam/v1/roles/{role_id}\x12\xdf\x01\n" +
-	"\x06Delete\x12&.kaname.cloud.iam.v1.DeleteRoleRequest\x1a .kacho.cloud.operation.Operation\"\x8a\x01\x8a\xb5\x18\x10iam.roles.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18\x13\n" +
+	"\x12UpdateRoleMetadata\x12\x04Role\x82\xd3\xe4\x93\x02\x1c:\x01*2\x17/iam/v1/roles/{role_id}\x12\xdb\x01\n" +
+	"\x06Delete\x12&.kaname.cloud.iam.v1.DeleteRoleRequest\x1a\x1c.corelib.operation.Operation\"\x8a\x01\x8a\xb5\x18\x10iam.roles.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18\x13\n" +
 	"\biam_role\x12\arole_id\xa2\xb5\x18\x012\xb2\xd2*+\n" +
 	"\x12DeleteRoleMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02\x19*\x17/iam/v1/roles/{role_id}\x12\xeb\x01\n" +
 	"\x0eListOperations\x12..kaname.cloud.iam.v1.ListRoleOperationsRequest\x1a/.kaname.cloud.iam.v1.ListRoleOperationsResponse\"x\x8a\xb5\x18$iam.role_operationses.listOperations\x92\xb5\x18\x06v_list\x9a\xb5\x18\x13\n" +
@@ -718,7 +718,7 @@ var file_kaname_cloud_iam_v1_role_service_proto_goTypes = []any{
 	(*Rule)(nil),                       // 11: kaname.cloud.iam.v1.Rule
 	(*DefinitionTier)(nil),             // 12: kaname.cloud.iam.v1.DefinitionTier
 	(*fieldmaskpb.FieldMask)(nil),      // 13: google.protobuf.FieldMask
-	(*operation.Operation)(nil),        // 14: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),        // 14: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_role_service_proto_depIdxs = []int32{
 	10, // 0: kaname.cloud.iam.v1.ListRolesResponse.roles:type_name -> kaname.cloud.iam.v1.Role
@@ -728,7 +728,7 @@ var file_kaname_cloud_iam_v1_role_service_proto_depIdxs = []int32{
 	13, // 4: kaname.cloud.iam.v1.UpdateRoleRequest.update_mask:type_name -> google.protobuf.FieldMask
 	11, // 5: kaname.cloud.iam.v1.UpdateRoleRequest.rules:type_name -> kaname.cloud.iam.v1.Rule
 	9,  // 6: kaname.cloud.iam.v1.UpdateRoleRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateRoleRequest.LabelsEntry
-	14, // 7: kaname.cloud.iam.v1.ListRoleOperationsResponse.operations:type_name -> kacho.cloud.operation.Operation
+	14, // 7: kaname.cloud.iam.v1.ListRoleOperationsResponse.operations:type_name -> corelib.operation.Operation
 	0,  // 8: kaname.cloud.iam.v1.RoleService.Get:input_type -> kaname.cloud.iam.v1.GetRoleRequest
 	1,  // 9: kaname.cloud.iam.v1.RoleService.List:input_type -> kaname.cloud.iam.v1.ListRolesRequest
 	3,  // 10: kaname.cloud.iam.v1.RoleService.Create:input_type -> kaname.cloud.iam.v1.CreateRoleRequest
@@ -737,9 +737,9 @@ var file_kaname_cloud_iam_v1_role_service_proto_depIdxs = []int32{
 	6,  // 13: kaname.cloud.iam.v1.RoleService.ListOperations:input_type -> kaname.cloud.iam.v1.ListRoleOperationsRequest
 	10, // 14: kaname.cloud.iam.v1.RoleService.Get:output_type -> kaname.cloud.iam.v1.Role
 	2,  // 15: kaname.cloud.iam.v1.RoleService.List:output_type -> kaname.cloud.iam.v1.ListRolesResponse
-	14, // 16: kaname.cloud.iam.v1.RoleService.Create:output_type -> kacho.cloud.operation.Operation
-	14, // 17: kaname.cloud.iam.v1.RoleService.Update:output_type -> kacho.cloud.operation.Operation
-	14, // 18: kaname.cloud.iam.v1.RoleService.Delete:output_type -> kacho.cloud.operation.Operation
+	14, // 16: kaname.cloud.iam.v1.RoleService.Create:output_type -> corelib.operation.Operation
+	14, // 17: kaname.cloud.iam.v1.RoleService.Update:output_type -> corelib.operation.Operation
+	14, // 18: kaname.cloud.iam.v1.RoleService.Delete:output_type -> corelib.operation.Operation
 	7,  // 19: kaname.cloud.iam.v1.RoleService.ListOperations:output_type -> kaname.cloud.iam.v1.ListRoleOperationsResponse
 	14, // [14:20] is the sub-list for method output_type
 	8,  // [8:14] is the sub-list for method input_type

@@ -55,7 +55,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	operationv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operationv1 "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	"github.com/PRO-Robotech/corelib/safeconv"
 	"github.com/PRO-Robotech/kaname/internal/manifestcheckrun"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"

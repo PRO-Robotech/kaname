@@ -328,7 +328,7 @@ func TestAuthorityResidueCorpusSelectorReadsWhatItMustAndNothingElse(t *testing.
 		"internal/authzmodel/fga_model.fga":               true,
 		"proto/kaname/cloud/iam/v1/fga_model.fga":         true,
 		"internal/domain/limit_test.go":                   false,
-		"proto/kacho/cloud/operation/operation.proto":     false,
+		"proto/corelib/operation/operation.proto":         false,
 		"proto/corelib/authz/v1/authz_options.proto":      false,
 		"internal/migrations/0001_initial.sql":            false,
 		"docs/content/api/quotas.mdx":                     false,

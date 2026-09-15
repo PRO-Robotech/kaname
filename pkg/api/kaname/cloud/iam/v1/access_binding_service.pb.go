@@ -12,7 +12,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -2008,7 +2008,7 @@ var File_kaname_cloud_iam_v1_access_binding_service_proto protoreflect.FileDescr
 
 const file_kaname_cloud_iam_v1_access_binding_service_proto_rawDesc = "" +
 	"\n" +
-	"0kaname/cloud/iam/v1/access_binding_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a(kaname/cloud/iam/v1/access_binding.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"E\n" +
+	"0kaname/cloud/iam/v1/access_binding_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a(kaname/cloud/iam/v1/access_binding.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"E\n" +
 	"\x17GetAccessBindingRequest\x12*\n" +
 	"\x11access_binding_id\x18\x01 \x01(\tR\x0faccessBindingId\"\xf8\x04\n" +
 	"\x1aCreateAccessBindingRequest\x12!\n" +
@@ -2086,10 +2086,10 @@ const file_kaname_cloud_iam_v1_access_binding_service_proto_rawDesc = "" +
 	"\x11access_binding_id\x18\x01 \x01(\tR\x0faccessBindingId\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x03R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x03 \x01(\tR\tpageToken\"\x8f\x01\n" +
-	"#ListAccessBindingOperationsResponse\x12@\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"\x8b\x01\n" +
+	"#ListAccessBindingOperationsResponse\x12<\n" +
 	"\n" +
-	"operations\x18\x01 \x03(\v2 .kacho.cloud.operation.OperationR\n" +
+	"operations\x18\x01 \x03(\v2\x1c.corelib.operation.OperationR\n" +
 	"operations\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x9c\x01\n" +
 	"\x1cListSubjectPrivilegesRequest\x12!\n" +
@@ -2183,16 +2183,16 @@ const file_kaname_cloud_iam_v1_access_binding_service_proto_rawDesc = "" +
 	"\n" +
 	"\x06SYSTEM\x10\x01\x12\v\n" +
 	"\aACCOUNT\x10\x02\x12\v\n" +
-	"\aPROJECT\x10\x032\xc9\x1b\n" +
+	"\aPROJECT\x10\x032\xb9\x1b\n" +
 	"\x14AccessBindingService\x12\xe0\x01\n" +
 	"\x03Get\x12,.kaname.cloud.iam.v1.GetAccessBindingRequest\x1a\".kaname.cloud.iam.v1.AccessBinding\"\x86\x01\x8a\xb5\x18\x17iam.access_bindings.get\x92\xb5\x18\x05v_get\x9a\xb5\x18'\n" +
-	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02,\x12*/iam/v1/accessBindings/{access_binding_id}\x12\xd2\x01\n" +
-	"\x06Create\x12/.kaname.cloud.iam.v1.CreateAccessBindingRequest\x1a .kacho.cloud.operation.Operation\"u\x8a\xb5\x18\b<exempt>\xa2\xb5\x18\x012\xba\xb5\x18\x0fHANDLER_DECIDES\xb2\xd2*,\n" +
-	"\x1bCreateAccessBindingMetadata\x12\rAccessBinding\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/iam/v1/accessBindings\x12\xa2\x02\n" +
-	"\x06Delete\x12/.kaname.cloud.iam.v1.DeleteAccessBindingRequest\x1a .kacho.cloud.operation.Operation\"\xc4\x01\x8a\xb5\x18\x1aiam.access_bindings.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18'\n" +
+	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02,\x12*/iam/v1/accessBindings/{access_binding_id}\x12\xce\x01\n" +
+	"\x06Create\x12/.kaname.cloud.iam.v1.CreateAccessBindingRequest\x1a\x1c.corelib.operation.Operation\"u\x8a\xb5\x18\b<exempt>\xa2\xb5\x18\x012\xba\xb5\x18\x0fHANDLER_DECIDES\xb2\xd2*,\n" +
+	"\x1bCreateAccessBindingMetadata\x12\rAccessBinding\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/iam/v1/accessBindings\x12\x9e\x02\n" +
+	"\x06Delete\x12/.kaname.cloud.iam.v1.DeleteAccessBindingRequest\x1a\x1c.corelib.operation.Operation\"\xc4\x01\x8a\xb5\x18\x1aiam.access_bindings.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18'\n" +
 	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x012\xb2\xd2*4\n" +
-	"\x1bDeleteAccessBindingMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02,**/iam/v1/accessBindings/{access_binding_id}\x12\x9d\x02\n" +
-	"\x06Update\x12/.kaname.cloud.iam.v1.UpdateAccessBindingRequest\x1a .kacho.cloud.operation.Operation\"\xbf\x01\x8a\xb5\x18\x1aiam.access_bindings.update\x92\xb5\x18\bv_update\x9a\xb5\x18'\n" +
+	"\x1bDeleteAccessBindingMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02,**/iam/v1/accessBindings/{access_binding_id}\x12\x99\x02\n" +
+	"\x06Update\x12/.kaname.cloud.iam.v1.UpdateAccessBindingRequest\x1a\x1c.corelib.operation.Operation\"\xbf\x01\x8a\xb5\x18\x1aiam.access_bindings.update\x92\xb5\x18\bv_update\x9a\xb5\x18'\n" +
 	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x012\xb2\xd2*,\n" +
 	"\x1bUpdateAccessBindingMetadata\x12\rAccessBinding\x82\xd3\xe4\x93\x02/:\x01*2*/iam/v1/accessBindings/{access_binding_id}\x12\xac\x01\n" +
 	"\x04List\x12..kaname.cloud.iam.v1.ListAccessBindingsRequest\x1a/.kaname.cloud.iam.v1.ListAccessBindingsResponse\"C\x8a\xb5\x18\x18iam.access_bindings.list\xa2\xb5\x18\x011\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x18\x12\x16/iam/v1/accessBindings\x12\x8a\x02\n" +
@@ -2209,8 +2209,8 @@ const file_kaname_cloud_iam_v1_access_binding_service_proto_rawDesc = "" +
 	"\aaccount\x12\n" +
 	"account_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02.\x12,/iam/v1/accounts/{account_id}/accessBindings\x12\xaf\x02\n" +
 	"\x0eListOperations\x127.kaname.cloud.iam.v1.ListAccessBindingOperationsRequest\x1a8.kaname.cloud.iam.v1.ListAccessBindingOperationsResponse\"\xa9\x01\x8a\xb5\x18.iam.access_binding_operationses.listOperations\x92\xb5\x18\x06v_list\x9a\xb5\x18'\n" +
-	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x027\x125/iam/v1/accessBindings/{access_binding_id}/operations\x12\xa4\x02\n" +
-	"\x06Revoke\x12/.kaname.cloud.iam.v1.RevokeAccessBindingRequest\x1a .kacho.cloud.operation.Operation\"\xc6\x01\x8a\xb5\x18\x1aiam.access_bindings.revoke\x92\xb5\x18\bv_delete\x9a\xb5\x18'\n" +
+	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x027\x125/iam/v1/accessBindings/{access_binding_id}/operations\x12\xa0\x02\n" +
+	"\x06Revoke\x12/.kaname.cloud.iam.v1.RevokeAccessBindingRequest\x1a\x1c.corelib.operation.Operation\"\xc6\x01\x8a\xb5\x18\x1aiam.access_bindings.revoke\x92\xb5\x18\bv_delete\x9a\xb5\x18'\n" +
 	"\x12iam_access_binding\x12\x11access_binding_id\xa2\xb5\x18\x012\xb2\xd2*,\n" +
 	"\x1bRevokeAccessBindingMetadata\x12\rAccessBinding\x82\xd3\xe4\x93\x026:\x01*\"1/iam/v1/accessBindings/{access_binding_id}:revokeBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
@@ -2261,7 +2261,7 @@ var file_kaname_cloud_iam_v1_access_binding_service_proto_goTypes = []any{
 	(*fieldmaskpb.FieldMask)(nil),               // 29: google.protobuf.FieldMask
 	(*AccessBinding)(nil),                       // 30: kaname.cloud.iam.v1.AccessBinding
 	(*GrantSurfaceRecord)(nil),                  // 31: kaname.cloud.iam.v1.GrantSurfaceRecord
-	(*operation.Operation)(nil),                 // 32: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),                 // 32: corelib.operation.Operation
 	(AccessBinding_Scope)(0),                    // 33: kaname.cloud.iam.v1.AccessBinding.Scope
 	(AccessBinding_Status)(0),                   // 34: kaname.cloud.iam.v1.AccessBinding.Status
 	(SubjectType)(0),                            // 35: kaname.cloud.iam.v1.SubjectType
@@ -2275,7 +2275,7 @@ var file_kaname_cloud_iam_v1_access_binding_service_proto_depIdxs = []int32{
 	25, // 5: kaname.cloud.iam.v1.UpdateAccessBindingRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateAccessBindingRequest.LabelsEntry
 	30, // 6: kaname.cloud.iam.v1.ListAccessBindingsResponse.access_bindings:type_name -> kaname.cloud.iam.v1.AccessBinding
 	31, // 7: kaname.cloud.iam.v1.ListAccessBindingsResponse.records:type_name -> kaname.cloud.iam.v1.GrantSurfaceRecord
-	32, // 8: kaname.cloud.iam.v1.ListAccessBindingOperationsResponse.operations:type_name -> kacho.cloud.operation.Operation
+	32, // 8: kaname.cloud.iam.v1.ListAccessBindingOperationsResponse.operations:type_name -> corelib.operation.Operation
 	16, // 9: kaname.cloud.iam.v1.ListSubjectPrivilegesResponse.privileges:type_name -> kaname.cloud.iam.v1.SubjectPrivilege
 	33, // 10: kaname.cloud.iam.v1.SubjectPrivilege.scope:type_name -> kaname.cloud.iam.v1.AccessBinding.Scope
 	34, // 11: kaname.cloud.iam.v1.SubjectPrivilege.status:type_name -> kaname.cloud.iam.v1.AccessBinding.Status
@@ -2302,9 +2302,9 @@ var file_kaname_cloud_iam_v1_access_binding_service_proto_depIdxs = []int32{
 	12, // 32: kaname.cloud.iam.v1.AccessBindingService.ListOperations:input_type -> kaname.cloud.iam.v1.ListAccessBindingOperationsRequest
 	5,  // 33: kaname.cloud.iam.v1.AccessBindingService.Revoke:input_type -> kaname.cloud.iam.v1.RevokeAccessBindingRequest
 	30, // 34: kaname.cloud.iam.v1.AccessBindingService.Get:output_type -> kaname.cloud.iam.v1.AccessBinding
-	32, // 35: kaname.cloud.iam.v1.AccessBindingService.Create:output_type -> kacho.cloud.operation.Operation
-	32, // 36: kaname.cloud.iam.v1.AccessBindingService.Delete:output_type -> kacho.cloud.operation.Operation
-	32, // 37: kaname.cloud.iam.v1.AccessBindingService.Update:output_type -> kacho.cloud.operation.Operation
+	32, // 35: kaname.cloud.iam.v1.AccessBindingService.Create:output_type -> corelib.operation.Operation
+	32, // 36: kaname.cloud.iam.v1.AccessBindingService.Delete:output_type -> corelib.operation.Operation
+	32, // 37: kaname.cloud.iam.v1.AccessBindingService.Update:output_type -> corelib.operation.Operation
 	11, // 38: kaname.cloud.iam.v1.AccessBindingService.List:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
 	11, // 39: kaname.cloud.iam.v1.AccessBindingService.ListByScope:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
 	11, // 40: kaname.cloud.iam.v1.AccessBindingService.ListBySubject:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
@@ -2314,7 +2314,7 @@ var file_kaname_cloud_iam_v1_access_binding_service_proto_depIdxs = []int32{
 	23, // 44: kaname.cloud.iam.v1.AccessBindingService.ExpandAccess:output_type -> kaname.cloud.iam.v1.ExpandAccessResponse
 	11, // 45: kaname.cloud.iam.v1.AccessBindingService.ListByAccount:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
 	13, // 46: kaname.cloud.iam.v1.AccessBindingService.ListOperations:output_type -> kaname.cloud.iam.v1.ListAccessBindingOperationsResponse
-	32, // 47: kaname.cloud.iam.v1.AccessBindingService.Revoke:output_type -> kacho.cloud.operation.Operation
+	32, // 47: kaname.cloud.iam.v1.AccessBindingService.Revoke:output_type -> corelib.operation.Operation
 	34, // [34:48] is the sub-list for method output_type
 	20, // [20:34] is the sub-list for method input_type
 	20, // [20:20] is the sub-list for extension type_name

@@ -11,7 +11,7 @@ import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/credential_kind.proto";
 import "kaname/cloud/iam/v1/user_oauth_client.proto";
 import "kaname/cloud/iam/v1/secret_options.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -73,7 +73,7 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 // провоцирует «починку» кода под неверный комментарий — то есть привёл бы к
 // повышению уровня на чтении, а не к правке текста.
 service UserTokenService {
-  rpc Issue (IssueUserTokenRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Issue (IssueUserTokenRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       post: "/iam/v1/users/{user_id}/tokens"
       body: "*"
@@ -104,7 +104,7 @@ service UserTokenService {
     option (corelib.authz.v1.required_acr_min) = "1";
   }
 
-  rpc Revoke (RevokeUserTokenRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Revoke (RevokeUserTokenRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       delete: "/iam/v1/users/{user_id}/tokens/{token_id}"
     };

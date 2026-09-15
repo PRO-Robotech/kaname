@@ -97,7 +97,7 @@ package kaname.cloud.iam.v1;
 
 import "google/api/annotations.proto";
 import "corelib/api/v1/operation.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -155,7 +155,7 @@ service InternalModuleService {
   //
   // Any refusal rolls the whole transaction back: nothing is written and no audit
   // record appears.
-  rpc Apply (ApplyModuleRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Apply (ApplyModuleRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       post: "/iam/v1/internal/modules/{module}:apply"
       body: "*"

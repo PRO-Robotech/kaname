@@ -10,7 +10,7 @@ import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/access_binding.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -36,7 +36,7 @@ service AccessBindingService {
   // Creates an access binding.
   // Strict INSERT — дубль активного гранта (subject, role_id, scope_type,
   // scope_id) → ALREADY_EXISTS (partial UNIQUE WHERE revoked_at IS NULL).
-  rpc Create (CreateAccessBindingRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Create (CreateAccessBindingRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/accessBindings" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "CreateAccessBindingMetadata"
@@ -58,7 +58,7 @@ service AccessBindingService {
   }
 
   // Deletes the specified access binding.
-  rpc Delete (DeleteAccessBindingRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Delete (DeleteAccessBindingRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { delete: "/iam/v1/accessBindings/{access_binding_id}" };
     option (corelib.api.v1.operation) = {
       metadata: "DeleteAccessBindingMetadata"
@@ -80,7 +80,7 @@ service AccessBindingService {
   // deleted. All other fields are immutable (AccessBinding is otherwise
   // Delete+Create); an `update_mask` referencing any non-mutable field →
   // INVALID_ARGUMENT. Async (returns Operation), like the other mutations.
-  rpc Update (UpdateAccessBindingRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Update (UpdateAccessBindingRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { patch: "/iam/v1/accessBindings/{access_binding_id}" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "UpdateAccessBindingMetadata"
@@ -408,7 +408,7 @@ service AccessBindingService {
   // (`UPDATE … WHERE status='ACTIVE' AND deletion_protection=false`) against
   // TOCTOU — clear the flag via Update first, exactly like Delete.
   // Async (returns Operation), like the other mutations.
-  rpc Revoke (RevokeAccessBindingRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Revoke (RevokeAccessBindingRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/accessBindings/{access_binding_id}:revoke" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "RevokeAccessBindingMetadata"
@@ -746,7 +746,7 @@ message ListAccessBindingOperationsRequest {
 
 message ListAccessBindingOperationsResponse {
   // List of operations for the specified access binding.
-  repeated kacho.cloud.operation.Operation operations = 1;
+  repeated corelib.operation.Operation operations = 1;
 
   // This token allows you to get the next page of results for list requests.
   string next_page_token = 2;

@@ -42,7 +42,7 @@ const soundOwnContract = `syntax = "proto3";
 
 package kaname.cloud.iam.v1;
 
-// Здесь НЕ оператор, а объяснение: import "kacho/cloud/operation/operation.proto";
+// Здесь НЕ оператор, а объяснение: import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -97,7 +97,7 @@ inputs:
 type contractHomeRoot struct {
 	OwnContract   string // proto/kaname/cloud/iam/v1/account.proto
 	InputContract string // proto/corelib/authz/v1/authz_options.proto; "" — файла нет
-	OrphanInput   string // proto/kacho/cloud/operation/operation.proto; "" — файла нет
+	OrphanInput   string // proto/corelib/operation/operation.proto; "" — файла нет
 	BufGen        string // proto/buf.gen.yaml; "" — файла нет
 	ForeignStub   string // pkg/api/corelib/authz/v1/authz_options.pb.go; "" — файла нет
 
@@ -133,7 +133,7 @@ func (r contractHomeRoot) build(t *testing.T) *treecorpus.Tree {
 
 	write("proto/kaname/cloud/iam/v1/account.proto", r.OwnContract)
 	write("proto/corelib/authz/v1/authz_options.proto", r.InputContract)
-	write("proto/kacho/cloud/operation/operation.proto", r.OrphanInput)
+	write("proto/corelib/operation/operation.proto", r.OrphanInput)
 	write("proto/buf.gen.yaml", r.BufGen)
 	if !r.NoLedger {
 		ledger := r.Ledger
@@ -223,13 +223,13 @@ func TestInjection_InputContractOutsideTheLedgerIsFound(t *testing.T) {
 	r := soundRoot()
 	// РОВНО ОДИН факт: в дереве завёлся вход, которого в ведомости нет.
 	r.OwnContract = soundOwnContract +
-		"\n// второй оператор ниже\nimport \"kacho/cloud/operation/operation.proto\";\n"
-	r.OrphanInput = "syntax = \"proto3\";\n\npackage kacho.cloud.operation;\n"
+		"\n// второй оператор ниже\nimport \"corelib/operation/operation.proto\";\n"
+	r.OrphanInput = "syntax = \"proto3\";\n\npackage corelib.operation;\n"
 	_, findings, err := scanInputLedger(r.build(t))
 	require.NoError(t, err)
 	require.Len(t, findings, 1, "вход мимо ведомости не найден")
 	require.Equal(t, ledgerGroundUnledgered, findings[0].Ground)
-	require.Equal(t, "kacho/cloud/operation/operation.proto", findings[0].Path)
+	require.Equal(t, "corelib/operation/operation.proto", findings[0].Path)
 }
 
 func TestInjection_MissingLedgerIsNotSilence(t *testing.T) {
@@ -259,7 +259,7 @@ func TestInjection_InputContractWithoutAConsumerIsFound(t *testing.T) {
 	r := soundRoot()
 	// РОВНО ОДИН факт: в дереве появился входной контракт, которого не
 	// импортирует ни один контракт службы.
-	r.OrphanInput = "syntax = \"proto3\";\n\npackage kacho.cloud.operation;\n"
+	r.OrphanInput = "syntax = \"proto3\";\n\npackage corelib.operation;\n"
 	_, findings, err := scanContractClosure(r.build(t))
 	require.NoError(t, err)
 	require.Len(t, findings, 1, "копия чужого контракта без потребителя не найдена")
@@ -272,7 +272,7 @@ func TestInjection_OperatorInACommentIsNotAnImport(t *testing.T) {
 	// назван он только КОММЕНТАРИЕМ соседа. Если разбор считал бы подстроку,
 	// находки не было бы — и проба выше зеленела бы, не измеряя ничего.
 	r := soundRoot()
-	r.OrphanInput = "syntax = \"proto3\";\n\npackage kacho.cloud.operation;\n"
+	r.OrphanInput = "syntax = \"proto3\";\n\npackage corelib.operation;\n"
 	census, findings, err := scanContractClosure(r.build(t))
 	require.NoError(t, err)
 	require.Len(t, findings, 1)

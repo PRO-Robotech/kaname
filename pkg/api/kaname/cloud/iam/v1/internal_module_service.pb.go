@@ -103,7 +103,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -1228,7 +1228,7 @@ var File_kaname_cloud_iam_v1_internal_module_service_proto protoreflect.FileDesc
 
 const file_kaname_cloud_iam_v1_internal_module_service_proto_rawDesc = "" +
 	"\n" +
-	"1kaname/cloud/iam/v1/internal_module_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"+\n" +
+	"1kaname/cloud/iam/v1/internal_module_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"+\n" +
 	"\x11PlanModuleRequest\x12\x16\n" +
 	"\x06module\x18\x01 \x01(\tR\x06module\"\x80\b\n" +
 	"\x12PlanModuleResponse\x12\x16\n" +
@@ -1301,11 +1301,11 @@ const file_kaname_cloud_iam_v1_internal_module_service_proto_rawDesc = "" +
 	"\x11ModulePlanVerdict\x12#\n" +
 	"\x1fMODULE_PLAN_VERDICT_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fMODULE_PLAN_VERDICT_WOULD_APPLY\x10\x01\x126\n" +
-	"2MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR\x10\x022\xb9\x06\n" +
+	"2MODULE_PLAN_VERDICT_WOULD_BE_REFUSED_BEYOND_ANCHOR\x10\x022\xb5\x06\n" +
 	"\x15InternalModuleService\x12\xc0\x01\n" +
 	"\x04Plan\x12&.kaname.cloud.iam.v1.PlanModuleRequest\x1a'.kaname.cloud.iam.v1.PlanModuleResponse\"g\x8a\xb5\x18\x10iam.modules.plan\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
-	"\acluster\x12\x01*\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02(\x12&/iam/v1/internal/modules/{module}:plan\x12\xef\x01\n" +
-	"\x05Apply\x12'.kaname.cloud.iam.v1.ApplyModuleRequest\x1a .kacho.cloud.operation.Operation\"\x9a\x01\x8a\xb5\x18\x11iam.modules.apply\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
+	"\acluster\x12\x01*\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02(\x12&/iam/v1/internal/modules/{module}:plan\x12\xeb\x01\n" +
+	"\x05Apply\x12'.kaname.cloud.iam.v1.ApplyModuleRequest\x1a\x1c.corelib.operation.Operation\"\x9a\x01\x8a\xb5\x18\x11iam.modules.apply\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x012\xb2\xd2**\n" +
 	"\x13ApplyModuleMetadata\x12\x13ApplyModuleResponse\x82\xd3\xe4\x93\x02,:\x01*\"'/iam/v1/internal/modules/{module}:apply\x12\xb3\x01\n" +
 	"\x03Get\x12%.kaname.cloud.iam.v1.GetModuleRequest\x1a\".kaname.cloud.iam.v1.ModuleCatalog\"a\x8a\xb5\x18\x0fiam.modules.get\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
@@ -1341,7 +1341,7 @@ var file_kaname_cloud_iam_v1_internal_module_service_proto_goTypes = []any{
 	(*ListModulesRequest)(nil),  // 10: kaname.cloud.iam.v1.ListModulesRequest
 	(*ModuleSummary)(nil),       // 11: kaname.cloud.iam.v1.ModuleSummary
 	(*ListModulesResponse)(nil), // 12: kaname.cloud.iam.v1.ListModulesResponse
-	(*operation.Operation)(nil), // 13: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil), // 13: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_internal_module_service_proto_depIdxs = []int32{
 	0,  // 0: kaname.cloud.iam.v1.PlanModuleResponse.verdict:type_name -> kaname.cloud.iam.v1.ModulePlanVerdict
@@ -1353,7 +1353,7 @@ var file_kaname_cloud_iam_v1_internal_module_service_proto_depIdxs = []int32{
 	6,  // 6: kaname.cloud.iam.v1.InternalModuleService.Get:input_type -> kaname.cloud.iam.v1.GetModuleRequest
 	10, // 7: kaname.cloud.iam.v1.InternalModuleService.List:input_type -> kaname.cloud.iam.v1.ListModulesRequest
 	2,  // 8: kaname.cloud.iam.v1.InternalModuleService.Plan:output_type -> kaname.cloud.iam.v1.PlanModuleResponse
-	13, // 9: kaname.cloud.iam.v1.InternalModuleService.Apply:output_type -> kacho.cloud.operation.Operation
+	13, // 9: kaname.cloud.iam.v1.InternalModuleService.Apply:output_type -> corelib.operation.Operation
 	9,  // 10: kaname.cloud.iam.v1.InternalModuleService.Get:output_type -> kaname.cloud.iam.v1.ModuleCatalog
 	12, // 11: kaname.cloud.iam.v1.InternalModuleService.List:output_type -> kaname.cloud.iam.v1.ListModulesResponse
 	8,  // [8:12] is the sub-list for method output_type

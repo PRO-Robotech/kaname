@@ -8,7 +8,7 @@ package kaname.cloud.iam.v1;
 import "google/protobuf/timestamp.proto";
 import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/session_revocation.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -57,7 +57,7 @@ service InternalSessionRevocationsService {
   // revocation by asking `IsRevoked` on the request path.
   //
   // Idempotent on `token_jti` (upsert on conflict).
-  rpc Revoke (RevokeRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Revoke (RevokeRequest) returns (corelib.operation.Operation) {
     option (corelib.api.v1.operation) = {
       metadata: "RevokeMetadata"
       response: "SessionRevocation"

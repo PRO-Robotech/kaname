@@ -40,7 +40,7 @@ package iamv1
 
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -179,16 +179,16 @@ var File_kaname_cloud_iam_v1_internal_operations_service_proto protoreflect.File
 
 const file_kaname_cloud_iam_v1_internal_operations_service_proto_rawDesc = "" +
 	"\n" +
-	"5kaname/cloud/iam/v1/internal_operations_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"u\n" +
+	"5kaname/cloud/iam/v1/internal_operations_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"u\n" +
 	"\x18ListIamOperationsRequest\x12\x1b\n" +
 	"\tpage_size\x18\x01 \x01(\x03R\bpageSize\x12\x1d\n" +
 	"\n" +
 	"page_token\x18\x02 \x01(\tR\tpageToken\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x03 \x01(\tR\taccountId\"\x85\x01\n" +
-	"\x19ListIamOperationsResponse\x12@\n" +
+	"account_id\x18\x03 \x01(\tR\taccountId\"\x81\x01\n" +
+	"\x19ListIamOperationsResponse\x12<\n" +
 	"\n" +
-	"operations\x18\x01 \x03(\v2 .kacho.cloud.operation.OperationR\n" +
+	"operations\x18\x01 \x03(\v2\x1c.corelib.operation.OperationR\n" +
 	"operations\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\x89\x02\n" +
 	"\x19InternalOperationsService\x12\xeb\x01\n" +
@@ -211,10 +211,10 @@ var file_kaname_cloud_iam_v1_internal_operations_service_proto_msgTypes = make([
 var file_kaname_cloud_iam_v1_internal_operations_service_proto_goTypes = []any{
 	(*ListIamOperationsRequest)(nil),  // 0: kaname.cloud.iam.v1.ListIamOperationsRequest
 	(*ListIamOperationsResponse)(nil), // 1: kaname.cloud.iam.v1.ListIamOperationsResponse
-	(*operation.Operation)(nil),       // 2: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),       // 2: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_internal_operations_service_proto_depIdxs = []int32{
-	2, // 0: kaname.cloud.iam.v1.ListIamOperationsResponse.operations:type_name -> kacho.cloud.operation.Operation
+	2, // 0: kaname.cloud.iam.v1.ListIamOperationsResponse.operations:type_name -> corelib.operation.Operation
 	0, // 1: kaname.cloud.iam.v1.InternalOperationsService.ListIamOperations:input_type -> kaname.cloud.iam.v1.ListIamOperationsRequest
 	1, // 2: kaname.cloud.iam.v1.InternalOperationsService.ListIamOperations:output_type -> kaname.cloud.iam.v1.ListIamOperationsResponse
 	2, // [2:3] is the sub-list for method output_type
