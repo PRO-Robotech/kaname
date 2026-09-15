@@ -97,12 +97,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 `владелец/репозиторий:путь` — **координата**, а не строка для оболочки: чтобы прогнать,
 исполняй в рабочей копии названного дома, сняв приставку (правило то же, что в Ф1 §1).
 
-### §1.1 Проверяющих пароля в продукте — ноль, в каждом из трёх домов
+### §1.1 Проверяющих пароля в продукте — ноль
+
+Образец и путь предиката — **дословно** прежней редакции и дословно те, что воспроизводит F4d
+§1.4а: она объявляет владельцем этого числа ID-PW-1 и требует, чтобы два места не расходились.
+Заголовок тот же по той же причине. Добавлена только ревизия чтения (`origin/main`), и изменились
+дома: служба вынесена, и ноль теперь меряется в каждом из трёх.
 
 ```sh
 # ДОМ: каждый из трёх — PRO-Robotech/kaname, PRO-Robotech/kacho, PRO-Robotech/corelib
 # единица — вхождение в НЕ-тестовом исходном файле Go, по origin/main
-git grep -n -E 'CompareHashAndPassword|crypto/bcrypt|x/crypto/argon2|x/crypto/scrypt|x/crypto/pbkdf2' origin/main -- '*.go' ':!*_test.go' | wc -l
+git grep -n 'CompareHashAndPassword\|crypto/bcrypt\|argon2\|scrypt\|pbkdf2' origin/main -- '*.go' ':!*_test.go' | wc -l
 # объём осмотренного — не-тестовых файлов Go:
 git ls-tree -r --name-only origin/main | grep '\.go$' | grep -vc '_test\.go$'
 ```
