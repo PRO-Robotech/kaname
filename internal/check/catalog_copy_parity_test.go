@@ -127,8 +127,14 @@ func TestEmptyCatalogIsNotAVerdict(t *testing.T) {
 // TestDeclaredRenamesCarryASubject — послабление без предмета отвергается самой
 // ведомостью: у записи обязаны быть обе стороны, причина, предикат снятия и
 // номер, за которым кто-то отвечает.
+//
+// На ПУСТОЙ ведомости проба проходит — пустой перечень есть цель, ради которой
+// ведомость и держит самоистечение. Поэтому перепись печатается всегда: «записей
+// 0» обязано быть отличимо от «проба ведомости не читала».
 func TestDeclaredRenamesCarryASubject(t *testing.T) {
-	for _, r := range CatalogFoundationRenames() {
+	renames := CatalogFoundationRenames()
+	t.Logf("перепись ведомости: записей %d", len(renames))
+	for _, r := range renames {
 		if r.EdgeFQN == "" || r.OwnFQN == "" {
 			t.Errorf("запись ведомости без одной из сторон: %+v", r)
 		}
