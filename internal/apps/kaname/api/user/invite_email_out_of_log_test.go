@@ -33,9 +33,9 @@ package user
 // объясняет, почему выдача ушла на другую строку, и без неё разбор невозможен.
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -50,6 +50,7 @@ import (
 	repoproject "github.com/PRO-Robotech/kaname/internal/repo/kaname/project"
 	reporole "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/logbuf"
 )
 
 const (
@@ -176,12 +177,17 @@ func (inviteLogABWtr) InsertSubjects(context.Context, domain.AccessBindingID, []
 
 // inviteWithCanonicalRow прогоняет одно project-scoped приглашение с провязанным
 // логгером и возвращает буфер журнала вместе с идентификатором свежей строки.
+//
+// Буфер журнала — `logbuf.Buffer`, а не голый `bytes.Buffer`: в него пишет
+// исполнитель операции из СВОЕЙ горутины, а читает проба из своей и из горутины
+// `require.Eventually`. Голый буфер давал здесь гонку, которую детектор ловил не
+// на каждом процессе — и проба краснела на чужих запросах слияния.
 func inviteWithCanonicalRow(t *testing.T) (logText string, perAccountRowID string) {
 	t.Helper()
 
 	repo := &inviteLogRepo{invPrincRepo: &invPrincRepo{}}
-	var logBuf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logBuf := &logbuf.Buffer{}
+	logger := slog.New(slog.NewTextHandler(logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	// Логгер провязывается ПОЛЕМ, а не через WithRelationStore: тот же вызов
 	// заменил бы и страж прав на nil, и приглашение упало бы на вопросе о
@@ -210,7 +216,7 @@ func inviteWithCanonicalRow(t *testing.T) (logText string, perAccountRowID strin
 	// Ветвь записи исполняется ПОСЛЕ вставки; дожидаемся самой записи, а не
 	// её предусловия, иначе проба судила бы пустой буфер.
 	require.Eventually(t, func() bool {
-		return bytes.Contains(logBuf.Bytes(), []byte("canonical_row"))
+		return strings.Contains(logBuf.String(), "canonical_row")
 	}, 5*time.Second, 10*time.Millisecond,
 		"запись о канонической строке не состоялась — ветвь, чью запись судит проба, не исполнилась")
 
