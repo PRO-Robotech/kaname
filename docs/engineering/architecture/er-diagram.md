@@ -18,6 +18,7 @@ erDiagram
     USERS ||..o{ ACCESS_BINDINGS : "subject (soft ref)"
     SERVICE_ACCOUNTS ||..o{ ACCESS_BINDINGS : "subject (soft ref)"
     GROUPS ||..o{ ACCESS_BINDINGS : "subject (soft ref)"
+    USERS ||--o{ USER_LOGIN_METHODS : "signs in by (CASCADE)"
 ```
 
 ## Notes
@@ -37,3 +38,19 @@ erDiagram
 
 - `operations` (corelib pattern + IAM-extension principal_* полей) — для
   всех LRO мутаций (Create/Update/Delete/Move/AddMember/RemoveMember).
+
+- `user_login_methods` — способ входа человека: строка на пару (`user_id`,
+  `kind`), ключ — `users.id` (не внешний субъект и не почта), снятие человека
+  уносит его способы каскадом. `verifier` — СЕКРЕТ (хеш пароля): копий в других
+  отношениях базы и в статистике планировщика нет, механизмов, исполняющихся
+  при записи без ведома писателя (триггеров, правил, политик строк, ограничений
+  сверх объявленных), на таблице нет — держит гейт схемы
+  `TestLoginVerifierStaysInsideTheSchema`
+  (`internal/repo/kaname/pg/login_verifier_stays_inside_integration_test.go`).
+  Уровня доверия и состояния у строки нет — F4d-13 держится частично, решение и
+  носители (`kacho#1280`, `kacho#1281`) в шапке миграции.
+
+- `users.email_verified_at` — подтверждённость ТЕКУЩЕГО значения `email`
+  (NULL — не подтверждён). Любая смена `email` снимает её в том же операторе
+  (триггер `users_email_change_drops_verification`); запись отметки сверяет
+  значение адреса в своём операторе.

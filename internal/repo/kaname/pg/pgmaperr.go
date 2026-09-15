@@ -153,6 +153,20 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		text, lane := fkText(pgErr, kindHint, idHint)
 		return iamerr.Wrapf(lane, "%s", text)
 	case pgfault.Check: // check_violation
+		// Таблица секрета: вид способа и непустоту материала судит ТИП до
+		// вставки (`domain.LoginMethod.Validate`), а материал вызывающий не
+		// присылает вовсе — его производит служба. Срабатывание ограничения
+		// поэтому НАШ дефект, а не ввод вызывающего. Сервер кладёт в `Detail` этого
+		// отказа строку ЦЕЛИКОМ, с материалом, — `Detail` здесь не читается и в
+		// журнал не пишется (`f.LogAttrs` его не несёт).
+		switch pgErr.ConstraintName {
+		case "user_login_methods_kind_check", "user_login_methods_verifier_check":
+			if isLoginMethodsTable(pgErr.TableName) {
+				slog.Error("login method backstop fired: service admitted a value it validates itself",
+					append([]any{"kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
+				return iamerr.ErrInternal
+			}
+		}
 		// Полоса ФОРМЫ ИМЕНИ отделена от прочих проверок, и отделена по вопросу
 		// «чьё это значение» (задача #718, здесь — #1279).
 		//
@@ -302,6 +316,11 @@ func uniqueText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 		// МОЛЧА — отказ остался бы верным по коду и перестал бы называть предмет.
 		"users_identity_external_id_uniq":
 		return "User with external_id already exists"
+	case "user_login_methods_pkey":
+		// Второй способ того же вида человеку (F4d-14). Подсказка несёт человека и
+		// вид и НИЧЕГО сверх: материал в текст отказа не доезжает by construction.
+		user, kind := splitLoginMethodHint(idHint)
+		return fmt.Sprintf("Login method %s of user %s already exists", kind, user)
 	case "users_account_email_unique",
 		// users_identity_email_uniq — глобальный ключ почты (миграция
 		// 20260823050000). Пер-аккаунтный лежит рядом и остаётся законным
@@ -399,6 +418,11 @@ func fkText(pgErr *pgconn.PgError, kindHint, idHint string) (string, error) {
 			return fmt.Sprintf("Account %s contains custom roles and cannot be deleted", idHint), iamerr.ErrReferenceInUse
 		}
 		return fmt.Sprintf("Account %s not found", idHint), iamerr.ErrReferenceMissing
+	case "user_login_methods_user_fk":
+		// Только сторона ВСТАВКИ: снятие человека уносит его способы каскадом, и
+		// обратной стороны у ключа нет.
+		user, _ := splitLoginMethodHint(idHint)
+		return fmt.Sprintf("User %s not found", user), iamerr.ErrReferenceMissing
 	case "group_members_group_fk":
 		return fmt.Sprintf("Group %s not found", idHint), iamerr.ErrReferenceMissing
 	case "access_bindings_role_fk":

@@ -8,6 +8,17 @@
 # `/internal/(repo|clients|reconciler|subscriptionjournal)`. Здесь модуль службы
 # и есть корень, поэтому префикса `services/iam/` в путях нет.
 #
+# `internal/migrations` добавлен к унаследованному отбору (задача продукта
+# `kacho#1268`). Его пробы схемы пропускаются под `-short`, а отбора он не
+# проходил, — значит их не исполняло ни одно задание, включая защиту отката от
+# уничтожения материала. Прочие пакеты с контейнерными пробами вне отбора
+# остаются вне его намеренно: их включение — предмет отдельной работы, часть из
+# них красна в самостоятельном клоне. Перечень выводится, а не выписывается:
+#
+#   git ls-files '*_test.go' | xargs grep -lE \
+#     '"github.com/PRO-Robotech/corelib/pgtest"|"github.com/testcontainers' \
+#     | xargs -n1 dirname | sort -u | grep -vE "${SELECT_RE#/}"
+#
 # «НЕЧЕГО ЗАПУСКАТЬ» И «НЕ СМОГ СПРОСИТЬ» — РАЗНЫЕ ИСХОДЫ, и различать их
 # обязательно. Форма `go list … | grep … || true` покрывает ОБА одним нулём:
 # отбор получает пустой список, печатает «нечего запускать» и выходит успехом —
@@ -41,7 +52,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SELECT_RE='/internal/(repo|clients|reconciler|subscriptionjournal)(/|$)'
+SELECT_RE='/internal/(repo|clients|reconciler|subscriptionjournal|migrations)(/|$)'
 TIMEOUT="${INTEGRATION_TIMEOUT:-25m}"
 
 cd "$ROOT" || exit 2
