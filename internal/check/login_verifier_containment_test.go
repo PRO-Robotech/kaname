@@ -1,0 +1,70 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package check_test
+
+import (
+	"os"
+	"testing"
+
+	"github.com/PRO-Robotech/corelib/treecorpus"
+	"github.com/stretchr/testify/require"
+
+	"github.com/PRO-Robotech/kaname/internal/check"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+)
+
+// loginVerifierSpec — объявление предмета. Живёт ЗДЕСЬ, в файле пробы: литерал
+// имени таблицы в ядре гейта сделал бы гейт своей же находкой (см. шапку
+// `login_verifier_containment.go`).
+//
+// Разрешённых мест сегодня ОДНО. Проверяющий пароля (часть П2 фазы Ф2) получит
+// своё разрешение ВМЕСТЕ со своим кодом и своей причиной — не раньше: раньше
+// оно было бы разрешением без предмета, и гейт это объявляет находкой.
+func loginVerifierSpec() check.LoginVerifierSpec {
+	return check.LoginVerifierSpec{
+		Accessor:      "Reveal",
+		DeclRel:       "internal/domain/login_method.go",
+		DeclType:      "LoginVerifier",
+		Table:         "user_login_methods",
+		TableOwnerRel: "internal/repo/kaname/pg/login_method_repo.go",
+		Allowed: map[string]string{
+			"internal/repo/kaname/pg": "адаптер хранилища кладёт материал в базу и читает его обратно",
+		},
+	}
+}
+
+// TestLoginVerifierStaysInside — гейт: материал способа входа выходит из своего
+// типа только в разрешённых местах, и таблицу секрета называет только её
+// адаптер.
+//
+// Что делать, если он сработал, — исходов три, четвёртого нет:
+//
+//  1. материал нужен этому месту по существу (проверка пароля) → разрешение
+//     ПАКЕТУ с причиной, в `loginVerifierSpec`, в том же изменении, что и код;
+//  2. нужен не материал, а факт о нём («способ есть», «вид такой-то») → брать
+//     факт из строки способа, а не материал;
+//  3. вызов попал по инерции → снять.
+//
+// Приписать место в разрешения без причины — НЕ исход: разрешение без названной
+// причины неотличимо от прощённой утечки.
+func TestLoginVerifierStaysInside(t *testing.T) {
+	t.Parallel()
+
+	wd, err := os.Getwd()
+	require.NoErrorf(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: рабочий каталог не установлен")
+	root, err := platformtree.ModuleRootFrom(wd)
+	require.NoErrorf(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не найден")
+	tree, err := treecorpus.NewTree(root)
+	require.NoErrorf(t, err, "состав дерева не установлен — «ноль находок» здесь означало бы «ноль прочитанного»")
+	corpus, err := check.CorpusFrom(tree, check.ProductionGoFile)
+	require.NoErrorf(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ: корпус не собран")
+
+	findings, census, err := check.AuditLoginVerifierContainment(corpus, loginVerifierSpec())
+	require.NoErrorf(t, err, "проверка НЕ ИСПОЛНЯЛАСЬ")
+	t.Logf("%s; находок %d", census, len(findings))
+
+	for _, f := range findings {
+		t.Error(f)
+	}
+}
