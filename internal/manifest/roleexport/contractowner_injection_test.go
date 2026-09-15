@@ -93,7 +93,7 @@ func TestAttribute_OwnerNobodyDeclaredIsAFindingWithItsCoordinate(t *testing.T) 
 // близнец ДРУГОГО вида: два вида находки не сливаются в один.
 func TestAttribute_PlatformServiceStaysAFindingOfShapeNotOwnership(t *testing.T) {
 	for _, fqn := range []string{
-		"kacho.cloud.operation.OperationService/Get",
+		"corelib.operation.OperationService/Get",
 		"corelib.subscription.InternalSubscriptionService/Subscribe",
 	} {
 		_, faults := roleexport.Attribute([]roleexport.CatalogEntry{{FQN: fqn}})

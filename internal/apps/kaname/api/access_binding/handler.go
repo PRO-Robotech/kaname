@@ -20,7 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operationpb "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	"github.com/PRO-Robotech/corelib/filter"
 	"github.com/PRO-Robotech/corelib/safeconv"
 	corevalidate "github.com/PRO-Robotech/corelib/validate"

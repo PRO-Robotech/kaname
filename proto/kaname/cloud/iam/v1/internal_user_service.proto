@@ -9,7 +9,7 @@ import "google/api/annotations.proto";
 import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/user.proto";
 import "kaname/cloud/iam/v1/user_service.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -30,7 +30,7 @@ service InternalUserService {
   // REST exposed ONLY on the cluster-internal listener;
   // api-gateway isInternalPath() gates `/iam/v1/internal/*` to internal mux
   // and authz-public-allowlist permits the <exempt> catalog entry.
-  rpc UpsertFromIdentity (UpsertFromIdentityRequest) returns (kacho.cloud.operation.Operation) {
+  rpc UpsertFromIdentity (UpsertFromIdentityRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       post: "/iam/v1/internal/users:upsertFromIdentity"
       body: "*"
@@ -57,7 +57,7 @@ service InternalUserService {
   //
   // Idempotent on `(external_id, recovery_jti)` — duplicate webhook delivery
   // does NOT spawn duplicate revocations.
-  rpc OnRecoveryCompleted (OnRecoveryCompletedRequest) returns (kacho.cloud.operation.Operation) {
+  rpc OnRecoveryCompleted (OnRecoveryCompletedRequest) returns (corelib.operation.Operation) {
     option (corelib.api.v1.operation) = {
       metadata: "OnRecoveryCompletedMetadata"
       response: "User"

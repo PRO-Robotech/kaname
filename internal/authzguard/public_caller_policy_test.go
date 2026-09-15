@@ -139,7 +139,7 @@ func TestPublicCallerPolicy_GatewayMayCallEverything(t *testing.T) {
 	for _, method := range []string{
 		userTokenIssueMethod, accessBindingCreateMethod, projectDeleteMethod,
 		projectGetMethod, projectListMethod, accountListMethod,
-		"/kacho.cloud.operation.OperationService/Get",
+		"/corelib.operation.OperationService/Get",
 	} {
 		if err := p.allow(newGatewayCtx(), method); err != nil {
 			t.Fatalf("api-gateway denied on %s: %v — the change denies service instead of narrowing it", method, err)

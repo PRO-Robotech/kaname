@@ -252,10 +252,10 @@ func TestDirNameInjection_CanonicalInsideALongerSegmentDoesNotSatisfyTheControl(
 // единственным различием пары.
 func inputLedgerTree(withLedger bool) map[string]string {
 	files := soundTree()
-	files["proto/kacho/cloud/operation/operation.proto"] = "syntax = \"proto3\";\n"
+	files["proto/kacho/cloud/vendored/vendored.proto"] = "syntax = \"proto3\";\n"
 	if withLedger {
-		files["proto/inputs.yaml"] = "inputs:\n  - path: kacho/cloud/operation/operation.proto\n" +
-			"    sha256: 0\n    stubs: github.com/PRO-Robotech/corelib/api/kacho/cloud/operation\n"
+		files["proto/inputs.yaml"] = "inputs:\n  - path: kacho/cloud/vendored/vendored.proto\n" +
+			"    sha256: 0\n    stubs: github.com/PRO-Robotech/kacho/pkg/api/kacho/cloud/vendored\n"
 	}
 	return files
 }
@@ -274,6 +274,6 @@ func TestDirNameInjection_SamePathOutsideTheLedgerIsFound(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, findings, 1, "тот же путь ВНЕ ведомости не найден: тогда полоса выше была бы "+
 		"маской на весь каталог контрактов, а не послаблением с предметом")
-	require.Equal(t, "proto/kacho/cloud/operation/operation.proto", findings[0].file)
+	require.Equal(t, "proto/kacho/cloud/vendored/vendored.proto", findings[0].file)
 	require.Zero(t, census.skippedInputPath)
 }

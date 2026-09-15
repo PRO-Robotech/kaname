@@ -9,7 +9,7 @@ import "google/api/annotations.proto";
 import "google/protobuf/field_mask.proto";
 import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/role.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -73,7 +73,7 @@ service RoleService {
 
   // Creates a custom role in the specified account.
   // Имя дублирующее system-role → AlreadyExists.
-  rpc Create (CreateRoleRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Create (CreateRoleRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/roles" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "CreateRoleMetadata"
@@ -105,7 +105,7 @@ service RoleService {
 
   // Updates the specified custom role.
   // System role → FailedPrecondition.
-  rpc Update (UpdateRoleRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Update (UpdateRoleRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { patch: "/iam/v1/roles/{role_id}" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "UpdateRoleMetadata"
@@ -123,7 +123,7 @@ service RoleService {
   // Deletes the specified custom role.
   // System role → FailedPrecondition.
   // Custom role с активными AccessBinding'ами → FailedPrecondition.
-  rpc Delete (DeleteRoleRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Delete (DeleteRoleRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { delete: "/iam/v1/roles/{role_id}" };
     option (corelib.api.v1.operation) = {
       metadata: "DeleteRoleMetadata"
@@ -282,7 +282,7 @@ message ListRoleOperationsRequest {
 
 message ListRoleOperationsResponse {
   // List of operations for the specified role.
-  repeated kacho.cloud.operation.Operation operations = 1;
+  repeated corelib.operation.Operation operations = 1;
 
   // This token allows you to get the next page of results for list requests.
   string next_page_token = 2;

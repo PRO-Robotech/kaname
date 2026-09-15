@@ -12,7 +12,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -524,7 +524,7 @@ var File_kaname_cloud_iam_v1_session_revocations_service_proto protoreflect.File
 
 const file_kaname_cloud_iam_v1_session_revocations_service_proto_rawDesc = "" +
 	"\n" +
-	"5kaname/cloud/iam/v1/session_revocations_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a,kaname/cloud/iam/v1/session_revocation.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"\xd4\x01\n" +
+	"5kaname/cloud/iam/v1/session_revocations_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a,kaname/cloud/iam/v1/session_revocation.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"\xd4\x01\n" +
 	"\rRevokeRequest\x12\x1b\n" +
 	"\ttoken_jti\x18\x01 \x01(\tR\btokenJti\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
@@ -554,9 +554,9 @@ const file_kaname_cloud_iam_v1_session_revocations_service_proto_rawDesc = "" +
 	"\x17SessionCutoffOfResponse\x12\x14\n" +
 	"\x05found\x18\x01 \x01(\bR\x05found\x12?\n" +
 	"\rrevoke_before\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\frevokeBefore\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reason2\x89\x05\n" +
-	"!InternalSessionRevocationsService\x12\x98\x01\n" +
-	"\x06Revoke\x12\".kaname.cloud.iam.v1.RevokeRequest\x1a .kacho.cloud.operation.Operation\"H\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\xb2\xd2*#\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason2\x85\x05\n" +
+	"!InternalSessionRevocationsService\x12\x94\x01\n" +
+	"\x06Revoke\x12\".kaname.cloud.iam.v1.RevokeRequest\x1a\x1c.corelib.operation.Operation\"H\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\xb2\xd2*#\n" +
 	"\x0eRevokeMetadata\x12\x11SessionRevocation\x12}\n" +
 	"\tIsRevoked\x12%.kaname.cloud.iam.v1.IsRevokedRequest\x1a&.kaname.cloud.iam.v1.IsRevokedResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\xb7\x01\n" +
 	"\n" +
@@ -588,7 +588,7 @@ var file_kaname_cloud_iam_v1_session_revocations_service_proto_goTypes = []any{
 	(*SessionCutoffOfResponse)(nil), // 7: kaname.cloud.iam.v1.SessionCutoffOfResponse
 	(*timestamppb.Timestamp)(nil),   // 8: google.protobuf.Timestamp
 	(*SessionRevocation)(nil),       // 9: kaname.cloud.iam.v1.SessionRevocation
-	(*operation.Operation)(nil),     // 10: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),     // 10: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_session_revocations_service_proto_depIdxs = []int32{
 	8,  // 0: kaname.cloud.iam.v1.RevokeRequest.ttl_expires_at:type_name -> google.protobuf.Timestamp
@@ -599,7 +599,7 @@ var file_kaname_cloud_iam_v1_session_revocations_service_proto_depIdxs = []int32
 	2,  // 5: kaname.cloud.iam.v1.InternalSessionRevocationsService.IsRevoked:input_type -> kaname.cloud.iam.v1.IsRevokedRequest
 	4,  // 6: kaname.cloud.iam.v1.InternalSessionRevocationsService.ListByUser:input_type -> kaname.cloud.iam.v1.ListByUserRequest
 	6,  // 7: kaname.cloud.iam.v1.InternalSessionRevocationsService.SessionCutoffOf:input_type -> kaname.cloud.iam.v1.SessionCutoffOfRequest
-	10, // 8: kaname.cloud.iam.v1.InternalSessionRevocationsService.Revoke:output_type -> kacho.cloud.operation.Operation
+	10, // 8: kaname.cloud.iam.v1.InternalSessionRevocationsService.Revoke:output_type -> corelib.operation.Operation
 	3,  // 9: kaname.cloud.iam.v1.InternalSessionRevocationsService.IsRevoked:output_type -> kaname.cloud.iam.v1.IsRevokedResponse
 	5,  // 10: kaname.cloud.iam.v1.InternalSessionRevocationsService.ListByUser:output_type -> kaname.cloud.iam.v1.ListByUserResponse
 	7,  // 11: kaname.cloud.iam.v1.InternalSessionRevocationsService.SessionCutoffOf:output_type -> kaname.cloud.iam.v1.SessionCutoffOfResponse

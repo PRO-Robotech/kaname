@@ -9,7 +9,7 @@ import "google/api/annotations.proto";
 import "google/protobuf/field_mask.proto";
 import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/account.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -55,7 +55,7 @@ service AccountService {
 
   // Creates an account using the data specified in the request.
   // Method starts an asynchronous operation that can be cancelled while it is in progress.
-  rpc Create (CreateAccountRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Create (CreateAccountRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/accounts" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "CreateAccountMetadata"
@@ -87,7 +87,7 @@ service AccountService {
   // Updates the specified account.
   // Note: owner_user_id is immutable after Account.Create. Attempt to include it in
   // update_mask returns InvalidArgument.
-  rpc Update (UpdateAccountRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Update (UpdateAccountRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { patch: "/iam/v1/accounts/{account_id}" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "UpdateAccountMetadata"
@@ -104,7 +104,7 @@ service AccountService {
 
   // Deletes the specified account.
   // Account with non-empty Projects returns FailedPrecondition.
-  rpc Delete (DeleteAccountRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Delete (DeleteAccountRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { delete: "/iam/v1/accounts/{account_id}" };
     option (corelib.api.v1.operation) = {
       metadata: "DeleteAccountMetadata"
@@ -236,7 +236,7 @@ message ListAccountOperationsRequest {
 
 message ListAccountOperationsResponse {
   // List of operations for the specified account.
-  repeated kacho.cloud.operation.Operation operations = 1;
+  repeated corelib.operation.Operation operations = 1;
 
   // This token allows you to get the next page of results for list requests.
   string next_page_token = 2;
@@ -257,7 +257,7 @@ message ListAllAccountOperationsRequest {
 
 message ListAllAccountOperationsResponse {
   // List of IAM operations aggregated for the specified account.
-  repeated kacho.cloud.operation.Operation operations = 1;
+  repeated corelib.operation.Operation operations = 1;
 
   // This token allows you to get the next page of results for list requests.
   string next_page_token = 2;

@@ -12,7 +12,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -1526,7 +1526,7 @@ var File_kaname_cloud_iam_v1_internal_iam_service_proto protoreflect.FileDescrip
 
 const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"\n" +
-	".kaname/cloud/iam/v1/internal_iam_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a)kaname/cloud/iam/v1/service_account.proto\x1a\x1ekaname/cloud/iam/v1/user.proto\x1a(kaname/cloud/iam/v1/secret_options.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"j\n" +
+	".kaname/cloud/iam/v1/internal_iam_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a)kaname/cloud/iam/v1/service_account.proto\x1a\x1ekaname/cloud/iam/v1/user.proto\x1a(kaname/cloud/iam/v1/secret_options.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"j\n" +
 	"\x14LookupSubjectRequest\x12!\n" +
 	"\vexternal_id\x18\x01 \x01(\tH\x00R\n" +
 	"externalId\x12\x10\n" +
@@ -1616,11 +1616,11 @@ const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"F\n" +
 	"\x1fCheckBasicCredentialLiveRequest\x12#\n" +
 	"\rcredential_id\x18\x01 \x01(\tR\fcredentialId\"\"\n" +
-	" CheckBasicCredentialLiveResponse2\xf7\v\n" +
+	" CheckBasicCredentialLiveResponse2\xf3\v\n" +
 	"\x12InternalIAMService\x12\xb6\x01\n" +
 	"\rLookupSubject\x12).kaname.cloud.iam.v1.LookupSubjectRequest\x1a*.kaname.cloud.iam.v1.LookupSubjectResponse\"N\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x82\xd3\xe4\x93\x02':\x01*\"\"/iam/v1/internal/iam:lookupSubject\x12\x96\x01\n" +
-	"\x05Check\x12!.kaname.cloud.iam.v1.CheckRequest\x1a\".kaname.cloud.iam.v1.CheckResponse\"F\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/iam/v1/internal/iam:check\x12\xa7\x01\n" +
-	"\vForceLogout\x12'.kaname.cloud.iam.v1.ForceLogoutRequest\x1a .kacho.cloud.operation.Operation\"M\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\xb2\xd2*(\n" +
+	"\x05Check\x12!.kaname.cloud.iam.v1.CheckRequest\x1a\".kaname.cloud.iam.v1.CheckResponse\"F\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x82\xd3\xe4\x93\x02\x1f:\x01*\"\x1a/iam/v1/internal/iam:check\x12\xa3\x01\n" +
+	"\vForceLogout\x12'.kaname.cloud.iam.v1.ForceLogoutRequest\x1a\x1c.corelib.operation.Operation\"M\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\xb2\xd2*(\n" +
 	"\x13ForceLogoutMetadata\x12\x11ForceLogoutResult\x12\x98\x01\n" +
 	"\x12PollSubjectChanges\x12..kaname.cloud.iam.v1.PollSubjectChangesRequest\x1a/.kaname.cloud.iam.v1.PollSubjectChangesResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\x92\x01\n" +
 	"\x10RegisterResource\x12,.kaname.cloud.iam.v1.RegisterResourceRequest\x1a-.kaname.cloud.iam.v1.RegisterResourceResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\x98\x01\n" +
@@ -1670,7 +1670,7 @@ var file_kaname_cloud_iam_v1_internal_iam_service_proto_goTypes = []any{
 	(*User)(nil),                             // 23: kaname.cloud.iam.v1.User
 	(*ServiceAccount)(nil),                   // 24: kaname.cloud.iam.v1.ServiceAccount
 	(*timestamppb.Timestamp)(nil),            // 25: google.protobuf.Timestamp
-	(*operation.Operation)(nil),              // 26: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),              // 26: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_internal_iam_service_proto_depIdxs = []int32{
 	23, // 0: kaname.cloud.iam.v1.LookupSubjectResponse.user:type_name -> kaname.cloud.iam.v1.User
@@ -1693,7 +1693,7 @@ var file_kaname_cloud_iam_v1_internal_iam_service_proto_depIdxs = []int32{
 	19, // 17: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:input_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
 	2,  // 18: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:output_type -> kaname.cloud.iam.v1.LookupSubjectResponse
 	4,  // 19: kaname.cloud.iam.v1.InternalIAMService.Check:output_type -> kaname.cloud.iam.v1.CheckResponse
-	26, // 20: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:output_type -> kacho.cloud.operation.Operation
+	26, // 20: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:output_type -> corelib.operation.Operation
 	14, // 21: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:output_type -> kaname.cloud.iam.v1.PollSubjectChangesResponse
 	6,  // 22: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:output_type -> kaname.cloud.iam.v1.RegisterResourceResponse
 	8,  // 23: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:output_type -> kaname.cloud.iam.v1.UnregisterResourceResponse

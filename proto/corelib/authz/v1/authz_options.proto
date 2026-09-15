@@ -44,7 +44,7 @@ option go_package = "github.com/PRO-Robotech/corelib/api/corelib/authz/v1;authzv
 // изменением.
 //
 // ЧЕМ ПЕРЕЕЗД УПЁРСЯ — ЗАМЕРОМ, А НЕ МНЕНИЕМ. Два контракта, чьи заглушки публикует
-// фундамент, сами РАЗМЕЧЕНЫ этим словарём: `kacho/cloud/operation/operation_service.proto`
+// фундамент, сами РАЗМЕЧЕНЫ этим словарём: `corelib/operation/operation_service.proto`
 // и `corelib/subscription/subscription_service.proto`. Порождённый Go-пакет неделим, а
 // собственные пакеты фундамента их линкуют — `operations/operationspb` и
 // `subscription/`. Значит фундамент обязан линковать словарь; словарь у службы
@@ -52,7 +52,7 @@ option go_package = "github.com/PRO-Robotech/corelib/api/corelib/authz/v1;authzv
 // запрещённое ядром правил («разрешены ровно три ребра … кольца запрещены»).
 //
 // Отдельно измерено: словарь НЕ ВПРАВЕ лечь в Go-пакет `kaname.cloud.iam.v1` даже
-// после снятия кольца — заглушки iam импортируют `api/kacho/cloud/operation`, а тот
+// после снятия кольца — заглушки iam импортируют `api/corelib/operation`, а тот
 // импортировал бы словарь, то есть получился бы ПАКЕТНЫЙ цикл, который не собирается
 // вовсе. Словарю нужен свой Go-пакет.
 //
