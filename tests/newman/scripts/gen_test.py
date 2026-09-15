@@ -331,3 +331,41 @@ def test_guard_stays_silent_when_the_body_placeholder_is_resolvable():
     assert pre.index("pm.variables.set('_t31nLsn'") < pre.index("pm.request.body"), (
         "страж обязан стоять ПОСЛЕ законных производителей тела этого шага"
     )
+
+
+# ---------------------------------------------------------------------------
+# Переадресация модуля на собственный фронт службы (`address_own_front`)
+# ---------------------------------------------------------------------------
+
+def _own_case():
+    return gen.Case(
+        id="OWN-FRONT-PROBE", title="t", classes=["CONF"], priority="P2",
+        steps=[
+            gen.Step(name="plain", method="GET", path="/iam/v1/roles/{{rid}}",
+                     test_script=["pm.test('x', () => {});"]),
+            gen.Step(name="internal", method="POST", path="/iam/v1/internal/iam:check",
+                     pre_script=gen.require_env_url("ownInternalRestBaseUrl",
+                                                    "/iam/v1/internal/iam:check", "внутр."),
+                     test_script=["pm.test('y', () => {});"]),
+        ])
+
+
+def test_address_own_front_readdresses_every_unaddressed_step_to_the_own_public_front():
+    case = gen.address_own_front([_own_case()], "почему")[0]
+    plain = "\n".join(case.steps[0].pre_script)
+    assert "pm.environment.get('ownRestBaseUrl')" in plain or \
+        'pm.environment.get("ownRestBaseUrl")' in plain, plain
+    assert "/iam/v1/roles/{{rid}}" in plain, plain
+    # ЗАКОННЫЙ БЛИЗНЕЦ: шаг, чей фронт кейс объявил сам, не перебит вторым адресом.
+    internal = "\n".join(case.steps[1].pre_script)
+    assert "ownRestBaseUrl" not in internal.replace("ownInternalRestBaseUrl", ""), internal
+    assert internal.count("HARNESS-CONFIG GUARD") == 1, internal
+
+
+def test_address_own_front_refuses_a_readdress_without_a_reason():
+    try:
+        gen.address_own_front([_own_case()], "")
+    except ValueError as e:
+        assert "причина" in str(e)
+    else:
+        raise AssertionError("пустая причина принята — отказ «адреса нет» не назвал бы, что потеряно")
