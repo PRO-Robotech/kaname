@@ -23,6 +23,11 @@ import (
 // Проверяющий пароля (часть П2 фазы Ф2) получит разрешение СВОЕМУ файлу вместе
 // со своим кодом и своей причиной — не раньше: раньше оно было бы разрешением
 // без предмета, и гейт это объявляет находкой.
+//
+// Потребители — ровно два оператора базы адаптера: запрос, называющий таблицу,
+// и материал уходят в них аргументами. Ключ — как его печатает находка; вызов с
+// материалом либо именем таблицы в любой другой функции либо другой вызов той же
+// функции — находка, пока не объявлен здесь с причиной.
 func loginVerifierSpec() check.LoginVerifierSpec {
 	return check.LoginVerifierSpec{
 		Accessor:      "Reveal",
@@ -32,6 +37,10 @@ func loginVerifierSpec() check.LoginVerifierSpec {
 		TableOwnerRel: "internal/repo/kaname/pg/login_method_repo.go",
 		AllowedFiles: map[string]string{
 			"internal/repo/kaname/pg/login_method_repo.go": "адаптер хранилища кладёт материал в базу аргументом оператора",
+		},
+		OpaqueConsumers: map[string]string{
+			"LoginMethodRepo.Create → r.pool.QueryRow": "оператор вставки строки способа: материал и запрос с именем таблицы — его аргументы",
+			"LoginMethodRepo.Get → r.pool.QueryRow":    "оператор чтения строки способа: запрос с именем таблицы — его аргумент",
 		},
 	}
 }

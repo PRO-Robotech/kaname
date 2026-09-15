@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // login_verifier_containment.go — ЯДРО гейта: проверочный материал способа входа
-// выходит из своего типа ТОЛЬКО в названном файле, и таблицу секрета называет
-// ТОЛЬКО её адаптер (фаза Ф2, `kacho#1268`).
+// выходит из своего типа ТОЛЬКО в названном файле и не уходит из него мимо
+// объявленного потребителя, а таблицу секрета называет ТОЛЬКО её адаптер (фаза
+// Ф2, `kacho#1268`).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПРЕДМЕТ
@@ -14,61 +15,60 @@
 // материала ОДИН — метод `Reveal`, — и он нужен ровно тем, кто кладёт материал в
 // базу и сверяет с ним предъявленное.
 //
-// У утечки из кода Go две СИНТАКСИЧЕСКИ УЗНАВАЕМЫЕ формы:
+// Правил три:
 //
-//  1. ВЫЗОВ ВЫХОДА вне разрешённого ФАЙЛА — материал достан строкой и дальше
-//     ничем не защищён: его можно положить в поле контракта, в нагрузку аудита,
-//     в журнал, в уведомление базы;
-//  2. ВТОРОЙ ЧИТАТЕЛЬ КОЛОНКИ — оператор, называющий таблицу секрета мимо её
-//     адаптера, читает материал строкой, не проходя через тип вовсе.
+//  1. ВЫХОД вне разрешённого ФАЙЛА — находка: материал достан строкой и дальше
+//     ничем не защищён.
+//  2. ВТОРОЙ ЧИТАТЕЛЬ КОЛОНКИ — выражение вне файла-владельца, называющее
+//     таблицу секрета, — находка: он читает материал строкой, минуя тип.
+//  3. ВЫНОС — материал из разрешённого файла, имя таблицы из файла-владельца
+//     уходят туда, куда гейт дальше не смотрит, — находка. Разбор потока —
+//     `login_verifier_flow.go`, один на оба предмета.
 //
-// Разрешение даётся ФАЙЛУ, а не пакету. Пакет адаптера — 70 не-тестовых
-// файлов; разрешение каталогу пропускало вызов выхода в любом из них, и шапка
-// владельца, называвшая себя «единственным местом», утверждала шире сделанного.
+// Разрешение даётся ФАЙЛУ, а не пакету: пакет адаптера — 70 не-тестовых файлов,
+// и разрешение каталогу пропускало выход в любом из них.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// ЧТО СУДИТСЯ И КАК — ВСЕ ЗАКОННЫЕ ФОРМЫ ЗАПИСИ ПРЕДМЕТА
+// ПЕРЕПИСЬ НАПИСАНИЙ — ЧТО РАСПОЗНАВАТЕЛЬ ЗНАЕТ, ВЫВЕДЕНО ИЗ ГРАММАТИКИ
 //
-// Судится РАЗБОРОМ, а не текстом: комментарий, объясняющий выход, и строка с
+// Судится РАЗБОРОМ, а не текстом: комментарий Go, объясняющий выход, и строка с
 // его именем законны и обязаны остаться — гейт, краснеющий на собственном
 // объяснении, снимают первым.
 //
-// Выход (правило 1) записывается ОДНОЙ синтаксической формой — селектором с его
-// именем: вызов, значение метода и выражение метода. Сверх вызова вне
-// разрешённого файла находкой является ВЫНОС материала из разрешённого файла
-// так, что его дальнейший путь гейт не видит:
+// Правило 1 — выход записывается ОДНОЙ формой, селектором с его именем: вызов,
+// значение метода, выражение метода, метод через интерфейс и через встроенное
+// поле.
 //
-//   - возврат, чьё значение НЕСЁТ материал (вызов выхода, его приведение к
-//     `string`/`[]byte`, склейка, составной литерал с ним). Непрозрачный вызов
-//     (сверка хеша) материал не несёт — несёт его результат сверки;
-//   - переменная уровня пакета, чьё значение обращается к выходу;
-//   - присваивание материала переменной уровня пакета и отправка в канал.
+// Правило 2 — имя таблицы. Строковое значение Go (литерал в двойных и в обратных
+// кавычках, с экранированием Go внутри) судится ГРАММАТИКОЙ SQL — `sql_relation_name.go`:
+// имя без кавычек в любом регистре, в кавычках побайтово, `U&"…"` с UESCAPE,
+// со схемой и без, внутри строки SQL (`'…'::regclass`, `EXECUTE '…'`,
+// E-, U&-, N-, долларовая строка, продолжение, склейка `||`). Каким выражением
+// Go это значение записано:
 //
-// Имя таблицы (правило 2) записывается ЧЕТЫРЬМЯ формами, и распознаватель знает
-// все четыре:
+//	литерал                  "…" и `…`
+//	склейка                  `+` литералов, констант, приведений `string(…)`
+//	                         и к строковому типу корпуса; судится свёрнутое
+//	                         значение и отдельно каждое звено
+//	связанное имя            константа либо переменная уровня пакета, чьё
+//	                         значение называет таблицу, — в том числе
+//	                         повторённая неявно в группе `const (…)`; сама
+//	                         константа владельца — такое имя
+//	локальная константа      `const` внутри функции участвует в склейке
+//	селектор другого пакета  `пакет.Имя` — с именем пакета, псевдонимом импорта и
+//	                         через импорт с точкой
 //
-//   - ЛИТЕРАЛ, где имя стоит целым словом. Имена ограничений (`<таблица>_pkey`)
-//     им не являются — «слово» здесь в смысле идентификатора SQL;
-//   - СКЛЕЙКА литералов и констант: судится свёрнутое значение, а не части,
-//     поэтому `"user_login_" + "methods"` — таблица, а `"user_login_" +
-//     "methods_pkey"` — имя ограничения. Звено склейки, само являющееся
-//     связанным именем владельца, судится отдельно: константа владельца за его
-//     файл не выходит ни в каком виде, в том числе как основа имени ограничения;
-//   - СВЯЗАННОЕ ИМЯ: константа или переменная уровня пакета, чьё значение
-//     называет таблицу (замыкание по цепочке имён — неподвижная точка). Сама
-//     константа владельца — такое имя, и её использование в соседнем файле того
-//     же пакета есть второй читатель;
-//   - СЕЛЕКТОР ДРУГОГО ПАКЕТА на такое имя.
-//
-// Сверх форм имени — ВЫНОС имени владельцем: функция файла-владельца,
-// возвращающая строку, в которой названа таблица. Её вызывающие гейту не видны.
-// Предикат владельца, возвращающий `bool` («это наша таблица?»), имени не
-// выносит — именно им переводчик отказов сверяет таблицу отказа.
+// Правило 3 — вынос: возврат, именованный результат, переменная пакета (своего
+// и чужого, её поле, элемент, ключ карты), память параметра и получателя,
+// канал, аргумент функции чужого файла, непрозрачный вызов без объявления
+// потребителя, встроенный вывод. Полный перечень и то, что несёт предмет, —
+// шапка `login_verifier_flow.go`. Переменная пакета в разрешённом файле, чьё
+// значение обращается к выходу, — вынос материала сама по себе.
 //
 // Объявление предмета (имя выхода, файл и тип, где он объявлен, имя таблицы,
-// разрешённые файлы) приходит ПАРАМЕТРОМ из файла пробы. Причина — не вкус:
-// литерал имени таблицы в этом файле сделал бы гейт своей же первой находкой,
-// а файл пробы в корпус не входит by construction.
+// разрешённые файлы, потребители) приходит ПАРАМЕТРОМ из файла пробы: литерал
+// имени таблицы в этом файле сделал бы гейт своей же первой находкой, а файл
+// пробы в корпус не входит by construction.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПРЕМИСЫ — ОТКАЗ, А НЕ МОЛЧАНИЕ
@@ -77,8 +77,9 @@
 //     Иначе селектор с тем же именем означает не этот выход, и перепись мерит
 //     чужой метод;
 //   - файл-владелец таблицы называет её хоть раз: иначе второе правило ослепло;
-//   - каждый разрешённый файл выход ИСПОЛЬЗУЕТ: разрешение без предмета —
-//     место, куда вызов вносят незамеченным (послабление обязано истекать само).
+//   - каждый разрешённый файл выход ИСПОЛЬЗУЕТ, каждый объявленный потребитель
+//     получает предмет: разрешение без предмета — место, куда вызов вносят
+//     незамеченным (послабление обязано истекать само).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ГРАНИЦЫ, НАЗВАННЫЕ ВСЛУХ
@@ -86,15 +87,16 @@
 //  1. ФАЙЛЫ ПРОБ НЕ СУДЯТСЯ: пробе законно достать материал, чтобы сверить его
 //     побайтово, а фикстуре инъекции — написать форму дефекта.
 //  2. ИМЯ, СОБРАННОЕ ВО ВРЕМЯ ИСПОЛНЕНИЯ, НЕ УЗНАЁТСЯ: `fmt.Sprintf`,
-//     `strings.Join`, срез байтов — это поток данных, а не синтаксис. В дереве
-//     такой формы нет; появится — гейт промолчит, и это его граница.
-//  3. ПОТОК МАТЕРИАЛА ВНУТРИ РАЗРЕШЁННОГО ФАЙЛА НЕ ПРОСЛЕЖИВАЕТСЯ дальше
-//     названных выносов: поле структуры, замыкание, указатель — тоже поток
-//     данных. Разрешённый файл один, и его держит ревью.
-//  4. ОТРАЖЕНИЕ НЕ УЗНАЁТСЯ: доступ к неэкспортированному полю через `reflect`
-//     либо `unsafe` синтаксического следа выхода не оставляет.
-//  5. ПУТЬ ВНЕ ГО НЕ СУДИТСЯ: базу судит соседний гейт схемы
-//     `internal/repo/kaname/pg` `TestLoginVerifierStaysInsideTheSchema`.
+//     `strings.Join`, `+=` к переменной, срез байтов — это поток данных, а не
+//     синтаксис. В дереве такой формы нет; появится — гейт промолчит.
+//  3. ГРАНИЦЫ РАЗБОРА ПОТОКА — псевдоним через указатель на локальную, материал,
+//     прочитанный владельцем из базы до обёртки в тип, отражение — названы в
+//     шапке `login_verifier_flow.go`.
+//  4. ГРАНИЦЫ РАСПОЗНАВАТЕЛЯ SQL — имя, собранное во время исполнения,
+//     аргумент `format('%I', …)` — названы в шапке `sql_relation_name.go`.
+//  5. ПУТЬ ВНЕ GO НЕ СУДИТСЯ: базу судит соседний гейт схемы
+//     `internal/repo/kaname/pg` `TestLoginVerifierStaysInsideTheSchema`, тем же
+//     распознавателем имени.
 package check
 
 import (
@@ -103,7 +105,6 @@ import (
 	"go/parser"
 	"go/token"
 	"path"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -120,6 +121,10 @@ type LoginVerifierSpec struct {
 	// AllowedFiles — файл → причина, по которой материал ему нужен. Причина
 	// уезжает в перепись: разрешение без названной причины снимается следующим.
 	AllowedFiles map[string]string
+	// OpaqueConsumers — вызов, которому материал либо имя таблицы отданы по
+	// существу, → причина. Ключ — «функция → вызов», как его печатает находка:
+	// `Тип.Метод → r.pool.QueryRow`. Объявление без вызова — находка.
+	OpaqueConsumers map[string]string
 }
 
 // LoginVerifierCensus — объём осмотренного по каждой оси.
@@ -134,6 +139,10 @@ type LoginVerifierCensus struct {
 	OwnerTableNamings int
 	// Bindings — связанные имена, несущие имя таблицы: «каталог.имя».
 	Bindings []string
+	// Material, Name — разбор потока материала и имени таблицы.
+	Material, Name LoginVerifierFlowCensus
+	// ConsumerUses — объявленный потребитель → вызовов с предметом.
+	ConsumerUses map[string]int
 }
 
 // формы записи имени таблицы — ключи переписи.
@@ -156,11 +165,18 @@ func (c LoginVerifierCensus) String() string {
 		forms = append(forms, fmt.Sprintf("%s %d", f, c.TableNamings[f]))
 		total += c.TableNamings[f]
 	}
+	consumers := make([]string, 0, len(c.ConsumerUses))
+	for k, n := range c.ConsumerUses {
+		consumers = append(consumers, fmt.Sprintf("«%s»=%d", k, n))
+	}
+	sort.Strings(consumers)
 	return fmt.Sprintf("перепись: не-тестовых файлов Go прочитано %d (разобрано %d) · объявлений выхода %d · "+
 		"обращений к выходу %d, из них в разрешённых файлах [%s] · упоминаний таблицы %d (%s), "+
-		"из них у владельца %d · связанных имён, несущих таблицу, %d %v",
+		"из них у владельца %d · связанных имён, несущих таблицу, %d %v · поток материала: %s · "+
+		"поток имени таблицы: %s · потребителей объявлено %d [%s]",
 		c.FilesRead, c.FilesParsed, c.AccessorDecls, c.AccessorUses, strings.Join(allowed, " "),
-		total, strings.Join(forms, ", "), c.OwnerTableNamings, len(c.Bindings), c.Bindings)
+		total, strings.Join(forms, ", "), c.OwnerTableNamings, len(c.Bindings), c.Bindings,
+		c.Material, c.Name, len(c.ConsumerUses), strings.Join(consumers, " "))
 }
 
 // lvFile — разобранный файл корпуса.
@@ -181,62 +197,168 @@ type lvBinding struct {
 	bearing  bool
 }
 
-// lvIndex — связанные имена по каталогу пакета и имена пакетов по каталогу.
+// lvFunc — функция либо метод корпуса и файл, где они объявлены.
+type lvFunc struct {
+	decl *ast.FuncDecl
+	file *lvFile
+}
+
+// lvIndex — объявления корпуса по каталогу пакета.
 type lvIndex struct {
-	tableWord *regexp.Regexp
-	bindings  map[string]map[string]*lvBinding
-	pkgNames  map[string]string
-	dirs      []string
+	relation string
+	bindings map[string]map[string]*lvBinding
+	pkgNames map[string]string
+	dirs     []string
+	types    map[string]map[string]bool
+	funcs    map[string]map[string]lvFunc
+	methods  map[string]map[string]map[string]lvFunc // каталог → тип получателя → имя
+	// consts — действующие значения каждой спецификации константы: у
+	// спецификации без значений в группе `const (…)` — значения предыдущей.
+	consts map[*ast.ValueSpec][]ast.Expr
+}
+
+// importDir — каталог корпуса, импортированный в файле под именем x; пусто — x
+// не имя импорта.
+func (ix *lvIndex) importDir(f *lvFile, x ast.Expr) string {
+	id, ok := x.(*ast.Ident)
+	if !ok || id.Obj != nil {
+		return ""
+	}
+	for _, imp := range f.file.Imports {
+		if imp.Name != nil && (imp.Name.Name == "." || imp.Name.Name == "_") {
+			continue
+		}
+		if dir := ix.corpusDir(imp); dir != "" {
+			local := ix.pkgNames[dir]
+			if imp.Name != nil {
+				local = imp.Name.Name
+			}
+			if local == id.Name {
+				return dir
+			}
+		}
+	}
+	return ""
+}
+
+// dotDirs — каталоги корпуса, импортированные в файл с точкой.
+func (ix *lvIndex) dotDirs(f *lvFile) []string {
+	var out []string
+	for _, imp := range f.file.Imports {
+		if imp.Name != nil && imp.Name.Name == "." {
+			if dir := ix.corpusDir(imp); dir != "" {
+				out = append(out, dir)
+			}
+		}
+	}
+	return out
+}
+
+func (ix *lvIndex) corpusDir(imp *ast.ImportSpec) string {
+	p, err := strconv.Unquote(imp.Path.Value)
+	if err != nil {
+		return ""
+	}
+	for _, dir := range ix.dirs {
+		if p == dir || strings.HasSuffix(p, "/"+dir) {
+			return dir
+		}
+	}
+	return ""
 }
 
 // resolve — связанное имя, на которое указывает идентификатор, либо nil.
 //
 // Идентификатор, разрешённый разбором внутри файла, указывает на своё
 // объявление; указывает на иное (локальная переменная с тем же именем) —
-// связанного имени нет. Неразрешённый — имя уровня пакета из соседнего файла.
+// связанного имени нет. Неразрешённый — имя уровня пакета из соседнего файла
+// либо из пакета, импортированного с точкой.
 func (ix *lvIndex) resolve(f *lvFile, id *ast.Ident) *lvBinding {
-	b := ix.bindings[f.dir][id.Name]
-	if b == nil {
-		return nil
+	if b := ix.bindings[f.dir][id.Name]; b != nil {
+		if id.Obj != nil {
+			if spec, ok := id.Obj.Decl.(*ast.ValueSpec); ok && spec == b.spec {
+				return b
+			}
+			return nil
+		}
+		return b
 	}
 	if id.Obj != nil {
-		if spec, ok := id.Obj.Decl.(*ast.ValueSpec); ok && spec == b.spec {
+		return nil
+	}
+	for _, dir := range ix.dotDirs(f) {
+		if b := ix.bindings[dir][id.Name]; b != nil {
 			return b
-		}
-		return nil
-	}
-	return b
-}
-
-// resolveSelector — связанное имя другого пакета под селектором `пакет.Имя`.
-func (ix *lvIndex) resolveSelector(f *lvFile, sel *ast.SelectorExpr) *lvBinding {
-	x, ok := sel.X.(*ast.Ident)
-	if !ok || x.Obj != nil {
-		return nil
-	}
-	for _, imp := range f.file.Imports {
-		p, err := strconv.Unquote(imp.Path.Value)
-		if err != nil {
-			continue
-		}
-		for _, dir := range ix.dirs {
-			if p != dir && !strings.HasSuffix(p, "/"+dir) {
-				continue
-			}
-			local := ix.pkgNames[dir]
-			if imp.Name != nil {
-				local = imp.Name.Name
-			}
-			if local == x.Name {
-				return ix.bindings[dir][sel.Sel.Name]
-			}
 		}
 	}
 	return nil
 }
 
-// fold — свёрнутое значение строкового выражения из литералов и связанных имён.
-func (ix *lvIndex) fold(f *lvFile, e ast.Expr) (string, bool) {
+// resolveSelector — связанное имя другого пакета под селектором `пакет.Имя`.
+func (ix *lvIndex) resolveSelector(f *lvFile, sel *ast.SelectorExpr) *lvBinding {
+	if dir := ix.importDir(f, sel.X); dir != "" {
+		return ix.bindings[dir][sel.Sel.Name]
+	}
+	return nil
+}
+
+// localConst — значение константы, объявленной внутри функции, либо nil.
+func (ix *lvIndex) localConst(id *ast.Ident) ast.Expr {
+	if id.Obj == nil || id.Obj.Kind != ast.Con {
+		return nil
+	}
+	spec, ok := id.Obj.Decl.(*ast.ValueSpec)
+	if !ok {
+		return nil
+	}
+	values := ix.consts[spec]
+	for i, n := range spec.Names {
+		if n.Name == id.Name && i < len(values) {
+			return values[i]
+		}
+	}
+	return nil
+}
+
+// isConversion — вызываемое есть тип строки либо среза байтов: `string`,
+// `[]byte`, `[]rune`, тип корпуса (своего пакета, локальный, другого пакета).
+func (ix *lvIndex) isConversion(f *lvFile, fun ast.Expr) bool {
+	switch t := fun.(type) {
+	case *ast.ParenExpr:
+		return ix.isConversion(f, t.X)
+	case *ast.ArrayType:
+		id, ok := t.Elt.(*ast.Ident)
+		return ok && t.Len == nil && (id.Name == "byte" || id.Name == "rune")
+	case *ast.Ident:
+		if t.Obj != nil {
+			return t.Obj.Kind == ast.Typ
+		}
+		if ix.types[f.dir][t.Name] {
+			return true
+		}
+		for _, dir := range ix.dotDirs(f) {
+			if ix.types[dir][t.Name] {
+				return true
+			}
+		}
+		_, fn := ix.funcs[f.dir][t.Name]
+		return t.Name == "string" && !fn && ix.bindings[f.dir]["string"] == nil
+	case *ast.SelectorExpr:
+		if dir := ix.importDir(f, t.X); dir != "" {
+			return ix.types[dir][t.Sel.Name]
+		}
+	}
+	return false
+}
+
+// fold — свёрнутое значение строкового выражения: литералы, склейка, константы
+// и связанные имена, приведения к строковому типу.
+func (ix *lvIndex) fold(f *lvFile, e ast.Expr) (string, bool) { return ix.foldDepth(f, e, 0) }
+
+func (ix *lvIndex) foldDepth(f *lvFile, e ast.Expr, depth int) (string, bool) {
+	if depth > 64 {
+		return "", false
+	}
 	switch n := e.(type) {
 	case *ast.BasicLit:
 		if n.Kind != token.STRING {
@@ -245,25 +367,35 @@ func (ix *lvIndex) fold(f *lvFile, e ast.Expr) (string, bool) {
 		v, err := strconv.Unquote(n.Value)
 		return v, err == nil
 	case *ast.ParenExpr:
-		return ix.fold(f, n.X)
+		return ix.foldDepth(f, n.X, depth+1)
 	case *ast.BinaryExpr:
 		if n.Op != token.ADD {
 			return "", false
 		}
-		l, lok := ix.fold(f, n.X)
-		r, rok := ix.fold(f, n.Y)
+		l, lok := ix.foldDepth(f, n.X, depth+1)
+		r, rok := ix.foldDepth(f, n.Y, depth+1)
 		return l + r, lok && rok
 	case *ast.Ident:
-		if b := ix.resolve(f, n); b != nil && b.foldable {
-			return b.folded, true
+		if b := ix.resolve(f, n); b != nil {
+			return b.folded, b.foldable
+		}
+		if v := ix.localConst(n); v != nil {
+			return ix.foldDepth(f, v, depth+1)
 		}
 	case *ast.SelectorExpr:
-		if b := ix.resolveSelector(f, n); b != nil && b.foldable {
-			return b.folded, true
+		if b := ix.resolveSelector(f, n); b != nil {
+			return b.folded, b.foldable
+		}
+	case *ast.CallExpr:
+		if len(n.Args) == 1 && ix.isConversion(f, n.Fun) {
+			return ix.foldDepth(f, n.Args[0], depth+1)
 		}
 	}
 	return "", false
 }
+
+// namesTable — значение называет таблицу по грамматике SQL.
+func (ix *lvIndex) namesTable(v string) bool { return SQLNamesRelation(v, ix.relation) }
 
 // lvNaming — упоминание таблицы: где и какой формой.
 type lvNaming struct {
@@ -284,7 +416,7 @@ func (ix *lvIndex) namings(f *lvFile, root ast.Node) []lvNaming {
 			if !ok {
 				return true
 			}
-			if !ix.tableWord.MatchString(v) {
+			if !ix.namesTable(v) {
 				// Свёрнутое значение таблицы не называет (имя ограничения), но
 				// звено внутри может быть связанным именем владельца — оно судится
 				// само: константа владельца за его файл не выходит ни в каком виде.
@@ -298,7 +430,11 @@ func (ix *lvIndex) namings(f *lvFile, root ast.Node) []lvNaming {
 			return false
 		case *ast.Ident:
 			if b := ix.resolve(f, e); b != nil && b.bearing {
-				out = append(out, lvNaming{pos: e.Pos(), form: formBinding, via: b.file.dir + "." + b.name})
+				form := formBinding
+				if b.file.dir != f.dir {
+					form = formForeign // импорт с точкой
+				}
+				out = append(out, lvNaming{pos: e.Pos(), form: form, via: b.file.dir + "." + b.name})
 			}
 		case *ast.SelectorExpr:
 			if b := ix.resolveSelector(f, e); b != nil && b.bearing {
@@ -328,54 +464,6 @@ func isAccessor(e ast.Expr, accessor string) bool {
 	return ok && sel.Sel.Name == accessor
 }
 
-// carriesMaterial — значение выражения несёт материал: сам выход, его
-// приведение к строке либо срезу байтов, склейка, составной литерал с ним.
-// Непрозрачный вызов не несёт: несёт его результат, а не аргумент.
-func carriesMaterial(e ast.Expr, accessor string) bool {
-	switch n := e.(type) {
-	case *ast.SelectorExpr:
-		return n.Sel.Name == accessor
-	case *ast.CallExpr:
-		if isAccessor(n.Fun, accessor) {
-			return true
-		}
-		if isConversion(n.Fun) && len(n.Args) == 1 {
-			return carriesMaterial(n.Args[0], accessor)
-		}
-		return false
-	case *ast.ParenExpr:
-		return carriesMaterial(n.X, accessor)
-	case *ast.BinaryExpr:
-		return n.Op == token.ADD && (carriesMaterial(n.X, accessor) || carriesMaterial(n.Y, accessor))
-	case *ast.UnaryExpr:
-		return n.Op == token.AND && carriesMaterial(n.X, accessor)
-	case *ast.CompositeLit:
-		for _, el := range n.Elts {
-			if kv, ok := el.(*ast.KeyValueExpr); ok {
-				el = kv.Value
-			}
-			if carriesMaterial(el, accessor) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// isConversion — приведение к строке либо к срезу байтов.
-func isConversion(fun ast.Expr) bool {
-	switch t := fun.(type) {
-	case *ast.Ident:
-		return t.Name == "string"
-	case *ast.ArrayType:
-		id, ok := t.Elt.(*ast.Ident)
-		return ok && t.Len == nil && (id.Name == "byte" || id.Name == "rune")
-	case *ast.ParenExpr:
-		return isConversion(t.X)
-	}
-	return false
-}
-
 // declLabel — чем назвать объявление в находке: функция либо переменная пакета.
 func declLabel(decl ast.Decl) string {
 	switch d := decl.(type) {
@@ -397,41 +485,97 @@ func declLabel(decl ast.Decl) string {
 	return "объявление уровня файла"
 }
 
-// returnsString — среди результатов функции есть строка (в любом составе).
-func returnsString(fn *ast.FuncDecl) bool {
-	if fn.Type.Results == nil {
-		return false
+// indexFile — объявления файла в индекс: связанные имена, типы, функции,
+// методы, действующие значения констант (включая объявленные внутри функций).
+func (ix *lvIndex) indexFile(f *lvFile) {
+	if _, seen := ix.pkgNames[f.dir]; !seen {
+		ix.pkgNames[f.dir] = f.file.Name.Name
+		ix.dirs = append(ix.dirs, f.dir)
+		ix.bindings[f.dir] = map[string]*lvBinding{}
+		ix.types[f.dir] = map[string]bool{}
+		ix.funcs[f.dir] = map[string]lvFunc{}
+		ix.methods[f.dir] = map[string]map[string]lvFunc{}
 	}
-	found := false
-	for _, r := range fn.Type.Results.List {
-		ast.Inspect(r.Type, func(n ast.Node) bool {
-			if id, ok := n.(*ast.Ident); ok && id.Name == "string" {
-				found = true
+	ast.Inspect(f.file, func(n ast.Node) bool {
+		gd, ok := n.(*ast.GenDecl)
+		if !ok || gd.Tok != token.CONST {
+			return true
+		}
+		var prev []ast.Expr
+		for _, s := range gd.Specs {
+			vs := s.(*ast.ValueSpec)
+			if len(vs.Values) > 0 {
+				prev = vs.Values
 			}
-			return !found
-		})
+			ix.consts[vs] = prev
+		}
+		return true
+	})
+	for _, decl := range f.file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			fn := lvFunc{decl: d, file: f}
+			if d.Recv == nil {
+				ix.funcs[f.dir][d.Name.Name] = fn
+				continue
+			}
+			recvType, _ := receiverTypeName(d)
+			if ix.methods[f.dir][recvType] == nil {
+				ix.methods[f.dir][recvType] = map[string]lvFunc{}
+			}
+			ix.methods[f.dir][recvType][d.Name.Name] = fn
+		case *ast.GenDecl:
+			switch d.Tok {
+			case token.TYPE:
+				for _, s := range d.Specs {
+					ix.types[f.dir][s.(*ast.TypeSpec).Name.Name] = true
+				}
+			case token.CONST, token.VAR:
+				for _, s := range d.Specs {
+					vs := s.(*ast.ValueSpec)
+					values := vs.Values
+					if d.Tok == token.CONST {
+						values = ix.consts[vs]
+					}
+					for i, name := range vs.Names {
+						// Имя без значения тоже записывается: присваивание переменной
+						// пакета судится по имени, а не по инициализатору.
+						var value ast.Expr
+						if i < len(values) {
+							value = values[i]
+						}
+						if name.Name == "_" {
+							continue
+						}
+						ix.bindings[f.dir][name.Name] = &lvBinding{name: name.Name, spec: vs, value: value, file: f}
+					}
+				}
+			}
+		}
 	}
-	return found
 }
 
 // AuditLoginVerifierContainment — находки и перепись по корпусу не-тестовых
 // файлов. Корпус и объявление приходят ПАРАМЕТРАМИ: инъекция обязана подать
 // разбору синтетику, а не это дерево.
 func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([]string, LoginVerifierCensus, error) {
-	c := LoginVerifierCensus{AllowedUses: map[string]int{}, TableNamings: map[string]int{}}
+	c := LoginVerifierCensus{AllowedUses: map[string]int{}, TableNamings: map[string]int{}, ConsumerUses: map[string]int{}}
 	for f := range spec.AllowedFiles {
 		c.AllowedUses[f] = 0
+	}
+	for k := range spec.OpaqueConsumers {
+		c.ConsumerUses[k] = 0
 	}
 	if spec.Accessor == "" || spec.Table == "" || spec.DeclRel == "" || spec.DeclType == "" || spec.TableOwnerRel == "" {
 		return nil, c, fmt.Errorf("объявление предмета неполно (%+v) — судить нечего", spec)
 	}
-	tableWord, err := regexp.Compile(`(^|[^A-Za-z0-9_])` + regexp.QuoteMeta(spec.Table) + `($|[^A-Za-z0-9_])`)
-	if err != nil {
-		return nil, c, fmt.Errorf("имя таблицы %q не образует предиката: %w", spec.Table, err)
-	}
 
-	// Проход первый: разбор и связанные имена по каталогу пакета.
-	ix := &lvIndex{tableWord: tableWord, bindings: map[string]map[string]*lvBinding{}, pkgNames: map[string]string{}}
+	// Проход первый: разбор и индекс по каталогу пакета.
+	ix := &lvIndex{
+		relation: spec.Table, bindings: map[string]map[string]*lvBinding{}, pkgNames: map[string]string{},
+		types: map[string]map[string]bool{}, funcs: map[string]map[string]lvFunc{},
+		methods: map[string]map[string]map[string]lvFunc{}, consts: map[*ast.ValueSpec][]ast.Expr{},
+	}
 	var files []*lvFile
 	for _, rel := range corpus.Rels() {
 		c.FilesRead++
@@ -443,32 +587,7 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 		c.FilesParsed++
 		f := &lvFile{rel: rel, dir: path.Dir(rel), fset: fset, file: file}
 		files = append(files, f)
-		if _, seen := ix.pkgNames[f.dir]; !seen {
-			ix.pkgNames[f.dir] = file.Name.Name
-			ix.dirs = append(ix.dirs, f.dir)
-			ix.bindings[f.dir] = map[string]*lvBinding{}
-		}
-		for _, decl := range file.Decls {
-			gd, ok := decl.(*ast.GenDecl)
-			if !ok || (gd.Tok != token.CONST && gd.Tok != token.VAR) {
-				continue
-			}
-			for _, s := range gd.Specs {
-				vs := s.(*ast.ValueSpec)
-				for i, name := range vs.Names {
-					// Имя без значения тоже записывается: присваивание материала
-					// переменной пакета судится по имени, а не по инициализатору.
-					var value ast.Expr
-					if i < len(vs.Values) {
-						value = vs.Values[i]
-					}
-					if name.Name == "_" {
-						continue
-					}
-					ix.bindings[f.dir][name.Name] = &lvBinding{name: name.Name, spec: vs, value: value, file: f}
-				}
-			}
-		}
+		ix.indexFile(f)
 	}
 	sort.Strings(ix.dirs)
 
@@ -503,7 +622,7 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 	}
 	sort.Strings(c.Bindings)
 
-	// Проход второй: находки.
+	// Проход второй: правила 1 и 2 и переменная пакета, обращающаяся к выходу.
 	var findings []string
 	var declWhere []string
 	for _, f := range files {
@@ -511,34 +630,12 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 		_, allowed := spec.AllowedFiles[f.rel]
 
 		for _, decl := range f.file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			if fn.Recv != nil && fn.Name.Name == spec.Accessor {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv != nil && fn.Name.Name == spec.Accessor {
 				c.AccessorDecls++
 				// Разбор получателя — общий с соседним гейтом (`provider_road_wire_guard.go`):
 				// вторая копия одного разбора разошлась бы с первой молча.
 				recvType, _ := receiverTypeName(fn)
 				declWhere = append(declWhere, fmt.Sprintf("%s (получатель %s)", f.rel, recvType))
-			}
-			if f.rel == spec.TableOwnerRel && fn.Body != nil && returnsString(fn) {
-				ast.Inspect(fn.Body, func(n ast.Node) bool {
-					ret, ok := n.(*ast.ReturnStmt)
-					if !ok {
-						return true
-					}
-					for _, r := range ret.Results {
-						if len(ix.namings(f, r)) > 0 {
-							findings = append(findings, fmt.Sprintf(
-								"%s:%d: владелец отдаёт имя таблицы секрета `%s` наружу функцией `%s` — её "+
-									"вызывающие называют таблицу мимо адаптера, и второе правило гейта их не видит",
-								f.rel, line(ret.Pos()), spec.Table, fn.Name.Name))
-							return false
-						}
-					}
-					return true
-				})
 			}
 		}
 
@@ -559,7 +656,6 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 				f.rel, line(nm.pos), spec.Table, spec.TableOwnerRel, nm.form, via))
 		}
 
-		// Выход: обращение вне разрешённого файла; вынос из разрешённого.
 		for _, decl := range f.file.Decls {
 			gd, ok := decl.(*ast.GenDecl)
 			if !ok || !allowed || (gd.Tok != token.VAR && gd.Tok != token.CONST) {
@@ -587,59 +683,68 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 		for _, decl := range f.file.Decls {
 			where := declLabel(decl)
 			ast.Inspect(decl, func(n ast.Node) bool {
-				switch node := n.(type) {
-				case *ast.SelectorExpr:
-					if node.Sel.Name != spec.Accessor {
-						return true
-					}
-					c.AccessorUses++
-					if allowed {
-						c.AllowedUses[f.rel]++
-						return true
-					}
-					findings = append(findings, fmt.Sprintf(
-						"%s:%d: материал способа входа выведен из своего типа обращением к `%s` вне "+
-							"разрешённых файлов (%s). Дальше он строка, и её ничто не мешает положить в "+
-							"поле контракта, нагрузку аудита, журнал либо уведомление базы. Разрешение "+
-							"даётся ФАЙЛУ с названной причиной и держится этим гейтом",
-						f.rel, line(node.Pos()), spec.Accessor, where))
-				case *ast.ReturnStmt:
-					if !allowed {
-						return true
-					}
-					for _, r := range node.Results {
-						if carriesMaterial(r, spec.Accessor) {
-							findings = append(findings, fmt.Sprintf(
-								"%s:%d: возврат выносит материал из разрешённого файла (%s) — вызывающие "+
-									"получают строку мимо гейта", f.rel, line(node.Pos()), where))
-							break
-						}
-					}
-				case *ast.AssignStmt:
-					if !allowed {
-						return true
-					}
-					for i, lhs := range node.Lhs {
-						id, ok := lhs.(*ast.Ident)
-						if !ok || i >= len(node.Rhs) || ix.resolve(f, id) == nil {
-							continue
-						}
-						if carriesMaterial(node.Rhs[i], spec.Accessor) {
-							findings = append(findings, fmt.Sprintf(
-								"%s:%d: материал присвоен переменной пакета `%s` (%s) — её читатели "+
-									"получают его мимо разрешённого файла", f.rel, line(node.Pos()), id.Name, where))
-						}
-					}
-				case *ast.SendStmt:
-					if allowed && carriesMaterial(node.Value, spec.Accessor) {
-						findings = append(findings, fmt.Sprintf(
-							"%s:%d: материал отправлен в канал (%s) — получатель берёт его мимо "+
-								"разрешённого файла", f.rel, line(node.Pos()), where))
-					}
+				sel, ok := n.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != spec.Accessor {
+					return true
 				}
+				c.AccessorUses++
+				if allowed {
+					c.AllowedUses[f.rel]++
+					return true
+				}
+				findings = append(findings, fmt.Sprintf(
+					"%s:%d: материал способа входа выведен из своего типа обращением к `%s` вне "+
+						"разрешённых файлов (%s). Дальше он строка, и её ничто не мешает положить в "+
+						"поле контракта, нагрузку аудита, журнал либо уведомление базы. Разрешение "+
+						"даётся ФАЙЛУ с названной причиной и держится этим гейтом",
+					f.rel, line(sel.Pos()), spec.Accessor, where))
 				return true
 			})
 		}
+	}
+
+	// Правило 3: вынос материала из разрешённых файлов и имени из файла-владельца.
+	allowedSet := map[string]bool{}
+	for rel := range spec.AllowedFiles {
+		allowedSet[rel] = true
+	}
+	material := lvSubject{noun: "материал", keep: allowedSet, isSource: func(_ *lvFile, e ast.Expr) bool {
+		switch n := e.(type) {
+		case *ast.SelectorExpr:
+			return n.Sel.Name == spec.Accessor
+		case *ast.CallExpr:
+			return isAccessor(lvCallee(n.Fun), spec.Accessor)
+		}
+		return false
+	}}
+	name := lvSubject{noun: "имя таблицы секрета", suffix: "о", keep: map[string]bool{spec.TableOwnerRel: true},
+		isSource: func(f *lvFile, e ast.Expr) bool {
+			switch n := e.(type) {
+			case *ast.BasicLit, *ast.BinaryExpr:
+				v, ok := ix.fold(f, n)
+				return ok && ix.namesTable(v)
+			case *ast.Ident:
+				if b := ix.resolve(f, n); b != nil {
+					return b.bearing
+				}
+				if v := ix.localConst(n); v != nil {
+					s, ok := ix.fold(f, v)
+					return ok && ix.namesTable(s)
+				}
+			case *ast.SelectorExpr:
+				if b := ix.resolveSelector(f, n); b != nil {
+					return b.bearing
+				}
+			}
+			return false
+		}}
+	var mUsed, nUsed map[string]int
+	var mFind, nFind []string
+	mFind, c.Material, mUsed = lvRunFlow(ix, files, material, spec.OpaqueConsumers)
+	nFind, c.Name, nUsed = lvRunFlow(ix, files, name, spec.OpaqueConsumers)
+	findings = append(append(findings, mFind...), nFind...)
+	for k := range spec.OpaqueConsumers {
+		c.ConsumerUses[k] = mUsed[k] + nUsed[k]
 	}
 
 	switch {
@@ -661,12 +766,7 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 		return nil, c, fmt.Errorf("владелец таблицы %s не называет её ни разу (упоминаний по дереву %d) — "+
 			"правило второго читателя ослепло, не покраснев", spec.TableOwnerRel, total)
 	}
-	files2 := make([]string, 0, len(spec.AllowedFiles))
-	for f := range spec.AllowedFiles {
-		files2 = append(files2, f)
-	}
-	sort.Strings(files2)
-	for _, f := range files2 {
+	for _, f := range lvSortedKeys(spec.AllowedFiles) {
 		if c.AllowedUses[f] == 0 {
 			findings = append(findings, fmt.Sprintf(
 				"разрешение файлу %s («%s») без предмета: выход там не используется ни разу. "+
@@ -675,6 +775,24 @@ func AuditLoginVerifierContainment(corpus TreeCorpus, spec LoginVerifierSpec) ([
 				f, spec.AllowedFiles[f]))
 		}
 	}
+	for _, k := range lvSortedKeys(spec.OpaqueConsumers) {
+		if c.ConsumerUses[k] == 0 {
+			findings = append(findings, fmt.Sprintf(
+				"потребитель «%s» («%s») объявлен без предмета: ни материал, ни имя таблицы этому вызову "+
+					"не отданы. Объявление, которому нечего разрешать, есть место, куда вызов вносят "+
+					"незамеченным, — снимается вместе с предметом",
+				k, spec.OpaqueConsumers[k]))
+		}
+	}
 	sort.Strings(findings)
 	return findings, c, nil
+}
+
+func lvSortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

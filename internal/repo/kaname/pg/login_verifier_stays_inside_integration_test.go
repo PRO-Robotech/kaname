@@ -64,9 +64,17 @@
 //     порождённые колонки, функции со стандартным телом SQL. Законно одно —
 //     проверка непустоты материала;
 //   - ИСПОЛЬЗУЮЩИЕ ТИП СТРОКИ таблицы — значение этого типа несёт материал;
-//   - ПОДПРОГРАММЫ, чей текст называет таблицу (без комментариев), — их
-//     исполняет не писатель, а тот, кто их зовёт: триггер соседней таблицы,
-//     событийный триггер;
+//   - ПОДПРОГРАММЫ, чей текст называет таблицу, — их исполняет не писатель, а
+//     тот, кто их зовёт: триггер соседней таблицы, событийный триггер. Текст
+//     судит ГРАММАТИКОЙ SQL общий распознаватель `internal/check`
+//     `SQLRoutineNamesRelation` — тот же, что у гейта дерева Go; перечень
+//     написаний выведен из лексики Postgres и стоит в его шапке: имя без
+//     кавычек в любом регистре, в кавычках побайтово, `U&"…"` с UESCAPE, со
+//     схемой и без (путь поиска), `ONLY`, псевдоним; внутри строки — `EXECUTE`,
+//     `'…'::regclass`, аргумент `format`, E-, U&-, долларовая строка,
+//     продолжение, склейка `||`. Комментарии не судятся. Текст на языке, чья
+//     грамматика распознавателю неизвестна, судится без неё — лишней находкой,
+//     не пропуском;
 //   - ПУБЛИКАЦИИ логической репликации, захватывающие таблицу, — по таблице,
 //     по схеме либо все таблицы.
 //
@@ -82,8 +90,13 @@
 //     читает журнал упреждающей записи мимо публикаций. Посадка пробы работает с
 //     `wal_level=replica`, слот в ней не заводится, и опытом это не доказуемо —
 //     это предмет конфигурации сервера;
-//   - имя таблицы, собранное подпрограммой ВО ВРЕМЯ ИСПОЛНЕНИЯ (`EXECUTE` со
-//     склейкой частей): текст подпрограммы его не содержит;
+//   - имя таблицы, собранное подпрограммой ВО ВРЕМЯ ИСПОЛНЕНИЯ — склейкой с
+//     переменной, `lower(…)`, выбором по oid из каталога: текст подпрограммы его
+//     не содержит. Склейка строковых КОНСТАНТ через `||` сюда не относится — её
+//     распознаватель складывает;
+//   - аргумент `format('%I', …)`: `%I` берёт имя в кавычки, и
+//     `format('%I', 'USER_LOGIN_METHODS')` называет ДРУГОЕ отношение — гейт
+//     найдёт в нём таблицу. Ошибка в сторону лишней находки, не пропуска;
 //   - физическая копия (резервная копия, журнал): у неё тот же читатель, что у
 //     самой таблицы;
 //   - путь кода Go до базы: его держит гейт дерева `internal/check`
@@ -91,13 +104,16 @@
 //
 // Способность упасть доказана инъекцией — `TestLoginVerifierContainmentGateInjection`:
 // у каждой формы обеих осей своя сцена, у каждого правила — законный близнец.
+// Сцены написаний (`lmSpellingInjections`) решают не чтением текста: триггер
+// соседней таблицы читает материал испытуемым написанием, и слушатель получает
+// метку, только если БАЗА разрешила написание в таблицу секрета; у близнеца —
+// пустое значение из отношения-двойника.
 package pg_test
 
 import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -107,6 +123,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/PRO-Robotech/kaname/internal/check"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
@@ -115,8 +132,12 @@ import (
 // содержимым схемы она не может, поэтому любое её вхождение — копия материала.
 const lmSentinel = "$2a$12$LMSTAYSINSIDE.sentinel.f2p1.copy.is.a.leak"
 
-// lmSecretHome — единственное законное место материала.
-const lmSecretHome = "kaname.user_login_methods.verifier"
+// lmSecretHome — единственное законное место материала; lmSecretTable — имя его
+// таблицы, каким его хранит каталог.
+const (
+	lmSecretHome  = "kaname.user_login_methods.verifier"
+	lmSecretTable = "user_login_methods"
+)
 
 // lmDeclaredConstraints — объявленный набор ограничений таблицы секрета.
 // Набор ЗАКРЫТ: ограничение, заведённое позже, исполняет своё выражение при
@@ -151,6 +172,7 @@ type lmContainment struct {
 	ColumnDependents   []string
 	RowtypeDependents  []string
 	RoutinesRead       int
+	RoutinesSQL        int // из них судились грамматикой SQL (sql, plpgsql)
 	NamingRoutines     []string
 	Publications       []string
 }
@@ -198,12 +220,13 @@ func (c lmContainment) Census() string {
 	return fmt.Sprintf("перепись: отношений осмотрено по видам [%s], без данных %d, колонок %d; метка найдена в %d местах; "+
 		"строк статистики таблицы секрета %d, выборок с меткой %d; триггеров: пользовательских %d, ссылочной целостности %d; "+
 		"правил %d; политик %d; ограничений объявленных %d из %d, чужих %d; доменных колонок %d; зависимых от колонки материала "+
-		"сверх законного %d; использующих тип строки %d; подпрограмм прочитано %d, называющих таблицу %d; публикаций %d",
+		"сверх законного %d; использующих тип строки %d; подпрограмм прочитано %d (грамматикой SQL %d, без грамматики %d), "+
+		"называющих таблицу %d; публикаций %d",
 		strings.Join(kinds, " "), len(c.Unpopulated), c.ScannedColumns, len(c.Hits),
 		c.StatRows, len(c.StatHits), len(c.UserTriggers), c.InternalTriggers,
 		len(c.Rules), len(c.Policies), c.DeclaredSeen, len(lmDeclaredConstraints), len(c.ForeignConstraints),
 		len(c.DomainColumns), len(c.ColumnDependents), len(c.RowtypeDependents),
-		c.RoutinesRead, len(c.NamingRoutines), len(c.Publications))
+		c.RoutinesRead, c.RoutinesSQL, c.RoutinesRead-c.RoutinesSQL, len(c.NamingRoutines), len(c.Publications))
 }
 
 // lmRequireCensus — премисы: каждое правило читало каталог. Без них «нарушений
@@ -220,6 +243,8 @@ func lmRequireCensus(t *testing.T, c lmContainment) {
 	require.Equal(t, len(lmDeclaredConstraints), c.DeclaredSeen,
 		"объявленные ограничения не найдены все — правило ограничений не читает каталог")
 	require.NotZero(t, c.RoutinesRead, "подпрограмм прочитано ноль — правило подпрограмм беспредметно")
+	require.NotZero(t, c.RoutinesSQL,
+		"грамматикой SQL не судилась ни одна подпрограмма — выбор грамматики по языку не читает каталог языков")
 }
 
 // lmQueryStrings — один столбец строк.
@@ -393,18 +418,29 @@ func lmScanContainment(t *testing.T, pool *pgxpool.Pool, needle string) lmContai
 		   AND d.deptype <> 'i'
 		 ORDER BY 1`)
 
+	// Текст подпрограммы судит ОБЩИЙ распознаватель имени отношения
+	// (`internal/check/sql_relation_name.go`) — тот же, что у гейта дерева Go:
+	// регистр имени без кавычек, имя в кавычках, U&, имя внутри строки
+	// динамического SQL и разбора имени. Язык выбирает грамматику: текст на
+	// языке, чья грамматика распознавателю неизвестна, судится без неё.
 	prows, err := pool.Query(ctx, `
-		SELECT p.oid::regprocedure::text, coalesce(p.prosrc, ''), coalesce(pg_get_function_sqlbody(p.oid), '')
-		  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+		SELECT p.oid::regprocedure::text, l.lanname::text,
+		       coalesce(p.prosrc, ''), coalesce(pg_get_function_sqlbody(p.oid), '')
+		  FROM pg_proc p
+		  JOIN pg_namespace n ON n.oid = p.pronamespace
+		  JOIN pg_language l ON l.oid = p.prolang
 		 WHERE `+lmUserSchemas+`
 		 ORDER BY 1`)
 	require.NoError(t, err)
-	tableWord := regexp.MustCompile(`(^|[^A-Za-z0-9_])user_login_methods($|[^A-Za-z0-9_])`)
 	for prows.Next() {
-		var name, src, body string
-		require.NoError(t, prows.Scan(&name, &src, &body))
+		var name, lang, src, body string
+		require.NoError(t, prows.Scan(&name, &lang, &src, &body))
 		c.RoutinesRead++
-		if tableWord.MatchString(lmStripSQLComments(src)) || tableWord.MatchString(lmStripSQLComments(body)) {
+		names, grammar := check.SQLRoutineNamesRelation(lang, src, lmSecretTable)
+		if grammar {
+			c.RoutinesSQL++
+		}
+		if names || check.SQLNamesRelation(body, lmSecretTable) {
 			c.NamingRoutines = append(c.NamingRoutines, name)
 		}
 	}
@@ -415,88 +451,6 @@ func lmScanContainment(t *testing.T, pool *pgxpool.Pool, needle string) lmContai
 		SELECT DISTINCT pubname::text FROM pg_publication_tables
 		 WHERE schemaname = 'kaname' AND tablename = 'user_login_methods' ORDER BY 1`)
 	return c
-}
-
-// lmDollarTag — метка строки в долларах: пустая либо идентификатор, не
-// начинающийся с цифры (`$1` меткой не является).
-var lmDollarTag = regexp.MustCompile(`^\$([A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*)?\$`)
-
-// lmStripSQLComments снимает комментарии SQL и PL/pgSQL, оставляя строки: в
-// строке живёт динамический SQL, и он — исполняемая часть, а не пояснение.
-// Знает строку в одинарных кавычках (и E-строку с обратной косой), имя в
-// двойных кавычках, строку в долларах с меткой и вложенный блочный комментарий.
-func lmStripSQLComments(src string) string {
-	var b strings.Builder
-	for i := 0; i < len(src); {
-		switch {
-		case strings.HasPrefix(src[i:], "--"):
-			for i < len(src) && src[i] != '\n' {
-				i++
-			}
-		case strings.HasPrefix(src[i:], "/*"):
-			depth := 0
-			for i < len(src) {
-				if strings.HasPrefix(src[i:], "/*") {
-					depth++
-					i += 2
-					continue
-				}
-				if strings.HasPrefix(src[i:], "*/") {
-					depth--
-					i += 2
-					if depth == 0 {
-						break
-					}
-					continue
-				}
-				i++
-			}
-			b.WriteByte(' ')
-		case src[i] == '\'' || src[i] == '"':
-			q := src[i]
-			escapes := q == '\'' && i > 0 && (src[i-1] == 'E' || src[i-1] == 'e')
-			b.WriteByte(q)
-			i++
-			for i < len(src) {
-				ch := src[i]
-				b.WriteByte(ch)
-				i++
-				if escapes && ch == '\\' && i < len(src) {
-					b.WriteByte(src[i])
-					i++
-					continue
-				}
-				if ch == q {
-					if i < len(src) && src[i] == q {
-						b.WriteByte(q)
-						i++
-						continue
-					}
-					break
-				}
-			}
-		case src[i] == '$':
-			tag := lmDollarTag.FindString(src[i:])
-			if tag == "" {
-				// `$1` — параметр, а не начало строки в долларах.
-				b.WriteByte(src[i])
-				i++
-				continue
-			}
-			closing := strings.Index(src[i+len(tag):], tag)
-			if closing < 0 {
-				b.WriteString(src[i:])
-				i = len(src)
-				continue
-			}
-			b.WriteString(src[i : i+len(tag)+closing+len(tag)])
-			i += len(tag) + closing + len(tag)
-		default:
-			b.WriteByte(src[i])
-			i++
-		}
-	}
-	return b.String()
 }
 
 // lmWriteSentinel пишет метку НАСТОЯЩИМ путём адаптера — предмет гейта есть то,
