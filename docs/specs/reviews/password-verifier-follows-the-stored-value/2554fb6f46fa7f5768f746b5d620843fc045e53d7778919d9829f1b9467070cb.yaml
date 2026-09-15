@@ -38,8 +38,12 @@ reviewed_at: '2026-09-16'
 
 # ─── ОДОБРЕНИЕ ВЕРДИКТА — НЕ САНКЦИЯ; САНКЦИЮ ВЫДАЁТ ВНЕШНЕЕ СОБЫТИЕ ───────────
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-15T23:12:38Z'
+  ban1_lifted: true
+  ban1_lifted_note: >-
+    Санкция наступила в момент внешнего события (event ниже), а не в момент вынесения
+    вердикта роли. Текст рецензента ниже сохранён как был; флаги переключены публикацией.
   why: >-
     Вердикт круга 3 — APPROVED: блокирующих ноль. Три блокирующих круга 2 (Б5 — с круга 1, Б7,
     Б8) закрыты по существу, и каждое проверено ПОВТОРОМ того самого опыта, которым найдено, с
@@ -72,18 +76,33 @@ authority:
   allowlisted_for_role: false
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось», а не «да». Внешнего события, связывающего отпечаток,
-    роль и вердикт, этим кругом не создавалось: его публикует оркестратор. Для APPROVED это
-    означает, что вердикт роли вынесен, а санкция (снятие запрета #1) наступит отдельным
-    событием — не раньше и не вместо.
+  type: issue_comment
+  status: performed
+  database_id: 5689367515
+  node_id: IC_kwDOTZqgWM8AAAABUxzb2w
+  url: https://github.com/PRO-Robotech/kacho/issues/1268#issuecomment-5689367515
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5689367515
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1268
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-15T23:12:38Z'
+  body_sha256: 94eb38459681de5b7fa7ddcdaa68113a66f17d94d71516395701fce1c0ac84a7
+  subject_sha256: 2554fb6f46fa7f5768f746b5d620843fc045e53d7778919d9829f1b9467070cb
+  subject_revision: dec9f53d65677113b2a7b8296a90462f8296f6a5
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; запись рецензента задним числом
+    не правилась, её прежнее состояние («не выполнилось») остаётся в истории. Отпечаток
+    предмета сверен перед публикацией (sha256sum файла на dec9f53d) и совпал с объявленным.
+    Отпечаток тела снят с сырого ответа API.
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: null
-  publication_mode: null
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
 
 scope:
