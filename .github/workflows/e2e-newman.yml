@@ -568,6 +568,7 @@ jobs:
             --service iam-system-grant-visibility \
             --service iam-rbac-rules-labels \
             --service iam-role-redesign \
+            --service label-revoke-iam \
             --ssl-client-cert ../../.stand/pki/srv.crt \
             --ssl-client-key ../../.stand/pki/srv.key \
             --ssl-extra-ca-certs ../../.stand/pki/ca.crt
