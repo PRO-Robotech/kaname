@@ -2,51 +2,99 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // login_verifier_stays_inside_integration_test.go — ГЕЙТ: проверочный материал
-// способа входа лежит в схеме РОВНО В ОДНОМ месте (фаза Ф2, `kacho#1268`).
+// способа входа лежит в базе РОВНО В ОДНОМ месте, и ни один механизм базы не
+// уносит его оттуда без ведома писателя (фаза Ф2, `kacho#1268`).
 //
 // # Предмет
 //
 // Материал пароля — хеш, созданный прежним поставщиком либо нашей функцией. Его
-// копия в журнале ресурсов, в очереди аудита, в очереди кортежей прав либо в
-// любой таблице, заведённой завтра, живёт своим сроком хранения и уезжает к
-// своему читателю. Хеш не пароль, но перебор офлайн по нему возможен, и срок
-// хранения копии становится сроком, в течение которого это возможно.
+// копия в журнале ресурсов, в очереди аудита, в представлении, в статистике
+// планировщика либо в любой таблице, заведённой завтра, живёт своим сроком
+// хранения и уезжает к своему читателю. Хеш не пароль, но перебор офлайн по нему
+// возможен, и срок хранения копии становится сроком, в течение которого это
+// возможно.
 //
-// # Что гейт судит — ИСХОД, а не объявление
+// # Что гейт судит — ИСХОД, а не объявление. Две оси, у каждой перечень форм
 //
-// Первое правило — ПЕРЕПИСЬ СХЕМЫ ПОСЛЕ ЗАПИСИ. Материал с меткой пишется
-// НАСТОЯЩИМ путём адаптера, после чего каждая текстовая, JSON и двоичная колонка
-// КАЖДОЙ таблицы схемы спрашивается о метке. Перечень таблиц берётся у каталога
-// базы, а не выписывается: таблица, заведённая завтра, попадает под перепись в
-// день появления. Метка обязана найтись ровно в `user_login_methods.verifier` —
-// это положительный контроль: без него «нигде нет» было бы верно и о переписи,
-// не читающей ничего.
+// ОСЬ ПЕРВАЯ — КОПИИ. Материал с меткой пишется НАСТОЯЩИМ путём адаптера двум
+// людям, таблица анализируется (ANALYZE), после чего метку ищут в каждой колонке
+// КАЖДОГО отношения, способного нести копию. Отношения выводятся из каталога по
+// виду `pg_class.relkind`, во всех схемах базы, кроме системных, — таблица,
+// заведённая завтра в любой схеме, попадает под перепись в день появления:
 //
-// Второе правило — ТРИГГЕРОВ НА ТАБЛИЦЕ СЕКРЕТА НЕТ, кроме порождённых ссылочной
-// целостностью. Триггер — единственный механизм базы, исполняющийся в
-// транзакции записи без ведома писателя и видящий строку ЦЕЛИКОМ. Правило
-// строже первого намеренно, и причина измерена инъекцией (г): триггер,
-// отправляющий строку уведомлением, ПЕРЕПИСЬ ТАБЛИЦ НЕ ВИДИТ — уведомление не
-// лежит ни в одной таблице, а уезжает к слушателю. Первое правило этого
-// различить не может by construction; второе — может.
+//	r  обычная таблица             — хранит строки;
+//	p  секционированная таблица    — читается через родителя, секции — тоже r;
+//	m  материализованное представление — хранит результат запроса;
+//	v  представление               — копии не хранит, но ОТДАЁТ материал вторым путём;
+//	f  внешняя таблица             — хранит строки на чужом сервере.
 //
-// # Чего гейт НЕ судит
+// Колонка ЛЮБОГО типа приводится к тексту: копия в составном типе, массиве,
+// JSON — тоже копия; двоичное значение ищется ещё и в шестнадцатеричной форме
+// своего вывода. Остальные виды отношений копию не несут либо несут её через
+// судимое: i/I (индекс) копирует колонки СВОЕЙ таблицы — индекс по колонке
+// материала судит ось вторая, индекс чужой таблицы копирует то, что уже нашла
+// перепись её строк; t (хранилище длинных значений) читается через свою
+// таблицу; S (последовательность) и c (составной тип) строк не хранят.
+//
+// Сверх отношений пользовательских схем — СТАТИСТИКА ПЛАНИРОВЩИКА
+// (`pg_statistic`): после ANALYZE она хранит выборку значений колонки и живёт до
+// следующего анализа, переживая удаление строки. Миграция выключает её сбор для
+// колонки материала (`SET STATISTICS 0`); гейт анализирует таблицу сам и ищет
+// метку в выборках.
+//
+// Метка обязана найтись ровно в `kaname.user_login_methods.verifier` — это
+// положительный контроль: без него «нигде нет» было бы верно и о переписи, не
+// читающей ничего.
+//
+// ОСЬ ВТОРАЯ — МЕХАНИЗМЫ, исполняющиеся без ведома писателя. Перепись копий
+// различить их не может by construction: уведомление, публикация и вызов
+// функции не лежат ни в одной таблице. Каждый — отдельным правилом каталога:
+//
+//   - ТРИГГЕРЫ на таблице секрета, кроме порождённых ссылочной целостностью;
+//   - ПРАВИЛА ПЕРЕЗАПИСИ на ней — `DO ALSO` исполняется в операторе писателя;
+//   - ПОЛИТИКИ СТРОК на ней — их выражение исполняется при записи;
+//   - ОГРАНИЧЕНИЯ сверх объявленного набора — выражение проверки исполняется при
+//     каждой записи (набор ЗАКРЫТ, как и состав колонок);
+//   - ДОМЕННЫЙ ТИП колонки — ограничения домена исполняются со значением;
+//   - ЗАВИСИМЫЕ ОТ КОЛОНКИ материала по каталогу зависимостей (`pg_depend`):
+//     представления, правила других таблиц, индексы, расширенная статистика,
+//     порождённые колонки, функции со стандартным телом SQL. Законно одно —
+//     проверка непустоты материала;
+//   - ИСПОЛЬЗУЮЩИЕ ТИП СТРОКИ таблицы — значение этого типа несёт материал;
+//   - ПОДПРОГРАММЫ, чей текст называет таблицу (без комментариев), — их
+//     исполняет не писатель, а тот, кто их зовёт: триггер соседней таблицы,
+//     событийный триггер;
+//   - ПУБЛИКАЦИИ логической репликации, захватывающие таблицу, — по таблице,
+//     по схеме либо все таблицы.
+//
+// # Чего гейт НЕ судит — границы, названные вслух
 //
 //   - журнал самого сервера базы: сообщение о нарушении ограничения проверки
-//     несёт строку целиком в `DETAIL`, и сервер пишет его в свой журнал.
-//     Достижимо только обходом доменной проверки — вид и материал судит тип до
-//     вставки. Переводчик отказов службы `DETAIL` не читает (`pgmaperr.go`), и
-//     это закреплено `pgmaperr_login_method_test.go`;
+//     несёт строку целиком в `DETAIL`, а журналирование операторов может нести
+//     значения их параметров. Первое достижимо только обходом доменной проверки
+//     — вид и материал судит тип до вставки, переводчик отказов службы `DETAIL`
+//     не читает (`pgmaperr_login_method_test.go`); второе — предмет настроек
+//     сервера в профиле развёртывания, а не схемы;
+//   - слот логического декодирования с модулем, отличным от `pgoutput`: он
+//     читает журнал упреждающей записи мимо публикаций. Посадка пробы работает с
+//     `wal_level=replica`, слот в ней не заводится, и опытом это не доказуемо —
+//     это предмет конфигурации сервера;
+//   - имя таблицы, собранное подпрограммой ВО ВРЕМЯ ИСПОЛНЕНИЯ (`EXECUTE` со
+//     склейкой частей): текст подпрограммы его не содержит;
+//   - физическая копия (резервная копия, журнал): у неё тот же читатель, что у
+//     самой таблицы;
 //   - путь кода Go до базы: его держит гейт дерева `internal/check`
-//     `TestLoginVerifierStaysInside` (единственный выход материала — `Reveal`, и
-//     его вызывающие перечислены).
+//     `TestLoginVerifierStaysInside`.
 //
-// Способность упасть доказана инъекцией — `TestLoginVerifierContainmentGateInjection`.
+// Способность упасть доказана инъекцией — `TestLoginVerifierContainmentGateInjection`:
+// у каждой формы обеих осей своя сцена, у каждого правила — законный близнец.
 package pg_test
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -65,20 +113,47 @@ import (
 const lmSentinel = "$2a$12$LMSTAYSINSIDE.sentinel.f2p1.copy.is.a.leak"
 
 // lmSecretHome — единственное законное место материала.
-const lmSecretHome = "user_login_methods.verifier"
+const lmSecretHome = "kaname.user_login_methods.verifier"
 
-type lmContainment struct {
-	// Где метка найдена: «таблица.колонка» → число строк.
-	Hits map[string]int
-	// Перепись схемы.
-	BaseTables, ScannedTables, ScannedColumns int
-	// Триггеры таблицы секрета.
-	UserTriggers     []string
-	InternalTriggers int
+// lmDeclaredConstraints — объявленный набор ограничений таблицы секрета.
+// Набор ЗАКРЫТ: ограничение, заведённое позже, исполняет своё выражение при
+// каждой записи и требует решения, а не проходит незамеченным.
+var lmDeclaredConstraints = []string{
+	"user_login_methods_pkey",
+	"user_login_methods_user_fk",
+	"user_login_methods_kind_check",
+	"user_login_methods_verifier_check",
 }
 
-// Findings — нарушения обоих правил. Пустой перечень — вердикт, только если
-// метка найдена в своём доме (см. HomeSeen).
+// lmVerifierDependent — единственный законный зависимый от колонки материала.
+const lmVerifierDependent = "user_login_methods_verifier_check"
+
+type lmContainment struct {
+	// Hits — где метка найдена: «схема.отношение.колонка» → строк.
+	Hits map[string]int
+	// Перепись оси копий.
+	Relations      map[string]int // вид отношения → осмотрено
+	Unpopulated    []string       // материализованные представления без данных
+	ScannedColumns int
+	StatRows       int      // строк статистики таблицы секрета — ANALYZE прошёл
+	StatHits       []string // выборки статистики, хранящие метку
+	// Ось механизмов.
+	UserTriggers       []string
+	InternalTriggers   int
+	Rules              []string
+	Policies           []string
+	DeclaredSeen       int
+	ForeignConstraints []string
+	DomainColumns      []string
+	ColumnDependents   []string
+	RowtypeDependents  []string
+	RoutinesRead       int
+	NamingRoutines     []string
+	Publications       []string
+}
+
+// Findings — нарушения обеих осей. Пустой перечень — вердикт, только если
+// метка найдена в своём доме (см. HomeSeen) и перепись не пуста (lmRequireCensus).
 func (c lmContainment) Findings() []string {
 	var out []string
 	for where, n := range c.Hits {
@@ -86,10 +161,24 @@ func (c lmContainment) Findings() []string {
 			out = append(out, fmt.Sprintf("материал найден вне своего дома: %s (строк %d)", where, n))
 		}
 	}
-	for _, tg := range c.UserTriggers {
-		out = append(out, fmt.Sprintf("на таблице секрета стоит триггер %q — он видит строку целиком "+
-			"и исполняется без ведома писателя", tg))
+	for _, s := range c.StatHits {
+		out = append(out, fmt.Sprintf("статистика планировщика (pg_statistic) хранит выборку материала: %s — "+
+			"копия живёт до следующего анализа и переживает удаление строки", s))
 	}
+	add := func(list []string, format string) {
+		for _, x := range list {
+			out = append(out, fmt.Sprintf(format, x))
+		}
+	}
+	add(c.UserTriggers, "на таблице секрета стоит триггер %q — он видит строку целиком и исполняется без ведома писателя")
+	add(c.Rules, "на таблице секрета стоит правило перезаписи %q — оно исполняется в операторе писателя и видит строку")
+	add(c.Policies, "на таблице секрета стоит политика строк %q — её выражение исполняется при записи и видит строку")
+	add(c.ForeignConstraints, "на таблице секрета ограничение %s вне объявленного набора — его выражение исполняется при каждой записи")
+	add(c.DomainColumns, "колонка таблицы секрета доменного типа (%s) — ограничения домена исполняются при записи со значением")
+	add(c.ColumnDependents, "от колонки материала зависит %s — он читает материал помимо адаптера")
+	add(c.RowtypeDependents, "тип строки таблицы секрета использует %s — значение этого типа несёт материал")
+	add(c.NamingRoutines, "подпрограмма %s называет таблицу секрета — её исполняет тот, кто её зовёт, мимо писателя")
+	add(c.Publications, "публикация %q отдаёт таблицу секрета подписчику логической репликации")
 	sort.Strings(out)
 	return out
 }
@@ -98,59 +187,137 @@ func (c lmContainment) Findings() []string {
 func (c lmContainment) HomeSeen() bool { return c.Hits[lmSecretHome] > 0 }
 
 func (c lmContainment) Census() string {
-	return fmt.Sprintf("перепись: базовых таблиц схемы %d, осмотрено таблиц %d, колонок %d; "+
-		"метка найдена в %d местах; триггеров таблицы секрета: пользовательских %d, ссылочной целостности %d",
-		c.BaseTables, c.ScannedTables, c.ScannedColumns, len(c.Hits), len(c.UserTriggers), c.InternalTriggers)
+	kinds := make([]string, 0, len(c.Relations))
+	for k, n := range c.Relations {
+		kinds = append(kinds, fmt.Sprintf("%s=%d", k, n))
+	}
+	sort.Strings(kinds)
+	return fmt.Sprintf("перепись: отношений осмотрено по видам [%s], без данных %d, колонок %d; метка найдена в %d местах; "+
+		"строк статистики таблицы секрета %d, выборок с меткой %d; триггеров: пользовательских %d, ссылочной целостности %d; "+
+		"правил %d; политик %d; ограничений объявленных %d из %d, чужих %d; доменных колонок %d; зависимых от колонки материала "+
+		"сверх законного %d; использующих тип строки %d; подпрограмм прочитано %d, называющих таблицу %d; публикаций %d",
+		strings.Join(kinds, " "), len(c.Unpopulated), c.ScannedColumns, len(c.Hits),
+		c.StatRows, len(c.StatHits), len(c.UserTriggers), c.InternalTriggers,
+		len(c.Rules), len(c.Policies), c.DeclaredSeen, len(lmDeclaredConstraints), len(c.ForeignConstraints),
+		len(c.DomainColumns), len(c.ColumnDependents), len(c.RowtypeDependents),
+		c.RoutinesRead, len(c.NamingRoutines), len(c.Publications))
 }
 
-// lmScanContainment спрашивает каталог схемы и каждую колонку.
+// lmRequireCensus — премисы: каждое правило читало каталог. Без них «нарушений
+// ноль» было бы верно и о правиле, не прочитавшем ничего.
+func lmRequireCensus(t *testing.T, c lmContainment) {
+	t.Helper()
+	require.NotZero(t, c.ScannedColumns, "колонок осмотрено ноль — вердикт беспредметен")
+	require.True(t, c.HomeSeen(),
+		"метка не найдена даже в своём доме %s — перепись не читает то, о чём судит", lmSecretHome)
+	require.NotZero(t, c.StatRows,
+		"у таблицы секрета нет ни одной строки статистики — ANALYZE не прошёл, и «выборок с меткой ноль» сказано ни о чём")
+	require.NotZero(t, c.InternalTriggers,
+		"триггеров ссылочной целостности ноль — вопрос о триггерах не читает каталог")
+	require.Equal(t, len(lmDeclaredConstraints), c.DeclaredSeen,
+		"объявленные ограничения не найдены все — правило ограничений не читает каталог")
+	require.NotZero(t, c.RoutinesRead, "подпрограмм прочитано ноль — правило подпрограмм беспредметно")
+}
+
+// lmQueryStrings — один столбец строк.
+func lmQueryStrings(t *testing.T, pool *pgxpool.Pool, q string, args ...any) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), q, args...)
+	require.NoError(t, err, "запрос каталога: %s", q)
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var v string
+		require.NoError(t, rows.Scan(&v))
+		out = append(out, v)
+	}
+	require.NoError(t, rows.Err())
+	return out
+}
+
+// lmUserSchemas — предикат схем, которые судит перепись: все, кроме системных.
+const lmUserSchemas = `n.nspname NOT IN ('pg_catalog', 'information_schema')
+	   AND n.nspname NOT LIKE 'pg\_toast%' AND n.nspname NOT LIKE 'pg\_temp\_%'`
+
+// lmScanContainment спрашивает каталог и каждую колонку.
 func lmScanContainment(t *testing.T, pool *pgxpool.Pool, needle string) lmContainment {
 	t.Helper()
 	ctx := context.Background()
-	c := lmContainment{Hits: map[string]int{}}
+	c := lmContainment{Hits: map[string]int{}, Relations: map[string]int{}}
+	hexNeedle := hex.EncodeToString([]byte(needle))
 
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM information_schema.tables
-		 WHERE table_schema = 'kaname' AND table_type = 'BASE TABLE'`).Scan(&c.BaseTables))
-
-	rows, err := pool.Query(ctx, `
-		SELECT col.table_name, col.column_name, col.data_type
-		  FROM information_schema.columns col
-		  JOIN information_schema.tables tab
-		    ON tab.table_schema = col.table_schema AND tab.table_name = col.table_name
-		 WHERE col.table_schema = 'kaname' AND tab.table_type = 'BASE TABLE'
-		   AND col.data_type IN ('text', 'character varying', 'character', 'jsonb', 'json', 'bytea', 'ARRAY')
-		 ORDER BY col.table_name, col.column_name`)
+	// ANALYZE — часть пути, который судится: служба живёт с автоанализом, и
+	// выборка статистики появляется без ведома писателя.
+	_, err := pool.Exec(ctx, `ANALYZE kaname.user_login_methods`)
 	require.NoError(t, err)
-	type column struct{ table, name, dtype string }
-	var cols []column
+
+	// ── ось первая: копии ─────────────────────────────────────────────────────
+	type relation struct {
+		oid                uint32
+		schema, name, kind string
+		populated          bool
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT c.oid, n.nspname, c.relname, c.relkind::text, c.relispopulated
+		  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE c.relkind IN ('r', 'p', 'm', 'v', 'f') AND `+lmUserSchemas+`
+		 ORDER BY n.nspname, c.relname`)
+	require.NoError(t, err)
+	var rels []relation
 	for rows.Next() {
-		var col column
-		require.NoError(t, rows.Scan(&col.table, &col.name, &col.dtype))
-		cols = append(cols, col)
+		var r relation
+		require.NoError(t, rows.Scan(&r.oid, &r.schema, &r.name, &r.kind, &r.populated))
+		rels = append(rels, r)
 	}
 	require.NoError(t, rows.Err())
 	rows.Close()
 
-	tables := map[string]bool{}
-	for _, col := range cols {
-		ident := pgx.Identifier{col.name}.Sanitize()
-		expr := ident + "::text"
-		if col.dtype == "bytea" {
-			expr = "encode(" + ident + ", 'escape')"
+	for _, r := range rels {
+		c.Relations[r.kind]++
+		if !r.populated {
+			c.Unpopulated = append(c.Unpopulated, r.schema+"."+r.name)
+			continue
 		}
-		q := fmt.Sprintf(`SELECT count(*) FROM %s WHERE position($1 in %s) > 0`,
-			pgx.Identifier{"kaname", col.table}.Sanitize(), expr)
-		var n int
-		require.NoError(t, pool.QueryRow(ctx, q, needle).Scan(&n), "колонка %s.%s", col.table, col.name)
-		if n > 0 {
-			c.Hits[col.table+"."+col.name] = n
+		cols := lmQueryStrings(t, pool, `
+			SELECT attname FROM pg_attribute
+			 WHERE attrelid = $1 AND attnum > 0 AND NOT attisdropped ORDER BY attnum`, r.oid)
+		if len(cols) == 0 {
+			continue
 		}
-		tables[col.table] = true
-		c.ScannedColumns++
+		exprs := make([]string, 0, len(cols))
+		for _, col := range cols {
+			ident := pgx.Identifier{col}.Sanitize()
+			exprs = append(exprs, fmt.Sprintf(
+				"count(*) FILTER (WHERE strpos(%[1]s::text, $1) > 0 OR strpos(%[1]s::text, $2) > 0)", ident))
+		}
+		q := fmt.Sprintf(`SELECT %s FROM %s`, strings.Join(exprs, ", "), pgx.Identifier{r.schema, r.name}.Sanitize())
+		counts := make([]int64, len(cols))
+		dest := make([]any, len(cols))
+		for i := range counts {
+			dest[i] = &counts[i]
+		}
+		require.NoError(t, pool.QueryRow(ctx, q, needle, hexNeedle).Scan(dest...), "отношение %s.%s", r.schema, r.name)
+		for i, n := range counts {
+			if n > 0 {
+				c.Hits[r.schema+"."+r.name+"."+cols[i]] = int(n)
+			}
+		}
+		c.ScannedColumns += len(cols)
 	}
-	c.ScannedTables = len(tables)
 
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*) FROM pg_statistic WHERE starelid = 'kaname.user_login_methods'::regclass`).Scan(&c.StatRows))
+	c.StatHits = lmQueryStrings(t, pool, `
+		SELECT s.starelid::regclass::text || '.' || a.attname
+		  FROM pg_statistic s
+		  JOIN pg_attribute a ON a.attrelid = s.starelid AND a.attnum = s.staattnum
+		 WHERE strpos(concat_ws('|', s.stavalues1::text, s.stavalues2::text, s.stavalues3::text,
+		                             s.stavalues4::text, s.stavalues5::text), $1) > 0
+		    OR strpos(concat_ws('|', s.stavalues1::text, s.stavalues2::text, s.stavalues3::text,
+		                             s.stavalues4::text, s.stavalues5::text), $2) > 0
+		 ORDER BY 1`, needle, hexNeedle)
+
+	// ── ось вторая: механизмы ─────────────────────────────────────────────────
 	trows, err := pool.Query(ctx, `
 		SELECT tgname, tgisinternal FROM pg_trigger
 		 WHERE tgrelid = 'kaname.user_login_methods'::regclass ORDER BY tgname`)
@@ -167,18 +334,181 @@ func lmScanContainment(t *testing.T, pool *pgxpool.Pool, needle string) lmContai
 	}
 	require.NoError(t, trows.Err())
 	trows.Close()
+
+	c.Rules = lmQueryStrings(t, pool, `
+		SELECT rulename::text FROM pg_rewrite WHERE ev_class = 'kaname.user_login_methods'::regclass ORDER BY 1`)
+	c.Policies = lmQueryStrings(t, pool, `
+		SELECT polname::text FROM pg_policy WHERE polrelid = 'kaname.user_login_methods'::regclass ORDER BY 1`)
+
+	crows, err := pool.Query(ctx, `
+		SELECT conname::text, contype::text, pg_get_constraintdef(oid) FROM pg_constraint
+		 WHERE conrelid = 'kaname.user_login_methods'::regclass ORDER BY conname`)
+	require.NoError(t, err)
+	declared := map[string]bool{}
+	for _, n := range lmDeclaredConstraints {
+		declared[n] = true
+	}
+	for crows.Next() {
+		var name, kind, def string
+		require.NoError(t, crows.Scan(&name, &kind, &def))
+		switch {
+		case declared[name]:
+			c.DeclaredSeen++
+		case kind == "n":
+			// Ограничение «не NULL» каталога (новые версии сервера): выражения не
+			// исполняет.
+		default:
+			c.ForeignConstraints = append(c.ForeignConstraints, fmt.Sprintf("%q (%s)", name, def))
+		}
+	}
+	require.NoError(t, crows.Err())
+	crows.Close()
+
+	c.DomainColumns = lmQueryStrings(t, pool, `
+		SELECT a.attname || ' — ' || format_type(a.atttypid, a.atttypmod)
+		  FROM pg_attribute a JOIN pg_type ty ON ty.oid = a.atttypid
+		 WHERE a.attrelid = 'kaname.user_login_methods'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+		   AND ty.typtype = 'd' ORDER BY 1`)
+
+	c.ColumnDependents = lmQueryStrings(t, pool, `
+		SELECT pg_describe_object(d.classid, d.objid, d.objsubid)
+		  FROM pg_depend d
+		 WHERE d.refclassid = 'pg_class'::regclass
+		   AND d.refobjid = 'kaname.user_login_methods'::regclass
+		   AND d.refobjsubid = (SELECT attnum FROM pg_attribute
+		                         WHERE attrelid = 'kaname.user_login_methods'::regclass AND attname = 'verifier')
+		   AND NOT (d.classid = 'pg_constraint'::regclass AND d.objid IN (
+		         SELECT oid FROM pg_constraint
+		          WHERE conrelid = 'kaname.user_login_methods'::regclass AND (conname = $1 OR contype = 'n')))
+		 ORDER BY 1`, lmVerifierDependent)
+
+	c.RowtypeDependents = lmQueryStrings(t, pool, `
+		SELECT pg_describe_object(d.classid, d.objid, d.objsubid)
+		  FROM pg_depend d
+		 WHERE d.refclassid = 'pg_type'::regclass
+		   AND d.refobjid = (SELECT reltype FROM pg_class WHERE oid = 'kaname.user_login_methods'::regclass)
+		   AND d.deptype <> 'i'
+		 ORDER BY 1`)
+
+	prows, err := pool.Query(ctx, `
+		SELECT p.oid::regprocedure::text, coalesce(p.prosrc, ''), coalesce(pg_get_function_sqlbody(p.oid), '')
+		  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+		 WHERE `+lmUserSchemas+`
+		 ORDER BY 1`)
+	require.NoError(t, err)
+	tableWord := regexp.MustCompile(`(^|[^A-Za-z0-9_])user_login_methods($|[^A-Za-z0-9_])`)
+	for prows.Next() {
+		var name, src, body string
+		require.NoError(t, prows.Scan(&name, &src, &body))
+		c.RoutinesRead++
+		if tableWord.MatchString(lmStripSQLComments(src)) || tableWord.MatchString(lmStripSQLComments(body)) {
+			c.NamingRoutines = append(c.NamingRoutines, name)
+		}
+	}
+	require.NoError(t, prows.Err())
+	prows.Close()
+
+	c.Publications = lmQueryStrings(t, pool, `
+		SELECT DISTINCT pubname::text FROM pg_publication_tables
+		 WHERE schemaname = 'kaname' AND tablename = 'user_login_methods' ORDER BY 1`)
 	return c
 }
 
+// lmDollarTag — метка строки в долларах: пустая либо идентификатор, не
+// начинающийся с цифры (`$1` меткой не является).
+var lmDollarTag = regexp.MustCompile(`^\$([A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*)?\$`)
+
+// lmStripSQLComments снимает комментарии SQL и PL/pgSQL, оставляя строки: в
+// строке живёт динамический SQL, и он — исполняемая часть, а не пояснение.
+// Знает строку в одинарных кавычках (и E-строку с обратной косой), имя в
+// двойных кавычках, строку в долларах с меткой и вложенный блочный комментарий.
+func lmStripSQLComments(src string) string {
+	var b strings.Builder
+	for i := 0; i < len(src); {
+		switch {
+		case strings.HasPrefix(src[i:], "--"):
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+		case strings.HasPrefix(src[i:], "/*"):
+			depth := 0
+			for i < len(src) {
+				if strings.HasPrefix(src[i:], "/*") {
+					depth++
+					i += 2
+					continue
+				}
+				if strings.HasPrefix(src[i:], "*/") {
+					depth--
+					i += 2
+					if depth == 0 {
+						break
+					}
+					continue
+				}
+				i++
+			}
+			b.WriteByte(' ')
+		case src[i] == '\'' || src[i] == '"':
+			q := src[i]
+			escapes := q == '\'' && i > 0 && (src[i-1] == 'E' || src[i-1] == 'e')
+			b.WriteByte(q)
+			i++
+			for i < len(src) {
+				ch := src[i]
+				b.WriteByte(ch)
+				i++
+				if escapes && ch == '\\' && i < len(src) {
+					b.WriteByte(src[i])
+					i++
+					continue
+				}
+				if ch == q {
+					if i < len(src) && src[i] == q {
+						b.WriteByte(q)
+						i++
+						continue
+					}
+					break
+				}
+			}
+		case src[i] == '$':
+			tag := lmDollarTag.FindString(src[i:])
+			if tag == "" {
+				// `$1` — параметр, а не начало строки в долларах.
+				b.WriteByte(src[i])
+				i++
+				continue
+			}
+			closing := strings.Index(src[i+len(tag):], tag)
+			if closing < 0 {
+				b.WriteString(src[i:])
+				i = len(src)
+				continue
+			}
+			b.WriteString(src[i : i+len(tag)+closing+len(tag)])
+			i += len(tag) + closing + len(tag)
+		default:
+			b.WriteByte(src[i])
+			i++
+		}
+	}
+	return b.String()
+}
+
 // lmWriteSentinel пишет метку НАСТОЯЩИМ путём адаптера — предмет гейта есть то,
-// что делает запись, а не то, что сделал бы сырой оператор.
+// что делает запись, а не то, что сделал бы сырой оператор. Людей двое и метка
+// одна: выборка статистики держит значение, встреченное чаще одного раза, —
+// одиночная строка не проверила бы статистику ни в какую сторону.
 func lmWriteSentinel(t *testing.T, pool *pgxpool.Pool, tag string) {
 	t.Helper()
-	people := lmPeople(t, pool, tag, 1)
-	_, err := pg.NewLoginMethodRepo(pool).Create(context.Background(), domain.LoginMethod{
-		UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, lmSentinel),
-	})
-	require.NoError(t, err)
+	repo := pg.NewLoginMethodRepo(pool)
+	for _, person := range lmPeople(t, pool, tag, 2) {
+		_, err := repo.Create(context.Background(), domain.LoginMethod{
+			UserID: person, Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, lmSentinel),
+		})
+		require.NoError(t, err)
+	}
 }
 
 // TestLoginVerifierStaysInsideTheSchema — гейт.
@@ -187,10 +517,10 @@ func lmWriteSentinel(t *testing.T, pool *pgxpool.Pool, tag string) {
 //
 //  1. копию снимают: писатель обязан класть идентификатор человека и вид
 //     способа, а не строку;
-//  2. триггер на таблице секрета нужен по существу → предмет требует РЕШЕНИЯ:
-//     его функция не читает материал, и это доказывается инъекцией в этом
-//     файле, после чего правило о триггерах сужается к конкретному имени —
-//     приёмкой, а не комментарием;
+//  2. механизм на таблице секрета нужен по существу → предмет требует РЕШЕНИЯ:
+//     доказать инъекцией в этом файле, что он материала не читает и не уносит,
+//     после чего правило сужается к конкретному имени — приёмкой, а не
+//     комментарием;
 //  3. копия нужна другому месту по существу (например, проверяющему П2) →
 //     её место — не таблица, а память процесса на время проверки.
 func TestLoginVerifierStaysInsideTheSchema(t *testing.T) {
@@ -199,13 +529,7 @@ func TestLoginVerifierStaysInsideTheSchema(t *testing.T) {
 
 	c := lmScanContainment(t, pool, lmSentinel)
 	t.Log(c.Census())
-
-	require.NotZero(t, c.ScannedColumns, "колонок осмотрено ноль — вердикт беспредметен")
-	require.True(t, c.HomeSeen(),
-		"метка не найдена даже в своём доме %s — перепись не читает то, о чём судит", lmSecretHome)
-	require.NotZero(t, c.InternalTriggers,
-		"триггеров ссылочной целостности ноль — вопрос о триггерах не читает каталог, "+
-			"и «пользовательских ноль» сказано ни о чём")
+	lmRequireCensus(t, c)
 	for _, f := range c.Findings() {
 		t.Error(f)
 	}
@@ -408,8 +732,12 @@ func lmInjections() []lmInjection {
 			copyAt: "user_login_methods.lm_probe_gen", want: "lm_probe_gen"},
 
 		// ── вид отношения: индекс и статистика ────────────────────────────────
-		{name: "уникальный индекс по материалу — копия в индексе и канал DETAIL", before: `
-			CREATE UNIQUE INDEX lm_probe_idx ON kaname.user_login_methods (verifier);`,
+		// Индекс копирует колонку в свои страницы; уникальный вдобавок кладёт
+		// значение нарушенного ключа в DETAIL каждого отказа. Правило одно —
+		// зависимость от колонки материала, — и сцена берёт неуникальный: метку
+		// гейт пишет двоим, и уникальный отверг бы саму запись.
+		{name: "индекс по материалу — копия колонки в индексе", before: `
+			CREATE INDEX lm_probe_idx ON kaname.user_login_methods (verifier);`,
 			want: "lm_probe_idx"},
 		{name: "законный близнец: индекс по владельцу", before: `
 			CREATE INDEX lm_probe_idx_user ON kaname.user_login_methods (user_id);`},
@@ -459,7 +787,7 @@ func TestLoginVerifierContainmentGateInjection(t *testing.T) {
 
 			c := lmScanContainment(t, pool, lmSentinel)
 			t.Log(c.Census())
-			require.True(t, c.HomeSeen(), "положительный контроль: метка в своём доме")
+			lmRequireCensus(t, c)
 
 			findings := strings.Join(c.Findings(), "\n")
 			t.Logf("находки:\n%s", findings)
@@ -471,8 +799,7 @@ func TestLoginVerifierContainmentGateInjection(t *testing.T) {
 				require.True(t, found, "копия %s не найдена — перепись слепа к этому месту (%v)", sc.copyAt, c.Hits)
 			} else {
 				for where := range c.Hits {
-					require.True(t, strings.HasSuffix(where, lmSecretHome),
-						"вне дома метки быть не должно, а она найдена в %s", where)
+					require.Equal(t, lmSecretHome, where, "вне дома метки быть не должно")
 				}
 			}
 			if sc.want == "" {

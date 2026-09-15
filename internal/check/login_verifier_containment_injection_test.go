@@ -72,9 +72,14 @@ func TestLoginVerifierGate_LawfulCorpusIsSilent(t *testing.T) {
 	t.Log(census)
 	require.Empty(t, findings, "законный корпус обязан молчать — иначе красное в сценах ниже ничего не доказывает")
 	require.Equal(t, 1, census.AccessorDecls)
-	require.Equal(t, 1, census.AllowedUses["internal/repo/kaname/pg"])
-	require.Equal(t, 1, census.OwnerTableLiterals, "у владельца один литерал — объявление константы")
-	require.Equal(t, 1, census.TableLiterals, "имена ограничений (`…_pkey`) таблицей не считаются")
+	require.Equal(t, 1, census.AllowedUses["internal/repo/kaname/pg/login_method_repo.go"])
+	// У владельца: объявление константы (литерал), склейка запроса с ней и
+	// сравнение в предикате (связанное имя). Имена ограничений у переводчика
+	// отказов таблицей не считаются — вне владельца упоминаний ноль.
+	require.Equal(t, map[string]int{"литерал": 1, "склейка": 1, "связанное имя": 1}, census.TableNamings)
+	require.Equal(t, 3, census.OwnerTableNamings)
+	require.Equal(t, []string{"internal/repo/kaname/pg.loginMethodsTable"}, census.Bindings,
+		"перепись связанных имён обязана назвать константу владельца")
 }
 
 func TestLoginVerifierGate_Injection(t *testing.T) {
@@ -239,7 +244,7 @@ var doc = "v.Reveal() запрещён в этом слое"
 const loginMethodsTable = "user_login_methods"
 `
 			},
-			wantFinding: "разрешение пакету internal/repo/kaname/pg",
+			wantFinding: "разрешение файлу internal/repo/kaname/pg/login_method_repo.go",
 		},
 		{
 			name: "премиса: выход объявлен дважды",
@@ -266,7 +271,11 @@ func (T) Reveal() string { return "" }
 			edit: func(c check.TreeCorpus) {
 				c["internal/repo/kaname/pg/login_method_repo.go"] = `package pg
 
-func write(v interface{ Reveal() string }) string { return v.Reveal() }
+type execer interface{ Exec(q string, args ...any) error }
+
+func write(db execer, v interface{ Reveal() string }) error { return db.Exec("INSERT", v.Reveal()) }
+
+func isLoginMethodsTable(name string) bool { return name != "" }
 `
 			},
 			wantPremise: "правило второго читателя ослепло",

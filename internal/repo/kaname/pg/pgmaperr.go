@@ -161,7 +161,7 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 		// журнал не пишется (`f.LogAttrs` его не несёт).
 		switch pgErr.ConstraintName {
 		case "user_login_methods_kind_check", "user_login_methods_verifier_check":
-			if pgErr.TableName == loginMethodsTable {
+			if isLoginMethodsTable(pgErr.TableName) {
 				slog.Error("login method backstop fired: service admitted a value it validates itself",
 					append([]any{"kind", kindHint, "id", idHint}, f.LogAttrs()...)...)
 				return iamerr.ErrInternal
