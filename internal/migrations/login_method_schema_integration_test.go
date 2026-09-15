@@ -47,6 +47,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pressly/goose/v3"
@@ -567,4 +568,255 @@ func TestIntegration_LoginMethodRollbackRefusesToDestroyMaterial(t *testing.T) {
 	require.NoError(t, goose.Up(db, "."), "повторный накат обязан пройти")
 	require.NoError(t, db.QueryRow(`SELECT to_regclass('kaname.user_login_methods') IS NOT NULL`).Scan(&exists))
 	require.True(t, exists)
+}
+
+// Что обязан назвать отказ отката: ЧИСЛО уничтожаемого по каждому предмету. Одно
+// имя таблицы здесь не различало бы сцены — отказ называет оба предмета всегда.
+const (
+	lmRefusesMaterial = "1 login verifier row(s)"
+	lmRefusesMarks    = "2 address verification mark(s)"
+)
+
+// rollbackScene — сцена обратного хода против писателя: один внесённый факт на
+// сцену, остальное общее.
+type rollbackScene struct {
+	name string
+	// write — оператор писателя; исполняется в ЕГО транзакции.
+	write func(tx *sql.Tx, owner, member string) error
+	// settle — фиксирует писатель ДО отката (true) либо ПОКА откат ждёт его
+	// замка (false).
+	settleBefore bool
+	// commit — чем писатель заканчивает: фиксацией либо отказом от транзакции.
+	commit bool
+	// refuses — обязан ли откат отказать; пусто — обязан пройти.
+	refuses string
+}
+
+// lmWriteMethod — писатель материала: вставка строки способа.
+func lmWriteMethod(tx *sql.Tx, owner, _ string) error {
+	_, err := tx.Exec(`INSERT INTO kaname.user_login_methods (user_id, kind, verifier)
+	                   VALUES ($1, 'password', '$2a$12$lmrace.material')`, owner)
+	return err
+}
+
+// lmWriteMarks — писатель отметок: две отметки подтверждения и ни одного способа.
+func lmWriteMarks(tx *sql.Tx, owner, member string) error {
+	_, err := tx.Exec(`UPDATE kaname.users SET email_verified_at = now() WHERE id IN ($1, $2)`, owner, member)
+	return err
+}
+
+// TestIntegration_LoginMethodRollbackDoesNotRaceItsWriter — Б1 и Н1.
+//
+// # Предмет
+//
+// Защита отката — «посчитать, и если ноль — снести». Посчитанное и снесённое
+// обязаны быть ОДНИМ состоянием таблицы: иначе писатель, зафиксировавший
+// строку между подсчётом и сносом, теряет её, а откат возвращает успех. Под
+// READ COMMITTED подсчёт не видит незафиксированной строки, а снос ждёт её
+// замка — и дожидается фиксации, после которой уничтожает то, чего подсчёт не
+// видел. Это проверка-затем-действие, запрещённая ban #10, только в миграции.
+//
+// Предмет Н1 — тот же, с другой колонкой: отметка подтверждения адреса после
+// снятия прежнего поставщика не выводится ниоткуда, кроме этой колонки, и её
+// снос — такая же невосстановимая потеря, как снос материала.
+//
+// # Как сцена создаёт гонку, не угадывая время
+//
+// Писатель держит транзакцию открытой; откат запускается рядом, и проба ЖДЁТ
+// УСЛОВИЯ — пока в каталоге замков не появится ожидающий запрос отката на одну
+// из двух таблиц. Только тогда писатель заканчивает. Порядок поэтому задан, а
+// не выпал: сон здесь утверждал бы о расписании, а не о продукте.
+//
+// # Законные близнецы
+//
+// Писатель, зафиксировавший ДО отката, получает тот же отказ — это сцена, в
+// которой защита работала и прежде. Писатель, ОТКАЗАВШИЙСЯ от транзакции, пока
+// откат ждёт, материала не оставил — и откат обязан пройти: иначе «откат отказал»
+// было бы верно и о защите, отказывающей всякому, кто ждал замка.
+func TestIntegration_LoginMethodRollbackDoesNotRaceItsWriter(t *testing.T) {
+	scenes := []rollbackScene{
+		{name: "материал зафиксирован до отката", write: lmWriteMethod, settleBefore: true, commit: true,
+			refuses: lmRefusesMaterial},
+		{name: "материал фиксируется, пока откат ждёт замка", write: lmWriteMethod, commit: true,
+			refuses: lmRefusesMaterial},
+		{name: "писатель материала отказался от транзакции, пока откат ждёт", write: lmWriteMethod, commit: false},
+		{name: "две отметки и ноль способов зафиксированы до отката", write: lmWriteMarks, settleBefore: true,
+			commit: true, refuses: lmRefusesMarks},
+		{name: "отметки фиксируются, пока откат ждёт замка", write: lmWriteMarks, commit: true,
+			refuses: lmRefusesMarks},
+	}
+	_, previous := loginMethodVersions(t)
+	for i, sc := range scenes {
+		t.Run(sc.name, func(t *testing.T) {
+			db := lmDB(t)
+			owner, member := lmSeed(t, db, fmt.Sprintf("lmrace%d", i))
+
+			var tables []int64
+			for _, rel := range []string{"kaname.user_login_methods", "kaname.users"} {
+				var oid int64
+				require.NoError(t, db.QueryRow(`SELECT $1::regclass::oid`, rel).Scan(&oid))
+				tables = append(tables, oid)
+			}
+
+			tx, err := db.Begin()
+			require.NoError(t, err)
+			defer func() { _ = tx.Rollback() }()
+			var writerPID int
+			require.NoError(t, tx.QueryRow(`SELECT pg_backend_pid()`).Scan(&writerPID))
+			require.NoError(t, sc.write(tx, owner, member), "писатель обязан записать — иначе сцена беспредметна")
+			if sc.settleBefore {
+				require.NoError(t, tx.Commit())
+			}
+
+			goose.SetBaseFS(migrations.FS)
+			require.NoError(t, goose.SetDialect("postgres"))
+			done := make(chan error, 1)
+			go func() { done <- goose.DownTo(db, ".", previous) }()
+
+			var downErr error
+			if sc.settleBefore {
+				downErr = <-done
+			} else {
+				// Ждём УСЛОВИЯ: откат стоит в очереди за замком писателя.
+				waited := false
+				deadline := time.Now().Add(60 * time.Second)
+				for !waited && time.Now().Before(deadline) {
+					select {
+					case downErr = <-done:
+						t.Fatalf("откат завершился (%v), не дождавшись замка писателя — гонка не создана, сцена беспредметна", downErr)
+					default:
+					}
+					var n int
+					require.NoError(t, db.QueryRow(`
+						SELECT count(*) FROM pg_locks
+						 WHERE NOT granted AND pid <> $1 AND relation = ANY($2::oid[])`,
+						writerPID, tables).Scan(&n))
+					waited = n > 0
+				}
+				require.True(t, waited, "откат не встал в очередь за замком писателя за 60 с")
+				if sc.commit {
+					require.NoError(t, tx.Commit())
+				} else {
+					require.NoError(t, tx.Rollback())
+				}
+				select {
+				case downErr = <-done:
+				case <-time.After(60 * time.Second):
+					t.Fatal("откат не завершился за 60 с после того, как писатель освободил замок")
+				}
+			}
+
+			var tableLeft bool
+			require.NoError(t, db.QueryRow(`SELECT to_regclass('kaname.user_login_methods') IS NOT NULL`).Scan(&tableLeft))
+			var methods, marks int
+			if tableLeft {
+				require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.user_login_methods`).Scan(&methods))
+			}
+			var markColumn bool
+			require.NoError(t, db.QueryRow(`
+				SELECT EXISTS (SELECT 1 FROM information_schema.columns
+				                WHERE table_schema = 'kaname' AND table_name = 'users'
+				                  AND column_name = 'email_verified_at')`).Scan(&markColumn))
+			if markColumn {
+				require.NoError(t, db.QueryRow(`SELECT count(*) FROM kaname.users WHERE email_verified_at IS NOT NULL`).Scan(&marks))
+			}
+			t.Logf("исход: ошибка отката %v; таблица способов на месте %v (строк %d); колонка отметок на месте %v (отметок %d)",
+				downErr, tableLeft, methods, markColumn, marks)
+
+			if sc.refuses == "" {
+				require.NoError(t, downErr, "писатель не оставил ничего — откат обязан пройти")
+				require.False(t, tableLeft, "прошедший откат снимает таблицу")
+				return
+			}
+			require.Error(t, downErr, "откат обязан отказать: писатель зафиксировал то, что откат уничтожил бы")
+			var pgErr *pgconn.PgError
+			require.ErrorAs(t, downErr, &pgErr, "отказ обязан прийти от базы")
+			require.Equal(t, "23001", pgErr.Code, "отказ — restrict_violation")
+			require.Contains(t, downErr.Error(), sc.refuses, "отказ обязан называть то, что откат уничтожил бы")
+			require.True(t, tableLeft, "отказанный откат не снял таблицу")
+			require.True(t, markColumn, "отказанный откат не снял колонку отметок")
+			if sc.refuses == lmRefusesMaterial {
+				require.Equal(t, 1, methods, "материал писателя цел")
+			} else {
+				require.Equal(t, 2, marks, "отметки писателя целы")
+			}
+		})
+	}
+}
+
+// lmVerificationTrigger — имя триггера, снимающего отметку при смене адреса.
+const lmVerificationTrigger = "users_email_change_drops_verification"
+
+// lmLaterBeforeUpdateNeighbours — пользовательские триггеры `users` вида BEFORE
+// UPDATE FOR EACH ROW, чьё имя сортируется ПОСЛЕ нашего. Порядок триггеров
+// одного вида задаётся именем (побайтово), и условие WHEN нашего вычисляется
+// над строкой, какой её оставили стоящие ДО него.
+func lmLaterBeforeUpdateNeighbours(t *testing.T, db *sql.DB) (later []string, sameKind int) {
+	t.Helper()
+	rows, err := db.Query(`
+		SELECT tgname, tgname > $1 COLLATE "C"
+		  FROM pg_trigger
+		 WHERE tgrelid = 'kaname.users'::regclass AND NOT tgisinternal
+		   AND (tgtype & 1) = 1 AND (tgtype & 2) = 2 AND (tgtype & 16) = 16
+		 ORDER BY tgname COLLATE "C"`, lmVerificationTrigger)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var name string
+		var after bool
+		require.NoError(t, rows.Scan(&name, &after))
+		sameKind++
+		if after {
+			later = append(later, name)
+		}
+	}
+	require.NoError(t, rows.Err())
+	return later, sameKind
+}
+
+// TestIntegration_AddressVerificationTriggerHasNoLaterNeighbour — Н2.
+//
+// Граница нашего триггера: соседний BEFORE UPDATE-триггер на `users`, чьё имя
+// сортируется ПОСЛЕ нашего, исполняется позже — и если он меняет адрес, условие
+// нашего уже вычислено над прежним адресом, и отметка переживает смену. Сегодня
+// таких соседей ноль, и проба это держит: сосед, заведённый завтра, требует
+// решения, а не проходит незамеченным.
+//
+// Внесённое различие показывает, почему правило нужно, а не только что оно
+// срабатывает: с таким соседом смена адреса ОСТАВЛЯЕТ отметку.
+func TestIntegration_AddressVerificationTriggerHasNoLaterNeighbour(t *testing.T) {
+	db := lmDB(t)
+	later, sameKind := lmLaterBeforeUpdateNeighbours(t, db)
+	t.Logf("перепись: триггеров BEFORE UPDATE FOR EACH ROW на users %d, из них после %s — %v",
+		sameKind, lmVerificationTrigger, later)
+	require.NotZero(t, sameKind, "свой триггер обязан найтись в переписи — иначе она не читает каталог")
+	require.Empty(t, later,
+		"BEFORE UPDATE-сосед после %s исполняется позже и может сменить адрес, не сняв отметку: "+
+			"нужно решение — сосед не трогает адрес (доказать пробой) либо наш триггер переименовывается",
+		lmVerificationTrigger)
+
+	// Внесённое различие: сосед, сортирующийся после нашего и меняющий адрес.
+	owner, _ := lmSeed(t, db, "lmn2")
+	_, err := db.Exec(`
+		CREATE FUNCTION kaname.lm_probe_rewrite_email() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+		  IF NEW.display_name = 'rewrite-email' THEN
+		    NEW.email := 'lmn2-rewritten@example.invalid';
+		  END IF;
+		  RETURN NEW;
+		END; $$;
+		CREATE TRIGGER zz_lm_probe_rewrite_email BEFORE UPDATE ON kaname.users
+		  FOR EACH ROW EXECUTE FUNCTION kaname.lm_probe_rewrite_email();`)
+	require.NoError(t, err)
+	markVerified(t, db, owner)
+	_, err = db.Exec(`UPDATE kaname.users SET display_name = 'rewrite-email' WHERE id = $1`, owner)
+	require.NoError(t, err)
+	var email string
+	require.NoError(t, db.QueryRow(`SELECT email FROM kaname.users WHERE id = $1`, owner).Scan(&email))
+	require.Equal(t, "lmn2-rewritten@example.invalid", email, "предпосылка: сосед сменил адрес")
+	require.True(t, verification(t, db, owner).Valid,
+		"граница наблюдаема: сосед после нашего сменил адрес, а отметка осталась")
+
+	later, _ = lmLaterBeforeUpdateNeighbours(t, db)
+	require.Equal(t, []string{"zz_lm_probe_rewrite_email"}, later, "перепись обязана назвать соседа по имени")
 }
