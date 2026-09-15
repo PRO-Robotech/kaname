@@ -137,7 +137,10 @@ func TestLoginVerifier_NeverLogged(t *testing.T) {
 	} {
 		var buf bytes.Buffer
 		log := slog.New(h.mk(&buf))
-		log.Info("login method", "verifier", v, "method", m, slog.Any("any", v))
+		// Идентификатор человека — отдельным атрибутом: JSON-обработчик на строке
+		// способа получает отказ сериализации целиком (так и задумано), и соседнее
+		// поле внутри неё не печатается вовсе.
+		log.Info("login method", "user_id", m.UserID, "verifier", v, "method", m, slog.Any("any", v))
 		out := buf.String()
 		require.NotContains(t, out, probeMaterial, "журнал %s выдал материал: %s", h.name, out)
 		require.Contains(t, out, "usr0000000000000lm02",

@@ -369,6 +369,17 @@ func TestLoginMethodRepo_VerificationRacesAnAddressChange(t *testing.T) {
 		_, err := pool.Exec(ctx, `UPDATE users SET email = $2 WHERE id = $1`, string(user), string(oldAddr))
 		require.NoError(t, err)
 
+		// Смещение старта чередуется: без него на этой машине всякий раз первой
+		// выигрывала смена (замер: 60 из 60), и второй порядок гонкой не
+		// сэмплировался. Смещение не ожидание условия — оно выбирает, КАКОЙ
+		// порядок исследовать, а исход по-прежнему решает замок строки.
+		var markLag, changeLag time.Duration
+		switch r % 3 {
+		case 1:
+			changeLag = time.Millisecond
+		case 2:
+			markLag = time.Millisecond
+		}
 		start := make(chan struct{})
 		var wg sync.WaitGroup
 		var markErr, changeErr error
@@ -376,11 +387,13 @@ func TestLoginMethodRepo_VerificationRacesAnAddressChange(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
+			time.Sleep(markLag)
 			markErr = repo.MarkEmailVerified(ctx, user, oldAddr, time.Now())
 		}()
 		go func() {
 			defer wg.Done()
 			<-start
+			time.Sleep(changeLag)
 			_, changeErr = pool.Exec(ctx, `UPDATE users SET email = $2 WHERE id = $1`, string(user), newAddr)
 		}()
 		close(start)
