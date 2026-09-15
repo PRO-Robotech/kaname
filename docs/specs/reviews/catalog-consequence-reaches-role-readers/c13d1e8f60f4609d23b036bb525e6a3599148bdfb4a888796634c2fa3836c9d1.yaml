@@ -1,0 +1,421 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/catalog-consequence-reaches-role-readers.md
+  sha256: c13d1e8f60f4609d23b036bb525e6a3599148bdfb4a888796634c2fa3836c9d1
+  static_status: DRAFT
+  base_commit: 6e9b94ab8e283698b5a60a9e7f17e9a483ed53ef
+  content_commit: b091bf6326ed59cf0574c7b5bc68bfd2fd6f06c2
+  lines: 1328
+  round: 1
+  predecessor_record: null
+  fingerprint_predicate: sha256sum docs/engineering/acceptance/catalog-consequence-reaches-role-readers.md
+  fingerprint_note: >-
+    Отпечаток посчитан рецензентом на голове ветки b091bf63 (git ls-remote перед
+    записью: голова та же) и совпал с отчётом автора. Шапка документа не
+    тронута: статический токен DRAFT остаётся тем, что в неё вписали
+    (change-graph.md §2).
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-16'
+
+# Первая запись этого каталога. Форма взята у записей соседнего каталога
+# docs/specs/reviews/login-session-and-credentials-are-our-contract/.
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт — CHANGES_REQUESTED, три блокирующих. Отказ санкции не выдаёт,
+    запрет #1 в силе ровно так же, как до ревью.
+  note_for_the_next_round: >-
+    Одобрение, когда до него дойдёт, потребует ВНЕШНЕГО события от
+    `pointpu` (review_authority.acceptance-reviewer политики воркспейса);
+    заключение агента в роли кодировать не разрешает.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main
+    в PRO-Robotech/kacho-workspace вернул 0 — исполнено этим кругом
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось». Событие полномочия публикует
+    оркестратор; для CHANGES_REQUESTED его отсутствие безвредно.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: null
+  publication_mode: null
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Документ целиком, §0…§10. Перепись производителей повторена предикатами
+    документа дословно. Мир М ПОСЕЯН рецензентом заново — своей временной
+    пробой в пакете internal/repo/kaname/pg (фикстуры, названные документом:
+    catalogPool, applierOver, probeResource, seedVerdictTenant, проект с
+    вычеканенным id, role.CreateRoleUseCase, catalog.NewSnapshot, Refresh,
+    verbRequest, verbApplierOver, applierOnLiveBase, withdrawalManifest).
+    Проба в дерево не коммитилась; рабочая копия чиста.
+  method: experiment_not_reading
+  neighbouring_acceptances_reviewed: true
+  neighbouring_acceptances: >-
+    по свойству, координаты сверены: role-read-relation-retired-not-half-declared.md
+    (§6 строки 628–629, §7б 727–729), module-withdrawal-is-described.md
+    (IAM-MW-1-17, строка 1125), retired-resource-names-its-successor.md §6 п. 1,
+    access-resources-reach-a-narrowed-subscriber.md (#69), решение #73 в шапке
+    internal/subscriptionjournal/journal.go.
+
+# ─── ЧТО ПРОГНАНО И ЧТО ДАЛО ────────────────────────────────────────────────
+predicates_run:
+  - section: §0.1
+    declared: 11 строк · 7 операторов
+    got: 11 строк (5 role_repo.go · 2 role_withdrawal_repo.go · 1 iface.go · 3 internal/check)
+    verdict: СХОДИТСЯ ТОЧНО
+  - section: §2а
+    declared: 15 строк в 5 файлах
+    got: 15 строк в 5 файлах
+    verdict: СХОДИТСЯ ТОЧНО
+  - section: §2.7
+    declared: 96 + 2
+    got: 96 internal/migrations/0001_initial.sql · 2 …20260914120000_…sql
+    verdict: СХОДИТСЯ ТОЧНО
+  - section: §5
+    declared: строк 38 · ЗАВОДИТСЯ 18 · сценариев 24
+    got: 38 · 18 · 24 (перечень ЗАВОДИТСЯ пересчитан поимённо — 18)
+    verdict: СХОДИТСЯ ТОЧНО
+  - section: Мир М (посев)
+    declared: восемь ролей use-case'ом создания, P — уровня проекта
+    got: >-
+      все восемь созданы, операции терминальны с пустым error. CREATED у A —
+      project_id "" и scope [{type account}]; у P — project_id = проект и scope
+      [{type project}]; payload {"id": …} у обеих
+    verdict: КОНСТРУИРУЕМ
+  - section: §0.2 / IAM-CCR-01, -03
+    declared: 'снято 1/5 · переселено правил 6 выдач 10 · селекторов укорочено 1 снято 5 элементов вырезано 6 · событий 0'
+    got: та же строка переписи дословно; строк iam_role 0
+    verdict: СХОДИТСЯ ТОЧНО, сегодня красный по существу
+  - section: IAM-CCR-02
+    declared: снято 1/3, переселено 0, событий 0
+    got: снято 1/3 · переселено правил 0 выдач 0 · событий 0
+    verdict: СХОДИТСЯ
+  - section: §0.3
+    declared: три UPDATE updated_at = now() в одной транзакции дают одно событие
+    got: A/UPDATED=1 · всего 1
+    verdict: СХОДИТСЯ
+  - section: §0.4 / IAM-CCR-12, -13, -14, -15, -17, -19
+    declared: A [get list] при rule_states [WITHDRAWN ACTIVE]; B [get list]; C [get] WITHDRAWN; D [get update delete*]; W [list]
+    got: >-
+      A [get list], rule_states [WITHDRAWN ACTIVE], decl 2 unres 1, DEGRADED,
+      withdrawn 2 (GRANT и RULE_REFERENCE); B [get list]; C [get], правило
+      WITHDRAWN; D [get update delete*]; W [list]; P [get list]
+    verdict: СХОДИТСЯ; красные сегодня ровно те, что названы
+  - section: §0.7 / IAM-CCR-04, -16
+    declared: F — role_rule_ref 1 → 0, выдачи update и delete целы, withdrawn 0 → 1, HEALTHY, [update delete*]
+    got: 'снято 0/1 · переселено правил 1 выдач 0; F role_rule_ref [] · role_verb [gadgets:delete, gadgets:update] · withdrawn 1 (RULE_REFERENCE, CATALOG_RETIRED) · HEALTHY · [update delete*]'
+    verdict: СХОДИТСЯ
+  - section: §1.1, подстановка на живом типе
+    declared: '{gadgets: [*]} после Ω-update — отставший снимок [get list update delete], обновлённый [get list delete], выдача update цела, событий 0'
+    got: то же дословно
+    verdict: СХОДИТСЯ
+  - section: IAM-CCR-05
+    declared: изменения false, событий 0
+    got: изменения false, событий 0
+    verdict: СХОДИТСЯ
+  - section: IAM-CCR-07
+    declared: полоса глагола с потолком выдач 0 — ErrResettleCeilingExceeded с именем потолка, отбор прошёл, проекции целы, событий 0
+    got: >-
+      «выдач глаголов переселено бы 1 при потолке 0 (max_resettled_role_verbs)»,
+      перепись «переселено правил 1 выдач 1», проекции A прежние, событий 0
+    verdict: КОНСТРУИРУЕМ
+  - section: IAM-CCR-08
+    declared: версия 880 → 880, правка правил по v0 принята
+    got: версия 757 → 757 (иная база — иное число), updated_at равен, операция правки правил по v0 done с пустым error
+    verdict: СХОДИТСЯ ПО СУЩЕСТВУ
+  - section: IAM-CCR-09 (Дано)
+    declared: без блокировки 3 из 3, событие у R одно
+    got: >-
+      три прогона: держатель FOR UPDATE на probemod.gadgets.get, ожидающих
+      замков после старта применителя 1, при обеих сторонах 2; исход — обе
+      стороны без ошибки, событий у R 1. Отвергнутую форму «записать строку
+      роли» рецензент НЕ воспроизводил — это «не выполнилось», довод (1) §2.4
+      принят на измерении автора; довод (2) независим и механически ясен
+    verdict: КОНСТРУИРУЕМ
+  - section: IAM-CCR-10
+    declared: снятие роли модулем — одно событие, сирота role_retired
+    got: событий iam_role у снятой роли 1 · причина сирот role_retired
+    verdict: СХОДИТСЯ
+  - section: IAM-CCR-11, -23
+    declared: оживление «записано 1/5», событий 0, A [get list] при [WITHDRAWN ACTIVE]; повторный отзыв — переселено 1/1/1, сирот 2 → 2, событий 0
+    got: то же; после переобъявления выдача widgets:get вернулась, ведомость прежнего отзыва (2) уцелела
+    verdict: КОНСТРУИРУЕМ
+  - section: IAM-CCR-22
+    declared: через снимок S0 A [get list], B [get list]
+    got: A [get list], B [get list]
+    verdict: СХОДИТСЯ
+  - section: §1.1 / §2.3, системные роли
+    declared: неудержанные сегменты у 42 из 48 до досева, 0 после
+    got: 42 из 48 до; ReseedSystemRoleVerbs {Examined 48 Reseeded 48 Pairs 654 Failed 0}; 0 из 48 после; сегментов create среди них 0
+    verdict: СХОДИТСЯ ТОЧНО
+  - section: гейты дома
+    declared: go test -count=1 -short ./internal/check/
+    got: >-
+      ok. TestAcceptancePathCoordinateResolves — приёмок 35, координат-путей 275,
+      находок 0; TestAcceptanceProbeCoordinateResolves — координат 468, находок 0;
+      TestMeasurementRevisionsAreDatedByHashAndBelongToThisHistory — находок 0;
+      TestAcceptanceEditedAfterItsVerdictSaysSo — правлено после объявления 33,
+      с записью 33
+    verdict: ЗЕЛЁНЫЙ; вердикт документа ни один из них не судит
+
+# ─── ЗАДАНИЕ КРУГА И РАЗБОРЫ СОРТИРОВЩИКА: повторён тот самый опыт ─────────
+task_items_check:
+  - item: 'задание круга — приёмка на оба следствия, перепись производителей ДО сценариев'
+    experiment: >-
+      предикат задания git grep -nE "(UPDATE|INSERT INTO|DELETE FROM) (kaname\.)?roles\b"
+      -- "*.go" ":!*_test.go" прогнан дословно
+    result: >-
+      11 строк, операторов 7 — ровно как §0.1. Перепись (§2а) стоит до
+      сценариев, оба следствия приняты одной приёмкой (части I и II).
+      Закрыто по форме; по существу открыты Б1–Б3.
+  - item: 'разбор kaname#76 — одно событие iam_role UPDATED на роль и транзакцию, ноль при пустом отборе'
+    experiment: >-
+      тот же опыт, что у сортировщика (снятие ресурса настоящим применителем
+      при арендаторской роли), на синтетическом модуле вместо поставляемого vpc
+    result: >-
+      событий iam_role 0 при «переселено правил 6 выдач 10 … вырезано 6» —
+      сегодня тот же +0; контроль правкой строки роли даёт 1. Предикат задачи
+      перенесён в IAM-CCR-01/02/03, дедупликация трёх операторов — §3.1 и
+      IAM-CCR-01, проба §3 решения #73 — §0.9 и §3.3. Закрыто.
+  - item: 'остаток kacho#1814 §6 п. 1 — превью по снятому не показывает ни одного глагола'
+    experiment: >-
+      роль с явным глаголом по снятому ресурсу, чтение use-case чтения роли
+      после применения
+    result: >-
+      A сегодня [get list] при rule_states [WITHDRAWN ACTIVE] — то же, что
+      сортировщик получил на vpc.addressPool. Решение §2.3 и сценарии части II
+      его закрывают; подслучай «снятие одного действия», который сортировщик
+      назвал тем же завышением, перемерен (§0.7) и воспроизведён: там превью
+      совпадает с проекцией. Закрыто по предмету; формула решения — Б1, Б2.
+
+# ─── БЛОКИРУЮЩИЕ ────────────────────────────────────────────────────────────
+blocking:
+  - id: Б1
+    title: >-
+      ярусный глагол проекцией выдач не держится НИКОГДА, и решение §2.3 снимет его с
+      превью; этого следствия нет ни в §1.1, ни в сценариях
+    sections: [§1 (б), §1.1, §2.3, IAM-CCR-20, §3.3 строка role.mdx:88]
+    predicate: >-
+      Временная проба рецензента, мир документа (probemod путём старта, роли
+      use-case'ом). Строки действий probemod после применения полного манифеста:
+      gadgets.create:false, spare.create:false, widgets.create:false — деривация
+      строк манифеста ДОБАВЛЯЕТ ярусный create каждому ресурсу («снято 1/5»
+      считает и его). Роль T {gadgets: [list, create]} — role_verb
+      [gadgets:list], UnresolvedSegments называет (probemod.gadgets, create),
+      правило UNRESOLVED, health DEGRADED, превью сегодня [list create]. Роль U
+      {gadgets: [create]} — role_verb [], health EMPTY, превью [create]. То же на
+      посевном каталоге: {compute.instance: [get, create]} → role_verb
+      [compute.instance:get], DEGRADED, [get create]; {compute.instance: [create]}
+      → EMPTY, [create]. Контроль {compute.instance: [get, list]} — HEALTHY,
+      неудержанных 0. Ярусных строк в посеве:
+      grep "per_object) VALUES" internal/migrations/0001_initial.sql | grep -c "false);" → 26.
+      Механизм по коду: ярусная строка в набор типа не входит
+      (internal/catalog/facts.go:197), глагол вне набора отношения не даёт
+      (internal/authzmap/role_verbs.go:80), поэтому строки role_verb у него нет
+      by construction; действие несёт ярус на родителе (comment
+      kaname.catalog_verb.per_object, 0001_initial.sql:1849; create → editor,
+      internal/domain/rule_verbs.go:55).
+    revision: kaname@b091bf63 (код = 6e9b94ab)
+    why_blocking: >-
+      Решение судит «держится ли сегмент», а у ярусного глагола сегмент не
+      держится при ЖИВОМ праве — по устройству, а не по деградации. Значит превью
+      всякой арендаторской роли, назвавшей create явно, теряет create: у U —
+      [create] → [], у T — [list create] → [list] (при чтении §1 (б)). §1.1
+      объявляет полный радиус («Кроме последствий каталога, таких состояний два»)
+      и третьего — самого массового — не называет; IAM-CCR-20 прямо говорит
+      «решение §2.3 причины не читает». Направление лжи документ не установил:
+      если ярус даёт create, превью станет УЖЕ выдачи — тот самый исход, которым
+      §2.3 отвергает два соседних варианта, и строка role.mdx:88 («исполняется
+      именно этот набор») станет ложной; если не даёт — сегодняшнее [create]
+      завышено, и изменение есть исправление, но тогда оно обязано быть
+      названо и удержано. Ни одна строка §5 этот вход не подаёт.
+    outcomes: >-
+      Исхода два. (а) Вывести ярусный глагол из суждения признаком (по строке
+      каталога per_object либо иным производителем, названным в §2.3), и
+      завести сценарий на мире М: роль {gadgets: [list, create]}, прочитанная
+      без всякого снятия, — превью [list create]; близнец {gadgets: [list]} —
+      [list], HEALTHY; различает их один факт — ярусный глагол в правиле.
+      (б) Показать вердиктом, что create ролью не выдаётся, и тогда назвать это изменение в §1.1 как третье состояние,
+      поправить role.mdx:88 и удержать сценарием с тем же близнецом. В обоих
+      исходах сказать, что health уже сегодня зовёт такую роль DEGRADED/EMPTY,
+      и что с этим: предпосылка «меняется ровно там, где health называет
+      деградацию» наследует этот сигнал.
+  - id: Б2
+    title: >-
+      гранулярность решения §2.3 двусмысленна, одно из прочтений снова открывает окно
+      отставшего снимка, и ни один сценарий прочтения не различает
+    sections: [§0.5, §1 (б), §2.3, IAM-CCR-20, IAM-CCR-22]
+    predicate: >-
+      Текст даёт два правила. §2.3, строка 319: «Глагол правила идёт в превью,
+      только если хотя бы один сегмент ЭТОГО ПРАВИЛА держится» — по правилу.
+      §1 (б), строка 259, и §0.5, строка 135: «не показывает глагола, чей сегмент
+      не держит», «держит ли проекция его сегмент "тип + глагол"» — по сегменту;
+      §2.3, строка 327, про подстановку: «при держащемся якоре разворачивается
+      набором глаголов типа» — по типу. Замер рецензента: роль V
+      {[widgets, gadgets]: [*]} в мире, где у gadgets только get и list; после
+      Ω-widgets role_verb [gadgets:get, gadgets:list], неудержан ровно якорь
+      widgets. Через снимок S0, не обновлённый после применения, превью сегодня
+      [get list update delete]; через обновлённый — [get list]; набор widgets в
+      S0 — [delete get list update]. Прочтение «по правилу» (якорь gadgets
+      держится ⇒ правило даёт, подстановка ruleVerbSet по обоим типам из S0)
+      оставляет [get list update delete]; прочтение «по типу» даёт [get list].
+      Второй вход — роль T из Б1: по правилу [list create], по сегменту [list].
+      Различающего сценария нет: у правила IAM-CCR-20 неудержаны ОБА сегмента;
+      IAM-CCR-22 подаёт только явные однотипные правила A и B; у widgets и
+      gadgets мира М наборы глаголов равны, поэтому многотипная подстановка в
+      нём ничего не различит.
+    revision: kaname@b091bf63
+    why_blocking: >-
+      Минимальная реализация первой фразы §2.3 — «пропустить правило, у которого
+      ни один сегмент не держится», оставив ruleVerbSet как есть, — проходит все
+      двадцать четыре сценария (установлено разбором каждого сценария части II,
+      не прогоном: реализации нет) и возвращает в окне отставшего снимка обещание
+      update и delete, которых роль нигде не держит. Это ровно то окно, которое
+      §2.3 объявляет закрытым «by construction, а не периодом петли», и ради
+      которого приёмка одна (§0.8). Держателя, способного покраснеть на этом
+      прочтении, в документе нет.
+    outcomes: >-
+      Записать формулу одним местом: глагол v правила r идёт в превью тогда и
+      только тогда, когда у r есть ресурс t с удержанным сегментом (t, v);
+      подстановка разворачивается наборами только тех типов, чей якорь
+      удержан. Привести к ней §0.5 и §1 (б). Завести различающие случаи: в
+      IAM-CCR-20 — правило с частично неудержанными сегментами (например
+      {probe.thing: [get, delete]}, неудержан только (probe.thing, delete) →
+      [get]); в IAM-CCR-22 — многотипная подстановка с разными наборами
+      глаголов (мир выше — готовый вход).
+  - id: Б3
+    title: >-
+      §0.10 объявляет фиксацию на полосе глагола невозможной «by construction» — посев
+      это опровергает; из-за этого у IAM-CCR-07 близнец с двумя фактами, а у полосы
+      глагола нет стороны фиксации
+    sections: [§0.10 (строки 235–242), §2.6 (строка 449), IAM-CCR-07 (строка 791)]
+    predicate: >-
+      Проба рецензента, мир документа с ролью A, полоса глагола
+      (verbApplierOver, verbRequest), щедрые потолки. С опорой нулевого значения
+      — ErrBeyondAnchor, как измерил автор. С опорой ДОСТАВКИ
+      (req.Anchor = modulecatalog.AnchorOfDelivery([Ω-widgets])) — err = nil,
+      «снято 1/5 · переселено правил 1 выдач 1 · … снято 1 элементов
+      вырезано 1», widgets снят, проекции A переселены, событий 0. Поле
+      Request.Anchor объявлено контрактом («опора едет ЗАПРОСОМ»,
+      internal/apps/kaname/modulecatalog/confirm.go), помощник производственный
+      (internal/apps/kaname/modulecatalog/anchor.go).
+    revision: kaname@b091bf63
+    why_blocking: >-
+      Отказ полосы глагола был свойством ВЫБРАННОЙ опоры, а не синтетического
+      модуля, и именно им документ оправдывает две вещи. Первая: IAM-CCR-07 и
+      его близнец IAM-CCR-01 различаются ДВУМЯ фактами — полосой и потолком, —
+      тогда как строка 791 объявляет «один факт» (change-graph.md §6: при двух
+      фактах неизвестно, какой дал исход). Вторая: у оси «полоса» есть только
+      сторона отказа, стороны фиксации на полосе глагола нет, и эмиссия,
+      поставленная под условие полосы, прошла бы все сценарии (по разбору: все
+      фиксации — на полосе старта, а IAM-CCR-07 даёт ноль при любой форме). Обе стороны оси
+      строятся тем же миром.
+    outcomes: >-
+      Снять «by construction» из §0.10 и довод §2.6. Близнецом IAM-CCR-07 сделать
+      ту же полосу глагола с опорой доставки и щедрыми потолками: применение
+      фиксируется, у A ровно одно событие — различает их один факт, потолок.
+      Строка §5 на этот исход — ЗАВОДИТСЯ.
+
+# ─── ВАЖНЫЕ, НЕ БЛОКИРУЮЩИЕ ─────────────────────────────────────────────────
+non_blocking:
+  - id: Н1
+    title: >-
+      перепись §2а называет два места, меняющих состав роли без записи её строки;
+      досев старта через ReplaceRoleVerbs — третье
+    detail: >-
+      seed.ReseedSystemRoleVerbs (internal/apps/kaname/seed/role_verb_reseed.go)
+      зовёт ReplaceRoleVerbs (role_repo.go:956, :961) в своей транзакции без
+      записи строки роли. #73 адъюдицировал его для УСТОЯВШЕГОСЯ подъёма; на
+      неустоявшемся он состав меняет — замер: неудержанные сегменты у 42 из 48
+      системных ролей до досева, 0 после, пар 654. После этого изменения он
+      сдвигает уже и превью ([] → полное) — без события. Назвать в §2а и §6 с
+      предикатом пересмотра.
+  - id: Н2
+    title: 'заголовок «Мир М — общий для IAM-CCR-01…19» накрывает IAM-CCR-10'
+    detail: >-
+      «Дано» IAM-CCR-10 — база харнесса применителя ролей (applierOnLiveBase,
+      модуль vpc), не мир М. Строка 650.
+  - id: Н3
+    title: 'описание мира М не называет ярусный create у каждого ресурса probemod'
+    detail: >-
+      Строки 657–659 перечисляют get, list, update, delete; деривация добавляет
+      create с per_object = false, и «снято 1/5», «снято 1/3» считают его.
+      Существенно для Б1: вход ярусного глагола в мире М уже есть.
+  - id: Н4
+    title: 'гейт §3.2а судит вызов функции по ФАЙЛУ, а не по разделу goose'
+    detail: >-
+      Миграция, пишущая подтаблицы роли в Down и зовущая функцию только в Up
+      (или наоборот), находки не даст. Судить Up и Down порознь.
+  - id: Н5
+    title: 'DoD п. 4 не требует инъекции для IAM-CCR-11'
+    detail: >-
+      IAM-CCR-11 — единственный держатель отказа от формы «множество из
+      ведомостей» (§3.1); §2.4 её измерил (0), но в перечень инъекций п. 4 она
+      не внесена.
+
+# ─── РАТИФИКАЦИЯ РЕШЕНИЙ ────────────────────────────────────────────────────
+decisions:
+  §2.1:
+    verdict: ПРИНИМАЮ
+    basis: >-
+      производитель один; посылка 0.8 воспроизведена: превью A после применения
+      [get list], то есть одно лишь событие отправило бы подписчика за завышенным.
+  §2.2:
+    verdict: ПРИНИМАЮ
+    basis: IAM-CCR-19 сегодня зелёный — rules, rule_states, счётчики и ведомость у A совпали.
+  §2.3:
+    verdict: ПРИНИМАЮ ИСТОЧНИК, БЛОКИРУЮ ФОРМУЛУ
+    basis: >-
+      Перенос признака со снимка на проекцию выдач подтверждён: через S0 и после
+      оживления сегодня [get list], проекция держит только gadgets:list. Формула
+      двусмысленна (Б2) и не называет ярусный глагол (Б1).
+  §2.4:
+    verdict: ПРИНИМАЮ
+    basis: >-
+      Посылка 0.3 воспроизведена (одно событие на три UPDATE). Версия и
+      updated_at A после применения прежние, правка правил по v0 принята.
+      «Дано» IAM-CCR-09 построено 3 из 3.
+  §2.5:
+    verdict: ПРИНИМАЮ
+    basis: IAM-CCR-10 — снятие роли модулем даёт одно событие сегодня.
+  §2.6:
+    verdict: БЛОКИРУЮ ДОВОД
+    basis: Б3 — фиксация на полосе глагола конструируема опорой доставки.
+  §2.7:
+    verdict: ПРИНИМАЮ
+    basis: предикат 96 + 2 сходится; решение «прошлое не догоняется» названо с предикатом пересмотра.
+
+verification:
+  method: >-
+    исполнение предикатов документа на голове ветки плюс посев мира М
+    временной интеграционной пробой рецензента (testcontainers, PG16)
+  subject_digest_matches_current_document: true
+  gates_run: [TestAcceptancePathCoordinateResolves, TestAcceptanceProbeCoordinateResolves,
+    TestAcceptanceEditedAfterItsVerdictSaysSo, TestMeasurementRevisionsAreDatedByHashAndBelongToThisHistory]
+  gates_result: 'go test -count=1 -short ./internal/check/ — ok'
+  not_executed: >-
+    отвергнутая форма «записать строку роли» (40P01 у применителя) не
+    воспроизводилась; эмиссия через ленту на крае и прогон на поднятом стенде
+    не проверялись — предмета у этого круга нет
+  header_left_untouched: true
