@@ -211,126 +211,275 @@ func TestLoginVerifierStaysInsideTheSchema(t *testing.T) {
 	}
 }
 
-// TestLoginVerifierContainmentGateInjection — способность упасть и смолчать.
-//
-// Каждая сцена — своя база, и отличается от чистой ОДНИМ фактом: внесённым
-// триггером.
-func TestLoginVerifierContainmentGateInjection(t *testing.T) {
-	type scene struct {
-		name string
-		// Внесённый факт.
-		setup string
-		// Что обязано найтись; пусто — перепись таблиц обязана смолчать.
-		wantHit string
-		// Обязано ли сработать правило о триггерах.
-		wantTrigger bool
-	}
-	scenes := []scene{
-		{
-			name: "а) журнал ресурсов получает строку целиком",
-			setup: `
-				CREATE FUNCTION kaname.lm_probe_copy_row() RETURNS trigger LANGUAGE plpgsql AS $$
-				BEGIN
-				  INSERT INTO kaname.resource_journal (resource_kind, resource_id, event_type, payload)
-				  VALUES ('iam_user', NEW.user_id, 'UPDATED', to_jsonb(NEW));
-				  RETURN NEW;
-				END; $$;
-				CREATE TRIGGER lm_probe_copy_row AFTER INSERT ON kaname.user_login_methods
-				  FOR EACH ROW EXECUTE FUNCTION kaname.lm_probe_copy_row();`,
-			wantHit:     "resource_journal.payload",
-			wantTrigger: true,
-		},
-		{
-			name: "б) таблица, заведённая после гейта, получает материал",
-			setup: `
-				CREATE TABLE kaname.lm_probe_sink (note text);
-				CREATE FUNCTION kaname.lm_probe_sink_fn() RETURNS trigger LANGUAGE plpgsql AS $$
-				BEGIN
-				  INSERT INTO kaname.lm_probe_sink (note) VALUES ('copied: ' || NEW.verifier);
-				  RETURN NEW;
-				END; $$;
-				CREATE TRIGGER lm_probe_sink_trg AFTER INSERT ON kaname.user_login_methods
-				  FOR EACH ROW EXECUTE FUNCTION kaname.lm_probe_sink_fn();`,
-			wantHit:     "lm_probe_sink.note",
-			wantTrigger: true,
-		},
-		{
-			name: "в) законный близнец: журнал получает только идентификатор",
-			setup: `
-				CREATE FUNCTION kaname.lm_probe_id_only() RETURNS trigger LANGUAGE plpgsql AS $$
-				BEGIN
-				  INSERT INTO kaname.resource_journal (resource_kind, resource_id, event_type, payload)
-				  VALUES ('iam_user', NEW.user_id, 'UPDATED', jsonb_build_object('id', NEW.user_id));
-				  RETURN NEW;
-				END; $$;
-				CREATE TRIGGER lm_probe_id_only AFTER INSERT ON kaname.user_login_methods
-				  FOR EACH ROW EXECUTE FUNCTION kaname.lm_probe_id_only();`,
-			wantHit:     "",
-			wantTrigger: true,
-		},
-	}
-	for i, sc := range scenes {
-		t.Run(sc.name, func(t *testing.T) {
-			pool := lmPool(t)
-			_, err := pool.Exec(context.Background(), sc.setup)
-			require.NoError(t, err, "внесённый факт не создан — сцена беспредметна")
-			lmWriteSentinel(t, pool, fmt.Sprintf("lminj%d", i))
+// lmLeakFunction — функция, уносящая переданное значение уведомлением. Её тело
+// таблицы секрета не называет: сцены, которые её зовут, обязан поймать не
+// разбор текста подпрограмм, а правило своего механизма.
+const lmLeakFunction = `
+	CREATE FUNCTION kaname.lm_probe_leak(v text) RETURNS boolean LANGUAGE plpgsql AS $$
+	BEGIN
+	  PERFORM pg_notify('lm_probe_leak_fn', v);
+	  RETURN true;
+	END; $$;`
 
-			c := lmScanContainment(t, pool, lmSentinel)
-			t.Log(c.Census())
-			require.True(t, c.HomeSeen(), "положительный контроль: метка в своём доме")
+// lmInjection — сцена инъекции: база отличается от чистой ОДНИМ внесённым фактом.
+type lmInjection struct {
+	name string
+	// before — внесённый факт; исполняется ДО записи метки.
+	before string
+	// after — действие после записи: обновить представление, снять копию
+	// запросом, задеть соседнюю таблицу. Пусто — ничего.
+	after string
+	// listen — канал уведомления. Непусто — сцена ДОКАЗЫВАЕТ утечку: слушатель
+	// обязан получить материал, иначе внесённый факт не сработал.
+	listen string
+	// copyAt — где обязана найтись копия (подстрока «таблица.колонка»); пусто —
+	// вне дома метки нет.
+	copyAt string
+	// want — подстрока находки; пусто — гейт обязан смолчать (законный близнец).
+	want string
+}
 
-			findings := strings.Join(c.Findings(), "\n")
-			if sc.wantHit != "" {
-				require.Contains(t, c.Hits, sc.wantHit, "копия не найдена — перепись слепа к этому месту")
-				require.Contains(t, findings, sc.wantHit, "находка обязана называть координату копии")
-			} else {
-				for where := range c.Hits {
-					require.Equal(t, lmSecretHome, where,
-						"законный близнец: вне дома метки нет, и перепись обязана смолчать")
-				}
-			}
-			if sc.wantTrigger {
-				require.NotEmpty(t, c.UserTriggers, "правило о триггерах обязано назвать внесённый триггер")
-			}
-		})
-	}
-
-	// г) Уведомление. Перепись таблиц его не видит — и это доказывается
-	// СЛУШАТЕЛЕМ, получившим материал: утечка настоящая, а таблицы молчат.
-	t.Run("г) уведомление уносит строку мимо таблиц", func(t *testing.T) {
-		pool := lmPool(t)
-		ctx := context.Background()
-		_, err := pool.Exec(ctx, `
+func lmInjections() []lmInjection {
+	return []lmInjection{
+		// ── механизм: триггер на таблице секрета ──────────────────────────────
+		{name: "триггер копирует строку целиком в журнал ресурсов", before: `
+			CREATE FUNCTION kaname.lm_probe_copy_row() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN
+			  INSERT INTO kaname.resource_journal (resource_kind, resource_id, event_type, payload)
+			  VALUES ('iam_user', NEW.user_id, 'UPDATED', to_jsonb(NEW));
+			  RETURN NEW;
+			END; $$;
+			CREATE TRIGGER lm_probe_copy_row AFTER INSERT ON kaname.user_login_methods
+			  FOR EACH ROW EXECUTE FUNCTION kaname.lm_probe_copy_row();`,
+			copyAt: "resource_journal.payload", want: "lm_probe_copy_row"},
+		{name: "триггер пишет материал в таблицу, заведённую после гейта", before: `
+			CREATE TABLE kaname.lm_probe_sink (note text);
+			CREATE FUNCTION kaname.lm_probe_sink_fn() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN
+			  INSERT INTO kaname.lm_probe_sink (note) VALUES ('copied: ' || NEW.verifier);
+			  RETURN NEW;
+			END; $$;
+			CREATE TRIGGER lm_probe_sink_trg AFTER INSERT ON kaname.user_login_methods
+			  FOR EACH ROW EXECUTE FUNCTION kaname.lm_probe_sink_fn();`,
+			copyAt: "lm_probe_sink.note", want: "lm_probe_sink_trg"},
+		{name: "триггер отправляет строку уведомлением мимо таблиц", before: `
 			CREATE FUNCTION kaname.lm_probe_notify() RETURNS trigger LANGUAGE plpgsql AS $$
 			BEGIN
 			  PERFORM pg_notify('lm_probe_leak', to_jsonb(NEW)::text);
 			  RETURN NEW;
 			END; $$;
 			CREATE TRIGGER lm_probe_notify AFTER INSERT ON kaname.user_login_methods
-			  FOR EACH ROW EXECUTE FUNCTION kaname.lm_probe_notify();`)
-		require.NoError(t, err)
+			  FOR EACH ROW EXECUTE FUNCTION kaname.lm_probe_notify();`,
+			listen: "lm_probe_leak", want: "lm_probe_notify"},
+		{name: "триггер пишет в журнал только идентификатор — правило о триггерах всё равно срабатывает", before: `
+			CREATE FUNCTION kaname.lm_probe_id_only() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN
+			  INSERT INTO kaname.resource_journal (resource_kind, resource_id, event_type, payload)
+			  VALUES ('iam_user', NEW.user_id, 'UPDATED', jsonb_build_object('id', NEW.user_id));
+			  RETURN NEW;
+			END; $$;
+			CREATE TRIGGER lm_probe_id_only AFTER INSERT ON kaname.user_login_methods
+			  FOR EACH ROW EXECUTE FUNCTION kaname.lm_probe_id_only();`,
+			want: "lm_probe_id_only"},
 
-		listener, err := pool.Acquire(ctx)
-		require.NoError(t, err)
-		defer listener.Release()
-		_, err = listener.Exec(ctx, `LISTEN lm_probe_leak`)
-		require.NoError(t, err)
+		// ── механизм: правило перезаписи ──────────────────────────────────────
+		{name: "правило на таблице секрета уносит материал уведомлением", before: `
+			CREATE RULE lm_probe_rule AS ON INSERT TO kaname.user_login_methods
+			  DO ALSO SELECT pg_notify('lm_probe_rule', NEW.verifier);`,
+			listen: "lm_probe_rule", want: "lm_probe_rule"},
+		{name: "законный близнец: правило на соседней таблице таблицы секрета не касается", before: `
+			CREATE RULE lm_probe_neighbour_rule AS ON UPDATE TO kaname.users DO ALSO NOTIFY lm_probe_neighbour_rule;`,
+			after: `UPDATE kaname.users SET display_name = display_name`},
 
-		lmWriteSentinel(t, pool, "lmnotify")
+		// ── механизм: подпрограмма, читающая таблицу секрета ──────────────────
+		{name: "триггер на СОСЕДНЕЙ таблице читает материал и отправляет его", before: `
+			CREATE FUNCTION kaname.lm_probe_neighbour_reads() RETURNS trigger LANGUAGE plpgsql AS $$
+			DECLARE v text;
+			BEGIN
+			  SELECT verifier INTO v FROM kaname.user_login_methods WHERE user_id = NEW.id LIMIT 1;
+			  PERFORM pg_notify('lm_probe_neighbour', coalesce(v, ''));
+			  RETURN NEW;
+			END; $$;
+			CREATE TRIGGER lm_probe_neighbour_reads AFTER UPDATE ON kaname.users
+			  FOR EACH ROW EXECUTE FUNCTION kaname.lm_probe_neighbour_reads();`,
+			after:  `UPDATE kaname.users SET display_name = display_name WHERE id IN (SELECT user_id FROM kaname.user_login_methods)`,
+			listen: "lm_probe_neighbour", want: "lm_probe_neighbour_reads"},
+		{name: "законный близнец: триггер соседа читает соседа, таблица секрета названа только в комментарии", before: `
+			CREATE FUNCTION kaname.lm_probe_neighbour_own() RETURNS trigger LANGUAGE plpgsql AS $$
+			DECLARE v text;
+			BEGIN
+			  -- user_login_methods здесь не читается: только собственный адрес
+			  /* и в блочном комментарии тоже: kaname.user_login_methods */
+			  SELECT email INTO v FROM kaname.users WHERE id = NEW.id;
+			  PERFORM pg_notify('lm_probe_neighbour_own', coalesce(v, ''));
+			  RETURN NEW;
+			END; $$;
+			CREATE TRIGGER lm_probe_neighbour_own AFTER UPDATE ON kaname.users
+			  FOR EACH ROW EXECUTE FUNCTION kaname.lm_probe_neighbour_own();`,
+			after: `UPDATE kaname.users SET display_name = display_name`},
+		{name: "событийный триггер читает материал при любом DDL", before: `
+			CREATE FUNCTION kaname.lm_probe_evt() RETURNS event_trigger LANGUAGE plpgsql AS $$
+			BEGIN
+			  PERFORM pg_notify('lm_probe_evt', coalesce((SELECT string_agg(verifier, ',') FROM kaname.user_login_methods), ''));
+			END; $$;
+			CREATE EVENT TRIGGER lm_probe_evt ON ddl_command_end EXECUTE FUNCTION kaname.lm_probe_evt();`,
+			after:  `CREATE TABLE kaname.lm_probe_ddl (x int)`,
+			listen: "lm_probe_evt", want: "lm_probe_evt"},
+		{name: "функция со стандартным телом SQL читает материал", before: `
+			CREATE FUNCTION kaname.lm_probe_sqlfn(u text) RETURNS text LANGUAGE sql
+			BEGIN ATOMIC
+			  SELECT verifier FROM kaname.user_login_methods WHERE user_id = u;
+			END;`,
+			want: "lm_probe_sqlfn"},
 
-		wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		n, err := listener.Conn().WaitForNotification(wctx)
-		require.NoError(t, err, "уведомление не пришло — внесённый факт не сработал, сцена беспредметна")
-		require.Contains(t, n.Payload, lmSentinel, "слушатель получил материал: утечка настоящая")
+		// ── механизм: политика строк, ограничение, домен ──────────────────────
+		// Суперпользователь обходит политики строк всегда, а роль пробы — он.
+		// Поэтому внесённый факт исполняет ПИСАТЕЛЬ без этого права: иначе
+		// политика не исполнилась бы, и сцена была бы беспредметна.
+		{name: "политика строк зовёт функцию с материалом", before: lmLeakFunction + `
+			DO $$ BEGIN
+			  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'lm_probe_writer') THEN
+			    CREATE ROLE lm_probe_writer NOLOGIN;
+			  END IF;
+			END $$;
+			GRANT USAGE ON SCHEMA kaname TO lm_probe_writer;
+			GRANT SELECT, UPDATE ON kaname.user_login_methods TO lm_probe_writer;
+			ALTER TABLE kaname.user_login_methods ENABLE ROW LEVEL SECURITY;
+			ALTER TABLE kaname.user_login_methods FORCE ROW LEVEL SECURITY;
+			CREATE POLICY lm_probe_policy ON kaname.user_login_methods
+			  USING (true) WITH CHECK (kaname.lm_probe_leak(verifier));`,
+			after: `SET ROLE lm_probe_writer;
+			  UPDATE kaname.user_login_methods SET verifier = verifier;
+			  RESET ROLE`,
+			listen: "lm_probe_leak_fn", want: "lm_probe_policy"},
+		{name: "ограничение проверки зовёт функцию с материалом", before: lmLeakFunction + `
+			ALTER TABLE kaname.user_login_methods ADD CONSTRAINT lm_probe_check CHECK (kaname.lm_probe_leak(verifier));`,
+			listen: "lm_probe_leak_fn", want: "lm_probe_check"},
+		{name: "домен колонки материала зовёт функцию со значением", before: lmLeakFunction + `
+			CREATE DOMAIN kaname.lm_probe_domain AS text CHECK (kaname.lm_probe_leak(VALUE));
+			ALTER TABLE kaname.user_login_methods ALTER COLUMN verifier TYPE kaname.lm_probe_domain;`,
+			listen: "lm_probe_leak_fn", want: "lm_probe_domain"},
 
-		c := lmScanContainment(t, pool, lmSentinel)
-		t.Log(c.Census())
-		for where := range c.Hits {
-			require.Equal(t, lmSecretHome, where, "перепись таблиц уведомления не видит — так и заявлено")
-		}
-		require.NotEmpty(t, c.UserTriggers,
-			"правило о триггерах — единственное, что различает эту утечку, и оно обязано сработать")
-	})
+		// ── механизм: публикация логической репликации ────────────────────────
+		{name: "публикация отдаёт таблицу секрета подписчику", before: `
+			CREATE PUBLICATION lm_probe_pub FOR TABLE kaname.user_login_methods;`,
+			want: "lm_probe_pub"},
+		{name: "публикация всей схемы захватывает таблицу секрета", before: `
+			CREATE PUBLICATION lm_probe_pub_schema FOR TABLES IN SCHEMA kaname;`,
+			want: "lm_probe_pub_schema"},
+		{name: "законный близнец: публикация соседней таблицы", before: `
+			CREATE PUBLICATION lm_probe_pub_users FOR TABLE kaname.users;`},
+
+		// ── вид отношения: представления ──────────────────────────────────────
+		{name: "материализованное представление с материалом, обновлённое после записи", before: `
+			CREATE MATERIALIZED VIEW kaname.lm_probe_mv AS SELECT user_id, verifier FROM kaname.user_login_methods;`,
+			after:  `REFRESH MATERIALIZED VIEW kaname.lm_probe_mv`,
+			copyAt: "lm_probe_mv.verifier", want: "lm_probe_mv"},
+		{name: "материализованное представление с материалом, ещё пустое", before: `
+			CREATE MATERIALIZED VIEW kaname.lm_probe_mv_empty AS SELECT user_id, verifier FROM kaname.user_login_methods;`,
+			want: "lm_probe_mv_empty"},
+		{name: "законный близнец: материализованное представление без материала", before: `
+			CREATE MATERIALIZED VIEW kaname.lm_probe_mv_ids AS SELECT user_id, kind FROM kaname.user_login_methods;`,
+			after: `REFRESH MATERIALIZED VIEW kaname.lm_probe_mv_ids`},
+		{name: "представление отдаёт материал", before: `
+			CREATE VIEW kaname.lm_probe_v AS SELECT * FROM kaname.user_login_methods;`,
+			copyAt: "lm_probe_v.verifier", want: "lm_probe_v"},
+		{name: "законный близнец: представление без материала", before: `
+			CREATE VIEW kaname.lm_probe_v_ids AS SELECT user_id, kind FROM kaname.user_login_methods;`},
+
+		// ── вид отношения: таблицы и формы колонки ────────────────────────────
+		{name: "копия запросом CREATE TABLE AS после записи", after: `
+			CREATE TABLE kaname.lm_probe_ctas AS SELECT user_id, verifier FROM kaname.user_login_methods`,
+			copyAt: "lm_probe_ctas.verifier", want: "lm_probe_ctas"},
+		{name: "копия в таблице ДРУГОЙ схемы", after: `
+			CREATE SCHEMA lm_probe_other;
+			CREATE TABLE lm_probe_other.copy AS SELECT verifier FROM kaname.user_login_methods`,
+			copyAt: "lm_probe_other.copy.verifier", want: "lm_probe_other.copy"},
+		{name: "копия в колонке составного типа строки таблицы секрета", before: `
+			CREATE TABLE kaname.lm_probe_rows (r kaname.user_login_methods);`,
+			after:  `INSERT INTO kaname.lm_probe_rows SELECT m FROM kaname.user_login_methods m`,
+			copyAt: "lm_probe_rows.r", want: "lm_probe_rows"},
+		{name: "копия в массиве двоичных значений", after: `
+			CREATE TABLE kaname.lm_probe_bytes AS
+			  SELECT ARRAY[convert_to(verifier, 'UTF8')] AS b FROM kaname.user_login_methods`,
+			copyAt: "lm_probe_bytes.b", want: "lm_probe_bytes"},
+		{name: "порождённая колонка несёт материал", before: `
+			ALTER TABLE kaname.user_login_methods ADD COLUMN lm_probe_gen text GENERATED ALWAYS AS ('copy:' || verifier) STORED;`,
+			copyAt: "user_login_methods.lm_probe_gen", want: "lm_probe_gen"},
+
+		// ── вид отношения: индекс и статистика ────────────────────────────────
+		{name: "уникальный индекс по материалу — копия в индексе и канал DETAIL", before: `
+			CREATE UNIQUE INDEX lm_probe_idx ON kaname.user_login_methods (verifier);`,
+			want: "lm_probe_idx"},
+		{name: "законный близнец: индекс по владельцу", before: `
+			CREATE INDEX lm_probe_idx_user ON kaname.user_login_methods (user_id);`},
+		{name: "расширенная статистика по материалу", before: `
+			CREATE STATISTICS lm_probe_stx (mcv) ON kind, verifier FROM kaname.user_login_methods;`,
+			want: "lm_probe_stx"},
+		{name: "статистика планировщика собирает выборку материала", before: `
+			ALTER TABLE kaname.user_login_methods ALTER COLUMN verifier SET STATISTICS -1;`,
+			want: "pg_statistic"},
+	}
+}
+
+// TestLoginVerifierContainmentGateInjection — способность упасть и смолчать.
+//
+// Каждая сцена — своя база и отличается от чистой ОДНИМ внесённым фактом. Сцена
+// с каналом доказывает, что утечка НАСТОЯЩАЯ: слушатель получил материал.
+func TestLoginVerifierContainmentGateInjection(t *testing.T) {
+	for i, sc := range lmInjections() {
+		t.Run(sc.name, func(t *testing.T) {
+			pool := lmPool(t)
+			ctx := context.Background()
+			if sc.before != "" {
+				_, err := pool.Exec(ctx, sc.before)
+				require.NoError(t, err, "внесённый факт не создан — сцена беспредметна")
+			}
+			var listener *pgxpool.Conn
+			if sc.listen != "" {
+				var err error
+				listener, err = pool.Acquire(ctx)
+				require.NoError(t, err)
+				defer listener.Release()
+				_, err = listener.Exec(ctx, "LISTEN "+pgx.Identifier{sc.listen}.Sanitize())
+				require.NoError(t, err)
+			}
+			lmWriteSentinel(t, pool, fmt.Sprintf("lminj%d", i))
+			if sc.after != "" {
+				_, err := pool.Exec(ctx, sc.after)
+				require.NoError(t, err, "действие после записи не исполнилось — сцена беспредметна")
+			}
+			if listener != nil {
+				wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				defer cancel()
+				n, err := listener.Conn().WaitForNotification(wctx)
+				require.NoError(t, err, "уведомление не пришло — внесённый факт не сработал, сцена беспредметна")
+				require.Contains(t, n.Payload, lmSentinel, "слушатель получил материал: утечка настоящая")
+			}
+
+			c := lmScanContainment(t, pool, lmSentinel)
+			t.Log(c.Census())
+			require.True(t, c.HomeSeen(), "положительный контроль: метка в своём доме")
+
+			findings := strings.Join(c.Findings(), "\n")
+			t.Logf("находки:\n%s", findings)
+			if sc.copyAt != "" {
+				found := false
+				for where := range c.Hits {
+					found = found || strings.Contains(where, sc.copyAt)
+				}
+				require.True(t, found, "копия %s не найдена — перепись слепа к этому месту (%v)", sc.copyAt, c.Hits)
+			} else {
+				for where := range c.Hits {
+					require.True(t, strings.HasSuffix(where, lmSecretHome),
+						"вне дома метки быть не должно, а она найдена в %s", where)
+				}
+			}
+			if sc.want == "" {
+				require.Empty(t, c.Findings(), "законный близнец: гейт обязан смолчать")
+				return
+			}
+			require.Contains(t, findings, sc.want, "находка обязана называть внесённое по имени")
+		})
+	}
 }

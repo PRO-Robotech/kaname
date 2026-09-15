@@ -19,9 +19,10 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/check"
 )
 
-// lawfulLoginVerifierCorpus — минимальное законное дерево: объявление выхода,
-// адаптер, пользующийся им и называющий таблицу, и сосед, не делающий ни того,
-// ни другого.
+// lawfulLoginVerifierCorpus — минимальное законное дерево той же ФОРМЫ, что
+// настоящее: объявление выхода; адаптер, который зовёт выход аргументом запроса
+// и строит запросы константой имени таблицы; переводчик отказов, сверяющий имя
+// таблицы из отказа предикатом владельца; сосед, не делающий ничего из этого.
 func lawfulLoginVerifierCorpus() check.TreeCorpus {
 	return check.TreeCorpus{
 		"internal/domain/login_method.go": `package domain
@@ -38,14 +39,19 @@ func (v LoginVerifier) String() string { return "Reveal is not called here" }
 
 const loginMethodsTable = "user_login_methods"
 
-func write(v interface{ Reveal() string }) string {
-	return "INSERT INTO user_login_methods (verifier) VALUES ('" + v.Reveal() + "')"
+type execer interface{ Exec(q string, args ...any) error }
+
+func write(db execer, v interface{ Reveal() string }) error {
+	q := "INSERT INTO " + loginMethodsTable + " (verifier) VALUES ($1)"
+	return db.Exec(q, v.Reveal())
 }
+
+func isLoginMethodsTable(name string) bool { return name == loginMethodsTable }
 `,
 		"internal/repo/kaname/pg/pgmaperr.go": `package pg
 
-func texts(c string) bool {
-	return c == "user_login_methods_pkey" || c == "user_login_methods_user_fk"
+func texts(c, table string) bool {
+	return (c == "user_login_methods_pkey" || c == "user_login_methods_user_fk") && isLoginMethodsTable(table)
 }
 `,
 		"internal/dto/toproto/user.go": `package toproto
@@ -67,8 +73,8 @@ func TestLoginVerifierGate_LawfulCorpusIsSilent(t *testing.T) {
 	require.Empty(t, findings, "законный корпус обязан молчать — иначе красное в сценах ниже ничего не доказывает")
 	require.Equal(t, 1, census.AccessorDecls)
 	require.Equal(t, 1, census.AllowedUses["internal/repo/kaname/pg"])
-	require.Equal(t, 2, census.OwnerTableLiterals, "константа и оператор у владельца — два литерала")
-	require.Equal(t, 2, census.TableLiterals, "имена ограничений (`…_pkey`) таблицей не считаются")
+	require.Equal(t, 1, census.OwnerTableLiterals, "у владельца один литерал — объявление константы")
+	require.Equal(t, 1, census.TableLiterals, "имена ограничений (`…_pkey`) таблицей не считаются")
 }
 
 func TestLoginVerifierGate_Injection(t *testing.T) {
@@ -82,6 +88,103 @@ func TestLoginVerifierGate_Injection(t *testing.T) {
 		wantPremise string
 	}
 	scenes := []scene{
+		{
+			// Б2 п.1: разрешение стояло на КАТАЛОГЕ пакета адаптера (70 не-тестовых
+			// файлов), а шапка владельца и тело PR обещали «единственное место».
+			name: "вызов выхода в соседнем файле того же пакета адаптера",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/audit_outbox_emitter.go"] = `package pg
+
+func payload(v interface{ Reveal() string }) map[string]string {
+	return map[string]string{"verifier": v.Reveal()}
+}
+`
+			},
+			wantFinding: "internal/repo/kaname/pg/audit_outbox_emitter.go:4: материал способа входа выведен",
+		},
+		{
+			// Опыт, который ревьюер разобрал только чтением: уведомление из пакета
+			// адаптера уносит материал к слушателю мимо таблиц — гейт схемы его не
+			// видит by construction, значит держать обязан гейт дерева.
+			name: "уведомление с материалом из соседнего файла пакета адаптера",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/notify.go"] = `package pg
+
+func announce(db execer, v interface{ Reveal() string }) error {
+	return db.Exec("SELECT pg_notify('lm_probe', $1)", v.Reveal())
+}
+`
+			},
+			wantFinding: "internal/repo/kaname/pg/notify.go:4: материал способа входа выведен",
+		},
+		{
+			// Б2 п.2: распознаватель второго читателя знал только литерал, а владелец
+			// строит оба своих запроса КОНСТАНТОЙ — и константа видна всему пакету.
+			name: "второй читатель через константу владельца в соседнем файле",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/login_reader.go"] = "package pg\n\nfunc q() string { return `SELECT verifier FROM ` + loginMethodsTable }\n"
+			},
+			wantFinding: "internal/repo/kaname/pg/login_reader.go:3: таблица секрета",
+		},
+		{
+			name: "второй читатель через склейку имени из литералов",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = "package handler\n\nconst q = `SELECT verifier FROM kaname.user_login_` + `methods`\n"
+			},
+			wantFinding: "internal/handler/login.go:3: таблица секрета",
+		},
+		{
+			name: "второй читатель через экспортированную константу в другом пакете",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/login_method_repo.go"] += "\nconst LoginMethodsTable = loginMethodsTable\n"
+				c["internal/handler/login.go"] = `package handler
+
+import "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+
+var q = "SELECT verifier FROM " + pg.LoginMethodsTable
+`
+			},
+			wantFinding: "internal/handler/login.go:5: таблица секрета",
+		},
+		{
+			name: "владелец отдаёт имя таблицы наружу функцией",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/login_method_repo.go"] += "\nfunc loginMethodsTableName() string { return loginMethodsTable }\n"
+			},
+			wantFinding: "loginMethodsTableName",
+		},
+		{
+			name: "владелец отдаёт материал наружу функцией",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/login_method_repo.go"] += "\nfunc material(v interface{ Reveal() string }) string { return v.Reveal() }\n"
+			},
+			wantFinding: "material",
+		},
+		{
+			name: "владелец отдаёт выход наружу переменной пакета",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/login_method_repo.go"] += "\nvar reveal = func(v interface{ Reveal() string }) string { return v.Reveal() }\n"
+			},
+			wantFinding: "reveal",
+		},
+		{
+			name: "законный близнец: локальная переменная с именем константы в чужом файле",
+			edit: func(c check.TreeCorpus) {
+				c["internal/repo/kaname/pg/shadow.go"] = `package pg
+
+func other() string {
+	loginMethodsTable := "users"
+	return loginMethodsTable
+}
+`
+			},
+		},
+		{
+			name: "законный близнец: склейка, дающая имя ограничения, а не таблицы",
+			edit: func(c check.TreeCorpus) {
+				c["internal/handler/login.go"] = "package handler\n\nconst c = `user_login_` + `methods_pkey`\n"
+			},
+		},
 		{
 			name: "вызов выхода в слое контракта",
 			edit: func(c check.TreeCorpus) {
