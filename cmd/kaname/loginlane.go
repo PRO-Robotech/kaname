@@ -112,7 +112,7 @@ func requireLoginLaneTLS(productionMode bool, cfg config.Config, mtlsCfg config.
 	}
 	if strings.TrimSpace(cfg.APIServer.LoginLaneEndpoint) == "" {
 		return fmt.Errorf("%s=%s requires the password sign-in lane listener, and its address is not declared "+
-			"(set %s, e.g. tcp://0.0.0.0:9098): on this posture no other component lets a person sign in",
+			"(set %s, e.g. tcp://0.0.0.0:9100 — a port of its own, distinct from the REST fronts): on this posture no other component lets a person sign in",
 			config.IdentityProviderSetting, config.IdentityProviderOwn, knobLoginLane)
 	}
 	if !mtlsCfg.LoginLaneServerMTLS.Enable {

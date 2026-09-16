@@ -133,7 +133,7 @@ func NewLoginUseCase(d LoginDeps) (*LoginUseCase, error) {
 	return &LoginUseCase{
 		store: d.Store, users: d.Users, methods: d.Methods, verifier: d.Verifier, hasher: d.Hasher,
 		limits: d.Limits, ttl: d.TTL, observer: d.Observer, now: d.Now, logger: d.Logger,
-		gate: attemptGate{store: d.Store, limits: d.Limits, now: d.Now}, rewriteOn: true,
+		gate: attemptGate{store: d.Store, limits: d.Limits, now: d.Now, observer: d.Observer}, rewriteOn: true,
 	}, nil
 }
 

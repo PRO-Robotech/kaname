@@ -240,6 +240,21 @@ func TestLogin_F3_04_MigratedBcryptIsRewrittenAfterMatch(t *testing.T) {
 	require.Equal(t, 2, h.obs.rewrit[humansession.RewriteDone], "PWV-09.4: следующий вход повторяет")
 }
 
+// TestLogin_F3_28_SourceAxisSilenceIsCounted — вопрос без адреса источника не
+// молчит: клетка «источник неизвестен» растёт, ось адреса при этом судится;
+// с адресом клетка не растёт.
+func TestLogin_F3_28_SourceAxisSilenceIsCounted(t *testing.T) {
+	h := newHarness(t, nil)
+	h.person(t, "usr-a", "a@example.invalid", "correct horse battery", true)
+	ctx := context.Background()
+	_, err := h.login.Execute(ctx, humansession.LoginInput{Email: "a@example.invalid", Password: "wrong", Source: "203.0.113.9"})
+	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
+	require.Zero(t, h.obs.sourceUnknown, "с адресом источника клетка не растёт")
+	_, err = h.login.Execute(ctx, humansession.LoginInput{Email: "a@example.invalid", Password: "wrong"})
+	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
+	require.Equal(t, 1, h.obs.sourceUnknown, "без адреса — ровно один вопрос сосчитан")
+}
+
 // TestLogin_F3_28_RateLimitByAddressAndSource — N неверных по адресу → отказ по
 // частоте на N+1-й, побайтово равный для адреса, которого нет; регистр не
 // удваивает окно; после окна проходит; успешный вход обнуляет счёт; по источнику
@@ -540,6 +555,44 @@ func TestPasswordRule_F3_34_UnavailableAuthorityPassesLoudlyMisconfiguredRefuses
 	_, err = h.change.Execute(ctx, humansession.ChangePasswordInput{Bearer: out.Bearer, CurrentPassword: "a clean passphrase", NewPassword: "another clean passphrase"})
 	require.ErrorIs(t, err, humansession.ErrBreachAuthorityMisconfigured, "настроен не туда — отказ, не проход")
 	require.Equal(t, 1, h.obs.breach[humansession.BreachCheckMisconfigured])
+}
+
+// TestChangePassword_F3_20_FiveRecordsAreOneOutcome — подставной отказ ЛЮБОЙ из
+// записей смены пароля (замещение материала, снятие прочих сессий, отсечка,
+// ротация носителя, снятие требования, аудит, фиксация) не оставляет ни одной:
+// материал прежний, прочие сессии живы, отсечки нет, носитель прежний, требование
+// стоит; наружу — ErrStoreUnavailable (Р6, Ф3-20 «д»).
+func TestChangePassword_F3_20_FiveRecordsAreOneOutcome(t *testing.T) {
+	for _, op := range []string{"replace", "end-others", "cutoff", "rotate", "clear-requirement", "audit", "commit", "writer"} {
+		t.Run(op, func(t *testing.T) {
+			h := newHarness(t, nil)
+			u := h.person(t, "usr-a", "a@example.invalid", "correct horse battery", true)
+			ctx := context.Background()
+			other := h.mustLogin(t, "a@example.invalid", "correct horse battery") // прочая сессия
+			rb, _ := domain.NewSessionBearer()
+			r := domain.HumanSession{ID: "hss-r", UserID: u.ID, AuthenticatedAt: ucBase, LastPresentedAt: ucBase,
+				ExpiresAt: ucBase.Add(ucTTL), AssuranceLevel: "1", PresentedMethods: []string{"recovery_code"}, PasswordChangeRequired: true}
+			h.store.rows[r.ID] = &fakeRow{s: r, digest: rb.Digest()}
+			before := h.store.verifiers[u.ID].Reveal()
+
+			h.store.failOn = op
+			_, err := h.change.Execute(ctx, humansession.ChangePasswordInput{Bearer: rb, CurrentPassword: "correct horse battery", NewPassword: "a clean passphrase"})
+			require.ErrorIs(t, err, humansession.ErrStoreUnavailable, "отказ %s", op)
+			h.store.failOn = ""
+
+			require.Equal(t, before, h.store.verifiers[u.ID].Reveal(), "материал не замещён при отказе %s", op)
+			_, found, _ := h.resolve.Execute(ctx, other.Bearer)
+			require.True(t, found, "прочая сессия жива при отказе %s", op)
+			_, hasCutoff := h.store.cutoffs[u.ID]
+			require.False(t, hasCutoff, "отсечки нет при отказе %s", op)
+			view, found, _ := h.resolve.Execute(ctx, rb)
+			require.True(t, found, "носитель не ротирован при отказе %s", op)
+			require.True(t, view.Session.PasswordChangeRequired, "требование стоит при отказе %s", op)
+			for _, ev := range h.store.audit {
+				require.NotEqual(t, humansession.AuditPasswordChanged, ev.EventType, "события смены нет при отказе %s", op)
+			}
+		})
+	}
 }
 
 // TestChangePassword_F3_23_ClearsTheRequirementAndKeepsOthersUntouched —

@@ -100,7 +100,7 @@ func NewChangePasswordUseCase(d ChangePasswordDeps) (*ChangePasswordUseCase, err
 	return &ChangePasswordUseCase{
 		store: d.Store, methods: d.Methods, verifier: d.Verifier, hasher: d.Hasher, rule: d.Rule,
 		observer: d.Observer, now: d.Now, logger: d.Logger,
-		gate: attemptGate{store: d.Store, limits: d.Limits, now: d.Now},
+		gate: attemptGate{store: d.Store, limits: d.Limits, now: d.Now, observer: d.Observer},
 	}, nil
 }
 
@@ -194,7 +194,7 @@ func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordI
 	if _, err := w.EndOtherSessions(ctx, user.ID, resolved.Session.ID, now, domain.RevokeReasonPasswordChange); err != nil {
 		return ChangePasswordOutput{}, ErrStoreUnavailable
 	}
-	cutoff, err := revocationMoment(ctx, w, resolved.Session)
+	cutoff, err := revocationMoment(ctx, w, resolved.Session, uc.logger)
 	if err != nil {
 		return ChangePasswordOutput{}, ErrStoreUnavailable
 	}

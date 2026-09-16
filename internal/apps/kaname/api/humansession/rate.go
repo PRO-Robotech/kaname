@@ -56,12 +56,15 @@ func (l Limits) LongestWindow() time.Duration {
 func AddressKey(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
 
 // attemptGate — вопрос «исчерпано ли» по обеим осям; source пуст — ось
-// источника не спрашивается (вызывающего без адреса к полосе не бывает — Р16, но
-// пробы уровня I зовут полосу и без него).
+// источника не спрашивается, и это СЧИТАЕТСЯ (`SourceUnknownObserved`): на
+// живом проводе адрес ставит край всегда (Р10, Р16), поэтому пустой источник —
+// запрос, дошедший до полосы мимо края, а не штатный путь. Пробы уровня I зовут
+// полосу без него — клетка у них растёт, и это перепись, а не находка.
 type attemptGate struct {
-	store  Store
-	limits Limits
-	now    func() time.Time
+	store    Store
+	limits   Limits
+	now      func() time.Time
+	observer Observer
 }
 
 func (g attemptGate) check(ctx context.Context, addressKey, source string) (*TooManyAttemptsError, error) {
@@ -69,7 +72,8 @@ func (g attemptGate) check(ctx context.Context, addressKey, source string) (*Too
 	if hit, err := g.exhausted(ctx, FailureByAddress, addressKey, g.limits.AddressAttempts, g.limits.AddressWindow, now); err != nil || hit != nil {
 		return hit, err
 	}
-	if source == "" {
+	if strings.TrimSpace(source) == "" {
+		g.observer.SourceUnknownObserved()
 		return nil, nil
 	}
 	return g.exhausted(ctx, FailureBySource, source, g.limits.SourceAttempts, g.limits.SourceWindow, now)

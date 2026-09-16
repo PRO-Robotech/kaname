@@ -340,6 +340,8 @@ type countingObserver struct {
 	rewrit map[humansession.RewriteOutcome]int
 	form   map[humansession.FormRefusal]int
 	logout int
+	// sourceUnknown — вопросов о частоте без адреса источника.
+	sourceUnknown int
 }
 
 func newCountingObserver() *countingObserver {
@@ -364,6 +366,11 @@ func (o *countingObserver) FormRefusalObserved(x humansession.FormRefusal) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.form[x]++
+}
+func (o *countingObserver) SourceUnknownObserved() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sourceUnknown++
 }
 func (o *countingObserver) RateLimitObserved(x humansession.FailureScope) {
 	o.mu.Lock()

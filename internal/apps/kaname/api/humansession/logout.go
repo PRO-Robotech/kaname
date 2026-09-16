@@ -84,7 +84,7 @@ func (uc *LogoutUseCase) Execute(ctx context.Context, bearer domain.SessionBeare
 		// Гонка с параллельным выходом: запись уже снята — ничего не пишем.
 		return false, nil
 	}
-	cutoff, err := revocationMoment(ctx, w, resolved.Session)
+	cutoff, err := revocationMoment(ctx, w, resolved.Session, uc.logger)
 	if err != nil {
 		uc.observer.LogoutStoreFailureObserved()
 		return false, ErrStoreUnavailable
@@ -117,14 +117,24 @@ func (uc *LogoutUseCase) Execute(ctx context.Context, bearer domain.SessionBeare
 // revocationMoment — момент отсечки выхода и смены пароля (Р4, Р5, Ф1 §4.2):
 // на единицу разрешения хранилища (микросекунда) РАНЬШЕ первой аутентификации
 // личности нашей посадкой. Память первой аутентификации пишет только выдача;
-// если её нет (запись посеяна мимо выдачи), берётся момент самой сессии — он
-// не позже первой, и это сказано в журнале, а не проглочено.
-func revocationMoment(ctx context.Context, w Writer, s domain.HumanSession) (time.Time, error) {
+// если её нет либо она позже момента сессии (запись посеяна мимо выдачи),
+// берётся момент самой сессии — он не позже первой, — и это пишется в журнал
+// уровня warn: расхождение памяти с записью есть находка о посеве, а не штатный
+// путь.
+func revocationMoment(ctx context.Context, w Writer, s domain.HumanSession, logger *slog.Logger) (time.Time, error) {
 	first, found, err := w.FirstAuthentication(ctx, s.UserID)
 	if err != nil {
 		return time.Time{}, err
 	}
-	if !found || first.After(s.AuthenticatedAt) {
+	switch {
+	case !found:
+		logger.WarnContext(ctx, "revocation moment: no first-authentication memory for the subject; using the session's own moment",
+			"session_id", string(s.ID), "user_id", string(s.UserID))
+		first = s.AuthenticatedAt
+	case first.After(s.AuthenticatedAt):
+		logger.WarnContext(ctx, "revocation moment: first-authentication memory is later than the session; using the session's own moment",
+			"session_id", string(s.ID), "user_id", string(s.UserID),
+			"first_authenticated_at", first, "session_authenticated_at", s.AuthenticatedAt)
 		first = s.AuthenticatedAt
 	}
 	return first.Add(-time.Microsecond), nil

@@ -86,6 +86,10 @@ type Observer interface {
 	NoSessionObserved(reason NoSessionReason)
 	FormRefusalObserved(refusal FormRefusal)
 	RateLimitObserved(scope FailureScope)
+	// SourceUnknownObserved — вопрос о частоте задан БЕЗ адреса источника: ось
+	// источника не спрашивалась. На живом проводе источник ставит край всегда
+	// (Р10); ненулевой счёт означает, что до полосы дошёл запрос без него.
+	SourceUnknownObserved()
 	BreachCheckObserved(outcome BreachCheckOutcome)
 	LogoutStoreFailureObserved()
 	RewriteObserved(outcome RewriteOutcome)
@@ -98,6 +102,7 @@ func (NopObserver) LoginObserved(LoginOutcome)             {}
 func (NopObserver) NoSessionObserved(NoSessionReason)      {}
 func (NopObserver) FormRefusalObserved(FormRefusal)        {}
 func (NopObserver) RateLimitObserved(FailureScope)         {}
+func (NopObserver) SourceUnknownObserved()                 {}
 func (NopObserver) BreachCheckObserved(BreachCheckOutcome) {}
 func (NopObserver) LogoutStoreFailureObserved()            {}
 func (NopObserver) RewriteObserved(RewriteOutcome)         {}

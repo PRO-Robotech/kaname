@@ -23,6 +23,7 @@ const (
 	LoginRateLimitRefusalsMetric       = Namespace + "_login_rate_limit_refusals_total"
 	PasswordBreachCheckMetric          = Namespace + "_password_breach_check_total"
 	LogoutStoreFailuresMetric          = Namespace + "_logout_store_failures_total"
+	LoginSourceUnknownMetric           = Namespace + "_login_source_unknown_total"
 	PasswordMaterialRewriteMetric      = Namespace + "_password_material_rewrite_total"
 )
 
@@ -37,6 +38,7 @@ type LoginLaneRecorder struct {
 	breach    *prometheus.CounterVec
 	logout    prometheus.Counter
 	rewrite   *prometheus.CounterVec
+	noSource  prometheus.Counter
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -76,13 +78,19 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 				Name: LogoutStoreFailuresMetric,
 				Help: "Sign-outs not performed because the store did not answer; the bearer stays with the client.",
 			}),
+			noSource: prometheus.NewCounter(prometheus.CounterOpts{
+				Name: LoginSourceUnknownMetric,
+				Help: "Attempt-rate questions asked WITHOUT a source address: the source axis was not judged. " +
+					"The edge always sets the address on the live wire, so a non-zero count means a request " +
+					"reached the lane past the edge.",
+			}),
 			rewrite: prometheus.NewCounterVec(prometheus.CounterOpts{
 				Name: PasswordMaterialRewriteMetric,
 				Help: "Rewrites of stored password material after a successful check, by outcome: rewritten, " +
 					"not needed, write failed, skipped (72-byte password, NUL byte, unjudgeable).",
 			}, []string{"outcome"}),
 		}
-		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite)
+		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -134,6 +142,8 @@ func (l *LoginLaneRecorder) BreachCheckObserved(o humansession.BreachCheckOutcom
 }
 
 func (l *LoginLaneRecorder) LogoutStoreFailureObserved() { l.logout.Inc() }
+
+func (l *LoginLaneRecorder) SourceUnknownObserved() { l.noSource.Inc() }
 
 func (l *LoginLaneRecorder) RewriteObserved(o humansession.RewriteOutcome) {
 	l.rewrite.WithLabelValues(string(o)).Inc()
