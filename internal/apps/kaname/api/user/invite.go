@@ -132,8 +132,6 @@ func NewInviteUserUseCase(
 	}
 }
 
-// WithObjectReconciler wires the post-commit synchronous per-object materializer.
-// nil-safe.
 // WithInviteTTL задаёт срок строки приглашения.
 //
 // Величину читает КОМПОЗИЦИОННЫЙ КОРЕНЬ из настройки и передаёт сюда: use-case
@@ -146,6 +144,8 @@ func (uc *InviteUserUseCase) WithInviteTTL(ttl time.Duration) *InviteUserUseCase
 	return uc
 }
 
+// WithObjectReconciler wires the post-commit synchronous per-object materializer.
+// nil-safe.
 func (uc *InviteUserUseCase) WithObjectReconciler(r ObjectReconciler) *InviteUserUseCase {
 	uc.reconciler = r
 	return uc
