@@ -220,6 +220,12 @@ func TestVerify_UnparsableBodyNeverMatches(t *testing.T) {
 		{"формат A усечён", good[:20]},
 		{"формат A без разделителя стоимости", strings.Replace(good, "$10$", "$10", 1)},
 		{"формат A со стоимостью не числом", strings.Replace(good, "$10$", "$xx$", 1)},
+		// Алфавит тела: длина цела, признак и стоимость разбираются, а символ
+		// телу формата не принадлежит. Без разбора алфавита библиотека отвечает
+		// отказом, НЕОТЛИЧИМЫМ от «не совпал», — и повреждение значения
+		// читалось бы как поток неверных паролей.
+		{"формат A с чужим символом в теле", good[:len(good)-1] + "!"},
+		{"формат A с пробелом в теле", good[:len(good)-1] + " "},
 		{"формат B усечён", goodArgon[:25]},
 		{"формат B без сегмента параметров", strings.Replace(goodArgon, "m=65536,t=3,p=4", "", 1)},
 		{"формат B с чужой версией разметки", strings.Replace(goodArgon, "v=19", "v=16", 1)},
@@ -285,7 +291,6 @@ func TestVerify_ParametersOutsideAdmissibilityAreRefusedBeforeComputing(t *testi
 	onTheEdge := []struct{ name, material string }{
 		{"формат B: итераций 1, параллельность 1, память 8 КиБ, ключ 4 байта",
 			argon2idValue(t, rightPassword, 8, 1, 1, 4)},
-		{"формат B: параллельность 255", argon2idValue(t, rightPassword, 65536, 1, 255, 32)},
 		{"формат A: стоимость 4", bcryptValue(t, rightPassword, 4)},
 	}
 	for _, c := range onTheEdge {
@@ -297,6 +302,18 @@ func TestVerify_ParametersOutsideAdmissibilityAreRefusedBeforeComputing(t *testi
 				"значение РОВНО на границе допустимости обязано читаться: граница включена")
 		})
 	}
+
+	// Близнец ВЕРХНЕЙ границы стоит отдельно, и его исход другой: параллельность
+	// 255 читатель вмещает, поэтому разбор её ПРОПУСКАЕТ, а отвергает потолок
+	// записи. Отличие от отрицательной полосы — один факт (255 против 256), и
+	// разные исходы доказывают, что 256 отвергается именно РАЗБОРОМ: сойдись
+	// оба к «выше потолка», проба не отличала бы разбор от сверки с потолком, а
+	// приведённая к однобайтовому типу параллельность дала бы панику.
+	obs := newRecordingObserver()
+	v := newVerifier(t, 4, obs)
+	got := v.Verify(verifierOf(t, argon2idValueWithParams(t, 65536, 1, 255)), rightPassword)
+	require.Equal(t, passwordverify.OutcomeParamsAboveCeiling, got.Outcome,
+		"параллельность 255 обязана дойти до сверки с потолком: тип читателя её вмещает")
 }
 
 // TestVerify_MissingMaterialIsNotAMismatch — PWV-06, строки 06.1…06.4.
@@ -459,36 +476,61 @@ func TestVerify_CapacityExhaustedIsItsOwnOutcome(t *testing.T) {
 
 // TestVerify_CapacityIsTakenAtomically — «спросить» и «занять» не разнесены:
 // под конкуренцией одновременных проверок не бывает больше ёмкости.
+//
+// Красное обязано быть ДЕТЕРМИНИРОВАННЫМ, а не выпадать в одном прогоне из
+// десяти, поэтому проба не полагается на удачу планировщика: соискатели ждут
+// общего сигнала и входят разом, а занявший место держит его, пока не вошли
+// все, кто мог. На разнесённой паре «прочитать счётчик — увеличить счётчик»
+// каждый соискатель видит свободное место и заходит; на атомарном захвате
+// внутрь попадает ровно ёмкость.
 func TestVerify_CapacityIsTakenAtomically(t *testing.T) {
 	t.Parallel()
 
-	const capacity = 3
+	const (
+		capacity  = 3
+		claimants = 256
+	)
 	v := newVerifier(t, capacity, newRecordingObserver())
 
 	var mu sync.Mutex
-	inside, peak := 0, 0
-	var wg sync.WaitGroup
-	for i := 0; i < 64; i++ {
-		wg.Add(1)
+	inside, peak, admitted := 0, 0, 0
+
+	start := make(chan struct{})
+	var ready, done sync.WaitGroup
+	ready.Add(claimants)
+	done.Add(claimants)
+	for i := 0; i < claimants; i++ {
 		go func() {
-			defer wg.Done()
+			defer done.Done()
+			ready.Done()
+			<-start
 			v.WithCapacity(func() {
 				mu.Lock()
 				inside++
+				admitted++
 				if inside > peak {
 					peak = inside
 				}
 				mu.Unlock()
-				time.Sleep(time.Millisecond)
+				// Место держится, пока разом вошедшие соискатели не проявятся:
+				// освободи его сразу — и пик замерил бы скорость планировщика,
+				// а не ёмкость.
+				time.Sleep(50 * time.Millisecond)
 				mu.Lock()
 				inside--
 				mu.Unlock()
 			})
 		}()
 	}
-	wg.Wait()
+	ready.Wait()
+	close(start)
+	done.Wait()
+
+	t.Logf("перепись: соискателей %d, внутрь допущено %d, пик одновременных %d при ёмкости %d",
+		claimants, admitted, peak, capacity)
 	require.LessOrEqual(t, peak, capacity,
-		"одновременных проверок было %d при ёмкости %d — «есть ли место» и «занять место» разнесены во времени", peak, capacity)
+		"одновременных проверок было %d при ёмкости %d — «есть ли место» и «занять место» разнесены во времени",
+		peak, capacity)
 	require.Positive(t, peak, "внутрь не зашёл никто — проба ничего не измерила")
 }
 
