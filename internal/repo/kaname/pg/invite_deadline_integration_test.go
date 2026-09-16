@@ -254,3 +254,120 @@ func TestInviteDeadline_ActivationHappensOnce(t *testing.T) {
 			"проигравший обязан получить исход гонки («строку активировал конкурент»), а не срок: %v", e)
 	}
 }
+
+// TestInviteDeadline_ReInvitingExtendsAnExpiredRow — приглашение, ВЫДАННОЕ
+// ЗАНОВО, продлевает срок; рождённых истёкшими приглашений не бывает.
+//
+// Строка приглашения ГЛОБАЛЬНА: человека, уже известного платформе, приглашают
+// во второй аккаунт ЭТОЙ ЖЕ строкой. Не тронь повторное приглашение срок —
+// активация отказала бы сразу, и отказ говорил бы «попросите пригласить
+// заново» тому, кого только что пригласили.
+func TestInviteDeadline_ReInvitingExtendsAnExpiredRow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+	repo := kanamepg.New(pool, nil)
+
+	adminA, accA := bootstrapAdmin(t, ctx, repo, "mail23d1")
+	_, accB := bootstrapAdmin(t, ctx, repo, "mail23d2")
+
+	// Первое приглашение — уже истёкшее.
+	w, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	first, _, err := w.UsersW().InsertPending(ctx, domain.User{
+		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
+		AccountID:    accA,
+		Email:        "reinvited@example.com",
+		InviteStatus: domain.InviteStatusPending,
+		InvitedBy:    adminA,
+	}, time.Now().UTC().Add(-time.Hour))
+	require.NoError(t, err)
+	require.NoError(t, w.Commit(ctx))
+
+	// Контроль: до повторного приглашения строка НЕ активируется.
+	wx, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	_, xerr := wx.UsersW().ActivateInvite(ctx, first.ID,
+		domain.ExternalSubject("sub-mail23d-pre"), domain.DisplayName("Real"))
+	_ = wx.Rollback(ctx)
+	require.Error(t, xerr, "проба судит не то состояние: строка активируется и без продления")
+	require.True(t, stderrors.Is(xerr, iamerr.ErrInviteExpired))
+
+	// Приглашение ЗАНОВО — во второй аккаунт, той же почты.
+	w2, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	_, _, err = w2.UsersW().InsertPending(ctx, domain.User{
+		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
+		AccountID:    accB,
+		Email:        "reinvited@example.com",
+		InviteStatus: domain.InviteStatusPending,
+		InvitedBy:    adminA,
+	}, time.Now().UTC().Add(time.Hour))
+	require.NoError(t, err)
+	require.NoError(t, w2.Commit(ctx))
+
+	// Теперь выкупается.
+	w3, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	activated, aerr := w3.UsersW().ActivateInvite(ctx, first.ID,
+		domain.ExternalSubject("sub-mail23d"), domain.DisplayName("Real"))
+	require.NoError(t, aerr, "приглашение, выданное заново, родилось истёкшим")
+	require.NoError(t, w3.Commit(ctx))
+	assert.Equal(t, domain.InviteStatusActive, activated.InviteStatus)
+}
+
+// TestInviteDeadline_ReInvitingNeverShortensALongerDeadline — срок НЕ
+// укорачивается: приглашение в соседний аккаунт с более близкой границей не
+// отнимает у человека времени, выданного первым приглашением.
+func TestInviteDeadline_ReInvitingNeverShortensALongerDeadline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	dsn := setupTestDB(t)
+	pool, err := coredb.NewPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+	repo := kanamepg.New(pool, nil)
+
+	adminA, accA := bootstrapAdmin(t, ctx, repo, "mail23e1")
+	_, accB := bootstrapAdmin(t, ctx, repo, "mail23e2")
+
+	w, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	first, _, err := w.UsersW().InsertPending(ctx, domain.User{
+		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
+		AccountID:    accA,
+		Email:        "longdeadline@example.com",
+		InviteStatus: domain.InviteStatusPending,
+		InvitedBy:    adminA,
+	}, time.Now().UTC().Add(48*time.Hour))
+	require.NoError(t, err)
+	require.NoError(t, w.Commit(ctx))
+
+	// Второе приглашение с УЖЕ ИСТЁКШЕЙ границей: укоротить срок оно не вправе.
+	w2, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	_, _, err = w2.UsersW().InsertPending(ctx, domain.User{
+		ID:           domain.UserID(ids.NewID(domain.PrefixUser)),
+		AccountID:    accB,
+		Email:        "longdeadline@example.com",
+		InviteStatus: domain.InviteStatusPending,
+		InvitedBy:    adminA,
+	}, time.Now().UTC().Add(-time.Hour))
+	require.NoError(t, err)
+	require.NoError(t, w2.Commit(ctx))
+
+	w3, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	activated, aerr := w3.UsersW().ActivateInvite(ctx, first.ID,
+		domain.ExternalSubject("sub-mail23e"), domain.DisplayName("Real"))
+	require.NoError(t, aerr, "второе приглашение укоротило срок, выданный первым")
+	require.NoError(t, w3.Commit(ctx))
+	assert.Equal(t, domain.InviteStatusActive, activated.InviteStatus)
+}

@@ -638,12 +638,30 @@ func (w *userWriter) InsertPending(ctx context.Context, u domain.User, inviteExp
 	//
 	// Членство пишется ЯВНО: при попадании в конфликт триггер не срабатывает
 	// вовсе, и выразить «этот человек приглашён СЮДА» больше нечем.
+	//
+	// СРОК ПРОДЛЕВАЕТСЯ ПРИГЛАШЕНИЕМ И НИКОГДА НЕ УКОРАЧИВАЕТСЯ. Строка
+	// приглашения ГЛОБАЛЬНА: человека, уже известного платформе, приглашают во
+	// второй аккаунт ЭТОЙ ЖЕ строкой. Не тронув срок, мы выдали бы приглашение,
+	// РОЖДЁННОЕ ИСТЁКШИМ: у того, чья прежняя строка своё отжила, активация
+	// отказала бы сразу — и отказ говорил бы «попросите пригласить заново» тому,
+	// кого только что пригласили.
+	//
+	// `GREATEST` берёт позднейший и отбрасывает NULL сам, поэтому три случая
+	// покрыты одним выражением: срока не было — появится; был дальше —
+	// останется; ручка не задана (величина NULL) — прежний срок уцелеет, а не
+	// сотрётся. Выкупленной строки это не касается: у ACTIVE/BLOCKED срок
+	// предмета не имеет, и писать его значило бы класть величину, которую никто
+	// не читает.
 	q := fmt.Sprintf(`
 		WITH ins AS (
 			INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, invited_by, created_at, invite_expires_at)
 			VALUES ($1, $2, '', $3, $4, 'PENDING', $5, $6, $7)
 			ON CONFLICT (lower(email)) DO UPDATE
-			   SET display_name = users.display_name
+			   SET display_name = users.display_name,
+			       invite_expires_at = CASE
+			           WHEN users.invite_status <> 'PENDING' THEN users.invite_expires_at
+			           ELSE GREATEST(users.invite_expires_at, $7::timestamptz)
+			       END
 			RETURNING %s, (xmax = 0) AS inserted
 		), membership AS (
 			INSERT INTO memberships (id, user_id, account_id, state, invited_by, created_at, updated_at)
