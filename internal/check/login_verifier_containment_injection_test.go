@@ -84,9 +84,38 @@ const lvOwner = "internal/repo/kaname/pg/login_method_repo.go"
 // lvGo — текст файла пакета pkg с телом body: тело начинается со строки 3.
 func lvGo(pkg, body string) string { return "package " + pkg + "\n\n" + body + "\n" }
 
+// lawfulLoginVerifierSpec — объявление предмета ДЛЯ СИНТЕТИКИ: та же форма, что
+// у настоящего (`loginVerifierSpec`), но разрешения и потребители названы по
+// файлам синтетического корпуса.
+//
+// # Почему не настоящее объявление
+//
+// Гейт требует, чтобы у каждого разрешения и каждого потребителя был ПРЕДМЕТ:
+// объявление, которому нечего разрешать, он называет находкой — и правильно.
+// Подай синтетике настоящую ведомость, и всякая её запись о файле, которого в
+// синтетике нет, становилась бы находкой на ЗАКОННОМ корпусе: «законный корпус
+// молчит» краснело бы от каждого нового разрешения в дереве, то есть
+// самопроверка зависела бы от содержимого живой ведомости и ломалась бы ровно
+// тогда, когда ведомость правильно растёт вместе с кодом.
+//
+// Живую ведомость судит сам гейт на живом дереве (`TestLoginVerifierStaysInside`):
+// разделение не ослабляет ничего — оно разводит два разных вопроса, «умеет ли
+// гейт падать» и «согласована ли ведомость с деревом».
+func lawfulLoginVerifierSpec() check.LoginVerifierSpec {
+	spec := loginVerifierSpec()
+	spec.AllowedFiles = map[string]string{
+		lvOwner: "адаптер хранилища кладёт материал в базу аргументом оператора",
+	}
+	spec.OpaqueConsumers = map[string]string{
+		"LoginMethodRepo.Create → r.pool.QueryRow": "оператор вставки строки способа: материал и запрос с именем таблицы — его аргументы",
+		"LoginMethodRepo.Get → r.pool.QueryRow":    "оператор чтения строки способа: запрос с именем таблицы — его аргумент",
+	}
+	return spec
+}
+
 func auditInjected(t *testing.T, corpus check.TreeCorpus) ([]string, check.LoginVerifierCensus, error) {
 	t.Helper()
-	return check.AuditLoginVerifierContainment(corpus, loginVerifierSpec())
+	return check.AuditLoginVerifierContainment(corpus, lawfulLoginVerifierSpec())
 }
 
 func TestLoginVerifierGate_LawfulCorpusIsSilent(t *testing.T) {
@@ -901,7 +930,7 @@ func isLoginMethodsTable(name string) bool { return name != "" }
 			if sc.edit != nil {
 				sc.edit(corpus)
 			}
-			spec := loginVerifierSpec()
+			spec := lawfulLoginVerifierSpec()
 			if sc.spec != nil {
 				sc.spec(&spec)
 			}
