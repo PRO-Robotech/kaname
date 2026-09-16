@@ -694,7 +694,7 @@ func runServe(cfg config.Config) error {
 	//
 	// Перепись печатается и на успешном старте: «ноль недостижимых записей»
 	// обязано быть отличимо от «каталог не читали».
-	laneWiring := observeLaneWiring(ctx, cfg, tokenSigner, logger)
+	laneWiring := observeLaneWiring(ctx, cfg, tokenSigner, wiredSignInMethods(), logger)
 	logger.Info("identity posture lane wiring", laneWiringCensus(laneWiring)...)
 	if err := config.ValidateLaneWiring(cfg, laneWiring); err != nil {
 		return fmt.Errorf("identity posture lane: %w", err)
