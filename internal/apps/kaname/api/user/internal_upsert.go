@@ -115,6 +115,12 @@ const (
 	activationOutcomeAlreadyActive = "already_active"
 	// activationOutcomeFailed — активация не удалась. Вход прерывается.
 	activationOutcomeFailed = "failed"
+	// activationOutcomeExpired — строка пережила свой срок (приёмка ID-MAIL-1,
+	// MAIL-23). Вход НЕ прерывается: личность человека существует и он входит,
+	// просто участником этого аккаунта не становится. Прервать вход значило бы
+	// наказать человека за чужую забывчивость — и наказать отказом, из которого
+	// не видно, что делать.
+	activationOutcomeExpired = "expired"
 )
 
 // ActivationObserver — наблюдатель исходов активации приглашения.
@@ -325,6 +331,22 @@ func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUser
 				// ожидаемый исход гонки первого входа, и он пропускается намеренно.
 				if errors.Is(aerr, iamerr.ErrNotFound) {
 					uc.observeActivation(activationOutcomeAlreadyActive)
+					continue
+				}
+				// Строка пережила свой срок. Это ШТАТНЫЙ исход, а не отказ:
+				// вход продолжается, участником аккаунта человек не становится,
+				// и следующий шаг ему называет отказ хранилища («попросить
+				// пригласить заново»). Считается СВОЕЙ клеткой — иначе
+				// систематически истекающие приглашения выглядели бы поломкой,
+				// а мёртвая доставка письма — здоровьем.
+				if errors.Is(aerr, iamerr.ErrInviteExpired) {
+					uc.observeActivation(activationOutcomeExpired)
+					if uc.logger != nil {
+						// Коррелируем по идентификатору строки: почта в лог не
+						// пишется ни на успешном, ни на отказном пути.
+						uc.logger.Info("invite expired, row not activated",
+							"user_id", string(p.ID))
+					}
 					continue
 				}
 				// Всё остальное — ОТКАЗ, и он не проглатывается. Прежняя редакция

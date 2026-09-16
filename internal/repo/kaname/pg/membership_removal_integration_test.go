@@ -31,6 +31,7 @@ package pg_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -67,7 +68,7 @@ func TestIntegration_RemoveMembershipTakesTheMembershipAndNothingElse(t *testing
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: person, AccountID: accA,
 			Email: "two-accounts-rmm@example.com", DisplayName: "Two", InvitedBy: ownerA,
-		})
+		}, time.Time{})
 		require.NoError(t, err)
 		require.NoError(t, w.Commit(ctx))
 	}
@@ -77,7 +78,7 @@ func TestIntegration_RemoveMembershipTakesTheMembershipAndNothingElse(t *testing
 		got, inserted, ierr := w.UsersW().InsertPending(ctx, domain.User{
 			ID: domain.UserID(ids.NewID(domain.PrefixUser)), AccountID: accB,
 			Email: "two-accounts-rmm@example.com", DisplayName: "Two", InvitedBy: ownerA,
-		})
+		}, time.Time{})
 		require.NoError(t, ierr)
 		require.False(t, inserted,
 			"ПРЕДПОСЫЛКА: приглашение известной почты во второй аккаунт не вправе заводить "+
@@ -156,7 +157,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: excluded, AccountID: accID,
 			Email: "excluded-rmres@example.com", DisplayName: "Excluded", InvitedBy: ownerID,
-		})
+		}, time.Time{})
 		require.NoError(t, err)
 		require.NoError(t, w.Commit(ctx))
 	}
@@ -169,7 +170,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: kept, AccountID: accID,
 			Email: "kept-rmres@example.com", DisplayName: "Kept", InvitedBy: ownerID,
-		})
+		}, time.Time{})
 		require.NoError(t, err)
 		require.NoError(t, w.Commit(ctx))
 	}
@@ -244,7 +245,7 @@ func TestIntegration_MembershipCarryingRightsIsRefusedWithContractTone(t *testin
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: person, AccountID: accID,
 			Email: "granted-rmrgt@example.com", DisplayName: "Granted", InvitedBy: ownerID,
-		})
+		}, time.Time{})
 		require.NoError(t, err)
 		require.NoError(t, w.Commit(ctx))
 	}

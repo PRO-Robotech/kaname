@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -111,6 +112,12 @@ type InviteUserUseCase struct {
 	relations  clients.RelationStore
 	reconciler ObjectReconciler // optional, nil-safe
 	logger     *slog.Logger
+	// inviteTTL — срок, под которым выдаётся приглашение (приёмка ID-MAIL-1,
+	// §10 п. 22). Ноль означает «посадка о сроке не высказалась»; величину
+	// подставляет `WithInviteTTL` из настройки, а нулевое поле читается как
+	// «срок не назначен» и едет в строку как NULL — ровно так выглядят строки,
+	// заведённые до появления колонки.
+	inviteTTL time.Duration
 }
 
 func NewInviteUserUseCase(
@@ -127,6 +134,18 @@ func NewInviteUserUseCase(
 
 // WithObjectReconciler wires the post-commit synchronous per-object materializer.
 // nil-safe.
+// WithInviteTTL задаёт срок строки приглашения.
+//
+// Величину читает КОМПОЗИЦИОННЫЙ КОРЕНЬ из настройки и передаёт сюда: use-case
+// настройки не читает, иначе он зависел бы от её формы, а не от величины.
+// Незаданный срок (ноль) означает «строка выдана без срока», и это законное
+// состояние — но не умолчание посадки: умолчание живёт у ручки
+// (`config.InviteConfig.TTLOrDefault`), где его судит страж старта.
+func (uc *InviteUserUseCase) WithInviteTTL(ttl time.Duration) *InviteUserUseCase {
+	uc.inviteTTL = ttl
+	return uc
+}
+
 func (uc *InviteUserUseCase) WithObjectReconciler(r ObjectReconciler) *InviteUserUseCase {
 	uc.reconciler = r
 	return uc
@@ -369,7 +388,7 @@ func (uc *InviteUserUseCase) doInvite(
 					DisplayName:  dn,
 					InviteStatus: domain.InviteStatusPending,
 					InvitedBy:    invitedBy,
-				})
+				}, uc.inviteDeadline())
 				if err != nil {
 					return inviteTxResult{}, err
 				}
@@ -555,6 +574,20 @@ func (uc *InviteUserUseCase) doInvite(
 	_ = opID
 
 	return marshalUser(user)
+}
+
+// inviteDeadline — момент, после которого выданное сейчас приглашение перестанет
+// активироваться. Нулевое время означает «срок не назначен».
+//
+// Отсчёт ведётся ЗДЕСЬ, а не в хранилище: срок есть свойство ВЫДАЧИ, и считать
+// его надо от неё. Вычисление в хранилище от времени строки дало бы ту же
+// величину сегодня и другую после правки ручки — у приглашений, выданных под
+// прежней.
+func (uc *InviteUserUseCase) inviteDeadline() time.Time {
+	if uc.inviteTTL <= 0 {
+		return time.Time{}
+	}
+	return time.Now().UTC().Add(uc.inviteTTL)
 }
 
 // reconcileObject runs the post-commit synchronous per-object materialization via the

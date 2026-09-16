@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -114,7 +115,7 @@ func TestIntegration_MembershipMirrorFollowsEveryWriter(t *testing.T) {
 			Email:       "pending-mir1@example.com",
 			DisplayName: "Pending",
 			InvitedBy:   ownerID,
-		})
+		}, time.Time{})
 		require.NoError(t, err)
 		require.NoError(t, w.Commit(ctx))
 	}
