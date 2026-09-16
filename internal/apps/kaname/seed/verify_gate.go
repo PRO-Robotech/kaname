@@ -51,20 +51,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/PRO-Robotech/corelib/ids"
-
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
-)
-
-// smokeMirrorType / smokeMirrorPrefix — the synthetic mirror object the boot
-// forward-smoke creates inside a real account to prove the forward path is live.
-// vpc.network is a materializable mirror type covered by the owner `*.*` wildcard
-// expansion, so an owner-binding's content tuple must materialize on it; the row is
-// seeded and removed by ForwardSmoke so it never lingers in a real account.
-const (
-	smokeMirrorType   = "vpc.network"
-	smokeMirrorPrefix = "net"
 )
 
 // VerifyReconcileEngine — the reconcile surface the forward-smoke drives.
@@ -135,15 +123,6 @@ type VerifyStore interface {
 	// LedgerHasObject reports whether the binding's ledger records ANY tuple on the
 	// given fga-object (e.g. "vpc_network:<id>") — the forward-smoke success check.
 	LedgerHasObject(ctx context.Context, bindingID domain.AccessBindingID, fgaObject string) (bool, error)
-
-	// SmokeOwnerBindingCandidate returns ONE ACTIVE account-scoped OWNER binding
-	// together with its account id, to drive a live forward-smoke at boot (the
-	// contract-phase gate must exercise ForwardSmoke, not only Verify). An
-	// owner (`*.*`) binding bound at ACCOUNT scope is the bounded-scope owner-content
-	// path the gate doc claims — it forward-materializes per-object content for a
-	// fresh resource in the account. ok=false when no owner-binding
-	// exists yet (a brand-new cluster) → the caller skips the smoke (non-fatal).
-	SmokeOwnerBindingCandidate(ctx context.Context) (bindingID domain.AccessBindingID, accountID string, ok bool, err error)
 
 	// ListActiveBindingRelationChecks returns, for every ACTIVE binding that
 	// materialized ≥1 per-object tuple, the (subject, enforcement-relation, object)
@@ -281,15 +260,15 @@ func (g *VerifyGate) VerifyRelationSatisfiesAction(ctx context.Context) (VerifyR
 				Object:    c.Object,
 				Subject:   c.Subject,
 				Reason: fmt.Sprintf("required relation %q on %s does NOT resolve for %s "+
-					"(materialized but relation-not-satisfied — cutover blocked, F-11)",
+					"(materialized read tuple does not resolve the enforced relation)",
 					c.Relation, c.Object, c.Subject),
 			})
 		}
 	}
 	if !report.NoAccessLoss {
-		g.logFailures(ctx, "verify-gate: relation-satisfies-action FAILED — catalog flip BLOCKED", report)
+		g.logFailures(ctx, "verify-gate: materialized read tuples that do NOT resolve", report)
 	} else {
-		g.logger.InfoContext(ctx, "verify-gate: 100% relation-satisfies-action — catalog flip permitted",
+		g.logger.InfoContext(ctx, "verify-gate: every materialized read tuple resolves",
 			slog.Int("bindings_checked", report.BindingsChecked))
 	}
 	return report, nil
@@ -374,11 +353,39 @@ func (g *VerifyGate) ForwardSmoke(ctx context.Context, spec ForwardSmokeSpec) (b
 		spec.ParentProject, spec.ParentAccount, spec.Labels); err != nil {
 		return false, fmt.Errorf("verify-gate: seed smoke object: %w", err)
 	}
-	// Best-effort cleanup so the synthetic object never lingers.
+	// УБОРКА СНИМАЕТ ВСЁ, ЧТО ПРОБА ЗАВЕЛА, А НЕ ТОЛЬКО СТРОКУ ЗЕРКАЛА (#119).
+	//
+	// Строка зеркала — не единственный след: сведение, которым проба и доказывает
+	// прямой путь, пишет по её объекту строки ведомости. Снятое зеркало их не
+	// уносит, и следующий страж читает ведомость и честно находит
+	// материализованное чтение на объекте, которого больше нет. На чистой
+	// установке это печатается отказом о СОБСТВЕННОЙ синтетике, неотличимым от
+	// поломки.
+	//
+	// Поэтому уборка: снять зеркало → свести объект ЕЩЁ РАЗ (желаемый набор
+	// пуст, сведение снимает написанное) → убедиться, что ведомость его не
+	// несёт. Всё три шага best-effort и не роняют старт — но остаток НАЗЫВАЕТСЯ,
+	// иначе половинная уборка снова станет невидимой.
 	defer func() {
 		if rerr := g.store.RemoveSmokeMirrorObject(ctx, spec.ObjectType, spec.ObjectID); rerr != nil {
 			g.logger.WarnContext(ctx, "verify-gate: smoke object cleanup failed",
 				slog.String("object_id", spec.ObjectID), slog.Any("err", rerr))
+			return
+		}
+		if rerr := g.engine.ReconcileObject(ctx, spec.ObjectType, spec.ObjectID); rerr != nil {
+			g.logger.WarnContext(ctx, "verify-gate: smoke object retraction reconcile failed",
+				slog.String("object", fgaObject), slog.Any("err", rerr))
+			return
+		}
+		residue, rerr := g.store.LedgerHasObject(ctx, spec.ExpectBinding, fgaObject)
+		switch {
+		case rerr != nil:
+			g.logger.WarnContext(ctx, "verify-gate: smoke object residue check failed",
+				slog.String("object", fgaObject), slog.Any("err", rerr))
+		case residue:
+			g.logger.WarnContext(ctx, "verify-gate: smoke object left ledger rows behind",
+				slog.String("binding_id", string(spec.ExpectBinding)),
+				slog.String("object", fgaObject))
 		}
 	}()
 
@@ -395,36 +402,6 @@ func (g *VerifyGate) ForwardSmoke(ctx context.Context, spec ForwardSmokeSpec) (b
 			slog.String("binding_id", string(spec.ExpectBinding)), slog.String("object", fgaObject))
 	}
 	return materialized, nil
-}
-
-// RunBootForwardSmoke drives a single LIVE ForwardSmoke at boot against a real
-// ACTIVE owner-binding (the contract-phase gate must actually exercise
-// the forward-materialization path, not only the active_members-derived Verify). It
-// discovers one account-scoped owner-binding, seeds a synthetic vpc.network mirror
-// row inside that account, drives ReconcileObject, and asserts the owner's content
-// tuple materialized — the assertion Verify provably cannot make (a resource created
-// in the contract window that never materializes its tuple → silent access-loss).
-// The synthetic object is removed by ForwardSmoke. Best-effort and non-fatal: when
-// no owner-binding exists yet (brand-new cluster) it returns ok=false with no error;
-// callers log the verdict and never crash on it (parity with Verify).
-func (g *VerifyGate) RunBootForwardSmoke(ctx context.Context) (passed bool, ran bool, err error) {
-	bindingID, accountID, ok, err := g.store.SmokeOwnerBindingCandidate(ctx)
-	if err != nil {
-		return false, false, fmt.Errorf("verify-gate: discover forward-smoke owner-binding: %w", err)
-	}
-	if !ok {
-		return false, false, nil // no owner-binding yet — nothing to smoke (non-fatal)
-	}
-	smoke, err := g.ForwardSmoke(ctx, ForwardSmokeSpec{
-		ExpectBinding: bindingID,
-		ObjectType:    smokeMirrorType,
-		ObjectID:      ids.NewID(smokeMirrorPrefix),
-		ParentAccount: accountID,
-	})
-	if err != nil {
-		return false, true, fmt.Errorf("verify-gate: boot forward-smoke: %w", err)
-	}
-	return smoke, true, nil
 }
 
 // fgaObjectForSmoke builds the FGA object ("<fga_type>:<id>") the forward-smoke

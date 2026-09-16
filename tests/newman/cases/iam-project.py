@@ -33,18 +33,22 @@ CRUD fixture dependency:
 
 Operation envelope:
   All mutations return `operation.Operation` with id prefix `iop`.
-  Poll step hits /operations/{id} via OpsProxy at api-gateway (iop* → kaname).
+  Poll step hits /operations/{id} on the service's OWN public REST front
+  (iop* → kaname); the module is readdressed there by `address_own_front`.
 
 Case IDs follow the IAM-PRJ-<RPC>-<CLASS>[-detail] scheme.
 
 ProjectService.Get is owner-only (returns NOT_FOUND for a non-owner non-anonymous
 caller — it does NOT consult AccessBinding). This is asserted explicitly.
 
-Удаление НЕПУСТОГО проекта (IAM-PRJ-DL-NEG-HAS-CHILDREN) держится внешним ключом
-`roles_project_fk` (запрет удаления родителя): единственный живой ребёнок проекта в
-kaname сегодня — ПРОЕКТНАЯ пользовательская роль. Кейс заводит и снимает его сам
-через публичный API, поэтому общая фикстура не задействована и после прогона ничего
-не остаётся.
+Удаление НЕПУСТОГО проекта отвергается одним оператором писателя по двум родам
+детей: проектным ролям (своя таблица) и зарегистрированным объектам чужих модулей
+(зеркало). Кейс набора службы заводит СВОЕГО ребёнка — проектную пользовательскую
+роль — через публичный API (IAM-PRJ-DL-NEG-HAS-CHILDREN), поэтому общая фикстура не
+задействована и после прогона ничего не остаётся. Чужой ресурс кейс службы завести
+не может (регистрация — внутренний глагол владельца), эту полосу держат
+интеграционные пробы дерева службы; сквозной кейс «сеть держит проект» — набор
+платформы (приёмка `non-empty-project-is-not-deleted.md`, §6.1).
 
 Test-first note (strict TDD):
   These cases are written RED-first. They will fail until the corresponding
@@ -213,8 +217,12 @@ CASES.append(Case(
 # IAM-PRJ-CR-NEG-ACCOUNT-MISSING — аккаунт без пути прав → отказ на краю
 # ---------------------------------------------------------------------------
 
-# Создание под аккаунтом, к которому у вызывающего нет пути прав, решается НА КРАЮ и
-# отказом — до того как сервис вообще набирается.
+# Создание под аккаунтом, к которому у вызывающего нет пути прав, решается ДО
+# бизнес-логики и отказом. Производителей ДВА, и они отвечают ОДИНАКОВЫМ фактом в
+# РАЗНЫХ местах: край платформы кладёт имя действия в `message`, собственный фронт
+# службы — в `details[].description`, оставляя `message` равным `permission
+# denied`. Поэтому утверждение читает ВЕСЬ ответ (см. ниже): по одному полю оно
+# проверяло не свойство отказа, а то, чей стенд поднят.
 #
 # Запись каталога прав для этого метода несёт `required_relation: editor` +
 # `scope_extractor {object_type: account, from_request_field: account_id}`. Идентификатор
@@ -247,12 +255,21 @@ CASES.append(Case(
             test_script=[
                 *assert_status(403),
                 *assert_grpc_code(7, "PERMISSION_DENIED"),
+                # ДЕЙСТВИЕ НАЗЫВАЕТСЯ ВСЕМ ОТВЕТОМ, А НЕ ОДНИМ ПОЛЕМ `message`, и
+                # это переутверждение по ФАКТИЧЕСКОМУ производителю, а не
+                # послабление. Оба фронта называют действие, но кладут его в
+                # разные места: край — в `message`, собственный фронт службы — в
+                # `details[].description` («the 'iam.projects.create' permission
+                # is granted by an AccessBinding on the account»), оставляя
+                # `message` равным `permission denied`. Утверждение по одному
+                # полю проверяло не свойство отказа, а то, чей стенд поднят.
                 "pm.test('отказ называет действие, а не судьбу объекта', () => "
-                "  pm.expect(pm.response.json().message||'').to.include('iam.projects.create'));",
-                # Анти-оракул: по тексту отказа нельзя отличить «аккаунта нет» от
-                # «доступа нет».
+                "  pm.expect(pm.response.text()||'').to.include('iam.projects.create'));",
+                # Анти-оракул. Читается ВЕСЬ ответ по той же причине — и это
+                # СТРОЖЕ прежнего: судьба объекта, названная в подробностях, была
+                # бы тем же оракулом, а проверка по `message` её не видела.
                 "pm.test('отказ не сообщает, существует ли аккаунт', () => {",
-                "  const m = (pm.response.json().message || '').toLowerCase();",
+                "  const m = (pm.response.text() || '').toLowerCase();",
                 "  pm.expect(m).to.not.contain('not found');",
                 "  pm.expect(m).to.not.contain('does not exist');",
                 "});",
@@ -500,7 +517,7 @@ CASES.append(Case(
             # asserts "this subject sees nothing" was therefore asserting it
             # against a subject that is genuinely authorised — a fixture artifact,
             # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
-            # subject seeded for exactly this (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh; it is
+            # subject seeded for exactly this (tests/authz-fixtures/seed_own_stand.py; it is
             # never a grant TARGET anywhere in the tree).
             auth="jwtPureNoBindings",
             test_script=[
@@ -941,8 +958,15 @@ CASES.append(Case(
             ],
         ),
         poll_operation_until_done(),
+        # IAM-PNE-1-01 (положительный контроль всей стадии «непустой проект не
+        # удаляется»): операция завершается БЕЗ error. Без этого утверждения
+        # каждое отрицание отказа по непустоте зеленело бы на удалении, которое
+        # не удаляет ничего и никогда.
+        assert_op_success(),
         # Poll the GET until the project is actually gone (async delete + FGA
-        # tuple removal can lag the Operation→done a beat).
+        # tuple removal can lag the Operation→done a beat). «Пропал» производит
+        # край парой 404|403: снятые кортежи проекта дают отказ в правах раньше
+        # промаха службы.
         get_until_gone("/iam/v1/projects/{{crudProjectId}}", "Project"),
     ],
 ))
@@ -993,12 +1017,15 @@ CASES.append(Case(
 # САМОДОСТАТОЧНА: свой проект, свой ребёнок, своя уборка — ни один общий
 # идентификатор фикстуры не задействован и после кейса не остаётся.
 #
-# ПОЧЕМУ ТЕКСТ ИМЕННО ОБЩИЙ. Запрет удаления поднимает 23503 на внешнем ключе
-# `roles_project_fk`, а он в поимённом разборе маппера НЕ назван (в отличие от
-# ключей аккаунта), поэтому до клиента доходит общий текст ветви «внешний ключ без
-# собственного сообщения» с кодом 9. Пиним ДОСТАВЛЕННЫЙ текст, а не желаемый: тон
-# сообщений — часть контракта (api-conventions.md §Error-format), и утверждение про
-# «Project … contains …» краснело бы на исправном продукте.
+# ПОЧЕМУ ТЕКСТ НАЗЫВАЕТ ВИД И ЧИСЛО. Отказ производит ОДИН оператор удаления
+# (охрана по своей таблице ролей и по зеркалу чужих ресурсов плюс зонд, отвечающий
+# ЧТО удерживает), а не внешний ключ: ключ `roles_project_fk` остаётся запасным
+# упором для конкурента, проскочившего между снимком и коммитом. Перечень
+# группирует удерживающее по виду и числу и печатает виды в порядке имени —
+# `Project <id> is not empty (iam.role: 1)`; роль стоит в нём тем же видом, что и
+# ресурсы чужих модулей (приёмка `non-empty-project-is-not-deleted.md`, §2.3,
+# §2.4; сценарий IAM-PNE-1-05). Прежде здесь пинился общий текст неразобранной
+# связи — он краснеет на новом операторе, и это верное красное.
 #
 # ОБЩИЙ ТЕКСТ ТЕПЕРЬ РАЗВЕДЁН ПО ПОЛОСАМ, И ЗДЕСЬ — «ЕЩЁ ИСПОЛЬЗУЕТСЯ». Прежде обе
 # стороны ссылочного отказа приходили ОДНИМ текстом («referenced resource not found or
@@ -1124,9 +1151,13 @@ CASES.append(Case(
                 *save_from_response("j.id", "opId"),
             ],
         ),
+        # IAM-PNE-1-05: проектная роль стоит в ТОМ ЖЕ перечне тем же видом, что и
+        # ресурсы чужих модулей, — один глагол, один тон. Текст утверждается
+        # ДОСЛОВНО (форма сети: «is not empty (<вид>: <число>, …)»), признак
+        # полосы прежний — REFERENCE_IN_USE (приёмка §2.4, §2.5).
         assert_op_error(9, "FAILED_PRECONDITION",
-                        msg_substr="resource is still referenced by other resources",
-                        reason="REFERENCE_IN_USE"),
+                        reason="REFERENCE_IN_USE",
+                        msg_text="Project {{childHostProjectId}} is not empty (iam.role: 1)"),
         # Проект обязан ОСТАТЬСЯ: отказ, после которого ресурс всё равно исчез, —
         # это не сработавший запрет, а потерянная строка.
         Step(
@@ -1198,6 +1229,373 @@ CASES.append(Case(
                 "pm.test('ANON: grpc code 16', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));",
             ],
         ),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-PRJ-DL-NEG-MALFORMED-PREFIX (IAM-PNE-1-08) ЖИВЁТ В `iam-project-edge-format.py`.
+#
+# Его пара `400` / `3` — производитель КРАЙ (короткое замыкание по приставке ДО
+# проверки прав, приёмка `non-empty-project-is-not-deleted.md` Н4/Н14). Этот
+# модуль целиком переадресован на собственный фронт службы, а там такого шага
+# нет: глагол доходит до проверки прав и на `qqq-not-a-project` отвечает `403` /
+# `7` (`AUTHZ_DENIED`, область `project`) — замер на сведённом дереве, прогон
+# автономного стенда 2026-09-16. Утверждение, чей производитель край, здесь
+# краснело бы не о предмете; ослаблять его до `oneOf` запрещено (testing.md
+# §e2e-инварианты), переутверждать как `403` — значит превратить кейс о ФОРМЕ
+# идентификатора в дубль `IAM-PRJ-DL-AUTHZ-NONEMPTY-DENY-FIRST` о ПРАВАХ.
+# Исход e2e-flow.md §7а — «оставить утверждение платформе, расщепив коллекцию».
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# IAM-PRJ-DL-AUTHZ-NONEMPTY-DENY-FIRST — IAM-PNE-1-09: отказ по непустоте НЕ
+# опережает проверку доступа.
+#
+# Иначе непустота становится оракулом: посторонний узнаёт про чужой проект, что в
+# нём что-то лежит, и сколько именно чего. Непустоту строит проектная роль (тот же
+# ребёнок, что у IAM-PRJ-DL-NEG-HAS-CHILDREN); принципал без `v_delete` на проект —
+# выделенный never-granted `jwtPureNoBindings`; аноним — второе утверждение.
+#
+# ПРОИЗВОДИТЕЛЬ — КРАЙ (сегодняшний дом набора): пообъектная проверка доступа с
+# сокрытием существования стоит до бэкенда, поэтому исход — 403 либо 404, и НИКОГДА
+# 200 с конвертом операции: конверт означал бы, что служба приняла удаление и
+# отказ по непустоте приедет в операции — то есть посторонний увидит перечень.
+# После переезда набора на собственный фронт службы порядок отказа станет другим
+# (приёмка §6.1) — тогда утверждение переутверждается по фактическому
+# производителю, а не ослабляется.
+# ---------------------------------------------------------------------------
+
+CASES.append(Case(
+    id="IAM-PRJ-DL-AUTHZ-NONEMPTY-DENY-FIRST",
+    title="Delete a NON-EMPTY project as a principal without v_delete → 403|404 (never a 200 envelope); as anonymous → 401",
+    classes=["AUTHZ", "NEG", "STATE"],
+    priority="P1",
+    steps=[
+        Step(
+            name="create-nonempty-host-project",
+            method="POST",
+            path="/iam/v1/projects",
+            body={
+                "accountId": "{{accountAId}}",
+                "name": "prjauthzfirst-{{runId}}",
+                "description": "newman non-empty delete authz-first host",
+            },
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.projectId", "authzFirstProjectId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        retry_until_authorized(Step(
+            name="get-nonempty-host-project",
+            method="GET",
+            path="/iam/v1/projects/{{authzFirstProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "pm.test('фикстура записала id проекта-носителя', () => "
+                "  pm.expect(pm.environment.get('authzFirstProjectId'), 'authzFirstProjectId')"
+                "   .to.be.a('string').and.not.empty);",
+            ],
+        )),
+        Step(
+            name="create-child-role-for-authz-first",
+            method="POST",
+            path="/iam/v1/roles",
+            body={
+                "projectId": "{{authzFirstProjectId}}",
+                "name": "prj_authzfirst_{{runId}}",
+                "description": "newman child making the project non-empty",
+                "rules": [
+                    {"module": "iam", "resources": ["project"], "verbs": ["get", "list"]},
+                ],
+            },
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.roleId", "authzFirstRoleId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        # ОТРИЦАНИЕ 1 — принципал без v_delete: отказ доступа, не FAILED_PRECONDITION.
+        # Толерантность 403|404 — производитель (сокрытие существования на крае), а
+        # не слабость; 200 сюда не входит ни при каком прочтении.
+        Step(
+            name="delete-nonempty-as-stranger",
+            method="DELETE",
+            path="/iam/v1/projects/{{authzFirstProjectId}}",
+            auth="jwtPureNoBindings",
+            test_script=[
+                "pm.test('STRANGER: 403 or 404 — never an operation envelope', () => "
+                "  pm.expect(pm.response.code, pm.response.text()).to.be.oneOf([403, 404]));",
+                "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                "pm.test('STRANGER: grpc code 7 or 5', () => pm.expect(j && j.code, JSON.stringify(j)).to.be.oneOf([7, 5]));",
+            ],
+        ),
+        # ОТРИЦАНИЕ 2 — аноним: 401.
+        Step(
+            name="delete-nonempty-as-anonymous",
+            method="DELETE",
+            path="/iam/v1/projects/{{authzFirstProjectId}}",
+            auth="anonymous",
+            test_script=[
+                "pm.test('ANON: status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
+                "let j; try { j = pm.response.json(); } catch(e) { j = null; }",
+                "pm.test('ANON: grpc code 16', () => pm.expect(j && j.code, JSON.stringify(j)).to.equal(16));",
+            ],
+        ),
+        # ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — носитель v_delete на ТОТ ЖЕ непустой проект
+        # получает конверт операции и отказ по непустоте В НЕЙ: иначе два отрицания
+        # выше зеленели бы на глаголе, отказывающем всем.
+        Step(
+            name="delete-nonempty-as-holder",
+            method="DELETE",
+            path="/iam/v1/projects/{{authzFirstProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        reason="REFERENCE_IN_USE",
+                        msg_text="Project {{authzFirstProjectId}} is not empty (iam.role: 1)"),
+        # Уборка: ребёнок, затем проект.
+        Step(
+            name="delete-child-role-authz-first",
+            method="DELETE",
+            path="/iam/v1/roles/{{authzFirstRoleId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        Step(
+            name="delete-host-project-authz-first",
+            method="DELETE",
+            path="/iam/v1/projects/{{authzFirstProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        get_until_gone("/iam/v1/projects/{{authzFirstProjectId}}", "Project"),
+    ],
+))
+
+
+# ---------------------------------------------------------------------------
+# IAM-PRJ-DL-STATE-REFUSAL-KEEPS-GRANTS — IAM-PNE-1-11, полоса А: отвергнутое
+# удаление не оставляет половинной работы — выдача на проект ДЕЙСТВУЕТ.
+#
+# Снятие выдач стоит в той же транзакции и ПЕРЕД удалением строки; отказ по
+# непустоте обязан ронять транзакцию целиком. Проект, оставшийся без своих выдач,
+# хуже неудалённого — он жив и недоступен. Полоса А наблюдает это там, где видит
+# арендатор: строка на месте (Get → 200) и носитель выдачи по-прежнему проходит
+# проверку доступа края к проекту. Очередь намерений той же транзакции наблюдает
+# полоса Б — интеграционная проба дерева службы.
+#
+# Носитель выдачи — служебная учётка `svaAId` (предъявляет `jwtSAA`, пара
+# объявлена в `tests/authz-fixtures/principal_pairings.py`); роль —
+# посеянная `iam.project.admin`. Первое обращение носителя к свежей выдаче — под
+# ограниченным повтором на окне материализации; проверка ПОСЛЕ отвергнутого
+# удаления идёт без повтора: кортежи уже были видны, и их исчезновение было бы
+# ровно тем дефектом, который кейс ловит.
+# ---------------------------------------------------------------------------
+
+ROLE_PROJECT_ADMIN = "rol674f6a6d7e4eeb3b6"  # посеянная системная роль iam.project.admin
+
+CASES.append(Case(
+    id="IAM-PRJ-DL-STATE-REFUSAL-KEEPS-GRANTS",
+    title="Refused delete of a NON-EMPTY project keeps its access bindings effective: Get → 200 and the grantee still passes the edge check",
+    classes=["STATE", "AUTHZ"],
+    priority="P1",
+    steps=[
+        Step(
+            name="create-grants-host-project",
+            method="POST",
+            path="/iam/v1/projects",
+            body={
+                "accountId": "{{accountAId}}",
+                "name": "prjkeepgrants-{{runId}}",
+                "description": "newman refused-delete keeps grants host",
+            },
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.projectId", "keepGrantsProjectId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        retry_until_authorized(Step(
+            name="get-grants-host-project",
+            method="GET",
+            path="/iam/v1/projects/{{keepGrantsProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "pm.test('фикстура записала id проекта-носителя', () => "
+                "  pm.expect(pm.environment.get('keepGrantsProjectId'), 'keepGrantsProjectId')"
+                "   .to.be.a('string').and.not.empty);",
+            ],
+        )),
+        Step(
+            name="create-child-role-keep-grants",
+            method="POST",
+            path="/iam/v1/roles",
+            body={
+                "projectId": "{{keepGrantsProjectId}}",
+                "name": "prj_keepgrants_{{runId}}",
+                "description": "newman child making the project non-empty",
+                "rules": [
+                    {"module": "iam", "resources": ["project"], "verbs": ["get", "list"]},
+                ],
+            },
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.roleId", "keepGrantsRoleId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        # Выдача на проект ПУБЛИЧНЫМ глаголом выдач.
+        Step(
+            name="grant-on-host-project",
+            method="POST",
+            path="/iam/v1/accessBindings",
+            body={
+                "subjectType": "service_account", "subjectId": "{{svaAId}}",
+                "roleId": ROLE_PROJECT_ADMIN,
+                "scopeType": "iam.project", "scopeId": "{{keepGrantsProjectId}}",
+                "target": {"allInScope": {}},
+            },
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+                *save_from_response("j.metadata && j.metadata.accessBindingId", "keepGrantsAcbId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        # Носитель выдачи видит проект — первое обращение под повтором на окне
+        # материализации кортежей выдачи.
+        retry_until_authorized(Step(
+            name="grantee-sees-project-before-delete",
+            method="GET",
+            path="/iam/v1/projects/{{keepGrantsProjectId}}",
+            auth="jwtSAA",
+            test_script=[
+                *assert_status(200),
+                "pm.test('носитель выдачи проходит проверку края', () => "
+                "  pm.expect(pm.response.json().id).to.eql(pm.environment.get('keepGrantsProjectId')));",
+            ],
+        )),
+        # Удаление отвергнуто по непустоте.
+        Step(
+            name="delete-refused-by-nonempty",
+            method="DELETE",
+            path="/iam/v1/projects/{{keepGrantsProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        assert_op_error(9, "FAILED_PRECONDITION",
+                        reason="REFERENCE_IN_USE",
+                        msg_text="Project {{keepGrantsProjectId}} is not empty (iam.role: 1)"),
+        # Строка на месте.
+        Step(
+            name="project-survived-refusal",
+            method="GET",
+            path="/iam/v1/projects/{{keepGrantsProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                "pm.test('проект на месте после отвергнутого удаления', () => "
+                "  pm.expect(pm.response.json().id).to.eql(pm.environment.get('keepGrantsProjectId')));",
+            ],
+        ),
+        # Носитель выдачи ПО-ПРЕЖНЕМУ проходит проверку края — БЕЗ повтора: кортежи
+        # были видны до удаления, и их исчезновение есть дефект, а не окно.
+        Step(
+            name="grantee-still-passes-after-refusal",
+            method="GET",
+            path="/iam/v1/projects/{{keepGrantsProjectId}}",
+            auth="jwtSAA",
+            test_script=[
+                *assert_status(200),
+                "pm.test('выдача действует после отвергнутого удаления', () => "
+                "  pm.expect(pm.response.json().id).to.eql(pm.environment.get('keepGrantsProjectId')));",
+            ],
+        ),
+        # Уборка: выдача, ребёнок, проект.
+        Step(
+            name="delete-grant-keep-grants",
+            method="DELETE",
+            path="/iam/v1/accessBindings/{{keepGrantsAcbId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        Step(
+            name="delete-child-role-keep-grants",
+            method="DELETE",
+            path="/iam/v1/roles/{{keepGrantsRoleId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        Step(
+            name="delete-host-project-keep-grants",
+            method="DELETE",
+            path="/iam/v1/projects/{{keepGrantsProjectId}}",
+            auth="jwtAccountAdminA",
+            test_script=[
+                *assert_status(200),
+                *assert_iam_operation_envelope(),
+                *save_from_response("j.id", "opId"),
+            ],
+        ),
+        poll_operation_until_done(),
+        assert_op_success(),
+        get_until_gone("/iam/v1/projects/{{keepGrantsProjectId}}", "Project"),
     ],
 ))
 
@@ -1302,3 +1700,8 @@ CASES.append(Case(
         ),
     ],
 ))
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")

@@ -20,6 +20,11 @@ const (
 	InviteActivationOutcomeAlreadyActive = "already_active"
 	// InviteActivationOutcomeFailed — активация не удалась, вход прерван.
 	InviteActivationOutcomeFailed = "failed"
+	// InviteActivationOutcomeExpired — строка пережила свой срок и не
+	// активируется. СВОЯ клетка, а не «отказ»: временем это не лечится, и
+	// систематическое истечение означает либо мёртвую доставку письма, либо
+	// слишком узкое окно, — тогда как рост клетки отказов означает поломку.
+	InviteActivationOutcomeExpired = "expired"
 )
 
 // InviteActivationOutcomes — ЗАКРЫТЫЙ набор клеток семейства.
@@ -27,6 +32,7 @@ var InviteActivationOutcomes = []string{
 	InviteActivationOutcomeActivated,
 	InviteActivationOutcomeAlreadyActive,
 	InviteActivationOutcomeFailed,
+	InviteActivationOutcomeExpired,
 }
 
 // InviteActivationRecorder — исходы активации приглашения на первом входе.

@@ -43,6 +43,7 @@ func TestRegisterResource_A06_ConcurrentRegisterIdempotent(t *testing.T) {
 		kanamepg.NewResourceMirrorEmitter(),
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
+		kanamepg.NewPublicReadPublisher(),
 	)
 
 	req := &iamv1.RegisterResourceRequest{

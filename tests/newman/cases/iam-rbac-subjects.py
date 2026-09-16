@@ -3,7 +3,7 @@
 
 """RBAC rules model — black-box subjects[] / ExpandAccess / ListByRole suite.
 
-Black-box only: every probe goes through api-gateway REST (camelCase JSON); no
+Black-box only: every probe goes through the service's OWN REST front (camelCase JSON); no
 internal/ or cmd/ prod code is touched.
 
 What this covers (one acceptance scenario per Case family):
@@ -46,7 +46,7 @@ Test-design techniques applied:
   - Conformance: response shapes vs the proto contract (subjects[], principals[],
     accessBindings[]); error text "Illegal argument subjects (must be 1..32)".
 
-Fixture dependency (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh → prodseed_all.py): jwtAccountAdminA,
+Fixture dependency (tests/authz-fixtures/seed_own_stand.py — посев автономного стенда): jwtAccountAdminA,
 jwtNoBindings, accountAId, userAAAId, userAABId, userNOBId. AccessBinding subjects
 must reference an EXISTING user/service_account/group in the iam DB — migration 0049
 (subject_ref_exists BEFORE INSERT/UPDATE trigger) closes the (subject_type,
@@ -343,7 +343,7 @@ def mint_user(env_var, ext, auth="jwtAccountAdminA"):
     so subjects can no longer be made up on the fly.
 
     WHY INVITE (not UpsertFromIdentity): UpsertFromIdentity is an Internal* RPC with
-    no PUBLIC REST route — it lives ONLY on the api-gateway cluster-internal listener
+    no PUBLIC REST route — it lives ONLY on the cluster-internal listener
     (:8081), so POSTing it at the public {{baseUrl}} (:8080) returns 404 (ban #6). The
     PUBLIC user-mint path a tenant admin can drive over REST is Invite: it INSERTs a
     PENDING user row (invite.go InsertPending) and returns metadata.userId synchronously.
@@ -1148,13 +1148,14 @@ CASES.append(Case(
                 "pm.environment.set('_gmChkSubj', 'user:' + pm.environment.get('userAABId'));",
                 "pm.environment.set('_gmChkObj', 'account:' + pm.environment.get('accountAId'));",
                 "// InternalIAMService.Check (/iam/v1/internal/iam:check) is an Internal* RPC —",
-                "// it lives ONLY on the api-gateway cluster-internal REST listener, NOT the",
-                "// public cmux. Reach it via internalBaseUrl (:18081 in CI); the public baseUrl",
-                "// 404s /iam/v1/internal/* by design (ban #6). Leaving the URL on baseUrl when",
-                "// internalBaseUrl is missing turned a harness misconfiguration into a poll that",
-                "// burns its whole budget against a 404 and then fails for the wrong reason —",
-                "// so the variable is ASSERTED here (RED, naming it) instead.",
-                *require_env_url("internalBaseUrl", "/iam/v1/internal/iam:check",
+                "// it lives ONLY on the cluster-internal REST listener, never on the public",
+                "// front, which 404s /iam/v1/internal/* by design (ban #6). The variable is",
+                "// the SERVICE'S OWN internal front: `internalBaseUrl` names the platform",
+                "// edge's internal listener, which the autonomous stand does not raise at all,",
+                "// and the step would die in a connection refusal — a request WITHOUT an",
+                "// answer, which a verdict counted by failed assertions does not show.",
+                "// A missing address is ASSERTED here (RED, naming it), never skipped.",
+                *require_env_url("ownInternalRestBaseUrl", "/iam/v1/internal/iam:check",
                                  "group-membership Check probe — Internal* path"),
             ],
             body={
@@ -1337,3 +1338,8 @@ CASES.append(Case(
         ),
     ],
 ))
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")

@@ -37,6 +37,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -106,7 +107,7 @@ func TestUserInvite_ExistingActiveEmail_SecondAccount(t *testing.T) {
 		DisplayName:  domain.DisplayName("Multi Account (invited)"),
 		InviteStatus: domain.InviteStatusPending,
 		InvitedBy:    adminA,
-	})
+	}, time.Time{})
 	require.NoError(t, err,
 		"приглашение известной почты во второй аккаунт обязано пройти: отказ здесь означал бы, "+
 			"что глобальный ключ сломал путь, ради которого он вводился")

@@ -174,6 +174,7 @@ MINTED_CREDENTIALS = (
     "jwtBootstrap",
     "jwtInvitee",
     "jwtProjectAdminA1",
+    "jwtNoBindings",
     "jwtPureNoBindings",
     "jwtSAA",
     "jwtSANoGrant",
@@ -192,6 +193,11 @@ MINTED_ADDRESSES = (
     "ownRestBaseUrl",
     "ownInternalRestBaseUrl",
     "iamJwksBaseUrl",
+    # Ручка докер-токена. Того же рода, что и остальные три: её НАЗЫВАЕТ посадка,
+    # и ни один подписант её не выпускает. В шаблоне окружения строки под неё не
+    # было ВОВСЕ — то есть ключ читался кейсом и не объявлялся нигде, и перепись
+    # долга его не видела, пока не научилась третьему состоянию (kaname#122).
+    "iamRegistryTokenBaseUrl",
 )
 # Идентификаторы, которые в шаблоне стоят ПРАВДОПОДОБНЫМИ ЛИТЕРАЛАМИ с чужого
 # стенда. Они непусты, поэтому перепись долга их препятствием не считает, — а
@@ -204,6 +210,10 @@ MINTED_IDENTIFIERS = (
     "existingProjectId",
     "existingProjectCrossId",
     "projectA1Id",
+    "projectB1Id",
+    "userAAAId",
+    "userAABId",
+    "userNOBId",
     "svaAId",
     "svaInviteeId",
     "svaNoGrantId",
@@ -901,7 +911,8 @@ def run(args: argparse.Namespace) -> int:
     public = f"https://{host}:{args.port_public}"
     internal = f"https://{host}:{args.port_internal}"
     hooks = f"https://{host}:{args.port_hooks}"
-    token_url = f"https://{host}:{args.port_token}/iam/v1/token"
+    token_base = f"https://{host}:{args.port_token}"
+    token_url = f"{token_base}/iam/v1/token"
     jwks_base = f"https://{host}:{args.port_jwks}"
 
     # Признак прогона: он уезжает в ИМЕНА заводимых предметов, поэтому повторный
@@ -1001,6 +1012,52 @@ def run(args: argparse.Namespace) -> int:
     assert_serves(http, public, creds["jwtPureNoBindings"], "/iam/v1/me",
                   "jwtPureNoBindings (рубеж проходит, права не имеет)")
     step("jwtPureNoBindings получен обменом и ПРИНЯТ рубежом (права при этом нет)")
+
+    say("── ВТОРОЙ субъект без выдач: у каждого слота своя учётка ──────────────")
+    #
+    # ПОЧЕМУ ОТДЕЛЬНАЯ УЧЁТКА, А НЕ ТА ЖЕ САМАЯ. `jwtNoBindings` и
+    # `jwtPureNoBindings` — два слота «кому не выдано ничего», и наборы читают их
+    # порознь. Сведи их в одну учётку — и выдача, сделанная одной коллекцией на
+    # первый слот, молча снимет предмет у второго: отрицание «не имеет прав»
+    # стало бы функцией порядка прогонов. Класс измерен на общем стенде
+    # (`testing-newman.md` §4а, общий субъект без выдач, который грант-суиты
+    # реально гранят) и здесь не воспроизводится.
+    sva_nob = make_service_account(http, public, boot, tenants["a"]["accountId"],
+                                   f"seed-{run_id}-nob", run_id,
+                                   "создание второй учётки без выдач")
+    assert_no_bindings(http, public, boot, sva_nob)
+    step(f"вторая учётка без выдач заведена, её перечень выдач ПУСТ: {sva_nob}")
+    creds["jwtNoBindings"] = sa_token(http, public, token_url, boot, sva_nob,
+                                      run_id, "второй субъект без выдач")
+    assert_serves(http, public, creds["jwtNoBindings"], "/iam/v1/me",
+                  "jwtNoBindings (рубеж проходит, права не имеет)")
+    step("jwtNoBindings получен обменом и ПРИНЯТ рубежом (права при этом нет)")
+
+    say("── ЧЕЛОВЕК, которому не выдано ничего: назначенный субъект без грантов ─")
+    #
+    # ЭТО ЧЕЛОВЕК, А НЕ СЛУЖЕБНАЯ УЧЁТКА, И ПОДМЕНА ЗДЕСЬ НЕ ПРОХОДИТ. Кейсы
+    # читают его как `"subjectId": "{{userNOBId}}"` и `subject="user:{{userNOBId}}"`
+    # — то есть предмет утверждения есть ТИП субъекта, и учётка с префиксом `sva`
+    # дала бы кейс, проверивший подстановку. Человека производит только провизия
+    # личности, поэтому заводится третья полоса арендатора.
+    #
+    # ПРЕДЪЯВИТЕЛЯ У НЕГО НЕТ НАМЕРЕННО: наборы называют его только КАК ЦЕЛЬ
+    # выдачи и ни разу не ходят под ним. Выпустить токен человека машинно значило
+    # бы дать предъявителя с пустым уровнем подтверждения личности — тот самый
+    # случай, который эта же полоса измерила выше.
+    nob_external = f"seed-{run_id}-nob@kaname.local"
+    provision_identity(http, hooks, hook_secret, nob_external)
+    step("личность БЕЗ ВЫДАЧ провизирована хуком поставщика")
+    tenants["nob"] = resolve_tenant(http, public, boot, nob_external)
+    user_nob = tenants["nob"]["userId"]
+    if tenants["nob"]["accountId"] in (tenants["a"]["accountId"],
+                                       tenants["b"]["accountId"]):
+        raise Finding(
+            "человек без выдач получил аккаунт одного из арендаторов — тогда "
+            "«ему не выдано ничего» перестаёт быть верным: владелец аккаунта "
+            "имеет права на нём структурно")
+    step(f"и стал арендатором своего аккаунта: человек {user_nob}, аккаунт "
+         f"{tenants['nob']['accountId']}")
 
     say("── бутстрап-предъявитель: тот, кем посев и работал всё это время ─────")
     #
@@ -1133,7 +1190,22 @@ def run(args: argparse.Namespace) -> int:
         "existingProjectId": tenants["a"]["projectId"],
         "existingProjectCrossId": tenants["b"]["projectId"],
         "iamJwksBaseUrl": jwks_base,
+        "iamRegistryTokenBaseUrl": token_base,
         "projectA1Id": tenants["a"]["projectId"],
+        # Проект на стороне ЧУЖОГО арендатора. Совпадает с
+        # `existingProjectCrossId` не случайно и не временно: у арендатора `b`
+        # проект по умолчанию один, и оба ключа называют именно его. Два имени
+        # остались оттого, что наборы пришли из разных фикстур; сводить их —
+        # ломающая правка кейсов, и она не предмет этой полосы.
+        "projectB1Id": tenants["b"]["projectId"],
+        # Собственные строки арендаторов. Кейсы читают их как ЧЕЛОВЕКА-владельца
+        # своего аккаунта (`ownerUserId`, пол видимости перечня людей), и
+        # производит их провизия личности, а не создание учётки.
+        "userAAAId": tenants["a"]["userId"],
+        "userAABId": tenants["b"]["userId"],
+        # Назначенный субъект БЕЗ выдач — человек своего аккаунта и никого
+        # больше. Предъявителя у него нет: наборы называют его целью выдачи.
+        "userNOBId": user_nob,
         "svaAId": sva_a,
         "svaInviteeId": sva_inv,
         "svaNoGrantId": sva_nogrant,
