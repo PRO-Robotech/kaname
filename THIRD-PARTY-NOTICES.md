@@ -25,9 +25,9 @@
 | Лицензия | Модулей |
 |---|---:|
 | Apache-2.0 | 13 |
-| BSD-3-Clause | 9 |
+| BSD-3-Clause | 10 |
 | MIT | 19 |
-| **всего** | **41** |
+| **всего** | **42** |
 
 ## Apache-2.0
 
@@ -55,6 +55,7 @@
 | `github.com/grpc-ecosystem/grpc-gateway/v2` | `v2.30.0` | `LICENSE` |
 | `github.com/munnerz/goautoneg` | `v0.0.0-20191010083416-a7dc8b61c822` | `LICENSE` |
 | `github.com/spf13/pflag` | `v1.0.10` | `LICENSE` |
+| `golang.org/x/crypto` | `v0.56.0` | `LICENSE` |
 | `golang.org/x/net` | `v0.58.0` | `LICENSE` |
 | `golang.org/x/sync` | `v0.22.0` | `LICENSE` |
 | `golang.org/x/sys` | `v0.47.0` | `LICENSE` |
