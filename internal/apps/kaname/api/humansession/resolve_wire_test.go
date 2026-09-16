@@ -6,6 +6,7 @@ package humansession_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -84,5 +85,17 @@ func TestResolveHandler_F3_27_FiveCausesOneWireAnswer(t *testing.T) {
 	resp, err := handler.Resolve(ctx, &iamv1.ResolveHumanSessionRequest{Bearer: live.Bearer.CookieValue()})
 	require.NoError(t, err)
 	require.True(t, resp.GetFound())
-	require.Equal(t, string(u.ID), resp.GetSession().GetUserId())
+	// Состав Р1 на проводе (Ф3-09, половина службы): личность, момент
+	// аутентификации в МИКРОСЕКУНДАХ (§4.1 п.19), срок, уровень, подтверждённость
+	// адреса, требование смены — каждое поле, и ни одного иного.
+	sess := resp.GetSession()
+	require.Equal(t, string(u.ID), sess.GetUserId())
+	require.Equal(t, "a@example.invalid", sess.GetEmail())
+	require.Equal(t, string(u.DisplayName), sess.GetDisplayName())
+	require.True(t, sess.GetAuthenticatedAt().AsTime().Equal(live.View.Session.AuthenticatedAt), "момент аутентификации — без усечения")
+	require.Equal(t, live.View.Session.AuthenticatedAt.Nanosecond()/1000, sess.GetAuthenticatedAt().AsTime().Nanosecond()/1000, "микросекунды на проводе")
+	require.True(t, sess.GetExpiresAt().AsTime().Equal(live.View.Session.ExpiresAt.Truncate(time.Second)), "срок — до секунды (конвенция)")
+	require.Equal(t, "1", sess.GetAssuranceLevel())
+	require.True(t, sess.GetEmailVerified())
+	require.False(t, sess.GetPasswordChangeRequired())
 }
