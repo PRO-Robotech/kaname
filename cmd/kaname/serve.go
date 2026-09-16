@@ -2138,30 +2138,37 @@ func runServe(cfg config.Config) error {
 					slog.Int("bindings_checked", report.BindingsChecked),
 					slog.Int("failures", len(report.Failures)))
 			}
-			// Live forward-smoke (review #14 / КФ-4/H-06): Verify (active_members-
-			// derived) provably CANNOT assert that a resource created in the contract
-			// window forward-materializes its tuple — so drive a real ForwardSmoke
-			// against an owner-binding (bounded-scope owner-content path). Best-effort,
-			// non-fatal (parity with Verify): a brand-new cluster with no owner-binding
-			// reports ran=false and the gate is logged as smoke-skipped.
-			passed, ran, serr := verifyGate.RunBootForwardSmoke(taskCtx)
-			switch {
-			case serr != nil:
-				logger.Warn("p8 verify-gate: forward-smoke failed", slog.Any("err", serr))
-			case !ran:
-				logger.Info("p8 verify-gate: forward-smoke skipped (no owner-binding to smoke yet)")
-			default:
-				logger.Info("p8 verify-gate forward-smoke result (forward-path liveness)",
-					slog.Bool("forward_smoke_passed", passed))
-			}
-			// Design-B cutover gate (F-12 / VBC-19): relation-satisfies-action — a REAL
-			// FGA Check per active binding's v_* required-relation triple. Logged as the
-			// catalog-flip gate (the flip to v_* is permitted only when 100% resolve).
+			// ДЫМОВАЯ ПРОБА ПРЯМОГО ПУТИ НА СТАРТЕ СНЯТА (#119), и снята вместе с
+			// предметом, а не ослаблена.
+			//
+			// Она заводила в БОЕВОМ зеркале поднятого кластера синтетический объект
+			// ЧУЖОГО домена (`vpc.network`) внутри настоящего аккаунта. Две беды
+			// сразу. Установка без модулей платформы такой живой строки каталога не
+			// несёт — у пробы там нет предмета вовсе, при том что служба исправна.
+			// И убирала она за собой половину: строка зеркала снималась, а строки
+			// ведомости, которые проба вызвала своим сведением, оставались — и
+			// следующий отчёт честно находил материализованное чтение на объекте,
+			// которого больше нет. На чистой установке это печаталось отказом о
+			// СОБСТВЕННОЙ синтетике, неотличимым для оператора от поломки.
+			//
+			// Свой тип вместо чужого не подошёл, и это ЗАМЕР, а не мнение: ни один
+			// из семи собственных типов службы содержательного кортежа владельца не
+			// материализует — материализуется зеркальный тип домена-потребителя.
+			// Значит «проверять себя своим типом» этим механизмом невыразимо.
+			//
+			// Свойство, которое проба утверждала, покрыто интеграционно и без неё:
+			// прямая материализация свежего объекта проверяется против настоящего
+			// сведения (`Test224_OwnerWildcard_ForwardMaterializesContent`), и эта
+			// проверка исполняется конвейером, тогда как отчёт на старте ничего не
+			// гейтил.
+			// Отчёт о том, РАЗРЕШАЮТСЯ ли материализованные чтения (F-12 / VBC-19):
+			// настоящий Check по каждой тройке v_* активной выдачи. Именно отчёт:
+			// вызывающий журналирует вердикт и ничего не переключает (#119).
 			relReport, rerr := verifyGate.VerifyRelationSatisfiesAction(taskCtx)
 			if rerr != nil {
 				logger.Warn("p8 verify-gate: relation-satisfies-action check failed", slog.Any("err", rerr))
 			} else {
-				logger.Info("p8 verify-gate relation-satisfies-action result (catalog-flip gate)",
+				logger.Info("p8 verify-gate: do materialized read tuples resolve",
 					slog.Bool("no_access_loss", relReport.NoAccessLoss),
 					slog.Int("bindings_checked", relReport.BindingsChecked),
 					slog.Int("failures", len(relReport.Failures)))
