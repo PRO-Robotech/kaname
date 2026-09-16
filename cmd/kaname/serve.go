@@ -1992,6 +1992,18 @@ func runServe(cfg config.Config) error {
 	// проход заведомо никому не мешает.
 	orphanMirrorSweeper := seed.NewOrphanMirrorSweeper(kanamepg.NewOrphanMirrorAdapter(pool),
 		seed.OrphanMirrorConfig{Logger: logger.With(slog.String("component", "orphan_mirror_sweep"))})
+	// Проход по строкам зеркала, чей проект НАЗВАН и не резолвится (стадия S2
+	// приёмки `non-empty-project-is-not-deleted.md`, kacho#1231).
+	//
+	// Предмет не пересекается с проходом выше: тот берёт строки без родителя
+	// вовсе, этот — с родителем, которого нет. Это остаток, который отказ по
+	// непустоте не закрывает по построению (окно доставки регистрации), и без
+	// прохода он невидим: такую строку не видит ни одна выдача и не назовёт ни
+	// один отказ. Проход ничего не удаляет и родителя не выдумывает — только
+	// называет и печатает перепись; свой ключ замка ("OMPN"), свой потолок.
+	danglingProjectMirrorSweeper := seed.NewDanglingProjectMirrorSweeper(
+		kanamepg.NewDanglingProjectMirrorAdapter(pool),
+		seed.DanglingProjectMirrorConfig{Logger: logger.With(slog.String("component", "dangling_project_mirror_sweep"))})
 	// Счётчик исходов пересчёта проекции глаголов роли — по одной системной роли.
 	// Успехи считаются наравне с отказами: без знаменателя «ноль отказов» не
 	// отличается от «пересчёта не было вовсе».
@@ -2017,6 +2029,17 @@ func runServe(cfg config.Config) error {
 		} else if mres.Executed {
 			logger.Info("orphan-mirror sweep: "+mres.Census(),
 				slog.Int("left_to_owner", len(mres.LeftToOwner)))
+		}
+		// Перепись прохода по родителю-проекту печатается на ЛЮБОМ исходе,
+		// включая чистый, и на чистом дереве проход ПРОХОДИТ, а не падает:
+		// проверка, падающая на достижении своей цели, толкает держать сироту
+		// ради зелёного.
+		if dres, derr := danglingProjectMirrorSweeper.RunOnce(taskCtx); derr != nil {
+			logger.Warn("dangling-project-mirror sweep failed (next boot will retry)",
+				slog.Any("err", derr), slog.String("census", dres.Census()))
+		} else if dres.Executed {
+			logger.Info("dangling-project-mirror sweep: "+dres.Census(),
+				slog.Int("named", len(dres.Named)), slog.Bool("truncated", dres.Truncated))
 		}
 		// Разность зеркала и живого каталога — ЧИТАЕТСЯ, а не чинится
 		// (kacho#1828). Держателем может быть только чтение: ключ на
