@@ -9,11 +9,28 @@
 // FORBIDDEN assumption): `required_acr_min` is enforced on the public path
 // (api-gateway StepUpGate), but the gateway does NOT re-run that gate when it
 // re-dials :9091 on the caller's behalf — so a privileged gateway-fronted
-// internal RPC (notably InternalClusterService/{Get,GrantAdmin,RevokeAdmin,
-// ListAdmins}, which already carry required_acr_min=2) would be un-enforced on
-// the internal route. This interceptor closes that arm: the gateway forwards the
-// validated acr as trusted metadata (grpcsrv.MDKeyTokenACR) and the floor
-// enforces the catalog requirement here too.
+// internal RPC with a raised floor would be un-enforced on the internal route.
+// This interceptor closes that arm: the gateway forwards the validated acr as
+// trusted metadata (grpcsrv.MDKeyTokenACR) and the floor enforces the catalog
+// requirement here too.
+//
+// WHICH RPC CARRIES WHICH FLOOR IS THE CONTRACT'S WORD, NOT THIS COMMENT'S. The
+// floor reads `required_acr_min` from the permission catalog (generated from
+// the proto options of each service) and restates nothing. On
+// InternalClusterService the contract raises the floor for the MUTATIONS of the
+// cluster-admin roster — InternalClusterService/GrantAdmin and
+// InternalClusterService/RevokeAdmin carry required_acr_min=2 — and keeps the
+// READS on the interactive floor: InternalClusterService/Get and
+// InternalClusterService/ListAdmins carry required_acr_min=1. That split is a
+// decision, not an omission (kaname#131): reading who administers the cluster
+// exposes no capability that a password-only session does not already hold
+// (the roster is visible to every system_admin through the catalog anyway), so
+// a second factor is demanded where the roster CHANGES, not where it is looked
+// at. A comment here that named a floor other than the contract's would be a
+// trap: a security comment that contradicts the code makes the next reader
+// "fix" one side to match the other without asking what was decided;
+// acr_floor_header_claims_test.go checks every floor this header names against
+// the embedded catalog.
 //
 // For each RPC in the GATEWAY-FRONTED set (GatewayFrontedInternalRPCs — caller-
 // context = api-gateway acting for an end user) whose catalog
