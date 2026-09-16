@@ -556,3 +556,50 @@ func TestHumanSessionRepo_F3_19_ReplaceLoginVerifierIsOneStatement(t *testing.T)
 	require.NoError(t, w.Rollback(ctx))
 	t.Logf("перепись: %s", fmt.Sprintf("замещений 2 параллельно · строк 1"))
 }
+
+// TestHumanSessionRepo_F3_28_OldestFailureInWindowNamesTheRetryAfter — самый
+// ранний след в окне — тот, по которому считается конец окна; вне окна и без
+// следов — «нет ни одного», а не ошибка.
+func TestHumanSessionRepo_F3_28_OldestFailureInWindowNamesTheRetryAfter(t *testing.T) {
+	pool := hsPool(t)
+	repo := pg.NewHumanSessionRepo(pool)
+	ctx := context.Background()
+	_, found, err := repo.OldestFailureSince(ctx, humansession.FailureByAddress, "o@example.invalid", hsBase)
+	require.NoError(t, err)
+	require.False(t, found)
+
+	w, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	require.NoError(t, w.RecordFailure(ctx, humansession.FailureByAddress, "o@example.invalid", hsBase.Add(-time.Hour)))
+	require.NoError(t, w.RecordFailure(ctx, humansession.FailureByAddress, "o@example.invalid", hsBase.Add(time.Second)))
+	require.NoError(t, w.RecordFailure(ctx, humansession.FailureByAddress, "o@example.invalid", hsBase.Add(5*time.Second)))
+	require.NoError(t, w.Commit(ctx))
+
+	at, found, err := repo.OldestFailureSince(ctx, humansession.FailureByAddress, "o@example.invalid", hsBase)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.True(t, at.Equal(hsBase.Add(time.Second)), "самый ранний В ОКНЕ, а не вообще: %s", at)
+}
+
+// TestHumanSessionRepo_F3_23_ClearPasswordChangeRequired — требование снимается
+// с записи и видно резолву (Ф5-24).
+func TestHumanSessionRepo_F3_23_ClearPasswordChangeRequired(t *testing.T) {
+	pool := hsPool(t)
+	repo := pg.NewHumanSessionRepo(pool)
+	ctx := context.Background()
+	people := lmPeople(t, pool, "hs23", 1)
+	s := hsSession(people[0], "23a", hsBase)
+	s.PasswordChangeRequired = true
+	s.PresentedMethods = []string{"recovery_code"}
+	b := hsIssue(t, repo, s)
+	got, r := hsResolve(t, repo, b, hsBase.Add(time.Minute))
+	require.Equal(t, humansession.SessionFound, r)
+	require.True(t, got.Session.PasswordChangeRequired)
+
+	w, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	require.NoError(t, w.ClearPasswordChangeRequired(ctx, "hss-23a"))
+	require.NoError(t, w.Commit(ctx))
+	got, _ = hsResolve(t, repo, b, hsBase.Add(time.Minute))
+	require.False(t, got.Session.PasswordChangeRequired, "Ф5-24: поле снято")
+}

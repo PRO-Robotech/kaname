@@ -76,6 +76,9 @@ type Store interface {
 	Resolve(ctx context.Context, digest domain.BearerDigest, now time.Time) (Resolved, NoSessionReason, error)
 	// CountFailures — неверных предъявлений по оси и ключу с момента since.
 	CountFailures(ctx context.Context, scope FailureScope, key string, since time.Time) (int, error)
+	// OldestFailureSince — момент самого раннего неверного предъявления в окне
+	// (по нему считается `Retry-After`: окно кончается, когда он состарится).
+	OldestFailureSince(ctx context.Context, scope FailureScope, key string, since time.Time) (time.Time, bool, error)
 	// FirstAuthentication — момент первой аутентификации личности нашей
 	// посадкой (Р5). found=false — посадка эту личность ещё не аутентифицировала.
 	FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error)
@@ -104,6 +107,9 @@ type Writer interface {
 	// перестаёт находить запись, момент аутентификации и срок прежние, момент
 	// последнего предъявления сдвигается на presentedAt.
 	RotateBearer(ctx context.Context, id domain.HumanSessionID, digest domain.BearerDigest, presentedAt time.Time) error
+	// ClearPasswordChangeRequired снимает требование сменить пароль с записи
+	// (Ф5-24): исход смены пароля из сессии восстановления.
+	ClearPasswordChangeRequired(ctx context.Context, id domain.HumanSessionID) error
 	// UpsertCutoff — операция записи отсечки (§4.1 п.17): момент монотонен;
 	// причина и актор идут за ПРИНЯТЫМ моментом, на равных стоит последняя.
 	UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error

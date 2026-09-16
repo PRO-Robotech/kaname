@@ -122,6 +122,22 @@ func (r *HumanSessionRepo) CountFailures(ctx context.Context, scope humansession
 	return n, nil
 }
 
+// OldestFailureSince — см. порт. `min` над пустым набором — NULL: «нет ни
+// одного», а не ошибка.
+func (r *HumanSessionRepo) OldestFailureSince(ctx context.Context, scope humansession.FailureScope, key string, since time.Time) (time.Time, bool, error) {
+	var at *time.Time
+	err := r.pool.QueryRow(ctx,
+		`SELECT min(failed_at) FROM login_failures WHERE scope = $1 AND key = $2 AND failed_at > $3`,
+		string(scope), key, since).Scan(&at)
+	if err != nil {
+		return time.Time{}, false, mapErr(err, "LoginFailures.Oldest", "")
+	}
+	if at == nil {
+		return time.Time{}, false, nil
+	}
+	return *at, true, nil
+}
+
 // FirstAuthentication — см. порт.
 func (r *HumanSessionRepo) FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error) {
 	return firstAuthenticationQ(ctx, r.pool, userID)
@@ -276,6 +292,14 @@ func (w *humanSessionWriter) RotateBearer(ctx context.Context, id domain.HumanSe
 	}
 	if tag.RowsAffected() != 1 {
 		return iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
+	}
+	return nil
+}
+
+// ClearPasswordChangeRequired — см. порт.
+func (w *humanSessionWriter) ClearPasswordChangeRequired(ctx context.Context, id domain.HumanSessionID) error {
+	if _, err := w.tx.Exec(ctx, `UPDATE human_sessions SET password_change_required = false WHERE id = $1`, string(id)); err != nil {
+		return mapErr(err, "HumanSession.ClearPasswordChangeRequired", string(id))
 	}
 	return nil
 }
