@@ -75,6 +75,7 @@ func TestNetworkRepo_T31G301_UpsertNotUnregister_MirrorRowStays(t *testing.T) {
 		kanamepg.NewResourceMirrorEmitter(),
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
+		kanamepg.NewPublicReadPublisher(),
 	)
 
 	const objType, objID = "vpc.network", "net-g3"

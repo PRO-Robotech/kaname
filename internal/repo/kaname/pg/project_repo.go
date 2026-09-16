@@ -8,11 +8,14 @@ package pg
 // Ban #10 (within-service refs — DB-уровень):
 //   - FK projects_account_fk на accounts(id) ON DELETE RESTRICT (23503).
 //   - UNIQUE projects_account_name_unique (account_id, name) (23505).
+//   - FK roles_project_fk на projects(id) ON DELETE RESTRICT (23503) — запасной
+//     упор охраны непустоты в `Delete` (см. `projectDeleteQ`).
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -215,16 +218,123 @@ func (w *projectWriter) Update(ctx context.Context, p domain.Project, updateMask
 	return out, nil
 }
 
-// Delete — без cross-service refcheck. Простой DELETE.
+// projectRoleChildKind — ПОДПИСЬ счёта проектных ролей в перечне отказа: имя
+// живой строки каталога, под которым арендатор видит этот вид в ответе каталога
+// прав. Это не предикат отбора — отбором семейства управляет приставка в
+// операторе ниже (приёмка `non-empty-project-is-not-deleted.md`, §2.3).
+const projectRoleChildKind = "iam.role"
+
+// projectDeleteQ — удаление проекта ОДНИМ оператором: две охраны `NOT EXISTS`
+// (зеркало чужих ресурсов и своя таблица ролей) плюс зонд, отвечающий, ЧТО
+// удерживает, — оба слагаемых перечня в том же снимке (запрет #10; форма взята
+// у `accountWriter.Delete`).
+//
+// Условий у охраны зеркала ДВА — родитель и семейство. Каталог охрану не
+// спрашивает НАМЕРЕННО: строка чужого вида удерживает проект в любом состоянии
+// каталога, потому что за ней может стоять живой ресурс, а условие «только
+// живой глагол удаления» было бы занижением счёта — ошибкой, которая сиротит
+// ресурс необратимо (приёмка §2.2, §«Удерживает ЛЮБАЯ строка чужого вида»).
+//
+// Семейство `iam.*` исключается из зеркала ПРИСТАВКОЙ С РАЗДЕЛИТЕЛЕМ — тем же
+// предикатом, каким свой вид классифицирует `internal/domain/selector_feed.go`.
+// Свои типы служба в зеркало не кладёт, ребёнок проекта у семейства ровно один
+// (роль, ключ `roles_project_fk`) и считается своей таблицей — без исключения
+// роль считалась бы дважды, а строка любого другого вида службы держала бы
+// проект неснимаемо. Разделитель несущий: вид модуля, чьё имя начинается на
+// `iam` (`iamx.thing`), — чужой, и удерживает как всякий чужой.
+//
+// Отбор в охране и в группировке ДОСЛОВНО ОДИН — разойдись они, отказ пришёл бы
+// с пустой скобкой либо назвал бы вид, которого удержание не касается. Гейт
+// формы файла — `project_delete_operator_form_test.go`.
+//
+// Ключ `roles_project_fk ON DELETE RESTRICT` остаётся запасным упором для
+// конкурента, проскочившего между снимком и коммитом: его отказ приходит общим
+// текстом ссылочной полосы, как у аккаунта.
+const projectDeleteQ = `
+	WITH del AS (
+		DELETE FROM projects p
+		 WHERE p.id = $1
+		   AND NOT EXISTS (SELECT 1 FROM resource_mirror m
+		                    WHERE m.parent_project_id = $1
+		                      AND m.object_type NOT LIKE 'iam.%')
+		   AND NOT EXISTS (SELECT 1 FROM roles WHERE project_id = $1)
+		RETURNING 1
+	), held AS (
+		SELECT m.object_type AS kind, count(*)::bigint AS n
+		  FROM resource_mirror m
+		 WHERE m.parent_project_id = $1
+		   AND m.object_type NOT LIKE 'iam.%'
+		 GROUP BY m.object_type
+	)
+	SELECT
+	  (SELECT count(*) FROM del)::int                                       AS deleted,
+	  EXISTS (SELECT 1 FROM projects WHERE id = $1)                          AS project_exists,
+	  (SELECT count(*) FROM roles WHERE project_id = $1)::bigint             AS role_count,
+	  (SELECT coalesce(jsonb_object_agg(kind, n), '{}'::jsonb) FROM held)    AS held
+`
+
+// Delete снимает строку проекта, если он ПУСТ: ни одной зарегистрированной
+// строки зеркала чужого вида с этим родителем и ни одной проектной роли.
+// Иначе — `ErrReferenceInUse` с перечнем видов и чисел в порядке имени вида:
+//
+//	Project <id> is not empty (compute.instance: 1, iam.role: 2, vpc.network: 3)
+//
+// Печатаются виды и числа, НИКОГДА идентификаторы дочерних (состав проекта по
+// идентификаторам — карта арендатора); вид с нулём в перечень не попадает.
+//
+// Состав читается в том же операторе, что снимает строку, — отдельный `SELECT`
+// перед удалением брал бы свой снимок, а между ним и `DELETE` лежит ещё и
+// запуск воркера операции. Гарантия при этом одна для рода «роли» (вставка
+// роли берёт по ключу блокировку строки проекта) и отсутствует для рода
+// «зеркало»: у зеркала нет ключа на `projects`, и регистрация, обогнавшая
+// удаление, ложится с родителем, которого нет, — это окно объявлено
+// контрактом глагола и закреплено пробой как законный исход.
+//
+// «Удалено» читается ПЕРВЫМ, зонд вторым: у оператора один снимок, и удаление
+// из своего же CTE внешнему чтению не видно — зонд отвечает «проект
+// существует» и после успешного удаления.
 func (w *projectWriter) Delete(ctx context.Context, id domain.ProjectID) error {
-	tag, err := w.tx.Exec(ctx, `DELETE FROM projects WHERE id = $1`, string(id))
+	var (
+		deleted       int
+		projectExists bool
+		roleCount     int64
+		held          map[string]int64
+	)
+	err := w.tx.QueryRow(ctx, projectDeleteQ, string(id)).
+		Scan(&deleted, &projectExists, &roleCount, &held)
 	if err != nil {
 		return mapErr(err, "Project.Delete", string(id))
 	}
-	if tag.RowsAffected() == 0 {
+	if deleted == 1 {
+		return nil
+	}
+	if !projectExists {
 		return iamerr.Wrapf(iamerr.ErrNotFound, "Project %s not found", id)
 	}
-	return nil
+	if roleCount > 0 {
+		held[projectRoleChildKind] = roleCount
+	}
+	if len(held) > 0 {
+		return iamerr.Wrapf(iamerr.ErrReferenceInUse, "Project %s is not empty (%s)", id, formatHeldKinds(held))
+	}
+	// Строка исчезла между шагом удаления и зондом (чужой коммит). NotFound.
+	return iamerr.Wrapf(iamerr.ErrNotFound, "Project %s not found", id)
+}
+
+// formatHeldKinds печатает перечень «вид: число» в порядке имени вида — в
+// байтовом порядке, а не в порядке сортировки базы: два одинаковых отказа
+// обязаны читаться одинаково независимо от локали соединения.
+func formatHeldKinds(held map[string]int64) string {
+	kinds := make([]string, 0, len(held))
+	for kind := range held {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	parts := make([]string, 0, len(kinds))
+	for _, kind := range kinds {
+		parts = append(parts, fmt.Sprintf("%s: %d", kind, held[kind]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // ---- helpers ---------------------------------------------------------------
