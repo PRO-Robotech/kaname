@@ -40,6 +40,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -346,7 +347,21 @@ func compareArgon2id(material, presented string, compare bool) Result {
 		return Result{Outcome: OutcomeMismatched, Format: domain.PasswordHashFormatArgon2id, Params: params}
 	}
 
-	want := argon2.IDKey([]byte(presented), salt, iterations, memory, uint8(parallelism), uint32(len(body)))
+	// Оба приведения — к типам читателя, и оба ограждены ЗДЕСЬ, а не только
+	// перечнем форматов: перечень зеркалит ширину типа (`Max: 255`, проба
+	// «параллельность 256»), а граница на месте приведения — факт самого типа,
+	// и она отказывает закрыто, если зеркало разойдётся. Длина ключа параметром
+	// стоимости не является и перечнем не судится: предел — ширина типа
+	// читателя, RFC 9106 §3.1 допускает ровно столько же (2³²−1). Сравнение в
+	// uint64 — чтобы константа не переполняла int на 32-битной сборке.
+	if parallelism > math.MaxUint8 {
+		return unreadable
+	}
+	keyLen := uint64(len(body))
+	if keyLen > math.MaxUint32 {
+		return unreadable
+	}
+	want := argon2.IDKey([]byte(presented), salt, iterations, memory, uint8(parallelism), uint32(keyLen))
 	if subtle.ConstantTimeCompare(want, body) != 1 {
 		return Result{Outcome: OutcomeMismatched, Format: domain.PasswordHashFormatArgon2id, Params: params}
 	}
