@@ -75,6 +75,12 @@ func registerInternalRESTServices(
 		// Он внутренний ровно настолько же, насколько сам слушатель: тот же
 		// периметр, та же посадка mTLS. Потребитель ходит gRPC, не HTTP.
 		{"InternalSubscriptionService", subscriptionv1.RegisterInternalSubscriptionServiceHandlerFromEndpoint},
+		// Наша сессия человека (Ф3, kacho#1269). Привязок ноль — внешнего пути у
+		// `Resolve` контракт не объявляет: край спрашивает его gRPC на каждом
+		// запросе с носителем, и HTTP-двери у этого вопроса нет. В перечне стоит
+		// по той же причине, что соседи с нулём привязок. Под посадкой `external`
+		// служба на слушателе не поднята, и привязка ведёт к `Unimplemented`.
+		{"InternalHumanSessionService", iamv1.RegisterInternalHumanSessionServiceHandlerFromEndpoint},
 	}
 	for _, r := range registrations {
 		if err := r.bind(ctx, mux, endpoint, opts); err != nil {

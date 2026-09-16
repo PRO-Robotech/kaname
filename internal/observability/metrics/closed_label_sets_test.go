@@ -65,8 +65,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 )
 
 // closedLabelSet — семейство, чей набор клеток ЗАКРЫТ и перечислим при сборке.
@@ -131,6 +133,44 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Cells: len(CompensationOrigins),
 		Build: func(r *Registry) { r.NewCompensationRecorder() },
 		Why:   "расхождение записанных и исполненных читается только когда обе серии существуют",
+	},
+	// ── ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) ────────────────────────────────
+	// Один конструктор, семь семейств: запись на каждое, иначе незасеянный сосед
+	// прятался бы под засеянным. Словари — у производителей событий.
+	LoginOutcomesMetric: {
+		Cells: len(humansession.LoginOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "вызывающий видит ОДИН отказ; причина — только здесь, и «ноль по причине» видно до первого события",
+	},
+	PasswordVerificationOutcomesMetric: {
+		Cells: len(passwordverify.OutcomeNames()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "исход «у нас негодные данные» обязан быть виден нулём: он не отказ человеку, а находка о хранилище",
+	},
+	HumanSessionNoSessionMetric: {
+		Cells: len(humansession.NoSessionReasons()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "«сессии нет» по четырём причинам — один ответ краю; причина считается только здесь",
+	},
+	LoginFormRefusalsMetric: {
+		Cells: len(humansession.FormRefusals()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "отказ формы, которого не было ни разу, обязан быть отличим от формы, которую никто не судил",
+	},
+	LoginRateLimitRefusalsMetric: {
+		Cells: 2, // address × source
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "предел по каждой оси виден нулём: ось, о которой никто не спрашивал, не отсутствует",
+	},
+	PasswordBreachCheckMetric: {
+		Cells: len(humansession.BreachCheckOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "«проверка не состоялась ни разу» видно только когда клетка есть с нулём (Ф3-34)",
+	},
+	PasswordMaterialRewriteMetric: {
+		Cells: len(humansession.RewriteOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "переписывание материала, которое не случилось ни разу, обязано быть отличимо от непровязанного",
 	},
 	Namespace + "_invite_activations_total": {
 		Cells: len(InviteActivationOutcomes),

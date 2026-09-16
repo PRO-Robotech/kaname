@@ -31,6 +31,9 @@ func RegisterDefaults(v *viper.Viper) {
 	// окружение его не разрешит и ручка станет необъявляемой.
 	v.SetDefault("api-server.rest-endpoint", "")
 	v.SetDefault("api-server.internal-rest-endpoint", "")
+	// Полоса входа паролем (Ф3): адреса нет — слушатель не поднимается; под
+	// `own` это отказ старта, а не молчаливая посадка без входа.
+	v.SetDefault("api-server.login-lane-endpoint", "")
 	// Prometheus /metrics HTTP listener — separate cluster-internal port (never
 	// the public tenant gRPC surface). Override via KANAME_API_SERVER__METRICS_ENDPOINT.
 	v.SetDefault("api-server.metrics-endpoint", "tcp://0.0.0.0:9095")

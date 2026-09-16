@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 733
+Всего кейсов: 737
 
 ## Перепись по модулям
 
@@ -67,6 +67,7 @@
 | `cases/iam-token-facade-conformance.py` | 7 |
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
+| `cases/kaname-login-lane.py` | 4 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/label-revoke-nlb.py` | 1 |
@@ -996,6 +997,19 @@
 - `IAM-SET-GRP-LABEL-EXACT-OK`
 - `IAM-SET-SVA-LIST-READ-PARITY`
 - `IAM-SET-GRP-LIST-READ-PARITY`
+
+## `cases/kaname-login-lane.py` — 4 кейса
+
+> Полоса входа паролем и наша сессия (Ф3, kacho#1269): собственный слушатель
+> формы службы, поднимается только посадкой `own` и допускает ровно край по SAN
+> клиентского листа. Адресуется `loginLaneBaseUrl`; на автономном стенде посадки
+> `external` переменная пуста ПО ПОСАДКЕ, и каждый шаг уходит в «условие не
+> создано» помеченным утверждением — не в зелёное и не в красное.
+
+- `IAM-LOGINLANE-OK-CSRF-ISSUED`
+- `IAM-LOGINLANE-NEG-WRONG-PASSWORD`
+- `IAM-LOGINLANE-OK-LOGIN-LOGOUT-REPRESENT`
+- `IAM-LOGINLANE-NEG-CSRF-MISSING`
 
 ## `cases/kaname-own-rest-front.py` — 14 кейсов
 
