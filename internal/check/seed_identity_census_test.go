@@ -79,9 +79,10 @@ func TestSeedIdentityCensusMatchesItsAcceptance(t *testing.T) {
 	}
 
 	t.Logf("осмотрено: предикат прочитал %d файлов из %d в индексе (двоичных %d) · "+
-		"объявляющий блок при ревизии %s — %d строк · вёдер у предиката %d, объявлено %d",
+		"объявляющий блок при ревизии %s — %d строк · вёдер у предиката %d, объявлено %d · "+
+		"изъято как текст приёмки %s (названо: %v)",
 		rep.Read, rep.Indexed, rep.Binary, decl.Revision, decl.BlockLines,
-		len(rep.Buckets), len(decl.Buckets))
+		len(rep.Buckets), len(decl.Buckets), rep.Edge, rep.EdgeNamed)
 
 	requireSeedCensusRevisionIsOurs(t, root, decl.Revision)
 
