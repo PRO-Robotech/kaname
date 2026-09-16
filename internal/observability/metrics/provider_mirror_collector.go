@@ -57,7 +57,13 @@ const (
 	// ProviderMirrorTableServiceAccountKeys и ProviderMirrorTableUserTokens —
 	// значения метки `table`: имена таблиц как они лежат в схеме.
 	ProviderMirrorTableServiceAccountKeys = "service_account_oauth_clients"
-	ProviderMirrorTableUserTokens         = "user_oauth_clients"
+	// #nosec G101 -- это ИМЯ ТАБЛИЦЫ, а не удостоверение: `CREATE TABLE
+	// kaname.user_oauth_clients` в `internal/migrations/0001_initial.sql`, и
+	// значение уходит только в метку `table` метрики. Образец инструмента ловит
+	// слово `Tokens` в имени постоянной, а имя названо по предмету таблицы —
+	// удостоверениям пользователя; переименовывать его под сканер значило бы
+	// завести второе имя об одном предмете.
+	ProviderMirrorTableUserTokens = "user_oauth_clients"
 
 	// ProviderMirrorSampleOK — замер прочитал обе таблицы.
 	ProviderMirrorSampleOK = "ok"
