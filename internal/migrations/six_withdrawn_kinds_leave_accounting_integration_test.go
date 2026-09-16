@@ -53,7 +53,8 @@ func TestSixWithdrawnKinds_LeaveTheAccountingAndTheThreeLiveOnesStay(t *testing.
 		"iam.role",
 		"iam.accessBinding",
 	}
-	// Оставшиеся — те, чей вызов `kacho_quota_count` стоит в применённой миграции.
+	// Оставшиеся — те, чей вызов списания (`kacho_quota_count` в своде; с
+	// `20260916184500` функция зовётся `quota_count`) стоит в применённой миграции.
 	kept := []string{
 		"iam.account",
 		"iam.user.credential",

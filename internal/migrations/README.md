@@ -66,7 +66,8 @@ ls internal/migrations/*.sql | wc -l
 > сам же считает снятой.
 
 CHECK / FK / UNIQUE / partial UNIQUE / триггеры inline в соответствующих
-миграциях. Helper-функции: `kacho_labels_valid(jsonb)`,
+миграциях. Helper-функции: `labels_valid(jsonb)` (в своде — `kacho_labels_valid`,
+переименована миграцией `20260916184500`),
 `iam_permissions_valid(jsonb)`, триггер `group_members_member_exists_trg`.
 
 Squash в единый `0001_initial.sql` baseline запланирован в Wave M

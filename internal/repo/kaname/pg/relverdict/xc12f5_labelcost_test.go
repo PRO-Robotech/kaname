@@ -85,7 +85,7 @@ import (
 // какой причине.
 const f5Gate = "AUTHZFORMBENCH_F5"
 
-// f5Label — метка правила. Ключ обязан пройти `kaname.kacho_labels_valid`
+// f5Label — метка правила. Ключ обязан пройти `kaname.labels_valid`
 // (`^[a-z][-_./@a-z0-9]{0,62}$`), поэтому он проверен схемой, а не выбран на глаз.
 const (
 	f5LabelKey   = "authzformbench"
