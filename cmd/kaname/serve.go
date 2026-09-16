@@ -503,10 +503,19 @@ func runServe(cfg config.Config) error {
 	}
 	startSigningKeySweeper(ctx, signingKeystore, logger)
 
+	// Полоса входа паролем и наша сессия (Ф3, kacho#1269) — строится ТОЛЬКО
+	// под `own`; под `external` — nil, и всё, что читает её провязку,
+	// сообщает «нет» наблюдением, а не литералом (`loginlane.go`). Собирается
+	// ДО уборки, потому что её таблицы — предметы той же петли.
+	lane, err := buildLoginLane(cfg, pool, kanameRepo, metricsReg, logger)
+	if err != nil {
+		return err
+	}
+
 	// Фоновая уборка таблиц, чей рост задаёт внешний (задача #1292). Три
 	// предмета обслуживает ОДНА петля: три расписания об одном предмете
 	// разошлись бы молча.
-	if err := startRetentionSweeper(ctx, pool, cfg, metricsReg, logger); err != nil {
+	if err := startRetentionSweeper(ctx, pool, cfg, metricsReg, lane.retentionReapers(), logger); err != nil {
 		return err
 	}
 
@@ -521,6 +530,9 @@ func runServe(cfg config.Config) error {
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
 		metricsReg, cfg, tokenSigner, logger)
+	// `InternalHumanSessionService.Resolve` — внутренний слушатель, только
+	// при поднятой полосе (Ф3-45); под `external` регистрация не происходит.
+	svcs.humanSessionHandler = lane.resolveHandler()
 
 	// gRPC servers. PrincipalExtract-interceptor читает
 	// x-kacho-principal-* metadata-headers, которые api-gateway auth-interceptor
@@ -612,6 +624,9 @@ func runServe(cfg config.Config) error {
 		cfg.APIServer.RegistryToken.ListenAddress(), mtlsCfg); err != nil {
 		return err
 	}
+	if err := requireLoginLaneTLS(productionMode, cfg, mtlsCfg); err != nil {
+		return err
+	}
 	// Транспорт остальных HTTP-рёбер. Их ручки задавал ЗОНТИЧНЫЙ чарт монорепо;
 	// у отдельно поставленной службы его нет, а адреса всех трёх приходят
 	// умолчанием процесса и потому непусты всегда — то есть без этого стража
@@ -694,7 +709,7 @@ func runServe(cfg config.Config) error {
 	//
 	// Перепись печатается и на успешном старте: «ноль недостижимых записей»
 	// обязано быть отличимо от «каталог не читали».
-	laneWiring := observeLaneWiring(ctx, cfg, tokenSigner, wiredSignInMethods(), logger)
+	laneWiring := observeLaneWiring(ctx, cfg, tokenSigner, lane.signInMethods(), lane, logger)
 	logger.Info("identity posture lane wiring", laneWiringCensus(laneWiring)...)
 	if err := config.ValidateLaneWiring(cfg, laneWiring); err != nil {
 		return fmt.Errorf("identity posture lane: %w", err)
@@ -1281,6 +1296,14 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("профиль поверхности выдачи docker-токена: %w", err)
 	}
 
+	// (3а) Полоса входа паролем — четыре глагола формы на своём слушателе,
+	// взаимный TLS, вызывающий — ровно край (Ф3, Р7). Под `external` поверхность
+	// объявлена выключенной с причиной, а не пропущена молча.
+	loginLaneSurface, err := loginLaneSurface(cfg, surfaceMode, logger, lane, mtlsCfg)
+	if err != nil {
+		return fmt.Errorf("профиль поверхности полосы входа: %w", err)
+	}
+
 	// jwksUpstreamTimeout — потолок ОДНОГО обращения зеркала к верхнему хопу.
 	// Назван здесь потому, что клиент собирается в этом корне, а обработчику
 	// обязана достаться ТА ЖЕ величина, с которой клиент построен: два места с
@@ -1526,6 +1549,7 @@ func runServe(cfg config.Config) error {
 		{knobHooks, hooksSurface},
 		{knobMetrics, metricsSurface},
 		{knobRegistryToken, registryTokenSurface},
+		{knobLoginLane, loginLaneSurface},
 		{knobJWKSProxy, jwksProxySurface},
 		{knobPublicREST, restSurface},
 		{knobInternalREST, internalRESTSurface},

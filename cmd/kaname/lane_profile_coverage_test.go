@@ -218,7 +218,7 @@ func collectLaneFacts(t *testing.T) []laneFact {
 func bestCaseWiring(t *testing.T, cfg config.Config) config.LaneWiring {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	w := observeLaneWiring(context.Background(), cfg, nil, nil, logger)
+	w := observeLaneWiring(context.Background(), cfg, nil, nil, nil, logger)
 	w.OwnMintSignerWired = true
 	return w
 }

@@ -64,13 +64,17 @@ import (
 // инв. 4). Ключ — `<каталог от корня модуля>:<имя типа>`, значение — какая из
 // пяти ролей. Перечень закрыт и самоистекает: запись без типа в дереве — находка.
 //
-// Сегодня пуст: ни записи сессии, ни её чтений в дереве нет (Ф3).
+// Сегодня пуст, и это перепись, а не пробел: запись сессии (`domain.HumanSession`)
+// несёт уровень СТРОКОЙ закрытой оси, а не полем типа `assurance.Level`, —
+// производитель значения один (`assurance.LevelOf` в `humansession.IssueSession`),
+// и структуры с полем типа оси в дереве нет (Ф3, kacho#1269).
 var assuranceLevelHolders = map[string]string{}
 
 // assuranceAxisHomeTable — таблица, при которой объявлена ось уровня в схеме
-// (запись сессии, Р1). Пусто, пока таблицы сессии нет: тогда ЛЮБОЕ объявление
-// оси в схеме — находка. Заполняется тем же изменением, что таблица.
-const assuranceAxisHomeTable = ""
+// (запись сессии, Р1): `kaname.human_sessions` (Ф3, kacho#1269,
+// `20260916190000_human_session_is_our_record.sql`). Объявление оси при любой
+// ДРУГОЙ таблице — находка: уровень как состояние лежит только в записи сессии.
+const assuranceAxisHomeTable = "kaname.human_sessions"
 
 func TestAssuranceLevelHasOneWriterAndOneHome(t *testing.T) {
 	t.Parallel()
