@@ -1614,10 +1614,21 @@ func mapPGErr(err error) error {
 		return status.Error(codes.NotFound, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrAlreadyExists):
 		return status.Error(codes.AlreadyExists, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrPermissionDenied):
+		return status.Error(codes.PermissionDenied, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrUnauthenticated):
+		return status.Error(codes.Unauthenticated, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrFailedPrecondition):
 		return status.Error(codes.FailedPrecondition, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrInvalidArg):
 		return status.Error(codes.InvalidArgument, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrAborted):
+		// ПОВТОРЯЕМЫЙ отказ, а не поломка. Признак ставит `pgmaperr` на 40001/40P01
+		// — сериализационный конфликт и взаимная блокировка, — и повтор того же
+		// запроса проходит. Без этой ветви он уезжал в терминальный INTERNAL:
+		// вызывающий читал «сервис сломан» на состоянии, которое проходит само, и
+		// не повторял (задача #114).
+		return status.Error(codes.Aborted, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrUnavailable):
 		// Фиксированный текст, как у INTERNAL ниже, и по той же причине: цепочка
 		// признака недоступности ведёт к ЧУЖОМУ производителю (база, сосед, гейт
@@ -1634,6 +1645,14 @@ func mapPGErr(err error) error {
 		// Подробность остаётся в цепочке, и у неё ЕСТЬ читатель: вызывающие зовут
 		// `mapPGErrLogged`, который называет причину журналу (задача #2507).
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
+	case errors.Is(err, iamerr.ErrInternal):
+		// Ветвь ЯВНАЯ, хотя исход совпадает с запасным ниже. Так набор различаемых
+		// полос сходится с каноном, а сходимость держит гейт: копия, у которой
+		// полос меньше, молча отправляет чужие в терминальный INTERNAL. Текст
+		// остаётся СВОИМ — он называет предмет и есть часть контракта домена;
+		// подробность цепочки на провод не идёт ни здесь, ни в запасной ветви
+		// (hardening-инвариант #1).
+		return status.Error(codes.Internal, "internal SA key error")
 	}
 	return status.Error(codes.Internal, "internal SA key error")
 }
