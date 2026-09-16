@@ -35,6 +35,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
@@ -91,7 +92,15 @@ func (h *Handler) SessionCutoffOf(
 	}
 	resp := &iamv1.SessionCutoffOfResponse{Found: found}
 	if found {
-		resp.RevokeBefore = shared.TimestampProto(before)
+		// В РАЗРЕШЕНИИ ХРАНИЛИЩА, а не усечённым до секунды (kaname#176; приёмка
+		// Ф3 §4.1 п.19). Общее `shared.TimestampProto` усекает — это конвенция
+		// ОТМЕТОК ресурса (`created_at`), которые никто ни с чем не сравнивает.
+		// Отсечка — величина СРАВНЕНИЯ: край судит ею неусечённый момент
+		// аутентификации включающе, и усечённая вниз отсечка пропускала бы всё,
+		// что аутентифицировано внутри отброшенной доли секунды. Отсечка выхода
+		// Ф3 стоит на одну микросекунду раньше первой аутентификации — на
+		// усечённом проводе эта единица исчезла бы целиком.
+		resp.RevokeBefore = timestamppb.New(before)
 	}
 	return resp, nil
 }
