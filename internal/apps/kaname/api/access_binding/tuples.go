@@ -70,7 +70,7 @@ func dedupeTuples(tuples []abrepo.RelationTuple) []abrepo.RelationTuple {
 	return out
 }
 
-func buildBindingTuples(b domain.AccessBinding, role domain.Role) ([]abrepo.RelationTuple, error) {
+func buildBindingTuples(b domain.AccessBinding, role domain.Role) []abrepo.RelationTuple {
 	// RBAC explicit-model 2026 P4 (D-4 / КФ-3): the binding-time scope_grant emission
 	// path is REMOVED WHOLESALE. A RULES-role no longer emits per-rule scope_grant
 	// tuples at Create — the UNIFIED reconciler is the SINGLE materialization path
@@ -85,7 +85,7 @@ func buildBindingTuples(b domain.AccessBinding, role domain.Role) ([]abrepo.Rela
 		if hp, ok := hierarchyParentTuple(b); ok {
 			tuples = append(tuples, hp)
 		}
-		return tuples, nil
+		return tuples
 	}
 	// Legacy permissions-only role (no rules): emit the whole-role tier relations
 	// on the scope anchor + the hierarchy parent-pointer (via tuplesForBinding).
@@ -94,7 +94,7 @@ func buildBindingTuples(b domain.AccessBinding, role domain.Role) ([]abrepo.Rela
 		permissions[i] = string(p)
 	}
 	relations := capSynthesizedAccountAdmin(b, permissions, authzmap.PermissionsToRelations(permissions))
-	return tuplesForBinding(b, relations), nil
+	return tuplesForBinding(b, relations)
 }
 
 // capSynthesizedAccountAdmin keeps the legacy whole-role projection from

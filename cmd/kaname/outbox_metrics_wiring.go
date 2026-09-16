@@ -126,7 +126,7 @@ const auditOutboxMaxAttempts = 10
 // construction, и её ненаблюдаемость выглядела как ненужность наблюдения.
 //
 // Решение о приёмнике, границах доставки и предикат его пересмотра:
-// services/iam/docs/engineering/architecture/audit-outbox-has-no-receiver.md
+// docs/engineering/architecture/audit-outbox-has-no-receiver.md
 // (имя файла историческое, см. оговорку в его шапке).
 func runAuditOutboxMetrics(ctx context.Context, pool *pgxpool.Pool, rec *metrics.OutboxRecorder, logger *slog.Logger) {
 	collector := outboxmetrics.NewCollector(pool, rec, outboxmetrics.CollectorConfig{

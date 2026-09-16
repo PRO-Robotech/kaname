@@ -85,8 +85,7 @@ func tierTuples(t *testing.T, got []abrepo.RelationTuple, anchor string) []abrep
 // turns into every project and every resource beneath it.
 func TestBuildBindingTuples_LegacyNarrowRole_DoesNotSynthesizeAccountAdmin(t *testing.T) {
 	b := bindingOn("account", "acc_legacy_test00001")
-	got, err := buildBindingTuples(b, legacyRole("vpc.network.*.*"))
-	require.NoError(t, err)
+	got := buildBindingTuples(b, legacyRole("vpc.network.*.*"))
 
 	access := tierTuples(t, got, "account:acc_legacy_test00001")
 	require.Len(t, access, 1, "exactly one tier tuple on the anchor")
@@ -102,8 +101,7 @@ func TestBuildBindingTuples_LegacyNarrowRole_DoesNotSynthesizeAccountAdmin(t *te
 // were simply never emitted on an account.
 func TestBuildBindingTuples_LegacyAccountRole_KeepsAuthoredAccountAdmin(t *testing.T) {
 	b := bindingOn("account", "acc_legacy_test00002")
-	got, err := buildBindingTuples(b, legacyRole("iam.account.*.*"))
-	require.NoError(t, err)
+	got := buildBindingTuples(b, legacyRole("iam.account.*.*"))
 
 	assert.Contains(t, got, abrepo.RelationTuple{
 		User:     "user:usr_legacy_test00001",
@@ -115,8 +113,7 @@ func TestBuildBindingTuples_LegacyAccountRole_KeepsAuthoredAccountAdmin(t *testi
 // A global wildcard names everything, the account included.
 func TestBuildBindingTuples_LegacyGlobalWildcard_KeepsAccountAdmin(t *testing.T) {
 	b := bindingOn("account", "acc_legacy_test00003")
-	got, err := buildBindingTuples(b, legacyRole("*.*.*.*"))
-	require.NoError(t, err)
+	got := buildBindingTuples(b, legacyRole("*.*.*.*"))
 
 	assert.Contains(t, got, abrepo.RelationTuple{
 		User:     "user:usr_legacy_test00001",
@@ -131,8 +128,7 @@ func TestBuildBindingTuples_LegacyGlobalWildcard_KeepsAccountAdmin(t *testing.T)
 func TestBuildBindingTuples_LegacyPartialWildcards_KeepAccountAdmin(t *testing.T) {
 	for _, perm := range []string{"iam.*.*.*", "*.account.*.*"} {
 		b := bindingOn("account", "acc_legacy_test00004")
-		got, err := buildBindingTuples(b, legacyRole(perm))
-		require.NoError(t, err)
+		got := buildBindingTuples(b, legacyRole(perm))
 
 		assert.Contains(t, got, abrepo.RelationTuple{
 			User:     "user:usr_legacy_test00001",
@@ -148,8 +144,7 @@ func TestBuildBindingTuples_LegacyPartialWildcards_KeepAccountAdmin(t *testing.T
 // closing an amplification.
 func TestBuildBindingTuples_LegacyNarrowRole_ProjectAnchorUnchanged(t *testing.T) {
 	b := bindingOn("project", "prj_legacy_test00001")
-	got, err := buildBindingTuples(b, legacyRole("iam.access_bindings.admin"))
-	require.NoError(t, err)
+	got := buildBindingTuples(b, legacyRole("iam.access_bindings.admin"))
 
 	assert.Contains(t, got, abrepo.RelationTuple{
 		User:     "user:usr_legacy_test00001",
@@ -161,8 +156,7 @@ func TestBuildBindingTuples_LegacyNarrowRole_ProjectAnchorUnchanged(t *testing.T
 // A leaf anchor is untouched for the same reason.
 func TestBuildBindingTuples_LegacyNarrowRole_LeafAnchorUnchanged(t *testing.T) {
 	b := bindingOn("vpc_network", "net_legacy_test00001")
-	got, err := buildBindingTuples(b, legacyRole("vpc.network.*.*"))
-	require.NoError(t, err)
+	got := buildBindingTuples(b, legacyRole("vpc.network.*.*"))
 
 	assert.Contains(t, got, abrepo.RelationTuple{
 		User:     "user:usr_legacy_test00001",
@@ -178,8 +172,7 @@ func TestBuildBindingTuples_LegacyNarrowRole_LeafAnchorUnchanged(t *testing.T) {
 // indirection further out.
 func TestBuildBindingTuples_LegacyMixedRole_TierComesFromTheCoveringHalf(t *testing.T) {
 	b := bindingOn("account", "acc_legacy_test00007")
-	got, err := buildBindingTuples(b, legacyRole("iam.account.*.get", "vpc.network.*.*"))
-	require.NoError(t, err)
+	got := buildBindingTuples(b, legacyRole("iam.account.*.get", "vpc.network.*.*"))
 
 	access := tierTuples(t, got, "account:acc_legacy_test00007")
 	require.Len(t, access, 1, "exactly one tier tuple on the anchor")
@@ -192,8 +185,7 @@ func TestBuildBindingTuples_LegacyMixedRole_TierComesFromTheCoveringHalf(t *test
 // even though the role also carries a weaker permission elsewhere.
 func TestBuildBindingTuples_LegacyMixedRole_CoveringHalfStrong_KeepsAdmin(t *testing.T) {
 	b := bindingOn("account", "acc_legacy_test00008")
-	got, err := buildBindingTuples(b, legacyRole("iam.account.*.*", "vpc.network.*.get"))
-	require.NoError(t, err)
+	got := buildBindingTuples(b, legacyRole("iam.account.*.*", "vpc.network.*.get"))
 
 	assert.Contains(t, got, abrepo.RelationTuple{
 		User:     "user:usr_legacy_test00001",
@@ -207,8 +199,7 @@ func TestBuildBindingTuples_LegacyMixedRole_CoveringHalfStrong_KeepsAdmin(t *tes
 // a reduction, not a rewrite of every tier.
 func TestBuildBindingTuples_LegacyReadOnlyRole_AccountTierUnaffected(t *testing.T) {
 	b := bindingOn("account", "acc_legacy_test00005")
-	got, err := buildBindingTuples(b, legacyRole("vpc.network.*.get"))
-	require.NoError(t, err)
+	got := buildBindingTuples(b, legacyRole("vpc.network.*.get"))
 
 	access := tierTuples(t, got, "account:acc_legacy_test00005")
 	require.Len(t, access, 1)

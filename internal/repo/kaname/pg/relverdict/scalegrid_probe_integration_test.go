@@ -945,13 +945,13 @@ func TestScaleGrid_FullGridReport(t *testing.T) {
 		t.Skip("integration")
 	}
 	if os.Getenv(fullGridEnv) == "" {
-		t.Skipf("полная сетка идёт РУЧНЫМ прогоном: %s=1 go test -C services/iam ./internal/repo/kaname/pg/relverdict/ "+
+		t.Skipf("полная сетка идёт РУЧНЫМ прогоном: %s=1 go test ./internal/repo/kaname/pg/relverdict/ "+
 			"-run TestScaleGrid_FullGridReport -count=1 -v -timeout 120m", fullGridEnv)
 	}
 	ctx := context.Background()
 	grid := scalegrid.Full()
 
-	runCommand := fmt.Sprintf("%s=1 go test -C services/iam ./internal/repo/kaname/pg/relverdict/ "+
+	runCommand := fmt.Sprintf("%s=1 go test ./internal/repo/kaname/pg/relverdict/ "+
 		"-run TestScaleGrid_FullGridReport -count=1 -v -timeout 120m", fullGridEnv)
 	prov := scalegrid.TakeProvenance(runCommand, grid)
 

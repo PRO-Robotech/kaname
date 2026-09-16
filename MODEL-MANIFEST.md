@@ -80,7 +80,7 @@ seed: null                # УКАЗАТЕЛЬ: «не сеет» и «объя�
 молчаливый пропуск. Форма проверяется одним разбором:
 
 ```
-make -C services/iam module-manifest-check
+make module-manifest-check
 ```
 
 ### Что выводится и потому не пишется
@@ -232,8 +232,8 @@ roles:
 ## 5. Проверить манифест до развёртывания
 
 ```
-make -C services/iam module-manifest-check   # форма документа
-make -C services/iam model-canon-check       # блоки модели сверяются с каноном ПОБАЙТОВО
+make module-manifest-check   # форма документа
+make model-canon-check       # блоки модели сверяются с каноном ПОБАЙТОВО
 ```
 
 Второй сверяет побайтово намеренно: сверка «по смыслу» измеряет согласие двух

@@ -30,13 +30,6 @@ func NewUserTokenRevocationRepo(pool *pgxpool.Pool) *UserTokenRevocationRepo {
 	return &UserTokenRevocationRepo{pool: pool}
 }
 
-// UpsertRevokeAll — idempotent, monotonic upsert of a user-level cutoff.
-//
-// ban #10: the "cutoff never moves backwards" invariant is enforced on the DB
-// via GREATEST inside a single-statement INSERT … ON CONFLICT … DO UPDATE. The
-// PK (user_id) row-lock serializes concurrent writers; GREATEST makes the merge
-// commutative so the converged cutoff is the maximum submitted revoke_before
-// regardless of arrival order (no software read-modify-write / TOCTOU).
 // upsertRevokeAllSQL — the canonical monotonic cutoff upsert, shared by the
 // pool-scoped UpsertRevokeAll and the tx-scoped UpsertRevokeAllTx.
 const upsertRevokeAllSQL = `
@@ -48,6 +41,13 @@ const upsertRevokeAllSQL = `
 	        revoked_by_user_id = EXCLUDED.revoked_by_user_id,
 	        updated_at         = now()`
 
+// UpsertRevokeAll — idempotent, monotonic upsert of a user-level cutoff.
+//
+// ban #10: the "cutoff never moves backwards" invariant is enforced on the DB
+// via GREATEST inside a single-statement INSERT … ON CONFLICT … DO UPDATE. The
+// PK (user_id) row-lock serializes concurrent writers; GREATEST makes the merge
+// commutative so the converged cutoff is the maximum submitted revoke_before
+// regardless of arrival order (no software read-modify-write / TOCTOU).
 func (r *UserTokenRevocationRepo) UpsertRevokeAll(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
 	_, err := r.pool.Exec(ctx, upsertRevokeAllSQL,
 		string(u.UserID), u.RevokeBefore, u.Reason, string(revokedBy),

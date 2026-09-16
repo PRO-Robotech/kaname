@@ -107,6 +107,17 @@ type services struct {
 	// сегодня не применяется — решение записано в приёмке, а не умолчание.
 	moduleHandler *moduleapp.Handler
 
+	// bindingReconciler — ТОТ ЖЕ экземпляр материализации привязки, вынесенный
+	// наружу для полосы ПЕРВОГО ВХОДА (`hooks_mux.go`).
+	//
+	// Полем, а не вторым построением. Шапка построения ниже обещает «created once
+	// here so every consumer drives the same instance», и до задачи #116 это было
+	// неправдой: хук собирал свой экземпляр БЕЗ приёмника размера, поэтому
+	// гистограмма не видела живой полосы регистрации человека — и выглядела при
+	// этом полной. Гистограмма, не видящая полосы, неотличима от гистограммы
+	// полосы, по которой нет трафика.
+	bindingReconciler *reconcileapp.Reconciler
+
 	// subscriptionDoor — ТА ЖЕ дверь решения, что у списков, вынесенная наружу
 	// для сборки сервера потока изменений.
 	//
@@ -273,11 +284,18 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		os.Exit(1)
 	}
 
-	// rsabReconciler — the SINGLE per-object materialization engine (RBAC
-	// explicit-model 2026 P4). Shared by AccessBinding.Create, the Role.Update
-	// membership fan-out, AND the P6 Account.Create owner auto-binding
-	// materialization (C-01/C-01b). Created once here so every consumer drives the
-	// same instance.
+	// rsabReconciler — the SINGLE per-object materialization engine of the REQUEST
+	// PATH (RBAC explicit-model 2026 P4). Shared by AccessBinding.Create, the
+	// Role.Update membership fan-out, the P6 Account.Create owner auto-binding
+	// materialization (C-01/C-01b) AND the first-login provision hook, which takes
+	// this very instance through `services.bindingReconciler` — it used to build
+	// its own, without the size recorder (#116).
+	//
+	// «Every consumer» здесь означает потребителей ПУТИ ЗАПРОСА, и это не оговорка:
+	// фоновый воркер обхода (`serve.go`) строит свой экземпляр со своим именем
+	// в журнале, и его материализации в эту гистограмму НЕ попадают. Решение
+	// о том, должны ли они туда попадать, не принималось — предмет заведён
+	// задачей #157.
 	rsabReconciler := reconcileapp.New(kanamepg.NewReconcileAdapter(pool, catalogSource), logger, catalogSource)
 	if metricsReg != nil {
 		// Размер материализации привязки — измерение, не потолок. Он ничего не
@@ -591,8 +609,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRevoke(abRevoke)
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
-	authzServices := buildAuthZServices(pool, opsRepo, kanameRepo, relationStore,
-		metricsReg, cfg.AuthN.Mode.IsProduction(), logger)
+	authzServices := buildAuthZServices(kanameRepo, relationStore,
+		metricsReg, cfg.AuthN.Mode.IsProduction())
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
 	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
@@ -933,7 +951,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		userTokensHandler: userTokensH,
 
 		// ЗНАЧЕНИЕ, которое держат стражи, собираемые в runServe.
-		ownGates: relationStore,
+		ownGates:          relationStore,
+		bindingReconciler: rsabReconciler,
 	}
 }
 
@@ -1171,11 +1190,8 @@ type authzServiceBundle struct {
 // движка то, чего обёртка не добавляла. Добавлять больше нечего: цепь областей и
 // надзор администратора облака форма поднимает своим планом, поэтому «два ответа
 // на один вопрос» перестало быть возможным by construction, а не по договорённости.
-func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
-	kanameRepo kanamerepo.Repository, ownGates *authzcascade.Client,
-	metricsReg *metrics.Registry,
-	prodMode bool, logger *slog.Logger) authzServiceBundle {
-	_ = opsRepo // операции здесь больше не создаются: их создавал снятый писатель кортежей
+func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade.Client,
+	metricsReg *metrics.Registry, prodMode bool) authzServiceBundle {
 
 	// ClusterAdminChecker — плоский надзор администратора облака. Он спрашивает о
 	// типе `cluster`, то есть о ДРУГОМ объекте, чем тот, о котором идёт вопрос, —

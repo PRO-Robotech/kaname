@@ -35,7 +35,7 @@ seed:
   # успехом о предмете, которого нет. Второй предикат жив и половину про ПЯТЬ
   # подтверждает дословно: `kaname-bootstrap` есть, `kaname` — нет.
   # Предикаты обеих половин:
-  #   go test -C services/iam ./internal/authzmap/ -run TestModuleSet_PinnedComposition -count=1
+  #   go test ./internal/authzmap/ -run TestModuleSet_PinnedComposition -count=1
   #   git grep -ohE "'kacho-[a-z-]+'" -- 'services/iam/internal/migrations/*.sql' | sort -u
   #
   # Каждая обязана нести `description` —

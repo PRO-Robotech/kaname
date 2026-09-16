@@ -44,7 +44,7 @@ package pg_test
 // расширение обязано быть ограничено членствами, а не снимать сужение вовсе.
 //
 // RED до перевода плана чтения на членства, GREEN после.
-// Прогон: `go test -C services/iam ./internal/repo/kaname/pg/ -run PersonSelector`
+// Прогон: `go test ./internal/repo/kaname/pg/ -run PersonSelector`
 // (testcontainers + Docker). Пропускается под -short.
 
 import (

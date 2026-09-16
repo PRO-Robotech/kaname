@@ -152,7 +152,7 @@ type WriterIface interface {
 	// СИСТЕМНОЙ роли — той, чей ярус кластерный (`cluster_id` непуст, отчего
 	// вычисляемый `is_system` истинен). Единственный писатель системной строки,
 	// не являющийся миграцией (приёмка
-	// `services/iam/docs/engineering/acceptance/roles-come-as-data-not-migrations.md`
+	// `docs/engineering/acceptance/roles-come-as-data-not-migrations.md`
 	// §3.1); `Insert` выше её произвести НЕ МОЖЕТ by construction — `cluster_id`
 	// в его перечне колонок отсутствует.
 	//

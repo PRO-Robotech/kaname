@@ -134,7 +134,7 @@ func syncFile(o Options, name, whole string, want func(disk string) (string, err
 		if os.IsNotExist(err) {
 			if !o.Write {
 				return []string{name + " — документа в дереве НЕТ; порождённый перечень некуда положить " +
-					"(порождение: `make -C services/iam operator-docs`)"}
+					"(порождение: `make operator-docs`)"}
 			}
 			if whole == "" {
 				return []string{name + " — документа в дереве нет, а его проза не порождается: " +
@@ -165,5 +165,5 @@ func syncFile(o Options, name, whole string, want func(disk string) (string, err
 	}
 	return []string{name + " — РАСХОДИТСЯ с порождённым: в дереве лежит не то, что производит сегодняшний " +
 		"источник. Обычная причина — источник изменился, а документ нет. Починка: " +
-		"`make -C services/iam operator-docs`"}
+		"`make operator-docs`"}
 }

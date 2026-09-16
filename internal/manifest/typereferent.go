@@ -54,7 +54,7 @@ package manifest
 // # Чего смена референта НЕ отнимает у старта службы
 //
 // Ничего. Чтение доставленных манифестов на старте
-// (`services/iam/cmd/kaname/module_manifests.go` → [LoadDelivered]) идёт
+// (`cmd/kaname/module_manifests.go` → [LoadDelivered]) идёт
 // умолчанием, то есть по-прежнему охраняет объявления образа.
 type TypeReferent uint8
 

@@ -119,7 +119,7 @@ func TestRoleRuleOfAForeignModuleIsRefused(t *testing.T) {
 // неотличимо от чистоты.
 func TestRoleRulesOfEveryManifestNameTheirOwnModule(t *testing.T) {
 	// Обход — ПРОД-ПУТЬ (`CheckTree`), тот самый, которым судит
-	// `make -C services/iam module-manifest-check`. Свой обходчик рядом
+	// `make module-manifest-check`. Свой обходчик рядом
 	// разошёлся бы с ним молча на первом же новом месте манифеста.
 	rep := manifest.CheckTree(platformtree.Require(t))
 	if len(rep.Findings) > 0 {

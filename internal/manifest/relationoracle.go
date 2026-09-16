@@ -7,7 +7,7 @@ import "github.com/PRO-Robotech/kaname/internal/domain"
 
 // relationoracle.go — модель прав ВНОСИТСЯ в загрузчик вызывающим (задача
 // продукта #2002; приёмка
-// `services/iam/docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md`,
+// `docs/engineering/acceptance/model-composes-at-boot-from-delivered-manifests.md`,
 // §2 п. 6, сценарий `IAM-MB-1-17`).
 //
 // # Предмет: загрузчик доставки добывал модель, из которой сам же собирается

@@ -296,7 +296,7 @@ const VerbRelationPrefix = "v_"
 //
 // `-module ../..` — корень ЭТОГО модуля, куда ложится порождённый файл; отсюда,
 // из `internal/authzmap`, два шага вверх дают его ровно. Прежняя редакция знала
-// один довод `-root ../../../..`: он отсчитывался от `services/iam/internal/
+// один довод `-root ../../../..`: он отсчитывался от `internal/
 // authzmap` и приводил к корню платформы, а из этого дерева те же четыре шага
 // уводят на два уровня ВЫШЕ корня репозитория.
 //
@@ -308,17 +308,17 @@ const VerbRelationPrefix = "v_"
 // поведение: таблица — межмодульный каталог, и собранная из части манифестов
 // она выглядит целой, молча теряя тип.
 //
-//	KANAME_PLATFORM_TREE=/путь/к/дереву/платформы go generate ./internal/authzmap/...
+//	PLATFORM_TREE=/путь/к/дереву/платформы go generate ./internal/authzmap/...
 //
-//go:generate go run github.com/PRO-Robotech/kaname/cmd/authzmap-tables -root $KANAME_PLATFORM_TREE -module ../..
+//go:generate go run github.com/PRO-Robotech/kaname/cmd/authzmap-tables -root $PLATFORM_TREE -module ../..
 
 // ─────────────────────────────────────────────────────────────────────────────
 // НАБОРЫ ДЕЙСТВИЙ ПОРОЖДАЮТСЯ ИЗ МАНИФЕСТОВ — ОДНА ТАБЛИЦА ИЗ ДВУХ (#1092)
 //
 // `typeVerbRelations` (набор `v_*` каждого типа) жил здесь рукописным литералом.
 // Теперь он выводится из манифестов модулей и лежит в `tables_gen.go`;
-// производитель — `services/iam/internal/authzmapgen`, команда —
-// `services/iam/cmd/authzmap-tables`. Замер при переносе: глагольных типов 27,
+// производитель — `internal/authzmapgen`, команда —
+// `cmd/authzmap-tables`. Замер при переносе: глагольных типов 27,
 // отношений действия 109, и набор каждого типа совпал с литералом до последней
 // записи — вывод ничего не изменил, он снял ВТОРОЕ место об одном предмете.
 //
@@ -364,6 +364,13 @@ const VerbRelationPrefix = "v_"
 // канон — два рендера одного замысла, и их согласие обязан кто-то проверять;
 // снять гейт вместе с заведением вывода значило бы оставить дерево без обоих.
 
+// expandableTierRelations / expandableMembershipRelation — НЕглагольная часть
+// поверхности. Глагольная часть не перечисляется: она ВЫВОДИТСЯ как объединение
+// наборов всех типов (см. expandableRelations ниже).
+var expandableTierRelations = []string{"viewer", "editor", "admin"}
+
+const expandableMembershipRelation = "member"
+
 // expandableRelations — the closed set of FGA relation names a caller may pass
 // to ExpandAccess ("who can do <relation> on <object>"). It is the user-facing
 // authorization-decision surface of the canonical fga_model.fga:
@@ -386,13 +393,7 @@ const VerbRelationPrefix = "v_"
 // типов, поэтому список не может отстать от модели. Обе стороны запрета
 // (принимаемое ⊆ модель, машинерия ∉ принимаемое) держит гейт дрейфа
 // (authzmap/fga_model_drift_test.go).
-// expandableTierRelations / expandableMembershipRelation — НЕглагольная часть
-// поверхности. Глагольная часть не перечисляется: она ВЫВОДИТСЯ как объединение
-// наборов всех типов (см. expandableRelations ниже).
-var expandableTierRelations = []string{"viewer", "editor", "admin"}
-
-const expandableMembershipRelation = "member"
-
+//
 // expandableRelations — ВЫВОДИМОЕ множество: объединение наборов `v_*` всех
 // глагольных типов ∪ ярусные ∪ членство.
 //
@@ -435,7 +436,7 @@ func IsExpandableRelation(relation string) bool {
 //
 // Здесь стоял рукописный литерал `objectTypes`: точечное имя каталога → тип
 // модели прав. Он лежит теперь в `tables_gen.go` рядом с наборами действий;
-// производитель — `services/iam/internal/authzmapgen`. Замер при переносе: имён
+// производитель — `internal/authzmapgen`. Замер при переносе: имён
 // 27, и каждое совпало с литералом до последней записи — вывод ничего не
 // изменил, он снял ВТОРОЕ место об одном предмете.
 //
