@@ -8,6 +8,12 @@
 # `/internal/(repo|clients|reconciler|subscriptionjournal)`. Здесь модуль службы
 # и есть корень, поэтому префикса `services/iam/` в путях нет.
 #
+# К отбору добавлены `internal/moduleseedparity` и `internal/migrations`
+# (приёмка MRW-1, S1 п. 10; kaname#106): держатель атрибуции посева и пробы
+# миграций — включая прецеденты отката с повторным накатом — пропускают себя
+# под `-short` быстрого прогона и не входили ни в одно задание, то есть были
+# зелены только у того, кто позвал их руками.
+#
 # «НЕЧЕГО ЗАПУСКАТЬ» И «НЕ СМОГ СПРОСИТЬ» — РАЗНЫЕ ИСХОДЫ, и различать их
 # обязательно. Форма `go list … | grep … || true` покрывает ОБА одним нулём:
 # отбор получает пустой список, печатает «нечего запускать» и выходит успехом —
@@ -41,7 +47,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SELECT_RE='/internal/(repo|clients|reconciler|subscriptionjournal)(/|$)'
+SELECT_RE='/internal/(repo|clients|reconciler|subscriptionjournal|moduleseedparity|migrations)(/|$)'
 TIMEOUT="${INTEGRATION_TIMEOUT:-25m}"
 
 cd "$ROOT" || exit 2

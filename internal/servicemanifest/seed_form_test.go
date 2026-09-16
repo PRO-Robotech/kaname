@@ -17,6 +17,7 @@ package servicemanifest
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -75,10 +76,10 @@ func TestMRW06_GroupWithoutAGrantIsRefusedByTheForm(t *testing.T) {
 	if !errors.Is(err, manifest.ErrGroupNeverGranted) {
 		t.Fatalf("группа без выдачи принята судьёй формы: %v", err)
 	}
-	if want := "seed.groups[0]"; err == nil || !contains(err.Error(), want) {
+	if want := "seed.groups[0]"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("находка не называет путь %q: %v", want, err)
 	}
-	if !contains(err.Error(), "line ") && !contains(err.Error(), "строк") {
+	if !strings.Contains(err.Error(), "line ") && !strings.Contains(err.Error(), "строк") {
 		t.Fatalf("находка не называет номер строки документа: %v", err)
 	}
 	t.Logf("находка: %v", err)
@@ -108,7 +109,7 @@ func TestMRW08_AnchorOutsideTheClusterSingletonIsRefused(t *testing.T) {
 		if !errors.Is(err, manifest.ErrBindingAnchor) {
 			t.Fatalf("якорь вне кластерного singleton'а принят: %v", err)
 		}
-		if !contains(err.Error(), "seed.accessBindings[0]") {
+		if !strings.Contains(err.Error(), "seed.accessBindings[0]") {
 			t.Fatalf("находка не называет путь seed.accessBindings[0]: %v", err)
 		}
 	})
@@ -155,7 +156,7 @@ func TestMRW10_RecipientKindTheRelationDoesNotAdmitIsRefused(t *testing.T) {
 		if !errors.Is(err, manifest.ErrRelationRecipientKind) {
 			t.Fatalf("получатель, которого отношение не принимает, принят: %v", err)
 		}
-		if !contains(err.Error(), "service_account") {
+		if !strings.Contains(err.Error(), "service_account") {
 			t.Fatalf("находка не называет принимаемые виды: %v", err)
 		}
 	})
@@ -169,15 +170,4 @@ func TestMRW10_RecipientKindTheRelationDoesNotAdmitIsRefused(t *testing.T) {
 			t.Fatalf("без оракула судья утверждает о виде получателя: %v", err)
 		}
 	})
-}
-
-func contains(s, sub string) bool { return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0) }
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
