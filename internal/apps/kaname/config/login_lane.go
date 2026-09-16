@@ -58,8 +58,7 @@ type LoginLaneConfig struct {
 	MemoryReserveBytes uint64 `mapstructure:"memory-reserve-bytes"`
 }
 
-// LoginLaneKnobs — перечень ручек полосы: ключ настройки ↔ переменная среды,
-// одним объявлением. Читается `Load` (привязка) и стражами (имя в отказе).
+// loginLaneKnob — пара «ключ настройки ↔ переменная среды» одной ручки полосы.
 type loginLaneKnob struct {
 	Key string
 	Env string
@@ -67,6 +66,8 @@ type loginLaneKnob struct {
 
 const loginLaneKeyPrefix = "authn.login."
 
+// LoginLaneKnobs — перечень ручек полосы одним объявлением. Читается `Load`
+// (привязка окружения) и стражами (имя в отказе).
 var LoginLaneKnobs = []loginLaneKnob{
 	{loginLaneKeyPrefix + "session-ttl", "KANAME_AUTHN__LOGIN__SESSION_TTL"},
 	{loginLaneKeyPrefix + "cookie-domain", "KANAME_AUTHN__LOGIN__COOKIE_DOMAIN"},
