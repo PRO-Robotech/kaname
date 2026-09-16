@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 744
+Всего кейсов: 730
 
 ## Перепись по модулям
 
@@ -48,9 +48,8 @@
 | `cases/iam-flat-authz-vbc.py` | 2 |
 | `cases/iam-group.py` | 33 |
 | `cases/iam-interactive-client.py` | 8 |
-| `cases/iam-internal-only-check.py` | 16 |
+| `cases/iam-internal-only-check.py` | 13 |
 | `cases/iam-invite-grant-fga.py` | 4 |
-| `cases/iam-limit.py` | 11 |
 | `cases/iam-list-visibility.py` | 3 |
 | `cases/iam-membership-read.py` | 7 |
 | `cases/iam-permission-catalog.py` | 3 |
@@ -613,7 +612,7 @@
 - `IAM-IC-UP-VAL-UNKNOWN-MASK`
 - `IAM-IC-DL-IDM-REPEAT`
 
-## `cases/iam-internal-only-check.py` — 16 кейсов
+## `cases/iam-internal-only-check.py` — 13 кейсов
 
 > Case-set для iam-internal-only-check.
 
@@ -630,9 +629,6 @@
 - `IAM-INT-NEG-EXT-IC-LIST`
 - `IAM-INT-NEG-EXT-IC-CREATE`
 - `IAM-INT-OK-INT-IC-LIST`
-- `IAM-INT-NEG-EXT-LIMIT-LIST`
-- `IAM-INT-NEG-EXT-LIMIT-CREATE`
-- `IAM-INT-OK-INT-LIMIT-LIST`
 
 ## `cases/iam-invite-grant-fga.py` — 4 кейсов
 
@@ -643,21 +639,6 @@
 - `INVGRANT-TE3-ARMNAMES-ACCOUNT-PARITY`
 - `INVGRANT-TE4-PROJECT-ANCHOR-VIEWER-RC1`
 
-## `cases/iam-limit.py` — 11 кейсов
-
-> Case-set: InternalLimitService — resource-count ceilings (issue #291, stage S1).
-
-- `IAM-LIM-CR-CRUD-OK`
-- `IAM-LIM-CR-VAL-NEG-VALUE`
-- `IAM-LIM-CR-VAL-KIND`
-- `IAM-LIM-GT-NEG-ABSENT`
-- `IAM-LIM-GT-VAL-MALFORMED-ID`
-- `IAM-LIM-CR-CONF-DUP-TRIPLE`
-- `IAM-LIM-CR-NEG-ABSENT-SCOPE`
-- `IAM-LIM-RS-CRUD-PRECEDENCE`
-- `IAM-LIM-RS-SEC-NARROW-GATE`
-- `IAM-LIM-CS-CRUD-DELTA`
-- `IAM-LIM-DL-IDM-REPEAT`
 
 ## `cases/iam-list-visibility.py` — 3 кейсов
 
