@@ -11,7 +11,7 @@ import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/credential_kind.proto";
 import "kaname/cloud/iam/v1/service_account_oauth_client.proto";
 import "kaname/cloud/iam/v1/secret_options.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -40,7 +40,7 @@ option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;
 // put the wrong value in the docker username (that is `client_id`, not the
 // Kachō-side `key_id`).
 service SAKeyService {
-  rpc Issue (IssueSAKeyRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Issue (IssueSAKeyRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       post: "/iam/v1/serviceAccounts/{service_account_id}/keys"
       body: "*"
@@ -71,7 +71,7 @@ service SAKeyService {
     option (corelib.authz.v1.required_acr_min) = "1";
   }
 
-  rpc Revoke (RevokeSAKeyRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Revoke (RevokeSAKeyRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       delete: "/iam/v1/serviceAccounts/{service_account_id}/keys/{key_id}"
     };

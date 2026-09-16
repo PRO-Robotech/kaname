@@ -110,7 +110,8 @@ sequenceDiagram
 
 ### REST mapping
 
-`OperationService` — **домен-агностичный** контракт (`proto/kacho/cloud/operation/operation_service.proto`),
+`OperationService` — **домен-агностичный** контракт фундамента (`corelib.operation`, файл
+`corelib/operation/operation_service.proto` дерева контрактов платформы),
 поэтому его пути не несут имени сервиса; шлюз выбирает бэкенд по 3-символьному префиксу
 id (`iop` → iam) в `gateway/internal/opsproxy/proxy.go`.
 

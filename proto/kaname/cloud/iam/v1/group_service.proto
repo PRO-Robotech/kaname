@@ -9,7 +9,7 @@ import "google/api/annotations.proto";
 import "google/protobuf/field_mask.proto";
 import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/group.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -56,7 +56,7 @@ service GroupService {
   }
 
   // Creates a group within the specified account.
-  rpc Create (CreateGroupRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Create (CreateGroupRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/groups" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "CreateGroupMetadata"
@@ -72,7 +72,7 @@ service GroupService {
   }
 
   // Updates the specified group.
-  rpc Update (UpdateGroupRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Update (UpdateGroupRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { patch: "/iam/v1/groups/{group_id}" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "UpdateGroupMetadata"
@@ -88,7 +88,7 @@ service GroupService {
   }
 
   // Deletes the specified group.
-  rpc Delete (DeleteGroupRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Delete (DeleteGroupRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { delete: "/iam/v1/groups/{group_id}" };
     option (corelib.api.v1.operation) = {
       metadata: "DeleteGroupMetadata"
@@ -106,7 +106,7 @@ service GroupService {
   // Adds a member (User или ServiceAccount) to the group.
   // Идемпотентно: повторное добавление того же member'а — no-op.
   // Несуществующий member → FailedPrecondition.
-  rpc AddMember (AddGroupMemberRequest) returns (kacho.cloud.operation.Operation) {
+  rpc AddMember (AddGroupMemberRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/groups/{group_id}:addMember" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "AddGroupMemberMetadata"
@@ -123,7 +123,7 @@ service GroupService {
 
   // Removes a member from the group.
   // Идемпотентно: удаление несуществующего членства — no-op.
-  rpc RemoveMember (RemoveGroupMemberRequest) returns (kacho.cloud.operation.Operation) {
+  rpc RemoveMember (RemoveGroupMemberRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/groups/{group_id}:removeMember" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "RemoveGroupMemberMetadata"
@@ -280,7 +280,7 @@ message ListGroupOperationsRequest {
 
 message ListGroupOperationsResponse {
   // List of operations for the specified group.
-  repeated kacho.cloud.operation.Operation operations = 1;
+  repeated corelib.operation.Operation operations = 1;
 
   // This token allows you to get the next page of results for list requests.
   string next_page_token = 2;

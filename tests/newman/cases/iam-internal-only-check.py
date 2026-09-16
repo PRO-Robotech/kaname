@@ -41,10 +41,6 @@ Coverage:
   IAM-INT-NEG-EXT-IC-LIST              — InternalInteractiveClientService.List → 404 mux-miss на external
   IAM-INT-NEG-EXT-IC-CREATE            — InternalInteractiveClientService.Create → 404 mux-miss на external
   IAM-INT-OK-INT-IC-LIST               — тот же путь на internal → 200 со списком (positive control)
-  IAM-INT-NEG-EXT-LIMIT-LIST           — InternalLimitService.List → 404 mux-miss на external (VPCQ-10)
-  IAM-INT-NEG-EXT-LIMIT-CREATE         — InternalLimitService.Create → 404 mux-miss на external (VPCQ-10)
-  IAM-INT-OK-INT-LIMIT-LIST            — тот же путь на internal → 200 со списком и посеянными
-                                         умолчаниями (positive control)
 
 Перечень выше СХОДИТСЯ с тем, что модуль объявляет, — но ДЕРЖИТСЯ ЭТО ВНИМАНИЕМ,
 и здесь сказано прямо, потому что прежняя редакция утверждала обратное. Гейт
@@ -95,29 +91,26 @@ Note: `InternalBreakGlassService` стоял в перечне выше как �
 ЗДЕСЬ: перечень проверяемых служб читается как объявление покрытия, а `Coverage`
 ниже его не несёт и потому расхождения не показывал.
 
-Note: у трёх кейсов ниже — IAM-INT-NEG-EXT-LIMIT-LIST, -LIMIT-CREATE и
-IAM-INT-OK-INT-LIMIT-LIST — ПРЕДМЕТ СНЯТ, и шапка обязана это называть, пока
-кейсы стоят. `InternalLimitService` выпилена стадией S4 задачи `kacho#2117`
+Note: ЗДЕСЬ СТОЯЛИ ТРИ КЕЙСА О ПОТОЛКАХ — IAM-INT-NEG-EXT-LIMIT-LIST,
+-LIMIT-CREATE и IAM-INT-OK-INT-LIMIT-LIST, — и они СНЯТЫ ВМЕСТЕ С ПРЕДМЕТОМ
+(kaname#124). `InternalLimitService` выпилена стадией S4 задачи `kacho#2117`
 (надгробие — `cmd/kaname/grpc_register.go`, «ЗДЕСЬ РЕГИСТРИРОВАЛАСЬ
-`InternalLimitService`»; возврат стережёт `internal/check/quota_authority_retired.go`).
-Производителя у `/iam/v1/internal/limits` в дереве НЕ ОСТАЛОСЬ ни одного:
-`git grep -c 'internal/limits' -- ':!tests/newman'` → пусто, при 6 вхождениях в
-этой коллекции и 88 в `iam-limit`.
+`InternalLimitService`»), производителя у её поверхности в дереве не осталось ни
+одного. Два отрицания стали ВАКУУМНЫМИ — 404 приходит теперь отовсюду, и
+утверждение зеленело потому, что метода нет, а не потому, что ban #6 держится, —
+а положительный контроль краснел бы на поднятом стенде.
 
-Следствие для ВЕРДИКТА, и оно разное у трёх кейсов. Два отрицания («404 на
-внешнем») стали ВАКУУМНЫМИ: 404 приходит теперь отовсюду, утверждение зеленеет
-потому, что метода нет, а не потому, что ban #6 держится, — то есть ровно тот
-дефект, который блок ниже (`InternalAuthorizeService/WriteTuples`) называет «the
-form of an isolation check and none of its substance». Положительный контроль
-`IAM-INT-OK-INT-LIMIT-LIST` вакуумным не стал — он КРАСНЕЕТ на поднятом стенде.
+Надгробие оставлено, а не стёрто молча: читатель, пришедший за кейсом по номеру
+сценария VPCQ-10, обязан узнать, что его СНЯЛИ, а не решить, что ищет не там.
+Ban #6 при этом остаётся проверенным: у оси есть четыре живых положительных
+контроля на внутреннем слушателе (USER-UPSERT, IAM-LOOKUPSUBJECT, IAM-CHECK,
+IC-LIST), то есть отрицания рядом с ними вакуумными не стали.
 
-Исходов три, и «оставить как есть» не входит: снять три кейса вместе с предметом
-· перевести их на живую поверхность · завести предмет с предикатом снятия. Здесь
-не сделано ни одного намеренно: предмет шире этого набора — те же 11 кейсов несёт
-`cases/iam-limit.py`, их гоняет `scripts/run.sh` (`run_one "iam-limit"`) и
-объявляет долгом `.github/scripts/newman-suite-debt.py`, — и решается он своим
-изменением, а не попутно в правке шапки. Запись ИСТЕКАЕТ САМА: снимут кейсы —
-описывать ей станет нечего, и она сама станет находкой.
+Возврат утверждения о снятом авторитете стережёт гейт
+`internal/check/quota_authority_retired.go`, ось «сквозная проба»: шаг
+порождённой коллекции, адресующийся к поверхности снятого авторитета, — находка.
+До kaname#124 такой оси не было, и три кейса здесь плюс одиннадцать в `iam-limit`
+пережили снятие своего предмета, не покраснев ни разу.
 
 Перечень выше приведён к тому, что набор ДЕЛАЕТ: службы выведены из путей шагов
 порождённой коллекции (`InternalIAMService` и `InternalSessionRevocationsService`
@@ -955,104 +948,3 @@ CASES.append(Case(
 ))
 
 
-# ===========================================================================
-# InternalLimitService — resource-count ceilings, issue #291 S1 (VPCQ-10).
-#
-# The same three-case shape as the interactive-login client above, and for the
-# same reason: the route IS mounted on both multiplexers, and isolation is the
-# DISPATCHER's doing. Saying "it is not mounted" would send the next reader to fix
-# the registration instead of the classifier.
-#
-# WHY THE PROBE CARRIES `jwtBootstrap`. It is the cluster `system_admin`
-# ServiceAccount — the principal the five CRUD verbs are authorised for. Probing
-# with anybody else would leave "not routed" indistinguishable from "not allowed",
-# and only the first is what ban #6 is about.
-#
-# WHY THE LEAK EXPRESSION ON CREATE IS THE OPERATION METADATA. If one came back, a
-# ceiling was STATED through the advertised endpoint — a change to how much of a
-# shared resource a tenant may take, made from outside. That is the outcome, not
-# merely a routing surprise.
-# ===========================================================================
-
-_LIMIT_PATH = "/iam/v1/internal/limits"
-
-CASES.append(Case(
-    id="IAM-INT-NEG-EXT-LIMIT-LIST",
-    title="InternalLimitService.List on the external TLS listener → 404 mux miss "
-          "(internal-only, ban #6) — refused even to the principal authorised for it",
-    classes=["NEG", "SEC"],
-    priority="P0",
-    steps=[
-        _external_step(
-            name="limit-list-on-external",
-            method="GET",
-            path=_LIMIT_PATH,
-            auth="jwtBootstrap",
-            test_script=_mux_miss_assertions(
-                "EXT-LIMIT-LIST", "(j || {}).limits", "limits page"),
-        ),
-    ],
-))
-
-
-CASES.append(Case(
-    id="IAM-INT-NEG-EXT-LIMIT-CREATE",
-    title="InternalLimitService.Create on the external TLS listener → 404 mux miss "
-          "(internal-only, ban #6) — no ceiling is stated from the outside",
-    classes=["NEG", "SEC"],
-    priority="P0",
-    steps=[
-        _external_step(
-            name="limit-create-on-external",
-            method="POST",
-            path=_LIMIT_PATH,
-            auth="jwtBootstrap",
-            body={
-                "scope": "PROJECT",
-                "scopeId": "{{existingProjectId}}",
-                "kind": "vpc.network",
-                "value": 4,
-            },
-            test_script=_mux_miss_assertions(
-                "EXT-LIMIT-CREATE", "(j || {}).metadata",
-                "Operation metadata (a ceiling was stated)"),
-        ),
-    ],
-))
-
-
-CASES.append(Case(
-    id="IAM-INT-OK-INT-LIMIT-LIST",
-    title="InternalLimitService.List on the cluster-internal listener → 200 with a page "
-          "(positive control: the two 404s above mean 'not routed here', not 'nowhere at all')",
-    classes=["CRUD", "SEC"],
-    priority="P0",
-    steps=[
-        Step(
-            name="limit-list-on-internal",
-            method="GET",
-            path=_LIMIT_PATH,
-            pre_script=_internal_url_override(_LIMIT_PATH),
-            auth="jwtBootstrap",
-            test_script=[
-                *assert_status(200),
-                "pm.test('INT-LIMIT-LIST: the internal listener serves the page', () => {",
-                "  const j = pm.response.json();",
-                "  pm.expect(j, JSON.stringify(j)).to.be.an('object');",
-                "  const items = j.limits === undefined ? [] : j.limits;",
-                "  pm.expect(items, 'limits must be a page, absent meaning empty').to.be.an('array');",
-                "});",
-                # The platform's defaults are seeded by a migration and are the ONE
-                # place those numbers live. A page that came back without them would
-                # mean the seed never ran — and then every tenant would be limited by
-                # nothing, which is the state this whole change exists to end.
-                "pm.test('INT-LIMIT-LIST: the seeded platform defaults are there', () => {",
-                "  const j = pm.response.json();",
-                "  const items = j.limits === undefined ? [] : j.limits;",
-                "  const defs = items.filter(l => l.scope === 'DEFAULT');",
-                "  pm.expect(defs.length, JSON.stringify(items)).to.be.above(0);",
-                "});",
-            ],
-        ),
-    ],
-))

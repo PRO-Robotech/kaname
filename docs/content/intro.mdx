@@ -13,7 +13,7 @@ import hero from '@site/src/css/hero.module.css'
 
   <h1 className={hero.title}>
     Личности и доступ<br />
-    <span className={hero.titleAccent}>Kachō</span>
+    <span className={hero.titleAccent}>Kaname</span>
   </h1>
 
   <p className={hero.subtitle}>
@@ -26,7 +26,7 @@ import hero from '@site/src/css/hero.module.css'
     <a className={hero.btnPrimary} href="/getting-started">Быстрый старт →</a>
     <a className={hero.btnGhost} href="/api/overview">Обзор API</a>
     <a className={hero.btnGhost} href="/architecture/authz">Авторизация</a>
-    <a className={hero.btnGhost} href="https://github.com/PRO-Robotech/kacho/tree/main/services/iam">GitHub</a>
+    <a className={hero.btnGhost} href="https://github.com/PRO-Robotech/kaname">GitHub</a>
   </div>
 </header>
 
@@ -45,7 +45,7 @@ RPC.
 роль в терминах *«какие глаголы над какими ресурсами»* и привязывает её к субъекту на нужном уровне иерархии — платформа сама
 разворачивает это в проверяемые отношения.
 
-API следует **конвенциям Kachō**: плоские (flat) ресурсы, camelCase JSON, REST-пути
+API следует **конвенциям Kaname**: плоские (flat) ресурсы, camelCase JSON, REST-пути
 `/iam/v1/<resource>`, единый формат ошибок `{code, message, details[]}`. Чтение — синхронное;
 мутации — асинхронные через `Operation` с поллингом.
 

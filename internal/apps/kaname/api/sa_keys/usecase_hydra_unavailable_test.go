@@ -19,7 +19,6 @@
 package sa_keys
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -29,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/PRO-Robotech/kaname/internal/clients"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/logbuf"
 )
 
 // unavailableHydra — CreateOAuthClient always fails (Hydra admin unreachable).
@@ -40,8 +40,12 @@ func (u unavailableHydra) CreateOAuthClient(context.Context, clients.CreateOAuth
 func (u unavailableHydra) DeleteOAuthClient(context.Context, string) error { return nil }
 
 func TestIssue_HydraCreateUnavailable_MapsToUnavailableAndLogs(t *testing.T) {
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+	// The cause is logged by the operation worker goroutine, and read here after
+	// waitForOp. Ordering through the ops stub's mutex happens to cover that read
+	// today (the log precedes MarkError); the synchronised buffer makes the probe
+	// independent of that ordering instead of relying on it.
+	buf := &logbuf.Buffer{}
+	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	// A realistic transport failure — the exact class the live stand produced
 	// (public hydra-admin host does not resolve in-cluster). Its text carries the

@@ -12,7 +12,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -530,7 +530,7 @@ var File_kaname_cloud_iam_v1_project_service_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_project_service_proto_rawDesc = "" +
 	"\n" +
-	")kaname/cloud/iam/v1/project_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a!kaname/cloud/iam/v1/project.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"2\n" +
+	")kaname/cloud/iam/v1/project_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a!kaname/cloud/iam/v1/project.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"2\n" +
 	"\x11GetProjectRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\"\x88\x01\n" +
@@ -572,27 +572,26 @@ const file_kaname_cloud_iam_v1_project_service_proto_rawDesc = "" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x03R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x03 \x01(\tR\tpageToken\"\x89\x01\n" +
-	"\x1dListProjectOperationsResponse\x12@\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"\x85\x01\n" +
+	"\x1dListProjectOperationsResponse\x12<\n" +
 	"\n" +
-	"operations\x18\x01 \x03(\v2 .kacho.cloud.operation.OperationR\n" +
+	"operations\x18\x01 \x03(\v2\x1c.corelib.operation.OperationR\n" +
 	"operations\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\x84\n" +
-	"\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\xf8\t\n" +
 	"\x0eProjectService\x12\xad\x01\n" +
 	"\x03Get\x12&.kaname.cloud.iam.v1.GetProjectRequest\x1a\x1c.kaname.cloud.iam.v1.Project\"`\x8a\xb5\x18\x10iam.projects.get\x92\xb5\x18\x05v_get\x9a\xb5\x18\x15\n" +
 	"\aproject\x12\n" +
 	"project_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02\x1f\x12\x1d/iam/v1/projects/{project_id}\x12\x8e\x01\n" +
-	"\x04List\x12(.kaname.cloud.iam.v1.ListProjectsRequest\x1a).kaname.cloud.iam.v1.ListProjectsResponse\"1\x8a\xb5\x18\x11iam.projects.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x12\x12\x10/iam/v1/projects\x12\xd5\x01\n" +
-	"\x06Create\x12).kaname.cloud.iam.v1.CreateProjectRequest\x1a .kacho.cloud.operation.Operation\"~\x8a\xb5\x18\x13iam.projects.create\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
+	"\x04List\x12(.kaname.cloud.iam.v1.ListProjectsRequest\x1a).kaname.cloud.iam.v1.ListProjectsResponse\"1\x8a\xb5\x18\x11iam.projects.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x12\x12\x10/iam/v1/projects\x12\xd1\x01\n" +
+	"\x06Create\x12).kaname.cloud.iam.v1.CreateProjectRequest\x1a\x1c.corelib.operation.Operation\"~\x8a\xb5\x18\x13iam.projects.create\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
 	"\aaccount\x12\n" +
 	"account_id\xa2\xb5\x18\x011\xb2\xd2* \n" +
-	"\x15CreateProjectMetadata\x12\aProject\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/iam/v1/projects\x12\xe5\x01\n" +
-	"\x06Update\x12).kaname.cloud.iam.v1.UpdateProjectRequest\x1a .kacho.cloud.operation.Operation\"\x8d\x01\x8a\xb5\x18\x13iam.projects.update\x92\xb5\x18\bv_update\x9a\xb5\x18\x15\n" +
+	"\x15CreateProjectMetadata\x12\aProject\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/iam/v1/projects\x12\xe1\x01\n" +
+	"\x06Update\x12).kaname.cloud.iam.v1.UpdateProjectRequest\x1a\x1c.corelib.operation.Operation\"\x8d\x01\x8a\xb5\x18\x13iam.projects.update\x92\xb5\x18\bv_update\x9a\xb5\x18\x15\n" +
 	"\aproject\x12\n" +
 	"project_id\xa2\xb5\x18\x011\xb2\xd2* \n" +
-	"\x15UpdateProjectMetadata\x12\aProject\x82\xd3\xe4\x93\x02\":\x01*2\x1d/iam/v1/projects/{project_id}\x12\xf0\x01\n" +
-	"\x06Delete\x12).kaname.cloud.iam.v1.DeleteProjectRequest\x1a .kacho.cloud.operation.Operation\"\x98\x01\x8a\xb5\x18\x13iam.projects.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18\x15\n" +
+	"\x15UpdateProjectMetadata\x12\aProject\x82\xd3\xe4\x93\x02\":\x01*2\x1d/iam/v1/projects/{project_id}\x12\xec\x01\n" +
+	"\x06Delete\x12).kaname.cloud.iam.v1.DeleteProjectRequest\x1a\x1c.corelib.operation.Operation\"\x98\x01\x8a\xb5\x18\x13iam.projects.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18\x15\n" +
 	"\aproject\x12\n" +
 	"project_id\xa2\xb5\x18\x012\xb2\xd2*.\n" +
 	"\x15DeleteProjectMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02\x1f*\x1d/iam/v1/projects/{project_id}\x12\xfd\x01\n" +
@@ -626,14 +625,14 @@ var file_kaname_cloud_iam_v1_project_service_proto_goTypes = []any{
 	nil,                                   // 9: kaname.cloud.iam.v1.UpdateProjectRequest.LabelsEntry
 	(*Project)(nil),                       // 10: kaname.cloud.iam.v1.Project
 	(*fieldmaskpb.FieldMask)(nil),         // 11: google.protobuf.FieldMask
-	(*operation.Operation)(nil),           // 12: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),           // 12: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_project_service_proto_depIdxs = []int32{
 	10, // 0: kaname.cloud.iam.v1.ListProjectsResponse.projects:type_name -> kaname.cloud.iam.v1.Project
 	8,  // 1: kaname.cloud.iam.v1.CreateProjectRequest.labels:type_name -> kaname.cloud.iam.v1.CreateProjectRequest.LabelsEntry
 	11, // 2: kaname.cloud.iam.v1.UpdateProjectRequest.update_mask:type_name -> google.protobuf.FieldMask
 	9,  // 3: kaname.cloud.iam.v1.UpdateProjectRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateProjectRequest.LabelsEntry
-	12, // 4: kaname.cloud.iam.v1.ListProjectOperationsResponse.operations:type_name -> kacho.cloud.operation.Operation
+	12, // 4: kaname.cloud.iam.v1.ListProjectOperationsResponse.operations:type_name -> corelib.operation.Operation
 	0,  // 5: kaname.cloud.iam.v1.ProjectService.Get:input_type -> kaname.cloud.iam.v1.GetProjectRequest
 	1,  // 6: kaname.cloud.iam.v1.ProjectService.List:input_type -> kaname.cloud.iam.v1.ListProjectsRequest
 	3,  // 7: kaname.cloud.iam.v1.ProjectService.Create:input_type -> kaname.cloud.iam.v1.CreateProjectRequest
@@ -642,9 +641,9 @@ var file_kaname_cloud_iam_v1_project_service_proto_depIdxs = []int32{
 	6,  // 10: kaname.cloud.iam.v1.ProjectService.ListOperations:input_type -> kaname.cloud.iam.v1.ListProjectOperationsRequest
 	10, // 11: kaname.cloud.iam.v1.ProjectService.Get:output_type -> kaname.cloud.iam.v1.Project
 	2,  // 12: kaname.cloud.iam.v1.ProjectService.List:output_type -> kaname.cloud.iam.v1.ListProjectsResponse
-	12, // 13: kaname.cloud.iam.v1.ProjectService.Create:output_type -> kacho.cloud.operation.Operation
-	12, // 14: kaname.cloud.iam.v1.ProjectService.Update:output_type -> kacho.cloud.operation.Operation
-	12, // 15: kaname.cloud.iam.v1.ProjectService.Delete:output_type -> kacho.cloud.operation.Operation
+	12, // 13: kaname.cloud.iam.v1.ProjectService.Create:output_type -> corelib.operation.Operation
+	12, // 14: kaname.cloud.iam.v1.ProjectService.Update:output_type -> corelib.operation.Operation
+	12, // 15: kaname.cloud.iam.v1.ProjectService.Delete:output_type -> corelib.operation.Operation
 	7,  // 16: kaname.cloud.iam.v1.ProjectService.ListOperations:output_type -> kaname.cloud.iam.v1.ListProjectOperationsResponse
 	11, // [11:17] is the sub-list for method output_type
 	5,  // [5:11] is the sub-list for method input_type

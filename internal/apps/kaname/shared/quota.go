@@ -12,6 +12,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/quota/quotadetail"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 )
 
 // Отказ учёта числа ресурсов на пути наружу.
@@ -54,7 +55,14 @@ const (
 )
 
 // quotaReasonDomain — источник отказа в `ErrorInfo.domain`, как его видит клиент.
-const quotaReasonDomain = "iam.kacho.cloud"
+//
+// Берётся у ЕДИНСТВЕННОГО объявления продукта, как у соседних полос (членство,
+// ссылка, позиция журнала), а не пишется здесь литералом. Прежде эта полоса одна
+// отвечала именем платформы: литерал остался по месту, когда соседние полосы
+// перешли на объявление, и держался записью ведомости гейта, чей довод —
+// «производитель уходит вместе с модулем учёта» — оказался ложным: ушёл
+// авторитет величин, а счётчик и его отказ остались (kacho#2076, kacho#2117).
+func quotaReasonDomain() string { return refusaldomain.For(refusaldomain.ServiceIAM) }
 
 // quotaRefusal собирает статус отказа учёта, если err им является; ok=false
 // означает «это не отказ учёта» и передаёт разбор общей классификации.
@@ -91,7 +99,7 @@ func quotaRefusal(err error) (error, bool) {
 	// нечем, а ноль есть законная величина занятого и молчанием быть не может.
 	withDetails, derr := st.WithDetails(&errdetails.ErrorInfo{
 		Reason:   reason,
-		Domain:   quotaReasonDomain,
+		Domain:   quotaReasonDomain(),
 		Metadata: quotadetail.MetadataFromError(err),
 	})
 	if derr != nil {

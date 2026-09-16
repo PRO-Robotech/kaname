@@ -9,7 +9,7 @@ in-scope object a selector matches — never a `scope_grant:` escalation carrier
 binding-time `scope_grant` primitive has been removed wholesale, so the escalation
 carrier no longer exists (closed by construction).
 
-What this suite asserts, black-box through api-gateway → IAM → OpenFGA:
+What this suite asserts, black-box through the service's OWN REST front → IAM → OpenFGA:
 
   GRANT CONTRACT — an all_in_scope RULES-role Create + AccessBinding.Create on an
              ACCOUNT scope SUCCEEDS (Operation done, no error). This is the
@@ -41,7 +41,7 @@ Check-response shape (proto3 JSON via grpc-gateway):
           j.allowed is `undefined` (NOT false) on a deny. Deny is asserted as
           "allowed !== true" + a positive evidence check on the `reason` carrier.
 
-Fixture dependency (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh): jwtBootstrap, jwtAccountAdminA,
+Fixture dependency (tests/authz-fixtures/seed_own_stand.py): jwtBootstrap, jwtAccountAdminA,
 userNOBId, accountAId.
 """
 
@@ -56,20 +56,26 @@ POLL_CAP = 30
 
 
 def _internal_url_override(path):
-    """Redirect this request to the api-gateway cluster-internal REST listener
-    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are served
-    ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design (ban #6).
-    gen.py emits {{baseUrl}}<path>; without this override the FGA-Check probe hits the
-    public port → the edge's routing error {"code":5,"message":"Not Found"} → the first
-    pm.response.json() parses but carries no result.
-    Mirrors label-revoke-iam.py::_internal_url_override. internalBaseUrl is injected at
-    runtime by the newman harness (--env-var); a MISSING value is a broken harness, not a legal mode, so the
-    guard ASSERTS it (RED, naming the variable) before skipping — see
-    gen.py::require_env_url."""
+    """Переадресовать шаг на СОБСТВЕННЫЙ внутренний REST-фронт службы.
+
+    Пути `/iam/v1/internal/*` подаёт ТОЛЬКО внутренний слушатель (ban #6): на
+    публичном фронте их нет и не будет. Генератор приписывает шагу публичный
+    адрес, а `address_own_front` уже адресованный шаг не трогает — значит
+    переменную называет автор, и называет он СВОЮ: `ownInternalRestBaseUrl`.
+
+    ПОЧЕМУ НЕ `internalBaseUrl`. Это внутренний слушатель КРАЯ ПЛАТФОРМЫ. На
+    автономном стенде его нет вовсе, и шаг уходил бы в отказ соединения — то есть
+    в запрос БЕЗ ОТВЕТА, который вердикт по упавшим утверждениям не показывает
+    (замер: семь таких шагов в этой коллекции, 0 упавших утверждений при 7 без
+    ответа).
+
+    Отсутствующий адрес — отказ с меткой «условие не создано» и именем
+    переменной (`require_env_url`), а не молчаливый пропуск.
+    """
     return require_env_url(
-        "internalBaseUrl", path,
+        "ownInternalRestBaseUrl", path,
         "internal-only Check probe — /iam/v1/internal/* is served ONLY by the "
-        "cluster-internal REST listener")
+        "service's own internal REST front")
 
 
 def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
@@ -455,3 +461,8 @@ CASES.append(Case(
         *revoke_binding_steps("_sgBindGCOp", "getcreate"),
     ],
 ))
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")

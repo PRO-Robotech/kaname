@@ -12,7 +12,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -808,7 +808,7 @@ var File_kaname_cloud_iam_v1_sa_key_service_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_sa_key_service_proto_rawDesc = "" +
 	"\n" +
-	"(kaname/cloud/iam/v1/sa_key_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a)kaname/cloud/iam/v1/credential_kind.proto\x1a6kaname/cloud/iam/v1/service_account_oauth_client.proto\x1a(kaname/cloud/iam/v1/secret_options.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"\x86\x04\n" +
+	"(kaname/cloud/iam/v1/sa_key_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a)kaname/cloud/iam/v1/credential_kind.proto\x1a6kaname/cloud/iam/v1/service_account_oauth_client.proto\x1a(kaname/cloud/iam/v1/secret_options.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"\x86\x04\n" +
 	"\x11IssueSAKeyRequest\x12,\n" +
 	"\x12service_account_id\x18\x01 \x01(\tR\x10serviceAccountId\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1f\n" +
@@ -862,14 +862,14 @@ const file_kaname_cloud_iam_v1_sa_key_service_proto_rawDesc = "" +
 	"\x12service_account_id\x18\x01 \x01(\tR\x10serviceAccountId\x12\x15\n" +
 	"\x06key_id\x18\x02 \x01(\tR\x05keyId\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x03 \x01(\tR\taccountId2\xb7\x06\n" +
-	"\fSAKeyService\x12\x97\x02\n" +
-	"\x05Issue\x12&.kaname.cloud.iam.v1.IssueSAKeyRequest\x1a .kacho.cloud.operation.Operation\"\xc3\x01\x8a\xb5\x18\x19iam.issue_s_a_keies.issue\x92\xb5\x18\bv_update\x9a\xb5\x18)\n" +
+	"account_id\x18\x03 \x01(\tR\taccountId2\xaf\x06\n" +
+	"\fSAKeyService\x12\x93\x02\n" +
+	"\x05Issue\x12&.kaname.cloud.iam.v1.IssueSAKeyRequest\x1a\x1c.corelib.operation.Operation\"\xc3\x01\x8a\xb5\x18\x19iam.issue_s_a_keies.issue\x92\xb5\x18\bv_update\x9a\xb5\x18)\n" +
 	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x012\xb2\xd2*(\n" +
 	"\x12IssueSAKeyMetadata\x12\x12IssueSAKeyResponse\x82\xd3\xe4\x93\x026:\x01*\"1/iam/v1/serviceAccounts/{service_account_id}/keys\x12\xe6\x01\n" +
 	"\x04List\x12&.kaname.cloud.iam.v1.ListSAKeysRequest\x1a'.kaname.cloud.iam.v1.ListSAKeysResponse\"\x8c\x01\x8a\xb5\x18\x13iam.s_a_keyses.list\x92\xb5\x18\x06v_list\x9a\xb5\x18)\n" +
-	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x023\x121/iam/v1/serviceAccounts/{service_account_id}/keys\x12\xa3\x02\n" +
-	"\x06Revoke\x12'.kaname.cloud.iam.v1.RevokeSAKeyRequest\x1a .kacho.cloud.operation.Operation\"\xcd\x01\x8a\xb5\x18\x1biam.revoke_s_a_keies.revoke\x92\xb5\x18\bv_update\x9a\xb5\x18)\n" +
+	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x023\x121/iam/v1/serviceAccounts/{service_account_id}/keys\x12\x9f\x02\n" +
+	"\x06Revoke\x12'.kaname.cloud.iam.v1.RevokeSAKeyRequest\x1a\x1c.corelib.operation.Operation\"\xcd\x01\x8a\xb5\x18\x1biam.revoke_s_a_keies.revoke\x92\xb5\x18\bv_update\x9a\xb5\x18)\n" +
 	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x012\xb2\xd2**\n" +
 	"\x13RevokeSAKeyMetadata\x12\x13RevokeSAKeyResponse\x82\xd3\xe4\x93\x02<*:/iam/v1/serviceAccounts/{service_account_id}/keys/{key_id}BBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
@@ -900,7 +900,7 @@ var file_kaname_cloud_iam_v1_sa_key_service_proto_goTypes = []any{
 	(CredentialKind)(0),               // 10: kaname.cloud.iam.v1.CredentialKind
 	(*ServiceAccountOAuthClient)(nil), // 11: kaname.cloud.iam.v1.ServiceAccountOAuthClient
 	(*timestamppb.Timestamp)(nil),     // 12: google.protobuf.Timestamp
-	(*operation.Operation)(nil),       // 13: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),       // 13: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_sa_key_service_proto_depIdxs = []int32{
 	1,  // 0: kaname.cloud.iam.v1.IssueSAKeyRequest.trusted_subjects:type_name -> kaname.cloud.iam.v1.TrustedSubject
@@ -912,9 +912,9 @@ var file_kaname_cloud_iam_v1_sa_key_service_proto_depIdxs = []int32{
 	0,  // 6: kaname.cloud.iam.v1.SAKeyService.Issue:input_type -> kaname.cloud.iam.v1.IssueSAKeyRequest
 	4,  // 7: kaname.cloud.iam.v1.SAKeyService.List:input_type -> kaname.cloud.iam.v1.ListSAKeysRequest
 	6,  // 8: kaname.cloud.iam.v1.SAKeyService.Revoke:input_type -> kaname.cloud.iam.v1.RevokeSAKeyRequest
-	13, // 9: kaname.cloud.iam.v1.SAKeyService.Issue:output_type -> kacho.cloud.operation.Operation
+	13, // 9: kaname.cloud.iam.v1.SAKeyService.Issue:output_type -> corelib.operation.Operation
 	5,  // 10: kaname.cloud.iam.v1.SAKeyService.List:output_type -> kaname.cloud.iam.v1.ListSAKeysResponse
-	13, // 11: kaname.cloud.iam.v1.SAKeyService.Revoke:output_type -> kacho.cloud.operation.Operation
+	13, // 11: kaname.cloud.iam.v1.SAKeyService.Revoke:output_type -> corelib.operation.Operation
 	9,  // [9:12] is the sub-list for method output_type
 	6,  // [6:9] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name

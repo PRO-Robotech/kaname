@@ -3,19 +3,50 @@
 
 """Case-set: PermissionCatalogService.ListPermissionCatalog.
 
-The backend-driven grantable role-rule catalog — a PUBLIC sync read on the
-external api-gateway mux (GET /iam/v1/permissionCatalog). It is platform
-metadata (grantable-token taxonomy: modules → resources + editor flags + the
-closed verb set + wildcard policy), NOT per-tenant data and NOT infra-sensitive
-— so it lives on the PUBLIC listener with an authenticated floor: any
-authenticated principal may read it, anonymous is fail-closed.
+Витрина грантуемого каталога правил роли — ПУБЛИЧНОЕ синхронное чтение
+`GET /iam/v1/permissionCatalog`. Это метаданные платформы (модули → ресурсы +
+признаки редактора, закрытый набор глаголов, политика подстановок, перечень
+снятого с преемниками), а не данные арендатора и не инфраструктурные сведения:
+читает любой аутентифицированный вызывающий, безымянный получает отказ.
 
-Source of truth (the catalog projects EXACTLY this — never more):
-  ЖИВЫЕ СТРОКИ каталога — `kaname.catalog_resource` / `catalog_verb`, читаемые
-  через снимок `catalog.Snapshot`. Строку заводит ПРИМЕНЕНИЕ МАНИФЕСТА модуля в
-  работающем процессе, снятие (#1861) делает её неживой. За сборкой остался ОДИН
-  факт, и это законно: `hasListEndpoint` — свойство КРАЯ (публичный ли у типа
-  отфильтрованный список), живой строкой оно не объявляется ни одной колонкой.
+ПОВЕРХНОСТЬ — СОБСТВЕННЫЙ ПУБЛИЧНЫЙ REST-ФРОНТ СЛУЖБЫ (`{{ownRestBaseUrl}}`),
+А НЕ КРАЙ ПЛАТФОРМЫ. Решение владельца (e2e-flow.md §7а): сущности службы
+доступа проверяются в её репозитории на её собственном фронте. Каждый шаг
+адресуется `require_env_url("ownRestBaseUrl", …)`; переменная края `baseUrl`
+не переопределяется (гейт `scripts/own_front_env_test.py`).
+
+Прежде коллекция стучалась к краю через `{{baseUrl}}`, которого на автономном
+стенде нет: прогон там давал три запроса из трёх без ответа
+(`ECONNREFUSED 127.0.0.1:18080`), то есть «не выполнилось», а не вердикт. Ни
+один конвейер службы её не гонял, поэтому кейс `CONF-G-03` (приёмка
+`docs/engineering/acceptance/retired-resource-names-its-successor.md`,
+`IAM-SUC-10`) был объявлен и не исполнялся нигде.
+
+ЧЕЙ ПРОИЗВОДИТЕЛЬ ОТВЕЧАЕТ НА КАЖДОЕ УТВЕРЖДЕНИЕ — по таблице e2e-flow.md §7а
+«что производит край». Край добавлял три вещи: разбор доступа с извлечением
+области до валидации тела, скрытие существования побайтово равным промахом и
+таблицу «внутренний тип → форма ответа». Витрина не принимает ни области, ни
+идентификатора объекта, поэтому ни одна из трёх до её утверждений не доходит:
+
+  * тело ответа (`modules[]`, `closedVerbs`, `wildcardPolicy`,
+    `retiredResources[]`) производит use-case витрины
+    (`internal/apps/kaname/api/permission_catalog/list_catalog.go`) из живых
+    строк каталога; в camelCase его кодирует `grpc-gateway` собственного
+    фронта (`internal/restfront/mux.go`), и ложные признаки
+    (`hasListEndpoint: false`, `labelSelectable: false`) на проводе есть — это
+    замерено ответом стенда, а не выведено. Утверждения не менялись;
+  * отказ безымянному — `401` + код 16 — на этой поверхности производит рубеж
+    самой службы (`internal/authzguard/public_caller_policy.go`,
+    `UnnamedCallerMessage`), а не перехватчик края. Утверждение то же;
+    переписано только, КТО его производит.
+
+Живые строки каталога — `kaname.catalog_resource` / `catalog_verb`, читаемые
+через снимок `catalog.Snapshot`. Строку заводит ПРИМЕНЕНИЕ МАНИФЕСТА модуля в
+работающем процессе, снятие (#1861) делает её неживой. За сборкой остался ОДИН
+факт, и это законно: `hasListEndpoint` — свойство КРАЯ (публичный ли у типа
+отфильтрованный список), живой строкой оно не объявляется ни одной колонкой.
+Значение этого признака на проводе всё равно производит служба — край его не
+вычисляет, — поэтому утверждение о нём остаётся здесь.
 
   ⚠️ ЗДЕСЬ СТОЯЛО «authzmap.objectTypes + TypeHasVerbRelations +
   authzmap.CommonVerbVocabulary() + curated hasListEndpoint table. No DB, no
@@ -31,6 +62,20 @@ Source of truth (the catalog projects EXACTLY this — never more):
   не стал бы проверять ни снятые строки, ни тип, заведённый применением
   манифеста в работающем процессе.
 
+Предъявитель — `{{jwtBootstrap}}`: на автономном стенде его чеканит бутстрап-
+контур нашего подписанта (`tests/authz-fixtures/seed_own_stand.py`). Витрина
+требует только аутентифицированного яруса и по арендатору не сужается, поэтому
+выбор предъявителя на ответ не влияет. Здесь прежде стояла ссылка на пробу
+паритета предъявителей `TestListPermissionCatalog_AuthenticatedFloor` — такой
+пробы в дереве нет; отказ безымянному на слое use-case держит
+`TestListPermissionCatalog_AnonymousFailClosed`.
+
+TLS: шаги НЕ снимают проверку цепочки (`insecure_tls` не ставится), в отличие
+от соседней коллекции `kaname-own-rest-front`. Её довод — туннель в кластер, где
+лист сервера выписан на имя Service, — здесь предмета не имеет: коллекцию гоняет
+задание автономного стенда, прогонщику передаётся УЦ стенда
+(`--ssl-extra-ca-certs`), а лист стенда называет `localhost` и `127.0.0.1`.
+
 Covered scenarios:
   - authenticated GET → 200, modules[]/resources[]/closedVerbs/wildcardPolicy
     present, camelCase on the wire.
@@ -41,28 +86,17 @@ Covered scenarios:
   - each resource carries labelSelectable (camelCase); vpc.subnet=true
     (mirror-fed), vpc.addressPool=false (not fed) — the ARM_LABELS feed-gate flag
     (domain.IsLabelSelectableType).
-
-Auth mechanism (same as the existing authenticated iam/geo suites):
-  Bearer {{jwtBootstrap}} — the shared authz-fixtures HS256 dev token for
-  admin@prorobotech.ru; the catalog gates an authenticated floor (system_viewer
-  tier), which this subject trivially satisfies. The catalog is NOT scope-
-  filtered per-tenant (one platform-wide taxonomy), so a member and an
-  admin would receive an identical catalog (asserted black-box only at the
-  authenticated-floor level here; the per-tenant-identity parity is covered by
-  the iam integration test TestListPermissionCatalog_AuthenticatedFloor).
+  - retiredResources[] names each retired type with its successor, and the
+    grantable half of the SAME body does not contain it (`IAM-SUC-10`).
 
 Test-design techniques:
   - CONF (conformance): response shape vs the ListPermissionCatalogResponse
     contract — camelCase modules/resources/closedVerbs/wildcardPolicy; resources
     carry hasVerbRelations + hasListEndpoint booleans.
   - ECP (equivalence): authenticated (valid) vs anonymous (invalid) input class.
-  - error-guessing: anonymous must 401 at the gateway authz interceptor and must
+  - error-guessing: anonymous must be refused before the catalog is read and must
     NOT leak any module/resource taxonomy in the error body.
   - state-transition is N/A — sync read, no Operation envelope.
-
-Test-first (strict TDD): authored RED before the iam handler exists; goes
-GREEN once kaname registers PermissionCatalogService on the public listener
-AND kacho-api-gateway registers GET /iam/v1/permissionCatalog on the public mux.
 """
 
 # ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
@@ -71,6 +105,16 @@ AND kacho-api-gateway registers GET /iam/v1/permissionCatalog on the public mux.
 HOME = "kaname"
 
 CASES = []
+
+_OWN_WHY = ("собственный публичный REST-фронт службы; без него у витрины нет "
+            "адреса на автономном стенде, и кейс проверял бы край платформы "
+            "вместо предмета")
+
+
+def _own(path):
+    """Шаг адресуется к СОБСТВЕННОМУ фронту службы; пропавший адрес — отказ с именем
+    переменной и меткой «условие не создано», а не молчаливый пропуск."""
+    return require_env_url("ownRestBaseUrl", path, _OWN_WHY)
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +132,7 @@ CASES.append(Case(
             name="list-permission-catalog-auth",
             method="GET",
             path="/iam/v1/permissionCatalog",
+            pre_script=_own("/iam/v1/permissionCatalog"),
             auth="jwtBootstrap",
             test_script=[
                 *assert_status(200),
@@ -195,6 +240,11 @@ CASES.append(Case(
 # ---------------------------------------------------------------------------
 # NEG-G-02-catalog-anonymous-unauthenticated — anonymous GET → 401, no leak.
 # Matched negative for CONF-G-01-catalog-happy.
+#
+# ПРОИЗВОДИТЕЛЬ ОТКАЗА на этой поверхности — рубеж самой службы
+# (`internal/authzguard/public_caller_policy.go`, `UnnamedCallerMessage`), а не
+# перехватчик края: край здесь не стоит. Пара «401 + код 16» у обоих
+# производителей одна, поэтому утверждение не менялось.
 # ---------------------------------------------------------------------------
 
 CASES.append(Case(
@@ -207,6 +257,7 @@ CASES.append(Case(
             name="list-permission-catalog-anon",
             method="GET",
             path="/iam/v1/permissionCatalog",
+            pre_script=_own("/iam/v1/permissionCatalog"),
             auth="anonymous",
             test_script=[
                 "pm.test('status 401', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.equal(401));",
@@ -254,6 +305,7 @@ CASES.append(Case(
             name="list-permission-catalog-retired",
             method="GET",
             path="/iam/v1/permissionCatalog",
+            pre_script=_own("/iam/v1/permissionCatalog"),
             auth="jwtBootstrap",
             test_script=[
                 *assert_status(200),

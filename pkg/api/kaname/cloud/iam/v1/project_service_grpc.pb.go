@@ -11,7 +11,7 @@ package iamv1
 
 import (
 	context "context"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -57,30 +57,44 @@ type ProjectServiceClient interface {
 	Update(ctx context.Context, in *UpdateProjectRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Deletes the specified project.
 	//
-	// NOT BLOCKED BY LIVE RESOURCES, and this is a consequence for the caller, not
-	// a detail of our implementation. Unlike Network.Delete — which refuses a
-	// non-empty network and lists what blocks it — this verb performs NO reference
-	// check across services. After it succeeds:
+	// A NON-EMPTY PROJECT IS NOT DELETED. The request is refused while the access
+	// service counts at least one object registered in the project — a resource
+	// of another service (Network, Instance, Volume, ...) registered by its owner,
+	// or a project-scoped custom Role. The refusal arrives in
+	// Operation.result.error, never synchronously:
 	//
-	//   - resources of other services (Network, Instance, Volume, ...) keep
-	//     existing and keep consuming limits — there is no cross-service cascade;
-	//   - no NEW resource can be created in the project: consumers validate
-	//     project_id against IAM on the create path, and the id stops resolving;
-	//   - every access binding scoped to the project is revoked in the same
-	//     transaction as the row removal;
-	//   - there is no supported way left to enumerate what remains: the List verbs
-	//     of the owning services require project_id, and ProjectService.List no
-	//     longer returns this project.
+	//	code    FAILED_PRECONDITION
+	//	message "Project <id> is not empty (compute.instance: 1, iam.role: 2, vpc.network: 3)"
+	//	details ErrorInfo{reason: "REFERENCE_IN_USE"}
 	//
-	// So: delete the project LAST. Remove the resources it holds first, or record
-	// their ids beforehand.
+	// The list names KINDS AND COUNTS — the dotted catalog names of the
+	// registered objects, ordered by name — and never the ids of the children.
+	// It names REGISTERED OBJECTS, not the actions you took: one created resource
+	// may be counted as several objects of different kinds, because the auxiliary
+	// objects its owner creates alongside it are registered next to it. Removing
+	// one resource therefore also removes from the list kinds you never created
+	// on their own — the list answers "what is still counted", not "how many
+	// times you pressed create".
 	//
-	// Blocking a non-empty project is decided and specified — the live tally must
-	// reach IAM from the resource owners, because IAM is a leaf of the call graph
-	// and may not call them back. See docs/architecture/project-deletion-and-live-resources.md;
-	// the OPEN successor carrying the mechanism is PRO-Robotech/kacho#1231.
-	// (The decision itself was taken under #1594, which is closed — a reader sent
-	// there would read "closed" as "done".)
+	// What the refusal does NOT guarantee. The tally reaches the access service
+	// from the resource owners and does not arrive instantly: a resource created
+	// a second ago may not be counted yet, and a removed one may still be counted
+	// for a while. The refusal is therefore a defence against an ordinary
+	// mistake, not a guarantee of integrity — only the owner of a resource
+	// guarantees it on its side. The order in which nothing is lost is the same
+	// as before: remove the resources, then the project.
+	//
+	// On success every access binding scoped to the project is revoked in the same
+	// transaction as the row removal. Whether a create in the deleted project is
+	// still accepted for a short while afterwards is decided by the owning service
+	// (some cache a positive existence answer), not by this verb.
+	//
+	// The mechanism is decided in docs/architecture/project-deletion-and-live-resources.md
+	// (PRO-Robotech/kacho). What remains open under PRO-Robotech/kacho#1231 is the
+	// end-to-end observation of a live resource of another domain holding the
+	// project through the platform edge; the mechanism itself lives here.
+	// (The decision was taken under #1594, which is closed — a reader sent there
+	// would read "closed" as "done".)
 	Delete(ctx context.Context, in *DeleteProjectRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Lists operations for the specified project.
 	ListOperations(ctx context.Context, in *ListProjectOperationsRequest, opts ...grpc.CallOption) (*ListProjectOperationsResponse, error)
@@ -180,30 +194,44 @@ type ProjectServiceServer interface {
 	Update(context.Context, *UpdateProjectRequest) (*operation.Operation, error)
 	// Deletes the specified project.
 	//
-	// NOT BLOCKED BY LIVE RESOURCES, and this is a consequence for the caller, not
-	// a detail of our implementation. Unlike Network.Delete — which refuses a
-	// non-empty network and lists what blocks it — this verb performs NO reference
-	// check across services. After it succeeds:
+	// A NON-EMPTY PROJECT IS NOT DELETED. The request is refused while the access
+	// service counts at least one object registered in the project — a resource
+	// of another service (Network, Instance, Volume, ...) registered by its owner,
+	// or a project-scoped custom Role. The refusal arrives in
+	// Operation.result.error, never synchronously:
 	//
-	//   - resources of other services (Network, Instance, Volume, ...) keep
-	//     existing and keep consuming limits — there is no cross-service cascade;
-	//   - no NEW resource can be created in the project: consumers validate
-	//     project_id against IAM on the create path, and the id stops resolving;
-	//   - every access binding scoped to the project is revoked in the same
-	//     transaction as the row removal;
-	//   - there is no supported way left to enumerate what remains: the List verbs
-	//     of the owning services require project_id, and ProjectService.List no
-	//     longer returns this project.
+	//	code    FAILED_PRECONDITION
+	//	message "Project <id> is not empty (compute.instance: 1, iam.role: 2, vpc.network: 3)"
+	//	details ErrorInfo{reason: "REFERENCE_IN_USE"}
 	//
-	// So: delete the project LAST. Remove the resources it holds first, or record
-	// their ids beforehand.
+	// The list names KINDS AND COUNTS — the dotted catalog names of the
+	// registered objects, ordered by name — and never the ids of the children.
+	// It names REGISTERED OBJECTS, not the actions you took: one created resource
+	// may be counted as several objects of different kinds, because the auxiliary
+	// objects its owner creates alongside it are registered next to it. Removing
+	// one resource therefore also removes from the list kinds you never created
+	// on their own — the list answers "what is still counted", not "how many
+	// times you pressed create".
 	//
-	// Blocking a non-empty project is decided and specified — the live tally must
-	// reach IAM from the resource owners, because IAM is a leaf of the call graph
-	// and may not call them back. See docs/architecture/project-deletion-and-live-resources.md;
-	// the OPEN successor carrying the mechanism is PRO-Robotech/kacho#1231.
-	// (The decision itself was taken under #1594, which is closed — a reader sent
-	// there would read "closed" as "done".)
+	// What the refusal does NOT guarantee. The tally reaches the access service
+	// from the resource owners and does not arrive instantly: a resource created
+	// a second ago may not be counted yet, and a removed one may still be counted
+	// for a while. The refusal is therefore a defence against an ordinary
+	// mistake, not a guarantee of integrity — only the owner of a resource
+	// guarantees it on its side. The order in which nothing is lost is the same
+	// as before: remove the resources, then the project.
+	//
+	// On success every access binding scoped to the project is revoked in the same
+	// transaction as the row removal. Whether a create in the deleted project is
+	// still accepted for a short while afterwards is decided by the owning service
+	// (some cache a positive existence answer), not by this verb.
+	//
+	// The mechanism is decided in docs/architecture/project-deletion-and-live-resources.md
+	// (PRO-Robotech/kacho). What remains open under PRO-Robotech/kacho#1231 is the
+	// end-to-end observation of a live resource of another domain holding the
+	// project through the platform edge; the mechanism itself lives here.
+	// (The decision was taken under #1594, which is closed — a reader sent there
+	// would read "closed" as "done".)
 	Delete(context.Context, *DeleteProjectRequest) (*operation.Operation, error)
 	// Lists operations for the specified project.
 	ListOperations(context.Context, *ListProjectOperationsRequest) (*ListProjectOperationsResponse, error)

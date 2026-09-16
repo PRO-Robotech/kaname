@@ -73,7 +73,7 @@ import dedent from 'ts-dedent'
 
 ## Sync-чтение, async-мутации
 
-Ключевая конвенция Kachō: **чтение синхронно, мутации асинхронны**.
+Ключевая конвенция Kaname: **чтение синхронно, мутации асинхронны**.
 
 - **`Get` / `List`** и все `:list…`/`:expand…`-read-действия — синхронные: возвращают ресурс
   или список немедленно.
@@ -81,7 +81,7 @@ import dedent from 'ts-dedent'
   `Issue`, ...) — возвращают `Operation` (long-running operation). Клиент поллит статус
   операции до `done=true`.
 
-`Operation` (`kacho.cloud.operation.v1`) несёт `id` (префикс `iop`), `description`, `createdAt`,
+`Operation` (`corelib.operation`) несёт `id` (префикс `iop`), `description`, `createdAt`,
 `done`, `metadata` (например `CreateAccountMetadata` с `accountId`) и `oneof result` —
 `google.rpc.Status error` при ошибке или итоговый ресурс (`response`) при успехе. Поллинг —
 через `OperationService.Get`; подробнее — [Операции](/api/operations).
@@ -196,7 +196,7 @@ by construction.
 
 Ошибки возвращаются в формате **`google.rpc.Status`** — `{code, message, details[]}` —
 единообразно для gRPC и REST. `code` — числовой gRPC-код (REST мапит его на HTTP-статус),
-`message` — текст в стабильной формулировке Kachō, `details[]` — массив структурированных
+`message` — текст в стабильной формулировке Kaname, `details[]` — массив структурированных
 деталей (обычно пустой).
 
 <CodeBlock language="json">
@@ -215,7 +215,7 @@ by construction.
     <tr><td><code>INVALID_ARGUMENT</code></td><td>400</td><td>Нарушение формата / валидации; malformed id; immutable-поле в update_mask</td></tr>
     <tr><td><code>NOT_FOUND</code></td><td>404</td><td>Корректный по формату, но несуществующий ресурс</td></tr>
     <tr><td><code>ALREADY_EXISTS</code></td><td>409</td><td>Нарушение UNIQUE (например, дублирующее имя роли)</td></tr>
-    <tr><td><code>FAILED_PRECONDITION</code></td><td>400</td><td>Состояние не позволяет (удаление аккаунта с проектами; system-роль; deletion_protection); потолок квоты на вид не назван ни на одной области видимости (признак <code>QUOTA_NOT_PROVISIONED</code>)</td></tr>
+    <tr><td><code>FAILED_PRECONDITION</code></td><td>400</td><td>Состояние не позволяет (удаление аккаунта с проектами; удаление непустого проекта — в операции, с перечнем видов и чисел, см. <a href="/api/project">Project</a>; system-роль; deletion_protection); потолок квоты на вид не назван ни на одной области видимости (признак <code>QUOTA_NOT_PROVISIONED</code>)</td></tr>
     <tr><td><code>RESOURCE_EXHAUSTED</code></td><td>429</td><td>Исчерпана квота на число ресурсов вида: потолок назван и выбран полностью (признак <code>QUOTA_EXCEEDED</code>) — см. <a href="/api/quotas">Квоты</a></td></tr>
     <tr><td><code>UNAVAILABLE</code></td><td>503</td><td>База IAM или сосед на пути запроса (внешний поставщик удостоверений, домен величин) недоступны — fail-closed для мутаций</td></tr>
     <tr><td><code>UNAUTHENTICATED</code></td><td>401</td><td>Нет / невалиден JWT (или анонимный запрос)</td></tr>
@@ -302,7 +302,7 @@ Malformed id → sync `INVALID_ARGUMENT` первым стейтментом RPC
 ## Точность временных меток
 
 Все `createdAt` / `updatedAt` в proto-ответе **усечены до секунд** (`Truncate(time.Second)`) —
-это конвенция Kachō. БД хранит микросекунды, но клиент видит только секундную точность
+это конвенция Kaname. БД хранит микросекунды, но клиент видит только секундную точность
 (`2026-06-24T10:00:00Z`, без долей).
 
 ## Сводка сервисов

@@ -12,7 +12,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -271,7 +271,7 @@ var File_kaname_cloud_iam_v1_internal_user_service_proto protoreflect.FileDescri
 
 const file_kaname_cloud_iam_v1_internal_user_service_proto_rawDesc = "" +
 	"\n" +
-	"/kaname/cloud/iam/v1/internal_user_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a\x1ekaname/cloud/iam/v1/user.proto\x1a&kaname/cloud/iam/v1/user_service.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"u\n" +
+	"/kaname/cloud/iam/v1/internal_user_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a\x1ekaname/cloud/iam/v1/user.proto\x1a&kaname/cloud/iam/v1/user_service.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"u\n" +
 	"\x19UpsertFromIdentityRequest\x12\x1f\n" +
 	"\vexternal_id\x18\x01 \x01(\tR\n" +
 	"externalId\x12\x14\n" +
@@ -287,12 +287,12 @@ const file_kaname_cloud_iam_v1_internal_user_service_proto_rawDesc = "" +
 	"\x05email\x18\x03 \x01(\tR\x05email\"j\n" +
 	"\x1bOnRecoveryCompletedMetadata\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x122\n" +
-	"\x15revoked_session_count\x18\x02 \x01(\x05R\x13revokedSessionCount2\x9a\x04\n" +
-	"\x13InternalUserService\x12\xe3\x01\n" +
-	"\x12UpsertFromIdentity\x12..kaname.cloud.iam.v1.UpsertFromIdentityRequest\x1a .kacho.cloud.operation.Operation\"{\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\xb2\xd2*\"\n" +
+	"\x15revoked_session_count\x18\x02 \x01(\x05R\x13revokedSessionCount2\x92\x04\n" +
+	"\x13InternalUserService\x12\xdf\x01\n" +
+	"\x12UpsertFromIdentity\x12..kaname.cloud.iam.v1.UpsertFromIdentityRequest\x1a\x1c.corelib.operation.Operation\"{\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\xb2\xd2*\"\n" +
 	"\x1aUpsertFromIdentityMetadata\x12\x04User\x82\xd3\xe4\x93\x02.:\x01*\")/iam/v1/internal/users:upsertFromIdentity\x12h\n" +
-	"\x03Get\x12#.kaname.cloud.iam.v1.GetUserRequest\x1a\x19.kaname.cloud.iam.v1.User\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\xb2\x01\n" +
-	"\x13OnRecoveryCompleted\x12/.kaname.cloud.iam.v1.OnRecoveryCompletedRequest\x1a .kacho.cloud.operation.Operation\"H\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\xb2\xd2*#\n" +
+	"\x03Get\x12#.kaname.cloud.iam.v1.GetUserRequest\x1a\x19.kaname.cloud.iam.v1.User\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\x12\xae\x01\n" +
+	"\x13OnRecoveryCompleted\x12/.kaname.cloud.iam.v1.OnRecoveryCompletedRequest\x1a\x1c.corelib.operation.Operation\"H\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENER\xb2\xd2*#\n" +
 	"\x1bOnRecoveryCompletedMetadata\x12\x04UserBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
 var (
@@ -314,16 +314,16 @@ var file_kaname_cloud_iam_v1_internal_user_service_proto_goTypes = []any{
 	(*OnRecoveryCompletedRequest)(nil),  // 2: kaname.cloud.iam.v1.OnRecoveryCompletedRequest
 	(*OnRecoveryCompletedMetadata)(nil), // 3: kaname.cloud.iam.v1.OnRecoveryCompletedMetadata
 	(*GetUserRequest)(nil),              // 4: kaname.cloud.iam.v1.GetUserRequest
-	(*operation.Operation)(nil),         // 5: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),         // 5: corelib.operation.Operation
 	(*User)(nil),                        // 6: kaname.cloud.iam.v1.User
 }
 var file_kaname_cloud_iam_v1_internal_user_service_proto_depIdxs = []int32{
 	0, // 0: kaname.cloud.iam.v1.InternalUserService.UpsertFromIdentity:input_type -> kaname.cloud.iam.v1.UpsertFromIdentityRequest
 	4, // 1: kaname.cloud.iam.v1.InternalUserService.Get:input_type -> kaname.cloud.iam.v1.GetUserRequest
 	2, // 2: kaname.cloud.iam.v1.InternalUserService.OnRecoveryCompleted:input_type -> kaname.cloud.iam.v1.OnRecoveryCompletedRequest
-	5, // 3: kaname.cloud.iam.v1.InternalUserService.UpsertFromIdentity:output_type -> kacho.cloud.operation.Operation
+	5, // 3: kaname.cloud.iam.v1.InternalUserService.UpsertFromIdentity:output_type -> corelib.operation.Operation
 	6, // 4: kaname.cloud.iam.v1.InternalUserService.Get:output_type -> kaname.cloud.iam.v1.User
-	5, // 5: kaname.cloud.iam.v1.InternalUserService.OnRecoveryCompleted:output_type -> kacho.cloud.operation.Operation
+	5, // 5: kaname.cloud.iam.v1.InternalUserService.OnRecoveryCompleted:output_type -> corelib.operation.Operation
 	3, // [3:6] is the sub-list for method output_type
 	0, // [0:3] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name

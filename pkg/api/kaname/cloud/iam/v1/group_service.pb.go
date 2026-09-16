@@ -12,7 +12,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -762,7 +762,7 @@ var File_kaname_cloud_iam_v1_group_service_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_group_service_proto_rawDesc = "" +
 	"\n" +
-	"'kaname/cloud/iam/v1/group_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a\x1fkaname/cloud/iam/v1/group.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\",\n" +
+	"'kaname/cloud/iam/v1/group_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a\x1fkaname/cloud/iam/v1/group.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\",\n" +
 	"\x0fGetGroupRequest\x12\x19\n" +
 	"\bgroup_id\x18\x01 \x01(\tR\agroupId\"\x86\x01\n" +
 	"\x11ListGroupsRequest\x12\x1d\n" +
@@ -818,30 +818,30 @@ const file_kaname_cloud_iam_v1_group_service_proto_rawDesc = "" +
 	"\bgroup_id\x18\x01 \x01(\tR\agroupId\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x03R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x03 \x01(\tR\tpageToken\"\x87\x01\n" +
-	"\x1bListGroupOperationsResponse\x12@\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"\x83\x01\n" +
+	"\x1bListGroupOperationsResponse\x12<\n" +
 	"\n" +
-	"operations\x18\x01 \x03(\v2 .kacho.cloud.operation.OperationR\n" +
+	"operations\x18\x01 \x03(\v2\x1c.corelib.operation.OperationR\n" +
 	"operations\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\xcd\x0f\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\xb9\x0f\n" +
 	"\fGroupService\x12\xa3\x01\n" +
 	"\x03Get\x12$.kaname.cloud.iam.v1.GetGroupRequest\x1a\x1a.kaname.cloud.iam.v1.Group\"Z\x8a\xb5\x18\x0eiam.groups.get\x92\xb5\x18\x05v_get\x9a\xb5\x18\x15\n" +
 	"\tiam_group\x12\bgroup_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02\x1b\x12\x19/iam/v1/groups/{group_id}\x12\x86\x01\n" +
-	"\x04List\x12&.kaname.cloud.iam.v1.ListGroupsRequest\x1a'.kaname.cloud.iam.v1.ListGroupsResponse\"-\x8a\xb5\x18\x0fiam.groups.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x10\x12\x0e/iam/v1/groups\x12\xcb\x01\n" +
-	"\x06Create\x12'.kaname.cloud.iam.v1.CreateGroupRequest\x1a .kacho.cloud.operation.Operation\"v\x8a\xb5\x18\x11iam.groups.create\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
+	"\x04List\x12&.kaname.cloud.iam.v1.ListGroupsRequest\x1a'.kaname.cloud.iam.v1.ListGroupsResponse\"-\x8a\xb5\x18\x0fiam.groups.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x10\x12\x0e/iam/v1/groups\x12\xc7\x01\n" +
+	"\x06Create\x12'.kaname.cloud.iam.v1.CreateGroupRequest\x1a\x1c.corelib.operation.Operation\"v\x8a\xb5\x18\x11iam.groups.create\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
 	"\aaccount\x12\n" +
 	"account_id\xa2\xb5\x18\x011\xb2\xd2*\x1c\n" +
-	"\x13CreateGroupMetadata\x12\x05Group\x82\xd3\xe4\x93\x02\x13:\x01*\"\x0e/iam/v1/groups\x12\xd9\x01\n" +
-	"\x06Update\x12'.kaname.cloud.iam.v1.UpdateGroupRequest\x1a .kacho.cloud.operation.Operation\"\x83\x01\x8a\xb5\x18\x11iam.groups.update\x92\xb5\x18\bv_update\x9a\xb5\x18\x15\n" +
+	"\x13CreateGroupMetadata\x12\x05Group\x82\xd3\xe4\x93\x02\x13:\x01*\"\x0e/iam/v1/groups\x12\xd5\x01\n" +
+	"\x06Update\x12'.kaname.cloud.iam.v1.UpdateGroupRequest\x1a\x1c.corelib.operation.Operation\"\x83\x01\x8a\xb5\x18\x11iam.groups.update\x92\xb5\x18\bv_update\x9a\xb5\x18\x15\n" +
 	"\tiam_group\x12\bgroup_id\xa2\xb5\x18\x011\xb2\xd2*\x1c\n" +
-	"\x13UpdateGroupMetadata\x12\x05Group\x82\xd3\xe4\x93\x02\x1e:\x01*2\x19/iam/v1/groups/{group_id}\x12\xe6\x01\n" +
-	"\x06Delete\x12'.kaname.cloud.iam.v1.DeleteGroupRequest\x1a .kacho.cloud.operation.Operation\"\x90\x01\x8a\xb5\x18\x11iam.groups.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18\x15\n" +
+	"\x13UpdateGroupMetadata\x12\x05Group\x82\xd3\xe4\x93\x02\x1e:\x01*2\x19/iam/v1/groups/{group_id}\x12\xe2\x01\n" +
+	"\x06Delete\x12'.kaname.cloud.iam.v1.DeleteGroupRequest\x1a\x1c.corelib.operation.Operation\"\x90\x01\x8a\xb5\x18\x11iam.groups.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18\x15\n" +
 	"\tiam_group\x12\bgroup_id\xa2\xb5\x18\x012\xb2\xd2*,\n" +
-	"\x13DeleteGroupMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02\x1b*\x19/iam/v1/groups/{group_id}\x12\x86\x02\n" +
-	"\tAddMember\x12*.kaname.cloud.iam.v1.AddGroupMemberRequest\x1a .kacho.cloud.operation.Operation\"\xaa\x01\x8a\xb5\x18\x1biam.group_members.addMember\x92\xb5\x18\bv_update\x9a\xb5\x18\x15\n" +
+	"\x13DeleteGroupMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02\x1b*\x19/iam/v1/groups/{group_id}\x12\x82\x02\n" +
+	"\tAddMember\x12*.kaname.cloud.iam.v1.AddGroupMemberRequest\x1a\x1c.corelib.operation.Operation\"\xaa\x01\x8a\xb5\x18\x1biam.group_members.addMember\x92\xb5\x18\bv_update\x9a\xb5\x18\x15\n" +
 	"\tiam_group\x12\bgroup_id\xa2\xb5\x18\x012\xb2\xd2*/\n" +
-	"\x16AddGroupMemberMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02(:\x01*\"#/iam/v1/groups/{group_id}:addMember\x12\x95\x02\n" +
-	"\fRemoveMember\x12-.kaname.cloud.iam.v1.RemoveGroupMemberRequest\x1a .kacho.cloud.operation.Operation\"\xb3\x01\x8a\xb5\x18\x1eiam.group_members.removeMember\x92\xb5\x18\bv_update\x9a\xb5\x18\x15\n" +
+	"\x16AddGroupMemberMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02(:\x01*\"#/iam/v1/groups/{group_id}:addMember\x12\x91\x02\n" +
+	"\fRemoveMember\x12-.kaname.cloud.iam.v1.RemoveGroupMemberRequest\x1a\x1c.corelib.operation.Operation\"\xb3\x01\x8a\xb5\x18\x1eiam.group_members.removeMember\x92\xb5\x18\bv_update\x9a\xb5\x18\x15\n" +
 	"\tiam_group\x12\bgroup_id\xa2\xb5\x18\x012\xb2\xd2*2\n" +
 	"\x19RemoveGroupMemberMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02+:\x01*\"&/iam/v1/groups/{group_id}:removeMember\x12\xe4\x01\n" +
 	"\vListMembers\x12,.kaname.cloud.iam.v1.ListGroupMembersRequest\x1a-.kaname.cloud.iam.v1.ListGroupMembersResponse\"x\x8a\xb5\x18\x1fiam.group_memberses.listMembers\x92\xb5\x18\x06v_list\x9a\xb5\x18\x15\n" +
@@ -880,7 +880,7 @@ var file_kaname_cloud_iam_v1_group_service_proto_goTypes = []any{
 	(*Group)(nil),                       // 14: kaname.cloud.iam.v1.Group
 	(*fieldmaskpb.FieldMask)(nil),       // 15: google.protobuf.FieldMask
 	(*GroupMember)(nil),                 // 16: kaname.cloud.iam.v1.GroupMember
-	(*operation.Operation)(nil),         // 17: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),         // 17: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_group_service_proto_depIdxs = []int32{
 	14, // 0: kaname.cloud.iam.v1.ListGroupsResponse.groups:type_name -> kaname.cloud.iam.v1.Group
@@ -888,7 +888,7 @@ var file_kaname_cloud_iam_v1_group_service_proto_depIdxs = []int32{
 	15, // 2: kaname.cloud.iam.v1.UpdateGroupRequest.update_mask:type_name -> google.protobuf.FieldMask
 	13, // 3: kaname.cloud.iam.v1.UpdateGroupRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateGroupRequest.LabelsEntry
 	16, // 4: kaname.cloud.iam.v1.ListGroupMembersResponse.members:type_name -> kaname.cloud.iam.v1.GroupMember
-	17, // 5: kaname.cloud.iam.v1.ListGroupOperationsResponse.operations:type_name -> kacho.cloud.operation.Operation
+	17, // 5: kaname.cloud.iam.v1.ListGroupOperationsResponse.operations:type_name -> corelib.operation.Operation
 	0,  // 6: kaname.cloud.iam.v1.GroupService.Get:input_type -> kaname.cloud.iam.v1.GetGroupRequest
 	1,  // 7: kaname.cloud.iam.v1.GroupService.List:input_type -> kaname.cloud.iam.v1.ListGroupsRequest
 	3,  // 8: kaname.cloud.iam.v1.GroupService.Create:input_type -> kaname.cloud.iam.v1.CreateGroupRequest
@@ -900,11 +900,11 @@ var file_kaname_cloud_iam_v1_group_service_proto_depIdxs = []int32{
 	10, // 14: kaname.cloud.iam.v1.GroupService.ListOperations:input_type -> kaname.cloud.iam.v1.ListGroupOperationsRequest
 	14, // 15: kaname.cloud.iam.v1.GroupService.Get:output_type -> kaname.cloud.iam.v1.Group
 	2,  // 16: kaname.cloud.iam.v1.GroupService.List:output_type -> kaname.cloud.iam.v1.ListGroupsResponse
-	17, // 17: kaname.cloud.iam.v1.GroupService.Create:output_type -> kacho.cloud.operation.Operation
-	17, // 18: kaname.cloud.iam.v1.GroupService.Update:output_type -> kacho.cloud.operation.Operation
-	17, // 19: kaname.cloud.iam.v1.GroupService.Delete:output_type -> kacho.cloud.operation.Operation
-	17, // 20: kaname.cloud.iam.v1.GroupService.AddMember:output_type -> kacho.cloud.operation.Operation
-	17, // 21: kaname.cloud.iam.v1.GroupService.RemoveMember:output_type -> kacho.cloud.operation.Operation
+	17, // 17: kaname.cloud.iam.v1.GroupService.Create:output_type -> corelib.operation.Operation
+	17, // 18: kaname.cloud.iam.v1.GroupService.Update:output_type -> corelib.operation.Operation
+	17, // 19: kaname.cloud.iam.v1.GroupService.Delete:output_type -> corelib.operation.Operation
+	17, // 20: kaname.cloud.iam.v1.GroupService.AddMember:output_type -> corelib.operation.Operation
+	17, // 21: kaname.cloud.iam.v1.GroupService.RemoveMember:output_type -> corelib.operation.Operation
 	9,  // 22: kaname.cloud.iam.v1.GroupService.ListMembers:output_type -> kaname.cloud.iam.v1.ListGroupMembersResponse
 	11, // 23: kaname.cloud.iam.v1.GroupService.ListOperations:output_type -> kaname.cloud.iam.v1.ListGroupOperationsResponse
 	15, // [15:24] is the sub-list for method output_type

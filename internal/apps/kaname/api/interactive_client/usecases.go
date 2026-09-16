@@ -16,7 +16,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	corevalidate "github.com/PRO-Robotech/corelib/validate"
 
-	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operationpb "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"

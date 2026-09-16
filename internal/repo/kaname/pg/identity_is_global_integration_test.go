@@ -46,6 +46,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -88,7 +89,7 @@ func invitePending(
 		Email:       domain.Email(email),
 		DisplayName: domain.DisplayName("Invitee"),
 		InvitedBy:   invitedBy,
-	})
+	}, time.Time{})
 	require.NoError(t, err, "приглашение в аккаунт %s обязано пройти", acc)
 	require.NoError(t, w.Commit(ctx))
 	committed = true
@@ -250,7 +251,7 @@ func TestIntegration_ConcurrentFirstAppearanceSerializes(t *testing.T) {
 				Email:       domain.Email(email),
 				DisplayName: domain.DisplayName("Racer"),
 				InvitedBy:   adminA,
-			})
+			}, time.Time{})
 			if uerr != nil {
 				_ = w.Rollback(ctx)
 				results[idx] = outcome{err: uerr}

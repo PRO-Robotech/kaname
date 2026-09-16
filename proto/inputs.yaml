@@ -45,20 +45,29 @@
 # публикует её собственный модуль. Сравнивать здесь не с чем, и предупреждение
 # снято вместе со своим предметом. Ревизия ниже говорит ровно одно: из какого
 # дерева взяты ИСХОДНИКИ входных контрактов.
+#
+# РЕВИЗИЯ ПЕРЕНАЗНАЧЕНА ВМЕСТЕ С ПЕРЕЕЗДОМ ФОРМЫ ОПЕРАЦИИ (kacho#2601), и прежняя
+# была неверна уже до него: копия `corelib/authz/v1/authz_options.proto` лежала
+# с отпечатком 26510bf9…, а в `ba27afe` у этого пути ed734abf… — вход взяли из
+# более поздней ревизии и адрес не поправили. Ниже — коммит ствола платформы,
+# в котором ВСЕ ШЕСТЬ путей дают ровно записанные отпечатки (сверено побайтово).
+# До вливания платформы здесь стоял коммит её ветки (`5f46b479dd`) — адрес был
+# верен, но стволом не был; переведён тем же заходом, что сняты записи окна в
+# ведомости переименований каталога (`internal/check/catalog_copy_parity.go`).
 source:
   repo: PRO-Robotech/kacho
-  revision: ba27afe77715de935d528c15c769775f3e46977a
+  revision: bdaedfd5aaa6123cc44059727c70f1bf330f717c
 
 inputs:
   - path: corelib/api/v1/operation.proto
-    sha256: d0124a4431dece27900865201e5e5c1f27ab682b7f71838d273e309e1aa910fe
+    sha256: 5a5889c14a1533fcdc9db9ed9febadc3b596ed8b351402538782971701199042
     stubs: github.com/PRO-Robotech/corelib/api/corelib/api/v1
   - path: corelib/authz/v1/authz_options.proto
-    sha256: 26510bf99fc6feca6618c44c37b1a0f007fa8844e2d56bef3076c77e20d7cb5e
+    sha256: fa71496b88a44993a39ca89f88eb0da7d82d0171de108a9d0eb2b52b74933abc
     stubs: github.com/PRO-Robotech/corelib/api/corelib/authz/v1
-  - path: kacho/cloud/operation/operation.proto
-    sha256: f322eb06dcbced2b5d5a656fa7ba4f6368baeae5b3ebda04cab8457e532e135f
-    stubs: github.com/PRO-Robotech/corelib/api/kacho/cloud/operation
+  - path: corelib/operation/operation.proto
+    sha256: 079d453db9f3b5ddec9b51b83ec102d8db3111343fc10831ccfd235ffb82387f
+    stubs: github.com/PRO-Robotech/corelib/api/corelib/operation
   - path: google/api/annotations.proto
     sha256: e79ea741cb605a65e78ca322174764a4af9fde1962c1631e12b84c4934ba9a6c
     stubs: google.golang.org/genproto/googleapis/api/annotations

@@ -378,7 +378,7 @@ func TestAttribute_TwoEntriesOneKeyIsAFinding(t *testing.T) {
 // НАЗЫВАЕТСЯ, а не отбрасывается молча.
 func TestAttribute_PlatformEntriesAreNamedNotDropped(t *testing.T) {
 	actions, faults := roleexport.Attribute([]roleexport.CatalogEntry{
-		{FQN: "kacho.cloud.operation.OperationService/Get"},
+		{FQN: "corelib.operation.OperationService/Get"},
 	})
 	if len(actions) != 0 {
 		t.Errorf("платформенная запись привязана к ресурсу модуля: %+v", actions)

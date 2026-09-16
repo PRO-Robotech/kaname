@@ -37,7 +37,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -450,7 +450,7 @@ var File_kaname_cloud_iam_v1_internal_interactive_client_service_proto protorefl
 
 const file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDesc = "" +
 	"\n" +
-	"=kaname/cloud/iam/v1/internal_interactive_client_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a,kaname/cloud/iam/v1/interactive_client.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"Q\n" +
+	"=kaname/cloud/iam/v1/internal_interactive_client_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a,kaname/cloud/iam/v1/interactive_client.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"Q\n" +
 	"\x1bGetInteractiveClientRequest\x122\n" +
 	"\x15interactive_client_id\x18\x01 \x01(\tR\x13interactiveClientId\"s\n" +
 	"\x1dListInteractiveClientsRequest\x12\x1b\n" +
@@ -483,20 +483,20 @@ const file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_rawDesc
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"T\n" +
 	"\x1eDeleteInteractiveClientRequest\x122\n" +
-	"\x15interactive_client_id\x18\x01 \x01(\tR\x13interactiveClientId2\xd5\n" +
+	"\x15interactive_client_id\x18\x01 \x01(\tR\x13interactiveClientId2\xc9\n" +
 	"\n" +
 	" InternalInteractiveClientService\x12\xe9\x01\n" +
 	"\x03Get\x120.kaname.cloud.iam.v1.GetInteractiveClientRequest\x1a&.kaname.cloud.iam.v1.InteractiveClient\"\x87\x01\x8a\xb5\x18\x1biam.interactive_clients.get\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02=\x12;/iam/v1/internal/interactiveClients/{interactive_client_id}\x12\xe1\x01\n" +
 	"\x04List\x122.kaname.cloud.iam.v1.ListInteractiveClientsRequest\x1a3.kaname.cloud.iam.v1.ListInteractiveClientsResponse\"p\x8a\xb5\x18\x1ciam.interactive_clients.list\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
-	"\acluster\x12\x01*\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02%\x12#/iam/v1/internal/interactiveClients\x12\x8f\x02\n" +
-	"\x06Create\x123.kaname.cloud.iam.v1.CreateInteractiveClientRequest\x1a .kacho.cloud.operation.Operation\"\xad\x01\x8a\xb5\x18\x1eiam.interactive_clients.create\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
+	"\acluster\x12\x01*\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02%\x12#/iam/v1/internal/interactiveClients\x12\x8b\x02\n" +
+	"\x06Create\x123.kaname.cloud.iam.v1.CreateInteractiveClientRequest\x1a\x1c.corelib.operation.Operation\"\xad\x01\x8a\xb5\x18\x1eiam.interactive_clients.create\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x012\xb2\xd2*4\n" +
-	"\x1fCreateInteractiveClientMetadata\x12\x11InteractiveClient\x82\xd3\xe4\x93\x02(:\x01*\"#/iam/v1/internal/interactiveClients\x12\xa7\x02\n" +
-	"\x06Update\x123.kaname.cloud.iam.v1.UpdateInteractiveClientRequest\x1a .kacho.cloud.operation.Operation\"\xc5\x01\x8a\xb5\x18\x1eiam.interactive_clients.update\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
+	"\x1fCreateInteractiveClientMetadata\x12\x11InteractiveClient\x82\xd3\xe4\x93\x02(:\x01*\"#/iam/v1/internal/interactiveClients\x12\xa3\x02\n" +
+	"\x06Update\x123.kaname.cloud.iam.v1.UpdateInteractiveClientRequest\x1a\x1c.corelib.operation.Operation\"\xc5\x01\x8a\xb5\x18\x1eiam.interactive_clients.update\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x012\xb2\xd2*4\n" +
-	"\x1fUpdateInteractiveClientMetadata\x12\x11InteractiveClient\x82\xd3\xe4\x93\x02@:\x01*2;/iam/v1/internal/interactiveClients/{interactive_client_id}\x12\xa4\x02\n" +
-	"\x06Delete\x123.kaname.cloud.iam.v1.DeleteInteractiveClientRequest\x1a .kacho.cloud.operation.Operation\"\xc2\x01\x8a\xb5\x18\x1eiam.interactive_clients.delete\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
+	"\x1fUpdateInteractiveClientMetadata\x12\x11InteractiveClient\x82\xd3\xe4\x93\x02@:\x01*2;/iam/v1/internal/interactiveClients/{interactive_client_id}\x12\xa0\x02\n" +
+	"\x06Delete\x123.kaname.cloud.iam.v1.DeleteInteractiveClientRequest\x1a\x1c.corelib.operation.Operation\"\xc2\x01\x8a\xb5\x18\x1eiam.interactive_clients.delete\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x012\xb2\xd2*4\n" +
 	"\x1fDeleteInteractiveClientMetadata\x12\x11InteractiveClient\x82\xd3\xe4\x93\x02=*;/iam/v1/internal/interactiveClients/{interactive_client_id}BBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
@@ -524,7 +524,7 @@ var file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_goTypes =
 	nil,                                    // 7: kaname.cloud.iam.v1.UpdateInteractiveClientRequest.LabelsEntry
 	(*InteractiveClient)(nil),              // 8: kaname.cloud.iam.v1.InteractiveClient
 	(*fieldmaskpb.FieldMask)(nil),          // 9: google.protobuf.FieldMask
-	(*operation.Operation)(nil),            // 10: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),            // 10: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_depIdxs = []int32{
 	8,  // 0: kaname.cloud.iam.v1.ListInteractiveClientsResponse.interactive_clients:type_name -> kaname.cloud.iam.v1.InteractiveClient
@@ -538,9 +538,9 @@ var file_kaname_cloud_iam_v1_internal_interactive_client_service_proto_depIdxs =
 	5,  // 8: kaname.cloud.iam.v1.InternalInteractiveClientService.Delete:input_type -> kaname.cloud.iam.v1.DeleteInteractiveClientRequest
 	8,  // 9: kaname.cloud.iam.v1.InternalInteractiveClientService.Get:output_type -> kaname.cloud.iam.v1.InteractiveClient
 	2,  // 10: kaname.cloud.iam.v1.InternalInteractiveClientService.List:output_type -> kaname.cloud.iam.v1.ListInteractiveClientsResponse
-	10, // 11: kaname.cloud.iam.v1.InternalInteractiveClientService.Create:output_type -> kacho.cloud.operation.Operation
-	10, // 12: kaname.cloud.iam.v1.InternalInteractiveClientService.Update:output_type -> kacho.cloud.operation.Operation
-	10, // 13: kaname.cloud.iam.v1.InternalInteractiveClientService.Delete:output_type -> kacho.cloud.operation.Operation
+	10, // 11: kaname.cloud.iam.v1.InternalInteractiveClientService.Create:output_type -> corelib.operation.Operation
+	10, // 12: kaname.cloud.iam.v1.InternalInteractiveClientService.Update:output_type -> corelib.operation.Operation
+	10, // 13: kaname.cloud.iam.v1.InternalInteractiveClientService.Delete:output_type -> corelib.operation.Operation
 	9,  // [9:14] is the sub-list for method output_type
 	4,  // [4:9] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
