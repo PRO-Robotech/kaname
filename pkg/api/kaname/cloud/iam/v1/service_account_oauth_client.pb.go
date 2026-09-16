@@ -25,14 +25,19 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// A ServiceAccountOAuthClient resource — Hydra static-client mapping for
-// Class A workload identity (OAuth 2.0 client_credentials flow, RFC 6749).
+// A ServiceAccountOAuthClient resource — a key credential of a service
+// account (Class A workload identity): a keypair the caller signs a
+// `client_assertion` with, a one-line secret, or a federated trust.
 //
 // 1:1 with ServiceAccount (`UNIQUE sva_id`). A future revision may
 // relax to N:1 via a separate migration without breaking existing rows.
 //
-// `hydra_client_id` is UNIQUE across all rows (matches the Hydra client id
-// registered out-of-band by the operator / `IssueKey` use-case).
+// The client is named by the `id` of THIS row: on the contour moved to the
+// platform's own minting the assertion carries it in `iss`/`sub`, the
+// platform's token endpoint resolves it, and `hydra_client_id` holds the
+// same value. A `hydra_client_id` that DIFFERS from `id` marks a row of the
+// previous issue — a client registered at the previous external OAuth
+// server, whose tokens are valid until their own expiry (kacho#2564).
 //
 // FK to `service_accounts(id) ON DELETE RESTRICT` — preserves audit trail
 // even if the SA is being decommissioned (operator must explicitly DELETE
@@ -48,10 +53,21 @@ type ServiceAccountOAuthClient struct {
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// ID of the ServiceAccount this client is bound to. UNIQUE — 1:1 mapping.
 	SvaId string `protobuf:"bytes,2,opt,name=sva_id,json=svaId,proto3" json:"sva_id,omitempty"`
-	// Hydra OAuth 2.0 client id, registered with the Ory Hydra instance. UNIQUE.
+	// LEAVING THE CONTRACT — read `id` instead. Equal to `id` on the moved
+	// contour; different from `id` only on rows of the previous issue, whose
+	// client was registered at the previous external OAuth server. Not an
+	// address in either case (ban #15): the client is named by `id`.
+	//
+	// Removed by a breaking change that reserves number 3 and this name, and
+	// only once the window is closed BY COUNT, not by time: the metric
+	// `kaname_provider_mirror_rows{table="service_account_oauth_clients"}`
+	// reads zero. Decision and order —
+	// docs/engineering/architecture/provider-mirror-column-retirement.md.
+	//
+	// Deprecated: Marked as deprecated in kaname/cloud/iam/v1/service_account_oauth_client.proto.
 	HydraClientId string `protobuf:"bytes,3,opt,name=hydra_client_id,json=hydraClientId,proto3" json:"hydra_client_id,omitempty"`
-	// Free-form description (e.g. `CI builder Hydra client (Class A workload
-	// identity)`). 0-256 chars.
+	// Free-form description (e.g. `CI builder key (Class A workload identity)`).
+	// 0-256 chars.
 	Description string `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	// Optional expiry / rotation reminder. Unset = no reminder (the service
 	// layer alerts ≤14d before expires_at).
@@ -120,6 +136,7 @@ func (x *ServiceAccountOAuthClient) GetSvaId() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in kaname/cloud/iam/v1/service_account_oauth_client.proto.
 func (x *ServiceAccountOAuthClient) GetHydraClientId() string {
 	if x != nil {
 		return x.HydraClientId
@@ -187,11 +204,11 @@ var File_kaname_cloud_iam_v1_service_account_oauth_client_proto protoreflect.Fil
 
 const file_kaname_cloud_iam_v1_service_account_oauth_client_proto_rawDesc = "" +
 	"\n" +
-	"6kaname/cloud/iam/v1/service_account_oauth_client.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a)kaname/cloud/iam/v1/credential_kind.proto\"\xde\x04\n" +
+	"6kaname/cloud/iam/v1/service_account_oauth_client.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a)kaname/cloud/iam/v1/credential_kind.proto\"\xe2\x04\n" +
 	"\x19ServiceAccountOAuthClient\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
-	"\x06sva_id\x18\x02 \x01(\tR\x05svaId\x12&\n" +
-	"\x0fhydra_client_id\x18\x03 \x01(\tR\rhydraClientId\x12 \n" +
+	"\x06sva_id\x18\x02 \x01(\tR\x05svaId\x12*\n" +
+	"\x0fhydra_client_id\x18\x03 \x01(\tB\x02\x18\x01R\rhydraClientId\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x129\n" +
 	"\n" +
 	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12<\n" +
