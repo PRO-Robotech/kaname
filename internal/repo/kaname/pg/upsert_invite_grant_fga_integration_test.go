@@ -24,6 +24,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -60,7 +61,7 @@ func seedInviterAndPendingInvite(t *testing.T, ctx context.Context, repo *kaname
 		DisplayName:  domain.DisplayName("Invitee"),
 		InviteStatus: domain.InviteStatusPending,
 		InvitedBy:    inviterID,
-	})
+	}, time.Time{})
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 	return inviterID, accID, inviteeID

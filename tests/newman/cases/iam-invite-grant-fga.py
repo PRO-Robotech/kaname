@@ -3,7 +3,7 @@
 
 """RC-1 — anchor-grant FGA materialization (e2e, black-box) — GREEN BY THE RIGHT REASON.
 
-Black-box, through api-gateway → IAM → OpenFGA. Verifies anchor-grant FGA
+Black-box, through the service's OWN REST front → IAM → OpenFGA. Verifies anchor-grant FGA
 materialization (RC-1) and role assignability:
 
   RC-1 — binding a RULES-role with a tier-only `iam.<tier>` rule onto an anchor
@@ -75,7 +75,7 @@ consumer authz-gate resolves). ALLOW → 200 {"allowed": true}; DENY → 200
 {"reason": "..."} with `allowed` omitted (proto3 false). Mirrors
 cases/iam-rbac-scope-grant.py.
 
-Fixtures (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh): jwtBootstrap,
+Fixtures (tests/authz-fixtures/seed_own_stand.py): jwtBootstrap,
 jwtAccountAdminA, accountAId, projectA1Id, projectB1Id (a project under account B
 — the cross-account containment target a fresh account-A subject has NO path to).
 The fresh-SA subject is created per-case via {{runId}}-suffixed names — no
@@ -122,20 +122,24 @@ def poll_op_done(op_var, auth="jwtAccountAdminA", out_id_var=None):
 
 
 def _internal_url_override(path):
-    """Redirect this request to the api-gateway cluster-internal REST listener
-    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are
-    served ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design
-    (ban #6). gen.py emits {{baseUrl}}<path>; without this override the FGA-Check
-    probe hits the public port → 404 page-not-found → JSONError on the first
-    pm.response.json(). Mirrors label-revoke-vpc.py / iam-internal-only-check.py
-    ::_internal_url_override. internalBaseUrl is injected at runtime by
-    deploy/scripts/newman-e2e.sh (--env-var); a MISSING value is a broken harness, not a legal mode, so the
-    guard ASSERTS it (RED, naming the variable) before skipping — see
-    gen.py::require_env_url."""
+    """Переадресовать шаг на СОБСТВЕННЫЙ внутренний REST-фронт службы.
+
+    Пути `/iam/v1/internal/*` подаёт ТОЛЬКО внутренний слушатель (ban #6): на
+    публичном фронте их нет и не будет. Генератор приписывает шагу публичный
+    адрес, а `address_own_front` уже адресованный шаг не трогает — значит
+    переменную называет автор, и называет он СВОЮ: `ownInternalRestBaseUrl`.
+
+    ПОЧЕМУ НЕ `internalBaseUrl`. Это внутренний слушатель КРАЯ ПЛАТФОРМЫ. На
+    автономном стенде его нет вовсе, и шаг уходил бы в отказ соединения — то есть
+    в запрос БЕЗ ОТВЕТА, который вердикт по упавшим утверждениям не показывает.
+
+    Отсутствующий адрес — отказ с меткой «условие не создано» и именем
+    переменной (`require_env_url`), а не молчаливый пропуск.
+    """
     return require_env_url(
-        "internalBaseUrl", path,
+        "ownInternalRestBaseUrl", path,
         "internal-only Check probe — /iam/v1/internal/* is served ONLY by the "
-        "cluster-internal REST listener")
+        "service's own internal REST front")
 
 
 def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap", poll=False):
@@ -144,7 +148,7 @@ def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap"
     One thought per pm.test().
 
     The probe hits the cluster-internal REST listener via _internal_url_override
-    (pre-request URL rewrite to {{internalBaseUrl}}): /iam/v1/internal/iam:check is
+    (pre-request URL rewrite to {{ownInternalRestBaseUrl}}): /iam/v1/internal/iam:check is
     served ONLY on :18081, so without the redirect gen.py's {{baseUrl}} (:18080)
     404s — the edge's routing error {"code":5,"message":"Not Found"}, byte-identical to a
     nonsense path. Matches label-revoke-vpc.py."""
@@ -527,9 +531,14 @@ CASES.append(Case(
 # integration level (T-I3, internal/repo/kaname/pg/upsert_invite_grant_fga_integration_test.go,
 # GREEN). RC-2 co-commits `account:<A>#account@iam_user:<invitee>` ONLY on genuine
 # activation through the Kratos provision-hook flow
-# (InternalUserService.UpsertFromIdentity). The black-box api-gateway harness has
+# (InternalUserService.UpsertFromIdentity). The black-box own-front harness has
 # no Kratos-hook fixture, so the member tuple is never emitted in e2e — these
 # cases asserted an activation tuple the fixture never produces (RED for a
 # test-authoring reason, not a product bug; RC-2 is 150/0 GREEN at integration).
 # Intentionally not reproduced here.
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")

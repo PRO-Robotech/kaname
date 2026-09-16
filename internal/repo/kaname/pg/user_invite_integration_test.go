@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -100,7 +101,7 @@ func TestUserInvite_S01_InsertPending_New(t *testing.T) {
 		DisplayName:  domain.DisplayName("Newbie"),
 		InviteStatus: domain.InviteStatusPending,
 		InvitedBy:    adminID,
-	})
+	}, time.Time{})
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
@@ -131,7 +132,7 @@ func TestUserInvite_S03_InsertPending_Idempotent(t *testing.T) {
 	first, ins1, err := w.UsersW().InsertPending(ctx, domain.User{
 		ID: uid1, AccountID: accID, Email: "dup@example.com",
 		DisplayName: "Original", InviteStatus: domain.InviteStatusPending, InvitedBy: adminID,
-	})
+	}, time.Time{})
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 	require.True(t, ins1)
@@ -143,7 +144,7 @@ func TestUserInvite_S03_InsertPending_Idempotent(t *testing.T) {
 	second, ins2, err := w2.UsersW().InsertPending(ctx, domain.User{
 		ID: uid2, AccountID: accID, Email: "DUP@example.com", // mixed case
 		DisplayName: "DifferentName", InviteStatus: domain.InviteStatusPending, InvitedBy: adminID,
-	})
+	}, time.Time{})
 	require.NoError(t, err)
 	require.NoError(t, w2.Commit(ctx))
 
@@ -208,7 +209,7 @@ func TestUserInvite_S04_FindPendingByEmail_OneRowManyMemberships(t *testing.T) {
 			DisplayName:  "Pending",
 			InviteStatus: domain.InviteStatusPending,
 			InvitedBy:    admin,
-		})
+		}, time.Time{})
 		require.NoError(t, ierr)
 		require.NoError(t, w.Commit(ctx))
 		committed = true
@@ -283,7 +284,7 @@ func TestUserInvite_S05_ActivateInvite_Happy(t *testing.T) {
 		DisplayName:  "Activated",
 		InviteStatus: domain.InviteStatusPending,
 		InvitedBy:    adminID,
-	})
+	}, time.Time{})
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
@@ -465,7 +466,7 @@ func TestUserInvite_S11_ConcurrentInvite_RaceSafe(t *testing.T) {
 				DisplayName:  "Race",
 				InviteStatus: domain.InviteStatusPending,
 				InvitedBy:    adminID,
-			})
+			}, time.Time{})
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, err)
@@ -525,7 +526,7 @@ func TestUserInvite_S23_GetByAccountEmail(t *testing.T) {
 	_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 		ID: uid, AccountID: accA, Email: "scope@example.com",
 		DisplayName: "Scoped", InviteStatus: domain.InviteStatusPending, InvitedBy: adminID,
-	})
+	}, time.Time{})
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 
@@ -574,7 +575,7 @@ func TestUserInvite_S09_List_TenantIsolation(t *testing.T) {
 			AccountID: p.acc, Email: domain.Email(p.email),
 			DisplayName:  domain.DisplayName(fmt.Sprintf("U%d", i)),
 			InviteStatus: domain.InviteStatusPending, InvitedBy: adminA,
-		})
+		}, time.Time{})
 		require.NoError(t, err)
 		require.NoError(t, w.Commit(ctx))
 	}
@@ -652,7 +653,7 @@ func TestUserInvite_S25_EmailIdentifiesThePersonGlobally(t *testing.T) {
 		ID:        domain.UserID(ids.NewID(domain.PrefixUser)),
 		AccountID: accA, Email: email,
 		DisplayName: "X", InviteStatus: domain.InviteStatusPending, InvitedBy: adminID,
-	})
+	}, time.Time{})
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(ctx))
 	require.True(t, ins1, "ПРЕДПОСЫЛКА: неизвестная почта обязана завести строку")
@@ -664,7 +665,7 @@ func TestUserInvite_S25_EmailIdentifiesThePersonGlobally(t *testing.T) {
 		ID:        domain.UserID(ids.NewID(domain.PrefixUser)),
 		AccountID: accB, Email: email,
 		DisplayName: "Y", InviteStatus: domain.InviteStatusPending, InvitedBy: adminID,
-	})
+	}, time.Time{})
 	require.NoError(t, err,
 		"приглашение известной почты во второй аккаунт обязано ПРОЙТИ: отказ здесь означал бы, "+
 			"что глобальный ключ сломал путь, ради которого он и вводился")

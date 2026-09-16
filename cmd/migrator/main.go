@@ -216,6 +216,15 @@ func newDownCmd(opts *rootOptions, migrationsFS fs.FS) *cobra.Command {
 		Args:  cobraargs.NoExtraArguments,
 		Short: "Rollback the most recent migration (or down to --target)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// СТРАЖ СВОДА СТОИТ ПЕРВЫМ, И ЭТО ПОРЯДОК, А НЕ СТИЛЬ. Обратный ход,
+			// который снёс бы свод, отвергается ДО открытия базы: иначе оператор
+			// ждал бы её две минуты ради ответа, известного заранее, — а на
+			// достижимой базе снос успел бы начаться. Разбор — baseline_rollback.go.
+			if err := refuseRollbackOfTheBaseline(
+				cmd.Context(), migrationsFS, target, headVersionFrom(opts, migrationsFS),
+			); err != nil {
+				return err
+			}
 			r, err := buildRunner(opts, migrationsFS)
 			if err != nil {
 				return err
@@ -244,6 +253,20 @@ func newStatusCmd(opts *rootOptions, migrationsFS fs.FS) *cobra.Command {
 			return r.Status(cmd.Context(), cmd.OutOrStdout())
 		},
 	}
+}
+
+// configDSN — запасной источник строки подключения: конфигурация самой службы.
+//
+// Назван функцией, а не лямбдой внутри `buildRunner`, потому что источников у
+// строки подключения ДВА читателя — сборка наката и страж обратного хода свода, —
+// и две редакции одного порядка разошлись бы молча ровно так, как уже расходились
+// тексты отказа у iam, vpc и общего пакета (#1544).
+func configDSN() (string, error) {
+	cfg, cerr := config.Load(os.Getenv("KANAME_CONFIG_PATH"))
+	if cerr != nil {
+		return "", cerr
+	}
+	return cfg.MigrateDSN(), nil
 }
 
 // buildRunner собирает накат из persistent-флагов + ENV + config-fallback.
@@ -278,13 +301,7 @@ func buildRunner(opts *rootOptions, migrationsFS fs.FS) (*migratorrun.Runner, er
 	// требует секретов поставщика личности, которых init-контейнер не несёт и
 	// нести не должен. Судится ровно употребляемая величина — строка подключения,
 	// ниже по тексту.
-	dsn, err := migratorcli.ResolveDSN(opts.dsn, func() (string, error) {
-		cfg, cerr := config.Load(os.Getenv("KANAME_CONFIG_PATH"))
-		if cerr != nil {
-			return "", cerr
-		}
-		return cfg.MigrateDSN(), nil
-	})
+	dsn, err := migratorcli.ResolveDSN(opts.dsn, configDSN)
 	if err != nil {
 		return nil, err
 	}

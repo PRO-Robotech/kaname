@@ -165,6 +165,8 @@ rate(kaname_db_pool_acquire_wait_seconds_total[5m]) / rate(kaname_db_pool_empty_
 |---|---|
 | `kaname_identities_total` | сколько личностей платформа видела **за всё время**. Ряд не убывает: человек уходит, запись остаётся |
 | `kaname_identity_ledger_samples_total` (`outcome`) | исходы фонового замера предыдущего ряда. Пока `outcome="ok"` растёт, ноль в нём означает ноль, а не неснятый замер |
+| `kaname_provider_mirror_rows` (`table`) | сколько удостоверений ещё несут зеркало клиента у **прежнего** внешнего OAuth-сервера, по таблице. Ноль в обоих рядах — измеренная половина условия, при котором прежний издатель снимается; пока он не ноль, снятие лишило бы эти удостоверения имени |
+| `kaname_provider_mirror_samples_total` (`outcome`) | исходы фонового замера предыдущего ряда. Ноль там открывает необратимое снятие, поэтому читайте его только вместе с этим рядом: пока `outcome="ok"` растёт, ноль означает ноль |
 | `kaname_retention_passes_total` | проходы фоновой уборки |
 | `kaname_retention_rows_removed_total` (`subject`) | снято строк, по каждому предмету отдельно |
 | `kaname_retention_pass_failures_total` (`subject`) | отказавшие проходы уборки |
@@ -465,6 +467,14 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   for: 10m
   annotations:
     summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
+
+- alert: KanameProviderMirrorUnsampled
+  # Ноль зеркал — цель, ради которой ряд заведён. Незаконно НЕ ЗНАТЬ, ноль
+  # это или неснятый замер: этот ноль открывает необратимое снятие компонента.
+  expr: increase(kaname_provider_mirror_samples_total{outcome="ok"}[10m]) == 0
+  for: 10m
+  annotations:
+    summary: "замер окна прежнего издателя не идёт — kaname_provider_mirror_rows перестал что-либо утверждать"
 
 - alert: KanameReadinessDependencyUnready
   expr: increase(kaname_readiness_dependency_checks_total{outcome="unready"}[5m]) > 0

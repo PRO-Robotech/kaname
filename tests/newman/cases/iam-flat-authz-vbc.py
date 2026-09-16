@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Case-set for the flat verb-bearing authz model (iam) — black-box
-через api-gateway.
+через собственный публичный REST-фронт службы.
 
 Covered scenarios (iam-native subset):
 
@@ -258,3 +258,8 @@ CASES.append(Case(
         ),
     ],
 ))
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")

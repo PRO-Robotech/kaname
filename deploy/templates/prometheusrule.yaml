@@ -115,6 +115,14 @@ spec:
           annotations:
             summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
 
+        - alert: KanameProviderMirrorUnsampled
+          # Ноль зеркал — цель, ради которой ряд заведён. Незаконно НЕ ЗНАТЬ, ноль
+          # это или неснятый замер: этот ноль открывает необратимое снятие компонента.
+          expr: increase(kaname_provider_mirror_samples_total{outcome="ok"}[10m]) == 0
+          for: 10m
+          annotations:
+            summary: "замер окна прежнего издателя не идёт — kaname_provider_mirror_rows перестал что-либо утверждать"
+
         - alert: KanameReadinessDependencyUnready
           expr: increase(kaname_readiness_dependency_checks_total{outcome="unready"}[5m]) > 0
           for: 5m

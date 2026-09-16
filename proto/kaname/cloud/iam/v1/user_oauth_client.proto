@@ -48,7 +48,13 @@ message UserOAuthClient {
   //
   // Адресацией НЕ является ни в каком случае: подписывать `client_assertion`
   // надо `id` строки.
-  string hydra_client_id = 3;
+  //
+  // УХОДИТ ИЗ КОНТРАКТА. Снимается ломающим изменением с резервированием
+  // номера 3 и имени — и только когда окно закрыто СЧЁТОМ, а не сроком: ряд
+  // `kaname_provider_mirror_rows{table="user_oauth_clients"}` равен нулю.
+  // Решение и порядок —
+  // docs/engineering/architecture/provider-mirror-column-retirement.md.
+  string hydra_client_id = 3 [deprecated = true];
 
   // Свободное описание (например `laptop CLI`). 0-256 символов.
   string description = 4;

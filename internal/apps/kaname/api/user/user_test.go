@@ -503,7 +503,7 @@ func (w *fakeUserUW) Upsert(_ context.Context, u domain.User) (domain.User, bool
 	u.CreatedAt = time.Now().UTC()
 	return u, true, nil
 }
-func (w *fakeUserUW) InsertPending(_ context.Context, u domain.User) (domain.User, bool, error) {
+func (w *fakeUserUW) InsertPending(_ context.Context, u domain.User, _ time.Time) (domain.User, bool, error) {
 	u.CreatedAt = time.Now().UTC()
 	return u, true, nil
 }
