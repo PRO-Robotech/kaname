@@ -109,7 +109,7 @@ Update (задан при Create). Требует `v_update`. Асинхронн
 
 </ApiOperation>
 
-### Delete — удалить проект
+### Delete — удалить проект {#delete}
 
 <ApiOperation method="DELETE" endpoint="/iam/v1/projects/{project_id}" async>
 
@@ -137,20 +137,18 @@ Update (задан при Create). Требует `v_update`. Асинхронн
 реестры), и проектные пользовательские роли. Запрос принимается (`200` с конвертом
 операции — синхронной полосы у этого отказа нет), а операция завершается с ошибкой:
 
-<CodeBlock language="json">
-  {dedent`
-    {
-      "done": true,
-      "error": {
-        "code": 9,
-        "message": "Project prj7mfpj2my52k5a06kg is not empty (compute.instance: 1, iam.role: 2, vpc.network: 3)",
-        "details": [ { "reason": "REFERENCE_IN_USE", "domain": "iam.kaname.cloud" } ]
-      }
-    }
-  `}
-</CodeBlock>
+```json
+{
+  "done": true,
+  "error": {
+    "code": 9,
+    "message": "Project prj7mfpj2my52k5a06kg is not empty (compute.instance: 1, iam.role: 2, vpc.network: 3)",
+    "details": [ { "reason": "REFERENCE_IN_USE", "domain": "iam.kaname.cloud" } ]
+  }
+}
+```
 
-| | |
+| свойство | значение |
 |---|---|
 | код | `FAILED_PRECONDITION` (9) |
 | текст | `Project <id> is not empty (<вид>: <число>, …)` — виды в порядке имени; печатаются **виды и числа**, никогда идентификаторы дочерних; вид с нулём не печатается |
