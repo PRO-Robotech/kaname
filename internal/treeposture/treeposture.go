@@ -306,12 +306,15 @@ func NamedPlatformRoot() (string, string) {
 				"(`authzartifacts`, выборка services/*/manifest.yaml) и передаёт корень этой ручкой",
 			PlatformTreeEnv)
 	}
-	st, err := os.Stat(filepath.Join(raw, siblingsDir))
+	root := filepath.Clean(raw)
+	// Корень называет задание конвейера либо оператор, а не ввод арендатора; хвост
+	// — константа. Обход дерева по названному корню и есть предмет этой функции.
+	st, err := os.Stat(filepath.Join(root, siblingsDir)) // #nosec G703 -- корень назван оператором ручкой, хвост константен
 	if err != nil || !st.IsDir() {
 		return "", fmt.Sprintf(
 			"ручка %s называет %s, а каталога модулей %s/ в нём нет: обход был бы пуст, и "+
 				"«манифестов ноль» прочиталось бы как «расхождений ноль»",
-			PlatformTreeEnv, raw, siblingsDir)
+			PlatformTreeEnv, root, siblingsDir)
 	}
-	return raw, ""
+	return root, ""
 }
