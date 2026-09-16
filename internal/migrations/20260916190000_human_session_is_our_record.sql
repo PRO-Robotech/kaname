@@ -96,6 +96,12 @@ CREATE INDEX human_sessions_user_id_idx ON kaname.human_sessions USING btree (us
 -- Уборка идёт по сроку и по отметке снятия; частичный индекс держит её дешёвой.
 CREATE INDEX human_sessions_expires_at_idx ON kaname.human_sessions USING btree (expires_at);
 
+-- Свёртка носителя не идёт в статистику планировщика: ищут её только равенством
+-- по уникальному индексу, для которого оценка «одна строка» берётся из самого
+-- индекса, а выборка значений в pg_stats была бы выдачей свёрток всякому, кто
+-- читает статистику (гейт `TestSecretMaterialCandidatesAreAllAdjudicated`).
+ALTER TABLE kaname.human_sessions ALTER COLUMN bearer_digest SET STATISTICS 0;
+
 CREATE TABLE kaname.human_first_authentications (
     user_id                text NOT NULL,
     first_authenticated_at timestamp with time zone NOT NULL,
