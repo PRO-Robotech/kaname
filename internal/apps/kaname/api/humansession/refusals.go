@@ -18,13 +18,15 @@ import (
 const (
 	TextAuthenticationFailed = "authentication failed"
 	TextTooManyAttempts      = "too many attempts; try again later"
-	TextFormTokenRejected    = "form token rejected"
-	TextLogoutNotPerformed   = "logout not performed; try again later"
-	TextRequestNotPerformed  = "request not performed; try again later"
+	// #nosec G101 -- ТЕКСТ ОТКАЗА, уезжающий клиенту, а не значение удостоверения.
+	TextFormTokenRejected   = "form token rejected"
+	TextLogoutNotPerformed  = "logout not performed; try again later"
+	TextRequestNotPerformed = "request not performed; try again later"
 )
 
 // Причины из закрытого перечня (`ErrorInfo.reason`, Р2).
 const (
+	// #nosec G101 -- машинный ПРИЗНАК ПРИЧИНЫ ОТКАЗА (`ErrorInfo.reason`), не секрет.
 	ReasonFormTokenRejected      = "FORM_TOKEN_REJECTED"
 	ReasonTooManyAttempts        = "TOO_MANY_ATTEMPTS"
 	ReasonPasswordChangeRequired = "PASSWORD_CHANGE_REQUIRED"

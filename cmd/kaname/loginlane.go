@@ -297,8 +297,10 @@ func loginLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog
 		Name:   "полоса входа паролем (/iam/v1/auth/{login,logout,password,csrf})",
 		Mode:   mode,
 		Logger: logger,
-		Addr: addrAxis(addr, "полоса входа поднимается только посадкой "+config.IdentityProviderSetting+"="+
-			config.IdentityProviderOwn.String()+" по адресу "+knobLoginLane+"; на этой посадке её нет"),
+		Addr: addrAxis(addr, "полоса входа паролем поднимается только посадкой authn.identity-provider=own "+
+			"по адресу "+knobLoginLane+"; на этой посадке вход человека, смену пароля и выход "+
+			"(/iam/v1/auth/login, /logout, /password, /csrf) служба не обслуживает — их исполняет "+
+			"внешний поставщик"),
 		Handler: handler,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](

@@ -24,6 +24,7 @@ import (
 	bootstraptoken "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token"
 	clusterapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/cluster"
 	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	identityquotaapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/identityquota"
 	interactiveclientapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/interactive_client"
 	internaliamapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
@@ -59,6 +60,9 @@ import (
 // россыпи локальных переменных в runServe). Заполняется buildServices,
 // используется register{Public,Internal}Services.
 type services struct {
+	// humanSessionHandler — InternalHumanSessionService.Resolve (Ф3). Ставится
+	// корнем ПОСЛЕ сборки: полоса входа строится отдельно и только под `own`.
+	humanSessionHandler   *humansession.Handler
 	accountHandler        *accountapp.Handler
 	projectHandler        *projectapp.Handler
 	userHandler           *userapp.Handler

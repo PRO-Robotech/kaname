@@ -56,8 +56,9 @@ import (
 // Пути семейства — точное совпадение (Р2). «Кто я» — маршрут КРАЯ, здесь его
 // нет намеренно.
 const (
-	PathLogin    = "/iam/v1/auth/login"
-	PathLogout   = "/iam/v1/auth/logout"
+	PathLogin  = "/iam/v1/auth/login"
+	PathLogout = "/iam/v1/auth/logout"
+	// #nosec G101 -- это ПУТЬ глагола смены пароля, а не значение пароля.
 	PathPassword = "/iam/v1/auth/password"
 	PathCSRF     = "/iam/v1/auth/csrf"
 )
@@ -189,7 +190,7 @@ type passwordForm struct {
 }
 
 // decodeForm — строгий разбор: неизвестное поле называется, а не глотается
-// (`api-conventions.md` §«Принято-и-проигнорировано»).
+// (конвенция платформы «принято-и-проигнорировано — запрещено»: поле запроса без читателя не принимается молча).
 func decodeForm(r *http.Request, into any) error {
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxBody))
 	dec.DisallowUnknownFields()

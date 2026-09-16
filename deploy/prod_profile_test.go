@@ -224,6 +224,13 @@ var configBridge = []bridged{
 	// (задача #2334). Класс держит `TestConfigBridge_CoversEveryKeyTheChartRenders`.
 	{configKey: "api-server.rest-endpoint", valuePath: []string{"apiServer", "restEndpoint"}, omitEmpty: true},
 	{configKey: "api-server.internal-rest-endpoint", valuePath: []string{"apiServer", "internalRestEndpoint"}, omitEmpty: true},
+	// ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) здесь НЕТ, и это следствие правила
+	// «переложение равно рендеру боевого профиля в обе стороны»: боевой профиль
+	// стоит на посадке `external`, шаблон рендерит `api-server.login-lane-endpoint`
+	// и блок `authn.login.*` только объявленными, а объявляет их посадка `own`.
+	// Первый профиль, который её объявит, покраснит
+	// `TestConfigBridge_CoversEveryKeyTheChartRenders` — и записи заводятся
+	// тогда, вместе с профилем, а не вперёд него.
 	// СВОЯ ЧЕКАНКА ТОКЕНОВ. Блок целиком за выключателем: шаблон не рендерит его
 	// ни одним ключом, пока чеканка выключена.
 	{configKey: "authn.token-signing.enabled", gate: tokenSigningGate, derive: func(*valueReader) any { return true }},

@@ -49,6 +49,8 @@ type HumanSessionID string
 const SessionBearerBytes = 32
 
 // sessionBearerRedacted — заглушка на всяком общем пути вывода носителя.
+// #nosec G101 -- это ЗАМЕНА носителя в выводе, а не сам носитель: строка стоит
+// там, где значение печатать запрещено.
 const sessionBearerRedacted = "[redacted session bearer]"
 
 // ErrSessionBearerNotSerializable — носитель не сериализуется ни в JSON, ни в
@@ -139,7 +141,7 @@ func (b SessionBearer) MarshalText() ([]byte, error) { return nil, ErrSessionBea
 // восстанавливается.
 type BearerDigest string
 
-// AssuranceLevelValues — закрытая ось уровня уверенности, как её объявила Ф11
+// assuranceLevelValues — закрытая ось уровня уверенности, как её объявила Ф11
 // (`internal/assurance`): «1», «2», «3». Здесь она нужна проверке записи ДО
 // базы; производитель значения — правило `assurance.LevelOf`, второго
 // вычисления уровня в дереве нет (гейт `assurance_level_sole_writer`).

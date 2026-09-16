@@ -173,6 +173,26 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 	require.NoError(t, requireRegistryTokenTLS(productionMode, registryTokenAddr, mtlsCfg),
 		"боевой профиль не проходит стража старта докерной полосы: объявленная посадка неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
 
+	// ── ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) ───────────────────────────────
+	//
+	// Судится ТОЙ посадкой, что объявляет профиль: под `own` страж требует адрес
+	// слушателя формы и взаимный TLS на нём, под `external` полосы нет и
+	// требований к ней нет. Посадка и адрес берутся у профиля и у умолчаний
+	// САМОГО процесса, а не выписываются: выписанное разошлось бы молча.
+	postureRaw, found := dig(values, "authn", "identityProvider")
+	require.True(t, found, "профиль не объявляет посадки личности (`authn.identityProvider`) — стража полосы входа судить не на чем")
+	posture, err := config.ParseIdentityProvider(valueAsString(t, "authn.identityProvider", postureRaw))
+	require.NoError(t, err, "посадка личности профиля не разбирается тем же разборщиком, что у процесса")
+	var laneCfg config.Config
+	laneCfg.AuthN.IdentityProvider = posture
+	laneCfg.APIServer.LoginLaneEndpoint = defaults.GetString("api-server.login-lane-endpoint")
+	if declared, ok := dig(values, "apiServer", "loginLaneEndpoint"); ok {
+		laneCfg.APIServer.LoginLaneEndpoint = valueAsString(t, "apiServer.loginLaneEndpoint", declared)
+	}
+	require.NoError(t, requireLoginLaneTLS(productionMode, laneCfg, mtlsCfg),
+		"боевой профиль не проходит стража старта полосы входа: объявленная посадка неисполнима — процесс не поднимется НИ ПРИ КАКОМ входе")
+	t.Logf("полоса входа: посадка %q · адрес %q", posture, laneCfg.APIServer.LoginLaneEndpoint)
+
 	// ── ТРАНСПОРТ ОСТАЛЬНЫХ HTTP-РЁБЕР ──────────────────────────────────────
 	//
 	// Адреса берутся у САМОГО процесса (`config.RegisterDefaults`), а не
@@ -306,6 +326,7 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		{knobJWKSProxy, jwksProxyAddr},
 		{knobPublicREST, restAddr},
 		{knobInternalREST, internalRESTAddr},
+		{knobLoginLane, config.ListenAddressOf(laneCfg.APIServer.LoginLaneEndpoint)},
 	}
 	rootFiles, err := treecorpus.UnderWithSuffix(filepath.Join(iamServiceRoot(t), "cmd"), ".go")
 	require.NoError(t, err, "перечень файлов композиционного корня")
@@ -322,7 +343,16 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 		"боевой профиль не проходит стража различимости адресов поверхностей")
 	t.Logf("различимость адресов: объявлено %d · с адресом %d · сверено пар %d",
 		surfaceCensus.Declared, surfaceCensus.Addressed, surfaceCensus.Pairs)
-	require.Equal(t, len(profileSurfaceAddrs), surfaceCensus.Addressed,
+	// Полоса входа поднимается ПОСАДКОЙ, а не ручкой: под `external` её адрес
+	// пуст by design, а не забыт, и требовать его значило бы требовать от
+	// профиля украшение — ручку, которую страж на этой посадке не читает.
+	// Под `own` адрес обязателен, и это судит `requireLoginLaneTLS` выше.
+	expectedAddressed := len(profileSurfaceAddrs)
+	if !loginLaneWanted(laneCfg) {
+		expectedAddressed--
+		t.Logf("полоса входа на посадке %q не поднимается: её адрес в перепись с адресом не входит", posture)
+	}
+	require.Equal(t, expectedAddressed, surfaceCensus.Addressed,
 		"поверхность без адреса в боевом профиле: страж пропускает её by construction "+
 			"(«не поднята»), и профиль, забывший ручку, прошёл бы молча")
 
