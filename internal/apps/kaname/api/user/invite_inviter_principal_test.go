@@ -235,7 +235,7 @@ type invPrincUserWtr struct {
 
 // InsertPending is the observation point: it records the stamped value instead
 // of asserting on a side effect the fake could not have.
-func (w *invPrincUserWtr) InsertPending(_ context.Context, u domain.User) (domain.User, bool, error) {
+func (w *invPrincUserWtr) InsertPending(_ context.Context, u domain.User, _ time.Time) (domain.User, bool, error) {
 	w.parent.mu.Lock()
 	defer w.parent.mu.Unlock()
 	w.parent.inserted = true

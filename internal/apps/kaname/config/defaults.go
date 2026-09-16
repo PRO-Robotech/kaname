@@ -326,6 +326,16 @@ func RegisterDefaults(v *viper.Viper) {
 	// Override: KANAME_INVITE_MAIL__RELAY, __FROM, __FROM_NAME,
 	// __USERNAME_ENV, __PASSWORD_ENV, __TLS_MODE, __CA_BUNDLE_FILE, __LOGIN_URL,
 	// __ATTEMPT_TIMEOUT, __MAX_ATTEMPTS.
+	// invite — величины ПРИГЛАШЕНИЯ как нашей сущности (приёмка ID-MAIL-1,
+	// §10 п. 22). Умолчание объявлено НУЛЁМ, а не величиной: настоящее умолчание
+	// живёт у ручки (`InviteConfig.TTLOrDefault`), где его читает и страж старта,
+	// и потребитель. Второе объявление той же величины разошлось бы с первым
+	// молча — и разошлось бы там, где расхождение не видно: на молчащем профиле.
+	//
+	// Ключ объявлен ЗДЕСЬ, потому что без объявления переменная окружения
+	// `KANAME_INVITE__TTL` не связывается вовсе: viper связывает то, что знает.
+	v.SetDefault("invite.ttl", time.Duration(0))
+
 	v.SetDefault("invite-mail.relay", "")
 	v.SetDefault("invite-mail.from", "")
 	v.SetDefault("invite-mail.from-name", "")

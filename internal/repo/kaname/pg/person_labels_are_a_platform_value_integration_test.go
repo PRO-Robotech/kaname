@@ -44,6 +44,7 @@ package pg_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -116,7 +117,7 @@ func TestIntegration_APersonHasExactlyOneLabelCarrier(t *testing.T) {
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: person, AccountID: accA,
 			Email: "two-accounts-lbl@example.com", DisplayName: "Two", InvitedBy: ownerA,
-		})
+		}, time.Time{})
 		require.NoError(t, err)
 		require.NoError(t, w.Commit(ctx))
 	}
@@ -126,7 +127,7 @@ func TestIntegration_APersonHasExactlyOneLabelCarrier(t *testing.T) {
 		_, _, err = w.UsersW().InsertPending(ctx, domain.User{
 			ID: domain.UserID(ids.NewID(domain.PrefixUser)), AccountID: accB,
 			Email: "two-accounts-lbl@example.com", DisplayName: "Two", InvitedBy: ownerA,
-		})
+		}, time.Time{})
 		require.NoError(t, err)
 		require.NoError(t, w.Commit(ctx))
 	}
