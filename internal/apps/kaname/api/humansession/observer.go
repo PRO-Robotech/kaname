@@ -79,6 +79,43 @@ const (
 // FormRefusals — закрытый перечень.
 func FormRefusals() []FormRefusal { return []FormRefusal{FormRefusalMissing, FormRefusalRejected} }
 
+// RecoveryRequestOutcome — исход запроса кода восстановления (Ф5-01, Ф5-02).
+// Вызывающий видит ОДИН ответ; причина — только здесь.
+type RecoveryRequestOutcome string
+
+const (
+	RecoveryRequestQueued      RecoveryRequestOutcome = "queued"       // код выдан, письмо в очереди
+	RecoveryRequestNoRow       RecoveryRequestOutcome = "no-row"       // адреса нет ни у кого
+	RecoveryRequestUnverified  RecoveryRequestOutcome = "unverified"   // адрес не подтверждён (Ф1-25)
+	RecoveryRequestStoreFailed RecoveryRequestOutcome = "store-failed" // хранилище не ответило
+)
+
+// RecoveryRequestOutcomes — закрытый перечень.
+func RecoveryRequestOutcomes() []RecoveryRequestOutcome {
+	return []RecoveryRequestOutcome{RecoveryRequestQueued, RecoveryRequestNoRow, RecoveryRequestUnverified, RecoveryRequestStoreFailed}
+}
+
+// RecoveryCompletionOutcome — исход предъявления кода (Ф5-03…08, Ф5-17).
+type RecoveryCompletionOutcome string
+
+const (
+	RecoveryCompletionIssued           RecoveryCompletionOutcome = "issued"            // сессия выдана
+	RecoveryCompletionNoRow            RecoveryCompletionOutcome = "no-row"            // адреса нет ни у кого
+	RecoveryCompletionCodeRejected     RecoveryCompletionOutcome = "code-rejected"     // код неверен, истёк либо применён
+	RecoveryCompletionBlocked          RecoveryCompletionOutcome = "blocked"           // личность заблокирована (Ф1-59)
+	RecoveryCompletionRateLimited      RecoveryCompletionOutcome = "rate-limited"      // отказ по частоте
+	RecoveryCompletionPasswordRejected RecoveryCompletionOutcome = "password-rejected" // новый пароль негоден по правилу
+	RecoveryCompletionStoreFailed      RecoveryCompletionOutcome = "store-failed"      // хранилище не ответило
+)
+
+// RecoveryCompletionOutcomes — закрытый перечень.
+func RecoveryCompletionOutcomes() []RecoveryCompletionOutcome {
+	return []RecoveryCompletionOutcome{
+		RecoveryCompletionIssued, RecoveryCompletionNoRow, RecoveryCompletionCodeRejected, RecoveryCompletionBlocked,
+		RecoveryCompletionRateLimited, RecoveryCompletionPasswordRejected, RecoveryCompletionStoreFailed,
+	}
+}
+
 // Observer — приёмник событий полосы. Все методы обязаны быть дёшевы и не
 // возвращать ничего: наблюдение не меняет исхода.
 type Observer interface {
@@ -93,16 +130,20 @@ type Observer interface {
 	BreachCheckObserved(outcome BreachCheckOutcome)
 	LogoutStoreFailureObserved()
 	RewriteObserved(outcome RewriteOutcome)
+	RecoveryRequestObserved(outcome RecoveryRequestOutcome)
+	RecoveryCompletionObserved(outcome RecoveryCompletionOutcome)
 }
 
 // NopObserver — приёмник, ничего не считающий; для проб, не о наблюдаемости.
 type NopObserver struct{}
 
-func (NopObserver) LoginObserved(LoginOutcome)             {}
-func (NopObserver) NoSessionObserved(NoSessionReason)      {}
-func (NopObserver) FormRefusalObserved(FormRefusal)        {}
-func (NopObserver) RateLimitObserved(FailureScope)         {}
-func (NopObserver) SourceUnknownObserved()                 {}
-func (NopObserver) BreachCheckObserved(BreachCheckOutcome) {}
-func (NopObserver) LogoutStoreFailureObserved()            {}
-func (NopObserver) RewriteObserved(RewriteOutcome)         {}
+func (NopObserver) LoginObserved(LoginOutcome)                           {}
+func (NopObserver) NoSessionObserved(NoSessionReason)                    {}
+func (NopObserver) FormRefusalObserved(FormRefusal)                      {}
+func (NopObserver) RateLimitObserved(FailureScope)                       {}
+func (NopObserver) SourceUnknownObserved()                               {}
+func (NopObserver) BreachCheckObserved(BreachCheckOutcome)               {}
+func (NopObserver) LogoutStoreFailureObserved()                          {}
+func (NopObserver) RewriteObserved(RewriteOutcome)                       {}
+func (NopObserver) RecoveryRequestObserved(RecoveryRequestOutcome)       {}
+func (NopObserver) RecoveryCompletionObserved(RecoveryCompletionOutcome) {}

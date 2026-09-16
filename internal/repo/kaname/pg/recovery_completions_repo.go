@@ -3,9 +3,12 @@
 
 package pg
 
-// recovery_completions_repo.go — kaname.recovery_completions (migration 0015):
-// idempotency ledger for the Kratos recovery-completed webhook
-// (InternalUserService.OnRecoveryCompleted).
+// recovery_completions_repo.go — kaname.recovery_completions: idempotency
+// ledger of recovery completions. Two event sources, one row shape (Ф5 Р4):
+// the identity-provider webhook (InternalUserService.OnRecoveryCompleted, names
+// an external subject) and our own recovery flow (`humansession`, Ф5 —
+// external subject absent, written as NULL; recovery_jti is the recovery_codes
+// row id).
 //
 // Within-service invariants — DB-level (ban #10):
 //   - PK recovery_jti                         → ON CONFLICT DO NOTHING dedup-gate,
@@ -42,7 +45,7 @@ func insertRecoveryCompletionTx(ctx context.Context, tx pgx.Tx, rc domain.Recove
 	q := fmt.Sprintf(`
 		WITH ins AS (
 			INSERT INTO recovery_completions (recovery_jti, external_id, user_id, revoked_session_count)
-			VALUES ($1, $2, $3, $4)
+			VALUES ($1, NULLIF($2, ''), $3, $4)
 			ON CONFLICT (recovery_jti) DO NOTHING
 			RETURNING %s
 		)

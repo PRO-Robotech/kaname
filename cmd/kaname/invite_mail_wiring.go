@@ -104,10 +104,10 @@ func buildInviteMailDrainer(
 	}
 
 	drainerLogger := logger.With(slog.String("component", "invite_mail_drainer"))
-	d, derr := drainer.New[clients.InviteMailEvent](
+	d, derr := drainer.New[clients.MailEvent](
 		pool,
 		inviteMailDrainerConfig(cfg.InviteMail),
-		clients.DecodeInviteMail,
+		clients.DecodeMailEvent,
 		clients.NewInviteMailApplier(clients.NewInviteMailSender(relay), obs, drainerLogger),
 		drainerLogger,
 	)

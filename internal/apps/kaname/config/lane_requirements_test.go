@@ -178,6 +178,8 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		broken.AuthN.Login.HasherFormat = ""
 	case "ёмкость проверяющего и резерв памяти объявлены":
 		broken.AuthN.Login.VerifierCapacity = 0
+	case "срок кода восстановления доступа объявлен":
+		broken.AuthN.Login.RecoveryCodeTTL = 0
 	case "каждый уровень доверия каталога предъявим":
 		w.PresentableACRs = nil
 	// Две строки ниже требуют ОТСУТСТВИЯ, поэтому ломаются наличием.

@@ -172,6 +172,17 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "переписывание материала, которое не случилось ни разу, обязано быть отличимо от непровязанного",
 	},
+	// ── ВОССТАНОВЛЕНИЕ ДОСТУПА (Ф5, kacho#1271) — тот же конструктор ─────────
+	RecoveryRequestOutcomesMetric: {
+		Cells: len(humansession.RecoveryRequestOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "ответ на запрос кода один при любом исходе (Ф5-02); «ноль по причине» видно до первого запроса",
+	},
+	RecoveryCompletionOutcomesMetric: {
+		Cells: len(humansession.RecoveryCompletionOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "отказ на предъявление один (Ф1-59); заблокированная, истёкший и чужой код различимы только здесь",
+	},
 	Namespace + "_invite_activations_total": {
 		Cells: len(InviteActivationOutcomes),
 		Build: func(r *Registry) { r.NewInviteActivationRecorder() },

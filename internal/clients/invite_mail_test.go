@@ -126,7 +126,7 @@ func Test_InviteMailSender_SilentRelayIsBoundedByItsOwnAttemptDeadline(t *testin
 	defer cancel()
 
 	start := time.Now()
-	err := sender.Send(ctx, clients.InviteMailEvent{To: "invitee@example.invalid"})
+	err := sender.Send(ctx, clients.MailEvent{To: "invitee@example.invalid"})
 	elapsed := time.Since(start)
 
 	require.Error(t, err, "молчащий узел обязан дать отказ, а не успех")
@@ -157,7 +157,7 @@ func Test_InviteMailSender_PositiveControl_ResponsiveRelayIsNotBoundedAway(t *te
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	require.NoError(t, sender.Send(ctx, clients.InviteMailEvent{
+	require.NoError(t, sender.Send(ctx, clients.MailEvent{
 		To:        "invitee@example.invalid",
 		AccountID: "acc-1",
 		LoginURL:  "https://console.example.invalid/login",
@@ -184,7 +184,7 @@ func Test_ClassifyInviteMailOutcome_SettingsIsItsOwnCell(t *testing.T) {
 			AttemptTimeout: 3 * time.Second,
 			TLSMode:        clients.MailTLSDisabledForTest,
 		})
-		err := sender.Send(context.Background(), clients.InviteMailEvent{To: "a@example.invalid"})
+		err := sender.Send(context.Background(), clients.MailEvent{To: "a@example.invalid"})
 		require.Error(t, err)
 		assert.Equal(t, clients.InviteMailOutcomeMisconfigured, clients.ClassifyInviteMailOutcome(err),
 			"ответ не по протоколу почты — НАСТРОЙКА: повтор её не вылечит")
@@ -197,7 +197,7 @@ func Test_ClassifyInviteMailOutcome_SettingsIsItsOwnCell(t *testing.T) {
 			AttemptTimeout: time.Second,
 			TLSMode:        clients.MailTLSDisabledForTest,
 		})
-		err := sender.Send(context.Background(), clients.InviteMailEvent{To: "a@example.invalid"})
+		err := sender.Send(context.Background(), clients.MailEvent{To: "a@example.invalid"})
 		require.Error(t, err)
 		assert.Equal(t, clients.InviteMailOutcomeMisconfigured, clients.ClassifyInviteMailOutcome(err),
 			"незаданный узел — НАСТРОЙКА, а не сбой")
@@ -214,7 +214,7 @@ func Test_ClassifyInviteMailOutcome_SettingsIsItsOwnCell(t *testing.T) {
 				AttemptTimeout: time.Second,
 				TLSMode:        clients.MailTLSDisabledForTest,
 			})
-			err := sender.Send(context.Background(), clients.InviteMailEvent{To: "a@example.invalid"})
+			err := sender.Send(context.Background(), clients.MailEvent{To: "a@example.invalid"})
 			require.Error(t, err, "вырожденный узел %q обязан дать отказ", degenerate)
 			assert.Equal(t, clients.InviteMailOutcomeMisconfigured,
 				clients.ClassifyInviteMailOutcome(err),
@@ -229,7 +229,7 @@ func Test_ClassifyInviteMailOutcome_SettingsIsItsOwnCell(t *testing.T) {
 			AttemptTimeout: time.Second,
 			TLSMode:        clients.MailTLSDisabledForTest,
 		})
-		err := sender.Send(context.Background(), clients.InviteMailEvent{To: "a@example.invalid"})
+		err := sender.Send(context.Background(), clients.MailEvent{To: "a@example.invalid"})
 		require.Error(t, err)
 		assert.Equal(t, clients.InviteMailOutcomeMisconfigured, clients.ClassifyInviteMailOutcome(err),
 			"незаданный адрес отправителя — НАСТРОЙКА (Р3: встроенного умолчания у него нет)")
@@ -251,7 +251,7 @@ func Test_ClassifyInviteMailOutcome_SettingsIsItsOwnCell(t *testing.T) {
 			AttemptTimeout: 2 * time.Second,
 			TLSMode:        clients.MailTLSDisabledForTest,
 		})
-		serr := sender.Send(context.Background(), clients.InviteMailEvent{To: "a@example.invalid"})
+		serr := sender.Send(context.Background(), clients.MailEvent{To: "a@example.invalid"})
 		require.Error(t, serr)
 		assert.Equal(t, clients.InviteMailOutcomeTransient, clients.ClassifyInviteMailOutcome(serr),
 			"узел не поднят — ВРЕМЕННЫЙ отказ: он лечится временем")
@@ -267,12 +267,12 @@ func Test_ClassifyInviteMailOutcome_SettingsIsItsOwnCell(t *testing.T) {
 func Test_InviteMailApplier_CountsSuccessAlongsideRefusals(t *testing.T) {
 	t.Parallel()
 	obs := newRecordingObserver()
-	apply := clients.NewInviteMailApplier(sendFunc(func(context.Context, clients.InviteMailEvent) error {
+	apply := clients.NewInviteMailApplier(sendFunc(func(context.Context, clients.MailEvent) error {
 		return nil
 	}), obs, nil)
 
 	require.NoError(t, apply(context.Background(), clients.EventInviteMailSend,
-		clients.InviteMailEvent{To: "a@example.invalid"}))
+		clients.MailEvent{To: "a@example.invalid"}))
 
 	assert.Equal(t, 1, obs.count(clients.InviteMailOutcomeSent),
 		"сданное письмо обязано считаться НАРАВНЕ с отказами — иначе ноль отказов "+
@@ -289,12 +289,12 @@ func Test_InviteMailApplier_ClassifiesRefusalIntoItsOwnCell(t *testing.T) {
 	t.Run("временный", func(t *testing.T) {
 		t.Parallel()
 		obs := newRecordingObserver()
-		apply := clients.NewInviteMailApplier(sendFunc(func(context.Context, clients.InviteMailEvent) error {
+		apply := clients.NewInviteMailApplier(sendFunc(func(context.Context, clients.MailEvent) error {
 			return fmt.Errorf("dial relay: %w", context.DeadlineExceeded)
 		}), obs, nil)
 
 		err := apply(context.Background(), clients.EventInviteMailSend,
-			clients.InviteMailEvent{To: "a@example.invalid"})
+			clients.MailEvent{To: "a@example.invalid"})
 		require.Error(t, err)
 		assert.False(t, errors.Is(err, drainer.ErrPermanent),
 			"временный отказ обязан ретраиться, а не отравлять строку")
@@ -305,12 +305,12 @@ func Test_InviteMailApplier_ClassifiesRefusalIntoItsOwnCell(t *testing.T) {
 	t.Run("по настройке — отравляет, а не повторяется бесконечно", func(t *testing.T) {
 		t.Parallel()
 		obs := newRecordingObserver()
-		apply := clients.NewInviteMailApplier(sendFunc(func(context.Context, clients.InviteMailEvent) error {
+		apply := clients.NewInviteMailApplier(sendFunc(func(context.Context, clients.MailEvent) error {
 			return clients.ErrMailMisconfigured
 		}), obs, nil)
 
 		err := apply(context.Background(), clients.EventInviteMailSend,
-			clients.InviteMailEvent{To: "a@example.invalid"})
+			clients.MailEvent{To: "a@example.invalid"})
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, drainer.ErrPermanent),
 			"MAIL-33: отказ по настройке — БЕЗ бесконечных повторов")
@@ -320,13 +320,13 @@ func Test_InviteMailApplier_ClassifiesRefusalIntoItsOwnCell(t *testing.T) {
 	t.Run("неизвестный вид события — постоянный отказ, корзины «прочее» нет", func(t *testing.T) {
 		t.Parallel()
 		obs := newRecordingObserver()
-		apply := clients.NewInviteMailApplier(sendFunc(func(context.Context, clients.InviteMailEvent) error {
+		apply := clients.NewInviteMailApplier(sendFunc(func(context.Context, clients.MailEvent) error {
 			t.Fatal("применитель не вправе звать отправку по неизвестному виду события")
 			return nil
 		}), obs, nil)
 
 		err := apply(context.Background(), "mail.invite.something_else",
-			clients.InviteMailEvent{To: "a@example.invalid"})
+			clients.MailEvent{To: "a@example.invalid"})
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, drainer.ErrPermanent))
 	})
@@ -337,12 +337,12 @@ func Test_InviteMailApplier_ClassifiesRefusalIntoItsOwnCell(t *testing.T) {
 func Test_DecodeInviteMail_RowWithoutASubjectIsPermanentlyRefused(t *testing.T) {
 	t.Parallel()
 
-	_, err := clients.DecodeInviteMail([]byte(`{"account_id":"acc-1"}`))
+	_, err := clients.DecodeMailEvent([]byte(`{"account_id":"acc-1"}`))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, drainer.ErrPermanent),
 		"без адресата письмо отправить некому — это ПОСТОЯННЫЙ отказ")
 
-	ev, err := clients.DecodeInviteMail([]byte(`{"to":"a@example.invalid","account_id":"acc-1"}`))
+	ev, err := clients.DecodeMailEvent([]byte(`{"to":"a@example.invalid","account_id":"acc-1"}`))
 	require.NoError(t, err, "положительный контроль: назвавшая адресата строка растолковывается")
 	assert.Equal(t, "a@example.invalid", ev.To)
 }
@@ -370,7 +370,7 @@ func Test_InviteMailOutcomes_IsAClosedSet(t *testing.T) {
 func Test_InviteMailBody_SaysSentNeverDelivered(t *testing.T) {
 	t.Parallel()
 	body := clients.RenderInviteMail(clients.MailRelay{From: "kacho@example.invalid"},
-		clients.InviteMailEvent{
+		clients.MailEvent{
 			To:       "invitee@example.invalid",
 			LoginURL: "https://console.example.invalid/login",
 		})
@@ -387,9 +387,9 @@ func Test_InviteMailBody_SaysSentNeverDelivered(t *testing.T) {
 
 // sendFunc — подставной транспорт. Он НЕ снисходительнее настоящего: возвращает
 // ровно то, что ему велено, и ни одной ветки не глотает.
-type sendFunc func(context.Context, clients.InviteMailEvent) error
+type sendFunc func(context.Context, clients.MailEvent) error
 
-func (f sendFunc) Send(ctx context.Context, ev clients.InviteMailEvent) error { return f(ctx, ev) }
+func (f sendFunc) Send(ctx context.Context, ev clients.MailEvent) error { return f(ctx, ev) }
 
 // acceptingRelay — минимальный узел, доводящий разговор до принятого письма.
 // Возвращает адрес и читателя числа принятых писем.

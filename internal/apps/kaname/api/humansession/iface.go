@@ -2,15 +2,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package humansession — полоса входа паролем, наша сессия человека, её
-// носитель, выход, смена пароля и ответ краю о сессии (фаза Ф3, задача
+// носитель, выход, смена пароля, ответ краю о сессии (фаза Ф3, задача
 // PRO-Robotech/kacho#1269; приёмка
-// `docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md`).
+// `docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md`)
+// и восстановление доступа кодом по почте (фаза Ф5, задача
+// PRO-Robotech/kacho#1271; приёмка `docs/engineering/acceptance/recovery-of-access.md`).
 //
 // # Раскладка
 //
 // Порты — в этом файле; варианты использования — по глаголу: `issue.go`
 // (операция выдачи, зовомая ИЗНУТРИ транзакции выдающего глагола — Д10),
-// `login.go`, `logout.go`, `change_password.go`, `form_token.go`, `resolve.go`.
+// `login.go`, `logout.go`, `change_password.go`, `form_token.go`, `resolve.go`,
+// `recovery_request.go` (запрос кода), `recovery_complete.go` (предъявление
+// кода с новым паролем), `dispatch.go` (работа вне пути ответа — Ф5 Р2).
 // Транспорт (HTTP-обработчик полосы формы и gRPC-обработчик `Resolve`) живёт в
 // `internal/handler/loginlanehttp` и в `handler.go`; сюда транспорт не течёт.
 //
@@ -59,6 +63,25 @@ type Resolved struct {
 	EmailVerified bool
 }
 
+// RecoveryTarget — человек, которому адресован запрос восстановления, вместе с
+// подтверждённостью его адреса (Ф1-25: код — для подтверждённого адреса).
+type RecoveryTarget struct {
+	User          domain.User
+	EmailVerified bool
+}
+
+// RecoveryMailIntent — намерение отправить письмо восстановления: пишется той же
+// транзакцией, что строка кода (Ф5-09). Код уходит в письмо своей формой для
+// человека — единственным своим выходом к нему.
+type RecoveryMailIntent struct {
+	UserID    domain.UserID
+	AccountID domain.AccountID
+	To        string
+	Code      domain.RecoveryCodeValue
+	// ValidFor — срок кода, как его назовёт письмо.
+	ValidFor time.Duration
+}
+
 // FailureScope — ось счёта неверных предъявлений (Р10): по адресу и по
 // источнику.
 type FailureScope string
@@ -82,6 +105,10 @@ type Store interface {
 	// FirstAuthentication — момент первой аутентификации личности нашей
 	// посадкой (Р5). found=false — посадка эту личность ещё не аутентифицировала.
 	FirstAuthentication(ctx context.Context, userID domain.UserID) (time.Time, bool, error)
+	// RecoveryTarget — человек по адресу вместе с подтверждённостью адреса
+	// ОДНИМ чтением: обе полосы запроса восстановления (адрес есть · адреса
+	// нет) стоят одинаково (Ф5 Р2, Р7). found=false — адреса нет ни у кого.
+	RecoveryTarget(ctx context.Context, email domain.Email) (RecoveryTarget, bool, error)
 	// Writer открывает транзакцию записи. Вызывающий обязан Commit либо Rollback.
 	Writer(ctx context.Context) (Writer, error)
 }
@@ -124,6 +151,25 @@ type Writer interface {
 	// EmitAudit — событие аудита в очередь той же транзакцией (форма Ф-м).
 	EmitAudit(ctx context.Context, ev outboxtypes.AuditEvent) error
 
+	// --- восстановление доступа (Ф5) ---
+
+	// InsertRecoveryCode кладёт строку кода (свёртку, не значение — Р1).
+	InsertRecoveryCode(ctx context.Context, c domain.RecoveryCode) error
+	// SupersedeRecoveryCodes снимает неприменённые коды личности: живой код у
+	// личности один, и новый запрос вытесняет прежний. Отвечает числом снятых.
+	SupersedeRecoveryCodes(ctx context.Context, userID domain.UserID) (int, error)
+	// ConsumeRecoveryCode — ОДИН оператор применения (Р1, Ф5-05): строка
+	// личности с этой свёрткой, ещё не применённая и не истёкшая на now,
+	// получает отметку применения. found=false — такого кода нет, он применён
+	// либо истёк; различать это вызывающему незачем — отказ один (Ф5-04, Ф5-07).
+	ConsumeRecoveryCode(ctx context.Context, userID domain.UserID, digest domain.CodeDigest, now time.Time) (domain.RecoveryCode, bool, error)
+	// EmitRecoveryMail — намерение отправить письмо восстановления той же
+	// транзакцией, что строка кода (Ф5-09, Р3).
+	EmitRecoveryMail(ctx context.Context, in RecoveryMailIntent) error
+	// InsertRecoveryCompletion — журнал завершений по ключу потока (Р4, форма
+	// Ф-а): inserted=false — ключ уже стоит, побочных записей делать нельзя.
+	InsertRecoveryCompletion(ctx context.Context, rc domain.RecoveryCompletion) (inserted bool, err error)
+
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context) error
 }
@@ -137,4 +183,10 @@ type SessionSweeper interface {
 
 type FailureSweeper interface {
 	SweepAgedFailures(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// RecoveryCodeSweeper — порт уборки кодов восстановления: применённые и
+// истёкшие строки, которые оператор применения уже не обслужит.
+type RecoveryCodeSweeper interface {
+	SweepUnservableRecoveryCodes(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
