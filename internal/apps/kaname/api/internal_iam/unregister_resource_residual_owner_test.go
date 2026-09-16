@@ -35,6 +35,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -153,6 +154,20 @@ func (b *factTxBeginner) Begin(context.Context) (service.Tx, error) {
 	return b.tx, nil
 }
 
+// ApplyTx — порт публикации в этом дублёре: публикация ложится строкой журнала в
+// транзакцию и меняет факты на ФИКСАЦИИ, как триггер проекции в базе. Порядок версий
+// дублёр не судит (его держит проба с базой): предмет проб этого файла — что снятие
+// объекта ДОВОДИТ публикацию, а не в каком порядке пришли доставки.
+func (s *factStore) ApplyTx(_ context.Context, tx service.Tx, objectType, objectID string, published bool, _ time.Time) (bool, error) {
+	tuple := service.RelationTuple{User: "user:*", Relation: "v_get", Object: objectType + ":" + objectID}
+	if published {
+		tx.(*factTx).writes = append(tx.(*factTx).writes, tuple)
+	} else {
+		tx.(*factTx).deletes = append(tx.(*factTx).deletes, tuple)
+	}
+	return true, nil
+}
+
 // journalEmitter — порт журнала намерений. Он ничего не применяет сам: применение —
 // свойство коммита, как и в базе.
 type journalEmitter struct{}
@@ -170,7 +185,7 @@ func (journalEmitter) EmitDeleteTx(_ context.Context, tx service.Tx, tuples []se
 func newRegUCWithStore(t *testing.T, s *factStore) (*RegisterResourceUseCase, *factTxBeginner) {
 	t.Helper()
 	txb := &factTxBeginner{store: s}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}).
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, s).
 		WithResidualTupleReader(s)
 	return uc, txb
 }
@@ -338,7 +353,7 @@ func TestUnregisterResource_ResidualReadFailure_FailsClosed(t *testing.T) {
 func TestUnregisterResource_ResidualReaderUnwired_KeepsPreviousBehaviour(t *testing.T) {
 	store := &factStore{}
 	txb := &factTxBeginner{store: store}
-	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}) // без WithResidualTupleReader
+	uc := NewRegisterResourceUseCase(journalEmitter{}, mirrorAdapter{}, txb, seededCatalogTypes{}, store) // без WithResidualTupleReader
 	require.NoError(t, uc.Unregister(context.Background(), &unregReq{
 		subject: "project:prj_home", relation: "project", object: "registry_registry:reg_doomed",
 	}))

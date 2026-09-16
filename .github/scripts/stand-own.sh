@@ -270,6 +270,31 @@ stand_env() {
   export KANAME_AUTHN__CLIENT_TOKEN__ENABLED=true
   export KANAME_AUTHN__CLIENT_TOKEN__ALLOWED_AUDIENCES='https://kaname.local,registry.kaname.local'
   export KANAME_AUTHN__CLIENT_TOKEN__DEFAULT_AUDIENCE='https://kaname.local'
+  # СРОК ТОКЕНА И ПОТОЛОК ТЕЛА — ОБЪЯВЛЯЕТ ТОТ, КТО ПОДНИМАЕТ СЛУЖБУ (#112).
+  #
+  # Умолчаний у обеих величин больше нет: страж старта требует их названными,
+  # потому что величина, которую подставляет построение, незаданной не бывает,
+  # и ветвь стража при ней не исполнялась ни разу. Стенд — единственный профиль
+  # дерева, включающий этот эндпоинт (чарт его не включает ни в одном
+  # `values*.yaml`), значит объявить их обязан он, и оба числа здесь — решение с
+  # производителем, а не «взяли побольше».
+  #
+  # Срок выводится из БЮДЖЕТА ШАГОВ, которые живут выданным токеном: посев
+  # чеканит его и передаёт прогону, и токен обязан пережить остаток посева
+  # (`timeout-minutes: 10`) плюс прогон коллекций (`timeout-minutes: 15`) —
+  # иначе истечение посреди прогона пришло бы отказом доступа, неотличимым от
+  # дефекта дерева. Сумма 25 минут не выходит за платформенный потолок
+  # `tokenpolicy.MaxTokenTTL` (30 минут), сверх которого страж отказывает.
+  # Предикат: `grep -n 'timeout-minutes' .github/workflows/e2e-newman.yml` у
+  # шагов посева и прогона.
+  export KANAME_AUTHN__CLIENT_TOKEN__TOKEN_TTL=25m
+  # Потолок тела — тот же, что у соседней поверхности, несущей ОДИН токен
+  # (`internal/handler/tokenintrospecthttp`, `maxTokenBytes = 16 << 10`): тело
+  # обмена — форма с одним подписанным утверждением. Замер по посеву
+  # (`sign_client_assertion`, P-256, вставленная в форму): 656 байт; утверждение
+  # RSA-4096 уложилось бы примерно в 1.2 КиБ. Запас более чем десятикратный, и
+  # потолок при этом остаётся потолком, а не «сколько пришлют».
+  export KANAME_AUTHN__CLIENT_TOKEN__BODY_CEILING=16384
   local l u
   for l in INTERNAL INTERNALREST HOOKS METRICS PUBLIC REST JWKSPROXY REGISTRYTOKEN; do
     eval "export KANAME_${l}_SERVER_MTLS_ENABLE=true \

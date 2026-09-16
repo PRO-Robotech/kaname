@@ -97,12 +97,16 @@ type BuildConfig struct {
 // minting. The caller mounts the returned mux on an EXTERNAL-reachable HTTP
 // listener.
 //
-// Composition root only — this is the single wire-up call for serve.go. Unlike
-// the deprecated RS256 signer, the shim needs NO JWKS encryption key: it does not
-// mint tokens (Hydra does) and does not decrypt any at-rest signing key. The
-// data-plane's verification keys are Hydra's, served via the separate
-// cluster-internal jwks-proxy mirror (internal/handler/jwksproxyhttp) — not by this
-// `/iam/token` shim.
+// Composition root only — this is the single wire-up call for serve.go. Who
+// mints is decided by `cfg.Signer` (providerExchangeFor, provider_hop.go): with
+// our signer wired — every chain this chart offers — the shim mints the registry
+// token itself through NewLocalMinter, and the data-plane verifies it against OUR
+// key set published by the cluster-internal key-set listener
+// (internal/handler/jwksproxyhttp, record keyed by our issuer). Without a signer
+// the shim only exchanges an assertion with the previous issuer, and the
+// data-plane reads that issuer's mirrored keys from the same listener. In neither
+// case does the shim decrypt any at-rest signing key: key material lives in the
+// signer's keystore, not here.
 func Build(pool *pgxpool.Pool, cfg BuildConfig) (*http.ServeMux, error) {
 	// Страж построения полосы: без объявленного адресата выдача чеканит тому,
 	// кого назовёт вызывающий (задача #1184).

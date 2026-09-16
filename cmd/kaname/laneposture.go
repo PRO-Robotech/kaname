@@ -29,6 +29,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -37,7 +38,14 @@ import (
 // Каждое поле обязано отражать собранную проводку, а не намерение профиля:
 // иначе страж отчитывался бы о намерении вместо исхода — тот самый класс, ради
 // которого заведён самоотчёт о посадке.
-func observeLaneWiring(ctx context.Context, cfg config.Config, signer *tokensigner.Signer, logger *slog.Logger) config.LaneWiring {
+//
+// signIn — способы входа человека, чьи проверяющие собраны ЭТИМ корнем
+// (wiredSignInMethods). Подаются параметром по той же причине, что и каталог:
+// перечень предъявимых уровней ВЫВОДИТСЯ из них правилом (приёмка Ф11, Р9), и
+// сценарий «провязан только пароль» обязан быть вызываемым, а не описываемым.
+func observeLaneWiring(ctx context.Context, cfg config.Config, signer *tokensigner.Signer,
+	signIn []assurance.Method, logger *slog.Logger,
+) config.LaneWiring {
 	return config.LaneWiring{
 		OwnMintSignerWired: signer != nil,
 
@@ -80,10 +88,13 @@ func observeLaneWiring(ctx context.Context, cfg config.Config, signer *tokensign
 		ProviderAdminHopBuilt:         providerAdminHopIsBuilt(cfg),
 		ProviderKeySetMirrorPublished: providerKeySetMirrorIsPublished(cfg),
 
-		// Уровни, которые полоса `own` умеет предъявить ЧЕЛОВЕКУ. Пока своих
-		// способов входа нет — ни одного; «ни одного» отличимо от «не
-		// заполнено» тем, что перечень пуст осознанно (см. выше).
-		PresentableACRs: nil,
+		// Уровни, которые полоса `own` умеет предъявить ЧЕЛОВЕКУ, — ВЫВЕДЕНЫ
+		// ПРАВИЛОМ из провязанных способов, взятых в лучшем исходе их флагов
+		// (приёмка Ф11, Р9). Здесь стоял литерал «ни одного»; литерал не мог
+		// покраснеть ни при какой провязке — наблюдатель отчитывался о
+		// намерении вместо исхода. Пока корень не провязал ни одного способа,
+		// перечень пуст — и это наблюдение того же рода, что два поля выше.
+		PresentableACRs: assurance.PresentableLevels(signIn).Strings(),
 
 		CatalogFloors: readCatalogFloors(ctx, logger),
 	}
@@ -134,4 +145,19 @@ func laneWiringCensus(w config.LaneWiring) []any {
 		"provider_admin_hop_built", w.ProviderAdminHopBuilt,
 		"provider_keyset_mirror_published", w.ProviderKeySetMirrorPublished,
 	}
+}
+
+// wiredSignInMethods — способы входа человека, чьи проверяющие собраны ЭТИМ
+// корнем. Из них страж посадки выводит предъявимые уровни доверия правилом
+// (`assurance.PresentableLevels`), а не литералом.
+//
+// Сегодня — НИ ОДНОГО, и это наблюдение того же рода, что `HumanCredentialsWired`
+// выше: проверяющих пароля, второго фактора и ключа в корне нет, их заводят
+// фазы эпика kacho#1266 — пароль Ф3 (kacho#1269), второй фактор Ф12
+// (kacho#1281), ключ Ф7/Ф13 (kacho#1273, kacho#1282). ПРЕДИКАТ СМЕНЫ: как только
+// корень собирает проверяющий способа, способ входит в этот перечень — и страж
+// начинает требовать от каталога ровно то, что полоса умеет предъявить (Ф11-27:
+// один пароль при каталоге, требующем «2», — отказ старта).
+func wiredSignInMethods() []assurance.Method {
+	return nil
 }

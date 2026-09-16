@@ -219,7 +219,7 @@ type fakeUsrWtr struct {
 func (w *fakeUsrWtr) Upsert(_ context.Context, u domain.User) (domain.User, bool, error) {
 	return u, false, nil
 }
-func (w *fakeUsrWtr) InsertPending(_ context.Context, u domain.User) (domain.User, bool, error) {
+func (w *fakeUsrWtr) InsertPending(_ context.Context, u domain.User, _ time.Time) (domain.User, bool, error) {
 	return u, false, nil
 }
 func (w *fakeUsrWtr) ActivateInvite(_ context.Context, id domain.UserID, _ domain.ExternalSubject, _ domain.DisplayName) (domain.User, error) {
