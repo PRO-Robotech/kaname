@@ -58,6 +58,13 @@ type stubLane struct {
 	logoutIn  []domain.SessionBearer
 	changeIn  []humansession.ChangePasswordInput
 	logoutHit int
+
+	// Восстановление доступа (Ф5) — методы в recovery_test.go.
+	requestErr  error
+	completeOut humansession.CompleteRecoveryOutput
+	completeErr error
+	requestIn   []humansession.RequestRecoveryInput
+	completeIn  []humansession.CompleteRecoveryInput
 }
 
 func (s *stubLane) Login(_ context.Context, in humansession.LoginInput) (humansession.LoginOutput, error) {

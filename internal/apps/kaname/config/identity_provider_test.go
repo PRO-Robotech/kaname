@@ -53,6 +53,7 @@ func loginLaneSettings() config.LoginLaneConfig {
 		HasherParallelism:  4,
 		VerifierCapacity:   4,
 		MemoryReserveBytes: 256 << 20,
+		RecoveryCodeTTL:    5 * time.Minute,
 	}
 }
 

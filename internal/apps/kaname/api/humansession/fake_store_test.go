@@ -50,6 +50,10 @@ type fakeStore struct {
 	cutoffs   map[domain.UserID]fakeCutoff
 	verifiers map[domain.UserID]domain.LoginVerifier
 	audit     []outboxtypes.AuditEvent
+	// Восстановление доступа (Ф5): коды, письма, журнал завершений.
+	codes       map[domain.RecoveryCodeID]*domain.RecoveryCode
+	mail        []humansession.RecoveryMailIntent
+	completions map[string]domain.RecoveryCompletion
 	// failOn — имя операции, на которой Writer отказывает (подставной отказ
 	// порта); "" — не отказывает. "writer" — отказ открыть транзакцию;
 	// "resolve" — отказ чтения.
@@ -63,6 +67,7 @@ func newFakeStore() *fakeStore {
 		rows: map[domain.HumanSessionID]*fakeRow{}, users: map[domain.UserID]domain.User{},
 		verified: map[domain.UserID]bool{}, first: map[domain.UserID]time.Time{},
 		cutoffs: map[domain.UserID]fakeCutoff{}, verifiers: map[domain.UserID]domain.LoginVerifier{},
+		codes: map[domain.RecoveryCodeID]*domain.RecoveryCode{}, completions: map[string]domain.RecoveryCompletion{},
 	}
 }
 
@@ -340,6 +345,9 @@ type countingObserver struct {
 	rewrit map[humansession.RewriteOutcome]int
 	form   map[humansession.FormRefusal]int
 	logout int
+	// Восстановление доступа (Ф5).
+	recoveryRequest    map[humansession.RecoveryRequestOutcome]int
+	recoveryCompletion map[humansession.RecoveryCompletionOutcome]int
 	// sourceUnknown — вопросов о частоте без адреса источника.
 	sourceUnknown int
 }
@@ -349,6 +357,8 @@ func newCountingObserver() *countingObserver {
 		login: map[humansession.LoginOutcome]int{}, noSess: map[humansession.NoSessionReason]int{},
 		rate: map[humansession.FailureScope]int{}, breach: map[humansession.BreachCheckOutcome]int{},
 		rewrit: map[humansession.RewriteOutcome]int{}, form: map[humansession.FormRefusal]int{},
+		recoveryRequest:    map[humansession.RecoveryRequestOutcome]int{},
+		recoveryCompletion: map[humansession.RecoveryCompletionOutcome]int{},
 	}
 }
 
