@@ -50,7 +50,7 @@
 //
 // ПРОИЗВОДИТЕЛЯ В КОНВЕЙЕРЕ ЭТОГО РЕПОЗИТОРИЯ У ПОЛОСЫ НЕТ, и это названо, а не
 // подразумевается. Здесь стояло «зовётся из job `helm` через
-// `make -C services/iam helm-render-guard`», а провязку якобы держал гейт
+// `make helm-render-guard`», а провязку якобы держал гейт
 // `internal/repohygiene/artifactgates/renderguard_test.go`. Перемерено: файл
 // конвейера называется ci.yml, job `helm` в нём ноль, каталога
 // internal/repohygiene в этом репозитории нет — он остался в дереве платформы,

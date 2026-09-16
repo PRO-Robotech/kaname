@@ -44,10 +44,11 @@ import (
 // realManifests — шесть манифестов дерева, прочитанных настоящим загрузчиком.
 func realManifests(t *testing.T) []*manifest.Manifest {
 	t.Helper()
-	// Читается ДЕРЕВО ПЛАТФОРМЫ: манифесты соседних модулей, каталог
-	// контрактов и канон модели в поставку нашего модуля не входят by
-	// construction. Их отсутствие — «условие не создано», а не находка.
-	paths, err := filepath.Glob(filepath.Join(platformtree.RequirePath(t, "services"), "*", "manifest.yaml"))
+	// Читается ДЕРЕВО ПЛАТФОРМЫ, НАЗВАННОЕ снаружи: манифесты соседних модулей в
+	// поставку нашего модуля не входят by construction, и их выкладывает задание
+	// конвейера. Отсутствие ручки — «условие не создано» с производителем.
+	paths, err := filepath.Glob(filepath.Join(
+		platformtree.RequireNamedPlatformTree(t), platformtree.SiblingsDir, "*", "manifest.yaml"))
 	if err != nil {
 		t.Fatalf("обход дерева отказал: %v", err)
 	}

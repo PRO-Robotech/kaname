@@ -75,7 +75,7 @@ func generatorSubst(t *testing.T, root, rel, old, new string) {
 // же довод стоит рядом в прозе, объясняющей его, и подмена по короткому образцу
 // перестала бы быть одно-фактной — страж одно-фактности это и показал.
 const generatorDirectiveLine = "//go:generate go run github.com/PRO-Robotech/kaname/cmd/" +
-	"authzmap-tables -root $KANAME_PLATFORM_TREE -module ../.."
+	"authzmap-tables -root $PLATFORM_TREE -module ../.."
 
 // ── КОНТРОЛЬ ────────────────────────────────────────────────────────────────
 func TestGeneratorCoordinatesInjectionControl_UntouchedWorldIsSilent(t *testing.T) {
@@ -218,7 +218,7 @@ func TestGeneratorCoordinatesInjection_ProseAboutTheMoveIsSilent(t *testing.T) {
 func TestGeneratorCoordinatesInjection_PlatformRootArgIsSilent(t *testing.T) {
 	t.Parallel()
 	root := generatorWorld(t)
-	generatorSubst(t, root, generatorDirectiveFile, "-root $KANAME_PLATFORM_TREE",
+	generatorSubst(t, root, generatorDirectiveFile, "-root $PLATFORM_TREE",
 		"-root $SOME_OTHER_PLATFORM_TREE_VARIABLE")
 	_, _, findings := scanGeneratorCoordinates(root)
 	if len(findings) != 0 {

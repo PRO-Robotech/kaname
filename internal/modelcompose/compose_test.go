@@ -129,7 +129,7 @@ func deliveredManifests(t *testing.T) []*manifest.Manifest {
 	t.Helper()
 	// Обход читает манифесты СОСЕДНИХ модулей платформы; в поставку нашего они
 	// не входят by construction.
-	root := platformtree.Require(t)
+	root := platformtree.RequireNamedPlatformTree(t)
 	// Состав берётся у ИНДЕКСА git, а не у диска: под services/ на всякой
 	// машине, где поднимали стенд, лежит игнорируемое (распаковки чартов,
 	// отчёты прогонов), и обход по диску сделал бы вердикт свойством рабочего

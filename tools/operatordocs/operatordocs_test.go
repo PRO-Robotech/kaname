@@ -52,7 +52,7 @@ func TestOperatorDocs_TreeIsInSync(t *testing.T) {
 	code, out := runGate(t, nil)
 	if code != ExitSynced {
 		t.Fatalf("сверка документов оператора вернула %d, ожидался %d (сходится).\n"+
-			"Починка: `make -C services/iam operator-docs`\n\nвывод:\n%s", code, ExitSynced, out)
+			"Починка: `make operator-docs`\n\nвывод:\n%s", code, ExitSynced, out)
 	}
 	if !strings.Contains(out, "модулей") || !strings.Contains(out, "строк ") {
 		t.Fatalf("перепись не напечатана — «находок 0» неотличимо от «прочитано 0».\nвывод:\n%s", out)

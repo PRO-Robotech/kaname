@@ -585,10 +585,13 @@ jobs:
           repository: PRO-Robotech/kacho
           path: upstream-kacho
           fetch-depth: 1
-          # Выборка РАЗРЕЖЁННАЯ и НЕ конусная: нужны ровно манифесты модулей, а
-          # конусный режим тянет каталог служб целиком — плата за операнд стала
-          # бы больше самого операнда.
-          sparse-checkout: services/*/manifest.yaml
+          # Выборка РАЗРЕЖЁННАЯ и НЕ конусная: нужны ровно манифесты модулей и
+          # объявление состава стендов, а конусный режим тянет каталог служб
+          # целиком — плата за операнд стала бы больше самого операнда.
+          sparse-checkout: |
+            services/*/manifest.yaml
+            deploy/stacks.txt
+            deploy/helm/umbrella
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -601,6 +604,49 @@ jobs:
         if: success() && steps.platform-tree.outcome != 'success'
         run: |
           echo "::error title=УСЛОВИЕ НЕ СОЗДАНО::выборка дерева платформы дала «${{ steps.platform-tree.outcome }}». Сверка ниже выйдет кодом 2 — вердикта о совпадении блоков НЕТ."
+
+      # ВТОРОЙ ОПЕРАНД СОСТАВНОЙ: манифесты СОСЕДЕЙ приезжают выборкой, манифест
+      # ЭТОГО модуля лежит здесь. Без него набор неполон, и это не «сверка уже»,
+      # а сверка О ДРУГОМ: производитель таблицы типов читает закрытый набор
+      # модулей, и потерянный тип не резолвится краем — вопрос о нём не задаётся
+      # вовсе, а проверка выглядит пройденной.
+      #
+      # Копией репозитория это НЕ является (ban #20): файл не лежит в дереве
+      # платформы и не отслеживается им — он кладётся В ПРОГОНЕ, в выборку,
+      # которая живёт минуты и никуда не отправляется.
+      #
+      # `git add` обязателен: перечень манифестов берётся у ИНДЕКСА, а не обходом
+      # диска, и неотслеживаемый файл не был бы найден — молча.
+      - name: второй операнд достраивается манифестом этого модуля
+        if: success() && steps.platform-tree.outcome == 'success'
+        run: |
+          set -euo pipefail
+          tree="$GITHUB_WORKSPACE/upstream-kacho"
+          mkdir -p "$tree/services/iam"
+          cp manifest.yaml "$tree/services/iam/manifest.yaml"
+          git -C "$tree" add services/iam/manifest.yaml
+          echo "манифестов в операнде: $(git -C "$tree" ls-files 'services/*/manifest.yaml' | wc -l)"
+
+      # ПРОБЫ, ЧЕЙ ПРЕДМЕТ — ПЛАТФОРМЕННЫЙ АРТЕФАКТ, исполняются ЗДЕСЬ и только
+      # здесь: в задании `unit` дерева платформы нет, и они честно пропускают
+      # себя с названной предпосылкой. Пропуск, у которого нет производителя,
+      # неотличим от исправной работы — этот производитель и есть шаг ниже.
+      - name: пробы, судящие манифесты всего набора модулей
+        if: success() && steps.platform-tree.outcome == 'success'
+        env:
+          PLATFORM_TREE: ${{ github.workspace }}/upstream-kacho
+        run: |
+          rc=0
+          go test -count=1 -short \
+            ./internal/authzmapgen/ \
+            ./internal/modelcompose/ \
+            ./internal/manifest/... \
+            ./internal/apps/kaname/modulecatalog/ \
+            ./tools/ || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Платформенный артефакт разошёлся со своим производителем::вывод выше называет пробу и координату"
+            exit 1
+          fi
 
       # ИСХОД ЧИТАЕТСЯ ПО ТЕКСТУ, А НЕ ПО КОДУ, и разбор вынесен СКРИПТОМ.
       #

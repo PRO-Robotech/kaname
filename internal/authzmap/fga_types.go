@@ -308,9 +308,9 @@ const VerbRelationPrefix = "v_"
 // поведение: таблица — межмодульный каталог, и собранная из части манифестов
 // она выглядит целой, молча теряя тип.
 //
-//	KANAME_PLATFORM_TREE=/путь/к/дереву/платформы go generate ./internal/authzmap/...
+//	PLATFORM_TREE=/путь/к/дереву/платформы go generate ./internal/authzmap/...
 //
-//go:generate go run github.com/PRO-Robotech/kaname/cmd/authzmap-tables -root $KANAME_PLATFORM_TREE -module ../..
+//go:generate go run github.com/PRO-Robotech/kaname/cmd/authzmap-tables -root $PLATFORM_TREE -module ../..
 
 // ─────────────────────────────────────────────────────────────────────────────
 // НАБОРЫ ДЕЙСТВИЙ ПОРОЖДАЮТСЯ ИЗ МАНИФЕСТОВ — ОДНА ТАБЛИЦА ИЗ ДВУХ (#1092)
