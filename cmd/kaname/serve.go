@@ -513,22 +513,6 @@ func runServe(cfg config.Config) error {
 	}
 	startSigningKeySweeper(ctx, signingKeystore, logger)
 
-	// Полоса входа паролем и наша сессия (Ф3, kacho#1269) — строится ТОЛЬКО
-	// под `own`; под `external` — nil, и всё, что читает её провязку,
-	// сообщает «нет» наблюдением, а не литералом (`loginlane.go`). Собирается
-	// ДО уборки, потому что её таблицы — предметы той же петли.
-	lane, err := buildLoginLane(cfg, pool, kanameRepo, metricsReg, logger)
-	if err != nil {
-		return err
-	}
-
-	// Фоновая уборка таблиц, чей рост задаёт внешний (задача #1292). Три
-	// предмета обслуживает ОДНА петля: три расписания об одном предмете
-	// разошлись бы молча.
-	if err := startRetentionSweeper(ctx, pool, cfg, metricsReg, lane.retentionReapers(), logger); err != nil {
-		return err
-	}
-
 	// Уборка ресурсного журнала подписки — своим уборщиком (см.
 	// `subscription_wiring.go`, там же довод, почему не предметом общего).
 	if err := startJournalRetentionSweep(ctx, pool, logger); err != nil {
@@ -540,6 +524,25 @@ func runServe(cfg config.Config) error {
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
 		metricsReg, cfg, tokenSigner, logger)
+
+	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
+	// kacho#1270) — строится ТОЛЬКО под `own`; под `external` — nil, и всё, что
+	// читает её провязку, сообщает «нет» наблюдением, а не литералом
+	// (`loginlane.go`). Собирается ПОСЛЕ служб: регистрация ПРИНИМАЕТ тот же
+	// реконсайлер материализации привязки, что путь запроса и полоса первого
+	// входа (`hook_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
+	// потому что её таблицы — предметы той же петли.
+	lane, err := buildLoginLane(cfg, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
+	if err != nil {
+		return err
+	}
+
+	// Фоновая уборка таблиц, чей рост задаёт внешний (задача #1292). Три
+	// предмета обслуживает ОДНА петля: три расписания об одном предмете
+	// разошлись бы молча.
+	if err := startRetentionSweeper(ctx, pool, cfg, metricsReg, lane.retentionReapers(), logger); err != nil {
+		return err
+	}
 	// `InternalHumanSessionService.Resolve` — внутренний слушатель, только
 	// при поднятой полосе (Ф3-45); под `external` регистрация не происходит.
 	svcs.humanSessionHandler = lane.resolveHandler()

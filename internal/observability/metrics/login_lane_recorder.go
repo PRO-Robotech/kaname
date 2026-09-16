@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 )
 
@@ -25,6 +26,7 @@ const (
 	LogoutStoreFailuresMetric          = Namespace + "_logout_store_failures_total"
 	LoginSourceUnknownMetric           = Namespace + "_login_source_unknown_total"
 	PasswordMaterialRewriteMetric      = Namespace + "_password_material_rewrite_total"
+	RegistrationOutcomesMetric         = Namespace + "_registration_outcomes_total"
 )
 
 // LoginLaneRecorder — приёмник событий полосы (`humansession.Observer`) и
@@ -39,6 +41,7 @@ type LoginLaneRecorder struct {
 	logout    prometheus.Counter
 	rewrite   *prometheus.CounterVec
 	noSource  prometheus.Counter
+	register  *prometheus.CounterVec
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -89,8 +92,14 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 				Help: "Rewrites of stored password material after a successful check, by outcome: rewritten, " +
 					"not needed, write failed, skipped (72-byte password, NUL byte, unjudgeable).",
 			}, []string{"outcome"}),
+			register: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: RegistrationOutcomesMetric,
+				Help: "Outcomes of registration by lane and cause. The caller always sees ONE refusal " +
+					"(registration refused) for an occupied address and for the admission-rate ceiling; " +
+					"the cause is visible only here and in the journal (Ф4 Р3).",
+			}, []string{"lane", "outcome"}),
 		}
-		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource)
+		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource, rec.register)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -111,6 +120,13 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		}
 		for _, o := range humansession.RewriteOutcomes() {
 			rec.rewrite.WithLabelValues(string(o)).Add(0)
+		}
+		// Полосы — из единственного объявления, исходы — от производителя:
+		// клетка каждой пары существует с нулём (Ф4 Р3, форма Ф-е).
+		for _, lane := range registration.Lanes {
+			for _, o := range registration.Outcomes() {
+				rec.register.WithLabelValues(lane.Name, string(o)).Add(0)
+			}
 		}
 		r.loginLane = rec
 	})
@@ -149,7 +165,13 @@ func (l *LoginLaneRecorder) RewriteObserved(o humansession.RewriteOutcome) {
 	l.rewrite.WithLabelValues(string(o)).Inc()
 }
 
+// RegistrationObserved — исход регистрации по полосе и причине (Ф4 Р3).
+func (l *LoginLaneRecorder) RegistrationObserved(lane string, o registration.Outcome) {
+	l.register.WithLabelValues(lane, string(o)).Inc()
+}
+
 var (
 	_ humansession.Observer   = (*LoginLaneRecorder)(nil)
 	_ passwordverify.Observer = (*LoginLaneRecorder)(nil)
+	_ registration.Observer   = (*LoginLaneRecorder)(nil)
 )
