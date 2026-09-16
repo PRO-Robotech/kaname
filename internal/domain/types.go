@@ -33,7 +33,7 @@ type (
 	// SubjectType defines the semantics.
 	SubjectID string
 
-	// Names — every newtype has its own regex.
+	// Every newtype below has its own regex.
 	AccountName    string
 	ProjectName    string
 	GroupName      string

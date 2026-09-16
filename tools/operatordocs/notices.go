@@ -115,7 +115,7 @@ func ListModules(root string) ([]Module, error) {
 // `LICENSE`, `LICENSE.md`, `LICENSE-MIT`, `COPYING.txt`.
 var licenseFileNames = []string{"license", "licence", "copying"}
 
-// licenseSignature — распознаватель одной лицензии: идентификатор SPDX и
+// licenseSignatures — распознаватель одной лицензии: идентификатор SPDX и
 // признаки, ВСЕ из которых обязаны встретиться.
 //
 // Порядок значим: более узкие распознаватели стоят раньше общих, иначе

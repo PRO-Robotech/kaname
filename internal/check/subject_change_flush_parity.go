@@ -258,7 +258,6 @@ func SubjectChangeRosterTotal(declared map[string]int) int {
 	return total
 }
 
-// IsSubjectChangeProducerFile — лежит ли координата в слое use-case и не проба ли это.
 // SubjectChangeProducerCorpus — корпус производителей полосы самосброса из ДЕРЕВА.
 //
 // Отбор объявлен `IsSubjectChangeProducerFile` и зовётся отсюда, а дерево
@@ -269,6 +268,7 @@ func SubjectChangeProducerCorpus(tree *treecorpus.Tree) (TreeCorpus, error) {
 	return CorpusFrom(tree, IsSubjectChangeProducerFile)
 }
 
+// IsSubjectChangeProducerFile — лежит ли координата в слое use-case и не проба ли это.
 func IsSubjectChangeProducerFile(rel string) bool {
 	return strings.HasPrefix(rel, SubjectChangeProducerRootRel+"/") &&
 		strings.HasSuffix(rel, ".go") && !strings.HasSuffix(rel, "_test.go")

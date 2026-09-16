@@ -140,7 +140,7 @@ func Run(root string, stdout, stderr io.Writer) int {
 	return code
 }
 
-// parseArgs — свой набор флагов, чтобы отказ разбора не выходил кодом VOID.
+// ParseRoot — свой набор флагов, чтобы отказ разбора не выходил кодом VOID.
 func ParseRoot(prog string, args []string) (string, error) {
 	fs := flag.NewFlagSet(prog, flag.ContinueOnError)
 	root := fs.String("root", ".", "корень дерева, в котором ищутся манифесты модулей")

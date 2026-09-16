@@ -1214,18 +1214,6 @@ func scanRolePolicy(ro *domain.Role, permsJSON, rulesJSON []byte) error {
 	return nil
 }
 
-// scanRoleWithVersion — ЕДИНСТВЕННОЕ объявление порядка назначений под roleCols.
-// Без versionOut это обычное чтение проекции (сюда делегирует scanRole); с ним
-// запрос ОБЯЗАН нести ведущую колонку `xmin::text`, и токен пишется в
-// *versionOut[0] — слот версии встаёт первым в тот же список (GetWithVersion).
-//
-// Порядок здесь именно ОДИН, а не «воспроизведён»: прежде список был написан
-// дважды, и вторая копия отстала на колонку `owner_module` — правка любой роли
-// отвечала арендатору INTERNAL, потому что описаний полей приходило 13, а
-// приёмников было 12. Компилятор такое расхождение не ловит, роняет его только
-// живая Postgres. Заводя колонку в roleCols, правь список ЗДЕСЬ; второго места,
-// способного с ним разойтись, больше нет, а остаточную ось «проекция против
-// списка» держит TestProjectionScanArityMatchesItsColumns.
 // scanRoleWithTrailing — те же колонки `roleCols`, за которыми идут ДОПОЛНИТЕЛЬНЫЕ
 // приёмники вызывающего.
 //
@@ -1238,6 +1226,18 @@ func scanRoleWithTrailing(row scanner, trailing ...any) (domain.Role, error) {
 	return scanRoleWithVersionAndTrailing(row, nil, trailing)
 }
 
+// scanRoleWithVersion — ЕДИНСТВЕННОЕ объявление порядка назначений под roleCols.
+// Без versionOut это обычное чтение проекции (сюда делегирует scanRole); с ним
+// запрос ОБЯЗАН нести ведущую колонку `xmin::text`, и токен пишется в
+// *versionOut[0] — слот версии встаёт первым в тот же список (GetWithVersion).
+//
+// Порядок здесь именно ОДИН, а не «воспроизведён»: прежде список был написан
+// дважды, и вторая копия отстала на колонку `owner_module` — правка любой роли
+// отвечала арендатору INTERNAL, потому что описаний полей приходило 13, а
+// приёмников было 12. Компилятор такое расхождение не ловит, роняет его только
+// живая Postgres. Заводя колонку в roleCols, правь список ЗДЕСЬ; второго места,
+// способного с ним разойтись, больше нет, а остаточную ось «проекция против
+// списка» держит TestProjectionScanArityMatchesItsColumns.
 func scanRoleWithVersion(row scanner, versionOut ...*string) (domain.Role, error) {
 	return scanRoleWithVersionAndTrailing(row, versionOut, nil)
 }

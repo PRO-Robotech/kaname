@@ -289,16 +289,6 @@ func isReadVerb(perm string) bool {
 	}
 }
 
-// ActionForMethod — the permission name the catalog gives a method, or "" when
-// the catalog has no entry for it or the entry is exempt.
-//
-// "" is meaningful, not merely absent: an empty action is exactly how a caller
-// recognises "this method is in no catalog row", so a row that names no
-// permission must not be reported as if it named one.
-//
-// Implements authzguard.DenyActionLookup. fqn is the full method name WITHOUT
-// the leading slash — the same normalisation the edge applies before its own
-// catalog lookup, so both layers key on one string.
 // ScopeForMethod — the object type on which the method's permission is granted
 // (project / account / cluster), or "" when the catalog names none or the row
 // is exempt.
@@ -316,6 +306,16 @@ func (r *PermissionRegistry) ScopeForMethod(fqn string) string {
 	return e.ScopeExtractor.ObjectType
 }
 
+// ActionForMethod — the permission name the catalog gives a method, or "" when
+// the catalog has no entry for it or the entry is exempt.
+//
+// "" is meaningful, not merely absent: an empty action is exactly how a caller
+// recognises "this method is in no catalog row", so a row that names no
+// permission must not be reported as if it named one.
+//
+// Implements authzguard.DenyActionLookup. fqn is the full method name WITHOUT
+// the leading slash — the same normalisation the edge applies before its own
+// catalog lookup, so both layers key on one string.
 func (r *PermissionRegistry) ActionForMethod(fqn string) string {
 	e, ok := r.byFQN[fqn]
 	if !ok || e.Permission == catalogderive.ExemptPermission {

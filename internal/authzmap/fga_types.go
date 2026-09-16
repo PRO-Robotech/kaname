@@ -364,6 +364,13 @@ const VerbRelationPrefix = "v_"
 // канон — два рендера одного замысла, и их согласие обязан кто-то проверять;
 // снять гейт вместе с заведением вывода значило бы оставить дерево без обоих.
 
+// expandableTierRelations / expandableMembershipRelation — НЕглагольная часть
+// поверхности. Глагольная часть не перечисляется: она ВЫВОДИТСЯ как объединение
+// наборов всех типов (см. expandableRelations ниже).
+var expandableTierRelations = []string{"viewer", "editor", "admin"}
+
+const expandableMembershipRelation = "member"
+
 // expandableRelations — the closed set of FGA relation names a caller may pass
 // to ExpandAccess ("who can do <relation> on <object>"). It is the user-facing
 // authorization-decision surface of the canonical fga_model.fga:
@@ -386,13 +393,7 @@ const VerbRelationPrefix = "v_"
 // типов, поэтому список не может отстать от модели. Обе стороны запрета
 // (принимаемое ⊆ модель, машинерия ∉ принимаемое) держит гейт дрейфа
 // (authzmap/fga_model_drift_test.go).
-// expandableTierRelations / expandableMembershipRelation — НЕглагольная часть
-// поверхности. Глагольная часть не перечисляется: она ВЫВОДИТСЯ как объединение
-// наборов всех типов (см. expandableRelations ниже).
-var expandableTierRelations = []string{"viewer", "editor", "admin"}
-
-const expandableMembershipRelation = "member"
-
+//
 // expandableRelations — ВЫВОДИМОЕ множество: объединение наборов `v_*` всех
 // глагольных типов ∪ ярусные ∪ членство.
 //

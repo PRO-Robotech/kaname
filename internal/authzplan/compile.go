@@ -359,7 +359,6 @@ func (m *Model) validate() error {
 	return nil
 }
 
-// pointerTargets — типы, на которые ведёт отношение-указатель.
 // PointerTargets — типы, на которые ведёт указатель. Экспортировано по той же
 // причине, что и Pointers: это чтение модели, а не шаг компиляции.
 func (m *Model) PointerTargets(ptr *Relation) []string {
