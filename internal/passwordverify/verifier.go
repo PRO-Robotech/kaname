@@ -95,7 +95,7 @@ func New(capacity int, observer Observer) (*Verifier, error) {
 		return nil, err
 	}
 	if observer == nil {
-		return nil, fmt.Errorf("Illegal argument password_verifier.observer: required — " +
+		return nil, fmt.Errorf("password_verifier.observer: required — " +
 			"проверяющий без приёмника исходов молчит обо всех отказах разом")
 	}
 	return &Verifier{capacity: gate, observer: observer}, nil

@@ -29,12 +29,17 @@ type capacityGate struct {
 
 // newCapacityGate — ёмкость из объявленной величины.
 //
+// Текст отказа начинается со строчной и называет ручку: контрактный тон
+// «Illegal argument …» принадлежит отказам, которые видит арендатор через
+// край, а этот читает ОПЕРАТОР в выводе старта — и разбор ошибок дерева
+// требует от внутреннего отказа обычной формы.
+//
 // Величина БЕЗ УМОЛЧАНИЯ: незаданная либо не положительная — отказ построения,
 // называющий ручку. Ноль означал бы отказ каждой проверки, а не «без предела»,
 // и подставить его молча значило бы выбрать за оператора то, чего он не выбирал.
 func newCapacityGate(capacity int) (*capacityGate, error) {
 	if capacity <= 0 {
-		return nil, fmt.Errorf("Illegal argument password_verifier.capacity = %d: required, положительная — "+
+		return nil, fmt.Errorf("password_verifier.capacity = %d: required, положительная — "+
 			"ноль означал бы отказ каждой проверки, а не «без предела»", capacity)
 	}
 	return &capacityGate{slots: make(chan struct{}, capacity)}, nil

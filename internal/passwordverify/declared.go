@@ -42,11 +42,11 @@ type Declared struct {
 func (d Declared) Validate() error {
 	record, ok := domain.PasswordHashFormatByMarker(string(d.Format))
 	if !ok {
-		return fmt.Errorf("Illegal argument password_hasher.format %q: такого формата нет в перечне (registry); допустимые: %v",
+		return fmt.Errorf("password_hasher.format %q: такого формата нет в перечне (registry); допустимые: %v",
 			d.Format, domain.PasswordHashFormatMarkers())
 	}
 	if !record.Writable {
-		return fmt.Errorf("Illegal argument password_hasher.format %q: формат только читаемый (only-readable) — "+
+		return fmt.Errorf("password_hasher.format %q: формат только читаемый (only-readable) — "+
 			"продукт его не пишет", d.Format)
 	}
 
@@ -54,16 +54,16 @@ func (d Declared) Validate() error {
 	for _, p := range params {
 		value, named := d.Params[p]
 		if !named {
-			return fmt.Errorf("Illegal argument password_hasher.params %q/%q: required — величина не подставляется молча",
+			return fmt.Errorf("password_hasher.params %q/%q: required — величина не подставляется молча",
 				d.Format, p)
 		}
 		if ceiling := record.Ceiling[p]; value > ceiling {
-			return fmt.Errorf("Illegal argument password_hasher.params %q/%q = %d: выше потолка записи (ceiling) %d — "+
+			return fmt.Errorf("password_hasher.params %q/%q = %d: выше потолка записи (ceiling) %d — "+
 				"каждое вновь заводимое значение отвергалось бы как «параметры вне потолка»",
 				d.Format, p, value, ceiling)
 		}
 		if floor := record.Floor[p]; value < floor {
-			return fmt.Errorf("Illegal argument password_hasher.params %q/%q = %d: ниже пола записи (floor) %d — "+
+			return fmt.Errorf("password_hasher.params %q/%q = %d: ниже пола записи (floor) %d — "+
 				"стойкость каждого нового пароля понизилась бы молча", d.Format, p, value, floor)
 		}
 	}
@@ -80,7 +80,7 @@ func (d Declared) Validate() error {
 	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
-		return fmt.Errorf("Illegal argument password_hasher.params %q: параметры %v формату не принадлежат — "+
+		return fmt.Errorf("password_hasher.params %q: параметры %v формату не принадлежат — "+
 			"принятое и не прочитанное обещало бы возможность, которой нет", d.Format, unknown)
 	}
 	return nil
