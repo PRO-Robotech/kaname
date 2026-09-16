@@ -106,9 +106,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # комментарии, — держит проба `TestBuildStampReachesTheBinaryItLabels`: она
 # разбирает ИСПОЛНЯЕМУЮ часть этого файла и требует, чтобы у каждого `-X` была
 # цель, объявленная переменной уровня пакета. Компоновщик о промахе `-X` молчит.
-ARG KACHO_IMAGE_REVISION=""
-ARG KACHO_IMAGE_VERSION=""
-RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags "-X main.buildVersion=$KACHO_IMAGE_VERSION -X main.buildRevision=$KACHO_IMAGE_REVISION" -o /kaname ./cmd/kaname \
+ARG OCI_IMAGE_REVISION=""
+ARG OCI_IMAGE_VERSION=""
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags "-X main.buildVersion=$OCI_IMAGE_VERSION -X main.buildRevision=$OCI_IMAGE_REVISION" -o /kaname ./cmd/kaname \
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /kaname-migrator ./cmd/migrator
 
 FROM mirror.gcr.io/library/alpine:3.24
@@ -125,11 +125,11 @@ COPY --from=builder /kaname-migrator /usr/local/bin/kaname-migrator
 # монорепо — здесь их координаты намеренно не воспроизводятся: в контексте этой
 # сборки такого каталога нет, и путь читался бы как обещание того, чего рядом не
 # существует.
-ARG KACHO_IMAGE_REVISION=""
-ARG KACHO_IMAGE_VERSION=""
-LABEL org.opencontainers.image.revision="$KACHO_IMAGE_REVISION" \
-      org.opencontainers.image.version="$KACHO_IMAGE_VERSION"
-RUN mkdir -p /etc/kacho && printf '%s\n' "$KACHO_IMAGE_REVISION" > /etc/kacho/image-revision
+ARG OCI_IMAGE_REVISION=""
+ARG OCI_IMAGE_VERSION=""
+LABEL org.opencontainers.image.revision="$OCI_IMAGE_REVISION" \
+      org.opencontainers.image.version="$OCI_IMAGE_VERSION"
+RUN mkdir -p /etc/kacho && printf '%s\n' "$OCI_IMAGE_REVISION" > /etc/kacho/image-revision
 
 USER 65532
 ENTRYPOINT ["/usr/local/bin/kaname"]
