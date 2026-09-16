@@ -19,8 +19,6 @@ import (
 	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
-	"github.com/PRO-Robotech/kaname/internal/catalog"
-	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	handlerinternal "github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
@@ -42,10 +40,16 @@ import (
 // соседних сервисов эта провязка есть, и её отсутствие было бы расхождением,
 // которому нечем себя выдать (#1752).
 //
-// kanameRepo / opsRepo / relationStore / bindingReconciler прокидываются из
+// kanameRepo / opsRepo / bindingReconciler прокидываются из
 // composition root (serve.go) — provision hook (Kratos user-provisioning, C4)
 // строит UpsertFromIdentityUseCase из тех же зависимостей, что wiring.go, и
 // переиспользует уже собранную дверь решения (не дублирует её).
+//
+// `relationStore` и `catalogSource` здесь БОЛЬШЕ НЕ ПРИНИМАЮТСЯ. Первый не читался
+// уже на стволе — шапка обещала «FGA-tuple side-effects», которых на этой полосе
+// нет; второй осиротел вместе с построением реконсайлера, снятым выше (#116).
+// Параметр, который никто не читает, — объявление зависимости, которой нет:
+// следующий провяжет его «как положено» и будет прав по форме и неправ по делу.
 //
 // Реконсайлер тоже ПРОКИДЫВАЕТСЯ, а не строится здесь, и это не единообразие
 // ради единообразия: собранный здесь экземпляр не нёс приёмника размера, поэтому
@@ -56,11 +60,6 @@ func buildHooksMux(
 	pool *pgxpool.Pool,
 	kanameRepo kanamerepo.Repository,
 	opsRepo operations.Repo,
-	relationStore clients.RelationStore,
-	// catalogSource — каталожный факт из живых строк (задача #1816): ЖИВОЙ путь
-	// первого входа материализует доступ тем же реконсайлером, что и gRPC-путь,
-	// и обязан читать тот же каталог.
-	catalogSource catalog.Source,
 	// bindingReconciler — ТОТ ЖЕ экземпляр, что у пути запроса (`wiring.go`), а не
 	// второй, собранный здесь. До #116 он собирался здесь и БЕЗ приёмника размера:
 	// живая полоса первого входа материализовала привязки мимо гистограммы, и та

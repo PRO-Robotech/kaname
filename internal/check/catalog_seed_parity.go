@@ -169,9 +169,9 @@ func (r insertRow) get(col string) string { return r.byName[col] }
 // и опирается (живая строка колонки `live` не несёт вовсе), дамп же печатает
 // значение всегда. Разбор обязан читать обе формы одинаково, иначе рукописная
 // живая строка была бы прочитана как «значение не задано».
-func (r insertRow) boolOrDefault(col string, def bool) bool {
+func (r insertRow) boolOrDefault(col string) bool {
 	if !r.has(col) {
-		return def
+		return true
 	}
 	return strings.EqualFold(strings.TrimSpace(r.get(col)), "true")
 }
@@ -362,7 +362,7 @@ func auditCatalogSeed(corpus []catalogSeedMigration, wantModules, wantResources,
 
 	gotMod := map[string]bool{}
 	for _, r := range mods {
-		if !r.boolOrDefault("live", true) {
+		if !r.boolOrDefault("live") {
 			continue // снятый модуль живым ключом каталога не является
 		}
 		gotMod[r.get("module")] = true
@@ -380,7 +380,7 @@ func auditCatalogSeed(corpus []catalogSeedMigration, wantModules, wantResources,
 			findings = append(findings, fmt.Sprintf(
 				"посев ресурса: точечная форма %q не выводится из пары (%s, %s)", dotted, module, resource))
 		}
-		if r.boolOrDefault("live", true) {
+		if r.boolOrDefault("live") {
 			gotRes[dotted] = true
 			continue
 		}
@@ -390,12 +390,12 @@ func auditCatalogSeed(corpus []catalogSeedMigration, wantModules, wantResources,
 	gotVerb := map[string]bool{}
 	seededAlive := map[string]bool{}
 	for _, r := range verbs {
-		if !r.boolOrDefault("live", true) {
+		if !r.boolOrDefault("live") {
 			continue // снятый глагол живым ключом каталога не является
 		}
 		key := r.get("module") + "." + r.get("resource") + "." + r.get("verb")
 		seededAlive[key] = true
-		if !r.boolOrDefault("per_object", true) {
+		if !r.boolOrDefault("per_object") {
 			continue // ярусная половина — предмет auditTierOnlyVerbSeed
 		}
 		if retiredLater[key] {
@@ -602,14 +602,14 @@ func auditTierOnlyVerbSeed(corpus []catalogSeedMigration, want []string) (seeded
 	wantSet := setOf(want)
 	got := map[string]bool{}
 	for _, r := range rows {
-		if !r.boolOrDefault("live", true) {
+		if !r.boolOrDefault("live") {
 			continue // снятый глагол ярусной половиной не является
 		}
 		key := r.get("module") + "." + r.get("resource") + "." + r.get("verb")
 		if retiredLater[key] {
 			continue // снято поздним оператором цепочки
 		}
-		if r.boolOrDefault("per_object", true) {
+		if r.boolOrDefault("per_object") {
 			if wantSet[key] {
 				findings = append(findings, fmt.Sprintf(
 					"посев ярусного глагола %s: признак словаря %q, а не false — "+

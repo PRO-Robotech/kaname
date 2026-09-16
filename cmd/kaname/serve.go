@@ -1129,8 +1129,8 @@ func runServe(cfg config.Config) error {
 	// Носитель готовности отдаётся сюда, чтобы гашение переводило `/readyz` в
 	// 503 ДО остановки серверов (см. triggerShutdown ниже). Без этого носитель
 	// был бы, а дёрнуть его было бы некому (#1752).
-	hooksHandler, hooksHealth := buildHooksMux(pool, kanameRepo, opsRepo, svcs.ownGates,
-		catalogSnapshot, svcs.bindingReconciler, metricsReg, cfg, logger)
+	hooksHandler, hooksHealth := buildHooksMux(pool, kanameRepo, opsRepo,
+		svcs.bindingReconciler, metricsReg, cfg, logger)
 	hooksSurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "вебхуки провайдера личности",
 		Mode:    surfaceMode,

@@ -365,10 +365,7 @@ func (u *IssueUserTokenUseCase) issueSecretSync(
 		if err != nil {
 			return nil, err
 		}
-		pbToken, err := userTokenToProto(persisted)
-		if err != nil {
-			return nil, err
-		}
+		pbToken := userTokenToProto(persisted)
 		// Тело, которое ЛОЖИТСЯ В СТРОКУ операции: без поля секрета.
 		stored := &iamv1.IssueUserTokenResponse{
 			Token:    pbToken,
@@ -529,10 +526,7 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 	//    `client_id` и `key_id` несут ОДНО значение — идентификатор строки
 	//    реестра. Это не избыточность ответа, а его смысл: этим именем
 	//    подписывается `client_assertion`, и только его разрешает наш издатель.
-	pbToken, err := userTokenToProto(persisted)
-	if err != nil {
-		return nil, err
-	}
+	pbToken := userTokenToProto(persisted)
 	resp := &iamv1.IssueUserTokenResponse{
 		Token:         pbToken,
 		ClientId:      string(tokenID),
@@ -809,7 +803,13 @@ func labelsToProto(l domain.Labels) map[string]string {
 	return out
 }
 
-func userTokenToProto(c domain.UserOAuthClient) (*iamv1.UserOAuthClient, error) {
+// userTokenToProto — проекция строки токена в форму контракта.//
+// Ошибки НЕ возвращает: собрать проекцию нечем — все поля берутся у уже
+// прочитанной строки. Прежде возвращалась всегда-nil ошибка, и у вызывающих
+// стояли недостижимые ветви `if err != nil`: ветвь, которая не может
+// исполниться, есть форма проверки без содержания — её читают как покрытый
+// случай (kaname#115).
+func userTokenToProto(c domain.UserOAuthClient) *iamv1.UserOAuthClient {
 	pb := &iamv1.UserOAuthClient{
 		Id:              string(c.ID),
 		UserId:          string(c.UserID),
@@ -829,7 +829,7 @@ func userTokenToProto(c domain.UserOAuthClient) (*iamv1.UserOAuthClient, error) 
 	if c.LastUsedAt != nil {
 		pb.LastUsedAt = shared.TimestampProto(*c.LastUsedAt)
 	}
-	return pb, nil
+	return pb
 }
 
 // credentialKindToProto — отображение вида домена в вид контракта. Объявлено

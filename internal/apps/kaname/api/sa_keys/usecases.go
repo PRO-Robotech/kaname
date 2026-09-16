@@ -682,10 +682,7 @@ func (u *IssueSAKeyUseCase) issueSecretSync(
 		if err != nil {
 			return nil, err
 		}
-		pbKey, err := saClientToProto(persisted)
-		if err != nil {
-			return nil, err
-		}
+		pbKey := saClientToProto(persisted)
 		stored := &iamv1.IssueSAKeyResponse{
 			Key:      pbKey,
 			ClientId: string(keyID),
@@ -811,10 +808,7 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 
 	// 4. Build response — return PRIVATE PEM + kid ONCE. `client_secret`
 	//    is kept empty (deprecated field, retained for wire-compat).
-	pbKey, err := saClientToProto(persisted)
-	if err != nil {
-		return nil, err
-	}
+	pbKey := saClientToProto(persisted)
 	resp := &iamv1.IssueSAKeyResponse{
 		Key:           pbKey,
 		ClientId:      identity.ClientID,
@@ -1075,10 +1069,7 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		return nil, err
 	}
 
-	pbKey, err := saClientToProto(persisted)
-	if err != nil {
-		return nil, err
-	}
+	pbKey := saClientToProto(persisted)
 	resp := &iamv1.IssueSAKeyResponse{
 		Key:      pbKey,
 		ClientId: identity.ClientID,
@@ -1512,7 +1503,13 @@ func labelsToProto(l domain.Labels) map[string]string {
 	return out
 }
 
-func saClientToProto(c domain.ServiceAccountOAuthClient) (*iamv1.ServiceAccountOAuthClient, error) {
+// saClientToProto — проекция строки клиента в форму контракта.//
+// Ошибки НЕ возвращает: собрать проекцию нечем — все поля берутся у уже
+// прочитанной строки. Прежде возвращалась всегда-nil ошибка, и у вызывающих
+// стояли недостижимые ветви `if err != nil`: ветвь, которая не может
+// исполниться, есть форма проверки без содержания — её читают как покрытый
+// случай (kaname#115).
+func saClientToProto(c domain.ServiceAccountOAuthClient) *iamv1.ServiceAccountOAuthClient {
 	pb := &iamv1.ServiceAccountOAuthClient{
 		Id:              string(c.ID),
 		SvaId:           string(c.SvaID),
@@ -1530,7 +1527,7 @@ func saClientToProto(c domain.ServiceAccountOAuthClient) (*iamv1.ServiceAccountO
 	if c.LastUsedAt != nil {
 		pb.LastUsedAt = shared.TimestampProto(*c.LastUsedAt)
 	}
-	return pb, nil
+	return pb
 }
 
 // credentialKindToProto / CredentialKindFromProto — отображение вида домена в

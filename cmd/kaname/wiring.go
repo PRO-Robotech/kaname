@@ -604,8 +604,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRevoke(abRevoke)
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
-	authzServices := buildAuthZServices(pool, opsRepo, kanameRepo, relationStore,
-		metricsReg, cfg.AuthN.Mode.IsProduction(), logger)
+	authzServices := buildAuthZServices(kanameRepo, relationStore,
+		metricsReg, cfg.AuthN.Mode.IsProduction())
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
 	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
@@ -1180,11 +1180,8 @@ type authzServiceBundle struct {
 // движка то, чего обёртка не добавляла. Добавлять больше нечего: цепь областей и
 // надзор администратора облака форма поднимает своим планом, поэтому «два ответа
 // на один вопрос» перестало быть возможным by construction, а не по договорённости.
-func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
-	kanameRepo kanamerepo.Repository, ownGates *authzcascade.Client,
-	metricsReg *metrics.Registry,
-	prodMode bool, logger *slog.Logger) authzServiceBundle {
-	_ = opsRepo // операции здесь больше не создаются: их создавал снятый писатель кортежей
+func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade.Client,
+	metricsReg *metrics.Registry, prodMode bool) authzServiceBundle {
 
 	// ClusterAdminChecker — плоский надзор администратора облака. Он спрашивает о
 	// типе `cluster`, то есть о ДРУГОМ объекте, чем тот, о котором идёт вопрос, —
