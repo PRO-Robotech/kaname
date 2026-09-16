@@ -359,7 +359,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithActivationObserver(metricsReg.InviteActivationRecorder())
 	userInvite := userapp.NewInviteUserUseCase(kanameRepo, opsRepo, relationStore).
 		WithRelationStore(relationStore, logger).
-		WithObjectReconciler(rsabReconciler)
+		WithObjectReconciler(rsabReconciler).
+		// Срок строки приглашения (приёмка ID-MAIL-1, §10 п. 22). Величина
+		// читается ЗДЕСЬ и передаётся use-case'у: настройки читает
+		// композиционный корень, а не бизнес-логика. Умолчание живёт у ручки,
+		// поэтому молчащая посадка получает его, а не «без срока».
+		WithInviteTTL(cfg.Invite.TTLOrDefault())
 	userOnRecovery := userapp.NewOnRecoveryCompletedUseCase(kanameRepo, opsRepo).
 		WithLogger(logger)
 	// Block/Unblock — административный запрет участию и его снятие. Два РАЗНЫХ
@@ -617,6 +622,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// сборки» молчалив — верный ответ на посеянных типах и неверный на
 		// заведённых применением манифеста в работающем процессе.
 		kanamepg.NewCatalogTypeReader(),
+		// Публикация для анонимного чтения — со СВОИМ порядком: версия владельца,
+		// сравниваемая хранилищем, и надгробие снятия (kaname#107). Параметр, а не
+		// опция: без порта у публикации нет порядка, и запоздавшая доставка открытия
+		// после закрытия вернула бы анонимное чтение приватному объекту.
+		kanamepg.NewPublicReadPublisher(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).

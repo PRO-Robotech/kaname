@@ -77,6 +77,7 @@ func newRegisterUCApplied(t *testing.T) (*internaliam.RegisterResourceUseCase, *
 		kanamepg.NewResourceMirrorEmitter(),
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
+		kanamepg.NewPublicReadPublisher(),
 	)
 	return uc, pool
 }

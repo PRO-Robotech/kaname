@@ -110,12 +110,13 @@ func (r *grantReq) GetParentChain() []string     { return nil }
 
 const publicGrantObject = "registry_repository:reg53eeeg3578y4ah0q9/team/app"
 
-func publicGrantRig() (*RegisterResourceUseCase, *mirrorSpy, *countingEmitter, *countingReconcileEvents) {
+func publicGrantRig() (*RegisterResourceUseCase, *mirrorSpy, *countingEmitter, *countingReconcileEvents, *recordingPublisher) {
 	m := newMirrorSpy()
 	e := &countingEmitter{}
 	ev := &countingReconcileEvents{}
-	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}).WithReconcile(ev)
-	return uc, m, e, ev
+	pub := &recordingPublisher{}
+	uc := NewRegisterResourceUseCase(e, m, &smTxBeginner{}, seededCatalogTypes{}, pub).WithReconcile(ev)
+	return uc, m, e, ev, pub
 }
 
 // mirrorKey — ключ строки зеркала для утверждений ниже: имя типа в словаре
@@ -142,7 +143,7 @@ func mirrorKey(t *testing.T, object string) string {
 // TestRegisterResource_PublicGrant_LeavesTheResourceProjectionAlone — the grant
 // must not restate the resource: the repository's parent scope survives it.
 func TestRegisterResource_PublicGrant_LeavesTheResourceProjectionAlone(t *testing.T) {
-	uc, mirror, emitter, events := publicGrantRig()
+	uc, mirror, emitter, events, pub := publicGrantRig()
 	ctx := context.Background()
 	key := mirrorKey(t, publicGrantObject)
 
@@ -167,7 +168,13 @@ func TestRegisterResource_PublicGrant_LeavesTheResourceProjectionAlone(t *testin
 		version: base.Add(5 * time.Millisecond),
 	}))
 
-	assert.Equal(t, 2, emitter.writes, "the grant tuple is enqueued")
+	// The grant travels the publication port, WITH the owner's version, and never
+	// reaches the bare journal emitter: only the repository's own registration did.
+	assert.Equal(t, 1, emitter.writes, "the grant must not be enqueued as a bare tuple")
+	assertPublications(t, []publicationCall{{
+		objectType: "registry_repository", objectID: "reg53eeeg3578y4ah0q9/team/app",
+		published: true, version: base.Add(5 * time.Millisecond),
+	}}, pub.seen(), "the grant is applied as a publication in the owner's order")
 	row, ok = mirror.row(key)
 	require.True(t, ok, "the repository must still be projected")
 	assert.Equal(t, "prj0000000000000proj", row.ParentProjectID,
@@ -183,7 +190,7 @@ func TestRegisterResource_PublicGrant_LeavesTheResourceProjectionAlone(t *testin
 // TestUnregisterResource_PublicGrant_DoesNotDeleteTheResourceProjection —
 // making a repository private removes the wildcard tuple, not the repository.
 func TestUnregisterResource_PublicGrant_DoesNotDeleteTheResourceProjection(t *testing.T) {
-	uc, mirror, emitter, _ := publicGrantRig()
+	uc, mirror, emitter, _, pub := publicGrantRig()
 	ctx := context.Background()
 	key := mirrorKey(t, publicGrantObject)
 
@@ -200,7 +207,11 @@ func TestUnregisterResource_PublicGrant_DoesNotDeleteTheResourceProjection(t *te
 		version: base.Add(5 * time.Millisecond),
 	}))
 
-	assert.Equal(t, 1, emitter.deletes, "the grant tuple is withdrawn")
+	assert.Equal(t, 0, emitter.deletes, "the withdrawal must not be enqueued as a bare tuple")
+	assertPublications(t, []publicationCall{{
+		objectType: "registry_repository", objectID: "reg53eeeg3578y4ah0q9/team/app",
+		published: false, version: base.Add(5 * time.Millisecond),
+	}}, pub.seen(), "the grant is withdrawn as a publication in the owner's order")
 	row, ok := mirror.row(key)
 	require.True(t, ok, "withdrawing the public grant must NOT delete the repository's projection")
 	assert.Equal(t, "prj0000000000000proj", row.ParentProjectID)
@@ -212,7 +223,7 @@ func TestUnregisterResource_PublicGrant_DoesNotDeleteTheResourceProjection(t *te
 // narrow: an ordinary hierarchy unregister (the repository itself going away)
 // still removes the projection.
 func TestUnregisterResource_Repository_StillDeletesTheProjection(t *testing.T) {
-	uc, mirror, _, _ := publicGrantRig()
+	uc, mirror, _, _, pub := publicGrantRig()
 	ctx := context.Background()
 	key := mirrorKey(t, publicGrantObject)
 
@@ -228,4 +239,63 @@ func TestUnregisterResource_Repository_StillDeletesTheProjection(t *testing.T) {
 
 	_, ok := mirror.row(key)
 	assert.False(t, ok, "removing the repository must still remove its projection")
+	// …and its publication, under the SAME version: a repository's id is its name,
+	// and a publication surviving the repository would open the next one so named.
+	assertPublications(t, []publicationCall{{
+		objectType: "registry_repository", objectID: "reg53eeeg3578y4ah0q9/team/app",
+		published: false, version: base.Add(5 * time.Millisecond),
+	}}, pub.seen(), "the object's withdrawal must withdraw its publication under its own version")
+}
+
+// TestUnregisterResource_TypeWithoutPublications_LeavesThePublicationPortAlone — the
+// legal twin of the case above: an object whose type admits no publication at all has
+// none to withdraw, and its removal must not seed a tombstone for one.
+func TestUnregisterResource_TypeWithoutPublications_LeavesThePublicationPortAlone(t *testing.T) {
+	uc, _, _, _, pub := publicGrantRig()
+	ctx := context.Background()
+	const network = "vpc_network:enp0000000000000net1"
+
+	base := time.Now()
+	require.NoError(t, uc.Register(ctx, &grantReq{
+		subject: "project:prj0000000000000proj", relation: "project", object: network,
+		parentProject: "prj0000000000000proj", version: base,
+	}))
+	require.NoError(t, uc.Unregister(ctx, &grantReq{
+		subject: "project:prj0000000000000proj", relation: "project", object: network,
+		version: base.Add(5 * time.Millisecond),
+	}))
+	assert.Empty(t, pub.seen(), "a type that admits no publication must not reach the publication port")
+}
+
+// TestRegisterResource_PublicGrant_CarriesTheOwnersVersion — the version the owner
+// stamped is the one the publication is ordered by. A zero here (the version dropped on
+// the way) would make every delivery unordered — the defect kaname#107 names.
+func TestRegisterResource_PublicGrant_CarriesTheOwnersVersion(t *testing.T) {
+	uc, _, _, _, pub := publicGrantRig()
+	v := time.Date(2026, 9, 16, 1, 2, 3, 456789000, time.UTC)
+	require.NoError(t, uc.Register(context.Background(), &grantReq{
+		subject: "user:*", relation: "v_get", object: publicGrantObject, version: v,
+	}))
+	require.NoError(t, uc.Unregister(context.Background(), &grantReq{
+		subject: "user:*", relation: "v_get", object: publicGrantObject, version: v.Add(time.Second),
+	}))
+	calls := pub.seen()
+	require.Len(t, calls, 2)
+	assert.True(t, calls[0].published)
+	assert.True(t, v.Equal(calls[0].version), "publication version = %v, owner stamped %v", calls[0].version, v)
+	assert.False(t, calls[1].published)
+	assert.True(t, v.Add(time.Second).Equal(calls[1].version), "withdrawal version = %v", calls[1].version)
+}
+
+// TestRegisterResource_PublicGrant_StoreFailureIsARefusal — a publication the store did
+// not take is an ERROR to the caller, never a quiet success: the consumer's durable
+// queue redelivers it only if it hears a refusal.
+func TestRegisterResource_PublicGrant_StoreFailureIsARefusal(t *testing.T) {
+	uc, _, _, _, pub := publicGrantRig()
+	pub.err = assertAnError
+	err := uc.Register(context.Background(), &grantReq{
+		subject: "user:*", relation: "v_get", object: publicGrantObject, version: time.Now(),
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assertAnError)
 }

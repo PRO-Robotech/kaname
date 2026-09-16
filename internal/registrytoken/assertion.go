@@ -4,12 +4,19 @@
 // Package registrytoken — ES256 client_assertion crypto for the Docker Registry
 // v2 auth-server (`/iam/token`) shim.
 //
-// The shim does NOT mint the registry token itself: it signs a short-lived RFC
-// 7523 client_assertion (JWS ES256) from the presented SA-key private half and
-// exchanges it with Ory Hydra (`client_credentials` + `private_key_jwt`); Hydra
-// is the issuer. This package assembles that assertion with pure stdlib crypto
-// (RFC 7519 JWT + RFC 7515 JWS, ECDSA P-256 / SHA-256), so no external JWT
-// dependency is pulled in.
+// This package serves the EXCHANGE lane of the shim only — the contour not yet
+// moved to our own minting (registrytokenwire.BuildConfig.Signer == nil). On
+// that lane the shim signs a short-lived RFC 7523 client_assertion (JWS ES256)
+// from the presented SA-key private half and exchanges it with the previous
+// external OAuth server (`client_credentials` + `private_key_jwt`), which then
+// issues the registry token. On the moved contour — every chain this chart
+// offers for installation — the assertion is never built: our signer mints the
+// registry token directly (registrytokenwire.NewLocalMinter), and this package
+// is not on the request path. The lane is removed together with the last
+// profile that declares it (kacho#2564).
+//
+// The assertion is assembled with pure stdlib crypto (RFC 7519 JWT + RFC 7515
+// JWS, ECDSA P-256 / SHA-256), so no external JWT dependency is pulled in.
 package registrytoken
 
 import (

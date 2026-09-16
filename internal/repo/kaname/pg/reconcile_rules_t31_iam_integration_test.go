@@ -59,6 +59,7 @@ func newRegisterUCWired(pool *pgxpool.Pool) *internal_iam.RegisterResourceUseCas
 		kanamepg.NewResourceMirrorEmitter(),
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
+		kanamepg.NewPublicReadPublisher(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver())

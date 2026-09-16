@@ -130,9 +130,9 @@ type inviteLogUserWtr struct {
 	parent *inviteLogRepo
 }
 
-func (w inviteLogUserWtr) InsertPending(ctx context.Context, u domain.User) (domain.User, bool, error) {
+func (w inviteLogUserWtr) InsertPending(ctx context.Context, u domain.User, _ time.Time) (domain.User, bool, error) {
 	w.parent.rememberRow(u.ID)
-	return w.WriterIface.InsertPending(ctx, u)
+	return w.WriterIface.InsertPending(ctx, u, time.Time{})
 }
 
 type inviteLogUserRdr struct{ invPrincUserRdr }
