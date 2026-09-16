@@ -1130,7 +1130,7 @@ func runServe(cfg config.Config) error {
 	// 503 ДО остановки серверов (см. triggerShutdown ниже). Без этого носитель
 	// был бы, а дёрнуть его было бы некому (#1752).
 	hooksHandler, hooksHealth := buildHooksMux(pool, kanameRepo, opsRepo, svcs.ownGates,
-		catalogSnapshot, metricsReg, cfg, logger)
+		catalogSnapshot, svcs.bindingReconciler, metricsReg, cfg, logger)
 	hooksSurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "вебхуки провайдера личности",
 		Mode:    surfaceMode,

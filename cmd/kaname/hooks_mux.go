@@ -42,10 +42,16 @@ import (
 // соседних сервисов эта провязка есть, и её отсутствие было бы расхождением,
 // которому нечем себя выдать (#1752).
 //
-// kanameRepo / opsRepo / relationStore прокидываются из composition root
-// (serve.go) — provision hook (Kratos user-provisioning, C4) строит
-// UpsertFromIdentityUseCase из тех же зависимостей, что wiring.go, и
+// kanameRepo / opsRepo / relationStore / bindingReconciler прокидываются из
+// composition root (serve.go) — provision hook (Kratos user-provisioning, C4)
+// строит UpsertFromIdentityUseCase из тех же зависимостей, что wiring.go, и
 // переиспользует уже собранную дверь решения (не дублирует её).
+//
+// Реконсайлер тоже ПРОКИДЫВАЕТСЯ, а не строится здесь, и это не единообразие
+// ради единообразия: собранный здесь экземпляр не нёс приёмника размера, поэтому
+// материализации живой полосы первого входа в гистограмму не попадали, а она
+// выглядела полной (#116). Измерение, провязанное к одному из двух экземпляров,
+// молчит о втором, и молчание это неотличимо от отсутствия трафика.
 func buildHooksMux(
 	pool *pgxpool.Pool,
 	kanameRepo kanamerepo.Repository,
@@ -55,6 +61,12 @@ func buildHooksMux(
 	// первого входа материализует доступ тем же реконсайлером, что и gRPC-путь,
 	// и обязан читать тот же каталог.
 	catalogSource catalog.Source,
+	// bindingReconciler — ТОТ ЖЕ экземпляр, что у пути запроса (`wiring.go`), а не
+	// второй, собранный здесь. До #116 он собирался здесь и БЕЗ приёмника размера:
+	// живая полоса первого входа материализовала привязки мимо гистограммы, и та
+	// читалась как полная. Параметром, а не построением: второй экземпляр — это
+	// решение о наблюдаемости, принятое побочным эффектом.
+	bindingReconciler *reconcileapp.Reconciler,
 	metricsReg *metrics.Registry,
 	cfg config.Config,
 	logger *slog.Logger,
@@ -120,10 +132,9 @@ func buildHooksMux(
 	// signup path) forward-materializes the bootstrap owner's per-object content
 	// access — parity with the gRPC InternalUserService wiring (wiring.go). Without
 	// it the LIVE signup user is 403 on their own account's content until the sweep.
-	provisionReconciler := reconcileapp.New(kanamepg.NewReconcileAdapter(pool, catalogSource), logger, catalogSource)
 	userUpsert := userapp.NewUpsertFromIdentityUseCase(kanameRepo, opsRepo).
 		WithLogger(logger).
-		WithReconciler(provisionReconciler).
+		WithReconciler(bindingReconciler).
 		// ЖИВОЙ путь первого входа: именно здесь активируются приглашения на
 		// настоящем трафике. Счётчик без этой провязки был бы всегда нулевым.
 		WithActivationObserver(metricsReg.InviteActivationRecorder())
