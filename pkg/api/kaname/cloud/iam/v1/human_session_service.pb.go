@@ -140,7 +140,7 @@ type HumanSession struct {
 	//
 	// RESOLUTION ON THE WIRE — MICROSECONDS, NOT SECONDS. This is a NAMED
 	// departure from `api-conventions.md` §Timestamps (Ф3 §4.1 п.19, Р7). The
-	// edge compares this value inclusively with `SessionCutoffOf.revoke_before`,
+	// edge compares this value inclusively with `SessionCutoffOfResponse.revoke_before`,
 	// and a logout / password change dates the cutoff ONE microsecond below the
 	// first authentication of the person. Truncating either side to a second
 	// would make «S1 stays valid after a logout from S2 in the same second»
