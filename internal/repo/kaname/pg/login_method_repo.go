@@ -176,3 +176,25 @@ func (r *LoginMethodRepo) EmailVerification(ctx context.Context, userID domain.U
 	}
 	return *at, true, nil
 }
+
+// replaceLoginVerifierTx — ЗАМЕЩЕНИЕ материала одним оператором (ID-PW-1
+// PWV-10, фаза Ф3 `kacho#1269`): новое значение кладётся `UPDATE` по паре
+// (человек, вид); строки нет — replaced=false, вставки нет (заводит способ
+// только `Create`). Два одновременных замещения одним значением — оба проходят,
+// запись одна: у `UPDATE` одной строки конкурента разводит замок строки.
+//
+// Живёт в ЭТОМ файле, потому что называет таблицу секрета и выпускает материал
+// оператору базы — оба права даны только этому файлу (гейт
+// `TestLoginVerifierStaysInside`). Транзакцию приносит вызывающий (полоса входа
+// и смена пароля кладут материал ОДНИМ исходом с прочими записями).
+func replaceLoginVerifierTx(ctx context.Context, tx pgx.Tx, m domain.LoginMethod) (bool, error) {
+	if err := m.Validate(); err != nil {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+	}
+	q := `UPDATE ` + loginMethodsTable + ` SET verifier = $3 WHERE user_id = $1 AND kind = $2`
+	tag, err := tx.Exec(ctx, q, string(m.UserID), string(m.Kind), m.Verifier.Reveal())
+	if err != nil {
+		return false, mapErr(err, "LoginMethod.Replace", loginMethodHint(m.UserID, m.Kind))
+	}
+	return tag.RowsAffected() == 1, nil
+}

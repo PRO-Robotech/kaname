@@ -1,0 +1,98 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/protobuf/timestamp.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// InternalHumanSessionService — the ONE question the edge asks about OUR human
+// session (phase Ф3, task PRO-Robotech/kacho#1269; acceptance
+// `docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md`,
+// decisions Р1, Р7).
+//
+// It lives on the cluster-internal listener (:9091) under mTLS, next to
+// `InternalSessionRevocationsService.SessionCutoffOf`, and is never routed to
+// the external listener (ban #6). The edge asks it on the identity lane and on
+// the `/iam/v1/auth/me` route, on every presentation — nothing is cached on the
+// edge, because a cached answer cannot be withdrawn by a logout or a block.
+//
+// WHAT THIS RPC DOES NOT DO — said so it is not inferred.
+//
+//   - It does NOT apply the revocation cutoff. The cutoff is asked separately
+//     (`SessionCutoffOf`) and compared INCLUSIVELY by the edge against
+//     `authenticated_at`. One reader of the cutoff, and it is on the edge (Р7):
+//     folding the cutoff in here would leave a second reader and make Ф1-56
+//     («UNIMPLEMENTED only about the cutoff — pass loudly») unbuildable.
+//   - It does NOT distinguish WHY there is no session. Unknown bearer, a
+//     record ended by a logout, an expired record and a blocked person are ONE
+//     answer (`found = false`, empty `session`). The reasons are visible only
+//     in this service's counters and journal (Ф1-11, Ф1-17).
+//   - It does NOT move the moment of last presentation: a presentation is a
+//     password, a code or a key being checked, not a bearer riding a request.
+service InternalHumanSessionService {
+  // Resolve — the session behind a bearer, or «no session».
+  //
+  // INVALID_ARGUMENT when `bearer` is empty (named by field). UNAVAILABLE when
+  // the store did not answer — the edge treats it as a refusal that leaves the
+  // client's bearer intact (F4d-23).
+  rpc Resolve (ResolveHumanSessionRequest) returns (ResolveHumanSessionResponse) {
+    option (corelib.authz.v1.permission) = "<exempt>";
+    option (corelib.authz.v1.exempt_reason) = "INTERNAL_LISTENER";
+  }
+}
+
+message ResolveHumanSessionRequest {
+  // The opaque value of the `kaname_session` cookie as the browser sent it.
+  // Nothing is read out of it: the service looks the record up by a digest of
+  // this value and never stores the value itself.
+  string bearer = 1;
+}
+
+message ResolveHumanSessionResponse {
+  // false — «no session»: one answer for every reason (see the service comment).
+  // `session` is then unset.
+  bool found = 1;
+  HumanSession session = 2;
+}
+
+// HumanSession — the composition the edge reads (Р1, Ф3-09). Only fields with a
+// reader on the edge are here: the set of presented methods and the moment of
+// last presentation are read INSIDE the service and deliberately absent (Ф11 Р7).
+message HumanSession {
+  // Our subject id (F4d Р10) — not an external identity.
+  string user_id = 1;
+  string email = 2;
+  string display_name = 3;
+
+  // Moment of authentication. Fixed for the life of the session (Ф11 Р6).
+  //
+  // RESOLUTION ON THE WIRE — MICROSECONDS, NOT SECONDS. This is a NAMED
+  // departure from `api-conventions.md` §Timestamps (Ф3 §4.1 п.19, Р7). The
+  // edge compares this value inclusively with `SessionCutoffOf.revoke_before`,
+  // and a logout / password change dates the cutoff ONE microsecond below the
+  // first authentication of the person. Truncating either side to a second
+  // would make «S1 stays valid after a logout from S2 in the same second»
+  // false by construction. Both compared values cross the wire untruncated;
+  // values that are SHOWN (expires_at) keep the convention.
+  google.protobuf.Timestamp authenticated_at = 4;
+
+  // Absolute expiry — issue moment plus the configured lifetime. Truncated to a
+  // second by the convention: the edge does not compare it (the service judges
+  // expiry — Ф3-11), it only shows it.
+  google.protobuf.Timestamp expires_at = 5;
+
+  // Assurance level by the Ф11 rule (`internal/assurance`): password → "1".
+  string assurance_level = 6;
+
+  // Whether the CURRENT e-mail value has been verified (Ф2 П1).
+  bool email_verified = 7;
+
+  // The session was issued by recovery and demands a password change before
+  // any platform verb (Ф5 Р5, Р8). The edge refuses catalogued paths on it.
+  bool password_change_required = 8;
+}
