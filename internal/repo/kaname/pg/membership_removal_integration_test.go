@@ -136,6 +136,18 @@ func TestIntegration_RemoveMembershipTakesTheMembershipAndNothingElse(t *testing
 // каждом срабатывании триггера, поэтому первый вход исключённого возвращал его
 // в аккаунт: `ActivateInvite` пишет `invite_status`, триггер срабатывает, членство
 // появляется заново — уже «активным».
+//
+// # Почему у исключённого ДВА аккаунта, а не один
+//
+// Снятие участия обесценивает невыкупленное приглашение, когда членств не
+// осталось ни одного (MAIL-24/46, `RemoveMembership`): у человека с единственным
+// членством первый вход после исключения отвергается ДО правки строки — триггер
+// этим путём не срабатывает вовсе, и проба о зеркале не спрашивала бы ничего.
+// Тот исход держит своя проба (`invite_revoked_on_removal_integration_test.go`).
+// Здесь человек приглашён и во ВТОРОЙ аккаунт: исключение из первого оставляет
+// строку выкупаемой, первый вход происходит настоящим глаголом, и `NEW.account_id`
+// на этой правке по-прежнему называет аккаунт, из которого его вывели, — худший
+// случай сохранён.
 func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
@@ -147,6 +159,7 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 	repo := kanamepg.New(pool, nil)
 
 	ownerID, accID := bootstrapAdmin(t, ctx, repo, "rmres")
+	ownerB, accB := bootstrapAdmin(t, ctx, repo, "rmres2")
 
 	// Приглашённый: его `users.account_id` называет ИМЕННО тот аккаунт, из
 	// которого его исключат, — то есть худший случай, а не удобный.
@@ -159,6 +172,22 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 			Email: "excluded-rmres@example.com", DisplayName: "Excluded", InvitedBy: ownerID,
 		}, time.Time{})
 		require.NoError(t, err)
+		require.NoError(t, w.Commit(ctx))
+	}
+	// Тот же человек — во второй аккаунт: строка одна, членство добавляется.
+	// Без этого исключение ниже обесценило бы приглашение (членств не осталось),
+	// и первого входа не было бы — см. шапку пробы.
+	{
+		w, werr := repo.Writer(ctx)
+		require.NoError(t, werr)
+		got, inserted, ierr := w.UsersW().InsertPending(ctx, domain.User{
+			ID: domain.UserID(ids.NewID(domain.PrefixUser)), AccountID: accB,
+			Email: "excluded-rmres@example.com", DisplayName: "Excluded", InvitedBy: ownerB,
+		}, time.Time{})
+		require.NoError(t, ierr)
+		require.False(t, inserted,
+			"ПРЕДПОСЫЛКА: приглашение известной почты во второй аккаунт не заводит второй строки")
+		require.Equal(t, excluded, got.ID, "ПРЕДПОСЫЛКА: членство добавлено ТОЙ ЖЕ строке")
 		require.NoError(t, w.Commit(ctx))
 	}
 	// Положительный контроль — сосед, которого НЕ исключали. Без него
@@ -174,7 +203,8 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 		require.NoError(t, err)
 		require.NoError(t, w.Commit(ctx))
 	}
-	require.Len(t, membershipsOf(t, ctx, pool, excluded), 1)
+	require.Len(t, membershipsOf(t, ctx, pool, excluded), 2,
+		"ПРЕДПОСЫЛКА: у исключаемого два членства — иначе исключение ниже обесценит приглашение")
 	require.Equal(t, "PENDING", membershipsOf(t, ctx, pool, kept)[0].State,
 		"ПРЕДПОСЫЛКА: контрольное членство обязано быть «приглашён», иначе переход состояния "+
 			"ниже ничего не показывает")
@@ -188,7 +218,11 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 		require.True(t, removed)
 		require.NoError(t, w.Commit(ctx))
 	}
-	require.Empty(t, membershipsOf(t, ctx, pool, excluded))
+	afterRemoval := membershipsOf(t, ctx, pool, excluded)
+	require.Len(t, afterRemoval, 1, "ПРЕДПОСЫЛКА: снято ровно членство в первом аккаунте")
+	require.Equal(t, string(accB), afterRemoval[0].AccountID,
+		"ПРЕДПОСЫЛКА: осталось членство во втором аккаунте — оно и держит строку выкупаемой")
+	require.Equal(t, "PENDING", afterRemoval[0].State)
 
 	// ── первый вход: строка человека ПРАВИТСЯ, триггер зеркала срабатывает ───
 	{
@@ -201,11 +235,21 @@ func TestIntegration_RemovedMembershipIsNotResurrectedByARowUpdate(t *testing.T)
 	}
 
 	// ── ОТРИЦАНИЕ — предмет пробы ────────────────────────────────────────────
-	require.Empty(t, membershipsOf(t, ctx, pool, excluded),
-		"исключённый человек ВЕРНУЛСЯ в аккаунт от правки собственной строки. Зеркало членства "+
-			"не вправе ЗАВОДИТЬ членство на правке: приглашения не было, решения распорядителя "+
-			"не было, а участие есть — и заметить это нечем, потому что «не доехало» и "+
-			"«отозвано намеренно» снаружи выглядят одинаково (миграция 20260824010000)")
+	afterLogin := membershipsOf(t, ctx, pool, excluded)
+	for _, m := range afterLogin {
+		require.NotEqual(t, string(accID), m.AccountID,
+			"исключённый человек ВЕРНУЛСЯ в аккаунт от правки собственной строки. Зеркало членства "+
+				"не вправе ЗАВОДИТЬ членство на правке: приглашения не было, решения распорядителя "+
+				"не было, а участие есть — и заметить это нечем, потому что «не доехало» и "+
+				"«отозвано намеренно» снаружи выглядят одинаково (миграция 20260824010000)")
+	}
+	// Правка строки ДОЕХАЛА до зеркала — иначе отрицание выше зеленело бы на входе,
+	// который до триггера не дошёл: оставшееся членство обязано стать «активно».
+	require.Len(t, afterLogin, 1, "у исключённого ровно одно членство — во втором аккаунте")
+	require.Equal(t, string(accB), afterLogin[0].AccountID)
+	require.Equal(t, "ACTIVE", afterLogin[0].State,
+		"КОНТРОЛЬ НА ТОЙ ЖЕ СТРОКЕ: первый вход обязан перевести оставшееся членство в «активно» — "+
+			"значит триггер сработал, и не завёл он ровно то, чего заводить не вправе")
 
 	// ── ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ — зеркало по-прежнему ПРАВИТ существующее ─────
 	{
