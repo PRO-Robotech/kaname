@@ -207,6 +207,11 @@ type APIServerConfig struct {
 	// только ВЕСЬ набор из четырёх осей — частичное объявление отвергается
 	// стартом с именем слушателя.
 	RateLimit RateLimitConfig `mapstructure:"rate-limit"`
+	// LoginLaneEndpoint — адрес HTTP-слушателя полосы входа паролем (Ф3,
+	// kacho#1269): четыре глагола формы, ретранслируемые краем; TLS
+	// взаимный, допуск — ровно край. Пустой — слушатель не поднимается; под
+	// посадкой `own` пустой — отказ старта.
+	LoginLaneEndpoint string `mapstructure:"login-lane-endpoint"`
 }
 
 // RateLimitConfig — величины допуска обоих слушателей в том виде, в каком их
@@ -411,6 +416,10 @@ type AuthNConfig struct {
 	// BootstrapMint — caller gate + key source for
 	// InternalBootstrapTokenService.MintBootstrapToken.
 	BootstrapMint BootstrapMintConfig `mapstructure:"bootstrap-mint"`
+	// Login — полоса входа паролем и наша сессия (Ф3, kacho#1269): срок и домен
+	// печенья, частота, политика пароля, ручка «что писать», ёмкость. Ни одна
+	// величина не подставляется молча; требуются под посадкой `own`.
+	Login LoginLaneConfig `mapstructure:"login"`
 	// TrustedForwarderSANs — EXACT client-certificate SPIFFE SAN URIs allowed to
 	// FORWARD an end-user identity (`x-kacho-principal-*` metadata) to iam. Fed
 	// into grpcsrv.WithTrustedForwarders on BOTH gRPC listeners

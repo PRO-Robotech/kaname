@@ -31,7 +31,29 @@ func laneCfg(p config.IdentityProvider) config.Config {
 	cfg.AuthN.IdentityProvider = p
 	cfg.AuthN.TokenSigning = ownMintingSettings()
 	cfg.AuthN.PresentedCredential = presentedCredentialSettings()
+	cfg.AuthN.Login = loginLaneSettings()
 	return cfg
+}
+
+// loginLaneSettings — годная настройка полосы входа (Ф3): значения настоящие,
+// каждое стережёт свой страж под посадкой `own`.
+func loginLaneSettings() config.LoginLaneConfig {
+	return config.LoginLaneConfig{
+		SessionTTL:         24 * time.Hour,
+		CookieDomain:       config.CookieDomainNone,
+		AddressAttempts:    5,
+		AddressWindow:      15 * time.Minute,
+		SourceAttempts:     50,
+		SourceWindow:       15 * time.Minute,
+		PasswordMinLength:  8,
+		BreachCheck:        config.BreachCheckDisabled,
+		HasherFormat:       "argon2id",
+		HasherMemory:       65536,
+		HasherIterations:   3,
+		HasherParallelism:  4,
+		VerifierCapacity:   4,
+		MemoryReserveBytes: 256 << 20,
+	}
 }
 
 // presentedCredentialSettings — валидная настройка приёма предъявленного.

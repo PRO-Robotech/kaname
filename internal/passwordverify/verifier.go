@@ -83,6 +83,12 @@ type Result struct {
 type Verifier struct {
 	capacity *capacityGate
 	observer Observer
+	// decoy — значение, против которого ВЫЧИСЛЯЕТСЯ проверка при отсутствии
+	// материала (PWV-06, Ф1-48): без него полоса «материала нет» отвечала бы
+	// мгновенно, и время отказа было бы оракулом существования личности. Исход
+	// вычисления выбрасывается — наружу уходит «материала нет»; пустое —
+	// проверяющий без выравнивания (пробы уровня U).
+	decoy domain.LoginVerifier
 }
 
 // New — проверяющий с объявленной ёмкостью и приёмником исходов.
@@ -100,6 +106,23 @@ func New(capacity int, observer Observer) (*Verifier, error) {
 			"проверяющий без приёмника исходов молчит обо всех отказах разом")
 	}
 	return &Verifier{capacity: gate, observer: observer}, nil
+}
+
+// SetDecoy — значение объявленного класса записи, которым выравнивается полоса
+// «материала нет» (Ф3-31, PWV-06). Ставится композиционным корнем ОДИН раз:
+// хешер объявленного класса пишет его от случайного пароля при старте, и
+// стоимость его проверки равна стоимости проверки всякого значения того же
+// класса. Пустое значение отвергается — «выравнивать нечем» не есть решение.
+func (v *Verifier) SetDecoy(decoy domain.LoginVerifier) error {
+	if decoy.IsZero() {
+		return fmt.Errorf("password_verifier.decoy: required — полоса «материала нет» без выравнивания отвечает мгновенно")
+	}
+	res := inspectAndCompare(decoy.Reveal(), "", false)
+	if res.Outcome != OutcomeMatched && res.Outcome != OutcomeMismatched {
+		return fmt.Errorf("password_verifier.decoy: значение не читается (%s) — выравнивать им нельзя", res.Outcome)
+	}
+	v.decoy = decoy
+	return nil
 }
 
 // WithCapacity исполняет работу, занимая одно место ёмкости; отвечает, удалось
@@ -126,6 +149,11 @@ func (v *Verifier) Verify(stored domain.LoginVerifier, presented string) Result 
 	// строке: сравнение пустого с пустым дало бы «совпал» у человека, пароля не
 	// заводившего.
 	if stored.IsZero() {
+		// Стоимость настоящей проверки — и только она: исход вычисления против
+		// ложного значения выбрасывается, наружу уходит «материала нет».
+		if !v.decoy.IsZero() {
+			_ = inspectAndCompare(v.decoy.Reveal(), presented, true)
+		}
 		return v.observed(Result{Outcome: OutcomeMaterialMissing})
 	}
 	return v.observed(inspectAndCompare(stored.Reveal(), presented, true))

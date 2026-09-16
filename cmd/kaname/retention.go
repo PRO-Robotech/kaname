@@ -47,11 +47,15 @@ func startRetentionSweeper(
 	pool *pgxpool.Pool,
 	cfg config.Config,
 	reg *metrics.Registry,
+	human retention.HumanSessionReapers,
 	logger *slog.Logger,
 ) error {
 	sweeper, err := retention.New(
 		cfg.Retention.Sweep(),
-		retention.Subjects(
+		// Восьмым и девятым предметами — сессии человека и журнал неверных
+		// предъявлений (Ф3, kacho#1269): уборщики приходят от полосы входа и
+		// под `external` отсутствуют — тогда перечень остаётся прежним.
+		retention.WithHumanSessions(retention.Subjects(
 			kanamepg.NewClientAssertionReplayRepo(pool),
 			kanamepg.NewSessionRevocationRepo(pool),
 			kanamepg.NewMintedTokenRevocationRepo(pool),
@@ -72,7 +76,7 @@ func startRetentionSweeper(
 			// уборщик платформы требует ключа партиции, а он у этой очереди
 			// пуст намеренно — обоснование в росписи commutativeDrainExempt.
 			kanamepg.NewProviderCompensationSweeper(pool),
-		),
+		), human),
 		logger.With(slog.String("component", "retention_sweep")),
 	)
 	if err != nil {

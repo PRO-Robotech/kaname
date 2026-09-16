@@ -60,6 +60,13 @@ import (
 // caller of the gateway-fronted privileged admin RPCs.
 const gatewayServiceName = "api-gateway"
 
+// GatewayServiceName — короткое имя службы края, каким его называет SAN
+// проверенного клиентского сертификата. ОДНО объявление на дерево (Ф3 §8
+// инв. 7): его читают ярус gateway-only внутреннего слушателя и слушатель
+// полосы формы (`internal/handler/loginlanehttp`, Р16) — второго литерала имени
+// края у второго читателя нет.
+func GatewayServiceName() string { return gatewayServiceName }
+
 // GatewayFrontedInternalRPCs returns the full-method set of internal RPCs that
 // the api-gateway fronts on behalf of an end user (admin UI / admin tooling).
 // These privileged RPCs may ONLY be called by the api-gateway SA — a direct call

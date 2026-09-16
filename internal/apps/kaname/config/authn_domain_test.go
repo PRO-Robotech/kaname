@@ -39,6 +39,7 @@ func domainCfg(domain string) config.Config {
 	cfg.AuthN.IdentityProvider = config.IdentityProviderOwn
 	cfg.AuthN.TokenSigning = ownMintingSettings()
 	cfg.AuthN.PresentedCredential = presentedCredentialSettings()
+	cfg.AuthN.Login = loginLaneSettings()
 	cfg.AuthN.Domain = domain
 	return cfg
 }

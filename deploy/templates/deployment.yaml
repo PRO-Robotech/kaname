@@ -240,6 +240,13 @@ spec:
             - name: http-rest-int
               containerPort: {{ include "kaname-svc.surfacePort" .Values.apiServer.internalRestEndpoint }}
             {{- end }}
+            # Полоса входа паролем (Ф3). Порт ВЫВОДИТСЯ из адреса, который профиль
+            # отдаёт процессу; поднимается посадкой `own`, под `external` слушателя
+            # за этим портом нет — и это названо самоотчётом процесса.
+            {{- if .Values.apiServer.loginLaneEndpoint }}
+            - name: http-login-lane
+              containerPort: {{ include "kaname-svc.surfacePort" .Values.apiServer.loginLaneEndpoint }}
+            {{- end }}
           volumeMounts:
             - name: config
               mountPath: /etc/kaname
