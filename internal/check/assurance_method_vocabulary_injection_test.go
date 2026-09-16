@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/check"
+	"github.com/PRO-Robotech/kaname/internal/migrations"
 )
 
 var injectionVocabulary = []string{"password", "totp", "lookup_secret", "webauthn", "recovery_code"}
@@ -136,7 +137,8 @@ CREATE TABLE kaname.sign_in_methods (
 );
 ALTER TABLE kaname.other ADD CONSTRAINT other_kind_ck CHECK (kind = ANY (ARRAY['lookup_secret'::text, 'sms'::text]));
 `
-	cs := check.ScanSchemaValueLists("internal/migrations/1_x.sql", up, injectionVocabulary)
+	// Накат подаётся ЗАБЕЛЁННЫМ тем же средством, что у гейта.
+	cs := check.ScanSchemaValueLists("internal/migrations/1_x.sql", migrations.SQLBlankComments(up), injectionVocabulary)
 	if len(cs) != 2 {
 		t.Fatalf("ограничений, касающихся словаря, найдено %d при ожидаемых 2 (перечень состояний — не предмет): %v", len(cs), cs)
 	}
@@ -150,7 +152,8 @@ ALTER TABLE kaname.other ADD CONSTRAINT other_kind_ck CHECK (kind = ANY (ARRAY['
 		t.Errorf("находка не называет ограничение: %s", cs[1])
 	}
 	// Слово словаря в комментарии — не ограничение: комментарии забелены до разбора.
-	if got := check.ScanSchemaValueLists("internal/migrations/2_x.sql", "-- password totp\nSELECT 1;\n", injectionVocabulary); len(got) != 0 {
+	if got := check.ScanSchemaValueLists("internal/migrations/2_x.sql",
+		migrations.SQLBlankComments("-- kind IN ('password', 'totp')\nSELECT 1;\n"), injectionVocabulary); len(got) != 0 {
 		t.Errorf("комментарий прочитан как ограничение: %v", got)
 	}
 }
