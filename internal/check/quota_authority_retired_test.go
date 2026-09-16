@@ -78,10 +78,12 @@ func TestLimitAuthorityIsGoneFromTheTree(t *testing.T) {
 
 	// ПРЕДПОСЫЛКИ — до вердикта. Пустой обход даёт ноль находок при любом
 	// состоянии дерева: это «не выполнилось», а не «чисто».
-	if census.GoFiles == 0 || census.Contracts == 0 || census.Models == 0 {
+	if census.GoFiles == 0 || census.Contracts == 0 || census.Models == 0 ||
+		census.Suites == 0 || census.SuiteSteps == 0 {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: обход пуст по одной из осей — "+
-			"прод-файлов %d, контрактов %d, моделей %d; ноль находок здесь есть "+
-			"вердикт об обходе, а не о дереве", census.GoFiles, census.Contracts, census.Models)
+			"прод-файлов %d, контрактов %d, моделей %d, коллекций %d (шагов %d); "+
+			"ноль находок здесь есть вердикт об обходе, а не о дереве",
+			census.GoFiles, census.Contracts, census.Models, census.Suites, census.SuiteSteps)
 	}
 	if census.Kept == 0 {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: законный остаток прочитан НОЛЬ раз — " +
@@ -118,6 +120,10 @@ func judgedByAuthorityResidue(rel string) bool {
 		return strings.HasPrefix(rel, "proto/kaname/")
 	case strings.HasSuffix(rel, ".fga"):
 		return true
+	case strings.HasSuffix(rel, ".postman_collection.json"):
+		// Порождённые коллекции сквозного набора. Судится АДРЕС шага, а не текст
+		// модуля кейсов: имя пути стоит и в шапках, разбирающих снятый предмет.
+		return strings.HasPrefix(rel, "tests/newman/collections/")
 	default:
 		return false
 	}

@@ -33,7 +33,8 @@ CRUD fixture dependency:
 
 Operation envelope:
   All mutations return `operation.Operation` with id prefix `iop`.
-  Poll step hits /operations/{id} via OpsProxy at api-gateway (iop* → kaname).
+  Poll step hits /operations/{id} on the service's OWN public REST front
+  (iop* → kaname); the module is readdressed there by `address_own_front`.
 
 Case IDs follow the IAM-PRJ-<RPC>-<CLASS>[-detail] scheme.
 
@@ -216,8 +217,12 @@ CASES.append(Case(
 # IAM-PRJ-CR-NEG-ACCOUNT-MISSING — аккаунт без пути прав → отказ на краю
 # ---------------------------------------------------------------------------
 
-# Создание под аккаунтом, к которому у вызывающего нет пути прав, решается НА КРАЮ и
-# отказом — до того как сервис вообще набирается.
+# Создание под аккаунтом, к которому у вызывающего нет пути прав, решается ДО
+# бизнес-логики и отказом. Производителей ДВА, и они отвечают ОДИНАКОВЫМ фактом в
+# РАЗНЫХ местах: край платформы кладёт имя действия в `message`, собственный фронт
+# службы — в `details[].description`, оставляя `message` равным `permission
+# denied`. Поэтому утверждение читает ВЕСЬ ответ (см. ниже): по одному полю оно
+# проверяло не свойство отказа, а то, чей стенд поднят.
 #
 # Запись каталога прав для этого метода несёт `required_relation: editor` +
 # `scope_extractor {object_type: account, from_request_field: account_id}`. Идентификатор
@@ -250,12 +255,21 @@ CASES.append(Case(
             test_script=[
                 *assert_status(403),
                 *assert_grpc_code(7, "PERMISSION_DENIED"),
+                # ДЕЙСТВИЕ НАЗЫВАЕТСЯ ВСЕМ ОТВЕТОМ, А НЕ ОДНИМ ПОЛЕМ `message`, и
+                # это переутверждение по ФАКТИЧЕСКОМУ производителю, а не
+                # послабление. Оба фронта называют действие, но кладут его в
+                # разные места: край — в `message`, собственный фронт службы — в
+                # `details[].description` («the 'iam.projects.create' permission
+                # is granted by an AccessBinding on the account»), оставляя
+                # `message` равным `permission denied`. Утверждение по одному
+                # полю проверяло не свойство отказа, а то, чей стенд поднят.
                 "pm.test('отказ называет действие, а не судьбу объекта', () => "
-                "  pm.expect(pm.response.json().message||'').to.include('iam.projects.create'));",
-                # Анти-оракул: по тексту отказа нельзя отличить «аккаунта нет» от
-                # «доступа нет».
+                "  pm.expect(pm.response.text()||'').to.include('iam.projects.create'));",
+                # Анти-оракул. Читается ВЕСЬ ответ по той же причине — и это
+                # СТРОЖЕ прежнего: судьба объекта, названная в подробностях, была
+                # бы тем же оракулом, а проверка по `message` её не видела.
                 "pm.test('отказ не сообщает, существует ли аккаунт', () => {",
-                "  const m = (pm.response.json().message || '').toLowerCase();",
+                "  const m = (pm.response.text() || '').toLowerCase();",
                 "  pm.expect(m).to.not.contain('not found');",
                 "  pm.expect(m).to.not.contain('does not exist');",
                 "});",
@@ -503,7 +517,7 @@ CASES.append(Case(
             # asserts "this subject sees nothing" was therefore asserting it
             # against a subject that is genuinely authorised — a fixture artifact,
             # not a product leak. jwtPureNoBindings is the DEDICATED never-granted
-            # subject seeded for exactly this (PRO-Robotech/kacho:tests/authz-fixtures/setup.sh; it is
+            # subject seeded for exactly this (tests/authz-fixtures/seed_own_stand.py; it is
             # never a grant TARGET anywhere in the tree).
             auth="jwtPureNoBindings",
             test_script=[
@@ -1220,46 +1234,19 @@ CASES.append(Case(
 
 
 # ---------------------------------------------------------------------------
-# IAM-PRJ-DL-NEG-MALFORMED-PREFIX — IAM-PNE-1-08: неправильная форма идентификатора
-# отвергается СИНХРОННО, операция не создаётся.
+# IAM-PRJ-DL-NEG-MALFORMED-PREFIX (IAM-PNE-1-08) ЖИВЁТ В `iam-project-edge-format.py`.
 #
-# ПРОИЗВОДИТЕЛЬ ПАРЫ — КРАЙ. Шаг короткого замыкания по форме идентификатора стоит
-# в крае ДО проверки прав и судит ТОЛЬКО приставку: строка, у которой ни первые три
-# знака, ни сегмент до первого дефиса не входят в каталог приставок платформы, даёт
-# 400 / 3 без обращения к службе. Идентификатор известной приставки не той длины
-# (`prj123`) и идентификатор чужого семейства правильной формы край ПРОПУСКАЕТ к
-# проверке прав, и тот отвечает 403, — поэтому такие входы сюда не входят: «Тогда»
-# было бы строже производителя (приёмка §0.2в, Н4, Н14).
-#
-# СТРОГОСТЬ ПАРЫ ОСЛАБЛЯТЬ ЗАПРЕЩЕНО (testing.md §e2e-инварианты: «malformed-id … не
-# ослаблять»): `oneOf` здесь был бы допуском на исход, которого край на этом входе
-# не производит.
+# Его пара `400` / `3` — производитель КРАЙ (короткое замыкание по приставке ДО
+# проверки прав, приёмка `non-empty-project-is-not-deleted.md` Н4/Н14). Этот
+# модуль целиком переадресован на собственный фронт службы, а там такого шага
+# нет: глагол доходит до проверки прав и на `qqq-not-a-project` отвечает `403` /
+# `7` (`AUTHZ_DENIED`, область `project`) — замер на сведённом дереве, прогон
+# автономного стенда 2026-09-16. Утверждение, чей производитель край, здесь
+# краснело бы не о предмете; ослаблять его до `oneOf` запрещено (testing.md
+# §e2e-инварианты), переутверждать как `403` — значит превратить кейс о ФОРМЕ
+# идентификатора в дубль `IAM-PRJ-DL-AUTHZ-NONEMPTY-DENY-FIRST` о ПРАВАХ.
+# Исход e2e-flow.md §7а — «оставить утверждение платформе, расщепив коллекцию».
 # ---------------------------------------------------------------------------
-
-CASES.append(Case(
-    id="IAM-PRJ-DL-NEG-MALFORMED-PREFIX",
-    title="Delete /projects/{string whose prefix is unknown to the platform} → sync 400 INVALID_ARGUMENT (3)",
-    classes=["NEG", "VAL"],
-    priority="P1",
-    steps=[
-        Step(
-            name="delete-malformed-prefix",
-            method="DELETE",
-            path="/iam/v1/projects/qqq-not-a-project",
-            auth="jwtAccountAdminA",
-            test_script=[
-                *assert_status(400),
-                *assert_grpc_code(3, "INVALID_ARGUMENT"),
-                # Конверта операции нет: отказ синхронный, проверка формы стоит
-                # раньше создания операции и этим изменением не сдвигается.
-                "pm.test('no operation envelope on a sync refusal', () => {"
-                " const j = pm.response.json();"
-                " pm.expect(j.id, JSON.stringify(j)).to.be.undefined; });",
-            ],
-        ),
-    ],
-))
-
 
 # ---------------------------------------------------------------------------
 # IAM-PRJ-DL-AUTHZ-NONEMPTY-DENY-FIRST — IAM-PNE-1-09: отказ по непустоте НЕ
@@ -1713,3 +1700,8 @@ CASES.append(Case(
         ),
     ],
 ))
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")

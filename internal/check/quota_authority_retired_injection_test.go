@@ -92,6 +92,17 @@ func TestAuthorityResidueGateCanFail(t *testing.T) {
 			body: "model\n  schema 1.1\ntype cluster\n  relations\n    define quota_reader: [service_account]\n",
 			at:   "internal/authzmodel/fga_model.fga:5",
 		},
+		{
+			// Ось заведена kaname#124: три первые судят прод-код, контракт и
+			// модель, а сквозной набор живёт в `.py` и `.json`, и авторитет
+			// пережил в нём своё снятие сорока семью шагами.
+			name: "шаг коллекции адресуется к поверхности снятого авторитета",
+			axis: check.AxisSuite,
+			file: "tests/newman/collections/iam-limit.postman_collection.json",
+			body: `{"item":[{"name":"IAM-LIM-CR-CRUD-OK :: create-limit","request":` +
+				`{"url":{"raw":"{{baseUrl}}/iam/v1/internal/limits"}}}]}`,
+			at: "tests/newman/collections/iam-limit.postman_collection.json",
+		},
 	}
 
 	for _, tc := range cases {
@@ -111,8 +122,8 @@ func TestAuthorityResidueGateCanFail(t *testing.T) {
 	}
 
 	t.Logf("сторона дефекта: осей прогнано %d", len(axes.defect))
-	if len(axes.defect) != 4 {
-		t.Fatalf("осей прогнано %d, а объявлено 4 — инъекция не покрывает разбор целиком", len(axes.defect))
+	if len(axes.defect) != 5 {
+		t.Fatalf("осей прогнано %d, а объявлено 5 — инъекция не покрывает разбор целиком", len(axes.defect))
 	}
 }
 
@@ -163,6 +174,26 @@ func TestAuthorityResidueGateStaysSilentOnTheLawfulRemainder(t *testing.T) {
 			file: "internal/authzmodel/fga_model.fga",
 			body: "model\n  schema 1.1\ntype cluster\n  relations\n    define fga_writer: [service_account]\n",
 		},
+		{
+			// Соседний шаг ТОГО ЖЕ набора: адрес другой, а имя пути стоит в
+			// тексте утверждения — то есть предикат по подстроке краснел бы
+			// здесь на собственном объяснении.
+			name: "набор: соседний шаг живой поверхности, путь назван лишь в тексте",
+			axis: check.AxisSuite,
+			file: "tests/newman/collections/iam-internal-only-check.postman_collection.json",
+			body: `{"item":[{"name":"IAM-INT-OK-INT-IAM-CHECK :: check","request":` +
+				`{"url":{"raw":"{{internalBaseUrl}}/iam/v1/internal/subjects:check"},` +
+				`"description":"здесь стоял шаг к /iam/v1/internal/limits — снят kaname#124"}}]}`,
+		},
+		{
+			// ВТОРАЯ ЗАКОННАЯ ЗАПИСЬ АДРЕСА: postman пишет `url` и цельной
+			// строкой. Разбор, знающий только объект, прошёл бы мимо неё молча.
+			name: "набор: адрес записан СТРОКОЙ, а не объектом — разбор читает обе записи",
+			axis: check.AxisSuite,
+			file: "tests/newman/collections/probe.postman_collection.json",
+			body: `{"item":[{"name":"живой шаг","request":` +
+				`{"url":"{{internalBaseUrl}}/iam/v1/internal/users:upsert"}}]}`,
+		},
 	}
 
 	for _, tc := range cases {
@@ -173,7 +204,7 @@ func TestAuthorityResidueGateStaysSilentOnTheLawfulRemainder(t *testing.T) {
 					census, findings)
 			}
 			// Молчание обязано быть ВЕРДИКТОМ, а не следствием непрочтения.
-			if census.GoFiles+census.Contracts+census.Models == 0 {
+			if census.GoFiles+census.Contracts+census.Models+census.SuiteSteps == 0 {
 				t.Fatalf("близнец не прочитан вовсе — его молчание ничего не доказывает: %s", census)
 			}
 		})
@@ -181,8 +212,8 @@ func TestAuthorityResidueGateStaysSilentOnTheLawfulRemainder(t *testing.T) {
 	}
 
 	t.Logf("сторона близнеца: осей прогнано %d", len(axes.twin))
-	if len(axes.twin) != 3 {
-		t.Fatalf("близнецов прогнано по %d осям, а объявлено 3 — ось без близнеца "+
+	if len(axes.twin) != 4 {
+		t.Fatalf("близнецов прогнано по %d осям, а объявлено 4 — ось без близнеца "+
 			"доказывает только способность краснеть", len(axes.twin))
 	}
 }

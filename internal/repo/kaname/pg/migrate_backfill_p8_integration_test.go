@@ -397,10 +397,21 @@ func TestP8_05_VerifyGate_NoAccessLoss_ForwardSmoke(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, smoke, "live forward-smoke on a fresh resource passes (КФ-4/H-06 gate)")
 
-	// Belt-and-braces: the selector binding's ledger now records the fresh object's
-	// tuple (the smoke removed the synthetic mirror row, but the ledger persists).
-	assert.True(t, ledgerHasTuple(t, ctx, pool, selBinding, "user:"+string(member), "v_get", "vpc_network:"+fresh),
-		"forward-materialization recorded the fresh resource tuple in the selector binding ledger (H-06)")
+	// ЗДЕСЬ УТВЕРЖДАЛСЯ ОСТАТОК — и теперь утверждается его ОТСУТСТВИЕ (kaname#119).
+	//
+	// Прежняя редакция требовала, чтобы строка ведомости по синтетическому объекту
+	// СОХРАНИЛАСЬ после пробы, и прямо это объясняла: «зеркало снято, а ведомость
+	// остаётся». Ровно этот остаток и печатался потом отказом о собственной
+	// синтетике: следующий страж читает ведомость и честно находит материализованное
+	// чтение на объекте, которого больше нет.
+	//
+	// Свойство, ради которого строка проверялась, никуда не делось и утверждается
+	// СТРОКОЙ ВЫШЕ: `smoke == true` означает, что прямой путь материализовал кортеж
+	// — проба увидела его в ведомости ДО уборки. Оставить оба утверждения нельзя:
+	// второе требует, чтобы уборки не было.
+	assert.False(t, ledgerHasTuple(t, ctx, pool, selBinding, "user:"+string(member), "v_get", "vpc_network:"+fresh),
+		"проба обязана убрать ВСЁ, что завела: строка ведомости по снятому синтетическому "+
+			"объекту читается следующим стражем как материализованное чтение на несуществующем")
 }
 
 // ── revoked owner-binding must NOT block re-grant on backfill ───

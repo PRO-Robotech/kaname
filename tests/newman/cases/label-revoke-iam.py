@@ -97,16 +97,22 @@ def poll_op_done(op_var, out_id_var=None):
 
 
 def _internal_url_override(path):
-    """Redirect this request to the api-gateway cluster-internal REST listener
-    ({{internalBaseUrl}} = :18081 in CI). Internal* paths (/iam/v1/internal/*) are served
-    ONLY there — the public cmux ({{baseUrl}} = :18080) 404s them by design (ban #6).
-    gen.py emits {{baseUrl}}<path>; without this override the FGA-Check probe hits the
-    public port → the edge's routing error {"code":5,"message":"Not Found"} → the first
-    pm.response.json() parses but carries no result.
-    Mirrors label-revoke-vpc.py::_internal_url_override / iam-internal-only-check.py.
-    internalBaseUrl is injected at runtime by the newman harness (--env-var); a MISSING value is a broken harness, not a legal mode, so the
-    guard ASSERTS it (RED, naming the variable) before skipping — see
-    gen.py::require_env_url."""
+    """Переадресовать шаг на СОБСТВЕННЫЙ внутренний REST-фронт службы.
+
+    Пути `/iam/v1/internal/*` подаёт ТОЛЬКО внутренний слушатель (ban #6): на
+    публичном фронте их нет и не будет. Генератор приписывает шагу публичный
+    адрес, а `address_own_front` уже адресованный шаг не трогает — значит
+    переменную называет автор, и называет он СВОЮ: `ownInternalRestBaseUrl`.
+
+    ПОЧЕМУ НЕ `internalBaseUrl`. Это внутренний слушатель КРАЯ ПЛАТФОРМЫ. На
+    автономном стенде его нет вовсе, и шаг уходил бы в отказ соединения — то есть
+    в запрос БЕЗ ОТВЕТА, который вердикт по упавшим утверждениям не показывает
+    (замер: семь таких шагов в этой коллекции, 0 упавших утверждений при 7 без
+    ответа).
+
+    Отсутствующий адрес — отказ с меткой «условие не создано» и именем
+    переменной (`require_env_url`), а не молчаливый пропуск.
+    """
     return require_env_url(
         "ownInternalRestBaseUrl", path,
         "internal-only Check probe — /iam/v1/internal/* is served ONLY by the "
@@ -115,8 +121,9 @@ def _internal_url_override(path):
 
 def check_step(name, subject, relation, obj, expect_allowed, auth="jwtBootstrap", poll=False):
     """InternalIAMService.Check probe (POST /iam/v1/internal/iam:check) — served ONLY on
-    the cluster-internal REST listener ({{internalBaseUrl}}, :18081); the pre_script
-    redirects there (the public :18080 404s /iam/v1/internal/* by design, ban #6).
+    the service's OWN internal REST front ({{ownInternalRestBaseUrl}}); the
+    pre_script redirects there (the public front 404s /iam/v1/internal/* by
+    design, ban #6).
     expect_allowed=True asserts allowed===true (optionally polling the reconcile/fga-drain
     window); False asserts allowed !== true. One thought / pm.test."""
     retry = []
