@@ -113,11 +113,6 @@ func answersClassAndOK(fn *ast.FuncDecl) bool {
 	return ok && second.Name == "bool"
 }
 
-// ScanClassRuleDeclarations — объявления правила «класс из имени» в одном
-// исходнике, с координатой каждого.
-//
-// Неразбираемый исходник отдаёт признак, а не пустой перечень: «объявлений ноль»
-// иначе означало бы и «их нет», и «разбор не состоялся».
 // GeneratedStubsPrefix — каталог сгенерированных стабов: правило, найденное
 // там, принадлежало бы генератору, а не дереву.
 const GeneratedStubsPrefix = "pkg/api/"
@@ -145,6 +140,11 @@ func ManifestLoaderCorpus(tree *treecorpus.Tree) (TreeCorpus, error) {
 	})
 }
 
+// ScanClassRuleDeclarations — объявления правила «класс из имени» в одном
+// исходнике, с координатой каждого.
+//
+// Неразбираемый исходник отдаёт признак, а не пустой перечень: «объявлений ноль»
+// иначе означало бы и «их нет», и «разбор не состоялся».
 func ScanClassRuleDeclarations(rel string, src []byte) ([]string, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, rel, src, 0)

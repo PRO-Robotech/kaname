@@ -22,7 +22,7 @@ package main
 // # Порядок: ПОСЛЕ доставки, ПЕРЕД стражем паритета
 //
 // Довод целиком —
-// `services/iam/docs/engineering/architecture/module-catalog-applier-runs-at-boot.md`.
+// `docs/engineering/architecture/module-catalog-applier-runs-at-boot.md`.
 // Коротко: страж, стоящий ПОСЛЕ применителя, судит то, что применитель ТОЛЬКО ЧТО
 // записал. Значит ConfigMap с манифестами — данные ОПЕРАТОРА, а не релиза — в
 // одиночку не вправе расширить каталог за пределы того, что знает образ.

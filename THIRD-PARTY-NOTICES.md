@@ -1,5 +1,5 @@
 <!-- ЭТОТ ФАЙЛ ПОРОЖДЁН. Правки в нём уедут при следующей регенерации.
-     Порождает: services/iam/tools/operatordocs — `make operator-docs`
+     Порождает: tools/operatordocs — `make operator-docs`
      Сверяет:   `make operator-docs-check` -->
 
 # Уведомления о третьих сторонах

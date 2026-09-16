@@ -6,7 +6,7 @@ package pg
 // role_withdrawal_repo.go — ПРОИЗВОДИТЕЛЬ ОТЗЫВА роли модуля: переселение,
 // снятие проекций и пометка.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
+// Приёмка `docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // (APPROVED круга 4), §2.3, §2.5, §2.7, §2.9; задача продукта #1913.
 //
 // # Отзыв есть ОДНА транзакция из трёх шагов, и порядок держит КЛЮЧ

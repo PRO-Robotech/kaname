@@ -30,10 +30,16 @@ package relverdict_test
 // ─────────────────────────────────────────────────────────────────────────────
 // ЧЕМ ПИШЕТСЯ НАМЕРЕНИЕ
 //
-// ПРОДУКТОВЫМ писателем (`pg.NewCreatorTupleWriter` и `pg.NewFGAOutboxEmitter`), а
-// не сырым INSERT'ом. Проба, кладущая строку своим SQL, осталась бы зелёной, если
-// продуктовый путь эмиссии сломан или снят, — то есть проверяла бы схему, а не
-// тракт.
+// ПРОДУКТОВЫМ эмиттером (`pg.NewFGAOutboxEmitter`) через помощника
+// `iampgtest.EmitCreatorIntent`, а не сырым INSERT'ом. Проба, кладущая строку
+// своим SQL, осталась бы зелёной, если продуктовый путь эмиссии сломан или снят,
+// — то есть проверяла бы схему, а не тракт.
+//
+// Прежде намерение клал `pg.CreatorTupleWriter` — адаптер снятого RPC, у которого
+// не осталось ни одного прод-вызывателя: прод-код, чей единственный потребитель
+// проба, есть фикстура, называющая себя продуктом (kaname#115). Продуктовым в
+// этом тракте был и остался ЭМИТТЕР; транзакция вокруг него продуктовой логики
+// не несла и переехала к пробам.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ОТРИЦАНИЕ СТОИТ В ПАРЕ С ПОЛОЖИТЕЛЬНЫМ
@@ -53,6 +59,7 @@ import (
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/service"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
 
 // TestR7_3_27_JournalSurvivesTheDrainRemoval — Г7.
@@ -98,11 +105,7 @@ func TestR7_3_27_JournalSurvivesTheDrainRemoval(t *testing.T) {
 	}
 
 	// ── Мутация выдачи: строка намерения продуктовым писателем ────────────────
-	writer := kanamepg.NewCreatorTupleWriter(pool)
-	if writer == nil {
-		t.Fatal("продуктовый писатель намерений не собран")
-	}
-	if werr := writer.RecordTuples(ctx, []clients.RelationTuple{{
+	if werr := iampgtest.EmitCreatorIntent(ctx, pool, []clients.RelationTuple{{
 		User: subject, Relation: relation, Object: object,
 	}}); werr != nil {
 		t.Fatalf("запись намерения продуктовым писателем: %v", werr)

@@ -68,10 +68,14 @@ import "net/smtp"
 func send(c *smtp.Client) error { return nil }
 `
 
+// mailWorldModule — путь модуля синтетического мира: пакеты СВОЕГО модуля с
+// «почтой» в пути импорта (хранилище очереди) — наш код, а не чужая форма.
+const mailWorldModule = "example.com/kaname"
+
 // scanOne — разбор одного синтетического файла.
 func scanOneMailFile(t *testing.T, rel, src string) ([]check.MailSendPath, []check.MailKindSite, check.MailSendCensus) {
 	t.Helper()
-	p, k, c, err := check.ScanMailSendFile(rel, []byte(src))
+	p, k, c, err := check.ScanMailSendFile(rel, []byte(src), mailWorldModule)
 	if err != nil {
 		t.Fatalf("разбор синтетики %s: %v", rel, err)
 	}
@@ -229,6 +233,109 @@ func TestMAIL47Injection_RemovingTheOnlySenderIsAFinding(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("снятие единственного пути НЕ дало находки: %+v", got)
+	}
+}
+
+// mailLawfulMailishNeighbour — ТРЕТИЙ законный близнец: файл, чьи импорты
+// говорят о почте, но транспортом не являются — разбор адреса `net/mail` и
+// хранилище очереди СВОЕГО модуля. Ось формы обязана на нём молчать: иначе она
+// звала бы неизвестной формой то, что разбор знает by construction.
+const mailLawfulMailishNeighbour = `package user
+
+import (
+	"net/mail"
+
+	outbox "example.com/kaname/internal/repo/kaname/pg/invite_mail_outbox"
+)
+
+func validAddress(s string) bool {
+	_, err := mail.ParseAddress(s)
+	_ = outbox.EventSend
+	return err == nil
+}
+`
+
+// mailInjectedUnknownTransportForm — ось 1, дефект Г: транспорт ФОРМЫ, которой
+// закрытый список не знает. Против близнеца выше меняется ровно один факт —
+// путь импорта: он говорит о почте, а ни транспортом, ни не-транспортом, ни
+// своим модулем не объявлен.
+const mailInjectedUnknownTransportForm = `package notify
+
+import mail "github.com/xhit/go-simple-mail/v2"
+
+var _ = mail.NewSMTPClient
+`
+
+// TestMAIL47Injection_UnknownTransportFormIsRefused — дефект Г: импорт,
+// говорящий о почте, которого закрытый список не знает, — ОТКАЗ с координатой
+// и путём импорта, а не тишина. Иначе второй отправитель на библиотеке, не
+// названной в списке, уезжал бы из-под наблюдения, не давая ни красного, ни
+// зелёного: якорная предпосылка (`net/smtp` в дереве есть) на нём молчит, а
+// ось словаря молчит, если вид взят константой хранилища, а не литералом.
+//
+// Рядом — законный близнец: те же «почтовые» слова в путях импорта
+// (`net/mail`, хранилище очереди своего модуля), и ось обязана молчать.
+func TestMAIL47Injection_UnknownTransportFormIsRefused(t *testing.T) {
+	t.Parallel()
+
+	lawful := findingsFor(t, map[string]string{
+		"internal/clients/invite_mail.go":           mailLawfulSender,
+		"internal/apps/kaname/api/user/validate.go": mailLawfulMailishNeighbour,
+	})
+	if len(lawful) != 0 {
+		t.Fatalf("законный сосед с «почтой» в путях импорта дал %d находок, ожидалось ноль: %+v",
+			len(lawful), lawful)
+	}
+
+	got := findingsFor(t, map[string]string{
+		"internal/clients/invite_mail.go":           mailLawfulSender,
+		"internal/apps/kaname/api/user/validate.go": mailLawfulMailishNeighbour,
+		"internal/notify/simple.go":                 mailInjectedUnknownTransportForm,
+	})
+	var hit *check.MailSendFinding
+	for i := range got {
+		if strings.Contains(got[i].What, "github.com/xhit/go-simple-mail/v2") {
+			hit = &got[i]
+		}
+	}
+	if hit == nil {
+		t.Fatalf("транспорт неизвестной формы НЕ отвергнут — форма вне наблюдения: %+v", got)
+	}
+	if !strings.Contains(hit.Where, "internal/notify/simple.go:") {
+		t.Errorf("отказ формы без координаты: %q", hit.Where)
+	}
+	if hit.Axis != "transport" {
+		t.Errorf("отказ формы пришёл по оси %q, ожидалась transport", hit.Axis)
+	}
+	if len(got) != 1 {
+		t.Errorf("ожидалась РОВНО одна находка (отказ формы), получено %d: %+v", len(got), got)
+	}
+}
+
+// TestMAIL47Injection_UnknownFormPredicateKnowsItsThreeExemptions — предикат
+// отказа знает три исключения: известный транспорт, известный не-транспорт и
+// пакет своего модуля. Одной стороны мало: предикат, отвергающий всё с «mail»
+// в пути, назвал бы неизвестной формой собственное хранилище очереди.
+func TestMAIL47Injection_UnknownFormPredicateKnowsItsThreeExemptions(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{"github.com/xhit/go-simple-mail/v2", true},
+		{"github.com/mailjet/mailjet-apiv3-go", true},
+		{"github.com/jordan-wright/email", true},
+		{"net/smtp", false},                                                      // известный транспорт
+		{"github.com/wneessen/go-mail", false},                                   // известный транспорт
+		{"net/mail", false},                                                      // известный НЕ-транспорт: разбор адреса
+		{"example.com/kaname/internal/repo/kaname/pg/invite_mail_outbox", false}, // свой модуль
+		{"example.com/kaname", false},                                            // свой модуль, корень
+		{"example.com/kanamemail/x", true},                                       // ЧУЖОЙ модуль с похожим префиксом
+		{"context", false},                                                       // о почте не говорит
+	} {
+		if got := check.MailImportFormIsUnknown(tc.path, mailWorldModule); got != tc.want {
+			t.Errorf("MailImportFormIsUnknown(%q) = %v, ожидалось %v", tc.path, got, tc.want)
+		}
 	}
 }
 

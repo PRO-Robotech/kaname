@@ -140,7 +140,7 @@ func NewHandler(l *LookupSubjectUseCase, authz Authorizer) *Handler {
 	return &Handler{lookup: l, authz: authz}
 }
 
-// WithSubjectChange — attaches the SubjectChangeService to the handler.
+// WithLogger — attaches the process logger to the handler.
 // Called from the composition root (cmd/kaname/main.go).
 func (h *Handler) WithLogger(l *slog.Logger) *Handler {
 	h.logger = l
@@ -163,12 +163,6 @@ func (h *Handler) WithResourceRegistrar(registrar resourceRegistrar, gate relati
 	return h
 }
 
-// RegisterResource — Internal FGA-proxy: enqueue an owner-hierarchy tuple write
-// into kaname.fga_outbox, out of which a trigger folds the direct fact in the
-// same commit. Idempotent: repeat of the same tuple → OK, never AlreadyExists.
-//
-// authz: exempt in proto-catalog; least-priv enforced HERE via ReBAC
-// (cert-cert→SA → `fga_writer@cluster:cluster_root`). cluster-internal :9091.
 // validateProxyTuple applies the shared proxy-write rule and maps its verdict to the
 // transport. This is the ONE place the refusal becomes a gRPC status, so the code and
 // the text cannot drift between the three RPCs that share the rule; the rule itself is
@@ -189,6 +183,12 @@ func validateProxyTuple(callerDomain, subject, relation, object string) error {
 	return nil
 }
 
+// RegisterResource — Internal FGA-proxy: enqueue an owner-hierarchy tuple write
+// into kaname.fga_outbox, out of which a trigger folds the direct fact in the
+// same commit. Idempotent: repeat of the same tuple → OK, never AlreadyExists.
+//
+// authz: exempt in proto-catalog; least-priv enforced HERE via ReBAC
+// (cert-cert→SA → `fga_writer@cluster:cluster_root`). cluster-internal :9091.
 func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResourceRequest) (*iamv1.RegisterResourceResponse, error) {
 	domain, err := h.authorizeRegistration(ctx)
 	if err != nil {

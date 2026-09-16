@@ -14,7 +14,7 @@
 //
 // Ни одно действие не повторяет логику, у которой уже есть производитель:
 //
-//	validate → services/iam/internal/manifestcheckrun (тот же исполнитель, что
+//	validate → internal/manifestcheckrun (тот же исполнитель, что
 //	           у сборочной цели module-manifest-check)
 //	plan     → InternalModuleService/Plan
 //	apply    → InternalModuleService/Apply

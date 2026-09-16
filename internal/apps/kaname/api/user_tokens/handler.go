@@ -168,11 +168,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListUserTokensRequest) (*
 	}
 	out := make([]*iamv1.UserOAuthClient, 0, len(rows))
 	for _, c := range rows {
-		pb, err := userTokenToProto(c)
-		if err != nil {
-			return nil, status.Error(codes.Internal, "internal error")
-		}
-		out = append(out, pb)
+		out = append(out, userTokenToProto(c))
 	}
 	return &iamv1.ListUserTokensResponse{Tokens: out, NextPageToken: nextToken}, nil
 }

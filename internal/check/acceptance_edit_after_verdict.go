@@ -6,7 +6,7 @@
 //
 // Порт с монорепо (`internal/repohygiene/acceptanceeditafterverdict.go`, снят
 // вынесением службы — `kacho#2597`). Изменилось: путь дома приёмок (был
-// `services/iam/docs/engineering/acceptance`, здесь — `docs/engineering/acceptance`
+// `docs/engineering/acceptance`, здесь — `docs/engineering/acceptance`
 // от корня СВОЕГО модуля) и обход git через `platformtree`/`gitenv` вместо
 // внутреннего `repoRoot(t)` монорепо. Осталось дословно: имя функции гейта
 // (`TestAcceptanceEditedAfterItsVerdictSaysSo`), сам разбор и текст находки.

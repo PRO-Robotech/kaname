@@ -35,7 +35,7 @@
 //
 // ЧТО ИЗ ЭТОГО СЛЕДУЕТ СЕГОДНЯ. Второе действие выхода — снятие сессии входа у
 // провайдера — уже выданный токен НЕ гасит: проба
-// `services/iam/scripts/provider-revocation-equivalence-probe.sh` на той же
+// `scripts/provider-revocation-equivalence-probe.sh` на той же
 // версии провайдера, что на стенде, с контролями в обе стороны (запись 15 в
 // `docs/engineering/architecture/known-divergences.md`). Поэтому выход с
 // `revoke_all=false` обеспечен ИМЕННО ЭТОЙ полосой: край спрашивает наш
