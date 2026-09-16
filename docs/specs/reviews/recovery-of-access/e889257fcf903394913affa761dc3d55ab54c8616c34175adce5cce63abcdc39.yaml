@@ -37,8 +37,9 @@ reviewed_at: '2026-09-16'
 
 # ─── ОДОБРЕНИЕ ВЕРДИКТА — НЕ САНКЦИЯ; САНКЦИЮ ВЫДАЁТ ВНЕШНЕЕ СОБЫТИЕ ───────────
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-16T04:22:26Z'
+  ban1_lifted: true
   why: >-
     Вердикт круга 1 — APPROVED: блокирующих НОЛЬ. Проверено экспериментом: производитель у
     всех 24 «Тогда» (все названные задачи существуют и в объявленном состоянии, включая
@@ -73,17 +74,32 @@ authority:
   allowlisted_for_role: false
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось», а не «да» и не «нет». Внешнего события этим кругом
-    не создавалось: его публикует оркестратор. Недоступность внешнего источника никогда не
-    читается как одобрение (`change-graph.md` §3).
+  type: issue_comment
+  status: performed
+  database_id: 5691996522
+  node_id: IC_kwDOTZqgWM8AAAABU0T5ag
+  url: https://github.com/PRO-Robotech/kacho/issues/1271#issuecomment-5691996522
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5691996522
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1271
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-16T04:22:26Z'
+  body_sha256: e4034bb25a56c0796bf962f65f7a04ae8ba56068e659076f2190e1499efa1df4
+  subject_sha256: e889257fcf903394913affa761dc3d55ab54c8616c34175adce5cce63abcdc39
+  subject_revision: a6bffc53ec4b1e53c2f9d25e3e0f6fef9d8ba6d5
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; запись рецензента не правилась.
+    Отпечаток предмета сверен перед публикацией и совпал с объявленным; отпечаток тела снят
+    с сырого ответа API.
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: null
-  publication_mode: null
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
 
 scope:
