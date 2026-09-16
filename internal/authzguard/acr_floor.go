@@ -10,10 +10,24 @@
 // (api-gateway StepUpGate), but the gateway does NOT re-run that gate when it
 // re-dials :9091 on the caller's behalf — so a privileged gateway-fronted
 // internal RPC (notably InternalClusterService/{Get,GrantAdmin,RevokeAdmin,
-// ListAdmins}, which already carry required_acr_min=2) would be un-enforced on
-// the internal route. This interceptor closes that arm: the gateway forwards the
-// validated acr as trusted metadata (grpcsrv.MDKeyTokenACR) and the floor
-// enforces the catalog requirement here too.
+// ListAdmins}, each carrying the `required_acr_min` ITS OWN contract declares)
+// would be un-enforced on the internal route. This interceptor closes that arm:
+// the gateway forwards the validated acr as trusted metadata
+// (grpcsrv.MDKeyTokenACR) and the floor enforces the catalog requirement here too.
+//
+// THE NUMBERS LIVE IN THE CONTRACT, NOT IN THIS HEADER. Reads and mutations of
+// the cluster do NOT share a floor: the contract asks a weaker ceremony of
+// Get/ListAdmins than of GrantAdmin/RevokeAdmin, because reading WHO holds
+// cluster admin is not the act of CHANGING who does. Retelling the values here
+// would be a second place about one subject, and the two would drift silently —
+// which is exactly what happened: this header claimed a single value for all
+// four while the contract declared two different ones (kaname#131).
+//
+// What the decision rests on is a RELATION, not a literal: no cluster-admin RPC
+// is left with no floor at all, and a read is never gated more strictly than the
+// mutation it precedes. That relation is read off the DELIVERED catalog by
+// TestACRFloorClusterAdminFloorsComeFromTheContract — a literal here would agree
+// with any edition of the contract, a relation cannot.
 //
 // For each RPC in the GATEWAY-FRONTED set (GatewayFrontedInternalRPCs — caller-
 // context = api-gateway acting for an end user) whose catalog
