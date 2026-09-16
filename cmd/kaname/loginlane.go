@@ -44,6 +44,7 @@ import (
 	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
+	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
@@ -267,7 +268,7 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 		return nil, fmt.Errorf("sign-in lane: registration lane %q is not declared in registration.Lanes", registration.LanePassword)
 	}
 	registerUC, err := registration.NewRegisterUseCase(registration.Deps{
-		Store: kanamepg.NewRegistrationStore(pool), Rule: rule, Hasher: hasher, Lane: regLane,
+		Store: registrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
 		TTL: login.SessionTTL, Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler), Now: time.Now, Logger: logger,
 	})
 	if err != nil {
@@ -288,6 +289,27 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 		handler: handler, resolve: humansession.NewHandler(resolveUC),
 		sessions: sessions, methods: methods, limits: limits,
 	}, nil
+}
+
+// registrationStore — адаптер хранилища регистрации к порту глагола. Адаптер
+// `pg` порт не импортирует (иначе круг импортов в пробах пакета зеркала) и
+// отдаёт писатель зеркала своей транзакции; композицию зеркала (Р6) над ним
+// исполняет `user.RegisterMirrorTx` — здесь, в композиционном корне, где
+// соответствие порту закрепляется присваиванием.
+type registrationStore struct{ inner *kanamepg.RegistrationStore }
+
+func (s registrationStore) Writer(ctx context.Context) (registration.Writer, error) {
+	w, err := s.inner.Writer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return registrationWriter{RegistrationWriter: w}, nil
+}
+
+type registrationWriter struct{ *kanamepg.RegistrationWriter }
+
+func (w registrationWriter) Mirror(ctx context.Context, in registration.MirrorInput) (registration.MirrorResult, error) {
+	return userapp.RegisterMirrorTx(ctx, w.MirrorWriter(), in)
 }
 
 // ownerReconcilerOrNone — nil указателя НЕ становится ненулевым интерфейсом:

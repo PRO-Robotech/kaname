@@ -108,7 +108,7 @@ func insertLoginMethod(ctx context.Context, q loginMethodQuerier, m domain.Login
 // InsertLoginMethod — строка способа входа в транзакции регистрации (порт
 // `registration.Writer`). Метод писателя регистрации объявлен ЗДЕСЬ, а не в его
 // файле: право назвать таблицу секрета дано этому файлу.
-func (w *registrationWriter) InsertLoginMethod(ctx context.Context, m domain.LoginMethod) error {
+func (w *RegistrationWriter) InsertLoginMethod(ctx context.Context, m domain.LoginMethod) error {
 	_, err := insertLoginMethod(ctx, w.tx, m)
 	return err
 }

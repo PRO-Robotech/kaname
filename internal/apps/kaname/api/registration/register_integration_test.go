@@ -45,6 +45,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -98,6 +99,25 @@ func (w *faultyWriter) InsertSession(ctx context.Context, s domain.HumanSession,
 	return w.Writer.InsertSession(ctx, s, digest)
 }
 
+// pgStore — адаптер хранилища базы к порту, тем же способом, что в
+// композиционном корне: писатель зеркала — от адаптера, композиция зеркала —
+// `user.RegisterMirrorTx`.
+type pgStore struct{ inner *kanamepg.RegistrationStore }
+
+func (s pgStore) Writer(ctx context.Context) (registration.Writer, error) {
+	w, err := s.inner.Writer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return pgWriter{RegistrationWriter: w}, nil
+}
+
+type pgWriter struct{ *kanamepg.RegistrationWriter }
+
+func (w pgWriter) Mirror(ctx context.Context, in registration.MirrorInput) (registration.MirrorResult, error) {
+	return user.RegisterMirrorTx(ctx, w.MirrorWriter(), in)
+}
+
 // countingObserver — клетки исходов регистрации.
 type countingObserver struct {
 	mu       sync.Mutex
@@ -147,7 +167,7 @@ func newHarness(t *testing.T) *harness {
 	return &harness{
 		ctx: ctx, pool: pool, repo: repo,
 		sessions: kanamepg.NewHumanSessionRepo(pool),
-		store:    kanamepg.NewRegistrationStore(pool),
+		store:    pgStore{inner: kanamepg.NewRegistrationStore(pool)},
 		obs:      &countingObserver{}, hasher: hasher, rule: rule,
 	}
 }
