@@ -1864,6 +1864,16 @@ func runServe(cfg config.Config) error {
 		return nil
 	})
 
+	// Окно прежнего издателя — строки, чьё зеркало у внешнего OAuth-сервера ещё
+	// предъявимо. Ноль по этому ряду — измеренная половина предиката снятия
+	// компонента (kacho#2564); без ряда окно считалось бы запросом по памяти.
+	providerMirror := newProviderMirrorSampler(kanamepg.NewProviderMirrorRepo(pool))
+	metricsReg.NewProviderMirrorCollector(providerMirror.Counts)
+	tasks = append(tasks, func() error {
+		providerMirror.Run(taskCtx, logger)
+		return nil
+	})
+
 	// Bootstrap-admin reconciler. Grants `system_admin@cluster_root` to
 	// the user identified by KANAME_BOOTSTRAP_ROOT_EMAIL and enqueues the
 	// FGA tuple into the transactional fga_outbox, out of which a trigger folds the

@@ -216,9 +216,7 @@ func retiredIssuerClaimAt(line string) (string, []int) {
 func quotedSpan(line string, s, e int) bool {
 	pairs := [][2]string{{"«", "»"}, {`"`, `"`}, {"“", "”"}}
 	for _, p := range pairs {
-		l := strings.LastIndex(line[:s], p[0])
-		r := strings.Index(line[e:], p[1])
-		if l >= 0 && r >= 0 {
+		if strings.Contains(line[:s], p[0]) && strings.Contains(line[e:], p[1]) {
 			return true
 		}
 	}
