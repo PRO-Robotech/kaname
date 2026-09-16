@@ -56,7 +56,7 @@ const (
 	// EdgeProducerCall — имя экспортированной функции-производителя.
 	EdgeProducerCall = "UpsertTx"
 	// EdgeProducerDir — каталог пакета-производителя, ОТ КОРНЯ своего модуля
-	// (было `services/iam/internal/repo/kaname/pg/resource_mirror`).
+	// (было `internal/repo/kaname/pg/resource_mirror`).
 	EdgeProducerDir = "internal/repo/kaname/pg/resource_mirror"
 	// EdgeProducerImport — хвост пути импорта. В самостоятельном модуле
 	// службы совпадает с каталогом (расхождение, из-за которого монорепо

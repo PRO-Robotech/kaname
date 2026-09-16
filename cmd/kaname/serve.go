@@ -343,7 +343,7 @@ func runServe(cfg config.Config) error {
 	// провязки его не звал никто, и каталог наполнял посев миграции, то есть
 	// объявленное манифестом состояние доезжало до базы только пересборкой
 	// образа. Довод о месте, порядке и о том, почему отказ фатален, —
-	// `services/iam/docs/engineering/architecture/module-catalog-applier-runs-at-boot.md`;
+	// `docs/engineering/architecture/module-catalog-applier-runs-at-boot.md`;
 	// порядок держит гейт `module_catalog_apply_wiring_test.go`, а не этот
 	// комментарий.
 	//

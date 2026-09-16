@@ -285,7 +285,7 @@ func Sweep(resources []catalog.ResourceRow, root string, waivers []Waiver) (Cens
 		findings = append(findings, Finding{Module: u.Module, Detail: fmt.Sprintf(
 			"%s: %s — %v; документ назвался манифестом и манифестом не стал, поэтому он не "+
 				"засчитан НИ модулем, НИ его отсутствием; форму судит "+
-				"`make -C services/iam module-manifest-check`", u.Cause, u.Path, u.Err)})
+				"`make module-manifest-check`", u.Cause, u.Path, u.Err)})
 	}
 
 	// Ведомость судится ДО обхода: запись без номера и запись на модуль вне
@@ -612,7 +612,7 @@ type unusableManifest struct {
 // засчитан, значит прощать ей на вид есть что.
 //
 // Форму документа здесь никто не судит второй раз — это предмет одного
-// исполнителя (`make -C services/iam module-manifest-check`). Здесь он лишь не
+// исполнителя (`make module-manifest-check`). Здесь он лишь не
 // вправе быть засчитан ни модулем, ни его отсутствием.
 func findManifests(treeRoot *os.Root, root string) (map[string]string, []unusableManifest, string, error) {
 	out := map[string]string{}

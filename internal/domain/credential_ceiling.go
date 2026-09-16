@@ -6,7 +6,7 @@ package domain
 // Подчинённые ресурсы и применимость областей величины.
 //
 // Задача `PRO-Robotech/kacho#1191`, приёмка
-// `services/iam/docs/engineering/acceptance/credential-ceiling-per-principal.md`
+// `docs/engineering/acceptance/credential-ceiling-per-principal.md`
 // (§3.3, §4).
 
 // SubordinateResource — ресурс, адресуемый арендатором и НЕ имеющий своего типа

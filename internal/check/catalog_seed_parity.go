@@ -11,9 +11,9 @@ package check
 //
 // Гейт обязан сверяться с ЛИТЕРАЛОМ, а не с его текстом (чтение чужого исходника
 // как текста — отдельный класс дефекта проверки). Литерал живёт в
-// `services/iam/internal/authzmap`, и корневой `internal/repohygiene` импортировать
+// `internal/authzmap`, и корневой `internal/repohygiene` импортировать
 // его НЕ МОЖЕТ: правило внутренних пакетов Go допускает импорт
-// `services/iam/internal/...` только из поддерева `services/iam/`. Прогнано и
+// `internal/...` только из поддерева `services/iam/`. Прогнано и
 // получено: «use of internal package … not allowed». Поэтому гейт живёт рядом со
 // вторым гейтом того же предмета (`retired_block_storage_test.go`), а не рядом с
 // прочими гейтами дерева.

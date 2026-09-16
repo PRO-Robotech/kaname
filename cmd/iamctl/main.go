@@ -11,8 +11,8 @@
 //	iamctl doctor                                     разбор состояния предикатом
 //
 // ТОНКАЯ: разбор вызова, классификация чужого отказа, тексты и коды возврата
-// живут в services/iam/internal/iamctl; локальная проверка дерева — в
-// services/iam/internal/manifestcheckrun, том же исполнителе, что зовёт
+// живут в internal/iamctl; локальная проверка дерева — в
+// internal/manifestcheckrun, том же исполнителе, что зовёт
 // сборочная цель module-manifest-check. Здесь — только флаги посадки и вызов.
 //
 // Прецедент формы — соседи по каталогу: migrator и authzmap-tables.
