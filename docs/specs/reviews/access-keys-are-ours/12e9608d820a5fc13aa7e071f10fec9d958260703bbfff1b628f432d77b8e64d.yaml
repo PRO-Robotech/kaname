@@ -54,8 +54,9 @@ reviewed_at: '2026-09-16'
 
 # ─── ОДОБРЕНИЕ РЕЦЕНЗЕНТА ЕСТЬ; САНКЦИЯ ВЫДАЁТСЯ ВНЕШНИМ СОБЫТИЕМ ─────────────
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-16T19:53:44Z'
+  ban1_lifted: true
   why: >-
     Вердикт круга 6 — APPROVED: блокирующих НОЛЬ. Единственное блокирующее круга 5 (Б1 — у
     испытания предъявления не было ни одного отрицания) ЗАКРЫТО, перемерено тем же опытом с
@@ -84,23 +85,33 @@ authority:
 
 event:
   type: issue_comment
-  status: not_performed
-  why_not_performed: >-
-    Внешнее событие полномочия публикует ОРКЕСТРАТОР (допущенный актор `pointpu`), а не
-    рецензент: агент в роли им не является и события не публикует. До события действующего
-    одобрения НЕТ — есть вердикт рецензента, привязанный к отпечатку. «Не выполнилось» — третья
-    категория; она не вычитается из вердикта и не зачитывается в успех (`testing.md` §E2E,
-    `change-graph.md` §3). Форма события — как у Ф11 (`kacho#1280`, комментарий с `role`,
-    `verdict`, `subject_sha256`) и у Ф1 (`kacho#1269`, `issued: true`).
+  status: performed
+  database_id: 5703628145
+  node_id: IC_kwDOTZqgWM8AAAABU_Z1cQ
+  url: https://github.com/PRO-Robotech/kacho/issues/1273#issuecomment-5703628145
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5703628145
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1273
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-16T19:53:44Z'
+  body_sha256: b9af38e11a2de6e2a349793d9a3e43f3c67a1d4b9f56715af7a95cbe393aed06
   subject_sha256: 12e9608d820a5fc13aa7e071f10fec9d958260703bbfff1b628f432d77b8e64d
   subject_revision: 863e3e0729d482c9f796abbcb08aa044ebd0f150
   verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; запись рецензента задним числом
+    не правилась. Отпечаток предмета сверен перед публикацией (sha256sum файла на 863e3e07)
+    и совпал с объявленным. Отпечаток тела снят с сырого ответа API.
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: none
-  publication_mode: agent_verdict_awaiting_courier
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
+
 
 scope:
   reviewed: >-
