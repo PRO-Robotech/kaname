@@ -172,6 +172,13 @@ import dedent from 'ts-dedent'
 выдать роль на проекте (`projectId` + `roleId`), тогда AccessBinding создаётся атомарно.
 Требует `editor` на аккаунте. Асинхронно (`response: User`).
 
+:::note У глагола есть преемник на ресурсе членства
+Тот же поток доступен как [`MembershipService.Create`](/api/membership#create) —
+`POST /iam/v1/memberships`, `response: Membership`. Оба глагола живут рядом до снятия
+`InviteUserRequest`; на одну пару «человек × аккаунт» любым из них приходится одно членство.
+Новым клиентам — преемник: он отвечает членством, то есть тем, что и заводится.
+:::
+
 <CodeBlock language="bash">
   {dedent`
     curl -X POST 'http://localhost:18080/iam/v1/users:invite' \\
