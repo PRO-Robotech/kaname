@@ -60,11 +60,15 @@ func RegisterDefaults(v *viper.Viper) {
 	// TestDocumentedEnvName_KeyMaterialWindowUntil.
 	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__KEY_MATERIAL_WINDOW_UNTIL
 	v.SetDefault("api-server.registry-token.key-material-window-until", "")
-	// Cluster-INTERNAL Hydra-JWKS proxy HTTP listener (`GET /.well-known/jwks.json`)
-	// — a SEPARATE cluster-internal port (default `tcp://0.0.0.0:9097`), served ONLY
-	// on the kaname-internal Service (never external, ban #6) over one-way
-	// server-TLS. Short-TTL caching reverse-proxy of Hydra's PUBLIC JWKS so the
-	// data-plane fetches verification keys from iam (Hydra stays the signer).
+	// Cluster-INTERNAL listener of verification KEY SETS — a SEPARATE port
+	// (default `tcp://0.0.0.0:9097`), served ONLY on the kaname-internal Service
+	// (never external, ban #6) over one-way server-TLS. It publishes records BY
+	// ISSUER (cmd/kaname/serve.go, jwksproxyhttp.NewBinding): our own key set at
+	// `authn.token-signing.key-set-path` — the signer of every token we mint — and,
+	// at the canonical `/.well-known/jwks.json`, a short-TTL mirror of the previous
+	// issuer's PUBLIC JWKS, kept only while tokens of its issue are still
+	// presentable (kacho#2564). Consumers pick the record by the token's declared
+	// issuer; there is no fallback across records.
 	// Override via KANAME_API_SERVER__JWKS_PROXY__ENDPOINT.
 	v.SetDefault("api-server.jwks-proxy.endpoint", "tcp://0.0.0.0:9097")
 
