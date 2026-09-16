@@ -30,16 +30,39 @@ func apply() {}
 //
 //	(а) приставка БЕЗ хвоста — указатель области в ЧУЖОМ дереве;
 //	(б) приставка БЕЗ хвоста — проза о самом переезде;
-//	(в) хвост-многоточие — форма записи класса путей, а не координата;
+//	(в) хвост-многоточие — форма записи класса путей, а не координата: знаком
+//	    и тремя точками, окончанием и сегментом. Голова такого хвоста в дереве
+//	    инъекции ЕСТЬ — иначе близнец молчал бы от незнания резолвера, а не от
+//	    распознанной формы (первая редакция так и была зелёной, пока настоящее
+//	    дерево не сказало обратное);
 //	(г) хвост, которого в дереве нет, — другой предмет;
 //	(д) координата БЕЗ приставки — то, чем починка и выглядит.
 const layoutLegalSrc = `package check
 
 // Предикат: ` + "`git grep -l Foo -- services/iam`" + ` — область в дереве платформы.
 // Изменилось: путь без префикса ` + "`services/iam/`" + ` — в kaname код службы и есть корень.
-// Класс путей: ` + "`services/iam/internal/…`" + ` целиком.
+// Класс путей: ` + "`services/iam/internal/…`" + ` целиком, он же ` + "`services/iam/internal/...`" + `.
+// Класс путей сегментом: ` + "`services/iam/.../REPORT-R7-2-strength.txt`" + `.
 // Снятое: ` + "`services/iam/internal/testsupport/fgatest`" + ` — его здесь нет.
 // Починенное: ` + "`docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`" + `.
+func check() {}
+`
+
+// layoutEllipsisDroppedSrc — ТОТ ЖЕ хвост, что у близнеца (в), но без
+// многоточия: это уже координата каталога, который здесь лежит, и она обязана
+// стать находкой. Пара с (в) доказывает, что молчание там — заслуга
+// распознанной формы, а не незнание резолвером хвоста `internal/`.
+const layoutEllipsisDroppedSrc = `package check
+
+// Каталог: ` + "`services/iam/internal/`" + ` — тот же лежит здесь как ` + "`internal/`" + `.
+func check() {}
+`
+
+// layoutSentenceStopSrc — точка в конце координаты есть конец предложения, а не
+// многоточие: хвост режется до координаты и резолвится как она.
+const layoutSentenceStopSrc = `package check
+
+// См. ` + "services/iam/internal/check." + ` Дальше — другое предложение.
 func check() {}
 `
 
@@ -98,15 +121,68 @@ func TestCommentCoordinateGateStaysSilentOnLegalForms(t *testing.T) {
 	if err != nil {
 		t.Fatalf("разбор близнеца: %v", err)
 	}
-	if census.Mentions < 4 {
+	if census.Mentions < 6 {
 		t.Fatalf("упоминаний приставки прочитано %d — близнец проверен ни на чём: %+v",
 			census.Mentions, census)
 	}
-	// Хвост есть только у двух из пяти: многоточие и снятый путь. Обе формы
-	// резолюции не проходят, а приставка без хвоста в перечень не попадает вовсе.
-	if f := commentCoordFindings(coords, resolvesFixture(
-		"docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md")); len(f) != 0 {
+	// Хвост есть у четырёх из семи: три формы многоточия и снятый путь. Формы
+	// класса путей распознаны РАЗБОРОМ — перепись обязана это назвать, иначе
+	// молчание на них неотличимо от слепоты к ним.
+	if census.ClassForms != 3 {
+		t.Fatalf("форм класса путей распознано %d из трёх — распознаватель не знает "+
+			"формы, которую шапка гейта объявляет законной: %+v", census.ClassForms, census)
+	}
+	if census.WithTail != 4 {
+		t.Fatalf("хвостов прочитано %d из четырёх: %+v", census.WithTail, census)
+	}
+	// Резолвер инъекции ЗНАЕТ голову каждого многоточия: молчание близнеца (в)
+	// обязано идти от формы, а не от того, что резолверу хвост незнаком.
+	knowsHeads := resolvesFixture(
+		"docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md",
+		"internal/…", "internal/...", ".../REPORT-R7-2-strength.txt", "internal/")
+	if f := commentCoordFindings(coords, knowsHeads); len(f) != 0 {
 		t.Fatalf("законная форма объявлена находкой: %v", f)
+	}
+}
+
+// TestCommentCoordinateGateRedsWhenTheEllipsisIsDropped — вторая половина пары
+// к близнецу (в): тот же хвост без многоточия есть координата, и она — находка.
+// Без этой половины молчание на многоточии ничего не доказывало бы.
+func TestCommentCoordinateGateRedsWhenTheEllipsisIsDropped(t *testing.T) {
+	coords, census, err := check.ScanCommentCoordinates("internal/check/x.go",
+		[]byte(layoutEllipsisDroppedSrc))
+	if err != nil {
+		t.Fatalf("разбор: %v", err)
+	}
+	if census.WithTail != 1 || census.ClassForms != 0 {
+		t.Fatalf("хвост без многоточия прочитан как форма класса путей: %+v", census)
+	}
+	f := commentCoordFindings(coords, resolvesFixture("internal/"))
+	if len(f) != 1 {
+		t.Fatalf("координата каталога, лежащего здесь, находкой не стала: %d — %v", len(f), f)
+	}
+	if !strings.Contains(f[0], "services/iam/internal/") {
+		t.Errorf("находка не называет координату целиком: %q", f[0])
+	}
+}
+
+// TestCommentCoordinateGateTreatsASentenceStopAsPunctuation — одна точка в
+// конце координаты — конец предложения: она отрезается, а координата судится.
+// Иначе точка в конце фразы прятала бы находку от резолвера.
+func TestCommentCoordinateGateTreatsASentenceStopAsPunctuation(t *testing.T) {
+	coords, census, err := check.ScanCommentCoordinates("internal/check/x.go",
+		[]byte(layoutSentenceStopSrc))
+	if err != nil {
+		t.Fatalf("разбор: %v", err)
+	}
+	if census.WithTail != 1 || census.ClassForms != 0 || len(coords) != 1 {
+		t.Fatalf("координата с точкой в конце прочитана не как координата: %+v", census)
+	}
+	if coords[0].Tail != "internal/check" {
+		t.Fatalf("точка предложения не отрезана: хвост %q", coords[0].Tail)
+	}
+	if f := commentCoordFindings(coords, resolvesFixture("internal/check")); len(f) != 1 {
+		t.Fatalf("координата с точкой предложения находкой не стала: %v", f)
 	}
 }
 

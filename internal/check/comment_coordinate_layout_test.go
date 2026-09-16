@@ -44,10 +44,14 @@ func commentCoordWalkable(rel string) bool {
 // commentCoordFindings — координаты, чей ХВОСТ резолвится в этом дереве. Тот же
 // предикат зовёт инъекция; резолюция подаётся функцией, чтобы инъекция могла
 // задать своё дерево, не трогая настоящее.
+//
+// Форма класса путей (хвост с многоточием) до резолюции НЕ доходит: её
+// распознаёт разбор, а не резолвер. Прежде было наоборот — резолвер знал знак
+// многоточия, а разбор обрывал хвост перед ним, и знание не исполнялось ни разу.
 func commentCoordFindings(coords []check.CommentCoordinate, resolves func(string) bool) []string {
 	var out []string
 	for _, c := range coords {
-		if !resolves(c.Tail) {
+		if c.ClassForm || !resolves(c.Tail) {
 			continue
 		}
 		out = append(out, fmt.Sprintf("%s:%d  `%s` — тот же файл лежит здесь как `%s`",
@@ -67,7 +71,7 @@ func TestCommentDoesNotNameThisTreeByTheOtherLayout(t *testing.T) {
 	resolves := func(tail string) bool {
 		head := strings.Split(tail, "*")[0]
 		head = strings.TrimRight(head, "/")
-		if head == "" || strings.Contains(tail, "…") {
+		if head == "" {
 			return false
 		}
 		_, err := os.Stat(filepath.Join(ownDir, filepath.FromSlash(head)))
@@ -106,12 +110,14 @@ func TestCommentDoesNotNameThisTreeByTheOtherLayout(t *testing.T) {
 		total.Comments += census.Comments
 		total.Mentions += census.Mentions
 		total.WithTail += census.WithTail
+		total.ClassForms += census.ClassForms
 		coords = append(coords, c...)
 	}
 
 	t.Logf("перепись: не-тестовых файлов Go разобрано %d, групп комментария %d, упоминаний "+
-		"приставки `%s` %d, из них с хвостом %d",
-		parsed, total.Comments, check.PlatformLayoutPrefix, total.Mentions, total.WithTail)
+		"приставки `%s` %d, из них с хвостом %d, из них форм класса путей (с многоточием) %d",
+		parsed, total.Comments, check.PlatformLayoutPrefix, total.Mentions, total.WithTail,
+		total.ClassForms)
 
 	if parsed < commentCoordCensusFloor {
 		t.Fatalf("перепись обвалилась: разобрано %d файлов при пороге %d", parsed, commentCoordCensusFloor)
