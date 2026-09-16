@@ -54,7 +54,7 @@ B-стороны в фикстуре нет вовсе, и честный кей
 страницу попала, а собственная строка может лежать сколь угодно далеко за окном.
 Это чёрно-ящичный близнец пробы 645-09 `own_user_row`.
 
-Pre-conditions: `PRO-Robotech/kacho:tests/authz-fixtures/setup.sh` (jwtAccountAdminB, accountAId,
+Pre-conditions: `tests/authz-fixtures/seed_own_stand.py` (jwtAccountAdminB, accountAId,
 accountBId, projectA1Id, projectB1Id, userAAAId, userAABId).
 """
 
@@ -196,3 +196,8 @@ for _slug, _path, _field, _own_var, _foreign_var, _belongs in _SURFACES:
             ),
         ],
     ))
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")

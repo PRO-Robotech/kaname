@@ -4,7 +4,8 @@
 """Case-set для AccessBindingService — IAM-1 REDESIGN (authz-core: scope+target+revoke).
 
 Покрывает tenant-facing редизайн AccessBinding (docs/specs/sub-phase-IAM-1-tenancy-
-authz-core-acceptance.md, F7/F8/F9/F10/F11). Public :8080 через api-gateway; мутации →
+authz-core-acceptance.md, F7/F8/F9/F10/F11). Собственный публичный REST-фронт
+службы (`address_own_front`, e2e-flow.md §7а); мутации →
 IAM Operation (id-prefix `iop`).
 
 Трассировка IAM-1-NN (verifies-аннотация в title):
@@ -747,3 +748,8 @@ CASES.append(Case(
         *_cleanup_role("rdRoleLf"),
     ],
 ))
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")
