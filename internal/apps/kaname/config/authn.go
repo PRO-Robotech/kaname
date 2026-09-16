@@ -181,12 +181,6 @@ func (c AuthNConfig) ResolveAudience() string {
 	return c.ResolveDomain()
 }
 
-// ResolveHydraAdminURL — URL of the Hydra admin API (client-registration +
-// jwt-bearer trust-grants). Precedence: the explicit `authn.hydra-admin-url` /
-// ENV KANAME_HYDRA_ADMIN_URL override, then the derivation from the issuer
-// (hydra.X → hydra-admin.X). The override lets in-cluster iam reach the
-// cluster-internal admin Service (http://kacho-umbrella-hydra-admin.<ns>.svc:4445)
-// even when the external issuer host does not resolve in-cluster.
 // DeclaredHydraAdminURL returns the admin-API address an operator actually
 // WROTE — the YAML setting or its ENV override — and the empty string when
 // neither is set.
@@ -216,6 +210,12 @@ func (c AuthNConfig) ResolveHydraAdminCAFile() string {
 	return strings.TrimSpace(os.Getenv("KANAME_HYDRA_ADMIN_CA_FILE"))
 }
 
+// ResolveHydraAdminURL — URL of the Hydra admin API (client-registration +
+// jwt-bearer trust-grants). Precedence: the explicit `authn.hydra-admin-url` /
+// ENV KANAME_HYDRA_ADMIN_URL override, then the derivation from the issuer
+// (hydra.X → hydra-admin.X). The override lets in-cluster iam reach the
+// cluster-internal admin Service (http://kacho-umbrella-hydra-admin.<ns>.svc:4445)
+// even when the external issuer host does not resolve in-cluster.
 func (c AuthNConfig) ResolveHydraAdminURL() string {
 	if v := c.DeclaredHydraAdminURL(); v != "" {
 		return v

@@ -5,7 +5,7 @@ package modulecatalog
 
 // plan.go — ВЕРДИКТ ОПОРЫ: отличает ПОЧИНКУ от КИРПИЧА.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`,
+// Приёмка `docs/engineering/acceptance/plan-confirms-what-apply-withdraws.md`,
 // §2.4 и §2.11; задача продукта #1034.
 //
 // ─────────────────────────────────────────────────────────────────────────────

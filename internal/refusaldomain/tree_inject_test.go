@@ -16,6 +16,7 @@ package refusaldomain_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -176,5 +177,157 @@ func TestInject_LedgerEntryWithoutSubjectIsAFinding(t *testing.T) {
 	if stale != len(ledger) {
 		t.Fatalf("на дереве без прощаемых записей ведомость дала %d устаревших из %d — "+
 			"самоистечение не наблюдается", stale, len(ledger))
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ФОРМА, КОТОРОЙ РАЗБОР НЕ ЗНАЛ (kaname#126)
+//
+// Домен, вычисленный ОДИН РАЗ при старте и уехавший именем уровня пакета, —
+// законная форма «величина берётся». Разбор считал всякое голое имя строковой
+// константой, поэтому производитель, бравший домен у объявления, числился
+// зашитым и держался записью ведомости — послабление прощало ИСПОЛНЕННЫЙ
+// предикат.
+
+// producerComputedNameSrc — производитель берёт домен ИМЕНЕМ, объявленным в
+// СОСЕДНЕМ файле того же пакета. Так лежит `deny_details.go`.
+const producerComputedNameSrc = `package probe
+
+import "google.golang.org/genproto/googleapis/rpc/errdetails"
+
+func refuse() *errdetails.ErrorInfo {
+	return &errdetails.ErrorInfo{Reason: "R", Domain: denyDomain}
+}
+`
+
+// producerComputedDeclSrc — сосед, объявляющий это имя вызовом.
+const producerComputedDeclSrc = `package probe
+
+var denyDomain = contractnaming.OwnContractPackage()
+`
+
+// producerLiteralDeclSrc — тот же сосед, изменён РОВНО ОДИН факт: инициализатор
+// стал литералом. Имя то же, форма записи у производителя та же — меняется
+// только то, ВЫЧИСЛЕНА ли величина.
+const producerLiteralDeclSrc = `package probe
+
+var denyDomain = "iam.kacho.cloud"
+`
+
+// syntheticPackage — дерево из НЕСКОЛЬКИХ файлов одного пакета. Отдельно от
+// `syntheticTree` затем, что предмет здесь — резолюция имени ЧЕРЕЗ ГРАНИЦУ
+// ФАЙЛА: резолюция в пределах файла дала бы ложную находку на законной раскладке.
+func syntheticPackage(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "probe")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("синтетическое дерево: %v", err)
+	}
+	for name, src := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600); err != nil {
+			t.Fatalf("запись %s: %v", name, err)
+		}
+	}
+	return root
+}
+
+// TestInject_ComputedNameIsTaken — законный близнец новой формы: имя, чья
+// величина ВЫЧИСЛЕНА вызовом, есть «домен берётся».
+func TestInject_ComputedNameIsTaken(t *testing.T) {
+	scan, err := scanTree(syntheticPackage(t, map[string]string{
+		"refusal.go": producerComputedNameSrc,
+		"declare.go": producerComputedDeclSrc,
+	}))
+	if err != nil {
+		t.Fatalf("обход: %v", err)
+	}
+	if scan.Producers != 1 {
+		t.Fatalf("производителей найдено %d, ожидался 1", scan.Producers)
+	}
+	if scan.Wired != 1 || len(scan.Hardcoded) != 0 {
+		t.Fatalf("имя, вычисленное вызовом, объявлено зашитым: берут у объявления %d, "+
+			"зашито %v.\nИменно эта посылка и была ложной: производитель, бравший домен у "+
+			"объявления, числился зашитым и держался записью ведомости (kaname#126)",
+			scan.Wired, scan.Hardcoded)
+	}
+}
+
+// TestInject_LiteralNameIsStillFound — ОДИН факт против близнеца выше:
+// инициализатор стал литералом. Без этой оси новая форма прощала бы всякое имя,
+// то есть закрывала бы предмет гейта целиком.
+func TestInject_LiteralNameIsStillFound(t *testing.T) {
+	scan, err := scanTree(syntheticPackage(t, map[string]string{
+		"refusal.go": producerComputedNameSrc,
+		"declare.go": producerLiteralDeclSrc,
+	}))
+	if err != nil {
+		t.Fatalf("обход: %v", err)
+	}
+	if len(scan.Hardcoded) != 1 {
+		t.Fatalf("имя с ЛИТЕРАЛЬНЫМ инициализатором зачтено как взятое у объявления: "+
+			"зашито %v, берут %d.\nТогда резолюция имён прощала бы всё подряд, и предмет "+
+			"гейта исчез бы вместе с его находками", scan.Hardcoded, scan.Wired)
+	}
+	if scan.Hardcoded[0] != "internal/probe/refusal.go" {
+		t.Fatalf("находка не называет координату производителя: %q", scan.Hardcoded[0])
+	}
+}
+
+// TestInject_NameResolutionCrossesFilesNotPackages — граница резолюции названа:
+// имя, объявленное в ДРУГОМ пакете, не резолвится. Иначе одноимённая переменная
+// соседнего пакета прощала бы зашитый домен.
+func TestInject_NameResolutionCrossesFilesNotPackages(t *testing.T) {
+	root := t.TempDir()
+	for dir, files := range map[string]map[string]string{
+		"probe": {"refusal.go": producerComputedNameSrc},
+		"other": {"declare.go": producerComputedDeclSrc},
+	} {
+		d := filepath.Join(root, "internal", dir)
+		if err := os.MkdirAll(d, 0o750); err != nil {
+			t.Fatalf("синтетическое дерево: %v", err)
+		}
+		for name, src := range files {
+			body := src
+			if dir == "other" {
+				body = strings.Replace(src, "package probe", "package other", 1)
+			}
+			if err := os.WriteFile(filepath.Join(d, name), []byte(body), 0o600); err != nil {
+				t.Fatalf("запись: %v", err)
+			}
+		}
+	}
+	scan, err := scanTree(root)
+	if err != nil {
+		t.Fatalf("обход: %v", err)
+	}
+	if len(scan.Hardcoded) != 1 {
+		t.Fatalf("имя ЧУЖОГО пакета зачтено как объявление этого: зашито %v, берут %d",
+			scan.Hardcoded, scan.Wired)
+	}
+}
+
+// TestInject_LocalVariableIsNotAPackageName — вторая граница: имя, объявленное
+// ВНУТРИ функции, именем уровня пакета не является.
+func TestInject_LocalVariableIsNotAPackageName(t *testing.T) {
+	const src = `package probe
+
+import "google.golang.org/genproto/googleapis/rpc/errdetails"
+
+func refuse() *errdetails.ErrorInfo {
+	denyDomain := compute()
+	_ = denyDomain
+	return &errdetails.ErrorInfo{Reason: "R", Domain: hardcoded}
+}
+
+const hardcoded = "iam.kacho.cloud"
+`
+	scan, err := scanTree(syntheticTree(t, "refusal.go", src))
+	if err != nil {
+		t.Fatalf("обход: %v", err)
+	}
+	if len(scan.Hardcoded) != 1 {
+		t.Fatalf("локальная переменная зачтена как объявление уровня пакета: зашито %v, "+
+			"берут %d", scan.Hardcoded, scan.Wired)
 	}
 }

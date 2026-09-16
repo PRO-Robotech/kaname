@@ -266,7 +266,7 @@ func sqlConstraintNameBefore(s string, at int) string {
 	return sqlIdentifierAtPos(s, i+len("constraint"))
 }
 
-// sqlIdentifierAt — первый идентификатор начиная с позиции i.
+// sqlIdentifierAtPos — первый идентификатор начиная с позиции i.
 func sqlIdentifierAtPos(s string, i int) string {
 	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
 		i++

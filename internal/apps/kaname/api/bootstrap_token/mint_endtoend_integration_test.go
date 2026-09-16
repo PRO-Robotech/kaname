@@ -116,7 +116,7 @@ func (p ownClientPort) GetSAKey(ctx context.Context, id domain.SAOAuthClientID) 
 // зеленело бы на реализации, выдающей строку, которую край отвергнет.
 func TestBootstrapTokenIsMintedByUsAndLooksLikeWhatTheEdgeAccepts(t *testing.T) {
 	if testing.Short() {
-		t.Skip("нужен Postgres в контейнере: пропуск под -short, прогон — make test-pg-outside-selection")
+		t.Skip("нужен Postgres в контейнере: пропуск под -short, прогон — контейнерное задание конвейера (.github/scripts/run-integration.sh)")
 	}
 	ctx := context.Background()
 	dsn := pgtest.NewDB(t)

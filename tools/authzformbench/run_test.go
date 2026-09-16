@@ -23,7 +23,7 @@ import (
 // benchmark that quietly declines to run is the "not executed reported as green"
 // class this tree already has a name for.
 //
-//	AUTHZFORMBENCH=1 go test -C services/iam ./tools/authzformbench/ -run TestRunMatrix -v -timeout 4h
+//	AUTHZFORMBENCH=1 go test ./tools/authzformbench/ -run TestRunMatrix -v -timeout 4h
 //
 // Overrides (all optional):
 //

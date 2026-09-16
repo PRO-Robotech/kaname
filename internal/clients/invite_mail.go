@@ -249,6 +249,14 @@ func (s *InviteMailSender) Send(ctx context.Context, ev InviteMailEvent) error {
 
 	addr, ok := normalizedHostPort(relay.Addr)
 	if !ok {
+		if strings.Contains(relay.Addr, "://") {
+			// Адрес доехал НЕРАЗОБРАННЫМ. Его разбирает страж старта
+			// (`invite-mail.relay`), и сборка обязана отдать сюда `узел:порт`.
+			// Сам адрес не печатается: в нём может стоять удостоверение.
+			return fmt.Errorf("%w: mail relay address reached the transport as a URI — it is "+
+				"parsed once, by the start guard of invite-mail.relay, and must arrive here as "+
+				"host:port", ErrMailMisconfigured)
+		}
 		return fmt.Errorf("%w: mail relay address is not set (got %q)", ErrMailMisconfigured, relay.Addr)
 	}
 	if strings.TrimSpace(relay.From) == "" {
@@ -375,29 +383,27 @@ func (s *InviteMailSender) Send(ctx context.Context, ev InviteMailEvent) error {
 	return nil
 }
 
-// normalizedHostPort приводит объявленный адрес к `host:port` и говорит, задан
-// ли он ВООБЩЕ.
+// normalizedHostPort приводит адрес к `host:port` и говорит, годен ли он.
 //
-// Вырожденные значения — пустая строка, пробел, схема без узла, `:` и `:25` —
-// считаются НЕЗАДАННЫМИ, а не «непустыми» (Р4). Предикат ОДИН на стража и на
-// потребителя: разойдясь, они разойдутся ровно там, где расхождение опасно.
+// АДРЕС ПРИХОДИТ РАЗОБРАННЫМ. Форму URI (`smtp://…`, `smtps://…`) разбирает ОДИН
+// раз страж старта (`config.InviteMailConfig.RelayCoordinate`): схема там —
+// посадка полосы, часть до «@» — имя пользователя. Прежде здесь схема срезалась
+// молча, то есть транспорт разбирал ту же строку второй раз и С ДРУГИМ СМЫСЛОМ:
+// `smtps://` уходил в STARTTLS, имя становилось частью имени узла, `/` — частью
+// порта. Поэтому адрес со схемой здесь НЕ годен — это отказ по настройке, а не
+// повод угадывать.
+//
+// Вырожденные значения — пустая строка, пробел, `:` и `:25` — считаются
+// НЕЗАДАННЫМИ, а не «непустыми» (Р4).
 func normalizedHostPort(raw string) (string, bool) {
 	s := strings.TrimSpace(raw)
-	if s == "" {
-		return "", false
-	}
-	// Схема, если её написали, снимается: `smtp://relay:587` → `relay:587`.
-	if i := strings.Index(s, "://"); i >= 0 {
-		s = s[i+3:]
-	}
-	s = strings.TrimSpace(s)
-	if s == "" {
+	if s == "" || strings.Contains(s, "://") {
 		return "", false
 	}
 	host, port, err := net.SplitHostPort(s)
 	if err != nil {
 		// Порт не назван — узел назван. Это законно: порт подставляем.
-		if strings.TrimSpace(s) == "" || strings.Contains(s, ":") {
+		if strings.Contains(s, ":") {
 			return "", false
 		}
 		return net.JoinHostPort(s, "587"), true

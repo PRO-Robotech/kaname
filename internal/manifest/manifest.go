@@ -3,7 +3,7 @@
 
 // Package manifest — форму манифеста домена судит ОДИН исполнитель: разбор в
 // Go-структуры плюс `Decoder.KnownFields(true)` (задача #1088, приёмка
-// services/iam/docs/engineering/acceptance/module-manifest-seed-contract.md,
+// docs/engineering/acceptance/module-manifest-seed-contract.md,
 // далее module-manifest-resources-roles-deprecated.md — задача #1778).
 //
 // Манифест — то, что домен объявляет платформе: чем он является и что у него

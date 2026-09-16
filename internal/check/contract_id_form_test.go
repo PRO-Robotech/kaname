@@ -89,7 +89,13 @@ type mintedPrefix struct {
 	prefix   string
 	form     idMintForm
 	producer string
-	// producerRoots — где искать производителя (относительно корня монорепо).
+	// producerRoots — где искать производителя (координатой дерева).
+	//
+	// ПУСТОЙ перечень означает «производитель живёт в дереве ПЛАТФОРМЫ»: контракт
+	// службы приводит такой префикс примером, а чеканит его чужой модуль, которого
+	// в этом репозитории нет by construction. Такие строки из оси живости
+	// исключены и НАЗВАНЫ числом в переписи — молча исключать их значило бы
+	// объявить «производитель есть» там, где его не искали.
 	producerRoots []string
 }
 
@@ -108,13 +114,20 @@ var mintedPrefixes = []mintedPrefix{
 	{"soc", mintConcatenated, "ids.NewID(domain.PrefixSAOAuthClient)", []string{"services/iam"}},
 	{"iop", mintConcatenated, "domain.PrefixOperationIAM", []string{"services/iam"}},
 	{"cag", mintUnderscore, "domain.NewKac127ID(domain.PrefixClusterAdminGrant)", []string{"services/iam"}},
-	{"lim", mintHyphen, "ids.NewHyphenID(ids.PrefixLimitHyphen)", []string{"services/iam"}},
+	// Здесь стояла строка `lim` (предел учёта). Снята вместе со своим предметом:
+	// авторитет величин ушёл из службы, места чеканки в непробном дереве не
+	// осталось, и контракт этого префикса примером больше не приводит. Перепись
+	// назвала строку пережившей предмет сама — но увидеть это удалось не сразу:
+	// проба спрашивала координату дерева платформы и пропускала себя целиком
+	// (kaname#108).
 	{"ic", mintHyphen, "ids.NewHyphenID(ids.PrefixInteractiveClientHyphen)", []string{"services/iam"}},
 	{"mbr", mintHyphenSQL, "'mbr-' || substr", []string{"services/iam/internal/migrations"}},
-	// Чужие домены, чьи идентификаторы контракт iam приводит в примерах.
-	{"net", mintConcatenated, "ids.NewID(ids.PrefixNetwork)", []string{"services/vpc"}},
-	{"enp", mintConcatenated, "ids.PrefixOperationVPC", []string{"services/vpc"}},
-	{"reg", mintConcatenated, "ids.NewID(ids.PrefixRegistry)", []string{"services/registry"}},
+	// Чужие домены, чьи идентификаторы контракт iam приводит в примерах. Место
+	// чеканки у них — дерево ПЛАТФОРМЫ, и здесь его нет: перечень пуст, строка
+	// из оси живости исключена и сосчитана отдельно.
+	{"net", mintConcatenated, "ids.NewID(ids.PrefixNetwork)", nil},
+	{"enp", mintConcatenated, "ids.PrefixOperationVPC", nil},
+	{"reg", mintConcatenated, "ids.NewID(ids.PrefixRegistry)", nil},
 }
 
 // legacyAcceptedForm — написание, которое продукт БОЛЬШЕ НЕ ЧЕКАНИТ, но всё ещё
@@ -171,21 +184,30 @@ func TestMintedFormsAreProvenByExecution(t *testing.T) {
 // ЧЕКАНКИ в непробном дереве. Без этого таблица переживает свой предмет.
 func TestEveryMintedPrefixStillHasAProducer(t *testing.T) {
 	root := monorepoRoot(t)
-	orphans, filesRead := prefixesWithoutAProducer(t, root, mintedPrefixes)
+	orphans, filesRead, foreign := prefixesWithoutAProducer(t, root, mintedPrefixes)
 	require.NotZero(t, filesRead, "обход пуст — вердикт беспредметен")
-	t.Logf("перепись: строк таблицы %d · прочитано файлов %d · без производителя %d",
-		len(mintedPrefixes), filesRead, len(orphans))
+	t.Logf("перепись: строк таблицы %d · прочитано файлов %d · без производителя %d · "+
+		"производитель в дереве платформы (вне оси) %d (%s)",
+		len(mintedPrefixes), filesRead, len(orphans), len(foreign), strings.Join(foreign, ", "))
 	require.Emptyf(t, orphans,
 		"у строк таблицы нет места чеканки в непробном дереве — они пережили свой предмет:\n%s",
 		strings.Join(orphans, "\n"))
 }
 
 // prefixesWithoutAProducer — строки таблицы, чьего места чеканки в дереве нет.
-func prefixesWithoutAProducer(t *testing.T, root string, rows []mintedPrefix) ([]string, int) {
+//
+// Третий возврат — строки, чей производитель живёт в дереве ПЛАТФОРМЫ: они вне
+// оси живости, и их число печатается, чтобы «без производителя 0» не читалось
+// шире, чем оно есть.
+func prefixesWithoutAProducer(t *testing.T, root string, rows []mintedPrefix) ([]string, int, []string) {
 	t.Helper()
-	var orphans []string
+	var orphans, foreign []string
 	filesRead := 0
 	for _, m := range rows {
+		if len(m.producerRoots) == 0 {
+			foreign = append(foreign, m.prefix)
+			continue
+		}
 		found := false
 		for _, sub := range m.producerRoots {
 			// Координата приводится к ПОСАДКЕ: перечисленные каталоги —
@@ -201,7 +223,7 @@ func prefixesWithoutAProducer(t *testing.T, root string, rows []mintedPrefix) ([
 			orphans = append(orphans, fmt.Sprintf("префикс %q: места чеканки %q нет", m.prefix, m.producer))
 		}
 	}
-	return orphans, filesRead
+	return orphans, filesRead, foreign
 }
 
 // TestLegacyAcceptedFormsStillHaveASubject — послабление живёт, пока есть, что

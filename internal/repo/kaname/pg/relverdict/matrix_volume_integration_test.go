@@ -86,7 +86,7 @@ const matrixEnv = "KACHO_MATRIX_VOLUME"
 // matrixRunCommand — команда повторения, дословно. Константой рядом с ручкой,
 // потому что попадает в отчёт: отчёт без дословной команды через месяц нечем
 // проверить.
-const matrixRunCommand = "KACHO_MATRIX_VOLUME=1 go test -C services/iam " +
+const matrixRunCommand = "KACHO_MATRIX_VOLUME=1 go test " +
 	"./internal/repo/kaname/pg/relverdict/ -run TestMatrixVolume_Report " +
 	"-count=1 -v -timeout 120m"
 

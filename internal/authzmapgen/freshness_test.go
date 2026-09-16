@@ -69,7 +69,7 @@ func TestGeneratedTablesAreFresh(t *testing.T) {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: корень модуля не установлен: %v", merr)
 	}
 
-	census, err := authzmapgen.CheckFresh(platformtree.Require(t), moduleRoot)
+	census, err := authzmapgen.CheckFresh(platformtree.RequireNamedPlatformTree(t), moduleRoot)
 	t.Logf("осмотрено: %s", census.Summary())
 	if census.Resources == 0 {
 		t.Fatal("ресурсов ноль — «файл свеж» здесь означало бы «сверять было нечего»")
@@ -91,7 +91,7 @@ func TestGeneratedTablesAreFresh(t *testing.T) {
 //
 // Прежняя редакция клала приманку в НАСТОЯЩЕЕ дерево службы (`services/iam/`)
 // и убирала её за собой. Пока проба шла одна, это работало. При штатном
-// `go test -C services/iam ./...` без `-p 1` соседний пакет обходит тот же каталог
+// `go test ./...` без `-p 1` соседний пакет обходит тот же каталог
 // В ЭТО ЖЕ ВРЕМЯ: он успевает прочитать запись каталога, а к `lstat` файла уже
 // нет. Соседняя проба падает с текстом «обход дерева службы не выполнен» — то
 // есть говорит о ДЕРЕВЕ, хотя дерево исправно. Это третья категория («не
