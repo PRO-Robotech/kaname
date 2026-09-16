@@ -15,7 +15,7 @@ import (
 )
 
 // resources.go — раздел `resources` (приёмка
-// services/iam/docs/engineering/acceptance/module-manifest-resources-roles-deprecated.md,
+// docs/engineering/acceptance/module-manifest-resources-roles-deprecated.md,
 // §1.3, §2.2 … §2.5; сценарии MOD-MR-01 … MOD-MR-09, MOD-MR-27).
 //
 // # Раздел НЕОДНОРОДЕН, и это главное о нём
@@ -183,7 +183,7 @@ var (
 // ЯРУСА (чтение · запись · администрирование) по 30 токенам, а не правило
 // класса действия по пяти. Экспортировав его, задача экспортировала бы другое
 // правило; предикат — `sed -n '/^func verbClass/,/^}/p'
-// services/iam/internal/authzmap/permissions_to_relations.go`, в теле три
+// internal/authzmap/permissions_to_relations.go`, в теле три
 // возвращаемых яруса и ни одного класса.
 var canonicalVerbClasses = []string{"get", "list", "create", "update", "delete"}
 
@@ -1458,8 +1458,7 @@ func VerbRelationName(verb string) string { return "v_" + strings.ToLower(verb) 
 // записан у базовых ярусов (`validateResourceBaseRoles`): ресурс, все действия
 // которого внутренние, ярусов не получает именно поэтому.
 //
-// Вторым следствием побайтовая сверка канона (`make -C services/iam
-// model-canon-check`) отвергала бы строку, которой в модели нет, — то есть
+// Вторым следствием побайтовая сверка канона (`make // model-canon-check`) отвергала бы строку, которой в модели нет, — то есть
 // объявить внутреннее действие было НЕЛЬЗЯ НИ ОДНИМ ВХОДОМ, пока правило не
 // объявлено здесь.
 //

@@ -3,7 +3,7 @@
 
 // Package moduleroles — ПРИМЕНИТЕЛЬ ролей модуля: читает манифест как данные и
 // приводит строки системных ролей своего модуля к объявленному состоянию
-// (приёмка `services/iam/docs/engineering/acceptance/roles-come-as-data-not-migrations.md`,
+// (приёмка `docs/engineering/acceptance/roles-come-as-data-not-migrations.md`,
 // §3.1, §3.3, §3.5, §3.7; задача #1824).
 //
 // # Почему писателем не может быть миграция
@@ -27,7 +27,7 @@
 //     RESTRICT`), а если бы было можно, каскад унёс бы селекторы, проекцию
 //     глаголов и проекцию сегментов МОЛЧА. Отзыв роли — предмет #1913, и он
 //     выражается ПОМЕТКОЙ снятия, а не удалением строки
-//     (`services/iam/docs/engineering/architecture/role-withdrawal-is-a-mark.md`);
+//     (`docs/engineering/architecture/role-withdrawal-is-a-mark.md`);
 //  2. **не приводит имя к другому написанию.** Имя роли — аргумент хеша,
 //     дающего `id`; «нормализация» дала бы другой `id` и разорвала бы выдачи
 //     (§3.7). Имя берётся ДОСЛОВНО;

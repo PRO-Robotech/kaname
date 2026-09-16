@@ -37,13 +37,14 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
-// manifestsRootRel — каталог манифестов МОДУЛЕЙ ПЛАТФОРМЫ, координатой от её
-// корня.
+// manifestsRootRel — каталог манифестов МОДУЛЕЙ ПЛАТФОРМЫ внутри дерева,
+// НАЗВАННОГО снаружи.
 //
-// Подъёма каталогами здесь больше нет: число шагов вверх верно ровно для одной
-// посадки, а в самостоятельном клоне тот же подъём выводит ВЫШЕ его корня — в
-// чужое дерево либо в никуда. Манифесты соседних модулей в поставку не входят
-// by construction, поэтому их отсутствие — «условие не создано».
+// Подъёма каталогами здесь нет и быть не может: модуль не лежит в дереве
+// платформы ни в одной посадке — после его выноса каталога `services/iam` нет ни
+// у платформы, ни здесь. Корень называет ручка `PLATFORM_TREE`, и её отсутствие
+// есть «условие не создано» с ПРОИЗВОДИТЕЛЕМ (задание конвейера), а не
+// безусловный пропуск, каким это было полтора месяца.
 const manifestsRootRel = "services"
 
 // deliveredManifests — манифесты, ВЫВЕДЕННЫЕ обходом дерева.
@@ -52,7 +53,7 @@ const manifestsRootRel = "services"
 // молча — ровно тем классом, который корпус ловит в документах.
 func deliveredManifests(t *testing.T) []*manifest.Manifest {
 	t.Helper()
-	manifestsRoot := platformtree.RequirePath(t, manifestsRootRel)
+	manifestsRoot := filepath.Join(platformtree.RequireNamedPlatformTree(t), manifestsRootRel)
 	paths, err := filepath.Glob(filepath.Join(manifestsRoot, "*", "manifest.yaml"))
 	require.NoError(t, err)
 	sort.Strings(paths)

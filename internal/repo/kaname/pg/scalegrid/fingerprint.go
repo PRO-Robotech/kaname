@@ -297,7 +297,7 @@ func stampFiles(root string, files []string, fp *Fingerprint) error {
 //
 //	путь импорта своего модуля   ".../kaname/internal/repo/<каталог>/pg/resource_mirror"
 //	путь отчёта                  "services/iam/.../REPORT-R7-2-strength.txt"
-//	каталог предмета записи      "services/iam/internal/apps/<каталог>/.../reconcile"
+//	каталог предмета записи      "internal/apps/<каталог>/.../reconcile"
 //
 // # Почему это НЕ дыра
 //

@@ -48,7 +48,7 @@ func (t *stmtTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEnd
 
 func (t *stmtTracer) count() int { return int(t.n.Load()) }
 
-// window — окно измерения: разность показаний трассировщика.
+// stmtWindow — окно измерения: разность показаний трассировщика.
 type stmtWindow struct {
 	t    *stmtTracer
 	base int

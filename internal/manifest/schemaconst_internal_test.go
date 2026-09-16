@@ -270,7 +270,8 @@ func splitSchemaPath(path string) []string {
 // readTreeManifests — манифесты дерева, разобранные как YAML.
 func readTreeManifests(t *testing.T) map[string]any {
 	t.Helper()
-	paths, err := filepath.Glob(platformtree.RequirePath(t, treeManifestGlob))
+	paths, err := filepath.Glob(filepath.Join(
+		platformtree.RequireNamedPlatformTree(t), filepath.FromSlash(treeManifestGlob)))
 	if err != nil {
 		t.Fatalf("обход манифестов дерева не состоялся (%s): %v", treeManifestGlob, err)
 	}

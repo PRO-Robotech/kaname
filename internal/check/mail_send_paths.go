@@ -28,6 +28,16 @@
 //     хотя бы раз, иначе ось судит пустоту и молчит по этой причине, а не по
 //     существу.
 //
+//     Закрытый список знает ровно то, что в нём названо, — поэтому импорт,
+//     говорящий о почте словом в пути и не объявленный ни транспортом, ни
+//     не-транспортом (`mailNotTransport`), ни пакетом своего модуля, есть
+//     ОТКАЗ «форма разбору неизвестна», а не тишина. Второй отправитель на
+//     библиотеке вне списка иначе уезжал бы из-под наблюдения: якорная
+//     предпосылка на нём молчит (`net/smtp` в дереве остаётся), ось словаря
+//     молчит, если вид взят константой хранилища, а не литералом. Отказ
+//     снимается тем, кто форму знает: библиотека вносится в один из двух
+//     списков этим же изменением.
+//
 //  2. СЛОВАРЬ ВИДОВ. Строковый литерал вида `mail.<вид>.send` — имя события
 //     очереди писем, чей словарь закрыт CHECK'ом миграции. Вид, отличный от
 //     приглашения, есть находка ГДЕ УГОДНО в не-тестовом дереве, даже без
@@ -43,7 +53,15 @@
 // Отправитель, написанный на голом сокете и говорящий по протоколу почты
 // руками, осью 1 не опознаётся: он не импортирует ничего почтового. Границу
 // закрывает ось 2 — такой отправитель всё равно обязан взять своё событие из
-// очереди, а словарь очереди закрыт миграцией.
+// очереди, а словарь очереди закрыт миграцией. Библиотека транспорта, чей путь
+// импорта о почте не говорит ни словом (`sendgrid`, `ses` названы в списке
+// именно поэтому), под отказ формы не подпадает — её место в списке, а не в
+// предикате.
+//
+// Путь считается ФАЙЛОМ, а не объявлением: второе объявление, открывающее
+// разговор в том же файле, что и первое, вторым путём не считается. Это
+// граница формы, а не оплошность; расширится предмет — ось учится узлу
+// объявления тем же изменением.
 //
 // Об отправителе, живущем в ЧУЖОМ процессе, гейт не утверждает НИЧЕГО (круг 6,
 // В3): его в нашем дереве нет и быть не может, а проверка, требующая
@@ -96,6 +114,19 @@ var mailTransportTokens = []string{
 // адреса, а не транспорт, — и признак, включивший это слово, объявил бы
 // транспортом всякий пакет, который всего лишь читает заголовок письма.
 
+// mailNotTransport — импорты, чей путь говорит о почте и которые разговора с
+// узлом НЕ открывают: разбор и сборка адресов. Второй закрытый список: то, что
+// не названо ни здесь, ни в `mailTransportTokens`, отвергается как форма,
+// которой разбор не знает.
+var mailNotTransport = map[string]bool{
+	"net/mail": true,
+}
+
+// mailishImportRe — путь импорта, говорящий о почте словом. Это НЕ признак
+// транспорта (им остаётся закрытый список), а признак того, что молчать об
+// импорте нельзя.
+var mailishImportRe = regexp.MustCompile(`(?i)smtp|mail`)
+
 // mailKindLiteralRe — имя события очереди писем. Привязано к ОБОИМ концам:
 // проза об этом же предмете несёт те же слова посреди предложения, и образец
 // без привязки краснел бы на собственном объяснении.
@@ -111,6 +142,10 @@ type MailSendPath struct {
 	Import string
 	// Kinds — виды письма, названные литералами ЭТОГО файла.
 	Kinds []string
+	// FormUnknown — импорт говорит о почте, а транспорт ли это, разбор не
+	// знает: это НЕ путь (в перепись путей не входит, вида не несёт), а отказ
+	// формы, и вердикт называет его находкой с координатой.
+	FormUnknown bool
 }
 
 // MailKindSite — координата объявления вида письма.
@@ -186,6 +221,21 @@ func MailImportIsTransport(path string) bool {
 	return false
 }
 
+// MailImportFormIsUnknown — предикат ОТКАЗА: путь импорта говорит о почте, а
+// ни известным транспортом, ни известным не-транспортом, ни пакетом своего
+// модуля не является. Исключений ровно три, и каждое — закрытый список либо
+// го-модуль: предикат, отвергающий всё с «mail» в пути, назвал бы неизвестной
+// формой собственное хранилище очереди.
+func MailImportFormIsUnknown(path, ownModule string) bool {
+	if MailImportIsTransport(path) || mailNotTransport[path] {
+		return false
+	}
+	if ownModule != "" && (path == ownModule || strings.HasPrefix(path, ownModule+"/")) {
+		return false
+	}
+	return mailishImportRe.MatchString(path)
+}
+
 // mailTrimLibraryTrappings снимает окантовку имени библиотеки Go: приставку
 // `go-`, окончание `-go` и суффикс мажорной версии.
 func mailTrimLibraryTrappings(seg string) string {
@@ -210,7 +260,11 @@ func MailKindOfLiteral(lit string) (string, bool) {
 }
 
 // ScanMailSendFile разбирает ОДИН файл: импорты транспорта и объявления вида.
-func ScanMailSendFile(rel string, src []byte) (paths []MailSendPath, kinds []MailKindSite, census MailSendCensus, err error) {
+//
+// ownModule — путь своего модуля из go.mod: пакеты своего модуля с «почтой» в
+// пути импорта (хранилище очереди) — наш код, и разбор судит их содержимое
+// там, где они лежат, а не имя импорта.
+func ScanMailSendFile(rel string, src []byte, ownModule string) (paths []MailSendPath, kinds []MailKindSite, census MailSendCensus, err error) {
 	fset := token.NewFileSet()
 	f, perr := parser.ParseFile(fset, rel, src, 0)
 	if perr != nil {
@@ -219,6 +273,7 @@ func ScanMailSendFile(rel string, src []byte) (paths []MailSendPath, kinds []Mai
 
 	var transportLine int
 	var transportImport string
+	var unknown []MailSendPath
 	for _, imp := range f.Imports {
 		census.Imports++
 		p, uerr := strconv.Unquote(imp.Path.Value)
@@ -231,6 +286,11 @@ func ScanMailSendFile(rel string, src []byte) (paths []MailSendPath, kinds []Mai
 		if MailImportIsTransport(p) && transportImport == "" {
 			transportImport = p
 			transportLine = fset.Position(imp.Pos()).Line
+		}
+		if MailImportFormIsUnknown(p, ownModule) {
+			unknown = append(unknown, MailSendPath{
+				File: rel, Line: fset.Position(imp.Pos()).Line, Import: p, FormUnknown: true,
+			})
 		}
 	}
 
@@ -269,6 +329,8 @@ func ScanMailSendFile(rel string, src []byte) (paths []MailSendPath, kinds []Mai
 		})
 		census.Paths = 1
 	}
+	// Отказ формы — не путь: он идёт в вердикт, но не в перепись путей.
+	paths = append(paths, unknown...)
 	return paths, kinds, census, nil
 }
 
@@ -277,9 +339,22 @@ func ScanMailSendFile(rel string, src []byte) (paths []MailSendPath, kinds []Mai
 func AdjudicateMailSendPaths(paths []MailSendPath, kinds []MailKindSite) []MailSendFinding {
 	var out []MailSendFinding
 
-	// Ось 1. Путь без названного вида; путь чужого вида; второй путь одного вида.
+	// Ось 1. Форма, которой разбор не знает; путь без названного вида; путь
+	// чужого вида; второй путь одного вида.
 	byKind := map[string][]MailSendPath{}
 	for _, p := range paths {
+		if p.FormUnknown {
+			out = append(out, MailSendFinding{
+				Where: fmt.Sprintf("%s:%d", p.File, p.Line),
+				Axis:  "transport",
+				What:  "импорт " + p.Import + " говорит о почте, а его форма разбору неизвестна",
+				Why: "Признак транспорта — закрытый список, и он знает ровно то, что в нём " +
+					"названо. Библиотека вне списка есть путь отправки вне наблюдения: ни " +
+					"красного, ни зелёного. Назовите форму — транспортом (`mailTransportTokens`) " +
+					"либо не-транспортом (`mailNotTransport`) — тем же изменением, что вводит импорт.",
+			})
+			continue
+		}
 		if len(p.Kinds) == 0 {
 			out = append(out, MailSendFinding{
 				Where: fmt.Sprintf("%s:%d", p.File, p.Line),
@@ -369,6 +444,10 @@ func ScanMailSendPaths(root string) (paths []MailSendPath, kinds []MailKindSite,
 		return nil, nil, census, fmt.Errorf("состав дерева: %w", terr)
 	}
 	census.Tracked = len(tracked)
+	ownModule, merr := TreeModulePath(root)
+	if merr != nil {
+		return nil, nil, census, fmt.Errorf("свой модуль не отличить от чужого импорта: %w", merr)
+	}
 
 	for _, abs := range tracked {
 		rel, rerr := filepath.Rel(root, abs)
@@ -385,7 +464,7 @@ func ScanMailSendPaths(root string) (paths []MailSendPath, kinds []MailKindSite,
 		}
 		census.Read++
 
-		p, k, c, serr := ScanMailSendFile(slashed, raw)
+		p, k, c, serr := ScanMailSendFile(slashed, raw, ownModule)
 		if serr != nil {
 			return nil, nil, census, fmt.Errorf("разбор %s: %w", slashed, serr)
 		}

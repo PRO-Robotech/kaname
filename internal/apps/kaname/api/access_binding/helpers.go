@@ -329,8 +329,8 @@ func fgaHoldsScopeAdminE(ctx context.Context, relations clients.RelationStore, r
 	return allowed, nil
 }
 
-// requireGrantAuthorityViaCreate — shim allowing CreateAccessBindingUseCase to
-// call the package-level requireGrantAuthority without exposing its fields.
+// requireGrantAuthority — метод-переходник: даёт CreateAccessBindingUseCase звать
+// пакетную функцию того же имени, не раскрывая своих полей.
 func (u *CreateAccessBindingUseCase) requireGrantAuthority(ctx context.Context, resourceType, resourceID string) error {
 	return requireGrantAuthority(ctx, u.repo, u.relations, resourceType, resourceID)
 }

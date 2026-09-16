@@ -290,7 +290,6 @@ func (uc *InviteUserUseCase) Execute(ctx context.Context, in InviteUserInput) (*
 	return &op, nil
 }
 
-// doInvite — async-часть. Возвращает marshalled User для Operation.response.
 // assertRoleAssignableOnProject refuses an invitation whose role may not be bound on
 // the invited project.
 //
@@ -341,6 +340,7 @@ func (uc *InviteUserUseCase) assertRoleAssignableOnProject(
 		"role %s is not assignable on project:%s", roleID, projectID)
 }
 
+// doInvite — async-часть. Возвращает marshalled User для Operation.response.
 func (uc *InviteUserUseCase) doInvite(
 	ctx context.Context, opID string, candidateID, invitedBy domain.UserID, in InviteUserInput,
 ) (*anypb.Any, error) {

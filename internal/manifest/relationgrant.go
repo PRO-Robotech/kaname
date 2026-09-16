@@ -5,7 +5,7 @@
 // прав.
 //
 // Задача продукта #1936, приёмка
-// `services/iam/docs/engineering/acceptance/module-manifest-relation-grant.md`
+// `docs/engineering/acceptance/module-manifest-relation-grant.md`
 // (APPROVED круг 1).
 //
 // # Что здесь было неверно и почему это чинится формой, а не данными

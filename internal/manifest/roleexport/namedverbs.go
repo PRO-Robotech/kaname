@@ -330,7 +330,7 @@ func reduceNamed(facts VerbFacts, m *manifest.Manifest, rule manifest.Rule, name
 	if len(missing) > 0 {
 		return classes, missing
 	}
-	return minimalClasses(facts, m, rule, classes, byResource), nil
+	return minimalClasses(facts, rule, classes, byResource), nil
 }
 
 // classMembers — ПРИГОДНОЕ содержимое класса на ресурсе: действия, помеченные
@@ -365,7 +365,7 @@ func classMembers(facts VerbFacts, m *manifest.Manifest, resource string, own []
 // Без него полное поимённое право и его класс давали бы РАЗНОЕ право при
 // одинаковом покрытии, и §3.6 п. 5 не выполнялся бы. Обход идёт по классам с
 // бо́льшим покрытием первыми: иначе результат зависел бы от порядка имён.
-func minimalClasses(facts VerbFacts, m *manifest.Manifest, rule manifest.Rule,
+func minimalClasses(facts VerbFacts, rule manifest.Rule,
 	classes []string, byResource map[string][]Action) []string {
 
 	// Покрытие класса — по ВСЕМ ресурсам правила: класс, лишний на одном

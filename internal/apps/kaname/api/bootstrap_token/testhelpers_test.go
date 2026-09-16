@@ -41,14 +41,21 @@ import (
 // демона Docker нет, — поэтому быстрая волна, задуманная как обходящаяся без
 // Docker, без него не проходила.
 //
-// Пропуск здесь НЕ снимает пробы с прогона: их гоняет собственный шаг конвейера
-// (`make test-pg-outside-selection`, вердикт по числам), а провязка залочена
-// гейтом internal/repohygiene/shortgatedselection_test.go — запись в
-// shortGatedRunByOwnCIStep без такого шага в ci.yaml краснеет.
+// Пропуск здесь НЕ снимает пробы с прогона: их гоняет контейнерное задание
+// конвейера (`.github/scripts/run-integration.sh`, вердикт по числам). Отбор
+// этого задания ВЫВОДИТСЯ признаком «сборка проб импортирует pgtest либо
+// testcontainers», поэтому пакет попадает в него by construction — вписывать его
+// в перечень не нужно и негде.
+//
+// Здесь стояли цель `make test-pg-outside-selection` и гейт
+// `internal/repohygiene/shortgatedselection_test.go`. Ни цели, ни гейта в этом
+// дереве нет: оба остались в монорепо, а координаты пережили вынос службы
+// (kaname#19). Пока отбор был выписан образцом пути, этот пакет не исполнялся
+// НИ В ОДНОМ задании — и текст отсылал за прогоном к тому, чего нет.
 func setupTestDB(t testing.TB) string {
 	t.Helper()
 	if testing.Short() {
-		t.Skip("нужен Postgres в контейнере: пропуск под -short, прогон — make test-pg-outside-selection")
+		t.Skip("нужен Postgres в контейнере: пропуск под -short, прогон — контейнерное задание конвейера (.github/scripts/run-integration.sh)")
 	}
 	return pgtest.NewDB(t)
 }

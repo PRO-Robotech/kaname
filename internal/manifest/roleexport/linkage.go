@@ -314,7 +314,7 @@ func CheckActionLinkage(m *manifest.Manifest, actions []Action) ([]error, Action
 	// Требовать действия на КАЖДУЮ запись нельзя и by construction: действие
 	// рендерится в `define v_<действие>`, поэтому названный `addCidrBlocks`
 	// породил бы `define v_addcidrblocks`, которого в каноне нет, — и побайтовая
-	// сверка модели (`make -C services/iam model-canon-check`) отвергла бы его.
+	// сверка модели (`make model-canon-check`) отвергла бы его.
 	// Две проверки одного дерева не вправе требовать несовместимого.
 	keys := make([]string, 0, len(catalogOf))
 	for k := range catalogOf {

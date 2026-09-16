@@ -33,7 +33,7 @@ type (
 	// SubjectType defines the semantics.
 	SubjectID string
 
-	// Names — every newtype has its own regex.
+	// Every newtype below has its own regex.
 	AccountName    string
 	ProjectName    string
 	GroupName      string
@@ -122,10 +122,10 @@ var (
 
 // Validate — per newtype.
 
-func (n AccountName) Validate() error    { return validateResourceName("name", string(n)) }
-func (n ProjectName) Validate() error    { return validateResourceName("name", string(n)) }
-func (n GroupName) Validate() error      { return validateResourceName("name", string(n)) }
-func (n SvcAccountName) Validate() error { return validateResourceName("name", string(n)) }
+func (n AccountName) Validate() error    { return validateResourceName(string(n)) }
+func (n ProjectName) Validate() error    { return validateResourceName(string(n)) }
+func (n GroupName) Validate() error      { return validateResourceName(string(n)) }
+func (n SvcAccountName) Validate() error { return validateResourceName(string(n)) }
 
 // Validate — OAuthClientName судится той же формой, что и остальные имена.
 //
@@ -133,7 +133,7 @@ func (n SvcAccountName) Validate() error { return validateResourceName("name", s
 // iam, где имя доживало до записи пустым. Пустое имя — не «имя, которого нет»,
 // а ресурс, который не ищется, не отличается в списке и показывается прочерком.
 // Ветка снята: пустое заменяется умолчанием ДО записи, в use-case выпуска.
-func (n OAuthClientName) Validate() error { return validateResourceName("name", string(n)) }
+func (n OAuthClientName) Validate() error { return validateResourceName(string(n)) }
 
 // Validate — форма имени роли БЕЗ различения яруса: годна любая из двух.
 // Оставлена для вызывающих, которым ярус неизвестен; сама сущность судится
@@ -310,9 +310,12 @@ func (r ResourceType) Validate() error {
 // Текст отказа называет ДЕЙСТВУЮЩУЮ форму, взяв её из того же объявления:
 // выписанная копия пережила бы смену канона и посылала бы арендатора чинить имя
 // по несуществующему правилу.
-func validateResourceName(field, v string) error {
+func validateResourceName(v string) error {
 	if !nameform.OK(v) {
-		return fmt.Errorf("Illegal argument %s: must match %s", field, nameform.Form)
+		// Имя поля — литерал, а не параметр: все шесть вызывающих передавали одно
+		// и то же, и параметр объявлял выбор, которого нет. Текст отказа при этом
+		// не изменился ни на знак — он часть контракта.
+		return fmt.Errorf("Illegal argument %s: must match %s", "name", nameform.Form)
 	}
 	return nil
 }

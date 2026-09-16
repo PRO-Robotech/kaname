@@ -53,7 +53,7 @@ const handWrittenTypeTablesRemaining = 0
 // TestTypeTablesGeneratedCountIsMeasuredNotClaimed — #1092: «порождено две из
 // двух» есть ИЗМЕРЕНИЕ, и вот оно.
 func TestTypeTablesGeneratedCountIsMeasuredNotClaimed(t *testing.T) {
-	tables, err := authzmapgen.Collect(platformtree.Require(t))
+	tables, err := authzmapgen.Collect(platformtree.RequireNamedPlatformTree(t))
 	if err != nil {
 		t.Fatalf("обход манифестов не состоялся (%v) — предпосылка гейта исчезла, "+
 			"а не дерево стало чистым", err)

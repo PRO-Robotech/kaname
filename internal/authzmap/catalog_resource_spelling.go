@@ -17,7 +17,7 @@ import "sort"
 //	                                                     первая буква)
 //
 // Первое написание объявлено; второе производит привязка записей каталога прав
-// к действиям модулей (services/iam/internal/manifest/roleexport, attribution.go)
+// к действиям модулей (internal/manifest/roleexport, attribution.go)
 // — из имени СЛУЖБЫ, потому что среднего сегмента `permission` и якоря
 // `scope_extractor.object_type` для этого не хватает (разобрано там же). У vpc,
 // compute и iam ключи единственного числа, и оба написания совпадают; у

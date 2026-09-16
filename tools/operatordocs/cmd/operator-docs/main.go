@@ -6,8 +6,8 @@
 //
 // Вызов — через цель сборки, а не руками:
 //
-//	make -C services/iam operator-docs         порождает
-//	make -C services/iam operator-docs-check   сверяет
+//	make operator-docs         порождает
+//	make operator-docs-check   сверяет
 package main
 
 import (

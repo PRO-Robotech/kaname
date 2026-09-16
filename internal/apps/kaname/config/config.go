@@ -107,13 +107,6 @@ type LoggerConfig struct {
 	Level string `mapstructure:"level"`
 }
 
-// APIServerConfig — api-server section.
-//
-// Endpoint / InternalEndpoint accept two formats:
-//   - `tcp://0.0.0.0:9090` (full URL-style, recommended);
-//   - `9090` (legacy: bare port; preserved for backward-compat
-//     with older values.yaml, see listenAddress in load.go).
-//
 // SubscriptionConfig — посадка потока изменений ресурсов.
 //
 // Каждый поток держит СВОЁ соединение вне пула, поэтому потолок числа потоков —
@@ -134,6 +127,12 @@ type SubscriptionConfig struct {
 	IdlePoll time.Duration `mapstructure:"idle-poll"`
 }
 
+// APIServerConfig — api-server section.
+//
+// Endpoint / InternalEndpoint accept two formats:
+//   - `tcp://0.0.0.0:9090` (full URL-style, recommended);
+//   - `9090` (legacy: bare port; preserved for backward-compat
+//     with older values.yaml, see listenAddress in load.go).
 type APIServerConfig struct {
 	Endpoint         string        `mapstructure:"endpoint"`
 	InternalEndpoint string        `mapstructure:"internal-endpoint"`

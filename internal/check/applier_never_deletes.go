@@ -10,7 +10,7 @@
 // вынесением службы — `kacho#2597`). Осталось дословно: имя функции гейта
 // (`TestMODRD15ApplierNeverDeletesARoleRow`), сам разбор (обе оси, оба
 // образца) и текст находки. Изменилось: пакет-цель — `internal/apps/kaname/moduleroles`
-// (в монорепо — `services/iam/internal/apps/kaname/moduleroles`), путь-константа
+// (в монорепо — `internal/apps/kaname/moduleroles`), путь-константа
 // без префикса `services/iam/`.
 //
 // # Предмет

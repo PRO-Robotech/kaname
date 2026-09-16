@@ -84,8 +84,7 @@ func TestBuildBindingTuples_ModuleSA_WithRules_EmitsNoAccessTuple(t *testing.T) 
 		Permissions: toPermissions(moduleSAPermissions),
 		Rules:       moduleSARules(),
 	}
-	got, err := buildBindingTuples(moduleSABinding(), role)
-	require.NoError(t, err)
+	got := buildBindingTuples(moduleSABinding(), role)
 
 	access := tierTuples(t, got, "cluster:cluster_root")
 	assert.Empty(t, access,
@@ -105,8 +104,7 @@ func TestBuildBindingTuples_ModuleSA_RulesCleared_MintsClusterTier(t *testing.T)
 		// Rules намеренно пусты — ровно то состояние, в которое роль попала бы,
 		// если снять её правила и оставить строки прав.
 	}
-	got, err := buildBindingTuples(moduleSABinding(), role)
-	require.NoError(t, err)
+	got := buildBindingTuples(moduleSABinding(), role)
 
 	access := tierTuples(t, got, "cluster:cluster_root")
 	require.NotEmpty(t, access,
@@ -142,8 +140,7 @@ func TestBuildBindingTuples_ModuleSA_ViewerOnlyRulesCleared_MintsClusterSystemVi
 		// Строки прав module.{vpc,nlb,api_gateway,registry,storage}_sa — только чтение.
 		Permissions: toPermissions([]string{"iam.projects.*.get"}),
 	}
-	got, err := buildBindingTuples(moduleSABinding(), role)
-	require.NoError(t, err)
+	got := buildBindingTuples(moduleSABinding(), role)
 
 	access := tierTuples(t, got, "cluster:cluster_root")
 	relations := make([]string, 0, len(access))

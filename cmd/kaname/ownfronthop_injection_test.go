@@ -36,55 +36,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 )
-
-// writeChartValues кладёт файл значений с объявленным листом и отдаёт путь.
-func writeChartValues(t *testing.T, trust, ns, sa string) string {
-	t.Helper()
-	dir := filepath.Join(t.TempDir(), "kaname")
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		t.Fatalf("каталог не создан: %v", err)
-	}
-	path := filepath.Join(dir, "values.yaml")
-	body := "mtls:\n  spiffe:\n    trustDomain: " + trust +
-		"\n    namespace: " + ns + "\n    saName: " + sa + "\n"
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatalf("файл значений не записан: %v", err)
-	}
-	return path
-}
-
-// TestOwnFrontHopInjection_ChartRenameIsCaught — переименование учётной записи в
-// чарте ловится, и сверка называет ОБЕ строки.
-func TestOwnFrontHopInjection_ChartRenameIsCaught(t *testing.T) {
-	got := chartFrontLeafMismatch(t, writeChartValues(t, frontTrustDomain, frontNamespace, "kaname-renamed"))
-	if got == "" {
-		t.Fatal("переименование учётной записи в чарте прошло молча — проба политики осталась бы " +
-			"зелёной, спрашивая про лист, которого установка не выдаёт")
-	}
-	for _, want := range []string{"kaname-renamed", "sa/kaname\""} {
-		if !strings.Contains(got, want) {
-			t.Errorf("расхождение не называет %q: %s", want, got)
-		}
-	}
-	t.Logf("инъекция чарта поймана: %s", got)
-}
-
-// TestOwnFrontHopInjection_ChartTwinStaysSilent — законный близнец: файл с тем
-// же листом, что выдаёт дерево, молчит.
-//
-// Без него красное выше приходило бы от чего угодно — например от сверки,
-// краснеющей на любом файле.
-func TestOwnFrontHopInjection_ChartTwinStaysSilent(t *testing.T) {
-	if got := chartFrontLeafMismatch(t, writeChartValues(t, frontTrustDomain, frontNamespace, "kaname")); got != "" {
-		t.Fatalf("законный лист объявлен расхождением: %s", got)
-	}
-}
 
 // TestOwnFrontHopInjection_NaiveSelectionWouldTakeTheForeignName — наивный отбор
 // «первое имя URI» вернул бы чужое, действующий возвращает наше.

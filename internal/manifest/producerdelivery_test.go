@@ -67,10 +67,15 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
-// stacksTablePath — единственное объявление состава стендов, от корня дерева.
+// stacksTablePath — единственное объявление состава стендов, координатой от
+// корня дерева ПЛАТФОРМЫ.
+//
+// Таблица и профили умбреллы живут у платформы вместе с её стендом; в поставку
+// этого модуля они не входят. Корень называет ручка `PLATFORM_TREE`, а не подъём
+// каталогами: подъёмом такое дерево не ищется — модуль в нём не лежит.
 const stacksTablePath = "deploy/stacks.txt"
 
-// umbrellaProfileDir — каталог профилей умбреллы, от корня дерева.
+// umbrellaProfileDir — каталог профилей умбреллы, от корня дерева платформы.
 const umbrellaProfileDir = "deploy/helm/umbrella"
 
 // stackTableLine — строка таблицы стендов: `<имя>:<профиль>[,<профиль>…]`.
@@ -108,36 +113,22 @@ func (c roundTripCensus) Summary() string {
 		strings.Join(c.Modules, ", "))
 }
 
-// repoRootFromTest — корень дерева, найденный подъёмом до go.mod.
+// repoRootFromTest — корень ДЕРЕВА ПЛАТФОРМЫ, названный снаружи.
 //
-// Выведен, а не выписан числом «..»: количество уровней меняется вместе с
-// раскладкой пакета и разошлось бы молча.
+// # Здесь стоял подъём до САМОГО ВНЕШНЕГО `go.mod`, и он не работал ни в одной
+// # посадке
+//
+// Предмет пробы — стенд ПЛАТФОРМЫ: таблица состава (`deploy/stacks.txt`) и
+// профили умбреллы. После выноса службы отдельным репозиторием подъём находил
+// корень СВОЕГО клона — либо, если клон лежал внутри чужого дерева, корень
+// ЧУЖОГО, — и вердикт оказывался о неизвестно чём. Ни один исход не был верным.
+//
+// Теперь дерево платформы НАЗЫВАЕТ тот, кто его выложил, ручкой `PLATFORM_TREE`.
+// Её отсутствие — «условие не создано» с производителем (задание конвейера), а
+// не находка о продукте и не безусловный пропуск.
 func repoRootFromTest(t *testing.T) string {
 	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("рабочий каталог не прочитан: %v", err)
-	}
-	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
-	// теперь СВОЙ модуль (она выносится отдельным репозиторием), и подъём «до
-	// первого» останавливался бы в её каталоге. Пути, которые ниже склеиваются с
-	// этим корнем, называют место В ДЕРЕВЕ МОНОРЕПО — от корня, — поэтому
-	// остановка внутри службы удваивала сегмент и обход искал `services/iam/
-	// services/iam/…`, которого не существует.
-	outermost := ""
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			outermost = dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			if outermost != "" {
-				return outermost
-			}
-			t.Fatalf("корень дерева не найден подъёмом от %s — предпосылка пробы исчезла", dir)
-		}
-		dir = parent
-	}
+	return platformtree.RequireNamedPlatformTree(t)
 }
 
 // deliveryStacksOfTree — популяция: КАЖДЫЙ стенд таблицы со своей цепочкой.
@@ -147,7 +138,7 @@ func repoRootFromTest(t *testing.T) string {
 // различимы, иначе проба объявит дерево осмотренным, не прочитав ни строки.
 func deliveryStacksOfTree(t *testing.T, root string) []deliveryStack {
 	t.Helper()
-	table := platformtree.RequirePath(t, stacksTablePath)
+	table := filepath.Join(root, filepath.FromSlash(stacksTablePath))
 	// #nosec G304 -- путь собран из корня дерева и константы.
 	raw, err := os.ReadFile(table)
 	if err != nil {

@@ -7,13 +7,16 @@ package modulemanifests_test
 // посадках и способен ли он отказать там, где отвечать нечем (#2377).
 //
 // Ось несущая. Прежде обе стороны сверки «объявлено ↔ лежит в базе» брались
-// обходом каталога модулей ПЛАТФОРМЫ. После разреза службы этот каталог рядом с
-// модулем не резолвится: сверка становилась невыразимой, а расхождение
-// объявления с фактом переставало находиться — молча.
+// обходом каталога модулей ПЛАТФОРМЫ, а сам каталог искался ПОДЪЁМОМ от модуля.
+// После выноса службы отдельным репозиторием модуль не лежит в нём ни в одной
+// посадке: признак стал ложным всегда, и посадка «дерево платформы» перестала
+// быть достижимой вовсе.
 //
-// Каждая инъекция меняет РОВНО ОДИН факт против законного близнеца: лежит ли
-// модуль в каталоге модулей платформы, есть ли рядом его собственный манифест,
-// есть ли в дереве платформы хоть один манифест.
+// Теперь дерево платформы НАЗЫВАЕТ тот, кто его выложил, — ручкой
+// `PLATFORM_TREE`, той же, что у рецепта и у задания конвейера. Каждая инъекция
+// меняет РОВНО ОДИН факт против законного близнеца: названо ли дерево платформы,
+// есть ли рядом собственный манифест модуля, есть ли в названном дереве хоть
+// один манифест.
 
 import (
 	"os"
@@ -47,15 +50,21 @@ func writeManifest(t *testing.T, dir string) {
 	}
 }
 
-// platformTwin — законный близнец ПЕРВОЙ посадки: модуль лежит среди модулей
-// платформы, у соседей есть манифесты.
+// platformTwin — законный близнец ПЕРВОЙ посадки: дерево платформы НАЗВАНО
+// ручкой, у модулей в нём есть манифесты.
+//
+// Ручка ставится через t.Setenv: он возвращает прежнее значение сам, поэтому
+// соседняя проба не получит чужую посадку. Параллельного прогона у этих проб
+// нет by construction — t.Setenv его запрещает, и это правильно: посадка есть
+// свойство ПРОЦЕССА, а не вызова.
 func platformTwin(t *testing.T) (base, mod string) {
 	t.Helper()
 	base = t.TempDir()
-	mod = mkModule(t, base, "services/iam")
+	mod = mkModule(t, t.TempDir(), "kaname-0.1.0")
 	for _, s := range []string{"iam", "vpc", "compute"} {
 		writeManifest(t, filepath.Join(base, "services", s))
 	}
+	t.Setenv(modulemanifests.PlatformTreeEnv, base)
 	return base, mod
 }
 
@@ -88,6 +97,7 @@ func TestPlatformPosture_ReadsEveryModuleManifest(t *testing.T) {
 // Здесь и есть предмет задачи: прежний обход в этой посадке отказывал из
 // os.ReadDir, то есть выглядел поломкой пробы, а не сдвигом дерева.
 func TestStandalonePosture_ReadsTheModulesOwnManifest(t *testing.T) {
+	t.Setenv(modulemanifests.PlatformTreeEnv, "")
 	base := t.TempDir()
 	mod := mkModule(t, base, "kaname-0.1.0")
 	writeManifest(t, mod)
@@ -118,6 +128,7 @@ func TestStandalonePosture_ReadsTheModulesOwnManifest(t *testing.T) {
 // Молчаливый пустой перечень здесь означал бы сверку, которая ничего не сверяет
 // и об этом не говорит.
 func TestStandalonePosture_WithoutOwnManifestIsARefusal(t *testing.T) {
+	t.Setenv(modulemanifests.PlatformTreeEnv, "")
 	base := t.TempDir()
 	mod := mkModule(t, base, "kaname-0.1.0")
 
@@ -125,7 +136,7 @@ func TestStandalonePosture_WithoutOwnManifestIsARefusal(t *testing.T) {
 	if err == nil {
 		t.Fatalf("клон без собственного манифеста принят: %+v", set)
 	}
-	if !strings.Contains(err.Error(), "собственного манифеста") {
+	if !strings.Contains(err.Error(), "не несёт собственного манифеста") {
 		t.Fatalf("отказ не назвал предпосылку словами: %v", err)
 	}
 }
@@ -136,10 +147,11 @@ func TestStandalonePosture_WithoutOwnManifestIsARefusal(t *testing.T) {
 // Отличие от близнеца ровно одно: соседям не написан ни один манифест.
 func TestPlatformPosture_WithoutAnyManifestIsARefusal(t *testing.T) {
 	base := t.TempDir()
-	mod := mkModule(t, base, "services/iam")
+	mod := mkModule(t, t.TempDir(), "kaname-0.1.0")
 	if err := os.MkdirAll(filepath.Join(base, "services", "vpc"), 0o750); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv(modulemanifests.PlatformTreeEnv, base)
 
 	set, err := modulemanifests.Available(mod)
 	if err == nil {
@@ -153,6 +165,7 @@ func TestPlatformPosture_WithoutAnyManifestIsARefusal(t *testing.T) {
 // TestNoModuleRootIsNotAPosture — третий исход представим отдельно: «корня
 // модуля нет» не выдаётся ни за одну из двух посадок.
 func TestNoModuleRootIsNotAPosture(t *testing.T) {
+	t.Setenv(modulemanifests.PlatformTreeEnv, "")
 	deep := filepath.Join(t.TempDir(), "а", "б")
 	if err := os.MkdirAll(deep, 0o750); err != nil {
 		t.Fatal(err)
@@ -161,5 +174,26 @@ func TestNoModuleRootIsNotAPosture(t *testing.T) {
 		t.Fatal("отсутствие корня модуля выдано за вердикт о посадке")
 	} else if !strings.Contains(err.Error(), "посадка не установлена") {
 		t.Fatalf("отказ не отличил «посадки нет» от «манифестов нет»: %v", err)
+	}
+}
+
+// TestNamedTreeWithoutTheModulesDirIsNotAPlatformTree — ручка, указавшая в
+// дерево БЕЗ каталога модулей, посадкой не считается.
+//
+// Без этой стороны непроверенный корень дал бы пустой обход, и «манифестов
+// ноль» прочиталось бы как «расхождений ноль» — ровно тот тихий класс, ради
+// которого перепись и печатается.
+func TestNamedTreeWithoutTheModulesDirIsNotAPlatformTree(t *testing.T) {
+	base := t.TempDir()
+	mod := mkModule(t, t.TempDir(), "kaname-0.1.0")
+	writeManifest(t, mod)
+	t.Setenv(modulemanifests.PlatformTreeEnv, base)
+
+	set, err := modulemanifests.Available(mod)
+	if err != nil {
+		t.Fatalf("посадка не установлена: %v", err)
+	}
+	if set.Posture != modulemanifests.StandaloneModule {
+		t.Fatalf("дерево без каталога модулей принято за дерево платформы: %q", set.Posture)
 	}
 }

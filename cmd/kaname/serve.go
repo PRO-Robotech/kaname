@@ -343,7 +343,7 @@ func runServe(cfg config.Config) error {
 	// провязки его не звал никто, и каталог наполнял посев миграции, то есть
 	// объявленное манифестом состояние доезжало до базы только пересборкой
 	// образа. Довод о месте, порядке и о том, почему отказ фатален, —
-	// `services/iam/docs/engineering/architecture/module-catalog-applier-runs-at-boot.md`;
+	// `docs/engineering/architecture/module-catalog-applier-runs-at-boot.md`;
 	// порядок держит гейт `module_catalog_apply_wiring_test.go`, а не этот
 	// комментарий.
 	//
@@ -1139,8 +1139,8 @@ func runServe(cfg config.Config) error {
 	// Носитель готовности отдаётся сюда, чтобы гашение переводило `/readyz` в
 	// 503 ДО остановки серверов (см. triggerShutdown ниже). Без этого носитель
 	// был бы, а дёрнуть его было бы некому (#1752).
-	hooksHandler, hooksHealth := buildHooksMux(pool, kanameRepo, opsRepo, svcs.ownGates,
-		catalogSnapshot, metricsReg, cfg, logger)
+	hooksHandler, hooksHealth := buildHooksMux(pool, kanameRepo, opsRepo,
+		svcs.bindingReconciler, metricsReg, cfg, logger)
 	hooksSurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "вебхуки провайдера личности",
 		Mode:    surfaceMode,

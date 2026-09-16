@@ -38,6 +38,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
 
 func TestR7_3_27_ResidualReaderNamesOwnObjectOnly(t *testing.T) {
@@ -49,8 +50,6 @@ func TestR7_3_27_ResidualReaderNamesOwnObjectOnly(t *testing.T) {
 	require.NoError(t, err)
 	pgtest.ClosePoolAtEnd(t, pool)
 
-	writer := kanamepg.NewCreatorTupleWriter(pool)
-	require.NotNil(t, writer)
 	reader := kanamepg.NewResidualTupleReader(pool)
 	require.NotNil(t, reader)
 
@@ -65,7 +64,7 @@ func TestR7_3_27_ResidualReaderNamesOwnObjectOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, before, "у нетронутого объекта остатка быть не может")
 
-	require.NoError(t, writer.RecordTuples(ctx, []clients.RelationTuple{
+	require.NoError(t, iampgtest.EmitCreatorIntent(ctx, pool, []clients.RelationTuple{
 		{User: "user:usr_r73creator", Relation: "owner", Object: mine},
 		{User: "project:prj_r73", Relation: "parent", Object: mine},
 		{User: "user:usr_r73neighbour", Relation: "owner", Object: other},
