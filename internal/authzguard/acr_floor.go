@@ -26,10 +26,11 @@
 // exposes no capability that a password-only session does not already hold
 // (the roster is visible to every system_admin through the catalog anyway), so
 // a second factor is demanded where the roster CHANGES, not where it is looked
-// at. A comment here that named a floor other than the contract's would be the
-// trap security-hardening.md p.5 describes — the next reader would "fix" one
-// side to match the other; acr_floor_header_claims_test.go checks every floor
-// this header names against the embedded catalog.
+// at. A comment here that named a floor other than the contract's would be a
+// trap: a security comment that contradicts the code makes the next reader
+// "fix" one side to match the other without asking what was decided;
+// acr_floor_header_claims_test.go checks every floor this header names against
+// the embedded catalog.
 //
 // For each RPC in the GATEWAY-FRONTED set (GatewayFrontedInternalRPCs — caller-
 // context = api-gateway acting for an end user) whose catalog
