@@ -108,7 +108,7 @@ type ManifestsConfig struct {
 // а не переписывают.
 //
 // Решение, которое этим значением называется, — не здесь: оно принято, доказано
-// и живёт в `services/iam/docs/engineering/architecture/composed-model-is-admitted-by-content.md`.
+// и живёт в `docs/engineering/architecture/composed-model-is-admitted-by-content.md`.
 const AdmissionByContent = "content"
 
 // admissionValues — ЗАКРЫТЫЙ набор значений `manifests.admission`, объявленный

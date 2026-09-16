@@ -29,11 +29,11 @@ import (
 // И это не вкус, а единственная исполнимая форма. Замерено kubectl, обе стороны:
 //
 //	$ kubectl create configmap probe \
-//	    --from-file=iam/manifest.yaml=services/iam/manifest.yaml --dry-run=client -o yaml
+//	    --from-file=iam/manifest.yaml=manifest.yaml --dry-run=client -o yaml
 //	error: "iam/manifest.yaml" is not a valid key name for a ConfigMap: a valid
 //	  config key must consist of alphanumeric characters, '-', '_' or '.'
 //
-//	$ kubectl create configmap probe --from-file=services/iam/manifest.yaml \
+//	$ kubectl create configmap probe --from-file=manifest.yaml \
 //	    --from-file=services/vpc/manifest.yaml --dry-run=client -o yaml
 //	error: cannot add key "manifest.yaml", another key by that name already exists
 //	  in Data for ConfigMap "probe"

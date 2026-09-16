@@ -1,6 +1,6 @@
 <!-- ЭТОТ ФАЙЛ ПОРОЖДЁН. Правки в нём уедут при следующей регенерации.
-     Порождает: services/iam/tools/operatordocs — `make -C services/iam operator-docs`
-     Сверяет:   `make -C services/iam operator-docs-check` -->
+     Порождает: tools/operatordocs — `make operator-docs`
+     Сверяет:   `make operator-docs-check` -->
 
 # Уведомления о третьих сторонах
 

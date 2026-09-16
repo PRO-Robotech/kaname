@@ -79,7 +79,7 @@ import "github.com/PRO-Robotech/kaname/internal/authzmap"
 // Отсюда и форма остатка. Расхождение словарей на ЖИВОЙ строке было бы тихим,
 // поэтому его держит гейт против живой базы; расхождение на типе ВРЕМЕНИ
 // ВЫПОЛНЕНИЯ тихим быть не может — его держит схема. Обе половины прогоняются
-// одной командой, и обе живут в `services/iam/internal/migrations/`:
+// одной командой, и обе живут в `internal/migrations/`:
 //
 //	go test -C services/iam ./internal/migrations/ \
 //	  -run 'BuildTypeDictionaryAgrees|UnknownDottedTypeIsRefused' -count=1 -v

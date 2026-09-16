@@ -48,7 +48,7 @@ const (
 	// Прежде здесь стоял якорь вне иерархии `cluster → account → project`.
 	// У такого якоря нет ни яруса, ни владельца: право не выражалось выдачей,
 	// не было видно перечислением выдач и не отзывалось (#914, решение 1 в
-	// `services/iam/docs/engineering/architecture/grant-surface-boundaries.md`).
+	// `docs/engineering/architecture/grant-surface-boundaries.md`).
 	// Фактический доступ переезд не расширяет: модуль и прежде писал кортежи по
 	// всему кластеру — честнее стало ОБЪЯВЛЕНИЕ этого права.
 	relationWriteObject = clusterRootObject

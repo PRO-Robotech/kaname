@@ -541,12 +541,6 @@ func IsDeletingVerb(verb string) bool {
 	return false
 }
 
-// integrityText — client-facing текст для 23000 (integrity_constraint_violation),
-// поднятого явным RAISE триггера схемы.
-//
-// Подсказка приходит из `writeTx.Commit`: отложенный триггер срабатывает НА
-// КОММИТЕ, и назвать человека с аккаунтом можно только тем, что писатель оставил
-// в подсказке (`userWriter.RemoveMembership`).
 // isMembershipCarriesRights — распознаватель ОДНОЙ полосы 23000, общий для
 // текста и для признака.
 //
@@ -584,6 +578,12 @@ func isGrantOnARetiredRole(pgErr *pgconn.PgError) bool {
 	return pgErr.ConstraintName == "access_bindings_role_is_live"
 }
 
+// integrityText — client-facing текст для 23000 (integrity_constraint_violation),
+// поднятого явным RAISE триггера схемы.
+//
+// Подсказка приходит из `writeTx.Commit`: отложенный триггер срабатывает НА
+// КОММИТЕ, и назвать человека с аккаунтом можно только тем, что писатель оставил
+// в подсказке (`userWriter.RemoveMembership`).
 func integrityText(pgErr *pgconn.PgError, kindHint, idHint string) string {
 	if isGrantOnARetiredRole(pgErr) {
 		// Роль называется, состояние называется, текст сервера НЕ эхается: в нём
