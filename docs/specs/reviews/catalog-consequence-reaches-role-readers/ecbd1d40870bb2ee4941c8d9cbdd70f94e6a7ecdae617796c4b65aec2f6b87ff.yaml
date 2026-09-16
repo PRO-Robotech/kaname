@@ -27,8 +27,9 @@ reviewed_at: '2026-09-16'
 # она остаётся вердиктом о ПРЕЖНЕЙ редакции, что верно, а не досадно.
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-16T12:05:58Z'
+  ban1_lifted: true
   why: >-
     Заключение рецензента — APPROVED, блокирующих ноль. Но САНКЦИЮ выдаёт
     внешнее событие от `pointpu` (review_authority.acceptance-reviewer политики
@@ -54,18 +55,34 @@ authority:
   allowlisted_for_role: false
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось», а не «да». Событие полномочия публикует
-    оркестратор; недоступность внешнего источника одобрением не читается
-    (change-graph.md §3).
+  type: issue_comment
+  status: performed
+  database_id: 5697133627
+  node_id: IC_kwDOUO26pM8AAAABU5NcOw
+  url: https://github.com/PRO-Robotech/kaname/issues/76#issuecomment-5697133627
+  api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/comments/5697133627
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kaname/issues/76
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-16T12:05:58Z'
+  body_sha256: 705ee24347d0f09f2903c829d2c9c3536a51a907dcd0137191bbc1e54b75c7c2
+  subject_sha256: ecbd1d40870bb2ee4941c8d9cbdd70f94e6a7ecdae617796c4b65aec2f6b87ff
+  subject_revision: 1fb4af191812ee64d810ae7143abe352ecaa8b49
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; запись рецензента задним числом
+    не правилась. Отпечаток предмета сверен перед публикацией (sha256sum файла на 1fb4af19)
+    и совпал с объявленным. Отпечаток тела снят с сырого ответа API.
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: null
-  publication_mode: null
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
+
 
 scope:
   reviewed: >-
