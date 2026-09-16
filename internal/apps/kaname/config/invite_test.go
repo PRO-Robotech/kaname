@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
@@ -72,4 +75,27 @@ func TestInviteTTL_ZeroReadsAsUnsetAndNotAsUnlimited(t *testing.T) {
 			"разбор настроек их не различает, и требовать разного значило бы "+
 			"требовать невыразимого", got, silent)
 	}
+}
+
+// TestInviteTTL_EnvKnobReachesTheProcess — ручка доезжает до процесса
+// переменной окружения ровно тем именем, которым её называет INSTALL.md.
+//
+// Проба заведена не ради viper, а ради ДОКУМЕНТА: имя, названное оператору и не
+// связанное разбором, есть возможность, объявленная и неисполнимая. Оператор
+// задаёт величину, служба её не видит, и сигнала нет ни одного.
+func TestInviteTTL_EnvKnobReachesTheProcess(t *testing.T) {
+	// Молчание окружения — контроль: без него утверждение ниже зеленело бы и
+	// на ручке, которая всегда отдаёт одно и то же.
+	silent, err := config.Load("")
+	require.NoError(t, err)
+	assert.Zero(t, silent.Invite.TTL,
+		"молчащее окружение обязано оставлять величину незаданной")
+
+	t.Setenv("KANAME_INVITE__TTL", "36h")
+	got, lerr := config.Load("")
+	require.NoError(t, lerr)
+	assert.Equal(t, 36*time.Hour, got.Invite.TTL,
+		"ручка `invite.ttl` не связана с переменной `KANAME_INVITE__TTL` — "+
+			"имя названо оператору в INSTALL.md и не читается разбором")
+	assert.Equal(t, 36*time.Hour, got.Invite.TTLOrDefault())
 }
