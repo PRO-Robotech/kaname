@@ -75,6 +75,30 @@ func lmDB(t *testing.T) *sql.DB {
 	return upAllIAMMigrations(t, pgtest.NewEmptyDB(t))
 }
 
+// lmDBAtOwn — база, приведённая РОВНО к предмету: миграции новее него сняты до
+// сцены, и `DownTo(previous)` дальше — один шаг, откат самого предмета.
+//
+// Цепочка живёт дальше предмета: ствол кладёт новые файлы поверх, и
+// `DownTo(previous)` от конца цепочки откатывает сперва их. Сцена, ждущая
+// «откат стоит в очереди за замком писателя», увидела бы тогда замок ЧУЖОГО
+// отката — соседняя миграция снимает колонку `users` и встаёт за писателем
+// раньше, чем откат предмета возьмёт свою таблицу, — и цикл взаимной
+// блокировки не замыкался бы никогда. Наблюдалось после слияния с
+// накопительной: три файла новее предмета, проба взаимной блокировки красна
+// три раза из трёх на пустой машине и зелёная на голове без них.
+func lmDBAtOwn(t *testing.T) *sql.DB {
+	t.Helper()
+	db := lmDB(t)
+	own, _ := loginMethodVersions(t)
+	goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.SetDialect("postgres"))
+	require.NoError(t, goose.DownTo(db, ".", own), "миграции новее предмета обязаны сняться ДО сцены")
+	version, err := goose.GetDBVersion(db)
+	require.NoError(t, err)
+	require.Equal(t, own, version, "сцена начинается ровно на предмете, а не на конце цепочки")
+	return db
+}
+
 // lmSeed заводит аккаунт, его владельца и ещё одного члена того же аккаунта.
 // Член нужен пробам снятия: владельца аккаунта снять нельзя (`accounts_owner_fk`),
 // и проба каскада упиралась бы в чужой ключ, а не в свой.
@@ -538,7 +562,7 @@ func loginMethodVersions(t *testing.T) (own, previous int64) {
 //
 // Обе стороны: с материалом откат отказан; без него — проходит.
 func TestIntegration_LoginMethodRollbackRefusesToDestroyMaterial(t *testing.T) {
-	db := lmDB(t)
+	db := lmDBAtOwn(t)
 	owner, _ := lmSeed(t, db, "lmdown")
 	_, previous := loginMethodVersions(t)
 
@@ -657,7 +681,7 @@ func TestIntegration_LoginMethodRollbackDoesNotRaceItsWriter(t *testing.T) {
 	_, previous := loginMethodVersions(t)
 	for i, sc := range scenes {
 		t.Run(sc.name, func(t *testing.T) {
-			db := lmDB(t)
+			db := lmDBAtOwn(t)
 			owner, member := lmSeed(t, db, fmt.Sprintf("lmrace%d", i))
 
 			var tables []int64
@@ -789,7 +813,7 @@ func TestIntegration_LoginMethodRollbackDeadlockLeavesDataIntact(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: нужен Postgres в контейнере")
 	}
-	db := lmDB(t)
+	db := lmDBAtOwn(t)
 	owner, _ := lmSeed(t, db, "lmdead")
 	own, previous := loginMethodVersions(t)
 
