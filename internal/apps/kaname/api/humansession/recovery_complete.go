@@ -15,7 +15,8 @@ package humansession
 // предъявляет код. Требование «до любого иного действия» тем самым держится
 // построением: сессии до записи пароля не существует, и отвергать «иное
 // действие» нечему. Поле сессии `PasswordChangeRequired` (Ф3 Р8) этот глагол не
-// ставит.
+// ставит; расхождение с прозой Ф3 Р8 / Ф5-03 названо владельцу задачей
+// `kacho#2697` — решение о форме принадлежит ему, а не этой полосе.
 //
 // # Порядок внутри обращения — несущий
 //
@@ -219,6 +220,7 @@ func (uc *CompleteRecoveryUseCase) complete(
 		// способа — предмет Ф2 (ID-PW-1), а не этой фазы; заводить его здесь
 		// значило бы завести второго писателя способа входа. Исход откатывается
 		// целиком (код остаётся годным), причина — в журнале, а не в ответе.
+		// Исход для человека решает владелец — `kacho#2698`.
 		uc.logger.Error("recovery completion: the person has no password sign-in method to replace — recovery cannot set one (ID-PW-1 owns the write)",
 			"user_id", string(user.ID))
 		return CompleteRecoveryOutput{}, fmt.Errorf("recovery completion: user %s has no password sign-in method", user.ID)
