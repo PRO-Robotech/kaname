@@ -67,6 +67,10 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	require.NoError(t, err)
 	h.verifier, err = passwordverify.New(4, nopVerifyObserver{})
 	require.NoError(t, err)
+	// Выравнивание полосы «материала нет» — как в композиционном корне.
+	decoy, err := h.hasher.Hash("decoy-of-the-harness")
+	require.NoError(t, err)
+	require.NoError(t, h.verifier.SetDecoy(decoy))
 	now := func() time.Time { return h.clock }
 	logger := slog.New(slog.DiscardHandler)
 	h.rule, err = humansession.NewPasswordRule(8, breach, h.obs, logger)

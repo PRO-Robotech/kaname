@@ -587,3 +587,49 @@ func TestVerify_ChoiceOfVerifierFollowsTheStoredValue(t *testing.T) {
 		require.Equal(t, passwordverify.OutcomeMatched, first.Verify(stored, rightPassword).Outcome)
 	}
 }
+
+// TestVerifier_F3_31_AbsentMaterialIsComputedAgainstADecoy — с выравнивающим
+// значением проверка «материала нет» ВЫЧИСЛЯЕТСЯ и стоит как настоящая, а исход
+// остаётся «материала нет» даже тогда, когда предъявлен пароль самого
+// выравнивающего значения (иначе ложное значение стало бы вторым паролем каждой
+// личности без способа входа). Пустое и нечитаемое выравнивающее — отказ.
+func TestVerifier_F3_31_AbsentMaterialIsComputedAgainstADecoy(t *testing.T) {
+	obs := newRecordingObserver()
+	v := newVerifier(t, 2, obs)
+	require.Error(t, v.SetDecoy(domain.LoginVerifier{}), "пустое выравнивающее — отказ")
+	require.Error(t, v.SetDecoy(verifierOf(t, "$unknown$format")), "нечитаемое выравнивающее — отказ")
+
+	hasher, err := passwordverify.NewHasher(passwordverify.Declared{Format: domain.PasswordHashFormatArgon2id,
+		Params: map[domain.PasswordHashCostParam]uint32{
+			domain.CostParamArgon2Memory: 65536, domain.CostParamArgon2Iterations: 3, domain.CostParamArgon2Parallelism: 4}})
+	require.NoError(t, err)
+	decoy, err := hasher.Hash("decoy password of the day")
+	require.NoError(t, err)
+	require.NoError(t, v.SetDecoy(decoy))
+
+	res := v.Verify(domain.LoginVerifier{}, "decoy password of the day")
+	require.Equal(t, passwordverify.OutcomeMaterialMissing, res.Outcome, "пароль выравнивающего значения не открывает ничего")
+	res = v.Verify(domain.LoginVerifier{}, "anything else")
+	require.Equal(t, passwordverify.OutcomeMaterialMissing, res.Outcome)
+	require.Equal(t, 2, obs.count(passwordverify.OutcomeMaterialMissing), "исход считается как «материала нет», не как «не совпал»")
+	require.Zero(t, obs.count(passwordverify.OutcomeMismatched))
+	require.Zero(t, obs.count(passwordverify.OutcomeMatched))
+
+	// Стоимость: проверка против пустого с выравниванием стоит как настоящая
+	// того же класса — не короче половины её (грубая граница, устойчивая к
+	// шуму; точная полоса — измерительная проба Ф3-31 полосы входа).
+	real, err := hasher.Hash("real password")
+	require.NoError(t, err)
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		v.Verify(real, "wrong")
+	}
+	realCost := time.Since(start) / 3
+	start = time.Now()
+	for i := 0; i < 3; i++ {
+		v.Verify(domain.LoginVerifier{}, "wrong")
+	}
+	absentCost := time.Since(start) / 3
+	t.Logf("стоимость: настоящая %v · «материала нет» с выравниванием %v", realCost, absentCost)
+	require.Greater(t, absentCost, realCost/2, "полоса «материала нет» отвечает много быстрее настоящей — оракул существования")
+}

@@ -603,3 +603,92 @@ func TestHumanSessionRepo_F3_23_ClearPasswordChangeRequired(t *testing.T) {
 	got, _ = hsResolve(t, repo, b, hsBase.Add(time.Minute))
 	require.False(t, got.Session.PasswordChangeRequired, "Ф5-24: поле снято")
 }
+
+// TestUserTokenRevocations_F3_25_ForceLogoutMomentCutsBothSessionsAndSparesTheNext —
+// принудительный выход администратора (существующий писатель `now` —
+// `UpsertRevokeAll`) датирует отсечку так, что ОБЕ живые сессии стоят не позже
+// её (край отвергает включающе, F4d-22), а сессия, выданная после, — позже и
+// проходит; журнал отсечек называет причину и актора администратора (Ф1-67).
+func TestUserTokenRevocations_F3_25_ForceLogoutMomentCutsBothSessionsAndSparesTheNext(t *testing.T) {
+	pool := hsPool(t)
+	repo := pg.NewHumanSessionRepo(pool)
+	revs := pg.NewUserTokenRevocationRepo(pool)
+	ctx := context.Background()
+	people := lmPeople(t, pool, "hs25", 2)
+	subject, admin := people[0], people[1]
+
+	s1 := hsSession(subject, "25-s1", hsBase)
+	s2 := hsSession(subject, "25-s2", hsBase.Add(time.Minute))
+	hsIssue(t, repo, s1)
+	hsIssue(t, repo, s2)
+
+	forced := hsBase.Add(2 * time.Minute) // момент принудительного выхода, `now` писателя
+	require.NoError(t, revs.UpsertRevokeAll(ctx,
+		domain.UserTokenRevocation{UserID: subject, RevokeBefore: forced, Reason: "admin-force-logout"}, admin))
+
+	cutoff, found, err := revs.RevokedBefore(ctx, string(subject))
+	require.NoError(t, err)
+	require.True(t, found)
+	require.False(t, s1.AuthenticatedAt.After(cutoff), "S1 аутентифицирована не позже отсечки — край отвергает включающе")
+	require.False(t, s2.AuthenticatedAt.After(cutoff), "S2 аутентифицирована не позже отсечки")
+
+	// Записи сессий ЖИВЫ у службы — гасит их отсечка на предъявлении, не
+	// принудительный выход: он пишет момент, а не снимает строки (Ф1-17).
+	for _, s := range []domain.HumanSession{s1, s2} {
+		var endedAt *time.Time
+		require.NoError(t, pool.QueryRow(ctx, `SELECT ended_at FROM kaname.human_sessions WHERE id = $1`, string(s.ID)).Scan(&endedAt))
+		require.Nil(t, endedAt, "запись %s не снята: отзыв действует отсечкой", s.ID)
+	}
+
+	// Новая сессия — позже отсечки — проходит: отзыв действует вперёд.
+	s3 := hsSession(subject, "25-s3", forced.Add(time.Microsecond))
+	hsIssue(t, repo, s3)
+	require.True(t, s3.AuthenticatedAt.After(cutoff), "сессия после принудительного выхода позже отсечки")
+
+	var reason string
+	var actor *string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT reason, revoked_by_user_id FROM user_token_revocations WHERE user_id = $1`, string(subject)).Scan(&reason, &actor))
+	require.Equal(t, "admin-force-logout", reason, "журнал отсечек называет причину")
+	require.NotNil(t, actor)
+	require.Equal(t, string(admin), *actor, "журнал отсечек называет актора администратора")
+}
+
+// TestUserTokenRevocations_F3_26_RecoveryCompletionCutsAllPriorSessionsAsPasswordChange —
+// завершение восстановления (существующий хук пишет отсечку `now` тем же
+// оператором транзакции, `UpsertUserTokenRevokeAll`) датирует отсечку не раньше
+// обеих прежних сессий — включая ту, из которой восстановление запрошено, —
+// причиной `password-change`, тем же значением, что пишет смена пароля (Р6);
+// сессия, выданная восстановлением после отсечки, — позже неё.
+func TestUserTokenRevocations_F3_26_RecoveryCompletionCutsAllPriorSessionsAsPasswordChange(t *testing.T) {
+	pool := hsPool(t)
+	repo := pg.NewHumanSessionRepo(pool)
+	revs := pg.NewUserTokenRevocationRepo(pool)
+	ctx := context.Background()
+	subject := lmPeople(t, pool, "hs26", 1)[0]
+
+	s1 := hsSession(subject, "26-s1", hsBase)
+	s2 := hsSession(subject, "26-s2", hsBase.Add(time.Minute)) // из неё запрошено восстановление
+	hsIssue(t, repo, s1)
+	hsIssue(t, repo, s2)
+
+	completed := hsBase.Add(2 * time.Minute)
+	// Тот же оператор, что у хука `internal_on_recovery`: причина — словарь домена.
+	require.NoError(t, revs.UpsertRevokeAll(ctx,
+		domain.UserTokenRevocation{UserID: subject, RevokeBefore: completed, Reason: domain.RevokeReasonPasswordChange}, ""))
+
+	cutoff, found, err := revs.RevokedBefore(ctx, string(subject))
+	require.NoError(t, err)
+	require.True(t, found)
+	require.False(t, s1.AuthenticatedAt.After(cutoff), "S1 — отказ по отсечке")
+	require.False(t, s2.AuthenticatedAt.After(cutoff), "S2, из которой запрошено, — тоже отказ (Ф5-19)")
+
+	var reason string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT reason FROM user_token_revocations WHERE user_id = $1`, string(subject)).Scan(&reason))
+	require.Equal(t, domain.RevokeReasonPasswordChange, reason, "причина — «смена пароля», значением словаря домена")
+
+	s3 := hsSession(subject, "26-s3", completed.Add(time.Microsecond)) // выдана восстановлением (Ф5-03)
+	hsIssue(t, repo, s3)
+	require.True(t, s3.AuthenticatedAt.After(cutoff), "сессия восстановления после отсечки проходит")
+}

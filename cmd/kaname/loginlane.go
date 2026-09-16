@@ -26,6 +26,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -195,6 +197,20 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 	}
 	hasher, err := passwordverify.NewHasher(login.Declared())
 	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	// Выравнивание полосы «материала нет» (Ф3-31, PWV-06): значение объявленного
+	// класса записи от случайного пароля, которого не знает никто, — проверка
+	// против него стоит как проверка всякого значения этого класса.
+	decoySecret := make([]byte, 32)
+	if _, err := rand.Read(decoySecret); err != nil {
+		return nil, fmt.Errorf("sign-in lane: decoy secret: %w", err)
+	}
+	decoy, err := hasher.Hash(hex.EncodeToString(decoySecret))
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: decoy: %w", err)
+	}
+	if err := verifier.SetDecoy(decoy); err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
 	var breach humansession.BreachChecker
