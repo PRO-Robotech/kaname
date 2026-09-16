@@ -11,11 +11,14 @@ package relverdict_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/corelib/gitenv"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/scalegrid"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // matrixReportAbsPath — абсолютный путь отчёта, разрешённый от КОРНЯ дерева.
@@ -24,12 +27,19 @@ import (
 // где угодно, и относительный путь уехал бы мимо дерева молча. Команда идёт
 // через `pkg/gitenv` — прямой вызов git унаследовал бы `GIT_DIR` и увёл бы
 // вопрос в чужой репозиторий.
+// РАЗРЕШИТЕЛЬ ОДИН НА ВСЕ ТРИ ОТЧЁТА, и здесь стояла ТРЕТЬЯ его копия.
+//
+// Копия склеивала вершину git с координатой, несущей приставку поставки модуля
+// (`services/iam/…`). В монорепо это давало тот же путь, что у читателя, и
+// расхождения не было видно; после выноса службы отдельным репозиторием
+// читатель файл находит, а писатель — нет.
+//
+// Цена измерена дважды, оба раза полным прогоном: замер объёма отрабатывал все
+// четыре точки сетки (944 с и 974 с) и не мог записать результат. Второй раз —
+// уже ПОСЛЕ починки общего разрешителя: соседние два отчёта чинились ею, а этот
+// шёл мимо, потому что нёс свою копию.
 func matrixReportAbsPath() (string, error) {
-	out, err := gitenv.Command("", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", fmt.Errorf("корень дерева не установлен, писать отчёт некуда: %w", err)
-	}
-	return strings.TrimSpace(string(out)) + "/" + matrixReportPath, nil
+	return scalegrid.AbsPathOf(matrixReportPath)
 }
 
 // humanBytes — байты в читаемом виде. Само число печатается рядом: округление
@@ -320,4 +330,29 @@ func renderMatrixReport(results []matrixResult, wall time.Duration, pgVersion st
 	w("  всего операций исполнено %d, настенное время %s\n",
 		len(results)*4*matrixRepeats, wall.Round(time.Second))
 	return b.String()
+}
+
+// TestMatrixReportPathResolvesWhereTheFreshnessGateReadsIt — писатель отчёта
+// объёма приводит координату ТУДА ЖЕ, куда её читает гейт свежести.
+//
+// Проба заведена потому, что копия разрешителя здесь БЫЛА, и цена её измерена
+// полным прогоном дважды: замер отрабатывал четыре точки сетки и выбрасывал
+// результат. Соседние два отчёта чинились общим разрешителем, а этот шёл мимо.
+func TestMatrixReportPathResolvesWhereTheFreshnessGateReadsIt(t *testing.T) {
+	t.Parallel()
+	byWriter, err := matrixReportAbsPath()
+	if err != nil {
+		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: писатель не разрешил координату: %v", err)
+	}
+	byReader := platformtree.RequirePath(t, matrixReportPath)
+	if byWriter != byReader {
+		t.Fatalf("координата %s приводится к РАЗНЫМ местам:\n  писатель: %s\n  читатель: %s\n"+
+			"Гейт свежести объявит отчёт устаревшим, а исполнить его требование будет нечем: "+
+			"замер отработает и не запишется.", matrixReportPath, byWriter, byReader)
+	}
+	if st, serr := os.Stat(filepath.Dir(byWriter)); serr != nil || !st.IsDir() {
+		t.Fatalf("каталог артефакта %s не существует (%v) — запись отчёта отказала бы",
+			filepath.Dir(byWriter), serr)
+	}
+	t.Logf("координата %s → %s", matrixReportPath, byWriter)
 }

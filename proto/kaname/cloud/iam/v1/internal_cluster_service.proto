@@ -33,7 +33,7 @@ import "google/protobuf/timestamp.proto";
 import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/cluster.proto";
 import "kaname/cloud/iam/v1/cluster_admin_grant.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -71,7 +71,7 @@ service InternalClusterService {
   // `audit_outbox` row in one transaction.
   //
   // REST exposed ONLY on the cluster-internal listener.
-  rpc GrantAdmin (GrantClusterAdminRequest) returns (kacho.cloud.operation.Operation) {
+  rpc GrantAdmin (GrantClusterAdminRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       post: "/iam/v1/internal/cluster/admins"
       body: "*"
@@ -100,7 +100,7 @@ service InternalClusterService {
   // NotFound (asymmetric with GrantAdmin idempotency).
   //
   // REST exposed ONLY on the cluster-internal listener.
-  rpc RevokeAdmin (RevokeClusterAdminRequest) returns (kacho.cloud.operation.Operation) {
+  rpc RevokeAdmin (RevokeClusterAdminRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       delete: "/iam/v1/internal/cluster/admins/{subject_id}"
     };

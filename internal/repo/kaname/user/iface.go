@@ -95,7 +95,7 @@ type WriterIface interface {
 	// приглашение известной почты во второй аккаунт строки не заводит, а
 	// добавляет членство, и отличить «завёл» от «нашёл» вызывающему больше нечем.
 	// display_name существующей строки НЕ перезаписывается.
-	InsertPending(ctx context.Context, u domain.User) (domain.User, bool /*inserted*/, error)
+	InsertPending(ctx context.Context, u domain.User, inviteExpiresAt time.Time) (domain.User, bool /*inserted*/, error)
 
 	// ActivateInvite — атомарный UPDATE PENDING → ACTIVE с set external_id +
 	// (optional) display_name. 0 rows → ErrNotFound (row либо несуществует,

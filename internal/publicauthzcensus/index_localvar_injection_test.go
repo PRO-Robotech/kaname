@@ -44,7 +44,9 @@ func servingPkgTree(t *testing.T, body string) (protoDir, cmdDir, root string) {
 	protoDir = filepath.Join(base, "proto")
 	cmdDir = filepath.Join(base, "cmd")
 	root = filepath.Join(base, "root")
-	pkgDir := filepath.Join(root, "services", "iam", "internal", "apps", "kaname", "api", "project")
+	// Пакет лежит ОТ КОРНЯ дерева, без приставки монорепо: модуль сам себе
+	// дерево, и путь импорта переводится в путь дерева отрезанием пути модуля.
+	pkgDir := filepath.Join(root, "internal", "apps", "kaname", "api", "project")
 	for _, d := range []string{protoDir, cmdDir, pkgDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatalf("создать %s: %v", d, err)

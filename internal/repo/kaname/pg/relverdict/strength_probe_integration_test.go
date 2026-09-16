@@ -840,14 +840,14 @@ func TestStrengthGrid_Report(t *testing.T) {
 		t.Skip("integration")
 	}
 	if os.Getenv(strengthEnv) == "" {
-		t.Skipf("сетка предела прочности идёт РУЧНЫМ прогоном: %s=1 go test -C services/iam "+
+		t.Skipf("сетка предела прочности идёт РУЧНЫМ прогоном: %s=1 go test "+
 			"./internal/repo/kaname/pg/relverdict/ -run TestStrengthGrid_Report "+
 			"-count=1 -v -timeout 120m", strengthEnv)
 	}
 	ctx := context.Background()
 	grid := scalegrid.Strength()
 
-	runCommand := fmt.Sprintf("%s=1 go test -C services/iam ./internal/repo/kaname/pg/relverdict/ "+
+	runCommand := fmt.Sprintf("%s=1 go test ./internal/repo/kaname/pg/relverdict/ "+
 		"-run TestStrengthGrid_Report -count=1 -v -timeout 120m", strengthEnv)
 	prov := scalegrid.TakeProvenance(runCommand, nil)
 	// Сетка у этого прибора СВОЯ, и провенанс обязан назвать именно её: шапка,

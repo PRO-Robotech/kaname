@@ -11,10 +11,8 @@
 package contractnaming_test
 
 import (
-	"strings"
 	"testing"
 
-	operationv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"google.golang.org/protobuf/proto"
 
@@ -78,56 +76,14 @@ func TestLedgerAgreesWithTheContract(t *testing.T) {
 	}
 }
 
-// TestPlatformOwnerIsTheOneTheContractDeclares — приставка платформы тоже не
-// выписана «по памяти»: её называет платформенный контракт.
-//
-// Свидетелей ДВА, и они разной формы намеренно: `quota` несёт сегмент версии и
-// разбирается как модуль, `operation` его не несёт вовсе. Один свидетель
-// закрепил бы форму, а не владельца.
-func TestPlatformOwnerIsTheOneTheContractDeclares(t *testing.T) {
-	// СВИДЕТЕЛЕЙ СТАЛО ДВА РАЗНОГО РОДА, И ЭТО ВЫНУЖДЕНО, а не выбрано.
-	//
-	// Здесь стояли два свидетеля ОДНОГО рода — оба платформенные: пакет учёта
-	// (с сегментом версии, разбираемый формой модуля) и служба операций (без
-	// сегмента). Пакет учёта платформенным быть перестал: он переименован в
-	// `corelib.quota.v1` вместе с формой подписки, потому что им пользуются ОБА
-	// продукта и по существу он принадлежит фундаменту.
-	//
-	// Версионного ПЛАТФОРМЕННОГО контракта в замыкании этой службы не осталось
-	// вовсе: она зависит от платформы ноль раз, а фундамент несёт теперь свои
-	// имена. Поэтому форма модуля свидетельствуется СВОИМ контрактом службы —
-	// он сегмент версии несёт и разбирается тем же разбором, — а объявленный
-	// владелец платформы по-прежнему свидетельствуется службой операций.
-	//
-	// ПРЕДИКАТ ИСТЕЧЕНИЯ НАЗВАН: переименуют `kacho.cloud.operation` — и второго
-	// свидетеля не станет тоже. Тогда у пробы исчезнет предмет целиком, и её
-	// надлежит снять вместе с ним, а не ослабить.
-	ownPkg := declaredPackage((*iamv1.Account)(nil))
-	owner, module, ok := contractnaming.Split(ownPkg)
-	if !ok {
-		t.Fatalf("пакет %q не разобрался формой модуля", ownPkg)
-	}
-	if !contractnaming.OwnsModule(owner, module) {
-		t.Errorf("владелец %q не признан владельцем модуля %q", owner, module)
-	}
-	if module != contractnaming.OwnModule {
-		t.Errorf("свой контракт называет модулем %q, объявлено %q",
-			module, contractnaming.OwnModule)
-	}
-
-	opPkg := declaredPackage((*operationv1.Operation)(nil))
-	if head, _, cut := strings.Cut(opPkg, "."); !cut || head != contractnaming.PlatformOwner() {
-		t.Errorf("платформенная служба %q не принадлежит объявленному владельцу %q",
-			opPkg, contractnaming.PlatformOwner())
-	}
-	if _, _, split := contractnaming.Split(opPkg); split {
-		t.Errorf("платформенная служба %q разобрана как пакет модуля: сегмента версии "+
-			"она не несёт, и ресурсом модуля не является", opPkg)
-	}
-	t.Logf("перепись: свидетелей 2 — форма модуля %s (свой) · владелец платформы %s; "+
-		"версионных платформенных контрактов в замыкании службы 0",
-		ownPkg, opPkg)
-}
+// Здесь стояла TestPlatformOwnerIsTheOneTheContractDeclares: приставку платформы
+// свидетельствовал контракт операции, линкуемый службой. Проба объявила свой
+// предикат истечения — «переименуют пакет операции, и второго свидетеля не
+// станет; снять вместе с предметом, а не ослабить», — и он наступил: контракт
+// операции назван корнем фундамента (`corelib.operation`, kacho#2601).
+// Платформенного контракта в замыкании службы не осталось ни одного, поэтому
+// свидетельствовать приставку платформы дескриптором здесь нечем. Форму своего
+// контракта держит TestLedgerAgreesWithTheContract выше.
 
 // TestOwnsModuleRefusesAnOwnerNobodyDeclared — отрицание в паре с положительным.
 //
@@ -169,7 +125,7 @@ func TestSplitKnowsTheFormsTheTreeProduces(t *testing.T) {
 		{"kacho.cloud.vpc.v1", "kacho", "vpc", true},
 		{"kaname.cloud.iam.v1", "kaname", "iam", true},
 		{"evilcorp.cloud.iam.v1", "evilcorp", "iam", true}, // форма годна, принадлежность — отдельный вопрос
-		{"kacho.cloud.operation", "", "", false},
+		{"corelib.operation", "", "", false},
 		{"corelib.subscription", "", "", false},
 		{"kacho.cloud.vpc.v2", "", "", false},
 		{"kacho.storage.vpc.v1", "", "", false},

@@ -122,6 +122,20 @@ func ownerOfType(fgaType string) string {
 	return ""
 }
 
+// ownCatalogCopyRel — СВОЯ копия каталога прав, координатой дерева.
+//
+// # Здесь стояла копия КРАЯ, и её в этом репозитории нет
+//
+// Гейт читал `gateway/internal/middleware/embed/permission_catalog.json` —
+// артефакт дерева платформы. После выноса службы координата перестала
+// резолвиться, и вся проба пропускала себя: гейт «у каждого материализованного
+// отношения есть читатель» не исполнялся ни разу (kaname#108).
+//
+// Копия службы — ТОТ ЖЕ артефакт: их побайтовое равенство держит отдельная
+// сверка (`internal/check` + задание `catalogparity`, выборка дерева края).
+// Значит читать надо свою: предмет тот же, а дерево — наше.
+const ownCatalogCopyRel = "services/iam/internal/apps/kaname/seed/embedded/permission_catalog.json"
+
 // emissionSideFiles — файлы, которые отношения ПИШУТ, а не читают. Исключаются из
 // поиска читателя (см. шапку: писатель, засчитанный за читателя, делает гейт вечно
 // зелёным). Каждый обязан существовать — исчез файл, значит предикат смотрит не туда.
@@ -302,7 +316,7 @@ func catalogRequiredRelations(t *testing.T, root string) map[string]map[string]b
 			ObjectType string `json:"object_type"`
 		} `json:"scope_extractor"`
 	}
-	raw, err := os.ReadFile(platformtree.RequirePath(t, "gateway/internal/middleware/embed/permission_catalog.json"))
+	raw, err := os.ReadFile(platformtree.RequirePath(t, ownCatalogCopyRel))
 	require.NoError(t, err, "каталог прав недоступен — гейт обязан быть громким, а не пропущенным")
 	require.NoError(t, json.Unmarshal(raw, &entries))
 	out := map[string]map[string]bool{}
@@ -321,7 +335,7 @@ func catalogRequiredRelations(t *testing.T, root string) map[string]map[string]b
 func countCatalogEntries(t *testing.T, root string) int {
 	t.Helper()
 	var entries []json.RawMessage
-	raw, err := os.ReadFile(platformtree.RequirePath(t, "gateway/internal/middleware/embed/permission_catalog.json"))
+	raw, err := os.ReadFile(platformtree.RequirePath(t, ownCatalogCopyRel))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &entries))
 	return len(entries)
@@ -404,9 +418,17 @@ func ownerServiceRelationLiterals(t *testing.T, root string) (map[string]map[str
 			"то есть перестал исключать писателя — а тогда писатель зачтётся за читателя", f)
 		skip[abs] = true
 	}
-	servicesDir := platformtree.RequirePath(t, "services")
-	files, err := treecorpus.UnderWithSuffix(servicesDir, ".go")
-	require.NoError(t, err, "индекс отслеживаемых файлов под services/")
+	// Обходится ДЕРЕВО СВОЕГО МОДУЛЯ, а не каталог модулей платформы.
+	//
+	// Прежде обход шёл по `<корень>/services` и отбрасывал всё, кроме своего
+	// модуля (см. ниже): чужие отношения приходят ОБЪЯВЛЕНИЕМ фундамента, а не
+	// обходом чужого кода. То есть каталог платформы был нужен обходу лишь как
+	// приставка к собственным файлам — и после выноса службы перестал
+	// резолвиться, забрав с собой всю пробу.
+	ownRoot, _, err := platformtree.CorpusRoot(mustWDForReaders(t))
+	require.NoError(t, err, "корень обхода не установлен")
+	files, err := treecorpus.UnderWithSuffix(ownRoot, ".go")
+	require.NoError(t, err, "индекс отслеживаемых файлов дерева модуля")
 
 	out := map[string]map[string]bool{}
 	scanned := 0
@@ -436,20 +458,11 @@ func ownerServiceRelationLiterals(t *testing.T, root string) (map[string]map[str
 		if strings.HasSuffix(path, "_test.go") || skip[path] {
 			continue
 		}
-		rel, rerr := filepath.Rel(servicesDir, path)
-		require.NoError(t, rerr)
-		svc, _, ok := strings.Cut(rel, string(filepath.Separator))
-		if !ok {
-			continue
-		}
-		// Обходом читается ТОЛЬКО своё. Чужое приходит объявлением выше, и если
-		// оставить здесь обход по всем каталогам, он перекроет объявление: в этом
-		// дереве чужой код пока лежит рядом, поэтому подмена источника прошла бы
-		// незаметно — а после разреза замолчала бы разом. Проверено инъекцией:
-		// без этого условия опустошение чужой записи в объявлении не краснеет.
-		if svc != selfModule {
-			continue
-		}
+		// Обходом читается ТОЛЬКО СВОЁ — и теперь это свойство ОБХОДА, а не
+		// отбора внутри него: дерево модуля чужого кода не несёт by
+		// construction. Чужое приходит объявлением фундамента выше, и отдельная
+		// проба утверждает, что источник именно он.
+		svc := selfModule
 		body, rerr := os.ReadFile(path)
 		require.NoError(t, rerr)
 		scanned++
@@ -463,31 +476,22 @@ func ownerServiceRelationLiterals(t *testing.T, root string) (map[string]map[str
 	return out, scanned
 }
 
+// monorepoRootForReaders — корень дерева, которое судит гейт.
+//
+// Подъём до САМОГО ВНЕШНЕГО `go.mod`, стоявший здесь, верен не был ни в одной
+// посадке: в самостоятельном клоне он давал корень клона, а в клоне, лежащем
+// внутри чужого дерева, — корень ЧУЖОГО. Корень называет резолв.
 func monorepoRootForReaders(t *testing.T) string {
 	t.Helper()
+	return platformtree.Require(t)
+}
+
+// mustWDForReaders — рабочий каталог либо отказ.
+func mustWDForReaders(t *testing.T) string {
+	t.Helper()
 	wd, err := os.Getwd()
-	require.NoError(t, err)
-	dir := wd
-	// Корнем берётся САМЫЙ ВНЕШНИЙ `go.mod`, а не первый встречный: у службы
-	// теперь СВОЙ модуль (она выносится отдельным репозиторием), и подъём «до
-	// первого» останавливался бы в её каталоге. Пути, которые ниже склеиваются с
-	// этим корнем, называют место В ДЕРЕВЕ МОНОРЕПО — от корня, — поэтому
-	// остановка внутри службы удваивала сегмент и обход искал `services/iam/
-	// services/iam/…`, которого не существует.
-	outermost := ""
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			outermost = dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			if outermost != "" {
-				return outermost
-			}
-			t.Fatalf("корень монорепо (go.mod) не найден от %s", wd)
-		}
-		dir = parent
-	}
+	require.NoError(t, err, "рабочий каталог не установлен")
+	return wd
 }
 
 // TestForeignReadersComeFromTheFoundationDeclaration — источник чужих читателей

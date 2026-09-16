@@ -212,10 +212,21 @@ func (u *MintUseCase) mapErr(ctx context.Context, action string, err error) erro
 		return status.Error(codes.NotFound, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrAlreadyExists):
 		return status.Error(codes.AlreadyExists, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrPermissionDenied):
+		return status.Error(codes.PermissionDenied, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrUnauthenticated):
+		return status.Error(codes.Unauthenticated, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrFailedPrecondition):
 		return status.Error(codes.FailedPrecondition, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrInvalidArg):
 		return status.Error(codes.InvalidArgument, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrAborted):
+		// ПОВТОРЯЕМЫЙ отказ, а не поломка. Признак ставит `pgmaperr` на 40001/40P01
+		// — сериализационный конфликт и взаимная блокировка, — и повтор того же
+		// запроса проходит. Без этой ветви он уезжал в терминальный INTERNAL:
+		// вызывающий читал «сервис сломан» на состоянии, которое проходит само, и
+		// не повторял (задача #114).
+		return status.Error(codes.Aborted, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrUnavailable):
 		// Фиксированный текст, как у INTERNAL ниже, и по той же причине: цепочка
 		// признака недоступности ведёт к ЧУЖОМУ производителю (база, сосед, гейт
@@ -229,6 +240,13 @@ func (u *MintUseCase) mapErr(ctx context.Context, action string, err error) erro
 		// вызывающего, которому она не адресована.
 		u.logErr(ctx, action, err)
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
+	case errors.Is(err, iamerr.ErrInternal):
+		// Ветвь ЯВНАЯ, хотя исход совпадает с запасным ниже: так набор различаемых
+		// полос сходится с каноном, а сходимость держит гейт. Причина уходит в
+		// журнал тем же глаголом, что и на запасной полосе, — на провод она не
+		// идёт (hardening-инвариант #1).
+		u.logErr(ctx, action, err)
+		return status.Error(codes.Internal, "internal error")
 	}
 	u.logErr(ctx, action, err)
 	return status.Error(codes.Internal, "internal error")

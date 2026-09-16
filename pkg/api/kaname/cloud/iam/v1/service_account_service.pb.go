@@ -12,7 +12,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -615,7 +615,7 @@ var File_kaname_cloud_iam_v1_service_account_service_proto protoreflect.FileDesc
 
 const file_kaname_cloud_iam_v1_service_account_service_proto_rawDesc = "" +
 	"\n" +
-	"1kaname/cloud/iam/v1/service_account_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a)kaname/cloud/iam/v1/service_account.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"H\n" +
+	"1kaname/cloud/iam/v1/service_account_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a)kaname/cloud/iam/v1/service_account.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"H\n" +
 	"\x18GetServiceAccountRequest\x12,\n" +
 	"\x12service_account_id\x18\x01 \x01(\tR\x10serviceAccountId\"\x8f\x01\n" +
 	"\x1aListServiceAccountsRequest\x12\x1d\n" +
@@ -657,30 +657,30 @@ const file_kaname_cloud_iam_v1_service_account_service_proto_rawDesc = "" +
 	"\x12service_account_id\x18\x01 \x01(\tR\x10serviceAccountId\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\x03R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x03 \x01(\tR\tpageToken\"\x90\x01\n" +
-	"$ListServiceAccountOperationsResponse\x12@\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"\x8c\x01\n" +
+	"$ListServiceAccountOperationsResponse\x12<\n" +
 	"\n" +
-	"operations\x18\x01 \x03(\v2 .kacho.cloud.operation.OperationR\n" +
+	"operations\x18\x01 \x03(\v2\x1c.corelib.operation.OperationR\n" +
 	"operations\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\x9c\x11\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\x88\x11\n" +
 	"\x15ServiceAccountService\x12\xe7\x01\n" +
 	"\x03Get\x12-.kaname.cloud.iam.v1.GetServiceAccountRequest\x1a#.kaname.cloud.iam.v1.ServiceAccount\"\x8b\x01\x8a\xb5\x18\x18iam.service_accounts.get\x92\xb5\x18\x05v_get\x9a\xb5\x18)\n" +
 	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02.\x12,/iam/v1/serviceAccounts/{service_account_id}\x12\xab\x01\n" +
-	"\x04List\x12/.kaname.cloud.iam.v1.ListServiceAccountsRequest\x1a0.kaname.cloud.iam.v1.ListServiceAccountsResponse\"@\x8a\xb5\x18\x19iam.service_accounts.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x19\x12\x17/iam/v1/serviceAccounts\x12\xfa\x01\n" +
-	"\x06Create\x120.kaname.cloud.iam.v1.CreateServiceAccountRequest\x1a .kacho.cloud.operation.Operation\"\x9b\x01\x8a\xb5\x18\x1biam.service_accounts.create\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
+	"\x04List\x12/.kaname.cloud.iam.v1.ListServiceAccountsRequest\x1a0.kaname.cloud.iam.v1.ListServiceAccountsResponse\"@\x8a\xb5\x18\x19iam.service_accounts.list\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x19\x12\x17/iam/v1/serviceAccounts\x12\xf6\x01\n" +
+	"\x06Create\x120.kaname.cloud.iam.v1.CreateServiceAccountRequest\x1a\x1c.corelib.operation.Operation\"\x9b\x01\x8a\xb5\x18\x1biam.service_accounts.create\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
 	"\aaccount\x12\n" +
 	"account_id\xa2\xb5\x18\x011\xb2\xd2*.\n" +
-	"\x1cCreateServiceAccountMetadata\x12\x0eServiceAccount\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/iam/v1/serviceAccounts\x12\xa5\x02\n" +
-	"\x06Update\x120.kaname.cloud.iam.v1.UpdateServiceAccountRequest\x1a .kacho.cloud.operation.Operation\"\xc6\x01\x8a\xb5\x18\x1biam.service_accounts.update\x92\xb5\x18\bv_update\x9a\xb5\x18)\n" +
+	"\x1cCreateServiceAccountMetadata\x12\x0eServiceAccount\x82\xd3\xe4\x93\x02\x1c:\x01*\"\x17/iam/v1/serviceAccounts\x12\xa1\x02\n" +
+	"\x06Update\x120.kaname.cloud.iam.v1.UpdateServiceAccountRequest\x1a\x1c.corelib.operation.Operation\"\xc6\x01\x8a\xb5\x18\x1biam.service_accounts.update\x92\xb5\x18\bv_update\x9a\xb5\x18)\n" +
 	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x011\xb2\xd2*.\n" +
-	"\x1cUpdateServiceAccountMetadata\x12\x0eServiceAccount\x82\xd3\xe4\x93\x021:\x01*2,/iam/v1/serviceAccounts/{service_account_id}\x12\xa9\x02\n" +
-	"\x06Delete\x120.kaname.cloud.iam.v1.DeleteServiceAccountRequest\x1a .kacho.cloud.operation.Operation\"\xca\x01\x8a\xb5\x18\x1biam.service_accounts.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18)\n" +
+	"\x1cUpdateServiceAccountMetadata\x12\x0eServiceAccount\x82\xd3\xe4\x93\x021:\x01*2,/iam/v1/serviceAccounts/{service_account_id}\x12\xa5\x02\n" +
+	"\x06Delete\x120.kaname.cloud.iam.v1.DeleteServiceAccountRequest\x1a\x1c.corelib.operation.Operation\"\xca\x01\x8a\xb5\x18\x1biam.service_accounts.delete\x92\xb5\x18\bv_delete\x9a\xb5\x18)\n" +
 	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x011\xb2\xd2*5\n" +
-	"\x1cDeleteServiceAccountMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02.*,/iam/v1/serviceAccounts/{service_account_id}\x12\xb1\x02\n" +
-	"\aDisable\x121.kaname.cloud.iam.v1.DisableServiceAccountRequest\x1a .kacho.cloud.operation.Operation\"\xd0\x01\x8a\xb5\x18\x1ciam.service_accounts.disable\x92\xb5\x18\bv_update\x9a\xb5\x18)\n" +
+	"\x1cDeleteServiceAccountMetadata\x12\x15google.protobuf.Empty\x82\xd3\xe4\x93\x02.*,/iam/v1/serviceAccounts/{service_account_id}\x12\xad\x02\n" +
+	"\aDisable\x121.kaname.cloud.iam.v1.DisableServiceAccountRequest\x1a\x1c.corelib.operation.Operation\"\xd0\x01\x8a\xb5\x18\x1ciam.service_accounts.disable\x92\xb5\x18\bv_update\x9a\xb5\x18)\n" +
 	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x012\xb2\xd2*/\n" +
-	"\x1dDisableServiceAccountMetadata\x12\x0eServiceAccount\x82\xd3\xe4\x93\x029:\x01*\"4/iam/v1/serviceAccounts/{service_account_id}:disable\x12\xac\x02\n" +
-	"\x06Enable\x120.kaname.cloud.iam.v1.EnableServiceAccountRequest\x1a .kacho.cloud.operation.Operation\"\xcd\x01\x8a\xb5\x18\x1biam.service_accounts.enable\x92\xb5\x18\bv_update\x9a\xb5\x18)\n" +
+	"\x1dDisableServiceAccountMetadata\x12\x0eServiceAccount\x82\xd3\xe4\x93\x029:\x01*\"4/iam/v1/serviceAccounts/{service_account_id}:disable\x12\xa8\x02\n" +
+	"\x06Enable\x120.kaname.cloud.iam.v1.EnableServiceAccountRequest\x1a\x1c.corelib.operation.Operation\"\xcd\x01\x8a\xb5\x18\x1biam.service_accounts.enable\x92\xb5\x18\bv_update\x9a\xb5\x18)\n" +
 	"\x13iam_service_account\x12\x12service_account_id\xa2\xb5\x18\x012\xb2\xd2*.\n" +
 	"\x1cEnableServiceAccountMetadata\x12\x0eServiceAccount\x82\xd3\xe4\x93\x028:\x01*\"3/iam/v1/serviceAccounts/{service_account_id}:enable\x12\xb6\x02\n" +
 	"\x0eListOperations\x128.kaname.cloud.iam.v1.ListServiceAccountOperationsRequest\x1a9.kaname.cloud.iam.v1.ListServiceAccountOperationsResponse\"\xae\x01\x8a\xb5\x18/iam.service_account_operationses.listOperations\x92\xb5\x18\x06v_list\x9a\xb5\x18)\n" +
@@ -714,14 +714,14 @@ var file_kaname_cloud_iam_v1_service_account_service_proto_goTypes = []any{
 	nil,                           // 11: kaname.cloud.iam.v1.UpdateServiceAccountRequest.LabelsEntry
 	(*ServiceAccount)(nil),        // 12: kaname.cloud.iam.v1.ServiceAccount
 	(*fieldmaskpb.FieldMask)(nil), // 13: google.protobuf.FieldMask
-	(*operation.Operation)(nil),   // 14: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),   // 14: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_service_account_service_proto_depIdxs = []int32{
 	12, // 0: kaname.cloud.iam.v1.ListServiceAccountsResponse.service_accounts:type_name -> kaname.cloud.iam.v1.ServiceAccount
 	10, // 1: kaname.cloud.iam.v1.CreateServiceAccountRequest.labels:type_name -> kaname.cloud.iam.v1.CreateServiceAccountRequest.LabelsEntry
 	13, // 2: kaname.cloud.iam.v1.UpdateServiceAccountRequest.update_mask:type_name -> google.protobuf.FieldMask
 	11, // 3: kaname.cloud.iam.v1.UpdateServiceAccountRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateServiceAccountRequest.LabelsEntry
-	14, // 4: kaname.cloud.iam.v1.ListServiceAccountOperationsResponse.operations:type_name -> kacho.cloud.operation.Operation
+	14, // 4: kaname.cloud.iam.v1.ListServiceAccountOperationsResponse.operations:type_name -> corelib.operation.Operation
 	0,  // 5: kaname.cloud.iam.v1.ServiceAccountService.Get:input_type -> kaname.cloud.iam.v1.GetServiceAccountRequest
 	1,  // 6: kaname.cloud.iam.v1.ServiceAccountService.List:input_type -> kaname.cloud.iam.v1.ListServiceAccountsRequest
 	3,  // 7: kaname.cloud.iam.v1.ServiceAccountService.Create:input_type -> kaname.cloud.iam.v1.CreateServiceAccountRequest
@@ -732,11 +732,11 @@ var file_kaname_cloud_iam_v1_service_account_service_proto_depIdxs = []int32{
 	8,  // 12: kaname.cloud.iam.v1.ServiceAccountService.ListOperations:input_type -> kaname.cloud.iam.v1.ListServiceAccountOperationsRequest
 	12, // 13: kaname.cloud.iam.v1.ServiceAccountService.Get:output_type -> kaname.cloud.iam.v1.ServiceAccount
 	2,  // 14: kaname.cloud.iam.v1.ServiceAccountService.List:output_type -> kaname.cloud.iam.v1.ListServiceAccountsResponse
-	14, // 15: kaname.cloud.iam.v1.ServiceAccountService.Create:output_type -> kacho.cloud.operation.Operation
-	14, // 16: kaname.cloud.iam.v1.ServiceAccountService.Update:output_type -> kacho.cloud.operation.Operation
-	14, // 17: kaname.cloud.iam.v1.ServiceAccountService.Delete:output_type -> kacho.cloud.operation.Operation
-	14, // 18: kaname.cloud.iam.v1.ServiceAccountService.Disable:output_type -> kacho.cloud.operation.Operation
-	14, // 19: kaname.cloud.iam.v1.ServiceAccountService.Enable:output_type -> kacho.cloud.operation.Operation
+	14, // 15: kaname.cloud.iam.v1.ServiceAccountService.Create:output_type -> corelib.operation.Operation
+	14, // 16: kaname.cloud.iam.v1.ServiceAccountService.Update:output_type -> corelib.operation.Operation
+	14, // 17: kaname.cloud.iam.v1.ServiceAccountService.Delete:output_type -> corelib.operation.Operation
+	14, // 18: kaname.cloud.iam.v1.ServiceAccountService.Disable:output_type -> corelib.operation.Operation
+	14, // 19: kaname.cloud.iam.v1.ServiceAccountService.Enable:output_type -> corelib.operation.Operation
 	9,  // 20: kaname.cloud.iam.v1.ServiceAccountService.ListOperations:output_type -> kaname.cloud.iam.v1.ListServiceAccountOperationsResponse
 	13, // [13:21] is the sub-list for method output_type
 	5,  // [5:13] is the sub-list for method input_type

@@ -49,7 +49,11 @@ const (
 // любом составе прочих полей: его не производит ни один глагол, и запрос,
 // которым его пытаются выпустить, исполнимого исхода не имеет ни при каком
 // входе. Предикат снятия элемента словаря: строк этого вида в обеих таблицах
-// ноль — исключение живёт, пока у него есть предмет.
+// ноль — исключение живёт, пока у него есть предмет. Снимается он ВМЕСТЕ с
+// полем `hydra_client_id`, одним ломающим изменением с резервированием номера
+// 4 и имени: вид определён через это поле (ограничение схемы), и снять одно
+// без другого нельзя. Окно считается рядом `kaname_provider_mirror_rows`;
+// решение — docs/engineering/architecture/provider-mirror-column-retirement.md.
 //
 // У ЛИЧНОСТИ ВИДОВ ТРИ, А НЕ ЧЕТЫРЕ: FEDERATED недостижим by construction — в
 // её контракте нет поля, которым он задаётся.
@@ -74,7 +78,10 @@ const (
 	// Ни ключевого материала, ни секрета у нас нет.
 	CredentialKind_CREDENTIAL_KIND_FEDERATED CredentialKind = 3
 	// Строка прежнего потока. Не выдаётся НИ ОДНИМ глаголом; появляется только
-	// обратным заполнением по фактическому содержимому.
+	// обратным заполнением по фактическому содержимому. УХОДИТ вместе с полем
+	// `hydra_client_id` (см. шапку словаря).
+	//
+	// Deprecated: Marked as deprecated in kaname/cloud/iam/v1/credential_kind.proto.
 	CredentialKind_CREDENTIAL_KIND_LEGACY CredentialKind = 4
 )
 
@@ -127,13 +134,13 @@ var File_kaname_cloud_iam_v1_credential_kind_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_credential_kind_proto_rawDesc = "" +
 	"\n" +
-	")kaname/cloud/iam/v1/credential_kind.proto\x12\x13kaname.cloud.iam.v1*\xa5\x01\n" +
+	")kaname/cloud/iam/v1/credential_kind.proto\x12\x13kaname.cloud.iam.v1*\xa9\x01\n" +
 	"\x0eCredentialKind\x12\x1f\n" +
 	"\x1bCREDENTIAL_KIND_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17CREDENTIAL_KIND_KEYPAIR\x10\x01\x12\x1a\n" +
 	"\x16CREDENTIAL_KIND_SECRET\x10\x02\x12\x1d\n" +
-	"\x19CREDENTIAL_KIND_FEDERATED\x10\x03\x12\x1a\n" +
-	"\x16CREDENTIAL_KIND_LEGACY\x10\x04BBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
+	"\x19CREDENTIAL_KIND_FEDERATED\x10\x03\x12\x1e\n" +
+	"\x16CREDENTIAL_KIND_LEGACY\x10\x04\x1a\x02\b\x01BBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
 var (
 	file_kaname_cloud_iam_v1_credential_kind_proto_rawDescOnce sync.Once

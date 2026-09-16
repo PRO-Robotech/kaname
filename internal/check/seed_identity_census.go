@@ -61,6 +61,21 @@ type SeedCensusReport struct {
 	Binary   int
 	Buckets  map[string]SeedCensusCell
 	Order    []string
+	// Edge — величина ГРАНИЦЫ: вхождения в тексте приёмки (оба его дома).
+	//
+	// Ведром она не является намеренно (задача #158): величина самоссылочна и
+	// растёт от документной работы, к предмету приёмки отношения не имеющей,
+	// поэтому её объявление в §0 облагало бы каждую приёмочную полосу правкой
+	// ЧУЖИХ чисел. Но из наблюдения она не изъята: предикат её печатает, а
+	// разбор читает — иначе изъятие стало бы маской.
+	Edge SeedCensusCell
+	// EdgeNamed — печатал ли предикат строку изъятого ВООБЩЕ.
+	//
+	// Отдельное поле, а не ноль в Edge: ноль вхождений в тексте приёмки —
+	// состояние достижимое (документ без единого литерала), а молчание
+	// предиката о границе — поломка. Слив их в одно значение, разбор объявил бы
+	// исправным прибор, переставший печатать.
+	EdgeNamed bool
 }
 
 // SeedCensusDeclaration — то, что объявила приёмка.
@@ -91,6 +106,12 @@ var (
 	revPattern = regexp.MustCompile("`([0-9a-f]{7,40})`")
 	// bucketLinePattern — «<имя ведра> <число> · <число> ф.» в выводе предиката.
 	bucketLinePattern = regexp.MustCompile(`^(\S.*?)\s{2,}(\d+)\s*·\s*(\d+)\s*ф\.\s*$`)
+	// edgeLinePattern — строка изъятого как текст приёмки.
+	//
+	// Форма НАМЕРЕННО не форма ведра: напечатай предикат границу ведром, она
+	// вернулась бы в сверку с §0 — то есть вернулась бы и плата, ради снятия
+	// которой она изъята.
+	edgeLinePattern = regexp.MustCompile(`изъято как текст приёмки:\s*(\d+)\s*вхожден\S*\s+в\s+(\d+)\s*ф\.`)
 )
 
 // ParseSeedCensusOutput разбирает вывод предиката.
@@ -104,6 +125,13 @@ func ParseSeedCensusOutput(out string) (SeedCensusReport, error) {
 		line = strings.TrimRight(line, " \t\r")
 		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "ревизия:"); ok {
 			rep.Revision = strings.TrimSpace(rest)
+			continue
+		}
+		if m := edgeLinePattern.FindStringSubmatch(line); m != nil {
+			hits, _ := strconv.Atoi(m[1])
+			files, _ := strconv.Atoi(m[2])
+			rep.Edge = SeedCensusCell{Hits: hits, Files: files}
+			rep.EdgeNamed = true
 			continue
 		}
 		if m := scanPattern.FindStringSubmatch(line); m != nil {
@@ -238,6 +266,16 @@ const SeedCensusFrozenBucket = "ПРЕДМЕТ: свод и миграции"
 // молчание прибора.
 func AdjudicateSeedCensus(decl SeedCensusDeclaration, rep SeedCensusReport) []string {
 	var findings []string
+
+	// АНТИМАСКА ГРАНИЦЫ: величина изъята из вёдер, но не из наблюдения.
+	//
+	// Изъятие защитимо ровно пока величину видно. Перестань предикат её
+	// печатать — текст приёмки исчез бы из переписи целиком, и «в тексте
+	// приёмки литералов нет» стало бы неотличимо от «предикат о нём молчит».
+	if !rep.EdgeNamed {
+		findings = append(findings, "предикат не печатает изъятое как текст приёмки — "+
+			"величина границы исчезла из наблюдения, и изъятие из вёдер стало маской")
+	}
 
 	frozen, printed := rep.Buckets[SeedCensusFrozenBucket]
 	switch {

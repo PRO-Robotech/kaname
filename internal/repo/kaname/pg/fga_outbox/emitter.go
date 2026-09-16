@@ -37,7 +37,9 @@
 //	event_type    text         IN ('fga.tuple.write','fga.tuple.delete')
 //	payload       jsonb        {"user":"…","object":"…"} плюс ЛИБО "relation"
 //	                           (одно отношение), ЛИБО "relations" (весь набор
-//	                           субъекта на этом объекте; см. emitTx)
+//	                           субъекта на этом объекте; см. emitTx); у строки
+//	                           ПУБЛИКАЦИИ ещё "source_version" — версия
+//	                           владельца (см. EmitPublicationTx)
 //	created_at    timestamptz  default now()
 //
 // Величин доставки (`sent_at`, `last_error`, `attempt_count`) здесь НЕТ, и перечислять
@@ -68,6 +70,9 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/PRO-Robotech/corelib/authz/proxytuple"
 
 	"github.com/PRO-Robotech/kaname/internal/clients"
 )
@@ -116,6 +121,70 @@ func EmitWriteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple)
 // — symmetric revoke. Same atomicity contract as EmitWriteTx.
 func EmitDeleteTx(ctx context.Context, tx pgx.Tx, tuples []clients.RelationTuple) error {
 	return emitTx(ctx, tx, EventTypeDelete, tuples)
+}
+
+// EmitPublicationTx кладёт строку журнала ПУБЛИКАЦИИ объекта для анонимного
+// чтения — кортеж `user:* #v_get @<object>`, — упорядоченную ВЕРСИЕЙ ВЛАДЕЛЬЦА.
+//
+// # Чем эта строка отличается от всех остальных, и почему отличие несущее
+//
+// Полезная нагрузка несёт поле `source_version`. По нему проекция журнала в
+// прямой факт (`kaname.relation_fact_from_journal`) узнаёт строку, упорядоченную
+// владельцем, и делает с ней две вещи, которых не делает ни с одной другой:
+//
+//   - сравнивает её по версии владельца, а не по метке `created_at`. Метка —
+//     момент НАЧАЛА транзакции службы: снятие, начавшее транзакцию раньше
+//     открытия и применённое позже, иначе оказалось бы старше того, что обязано
+//     снять, и факт пережил бы своё снятие;
+//   - переносит её в прямой факт, хотя отношение — глагол. Глаголы проекция не
+//     копирует: форма E выводит их из выдачи. Публикацию не выводит ни одна
+//     выдача — её объявляет владелец ресурса, — и без факта её нет нигде.
+//
+// Поэтому функция принимает ТОЛЬКО объект: субъект и отношение она берёт у
+// правила приёма (`proxytuple.PublicReadSubject` / `PublicReadRelation`), а не у
+// вызывающего. Строку другой формы с этим полем положить нельзя by construction,
+// и глагол, выведенный из выдачи, мимо запрета проекции не проедет.
+//
+// # Кто зовёт
+//
+// Только путь публикации (`public_read.ApplyTx`), и только когда намерение
+// ПРИМЕНИЛОСЬ — то есть строго новее последнего применённого по этому объекту.
+// Устаревшая доставка до журнала не доходит вовсе; порядок строк одного объекта
+// в журнале поэтому совпадает с порядком версий владельца.
+//
+// Версия приходит значением `pgtype.Timestamptz`, а не `time.Time`: намерение без
+// маркера хранится как '-infinity', и строка его снятия обязана нести то же
+// значение, иначе сравнение в проекции разошлось бы со сравнением в состоянии.
+func EmitPublicationTx(ctx context.Context, tx pgx.Tx, published bool, object string, ownerVersion pgtype.Timestamptz) error {
+	if tx == nil {
+		return fmt.Errorf("fga_outbox: tx must not be nil")
+	}
+	if object == "" {
+		return fmt.Errorf("fga_outbox: publication without an object")
+	}
+	if !ownerVersion.Valid {
+		// Недействительная версия уехала бы в полезную нагрузку как null, и
+		// проекция молча упорядочила бы строку меткой журнала — ровно тем
+		// порядком, от которого поле защищает.
+		return fmt.Errorf("fga_outbox: publication of %s without an owner version", object)
+	}
+	eventType := EventTypeDelete
+	if published {
+		eventType = EventTypeWrite
+	}
+	// Версия кладётся В ТОМ ЖЕ ОПЕРАТОРЕ приведением к jsonb, а не форматом на
+	// стороне Go: так значение в полезной нагрузке и значение в состоянии
+	// публикации — одна и та же величина до микросекунды, включая '-infinity'.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO kaname.fga_outbox (event_type, payload, created_at)
+		 VALUES ($1, jsonb_build_object('user', $2::text, 'relation', $3::text,
+		                                'object', $4::text, 'source_version', $5::timestamptz),
+		         now())`,
+		eventType, proxytuple.PublicReadSubject, string(proxytuple.PublicReadRelation), object, ownerVersion,
+	); err != nil {
+		return fmt.Errorf("fga_outbox: insert publication %s: %w", eventType, err)
+	}
+	return nil
 }
 
 // emitTx enqueues the tuples GROUPED BY (user, object): one row per subject per

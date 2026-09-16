@@ -201,10 +201,25 @@ func TestIntegration_R914_RevokingTheClusterGrantClosesTheWrite(t *testing.T) {
 
 	// Положительный контроль. Без него «отказ после отзыва» неотличим от пробы,
 	// которая сломала вердикт целиком.
-	quotaReader, err := asker.Allowed(ctx,
-		"service_account:"+authzguard.ServiceAccountIDForService("vpc"),
-		"cluster", domain.ClusterSingletonID, "quota_reader", nil)
+	//
+	// Соседнее основание БЕРЁТСЯ у проекции фактов, а не выписывается: прежняя
+	// редакция называла `quota_reader`, выдача которого отозвана миграцией
+	// `20260914091500` (модуль пределов снят), и контроль пережил свой предмет,
+	// не покраснев ни разу — проба пропускала себя в каждом задании конвейера,
+	// пока дерево платформы не называло ни одно из них (#108). Отбор ПОЛОЖИТЕЛЬНЫЙ:
+	// тот же субъект, тот же якорь, любое отношение, кроме отозванного. Пустой
+	// отбор — отказ, а не молчание: контроль без основания ничего не контролирует.
+	subject := "service_account:" + authzguard.ServiceAccountIDForService("vpc")
+	var sibling string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT relation FROM kaname.relation_fact
+		 WHERE object_type = 'cluster' AND object_id = $1 AND subject = $2 AND relation <> $3
+		 ORDER BY relation LIMIT 1`,
+		domain.ClusterSingletonID, subject, relationWriteRelation).Scan(&sibling),
+		"положительный контроль беспредметен: у %s нет второго основания на кластере", subject)
+	siblingAllowed, err := asker.Allowed(ctx, subject, "cluster", domain.ClusterSingletonID, sibling, nil)
 	require.NoError(t, err)
-	assert.True(t, quotaReader,
-		"положительный контроль: отзыв ОДНОЙ выдачи не трогает соседнее основание того же субъекта")
+	assert.Truef(t, siblingAllowed,
+		"положительный контроль: отзыв ОДНОЙ выдачи не трогает соседнее основание того же "+
+			"субъекта (%s на кластере)", sibling)
 }

@@ -220,7 +220,7 @@ func scopeTier(objectType string) string {
 // grantAdvice — следующий шаг словами, по ярусу. Текст английский и стабильный:
 // он часть контракта, а русскую редакцию производит клиентская поверхность из
 // машинного признака (решение о языке клиентских отказов —
-// services/iam/internal/errors/client_refusal_reason_coverage_test.go).
+// internal/errors/client_refusal_reason_coverage_test.go).
 func grantAdvice(action, tier string) string {
 	const lead = "the '"
 	switch tier {

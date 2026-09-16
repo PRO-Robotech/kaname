@@ -16,11 +16,9 @@ package pg
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
@@ -267,35 +265,6 @@ func (a *BackfillAdapter) RemoveSmokeMirrorObject(ctx context.Context, objectTyp
 		return fmt.Errorf("backfill: remove smoke mirror object %s:%s: %w", objectType, objectID, err)
 	}
 	return nil
-}
-
-// SmokeOwnerBindingCandidate returns ONE ACTIVE account-scoped OWNER binding and its
-// account id, to drive the boot forward-smoke. The owner (`*.*`) role
-// bound at ACCOUNT scope is the bounded-scope owner-content path: a fresh resource in
-// the account forward-materializes the owner's per-object content tuple.
-// Deterministic (ORDER BY id) so the smoke is stable across boots. ok=false when no
-// owner-binding exists yet (brand-new cluster) → the caller skips the smoke.
-func (a *BackfillAdapter) SmokeOwnerBindingCandidate(ctx context.Context) (domain.AccessBindingID, string, bool, error) {
-	var (
-		bindingID string
-		accountID string
-	)
-	err := a.pool.QueryRow(ctx,
-		`SELECT id, resource_id
-		   FROM kaname.access_bindings
-		  WHERE status = 'ACTIVE'
-		    AND role_id = $1
-		    AND resource_type = 'account'
-		  ORDER BY id ASC
-		  LIMIT 1`,
-		domain.OwnerRoleID).Scan(&bindingID, &accountID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", "", false, nil
-		}
-		return "", "", false, fmt.Errorf("backfill: smoke owner-binding candidate: %w", err)
-	}
-	return domain.AccessBindingID(bindingID), accountID, true, nil
 }
 
 // ListActiveBindingRelationChecks returns, for every ACTIVE binding, the per-object

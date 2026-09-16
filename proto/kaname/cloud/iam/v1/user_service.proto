@@ -9,7 +9,7 @@ import "google/api/annotations.proto";
 import "google/protobuf/field_mask.proto";
 import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/user.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -62,7 +62,7 @@ service UserService {
   // Invite a user by email. Если user уже invited в этот Account
   // (idempotent re-invite) — Operation возвращается, AB опционально создается.
   // Permission: requires `admin` OR `editor` relation на account_id.
-  rpc Invite (InviteUserRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Invite (InviteUserRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       post: "/iam/v1/users:invite"
       body: "*"
@@ -104,7 +104,7 @@ service UserService {
   //
   // Reading the record keeps its account-level sources on purpose: seeing the
   // people of your own Account is the Account's business (`v_get` / `v_list`).
-  rpc Update (UpdateUserRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Update (UpdateUserRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { patch: "/iam/v1/users/{user_id}" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "UpdateUserMetadata"
@@ -151,7 +151,7 @@ service UserService {
   // Deleting an identity that still owns Accounts is refused by the database
   // (`accounts_owner_fk`) → FAILED_PRECONDITION "User <id> owns accounts and
   // cannot be deleted"; that is unchanged.
-  rpc Delete (DeleteUserRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Delete (DeleteUserRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { delete: "/iam/v1/users/{user_id}" };
     option (corelib.api.v1.operation) = {
       metadata: "DeleteUserMetadata"
@@ -213,7 +213,7 @@ service UserService {
   // which admits a person, and AccessBindingService/Revoke, which withdraws a
   // right. Changing who takes part in an Account is a membership-posture change,
   // not routine lifecycle.
-  rpc RemoveFromAccount (RemoveUserFromAccountRequest) returns (kacho.cloud.operation.Operation) {
+  rpc RemoveFromAccount (RemoveUserFromAccountRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       post: "/iam/v1/users/{user_id}:removeFromAccount"
       body: "*"
@@ -328,7 +328,7 @@ service UserService {
   // on their own schedule. What stops immediately is every path that mints a
   // NEW one (token hook, refresh hook, personal-token issuance, subject
   // resolution at the edge).
-  rpc Block (BlockUserRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Block (BlockUserRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/users/{user_id}:block" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "BlockUserMetadata"
@@ -357,7 +357,7 @@ service UserService {
   // (unblocking an active membership succeeds). A PENDING invitation is refused
   // here too — turning an unconfirmed invitee into an active member is
   // activation-on-first-login, a different path with a different subject.
-  rpc Unblock (UnblockUserRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Unblock (UnblockUserRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = { post: "/iam/v1/users/{user_id}:unblock" body: "*" };
     option (corelib.api.v1.operation) = {
       metadata: "UnblockUserMetadata"
@@ -508,7 +508,7 @@ message ListUserOperationsRequest {
 
 message ListUserOperationsResponse {
   // List of operations for the specified user.
-  repeated kacho.cloud.operation.Operation operations = 1;
+  repeated corelib.operation.Operation operations = 1;
 
   // This token allows you to get the next page of results for list requests.
   string next_page_token = 2;

@@ -143,14 +143,14 @@ func TestDocsSiteInjection_MissingConfigIsFound(t *testing.T) {
 
 // ── ЗАКОННЫЕ БЛИЗНЕЦЫ ───────────────────────────────────────────────────────
 
-// Имя платформы как имя proto-пакета. Конверт операции ПРИНАДЛЕЖИТ платформе, и
-// страницы службы законно его называют; гейт по подстроке краснел бы здесь и был
-// бы снят первым же читателем.
+// Имя платформы как имя proto-пакета. Контракты доменов платформы ей и
+// ПРИНАДЛЕЖАТ, и копия каталога прав края законно их называет; гейт по подстроке
+// краснел бы здесь и был бы снят первым же читателем.
 func TestDocsSiteInjection_PlatformProtoPackageInProseIsSilent(t *testing.T) {
 	t.Parallel()
 	root := docsSiteWorld(t)
 	docsSiteSubst(t, root, docsSiteLiveURL,
-		"  // конверт операции — `kacho.cloud.operation.v1`, он принадлежит платформе\n"+docsSiteLiveURL)
+		"  // ресурс сети — `kacho.cloud.vpc.v1`, он принадлежит платформе\n"+docsSiteLiveURL)
 	_, findings := scanDocsSiteAddress(root)
 	if len(findings) != 0 {
 		t.Fatalf("гейт краснеет на ЗАКОННОМ близнеце (имя proto-пакета платформы в комментарии):\n%s",
@@ -178,7 +178,7 @@ func TestDocsSiteInjection_NestedURLKeyIsSilent(t *testing.T) {
 	t.Parallel()
 	root := docsSiteWorld(t)
 	docsSiteSubst(t, root, docsSiteLiveURL,
-		docsSiteLiveURL+"\n          url: 'https://docs.kacho.cloud/operation',")
+		docsSiteLiveURL+"\n          url: 'https://docs.kacho.cloud/vpc',")
 	_, findings := scanDocsSiteAddress(root)
 	if len(findings) != 0 {
 		t.Fatalf("гейт краснеет на ЗАКОННОМ близнеце (вложенный ключ чужого предмета):\n%s",

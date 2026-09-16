@@ -16,20 +16,42 @@ package refusaldomain_test
 // # Что здесь считается ПРОИЗВОДИТЕЛЕМ
 //
 // Составной литерал `errdetails.ErrorInfo` — то место, где домен уезжает
-// клиенту. Судится ВЫРАЖЕНИЕ поля `Domain`: вызов означает «величина берётся»,
-// голое имя — «величина зашита» (в этом дереве такие имена суть строковые
-// константы уровня пакета).
+// клиенту. Судится ВЫРАЖЕНИЕ поля `Domain`, и «берётся» значит ОДНО из двух:
+//
+//	Domain: refusaldomain.For(…)   — вызов по месту;
+//	Domain: denyDomain             — имя уровня ПАКЕТА, чей инициализатор вызов.
+//
+// Вторая форма добавлена задачей kaname#126, и добавлена потому, что посылка
+// прежнего разбора была ЛОЖНА: он считал всякое голое имя строковой константой,
+// тогда как `denyDomain` берётся вызовом `contractnaming.OwnContractPackage()`.
+// Производитель, бравший домен у объявления, числился зашитым и держался
+// записью ведомости — то есть послабление прощало ИСПОЛНЕННЫЙ предикат, а
+// форма записи «величину вычислили один раз при старте» оставалась вне
+// наблюдения.
+//
+// Имя резолвится по ВСЕМУ ПАКЕТУ (каталогу), а не по файлу: объявление и
+// производитель законно лежат в разных файлах одного пакета, и резолюция в
+// пределах файла давала бы ЛОЖНУЮ находку.
 //
 // # Чего разбор НЕ видит — названо, а не спрятано
 //
-//  1. домен, собранный присваиванием в переменную и уехавший ею;
-//  2. отказ, собранный не составным литералом (`proto.Merge`, конструктор);
-//  3. производитель, чей домен ещё не взят у объявления, — их ДВА, и оба названы
-//     ведомостью ниже. Третьей была запись ступени S0a о `pkg/subjectchange`:
-//     производитель приехал в это дерево из модуля платформы, и до переезда его не
-//     видел ни один прогон этого репозитория — то есть слепая зона была не «разбор
-//     не умеет», а «файла в дереве нет». Запись СНЯТА вместе со своим предметом
-//     (kaname#48): домен там берётся у объявления, и прощать в файле нечего.
+//  1. домен, собранный присваиванием в переменную ВНУТРИ функции;
+//  2. имя, чей инициализатор — не вызов, а другое имя (цепочка длиннее одного
+//     звена);
+//  3. отказ, собранный не составным литералом (`proto.Merge`, конструктор);
+//  4. производитель, чей домен ещё не взят у объявления. Записей было три, и
+//     все три сняты вместе со своим предметом — ведомость сегодня ПУСТА.
+//     Запись ступени S0a о `pkg/subjectchange`: производитель приехал в это
+//     дерево из модуля платформы, и до переезда его не видел ни один прогон
+//     этого репозитория — слепая зона была не «разбор не умеет», а «файла в
+//     дереве нет»; снята kaname#48. Запись об отказе учёта
+//     (`internal/apps/kaname/shared/quota.go`): её довод — «производитель уходит
+//     вместе с модулем учёта» — опроверг сам уход модуля (kacho#2117): ушёл
+//     авторитет величин, а счётчик и его отказ остались; снята kacho#2076, домен
+//     там берётся у объявления. Третья — о `internal/authzguard/deny_details.go`:
+//     её предикат («имя пакета контракта переехало вслед за продуктом») был
+//     ИСПОЛНЕН закрытием kacho#2133, а запись продолжала прощать; снята
+//     kaname#126 вместе с починкой посылки разбора.
 //
 // # Ведомость самоистекает
 //
@@ -70,22 +92,9 @@ type ledgerEntry struct {
 //
 // Все записи — о ЧУЖОЙ работе, и это не отсрочка: у каждой назван владелец,
 // предмет которого шире домена отказа, и правка здесь столкнулась бы с ним.
-var ledger = []ledgerEntry{
-	{
-		File:  "internal/apps/kaname/shared/quota.go",
-		Why:   "модуль учёта величин выпиливается из службы целиком вместе со своим производителем отказа",
-		Until: "файла нет в дереве",
-		Owner: "PRO-Robotech/kacho#2117",
-	},
-	{
-		File: "internal/authzguard/deny_details.go",
-		Why: "домен здесь — ИМЯ ПАКЕТА КОНТРАКТА, а не суффикс продукта, и он намеренно совпадает " +
-			"с тем, что ставит край: вызывающий не обязан знать, какой слой сказал «нет». " +
-			"Взять его у объявления продукта значило бы развести две стороны одного контракта",
-		Until: "имя пакета контракта переехало вслед за продуктом (решение Р14)",
-		Owner: "PRO-Robotech/kacho#2133",
-	},
-}
+// ПУСТА, и это цель механизма, а не его простой: гейт проходит на пустой
+// ведомости и падает на записи, которой нечего прощать (см. ветвь `hit` ниже).
+var ledger = []ledgerEntry{}
 
 // scanResult — что обход увидел.
 type scanResult struct {
@@ -106,6 +115,13 @@ type scanResult struct {
 // копии разбора, доказывает свойство копии.
 func scanTree(root string) (scanResult, error) {
 	var out scanResult
+	// computed — по каталогу: имена уровня пакета, чья величина ВЫЧИСЛЕНА вызовом.
+	computed := map[string]map[string]bool{}
+	type parsedFile struct {
+		rel, pkg string
+		file     *ast.File
+	}
+	var files []parsedFile
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -132,8 +148,23 @@ func scanTree(root string) (scanResult, error) {
 			return nil
 		}
 		out.Parsed++
-
-		ast.Inspect(file, func(n ast.Node) bool {
+		// ПЕРВЫЙ проход по файлу: имена уровня пакета, чей инициализатор — вызов.
+		// Собираются по КАТАЛОГУ: объявление и производитель законно лежат в
+		// разных файлах одного пакета.
+		pkg := filepath.Dir(rel)
+		for _, name := range callInitialisedNames(file) {
+			if computed[pkg] == nil {
+				computed[pkg] = map[string]bool{}
+			}
+			computed[pkg][name] = true
+		}
+		files = append(files, parsedFile{rel: rel, pkg: pkg, file: file})
+		return nil
+	})
+	// ВТОРОЙ проход: классификация. Отдельным проходом потому, что имя может
+	// объявляться в файле, который обход прочитает ПОЗЖЕ производителя.
+	for _, pf := range files {
+		ast.Inspect(pf.file, func(n ast.Node) bool {
 			cl, ok := n.(*ast.CompositeLit)
 			if !ok || typeName(cl.Type) != errorInfoType {
 				return true
@@ -142,16 +173,15 @@ func scanTree(root string) (scanResult, error) {
 			expr := fieldValue(cl, "Domain")
 			switch {
 			case expr == nil:
-				out.Nameless = append(out.Nameless, rel)
-			case isCall(expr):
+				out.Nameless = append(out.Nameless, pf.rel)
+			case isTaken(expr, computed[pf.pkg]):
 				out.Wired++
 			default:
-				out.Hardcoded = append(out.Hardcoded, rel)
+				out.Hardcoded = append(out.Hardcoded, pf.rel)
 			}
 			return true
 		})
-		return nil
-	})
+	}
 	sort.Strings(out.Hardcoded)
 	sort.Strings(out.Nameless)
 	return out, err
@@ -205,10 +235,50 @@ func TestRefusalDomainComesFromTheDeclaration(t *testing.T) {
 	}
 }
 
-// isCall — выражение есть вызов, то есть величина БЕРЁТСЯ, а не зашита.
-func isCall(e ast.Expr) bool {
-	_, ok := e.(*ast.CallExpr)
-	return ok
+// isTaken — величина БЕРЁТСЯ, а не зашита. Две законные формы, и обе названы:
+// вызов по месту либо имя уровня пакета, чей инициализатор — вызов.
+//
+// Второй формы разбор не знал, и это делало его посылку («голое имя = строковая
+// константа») ложной: производитель, бравший домен у объявления, числился
+// зашитым (kaname#126).
+func isTaken(e ast.Expr, computed map[string]bool) bool {
+	if _, ok := e.(*ast.CallExpr); ok {
+		return true
+	}
+	ident, ok := e.(*ast.Ident)
+	return ok && computed[ident.Name]
+}
+
+// callInitialisedNames — имена уровня ПАКЕТА, чей инициализатор есть вызов.
+//
+// Судится узел объявления, а не текст: имя, названное в комментарии, сюда не
+// попадает by construction. Читаются `var` и `const` верхнего уровня; имя внутри
+// функции именем уровня пакета не является и резолюции не подлежит — иначе
+// локальная переменная с тем же именем прощала бы зашитый домен в соседнем
+// файле.
+func callInitialisedNames(file *ast.File) []string {
+	var out []string
+	for _, d := range file.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || (gd.Tok != token.VAR && gd.Tok != token.CONST) {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, name := range vs.Names {
+				if i >= len(vs.Values) {
+					continue
+				}
+				if _, isCall := vs.Values[i].(*ast.CallExpr); isCall {
+					out = append(out, name.Name)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // typeName — имя типа составного литерала в форме `pkg.Type`.

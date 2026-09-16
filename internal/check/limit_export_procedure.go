@@ -80,9 +80,6 @@ func (c ExportProcedureCensus) String() string {
 		c.Guides, c.Lines, c.Procedures, c.Templates, len(c.Tables), strings.Join(c.Tables, ", "))
 }
 
-// exportCopyMarker — по чему строка документа опознаётся как процедура выгрузки. Это
-// мета-команда оболочки psql, и в прозе она не встречается: у разбора нет риска
-// принять за процедуру объяснение процедуры.
 // InstallGuideSuffix — по чему инструкции обновления опознаются в составе дерева.
 const InstallGuideSuffix = "INSTALL.md"
 
@@ -98,6 +95,9 @@ func ExportProcedureGuides(tree *treecorpus.Tree) (TreeCorpus, error) {
 	})
 }
 
+// exportCopyMarker — по чему строка документа опознаётся как процедура выгрузки. Это
+// мета-команда оболочки psql, и в прозе она не встречается: у разбора нет риска
+// принять за процедуру объяснение процедуры.
 const exportCopyMarker = `\copy (`
 
 // JudgeExportProcedure судит корпус инструкций: ключ — путь, значение — текст.

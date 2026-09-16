@@ -11,8 +11,8 @@
 //	iamctl doctor                                     разбор состояния предикатом
 //
 // ТОНКАЯ: разбор вызова, классификация чужого отказа, тексты и коды возврата
-// живут в services/iam/internal/iamctl; локальная проверка дерева — в
-// services/iam/internal/manifestcheckrun, том же исполнителе, что зовёт
+// живут в internal/iamctl; локальная проверка дерева — в
+// internal/manifestcheckrun, том же исполнителе, что зовёт
 // сборочная цель module-manifest-check. Здесь — только флаги посадки и вызов.
 //
 // Прецедент формы — соседи по каталогу: migrator и authzmap-tables.
@@ -48,15 +48,15 @@ func main() {
 	// действий свои наборы, и общий набор с ними не смешивается.
 	fs := flag.NewFlagSet("iamctl", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	endpoint := fs.String("endpoint", envOr("KANAMECTL_ENDPOINT", ""),
+	endpoint := fs.String("endpoint", envOr("KANAMECTL_ENDPOINT"),
 		"адрес ВНУТРЕННЕГО слушателя iam (:9091): глаголы каталога модуля внешним маршрутизатором не обслуживаются")
-	serverName := fs.String("server-name", envOr("KANAMECTL_SERVER_NAME", ""),
+	serverName := fs.String("server-name", envOr("KANAMECTL_SERVER_NAME"),
 		"имя, сверяемое с SAN сертификата службы")
-	caFiles := fs.String("ca", envOr("KANAMECTL_CA_FILES", ""),
+	caFiles := fs.String("ca", envOr("KANAMECTL_CA_FILES"),
 		"корни доверия через запятую: ими проверяется сертификат службы")
-	certFile := fs.String("cert", envOr("KANAMECTL_CERT_FILE", ""),
+	certFile := fs.String("cert", envOr("KANAMECTL_CERT_FILE"),
 		"СВОЁ удостоверение: служба решает по личности вызывающего, а не по факту достижимости")
-	keyFile := fs.String("key", envOr("KANAMECTL_KEY_FILE", ""),
+	keyFile := fs.String("key", envOr("KANAMECTL_KEY_FILE"),
 		"ключ к своему удостоверению")
 	timeout := fs.Duration("timeout", 30*time.Second,
 		"срок КАЖДОГО вызова службы")
@@ -91,12 +91,7 @@ func main() {
 
 // envOr — умолчание из окружения: инструмент запускается Job'ом, и переменные
 // посадки удобнее монтировать, чем собирать строку вызова.
-func envOr(name, fallback string) string {
-	if v, ok := os.LookupEnv(name); ok {
-		return v
-	}
-	return fallback
-}
+func envOr(name string) string { return os.Getenv(name) }
 
 // splitList — перечень путей через запятую, без пустых записей.
 //

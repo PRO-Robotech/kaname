@@ -114,7 +114,7 @@ const config: Config = {
           position: 'left',
         },
         {
-          href: 'https://github.com/PRO-Robotech/kacho/tree/main/services/iam',
+          href: 'https://github.com/PRO-Robotech/kaname',
           label: 'GitHub',
           position: 'right',
         },
@@ -127,7 +127,7 @@ const config: Config = {
     },
     footer: {
       style: 'dark',
-      copyright: `Copyright © ${new Date().getFullYear()} ООО «ПРТ» · Kachō Cloud Platform.`,
+      copyright: `Copyright © ${new Date().getFullYear()} ООО «ПРТ» · Kaname.`,
       links: [
         {
           title: 'Документация',
@@ -140,10 +140,9 @@ const config: Config = {
         {
           title: 'Исходный код',
           items: [
-            { label: 'Монорепозиторий kacho', href: 'https://github.com/PRO-Robotech/kacho' },
-            { label: 'services/iam/', href: 'https://github.com/PRO-Robotech/kacho/tree/main/services/iam' },
-            { label: 'proto/', href: 'https://github.com/PRO-Robotech/kacho/tree/main/proto' },
-            { label: 'pkg/', href: 'https://github.com/PRO-Robotech/kacho/tree/main/pkg' },
+            { label: 'Репозиторий kaname', href: 'https://github.com/PRO-Robotech/kaname' },
+            { label: 'proto/', href: 'https://github.com/PRO-Robotech/kaname/tree/main/proto' },
+            { label: 'pkg/', href: 'https://github.com/PRO-Robotech/kaname/tree/main/pkg' },
           ],
         },
       ],

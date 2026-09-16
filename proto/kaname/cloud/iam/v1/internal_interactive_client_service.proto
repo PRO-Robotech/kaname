@@ -33,7 +33,7 @@ import "google/api/annotations.proto";
 import "google/protobuf/field_mask.proto";
 import "corelib/api/v1/operation.proto";
 import "kaname/cloud/iam/v1/interactive_client.proto";
-import "kacho/cloud/operation/operation.proto";
+import "corelib/operation/operation.proto";
 import "corelib/authz/v1/authz_options.proto";
 
 option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
@@ -83,7 +83,7 @@ service InternalInteractiveClientService {
   // `UNAVAILABLE` and leaves NO row behind — the name does not stay taken.
   //
   // REST exposed ONLY on the cluster-internal listener.
-  rpc Create (CreateInteractiveClientRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Create (CreateInteractiveClientRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       post: "/iam/v1/internal/interactiveClients"
       body: "*"
@@ -107,7 +107,7 @@ service InternalInteractiveClientService {
   // rejected by name when named in the mask.
   //
   // REST exposed ONLY on the cluster-internal listener.
-  rpc Update (UpdateInteractiveClientRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Update (UpdateInteractiveClientRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       patch: "/iam/v1/internal/interactiveClients/{interactive_client_id}"
       body: "*"
@@ -130,7 +130,7 @@ service InternalInteractiveClientService {
   // delete.
   //
   // REST exposed ONLY on the cluster-internal listener.
-  rpc Delete (DeleteInteractiveClientRequest) returns (kacho.cloud.operation.Operation) {
+  rpc Delete (DeleteInteractiveClientRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       delete: "/iam/v1/internal/interactiveClients/{interactive_client_id}"
     };

@@ -682,10 +682,7 @@ func (u *IssueSAKeyUseCase) issueSecretSync(
 		if err != nil {
 			return nil, err
 		}
-		pbKey, err := saClientToProto(persisted)
-		if err != nil {
-			return nil, err
-		}
+		pbKey := saClientToProto(persisted)
 		stored := &iamv1.IssueSAKeyResponse{
 			Key:      pbKey,
 			ClientId: string(keyID),
@@ -811,10 +808,7 @@ func (u *IssueSAKeyUseCase) doIssuePrivateKeyJWT(ctx context.Context, keyID doma
 
 	// 4. Build response — return PRIVATE PEM + kid ONCE. `client_secret`
 	//    is kept empty (deprecated field, retained for wire-compat).
-	pbKey, err := saClientToProto(persisted)
-	if err != nil {
-		return nil, err
-	}
+	pbKey := saClientToProto(persisted)
 	resp := &iamv1.IssueSAKeyResponse{
 		Key:           pbKey,
 		ClientId:      identity.ClientID,
@@ -1075,10 +1069,7 @@ func (u *IssueSAKeyUseCase) doIssueFederated(ctx context.Context, keyID domain.S
 		return nil, err
 	}
 
-	pbKey, err := saClientToProto(persisted)
-	if err != nil {
-		return nil, err
-	}
+	pbKey := saClientToProto(persisted)
 	resp := &iamv1.IssueSAKeyResponse{
 		Key:      pbKey,
 		ClientId: identity.ClientID,
@@ -1512,7 +1503,13 @@ func labelsToProto(l domain.Labels) map[string]string {
 	return out
 }
 
-func saClientToProto(c domain.ServiceAccountOAuthClient) (*iamv1.ServiceAccountOAuthClient, error) {
+// saClientToProto — проекция строки клиента в форму контракта.//
+// Ошибки НЕ возвращает: собрать проекцию нечем — все поля берутся у уже
+// прочитанной строки. Прежде возвращалась всегда-nil ошибка, и у вызывающих
+// стояли недостижимые ветви `if err != nil`: ветвь, которая не может
+// исполниться, есть форма проверки без содержания — её читают как покрытый
+// случай (kaname#115).
+func saClientToProto(c domain.ServiceAccountOAuthClient) *iamv1.ServiceAccountOAuthClient {
 	pb := &iamv1.ServiceAccountOAuthClient{
 		Id:              string(c.ID),
 		SvaId:           string(c.SvaID),
@@ -1530,7 +1527,7 @@ func saClientToProto(c domain.ServiceAccountOAuthClient) (*iamv1.ServiceAccountO
 	if c.LastUsedAt != nil {
 		pb.LastUsedAt = shared.TimestampProto(*c.LastUsedAt)
 	}
-	return pb, nil
+	return pb
 }
 
 // credentialKindToProto / CredentialKindFromProto — отображение вида домена в
@@ -1614,10 +1611,21 @@ func mapPGErr(err error) error {
 		return status.Error(codes.NotFound, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrAlreadyExists):
 		return status.Error(codes.AlreadyExists, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrPermissionDenied):
+		return status.Error(codes.PermissionDenied, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrUnauthenticated):
+		return status.Error(codes.Unauthenticated, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrFailedPrecondition):
 		return status.Error(codes.FailedPrecondition, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrInvalidArg):
 		return status.Error(codes.InvalidArgument, iamerr.StripSentinel(err))
+	case errors.Is(err, iamerr.ErrAborted):
+		// ПОВТОРЯЕМЫЙ отказ, а не поломка. Признак ставит `pgmaperr` на 40001/40P01
+		// — сериализационный конфликт и взаимная блокировка, — и повтор того же
+		// запроса проходит. Без этой ветви он уезжал в терминальный INTERNAL:
+		// вызывающий читал «сервис сломан» на состоянии, которое проходит само, и
+		// не повторял (задача #114).
+		return status.Error(codes.Aborted, iamerr.StripSentinel(err))
 	case errors.Is(err, iamerr.ErrUnavailable):
 		// Фиксированный текст, как у INTERNAL ниже, и по той же причине: цепочка
 		// признака недоступности ведёт к ЧУЖОМУ производителю (база, сосед, гейт
@@ -1634,6 +1642,14 @@ func mapPGErr(err error) error {
 		// Подробность остаётся в цепочке, и у неё ЕСТЬ читатель: вызывающие зовут
 		// `mapPGErrLogged`, который называет причину журналу (задача #2507).
 		return status.Error(codes.Unavailable, shared.UnavailableMessage)
+	case errors.Is(err, iamerr.ErrInternal):
+		// Ветвь ЯВНАЯ, хотя исход совпадает с запасным ниже. Так набор различаемых
+		// полос сходится с каноном, а сходимость держит гейт: копия, у которой
+		// полос меньше, молча отправляет чужие в терминальный INTERNAL. Текст
+		// остаётся СВОИМ — он называет предмет и есть часть контракта домена;
+		// подробность цепочки на провод не идёт ни здесь, ни в запасной ветви
+		// (hardening-инвариант #1).
+		return status.Error(codes.Internal, "internal SA key error")
 	}
 	return status.Error(codes.Internal, "internal SA key error")
 }

@@ -62,6 +62,7 @@ func newRegisterUC(t *testing.T) (*internaliam.RegisterResourceUseCase, *outboxP
 		kanamepg.NewResourceMirrorEmitter(),
 		kanamepg.NewPoolTxBeginner(pool),
 		kanamepg.NewCatalogTypeReader(),
+		kanamepg.NewPublicReadPublisher(),
 	)
 	return uc, &outboxProbe{pool: pool}
 }

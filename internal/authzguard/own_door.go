@@ -89,7 +89,7 @@ import (
 func OwnDoorProtoPackages() []string {
 	return []string{
 		"kaname.cloud.iam.v1",
-		"kacho.cloud.operation",
+		"corelib.operation",
 		// Здесь стоял `kacho.cloud.quota.v1` — пакет общей формы ответа учёта.
 		// Служба чтения квот личности переехала в собственный контракт службы
 		// доступа (`kaname.cloud.iam.v1`, kacho#2362, решение `Д9`), и RPC в том

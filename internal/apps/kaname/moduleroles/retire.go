@@ -6,7 +6,7 @@ package moduleroles
 // retire.go — ТРИГГЕР ОТЗЫВА: роль, чьё объявление убрано из манифеста,
 // помечается снятой.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
+// Приёмка `docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // (APPROVED круга 4), §2.2, §2.5; сценарии IAM-RW-1-05 … -09, -24. Задача
 // продукта #1913.
 //

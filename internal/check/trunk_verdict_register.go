@@ -134,7 +134,7 @@ func DeclaredContexts(raw string, trunkProcesses []string) []string {
 		if len(r.Cells) != 3 {
 			continue
 		}
-		if _, isProc := registerHasProcess(trunkProcesses, r.Cells[2]); !isProc {
+		if !registerHasProcess(trunkProcesses, r.Cells[2]) {
 			continue
 		}
 		name := strings.Trim(r.Cells[0], "`")
@@ -175,7 +175,7 @@ func AuditTrunkRegister(raw string, jobs map[string]string, trunkProcesses []str
 			// Таблица контекстов — три колонки, средняя есть задание.
 			// Перечень «что не переносится» — тоже три; различает их третья:
 			// у контекстов там имя процесса, у перечня — производитель.
-			if _, isProc := registerHasProcess(trunkProcesses, r.Cells[2]); isProc {
+			if registerHasProcess(trunkProcesses, r.Cells[2]) {
 				census.Contexts++
 				for _, m := range inlineCode.FindAllStringSubmatch(r.Cells[1], -1) {
 					named[m[1]] = true
@@ -234,13 +234,13 @@ func AuditTrunkRegister(raw string, jobs map[string]string, trunkProcesses []str
 	return findings, census, nil
 }
 
-func registerHasProcess(hay []string, needle string) (int, bool) {
-	for i, h := range hay {
+func registerHasProcess(hay []string, needle string) bool {
+	for _, h := range hay {
 		if h == needle {
-			return i, true
+			return true
 		}
 	}
-	return 0, false
+	return false
 }
 
 func trimCell(s string) string {

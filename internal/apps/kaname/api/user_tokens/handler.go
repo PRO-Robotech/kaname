@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	operationpb "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operationpb "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/safeconv"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -168,11 +168,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListUserTokensRequest) (*
 	}
 	out := make([]*iamv1.UserOAuthClient, 0, len(rows))
 	for _, c := range rows {
-		pb, err := userTokenToProto(c)
-		if err != nil {
-			return nil, status.Error(codes.Internal, "internal error")
-		}
-		out = append(out, pb)
+		out = append(out, userTokenToProto(c))
 	}
 	return &iamv1.ListUserTokensResponse{Tokens: out, NextPageToken: nextToken}, nil
 }

@@ -19,8 +19,6 @@ import (
 	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
-	"github.com/PRO-Robotech/kaname/internal/catalog"
-	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	handlerinternal "github.com/PRO-Robotech/kaname/internal/handler/iamhooks"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
@@ -42,19 +40,32 @@ import (
 // соседних сервисов эта провязка есть, и её отсутствие было бы расхождением,
 // которому нечем себя выдать (#1752).
 //
-// kanameRepo / opsRepo / relationStore прокидываются из composition root
-// (serve.go) — provision hook (Kratos user-provisioning, C4) строит
-// UpsertFromIdentityUseCase из тех же зависимостей, что wiring.go, и
+// kanameRepo / opsRepo / bindingReconciler прокидываются из
+// composition root (serve.go) — provision hook (Kratos user-provisioning, C4)
+// строит UpsertFromIdentityUseCase из тех же зависимостей, что wiring.go, и
 // переиспользует уже собранную дверь решения (не дублирует её).
+//
+// `relationStore` и `catalogSource` здесь БОЛЬШЕ НЕ ПРИНИМАЮТСЯ. Первый не читался
+// уже на стволе — шапка обещала «FGA-tuple side-effects», которых на этой полосе
+// нет; второй осиротел вместе с построением реконсайлера, снятым выше (#116).
+// Параметр, который никто не читает, — объявление зависимости, которой нет:
+// следующий провяжет его «как положено» и будет прав по форме и неправ по делу.
+//
+// Реконсайлер тоже ПРОКИДЫВАЕТСЯ, а не строится здесь, и это не единообразие
+// ради единообразия: собранный здесь экземпляр не нёс приёмника размера, поэтому
+// материализации живой полосы первого входа в гистограмму не попадали, а она
+// выглядела полной (#116). Измерение, провязанное к одному из двух экземпляров,
+// молчит о втором, и молчание это неотличимо от отсутствия трафика.
 func buildHooksMux(
 	pool *pgxpool.Pool,
 	kanameRepo kanamerepo.Repository,
 	opsRepo operations.Repo,
-	relationStore clients.RelationStore,
-	// catalogSource — каталожный факт из живых строк (задача #1816): ЖИВОЙ путь
-	// первого входа материализует доступ тем же реконсайлером, что и gRPC-путь,
-	// и обязан читать тот же каталог.
-	catalogSource catalog.Source,
+	// bindingReconciler — ТОТ ЖЕ экземпляр, что у пути запроса (`wiring.go`), а не
+	// второй, собранный здесь. До #116 он собирался здесь и БЕЗ приёмника размера:
+	// живая полоса первого входа материализовала привязки мимо гистограммы, и та
+	// читалась как полная. Параметром, а не построением: второй экземпляр — это
+	// решение о наблюдаемости, принятое побочным эффектом.
+	bindingReconciler *reconcileapp.Reconciler,
 	metricsReg *metrics.Registry,
 	cfg config.Config,
 	logger *slog.Logger,
@@ -120,10 +131,9 @@ func buildHooksMux(
 	// signup path) forward-materializes the bootstrap owner's per-object content
 	// access — parity with the gRPC InternalUserService wiring (wiring.go). Without
 	// it the LIVE signup user is 403 on their own account's content until the sweep.
-	provisionReconciler := reconcileapp.New(kanamepg.NewReconcileAdapter(pool, catalogSource), logger, catalogSource)
 	userUpsert := userapp.NewUpsertFromIdentityUseCase(kanameRepo, opsRepo).
 		WithLogger(logger).
-		WithReconciler(provisionReconciler).
+		WithReconciler(bindingReconciler).
 		// ЖИВОЙ путь первого входа: именно здесь активируются приглашения на
 		// настоящем трафике. Счётчик без этой провязки был бы всегда нулевым.
 		WithActivationObserver(metricsReg.InviteActivationRecorder())

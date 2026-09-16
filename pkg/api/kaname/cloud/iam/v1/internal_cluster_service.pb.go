@@ -36,7 +36,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -532,7 +532,7 @@ var File_kaname_cloud_iam_v1_internal_cluster_service_proto protoreflect.FileDes
 
 const file_kaname_cloud_iam_v1_internal_cluster_service_proto_rawDesc = "" +
 	"\n" +
-	"2kaname/cloud/iam/v1/internal_cluster_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a!kaname/cloud/iam/v1/cluster.proto\x1a-kaname/cloud/iam/v1/cluster_admin_grant.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"\x13\n" +
+	"2kaname/cloud/iam/v1/internal_cluster_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a!kaname/cloud/iam/v1/cluster.proto\x1a-kaname/cloud/iam/v1/cluster_admin_grant.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"\x13\n" +
 	"\x11GetClusterRequest\"\x8a\x01\n" +
 	"\x18GrantClusterAdminRequest\x12O\n" +
 	"\fsubject_type\x18\x01 \x01(\x0e2,.kaname.cloud.iam.v1.ClusterGrantSubjectTypeR\vsubjectType\x12\x1d\n" +
@@ -563,15 +563,15 @@ const file_kaname_cloud_iam_v1_internal_cluster_service_proto_rawDesc = "" +
 	"\x12granted_by_user_id\x18\x06 \x01(\tR\x0fgrantedByUserId\x12(\n" +
 	"\x10granted_by_email\x18\a \x01(\tR\x0egrantedByEmail\x129\n" +
 	"\n" +
-	"granted_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tgrantedAt2\xac\a\n" +
+	"granted_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tgrantedAt2\xa4\a\n" +
 	"\x16InternalClusterService\x12\xac\x01\n" +
 	"\x03Get\x12&.kaname.cloud.iam.v1.GetClusterRequest\x1a\x1c.kaname.cloud.iam.v1.Cluster\"_\x8a\xb5\x18\x16iam.cluster_admins.get\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
-	"\acluster\x12\x01*\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02\x1a\x12\x18/iam/v1/internal/cluster\x12\xfd\x01\n" +
+	"\acluster\x12\x01*\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02\x1a\x12\x18/iam/v1/internal/cluster\x12\xf9\x01\n" +
 	"\n" +
-	"GrantAdmin\x12-.kaname.cloud.iam.v1.GrantClusterAdminRequest\x1a .kacho.cloud.operation.Operation\"\x9d\x01\x8a\xb5\x18\x18iam.cluster_admins.grant\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
+	"GrantAdmin\x12-.kaname.cloud.iam.v1.GrantClusterAdminRequest\x1a\x1c.corelib.operation.Operation\"\x9d\x01\x8a\xb5\x18\x18iam.cluster_admins.grant\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x012\xb2\xd2*.\n" +
-	"\x19GrantClusterAdminMetadata\x12\x11ClusterAdminGrant\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/iam/v1/internal/cluster/admins\x12\x8b\x02\n" +
-	"\vRevokeAdmin\x12..kaname.cloud.iam.v1.RevokeClusterAdminRequest\x1a .kacho.cloud.operation.Operation\"\xa9\x01\x8a\xb5\x18\x19iam.cluster_admins.revoke\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
+	"\x19GrantClusterAdminMetadata\x12\x11ClusterAdminGrant\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/iam/v1/internal/cluster/admins\x12\x87\x02\n" +
+	"\vRevokeAdmin\x12..kaname.cloud.iam.v1.RevokeClusterAdminRequest\x1a\x1c.corelib.operation.Operation\"\xa9\x01\x8a\xb5\x18\x19iam.cluster_admins.revoke\x92\xb5\x18\fsystem_admin\x9a\xb5\x18\f\n" +
 	"\acluster\x12\x01*\xa2\xb5\x18\x012\xb2\xd2*/\n" +
 	"\x1aRevokeClusterAdminMetadata\x12\x11ClusterAdminGrant\x82\xd3\xe4\x93\x02.*,/iam/v1/internal/cluster/admins/{subject_id}\x12\xd4\x01\n" +
 	"\n" +
@@ -603,7 +603,7 @@ var file_kaname_cloud_iam_v1_internal_cluster_service_proto_goTypes = []any{
 	(ClusterGrantSubjectType)(0),       // 8: kaname.cloud.iam.v1.ClusterGrantSubjectType
 	(*timestamppb.Timestamp)(nil),      // 9: google.protobuf.Timestamp
 	(*Cluster)(nil),                    // 10: kaname.cloud.iam.v1.Cluster
-	(*operation.Operation)(nil),        // 11: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),        // 11: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_internal_cluster_service_proto_depIdxs = []int32{
 	8,  // 0: kaname.cloud.iam.v1.GrantClusterAdminRequest.subject_type:type_name -> kaname.cloud.iam.v1.ClusterGrantSubjectType
@@ -616,8 +616,8 @@ var file_kaname_cloud_iam_v1_internal_cluster_service_proto_depIdxs = []int32{
 	3,  // 7: kaname.cloud.iam.v1.InternalClusterService.RevokeAdmin:input_type -> kaname.cloud.iam.v1.RevokeClusterAdminRequest
 	5,  // 8: kaname.cloud.iam.v1.InternalClusterService.ListAdmins:input_type -> kaname.cloud.iam.v1.ListClusterAdminsRequest
 	10, // 9: kaname.cloud.iam.v1.InternalClusterService.Get:output_type -> kaname.cloud.iam.v1.Cluster
-	11, // 10: kaname.cloud.iam.v1.InternalClusterService.GrantAdmin:output_type -> kacho.cloud.operation.Operation
-	11, // 11: kaname.cloud.iam.v1.InternalClusterService.RevokeAdmin:output_type -> kacho.cloud.operation.Operation
+	11, // 10: kaname.cloud.iam.v1.InternalClusterService.GrantAdmin:output_type -> corelib.operation.Operation
+	11, // 11: kaname.cloud.iam.v1.InternalClusterService.RevokeAdmin:output_type -> corelib.operation.Operation
 	6,  // 12: kaname.cloud.iam.v1.InternalClusterService.ListAdmins:output_type -> kaname.cloud.iam.v1.ListClusterAdminsResponse
 	9,  // [9:13] is the sub-list for method output_type
 	5,  // [5:9] is the sub-list for method input_type

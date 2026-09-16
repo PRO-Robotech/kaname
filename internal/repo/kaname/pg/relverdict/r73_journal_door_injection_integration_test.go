@@ -22,8 +22,8 @@ import (
 
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/clients"
-	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 )
 
 // TestR7_3_27_InjectionRedWhenTheJournalIsDeadened — сняли триггер журнала (то,
@@ -56,12 +56,11 @@ func TestR7_3_27_InjectionRedWhenTheJournalIsDeadened(t *testing.T) {
 	)
 
 	asker := relverdict.NewAsker(pool)
-	writer := kanamepg.NewCreatorTupleWriter(pool)
-	if asker == nil || writer == nil {
-		t.Fatal("форма или продуктовый писатель не собраны")
+	if asker == nil {
+		t.Fatal("форма не собрана")
 	}
 
-	if werr := writer.RecordTuples(ctx, []clients.RelationTuple{{
+	if werr := iampgtest.EmitCreatorIntent(ctx, pool, []clients.RelationTuple{{
 		User: subject, Relation: relation, Object: objectType + ":" + objectID,
 	}}); werr != nil {
 		t.Fatalf("запись намерения: %v", werr)

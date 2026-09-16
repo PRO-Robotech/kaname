@@ -16,8 +16,8 @@ import (
 // вопрос — вправе ли текст, собранный из доставленных манифестов, стать моделью
 // процесса.
 //
-// Решение — services/iam/docs/engineering/architecture/composed-model-is-admitted-by-content.md.
-// Приёмка — services/iam/docs/engineering/acceptance/composed-model-admits-only-what-it-owns.md,
+// Решение — docs/engineering/architecture/composed-model-is-admitted-by-content.md.
+// Приёмка — docs/engineering/acceptance/composed-model-admits-only-what-it-owns.md,
 // предмет A (сценарии ADM-A-01…ADM-A-27). Здесь они НЕ пересказываются: два места
 // об одном предмете расходятся молча.
 //
@@ -33,7 +33,7 @@ import (
 //
 //  1. Д7(а) судит БАЙТЫ — у разобранной модели байтов нет, и функция, принимающая
 //     только `*authzplan.Model`, эту клаузу выразить не может вовсе;
-//  2. вход `services/iam/internal/manifest` дал бы цикл импорта: тот пакет уже
+//  2. вход `internal/manifest` дал бы цикл импорта: тот пакет уже
 //     импортирует этот (`relationgrant.go`, вызов `Shared()`);
 //  3. допуск судит МОДЕЛЬ, а не заявку: манифест до модели проходит рендер, и
 //     судить заявку значило бы судить не тот артефакт.

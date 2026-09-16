@@ -19,6 +19,21 @@
 // продукт отвечает «кому что разрешено», а не «сколько чего можно завести».
 //
 // ─────────────────────────────────────────────────────────────────────────────
+// ЧТО СНЯТО ВМЕСТЕ С АВТОРИТЕТОМ, КРОМЕ ЕГО КОДА (kaname#108)
+//
+// Здесь же называется судьба СОСЕДНЕГО гейта, чтобы его исчезновение не пришлось
+// восстанавливать по истории: `quota_reader_grant_test.go` требовал, чтобы
+// владелец считаемого вида состоял в группе читателей пределов. Он судил
+// миграции ВСЕХ модулей платформы (`<корень>/services/**/*.sql`) и опирался на
+// группу `module.quota_readers`.
+//
+// Ни того, ни другого в этом репозитории нет: каталога соседних модулей — by
+// construction, группы читателей — потому, что хранилище авторитета ушло из
+// схемы вместе с ним. Гейт при этом не краснел и не зеленел: он спрашивал
+// координату дерева платформы и пропускал себя в любой посадке, то есть не
+// исполнялся НИ РАЗУ с момента выноса службы.
+//
+// ─────────────────────────────────────────────────────────────────────────────
 // РАЗБОР СУДИТ УЗЕЛ-ИДЕНТИФИКАТОР, А НЕ ТЕКСТ — И ЭТО НЕСУЩЕЕ
 //
 // Гейт по подстроке краснел бы на СОБСТВЕННОМ объяснении: перечень снятых имён
@@ -35,6 +50,14 @@
 //
 // Ось контракта разбирает СТРОКУ ОБЪЯВЛЕНИЯ (`service` / `message` / `enum` /
 // `rpc` в начале строки).
+//
+// Ось СКВОЗНОГО НАБОРА разбирает порождённую коллекцию как JSON и судит АДРЕС
+// шага. Она заведена позже трёх остальных (`kaname#124`) и ровно потому, что те
+// её предмет не покрывали: они читают `.go`, `.proto` и `.fga`, а набор живёт в
+// `.py` и `.json`. Замер на день заведения: авторитет был снят из всех трёх осей,
+// а набор нёс 47 шагов к его поверхности в двух коллекциях — одиннадцать кейсов
+// целой коллекции и три в соседней. Ни одна ось этого не видела, и утверждения о
+// снятом предмете не краснели и не зеленели: они невыполнимы.
 //
 // Отступ в образцах записан `[ \t]`, а НЕ `[[:space:]]`, и это не придирка:
 // второй класс включает перевод строки, поэтому совпадение начиналось на строку
@@ -83,6 +106,7 @@
 package check
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -243,6 +267,11 @@ type AuthorityResidueCensus struct {
 	// Kept — прочтений законного соседа. Ноль здесь означает, что разбор не
 	// дошёл до остатка, и его вердикт недействителен.
 	Kept int
+	// Suites — коллекций сквозного набора прочитано.
+	Suites int
+	// SuiteSteps — шагов коллекций осмотрено. Ноль здесь означает, что разбор не
+	// дошёл до набора, и его вердикт недействителен.
+	SuiteSteps int
 	// Excused — прочтений отношения, снятие которого объявлено чужим предметом.
 	// Печатается рядом с находками: послабление, о котором не сказано числом,
 	// неотличимо от его отсутствия.
@@ -255,10 +284,10 @@ type AuthorityResidueCensus struct {
 func (c AuthorityResidueCensus) String() string {
 	return fmt.Sprintf(
 		"перепись: прод-файлов Go разобрано %d (узлов-имён %d), контрактов прочитано %d "+
-			"(объявлений %d), объявлений модели прав %d; законный остаток прочитан %d раз; "+
-			"по ведомости прощено %d; не разобрано %d",
-		c.GoFiles, c.GoIdents, c.Contracts, c.ContractDecls, c.Models, c.Kept,
-		c.Excused, len(c.Unparsed))
+			"(объявлений %d), объявлений модели прав %d, коллекций набора %d (шагов %d); "+
+			"законный остаток прочитан %d раз; по ведомости прощено %d; не разобрано %d",
+		c.GoFiles, c.GoIdents, c.Contracts, c.ContractDecls, c.Models, c.Suites,
+		c.SuiteSteps, c.Kept, c.Excused, len(c.Unparsed))
 }
 
 // AuthorityResidueFinding — одна находка: где, по какой оси и что именно.
@@ -279,7 +308,24 @@ const (
 	AxisGoCode    = "прод-код"
 	AxisCatalogue = "каталог видов"
 	AxisModel     = "модель прав"
+	AxisSuite     = "сквозная проба"
 )
+
+// retiredAuthorityRESTPath — поверхность авторитета величин у края.
+//
+// Ось заведена затем, что три первые её НЕ ПОКРЫВАЛИ: они судят прод-код,
+// контракт и модель, а сквозной набор живёт в `.py` и `.json`. Замер на день
+// заведения: авторитет был снят из всех трёх, а набор нёс 47 шагов к
+// `/iam/v1/internal/limits` в двух коллекциях, из них 44 — целой коллекцией
+// `iam-limit` с одиннадцатью кейсами. Утверждение о снятом предмете не краснеет
+// и не зеленеет — оно невыполнимо, и ни одна из трёх осей этого не видела.
+//
+// СУДИТСЯ АДРЕС ШАГА ПОРОЖДЁННОЙ КОЛЛЕКЦИИ, А НЕ ТЕКСТ МОДУЛЯ КЕЙСОВ. Путь
+// авторитета называют и шапки — разбором снятого предмета, — и предикат по
+// подстроке краснел бы на собственном объяснении: тот же класс, который эта же
+// шапка называет про грепанье комментариев. Адрес шага — исполняемая часть:
+// его читает newman, а не человек.
+const retiredAuthorityRESTPath = "/iam/v1/internal/limits"
 
 // JudgeAuthorityResidue судит корпус: ключ — путь в дереве, значение — текст.
 //
@@ -359,6 +405,24 @@ func JudgeAuthorityResidue(corpus, excused map[string]string) (AuthorityResidueC
 					Where: fmt.Sprintf("%s:%d", path, 1+strings.Count(body[:m[0]], "\n")),
 					Axis:  AxisContract,
 					What:  fmt.Sprintf("объявление %s %s", body[m[2]:m[3]], name),
+				})
+			}
+
+		case strings.HasSuffix(path, ".postman_collection.json"):
+			census.Suites++
+			steps, addressed, perr := suiteStepsAddressing(body, retiredAuthorityRESTPath)
+			if perr != nil {
+				census.Unparsed = append(census.Unparsed, path)
+				continue
+			}
+			census.SuiteSteps += steps
+			for _, name := range addressed {
+				findings = append(findings, AuthorityResidueFinding{
+					Where: path,
+					Axis:  AxisSuite,
+					What: fmt.Sprintf("шаг %q адресуется к %s — поверхности снятого "+
+						"авторитета величин, у которой в дереве нет производителя",
+						name, retiredAuthorityRESTPath),
 				})
 			}
 
@@ -461,4 +525,70 @@ func authorityIdents(path, body string) (identScan, int, bool) {
 		return true
 	})
 	return scan, kept, true
+}
+
+// suiteStepsAddressing — сколько шагов у коллекции и какие адресуются к пути.
+//
+// Возвращает (осмотрено шагов, имена адресующихся, ошибка разбора). Разбор
+// нужен потому, что судить надо АДРЕС шага, а не текст файла: имя пути стоит и
+// в текстах утверждений, и в прозе шапок, а исполняет newman именно `url`.
+func suiteStepsAddressing(body, path string) (int, []string, error) {
+	var doc struct {
+		Item []json.RawMessage `json:"item"`
+	}
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		return 0, nil, err
+	}
+	var (
+		steps     int
+		addressed []string
+	)
+	var walk func(items []json.RawMessage)
+	walk = func(items []json.RawMessage) {
+		for _, raw := range items {
+			var node struct {
+				Name    string            `json:"name"`
+				Item    []json.RawMessage `json:"item"`
+				Request *struct {
+					URL json.RawMessage `json:"url"`
+				} `json:"request"`
+			}
+			if err := json.Unmarshal(raw, &node); err != nil {
+				continue
+			}
+			if len(node.Item) > 0 {
+				walk(node.Item)
+				continue
+			}
+			if node.Request == nil {
+				continue
+			}
+			steps++
+			if strings.Contains(suiteURLRaw(node.Request.URL), path) {
+				addressed = append(addressed, node.Name)
+			}
+		}
+	}
+	walk(doc.Item)
+	return steps, addressed, nil
+}
+
+// suiteURLRaw — адрес шага в ОБЕИХ законных записях postman: цельной строкой и
+// разобранным объектом с полем `raw`. Знать надо обе: коллекция, записанная
+// строкой, прошла бы мимо разбора объекта молча.
+func suiteURLRaw(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	var obj struct {
+		Raw string `json:"raw"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		return obj.Raw
+	}
+	return ""
 }

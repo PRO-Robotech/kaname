@@ -14,7 +14,7 @@
 //
 // Ни одно действие не повторяет логику, у которой уже есть производитель:
 //
-//	validate → services/iam/internal/manifestcheckrun (тот же исполнитель, что
+//	validate → internal/manifestcheckrun (тот же исполнитель, что
 //	           у сборочной цели module-manifest-check)
 //	plan     → InternalModuleService/Plan
 //	apply    → InternalModuleService/Apply
@@ -55,7 +55,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	operationv1 "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operationv1 "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	"github.com/PRO-Robotech/corelib/safeconv"
 	"github.com/PRO-Robotech/kaname/internal/manifestcheckrun"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"

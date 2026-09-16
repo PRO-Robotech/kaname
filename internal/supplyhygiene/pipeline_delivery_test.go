@@ -113,6 +113,10 @@ var deliveredWorkflows = []string{deliveredWorkflow, deliveredImageWorkflow}
 var deliveredPipelineFiles = []string{
 	deliveredWorkflow,
 	deliveredImageWorkflow,
+	// Составное действие, которым два задания создают дерево платформы: без
+	// него провайдер отказывает на разборе ссылки `uses: ./.github/actions/…`,
+	// и оба задания не исполняются вовсе.
+	".github/actions/platform-tree/action.yml",
 	".github/golangci.yml",
 	".github/scripts/classify-integration-outcome.sh",
 	".github/scripts/go-test-verdict.py",

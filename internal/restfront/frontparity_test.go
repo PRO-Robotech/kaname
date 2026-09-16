@@ -43,8 +43,8 @@ import (
 	// импорт — единственный способ влинковать их в бинарь гейта; перечень обязан
 	// покрывать все три пакета, иначе маршруты непокрытого не найдутся вовсе и
 	// «объявлено ноль» прочтётся как «поднято всё».
+	_ "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/quota/v1"
-	_ "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
 	_ "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
@@ -53,12 +53,17 @@ import (
 // ownDoorProtoPackages — пакеты контракта, чьи службы служба поднимает.
 //
 // Выписан здесь, а не взят у двери решения, НАМЕРЕННО: гейт обязан судить
-// маршруты независимо от того, что о них думает дверь. Совпадение перечней —
-// предмет отдельной проверки ниже, а не посылка этой.
+// маршруты независимо от того, что о них думает дверь. Общий источник сделал бы
+// согласие тавтологией, и две стороны перестали бы быть двумя.
+//
+// Совпадение с картой двери — ОТДЕЛЬНОЕ утверждение, и теперь оно существует:
+// `doorpackages_test.go`. Прежде шапка называла его «предметом отдельной
+// проверки ниже», а проверки не было, и перечни разошлись молча: дверь сняла
+// пакет общей формы ответа учёта (у него не осталось ни одного RPC), а гейт
+// продолжал выбирать по нему маршруты.
 var ownDoorProtoPackages = map[string]bool{
-	"kaname.cloud.iam.v1":   true,
-	"kacho.cloud.operation": true,
-	"kacho.cloud.quota.v1":  true,
+	"kaname.cloud.iam.v1": true,
+	"corelib.operation":   true,
 }
 
 // route — пара «метод + путь», то есть ровно то, что различает маршрут снаружи.

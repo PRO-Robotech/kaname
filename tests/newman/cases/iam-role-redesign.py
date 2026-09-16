@@ -33,6 +33,16 @@ isSystem derived · list.go:111 catalog rank view<edit<admin<owner · role_effec
 delete*/note · update.go:124 System role read-only · role_repo.go:472 cannot be deleted.
 Seed (migrations 0001/0031/0040/0035): edit rules verbs=[get,list,update] (editor-tier),
 view=[read,list,get], admin=[*], owner=[*.*].
+
+ПОВЕРХНОСТЬ — СОБСТВЕННЫЙ ПУБЛИЧНЫЙ REST-ФРОНТ СЛУЖБЫ (`{{ownRestBaseUrl}}`),
+а не край платформы (e2e-flow.md §7а). Все шаги, включая опрос операций,
+переадресованы `address_own_front`; предъявителей и аккаунт пишет посев
+автономного стенда. Производитель каждого утверждения — сама служба: форма
+роли, `definitionTier`, отсутствие скомпилированных прав и полей области,
+порядок каталога, тексты отказов обработчика и исполнителя операций. Из трёх
+свойств края (таблица §7а) до модуля доходило одно — извлечение области до
+валидации тела, у кейса с пустым tierType; на собственном фронте его
+производит рубеж службы, и кейс переутверждён по нему (причина — у кейса).
 """
 
 # ДОМ МОДУЛЯ — репозиторий его ПРЕДМЕТА (e2e-flow.md §7а, решение владельца
@@ -136,9 +146,9 @@ CASES.append(Case(
 
 CASES.append(Case(
     id="IAM-ROL-RD-CR-DEFINITIONTIER-EMPTY-TIERTYPE-NEG",
-    title="IAM-1-11/12: definitionTier с tierId но БЕЗ tierType → sync 400 INVALID_ARGUMENT "
-          "'Illegal argument definitionTier' (pre-Phase-0 tierType ОБЯЗАТЕЛЕН — prefix-derivation "
-          "B3-gated; ровно один валидный anchor)",
+    title="IAM-1-11/12: definitionTier с tierId но БЕЗ tierType → синхронный отказ ДО операции: "
+          "области не извлечь, рубеж службы отвечает 403 AUTHZ_DENIED (pre-Phase-0 tierType "
+          "ОБЯЗАТЕЛЕН — prefix-derivation B3-gated; ровно один валидный anchor)",
     classes=["NEG"],
     priority="P1",
     steps=[
@@ -151,18 +161,28 @@ CASES.append(Case(
                   "rules": [{"module": "compute", "resources": ["instance"], "verbs": ["get"]}]},
             auth="jwtAccountAdminA",
             test_script=[
-                # authz-first: an empty tierType is UNSCOPEABLE at the gateway (no
-                # object type to derive from the anchor; pre-Phase-0 prefix-derivation
-                # is B3-gated) → the scope_extractor cannot resolve account|project and
-                # fail-closes 403 BEFORE the iam handler's sync 400 'Illegal argument
-                # definitionTier'. Both are correct rejections of a malformed anchor —
-                # tolerate 400|403 (testing.md authz-first). Assert the canonical text
-                # only when the request reached the handler (400).
-                "pm.test('rejected 400 (validation) or 403 (authz-first unscoped)', () => pm.expect(pm.response.code, JSON.stringify(pm.response.text())).to.be.oneOf([400, 403]));",
-                "if (pm.response.code === 400) {",
-                "  pm.test('INVALID_ARGUMENT (3)', () => pm.expect(pm.response.json().code).to.eql(3));",
-                "  pm.test('Illegal argument definitionTier text', () => pm.expect(pm.response.json().message||'', JSON.stringify(pm.response.json())).to.include('Illegal argument definitionTier'));",
-                "}",
+                # ПРОИЗВОДИТЕЛЬ ОТКАЗА НА ЭТОЙ ПОВЕРХНОСТИ — РУБЕЖ САМОЙ СЛУЖБЫ, и он
+                # ОДИН. На краю здесь стояла толерантность `400|403`: пустой
+                # tierType не даёт извлечь область, и край мог отказать 403 ДО
+                # обработчика, а мог пропустить к его синхронному 400 — две полосы
+                # с разными производителями (строка «извлечение области до
+                # валидации тела» таблицы e2e-flow.md §7а). На собственном фронте
+                # порядок детерминирован: рубеж службы спрашивает право на
+                # области, которой нет, и отказывает раньше обработчика —
+                # замерено ответом стенда (403, code 7, AUTHZ_DENIED, scope
+                # account). Полоса 400 здесь производителя НЕ ИМЕЕТ, поэтому
+                # утверждается одна пара, а не перечень, в котором один исход
+                # бывает, а другой нет. Положительный близнец — кейс
+                # IAM-ROL-RD-CR-DEFINITIONTIER-OK: с названным tierType тот же
+                # предъявитель создаёт роль, значит отказ не вакуумен.
+                *assert_status(403),
+                *assert_grpc_code(7, "PERMISSION_DENIED"),
+                "pm.test('отказ несёт причину рубежа AUTHZ_DENIED и не несёт операции', () => {",
+                "  const j = pm.response.json();",
+                "  const info = (j.details || []).find(d => (d['@type'] || '').endsWith('google.rpc.ErrorInfo')) || {};",
+                "  pm.expect(info.reason, JSON.stringify(j)).to.eql('AUTHZ_DENIED');",
+                "  pm.expect(j.done, 'синхронный отказ — не конверт операции').to.equal(undefined);",
+                "});",
             ],
         ),
     ],
@@ -480,3 +500,9 @@ CASES.append(Case(
 # gate ever over-rejects a grantable token. The exhaustive both-ways conformance
 # (every published catalog pair is accepted) is locked in Go —
 # role/rules_catalog_test.go::TestRuleCatalogGate_AcceptsEveryPublishedCatalogToken.
+
+
+# Все шаги — на собственный публичный фронт службы (e2e-flow.md §7а; см. шапку).
+CASES = address_own_front(CASES, "собственный публичный REST-фронт службы; без него у "
+                                 "ресурса нет адреса на автономном стенде, и кейс "
+                                 "проверял бы край платформы вместо предмета")

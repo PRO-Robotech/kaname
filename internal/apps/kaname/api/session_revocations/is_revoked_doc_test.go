@@ -25,14 +25,19 @@ package session_revocations
 // Поэтому гейт судит ЗАКРЫТЫЙ НАБОР файлов, а не один: перечень ниже, и
 // исчезнувший файл — находка, а не тишина.
 //
-// # Что утверждает гейт — две оси, каждая падает сама
+// # Что утверждает гейт — ОДНА ось, и вторая СНЯТА ВМЕСТЕ С ПРЕДМЕТОМ
 //
 //  1. ЧИСЛО. Ровно один файл набора называет, сколько вызывающих у метода в
 //     прод-коде дерева; гейт считает их САМ и требует совпадения. Появился
 //     вызывающий — утверждение обязано это признать; исчез — тоже.
-//  2. КРАЙ, ПОФАЙЛОВО. Клиент края экспонирует метод чтения ⟺ КАЖДЫЙ файл
-//     набора его называет. Одна сторона без другой оставляла бы ровно ту ложь,
-//     ради которой гейт заведён: «у края нет метода чтения» при живом методе.
+//
+// Вторая ось («клиент КРАЯ экспонирует метод чтения ⟺ каждый файл набора его
+// называет») СНЯТА: её предмет — файл платформы
+// `gateway/internal/clients/session_revocations_client.go`, — и в этот
+// репозиторий он не входит. После выноса службы ось не исполнялась НИ РАЗУ:
+// резолв координаты объявлял «условие не создано», и вся проба пропускала себя.
+// Ось, судящая дерево, которого здесь нет, не «ослаблена» — у неё здесь нет
+// предмета; её место в репозитории платформы, и она заведена там задачей.
 //
 // # Почему разбор, а не поиск по тексту
 //
@@ -64,13 +69,6 @@ import (
 // isRevokedMethod — имя метода, чьих вызывающих считает перепись.
 const isRevokedMethod = "IsRevoked"
 
-// edgeReadMethod — метод чтения нашего отзыва в клиенте края. Его присутствие и
-// есть предмет второй оси.
-const edgeReadMethod = "IsSessionRevoked"
-
-// edgeClientFile — файл клиента края (относительно корня монорепо).
-const edgeClientFile = "gateway/internal/clients/session_revocations_client.go"
-
 // laneFiles — ЗАКРЫТЫЙ набор прод-файлов, чьи комментарии рассуждают о том, кто
 // зовёт полосу отзыва: сам хендлер и два обоснования послаблений периметра.
 // Именно в них жило утверждение «вызывающего нет», и именно поэтому они судятся
@@ -93,8 +91,6 @@ type isRevokedDocFacts struct {
 	Comments map[string]string
 	// CallerFiles — пути прод-файлов, где разбор нашёл вызов метода.
 	CallerFiles []string
-	// EdgeExportsRead — экспонирует ли клиент края метод чтения.
-	EdgeExportsRead bool
 }
 
 // auditIsRevokedDoc — предикат обеих осей. Возвращает находки; пусто = норма.
@@ -121,19 +117,6 @@ func auditIsRevokedDoc(f isRevokedDocFacts) []string {
 			"сверять с деревом нечего, больше одного — два места об одном числе")
 	}
 
-	for _, path := range sortedKeys(f.Comments) {
-		mentions := strings.Contains(f.Comments[path], edgeReadMethod)
-		switch {
-		case f.EdgeExportsRead && !mentions:
-			found = append(found, path+": клиент края экспонирует "+edgeReadMethod+
-				", а комментарий его не называет — он описывает полосу как не имеющую "+
-				"читателя на пути запроса, тогда как читатель есть и решает вопрос доступа")
-		case !f.EdgeExportsRead && mentions:
-			found = append(found, path+": комментарий называет "+edgeReadMethod+
-				", которого клиент края больше не экспонирует — утверждение пережило свой предмет")
-		}
-	}
-
 	return found
 }
 
@@ -142,9 +125,6 @@ func TestIsRevokedDocDescribesTheTree(t *testing.T) {
 	root := monorepoRootForDoc(t)
 
 	callers, filesScanned, filesParsed := isRevokedCallSites(t, root, true)
-	// Клиент КРАЯ живёт у платформы: в поставку модуля он не входит by
-	// construction, поэтому его отсутствие — «условие не создано», а не находка.
-	edge := fileDeclaresMethod(t, platformtree.RequirePath(t, edgeClientFile), edgeReadMethod)
 	comments := laneComments(t, root)
 
 	// ПРЕДПОСЫЛКИ. «Ноль находок» обязано быть отличимо от «ноль прочитанного»:
@@ -160,9 +140,7 @@ func TestIsRevokedDocDescribesTheTree(t *testing.T) {
 		require.NotEmptyf(t, text, "%s: комментариев не прочитано ни одного", path)
 	}
 
-	found := auditIsRevokedDoc(isRevokedDocFacts{
-		Comments: comments, CallerFiles: callers, EdgeExportsRead: edge,
-	})
+	found := auditIsRevokedDoc(isRevokedDocFacts{Comments: comments, CallerFiles: callers})
 	require.Emptyf(t, found,
 		"утверждения о полосе отзыва расходятся с деревом:\n  %s\n"+
 			"Комментарий обязан отражать РЕАЛЬНОСТЬ, а не намерение: отрицая живой "+
@@ -170,9 +148,9 @@ func TestIsRevokedDocDescribesTheTree(t *testing.T) {
 		strings.Join(found, "\n  "))
 
 	t.Logf("перепись: прод-файлов Go осмотрено %d, разобрано %d; вызывающих %s: %d (%s); "+
-		"файлов набора: %d; клиент края экспонирует %s: %t",
+		"файлов набора: %d",
 		filesScanned, filesParsed, isRevokedMethod, len(callers), strings.Join(callers, ", "),
-		len(comments), edgeReadMethod, edge)
+		len(comments))
 }
 
 // isRevokedCallSites — пути файлов, в которых РАЗБОР нашёл вызов метода.

@@ -46,6 +46,12 @@ type Config struct {
 	// предъявленного. Величин две и они РАЗНЫЕ — предел времени на попытку и
 	// число повторов; см. invite_mail.go.
 	InviteMail InviteMailConfig `mapstructure:"invite-mail"`
+	// Invite — величины ПРИГЛАШЕНИЯ как нашей сущности: срок строки, после
+	// которого активация отвергается (приёмка ID-MAIL-1, §10 п. 22). Секция
+	// отдельна от `invite-mail` намеренно: там величины ОТПРАВКИ письма, здесь —
+	// свойства самой строки, и живут они независимо (приглашение без почты
+	// по-прежнему заводится и по-прежнему истекает).
+	Invite InviteConfig `mapstructure:"invite"`
 	// Manifests — ДОСТАВКА манифестов модулей работающей службе (задача #1875):
 	// каталог, куда посадка их монтирует, и объявление того, что посадка на них
 	// опирается. Секция заведена вперёд своих потребителей: пока каталог не
@@ -101,13 +107,6 @@ type LoggerConfig struct {
 	Level string `mapstructure:"level"`
 }
 
-// APIServerConfig — api-server section.
-//
-// Endpoint / InternalEndpoint accept two formats:
-//   - `tcp://0.0.0.0:9090` (full URL-style, recommended);
-//   - `9090` (legacy: bare port; preserved for backward-compat
-//     with older values.yaml, see listenAddress in load.go).
-//
 // SubscriptionConfig — посадка потока изменений ресурсов.
 //
 // Каждый поток держит СВОЁ соединение вне пула, поэтому потолок числа потоков —
@@ -128,6 +127,12 @@ type SubscriptionConfig struct {
 	IdlePoll time.Duration `mapstructure:"idle-poll"`
 }
 
+// APIServerConfig — api-server section.
+//
+// Endpoint / InternalEndpoint accept two formats:
+//   - `tcp://0.0.0.0:9090` (full URL-style, recommended);
+//   - `9090` (legacy: bare port; preserved for backward-compat
+//     with older values.yaml, see listenAddress in load.go).
 type APIServerConfig struct {
 	Endpoint         string        `mapstructure:"endpoint"`
 	InternalEndpoint string        `mapstructure:"internal-endpoint"`

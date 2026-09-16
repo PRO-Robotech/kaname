@@ -5,7 +5,7 @@
 // каталога прав правило роли ДЕЙСТВИТЕЛЬНО выдаёт, а какие не выдаёт ни при
 // каком написании.
 //
-// Приёмка: services/iam/docs/engineering/acceptance/module-manifest-roles-and-seed-grants.md
+// Приёмка: docs/engineering/acceptance/module-manifest-roles-and-seed-grants.md
 // (задача PRO-Robotech/kacho#1090), §3.6 п. 3 · §3.7 · сценарии MOD-RL-05 и его
 // парный положительный.
 //

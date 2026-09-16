@@ -79,8 +79,14 @@ message AccessBinding {
   // `condition_id` / `builtin_condition` are RESERVED so a future design starts
   // from a clean number instead of inheriting a meaning nobody implemented.
   //
-  // Conditions on a tuple remain first-class and untouched: the model declares
-  // them, and the internal listener carries them on `Tuple.condition`.
+  // Conditions on a tuple remain first-class and untouched — but they live
+  // OUTSIDE this contract, and naming a message here would promise a carrier
+  // that does not exist. The model declares them (`fga_model.fga`: the
+  // `condition …` blocks and the `… with …` constraints on relations); the
+  // evaluation context a caller supplies arrives on
+  // `AuthorizeService.CheckRequest.context`. No contract message carries a
+  // tuple: relation state is a fold of the service's own intent journal, not a
+  // payload a client submits.
   reserved 9, 14;
   reserved "condition_id", "builtin_condition";
 

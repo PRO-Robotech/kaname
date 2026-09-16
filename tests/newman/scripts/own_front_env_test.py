@@ -55,6 +55,15 @@ EDGE_VALUE = "http://localhost:18080"
 
 RE_ENV_URL = re.compile(r'require_env_url\(\s*"([A-Za-z][A-Za-z0-9_]*)"')
 
+# Второй законный способ адресовать модуль к собственному публичному фронту —
+# помощник генератора `address_own_front` (`scripts/gen.py`): он переадресует ВСЕ
+# шаги модуля, включая сделанные помощниками опроса и ожидания, на
+# `ownRestBaseUrl`. Без этой формы перепись молча недосчитывала бы каждый
+# модуль, переведённый помощником, — и печатала «адресуются к ownRestBaseUrl 2»
+# при большем числе на деле.
+RE_OWN_HELPER = re.compile(r'^\s*CASES\s*=\s*address_own_front\(', re.M)
+OWN_HELPER_VAR = "ownRestBaseUrl"
+
 
 def audit(env_path, cases_dir):
     findings, census = [], {}
@@ -83,8 +92,11 @@ def audit(env_path, cases_dir):
     modules = 0
     for path in sorted(cases_dir.glob("*.py")):
         modules += 1
-        for m in RE_ENV_URL.finditer(path.read_text(encoding="utf-8")):
+        text = path.read_text(encoding="utf-8")
+        for m in RE_ENV_URL.finditer(text):
             by_var.setdefault(m.group(1), set()).add(path.name)
+        if RE_OWN_HELPER.search(text):
+            by_var.setdefault(OWN_HELPER_VAR, set()).add(path.name)
     census["модулей кейсов"] = modules
     for var in sorted(by_var):
         census[f"адресуются к {var}"] = len(by_var[var])

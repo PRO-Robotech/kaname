@@ -12,7 +12,7 @@ package iamv1
 import (
 	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
-	operation "github.com/PRO-Robotech/corelib/api/kacho/cloud/operation"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -622,7 +622,7 @@ var File_kaname_cloud_iam_v1_user_token_service_proto protoreflect.FileDescripto
 
 const file_kaname_cloud_iam_v1_user_token_service_proto_rawDesc = "" +
 	"\n" +
-	",kaname/cloud/iam/v1/user_token_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a)kaname/cloud/iam/v1/credential_kind.proto\x1a+kaname/cloud/iam/v1/user_oauth_client.proto\x1a(kaname/cloud/iam/v1/secret_options.proto\x1a%kacho/cloud/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"\x8d\x03\n" +
+	",kaname/cloud/iam/v1/user_token_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a)kaname/cloud/iam/v1/credential_kind.proto\x1a+kaname/cloud/iam/v1/user_oauth_client.proto\x1a(kaname/cloud/iam/v1/secret_options.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"\x8d\x03\n" +
 	"\x15IssueUserTokenRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x1f\n" +
@@ -667,14 +667,14 @@ const file_kaname_cloud_iam_v1_user_token_service_proto_rawDesc = "" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x19\n" +
 	"\btoken_id\x18\x02 \x01(\tR\atokenId\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x03 \x01(\tR\taccountId2\xf4\x05\n" +
-	"\x10UserTokenService\x12\x80\x02\n" +
-	"\x05Issue\x12*.kaname.cloud.iam.v1.IssueUserTokenRequest\x1a .kacho.cloud.operation.Operation\"\xa8\x01\x8a\xb5\x18\x1biam.issue_user_tokens.issue\x92\xb5\x18\ftoken_issuer\x9a\xb5\x18\x13\n" +
+	"account_id\x18\x03 \x01(\tR\taccountId2\xec\x05\n" +
+	"\x10UserTokenService\x12\xfc\x01\n" +
+	"\x05Issue\x12*.kaname.cloud.iam.v1.IssueUserTokenRequest\x1a\x1c.corelib.operation.Operation\"\xa8\x01\x8a\xb5\x18\x1biam.issue_user_tokens.issue\x92\xb5\x18\ftoken_issuer\x9a\xb5\x18\x13\n" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x012\xb2\xd2*0\n" +
 	"\x16IssueUserTokenMetadata\x12\x16IssueUserTokenResponse\x82\xd3\xe4\x93\x02#:\x01*\"\x1e/iam/v1/users/{user_id}/tokens\x12\xcb\x01\n" +
 	"\x04List\x12*.kaname.cloud.iam.v1.ListUserTokensRequest\x1a+.kaname.cloud.iam.v1.ListUserTokensResponse\"j\x8a\xb5\x18\x14iam.user_tokens.list\x92\xb5\x18\ftoken_reader\x9a\xb5\x18\x13\n" +
-	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02 \x12\x1e/iam/v1/users/{user_id}/tokens\x12\x8e\x02\n" +
-	"\x06Revoke\x12+.kaname.cloud.iam.v1.RevokeUserTokenRequest\x1a .kacho.cloud.operation.Operation\"\xb4\x01\x8a\xb5\x18\x1diam.revoke_user_tokens.revoke\x92\xb5\x18\ftoken_issuer\x9a\xb5\x18\x13\n" +
+	"\biam_user\x12\auser_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02 \x12\x1e/iam/v1/users/{user_id}/tokens\x12\x8a\x02\n" +
+	"\x06Revoke\x12+.kaname.cloud.iam.v1.RevokeUserTokenRequest\x1a\x1c.corelib.operation.Operation\"\xb4\x01\x8a\xb5\x18\x1diam.revoke_user_tokens.revoke\x92\xb5\x18\ftoken_issuer\x9a\xb5\x18\x13\n" +
 	"\biam_user\x12\auser_id\xa2\xb5\x18\x012\xb2\xd2*2\n" +
 	"\x17RevokeUserTokenMetadata\x12\x17RevokeUserTokenResponse\x82\xd3\xe4\x93\x02+*)/iam/v1/users/{user_id}/tokens/{token_id}BBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
@@ -704,7 +704,7 @@ var file_kaname_cloud_iam_v1_user_token_service_proto_goTypes = []any{
 	(CredentialKind)(0),             // 9: kaname.cloud.iam.v1.CredentialKind
 	(*UserOAuthClient)(nil),         // 10: kaname.cloud.iam.v1.UserOAuthClient
 	(*timestamppb.Timestamp)(nil),   // 11: google.protobuf.Timestamp
-	(*operation.Operation)(nil),     // 12: kacho.cloud.operation.Operation
+	(*operation.Operation)(nil),     // 12: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_user_token_service_proto_depIdxs = []int32{
 	8,  // 0: kaname.cloud.iam.v1.IssueUserTokenRequest.labels:type_name -> kaname.cloud.iam.v1.IssueUserTokenRequest.LabelsEntry
@@ -715,9 +715,9 @@ var file_kaname_cloud_iam_v1_user_token_service_proto_depIdxs = []int32{
 	0,  // 5: kaname.cloud.iam.v1.UserTokenService.Issue:input_type -> kaname.cloud.iam.v1.IssueUserTokenRequest
 	3,  // 6: kaname.cloud.iam.v1.UserTokenService.List:input_type -> kaname.cloud.iam.v1.ListUserTokensRequest
 	5,  // 7: kaname.cloud.iam.v1.UserTokenService.Revoke:input_type -> kaname.cloud.iam.v1.RevokeUserTokenRequest
-	12, // 8: kaname.cloud.iam.v1.UserTokenService.Issue:output_type -> kacho.cloud.operation.Operation
+	12, // 8: kaname.cloud.iam.v1.UserTokenService.Issue:output_type -> corelib.operation.Operation
 	4,  // 9: kaname.cloud.iam.v1.UserTokenService.List:output_type -> kaname.cloud.iam.v1.ListUserTokensResponse
-	12, // 10: kaname.cloud.iam.v1.UserTokenService.Revoke:output_type -> kacho.cloud.operation.Operation
+	12, // 10: kaname.cloud.iam.v1.UserTokenService.Revoke:output_type -> corelib.operation.Operation
 	8,  // [8:11] is the sub-list for method output_type
 	5,  // [5:8] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name

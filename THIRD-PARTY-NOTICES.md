@@ -1,6 +1,6 @@
 <!-- ЭТОТ ФАЙЛ ПОРОЖДЁН. Правки в нём уедут при следующей регенерации.
-     Порождает: services/iam/tools/operatordocs — `make -C services/iam operator-docs`
-     Сверяет:   `make -C services/iam operator-docs-check` -->
+     Порождает: tools/operatordocs — `make operator-docs`
+     Сверяет:   `make operator-docs-check` -->
 
 # Уведомления о третьих сторонах
 
@@ -33,7 +33,7 @@
 
 | Модуль | Версия | Файл лицензии в модуле |
 |---|---|---|
-| `github.com/PRO-Robotech/corelib` | `v1.7.0` | `LICENSE` |
+| `github.com/PRO-Robotech/corelib` | `v1.8.0` | `LICENSE` |
 | `github.com/prometheus/client_golang` | `v1.24.1` | `LICENSE` |
 | `github.com/prometheus/client_model` | `v0.6.2` | `LICENSE` |
 | `github.com/prometheus/common` | `v0.70.1` | `LICENSE` |
