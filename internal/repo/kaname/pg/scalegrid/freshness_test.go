@@ -70,7 +70,7 @@ const scaleGridReportDateMark = "  снято               "
 
 // scaleGridRunHint — КАК ПЕРЕСНЯТЬ. Отдельной строкой: сообщение отказа обязано
 // говорить, что делать, а не только что не так.
-const scaleGridRunHint = "KACHO_SCALEGRID_FULL=1 go test -C services/iam " +
+const scaleGridRunHint = "KACHO_SCALEGRID_FULL=1 go test " +
 	"./internal/repo/kaname/pg/relverdict/ -run TestScaleGrid_FullGridReport " +
 	"-count=1 -v -timeout 120m"
 
@@ -211,10 +211,10 @@ func guardedReports() []guardedReport {
 	return []guardedReport{
 		{path: scalegrid.ReportPath, subject: scalegrid.ComputeFingerprint, hint: scaleGridRunHint},
 		{path: scalegrid.StrengthReportPath, subject: scalegrid.ComputeFingerprint,
-			hint: "KACHO_STRENGTH_FULL=1 go test -C services/iam ./internal/repo/kaname/pg/relverdict/ " +
+			hint: "KACHO_STRENGTH_FULL=1 go test ./internal/repo/kaname/pg/relverdict/ " +
 				"-run TestStrengthGrid_Report -count=1 -v -timeout 120m"},
 		{path: scalegrid.WriteDeleteReportPath, subject: scalegrid.ComputeWriteDeleteFingerprint,
-			hint: "KACHO_STRENGTH_WRITE=1 go test -C services/iam ./internal/repo/kaname/pg/ " +
+			hint: "KACHO_STRENGTH_WRITE=1 go test ./internal/repo/kaname/pg/ " +
 				"-run TestStrengthWriteDelete_Report -count=1 -v -timeout 120m"},
 	}
 }

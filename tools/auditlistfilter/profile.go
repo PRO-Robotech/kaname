@@ -67,7 +67,7 @@
 // method the pass means "the per-object question is asked", not "it is asked for every
 // row". The stronger statement is a test's job — TestListByRole_StrangerSeesNothing and
 // TestListByRole_FilteringKeepsExactlyTheAuthorisedRows in
-// services/iam/internal/apps/kaname/api/access_binding — not this gate's, and pretending
+// internal/apps/kaname/api/access_binding — not this gate's, and pretending
 // otherwise would be exactly the form-without-substance this class is about.
 //
 // Likewise, the three EdgeGate methods delegate their check to the per-RPC

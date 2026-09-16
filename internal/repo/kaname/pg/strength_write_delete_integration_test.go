@@ -446,7 +446,7 @@ func TestStrengthWriteDelete_Report(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	runCommand := fmt.Sprintf("%s=1 go test -C services/iam ./internal/repo/kaname/pg/ "+
+	runCommand := fmt.Sprintf("%s=1 go test ./internal/repo/kaname/pg/ "+
 		"-run TestStrengthWriteDelete_Report -count=1 -v -timeout 120m", strengthWDEnv)
 	prov := scalegrid.TakeProvenance(runCommand, nil)
 	prov.GridText = wdGridText()

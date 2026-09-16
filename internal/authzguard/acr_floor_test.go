@@ -51,8 +51,8 @@ func realisticCatalog() fakeACRCatalog {
 	return fakeACRCatalog{
 		"kaname.cloud.iam.v1.InternalClusterService/GrantAdmin":        "2",
 		"kaname.cloud.iam.v1.InternalClusterService/RevokeAdmin":       "2",
-		"kaname.cloud.iam.v1.InternalClusterService/ListAdmins":        "2",
-		"kaname.cloud.iam.v1.InternalClusterService/Get":               "2",
+		"kaname.cloud.iam.v1.InternalClusterService/ListAdmins":        "1",
+		"kaname.cloud.iam.v1.InternalClusterService/Get":               "1",
 		"kaname.cloud.iam.v1.InternalSessionRevocationsService/Revoke": "", // acr_min 0
 		"kaname.cloud.iam.v1.InternalIAMService/ForceLogout":           "", // acr_min 0 (prod)
 	}

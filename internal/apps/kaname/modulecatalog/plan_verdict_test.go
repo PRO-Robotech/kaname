@@ -359,7 +359,7 @@ func planStates(t *testing.T) []planState {
 // модуля. Читаются из дерева тем же путём, каким их читает применитель.
 func declaredRowsOfShippedModule(t *testing.T, module string) modulecatalog.Declared {
 	t.Helper()
-	path := filepath.Join(platformtree.RequirePath(t, manifestsRootRel), module, "manifest.yaml")
+	path := filepath.Join(platformtree.RequireNamedPlatformTree(t), manifestsRootRel, module, "manifest.yaml")
 	body, err := os.ReadFile(path) // #nosec G304 -- путь собран из константы пакета проб
 	require.NoErrorf(t, err, "прочитать манифест %s", path)
 	m, err := manifest.Load(body)

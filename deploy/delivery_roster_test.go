@@ -68,6 +68,8 @@ var deliveryRoster = []string{
 	"Chart.yaml",
 	"alert_rules_delivered_injection_test.go",
 	"alert_rules_delivered_test.go",
+	"chart_raise_has_a_holder_injection_test.go",
+	"chart_raise_has_a_holder_test.go",
 	"boot_guard_defaults_injection_test.go",
 	"boot_guard_defaults_test.go",
 	"defaultless_keys_injection_test.go",

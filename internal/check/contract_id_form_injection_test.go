@@ -91,9 +91,16 @@ func TestJudgeFlagsAFormTheProductDoesNotMint(t *testing.T) {
 			idExample{prefix: "grp", sep: "", raw: "grp…"},
 		},
 		{
+			// Дефисный канон: пара взята на действующем префиксе.
+			//
+			// Прежде здесь стоял `lim` (предел учёта). Его строка снята вместе с
+			// предметом — авторитет величин ушёл из службы, — и опыт перевешен на
+			// `ic`, чей дефисный канон живой. Это и есть цена фикстуры,
+			// привязанной к снимаемому предмету: она истекает вместе с ним
+			// (`testing-verdict.md` §5).
 			"дефисный канон против слитной формы",
-			idExample{prefix: "lim", sep: "", raw: "lim…"},
-			idExample{prefix: "lim", sep: "-", raw: "lim-…"},
+			idExample{prefix: "ic", sep: "", raw: "ic…"},
+			idExample{prefix: "ic", sep: "-", raw: "ic-…"},
 		},
 		{
 			"подчёркивание против слитной формы",
@@ -138,15 +145,23 @@ func TestLegacyLedgerSilencesOnlyItsOwnEntry(t *testing.T) {
 func TestProducerCheckFailsWhenTheMintingSiteIsGone(t *testing.T) {
 	root := monorepoRoot(t)
 
-	alive, filesAlive := prefixesWithoutAProducer(t, root,
+	alive, filesAlive, _ := prefixesWithoutAProducer(t, root,
 		[]mintedPrefix{{"usr", mintConcatenated, "ids.NewID(domain.PrefixUser)", []string{"services/iam"}}})
 	require.NotZero(t, filesAlive, "обход пуст — контроль беспредметен")
 	require.Empty(t, alive, "живое место чеканки объявлено исчезнувшим")
 
-	gone, filesGone := prefixesWithoutAProducer(t, root,
+	gone, filesGone, _ := prefixesWithoutAProducer(t, root,
 		[]mintedPrefix{{"usr", mintConcatenated, "ids.NewID(domain.PrefixThatWasRetired)", []string{"services/iam"}}})
 	require.NotZero(t, filesGone, "обход пуст — контроль беспредметен")
 	require.Len(t, gone, 1, "исчезнувшее место чеканки прошло молча")
+
+	// Третья сторона: строка БЕЗ перечня каталогов уходит из оси живости, а не
+	// объявляется потерявшей производителя. Без этого утверждения исключение
+	// было бы неотличимо от молчания на всём.
+	orphans, _, foreign := prefixesWithoutAProducer(t, root,
+		[]mintedPrefix{{"net", mintConcatenated, "ids.NewID(ids.PrefixNetwork)", nil}})
+	require.Empty(t, orphans, "строка, чей производитель в дереве платформы, названа потерявшей его")
+	require.Equal(t, []string{"net"}, foreign, "строка вне оси живости не названа числом")
 }
 
 // TestLegacyLedgerEntryExpiresWithItsAcceptor — запись послабления, чьей

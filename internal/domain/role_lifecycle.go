@@ -8,7 +8,7 @@ import "time"
 // role_lifecycle.go — ЖИЗНЕННОЕ СОСТОЯНИЕ самой роли: объявлена она манифестом
 // модуля сегодня либо снята.
 //
-// Приёмка `services/iam/docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
+// Приёмка `docs/engineering/acceptance/role-withdrawal-has-a-producer.md`
 // §2.6; задача продукта #1913.
 //
 // # Почему это ОТДЕЛЬНОЕ состояние, а не значение целости

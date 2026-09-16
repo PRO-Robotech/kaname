@@ -73,19 +73,30 @@
 // молчание разряда «без владельца». Группа, которую не объявил никто, владельца
 // не имеет и считается отдельно, как и прежде.
 //
-// Написания сравниваются СЫРЫМИ: окна двух написаний аккаунта здесь нет и не
-// будет — оно существует ради непереведённых чужих манифестов и истекает с их
-// переводом, а второй его читатель пережил бы предмет окна молча.
+// # Написания объявленной стороны приводятся ОКНОМ ПЕРЕИМЕНОВАНИЙ (kaname#110)
 //
-// # Полы взяты у базы после ВСЕХ миграций, а не у прежнего свода
+// Приёмка MRW-1 (Р5) писала: «сверка сравнивает написания сырыми, окна в неё не
+// заводится — второй читатель пережил бы предмет окна молча». Линия #140
+// (kaname#110) это решение ОТОЗВАЛА замером: на дереве платформы объявленный
+// ключ с ПРЕЖНИМ написанием аккаунта против живого `system/…` давал 30 находок
+// из 30 (литерал здесь не пишется намеренно: он двигал бы ведро «живой» соседа). Окно
+// читается у ЕДИНСТВЕННОГО объявления (`domain.SeedIdentityWindow()`,
+// `declaredSpelling` ниже), а не копируется, — снятие записи окна из объявления
+// снимает её и здесь, так что «читатель, переживший предмет» не заводится.
+// Атрибуция Р5 идёт по тем же приведённым ключам: иначе на дереве платформы
+// объявленная пара не нашла бы живой строки при верном продукте. Расхождение
+// текста Р5 с деревом названо в отчёте слияния #169 с линией — решение о записи
+// ревью к приёмке за владельцем, не за этой пробой.
+//
+// # Порог чтения — ЯКОРЬ, а не число (kaname#110), и его дополняет атрибуция
 //
 // Здесь стояли полы `3 · 3 · 1` и `NotZero(Joins.Live)`, снятые с базы ДО
-// `20260909202745`: после неё служебных записей две, вступлений ноль — законное
-// состояние самостоятельной посадки, — и гейт краснел на собственной предпосылке,
-// не доходя до сравнения (§6 S1 п. 9 приёмки MRW-1). Пол стережёт ОБВАЛ чтения:
-// ноль записей, ноль групп, ноль выдач красны по-прежнему; порог по вступлениям
-// действует только там, где доставленные манифесты вступают, — в посадке дерева
-// платформы.
+// `20260909202745`; ветка #106 привела их к базе после всех миграций
+// (`2 · 1 · 3`, §6 S1 п. 9 приёмки MRW-1), линия #140 сняла числа вовсе — см.
+// разбор у `TestModuleManifestDeclaresTheSeedTheLiveBaseHolds`. Обвал чтения
+// различим и без чисел: якорь по имени стережёт служебные записи, а
+// `NotZero(Groups.Owned)` и `NotZero(Bindings.Owned)` (положительная сторона Р5)
+// — группы и выдачи: ноль прочитанных групп и ноль выдач по-прежнему красны.
 package moduleseedparity_test
 
 import (
@@ -111,20 +122,58 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/testsupport/modulemanifests"
 )
 
-// Пороги чтения: ниже них молчание гейта сказано ни о чём. Числа взяты у живой
-// базы этого дерева с запасом вниз — порог стережёт ОБВАЛ чтения, а не
-// сегодняшнее состояние посева, которое законно меняется миграциями.
-const (
-	// Две служебные записи живут из свода на каждой установке (`kacho-api-gateway`,
-	// `bootstrap-admin`); пять личностей модулей платформы сняла `20260909202745`.
-	liveServiceAccountFloor = 2
-	liveBindingFloor        = 3
-	liveGroupFloor          = 1
-)
+// ПОРОГИ ЧИСЛАМИ СНЯТЫ — У НИХ НЕ БЫЛО НЕЗАВИСИМОГО ПРОИЗВОДИТЕЛЯ.
+//
+// Здесь стояли три числа (`3`, `3`, `1`), снятые с живой базы «с запасом вниз».
+// Запас был свойством ТОЙ базы: пять личностей модулей ушли из применённой
+// цепочки в доставку (`20260909202745_module_identities_leave_the_baseline`), и
+// служебных записей в самостоятельном клоне осталось ДВЕ. Порог 3 стал
+// утверждением о состоянии, которого больше нет, — проба краснела «чтение
+// перестало видеть предмет» там, где чтение исправно.
+//
+// Увидеть это было нечем: пакет не исполняло НИ ОДНО задание (kaname#19), а
+// сама проба вдобавок спрашивала дерево платформы и пропускала себя (kaname#108).
+//
+// Вместо порога — ЯКОРЬ. Непустота трёх из четырёх чтений зависит от того, что
+// ДОСТАВИЛА установка: без манифестов модулей ни групп модулей, ни их вступлений
+// в базе нет законно, и порог на них был бы утверждением об окружении. Свойством
+// ПРИМЕНЁННОЙ ЦЕПОЧКИ является ровно одно: собственная посевная личность службы
+// лежит в базе в обеих посадках. Её и спрашиваем поимённо — у имени один
+// владелец (`domain.BootstrapAdminSAName`), а держит её в базе гейт дерева
+// `internal/check/module_identity_seeded_only_by_baseline.go`.
 
-// seededNamePrefix — по этому написанию живая строка переводится в
-// модуль-владелец: `kacho-<служба>`, служба — из словаря платформы.
+// seededNamePrefix — приставка, которой посев называет служебную запись модуля:
+// `kacho-<служба>`, служба — из словаря платформы.
+//
+// Это НЕ «узнавание по бренду»: переводится приставкой только то, что ею
+// названо, а написания, переведённые решением о бренде, приводятся к
+// действующему ОКНОМ ПЕРЕИМЕНОВАНИЙ (`declaredSpelling` ниже) — тем же, которым
+// их приводит применитель. Пока платформа называет свои личности `kacho-<…>`,
+// приставка остаётся верной; переведёт — окно примет оба написания, как принимает
+// их сегодня для аккаунта и для собственной личности службы.
 const seededNamePrefix = "kacho-"
+
+// declaredSpelling — ДЕЙСТВУЮЩЕЕ написание посевного имени.
+//
+// Манифест платформы продолжает называть аккаунт `kacho-system`, а базу мы
+// перевели на `system` (`20260913144108_seed_identity_leaves_the_platform_brand`).
+// Применитель различие снимает окном (`domain.SeedIdentitySpellings`), а сверка
+// — нет: она сравнивала объявленный ключ `kacho-system/…` с живым `system/…` и
+// находила расхождение на КАЖДОЙ строке. Замер: 30 находок из 30, все одного
+// рода — «объявлено и не живёт» плюс «живёт и не объявлено» об одной и той же
+// строке.
+//
+// Окно читается у ЕДИНСТВЕННОГО объявления, а не копируется: второе место об
+// одном предмете разошлось бы с применителем молча, и сверка снова судила бы
+// написание вместо строки.
+func declaredSpelling(name string) string {
+	for _, r := range domain.SeedIdentityWindow() {
+		if name == r.Previous {
+			return r.Declared
+		}
+	}
+	return name
+}
 
 // TestModuleManifestDeclaresTheSeedTheLiveBaseHolds — сам гейт (MRW-11).
 func TestModuleManifestDeclaresTheSeedTheLiveBaseHolds(t *testing.T) {
@@ -135,7 +184,7 @@ func TestModuleManifestDeclaresTheSeedTheLiveBaseHolds(t *testing.T) {
 	ctx := context.Background()
 	set := manifestSet(t)
 
-	states, census := moduleStates(ctx, t, set, nil)
+	states, census, anchors := moduleStates(ctx, t, set, nil)
 
 	// Перепись — ДО всякого вердикта и независимо от него. Посадка называется
 	// ОТДЕЛЬНОЙ строкой: «расхождений 0» на одном прочитанном манифесте и на
@@ -153,25 +202,15 @@ func TestModuleManifestDeclaresTheSeedTheLiveBaseHolds(t *testing.T) {
 	require.NotZero(t, census.Manifests,
 		"манифестов модулей прочитано ноль — каталог переехал, и гейт стережёт координату, "+
 			"которой больше нет")
-	require.GreaterOrEqual(t, census.SA.Live, liveServiceAccountFloor,
-		"служебных записей прочитано %d при пороге %d — чтение перестало видеть предмет",
-		census.SA.Live, liveServiceAccountFloor)
-	if set.Posture == modulemanifests.PlatformTree {
-		require.NotZero(t, census.Joins.Live,
-			"вступлений прочитано ноль в посадке дерева платформы — чтение членства перестало видеть предмет")
-	} else {
-		// Самостоятельная посадка: вступления приезжают доставкой, а её здесь
-		// нет by construction. Ноль — законное состояние, и перепись говорит это
-		// словом, а не падением.
-		t.Logf("вступлений живых %d — в посадке «%s» вступления заводит доставка, которой здесь нет",
-			census.Joins.Live, set.Posture)
-	}
-	require.GreaterOrEqual(t, census.Bindings.Live, liveBindingFloor,
-		"выдач прочитано %d при пороге %d — чтение выдач перестало видеть предмет",
-		census.Bindings.Live, liveBindingFloor)
-	require.GreaterOrEqual(t, census.Groups.Live, liveGroupFloor,
-		"групп прочитано %d при пороге %d — чтение групп перестало видеть предмет",
-		census.Groups.Live, liveGroupFloor)
+	// ЯКОРЬ ЧТЕНИЯ — собственная посевная личность службы. Она лежит в базе в
+	// ОБЕИХ посадках, потому что её кладёт применённая цепочка, а не доставка;
+	// всё остальное живое зависит от того, что доставила установка, и порог на
+	// нём был бы утверждением об окружении, а не о чтении.
+	require.Truef(t, liveNamesInclude(anchors, domain.BootstrapAdminSAName),
+		"чтение служебных записей не нашло собственную посевную личность службы %q "+
+			"(прочитано имён: %d, среди них: %s) — чтение перестало видеть предмет, "+
+			"и «расхождений 0» было бы сказано ни о чём",
+		domain.BootstrapAdminSAName, len(anchors), strings.Join(anchors, ", "))
 
 	res := moduleseedparity.Compare(states)
 
@@ -230,7 +269,7 @@ func TestMRW12_DeclaredGroupMissingFromTheBaseIsAFinding(t *testing.T) {
 		t.Skip("нужен Postgres")
 	}
 	ctx := context.Background()
-	states, census := moduleStates(ctx, t, manifestSet(t), removeServiceGroup)
+	states, census, _ := moduleStates(ctx, t, manifestSet(t), removeServiceGroup)
 	t.Logf("перепись: %s", census)
 	res := moduleseedparity.Compare(states)
 	t.Logf("находки: %s", strings.Join(res.Findings, " · "))
@@ -256,9 +295,9 @@ func TestMRW13_LiveGroupDeclaredByNobodyHasNoOwner(t *testing.T) {
 	const stray = "module-declared-by-nobody"
 	var baseline moduleseedparity.Census
 	set := manifestSet(t)
-	_, baseline = moduleStates(ctx, t, set, nil)
+	_, baseline, _ = moduleStates(ctx, t, set, nil)
 
-	states, census := moduleStates(ctx, t, set, func(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	states, census, _ := moduleStates(ctx, t, set, func(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		t.Helper()
 		var groupID string
 		require.NoError(t, pool.QueryRow(ctx, `
@@ -291,7 +330,7 @@ func TestMRW22_LiveGroupWithADriftedDescriptionIsAFindingBothWays(t *testing.T) 
 		t.Skip("нужен Postgres")
 	}
 	ctx := context.Background()
-	states, census := moduleStates(ctx, t, manifestSet(t), func(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	states, census, _ := moduleStates(ctx, t, manifestSet(t), func(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		t.Helper()
 		tag, err := pool.Exec(ctx, `
 			UPDATE kaname.groups g SET description = 'назначение, разошедшееся с объявленным'
@@ -338,7 +377,7 @@ type between func(ctx context.Context, t *testing.T, pool *pgxpool.Pool)
 
 // moduleStates — обе стороны сверки по каждому модулю.
 func moduleStates(ctx context.Context, t *testing.T, set modulemanifests.Set, edit between) (
-	[]moduleseedparity.ModuleState, moduleseedparity.Census,
+	[]moduleseedparity.ModuleState, moduleseedparity.Census, []string,
 ) {
 	t.Helper()
 
@@ -361,11 +400,11 @@ func moduleStates(ctx context.Context, t *testing.T, set modulemanifests.Set, ed
 			continue
 		}
 		for _, g := range m.Seed.Groups {
-			ownership.Declare(m.Module, g.Account, g.Name)
+			ownership.Declare(m.Module, declaredSpelling(g.Account), declaredSpelling(g.Name))
 		}
 	}
 
-	liveSA, saByOwner, ownerlessSA := readLiveServiceAccounts(ctx, t, pool)
+	liveSA, saByOwner, ownerlessSA, liveSANames := readLiveServiceAccounts(ctx, t, pool)
 	liveJoin, joinByOwner, ownerlessJoin := readLiveJoins(ctx, t, pool)
 	liveGroup, groupByOwner, ownerlessGroup := readLiveGroups(ctx, t, pool, ownership)
 	liveBinding, bindingByOwner, ownerlessBinding := readLiveBindings(ctx, t, pool, ownership)
@@ -432,7 +471,7 @@ func moduleStates(ctx context.Context, t *testing.T, set modulemanifests.Set, ed
 		census.Groups.Owned += len(st.LiveGroup)
 		census.Bindings.Owned += len(st.LiveBinding)
 	}
-	return states, census
+	return states, census, liveSANames
 }
 
 // loadManifests разбирает манифесты перечня В ТОМ ЖЕ ПОРЯДКЕ, в каком они в нём
@@ -521,13 +560,15 @@ func declaredSeed(m *manifest.Manifest) ([]moduleseedparity.ServiceAccount, []mo
 	sa := make([]moduleseedparity.ServiceAccount, 0, len(m.Seed.ServiceAccounts))
 	for _, s := range m.Seed.ServiceAccounts {
 		sa = append(sa, moduleseedparity.ServiceAccount{
-			Account: s.Account, Name: s.Name, Description: s.Description,
+			Account: declaredSpelling(s.Account), Name: declaredSpelling(s.Name),
+			Description: s.Description,
 		})
 	}
 	groups := make([]moduleseedparity.Group, 0, len(m.Seed.Groups))
 	for _, g := range m.Seed.Groups {
 		groups = append(groups, moduleseedparity.Group{
-			Account: g.Account, Name: g.Name, Description: g.Description,
+			Account: declaredSpelling(g.Account), Name: declaredSpelling(g.Name),
+			Description: g.Description,
 		})
 	}
 	// Выдача манифеста несёт СПИСОК субъектов, а в базе каждый субъект — своя
@@ -537,7 +578,7 @@ func declaredSeed(m *manifest.Manifest) ([]moduleseedparity.ServiceAccount, []mo
 	for _, b := range m.Seed.AccessBindings {
 		for _, subj := range b.Subjects {
 			bindings = append(bindings, moduleseedparity.Binding{
-				SubjectType: subj.Type, SubjectName: subj.Name,
+				SubjectType: subj.Type, SubjectName: declaredSpelling(subj.Name),
 				RoleID: b.RoleID, Relation: b.GrantedRelation,
 				ScopeType: b.ScopeType, ScopeID: b.ScopeID,
 			})
@@ -546,10 +587,10 @@ func declaredSeed(m *manifest.Manifest) ([]moduleseedparity.ServiceAccount, []mo
 	joins := make([]moduleseedparity.Join, 0, len(m.Seed.Joins))
 	for _, j := range m.Seed.Joins {
 		joins = append(joins, moduleseedparity.Join{
-			AccountName:  j.ServiceAccount.Account,
-			SAName:       j.ServiceAccount.Name,
-			GroupAccount: j.Group.Account,
-			GroupName:    j.Group.Name,
+			AccountName:  declaredSpelling(j.ServiceAccount.Account),
+			SAName:       declaredSpelling(j.ServiceAccount.Name),
+			GroupAccount: declaredSpelling(j.Group.Account),
+			GroupName:    declaredSpelling(j.Group.Name),
 		})
 	}
 	return sa, groups, bindings, joins
@@ -558,7 +599,7 @@ func declaredSeed(m *manifest.Manifest) ([]moduleseedparity.ServiceAccount, []mo
 // readLiveServiceAccounts читает служебные записи живой базы и раскладывает их
 // по модулю-владельцу — имени `kacho-<служба>`.
 func readLiveServiceAccounts(ctx context.Context, t *testing.T, pool *pgxpool.Pool) (
-	total int, byOwner map[string][]moduleseedparity.ServiceAccount, ownerless int,
+	total int, byOwner map[string][]moduleseedparity.ServiceAccount, ownerless int, names []string,
 ) {
 	t.Helper()
 	rows, err := pool.Query(ctx,
@@ -574,6 +615,7 @@ func readLiveServiceAccounts(ctx context.Context, t *testing.T, pool *pgxpool.Po
 		var account, name, description string
 		require.NoError(t, rows.Scan(&account, &name, &description))
 		total++
+		names = append(names, name)
 
 		owner, ok := ownerOfSeededName(name)
 		if !ok {
@@ -585,7 +627,20 @@ func readLiveServiceAccounts(ctx context.Context, t *testing.T, pool *pgxpool.Po
 		})
 	}
 	require.NoError(t, rows.Err())
-	return total, byOwner, ownerless
+	return total, byOwner, ownerless, names
+}
+
+// liveNamesInclude — есть ли названное имя среди прочитанных.
+//
+// Отдельной функцией, а не выражением на месте: якорь читается в теле пробы, и
+// вынесенный предикат называет, ЧТО именно спрашивается.
+func liveNamesInclude(names []string, want string) bool {
+	for _, n := range names {
+		if n == want {
+			return true
+		}
+	}
+	return false
 }
 
 // ownerOfSeededName — модуль-владелец СЛУЖЕБНОЙ ЗАПИСИ по её ИМЕНИ: имя вида

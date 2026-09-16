@@ -22,7 +22,7 @@ type InteractiveClientID string
 type InteractiveClientName string
 
 // Validate — единственная форма имени (`pkg/validate/nameform`).
-func (n InteractiveClientName) Validate() error { return validateResourceName("name", string(n)) }
+func (n InteractiveClientName) Validate() error { return validateResourceName(string(n)) }
 
 // InteractiveClientStatus — lifecycle status.
 type InteractiveClientStatus string

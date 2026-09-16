@@ -35,7 +35,7 @@ import (
 // Ей нечего решать о состоянии: она называет расхождение, а исход выбирает
 // человек — дописать объявление либо снять роль отдельным изменением (#1913;
 // снятие есть ПОМЕТКА, а не удаление строки — запись решения
-// `services/iam/docs/engineering/architecture/role-withdrawal-is-a-mark.md`).
+// `docs/engineering/architecture/role-withdrawal-is-a-mark.md`).
 // Применитель ничего не удаляет, поэтому автоматического исхода у находки нет
 // by construction.
 
