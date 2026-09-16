@@ -36,9 +36,14 @@ prod / staging / dev — это три Project одного Account).
 
 **Ограничения:**
 - **Имя уникально per-Account** (`UNIQUE projects_account_name_unique`).
-- Удаление RESTRICT — нельзя удалить Project, пока в нем есть workload
-  (это проверяется на стороне Compute/VPC через peer-API; на DB-уровне
-  Project — leaf-ресурс в `kaname`).
+- **Непустой проект не удаляется.** Состав проекта служба знает СВОЕЙ базой:
+  владельцы ресурсов пяти доменов регистрируют каждый объект в зеркале
+  `kaname.resource_mirror` (внутренний глагол `RegisterResource`), а проектные
+  роли лежат в `kaname.roles` под ключом `roles_project_fk ON DELETE RESTRICT`.
+  Удаление — ОДИН оператор писателя: две охраны `NOT EXISTS` (зеркало без
+  семейства `iam.*`, таблица ролей) плюс зонд, отвечающий, что удерживает.
+  Владельцев служба на удалении не спрашивает и не вправе — она лист графа
+  вызовов. Приёмка — `docs/engineering/acceptance/non-empty-project-is-not-deleted.md`.
 - `account_id` **hard-immutable**: в `updateMask` отвергается `INVALID_ARGUMENT`
   (`"accountId is immutable after Project.Create"`). Операции переноса проекта между
   аккаунтами в дереве нет.
@@ -63,15 +68,17 @@ prod / staging / dev — это три Project одного Account).
 |-------------------------|-------------------------|----------------------------------------------------|
 | `ErrNotFound`           | `NOT_FOUND`             | id не найден                                       |
 | `ErrAlreadyExists`      | `ALREADY_EXISTS`        | name занят в данном Account                        |
-| `ErrFailedPrecondition` | `FAILED_PRECONDITION`   | Delete с зависимыми ресурсами                      |
+| `ErrReferenceInUse`     | `FAILED_PRECONDITION`   | Delete непустого проекта: `Project <id> is not empty (<вид>: <число>, …)`, признак `REFERENCE_IN_USE` — в операции |
 | `ErrInvalidArg`         | `INVALID_ARGUMENT`      | domain.Validate / immutable-field в UpdateMask     |
 
 **FK contract:**
 
 ```
 accounts(id) ──RESTRICT── projects.account_id
-projects(id) ──RESTRICT── (cross-service: vpc_network.project_id,
-                           compute_instance.project_id, nlb.project_id)
+projects(id) ──RESTRICT── roles.project_id            (единственный ключ на projects)
+projects(id) ·· без ключа ·· resource_mirror.parent_project_id
+                             (ресурсы чужих модулей: зеркало живёт в той же базе,
+                              но ключа не несёт — окно доставки объявлено контрактом)
 ```
 
 ## Sequence diagram — Create
@@ -107,7 +114,7 @@ sequenceDiagram
 | `Get`    | sync       | Получает по id.                                           |
 | `List`   | sync       | Список (filter by `account_id`, paging).                  |
 | `Update` | async      | UpdateMask: `name`, `description`, `labels`.              |
-| `Delete` | async      | Удаление (RESTRICT-FK на cross-service ссылки — мягко).   |
+| `Delete` | async      | Удаление; непустой проект отвергается в операции с перечнем видов и чисел. |
 | `ListOperations` | sync | Журнал операций над этим Project.                        |
 
 ### REST mapping
@@ -203,10 +210,14 @@ go test -short -count=1 -timeout 120s -run TestProject \
 
 ## Gotchas / известные ограничения
 
-- **Delete не cascade'ит cross-service** — Compute / VPC / LB будут сообщать
-  «project имеет workload»; на стороне kaname Delete пройдет без проблем,
-  но workload останется orphan-ed (consumer-сервис обязан грациозно переживать
-  dangling-ref — деградированный статус, не паника).
+- **Delete не cascade'ит cross-service и не спрашивает владельцев** — проект с
+  зарегистрированными ресурсами чужих модулей отвергается по зеркалу
+  (`Project <id> is not empty (vpc.network: 2)`). Что отказ НЕ гарантирует:
+  строка зеркала приходит после коммита владельца, и регистрация, обогнавшая
+  удаление, ложится с родителем, которого нет (`IAM-PNE-1-13`); такие строки
+  называет проход по зеркалу на старте (стадия S2 приёмки). Consumer-сервис
+  по-прежнему обязан грациозно переживать dangling-ref — деградированный
+  статус, не паника.
 
 ## Связанные компоненты
 
