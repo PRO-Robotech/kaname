@@ -204,7 +204,7 @@ apiServer:
   # Транспорт — ВЗАИМНЫЙ TLS (`KANAME_LOGINLANE_SERVER_MTLS_*`, режим `mutual`):
   # вызывающий — ровно край платформы, и слушатель судит его по SAN
   # клиентского сертификата, а не по заголовку.
-  #   loginLaneEndpoint: tcp://0.0.0.0:9100      # объявляет ПОСАДКА `own`
+  #   loginLaneEndpoint: tcp://0.0.0.0:9100      # объявляет профиль (см. values.prod.yaml)
   # Вместе с адресом посадка `own` объявляет транспорт в карте `env`:
   #   KANAME_LOGINLANE_SERVER_MTLS_ENABLE: "true"
   #   KANAME_LOGINLANE_SERVER_MTLS_CERTFILE: /etc/kaname/tls/server/tls.crt

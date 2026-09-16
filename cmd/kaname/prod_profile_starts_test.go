@@ -348,9 +348,9 @@ func TestProductionProfileSatisfiesTheStartupGuards(t *testing.T) {
 	// профиля украшение — ручку, которую страж на этой посадке не читает.
 	// Под `own` адрес обязателен, и это судит `requireLoginLaneTLS` выше.
 	expectedAddressed := len(profileSurfaceAddrs)
-	if !loginLaneWanted(laneCfg) {
+	if !loginLaneWanted(laneCfg) && strings.TrimSpace(laneCfg.APIServer.LoginLaneEndpoint) == "" {
 		expectedAddressed--
-		t.Logf("полоса входа на посадке %q не поднимается: её адрес в перепись с адресом не входит", posture)
+		t.Logf("полоса входа на посадке %q не поднимается и адреса не объявляет: в перепись с адресом не входит", posture)
 	}
 	require.Equal(t, expectedAddressed, surfaceCensus.Addressed,
 		"поверхность без адреса в боевом профиле: страж пропускает её by construction "+
