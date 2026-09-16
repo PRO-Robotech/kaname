@@ -697,6 +697,36 @@ proto-gen-diff:
 	  exit 1; }
 	@echo "ЗЕЛЁНЫЙ: заглушки совпадают с контрактами."
 
+# service-manifest-embed — вшитая копия манифеста службы из манифеста дерева
+# (приёмка MRW-1, Р2; задача kaname#106).
+#
+# Манифест службы приезжает применителю посева ВСТРОЕННЫМ В ОБРАЗ: доставка
+# собирается обходом дерева платформы, где службы больше нет, а копия её
+# манифеста в чужом репозитории запрещена (ban #20). Директива встраивания
+# родительского каталога не принимает, поэтому копия лежит в каталоге пакета
+# `internal/servicemanifest` — под именем, которое обход дерева манифестом не
+# считает (второй `manifest.yaml` был бы вторым объявлением модуля `iam`).
+#
+# Цель копию ПОРОЖДАЕТ, а не держит равенство: его держит проба
+# `internal/servicemanifest` TestEmbeddedManifestIsByteIdenticalToTheTree —
+# правка `manifest.yaml` без пересборки копии роняет ЕЁ. Образец пары —
+# `fga-model-embed` ниже.
+SERVICE_MANIFEST_TREE  := manifest.yaml
+SERVICE_MANIFEST_EMBED := internal/servicemanifest/manifest.embedded.yaml
+.PHONY: service-manifest-embed
+
+## service-manifest-embed — вшитая копия манифеста службы из манифеста дерева (побайтово)
+service-manifest-embed:
+	@test -s "$(SERVICE_MANIFEST_TREE)" || { \
+	  echo "манифеста дерева нет либо он пуст: $(SERVICE_MANIFEST_TREE)"; \
+	  echo "Порождать копию из ничего нельзя: вшитый текст И ЕСТЬ тот, по которому"; \
+	  echo "применитель посева заводит группу службы и её выдачу."; \
+	  exit 1; }
+	cp "$(SERVICE_MANIFEST_TREE)" "$(SERVICE_MANIFEST_EMBED)"
+	@cmp -s "$(SERVICE_MANIFEST_TREE)" "$(SERVICE_MANIFEST_EMBED)" || { \
+	  echo "копии разошлись сразу после копирования"; exit 1; }
+	@echo "вшитая копия манифеста службы обновлена из манифеста дерева (побайтово)."
+
 # fga-model-embed — вшитая копия модели прав из канонической.
 #
 # ЦЕЛЬ ЗАВЕДЕНА ВМЕСТЕ С ПРЕДМЕТОМ, и до переезда контрактов предмета у неё не
