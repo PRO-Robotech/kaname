@@ -20,7 +20,8 @@
 несёт удостоверение. Поэтому она устроена не перечнем позиций, а ОБХОДОМ ВСЕГО
 документа: неизвестная форма покрывается построением, а не списком.
 
-ФОРМЫ ЗАМЕРЕНЫ, А НЕ ПРЕДПОЛОЖЕНЫ — ИХ СЕМЬ. Замер: синтетический прогон newman
+ФОРМЫ ЗАМЕРЕНЫ, А НЕ ПРЕДПОЛОЖЕНЫ — ИХ ВОСЕМЬ: семь ПОЗИЦИЙ отчёта и одна форма
+ВНУТРИ позиции (тело, которое само есть JSON). Замер: синтетический прогон newman
 6.2.2 с маркерами в каждой позиции (окружение · заголовок запроса · заголовок
 ответа · тело запроса · параметр адреса · тело ответа · литерал в скрипте) и
 обход отчёта с печатью пути каждого вхождения:
@@ -42,7 +43,13 @@
     ГРЕП ЕЁ НЕ ВИДИТ ВООБЩЕ. Замер «51 вхождение» получен текстовым предикатом,
     значит он НЕ СЧИТАЛ тела ответов — утечка была шире названного числа;
   7 `collection.item[].event[].script.exec[]` — литерал, вписанный в скрипт
-    коллекции (и его копия в `run.executions[].item`).
+    коллекции (и его копия в `run.executions[].item`);
+  8 ТЕЛО (4 и 6), КОТОРОЕ САМО ЕСТЬ JSON, — секрет стоит ПОД ИМЕНЕМ КЛЮЧА внутри
+    текста, а формы у значения нет: `response.secret` у `SAKeyService.Issue`
+    вида SECRET (строка показывается один раз) и `nextPageToken` списков. Обход
+    узлов отчёта имён внутри строки не видит by construction, поэтому такое тело
+    разбирается и судится теми же правилами — по имени и по форме. Захвачено на
+    автономном стенде (задача #19): два остатка в 47 файлах, оба этой формы.
 
 ЧТО ОСТАЁТСЯ. Имена ключей, имена заголовков, пути запросов, коды, тексты
 утверждений, числа и времена — то есть РАЗБОР ПАДЕНИЯ. Чистка, съедающая имя
@@ -57,7 +64,7 @@
 удостоверение, публикует его в журнал прогона — то есть туда же, откуда его
 убирали.
 
-САМОПРОВЕРКА — `--self-test`: по одной оси на каждую из семи форм, законный
+САМОПРОВЕРКА — `--self-test`: по одной оси на каждую из восьми форм, законный
 близнец рядом (идентификатор, адрес, текст утверждения обязаны выжить), пустой
 обход обязан дать отказ.
 """
@@ -165,6 +172,53 @@ class Census:
         return self.redacted_by_name + self.redacted_by_shape
 
 
+def _embedded_json(text: str) -> object | None:
+    """Текст, который сам есть JSON-объект или массив, — иначе None.
+
+    ФОРМА 8: ТЕЛО ЗАПРОСА И ТЕЛО ОТВЕТА — ТЕКСТ, А ВНУТРИ ТЕКСТА ЕСТЬ ИМЕНА.
+    Обход узлов отчёта видит имя ключа только у УЗЛА (`{"key": …, "value": …}`,
+    поле словаря); имя внутри строки тела ему невидимо by construction, и тело
+    резалось только по ФОРМЕ значения. У отчеканенной строки секрета формы нет
+    (`credsecret.Mint`: ни `eyJ`, ни точек, ни `Bearer`), поэтому
+    `SAKeyService.Issue` вида SECRET уезжал в артефакт с `response.secret`
+    целиком — и то же с `nextPageToken` списков. Захвачено на автономном стенде
+    (задача #19): два остатка в 47 файлах, оба — тело ответа, оба под именем,
+    которое узел отчёта уже режет, когда оно стоит в заголовке или параметре.
+
+    Разбирается ТОЛЬКО объект или массив: голая строка в кавычках и число телом
+    не являются, и «вычищенное» число ничем не отличалось бы от исходного.
+    """
+    stripped = text.lstrip()
+    if not stripped or stripped[0] not in "{[":
+        return None
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def _scrub_body(text: str, c: Census) -> str:
+    """Вычистить ТЕКСТ тела: JSON — по именам И по форме, иначе — по форме.
+
+    Возвращает текст; сколько вырезано, считает перепись — по имени либо по
+    форме, ровно как у узлов отчёта. Тело, разобранное как JSON, собирается
+    обратно ТОЛЬКО если из него что-то вырезано: иначе байты остаются исходными,
+    и «вычищенный» файл не отличается от исходного ничем, кроме вырезанного.
+    """
+    parsed = _embedded_json(text)
+    if parsed is not None:
+        before = c.redacted
+        cleaned = _walk(parsed, None, c)
+        if c.redacted != before:
+            return json.dumps(cleaned, ensure_ascii=False)
+        return text
+    clean, n = scrub_text(text)
+    if n:
+        c.redacted_by_shape += n
+    return clean
+
+
 def _walk(node: object, key_hint: str | None, c: Census) -> object:
     """Обойти ВЕСЬ документ. Перечня позиций здесь нет намеренно: неизвестная
     форма покрывается обходом, а перечень разошёлся бы с newman молча."""
@@ -181,9 +235,8 @@ def _walk(node: object, key_hint: str | None, c: Census) -> object:
                 raw = bytes(int(b) & 0xFF for b in node["data"]).decode("utf-8", "replace")
             except (TypeError, ValueError):
                 return node
-            clean, n = scrub_text(raw)
-            if n:
-                c.redacted_by_shape += n
+            clean = _scrub_body(raw, c)
+            if clean != raw:
                 return {"type": "Buffer", "data": list(clean.encode("utf-8"))}
             return node
         out: dict = {}
@@ -198,11 +251,9 @@ def _walk(node: object, key_hint: str | None, c: Census) -> object:
         if key_hint and SECRET_NAME_RE.search(key_hint) and node:
             c.redacted_by_name += 1
             return REDACTED
-        clean, n = scrub_text(node)
-        if n:
-            c.redacted_by_shape += n
-            return clean
-        return node
+        # Строка, которая сама есть JSON (тело запроса `body.raw`), несёт имена
+        # ВНУТРИ себя — форма 8, та же, что у байтового массива тела ответа.
+        return _scrub_body(node, c)
     return node
 
 
@@ -357,6 +408,13 @@ def residue(node: object, path: str, found: list[str],
                 raw = bytes(int(b) & 0xFF for b in node["data"]).decode("utf-8", "replace")
             except (TypeError, ValueError):
                 raw = ""
+            # Тело, разбираемое как JSON, судится ПО ИМЕНАМ внутри себя — второй
+            # взгляд обязан видеть форму 8 сам, иначе ослепший разбор тела у
+            # чистки прошёл бы молча. Неразбираемое тело судится по форме целиком.
+            parsed = _embedded_json(raw)
+            if parsed is not None:
+                residue(parsed, f"{path}[байтовый массив, JSON]", found)
+                return
             form = residue_shaped(raw)
             if form:
                 found.append(f"{path}[байтовый массив] — {form}")
@@ -377,6 +435,11 @@ def residue(node: object, path: str, found: list[str],
         if key_hint and SECRET_NAME_RE.search(key_hint) and node and node != REDACTED:
             found.append(f"{path} — значение ключа {key_hint!r} не вырезано "
                          f"(длина {len(node)})")
+            return
+        # Строка-тело (`body.raw`), разбираемая как JSON, — та же форма 8.
+        parsed = _embedded_json(node)
+        if parsed is not None:
+            residue(parsed, f"{path}[JSON]", found)
             return
         form = residue_shaped(node)
         if form:
@@ -483,8 +546,16 @@ def _jwt(mark: str) -> str:
             f".{mark}c2lnbmF0dXJlc2lnbmF0dXJlc2lnbmF0dXJlc2ln")
 
 
+def _opaque(mark: str) -> str:
+    # Удостоверение БЕЗ формы: ни `eyJ`, ни точек, ни `Bearer`, ни PEM. Ловится
+    # только ИМЕНЕМ ключа; длина и смешение — как у отчеканенной строки секрета
+    # (`credsecret.Mint`: 59 знаков, буквы и цифры вплотную).
+    return f"kt_{mark}_9f3Ac71Qd0Ze8Bx2Yv5Nm4Kj6Hg1Fs3Dp7Lw0Rt2UqXe4Vb"
+
+
 def _report(mark_env: str, mark_reqh: str, mark_resh: str, mark_body: str,
-            mark_query: str, mark_stream: str, mark_script: str) -> dict:
+            mark_query: str, mark_stream: str, mark_script: str,
+            mark_json: str = "JSN8") -> dict:
     """Отчёт формы newman 6.2.2 — позиции взяты ЗАМЕРОМ (см. шапку файла)."""
     return {
         "collection": {"item": [{
@@ -527,6 +598,39 @@ def _report(mark_env: str, mark_reqh: str, mark_resh: str, mark_body: str,
                         ('{"accessToken":"' + _jwt(mark_stream) + '"}').encode("utf-8"))},
                 },
                 "assertions": [{"assertion": "иам возвращает 200", "error": None}],
+            }, {
+                # ФОРМА 8 — JSON-ТЕЛО, НЕСУЩЕЕ СЕКРЕТ ПОД ИМЕНЕМ КЛЮЧА. Значение
+                # формы не имеет, поэтому по форме его не срезать; имя стоит ВНУТРИ
+                # текста тела, а не в узле отчёта, — и обход узлов его не видит.
+                # Захвачено на автономном стенде (задача #19): `SAKeyService.Issue`
+                # вида SECRET отдаёт `response.secret` один раз, а `List` отдаёт
+                # `nextPageToken`. Тот же ключ секрета уезжает и телом ЗАПРОСА.
+                "item": {"name": "probe-json-body", "event": []},
+                "request": {
+                    "method": "POST",
+                    "header": [{"key": "Content-Type", "value": "application/json"}],
+                    "body": {"mode": "raw",
+                             "raw": json.dumps({"clientSecret": _opaque(mark_json),
+                                                "pageSize": 1})},
+                    "url": {"raw": "https://localhost:9098/iam/v1/projects",
+                            "path": ["iam", "v1", "projects"], "query": []},
+                },
+                "response": {
+                    "code": 200,
+                    "status": "OK",
+                    "responseTime": 9,
+                    "header": [{"key": "Content-Type", "value": "application/json"}],
+                    "stream": {"type": "Buffer", "data": list(json.dumps({
+                        "done": True,
+                        "response": {"secret": _opaque(mark_json),
+                                     "keyId": "sak0123456789abcdefgh",
+                                     "privateKeyPem": ""},
+                        "projects": [{"id": "prj0123456789abcdefgh", "name": "prj-legit-7"}],
+                        "nextPageToken": _opaque(mark_json),
+                        "total": 3,
+                    }).encode("utf-8"))},
+                },
+                "assertions": [{"assertion": "секрет объявленной формы", "error": None}],
             }],
         },
     }
@@ -559,7 +663,7 @@ def self_test() -> int:
         text = (dst / "kaname-own-rest-front.json").read_text(encoding="utf-8")
         out = json.loads(text)
 
-        # ── ОДНА ОСЬ НА КАЖДУЮ ИЗ СЕМИ ЗАМЕРЕННЫХ ФОРМ ───────────────────────
+        # ── ОДНА ОСЬ НА КАЖДУЮ ИЗ СЕМИ ЗАМЕРЕННЫХ ПОЗИЦИЙ (восьмая форма — ниже) ──
         forms = (
             ("1 окружение (`environment.values[].value`)", "ENVV"),
             ("2 заголовок запроса (`request.header[].value`)", "REQH"),
@@ -580,6 +684,40 @@ def self_test() -> int:
             if isinstance(stream, dict) and stream.get("type") == "Buffer" else str(stream)
         _c("форма 6: и в ДЕКОДИРОВАННОМ массиве его нет",
            "STRM" not in decoded and shaped_credential(decoded) is None, decoded[:120])
+
+        # ── ФОРМА 8: JSON-ТЕЛО НЕСЁТ СЕКРЕТ ПОД ИМЕНЕМ КЛЮЧА, А ФОРМЫ У НЕГО НЕТ ──
+        #
+        # Тело — ТЕКСТ, и обход узлов отчёта имён внутри него не видит: до этой оси
+        # значение под `secret` внутри `response.stream` резалось только по форме,
+        # а формы у отчеканенной строки секрета нет. Пара: секрет вырезан ПО ИМЕНИ
+        # в теле ответа и в теле запроса; соседние несекретные поля тела выжили и
+        # тело осталось JSON — иначе разбор падения по нему невозможен.
+        ex8 = out["run"]["executions"][1]
+        stream8 = ex8["response"]["stream"]
+        decoded8 = bytes(stream8["data"]).decode("utf-8", "replace") \
+            if isinstance(stream8, dict) and stream8.get("type") == "Buffer" else str(stream8)
+        _c("форма 8 тело ответа — JSON с секретом ПОД ИМЕНЕМ: удостоверения в выходе НЕТ",
+           "JSN8" not in decoded8, decoded8[:160])
+        try:
+            body8 = json.loads(decoded8)
+        except ValueError:
+            body8 = None
+        _c("форма 8: тело ответа ОСТАЛОСЬ JSON после чистки", isinstance(body8, dict), decoded8[:160])
+        if isinstance(body8, dict):
+            _c("форма 8: `response.secret` вырезан по имени, а не удалён вместе с ключом",
+               body8.get("response", {}).get("secret") == REDACTED, f"{body8.get('response')}")
+            _c("форма 8: `nextPageToken` вырезан по имени (как и в параметре адреса)",
+               body8.get("nextPageToken") == REDACTED, f"{body8.get('nextPageToken')!r}")
+            _c("форма 8: соседние несекретные поля тела выжили (законный близнец)",
+               body8.get("projects") == [{"id": "prj0123456789abcdefgh", "name": "prj-legit-7"}]
+               and body8.get("total") == 3 and body8.get("done") is True
+               and body8.get("response", {}).get("keyId") == "sak0123456789abcdefgh",
+               f"{body8}")
+            _c("форма 8: ПУСТОЕ значение секретного ключа не превращается в «вырезано»",
+               body8.get("response", {}).get("privateKeyPem") == "", f"{body8.get('response')}")
+        raw8 = ex8["request"]["body"]["raw"]
+        _c("форма 8 тело запроса — JSON с `clientSecret`: удостоверения в выходе НЕТ",
+           "JSN8" not in raw8 and '"pageSize": 1' in raw8.replace(":1", ": 1"), raw8[:160])
 
         # ── ИМЯ КЛЮЧА ОБЯЗАНО ОСТАТЬСЯ: иначе чистка = удаление файла ────────
         names = [v["key"] for v in out["environment"]["values"]]
@@ -773,6 +911,53 @@ def self_test() -> int:
             globals().update(saved)
         _c("предикаты ЧИСТКИ ослеплены — отказ по ОСТАТКУ, а не зелёное", rc == 1)
 
+    # ФОРМА 8 ОТДЕЛЬНО: ослеплён РАЗБОР ТЕЛА у чистки (тело снова режется только
+    # по форме), а секрет под именем — КОРОТКИЙ, ниже порога пробега 40+, и формы
+    # у него нет. Тогда поймать его может только именная половина второго
+    # взгляда, читающая JSON тела сама; и отказ обязан назвать путь В ТЕЛЕ, а не
+    # значение. Близнец: та же чистка без ослепления — код 0.
+    short_secret = '{"done":true,"response":{"secret":"kt_short_2Fx9_value","keyId":"sak1"}}'
+    for blinded, want in ((True, 1), (False, 0)):
+        with tempfile.TemporaryDirectory(prefix="redact-form8-") as td:
+            tmp = pathlib.Path(td)
+            src, dst = tmp / "out", tmp / "out-public"
+            src.mkdir()
+            # Рядом с телом — обычная строка узла: без неё обход насчитал бы ноль
+            # строк и отказал бы «обход пуст», то есть по ДРУГОЙ причине, и код 1
+            # доказывал бы не то, что назван.
+            (src / "r.json").write_text(json.dumps({"run": {"executions": [{
+                "item": {"name": "probe-short-secret"},
+                "response": {"stream": {"type": "Buffer",
+                                        "data": list(short_secret.encode("utf-8"))}}}]}}),
+                encoding="utf-8")
+            saved_body = globals()["_scrub_body"]
+            if blinded:
+                def _shape_only(text: str, c: Census) -> str:
+                    clean, n = scrub_text(text)
+                    c.redacted_by_shape += n
+                    return clean
+                globals()["_scrub_body"] = _shape_only
+            buf = io.StringIO()
+            try:
+                # Остаток печатается в stderr — читаем оба потока, иначе «путь
+                # назван» проверялось бы по потоку, в котором его нет by construction.
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                    rc = run(src, dst)
+            finally:
+                globals()["_scrub_body"] = saved_body
+            out = buf.getvalue()
+            if blinded:
+                _c("форма 8: разбор тела у чистки ослеплён, секрет короткий и без формы — "
+                   "отказ по ИМЕНИ внутри тела (а не «обход пуст»)",
+                   rc == want and "обход пуст" not in out and "осталось 1 удостоверени" in out,
+                   out[-400:])
+                _c("форма 8: остаток назван ПУТЁМ внутри тела, значение не напечатано",
+                   "[байтовый массив, JSON]" in out and "kt_short_2Fx9_value" not in out,
+                   out[-400:])
+            else:
+                _c("форма 8: тот же вход при живой чистке — код 0 (близнец)",
+                   rc == want, out[-400:])
+
     # ── ОСЬ: ПУСТОЙ ОБХОД — ОТКАЗ, А НЕ «ЧИСТО» ────────────────────────────
     with tempfile.TemporaryDirectory(prefix="redact-empty-") as td:
         tmp = pathlib.Path(td)
@@ -787,9 +972,10 @@ def self_test() -> int:
     if _F:
         print(f"САМОПРОВЕРКА ПРОВАЛЕНА: {len(_F)} — {', '.join(_F)}", file=sys.stderr)
         return 1
-    print("ДОКАЗАНО: все семь замеренных форм вычищены (включая байтовый массив "
-          "тела ответа, невидимый текстовому грепу), имена ключей и разбор падения "
-          "выжили, ослеплённый предикат отвергается по остатку, пустой обход — отказ.")
+    print("ДОКАЗАНО: все восемь замеренных форм вычищены (включая байтовый массив "
+          "тела ответа, невидимый текстовому грепу, и секрет под именем ключа внутри "
+          "JSON-тела), имена ключей и разбор падения выжили, ослеплённый предикат "
+          "отвергается по остатку, пустой обход — отказ.")
     return 0
 
 
