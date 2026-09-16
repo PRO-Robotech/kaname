@@ -311,9 +311,45 @@ data:
     старта, и отвергает правильно: значения, означающего «без срока», в словаре
     ручки не существует вовсе. */}}
     {{- with $inv := .Values.invite | default dict }}
-    {{- with $inv.ttl }}
+    {{- /* ─── ОГРАНИЧЕНИЕ ЧАСТОТЫ ПИСЕМ НА АДРЕС (приёмка ID-MAIL-1, Р14, MAIL-42/43)
+
+    СТРАЖ РЕНДЕРА — МЕСТО С1 (Р4а): непозитивная величина отвергается ЗДЕСЬ, до
+    посадки, и отказ называет ручку и требование положительного значения.
+    Ключи отдаются только объявленными: молчание профиля — согласие с
+    умолчанием процесса (три письма в час на адрес), а не «без ограничения».
+    Значения, означающего «без ограничения», в словаре ручки нет: ноль,
+    отрицательное и слово («off», «unlimited») — отказ рендера. Чем судит
+    `with`: он пропускает ноль как пустое, поэтому объявленность спрашивается
+    у ключа, а не у значения. */}}
+    {{- $lim := $inv.mailRateLimit | default dict }}
+    {{- $maxDeclared := hasKey $lim "maxPerWindow" }}
+    {{- $winDeclared := hasKey $lim "window" }}
+    {{- if $maxDeclared }}
+    {{- $max := $lim.maxPerWindow }}
+    {{- if or (not (or (kindIs "int64" $max) (kindIs "float64" $max) (kindIs "int" $max))) (le (int $max) 0) }}
+    {{- fail (printf "kaname: `invite.mailRateLimit.maxPerWindow` = %v — ожидается положительное целое число писем одному адресу за окно. Значения «без ограничения» не существует: профиль вправе изменить величину, но не снять её (решение Р14 приёмки ID-MAIL-1, MAIL-43)" $max) }}
+    {{- end }}
+    {{- end }}
+    {{- if $winDeclared }}
+    {{- $win := toString $lim.window }}
+    {{- if or (not (regexMatch "^([0-9]+(ns|us|ms|s|m|h))+$" $win)) (regexMatch "^(0+(ns|us|ms|s|m|h))+$" $win) }}
+    {{- fail (printf "kaname: `invite.mailRateLimit.window` = %q — ожидается положительная длительность окна (`1h`, `30m`). Значения «без ограничения» не существует: профиль вправе изменить величину, но не снять её (решение Р14 приёмки ID-MAIL-1, MAIL-43)" $win) }}
+    {{- end }}
+    {{- end }}
+    {{- if or $inv.ttl $maxDeclared $winDeclared }}
     invite:
+      {{- with $inv.ttl }}
       ttl: {{ . | quote }}
+      {{- end }}
+      {{- if or $maxDeclared $winDeclared }}
+      mail-rate-limit:
+        {{- if $maxDeclared }}
+        max-per-window: {{ int $lim.maxPerWindow }}
+        {{- end }}
+        {{- if $winDeclared }}
+        window: {{ $lim.window | quote }}
+        {{- end }}
+      {{- end }}
     {{- end }}
     {{- end }}
     {{- with $im := .Values.inviteMail | default dict }}

@@ -39,6 +39,7 @@ package user
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -50,6 +51,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
@@ -293,18 +295,36 @@ func (*invPrincUserWtr) RemoveMembership(context.Context, domain.UserID, domain.
 // партиции отвергаются здесь так же, как ограничением миграции, — иначе фикстура
 // была бы снисходительнее продукта и скрыла бы ровно тот дефект, ради которого её
 // подставляют.
-func (w *invPrincWriter) EmitInviteMail(_ context.Context, userID, accountID, to, _ string) error {
-	if to == "" {
-		return fmt.Errorf("invite mail: recipient required")
+func (w *invPrincWriter) EmitInviteMail(_ context.Context, intent outboxtypes.InviteMailIntent) (bool, error) {
+	if intent.To == "" {
+		return false, fmt.Errorf("invite mail: recipient required")
 	}
-	if userID == "" {
-		return fmt.Errorf("invite mail: user id required")
+	if intent.UserID == "" {
+		return false, fmt.Errorf("invite mail: user id required")
+	}
+	// Непозитивное ограничение настоящий писатель отвергает — дублёр тоже:
+	// иначе use-case без провязанного ограничения слал бы письма в пробах и
+	// молчал бы в продукте.
+	if intent.Limit.MaxPerWindow <= 0 || intent.Limit.Window <= 0 {
+		return false, fmt.Errorf("invite mail: rate limit must be positive — there is no «unlimited»")
 	}
 	w.parent.mu.Lock()
 	defer w.parent.mu.Unlock()
+	// ОКНО АДРЕСАТА моделируется тем же правилом, что у настоящего писателя:
+	// не больше MaxPerWindow намерений на адрес (окно здесь не истекает —
+	// пробы коротки). Сверхнормативное — «не поставлено», не ошибка.
+	sent := 0
+	for _, m := range w.parent.mailIntents {
+		if strings.EqualFold(m.To, intent.To) {
+			sent++
+		}
+	}
+	if sent >= intent.Limit.MaxPerWindow {
+		return false, nil
+	}
 	w.parent.mailIntents = append(w.parent.mailIntents,
-		mailIntent{UserID: userID, AccountID: accountID, To: to})
-	return nil
+		mailIntent{UserID: intent.UserID, AccountID: intent.AccountID, To: intent.To})
+	return true, nil
 }
 
 // mailIntent — со-коммиченное намерение отправить письмо, запомненное дублёром.

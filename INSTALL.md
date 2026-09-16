@@ -281,6 +281,8 @@ KANAME_REPOSITORY__POSTGRES__URL=postgres://iam:...@pg:5432/kaname?sslmode=requi
 | `inviteMail.tlsMode` | `KANAME_INVITE_MAIL__TLS_MODE` | `starttls` (умолчание) либо `implicit` |
 | `inviteMail.caBundleFile` | `KANAME_INVITE_MAIL__CA_BUNDLE_FILE` | якорь доверия к сертификату узла; пусто — системные корни |
 | `inviteMail.loginUrl` | `KANAME_INVITE_MAIL__LOGIN_URL` | адрес страницы входа, который несёт письмо |
+| `invite.mailRateLimit.maxPerWindow` | `KANAME_INVITE__MAIL_RATE_LIMIT__MAX_PER_WINDOW` | сколько писем приглашения уходит одному адресу за окно — на приглашении и на повторной отправке вместе. Умолчание 3; положительное, «без ограничения» не бывает |
+| `invite.mailRateLimit.window` | `KANAME_INVITE__MAIL_RATE_LIMIT__WINDOW` | длина окна. Умолчание `1h`; положительная |
 
 **Адрес узла принимается в двух формах, и у каждой свой смысл.** Голая форма
 `host:port` — посадку полосы называет `inviteMail.tlsMode`, логин — переменная

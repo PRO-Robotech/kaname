@@ -581,6 +581,7 @@ jobs:
             --service iam-rbac-subjects \
             --service iam-rbac-scope-grant \
             --service iam-invite-grant-fga \
+            --service iam-invite-resend \
             --service iam-subject-privileges-read \
             --service iam-list-visibility \
             --service iam-flat-authz-vbc \

@@ -584,6 +584,7 @@ PRODUCER_LEDGER: dict[str, tuple[str, str]] = {
     "iam-interactive-client": ("B", "Create/Delete регистрируют клиента в ВНЕШНЕМ поставщике (`providerClients`, адаптер `*clients.HydraAdminClient`); на автономном стенде поставщик об…"),
     "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»"),
     "iam-invite-grant-fga": ("A", "приглашение → выдача → сходимость модели, всё внутри iam"),
+    "iam-invite-resend": ("A", "повторная отправка письма приглашения — глагол службы; ограничение частоты и hide-existence производит своя дверь; письмо у приёмника наблюдает стенд с почтой (MAIL-05), не этот набор"),
     "iam-list-visibility": ("A", "видимость перечня по членству; один предъявитель, только 200"),
     "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем"),
     "iam-permission-catalog": ("A", "каталог прав — данные службы"),

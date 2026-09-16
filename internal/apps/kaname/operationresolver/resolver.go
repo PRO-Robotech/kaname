@@ -122,6 +122,16 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
 	case *iamv1.UnblockUserMetadata:
 		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
+	case *iamv1.ResendInviteMetadata:
+		// Повторная отправка письма приглашения (ID-MAIL-1, §10 п. 9) НЕ меняет
+		// строку человека: её предмет — намерение в очереди писем, поставленное
+		// либо не поставленное (окно частоты). Осиротевшая операция —
+		// процесс умер между чеканкой операции и коммитом намерения — разрешается
+		// как Update: строка есть ⇒ ответ — она же, ровно тот ответ, что даёт и
+		// состоявшийся вызов (в норме и сверх нормы он один by construction, Р9).
+		// Строки нет ⇒ операция прервана. Сказать «письмо ушло» резолвер не
+		// может и не говорит: письмо у приёмника наблюдает стенд, а не операция.
+		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
 
 	case *iamv1.CreateServiceAccountMetadata:
 		return resolveExistence(ctx, kindCreate, m.GetServiceAccountId(), rd.ServiceAccounts().Get, marshalServiceAccount)
