@@ -32,6 +32,7 @@ import (
 	"context"
 	stderrors "errors"
 	"log/slog"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -380,4 +381,108 @@ func seedActiveUserWithAccount(t *testing.T, h *harness, email string) domain.Us
 	out, err := h.register(t, h.useCase(t, h.store), email)
 	require.NoError(t, err)
 	return out.View.User
+}
+
+// TestRegisterIntegration_F4_12_17_ExhaustedRateIsTheSameRefusalAsOccupied —
+// Ф4-12: адрес свободен, предел темпа по его носителю исчерпан — отказ
+// побайтово равен отказу занятости (Р3). Ф4-17: первая регистрация носителя
+// при потолке НОЛЬ проходит. Положительный контроль Ф4-13 — свободный адрес
+// при неисчерпанном пределе проходит.
+//
+// «Предел исчерпан у свободного адреса» строится по-честному: окно носителя
+// (адреса) уже несёт заведения — ровно то состояние, которое оставляет
+// регистрация с последующим снятием строки человека.
+func TestRegisterIntegration_F4_12_17_ExhaustedRateIsTheSameRefusalAsOccupied(t *testing.T) {
+	h := newHarness(t)
+	uc := h.useCase(t, h.store)
+	projector := kanamepg.NewOwnCeilingRepo(h.pool)
+
+	// Ф4-17: потолок ноль — первая регистрация носителя проходит.
+	_, err := projector.ApplyAdmissionRate(h.ctx, 0, time.Hour)
+	require.NoError(t, err)
+	first := freshEmail("f4-17")
+	out, err := h.register(t, uc, first)
+	require.NoError(t, err, "первое заведение носителя безусловно при любой величине")
+	h.assertAllThree(t, first, out)
+
+	// Ф4-11: занятый адрес — эталон отказа.
+	_, errOccupied := h.register(t, uc, first)
+	require.ErrorIs(t, errOccupied, registration.ErrRefused)
+
+	// Ф4-12: свободный адрес, чьё окно уже полно (потолок один, заведение одно).
+	_, err = projector.ApplyAdmissionRate(h.ctx, 1, time.Hour)
+	require.NoError(t, err)
+	exhausted := freshEmail("f4-12")
+	_, err = h.pool.Exec(h.ctx, `
+		INSERT INTO identity_admission_windows (carrier_id, kind, window_started_at, admitted)
+		VALUES ($1, 'iam.account', now(), 1)`, humansession.AddressKey(exhausted))
+	require.NoError(t, err)
+	_, errRate := h.register(t, uc, exhausted)
+	require.ErrorIs(t, errRate, registration.ErrRefused)
+	require.Equal(t, errOccupied.Error(), errRate.Error(), "тело отказа побайтово равно занятости (Р3)")
+	require.Equal(t, rows{}, h.rowsFor(t, exhausted), "отказ по темпу не оставил ничего из трёх")
+	require.Equal(t, 1, h.obs.count(registration.OutcomeRefusedRate), "причина различима только клеткой счётчика")
+	require.Equal(t, 1, h.obs.count(registration.OutcomeRefusedOccupied))
+
+	// Ф4-13: свободный адрес при неисчерпанном пределе — успех.
+	free := freshEmail("f4-13b")
+	out, err = h.register(t, uc, free)
+	require.NoError(t, err)
+	h.assertAllThree(t, free, out)
+}
+
+// TestRegisterIntegration_F4_14_LiveOnPostgres — живой замер Ф4-14 на
+// НАСТОЯЩЕЙ базе: полоса «адрес занят» отвечает ключом почты на вставке
+// строки человека, полоса «предел исчерпан» — триггером на фиксации, после
+// прочих записей транзакции. Критерий Ф1-48 тот же (`judgeTiming`); ручной
+// прогон, как у соседних измерительных приборов:
+//
+//	KACHO_REGISTRATION_TIMING=1 go test ./internal/apps/kaname/api/registration/ -run TestRegisterIntegration_F4_14_LiveOnPostgres -count=1 -v
+func TestRegisterIntegration_F4_14_LiveOnPostgres(t *testing.T) {
+	if os.Getenv(timingEnv) == "" {
+		t.Skipf("измерительная проба идёт РУЧНЫМ прогоном: %s=1", timingEnv)
+	}
+	h := newHarness(t)
+	uc := h.useCase(t, h.store)
+	projector := kanamepg.NewOwnCeilingRepo(h.pool)
+	_, err := projector.ApplyAdmissionRate(h.ctx, 1, time.Hour)
+	require.NoError(t, err)
+
+	occupied := freshEmail("t-occupied")
+	_, err = h.register(t, uc, occupied)
+	require.NoError(t, err)
+	exhausted := freshEmail("t-exhausted")
+	_, err = h.pool.Exec(h.ctx, `
+		INSERT INTO identity_admission_windows (carrier_id, kind, window_started_at, admitted)
+		VALUES ($1, 'iam.account', now(), 1)`, humansession.AddressKey(exhausted))
+	require.NoError(t, err)
+
+	a, b := timingLane{name: "адрес занят"}, timingLane{name: "предел исчерпан"}
+	for _, e := range []string{occupied, exhausted} {
+		_, _ = h.register(t, uc, e) // прогрев
+	}
+	for i := 0; i < timingLaneN; i++ {
+		for _, x := range []struct {
+			email string
+			l     *timingLane
+		}{{occupied, &a}, {exhausted, &b}} {
+			start := time.Now()
+			_, err := h.register(t, uc, x.email)
+			x.l.samples = append(x.l.samples, time.Since(start))
+			require.ErrorIs(t, err, registration.ErrRefused)
+		}
+	}
+	for _, l := range []timingLane{a, b} {
+		m, q := l.stats()
+		t.Logf("полоса %-18s медиана %10v · IQR %10v · n=%d", l.name, m, q, len(l.samples))
+	}
+	v := judgeTiming(a, b, timingIQRCeilng, timingLowerN)
+	t.Log(v.text)
+	switch v.kind {
+	case "ok":
+	case "not-performed":
+		t.Skip(v.text)
+	default:
+		t.Fatal(v.text)
+	}
 }

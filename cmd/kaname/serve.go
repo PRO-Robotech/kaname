@@ -173,6 +173,12 @@ func runServe(cfg config.Config) error {
 	if err := projectOwnCeilings(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg.OwnCeilings); err != nil {
 		return err
 	}
+	// ПРОЕКЦИЯ ТЕМПА ЗАВЕДЕНИЯ (Ф4 Р5, kacho#1270) — тем же местом и по той же
+	// причине: триггер читает величину из строки авторитета, и под `own` её
+	// объявляет профиль (незаданная — отказ старта стражем полосы).
+	if err := projectAdmissionRate(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg); err != nil {
+		return err
+	}
 
 	// slave-pool wiring (read-replica). Если slave-url
 	// настроен и отличается от master URL — отдельный pgxpool для read-TX'ов;
