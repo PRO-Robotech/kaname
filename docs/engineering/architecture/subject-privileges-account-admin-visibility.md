@@ -90,7 +90,7 @@ within-`kaname` `Users().Get` / `ServiceAccounts().Get` (same-schema read,
 `services/iam/internal/apps/kaname/api/access_binding/list_subject_privileges_narrowing_test.go`
 — семь проб, у отрицания в каждой стоит положительная половина на том же ответе.
 Объявление поверхности — `rowFilter` в `services/iam/tools/auditlistfilter/profile.go`,
-и оно проверяемо: `make -C services/iam audit-list-filter` доходит до
+и оно проверяемо: `make audit-list-filter` доходит до
 пообъектного вопроса внутри use-case'а, а не верит объявлению на слово.
 
 ## Отношение к `ListBySubject` — ОДИН допуск на два глагола (#1352)

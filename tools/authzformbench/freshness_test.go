@@ -96,7 +96,7 @@ var benchReportRevMarks = []string{"tree         ", "ревизия дерева
 
 // benchRunHint — КАК ПЕРЕСНЯТЬ. Отдельной строкой: сообщение отказа обязано
 // говорить, что делать, а не только что не так.
-const benchRunHint = "AUTHZFORMBENCH=1 go test -C services/iam ./tools/authzformbench/ " +
+const benchRunHint = "AUTHZFORMBENCH=1 go test ./tools/authzformbench/ " +
 	"-run TestMatrix -count=1 -v -timeout 120m  (поднимает контейнеры)"
 
 // ── ПОЛОСА A: ВЕРДИКТ ПО ОТЧЁТУ СО ШТАМПОМ, ЧИСТОЙ ФУНКЦИЕЙ ─────────────────

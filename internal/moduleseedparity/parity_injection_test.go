@@ -273,3 +273,42 @@ func TestInjectionSeedParityGroupGrantedOnlyByRelationIsJudgedLikeTheRest(t *tes
 	require.Contains(t, joined, "выдача ЖИВЁТ и не объявлена")
 	require.Contains(t, joined, "module-quota-readers")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ОКНО ПЕРЕИМЕНОВАНИЙ И ЯКОРЬ ЧТЕНИЯ — обе стороны каждой оси
+//
+// Обе величины введены взамен того, что пережило свой предмет: сверка судила
+// НАПИСАНИЕ вместо строки (30 находок из 30 на дереве платформы), а порог
+// чтения был снят с базы, в которой пять личностей модулей ещё лежали
+// (kaname#110). Инъекция подаёт синтетический вход и меняет РОВНО ОДИН факт.
+
+// TestInjectionDeclaredSpellingResolvesBothWritings — прежнее написание
+// приводится к действующему, действующее остаётся собой.
+//
+// Без первой половины сверка снова сравнивала бы `kacho-system/…` с `system/…`;
+// без второй окно переписывало бы то, что переписывать нечего, — и разошлось бы
+// с применителем в другую сторону.
+func TestInjectionDeclaredSpellingResolvesBothWritings(t *testing.T) {
+	require.Equal(t, "system", declaredSpelling("kacho-system"),
+		"прежнее написание аккаунта не приведено к действующему — сверка судит написание")
+	require.Equal(t, "system", declaredSpelling("system"),
+		"действующее написание изменено окном — окно переписывает лишнее")
+	require.Equal(t, "bootstrap-admin", declaredSpelling("kacho-bootstrap-admin"),
+		"прежнее написание собственной личности службы не приведено к действующему")
+	require.Equal(t, "kacho-vpc", declaredSpelling("kacho-vpc"),
+		"имя ВНЕ окна изменено: окно расширяет приём ровно на объявленные пары")
+}
+
+// TestInjectionLiveNamesAnchorFallsAndStaysSilent — якорь чтения различает обе
+// стороны.
+//
+// Якорь, который не умеет отвечать «нет», не отличает прочитанную базу от
+// пустой — ровно то, чем был порог, снятый с чужого состояния.
+func TestInjectionLiveNamesAnchorFallsAndStaysSilent(t *testing.T) {
+	require.True(t, liveNamesInclude([]string{"kacho-api-gateway", "bootstrap-admin"}, "bootstrap-admin"),
+		"якорь не нашёл имя, которое в перечне ЕСТЬ — чтение объявлялось бы обвалившимся на исправной базе")
+	require.False(t, liveNamesInclude([]string{"kacho-api-gateway"}, "bootstrap-admin"),
+		"якорь нашёл имя, которого в перечне НЕТ — обвал чтения прошёл бы молча")
+	require.False(t, liveNamesInclude(nil, "bootstrap-admin"),
+		"якорь смолчал на ПУСТОМ перечне — «прочитано ноль» стало бы неотличимо от «прочитано»")
+}

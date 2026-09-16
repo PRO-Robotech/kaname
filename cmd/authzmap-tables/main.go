@@ -59,7 +59,7 @@ func main() {
 			"authzmap-tables: УСЛОВИЕ НЕ СОЗДАНО (не находка): корень дерева платформы не назван.\n"+
 			"  таблица — межмодульный каталог: её источник это services/*/manifest.yaml ВСЕХ модулей,\n"+
 			"  а в самостоятельном клоне службы их нет by construction.\n"+
-			"  KANAME_PLATFORM_TREE=/путь/к/дереву/платформы go generate ./internal/authzmap/...\n"+
+			"  PLATFORM_TREE=/путь/к/дереву/платформы go generate ./internal/authzmap/...\n"+
 			"  либо: go run ./cmd/authzmap-tables -root /путь/к/дереву/платформы -module .\n")
 		os.Exit(2)
 	}

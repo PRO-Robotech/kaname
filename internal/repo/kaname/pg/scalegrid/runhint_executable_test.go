@@ -13,11 +13,15 @@
 // непонятная (`testing.md` §«Гейт на класс», п. 8).
 //
 // После выноса службы в собственный модуль (`github.com/PRO-Robotech/kaname`)
-// образец пакета `./services/iam/internal/...` из корня дерева НЕ РЕЗОЛВИТСЯ
-// вовсе: корневой модуль этих пакетов больше не содержит. Две подсказки из
-// четырёх переехали на форму `-C services/iam ./internal/...`, две остались на
-// прежней — и никто этого не решал. Это ровно класс «параллельные полосы одного
-// механизма обязаны сверяться между собой» (`architecture.md`).
+// образец пакета `./services/iam/internal/...` НЕ РЕЗОЛВИТСЯ вовсе: каталога
+// `services/iam` нет ни в этом дереве, ни у платформы. Подсказки переехали на
+// координату СОБСТВЕННОГО дерева — `./internal/...` из корня модуля.
+//
+// Промежуточная форма `-C services/iam ./internal/...` была ошибкой того же
+// рода, только в другую сторону: она называет каталог, которого нет, и
+// `go test -C` отвечает отказом ИНСТРУМЕНТА. Все девять подсказок стояли в ней,
+// и гейт этого не видел — он спрашивал координату дерева платформы и пропускал
+// себя целиком (kaname#108).
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // ПОЧЕМУ РАЗБОР, А НЕ ПОИСК ПО ОБРАЗЦУ
@@ -229,10 +233,8 @@ func resolves(root string, cmd resnapshotCommand, pattern string) error {
 
 // TestEveryResnapshotHintNamesAResolvablePackage — гейт.
 func TestEveryResnapshotHintNamesAResolvablePackage(t *testing.T) {
-	// Подсказки пересъёма записаны в посадке МОНОРЕПО (`-C services/iam`), и
-	// гейт исполняет их по-настоящему. В самостоятельном клоне такого каталога
-	// нет by construction, поэтому ЗАКОННАЯ форма перестала бы резолвиться, и
-	// гейт объявил бы находкой посадку, а не подсказку.
+	// Гейт исполняет подсказки по-настоящему — `go list` из корня дерева, которое
+	// судят пробы.
 	root := platformtree.Require(t)
 
 	var all []resnapshotCommand
@@ -285,7 +287,8 @@ func TestEveryResnapshotHintNamesAResolvablePackage(t *testing.T) {
 		t.Fatalf("команд пересъёма, которые НЕ ИСПОЛНЯТСЯ: %d из %d\n  %s\n\n"+
 			"Гейт печатает эту команду читателю как «переснять вот так». "+
 			"После выноса службы в собственный модуль образец ./services/iam/... "+
-			"из корня не резолвится — форма стала `-C services/iam ./internal/...`.",
+			"не резолвится ни из корня, ни с -C: каталога services/iam нет ни в одном "+
+			"дереве. Форма подсказки — ./internal/... из корня модуля.",
 			len(findings), checked, strings.Join(findings, "\n  "))
 	}
 }
@@ -295,15 +298,10 @@ func TestEveryResnapshotHintNamesAResolvablePackage(t *testing.T) {
 //
 // Обе подсказки резолвятся тем же `go list` против ТОГО ЖЕ дерева, что и в
 // гейте выше: подделки здесь нет, различие между случаями — РОВНО ОДНО
-// (переехал ли образец на форму `-C services/iam`).
+// (несёт ли образец историческую приставку `services/iam/`).
 func TestResnapshotHintCheckerCanFail(t *testing.T) {
-	// Доказательство исполняет НАСТОЯЩИЕ команды подсказки, а они записаны в
-	// посадке монорепо (`-C services/iam`). В самостоятельном клоне такого
-	// каталога нет by construction, и законная форма перестала бы резолвиться —
-	// гейт объявил бы находкой посадку, а не подсказку.
-	//
-	// Это «условие не создано», а не находка о продукте, поэтому предпосылку
-	// назначает дерево, а не проба.
+	// Доказательство исполняет НАСТОЯЩИЕ команды `go list` против дерева прогона:
+	// подделки здесь нет.
 	root := platformtree.Require(t)
 	dir := t.TempDir()
 
@@ -321,13 +319,14 @@ func TestResnapshotHintCheckerCanFail(t *testing.T) {
 	// Отсюда названная ГРАНИЦА гейта: подсказку, собранную из переменных, он не
 	// увидит. Сегодня таких нет — все 10 найденных записаны литералами, — а
 	// перепись в выводе покажет, если их число поедет.
+	// Различие между мирами РОВНО ОДНО — историческая приставка в образце.
 	stalePattern := "./services/iam/internal/repo/kaname/pg/relverdict/"
 	movedPattern := "./internal/repo/kaname/pg/relverdict/"
 	prosePattern := "./services/iam/nowhere/"
 
 	stale := "package p\n\nconst staleHint = \"KACHO_X=1 go test \" +\n\t\"" +
 		stalePattern + " -run TestX -count=1\"\n"
-	moved := "package p\n\nconst movedHint = \"KACHO_X=1 go test -C services/iam \" +\n\t\"" +
+	moved := "package p\n\nconst movedHint = \"KACHO_X=1 go test \" +\n\t\"" +
 		movedPattern + " -run TestX -count=1\"\n"
 	// Команда в КОММЕНТАРИИ — не команда: законный близнец распознавателя.
 	inProse := "package p\n\n// Прогон поднимает контейнеры, поэтому go test " +
@@ -357,20 +356,18 @@ func TestResnapshotHintCheckerCanFail(t *testing.T) {
 	for _, cmd := range found {
 		for _, pattern := range cmd.Patterns {
 			err := resolves(root, cmd, pattern)
-			switch {
-			case strings.HasPrefix(cmd.File, "синтетика") && cmd.Dir == "":
+			if pattern == stalePattern {
 				sawStale = true
 				if err == nil {
-					t.Errorf("образец %q без -C РЕЗОЛВИЛСЯ из корня — гейт потерял "+
+					t.Errorf("образец %q с исторической приставкой РЕЗОЛВИЛСЯ — гейт потерял "+
 						"способность падать: негодную подсказку он объявит годной", pattern)
 				}
-			default:
-				sawMoved = true
-				if err != nil {
-					t.Errorf("образец %q с -C %s НЕ резолвится (%v) — гейт краснеет "+
-						"на ЗАКОННОЙ форме и будет снят первым же срабатыванием",
-						pattern, cmd.Dir, err)
-				}
+				continue
+			}
+			sawMoved = true
+			if err != nil {
+				t.Errorf("образец %q НЕ резолвится (%v) — гейт краснеет на ЗАКОННОЙ форме "+
+					"и будет снят первым же срабатыванием", pattern, err)
 			}
 		}
 	}

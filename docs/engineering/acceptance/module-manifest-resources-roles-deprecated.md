@@ -1333,7 +1333,7 @@ TestMODMF13RoleSetStaysUnwiredOnlyWhileTheSectionIsRefused
 **MOD-MR-28 — исход VOID сохраняется, пока манифестов ноль**
 
 **Given** дерево продукта после этого изменения
-**When** прогнана цель `make -C services/iam module-manifest-check`
+**When** прогнана цель `make module-manifest-check`
 **Then** код возврата **2** (VOID), а не 0
 **And** текст говорит, что манифестов не найдено **ни одного**
 
@@ -2737,7 +2737,7 @@ verbs` у `#1090`. Заведено задачей `#1835`.
 производит · устаревший глагол без единого правила роли, — и **каждая** дала
 находку с координатой.
 
-**И прод-путь целиком:** `make -C services/iam module-manifest-check` на пустом
+**И прод-путь целиком:** `make module-manifest-check` на пустом
 дереве даёт **2** (VOID), на законном манифесте — **0**, на четырёх инъекциях
 (`producerr` · `clazz` · неизвестный тип объекта · `tierType: iam.cluster`) —
 находку с файлом, полем и номером строки.

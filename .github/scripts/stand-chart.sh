@@ -71,10 +71,30 @@ set -euo pipefail
 
 RC_UNMET=75
 
-CLUSTER="${KANAME_STAND_CLUSTER:-kaname-chart}"
+SCRIPT_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_EARLY="$(cd "$SCRIPT_DIR_EARLY/../.." && pwd)"
+
+# ─── УМОЛЧАНИЯ РАЗЛИЧАЮТ ПОЛОСУ ─────────────────────────────────────────────
+#
+# На одной машине рядом работают несколько рабочих копий. Общие умолчания
+# (`kaname-chart`, `kaname:stand`, `$TMPDIR/kaname-stand-chart`) делали кластер,
+# тег образа и рабочий каталог ОДНИМИ на всех: `down` одной полосы уносил PKI и
+# накладку идущего прогона соседа, а `kind load` мог увезти чужую сборку — и
+# вердикт оказывался о чужом дереве (`multi-agent-flow-shared-tree.md` §13).
+#
+# Признак полосы ВЫВОДИТСЯ из пути рабочей копии, а не выписывается: выписанное
+# имя пришлось бы задавать каждой полосе руками, то есть помнить, — а
+# умолчание, которое надо помнить, умолчанием не является. Суффикс короткий и
+# устойчивый: имена кластера kind ограничены длиной и алфавитом.
+lane_tag() {
+	printf '%s' "${1:-$ROOT_EARLY}" | sha256sum | cut -c1-8
+}
+LANE="$(lane_tag "$ROOT_EARLY")"
+
+CLUSTER="${KANAME_STAND_CLUSTER:-kaname-chart-$LANE}"
 NS="${KANAME_STAND_NS:-kaname}"
 RELEASE="${KANAME_STAND_RELEASE:-kaname}"
-IMAGE="${KANAME_STAND_IMAGE:-kaname:stand}"
+IMAGE="${KANAME_STAND_IMAGE:-kaname:stand-$LANE}"
 DOMAIN="${KANAME_STAND_DOMAIN:-kaname.local}"
 PG_PASSWORD="${KANAME_STAND_PG_PASSWORD:-standpassword}"
 ALERT_RULES="${KANAME_STAND_ALERT_RULES:-on}"
@@ -89,10 +109,21 @@ ALERT_RULES="${KANAME_STAND_ALERT_RULES:-on}"
 # создания не существует, и вписать его в накладку заранее нельзя.
 DB_ADDR="${KANAME_STAND_DB_ADDR:-}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-WORK="${KANAME_STAND_WORKDIR:-${TMPDIR:-/tmp}/kaname-stand-chart}"
+SCRIPT_DIR="$SCRIPT_DIR_EARLY"
+ROOT="$ROOT_EARLY"
+WORK="${KANAME_STAND_WORKDIR:-${TMPDIR:-/tmp}/kaname-stand-chart-$LANE}"
 PKI="$WORK/pki"
+
+# KUBECONFIG У СКРИПТА СВОЙ, И ЭТО НЕ УДОБСТВО.
+#
+# `kind create cluster` без своего файла пишет в общий `~/.kube/config` И
+# ПЕРЕКЛЮЧАЕТ в нём текущий контекст. Полоса, поднявшая стенд, тем самым
+# уводила `kubectl` соседа на свой кластер — молча, потому что вызовы соседа
+# продолжают работать, просто не там.
+#
+# Названный снаружи файл уважается: задание конвейера имеет право положить его
+# куда хочет, и тогда решение принимает вызывающий.
+export KUBECONFIG="${KUBECONFIG:-$WORK/kubeconfig}"
 
 say()   { printf '%s\n' "$*"; }
 fail()  { printf 'НАХОДКА: %s\n' "$*" >&2; }
@@ -139,6 +170,48 @@ make_pki() {
 	say "стенд: УЦ и три листа выписаны ($PKI)"
 }
 
+# RESOLVER_TIMEOUT — предел ОЖИДАНИЯ готовности резолвера, в секундах.
+#
+# Назван ручкой, потому что зависит от машины, а не от дерева: на ранере
+# кластер поднимается за секунды, на загруженной машине разработчика — дольше.
+RESOLVER_TIMEOUT="${KANAME_STAND_RESOLVER_TIMEOUT:-120}"
+
+# RESOLVER_POLL — пауза между опросами. Настоящая пауза, а не busy-wait: без неё
+# «ожидание» вырождается в подряд идущие вызовы и само создаёт нагрузку.
+RESOLVER_POLL="${KANAME_STAND_RESOLVER_POLL:-3}"
+
+# wait_ready — ЖДЁТ, пока названная функция не вернёт положительное число.
+#
+# Печатает `<величина>:<сколько ждали>` и выходит нулём; по исчерпании предела
+# печатает `<сколько ждали>` и выходит единицей. Обе стороны несут время
+# ожидания: вызывающий обязан назвать его в любом исходе.
+#
+# Функция принимается ИМЕНЕМ, а не телом: тем же вызовом самопроба подаёт свою,
+# не поднимая кластера, — и проверяет ОБЕ стороны ожидания.
+wait_ready() {
+	local probe="$1" limit="$2" waited=0 value
+	while :; do
+		value="$("$probe" 2>/dev/null || true)"
+		if [ "${value:-0}" -gt 0 ] 2>/dev/null; then
+			printf '%s:%s' "$value" "$waited"
+			return 0
+		fi
+		if [ "$waited" -ge "$limit" ]; then
+			printf '%s' "$waited"
+			return 1
+		fi
+		sleep "$RESOLVER_POLL"
+		waited=$((waited + RESOLVER_POLL))
+	done
+}
+
+# resolver_ready_count — сколько подов резолвера кластера готовы.
+resolver_ready_count() {
+	"${KCTL[@]}" -n kube-system get pod -l k8s-app=kube-dns \
+		-o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null \
+		| grep -c True || true
+}
+
 start_cluster() {
 	if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
 		say "стенд: кластер $CLUSTER уже есть"
@@ -159,16 +232,26 @@ start_cluster() {
 		say "стенд: узел базы адресуется явно ($DB_ADDR) — предпосылка резолвера не спрашивается"
 		return 0
 	fi
-	local ready
-	ready="$("${KCTL[@]}" -n kube-system get pod -l k8s-app=kube-dns \
-		-o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null | grep -c True || true)"
-	if [ "${ready:-0}" -eq 0 ]; then
-		unmet "резолвер кластера не готов (готовых CoreDNS: ${ready:-0}) — накат пойдёт к базе по имени Service и не дойдёт.
+	# ЖДЁМ УСЛОВИЕ, А НЕ СПРАШИВАЕМ ОДНОКРАТНО.
+	#
+	# Здесь стоял ОДИН вызов сразу после `kind create`: ноль готовых — выход 75.
+	# Готовность резолвера наступает ПОЗЖЕ готовности узла, поэтому однократный
+	# вопрос объявлял «условие не создано» на кластере, который через несколько
+	# секунд был бы готов, — то есть срывал прогон по расписанию собственного
+	# опроса (`e2e-flow.md` §4: ждём условие, а не время).
+	#
+	# Сколько ЖДАЛИ — печатается в ОБОИХ исходах. Без этого «готов» и «готов
+	# впритык к пределу» выглядят одинаково, и предел двигают вслепую.
+	local ready waited
+	ready="$(wait_ready resolver_ready_count "$RESOLVER_TIMEOUT")" || {
+		waited="${ready:-?}"
+		unmet "резолвер кластера не готов: ждали ${waited} с при пределе ${RESOLVER_TIMEOUT} с — накат пойдёт к базе по имени Service и не дойдёт.
   Проверьте: kubectl -n kube-system get pod -l k8s-app=kube-proxy
   Частая причина: fs.inotify.max_user_instances=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo '?') при рекомендованных kind 512"
 		exit "$RC_UNMET"
-	fi
-	say "стенд: резолвер кластера готов (CoreDNS: $ready)"
+	}
+	waited="${ready#*:}"; ready="${ready%%:*}"
+	say "стенд: резолвер кластера готов (CoreDNS: $ready; ждали ${waited} с из предела ${RESOLVER_TIMEOUT} с)"
 }
 
 # ─── ВИД PrometheusRule — ПРЕДПОСЫЛКА УСТАНОВКИ, А НЕ УКРАШЕНИЕ ─────────────
@@ -389,7 +472,7 @@ posture_matches() {
 }
 
 self_test() {
-	local legal off rc=0
+	local legal off rc=0 out
 	legal='{"msg":"boot security posture","auth_mode":"production-strict","db_sslmode":"require","public_mtls":true,"internal_mtls":"true","authz_check":true,"trusted_forwarders":true}'
 	# ОДИН факт против законного близнеца, не два: иначе неизвестно, который
 	# из них дал красное, и вердикт пробы недействителен.
@@ -404,7 +487,53 @@ self_test() {
 	say "самопроба: самоотчёта нет вовсе — сверка обязана упасть"
 	posture_matches "" >/dev/null 2>&1 && { fail "самопроба: сверка смолчала на пустом самоотчёте"; rc=1; }
 
-	say "самопроба: утверждений 3 · осей сверки 6"
+	# ── УМОЛЧАНИЯ РАЗЛИЧАЮТ ПОЛОСУ ─────────────────────────────────────────
+	#
+	# Инъекция меняет РОВНО ОДИН факт — путь рабочей копии — и требует, чтобы
+	# признак полосы разошёлся. Законный близнец рядом: тот же путь даёт тот же
+	# признак, иначе имена кластера гуляли бы от вызова к вызову и `down` сносил
+	# бы не то, что поднял `up`.
+	local a b
+	a="$(lane_tag /полоса/один)"
+	b="$(lane_tag /полоса/два)"
+	say "самопроба: две рабочие копии — признак полосы обязан разойтись"
+	[ "$a" != "$b" ] || { fail "самопроба: разные копии дали один признак полосы ($a) — кластер, тег образа и рабочий каталог остались бы общими"; rc=1; }
+	say "самопроба: та же копия — признак полосы обязан совпасть"
+	[ "$a" = "$(lane_tag /полоса/один)" ] || { fail "самопроба: один путь дал два признака — down сносил бы не то, что поднял up"; rc=1; }
+	# КАЖДОЕ умолчание проверяется ОТДЕЛЬНО: склейка трёх в одну строку
+	# зеленела бы, когда признак вошёл в одну из них, — а делят полосы все три.
+	say "самопроба: признак полосы входит в КАЖДОЕ из трёх умолчаний"
+	for pair in "кластер=$CLUSTER" "образ=$IMAGE" "каталог=$WORK"; do
+		case "${pair#*=}" in
+			*"$LANE"*) ;;
+			*) fail "самопроба: признак полосы не вошёл в умолчание ${pair%%=*} (${pair#*=}) — полосы делили бы его"; rc=1 ;;
+		esac
+	done
+	say "самопроба: KUBECONFIG у скрипта свой"
+	[ -n "${KUBECONFIG:-}" ] || { fail "самопроба: KUBECONFIG не задан — kind писал бы в общий файл и уводил kubectl соседа"; rc=1; }
+
+	# ── ОЖИДАНИЕ УСЛОВИЯ ────────────────────────────────────────────────────
+	#
+	# Обе стороны: условие наступает — ждали и дождались; не наступает — предел
+	# исчерпан, и время ожидания НАЗВАНО. Подаётся своя функция, кластер не
+	# нужен.
+	local saved_poll="$RESOLVER_POLL"
+	RESOLVER_POLL=1
+	self_never_ready() { printf '0'; }
+	self_always_ready() { printf '2'; }
+	say "самопроба: условие выполнено сразу — ожидание обязано вернуть величину и ноль секунд"
+	[ "$(wait_ready self_always_ready 2)" = "2:0" ] || { fail "самопроба: готовое условие не распознано"; rc=1; }
+	say "самопроба: условие не наступает — предел обязан исчерпаться и назвать ожидание"
+	if out="$(wait_ready self_never_ready 1)"; then
+		fail "самопроба: ожидание объявило готовность там, где условие не наступало ни разу"
+		rc=1
+	elif [ "$out" != "1" ]; then
+		fail "самопроба: исчерпанный предел не назвал времени ожидания (получено «$out»)"
+		rc=1
+	fi
+	RESOLVER_POLL="$saved_poll"
+
+	say "самопроба: утверждений 9 · осей сверки 6"
 	[ "$rc" -eq 0 ] && say "===== самопроба пройдена =====" || fail "самопроба не пройдена"
 	return "$rc"
 }

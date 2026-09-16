@@ -18,8 +18,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // TestIsRevokedDocGate_SilentOnTheTree — положительный контроль.
@@ -29,59 +27,30 @@ import (
 func TestIsRevokedDocGate_SilentOnTheTree(t *testing.T) {
 	root := monorepoRootForDoc(t)
 	callers, _, _ := isRevokedCallSites(t, root, true)
-	facts := isRevokedDocFacts{
-		Comments:        laneComments(t, root),
-		CallerFiles:     callers,
-		EdgeExportsRead: fileDeclaresMethod(t, platformtree.RequirePath(t, edgeClientFile), edgeReadMethod),
-	}
+	facts := isRevokedDocFacts{Comments: laneComments(t, root), CallerFiles: callers}
 	require.Empty(t, auditIsRevokedDoc(facts),
 		"гейт находит нарушение на исправном дереве — он ловит форму, а не существо")
 }
 
-// TestIsRevokedDocGate_FallsOnEachAxis — четыре порчи, каждая по одной величине.
+// TestIsRevokedDocGate_FallsOnEachAxis — три порчи, каждая по одной величине.
 func TestIsRevokedDocGate_FallsOnEachAxis(t *testing.T) {
 	root := monorepoRootForDoc(t)
 	callers, _, _ := isRevokedCallSites(t, root, true)
 	comments := laneComments(t, root)
-	edge := fileDeclaresMethod(t, platformtree.RequirePath(t, edgeClientFile), edgeReadMethod)
 
-	require.True(t, edge,
-		"ПРЕДПОСЫЛКА ОПЫТА: клиент края обязан экспонировать %s — иначе оси про край "+
-			"ниже поменялись бы местами, и опыт доказывал бы не то, что называет", edgeReadMethod)
 	require.NotEmpty(t, callers, "ПРЕДПОСЫЛКА ОПЫТА: вызывающие обязаны быть найдены")
 
 	t.Run("вызывающий появился, шапка молчит", func(t *testing.T) {
 		// Дерево получило ещё одного вызывающего — число в шапке отстало.
-		grown := append(append([]string(nil), callers...), "services/iam/internal/synthetic/caller.go")
-		found := auditIsRevokedDoc(isRevokedDocFacts{Comments: comments, CallerFiles: grown, EdgeExportsRead: edge})
+		grown := append(append([]string(nil), callers...), "internal/synthetic/caller.go")
+		found := auditIsRevokedDoc(isRevokedDocFacts{Comments: comments, CallerFiles: grown})
 		requireFinding(t, found, "разбор дерева нашёл")
 	})
 
 	t.Run("вызывающий исчез, шапка держит прежнее число", func(t *testing.T) {
 		shrunk := callers[:len(callers)-1]
-		found := auditIsRevokedDoc(isRevokedDocFacts{Comments: comments, CallerFiles: shrunk, EdgeExportsRead: edge})
+		found := auditIsRevokedDoc(isRevokedDocFacts{Comments: comments, CallerFiles: shrunk})
 		requireFinding(t, found, "разбор дерева нашёл")
-	})
-
-	// Ровно исходный дефект #1156, и по КАЖДОМУ файлу набора отдельно: молчание
-	// одного файла не должно прикрываться тем, что о крае сказал сосед.
-	for _, rel := range laneFiles {
-		t.Run("край читает, комментарий молчит: "+rel, func(t *testing.T) {
-			silent := copyComments(comments)
-			silent[rel] = strings.ReplaceAll(silent[rel], edgeReadMethod, "Revoke")
-			require.NotEqualf(t, comments[rel], silent[rel],
-				"ПРЕДПОСЫЛКА: в %s нечего было портить — файл не называет %s, и опыт "+
-					"доказывал бы пустоту", rel, edgeReadMethod)
-			found := auditIsRevokedDoc(isRevokedDocFacts{
-				Comments: silent, CallerFiles: callers, EdgeExportsRead: edge})
-			requireFinding(t, found, rel+": клиент края экспонирует")
-		})
-	}
-
-	t.Run("край читать перестал, комментарии держат прежнее", func(t *testing.T) {
-		found := auditIsRevokedDoc(isRevokedDocFacts{
-			Comments: comments, CallerFiles: callers, EdgeExportsRead: false})
-		requireFinding(t, found, "которого клиент края больше не экспонирует")
 	})
 
 	t.Run("маркер числа исчез", func(t *testing.T) {
@@ -89,8 +58,7 @@ func TestIsRevokedDocGate_FallsOnEachAxis(t *testing.T) {
 		for k, v := range blind {
 			blind[k] = strings.ReplaceAll(v, "ВЫЗЫВАЮЩИХ В ПРОД-КОДЕ:", "вызывающих примерно")
 		}
-		found := auditIsRevokedDoc(isRevokedDocFacts{
-			Comments: blind, CallerFiles: callers, EdgeExportsRead: edge})
+		found := auditIsRevokedDoc(isRevokedDocFacts{Comments: blind, CallerFiles: callers})
 		requireFinding(t, found, "встречается 0 раз(а)")
 	})
 }

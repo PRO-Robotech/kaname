@@ -40,8 +40,6 @@ package pg_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -55,8 +53,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
-
-	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // applierProbeModule — модуль, на котором ставятся сценарии применителя.
@@ -228,19 +224,15 @@ func TestModuleCatalogApplierAgreesWithTheSeededCatalog(t *testing.T) {
 	ctx, pool := catalogPool(t)
 	applier := applierOver(t, pool)
 
-	// Каталог соседних модулей спрашивается у владельца резолва
-	// (`internal/testsupport/platformtree`): литерал-подъём был координатой
-	// РАСКЛАДКИ монорепо, и вне её вердикт выносился бы о чужом дереве (kacho#2254).
-	paths, err := filepath.Glob(filepath.Join(platformtree.Require(t), "services", "*", "manifest.yaml"))
-	require.NoError(t, err)
-	require.NotEmpty(t, paths, "обход дерева не нашёл манифестов: вердикт беспредметен")
+	// Манифесты соседних модулей лежат в дереве платформы, НАЗВАННОМ снаружи
+	// (`platform_manifests_test.go`): корень своего модуля их не несёт ни в одной
+	// посадке, и вердикт выносился бы о чужом дереве (kacho#2254, #108).
+	paths := platformManifestPaths(t)
 
 	before := stateFingerprint(t, ctx, pool)
 	applied := 0
 	for _, p := range paths {
-		body, rerr := os.ReadFile(p) // #nosec G304 -- путь собран обходом дерева проб
-		require.NoError(t, rerr)
-		m, lerr := manifest.Load(body)
+		m, lerr := manifest.Load(readPlatformManifest(t, p))
 		require.NoError(t, lerr, "разобрать %s", p)
 		rep, aerr := applier.Apply(ctx, m)
 		require.NoError(t, aerr, "применить %s", p)

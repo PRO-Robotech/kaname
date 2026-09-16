@@ -70,12 +70,16 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // Category — исход по одному публичному RPC. Значения перечислены в шапке.
@@ -260,23 +264,149 @@ func Collect(root string) (Census, error) {
 	// слушателе, а не один собственный.
 	//
 	// Пока каталог был один, население переписи (78 RPC собственного контракта)
-	// было УЖЕ населения публичной поверхности: маршрут квот и два маршрута
-	// операции обслуживаются тем же слушателем, а спрошены не были. Утверждение
-	// «публичных RPC без двери ноль» верно ровно для того, что осмотрено, — и
-	// три неосмотренных маршрута делали его уже, чем оно читается.
+	// было УЖЕ населения публичной поверхности: маршруты операции обслуживаются
+	// тем же слушателем, а спрошены не были. Утверждение «публичных RPC без двери
+	// ноль» верно ровно для того, что осмотрено.
 	//
-	// Перечень обязан совпадать с пакетами карты прав двери
-	// (`authzguard.OwnDoorProtoPackages`): дверь их уже знает, а перепись не
-	// спрашивала — отсюда и расхождение «записей карты 119 против осмотренных 78».
-	return collectFromDirs(
-		[]string{
-			filepath.Join(root, "proto", "kaname", "cloud", "iam", "v1"),
-			filepath.Join(root, "proto", "kacho", "cloud", "operation"),
-			filepath.Join(root, "proto", "kacho", "cloud", "quota", "v1"),
-		},
-		filepath.Join(root, "services", "iam", "cmd", "kaname"),
-		root,
-	)
+	// Перечень ВЫВОДИТСЯ из пакетов карты прав двери
+	// (`authzguard.OwnDoorProtoPackages`), а не выписывается рядом. Прежде он был
+	// выписан, и оба места разошлись молча: дверь сняла пакет общей формы ответа
+	// учёта и переименовала пакет операции, а перепись осталась при координатах,
+	// которых в дереве нет ни одной, — то есть не читала НИЧЕГО сверх
+	// собственного контракта и роняла себя отказом чтения.
+	dirs, err := contractDirs(root)
+	if err != nil {
+		return Census{}, err
+	}
+	cmdDir, err := treeposture.PathUnder(root, "services/iam/cmd/kaname")
+	if err != nil {
+		return Census{}, fmt.Errorf("композиционный корень: %w", err)
+	}
+	return collectFromDirs(dirs, cmdDir, root)
+}
+
+// contractDirs — каталоги контракта, которые читает перепись.
+//
+// # ПОЧЕМУ ОБХОД, А НЕ ТАБЛИЦА «ПАКЕТ → КАТАЛОГ»
+//
+// Таблица была бы третьим местом об одном предмете и разошлась бы так же, как
+// разошлось второе. Каталог ищется ПО ОБЪЯВЛЕНИЮ ПАКЕТА в самих файлах
+// контракта: имя каталога выбирает тот, кто раскладывал дерево, а имя пакета
+// объявляет контракт — и дверь оперирует именно им.
+//
+// Пакет двери, которому не нашлось ни одного файла, — ОТКАЗ, а не пропуск: его
+// RPC остались бы неосмотренными, и «публичных RPC без двери ноль» читалось бы
+// шире, чем оно есть.
+func contractDirs(root string) ([]string, error) {
+	protoRoot, err := treeposture.PathUnder(root, "proto")
+	if err != nil {
+		return nil, fmt.Errorf("каталог контрактов: %w", err)
+	}
+
+	want := map[string]bool{}
+	for _, pkg := range authzguard.OwnDoorProtoPackages() {
+		want[pkg] = true
+	}
+	found := map[string]string{}
+	walkErr := filepath.WalkDir(protoRoot, func(path string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".proto") {
+			return nil
+		}
+		pkg, perr := protoPackageOf(path)
+		if perr != nil {
+			return perr
+		}
+		if want[pkg] {
+			found[pkg] = filepath.Dir(path)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("обход каталога контрактов %s: %w", protoRoot, walkErr)
+	}
+
+	dirs := make([]string, 0, len(want))
+	var missing []string
+	for _, pkg := range authzguard.OwnDoorProtoPackages() {
+		dir, ok := found[pkg]
+		if !ok {
+			missing = append(missing, pkg)
+			continue
+		}
+		dirs = append(dirs, dir)
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf(
+			"карта двери держит пакеты %v, а в каталоге контрактов %s не нашлось ни одного их файла: "+
+				"их RPC остались бы неосмотренными, и «публичных RPC без двери ноль» читалось бы шире, "+
+				"чем оно есть", missing, protoRoot)
+	}
+	sort.Strings(dirs)
+	return dirs, nil
+}
+
+// reProtoPackage — объявление пакета в файле контракта.
+var reProtoPackage = regexp.MustCompile(`(?m)^\s*package\s+([A-Za-z0-9_.]+)\s*;`)
+
+// protoPackageOf — пакет, объявленный файлом контракта. Пустая строка означает
+// «объявления нет», и это не ошибка: в дереве лежат файлы опций без служб.
+func protoPackageOf(path string) (string, error) {
+	raw, err := os.ReadFile(path) // #nosec G304 -- путь собран из корня собственного модуля
+	if err != nil {
+		return "", fmt.Errorf("файл контракта %s: %w", path, err)
+	}
+	m := reProtoPackage.FindSubmatch(raw)
+	if m == nil {
+		return "", nil
+	}
+	return string(m[1]), nil
+}
+
+// ContractPackages — ПАКЕТЫ контракта, которые читает перепись.
+//
+// Единица — пакет, а не каталог: имя каталога выбирает тот, кто раскладывал
+// дерево, а имя пакета объявляет сам контракт — то есть та величина, которой
+// оперирует карта двери. Сверять каталог с пакетом значило бы сравнивать разные
+// вещи и называть это совпадением.
+func ContractPackages(root string) ([]string, error) {
+	dirs, err := contractDirs(root)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, dir := range dirs {
+		entries, rerr := os.ReadDir(dir)
+		if rerr != nil {
+			return nil, fmt.Errorf("каталог контракта %s: %w", dir, rerr)
+		}
+		files := 0
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".proto") {
+				continue
+			}
+			files++
+			pkg, perr := protoPackageOf(filepath.Join(dir, e.Name()))
+			if perr != nil {
+				return nil, perr
+			}
+			if pkg != "" {
+				seen[pkg] = true
+			}
+		}
+		if files == 0 {
+			return nil, fmt.Errorf("каталог контракта %s не несёт ни одного .proto: обход пуст, "+
+				"и «пакетов ноль» было бы неотличимо от «прочитано ноль»", dir)
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for p := range seen {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // CollectFrom — тот же обход с явно названными источниками.
@@ -473,30 +603,36 @@ func collectFromDirs(protoDirs []string, cmdDir, root string) (Census, error) {
 	return c, nil
 }
 
-// МОДУЛЕЙ В ДЕРЕВЕ ДВА, И ОТОБРАЖЕНИЕ ОБЯЗАНО ЗНАТЬ ОБА.
+// ПУТЬ ИМПОРТА ПЕРЕВОДИТСЯ В ПУТЬ ЭТОГО ДЕРЕВА, И ДЕРЕВО ОДНО.
 //
-// Служба несёт свой `go.mod` (`github.com/PRO-Robotech/kaname`) — она
-// выносится отдельным репозиторием. Отрезание ОДНОГО префикса перестало
-// переводить путь импорта в путь дерева: для собственных пакетов службы
-// `TrimPrefix` не срабатывал вовсе, путь оставался целым, каталог не находился,
-// и перепись честно печатала «файлов Go разобрано 0». Это не находка и не
-// чистота — это пустой обход, и падать на нём обязан вызывающий.
-const (
-	rootModulePrefix    = "github.com/PRO-Robotech/kacho/"
-	serviceModulePrefix = "github.com/PRO-Robotech/kaname/"
-	serviceTreePrefix   = "services/iam/"
-)
+// Служба несёт свой `go.mod` (`github.com/PRO-Robotech/kaname`) и выносится
+// отдельным репозиторием: её пакеты лежат от корня этого дерева, без приставки.
+//
+// Здесь стояла приставка `services/iam/` — координата монорепо. После выноса она
+// уводила обход в несуществующий подкаталог, и перепись печатала «файлов Go
+// разобрано 0». Это не находка и не чистота — это пустой обход, и падать на нём
+// обязан вызывающий; он и падал, но увидеть это было нечем: вся проба
+// пропускала себя раньше, на резолве координаты.
+const serviceModulePrefix = "github.com/PRO-Robotech/kaname/"
 
-// treeRelOfPackage — путь пакета В ДЕРЕВЕ (от корня монорепо) по пути импорта.
+// treeRelOfPackage — путь пакета В ЭТОМ ДЕРЕВЕ по пути импорта.
+//
+// Пустая строка означает «пакет не наш»: чужой модуль в этом дереве не лежит, и
+// склеивать его путь с нашим корнем значило бы называть каталог, которого нет.
 func treeRelOfPackage(importPath string) string {
-	if rel, ok := strings.CutPrefix(importPath, serviceModulePrefix); ok {
-		return serviceTreePrefix + rel
+	rel, ok := strings.CutPrefix(importPath, serviceModulePrefix)
+	if !ok {
+		return ""
 	}
-	return strings.TrimPrefix(importPath, rootModulePrefix)
+	return rel
 }
 
 func packageDir(root, importPath string) string {
-	return filepath.Join(root, filepath.FromSlash(treeRelOfPackage(importPath)))
+	rel := treeRelOfPackage(importPath)
+	if rel == "" {
+		return ""
+	}
+	return filepath.Join(root, filepath.FromSlash(rel))
 }
 
 // --- контракт -------------------------------------------------------------
