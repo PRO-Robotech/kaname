@@ -39,7 +39,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -54,7 +53,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
-	abrepo "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -324,7 +322,7 @@ func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUser
 			if werr != nil {
 				return nil, shared.MapRepoErr(werr)
 			}
-			activated, aerr := w.UsersW().ActivateInvite(ctx, p.ID, in.ExternalID, in.DisplayName)
+			activated, aerr := ActivateInviteTx(ctx, w, p, in.ExternalID, in.DisplayName, actor)
 			if aerr != nil {
 				_ = w.Rollback(ctx)
 				// Строку уже активировал конкурент (она больше не PENDING) — это
@@ -368,51 +366,6 @@ func (uc *UpsertFromIdentityUseCase) doUpsert(ctx context.Context, candidateUser
 						"user_id", string(p.ID), "error", aerr.Error())
 				}
 				return nil, shared.MapRepoErr(aerr)
-			}
-			// Activate-invite is the User update branch (mirror-fields email/
-			// display_name applied) — emit iam.user.updated atomically with the
-			// activation, in the SAME writer-tx (запрет #10), before Commit.
-			if eerr := w.EmitAuditEvent(ctx, service.AuditEvent{
-				EventType:       auditEventUserUpdated,
-				TenantAccountID: string(activated.AccountID),
-				Payload: map[string]any{
-					"actor":          actor,
-					"resource_type":  "user",
-					"resource_id":    string(activated.ID),
-					"account_id":     string(activated.AccountID),
-					"changed_fields": []string{"external_id", "display_name", "invite_status"},
-				},
-			}); eerr != nil {
-				_ = w.Rollback(ctx)
-				return nil, shared.MapRepoErr(eerr)
-			}
-			// RC-2: co-commit the member hierarchy-tuple intent in the SAME Step-1
-			// writer-tx as the ActivateInvite UPDATE + the iam.user.updated audit-event
-			// (запрет #10 / SEC-D). Без него активированный member не имеет FGA-ребра
-			// в account инвайтера → его AccountService.List не видит этот account.
-			// Tuple-форма byte-идентична bootstrapTuples hierarchy-блоку
-			// (account:<A>#account@iam_user:<id>). It is the SAME in-tx outbox
-			// mechanism the bootstrap path uses — NOT post-commit best-effort
-			// записью ПОСЛЕ коммита (снята; она теряла кортеж при недоступности FGA
-			// outage and is not co-commit-able, violating ban #10). Idempotent:
-			// re-activation re-emits the same intent → at-least-once + idempotent
-			// drain → exactly one FGA edge.
-			if ferr := w.EmitFGARelationWrite(ctx, []service.RelationTuple{{
-				User:     fmt.Sprintf("account:%s", activated.AccountID),
-				Relation: "account",
-				Object:   fmt.Sprintf("iam_user:%s", activated.ID),
-			}}); ferr != nil {
-				_ = w.Rollback(ctx)
-				return nil, shared.MapRepoErr(ferr)
-			}
-			// rbac-contract-a-fix (forward-mat, C-01b): co-commit a reconcile event in
-			// the SAME activation writer-tx (ban #10) so the now-ACTIVE invitee user
-			// forward-materializes under the inviter-account's owner `*.*` binding —
-			// the flat rights model dropped the iam_user `from account` ACCESS cascade,
-			// so the parent-pointer above no longer grants the owner Get on the user.
-			if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.user", string(activated.ID)); rerr != nil {
-				_ = w.Rollback(ctx)
-				return nil, shared.MapRepoErr(rerr)
 			}
 			if cerr := w.Commit(ctx); cerr != nil {
 				_ = w.Rollback(ctx)
@@ -551,266 +504,22 @@ func (uc *UpsertFromIdentityUseCase) countOwnedAccounts(ctx context.Context, use
 // Любой пользователь (genuinely-new identity ИЛИ invited+activated) без
 // собственного account'а получает один personal Account + один "default" Project
 // + 2 self-grant AccessBinding (account-admin + project-admin) + bootstrapTuples.
-//
-//   - newIdentity=true  — genuinely-new identity: INSERT user-row первым (FK на
-//     account отложен, DEFERRABLE chicken-and-egg), затем personal Account/Project.
-//     Emits iam.user.created audit.
-//   - newIdentity=false — invited+activated user: user-row УЖЕ существует
-//     (ActivateInvite сохранил id) — повторный InsertActive вызвал бы 23505 на
-//     UNIQUE(external_id). Поэтому загружаем существующий row через Get, НЕ
-//     вставляем повторно; создаем только personal Account/Project/AB/tuples для
-//     существующего user-id. iam.user.created НЕ эмитится (user-identity не нова —
-//     активация уже эмитировала iam.user.updated в Step-1).
-//
-// Кластерное право администратора этот путь не эмитит вовсе: его ставит отдельный
-// реконсайлер старта (`seed.RunBootstrapAdmin`) по адресу почты из настроек.
+// Тело транзакции — `BootstrapPersonalResourcesTx`: его же зовёт регистрация
+// нашей полосой ИЗНУТРИ своей транзакции (Ф4 Р1). Здесь — транзакция этого
+// глагола и пост-коммитная материализация.
 func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 	ctx context.Context, candidateUserID string, in UpsertFromIdentityInput, actor string, newIdentity bool,
 ) (domain.User, error) {
-	userID := domain.UserID(candidateUserID)
-	accID := domain.AccountID(ids.NewID(domain.PrefixAccount))
-	prjID := domain.ProjectID(ids.NewID(domain.PrefixProject))
-
-	// rbac-contract-a-flat-fallout: the account-scoped self-binding is the OWNER
-	// binding (parity with Account.Create doCreate) — the signup user IS the owner
-	// of their personal account. The owner role (OwnerRoleID, migration 0035)
-	// carries the `*.*.*` wildcard whose ARM_ANCHOR forward-materializes per-object
-	// access over the account's content (project, iam-native, cross-service). Under
-	// the flat rights model the prior admin-role binding (plus inert hierarchy
-	// pointers) granted the user NO access on their own account's content → 403.
-	ownerAB := domain.AccessBinding{
-		ID:                 domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)),
-		SubjectType:        domain.SubjectTypeUser,
-		SubjectID:          domain.SubjectID(userID),
-		RoleID:             domain.OwnerRoleID,
-		ResourceType:       domain.ResourceType("account"),
-		ResourceID:         string(accID),
-		Scope:              domain.ScopeAccount,
-		GrantedByUserID:    domain.UserID(actor),
-		DeletionProtection: true,
-		Subjects:           []domain.Subject{{Type: domain.SubjectTypeUser, ID: domain.SubjectID(userID)}},
-		// F8: whole-account owner grant (explicit allInScope).
-		Target: domain.AccessTarget{AllInScope: true},
-	}
-	// project-scoped self-grant stays the "admin" system-role (explicit
-	// project-admin grant). The user's ACCESS on the project (and its content) is
-	// ALSO covered by the owner ARM_ANCHOR forward-mat over iam.project — this row
-	// is the explicit binding parity (so the project shows in the user's grants).
-	// The pinned deterministic id of the system `admin` role is the single source
-	// of truth in domain; project vs cluster privilege is keyed on binding Scope,
-	// not the id (so reusing the constant is not a privilege bug).
-	projectAB := domain.AccessBinding{
-		ID:           domain.AccessBindingID(ids.NewID(domain.PrefixAccessBinding)),
-		SubjectType:  domain.SubjectTypeUser,
-		SubjectID:    domain.SubjectID(userID),
-		RoleID:       domain.RoleID(domain.ClusterAdminRoleID),
-		ResourceType: domain.ResourceType("project"),
-		ResourceID:   string(prjID),
-		// F8: whole-project grant (explicit allInScope).
-		Target: domain.AccessTarget{AllInScope: true},
-	}
-	// Self-validating-domain (parity with account/create.go): the internally-built
-	// owner-binding must be well-formed BEFORE Insert. A failure means field drift,
-	// not bad input — fail-closed (the worker-tx rolls back).
-	if verr := ownerAB.Validate(); verr != nil {
-		return domain.User{}, shared.MapValidationErr(verr)
-	}
-
-	// Captured from inside the writer-tx so the post-commit owner-binding reconcile
-	// (forward-mat over the account's content) can drive the committed binding id.
-	ownerBindingID := ownerAB.ID
-
-	user, err := shared.DoWithWriteTx(ctx, uc.repo,
-		func(ctx context.Context, w Writer) (domain.User, error) {
-			// 0. ban #10 — close the owns-zero-accounts TOCTOU. The outer
-			// countOwnedAccounts pre-check (uc.countOwnedAccounts above) runs in
-			// its OWN reader-tx, so two concurrent bootstraps for the SAME resolved
-			// user-id both read count==0 and both INSERT a distinct personal
-			// account (random 'personal-cloud-<rand>' name → accounts_name_unique
-			// never fires; owner_user_id has no cardinality bound). "One personal
-			// account per user" cannot be a partial UNIQUE (a user may legitimately
-			// own many accounts), so we serialize same-user bootstraps with a
-			// tx-scoped advisory lock and RE-CHECK the owned-account count INSIDE
-			// this writer-tx: the loser blocks until the winner commits, then sees
-			// count>0 and returns the already-bootstrapped user without inserting a
-			// duplicate. (newIdentity=true callers each carry a distinct fresh id →
-			// different lock key; they are serialized instead by UNIQUE(external_id)
-			// on InsertActive below — unchanged.)
-			if lerr := w.AdvisoryXactLock(ctx, "iam:bootstrap:"+candidateUserID); lerr != nil {
-				return domain.User{}, lerr
-			}
-			if owned, cerr := w.Accounts().CountAccountsByOwner(ctx, userID); cerr != nil {
-				return domain.User{}, cerr
-			} else if owned > 0 {
-				// A concurrent bootstrap won the lock and already created this
-				// user's personal account — return the existing user-row.
-				return w.Users().Get(ctx, userID)
-			}
-
-			// 1. Resolve the user-row.
-			//   - newIdentity=true → INSERT user первым (FK на account отложен).
-			//   - newIdentity=false → invited+activated row уже существует; Get его,
-			//     БЕЗ повторного InsertActive (иначе 23505 на UNIQUE(external_id)).
-			var (
-				user domain.User
-				err  error
-			)
-			if newIdentity {
-				dn := in.DisplayName
-				if dn == "" {
-					dn = defaultDisplayName(in.Email)
-				}
-				user, err = w.UsersW().InsertActive(ctx, domain.User{
-					ID:           userID,
-					AccountID:    accID,
-					ExternalID:   in.ExternalID,
-					Email:        in.Email,
-					DisplayName:  dn,
-					InviteStatus: domain.InviteStatusActive,
-				})
-				if err != nil {
-					// Concurrency contract (migration 0002): DB UNIQUE(email) +
-					// UNIQUE(external_id WHERE !='') enforce one user-row per
-					// identity. Concurrent bootstraps for the same Kratos
-					// identity lose the race here with 23505 (mapped to
-					// ErrAlreadyExists). Operator-facing recovery: the client
-					// retries UpsertFromIdentity, and the second attempt hits the
-					// fast-path SELECT by external_id and returns the
-					// already-bootstrapped row. This is complete as-is — the DB
-					// constraint is the authoritative dup guard; a single
-					// ON CONFLICT statement would be an equivalent alternative,
-					// not a missing piece.
-					return domain.User{}, err
-				}
-			} else {
-				// invited+activated: переиспользуем существующий user-row (его id =
-				// candidateUserID; account_id = account инвайтера — НЕ меняется,
-				// остается primary context). НЕ вызываем InsertActive повторно.
-				user, err = w.Users().Get(ctx, userID)
-				if err != nil {
-					return domain.User{}, err
-				}
-			}
-
-			// 2. INSERT account. Name = "personal-cloud-<6-char tail>"
-			// ("Personal cloud"). Имя ВЫБРАНО, а не подставлено умолчанием:
-			// личный аккаунт заводится без участия арендатора, и «personal-cloud-…»
-			// он прочтёт, а идентификатор — нет. Форме дерева оно отвечает как
-			// есть (`pkg/validate/nameform`): строчные, дефис в середине, хвост —
-			// крокфордово тело идентификатора.
-			tail := strings.ToLower(string(accID[len(accID)-6:]))
-			if _, err := w.AccountsW().Insert(ctx, domain.Account{
-				ID:          accID,
-				Name:        domain.AccountName("personal-cloud-" + tail),
-				OwnerUserID: userID,
-				Labels:      domain.Labels{},
-			}); err != nil {
-				return domain.User{}, err
-			}
-
-			// 3. INSERT default project.
-			if _, err := w.ProjectsW().Insert(ctx, domain.Project{
-				ID:        prjID,
-				AccountID: accID,
-				Name:      domain.ProjectName("default"),
-				Labels:    domain.Labels{},
-			}); err != nil {
-				return domain.User{}, err
-			}
-
-			// 4. INSERT the owner (account-scoped) + project-admin self-grant rows.
-			//   - owner-binding: + multi-subject set + OWNER-BINDING-lifecycle ledger
-			//     (so a symmetric revoke removes exactly what was emitted) + grant audit,
-			//     mirroring account/create.go doCreate.
-			createdOwner, oerr := w.AccessBindingsW().Insert(ctx, ownerAB)
-			if oerr != nil {
-				return domain.User{}, oerr
-			}
-			if serr := w.AccessBindingsW().InsertSubjects(ctx, createdOwner.ID, ownerAB.Subjects); serr != nil {
-				return domain.User{}, serr
-			}
-			// Record the OWNER-BINDING-lifecycle tuples in the emitted-tuple ledger
-			// (review #7 symmetric revoke — parity with account/create.go
-			// ownerBindingLedgerTuples): the owner self-grant + the binding-object
-			// hierarchy pointer. The SEC-L cluster pointer is account-lifecycle and is
-			// intentionally NOT part of the owner-binding's revoke set (survives revoke).
-			if lerr := w.AccessBindingsW().InsertEmittedTuples(ctx, createdOwner.ID, []abrepo.RelationTuple{
-				{User: "user:" + string(userID), Relation: "owner", Object: "account:" + string(accID)},
-				{User: "account:" + string(accID), Relation: "account", Object: "iam_access_binding:" + string(createdOwner.ID)},
-			}); lerr != nil {
-				return domain.User{}, lerr
-			}
-			if aerr := w.AccessBindingsW().EmitAuditEvent(ctx, abrepo.AuditEvent{
-				EventType:       abrepo.AuditEventTypeGranted,
+	res, err := shared.DoWithWriteTx(ctx, uc.repo,
+		func(ctx context.Context, w Writer) (BootstrapResult, error) {
+			return BootstrapPersonalResourcesTx(ctx, w, BootstrapInput{
+				CandidateUserID: candidateUserID,
+				ExternalID:      in.ExternalID,
+				Email:           in.Email,
+				DisplayName:     in.DisplayName,
 				Actor:           actor,
-				SubjectType:     string(domain.SubjectTypeUser),
-				SubjectID:       string(userID),
-				ResourceType:    "account",
-				ResourceID:      string(accID),
-				RoleID:          domain.OwnerRoleID,
-				BindingID:       string(createdOwner.ID),
-				TenantAccountID: string(accID),
-			}); aerr != nil {
-				return domain.User{}, aerr
-			}
-			ownerBindingID = createdOwner.ID
-			createdProjectAB, err := w.AccessBindingsW().Insert(ctx, projectAB)
-			if err != nil {
-				return domain.User{}, err
-			}
-			// Состав субъектов записывается вместе с выдачей — иначе она
-			// невидима форме вердикта, и человек не имеет прав на проекте,
-			// который сам же и завёл. Замер на живом стенде: из 111 выдач без
-			// состава 110 пришли отсюда.
-			if serr := w.AccessBindingsW().InsertSubjects(ctx, createdProjectAB.ID,
-				[]domain.Subject{{Type: projectAB.SubjectType, ID: projectAB.SubjectID}}); serr != nil {
-				return domain.User{}, serr
-			}
-
-			// 5. Durable audit_outbox iam.user.created in the SAME bootstrap tx
-			// (запрет #10) — atomic with the user INSERT. ТОЛЬКО для genuinely-new
-			// identity: создается новая user-identity → iam.user.created scoped к
-			// ее personal Account. Для invited+activated user (newIdentity=false)
-			// user-identity НЕ нова — Step-1 уже эмитировал iam.user.updated; здесь
-			// мы лишь добавляем personal-resource'ы существующему user-id, поэтому
-			// второй iam.user.created был бы ложным дублем identity-creation.
-			if newIdentity {
-				if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
-					EventType:       auditEventUserCreated,
-					TenantAccountID: string(accID),
-					// Ни почты, ни отображаемого имени: приёмник журнала кладёт
-					// ВСЕ поля нагрузки как есть — шага сокрытия нет ни одного,
-					// — поэтому личное поле уезжает в поток службы, а срок
-					// хранения потока становится сроком хранения личных данных
-					// (`kacho#2483`). Субъект назван `resource_id`: он
-					// неизменяем и остаётся правдой через год, тогда как оба
-					// снятых поля меняются свободно.
-					Payload: map[string]any{
-						"actor":         actor,
-						"resource_type": "user",
-						"resource_id":   string(user.ID),
-						"account_id":    string(accID),
-					},
-				}); aerr != nil {
-					return domain.User{}, aerr
-				}
-			}
-
-			// 6. Эмитим ВСЕ FGA-tuples bootstrap-графа intent'ами в kaname.fga_outbox
-			// в ТОЙ ЖЕ bootstrap-tx (SEC-D, запрет #10).
-			// Bootstrap идет в обход CreateAccount/CreateProject/CreateAccessBinding
-			// use-case'ов (которые обычно пишут эти tuples), поэтому без этого блока
-			// новый User / Account / Project недоступны через per-resource RPC — FGA
-			// Check `no path`. Раньше блок был best-effort post-commit «Non-fatal»
-			// (терялся на любом FGA-сбое); теперь intent co-committed in-tx и
-			// доставляется live drainer'ом at-least-once + идемпотентно — owner-self-
-			// grant (D-4: невосстановим reconciler'ом) гарантирован.
-			if ferr := w.EmitFGARelationWrite(ctx,
-				bootstrapTuples(userID, accID, prjID, ownerBindingID, projectAB)); ferr != nil {
-				return domain.User{}, ferr
-			}
-
-			return user, nil
+				NewIdentity:     newIdentity,
+			})
 		})
 	if err != nil {
 		return domain.User{}, err
@@ -824,13 +533,13 @@ func (uc *UpsertFromIdentityUseCase) bootstrapPersonalResources(
 	// backstop. Non-fatal to bootstrap — the account + owner-binding are durably
 	// committed; a sweep retries on any reconcile error.
 	if uc.reconciler != nil {
-		if rerr := uc.reconciler.ReconcileBinding(ctx, ownerBindingID); rerr != nil && uc.logger != nil {
+		if rerr := uc.reconciler.ReconcileBinding(ctx, res.OwnerBindingID); rerr != nil && uc.logger != nil {
 			uc.logger.Error("bootstrap: owner-binding reconcile failed (sweep will retry)",
-				"account_id", string(accID), "binding_id", string(ownerBindingID), "err", rerr)
+				"account_id", string(res.AccountID), "binding_id", string(res.OwnerBindingID), "err", rerr)
 		}
 	}
 
-	return user, nil
+	return res.User, nil
 }
 
 // bootstrapTuples строит ВСЕ FGA-tuples bootstrap-графа identity для co-commit

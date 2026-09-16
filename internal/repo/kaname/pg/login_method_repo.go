@@ -76,19 +76,41 @@ func splitLoginMethodHint(hint string) (user, kind string) {
 // различим кодом с отказом ограничения таблицы (INVALID_ARGUMENT против
 // INTERNAL).
 func (r *LoginMethodRepo) Create(ctx context.Context, m domain.LoginMethod) (domain.LoginMethod, error) {
+	return insertLoginMethod(ctx, r.pool, m)
+}
+
+// loginMethodQuerier — то, что исполняет вставку: пул (глагол `Create`) либо
+// транзакция вызывающего (регистрация Ф4 кладёт строку способа входа одним
+// исходом с зеркалом и сессией).
+type loginMethodQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// insertLoginMethod — ЕДИНСТВЕННЫЙ оператор вставки строки способа входа.
+// Живёт в этом файле, потому что называет таблицу секрета и выпускает материал
+// оператору базы (гейт `TestLoginVerifierStaysInside`).
+func insertLoginMethod(ctx context.Context, q loginMethodQuerier, m domain.LoginMethod) (domain.LoginMethod, error) {
 	if err := m.Validate(); err != nil {
 		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
 	}
-	q := `INSERT INTO ` + loginMethodsTable + ` (user_id, kind, verifier)
+	sql := `INSERT INTO ` + loginMethodsTable + ` (user_id, kind, verifier)
 	      VALUES ($1, $2, $3)
 	      RETURNING created_at`
 	var created time.Time
-	if err := r.pool.QueryRow(ctx, q, string(m.UserID), string(m.Kind), m.Verifier.Reveal()).Scan(&created); err != nil {
+	if err := q.QueryRow(ctx, sql, string(m.UserID), string(m.Kind), m.Verifier.Reveal()).Scan(&created); err != nil {
 		return domain.LoginMethod{}, mapErr(err, "LoginMethod.Create", loginMethodHint(m.UserID, m.Kind))
 	}
 	out := m
 	out.CreatedAt = created
 	return out, nil
+}
+
+// InsertLoginMethod — строка способа входа в транзакции регистрации (порт
+// `registration.Writer`). Метод писателя регистрации объявлен ЗДЕСЬ, а не в его
+// файле: право назвать таблицу секрета дано этому файлу.
+func (w *registrationWriter) InsertLoginMethod(ctx context.Context, m domain.LoginMethod) error {
+	_, err := insertLoginMethod(ctx, w.tx, m)
+	return err
 }
 
 // Get читает способ человека данного вида.

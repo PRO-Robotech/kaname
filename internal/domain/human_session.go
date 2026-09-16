@@ -236,9 +236,12 @@ const (
 	FormLogin    FormKind = "login"
 	FormLogout   FormKind = "logout"
 	FormPassword FormKind = "password"
+	// FormRegister — форма регистрации (Ф4 Р1; форма защищена признаком, как и
+	// прочие, меняющие состояние, — Ф1-39…43).
+	FormRegister FormKind = "register"
 )
 
-var formKinds = []FormKind{FormLogin, FormLogout, FormPassword}
+var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister}
 
 // FormKinds — закрытый перечень видов формы, копией.
 func FormKinds() []FormKind {

@@ -686,7 +686,10 @@ func TestFormToken_F3_35_40_ContextAndKind(t *testing.T) {
 	require.NotContains(t, tok, k1[:8], "контекст из признака не читается")
 	require.Equal(t, humansession.JudgeFormToken(k2, domain.FormPassword, tok).Error(),
 		humansession.JudgeFormToken(k1, domain.FormLogout, tok).Error(), "один текст на чужой контекст и чужой вид")
-	_, err = domain.ParseFormKind("register")
+	// Вид вне перечня: значение, которого перечень не несёт by construction.
+	// Прежде здесь стояло «register» — с Ф4 это законный вид (форма
+	// регистрации), и отрицание на нём перестало бы отрицать.
+	_, err = domain.ParseFormKind("no-such-form")
 	require.Error(t, err, "вид вне перечня")
 }
 
