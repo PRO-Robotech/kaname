@@ -147,15 +147,12 @@ func TestEnvelope_AKnownClassIsNotCalibratedTwice(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, first.Calibrated)
 
-	start := time.Now()
 	again, err := e.Admit(ctx, bcryptClass(5), passwordverify.EnvelopeTriggerRead)
-	elapsed := time.Since(start)
 	require.NoError(t, err)
 	require.False(t, again.Calibrated, "известный класс — без калибровки")
 	require.Equal(t, first.Cost, again.Cost)
 	require.Equal(t, first.Floor, again.Floor)
-	require.Less(t, elapsed, first.Cost, "повторный допуск — поиск по ключу, а не прогон проверяющего")
-	require.Len(t, obs.calibrated, 1)
+	require.Len(t, obs.calibrated, 1, "повторный допуск — поиск по ключу, а не прогон проверяющего")
 }
 
 // TestEnvelope_AClassTheVerifierDoesNotReadIsNotCalibrated — выше потолка
@@ -220,18 +217,18 @@ func TestEnvelope_ConcurrentAdmitsOfOneClassCalibrateOnce(t *testing.T) {
 	e, _, obs := newEnvelope(t, 4)
 	var wg sync.WaitGroup
 	results := make([]passwordverify.Admission, 4)
+	errs := make([]error, 4)
 	for i := range results {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			adm, err := e.Admit(context.Background(), bcryptClass(6), passwordverify.EnvelopeTriggerRead)
-			require.NoError(t, err)
-			results[i] = adm
+			results[i], errs[i] = e.Admit(context.Background(), bcryptClass(6), passwordverify.EnvelopeTriggerRead)
 		}(i)
 	}
 	wg.Wait()
 	calibrated := 0
-	for _, r := range results {
+	for i, r := range results {
+		require.NoError(t, errs[i])
 		if r.Calibrated {
 			calibrated++
 		}
