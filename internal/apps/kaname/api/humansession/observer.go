@@ -26,6 +26,14 @@ const (
 	// LoginOutcomeSecondFactorRefused — пароль сошёлся, вход отказан по полю
 	// `secondFactor` (Ф12): какой именно исход — в клетках предъявления.
 	LoginOutcomeSecondFactorRefused LoginOutcome = "second-factor-refused"
+	// LoginOutcomeSecondFactorNotEnrolled — пароль сошёлся, код предъявлен, а
+	// фактора у личности нет (строки нет либо `pending`). Наружу — тот же один
+	// отказ входа и та же попытка, что «код не тот» (Ф12-13 «е», Р7 редакции 8,
+	// kaname#257): иначе код ответа называл бы совпавший пароль всякому, кто
+	// приложил код. Различимость — только этой клеткой и журналом; клетка
+	// отказов второго фактора `not-enrolled` считает отказы ПОД СЕССИЕЙ и на
+	// входе не растёт.
+	LoginOutcomeSecondFactorNotEnrolled LoginOutcome = "second-factor-not-enrolled"
 )
 
 // LoginOutcomes — закрытый перечень исходов входа.
@@ -34,6 +42,7 @@ func LoginOutcomes() []LoginOutcome {
 		LoginOutcomeIssued, LoginOutcomeNoRow, LoginOutcomeBlocked, LoginOutcomeRateLimited,
 		LoginOutcomeStoreFailed, LoginOutcomeVerifierIssue, LoginOutcomeMismatched,
 		LoginOutcomeMaterialNone, LoginOutcomeCapacity, LoginOutcomeSecondFactorRefused,
+		LoginOutcomeSecondFactorNotEnrolled,
 	}
 }
 

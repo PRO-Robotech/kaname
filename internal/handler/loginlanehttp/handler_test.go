@@ -171,6 +171,15 @@ type lane struct {
 
 func newLane(t *testing.T, stub *stubLane, cookieDomain string) *lane {
 	t.Helper()
+	l := newLaneOver(t, stub, cookieDomain)
+	l.stub = stub
+	return l
+}
+
+// newLaneOver — слушатель над ЛЮБЫМИ глаголами: дублёром либо настоящим
+// вариантом использования (интеграционная проба входа со вторым фактором).
+func newLaneOver(t *testing.T, verbs loginlanehttp.Lane, cookieDomain string) *lane {
+	t.Helper()
 	ca := newCA(t)
 	h, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    24 * time.Hour,
@@ -178,7 +187,7 @@ func newLane(t *testing.T, stub *stubLane, cookieDomain string) *lane {
 		TrustDomain:   grpcsrv.NewTrustDomain(trustDomain),
 		RefusalDomain: "iam.kaname.cloud",
 		Logger:        slog.New(slog.DiscardHandler),
-	}, stub)
+	}, verbs)
 	require.NoError(t, err)
 	srv := httptest.NewUnstartedServer(h)
 	pool := x509.NewCertPool()
@@ -191,7 +200,7 @@ func newLane(t *testing.T, stub *stubLane, cookieDomain string) *lane {
 	}
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
-	return &lane{srv: srv, ca: ca, stub: stub}
+	return &lane{srv: srv, ca: ca}
 }
 
 func (l *lane) client(t *testing.T, san string) *http.Client {
