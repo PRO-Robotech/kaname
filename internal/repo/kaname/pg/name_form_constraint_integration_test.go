@@ -61,6 +61,12 @@ func TestIntegration_IAM_NameFormConstraintIsEnforced(t *testing.T) {
 	acc := seedNameFormAccount(t, ctx, pool, owners[0])
 	nextOwner++
 
+	// Ключ доступа списывается триггером против объявленного потолка вида
+	// (Ф7 Р8): без строки потолка вставка отвергается KQ002 РАНЬШЕ формы имени,
+	// и положительный контроль падал бы по чужой причине. Величина щедрая —
+	// счёт ведётся у одного человека, а проба берёт каждой строке своего.
+	akCeiling(t, pool, 100)
+
 	nameformdb.Probe{
 		Schema: "kaname",
 		Tables: []nameformdb.Table{
@@ -96,6 +102,28 @@ func TestIntegration_IAM_NameFormConstraintIsEnforced(t *testing.T) {
 					return `INSERT INTO kaname.service_accounts (id, account_id, name)
 					        VALUES ($1, $2, $3)`,
 						[]any{fmt.Sprintf("sva%017d", seq), acc, name}
+				},
+			},
+			{
+				Name: "user_access_keys",
+				Row: func(name string, seq int) (string, []any) {
+					// Ключ доступа несёт имя той же формы дерева (Ф7 Р10):
+					// удостоверение уникально по credential_id, поэтому каждая
+					// строка берёт свой байт; открытый ключ непуст, алгоритм —
+					// из словаря; строка, спотыкающаяся о них, до формы имени бы
+					// не дошла. Владельца берём своего — потолок ключей у
+					// одного человека иначе отверг бы вставку раньше формы.
+					o := owners[nextOwner%len(owners)]
+					nextOwner++
+					return `INSERT INTO kaname.user_access_keys
+					            (id, user_id, credential_id, public_key, algorithm, sign_count, name, description)
+					        VALUES ($1, $2, $3, '', -7, 0, $4, '')`,
+						[]any{
+							fmt.Sprintf("ak-%017d", seq),
+							string(o),
+							[]byte(fmt.Sprintf("cred-%011d", seq)),
+							name,
+						}
 				},
 			},
 			{
