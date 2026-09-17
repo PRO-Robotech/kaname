@@ -250,6 +250,15 @@ var configBridge = []bridged{
 	{configKey: "authn.login.hasher-parallelism", valuePath: []string{"authn", "login", "hasherParallelism"}, omitEmpty: true},
 	{configKey: "authn.login.verifier-capacity", valuePath: []string{"authn", "login", "verifierCapacity"}, omitEmpty: true},
 	{configKey: "authn.login.memory-reserve-bytes", valuePath: []string{"authn", "login", "memoryReserveBytes"}, omitEmpty: true},
+	// ВОССТАНОВЛЕНИЕ ДОСТУПА (Ф5, kacho#1271): срок кода — ключ того же блока
+	// `login`, та же ветвь `with`.
+	{configKey: "authn.login.recovery-code-ttl", valuePath: []string{"authn", "login", "recoveryCodeTtl"}, omitEmpty: true},
+	// РЕГИСТРАЦИЯ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270; задача #205): предел ветвится по
+	// `hasKey` (ноль законен), окно — по `with`. `omitEmpty` у предела НЕ
+	// ставится по тому же доводу, что у собственных потолков: ноль — величина,
+	// а не пустота, и вычет пустого выбросил бы её из входа.
+	{configKey: "authn.registration.admissions-per-window", valuePath: []string{"authn", "registration", "admissionsPerWindow"}},
+	{configKey: "authn.registration.admission-window", valuePath: []string{"authn", "registration", "admissionWindow"}, omitEmpty: true},
 	// ВТОРОЙ ФАКТОР (Ф12, kacho#1281): окно свежести правки своих данных —
 	// та же форма, что у величин полосы: ветвь, читается только под `own`.
 	// Перечень ключей обёртки секретов — секрет, подаётся переменной из Secret и
@@ -360,6 +369,21 @@ var restatedDeliberately = map[string]string{
 		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
 		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
 		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.recoveryCodeTtl": "величина ВОССТАНОВЛЕНИЯ ДОСТУПА (Ф5, kacho#1271, Р1): срок кода восстановления от " +
+		"чеканки; страж читает её только под посадкой `own` (config.ValidateLaneRequirements), а боевой профиль " +
+		"стоит на `external`. Объявлена по приёмке Ф5 (Ф5-06): дословный перенос Ф1 §4.1 (5 мин) живёт в " +
+		"профилях обоих чартов, где его видит читающий (задача #205). Запись истекает с первым профилем на " +
+		"`own`: там снятие ручки роняет СТАРТ",
+	"authn.registration.admissionsPerWindow": "величина РЕГИСТРАЦИИ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270, Р5): " +
+		"потолок темпа заведения аккаунтов одной личностью; страж читает её только под посадкой `own` " +
+		"(config.ValidateLaneRequirements), а боевой профиль стоит на `external`. Объявлена по приёмке Ф4 " +
+		"(Ф4-18/19): перенос строки справочника (3 за 1 ч) живёт в профилях обоих чартов, где его видит " +
+		"читающий (задача #205). Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.registration.admissionWindow": "величина РЕГИСТРАЦИИ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270, Р5): окно " +
+		"счёта заведений; страж читает её только под посадкой `own` (config.ValidateLaneRequirements), а " +
+		"боевой профиль стоит на `external`. Объявлена по приёмке Ф4 (Ф4-18/19): перенос строки справочника " +
+		"(3 за 1 ч) живёт в профилях обоих чартов, где его видит читающий (задача #205). Запись истекает с " +
+		"первым профилем на `own`: там снятие ручки роняет СТАРТ",
 	"authn.selfServiceFreshness": "величина ВТОРОГО ФАКТОРА (Ф12, kacho#1281, Р8): окно свежести правки своих данных; страж " +
 		"читает её только под посадкой `own` (config.ValidateLaneRequirements), а боевой профиль стоит на " +
 		"`external`. Объявлена по приёмке Ф12 (Ф12-36): дословный перенос Ф1 §4.1 (15 мин) живёт в " +
