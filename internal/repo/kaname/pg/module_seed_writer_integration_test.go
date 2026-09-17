@@ -61,7 +61,7 @@ seed:
       target: allInScope
   joins:
     - serviceAccount: {account: kacho-system, name: kacho-vpc}
-      group: {account: kacho-system, name: module-quota-readers}
+      group: {account: kacho-system, name: module-relation-writers}
       why: "проба применителя посева"
 `
 

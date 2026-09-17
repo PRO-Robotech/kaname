@@ -274,6 +274,59 @@ func TestInjectionSeedParityGroupGrantedOnlyByRelationIsJudgedLikeTheRest(t *tes
 	require.Contains(t, joined, "module-quota-readers")
 }
 
+// ─── Атрибуция ГРУППЫ по объявлению (приёмка MRW-1, Р5) — в обе стороны ──────
+//
+// Живая группа относится к модулю, ЧЕЙ МАНИФЕСТ ЕЁ ОБЪЯВЛЯЕТ, по паре
+// (аккаунт, имя); ключ сравнения при этом остаётся тройкой с назначением.
+// Правило имени `kacho-<служба>` остаётся правилом для служебных записей.
+
+// Законный близнец: объявленная пара находит владельца.
+func TestInjectionGroupOwnershipDeclaredPairHasAnOwner(t *testing.T) {
+	own := moduleseedparity.GroupOwnership{}
+	own.Declare("iam", "system", "module-relation-writers")
+	owner, ok := own.OwnerOf("system", "module-relation-writers")
+	require.True(t, ok, "объявленная группа осталась без владельца")
+	require.Equal(t, "iam", owner)
+}
+
+// Группа, которую не объявил никто, владельца не получает — и считается в
+// разряде «без модуля-владельца», а не приписывается по имени.
+func TestInjectionGroupOwnershipUndeclaredGroupHasNoOwner(t *testing.T) {
+	own := moduleseedparity.GroupOwnership{}
+	own.Declare("iam", "system", "module-relation-writers")
+	_, ok := own.OwnerOf("system", "module-quota-readers")
+	require.False(t, ok, "группа, не объявленная ни одним манифестом, получила владельца")
+}
+
+// Ключ атрибуции — ПАРА, а не имя: то же имя в другом аккаунте — другая группа.
+func TestInjectionGroupOwnershipIsKeyedByThePairNotTheName(t *testing.T) {
+	own := moduleseedparity.GroupOwnership{}
+	own.Declare("iam", "system", "module-relation-writers")
+	_, ok := own.OwnerOf("tenant", "module-relation-writers")
+	require.False(t, ok, "имя без аккаунта нашло владельца — ключ атрибуции не пара")
+}
+
+// Пустой перечень объявлений никого не относит: отрицание не вакуумно, потому
+// что близнец выше на том же вызове даёт владельца.
+func TestInjectionGroupOwnershipEmptyRelatesNobody(t *testing.T) {
+	_, ok := moduleseedparity.GroupOwnership{}.OwnerOf("system", "module-relation-writers")
+	require.False(t, ok)
+}
+
+// Дрейф НАЗНАЧЕНИЯ живой строки при верной паре: атрибуция по паре относит
+// строку к модулю, и тройной ключ сравнения даёт находку в ОБЕ стороны — иначе
+// строка ушла бы в разряд «без владельца», и обе стороны погасли бы разом.
+func TestInjectionSeedParityDriftedGroupDescriptionIsAFindingBothWays(t *testing.T) {
+	declared := []moduleseedparity.Group{{Account: "system", Name: "module-relation-writers", Description: "объявленное назначение группы"}}
+	live := []moduleseedparity.Group{{Account: "system", Name: "module-relation-writers", Description: "живое назначение, разошедшееся"}}
+	findings := moduleseedparity.Compare([]moduleseedparity.ModuleState{{
+		Module: "iam", ManifestFile: "manifest.yaml", DeclaredGroup: declared, LiveGroup: live,
+	}}).Findings
+	require.Len(t, findings, 2, "дрейф назначения дал не две находки: %v", findings)
+	require.Contains(t, findings[0]+findings[1], "группа ЖИВЁТ и не объявлена")
+	require.Contains(t, findings[0]+findings[1], "группа ОБЪЯВЛЕНА и не живёт")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ОКНО ПЕРЕИМЕНОВАНИЙ И ЯКОРЬ ЧТЕНИЯ — обе стороны каждой оси
 //

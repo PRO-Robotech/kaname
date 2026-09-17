@@ -513,6 +513,12 @@ func (*updUserRdr) MembershipExists(context.Context, domain.UserID, domain.Accou
 	return false, nil
 }
 
+// Membership — дублёр членства ПАРОЙ не читает: предмет этих проб другой, и
+// подставная строка была бы утверждением, которого никто не делал (kaname#181).
+func (*updUserRdr) Membership(context.Context, domain.UserID, domain.AccountID) (domain.Membership, error) {
+	return domain.Membership{}, iamerr.ErrNotFound
+}
+
 // RemoveMembership — дублёр исключения из аккаунта не делает: предмет этой
 // пробы другой. Снятие членства проверяется своими пробами (#1127).
 func (*updUserWtr) RemoveMembership(context.Context, domain.UserID, domain.AccountID) (bool, error) {

@@ -74,6 +74,13 @@ data:
       {{- if .Values.apiServer.internalRestEndpoint }}
       internal-rest-endpoint: {{ .Values.apiServer.internalRestEndpoint | quote }}
       {{- end }}
+      # Слушатель полосы входа паролем (Ф3, kacho#1269). Поднимается ПОСАДКОЙ
+      # `authn.identityProvider: own`, а не адресом: под `external` процесс адрес
+      # читает и объявляет поверхность выключенной с причиной. Умолчания нет —
+      # под `own` незаданный адрес есть отказ старта с именем ручки.
+      {{- if .Values.apiServer.loginLaneEndpoint }}
+      login-lane-endpoint: {{ .Values.apiServer.loginLaneEndpoint | quote }}
+      {{- end }}
       # ── ВЫКЛЮЧЕНИЕ ПОВЕРХНОСТИ: ПУСТОЙ АДРЕС ЗНАЧИТ ПУСТОЙ ─────────────────
       #
       # У четырёх поверхностей адрес приходит НЕПУСТЫМ умолчанием процесса,
@@ -209,6 +216,62 @@ data:
       trusted-forwarder-sans:
         {{- range . }}
         - {{ . | quote }}
+        {{- end }}
+      {{- end }}
+
+      {{- with $authn.login }}
+      # ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269). Каждая величина — условие старта
+      # под `authn.identityProvider: own`, и умолчания нет ни у одной: срок
+      # сессии, предел частоты, правило пароля и ёмкость проверяющего — решения
+      # установки, которые нельзя подставить за оператора. Под `external` блок
+      # не читается: полосы на той посадке нет. Целые проходят через `int64`:
+      # большое число из значений чарта приходит в шаблон плавающим и без
+      # приведения рендерится как `2.68e+08`, чего разборщик настроек не примет.
+      login:
+        {{- with .sessionTtl }}
+        session-ttl: {{ . | quote }}
+        {{- end }}
+        {{- with .cookieDomain }}
+        cookie-domain: {{ . | quote }}
+        {{- end }}
+        {{- if hasKey . "addressAttempts" }}
+        address-attempts: {{ int64 .addressAttempts }}
+        {{- end }}
+        {{- with .addressWindow }}
+        address-window: {{ . | quote }}
+        {{- end }}
+        {{- if hasKey . "sourceAttempts" }}
+        source-attempts: {{ int64 .sourceAttempts }}
+        {{- end }}
+        {{- with .sourceWindow }}
+        source-window: {{ . | quote }}
+        {{- end }}
+        {{- if hasKey . "passwordMinLength" }}
+        password-min-length: {{ int64 .passwordMinLength }}
+        {{- end }}
+        {{- with .breachCheck }}
+        breach-check: {{ . | quote }}
+        {{- end }}
+        {{- with .breachCheckUrl }}
+        breach-check-url: {{ . | quote }}
+        {{- end }}
+        {{- with .hasherFormat }}
+        hasher-format: {{ . | quote }}
+        {{- end }}
+        {{- if hasKey . "hasherMemory" }}
+        hasher-memory: {{ int64 .hasherMemory }}
+        {{- end }}
+        {{- if hasKey . "hasherIterations" }}
+        hasher-iterations: {{ int64 .hasherIterations }}
+        {{- end }}
+        {{- if hasKey . "hasherParallelism" }}
+        hasher-parallelism: {{ int64 .hasherParallelism }}
+        {{- end }}
+        {{- if hasKey . "verifierCapacity" }}
+        verifier-capacity: {{ int64 .verifierCapacity }}
+        {{- end }}
+        {{- if hasKey . "memoryReserveBytes" }}
+        memory-reserve-bytes: {{ int64 .memoryReserveBytes }}
         {{- end }}
       {{- end }}
 

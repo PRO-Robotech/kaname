@@ -20,12 +20,18 @@ package main
 // заведены гейты провязки каталога и ролей. Отличать надо не «применитель есть»
 // от «применителя нет», а «вызов меняет состояние платформы» от «не меняет».
 //
-// # Гейт судит ДВА факта, и ни один не выводится из другого
+// # Гейт судит ТРИ факта, и ни один не выводится из другого
 //
 //	A. СВЯЗЫВАНИЕ → ВЫЗОВ. Идентификатор, связанный `moduleseed.NewApplier`,
 //	   обязан быть доводом вызова применения в прод-коде корня.
 //
 //	B. ПОРЯДОК на пути старта: доставка → применение ролей → применение посева.
+//
+//	C. СВОЙ МАНИФЕСТ — ОТДЕЛЬНЫМ ДОВОДОМ (приёмка MRW-1, Р3). Довод своего
+//	   манифеста связан `loadOwnManifest`, довод доставки — `loadDeliveredManifests`,
+//	   и это РАЗНЫЕ идентификаторы: подмешанный в перечень доставки манифест
+//	   службы достался бы всем пяти потребителям перечня разом, а проба на
+//	   исходе применения о радиусе не утверждает ничего — она зелена и тогда.
 //
 // # Почему посев — ПОСЛЕ ролей
 //
@@ -48,6 +54,12 @@ package main
 // Применитель, переданный чужому пакету, который зовёт применение у себя, этим
 // гейтом не виден; такой формы в дереве сегодня нет. Об ИСХОДЕ применения гейт
 // не судит вовсе — это предмет проб применителя против живой базы.
+//
+// Часть C судит ДОВОДЫ вызова, а не содержимое перечня: свой манифест, дописанный
+// в перечень доставки отдельным присваиванием ДО вызова, гейту не виден — так
+// проверено инъекцией (`deliveredManifests = append(deliveredManifests,
+// ownManifest)` → зелёный), тогда как та же примесь выражением на месте вызова
+// краснеет. Слепая зона названа, а не умолчана; форма в дереве не встречается.
 
 import (
 	"go/ast"
@@ -66,8 +78,14 @@ type seedWiringCensus struct {
 	callsSeen int
 	// bound — идентификаторы, связанные `moduleseed.NewApplier`, с координатой.
 	bound map[string]string
-	// called — идентификаторы, поданные доводом в `applyDeliveredModuleSeed`.
+	// called — идентификаторы, поданные доводом в `applyModuleSeed`.
 	called map[string]string
+	// callArgs — доводы вызова применения по позициям (идентификаторы либо "").
+	callArgs []string
+	// ownBound — идентификаторы, связанные `loadOwnManifest`.
+	ownBound map[string]string
+	// deliveredBound — идентификаторы, связанные `loadDeliveredManifests`.
+	deliveredBound map[string]string
 }
 
 // rootProdFiles — не-тестовые файлы Go композиционного корня.
@@ -90,7 +108,10 @@ func rootProdFiles(t *testing.T) []string {
 // seedApplierWiring — где применитель посева СВЯЗАН и где он ПОЗВАН.
 func seedApplierWiring(t *testing.T) seedWiringCensus {
 	t.Helper()
-	census := seedWiringCensus{bound: map[string]string{}, called: map[string]string{}}
+	census := seedWiringCensus{
+		bound: map[string]string{}, called: map[string]string{},
+		ownBound: map[string]string{}, deliveredBound: map[string]string{},
+	}
 	fset := token.NewFileSet()
 
 	for _, name := range rootProdFiles(t) {
@@ -103,40 +124,52 @@ func seedApplierWiring(t *testing.T) seedWiringCensus {
 		census.filesRead++
 
 		ast.Inspect(file, func(n ast.Node) bool {
-			// Связывание: `x := moduleseed.NewApplier(...)`.
+			// Связывание: `x := moduleseed.NewApplier(...)`, `own, err :=
+			// loadOwnManifest(...)`, `delivered, err := loadDeliveredManifests(...)`.
 			if assign, ok := n.(*ast.AssignStmt); ok {
 				for i, rhs := range assign.Rhs {
 					call, isCall := rhs.(*ast.CallExpr)
 					if !isCall || i >= len(assign.Lhs) {
 						continue
 					}
-					sel, isSel := call.Fun.(*ast.SelectorExpr)
-					if !isSel || sel.Sel.Name != "NewApplier" {
+					lhs, isIdent := assign.Lhs[i].(*ast.Ident)
+					if !isIdent {
 						continue
 					}
-					pkg, isIdent := sel.X.(*ast.Ident)
-					if !isIdent || pkg.Name != "moduleseed" {
-						continue
-					}
-					if lhs, isIdent := assign.Lhs[i].(*ast.Ident); isIdent {
-						census.bound[lhs.Name] = fset.Position(call.Pos()).String()
+					at := fset.Position(call.Pos()).String()
+					switch fn := call.Fun.(type) {
+					case *ast.SelectorExpr:
+						if pkg, ok := fn.X.(*ast.Ident); ok && pkg.Name == "moduleseed" && fn.Sel.Name == "NewApplier" {
+							census.bound[lhs.Name] = at
+						}
+					case *ast.Ident:
+						switch fn.Name {
+						case "loadOwnManifest":
+							census.ownBound[lhs.Name] = at
+						case "loadDeliveredManifests":
+							census.deliveredBound[lhs.Name] = at
+						}
 					}
 				}
 			}
-			// Вызов: `applyDeliveredModuleSeed(..., x, ...)`.
+			// Вызов: `applyModuleSeed(..., x, own, delivered)`.
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
 				return true
 			}
 			census.callsSeen++
 			fn, isIdent := call.Fun.(*ast.Ident)
-			if !isIdent || fn.Name != "applyDeliveredModuleSeed" {
+			if !isIdent || fn.Name != "applyModuleSeed" {
 				return true
 			}
+			census.callArgs = census.callArgs[:0]
 			for _, arg := range call.Args {
+				name := ""
 				if id, isIdent := arg.(*ast.Ident); isIdent {
+					name = id.Name
 					census.called[id.Name] = fset.Position(call.Pos()).String()
 				}
+				census.callArgs = append(census.callArgs, name)
 			}
 			return true
 		})
@@ -169,6 +202,60 @@ func TestIAM2452_SeedApplierBuiltByTheRootIsAlsoCalledByIt(t *testing.T) {
 	}
 }
 
+// Позиции доводов вызова применения посева: `applyModuleSeed(ctx, logger,
+// applier, own, delivered)`. Названы числом здесь, а не выведены из сигнатуры:
+// гейт читает узел вызова, и сигнатуры у него нет.
+const (
+	seedCallArgOwn       = 3
+	seedCallArgDelivered = 4
+)
+
+// TestMRW1_OwnManifestReachesTheSeedApplierAsItsOwnArgument — часть C.
+func TestMRW1_OwnManifestReachesTheSeedApplierAsItsOwnArgument(t *testing.T) {
+	c := seedApplierWiring(t)
+	t.Logf("перепись: прод-файлов корня прочитано %d · связываний своего манифеста %d · "+
+		"связываний доставки %d · доводов вызова применения %d",
+		c.filesRead, len(c.ownBound), len(c.deliveredBound), len(c.callArgs))
+
+	if c.filesRead == 0 || c.callsSeen == 0 {
+		t.Fatal("обход не прочитал ни одного файла либо не нашёл ни одного вызова — вердикт беспредметен")
+	}
+	if len(c.callArgs) == 0 {
+		t.Fatal("композиционный корень НЕ ЗОВЁТ applyModuleSeed: свой манифест службы до применителя " +
+			"посева не доезжает, и группа пишущих кортежи остаётся объявлением без производителя (kaname#106)")
+	}
+	if len(c.callArgs) <= seedCallArgDelivered {
+		t.Fatalf("вызов applyModuleSeed несёт %d довод(ов), а свой манифест и доставка — позиции %d и %d",
+			len(c.callArgs), seedCallArgOwn, seedCallArgDelivered)
+	}
+	own, delivered := c.callArgs[seedCallArgOwn], c.callArgs[seedCallArgDelivered]
+	if own == "" || delivered == "" {
+		t.Fatalf("доводы своего манифеста (%q) и доставки (%q) обязаны быть идентификаторами, "+
+			"связанными загрузчиками корня, а не выражениями на месте", own, delivered)
+	}
+	if own == delivered {
+		t.Fatalf("свой манифест и доставка поданы ОДНИМ доводом %q: манифест службы подмешан в перечень, "+
+			"который читают пятеро потребителей старта (Р3)", own)
+	}
+	if _, ok := c.ownBound[own]; !ok {
+		t.Errorf("довод своего манифеста %q не связан loadOwnManifest (связаны: %v)", own, keysOf(c.ownBound))
+	}
+	if _, ok := c.deliveredBound[own]; ok {
+		t.Errorf("довод своего манифеста %q связан loadDeliveredManifests — доставка подана вместо своего", own)
+	}
+	if _, ok := c.deliveredBound[delivered]; !ok {
+		t.Errorf("довод доставки %q не связан loadDeliveredManifests (связаны: %v)", delivered, keysOf(c.deliveredBound))
+	}
+}
+
+func keysOf(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 // seedOrderAnchors — где на пути старта стоят доставка, применение ролей и
 // применение посева.
 type seedOrderAnchors struct {
@@ -198,7 +285,7 @@ func bootSeedOrderAnchors(fset *token.FileSet, file *ast.File) seedOrderAnchors 
 			if !a.roles.IsValid() {
 				a.roles, a.rolesAt = call.Pos(), fset.Position(call.Pos()).String()
 			}
-		case "applyDeliveredModuleSeed":
+		case "applyModuleSeed":
 			if !a.seed.IsValid() {
 				a.seed, a.seedAt = call.Pos(), fset.Position(call.Pos()).String()
 			}
@@ -231,8 +318,9 @@ func TestIAM2452_ServeAppliesModuleSeedAfterModuleRoles(t *testing.T) {
 			"исчезла, и порядок больше нечем судить")
 	}
 	if !a.seed.IsValid() {
-		t.Fatal("serve.go НЕ ПРИМЕНЯЕТ посев доставленных манифестов: служебные учётки модулей " +
-			"платформы сняты миграцией, и заводить их стало некому (kacho#2452)")
+		t.Fatal("serve.go НЕ ПРИМЕНЯЕТ посев (applyModuleSeed): служебные учётки модулей " +
+			"платформы сняты миграцией, и заводить их стало некому (kacho#2452); группу службы " +
+			"объявляет свой манифест, и производителя у неё тоже нет (kaname#106)")
 	}
 	if a.seed < a.delivery {
 		t.Errorf("применение посева стоит ПЕРЕД чтением доставки (%s против %s) — применять "+

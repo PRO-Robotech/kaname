@@ -11,6 +11,7 @@ package iamv1
 
 import (
 	context "context"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -22,23 +23,38 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MembershipService_Get_FullMethodName  = "/kaname.cloud.iam.v1.MembershipService/Get"
-	MembershipService_List_FullMethodName = "/kaname.cloud.iam.v1.MembershipService/List"
+	MembershipService_Create_FullMethodName = "/kaname.cloud.iam.v1.MembershipService/Create"
+	MembershipService_Get_FullMethodName    = "/kaname.cloud.iam.v1.MembershipService/Get"
+	MembershipService_List_FullMethodName   = "/kaname.cloud.iam.v1.MembershipService/List"
 )
 
 // MembershipServiceClient is the client API for MembershipService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// MembershipService — чтение принадлежности человека аккаунту.
+// MembershipService — принадлежность человека аккаунту: два чтения на
+// аккаунт-скоупных путях и ОДНО создание на плоской коллекции.
 //
-// # Аккаунт в пути ОБЯЗАТЕЛЕН, и это несущее свойство, а не удобство
+// # Поверхность ТРЁХАДРЕСНАЯ, и плоская коллекция несёт ТОЛЬКО создание
+//
+//	POST /iam/v1/memberships                                  — создание
+//	GET  /iam/v1/accounts/{account_id}/memberships[/{id}]     — чтения аккаунта
+//	GET  /iam/v1/me/memberships                               — свой список
+//
+// Чтения на `/iam/v1/memberships` НЕ заводятся НИКОГДА — «раз уж глагол
+// рядом» не довод. Идентификатор членства вычислим офлайн из пары «человек ×
+// аккаунт», поэтому плоское чтение по нему было бы вопросом «в каких аккаунтах
+// состоит этот человек», заданным арифметикой вместо параметра (IAM-ID-2 §2.2,
+// уровень 4). Держит это полоса C гейта IAM-ID-2-15, а не эта строка.
+//
+// # Аккаунт ОБЯЗАТЕЛЕН на каждом глаголе, и это несущее свойство, а не удобство
 //
 // Оба чтения отвечают ТОЛЬКО про названный аккаунт: он приходит входом и стоит в
 // условии отбора запроса к хранилищу, а не в проверке после чтения. Рассказать о
 // чужих аккаунтах эта поверхность не может by construction — она их не
 // спрашивает. Это сильнее фильтрации: фильтр можно забыть, отсутствующий
-// параметр забыть нельзя.
+// параметр забыть нельзя. У создания аккаунт приходит ПОЛЕМ ТЕЛА — и это то,
+// про что край спрашивает модель прав (`scope_extractor` ниже).
 //
 // Перечень аккаунтов человека — факт о ТРЕТЬИХ СТОРОНАХ (в каких организациях он
 // работает, куда его позвали), и права видеть его у распорядителя одного аккаунта
@@ -69,6 +85,44 @@ const (
 // Подстановочным кортежем `viewer` @ `account` НЕ выполняется: тип объявляет
 // `[user, service_account, group#member] or editor`, члена `user:*` в нём нет.
 type MembershipServiceClient interface {
+	// Creates a Membership: invites a person (by email) into the named Account.
+	//
+	// # Это ПЕРЕЕЗД глагола приглашения на ресурс членства (IAM-ID-1 §4, S3.2)
+	//
+	// Поток тот же, что у `UserService.Invite`, и до стадии S4 оба глагола живут
+	// рядом. Два вызова на одну пару «человек × аккаунт» — любым из глаголов, в
+	// любом порядке — дают ОДНО членство: пара уникальна полностью
+	// (`UNIQUE(user_id, account_id)`), идентификатор членства вычисляется из неё
+	// неизменяемой функцией и потому ПЕРЕИСПОЛЬЗУЕТСЯ. Повтор идемпотентен и
+	// отвечает той же строкой.
+	//
+	// # Что заводится, сказано по ветвям, потому что обе обманчивы
+	//
+	//   - почта платформе НЕИЗВЕСТНА → одна строка человека в состоянии
+	//     «приглашён» и одно членство `PENDING`. Письмо приглашения уходит РОВНО
+	//     ОДНО на пару (аккаунт, почта) — на заведении строки, не на каждом вызове;
+	//   - почта ИЗВЕСТНА → второй строки НЕ заводится (глобальный ключ почты):
+	//     тому же человеку добавляется членство в названном аккаунте, и если он
+	//     уже входил — сразу `ACTIVE`. Шага принятия нет: первый вход активирует
+	//     ВСЕ приглашённые членства разом (IAM-ID-2 §2.4а).
+	//
+	// # Response — `Membership`, metadata — `CreateMembershipMetadata`
+	//
+	// Идентификатор членства берётся из `response` после `done` и `!error` —
+	// он вычисляется из пары в транзакции и до неё не известен. `metadata.user_id`
+	// — строка человека, если почта известна на момент принятия, иначе
+	// идентификатор, который получит новая строка (см. комментарий у сообщения).
+	//
+	// # Разграничение — то же, что у приглашения, и переехало вместе с полем
+	//
+	// `account_id` — объект, про который гейт задаёт вопрос: без него вызов
+	// unscoped и fail-closed (IAM-ID-1 §1.5 п. 2). Все три опции ниже — не
+	// украшение, а условие работоспособности глагола. Повышенный уровень входа
+	// (acr=2): это поверхность ВЫДАЧИ ПРАВ, а не рутинный жизненный цикл —
+	// `project_id` + `role_id` заводят привязку доступа АТОМАРНО с членством,
+	// то есть глагол выдаёт ровно то, что выдаёт `AccessBindingService.Create`,
+	// и порог ниже её порога был бы обходом step-up через более дешёвую дверь.
+	Create(ctx context.Context, in *CreateMembershipRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Returns the specified Membership within the named Account.
 	//
 	// Well-formed идентификатор членства ЧУЖОГО аккаунта неотличим от
@@ -87,6 +141,16 @@ type membershipServiceClient struct {
 
 func NewMembershipServiceClient(cc grpc.ClientConnInterface) MembershipServiceClient {
 	return &membershipServiceClient{cc}
+}
+
+func (c *membershipServiceClient) Create(ctx context.Context, in *CreateMembershipRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(operation.Operation)
+	err := c.cc.Invoke(ctx, MembershipService_Create_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *membershipServiceClient) Get(ctx context.Context, in *GetMembershipRequest, opts ...grpc.CallOption) (*Membership, error) {
@@ -113,15 +177,29 @@ func (c *membershipServiceClient) List(ctx context.Context, in *ListMembershipsR
 // All implementations must embed UnimplementedMembershipServiceServer
 // for forward compatibility.
 //
-// MembershipService — чтение принадлежности человека аккаунту.
+// MembershipService — принадлежность человека аккаунту: два чтения на
+// аккаунт-скоупных путях и ОДНО создание на плоской коллекции.
 //
-// # Аккаунт в пути ОБЯЗАТЕЛЕН, и это несущее свойство, а не удобство
+// # Поверхность ТРЁХАДРЕСНАЯ, и плоская коллекция несёт ТОЛЬКО создание
+//
+//	POST /iam/v1/memberships                                  — создание
+//	GET  /iam/v1/accounts/{account_id}/memberships[/{id}]     — чтения аккаунта
+//	GET  /iam/v1/me/memberships                               — свой список
+//
+// Чтения на `/iam/v1/memberships` НЕ заводятся НИКОГДА — «раз уж глагол
+// рядом» не довод. Идентификатор членства вычислим офлайн из пары «человек ×
+// аккаунт», поэтому плоское чтение по нему было бы вопросом «в каких аккаунтах
+// состоит этот человек», заданным арифметикой вместо параметра (IAM-ID-2 §2.2,
+// уровень 4). Держит это полоса C гейта IAM-ID-2-15, а не эта строка.
+//
+// # Аккаунт ОБЯЗАТЕЛЕН на каждом глаголе, и это несущее свойство, а не удобство
 //
 // Оба чтения отвечают ТОЛЬКО про названный аккаунт: он приходит входом и стоит в
 // условии отбора запроса к хранилищу, а не в проверке после чтения. Рассказать о
 // чужих аккаунтах эта поверхность не может by construction — она их не
 // спрашивает. Это сильнее фильтрации: фильтр можно забыть, отсутствующий
-// параметр забыть нельзя.
+// параметр забыть нельзя. У создания аккаунт приходит ПОЛЕМ ТЕЛА — и это то,
+// про что край спрашивает модель прав (`scope_extractor` ниже).
 //
 // Перечень аккаунтов человека — факт о ТРЕТЬИХ СТОРОНАХ (в каких организациях он
 // работает, куда его позвали), и права видеть его у распорядителя одного аккаунта
@@ -152,6 +230,44 @@ func (c *membershipServiceClient) List(ctx context.Context, in *ListMembershipsR
 // Подстановочным кортежем `viewer` @ `account` НЕ выполняется: тип объявляет
 // `[user, service_account, group#member] or editor`, члена `user:*` в нём нет.
 type MembershipServiceServer interface {
+	// Creates a Membership: invites a person (by email) into the named Account.
+	//
+	// # Это ПЕРЕЕЗД глагола приглашения на ресурс членства (IAM-ID-1 §4, S3.2)
+	//
+	// Поток тот же, что у `UserService.Invite`, и до стадии S4 оба глагола живут
+	// рядом. Два вызова на одну пару «человек × аккаунт» — любым из глаголов, в
+	// любом порядке — дают ОДНО членство: пара уникальна полностью
+	// (`UNIQUE(user_id, account_id)`), идентификатор членства вычисляется из неё
+	// неизменяемой функцией и потому ПЕРЕИСПОЛЬЗУЕТСЯ. Повтор идемпотентен и
+	// отвечает той же строкой.
+	//
+	// # Что заводится, сказано по ветвям, потому что обе обманчивы
+	//
+	//   - почта платформе НЕИЗВЕСТНА → одна строка человека в состоянии
+	//     «приглашён» и одно членство `PENDING`. Письмо приглашения уходит РОВНО
+	//     ОДНО на пару (аккаунт, почта) — на заведении строки, не на каждом вызове;
+	//   - почта ИЗВЕСТНА → второй строки НЕ заводится (глобальный ключ почты):
+	//     тому же человеку добавляется членство в названном аккаунте, и если он
+	//     уже входил — сразу `ACTIVE`. Шага принятия нет: первый вход активирует
+	//     ВСЕ приглашённые членства разом (IAM-ID-2 §2.4а).
+	//
+	// # Response — `Membership`, metadata — `CreateMembershipMetadata`
+	//
+	// Идентификатор членства берётся из `response` после `done` и `!error` —
+	// он вычисляется из пары в транзакции и до неё не известен. `metadata.user_id`
+	// — строка человека, если почта известна на момент принятия, иначе
+	// идентификатор, который получит новая строка (см. комментарий у сообщения).
+	//
+	// # Разграничение — то же, что у приглашения, и переехало вместе с полем
+	//
+	// `account_id` — объект, про который гейт задаёт вопрос: без него вызов
+	// unscoped и fail-closed (IAM-ID-1 §1.5 п. 2). Все три опции ниже — не
+	// украшение, а условие работоспособности глагола. Повышенный уровень входа
+	// (acr=2): это поверхность ВЫДАЧИ ПРАВ, а не рутинный жизненный цикл —
+	// `project_id` + `role_id` заводят привязку доступа АТОМАРНО с членством,
+	// то есть глагол выдаёт ровно то, что выдаёт `AccessBindingService.Create`,
+	// и порог ниже её порога был бы обходом step-up через более дешёвую дверь.
+	Create(context.Context, *CreateMembershipRequest) (*operation.Operation, error)
 	// Returns the specified Membership within the named Account.
 	//
 	// Well-formed идентификатор членства ЧУЖОГО аккаунта неотличим от
@@ -172,6 +288,9 @@ type MembershipServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedMembershipServiceServer struct{}
 
+func (UnimplementedMembershipServiceServer) Create(context.Context, *CreateMembershipRequest) (*operation.Operation, error) {
+	return nil, status.Error(codes.Unimplemented, "method Create not implemented")
+}
 func (UnimplementedMembershipServiceServer) Get(context.Context, *GetMembershipRequest) (*Membership, error) {
 	return nil, status.Error(codes.Unimplemented, "method Get not implemented")
 }
@@ -197,6 +316,24 @@ func RegisterMembershipServiceServer(s grpc.ServiceRegistrar, srv MembershipServ
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&MembershipService_ServiceDesc, srv)
+}
+
+func _MembershipService_Create_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateMembershipRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MembershipServiceServer).Create(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MembershipService_Create_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MembershipServiceServer).Create(ctx, req.(*CreateMembershipRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _MembershipService_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -242,6 +379,10 @@ var MembershipService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "kaname.cloud.iam.v1.MembershipService",
 	HandlerType: (*MembershipServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Create",
+			Handler:    _MembershipService_Create_Handler,
+		},
 		{
 			MethodName: "Get",
 			Handler:    _MembershipService_Get_Handler,

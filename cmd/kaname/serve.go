@@ -173,6 +173,12 @@ func runServe(cfg config.Config) error {
 	if err := projectOwnCeilings(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg.OwnCeilings); err != nil {
 		return err
 	}
+	// ПРОЕКЦИЯ ТЕМПА ЗАВЕДЕНИЯ (Ф4 Р5, kacho#1270) — тем же местом и по той же
+	// причине: триггер читает величину из строки авторитета, и под `own` её
+	// объявляет профиль (незаданная — отказ старта стражем полосы).
+	if err := projectAdmissionRate(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg); err != nil {
+		return err
+	}
 
 	// slave-pool wiring (read-replica). Если slave-url
 	// настроен и отличается от master URL — отдельный pgxpool для read-TX'ов;
@@ -442,19 +448,29 @@ func runServe(cfg config.Config) error {
 		return raErr
 	}
 
-	// ПРИМЕНЕНИЕ ПОСЕВА ДОСТАВЛЕННОГО — ПОСЛЕ применения ролей (задача #2452).
+	// ПРИМЕНЕНИЕ ПОСЕВА — ПОСЛЕ применения ролей (задачи #2452, kaname#106).
 	//
-	// Служебные учётки модулей платформы, их членства и выдачи заводит ЭТОТ
-	// путь, а не миграция службы: миграция применяется везде, включая установку
-	// без платформы, и заводила там пять личностей чужого продукта. Условием
-	// служит ДОСТАВКА манифеста — её кладёт зонтичный чарт платформы и не кладёт
-	// чарт самостоятельной службы.
+	// Сначала СВОЙ манифест службы, встроенный в образ: группу пишущих кортежи
+	// `module-relation-writers` и её выдачу заводит сама служба, на любой
+	// установке. Затем ДОСТАВЛЕННЫЕ манифесты: служебные учётки модулей
+	// платформы, их членства и выдачи заводит этот путь, а не миграция службы —
+	// миграция применяется везде, включая установку без платформы, и заводила
+	// там пять личностей чужого продукта. Условием доставленных служит ДОСТАВКА
+	// — её кладёт зонтичный чарт платформы и не кладёт чарт самостоятельной
+	// службы; своё доставкой не связано.
 	//
-	// Довод о месте, порядке и о том, почему отказ фатален, — шапка
-	// `module_seed_apply.go`; порядок держит гейт
+	// Свой манифест читается ЗДЕСЬ и подаётся применителю посева ОТДЕЛЬНЫМ
+	// доводом — в перечень `deliveredManifests` он не подмешивается: тот
+	// читают пятеро, а получатель у своего манифеста ровно один (Р3 приёмки
+	// MRW-1). Довод о месте, порядке и о том, почему отказ фатален, — шапка
+	// `module_seed_apply.go`; порядок и раздельность доводов держит гейт
 	// `module_seed_apply_wiring_test.go`, а не этот комментарий.
+	ownManifest, omErr := loadOwnManifest(logger)
+	if omErr != nil {
+		return omErr
+	}
 	seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
-	if seErr := applyDeliveredModuleSeed(ctx, logger, seedApplier, deliveredManifests); seErr != nil {
+	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, deliveredManifests); seErr != nil {
 		return seErr
 	}
 
@@ -503,13 +519,6 @@ func runServe(cfg config.Config) error {
 	}
 	startSigningKeySweeper(ctx, signingKeystore, logger)
 
-	// Фоновая уборка таблиц, чей рост задаёт внешний (задача #1292). Три
-	// предмета обслуживает ОДНА петля: три расписания об одном предмете
-	// разошлись бы молча.
-	if err := startRetentionSweeper(ctx, pool, cfg, metricsReg, logger); err != nil {
-		return err
-	}
-
 	// Уборка ресурсного журнала подписки — своим уборщиком (см.
 	// `subscription_wiring.go`, там же довод, почему не предметом общего).
 	if err := startJournalRetentionSweep(ctx, pool, logger); err != nil {
@@ -521,6 +530,28 @@ func runServe(cfg config.Config) error {
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
 		metricsReg, cfg, tokenSigner, logger)
+
+	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
+	// kacho#1270) — строится ТОЛЬКО под `own`; под `external` — nil, и всё, что
+	// читает её провязку, сообщает «нет» наблюдением, а не литералом
+	// (`loginlane.go`). Собирается ПОСЛЕ служб: регистрация ПРИНИМАЕТ тот же
+	// реконсайлер материализации привязки, что путь запроса и полоса первого
+	// входа (`hook_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
+	// потому что её таблицы — предметы той же петли.
+	lane, err := buildLoginLane(cfg, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
+	if err != nil {
+		return err
+	}
+
+	// Фоновая уборка таблиц, чей рост задаёт внешний (задача #1292). Три
+	// предмета обслуживает ОДНА петля: три расписания об одном предмете
+	// разошлись бы молча.
+	if err := startRetentionSweeper(ctx, pool, cfg, metricsReg, lane.retentionReapers(), logger); err != nil {
+		return err
+	}
+	// `InternalHumanSessionService.Resolve` — внутренний слушатель, только
+	// при поднятой полосе (Ф3-45); под `external` регистрация не происходит.
+	svcs.humanSessionHandler = lane.resolveHandler()
 
 	// gRPC servers. PrincipalExtract-interceptor читает
 	// x-kacho-principal-* metadata-headers, которые api-gateway auth-interceptor
@@ -612,6 +643,9 @@ func runServe(cfg config.Config) error {
 		cfg.APIServer.RegistryToken.ListenAddress(), mtlsCfg); err != nil {
 		return err
 	}
+	if err := requireLoginLaneTLS(productionMode, cfg, mtlsCfg); err != nil {
+		return err
+	}
 	// Транспорт остальных HTTP-рёбер. Их ручки задавал ЗОНТИЧНЫЙ чарт монорепо;
 	// у отдельно поставленной службы его нет, а адреса всех трёх приходят
 	// умолчанием процесса и потому непусты всегда — то есть без этого стража
@@ -694,7 +728,7 @@ func runServe(cfg config.Config) error {
 	//
 	// Перепись печатается и на успешном старте: «ноль недостижимых записей»
 	// обязано быть отличимо от «каталог не читали».
-	laneWiring := observeLaneWiring(ctx, cfg, tokenSigner, wiredSignInMethods(), logger)
+	laneWiring := observeLaneWiring(ctx, cfg, tokenSigner, lane.signInMethods(), lane, logger)
 	logger.Info("identity posture lane wiring", laneWiringCensus(laneWiring)...)
 	if err := config.ValidateLaneWiring(cfg, laneWiring); err != nil {
 		return fmt.Errorf("identity posture lane: %w", err)
@@ -1281,6 +1315,14 @@ func runServe(cfg config.Config) error {
 		return fmt.Errorf("профиль поверхности выдачи docker-токена: %w", err)
 	}
 
+	// (3а) Полоса входа паролем — четыре глагола формы на своём слушателе,
+	// взаимный TLS, вызывающий — ровно край (Ф3, Р7). Под `external` поверхность
+	// объявлена выключенной с причиной, а не пропущена молча.
+	loginLaneSurface, err := loginLaneSurface(cfg, surfaceMode, logger, lane, mtlsCfg)
+	if err != nil {
+		return fmt.Errorf("профиль поверхности полосы входа: %w", err)
+	}
+
 	// jwksUpstreamTimeout — потолок ОДНОГО обращения зеркала к верхнему хопу.
 	// Назван здесь потому, что клиент собирается в этом корне, а обработчику
 	// обязана достаться ТА ЖЕ величина, с которой клиент построен: два места с
@@ -1526,6 +1568,7 @@ func runServe(cfg config.Config) error {
 		{knobHooks, hooksSurface},
 		{knobMetrics, metricsSurface},
 		{knobRegistryToken, registryTokenSurface},
+		{knobLoginLane, loginLaneSurface},
 		{knobJWKSProxy, jwksProxySurface},
 		{knobPublicREST, restSurface},
 		{knobInternalREST, internalRESTSurface},

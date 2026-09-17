@@ -143,21 +143,35 @@ type invPrincRepo struct {
 	// путь мог не эмитить ничего, и дублёр, глотающий вызов, сделал бы это
 	// невидимым.
 	mailIntents []mailIntent
+	// seq — ПОРЯДОК вызовов писателя. Утверждение «членство читается той же
+	// транзакцией, что его завела» есть утверждение о порядке (вставка → чтение
+	// → фиксация), и наблюдаем он только у дублёра, который его записывает.
+	seq []string
+	// memberships — строки, которые завёл бы `InsertPending`: одна на пару
+	// «человек × аккаунт», состояние выводится из личности. Дублёр отвечает на
+	// чтение пары ТЕМ, что записал, а не выдумкой (kaname#181).
+	memberships map[string]domain.Membership
+}
+
+func (f *invPrincRepo) record(step string) {
+	f.mu.Lock()
+	f.seq = append(f.seq, step)
+	f.mu.Unlock()
 }
 
 func (f *invPrincRepo) Reader(context.Context) (kanamerepo.Reader, error) {
-	return &invPrincReader{}, nil
+	return &invPrincReader{parent: f}, nil
 }
 func (f *invPrincRepo) Writer(context.Context) (kanamerepo.Writer, error) {
-	return &invPrincWriter{parent: f}, nil
+	return &invPrincWriter{invPrincReader: invPrincReader{parent: f}, parent: f}, nil
 }
 func (f *invPrincRepo) Close() {}
 
-type invPrincReader struct{}
+type invPrincReader struct{ parent *invPrincRepo }
 
 func (r *invPrincReader) Accounts() account.ReaderIface                { return nil }
 func (r *invPrincReader) Projects() repoproject.ReaderIface            { return nil }
-func (r *invPrincReader) Users() repouser.ReaderIface                  { return invPrincUserRdr{} }
+func (r *invPrincReader) Users() repouser.ReaderIface                  { return invPrincUserRdr{parent: r.parent} }
 func (r *invPrincReader) ServiceAccounts() service_account.ReaderIface { return nil }
 func (r *invPrincReader) Groups() group.ReaderIface                    { return nil }
 func (r *invPrincReader) Roles() role.ReaderIface                      { return nil }
@@ -165,7 +179,7 @@ func (r *invPrincReader) AccessBindings() access_binding.ReaderIface   { return 
 func (r *invPrincReader) Commit(context.Context) error                 { return nil }
 func (r *invPrincReader) Rollback(context.Context) error               { return nil }
 
-type invPrincUserRdr struct{}
+type invPrincUserRdr struct{ parent *invPrincRepo }
 
 func (invPrincUserRdr) Get(_ context.Context, id domain.UserID) (domain.User, error) {
 	return domain.User{ID: id}, nil
@@ -203,7 +217,14 @@ type invPrincWriter struct {
 func (w *invPrincWriter) AccountsW() account.WriterIface     { return nil }
 func (w *invPrincWriter) ProjectsW() repoproject.WriterIface { return nil }
 func (w *invPrincWriter) UsersW() repouser.WriterIface {
-	return &invPrincUserWtr{parent: w.parent}
+	return &invPrincUserWtr{invPrincUserRdr: invPrincUserRdr{parent: w.parent}, parent: w.parent}
+}
+
+// Commit записывается в порядок: «чтение членства ДО фиксации» и есть то, что
+// отличает чтение той же транзакцией от чтения после коммита.
+func (w *invPrincWriter) Commit(context.Context) error {
+	w.parent.record("commit")
+	return nil
 }
 func (w *invPrincWriter) ServiceAccountsW() service_account.WriterIface            { return nil }
 func (w *invPrincWriter) GroupsW() group.WriterIface                               { return nil }
@@ -242,6 +263,25 @@ func (w *invPrincUserWtr) InsertPending(_ context.Context, u domain.User, _ time
 	defer w.parent.mu.Unlock()
 	w.parent.inserted = true
 	w.parent.gotInvitedBy = u.InvitedBy
+	w.parent.seq = append(w.parent.seq, "insert-pending")
+	// Та же половина оператора, что у настоящего писателя: строка членства
+	// заводится ВМЕСТЕ со строкой человека, состояние — из личности.
+	if w.parent.memberships == nil {
+		w.parent.memberships = map[string]domain.Membership{}
+	}
+	key := string(u.ID) + "/" + string(u.AccountID)
+	if _, exists := w.parent.memberships[key]; !exists {
+		now := time.Now().UTC()
+		w.parent.memberships[key] = domain.Membership{
+			ID:        domain.MembershipID("mbr-0000000000000" + string(u.AccountID[len(u.AccountID)-4:])),
+			AccountID: u.AccountID,
+			UserID:    u.ID,
+			State:     domain.MembershipStatePending,
+			InvitedBy: u.InvitedBy,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+	}
 	return u, true, nil
 }
 
@@ -282,6 +322,23 @@ func (r *invPrincWriter) Visibility() visibility.ReaderIface { return nil }
 // исключения из аккаунта (#1127).
 func (invPrincUserRdr) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
+}
+
+// Membership — дублёр отвечает ТЕМ, что записал `InsertPending`, и записывает
+// сам факт чтения в порядок вызовов: «читается той же транзакцией» доказуемо
+// только положением этого шага между вставкой и фиксацией (kaname#181).
+func (r invPrincUserRdr) Membership(_ context.Context, userID domain.UserID, accountID domain.AccountID) (domain.Membership, error) {
+	if r.parent == nil {
+		return domain.Membership{}, iamerr.ErrNotFound
+	}
+	r.parent.mu.Lock()
+	defer r.parent.mu.Unlock()
+	r.parent.seq = append(r.parent.seq, "read-membership")
+	m, ok := r.parent.memberships[string(userID)+"/"+string(accountID)]
+	if !ok {
+		return domain.Membership{}, iamerr.ErrNotFound
+	}
+	return m, nil
 }
 
 // RemoveMembership — дублёр исключения из аккаунта не делает: предмет этой

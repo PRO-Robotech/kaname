@@ -85,7 +85,56 @@ const (
 	// СВОЙ и более простой, чем у общего уборщика платформы, а послабление
 	// обязано нести гейт, который покраснеет с появлением оживителя.
 	SubjectProviderCompensationOutbox = "provider_compensation_outbox"
+	// SubjectHumanSessions — записи нашей сессии человека, которые `Resolve`
+	// уже не обслужит ни при каком носителе: истёкшие и снятые (Ф3-49).
+	SubjectHumanSessions = "human_sessions"
+	// SubjectLoginFailures — следы неверных предъявлений пароля старше самого
+	// длинного окна счёта (Ф3 Р10).
+	SubjectLoginFailures = "login_failures"
 )
+
+// HumanSessionReapers — ДВА уборщика полосы входа (Ф3): порог у второго —
+// самое длинное окно счёта, величина посадки, поэтому он приходит параметром
+// вместе с окном, а не выписывается длительностью.
+type HumanSessionReapers struct {
+	Sessions      HumanSessionReaper
+	Failures      LoginFailureReaper
+	LongestWindow time.Duration
+}
+
+// HumanSessionReaper — порт уборщика истёкших и снятых записей сессии.
+type HumanSessionReaper interface {
+	SweepUnservableSessions(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// LoginFailureReaper — порт уборщика следов неверных предъявлений.
+type LoginFailureReaper interface {
+	SweepAgedFailures(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// WithHumanSessions — записи реестра полосы входа поверх базовых. Отдельной
+// функцией, а не параметрами `Subjects`: полоса поднимается посадкой `own`, и
+// под `external` записей у неё нет — уборщик без предмета выглядел бы исправным.
+func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
+	if r.Sessions == nil || r.Failures == nil {
+		return base
+	}
+	return append(base,
+		Subject{
+			Name: SubjectHumanSessions,
+			// Порог — функция предиката читателя: запись годна к снятию, как
+			// только `Resolve` её не обслужит, и не раньше; запаса сверх срока
+			// не нужно — момент истечения ВКЛЮЧАЮЩИЙ и у читателя, и у уборки.
+			Grace: 0,
+			Sweep: r.Sessions.SweepUnservableSessions,
+		},
+		Subject{
+			Name:  SubjectLoginFailures,
+			Grace: r.LongestWindow,
+			Sweep: r.Failures.SweepAgedFailures,
+		},
+	)
+}
 
 // SweepFunc — один проход уборщика по одному предмету.
 //

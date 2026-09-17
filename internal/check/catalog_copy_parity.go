@@ -50,8 +50,9 @@
 // ЧТО СВЕРКА УТВЕРЖДАЕТ ТЕПЕРЬ
 //
 // Норма прежняя и НЕ ослаблена: копии — ОДИН порождённый артефакт. Изменилось
-// то, что у равенства появился закрытый список переименований фундамента, и
-// каждое из них обязано держать себя САМО в обе стороны. Остаток после их
+// то, что у равенства появились ДВА закрытых перечня объявленных окон —
+// переименования фундамента и записи службы, ждущие края (kaname#181), — и
+// каждая запись обязана держать себя САМА в обе стороны. Остаток после их
 // применения — находка с прежним текстом.
 //
 // Сравнение остаётся ПОБАЙТОВЫМ, а не «по смыслу»: файл режется на блоки
@@ -156,6 +157,93 @@ func CatalogFoundationRenames() []CatalogFoundationRename {
 	return out
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ВТОРОЙ ВИД ЗАПИСИ — ГЛАГОЛ СЛУЖБЫ, КОТОРОГО КРАЙ ЕЩЁ НЕ ВИДЕЛ (kaname#181)
+//
+// Тот же класс окна, что у переименования фундамента, с другой стороны: служба
+// завела СВОЙ глагол, а копия края порождается из её контракта ПО ПИНУ — то есть
+// увидит его только после посадки в ствол службы и подъёма пина платформой.
+// Промежуточного состояния, в котором обе копии совпали бы, не существует by
+// construction: пин не поднять на ревизию, которой в стволе нет, а ствол не
+// принять с красной сверкой.
+//
+// Запись объявляет: у нас эта запись ЕСТЬ, у края её ещё НЕТ, и это не
+// расхождение. Держит себя в обе стороны: край назвал глагол — предикат снятия
+// наступил, запись обязана уйти и копия — синхронизироваться; в нашей копии
+// глагола нет — запись утверждает о дереве неправду.
+//
+// Что при этом НЕ ослаблено: содержимое нашей записи не сверяется ни с чем,
+// пока края нет, — поэтому запись сюда кладётся ПОРОЖДЁННОЙ генератором края
+// над своим контрактом, а не рукой; расхождение с тем, что край породит по
+// пину, всплывёт первой же сверкой после подъёма — находкой вида «копии».
+
+// CatalogPendingEntry — запись нашей копии, у которой в копии края ещё нет
+// предмета, потому что край порождает её из нашего контракта по пину.
+type CatalogPendingEntry struct {
+	// OwnFQN — полное имя метода в нашей копии.
+	OwnFQN string
+	// Why — почему отсутствие у края не дефект.
+	Why string
+	// Removal — ПРЕДИКАТ СНЯТИЯ, внешний по отношению к этому дереву.
+	Removal string
+	// Refs — где предмет ведётся.
+	Refs string
+}
+
+// catalogPendingEntries — ЗАКРЫТЫЙ перечень записей, ждущих края.
+//
+// Условия те же три, что у переименований: величина названа замером, предмет
+// заведён, снятие наступает от внешнего факта. Самоистечение держит
+// `CompareCatalogCopies`: запись, чей глагол край уже назвал, — находка.
+var catalogPendingEntries = []CatalogPendingEntry{
+	{
+		OwnFQN: "kaname.cloud.iam.v1.MembershipService/Create",
+		Why: "глагол создания членства заведён контрактом службы (kaname#181, IAM-ID-1 §4 S3.2); " +
+			"запись порождена генератором края над этим контрактом (340 записей против 338 у " +
+			"края на стволе платформы a2981976c61, вторая — чужой глагол той же линии); " +
+			"край порождает свою копию по пину службы и увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.MembershipService/Create` " +
+			"— платформа подняла пин службы и перегенерировала каталог; тогда запись снимается, " +
+			"а копия синхронизируется (make sync-permission-catalog)",
+		Refs: "kaname#181 · PRO-Robotech/kacho#1351",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.InternalHumanSessionService/Resolve",
+		Why: "глагол чтения нашей сессии заведён контрактом службы (kaname#179, Ф3 полосы входа); " +
+			"запись порождена генератором края над этим контрактом (340 записей против 338 у края " +
+			"на стволе платформы 741d340e3ee — вторая из двух и есть эта; сверка копии с контрактом " +
+			"`TestOwnCatalogCopyCoversOwnContract` без неё красна: RPC контракта 107, своих строк 106); " +
+			"край порождает свою копию по пину службы, а пин на стволе платформы (40bd49a3) старше " +
+			"контракта с этим глаголом — увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.InternalHumanSessionService/Resolve` " +
+			"— платформа подняла пин службы до ревизии не старше c0eb17c5 (kaname#179) и перегенерировала " +
+			"каталог; тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
+		Refs: "kaname#184 · PRO-Robotech/kacho#2689",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.UserService/ResendInvite",
+		Why: "глагол повторной отправки письма приглашения заведён контрактом службы (kaname#186, " +
+			"MAIL-36, Р22); запись порождена генератором края над этим контрактом " +
+			"(`gateway/scripts/gen-permission-catalog.sh` платформы с отбором домена iam над деревом, " +
+			"где `kaname/` — контракт службы этой ревизии: 108 строк службы против 107 в копии, " +
+			"остальные 107 совпали побайтово; у края на стволе платформы 972bdc342d1 записей 338, " +
+			"этой нет); край порождает свою копию по пину службы, а пин на стволе платформы " +
+			"(40bd49a3) старше контракта с этим глаголом — увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.UserService/ResendInvite` " +
+			"— платформа подняла пин службы до ревизии не старше b5e0c74d (kaname#186) и " +
+			"перегенерировала каталог; тогда запись снимается, а копия синхронизируется " +
+			"(make sync-permission-catalog)",
+		Refs: "kaname#186 · PRO-Robotech/kacho#1774",
+	},
+}
+
+// CatalogPendingEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
+func CatalogPendingEntries() []CatalogPendingEntry {
+	out := make([]CatalogPendingEntry, len(catalogPendingEntries))
+	copy(out, catalogPendingEntries)
+	return out
+}
+
 // Виды находок. Разделены потому, что у них РАЗНЫЙ адресат: ведомость правят
 // здесь, а расхождение копий ведёт либо к синхронизации, либо к платформе.
 // Общий заголовок «копии разошлись» на находке ведомости лгал бы: при
@@ -183,6 +271,11 @@ type CatalogParityCensus struct {
 	RenamesDeclared int
 	// RenamesApplied — сколько из них ДЕЙСТВИТЕЛЬНО применились к копии края.
 	RenamesApplied int
+	// PendingDeclared — записей, ждущих края, в ведомости.
+	PendingDeclared int
+	// PendingApplied — сколько из них ДЕЙСТВИТЕЛЬНО вынесены из сравнения:
+	// глагол есть у нас и его ещё нет у края.
+	PendingApplied int
 	// BytesEqual — совпали ли копии побайтово ДО применения ведомости.
 	BytesEqual bool
 }
@@ -190,27 +283,30 @@ type CatalogParityCensus struct {
 // String — перепись одной строкой, пригодной для журнала конвейера.
 func (c CatalogParityCensus) String() string {
 	return fmt.Sprintf(
-		"перепись: записей у края %d · записей у нас %d · переименований объявлено %d · применено %d · побайтово до ведомости %v",
-		c.EdgeEntries, c.OwnEntries, c.RenamesDeclared, c.RenamesApplied, c.BytesEqual)
+		"перепись: записей у края %d · записей у нас %d · переименований объявлено %d · применено %d · "+
+			"ожидающих края объявлено %d · применено %d · побайтово до ведомости %v",
+		c.EdgeEntries, c.OwnEntries, c.RenamesDeclared, c.RenamesApplied,
+		c.PendingDeclared, c.PendingApplied, c.BytesEqual)
 }
 
 // CompareCatalogCopies — сверка против ДЕЙСТВУЮЩЕЙ ведомости дерева. Возвращает
 // перечень находок (пустой = зелёное) и перепись. Ошибка — это ТРЕТИЙ ИСХОД:
 // разобрать не удалось, вердикта о совпадении копий НЕТ (не путать с находкой).
 func CompareCatalogCopies(edgeRaw, ownRaw string) ([]CatalogParityFinding, CatalogParityCensus, error) {
-	return compareCatalogCopiesWith(catalogFoundationRenames, edgeRaw, ownRaw)
+	return compareCatalogCopiesWith(catalogFoundationRenames, catalogPendingEntries, edgeRaw, ownRaw)
 }
 
-// compareCatalogCopiesWith — та же сверка с ЯВНОЙ ведомостью.
+// compareCatalogCopiesWith — та же сверка с ЯВНЫМИ ведомостями.
 //
 // Отдельная форма нужна ПРОБАМ: инъекция обязана вносить дефект в ведомость и
 // в копии, а не подменять пакетную переменную из-под соседних проб. Прод-вход
-// остаётся один и ведомость берёт только свою — подменить её вызовом нельзя.
+// остаётся один и ведомости берёт только свои — подменить их вызовом нельзя.
 func compareCatalogCopiesWith(
-	renames []CatalogFoundationRename, edgeRaw, ownRaw string,
+	renames []CatalogFoundationRename, pending []CatalogPendingEntry, edgeRaw, ownRaw string,
 ) ([]CatalogParityFinding, CatalogParityCensus, error) {
 	census := CatalogParityCensus{
 		RenamesDeclared: len(renames),
+		PendingDeclared: len(pending),
 		BytesEqual:      edgeRaw == ownRaw,
 	}
 
@@ -252,6 +348,39 @@ func compareCatalogCopiesWith(
 		census.RenamesApplied++
 	}
 
+	// ── ЗАПИСИ, ЖДУЩИЕ КРАЯ, ДЕРЖАТ СЕБЯ В ОБЕ СТОРОНЫ ────────────────────────
+	//
+	// Край уже назвал глагол → предикат снятия наступил: запись обязана уйти, а
+	// копия — синхронизироваться. В нашей копии глагола нет → ведомость
+	// утверждает о НАШЕМ дереве неправду. Только при предмете с обеих сторон
+	// запись выносится из сравнения — и ровно она одна.
+	awaited := make(map[string]bool, len(pending))
+	for _, e := range pending {
+		if _, ok := edgeByFQN[e.OwnFQN]; ok {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"край уже несёт глагол %q — предикат снятия наступил: снимите запись и синхронизируйте копию. %s",
+				e.OwnFQN, e.Refs)})
+			continue
+		}
+		if _, ok := ownByFQN[e.OwnFQN]; !ok {
+			findings = append(findings, CatalogParityFinding{CatalogFindingLedger, fmt.Sprintf(
+				"запись ждёт края для глагола %q, которого в НАШЕЙ копии нет — она утверждает о дереве неправду. %s",
+				e.OwnFQN, e.Refs)})
+			continue
+		}
+		awaited[e.OwnFQN] = true
+		census.PendingApplied++
+	}
+	ownCompared := ownBlocks
+	if len(awaited) > 0 {
+		ownCompared = make([]catalogBlock, 0, len(ownBlocks))
+		for _, b := range ownBlocks {
+			if !awaited[b.fqn] {
+				ownCompared = append(ownCompared, b)
+			}
+		}
+	}
+
 	// ── ПРИМЕНЕНИЕ ВЕДОМОСТИ К КОПИИ КРАЯ ────────────────────────────────────
 	//
 	// Переименование двигает запись в перечне: он отсортирован по `fqn`. Значит
@@ -270,12 +399,12 @@ func compareCatalogCopiesWith(
 	}
 	sort.Slice(projected, func(i, j int) bool { return projected[i].fqn < projected[j].fqn })
 
-	if assembleCatalog(projected) == ownRaw {
+	if assembleCatalog(projected) == assembleCatalog(ownCompared) {
 		return findings, census, nil
 	}
 
 	// ── ОСТАТОК — НАХОДКА, И ОН НАЗЫВАЕТСЯ ПОИМЁННО ──────────────────────────
-	findings = append(findings, catalogResidualFindings(projected, ownBlocks)...)
+	findings = append(findings, catalogResidualFindings(projected, ownCompared)...)
 	if len(findings) == 0 {
 		// Состав и содержимое записей сошлись, а файл — нет: разошлась ФОРМА
 		// файла (порядок, отступ, перевод строки). Молчать об этом нельзя:

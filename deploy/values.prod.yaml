@@ -127,6 +127,15 @@ apiServer:
   # «нарушений нет» стало бы неотличимо от «не судили».
   restEndpoint: tcp://0.0.0.0:9098
   internalRestEndpoint: tcp://0.0.0.0:9099
+  # Слушатель полосы входа паролем (Ф3, kacho#1269). Поднимается ПОСАДКОЙ
+  # `authn.identityProvider: own`, а не адресом: на посадке `external` этого
+  # профиля процесс адрес читает, объявляет поверхность выключенной с причиной и
+  # слушателя не поднимает. Величина стоит здесь по приёмке Ф3 (Р3, Р11, Ф3-42):
+  # дословный перенос живёт в ПРОФИЛЯХ обоих чартов, где его видит читающий, а не
+  # в построении, где его не видит никто; перевод установки на `own` не заводит
+  # полосу с нуля. Порт свой — от фронтов (9098/9099) отличен, и страж
+  # различимости адресов это судит и на посадке `external`.
+  loginLaneEndpoint: tcp://0.0.0.0:9100
   registryToken:
     # REALM ДОКЕРНОЙ ПОЛОСЫ. Страж на снятии молчит — встроенное умолчание
     # процесса непусто, — но оно называет локальное имя стенда, и оставленным
@@ -195,6 +204,42 @@ authn:
   # на поставку отдельного продукта. Теперь профили ЭТОГО чарта он читает тоже:
   # `cmd/kaname` · TestEveryLaneIsEitherProfiledOrProvablyUnreachable.
   identityProvider: external
+
+  # ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) — величины, которые читает ТОЛЬКО
+  # посадка `own`. Этот профиль стоит на `external`, и страж их здесь не судит;
+  # объявлены они по приёмке Ф3 (Р3 — срок 24 ч и домен, Р11 — длина 8 и
+  # состояние проверки утечек, Ф3-42 — ёмкость и резерв памяти): дословный
+  # перенос прежних величин живёт в профилях обоих чартов, где его видит
+  # читающий. Умолчания в коде нет ни у одной: под `own` незаданное — отказ
+  # старта с именем ручки (`KANAME_AUTHN__LOGIN__*`). Ведомость восстановленных
+  # намеренно в `prod_profile_test.go` называет каждую с этой же причиной.
+  login:
+    # абсолютный срок нашей сессии от выдачи (Ф1 §4.1: 24 ч, постоянное печенье)
+    sessionTtl: 24h
+    # ключ Domain печенья: доменное имя origin консоли либо `none` на адресной
+    # посадке (kacho#1222: Domain с IP-литералом браузер отбрасывает целиком)
+    cookieDomain: none
+    # предел частоты неверных предъявлений — по адресу почты и по источнику
+    addressAttempts: 5
+    addressWindow: 15m
+    sourceAttempts: 50
+    sourceWindow: 15m
+    # правило пароля — одно на вход, регистрацию и восстановление (Ф1-38)
+    passwordMinLength: 8
+    # проверка по базе утечек: `enabled` с `breachCheckUrl` либо `disabled` словом;
+    # необъявленное — отказ старта, потому что выключенная молча неотличима от
+    # настроенной (Ф1-37)
+    breachCheck: disabled
+    # чем ПИСАТЬ новый материал и его стоимость (KiB · проходы · параллелизм)
+    hasherFormat: argon2id
+    hasherMemory: 65536
+    hasherIterations: 3
+    hasherParallelism: 4
+    # одновременных проверок пароля и резерв памяти процесса сверх них: ёмкость ×
+    # память на потолке + резерв обязаны помещаться в предел памяти контейнера,
+    # страж старта сверяет числа (Ф3-42)
+    verifierCapacity: 8
+    memoryReserveBytes: 268435456
 
   # КРУГ ЗАКОННЫХ ОТПРАВИТЕЛЕЙ ПЕРЕДАННОЙ ЛИЧНОСТИ.
   #
@@ -456,6 +501,16 @@ env:
   KANAME_REGISTRYTOKEN_SERVER_MTLS_ENABLE: "true"
   KANAME_REGISTRYTOKEN_SERVER_MTLS_CERTFILE: /etc/kaname/tls/server/tls.crt
   KANAME_REGISTRYTOKEN_SERVER_MTLS_KEYFILE: /etc/kaname/tls/server/tls.key
+  # Слушатель полосы входа паролем (Ф3, kacho#1269) — ВЗАИМНЫЙ TLS: вызывающий
+  # (край платформы) опознаётся SAN проверенного клиентского листа, режим
+  # `mutual` под `own` — условие старта (страж requireLoginLaneTLS). На посадке
+  # `external` этого профиля слушатель не поднимается, и страж ручек не читает;
+  # объявлены по той же причине, что блок `authn.login` выше.
+  KANAME_LOGINLANE_SERVER_MTLS_ENABLE: "true"
+  KANAME_LOGINLANE_SERVER_MTLS_CERTFILE: /etc/kaname/tls/server/tls.crt
+  KANAME_LOGINLANE_SERVER_MTLS_KEYFILE: /etc/kaname/tls/server/tls.key
+  KANAME_LOGINLANE_SERVER_MTLS_CLIENTCAFILES: /etc/kaname/tls/server/ca.crt
+  KANAME_LOGINLANE_SERVER_MTLS_CLIENTAUTHMODE: mutual
 
   # ── ТРАНСПОРТ ОСТАЛЬНЫХ HTTP-РЁБЕР ───────────────────────────────────────
   #

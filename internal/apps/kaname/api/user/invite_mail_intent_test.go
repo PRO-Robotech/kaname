@@ -230,8 +230,40 @@ func (f *inviteIdempotentRepo) Reader(context.Context) (kanamerepo.Reader, error
 	return &inviteIdempotentReader{existing: f.existing}, nil
 }
 
+// Writer — тот же писатель, что у `invPrincRepo`, поверх пары членства
+// существующего приглашённого. Пара заводится продуктом ТЕМ ЖЕ оператором, что
+// строка человека (kaname#181: «пары нет только при нарушенной конструкции
+// хранилища»), поэтому «человек уже есть, а членства нет» — состояние, которого
+// продукт не производит; дублёр без пары был бы строже продукта и ронял бы
+// повторное приглашение на чтении членства, а не на предмете пробы.
 func (f *inviteIdempotentRepo) Writer(context.Context) (kanamerepo.Writer, error) {
-	return &invPrincWriter{parent: &f.invPrincRepo}, nil
+	f.seedExistingMembership()
+	return &invPrincWriter{invPrincReader: invPrincReader{parent: &f.invPrincRepo}, parent: &f.invPrincRepo}, nil
+}
+
+// seedExistingMembership — пара «человек × аккаунт» существующего приглашённого,
+// в той же форме, в какой её записал бы `InsertPending`; идемпотентно.
+func (f *inviteIdempotentRepo) seedExistingMembership() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.memberships == nil {
+		f.memberships = map[string]domain.Membership{}
+	}
+	u := f.existing
+	key := string(u.ID) + "/" + string(u.AccountID)
+	if _, ok := f.memberships[key]; ok {
+		return
+	}
+	now := time.Now().UTC()
+	f.memberships[key] = domain.Membership{
+		ID:        domain.MembershipID("mbr-0000000000000" + string(u.AccountID[len(u.AccountID)-4:])),
+		AccountID: u.AccountID,
+		UserID:    u.ID,
+		State:     domain.MembershipStatePending,
+		InvitedBy: u.InvitedBy,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
 }
 
 type inviteIdempotentReader struct {

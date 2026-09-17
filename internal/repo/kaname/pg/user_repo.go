@@ -142,6 +142,28 @@ func (r *userReader) MembershipExists(ctx context.Context, userID domain.UserID,
 	return exists, nil
 }
 
+// Membership — членство пары «человек × аккаунт» проекцией `membershipCols`:
+// колонки объявлены ОДИН раз (`membership_repo.go`), и эта дорога к строке
+// разойтись с аккаунт-скоупными чтениями не может — она их же проекцию и читает.
+func (r *userReader) Membership(ctx context.Context, userID domain.UserID, accountID domain.AccountID) (domain.Membership, error) {
+	if userID == "" || accountID == "" {
+		// Пустая половина пары означала бы «любой», то есть строку, которую
+		// вызывающий не называл. До запроса пустое значение доходить не должно.
+		return domain.Membership{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument membership pair")
+	}
+	q := fmt.Sprintf(`SELECT %s %s WHERE m.user_id = $1 AND m.account_id = $2`,
+		membershipCols, membershipFrom)
+	m, err := scanMembership(r.tx.QueryRow(ctx, q, string(userID), string(accountID)))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Membership{}, iamerr.Wrapf(iamerr.ErrNotFound,
+				"Membership of user %s in account %s not found", userID, accountID)
+		}
+		return domain.Membership{}, mapErr(err, "", string(userID))
+	}
+	return m, nil
+}
+
 // FindPendingByEmail — приглашённые строки по адресу.
 //
 // Строк по адресу больше не бывает больше одной (`users_identity_email_uniq`,
