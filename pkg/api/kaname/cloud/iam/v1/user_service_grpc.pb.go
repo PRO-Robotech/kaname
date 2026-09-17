@@ -56,6 +56,10 @@ type UserServiceClient interface {
 	// Invite a user by email. Если user уже invited в этот Account
 	// (idempotent re-invite) — Operation возвращается, AB опционально создается.
 	// Permission: requires `admin` OR `editor` relation на account_id.
+	//
+	// Письмо приглашения — то же правило, что у `MembershipService.Create` (один
+	// поток): уходит, пока личность ни разу не входила, на первом и на повторном
+	// приглашении той же пары, в пределах ограничения частоты на адрес.
 	Invite(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
 	// не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).
@@ -460,6 +464,10 @@ type UserServiceServer interface {
 	// Invite a user by email. Если user уже invited в этот Account
 	// (idempotent re-invite) — Operation возвращается, AB опционально создается.
 	// Permission: requires `admin` OR `editor` relation на account_id.
+	//
+	// Письмо приглашения — то же правило, что у `MembershipService.Create` (один
+	// поток): уходит, пока личность ни разу не входила, на первом и на повторном
+	// приглашении той же пары, в пределах ограничения частоты на адрес.
 	Invite(context.Context, *InviteUserRequest) (*operation.Operation, error)
 	// ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
 	// не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).

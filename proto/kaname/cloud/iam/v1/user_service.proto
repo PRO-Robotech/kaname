@@ -62,6 +62,10 @@ service UserService {
   // Invite a user by email. Если user уже invited в этот Account
   // (idempotent re-invite) — Operation возвращается, AB опционально создается.
   // Permission: requires `admin` OR `editor` relation на account_id.
+  //
+  // Письмо приглашения — то же правило, что у `MembershipService.Create` (один
+  // поток): уходит, пока личность ни разу не входила, на первом и на повторном
+  // приглашении той же пары, в пределах ограничения частоты на адрес.
   rpc Invite (InviteUserRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       post: "/iam/v1/users:invite"

@@ -36,7 +36,7 @@ import dedent from 'ts-dedent'
     <tr><td><strong>Account</strong></td><td>Верхнеуровневый tenant-контейнер</td><td>[Account](/api/account)</td></tr>
     <tr><td><strong>Project</strong></td><td>Контейнер ресурсов внутри аккаунта</td><td>[Project](/api/project)</td></tr>
     <tr><td><strong>User</strong></td><td>Человек-субъект: глобальная личность, одна строка на человека</td><td>[User](/api/user)</td></tr>
-    <tr><td><strong>Membership</strong></td><td>Принадлежность человека аккаунту; их у него может быть несколько. Только чтение</td><td>[Membership](/api/membership)</td></tr>
+    <tr><td><strong>Membership</strong></td><td>Принадлежность человека аккаунту; их у него может быть несколько. Заводится приглашением (<code>Create</code>), читается по аккаунту; правки нет — ни одного поля вызывающий не назначает сам</td><td>[Membership](/api/membership)</td></tr>
     <tr><td><strong>ServiceAccount</strong></td><td>Машинный субъект</td><td>[ServiceAccount](/api/service-account)</td></tr>
     <tr><td><strong>Group</strong></td><td>Набор субъектов для bulk-грантов</td><td>[Group](/api/group)</td></tr>
     <tr><td><strong>Role</strong></td><td>Именованный набор правил доступа</td><td>[Role](/api/role)</td></tr>
@@ -320,7 +320,8 @@ Malformed id → sync `INVALID_ARGUMENT` первым стейтментом RPC
   <tbody>
     <tr><td><code>AccountService</code></td><td>Get / List / Create / Update / Delete / ListOperations / ListAllOperations</td><td>[Account](/api/account)</td></tr>
     <tr><td><code>ProjectService</code></td><td>Get / List / Create / Update / Delete / ListOperations</td><td>[Project](/api/project)</td></tr>
-    <tr><td><code>UserService</code></td><td>Get / List / Invite / Update / Delete / ListOperations</td><td>[User](/api/user)</td></tr>
+    <tr><td><code>UserService</code></td><td>Get / List / Invite / ResendInvite / Update / RemoveFromAccount / Block / Unblock / ResetSecondFactor / Delete / ListOperations</td><td>[User](/api/user)</td></tr>
+    <tr><td><code>MembershipService</code></td><td>Create / Get / List</td><td>[Membership](/api/membership)</td></tr>
     <tr><td><code>ServiceAccountService</code></td><td>Get / List / Create / Update / Delete / ListOperations</td><td>[ServiceAccount](/api/service-account)</td></tr>
     <tr><td><code>GroupService</code></td><td>Get / List / Create / Update / Delete / AddMember / RemoveMember / ListMembers / ListOperations</td><td>[Group](/api/group)</td></tr>
     <tr><td><code>RoleService</code></td><td>Get / List / Create / Update / Delete / ListOperations</td><td>[Role](/api/role)</td></tr>
