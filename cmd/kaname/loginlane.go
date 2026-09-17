@@ -517,7 +517,13 @@ func loginLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog
 	addr := ""
 	var handler http.Handler
 	if lane != nil {
-		addr = cfg.APIServer.LoginLaneEndpoint
+		// Адрес — НОРМАЛИЗОВАННЫЙ, тем же правилом, что у остальных
+		// поверхностей. Здесь стояло сырое объявление профиля
+		// (`tcp://0.0.0.0:9100`): под `own` процесс проходил всех стражей и
+		// падал на привязке этой поверхности — «too many colons in address»
+		// (задача kaname#21, живой старт 2026-09-17). Держит
+		// `loginlane_addr_test.go`.
+		addr = cfg.APIServer.LoginLaneListenAddress()
 		handler = lane.handler
 	}
 	tlsCfg, err := mtlsCfg.LoginLaneServerTLSConfig()
