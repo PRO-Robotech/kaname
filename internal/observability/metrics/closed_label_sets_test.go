@@ -66,6 +66,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
@@ -171,6 +172,11 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Cells: len(humansession.RewriteOutcomes()),
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "переписывание материала, которое не случилось ни разу, обязано быть отличимо от непровязанного",
+	},
+	RegistrationOutcomesMetric: {
+		Cells: len(registration.Lanes) * len(registration.Outcomes()), // полоса × исход
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "вызывающий видит ОДИН отказ регистрации (Ф4 Р3); занятость и потолок темпа различимы только клеткой, и клетка обязана быть с нулём до первого события",
 	},
 	// ── ВОССТАНОВЛЕНИЕ ДОСТУПА (Ф5, kacho#1271) — тот же конструктор ─────────
 	RecoveryRequestOutcomesMetric: {

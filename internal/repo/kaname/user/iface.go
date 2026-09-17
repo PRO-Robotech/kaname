@@ -74,6 +74,18 @@ type ReaderIface interface {
 	// идемпотентно по построению (0 снятых строк = «его там и не было»), а
 	// спрашивать перед записью значило бы завести check-then-act (ban #10).
 	MembershipExists(ctx context.Context, userID domain.UserID, accountID domain.AccountID) (bool, error)
+
+	// Membership — членство человека в НАЗВАННОМ аккаунте, той же проекцией, что
+	// отдают аккаунт-скоупные чтения `MembershipService` (kaname#181).
+	//
+	// Зачем оно здесь, а не только в узком корне чтения членства. Ответ операции
+	// создания членства обязан быть тем, что записала ЕЁ транзакция; узкий
+	// корень открывает свою сессию на пуле ЧТЕНИЯ — на реплике, если она есть, —
+	// и после коммита мог бы не увидеть только что записанной строки. Поэтому
+	// писатель читает пару ЭТОЙ ЖЕ транзакцией, до фиксации.
+	//
+	// Отсутствующая пара — `ErrNotFound` тоном отсутствия членства.
+	Membership(ctx context.Context, userID domain.UserID, accountID domain.AccountID) (domain.Membership, error)
 }
 
 type WriterIface interface {

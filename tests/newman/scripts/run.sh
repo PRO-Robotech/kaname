@@ -503,6 +503,13 @@ else
   # гейт назвал бы `iam-membership-read(no-report)` — и это читалось бы как
   # призрачный отказ, а не как «набор не запускали».
   run_one "iam-membership-read"
+  # iam-membership-create — создание членства на плоской коллекции
+  # (`POST /iam/v1/memberships`, kaname#181, IAM-ID-1 §4 S3.2): исход виден
+  # списком аккаунта, повтор прежним глаголом не удваивает, разграничение —
+  # authz-first. Объявляется здесь по той же причине, что и сосед выше: без
+  # строки набор исполнялся бы нулём коллекций, а гейт назвал бы
+  # `iam-membership-create(no-report)`.
+  run_one "iam-membership-create"
   # iam-token-facade-conformance — #59 Phase C: iam is the SINGLE FACADE to the
   # token-signing provider (security.md §«Production-mode обязателен ВЕЗДЕ» п.4).
   # IBT-04/05/06/10 (the acceptance's e2e-conformance scenarios) + IBT-12/13/14/15

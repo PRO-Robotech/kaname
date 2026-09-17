@@ -222,7 +222,7 @@ errors/              # sentinel + WrapPgErr.
 | `:9090`   | `AuthorizeService`              | Check / BatchCheck / ListSubjects / ExpandRelations / WhoAmI |
 | `:9090`   | `PermissionCatalogService`      | грантуемая таксономия прав                              |
 | `:9090`   | `OperationService`              | LRO Get / List / Cancel (corelib)                      |
-| `:9090`   | `MembershipService`             | read Membership (Account ↔ User)                       |
+| `:9090`   | `MembershipService`             | Create + read Membership (Account ↔ User)              |
 | `:9090`   | `UserTokenService`              | Issue / List / Revoke пользовательских токенов         |
 | `:9090`   | `IdentityQuotaService`          | List квот личности (`kaname.cloud.iam.v1`)             |
 | `:9091`   | `InternalIAMService`            | Check + Register/UnregisterResource (fgaproxy)         |

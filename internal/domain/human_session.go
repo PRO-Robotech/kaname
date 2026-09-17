@@ -236,6 +236,9 @@ const (
 	FormLogin    FormKind = "login"
 	FormLogout   FormKind = "logout"
 	FormPassword FormKind = "password"
+	// FormRegister — форма регистрации (Ф4 Р1; форма защищена признаком, как и
+	// прочие, меняющие состояние, — Ф1-39…43).
+	FormRegister FormKind = "register"
 	// Восстановление доступа (Ф5, `kacho#1271`) — две формы, два вида: запрос
 	// кода и его предъявление с новым паролем. Признак одной не годится другой
 	// (Ф1 Р6): у них разные предметы и разные последствия.
@@ -243,7 +246,7 @@ const (
 	FormRecoveryComplete FormKind = "recovery-complete"
 )
 
-var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRecovery, FormRecoveryComplete}
+var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete}
 
 // FormKinds — закрытый перечень видов формы, копией.
 func FormKinds() []FormKind {

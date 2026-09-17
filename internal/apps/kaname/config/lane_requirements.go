@@ -271,6 +271,18 @@ var LaneRequirements = []LaneRequirement{
 			return ownScoped(c.AuthN.Login.ValidateCapacity())
 		},
 	},
+	// СТРОКА РЕГИСТРАЦИИ (Ф4, kacho#1270; Р5, Ф4-18/19): величина темпа
+	// заведения объявляется профилем и незаданная — отказ старта с именем ручки.
+	// Под `external` носитель ключа — идентификатор поставщика, а величину
+	// правит администратор облака; требование не предъявляется.
+	{
+		Lanes:   laneOwn,
+		Element: "величина темпа заведения объявлена: предел и окно",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.Registration.ValidateAdmissionRate())
+		},
+	},
 	{
 		Lanes:   laneOwn,
 		Element: "срок кода восстановления доступа объявлен",

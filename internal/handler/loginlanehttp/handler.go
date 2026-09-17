@@ -5,10 +5,12 @@
 // адресе консоли, ретранслируемые краем (фаза Ф3, задача
 // PRO-Robotech/kacho#1269; приёмка
 // `docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md`,
-// решения Р2, Р3, Р10, Р12, Р16), и два глагола восстановления доступа на той
-// же полосе (фаза Ф5, задача PRO-Robotech/kacho#1271; приёмка
-// `docs/engineering/acceptance/recovery-of-access.md`): запрос кода и его
-// предъявление с новым паролем.
+// решения Р2, Р3, Р10, Р12, Р16), пятый — регистрация (фаза Ф4,
+// PRO-Robotech/kacho#1270): та же форма ответа, то же печенье, свой вид
+// признака формы и ОДИН отказ на занятость и потолок темпа (Ф4 Р3), — и два
+// глагола восстановления доступа на той же полосе (фаза Ф5, задача
+// PRO-Robotech/kacho#1271; приёмка `docs/engineering/acceptance/recovery-of-access.md`):
+// запрос кода и его предъявление с новым паролем.
 //
 // # Кто вправе звать — РОВНО край, и это судится здесь, до тела запроса
 //
@@ -52,6 +54,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
@@ -64,16 +67,18 @@ const (
 	// #nosec G101 -- это ПУТЬ глагола смены пароля, а не значение пароля.
 	PathPassword = "/iam/v1/auth/password"
 	PathCSRF     = "/iam/v1/auth/csrf"
+	// PathRegister — регистрация паролем (Ф4): подпутём, как остальные.
+	PathRegister = "/iam/v1/auth/register"
 	// Восстановление доступа (Ф5): запрос кода и его предъявление с новым
 	// паролем — два глагола, две формы, два вида признака.
 	PathRecovery         = "/iam/v1/auth/recovery"
 	PathRecoveryComplete = "/iam/v1/auth/recovery/complete"
 )
 
-// Paths — шесть глаголов, ОДНИМ объявлением: край читает тот же перечень для
+// Paths — семь глаголов, ОДНИМ объявлением: край читает тот же перечень для
 // ретрансляции (§8 инв. 7).
 func Paths() []string {
-	return []string{PathLogin, PathLogout, PathPassword, PathCSRF, PathRecovery, PathRecoveryComplete}
+	return []string{PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete}
 }
 
 // Имена печений (Р3). Имя носителя отлично от имени носителя поставщика
@@ -100,6 +105,8 @@ type Lane interface {
 	Login(ctx context.Context, in humansession.LoginInput) (humansession.LoginOutput, error)
 	Logout(ctx context.Context, bearer domain.SessionBearer) (bool, error)
 	ChangePassword(ctx context.Context, in humansession.ChangePasswordInput) (humansession.ChangePasswordOutput, error)
+	// Register — регистрация паролем (Ф4): три следствия одним исходом.
+	Register(ctx context.Context, in registration.Input) (registration.Output, error)
 	// RequestRecovery — запрос кода (Ф5-01/02): исход наружу не выходит.
 	RequestRecovery(ctx context.Context, in humansession.RequestRecoveryInput) error
 	// CompleteRecovery — предъявление кода с новым паролем (Ф5-03): выдаёт
@@ -148,6 +155,7 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 	h.mux.HandleFunc(PathLogout, h.method(http.MethodPost, h.logout))
 	h.mux.HandleFunc(PathPassword, h.method(http.MethodPost, h.changePassword))
 	h.mux.HandleFunc(PathCSRF, h.method(http.MethodGet, h.csrf))
+	h.mux.HandleFunc(PathRegister, h.method(http.MethodPost, h.register))
 	h.mux.HandleFunc(PathRecovery, h.method(http.MethodPost, h.requestRecovery))
 	h.mux.HandleFunc(PathRecoveryComplete, h.method(http.MethodPost, h.completeRecovery))
 	return h, nil
@@ -203,6 +211,15 @@ type passwordForm struct {
 	CurrentPassword string `json:"currentPassword"`
 	NewPassword     string `json:"newPassword"`
 	CSRFToken       string `json:"csrfToken"`
+}
+
+// registerForm — форма регистрации: адрес, пароль, признак. Отображаемое имя
+// сюда не принимается: у человека, заводящего себя, оно выводится из адреса и
+// правится отдельным глаголом; поле без читателя принимать нельзя.
+type registerForm struct {
+	Email     string `json:"email"`
+	Password  string `json:"password"`
+	CSRFToken string `json:"csrfToken"`
 }
 
 // recoveryRequestForm — запрос кода: только адрес.
@@ -324,6 +341,42 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Контекст формы СМЕНЯЕТСЯ выдачей сессии (Р12, Ф3-37).
+	fresh, ferr := humansession.NewFormContext()
+	if ferr != nil {
+		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, humansession.TextRequestNotPerformed, nil)
+		return
+	}
+	http.SetCookie(w, h.sessionCookie(out.Bearer))
+	http.SetCookie(w, h.formCookie(fresh))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user":    userJSON(out.View),
+		"session": sessionJSON(out.View),
+	})
+}
+
+// register — регистрация паролем (Ф4-01): три следствия одним исходом глагола,
+// ответ и печенья — как у входа; отказ — один (Ф4-11/12).
+func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
+	var form registerForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormRegister, form.CSRFToken) {
+		return
+	}
+	if err := requireFields(map[string]string{"email": form.Email, "password": form.Password}); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	out, err := h.lane.Register(r.Context(), registration.Input{
+		Email: form.Email, Password: form.Password, Source: h.source(r),
+	})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	// Контекст формы СМЕНЯЕТСЯ выдачей сессии (Р12) — как у входа.
 	fresh, ferr := humansession.NewFormContext()
 	if ferr != nil {
 		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, humansession.TextRequestNotPerformed, nil)
@@ -505,6 +558,12 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 			&errorInfo{Reason: humansession.ReasonTooManyAttempts, Domain: h.cfg.RefusalDomain})
 	case errors.Is(err, humansession.ErrAuthenticationFailed):
 		writeRefusal(w, http.StatusUnauthorized, codeUnauthenticated, humansession.TextAuthenticationFailed, nil)
+	case errors.Is(err, registration.ErrRefused):
+		// ОДИН отказ на занятость адреса и потолок темпа (Ф4 Р3): состояние не
+		// позволяет, а какое — не говорится. Ни Retry-After, ни 409: и то и
+		// другое было бы оракулом.
+		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, registration.TextRegistrationRefused,
+			&errorInfo{Reason: registration.ReasonRegistrationRefused, Domain: h.cfg.RefusalDomain})
 	case errors.Is(err, humansession.ErrFormTokenRejected):
 		writeRefusal(w, http.StatusForbidden, codePermissionDenied, humansession.TextFormTokenRejected,
 			&errorInfo{Reason: humansession.ReasonFormTokenRejected, Domain: h.cfg.RefusalDomain})
@@ -531,11 +590,12 @@ func retryAfterSeconds(d time.Duration) int64 {
 
 // Коды `google.rpc.Code`, которые отдаёт полоса.
 const (
-	codeInvalidArgument   = 3
-	codePermissionDenied  = 7
-	codeResourceExhausted = 8
-	codeUnavailable       = 14
-	codeUnauthenticated   = 16
+	codeInvalidArgument    = 3
+	codePermissionDenied   = 7
+	codeResourceExhausted  = 8
+	codeFailedPrecondition = 9
+	codeUnavailable        = 14
+	codeUnauthenticated    = 16
 )
 
 // errorInfo — `google.rpc.ErrorInfo` в форме, какой её печатает protojson.

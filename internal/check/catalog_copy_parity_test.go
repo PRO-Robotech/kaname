@@ -56,7 +56,7 @@ func TestCatalogCopiesAreOneArtifact(t *testing.T) {
 		catalogEntry("kacho.cloud.b.v1.B/Get", "b.get"),
 	)
 
-	findings, census, err := compareCatalogCopiesWith(nil, file, file)
+	findings, census, err := compareCatalogCopiesWith(nil, nil, file, file)
 	if err != nil {
 		t.Fatalf("сверка НЕ ИСПОЛНИЛАСЬ: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestCatalogRenameMovesTheEntryAndStillMatches(t *testing.T) {
 		catalogEntry("kacho.cloud.a.v1.A/Get", "a.get"),
 	)
 
-	findings, census, err := compareCatalogCopiesWith(testRenames(), edge, own)
+	findings, census, err := compareCatalogCopiesWith(testRenames(), nil, edge, own)
 	if err != nil {
 		t.Fatalf("сверка НЕ ИСПОЛНИЛАСЬ: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestCatalogRenameMovesTheEntryAndStillMatches(t *testing.T) {
 // находок» обязано быть отличимо от «ноль прочитанного».
 func TestCatalogParityCensusIsNotEmpty(t *testing.T) {
 	file := catalogFile(catalogEntry("kacho.cloud.a.v1.A/Get", "a.get"))
-	_, census, err := compareCatalogCopiesWith(nil, file, file)
+	_, census, err := compareCatalogCopiesWith(nil, nil, file, file)
 	if err != nil {
 		t.Fatalf("сверка НЕ ИСПОЛНИЛАСЬ: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestCatalogParityCensusIsNotEmpty(t *testing.T) {
 // ИСХОД, а не «копии совпали». Пустой обход, отданный зелёным, — ровно тот
 // класс, который корпус ловит.
 func TestEmptyCatalogIsNotAVerdict(t *testing.T) {
-	if _, _, err := compareCatalogCopiesWith(nil, "[\n\n]\n", "[\n\n]\n"); err == nil {
+	if _, _, err := compareCatalogCopiesWith(nil, nil, "[\n\n]\n", "[\n\n]\n"); err == nil {
 		t.Fatal("пустой перечень принят за совпадение копий")
 	}
 }
@@ -149,6 +149,28 @@ func TestDeclaredRenamesCarryASubject(t *testing.T) {
 		}
 		if !strings.Contains(r.Refs, "#") {
 			t.Errorf("запись ведомости без номера предмета: %s (refs=%q)", r.EdgeFQN, r.Refs)
+		}
+	}
+}
+
+// TestDeclaredPendingEntriesCarryASubject — та же дисциплина, что у
+// переименований: у каждой записи, ждущей края, названы причина, внешний
+// предикат снятия и номер предмета. На пустой ведомости проходит с переписью.
+func TestDeclaredPendingEntriesCarryASubject(t *testing.T) {
+	pending := CatalogPendingEntries()
+	t.Logf("перепись ведомости ожидающих края: записей %d", len(pending))
+	for _, e := range pending {
+		if e.OwnFQN == "" {
+			t.Errorf("запись ведомости без глагола: %+v", e)
+		}
+		if strings.TrimSpace(e.Why) == "" {
+			t.Errorf("запись ведомости без причины: %s", e.OwnFQN)
+		}
+		if strings.TrimSpace(e.Removal) == "" {
+			t.Errorf("запись ведомости без предиката снятия: %s", e.OwnFQN)
+		}
+		if !strings.Contains(e.Refs, "#") {
+			t.Errorf("запись ведомости без номера предмета: %s (refs=%q)", e.OwnFQN, e.Refs)
 		}
 	}
 }

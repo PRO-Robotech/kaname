@@ -378,6 +378,12 @@ var RequiredSettings = []RequiredSetting{
 		"сколько неверных предъявлений с одного источника (адрес из X-Forwarded-For края) допускается в окне"),
 	loginLaneRequirement("source-window", "15m",
 		"окно счёта неверных предъявлений по источнику"),
+	// РЕГИСТРАЦИЯ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270) — величины посадки `own`;
+	// строки ВЫВОДЯТСЯ из перечня ручек регистрации.
+	registrationRequirement("admissions-per-window", "3",
+		"потолок ТЕМПА заведения аккаунтов одной личностью: сколько за окно СВЕРХ первого. Первое заведение — регистрация — проходит безусловно; величина ограничивает повторную регистрацию адресом и последующие заведения аккаунтов того же человека. Носитель ключа на этой посадке — адрес, которым человек представился (Ф4 Р5). 0 законен: сверх первого — ни одного. Служба проецирует величину в схему на старте; под `external` строку авторитета правит администратор"),
+	registrationRequirement("admission-window", "1h",
+		"окно счёта заведений аккаунтов одной личностью"),
 	loginLaneRequirement("password-min-length", "8",
 		"минимальная длина пароля в знаках — одно правило на вход, регистрацию и восстановление; перенос прежней величины (8) объявляется профилем"),
 	loginLaneRequirement("breach-check", BreachCheckDisabled,
@@ -600,6 +606,21 @@ func ownCeilingRequirement(kind domain.LimitKind, sample string) RequiredSetting
 	// двух объявлений. Паника здесь законна: это инициализация пакета, и
 	// молчаливая пустая строка дала бы документ без величины при живом страже.
 	panic("own ceiling knob for kind " + string(kind) + " is not declared")
+}
+
+// registrationRequirement — строка таблицы для ручки регистрации (Ф4): ключ и
+// переменная берутся у перечня ручек (`RegistrationKnobs`).
+func registrationRequirement(short, sample, why string) RequiredSetting {
+	key := registrationKeyPrefix + short
+	return RequiredSetting{
+		Key:     key,
+		Env:     registrationEnv(key),
+		Supply:  SupplyEnv,
+		Lanes:   []IdentityProvider{IdentityProviderOwn},
+		Sample:  sample,
+		Why:     why,
+		Refusal: key,
+	}
 }
 
 // loginLaneRequirement — строка таблицы для ручки полосы входа: ключ и

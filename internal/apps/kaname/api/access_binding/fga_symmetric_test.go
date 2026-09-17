@@ -1223,6 +1223,12 @@ func (*fakeUserRdr) MembershipExists(context.Context, domain.UserID, domain.Acco
 	return false, nil
 }
 
+// Membership — дублёр членства ПАРОЙ не читает: предмет этих проб другой, и
+// подставная строка была бы утверждением, которого никто не делал (kaname#181).
+func (*fakeUserRdr) Membership(context.Context, domain.UserID, domain.AccountID) (domain.Membership, error) {
+	return domain.Membership{}, iamerr.ErrNotFound
+}
+
 // EmitInviteMail — порт со-коммита намерения отправить письмо приглашения.
 // Дублёр не глотает того, что настоящий отвергает: пустой адресат и пустой ключ
 // партиции отвергаются здесь так же, как ограничением миграции, — иначе фикстура

@@ -52,7 +52,7 @@ seed:
       description: "Module SA: kacho-vpc (SEC-C least-priv)"
   joins:
     - serviceAccount: {account: system, name: kacho-vpc}
-      group: {account: system, name: module-quota-readers}
+      group: {account: system, name: module-relation-writers}
       why: "проба окна двух написаний"
 `
 
