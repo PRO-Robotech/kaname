@@ -84,7 +84,7 @@ Kaname конфигурируется через переменные окруж
     <tr><td><code>KANAME_BOOTSTRAP_ROOT_EMAIL</code></td><td>Email первого cluster-admin (bootstrap)</td></tr>
     <tr><td><code>KANAME_JWKS_ENC_KEY</code></td><td>Ключ <b>обёртки</b> приватной половины подписного ключа: 32 байта в <b>hex</b> (64 знака). Принимает <b>перечень через запятую</b> — первый ключ оборачивает, все открывают; так ключ обёртки и меняется, без простоя и без переписывания хранилища. Соседней ручки срока ротации <b>не существует</b> — прежняя редакция называла её рядом, а в дереве ноль вхождений; ротацию сервис не планирует по расписанию</td></tr>
     <tr><td><code>KANAME_SECOND_FACTOR_ENC_KEY</code></td><td>Перечень ключей <b>обёртки</b> секретов второго фактора (код по времени): 32 байта в <b>hex</b> (64 знака) через запятую — первый оборачивает, все открывают. <b>Своя</b> ручка, а не ключ выше: предмет другой (секретов много, по одному на человека), и смена одного перечня не обязана останавливать другой. Требуется <b>только</b> под <code>own</code>; незаданная — отказ старта с именем ручки <code>authn.second-factor-encryption-key-hex</code>. Материал, который не открывается ни одним ключом перечня, служба отдаёт как недоступность (503), а не как отказ предъявителю</td></tr>
-    <tr><td><code>KANAME_AUTHN__SELF_SERVICE_FRESHNESS</code></td><td>Окно свежести правки своих данных (<code>authn.self-service-freshness</code>, перенос Ф1 §4.1 — <code>15m</code> в профилях): заведение и подтверждение второго фактора требуют предъявления не старше окна, и тем же окном ограничен срок неподтверждённого заведения. Требуется <b>только</b> под <code>own</code>; умолчания нет</td></tr>
+    <tr><td><code>KANAME_AUTHN&#95;&#95;SELF_SERVICE_FRESHNESS</code></td><td>Окно свежести правки своих данных (<code>authn.self-service-freshness</code>, перенос Ф1 §4.1 — <code>15m</code> в профилях): заведение и подтверждение второго фактора требуют предъявления не старше окна, и тем же окном ограничен срок неподтверждённого заведения. Требуется <b>только</b> под <code>own</code>; умолчания нет</td></tr>
     <tr><td><code>KANAME_SAKEY_REDACT_GRACE</code> / <code>KANAME_USERTOKEN_REDACT_GRACE</code></td><td>Grace-период редактирования секретов</td></tr>
   </tbody>
 </table>
@@ -101,7 +101,7 @@ listener'ы, а под посадкой `own` — ещё слушатель по
     <tr><td><code>KANAME_PUBLIC_SERVER_MTLS_…</code></td><td>mTLS публичного listener'а (cert / key / clientCA / enable)</td></tr>
     <tr><td><code>KANAME_INTERNAL_SERVER_MTLS_…</code></td><td>mTLS internal listener'а (<code>InternalIAMService</code>)</td></tr>
     <tr><td><code>KANAME_HOOKS_SERVER_MTLS_…</code></td><td>mTLS hooks-listener'а (хуки поставщика удостоверений; читается под <code>external</code>)</td></tr>
-    <tr><td><code>KANAME_API_SERVER__LOGIN_LANE_ENDPOINT</code> / <code>KANAME_LOGINLANE_SERVER_MTLS_…</code></td><td>Адрес и транспорт слушателя <b>полосы входа</b> — поднимается только под посадкой <code>own</code>, умолчания у адреса нет (в поставляемом профиле <code>tcp://0.0.0.0:9100</code>). Транспорт — взаимный TLS (<code>…_CLIENTAUTHMODE=mutual</code>): слушатель впускает ровно край платформы, судя его по SAN клиентского сертификата. Под <code>external</code> адрес читается, поверхность объявляется выключенной с причиной, слушатель не поднимается</td></tr>
+    <tr><td><code>KANAME_API_SERVER&#95;&#95;LOGIN_LANE_ENDPOINT</code> / <code>KANAME_LOGINLANE_SERVER_MTLS_…</code></td><td>Адрес и транспорт слушателя <b>полосы входа</b> — поднимается только под посадкой <code>own</code>, умолчания у адреса нет (в поставляемом профиле <code>tcp://0.0.0.0:9100</code>). Транспорт — взаимный TLS (<code>…&#95;CLIENTAUTHMODE=mutual</code>): слушатель впускает ровно край платформы, судя его по SAN клиентского сертификата. Под <code>external</code> адрес читается, поверхность объявляется выключенной с причиной, слушатель не поднимается</td></tr>
     <tr><td><code>KANAME_METRICS_SERVER_MTLS_…</code></td><td>mTLS metrics-listener'а (Prometheus)</td></tr>
     <tr><td><code>KANAME_JWKSPROXY_SERVER_MTLS_…</code></td><td>TLS зеркала ключей проверки (<code>/.well-known/jwks.json</code>, односторонняя)</td></tr>
     <tr><td><code>KANAME_REGISTRYTOKEN_SERVER_MTLS_…</code></td><td>TLS докерной полосы (<code>/iam/token</code>, односторонняя)</td></tr>
@@ -156,6 +156,37 @@ provider's shared secret travels this hop …
 сбрасывать кэш решений. Ни одной из этих переменных **не существует**: направление развёрнуто,
 край сам читает журнал смены субъекта у iam. Ручка адреса была вдобавок обязательной, из-за чего
 iam не поднимался там, где api-gateway нет вовсе; теперь iam разворачивается без него.
+:::
+
+## Полоса входа — только под `own` {#login-lane}
+
+Величины полосы входа читаются **только** под посадкой `own`; ни у одной нет умолчания, и
+незаданная — отказ старта с именем ключа. Под `external` блок не читается. Что на полосе
+происходит — [Полоса входа](/api/auth-lane); перечень обязательных величин целиком
+порождён в `INSTALL.md` §3.
+
+<table>
+  <thead><tr><th>Ключ · переменная</th><th>Назначение</th></tr></thead>
+  <tbody>
+    <tr><td><code>api-server.login-lane-endpoint</code> · <code>KANAME_API_SERVER&#95;&#95;LOGIN_LANE_ENDPOINT</code></td><td>Адрес слушателя полосы (в поставляемом профиле <code>tcp://0.0.0.0:9100</code>); транспорт — <code>KANAME_LOGINLANE_SERVER_MTLS_…</code>, режим <code>mutual</code></td></tr>
+    <tr><td><code>authn.login.session-ttl</code> · <code>KANAME_AUTHN&#95;&#95;LOGIN&#95;&#95;SESSION_TTL</code></td><td>Абсолютный срок сессии от выдачи; он же <code>Max-Age</code> печенья <code>kaname_session</code></td></tr>
+    <tr><td><code>authn.login.cookie-domain</code> · <code>KANAME_AUTHN&#95;&#95;LOGIN&#95;&#95;COOKIE_DOMAIN</code></td><td>Атрибут <code>Domain</code> печений — доменное имя консоли либо <code>none</code> (печенье только на хост; на адресной посадке <code>Domain</code> с IP-литералом браузер отбрасывает)</td></tr>
+    <tr><td><code>authn.login.address-attempts</code> / <code>address-window</code> · <code>source-attempts</code> / <code>source-window</code></td><td>Окна частоты неверных предъявлений — по адресу почты и по источнику запроса; сверх окна — <code>429 TOO_MANY_ATTEMPTS</code> с <code>Retry-After</code></td></tr>
+    <tr><td><code>authn.registration.admissions-per-window</code> / <code>admission-window</code></td><td>Потолок темпа заведения личностей с улицы; сверх него регистрация отвечает единым <code>registration refused</code></td></tr>
+    <tr><td><code>authn.login.password-min-length</code> · <code>authn.login.breach-check</code> (+ <code>breach-check-url</code>)</td><td>Правило пароля: минимальная длина и состояние проверки по корпусу утечек (<code>enabled</code> требует адреса авторитета)</td></tr>
+    <tr><td><code>authn.login.hasher-format</code> · <code>hasher-memory</code> · <code>hasher-iterations</code> · <code>hasher-parallelism</code></td><td>Чем писать новый материал пароля и его стоимость</td></tr>
+    <tr><td><code>authn.login.verifier-capacity</code> · <code>memory-reserve-bytes</code></td><td>Одновременных проверок пароля и резерв памяти процесса сверх них; страж старта сверяет их с пределом памяти контейнера</td></tr>
+    <tr><td><code>authn.login.recovery-code-ttl</code> · <code>KANAME_AUTHN&#95;&#95;LOGIN&#95;&#95;RECOVERY_CODE_TTL</code></td><td>Срок кода восстановления доступа</td></tr>
+    <tr><td><code>authn.self-service-freshness</code> · <code>KANAME_AUTHN&#95;&#95;SELF_SERVICE_FRESHNESS</code></td><td>Окно свежести правки своих данных: заведение второго фактора требует предъявления не старше окна, и им же ограничен срок неподтверждённого заведения</td></tr>
+    <tr><td><code>authn.second-factor-encryption-key-hex</code> · <code>KANAME_SECOND_FACTOR_ENC_KEY</code></td><td>Перечень ключей обёртки секретов второго фактора (см. таблицу идентичности выше)</td></tr>
+  </tbody>
+</table>
+
+:::warning Три из этих величин чарт службы сегодня не рендерит
+`authn.registration.admissions-per-window`, `authn.registration.admission-window` и
+`authn.login.recovery-code-ttl` страж старта под `own` требует, а шаблон карты настроек
+поставляемого чарта их не знает — задать их можно только переменными окружения в карте `env`
+профиля. Предмет — kaname#205.
 :::
 
 ## Потолок темпа и одновременности запросов

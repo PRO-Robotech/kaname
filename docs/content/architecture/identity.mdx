@@ -14,13 +14,13 @@ title: Идентичность и токены
   <thead><tr><th></th><th><code>external</code></th><th><code>own</code></th></tr></thead>
   <tbody>
     <tr><td>кто проверяет человека</td><td>внешний поставщик удостоверений (Ory Kratos + Ory Hydra)</td><td>сама служба: свои способы входа, своя сессия</td></tr>
-    <tr><td>кто держит форму входа</td><td>самообслуживание поставщика (страницы <code>/login</code>, <code>/registration</code>, <code>/settings</code>, <code>/recovery</code>, которые раздаёт консоль платформы)</td><td>консоль платформы; тела форм уходят на полосу входа службы через край</td></tr>
+    <tr><td>кто держит форму входа</td><td>самообслуживание поставщика (страницы <code>/login</code>, <code>/registration</code>, <code>/settings</code>, <code>/recovery</code>, которые раздаёт консоль платформы)</td><td>консоль платформы; тела форм уходят на <a href="/api/auth-lane">полосу входа</a> службы через край</td></tr>
     <tr><td>печенье сессии</td><td><code>ory_kratos_session</code> — печенье поставщика</td><td><code>kaname_session</code> — наше; срок <code>authn.login.session-ttl</code>, гасится выходом на стороне сервера</td></tr>
     <tr><td>уровень уверенности сессии</td><td>из <code>session.authenticator_assurance_level</code> поставщика: <code>aal1</code> → <code>1</code>, <code>aal2</code> → <code>2</code></td><td>объявляет сама сессия: пароль → <code>1</code>, пароль плюс код по времени или запасной код → <code>2</code></td></tr>
-    <tr><td>второй фактор</td><td>заводится в самообслуживании поставщика (<code>/settings</code>): код по времени, запасные коды</td><td>заводится на полосе входа: <code>/iam/v1/auth/second-factor/*</code>, церемония повышения — <code>/iam/v1/auth/step-up</code></td></tr>
+    <tr><td>второй фактор</td><td>заводится в самообслуживании поставщика (<code>/settings</code>): код по времени, запасные коды</td><td>заводится на полосе входа: <code>/iam/v1/auth/second-factor/&#42;</code>, церемония повышения — <code>/iam/v1/auth/step-up</code></td></tr>
     <tr><td>восстановление доступа</td><td>поток поставщика (код письмом); служба узнаёт о завершении хуком <code>InternalUserService.OnRecoveryCompleted</code> на <code>:9092</code> и гасит сессии</td><td>наш код письмом: <code>/iam/v1/auth/recovery</code> → <code>/iam/v1/auth/recovery/complete</code></td></tr>
     <tr><td>программные токены</td><td colspan="2">на обеих посадках выпускает платформа своим подписантом там, где объявлен её токен-эндпоинт (<code>authn.token-signing</code> + <code>authn.client-token</code>); под <code>external</code> без него — внешний OAuth-сервер</td></tr>
-    <tr><td>что обязательно при старте</td><td>три адреса поставщика и корень доверия к нему</td><td>слушатель полосы входа, величины полосы (<code>authn.login.*</code>), обёртка секретов второго фактора, окно свежести, своя чеканка</td></tr>
+    <tr><td>что обязательно при старте</td><td>три адреса поставщика и корень доверия к нему</td><td>слушатель полосы входа, величины полосы (<code>authn.login.&#42;</code>), обёртка секретов второго фактора, окно свежести, своя чеканка</td></tr>
   </tbody>
 </table>
 
@@ -95,7 +95,7 @@ flowchart LR
 3. Первый вход — по посадке. Под `external` приглашённый входит через поставщика, и тот дёргает
    **identity-hook** службы (слушатель `:9092`, mTLS): служба сопоставляет адрес с
    `PENDING`-строкой, переводит её в `ACTIVE` и заполняет `externalId`. Под `own` приглашённый
-   **регистрируется тем же адресом** на полосе входа: регистрация активирует
+   **регистрируется тем же адресом** на [полосе входа](/api/auth-lane): регистрация активирует
    строку и второго личного аккаунта не заводит.
 4. Первый вход переводит в `ACTIVE` **все** приглашённые членства человека разом.
 
