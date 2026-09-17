@@ -35,11 +35,13 @@ CASES = []
 POLL_CAP = 30
 
 
-def _poll_op(op_var, out_var=None):
-    capture = ""
-    if out_var:
-        capture = (f"if (j.response && j.response.id && !pm.environment.get('{out_var}')) "
-                   f"{{ pm.environment.set('{out_var}', j.response.id); }}")
+def _poll_op(op_var):
+    """Тело самоопрашивающего шага: дождаться `done` операции, отказа быть не должно.
+
+    Ветки захвата `response.id` здесь нет намеренно: ни один вызывающий её не
+    передавал, а вклейка имени переменной в JS-литерал — форма, которую держат
+    храповики `js_regex_literal_cases_test.py` и `js_name_position_test.py`.
+    """
     return [
         "const j = pm.response.json();",
         "if (pm.environment.get('_pollStarted') !== pm.info.requestName) { pm.environment.set('_pollCount', '0'); pm.environment.set('_pollStarted', pm.info.requestName); }",
@@ -52,7 +54,6 @@ def _poll_op(op_var, out_var=None):
         "}",
         "pm.environment.unset('_pollCount');",
         "pm.environment.unset('_pollStarted');",
-        capture,
         "pm.test('operation done', () => pm.expect(j.done, JSON.stringify(j)).to.eql(true));",
         "pm.test('operation no error', () => pm.expect(j.error, JSON.stringify(j)).to.not.exist);",
         "pm.test('operation carries the response row', () => pm.expect(Boolean(j.response), JSON.stringify(j)).to.eql(true));",
