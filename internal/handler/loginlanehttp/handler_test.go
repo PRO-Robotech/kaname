@@ -33,6 +33,7 @@ import (
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 )
@@ -48,16 +49,24 @@ var base = time.Date(2026, 9, 16, 12, 0, 0, 123456000, time.UTC)
 
 // stubLane — дублёр глаголов: отвечает объявленным исходом и записывает вход.
 type stubLane struct {
-	loginOut  humansession.LoginOutput
-	loginErr  error
-	logoutErr error
-	changeOut humansession.ChangePasswordOutput
-	changeErr error
+	loginOut    humansession.LoginOutput
+	loginErr    error
+	logoutErr   error
+	changeOut   humansession.ChangePasswordOutput
+	changeErr   error
+	registerOut registration.Output
+	registerErr error
 
-	loginIn   []humansession.LoginInput
-	logoutIn  []domain.SessionBearer
-	changeIn  []humansession.ChangePasswordInput
-	logoutHit int
+	loginIn    []humansession.LoginInput
+	logoutIn   []domain.SessionBearer
+	changeIn   []humansession.ChangePasswordInput
+	registerIn []registration.Input
+	logoutHit  int
+}
+
+func (s *stubLane) Register(_ context.Context, in registration.Input) (registration.Output, error) {
+	s.registerIn = append(s.registerIn, in)
+	return s.registerOut, s.registerErr
 }
 
 func (s *stubLane) Login(_ context.Context, in humansession.LoginInput) (humansession.LoginOutput, error) {
@@ -262,7 +271,9 @@ func TestLane_F3_35_CSRFIssuesAContextAndAToken(t *testing.T) {
 	again := l.do(t, c, http.MethodGet, "/iam/v1/auth/csrf?form=login", nil, nil, ck)
 	require.Nil(t, cookieNamed(again.cookies, "kaname_form"), "повторный запрос контекст не меняет")
 
-	bad := l.do(t, c, http.MethodGet, "/iam/v1/auth/csrf?form=register", nil, nil, ck)
+	// Вид вне перечня — значение, которого перечень не несёт by construction
+	// (прежде здесь стояло «register»; с Ф4 это законный вид формы).
+	bad := l.do(t, c, http.MethodGet, "/iam/v1/auth/csrf?form=no-such-form", nil, nil, ck)
 	require.Equal(t, http.StatusBadRequest, bad.status)
 	require.Contains(t, bad.body, `"Illegal argument form:`)
 }

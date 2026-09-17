@@ -137,6 +137,11 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
 		}
 	}
+	for _, k := range RegistrationKnobs {
+		if err := v.BindEnv(k.Key, k.Env); err != nil {
+			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
+		}
+	}
 
 	// YAML file (optional).
 	if path != "" {

@@ -6,7 +6,9 @@ package main
 // loginlane.go — КОМПОЗИЦИЯ полосы входа паролем и нашей сессии (фаза Ф3,
 // задача PRO-Robotech/kacho#1269; приёмка
 // `docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md`,
-// Р15, Ф3-44, Ф3-45).
+// Р15, Ф3-44, Ф3-45) и регистрации той же полосой (фаза Ф4, kacho#1270): глагол
+// регистрации собирается здесь же, для полосы из объявления `registration.Lanes`,
+// с тем же правилом пароля, хешером, сроком сессии и наблюдателем.
 //
 // # Поднимается ПОСАДКОЙ
 //
@@ -39,7 +41,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/PRO-Robotech/corelib/servicecontract"
+	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
+	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention"
 	"github.com/PRO-Robotech/kaname/internal/assurance"
@@ -170,8 +175,10 @@ func writeProbeFile(path, body string) error {
 }
 
 // buildLoginLane — полоса под `own`; под `external` — nil без ошибки.
+// reconciler — материализация собственнической выдачи после регистрации: тот
+// же экземпляр, что у пути запроса; nil-safe (уборка доберёт по намерениям).
 func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repository,
-	reg *metrics.Registry, logger *slog.Logger,
+	reconciler *reconcileapp.Reconciler, reg *metrics.Registry, logger *slog.Logger,
 ) (*loginLane, error) {
 	if !loginLaneWanted(cfg) {
 		return nil, nil
@@ -254,6 +261,19 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Регистрация (Ф4) — полоса из ЕДИНСТВЕННОГО объявления; глагол не
+	// собирается для полосы, не объявившей всех трёх следствий.
+	regLane, ok := registration.LaneByName(registration.LanePassword)
+	if !ok {
+		return nil, fmt.Errorf("sign-in lane: registration lane %q is not declared in registration.Lanes", registration.LanePassword)
+	}
+	registerUC, err := registration.NewRegisterUseCase(registration.Deps{
+		Store: registrationStore{inner: kanamepg.NewRegistrationStore(pool)}, Rule: rule, Hasher: hasher, Lane: regLane,
+		TTL: login.SessionTTL, Observer: rec, Reconciler: ownerReconcilerOrNone(reconciler), Now: time.Now, Logger: logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	handler, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    login.SessionTTL,
 		CookieDomain:  login.ResolvedCookieDomain(),
@@ -261,7 +281,7 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 		RefusalDomain: refusaldomain.For(refusaldomain.ServiceIAM),
 		Logger:        logger,
 		Observer:      rec,
-	}, laneVerbs{login: loginUC, logout: logoutUC, change: changeUC})
+	}, laneVerbs{login: loginUC, logout: logoutUC, change: changeUC, register: registerUC})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
@@ -271,11 +291,47 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 	}, nil
 }
 
+// registrationStore — адаптер хранилища регистрации к порту глагола. Адаптер
+// `pg` порт не импортирует (иначе круг импортов в пробах пакета зеркала) и
+// отдаёт писатель зеркала своей транзакции; композицию зеркала (Р6) над ним
+// исполняет `user.RegisterMirrorTx` — здесь, в композиционном корне, где
+// соответствие порту закрепляется присваиванием.
+type registrationStore struct{ inner *kanamepg.RegistrationStore }
+
+func (s registrationStore) Writer(ctx context.Context) (registration.Writer, error) {
+	w, err := s.inner.Writer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return registrationWriter{RegistrationWriter: w}, nil
+}
+
+type registrationWriter struct{ *kanamepg.RegistrationWriter }
+
+func (w registrationWriter) Mirror(ctx context.Context, in registration.MirrorInput) (registration.MirrorResult, error) {
+	return userapp.RegisterMirrorTx(ctx, w.MirrorWriter(), in)
+}
+
+// ownerReconcilerOrNone — nil указателя НЕ становится ненулевым интерфейсом:
+// глагол читает «реконсайлера нет» по nil интерфейса и оставляет
+// материализацию уборке по намерениям.
+func ownerReconcilerOrNone(r *reconcileapp.Reconciler) registration.OwnerBindingReconciler {
+	if r == nil {
+		return nil
+	}
+	return r
+}
+
 // laneVerbs — порт глаголов слушателя над вариантами использования.
 type laneVerbs struct {
-	login  *humansession.LoginUseCase
-	logout *humansession.LogoutUseCase
-	change *humansession.ChangePasswordUseCase
+	login    *humansession.LoginUseCase
+	logout   *humansession.LogoutUseCase
+	change   *humansession.ChangePasswordUseCase
+	register *registration.RegisterUseCase
+}
+
+func (v laneVerbs) Register(ctx context.Context, in registration.Input) (registration.Output, error) {
+	return v.register.Execute(ctx, in)
 }
 
 func (v laneVerbs) Login(ctx context.Context, in humansession.LoginInput) (humansession.LoginOutput, error) {
@@ -310,12 +366,12 @@ func loginLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog
 		tlsCfg = nil
 	}
 	return iamHTTPSurface(servicecontract.Surface{
-		Name:   "полоса входа паролем (/iam/v1/auth/{login,logout,password,csrf})",
+		Name:   "полоса входа паролем и регистрации (/iam/v1/auth/{login,logout,password,csrf,register})",
 		Mode:   mode,
 		Logger: logger,
 		Addr: addrAxis(addr, "полоса входа паролем поднимается только посадкой authn.identity-provider=own "+
-			"по адресу "+knobLoginLane+"; на этой посадке вход человека, смену пароля и выход "+
-			"(/iam/v1/auth/login, /logout, /password, /csrf) служба не обслуживает — их исполняет "+
+			"по адресу "+knobLoginLane+"; на этой посадке вход человека, регистрацию, смену пароля и выход "+
+			"(/iam/v1/auth/login, /register, /logout, /password, /csrf) служба не обслуживает — их исполняет "+
 			"внешний поставщик"),
 		Handler: handler,
 		Reach:   servicecontract.ReachClusterInternal,
