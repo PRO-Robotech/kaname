@@ -34,8 +34,9 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-09-17'
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-17T03:21:36Z'
+  ban1_lifted: true
   why: >-
     Вердикт круга 2 — APPROVED: блокирующих ноль. Санкция не выдана: политика называет
     единственного, кто выпускает effective approval, — `pointpu`; роль без внешнего события
@@ -66,17 +67,34 @@ authority:
   allowlisted_for_role: false
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось». Внешнего события этим кругом не создавалось; запись
-    сдаётся в PR #214, событие — за оркестратором.
+  type: issue_comment
+  status: performed
+  database_id: 5707963723
+  node_id: IC_kwDOTZqgWM8AAAABVDidSw
+  url: https://github.com/PRO-Robotech/kacho/issues/1271#issuecomment-5707963723
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5707963723
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1271
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-17T03:21:36Z'
+  body_sha256: 753bdd43e60d106d441133471e9c583531aa494792eded83e6d21a14ce3dc342
+  subject_sha256: 5b70cc583c7d4d3fc451dd35758d404ee0897410c449ad46c4c1ac1ce864ce3d
+  subject_revision: c6a3c12efbb68df540445b9633795cacb2f5d008
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; запись рецензента задним числом
+    не правилась. Отпечаток предмета сверен перед публикацией (sha256sum файла на c6a3c12e)
+    и совпал с объявленным. Отпечаток тела снят с сырого ответа API.
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: null
-  publication_mode: record_only
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
+
 
 scope:
   reviewed: >-

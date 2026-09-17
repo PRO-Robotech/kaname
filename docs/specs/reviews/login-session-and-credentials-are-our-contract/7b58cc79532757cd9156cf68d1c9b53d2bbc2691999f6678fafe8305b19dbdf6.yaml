@@ -39,8 +39,9 @@ reviewer_role: acceptance-reviewer
 reviewed_at: '2026-09-17'
 
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-17T03:21:37Z'
+  ban1_lifted: true
   why: >-
     Вердикт круга 10 — APPROVED: блокирующих ноль, Б1 круга 9 закрыт тем же опытом с другим
     результатом (предикат рецензента → живых 0; предикат по корню → живых 5, и все пять называют
@@ -72,17 +73,34 @@ authority:
   allowlisted_for_role: false
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось». Внешнего события этим кругом не создавалось; запись
-    сдаётся в PR #214, событие — за оркестратором.
+  type: issue_comment
+  status: performed
+  database_id: 5707963871
+  node_id: IC_kwDOTZqgWM8AAAABVDid3w
+  url: https://github.com/PRO-Robotech/kacho/issues/1269#issuecomment-5707963871
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5707963871
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1269
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-17T03:21:37Z'
+  body_sha256: 4b5975d30deb3cbbc50f8057d829d8efdeaee9f8c6ac95ee0c14ba4e1e57c941
+  subject_sha256: 7b58cc79532757cd9156cf68d1c9b53d2bbc2691999f6678fafe8305b19dbdf6
+  subject_revision: 639bade40057bc255eb2cca3126e87497607e7f3
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; запись рецензента задним числом
+    не правилась. Отпечаток предмета сверен перед публикацией (sha256sum файла на 639bade4)
+    и совпал с объявленным. Отпечаток тела снят с сырого ответа API.
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: null
-  publication_mode: record_only
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
+
 
 scope:
   reviewed: >-
