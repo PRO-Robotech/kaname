@@ -83,7 +83,7 @@ func newSFHarness(t *testing.T) *sfHarness {
 	h.login, err = humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, Limits: sfLimits(), TTL: ucTTL, Observer: h.obs, Now: now, Logger: logger,
-		TOTP: totp, Sets: h.verifier,
+		Envelope: h.envelopePort, TOTP: totp, Sets: h.verifier,
 	})
 	require.NoError(t, err)
 	return h

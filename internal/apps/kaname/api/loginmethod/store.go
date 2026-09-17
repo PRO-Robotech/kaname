@@ -61,3 +61,24 @@ type Store interface {
 	// подтверждён; ошибка — спросить не удалось (NOT_FOUND — человека нет).
 	EmailVerification(ctx context.Context, userID domain.UserID) (at time.Time, verified bool, err error)
 }
+
+// CostClassCount — строка переписи классов стоимости: префикс класса (значение
+// без соли и тела — формат и числа параметров, как его читает
+// `passwordverify.ParseCostClassPrefix`) и число строк этого класса. Пустой
+// префикс — признак формата вне перечня: сегмент чужого признака из хранилища
+// не выносится.
+type CostClassCount struct {
+	Prefix string
+	Rows   int64
+}
+
+// CostClassCensus — перепись классов стоимости хранимых значений способа
+// «пароль» (решение kaname#188): вызывающий — композиционный корень при старте,
+// калибрующий огибающую по потолку на ФАКТИЧЕСКОЙ популяции. Материал перепись
+// не выносит; порт отделён от `Store`, потому что читатель у него один и другой.
+type CostClassCensus interface {
+	// PasswordCostClasses — по строке на класс, с числом строк; один проход по
+	// таблице способов без индекса по материалу (индекс копировал бы колонку в
+	// свои страницы, и заводить его нельзя — шапка миграции таблицы).
+	PasswordCostClasses(ctx context.Context) ([]CostClassCount, error)
+}
