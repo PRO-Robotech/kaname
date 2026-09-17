@@ -13,8 +13,8 @@ package main
 //	go build -ldflags "-X main.buildVersion=… -X main.buildRevision=…"
 //
 // Обе величины сборка берёт из ТОГО ЖЕ объявления, из которого делает клеймо
-// образа и файл ревизии внутри него (`ARG KACHO_IMAGE_VERSION` /
-// `ARG KACHO_IMAGE_REVISION` в Dockerfile службы, а сами величины — из
+// образа и файл ревизии внутри него (`ARG OCI_IMAGE_VERSION` /
+// `ARG OCI_IMAGE_REVISION` в Dockerfile службы, а сами величины — из
 // `provenance.mk`). Источник один, поэтому строка на витрине и строка на образе
 // разойтись не могут.
 //

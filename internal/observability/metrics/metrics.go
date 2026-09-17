@@ -99,6 +99,10 @@ type Registry struct {
 	// целиком.
 	inviteMailOnce sync.Once
 	inviteMail     *InviteMailRecorder
+	// inviteMailIntentOnce/inviteMailIntent — счётчик исходов намерения
+	// отправки (queued · rate_limited); один на оба глагола.
+	inviteMailIntentOnce sync.Once
+	inviteMailIntent     *InviteMailIntentRecorder
 
 	// readinessOnce/readiness — единственный экземпляр приёмника исхода
 	// готовности (#2494). Носитель готовности собирается в прогоне не единожды

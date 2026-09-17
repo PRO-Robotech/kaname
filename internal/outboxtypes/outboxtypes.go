@@ -18,6 +18,8 @@
 // This package imports ONLY the standard library.
 package outboxtypes
 
+import "time"
+
 // RelationTuple — {User, Relation, Object} triple for kaname.fga_outbox
 // grant/revoke writes.
 type RelationTuple struct {
@@ -43,4 +45,34 @@ type AuditEvent struct {
 	// Payload — the event_payload jsonb body (the use-case decides key names —
 	// actor / subject_id / reason / token_jti / …).
 	Payload map[string]any
+}
+
+// InviteMailRateLimit — ограничение частоты писем НА АДРЕС за окно (приёмка
+// ID-MAIL-1, Р14/Р22, MAIL-25): не больше MaxPerWindow писем одному адресу за
+// Window. Обе величины положительны; значения, означающего «без ограничения»,
+// у ограничения нет — писатель отвергает непозитивные, а не читает их как
+// «сколько угодно».
+type InviteMailRateLimit struct {
+	MaxPerWindow int
+	Window       time.Duration
+}
+
+// InviteMailIntent — намерение отправить письмо приглашения, ставящееся в
+// очередь `kaname.invite_mail_outbox` ТОЙ ЖЕ транзакцией, что и мутация,
+// его породившая. Несёт ограничение частоты: писатель списывает окно адресата
+// ПЕРЕД постановкой в очередь, и сверхнормативное намерение в очередь не
+// попадает — это и есть единственный путь письма, и ограничитель стоит на
+// нём по построению, а не по дисциплине вызывающего.
+type InviteMailIntent struct {
+	// UserID — строка приглашения; ключ партиции порядка очереди.
+	UserID string
+	// AccountID — аккаунт, куда приглашён человек (атрибуция письма).
+	AccountID string
+	// To — адрес получателя.
+	To string
+	// LoginURL — адрес страницы входа; пусто ⇒ подставит отправитель из
+	// своей настройки.
+	LoginURL string
+	// Limit — ограничение частоты на адрес.
+	Limit InviteMailRateLimit
 }

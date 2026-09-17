@@ -90,10 +90,21 @@ type User struct {
 	InviteStatus InviteStatus
 	InvitedBy    UserID // user.id of admin who invoked Invite; "" if self-signup
 	CreatedAt    time.Time
+	// InviteExpiresAt — срок строки приглашения (ID-MAIL-1, MAIL-23): после
+	// него активация отвергается. Нулевое время — «срок не назначен»: так
+	// выглядят строки, заведённые до появления колонки, и выкупленные строки,
+	// у которых срок предмета не имеет.
+	InviteExpiresAt time.Time
 	// Labels — tenant-facing метки. Делают User label-selectable наравне с
 	// account/project: ARM_LABELS-грант на iam.user материализует v_list по
 	// `labels @> matchLabels`, а List фильтрует через viewer ∪ v_list.
 	Labels Labels
+}
+
+// InviteExpired — истёк ли срок приглашения к моменту now. Строка без срока
+// не истекает никогда — это законное состояние, а не отказ.
+func (u User) InviteExpired(now time.Time) bool {
+	return !u.InviteExpiresAt.IsZero() && !now.Before(u.InviteExpiresAt)
 }
 
 // Validate — fields + invite-status consistency.

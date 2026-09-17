@@ -37,6 +37,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
@@ -529,12 +530,15 @@ func (*updUserWtr) RemoveMembership(context.Context, domain.UserID, domain.Accou
 // партиции отвергаются здесь так же, как ограничением миграции, — иначе фикстура
 // была бы снисходительнее продукта и скрыла бы ровно тот дефект, ради которого её
 // подставляют.
-func (w *updUserWriter) EmitInviteMail(_ context.Context, userID, _, to, _ string) error {
-	if to == "" {
-		return fmt.Errorf("invite mail: recipient required")
+func (w *updUserWriter) EmitInviteMail(_ context.Context, intent outboxtypes.InviteMailIntent) (bool, error) {
+	if intent.To == "" {
+		return false, fmt.Errorf("invite mail: recipient required")
 	}
-	if userID == "" {
-		return fmt.Errorf("invite mail: user id required")
+	if intent.UserID == "" {
+		return false, fmt.Errorf("invite mail: user id required")
 	}
-	return nil
+	if intent.Limit.MaxPerWindow <= 0 || intent.Limit.Window <= 0 {
+		return false, fmt.Errorf("invite mail: rate limit must be positive — there is no «unlimited»")
+	}
+	return true, nil
 }

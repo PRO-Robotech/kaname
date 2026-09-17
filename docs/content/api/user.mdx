@@ -192,10 +192,42 @@ import dedent from 'ts-dedent'
   `}
 </CodeBlock>
 
-`Operation.metadata` (`InviteUserMetadata`) несёт `magicLinkUrl` — recovery/magic-link Kratos.
-Автоотправка письма существует; пока не объявлены `inviteMail.relay` и `inviteMail.from`,
-письмо не уходит и ссылку передаёт админ вручную. Для повторного приглашения уже активного
-пользователя ссылка пустая.
+`Operation.metadata` (`InviteUserMetadata`) несёт `userId` и `accountId`. Ссылки первого входа
+в нём **нет**: поле снято с контракта (номер и имя зарезервированы) — ссылка выдавала бы
+приглашающему предъявителя приглашённого. Письмо приглашения служба составляет и отправляет
+сама, через свою очередь; повторное приглашение того же адреса в тот же аккаунт отправляет
+письмо ещё раз в пределах ограничения частоты. Пока не объявлены `inviteMail.relay` и
+`inviteMail.from`, письмо не уходит, и это видно счётчиком исходов отправки.
+
+</ApiOperation>
+
+### ResendInvite — отправить письмо приглашения ещё раз
+
+<ApiOperation method="POST" endpoint="/iam/v1/users/{user_id}:resendInvite" async>
+
+Письмо приглашения уходит ещё раз тому, кто приглашён в названный аккаунт и ещё не выкупил
+приглашение. Требует `editor` на аккаунте — то же право, что у `Invite`. Асинхронно
+(`response: User`, `metadata: ResendInviteMetadata{userId, accountId}`).
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -X POST 'http://localhost:18080/iam/v1/users/usr2bkd71802av7dywa8:resendInvite' \\
+      -H 'Authorization: Bearer <JWT>' \\
+      -H 'Content-Type: application/json' \\
+      -d '{ "accountId": "acc2bkd71802av7dywa8" }'
+  `}
+</CodeBlock>
+
+Исходы: человека нет в названном аккаунте — `NOT_FOUND` (`User <id> not found`, тем же
+текстом, что и для несуществующего); приглашение уже выкуплено либо человек заблокирован —
+`FAILED_PRECONDITION`; срок приглашения истёк — `FAILED_PRECONDITION` с указанием пригласить
+заново (срок есть свойство выдачи, и повтор письма его не двигает).
+
+**Ограничение частоты** стоит на обоих глаголах, отправляющих письмо, — `Invite` и
+`ResendInvite`: одному адресу за окно уходит не больше `invite.mailRateLimit.maxPerWindow`
+писем (умолчание три в час). Сверх нормы вызов отвечает так же, как в норме, а письмо не
+отправляется — отказ по частоте не является оракулом; оператор видит его счётчиком
+`kaname_invite_mail_intents_total{outcome="rate_limited"}`.
 
 </ApiOperation>
 

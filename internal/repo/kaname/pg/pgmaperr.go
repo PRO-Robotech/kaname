@@ -80,7 +80,7 @@ func wrapPgErr(err error, kindHint, idHint string) error {
 			iamerr.Wrapf(iamerr.ErrQuotaNotProvisioned, "%s", pgErr.Message), pgErr.Detail)
 	case "KQ003": // строка ресурса не несёт носителя — дефект схемы, не арендатора
 		return iamerr.Wrapf(iamerr.ErrInternal, "quota accounting")
-	// Полоса ТЕМПА (`kacho_rate_refuse`, миграция задачи #618). Её производитель
+	// Полоса ТЕМПА (`rate_refuse`, миграция задачи #618). Её производитель
 	// отдельный: тот, что выше, рендерится из общего шаблона шести владельцев и
 	// говорит о строке учёта ОБЪЁМА, а этой полосы нет больше ни у кого.
 	case "KQ004": // окно полно: за текущее окно принято столько, сколько названо
