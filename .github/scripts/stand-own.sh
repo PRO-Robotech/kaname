@@ -208,6 +208,7 @@ stand_env() {
   export KANAME_OWN_CEILINGS__ACCOUNTS_PER_IDENTITY=3
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_USER=5
   export KANAME_OWN_CEILINGS__CREDENTIALS_PER_SERVICE_ACCOUNT=5
+  export KANAME_OWN_CEILINGS__ACCESS_KEYS_PER_USER=5
   # ПОЛОСА ЛИЧНОСТИ — `external`, И ЭТО ПРЕДМЕТ СТЕНДА, А НЕ НЕСПОСОБНОСТЬ
   # ПРОДУКТА.
   #
