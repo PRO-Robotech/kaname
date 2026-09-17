@@ -92,7 +92,12 @@ message HumanSession {
   // Whether the CURRENT e-mail value has been verified (Ф2 П1).
   bool email_verified = 7;
 
-  // The session was issued by recovery and demands a password change before
-  // any platform verb (Ф5 Р5, Р8). The edge refuses catalogued paths on it.
-  bool password_change_required = 8;
+  // Field 8 `password_change_required` is RETIRED (kacho#2697, kaname#201):
+  // recovery completes in ONE request that writes the new password before
+  // the session exists (Ф5 Р5 edition 3), so no producer ever set it to true
+  // while the edge kept a reader for it — "accepted and ignored". Both the
+  // number and the name are reserved: the number cannot be reused by another
+  // field, the name cannot return under another number.
+  reserved 8;
+  reserved "password_change_required";
 }

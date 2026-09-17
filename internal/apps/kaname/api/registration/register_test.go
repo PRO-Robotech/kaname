@@ -199,7 +199,6 @@ func TestRegister_F4_01_ThreeConsequencesInOneWriterInDeclaredOrder(t *testing.T
 	require.Equal(t, unitBase, w.sessions[0].AuthenticatedAt)
 	require.Equal(t, unitBase.Add(24*time.Hour), w.sessions[0].ExpiresAt)
 	require.Equal(t, []string{"password"}, w.sessions[0].PresentedMethods)
-	require.False(t, w.sessions[0].PasswordChangeRequired)
 	require.NotEmpty(t, out.Bearer.CookieValue())
 	require.Equal(t, w.sessions[0].ID, out.View.Session.ID)
 	require.Equal(t, "ann@example.invalid", string(out.View.User.Email), "адрес нормализован ключом")

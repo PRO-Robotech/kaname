@@ -173,6 +173,22 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "переписывание материала, которое не случилось ни разу, обязано быть отличимо от непровязанного",
 	},
+	// ── ВТОРОЙ ФАКТОР (Ф12, kacho#1281) ─────────────────────────────────────
+	SecondFactorPresentationsMetric: {
+		Cells: len(humansession.PresentationCells()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "«материал не открылся» — находка о ключнице, а не отказ человеку: ноль по ней обязан быть виден до первого события",
+	},
+	SecondFactorRefusalsMetric: {
+		Cells: len(humansession.SecondFactorRefusals()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "отказ по состоянию попыткой не считается и в счёт подбора не идёт — виден только здесь",
+	},
+	SecondFactorEventsMetric: {
+		Cells: len(humansession.SecondFactorEvents()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "ноль заведений за всю жизнь и непровязанный глагол выглядят одинаково без клетки",
+	},
 	RegistrationOutcomesMetric: {
 		Cells: len(registration.Lanes) * len(registration.Outcomes()), // полоса × исход
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
@@ -193,6 +209,11 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Cells: len(InviteActivationOutcomes),
 		Build: func(r *Registry) { r.NewInviteActivationRecorder() },
 		Why:   "путь первого входа, умерший целиком, выглядел бы здоровее всех",
+	},
+	Namespace + "_invite_mail_intents_total": {
+		Cells: len(InviteMailIntentOutcomes),
+		Build: func(r *Registry) { r.NewInviteMailIntentRecorder() },
+		Why:   "ограничение частоты для вызывающего невидимо by construction (Р9); незасеянная клетка rate_limited означала бы «сюда никто не приходил» там, где письма молча не уходят",
 	},
 	Namespace + "_module_catalog_applies_total": {
 		Cells: len(ModuleCatalogApplyOutcomes),

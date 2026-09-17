@@ -422,6 +422,30 @@ var RequiredSettings = []RequiredSetting{
 			"и меняется, без простоя и без переписывания хранилища",
 		Refusal: "authn.jwks-encryption-key-hex",
 	},
+	// ВТОРОЙ ФАКТОР (Ф12, kacho#1281) — величины полосы `own`.
+	{
+		Key:    "authn.second-factor-encryption-key-hex",
+		Env:    "KANAME_SECOND_FACTOR_ENC_KEY",
+		Supply: SupplyEnv,
+		Lanes:  []IdentityProvider{IdentityProviderOwn},
+		Sample: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+		Why: "перечень ключей ОБЁРТКИ секретов второго фактора (код по времени): 32 байта в hex (64 знака) " +
+			"через запятую — первый оборачивает, все открывают. СВОЯ ручка, а не ключ подписного ключа: " +
+			"предмет другой (секретов много, по одному на человека), и смена одного перечня не обязана " +
+			"останавливать другой",
+		Refusal: "authn.second-factor-encryption-key-hex",
+	},
+	{
+		Key:    "authn.self-service-freshness",
+		Env:    "KANAME_AUTHN__SELF_SERVICE_FRESHNESS",
+		Supply: SupplyEnv,
+		Lanes:  []IdentityProvider{IdentityProviderOwn},
+		Sample: "15m",
+		Why: "окно свежести правки своих данных от последнего предъявления: заведение и подтверждение " +
+			"второго фактора требуют предъявления не старше окна, и тем же окном ограничен срок " +
+			"неподтверждённого заведения. Умолчания нет: перенос прежней величины (15 мин) объявляется профилем",
+		Refusal: "authn.self-service-freshness",
+	},
 	{
 		Key:    "api-server.registry-token.service",
 		Env:    "KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE",

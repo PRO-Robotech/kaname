@@ -35,14 +35,14 @@ import (
 const stampGoodDockerfile = `FROM golang:1.26-alpine AS builder
 WORKDIR /src
 COPY . .
-ARG KACHO_IMAGE_REVISION=""
-ARG KACHO_IMAGE_VERSION=""
-RUN go build -ldflags "-X main.buildVersion=$KACHO_IMAGE_VERSION -X main.buildRevision=$KACHO_IMAGE_REVISION" -o /kaname ./cmd/kaname \
+ARG OCI_IMAGE_REVISION=""
+ARG OCI_IMAGE_VERSION=""
+RUN go build -ldflags "-X main.buildVersion=$OCI_IMAGE_VERSION -X main.buildRevision=$OCI_IMAGE_REVISION" -o /kaname ./cmd/kaname \
  && go build -o /kaname-migrator ./cmd/migrator
 
 FROM alpine:3.24
-ARG KACHO_IMAGE_REVISION=""
-ARG KACHO_IMAGE_VERSION=""
+ARG OCI_IMAGE_REVISION=""
+ARG OCI_IMAGE_VERSION=""
 COPY --from=builder /kaname /usr/local/bin/kaname
 `
 
@@ -101,7 +101,7 @@ func TestBuildStampInjection_ControlIsSilent(t *testing.T) {
 func TestBuildStampInjection_LdflagsOnlyInAComment(t *testing.T) {
 	t.Parallel()
 	broken := strings.Replace(stampGoodDockerfile,
-		`RUN go build -ldflags "-X main.buildVersion=$KACHO_IMAGE_VERSION -X main.buildRevision=$KACHO_IMAGE_REVISION" -o /kaname ./cmd/kaname \`,
+		`RUN go build -ldflags "-X main.buildVersion=$OCI_IMAGE_VERSION -X main.buildRevision=$OCI_IMAGE_REVISION" -o /kaname ./cmd/kaname \`,
 		"# версия инжектится через -ldflags \"-X main.buildVersion=… -X main.buildRevision=…\"\n"+
 			`RUN go build -o /kaname ./cmd/kaname \`, 1)
 	require.NotEqual(t, stampGoodDockerfile, broken, "инъекция не применилась")
@@ -128,12 +128,12 @@ func TestBuildStampInjection_SymbolRenamedInGo(t *testing.T) {
 func TestBuildStampInjection_ArgDeclaredInAnotherStage(t *testing.T) {
 	t.Parallel()
 	broken := strings.Replace(stampGoodDockerfile,
-		"ARG KACHO_IMAGE_REVISION=\"\"\nARG KACHO_IMAGE_VERSION=\"\"\nRUN go build",
+		"ARG OCI_IMAGE_REVISION=\"\"\nARG OCI_IMAGE_VERSION=\"\"\nRUN go build",
 		"RUN go build", 1)
 	require.NotEqual(t, stampGoodDockerfile, broken, "инъекция не применилась")
 
 	requireStampFinding(t, syntheticStampRoot(t, broken, stampGoodMain),
-		"аргумент KACHO_IMAGE_VERSION не объявлен в ступени сборки")
+		"аргумент OCI_IMAGE_VERSION не объявлен в ступени сборки")
 }
 
 // TestBuildStampInjection_ValueFromAForeignArg — подстановка берёт значение не из
@@ -141,11 +141,11 @@ func TestBuildStampInjection_ArgDeclaredInAnotherStage(t *testing.T) {
 func TestBuildStampInjection_ValueFromAForeignArg(t *testing.T) {
 	t.Parallel()
 	broken := strings.Replace(stampGoodDockerfile,
-		"-X main.buildRevision=$KACHO_IMAGE_REVISION", "-X main.buildRevision=$SOME_OTHER_ARG", 1)
+		"-X main.buildRevision=$OCI_IMAGE_REVISION", "-X main.buildRevision=$SOME_OTHER_ARG", 1)
 	require.NotEqual(t, stampGoodDockerfile, broken, "инъекция не применилась")
 
 	requireStampFinding(t, syntheticStampRoot(t, broken, stampGoodMain),
-		"берётся не из аргумента KACHO_IMAGE_REVISION")
+		"берётся не из аргумента OCI_IMAGE_REVISION")
 }
 
 // TestBuildStampInjection_NoServiceBuildLine — сборки служебного двоичного файла

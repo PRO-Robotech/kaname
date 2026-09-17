@@ -219,6 +219,12 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.hydra-admin-token-env", "KANAME_HYDRA_ADMIN_TOKEN")
 	v.SetDefault("authn.jwks-encryption-key-hex", "")
 	v.SetDefault("authn.jwks-encryption-key-hex-env", "KANAME_JWKS_ENC_KEY")
+	// Второй фактор (Ф12, kacho#1281): свой перечень ключей обёртки — те же
+	// две половины, что у соседней ручки; окно свежести правки своих данных —
+	// без умолчания (нулевая длительность доезжает до стража незаданной).
+	v.SetDefault("authn.second-factor-encryption-key-hex", "")
+	v.SetDefault("authn.second-factor-encryption-key-hex-env", "KANAME_SECOND_FACTOR_ENC_KEY")
+	v.SetDefault("authn.self-service-freshness", time.Duration(0))
 	v.SetDefault("authn.hooks-http-endpoint", "tcp://0.0.0.0:9092")
 	// Своя чеканка токенов (задача #897). Умолчания заданы ТОЛЬКО у величин,
 	// у которых умолчание осмысленно: путь нашей записи набора и срок ключа.
@@ -352,6 +358,13 @@ func RegisterDefaults(v *viper.Viper) {
 	// Ключ объявлен ЗДЕСЬ, потому что без объявления переменная окружения
 	// `KANAME_INVITE__TTL` не связывается вовсе: viper связывает то, что знает.
 	v.SetDefault("invite.ttl", time.Duration(0))
+	// invite.mail-rate-limit — ограничение частоты писем на адрес (ID-MAIL-1,
+	// Р14, MAIL-42/43). Умолчание объявлено ЗДЕСЬ и положительно: молчащий
+	// профиль ограничение не снимает, а явный ноль доезжает до поля нулём и
+	// отвергается стражем — значения «без ограничения» у ручки нет.
+	// Override: KANAME_INVITE__MAIL_RATE_LIMIT__MAX_PER_WINDOW, __WINDOW.
+	v.SetDefault("invite.mail-rate-limit.max-per-window", DefaultInviteMailPerWindow)
+	v.SetDefault("invite.mail-rate-limit.window", DefaultInviteMailWindow)
 
 	v.SetDefault("invite-mail.relay", "")
 	v.SetDefault("invite-mail.from", "")

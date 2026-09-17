@@ -244,3 +244,58 @@ func TestOwnershipScopedReadWithoutTheOwnerArgumentIsNotADecider(t *testing.T) {
 		t.Fatalf("чтение без довода-владельца зачтено за решателя: %q", ev)
 	}
 }
+
+// ЧЕТВЁРТАЯ ФОРМА СУЖЕНИЯ СТРАНИЦЫ — ЧТЕНИЕ, СУЖЕННОЕ ВЫЗЫВАЮЩИМ (IAM-ID-2 §2.5)
+//
+// На полосе `scope_filtered` у чтения «про себя» единичного объекта нет, и
+// модели спрашивать не о чем: сужение и есть личность, и она уходит доводом
+// запроса (`ListMine(ctx, userID, страница)`). Распознаватель, знавший только
+// три прежние формы, молчал бы на живом сужении. Обе стороны доказаны: довод
+// на месте — сужение; голое связывание с личностью либо чтение без довода —
+// нет.
+
+func TestCallerScopedReadCountsAsPageNarrowing(t *testing.T) {
+	idx := servingPackage(t, `userID := authzguard.PrincipalUserID(ctx)
+	_, _, _ = u.store.ListMine(ctx, userID, page)`)
+	ev, resolved := idx.findOnServingPath("Create", pageNarrowingMatcher)
+	if !resolved {
+		t.Fatal("метод обработчика не разрешился — вердикта нет ни в одну сторону")
+	}
+	if ev == "" {
+		t.Fatal("чтение, суженное вызывающим, не зачтено за сужение страницы: личность — довод " +
+			"запроса, чужая строка не читается вовсе — это крепче вопроса после чтения")
+	}
+	if !strings.Contains(ev, "ListMine") {
+		t.Fatalf("находка не называет форму сужения: %q", ev)
+	}
+}
+
+// TestABareCallerBindingIsNotPageNarrowing — АНТИ-ЗАЧЁТ. Чтение личности стоит
+// на пути почти каждого вызова; зачтённое за сужение, оно сделало бы гейт
+// формой без содержания.
+func TestABareCallerBindingIsNotPageNarrowing(t *testing.T) {
+	idx := servingPackage(t, `userID := authzguard.PrincipalUserID(ctx)
+	_ = userID
+	_, _, _ = u.store.List(ctx, page)`)
+	ev, resolved := idx.findOnServingPath("Create", pageNarrowingMatcher)
+	if !resolved {
+		t.Fatal("метод обработчика не разрешился — вердикта нет ни в одну сторону")
+	}
+	if ev != "" {
+		t.Fatalf("голое связывание с личностью зачтено за сужение страницы: %q", ev)
+	}
+}
+
+// TestCallerScopedReadWithoutThePrincipalArgumentIsNotPageNarrowing — ГРАНИЦА
+// ФОРМЫ: суффикс без довода-принципала сужает по чему угодно, только не по
+// вызывающему.
+func TestCallerScopedReadWithoutThePrincipalArgumentIsNotPageNarrowing(t *testing.T) {
+	idx := servingPackage(t, `_, _, _ = u.store.ListMine(ctx)`)
+	ev, resolved := idx.findOnServingPath("Create", pageNarrowingMatcher)
+	if !resolved {
+		t.Fatal("метод обработчика не разрешился — вердикта нет ни в одну сторону")
+	}
+	if ev != "" {
+		t.Fatalf("чтение без довода-принципала зачтено за сужение: %q", ev)
+	}
+}

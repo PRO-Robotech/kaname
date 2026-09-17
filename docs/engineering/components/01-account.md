@@ -289,7 +289,7 @@ make -C deploy logs-svc SVC=iam
 - **FK:** `accounts_owner_fk(owner_user_id) → users(id) ON DELETE RESTRICT`, объявлен
   **`DEFERRABLE INITIALLY DEFERRED`** (порядок посева не важен). Следствие для маппинга
   ошибок: `23503` по этому ключу приходит из `Commit()`, а не из `INSERT`.
-- **CHECK:** `accounts_labels_valid CHECK (kacho_labels_valid(labels))`.
+- **CHECK:** `accounts_labels_valid CHECK (labels_valid(labels))`.
 - **Намерение о владении:** Create-use-case кладёт кортеж владельца
   `(user:usr_xxx, owner, account:acc_xxx)` в журнал `kaname.fga_outbox` **в том же
   writer-tx**; триггер журнала складывает из строки прямой факт (`relation_fact`) там же.

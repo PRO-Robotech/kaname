@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 740
+Всего кейсов: 754
 
 ## Перепись по модулям
 
@@ -50,8 +50,10 @@
 | `cases/iam-interactive-client.py` | 8 |
 | `cases/iam-internal-only-check.py` | 13 |
 | `cases/iam-invite-grant-fga.py` | 4 |
+| `cases/iam-invite-resend.py` | 4 |
 | `cases/iam-list-visibility.py` | 3 |
 | `cases/iam-membership-create.py` | 3 |
+| `cases/iam-membership-mine.py` | 3 |
 | `cases/iam-membership-read.py` | 7 |
 | `cases/iam-permission-catalog.py` | 3 |
 | `cases/iam-project-edge-format.py` | 1 |
@@ -70,6 +72,7 @@
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-login-lane.py` | 4 |
 | `cases/kaname-recovery-lane.py` | 3 |
+| `cases/kaname-second-factor.py` | 4 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/label-revoke-nlb.py` | 1 |
@@ -644,6 +647,16 @@
 - `INVGRANT-TE4-PROJECT-ANCHOR-VIEWER-RC1`
 
 
+## `cases/iam-invite-resend.py` — 4 кейсов
+
+> Повторная отправка письма приглашения — UserService.ResendInvite (приёмка ID-MAIL-1, §10 п. 9; MAIL-36, MAIL-37, MAIL-38, MAIL-25).
+
+- `IAM-USR-RESEND-OK`
+- `IAM-USR-RESEND-SAME-OUTCOME`
+- `IAM-USR-RESEND-NEG-NOT-IN-ACCOUNT`
+- `IAM-USR-RESEND-NEG-MALFORMED-ID`
+
+
 ## `cases/iam-list-visibility.py` — 3 кейсов
 
 > Case-set iam-list-visibility — страница списка есть страница ВИДИМОГО (задача #645).
@@ -659,6 +672,14 @@
 - `IAM-ID1-MBR-CREATE-OK`
 - `IAM-ID1-MBR-CREATE-SECOND-ACCOUNT`
 - `IAM-ID1-MBR-CREATE-NEG-AUTHZ`
+
+## `cases/iam-membership-mine.py` — 3 кейсов
+
+> Case-set СВОЕГО списка членств (IAM-ID-2, стадия S2; kaname#206).
+
+- `IAM-ID2-MINE-INVITED-OK`
+- `IAM-ID2-MINE-PAGINATION`
+- `IAM-ID2-MINE-NEG-ANON`
 
 ## `cases/iam-membership-read.py` — 7 кейсов
 
@@ -1032,6 +1053,19 @@
 - `IAM-RECOVERY-OK-REQUEST-SAME-ANSWER`
 - `IAM-RECOVERY-NEG-WRONG-CODE`
 - `IAM-RECOVERY-NEG-CSRF-MISSING`
+
+## `cases/kaname-second-factor.py` — 4 кейса
+
+> Второй фактор (Ф12, kacho#1281): шесть глаголов семейства на том же слушателе
+> формы, что вход, и поле `secondFactor` формы входа. Адресуется `loginLaneBaseUrl`;
+> на автономном стенде посадки `external` переменная пуста ПО ПОСАДКЕ — «условие
+> не создано». Код по времени вычисляет посев из `secret` ответа `enroll`; вход с
+> кодом идёт ступенью `t₀ + 1` — границы ступени посев не ждёт (Ф12-08).
+
+- `IAM-2FA-OK-ENROLL-CONFIRM-LOGIN-LEVEL2`
+- `IAM-2FA-OK-BACKUP-CODE-STEP-UP`
+- `IAM-2FA-OK-REMOVE-BY-CODE`
+- `IAM-2FA-NEG-FORMS-AND-STATE`
 
 ## `cases/kaname-own-rest-front.py` — 14 кейсов
 

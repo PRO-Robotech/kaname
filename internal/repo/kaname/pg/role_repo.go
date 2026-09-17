@@ -1137,7 +1137,7 @@ func (w *roleWriter) ReplaceRuleSelectors(ctx context.Context, roleID domain.Rol
 			        updated_at     = now()`,
 			string(roleID), sel.RuleFP, armText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
 		); err != nil {
-			// A CHECK violation (23514 — e.g. match_labels fails kacho_labels_valid)
+			// A CHECK violation (23514 — e.g. match_labels fails labels_valid)
 			// must surface as InvalidArgument, not INTERNAL; mapErr also keeps the pgx
 			// constraint text from leaking to the caller.
 			return mapErr(err, "", string(roleID))

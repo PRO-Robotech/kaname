@@ -72,8 +72,8 @@ var stampedSymbols = []struct {
 	symbol string // полное имя, как его видит компоновщик
 	arg    string // аргумент сборки, из которого берётся значение
 }{
-	{symbol: "main.buildVersion", arg: "KACHO_IMAGE_VERSION"},
-	{symbol: "main.buildRevision", arg: "KACHO_IMAGE_REVISION"},
+	{symbol: "main.buildVersion", arg: "OCI_IMAGE_VERSION"},
+	{symbol: "main.buildRevision", arg: "OCI_IMAGE_REVISION"},
 }
 
 // serviceBinaryFlag — по чему опознаётся строка сборки ИМЕННО служебного

@@ -1,0 +1,227 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-session-and-credentials-are-our-contract.md
+  sha256: 7b58cc79532757cd9156cf68d1c9b53d2bbc2691999f6678fafe8305b19dbdf6
+  static_status: DRAFT
+  base_commit: 6acf8f19351141fdcabd56284bd8bf78bf66d9d2
+  content_commit: 639bade40057bc255eb2cca3126e87497607e7f3
+  branch: acceptance/w14-decisions
+  pull_request: PRO-Robotech/kaname#214
+  task: PRO-Robotech/kacho#1269
+  decisions_recorded: [PRO-Robotech/kacho#2697]
+  lines: 3796
+  round: 10
+  predecessor_record: docs/specs/reviews/login-session-and-credentials-are-our-contract/fc388532c1b917f5717a3d896dcd956f927d38e4529b8e596f19a7e445c8aadf.yaml
+  fingerprint_predicate: >-
+    git show 639bade40057bc255eb2cca3126e87497607e7f3:docs/engineering/acceptance/login-session-and-credentials-are-our-contract.md
+    | sha256sum
+  fingerprint_note: >-
+    Отпечаток снят своим замером в рабочей копии круга (`tmp/w14-review2`) и сверен с головой
+    ветки на origin (`git ls-remote` → 639bade4, до чтения и перед записью); документ на ветке
+    после круга 9 правил один коммит 639bade4 (редакция 13). Шапка (строка «Статус») не тронута;
+    прежние девять записей не редактировались (`git diff ac9135bc..639bade4 -- docs/specs/reviews/`
+    пуст).
+  brief_premise_corrected: >-
+    Посылки задания подтвердились (голова 639bade4; база ветки 6acf8f19 — линия при этом
+    пересоздана на 1f51668f, приёмок и записей ревью она после 6acf8f19 не трогает, ветка
+    сливается без конфликта — см. Ф3-запись этого круга). Посылка круга 9 «четырёх правок словом
+    довольно» ОПРОВЕРГНУТА автором на одну копию: предикат по корню слова нашёл пятую (§5, строка
+    Ф3, форма без прилагательного) — перемерено здесь, подтверждено. Посылка редакции 13 «26 строк
+    по корню, из них записей 15» НЕ воспроизводится на этой же редакции — В1.
+  measurement_revisions: >-
+    Дом службы: ветка 639bade4 (база 6acf8f19); origin/release/iam-lines — 1f51668f. Дом платформы
+    не трогался — редакция 13 правит только слова, ни одного факта «Тогда».
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-17'
+
+effective_approval:
+  issued: true
+  issued_at: '2026-09-17T03:21:37Z'
+  ban1_lifted: true
+  why: >-
+    Вердикт круга 10 — APPROVED: блокирующих ноль, Б1 круга 9 закрыт тем же опытом с другим
+    результатом (предикат рецензента → живых 0; предикат по корню → живых 5, и все пять называют
+    ОТЗЫВ посылки, не посылку). Санкция не выдана: политика называет единственного, кто выпускает
+    effective approval, — `pointpu`; роль без внешнего события полномочия не даёт
+    (`change-graph.md` §3). Что событие выдало бы: редакцию 13 — ту же редакцию 11, влитую #104,
+    с решением kacho#2697 (§4.2, редакция 12) и переписью отозванной посылки по словоформам
+    (редакция 13); ни одного факта «Тогда» с редакции 11 не изменилось.
+  publication_pending:
+    required_for_sanction: true
+    expected_from: оркестратор волны
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Публикация — отдельным коммитом поверх этой записи дописывается только блок `event`.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (исполнено этим кругом); `docs/changes/policy.yaml`
+    строка 41: `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5707963871
+  node_id: IC_kwDOTZqgWM8AAAABVDid3w
+  url: https://github.com/PRO-Robotech/kacho/issues/1269#issuecomment-5707963871
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5707963871
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1269
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-17T03:21:37Z'
+  body_sha256: 4b5975d30deb3cbbc50f8057d829d8efdeaee9f8c6ac95ee0c14ba4e1e57c941
+  subject_sha256: 7b58cc79532757cd9156cf68d1c9b53d2bbc2691999f6678fafe8305b19dbdf6
+  subject_revision: 639bade40057bc255eb2cca3126e87497607e7f3
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; запись рецензента задним числом
+    не правилась. Отпечаток предмета сверен перед публикацией (sha256sum файла на 639bade4)
+    и совпал с объявленным. Отпечаток тела снят с сырого ответа API.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+
+scope:
+  reviewed: >-
+    Дифф 3d346ddd..639bade4 документа целиком (108 вставок, 8 снятий) против Б1 круга 9 — тем
+    же предикатом, дословно, плюс предикат автора по корню слова, дословно (python из §10.19),
+    с чтением каждой живой строки; сверка пяти правленых мест по образцу how_to_close круга 9;
+    перепись §5 (67); гейты приёмок дома службы на 639bade4; сверка с Ф3 §7.1/§7.2 и Ф5 §13.
+  method: experiment_not_reading
+  neighbouring_acceptances_reviewed: >-
+    Ф3 редакции 9 (тот же PR): §7.1 и §7.2 ссылаются на строки Ф1 §5 и §4.2 — те на месте и
+    говорят то, что им приписывают; снятую форму «обязательна» Ф3 из Ф1 не цитирует (одна её
+    собственная копия в Р6 — предмет Ф3-записи этого круга, Ф1 она не касается). Ф5 редакции 3 —
+    §13 называет Ф1 §4.2 «запись монотонна» — на месте.
+  document_edited_by_reviewer: false
+
+questions:
+  - q: новая редакция исполняет РОВНО замечание — ни шире, ни уже
+    answer: >-
+      ДА и на одну копию ГЛУБЖЕ, с доказательством: четыре места круга 9 (800→817 «Дано» Ф1-63,
+      803→820 пояснение «Тогда» Ф1-67, 1214→1234 §4.2 «оставшиеся две», 2030→2052 §8 замок Ф1-66)
+      правлены словом по образцу how_to_close; пятое (§5, строка Ф3: «обязательна» →
+      «возможным, не обязательным», с отзывом редакций 10…12) найдено вторым предикатом и
+      названо опровержением посылки круга. Ни один факт «Тогда» не тронут — дифф 3d346ddd..639bade4
+      меняет только эти пять ячеек/абзацев, шапку, §10.18 (указатель у числа «три») и новый
+      §10.19. Записи редакций 10…12 и §10.16…§10.18 оставлены как записи своих редакций — верно
+      (история добавляется, не переписывается).
+  - q: у каждого нового/изменённого «Тогда» есть производитель; у снятого назван предмет
+    answer: >-
+      Новых «Тогда» нет; изменённые — только словом («возможный, не обязательный») с указанием
+      производителя (`recovery_complete.go` пишет пароль сам, PR kaname#200; Ф3-19 — смена из
+      сессии восстановления по текущему паролю). Снятого нет — снят был шаг в редакции 12, здесь
+      снимаются его последние упоминания.
+  - q: отрицания с положительным близнецом
+    answer: >-
+      Не затронуто редакцией: близнецы Ф1-63/Ф1-27 и Ф1-67/Ф1-17 те же; §8 замок Ф1-66 —
+      отрицательный контроль «только полоса входа» и положительный Ф1-60 в том же прогоне — на
+      месте (строка 2052).
+  - q: прежние записи ревью не тронуты
+    answer: ДА — `git diff ac9135bc..639bade4 -- docs/specs/reviews/` пуст.
+  - q: соседи (ведомости соответствия) согласны
+    answer: ДА — Ф3 §7.1/§7.2, Ф5 §13 (см. neighbouring_acceptances_reviewed).
+
+predicates_run:
+  - where: PRO-Robotech/kaname@639bade4
+    command: "git show 639bade4:docs/engineering/acceptance/login-session-and-credentials-are-our-contract.md | sha256sum"
+    expected: отпечаток записи
+    got: 7b58cc79532757cd9156cf68d1c9b53d2bbc2691999f6678fafe8305b19dbdf6
+  - where: PRO-Robotech/kaname@639bade4 — предикат круга 9, дословно
+    command: "grep -n -iE 'обязательн(ый|ая|ой|ым) (путь|смен)' \"$D\" | cut -d: -f1"
+    expected: 9 строк, все — записи (шапка · §10.16 · §10.17 · §10.18 · §10.19); живых 0
+    got: "43 · 3470 3484 · 3599 · 3702 · 3774 3775 3776 3778 — 9, живых 0 (границы: первый `## ` на 386, §10.16 с 3432, §10.19 с 3721)"
+  - where: PRO-Robotech/kaname@639bade4 — предикат автора по корню, дословно (python §10.19)
+    command: "pat=r'обязател[а-я]*[^.|]{0,40}(смен|пут[ьи])|(смен|пут[ьи])[^.|]{0,40}обязател'"
+    expected: "26 строк: шапка 6 · записи 15 · живых 5 (§10.19)"
+    got: "27 строк: шапка 6 (17, 43, 49, 66, 69, 102) · записи 16 (3452…3786) · ЖИВЫХ 5 (820, 1197, 1202, 1214, 2052) — живые совпали с объявленными и все пять называют отзыв; на одну строку больше в зоне записей — В1"
+  - where: PRO-Robotech/kaname@639bade4
+    command: "sed -n '820p;2052p;1190,1216p' \"$D\" — чтение пяти живых строк"
+    expected: каждая называет отзыв, ни одна — посылку
+    got: "820 — «возможна, но не обязательна … Путь через восстановление (возможный, не обязательный — §4.2, редакция 12)»; 1197/1202/1214 — §4.2, отзыв («наступал обязательно в редакциях 10…11», «обязательным этот путь быть перестал», «слово „обязательно“ — у пути через восстановление»); 2052 — §8, «путь возможный, не обязательный, и проба выполняет его сама (Ф3-19)»"
+  - where: PRO-Robotech/kaname@639bade4
+    command: "grep -oE '\\| \\*\\*Ф1-[0-9]+\\*\\* \\|' \"$D\" | sort -u | wc -l ; git diff 3d346ddd 639bade4 -- \"$D\" | grep -cE '^[-+]- \\*\\*Статус'"
+    expected: 67 · 0
+    got: 67 · 0
+  - where: PRO-Robotech/kaname@639bade4
+    command: "go test ./internal/check/ -run TestAcceptance -count=1 -v"
+    expected: PASS
+    got: "PASS — приёмок 44; координат-путей 565, находок 0; координат проб 646, находок 0; правлено после объявления состояния 38, с записью 38"
+  - where: PRO-Robotech/kaname@6acf8f19..1f51668f
+    command: "git diff --stat 6acf8f19 1f51668f -- docs/engineering/acceptance/ docs/specs/reviews/"
+    expected: пусто
+    got: пусто (линия приёмок не трогала — как §10.19 и говорит)
+
+blocking: []
+
+non_blocking:
+  - id: В1
+    where: "§10.19, блок предиката по корню: «редакция 13 → 26 строк: шапка 6 · записи 15 · ЖИВЫХ 5»; таблица перемера: «пятая живая копия, 1369» при «1365» в комментарии предиката"
+    what: >-
+      Предикат, исполненный дословно на этой же редакции, даёт 27 строк (записей 16, не 15): в зону
+      записей входит сам §10.19, и последняя его правка сдвинула число — тот же класс, что
+      «величина включает этот же файл, значит мерится после правки» (`01-wave-contract.md`).
+      Живых 5 и их состав воспроизводятся — довод редакции стоит. Две координаты пятой копии в
+      редакции 12 (1365 и 1369) — одно место, два числа. Править в следующей редакции, не отдельным
+      кругом.
+
+decisions:
+  - subject: пятая копия («последовательность … обязательна», §5 строка Ф3) правлена вместе с четырьмя — шире замечания круга 9 на одну копию
+    verdict: принято — опровержение посылки круга с предикатом и числами; ровно то, чего how_to_close требовал «предикатом со словоформами»
+  - subject: записи редакций 10…12 и §10.16…§10.18 не переписаны, у §10.18 — указатель у числа «три»
+    verdict: принято — история добавляется, не переписывается (`change-graph.md` §2)
+
+found_on_the_way:
+  - >-
+    Тот же класс — отозванная посылка в прозе — жив в Ф3 Р6 (одна копия), найден переписью по
+    пачке; предмет Ф3-записи этого круга (Б1 там), Ф1 не касается.
+
+verification:
+  what_was_done: >-
+    исполнение обоих предикатов §10.19 дословно; чтение пяти живых строк и пяти правленых
+    мест; перепись §5; гейты приёмок; сверка ведомостей Ф3/Ф5; сверка линии и сливаемости.
+  subject_digest_matches_current_document: true
+  header_left_untouched: true
+  document_edited_by_reviewer: false
+
+reviewer_errors_named_first:
+  - >-
+    Круг 9 назвал «четыре правки словом» — предикат рецензента знал прилагательное и не знал
+    формы без него; пятую копию нашёл автор. Числа круга 9 (четыре) верны для своего предиката
+    и неполны для класса — как §10.19 и записал.
+
+limits:
+  - Стенд не поднимался; круг о контракте, не о коде.
+  - >-
+    Реализация снятия поля (`kaname#201`) не сделана — Ф1 её не требует; отрицательный контроль
+    Ф5-24 держится живым читателем края до неё (Ф5-запись круга 3).
+
+cycle:
+  round_cost_note: >-
+    Класс «перепись по одной словоформе» отверг работу этой волны дважды (Ф1 круг 9, Ф3 круг
+    4) — по `multi-agent-flow-orchestration.md` §«Класс, отвергший работу ДВАЖДЫ» он переезжает
+    в форму задания: перепись отозванной посылки по корню слова — по КАЖДОМУ документу пачки.
+  next_step: >-
+    Публикация внешнего события оркестратором (блок `event` поверх этой записи); правка В1 —
+    следующей редакцией по любому поводу, круга не требует.

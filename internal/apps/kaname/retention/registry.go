@@ -95,16 +95,24 @@ const (
 	// уже не обслужит: применённые и истёкшие (Ф5 Р1). Темп задаёт внешний:
 	// строку заводит запрос восстановления по любому подтверждённому адресу.
 	SubjectRecoveryCodes = "recovery_codes"
+	// SubjectSecondFactorEnrollments — неподтверждённые заведения второго
+	// фактора (Ф12-44, kacho#1281): строки `pending` старше окна свежести —
+	// `confirm` их уже не примет ни при каком коде (Ф12-04). Темп задаёт сам
+	// человек: строку заводит `enroll` под живой сессией.
+	SubjectSecondFactorEnrollments = "second_factor_enrollments"
 )
 
-// HumanSessionReapers — ТРИ уборщика полосы входа (Ф3, Ф5): порог у второго —
-// самое длинное окно счёта, величина посадки, поэтому он приходит параметром
-// вместе с окном, а не выписывается длительностью.
+// HumanSessionReapers — ЧЕТЫРЕ уборщика полосы входа (Ф3, Ф5, Ф12): порог у
+// второго — самое длинное окно счёта, у четвёртого — окно свежести правки
+// своих данных; обе величины посадки и приходят параметром вместе с
+// уборщиком, а не выписываются длительностью.
 type HumanSessionReapers struct {
-	Sessions      HumanSessionReaper
-	Failures      LoginFailureReaper
-	Codes         RecoveryCodeReaper
-	LongestWindow time.Duration
+	Sessions         HumanSessionReaper
+	Failures         LoginFailureReaper
+	Codes            RecoveryCodeReaper
+	Enrollments      EnrollmentReaper
+	LongestWindow    time.Duration
+	EnrollmentWindow time.Duration
 }
 
 // HumanSessionReaper — порт уборщика истёкших и снятых записей сессии.
@@ -122,11 +130,17 @@ type RecoveryCodeReaper interface {
 	SweepUnservableRecoveryCodes(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
 
+// EnrollmentReaper — порт уборщика неподтверждённых заведений второго фактора:
+// `window` — окно свежести; строка `pending` старше него снимается.
+type EnrollmentReaper interface {
+	SweepExpiredEnrollments(ctx context.Context, window time.Duration, batch int) (int64, bool, error)
+}
+
 // WithHumanSessions — записи реестра полосы входа поверх базовых. Отдельной
 // функцией, а не параметрами `Subjects`: полоса поднимается посадкой `own`, и
 // под `external` записей у неё нет — уборщик без предмета выглядел бы исправным.
 func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
-	if r.Sessions == nil || r.Failures == nil || r.Codes == nil {
+	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.EnrollmentWindow <= 0 {
 		return base
 	}
 	return append(base,
@@ -150,6 +164,14 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 			// граница срока включающая и у оператора, и у уборки.
 			Grace: 0,
 			Sweep: r.Codes.SweepUnservableRecoveryCodes,
+		},
+		Subject{
+			Name: SubjectSecondFactorEnrollments,
+			// Порог — предикат читателя: `confirm` не примет `pending` старше
+			// окна свежести (Р8 — срок заведения равен окну), и уборщик снимает
+			// ровно то, что читатель уже отверг; запаса сверх окна не нужно.
+			Grace: r.EnrollmentWindow,
+			Sweep: r.Enrollments.SweepExpiredEnrollments,
 		},
 	)
 }

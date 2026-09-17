@@ -5,13 +5,13 @@ package pg
 
 // membership_repo.go — чтение принадлежности человека аккаунту.
 //
-// # НЕСУЩЕЕ СВОЙСТВО: аккаунт стоит в УСЛОВИИ ОТБОРА, а не в проверке после
+// # НЕСУЩЕЕ СВОЙСТВО: ключ сужения стоит в УСЛОВИИ ОТБОРА, а не в проверке после
 //
-// Оба запроса несут `m.account_id = $1` первым условием. Значит строк других
-// аккаунтов они не читают ВОВСЕ — и различию неоткуда взяться ни в теле ответа,
-// ни во времени его получения. Это сильнее проверки после чтения: проверку можно
-// забыть в следующей ветке, а условие отбора забыть нельзя — без него запрос не
-// соберётся.
+// Оба аккаунт-скоупных запроса несут `m.account_id = $1` первым условием, свой
+// список — `m.user_id = $1`. Значит чужих строк они не читают ВОВСЕ — и
+// различию неоткуда взяться ни в теле ответа, ни во времени его получения. Это
+// сильнее проверки после чтения: проверку можно забыть в следующей ветке, а
+// условие отбора забыть нельзя — без него запрос не соберётся.
 //
 // Отсюда же следует полоса ответа одиночного чтения: well-formed идентификатор
 // членства ЧУЖОГО аккаунта даёт `ErrNotFound` не потому, что вызывающий проверен
@@ -58,16 +58,16 @@ func (s *membershipSession) Close(ctx context.Context)           { _ = s.tx.Roll
 
 type membershipReader struct{ tx pgx.Tx }
 
-// membershipCols — проекция ОДНА на оба чтения.
+// membershipCols — проекция ОДНА на все три чтения.
 //
-// Одиночное чтение и список отдают одно сообщение с одинаково заполненными
-// полями, и держится это тем, что колонки объявлены один раз: расхождение
-// проекций законно только там, где контракт назвал их разными, а он их разными
-// не называет.
+// Одиночное чтение, список аккаунта и свой список отдают одно сообщение с
+// одинаково заполненными полями, и держится это тем, что колонки объявлены
+// один раз: расхождение проекций законно только там, где контракт назвал их
+// разными, а он их разными не называет.
 const membershipCols = `m.id, m.account_id, COALESCE(a.name, ''), m.user_id, m.state,
 	COALESCE(m.invited_by, ''), m.created_at, m.updated_at`
 
-// membershipFrom — источник строк обоих чтений.
+// membershipFrom — источник строк всех чтений.
 const membershipFrom = `FROM memberships m JOIN accounts a ON a.id = m.account_id`
 
 func scanMembership(row pgx.Row) (domain.Membership, error) {
@@ -160,6 +160,74 @@ func (r *membershipReader) List(
 	// `memberships_account_cursor_idx (account_id, created_at, id)`: ведущее
 	// равенство по аккаунту, за ним ключи курсора подряд и в согласованном
 	// направлении.
+	q := fmt.Sprintf(`SELECT %s %s WHERE %s ORDER BY m.created_at ASC, m.id ASC LIMIT $%d`,
+		membershipCols, membershipFrom, strings.Join(conditions, " AND "), argIdx)
+	args = append(args, pageSize+1)
+
+	rows, err := r.tx.Query(ctx, q, args...)
+	if err != nil {
+		return nil, "", mapErr(err, "", "")
+	}
+	defer rows.Close()
+
+	out := []domain.Membership{}
+	for rows.Next() {
+		m, serr := scanMembership(rows)
+		if serr != nil {
+			return nil, "", mapErr(serr, "", "")
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", mapErr(err, "", "")
+	}
+
+	var nextToken string
+	if int64(len(out)) > pageSize {
+		last := out[pageSize-1]
+		nextToken = encodePageToken(last.CreatedAt, string(last.ID))
+		out = out[:pageSize]
+	}
+	return out, nextToken, nil
+}
+
+// ListMine — страница членств НАЗВАННОГО человека (IAM-ID-2, стадия S2).
+//
+// Человек стоит в WHERE первым условием — тем же приёмом, что аккаунт у
+// аккаунт-скоупных чтений: строки других людей запрос не выбирает вовсе.
+// Разбор курсора и предел страницы — ТЕ ЖЕ функции, что у списка аккаунта:
+// второй кодек разошёлся бы с первым молча, на валидном входе оба отвечают
+// «валидно».
+func (r *membershipReader) ListMine(
+	ctx context.Context, userID domain.UserID, page membership.MinePage,
+) ([]domain.Membership, string, error) {
+	if userID == "" {
+		// Пустой человек означал бы «любой», то есть ровно тот межаккаунтный
+		// перечень, которого на этой поверхности не бывает.
+		return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument user_id")
+	}
+	pageSize, err := effectivePageSize(page.PageSize)
+	if err != nil {
+		return nil, "", err
+	}
+
+	conditions := []string{"m.user_id = $1"}
+	args := []any{string(userID)}
+	argIdx := 2
+	if page.PageToken != "" {
+		ts, id, derr := decodePageToken(page.PageToken)
+		if derr != nil {
+			return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument page_token")
+		}
+		conditions = append(conditions,
+			fmt.Sprintf("(m.created_at, m.id) > ($%d, $%d)", argIdx, argIdx+1))
+		args = append(args, ts, id)
+		argIdx += 2
+	}
+
+	// Порядок обхода — тот же, что у объявленного индекса
+	// `memberships_user_cursor_idx (user_id, created_at, id)`: ведущее
+	// равенство по человеку, за ним ключи курсора подряд.
 	q := fmt.Sprintf(`SELECT %s %s WHERE %s ORDER BY m.created_at ASC, m.id ASC LIMIT $%d`,
 		membershipCols, membershipFrom, strings.Join(conditions, " AND "), argIdx)
 	args = append(args, pageSize+1)

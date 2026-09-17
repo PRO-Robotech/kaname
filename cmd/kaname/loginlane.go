@@ -44,6 +44,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/servicecontract"
 	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
@@ -55,11 +56,13 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients/breachcheck"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
+	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
 // knobLoginLane — ручка адреса слушателя полосы формы.
@@ -80,6 +83,9 @@ type loginLane struct {
 	methods    *kanamepg.LoginMethodRepo
 	limits     humansession.Limits
 	dispatcher *humansession.GoDispatcher
+	// freshness — окно свежести правки своих данных (Ф12 Р8): срок `pending`
+	// и порог уборки заведений — та же величина.
+	freshness time.Duration
 }
 
 // drain — дождаться постановок письма, начатых до гашения (Ф5 Р2): ответ их не
@@ -100,17 +106,36 @@ func loginLaneWanted(cfg config.Config) bool {
 func (l *loginLane) wired() bool { return l != nil && l.sessions != nil && l.methods != nil }
 
 // signInMethods — способы входа человека, чьи проверяющие собраны ЭТИМ корнем:
-// пароль, пока полоса поднята. Второй фактор — Ф12.
+// пароль, код по времени и запасной код (Ф12): проверяющие обоих кодов
+// собираются вместе с полосой, поэтому пока полоса поднята — собраны все три.
 func (l *loginLane) signInMethods() []assurance.Method {
 	if !l.wired() {
 		return nil
 	}
-	return []assurance.Method{assurance.MethodPassword}
+	return []assurance.Method{assurance.MethodPassword, assurance.MethodTOTP, assurance.MethodLookupSecret}
 }
 
 // laneWiringOf — вклад полосы в наблюдение провязки.
 func laneWiringOf(l *loginLane) config.LaneWiring {
 	return config.LaneWiring{HumanCredentialsWired: l.wired(), HumanSessionsWired: l.wired()}
+}
+
+// resetSecondFactorUseCase — сброс второго фактора распорядителем (Ф12 Р10)
+// теми же хранилищами, что полоса: чтение строки способа — хранилище способов,
+// снятие/отсечка/событие — писатель хранилища сессий; nil — полосы нет.
+func (l *loginLane) resetSecondFactorUseCase(repo kanamerepo.Repository, opsRepo operations.Repo) *userapp.ResetSecondFactorUseCase {
+	if !l.wired() {
+		return nil
+	}
+	return userapp.NewResetSecondFactorUseCase(repo, opsRepo, l.methods, secondFactorResetStore{sessions: l.sessions})
+}
+
+// secondFactorResetStore — адаптер хранилища сессий к порту сброса: писатель
+// сессии несёт все четыре операции порта, соответствие закрепляется здесь.
+type secondFactorResetStore struct{ sessions *kanamepg.HumanSessionRepo }
+
+func (s secondFactorResetStore) ResetWriter(ctx context.Context) (userapp.SecondFactorResetWriter, error) {
+	return s.sessions.Writer(ctx)
 }
 
 // resolveHandler — `Resolve` для внутреннего слушателя; nil — полосы нет.
@@ -128,6 +153,7 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 	}
 	return retention.HumanSessionReapers{
 		Sessions: l.sessions, Failures: l.sessions, Codes: l.sessions, LongestWindow: l.limits.LongestWindow(),
+		Enrollments: l.methods, EnrollmentWindow: l.freshness,
 	}
 }
 
@@ -259,9 +285,29 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 	}
 	sessions := kanamepg.NewHumanSessionRepo(pool)
 	methods := kanamepg.NewLoginMethodRepo(pool)
+	// Второй фактор (Ф12): своё кольцо ключей обёртки секретов (Р2) — первый
+	// оборачивает, все открывают; число ключей печатается всегда, как у
+	// приватной половины подписи (`signing.go`).
+	sfKeys, err := cfg.AuthN.ResolveSecondFactorEncryptionKeys()
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: second factor wrapping keys: %w", err)
+	}
+	sfWrapper, err := keywrap.New(sfKeys...)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: second factor wrapper: %w", err)
+	}
+	logger.Info("second-factor wrapping keys declared",
+		slog.Int("keys", sfWrapper.KeyCount()),
+		slog.String("knob", "authn.second-factor-encryption-key-hex"),
+		slog.String("env", cfg.AuthN.SecondFactorEncryptionKeyEnvName()))
+	totp, err := totpverify.New(sfWrapper)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: totp verifier: %w", err)
+	}
 	loginUC, err := humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: sessions, Users: kanamepg.NewUserDirectory(repo), Methods: methods, Verifier: verifier,
 		Hasher: hasher, Limits: limits, TTL: login.SessionTTL, Observer: rec, Now: time.Now, Logger: logger,
+		TOTP: totp, Sets: verifier,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -309,6 +355,42 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Второй фактор (Ф12): шесть глаголов одними зависимостями — те же
+	// хранилища, тот же проверяющий пароля (он же проверяющий набора, Р6), тот
+	// же хешер (он же чеканит набор), окно свежести Р8 и доменное имя посадки
+	// как издатель `otpauth`-адреса (Р5).
+	if err := cfg.AuthN.ValidateSelfServiceFreshness(); err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	sfDeps := humansession.SecondFactorDeps{
+		Store: sessions, Methods: methods, TOTP: totp, Sets: verifier, SetHasher: hasher, Verifier: verifier,
+		Limits: limits, Freshness: cfg.AuthN.SelfServiceFreshness, Domain: cfg.AuthN.ResolveDomain(),
+		Observer: rec, Now: time.Now, Logger: logger,
+	}
+	enrollUC, err := humansession.NewEnrollSecondFactorUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	confirmUC, err := humansession.NewConfirmSecondFactorUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	statusUC, err := humansession.NewSecondFactorStatusUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	removeUC, err := humansession.NewRemoveSecondFactorUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	regenerateUC, err := humansession.NewRegenerateBackupCodesUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	stepUpUC, err := humansession.NewStepUpUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	handler, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    login.SessionTTL,
 		CookieDomain:  login.ResolvedCookieDomain(),
@@ -316,13 +398,17 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 		RefusalDomain: refusaldomain.For(refusaldomain.ServiceIAM),
 		Logger:        logger,
 		Observer:      rec,
-	}, laneVerbs{login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC})
+	}, laneVerbs{
+		login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC,
+		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
 	return &loginLane{
 		handler: handler, resolve: humansession.NewHandler(resolveUC),
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
+		freshness: cfg.AuthN.SelfServiceFreshness,
 	}, nil
 }
 
@@ -365,6 +451,13 @@ type laneVerbs struct {
 	register *registration.RegisterUseCase
 	request  *humansession.RequestRecoveryUseCase
 	complete *humansession.CompleteRecoveryUseCase
+	// Второй фактор (Ф12).
+	enroll     *humansession.EnrollSecondFactorUseCase
+	confirm    *humansession.ConfirmSecondFactorUseCase
+	status     *humansession.SecondFactorStatusUseCase
+	remove     *humansession.RemoveSecondFactorUseCase
+	regenerate *humansession.RegenerateBackupCodesUseCase
+	stepUp     *humansession.StepUpUseCase
 }
 
 func (v laneVerbs) Register(ctx context.Context, in registration.Input) (registration.Output, error) {
@@ -391,6 +484,30 @@ func (v laneVerbs) CompleteRecovery(ctx context.Context, in humansession.Complet
 	return v.complete.Execute(ctx, in)
 }
 
+func (v laneVerbs) EnrollSecondFactor(ctx context.Context, in humansession.EnrollInput) (humansession.EnrollOutput, error) {
+	return v.enroll.Execute(ctx, in)
+}
+
+func (v laneVerbs) ConfirmSecondFactor(ctx context.Context, in humansession.ConfirmInput) (humansession.ConfirmOutput, error) {
+	return v.confirm.Execute(ctx, in)
+}
+
+func (v laneVerbs) SecondFactorStatus(ctx context.Context, in humansession.StatusInput) (humansession.StatusOutput, error) {
+	return v.status.Execute(ctx, in)
+}
+
+func (v laneVerbs) RemoveSecondFactor(ctx context.Context, in humansession.RemoveSecondFactorInput) (humansession.RemoveSecondFactorOutput, error) {
+	return v.remove.Execute(ctx, in)
+}
+
+func (v laneVerbs) RegenerateBackupCodes(ctx context.Context, in humansession.RegenerateBackupCodesInput) (humansession.RegenerateBackupCodesOutput, error) {
+	return v.regenerate.Execute(ctx, in)
+}
+
+func (v laneVerbs) StepUp(ctx context.Context, in humansession.StepUpInput) (humansession.StepUpOutput, error) {
+	return v.stepUp.Execute(ctx, in)
+}
+
 // loginLaneSurface — профиль поверхности слушателя формы. Досягаемость —
 // внутри кластера: до слушателя доходит ровно край, и адрес консоли, на
 // котором живут глаголы полосы, принадлежит краю.
@@ -411,14 +528,15 @@ func loginLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog
 		tlsCfg = nil
 	}
 	return iamHTTPSurface(servicecontract.Surface{
-		Name:   "полоса входа паролем, регистрации и восстановления доступа (/iam/v1/auth/{login,logout,password,csrf,register,recovery,recovery/complete})",
+		Name: "полоса входа паролем, регистрации, восстановления доступа и второго фактора " +
+			"(/iam/v1/auth/{login,logout,password,csrf,register,recovery,recovery/complete,second-factor,second-factor/{enroll,confirm,remove,backup-codes},step-up})",
 		Mode:   mode,
 		Logger: logger,
 		Addr: addrAxis(addr, "полоса входа паролем поднимается только посадкой authn.identity-provider=own "+
-			"по адресу "+knobLoginLane+"; на этой посадке вход человека, регистрацию, смену пароля, выход "+
-			"и восстановление доступа (/iam/v1/auth/login, /register, /logout, /password, /csrf, /recovery, "+
-			"/recovery/complete) служба не обслуживает — их исполняет "+
-			"внешний поставщик"),
+			"по адресу "+knobLoginLane+"; на этой посадке вход человека, регистрацию, смену пароля, выход, "+
+			"восстановление доступа и второй фактор (/iam/v1/auth/login, /register, /logout, /password, /csrf, /recovery, "+
+			"/recovery/complete, /second-factor, /second-factor/{enroll,confirm,remove,backup-codes}, /step-up) "+
+			"служба не обслуживает — их исполняет внешний поставщик"),
 		Handler: handler,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](

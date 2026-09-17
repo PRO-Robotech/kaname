@@ -273,6 +273,43 @@ data:
         {{- if hasKey . "memoryReserveBytes" }}
         memory-reserve-bytes: {{ int64 .memoryReserveBytes }}
         {{- end }}
+        {{- /* ВОССТАНОВЛЕНИЕ ДОСТУПА на той же полосе (Ф5, kacho#1271): срок кода
+             от чеканки, код однократен и после срока не оживает. Умолчания нет —
+             перенос прежней величины (5 мин) объявляет профиль, а не построение;
+             под `own` незаданный срок — отказ старта с именем ручки
+             (KANAME_AUTHN__LOGIN__RECOVERY_CODE_TTL). Ключ ТОГО ЖЕ блока `login`:
+             страж требует его наравне с величинами Ф3 (задача #205). */}}
+        {{- with .recoveryCodeTtl }}
+        recovery-code-ttl: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+
+      {{- with $authn.registration }}
+      # РЕГИСТРАЦИЯ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270; задача #205). Потолок ТЕМПА
+      # заведения аккаунтов одной личностью — сколько за окно СВЕРХ первого — и
+      # окно счёта. Первое заведение (сама регистрация) проходит безусловно;
+      # величина ограничивает следующие за окно. Обе — условие старта под
+      # `identityProvider: own`, умолчания нет ни у одной (Ф4 Р5, Ф4-18/19):
+      # незаданная — отказ старта с именем ручки (KANAME_AUTHN__REGISTRATION__*).
+      # Под `external` блок не читается: там строку авторитета правит
+      # администратор. Предел ветвится по `hasKey`, а не `with`: НОЛЬ у него
+      # законен («сверх первого — ни одного»), а `with` считает ноль пустым и
+      # выбросил бы объявленную величину. Целое проходит через `int64` — тот же
+      # довод, что у блока `login`.
+      registration:
+        {{- if hasKey . "admissionsPerWindow" }}
+        admissions-per-window: {{ int64 .admissionsPerWindow }}
+        {{- end }}
+        {{- with .admissionWindow }}
+        admission-window: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+
+      {{- with $authn.selfServiceFreshness }}
+      # ОКНО СВЕЖЕСТИ ПРАВКИ СВОИХ ДАННЫХ (Ф12, kacho#1281): условие старта под
+      # `authn.identityProvider: own`, умолчания нет — ветвь, а не сквозная
+      # подстановка, чтобы незаданное доехало до стража незаданным.
+      self-service-freshness: {{ . | quote }}
       {{- end }}
 
       {{- with (include "kaname-svc.trustDomain" .) }}
@@ -374,9 +411,45 @@ data:
     старта, и отвергает правильно: значения, означающего «без срока», в словаре
     ручки не существует вовсе. */}}
     {{- with $inv := .Values.invite | default dict }}
-    {{- with $inv.ttl }}
+    {{- /* ─── ОГРАНИЧЕНИЕ ЧАСТОТЫ ПИСЕМ НА АДРЕС (приёмка ID-MAIL-1, Р14, MAIL-42/43)
+
+    СТРАЖ РЕНДЕРА — МЕСТО С1 (Р4а): непозитивная величина отвергается ЗДЕСЬ, до
+    посадки, и отказ называет ручку и требование положительного значения.
+    Ключи отдаются только объявленными: молчание профиля — согласие с
+    умолчанием процесса (три письма в час на адрес), а не «без ограничения».
+    Значения, означающего «без ограничения», в словаре ручки нет: ноль,
+    отрицательное и слово («off», «unlimited») — отказ рендера. Чем судит
+    `with`: он пропускает ноль как пустое, поэтому объявленность спрашивается
+    у ключа, а не у значения. */}}
+    {{- $lim := $inv.mailRateLimit | default dict }}
+    {{- $maxDeclared := hasKey $lim "maxPerWindow" }}
+    {{- $winDeclared := hasKey $lim "window" }}
+    {{- if $maxDeclared }}
+    {{- $max := $lim.maxPerWindow }}
+    {{- if or (not (or (kindIs "int64" $max) (kindIs "float64" $max) (kindIs "int" $max))) (le (int $max) 0) }}
+    {{- fail (printf "kaname: `invite.mailRateLimit.maxPerWindow` = %v — ожидается положительное целое число писем одному адресу за окно. Значения «без ограничения» не существует: профиль вправе изменить величину, но не снять её (решение Р14 приёмки ID-MAIL-1, MAIL-43)" $max) }}
+    {{- end }}
+    {{- end }}
+    {{- if $winDeclared }}
+    {{- $win := toString $lim.window }}
+    {{- if or (not (regexMatch "^([0-9]+(ns|us|ms|s|m|h))+$" $win)) (regexMatch "^(0+(ns|us|ms|s|m|h))+$" $win) }}
+    {{- fail (printf "kaname: `invite.mailRateLimit.window` = %q — ожидается положительная длительность окна (`1h`, `30m`). Значения «без ограничения» не существует: профиль вправе изменить величину, но не снять её (решение Р14 приёмки ID-MAIL-1, MAIL-43)" $win) }}
+    {{- end }}
+    {{- end }}
+    {{- if or $inv.ttl $maxDeclared $winDeclared }}
     invite:
+      {{- with $inv.ttl }}
       ttl: {{ . | quote }}
+      {{- end }}
+      {{- if or $maxDeclared $winDeclared }}
+      mail-rate-limit:
+        {{- if $maxDeclared }}
+        max-per-window: {{ int $lim.maxPerWindow }}
+        {{- end }}
+        {{- if $winDeclared }}
+        window: {{ $lim.window | quote }}
+        {{- end }}
+      {{- end }}
     {{- end }}
     {{- end }}
     {{- with $im := .Values.inviteMail | default dict }}

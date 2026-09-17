@@ -28,6 +28,7 @@ import (
 
 	membershipapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/membership"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
 
 const (
@@ -40,6 +41,14 @@ func cmCtx() context.Context {
 	return operations.WithPrincipal(context.Background(),
 		operations.Principal{Type: "user", ID: cmInviter})
 }
+
+// cmMailLimit — ограничение частоты письма приглашения, провязанное пробам
+// этого файла. Без провязанного ограничения use-case письма не шлёт и
+// приглашение НЕ проходит (`Test_Invite_WithoutAWiredLimitRefusesToSend`,
+// kacho#1774) — это решение продукта, а не умолчание, и пробы членства его не
+// переоткрывают: их предмет — форма операции и порядок в транзакции, письмо
+// здесь лишь условие прохождения глагола.
+var cmMailLimit = outboxtypes.InviteMailRateLimit{MaxPerWindow: 3, Window: time.Hour}
 
 // awaitUsrOp ждёт терминального состояния операции у дублёра операций —
 // детерминированно, по условию, а не по паузе.
@@ -63,7 +72,7 @@ func awaitUsrOp(t *testing.T, ops *fakeUsrOps, id string) *operations.Operation 
 func TestInvite_KAN181_CreateMembershipMintsCreateMembershipMetadata(t *testing.T) {
 	repo := &invPrincRepo{}
 	ops := newFakeUsrOps()
-	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{})
+	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{}).WithInviteMailRateLimit(cmMailLimit, nil)
 
 	op, err := uc.CreateMembership(cmCtx(), membershipapp.CreateInput{
 		AccountID: domain.AccountID(cmAccount),
@@ -98,7 +107,7 @@ func TestInvite_KAN181_CreateMembershipMintsCreateMembershipMetadata(t *testing.
 func TestInvite_KAN181_MembershipIsReadInsideTheWriterTransaction(t *testing.T) {
 	repo := &invPrincRepo{}
 	ops := newFakeUsrOps()
-	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{})
+	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{}).WithInviteMailRateLimit(cmMailLimit, nil)
 
 	op, err := uc.CreateMembership(cmCtx(), membershipapp.CreateInput{
 		AccountID: domain.AccountID(cmAccount),
@@ -135,7 +144,7 @@ func TestInvite_KAN181_BothVerbsReachTheSameWriter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &invPrincRepo{}
 			ops := newFakeUsrOps()
-			uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{})
+			uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{}).WithInviteMailRateLimit(cmMailLimit, nil)
 			op, err := tc.call(uc)
 			require.NoError(t, err)
 			done := awaitUsrOp(t, ops, op.ID)
@@ -164,7 +173,7 @@ func TestInvite_KAN181_CreateMembershipRefusesBadAccountSynchronously(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &invPrincRepo{}
 			ops := newFakeUsrOps()
-			uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{})
+			uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{}).WithInviteMailRateLimit(cmMailLimit, nil)
 
 			op, err := uc.CreateMembership(cmCtx(), membershipapp.CreateInput{
 				AccountID: domain.AccountID(tc.account),
