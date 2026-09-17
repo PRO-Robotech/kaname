@@ -189,6 +189,26 @@ spec:
           image: "{{ .Values.image }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           command: ["/usr/local/bin/kaname", "serve"]
+          # ПРЕДЕЛЫ РЕСУРСОВ КОНТЕЙНЕРА СЛУЖБЫ — ОБЪЯВЛЯЕТ ПРОФИЛЬ, И ПОД `own`
+          # ЭТО УСЛОВИЕ СТАРТА, А НЕ ЭКСПЛУАТАЦИОННОЕ УКРАШЕНИЕ.
+          #
+          # Полоса входа паролем читает предел памяти У СРЕДЫ (cgroup
+          # контейнера) и отказывает в старте, когда предела нет: «ёмкость ×
+          # память на проверку + резерв сверять не с чем; задайте предел памяти
+          # контейнеру» (`config.LoginLaneConfig.ValidateMemoryBudget`). Здесь
+          # блока `resources` не было ВОВСЕ — шаблон не рендерил его ни ключом,
+          # ни умолчанием, — и посадка `own` была неподнимаема поставляемым
+          # чартом by construction: измерено живым процессом в kind
+          # (задача kaname#21, 2026-09-17). Умолчания в базовых значениях нет
+          # намеренно: величину пределов выбирает тот, кто ставит, а боевой
+          # профиль объявляет свою по арифметике стража
+          # (`deploy/own_lane_memory_ceiling_test.go`).
+          #
+          # Блок стоит у контейнера СЛУЖБЫ: контейнер наката страж не судит.
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
