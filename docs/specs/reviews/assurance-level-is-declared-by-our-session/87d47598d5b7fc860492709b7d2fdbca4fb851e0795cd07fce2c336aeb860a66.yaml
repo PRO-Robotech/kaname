@@ -1,0 +1,227 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md
+  sha256: 87d47598d5b7fc860492709b7d2fdbca4fb851e0795cd07fce2c336aeb860a66
+  static_status: DRAFT
+  base_commit: 6acf8f19351141fdcabd56284bd8bf78bf66d9d2
+  content_commit: 3b2b4093
+  branch: acceptance/w14-decisions
+  pull_request: PRO-Robotech/kaname#214
+  task: PRO-Robotech/kaname#195
+  lines: 1761
+  round: 4
+  predecessor_record: docs/specs/reviews/assurance-level-is-declared-by-our-session/68c2cc6cda07e7ecfbd5efe209954748146970cfcbbd9fbc670a737527f3a324.yaml
+  fingerprint_predicate: >-
+    git show c6a3c12efbb68df540445b9633795cacb2f5d008:docs/engineering/acceptance/assurance-level-is-declared-by-our-session.md
+    | sha256sum
+  fingerprint_note: >-
+    Отпечаток снят СВОИМ замером в рабочей копии круга (tmp/w14-review на голове ветки) и
+    сверен с головой ветки на origin (`git ls-remote` — c6a3c12e, снято до чтения и перед записью,
+    не сдвинулась); документ на ветке правил единственный коммит 3b2b4093. Шапка не тронута:
+    статический токен `DRAFT` вердиктом не является, вердикт выводится из ЭТОЙ записи и внешнего
+    события (`change-graph.md` §2, §3). Прежние три записи не редактировались — эта добавлена
+    соседней (`git diff 6acf8f19..c6a3c12e -- docs/specs/reviews/` → пусто).
+  brief_premise_corrected: >-
+    Посылки задания перемерены: голова ветки c6a3c12e — на origin, sha256 всех четырёх
+    документов равны заявленным; база ветвления 6acf8f19 — предок головы. ОПРОВЕРГНУТО одно:
+    «release/iam-lines сейчас 6acf8f19» — линия ушла вперёд на ed547967 (два вливания, #186 и
+    #217, ни одно не трогает docs/engineering/acceptance), ветка от неё не ребейзилась; на
+    вердикт по содержимому это не влияет, на слияние PR — не конфликтует по этим путям.
+  measurement_revisions: >-
+    Дом службы: ветка c6a3c12e (база 6acf8f19); origin/release/iam-lines на момент круга —
+    ed547967. Дом платформы: PRO-Robotech/kacho@275240efdc — объявленная документом ревизия и
+    одновременно origin/main на момент круга (дрейф 0). Историческая ревизия 45d1719fe8
+    перемерена там же для «было».
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-17'
+
+# ─── ОДОБРЕНИЕ ВЫВОДИТСЯ ИЗ ЗАПИСИ И СОБЫТИЯ, А НЕ ИЗ СЛОВА В ШАПКЕ ──────────
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт круга 4 — APPROVED: блокирующих ноль. САНКЦИЯ этим не выдана: политика называет
+    единственного, кто выпускает effective approval, — `pointpu`; роль без внешнего события
+    полномочия не даёт (`change-graph.md` §3). Пока событие не выполнено, запрет #1 по этой
+    редакции остаётся в силе — третья категория, не «да» и не «нет». Предмет редакции —
+    приведение к Ф3-45 — кода не разрешает и не запрещает сверх того, что разрешала редакция 4:
+    объём §0.2 не менялся.
+  publication_pending:
+    required_for_sanction: true
+    expected_from: оркестратор волны
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Публикация — отдельным коммитом поверх этой записи дописывается только блок `event`;
+      вердикт, разбор и числа задним числом не правятся.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (исполнено этим кругом); `docs/changes/policy.yaml`
+    строка 41: `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: none
+  status: not_performed
+  reason: >-
+    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось». Внешнего события, связывающего отпечаток, роль и
+    вердикт, этим кругом не создавалось: запись сдаётся в PR #214, событие — за оркестратором.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: null
+  publication_mode: record_only
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Дифф 6acf8f19..c6a3c12e документа целиком (126 вставок, 18 снятий) против решения
+    `kaname#195` (комментарий pointpu 2026-09-17T00:38:11Z, прочитан дословно) и против
+    Ф3-45 одобренной Ф3; каждый предикат §1.2, §7 инв. 8, §9 п.3 и §14 исполнен в своём доме
+    на объявленной ревизии.
+  method: experiment_not_reading
+  neighbouring_acceptances_reviewed: >-
+    Ф3 (тот же PR, редакция 8) — Ф3-45 дословно: «под `external` — прежнего поставщика и
+    `SessionCutoffOf`, как сегодня»; не правилась (дифф Ф3 строки 2242…2250 не касается).
+  document_edited_by_reviewer: false
+
+# ─── ПЯТЬ ВОПРОСОВ ЗАДАНИЯ — ПО КАЖДОМУ ЗАМЕР ────────────────────────────────
+questions:
+  - q: новая редакция исполняет РОВНО решение — ни шире, ни уже
+    answer: >-
+      ДА. Решение п.1: §9 п.3 и §8 (строка гейта словаря) называют производителя снятия — S3
+      (`kacho#1276`), «до S3 гейт не заводится» сказано словами — исполнено (строка §8:
+      «гейт заводится изменением S3 … до S3 не заводится — сказано словами»; §9 п.3: «две
+      строки, чья правая часть наступает с S3, в DoD Ф11 не входят»). Решение п.2: ориентир
+      «→ 2» с доводом Р7, «сегодня 3» — исполнено (§1.2 новый абзац; §9 п.3 четвёртая строка).
+      «Ф3-45 не правится» — исполнено. Сверх решения тронуты §1.3 Ч1, Р7 (последний абзац),
+      §5.1 п.1/п.3, §7 инв. 8, §9 п.4 и добавлен §14 — все шесть суть следствия того же
+      решения в местах, где документ называл «переключение Ф3» единственным моментом
+      снятия; ни одно не заводит нового решения и не трогает Р1…Р6, Р8…Р10, сценарии §3.
+      Шире решения — ноль; уже — ноль.
+  - q: у каждого нового/изменённого «Тогда» есть производитель; у снятого назван предмет
+    answer: >-
+      Сценарии §3 не тронуты — ни одного нового «Тогда» (проверено: дифф не содержит строк
+      `**Then**`/«Тогда» вне §14). Изменены предикаты и ведомость; каждый исполнен, см.
+      predicates_run.
+  - q: отрицания с положительным близнецом
+    answer: >-
+      Новых отрицаний нет. Близнец §7 инв. 8 (`own_session_assurance_test.go` как законный
+      близнец наряду с `auth_basic_stepup_internal_test.go`) — файл в дереве платформы есть.
+  - q: прежние записи ревью не тронуты
+    answer: >-
+      ДА — `git diff 6acf8f19..c6a3c12e -- docs/specs/reviews/` пуст; три записи на месте.
+  - q: соседи (ведомости соответствия) согласны
+    answer: >-
+      ДА — Ф3-45 не правилась и совпадает с тем, что Ф11 §1.3 Ч1 / §5.1 теперь утверждает;
+      Ф11 §14 цитирует Ф3-45 дословно (`grep -c 'прежнего поставщика и'` → 1, исполнено).
+
+predicates_run:
+  - where: PRO-Robotech/kacho@275240efdc (= origin/main)
+    command: "git grep -hE '^func acrFrom[A-Za-z]+\\(' -- 'gateway/**' | wc -l"
+    expected: 3 (acrFromCredentialLevel · acrFromAssuranceLevel · acrFromSessionLevel)
+    got: 3 — три имени совпали поимённо
+  - where: PRO-Robotech/kacho@45d1719fe8
+    command: та же
+    expected: 2 («было» редакций 1…4)
+    got: 2
+  - where: PRO-Robotech/kacho@275240efdc
+    command: "git grep -l 'authenticator_assurance_level' -- 'gateway/**' 'ui-future/**' ':!*_test.go' ':!*.test.ts' ':!*.test.tsx' ':!ui-future/e2e/**' | wc -l"
+    expected: 2 (остаток — край)
+    got: 2 — auth_session_stepup.go, kratos_session.go, оба в gateway/internal/middleware
+  - where: PRO-Robotech/kacho@275240efdc
+    command: "git grep -l 'mfaFreshUntil' -- 'ui-future/**' ':!*.test.ts' ':!*.test.tsx' | wc -l"
+    expected: 0
+    got: 0
+  - where: PRO-Robotech/kacho@275240efdc
+    command: "git grep -l -E 'authenticator_assurance_level|\"aal[0-3]\"' -- 'gateway/**/*_test.go' | wc -l"
+    expected: 5 (§7 инв. 8 «после Ф11 без S3»)
+    got: 5 — пять файлов поимённо, среди них own_session_assurance_test.go
+  - where: PRO-Robotech/kacho@45d1719fe8
+    command: та же
+    expected: 4 («было»)
+    got: 4
+  - where: PRO-Robotech/kacho@275240efdc
+    command: "git grep -l -E 'authenticator_assurance_level|\"aal[0-3]\"|aal=aal[0-3]' -- 'ui-future/e2e/**' | wc -l"
+    expected: 2
+    got: 2 — assurance.ts, stepup.spec.ts
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "grep -c 'прежнего поставщика и' docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md"
+    expected: 1
+    got: 1
+  - where: GitHub
+    command: "gh pr view 2689 -R PRO-Robotech/kacho --json mergedAt,mergeCommit"
+    expected: влит 2026-09-17T01:08:30Z в 275240efdc
+    got: совпало; `gh issue view 1276` → OPEN (S3 не назначен — как документ и говорит)
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "go test ./internal/check/ -run TestAcceptance -count=1"
+    expected: PASS
+    got: >-
+      PASS — TestAcceptancePathCoordinateResolves (приёмок 44 · координат-путей 563 ·
+      резолвится 483 · в чужом доме 80 · находок 0); TestAcceptanceProbeCoordinateResolves
+      (координат 641 · резолвится 517 · в чужом доме 124 · находок 0 · НЕ ПРОВЕРЕНО 0);
+      TestAcceptanceEditedAfterItsVerdictSaysSo (приёмок 44 · правлено после объявления 38 ·
+      с записью о правке 38); инъекции всех трёх — PASS
+
+blocking: []
+
+non_blocking:
+  - id: В1
+    where: §9 п.3, первая строка предиката
+    what: >-
+      `git grep -c … | wc -l` — `-c` печатает счёт по файлу, `wc -l` считает файлы с
+      совпадением; строка унаследована от редакций 1…4 и меряет «файлов с объявлением», а
+      комментарий читает «1 → 0» как число объявлений. Совпадает, пока функция объявлена в
+      одном файле. Не блокирует: единица названа неточно, число верно.
+  - id: В2
+    where: шапка, второй пункт («Ревизии измерения»)
+    what: >-
+      Пункт редакции 5 называет 275240efdc и 6acf8f19; ниже осталась строка редакций 1…4 с
+      45d1719fe8 как «ревизией измерения» без пометки «было». Читатель, взявший вторую,
+      получит «2» там, где документ утверждает «3». Не блокирует: §9 п.3 и §14 называют обе
+      ревизии рядом с числами.
+
+decisions:
+  - subject: приведение к Ф3-45 — действует Ф3, Ф11 правится
+    verdict: принято как записано — основание решения оркестратора воспроизведено, не расширено
+    checked_by: сравнение §14 с комментарием kaname#195 дословно; Ф3-45 не тронута
+
+verification:
+  what_was_done: >-
+    исполнение каждого предиката §1.2, §7 инв. 8, §9 п.3, §14 в названном доме на объявленной
+    ревизии (kacho@275240efdc, kacho@45d1719fe8, kaname@c6a3c12e); прогон трёх гейтов приёмок и
+    их инъекций в доме службы; сверка Ф3-45 дословно.
+  subject_digest_matches_current_document: true
+  header_left_untouched: true
+  document_edited_by_reviewer: false
+
+reviewer_errors_named_first:
+  - >-
+    Ни одна посылка задания по этому документу не опровергнута; собственных ошибок круга не
+    зафиксировано.
+
+limits:
+  - >-
+    Гейт §8 «словарь поставщика — платформа» не существует до S3 — документ говорит это сам;
+    свойство до S3 держится предикатами §9 п.3, то есть вниманием. Круг это подтверждает, а
+    не закрывает.
+  - >-
+    Момент S3 (`kacho#1276`) не назначен; документ этого не решает и не обязан.
+
+cycle:
+  next_step: >-
+    Публикация внешнего события оркестратором; кода по этой редакции не открывается ничего
+    сверх объёма §0.2 редакции 4.
