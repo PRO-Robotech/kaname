@@ -219,6 +219,12 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.hydra-admin-token-env", "KANAME_HYDRA_ADMIN_TOKEN")
 	v.SetDefault("authn.jwks-encryption-key-hex", "")
 	v.SetDefault("authn.jwks-encryption-key-hex-env", "KANAME_JWKS_ENC_KEY")
+	// Второй фактор (Ф12, kacho#1281): свой перечень ключей обёртки — те же
+	// две половины, что у соседней ручки; окно свежести правки своих данных —
+	// без умолчания (нулевая длительность доезжает до стража незаданной).
+	v.SetDefault("authn.second-factor-encryption-key-hex", "")
+	v.SetDefault("authn.second-factor-encryption-key-hex-env", "KANAME_SECOND_FACTOR_ENC_KEY")
+	v.SetDefault("authn.self-service-freshness", time.Duration(0))
 	v.SetDefault("authn.hooks-http-endpoint", "tcp://0.0.0.0:9092")
 	// Своя чеканка токенов (задача #897). Умолчания заданы ТОЛЬКО у величин,
 	// у которых умолчание осмысленно: путь нашей записи набора и срок ключа.

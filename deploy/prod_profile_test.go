@@ -250,6 +250,11 @@ var configBridge = []bridged{
 	{configKey: "authn.login.hasher-parallelism", valuePath: []string{"authn", "login", "hasherParallelism"}, omitEmpty: true},
 	{configKey: "authn.login.verifier-capacity", valuePath: []string{"authn", "login", "verifierCapacity"}, omitEmpty: true},
 	{configKey: "authn.login.memory-reserve-bytes", valuePath: []string{"authn", "login", "memoryReserveBytes"}, omitEmpty: true},
+	// ВТОРОЙ ФАКТОР (Ф12, kacho#1281): окно свежести правки своих данных —
+	// та же форма, что у величин полосы: ветвь, читается только под `own`.
+	// Перечень ключей обёртки секретов — секрет, подаётся переменной из Secret и
+	// файлом настроек не рендерится.
+	{configKey: "authn.self-service-freshness", valuePath: []string{"authn", "selfServiceFreshness"}, omitEmpty: true},
 	// СВОЯ ЧЕКАНКА ТОКЕНОВ. Блок целиком за выключателем: шаблон не рендерит его
 	// ни одним ключом, пока чеканка выключена.
 	{configKey: "authn.token-signing.enabled", gate: tokenSigningGate, derive: func(*valueReader) any { return true }},
@@ -355,6 +360,11 @@ var restatedDeliberately = map[string]string{
 		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
 		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
 		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.selfServiceFreshness": "величина ВТОРОГО ФАКТОРА (Ф12, kacho#1281, Р8): окно свежести правки своих данных; страж " +
+		"читает её только под посадкой `own` (config.ValidateLaneRequirements), а боевой профиль стоит на " +
+		"`external`. Объявлена по приёмке Ф12 (Ф12-36): дословный перенос Ф1 §4.1 (15 мин) живёт в " +
+		"профилях обоих чартов, где его видит читающий. Запись истекает с первым профилем на `own`: там " +
+		"снятие ручки роняет СТАРТ",
 	"env.KANAME_LOGINLANE_SERVER_MTLS_ENABLE": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
 		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
 		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
@@ -529,6 +539,10 @@ var secretStandIns = map[string]string{
 	// Ключ обёртки разбирается как шестнадцатеричная строка объявленной длины,
 	// поэтому заменитель обязан быть годен по форме.
 	"KANAME_JWKS_ENC_KEY": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+	// Перечень ключей обёртки секретов второго фактора (Ф12, kacho#1281) — та
+	// же форма, свой заменитель: страж читает его только под `own`, объявление
+	// стоит в профиле по приёмке.
+	"KANAME_SECOND_FACTOR_ENC_KEY": "1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100",
 }
 
 // ── несущая проба ────────────────────────────────────────────────────────────
