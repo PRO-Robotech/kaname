@@ -264,8 +264,10 @@ func TestParseCostClassPrefix_ReadsBothFormatsAndRefusesTheRest(t *testing.T) {
 }
 
 // TestEnvelopeTriggers_DictionaryIsClosed — поводов калибровки два: старт и
-// чтение неизвестного класса; словарь закрыт и клетки счётчика заводятся из
-// него.
+// чтение неизвестного класса; словарь закрыт ДВУМЯ и клетки счётчика
+// заводятся из него. Третьего повода — `write` — нет и не будет: у записи
+// класса дороже потолка своим процессом нет производителя (`kacho#1268`,
+// `kaname#222`), и проба обязана краснеть на его появлении.
 func TestEnvelopeTriggers_DictionaryIsClosed(t *testing.T) {
 	t.Parallel()
 	triggers := passwordverify.EnvelopeTriggers()
