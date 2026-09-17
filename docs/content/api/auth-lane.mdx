@@ -1,0 +1,302 @@
+---
+id: auth-lane
+sidebar_position: 11
+title: Полоса входа
+---
+
+import CodeBlock from '@theme/CodeBlock'
+import dedent from 'ts-dedent'
+
+# Полоса входа — регистрация, вход, сессия, восстановление, второй фактор
+
+**Полоса входа** — HTTP-слушатель службы, на который консоль платформы отправляет формы
+человека: регистрацию, вход, выход, смену пароля, восстановление доступа и второй фактор.
+Она существует **только под посадкой личности `own`**; под `external` те же формы держит
+внешний поставщик удостоверений, и слушатель не поднимается (что верно под какой посадкой —
+[Идентичность и токены](/architecture/identity)). Под `own` это **единственный** вход
+человека в продукт.
+
+Путей у полосы **тринадцать**, и объявлены они одним перечнем — `loginlanehttp.Paths()`
+(`internal/handler/loginlanehttp/handler.go`); перечень ниже сверяется с ним пробой, а не
+выписан.
+
+<table>
+  <thead><tr><th>Метод и путь</th><th>Что делает</th><th>Вид признака формы</th><th>Нужна сессия</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET /iam/v1/auth/csrf?form=&lt;вид&gt;</code></td><td>признак формы названного вида; заводит контекст формы, если его нет</td><td>—</td><td>нет</td></tr>
+    <tr><td><code>POST /iam/v1/auth/register</code></td><td>регистрация паролем — три следствия одним исходом, сессия выдаётся сразу</td><td><code>register</code></td><td>нет</td></tr>
+    <tr><td><code>POST /iam/v1/auth/login</code></td><td>вход паролем, необязательно — с кодом второго фактора</td><td><code>login</code></td><td>нет</td></tr>
+    <tr><td><code>POST /iam/v1/auth/logout</code></td><td>выход: запись сессии гасится на стороне сервера</td><td><code>logout</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/password</code></td><td>смена пароля с подтверждением текущим; все прочие сессии человека завершаются</td><td><code>password</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/recovery</code></td><td>запрос кода восстановления письмом</td><td><code>recovery</code></td><td>нет</td></tr>
+    <tr><td><code>POST /iam/v1/auth/recovery/complete</code></td><td>предъявление кода с новым паролем; отвечает как вход</td><td><code>recovery-complete</code></td><td>нет</td></tr>
+    <tr><td><code>GET /iam/v1/auth/second-factor</code></td><td>состояние второго фактора</td><td>—</td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/second-factor/enroll</code></td><td>заведение кода по времени: секрет показывается один раз</td><td><code>second-factor</code></td><td>да, свежая</td></tr>
+    <tr><td><code>POST /iam/v1/auth/second-factor/confirm</code></td><td>подтверждение первым кодом; запасные коды показываются один раз</td><td><code>second-factor</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/second-factor/remove</code></td><td>снятие фактора, подтверждённое кодом</td><td><code>second-factor</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/second-factor/backup-codes</code></td><td>перечеканка запасных кодов, подтверждённая кодом</td><td><code>second-factor</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/step-up</code></td><td>церемония повышения уровня внутри живой сессии</td><td><code>step-up</code></td><td>да</td></tr>
+  </tbody>
+</table>
+
+Совпадение путей **точное**: параметры запроса к пути не относятся, а `/iam/v1/auth/` —
+не приставка, под которой всякий новый маршрут получал бы те же свойства. «Кто я»
+(`GET /iam/v1/auth/me`, `GET /iam/v1/me`) — маршруты **края**, а не полосы: на слушателе их
+нет.
+
+## Кто вправе звать — ровно край, и это судится до тела запроса
+
+Слушатель поднимается по адресу `api-server.login-lane-endpoint`
+(`KANAME_API_SERVER__LOGIN_LANE_ENDPOINT`; умолчания нет, в поставляемом профиле
+`tcp://0.0.0.0:9100`) под **взаимным TLS** (`KANAME_LOGINLANE_SERVER_MTLS_*`, режим `mutual`).
+Множество допущенных вызывающих равно **краю платформы**: короткое имя службы, разобранное из
+SAN проверенного клиентского сертификата под доменом доверия установки, обязано равняться имени
+края (`api-gateway`). Пир с иным именем получает `403` с кодом `7` и текстом
+`permission denied` — тело не читается, заголовки в счёт не попадают.
+
+Отсюда три следствия, которые надо знать до установки:
+
+- **браузер ходит на адрес консоли**, а не на слушатель: он отправляет `POST /iam/v1/auth/login`
+  на origin консоли, и край ретранслирует тело службе, приложив один адрес источника в
+  `X-Forwarded-For`. Заголовков переданной личности, которыми платформа переносит субъекта
+  между своими компонентами, полоса не читает вовсе: субъект берётся из печенья
+  `kaname_session`;
+- **под `external` полосы нет**: адрес читается, поверхность объявляется выключенной с причиной,
+  слушатель не поднимается. Формы входа тогда держит поставщик (`/login`, `/registration`,
+  `/settings`, `/recovery` на том же адресе консоли);
+- **поставка без края платформы дверь входа человека не открывает.** Слушатель впускает только
+  предъявителя сертификата с именем края под вашим доменом доверия; собственные REST-фронты
+  службы (`:9098`, `:9099`) этих путей не обслуживают. На такой установке человеку доступен
+  вход только под `external` у поставщика, а машине — обмен ключа на токен
+  (`POST /iam/v1/token`). Сквозной прогон полосы на стенде службы без края — предмет
+  kaname#183.
+
+:::note Что из тринадцати путей ретранслирует край — свойство версии края
+Служба обслуживает все тринадцать. Край платформы ретранслирует перечень, объявленный у него
+(`gateway/internal/middleware/login_lane_paths.go` в `PRO-Robotech/kacho`), и на разных
+ревизиях он разный: на стволе `kacho@26206c80f9d` (2026-09-17) — четыре (`csrf`, `login`,
+`logout`, `password`); регистрация и оба глагола восстановления — в открытом PR kacho#2706;
+шесть глаголов второго фактора и церемония — в ветке `issue-1281-second-factor-edge`. Путь,
+которого край не ретранслирует, отвечает с адреса консоли отказом края, а не службы. Предикат:
+`git show <ревизия края>:gateway/internal/middleware/login_lane_paths.go`.
+:::
+
+## Печенья — два, и оба только по протоколу
+
+<table>
+  <thead><tr><th>Печенье</th><th>Что несёт</th><th>Кто ставит</th><th>Атрибуты</th></tr></thead>
+  <tbody>
+    <tr><td><code>kaname_session</code></td><td>носитель сессии — непрозрачное значение; служба ищет запись по его свёртке и само значение не хранит</td><td>вход, регистрация, завершение восстановления; перевыпускается сменой пароля и каждым предъявлением второго фактора</td><td><code>Path=/</code>; <code>Domain</code> — <code>authn.login.cookie-domain</code> (<code>none</code> — печенье только на хост); <code>Max-Age</code> — <code>authn.login.session-ttl</code>; <code>HttpOnly; Secure; SameSite=Lax</code></td></tr>
+    <tr><td><code>kaname_form</code></td><td>контекст формы — 32 байта случайности, по которым вычисляется признак формы</td><td><code>GET …/csrf</code>, если печенья ещё нет; <strong>сменяется</strong> выдачей сессии (вход, регистрация, завершение восстановления); выход его не трогает</td><td>те же, без срока (сессионное)</td></tr>
+  </tbody>
+</table>
+
+Выход ставит `kaname_session` с `Max-Age=-1` — браузер печенье выбрасывает. Отказ выхода
+(`503`) печенья **не трогает**: носитель цел, повторить можно.
+
+## Признак формы — против подделки запроса
+
+Каждый `POST` несёт поле `csrfToken`, полученное `GET /iam/v1/auth/csrf?form=<вид>` **с тем же**
+печеньем `kaname_form`. Признак — свёртка HMAC-SHA256 над видом формы с ключом-контекстом:
+признак вида `logout` форме `password` не подходит, чужой контекст не подходит тоже, и оба
+случая отвечают **одним** отказом. Виды: `login`, `logout`, `password`, `register`,
+`recovery`, `recovery-complete`, `second-factor`, `step-up`.
+
+<CodeBlock language="bash">
+  {dedent`
+    curl -c jar -b jar 'https://console.example/iam/v1/auth/csrf?form=login'
+    # → {"csrfToken":"…"}; в jar легло kaname_form
+  `}
+</CodeBlock>
+
+Неизвестный вид — `400` с кодом `3`:
+`Illegal argument form: must be one of [login logout password register recovery recovery-complete second-factor step-up]`.
+
+## Форма запроса и ответа — по глаголу
+
+Тело — JSON с **закрытым** набором полей: лишнее поле не глотается, а называется (`Illegal
+argument <поле>: unknown field`, у вложенного — `secondFactor.<поле>`); потолок тела — 16 КиБ.
+Незаполненное обязательное поле называется до глагола: `Illegal argument email: required`,
+`Illegal argument csrfToken: required` — такой отказ в счёт частоты не идёт.
+
+### Вход — `POST /iam/v1/auth/login`
+
+<CodeBlock language="json">
+  {dedent`
+    { "email": "dev@acme.example", "password": "…", "csrfToken": "…",
+      "secondFactor": { "method": "totp", "code": "123456" } }
+  `}
+</CodeBlock>
+
+`secondFactor` необязателен: без него сессия получает уровень `1`, даже если фактор заведён;
+с ним (`method` — `totp` либо `lookup_secret`, `code` — шесть цифр либо десять знаков
+запасного кода) — уровень `2`. Форма кода судится **до** пароля: негодный код — отказ формы с
+именем поля (`Illegal argument secondFactor.code: must be 6 digits`), не попытка.
+
+Успех — `200`, печенья `kaname_session` и **новое** `kaname_form`:
+
+<CodeBlock language="json">
+  {dedent`
+    {
+      "user":    { "id": "usrbr69ze0ftz3jf7396", "email": "dev@acme.example", "displayName": "dev" },
+      "session": { "expiresAt": "2026-09-18T10:00:00Z", "assuranceLevel": "1",
+                   "emailVerified": false, "passwordChangeRequired": false }
+    }
+  `}
+</CodeBlock>
+
+Тот же ответ и те же печенья отдают регистрация и завершение восстановления.
+
+### Регистрация — `POST /iam/v1/auth/register`
+
+<CodeBlock language="json">
+  {dedent`
+    { "email": "dev@acme.example", "password": "…", "csrfToken": "…" }
+  `}
+</CodeBlock>
+
+Три следствия одним исходом: строка личности (либо активация приглашения тем же адресом —
+второго личного аккаунта приглашённый не получает), требование подтверждения адреса
+(`emailVerified: false`) и сессия. Отображаемое имя сюда не принимается — оно выводится из
+адреса и правится отдельным глаголом.
+
+Правило пароля судится **до** транзакции и называет поле: `Illegal argument password: shorter
+than the declared minimum length` (`authn.login.password-min-length`) ·
+`… must not resemble the e-mail address` · `… appears in a known breach corpus` (при включённой
+проверке утечек).
+
+### Выход — `POST /iam/v1/auth/logout`
+
+Тело — только `csrfToken`. Ответ `200 {}` и погашенное печенье при любом исходе, **включая
+«сессии нет»**: причина видна только в счётчиках.
+
+### Смена пароля — `POST /iam/v1/auth/password`
+
+<CodeBlock language="json">
+  {dedent`
+    { "currentPassword": "…", "newPassword": "…", "csrfToken": "…" }
+  `}
+</CodeBlock>
+
+Требует печенья сессии. Успех — `200 {"session": {…}}` и **новое** `kaname_session`: сессия
+перевыпускается, все **прочие** сессии человека завершаются. Неподошедший текущий пароль и
+отсутствующая сессия отвечают одним `401`.
+
+### Восстановление доступа — два обращения
+
+`POST /iam/v1/auth/recovery` с `{ "email", "csrfToken" }` отвечает **`200 {}` при любом
+исходе**, без печений и не дожидаясь постановки письма: адреса нет · адрес не подтверждён (код
+не выдаётся) · код выдан и письмо в очереди — снаружи неразличимы, исход виден только счётчиком
+`kaname_recovery_request_outcomes_total`. Заблокированная личность код получает и встречает
+отказ на предъявлении. Срок кода — `authn.login.recovery-code-ttl`; новый запрос вытесняет
+прежние коды.
+
+`POST /iam/v1/auth/recovery/complete` с `{ "email", "code", "newPassword", "csrfToken" }` —
+текущего пароля здесь нет by construction, код и есть доказательство. Правило нового пароля
+судится **до** применения кода (негодный пароль код не тратит). Успех отвечает как вход: тело
+Ф3, `kaname_session`, новый `kaname_form`; все прежние сессии человека завершены. У
+заблокированной личности код применяется и пароль записывается, но сессия не выдаётся.
+
+:::warning Подтверждение адреса под `own` — производителя на линии нет
+Под `own` служба не несёт глагола, который записывал бы подтверждение адреса: зарегистрированный
+человек остаётся с `emailVerified: false`, и запрос кода восстановления для его адреса кода
+**не выдаёт** (исход `unverified`). Это состояние линии, а не решение — предмет фазы Ф6
+(kacho#1272). Предикат: `git grep -n 'MarkEmailVerified(' -- 'internal/**/*.go' ':!*_test.go'` —
+вызывающих у писателя отметки нет. Под `external` подтверждение и восстановление держит
+поставщик.
+:::
+
+### Второй фактор
+
+`GET /iam/v1/auth/second-factor` (без признака, с сессией) — три формы тела:
+
+<CodeBlock language="json">
+  {dedent`
+    { "totp": { "enrolled": false } }
+    { "totp": { "enrolled": false, "pendingUntil": "2026-09-17T10:15:00Z" } }
+    { "totp": { "enrolled": true, "confirmedAt": "2026-09-17T10:00:00Z" },
+      "backupCodes": { "remaining": 8, "total": 10 } }
+  `}
+</CodeBlock>
+
+`POST …/enroll` (`{ "csrfToken" }`) отвечает `{ "secret", "otpauthUri", "expiresAt" }` — секрет
+в Base32 показывается **один раз**; печений нет. Требует **свежего** предъявления: последнее
+предъявление пароля или кода не старше `authn.self-service-freshness`, иначе `403`
+`SESSION_NOT_FRESH`; тем же окном ограничен срок неподтверждённого заведения (`pendingUntil`).
+Заведённый фактор — `409` `SECOND_FACTOR_ALREADY_ENROLLED`.
+
+`POST …/confirm` (`{ "code", "csrfToken" }`) — первым кодом с приложения; ответ
+`{ "backupCodes": [десять кодов], "session", "assurance" }` и **новый** `kaname_session`:
+подтверждение — предъявление, сессия получает уровень `2`. Запасные коды показываются один раз.
+Без начатого заведения — `400` `ENROLLMENT_NOT_PENDING`; неверный код — `401`.
+
+`POST …/remove` и `POST …/backup-codes` подтверждаются кодом — `{ "method", "code",
+"csrfToken" }` (`method`: `totp` либо `lookup_secret`), как смена пароля подтверждается текущим.
+Ответ — `{ "session", "assurance" }` (у перечеканки ещё `backupCodes`, у ответа, потребившего
+запасной код, — `backupCodesRemaining`) и новый носитель. Без заведённого фактора — `400`
+`SECOND_FACTOR_NOT_ENROLLED`.
+
+Утративший и приложение, и запасные коды сам фактор не снимет: за него это делает надзор облака
+глаголом [`UserService.ResetSecondFactor`](/api/user#reset-second-factor).
+
+### Церемония повышения — `POST /iam/v1/auth/step-up`
+
+<CodeBlock language="json">
+  {dedent`
+    { "method": "totp", "code": "123456", "csrfToken": "…" }
+    { "method": "password", "password": "…", "csrfToken": "…" }
+  `}
+</CodeBlock>
+
+Способ называет клиент: `password`, `totp`, `lookup_secret`; поле, не относящееся к способу,
+отвергается по имени. Успешное предъявление кладёт способ в множество предъявленных, уровень
+пересчитывается правилом (монотонно — понижения нет), носитель перевыпускается. Неудачное
+предъявление сессию не гасит и не понижает. Ответ — `{ "session", "assurance" }`:
+
+<CodeBlock language="json">
+  {dedent`
+    { "session": { "expiresAt": "…", "assuranceLevel": "2", "emailVerified": true, "passwordChangeRequired": false },
+      "assurance": { "level": "2", "level2Reachable": true, "missingForLevel2": [] } }
+  `}
+</CodeBlock>
+
+`level2Reachable` — есть ли среди заведённых у человека способов такой, что даст `2`;
+`missingForLevel2` — какие способы (`totp`, `lookup_secret`) его предъявление в этой сессии
+выполнит; пуст, когда `2` достигнут либо недостижим. Пароль вместе с кодом по времени или
+запасным кодом — `2`; один пароль либо код восстановления — `1`.
+
+## Отказы — `google.rpc.Status`, тексты фиксированы
+
+Форма — та же, что у края через grpc-gateway: `{code, message, details}`, `details` — всегда
+массив, пустой либо с одним `google.rpc.ErrorInfo` (`reason`, `domain`). Тексты — контракт:
+они не несут причины, и клиент ключуется на `reason`, а не на прозу.
+
+<table>
+  <thead><tr><th>HTTP</th><th><code>code</code></th><th><code>message</code> дословно</th><th><code>reason</code></th><th>Когда</th></tr></thead>
+  <tbody>
+    <tr><td>400</td><td>3</td><td><code>Illegal argument &lt;поле&gt;: required</code> · <code>… unknown field</code> · <code>Illegal argument body: malformed JSON</code> · <code>… trailing content</code> · правило пароля · форма кода</td><td>—</td><td>форма негодна; состояние не изменено, в счёт частоты не идёт</td></tr>
+    <tr><td>400</td><td>9</td><td><code>registration refused</code></td><td><code>REGISTRATION_REFUSED</code></td><td>регистрация: адрес занят · приглашение уже активировано · приглашение истекло · потолок темпа заведения исчерпан — <strong>один</strong> отказ на все четыре, без <code>Retry-After</code> и без 409: различимый ответ был бы оракулом занятости адреса</td></tr>
+    <tr><td>400</td><td>9</td><td><code>second factor is not enrolled</code></td><td><code>SECOND_FACTOR_NOT_ENROLLED</code></td><td>предъявлен код при незаведённом факторе (после совпавшего пароля); снятие или перечеканка без фактора</td></tr>
+    <tr><td>400</td><td>9</td><td><code>no pending enrollment: begin with enroll</code></td><td><code>ENROLLMENT_NOT_PENDING</code></td><td>подтверждение без начатого либо истёкшего заведения</td></tr>
+    <tr><td>401</td><td>16</td><td><code>authentication failed</code></td><td>—</td><td><strong>один</strong> отказ на все причины: адреса нет · пароль не тот · личность заблокирована или ни разу не входила · код не тот · код истёк или применён · сессии нет (у глаголов под сессией) · текущий пароль не тот</td></tr>
+    <tr><td>403</td><td>7</td><td><code>form token rejected</code></td><td><code>FORM_TOKEN_REJECTED</code></td><td>признак есть и не подошёл: чужой контекст либо чужой вид, неразличимо</td></tr>
+    <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>заведение фактора при предъявлении старше окна свежести</td></tr>
+    <tr><td>403</td><td>7</td><td><code>permission denied</code></td><td>—</td><td>вызывающий — не край: тело не читалось</td></tr>
+    <tr><td>405</td><td>3</td><td><code>method not allowed</code></td><td>—</td><td>путь есть, метод не тот; заголовок <code>Allow</code> называет допустимый</td></tr>
+    <tr><td>409</td><td>6</td><td><code>second factor is already enrolled</code></td><td><code>SECOND_FACTOR_ALREADY_ENROLLED</code></td><td>повторное заведение</td></tr>
+    <tr><td>429</td><td>8</td><td><code>too many attempts; try again later</code></td><td><code>TOO_MANY_ATTEMPTS</code></td><td>окно частоты по адресу (<code>authn.login.address-attempts</code> / <code>address-window</code>) либо по источнику (<code>source-attempts</code> / <code>source-window</code>) полно; <code>Retry-After</code> — секунды до конца окна</td></tr>
+    <tr><td>503</td><td>14</td><td><code>request not performed; try again later</code> · у выхода <code>logout not performed; try again later</code> · <code>second factor temporarily unavailable</code></td><td>—</td><td>хранилище не ответило, авторитет утечек настроен неверно, материал фактора не открылся ни одним ключом обёртки; глагол не выполнен, состояние не изменено, печенья не тронуты</td></tr>
+  </tbody>
+</table>
+
+Неразличимость отказов входа, регистрации и восстановления — **решение**, а не пробел
+(анти-оракул); что отказ не называет следующего шага клиента — отдельная ось, предмет
+kaname#211.
+
+## Что видит оператор
+
+Исходы, которых клиент не видит в ответе, служба отдаёт счётчиками: входа, регистрации, запроса
+и завершения восстановления, отказов формы, второго фактора — [Наблюдаемость](/advanced/observability).
+Величины полосы — срок сессии, домен печенья, окна частоты, правило пароля, стоимость хеша,
+срок кода восстановления, окно свежести, ключи обёртки секретов фактора — обязательны под
+`own` и названы в [Конфигурации](/install/configuration#login-lane) и `INSTALL.md` §3.

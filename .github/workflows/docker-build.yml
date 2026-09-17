@@ -221,8 +221,8 @@ jobs:
           docker buildx build \
             --platform "$PLATFORMS" \
             --provenance=false \
-            --build-arg KACHO_IMAGE_REVISION="$REVISION" \
-            --build-arg KACHO_IMAGE_VERSION="$VERSION" \
+            --build-arg OCI_IMAGE_REVISION="$REVISION" \
+            --build-arg OCI_IMAGE_VERSION="$VERSION" \
             --cache-from "type=gha,scope=$IMAGE_NAME" \
             --cache-to "type=gha,mode=max,scope=$IMAGE_NAME" \
             -f ./Dockerfile \

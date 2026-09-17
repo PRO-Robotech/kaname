@@ -52,6 +52,47 @@ func TestSessionCutoffOf_ReportsTheCutoff(t *testing.T) {
 	}
 }
 
+// TestSessionCutoffOf_F3_19_MomentCrossesTheWireAtStorageResolution — момент
+// отсечки уезжает на провод В РАЗРЕШЕНИИ ХРАНИЛИЩА (микросекунды), а не
+// усечённым до секунды (kaname#176; приёмка Ф3 §4.1 п.19).
+//
+// Край сравнивает с этим моментом НЕусечённый момент аутентификации включающе:
+// усечённая вниз отсечка ниже настоящей на долю секунды, и сессия,
+// аутентифицированная внутри этой доли, судилась бы как «позже отсечки».
+// Отсечка выхода Ф3 датируется на одну микросекунду раньше первой
+// аутентификации — на усечённом проводе эта единица исчезала бы целиком.
+//
+// Проба кормит момент С микросекундами и требует его обратно ПОБАЙТОВО через
+// настоящую форму ответа (`timestamppb`), а не через подставного читателя.
+func TestSessionCutoffOf_F3_19_MomentCrossesTheWireAtStorageResolution(t *testing.T) {
+	at := time.Date(2026, 9, 16, 10, 0, 0, 123456000, time.UTC) // .123456 — микросекунды
+	f := &fakeCutoffs{before: at, found: true}
+	h := (&Handler{}).WithCutoffReader(f)
+
+	resp, err := h.SessionCutoffOf(context.Background(),
+		&iamv1.SessionCutoffOfRequest{UserId: "usr-1"})
+	if err != nil {
+		t.Fatalf("неожиданная ошибка: %v", err)
+	}
+	got := resp.GetRevokeBefore().AsTime()
+	if !got.Equal(at) {
+		t.Fatalf("момент отсечки на проводе %v, в хранилище %v: разрешение потеряно на %v",
+			got, at, at.Sub(got))
+	}
+	// Положительный контроль различимости: момент на одну микросекунду позже
+	// обязан отличаться на проводе — иначе равенство выше вакуумно.
+	later := at.Add(time.Microsecond)
+	f.before = later
+	resp, err = h.SessionCutoffOf(context.Background(),
+		&iamv1.SessionCutoffOfRequest{UserId: "usr-1"})
+	if err != nil {
+		t.Fatalf("неожиданная ошибка: %v", err)
+	}
+	if resp.GetRevokeBefore().AsTime().Equal(at) {
+		t.Fatal("момент на микросекунду позже неотличим на проводе от исходного: разрешение провода грубее хранилища")
+	}
+}
+
 // TestSessionCutoffOf_AbsentCutoffIsNotAnError — ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ и
 // одновременно контракт: отсутствие отзыва — обычное состояние человека, а не
 // отсутствие ресурса.

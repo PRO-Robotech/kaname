@@ -26,11 +26,13 @@ const (
 	UserService_Get_FullMethodName               = "/kaname.cloud.iam.v1.UserService/Get"
 	UserService_List_FullMethodName              = "/kaname.cloud.iam.v1.UserService/List"
 	UserService_Invite_FullMethodName            = "/kaname.cloud.iam.v1.UserService/Invite"
+	UserService_ResendInvite_FullMethodName      = "/kaname.cloud.iam.v1.UserService/ResendInvite"
 	UserService_Update_FullMethodName            = "/kaname.cloud.iam.v1.UserService/Update"
 	UserService_Delete_FullMethodName            = "/kaname.cloud.iam.v1.UserService/Delete"
 	UserService_RemoveFromAccount_FullMethodName = "/kaname.cloud.iam.v1.UserService/RemoveFromAccount"
 	UserService_Block_FullMethodName             = "/kaname.cloud.iam.v1.UserService/Block"
 	UserService_Unblock_FullMethodName           = "/kaname.cloud.iam.v1.UserService/Unblock"
+	UserService_ResetSecondFactor_FullMethodName = "/kaname.cloud.iam.v1.UserService/ResetSecondFactor"
 	UserService_ListOperations_FullMethodName    = "/kaname.cloud.iam.v1.UserService/ListOperations"
 )
 
@@ -54,7 +56,35 @@ type UserServiceClient interface {
 	// Invite a user by email. Если user уже invited в этот Account
 	// (idempotent re-invite) — Operation возвращается, AB опционально создается.
 	// Permission: requires `admin` OR `editor` relation на account_id.
+	//
+	// Письмо приглашения — то же правило, что у `MembershipService.Create` (один
+	// поток): уходит, пока личность ни разу не входила, на первом и на повторном
+	// приглашении той же пары, в пределах ограничения частоты на адрес.
 	Invite(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
+	// ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
+	// не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).
+	//
+	// Что приходит взамен снятого поля ссылки (InviteUserMetadata): ссылки
+	// администратор не получает ни в каком ответе, а получает способ повторить
+	// письмо, если оно не дошло. Предъявителя письмо не несёт — доступ даёт
+	// владение почтовым ящиком, и повтор письма ничего не выдаёт заново.
+	//
+	// Исходы: строки приглашения в этом аккаунте нет — NOT_FOUND тем же текстом,
+	// что и у человека, которого нет нигде (hide-existence: чужой аккаунт
+	// неотличим от отсутствия); приглашение уже выкуплено либо человек
+	// заблокирован — FAILED_PRECONDITION; срок приглашения истёк —
+	// FAILED_PRECONDITION с указанием пригласить заново (срок есть свойство
+	// ВЫДАЧИ, и повтор письма его не двигает).
+	//
+	// ОГРАНИЧЕНИЕ ЧАСТОТЫ СТОИТ НА ПУТИ ЭТОГО ГЛАГОЛА (Р22): писем на один адрес
+	// за окно уходит не больше объявленного, сверхнормативные не отправляются,
+	// а ответ при этом НЕОТЛИЧИМ от ответа в пределах нормы — отказ по частоте
+	// не вправе становиться оракулом (Р9, MAIL-25).
+	//
+	// Permission: то же отношение, что у Invite — `editor` на account_id; тот же
+	// пол step-up (acr=2): это та же поверхность допуска в аккаунт, и более
+	// дешёвая дверь к письму от имени платформы заводиться не должна.
+	ResendInvite(ctx context.Context, in *ResendInviteRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Updates the specified User. Единственное mutable-поле — `labels` (User —
 	// label-selectable наравне с account/project). Identity-поля (`external_id`
 	// — IdP `sub`, и иные IdP-projected identity-ключи) hard-immutable: их наличие
@@ -266,6 +296,32 @@ type UserServiceClient interface {
 	// here too — turning an unconfirmed invitee into an active member is
 	// activation-on-first-login, a different path with a different subject.
 	Unblock(ctx context.Context, in *UnblockUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
+	// Resets the second factor of the specified User: the administrator's path
+	// for a person who lost the authenticator device AND the backup codes.
+	//
+	// Without it such a person signs in with the password and stays at
+	// assurance level "1" with no way up: self-service removal of the factor
+	// asks for a code (the very thing that was lost). So the administrator of
+	// the person's Account — `identity_suspender`, the same relation and the
+	// same step-up floor as Block/Unblock — removes it here, and the person
+	// enrolls a new one himself.
+	//
+	// ONE TRANSACTION: the time-based code row (active) and the backup-code set
+	// are removed; EVERY session of the person is covered by a cutoff at `now`
+	// with reason `second-factor-reset` and the administrator as the actor —
+	// whoever holds the lost device may hold a session too; the audit event
+	// `iam.user.second_factor_reset` names both actors.
+	//
+	// A person WITHOUT an enrolled factor — no row, or an enrollment that was
+	// started and never confirmed — is refused synchronously:
+	// FAILED_PRECONDITION with `ErrorInfo.reason = SECOND_FACTOR_NOT_ENROLLED`.
+	// The unconfirmed enrollment is left alone and no session is ended: there
+	// is nothing to reset, and the person replaces the pending enrollment by
+	// starting a new one.
+	//
+	// WHAT IT DOES NOT DO: it does not reset the password, does not enroll a
+	// factor on the person's behalf, and does not lift a block.
+	ResetSecondFactor(ctx context.Context, in *ResetSecondFactorRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Lists operations for the specified user.
 	ListOperations(ctx context.Context, in *ListUserOperationsRequest, opts ...grpc.CallOption) (*ListUserOperationsResponse, error)
 }
@@ -302,6 +358,16 @@ func (c *userServiceClient) Invite(ctx context.Context, in *InviteUserRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(operation.Operation)
 	err := c.cc.Invoke(ctx, UserService_Invite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) ResendInvite(ctx context.Context, in *ResendInviteRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(operation.Operation)
+	err := c.cc.Invoke(ctx, UserService_ResendInvite_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -358,6 +424,16 @@ func (c *userServiceClient) Unblock(ctx context.Context, in *UnblockUserRequest,
 	return out, nil
 }
 
+func (c *userServiceClient) ResetSecondFactor(ctx context.Context, in *ResetSecondFactorRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(operation.Operation)
+	err := c.cc.Invoke(ctx, UserService_ResetSecondFactor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *userServiceClient) ListOperations(ctx context.Context, in *ListUserOperationsRequest, opts ...grpc.CallOption) (*ListUserOperationsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListUserOperationsResponse)
@@ -388,7 +464,35 @@ type UserServiceServer interface {
 	// Invite a user by email. Если user уже invited в этот Account
 	// (idempotent re-invite) — Operation возвращается, AB опционально создается.
 	// Permission: requires `admin` OR `editor` relation на account_id.
+	//
+	// Письмо приглашения — то же правило, что у `MembershipService.Create` (один
+	// поток): уходит, пока личность ни разу не входила, на первом и на повторном
+	// приглашении той же пары, в пределах ограничения частоты на адрес.
 	Invite(context.Context, *InviteUserRequest) (*operation.Operation, error)
+	// ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
+	// не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).
+	//
+	// Что приходит взамен снятого поля ссылки (InviteUserMetadata): ссылки
+	// администратор не получает ни в каком ответе, а получает способ повторить
+	// письмо, если оно не дошло. Предъявителя письмо не несёт — доступ даёт
+	// владение почтовым ящиком, и повтор письма ничего не выдаёт заново.
+	//
+	// Исходы: строки приглашения в этом аккаунте нет — NOT_FOUND тем же текстом,
+	// что и у человека, которого нет нигде (hide-existence: чужой аккаунт
+	// неотличим от отсутствия); приглашение уже выкуплено либо человек
+	// заблокирован — FAILED_PRECONDITION; срок приглашения истёк —
+	// FAILED_PRECONDITION с указанием пригласить заново (срок есть свойство
+	// ВЫДАЧИ, и повтор письма его не двигает).
+	//
+	// ОГРАНИЧЕНИЕ ЧАСТОТЫ СТОИТ НА ПУТИ ЭТОГО ГЛАГОЛА (Р22): писем на один адрес
+	// за окно уходит не больше объявленного, сверхнормативные не отправляются,
+	// а ответ при этом НЕОТЛИЧИМ от ответа в пределах нормы — отказ по частоте
+	// не вправе становиться оракулом (Р9, MAIL-25).
+	//
+	// Permission: то же отношение, что у Invite — `editor` на account_id; тот же
+	// пол step-up (acr=2): это та же поверхность допуска в аккаунт, и более
+	// дешёвая дверь к письму от имени платформы заводиться не должна.
+	ResendInvite(context.Context, *ResendInviteRequest) (*operation.Operation, error)
 	// Updates the specified User. Единственное mutable-поле — `labels` (User —
 	// label-selectable наравне с account/project). Identity-поля (`external_id`
 	// — IdP `sub`, и иные IdP-projected identity-ключи) hard-immutable: их наличие
@@ -600,6 +704,32 @@ type UserServiceServer interface {
 	// here too — turning an unconfirmed invitee into an active member is
 	// activation-on-first-login, a different path with a different subject.
 	Unblock(context.Context, *UnblockUserRequest) (*operation.Operation, error)
+	// Resets the second factor of the specified User: the administrator's path
+	// for a person who lost the authenticator device AND the backup codes.
+	//
+	// Without it such a person signs in with the password and stays at
+	// assurance level "1" with no way up: self-service removal of the factor
+	// asks for a code (the very thing that was lost). So the administrator of
+	// the person's Account — `identity_suspender`, the same relation and the
+	// same step-up floor as Block/Unblock — removes it here, and the person
+	// enrolls a new one himself.
+	//
+	// ONE TRANSACTION: the time-based code row (active) and the backup-code set
+	// are removed; EVERY session of the person is covered by a cutoff at `now`
+	// with reason `second-factor-reset` and the administrator as the actor —
+	// whoever holds the lost device may hold a session too; the audit event
+	// `iam.user.second_factor_reset` names both actors.
+	//
+	// A person WITHOUT an enrolled factor — no row, or an enrollment that was
+	// started and never confirmed — is refused synchronously:
+	// FAILED_PRECONDITION with `ErrorInfo.reason = SECOND_FACTOR_NOT_ENROLLED`.
+	// The unconfirmed enrollment is left alone and no session is ended: there
+	// is nothing to reset, and the person replaces the pending enrollment by
+	// starting a new one.
+	//
+	// WHAT IT DOES NOT DO: it does not reset the password, does not enroll a
+	// factor on the person's behalf, and does not lift a block.
+	ResetSecondFactor(context.Context, *ResetSecondFactorRequest) (*operation.Operation, error)
 	// Lists operations for the specified user.
 	ListOperations(context.Context, *ListUserOperationsRequest) (*ListUserOperationsResponse, error)
 	mustEmbedUnimplementedUserServiceServer()
@@ -621,6 +751,9 @@ func (UnimplementedUserServiceServer) List(context.Context, *ListUsersRequest) (
 func (UnimplementedUserServiceServer) Invite(context.Context, *InviteUserRequest) (*operation.Operation, error) {
 	return nil, status.Error(codes.Unimplemented, "method Invite not implemented")
 }
+func (UnimplementedUserServiceServer) ResendInvite(context.Context, *ResendInviteRequest) (*operation.Operation, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResendInvite not implemented")
+}
 func (UnimplementedUserServiceServer) Update(context.Context, *UpdateUserRequest) (*operation.Operation, error) {
 	return nil, status.Error(codes.Unimplemented, "method Update not implemented")
 }
@@ -635,6 +768,9 @@ func (UnimplementedUserServiceServer) Block(context.Context, *BlockUserRequest) 
 }
 func (UnimplementedUserServiceServer) Unblock(context.Context, *UnblockUserRequest) (*operation.Operation, error) {
 	return nil, status.Error(codes.Unimplemented, "method Unblock not implemented")
+}
+func (UnimplementedUserServiceServer) ResetSecondFactor(context.Context, *ResetSecondFactorRequest) (*operation.Operation, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetSecondFactor not implemented")
 }
 func (UnimplementedUserServiceServer) ListOperations(context.Context, *ListUserOperationsRequest) (*ListUserOperationsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListOperations not implemented")
@@ -710,6 +846,24 @@ func _UserService_Invite_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UserServiceServer).Invite(ctx, req.(*InviteUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_ResendInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResendInviteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResendInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResendInvite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResendInvite(ctx, req.(*ResendInviteRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -804,6 +958,24 @@ func _UserService_Unblock_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_ResetSecondFactor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetSecondFactorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResetSecondFactor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResetSecondFactor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResetSecondFactor(ctx, req.(*ResetSecondFactorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _UserService_ListOperations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListUserOperationsRequest)
 	if err := dec(in); err != nil {
@@ -842,6 +1014,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _UserService_Invite_Handler,
 		},
 		{
+			MethodName: "ResendInvite",
+			Handler:    _UserService_ResendInvite_Handler,
+		},
+		{
 			MethodName: "Update",
 			Handler:    _UserService_Update_Handler,
 		},
@@ -860,6 +1036,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Unblock",
 			Handler:    _UserService_Unblock_Handler,
+		},
+		{
+			MethodName: "ResetSecondFactor",
+			Handler:    _UserService_ResetSecondFactor_Handler,
 		},
 		{
 			MethodName: "ListOperations",

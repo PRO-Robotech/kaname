@@ -11,10 +11,14 @@ package pg
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
@@ -168,11 +172,77 @@ func (w *writeTx) EmitReconcileEvent(ctx context.Context, eventType, objectType,
 }
 
 // EmitInviteMail ставит намерение отправить письмо приглашения на ЭТОЙ
-// writer-транзакции — атомарно со строкой приглашения (ban #10). Откат
-// приглашения снимает и намерение: письма о приглашении, которого не случилось,
-// не бывает by construction.
-func (w *writeTx) EmitInviteMail(ctx context.Context, userID, accountID, to, loginURL string) error {
-	return invite_mail_outbox.EmitTx(ctx, w.tx, userID, accountID, to, loginURL)
+// writer-транзакции — атомарно со строкой приглашения (ban #10) — и ПРЕЖДЕ
+// списывает окно частоты адресата (приёмка ID-MAIL-1, MAIL-25). Откат
+// приглашения снимает и намерение, и списание: письма о приглашении, которого
+// не случилось, не бывает by construction, и окно за него не платит.
+//
+// Порядок несущий: сперва списание, потом постановка. Сверхнормативное
+// намерение в очередь не попадает, а вызов отвечает «не поставлено» — не
+// ошибкой: отказ по частоте обязан быть неотличим для вызывающего от ответа в
+// норме (Р9), и различать их вправе только счётчик исходов у use-case.
+func (w *writeTx) EmitInviteMail(ctx context.Context, intent outboxtypes.InviteMailIntent) (bool, error) {
+	admitted, err := chargeInviteMailWindowTx(ctx, w.tx, intent.To, intent.Limit)
+	if err != nil {
+		return false, err
+	}
+	if !admitted {
+		return false, nil
+	}
+	if err := invite_mail_outbox.EmitTx(ctx, w.tx, intent.UserID, intent.AccountID, intent.To, intent.LoginURL); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// chargeInviteMailWindowTx списывает одно письмо из окна адресата ОДНИМ
+// оператором — тем же приёмом, каким триггер темпа приёма личности держит темп
+// приёма личности (миграция 20260916100000, таблица `invite_mail_windows`).
+//
+// Ветвь ВСТАВКИ — первое письмо адресату за всю жизнь установки: проходит
+// безусловно. Ветвь ПРАВКИ берёт блокировку строки окна, поэтому конкурирующий
+// писатель ждёт коммита первого и видит его результат; переход в следующее окно
+// и списание считаются одним выражением, а условие `WHERE` отвергает правку,
+// когда окно полно. Ноль затронутых строк означает ровно одно — окно полно.
+// Это не check-then-act: решение уже принято оператором, а Go лишь читает
+// число затронутых строк.
+//
+// Непозитивное ограничение — ОТКАЗ, а не «сколько угодно»: значения «без
+// ограничения» у ручки не существует (MAIL-43), и здесь оно не изобретается.
+func chargeInviteMailWindowTx(ctx context.Context, tx pgx.Tx, to string, limit outboxtypes.InviteMailRateLimit) (bool, error) {
+	if limit.MaxPerWindow <= 0 || limit.Window <= 0 {
+		return false, fmt.Errorf(
+			"invite mail rate limit: max-per-window=%d window=%s — both must be positive; there is "+
+				"no value meaning «unlimited», and a letter is not sent under an undeclared cap",
+			limit.MaxPerWindow, limit.Window)
+	}
+	recipient := strings.ToLower(strings.TrimSpace(to))
+	if recipient == "" {
+		return false, fmt.Errorf("invite mail rate limit: recipient required — a window belongs to an address")
+	}
+	windowSeconds := int64(limit.Window / time.Second)
+	if windowSeconds < 1 {
+		windowSeconds = 1
+	}
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO invite_mail_windows AS w (recipient, window_started_at, sent, updated_at)
+		VALUES ($1, now(), 1, now())
+		ON CONFLICT (recipient) DO UPDATE
+		   SET window_started_at = CASE
+		           WHEN now() >= w.window_started_at + make_interval(secs => $3)
+		           THEN now() ELSE w.window_started_at END,
+		       sent = CASE
+		           WHEN now() >= w.window_started_at + make_interval(secs => $3)
+		           THEN 1 ELSE w.sent + 1 END,
+		       updated_at = now()
+		 WHERE CASE
+		           WHEN now() >= w.window_started_at + make_interval(secs => $3)
+		           THEN 1 ELSE w.sent + 1 END <= $2`,
+		recipient, limit.MaxPerWindow, windowSeconds)
+	if err != nil {
+		return false, mapErr(err, "", recipient)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // InsertRecoveryCompletion — idempotency-gate INSERT on THIS writer-tx

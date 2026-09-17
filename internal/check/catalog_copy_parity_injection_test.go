@@ -57,13 +57,13 @@ func TestCatalogParityCatchesChangedEntry(t *testing.T) {
 
 	t.Run("дефект: право у записи подменено", func(t *testing.T) {
 		own := catalogFile(catalogEntry(fqn, "a.ADMIN"), catalogEntry("kacho.cloud.b.v1.B/Get", "b.get"))
-		findings, _, err := compareCatalogCopiesWith(nil, edge, own)
+		findings, _, err := compareCatalogCopiesWith(nil, nil, edge, own)
 		requireFinding(t, findings, err, fqn, CatalogFindingCopies)
 	})
 
 	t.Run("близнец: запись дословно та же", func(t *testing.T) {
 		own := catalogFile(twin, catalogEntry("kacho.cloud.b.v1.B/Get", "b.get"))
-		findings, _, err := compareCatalogCopiesWith(nil, edge, own)
+		findings, _, err := compareCatalogCopiesWith(nil, nil, edge, own)
 		requireSilent(t, findings, err)
 	})
 }
@@ -75,17 +75,17 @@ func TestCatalogParityCatchesMissingAndExtraEntries(t *testing.T) {
 	b := catalogEntry("kacho.cloud.b.v1.B/Get", "b.get")
 
 	t.Run("дефект: запись есть у края, нет у нас", func(t *testing.T) {
-		findings, _, err := compareCatalogCopiesWith(nil, catalogFile(a, b), catalogFile(a))
+		findings, _, err := compareCatalogCopiesWith(nil, nil, catalogFile(a, b), catalogFile(a))
 		requireFinding(t, findings, err, "kacho.cloud.b.v1.B/Get", CatalogFindingCopies)
 	})
 
 	t.Run("дефект: запись есть у нас, нет у края", func(t *testing.T) {
-		findings, _, err := compareCatalogCopiesWith(nil, catalogFile(a), catalogFile(a, b))
+		findings, _, err := compareCatalogCopiesWith(nil, nil, catalogFile(a), catalogFile(a, b))
 		requireFinding(t, findings, err, "kacho.cloud.b.v1.B/Get", CatalogFindingCopies)
 	})
 
 	t.Run("близнец: состав тот же", func(t *testing.T) {
-		findings, _, err := compareCatalogCopiesWith(nil, catalogFile(a, b), catalogFile(a, b))
+		findings, _, err := compareCatalogCopiesWith(nil, nil, catalogFile(a, b), catalogFile(a, b))
 		requireSilent(t, findings, err)
 	})
 }
@@ -98,12 +98,12 @@ func TestCatalogParityCatchesUnexplainedRename(t *testing.T) {
 	own := catalogFile(catalogEntry(testOwnFQN, "platform.demo.subscribe"))
 
 	t.Run("дефект: ведомость пуста, переименование не объяснено", func(t *testing.T) {
-		findings, _, err := compareCatalogCopiesWith(nil, edge, own)
+		findings, _, err := compareCatalogCopiesWith(nil, nil, edge, own)
 		requireFinding(t, findings, err, testOwnFQN, CatalogFindingCopies)
 	})
 
 	t.Run("близнец: то же переименование ОБЪЯВЛЕНО", func(t *testing.T) {
-		findings, _, err := compareCatalogCopiesWith(testRenames(), edge, own)
+		findings, _, err := compareCatalogCopiesWith(testRenames(), nil, edge, own)
 		requireSilent(t, findings, err)
 	})
 }
@@ -114,7 +114,7 @@ func TestCatalogParityCatchesUnexplainedRename(t *testing.T) {
 func TestDeclaredRenameExpiresOnItsOwn(t *testing.T) {
 	t.Run("дефект: край уже назвал глагол новым именем", func(t *testing.T) {
 		caught := catalogFile(catalogEntry(testOwnFQN, "platform.demo.subscribe"))
-		findings, census, err := compareCatalogCopiesWith(testRenames(), caught, caught)
+		findings, census, err := compareCatalogCopiesWith(testRenames(), nil, caught, caught)
 		requireFinding(t, findings, err, testEdgeFQN, CatalogFindingLedger)
 		if census.RenamesApplied != 0 {
 			t.Fatalf("запись, которой нечего исключать, объявлена применённой: %s", census)
@@ -124,7 +124,7 @@ func TestDeclaredRenameExpiresOnItsOwn(t *testing.T) {
 	t.Run("близнец: край ещё не догнал — запись при предмете", func(t *testing.T) {
 		edge := catalogFile(catalogEntry(testEdgeFQN, "platform.demo.subscribe"))
 		own := catalogFile(catalogEntry(testOwnFQN, "platform.demo.subscribe"))
-		findings, _, err := compareCatalogCopiesWith(testRenames(), edge, own)
+		findings, _, err := compareCatalogCopiesWith(testRenames(), nil, edge, own)
 		requireSilent(t, findings, err)
 	})
 }
@@ -138,13 +138,13 @@ func TestDeclaredRenameMustNameOurOwnVerb(t *testing.T) {
 
 	t.Run("дефект: нашей стороны переименования в дереве нет", func(t *testing.T) {
 		own := catalogFile(catalogEntry("corelib.demo.DemoService/Other", "platform.demo.subscribe"))
-		findings, _, err := compareCatalogCopiesWith(testRenames(), edge, own)
+		findings, _, err := compareCatalogCopiesWith(testRenames(), nil, edge, own)
 		requireFinding(t, findings, err, testOwnFQN, CatalogFindingLedger)
 	})
 
 	t.Run("близнец: наша сторона на месте", func(t *testing.T) {
 		own := catalogFile(catalogEntry(testOwnFQN, "platform.demo.subscribe"))
-		findings, _, err := compareCatalogCopiesWith(testRenames(), edge, own)
+		findings, _, err := compareCatalogCopiesWith(testRenames(), nil, edge, own)
 		requireSilent(t, findings, err)
 	})
 }
@@ -157,20 +157,101 @@ func TestCatalogParityRefusesAnUnknownFileShape(t *testing.T) {
 
 	t.Run("дефект: перевода строки в конце нет", func(t *testing.T) {
 		broken := strings.TrimSuffix(good, "\n")
-		if _, _, err := compareCatalogCopiesWith(nil, broken, good); err == nil {
+		if _, _, err := compareCatalogCopiesWith(nil, nil, broken, good); err == nil {
 			t.Fatal("форма файла сменилась, а сверка объявила вердикт")
 		}
 	})
 
 	t.Run("дефект: запись не разбирается", func(t *testing.T) {
 		broken := "[\n  {\n    \"fqn\": не строка\n  }\n]\n"
-		if _, _, err := compareCatalogCopiesWith(nil, broken, good); err == nil {
+		if _, _, err := compareCatalogCopiesWith(nil, nil, broken, good); err == nil {
 			t.Fatal("неразбираемая запись принята за вердикт")
 		}
 	})
 
 	t.Run("близнец: форма та самая", func(t *testing.T) {
-		findings, _, err := compareCatalogCopiesWith(nil, good, good)
+		findings, _, err := compareCatalogCopiesWith(nil, nil, good, good)
+		requireSilent(t, findings, err)
+	})
+}
+
+// ── ЗАПИСИ, ЖДУЩИЕ КРАЯ (kaname#181) ─────────────────────────────────────────
+
+const testPendingFQN = "kaname.cloud.demo.v1.DemoService/Create"
+
+// testPending — ведомость проб: одна запись того же вида, что действующая.
+func testPending() []CatalogPendingEntry {
+	return []CatalogPendingEntry{{
+		OwnFQN:  testPendingFQN,
+		Why:     "синтетика пробы",
+		Removal: "край назвал глагол",
+		Refs:    "kaname#181",
+	}}
+}
+
+// TestDeclaredPendingEntryExplainsAnOwnOnlyVerb — ось ВЕДОМОСТИ ОЖИДАЮЩИХ: наша
+// запись без пары у края — находка, пока её не объявили; объявленная — молчит.
+// Ровно один факт между близнецами: наличие записи в ведомости.
+func TestDeclaredPendingEntryExplainsAnOwnOnlyVerb(t *testing.T) {
+	a := catalogEntry("kacho.cloud.a.v1.A/Get", "a.get")
+	edge := catalogFile(a)
+	own := catalogFile(a, catalogEntry(testPendingFQN, "demo.create"))
+
+	t.Run("дефект: наш глагол не объявлен ждущим", func(t *testing.T) {
+		findings, _, err := compareCatalogCopiesWith(nil, nil, edge, own)
+		requireFinding(t, findings, err, testPendingFQN, CatalogFindingCopies)
+	})
+
+	t.Run("близнец: тот же глагол ОБЪЯВЛЕН ждущим края", func(t *testing.T) {
+		findings, census, err := compareCatalogCopiesWith(nil, testPending(), edge, own)
+		requireSilent(t, findings, err)
+		if census.PendingApplied != 1 || census.PendingDeclared != 1 {
+			t.Fatalf("перепись не назвала применённую запись: %s", census)
+		}
+	})
+
+	t.Run("контроль: ведомость выносит ТОЛЬКО объявленное — второй лишний глагол остаётся находкой", func(t *testing.T) {
+		own2 := catalogFile(a, catalogEntry("kaname.cloud.demo.v1.DemoService/Other", "demo.other"),
+			catalogEntry(testPendingFQN, "demo.create"))
+		findings, _, err := compareCatalogCopiesWith(nil, testPending(), edge, own2)
+		requireFinding(t, findings, err, "kaname.cloud.demo.v1.DemoService/Other", CatalogFindingCopies)
+	})
+}
+
+// TestDeclaredPendingEntryExpiresOnItsOwn — САМОИСТЕЧЕНИЕ: край назвал глагол —
+// запись обязана уйти (и копия синхронизироваться), а не прощать дальше.
+func TestDeclaredPendingEntryExpiresOnItsOwn(t *testing.T) {
+	a := catalogEntry("kacho.cloud.a.v1.A/Get", "a.get")
+	created := catalogEntry(testPendingFQN, "demo.create")
+
+	t.Run("дефект: край уже несёт глагол, запись стоит", func(t *testing.T) {
+		both := catalogFile(a, created)
+		findings, census, err := compareCatalogCopiesWith(nil, testPending(), both, both)
+		requireFinding(t, findings, err, testPendingFQN, CatalogFindingLedger)
+		if census.PendingApplied != 0 {
+			t.Fatalf("запись, которой нечего ждать, объявлена применённой: %s", census)
+		}
+	})
+
+	t.Run("близнец: край ещё не догнал — запись при предмете", func(t *testing.T) {
+		findings, _, err := compareCatalogCopiesWith(nil, testPending(), catalogFile(a), catalogFile(a, created))
+		requireSilent(t, findings, err)
+	})
+}
+
+// TestDeclaredPendingEntryMustNameOurOwnVerb — вторая сторона: запись ждёт края
+// для глагола, которого в НАШЕЙ копии нет, — она утверждает о дереве неправду.
+func TestDeclaredPendingEntryMustNameOurOwnVerb(t *testing.T) {
+	a := catalogEntry("kacho.cloud.a.v1.A/Get", "a.get")
+
+	t.Run("дефект: нашей записи нет, ведомость её ждёт", func(t *testing.T) {
+		findings, _, err := compareCatalogCopiesWith(nil, testPending(), catalogFile(a), catalogFile(a))
+		requireFinding(t, findings, err, testPendingFQN, CatalogFindingLedger)
+	})
+
+	t.Run("близнец: наша запись на месте", func(t *testing.T) {
+		findings, _, err := compareCatalogCopiesWith(nil, testPending(), catalogFile(a),
+			catalogFile(a, catalogEntry(testPendingFQN, "demo.create")))
 		requireSilent(t, findings, err)
 	})
 }

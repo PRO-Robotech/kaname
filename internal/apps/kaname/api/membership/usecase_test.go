@@ -52,6 +52,12 @@ func (c *countingReader) List(context.Context, repomembership.ListFilter) ([]dom
 	return c.rows, c.next, nil
 }
 
+// ListMine у дублёра аккаунт-скоупных проб не по делу: своё чтение здесь не
+// зовётся, и обращение к нему — дефект пробы, а не поведение.
+func (c *countingReader) ListMine(context.Context, domain.UserID, repomembership.MinePage) ([]domain.Membership, string, error) {
+	panic("countingReader.ListMine: своё чтение в аккаунт-скоупных пробах не зовётся")
+}
+
 type fakeSession struct{ rd *countingReader }
 
 func (s fakeSession) Memberships() repomembership.ReaderIface { return s.rd }

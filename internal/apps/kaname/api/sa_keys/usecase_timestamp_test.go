@@ -18,7 +18,7 @@ func TestSAClientToProto_TruncatesTimestampsToSeconds(t *testing.T) {
 	expires := time.Date(2027, 1, 2, 3, 4, 5, 555555555, time.UTC)
 	used := time.Date(2026, 6, 16, 11, 22, 33, 999999999, time.UTC)
 
-	pb, err := saClientToProto(domain.ServiceAccountOAuthClient{
+	pb := saClientToProto(domain.ServiceAccountOAuthClient{
 		// Вид ЗАПИСЫВАЕТСЯ каждым писателем (#1142): закрытый
 		// словарь таблицы отвергает строку, вида не назвавшую.
 		CredentialKind: domain.CredentialKindKeypair,
@@ -28,9 +28,6 @@ func TestSAClientToProto_TruncatesTimestampsToSeconds(t *testing.T) {
 		ExpiresAt:      &expires,
 		LastUsedAt:     &used,
 	})
-	if err != nil {
-		t.Fatalf("saClientToProto: %v", err)
-	}
 
 	if got := pb.GetCreatedAt().AsTime().Nanosecond(); got != 0 {
 		t.Fatalf("CreatedAt sub-second leaked: nanos=%d, want 0", got)

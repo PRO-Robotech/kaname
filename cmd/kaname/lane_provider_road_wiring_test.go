@@ -71,7 +71,7 @@ func TestObserveLaneWiring_ReportsTheRoadItActuallyBuilt(t *testing.T) {
 	ctx := context.Background()
 	lg := quietLogger()
 
-	own := observeLaneWiring(ctx, roadCfg(config.IdentityProviderOwn, "9097"), nil, lg)
+	own := observeLaneWiring(ctx, roadCfg(config.IdentityProviderOwn, "9097"), nil, nil, nil, lg)
 	if own.ProviderAdminHopBuilt {
 		t.Error("под own наблюдатель докладывает построенную дорогу, которой корень не строит")
 	}
@@ -81,7 +81,7 @@ func TestObserveLaneWiring_ReportsTheRoadItActuallyBuilt(t *testing.T) {
 	}
 
 	// ПОЛОЖИТЕЛЬНЫЙ КОНТРОЛЬ: под external оба факта истинны.
-	ext := observeLaneWiring(ctx, roadCfg(config.IdentityProviderExternal, "9097"), nil, lg)
+	ext := observeLaneWiring(ctx, roadCfg(config.IdentityProviderExternal, "9097"), nil, nil, nil, lg)
 	if !ext.ProviderAdminHopBuilt {
 		t.Error("под external дорога не доложена — отрицание выше зеленело бы на " +
 			"наблюдателе, отвечающем false всегда")
@@ -99,7 +99,7 @@ func TestObserveLaneWiring_ReportsTheRoadItActuallyBuilt(t *testing.T) {
 // не существует, на стенде, который публикатора не поднимал.
 func TestObserveLaneWiring_NoPublisherListenerMeansNoMirror(t *testing.T) {
 	w := observeLaneWiring(context.Background(),
-		roadCfg(config.IdentityProviderExternal, ""), nil, quietLogger())
+		roadCfg(config.IdentityProviderExternal, ""), nil, nil, nil, quietLogger())
 	if w.ProviderKeySetMirrorPublished {
 		t.Error("слушателя публикатора нет, а зеркало доложено опубликованным: " +
 			"наблюдатель отчитывается о намерении вместо исхода")

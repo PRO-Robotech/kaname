@@ -234,7 +234,10 @@ func TestSurfaceRouteCensusCanFail(t *testing.T) {
 	raised, routed, findings := judgeSurfaceRoutes(t, roster, rendered)
 	require.NotEmpty(t, findings,
 		"гейт молчит на чарте, ведущем к двум поверхностям из восьми, — он не измеряет своего предмета")
-	require.Equal(t, 8, raised, "этим входом поднимаются все восемь поверхностей")
+	// Число поверхностей БЕРЁТСЯ у перечня: здесь стояло «8», и девятая —
+	// полоса входа под посадкой `own` — сделала бы инъекцию красной на верном
+	// дереве (kaname#204).
+	require.Equal(t, len(roster.Surfaces), raised, "этим входом поднимаются все объявленные перечнем поверхности")
 	require.Equal(t, 2, routed, "до починки маршрут несли ровно две")
 
 	joined := strings.Join(findings, "\n")

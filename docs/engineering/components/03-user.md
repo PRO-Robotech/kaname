@@ -13,8 +13,12 @@
 1. **Self-signup** через OIDC-callback (Ory Kratos logged in → api-gateway вызывает
    `InternalUserService.UpsertFromIdentity`).
 2. **Invite-flow** через `UserService.Invite` — admin создает PENDING-запись с
-   `external_id=""`, Kratos шлет magic-link, при первом login заполняется
-   `external_id`.
+   `external_id=""`; письмо приглашения ставится в `invite_mail_outbox` той же
+   транзакцией и уходит нашим отправителем (ссылки-предъявителя оно не несёт;
+   решение Р24 приёмки ID-MAIL-1); при первом login заполняется `external_id`.
+   Повторно письмо шлёт `UserService.ResendInvite`; оба глагола — под одним
+   ограничением частоты на адрес (`invite.mail-rate-limit`, списывается
+   писателем очереди).
 
 **Use-cases:**
 - Mirror identity для AccessBinding (`subject_type=user`, `subject_id=usr_*`).
@@ -78,14 +82,14 @@ sequenceDiagram
     IAM->>DB: INSERT INTO users (status=PENDING, external_id='', invited_by=$admin)
     IAM->>DB: INSERT INTO access_bindings (subject=user:usr_pending, role_id, scope=project)
     IAM->>DB: INSERT INTO fga_outbox (role-tuple + hierarchy)
+    IAM->>DB: INSERT INTO invite_mail_windows (окно адресата, списание) + INSERT INTO invite_mail_outbox
     IAM->>DB: COMMIT
-    IAM->>Kratos: POST /admin/recovery/link (magic-link delivery)
-    Kratos->>Invitee: Email с magic-link
+    IAM-->>Invitee: письмо приглашения (дренаж очереди, наш отправитель)
     IAM-->>GW: Operation
     GW-->>Admin: 200 {operationId, userId:"usr_pending"}
 
-    Note over Invitee,Ory: ─── ASYNC: invitee кликает по link ───
-    Invitee->>Ory: clicks link → OIDC login flow
+    Note over Invitee,Ory: ─── ASYNC: invitee идёт на страницу входа из письма ───
+    Invitee->>Ory: login flow
     Ory->>GW: OIDC callback (id_token c "sub":"ory-sub-xyz", email)
     GW->>IAM: gRPC InternalUserService.UpsertFromIdentity<br/>{external_id:"ory-sub-xyz", email:"bob@x"}
     IAM->>DB: SELECT user WHERE account_id=? AND email=? AND status=PENDING
@@ -132,7 +136,8 @@ sequenceDiagram
 |----------|------------|-------------------------------------------------------|
 | `Get`    | sync       | Получает User по id.                                  |
 | `List`   | sync       | Список (filter by `account_id`).                      |
-| `Invite` | async      | Создает PENDING-User + AccessBinding + Kratos magic-link |
+| `Invite` | async      | Создает PENDING-User + AccessBinding + письмо приглашения (своя очередь, ограничение частоты на адрес) |
+| `ResendInvite` | async | Письмо приглашения ещё раз невыкупленному; то же право и ограничение частоты, что у `Invite`. |
 | `Update` | async      | Единственное mutable-поле — `labels`.                 |
 | `Delete` | async      | Удаление. RESTRICT-FK если есть AccessBinding.        |
 | `Block`  | async      | Участие в Account'е запрещено. Идемпотентно по состоянию; `v_update` + порог повышенной аутентификации. |
@@ -157,6 +162,7 @@ sequenceDiagram
 | DELETE  | `/iam/v1/users/{userId}`          | `UserService.Delete`      |
 | POST    | `/iam/v1/users/{userId}:block`    | `UserService.Block`       |
 | POST    | `/iam/v1/users/{userId}:unblock`  | `UserService.Unblock`     |
+| POST    | `/iam/v1/users/{userId}:resetSecondFactor` | `UserService.ResetSecondFactor` |
 
 ## Административный запрет участию (`:block` / `:unblock`)
 

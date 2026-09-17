@@ -44,6 +44,24 @@ C 8 · D 5. Для восемнадцати выведенный ярлык бы
 ПЕЧАТАЮТСЯ ОБЕ ВЕЛИЧИНЫ. «Гоняется здесь N» без «не гоняется M» скрывает ровно тот
 случай, ради которого перепись и делается.
 
+НЕПОСЕЯННОСТЬ — ТРИ СОСТОЯНИЯ, А НЕ ОДНО, И ОНИ ЛОМАЮТСЯ ПО-РАЗНОМУ. Прежний
+предикат спрашивал одно («значение в шаблоне ПУСТО») и потому не видел двух
+других: ключа с правдоподобным литералом ЧУЖОГО стенда (`userNOBId`, `userAAAId`,
+`projectB1Id` несут непустые `usr…`/`prj…`) и ключа, которого в шаблоне НЕТ вовсе
+(`iamRegistryTokenBaseUrl`, `jwtHumanCeremony*`). Оба выглядели покрытыми, и мера
+работы переезда занижалась: коллекция читалась переводимой одним адресом, а на
+стенде падала на пустоте. Состояния печатаются ОТДЕЛЬНО — своей переписью и рядом
+с каждым названным ключом, — потому что чинятся они разным, а пустой ключ падает
+ГРОМКО (страж набора утверждает его по имени до первого запроса), тогда как
+литерал чужого стенда доезжает до службы и возвращается 403/404, то есть ПОХОЖИМ
+НА ДЕФЕКТ ПРОДУКТА.
+
+КАТЕГОРИЯ ВЕДОМОСТИ СВЕРЯЕТСЯ С ТРЕБОВАНИЕМ ЦЕРЕМОНИИ. Запись A у коллекции,
+читающей предъявителя церемонии, объявляет её переводимой машинным посевом —
+возможность, неисполнимую by construction. Сверка идёт в ОДНУ сторону: обратное
+(«B не требует церемонии») находкой не объявляется, потому что у B бывает и другое
+препятствие — недостижимый внешний поставщик.
+
 «ГОНЯЕТСЯ» ЧИТАЕТСЯ ИЗ ОБЪЯВЛЕНИЯ КОНВЕЙЕРА, А НЕ ВЫВОДИТСЯ ИЗ ОТСУТСТВИЯ
 ПРЕПЯТСТВИЙ. Прежняя редакция печатала «гоняется здесь: 1», не читая конвейер
 ВОВСЕ: снятие шага прогона из `.github/workflows/e2e-newman.yml` величину не
@@ -91,13 +109,53 @@ CFG_RE = re.compile(r"pm\.environment\.get\(\s*['\"]([A-Za-z_][A-Za-z0-9_]*BaseU
 # на собственный фронт службы запрещено гейтом набора, и запрет верен: те же
 # кейсы, тот же зелёный отчёт, проверено РАЗНОЕ.
 EDGE_VARS = frozenset({"baseUrl", "internalBaseUrl", "externalBaseUrl"})
-# Переменные адреса СОБСТВЕННЫХ фронтов службы — единственная поверхность,
-# которую автономный стенд производит сам.
-OWN_VARS = frozenset({"ownRestBaseUrl", "ownInternalRestBaseUrl"})
+# Переменные адреса СОБСТВЕННЫХ HTTP-поверхностей службы — те, что автономный
+# стенд производит сам: два REST-фронта и слушатель полосы входа паролем (Ф3,
+# kacho#1269; поднимается посадкой `own`, kaname#183). Ярлык поверхности у трёх
+# один — он контракт с посевом стенда (`--minted-surface`), а не описание порта.
+OWN_VARS = frozenset({"ownRestBaseUrl", "ownInternalRestBaseUrl", "loginLaneBaseUrl"})
 # Поверхности, которые служба поднимает, но чей ОТВЕТ зависит от недостижимого
 # соседа: зеркало набора ключей и полоса docker-токена.
 NEIGHBOUR_VARS = frozenset({"iamJwksBaseUrl", "iamRegistryTokenBaseUrl",
                             "providerPublicBaseUrl", "registryDataPlaneBaseUrl"})
+# ─────────────── СОСТОЯНИЕ КЛЮЧА: ТРИ, А НЕ ДВА ────────────────────────────
+#
+# Непосеянность — не одно состояние, и разные состояния ЛОМАЮТСЯ ПО-РАЗНОМУ.
+# Прежний предикат спрашивал одно («значение в шаблоне пусто») и потому не видел
+# двух других: ключ с правдоподобным литералом ЧУЖОГО стенда и ключ, которого в
+# шаблоне нет вовсе. Оба выглядели покрытыми, и мера работы переезда занижалась.
+#
+#   · ПУСТО — строка в шаблоне есть, значения нет. Падает ГРОМКО: страж набора
+#     (`require_env_url` и его родня) утверждает ключ по имени ДО первого запроса;
+#   · ЛИТЕРАЛ ЧУЖОГО СТЕНДА — значение непустое и правдоподобное (`usr…`, `prj…`),
+#     но куёт его ЧУЖОЙ посев. Доезжает до службы и возвращается 403/404, то есть
+#     ПОХОЖИМ НА ДЕФЕКТ ПРОДУКТА — самый дорогой из трёх исходов;
+#   · НЕТ В ШАБЛОНЕ — строки под ключ нет вовсе. Лечится иначе: сперва строка,
+#     потом значение.
+#
+# Названия — КОНСТАНТЫ, а не текст в двух местах: самопроверка ищет ровно их, и
+# переименование не оставит её зелёной на прежнем слове.
+KEY_STATE_EMPTY = "пусто"
+KEY_STATE_LITERAL = "ЛИТЕРАЛ чужого стенда"
+KEY_STATE_ABSENT = "НЕТ в шаблоне"
+
+# КЛЮЧ, КОТОРЫЙ КОЛЛЕКЦИЯ ПИШЕТ САМА, ПРЕПЯТСТВИЕМ НЕ ЯВЛЯЕТСЯ. Генератор заводит
+# сотни рабочих записей (`opId`, `_pollCount`, `_provisionalIds`, идентификаторы
+# созданного по ходу): их производит сам прогон, и требовать их от стенда значило
+# бы объявить неисполнимую возможность.
+#
+# НАПИСАНИЙ ТРИ, И РАСПОЗНАВАТЕЛЬ ЗНАЕТ ВСЕ ТРИ (`testing.md` §«Гейт на класс»,
+# п. 7). Тело шага лежит в JSON строкой, поэтому кавычка бывает и обычной, и
+# ЭКРАНИРОВАННОЙ (`set(\"k\"` — так генератор пишет разбор набора ключей: замер
+# по дереву даёт 4 вхождения в одной коллекции), а снятие (`unset`) — та же
+# принадлежность ключа коллекции, что и запись. Предикат без учёта экранирования
+# объявил бы `_facadeByKid` и `_facadeOwnByKid` требованием к стенду — то есть
+# завёл бы ЛОЖНУЮ находку там, где ключ производит сам прогон.
+_Q = r"\\?['\"]"
+OWN_KEY_RE = re.compile(
+    r"pm\.(?:environment|collectionVariables|variables|globals)\.(?:set|unset)\(\s*"
+    + _Q + r"([A-Za-z_][A-Za-z0-9_]*)" + _Q)
+
 # Предъявитель, которого машинный посев не производит: он требует ЧЕЛОВЕКА.
 CEREMONY_PREFIXES = ("jwtHuman", "ceremony")
 # ИДЕНТИФИКАТОР ЧЕЛОВЕКА ЦЕРЕМОНИИ — та же природа, что у его предъявителя, и тот
@@ -137,18 +195,19 @@ def collections(newman: pathlib.Path) -> list[pathlib.Path]:
     return sorted((newman / "collections").glob("*.postman_collection.json"))
 
 
-def template_keys(newman: pathlib.Path) -> tuple[set[str], set[str]]:
-    """(все ключи шаблона, ключи с ПУСТЫМ значением)."""
+def template_keys(newman: pathlib.Path) -> dict[str, str]:
+    """Объявленные ключи шаблона — СО ЗНАЧЕНИЯМИ.
+
+    Прежде отдавалась пара множеств («все» и «пустые»), и вызывающий видел ровно
+    два состояния ключа. Непосеянность их не исчерпывает (см. `key_state`), а
+    третье — «в шаблоне его нет» — множеством «все» выражалось только вычитанием,
+    которого никто не делал.
+    """
     path = newman / "environments" / "local.postman_environment.template.json"
     if not path.is_file():
-        return set(), set()
+        return {}
     doc = json.loads(path.read_text(encoding="utf-8"))
-    allk, empty = set(), set()
-    for v in doc.get("values", []):
-        allk.add(v["key"])
-        if not str(v.get("value", "")):
-            empty.add(v["key"])
-    return allk, empty
+    return {v["key"]: str(v.get("value", "")) for v in doc.get("values", [])}
 
 
 def used_keys(text: str) -> set[str]:
@@ -184,9 +243,39 @@ def surface_of(text: str, keys: set[str]) -> str:
     return "не определена"
 
 
-def blockers(surface: str, keys: set[str], empty: set[str],
-             minted_by_surface: dict[str, set[str]],
-             runs: list[str] | None = None) -> list[str]:
+def key_state(key: str, declared: dict[str, str], own: set[str]) -> str | None:
+    """Состояние ключа: что стенд обязан ему дать. `None` — не обязан ничего.
+
+    ТРИ СОСТОЯНИЯ, А НЕ ОДНО, и это замер: прежний предикат спрашивал только
+    `k in empty` и потому не видел ни ключа с литералом чужого стенда (их в
+    шаблоне 16 имён, читают их 35 коллекций), ни ключа, которого в шаблоне нет
+    вовсе (4 имени, 9 коллекций).
+
+    ДВА ВЫЧЕТА, И КАЖДЫЙ НАЗВАН, ЧТОБЫ ЕГО НЕ ПРИНЯЛИ ЗА СЛЕПОТУ:
+
+      · ключ, который коллекция ПИШЕТ САМА, — её собственная рабочая запись, а не
+        требование к стенду. Замер: таких вычетов из сегодняшних препятствий
+        РОВНО НОЛЬ (147 пустых ключей, самозаписанных среди них 0), то есть вычет
+        ничего не маскирует — он гатит ТОЛЬКО новое третье состояние;
+      · АДРЕС с непустым значением. Его поверхность уже названа отдельной строкой
+        («адресуется к краю платформы»), и второй раз он не считается. Пустой либо
+        отсутствующий адрес состояние получает — его называет посадка, и эту
+        строку долг печатает.
+    """
+    if key == "runId" or key in own:
+        return None
+    if key not in declared:
+        return KEY_STATE_ABSENT
+    if not declared[key]:
+        return KEY_STATE_EMPTY
+    if key in ADDRESS_VARS:
+        return None
+    return KEY_STATE_LITERAL
+
+
+def blockers(surface: str, keys: set[str], declared: dict[str, str],
+             own: set[str], minted_by_surface: dict[str, set[str]],
+             runs: list[str] | None = None) -> tuple[list[str], dict[str, int]]:
     """Препятствия коллекции. `minted` — ключи, которые посев дерева УМЕЕТ писать.
 
     ПРЕДМЕТ СЧИТАЕТСЯ ПОКЛЮЧЕВО, А НЕ ОДНИМ ФЛАГОМ «посев есть». Флаг снимал
@@ -238,7 +327,21 @@ def blockers(surface: str, keys: set[str], empty: set[str],
     if surface == SURFACE_EDGE:
         out.append("адресуется к краю платформы (переменная базового адреса)")
     minted = minted_by_surface.get(surface, set())
-    need = sorted(k for k in keys if k in empty and k != "runId")
+    states = {k: key_state(k, declared, own) for k in sorted(keys)}
+    need = [k for k, s in states.items() if s is not None]
+    # ПЕРЕПИСЬ СЧИТАЕТ НЕПОСЕЯННОЕ, А НЕ ВСЁ ОБЪЯВЛЕННОЕ: ключ, который посев ЭТОЙ
+    # поверхности куёт, состоянием долга не является — иначе величина росла бы
+    # вместе с посевом, то есть двигалась бы в обратную сторону от цели.
+    census = {KEY_STATE_EMPTY: 0, KEY_STATE_LITERAL: 0, KEY_STATE_ABSENT: 0}
+    for k in need:
+        if k not in minted:
+            census[states[k]] += 1
+
+    def named(ks: list[str]) -> str:
+        """Ключи С ИХ СОСТОЯНИЕМ: чинятся они разным, и знать это надо сразу."""
+        shown = ", ".join(f"{k} ({states[k]})" for k in ks[:3])
+        return shown + ("…" if len(ks) > 3 else "")
+
     ceremony = [k for k in need if is_ceremony_key(k)]
     rest = [k for k in need if k not in ceremony and k not in minted]
     address = [k for k in rest if k in ADDRESS_VARS]
@@ -247,18 +350,16 @@ def blockers(surface: str, keys: set[str], empty: set[str],
         out.append(f"нужна ЦЕРЕМОНИЯ ЧЕЛОВЕКА ({len(ceremony)} ключ(ей) — "
                    f"предъявитель человека либо его идентификатор, производит их "
                    f"одна и та же церемония, а машинный посев не производит ни "
-                   f"одного: "
-                   f"{', '.join(ceremony[:3])}{'…' if len(ceremony) > 3 else ''})")
+                   f"одного: {named(ceremony)})")
     if address:
         out.append(f"нужен АДРЕС поверхности «{surface}» ({len(address)} ключ(ей) — "
                    f"его НАЗЫВАЕТ посадка, ни один подписант его не выпускает: "
-                   f"{', '.join(address[:3])}{'…' if len(address) > 3 else ''})")
+                   f"{named(address)})")
     if machine:
         out.append(f"нужен машинный посев поверхности «{surface}» "
                    f"({len(machine)} ключ(ей) окружения, которых не пишет ни один "
-                   f"посев ЭТОЙ поверхности: "
-                   f"{', '.join(machine[:3])}{'…' if len(machine) > 3 else ''})")
-    return out
+                   f"посев ЭТОЙ поверхности: {named(machine)})")
+    return out, census
 
 
 # Коллекция, которую гоняет шаг конвейера: `run.sh --service <stem>`.
@@ -388,11 +489,11 @@ def survey(newman: pathlib.Path, workflows: pathlib.Path):
     считал свою: второй счётчик того же предмета расходится с первым молча.
     """
     cols = collections(newman)
-    allk, empty = template_keys(newman)
+    declared = template_keys(newman)
     if not cols:
         raise ValueError(f"в {newman/'collections'} не прочитано ни одной коллекции — "
                          f"перепись беспредметна, а не пуста")
-    if not allk:
+    if not declared:
         raise ValueError("шаблона окружения нет — препятствия вывести не из чего")
 
     wfs = workflow_files(workflows)
@@ -408,6 +509,9 @@ def survey(newman: pathlib.Path, workflows: pathlib.Path):
     runnable, blocked = [], []
     by_surface: dict[str, int] = {}
     by_blocker: dict[str, int] = {}
+    by_state: dict[str, int] = {KEY_STATE_EMPTY: 0, KEY_STATE_LITERAL: 0,
+                                KEY_STATE_ABSENT: 0}
+    ceremony_need: dict[str, list[str]] = {}
     for col in cols:
         text = col.read_text(encoding="utf-8")
         keys = used_keys(text)
@@ -416,7 +520,14 @@ def survey(newman: pathlib.Path, workflows: pathlib.Path):
         # Имя коллекции — БЕЗ приставки формата: `Path.stem` снимает только `.json`,
         # оставляя `.postman_collection`, и перепись читалась бы шумом.
         stem = col.name[: -len(".postman_collection.json")]
-        bl = blockers(surface, keys, empty, minted, runs.get(stem, []))
+        own = set(OWN_KEY_RE.findall(text))
+        ceremony_need[stem] = sorted(
+            k for k in keys
+            if key_state(k, declared, own) is not None and is_ceremony_key(k))
+        bl, states = blockers(surface, keys, declared, own, minted,
+                              runs.get(stem, []))
+        for state, n in states.items():
+            by_state[state] += n
         if bl:
             blocked.append((stem, surface, bl))
             for b in bl:
@@ -425,12 +536,12 @@ def survey(newman: pathlib.Path, workflows: pathlib.Path):
         else:
             runnable.append((stem, surface, runs.get(stem, [])))
     return (cols, wfs, runs, scripts, minted, mute, runnable, blocked,
-            by_surface, by_blocker)
+            by_surface, by_blocker, by_state, ceremony_need)
 
 
 def blocked_stems(newman: pathlib.Path, workflows: pathlib.Path) -> dict[str, list[str]]:
     """{stem: [препятствие, …]} — для держателя согласованности дерева."""
-    _, _, _, _, _, _, _, blocked, _, _ = survey(newman, workflows)
+    blocked = survey(newman, workflows)[7]
     return {stem: bl for stem, _, bl in blocked}
 
 
@@ -461,11 +572,11 @@ PRODUCER_LEDGER: dict[str, tuple[str, str]] = {
     "authz-deny": ("B", "матрица отказов по 6 классам субъектов; `jwtHumanCeremonyNoBindings` — человек"),
     "authz-failclosed": ("C", "утверждает ПРОИЗВОДИТЕЛЯ отказа и он измерен — край, полоса чтения отзыва; условие создаётся сворачиванием базы и до службы не доходит"),
     "authz-sa-apitoken": ("D", "20 из 30 запросов — `vpc`; половина ALLOW определена семантикой vpc («project-viewer-GATED List … owned by kacho-vpc»)"),
-    "basic-access-token": ("A", "выдача → предъявление → отзыв → отказ, всё на ручках iam; предъявитель выбран машинный **намеренно** («предъявитель человека добывается волной цере…"),
+    "basic-access-token": ("A", "выдача и отзыв — ручки iam. ПОЛОВИНА ПРЕДМЕТА ПРОИЗВОДИТСЯ КРАЕМ и потому здесь НЕ гоняется: предъявление непрозрачного секрета ресурсному эндпоинту делает край, а служба лишь АВТОРИТЕТ о нём (`InternalIAMService/ResolveBasicCredential`, чья шапка говорит «Край зовёт этот глагол»); рубеж собственного фронта проверяет подпись и непрозрачную строку не разбирает by construction. Исход выбирается задачей kaname#155"),
     "docker-lane-credential-kind": ("A", "«адрес `:9096` — собственная ручка iam»; предмет — полоса выдачи kaname, не данные реестра"),
     "geo-read": ("D", "все 4 запроса — `/geo/v1`, путей `iam` ноль"),
-    "iam-access-binding-account-scope": ("A", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель"),
-    "iam-access-binding-include-revoked": ("A", "чтение с отозванными; статусов кроме 200 не утверждает вовсе"),
+    "iam-access-binding-account-scope": ("B", "выдачи на ярусе аккаунта; все утверждения — свои коды, свои тела, своя модель. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит"),
+    "iam-access-binding-include-revoked": ("B", "чтение с отозванными; статусов кроме 200 не утверждает вовсе. КАТЕГОРИЯ ИСПРАВЛЕНА С A: читает `jwtAccountAdminAStepUp` — предъявителя ЦЕРЕМОНИИ, которого машинный посев не производит"),
     "iam-access-binding-redesign": ("A", "один предъявитель, `iam` целиком, `md.resource` — ноль"),
     "iam-account": ("B", "9 человеческих предъявителей из 14; аккаунт принадлежит человеку by construction"),
     "iam-account-redesign": ("B", "7 человеческих предъявителей из 10"),
@@ -475,11 +586,13 @@ PRODUCER_LEDGER: dict[str, tuple[str, str]] = {
     "iam-interactive-client": ("B", "Create/Delete регистрируют клиента в ВНЕШНЕМ поставщике (`providerClients`, адаптер `*clients.HydraAdminClient`); на автономном стенде поставщик об…"),
     "iam-internal-only-check": ("C", "предмет — маршрутная таблица ОБЪЯВЛЕННОГО внешнего слушателя края (:8443); «ban #6 is a property of the LISTENER»"),
     "iam-invite-grant-fga": ("A", "приглашение → выдача → сходимость модели, всё внутри iam"),
-    "iam-limit": ("A", "пределы личности; 88 обращений к внутреннему фронту. Виды `vpc.*` — записи СВОЕГО каталога пределов, чужой поверхности не требуют"),
+    "iam-invite-resend": ("A", "повторная отправка письма приглашения — глагол службы; ограничение частоты и hide-existence производит своя дверь; письмо у приёмника наблюдает стенд с почтой (MAIL-05), не этот набор"),
     "iam-list-visibility": ("A", "видимость перечня по членству; один предъявитель, только 200"),
+    "iam-membership-create": ("A", "создание членства (kaname#181): два машинных распорядителя аккаунтов, исход читается своим списком аккаунта, отказы — своя дверь (403/7 на чужом, несуществующем и пустом аккаунте; `md.resource` не читается)"),
     "iam-membership-read": ("B", "`jwtHumanCeremony` + `…StepUp` — человек с поднятым уровнем"),
     "iam-permission-catalog": ("A", "каталог прав — данные службы"),
     "iam-project": ("A", "CRUD проекта + чужой объект неотличим от промаха (404/code 5) — производит своя дверь"),
+    "iam-project-edge-format": ("C", "один кейс, вынесенный из `iam-project` при её переезде: пара 400/3 на неизвестной приставке — короткое замыкание КРАЯ по форме до проверки прав; собственный фронт этого шага не несёт и отвечает 403/7 от проверки прав (замер на автономном стенде 2026-09-16)"),
     "iam-rbac-rules-labels": ("A", "метки правил роли; один предъявитель, только 200"),
     "iam-rbac-scope-grant": ("A", "выдача на области; внутренний `iam:check` через внутренний фронт"),
     "iam-rbac-subjects": ("A", "субъекты выдач; единственное упоминание края — комментарий о том, ГДЕ живёт внутренний RPC"),
@@ -501,6 +614,21 @@ PRODUCER_LEDGER: dict[str, tuple[str, str]] = {
     # Коллекция СОБСТВЕННОГО фронта: она и есть поверхность службы, поэтому
     # разрезом #24 не судилась — судить было нечего.
     "kaname-own-rest-front": ("A", "собственный REST-фронт службы: предмет коллекции и есть эта поверхность"),
+    # Полоса входа паролем (Ф3, kacho#1269): собственный слушатель формы службы,
+    # предъявителя-JWT не читает вовсе — человек предъявляет пароль, а сессию
+    # выдаёт сама служба. Условие стенда — посадка `own`, лист с SAN края и посев
+    # человека со способом входа (kaname#183); до него — третья категория.
+    "kaname-login-lane": ("A", "собственный слушатель формы службы (Р7, Р16): вход, выход, признак формы, смена пароля — всё производит служба; ни одного `jwt…` ключа не читает, человек предъявляет пароль"),
+    # Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на ТОМ ЖЕ
+    # слушателе формы, что вход (`internal/handler/loginlanehttp`), те же две
+    # переменные (`loginLaneBaseUrl`, `loginLaneEmail`) и то же условие стенда —
+    # посадка `own`; без неё каждый шаг уходит в третью категорию помеченным
+    # утверждением. Счастливого завершения с настоящим кодом набор не несёт: код
+    # уходит письмом, и его наблюдает стенд с почтой (ID-MAIL-1 MAIL-04), не край.
+    "kaname-recovery-lane": ("A", "собственный слушатель формы службы, полоса входа (Ф5-01, Ф5-02, Ф5-04): один ответ на запрос кода для существующего и несуществующего адреса, один отказ на неверный код без носителя, форма без признака — поле названо; всё производит служба, ни одного `jwt…` ключа не читает"),
+    # Второй фактор (Ф12, kacho#1281): те же слушатель, посадка и условие стенда,
+    # что у полосы входа; код по времени вычисляет сам посев из секрета ответа.
+    "kaname-second-factor": ("A", "шесть глаголов второго фактора и поле `secondFactor` входа на собственном слушателе формы службы (Ф12 Р4): всё производит служба, ключей `jwt…` не читает, код вычисляет посев"),
 }
 
 
@@ -544,13 +672,38 @@ def reconcile_producer_ledger(stems: set[str],
     return out
 
 
+def ledger_matches_ceremony(ceremony_need: dict[str, list[str]],
+                            ledger: dict[str, tuple[str, str]] | None = None
+                            ) -> list[str]:
+    """Категория A у коллекции, требующей ЦЕРЕМОНИИ ЧЕЛОВЕКА, — находка.
+
+    Сверка идёт в ОДНУ сторону намеренно. «A требует церемонии» — противоречие
+    самой ведомости, и оно машинно разрешимо. Обратное («B не требует церемонии»)
+    находкой НЕ объявляется: у B бывает и другое препятствие — недостижимый
+    внешний поставщик, — и предикат, объявивший это расхождением, краснел бы на
+    верной записи.
+    """
+    ledger = PRODUCER_LEDGER if ledger is None else ledger
+    out = []
+    for stem, keys in sorted(ceremony_need.items()):
+        if not keys or stem not in ledger:
+            continue
+        if ledger[stem][0] == "A":
+            out.append(
+                f"коллекция {stem} объявлена категорией A (производитель — служба, "
+                f"переезжает машинным посевом), а читает предъявителя ЦЕРЕМОНИИ "
+                f"({', '.join(keys)}): машинный посев его не производит ни при "
+                f"каком устройстве, значит это B")
+    return out
+
+
 def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
         ledger: dict[str, tuple[str, str]] | None = None) -> int:
     if workflows is None:
         workflows = ROOT / ".github" / "workflows"
     try:
         (cols, wfs, runs, scripts, minted, mute, runnable, blocked,
-         by_surface, by_blocker) = survey(newman, workflows)
+         by_surface, by_blocker, by_state, ceremony_need) = survey(newman, workflows)
     except ValueError as e:
         print(f"ОТКАЗ: {e}.", file=sys.stderr)
         return 1
@@ -564,6 +717,14 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
 
     drift = reconcile_producer_ledger({stem for stem, *_ in
                                        [*runnable, *blocked]}, ledger)
+    # КАТЕГОРИЯ СВЕРЯЕТСЯ С ТРЕБОВАНИЕМ ЦЕРЕМОНИИ, А НЕ ТОЛЬКО ОБЪЯВЛЯЕТСЯ.
+    # Ведомость сама определяет B как «служба, но нужен ЧЕЛОВЕЧЕСКИЙ
+    # предъявитель». Коллекция, объявленная A и читающая предъявителя церемонии,
+    # объявлена переводимой машинным посевом — то есть ОБЕЩАЕТ ВОЗМОЖНОСТЬ,
+    # неисполнимую by construction: машине поднять уровень нечем.
+    # Цена названа: такая запись переносит коллекцию в план переезда, где её
+    # нельзя закрыть ничем, и мера работы становится недостижимой.
+    drift += ledger_matches_ceremony(ceremony_need, ledger)
     if drift:
         print("ОТКАЗ: ведомость производителя разошлась с деревом:", file=sys.stderr)
         for d in drift:
@@ -607,6 +768,14 @@ def run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
     print("по препятствию (одна коллекция может иметь несколько):")
     for b, n in sorted(by_blocker.items(), key=lambda kv: -kv[1]):
         print(f"  {n:3d}  {b}")
+    print()
+    # СОСТОЯНИЕ КЛЮЧА — ОТДЕЛЬНОЙ ПЕРЕПИСЬЮ. Одно число «непосеянных» скрыло бы
+    # то, ради чего перепись и делается: пустой ключ падает громко (страж набора
+    # утверждает его по имени), литерал чужого стенда — тихо и ПОХОЖЕ НА ДЕФЕКТ
+    # ПРОДУКТА, а отсутствующей строки шаблона не хватает раньше значения.
+    print("по СОСТОЯНИЮ непосеянного ключа (вхождений по всем коллекциям):")
+    for state in (KEY_STATE_EMPTY, KEY_STATE_LITERAL, KEY_STATE_ABSENT):
+        print(f"  {state}: {by_state[state]}")
     print()
     print(f"посев общих фикстур: {'есть' if scripts else 'ОТСУТСТВУЕТ'} "
           f"({len(scripts)} скрипт(ов) в authz-fixtures/), "
@@ -698,9 +867,20 @@ def _st_ledger(newman: pathlib.Path) -> dict[str, tuple[str, str]]:
     которому она не относится. Сверку самой ведомости держат оси 10 и 11 ниже —
     там расхождение вносится НАМЕРЕННО.
     """
-    cols = sorted(p.name.replace(".postman_collection.json", "")
-                  for p in (newman / "collections").glob("*.postman_collection.json"))
-    return {stem: ("A", "синтетика самопроверки") for stem in cols}
+    declared = template_keys(newman)
+    out: dict[str, tuple[str, str]] = {}
+    for p in sorted((newman / "collections").glob("*.postman_collection.json")):
+        stem = p.name.replace(".postman_collection.json", "")
+        text = p.read_text(encoding="utf-8")
+        own = set(OWN_KEY_RE.findall(text))
+        # Категория выводится ТЕМ ЖЕ правилом, что сверяет `ledger_matches_ceremony`:
+        # иначе оси 7 и 7б (фикстуры с предъявителем церемонии) падали бы на
+        # проверке классификации, к которой они не относятся. Сама проверка от
+        # этого не становится вакуумной — её ось ниже подаёт ведомость ЯВНО.
+        cer = any(key_state(k, declared, own) is not None and is_ceremony_key(k)
+                  for k in used_keys(text))
+        out[stem] = ("B" if cer else "A", "синтетика самопроверки")
+    return out
 
 
 def _st_run(newman: pathlib.Path, workflows: pathlib.Path | None = None,
@@ -1055,6 +1235,172 @@ def self_test() -> int:
            f"машинный посев поверхности «{SURFACE_EDGE}»" in out, out[:800])
         _c("и НЕ называет поверхность посева, который в дереве лежит",
            "машинный посев поверхности «служба" not in out, out[:800])
+
+        # ── Ось 12: НЕПОСЕЯННЫЙ КЛЮЧ С ЧУЖИМ ЛИТЕРАЛОМ ──────────────────────
+        #
+        # ПУСТОЙ КЛЮЧ — НЕ ЕДИНСТВЕННОЕ СОСТОЯНИЕ НЕПОСЕЯННОГО. Шаблон несёт
+        # `userNOBId`, `userAAAId`, `projectB1Id` НЕПУСТЫМИ — правдоподобными
+        # `usr…`/`prj…` чужого стенда. Посев автономного стенда их не куёт, значит
+        # на нём они указывают в пустоту, а перепись их НЕ ВИДЕЛА: предикат
+        # спрашивал только про пустое значение.
+        #
+        # ЦЕНА РАЗНАЯ, И ПОТОМУ ВИД НАЗЫВАЕТСЯ ОТДЕЛЬНО. Пустой ключ падает
+        # ГРОМКО — страж набора утверждает его по имени до первого запроса.
+        # Литерал чужого стенда доезжает до службы и возвращается 403/404, то есть
+        # ПОХОЖИМ НА ДЕФЕКТ ПРОДУКТА.
+        #
+        # Законных близнеца ДВА, и каждый отличается одним фактом: тот же литерал,
+        # но посев его КУЁТ — препятствия нет; и АДРЕС с непустым литералом — его
+        # поверхность названа отдельной строкой, второй раз он не считается.
+        for lane, minted_key, want in (("unminted", "jwtSomethingElse", True),
+                                       ("minted", "userNOBId", False)):
+            base = tmp / f"literal-{lane}"
+            body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                    '"{{ownRestBaseUrl}}/x"}},'
+                    '"event":[{"listen":"test","script":{"exec":['
+                    '"pm.environment.get(\'userNOBId\')"]}}]}]}')
+            t12 = _mk(base, {"literal": body},
+                      {"ownRestBaseUrl": "https://localhost:9098",
+                       "userNOBId": "usry4tz0kfahkv1favw1", "runId": ""})
+            fx = t12.parent / "authz-fixtures"
+            fx.mkdir(parents=True, exist_ok=True)
+            (fx / "seed_probe.py").write_text(
+                "import sys\n"
+                "if '--minted-keys' in sys.argv:\n"
+                f"    print({minted_key!r})\n"
+                "elif '--minted-surface' in sys.argv:\n"
+                "    print('служба (собственный REST-фронт)')\n",
+                encoding="utf-8")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _st_run(t12, workflows=_wf(base, runs=["literal"]))
+            out = buf.getvalue()
+            _c(f"непустой `userNOBId`, посев его {'НЕ куёт' if want else 'куёт'} — "
+               f"препятствие {'названо' if want else 'снято'}",
+               (f"НЕ гоняется здесь: {1 if want else 0}" in out
+                and f"{KEY_STATE_LITERAL}: {1 if want else 0}" in out), out[:900])
+
+        # Законный близнец про АДРЕС: непустое значение переменной края вторым
+        # препятствием не считается — его поверхность уже названа своей строкой.
+        base = tmp / "literal-address"
+        edge_plain = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                      '"{{baseUrl}}/iam/v1/x"}}}]}')
+        t12b = _mk(base, {"edge-plain": edge_plain},
+                   {"baseUrl": "http://localhost:18080", "runId": ""})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _st_run(t12b, workflows=_wf(base, runs=["edge-plain"]))
+        out = buf.getvalue()
+        _c("непустой АДРЕС края литералом чужого стенда НЕ называется",
+           f"{KEY_STATE_LITERAL}: 0" in out, out[:900])
+        _c("и его поверхность названа своей строкой",
+           "адресуется к краю платформы (переменная базового адреса)" in out,
+           out[:900])
+
+        # ── Ось 13: КЛЮЧА НЕТ В ШАБЛОНЕ ВОВСЕ ───────────────────────────────
+        #
+        # Третье состояние непосеянного: ключ читается, а строки под него в
+        # шаблоне НЕТ. Прежний предикат спрашивал `k in empty` и такой ключ не
+        # видел by construction — непосеянность выглядела нулём.
+        #
+        # ЗАКОННЫХ БЛИЗНЕЦА ТРИ, и все три — законные написания того, что
+        # коллекция производит САМА (`testing.md` §«Гейт на класс», п. 7):
+        # обычные кавычки, ЭКРАНИРОВАННЫЕ кавычки (`set(\"k\"` — так генератор
+        # пишет разбор набора ключей) и снятие (`unset('k')` — так снимается
+        # временная запись). Ни одно из трёх препятствием не является: стенд
+        # такой ключ производить не обязан.
+        for lane, extra, want in (
+                ("absent", '', True),
+                ("self-plain", '","pm.environment.set(\'k13\', \'v\')', False),
+                ("self-escaped", '","pm.environment.set(\\"k13\\", \'v\')', False),
+                ("self-unset", '","pm.environment.unset(\'k13\')', False)):
+            base = tmp / f"absent-{lane}"
+            body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                    '"{{ownRestBaseUrl}}/x"}},'
+                    '"event":[{"listen":"test","script":{"exec":['
+                    '"pm.environment.get(\'k13\')' + extra + '"]}}]}]}')
+            t13 = _mk(base, {"absent": body},
+                      {"ownRestBaseUrl": "https://localhost:9098", "runId": ""})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _st_run(t13, workflows=_wf(base, runs=["absent"]))
+            out = buf.getvalue()
+            _c(f"ключ вне шаблона, коллекция его "
+               f"{'НЕ пишет' if want else f'пишет ({lane})'} — препятствие "
+               f"{'названо' if want else 'снято'}",
+               (f"НЕ гоняется здесь: {1 if want else 0}" in out
+                and f"{KEY_STATE_ABSENT}: {1 if want else 0}" in out), out[:900])
+
+        # ── Ось 14: ПЕРЕПИСЬ ПЕЧАТАЕТ СОСТОЯНИЯ ОТДЕЛЬНО ────────────────────
+        #
+        # «Оба вида отдельно» — не украшение: читатель, видящий одно число
+        # «непосеянных ключей», не отличит громкого отказа стража от тихого
+        # 404 по чужому литералу, а чинятся они разным.
+        base = tmp / "states"
+        body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                '"{{ownRestBaseUrl}}/x"}},'
+                '"event":[{"listen":"test","script":{"exec":['
+                '"pm.environment.get(\'jwtEmptyOne\')",'
+                '"pm.environment.get(\'userNOBId\')",'
+                '"pm.environment.get(\'absentOne\')"]}}]}]}')
+        t14 = _mk(base, {"states": body},
+                  {"ownRestBaseUrl": "https://localhost:9098",
+                   "jwtEmptyOne": "", "userNOBId": "usry4tz0kfahkv1favw1",
+                   "runId": ""})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _st_run(t14, workflows=_wf(base, runs=["states"]))
+        out = buf.getvalue()
+        _c("перепись печатает ТРИ состояния ключа по отдельности",
+           all(f"{s}: " in out for s in (KEY_STATE_EMPTY, KEY_STATE_LITERAL,
+                                         KEY_STATE_ABSENT)), out[:1200])
+        _c("и каждое своим числом",
+           f"{KEY_STATE_EMPTY}: 1" in out and f"{KEY_STATE_LITERAL}: 1" in out
+           and f"{KEY_STATE_ABSENT}: 1" in out, out[:1200])
+
+        # ── Ось 15: КАТЕГОРИЯ A ПРИ ТРЕБОВАНИИ ЦЕРЕМОНИИ — НАХОДКА ──────────
+        #
+        # Ведомость сама определяет B как «нужен ЧЕЛОВЕЧЕСКИЙ предъявитель».
+        # Запись A у коллекции, читающей `*StepUp`, объявляет её переводимой
+        # машинным посевом — возможность, неисполнимую by construction.
+        # Ведомость подаётся ЯВНО, мимо `_st_ledger`: иначе ось судила бы то же
+        # правило, которым синтетическая ведомость и строится, то есть себя.
+        base = tmp / "misfiled"
+        stepup_body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                       '"{{ownRestBaseUrl}}/x"}},'
+                       '"event":[{"listen":"test","script":{"exec":['
+                       '"pm.environment.get(\'jwtAccountAdminAStepUp\')"]}}]}]}')
+        t15 = _mk(base, {"misfiled": stepup_body},
+                  {"ownRestBaseUrl": "https://localhost:9098",
+                   "jwtAccountAdminAStepUp": "", "runId": ""})
+        wf15 = _wf(base, runs=["misfiled"])
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            rc = run(t15, workflows=wf15, ledger={"misfiled": ("A", "довод")})
+        _c("A при требовании церемонии — код 1", rc == 1, f"код {rc}")
+        _c("и находка называет коллекцию и ключ",
+           "misfiled" in err.getvalue()
+           and "jwtAccountAdminAStepUp" in err.getvalue(), err.getvalue()[:400])
+
+        # ЗАКОННЫЙ БЛИЗНЕЦ ПЕРВЫЙ: та же коллекция, категория B — молчание.
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = run(t15, workflows=wf15, ledger={"misfiled": ("B", "довод")})
+        _c("ЗАКОННЫЙ БЛИЗНЕЦ: та же коллекция как B — код 0", rc == 0, f"код {rc}")
+
+        # ЗАКОННЫЙ БЛИЗНЕЦ ВТОРОЙ: категория A у коллекции БЕЗ церемонии —
+        # молчание. Без него ось краснела бы на любой записи A.
+        base = tmp / "filed-ok"
+        plain_body = ('{"item":[{"name":"s","request":{"url":{"raw":'
+                      '"{{ownRestBaseUrl}}/x"}},'
+                      '"event":[{"listen":"test","script":{"exec":['
+                      '"pm.environment.get(\'jwtAccountAdminA\')"]}}]}]}')
+        t15b = _mk(base, {"filed-ok": plain_body},
+                   {"ownRestBaseUrl": "https://localhost:9098",
+                    "jwtAccountAdminA": "", "runId": ""})
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = run(t15b, workflows=_wf(base, runs=["filed-ok"]),
+                     ledger={"filed-ok": ("A", "довод")})
+        _c("ЗАКОННЫЙ БЛИЗНЕЦ: A без церемонии — код 0", rc == 0, f"код {rc}")
 
         # Ось 4: коллекция края попадает в «не гоняется» с причиной про край.
         edge = ('{"item":[{"name":"s","request":{"url":{"raw":"{{baseUrl}}/iam/v1/x"}}}]}')

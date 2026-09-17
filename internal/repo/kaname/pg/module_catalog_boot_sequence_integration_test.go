@@ -52,8 +52,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
-
-	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
 )
 
 // deliveryOfShippedManifests раскладывает ПОСТАВЛЯЕМЫЕ манифесты дерева в
@@ -65,17 +63,14 @@ import (
 // Возьми проба форму дерева — она читала бы вход, которого доставка не порождает.
 func deliveryOfShippedManifests(t *testing.T) (dir string, modules []string) {
 	t.Helper()
-	// Каталог соседних модулей спрашивается у владельца резолва
-	// (`internal/testsupport/platformtree`): литерал-подъём был координатой
-	// РАСКЛАДКИ монорепо, и вне её вердикт выносился бы о чужом дереве (kacho#2254).
-	paths, err := filepath.Glob(filepath.Join(platformtree.Require(t), "services", "*", "manifest.yaml"))
-	require.NoError(t, err)
-	require.NotEmpty(t, paths, "обход дерева не нашёл манифестов: вердикт беспредметен")
+	// Манифесты соседних модулей лежат в дереве платформы, НАЗВАННОМ снаружи
+	// (`platform_manifests_test.go`): корень своего модуля их не несёт ни в одной
+	// посадке, и вердикт выносился бы о чужом дереве (kacho#2254, #108).
+	paths := platformManifestPaths(t)
 
 	dir = t.TempDir()
 	for _, p := range paths {
-		body, rerr := os.ReadFile(p) // #nosec G304 -- путь собран обходом дерева проб
-		require.NoError(t, rerr)
+		body := readPlatformManifest(t, p)
 		svcDir := filepath.Base(filepath.Dir(p))
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, svcDir+".manifest.yaml"), body, 0o600))

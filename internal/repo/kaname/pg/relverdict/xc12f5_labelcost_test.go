@@ -85,7 +85,7 @@ import (
 // какой причине.
 const f5Gate = "AUTHZFORMBENCH_F5"
 
-// f5Label — метка правила. Ключ обязан пройти `kaname.kacho_labels_valid`
+// f5Label — метка правила. Ключ обязан пройти `kaname.labels_valid`
 // (`^[a-z][-_./@a-z0-9]{0,62}$`), поэтому он проверен схемой, а не выбран на глаз.
 const (
 	f5LabelKey   = "authzformbench"
@@ -444,7 +444,7 @@ func TestXC12F5LabelPathCost(t *testing.T) {
 			PageSize: 1000, Partition: 50, Parallelism: 8,
 		},
 		RepeatSchedule: strings.Join(schedule, " · "),
-		RunCommand: "AUTHZFORMBENCH_F5=1 go test -C services/iam ./internal/repo/kaname/pg/relverdict/ " +
+		RunCommand: "AUTHZFORMBENCH_F5=1 go test ./internal/repo/kaname/pg/relverdict/ " +
 			"-run TestXC12F5LabelPathCost -count=1 -v -timeout 180m",
 		QueueNote:  f5QueueNote,
 		Unmeasured: f5Unmeasured(),

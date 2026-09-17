@@ -206,6 +206,13 @@ type MTLSConfig struct {
 	// KANAME_REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE. Пустая строка (unset) при
 	// enabled-ребре → server-tls-only. Неизвестный режим → fail-closed.
 	RegistryTokenClientAuthMode string `envconfig:"REGISTRYTOKEN_SERVER_MTLS_CLIENTAUTHMODE"`
+
+	// LoginLaneServerMTLS — TLS-профиль слушателя полосы входа паролем (Ф3,
+	// kacho#1269). Режим на посадке `own` — ТОЛЬКО `mutual`: допуск ровно края
+	// судится по SAN проверенного клиентского сертификата, и без него слушатель
+	// открыт всякому (Р16, Ф3-44).
+	LoginLaneServerMTLS     grpcsrv.TLSServer `envconfig:"LOGINLANE_SERVER_MTLS"`
+	LoginLaneClientAuthMode string            `envconfig:"LOGINLANE_SERVER_MTLS_CLIENTAUTHMODE"`
 }
 
 // clientAuthMode — TLS ClientAuth-режим per-edge для HTTP-listener'ов.
@@ -394,6 +401,25 @@ func (m MTLSConfig) InternalRESTServerTLSConfig() (*tls.Config, error) {
 // не переносит, — поэтому запрашивающий режим не сузил бы ничего, оставаясь на
 // вид настроенным. Выключенный транспорт — тем более «нет»: сертификата не
 // бывает там, где нет рукопожатия.
+// LoginLaneServerTLSConfig — профиль слушателя полосы входа.
+func (m MTLSConfig) LoginLaneServerTLSConfig() (*tls.Config, error) {
+	return serverTLSConfig(m.LoginLaneServerMTLS, resolveClientAuthMode(m.LoginLaneClientAuthMode))
+}
+
+// LoginLaneRequiresClientCert — слушатель полосы взаимный: клиентский
+// сертификат обязателен и проверяется (единственный режим, допустимый под `own`).
+func (m MTLSConfig) LoginLaneRequiresClientCert() bool {
+	if !m.LoginLaneServerMTLS.Enable {
+		return false
+	}
+	return resolveClientAuthMode(m.LoginLaneClientAuthMode) == clientAuthMutual
+}
+
+// LoginLaneClientAuthModeValue — режим, как он объявлен (с умолчанием формы).
+func (m MTLSConfig) LoginLaneClientAuthModeValue() string {
+	return resolveClientAuthMode(m.LoginLaneClientAuthMode)
+}
+
 func (m MTLSConfig) InternalRESTRequiresClientCert() bool {
 	if !m.InternalRESTServerMTLS.Enable {
 		return false
@@ -473,6 +499,7 @@ func (m MTLSConfig) Validate() error {
 		"registry-token-server": {m.RegistryTokenServerMTLS, resolveClientAuthMode(m.RegistryTokenClientAuthMode)},
 		"rest-server":           {m.RESTServerMTLS, resolveClientAuthMode(m.RESTClientAuthMode)},
 		"internal-rest-server":  {m.InternalRESTServerMTLS, resolveClientAuthMode(m.InternalRESTClientAuthMode)},
+		"login-lane-server":     {m.LoginLaneServerMTLS, resolveClientAuthMode(m.LoginLaneClientAuthMode)},
 	} {
 		if !e.edge.Enable {
 			continue

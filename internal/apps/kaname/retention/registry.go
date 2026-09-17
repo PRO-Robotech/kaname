@@ -3,7 +3,7 @@
 
 // Package retention — уборка таблиц iam, чей рост задаёт внешний.
 //
-// Предмет — приёмка `services/iam/docs/engineering/acceptance/
+// Предмет — приёмка `docs/engineering/acceptance/
 // retention-sweep-has-a-caller.md` (задача #1292). Три таблицы росли без
 // ограничения: у двух уборщик был ОБЪЯВЛЕН и не имел ни одного прод-вызывающего,
 // у третьей уборщика не было вовсе. Восемь мест дерева при этом утверждали в
@@ -85,7 +85,96 @@ const (
 	// СВОЙ и более простой, чем у общего уборщика платформы, а послабление
 	// обязано нести гейт, который покраснеет с появлением оживителя.
 	SubjectProviderCompensationOutbox = "provider_compensation_outbox"
+	// SubjectHumanSessions — записи нашей сессии человека, которые `Resolve`
+	// уже не обслужит ни при каком носителе: истёкшие и снятые (Ф3-49).
+	SubjectHumanSessions = "human_sessions"
+	// SubjectLoginFailures — следы неверных предъявлений пароля старше самого
+	// длинного окна счёта (Ф3 Р10).
+	SubjectLoginFailures = "login_failures"
+	// SubjectRecoveryCodes — коды восстановления, которые оператор применения
+	// уже не обслужит: применённые и истёкшие (Ф5 Р1). Темп задаёт внешний:
+	// строку заводит запрос восстановления по любому подтверждённому адресу.
+	SubjectRecoveryCodes = "recovery_codes"
+	// SubjectSecondFactorEnrollments — неподтверждённые заведения второго
+	// фактора (Ф12-44, kacho#1281): строки `pending` старше окна свежести —
+	// `confirm` их уже не примет ни при каком коде (Ф12-04). Темп задаёт сам
+	// человек: строку заводит `enroll` под живой сессией.
+	SubjectSecondFactorEnrollments = "second_factor_enrollments"
 )
+
+// HumanSessionReapers — ЧЕТЫРЕ уборщика полосы входа (Ф3, Ф5, Ф12): порог у
+// второго — самое длинное окно счёта, у четвёртого — окно свежести правки
+// своих данных; обе величины посадки и приходят параметром вместе с
+// уборщиком, а не выписываются длительностью.
+type HumanSessionReapers struct {
+	Sessions         HumanSessionReaper
+	Failures         LoginFailureReaper
+	Codes            RecoveryCodeReaper
+	Enrollments      EnrollmentReaper
+	LongestWindow    time.Duration
+	EnrollmentWindow time.Duration
+}
+
+// HumanSessionReaper — порт уборщика истёкших и снятых записей сессии.
+type HumanSessionReaper interface {
+	SweepUnservableSessions(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// LoginFailureReaper — порт уборщика следов неверных предъявлений.
+type LoginFailureReaper interface {
+	SweepAgedFailures(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// RecoveryCodeReaper — порт уборщика применённых и истёкших кодов восстановления.
+type RecoveryCodeReaper interface {
+	SweepUnservableRecoveryCodes(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
+// EnrollmentReaper — порт уборщика неподтверждённых заведений второго фактора:
+// `window` — окно свежести; строка `pending` старше него снимается.
+type EnrollmentReaper interface {
+	SweepExpiredEnrollments(ctx context.Context, window time.Duration, batch int) (int64, bool, error)
+}
+
+// WithHumanSessions — записи реестра полосы входа поверх базовых. Отдельной
+// функцией, а не параметрами `Subjects`: полоса поднимается посадкой `own`, и
+// под `external` записей у неё нет — уборщик без предмета выглядел бы исправным.
+func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
+	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.EnrollmentWindow <= 0 {
+		return base
+	}
+	return append(base,
+		Subject{
+			Name: SubjectHumanSessions,
+			// Порог — функция предиката читателя: запись годна к снятию, как
+			// только `Resolve` её не обслужит, и не раньше; запаса сверх срока
+			// не нужно — момент истечения ВКЛЮЧАЮЩИЙ и у читателя, и у уборки.
+			Grace: 0,
+			Sweep: r.Sessions.SweepUnservableSessions,
+		},
+		Subject{
+			Name:  SubjectLoginFailures,
+			Grace: r.LongestWindow,
+			Sweep: r.Failures.SweepAgedFailures,
+		},
+		Subject{
+			Name: SubjectRecoveryCodes,
+			// Порог — предикат читателя: оператор применения не обслужит ни
+			// истёкшую, ни применённую строку, и запаса сверх срока не нужно —
+			// граница срока включающая и у оператора, и у уборки.
+			Grace: 0,
+			Sweep: r.Codes.SweepUnservableRecoveryCodes,
+		},
+		Subject{
+			Name: SubjectSecondFactorEnrollments,
+			// Порог — предикат читателя: `confirm` не примет `pending` старше
+			// окна свежести (Р8 — срок заведения равен окну), и уборщик снимает
+			// ровно то, что читатель уже отверг; запаса сверх окна не нужно.
+			Grace: r.EnrollmentWindow,
+			Sweep: r.Enrollments.SweepExpiredEnrollments,
+		},
+	)
+}
 
 // SweepFunc — один проход уборщика по одному предмету.
 //

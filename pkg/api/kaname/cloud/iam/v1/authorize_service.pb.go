@@ -796,6 +796,19 @@ type WhoAmIResponse struct {
 	// account-scoped grant; and ANY service-account principal — this snapshot is
 	// filled for `user` principals only, and a service account relies on per-RPC
 	// authorization instead.
+	//
+	// WHAT QUESTION THIS FIELD ANSWERS — AND WHAT IT DOES NOT (IAM-ID-2 §2.1,
+	// §2.3; стадия S2). It answers "what is reachable to me". The three sources
+	// above are MERGED: an account listed here looks the same whether the caller
+	// owns it, was invited into it or holds a grant on it — the entry carries no
+	// mark of the branch that selected it. It therefore carries NO TRACE OF AN
+	// INVITATION either — neither WHO invited the caller nor WHEN. Those are a
+	// property of the membership row, and they are read on the caller's own
+	// membership list (`MembershipService.ListMine`, `GET /iam/v1/me/memberships`):
+	// there `invited_by` and `created_at` name the inviter and the moment. After the
+	// first login the snapshot DOES list the account of an invitation (membership
+	// becomes ACTIVE at login) — so "the snapshot carries no invitations" would be
+	// false; what it lacks is the DISTINCTION, not the account.
 	Accounts []*AccountMembership `protobuf:"bytes,7,rep,name=accounts,proto3" json:"accounts,omitempty"`
 	// Timestamp at which the snapshot was computed (truncated to seconds).
 	CheckedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=checked_at,json=checkedAt,proto3" json:"checked_at,omitempty"`

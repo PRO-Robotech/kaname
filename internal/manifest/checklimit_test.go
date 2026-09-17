@@ -132,7 +132,7 @@ const manifestHeadroomDivisor = 4
 // # Обход — ПРОД-ПУТЬ
 //
 // `CheckTree` — тот самый исполнитель, которым судит
-// `make -C services/iam module-manifest-check`. Свой обходчик рядом разошёлся бы
+// `make module-manifest-check`. Свой обходчик рядом разошёлся бы
 // с ним молча на первом же новом месте манифеста.
 //
 // # Пустой обход — НАХОДКА

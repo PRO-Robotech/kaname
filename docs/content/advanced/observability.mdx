@@ -165,6 +165,8 @@ rate(kaname_db_pool_acquire_wait_seconds_total[5m]) / rate(kaname_db_pool_empty_
 |---|---|
 | `kaname_identities_total` | сколько личностей платформа видела **за всё время**. Ряд не убывает: человек уходит, запись остаётся |
 | `kaname_identity_ledger_samples_total` (`outcome`) | исходы фонового замера предыдущего ряда. Пока `outcome="ok"` растёт, ноль в нём означает ноль, а не неснятый замер |
+| `kaname_provider_mirror_rows` (`table`) | сколько удостоверений ещё несут зеркало клиента у **прежнего** внешнего OAuth-сервера, по таблице. Ноль в обоих рядах — измеренная половина условия, при котором прежний издатель снимается; пока он не ноль, снятие лишило бы эти удостоверения имени |
+| `kaname_provider_mirror_samples_total` (`outcome`) | исходы фонового замера предыдущего ряда. Ноль там открывает необратимое снятие, поэтому читайте его только вместе с этим рядом: пока `outcome="ok"` растёт, ноль означает ноль |
 | `kaname_retention_passes_total` | проходы фоновой уборки |
 | `kaname_retention_rows_removed_total` (`subject`) | снято строк, по каждому предмету отдельно |
 | `kaname_retention_pass_failures_total` (`subject`) | отказавшие проходы уборки |
@@ -208,7 +210,44 @@ sum by (route, outcome) (rate(kaname_authn_hook_requests_total[5m]))
 строк журнала тревогой не бывает.
 
 Если поставщик личности в установке не настроен вовсе, правило `KanameAuthnHooksSilent` звонит
-именно об этом, и это верный ответ, а не шум.
+именно об этом, и это верный ответ, а не шум — **под посадкой `external`**. Под `own` хуков
+поставщика нет by construction, тишина на них штатна, и чарт это правило туда не везёт:
+правила о хуках поставщика поставляются только установке на `external`
+(см. [Правила тревоги](#alert-rules)).
+
+## Вход человека: собственная полоса пароля и наша сессия {#login-lane}
+
+Поднимается только посадкой `authn.identityProvider: own`. На посадке `external` рядов нет, и это
+не тишина: полоса не построена, и самоотчёт старта называет её выключенной с причиной.
+
+```promql
+# исходы входа по причине — вызывающий видит ОДИН отказ, причина только здесь
+sum by (outcome) (rate(kaname_login_outcomes_total[5m]))
+# «сессии нет» по причине
+sum by (reason) (rate(kaname_human_session_no_session_total[5m]))
+```
+
+| Ряд | Метки | Что значит |
+|---|---|---|
+| `kaname_login_outcomes_total` | `outcome` | исходы входа: `issued`, `no-row`, `blocked`, `rate-limited`, `store-failed`, `verifier-issue`, `mismatched`, `material-missing`, `capacity-exhausted`, `second-factor-refused` (пароль сошёлся, отказано по полю `secondFactor` — исход в клетках предъявления ниже). Человек получает один и тот же отказ на всё, кроме частоты и состояния второго фактора; какая именно причина — видно только здесь и в журнале |
+| `kaname_password_verification_outcomes_total` | `outcome` | исходы проверяющего пароля: `matched`, `mismatched`, `format-not-in-registry`, `body-not-parsable`, `params-above-ceiling`, `material-missing`, `capacity-exhausted`. Три средних — **наша** негодность хранимого материала, а не ошибка человека: рост означает находку о хранилище |
+| `kaname_human_session_no_session_total` | `reason` | ответы «сессии нет» краю: `unknown` (носитель неизвестен), `ended` (завершена выходом либо сменой пароля), `expired`, `blocked`. Край и предъявитель получают один ответ; причина считается только здесь |
+| `kaname_login_form_refusals_total` | `refusal` | отказы признака формы: `missing`, `rejected`. Рост `rejected` при живой консоли — признак подделанной формы либо смены контекста, о которой консоль не знает |
+| `kaname_login_rate_limit_refusals_total` | `scope` | отказы по частоте по оси: `address` (почта), `source` (адрес источника). Ось, о которой ни разу не спрашивали, стоит нулём, а не отсутствует |
+| `kaname_password_breach_check_total` | `outcome` | проверка пароля по базе утечек: `clean`, `found`, `unavailable` (авторитет не ответил — пароль принят **громко**), `misconfigured` (по адресу не тот протокол — операция отвергнута), `disabled`. «Ноль проверок за всю жизнь» видно, потому что клетка есть с нулём |
+| `kaname_logout_store_failures_total` | — | выходы, не исполненные потому, что хранилище не ответило; носитель остаётся у клиента, и повтор законен |
+| `kaname_login_source_unknown_total` | — | вопросы о частоте предъявлений, заданные **без адреса источника**: ось источника не судилась. На живом проводе адрес ставит край всегда, поэтому рост ряда означает запрос, дошедший до полосы мимо края, — это признак посадки, а не нагрузки |
+| `kaname_password_material_rewrite_total` | `outcome` | переписывание хранимого материала после совпадения: `rewritten`, `not-needed`, `write-failed`, `skipped-72-bytes`, `skipped-nul-byte`, `skipped-unjudgeable`. `write-failed` не есть отказ человеку — вход состоялся, материал остался прежним |
+| `kaname_registration_outcomes_total` | `lane`, `outcome` | исходы регистрации по полосе (`password`) и причине: `issued`, `issued-invited` (адрес нёс приглашение — оно активировано той же полосой), `refused-occupied` (адрес принадлежит личности либо тот же человек повторил обращение), `refused-invite-expired`, `refused-rate` (потолок темпа заведения по адресу исчерпан), `refused-password` (правило пароля), `store-failed`. Человек получает **один** отказ на занятость и на потолок темпа — `registration refused`, и различить их можно только здесь. Клетка каждой пары «полоса × исход» есть с нулём до первого события |
+| `kaname_recovery_request_outcomes_total` | `outcome` | исходы запроса кода восстановления доступа: `queued` (код выдан, письмо в очереди), `no-row` (адрес не принадлежит никому), `unverified` (адрес не подтверждён — код для него не выдаётся), `store-failed`. Вызывающий получает **один и тот же** ответ при любом исходе и постановки письма не ждёт; исход виден только здесь |
+| `kaname_recovery_completion_outcomes_total` | `outcome` | исходы предъявления кода восстановления с новым паролем: `issued` (сессия выдана), `no-row`, `code-rejected` (неверен, истёк либо уже применён), `blocked` (личность заблокирована: учётные данные сменены, сессии нет), `rate-limited`, `password-rejected` (новый пароль негоден по правилу, код не потрачен), `store-failed`. Человек получает один отказ на всё, кроме частоты и правила |
+| `kaname_second_factor_presentations_total` | `method`, `outcome` | предъявления кода второго фактора по способу (`totp`, `lookup_secret`) и исходу: `matched`, `mismatched`, `replayed` (только `totp`: код той же ступени, что уже принят строкой), `material-unreadable` (**наш** хранимый секрет не открывается ни одним ключом кольца — находка о ключнице, человеку отвечают 503), `capacity-exhausted` (только `lookup_secret`: ёмкость проверяющего пароля исчерпана). Клетка заводится только для пар, которые полоса производит; предъявление при несошедшемся пароле сюда не идёт — пароль его не открыл |
+| `kaname_second_factor_refusals_total` | `reason` | отказы второго фактора, которые **не попытки** и в счёт подбора не идут: `not-enrolled`, `already-enrolled`, `enrollment-not-pending`, `session-not-fresh`, `unavailable`. Рост `session-not-fresh` при живой консоли — признак вызова глагола без предварительного предъявления |
+| `kaname_second_factor_events_total` | `event` | события второго фактора: `enrollment-started`, `enrollment-confirmed`, `removed`, `backup-codes-regenerated`, `backup-code-consumed`. Ноль заведений за всю жизнь посадки виден только потому, что клетка есть |
+
+**`unavailable` у проверки утечек — не отказ человеку, а запись уровня error и клетка.** Решение
+записано приёмкой полосы: недоступный авторитет пропускает пароль громко, настроенный не туда —
+отвергает операцию. Различать их надо по этому ряду, а не по журналу.
 
 ## Выдача токенов по учётным данным клиента
 
@@ -296,6 +335,7 @@ sum by (outcome) (rate(kaname_client_token_outcomes_total[5m]))
 | Ряд | Метки | Что значит |
 |---|---|---|
 | `kaname_invite_mail_outcomes_total` | `outcome` | исходы отправки письма приглашения нашим отправителем |
+| `kaname_invite_mail_intents_total` | `outcome` | исходы намерения отправить письмо на глаголах приглашения и повторной отправки: `queued` — поставлено в очередь, `rate_limited` — окно частоты адреса полно, письмо не поставлено. Для вызывающего эти исходы неотличимы (отказ по частоте не оракул), поэтому это единственное место, где сверхнормативное письмо видно |
 | `kaname_invite_activations_total` | `outcome` | активации приглашения на первом входе человека |
 | `kaname_bootstrap_admin_attempts_total` | `outcome` | попытки посева доступа кластерного администратора |
 
@@ -400,9 +440,16 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
 Растущий возраст самой старой строки при неподвижном `delivered_total` — очередь не доезжает.
 Ненулевой `lro_terminal_write_failures_total` — операция зависла и сама не поднимется.
 
-## Правила тревоги
+## Правила тревоги {#alert-rules}
 
 Готовые к переносу в свою систему мониторинга. Все ряды здесь — те же, что названы выше.
+
+**Набор зависит от посадки личности, и это решение, а не оговорка.** Общие правила ниже везёт
+каждая установка; правила о хуках поставщика — только установка на `external`, правила
+собственной полосы входа — только установка на `own`. Правило чужой полосы звонило бы вечно:
+под `own` тишина на хуках поставщика штатна, под `external` полосы пароля нет вовсе. Порог,
+срабатывающий на штатном состоянии, перестают читать — и вместе с ним теряют настоящую тревогу.
+Профиль, посадку не объявивший, получает только общие правила; служба под ним и не стартует.
 
 ```yaml
 - alert: KanameAuthzSlow
@@ -466,6 +513,14 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   annotations:
     summary: "замер журнала личностей не идёт — kaname_identities_total перестал что-либо утверждать"
 
+- alert: KanameProviderMirrorUnsampled
+  # Ноль зеркал — цель, ради которой ряд заведён. Незаконно НЕ ЗНАТЬ, ноль
+  # это или неснятый замер: этот ноль открывает необратимое снятие компонента.
+  expr: increase(kaname_provider_mirror_samples_total{outcome="ok"}[10m]) == 0
+  for: 10m
+  annotations:
+    summary: "замер окна прежнего издателя не идёт — kaname_provider_mirror_rows перестал что-либо утверждать"
+
 - alert: KanameReadinessDependencyUnready
   expr: increase(kaname_readiness_dependency_checks_total{outcome="unready"}[5m]) > 0
   for: 5m
@@ -478,24 +533,6 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
   for: 15m
   annotations:
     summary: "готовность не оценивалась ни разу за 15 минут — пробу никто не спрашивает"
-
-- alert: KanameAuthnHooksSilent
-  # Отсутствие обращений невидимо в журнале by construction: строк нет вовсе.
-  expr: sum(increase(kaname_authn_hook_requests_total[1h])) == 0
-  for: 30m
-  annotations:
-    summary: "за час ни одного обращения к хукам поставщика личности — вход человека не работает"
-
-- alert: KanameAuthnHookRefused
-  expr: increase(kaname_authn_hook_requests_total{outcome="refused"}[15m]) > 0
-  for: 15m
-  annotations:
-    summary: "хук {{ $labels.route }} отвергает обращения поставщика — провязка на его стороне неверна"
-
-- alert: KanameAuthnHookFailing
-  expr: increase(kaname_authn_hook_requests_total{outcome="failed"}[10m]) > 0
-  annotations:
-    summary: "хук {{ $labels.route }} не смог ответить — вход человека отказывает"
 
 - alert: KanameExpiredCredentialReclaimStalled
   # Включён и не крутится. Выключенный НЕ звонит: это решение оператора, а не отказ.
@@ -537,12 +574,61 @@ kubectl exec deploy/kaname -- wget -qO- http://127.0.0.1:9095/metrics \
     summary: "доля неуспешных ответов выше 5%"
 ```
 
+### Только под посадкой `external` — хуки поставщика личности
+
+<!-- posture: external -->
+```yaml
+- alert: KanameAuthnHooksSilent
+  # Отсутствие обращений невидимо в журнале by construction: строк нет вовсе.
+  expr: sum(increase(kaname_authn_hook_requests_total[1h])) == 0
+  for: 30m
+  annotations:
+    summary: "за час ни одного обращения к хукам поставщика личности — вход человека не работает"
+
+- alert: KanameAuthnHookRefused
+  expr: increase(kaname_authn_hook_requests_total{outcome="refused"}[15m]) > 0
+  for: 15m
+  annotations:
+    summary: "хук {{ $labels.route }} отвергает обращения поставщика — провязка на его стороне неверна"
+
+- alert: KanameAuthnHookFailing
+  expr: increase(kaname_authn_hook_requests_total{outcome="failed"}[10m]) > 0
+  annotations:
+    summary: "хук {{ $labels.route }} не смог ответить — вход человека отказывает"
+```
+
+### Только под посадкой `own` — собственная полоса входа
+
+Правила о **тишине** здесь нет намеренно: час без единого входа у небольшой установки ночью —
+штатное состояние. Звонят отказы **нашей** стороны: человек получает один и тот же отказ, а
+причина видна только в `outcome` (ряды [полосы входа](#login-lane)).
+
+<!-- posture: own -->
+```yaml
+- alert: KanameLoginLaneFailing
+  expr: |
+    sum(increase(kaname_login_outcomes_total{outcome=~"store-failed|verifier-issue"}[10m]))
+      + sum(increase(kaname_registration_outcomes_total{outcome="store-failed"}[10m]))
+      + sum(increase(kaname_recovery_request_outcomes_total{outcome="store-failed"}[10m]))
+      + sum(increase(kaname_recovery_completion_outcomes_total{outcome="store-failed"}[10m])) > 0
+  for: 5m
+  annotations:
+    summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище либо проверяющий пароля; человек видит один отказ, причина в outcome"
+
+- alert: KanameLoginVerifierCapacityExhausted
+  expr: increase(kaname_login_outcomes_total{outcome="capacity-exhausted"}[10m]) > 0
+  for: 5m
+  annotations:
+    summary: "ёмкость проверяющего пароля исчерпана — людям отказано по нагрузке; величина authn.login.verifier-capacity"
+```
+
 Эти правила **везёт сам чарт** — объектом `PrometheusRule`, поэтому переносить их руками не нужно.
 Выключается объект ручкой `alertRules.enabled=false`: там, где оператора Prometheus нет, его вид
 неизвестен кластеру, и установка была бы отвергнута целиком.
 
-Объект и этот текст обязаны совпадать — сверяется это при сборке, в обе стороны: и обещанное без
-поставки, и поставленное без объяснения одинаково красные.
+Объект и этот текст обязаны совпадать — сверяется это при сборке, в обе стороны и **по каждой
+посадке**: и обещанное без поставки, и поставленное без объяснения одинаково красные, а правило
+полосы, уехавшее под чужую посадку, красное на второй полосе.
 
 ## Чего одна наблюдаемость не доказывает
 

@@ -10,7 +10,9 @@
 package iamv1
 
 import (
+	_ "github.com/PRO-Robotech/corelib/api/corelib/api/v1"
 	_ "github.com/PRO-Robotech/corelib/api/corelib/authz/v1"
+	operation "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -26,6 +28,154 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type CreateMembershipRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Аккаунт, в который приглашают. ОБЯЗАТЕЛЕН: пустое значение — синхронный
+	// `INVALID_ARGUMENT` с именем поля, до чеканки операции. Это и есть объект,
+	// про который край спрашивает модель прав.
+	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	// Почта приглашаемого. ОБЯЗАТЕЛЬНА; сравнивается без учёта регистра.
+	Email string `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	// Отображаемое имя для СВЕЖЕЙ строки человека (необязательно; пусто —
+	// локальная часть почты). Человеку, который в платформе уже есть, имя этим
+	// полем НЕ переписывается — приглашающий не вправе его менять.
+	DisplayName string `protobuf:"bytes,3,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	// Необязательная пара: проект аккаунта и роль, выдаваемая приглашённому на
+	// этом проекте АТОМАРНО с членством. Оба либо заданы, либо пусты; проект
+	// обязан принадлежать `account_id`, роль — быть назначаемой на нём (тот же
+	// вопрос, что задаёт `AccessBindingService.Create`).
+	ProjectId     string `protobuf:"bytes,4,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	RoleId        string `protobuf:"bytes,5,opt,name=role_id,json=roleId,proto3" json:"role_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateMembershipRequest) Reset() {
+	*x = CreateMembershipRequest{}
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateMembershipRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateMembershipRequest) ProtoMessage() {}
+
+func (x *CreateMembershipRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateMembershipRequest.ProtoReflect.Descriptor instead.
+func (*CreateMembershipRequest) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_membership_service_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *CreateMembershipRequest) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *CreateMembershipRequest) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *CreateMembershipRequest) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *CreateMembershipRequest) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *CreateMembershipRequest) GetRoleId() string {
+	if x != nil {
+		return x.RoleId
+	}
+	return ""
+}
+
+type CreateMembershipMetadata struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Аккаунт, в который приглашают. Известен ДО исполнения.
+	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	// Человек, чьё членство заводится. У почты, ИЗВЕСТНОЙ платформе на момент
+	// принятия, — идентификатор её строки (строка у человека одна, глобальный
+	// ключ почты); у неизвестной — идентификатор, который получит новая строка.
+	// Арбитр остаётся транзакция: если тот же человек появился между принятием
+	// и исполнением (конкурентный первый вход), строка получила другой
+	// идентификатор, и действующий несёт `response`. Идентификатор ЧЛЕНСТВА
+	// здесь не называется вовсе — он вычисляется из пары в транзакции; читать его
+	// надо из `response` после `done` и `!error`, иначе публикуется фантом.
+	UserId        string `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateMembershipMetadata) Reset() {
+	*x = CreateMembershipMetadata{}
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateMembershipMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateMembershipMetadata) ProtoMessage() {}
+
+func (x *CreateMembershipMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateMembershipMetadata.ProtoReflect.Descriptor instead.
+func (*CreateMembershipMetadata) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_membership_service_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CreateMembershipMetadata) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *CreateMembershipMetadata) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
 type GetMembershipRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Аккаунт, в котором читается членство. ОБЯЗАТЕЛЕН: он и есть объект, про
@@ -39,7 +189,7 @@ type GetMembershipRequest struct {
 
 func (x *GetMembershipRequest) Reset() {
 	*x = GetMembershipRequest{}
-	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[0]
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -51,7 +201,7 @@ func (x *GetMembershipRequest) String() string {
 func (*GetMembershipRequest) ProtoMessage() {}
 
 func (x *GetMembershipRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[0]
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -64,7 +214,7 @@ func (x *GetMembershipRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMembershipRequest.ProtoReflect.Descriptor instead.
 func (*GetMembershipRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_membership_service_proto_rawDescGZIP(), []int{0}
+	return file_kaname_cloud_iam_v1_membership_service_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *GetMembershipRequest) GetAccountId() string {
@@ -106,7 +256,7 @@ type ListMembershipsRequest struct {
 
 func (x *ListMembershipsRequest) Reset() {
 	*x = ListMembershipsRequest{}
-	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[1]
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -118,7 +268,7 @@ func (x *ListMembershipsRequest) String() string {
 func (*ListMembershipsRequest) ProtoMessage() {}
 
 func (x *ListMembershipsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[1]
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -131,7 +281,7 @@ func (x *ListMembershipsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMembershipsRequest.ProtoReflect.Descriptor instead.
 func (*ListMembershipsRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_membership_service_proto_rawDescGZIP(), []int{1}
+	return file_kaname_cloud_iam_v1_membership_service_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ListMembershipsRequest) GetAccountId() string {
@@ -180,7 +330,7 @@ type ListMembershipsResponse struct {
 
 func (x *ListMembershipsResponse) Reset() {
 	*x = ListMembershipsResponse{}
-	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[2]
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -192,7 +342,7 @@ func (x *ListMembershipsResponse) String() string {
 func (*ListMembershipsResponse) ProtoMessage() {}
 
 func (x *ListMembershipsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[2]
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -205,7 +355,7 @@ func (x *ListMembershipsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMembershipsResponse.ProtoReflect.Descriptor instead.
 func (*ListMembershipsResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_membership_service_proto_rawDescGZIP(), []int{2}
+	return file_kaname_cloud_iam_v1_membership_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListMembershipsResponse) GetMemberships() []*Membership {
@@ -222,11 +372,139 @@ func (x *ListMembershipsResponse) GetNextPageToken() string {
 	return ""
 }
 
+type ListMyMembershipsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The maximum number of results per page to return. Default value: 50.
+	// Значение вне [0..1000] ОТВЕРГАЕТСЯ, а не подрезается.
+	PageSize int64 `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// Page token, opaque. Негодный токен отвергается, а не игнорируется.
+	PageToken     string `protobuf:"bytes,2,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMyMembershipsRequest) Reset() {
+	*x = ListMyMembershipsRequest{}
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMyMembershipsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMyMembershipsRequest) ProtoMessage() {}
+
+func (x *ListMyMembershipsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMyMembershipsRequest.ProtoReflect.Descriptor instead.
+func (*ListMyMembershipsRequest) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_membership_service_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ListMyMembershipsRequest) GetPageSize() int64 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListMyMembershipsRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
+type ListMyMembershipsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Членства ВЫЗЫВАЮЩЕГО — все аккаунты, где он состоит, включая те, куда его
+	// позвали. Обе проекции заполняют один и тот же набор полей (§3.1):
+	// `invited_by` непуст у членства, заведённого приглашением, и пуст у
+	// остальных — поле различает два случая, а не отдаёт константу.
+	//
+	// Это НАБОР: порядок элементов определяется курсором `(created_at, id)` и
+	// значимым НЕ является. Вызывающий обязан сверять состав, а не индексы.
+	Memberships []*Membership `protobuf:"bytes,1,rep,name=memberships,proto3" json:"memberships,omitempty"`
+	// Токен следующей страницы; пусто — страница последняя. Вычисляется ТОЛЬКО
+	// по строкам вызывающего.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMyMembershipsResponse) Reset() {
+	*x = ListMyMembershipsResponse{}
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMyMembershipsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMyMembershipsResponse) ProtoMessage() {}
+
+func (x *ListMyMembershipsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_membership_service_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMyMembershipsResponse.ProtoReflect.Descriptor instead.
+func (*ListMyMembershipsResponse) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_membership_service_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ListMyMembershipsResponse) GetMemberships() []*Membership {
+	if x != nil {
+		return x.Memberships
+	}
+	return nil
+}
+
+func (x *ListMyMembershipsResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
+}
+
 var File_kaname_cloud_iam_v1_membership_service_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_membership_service_proto_rawDesc = "" +
 	"\n" +
-	",kaname/cloud/iam/v1/membership_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a$kaname/cloud/iam/v1/membership.proto\x1a$corelib/authz/v1/authz_options.proto\"Z\n" +
+	",kaname/cloud/iam/v1/membership_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a$corelib/authz/v1/authz_options.proto\x1a!corelib/operation/operation.proto\x1a$kaname/cloud/iam/v1/membership.proto\"\xa9\x01\n" +
+	"\x17CreateMembershipRequest\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\x12\x14\n" +
+	"\x05email\x18\x02 \x01(\tR\x05email\x12!\n" +
+	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x04 \x01(\tR\tprojectId\x12\x17\n" +
+	"\arole_id\x18\x05 \x01(\tR\x06roleId\"R\n" +
+	"\x18CreateMembershipMetadata\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"Z\n" +
 	"\x14GetMembershipRequest\x12\x1d\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tR\taccountId\x12#\n" +
@@ -240,14 +518,27 @@ const file_kaname_cloud_iam_v1_membership_service_proto_rawDesc = "" +
 	"\x06filter\x18\x04 \x01(\tR\x06filter\"\x84\x01\n" +
 	"\x17ListMembershipsResponse\x12A\n" +
 	"\vmemberships\x18\x01 \x03(\v2\x1f.kaname.cloud.iam.v1.MembershipR\vmemberships\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\xc1\x03\n" +
-	"\x11MembershipService\x12\xd4\x01\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"V\n" +
+	"\x18ListMyMembershipsRequest\x12\x1b\n" +
+	"\tpage_size\x18\x01 \x01(\x03R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x02 \x01(\tR\tpageToken\"\x86\x01\n" +
+	"\x19ListMyMembershipsResponse\x12A\n" +
+	"\vmemberships\x18\x01 \x03(\v2\x1f.kaname.cloud.iam.v1.MembershipR\vmemberships\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken2\xd6\x06\n" +
+	"\x11MembershipService\x12\xe1\x01\n" +
+	"\x06Create\x12,.kaname.cloud.iam.v1.CreateMembershipRequest\x1a\x1c.corelib.operation.Operation\"\x8a\x01\x8a\xb5\x18\x16iam.memberships.create\x92\xb5\x18\x06editor\x9a\xb5\x18\x15\n" +
+	"\aaccount\x12\n" +
+	"account_id\xa2\xb5\x18\x012\xb2\xd2*&\n" +
+	"\x18CreateMembershipMetadata\x12\n" +
+	"Membership\x82\xd3\xe4\x93\x02\x18:\x01*\"\x13/iam/v1/memberships\x12\xd4\x01\n" +
 	"\x03Get\x12).kaname.cloud.iam.v1.GetMembershipRequest\x1a\x1f.kaname.cloud.iam.v1.Membership\"\x80\x01\x8a\xb5\x18\x13iam.memberships.get\x92\xb5\x18\x06viewer\x9a\xb5\x18\x15\n" +
 	"\aaccount\x12\n" +
 	"account_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02;\x129/iam/v1/accounts/{account_id}/memberships/{membership_id}\x12\xd4\x01\n" +
 	"\x04List\x12+.kaname.cloud.iam.v1.ListMembershipsRequest\x1a,.kaname.cloud.iam.v1.ListMembershipsResponse\"q\x8a\xb5\x18\x14iam.memberships.list\x92\xb5\x18\x06viewer\x9a\xb5\x18\x15\n" +
 	"\aaccount\x12\n" +
-	"account_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02+\x12)/iam/v1/accounts/{account_id}/membershipsBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
+	"account_id\xa2\xb5\x18\x011\x82\xd3\xe4\x93\x02+\x12)/iam/v1/accounts/{account_id}/memberships\x12\xae\x01\n" +
+	"\bListMine\x12-.kaname.cloud.iam.v1.ListMyMembershipsRequest\x1a..kaname.cloud.iam.v1.ListMyMembershipsResponse\"C\x8a\xb5\x18\x18iam.memberships.listMine\xa2\xb5\x18\x011\xb0\xb5\x18\x01\x82\xd3\xe4\x93\x02\x18\x12\x16/iam/v1/me/membershipsBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
 var (
 	file_kaname_cloud_iam_v1_membership_service_proto_rawDescOnce sync.Once
@@ -261,24 +552,34 @@ func file_kaname_cloud_iam_v1_membership_service_proto_rawDescGZIP() []byte {
 	return file_kaname_cloud_iam_v1_membership_service_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_membership_service_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_kaname_cloud_iam_v1_membership_service_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_kaname_cloud_iam_v1_membership_service_proto_goTypes = []any{
-	(*GetMembershipRequest)(nil),    // 0: kaname.cloud.iam.v1.GetMembershipRequest
-	(*ListMembershipsRequest)(nil),  // 1: kaname.cloud.iam.v1.ListMembershipsRequest
-	(*ListMembershipsResponse)(nil), // 2: kaname.cloud.iam.v1.ListMembershipsResponse
-	(*Membership)(nil),              // 3: kaname.cloud.iam.v1.Membership
+	(*CreateMembershipRequest)(nil),   // 0: kaname.cloud.iam.v1.CreateMembershipRequest
+	(*CreateMembershipMetadata)(nil),  // 1: kaname.cloud.iam.v1.CreateMembershipMetadata
+	(*GetMembershipRequest)(nil),      // 2: kaname.cloud.iam.v1.GetMembershipRequest
+	(*ListMembershipsRequest)(nil),    // 3: kaname.cloud.iam.v1.ListMembershipsRequest
+	(*ListMembershipsResponse)(nil),   // 4: kaname.cloud.iam.v1.ListMembershipsResponse
+	(*ListMyMembershipsRequest)(nil),  // 5: kaname.cloud.iam.v1.ListMyMembershipsRequest
+	(*ListMyMembershipsResponse)(nil), // 6: kaname.cloud.iam.v1.ListMyMembershipsResponse
+	(*Membership)(nil),                // 7: kaname.cloud.iam.v1.Membership
+	(*operation.Operation)(nil),       // 8: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_membership_service_proto_depIdxs = []int32{
-	3, // 0: kaname.cloud.iam.v1.ListMembershipsResponse.memberships:type_name -> kaname.cloud.iam.v1.Membership
-	0, // 1: kaname.cloud.iam.v1.MembershipService.Get:input_type -> kaname.cloud.iam.v1.GetMembershipRequest
-	1, // 2: kaname.cloud.iam.v1.MembershipService.List:input_type -> kaname.cloud.iam.v1.ListMembershipsRequest
-	3, // 3: kaname.cloud.iam.v1.MembershipService.Get:output_type -> kaname.cloud.iam.v1.Membership
-	2, // 4: kaname.cloud.iam.v1.MembershipService.List:output_type -> kaname.cloud.iam.v1.ListMembershipsResponse
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	7, // 0: kaname.cloud.iam.v1.ListMembershipsResponse.memberships:type_name -> kaname.cloud.iam.v1.Membership
+	7, // 1: kaname.cloud.iam.v1.ListMyMembershipsResponse.memberships:type_name -> kaname.cloud.iam.v1.Membership
+	0, // 2: kaname.cloud.iam.v1.MembershipService.Create:input_type -> kaname.cloud.iam.v1.CreateMembershipRequest
+	2, // 3: kaname.cloud.iam.v1.MembershipService.Get:input_type -> kaname.cloud.iam.v1.GetMembershipRequest
+	3, // 4: kaname.cloud.iam.v1.MembershipService.List:input_type -> kaname.cloud.iam.v1.ListMembershipsRequest
+	5, // 5: kaname.cloud.iam.v1.MembershipService.ListMine:input_type -> kaname.cloud.iam.v1.ListMyMembershipsRequest
+	8, // 6: kaname.cloud.iam.v1.MembershipService.Create:output_type -> corelib.operation.Operation
+	7, // 7: kaname.cloud.iam.v1.MembershipService.Get:output_type -> kaname.cloud.iam.v1.Membership
+	4, // 8: kaname.cloud.iam.v1.MembershipService.List:output_type -> kaname.cloud.iam.v1.ListMembershipsResponse
+	6, // 9: kaname.cloud.iam.v1.MembershipService.ListMine:output_type -> kaname.cloud.iam.v1.ListMyMembershipsResponse
+	6, // [6:10] is the sub-list for method output_type
+	2, // [2:6] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_membership_service_proto_init() }
@@ -293,7 +594,7 @@ func file_kaname_cloud_iam_v1_membership_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_membership_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_membership_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

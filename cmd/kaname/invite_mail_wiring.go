@@ -104,10 +104,10 @@ func buildInviteMailDrainer(
 	}
 
 	drainerLogger := logger.With(slog.String("component", "invite_mail_drainer"))
-	d, derr := drainer.New[clients.InviteMailEvent](
+	d, derr := drainer.New[clients.MailEvent](
 		pool,
 		inviteMailDrainerConfig(cfg.InviteMail),
-		clients.DecodeInviteMail,
+		clients.DecodeMailEvent,
 		clients.NewInviteMailApplier(clients.NewInviteMailSender(relay), obs, drainerLogger),
 		drainerLogger,
 	)
@@ -181,6 +181,18 @@ func inviteMailDrainerConfig(cfg config.InviteMailConfig) drainer.Config {
 // ненастроенная полоса НАБЛЮДАЕМА, а не тиха; тихой она была бы, если бы дренаж
 // не поднимался вовсе.
 func buildMailRelay(cfg config.InviteMailConfig) (clients.MailRelay, error) {
+	// АДРЕС РАЗБИРАЕТСЯ ТЕМ ЖЕ, ЧЕМ СУДИТ СТРАЖ СТАРТА, — и только им. До
+	// транспорта доезжает `узел:порт`; посадку из схемы и имя из адреса
+	// применяет этот разбор, а не транспорт вторым разбором с другим смыслом.
+	var coord config.MailRelayCoordinate
+	if cfg.RelayConfigured() {
+		c, cerr := cfg.RelayCoordinate()
+		if cerr != nil {
+			return clients.MailRelay{}, fmt.Errorf("invite mail relay: %w", cerr)
+		}
+		coord = c
+	}
+
 	mode, err := clients.ParseMailTLSMode(cfg.TLSModeName())
 	if err != nil {
 		return clients.MailRelay{}, fmt.Errorf("invite mail relay: %w", err)
@@ -201,11 +213,18 @@ func buildMailRelay(cfg config.InviteMailConfig) (clients.MailRelay, error) {
 		}
 	}
 
+	// ИМЯ ПОЛЬЗОВАТЕЛЯ — один источник: адрес формы URI либо окружение.
+	// Оба сразу отвергает страж старта, поэтому здесь выбора нет.
+	username := coord.Username
+	if username == "" {
+		username = valueFromEnvName(cfg.UsernameEnv)
+	}
+
 	return clients.MailRelay{
-		Addr:     cfg.Relay,
+		Addr:     coord.HostPort,
 		From:     cfg.From,
 		FromName: cfg.FromName,
-		Username: valueFromEnvName(cfg.UsernameEnv),
+		Username: username,
 		Password: valueFromEnvName(cfg.PasswordEnv),
 		// ПРЕДЕЛ ВРЕМЕНИ НА ПОПЫТКУ — величина объявления (MAIL-32), отдельная
 		// от числа повторов.

@@ -57,7 +57,7 @@ type userReader struct {
 
 // userCols — полный набор колонок. `labels` (D-3) — tenant-facing метки,
 // делающие User label-selectable наравне с account/project (iam-direct ARM_LABELS).
-const userCols = "id, account_id, external_id, email, display_name, invite_status, invited_by, created_at, labels"
+const userCols = "id, account_id, external_id, email, display_name, invite_status, invited_by, created_at, labels, invite_expires_at"
 
 func (r *userReader) Get(ctx context.Context, id domain.UserID) (domain.User, error) {
 	row := r.tx.QueryRow(ctx, fmt.Sprintf(`SELECT %s FROM users WHERE id = $1`, userCols), string(id))
@@ -140,6 +140,28 @@ func (r *userReader) MembershipExists(ctx context.Context, userID domain.UserID,
 		return false, mapErr(err, "", string(userID))
 	}
 	return exists, nil
+}
+
+// Membership — членство пары «человек × аккаунт» проекцией `membershipCols`:
+// колонки объявлены ОДИН раз (`membership_repo.go`), и эта дорога к строке
+// разойтись с аккаунт-скоупными чтениями не может — она их же проекцию и читает.
+func (r *userReader) Membership(ctx context.Context, userID domain.UserID, accountID domain.AccountID) (domain.Membership, error) {
+	if userID == "" || accountID == "" {
+		// Пустая половина пары означала бы «любой», то есть строку, которую
+		// вызывающий не называл. До запроса пустое значение доходить не должно.
+		return domain.Membership{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument membership pair")
+	}
+	q := fmt.Sprintf(`SELECT %s %s WHERE m.user_id = $1 AND m.account_id = $2`,
+		membershipCols, membershipFrom)
+	m, err := scanMembership(r.tx.QueryRow(ctx, q, string(userID), string(accountID)))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Membership{}, iamerr.Wrapf(iamerr.ErrNotFound,
+				"Membership of user %s in account %s not found", userID, accountID)
+		}
+		return domain.Membership{}, mapErr(err, "", string(userID))
+	}
+	return m, nil
 }
 
 // FindPendingByEmail — приглашённые строки по адресу.
@@ -605,8 +627,18 @@ func (w *userWriter) Upsert(ctx context.Context, u domain.User) (domain.User, bo
 // арбитр по почте) и его членство в названном аккаунте. Разнести их на два
 // стейтмента нельзя — между ними встала бы точка, в которой человек есть, а
 // приглашение потерялось.
-func (w *userWriter) InsertPending(ctx context.Context, u domain.User) (domain.User, bool, error) {
+func (w *userWriter) InsertPending(ctx context.Context, u domain.User, inviteExpiresAt time.Time) (domain.User, bool, error) {
 	now := time.Now().UTC()
+	// СРОК — свойство ВЫДАННОГО приглашения, поэтому он записывается здесь, в
+	// момент выдачи, а не вычисляется при выкупе от времени заведения: правка
+	// ручки посадки иначе молча сдвинула бы срок уже выданным (ID-MAIL-1, §10
+	// п. 22). Нулевое время означает «срок не назначен» и едет в NULL —
+	// величина, которую построение подставляет молча, предметом стража быть не
+	// может.
+	var expires any
+	if !inviteExpiresAt.IsZero() {
+		expires = inviteExpiresAt.UTC()
+	}
 	invitedBy := nullableInvitedBy(u.InvitedBy)
 
 	// Арбитр — ГЛОБАЛЬНЫЙ ключ почты (`users_identity_email_uniq`, миграция
@@ -628,12 +660,30 @@ func (w *userWriter) InsertPending(ctx context.Context, u domain.User) (domain.U
 	//
 	// Членство пишется ЯВНО: при попадании в конфликт триггер не срабатывает
 	// вовсе, и выразить «этот человек приглашён СЮДА» больше нечем.
+	//
+	// СРОК ПРОДЛЕВАЕТСЯ ПРИГЛАШЕНИЕМ И НИКОГДА НЕ УКОРАЧИВАЕТСЯ. Строка
+	// приглашения ГЛОБАЛЬНА: человека, уже известного платформе, приглашают во
+	// второй аккаунт ЭТОЙ ЖЕ строкой. Не тронув срок, мы выдали бы приглашение,
+	// РОЖДЁННОЕ ИСТЁКШИМ: у того, чья прежняя строка своё отжила, активация
+	// отказала бы сразу — и отказ говорил бы «попросите пригласить заново» тому,
+	// кого только что пригласили.
+	//
+	// `GREATEST` берёт позднейший и отбрасывает NULL сам, поэтому три случая
+	// покрыты одним выражением: срока не было — появится; был дальше —
+	// останется; ручка не задана (величина NULL) — прежний срок уцелеет, а не
+	// сотрётся. Выкупленной строки это не касается: у ACTIVE/BLOCKED срок
+	// предмета не имеет, и писать его значило бы класть величину, которую никто
+	// не читает.
 	q := fmt.Sprintf(`
 		WITH ins AS (
-			INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, invited_by, created_at)
-			VALUES ($1, $2, '', $3, $4, 'PENDING', $5, $6)
+			INSERT INTO users (id, account_id, external_id, email, display_name, invite_status, invited_by, created_at, invite_expires_at)
+			VALUES ($1, $2, '', $3, $4, 'PENDING', $5, $6, $7)
 			ON CONFLICT (lower(email)) DO UPDATE
-			   SET display_name = users.display_name
+			   SET display_name = users.display_name,
+			       invite_expires_at = CASE
+			           WHEN users.invite_status <> 'PENDING' THEN users.invite_expires_at
+			           ELSE GREATEST(users.invite_expires_at, $7::timestamptz)
+			       END
 			RETURNING %s, (xmax = 0) AS inserted
 		), membership AS (
 			INSERT INTO memberships (id, user_id, account_id, state, invited_by, created_at, updated_at)
@@ -648,7 +698,7 @@ func (w *userWriter) InsertPending(ctx context.Context, u domain.User) (domain.U
 
 	row := w.tx.QueryRow(ctx, q,
 		string(u.ID), string(u.AccountID), string(u.Email), string(u.DisplayName),
-		invitedBy, now,
+		invitedBy, now, expires,
 	)
 	var (
 		out      domain.User
@@ -661,29 +711,71 @@ func (w *userWriter) InsertPending(ctx context.Context, u domain.User) (domain.U
 }
 
 // ActivateInvite — атомарный UPDATE PENDING → ACTIVE с set external_id +
-// (optional) display_name.
+// (optional) display_name, И ТОЛЬКО ПОКА СРОК СТРОКИ НЕ ИСТЁК.
 //
-// 0 rows RETURNING → ErrNotFound (либо row не существует, либо уже не PENDING
-// — race с параллельной активацией). NULL-проверка дисплейнейма:
-// `COALESCE(NULLIF($2,”), display_name)` — пустой displayName не перезаписывает.
+// # РЕШЕНИЕ ПРИНИМАЕТ ОПЕРАТОР, А НЕ ПРОВЕРКА-ПЕРЕД-ЗАПИСЬЮ
+//
+// Оба условия — состояние и срок — стоят в `WHERE` одного оператора, поэтому
+// под конкуренцией выигрывает ровно одна транзакция, а остальные видят ноль
+// строк (запрет #10: инвариант держит база, а не последовательность «прочитал →
+// решил → записал»).
+//
+// # ПОЧЕМУ ПОСЛЕ НУЛЯ СТРОК ИДЁТ ВТОРОЕ ЧТЕНИЕ — И ПОЧЕМУ ЭТО НЕ TOCTOU
+//
+// Ноль строк означает три РАЗНЫХ вещи: строки нет · она уже не PENDING (гонку
+// выиграл конкурент) · срок истёк. Исходы у них разные, и человеку они говорят
+// разное: «искать нечего» против «попросите пригласить заново». Второе чтение
+// выбирает СЛОВА, а не исход: доступа оно не открывает ни при каком ответе, и
+// вернуться к активации после него нельзя — оператор уже отработал.
+//
+// NULL-срок означает «не назначен» и активацию не отвергает: иначе колонка,
+// заведённая позже строк, обесценила бы каждое приглашение, выданное раньше.
 func (w *userWriter) ActivateInvite(ctx context.Context, userID domain.UserID, externalID domain.ExternalSubject, displayName domain.DisplayName) (domain.User, error) {
 	q := fmt.Sprintf(`
 		UPDATE users
 		   SET external_id = $1,
 		       display_name = COALESCE(NULLIF($2, ''), display_name),
 		       invite_status = 'ACTIVE'
-		 WHERE id = $3 AND invite_status = 'PENDING'
+		 WHERE id = $3
+		   AND invite_status = 'PENDING'
+		   AND (invite_expires_at IS NULL OR invite_expires_at > now())
 		RETURNING %s`, userCols)
 	row := w.tx.QueryRow(ctx, q, string(externalID), string(displayName), string(userID))
 	out, err := scanUser(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.User{}, iamerr.Wrapf(iamerr.ErrNotFound,
-				"User %s not found in PENDING state", userID)
-		}
+	if err == nil {
+		return out, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
 		return domain.User{}, mapErr(err, "", string(userID))
 	}
-	return out, nil
+	return domain.User{}, w.explainRefusedActivation(ctx, userID)
+}
+
+// explainRefusedActivation называет ПРИЧИНУ отказа активации. Исхода два, и
+// каждый говорит человеку СВОЙ следующий шаг.
+func (w *userWriter) explainRefusedActivation(ctx context.Context, userID domain.UserID) error {
+	var (
+		status  string
+		expired bool
+	)
+	const q = `
+		SELECT invite_status,
+		       (invite_expires_at IS NOT NULL AND invite_expires_at <= now()) AS expired
+		  FROM users
+		 WHERE id = $1`
+	if err := w.tx.QueryRow(ctx, q, string(userID)).Scan(&status, &expired); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found in PENDING state", userID)
+		}
+		return mapErr(err, "", string(userID))
+	}
+	if status == string(domain.InviteStatusPending) && expired {
+		return iamerr.Wrapf(iamerr.ErrInviteExpired,
+			"Invite for User %s has expired — ask an account administrator to invite again", userID)
+	}
+	// Строка есть и уже не PENDING — её активировал конкурент либо участие
+	// сняли. Тон отказа тот же, что был до появления срока: он не менялся.
+	return iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found in PENDING state", userID)
 }
 
 // InsertActive — INSERT ACTIVE-row напрямую (для bootstrap-flow).
@@ -816,11 +908,11 @@ func (w *userWriter) SetInviteStatus(ctx context.Context, id domain.UserID, st d
 			   SET invite_status = $2
 			 WHERE id = $1 AND invite_status <> 'PENDING'
 			RETURNING id, account_id, external_id, email, display_name,
-			          invite_status, invited_by, created_at, labels
+			          invite_status, invited_by, created_at, labels, invite_expires_at
 		)
 		SELECT EXISTS(SELECT 1 FROM users WHERE id = $1) AS row_exists,
 		       u.id, u.account_id, u.external_id, u.email, u.display_name,
-		       u.invite_status, u.invited_by, u.created_at, u.labels
+		       u.invite_status, u.invited_by, u.created_at, u.labels, u.invite_expires_at
 		  FROM (SELECT 1) AS one
 		  LEFT JOIN upd u ON true`
 	row := w.tx.QueryRow(ctx, q, string(id), string(st))
@@ -857,9 +949,10 @@ func scanUserStateWrite(row scanner) (domain.User, bool /*updated*/, bool /*rowE
 		invitedBy    sql.NullString
 		createdAt    sql.NullTime
 		labelsJSON   []byte
+		expiresAt    sql.NullTime
 	)
 	if err := row.Scan(&rowExists, &userID, &accountID, &externalID, &email,
-		&displayName, &inviteStatus, &invitedBy, &createdAt, &labelsJSON); err != nil {
+		&displayName, &inviteStatus, &invitedBy, &createdAt, &labelsJSON, &expiresAt); err != nil {
 		return domain.User{}, false, false, err
 	}
 	if !userID.Valid {
@@ -874,6 +967,9 @@ func scanUserStateWrite(row scanner) (domain.User, bool /*updated*/, bool /*rowE
 		InviteStatus: domain.InviteStatus(inviteStatus.String),
 		InvitedBy:    domain.UserID(invitedBy.String),
 		CreatedAt:    createdAt.Time,
+	}
+	if expiresAt.Valid {
+		u.InviteExpiresAt = expiresAt.Time
 	}
 	labels, err := unmarshalLabels(labelsJSON)
 	if err != nil {
@@ -908,6 +1004,7 @@ func scanUserInto(row scanner, out *domain.User, extra ...any) error {
 		inviteStatus sql.NullString
 		invitedBy    sql.NullString
 		labelsJSON   []byte
+		expiresAt    sql.NullTime
 	)
 	dest := append([]any{
 		(*string)(&out.ID),
@@ -919,9 +1016,13 @@ func scanUserInto(row scanner, out *domain.User, extra ...any) error {
 		&invitedBy,
 		&out.CreatedAt,
 		&labelsJSON,
+		&expiresAt,
 	}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return err
+	}
+	if expiresAt.Valid {
+		out.InviteExpiresAt = expiresAt.Time
 	}
 	if accountID.Valid {
 		out.AccountID = domain.AccountID(accountID.String)
@@ -999,11 +1100,57 @@ func (w *userWriter) RemoveMembership(ctx context.Context, userID domain.UserID,
 	if w.membershipHintSink != nil {
 		*w.membershipHintSink = string(userID) + "|" + string(accountID)
 	}
-	tag, err := w.tx.Exec(ctx,
-		`DELETE FROM memberships WHERE user_id = $1 AND account_id = $2`,
-		string(userID), string(accountID))
-	if err != nil {
+	// СНЯТИЕ УЧАСТИЯ ОБЕСЦЕНИВАЕТ НЕВЫКУПЛЕННОЕ ПРИГЛАШЕНИЕ — ОДНИМ ОПЕРАТОРОМ
+	// (приёмка ID-MAIL-1, §10 п. 16, MAIL-24/MAIL-46).
+	//
+	// # Что было бы без второго плеча
+	//
+	// Строка приглашения ГЛОБАЛЬНА, членства — по аккаунту. Сняв членство и
+	// оставив строку PENDING, мы оставляем приглашение выкупаемым: первый вход
+	// человека переводит строку в ACTIVE и со-коммитит указатель на ТОТ САМЫЙ
+	// аккаунт, из которого его только что исключили. Это и есть предъявитель,
+	// переживший снятие участия, — и заметить его неоткуда: отказа нет,
+	// красного нет, человек просто оказывается там, где ему быть не положено.
+	//
+	// # Почему «когда членств не осталось», а не «всегда»
+	//
+	// Человека приглашают в НЕСКОЛЬКО аккаунтов одной строкой. Обесценив её при
+	// исключении из одного, мы отняли бы у него приглашение в остальные —
+	// молча. Условие «не осталось ни одного членства» и есть исход глагола,
+	// сформулированный по существу: человек перестал быть участником ГДЕ БЫ ТО
+	// НИ БЫЛО.
+	//
+	// # Почему один оператор, а не два
+	//
+	// Между снятием членства и обесцениванием строки нет окна, в котором
+	// активация увидела бы членств ноль и срок живым: оба плеча — одна команда,
+	// её снимок общий (запрет #10). Читать-решать-писать здесь дало бы гонку
+	// ровно с первым входом — тем самым, ради которого срок и вводится.
+	//
+	// Срок ставится `now()`, а не обнуляется в NULL и не удаляется: NULL означает
+	// «срок не назначен» и активацию НЕ отвергает.
+	const q = `
+		WITH gone AS (
+			DELETE FROM memberships
+			 WHERE user_id = $1 AND account_id = $2
+			RETURNING 1
+		), expired AS (
+			UPDATE users u
+			   SET invite_expires_at = now()
+			 WHERE u.id = $1
+			   AND u.invite_status = 'PENDING'
+			   AND EXISTS (SELECT 1 FROM gone)
+			   AND NOT EXISTS (
+			         SELECT 1 FROM memberships m
+			          WHERE m.user_id = $1
+			            AND NOT (m.account_id = $2)
+			       )
+			RETURNING 1
+		)
+		SELECT (SELECT count(*) FROM gone), (SELECT count(*) FROM expired)`
+	var removed, expired int
+	if err := w.tx.QueryRow(ctx, q, string(userID), string(accountID)).Scan(&removed, &expired); err != nil {
 		return false, mapErr(err, "Membership.Remove", string(userID)+"|"+string(accountID))
 	}
-	return tag.RowsAffected() > 0, nil
+	return removed > 0, nil
 }

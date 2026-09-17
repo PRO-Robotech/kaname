@@ -8,7 +8,7 @@
 //
 // Порт с монорепо (`internal/repohygiene/namedverbformexpiry.go`, снят
 // вынесением службы — `kacho#2597`). Изменилось: пакет (`repohygiene` →
-// `check`), путь домена (`services/iam/internal/manifest/` →
+// `check`), путь домена (`internal/manifest/` →
 // `internal/manifest/`, префикс `services/iam/` снят — в kaname код службы
 // лежит от корня репозитория). Осталось дословно: разбор узла (не подстроки),
 // закрытый перечень шести сценариев, различение двух законных причин

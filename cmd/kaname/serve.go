@@ -173,6 +173,12 @@ func runServe(cfg config.Config) error {
 	if err := projectOwnCeilings(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg.OwnCeilings); err != nil {
 		return err
 	}
+	// ПРОЕКЦИЯ ТЕМПА ЗАВЕДЕНИЯ (Ф4 Р5, kacho#1270) — тем же местом и по той же
+	// причине: триггер читает величину из строки авторитета, и под `own` её
+	// объявляет профиль (незаданная — отказ старта стражем полосы).
+	if err := projectAdmissionRate(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg); err != nil {
+		return err
+	}
 
 	// slave-pool wiring (read-replica). Если slave-url
 	// настроен и отличается от master URL — отдельный pgxpool для read-TX'ов;
@@ -343,7 +349,7 @@ func runServe(cfg config.Config) error {
 	// провязки его не звал никто, и каталог наполнял посев миграции, то есть
 	// объявленное манифестом состояние доезжало до базы только пересборкой
 	// образа. Довод о месте, порядке и о том, почему отказ фатален, —
-	// `services/iam/docs/engineering/architecture/module-catalog-applier-runs-at-boot.md`;
+	// `docs/engineering/architecture/module-catalog-applier-runs-at-boot.md`;
 	// порядок держит гейт `module_catalog_apply_wiring_test.go`, а не этот
 	// комментарий.
 	//
@@ -442,19 +448,29 @@ func runServe(cfg config.Config) error {
 		return raErr
 	}
 
-	// ПРИМЕНЕНИЕ ПОСЕВА ДОСТАВЛЕННОГО — ПОСЛЕ применения ролей (задача #2452).
+	// ПРИМЕНЕНИЕ ПОСЕВА — ПОСЛЕ применения ролей (задачи #2452, kaname#106).
 	//
-	// Служебные учётки модулей платформы, их членства и выдачи заводит ЭТОТ
-	// путь, а не миграция службы: миграция применяется везде, включая установку
-	// без платформы, и заводила там пять личностей чужого продукта. Условием
-	// служит ДОСТАВКА манифеста — её кладёт зонтичный чарт платформы и не кладёт
-	// чарт самостоятельной службы.
+	// Сначала СВОЙ манифест службы, встроенный в образ: группу пишущих кортежи
+	// `module-relation-writers` и её выдачу заводит сама служба, на любой
+	// установке. Затем ДОСТАВЛЕННЫЕ манифесты: служебные учётки модулей
+	// платформы, их членства и выдачи заводит этот путь, а не миграция службы —
+	// миграция применяется везде, включая установку без платформы, и заводила
+	// там пять личностей чужого продукта. Условием доставленных служит ДОСТАВКА
+	// — её кладёт зонтичный чарт платформы и не кладёт чарт самостоятельной
+	// службы; своё доставкой не связано.
 	//
-	// Довод о месте, порядке и о том, почему отказ фатален, — шапка
-	// `module_seed_apply.go`; порядок держит гейт
+	// Свой манифест читается ЗДЕСЬ и подаётся применителю посева ОТДЕЛЬНЫМ
+	// доводом — в перечень `deliveredManifests` он не подмешивается: тот
+	// читают пятеро, а получатель у своего манифеста ровно один (Р3 приёмки
+	// MRW-1). Довод о месте, порядке и о том, почему отказ фатален, — шапка
+	// `module_seed_apply.go`; порядок и раздельность доводов держит гейт
 	// `module_seed_apply_wiring_test.go`, а не этот комментарий.
+	ownManifest, omErr := loadOwnManifest(logger)
+	if omErr != nil {
+		return omErr
+	}
 	seedApplier := moduleseed.NewApplier(kanamepg.NewModuleSeedWriteRepo(pool))
-	if seErr := applyDeliveredModuleSeed(ctx, logger, seedApplier, deliveredManifests); seErr != nil {
+	if seErr := applyModuleSeed(ctx, logger, seedApplier, ownManifest, deliveredManifests); seErr != nil {
 		return seErr
 	}
 
@@ -503,13 +519,6 @@ func runServe(cfg config.Config) error {
 	}
 	startSigningKeySweeper(ctx, signingKeystore, logger)
 
-	// Фоновая уборка таблиц, чей рост задаёт внешний (задача #1292). Три
-	// предмета обслуживает ОДНА петля: три расписания об одном предмете
-	// разошлись бы молча.
-	if err := startRetentionSweeper(ctx, pool, cfg, metricsReg, logger); err != nil {
-		return err
-	}
-
 	// Уборка ресурсного журнала подписки — своим уборщиком (см.
 	// `subscription_wiring.go`, там же довод, почему не предметом общего).
 	if err := startJournalRetentionSweep(ctx, pool, logger); err != nil {
@@ -521,6 +530,33 @@ func runServe(cfg config.Config) error {
 		// и для снимка: третьего чтения каталога на старте не заводится.
 		catalogRepo,
 		metricsReg, cfg, tokenSigner, logger)
+
+	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4
+	// kacho#1270) — строится ТОЛЬКО под `own`; под `external` — nil, и всё, что
+	// читает её провязку, сообщает «нет» наблюдением, а не литералом
+	// (`loginlane.go`). Собирается ПОСЛЕ служб: регистрация ПРИНИМАЕТ тот же
+	// реконсайлер материализации привязки, что путь запроса и полоса первого
+	// входа (`hook_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
+	// потому что её таблицы — предметы той же петли.
+	lane, err := buildLoginLane(cfg, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
+	if err != nil {
+		return err
+	}
+
+	// Фоновая уборка таблиц, чей рост задаёт внешний (задача #1292). Три
+	// предмета обслуживает ОДНА петля: три расписания об одном предмете
+	// разошлись бы молча.
+	if err := startRetentionSweeper(ctx, pool, cfg, metricsReg, lane.retentionReapers(), logger); err != nil {
+		return err
+	}
+	// `InternalHumanSessionService.Resolve` — внутренний слушатель, только
+	// при поднятой полосе (Ф3-45); под `external` регистрация не происходит.
+	svcs.humanSessionHandler = lane.resolveHandler()
+	// `UserService/ResetSecondFactor` (Ф12 Р10) — теми же хранилищами, что
+	// полоса; под `external` не провязан (Ф12-37): второго фактора у службы там нет.
+	if reset := lane.resetSecondFactorUseCase(kanameRepo, opsRepo); reset != nil {
+		svcs.userHandler.WithResetSecondFactor(reset)
+	}
 
 	// gRPC servers. PrincipalExtract-interceptor читает
 	// x-kacho-principal-* metadata-headers, которые api-gateway auth-interceptor
@@ -612,6 +648,9 @@ func runServe(cfg config.Config) error {
 		cfg.APIServer.RegistryToken.ListenAddress(), mtlsCfg); err != nil {
 		return err
 	}
+	if err := requireLoginLaneTLS(productionMode, cfg, mtlsCfg); err != nil {
+		return err
+	}
 	// Транспорт остальных HTTP-рёбер. Их ручки задавал ЗОНТИЧНЫЙ чарт монорепо;
 	// у отдельно поставленной службы его нет, а адреса всех трёх приходят
 	// умолчанием процесса и потому непусты всегда — то есть без этого стража
@@ -694,7 +733,7 @@ func runServe(cfg config.Config) error {
 	//
 	// Перепись печатается и на успешном старте: «ноль недостижимых записей»
 	// обязано быть отличимо от «каталог не читали».
-	laneWiring := observeLaneWiring(ctx, cfg, tokenSigner, logger)
+	laneWiring := observeLaneWiring(ctx, cfg, tokenSigner, lane.signInMethods(), lane, logger)
 	logger.Info("identity posture lane wiring", laneWiringCensus(laneWiring)...)
 	if err := config.ValidateLaneWiring(cfg, laneWiring); err != nil {
 		return fmt.Errorf("identity posture lane: %w", err)
@@ -1129,8 +1168,8 @@ func runServe(cfg config.Config) error {
 	// Носитель готовности отдаётся сюда, чтобы гашение переводило `/readyz` в
 	// 503 ДО остановки серверов (см. triggerShutdown ниже). Без этого носитель
 	// был бы, а дёрнуть его было бы некому (#1752).
-	hooksHandler, hooksHealth := buildHooksMux(pool, kanameRepo, opsRepo, svcs.ownGates,
-		catalogSnapshot, metricsReg, cfg, logger)
+	hooksHandler, hooksHealth := buildHooksMux(pool, kanameRepo, opsRepo,
+		svcs.bindingReconciler, metricsReg, cfg, logger)
 	hooksSurface, err := iamHTTPSurface(servicecontract.Surface{
 		Name:    "вебхуки провайдера личности",
 		Mode:    surfaceMode,
@@ -1279,6 +1318,14 @@ func runServe(cfg config.Config) error {
 	})
 	if err != nil {
 		return fmt.Errorf("профиль поверхности выдачи docker-токена: %w", err)
+	}
+
+	// (3а) Полоса входа паролем — четыре глагола формы на своём слушателе,
+	// взаимный TLS, вызывающий — ровно край (Ф3, Р7). Под `external` поверхность
+	// объявлена выключенной с причиной, а не пропущена молча.
+	loginLaneSurface, err := loginLaneSurface(cfg, surfaceMode, logger, lane, mtlsCfg)
+	if err != nil {
+		return fmt.Errorf("профиль поверхности полосы входа: %w", err)
 	}
 
 	// jwksUpstreamTimeout — потолок ОДНОГО обращения зеркала к верхнему хопу.
@@ -1526,6 +1573,7 @@ func runServe(cfg config.Config) error {
 		{knobHooks, hooksSurface},
 		{knobMetrics, metricsSurface},
 		{knobRegistryToken, registryTokenSurface},
+		{knobLoginLane, loginLaneSurface},
 		{knobJWKSProxy, jwksProxySurface},
 		{knobPublicREST, restSurface},
 		{knobInternalREST, internalRESTSurface},
@@ -1608,6 +1656,9 @@ func runServe(cfg config.Config) error {
 		// здесь нет намеренно: оно росло молча (в день заведения комментарий
 		// говорил «четыре»), а перечень выводится из `httpSurfaces`.
 		stopSurfaces()
+		// Постановки письма восстановления, начатые до гашения, дожидаются
+		// ПОСЛЕ слушателей: новых не придёт, начатые доедут (Ф5 Р2).
+		lane.drain()
 	})
 	defer rootShutdown.Stop()
 	// taskCtx — контекст ФОНОВЫХ ЗАДАЧ. Отдельное имя, а не затенение `ctx`:
@@ -1864,6 +1915,16 @@ func runServe(cfg config.Config) error {
 		return nil
 	})
 
+	// Окно прежнего издателя — строки, чьё зеркало у внешнего OAuth-сервера ещё
+	// предъявимо. Ноль по этому ряду — измеренная половина предиката снятия
+	// компонента (kacho#2564); без ряда окно считалось бы запросом по памяти.
+	providerMirror := newProviderMirrorSampler(kanamepg.NewProviderMirrorRepo(pool))
+	metricsReg.NewProviderMirrorCollector(providerMirror.Counts)
+	tasks = append(tasks, func() error {
+		providerMirror.Run(taskCtx, logger)
+		return nil
+	})
+
 	// Bootstrap-admin reconciler. Grants `system_admin@cluster_root` to
 	// the user identified by KANAME_BOOTSTRAP_ROOT_EMAIL and enqueues the
 	// FGA tuple into the transactional fga_outbox, out of which a trigger folds the
@@ -1992,6 +2053,18 @@ func runServe(cfg config.Config) error {
 	// проход заведомо никому не мешает.
 	orphanMirrorSweeper := seed.NewOrphanMirrorSweeper(kanamepg.NewOrphanMirrorAdapter(pool),
 		seed.OrphanMirrorConfig{Logger: logger.With(slog.String("component", "orphan_mirror_sweep"))})
+	// Проход по строкам зеркала, чей проект НАЗВАН и не резолвится (стадия S2
+	// приёмки `non-empty-project-is-not-deleted.md`, kacho#1231).
+	//
+	// Предмет не пересекается с проходом выше: тот берёт строки без родителя
+	// вовсе, этот — с родителем, которого нет. Это остаток, который отказ по
+	// непустоте не закрывает по построению (окно доставки регистрации), и без
+	// прохода он невидим: такую строку не видит ни одна выдача и не назовёт ни
+	// один отказ. Проход ничего не удаляет и родителя не выдумывает — только
+	// называет и печатает перепись; свой ключ замка ("OMPN"), свой потолок.
+	danglingProjectMirrorSweeper := seed.NewDanglingProjectMirrorSweeper(
+		kanamepg.NewDanglingProjectMirrorAdapter(pool),
+		seed.DanglingProjectMirrorConfig{Logger: logger.With(slog.String("component", "dangling_project_mirror_sweep"))})
 	// Счётчик исходов пересчёта проекции глаголов роли — по одной системной роли.
 	// Успехи считаются наравне с отказами: без знаменателя «ноль отказов» не
 	// отличается от «пересчёта не было вовсе».
@@ -2017,6 +2090,17 @@ func runServe(cfg config.Config) error {
 		} else if mres.Executed {
 			logger.Info("orphan-mirror sweep: "+mres.Census(),
 				slog.Int("left_to_owner", len(mres.LeftToOwner)))
+		}
+		// Перепись прохода по родителю-проекту печатается на ЛЮБОМ исходе,
+		// включая чистый, и на чистом дереве проход ПРОХОДИТ, а не падает:
+		// проверка, падающая на достижении своей цели, толкает держать сироту
+		// ради зелёного.
+		if dres, derr := danglingProjectMirrorSweeper.RunOnce(taskCtx); derr != nil {
+			logger.Warn("dangling-project-mirror sweep failed (next boot will retry)",
+				slog.Any("err", derr), slog.String("census", dres.Census()))
+		} else if dres.Executed {
+			logger.Info("dangling-project-mirror sweep: "+dres.Census(),
+				slog.Int("named", len(dres.Named)), slog.Bool("truncated", dres.Truncated))
 		}
 		// Разность зеркала и живого каталога — ЧИТАЕТСЯ, а не чинится
 		// (kacho#1828). Держателем может быть только чтение: ключ на
@@ -2138,30 +2222,37 @@ func runServe(cfg config.Config) error {
 					slog.Int("bindings_checked", report.BindingsChecked),
 					slog.Int("failures", len(report.Failures)))
 			}
-			// Live forward-smoke (review #14 / КФ-4/H-06): Verify (active_members-
-			// derived) provably CANNOT assert that a resource created in the contract
-			// window forward-materializes its tuple — so drive a real ForwardSmoke
-			// against an owner-binding (bounded-scope owner-content path). Best-effort,
-			// non-fatal (parity with Verify): a brand-new cluster with no owner-binding
-			// reports ran=false and the gate is logged as smoke-skipped.
-			passed, ran, serr := verifyGate.RunBootForwardSmoke(taskCtx)
-			switch {
-			case serr != nil:
-				logger.Warn("p8 verify-gate: forward-smoke failed", slog.Any("err", serr))
-			case !ran:
-				logger.Info("p8 verify-gate: forward-smoke skipped (no owner-binding to smoke yet)")
-			default:
-				logger.Info("p8 verify-gate forward-smoke result (forward-path liveness)",
-					slog.Bool("forward_smoke_passed", passed))
-			}
-			// Design-B cutover gate (F-12 / VBC-19): relation-satisfies-action — a REAL
-			// FGA Check per active binding's v_* required-relation triple. Logged as the
-			// catalog-flip gate (the flip to v_* is permitted only when 100% resolve).
+			// ДЫМОВАЯ ПРОБА ПРЯМОГО ПУТИ НА СТАРТЕ СНЯТА (#119), и снята вместе с
+			// предметом, а не ослаблена.
+			//
+			// Она заводила в БОЕВОМ зеркале поднятого кластера синтетический объект
+			// ЧУЖОГО домена (`vpc.network`) внутри настоящего аккаунта. Две беды
+			// сразу. Установка без модулей платформы такой живой строки каталога не
+			// несёт — у пробы там нет предмета вовсе, при том что служба исправна.
+			// И убирала она за собой половину: строка зеркала снималась, а строки
+			// ведомости, которые проба вызвала своим сведением, оставались — и
+			// следующий отчёт честно находил материализованное чтение на объекте,
+			// которого больше нет. На чистой установке это печаталось отказом о
+			// СОБСТВЕННОЙ синтетике, неотличимым для оператора от поломки.
+			//
+			// Свой тип вместо чужого не подошёл, и это ЗАМЕР, а не мнение: ни один
+			// из семи собственных типов службы содержательного кортежа владельца не
+			// материализует — материализуется зеркальный тип домена-потребителя.
+			// Значит «проверять себя своим типом» этим механизмом невыразимо.
+			//
+			// Свойство, которое проба утверждала, покрыто интеграционно и без неё:
+			// прямая материализация свежего объекта проверяется против настоящего
+			// сведения (`Test224_OwnerWildcard_ForwardMaterializesContent`), и эта
+			// проверка исполняется конвейером, тогда как отчёт на старте ничего не
+			// гейтил.
+			// Отчёт о том, РАЗРЕШАЮТСЯ ли материализованные чтения (F-12 / VBC-19):
+			// настоящий Check по каждой тройке v_* активной выдачи. Именно отчёт:
+			// вызывающий журналирует вердикт и ничего не переключает (#119).
 			relReport, rerr := verifyGate.VerifyRelationSatisfiesAction(taskCtx)
 			if rerr != nil {
 				logger.Warn("p8 verify-gate: relation-satisfies-action check failed", slog.Any("err", rerr))
 			} else {
-				logger.Info("p8 verify-gate relation-satisfies-action result (catalog-flip gate)",
+				logger.Info("p8 verify-gate: do materialized read tuples resolve",
 					slog.Bool("no_access_loss", relReport.NoAccessLoss),
 					slog.Int("bindings_checked", relReport.BindingsChecked),
 					slog.Int("failures", len(relReport.Failures)))

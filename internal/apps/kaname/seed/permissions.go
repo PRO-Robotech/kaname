@@ -43,15 +43,15 @@
 //
 // ─── СОСТАВ КАТАЛОГА ────────────────────────────────────────────────────────
 //
-// ЗАПИСЕЙ КАТАЛОГА: 338
+// ЗАПИСЕЙ КАТАЛОГА: 343
 // ЗАПИСЕЙ БЕЗ ПРАВА: 0
-// ЗАПИСЕЙ БЕЗ ОТНОШЕНИЯ: 53
+// ЗАПИСЕЙ БЕЗ ОТНОШЕНИЯ: 55
 //
 // Три числа, каждое из embed-файла, каждое своим маркером и каждое сверяется тем
 // же гейтом. Аннотации наполнены: записи без права нет ни одной, поэтому
 // `PermissionsForRole("system.viewer")` разворачивается в права
 // читающего класса, а не в пустой список. Право записывается тремя сегментами
-// (`<домен>.<ресурс>.<глагол>`); 22 записи вместо права несут литерал изъятия
+// (`<домен>.<ресурс>.<глагол>`); 23 записи вместо права несут литерал изъятия
 // `catalogderive.ExemptPermission`, и это НЕ пустое поле: изъятие объявлено, а
 // не забыто.
 //
@@ -289,16 +289,6 @@ func isReadVerb(perm string) bool {
 	}
 }
 
-// ActionForMethod — the permission name the catalog gives a method, or "" when
-// the catalog has no entry for it or the entry is exempt.
-//
-// "" is meaningful, not merely absent: an empty action is exactly how a caller
-// recognises "this method is in no catalog row", so a row that names no
-// permission must not be reported as if it named one.
-//
-// Implements authzguard.DenyActionLookup. fqn is the full method name WITHOUT
-// the leading slash — the same normalisation the edge applies before its own
-// catalog lookup, so both layers key on one string.
 // ScopeForMethod — the object type on which the method's permission is granted
 // (project / account / cluster), or "" when the catalog names none or the row
 // is exempt.
@@ -316,6 +306,16 @@ func (r *PermissionRegistry) ScopeForMethod(fqn string) string {
 	return e.ScopeExtractor.ObjectType
 }
 
+// ActionForMethod — the permission name the catalog gives a method, or "" when
+// the catalog has no entry for it or the entry is exempt.
+//
+// "" is meaningful, not merely absent: an empty action is exactly how a caller
+// recognises "this method is in no catalog row", so a row that names no
+// permission must not be reported as if it named one.
+//
+// Implements authzguard.DenyActionLookup. fqn is the full method name WITHOUT
+// the leading slash — the same normalisation the edge applies before its own
+// catalog lookup, so both layers key on one string.
 func (r *PermissionRegistry) ActionForMethod(fqn string) string {
 	e, ok := r.byFQN[fqn]
 	if !ok || e.Permission == catalogderive.ExemptPermission {

@@ -44,7 +44,7 @@ import (
 var brandsThatMustNotBeHardcoded = []string{"Kachō", "Kacho", "Kaname", "kaname"}
 
 func TestInviteMailNamesTheSenderNotAHardcodedProduct(t *testing.T) {
-	ev := clients.InviteMailEvent{To: "someone@example.test"}
+	ev := clients.MailEvent{To: "someone@example.test"}
 
 	// (1) Имя отправителя задано — оно и называет приглашающего.
 	named := clients.MailRelay{

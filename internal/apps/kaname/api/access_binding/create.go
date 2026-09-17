@@ -344,14 +344,7 @@ func (u *CreateAccessBindingUseCase) doCreate(ctx context.Context, b domain.Acce
 	for _, s := range b.Subjects {
 		perSubject.SubjectType = s.Type
 		perSubject.SubjectID = s.ID
-		st, berr := buildBindingTuples(perSubject, role)
-		if berr != nil {
-			// Fail-closed on a tuple/coverage desync: a
-			// covered ref that emits 0 tuples returns INTERNAL → tx rollback, never a
-			// target row without a backing FGA tuple.
-			return nil, berr
-		}
-		tuples = append(tuples, st...)
+		tuples = append(tuples, buildBindingTuples(perSubject, role)...)
 	}
 	tuples = dedupeTuples(tuples)
 

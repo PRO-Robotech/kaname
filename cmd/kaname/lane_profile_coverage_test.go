@@ -50,7 +50,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -84,12 +83,12 @@ const (
 	// productChartDirRel — чарт ПРОДУКТА, координатой от корня МОДУЛЯ. Входит в
 	// поставку модуля, поэтому читается в обеих посадках и пропуска не имеет.
 	productChartDirRel = "deploy"
-	// umbrellaDirRel — зонтичный чарт стенда, координатой от корня ПЛАТФОРМЫ. В
-	// поставку модуля не входит by construction, поэтому его отсутствие —
-	// «условие не создано», и оно НАЗЫВАЕТСЯ словами.
-	umbrellaDirRel = "deploy/helm/umbrella"
-
-	productRootName  = "чарт продукта"
+	productRootName    = "чарт продукта"
+	// umbrellaRootName — ВТОРОЙ корень профилей. На дереве его больше нет:
+	// зонтичный чарт стенда живёт у платформы и в этот репозиторий не входит
+	// (разбор — в шапке `laneProfileSources`). Имя оставлено ради опыта над
+	// читателем: он обязан считать корни РАЗДЕЛЬНО, и доказать это можно только
+	// подав ему два.
 	umbrellaRootName = "зонт платформы"
 )
 
@@ -219,7 +218,7 @@ func collectLaneFacts(t *testing.T) []laneFact {
 func bestCaseWiring(t *testing.T, cfg config.Config) config.LaneWiring {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	w := observeLaneWiring(context.Background(), cfg, nil, logger)
+	w := observeLaneWiring(context.Background(), cfg, nil, nil, nil, logger)
 	w.OwnMintSignerWired = true
 	return w
 }
@@ -272,16 +271,25 @@ func valuesFilesIn(t *testing.T, dir string) []string {
 	return out
 }
 
-// laneProfileSources — файлы значений ОБОИХ корней плюс оговорка о втором.
+// laneProfileSources — файлы значений чарта продукта.
 //
-// Чарт продукта читается ВСЕГДА. Зонтичный — только там, где он есть; его
-// отсутствие гасит ВТОРОЙ КОРЕНЬ, а не пробу целиком: погашенная проба
-// перестала бы судить и продуктовый корень, то есть ровно тот, ради которого
-// написана, — и в самостоятельном клоне у класса не осталось бы держателя
-// вовсе.
-func laneProfileSources(t *testing.T) (sources []profileSource, umbrellaNote string) {
+// # ВТОРОЙ КОРЕНЬ СНЯТ ВМЕСТЕ С ПРЕДМЕТОМ
+//
+// Прежде читались два корня: чарт продукта и зонтичный чарт стенда
+// (`deploy/helm/umbrella`), а отсутствие второго гасило только его — оговоркой
+// словами. Оговорка была верна, пока служба лежала в дереве платформы; после
+// выноса зонт не резолвится НИКОГДА, и «условие не создано» печаталось на каждом
+// прогоне. Держать корень, которого не бывает, значит держать перепись, чей
+// знаменатель постоянен и равен нулю.
+//
+// Зонт живёт у платформы вместе с её стендом, и профили в нём правит она. Класс
+// от этого не остался без держателя: посадка `own`, вписанная в боевой профиль
+// ЧАРТА ПРОДУКТА, — ровно та поставка, ради которой служба выносится отдельным
+// продуктом, и её этот гейт читает.
+func laneProfileSources(t *testing.T) []profileSource {
 	t.Helper()
 
+	var sources []profileSource
 	root, prefix := platformtree.RequireCorpus(t)
 	productDir := filepath.Join(root, filepath.FromSlash(platformtree.Under(prefix, productChartDirRel)))
 	for _, name := range valuesFilesIn(t, productDir) {
@@ -292,36 +300,7 @@ func laneProfileSources(t *testing.T) (sources []profileSource, umbrellaNote str
 			Keys:  []string{"authn", "identityProvider"},
 		})
 	}
-
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: рабочий каталог не установлен: %v", err)
-	}
-	umbrellaDir, err := platformtree.PathOf(wd, umbrellaDirRel)
-	switch {
-	case errors.Is(err, platformtree.ErrNoPlatformTree):
-		return sources, "УСЛОВИЕ НЕ СОЗДАНО (не находка): " + err.Error()
-	case err != nil:
-		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: зонтичный чарт не резолвится: %v", err)
-	}
-	for _, name := range valuesFilesIn(t, umbrellaDir) {
-		sources = append(sources, profileSource{
-			Root:  umbrellaRootName,
-			Label: umbrellaDirRel + "/" + name,
-			Path:  filepath.Join(umbrellaDir, name),
-			Keys:  []string{"kaname", "config", "authn", "identityProvider"},
-		})
-	}
-	// Базовое значение подчарта считается профилем — оно и есть умолчание
-	// всякого стенда, не назвавшего полосу сам.
-	const subchart = "charts/kaname/values.yaml"
-	sources = append(sources, profileSource{
-		Root:  umbrellaRootName,
-		Label: umbrellaDirRel + "/" + subchart,
-		Path:  filepath.Join(umbrellaDir, filepath.FromSlash(subchart)),
-		Keys:  []string{"config", "authn", "identityProvider"},
-	})
-	return sources, ""
+	return sources
 }
 
 // readLaneDeclarations — «полоса → профили, её объявляющие» плюс перепись по
@@ -367,10 +346,7 @@ func readLaneDeclarations(sources []profileSource) (map[string][]string, []rootC
 func profilesDeclaringALane(t *testing.T) map[string][]string {
 	t.Helper()
 
-	sources, umbrellaNote := laneProfileSources(t)
-	if umbrellaNote != "" {
-		t.Logf("%s: %s", umbrellaRootName, umbrellaNote)
-	}
+	sources := laneProfileSources(t)
 	out, census := readLaneDeclarations(sources)
 
 	// ОБЪЁМ ОСМОТРЕННОГО, и обе его величины ПО КАЖДОМУ корню. На одном сводном

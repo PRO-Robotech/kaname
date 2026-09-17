@@ -81,6 +81,7 @@ func TestRegisterResource_UnknownResourceType_IsAFieldNamedInvalidArgument(t *te
 		refusingMirror{objectType: "vpc_totally_invented"},
 		&smTxBeginner{},
 		seededCatalogTypes{},
+		&recordingPublisher{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{
@@ -128,6 +129,7 @@ func TestRegisterResource_LiveResourceType_StillRegisters(t *testing.T) {
 		refusingMirror{objectType: "vpc_totally_invented"},
 		&smTxBeginner{},
 		seededCatalogTypes{},
+		&recordingPublisher{},
 	)
 
 	err := uc.Register(context.Background(), &regReq{

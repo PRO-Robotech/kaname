@@ -69,10 +69,7 @@ func (r *RoleTupleReconciler) ReconcileRoleTuples(ctx context.Context, w kanamer
 		// (ARM_LABELS) tuple retiering is the complementary RoleMembershipFanout
 		// half (a rule verb change bumps rule_fp → γ eager-revokes + re-materializes
 		// at the new tier).
-		newTuples, berr := buildBindingTuples(b, newRole)
-		if berr != nil {
-			return fmt.Errorf("build tuples for binding %s: %w", b.ID, berr)
-		}
+		newTuples := buildBindingTuples(b, newRole)
 		// Read ONLY the binding-level subset (source='binding'). The ARM_LABELS
 		// per-member tuples (source='member') are owned by RoleMembershipFanout — if
 		// the diff saw them it would classify every member tuple as `removed` and

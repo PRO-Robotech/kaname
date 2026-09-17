@@ -112,13 +112,44 @@ func (c AuthNConfig) JWKSEncryptionKeyEnvName() string {
 // профиля развёртывания и дало бы окно, в котором старое имя молча
 // игнорируется. Сменился смысл, и он записан здесь.
 func (c AuthNConfig) ResolveJWKSEncryptionKeys() ([][]byte, error) {
-	raw := c.JWKSEncryptionKeyHex
+	return resolveWrappingKeyRing("authn.jwks-encryption-key-hex", c.JWKSEncryptionKeyHex, c.JWKSEncryptionKeyEnvName())
+}
+
+// SecondFactorEncryptionKeyEnvName — имя переменной окружения, из которой
+// берётся перечень ключей обёртки секретов второго фактора, когда ручка не
+// задана значением напрямую. Объявлено одним местом по той же причине, что у
+// соседней ручки.
+func (c AuthNConfig) SecondFactorEncryptionKeyEnvName() string {
+	if n := strings.TrimSpace(c.SecondFactorEncryptionKeyHexEnv); n != "" {
+		return n
+	}
+	return "KANAME_SECOND_FACTOR_ENC_KEY"
+}
+
+// ResolveSecondFactorEncryptionKeys — перечень ключей ОБЁРТКИ секретов второго
+// фактора (Ф12 Р2, kacho#1281): первый оборачивает, все открывают.
+//
+// Источник: authn.second-factor-encryption-key-hex напрямую либо переменная
+// окружения, названная authn.second-factor-encryption-key-hex-env (по
+// умолчанию KANAME_SECOND_FACTOR_ENC_KEY). Форма и правила перечня — те же,
+// что у ручки подписного ключа (один разбор на обе, ниже); ручка — СВОЯ:
+// секретов второго фактора много, по одному на человека, их срок жизни — срок
+// фактора, радиус компрометации — вход людей, а не подпись службы; смена одного
+// перечня не обязана останавливать другой. Ручка подписного ключа перечень
+// второго фактора НЕ подменяет.
+func (c AuthNConfig) ResolveSecondFactorEncryptionKeys() ([][]byte, error) {
+	return resolveWrappingKeyRing("authn.second-factor-encryption-key-hex", c.SecondFactorEncryptionKeyHex, c.SecondFactorEncryptionKeyEnvName())
+}
+
+// resolveWrappingKeyRing — ОДИН разбор перечня ключей обёртки на обе ручки:
+// две копии разошлись бы ровно на вырожденном значении.
+func resolveWrappingKeyRing(knob, raw, envName string) ([][]byte, error) {
 	if raw == "" {
-		raw = os.Getenv(c.JWKSEncryptionKeyEnvName())
+		raw = os.Getenv(envName)
 	}
 	entries := ParseCommaList(raw)
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("authn.jwks-encryption-key-hex is empty (set ENV %s)", c.JWKSEncryptionKeyEnvName())
+		return nil, fmt.Errorf("%s is empty (set ENV %s)", knob, envName)
 	}
 	// Размер ключа берётся у обёртки, а не из своей копии: два числа об одном
 	// предмете разошлись бы так, что страж пропускал бы то, чем обернуть нельзя.
@@ -127,24 +158,35 @@ func (c AuthNConfig) ResolveJWKSEncryptionKeys() ([][]byte, error) {
 	for i, entry := range entries {
 		key, err := hex.DecodeString(entry)
 		if err != nil {
-			return nil, fmt.Errorf("authn.jwks-encryption-key-hex: entry #%d of %d: invalid hex: %w",
-				i+1, len(entries), err)
+			return nil, fmt.Errorf("%s: entry #%d of %d: invalid hex: %w", knob, i+1, len(entries), err)
 		}
 		if len(key) != keywrap.KeySize {
-			return nil, fmt.Errorf("authn.jwks-encryption-key-hex: entry #%d of %d must decode to %d bytes (got %d)",
-				i+1, len(entries), keywrap.KeySize, len(key))
+			return nil, fmt.Errorf("%s: entry #%d of %d must decode to %d bytes (got %d)",
+				knob, i+1, len(entries), keywrap.KeySize, len(key))
 		}
 		// Значение НЕ попадает в текст отказа ни при каком исходе — оператору
 		// называется позиция, предъявителю не называется ничего.
 		if first, dup := seen[string(key)]; dup {
 			return nil, fmt.Errorf(
-				"authn.jwks-encryption-key-hex: entry #%d of %d repeats entry #%d — a repeated wrapping key is a change that did not happen",
-				i+1, len(entries), first)
+				"%s: entry #%d of %d repeats entry #%d — a repeated wrapping key is a change that did not happen",
+				knob, i+1, len(entries), first)
 		}
 		seen[string(key)] = i + 1
 		keys = append(keys, key)
 	}
 	return keys, nil
+}
+
+// ValidateSelfServiceFreshness — окно свежести правки своих данных объявлено
+// (Ф12 Р8, Ф12-36): незаданное — отказ с именем ручки; величина без умолчания,
+// дословный перенос «15 мин» Ф1 §4.1 объявляется профилем, а не построением.
+func (c AuthNConfig) ValidateSelfServiceFreshness() error {
+	if c.SelfServiceFreshness <= 0 {
+		return fmt.Errorf("authn.self-service-freshness не задан (KANAME_AUTHN__SELF_SERVICE_FRESHNESS): " +
+			"окно свежести правки своих данных — величина посадки без умолчания в коде; заведение второго фактора " +
+			"и срок неподтверждённого заведения читают её, перенос Ф1 §4.1 (15m) объявляется профилем")
+	}
+	return nil
 }
 
 // ResolveDomain — доменное имя посадки, объявленное оператором. Умолчания НЕТ:
@@ -181,12 +223,6 @@ func (c AuthNConfig) ResolveAudience() string {
 	return c.ResolveDomain()
 }
 
-// ResolveHydraAdminURL — URL of the Hydra admin API (client-registration +
-// jwt-bearer trust-grants). Precedence: the explicit `authn.hydra-admin-url` /
-// ENV KANAME_HYDRA_ADMIN_URL override, then the derivation from the issuer
-// (hydra.X → hydra-admin.X). The override lets in-cluster iam reach the
-// cluster-internal admin Service (http://kacho-umbrella-hydra-admin.<ns>.svc:4445)
-// even when the external issuer host does not resolve in-cluster.
 // DeclaredHydraAdminURL returns the admin-API address an operator actually
 // WROTE — the YAML setting or its ENV override — and the empty string when
 // neither is set.
@@ -216,6 +252,12 @@ func (c AuthNConfig) ResolveHydraAdminCAFile() string {
 	return strings.TrimSpace(os.Getenv("KANAME_HYDRA_ADMIN_CA_FILE"))
 }
 
+// ResolveHydraAdminURL — URL of the Hydra admin API (client-registration +
+// jwt-bearer trust-grants). Precedence: the explicit `authn.hydra-admin-url` /
+// ENV KANAME_HYDRA_ADMIN_URL override, then the derivation from the issuer
+// (hydra.X → hydra-admin.X). The override lets in-cluster iam reach the
+// cluster-internal admin Service (http://kacho-umbrella-hydra-admin.<ns>.svc:4445)
+// even when the external issuer host does not resolve in-cluster.
 func (c AuthNConfig) ResolveHydraAdminURL() string {
 	if v := c.DeclaredHydraAdminURL(); v != "" {
 		return v

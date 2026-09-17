@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/gitenv"
+
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // ПРОВЕНАНС ЗАМЕРА — И ПОЧЕМУ В НЁМ ПОЯВИЛСЯ ПРИЗНАК ЧИСТОТЫ ДЕРЕВА
@@ -127,13 +129,7 @@ func cpuModel() string {
 // то есть печатал бы «полного отчёта нет» при существующем отчёте. Корень
 // спрашивается у git, а не собирается из `..`: число шагов вверх зависит от
 // того, кто зовёт.
-func ReportAbsPath() (string, error) {
-	out, err := gitenv.Command("", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", fmt.Errorf("scalegrid: корень дерева не установлен, писать отчёт некуда: %w", err)
-	}
-	return strings.TrimSpace(string(out)) + "/" + ReportPath, nil
-}
+func ReportAbsPath() (string, error) { return AbsPathOf(ReportPath) }
 
 // AbsPathOf — абсолютный путь ПРОИЗВОЛЬНОГО артефакта, разрешённый ОТ КОРНЯ
 // ДЕРЕВА. Тот же довод, что у ReportAbsPath выше, и та же причина держать их
@@ -152,17 +148,38 @@ func ReportAbsPath() (string, error) {
 // Исключение при этом НЕ расширено: `scaffoldingStillHolds` проверяет каждую
 // запись разбором — обращение к базе вернёт файл под отпечаток само.
 func AbsPathOf(rel string) (string, error) {
-	out, err := gitenv.Command("", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", fmt.Errorf("scalegrid: корень дерева не установлен, писать %s некуда: %w", rel, err)
+	if strings.TrimSpace(rel) == "" {
+		// Пустой путь означает КОРЕНЬ дерева прогона. Разрешается он по-прежнему
+		// git'ом: приставки здесь нет, снимать нечего.
+		out, err := gitenv.Command("", "rev-parse", "--show-toplevel").Output()
+		if err != nil {
+			return "", fmt.Errorf("scalegrid: корень дерева не установлен: %w", err)
+		}
+		return strings.TrimSpace(string(out)), nil
 	}
-	return strings.TrimSpace(string(out)) + "/" + rel, nil
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("scalegrid: рабочий каталог не установлен, писать %s некуда: %w", rel, err)
+	}
+	// РАЗРЕШИТЕЛЬ ТОТ ЖЕ, ЧТО У ЧИТАТЕЛЯ ОТЧЁТА, и это несущее требование, а не
+	// вкус: координата артефакта названа ОДНА, а мест, приводящих её к диску,
+	// было два — гейт свежести (через `treeposture`) и вот этот писатель (склейка
+	// с вершиной git). В монорепо они отвечали одинаково, поэтому расхождения не
+	// было видно; после выноса службы отдельным репозиторием читатель нашёл файл,
+	// а писатель — нет: приставка `services/iam/` в этом дереве ничему не
+	// соответствует.
+	//
+	// Цена измерена: пересъёмка отчёта объёма отработала все четыре точки сетки
+	// (944 с на поднятой базе) и не смогла записать результат — «no such file or
+	// directory». То есть гейт свежести объявлял отчёт устаревшим, а исполнить
+	// его требование было НЕЧЕМ.
+	return treeposture.PathOf(wd, rel)
 }
 
 // Header — шапка отчёта.
 //
 // Отчёт БЕЗ строки воспроизведения считается невалидным, и это не украшение:
-// перепись по соседнему прибору того же дерева (`services/iam/tools/authzformbench`,
+// перепись по соседнему прибору того же дерева (`tools/authzformbench`,
 // 10 отчётов) даёт 7 с командой и 3 без — и эти три невоспроизводимы ничем,
 // потому что их писатель строку повторения не печатает вовсе.
 func (p Provenance) Header(title string) (string, error) {

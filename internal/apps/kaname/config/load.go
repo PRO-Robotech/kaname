@@ -113,6 +113,7 @@ func Load(path string) (Config, error) {
 		"manifests.admission":     "KANAME_MANIFESTS__ADMISSION",
 
 		"authn.domain":                      "KANAME_AUTHN__DOMAIN",
+		"authn.self-service-freshness":      "KANAME_AUTHN__SELF_SERVICE_FRESHNESS",
 		"authn.trusted-forwarder-sans":      "KANAME_AUTHN__TRUSTED_FORWARDER_SANS",
 		"authn.trust-domain":                "KANAME_AUTHN__TRUST_DOMAIN",
 		"authn.trust-any-forwarder":         "KANAME_AUTHN__TRUST_ANY_FORWARDER",
@@ -128,6 +129,16 @@ func Load(path string) (Config, error) {
 	// вторым списком (`own_ceilings.go`): выписанный разошёлся бы с ней молча,
 	// и переменная, названная текстом отказа, перестала бы доезжать до поля.
 	for _, k := range OwnCeilingKnobs {
+		if err := v.BindEnv(k.Key, k.Env); err != nil {
+			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
+		}
+	}
+	for _, k := range LoginLaneKnobs {
+		if err := v.BindEnv(k.Key, k.Env); err != nil {
+			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
+		}
+	}
+	for _, k := range RegistrationKnobs {
 		if err := v.BindEnv(k.Key, k.Env); err != nil {
 			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
 		}

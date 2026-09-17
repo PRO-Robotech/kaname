@@ -47,11 +47,12 @@ import (
 const minManifestsRead = 5
 
 func TestPlaneAgreementJudgesADifferingInputOnTheTree(t *testing.T) {
-	// `../../../..` от этого пакета — каталог `services` монорепо.
-	// Читается ДЕРЕВО ПЛАТФОРМЫ: манифесты соседних модулей, каталог
-	// контрактов и канон модели в поставку нашего модуля не входят by
-	// construction. Их отсутствие — «условие не создано», а не находка.
-	paths, err := filepath.Glob(filepath.Join(platformtree.RequirePath(t, "services"), "*", "manifest.yaml"))
+	// Читается ДЕРЕВО ПЛАТФОРМЫ, НАЗВАННОЕ снаружи: манифесты соседних модулей в
+	// поставку нашего модуля не входят by construction, и их выкладывает задание
+	// конвейера. Отсутствие ручки — «условие не создано» с производителем, а не
+	// находка и не безусловный пропуск.
+	paths, err := filepath.Glob(filepath.Join(
+		platformtree.RequireNamedPlatformTree(t), platformtree.SiblingsDir, "*", "manifest.yaml"))
 	if err != nil {
 		t.Fatalf("обход дерева: %v", err)
 	}
@@ -153,11 +154,10 @@ var namedByMODRL19 = []struct{ resource, verb string }{
 // они объявляют ещё и РОЛЬ с поимённым правом, которой поставляемый манифест не
 // несёт. Утверждается ровно то, что оси не выдуманы — их действия в дереве есть.
 func TestMODRL19InternalAxesHaveAnInputInTheTree(t *testing.T) {
-	// Манифест СОСЕДНЕГО модуля — координатой от корня платформы, а не подъёмом
-	// каталогами: в поставку нашего модуля он не входит, и его отсутствие есть
-	// «условие не создано».
+	// Манифест СОСЕДНЕГО модуля — координатой от НАЗВАННОГО корня платформы: в
+	// поставку нашего модуля он не входит, и его выкладывает задание конвейера.
 	const rel = "services/vpc/manifest.yaml"
-	body, err := os.ReadFile(platformtree.RequirePath(t, rel))
+	body, err := os.ReadFile(filepath.Join(platformtree.RequireNamedPlatformTree(t), filepath.FromSlash(rel)))
 	if err != nil {
 		t.Fatalf("поставляемый манифест vpc не прочитан: %v", err)
 	}

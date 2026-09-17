@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 744
+Всего кейсов: 754
 
 ## Перепись по модулям
 
@@ -48,13 +48,16 @@
 | `cases/iam-flat-authz-vbc.py` | 2 |
 | `cases/iam-group.py` | 33 |
 | `cases/iam-interactive-client.py` | 8 |
-| `cases/iam-internal-only-check.py` | 16 |
+| `cases/iam-internal-only-check.py` | 13 |
 | `cases/iam-invite-grant-fga.py` | 4 |
-| `cases/iam-limit.py` | 11 |
+| `cases/iam-invite-resend.py` | 4 |
 | `cases/iam-list-visibility.py` | 3 |
+| `cases/iam-membership-create.py` | 3 |
+| `cases/iam-membership-mine.py` | 3 |
 | `cases/iam-membership-read.py` | 7 |
 | `cases/iam-permission-catalog.py` | 3 |
-| `cases/iam-project.py` | 33 |
+| `cases/iam-project-edge-format.py` | 1 |
+| `cases/iam-project.py` | 35 |
 | `cases/iam-rbac-rules-labels.py` | 2 |
 | `cases/iam-rbac-scope-grant.py` | 2 |
 | `cases/iam-rbac-subjects.py` | 14 |
@@ -67,6 +70,9 @@
 | `cases/iam-token-facade-conformance.py` | 7 |
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
+| `cases/kaname-login-lane.py` | 4 |
+| `cases/kaname-recovery-lane.py` | 3 |
+| `cases/kaname-second-factor.py` | 4 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/label-revoke-nlb.py` | 1 |
@@ -613,7 +619,7 @@
 - `IAM-IC-UP-VAL-UNKNOWN-MASK`
 - `IAM-IC-DL-IDM-REPEAT`
 
-## `cases/iam-internal-only-check.py` — 16 кейсов
+## `cases/iam-internal-only-check.py` — 13 кейсов
 
 > Case-set для iam-internal-only-check.
 
@@ -630,9 +636,6 @@
 - `IAM-INT-NEG-EXT-IC-LIST`
 - `IAM-INT-NEG-EXT-IC-CREATE`
 - `IAM-INT-OK-INT-IC-LIST`
-- `IAM-INT-NEG-EXT-LIMIT-LIST`
-- `IAM-INT-NEG-EXT-LIMIT-CREATE`
-- `IAM-INT-OK-INT-LIMIT-LIST`
 
 ## `cases/iam-invite-grant-fga.py` — 4 кейсов
 
@@ -643,21 +646,16 @@
 - `INVGRANT-TE3-ARMNAMES-ACCOUNT-PARITY`
 - `INVGRANT-TE4-PROJECT-ANCHOR-VIEWER-RC1`
 
-## `cases/iam-limit.py` — 11 кейсов
 
-> Case-set: InternalLimitService — resource-count ceilings (issue #291, stage S1).
+## `cases/iam-invite-resend.py` — 4 кейсов
 
-- `IAM-LIM-CR-CRUD-OK`
-- `IAM-LIM-CR-VAL-NEG-VALUE`
-- `IAM-LIM-CR-VAL-KIND`
-- `IAM-LIM-GT-NEG-ABSENT`
-- `IAM-LIM-GT-VAL-MALFORMED-ID`
-- `IAM-LIM-CR-CONF-DUP-TRIPLE`
-- `IAM-LIM-CR-NEG-ABSENT-SCOPE`
-- `IAM-LIM-RS-CRUD-PRECEDENCE`
-- `IAM-LIM-RS-SEC-NARROW-GATE`
-- `IAM-LIM-CS-CRUD-DELTA`
-- `IAM-LIM-DL-IDM-REPEAT`
+> Повторная отправка письма приглашения — UserService.ResendInvite (приёмка ID-MAIL-1, §10 п. 9; MAIL-36, MAIL-37, MAIL-38, MAIL-25).
+
+- `IAM-USR-RESEND-OK`
+- `IAM-USR-RESEND-SAME-OUTCOME`
+- `IAM-USR-RESEND-NEG-NOT-IN-ACCOUNT`
+- `IAM-USR-RESEND-NEG-MALFORMED-ID`
+
 
 ## `cases/iam-list-visibility.py` — 3 кейсов
 
@@ -666,6 +664,22 @@
 - `IAM-645-LIST-VISIBLE-PAGE-PROJECTS`
 - `IAM-645-LIST-VISIBLE-PAGE-ACCOUNTS`
 - `IAM-645-LIST-VISIBLE-PAGE-USERS`
+
+## `cases/iam-membership-create.py` — 3 кейсов
+
+> Case-set создания членства (kaname#181; IAM-ID-1 §4 S3.2, сценарии -01/-02/-05).
+
+- `IAM-ID1-MBR-CREATE-OK`
+- `IAM-ID1-MBR-CREATE-SECOND-ACCOUNT`
+- `IAM-ID1-MBR-CREATE-NEG-AUTHZ`
+
+## `cases/iam-membership-mine.py` — 3 кейсов
+
+> Case-set СВОЕГО списка членств (IAM-ID-2, стадия S2; kaname#206).
+
+- `IAM-ID2-MINE-INVITED-OK`
+- `IAM-ID2-MINE-PAGINATION`
+- `IAM-ID2-MINE-NEG-ANON`
 
 ## `cases/iam-membership-read.py` — 7 кейсов
 
@@ -687,7 +701,13 @@
 - `CONF-G-03-catalog-retired-successor`
 - `NEG-G-02-catalog-anonymous-unauthenticated`
 
-## `cases/iam-project.py` — 33 кейсов
+## `cases/iam-project-edge-format.py` — 1 кейсов
+
+> Case-set iam-project-edge-format — ФОРМА ИДЕНТИФИКАТОРА ПРОЕКТА, КОТОРУЮ СУДИТ КРАЙ.
+
+- `IAM-PRJ-DL-NEG-MALFORMED-PREFIX`
+
+## `cases/iam-project.py` — 35 кейсов
 
 > Case-set для ProjectService.
 
@@ -722,6 +742,8 @@
 - `IAM-PRJ-DL-NEG-NOTFOUND`
 - `IAM-PRJ-DL-NEG-HAS-CHILDREN`
 - `IAM-PRJ-DL-AUTHZ-ANON-DENY`
+- `IAM-PRJ-DL-AUTHZ-NONEMPTY-DENY-FIRST`
+- `IAM-PRJ-DL-STATE-REFUSAL-KEEPS-GRANTS`
 - `IAM-PRJ-LSOP-CRUD-OK`
 - `IAM-PRJ-LSOP-NEG-NOTFOUND`
 
@@ -1006,6 +1028,44 @@
 - `IAM-SET-GRP-LABEL-EXACT-OK`
 - `IAM-SET-SVA-LIST-READ-PARITY`
 - `IAM-SET-GRP-LIST-READ-PARITY`
+
+## `cases/kaname-login-lane.py` — 4 кейса
+
+> Полоса входа паролем и наша сессия (Ф3, kacho#1269): собственный слушатель
+> формы службы, поднимается только посадкой `own` и допускает ровно край по SAN
+> клиентского листа. Адресуется `loginLaneBaseUrl`; на автономном стенде посадки
+> `external` переменная пуста ПО ПОСАДКЕ, и каждый шаг уходит в «условие не
+> создано» помеченным утверждением — не в зелёное и не в красное.
+
+- `IAM-LOGINLANE-OK-CSRF-ISSUED`
+- `IAM-LOGINLANE-NEG-WRONG-PASSWORD`
+- `IAM-LOGINLANE-OK-LOGIN-LOGOUT-REPRESENT`
+- `IAM-LOGINLANE-NEG-CSRF-MISSING`
+
+## `cases/kaname-recovery-lane.py` — 3 кейса
+
+> Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на том же
+> слушателе формы, что вход. Адресуется `loginLaneBaseUrl`; на автономном стенде
+> посадки `external` переменная пуста ПО ПОСАДКЕ — «условие не создано». Счастливого
+> завершения с настоящим кодом здесь нет: код уходит письмом, и через край его не
+> прочитать — предмет Ф5-14 (`kacho#1773`).
+
+- `IAM-RECOVERY-OK-REQUEST-SAME-ANSWER`
+- `IAM-RECOVERY-NEG-WRONG-CODE`
+- `IAM-RECOVERY-NEG-CSRF-MISSING`
+
+## `cases/kaname-second-factor.py` — 4 кейса
+
+> Второй фактор (Ф12, kacho#1281): шесть глаголов семейства на том же слушателе
+> формы, что вход, и поле `secondFactor` формы входа. Адресуется `loginLaneBaseUrl`;
+> на автономном стенде посадки `external` переменная пуста ПО ПОСАДКЕ — «условие
+> не создано». Код по времени вычисляет посев из `secret` ответа `enroll`; вход с
+> кодом идёт ступенью `t₀ + 1` — границы ступени посев не ждёт (Ф12-08).
+
+- `IAM-2FA-OK-ENROLL-CONFIRM-LOGIN-LEVEL2`
+- `IAM-2FA-OK-BACKUP-CODE-STEP-UP`
+- `IAM-2FA-OK-REMOVE-BY-CODE`
+- `IAM-2FA-NEG-FORMS-AND-STATE`
 
 ## `cases/kaname-own-rest-front.py` — 14 кейсов
 

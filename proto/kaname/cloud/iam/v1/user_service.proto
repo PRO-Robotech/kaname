@@ -62,6 +62,10 @@ service UserService {
   // Invite a user by email. Если user уже invited в этот Account
   // (idempotent re-invite) — Operation возвращается, AB опционально создается.
   // Permission: requires `admin` OR `editor` relation на account_id.
+  //
+  // Письмо приглашения — то же правило, что у `MembershipService.Create` (один
+  // поток): уходит, пока личность ни разу не входила, на первом и на повторном
+  // приглашении той же пары, в пределах ограничения частоты на адрес.
   rpc Invite (InviteUserRequest) returns (corelib.operation.Operation) {
     option (google.api.http) = {
       post: "/iam/v1/users:invite"
@@ -85,6 +89,47 @@ service UserService {
     // AAL1 floor while Create demands acr=2 would be a step-up BYPASS — the same
     // grant issued through the cheaper door. Step-up stays sensitive-only (the
     // routine User lifecycle Get/Update/Delete keeps "1").
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+
+  // ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
+  // не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).
+  //
+  // Что приходит взамен снятого поля ссылки (InviteUserMetadata): ссылки
+  // администратор не получает ни в каком ответе, а получает способ повторить
+  // письмо, если оно не дошло. Предъявителя письмо не несёт — доступ даёт
+  // владение почтовым ящиком, и повтор письма ничего не выдаёт заново.
+  //
+  // Исходы: строки приглашения в этом аккаунте нет — NOT_FOUND тем же текстом,
+  // что и у человека, которого нет нигде (hide-existence: чужой аккаунт
+  // неотличим от отсутствия); приглашение уже выкуплено либо человек
+  // заблокирован — FAILED_PRECONDITION; срок приглашения истёк —
+  // FAILED_PRECONDITION с указанием пригласить заново (срок есть свойство
+  // ВЫДАЧИ, и повтор письма его не двигает).
+  //
+  // ОГРАНИЧЕНИЕ ЧАСТОТЫ СТОИТ НА ПУТИ ЭТОГО ГЛАГОЛА (Р22): писем на один адрес
+  // за окно уходит не больше объявленного, сверхнормативные не отправляются,
+  // а ответ при этом НЕОТЛИЧИМ от ответа в пределах нормы — отказ по частоте
+  // не вправе становиться оракулом (Р9, MAIL-25).
+  //
+  // Permission: то же отношение, что у Invite — `editor` на account_id; тот же
+  // пол step-up (acr=2): это та же поверхность допуска в аккаунт, и более
+  // дешёвая дверь к письму от имени платформы заводиться не должна.
+  rpc ResendInvite (ResendInviteRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/users/{user_id}:resendInvite"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "ResendInviteMetadata"
+      response: "User"
+    };
+    option (corelib.authz.v1.permission)        = "iam.users.resendInvite";
+    option (corelib.authz.v1.required_relation) = "editor";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "account"
+      from_request_field: "account_id"
+    };
     option (corelib.authz.v1.required_acr_min) = "2";
   }
 
@@ -372,6 +417,46 @@ service UserService {
     option (corelib.authz.v1.required_acr_min)  = "2";
   }
 
+  // Resets the second factor of the specified User: the administrator's path
+  // for a person who lost the authenticator device AND the backup codes.
+  //
+  // Without it such a person signs in with the password and stays at
+  // assurance level "1" with no way up: self-service removal of the factor
+  // asks for a code (the very thing that was lost). So the administrator of
+  // the person's Account — `identity_suspender`, the same relation and the
+  // same step-up floor as Block/Unblock — removes it here, and the person
+  // enrolls a new one himself.
+  //
+  // ONE TRANSACTION: the time-based code row (active) and the backup-code set
+  // are removed; EVERY session of the person is covered by a cutoff at `now`
+  // with reason `second-factor-reset` and the administrator as the actor —
+  // whoever holds the lost device may hold a session too; the audit event
+  // `iam.user.second_factor_reset` names both actors.
+  //
+  // A person WITHOUT an enrolled factor — no row, or an enrollment that was
+  // started and never confirmed — is refused synchronously:
+  // FAILED_PRECONDITION with `ErrorInfo.reason = SECOND_FACTOR_NOT_ENROLLED`.
+  // The unconfirmed enrollment is left alone and no session is ended: there
+  // is nothing to reset, and the person replaces the pending enrollment by
+  // starting a new one.
+  //
+  // WHAT IT DOES NOT DO: it does not reset the password, does not enroll a
+  // factor on the person's behalf, and does not lift a block.
+  rpc ResetSecondFactor (ResetSecondFactorRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = { post: "/iam/v1/users/{user_id}:resetSecondFactor" body: "*" };
+    option (corelib.api.v1.operation) = {
+      metadata: "ResetSecondFactorMetadata"
+      response: "User"
+    };
+    option (corelib.authz.v1.permission)        = "iam.users.resetSecondFactor";
+    option (corelib.authz.v1.required_relation) = "identity_suspender";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "2";
+  }
+
   // Lists operations for the specified user.
   rpc ListOperations (ListUserOperationsRequest) returns (ListUserOperationsResponse) {
     option (google.api.http) = { get: "/iam/v1/users/{user_id}/operations" };
@@ -442,6 +527,17 @@ message InviteUserRequest {
   string role_id = 5;
 }
 
+// ResendInviteRequest — повторная отправка письма приглашения.
+message ResendInviteRequest {
+  // ID строки приглашения (человека). Обязателен; путь запроса.
+  string user_id = 1;
+
+  // Аккаунт, куда человек приглашён. Обязателен: по нему край извлекает
+  // область права (scope_extractor), и по нему же служба ищет членство —
+  // приглашение есть пара «человек + аккаунт», и вызов называет обе половины.
+  string account_id = 2;
+}
+
 message UpdateUserRequest {
   // Flat-форма request'а (паритет с UpdateRole/ServiceAccount/AccessBinding/...):
   // mutable-поля лежат на верхнем уровне, без вложенного ресурса.
@@ -492,6 +588,12 @@ message BlockUserRequest {
 
 message UnblockUserRequest {
   // ID of the User membership row to unblock.
+  string user_id = 1;
+}
+
+message ResetSecondFactorRequest {
+  // ID of the User whose second factor is reset. The only input: there is no
+  // code to present — the caller is the administrator, not the person.
   string user_id = 1;
 }
 

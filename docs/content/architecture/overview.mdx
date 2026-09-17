@@ -75,22 +75,24 @@ IAM — не только владелец модели прав, но и **то
 Изменение прав (роль, привязка) действует **с момента фиксации транзакции** — отдельного
 хранилища, до которого право должно доехать, нет. Полная модель — [Авторизация](/architecture/authz).
 
-## Идентичность — Ory Kratos + Ory Hydra, плюс своя чеканка
+## Идентичность — по посадке: внешний поставщик либо свой вход
 
-Личность человека и его интерактивный вход вынесены в Ory-стек: **Kratos** хранит личности и
-обслуживает вход (пароль / passkey), **Hydra** — OAuth 2.0 authorization server. IAM интегрируется
-с ними через hook-listener (активация User при первом входе) и клиент Hydra (регистрация
-OAuth-клиентов). User — проекция Kratos-identity.
+Кто проверяет человека, решает ключ `authn.identity-provider`, и посадок две. Под **`external`**
+личность и интерактивный вход вынесены в Ory-стек: **Kratos** хранит личности и обслуживает
+вход (пароль / passkey), **Hydra** — OAuth 2.0 authorization server; IAM интегрируется с ними
+через hook-listener (активация User при первом входе) и клиент Hydra (регистрация
+OAuth-клиентов), а User — проекция Kratos-identity. Под **`own`** внешнего поставщика нет:
+способы входа, сессия (`kaname_session`) и второй фактор — записи самой службы, форма входа
+приходит на её слушатель полосы входа от края.
 
 **Программные токены платформа выпускает сама** там, где объявлена своя чеканка
 (`authn.token-signing` + `authn.client-token`): у неё своя ключница, свой подписант и своя запись
-публикуемого набора ключей рядом с зеркалом набора провайдера. Где своя чеканка не объявлена, ключ
-и токен по-прежнему зеркалятся у Hydra, и издателем выступает она.
+публикуемого набора ключей. Под `external` без своей чеканки ключ и токен по-прежнему зеркалятся
+у Hydra, и издателем выступает она.
 
-**Интерактивный вход человека держится на провайдере на любой посадке**: вида выдачи
-`authorization_code` наш токен-эндпоинт не принимает вовсе — перечень видов у него закрыт и состоит
-из `client_credentials` и `jwt-bearer`. Это остаток перехода, а не решение: пока он не снят,
-провайдер нужен каждой установке, где входит человек.
+Вида выдачи `authorization_code` наш токен-эндпоинт не принимает ни на одной посадке — перечень
+видов у него закрыт и состоит из `client_credentials` и `jwt-bearer`: человек входит либо у
+поставщика, либо на полосе входа службы, а токен для терминала выпускает уже сессией.
 
 Детали и потоки — [Идентичность и токены](/architecture/identity).
 
@@ -103,8 +105,9 @@ OAuth-клиентов). User — проекция Kratos-identity.
   <tbody>
     <tr><td><code>:9090</code></td><td>public</td><td>Tenant через <code>api-gateway</code> (TLS+JWT); peer-сервисы (mTLS)</td><td>Публичные RPC ресурсов + AuthorizeService + OperationService</td></tr>
     <tr><td><code>:9091</code></td><td>internal</td><td>Peer-сервисы (mTLS)</td><td><code>InternalIAMService</code> (<code>Check</code> / <code>RegisterResource</code> / ...) — authz-gate платформы</td></tr>
-    <tr><td><code>:9092</code></td><td>hooks</td><td>Ory Kratos (mTLS)</td><td>Identity-хуки (активация User при первом входе)</td></tr>
+    <tr><td><code>:9092</code></td><td>hooks</td><td>Ory Kratos (mTLS) — посадка <code>external</code></td><td>Identity-хуки (активация User при первом входе, завершение восстановления)</td></tr>
     <tr><td><code>:9095</code></td><td>metrics</td><td>Prometheus (cluster-internal)</td><td><code>/metrics</code></td></tr>
+    <tr><td><code>:9100</code> (адрес объявляет профиль)</td><td>login lane</td><td>ровно край платформы (взаимный TLS, допуск по SAN) — посадка <code>own</code></td><td>Формы входа: регистрация, вход, выход, смена пароля, восстановление, второй фактор</td></tr>
   </tbody>
 </table>
 
@@ -125,7 +128,7 @@ flowchart LR
   geo["kacho-geo"] -->|"Check"| iam
   nlb["kacho-nlb"] -->|"Check"| iam
   iam -->|"вердикт запросом"| pg[("PostgreSQL kaname")]
-  iam -->|"identity / OAuth"| ory["Ory Kratos + Hydra"]
+  iam -->|"identity / OAuth — посадка external"| ory["Ory Kratos + Hydra"]
 ```
 
 По сборке IAM — **leaf-узел**: он не зависит ни от одного доменного сервиса (как kacho-geo). По
@@ -135,5 +138,6 @@ RPC, а vpc/compute дополнительно регистрируют влад
 
 :::info Циклов нет
 Рёбра `* → iam` однонаправлены — IAM не зовёт своих консументов обратно. Единственные исходящие
-рёбра IAM — к инфраструктуре (Kratos, Hydra, Postgres), не к доменным сервисам.
+рёбра IAM — к инфраструктуре (Postgres; под `external` ещё Kratos и Hydra), не к доменным
+сервисам.
 :::

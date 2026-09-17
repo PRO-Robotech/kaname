@@ -29,6 +29,7 @@ import (
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
+	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/tokensigner"
 )
 
@@ -37,30 +38,28 @@ import (
 // Каждое поле обязано отражать собранную проводку, а не намерение профиля:
 // иначе страж отчитывался бы о намерении вместо исхода — тот самый класс, ради
 // которого заведён самоотчёт о посадке.
-func observeLaneWiring(ctx context.Context, cfg config.Config, signer *tokensigner.Signer, logger *slog.Logger) config.LaneWiring {
+//
+// signIn — способы входа человека, чьи проверяющие собраны ЭТИМ корнем
+// (wiredSignInMethods). Подаются параметром по той же причине, что и каталог:
+// перечень предъявимых уровней ВЫВОДИТСЯ из них правилом (приёмка Ф11, Р9), и
+// сценарий «провязан только пароль» обязан быть вызываемым, а не описываемым.
+func observeLaneWiring(ctx context.Context, cfg config.Config, signer *tokensigner.Signer,
+	signIn []assurance.Method, lane *loginLane, logger *slog.Logger,
+) config.LaneWiring {
+	human := laneWiringOf(lane)
 	return config.LaneWiring{
 		OwnMintSignerWired: signer != nil,
 
-		// СВОИХ способов входа человека и СВОЕЙ сессии в этом дереве ещё нет:
-		// проверку пароля, второй фактор и сессию браузера сегодня исполняет
-		// внешний поставщик, в своей базе. Значения здесь — НАБЛЮДЕНИЕ, а не
-		// заглушка: полоса `own` действительно не может впустить человека, и
-		// стенд, объявивший её, обязан об этом узнать при старте, а не после
-		// того, как первый человек не смог войти.
-		//
-		// ПРЕДИКАТ СМЕНЫ: как только в композиционном корне появятся хранилище
-		// способов входа и хранилище сессии человека, эти поля читают их
-		// провязку (`store != nil`) — и обе строки таблицы требований начинают
-		// проходить. Строки таблицы при этом не меняются: их предмет — провязка,
-		// а не то, чем она сегодня оказалась.
-		//
-		// ПРОИЗВОДИТЕЛЬ НАЗВАН, А НЕ ПОДРАЗУМЕВАЕТСЯ (находка #2101): хранилище
-		// способов входа — задача продукта #1268, хранилище сессии — #1269, обе
-		// внутри эпика #1266. Пока обе не приземлились, значение поля посадки
-		// `own` неисполнимо ни при одной настройке — это свойство ПОСТРОЕНИЯ,
-		// а не недонастройки, и держится оно этой же таблицей требований.
-		HumanCredentialsWired: false,
-		HumanSessionsWired:    false,
+		// СВОИ способы входа человека и СВОЯ сессия — НАБЛЮДЕНИЕ за полосой
+		// входа паролем (Ф3, kacho#1269; хранилище способов входа — Ф2,
+		// kacho#1268). Полоса строится корнем только под `own`
+		// (`buildLoginLane`), и оба поля читают её провязку: хранилище сессии и
+		// хранилище способов входа собраны — `true`; полосы нет — `false`.
+		// Литерала здесь нет ни в одну сторону: под `external` полоса не
+		// строится, и наблюдатель честно сообщает, что человека своей полосой
+		// служба не впустит.
+		HumanCredentialsWired: human.HumanCredentialsWired,
+		HumanSessionsWired:    human.HumanSessionsWired,
 
 		// ДОРОГА К ВНЕШНЕМУ ПОСТАВЩИКУ И ЗАПИСЬ ЗЕРКАЛА ЕГО КЛЮЧЕЙ — ТЕПЕРЬ
 		// НАБЛЮДЕНИЕ, А НЕ ЛИТЕРАЛ (задача kaname#21; kacho#2489 была закрыта
@@ -80,10 +79,13 @@ func observeLaneWiring(ctx context.Context, cfg config.Config, signer *tokensign
 		ProviderAdminHopBuilt:         providerAdminHopIsBuilt(cfg),
 		ProviderKeySetMirrorPublished: providerKeySetMirrorIsPublished(cfg),
 
-		// Уровни, которые полоса `own` умеет предъявить ЧЕЛОВЕКУ. Пока своих
-		// способов входа нет — ни одного; «ни одного» отличимо от «не
-		// заполнено» тем, что перечень пуст осознанно (см. выше).
-		PresentableACRs: nil,
+		// Уровни, которые полоса `own` умеет предъявить ЧЕЛОВЕКУ, — ВЫВЕДЕНЫ
+		// ПРАВИЛОМ из провязанных способов, взятых в лучшем исходе их флагов
+		// (приёмка Ф11, Р9). Здесь стоял литерал «ни одного»; литерал не мог
+		// покраснеть ни при какой провязке — наблюдатель отчитывался о
+		// намерении вместо исхода. Пока корень не провязал ни одного способа,
+		// перечень пуст — и это наблюдение того же рода, что два поля выше.
+		PresentableACRs: assurance.PresentableLevels(signIn).Strings(),
 
 		CatalogFloors: readCatalogFloors(ctx, logger),
 	}

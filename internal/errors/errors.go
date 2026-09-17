@@ -83,6 +83,15 @@ var (
 	ErrReferenceMissing = fmt.Errorf("%w: referenced resource missing", ErrFailedPrecondition)
 	ErrReferenceInUse   = fmt.Errorf("%w: resource still referenced", ErrFailedPrecondition)
 
+	// ErrInviteExpired — строка приглашения пережила свой срок (приёмка
+	// ID-MAIL-1, MAIL-23). Вложена в ErrFailedPrecondition: строка ЕСТЬ, и
+	// вызывающий её назвал верно — не позволяет СОСТОЯНИЕ.
+	//
+	// ОТДЕЛЬНЫЙ ИСХОД, А НЕ «НЕ НАЙДЕНО», и различие это не косметическое:
+	// «не найдено» посылает человека искать то, чего нет, тогда как строка на
+	// месте и следующий шаг у него другой — попросить пригласить заново.
+	ErrInviteExpired = fmt.Errorf("%w: invite expired", ErrFailedPrecondition)
+
 	// ErrAborted — a transient concurrency conflict the caller can retry (the
 	// operation was aborted, typically a transaction serialization failure).
 	// Maps to gRPC ABORTED, the idiomatic "retry the transaction" code — unlike

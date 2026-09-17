@@ -226,6 +226,94 @@ var LaneRequirements = []LaneRequirement{
 	// («фронт поднят ИЛИ посадка без края»), а требование живёт в ОДНОМ месте —
 	// и это место не таблица полос, потому что строка, названная обеими
 	// полосами, клеткой произведения не является (см. шапку файла).
+	// ШЕСТЬ СТРОК ПОЛОСЫ ВХОДА (Ф3, kacho#1269; шестая — Ф5, kacho#1271):
+	// величины, без которых полоса входа паролем и восстановления не
+	// собирается, объявляет профиль; незаданная — отказ старта с именем ручки
+	// (Ф1 §7 инв. 4; Ф3-28, Ф3-33, Ф3-41, Ф3-42, Ф5-06). Под `external` полосы
+	// нет, и её величины не требуются.
+	{
+		Lanes:   laneOwn,
+		Element: "срок сессии и домен печенья объявлены",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.Login.ValidateSessionAndCookie())
+		},
+	},
+	{
+		Lanes:   laneOwn,
+		Element: "предел частоты неверных предъявлений объявлен по обеим осям",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.Login.ValidateRateLimits())
+		},
+	},
+	{
+		Lanes:   laneOwn,
+		Element: "правило пароля объявлено: длина, состояние и адрес проверки утечек",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.Login.ValidatePasswordPolicy())
+		},
+	},
+	{
+		Lanes:   laneOwn,
+		Element: "ручка «что писать» объявлена и в перечне записываемых",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.Login.ValidateHasher())
+		},
+	},
+	{
+		Lanes:   laneOwn,
+		Element: "ёмкость проверяющего и резерв памяти объявлены",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.Login.ValidateCapacity())
+		},
+	},
+	// СТРОКА РЕГИСТРАЦИИ (Ф4, kacho#1270; Р5, Ф4-18/19): величина темпа
+	// заведения объявляется профилем и незаданная — отказ старта с именем ручки.
+	// Под `external` носитель ключа — идентификатор поставщика, а величину
+	// правит администратор облака; требование не предъявляется.
+	{
+		Lanes:   laneOwn,
+		Element: "величина темпа заведения объявлена: предел и окно",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.Registration.ValidateAdmissionRate())
+		},
+	},
+	{
+		Lanes:   laneOwn,
+		Element: "срок кода восстановления доступа объявлен",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.Login.ValidateRecovery())
+		},
+	},
+	// ДВЕ СТРОКИ ВТОРОГО ФАКТОРА (Ф12, kacho#1281; Р2, Р8; Ф12-35, Ф12-36):
+	// перечень ключей обёртки секретов и окно свежести правки своих данных
+	// объявляет профиль; незаданное — отказ старта с именем ручки. Под
+	// `external` второй фактор ведёт поставщик, и величины не требуются.
+	{
+		Lanes:   laneOwn,
+		Element: "перечень ключей обёртки секретов второго фактора объявлен",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			if _, err := c.AuthN.ResolveSecondFactorEncryptionKeys(); err != nil {
+				return ownScoped(fmt.Errorf("production mode: %w", err))
+			}
+			return nil
+		},
+	},
+	{
+		Lanes:   laneOwn,
+		Element: "окно свежести правки своих данных объявлено",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.ValidateSelfServiceFreshness())
+		},
+	},
 	{
 		Lanes:   laneOwn,
 		Element: "подписант своей чеканки провязан",
@@ -403,6 +491,22 @@ func presentedList(presentable []string) string {
 // laneScoped добавляет к отказу полосы ОДНУ строку о том, каким значением поля
 // требование снимается. Текст самого отказа не меняется — он часть контракта
 // оператора.
+// ownScoped — то же для требований, предъявляемых посадке `own`: каждая
+// строка отказа называет поле посадки и значение, которым требование снимается.
+func ownScoped(err error) error {
+	if err == nil {
+		return nil
+	}
+	var out error
+	for _, e := range multierr.Errors(err) {
+		out = multierr.Append(out, fmt.Errorf(
+			"%w [required because %s=%s; declare %s=%s and this requirement is lifted]",
+			e, IdentityProviderSetting, IdentityProviderOwn,
+			IdentityProviderSetting, IdentityProviderExternal))
+	}
+	return out
+}
+
 func laneScoped(err error) error {
 	if err == nil {
 		return nil

@@ -3,7 +3,19 @@
 
 package user
 
-// invite.go — UserService.Invite use-case.
+// invite.go — UserService.Invite use-case — И второй вход того же потока,
+// `MembershipService.Create` (kaname#181, IAM-ID-1 §4 S3.2).
+//
+// # ДВА ГЛАГОЛА, ОДИН ПОТОК — и это решение, а не удобство
+//
+// Создание членства есть переезд глагола приглашения на ресурс членства:
+// меняется КОНТРАКТ (адрес, имя, форма операции), а не то, что происходит с
+// данными. Поэтому оба глагола входят в ОДНУ синхронную приёмку (`admit`) и ОДНУ
+// транзакцию (`run`), и различаются ровно тем, чем различаются их контракты:
+// сообщением в `metadata` и сообщением в `response`. Второй поток дал бы два
+// места об одном предмете, и они разошлись бы на первой же правке семантики
+// приглашения. До стадии S4 (снятие `UserService.Invite`) оба входа живут
+// рядом; после неё остаётся вход членства.
 //
 // Flow:
 //  1. sync: validate AccountID + email; permission-check через
@@ -28,6 +40,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -38,11 +51,13 @@ import (
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
+	membershipapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/membership"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -111,7 +126,35 @@ type InviteUserUseCase struct {
 	relations  clients.RelationStore
 	reconciler ObjectReconciler // optional, nil-safe
 	logger     *slog.Logger
+	// inviteTTL — срок, под которым выдаётся приглашение (приёмка ID-MAIL-1,
+	// §10 п. 22). Ноль означает «посадка о сроке не высказалась»; величину
+	// подставляет `WithInviteTTL` из настройки, а нулевое поле читается как
+	// «срок не назначен» и едет в строку как NULL — ровно так выглядят строки,
+	// заведённые до появления колонки.
+	inviteTTL time.Duration
+	// mailLimit — ограничение частоты писем на адрес (Р14/Р22, MAIL-25).
+	// Подставляет композиционный корень из настройки; писатель очереди
+	// списывает окно перед постановкой намерения, и нулевое ограничение он
+	// отвергает — значения «без ограничения» не существует.
+	mailLimit outboxtypes.InviteMailRateLimit
+	// mailIntents — счётчик исходов намерения отправки (queued ·
+	// rate_limited). nil-safe: без наблюдателя исход не считается, но и не
+	// меняется.
+	mailIntents InviteMailIntentObserver
 }
+
+// InviteMailIntentObserver — узкий порт наблюдаемости намерения отправки.
+// Реализует metrics.InviteMailIntentRecorder.
+type InviteMailIntentObserver interface {
+	IncInviteMailIntent(outcome string)
+}
+
+// Клетки счётчика намерений. Набор закрыт; имена совпадают с
+// metrics.InviteMailIntentOutcomes дословно, и совпадение держит проба.
+const (
+	MailIntentQueued      = "queued"
+	MailIntentRateLimited = "rate_limited"
+)
 
 func NewInviteUserUseCase(
 	r Repo,
@@ -123,6 +166,29 @@ func NewInviteUserUseCase(
 		opsRepo: opsRepo,
 		authz:   authz,
 	}
+}
+
+// WithInviteTTL задаёт срок строки приглашения.
+//
+// Величину читает КОМПОЗИЦИОННЫЙ КОРЕНЬ из настройки и передаёт сюда: use-case
+// настройки не читает, иначе он зависел бы от её формы, а не от величины.
+// Незаданный срок (ноль) означает «строка выдана без срока», и это законное
+// состояние — но не умолчание посадки: умолчание живёт у ручки
+// (`config.InviteConfig.TTLOrDefault`), где его судит страж старта.
+func (uc *InviteUserUseCase) WithInviteTTL(ttl time.Duration) *InviteUserUseCase {
+	uc.inviteTTL = ttl
+	return uc
+}
+
+// WithInviteMailRateLimit задаёт ограничение частоты писем на адрес и
+// наблюдателя исходов намерения. Величину читает КОМПОЗИЦИОННЫЙ КОРЕНЬ из
+// настройки (`invite.mail-rate-limit`); use-case её не читает и не судит —
+// непозитивную отвергает страж старта, а если она доедет мимо него, откажет
+// писатель очереди.
+func (uc *InviteUserUseCase) WithInviteMailRateLimit(limit outboxtypes.InviteMailRateLimit, obs InviteMailIntentObserver) *InviteUserUseCase {
+	uc.mailLimit = limit
+	uc.mailIntents = obs
+	return uc
 }
 
 // WithObjectReconciler wires the post-commit synchronous per-object materializer.
@@ -147,50 +213,141 @@ func (uc *InviteUserUseCase) WithRelationStore(relations clients.RelationStore, 
 	return uc
 }
 
-// Execute — основной entry-point.
+// Execute — вход `UserService.Invite`: metadata `InviteUserMetadata`, response
+// `User`. Приёмка и транзакция общие со вторым входом — см. шапку файла.
+func (uc *InviteUserUseCase) Execute(ctx context.Context, in InviteUserInput) (*operations.Operation, error) {
+	adm, err := uc.admit(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	op, err := operations.NewFromContext(ctx,
+		domain.PrefixOperationIAM,
+		fmt.Sprintf("Invite user %s to account %s", in.Email, in.AccountID),
+		&iamv1.InviteUserMetadata{
+			UserId:    string(adm.candidateUserID),
+			AccountId: string(in.AccountID),
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := uc.opsRepo.Create(ctx, op); err != nil {
+		return nil, err
+	}
+
+	operations.Run(ctx, uc.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		out, err := uc.run(ctx, adm, in)
+		if err != nil {
+			return nil, err
+		}
+		return marshalUser(out.user)
+	})
+	return &op, nil
+}
+
+// CreateMembership — вход `MembershipService.Create`: metadata
+// `CreateMembershipMetadata`, response `Membership`.
+//
+// Ответ собирается из строки членства, прочитанной ТОЙ ЖЕ транзакцией, что её
+// завела (`run`), — не чтением после коммита: узкий корень чтения членства
+// открывает сессию на пуле чтения, и на реплике только что записанной строки
+// могло бы ещё не быть.
+func (uc *InviteUserUseCase) CreateMembership(ctx context.Context, in membershipapp.CreateInput) (*operations.Operation, error) {
+	inv := InviteUserInput{
+		AccountID:   in.AccountID,
+		Email:       in.Email,
+		DisplayName: in.DisplayName,
+		ProjectID:   in.ProjectID,
+		RoleID:      in.RoleID,
+	}
+	adm, err := uc.admit(ctx, inv)
+	if err != nil {
+		return nil, err
+	}
+	op, err := operations.NewFromContext(ctx,
+		domain.PrefixOperationIAM,
+		fmt.Sprintf("Create membership of %s in account %s", in.Email, in.AccountID),
+		&iamv1.CreateMembershipMetadata{
+			AccountId: string(in.AccountID),
+			UserId:    string(adm.candidateUserID),
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := uc.opsRepo.Create(ctx, op); err != nil {
+		return nil, err
+	}
+
+	operations.Run(ctx, uc.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		out, err := uc.run(ctx, adm, inv)
+		if err != nil {
+			return nil, err
+		}
+		pb, err := membershipapp.ToProto(out.membership)
+		if err != nil {
+			return nil, err
+		}
+		return anypb.New(pb)
+	})
+	return &op, nil
+}
+
+// admission — то, что синхронная приёмка решила и что нужно транзакции:
+// кандидат идентификатора человека (на случай заведения строки) и след
+// приглашения.
+type admission struct {
+	candidateUserID domain.UserID
+	invitedBy       domain.UserID
+}
+
+// admit — СИНХРОННАЯ приёмка, общая для обоих глаголов. Всё до чеканки
+// операции: форма входа, право приглашать, согласие проекта с аккаунтом и
+// назначаемость роли. Отказ здесь — отказ вызова, операции не существует.
 //
 // **Sync validation** (все до Operation):
-//   - AccountID required.
+//   - AccountID required, затем форма (own-owned id — первым стейтментом).
 //   - Email format (RFC 5321 lite via domain.Email.Validate).
 //   - ProjectID+RoleID consistency.
 //   - Permission check (CanInviteUsers cascade). 401/PERMISSION_DENIED — НЕ
 //     создаем Operation.
-//
-// **Async work** в LRO worker'е:
-//   - GetByAccountEmail → idempotent path или INSERT PENDING.
-//   - Optionally AB-Insert (idempotent через ON CONFLICT).
-//   - Magic-link generation.
-func (uc *InviteUserUseCase) Execute(ctx context.Context, in InviteUserInput) (*operations.Operation, error) {
+func (uc *InviteUserUseCase) admit(ctx context.Context, in InviteUserInput) (admission, error) {
 	// 1. Sync validation.
 	if in.AccountID == "" {
-		return nil, shared.InvalidArg("account_id", "Illegal argument account_id: required")
+		return admission{}, shared.InvalidArg("account_id", "Illegal argument account_id: required")
+	}
+	// Форма СВОЕГО идентификатора судится здесь, до вопроса к модели прав:
+	// негодная строка не станет аккаунтом ни при каком ответе модели, и отвечать
+	// на неё отказом прав значило бы предлагать просить права на то, чего нет.
+	if err := shared.ValidateResourceID(string(in.AccountID), domain.PrefixAccount, "account"); err != nil {
+		return admission{}, err
 	}
 	if err := in.Email.Validate(); err != nil {
-		return nil, shared.MapValidationErr(err)
+		return admission{}, shared.MapValidationErr(err)
 	}
 	if in.DisplayName != "" {
 		if err := in.DisplayName.Validate(); err != nil {
-			return nil, shared.MapValidationErr(err)
+			return admission{}, shared.MapValidationErr(err)
 		}
 	}
 	if in.ProjectID != "" && in.RoleID == "" {
-		return nil, shared.InvalidArg("role_id", "Illegal argument role_id: required when project_id is set")
+		return admission{}, shared.InvalidArg("role_id", "Illegal argument role_id: required when project_id is set")
 	}
 	if in.ProjectID == "" && in.RoleID != "" {
-		return nil, shared.InvalidArg("project_id", "Illegal argument project_id: required when role_id is set")
+		return admission{}, shared.InvalidArg("project_id", "Illegal argument project_id: required when role_id is set")
 	}
 
 	// 2. Permission check через cascade Check(editor).
 	principal := operations.PrincipalFromContext(ctx)
 	if principal.ID == "" {
-		return nil, status.Error(codes.Unauthenticated, "principal required")
+		return admission{}, status.Error(codes.Unauthenticated, "principal required")
 	}
 	allowed, err := canInviteUsers(ctx, uc.authz, string(in.AccountID))
 	if err != nil {
-		return nil, fmt.Errorf("authz check: %w", err)
+		return admission{}, fmt.Errorf("authz check: %w", err)
 	}
 	if !allowed {
-		return nil, status.Errorf(codes.PermissionDenied,
+		return admission{}, status.Errorf(codes.PermissionDenied,
 			"Permission denied to invite users in account %s", in.AccountID)
 	}
 
@@ -199,15 +356,15 @@ func (uc *InviteUserUseCase) Execute(ctx context.Context, in InviteUserInput) (*
 	if in.ProjectID != "" {
 		rd, rerr := uc.repo.Reader(ctx)
 		if rerr != nil {
-			return nil, shared.MapRepoErr(rerr)
+			return admission{}, shared.MapRepoErr(rerr)
 		}
 		prj, perr := rd.Projects().Get(ctx, in.ProjectID)
 		_ = rd.Rollback(ctx)
 		if perr != nil {
-			return nil, shared.MapRepoErr(perr)
+			return admission{}, shared.MapRepoErr(perr)
 		}
 		if prj.AccountID != in.AccountID {
-			return nil, status.Error(codes.FailedPrecondition,
+			return admission{}, status.Error(codes.FailedPrecondition,
 				"project_id belongs to different account")
 		}
 
@@ -227,13 +384,32 @@ func (uc *InviteUserUseCase) Execute(ctx context.Context, in InviteUserInput) (*
 		// gate is what makes the refusal say WHY, in the platform's contract tone,
 		// instead of surfacing a constraint violation.
 		if rerr := uc.assertRoleAssignableOnProject(ctx, in.RoleID, in.ProjectID, in.AccountID); rerr != nil {
-			return nil, rerr
+			return admission{}, rerr
 		}
 	}
 
-	// 4. Pre-allocate user-id (на случай INSERT в async path; при idempotent
-	// возврате existing-row id игнорируется).
-	candidateUserID := domain.UserID(ids.NewID(domain.PrefixUser))
+	// 4. Идентификатор человека в метаданных операции.
+	//
+	// ИЗВЕСТНАЯ почта — её строка (глобальный ключ почты: у человека строка
+	// одна), НЕИЗВЕСТНАЯ — кандидат, который получит новая строка. Спросить
+	// здесь, а не чеканить кандидата вслепую, нужно ради двух читателей
+	// метаданных: вызывающего, который иначе получал бы идентификатор,
+	// которого нет ни у одной строки, и разрешения осиротевшей операции,
+	// которое ищет пару «человек × аккаунт» именно по этому полю.
+	//
+	// Это НЕ проверка-перед-записью: арбитр по-прежнему оператор вставки под
+	// замком (`InsertPending`, ON CONFLICT по почте), и его исход от этого
+	// чтения не зависит. Чтение лишь называет вероятную строку; окно между ним
+	// и транзакцией (конкурентное первое появление того же человека) закрыто
+	// самой транзакцией, а разрешение сироты на промахе велит повторить —
+	// повтор идемпотентен по построению.
+	userID, err := uc.knownUserID(ctx, in.Email)
+	if err != nil {
+		return admission{}, err
+	}
+	if userID == "" {
+		userID = domain.UserID(ids.NewID(domain.PrefixUser))
+	}
 
 	// `users.invited_by` is a foreign key into `users(id)` — it names the USER who
 	// invited, and nothing else can be named there. Stamping it from the principal
@@ -248,30 +424,32 @@ func (uc *InviteUserUseCase) Execute(ctx context.Context, in InviteUserInput) (*
 	// non-user actor belongs. Same question the authz model answers through
 	// authzguard.SubjectFromPrincipal — name the principal by the type it has,
 	// never by a type that merely fits the column.
-	invitedBy := domain.UserID(authzguard.HumanUserID(ctx))
-
-	op, err := operations.NewFromContext(ctx,
-		domain.PrefixOperationIAM,
-		fmt.Sprintf("Invite user %s to account %s", in.Email, in.AccountID),
-		&iamv1.InviteUserMetadata{
-			UserId:    string(candidateUserID),
-			AccountId: string(in.AccountID),
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	if err := uc.opsRepo.Create(ctx, op); err != nil {
-		return nil, err
-	}
-
-	operations.Run(ctx, uc.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		return uc.doInvite(ctx, op.ID, candidateUserID, invitedBy, in)
-	})
-	return &op, nil
+	return admission{
+		candidateUserID: userID,
+		invitedBy:       domain.UserID(authzguard.HumanUserID(ctx)),
+	}, nil
 }
 
-// doInvite — async-часть. Возвращает marshalled User для Operation.response.
+// knownUserID — строка человека по почте, если она в платформе уже есть; пусто,
+// если нет. Прочие отказы чтения — отказ приёмки: молча подставить кандидата
+// значило бы назвать в метаданных строку, которой не будет.
+func (uc *InviteUserUseCase) knownUserID(ctx context.Context, email domain.Email) (domain.UserID, error) {
+	rd, err := uc.repo.Reader(ctx)
+	if err != nil {
+		return "", shared.MapRepoErr(err)
+	}
+	defer func() { _ = rd.Rollback(ctx) }()
+	u, err := rd.Users().GetByEmail(ctx, email)
+	switch {
+	case err == nil:
+		return u.ID, nil
+	case stderrors.Is(err, iamerr.ErrNotFound):
+		return "", nil
+	default:
+		return "", shared.MapRepoErr(err)
+	}
+}
+
 // assertRoleAssignableOnProject refuses an invitation whose role may not be bound on
 // the invited project.
 //
@@ -322,13 +500,22 @@ func (uc *InviteUserUseCase) assertRoleAssignableOnProject(
 		"role %s is not assignable on project:%s", roleID, projectID)
 }
 
-func (uc *InviteUserUseCase) doInvite(
-	ctx context.Context, opID string, candidateID, invitedBy domain.UserID, in InviteUserInput,
-) (*anypb.Any, error) {
+// inviteOutcome — что транзакция приглашения оставила после себя: строка
+// человека и её членство в названном аккаунте, прочитанное ТОЙ ЖЕ транзакцией.
+// Каждый вход потока проецирует из этого своё `response`.
+type inviteOutcome struct {
+	user       domain.User
+	membership domain.Membership
+}
+
+// run — асинхронная часть, общая для обоих глаголов: транзакция приглашения
+// плюс синхронная материализация после коммита.
+func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUserInput) (inviteOutcome, error) {
+	candidateID, invitedBy := adm.candidateUserID, adm.invitedBy
 	// 4.1 Read-side check (быстрый path для idempotent ACTIVE/PENDING).
 	rd, err := uc.repo.Reader(ctx)
 	if err != nil {
-		return nil, shared.MapRepoErr(err)
+		return inviteOutcome{}, shared.MapRepoErr(err)
 	}
 	existing, exErr := rd.Users().GetByAccountEmail(ctx, in.AccountID, in.Email)
 	_ = rd.Rollback(ctx)
@@ -340,10 +527,15 @@ func (uc *InviteUserUseCase) doInvite(
 
 	// 4.2 INSERT (или Get-existing) + AB-INSERT в одной TX.
 	type inviteTxResult struct {
-		user      domain.User
-		userIsNew bool
-		createdAB domain.AccessBinding
-		haveAB    bool
+		user       domain.User
+		userIsNew  bool
+		membership domain.Membership
+		createdAB  domain.AccessBinding
+		haveAB     bool
+		// mailAsked/mailQueued — просили ли поставить письмо и поставлено ли
+		// оно; расходятся ровно тогда, когда окно адресата полно.
+		mailAsked  bool
+		mailQueued bool
 	}
 	res, err := shared.DoWithWriteTx(ctx, uc.repo,
 		func(ctx context.Context, w Writer) (inviteTxResult, error) {
@@ -369,7 +561,7 @@ func (uc *InviteUserUseCase) doInvite(
 					DisplayName:  dn,
 					InviteStatus: domain.InviteStatusPending,
 					InvitedBy:    invitedBy,
-				})
+				}, uc.inviteDeadline())
 				if err != nil {
 					return inviteTxResult{}, err
 				}
@@ -485,42 +677,72 @@ func (uc *InviteUserUseCase) doInvite(
 				}}); ferr != nil {
 					return inviteTxResult{}, ferr
 				}
-				// ПИСЬМО ПРИГЛАШЕНИЯ — намерение в очередь, В ЭТОЙ ЖЕ транзакции
-				// (Р23/Р25 приёмки ID-MAIL-1). Атомарность несущая: при откате
-				// приглашения намерения нет ВОВСЕ, поэтому письма о приглашении,
-				// которого не случилось, не бывает by construction. Прямой вызов
-				// ретранслятора отсюда не дал бы ни этого, ни переживания
-				// намерением смерти процесса.
-				//
-				// ПОЧЕМУ ТОЛЬКО НА ЗАВЕДЕНИИ СТРОКИ, а не на каждом вызове.
-				// Повторное приглашение того же адреса в тот же аккаунт
-				// идемпотентно и сюда не доходит (быстрый путь выше отдаёт
-				// существующую строку) — значит письмо уходит РОВНО ОДНО на
-				// (аккаунт, адрес), и предел этот держится построением, а не
-				// ручкой. Эмиссия на каждом вызове сделала бы приглашение
-				// средством рассылки: обладатель права приглашать слал бы на
-				// произвольный адрес со скоростью вызовов API. Повторная отправка
-				// — предмет СВОЕГО глагола со своим ограничением частоты (§10
-				// пп. 9 и 17 приёмки), и она не заводится здесь молча.
-				//
-				// Адрес страницы входа намеренно НЕ передаётся: он величина
-				// установки, а не сведение use-case'а, и подставляет его
-				// отправитель из своей настройки.
-				if merr := w.EmitInviteMail(ctx,
-					string(out.user.ID), string(out.user.AccountID), string(in.Email), "",
-				); merr != nil {
+			}
+			// ПИСЬМО ПРИГЛАШЕНИЯ — намерение в очередь, В ЭТОЙ ЖЕ транзакции
+			// (Р23/Р25 приёмки ID-MAIL-1). Атомарность несущая: при откате
+			// приглашения намерения нет ВОВСЕ, поэтому письма о приглашении,
+			// которого не случилось, не бывает by construction. Прямой вызов
+			// ретранслятора отсюда не дал бы ни этого, ни переживания
+			// намерением смерти процесса.
+			//
+			// ПИСЬМО УХОДИТ, ПОКА ПРИГЛАШЕНИЕ НЕ ВЫКУПЛЕНО, — и на заведении
+			// строки, и на повторном приглашении того же адреса в тот же аккаунт
+			// (MAIL-36: повтор идемпотентен, письмо отправляется повторно В
+			// ПРЕДЕЛАХ ограничения частоты). Здесь стояло «только на заведении
+			// строки», и предел держался построением, потому что ограничителя
+			// ещё не было; теперь предел держит ОКНО АДРЕСАТА, которое писатель
+			// очереди списывает перед постановкой (MAIL-25), и обладатель права
+			// приглашать не сделает из глагола средство рассылки.
+			//
+			// Выкупленному (ACTIVE) и заблокированному письмо не уходит:
+			// приглашать некуда, а писать «вы приглашены» тому, кто уже в
+			// аккаунте, значит слать письмо без предмета.
+			//
+			// Адрес страницы входа намеренно НЕ передаётся: он величина
+			// установки, а не сведение use-case'а, и подставляет его
+			// отправитель из своей настройки.
+			if out.user.InviteStatus == domain.InviteStatusPending {
+				queued, merr := w.EmitInviteMail(ctx, outboxtypes.InviteMailIntent{
+					UserID:    string(out.user.ID),
+					AccountID: string(in.AccountID),
+					To:        string(in.Email),
+					Limit:     uc.mailLimit,
+				})
+				if merr != nil {
 					return inviteTxResult{}, merr
 				}
+				out.mailQueued = queued
+				out.mailAsked = true
 			}
+			// ЧЛЕНСТВО ЧИТАЕТСЯ ЗДЕСЬ — ЭТОЙ ЖЕ ТРАНЗАКЦИЕЙ, ДО ФИКСАЦИИ. Строка
+			// заведена (или уже была) вставкой выше, и ответ операции создания
+			// членства обязан нести именно её: идентификатор, состояние (из
+			// личности) и след приглашения. Чтение после коммита узким корнем
+			// шло бы на пул чтения, а на реплике этой строки могло бы ещё не быть.
+			// Пары нет только при нарушенной конструкции хранилища — вставка
+			// заводит её тем же оператором, — поэтому отсутствие здесь ОТКАЗ, а
+			// не пустой ответ.
+			m, merr := w.Users().Membership(ctx, out.user.ID, in.AccountID)
+			if merr != nil {
+				return inviteTxResult{}, fmt.Errorf("membership of %s in %s after invite: %w",
+					out.user.ID, in.AccountID, merr)
+			}
+			out.membership = m
 			return out, nil
 		})
 	if err != nil {
-		return nil, err
+		return inviteOutcome{}, err
 	}
 	user := res.user
 	userIsNew := res.userIsNew
 	createdAB := res.createdAB
 	haveAB := res.haveAB
+	// Исход намерения считается ПОСЛЕ коммита: до него намерение ещё может
+	// откатиться вместе с приглашением, и счётчик утверждал бы о письме,
+	// которого не поставили.
+	if res.mailAsked {
+		uc.observeMailIntent(res.mailQueued)
+	}
 
 	// Указатели на предков (привязка→проект, пользователь→аккаунт) СО-КОММИЧЕНЫ
 	// строкой журнала в транзакции выше — здесь их больше не пишут. Членство
@@ -549,12 +771,35 @@ func (uc *InviteUserUseCase) doInvite(
 		uc.reconcileObject(ctx, "iam.user", string(user.ID))
 	}
 
-	// The Kratos magic-link
-	// step that used to run here was removed; activation of the freshly
-	// invited PENDING row is now the broker's responsibility.
-	_ = opID
+	return inviteOutcome{user: user, membership: res.membership}, nil
+}
 
-	return marshalUser(user)
+// observeMailIntent — исход намерения отправки в счётчик. Ответ глагола от
+// исхода не зависит (Р9): сверхнормативное письмо не отправляется молча для
+// вызывающего и ГРОМКО для оператора — только здесь это различие и существует.
+func (uc *InviteUserUseCase) observeMailIntent(queued bool) {
+	if uc.mailIntents == nil {
+		return
+	}
+	if queued {
+		uc.mailIntents.IncInviteMailIntent(MailIntentQueued)
+		return
+	}
+	uc.mailIntents.IncInviteMailIntent(MailIntentRateLimited)
+}
+
+// inviteDeadline — момент, после которого выданное сейчас приглашение перестанет
+// активироваться. Нулевое время означает «срок не назначен».
+//
+// Отсчёт ведётся ЗДЕСЬ, а не в хранилище: срок есть свойство ВЫДАЧИ, и считать
+// его надо от неё. Вычисление в хранилище от времени строки дало бы ту же
+// величину сегодня и другую после правки ручки — у приглашений, выданных под
+// прежней.
+func (uc *InviteUserUseCase) inviteDeadline() time.Time {
+	if uc.inviteTTL <= 0 {
+		return time.Time{}
+	}
+	return time.Now().UTC().Add(uc.inviteTTL)
 }
 
 // reconcileObject runs the post-commit synchronous per-object materialization via the

@@ -42,6 +42,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzfilter"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
@@ -394,4 +395,10 @@ func (usrUnrestrictedVisibility) ScopeOf(_ context.Context, _ visibility.Subject
 // исключения из аккаунта (#1127).
 func (*scopeUserRdr) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
+}
+
+// Membership — дублёр членства ПАРОЙ не читает: предмет этих проб другой, и
+// подставная строка была бы утверждением, которого никто не делал (kaname#181).
+func (*scopeUserRdr) Membership(context.Context, domain.UserID, domain.AccountID) (domain.Membership, error) {
+	return domain.Membership{}, iamerr.ErrNotFound
 }

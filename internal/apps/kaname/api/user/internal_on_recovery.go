@@ -80,7 +80,11 @@ const auditEventUserRecoveryCompleted = "iam.user.recovery_completed"
 
 // recoveryRevokeReason — the user_token_revocations reason for a recovery-driven
 // revoke-all (per proto docstring: password recovery == credential change).
-const recoveryRevokeReason = "password-change"
+//
+// Одно объявление на предмет: смена пароля по нашей полосе (Ф3) пишет ТУ ЖЕ
+// причину, и словарь причин объявлен в домене, а не литералом у каждого
+// писателя — два литерала об одной причине разошлись бы молча.
+const recoveryRevokeReason = domain.RevokeReasonPasswordChange
 
 // OnRecoveryCompletedInput — transport-agnostic input.
 type OnRecoveryCompletedInput struct {

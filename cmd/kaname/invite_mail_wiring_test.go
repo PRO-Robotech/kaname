@@ -19,6 +19,7 @@ import (
 	"github.com/PRO-Robotech/corelib/outbox/drainer"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/PRO-Robotech/kaname/internal/clients"
 )
 
 // Test_InviteMailDrainerConfig_PatienceOutlastsTheAttempt — требование, ради
@@ -115,4 +116,39 @@ func Test_BuildMailRelay_UnconfiguredLaneStillBoots(t *testing.T) {
 	require.Error(t, err,
 		"якорь доверия, которого нет на диске, — отказ сборки: полоса объявлена "+
 			"шифрованной, а проверить сертификат нечем")
+}
+
+// Test_BuildMailRelay_URIFormReachesTheTransportAsTheVendorReadsIt — сборка
+// отправителя применяет ТОТ ЖЕ разбор адреса, что страж старта: узел, посадка из
+// схемы и имя пользователя из адреса доезжают до транспорта, а пароль — из
+// окружения по объявленному имени (Р6).
+//
+// Положительный контроль — голая форма: посадку по-прежнему называет ручка, имя
+// — окружение. Без него проба зеленела бы на сборке, игнорирующей форму вовсе.
+func Test_BuildMailRelay_URIFormReachesTheTransportAsTheVendorReadsIt(t *testing.T) {
+	t.Setenv("KANAME_TEST_INVITE_MAIL_PASSWORD", "pw-from-secret")
+	t.Setenv("KANAME_TEST_INVITE_MAIL_USER", "user-from-env")
+
+	relay, err := buildMailRelay(config.InviteMailConfig{
+		Relay:       "smtps://noreply%40kacho.cloud@relay.example:465",
+		From:        "noreply@kacho.cloud",
+		PasswordEnv: "KANAME_TEST_INVITE_MAIL_PASSWORD",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "relay.example:465", relay.Addr, "транспорт получает узел, а не адрес целиком")
+	assert.Equal(t, clients.MailTLSImplicit, relay.TLSMode, "посадка — из схемы адреса")
+	assert.Equal(t, "noreply@kacho.cloud", relay.Username, "имя — из адреса, раскодированным")
+	assert.Equal(t, "pw-from-secret", relay.Password, "пароль — из окружения по объявленному имени")
+
+	bare, err := buildMailRelay(config.InviteMailConfig{
+		Relay: "relay.example:2525", From: "noreply@kacho.cloud",
+		UsernameEnv: "KANAME_TEST_INVITE_MAIL_USER", PasswordEnv: "KANAME_TEST_INVITE_MAIL_PASSWORD",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "relay.example:2525", bare.Addr)
+	assert.Equal(t, clients.MailTLSStartTLS, bare.TLSMode, "голый адрес: посадка из ручки, умолчание — STARTTLS")
+	assert.Equal(t, "user-from-env", bare.Username)
+
+	_, err = buildMailRelay(config.InviteMailConfig{Relay: "smtp://relay.example:587/?disable_starttls=true"})
+	require.Error(t, err, "сборка не вправе принять адрес, который страж отверг бы")
 }

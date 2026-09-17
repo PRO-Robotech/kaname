@@ -14,7 +14,7 @@
 // тот, кто в этот день ставит службу впервые.
 //
 // Поэтому перечень в документе ПОРОЖДАЕТСЯ отсюда и сверяется гейтом
-// (services/iam/tools/operatordocs), а сама таблица доказывается ПРОГОНОМ
+// (tools/operatordocs), а сама таблица доказывается ПРОГОНОМ
 // (required_settings_test.go): снятая величина обязана уронить старт, а поданная
 // объявленным путём — отказ снять. Строка, которой страж не требует, и строка,
 // чей путь подачи не работает, роняют прогон одинаково.
@@ -363,6 +363,46 @@ var RequiredSettings = []RequiredSetting{
 	ownCeilingRequirement("iam.account", "1"),
 	ownCeilingRequirement("iam.user.credential", "2"),
 	ownCeilingRequirement("iam.serviceAccount.credential", "2"),
+
+	// ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) — величины посадки `own`; строки
+	// ВЫВОДЯТСЯ из перечня ручек полосы, а не выписываются рядом с ним.
+	loginLaneRequirement("session-ttl", "24h",
+		"срок нашей сессии человека, абсолютный, от выдачи. Умолчания нет: перенос прежней величины (24 ч) объявляется профилем, а не построением"),
+	loginLaneRequirement("cookie-domain", CookieDomainNone,
+		"ключ Domain печенья сессии: доменное имя origin консоли либо слово «none» на адресной посадке — там браузер отбрасывает печенье с Domain=IP целиком. Пропуск и «none» обязаны различаться"),
+	loginLaneRequirement("address-attempts", "5",
+		"сколько неверных предъявлений пароля по одному адресу допускается в окне до отказа по частоте"),
+	loginLaneRequirement("address-window", "15m",
+		"окно счёта неверных предъявлений по адресу"),
+	loginLaneRequirement("source-attempts", "50",
+		"сколько неверных предъявлений с одного источника (адрес из X-Forwarded-For края) допускается в окне"),
+	loginLaneRequirement("source-window", "15m",
+		"окно счёта неверных предъявлений по источнику"),
+	// РЕГИСТРАЦИЯ НАШЕЙ ПОЛОСОЙ (Ф4, kacho#1270) — величины посадки `own`;
+	// строки ВЫВОДЯТСЯ из перечня ручек регистрации.
+	registrationRequirement("admissions-per-window", "3",
+		"потолок ТЕМПА заведения аккаунтов одной личностью: сколько за окно СВЕРХ первого. Первое заведение — регистрация — проходит безусловно; величина ограничивает повторную регистрацию адресом и последующие заведения аккаунтов того же человека. Носитель ключа на этой посадке — адрес, которым человек представился (Ф4 Р5). 0 законен: сверх первого — ни одного. Служба проецирует величину в схему на старте; под `external` строку авторитета правит администратор"),
+	registrationRequirement("admission-window", "1h",
+		"окно счёта заведений аккаунтов одной личностью"),
+	loginLaneRequirement("password-min-length", "8",
+		"минимальная длина пароля в знаках — одно правило на вход, регистрацию и восстановление; перенос прежней величины (8) объявляется профилем"),
+	loginLaneRequirement("breach-check", BreachCheckDisabled,
+		"проверка нового пароля по базе утечек: «enabled» с адресом авторитета либо «disabled» словом; необъявленное — отказ старта, потому что выключенная молча проверка неотличима от настроенной"),
+	loginLaneRequirement("hasher-format", "argon2id",
+		"формат вновь заводимых значений пароля из перечня записываемых; параметры стоимости — hasher-memory, hasher-iterations, hasher-parallelism, между полом и потолком перечня"),
+	loginLaneRequirement("hasher-memory", "65536",
+		"параметр стоимости argon2id: память, КиБ"),
+	loginLaneRequirement("hasher-iterations", "3",
+		"параметр стоимости argon2id: проходы"),
+	loginLaneRequirement("hasher-parallelism", "4",
+		"параметр стоимости argon2id: параллелизм"),
+	loginLaneRequirement("verifier-capacity", "4",
+		"сколько проверок пароля идут одновременно; ёмкость × память на потолке + резерв обязаны помещаться в предел памяти контейнера — страж старта сверяет числа"),
+	loginLaneRequirement("memory-reserve-bytes", "268435456",
+		"резерв памяти процесса сверх проверок пароля, байт"),
+	// ВОССТАНОВЛЕНИЕ ДОСТУПА на той же полосе (Ф5, kacho#1271).
+	loginLaneRequirement("recovery-code-ttl", "5m",
+		"срок кода восстановления доступа, от чеканки; код однократен и после срока не оживает. Умолчания нет: перенос прежней величины (5 мин) объявляется профилем, а не построением"),
 	{
 		Key:    "authn.hook-shared-secret",
 		Env:    "KANAME_HOOK_TOKEN",
@@ -381,6 +421,30 @@ var RequiredSettings = []RequiredSetting{
 			"Принимает перечень через запятую — первый оборачивает, все открывают; так ключ обёртки " +
 			"и меняется, без простоя и без переписывания хранилища",
 		Refusal: "authn.jwks-encryption-key-hex",
+	},
+	// ВТОРОЙ ФАКТОР (Ф12, kacho#1281) — величины полосы `own`.
+	{
+		Key:    "authn.second-factor-encryption-key-hex",
+		Env:    "KANAME_SECOND_FACTOR_ENC_KEY",
+		Supply: SupplyEnv,
+		Lanes:  []IdentityProvider{IdentityProviderOwn},
+		Sample: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+		Why: "перечень ключей ОБЁРТКИ секретов второго фактора (код по времени): 32 байта в hex (64 знака) " +
+			"через запятую — первый оборачивает, все открывают. СВОЯ ручка, а не ключ подписного ключа: " +
+			"предмет другой (секретов много, по одному на человека), и смена одного перечня не обязана " +
+			"останавливать другой",
+		Refusal: "authn.second-factor-encryption-key-hex",
+	},
+	{
+		Key:    "authn.self-service-freshness",
+		Env:    "KANAME_AUTHN__SELF_SERVICE_FRESHNESS",
+		Supply: SupplyEnv,
+		Lanes:  []IdentityProvider{IdentityProviderOwn},
+		Sample: "15m",
+		Why: "окно свежести правки своих данных от последнего предъявления: заведение и подтверждение " +
+			"второго фактора требуют предъявления не старше окна, и тем же окном ограничен срок " +
+			"неподтверждённого заведения. Умолчания нет: перенос прежней величины (15 мин) объявляется профилем",
+		Refusal: "authn.self-service-freshness",
 	},
 	{
 		Key:    "api-server.registry-token.service",
@@ -566,4 +630,35 @@ func ownCeilingRequirement(kind domain.LimitKind, sample string) RequiredSetting
 	// двух объявлений. Паника здесь законна: это инициализация пакета, и
 	// молчаливая пустая строка дала бы документ без величины при живом страже.
 	panic("own ceiling knob for kind " + string(kind) + " is not declared")
+}
+
+// registrationRequirement — строка таблицы для ручки регистрации (Ф4): ключ и
+// переменная берутся у перечня ручек (`RegistrationKnobs`).
+func registrationRequirement(short, sample, why string) RequiredSetting {
+	key := registrationKeyPrefix + short
+	return RequiredSetting{
+		Key:     key,
+		Env:     registrationEnv(key),
+		Supply:  SupplyEnv,
+		Lanes:   []IdentityProvider{IdentityProviderOwn},
+		Sample:  sample,
+		Why:     why,
+		Refusal: key,
+	}
+}
+
+// loginLaneRequirement — строка таблицы для ручки полосы входа: ключ и
+// переменная берутся у перечня ручек (`LoginLaneKnobs`), чтобы второе
+// написание не разошлось с первым.
+func loginLaneRequirement(short, sample, why string) RequiredSetting {
+	key := loginLaneKeyPrefix + short
+	return RequiredSetting{
+		Key:     key,
+		Env:     loginLaneEnv(key),
+		Supply:  SupplyEnv,
+		Lanes:   []IdentityProvider{IdentityProviderOwn},
+		Sample:  sample,
+		Why:     why,
+		Refusal: key,
+	}
 }

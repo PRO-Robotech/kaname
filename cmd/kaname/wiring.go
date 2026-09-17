@@ -24,6 +24,7 @@ import (
 	bootstraptoken "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token"
 	clusterapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/cluster"
 	groupapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/group"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	identityquotaapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/identityquota"
 	interactiveclientapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/interactive_client"
 	internaliamapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam"
@@ -47,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
@@ -59,6 +61,9 @@ import (
 // россыпи локальных переменных в runServe). Заполняется buildServices,
 // используется register{Public,Internal}Services.
 type services struct {
+	// humanSessionHandler — InternalHumanSessionService.Resolve (Ф3). Ставится
+	// корнем ПОСЛЕ сборки: полоса входа строится отдельно и только под `own`.
+	humanSessionHandler   *humansession.Handler
 	accountHandler        *accountapp.Handler
 	projectHandler        *projectapp.Handler
 	userHandler           *userapp.Handler
@@ -106,6 +111,17 @@ type services struct {
 	// авторизацией этой поверхности: ступень подтверждения личности к ней
 	// сегодня не применяется — решение записано в приёмке, а не умолчание.
 	moduleHandler *moduleapp.Handler
+
+	// bindingReconciler — ТОТ ЖЕ экземпляр материализации привязки, вынесенный
+	// наружу для полосы ПЕРВОГО ВХОДА (`hooks_mux.go`).
+	//
+	// Полем, а не вторым построением. Шапка построения ниже обещает «created once
+	// here so every consumer drives the same instance», и до задачи #116 это было
+	// неправдой: хук собирал свой экземпляр БЕЗ приёмника размера, поэтому
+	// гистограмма не видела живой полосы регистрации человека — и выглядела при
+	// этом полной. Гистограмма, не видящая полосы, неотличима от гистограммы
+	// полосы, по которой нет трафика.
+	bindingReconciler *reconcileapp.Reconciler
 
 	// subscriptionDoor — ТА ЖЕ дверь решения, что у списков, вынесенная наружу
 	// для сборки сервера потока изменений.
@@ -273,11 +289,18 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		os.Exit(1)
 	}
 
-	// rsabReconciler — the SINGLE per-object materialization engine (RBAC
-	// explicit-model 2026 P4). Shared by AccessBinding.Create, the Role.Update
-	// membership fan-out, AND the P6 Account.Create owner auto-binding
-	// materialization (C-01/C-01b). Created once here so every consumer drives the
-	// same instance.
+	// rsabReconciler — the SINGLE per-object materialization engine of the REQUEST
+	// PATH (RBAC explicit-model 2026 P4). Shared by AccessBinding.Create, the
+	// Role.Update membership fan-out, the P6 Account.Create owner auto-binding
+	// materialization (C-01/C-01b) AND the first-login provision hook, which takes
+	// this very instance through `services.bindingReconciler` — it used to build
+	// its own, without the size recorder (#116).
+	//
+	// «Every consumer» здесь означает потребителей ПУТИ ЗАПРОСА, и это не оговорка:
+	// фоновый воркер обхода (`serve.go`) строит свой экземпляр со своим именем
+	// в журнале, и его материализации в эту гистограмму НЕ попадают. Решение
+	// о том, должны ли они туда попадать, не принималось — предмет заведён
+	// задачей #157.
 	rsabReconciler := reconcileapp.New(kanamepg.NewReconcileAdapter(pool, catalogSource), logger, catalogSource)
 	if metricsReg != nil {
 		// Размер материализации привязки — измерение, не потолок. Он ничего не
@@ -359,7 +382,17 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithActivationObserver(metricsReg.InviteActivationRecorder())
 	userInvite := userapp.NewInviteUserUseCase(kanameRepo, opsRepo, relationStore).
 		WithRelationStore(relationStore, logger).
-		WithObjectReconciler(rsabReconciler)
+		WithObjectReconciler(rsabReconciler).
+		// Срок строки приглашения (приёмка ID-MAIL-1, §10 п. 22). Величина
+		// читается ЗДЕСЬ и передаётся use-case'у: настройки читает
+		// композиционный корень, а не бизнес-логика. Умолчание живёт у ручки,
+		// поэтому молчащая посадка получает его, а не «без срока».
+		WithInviteTTL(cfg.Invite.TTLOrDefault()).
+		// Ограничение частоты писем на адрес (приёмка ID-MAIL-1, Р14/Р22,
+		// MAIL-25) — одно на оба глагола, отправляющих письмо; счётчик исходов
+		// намерения — тоже один. Величину судит страж старта: непозитивную он
+		// не пропускает, поэтому здесь читается уже проверенное.
+		WithInviteMailRateLimit(inviteMailRateLimit(cfg), metricsReg.InviteMailIntentRecorder())
 	userOnRecovery := userapp.NewOnRecoveryCompletedUseCase(kanameRepo, opsRepo).
 		WithLogger(logger)
 	// Block/Unblock — административный запрет участию и его снятие. Два РАЗНЫХ
@@ -370,8 +403,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// Исключение из аккаунта — пара к приглашению: тот вводит человека в
 	// аккаунт, этот выводит (#1127). Строку личности не трогает.
 	userRemoveFromAccount := userapp.NewRemoveFromAccountUseCase(kanameRepo, opsRepo)
+	// Повторная отправка письма приглашения — то, что приходит взамен снятого
+	// поля ссылки (ID-MAIL-1, §10 п. 9). Право приглашать спрашивается у того
+	// же клиента, что у Invite; ограничение частоты и счётчик — те же.
+	userResendInvite := userapp.NewResendInviteUseCase(kanameRepo, opsRepo, relationStore,
+		inviteMailRateLimit(cfg), metricsReg.InviteMailIntentRecorder())
 	userHandler := userapp.NewHandler(userGet, userList, userUpdate, userDelete, userInvite,
 		userBlock, userUnblock, userRemoveFromAccount).
+		WithResendInvite(userResendInvite).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 	internalUserHandler := userapp.NewInternalHandler(userUpsert, userGet, userOnRecovery)
 
@@ -427,16 +466,29 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		groupAdd, groupRemove, groupListMembers).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 
-	// MembershipService — чтение членства на аккаунт-скоупных путях.
+	// MembershipService — чтение членства на аккаунт-скоупных путях и создание
+	// на плоской коллекции (kaname#181, IAM-ID-1 §4 S3.2).
 	//
-	// Ни клиента модели прав, ни фильтра страницы здесь НЕТ, и это утверждение,
-	// а не пропуск: единственный гейт этих чтений — пообъектная проверка КРАЯ по
-	// аккаунту из пути, а строки отбираются тем же аккаунтом в условии запроса.
-	// Провязать сюда второй замок значило бы заменить проверку края кодом,
-	// который можно забыть в следующей ветке.
+	// У АККАУНТ-СКОУПНЫХ ЧТЕНИЙ ни клиента модели прав, ни фильтра страницы
+	// здесь НЕТ, и это утверждение, а не пропуск: единственный гейт этих чтений
+	// — пообъектная проверка КРАЯ по аккаунту из пути, а строки отбираются тем
+	// же аккаунтом в условии запроса. Провязать сюда второй замок значило бы
+	// заменить проверку края кодом, который можно забыть в следующей ветке.
+	//
+	// СВОЙ СПИСОК (стадия S2) фильтра тоже не несёт — его сужение и есть
+	// личность вызывающего: человек берётся из принципала и уходит доводом
+	// запроса, других входов у чтения нет (`membershipapp/list_mine.go`).
+	//
+	// СОЗДАНИЕ — тот же поток, что `UserService.Invite`, и провязывается ТЕМ ЖЕ
+	// экземпляром use-case'а (`userInvite`): реконсайлер, срок приглашения и
+	// клиент модели прав у обоих глаголов одни. Второй экземпляр разошёлся бы с
+	// первым в провязке молча — и разошёлся бы на самом чувствительном: на том,
+	// что материализуется после коммита.
 	membershipHandler := membershipapp.NewHandler(
 		membershipapp.NewGetMembershipUseCase(membershipRepo),
 		membershipapp.NewListMembershipsUseCase(membershipRepo),
+		membershipapp.NewListMyMembershipsUseCase(membershipRepo),
+		userInvite,
 	)
 
 	// RoleService.
@@ -586,8 +638,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		WithRevoke(abRevoke)
 
 	// ── AuthZ core wiring ─────────────────────────────────────────────────
-	authzServices := buildAuthZServices(pool, opsRepo, kanameRepo, relationStore,
-		metricsReg, cfg.AuthN.Mode.IsProduction(), logger)
+	authzServices := buildAuthZServices(kanameRepo, relationStore,
+		metricsReg, cfg.AuthN.Mode.IsProduction())
 	// InternalIAMService — LookupSubject (for the api-gateway
 	// auth-interceptor) + Check (delegates to AuthorizeService.CheckRelation
 	// — same FGA + OPA pipeline). Internal listener only, port 9091: never on
@@ -617,6 +669,11 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// сборки» молчалив — верный ответ на посеянных типах и неверный на
 		// заведённых применением манифеста в работающем процессе.
 		kanamepg.NewCatalogTypeReader(),
+		// Публикация для анонимного чтения — со СВОИМ порядком: версия владельца,
+		// сравниваемая хранилищем, и надгробие снятия (kaname#107). Параметр, а не
+		// опция: без порта у публикации нет порядка, и запоздавшая доставка открытия
+		// после закрытия вернула бы анонимное чтение приватному объекту.
+		kanamepg.NewPublicReadPublisher(),
 	).
 		WithReconcile(kanamepg.NewReconcileEventEmitter()).
 		WithAccountResolver(kanamepg.NewProjectAccountResolver()).
@@ -923,7 +980,8 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		userTokensHandler: userTokensH,
 
 		// ЗНАЧЕНИЕ, которое держат стражи, собираемые в runServe.
-		ownGates: relationStore,
+		ownGates:          relationStore,
+		bindingReconciler: rsabReconciler,
 	}
 }
 
@@ -1161,11 +1219,8 @@ type authzServiceBundle struct {
 // движка то, чего обёртка не добавляла. Добавлять больше нечего: цепь областей и
 // надзор администратора облака форма поднимает своим планом, поэтому «два ответа
 // на один вопрос» перестало быть возможным by construction, а не по договорённости.
-func buildAuthZServices(pool *pgxpool.Pool, opsRepo operations.Repo,
-	kanameRepo kanamerepo.Repository, ownGates *authzcascade.Client,
-	metricsReg *metrics.Registry,
-	prodMode bool, logger *slog.Logger) authzServiceBundle {
-	_ = opsRepo // операции здесь больше не создаются: их создавал снятый писатель кортежей
+func buildAuthZServices(kanameRepo kanamerepo.Repository, ownGates *authzcascade.Client,
+	metricsReg *metrics.Registry, prodMode bool) authzServiceBundle {
 
 	// ClusterAdminChecker — плоский надзор администратора облака. Он спрашивает о
 	// типе `cluster`, то есть о ДРУГОМ объекте, чем тот, о котором идёт вопрос, —
@@ -1224,4 +1279,13 @@ func (r *forceLogoutSubjectResolver) ExternalIDOf(ctx context.Context, id domain
 		return "", err
 	}
 	return string(u.ExternalID), nil
+}
+
+// inviteMailRateLimit — ограничение частоты писем на адрес из настройки, в
+// форме порта. Страж старта уже отверг непозитивное; здесь только перенос.
+func inviteMailRateLimit(cfg config.Config) outboxtypes.InviteMailRateLimit {
+	return outboxtypes.InviteMailRateLimit{
+		MaxPerWindow: cfg.Invite.MailRateLimit.MaxPerWindow,
+		Window:       cfg.Invite.MailRateLimit.Window,
+	}
 }

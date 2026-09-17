@@ -331,9 +331,22 @@ module-manifest-check:
 ## helm-render-guard — офлайновый страж рендера чарта: вход, который чарт отдаёт
 ## процессу, обязан пройти страж старта.
 ##
-## Живёт отдельной целью, а не внутри `test`, потому что требует helm, а тот
-## пришпилен ровно к одной job конвейера (`helm` в .github/workflows/ci.yaml).
-## Провязку держит гейт класса internal/repohygiene/artifactgates/renderguard_test.go.
+## Живёт отдельной целью, а не внутри `test`, потому что требует helm, а его на
+## машине разработчика может не быть: `deploy/render-guard.sh` без ручки полосы
+## считает отсутствие helm ТРЕТЬИМ ИСХОДОМ и выходит нулём — цель не вправе
+## объявлять находкой чужую машину.
+##
+## ЧТО ЭТА ЦЕЛЬ НЕ ДЕЛАЕТ: она судит РЕНДЕР и пода не поднимает. Установку и
+## готовность выката в боевой посадке судит задание `chart` процесса
+## `.github/workflows/e2e-newman.yml` (`.github/scripts/stand-chart.sh up` и
+## `assert`, kind). Половины ДВЕ, и рендер без подъёма закрывает одну: чарт,
+## который рендерится и не поднимается, — отдельный класс.
+##
+## Здесь стояло «helm пришпилен ровно к одной job конвейера (`helm` в
+## .github/workflows/ci.yaml)» и держателем назывался гейт
+## `internal/repohygiene/artifactgates/renderguard_test.go`. Ни файла `ci.yaml`,
+## ни задания `helm`, ни этого гейта в дереве нет: утверждение пережило своё
+## дерево вместе с выносом службы (kaname#109).
 helm-render-guard:
 	@bash deploy/render-guard.sh
 
@@ -696,6 +709,36 @@ proto-gen-diff:
 	  git diff --stat -- pkg/api; \
 	  exit 1; }
 	@echo "ЗЕЛЁНЫЙ: заглушки совпадают с контрактами."
+
+# service-manifest-embed — вшитая копия манифеста службы из манифеста дерева
+# (приёмка MRW-1, Р2; задача kaname#106).
+#
+# Манифест службы приезжает применителю посева ВСТРОЕННЫМ В ОБРАЗ: доставка
+# собирается обходом дерева платформы, где службы больше нет, а копия её
+# манифеста в чужом репозитории запрещена (ban #20). Директива встраивания
+# родительского каталога не принимает, поэтому копия лежит в каталоге пакета
+# `internal/servicemanifest` — под именем, которое обход дерева манифестом не
+# считает (второй `manifest.yaml` был бы вторым объявлением модуля `iam`).
+#
+# Цель копию ПОРОЖДАЕТ, а не держит равенство: его держит проба
+# `internal/servicemanifest` TestEmbeddedManifestIsByteIdenticalToTheTree —
+# правка `manifest.yaml` без пересборки копии роняет ЕЁ. Образец пары —
+# `fga-model-embed` ниже.
+SERVICE_MANIFEST_TREE  := manifest.yaml
+SERVICE_MANIFEST_EMBED := internal/servicemanifest/manifest.embedded.yaml
+.PHONY: service-manifest-embed
+
+## service-manifest-embed — вшитая копия манифеста службы из манифеста дерева (побайтово)
+service-manifest-embed:
+	@test -s "$(SERVICE_MANIFEST_TREE)" || { \
+	  echo "манифеста дерева нет либо он пуст: $(SERVICE_MANIFEST_TREE)"; \
+	  echo "Порождать копию из ничего нельзя: вшитый текст И ЕСТЬ тот, по которому"; \
+	  echo "применитель посева заводит группу службы и её выдачу."; \
+	  exit 1; }
+	cp "$(SERVICE_MANIFEST_TREE)" "$(SERVICE_MANIFEST_EMBED)"
+	@cmp -s "$(SERVICE_MANIFEST_TREE)" "$(SERVICE_MANIFEST_EMBED)" || { \
+	  echo "копии разошлись сразу после копирования"; exit 1; }
+	@echo "вшитая копия манифеста службы обновлена из манифеста дерева (побайтово)."
 
 # fga-model-embed — вшитая копия модели прав из канонической.
 #

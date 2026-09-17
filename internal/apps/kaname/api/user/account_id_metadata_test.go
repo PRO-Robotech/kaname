@@ -27,6 +27,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
@@ -219,7 +220,7 @@ type fakeUsrWtr struct {
 func (w *fakeUsrWtr) Upsert(_ context.Context, u domain.User) (domain.User, bool, error) {
 	return u, false, nil
 }
-func (w *fakeUsrWtr) InsertPending(_ context.Context, u domain.User) (domain.User, bool, error) {
+func (w *fakeUsrWtr) InsertPending(_ context.Context, u domain.User, _ time.Time) (domain.User, bool, error) {
 	return u, false, nil
 }
 func (w *fakeUsrWtr) ActivateInvite(_ context.Context, id domain.UserID, _ domain.ExternalSubject, _ domain.DisplayName) (domain.User, error) {
@@ -323,6 +324,12 @@ func (*fakeUsrRdr) MembershipExists(context.Context, domain.UserID, domain.Accou
 	return false, nil
 }
 
+// Membership — дублёр членства ПАРОЙ не читает: предмет этих проб другой, и
+// подставная строка была бы утверждением, которого никто не делал (kaname#181).
+func (*fakeUsrRdr) Membership(context.Context, domain.UserID, domain.AccountID) (domain.Membership, error) {
+	return domain.Membership{}, iamerr.ErrNotFound
+}
+
 // RemoveMembership — дублёр исключения из аккаунта не делает: предмет этой
 // пробы другой. Снятие членства проверяется своими пробами (#1127).
 func (*fakeUsrWtr) RemoveMembership(context.Context, domain.UserID, domain.AccountID) (bool, error) {
@@ -334,12 +341,15 @@ func (*fakeUsrWtr) RemoveMembership(context.Context, domain.UserID, domain.Accou
 // партиции отвергаются здесь так же, как ограничением миграции, — иначе фикстура
 // была бы снисходительнее продукта и скрыла бы ровно тот дефект, ради которого её
 // подставляют.
-func (w *fakeUsrWriter) EmitInviteMail(_ context.Context, userID, _, to, _ string) error {
-	if to == "" {
-		return fmt.Errorf("invite mail: recipient required")
+func (w *fakeUsrWriter) EmitInviteMail(_ context.Context, intent outboxtypes.InviteMailIntent) (bool, error) {
+	if intent.To == "" {
+		return false, fmt.Errorf("invite mail: recipient required")
 	}
-	if userID == "" {
-		return fmt.Errorf("invite mail: user id required")
+	if intent.UserID == "" {
+		return false, fmt.Errorf("invite mail: user id required")
 	}
-	return nil
+	if intent.Limit.MaxPerWindow <= 0 || intent.Limit.Window <= 0 {
+		return false, fmt.Errorf("invite mail: rate limit must be positive — there is no «unlimited»")
+	}
+	return true, nil
 }

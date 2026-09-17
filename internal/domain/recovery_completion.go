@@ -9,12 +9,17 @@ import (
 	"go.uber.org/multierr"
 )
 
-// RecoveryCompletion — one row of the Kratos recovery-completed idempotency
-// ledger (migration 0015). PK recovery_jti dedups at-least-once webhook
-// delivery. The row stores the deterministic primary
-// user_id (first row by created_at ASC) and the revoked session count so a
-// duplicate delivery can replay the same Operation.metadata without re-running
-// any side-effect.
+// RecoveryCompletion — one row of the recovery-completed idempotency ledger.
+// PK recovery_jti dedups at-least-once delivery. The row stores the
+// deterministic primary user_id and the revoked session count so a duplicate
+// delivery can replay the same Operation.metadata without re-running any
+// side-effect.
+//
+// Источника события ДВА (Ф5 Р4): обратный вызов поставщика личности называет
+// внешнего субъекта; наш поток восстановления (Ф5, `kacho#1271`) называет
+// человека его строкой, а внешнего субъекта не несёт — у личности, заведённой
+// нашей регистрацией, его нет. Поэтому `ExternalID` необязателен; заданный
+// по-прежнему ограничен длиной.
 type RecoveryCompletion struct {
 	RecoveryJTI         string
 	ExternalID          ExternalSubject
@@ -29,7 +34,7 @@ func (r RecoveryCompletion) Validate() error {
 	if l := len(r.RecoveryJTI); l == 0 || l > 128 {
 		errs = multierr.Append(errs, fmt.Errorf("Illegal argument recovery_jti: length must be 1..128"))
 	}
-	if l := len(r.ExternalID); l == 0 || l > 128 {
+	if l := len(r.ExternalID); l > 128 {
 		errs = multierr.Append(errs, fmt.Errorf("Illegal argument external_id: length must be 1..128"))
 	}
 	if l := len(r.UserID); l == 0 || l > 64 {

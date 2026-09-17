@@ -67,7 +67,7 @@
 // method the pass means "the per-object question is asked", not "it is asked for every
 // row". The stronger statement is a test's job — TestListByRole_StrangerSeesNothing and
 // TestListByRole_FilteringKeepsExactlyTheAuthorisedRows in
-// services/iam/internal/apps/kaname/api/access_binding — not this gate's, and pretending
+// internal/apps/kaname/api/access_binding — not this gate's, and pretending
 // otherwise would be exactly the form-without-substance this class is about.
 //
 // Likewise, the three EdgeGate methods delegate their check to the per-RPC
@@ -192,7 +192,14 @@ var Profile = listfiltergate.Profile{
 	// else, so there is no request field through which a caller could name someone
 	// else's identity, and the narrowing cannot be widened without changing the
 	// signature the gate reads.
-	SubjectScopers: []string{"ListForCaller", "listOp.Execute", "identityOfAuthenticatedCaller"},
+	//
+	// "userIDOfAuthenticatedCaller" — свой список членств (IAM-ID-2, стадия S2).
+	// Та же форма, что у чтения пределов личности: функция живёт в ТОМ ЖЕ
+	// пакете, что и сужаемый ею метод, на входе только `ctx`, поэтому назвать
+	// чужую личность нечем, а расширить сужение, не тронув подписи, которую
+	// страж читает, нельзя. Полученная личность уходит доводом запроса
+	// (`ListMine(ctx, userID, страница)`): чужая строка не читается вовсе.
+	SubjectScopers: []string{"ListForCaller", "listOp.Execute", "identityOfAuthenticatedCaller", "userIDOfAuthenticatedCaller"},
 
 	ProtoFiles: []string{
 		"kaname/cloud/iam/v1/internal_cluster_service.proto",
@@ -315,6 +322,15 @@ var Profile = listfiltergate.Profile{
 		// editor`, члена `user:*` в нём нет), поэтому оно сужает, а не означает
 		// «аутентифицирован».
 		"membership.List": edgeGate("membership_service.proto", "account_id"),
+		// membership.ListMine — свой список (IAM-ID-2 S2, §2.5): страница целиком
+		// принадлежит вызывающему, потому что человек берётся из проверенного
+		// принципала, а поля, которым его можно было бы назвать, в запросе НЕ
+		// СУЩЕСТВУЕТ (IAM-ID-2-09). Пообъектный фильтр здесь утверждал бы
+		// сужение, которому нечего сужать; сужение уже сделано формой запроса и
+		// доводом чтения, и это сильнее. В каталоге прав глагол объявлен
+		// `scope_filtered`, и перепись публичной поверхности читает то же
+		// сужение своей четвёртой формой (чтение, суженное вызывающим).
+		"membership.ListMine": subjectScoped,
 
 		// ---- reference data every authenticated caller may read ----
 		"permission_catalog.ListPermissionCatalog": {

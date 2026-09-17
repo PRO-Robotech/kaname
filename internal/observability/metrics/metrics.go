@@ -99,6 +99,10 @@ type Registry struct {
 	// целиком.
 	inviteMailOnce sync.Once
 	inviteMail     *InviteMailRecorder
+	// inviteMailIntentOnce/inviteMailIntent — счётчик исходов намерения
+	// отправки (queued · rate_limited); один на оба глагола.
+	inviteMailIntentOnce sync.Once
+	inviteMailIntent     *InviteMailIntentRecorder
 
 	// readinessOnce/readiness — единственный экземпляр приёмника исхода
 	// готовности (#2494). Носитель готовности собирается в прогоне не единожды
@@ -125,6 +129,12 @@ type Registry struct {
 	// регистрации семейства с тем же именем.
 	providerRoadOnce sync.Once
 	providerRoad     *ProviderRoadRecorder
+
+	// loginLaneOnce/loginLane — единственный экземпляр приёмника полосы входа
+	// (Ф3): его делят слушатель формы, варианты использования и проверяющий
+	// пароля; второй конструктор уронил бы старт повторной регистрацией.
+	loginLaneOnce sync.Once
+	loginLane     *LoginLaneRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

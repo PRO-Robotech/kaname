@@ -273,3 +273,95 @@ func TestInjectionSeedParityGroupGrantedOnlyByRelationIsJudgedLikeTheRest(t *tes
 	require.Contains(t, joined, "выдача ЖИВЁТ и не объявлена")
 	require.Contains(t, joined, "module-quota-readers")
 }
+
+// ─── Атрибуция ГРУППЫ по объявлению (приёмка MRW-1, Р5) — в обе стороны ──────
+//
+// Живая группа относится к модулю, ЧЕЙ МАНИФЕСТ ЕЁ ОБЪЯВЛЯЕТ, по паре
+// (аккаунт, имя); ключ сравнения при этом остаётся тройкой с назначением.
+// Правило имени `kacho-<служба>` остаётся правилом для служебных записей.
+
+// Законный близнец: объявленная пара находит владельца.
+func TestInjectionGroupOwnershipDeclaredPairHasAnOwner(t *testing.T) {
+	own := moduleseedparity.GroupOwnership{}
+	own.Declare("iam", "system", "module-relation-writers")
+	owner, ok := own.OwnerOf("system", "module-relation-writers")
+	require.True(t, ok, "объявленная группа осталась без владельца")
+	require.Equal(t, "iam", owner)
+}
+
+// Группа, которую не объявил никто, владельца не получает — и считается в
+// разряде «без модуля-владельца», а не приписывается по имени.
+func TestInjectionGroupOwnershipUndeclaredGroupHasNoOwner(t *testing.T) {
+	own := moduleseedparity.GroupOwnership{}
+	own.Declare("iam", "system", "module-relation-writers")
+	_, ok := own.OwnerOf("system", "module-quota-readers")
+	require.False(t, ok, "группа, не объявленная ни одним манифестом, получила владельца")
+}
+
+// Ключ атрибуции — ПАРА, а не имя: то же имя в другом аккаунте — другая группа.
+func TestInjectionGroupOwnershipIsKeyedByThePairNotTheName(t *testing.T) {
+	own := moduleseedparity.GroupOwnership{}
+	own.Declare("iam", "system", "module-relation-writers")
+	_, ok := own.OwnerOf("tenant", "module-relation-writers")
+	require.False(t, ok, "имя без аккаунта нашло владельца — ключ атрибуции не пара")
+}
+
+// Пустой перечень объявлений никого не относит: отрицание не вакуумно, потому
+// что близнец выше на том же вызове даёт владельца.
+func TestInjectionGroupOwnershipEmptyRelatesNobody(t *testing.T) {
+	_, ok := moduleseedparity.GroupOwnership{}.OwnerOf("system", "module-relation-writers")
+	require.False(t, ok)
+}
+
+// Дрейф НАЗНАЧЕНИЯ живой строки при верной паре: атрибуция по паре относит
+// строку к модулю, и тройной ключ сравнения даёт находку в ОБЕ стороны — иначе
+// строка ушла бы в разряд «без владельца», и обе стороны погасли бы разом.
+func TestInjectionSeedParityDriftedGroupDescriptionIsAFindingBothWays(t *testing.T) {
+	declared := []moduleseedparity.Group{{Account: "system", Name: "module-relation-writers", Description: "объявленное назначение группы"}}
+	live := []moduleseedparity.Group{{Account: "system", Name: "module-relation-writers", Description: "живое назначение, разошедшееся"}}
+	findings := moduleseedparity.Compare([]moduleseedparity.ModuleState{{
+		Module: "iam", ManifestFile: "manifest.yaml", DeclaredGroup: declared, LiveGroup: live,
+	}}).Findings
+	require.Len(t, findings, 2, "дрейф назначения дал не две находки: %v", findings)
+	require.Contains(t, findings[0]+findings[1], "группа ЖИВЁТ и не объявлена")
+	require.Contains(t, findings[0]+findings[1], "группа ОБЪЯВЛЕНА и не живёт")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ОКНО ПЕРЕИМЕНОВАНИЙ И ЯКОРЬ ЧТЕНИЯ — обе стороны каждой оси
+//
+// Обе величины введены взамен того, что пережило свой предмет: сверка судила
+// НАПИСАНИЕ вместо строки (30 находок из 30 на дереве платформы), а порог
+// чтения был снят с базы, в которой пять личностей модулей ещё лежали
+// (kaname#110). Инъекция подаёт синтетический вход и меняет РОВНО ОДИН факт.
+
+// TestInjectionDeclaredSpellingResolvesBothWritings — прежнее написание
+// приводится к действующему, действующее остаётся собой.
+//
+// Без первой половины сверка снова сравнивала бы `kacho-system/…` с `system/…`;
+// без второй окно переписывало бы то, что переписывать нечего, — и разошлось бы
+// с применителем в другую сторону.
+func TestInjectionDeclaredSpellingResolvesBothWritings(t *testing.T) {
+	require.Equal(t, "system", declaredSpelling("kacho-system"),
+		"прежнее написание аккаунта не приведено к действующему — сверка судит написание")
+	require.Equal(t, "system", declaredSpelling("system"),
+		"действующее написание изменено окном — окно переписывает лишнее")
+	require.Equal(t, "bootstrap-admin", declaredSpelling("kacho-bootstrap-admin"),
+		"прежнее написание собственной личности службы не приведено к действующему")
+	require.Equal(t, "kacho-vpc", declaredSpelling("kacho-vpc"),
+		"имя ВНЕ окна изменено: окно расширяет приём ровно на объявленные пары")
+}
+
+// TestInjectionLiveNamesAnchorFallsAndStaysSilent — якорь чтения различает обе
+// стороны.
+//
+// Якорь, который не умеет отвечать «нет», не отличает прочитанную базу от
+// пустой — ровно то, чем был порог, снятый с чужого состояния.
+func TestInjectionLiveNamesAnchorFallsAndStaysSilent(t *testing.T) {
+	require.True(t, liveNamesInclude([]string{"kacho-api-gateway", "bootstrap-admin"}, "bootstrap-admin"),
+		"якорь не нашёл имя, которое в перечне ЕСТЬ — чтение объявлялось бы обвалившимся на исправной базе")
+	require.False(t, liveNamesInclude([]string{"kacho-api-gateway"}, "bootstrap-admin"),
+		"якорь нашёл имя, которого в перечне НЕТ — обвал чтения прошёл бы молча")
+	require.False(t, liveNamesInclude(nil, "bootstrap-admin"),
+		"якорь смолчал на ПУСТОМ перечне — «прочитано ноль» стало бы неотличимо от «прочитано»")
+}

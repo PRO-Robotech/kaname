@@ -168,6 +168,25 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		w.HumanCredentialsWired = false
 	case "своя сессия человека провязана":
 		w.HumanSessionsWired = false
+	case "срок сессии и домен печенья объявлены":
+		broken.AuthN.Login.SessionTTL = 0
+	case "предел частоты неверных предъявлений объявлен по обеим осям":
+		broken.AuthN.Login.SourceWindow = 0
+	case "правило пароля объявлено: длина, состояние и адрес проверки утечек":
+		broken.AuthN.Login.BreachCheck = ""
+	case "ручка «что писать» объявлена и в перечне записываемых":
+		broken.AuthN.Login.HasherFormat = ""
+	case "ёмкость проверяющего и резерв памяти объявлены":
+		broken.AuthN.Login.VerifierCapacity = 0
+	case "величина темпа заведения объявлена: предел и окно":
+		broken.AuthN.Registration.AdmissionsPerWindow = nil
+	case "срок кода восстановления доступа объявлен":
+		broken.AuthN.Login.RecoveryCodeTTL = 0
+	case "перечень ключей обёртки секретов второго фактора объявлен":
+		t.Setenv("KANAME_SECOND_FACTOR_ENC_KEY", "")
+		broken.AuthN.SecondFactorEncryptionKeyHex = ""
+	case "окно свежести правки своих данных объявлено":
+		broken.AuthN.SelfServiceFreshness = 0
 	case "каждый уровень доверия каталога предъявим":
 		w.PresentableACRs = nil
 	// Две строки ниже требуют ОТСУТСТВИЯ, поэтому ломаются наличием.

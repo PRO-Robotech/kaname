@@ -31,6 +31,9 @@ func RegisterDefaults(v *viper.Viper) {
 	// окружение его не разрешит и ручка станет необъявляемой.
 	v.SetDefault("api-server.rest-endpoint", "")
 	v.SetDefault("api-server.internal-rest-endpoint", "")
+	// Полоса входа паролем (Ф3): адреса нет — слушатель не поднимается; под
+	// `own` это отказ старта, а не молчаливая посадка без входа.
+	v.SetDefault("api-server.login-lane-endpoint", "")
 	// Prometheus /metrics HTTP listener — separate cluster-internal port (never
 	// the public tenant gRPC surface). Override via KANAME_API_SERVER__METRICS_ENDPOINT.
 	v.SetDefault("api-server.metrics-endpoint", "tcp://0.0.0.0:9095")
@@ -60,11 +63,15 @@ func RegisterDefaults(v *viper.Viper) {
 	// TestDocumentedEnvName_KeyMaterialWindowUntil.
 	// ENV: KANAME_API_SERVER__REGISTRY_TOKEN__KEY_MATERIAL_WINDOW_UNTIL
 	v.SetDefault("api-server.registry-token.key-material-window-until", "")
-	// Cluster-INTERNAL Hydra-JWKS proxy HTTP listener (`GET /.well-known/jwks.json`)
-	// — a SEPARATE cluster-internal port (default `tcp://0.0.0.0:9097`), served ONLY
-	// on the kaname-internal Service (never external, ban #6) over one-way
-	// server-TLS. Short-TTL caching reverse-proxy of Hydra's PUBLIC JWKS so the
-	// data-plane fetches verification keys from iam (Hydra stays the signer).
+	// Cluster-INTERNAL listener of verification KEY SETS — a SEPARATE port
+	// (default `tcp://0.0.0.0:9097`), served ONLY on the kaname-internal Service
+	// (never external, ban #6) over one-way server-TLS. It publishes records BY
+	// ISSUER (cmd/kaname/serve.go, jwksproxyhttp.NewBinding): our own key set at
+	// `authn.token-signing.key-set-path` — the signer of every token we mint — and,
+	// at the canonical `/.well-known/jwks.json`, a short-TTL mirror of the previous
+	// issuer's PUBLIC JWKS, kept only while tokens of its issue are still
+	// presentable (kacho#2564). Consumers pick the record by the token's declared
+	// issuer; there is no fallback across records.
 	// Override via KANAME_API_SERVER__JWKS_PROXY__ENDPOINT.
 	v.SetDefault("api-server.jwks-proxy.endpoint", "tcp://0.0.0.0:9097")
 
@@ -212,6 +219,12 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.hydra-admin-token-env", "KANAME_HYDRA_ADMIN_TOKEN")
 	v.SetDefault("authn.jwks-encryption-key-hex", "")
 	v.SetDefault("authn.jwks-encryption-key-hex-env", "KANAME_JWKS_ENC_KEY")
+	// Второй фактор (Ф12, kacho#1281): свой перечень ключей обёртки — те же
+	// две половины, что у соседней ручки; окно свежести правки своих данных —
+	// без умолчания (нулевая длительность доезжает до стража незаданной).
+	v.SetDefault("authn.second-factor-encryption-key-hex", "")
+	v.SetDefault("authn.second-factor-encryption-key-hex-env", "KANAME_SECOND_FACTOR_ENC_KEY")
+	v.SetDefault("authn.self-service-freshness", time.Duration(0))
 	v.SetDefault("authn.hooks-http-endpoint", "tcp://0.0.0.0:9092")
 	// Своя чеканка токенов (задача #897). Умолчания заданы ТОЛЬКО у величин,
 	// у которых умолчание осмысленно: путь нашей записи набора и срок ключа.
@@ -234,17 +247,27 @@ func RegisterDefaults(v *viper.Viper) {
 	v.SetDefault("authn.presented-credential.enabled", false)
 	v.SetDefault("authn.presented-credential.audience", "")
 	v.SetDefault("authn.presented-credential.revocation-cache-ttl", "0s")
-	// Токен-эндпоинт платформы (задача #898). Умолчания заданы ТОЛЬКО у
-	// величин, которые описывают НАШ расход и ничего не разрешают: потолок
-	// тела и обычный срок токена. У перечня адресатов, адресата по умолчанию и
-	// слушателя умолчаний НЕТ — каждое из них расширяет принимаемое либо
-	// выставляет поверхность, и умолчание здесь было бы решением, принятым за
-	// оператора. Страж старта требует их все, как только эндпоинт включён.
+	// Токен-эндпоинт платформы (задача #898). Умолчаний у его величин НЕТ ни
+	// у одной — все они ВЫРОЖДЕННЫЕ, и это решение, а не пропуск (#112).
+	//
+	// Здесь стояли «15m» и 64 KiB, и объяснялись они тем, что описывают НАШ
+	// расход и ничего не разрешают. Довод неверен в обе стороны. Потолок тела
+	// и срок токена объявляют ГРАНИЦУ: незаданный потолок означает «читаем,
+	// сколько пришлют», незаданный срок — «решим за оператора, сколько живёт
+	// выданное им удостоверение». И, что важнее, страж старта их уже требовал —
+	// но ветвь его не исполнялась НИ РАЗУ: величина, которую подставляет
+	// построение, незаданной не бывает, и страж зелен при любом входе. Сценарий
+	// приёмки F2-43 («страж отвергает пуск при незаданном потолке тела»)
+	// продуктом не исполнялся.
+	//
+	// Ключи остаются ЗАРЕГИСТРИРОВАННЫМИ с вырожденным значением: `AutomaticEnv`
+	// резолвит переменную только для ключа, который випер уже знает, и снятие
+	// регистрации закрыло бы оператору запасной путь настройки молча.
 	v.SetDefault("authn.client-token.enabled", false)
 	v.SetDefault("authn.client-token.allowed-audiences", "")
 	v.SetDefault("authn.client-token.default-audience", "")
-	v.SetDefault("authn.client-token.token-ttl", "15m")
-	v.SetDefault("authn.client-token.body-ceiling", 64<<10)
+	v.SetDefault("authn.client-token.token-ttl", "0s")
+	v.SetDefault("authn.client-token.body-ceiling", 0)
 	// SA-key одноразовый private_key_pem отдаётся только в op.response; клиент
 	// поллит Operation.Get, чтобы его забрать. Затирание выдерживает это окно,
 	// иначе клиент проигрывает гонку и получает ПУСТОЕ поле (затирание очищает
@@ -326,6 +349,23 @@ func RegisterDefaults(v *viper.Viper) {
 	// Override: KANAME_INVITE_MAIL__RELAY, __FROM, __FROM_NAME,
 	// __USERNAME_ENV, __PASSWORD_ENV, __TLS_MODE, __CA_BUNDLE_FILE, __LOGIN_URL,
 	// __ATTEMPT_TIMEOUT, __MAX_ATTEMPTS.
+	// invite — величины ПРИГЛАШЕНИЯ как нашей сущности (приёмка ID-MAIL-1,
+	// §10 п. 22). Умолчание объявлено НУЛЁМ, а не величиной: настоящее умолчание
+	// живёт у ручки (`InviteConfig.TTLOrDefault`), где его читает и страж старта,
+	// и потребитель. Второе объявление той же величины разошлось бы с первым
+	// молча — и разошлось бы там, где расхождение не видно: на молчащем профиле.
+	//
+	// Ключ объявлен ЗДЕСЬ, потому что без объявления переменная окружения
+	// `KANAME_INVITE__TTL` не связывается вовсе: viper связывает то, что знает.
+	v.SetDefault("invite.ttl", time.Duration(0))
+	// invite.mail-rate-limit — ограничение частоты писем на адрес (ID-MAIL-1,
+	// Р14, MAIL-42/43). Умолчание объявлено ЗДЕСЬ и положительно: молчащий
+	// профиль ограничение не снимает, а явный ноль доезжает до поля нулём и
+	// отвергается стражем — значения «без ограничения» у ручки нет.
+	// Override: KANAME_INVITE__MAIL_RATE_LIMIT__MAX_PER_WINDOW, __WINDOW.
+	v.SetDefault("invite.mail-rate-limit.max-per-window", DefaultInviteMailPerWindow)
+	v.SetDefault("invite.mail-rate-limit.window", DefaultInviteMailWindow)
+
 	v.SetDefault("invite-mail.relay", "")
 	v.SetDefault("invite-mail.from", "")
 	v.SetDefault("invite-mail.from-name", "")

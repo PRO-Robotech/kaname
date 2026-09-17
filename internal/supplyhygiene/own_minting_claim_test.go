@@ -83,6 +83,7 @@ import (
 	"github.com/PRO-Robotech/corelib/gitenv"
 
 	"github.com/PRO-Robotech/kaname/internal/testsupport/platformtree"
+	"github.com/PRO-Robotech/kaname/internal/treeposture"
 )
 
 // mintingAnchors — вызовы, ОПРОВЕРГАЮЩИЕ утверждение исключительности. Каждый
@@ -343,7 +344,13 @@ func findMintingAnchors(root string, dirs []string) ([]string, int, error) {
 	seen := map[string]bool{}
 	files := 0
 	for _, d := range dirs {
-		abs := filepath.Join(root, filepath.FromSlash(d))
+		// Координата приводится к дереву прогона резолвом, а не склейкой: она
+		// записана исторической формой от корня монорепо, и склеенная с корнем
+		// модуля указывала бы в несуществующий подкаталог.
+		abs, aerr := treeposture.PathUnder(root, d)
+		if aerr != nil {
+			return nil, 0, fmt.Errorf("координата композиционного корня %s: %w", d, aerr)
+		}
 		entries, err := os.ReadDir(abs)
 		if err != nil {
 			return nil, 0, fmt.Errorf("композиционный корень %s не прочитан: %w", d, err)
