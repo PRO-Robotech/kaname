@@ -8,7 +8,9 @@ package humansession
 // вход), новый — по правилу пароля, и ЧЕТЫРЕ записи одним исходом: новый
 // материал · записи всех прочих сессий сняты · отсечка тем же моментом, что у
 // выхода, с причиной `password-change` · событие. Сверх того — носитель
-// перевыпущен (Ф11 Р5), требование сменить пароль снято (Ф5-24).
+// перевыпущен (Ф11 Р5). Сессия восстановления идёт этим же путём: поля
+// «требование сменить пароль» у сессии нет (kacho#2697, kaname#201), снимать
+// с неё нечего.
 //
 // Отказов два, и они разные (F4d-19): подтверждение не прислано — поле;
 // прислано и не подошло — тот же отказ, что на входе.
@@ -206,11 +208,6 @@ func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordI
 	if err := w.RotateBearer(ctx, resolved.Session.ID, bearer.Digest(), now); err != nil {
 		return ChangePasswordOutput{}, ErrStoreUnavailable
 	}
-	if resolved.Session.PasswordChangeRequired {
-		if err := w.ClearPasswordChangeRequired(ctx, resolved.Session.ID); err != nil {
-			return ChangePasswordOutput{}, ErrStoreUnavailable
-		}
-	}
 	if err := w.EmitAudit(ctx, outboxtypes.AuditEvent{
 		EventType:       AuditPasswordChanged,
 		TenantAccountID: string(user.AccountID),
@@ -228,7 +225,6 @@ func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordI
 
 	s := resolved.Session
 	s.LastPresentedAt = now
-	s.PasswordChangeRequired = false
 	// Уровень — пересчёт правилом от множества предъявленного, а не константа.
 	if level, ok := assurance.LevelOf(presentationsOf(s.PresentedMethods)); ok {
 		s.AssuranceLevel = level.String()

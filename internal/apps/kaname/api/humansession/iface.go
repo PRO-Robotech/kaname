@@ -134,9 +134,6 @@ type Writer interface {
 	// перестаёт находить запись, момент аутентификации и срок прежние, момент
 	// последнего предъявления сдвигается на presentedAt.
 	RotateBearer(ctx context.Context, id domain.HumanSessionID, digest domain.BearerDigest, presentedAt time.Time) error
-	// ClearPasswordChangeRequired снимает требование сменить пароль с записи
-	// (Ф5-24): исход смены пароля из сессии восстановления.
-	ClearPasswordChangeRequired(ctx context.Context, id domain.HumanSessionID) error
 	// PresentInSession — предъявление способа ВНУТРИ сессии (Ф11 Р5, Ф12):
 	// множество предъявленного, уровень (по правилу, вычислен вызывающим),
 	// новый дайджест носителя и момент последнего предъявления — одной записью

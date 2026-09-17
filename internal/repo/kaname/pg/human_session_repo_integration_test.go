@@ -582,27 +582,43 @@ func TestHumanSessionRepo_F3_28_OldestFailureInWindowNamesTheRetryAfter(t *testi
 	require.True(t, at.Equal(hsBase.Add(time.Second)), "самый ранний В ОКНЕ, а не вообще: %s", at)
 }
 
-// TestHumanSessionRepo_F3_23_ClearPasswordChangeRequired — требование снимается
-// с записи и видно резолву (Ф5-24).
-func TestHumanSessionRepo_F3_23_ClearPasswordChangeRequired(t *testing.T) {
+// TestHumanSessionRepo_KN201_SessionRowCarriesNoPasswordChangeRequired —
+// колонка `human_sessions.password_change_required` снята новой миграцией
+// вместе с полем контракта и его читателями (kacho#2697, kaname#201): у
+// значения `true` не было ни одного производителя в прод-коде, и признак,
+// который пишут константой `false` и читают, есть «принято-и-проигнорировано»
+// на уровне схемы. Здесь стояла проба Ф3-23 «требование снимается с записи»;
+// она снята ВМЕСТЕ с предметом, а не ослаблена (`testing.md` §«Гейт на класс»,
+// п. 9): утверждать снятие требования, которого схема не допускает, нечем.
+//
+// Судится применённая схема, а не текст миграции; положительный контроль —
+// соседняя колонка состава Р1 на месте, иначе «колонки нет» было бы верно и
+// на отсутствующей таблице. Вторая половина — запись и чтение сессии через
+// репозиторий на схеме без колонки проходят: `resolveSQL` и вставка не
+// называют снятой колонки.
+func TestHumanSessionRepo_KN201_SessionRowCarriesNoPasswordChangeRequired(t *testing.T) {
 	pool := hsPool(t)
 	repo := pg.NewHumanSessionRepo(pool)
 	ctx := context.Background()
-	people := lmPeople(t, pool, "hs23", 1)
-	s := hsSession(people[0], "23a", hsBase)
-	s.PasswordChangeRequired = true
+
+	columns := func(name string) int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `
+			SELECT count(*) FROM information_schema.columns
+			 WHERE table_schema = 'kaname' AND table_name = 'human_sessions' AND column_name = $1`, name).Scan(&n))
+		return n
+	}
+	require.Equal(t, 1, columns("assurance_level"), "положительный контроль: состав Р1 на месте")
+	require.Equal(t, 0, columns("password_change_required"),
+		"kaname#201: колонка признака снята — производителя `true` у него не было (kacho#2697)")
+
+	people := lmPeople(t, pool, "hs201", 1)
+	s := hsSession(people[0], "201a", hsBase)
 	s.PresentedMethods = []string{"recovery_code"}
 	b := hsIssue(t, repo, s)
 	got, r := hsResolve(t, repo, b, hsBase.Add(time.Minute))
-	require.Equal(t, humansession.SessionFound, r)
-	require.True(t, got.Session.PasswordChangeRequired)
-
-	w, err := repo.Writer(ctx)
-	require.NoError(t, err)
-	require.NoError(t, w.ClearPasswordChangeRequired(ctx, "hss-23a"))
-	require.NoError(t, w.Commit(ctx))
-	got, _ = hsResolve(t, repo, b, hsBase.Add(time.Minute))
-	require.False(t, got.Session.PasswordChangeRequired, "Ф5-24: поле снято")
+	require.Equal(t, humansession.SessionFound, r, "сессия восстановления полноправна: пишется и читается на схеме без колонки")
+	require.Equal(t, []string{"recovery_code"}, got.Session.PresentedMethods)
 }
 
 // TestUserTokenRevocations_F3_25_ForceLogoutMomentCutsBothSessionsAndSparesTheNext —

@@ -243,16 +243,6 @@ func (w *fakeWriter) PresentInSession(_ context.Context, id domain.HumanSessionI
 	return nil
 }
 
-func (w *fakeWriter) ClearPasswordChangeRequired(_ context.Context, id domain.HumanSessionID) error {
-	if err := w.fail("clear-requirement"); err != nil {
-		return err
-	}
-	if r, ok := w.store.rows[id]; ok {
-		w.ops = append(w.ops, func() { r.s.PasswordChangeRequired = false })
-	}
-	return nil
-}
-
 func (w *fakeWriter) UpsertCutoff(_ context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error {
 	if err := w.fail("cutoff"); err != nil {
 		return err

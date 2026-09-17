@@ -835,10 +835,9 @@ func assuranceJSON(a humansession.AssuranceView) map[string]any {
 func sessionJSON(v humansession.SessionView) map[string]any {
 	return map[string]any{
 		// Срок — до секунды (конвенция); сравнивает его служба, не клиент.
-		"expiresAt":              v.Session.ExpiresAt.UTC().Truncate(time.Second).Format(time.RFC3339),
-		"assuranceLevel":         v.Session.AssuranceLevel,
-		"emailVerified":          v.EmailVerified,
-		"passwordChangeRequired": v.Session.PasswordChangeRequired,
+		"expiresAt":      v.Session.ExpiresAt.UTC().Truncate(time.Second).Format(time.RFC3339),
+		"assuranceLevel": v.Session.AssuranceLevel,
+		"emailVerified":  v.EmailVerified,
 	}
 }
 

@@ -9,7 +9,7 @@ package humansession
 // бы глагол целиком (Ф4-04).
 //
 // Момент и уровень назначает ЭТА операция (F4d-21): вызывающий приносит
-// множество предъявленного и требование смены пароля, всё остальное — здесь.
+// множество предъявленного, всё остальное — здесь.
 
 import (
 	"context"
@@ -37,8 +37,6 @@ type IssueInput struct {
 	// Presented — множество предъявленного (Ф11 Р2); уровень выводится
 	// правилом, а не приносится.
 	Presented []assurance.Presentation
-	// PasswordChangeRequired — сессия восстановления (Ф5 Р5); вход даёт false.
-	PasswordChangeRequired bool
 	// At — момент аутентификации (часы полосы, форма Ф-д).
 	At time.Time
 	// TTL — срок с момента выдачи (настройка, Р3).
@@ -75,14 +73,13 @@ func IssueSession(ctx context.Context, w Writer, in IssueInput) (domain.HumanSes
 	}
 	at := in.At.UTC()
 	s := domain.HumanSession{
-		ID:                     domain.HumanSessionID(ids.NewHyphenID(sessionIDPrefix)),
-		UserID:                 in.User.ID,
-		AuthenticatedAt:        at,
-		LastPresentedAt:        at,
-		ExpiresAt:              at.Add(in.TTL),
-		AssuranceLevel:         level.String(),
-		PresentedMethods:       methods,
-		PasswordChangeRequired: in.PasswordChangeRequired,
+		ID:               domain.HumanSessionID(ids.NewHyphenID(sessionIDPrefix)),
+		UserID:           in.User.ID,
+		AuthenticatedAt:  at,
+		LastPresentedAt:  at,
+		ExpiresAt:        at.Add(in.TTL),
+		AssuranceLevel:   level.String(),
+		PresentedMethods: methods,
 	}
 	if err := w.InsertSession(ctx, s, bearer.Digest()); err != nil {
 		return domain.HumanSession{}, domain.SessionBearer{}, err

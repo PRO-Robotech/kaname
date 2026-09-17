@@ -155,11 +155,8 @@ type HumanSession struct {
 	AssuranceLevel string `protobuf:"bytes,6,opt,name=assurance_level,json=assuranceLevel,proto3" json:"assurance_level,omitempty"`
 	// Whether the CURRENT e-mail value has been verified (Ф2 П1).
 	EmailVerified bool `protobuf:"varint,7,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
-	// The session was issued by recovery and demands a password change before
-	// any platform verb (Ф5 Р5, Р8). The edge refuses catalogued paths on it.
-	PasswordChangeRequired bool `protobuf:"varint,8,opt,name=password_change_required,json=passwordChangeRequired,proto3" json:"password_change_required,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *HumanSession) Reset() {
@@ -241,13 +238,6 @@ func (x *HumanSession) GetEmailVerified() bool {
 	return false
 }
 
-func (x *HumanSession) GetPasswordChangeRequired() bool {
-	if x != nil {
-		return x.PasswordChangeRequired
-	}
-	return false
-}
-
 var File_kaname_cloud_iam_v1_human_session_service_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_human_session_service_proto_rawDesc = "" +
@@ -257,7 +247,7 @@ const file_kaname_cloud_iam_v1_human_session_service_proto_rawDesc = "" +
 	"\x06bearer\x18\x01 \x01(\tR\x06bearer\"p\n" +
 	"\x1bResolveHumanSessionResponse\x12\x14\n" +
 	"\x05found\x18\x01 \x01(\bR\x05found\x12;\n" +
-	"\asession\x18\x02 \x01(\v2!.kaname.cloud.iam.v1.HumanSessionR\asession\"\xec\x02\n" +
+	"\asession\x18\x02 \x01(\v2!.kaname.cloud.iam.v1.HumanSessionR\asession\"\xd2\x02\n" +
 	"\fHumanSession\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12!\n" +
@@ -266,8 +256,7 @@ const file_kaname_cloud_iam_v1_human_session_service_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12'\n" +
 	"\x0fassurance_level\x18\x06 \x01(\tR\x0eassuranceLevel\x12%\n" +
-	"\x0eemail_verified\x18\a \x01(\bR\remailVerified\x128\n" +
-	"\x18password_change_required\x18\b \x01(\bR\x16passwordChangeRequired2\xaf\x01\n" +
+	"\x0eemail_verified\x18\a \x01(\bR\remailVerifiedJ\x04\b\b\x10\tR\x18password_change_required2\xaf\x01\n" +
 	"\x1bInternalHumanSessionService\x12\x8f\x01\n" +
 	"\aResolve\x12/.kaname.cloud.iam.v1.ResolveHumanSessionRequest\x1a0.kaname.cloud.iam.v1.ResolveHumanSessionResponse\"!\x8a\xb5\x18\b<exempt>\xba\xb5\x18\x11INTERNAL_LISTENERBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 

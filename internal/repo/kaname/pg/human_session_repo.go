@@ -47,7 +47,7 @@ func NewHumanSessionRepo(pool *pgxpool.Pool) *HumanSessionRepo {
 // часы — у вызывающего (форма Ф-д).
 const resolveSQL = `
 	SELECT s.id, s.user_id, s.authenticated_at, s.last_presented_at, s.expires_at,
-	       s.assurance_level, s.presented_methods, s.password_change_required,
+	       s.assurance_level, s.presented_methods,
 	       s.ended_at, s.created_at,
 	       u.account_id, u.external_id, u.email, u.display_name, u.invite_status,
 	       u.invited_by, u.created_at, u.labels, u.email_verified_at
@@ -73,7 +73,7 @@ func (r *HumanSessionRepo) Resolve(ctx context.Context, digest domain.BearerDige
 	)
 	err := r.pool.QueryRow(ctx, resolveSQL, string(digest)).Scan(
 		&out.Session.ID, &out.Session.UserID, &out.Session.AuthenticatedAt, &out.Session.LastPresentedAt,
-		&out.Session.ExpiresAt, &out.Session.AssuranceLevel, &methods, &out.Session.PasswordChangeRequired,
+		&out.Session.ExpiresAt, &out.Session.AssuranceLevel, &methods,
 		&endedAt, &out.Session.CreatedAt,
 		&out.User.AccountID, &out.User.ExternalID, &out.User.Email, &out.User.DisplayName, &inviteState,
 		&invitedBy, &out.User.CreatedAt, &labels, &emailVerAt,
@@ -221,10 +221,10 @@ func (w *humanSessionWriter) InsertSession(ctx context.Context, s domain.HumanSe
 	_, err := w.tx.Exec(ctx, `
 		INSERT INTO human_sessions
 		    (id, user_id, bearer_digest, authenticated_at, last_presented_at, expires_at,
-		     assurance_level, presented_methods, password_change_required)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		     assurance_level, presented_methods)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		string(s.ID), string(s.UserID), string(digest), s.AuthenticatedAt, s.LastPresentedAt, s.ExpiresAt,
-		s.AssuranceLevel, s.PresentedMethods, s.PasswordChangeRequired)
+		s.AssuranceLevel, s.PresentedMethods)
 	if err != nil {
 		return mapErr(err, "HumanSession.Insert", string(s.ID))
 	}
@@ -316,14 +316,6 @@ func (w *humanSessionWriter) PresentInSession(ctx context.Context, id domain.Hum
 	}
 	if tag.RowsAffected() != 1 {
 		return iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
-	}
-	return nil
-}
-
-// ClearPasswordChangeRequired — см. порт.
-func (w *humanSessionWriter) ClearPasswordChangeRequired(ctx context.Context, id domain.HumanSessionID) error {
-	if _, err := w.tx.Exec(ctx, `UPDATE human_sessions SET password_change_required = false WHERE id = $1`, string(id)); err != nil {
-		return mapErr(err, "HumanSession.ClearPasswordChangeRequired", string(id))
 	}
 	return nil
 }
