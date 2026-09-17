@@ -69,6 +69,26 @@ type stubLane struct {
 	completeErr error
 	requestIn   []humansession.RequestRecoveryInput
 	completeIn  []humansession.CompleteRecoveryInput
+
+	// Второй фактор (Ф12) — методы в second_factor_test.go.
+	enrollOut  humansession.EnrollOutput
+	enrollErr  error
+	confirmOut humansession.ConfirmOutput
+	confirmErr error
+	statusOut  humansession.StatusOutput
+	statusErr  error
+	removeOut  humansession.RemoveSecondFactorOutput
+	removeErr  error
+	regenOut   humansession.RegenerateBackupCodesOutput
+	regenErr   error
+	stepUpOut  humansession.StepUpOutput
+	stepUpErr  error
+	enrollIn   []humansession.EnrollInput
+	confirmIn  []humansession.ConfirmInput
+	statusIn   []humansession.StatusInput
+	removeIn   []humansession.RemoveSecondFactorInput
+	regenIn    []humansession.RegenerateBackupCodesInput
+	stepUpIn   []humansession.StepUpInput
 }
 
 func (s *stubLane) Register(_ context.Context, in registration.Input) (registration.Output, error) {

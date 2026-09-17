@@ -253,9 +253,15 @@ const (
 	// (Ф1 Р6): у них разные предметы и разные последствия.
 	FormRecovery         FormKind = "recovery"
 	FormRecoveryComplete FormKind = "recovery-complete"
+	// Второй фактор (Ф12, `kacho#1281`, Р4): один вид на четыре глагола
+	// семейства `second-factor/*` — у них один предмет (заведённый фактор
+	// самого человека) — и свой вид у церемонии повышения: её зовут и без
+	// фактора, ветвью пароля (Ф11-09), и признак семейства ей не годится.
+	FormSecondFactor FormKind = "second-factor"
+	FormStepUp       FormKind = "step-up"
 )
 
-var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete}
+var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete, FormSecondFactor, FormStepUp}
 
 // FormKinds — закрытый перечень видов формы, копией.
 func FormKinds() []FormKind {

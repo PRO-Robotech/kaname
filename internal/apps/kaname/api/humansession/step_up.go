@@ -64,17 +64,8 @@ func NewStepUpUseCase(d SecondFactorDeps) (*StepUpUseCase, error) {
 // Execute — порядок: форма → сессия → частота → (у кода) состояние → сверка →
 // предъявление одним исходом с журналом повышения.
 func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOutput, error) {
-	switch in.Method {
-	case assurance.MethodPassword:
-		if in.Password == "" {
-			return StepUpOutput{}, FieldRequired("password")
-		}
-	case assurance.MethodTOTP, assurance.MethodLookupSecret:
-		if err := JudgeCodeForm("code", SecondFactorPresentation{Method: in.Method, Code: in.Code}); err != nil {
-			return StepUpOutput{}, err
-		}
-	default:
-		return StepUpOutput{}, &FieldError{Field: "method", Rule: "must be one of password|totp|lookup_secret"}
+	if err := JudgeStepUpForm(in); err != nil {
+		return StepUpOutput{}, err
 	}
 	now := uc.deps.Now().UTC()
 	resolved, err := resolveLiveSession(ctx, uc.deps, in.Bearer, now)

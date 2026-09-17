@@ -141,6 +141,38 @@ func ParseSecondFactorMethod(field, s string) (assurance.Method, error) {
 	return assurance.Method{}, &FieldError{Field: field, Rule: "must be one of totp|lookup_secret"}
 }
 
+// ParseStepUpMethod — способ церемонии из строки формы: `password`, `totp`,
+// `lookup_secret` (ветвь пароля — Ф11-09, ветви кода — Ф12); иное — отказ
+// формы с именем поля. Словарь один: имена берутся у `assurance`.
+func ParseStepUpMethod(field, s string) (assurance.Method, error) {
+	switch s {
+	case assurance.MethodPassword.String():
+		return assurance.MethodPassword, nil
+	case assurance.MethodTOTP.String():
+		return assurance.MethodTOTP, nil
+	case assurance.MethodLookupSecret.String():
+		return assurance.MethodLookupSecret, nil
+	case "":
+		return assurance.Method{}, FieldRequired(field)
+	}
+	return assurance.Method{}, &FieldError{Field: field, Rule: "must be one of password|totp|lookup_secret"}
+}
+
+// JudgeStepUpForm — форма церемонии по способу: у `password` — пароль, у кода
+// — форма кода (Н12). Судится и транспортом, и глаголом одним разбором.
+func JudgeStepUpForm(in StepUpInput) error {
+	switch in.Method {
+	case assurance.MethodPassword:
+		if in.Password == "" {
+			return FieldRequired("password")
+		}
+		return nil
+	case assurance.MethodTOTP, assurance.MethodLookupSecret:
+		return JudgeCodeForm("code", SecondFactorPresentation{Method: in.Method, Code: in.Code})
+	}
+	return &FieldError{Field: "method", Rule: "must be one of password|totp|lookup_secret"}
+}
+
 // JudgeCodeForm — форма кода по способу (Н12): шесть цифр у `totp`, десять
 // знаков Crockford у `lookup_secret`. Судится ДО пароля и до состояния;
 // малоформенный код — отказ формы с именем поля, не попытка.

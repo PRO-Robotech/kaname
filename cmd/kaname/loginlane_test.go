@@ -11,11 +11,15 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/retention"
+	"github.com/PRO-Robotech/kaname/internal/assurance"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
 func loginLaneCfg(p config.IdentityProvider) config.Config {
@@ -111,3 +115,27 @@ func writeFile(t *testing.T, path, body string) {
 }
 
 var _ = strings.Contains
+
+// TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels — Ф12-34 (Ф11-28):
+// поднятая полоса называет `password`, `totp`, `lookup_secret` наблюдением, и
+// правило даёт из них два предъявимых уровня; уборка полосы несёт четвёртый
+// предмет — заведения — с порогом, равным окну свежести (Ф12-44, Р8).
+func TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels(t *testing.T) {
+	lane := &loginLane{
+		sessions: kanamepg.NewHumanSessionRepo(nil), methods: kanamepg.NewLoginMethodRepo(nil),
+		freshness: 15 * time.Minute,
+	}
+	require.True(t, lane.wired())
+	require.Equal(t, []assurance.Method{assurance.MethodPassword, assurance.MethodTOTP, assurance.MethodLookupSecret}, lane.signInMethods())
+	require.Equal(t, []string{"1", "2"}, assurance.PresentableLevels(lane.signInMethods()).Strings())
+
+	reapers := lane.retentionReapers()
+	require.NotNil(t, reapers.Enrollments)
+	require.Equal(t, 15*time.Minute, reapers.EnrollmentWindow)
+	names := map[string]time.Duration{}
+	for _, s := range retention.WithHumanSessions(nil, reapers) {
+		names[s.Name] = s.Grace
+	}
+	require.Len(t, names, 4)
+	require.Equal(t, 15*time.Minute, names[retention.SubjectSecondFactorEnrollments])
+}
