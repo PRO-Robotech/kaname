@@ -365,10 +365,22 @@ make_secrets() {
 	# выпускал бы тот же УЦ, — но координата своя, и выбор поэтому выразим.
 	"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-provider-ca" \
 		--from-file=ca.crt="$PKI/ca.crt" >/dev/null
+	# ПЕРЕЧЕНЬ КЛЮЧЕЙ ЭТОГО ОБЪЕКТА ДИКТУЕТ ПРОФИЛЬ, А НЕ СТЕНД: каждая запись
+	# карты `secrets` боевого профиля рендерится `secretKeyRef` без `optional`,
+	# и ключ, которого в объекте нет, останавливает контейнер до старта
+	# (CreateContainerConfigError), — выкат не доходит до готовности, вердикта
+	# о посадке нет. Так и случилось: Ф12 добавила третью запись, стенд заводил
+	# два ключа, и подъём на голове линии вставал на первом поде. Согласие
+	# перечней держит `deploy/stand_secrets_cover_the_profile_test.go`.
+	#
+	# Кольцо обёртки секретов второго фактора читается только под `own`, но
+	# объект обязан нести ключ на любой посадке: `secretKeyRef` судится
+	# кластером при создании контейнера, а не процессом при чтении.
 	"${KCTL[@]}" -n "$NS" create secret generic "$RELEASE-authn" \
 		--from-literal=hook-shared-secret="$(openssl rand -hex 16)" \
-		--from-literal=jwks-encryption-key-hex="$(openssl rand -hex 32)" >/dev/null
-	say "стенд: пять секретов заведены (база · серверный лист · клиентский лист · якорь поставщика · величины authn)"
+		--from-literal=jwks-encryption-key-hex="$(openssl rand -hex 32)" \
+		--from-literal=second-factor-encryption-key-hex="$(openssl rand -hex 32)" >/dev/null
+	say "стенд: пять секретов заведены (база · серверный лист · клиентский лист · якорь поставщика · величины authn: три ключа)"
 }
 
 build_image() {

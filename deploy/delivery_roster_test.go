@@ -120,6 +120,8 @@ var deliveryRoster = []string{
 	"service_links_are_off_test.go",
 	"service_routes_every_surface_injection_test.go",
 	"service_routes_every_surface_test.go",
+	"stand_secrets_cover_the_profile_injection_test.go",
+	"stand_secrets_cover_the_profile_test.go",
 	"templates/_helpers.tpl",
 	"templates/configmap.yaml",
 	"templates/deployment.yaml",
