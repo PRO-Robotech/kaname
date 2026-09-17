@@ -11,9 +11,12 @@ import dedent from 'ts-dedent'
 
 Kaname конфигурируется через переменные окружения с префиксом **`KANAME_`** (плюс
 опциональный YAML-файл через `KANAME_CONFIG_PATH`). Эта страница перечисляет ключевые группы
-настроек: подключение к БД, провайдеры идентичности (Kratos / Hydra), listener'ы и mTLS,
-режим аутентификации. Секреты (пароли, токены) подаются из окружения / секрет-хранилища, не
-хардкодятся.
+настроек: подключение к БД, посадка личности (`external` — внешний поставщик, `own` — свой
+вход), listener'ы и mTLS, режим аутентификации. Секреты (пароли, токены) подаются из окружения /
+секрет-хранилища, не хардкодятся.
+
+Перечень **обязательных** величин — тех, без которых служба не пускается, — порождается из
+таблицы стража старта и лежит в `INSTALL.md` §3; здесь он не повторяется.
 
 ## Подключение к БД
 
@@ -64,7 +67,13 @@ Kaname конфигурируется через переменные окруж
 настройка, поэтому лучше убрать.
 :::
 
-## Идентичность (Kratos / Hydra)
+## Идентичность — посадка и что она требует
+
+Посадку выбирают **до** установки, и умолчания у неё нет. Под `external` человека проверяет
+внешний поставщик удостоверений, и обязательны три его адреса; под `own` внешнего поставщика
+нет — обязательны слушатель и величины полосы входа, обёртка секретов второго фактора, окно
+свежести и своя чеканка. Состояние посадки `own` на линии названо с предикатом на странице
+[Идентичность и токены](/architecture/identity).
 
 <table>
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
@@ -83,7 +92,7 @@ Kaname конфигурируется через переменные окруж
 ## Listener'ы и mTLS
 
 Сервис поднимает публичный (`:9090`), internal (`:9091`), hooks (`:9092`) и metrics (`:9095`)
-listener'ы. Каждый может требовать mTLS.
+listener'ы, а под посадкой `own` — ещё слушатель полосы входа. Каждый может требовать mTLS.
 
 <table>
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
@@ -91,7 +100,8 @@ listener'ы. Каждый может требовать mTLS.
     <tr><td><code>KANAME_GRPC_PORT</code> / <code>KANAME_INTERNAL_PORT</code></td><td>Порты public / internal listener'ов. Значение — <b>голый номер порта</b> (<code>9091</code>); всё прочее отвергается при старте с именем ручки. См. предупреждение ниже: эти имена совпадают с формой, которой Kubernetes сам объявляет поду адреса служб</td></tr>
     <tr><td><code>KANAME_PUBLIC_SERVER_MTLS_…</code></td><td>mTLS публичного listener'а (cert / key / clientCA / enable)</td></tr>
     <tr><td><code>KANAME_INTERNAL_SERVER_MTLS_…</code></td><td>mTLS internal listener'а (<code>InternalIAMService</code>)</td></tr>
-    <tr><td><code>KANAME_HOOKS_SERVER_MTLS_…</code></td><td>mTLS hooks-listener'а (Kratos identity-хуки)</td></tr>
+    <tr><td><code>KANAME_HOOKS_SERVER_MTLS_…</code></td><td>mTLS hooks-listener'а (хуки поставщика удостоверений; читается под <code>external</code>)</td></tr>
+    <tr><td><code>KANAME_API_SERVER__LOGIN_LANE_ENDPOINT</code> / <code>KANAME_LOGINLANE_SERVER_MTLS_…</code></td><td>Адрес и транспорт слушателя <b>полосы входа</b> — поднимается только под посадкой <code>own</code>, умолчания у адреса нет (в поставляемом профиле <code>tcp://0.0.0.0:9100</code>). Транспорт — взаимный TLS (<code>…_CLIENTAUTHMODE=mutual</code>): слушатель впускает ровно край платформы, судя его по SAN клиентского сертификата. Под <code>external</code> адрес читается, поверхность объявляется выключенной с причиной, слушатель не поднимается</td></tr>
     <tr><td><code>KANAME_METRICS_SERVER_MTLS_…</code></td><td>mTLS metrics-listener'а (Prometheus)</td></tr>
     <tr><td><code>KANAME_JWKSPROXY_SERVER_MTLS_…</code></td><td>TLS зеркала ключей проверки (<code>/.well-known/jwks.json</code>, односторонняя)</td></tr>
     <tr><td><code>KANAME_REGISTRYTOKEN_SERVER_MTLS_…</code></td><td>TLS докерной полосы (<code>/iam/token</code>, односторонняя)</td></tr>
@@ -178,7 +188,7 @@ iam не поднимался там, где api-gateway нет вовсе; те
   <thead><tr><th>Переменная</th><th>Назначение</th></tr></thead>
   <tbody>
     <tr><td><code>KANAME_AUTHN__MODE</code></td><td>Режим аутентификации (dev-фикстуры vs production-strict)</td></tr>
-    <tr><td><code>KANAME_HOOK_TOKEN</code></td><td>Токен для identity-хуков Kratos</td></tr>
+    <tr><td><code>KANAME_HOOK_TOKEN</code></td><td>Общий секрет хуков поставщика удостоверений (<code>:9092</code>); под <code>own</code> хуки не приходят</td></tr>
   </tbody>
 </table>
 

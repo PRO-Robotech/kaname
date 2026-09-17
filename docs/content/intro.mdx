@@ -49,12 +49,21 @@ API следует **конвенциям Kaname**: плоские (flat) рес
 `/iam/v1/<resource>`, единый формат ошибок `{code, message, details[]}`. Чтение — синхронное;
 мутации — асинхронные через `Operation` с поллингом.
 
-:::info Control-plane only
-Kaname управляет **описанием личностей и прав**. Хранение паролей / passkey и интерактивный вход
-вынесены в интеграцию с Ory Kratos и Ory Hydra. **Программные** токены платформа выпускает сама
-там, где объявлен её токен-эндпоинт, — своим подписантом и своей ключницей; где не объявлен, их
-по-прежнему выпускает Hydra (см. [Идентичность и токены](/architecture/identity)). IAM хранит
-*проекцию* личности (User-row) и модель авторизации.
+:::info Кто проверяет человека — решает посадка, и посадок две
+Kaname управляет **описанием личностей и прав** и на любой посадке — единственный владелец
+субъектов и модели прав. Чей интерактивный вход человека, зависит от ключа
+`authn.identity-provider` установки, и умолчания у него нет:
+
+- **`external`** — пароль / passkey, форму входа и восстановление держит внешний поставщик
+  удостоверений (Ory Kratos + Ory Hydra); печенье сессии — `ory_kratos_session`; служба хранит
+  проекцию личности и узнаёт о входе хуком;
+- **`own`** — способы входа, сессия и второй фактор **наши**: форма входа уходит на полосу
+  входа службы, печенье — `kaname_session`, внешнего поставщика нет вовсе.
+
+**Программные** токены на обеих посадках платформа выпускает сама там, где объявлен её
+токен-эндпоинт, — своим подписантом и своей ключницей; под `external` без него их выпускает
+Hydra. Что верно под какой посадкой — [Идентичность и токены](/architecture/identity); состояние
+`own` названо там с предикатом.
 :::
 
 :::tip С чего начать
@@ -94,8 +103,8 @@ Kaname управляет **описанием личностей и прав**.
 
 Кроме tenant-ресурсов IAM выдаёт **креды доступа**: статические ключи сервис-аккаунтов
 (`SAKey`) и персональные токены пользователя (`UserToken`) — оба по стандарту OAuth 2.0. Токен по
-такому кроду выпускает платформа там, где объявлен её токен-эндпоинт, и OAuth-клиент Hydra там,
-где не объявлен.
+такому креду выпускает платформа там, где объявлен её токен-эндпоинт, и OAuth-клиент Hydra там,
+где не объявлен (только под посадкой `external`).
 
 ### Иерархия и привязки
 
@@ -138,9 +147,9 @@ flowchart LR
     iam["kaname<br/>:9090 public · :9091 internal"]
     peers["kacho-vpc · kacho-compute<br/>kacho-geo · kacho-nlb"]
   end
-  subgraph idp["Identity providers"]
+  subgraph idp["Поставщик удостоверений — только посадка external"]
     kratos["Ory Kratos<br/>login / identity"]
-    hydra["Ory Hydra<br/>интерактивный вход,<br/>токены на непереведённой установке"]
+    hydra["Ory Hydra<br/>интерактивный вход,<br/>токены без своей чеканки"]
   end
   subgraph store["Хранилище"]
     pg[("PostgreSQL<br/>kaname · права · outbox")]
@@ -148,9 +157,10 @@ flowchart LR
 
   cli --> agw
   agw -->|"kaname.cloud.iam.v1"| iam
+  agw -->|"own: формы входа → полоса входа"| iam
   iam -->|"SQL · pgx"| pg
-  iam -->|"identity hooks"| kratos
-  iam -->|"OAuth2 clients"| hydra
+  iam -->|"external: identity hooks"| kratos
+  iam -->|"external: OAuth2 clients"| hydra
   peers -->|"InternalIAMService.Check"| iam
 ```
 
@@ -202,8 +212,8 @@ flowchart LR
     <tr><td>Go</td><td>Язык реализации (чистая архитектура: handler → use-case → domain)</td></tr>
     <tr><td>Protocol Buffers / Buf</td><td>Контракт API (<code>proto/</code>, домен <code>kaname.cloud.iam.v1</code>)</td></tr>
     <tr><td>PostgreSQL / pgx v5</td><td>Хранилище <code>kaname</code> — и данные, и права, и вердикт (без ORM — sqlc + handwritten pgx)</td></tr>
-    <tr><td>Ory Kratos</td><td>Аутентификация и хранение личностей (login / passkey); User — проекция identity</td></tr>
-    <tr><td>Ory Hydra</td><td>OAuth 2.0 authorization server: интерактивный вход человека; программные токены — там, где токен-эндпоинт платформы не объявлен</td></tr>
+    <tr><td>Ory Kratos</td><td>Под посадкой <code>external</code>: аутентификация и хранение личностей (login / passkey); User — проекция identity. Под <code>own</code> не используется</td></tr>
+    <tr><td>Ory Hydra</td><td>Под посадкой <code>external</code>: OAuth 2.0 authorization server — интерактивный вход человека; программные токены — там, где токен-эндпоинт платформы не объявлен. Под <code>own</code> не используется</td></tr>
     <tr><td>Goose</td><td>Версионирование схемы (набор миграций <code>0001…</code>)</td></tr>
     <tr><td>grpc-gateway</td><td>REST-проекция gRPC</td></tr>
   </tbody>
