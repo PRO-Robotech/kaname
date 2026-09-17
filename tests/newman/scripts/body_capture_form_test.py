@@ -61,7 +61,40 @@ unstable across different builds»). Внутри процесса решени�
 ЧТО ЭТО НЕ ЛОВИТ — названо честно. Захват величины, ТЕЛОМ не являющейся
 (массив идентификаторов, выборка полей, счётчик), под гейт не подпадает: там
 пересборка законна и обычна. Признак тела — форма захвата дословно называет
-`pm.response.text()` либо печатает заново то, что вернул `pm.response.json()`.
+`pm.response.text()` либо печатает заново ТО САМОЕ, что вернул
+`pm.response.json()`: довод `JSON.stringify` есть сам разобранный ответ (вызов
+либо имя, которому он присвоен), при желании с подстановкой на неразбираемое
+(`|| {}`) и с доводами печати (`, null, 2`). Свойство, вызов метода, выражение
+НАД ответом (`pm.response.json().memberships.map(m => m.id).sort()`) — уже
+производное: у него НЕТ сырой формы, и совет «захватывать `pm.response.text()`»
+для него неисполним. Гейт судит форму довода, а не смысл: копия целого через
+`{...pm.response.json()}` прочлась бы производным — такой формы в дереве нет
+(`grep -cF 'JSON.stringify({...' tests/newman/collections/*.json` → 0 везде).
+
+РАСПОЗНАВАТЕЛЬ ЧИТАЛ ПРОИЗВОДНОЕ КАК ТЕЛО — исправлено 2026-09-17 (kaname#206).
+Прежняя редакция объявляла пересобранным телом всякий `JSON.stringify(...)`, внутри
+которого ГДЕ УГОДНО стоит `pm.response.json()`, — и назвала находкой захват
+отсортированного перечня `id` (`mineFullIds`, `iam-membership-mine`) с советом,
+которого нельзя исполнить. Самопроверка (c) доказывала невиновность производного
+только в форме локальной переменной (`JSON.stringify(ids)`), а инлайн-форму не
+знала — класс `testing.md` §«Гейт на класс», п. 7. Перепись до правки:
+захваченных тел 21 = сырых 20 + «пересобранное» 1, и это одно было производным;
+после — тел 20, захватов производного от ответа 369, и второе число печатается
+отдельно, чтобы сужение распознавателя было видно на каждом прогоне, а не
+выведено из молчания. Состав 369 назван, потому что число больше ожидаемой
+единицы: 368 — `JSON.stringify(j.error)` и `JSON.stringify(j.response)` в
+помощнике опроса операции (по 184, через имя разобранного ответа), 1 — инлайн
+над `pm.response.json()`. Первые 368 и прежде телом не считались — но молча,
+без числа; теперь у ветви «производное — молчание» есть перепись, и её
+опустение будет видно (`testing.md` §«Гейт на класс», п. 9).
+Инъекция новых проб поверх прежнего распознавателя (6 красных из 6 новых) заодно
+показала его слепоту в ДРУГУЮ сторону: `JSON.stringify(j, null, 2)` — целое тело
+через имя с доводами печати — он телом НЕ считал, потому что сверял с именем весь
+список доводов. Новый берёт первый довод, и эта форма стала находкой; в дереве её
+нет (перепись тел не изменилась сверх снятой единицы: 21 → 20).
+Форма кейса не менялась: `JSON.stringify` отсортированного массива — законная
+каноническая запись множества, и подгонять кейс под инструмент значило бы
+закрыть экземпляр, оставив класс.
 
 ЧИТАЕТСЯ ИСПОЛНЯЕМАЯ ЧАСТЬ, А НЕ ТЕКСТ КЕЙСА. Судятся сгенерированные
 коллекции: там лежит ровно то, что исполнит newman. Разбор снимает строковые
@@ -204,16 +237,64 @@ def _json_aliases(src: str) -> set[str]:
     return out
 
 
+# Довод `JSON.stringify`, который ЕСТЬ разобранный ответ: сам вызов либо имя
+# (алиас проверяется отдельно), с необязательной подстановкой на неразбираемое.
+# Свойство, индекс, вызов метода после — производное, и группа не совпадёт.
+_BODY_ARG = re.compile(
+    r"^(pm\.response\.json\(\)|[A-Za-z0-9_$]+)"
+    r"(\|\|(\{\}|\[\]|null|undefined|''|\"\"|``))?$")
+
+
+def _stringify_subject(expr: str) -> str | None:
+    """Первый довод первого `JSON.stringify(` в выражении, без пробелов и
+    обёртывающих скобок; None — если `JSON.stringify(` в выражении нет.
+
+    Первый довод, а не весь список: `JSON.stringify(j, null, 2)` печатает то же
+    тело, что `JSON.stringify(j)`, и доводы печати телом не являются.
+    """
+    m = _SER_CALL.search(expr)
+    if not m:
+        return None
+    inner = _balanced(expr, m.end() - 1)
+    subject = re.sub(r"\s+", "", _split_top(inner)[0])
+    while subject.startswith("(") and subject.endswith(")") \
+            and _balanced(subject, 0) == subject[1:-1]:
+        subject = subject[1:-1]
+    return subject
+
+
+def _is_derived_from_response(expr: str, aliases: set[str]) -> bool:
+    """`JSON.stringify` над ВЫРАЖЕНИЕМ от ответа, телом не являющимся.
+
+    Считается переписью, а не судится: ветвь «производное — молчание» без
+    числа была бы негативным утверждением, которое замолкает, когда предмета
+    больше нет (`testing.md` §«Гейт на класс», п. 9).
+    """
+    subject = _stringify_subject(expr)
+    if subject is None or _BODY_ARG.match(subject):
+        return False
+    if _JSON_CALL.search(subject):
+        return True
+    return any(re.match(rf"{re.escape(a)}[.\[]", subject) for a in aliases)
+
+
 def _form_of(expr: str, aliases: set[str]) -> str | None:
-    """Форма тела в выражении, либо None — если это не тело."""
+    """Форма тела в выражении, либо None — если это не тело.
+
+    Тело в пересобранной форме — `JSON.stringify(<разобранный ответ>)`, где довод
+    есть САМ ответ: вызов `pm.response.json()` либо имя, которому он присвоен.
+    Всё, что вычислено НАД ответом, — производное, и формы тела у него нет.
+    """
     if _RAW_CALL.search(expr):
         return RAW
-    if _SER_CALL.search(expr):
-        inner = _balanced(expr, expr.index("JSON.stringify(") + len("JSON.stringify"))
-        if _JSON_CALL.search(inner):
-            return SERIALIZED
-        if inner.strip() in aliases:
-            return SERIALIZED
+    subject = _stringify_subject(expr)
+    if subject is None:
+        return None
+    m = _BODY_ARG.match(subject)
+    if not m:
+        return None
+    if m.group(1) == "pm.response.json()" or m.group(1) in aliases:
+        return SERIALIZED
     return None
 
 
@@ -306,6 +387,7 @@ def _statements(src: str):
 
 def audit(files, out=sys.stdout) -> int:
     findings, seen_files, seen_scripts, seen_vars, seen_cmp = [], 0, 0, set(), 0
+    seen_derived = 0
     for path in files:
         try:
             doc = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -324,6 +406,8 @@ def audit(files, out=sys.stdout) -> int:
                 expr = _balanced(src, src.index("(", m.start()))
                 value = expr.split(",", 1)[1] if "," in expr else expr
                 form = _form_of(value, aliases)
+                if not form and _is_derived_from_response(value, aliases):
+                    seen_derived += 1
                 if form:
                     captured[var] = (form, step)
                     seen_vars.add((str(path), var))
@@ -369,7 +453,9 @@ def audit(files, out=sys.stdout) -> int:
                     f"равенство или различие таких строк ни о чём не свидетельствует")
 
     print(f"осмотрено: коллекций {seen_files}, скриптов {seen_scripts}, "
-          f"захваченных тел {len(seen_vars)}, сравнений с ними {seen_cmp}", file=out)
+          f"захваченных тел {len(seen_vars)}, "
+          f"захватов производного от ответа (телом не считаются) {seen_derived}, "
+          f"сравнений с ними {seen_cmp}", file=out)
     if seen_files == 0 or seen_scripts == 0:
         print("ОТКАЗ: обход пуст — вердикт беспредметен, «ноль находок» здесь "
               "означает «ноль прочитанного»", file=out)
@@ -484,6 +570,45 @@ def self_test() -> int:
         print("(c) не-тело под гейт не подпадает")
         rc, out = _run(_collection("JSON.stringify(ids)", "pm.response.text()"), tmp)
         check("захват массива идентификаторов — не находка", rc == 0, out)
+
+        print("(c1) производное НАД разобранным ответом — не тело (форма из дерева, kaname#206)")
+        # Инлайн-форма, которую прежняя редакция читала как тело: довод
+        # `JSON.stringify` содержит `pm.response.json()`, но им НЕ является.
+        derived = "JSON.stringify(pm.response.json().memberships.map(m => m.id).sort())"
+        rc, out = _run(_collection(derived, derived), tmp)
+        check("захват отсортированного перечня id — не находка", rc == 0, out)
+        check("производное сосчитано переписью, а не пропущено молча",
+              "захватов производного от ответа (телом не считаются) 1" in out, out)
+        # Свойство ответа — тоже производное: сырой формы у поддерева нет, и совет
+        # «захватывать pm.response.text()» для него неисполним.
+        rc, out = _run(_collection("JSON.stringify(pm.response.json().memberships)",
+                                   "JSON.stringify(j.memberships)"), tmp)
+        check("захват поддерева ответа — не находка", rc == 0, out)
+        rc, out = _run(_collection("JSON.stringify(j.error)", "JSON.stringify(j.error)"), tmp)
+        check("свойство через имя ответа — не находка, но сосчитано",
+              rc == 0 and "захватов производного от ответа (телом не считаются) 1" in out, out)
+
+        print("(c2) сужение НЕ ослабило ось (в): целое тело в любой законной записи — находка")
+        for capture in ("JSON.stringify( pm.response.json() )",
+                        "JSON.stringify((pm.response.json()))",
+                        "JSON.stringify(pm.response.json(), null, 2)",
+                        "JSON.stringify(pm.response.json() || {})",
+                        "JSON.stringify(j, null, 2)"):
+            rc, out = _run(_collection(capture, "JSON.stringify(pm.response.json())"), tmp)
+            check(f"{capture} — находка оси (в)",
+                  rc == 1 and "ПЕРЕСОБРАННЫМ телом" in out, out)
+
+        print("(c3) производное рядом с настоящим дефектом соседней оси — краснеет только сосед")
+        # Третий прогон по `testing.md` §«Гейт на класс», п. 2в: молчание ветви
+        # «производное» доказано не само по себе, а при живом красном рядом.
+        doc = _collection("pm.response.text()", "JSON.stringify(pm.response.json())")
+        doc["item"][0]["event"][0]["script"]["exec"].append(
+            f"pm.environment.set('probeIds', {derived});")
+        rc, out = _run(doc, tmp)
+        check("ось (а) краснеет на смешении форм", rc == 1 and "а сравнивается формой" in out, out)
+        check("ось (в) молчит — производное телом не стало", "ПЕРЕСОБРАННЫМ телом" not in out, out)
+        check("производное сосчитано рядом с находкой",
+              "захватов производного от ответа (телом не считаются) 1" in out, out)
 
         print("(d) читается исполняемая часть, а не текст")
         doc = _collection("pm.response.text()", "pm.response.text()")
