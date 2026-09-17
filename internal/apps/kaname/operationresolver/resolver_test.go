@@ -88,3 +88,44 @@ func TestResolve_NilMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, operations.OutcomeSkip, res.Outcome)
 }
+
+// TestResolveMembershipPair — kaname#181: осиротевшее создание членства
+// разрешается ПАРОЙ «человек × аккаунт» из метаданных, а не одним
+// идентификатором: пара есть → работа закоммичена, ответ — членство той же
+// проекцией, что у чтений; пары нет → до коммита не дошло (повтор создания
+// идемпотентен по построению — пара уникальна, идентификатор вычислим).
+func TestResolveMembershipPair(t *testing.T) {
+	ctx := context.Background()
+	present := func(_ context.Context, uid domain.UserID, acc domain.AccountID) (domain.Membership, error) {
+		return domain.Membership{ID: "mbr-0000000000000pair", UserID: uid, AccountID: acc,
+			State: domain.MembershipStateActive}, nil
+	}
+	absent := func(context.Context, domain.UserID, domain.AccountID) (domain.Membership, error) {
+		return domain.Membership{}, iamerr.ErrNotFound
+	}
+	transient := func(context.Context, domain.UserID, domain.AccountID) (domain.Membership, error) {
+		return domain.Membership{}, context.DeadlineExceeded
+	}
+
+	t.Run("pair present → Done with the Membership", func(t *testing.T) {
+		res, err := resolveMembershipPair(ctx, "usr0000000000000pair", "acc0000000000000pair", present)
+		require.NoError(t, err)
+		require.Equal(t, operations.OutcomeDone, res.Outcome)
+		require.NotNil(t, res.Response)
+		m := &iamv1.Membership{}
+		require.NoError(t, res.Response.UnmarshalTo(m), "ответ — Membership той же проекции")
+		require.Equal(t, "mbr-0000000000000pair", m.GetId())
+		require.Equal(t, iamv1.Membership_ACTIVE, m.GetState())
+	})
+
+	t.Run("pair absent → Interrupted", func(t *testing.T) {
+		res, err := resolveMembershipPair(ctx, "usr0000000000000pair", "acc0000000000000pair", absent)
+		require.NoError(t, err)
+		require.Equal(t, operations.OutcomeInterrupted, res.Outcome)
+	})
+
+	t.Run("transient read error is not a verdict", func(t *testing.T) {
+		_, err := resolveMembershipPair(ctx, "usr0000000000000pair", "acc0000000000000pair", transient)
+		require.Error(t, err)
+	})
+}

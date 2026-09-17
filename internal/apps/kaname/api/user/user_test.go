@@ -30,6 +30,7 @@ import (
 	gstatus "google.golang.org/genproto/googleapis/rpc/status"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/account"
@@ -619,6 +620,12 @@ func (r *fakeUWtr) Visibility() visibility.ReaderIface { return nil }
 // другой, и подставной ответ был бы утверждением, которого никто не делал.
 func (fakeUserUR) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
+}
+
+// Membership — дублёр членства ПАРОЙ не читает: предмет этих проб другой, и
+// подставная строка была бы утверждением, которого никто не делал (kaname#181).
+func (fakeUserUR) Membership(context.Context, domain.UserID, domain.AccountID) (domain.Membership, error) {
+	return domain.Membership{}, iamerr.ErrNotFound
 }
 
 // RemoveMembership — дублёр исключения из аккаунта не делает: снятие членства
