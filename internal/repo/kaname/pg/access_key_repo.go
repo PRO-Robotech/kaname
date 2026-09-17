@@ -92,6 +92,22 @@ func (r *AccessKeyRepo) KeyByCredentialID(ctx context.Context, credentialID []by
 	return k, true, nil
 }
 
+// KeyOwnedByID — строка ключа по паре (человек, ключ) для резолвера
+// осиротевших операций (регистрация — присутствие, снятие — отсутствие).
+// Чужой ключ и несуществующий отвечают одинаково «нет строки» (Ф7-27): по
+// идентификатору ключа нельзя узнать, есть ли он у другого человека.
+func (r *AccessKeyRepo) KeyOwnedByID(ctx context.Context, userID domain.UserID, id domain.AccessKeyID) (domain.AccessKey, bool, error) {
+	k, err := scanAccessKey(r.pool.QueryRow(ctx,
+		`SELECT `+accessKeyCols+` FROM user_access_keys WHERE user_id = $1 AND id = $2`, userID, id))
+	if stderrors.Is(err, pgx.ErrNoRows) {
+		return domain.AccessKey{}, false, nil
+	}
+	if err != nil {
+		return domain.AccessKey{}, false, mapErr(err, "AccessKey.OwnedByID", "")
+	}
+	return k, true, nil
+}
+
 // KeysOf — перечень человека курсором `(created_at, id)`; мусорный курсор и
 // величина страницы вне `[0..1000]` — отказ формы, а не молчаливая обрезка.
 func (r *AccessKeyRepo) KeysOf(ctx context.Context, userID domain.UserID, pageToken string, pageSize int32) ([]domain.AccessKey, string, error) {

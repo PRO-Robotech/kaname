@@ -301,9 +301,12 @@ message RevokeAccessKeyRequest {
   string access_key_id = 2;
 }
 
+// Ответ снятия — идентификатор снятого ключа. Момента снятия здесь нет
+// намеренно: строка удаляется, момент несёт событие аудита, а операция,
+// разрешённая после гибели процесса, узнать его не может — пустое поле
+// означало бы «не знаем», а не «пусто».
 message RevokeAccessKeyResponse {
   string access_key_id = 1;
-  google.protobuf.Timestamp revoked_at = 2;
 }
 
 message RevokeAccessKeyMetadata {

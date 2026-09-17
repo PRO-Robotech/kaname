@@ -249,6 +249,76 @@ var catalogPendingEntries = []CatalogPendingEntry{
 			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
 		Refs: "kaname#206 · PRO-Robotech/kacho#1085",
 	},
+	// ШЕСТЬ ГЛАГОЛОВ КЛЮЧА ДОСТУПА (Ф7, kacho#1273; Р11): с ними записей с полом
+	// «1» в копии 289, с полом «2» — по-прежнему 30 (четыре глагола ключа стоят
+	// на «1» при соседях-удостоверениях на «2» — решение Р11, а не недосмотр).
+	{
+		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/BeginRegistration",
+		Why: "глагол начала церемонии регистрации ключа заведён контрактом службы (kacho#1273, Ф7 Р11: " +
+			"пол «1», `token_issuer` на `iam_user` по `user_id`); запись порождена генератором края над " +
+			"этим контрактом (`gateway/scripts/gen-permission-catalog.sh` платформы с отбором домена iam " +
+			"над деревом, где `kaname/` — контракт службы этой ревизии: 116 имён службы против 110 в " +
+			"копии, остальные 110 совпали побайтово; у края на стволе платформы b5fa093341f записей 341, " +
+			"ни одной из шести нет); край порождает свою копию по пину службы и увидит запись после " +
+			"подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/BeginRegistration` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
+		Refs: "PRO-Robotech/kacho#1273",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/FinishRegistration",
+		Why: "глагол приёма результата церемонии регистрации ключа заведён контрактом службы (kacho#1273, " +
+			"Ф7 Р11: пол «1», `token_issuer` на `iam_user` по `user_id`); запись порождена тем же прогоном " +
+			"генератора края, что у `AccessKeyService/BeginRegistration` (шесть глаголов одной службы " +
+			"одним контрактом); край увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/FinishRegistration` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
+		Refs: "PRO-Robotech/kacho#1273",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/List",
+		Why: "глагол перечня ключей человека заведён контрактом службы (kacho#1273, Ф7 Р11: пол «1», " +
+			"`token_reader` на `iam_user` по `user_id`); запись порождена тем же прогоном генератора " +
+			"края, что у `AccessKeyService/BeginRegistration`; край увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/List` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
+		Refs: "PRO-Robotech/kacho#1273",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/Revoke",
+		Why: "глагол снятия ключа заведён контрактом службы (kacho#1273, Ф7 Р11: пол «1», `token_issuer` " +
+			"на `iam_user` по `user_id`); запись порождена тем же прогоном генератора края, что у " +
+			"`AccessKeyService/BeginRegistration`; край увидит запись после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/Revoke` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
+		Refs: "PRO-Robotech/kacho#1273",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/BeginAssertion",
+		Why: "глагол начала испытания утверждения ключа заведён контрактом службы (kacho#1273, Ф7 Р11: " +
+			"освобождён, `SELF_SERVICE`, без пола — вызывающий ещё не назвался); запись порождена тем же " +
+			"прогоном генератора края, что у `AccessKeyService/BeginRegistration`; край увидит запись " +
+			"после подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/BeginAssertion` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
+		Refs: "PRO-Robotech/kacho#1273",
+	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.AccessKeyService/FinishAssertion",
+		Why: "глагол проверки утверждения ключа заведён контрактом службы (kacho#1273, Ф7 Р11: освобождён, " +
+			"`SELF_SERVICE`, без пола — предъявление и есть вход); запись порождена тем же прогоном " +
+			"генератора края, что у `AccessKeyService/BeginRegistration`; край увидит запись после " +
+			"подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.AccessKeyService/FinishAssertion` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
+		Refs: "PRO-Robotech/kacho#1273",
+	},
 }
 
 // CatalogPendingEntries — объявленный перечень (копия, см. CatalogFoundationRenames).

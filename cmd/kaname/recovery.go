@@ -14,6 +14,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/operationresolver"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
 
 // startLROReconciler wires the orphan-reconciler backstop. Without it an operation
@@ -24,7 +25,13 @@ import (
 // terminal outcome from the committed reality of the resource. It runs a boot
 // sweep + a periodic background sweep; it is non-fatal by contract.
 func startLROReconciler(ctx context.Context, pool *pgxpool.Pool, repo kanamerepo.Repository, catalogSource catalog.Source, rec operations.Recorder, logger *slog.Logger) {
-	resolver := operationresolver.New(repo, catalogSource, operationresolver.WithLogger(logger))
+	// Читатель ключей доступа (Ф7) — свой адаптер поверх того же пула, не
+	// CQRS-корень: осиротевшие регистрация и снятие ключа разрешаются его
+	// строкой. Провязан на любой посадке — операций этого типа под `external`
+	// не заводится, но строка, оставшаяся от прежней посадки, обязана стать
+	// терминальной и там.
+	resolver := operationresolver.New(repo, catalogSource, kanamepg.NewAccessKeyRepo(pool),
+		operationresolver.WithLogger(logger))
 	reconciler := operations.NewReconciler(pool, resolver, operations.ReconcilerConfig{
 		Schema: "kaname",
 	}, operations.WithReconcilerRecorder(rec), operations.WithReconcilerLogger(logger))

@@ -600,3 +600,31 @@ func TestAccessKeyRepo_KeysOfPagesInCreationOrder(t *testing.T) {
 	require.Equal(t, people[0], got.UserID)
 	require.Equal(t, "проба", string(got.Description))
 }
+
+// TestAccessKeyRepo_KeyOwnedByIDIsNarrowedByOwner — чтение по паре (человек,
+// ключ) для резолвера осиротевших операций: свой ключ читается той же
+// проекцией, что перечень; чужой и несуществующий — «нет строки», одинаково
+// (побайтовая неразличимость, Ф7-27).
+func TestAccessKeyRepo_KeyOwnedByIDIsNarrowedByOwner(t *testing.T) {
+	pool := akPool(t)
+	akCeiling(t, pool, 10)
+	repo := pg.NewAccessKeyRepo(pool)
+	people := lmPeople(t, pool, "akid", 2)
+	ctx := context.Background()
+	mine := akInsert(t, repo, akKey(people[0], "mine"))
+
+	got, found, err := repo.KeyOwnedByID(ctx, people[0], mine.ID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, mine.ID, got.ID)
+	require.Equal(t, people[0], got.UserID)
+	require.Equal(t, mine.Name, got.Name)
+	require.Equal(t, mine.CredentialID, got.CredentialID)
+
+	_, found, err = repo.KeyOwnedByID(ctx, people[1], mine.ID)
+	require.NoError(t, err)
+	require.False(t, found, "чужой — «нет строки»")
+	_, found, err = repo.KeyOwnedByID(ctx, people[0], domain.AccessKeyID("ak-0000000000000000z"))
+	require.NoError(t, err)
+	require.False(t, found, "несуществующий — то же «нет строки»")
+}

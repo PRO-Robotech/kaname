@@ -890,10 +890,13 @@ func (x *RevokeAccessKeyRequest) GetAccessKeyId() string {
 	return ""
 }
 
+// Ответ снятия — идентификатор снятого ключа. Момента снятия здесь нет
+// намеренно: строка удаляется, момент несёт событие аудита, а операция,
+// разрешённая после гибели процесса, узнать его не может — пустое поле
+// означало бы «не знаем», а не «пусто».
 type RevokeAccessKeyResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AccessKeyId   string                 `protobuf:"bytes,1,opt,name=access_key_id,json=accessKeyId,proto3" json:"access_key_id,omitempty"`
-	RevokedAt     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=revoked_at,json=revokedAt,proto3" json:"revoked_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -933,13 +936,6 @@ func (x *RevokeAccessKeyResponse) GetAccessKeyId() string {
 		return x.AccessKeyId
 	}
 	return ""
-}
-
-func (x *RevokeAccessKeyResponse) GetRevokedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.RevokedAt
-	}
-	return nil
 }
 
 type RevokeAccessKeyMetadata struct {
@@ -1499,11 +1495,9 @@ const file_kaname_cloud_iam_v1_access_key_service_proto_rawDesc = "" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"U\n" +
 	"\x16RevokeAccessKeyRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\"\n" +
-	"\raccess_key_id\x18\x02 \x01(\tR\vaccessKeyId\"x\n" +
+	"\raccess_key_id\x18\x02 \x01(\tR\vaccessKeyId\"=\n" +
 	"\x17RevokeAccessKeyResponse\x12\"\n" +
-	"\raccess_key_id\x18\x01 \x01(\tR\vaccessKeyId\x129\n" +
-	"\n" +
-	"revoked_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\trevokedAt\"u\n" +
+	"\raccess_key_id\x18\x01 \x01(\tR\vaccessKeyId\"u\n" +
 	"\x17RevokeAccessKeyMetadata\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\"\n" +
 	"\raccess_key_id\x18\x02 \x01(\tR\vaccessKeyId\x12\x1d\n" +
@@ -1607,28 +1601,27 @@ var file_kaname_cloud_iam_v1_access_key_service_proto_depIdxs = []int32{
 	24, // 7: kaname.cloud.iam.v1.RegistrationCredential.discoverable:type_name -> google.protobuf.BoolValue
 	25, // 8: kaname.cloud.iam.v1.RegisterAccessKeyResponse.access_key:type_name -> kaname.cloud.iam.v1.AccessKey
 	25, // 9: kaname.cloud.iam.v1.ListAccessKeysResponse.access_keys:type_name -> kaname.cloud.iam.v1.AccessKey
-	23, // 10: kaname.cloud.iam.v1.RevokeAccessKeyResponse.revoked_at:type_name -> google.protobuf.Timestamp
-	18, // 11: kaname.cloud.iam.v1.AccessKeyAssertionChallenge.allow_credentials:type_name -> kaname.cloud.iam.v1.PublicKeyCredentialDescriptor
-	23, // 12: kaname.cloud.iam.v1.AccessKeyAssertionChallenge.expires_at:type_name -> google.protobuf.Timestamp
-	20, // 13: kaname.cloud.iam.v1.FinishAccessKeyAssertionRequest.credential:type_name -> kaname.cloud.iam.v1.AssertionCredential
-	22, // 14: kaname.cloud.iam.v1.FinishAccessKeyAssertionResponse.flags:type_name -> kaname.cloud.iam.v1.AssertionFlags
-	0,  // 15: kaname.cloud.iam.v1.AccessKeyService.BeginRegistration:input_type -> kaname.cloud.iam.v1.BeginAccessKeyRegistrationRequest
-	7,  // 16: kaname.cloud.iam.v1.AccessKeyService.FinishRegistration:input_type -> kaname.cloud.iam.v1.FinishAccessKeyRegistrationRequest
-	11, // 17: kaname.cloud.iam.v1.AccessKeyService.List:input_type -> kaname.cloud.iam.v1.ListAccessKeysRequest
-	13, // 18: kaname.cloud.iam.v1.AccessKeyService.Revoke:input_type -> kaname.cloud.iam.v1.RevokeAccessKeyRequest
-	16, // 19: kaname.cloud.iam.v1.AccessKeyService.BeginAssertion:input_type -> kaname.cloud.iam.v1.BeginAccessKeyAssertionRequest
-	19, // 20: kaname.cloud.iam.v1.AccessKeyService.FinishAssertion:input_type -> kaname.cloud.iam.v1.FinishAccessKeyAssertionRequest
-	1,  // 21: kaname.cloud.iam.v1.AccessKeyService.BeginRegistration:output_type -> kaname.cloud.iam.v1.AccessKeyRegistrationChallenge
-	26, // 22: kaname.cloud.iam.v1.AccessKeyService.FinishRegistration:output_type -> corelib.operation.Operation
-	12, // 23: kaname.cloud.iam.v1.AccessKeyService.List:output_type -> kaname.cloud.iam.v1.ListAccessKeysResponse
-	26, // 24: kaname.cloud.iam.v1.AccessKeyService.Revoke:output_type -> corelib.operation.Operation
-	17, // 25: kaname.cloud.iam.v1.AccessKeyService.BeginAssertion:output_type -> kaname.cloud.iam.v1.AccessKeyAssertionChallenge
-	21, // 26: kaname.cloud.iam.v1.AccessKeyService.FinishAssertion:output_type -> kaname.cloud.iam.v1.FinishAccessKeyAssertionResponse
-	21, // [21:27] is the sub-list for method output_type
-	15, // [15:21] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	18, // 10: kaname.cloud.iam.v1.AccessKeyAssertionChallenge.allow_credentials:type_name -> kaname.cloud.iam.v1.PublicKeyCredentialDescriptor
+	23, // 11: kaname.cloud.iam.v1.AccessKeyAssertionChallenge.expires_at:type_name -> google.protobuf.Timestamp
+	20, // 12: kaname.cloud.iam.v1.FinishAccessKeyAssertionRequest.credential:type_name -> kaname.cloud.iam.v1.AssertionCredential
+	22, // 13: kaname.cloud.iam.v1.FinishAccessKeyAssertionResponse.flags:type_name -> kaname.cloud.iam.v1.AssertionFlags
+	0,  // 14: kaname.cloud.iam.v1.AccessKeyService.BeginRegistration:input_type -> kaname.cloud.iam.v1.BeginAccessKeyRegistrationRequest
+	7,  // 15: kaname.cloud.iam.v1.AccessKeyService.FinishRegistration:input_type -> kaname.cloud.iam.v1.FinishAccessKeyRegistrationRequest
+	11, // 16: kaname.cloud.iam.v1.AccessKeyService.List:input_type -> kaname.cloud.iam.v1.ListAccessKeysRequest
+	13, // 17: kaname.cloud.iam.v1.AccessKeyService.Revoke:input_type -> kaname.cloud.iam.v1.RevokeAccessKeyRequest
+	16, // 18: kaname.cloud.iam.v1.AccessKeyService.BeginAssertion:input_type -> kaname.cloud.iam.v1.BeginAccessKeyAssertionRequest
+	19, // 19: kaname.cloud.iam.v1.AccessKeyService.FinishAssertion:input_type -> kaname.cloud.iam.v1.FinishAccessKeyAssertionRequest
+	1,  // 20: kaname.cloud.iam.v1.AccessKeyService.BeginRegistration:output_type -> kaname.cloud.iam.v1.AccessKeyRegistrationChallenge
+	26, // 21: kaname.cloud.iam.v1.AccessKeyService.FinishRegistration:output_type -> corelib.operation.Operation
+	12, // 22: kaname.cloud.iam.v1.AccessKeyService.List:output_type -> kaname.cloud.iam.v1.ListAccessKeysResponse
+	26, // 23: kaname.cloud.iam.v1.AccessKeyService.Revoke:output_type -> corelib.operation.Operation
+	17, // 24: kaname.cloud.iam.v1.AccessKeyService.BeginAssertion:output_type -> kaname.cloud.iam.v1.AccessKeyAssertionChallenge
+	21, // 25: kaname.cloud.iam.v1.AccessKeyService.FinishAssertion:output_type -> kaname.cloud.iam.v1.FinishAccessKeyAssertionResponse
+	20, // [20:26] is the sub-list for method output_type
+	14, // [14:20] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_access_key_service_proto_init() }

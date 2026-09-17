@@ -163,6 +163,7 @@ own-ceilings:
   accounts-per-identity: -1
   credentials-per-user: 2
   credentials-per-service-account: 2
+  access-keys-per-user: 2
 `))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -191,6 +192,7 @@ own-ceilings:
   accounts-per-identity: 0
   credentials-per-user: 0
   credentials-per-service-account: 0
+  access-keys-per-user: 0
 `))
 	if err != nil {
 		t.Fatalf("Load: %v", err)

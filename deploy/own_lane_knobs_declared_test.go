@@ -47,8 +47,9 @@
 //	страж → чарт   каждая строка таблицы с полосой `own` объявлена: рендерится
 //	               ключом либо подаётся секретом;
 //	чарт  → процесс каждый ключ, который шаблон рендерит в блоках полосы
-//	               (`authn.login.*`, `authn.registration.*`), процесс читает
-//	               ручкой перечня (`config.LoginLaneKnobs`, `config.RegistrationKnobs`).
+//	               (`authn.login.*`, `authn.registration.*`, `authn.access-keys.*`),
+//	               процесс читает ручкой перечня (`config.LoginLaneKnobs`,
+//	               `config.RegistrationKnobs`, `config.AccessKeyKnobs`).
 //	               Ключ вне перечня — ручка без читателя: оператор её правит,
 //	               рендер зелёный, поведение прежнее.
 //
@@ -77,7 +78,7 @@ import (
 
 // ownLaneBlockPrefixes — ключи блоков полосы: рендерятся только под `own`,
 // и каждый обязан иметь читателя в перечне ручек процесса.
-var ownLaneBlockPrefixes = []string{"authn.login.", "authn.registration."}
+var ownLaneBlockPrefixes = []string{"authn.login.", "authn.registration.", "authn.access-keys."}
 
 // ownLaneRequiredSettings — строки таблицы стража, применимые к посадке `own`
 // ПОЛОСОЙ, а не любой посадке: у безусловных строк своя проба.
@@ -102,6 +103,9 @@ func laneKnobKeys() map[string]bool {
 		keys[k.Key] = true
 	}
 	for _, k := range config.RegistrationKnobs {
+		keys[k.Key] = true
+	}
+	for _, k := range config.AccessKeyKnobs {
 		keys[k.Key] = true
 	}
 	return keys
@@ -259,7 +263,7 @@ func auditOwnLaneKnobsDeclared(chartDir string) (findings []string, census strin
 		unread++
 		findings = append(findings, fmt.Sprintf(
 			"  %s:%d: ключ %s рендерится в блоке полосы, а процесс не читает его ни одной ручкой перечня\n"+
-				"    (config.LoginLaneKnobs, config.RegistrationKnobs). Это ручка без читателя: оператор её\n"+
+				"    (config.LoginLaneKnobs, config.RegistrationKnobs, config.AccessKeyKnobs). Это ручка без читателя: оператор её\n"+
 				"    правит, рендер зелёный, поведение прежнее. Снимите ключ с шаблона либо заведите ручку в перечне.",
 			configMapTemplate, k.line, path))
 	}

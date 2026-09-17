@@ -202,6 +202,7 @@ var Profile = listfiltergate.Profile{
 	SubjectScopers: []string{"ListForCaller", "listOp.Execute", "identityOfAuthenticatedCaller", "userIDOfAuthenticatedCaller"},
 
 	ProtoFiles: []string{
+		"kaname/cloud/iam/v1/access_key_service.proto",
 		"kaname/cloud/iam/v1/internal_cluster_service.proto",
 		"kaname/cloud/iam/v1/membership_service.proto",
 		"kaname/cloud/iam/v1/sa_key_service.proto",
@@ -308,6 +309,11 @@ var Profile = listfiltergate.Profile{
 		// declaration names the field and the gate verifies it in the proto.
 		"sa_keys.List":     edgeGate("sa_key_service.proto", "service_account_id"),
 		"user_tokens.List": edgeGate("user_token_service.proto", "user_id"),
+		// access_keys.List (Ф7, kacho#1273; Р11) — та же полоса, что у
+		// user_tokens.List: SQL сужен `user_id` из ПУТИ, вопрос о праве задаёт
+		// дверь по тому же полю (`token_reader` @ `iam_user`, `scope_extractor`
+		// `user_id`).
+		"access_keys.List": edgeGate("access_key_service.proto", "user_id"),
 		// membership.List сужает свой SQL аккаунтом из ПУТИ, и никакая проверка
 		// внутри сервиса вызывающего против этого аккаунта не сверяет — это
 		// решение, а не пропуск: у запроса есть ОДИН объект, про который можно

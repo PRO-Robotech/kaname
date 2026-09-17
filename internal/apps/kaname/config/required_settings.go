@@ -363,6 +363,8 @@ var RequiredSettings = []RequiredSetting{
 	ownCeilingRequirement("iam.account", "1"),
 	ownCeilingRequirement("iam.user.credential", "2"),
 	ownCeilingRequirement("iam.serviceAccount.credential", "2"),
+	// ЧЕТВЁРТЫЙ ПОТОЛОК — ключи доступа (Ф7 Р8, Ф7-38; kacho#1273): та же форма.
+	ownCeilingRequirement("iam.user.accessKey", "3"),
 
 	// ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269) — величины посадки `own`; строки
 	// ВЫВОДЯТСЯ из перечня ручек полосы, а не выписываются рядом с ним.
@@ -403,6 +405,16 @@ var RequiredSettings = []RequiredSetting{
 	// ВОССТАНОВЛЕНИЕ ДОСТУПА на той же полосе (Ф5, kacho#1271).
 	loginLaneRequirement("recovery-code-ttl", "5m",
 		"срок кода восстановления доступа, от чеканки; код однократен и после срока не оживает. Умолчания нет: перенос прежней величины (5 мин) объявляется профилем, а не построением"),
+	// ПРИВЯЗКА КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273; Р2, Ф7-13) — величины посадки
+	// `own`; строки ВЫВОДЯТСЯ из перечня ручек привязки. Образцы намеренно
+	// НЕРЕЗОЛВИМЫЕ (RFC 2606) и согласованы между собой: хост происхождения
+	// лежит под именем доверяющей стороны, иначе страж отверг бы образец.
+	accessKeyRequirement("rp-id", "access.example.invalid",
+		"имя доверяющей стороны (RP ID): доменное имя установки строчными, без схемы, порта и пути, — к нему браузер привязывает каждый ключ (WebAuthn L2 §5.1.3). Пустого значения не бывает; литерал адреса не доменное имя, и посадка без имени объявляет вместо этого перечень происхождений пустым"),
+	accessKeyRequirement("origins", "https://console.access.example.invalid",
+		"перечень происхождений (origin) консоли `https://хост[:порт]` через запятую, каждое под именем доверяющей стороны; сверяется побайтово на приёме результата церемонии и на каждом предъявлении. Слово «"+AccessKeyOriginsNone+"» (в файле — пустой список) означает «никого»: служба стартует и отвергает всякий ключ. Незаданный перечень — отказ старта: «принимаем любое» не политика, а отсутствие привязки"),
+	accessKeyRequirement("algorithms", "-7",
+		"перечень алгоритмов открытого ключа (идентификаторы COSE через запятую), в которых принимаются ключи: -7 (ES256), -8 (EdDSA), -257 (RS256). Пустого «никого» не бывает: перечень без единого алгоритма делает церемонию невыполнимой. Сужение перечня делает уже принятые ключи вне его непринимаемыми — перепись переноса называет их числом"),
 	{
 		Key:    "authn.hook-shared-secret",
 		Env:    "KANAME_HOOK_TOKEN",
@@ -639,6 +651,21 @@ func registrationRequirement(short, sample, why string) RequiredSetting {
 	return RequiredSetting{
 		Key:     key,
 		Env:     registrationEnv(key),
+		Supply:  SupplyEnv,
+		Lanes:   []IdentityProvider{IdentityProviderOwn},
+		Sample:  sample,
+		Why:     why,
+		Refusal: key,
+	}
+}
+
+// accessKeyRequirement — строка таблицы для ручки привязки ключей доступа (Ф7):
+// ключ и переменная берутся у перечня ручек (`AccessKeyKnobs`).
+func accessKeyRequirement(short, sample, why string) RequiredSetting {
+	key := accessKeyKeyPrefix + short
+	return RequiredSetting{
+		Key:     key,
+		Env:     accessKeyEnv(key),
 		Supply:  SupplyEnv,
 		Lanes:   []IdentityProvider{IdentityProviderOwn},
 		Sample:  sample,

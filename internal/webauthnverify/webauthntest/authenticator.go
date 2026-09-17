@@ -122,11 +122,12 @@ func (a *Authenticator) cosePublicKey(t testing.TB, claimedAlg int64) []byte {
 	var m map[int64]any
 	switch k := a.priv.(type) {
 	case *ecdsa.PrivateKey:
-		x := make([]byte, 32)
-		y := make([]byte, 32)
-		k.PublicKey.X.FillBytes(x)
-		k.PublicKey.Y.FillBytes(y)
-		m = map[int64]any{1: int64(2), 3: claimedAlg, -1: int64(1), -2: x, -3: y}
+		// Несжатая точка SEC 1: 0x04 || X || Y — координаты берутся из неё,
+		// а не из полей большого числа.
+		point, err := k.PublicKey.Bytes()
+		require.NoError(t, err)
+		require.Len(t, point, 65)
+		m = map[int64]any{1: int64(2), 3: claimedAlg, -1: int64(1), -2: point[1:33], -3: point[33:65]}
 	case *rsa.PrivateKey:
 		e := big3(k.PublicKey.E)
 		m = map[int64]any{1: int64(3), 3: claimedAlg, -1: k.PublicKey.N.Bytes(), -2: e}
@@ -134,10 +135,23 @@ func (a *Authenticator) cosePublicKey(t testing.TB, claimedAlg int64) []byte {
 		pub := k.Public().(ed25519.PublicKey)
 		m = map[int64]any{1: int64(1), 3: claimedAlg, -1: int64(6), -2: []byte(pub)}
 	}
-	out, err := cbor.Marshal(m)
+	out, err := detEncMode.Marshal(m)
 	require.NoError(t, err)
 	return out
 }
+
+// detEncMode — ДЕТЕРМИНИРОВАННОЕ кодирование CBOR (RFC 8949 §4.2.1). Байты
+// ключа сравниваются пробой с байтами, принятыми проверяющим из результата
+// церемонии, а кодирование карты Go в порядке обхода нестабильно by
+// construction: два кодирования одной карты давали разные байты, и проба
+// краснела по жребию порядка ключей.
+var detEncMode = func() cbor.EncMode {
+	em, err := cbor.CoreDetEncOptions().EncMode()
+	if err != nil {
+		panic(err)
+	}
+	return em
+}()
 
 func big3(e int) []byte {
 	b := make([]byte, 4)
@@ -215,7 +229,7 @@ func (a *Authenticator) Register(t testing.TB, o RegistrationOptions) (clientDat
 		attStmt["alg"] = alg
 		attStmt["sig"] = []byte{0x30, 0x00}
 	}
-	att, err := cbor.Marshal(map[string]any{"fmt": fmtName, "attStmt": attStmt, "authData": authData})
+	att, err := detEncMode.Marshal(map[string]any{"fmt": fmtName, "attStmt": attStmt, "authData": authData})
 	require.NoError(t, err)
 	return clientDataJSON, att
 }

@@ -4,25 +4,22 @@
 package access_keys
 
 import (
-	"time"
-
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"fmt"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/dto"
+	_ "github.com/PRO-Robotech/kaname/internal/dto/toproto" // регистрация перевода ключа
 )
 
-// keyToProto — публичная проекция строки: идентификатор удостоверения,
-// открытый ключ, счётчик и рукоятка наружу не выходят (Р10). Моменты усечены
-// до секунды (`api-conventions.md`).
-func keyToProto(k domain.AccessKey) *iamv1.AccessKey {
-	out := &iamv1.AccessKey{
-		Id: string(k.ID), UserId: string(k.UserID), Name: string(k.Name), Description: string(k.Description),
-		CreatedAt: timestamppb.New(k.CreatedAt.Truncate(time.Second)),
+// KeyToProto — публичная проекция строки ОДНИМ переводом реестра
+// (`dto/toproto/access_key.go`): та же у перечня, у ответа операции
+// регистрации и у резолвера осиротевших операций.
+func KeyToProto(k domain.AccessKey) (*iamv1.AccessKey, error) {
+	var dst *iamv1.AccessKey
+	if err := dto.Transfer(dto.FromTo(k, &dst)); err != nil {
+		return nil, fmt.Errorf("access key %s: projection: %w", k.ID, err)
 	}
-	if k.LastUsedAt != nil {
-		out.LastUsedAt = timestamppb.New(k.LastUsedAt.Truncate(time.Second))
-	}
-	return out
+	return dst, nil
 }

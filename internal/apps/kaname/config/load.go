@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
@@ -124,7 +125,7 @@ func Load(path string) (Config, error) {
 		}
 	}
 
-	// ТРИ СОБСТВЕННЫХ ПОТОЛКА привязываются здесь по той же причине, что три
+	// ЧЕТЫРЕ СОБСТВЕННЫХ ПОТОЛКА привязываются здесь по той же причине, что три
 	// ручки выше, и перечень ВЫВОДИТСЯ из таблицы величин, а не выписывается
 	// вторым списком (`own_ceilings.go`): выписанный разошёлся бы с ней молча,
 	// и переменная, названная текстом отказа, перестала бы доезжать до поля.
@@ -139,6 +140,11 @@ func Load(path string) (Config, error) {
 		}
 	}
 	for _, k := range RegistrationKnobs {
+		if err := v.BindEnv(k.Key, k.Env); err != nil {
+			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
+		}
+	}
+	for _, k := range AccessKeyKnobs {
 		if err := v.BindEnv(k.Key, k.Env); err != nil {
 			return Config{}, fmt.Errorf("bind %s env: %w", k.Key, err)
 		}
@@ -175,6 +181,7 @@ func Load(path string) (Config, error) {
 		dc.DecodeHook = mapstructure.ComposeDecodeHookFunc(
 			mapstructure.StringToTimeDurationHookFunc(),
 			mapstructure.StringToSliceHookFunc(","),
+			stringToInt64SliceHook(","),
 			modeDecodeHook(),
 			identityProviderDecodeHook(),
 		)
@@ -355,6 +362,37 @@ func injectPasswordIntoDSN(dsn, pwd string) string {
 	}
 	u.User = url.UserPassword(u.User.Username(), pwd)
 	return u.String()
+}
+
+// stringToInt64SliceHook — DecodeHook для viper.Unmarshal: строка с
+// разделителем → `[]int64` (перечень алгоритмов ключей доступа из переменной
+// окружения, `authn.access-keys.algorithms`).
+//
+// Зачем свой: `StringToSliceHookFunc` делит строку ТОЛЬКО в `[]string` — на
+// целевом `[]int64` он молчит, и переменная `-7,-257` доезжала бы до поля
+// целиком одним элементом, роняя разбор текстом о `[0]`, которого оператор не
+// писал. Пробелы вокруг элементов снимаются: форма `-7, -8` — обычная запись
+// перечня, и отказ на ней читался бы как наша ошибка.
+func stringToInt64SliceHook(sep string) mapstructure.DecodeHookFunc {
+	return func(from reflect.Type, to reflect.Type, data interface{}) (interface{}, error) {
+		if from.Kind() != reflect.String || to != reflect.TypeOf([]int64(nil)) {
+			return data, nil
+		}
+		raw := strings.TrimSpace(data.(string))
+		if raw == "" {
+			return []int64{}, nil
+		}
+		parts := strings.Split(raw, sep)
+		out := make([]int64, 0, len(parts))
+		for _, p := range parts {
+			v, err := strconv.ParseInt(strings.TrimSpace(p), 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("элемент %q не целое число", p)
+			}
+			out = append(out, v)
+		}
+		return out, nil
+	}
 }
 
 // modeDecodeHook — DecodeHook for viper.Unmarshal: parses string → Mode (ENUM).

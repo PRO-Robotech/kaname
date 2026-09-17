@@ -67,6 +67,21 @@ const (
 // KnownAlgorithms — словарь в устойчивом порядке.
 func KnownAlgorithms() []Algorithm { return []Algorithm{AlgES256, AlgEdDSA, AlgRS256} }
 
+// Name — имя алгоритма по реестру IANA COSE (для текстов отказа и документа
+// оператора); идентификатор вне словаря имени не имеет.
+func (a Algorithm) Name() string {
+	switch a {
+	case AlgES256:
+		return "ES256"
+	case AlgEdDSA:
+		return "EdDSA"
+	case AlgRS256:
+		return "RS256"
+	default:
+		return ""
+	}
+}
+
 // ParseAlgorithms читает перечень посадки: каждый идентификатор обязан быть
 // в словаре, перечень — непустым (пустой означает «церемония невозможна», Р2).
 func ParseAlgorithms(raw []int64) ([]Algorithm, error) {
@@ -441,8 +456,14 @@ func parseCOSEKey(raw []byte) (Algorithm, crypto.PublicKey, error) {
 		if decodeInt(m[-1], &crv) != nil || crv != 1 || decodeBytes(m[-2], &x) != nil || decodeBytes(m[-3], &y) != nil || len(x) != 32 || len(y) != 32 {
 			return 0, nil, refuse(ReasonMalformed, "EC2 key")
 		}
-		pub := &ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
-		if !pub.Curve.IsOnCurve(pub.X, pub.Y) {
+		// Несжатая точка SEC 1 §2.3.3: 0x04 || X || Y; разбор сам проверяет,
+		// что точка лежит на кривой, — ключ вне кривой не собирается вовсе.
+		point := make([]byte, 0, 65)
+		point = append(point, 0x04)
+		point = append(point, x...)
+		point = append(point, y...)
+		pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), point)
+		if err != nil {
 			return 0, nil, refuse(ReasonMalformed, "EC2 point is not on P-256")
 		}
 		return a, pub, nil

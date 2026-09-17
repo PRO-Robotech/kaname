@@ -383,3 +383,17 @@ func requireRefusal(t *testing.T, err error, reason webauthnverify.Reason) {
 	require.True(t, errors.As(err, &r), "ожидался отказ проверяющего, получено %v", err)
 	require.Equal(t, reason, r.Reason, "причина отказа: %v", err)
 }
+
+// TestAccessKey_AlgorithmNamesFollowTheDictionary — у каждого идентификатора
+// словаря есть имя реестра COSE, у чужого — нет.
+func TestAccessKey_AlgorithmNamesFollowTheDictionary(t *testing.T) {
+	want := map[webauthnverify.Algorithm]string{webauthnverify.AlgES256: "ES256", webauthnverify.AlgEdDSA: "EdDSA", webauthnverify.AlgRS256: "RS256"}
+	for _, a := range webauthnverify.KnownAlgorithms() {
+		if got := a.Name(); got != want[a] {
+			t.Fatalf("имя %d: получено %q, ожидалось %q", int64(a), got, want[a])
+		}
+	}
+	if got := webauthnverify.Algorithm(-35).Name(); got != "" {
+		t.Fatalf("идентификатор вне словаря имени не имеет, получено %q", got)
+	}
+}

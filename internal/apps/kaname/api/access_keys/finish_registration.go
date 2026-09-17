@@ -116,7 +116,7 @@ func (uc *FinishRegistrationUseCase) Execute(ctx context.Context, in FinishRegis
 	ch, found, err := uc.deps.Store.Challenge(ctx, cd.Challenge, in.UserID, domain.ChallengeForRegistration)
 	if err != nil {
 		uc.deps.Logger.Error("access keys: challenge unreadable", "err", err.Error())
-		return nil, storeUnavailable("access key registration")
+		return nil, storeUnavailable()
 	}
 	if !found {
 		uc.deps.Observer.AccessKeyRefusalObserved(LaneRegistration, RefusalChallengeUnknown)
@@ -201,7 +201,11 @@ func (uc *FinishRegistrationUseCase) commit(ctx context.Context, key domain.Acce
 		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.commit", err)
 	}
 	uc.deps.Observer.AccessKeyEventObserved(EventRegistered)
-	return anypb.New(&iamv1.RegisterAccessKeyResponse{AccessKey: keyToProto(persisted)})
+	pb, err := KeyToProto(persisted)
+	if err != nil {
+		return nil, mapStoreErr(uc.deps, "access_keys.FinishRegistration.project", err)
+	}
+	return anypb.New(&iamv1.RegisterAccessKeyResponse{AccessKey: pb})
 }
 
 // ceremonyRefusal — отказ проверяющего на полосе церемонии: причина названа

@@ -65,6 +65,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
@@ -193,6 +194,17 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Cells: len(registration.Lanes) * len(registration.Outcomes()), // полоса × исход
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "вызывающий видит ОДИН отказ регистрации (Ф4 Р3); занятость и потолок темпа различимы только клеткой, и клетка обязана быть с нулём до первого события",
+	},
+	// ── КЛЮЧИ ДОСТУПА (Ф7, kacho#1273) ───────────────────────────────────────
+	AccessKeyRefusalsMetric: {
+		Cells: len(access_keys.Lanes()) * len(access_keys.Refusals()), // полоса × причина
+		Build: func(r *Registry) { r.AccessKeyRecorder() },
+		Why:   "вызывающий видит ЕДИНЫЙ отказ утверждения (§3.0); причина — только здесь, и клетка обязана быть с нулём до первого события",
+	},
+	AccessKeyEventsMetric: {
+		Cells: len(access_keys.Events()),
+		Build: func(r *Registry) { r.AccessKeyRecorder() },
+		Why:   "ноль заведений и утверждений за всю жизнь и непровязанная служба выглядят одинаково без клетки",
 	},
 	// ── ВОССТАНОВЛЕНИЕ ДОСТУПА (Ф5, kacho#1271) — тот же конструктор ─────────
 	RecoveryRequestOutcomesMetric: {

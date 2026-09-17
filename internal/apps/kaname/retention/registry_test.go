@@ -163,7 +163,7 @@ func (stubReaper) SweepAgedRows(_ context.Context, _ time.Duration, _ int) (int6
 func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
 	window := 15 * time.Minute
 	full := HumanSessionReapers{
-		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{},
+		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{},
 		LongestWindow: 10 * time.Minute, EnrollmentWindow: window,
 	}
 	got := WithHumanSessions(nil, full)
@@ -171,8 +171,8 @@ func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
 	for _, s := range got {
 		byName[s.Name] = s
 	}
-	if len(got) != 4 {
-		t.Fatalf("предметов полосы входа %d, ждали 4: %v", len(got), byName)
+	if len(got) != 5 {
+		t.Fatalf("предметов полосы входа %d, ждали 5: %v", len(got), byName)
 	}
 	s, ok := byName[SubjectSecondFactorEnrollments]
 	if !ok {
@@ -184,12 +184,47 @@ func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
 	if s.Sweep == nil {
 		t.Errorf("предмет %q объявлен без уборщика", s.Name)
 	}
-	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, LongestWindow: time.Minute, EnrollmentWindow: window}); len(got) != 0 {
+	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Challenges: stubReaper{}, LongestWindow: time.Minute, EnrollmentWindow: window}); len(got) != 0 {
 		t.Errorf("без уборщика заведений полоса даёт %d записей, ждали 0", len(got))
 	}
-	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, LongestWindow: time.Minute}); len(got) != 0 {
+	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{}, LongestWindow: time.Minute}); len(got) != 0 {
 		t.Errorf("без окна заведений полоса даёт %d записей, ждали 0: порог нулём снимал бы живые pending", len(got))
 	}
+}
+
+// TestWithHumanSessionsCarriesTheAccessKeyChallengeSweeper — Ф7 (kacho#1273,
+// Р5 врезка Ф7-34): пятый предмет полосы — испытания ключей, которых приём
+// результата и проверка утверждения уже не обслужат (истёкшие и снятые);
+// порог ноль — граница срока включающая и у читателя, и у уборки; полоса без
+// уборщика испытаний записей не даёт вовсе.
+func TestWithHumanSessionsCarriesTheAccessKeyChallengeSweeper(t *testing.T) {
+	full := HumanSessionReapers{
+		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, Challenges: stubReaper{},
+		LongestWindow: 10 * time.Minute, EnrollmentWindow: 15 * time.Minute,
+	}
+	byName := map[string]Subject{}
+	for _, s := range WithHumanSessions(nil, full) {
+		byName[s.Name] = s
+	}
+	s, ok := byName[SubjectAccessKeyChallenges]
+	if !ok {
+		t.Fatalf("предмета %q нет среди %v", SubjectAccessKeyChallenges, byName)
+	}
+	if s.Grace != 0 {
+		t.Errorf("порог испытаний %v, ждали 0: истёкшее и снятое читатель уже не обслужит", s.Grace)
+	}
+	if s.Sweep == nil {
+		t.Errorf("предмет %q объявлен без уборщика", s.Name)
+	}
+	without := full
+	without.Challenges = nil
+	if got := WithHumanSessions(nil, without); len(got) != 0 {
+		t.Errorf("без уборщика испытаний полоса даёт %d записей, ждали 0", len(got))
+	}
+}
+
+func (stubReaper) SweepUnservableChallenges(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
+	return 0, false, nil
 }
 
 func (stubReaper) SweepExpiredEnrollments(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {

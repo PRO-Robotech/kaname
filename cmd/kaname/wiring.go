@@ -19,6 +19,7 @@ import (
 
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	accountapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/account"
 	authorizeapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/authorize"
 	bootstraptoken "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token"
@@ -61,6 +62,10 @@ import (
 // россыпи локальных переменных в runServe). Заполняется buildServices,
 // используется register{Public,Internal}Services.
 type services struct {
+	// accessKeyHandler — AccessKeyService (Ф7, kacho#1273): шесть глаголов
+	// ключа доступа на публичном слушателе; nil под `external` — служба не
+	// регистрируется, и незарегистрированный метод отвечает `Unimplemented`.
+	accessKeyHandler *access_keys.Handler
 	// humanSessionHandler — InternalHumanSessionService.Resolve (Ф3). Ставится
 	// корнем ПОСЛЕ сборки: полоса входа строится отдельно и только под `own`.
 	humanSessionHandler   *humansession.Handler

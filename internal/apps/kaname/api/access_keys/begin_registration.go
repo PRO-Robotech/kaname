@@ -121,7 +121,7 @@ func requireFresh(ctx context.Context, d Deps, lane Lane, actor domain.UserID, n
 	at, found, err := d.Freshness.LastPresentedAt(ctx, actor)
 	if err != nil {
 		d.Logger.Error("access keys: freshness unreadable", "lane", string(lane), "err", err.Error())
-		return storeUnavailable("access key " + string(lane))
+		return storeUnavailable()
 	}
 	if !found || now.Sub(at) > d.FreshnessWindow {
 		d.Observer.AccessKeyRefusalObserved(lane, RefusalSessionNotFresh)
@@ -139,7 +139,7 @@ func activeUser(ctx context.Context, d Deps, id domain.UserID, verb string) (dom
 			return domain.User{}, notFoundUser(id)
 		}
 		d.Logger.Error("access keys: user unreadable", "verb", verb, "err", err.Error())
-		return domain.User{}, storeUnavailable("access key " + verb)
+		return domain.User{}, storeUnavailable()
 	}
 	if !user.InviteStatus.MayAuthenticate() {
 		return domain.User{}, userNotActive(id)
@@ -153,7 +153,7 @@ func issueChallenge(ctx context.Context, d Deps, userID domain.UserID, purpose d
 	raw := make([]byte, domain.AccessKeyChallengeBytes)
 	if _, err := rand.Read(raw); err != nil {
 		d.Logger.Error("access keys: challenge not minted", "err", err.Error())
-		return domain.AccessKeyChallenge{}, storeUnavailable("access key challenge")
+		return domain.AccessKeyChallenge{}, storeUnavailable()
 	}
 	ch := domain.AccessKeyChallenge{Challenge: raw, UserID: userID, Purpose: purpose, IssuedAt: now, ExpiresAt: now.Add(ChallengeTTL)}
 	if err := ch.Validate(); err != nil {
@@ -161,15 +161,15 @@ func issueChallenge(ctx context.Context, d Deps, userID domain.UserID, purpose d
 	}
 	w, err := d.Store.Writer(ctx)
 	if err != nil {
-		return domain.AccessKeyChallenge{}, storeUnavailable("access key challenge")
+		return domain.AccessKeyChallenge{}, storeUnavailable()
 	}
 	defer func() { _ = w.Rollback(ctx) }()
 	if err := w.InsertChallenge(ctx, ch); err != nil {
 		d.Logger.Error("access keys: challenge not stored", "err", err.Error())
-		return domain.AccessKeyChallenge{}, storeUnavailable("access key challenge")
+		return domain.AccessKeyChallenge{}, storeUnavailable()
 	}
 	if err := w.Commit(ctx); err != nil {
-		return domain.AccessKeyChallenge{}, storeUnavailable("access key challenge")
+		return domain.AccessKeyChallenge{}, storeUnavailable()
 	}
 	return ch, nil
 }

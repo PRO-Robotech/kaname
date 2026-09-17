@@ -184,6 +184,7 @@ var configBridge = []bridged{
 	{configKey: "own-ceilings.accounts-per-identity", valuePath: []string{"ownCeilings", "accountsPerIdentity"}},
 	{configKey: "own-ceilings.credentials-per-user", valuePath: []string{"ownCeilings", "credentialsPerUser"}},
 	{configKey: "own-ceilings.credentials-per-service-account", valuePath: []string{"ownCeilings", "credentialsPerServiceAccount"}},
+	{configKey: "own-ceilings.access-keys-per-user", valuePath: []string{"ownCeilings", "accessKeysPerUser"}},
 	{configKey: "api-server.endpoint", derive: func(r *valueReader) any {
 		return fmt.Sprintf("tcp://0.0.0.0:%s", r.text("ports", "grpc"))
 	}},
@@ -264,6 +265,13 @@ var configBridge = []bridged{
 	// Перечень ключей обёртки секретов — секрет, подаётся переменной из Secret и
 	// файлом настроек не рендерится.
 	{configKey: "authn.self-service-freshness", valuePath: []string{"authn", "selfServiceFreshness"}, omitEmpty: true},
+	// ПРИВЯЗКА КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273): имя и алгоритмы — ветвь `with`
+	// (`omitEmpty`); перечень происхождений — ветвь `hasKey`, и `omitEmpty` у него
+	// НЕ ставится по тому же доводу, что у потолков: пустой список — величина
+	// «никого», а не пустота, и вычет пустого выбросил бы её из входа.
+	{configKey: "authn.access-keys.rp-id", valuePath: []string{"authn", "accessKeys", "rpId"}, omitEmpty: true},
+	{configKey: "authn.access-keys.origins", valuePath: []string{"authn", "accessKeys", "origins"}},
+	{configKey: "authn.access-keys.algorithms", valuePath: []string{"authn", "accessKeys", "algorithms"}, omitEmpty: true},
 	// СВОЯ ЧЕКАНКА ТОКЕНОВ. Блок целиком за выключателем: шаблон не рендерит его
 	// ни одним ключом, пока чеканка выключена.
 	{configKey: "authn.token-signing.enabled", gate: tokenSigningGate, derive: func(*valueReader) any { return true }},
@@ -389,6 +397,21 @@ var restatedDeliberately = map[string]string{
 		"`external`. Объявлена по приёмке Ф12 (Ф12-36): дословный перенос Ф1 §4.1 (15 мин) живёт в " +
 		"профилях обоих чартов, где его видит читающий. Запись истекает с первым профилем на `own`: там " +
 		"снятие ручки роняет СТАРТ",
+	"authn.accessKeys.rpId": "величина ПРИВЯЗКИ КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273, Р2): имя доверяющей стороны; страж читает " +
+		"её только под посадкой `own` (config.ValidateLaneRequirements, Ф7-13), а боевой профиль стоит на " +
+		"`external`. Объявлена по приёмке Ф7 (§1.2, §1.3): величины привязки переезжают из настройки " +
+		"прежнего компонента в профиль службы, где их видит читающий. Запись истекает с первым профилем " +
+		"на `own`: там снятие ручки роняет СТАРТ",
+	"authn.accessKeys.origins": "величина ПРИВЯЗКИ КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273, Р2): перечень происхождений консоли; страж читает " +
+		"её только под посадкой `own` (config.ValidateLaneRequirements, Ф7-13), а боевой профиль стоит на " +
+		"`external`. Объявлена по приёмке Ф7 (§1.2, §1.3): величины привязки переезжают из настройки " +
+		"прежнего компонента в профиль службы, где их видит читающий. Запись истекает с первым профилем " +
+		"на `own`: там снятие ручки роняет СТАРТ",
+	"authn.accessKeys.algorithms": "величина ПРИВЯЗКИ КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273, Р2): перечень алгоритмов открытого ключа; страж читает " +
+		"её только под посадкой `own` (config.ValidateLaneRequirements, Ф7-13), а боевой профиль стоит на " +
+		"`external`. Объявлена по приёмке Ф7 (§1.2, §1.3): величины привязки переезжают из настройки " +
+		"прежнего компонента в профиль службы, где их видит читающий. Запись истекает с первым профилем " +
+		"на `own`: там снятие ручки роняет СТАРТ",
 	"env.KANAME_LOGINLANE_SERVER_MTLS_ENABLE": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
 		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
 		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +

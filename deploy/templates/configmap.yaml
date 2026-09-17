@@ -60,6 +60,12 @@ data:
       {{- if hasKey $oc "credentialsPerServiceAccount" }}
       credentials-per-service-account: {{ $oc.credentialsPerServiceAccount }}
       {{- end }}
+      {{- /* ЧЕТВЁРТЫЙ ПОТОЛОК — ключи доступа человека (Ф7, kacho#1273; Р8,
+           Ф7-38): та же форма, тот же довод про `hasKey` — ноль означает
+           «ключей не заводить». */}}
+      {{- if hasKey $oc "accessKeysPerUser" }}
+      access-keys-per-user: {{ $oc.accessKeysPerUser }}
+      {{- end }}
 
     api-server:
       endpoint: {{ printf "tcp://0.0.0.0:%v" .Values.ports.grpc | quote }}
@@ -310,6 +316,42 @@ data:
       # `authn.identityProvider: own`, умолчания нет — ветвь, а не сквозная
       # подстановка, чтобы незаданное доехало до стража незаданным.
       self-service-freshness: {{ . | quote }}
+      {{- end }}
+
+      {{- with $authn.accessKeys }}
+      # ПРИВЯЗКА КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273; Р2, Ф7-13): имя доверяющей
+      # стороны, перечень происхождений, перечень алгоритмов — три величины
+      # контракта, каждая условие старта под `authn.identityProvider: own`,
+      # умолчания нет ни у одной; незаданная — отказ старта с именем СВОЕЙ ручки
+      # (KANAME_AUTHN__ACCESS_KEYS__*). Под `external` блок не читается.
+      #
+      # Перечень происхождений ветвится по `hasKey`, а не `with`, и это несущее:
+      # ПУСТОЙ список — законная величина «никого» (служба стартует и отвергает
+      # всякий ключ, Ф7-44/Ф7-10), а `with` считает пустой список пустым и
+      # выбросил бы объявленное — незаданное и «никого» перестали бы различаться.
+      access-keys:
+        {{- with .rpId }}
+        rp-id: {{ . | quote }}
+        {{- end }}
+        # Ключ с ПУСТЫМ значением (`origins` без списка, `--set …=null`) — не
+        # объявление. `hasKey` на нём истинен, поэтому вид проверяется отдельно,
+        # иначе снятый ключ читался бы как «никого».
+        {{- if and (hasKey . "origins") (not (kindIs "invalid" .origins)) }}
+        {{- if .origins }}
+        origins:
+          {{- range .origins }}
+          - {{ . | quote }}
+          {{- end }}
+        {{- else }}
+        origins: []
+        {{- end }}
+        {{- end }}
+        {{- with .algorithms }}
+        algorithms:
+          {{- range . }}
+          - {{ int64 . }}
+          {{- end }}
+        {{- end }}
       {{- end }}
 
       {{- with (include "kaname-svc.trustDomain" .) }}

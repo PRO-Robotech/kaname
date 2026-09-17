@@ -20,10 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
@@ -115,7 +113,7 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 	}
 	actor := string(in.Actor)
 	operations.Run(ctx, uc.ops, op.ID, func(ctx context.Context) (*anypb.Any, error) {
-		return uc.commit(ctx, in.UserID, keyID, user.AccountID, actor, now)
+		return uc.commit(ctx, in.UserID, keyID, user.AccountID, actor)
 	})
 	return &op, nil
 }
@@ -151,7 +149,7 @@ func (uc *RevokeUseCase) lastMethodRefusal(ctx context.Context, userID domain.Us
 }
 
 // commit — ОДНА транзакция под замком строк человека.
-func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID, account domain.AccountID, actor string, now time.Time) (*anypb.Any, error) {
+func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID domain.AccessKeyID, account domain.AccountID, actor string) (*anypb.Any, error) {
 	w, err := uc.deps.Store.Writer(ctx)
 	if err != nil {
 		return nil, mapStoreErr(uc.deps, "access_keys.Revoke.writer", err)
@@ -179,5 +177,5 @@ func (uc *RevokeUseCase) commit(ctx context.Context, userID domain.UserID, keyID
 		return nil, mapStoreErr(uc.deps, "access_keys.Revoke.commit", err)
 	}
 	uc.deps.Observer.AccessKeyEventObserved(EventRevoked)
-	return anypb.New(&iamv1.RevokeAccessKeyResponse{AccessKeyId: string(keyID), RevokedAt: timestamppb.New(now.Truncate(time.Second))})
+	return anypb.New(&iamv1.RevokeAccessKeyResponse{AccessKeyId: string(keyID)})
 }

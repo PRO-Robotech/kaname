@@ -225,6 +225,7 @@ errors/              # sentinel + WrapPgErr.
 | `:9090`   | `MembershipService`             | Create + read Membership (Account ↔ User)              |
 | `:9090`   | `UserTokenService`              | Issue / List / Revoke пользовательских токенов         |
 | `:9090`   | `IdentityQuotaService`          | List квот личности (`kaname.cloud.iam.v1`)             |
+| `:9090`   | `AccessKeyService`              | ключи доступа (WebAuthn): церемония регистрации, List / Revoke, испытание и проверка утверждения; регистрируется только под посадкой `own` (Ф7) |
 | `:9091`   | `InternalIAMService`            | Check + Register/UnregisterResource (fgaproxy)         |
 | `:9091`   | `AuthorizeService`              | тот же обработчик для peer-проверок по mTLS-ребру      |
 | `:9091`   | `InternalClusterService`        | cluster-admin grants (time-bombed / permanent)         |

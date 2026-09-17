@@ -17,7 +17,6 @@ package access_keys
 
 import (
 	"errors"
-	"fmt"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
@@ -40,7 +39,7 @@ const (
 	TextUserNotPresent       = "authenticator did not report user presence"
 	TextAlgorithmNotAllowed  = "credential public key algorithm is not in the declared list"
 	TextNotDiscoverable      = "credential is not discoverable: a discoverable credential is required"
-	TextMalformedCredential  = "credential result is malformed"
+	TextMalformedCredential  = "credential result is malformed" // #nosec G101 -- текст отказа, а не секрет
 	TextLastSignInMethod     = "last sign-in method cannot be revoked: enrol another sign-in method first"
 	TextUserNotActive        = "user %s is not active and cannot register an access key"
 	TextAccessKeyNotFound    = "AccessKey %s not found"
@@ -183,7 +182,13 @@ func Events() []Event {
 	return []Event{EventRegistrationChallengeIssued, EventRegistered, EventAssertionChallengeIssued, EventAsserted, EventRevoked, EventTransferred}
 }
 
+// TextStoreUnavailable — ФИКСИРОВАННЫЙ текст отказа на полосе чужой причины
+// (хранилище, окно свежести): в нём нет ни имени глагола, ни текста полученной
+// ошибки — незамапленная ошибка драйвера несёт строку подключения, и
+// подставленный текст уехал бы вызывающему. Причина остаётся в журнале.
+const TextStoreUnavailable = "access key service temporarily unavailable"
+
 // storeUnavailable — хранилище не ответило: фиксированный текст, без причины.
-func storeUnavailable(verb string) error {
-	return status.Error(codes.Unavailable, fmt.Sprintf("%s temporarily unavailable", verb))
+func storeUnavailable() error {
+	return status.Error(codes.Unavailable, TextStoreUnavailable)
 }
