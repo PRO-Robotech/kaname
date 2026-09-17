@@ -11,15 +11,20 @@ package domain
 // строка Ф2; F4d-13…F4d-15, причём F4d-13 — ЧАСТИЧНО.
 //
 // F4d-13 требует от строки «вид способа, проверочный материал, уровень доверия
-// и состояние». Держатся вид и материал; уровень доверия и состояние здесь НЕ
-// заведены, и это решение, а не пропуск. Уровень есть функция вида способа:
-// хранимый рядом, он стал бы вторым написанием одного значения, а «уровень
-// уверенности как значение нашего хранилища» Ф1 §0.2 прямо относит к фазе Ф11 и
-// не санкционирует. Состояния у способа сегодня ровно одно — «есть», и оно
-// выражается существованием строки; производителя второго состояния нет. Каждое
-// заводится потом добавлением колонки с умолчанием, без переноса строк.
-// Носители: уровень доверия — PRO-Robotech/kacho#1280 (Ф11), состояние —
-// PRO-Robotech/kacho#1281 (Ф12); решение — PRO-Robotech/kacho#1268 (комментарий 5680711802).
+// и состояние». Держатся вид, материал и — с фазы Ф12 (PRO-Robotech/kacho#1281,
+// приёмка `second-factor-totp-and-recovery-codes.md`, Р1) — СОСТОЯНИЕ: `pending`
+// (секрет чеканен, первый код не предъявлен) · `active` (подтверждён). Строка
+// `pending` способом входа НЕ является: её не читает ни правило уровня, ни
+// полоса входа. Уровень доверия в строке НЕ заведён и не будет: он есть функция
+// предъявленного, а не способа (Ф11 Р1, PRO-Robotech/kacho#1280) — хранимый
+// рядом, он был бы неверен для каждого предъявления, где сверки не было.
+// Решение о составе строки — PRO-Robotech/kacho#1268 (комментарий 5680711802).
+//
+// Виды и их состояния: у `password` и `lookup_secret` состояние ровно одно —
+// `active` (ограничение схемы `user_login_methods_pending_only_totp_check`);
+// `pending` бывает только у `totp`. Сверх материала строка `totp` несёт
+// ПОСЛЕДНИЙ ПРИНЯТЫЙ ШАГ (Ф12 Р5): состояние сверки, не секрет; код шага не
+// старше него отвергается повтором.
 
 import (
 	"errors"
@@ -28,20 +33,57 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/PRO-Robotech/kaname/internal/assurance"
 )
 
 // LoginMethodKind — вид способа входа. Словарь ЗАКРЫТ и совпадает с
 // ограничением таблицы `user_login_methods_kind_check`.
 //
-// Вид сегодня один. Второй — одноразовый код по времени — заводится ВМЕСТЕ со
-// своим производителем (Ф12): значение словаря без производителя обещало бы
-// возможность, которой нет.
+// ИМЕНА БЕРУТСЯ У СЛОВАРЯ СПОСОБОВ ПРЕДЪЯВЛЕНИЯ (`internal/assurance`, Ф11 Р8),
+// а не пишутся здесь литералами: словарь объявлен ОДИН раз, и второе объявление
+// перечня имён в прод-коде службы — находка гейта
+// `TestAssuranceMethodVocabularyIsDeclaredOnce`. Видов три (Ф12 Р1):
+// пароль · код по времени · набор запасных кодов; ключ доступа (`webauthn`)
+// строкой этой таблицы не является — его хранилище заводит Ф7 своей приёмкой.
 type LoginMethodKind string
 
 // LoginMethodPassword — пароль: строка несёт его проверочный материал.
-const LoginMethodPassword LoginMethodKind = "password"
+var LoginMethodPassword = LoginMethodKind(assurance.MethodPassword.String())
 
-var loginMethodKinds = []LoginMethodKind{LoginMethodPassword}
+// LoginMethodTOTP — одноразовый код по времени (RFC 6238): строка несёт секрет
+// ОБЁРНУТЫМ (Ф12 Р2) и последний принятый шаг.
+var LoginMethodTOTP = LoginMethodKind(assurance.MethodTOTP.String())
+
+// LoginMethodLookupSecret — набор запасных кодов: строка несёт проверочный
+// материал набора, из которого значение кода не восстановимо (Ф12 Р6).
+var LoginMethodLookupSecret = LoginMethodKind(assurance.MethodLookupSecret.String())
+
+var loginMethodKinds = []LoginMethodKind{LoginMethodPassword, LoginMethodTOTP, LoginMethodLookupSecret}
+
+// LoginMethodState — состояние строки способа (Ф12 Р1). Значений ровно два,
+// закреплены ограничением схемы `user_login_methods_state_check`.
+type LoginMethodState string
+
+const (
+	// LoginMethodStatePending — секрет чеканен, первый код не предъявлен.
+	// Способом входа такая строка не является и живёт не дольше окна свежести
+	// правки своих данных (Ф12 Р8); снимает её уборка либо новое заведение.
+	LoginMethodStatePending LoginMethodState = "pending"
+	// LoginMethodStateActive — подтверждён; единственное состояние `password`
+	// и `lookup_secret`.
+	LoginMethodStateActive LoginMethodState = "active"
+)
+
+// Validate — состояние из словаря.
+func (s LoginMethodState) Validate() error {
+	switch s {
+	case LoginMethodStatePending, LoginMethodStateActive:
+		return nil
+	}
+	return fmt.Errorf("Illegal argument login_method.state %q (allowed: %s|%s)", string(s),
+		LoginMethodStatePending, LoginMethodStateActive)
+}
 
 // LoginMethodKinds — словарь видов; копия, чтобы вызывающий не мог его расширить.
 func LoginMethodKinds() []LoginMethodKind {
@@ -170,7 +212,17 @@ type LoginMethod struct {
 	UserID   UserID
 	Kind     LoginMethodKind
 	Verifier LoginVerifier
-	// CreatedAt назначает запись; на входе игнорируется.
+	// State — состояние строки (Ф12 Р1). Обязательно у всякого вида: значение,
+	// подставленное молча, было бы вторым местом об одном предмете рядом с
+	// умолчанием колонки.
+	State LoginMethodState
+	// AcceptedStep — последний принятый шаг кода по времени (Ф12 Р5);
+	// StepAccepted отделяет «шага ещё не было» от значения: нулевой шаг —
+	// законная величина оси, а не отсутствие.
+	AcceptedStep int64
+	StepAccepted bool
+	// CreatedAt назначает запись. У строки `pending` — момент заведения, от
+	// которого считается срок (Ф12 Р8); у `active` — момент подтверждения.
 	CreatedAt time.Time
 }
 
@@ -185,5 +237,17 @@ func (m LoginMethod) Validate() error {
 	if m.Verifier.IsZero() {
 		return fmt.Errorf("Illegal argument login_method.verifier: required")
 	}
+	if err := m.State.Validate(); err != nil {
+		return err
+	}
+	if m.State == LoginMethodStatePending && m.Kind != LoginMethodTOTP {
+		return fmt.Errorf("Illegal argument login_method.state: %q is only a state of %q", m.State, LoginMethodTOTP)
+	}
+	if m.StepAccepted && m.Kind != LoginMethodTOTP {
+		return fmt.Errorf("Illegal argument login_method.accepted_step: only %q carries one", LoginMethodTOTP)
+	}
 	return nil
 }
+
+// Enrolled — строка есть способ входа: заведён и подтверждён (Ф12 Р1).
+func (m LoginMethod) Enrolled() bool { return m.State == LoginMethodStateActive }

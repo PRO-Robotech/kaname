@@ -142,11 +142,20 @@ const (
 // lmDeclaredConstraints — объявленный набор ограничений таблицы секрета.
 // Набор ЗАКРЫТ: ограничение, заведённое позже, исполняет своё выражение при
 // каждой записи и требует решения, а не проходит незамеченным.
+//
+// Два последних имени — решение приёмки Ф12 (§4.1 п.1, kacho#1281; миграция
+// `20260917160000_second_factor_rows_carry_state_and_step.sql`): состояние
+// строки из словаря и «pending — только у totp». Оба судят `kind`/`state` и
+// материала не касаются; инъекция «чужое ограничение» ниже прогнана заново на
+// расширенном наборе — зелёный гейт значит «чужих ноль при объявленных шести»,
+// а не «набор не менялся».
 var lmDeclaredConstraints = []string{
 	"user_login_methods_pkey",
 	"user_login_methods_user_fk",
 	"user_login_methods_kind_check",
 	"user_login_methods_verifier_check",
+	"user_login_methods_state_check",
+	"user_login_methods_pending_only_totp_check",
 }
 
 // lmVerifierDependent — единственный законный зависимый от колонки материала.
@@ -462,7 +471,7 @@ func lmWriteSentinel(t *testing.T, pool *pgxpool.Pool, tag string) {
 	repo := pg.NewLoginMethodRepo(pool)
 	for _, person := range lmPeople(t, pool, tag, 2) {
 		_, err := repo.Create(context.Background(), domain.LoginMethod{
-			UserID: person, Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, lmSentinel),
+			UserID: person, Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, lmSentinel), State: domain.LoginMethodStateActive,
 		})
 		require.NoError(t, err)
 	}

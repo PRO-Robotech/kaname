@@ -49,7 +49,9 @@ func TestLoginMethodKind_DictionaryIsClosed(t *testing.T) {
 
 	// Вне словаря — отказ, называющий поле и допустимое. Регистр не
 	// нормализуется: написание одно, иначе вид становится двумя значениями.
-	for _, bad := range []string{"", "Password", "PASSWORD", "totp", "otp", "password ", "sms"} {
+	// «totp» с Ф12 — вид словаря (kacho#1281): из перечня отвергаемых он ушёл в
+	// перечень выше; чужие написания и чужие имена по-прежнему отказ.
+	for _, bad := range []string{"", "Password", "PASSWORD", "TOTP", "otp", "password ", "sms", "webauthn"} {
 		_, err := domain.ParseLoginMethodKind(bad)
 		require.Error(t, err, "вид %q обязан быть отвергнут", bad)
 		require.Contains(t, err.Error(), "Illegal argument login_method.kind",
@@ -176,17 +178,18 @@ func TestLoginVerifier_RefusesSerialization(t *testing.T) {
 func TestLoginMethod_Validate(t *testing.T) {
 	v, err := domain.NewLoginVerifier(probeMaterial)
 	require.NoError(t, err)
-	ok := domain.LoginMethod{UserID: "usr0000000000000lm04", Kind: domain.LoginMethodPassword, Verifier: v}
+	ok := domain.LoginMethod{UserID: "usr0000000000000lm04", Kind: domain.LoginMethodPassword, Verifier: v, State: domain.LoginMethodStateActive}
 	require.NoError(t, ok.Validate(), "положительный контроль: полная строка проходит")
 
 	cases := map[string]struct {
 		m    domain.LoginMethod
 		want string
 	}{
-		"человека нет":   {domain.LoginMethod{Kind: domain.LoginMethodPassword, Verifier: v}, "login_method.user_id: required"},
-		"вида нет":       {domain.LoginMethod{UserID: ok.UserID, Verifier: v}, "login_method.kind"},
-		"вид чужой":      {domain.LoginMethod{UserID: ok.UserID, Kind: "totp", Verifier: v}, "login_method.kind"},
-		"материала нет":  {domain.LoginMethod{UserID: ok.UserID, Kind: domain.LoginMethodPassword}, "login_method.verifier: required"},
+		"человека нет":   {domain.LoginMethod{Kind: domain.LoginMethodPassword, Verifier: v, State: ok.State}, "login_method.user_id: required"},
+		"вида нет":       {domain.LoginMethod{UserID: ok.UserID, Verifier: v, State: ok.State}, "login_method.kind"},
+		"вид чужой":      {domain.LoginMethod{UserID: ok.UserID, Kind: "sms", Verifier: v, State: ok.State}, "login_method.kind"},
+		"материала нет":  {domain.LoginMethod{UserID: ok.UserID, Kind: domain.LoginMethodPassword, State: ok.State}, "login_method.verifier: required"},
+		"состояния нет":  {domain.LoginMethod{UserID: ok.UserID, Kind: domain.LoginMethodPassword, Verifier: v}, "login_method.state"},
 		"нулевой способ": {domain.LoginMethod{}, "login_method.user_id: required"},
 	}
 	for name, c := range cases {

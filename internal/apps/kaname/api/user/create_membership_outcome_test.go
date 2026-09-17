@@ -14,6 +14,13 @@ package user
 // Два глагола на одну пару «человек × аккаунт» дают ОДНУ строку членства В
 // ЛЮБОМ ПОРЯДКЕ, и оба порядка прогоняются: порядок — тот единственный факт,
 // которым положительный близнец отличается от своего зеркала.
+//
+// Предел письма приглашения провязан пробам как УСЛОВИЕ прохождения глагола, а
+// не как предмет: без него настоящий писатель отвергает намерение («there is no
+// value meaning «unlimited»»), отказ прячется за фиксированным INTERNAL, и
+// приглашение не проходит — решение kacho#1774 (Р22, MAIL-25), а не умолчание.
+// Величина та же, что у модульных проб (`cmMailLimit`); наблюдатель исходов не
+// нужен — исход письма здесь не утверждается.
 
 import (
 	"context"
@@ -83,7 +90,7 @@ func TestIntegration_KAN181_CreateMembershipThenInviteIsOneRow(t *testing.T) {
 
 	admin, acc := seedUserWithAccount(t, ctx, repo, "cm1")
 	ops := newFakeUsrOps()
-	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{})
+	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{}).WithInviteMailRateLimit(cmMailLimit, nil)
 	ctx = operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: string(admin)})
 	const email = domain.Email("fresh-cm1@example.com")
 
@@ -134,7 +141,7 @@ func TestIntegration_KAN181_InviteThenCreateMembershipIsOneRow(t *testing.T) {
 
 	admin, acc := seedUserWithAccount(t, ctx, repo, "cm2")
 	ops := newFakeUsrOps()
-	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{})
+	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{}).WithInviteMailRateLimit(cmMailLimit, nil)
 	ctx = operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: string(admin)})
 	const email = domain.Email("fresh-cm2@example.com")
 
@@ -180,7 +187,7 @@ func TestIntegration_KAN181_KnownEmailIntoSecondAccountKeepsOneUserRow(t *testin
 	_, accC := seedUserWithAccount(t, ctx, repo, "cm3c")
 
 	ops := newFakeUsrOps()
-	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{})
+	uc := NewInviteUserUseCase(repo, ops, invPrincAllowAll{}).WithInviteMailRateLimit(cmMailLimit, nil)
 	ctx = operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: string(adminB)})
 
 	op, err := uc.CreateMembership(ctx, membershipapp.CreateInput{

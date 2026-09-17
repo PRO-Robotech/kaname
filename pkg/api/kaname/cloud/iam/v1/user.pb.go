@@ -498,6 +498,60 @@ func (x *UnblockUserMetadata) GetAccountId() string {
 	return ""
 }
 
+type ResetSecondFactorMetadata struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ID of the User whose second factor is being reset.
+	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// ID of the owning Account (denormalized; non-first, see UpdateUserMetadata).
+	AccountId     string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetSecondFactorMetadata) Reset() {
+	*x = ResetSecondFactorMetadata{}
+	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetSecondFactorMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetSecondFactorMetadata) ProtoMessage() {}
+
+func (x *ResetSecondFactorMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetSecondFactorMetadata.ProtoReflect.Descriptor instead.
+func (*ResetSecondFactorMetadata) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_user_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ResetSecondFactorMetadata) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ResetSecondFactorMetadata) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
 // Invite-flow.
 type RemoveUserFromAccountMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -513,7 +567,7 @@ type RemoveUserFromAccountMetadata struct {
 
 func (x *RemoveUserFromAccountMetadata) Reset() {
 	*x = RemoveUserFromAccountMetadata{}
-	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -525,7 +579,7 @@ func (x *RemoveUserFromAccountMetadata) String() string {
 func (*RemoveUserFromAccountMetadata) ProtoMessage() {}
 
 func (x *RemoveUserFromAccountMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -538,7 +592,7 @@ func (x *RemoveUserFromAccountMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveUserFromAccountMetadata.ProtoReflect.Descriptor instead.
 func (*RemoveUserFromAccountMetadata) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_user_proto_rawDescGZIP(), []int{5}
+	return file_kaname_cloud_iam_v1_user_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RemoveUserFromAccountMetadata) GetUserId() string {
@@ -565,7 +619,7 @@ type InviteUserMetadata struct {
 
 func (x *InviteUserMetadata) Reset() {
 	*x = InviteUserMetadata{}
-	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[6]
+	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -577,7 +631,7 @@ func (x *InviteUserMetadata) String() string {
 func (*InviteUserMetadata) ProtoMessage() {}
 
 func (x *InviteUserMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[6]
+	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -590,7 +644,7 @@ func (x *InviteUserMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InviteUserMetadata.ProtoReflect.Descriptor instead.
 func (*InviteUserMetadata) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_user_proto_rawDescGZIP(), []int{6}
+	return file_kaname_cloud_iam_v1_user_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *InviteUserMetadata) GetUserId() string {
@@ -621,7 +675,7 @@ type ResendInviteMetadata struct {
 
 func (x *ResendInviteMetadata) Reset() {
 	*x = ResendInviteMetadata{}
-	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[7]
+	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -633,7 +687,7 @@ func (x *ResendInviteMetadata) String() string {
 func (*ResendInviteMetadata) ProtoMessage() {}
 
 func (x *ResendInviteMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[7]
+	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -646,7 +700,7 @@ func (x *ResendInviteMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResendInviteMetadata.ProtoReflect.Descriptor instead.
 func (*ResendInviteMetadata) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_user_proto_rawDescGZIP(), []int{7}
+	return file_kaname_cloud_iam_v1_user_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ResendInviteMetadata) GetUserId() string {
@@ -705,6 +759,10 @@ const file_kaname_cloud_iam_v1_user_proto_rawDesc = "" +
 	"\x13UnblockUserMetadata\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
+	"account_id\x18\x02 \x01(\tR\taccountId\"S\n" +
+	"\x19ResetSecondFactorMetadata\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
+	"\n" +
 	"account_id\x18\x02 \x01(\tR\taccountId\"W\n" +
 	"\x1dRemoveUserFromAccountMetadata\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
@@ -732,7 +790,7 @@ func file_kaname_cloud_iam_v1_user_proto_rawDescGZIP() []byte {
 }
 
 var file_kaname_cloud_iam_v1_user_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_kaname_cloud_iam_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_kaname_cloud_iam_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_kaname_cloud_iam_v1_user_proto_goTypes = []any{
 	(User_InviteStatus)(0),                // 0: kaname.cloud.iam.v1.User.InviteStatus
 	(*User)(nil),                          // 1: kaname.cloud.iam.v1.User
@@ -740,16 +798,17 @@ var file_kaname_cloud_iam_v1_user_proto_goTypes = []any{
 	(*UpdateUserMetadata)(nil),            // 3: kaname.cloud.iam.v1.UpdateUserMetadata
 	(*BlockUserMetadata)(nil),             // 4: kaname.cloud.iam.v1.BlockUserMetadata
 	(*UnblockUserMetadata)(nil),           // 5: kaname.cloud.iam.v1.UnblockUserMetadata
-	(*RemoveUserFromAccountMetadata)(nil), // 6: kaname.cloud.iam.v1.RemoveUserFromAccountMetadata
-	(*InviteUserMetadata)(nil),            // 7: kaname.cloud.iam.v1.InviteUserMetadata
-	(*ResendInviteMetadata)(nil),          // 8: kaname.cloud.iam.v1.ResendInviteMetadata
-	nil,                                   // 9: kaname.cloud.iam.v1.User.LabelsEntry
-	(*timestamppb.Timestamp)(nil),         // 10: google.protobuf.Timestamp
+	(*ResetSecondFactorMetadata)(nil),     // 6: kaname.cloud.iam.v1.ResetSecondFactorMetadata
+	(*RemoveUserFromAccountMetadata)(nil), // 7: kaname.cloud.iam.v1.RemoveUserFromAccountMetadata
+	(*InviteUserMetadata)(nil),            // 8: kaname.cloud.iam.v1.InviteUserMetadata
+	(*ResendInviteMetadata)(nil),          // 9: kaname.cloud.iam.v1.ResendInviteMetadata
+	nil,                                   // 10: kaname.cloud.iam.v1.User.LabelsEntry
+	(*timestamppb.Timestamp)(nil),         // 11: google.protobuf.Timestamp
 }
 var file_kaname_cloud_iam_v1_user_proto_depIdxs = []int32{
-	10, // 0: kaname.cloud.iam.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	11, // 0: kaname.cloud.iam.v1.User.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 1: kaname.cloud.iam.v1.User.invite_status:type_name -> kaname.cloud.iam.v1.User.InviteStatus
-	9,  // 2: kaname.cloud.iam.v1.User.labels:type_name -> kaname.cloud.iam.v1.User.LabelsEntry
+	10, // 2: kaname.cloud.iam.v1.User.labels:type_name -> kaname.cloud.iam.v1.User.LabelsEntry
 	3,  // [3:3] is the sub-list for method output_type
 	3,  // [3:3] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
@@ -768,7 +827,7 @@ func file_kaname_cloud_iam_v1_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_user_proto_rawDesc), len(file_kaname_cloud_iam_v1_user_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

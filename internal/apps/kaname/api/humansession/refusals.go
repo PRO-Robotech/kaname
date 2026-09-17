@@ -24,12 +24,13 @@ const (
 	TextRequestNotPerformed = "request not performed; try again later"
 )
 
-// Причины из закрытого перечня (`ErrorInfo.reason`, Р2).
+// Причины из закрытого перечня (`ErrorInfo.reason`, Р2). Причины
+// «требуется сменить пароль» в перечне НЕТ: поле сессии, которое её
+// производило бы, снято с контракта (kacho#2697, kaname#201).
 const (
 	// #nosec G101 -- машинный ПРИЗНАК ПРИЧИНЫ ОТКАЗА (`ErrorInfo.reason`), не секрет.
-	ReasonFormTokenRejected      = "FORM_TOKEN_REJECTED"
-	ReasonTooManyAttempts        = "TOO_MANY_ATTEMPTS"
-	ReasonPasswordChangeRequired = "PASSWORD_CHANGE_REQUIRED"
+	ReasonFormTokenRejected = "FORM_TOKEN_REJECTED"
+	ReasonTooManyAttempts   = "TOO_MANY_ATTEMPTS"
 )
 
 // ErrAuthenticationFailed — ОДИН отказ на все причины входа и на неподошедшее

@@ -113,6 +113,7 @@ func Load(path string) (Config, error) {
 		"manifests.admission":     "KANAME_MANIFESTS__ADMISSION",
 
 		"authn.domain":                      "KANAME_AUTHN__DOMAIN",
+		"authn.self-service-freshness":      "KANAME_AUTHN__SELF_SERVICE_FRESHNESS",
 		"authn.trusted-forwarder-sans":      "KANAME_AUTHN__TRUSTED_FORWARDER_SANS",
 		"authn.trust-domain":                "KANAME_AUTHN__TRUST_DOMAIN",
 		"authn.trust-any-forwarder":         "KANAME_AUTHN__TRUST_ANY_FORWARDER",

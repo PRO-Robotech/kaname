@@ -167,7 +167,7 @@ func TestLogin_F3_31_EveryOutcomeAfterTheRateGateHoldsUntilTheFloor(t *testing.T
 	broken, err := humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: h.store, Users: failingUsers{}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, TTL: ucTTL, Observer: h.obs, Now: func() time.Time { return h.clock },
-		Logger: slog.New(slog.DiscardHandler), Envelope: h.envelope,
+		Logger: slog.New(slog.DiscardHandler), Envelope: h.envelope, TOTP: h.totp, Sets: h.verifier,
 		Limits: humansession.Limits{AddressAttempts: 100, AddressWindow: time.Hour, SourceAttempts: 1000, SourceWindow: time.Hour},
 	})
 	require.NoError(t, err)
@@ -246,7 +246,7 @@ func TestNewLoginUseCase_RequiresTheTimingEnvelope(t *testing.T) {
 	_, err := humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, Limits: limits(), TTL: ucTTL, Observer: h.obs, Now: func() time.Time { return h.clock },
-		Logger: slog.New(slog.DiscardHandler),
+		Logger: slog.New(slog.DiscardHandler), TOTP: h.totp, Sets: h.verifier,
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "timing envelope")

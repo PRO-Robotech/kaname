@@ -14,9 +14,10 @@ package humansession
 // пароль из сессии» у неё быть не может; пароль задаётся тем же обращением, что
 // предъявляет код. Требование «до любого иного действия» тем самым держится
 // построением: сессии до записи пароля не существует, и отвергать «иное
-// действие» нечему. Поле сессии `PasswordChangeRequired` (Ф3 Р8) этот глагол не
-// ставит; расхождение с прозой Ф3 Р8 / Ф5-03 названо владельцу задачей
-// `kacho#2697` — решение о форме принадлежит ему, а не этой полосе.
+// действие» нечему. Расхождение этой формы с прежней прозой Ф3 Р8 / Ф5-03
+// разрешено решением `kacho#2697` (исход 1): форма одного обращения — выбранная,
+// поле сессии «требование сменить пароль» снято с контракта вместе с
+// читателями (kaname#201), приёмки приведены новыми редакциями.
 //
 // # Порядок внутри обращения — несущий
 //
@@ -211,7 +212,7 @@ func (uc *CompleteRecoveryUseCase) complete(
 	ctx context.Context, w Writer, user domain.User, code domain.RecoveryCode, fresh domain.LoginVerifier,
 	now time.Time, blocked, emailVerified bool,
 ) (CompleteRecoveryOutput, error) {
-	replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh})
+	replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive})
 	if err != nil {
 		return CompleteRecoveryOutput{}, err
 	}

@@ -48,7 +48,7 @@ func (c *countingCreator) CreateMembership(_ context.Context, in CreateInput) (*
 // вызов доходит до порта с разобранным входом, ответ — операция порта.
 func TestMembership_KAN181_HandlerServesCreate(t *testing.T) {
 	creator := &countingCreator{op: &operations.Operation{ID: "iop00000000000000181", Description: "d"}}
-	var srv iamv1.MembershipServiceServer = NewHandler(nil, nil, creator)
+	var srv iamv1.MembershipServiceServer = NewHandler(nil, nil, nil, creator)
 
 	op, err := srv.Create(context.Background(), &iamv1.CreateMembershipRequest{
 		AccountId:   goodAccount,
@@ -78,7 +78,7 @@ func TestMembership_KAN181_HandlerServesCreate(t *testing.T) {
 // вызывающему КАК ЕСТЬ: транспорт не переводит и не глотает кодов.
 func TestMembership_KAN181_HandlerPassesRefusalThrough(t *testing.T) {
 	creator := &countingCreator{err: status.Error(codes.InvalidArgument, "Illegal argument account_id: required")}
-	var srv iamv1.MembershipServiceServer = NewHandler(nil, nil, creator)
+	var srv iamv1.MembershipServiceServer = NewHandler(nil, nil, nil, creator)
 
 	op, err := srv.Create(context.Background(), &iamv1.CreateMembershipRequest{Email: "p@example.test"})
 	require.Nil(t, op)

@@ -12,10 +12,12 @@ package humansession_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -49,7 +51,10 @@ type fakeStore struct {
 	failures  []fakeFailure
 	cutoffs   map[domain.UserID]fakeCutoff
 	verifiers map[domain.UserID]domain.LoginVerifier
-	audit     []outboxtypes.AuditEvent
+	// factors — строки второго фактора (Ф12): вид → строка; пароль живёт в
+	// verifiers, как прежде. Семантика операторов — та же, что у адаптера.
+	factors map[domain.UserID]map[domain.LoginMethodKind]*domain.LoginMethod
+	audit   []outboxtypes.AuditEvent
 	// Восстановление доступа (Ф5): коды, письма, журнал завершений.
 	codes       map[domain.RecoveryCodeID]*domain.RecoveryCode
 	mail        []humansession.RecoveryMailIntent
@@ -67,7 +72,8 @@ func newFakeStore() *fakeStore {
 		rows: map[domain.HumanSessionID]*fakeRow{}, users: map[domain.UserID]domain.User{},
 		verified: map[domain.UserID]bool{}, first: map[domain.UserID]time.Time{},
 		cutoffs: map[domain.UserID]fakeCutoff{}, verifiers: map[domain.UserID]domain.LoginVerifier{},
-		codes: map[domain.RecoveryCodeID]*domain.RecoveryCode{}, completions: map[string]domain.RecoveryCompletion{},
+		factors: map[domain.UserID]map[domain.LoginMethodKind]*domain.LoginMethod{},
+		codes:   map[domain.RecoveryCodeID]*domain.RecoveryCode{}, completions: map[string]domain.RecoveryCompletion{},
 	}
 }
 
@@ -214,13 +220,26 @@ func (w *fakeWriter) RotateBearer(_ context.Context, id domain.HumanSessionID, d
 	return nil
 }
 
-func (w *fakeWriter) ClearPasswordChangeRequired(_ context.Context, id domain.HumanSessionID) error {
-	if err := w.fail("clear-requirement"); err != nil {
+// PresentInSession — предъявление способа внутри сессии (Ф12): множество,
+// уровень, носитель и момент — одной записью на живой строке.
+func (w *fakeWriter) PresentInSession(_ context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error {
+	if err := w.fail("present"); err != nil {
 		return err
 	}
-	if r, ok := w.store.rows[id]; ok {
-		w.ops = append(w.ops, func() { r.s.PasswordChangeRequired = false })
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	r, ok := w.store.rows[id]
+	if !ok || r.ended != nil {
+		return iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
 	}
+	w.ops = append(w.ops, func() {
+		if cur, ok := w.store.rows[id]; ok && cur.ended == nil {
+			cur.s.PresentedMethods = append([]string(nil), methods...)
+			cur.s.AssuranceLevel = level
+			cur.s.LastPresentedAt = presentedAt
+			cur.digest = digest
+		}
+	})
 	return nil
 }
 
@@ -295,6 +314,139 @@ func (w *fakeWriter) Commit(context.Context) error {
 
 func (w *fakeWriter) Rollback(context.Context) error { w.ops = nil; return nil }
 
+// --- второй фактор (Ф12): семантика операторов адаптера, не снисходительнее ---
+
+func (w *fakeWriter) factorRow(userID domain.UserID, kind domain.LoginMethodKind) (*domain.LoginMethod, bool) {
+	row, ok := w.store.factors[userID][kind]
+	return row, ok
+}
+
+func (w *fakeWriter) putFactor(m domain.LoginMethod) {
+	if w.store.factors[m.UserID] == nil {
+		w.store.factors[m.UserID] = map[domain.LoginMethodKind]*domain.LoginMethod{}
+	}
+	row := m
+	w.store.factors[m.UserID][m.Kind] = &row
+}
+
+func (w *fakeWriter) UpsertPendingTOTP(_ context.Context, m domain.LoginMethod) (bool, error) {
+	if err := m.Validate(); err != nil {
+		return false, iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+	}
+	if err := w.fail("enroll"); err != nil {
+		return false, err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	if row, ok := w.factorRow(m.UserID, domain.LoginMethodTOTP); ok && row.State == domain.LoginMethodStateActive {
+		return false, nil
+	}
+	w.ops = append(w.ops, func() { w.putFactor(m) })
+	return true, nil
+}
+
+func (w *fakeWriter) ActivateTOTP(_ context.Context, userID domain.UserID, pendingSince time.Time, step int64, at time.Time) (bool, error) {
+	if err := w.fail("activate"); err != nil {
+		return false, err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	row, ok := w.factorRow(userID, domain.LoginMethodTOTP)
+	if !ok || row.State != domain.LoginMethodStatePending || !row.CreatedAt.Equal(pendingSince) {
+		return false, nil
+	}
+	w.ops = append(w.ops, func() {
+		if cur, ok := w.factorRow(userID, domain.LoginMethodTOTP); ok && cur.State == domain.LoginMethodStatePending && cur.CreatedAt.Equal(pendingSince) {
+			cur.State, cur.AcceptedStep, cur.StepAccepted, cur.CreatedAt = domain.LoginMethodStateActive, step, true, at
+		}
+	})
+	return true, nil
+}
+
+func (w *fakeWriter) ReplaceLookupSet(_ context.Context, m domain.LoginMethod) error {
+	if err := m.Validate(); err != nil {
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "%s", err.Error())
+	}
+	if err := w.fail("replace-set"); err != nil {
+		return err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	w.ops = append(w.ops, func() { w.putFactor(m) })
+	return nil
+}
+
+func (w *fakeWriter) LockLookupSet(_ context.Context, userID domain.UserID) (domain.LoginMethod, bool, error) {
+	if err := w.fail("lock-set"); err != nil {
+		return domain.LoginMethod{}, false, err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	row, ok := w.factorRow(userID, domain.LoginMethodLookupSecret)
+	if !ok {
+		return domain.LoginMethod{}, false, nil
+	}
+	return *row, true, nil
+}
+
+func (w *fakeWriter) ConsumeLookupElement(_ context.Context, userID domain.UserID, element string) (bool, error) {
+	if err := w.fail("consume"); err != nil {
+		return false, err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	row, ok := w.factorRow(userID, domain.LoginMethodLookupSecret)
+	if !ok || !strings.Contains(row.Verifier.Reveal(), ","+element+",") {
+		return false, nil
+	}
+	w.ops = append(w.ops, func() {
+		cur, ok := w.factorRow(userID, domain.LoginMethodLookupSecret)
+		if !ok {
+			return
+		}
+		v, err := domain.NewLoginVerifier(strings.Replace(cur.Verifier.Reveal(), ","+element+",", ",", 1))
+		if err == nil {
+			cur.Verifier = v
+		}
+	})
+	return true, nil
+}
+
+func (w *fakeWriter) RecordAcceptedStep(_ context.Context, userID domain.UserID, step int64) (bool, error) {
+	if err := w.fail("record-step"); err != nil {
+		return false, err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	row, ok := w.factorRow(userID, domain.LoginMethodTOTP)
+	if !ok || row.State != domain.LoginMethodStateActive || (row.StepAccepted && row.AcceptedStep >= step) {
+		return false, nil
+	}
+	w.ops = append(w.ops, func() {
+		if cur, ok := w.factorRow(userID, domain.LoginMethodTOTP); ok && cur.State == domain.LoginMethodStateActive && (!cur.StepAccepted || cur.AcceptedStep < step) {
+			cur.AcceptedStep, cur.StepAccepted = step, true
+		}
+	})
+	return true, nil
+}
+
+func (w *fakeWriter) RemoveSecondFactor(_ context.Context, userID domain.UserID) (bool, error) {
+	if err := w.fail("remove-factor"); err != nil {
+		return false, err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	row, ok := w.factorRow(userID, domain.LoginMethodTOTP)
+	if !ok || row.State != domain.LoginMethodStateActive {
+		return false, nil
+	}
+	w.ops = append(w.ops, func() {
+		delete(w.store.factors[userID], domain.LoginMethodTOTP)
+		delete(w.store.factors[userID], domain.LoginMethodLookupSecret)
+	})
+	return true, nil
+}
+
 // Дублёры соседних портов.
 
 type fakeUsers struct{ store *fakeStore }
@@ -316,11 +468,19 @@ func (m fakeMethods) Create(_ context.Context, lm domain.LoginMethod) (domain.Lo
 }
 
 func (m fakeMethods) Get(_ context.Context, userID domain.UserID, kind domain.LoginMethodKind) (domain.LoginMethod, error) {
+	m.store.mu.Lock()
+	defer m.store.mu.Unlock()
+	if kind != domain.LoginMethodPassword {
+		if row, ok := m.store.factors[userID][kind]; ok {
+			return *row, nil
+		}
+		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrNotFound, "Login method %s of user %s not found", kind, userID)
+	}
 	v, ok := m.store.verifiers[userID]
 	if !ok {
 		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrNotFound, "Login method %s of user %s not found", kind, userID)
 	}
-	return domain.LoginMethod{UserID: userID, Kind: kind, Verifier: v}, nil
+	return domain.LoginMethod{UserID: userID, Kind: kind, Verifier: v, State: domain.LoginMethodStateActive}, nil
 }
 
 func (m fakeMethods) MarkEmailVerified(_ context.Context, userID domain.UserID, _ domain.Email, _ time.Time) error {
@@ -350,6 +510,11 @@ type countingObserver struct {
 	recoveryCompletion map[humansession.RecoveryCompletionOutcome]int
 	// sourceUnknown — вопросов о частоте без адреса источника.
 	sourceUnknown int
+	// Второй фактор (Ф12): предъявления по способу × исходу, отказы по причине,
+	// события.
+	sfPresent  map[string]int
+	sfRefusals map[humansession.SecondFactorRefusal]int
+	sfEvents   map[humansession.SecondFactorEvent]int
 }
 
 func newCountingObserver() *countingObserver {
@@ -359,7 +524,26 @@ func newCountingObserver() *countingObserver {
 		rewrit: map[humansession.RewriteOutcome]int{}, form: map[humansession.FormRefusal]int{},
 		recoveryRequest:    map[humansession.RecoveryRequestOutcome]int{},
 		recoveryCompletion: map[humansession.RecoveryCompletionOutcome]int{},
+		sfPresent:          map[string]int{},
+		sfRefusals:         map[humansession.SecondFactorRefusal]int{},
+		sfEvents:           map[humansession.SecondFactorEvent]int{},
 	}
+}
+
+func (o *countingObserver) SecondFactorPresentationObserved(m assurance.Method, x humansession.PresentationOutcome) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sfPresent[m.String()+"/"+string(x)]++
+}
+func (o *countingObserver) SecondFactorRefusalObserved(x humansession.SecondFactorRefusal) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sfRefusals[x]++
+}
+func (o *countingObserver) SecondFactorEventObserved(x humansession.SecondFactorEvent) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sfEvents[x]++
 }
 
 func (o *countingObserver) LoginObserved(x humansession.LoginOutcome) {

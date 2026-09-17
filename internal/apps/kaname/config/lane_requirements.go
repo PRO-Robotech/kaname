@@ -291,6 +291,29 @@ var LaneRequirements = []LaneRequirement{
 			return ownScoped(c.AuthN.Login.ValidateRecovery())
 		},
 	},
+	// ДВЕ СТРОКИ ВТОРОГО ФАКТОРА (Ф12, kacho#1281; Р2, Р8; Ф12-35, Ф12-36):
+	// перечень ключей обёртки секретов и окно свежести правки своих данных
+	// объявляет профиль; незаданное — отказ старта с именем ручки. Под
+	// `external` второй фактор ведёт поставщик, и величины не требуются.
+	{
+		Lanes:   laneOwn,
+		Element: "перечень ключей обёртки секретов второго фактора объявлен",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			if _, err := c.AuthN.ResolveSecondFactorEncryptionKeys(); err != nil {
+				return ownScoped(fmt.Errorf("production mode: %w", err))
+			}
+			return nil
+		},
+	},
+	{
+		Lanes:   laneOwn,
+		Element: "окно свежести правки своих данных объявлено",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.ValidateSelfServiceFreshness())
+		},
+	},
 	{
 		Lanes:   laneOwn,
 		Element: "подписант своей чеканки провязан",

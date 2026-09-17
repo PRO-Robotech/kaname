@@ -161,7 +161,42 @@ func (p *pkgIndex) findOnServingPath(rpcMethod string, m callMatcher) (string, b
 // другой.
 type callMatcher func(call *ast.CallExpr) string
 
+// callerScopedReadSuffix / callerScopedReadArity — ЧЕТВЁРТАЯ форма сужения:
+// чтение, суженное САМИМ ВЫЗЫВАЮЩИМ. Личность принципала уходит доводом
+// запроса к хранилищу (`ListMine(ctx, userID, страница)`), поэтому чужая
+// строка не читается вовсе — тот же приём, что у чтения, суженного владельцем
+// (`Owned`, exempt.go), только предикат — не владение объектом, а тождество
+// субъекта.
+//
+// Форма нужна полосе `scope_filtered` у чтений «про себя» (свой список членств,
+// IAM-ID-2 §2.5): единичного объекта у них нет, а сужение по данным и есть
+// личность. Ни один из трёх прежних вопросов там не задаётся by construction —
+// модели спрашивать не о чем, — и распознаватель, знавший только их, МОЛЧАЛ
+// бы на живом сужении: RPC уезжал бы в «без двери» при решателе, который
+// крепче вопроса после чтения.
+//
+// Арность — (ctx, принципал, …): суффикс сам по себе решателем не является,
+// личность обязана быть ДОВОДОМ. Голое связывание с личностью
+// (`authzguard.PrincipalUserID` и родня) сюда намеренно не зачитывается: чтение
+// личности стоит на пути почти каждого вызова (аудит) и, зачтённое за сужение,
+// сделало бы гейт формой без содержания.
+const (
+	callerScopedReadSuffix = "Mine"
+	callerScopedReadArity  = 2
+)
+
+// isCallerScopedRead — чтение, суженное вызывающим: `<получатель>.<…>Mine(ctx,
+// принципал, …)`.
+func isCallerScopedRead(call *ast.CallExpr) bool {
+	sel, isSel := call.Fun.(*ast.SelectorExpr)
+	return isSel && strings.HasSuffix(sel.Sel.Name, callerScopedReadSuffix) &&
+		len(call.Args) >= callerScopedReadArity
+}
+
 // pageNarrowingMatcher — распознаватель сужения страницы построчно.
+//
+// Форм ЧЕТЫРЕ, и каждая названа: сужение общим фильтром страницы (две записи
+// перечня), прямой вопрос к порту отношений, чтение, суженное вызывающим.
 func pageNarrowingMatcher(call *ast.CallExpr) string {
 	if name, isQualified := qualifiedCallName(call.Fun); isQualified {
 		if form, hit := pageNarrowingCalls[name]; hit {
@@ -171,6 +206,11 @@ func pageNarrowingMatcher(call *ast.CallExpr) string {
 	// Третья форма: прямой вопрос к порту отношений.
 	if isRelationPortQuestion(call) {
 		return "порт отношений: Check(ctx, субъект, отношение, объект)"
+	}
+	// Четвёртая форма: чтение, суженное вызывающим.
+	if isCallerScopedRead(call) {
+		sel := call.Fun.(*ast.SelectorExpr)
+		return sel.Sel.Name + " (чтение, суженное вызывающим: личность принципала — довод запроса, а не проверка после чтения)"
 	}
 	return ""
 }

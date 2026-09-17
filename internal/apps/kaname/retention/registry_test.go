@@ -154,3 +154,56 @@ func (stubReaper) SweepDeliveredCompensations(_ context.Context, _ time.Duration
 func (stubReaper) SweepAgedRows(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
 	return 0, false, nil
 }
+
+// TestWithHumanSessionsCarriesTheEnrollmentSweeper — Ф12-44 (kacho#1281): у полосы
+// входа четыре предмета уборки, четвёртый — неподтверждённые заведения второго
+// фактора с порогом, равным окну свежести (Р8: срок `pending` = то же окно);
+// полоса без любого из уборщиков записей не даёт вовсе — уборщик без предмета
+// выглядел бы исправным.
+func TestWithHumanSessionsCarriesTheEnrollmentSweeper(t *testing.T) {
+	window := 15 * time.Minute
+	full := HumanSessionReapers{
+		Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{},
+		LongestWindow: 10 * time.Minute, EnrollmentWindow: window,
+	}
+	got := WithHumanSessions(nil, full)
+	byName := map[string]Subject{}
+	for _, s := range got {
+		byName[s.Name] = s
+	}
+	if len(got) != 4 {
+		t.Fatalf("предметов полосы входа %d, ждали 4: %v", len(got), byName)
+	}
+	s, ok := byName[SubjectSecondFactorEnrollments]
+	if !ok {
+		t.Fatalf("предмета %q нет среди %v", SubjectSecondFactorEnrollments, byName)
+	}
+	if s.Grace != window {
+		t.Errorf("порог заведений %v, окно свежести %v: срок pending — то же окно (Р8)", s.Grace, window)
+	}
+	if s.Sweep == nil {
+		t.Errorf("предмет %q объявлен без уборщика", s.Name)
+	}
+	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, LongestWindow: time.Minute, EnrollmentWindow: window}); len(got) != 0 {
+		t.Errorf("без уборщика заведений полоса даёт %d записей, ждали 0", len(got))
+	}
+	if got := WithHumanSessions(nil, HumanSessionReapers{Sessions: stubReaper{}, Failures: stubReaper{}, Codes: stubReaper{}, Enrollments: stubReaper{}, LongestWindow: time.Minute}); len(got) != 0 {
+		t.Errorf("без окна заведений полоса даёт %d записей, ждали 0: порог нулём снимал бы живые pending", len(got))
+	}
+}
+
+func (stubReaper) SweepExpiredEnrollments(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (stubReaper) SweepUnservableSessions(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (stubReaper) SweepAgedFailures(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (stubReaper) SweepUnservableRecoveryCodes(_ context.Context, _ time.Duration, _ int) (int64, bool, error) {
+	return 0, false, nil
+}

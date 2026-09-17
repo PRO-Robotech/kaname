@@ -255,7 +255,7 @@ func rebuildLoginWithLimits(h *harness, attempts int, window time.Duration) erro
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, TTL: ucTTL, Observer: h.obs, Now: func() time.Time { return h.clock },
-		Logger: slog.New(slog.DiscardHandler), Envelope: h.envelopePort,
+		Logger: slog.New(slog.DiscardHandler), Envelope: h.envelopePort, TOTP: h.totp, Sets: h.verifier,
 		Limits: humansession.Limits{AddressAttempts: attempts, AddressWindow: window, SourceAttempts: attempts * 10, SourceWindow: window},
 	})
 	if err != nil {

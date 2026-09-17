@@ -53,8 +53,11 @@ func TestInstallSurfaceCensusCanFail(t *testing.T) {
 	delete(rows, "9099")
 
 	declared, named, findings := judgeInstallSurfaces(t, roster, rows)
-	require.Equal(t, 8, declared, "процесс поднимает восемь поверхностей")
-	require.Equal(t, 6, named, "до починки документ называл шесть")
+	// Число поверхностей БЕРЁТСЯ у перечня, а не выписывается: здесь стояло
+	// «8», и девятая — полоса входа, объявленная в соседнем файле корня, —
+	// сделала бы инъекцию красной на верном дереве (kaname#204).
+	require.Equal(t, len(roster.Surfaces), declared, "процесс поднимает столько поверхностей, сколько объявил перечень")
+	require.Equal(t, len(roster.Surfaces)-2, named, "до починки документ называл на две меньше")
 	require.Len(t, findings, 2, "неназванных дверей ровно две")
 
 	joined := strings.Join(findings, "\n")

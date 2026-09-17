@@ -1,0 +1,221 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/recovery-of-access.md
+  sha256: 5b70cc583c7d4d3fc451dd35758d404ee0897410c449ad46c4c1ac1ce864ce3d
+  static_status: DRAFT
+  base_commit: 6acf8f19351141fdcabd56284bd8bf78bf66d9d2
+  content_commit: b6b83d59
+  branch: acceptance/w14-decisions
+  pull_request: PRO-Robotech/kaname#214
+  task: PRO-Robotech/kacho#1271
+  decisions_recorded: [PRO-Robotech/kacho#2697]
+  lines: 1162
+  round: 2
+  predecessor_record: docs/specs/reviews/recovery-of-access/e889257fcf903394913affa761dc3d55ab54c8616c34175adce5cce63abcdc39.yaml
+  fingerprint_predicate: >-
+    git show c6a3c12efbb68df540445b9633795cacb2f5d008:docs/engineering/acceptance/recovery-of-access.md
+    | sha256sum
+  fingerprint_note: >-
+    Отпечаток снят своим замером в рабочей копии круга и сверен с головой ветки на origin
+    (`git ls-remote` — c6a3c12e, до чтения и перед записью); документ на ветке правил один
+    коммит b6b83d59. Шапка не тронута; прежняя запись не редактировалась.
+  brief_premise_corrected: >-
+    Посылки задания подтвердились (голова, база, отпечаток — см. Ф11-запись круга). Посылка
+    самого документа (§13, четыре строки) перемерена заново — все четыре подтверждены.
+  measurement_revisions: >-
+    Дом службы: ветка c6a3c12e (база 6acf8f19); origin/release/iam-lines на момент круга —
+    ed547967; `recovery_complete.go` и `loginlanehttp/handler.go` на обеих ревизиях без
+    различий по предмету. Дом платформы: PRO-Robotech/kacho@275240efdc = origin/main.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-17'
+
+effective_approval:
+  issued: true
+  issued_at: '2026-09-17T03:21:36Z'
+  ban1_lifted: true
+  why: >-
+    Вердикт круга 2 — APPROVED: блокирующих ноль. Санкция не выдана: политика называет
+    единственного, кто выпускает effective approval, — `pointpu`; роль без внешнего события
+    полномочия не даёт (`change-graph.md` §3). Что событие выдало бы: кодирование объёма
+    §4.1 в редакции 3 — то есть форму, УЖЕ посаженную PR kaname#200 (§13 это называет:
+    приёмка ратифицирует посаженное), плюс Ф5-24 в обоих домах; снятие поля — `kaname#201`,
+    не этот документ.
+  publication_pending:
+    required_for_sanction: true
+    expected_from: оркестратор волны
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: >-
+      Публикация — отдельным коммитом поверх этой записи дописывается только блок `event`.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (исполнено этим кругом); `docs/changes/policy.yaml`
+    строка 41: `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5707963723
+  node_id: IC_kwDOTZqgWM8AAAABVDidSw
+  url: https://github.com/PRO-Robotech/kacho/issues/1271#issuecomment-5707963723
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5707963723
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1271
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-17T03:21:36Z'
+  body_sha256: 753bdd43e60d106d441133471e9c583531aa494792eded83e6d21a14ce3dc342
+  subject_sha256: 5b70cc583c7d4d3fc451dd35758d404ee0897410c449ad46c4c1ac1ce864ce3d
+  subject_revision: c6a3c12efbb68df540445b9633795cacb2f5d008
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; запись рецензента задним числом
+    не правилась. Отпечаток предмета сверен перед публикацией (sha256sum файла на c6a3c12e)
+    и совпал с объявленным. Отпечаток тела снят с сырого ответа API.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+
+scope:
+  reviewed: >-
+    Дифф 6acf8f19..c6a3c12e документа целиком (147 вставок, 35 снятий) против решения
+    `kacho#2697` (комментарий pointpu 2026-09-17T00:38:12Z, дословно); производитель каждого
+    нового «Тогда» прочитан в дереве линии; предикаты §7 и §13 исполнены; ведомости с Ф3 и Ф1
+    (тот же PR) сверены в обе стороны.
+  method: experiment_not_reading
+  neighbouring_acceptances_reviewed: >-
+    Ф3 редакции 8 (§0.1 строка Ф5, Р8, Ф3-23 снят, §7.2 строка Ф5 §7) и Ф1 редакции 12 (§4.2,
+    §5 строка Ф5) — те же строки, что §13 называет обновлёнными; сходятся. Ф12 (одобрена) —
+    Ф12-38 строит носитель R на поле: чужой предмет, `kaname#202` OPEN.
+  document_edited_by_reviewer: false
+
+questions:
+  - q: новая редакция исполняет РОВНО решение — ни шире, ни уже
+    answer: >-
+      ДА. Р5 переписано под одно обращение с порядком, который производит код; Ф5-03 — «Когда» с
+      `newPassword`, «Тогда» — durable-запись, полноправная сессия; Ф5-23 снят вместе с
+      предметом (не ослаблен); Ф5-24 — положительный близнец с двояким по времени
+      отрицательным контролем; поле и читатели — `kaname#201`; пять вопросов ban #18 — как назвал
+      оркестратор, без добавлений; отвергнутый исход 2 — с доводом Ф3 Р6. Не тронуты Р1…Р4, Р6,
+      Р7, Ф5-17…19 — проверено диффом. Шире — ноль; уже — ноль.
+  - q: у каждого нового/изменённого «Тогда» есть производитель; у снятого назван предмет
+    answer: >-
+      Ф5-03: `internal/apps/kaname/api/humansession/recovery_complete.go` `Execute` — порядок
+      «форма → частота → правило (Judge, до ConsumeRecoveryCode) → чтение адреса → одна
+      транзакция … выдача сессии, если не заблокирована»; отказ правила — `*FieldError{Field:
+      "newPassword", Rule: …}` (`password_rule.go`); код при негодном пароле не тратится —
+      `rule.Judge` стоит до `w.ConsumeRecoveryCode`. Ф5-24: `Resolve` — Ф3-09 (служба);
+      читатель поля на крае жив — `gateway/internal/middleware/authz.go:489` на 275240efdc,
+      поэтому отрицательный контроль «посев R′ с полем под живым читателем» конструируем до
+      #201, как документ и пишет. Ф5-23: предмет снятия назван — поле сессии и его читатели.
+  - q: отрицания с положительным близнецом
+    answer: >-
+      Ф5-24 несёт близнеца `L` внутри сценария; отрицательный контроль назван поимённо и в обе
+      эпохи (до/после #201). Ф5-03 — положительный контроль к Ф5-04/05/07/08, как прежде.
+  - q: прежние записи ревью не тронуты
+    answer: ДА — `git diff 6acf8f19..c6a3c12e -- docs/specs/reviews/` пуст.
+  - q: соседи согласны
+    answer: >-
+      ДА — Ф3 §0.1/§7.2 и Ф1 §5 называют Ф5 Р5/Ф5-03/Ф5-24 редакции 3 теми же словами; Ф3 Р8
+      и Ф5 Р5 — одна норма с двух сторон, без второго изложения.
+
+predicates_run:
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "awk '/^## §6 /,/^## §7 /' \"$D\" | grep -oE '\\*\\*Ф5-[0-9]+' | sort -u | wc -l ; awk '/^## §7 /,/^## §8 /' … ; grep -cE 'F5[-]0' \"$D\""
+    expected: 24 · 24 · 0
+    got: 24 · 24 · 0 (единица — различная метка; снятый Ф5-23 в счёте, как документ и пишет)
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "git grep -n 'PasswordChangeRequired: *true' -- '*.go' ':!*_test.go' | wc -l ; git grep -c PasswordChangeRequired -- '*.go' ':!*_test.go'"
+    expected: 0 · 10 файлов / 22 строки
+    got: 0 · 10 / 22
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "grep -n 'PathRecoveryComplete\\|newPassword' internal/handler/loginlanehttp/handler.go ; sed -n 123,170p internal/apps/kaname/api/humansession/recovery_complete.go"
+    expected: маршрут `/iam/v1/auth/recovery/complete`, форма с `newPassword`, порядок Р5
+    got: >-
+      совпало (handler.go строки 75, 160, 212, 472; recovery_complete.go — (1) частота → (2) правило →
+      (3) адрес → (4) транзакция)
+  - where: PRO-Robotech/kacho@275240efdc
+    command: "git grep -n 'PasswordChangeRequiredFromContext' -- gateway/internal/middleware/authz.go"
+    expected: читатель жив
+    got: authz.go:489
+  - where: GitHub
+    command: "gh pr view 200 -R PRO-Robotech/kaname --json mergedAt ; gh issue view 201 ; gh issue view 202 ; gh issue view 1271 -R PRO-Robotech/kacho --json labels"
+    expected: "#200 влит 2026-09-17T00:46:49Z; #201/#202 OPEN; #1271 status:test"
+    got: совпало
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "grep -n -i 'требовани[ея].*сменить\\|PASSWORD_CHANGE\\|passwordChangeRequired' \"$D\" | grep -v '§13\\|редакц\\|снят\\|#201'"
+    expected: остатков снятого предмета вне абзацев о снятии — 0
+    got: >-
+      0 — все вхождения суть Р5 «снимаются», отрицательный контроль Ф5-24 и §13
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "go test ./internal/check/ -run TestAcceptance -count=1"
+    expected: PASS
+    got: PASS (перепись как в Ф11-записи этого круга)
+
+blocking: []
+
+non_blocking:
+  - id: В1
+    where: "шапка, пункт «Ревизии измерения — по дому» (редакция 2: 83ddd08a84 / 45d1719fe8 / e229059a)"
+    what: >-
+      Пункт редакции 3 называет свои ревизии (6acf8f19, 275240efdc), прежний пункт остался без
+      пометки «было». Не блокирует — §13 называет ревизии рядом с числами.
+  - id: В2
+    where: Р5, фраза «отсечка `password-change` актором-человеком (Ф1 Р4, Ф5-19)»
+    what: >-
+      Производитель пишет отсечку с `RevokeReasonPasswordChange` в `complete` (строка 233) —
+      сходится; Ф3-26 в доме Ф3 по-прежнему строит отсечку «существующим хуком завершения
+      восстановления» (обратный вызов поставщика) — второй источник того же события, и оба
+      законны до S3 (`recovery_complete.go`: «источника события два, событие одно»). Ведомость
+      Ф3 §7 это называет; здесь — только чтобы читатель Р5 не принял завершение за
+      единственный писатель до S3.
+
+decisions:
+  - subject: решение kacho#2697 исход 1 — записано Р5, ратифицируется редакцией (§12 п.8)
+    verdict: принято — ровно решение; посаженная форма (#200) и есть выбранная
+  - subject: Ф5-23 снят, а не ослаблен; близнец Ф5-24
+    verdict: принято — «Дано» неконструируемо схемой, снятие вместе с предметом (testing.md §«Гейт на класс», п. 9)
+
+verification:
+  what_was_done: >-
+    исполнение предикатов §7 и §13; чтение производителя Ф5-03 и Ф5-24 (recovery_complete.go,
+    password_rule.go, loginlanehttp/handler.go на ветке; authz.go на 275240efdc); прогон
+    гейтов приёмок; сверка ведомостей Ф3/Ф1 в обе стороны.
+  subject_digest_matches_current_document: true
+  header_left_untouched: true
+  document_edited_by_reviewer: false
+
+reviewer_errors_named_first:
+  - Собственных ошибок круга не зафиксировано; посылки задания по документу не опровергнуты.
+
+limits:
+  - >-
+    Стенд не поднимался; Ф5-24 половина через край не исполнялась — круг о контракте.
+  - >-
+    Снятие поля (`kaname#201`) не сделано; до него отрицательный контроль Ф5-24 держится живым
+    читателем края, как документ и говорит.
+
+cycle:
+  next_step: >-
+    Публикация внешнего события оркестратором; реализация — `kaname#201` (снятие поля), Ф5-24
+    в обоих домах.

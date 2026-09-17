@@ -182,6 +182,11 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		broken.AuthN.Registration.AdmissionsPerWindow = nil
 	case "срок кода восстановления доступа объявлен":
 		broken.AuthN.Login.RecoveryCodeTTL = 0
+	case "перечень ключей обёртки секретов второго фактора объявлен":
+		t.Setenv("KANAME_SECOND_FACTOR_ENC_KEY", "")
+		broken.AuthN.SecondFactorEncryptionKeyHex = ""
+	case "окно свежести правки своих данных объявлено":
+		broken.AuthN.SelfServiceFreshness = 0
 	case "каждый уровень доверия каталога предъявим":
 		w.PresentableACRs = nil
 	// Две строки ниже требуют ОТСУТСТВИЯ, поэтому ломаются наличием.
