@@ -138,4 +138,9 @@ func TestLoginLane_F12_34_WiredLaneNamesThreeMethodsAndTwoLevels(t *testing.T) {
 	}
 	require.Len(t, names, 4)
 	require.Equal(t, 15*time.Minute, names[retention.SubjectSecondFactorEnrollments])
+
+	// Ф12-37: сброс распорядителем провязан ровно там, где полоса поднята.
+	require.NotNil(t, lane.resetSecondFactorUseCase(nil, nil))
+	var none *loginLane
+	require.Nil(t, none.resetSecondFactorUseCase(nil, nil), "под external глагол не провязан")
 }

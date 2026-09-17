@@ -44,6 +44,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/servicecontract"
 	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
@@ -117,6 +118,24 @@ func (l *loginLane) signInMethods() []assurance.Method {
 // laneWiringOf — вклад полосы в наблюдение провязки.
 func laneWiringOf(l *loginLane) config.LaneWiring {
 	return config.LaneWiring{HumanCredentialsWired: l.wired(), HumanSessionsWired: l.wired()}
+}
+
+// resetSecondFactorUseCase — сброс второго фактора распорядителем (Ф12 Р10)
+// теми же хранилищами, что полоса: чтение строки способа — хранилище способов,
+// снятие/отсечка/событие — писатель хранилища сессий; nil — полосы нет.
+func (l *loginLane) resetSecondFactorUseCase(repo kanamerepo.Repository, opsRepo operations.Repo) *userapp.ResetSecondFactorUseCase {
+	if !l.wired() {
+		return nil
+	}
+	return userapp.NewResetSecondFactorUseCase(repo, opsRepo, l.methods, secondFactorResetStore{sessions: l.sessions})
+}
+
+// secondFactorResetStore — адаптер хранилища сессий к порту сброса: писатель
+// сессии несёт все четыре операции порта, соответствие закрепляется здесь.
+type secondFactorResetStore struct{ sessions *kanamepg.HumanSessionRepo }
+
+func (s secondFactorResetStore) ResetWriter(ctx context.Context) (userapp.SecondFactorResetWriter, error) {
+	return s.sessions.Writer(ctx)
 }
 
 // resolveHandler — `Resolve` для внутреннего слушателя; nil — полосы нет.

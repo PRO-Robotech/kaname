@@ -220,6 +220,18 @@ var catalogPendingEntries = []CatalogPendingEntry{
 			"каталог; тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
 		Refs: "kaname#184 · PRO-Robotech/kacho#2689",
 	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.UserService/ResetSecondFactor",
+		Why: "глагол сброса второго фактора распорядителем заведён контрактом службы (kacho#1281, " +
+			"Ф12 Р10); запись порождена генератором края над этим контрактом (341 запись против 338 " +
+			"у края на стволе платформы 275240efdc1 — третья из трёх ждущих, и с ней записей с полом " +
+			"«2» становится 29); край порождает свою копию по пину службы и увидит запись после " +
+			"подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.UserService/ResetSecondFactor` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
+		Refs: "PRO-Robotech/kacho#1281",
+	},
 }
 
 // CatalogPendingEntries — объявленный перечень (копия, см. CatalogFoundationRenames).
