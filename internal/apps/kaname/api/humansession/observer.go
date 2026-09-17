@@ -7,6 +7,8 @@ package humansession
 // до первого события (форма Ф-е) — перечни исходов закрыты и отдаются
 // приёмнику словарями ниже; приёмник ими и засевает клетки.
 
+import "github.com/PRO-Robotech/kaname/internal/assurance"
+
 // LoginOutcome — исход входа по причине. Перечень закрыт: исходы проверяющего
 // — из его словаря (`passwordverify.OutcomeNames`), плюс исходы полосы.
 type LoginOutcome string
@@ -21,6 +23,9 @@ const (
 	LoginOutcomeMismatched    LoginOutcome = "mismatched"
 	LoginOutcomeMaterialNone  LoginOutcome = "material-missing"
 	LoginOutcomeCapacity      LoginOutcome = "capacity-exhausted"
+	// LoginOutcomeSecondFactorRefused — пароль сошёлся, вход отказан по полю
+	// `secondFactor` (Ф12): какой именно исход — в клетках предъявления.
+	LoginOutcomeSecondFactorRefused LoginOutcome = "second-factor-refused"
 )
 
 // LoginOutcomes — закрытый перечень исходов входа.
@@ -28,7 +33,7 @@ func LoginOutcomes() []LoginOutcome {
 	return []LoginOutcome{
 		LoginOutcomeIssued, LoginOutcomeNoRow, LoginOutcomeBlocked, LoginOutcomeRateLimited,
 		LoginOutcomeStoreFailed, LoginOutcomeVerifierIssue, LoginOutcomeMismatched,
-		LoginOutcomeMaterialNone, LoginOutcomeCapacity,
+		LoginOutcomeMaterialNone, LoginOutcomeCapacity, LoginOutcomeSecondFactorRefused,
 	}
 }
 
@@ -132,18 +137,26 @@ type Observer interface {
 	RewriteObserved(outcome RewriteOutcome)
 	RecoveryRequestObserved(outcome RecoveryRequestOutcome)
 	RecoveryCompletionObserved(outcome RecoveryCompletionOutcome)
+	// Второй фактор (Ф12, Ф12-43): предъявления по способу × исходу, отказы
+	// по состоянию/свежести/недоступности, события.
+	SecondFactorPresentationObserved(method assurance.Method, outcome PresentationOutcome)
+	SecondFactorRefusalObserved(refusal SecondFactorRefusal)
+	SecondFactorEventObserved(event SecondFactorEvent)
 }
 
 // NopObserver — приёмник, ничего не считающий; для проб, не о наблюдаемости.
 type NopObserver struct{}
 
-func (NopObserver) LoginObserved(LoginOutcome)                           {}
-func (NopObserver) NoSessionObserved(NoSessionReason)                    {}
-func (NopObserver) FormRefusalObserved(FormRefusal)                      {}
-func (NopObserver) RateLimitObserved(FailureScope)                       {}
-func (NopObserver) SourceUnknownObserved()                               {}
-func (NopObserver) BreachCheckObserved(BreachCheckOutcome)               {}
-func (NopObserver) LogoutStoreFailureObserved()                          {}
-func (NopObserver) RewriteObserved(RewriteOutcome)                       {}
-func (NopObserver) RecoveryRequestObserved(RecoveryRequestOutcome)       {}
-func (NopObserver) RecoveryCompletionObserved(RecoveryCompletionOutcome) {}
+func (NopObserver) LoginObserved(LoginOutcome)                                             {}
+func (NopObserver) NoSessionObserved(NoSessionReason)                                      {}
+func (NopObserver) FormRefusalObserved(FormRefusal)                                        {}
+func (NopObserver) RateLimitObserved(FailureScope)                                         {}
+func (NopObserver) SourceUnknownObserved()                                                 {}
+func (NopObserver) BreachCheckObserved(BreachCheckOutcome)                                 {}
+func (NopObserver) LogoutStoreFailureObserved()                                            {}
+func (NopObserver) RewriteObserved(RewriteOutcome)                                         {}
+func (NopObserver) RecoveryRequestObserved(RecoveryRequestOutcome)                         {}
+func (NopObserver) RecoveryCompletionObserved(RecoveryCompletionOutcome)                   {}
+func (NopObserver) SecondFactorPresentationObserved(assurance.Method, PresentationOutcome) {}
+func (NopObserver) SecondFactorRefusalObserved(SecondFactorRefusal)                        {}
+func (NopObserver) SecondFactorEventObserved(SecondFactorEvent)                            {}

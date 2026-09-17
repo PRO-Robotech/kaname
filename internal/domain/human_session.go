@@ -225,6 +225,15 @@ func (s HumanSession) Expired(now time.Time) bool { return !now.Before(s.Expires
 const (
 	RevokeReasonLogout         = "logout"
 	RevokeReasonPasswordChange = "password-change"
+	// RevokeReasonSecondFactorRemoved — снятие второго фактора самим человеком
+	// гасит ПРОЧИЕ его сессии (Ф12 Р9, kacho#1281): журнал отличает это от
+	// выхода и от смены пароля. Третье значение словаря
+	// `human_sessions_ended_reason_check`.
+	RevokeReasonSecondFactorRemoved = "second-factor-removed"
+	// RevokeReasonSecondFactorReset — причина отсечки, которую пишет сброс
+	// второго фактора распорядителем (Ф12 Р10): все сессии человека покрыты
+	// отсечкой `now` существующим писателем принудительного выхода.
+	RevokeReasonSecondFactorReset = "second-factor-reset"
 )
 
 // FormKind — вид формы, к которому привязан признак защиты от подделки
@@ -244,9 +253,15 @@ const (
 	// (Ф1 Р6): у них разные предметы и разные последствия.
 	FormRecovery         FormKind = "recovery"
 	FormRecoveryComplete FormKind = "recovery-complete"
+	// Второй фактор (Ф12, `kacho#1281`, Р4): один вид на четыре глагола
+	// семейства `second-factor/*` — у них один предмет (заведённый фактор
+	// самого человека) — и свой вид у церемонии повышения: её зовут и без
+	// фактора, ветвью пароля (Ф11-09), и признак семейства ей не годится.
+	FormSecondFactor FormKind = "second-factor"
+	FormStepUp       FormKind = "step-up"
 )
 
-var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete}
+var formKinds = []FormKind{FormLogin, FormLogout, FormPassword, FormRegister, FormRecovery, FormRecoveryComplete, FormSecondFactor, FormStepUp}
 
 // FormKinds — закрытый перечень видов формы, копией.
 func FormKinds() []FormKind {

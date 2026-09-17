@@ -296,6 +296,30 @@ func (w *humanSessionWriter) RotateBearer(ctx context.Context, id domain.HumanSe
 	return nil
 }
 
+// PresentInSession — предъявление способа внутри сессии (Ф11 Р5, Ф12): одной
+// записью множество предъявленного, уровень, новый дайджест и момент; момент
+// аутентификации и срок не трогаются by construction (их нет в SET). Словарь
+// способов и ось уровня судит CHECK строки, а не эта функция.
+func (w *humanSessionWriter) PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error {
+	if digest == "" {
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.bearer_digest: required")
+	}
+	if len(methods) == 0 {
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument human_session.presented_methods: required")
+	}
+	tag, err := w.tx.Exec(ctx, `
+		UPDATE human_sessions
+		   SET presented_methods = $2, assurance_level = $3, bearer_digest = $4, last_presented_at = $5
+		 WHERE id = $1 AND ended_at IS NULL`, string(id), methods, level, string(digest), presentedAt)
+	if err != nil {
+		return mapErr(err, "HumanSession.Present", string(id))
+	}
+	if tag.RowsAffected() != 1 {
+		return iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
+	}
+	return nil
+}
+
 // ClearPasswordChangeRequired — см. порт.
 func (w *humanSessionWriter) ClearPasswordChangeRequired(ctx context.Context, id domain.HumanSessionID) error {
 	if _, err := w.tx.Exec(ctx, `UPDATE human_sessions SET password_change_required = false WHERE id = $1`, string(id)); err != nil {
@@ -318,6 +342,36 @@ func (w *humanSessionWriter) UpsertCutoff(ctx context.Context, u domain.UserToke
 // ReplaceLoginVerifier — делегируется адаптеру таблицы секрета (см. шапку).
 func (w *humanSessionWriter) ReplaceLoginVerifier(ctx context.Context, m domain.LoginMethod) (bool, error) {
 	return replaceLoginVerifierTx(ctx, w.tx, m)
+}
+
+// Операторы второго фактора (Ф12) — те же делегации: таблицу секрета называет
+// только её адаптер.
+func (w *humanSessionWriter) UpsertPendingTOTP(ctx context.Context, m domain.LoginMethod) (bool, error) {
+	return upsertPendingTOTPTx(ctx, w.tx, m)
+}
+
+func (w *humanSessionWriter) ActivateTOTP(ctx context.Context, userID domain.UserID, pendingSince time.Time, step int64, at time.Time) (bool, error) {
+	return activateTOTPTx(ctx, w.tx, userID, pendingSince, step, at)
+}
+
+func (w *humanSessionWriter) ReplaceLookupSet(ctx context.Context, m domain.LoginMethod) error {
+	return replaceLookupSetTx(ctx, w.tx, m)
+}
+
+func (w *humanSessionWriter) LockLookupSet(ctx context.Context, userID domain.UserID) (domain.LoginMethod, bool, error) {
+	return lockLookupSetTx(ctx, w.tx, userID)
+}
+
+func (w *humanSessionWriter) ConsumeLookupElement(ctx context.Context, userID domain.UserID, element string) (bool, error) {
+	return consumeLookupElementTx(ctx, w.tx, userID, element)
+}
+
+func (w *humanSessionWriter) RecordAcceptedStep(ctx context.Context, userID domain.UserID, step int64) (bool, error) {
+	return recordAcceptedStepTx(ctx, w.tx, userID, step)
+}
+
+func (w *humanSessionWriter) RemoveSecondFactor(ctx context.Context, userID domain.UserID) (bool, error) {
+	return removeSecondFactorTx(ctx, w.tx, userID)
 }
 
 func (w *humanSessionWriter) RecordFailure(ctx context.Context, scope humansession.FailureScope, key string, at time.Time) error {

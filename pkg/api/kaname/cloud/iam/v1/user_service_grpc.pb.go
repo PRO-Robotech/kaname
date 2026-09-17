@@ -32,6 +32,7 @@ const (
 	UserService_RemoveFromAccount_FullMethodName = "/kaname.cloud.iam.v1.UserService/RemoveFromAccount"
 	UserService_Block_FullMethodName             = "/kaname.cloud.iam.v1.UserService/Block"
 	UserService_Unblock_FullMethodName           = "/kaname.cloud.iam.v1.UserService/Unblock"
+	UserService_ResetSecondFactor_FullMethodName = "/kaname.cloud.iam.v1.UserService/ResetSecondFactor"
 	UserService_ListOperations_FullMethodName    = "/kaname.cloud.iam.v1.UserService/ListOperations"
 )
 
@@ -291,6 +292,32 @@ type UserServiceClient interface {
 	// here too — turning an unconfirmed invitee into an active member is
 	// activation-on-first-login, a different path with a different subject.
 	Unblock(ctx context.Context, in *UnblockUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
+	// Resets the second factor of the specified User: the administrator's path
+	// for a person who lost the authenticator device AND the backup codes.
+	//
+	// Without it such a person signs in with the password and stays at
+	// assurance level "1" with no way up: self-service removal of the factor
+	// asks for a code (the very thing that was lost). So the administrator of
+	// the person's Account — `identity_suspender`, the same relation and the
+	// same step-up floor as Block/Unblock — removes it here, and the person
+	// enrolls a new one himself.
+	//
+	// ONE TRANSACTION: the time-based code row (active) and the backup-code set
+	// are removed; EVERY session of the person is covered by a cutoff at `now`
+	// with reason `second-factor-reset` and the administrator as the actor —
+	// whoever holds the lost device may hold a session too; the audit event
+	// `iam.user.second_factor_reset` names both actors.
+	//
+	// A person WITHOUT an enrolled factor — no row, or an enrollment that was
+	// started and never confirmed — is refused synchronously:
+	// FAILED_PRECONDITION with `ErrorInfo.reason = SECOND_FACTOR_NOT_ENROLLED`.
+	// The unconfirmed enrollment is left alone and no session is ended: there
+	// is nothing to reset, and the person replaces the pending enrollment by
+	// starting a new one.
+	//
+	// WHAT IT DOES NOT DO: it does not reset the password, does not enroll a
+	// factor on the person's behalf, and does not lift a block.
+	ResetSecondFactor(ctx context.Context, in *ResetSecondFactorRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Lists operations for the specified user.
 	ListOperations(ctx context.Context, in *ListUserOperationsRequest, opts ...grpc.CallOption) (*ListUserOperationsResponse, error)
 }
@@ -387,6 +414,16 @@ func (c *userServiceClient) Unblock(ctx context.Context, in *UnblockUserRequest,
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(operation.Operation)
 	err := c.cc.Invoke(ctx, UserService_Unblock_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) ResetSecondFactor(ctx context.Context, in *ResetSecondFactorRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(operation.Operation)
+	err := c.cc.Invoke(ctx, UserService_ResetSecondFactor_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -659,6 +696,32 @@ type UserServiceServer interface {
 	// here too — turning an unconfirmed invitee into an active member is
 	// activation-on-first-login, a different path with a different subject.
 	Unblock(context.Context, *UnblockUserRequest) (*operation.Operation, error)
+	// Resets the second factor of the specified User: the administrator's path
+	// for a person who lost the authenticator device AND the backup codes.
+	//
+	// Without it such a person signs in with the password and stays at
+	// assurance level "1" with no way up: self-service removal of the factor
+	// asks for a code (the very thing that was lost). So the administrator of
+	// the person's Account — `identity_suspender`, the same relation and the
+	// same step-up floor as Block/Unblock — removes it here, and the person
+	// enrolls a new one himself.
+	//
+	// ONE TRANSACTION: the time-based code row (active) and the backup-code set
+	// are removed; EVERY session of the person is covered by a cutoff at `now`
+	// with reason `second-factor-reset` and the administrator as the actor —
+	// whoever holds the lost device may hold a session too; the audit event
+	// `iam.user.second_factor_reset` names both actors.
+	//
+	// A person WITHOUT an enrolled factor — no row, or an enrollment that was
+	// started and never confirmed — is refused synchronously:
+	// FAILED_PRECONDITION with `ErrorInfo.reason = SECOND_FACTOR_NOT_ENROLLED`.
+	// The unconfirmed enrollment is left alone and no session is ended: there
+	// is nothing to reset, and the person replaces the pending enrollment by
+	// starting a new one.
+	//
+	// WHAT IT DOES NOT DO: it does not reset the password, does not enroll a
+	// factor on the person's behalf, and does not lift a block.
+	ResetSecondFactor(context.Context, *ResetSecondFactorRequest) (*operation.Operation, error)
 	// Lists operations for the specified user.
 	ListOperations(context.Context, *ListUserOperationsRequest) (*ListUserOperationsResponse, error)
 	mustEmbedUnimplementedUserServiceServer()
@@ -697,6 +760,9 @@ func (UnimplementedUserServiceServer) Block(context.Context, *BlockUserRequest) 
 }
 func (UnimplementedUserServiceServer) Unblock(context.Context, *UnblockUserRequest) (*operation.Operation, error) {
 	return nil, status.Error(codes.Unimplemented, "method Unblock not implemented")
+}
+func (UnimplementedUserServiceServer) ResetSecondFactor(context.Context, *ResetSecondFactorRequest) (*operation.Operation, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetSecondFactor not implemented")
 }
 func (UnimplementedUserServiceServer) ListOperations(context.Context, *ListUserOperationsRequest) (*ListUserOperationsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListOperations not implemented")
@@ -884,6 +950,24 @@ func _UserService_Unblock_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_ResetSecondFactor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetSecondFactorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResetSecondFactor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResetSecondFactor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResetSecondFactor(ctx, req.(*ResetSecondFactorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _UserService_ListOperations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListUserOperationsRequest)
 	if err := dec(in); err != nil {
@@ -944,6 +1028,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Unblock",
 			Handler:    _UserService_Unblock_Handler,
+		},
+		{
+			MethodName: "ResetSecondFactor",
+			Handler:    _UserService_ResetSecondFactor_Handler,
 		},
 		{
 			MethodName: "ListOperations",

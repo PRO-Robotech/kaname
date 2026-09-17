@@ -20,7 +20,9 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
+	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
 var ucBase = time.Date(2026, 9, 16, 12, 0, 0, 123456000, time.UTC)
@@ -33,6 +35,7 @@ type harness struct {
 	clock    time.Time
 	hasher   *passwordverify.Hasher
 	verifier *passwordverify.Verifier
+	totp     *totpverify.Verifier
 	login    *humansession.LoginUseCase
 	logout   *humansession.LogoutUseCase
 	change   *humansession.ChangePasswordUseCase
@@ -65,9 +68,24 @@ func limits() humansession.Limits {
 	return humansession.Limits{AddressAttempts: 3, AddressWindow: 10 * time.Minute, SourceAttempts: 5, SourceWindow: 10 * time.Minute}
 }
 
+// probeTOTPVerifier — проверяющий кода по времени харнесса: одна обёртка с
+// постоянным ключом, чтобы материал читался между пробами одного прогона.
+func probeTOTPVerifier(t *testing.T) *totpverify.Verifier {
+	t.Helper()
+	key := make([]byte, keywrap.KeySize)
+	for i := range key {
+		key[i] = 7
+	}
+	wrapper, err := keywrap.New(key)
+	require.NoError(t, err)
+	totp, err := totpverify.New(wrapper)
+	require.NoError(t, err)
+	return totp
+}
+
 func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	t.Helper()
-	h := &harness{store: newFakeStore(), obs: newCountingObserver(), clock: ucBase}
+	h := &harness{store: newFakeStore(), obs: newCountingObserver(), clock: ucBase, totp: probeTOTPVerifier(t)}
 	var err error
 	h.hasher, err = passwordverify.NewHasher(declared())
 	require.NoError(t, err)
@@ -84,6 +102,7 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	h.login, err = humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, Limits: limits(), TTL: ucTTL, Observer: h.obs, Now: now, Logger: logger,
+		TOTP: h.totp, Sets: h.verifier,
 	})
 	require.NoError(t, err)
 	h.logout, err = humansession.NewLogoutUseCase(h.store, h.obs, now, logger)

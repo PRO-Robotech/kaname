@@ -34,6 +34,7 @@ type Handler struct {
 	remove  *RemoveFromAccountUseCase
 	resend  *ResendInviteUseCase
 	listOp  *shared.ListOperationsUseCase
+	reset   *ResetSecondFactorUseCase
 }
 
 func NewHandler(g *GetUserUseCase, l *ListUsersUseCase, u *UpdateUserUseCase, d *DeleteUserUseCase,
@@ -48,6 +49,16 @@ func NewHandler(g *GetUserUseCase, l *ListUsersUseCase, u *UpdateUserUseCase, d 
 // panicking — the composition root's wiring is held by cmd's probe.
 func (h *Handler) WithResendInvite(uc *ResendInviteUseCase) *Handler {
 	h.resend = uc
+	return h
+}
+
+// WithResetSecondFactor — сброс второго фактора распорядителем (Ф12 Р10).
+// Отдельной провязкой, а не параметром построения: глагол существует только
+// на посадке `own` — под `external` второго фактора у службы нет, и там он не
+// провязывается вовсе (Ф12-37); вызов без провязки отвечает `Unimplemented`
+// — ровно как контракт, у которого нет исполнителя.
+func (h *Handler) WithResetSecondFactor(uc *ResetSecondFactorUseCase) *Handler {
+	h.reset = uc
 	return h
 }
 
@@ -164,6 +175,19 @@ func (h *Handler) Block(ctx context.Context, req *iamv1.BlockUserRequest) (*oper
 // Unblock — участие разрешается снова.
 func (h *Handler) Unblock(ctx context.Context, req *iamv1.UnblockUserRequest) (*operationpb.Operation, error) {
 	op, err := h.unblock.Execute(ctx, domain.UserID(req.GetUserId()))
+	if err != nil {
+		return nil, err
+	}
+	return shared.OperationToProto(op), nil
+}
+
+// ResetSecondFactor — сброс второго фактора распорядителем (Ф12-30): под
+// `external` не провязан и отвечает как контракт без исполнителя.
+func (h *Handler) ResetSecondFactor(ctx context.Context, req *iamv1.ResetSecondFactorRequest) (*operationpb.Operation, error) {
+	if h.reset == nil {
+		return nil, status.Error(codes.Unimplemented, "second factor is not served on this posture")
+	}
+	op, err := h.reset.Execute(ctx, domain.UserID(req.GetUserId()))
 	if err != nil {
 		return nil, err
 	}

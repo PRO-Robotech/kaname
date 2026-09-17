@@ -183,7 +183,7 @@ func (uc *ChangePasswordUseCase) Execute(ctx context.Context, in ChangePasswordI
 		return ChangePasswordOutput{}, ErrStoreUnavailable
 	}
 	defer func() { _ = w.Rollback(ctx) }()
-	replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh})
+	replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive})
 	if err != nil {
 		return ChangePasswordOutput{}, ErrStoreUnavailable
 	}

@@ -28,6 +28,8 @@ func laneCfg(p config.IdentityProvider) config.Config {
 	cfg := goodEndpoints(config.ModeProduction, "require")
 	cfg.AuthN.HookSharedSecret = "hook-secret"
 	cfg.AuthN.JWKSEncryptionKeyHex = strings.Repeat("ab", 32)
+	cfg.AuthN.SecondFactorEncryptionKeyHex = strings.Repeat("cd", 32)
+	cfg.AuthN.SelfServiceFreshness = 15 * time.Minute
 	cfg.AuthN.IdentityProvider = p
 	cfg.AuthN.TokenSigning = ownMintingSettings()
 	cfg.AuthN.PresentedCredential = presentedCredentialSettings()

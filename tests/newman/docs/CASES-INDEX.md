@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 747
+Всего кейсов: 751
 
 ## Перепись по модулям
 
@@ -71,6 +71,7 @@
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-login-lane.py` | 4 |
 | `cases/kaname-recovery-lane.py` | 3 |
+| `cases/kaname-second-factor.py` | 4 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/label-revoke-nlb.py` | 1 |
@@ -1043,6 +1044,19 @@
 - `IAM-RECOVERY-OK-REQUEST-SAME-ANSWER`
 - `IAM-RECOVERY-NEG-WRONG-CODE`
 - `IAM-RECOVERY-NEG-CSRF-MISSING`
+
+## `cases/kaname-second-factor.py` — 4 кейса
+
+> Второй фактор (Ф12, kacho#1281): шесть глаголов семейства на том же слушателе
+> формы, что вход, и поле `secondFactor` формы входа. Адресуется `loginLaneBaseUrl`;
+> на автономном стенде посадки `external` переменная пуста ПО ПОСАДКЕ — «условие
+> не создано». Код по времени вычисляет посев из `secret` ответа `enroll`; вход с
+> кодом идёт ступенью `t₀ + 1` — границы ступени посев не ждёт (Ф12-08).
+
+- `IAM-2FA-OK-ENROLL-CONFIRM-LOGIN-LEVEL2`
+- `IAM-2FA-OK-BACKUP-CODE-STEP-UP`
+- `IAM-2FA-OK-REMOVE-BY-CODE`
+- `IAM-2FA-NEG-FORMS-AND-STATE`
 
 ## `cases/kaname-own-rest-front.py` — 14 кейсов
 

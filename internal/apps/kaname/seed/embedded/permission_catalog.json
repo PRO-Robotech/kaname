@@ -3391,6 +3391,16 @@
     "required_acr_min": "2"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.UserService/ResetSecondFactor",
+    "permission": "iam.users.resetSecondFactor",
+    "required_relation": "identity_suspender",
+    "scope_extractor": {
+      "object_type": "iam_user",
+      "from_request_field": "user_id"
+    },
+    "required_acr_min": "2"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.UserService/Unblock",
     "permission": "iam.users.unblock",
     "required_relation": "identity_suspender",

@@ -162,6 +162,7 @@ sequenceDiagram
 | DELETE  | `/iam/v1/users/{userId}`          | `UserService.Delete`      |
 | POST    | `/iam/v1/users/{userId}:block`    | `UserService.Block`       |
 | POST    | `/iam/v1/users/{userId}:unblock`  | `UserService.Unblock`     |
+| POST    | `/iam/v1/users/{userId}:resetSecondFactor` | `UserService.ResetSecondFactor` |
 
 ## Административный запрет участию (`:block` / `:unblock`)
 

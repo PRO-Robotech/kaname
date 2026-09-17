@@ -111,3 +111,17 @@ func requireUserHandlerAnswered(t *testing.T, err error, method string) {
 			"anti-anonymous floor", method, code, err)
 	}
 }
+
+// TestHandlerServesResetSecondFactor — Ф12-30 (kacho#1281): глагол ПРОВЯЗАН в
+// слушателе, а не только объявлен контрактом. Порог «не аноним» отвечает до
+// разыменования зависимостей, поэтому фикстуры не нужны.
+func TestHandlerServesResetSecondFactor(t *testing.T) {
+	var srv iamv1.UserServiceServer = NewHandler(
+		nil, nil, nil, nil, nil,
+		NewBlockUserUseCase(nil, nil),
+		NewUnblockUserUseCase(nil, nil),
+		NewRemoveFromAccountUseCase(nil, nil),
+	).WithResetSecondFactor(NewResetSecondFactorUseCase(nil, nil, nil, nil))
+	_, err := srv.ResetSecondFactor(context.Background(), &iamv1.ResetSecondFactorRequest{UserId: actionsUserID})
+	requireUserHandlerAnswered(t, err, "ResetSecondFactor")
+}
