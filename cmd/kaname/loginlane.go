@@ -34,6 +34,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -49,6 +50,7 @@ import (
 	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/loginmethod"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
@@ -75,6 +77,17 @@ const breachCheckTimeout = 5 * time.Second
 // recoveryDispatchTimeout — предел одной постановки письма восстановления вне
 // пути ответа: запись двух строк одной транзакцией, а не разговор с узлом.
 const recoveryDispatchTimeout = 30 * time.Second
+
+// envelopeCensusTimeout — предел переписи классов стоимости при старте: один
+// последовательный проход по таблице способов (индекса по материалу нет
+// намеренно — шапка её миграции). Калибровка классов в этот срок не входит:
+// у неё свой предел ниже.
+const envelopeCensusTimeout = 60 * time.Second
+
+// envelopeCalibrationTimeout — предел калибровки ОДНОГО класса: пять прогонов
+// плюс построение значения; класс на потолке наследуемого формата (bcrypt 14)
+// стоит около секунды на прогон на машине разработки, на слабом поде — больше.
+const envelopeCalibrationTimeout = 2 * time.Minute
 
 // loginLane — всё, что корень собирает под полосу; nil — полосы нет.
 type loginLane struct {
@@ -261,10 +274,85 @@ func writeProbeFile(path, body string) error {
 	return os.WriteFile(path, []byte(body), 0o600)
 }
 
+// envelopeReport — самоотчёт калибровки огибающей при старте (Ф3-31, решение
+// kaname#188): что прочитано, что калибровано, что не читается.
+type envelopeReport struct {
+	// RowsCounted — строк способа «пароль» в хранилище, по переписи.
+	RowsCounted int64
+	// ClassesCalibrated — классов, калиброванных этим стартом (перепись ∪
+	// ручка; класс ручки, лежащий и в хранилище, считается один раз).
+	ClassesCalibrated int
+	// UnreadableRows / UnreadablePrefixes — строк и префиксов переписи, чей
+	// класс проверяющий не читает: признак вне перечня, негодная стоимость,
+	// выше потолка записи. Находка о хранилище, не отказ старта: отказ входа
+	// по таким строкам приходит без вычисления (ID-PW-1 Р4, PWV-04/05/14).
+	UnreadableRows     int64
+	UnreadablePrefixes int
+	// Floor — потолок после калибровки; CeilingClass — класс-потолок.
+	Floor        time.Duration
+	CeilingClass string
+}
+
+// calibrateLoginEnvelope — огибающая по потолку ФАКТИЧЕСКОЙ популяции: каждый
+// читаемый класс переписи хранилища и класс ручки «что писать» — калибровкой
+// (повод `startup`). Класс ручки, который проверяющий не читает, — отказ:
+// огибающей, не покрывающей то, что продукт сам пишет, не бывает.
+func calibrateLoginEnvelope(ctx context.Context, envelope *passwordverify.Envelope,
+	census []loginmethod.CostClassCount, declared domain.PasswordCostClass, logger *slog.Logger,
+) (envelopeReport, error) {
+	var report envelopeReport
+	admit := func(class domain.PasswordCostClass) (passwordverify.Admission, error) {
+		cctx, cancel := context.WithTimeout(ctx, envelopeCalibrationTimeout)
+		defer cancel()
+		return envelope.Admit(cctx, class, passwordverify.EnvelopeTriggerStartup)
+	}
+	for _, row := range census {
+		report.RowsCounted += row.Rows
+		class, err := passwordverify.ParseCostClassPrefix(row.Prefix)
+		if err != nil {
+			report.UnreadableRows += row.Rows
+			report.UnreadablePrefixes++
+			logger.Error("sign-in lane timing envelope: stored class is not readable by the verifier — a finding about the store, not a refusal to start",
+				"rows", row.Rows, "err", err.Error())
+			continue
+		}
+		adm, err := admit(class)
+		var unreadable *passwordverify.ClassNotReadableError
+		switch {
+		case errors.As(err, &unreadable):
+			report.UnreadableRows += row.Rows
+			report.UnreadablePrefixes++
+			logger.Error("sign-in lane timing envelope: stored class is not readable by the verifier — a finding about the store, not a refusal to start",
+				"class", class.Key(), "rows", row.Rows, "outcome", string(unreadable.Outcome))
+			continue
+		case err != nil:
+			return envelopeReport{}, fmt.Errorf("sign-in lane timing envelope: class %s from the store: %w", class.Key(), err)
+		}
+		if adm.Calibrated {
+			report.ClassesCalibrated++
+		}
+		logger.Info("sign-in lane timing envelope: class calibrated", "class", class.Key(), "rows", row.Rows, "cost", adm.Cost)
+	}
+	adm, err := admit(declared)
+	if err != nil {
+		return envelopeReport{}, fmt.Errorf("sign-in lane timing envelope: the class the product writes (%s) could not be calibrated: %w", declared.Key(), err)
+	}
+	if adm.Calibrated {
+		report.ClassesCalibrated++
+		logger.Info("sign-in lane timing envelope: class calibrated", "class", declared.Key(), "rows", 0, "cost", adm.Cost)
+	}
+	ceiling, ok := envelope.Ceiling()
+	if !ok {
+		return envelopeReport{}, fmt.Errorf("sign-in lane timing envelope: no class calibrated — the lane would answer with the verification time")
+	}
+	report.Floor, report.CeilingClass = envelope.Floor(), ceiling.Class.Key()
+	return report, nil
+}
+
 // buildLoginLane — полоса под `own`; под `external` — nil без ошибки.
 // reconciler — материализация собственнической выдачи после регистрации: тот
 // же экземпляр, что у пути запроса; nil-safe (уборка доберёт по намерениям).
-func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repository,
+func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repository,
 	reconciler *reconcileapp.Reconciler, reg *metrics.Registry, logger *slog.Logger,
 ) (*loginLane, error) {
 	if !loginLaneWanted(cfg) {
@@ -307,6 +395,34 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 	if err := verifier.SetDecoy(decoy); err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	sessions := kanamepg.NewHumanSessionRepo(pool)
+	methods := kanamepg.NewLoginMethodRepo(pool)
+	// Огибающая по потолку (Ф3-31, решение kaname#188): перепись классов
+	// хранилища ∪ класс ручки, каждый — калибровкой прогоном проверяющего.
+	// Перепись не удалась — отказ старта: огибающая только по классу ручки
+	// оставила бы популяцию переноса отличимой по времени.
+	envelope, err := passwordverify.NewEnvelope(verifier, rec)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	censusCtx, cancelCensus := context.WithTimeout(ctx, envelopeCensusTimeout)
+	census, err := methods.PasswordCostClasses(censusCtx)
+	cancelCensus()
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane timing envelope: cost-class census of the store: %w", err)
+	}
+	report, err := calibrateLoginEnvelope(ctx, envelope,
+		census, domain.PasswordCostClass{Format: login.Declared().Format, Params: login.Declared().Params}, logger)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("sign-in lane timing envelope",
+		"floor", report.Floor,
+		"ceiling_class", report.CeilingClass,
+		"classes_calibrated", report.ClassesCalibrated,
+		"rows_counted", report.RowsCounted,
+		"unreadable_rows", report.UnreadableRows,
+		"unreadable_prefixes", report.UnreadablePrefixes)
 	var breach humansession.BreachChecker
 	if login.BreachCheckOn() {
 		client, berr := breachcheck.New(login.BreachCheckURL, breachCheckTimeout)
@@ -324,8 +440,6 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 		AddressAttempts: login.AddressAttempts, AddressWindow: login.AddressWindow,
 		SourceAttempts: login.SourceAttempts, SourceWindow: login.SourceWindow,
 	}
-	sessions := kanamepg.NewHumanSessionRepo(pool)
-	methods := kanamepg.NewLoginMethodRepo(pool)
 	// Второй фактор (Ф12): своё кольцо ключей обёртки секретов (Р2) — первый
 	// оборачивает, все открывают; число ключей печатается всегда, как у
 	// приватной половины подписи (`signing.go`).
@@ -348,7 +462,7 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 	loginUC, err := humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: sessions, Users: kanamepg.NewUserDirectory(repo), Methods: methods, Verifier: verifier,
 		Hasher: hasher, Limits: limits, TTL: login.SessionTTL, Observer: rec, Now: time.Now, Logger: logger,
-		TOTP: totp, Sets: verifier,
+		Envelope: envelope, TOTP: totp, Sets: verifier,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)

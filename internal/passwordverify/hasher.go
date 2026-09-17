@@ -82,10 +82,17 @@ func (h *Hasher) hashArgon2id(password string) (domain.LoginVerifier, error) {
 		return domain.LoginVerifier{}, fmt.Errorf("password_hasher: random source: %w", err)
 	}
 	body := argon2.IDKey([]byte(password), salt, iterations, memory, uint8(parallelism), argon2idKeyLen)
-	material := fmt.Sprintf("%s%sm=%d,t=%d,p=%d$%s$%s",
+	return domain.NewLoginVerifier(argon2idMaterial(memory, iterations, parallelism, salt, body))
+}
+
+// argon2idMaterial — разметка PHC объявленного формата из параметров, соли и
+// тела. ЕДИНСТВЕННОЕ место, где она собирается: хешер пишет ею значения,
+// калибровка огибающей строит ею синтетические (`envelope.go`); второе
+// написание разошлось бы с проверяющим молча.
+func argon2idMaterial(memory, iterations, parallelism uint32, salt, body []byte) string {
+	return fmt.Sprintf("%s%sm=%d,t=%d,p=%d$%s$%s",
 		argon2idMarkerPrefix, argon2idVersionPrefix, memory, iterations, parallelism,
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(body))
-	return domain.NewLoginVerifier(material)
 }
 
 // --- набор запасных кодов (Ф12 Р6, kacho#1281) ---

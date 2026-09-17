@@ -538,7 +538,7 @@ func runServe(cfg config.Config) error {
 	// реконсайлер материализации привязки, что путь запроса и полоса первого
 	// входа (`hook_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
 	// потому что её таблицы — предметы той же петли.
-	lane, err := buildLoginLane(cfg, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
+	lane, err := buildLoginLane(ctx, cfg, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
 	if err != nil {
 		return err
 	}
