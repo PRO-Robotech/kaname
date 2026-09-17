@@ -58,8 +58,9 @@ reviewed_at: '2026-09-17'
 
 # ─── ОДОБРЕНИЕ ВЫВОДИТСЯ ИЗ ЗАПИСИ И СОБЫТИЯ, А НЕ ИЗ СЛОВА В ШАПКЕ ──────────
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-17T05:24:39Z'
+  ban1_lifted: true
   why: >-
     Вердикт круга 3 — APPROVED: блокирующих ноль. Б3 круга 2 закрыт ТЕМ ЖЕ опытом с другим
     результатом — арифметика Ф13-32 сверена с Ф3-28, Ф3 Р10 и Ф13-04 (round2_blocking_recheck):
@@ -113,18 +114,34 @@ authority:
   allowlisted_for_role: false
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось», а не «да» и не «нет». Внешнего события,
-    связывающего отпечаток, роль и вердикт, не создавалось: его публикует оркестратор
-    (`publication_pending`). До него санкции по ban #1 нет.
+  type: issue_comment
+  status: performed
+  database_id: 5709230381
+  node_id: IC_kwDOTZqgWM8AAAABVEvxLQ
+  url: https://github.com/PRO-Robotech/kacho/issues/1282#issuecomment-5709230381
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5709230381
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1282
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-17T05:24:39Z'
+  body_sha256: fceba536f775a75e140dd99151c5d6aa3aa6d51228ef373382d5900f3659529f
+  subject_sha256: 833470690aff167314d54fec332810f34c3aab2e4574a0e3e871ee9184841099
+  subject_revision: 1c438124132a90339fc25e1575088dcf09a1ede5
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; запись рецензента задним числом
+    не правилась. Отпечаток предмета сверен перед публикацией (sha256sum файла на 1c438124)
+    и совпал с объявленным. Отпечаток тела снят с сырого ответа API.
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: null
-  publication_mode: record_only
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
+
 
 # ─── БЛОКИРУЮЩЕЕ КРУГА 2 — ТОТ ЖЕ ОПЫТ, ДРУГОЙ РЕЗУЛЬТАТ ─────────────────────
 round2_blocking_recheck:
