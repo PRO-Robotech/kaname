@@ -38,6 +38,11 @@ type harness struct {
 	change   *humansession.ChangePasswordUseCase
 	resolve  *humansession.ResolveUseCase
 	rule     *humansession.PasswordRule
+	// envelope — дублёр огибающей по потолку (Ф3-31, kaname#188): потолок
+	// задаёт проба; envelopePort — то, что получает полоса: по умолчанию
+	// дублёр, измерительная проба подставляет настоящую огибающую.
+	envelope     *laneEnvelope
+	envelopePort humansession.TimingEnvelope
 	// Восстановление доступа (Ф5).
 	recoveryRequest  *humansession.RequestRecoveryUseCase
 	recoveryComplete *humansession.CompleteRecoveryUseCase
@@ -67,7 +72,8 @@ func limits() humansession.Limits {
 
 func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	t.Helper()
-	h := &harness{store: newFakeStore(), obs: newCountingObserver(), clock: ucBase}
+	h := &harness{store: newFakeStore(), obs: newCountingObserver(), clock: ucBase, envelope: &laneEnvelope{}}
+	h.envelopePort = h.envelope
 	var err error
 	h.hasher, err = passwordverify.NewHasher(declared())
 	require.NoError(t, err)
@@ -84,6 +90,7 @@ func newHarness(t *testing.T, breach humansession.BreachChecker) *harness {
 	h.login, err = humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, Limits: limits(), TTL: ucTTL, Observer: h.obs, Now: now, Logger: logger,
+		Envelope: h.envelopePort,
 	})
 	require.NoError(t, err)
 	h.logout, err = humansession.NewLogoutUseCase(h.store, h.obs, now, logger)
