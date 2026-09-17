@@ -26,13 +26,14 @@ type Handler struct {
 
 	get    *GetMembershipUseCase
 	list   *ListMembershipsUseCase
+	mine   *ListMyMembershipsUseCase
 	create Creator
 }
 
-// NewHandler — оба чтения и создание. Создание приходит ПОРТОМ: поток
+// NewHandler — все чтения и создание. Создание приходит ПОРТОМ: поток
 // приглашения живёт у ресурса человека до стадии S4 (см. create.go).
-func NewHandler(g *GetMembershipUseCase, l *ListMembershipsUseCase, c Creator) *Handler {
-	return &Handler{get: g, list: l, create: c}
+func NewHandler(g *GetMembershipUseCase, l *ListMembershipsUseCase, m *ListMyMembershipsUseCase, c Creator) *Handler {
+	return &Handler{get: g, list: l, mine: m, create: c}
 }
 
 // Create — POST /iam/v1/memberships. Разобрать → порт → операция.
@@ -90,7 +91,31 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListMembershipsRequest) (
 	return &iamv1.ListMembershipsResponse{Memberships: out, NextPageToken: next}, nil
 }
 
-// ToProto — перевод членства в контракт: ОДНА проекция на оба чтения, на
+// ListMine — GET /iam/v1/me/memberships. Разобрать → use-case → сформатировать;
+// личность вызывающего use-case берёт из контекста сам — запрос её не несёт.
+func (h *Handler) ListMine(ctx context.Context, req *iamv1.ListMyMembershipsRequest) (*iamv1.ListMyMembershipsResponse, error) {
+	if err := shared.ValidateRawPagination(req.GetPageToken(), req.GetPageSize()); err != nil {
+		return nil, err
+	}
+	rows, next, err := h.mine.Execute(ctx, repomembership.MinePage{
+		PageSize:  safeconv.ClampNonNegInt32(req.GetPageSize()),
+		PageToken: req.GetPageToken(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*iamv1.Membership, 0, len(rows))
+	for _, m := range rows {
+		pb, perr := ToProto(m)
+		if perr != nil {
+			return nil, shared.MapRepoErr(perr)
+		}
+		out = append(out, pb)
+	}
+	return &iamv1.ListMyMembershipsResponse{Memberships: out, NextPageToken: next}, nil
+}
+
+// ToProto — перевод членства в контракт: ОДНА проекция на все чтения, на
 // ответ операции создания и на разрешение осиротевшей операции.
 //
 // Сам перевод объявлен в реестре (`internal/dto/toproto`, membership.go) и здесь

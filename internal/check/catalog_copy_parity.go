@@ -234,6 +234,21 @@ var catalogPendingEntries = []CatalogPendingEntry{
 			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
 		Refs: "PRO-Robotech/kacho#1281",
 	},
+	{
+		OwnFQN: "kaname.cloud.iam.v1.MembershipService/ListMine",
+		Why: "свой список членств заведён контрактом службы (kaname#206, IAM-ID-2 стадия S2, §2.5: " +
+			"полоса `scope_filtered` при непустом `permission`); запись порождена генератором края " +
+			"над этим контрактом (`gateway/scripts/gen-permission-catalog.sh` платформы с отбором " +
+			"домена iam над деревом, где `kaname/` — контракт службы этой ревизии: 113 имён, из них " +
+			"своих 110 против 109 в копии, остальные 109 совпали побайтово; у края на стволе платформы " +
+			"26206c80f9d записей 339, этой нет); край порождает свою копию по пину службы, а пин на " +
+			"стволе платформы (af0ca8f3) старше контракта с этим глаголом — увидит запись после " +
+			"подъёма пина",
+		Removal: "копия края на стволе платформы несёт `kaname.cloud.iam.v1.MembershipService/ListMine` " +
+			"— платформа подняла пин службы до ревизии с этим глаголом и перегенерировала каталог; " +
+			"тогда запись снимается, а копия синхронизируется (make sync-permission-catalog)",
+		Refs: "kaname#206 · PRO-Robotech/kacho#1085",
+	},
 }
 
 // CatalogPendingEntries — объявленный перечень (копия, см. CatalogFoundationRenames).

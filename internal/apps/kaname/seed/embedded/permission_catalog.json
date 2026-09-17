@@ -3071,6 +3071,17 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.MembershipService/ListMine",
+    "permission": "iam.memberships.listMine",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "1",
+    "scope_filtered": true
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.PermissionCatalogService/ListPermissionCatalog",
     "permission": "iam.permissions.list",
     "required_relation": "viewer",
