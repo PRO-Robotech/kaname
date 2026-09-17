@@ -328,7 +328,8 @@ func TestLane_F3_01_LoginIssuesTheSessionCookieAndANewFormContext(t *testing.T) 
 	sess := body["session"].(map[string]any)
 	require.Equal(t, "1", sess["assuranceLevel"])
 	require.Equal(t, true, sess["emailVerified"])
-	require.Equal(t, false, sess["passwordChangeRequired"])
+	_, carriesRequirement := sess["passwordChangeRequired"]
+	require.False(t, carriesRequirement, "kaname#201: ключа требования сменить пароль в теле сессии нет — поле снято с контракта (kacho#2697)")
 	require.Equal(t, base.Add(24*time.Hour).Format(time.RFC3339), sess["expiresAt"], "expiresAt с точностью до секунды")
 	require.NotContains(t, r.body, bearer.CookieValue(), "носитель не в теле")
 

@@ -123,7 +123,8 @@ func TestLane_F5_03_CompleteIssuesTheSessionCookieLikeALogin(t *testing.T) {
 	require.Equal(t, "usr-a", body["user"].(map[string]any)["id"])
 	sess := body["session"].(map[string]any)
 	require.Equal(t, "1", sess["assuranceLevel"])
-	require.Equal(t, false, sess["passwordChangeRequired"])
+	_, carriesRequirement := sess["passwordChangeRequired"]
+	require.False(t, carriesRequirement, "kaname#201: сессия восстановления полноправна — ключа требования в теле нет (kacho#2697, Ф5 редакция 3)")
 	require.Equal(t, base.Add(24*time.Hour).Format(time.RFC3339), sess["expiresAt"])
 	require.NotContains(t, r.body, bearer.CookieValue(), "носитель не в теле")
 	require.NotContains(t, r.body, "ABCDE-FGHJK", "код в ответе не повторяется")

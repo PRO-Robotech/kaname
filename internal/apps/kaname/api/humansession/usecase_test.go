@@ -160,7 +160,6 @@ func TestLogin_F3_01_IssuesASessionWithLevelOneAndRemembersFirstAuthentication(t
 	require.True(t, out.View.Session.ExpiresAt.Equal(ucBase.Add(ucTTL)), "срок — момент выдачи плюс 24 ч")
 	require.True(t, out.View.Session.AuthenticatedAt.Equal(ucBase))
 	require.True(t, out.View.EmailVerified)
-	require.False(t, out.View.Session.PasswordChangeRequired)
 	require.False(t, out.Bearer.IsZero())
 	require.Len(t, h.store.audit, 1)
 	require.Equal(t, humansession.AuditSessionIssued, h.store.audit[0].EventType)
@@ -247,7 +246,8 @@ func TestLogin_F3_04_MigratedBcryptIsRewrittenAfterMatch(t *testing.T) {
 	require.True(t, strings.HasPrefix(h.store.verifiers[u.ID].Reveal(), "$2a$"), "PWV-08.7: неверный пароль не переписал")
 
 	out := h.mustLogin(t, "m@example.invalid", "old password 1")
-	require.False(t, out.View.Session.PasswordChangeRequired, "PWV-01.2: требования смены нет")
+	// PWV-01.2 «требования смены нет» держится построением: поля требования у
+	// сессии больше нет (kacho#2697, kaname#201), утверждать нечего.
 	require.True(t, strings.HasPrefix(h.store.verifiers[u.ID].Reveal(), "$argon2id$"), "PWV-08.2: значение несёт объявленный формат")
 	require.Equal(t, 1, h.obs.rewrit[humansession.RewriteDone])
 	h.mustLogin(t, "m@example.invalid", "old password 1")
@@ -596,11 +596,13 @@ func TestPasswordRule_F3_34_UnavailableAuthorityPassesLoudlyMisconfiguredRefuses
 
 // TestChangePassword_F3_20_FiveRecordsAreOneOutcome — подставной отказ ЛЮБОЙ из
 // записей смены пароля (замещение материала, снятие прочих сессий, отсечка,
-// ротация носителя, снятие требования, аудит, фиксация) не оставляет ни одной:
-// материал прежний, прочие сессии живы, отсечки нет, носитель прежний, требование
-// стоит; наружу — ErrStoreUnavailable (Р6, Ф3-20 «д»).
+// ротация носителя, аудит, фиксация) не оставляет ни одной: материал прежний,
+// прочие сессии живы, отсечки нет, носитель прежний; наружу —
+// ErrStoreUnavailable (Р6, Ф3-20 «д»). Записи «снятие требования» в перечне
+// больше нет: поле требования снято с контракта (kacho#2697, kaname#201), и
+// сессия восстановления (`recovery_code`) идёт тем же путём, что всякая.
 func TestChangePassword_F3_20_FiveRecordsAreOneOutcome(t *testing.T) {
-	for _, op := range []string{"replace", "end-others", "cutoff", "rotate", "clear-requirement", "audit", "commit", "writer"} {
+	for _, op := range []string{"replace", "end-others", "cutoff", "rotate", "audit", "commit", "writer"} {
 		t.Run(op, func(t *testing.T) {
 			h := newHarness(t, nil)
 			u := h.person(t, "usr-a", "a@example.invalid", "correct horse battery", true)
@@ -608,7 +610,7 @@ func TestChangePassword_F3_20_FiveRecordsAreOneOutcome(t *testing.T) {
 			other := h.mustLogin(t, "a@example.invalid", "correct horse battery") // прочая сессия
 			rb, _ := domain.NewSessionBearer()
 			r := domain.HumanSession{ID: "hss-r", UserID: u.ID, AuthenticatedAt: ucBase, LastPresentedAt: ucBase,
-				ExpiresAt: ucBase.Add(ucTTL), AssuranceLevel: "1", PresentedMethods: []string{"recovery_code"}, PasswordChangeRequired: true}
+				ExpiresAt: ucBase.Add(ucTTL), AssuranceLevel: "1", PresentedMethods: []string{"recovery_code"}}
 			h.store.rows[r.ID] = &fakeRow{s: r, digest: rb.Digest()}
 			before := h.store.verifiers[u.ID].Reveal()
 
@@ -624,43 +626,12 @@ func TestChangePassword_F3_20_FiveRecordsAreOneOutcome(t *testing.T) {
 			require.False(t, hasCutoff, "отсечки нет при отказе %s", op)
 			view, found, _ := h.resolve.Execute(ctx, rb)
 			require.True(t, found, "носитель не ротирован при отказе %s", op)
-			require.True(t, view.Session.PasswordChangeRequired, "требование стоит при отказе %s", op)
+			require.Equal(t, []string{"recovery_code"}, view.Session.PresentedMethods, "запись не тронута при отказе %s", op)
 			for _, ev := range h.store.audit {
 				require.NotEqual(t, humansession.AuditPasswordChanged, ev.EventType, "события смены нет при отказе %s", op)
 			}
 		})
 	}
-}
-
-// TestChangePassword_F3_23_ClearsTheRequirementAndKeepsOthersUntouched —
-// сессия восстановления с требованием: смена снимает поле; вход паролем с тем
-// же носителем в заголовке выдаёт новую сессию БЕЗ требования, запись R не тронута.
-func TestChangePassword_F3_23_ClearsTheRequirementAndKeepsOthersUntouched(t *testing.T) {
-	h := newHarness(t, nil)
-	u := h.person(t, "usr-a", "a@example.invalid", "correct horse battery", true)
-	ctx := context.Background()
-	// Посев записи с требованием (Ф5-03 сквозным путём — Ф5).
-	rb, _ := domain.NewSessionBearer()
-	r := domain.HumanSession{ID: "hss-r", UserID: u.ID, AuthenticatedAt: ucBase, LastPresentedAt: ucBase,
-		ExpiresAt: ucBase.Add(ucTTL), AssuranceLevel: "1", PresentedMethods: []string{"recovery_code"}, PasswordChangeRequired: true}
-	h.store.rows[r.ID] = &fakeRow{s: r, digest: rb.Digest()}
-
-	view, found, err := h.resolve.Execute(ctx, rb)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.True(t, view.Session.PasswordChangeRequired, "«кто я» видит требование")
-
-	l := h.mustLogin(t, "a@example.invalid", "correct horse battery")
-	require.False(t, l.View.Session.PasswordChangeRequired, "вход даёт новую сессию без требования")
-	view, _, _ = h.resolve.Execute(ctx, rb)
-	require.True(t, view.Session.PasswordChangeRequired, "запись R не тронута входом")
-
-	out, err := h.change.Execute(ctx, humansession.ChangePasswordInput{Bearer: rb, CurrentPassword: "correct horse battery", NewPassword: "a clean passphrase"})
-	require.NoError(t, err)
-	require.False(t, out.View.Session.PasswordChangeRequired, "Ф5-24: поле снято")
-	view, found, _ = h.resolve.Execute(ctx, out.Bearer)
-	require.True(t, found)
-	require.False(t, view.Session.PasswordChangeRequired)
 }
 
 // TestResolve_F3_10_OneAnswerForFourReasons — неизвестный, снятый, истёкший,
