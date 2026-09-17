@@ -67,6 +67,9 @@ const (
 		"переименованный #57, и производитель отказа, закрытый kaname#48"
 	whyNeighborConsoleStyle = "консоль платформы — источник палитры и шрифтового стека, у которого " +
 		"оформление сайта взято; называется в комментариях стилей и оболочки"
+	whyNeighborEdgeRelay = "край платформы — сосед, ретранслирующий формы полосы входа: перечень " +
+		"ретранслируемых путей живёт у него, и страница называет его репозиторий, ревизию и " +
+		"запрос на слияние, по которым читатель этот перечень проверит (kaname#204)"
 )
 
 // clientSiteStay — ведомость: имя платформы, которое сайт вправе нести.
@@ -82,6 +85,10 @@ var clientSiteStay = []ClientSiteStay{
 	{Page: "docs/content/advanced/observability.mdx", Token: "kacho_grpc_server_handled_total", Count: 7, Why: whyFoundationSeries},
 	{Page: "docs/content/advanced/observability.mdx", Token: "kacho_grpc_server_handling_seconds", Count: 1, Why: whyFoundationSeries},
 	{Page: "docs/content/advanced/observability.mdx", Token: "kacho_grpc_server_stream_seconds", Count: 1, Why: whyFoundationSeries},
+	{Page: "docs/content/api/auth-lane.mdx", Token: "kacho#1272", Count: 1, Why: whyTrackerAddress},
+	{Page: "docs/content/api/auth-lane.mdx", Token: "kacho#2706", Count: 1, Why: whyNeighborEdgeRelay},
+	{Page: "docs/content/api/auth-lane.mdx", Token: "kacho@26206c80f9d", Count: 1, Why: whyNeighborEdgeRelay},
+	{Page: "docs/content/api/auth-lane.mdx", Token: "PRO-Robotech/kacho", Count: 1, Why: whyNeighborEdgeRelay},
 	{Page: "docs/content/api/project.mdx", Token: "https://github.com/PRO-Robotech/kacho/issues/1231", Count: 1, Why: whyTrackerAddress},
 	{Page: "docs/content/api/quotas.mdx", Token: "Kachō", Count: 1, Why: whyNeighborServiceDocs},
 	{Page: "docs/content/api/tokens.mdx", Token: "kacho_", Count: 2, Why: whyFoundationSecretLabel},
@@ -92,8 +99,10 @@ var clientSiteStay = []ClientSiteStay{
 	{Page: "docs/content/architecture/overview.mdx", Token: "kacho-geo", Count: 2, Why: whyNeighborService},
 	{Page: "docs/content/architecture/overview.mdx", Token: "kacho-nlb", Count: 1, Why: whyNeighborService},
 	{Page: "docs/content/architecture/overview.mdx", Token: "kacho-vpc", Count: 1, Why: whyNeighborService},
+	{Page: "docs/content/first-credential.mdx", Token: "kacho#1281", Count: 1, Why: whyTrackerAddress},
 	{Page: "docs/content/first-credential.mdx", Token: "kacho_", Count: 2, Why: whyFoundationSecretLabel},
 	{Page: "docs/content/first-credential.mdx", Token: "kacho_uoc4k2m8p0q1r5s9t3v7_", Count: 1, Why: whyFoundationSecretLabel},
+	{Page: "docs/content/getting-started.mdx", Token: "kacho#1281", Count: 1, Why: whyTrackerAddress},
 	{Page: "docs/content/getting-started.mdx", Token: "kacho_", Count: 1, Why: whyFoundationSecretLabel},
 	{Page: "docs/content/getting-started.mdx", Token: "KACHO_API_GATEWAY_AUTHZ_CACHE_TTL_SECONDS", Count: 1, Why: whyNeighborEdgeKnob},
 	// Прежнее имя схемы берётся у ЕДИНСТВЕННОГО его объявления — гейта имени

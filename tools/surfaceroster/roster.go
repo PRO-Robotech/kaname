@@ -142,11 +142,19 @@ func Read(iamRoot string) (Roster, error) {
 	}
 	r.FilesRead += constFiles
 
-	declared, err := readDeclaredSurfaces(filepath.Join(rootDir, "serve.go"), consts)
+	// Объявления читаются ИЗ ВСЕХ файлов композиционного корня, а не из одного
+	// `serve.go`: полоса входа (Ф3, kacho#1269) объявляет свою поверхность в
+	// `loginlane.go`, и разбор одного файла её не видел — процесс поднимал
+	// девять поверхностей, перечень называл восемь, и строка `:9100` в таблице
+	// документа установки читалась гейтом как «дверь, которой нет»
+	// (kaname#204). Слепая зона распознавателя — не край, а невидимость:
+	// поверхность, объявленная в соседнем файле, оставалась вне наблюдения
+	// без единой находки.
+	declared, declaredFiles, err := readDeclaredSurfacesInPackage(rootDir, consts)
 	if err != nil {
 		return r, err
 	}
-	r.FilesRead++
+	r.FilesRead += declaredFiles
 
 	posture, err := readPostureAddrs(filepath.Join(iamRoot, "deploy/values.prod.yaml"))
 	if err != nil {
@@ -262,7 +270,33 @@ func readPackageStringConsts(dir string) (map[string]string, int, error) {
 	return out, read, nil
 }
 
-// readDeclaredSurfaces читает объявления поверхностей композиционного корня.
+// readDeclaredSurfacesInPackage читает объявления поверхностей из КАЖДОГО
+// не-тестового файла композиционного корня, в устойчивом порядке имён.
+// Возвращает перечень и число прочитанных файлов — перепись, а не только итог.
+func readDeclaredSurfacesInPackage(dir string, consts map[string]string) ([]Surface, int, error) {
+	names, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return nil, 0, err
+	}
+	sort.Strings(names)
+	var out []Surface
+	read := 0
+	for _, path := range names {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		declared, derr := readDeclaredSurfaces(path, consts)
+		if derr != nil {
+			return nil, 0, derr
+		}
+		read++
+		out = append(out, declared...)
+	}
+	return out, read, nil
+}
+
+// readDeclaredSurfaces читает объявления поверхностей из ОДНОГО файла
+// композиционного корня.
 func readDeclaredSurfaces(path string, consts map[string]string) ([]Surface, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, 0)
