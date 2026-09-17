@@ -21,8 +21,8 @@ package main
 import (
 	"context"
 	"log/slog"
-	"time"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -62,10 +62,10 @@ func argon2ClassOf(memory, iterations, parallelism uint32) domain.PasswordCostCl
 func TestLoginLane_188_EnvelopeIsCalibratedOnThePopulationAndTheKnob(t *testing.T) {
 	e := envelopeForProbe(t)
 	census := []loginmethod.CostClassCount{
-		{Prefix: "$2a$4", Rows: 2},
-		{Prefix: "$2a$6", Rows: 1},
+		{Prefix: "$2a$04", Rows: 2},
+		{Prefix: "$2a$06", Rows: 1},
 		{Prefix: "$argon2id$v=19$m=8,t=1,p=1", Rows: 3},
-		{Prefix: "", Rows: 2},      // признак вне перечня
+		{Prefix: "", Rows: 2},       // признак вне перечня
 		{Prefix: "$2a$15", Rows: 1}, // выше потолка записи — вычисление не начинается (Р4)
 		{Prefix: "$2a$xx", Rows: 1}, // стоимость не разбирается
 	}

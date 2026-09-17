@@ -162,7 +162,7 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 	envelope, err := passwordverify.NewEnvelope(h.verifier, passwordverify.NopEnvelopeObserver{})
 	require.NoError(t, err)
 	population := []domain.PasswordCostClass{
-		costClass(domain.PasswordHashFormatBcrypt, domain.CostParamBcryptCost, bcrypt.MinCost),
+		costClass(domain.PasswordHashFormatBcrypt, domain.CostParamBcryptCost, uint32(bcrypt.MinCost)),
 		costClass(domain.PasswordHashFormatBcrypt, domain.CostParamBcryptCost, 14),
 		argon2Class(65536, 3, 4), argon2Class(131072, 10, 8), argon2Class(32768, 3, 4),
 		{Format: h.hasher.Declared().Format, Params: h.hasher.Declared().Params},

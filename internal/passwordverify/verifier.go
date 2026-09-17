@@ -159,6 +159,14 @@ func (v *Verifier) Verify(stored domain.LoginVerifier, presented string) Result 
 	return v.observed(inspectAndCompare(stored.Reveal(), presented, true))
 }
 
+// compute — вычисление против значения БЕЗ ёмкости и БЕЗ приёмника исходов:
+// путь калибровки огибающей (`envelope.go`). Ёмкость калибровка занимает
+// сама, на всё время прогона; исход ей не событие полосы — сосчитанный, он
+// читался бы как поток неверных паролей при каждом старте.
+func (v *Verifier) compute(stored domain.LoginVerifier, presented string) Result {
+	return inspectAndCompare(stored.Reveal(), presented, true)
+}
+
 // MeetsDeclared — отвечает ли хранимое значение объявленному формату и
 // объявленным параметрам (PWV-11, строки 11.2 и 11.4).
 //
