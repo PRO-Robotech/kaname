@@ -32,8 +32,6 @@ import (
 	"regexp"
 	"time"
 	"unicode/utf8"
-
-	corevalidate "github.com/PRO-Robotech/corelib/validate"
 )
 
 // PrefixAccessKey — префикс дефисной формы `ak-<17>`; сама константа канона —
@@ -65,7 +63,10 @@ type AccessKeyName string
 // Validate судит записываемое имя: пустое до записи не доживает
 // (`corevalidate.NameOrDefault`), поэтому здесь оно негодно.
 func (n AccessKeyName) Validate() error {
-	return corevalidate.NameOnCreate("name", string(n))
+	// Строка ключа имя несёт ВСЕГДА (Р10: пустое заменяется умолчанием от `id`
+	// до записи), поэтому судится каноном дерева, как шесть соседних типов:
+	// пустое здесь — не законный вход, а дефект строки.
+	return validateResourceName(string(n))
 }
 
 // AccessKeyDescriptionMax — предел описания в ЗНАКАХ, единица схемы

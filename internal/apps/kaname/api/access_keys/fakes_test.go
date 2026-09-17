@@ -31,6 +31,9 @@ type fakeStore struct {
 	audit   []outboxtypes.AuditEvent
 	// failWriter — Writer не открывается (недоступность).
 	failWriter bool
+	// beforeAdvance — крючок конкуренции (Ф7-20, ветвь б): исполняется перед
+	// сдвигом счётчика, чтобы соседнее утверждение успело перехватить слот.
+	beforeAdvance func()
 }
 
 func newFakeStore() *fakeStore {
@@ -185,6 +188,9 @@ func (w *fakeWriter) DeleteOwnedByID(_ context.Context, userID domain.UserID, id
 }
 
 func (w *fakeWriter) AdvanceSignCount(_ context.Context, id domain.AccessKeyID, expected, reported uint32, at time.Time) (bool, error) {
+	if w.s.beforeAdvance != nil {
+		w.s.beforeAdvance()
+	}
 	w.s.mu.Lock()
 	defer w.s.mu.Unlock()
 	k, ok := w.s.keys[id]
