@@ -7,14 +7,40 @@ package humansession
 //
 // # Порядок внутри входа — несущий
 //
-//	частота (обе оси) → строка адреса → ПРОВЕРКА ПАРОЛЯ (всегда, даже когда
-//	адреса нет: полоса «адреса нет» занимает ту же ёмкость проверяющего —
-//	PWV-15.4) → блокировка → выдача одним исходом → переписывание материала
-//	отдельной записью (не смена пароля — ID-PW-1 Р5)
+//	частота (обе оси) → [отсчёт огибающей] → строка адреса → ПРОВЕРКА ПАРОЛЯ
+//	(всегда, даже когда адреса нет: полоса «адреса нет» занимает ту же
+//	ёмкость проверяющего — PWV-15.4) → допуск класса в огибающую → сверка
+//	второго фактора (всегда, когда предъявлен — Ф12) → блокировка → исход
+//	поля `secondFactor` → выдача одним исходом → переписывание материала
+//	отдельной записью (не смена пароля — ID-PW-1 Р5) → [ожидание потолка
+//	огибающей]
 //
 // Отказ — ОДИН на все причины (Ф1 Р3): «адреса нет», «пароль не тот»,
 // «заблокирована», исходы проверяющего — наружу уходит один и тот же
 // ErrAuthenticationFailed; причина различима только приёмником (Ф3-48).
+//
+// # Время исхода — огибающая по потолку (Ф3-31, Ф1-48; решение kaname#188)
+//
+// Всякий исход, наступивший ПОСЛЕ ворот частоты, уходит не раньше потолка
+// огибающей — калиброванной стоимости самого дорогого класса среди лежащих в
+// хранилище и класса ручки (`passwordverify.Envelope`). Успех, «пароль не
+// тот», «адреса нет», «материала нет», «заблокирована», негодный материал,
+// исчерпание ёмкости, отказ хранилища — все стоят одинаково, и класс хранимого
+// значения по времени невидим by construction. Ветви второго фактора (Ф12) —
+// холостая и настоящая сверка кода, «не заведён», «не сошёлся», «повторён»,
+// «недоступен», отказ формы предъявления — лежат внутри той же полосы после
+// ворот и ждут того же потолка: исход поля `secondFactor` не различим по
+// времени ни от исхода пароля, ни между собой. Ждёт ПОЛОСА, а не
+// проверяющий: место ёмкости отпущено до ожидания.
+//
+// Вне огибающей ровно два исхода, у каждого СВОЙ ответ, отличимый кодом и не
+// говорящий о личности ничего: отказ формы (поле не заполнено) и отказ по
+// частоте. Задержка на них сделала бы шторм попыток дороже нам, не постороннему.
+//
+// Класс вычисленного исхода («совпал», «не совпал») ДОПУСКАЕТСЯ в огибающую до
+// ожидания: значение, положенное мимо нашего процесса, приносит класс, которого
+// перепись старта не видела, и первый же вход по нему поднимает потолок — окно
+// оракула равно одному обращению, а не времени до перезапуска.
 //
 // # Второй фактор во входе (Ф12 Р5, Ф12-11…14, Ф12-13)
 //
@@ -58,6 +84,16 @@ type Hasher interface {
 	Declared() passwordverify.Declared
 }
 
+// TimingEnvelope — огибающая по потолку (порт по существующему типу
+// `passwordverify.Envelope`).
+type TimingEnvelope interface {
+	// Floor — потолок: раньше него ни один исход после ворот частоты не уходит.
+	Floor() time.Duration
+	// Admit — класс вычисленного исхода входит в огибающую; известный —
+	// поиск по ключу, новый — калибровка с подъёмом потолка.
+	Admit(ctx context.Context, class domain.PasswordCostClass, trigger passwordverify.EnvelopeTrigger) (passwordverify.Admission, error)
+}
+
 // LoginInput — форма входа. Форму (поля, лишние поля) судит транспорт; сюда
 // приходят значения.
 type LoginInput struct {
@@ -97,6 +133,7 @@ type LoginUseCase struct {
 	logger    *slog.Logger
 	gate      attemptGate
 	rewriteOn bool
+	envelope  TimingEnvelope
 	// factor — сверка кода второго фактора теми же портами, что глаголы Ф12.
 	factor presenter
 }
@@ -113,6 +150,7 @@ type LoginDeps struct {
 	Observer Observer
 	Now      func() time.Time
 	Logger   *slog.Logger
+	Envelope TimingEnvelope
 	// TOTP и Sets — проверяющие второго фактора (Ф12 Р5, Р6): поле
 	// `secondFactor` без них не судится, поэтому оба обязательны.
 	TOTP TOTPVerifier
@@ -135,6 +173,8 @@ func NewLoginUseCase(d LoginDeps) (*LoginUseCase, error) {
 		return nil, fmt.Errorf("login: password hasher required")
 	case d.TTL <= 0:
 		return nil, fmt.Errorf("login: session ttl must be positive")
+	case d.Envelope == nil:
+		return nil, fmt.Errorf("login: timing envelope required — полоса без огибающей отвечает временем проверки, а оно называет класс хранимого значения")
 	case d.TOTP == nil:
 		return nil, fmt.Errorf("login: totp verifier required")
 	case d.Sets == nil:
@@ -156,6 +196,7 @@ func NewLoginUseCase(d LoginDeps) (*LoginUseCase, error) {
 		store: d.Store, users: d.Users, methods: d.Methods, verifier: d.Verifier, hasher: d.Hasher,
 		limits: d.Limits, ttl: d.TTL, observer: d.Observer, now: d.Now, logger: d.Logger,
 		gate: attemptGate{store: d.Store, limits: d.Limits, now: d.Now, observer: d.Observer}, rewriteOn: true,
+		envelope: d.Envelope,
 		factor: presenter{deps: SecondFactorDeps{
 			Store: d.Store, Methods: d.Methods, TOTP: d.TOTP, Sets: d.Sets, Observer: d.Observer, Now: d.Now, Logger: d.Logger,
 		}},
@@ -183,6 +224,33 @@ func (uc *LoginUseCase) Execute(ctx context.Context, in LoginInput) (LoginOutput
 		return LoginOutput{}, hit
 	}
 
+	// Отсчёт огибающей — с этого момента: всё ниже уходит не раньше потолка.
+	// Часы — монотонные часы процесса, а не порт времени полосы: порт
+	// подставляют пробы, а ожидание обязано быть настоящим.
+	started := time.Now()
+	out, err := uc.admitted(ctx, in, addressKey)
+	holdUntil(ctx, started, uc.envelope.Floor())
+	return out, err
+}
+
+// holdUntil — дождаться потолка огибающей от момента started; отмена
+// контекста вызывающего снимает ожидание — ответа, которого никто не ждёт,
+// не бывает.
+func holdUntil(ctx context.Context, started time.Time, floor time.Duration) {
+	remaining := floor - time.Since(started)
+	if remaining <= 0 {
+		return
+	}
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+}
+
+// admitted — вход после ворот частоты: всё, что здесь, — под огибающей.
+func (uc *LoginUseCase) admitted(ctx context.Context, in LoginInput, addressKey string) (LoginOutput, error) {
 	// (2) Строка адреса и материал. Отсутствие того или другого — нулевой
 	// материал, который проверяющий сверит с занятой ёмкостью (PWV-15.4).
 	user, found, err := uc.lookup(ctx, addressKey)
@@ -207,6 +275,7 @@ func (uc *LoginUseCase) Execute(ctx context.Context, in LoginInput) (LoginOutput
 	// (3) Проверка — всегда.
 	res := uc.verifier.Verify(stored, in.Password)
 	now := uc.now().UTC()
+	uc.admitClass(ctx, res)
 
 	// (3а) Второй фактор — тоже всегда, тем же путём (Ф12-13 «б», «ж»; Ф12-33):
 	// у отсутствующей личности и у личности без фактора сверка холостая.
@@ -272,6 +341,23 @@ func (uc *LoginUseCase) Execute(ctx context.Context, in LoginInput) (LoginOutput
 	// записью после «совпал»: отказ записи входа не пересматривает.
 	uc.rewriteIfNeeded(ctx, user, stored, res, in.Password)
 	return out, nil
+}
+
+// admitClass — класс вычисленного исхода входит в огибающую (повод «чтение»).
+// Только исходы, у которых класс ЕСТЬ: «совпал» и «не совпал» — разобранное
+// значение внутри потолка. «Материала нет» вычисляется против выравнивающего
+// значения класса ручки, допущенного при старте; наши отказы проверяющего
+// класса не несут. Отказ допуска — наша сторона: исход входа он не меняет,
+// потолок остаётся прежним, следующий вход по классу попробует снова.
+func (uc *LoginUseCase) admitClass(ctx context.Context, res passwordverify.Result) {
+	if res.Outcome != passwordverify.OutcomeMatched && res.Outcome != passwordverify.OutcomeMismatched {
+		return
+	}
+	class := domain.PasswordCostClass{Format: res.Format, Params: res.Params}
+	if _, err := uc.envelope.Admit(ctx, class, passwordverify.EnvelopeTriggerRead); err != nil {
+		uc.logger.Error("login: cost class read from the store could not be admitted into the timing envelope — our side, not the caller's input",
+			"class", class.Key(), "err", err.Error())
+	}
 }
 
 func (uc *LoginUseCase) lookup(ctx context.Context, addressKey string) (domain.User, bool, error) {
