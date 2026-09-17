@@ -131,7 +131,11 @@ argument <поле>: unknown field`, у вложенного — `secondFactor.<
 `secondFactor` необязателен: без него сессия получает уровень `1`, даже если фактор заведён;
 с ним (`method` — `totp` либо `lookup_secret`, `code` — шесть цифр либо десять знаков
 запасного кода) — уровень `2`. Форма кода судится **до** пароля: негодный код — отказ формы с
-именем поля (`Illegal argument secondFactor.code: must be 6 digits`), не попытка.
+именем поля (`Illegal argument secondFactor.code: must be 6 digits`), не попытка. Всё
+остальное о коде — не сошёлся, повторён, потреблён, **фактор не заведён** — отвечает тем же
+`401`, что неверный пароль, и считается попыткой: по ответу на вход нельзя узнать ни состояние
+фактора, ни то, совпал ли пароль. Заведён ли фактор, вошедший читает
+[`GET /iam/v1/auth/second-factor`](#second-factor).
 
 Успех — `200`, печенья `kaname_session` и **новое** `kaname_form`:
 
@@ -206,7 +210,7 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 поставщик.
 :::
 
-### Второй фактор
+### Второй фактор {#second-factor}
 
 `GET /iam/v1/auth/second-factor` (без признака, с сессией) — три формы тела:
 
@@ -338,9 +342,9 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
   <tbody>
     <tr><td>400</td><td>3</td><td><code>Illegal argument &lt;поле&gt;: required</code> · <code>… unknown field</code> · <code>Illegal argument body: malformed JSON</code> · <code>… trailing content</code> · правило пароля · форма кода</td><td>—</td><td>форма негодна; состояние не изменено, в счёт частоты не идёт</td></tr>
     <tr><td>400</td><td>9</td><td><code>registration refused</code></td><td><code>REGISTRATION_REFUSED</code></td><td>регистрация: адрес занят · приглашение уже активировано · приглашение истекло · потолок темпа заведения исчерпан — <strong>один</strong> отказ на все четыре, без <code>Retry-After</code> и без 409: различимый ответ был бы оракулом занятости адреса</td></tr>
-    <tr><td>400</td><td>9</td><td><code>second factor is not enrolled</code></td><td><code>SECOND_FACTOR_NOT_ENROLLED</code></td><td>предъявлен код при незаведённом факторе (после совпавшего пароля); снятие или перечеканка без фактора</td></tr>
+    <tr><td>400</td><td>9</td><td><code>second factor is not enrolled</code></td><td><code>SECOND_FACTOR_NOT_ENROLLED</code></td><td>церемония повышения, снятие или перечеканка без заведённого фактора — глаголы под живой сессией; <strong>на входе не производится</strong>: код при незаведённом факторе — тот же <code>401</code>, что неверный пароль</td></tr>
     <tr><td>400</td><td>9</td><td><code>no pending enrollment: begin with enroll</code></td><td><code>ENROLLMENT_NOT_PENDING</code></td><td>подтверждение без начатого либо истёкшего заведения</td></tr>
-    <tr><td>401</td><td>16</td><td><code>authentication failed</code></td><td>—</td><td><strong>один</strong> отказ на все причины: адреса нет · пароль не тот · личность заблокирована или ни разу не входила · код не тот · код истёк или применён · сессии нет (у глаголов под сессией) · текущий пароль не тот</td></tr>
+    <tr><td>401</td><td>16</td><td><code>authentication failed</code></td><td>—</td><td><strong>один</strong> отказ на все причины: адреса нет · пароль не тот · личность заблокирована или ни разу не входила · код не тот · код истёк или применён · код приложен при незаведённом факторе (на входе) · сессии нет (у глаголов под сессией) · текущий пароль не тот</td></tr>
     <tr><td>403</td><td>7</td><td><code>form token rejected</code></td><td><code>FORM_TOKEN_REJECTED</code></td><td>признак есть и не подошёл: чужой контекст либо чужой вид, неразличимо</td></tr>
     <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>заведение фактора при предъявлении старше окна свежести</td></tr>
     <tr><td>403</td><td>7</td><td><code>permission denied</code></td><td>—</td><td>вызывающий — не край: тело не читалось</td></tr>

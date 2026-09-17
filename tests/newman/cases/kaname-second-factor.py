@@ -39,8 +39,9 @@ Coverage:
                                             форма); состояние — 9 из 10
   IAM-2FA-OK-REMOVE-BY-CODE               — Ф12-28: снятие запасным кодом — сессия «2»,
                                             остаток в ответе; состояние — не заведён; вход с
-                                            кодом после снятия — 400 SECOND_FACTOR_NOT_ENROLLED
-                                            (Ф12-13 е); без кода — «1»
+                                            кодом после снятия — тот же 401, что на неверный
+                                            пароль, тело побайтово (Ф12-13 е: состояние наружу
+                                            не выходит, kaname#257); без кода — «1»
   IAM-2FA-NEG-FORMS-AND-STATE             — Ф12-06/Ф12-41: `enroll` с чужим признаком — 403
                                             FORM_TOKEN_REJECTED; `confirm` без кода — 400 с
                                             именем поля; `step-up` с `method` вне словаря — 400;
@@ -434,12 +435,16 @@ CASES.append(Case(
 
 # ───────────────────────────────────────────────────────────────────────────
 # Ф12-28: снятие запасным кодом; после — состояние «не заведён», вход с кодом —
-# 400 SECOND_FACTOR_NOT_ENROLLED (Ф12-13 е), без кода — «1». Заодно возвращает
-# посев в исходное: следующий прогон снова заводит фактор с нуля.
+# тот же 401 «authentication failed», что на неверный пароль, тело побайтово
+# (Ф12-13 е, kaname#257: код при незаведённом факторе не называет совпавшего
+# пароля), без кода — «1». Порядок трёх входов несущий: неверный пароль + код
+# → верный пароль + код (тело равно первому) → верный пароль без кода (сессия
+# «1», положительный близнец). Заодно возвращает посев в исходное: следующий
+# прогон снова заводит фактор с нуля.
 # ───────────────────────────────────────────────────────────────────────────
 CASES.append(Case(
     id="IAM-2FA-OK-REMOVE-BY-CODE",
-    title="Снятие фактора запасным кодом: строки сняты, сессия жива на «2», вход с кодом после — «не заведён»",
+    title="Снятие фактора запасным кодом: строки сняты, сессия жива на «2», вход с кодом после — тот же 401, что на неверный пароль",
     classes=["CRUD", "SEC"],
     priority="P0",
     steps=[
@@ -481,6 +486,21 @@ CASES.append(Case(
         ),
         *_logout_steps("after-remove"),
         Step(
+            name="login-wrong-password-with-code-after-remove",
+            method="POST",
+            path=_LOGIN,
+            body={"email": "{{loginLaneEmail}}", "password": "not-the-password-{{runId}}", "csrfToken": "{{sfCsrfLogin}}",
+                  "secondFactor": {"method": "totp", "code": "000000"}},
+            pre_script=[*_lane(_LOGIN), *_with_cookies(("kaname_form", "sfFormCookie"))],
+            insecure_tls=True,
+            auth="anonymous",
+            test_script=[
+                *_refusal(401, 16, "authentication failed", "WRONG-PW-WITH-CODE"),
+                # Тело — эталон для следующего шага: сравнение побайтовое, не по полям.
+                "pm.environment.set('sfWrongPasswordRefusalBody', pm.response.text());",
+            ],
+        ),
+        Step(
             name="login-with-code-after-remove",
             method="POST",
             path=_LOGIN,
@@ -489,7 +509,11 @@ CASES.append(Case(
             pre_script=[*_lane(_LOGIN), *_with_cookies(("kaname_form", "sfFormCookie"))],
             insecure_tls=True,
             auth="anonymous",
-            test_script=_refusal(400, 9, "second factor is not enrolled", "NOT-ENROLLED", reason="SECOND_FACTOR_NOT_ENROLLED"),
+            test_script=[
+                *_refusal(401, 16, "authentication failed", "NOT-ENROLLED-ON-LOGIN"),
+                "pm.test('NOT-ENROLLED-ON-LOGIN: тело побайтово равно отказу на неверный пароль — совпавший пароль не назван', () => "
+                "pm.expect(pm.response.text()).to.eql(pm.environment.get('sfWrongPasswordRefusalBody')));",
+            ],
         ),
         _login_step("login-plain-after-remove", "LOGIN-PLAIN"),
         *_logout_steps("after-plain"),
