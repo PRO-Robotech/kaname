@@ -17,8 +17,10 @@ package humansession
 // Строка `totp` у человека одна; состояний три: нет · `pending` · `active`;
 // набор есть ровно при `active`. Токенов о состоянии три, каждый — один факт:
 //
-//	SECOND_FACTOR_NOT_ENROLLED     вход с полем, step-up, remove, backup-codes,
-//	                               ResetSecondFactor — при «нет» и при `pending`
+//	SECOND_FACTOR_NOT_ENROLLED     step-up, remove, backup-codes, ResetSecondFactor
+//	                               — при «нет» и при `pending`; ВХОД с полем
+//	                               токена не несёт: там факт наружу не выходит
+//	                               (тот же 401, Ф12-13 «е», kaname#257)
 //	SECOND_FACTOR_ALREADY_ENROLLED enroll и confirm при `active`
 //	ENROLLMENT_NOT_PENDING         confirm без ожидающего заведения: не начато,
 //	                               истекло, снято уборкой — ОДИН токен

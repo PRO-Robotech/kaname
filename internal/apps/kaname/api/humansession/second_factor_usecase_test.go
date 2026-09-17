@@ -173,12 +173,16 @@ func TestF12_01_EnrollMintsAPendingRowAndShowsTheSecretOnce(t *testing.T) {
 	require.Nil(t, st.BackupCodes, "ключа backupCodes нет: заведён — только active")
 	require.Equal(t, 1, h.obs.sfEvents[humansession.SecondFactorEnrollmentStarted])
 
-	// Вход с кодом от pending — «не заведён»; без кода — «1», как до заведения.
+	// Вход с кодом от pending — строка `pending` не способ: тот же отказ
+	// входа, что на неверный пароль, и попытка (Ф12-13 «е» редакции 8 —
+	// состояние наружу не выходит); без кода — «1», как до заведения.
 	_, err = h.login.Execute(context.Background(), humansession.LoginInput{
 		Email: "e1@example.invalid", Password: "correct horse battery", Source: "203.0.113.7",
 		SecondFactor: &humansession.SecondFactorPresentation{Method: assurance.MethodTOTP, Code: probeTOTP(t, en.Secret, h.step())},
 	})
-	require.ErrorIs(t, err, humansession.ErrSecondFactorNotEnrolled)
+	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
+	require.Equal(t, 1, h.failures(humansession.FailureByAddress, "e1@example.invalid"), "попытка")
+	require.Equal(t, 1, h.obs.login[humansession.LoginOutcomeSecondFactorNotEnrolled])
 	plain := h.mustLogin(t, "e1@example.invalid", "correct horse battery")
 	require.Equal(t, "1", plain.View.Session.AssuranceLevel)
 }
@@ -431,8 +435,9 @@ func TestF12_11_14_LoginWithACodeIssuesLevelTwoOnTheFirstBearer(t *testing.T) {
 	require.True(t, st.TOTPEnrolled)
 }
 
-// TestF12_13_LoginRefusalsWithASecondFactor — Ф12-13 (а…ж): один отказ 401,
-// (е) — состояние 400; строка после неполного успеха не изменена.
+// TestF12_13_LoginRefusalsWithASecondFactor — Ф12-13 (а…ж): один отказ 401 на
+// все семь, включая (е) — состояние фактора на входе наружу не выходит
+// (редакция 8, kaname#257); строка после неполного успеха не изменена.
 func TestF12_13_LoginRefusalsWithASecondFactor(t *testing.T) {
 	h := newSFHarness(t)
 	loginA, secret, codes := h.enrolled(t, "usr-a13", "a13@example.invalid", "correct horse battery")
@@ -468,14 +473,23 @@ func TestF12_13_LoginRefusalsWithASecondFactor(t *testing.T) {
 	require.ErrorIs(t, attempt("a13@example.invalid", "wrong", lookup(codes[1])), humansession.ErrAuthenticationFailed)
 	setAfter, _ := h.sfRow(uA, domain.LoginMethodLookupSecret)
 	require.Equal(t, setBefore.Verifier.Reveal(), setAfter.Verifier.Reveal(), "набор после (ж) прежний")
-	// (е) B без фактора и C со строкой pending — состояние, не попытка.
-	require.ErrorIs(t, attempt("b13@example.invalid", "correct horse battery", totp("123456")), humansession.ErrSecondFactorNotEnrolled)
-	require.ErrorIs(t, attempt("c13@example.invalid", "correct horse battery", totp("123456")), humansession.ErrSecondFactorNotEnrolled)
-	require.ErrorIs(t, attempt("b13@example.invalid", "correct horse battery", lookup("ABCDEFGH12")), humansession.ErrSecondFactorNotEnrolled)
-	require.Zero(t, h.failures(humansession.FailureByAddress, "b13@example.invalid"))
-	require.Zero(t, h.failures(humansession.FailureByAddress, "c13@example.invalid"))
-	// (е) c неверным паролем — 401, как (в): различимость только после пароля.
+	// (е) B без фактора и C со строкой pending — тот же отказ входа и попытка
+	// (Р4, Р7 редакции 8): состояние наружу не выходит; различимость — только
+	// внутрь, в клетку исходов входа, а клетка отказов под сессией не растёт.
+	require.ErrorIs(t, attempt("b13@example.invalid", "correct horse battery", totp("123456")), humansession.ErrAuthenticationFailed)
+	require.ErrorIs(t, attempt("c13@example.invalid", "correct horse battery", totp("123456")), humansession.ErrAuthenticationFailed)
+	require.ErrorIs(t, attempt("b13@example.invalid", "correct horse battery", lookup("ABCDEFGH12")), humansession.ErrAuthenticationFailed)
+	require.Equal(t, 2, h.failures(humansession.FailureByAddress, "b13@example.invalid"), "(е) у B — две попытки")
+	require.Equal(t, 1, h.failures(humansession.FailureByAddress, "c13@example.invalid"), "(е) у C — попытка")
+	require.Equal(t, 3, h.obs.login[humansession.LoginOutcomeSecondFactorNotEnrolled], "различимость внутрь: клетка исходов входа")
+	require.Zero(t, h.obs.sfRefusals[humansession.RefusalNotEnrolled], "клетка отказов под сессией на входе не растёт")
+	// (е) c неверным паролем — тот же 401, что и (в), и та же попытка.
 	require.ErrorIs(t, attempt("b13@example.invalid", "wrong", totp("123456")), humansession.ErrAuthenticationFailed)
+	require.Equal(t, 3, h.failures(humansession.FailureByAddress, "b13@example.invalid"))
+	// Положительный близнец (е): та же личность B без поля — сессия «1».
+	plainB := h.mustLogin(t, "b13@example.invalid", "correct horse battery")
+	require.Equal(t, "1", plainB.View.Session.AssuranceLevel)
+	require.Zero(t, h.failures(humansession.FailureByAddress, "b13@example.invalid"), "успех обнуляет счёт (Ф3 Р10)")
 
 	require.Equal(t, 4, h.failures(humansession.FailureByAddress, "a13@example.invalid"), "(а), (б), (в), (ж) сосчитаны")
 
@@ -496,6 +510,37 @@ func TestF12_13_LoginRefusalsWithASecondFactor(t *testing.T) {
 	require.Equal(t, "2", out.View.Session.AssuranceLevel)
 	// (д) потреблённый запасной код — 401.
 	require.ErrorIs(t, attempt("a13@example.invalid", "correct horse battery", lookup(codes[1])), humansession.ErrAuthenticationFailed)
+}
+
+// TestF12_13e_NotEnrolledOnLoginIsTheSameRefusalAsAWrongPassword — Ф12-13 «е»
+// редакции 8 (kaname#257): у личности без фактора «неверный пароль + код» и
+// «верный пароль + код» дают ОДИН И ТОТ ЖЕ сентинел с тем же текстом, обе —
+// попытки в окне частоты; положительный близнец — верный пароль без поля даёт
+// сессию «1». Отрицательный контроль: реализация, отдающая на второе обращение
+// сентинел состояния, тело, отличное от первого, либо не считающая его попыткой,
+// краснеет здесь.
+func TestF12_13e_NotEnrolledOnLoginIsTheSameRefusalAsAWrongPassword(t *testing.T) {
+	h := newSFHarness(t)
+	h.person(t, "usr-ne1", "ne1@example.invalid", "correct horse battery", true)
+	attempt := func(password string, f *humansession.SecondFactorPresentation) error {
+		_, err := h.login.Execute(context.Background(), humansession.LoginInput{Email: "ne1@example.invalid", Password: password, Source: "203.0.113.7", SecondFactor: f})
+		return err
+	}
+	code := &humansession.SecondFactorPresentation{Method: assurance.MethodTOTP, Code: "000000"}
+
+	wrong := attempt("wrong", code)
+	require.ErrorIs(t, wrong, humansession.ErrAuthenticationFailed)
+	require.Equal(t, 1, h.failures(humansession.FailureByAddress, "ne1@example.invalid"))
+
+	right := attempt("correct horse battery", code)
+	require.ErrorIs(t, right, humansession.ErrAuthenticationFailed, "совпавший пароль не назван кодом отказа")
+	require.Equal(t, wrong.Error(), right.Error(), "совпавший пароль не назван текстом отказа")
+	require.Equal(t, 2, h.failures(humansession.FailureByAddress, "ne1@example.invalid"), "совпавший пароль не назван темпом окна")
+	require.Equal(t, 1, h.obs.login[humansession.LoginOutcomeSecondFactorNotEnrolled], "различимость — внутрь")
+	require.Zero(t, h.obs.sfRefusals[humansession.RefusalNotEnrolled])
+
+	out := h.mustLogin(t, "ne1@example.invalid", "correct horse battery")
+	require.Equal(t, "1", out.View.Session.AssuranceLevel, "положительный близнец: без поля — сессия «1»")
 }
 
 // ───────────────────────────── церемония ─────────────────────────────────
