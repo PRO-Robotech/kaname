@@ -44,14 +44,29 @@ REST-примеры идут через `api-gateway` (порт указан к�
   </tbody>
 </table>
 
+**Как получить уровень `2` — по посадке личности установки** (`authn.identity-provider`):
+
+<table>
+  <thead><tr><th>Посадка</th><th>Что сделать один раз</th><th>Чем слать шаги 6 и 8</th></tr></thead>
+  <tbody>
+    <tr><td><code>external</code></td><td>завести код по времени в самообслуживании поставщика — раздел параметров безопасности <code>/settings</code> на адресе консоли (поток открыт и сессии, вошедшей одним паролем); затем войти заново с запросом второго уровня: <code>/login?aal=aal2</code>. Сессия поставщика получает <code>aal2</code>, край переводит его в <code>2</code></td><td>печеньем <code>ory_kratos_session</code> этой сессии</td></tr>
+    <tr><td><code>own</code></td><td>завести код по времени на полосе входа службы — <code>POST /iam/v1/auth/second-factor/enroll</code>, затем <code>…/confirm</code> первым кодом; сессия после подтверждения уже <code>2</code>. В следующей сессии — либо <code>secondFactor</code> в форме входа, либо <code>POST /iam/v1/auth/step-up</code> с <code>method: totp</code>. Форма и отказы — <a href="/api/auth-lane">Полоса входа</a></td><td>печеньем <code>kaname_session</code> этой сессии</td></tr>
+  </tbody>
+</table>
+
 Практически: держите вкладку консоли открытой и делайте эти два шага из неё, либо шлите те же
-два запроса клиентом, несущим cookie вашей сессии. Отказ на порог приходит **тем же
-неразличимым `401`**, что и на опечатку в токене, — если строка точно верна, а `401` приходит
-только на этих двух шагах, дело в пороге. Разбор — [Первое
+два запроса клиентом, несущим печенье вашей сессии — примеры шагов 6 и 8 ниже написаны именно
+так. Отказ на порог приходит **тем же неразличимым `401`**, что и на опечатку в токене, — если
+строка точно верна, а `401` приходит только на этих двух шагах, дело в пороге. Разбор — [Первое
 удостоверение](/first-credential), и полный перечень глаголов с порогом — [Модель
 авторизации](/architecture/authz#step-up).
 
 **Служебная учётка от порога освобождена** — конвейеру эти два шага доступны её ключом.
+
+Состояние `own` на линии — с предикатом: производитель второго фактора (Ф12, kacho#1281) в
+дереве службы есть, а живой старт посадки `own` не измерен (kaname#21), и какие из путей
+полосы ретранслирует ваш край — свойство его версии (см. врезку на странице полосы входа). На
+установке `external` путь выше рабочий на любой версии.
 :::
 
 ## 1. Собрать сервис и мигратор
@@ -116,7 +131,10 @@ Production-режим обязывает mTLS на публичном и interna
 
 <CodeBlock language="bash">
   {dedent`
-    export TOKEN='kacho_…'   # базовый токен доступа либо JWT
+    export TOKEN='kacho_…'   # базовый токен доступа либо JWT — шаги 4, 5, 7, 9
+    # шаги 6 и 8 — печеньем интерактивной сессии уровня 2 (врезка выше):
+    export SESSION_COOKIE='ory_kratos_session=…'   # посадка external
+    export SESSION_COOKIE='kaname_session=…'       # посадка own
   `}
 </CodeBlock>
 
@@ -225,8 +243,10 @@ Production-режим обязывает mTLS на публичном и interna
 
 <CodeBlock language="bash">
   {dedent`
+    # интерактивной сессией уровня 2 — печенье по посадке:
+    #   external: ory_kratos_session=…   own: kaname_session=…
     curl -X POST 'http://localhost:18080/iam/v1/users:invite' \\
-      -H "Authorization: Bearer $TOKEN" \\
+      -H "Cookie: $SESSION_COOKIE" \\
       -H 'Content-Type: application/json' \\
       -d '{
             "accountId": "acc2bkd71802av7dywa8",
@@ -297,8 +317,9 @@ AccessBinding соединяет субъект (User / ServiceAccount / Group) 
 
 <CodeBlock language="bash">
   {dedent`
+    # интерактивной сессией уровня 2 (см. врезку в начале страницы), не $TOKEN
     curl -X POST 'http://localhost:18080/iam/v1/accessBindings' \\
-      -H "Authorization: Bearer $TOKEN" \\
+      -H "Cookie: $SESSION_COOKIE" \\
       -H 'Content-Type: application/json' \\
       -d '{
             "subjects": [ { "type": "SUBJECT_TYPE_USER", "id": "usrbr69ze0ftz3jf7396" } ],
