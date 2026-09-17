@@ -28,6 +28,7 @@ import (
 	"github.com/PRO-Robotech/corelib/pgtest"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 )
@@ -520,7 +521,7 @@ func TestHumanSessionRepo_F3_19_ReplaceLoginVerifierIsOneStatement(t *testing.T)
 	methods := pg.NewLoginMethodRepo(pool)
 	ctx := context.Background()
 	people := lmPeople(t, pool, "hs1r", 2)
-	_, err := methods.Create(ctx, domain.LoginMethod{UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$old.material.old.material.old.material.old.material.oldmat")})
+	_, err := methods.Create(ctx, domain.LoginMethod{UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$old.material.old.material.old.material.old.material.oldmat"), State: domain.LoginMethodStateActive})
 	require.NoError(t, err)
 
 	fresh := lmVerifier(t, "$argon2id$v=19$m=65536,t=3,p=4$cHJvYmUtc2FsdC1mMw$cHJvYmUtaGFzaC1mMy1yZXBsYWNl")
@@ -532,7 +533,7 @@ func TestHumanSessionRepo_F3_19_ReplaceLoginVerifierIsOneStatement(t *testing.T)
 			defer wg.Done()
 			w, err := repo.Writer(ctx)
 			require.NoError(t, err)
-			replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: fresh})
+			replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive})
 			require.NoError(t, err)
 			require.NoError(t, w.Commit(ctx))
 			results <- replaced
@@ -550,7 +551,7 @@ func TestHumanSessionRepo_F3_19_ReplaceLoginVerifierIsOneStatement(t *testing.T)
 
 	w, err := repo.Writer(ctx)
 	require.NoError(t, err)
-	replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: people[1], Kind: domain.LoginMethodPassword, Verifier: fresh})
+	replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: people[1], Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive})
 	require.NoError(t, err)
 	require.False(t, replaced, "у человека без способа замещать нечего")
 	require.NoError(t, w.Rollback(ctx))
@@ -581,27 +582,43 @@ func TestHumanSessionRepo_F3_28_OldestFailureInWindowNamesTheRetryAfter(t *testi
 	require.True(t, at.Equal(hsBase.Add(time.Second)), "самый ранний В ОКНЕ, а не вообще: %s", at)
 }
 
-// TestHumanSessionRepo_F3_23_ClearPasswordChangeRequired — требование снимается
-// с записи и видно резолву (Ф5-24).
-func TestHumanSessionRepo_F3_23_ClearPasswordChangeRequired(t *testing.T) {
+// TestHumanSessionRepo_KN201_SessionRowCarriesNoPasswordChangeRequired —
+// колонка `human_sessions.password_change_required` снята новой миграцией
+// вместе с полем контракта и его читателями (kacho#2697, kaname#201): у
+// значения `true` не было ни одного производителя в прод-коде, и признак,
+// который пишут константой `false` и читают, есть «принято-и-проигнорировано»
+// на уровне схемы. Здесь стояла проба Ф3-23 «требование снимается с записи»;
+// она снята ВМЕСТЕ с предметом, а не ослаблена (`testing.md` §«Гейт на класс»,
+// п. 9): утверждать снятие требования, которого схема не допускает, нечем.
+//
+// Судится применённая схема, а не текст миграции; положительный контроль —
+// соседняя колонка состава Р1 на месте, иначе «колонки нет» было бы верно и
+// на отсутствующей таблице. Вторая половина — запись и чтение сессии через
+// репозиторий на схеме без колонки проходят: `resolveSQL` и вставка не
+// называют снятой колонки.
+func TestHumanSessionRepo_KN201_SessionRowCarriesNoPasswordChangeRequired(t *testing.T) {
 	pool := hsPool(t)
 	repo := pg.NewHumanSessionRepo(pool)
 	ctx := context.Background()
-	people := lmPeople(t, pool, "hs23", 1)
-	s := hsSession(people[0], "23a", hsBase)
-	s.PasswordChangeRequired = true
+
+	columns := func(name string) int {
+		var n int
+		require.NoError(t, pool.QueryRow(ctx, `
+			SELECT count(*) FROM information_schema.columns
+			 WHERE table_schema = 'kaname' AND table_name = 'human_sessions' AND column_name = $1`, name).Scan(&n))
+		return n
+	}
+	require.Equal(t, 1, columns("assurance_level"), "положительный контроль: состав Р1 на месте")
+	require.Equal(t, 0, columns("password_change_required"),
+		"kaname#201: колонка признака снята — производителя `true` у него не было (kacho#2697)")
+
+	people := lmPeople(t, pool, "hs201", 1)
+	s := hsSession(people[0], "201a", hsBase)
 	s.PresentedMethods = []string{"recovery_code"}
 	b := hsIssue(t, repo, s)
 	got, r := hsResolve(t, repo, b, hsBase.Add(time.Minute))
-	require.Equal(t, humansession.SessionFound, r)
-	require.True(t, got.Session.PasswordChangeRequired)
-
-	w, err := repo.Writer(ctx)
-	require.NoError(t, err)
-	require.NoError(t, w.ClearPasswordChangeRequired(ctx, "hss-23a"))
-	require.NoError(t, w.Commit(ctx))
-	got, _ = hsResolve(t, repo, b, hsBase.Add(time.Minute))
-	require.False(t, got.Session.PasswordChangeRequired, "Ф5-24: поле снято")
+	require.Equal(t, humansession.SessionFound, r, "сессия восстановления полноправна: пишется и читается на схеме без колонки")
+	require.Equal(t, []string{"recovery_code"}, got.Session.PresentedMethods)
 }
 
 // TestUserTokenRevocations_F3_25_ForceLogoutMomentCutsBothSessionsAndSparesTheNext —
@@ -691,4 +708,73 @@ func TestUserTokenRevocations_F3_26_RecoveryCompletionCutsAllPriorSessionsAsPass
 	s3 := hsSession(subject, "26-s3", completed.Add(time.Microsecond)) // выдана восстановлением (Ф5-03)
 	hsIssue(t, repo, s3)
 	require.True(t, s3.AuthenticatedAt.After(cutoff), "сессия восстановления после отсечки проходит")
+}
+
+// TestHumanSessionRepo_F12_PresentInSessionRaisesTheRowInPlace — предъявление
+// внутри сессии (Ф11 Р5, Ф12-15…18): множество, уровень, носитель и момент
+// предъявления сменены одной записью; момент аутентификации и срок прежние;
+// снятая строка — «не найдена»; способ вне словаря и уровень вне оси отвергает
+// CHECK строки, а не код (Ф12-40 в части сессии).
+func TestHumanSessionRepo_F12_PresentInSessionRaisesTheRowInPlace(t *testing.T) {
+	pool := hsPool(t)
+	repo := pg.NewHumanSessionRepo(pool)
+	ctx := context.Background()
+	people := lmPeople(t, pool, "hs12p", 1)
+	old := hsIssue(t, repo, hsSession(people[0], "12p", hsBase))
+	fresh, err := domain.NewSessionBearer()
+	require.NoError(t, err)
+	presented := hsBase.Add(20 * time.Minute)
+
+	w, err := repo.Writer(ctx)
+	require.NoError(t, err)
+	require.NoError(t, w.PresentInSession(ctx, "hss-12p", []string{"password", "totp"}, "2", fresh.Digest(), presented))
+	require.NoError(t, w.Commit(ctx))
+
+	_, rOld := hsResolve(t, repo, old, presented.Add(time.Minute))
+	require.Equal(t, humansession.NoSessionUnknown, rOld, "прежний носитель после предъявления — «сессии нет»")
+	got, rNew := hsResolve(t, repo, fresh, presented.Add(time.Minute))
+	require.Equal(t, humansession.SessionFound, rNew)
+	require.Equal(t, "2", got.Session.AssuranceLevel)
+	require.ElementsMatch(t, []string{"password", "totp"}, got.Session.PresentedMethods)
+	require.True(t, got.Session.AuthenticatedAt.Equal(hsBase), "момент аутентификации прежний")
+	require.True(t, got.Session.ExpiresAt.Equal(hsBase.Add(hsTTL)), "срок прежний")
+	require.True(t, got.Session.LastPresentedAt.Equal(presented), "момент последнего предъявления сдвинут")
+
+	// Словарь и ось держит база: способ вне словаря, уровень вне оси, пустое множество.
+	for _, bad := range []struct {
+		name    string
+		methods []string
+		level   string
+	}{
+		{"method", []string{"password", "sms"}, "2"},
+		{"level", []string{"password", "totp"}, "4"},
+	} {
+		w, err := repo.Writer(ctx)
+		require.NoError(t, err)
+		next, err := domain.NewSessionBearer()
+		require.NoError(t, err)
+		err = w.PresentInSession(ctx, "hss-12p", bad.methods, bad.level, next.Digest(), presented.Add(time.Minute))
+		require.ErrorIs(t, err, iamerr.ErrInvalidArg, "%s: CHECK строки → InvalidArgument", bad.name)
+		require.NotContains(t, err.Error(), "SQLSTATE", "%s: текст драйвера наружу не течёт", bad.name)
+		_ = w.Rollback(ctx)
+	}
+	w, err = repo.Writer(ctx)
+	require.NoError(t, err)
+	next, err := domain.NewSessionBearer()
+	require.NoError(t, err)
+	require.ErrorIs(t, w.PresentInSession(ctx, "hss-12p", nil, "2", next.Digest(), presented), iamerr.ErrInvalidArg, "пустое множество отвергается до записи")
+	_ = w.Rollback(ctx)
+
+	// Снятая сессия предъявления не принимает.
+	w, err = repo.Writer(ctx)
+	require.NoError(t, err)
+	ended, err := w.EndSession(ctx, "hss-12p", presented.Add(2*time.Minute), domain.RevokeReasonLogout)
+	require.NoError(t, err)
+	require.True(t, ended)
+	require.NoError(t, w.Commit(ctx))
+	w, err = repo.Writer(ctx)
+	require.NoError(t, err)
+	err = w.PresentInSession(ctx, "hss-12p", []string{"password", "totp"}, "2", next.Digest(), presented.Add(3*time.Minute))
+	require.ErrorIs(t, err, iamerr.ErrNotFound)
+	_ = w.Rollback(ctx)
 }

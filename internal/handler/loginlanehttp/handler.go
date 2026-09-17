@@ -10,7 +10,12 @@
 // признака формы и ОДИН отказ на занятость и потолок темпа (Ф4 Р3), — и два
 // глагола восстановления доступа на той же полосе (фаза Ф5, задача
 // PRO-Robotech/kacho#1271; приёмка `docs/engineering/acceptance/recovery-of-access.md`):
-// запрос кода и его предъявление с новым паролем.
+// запрос кода и его предъявление с новым паролем, — и шесть глаголов второго
+// фактора (фаза Ф12, задача PRO-Robotech/kacho#1281; приёмка
+// `docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md`, Р4):
+// заведение, подтверждение, снятие, перечеканка запасных кодов, чтение
+// состояния и церемония повышения внутри сессии; форма входа при этом несёт
+// необязательное поле `secondFactor`.
 //
 // # Кто вправе звать — РОВНО край, и это судится здесь, до тела запроса
 //
@@ -40,6 +45,7 @@
 package loginlanehttp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -73,12 +79,24 @@ const (
 	// паролем — два глагола, две формы, два вида признака.
 	PathRecovery         = "/iam/v1/auth/recovery"
 	PathRecoveryComplete = "/iam/v1/auth/recovery/complete"
+	// Второй фактор (Ф12 Р4): четыре глагола семейства подпутями, чтение
+	// состояния на корне семейства, церемония повышения — своим подпутём.
+	PathSecondFactor            = "/iam/v1/auth/second-factor"
+	PathSecondFactorEnroll      = "/iam/v1/auth/second-factor/enroll"
+	PathSecondFactorConfirm     = "/iam/v1/auth/second-factor/confirm"
+	PathSecondFactorRemove      = "/iam/v1/auth/second-factor/remove"
+	PathSecondFactorBackupCodes = "/iam/v1/auth/second-factor/backup-codes"
+	PathStepUp                  = "/iam/v1/auth/step-up"
 )
 
-// Paths — семь глаголов, ОДНИМ объявлением: край читает тот же перечень для
-// ретрансляции (§8 инв. 7).
+// Paths — тринадцать глаголов, ОДНИМ объявлением: край читает тот же перечень
+// для ретрансляции (§8 инв. 7).
 func Paths() []string {
-	return []string{PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete}
+	return []string{
+		PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete,
+		PathSecondFactor, PathSecondFactorEnroll, PathSecondFactorConfirm, PathSecondFactorRemove,
+		PathSecondFactorBackupCodes, PathStepUp,
+	}
 }
 
 // Имена печений (Р3). Имя носителя отлично от имени носителя поставщика
@@ -112,6 +130,13 @@ type Lane interface {
 	// CompleteRecovery — предъявление кода с новым паролем (Ф5-03): выдаёт
 	// сессию, как вход.
 	CompleteRecovery(ctx context.Context, in humansession.CompleteRecoveryInput) (humansession.CompleteRecoveryOutput, error)
+	// Второй фактор (Ф12 Р4): шесть глаголов под сессией носителя.
+	EnrollSecondFactor(ctx context.Context, in humansession.EnrollInput) (humansession.EnrollOutput, error)
+	ConfirmSecondFactor(ctx context.Context, in humansession.ConfirmInput) (humansession.ConfirmOutput, error)
+	SecondFactorStatus(ctx context.Context, in humansession.StatusInput) (humansession.StatusOutput, error)
+	RemoveSecondFactor(ctx context.Context, in humansession.RemoveSecondFactorInput) (humansession.RemoveSecondFactorOutput, error)
+	RegenerateBackupCodes(ctx context.Context, in humansession.RegenerateBackupCodesInput) (humansession.RegenerateBackupCodesOutput, error)
+	StepUp(ctx context.Context, in humansession.StepUpInput) (humansession.StepUpOutput, error)
 }
 
 // Config — настройка слушателя. Срок и домен — величины профиля (Р3): срок без
@@ -158,6 +183,12 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 	h.mux.HandleFunc(PathRegister, h.method(http.MethodPost, h.register))
 	h.mux.HandleFunc(PathRecovery, h.method(http.MethodPost, h.requestRecovery))
 	h.mux.HandleFunc(PathRecoveryComplete, h.method(http.MethodPost, h.completeRecovery))
+	h.mux.HandleFunc(PathSecondFactor, h.method(http.MethodGet, h.secondFactorStatus))
+	h.mux.HandleFunc(PathSecondFactorEnroll, h.method(http.MethodPost, h.enrollSecondFactor))
+	h.mux.HandleFunc(PathSecondFactorConfirm, h.method(http.MethodPost, h.confirmSecondFactor))
+	h.mux.HandleFunc(PathSecondFactorRemove, h.method(http.MethodPost, h.removeSecondFactor))
+	h.mux.HandleFunc(PathSecondFactorBackupCodes, h.method(http.MethodPost, h.regenerateBackupCodes))
+	h.mux.HandleFunc(PathStepUp, h.method(http.MethodPost, h.stepUp))
 	return h, nil
 }
 
@@ -200,6 +231,46 @@ func (h *Handler) method(want string, next http.HandlerFunc) http.HandlerFunc {
 type loginForm struct {
 	Email     string `json:"email"`
 	Password  string `json:"password"`
+	CSRFToken string `json:"csrfToken"`
+	// SecondFactor — необязательное предъявление кода (Ф12 Р4, Р5): способ
+	// называет клиент; отсутствие поля — сессия «1». Разбирается отдельно,
+	// чтобы отказ формы называл вложенное поле полным именем.
+	SecondFactor json.RawMessage `json:"secondFactor"`
+}
+
+// secondFactorField — `{"method", "code"}`: и во входе, и как подтверждение у
+// снятия и перечеканки. Лишнее вложенное поле отвергается тем же разбором.
+type secondFactorField struct {
+	Method string `json:"method"`
+	Code   string `json:"code"`
+}
+
+// enrollForm — заведение: только признак.
+type enrollForm struct {
+	CSRFToken string `json:"csrfToken"`
+}
+
+// confirmForm — подтверждение первым кодом; способ здесь один (`totp`) и не
+// называется.
+type confirmForm struct {
+	Code      string `json:"code"`
+	CSRFToken string `json:"csrfToken"`
+}
+
+// confirmedForm — снятие и перечеканка: подтверждение кодом, как у смены пароля
+// `currentPassword` (Р4).
+type confirmedForm struct {
+	Method    string `json:"method"`
+	Code      string `json:"code"`
+	CSRFToken string `json:"csrfToken"`
+}
+
+// stepUpForm — церемония: один способ; `password` — у ветви пароля, `code` — у
+// кода; поле, не относящееся к названному способу, отвергается глаголом.
+type stepUpForm struct {
+	Method    string `json:"method"`
+	Password  string `json:"password"`
+	Code      string `json:"code"`
 	CSRFToken string `json:"csrfToken"`
 }
 
@@ -252,6 +323,22 @@ func decodeForm(r *http.Request, into any) error {
 	}
 	if dec.More() {
 		return &humansession.FieldError{Field: "body", Rule: "trailing content"}
+	}
+	return nil
+}
+
+// decodeNested — строгий разбор вложенного объекта формы: неизвестное поле
+// называется полным именем `<prefix>.<поле>`.
+func decodeNested(prefix string, raw json.RawMessage, into any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		msg := err.Error()
+		if strings.HasPrefix(msg, "json: unknown field ") {
+			field := strings.Trim(strings.TrimPrefix(msg, "json: unknown field "), `"`)
+			return &humansession.FieldError{Field: prefix + "." + field, Rule: "unknown field"}
+		}
+		return &humansession.FieldError{Field: prefix, Rule: "must be an object"}
 	}
 	return nil
 }
@@ -333,9 +420,21 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
 		return
 	}
-	out, err := h.lane.Login(r.Context(), humansession.LoginInput{
-		Email: form.Email, Password: form.Password, Source: h.source(r),
-	})
+	in := humansession.LoginInput{Email: form.Email, Password: form.Password, Source: h.source(r)}
+	if len(form.SecondFactor) > 0 && string(form.SecondFactor) != "null" {
+		var nested secondFactorField
+		if err := decodeNested("secondFactor", form.SecondFactor, &nested); err != nil {
+			h.writeError(w, err, humansession.TextRequestNotPerformed)
+			return
+		}
+		factor, err := parseSecondFactorField("secondFactor", nested)
+		if err != nil {
+			h.writeError(w, err, humansession.TextRequestNotPerformed)
+			return
+		}
+		in.SecondFactor = &factor
+	}
+	out, err := h.lane.Login(r.Context(), in)
 	if err != nil {
 		h.writeError(w, err, humansession.TextRequestNotPerformed)
 		return
@@ -493,6 +592,197 @@ func (h *Handler) completeRecovery(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// --- второй фактор (Ф12 Р4) ---
+
+// parseSecondFactorField — способ и форма кода (Н12) судятся ДО глагола, с
+// именем поля: у вложенного объекта — `<prefix>.method` / `<prefix>.code`, у
+// плоской формы (пустой prefix) — `method` / `code`.
+func parseSecondFactorField(prefix string, f secondFactorField) (humansession.SecondFactorPresentation, error) {
+	field := func(name string) string {
+		if prefix == "" {
+			return name
+		}
+		return prefix + "." + name
+	}
+	method, err := humansession.ParseSecondFactorMethod(field("method"), f.Method)
+	if err != nil {
+		return humansession.SecondFactorPresentation{}, err
+	}
+	p := humansession.SecondFactorPresentation{Method: method, Code: f.Code}
+	if err := humansession.JudgeCodeForm(field("code"), p); err != nil {
+		return humansession.SecondFactorPresentation{}, err
+	}
+	return p, nil
+}
+
+// enrollSecondFactor — Ф12-01: секрет и адрес показываются один раз, печений
+// нет — сессия и контекст прежние.
+func (h *Handler) enrollSecondFactor(w http.ResponseWriter, r *http.Request) {
+	var form enrollForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
+		return
+	}
+	out, err := h.lane.EnrollSecondFactor(r.Context(), humansession.EnrollInput{Bearer: h.bearer(r)})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"secret":     out.Secret.Base32(),
+		"otpauthUri": out.OtpauthURI,
+		"expiresAt":  out.ExpiresAt.UTC().Truncate(time.Second).Format(time.RFC3339),
+	})
+}
+
+// confirmSecondFactor — Ф12-02: коды один раз; предъявление — новый носитель.
+func (h *Handler) confirmSecondFactor(w http.ResponseWriter, r *http.Request) {
+	var form confirmForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
+		return
+	}
+	if err := requireFields(map[string]string{"code": form.Code}); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	out, err := h.lane.ConfirmSecondFactor(r.Context(), humansession.ConfirmInput{
+		Bearer: h.bearer(r), Code: form.Code, Source: h.source(r),
+	})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	http.SetCookie(w, h.sessionCookie(out.Bearer))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"backupCodes": out.BackupCodes,
+		"session":     sessionJSON(out.View),
+		"assurance":   assuranceJSON(out.Assurance),
+	})
+}
+
+// secondFactorStatus — чтение состояния (Р4): без признака; две формы тела —
+// `pending` и `active`; ключ `backupCodes` — только у заведённого.
+func (h *Handler) secondFactorStatus(w http.ResponseWriter, r *http.Request) {
+	out, err := h.lane.SecondFactorStatus(r.Context(), humansession.StatusInput{Bearer: h.bearer(r)})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	totp := map[string]any{"enrolled": out.TOTPEnrolled}
+	switch {
+	case out.TOTPEnrolled:
+		totp["confirmedAt"] = out.ConfirmedAt.UTC().Truncate(time.Second).Format(time.RFC3339)
+	case !out.PendingUntil.IsZero():
+		totp["pendingUntil"] = out.PendingUntil.UTC().Truncate(time.Second).Format(time.RFC3339)
+	}
+	body := map[string]any{"totp": totp}
+	if out.BackupCodes != nil {
+		body["backupCodes"] = map[string]any{"remaining": out.BackupCodes.Remaining, "total": out.BackupCodes.Total}
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+// removeSecondFactor — Ф12-28: подтверждение кодом, ответ как у церемонии.
+func (h *Handler) removeSecondFactor(w http.ResponseWriter, r *http.Request) {
+	var form confirmedForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
+		return
+	}
+	factor, err := parseSecondFactorField("", secondFactorField{Method: form.Method, Code: form.Code})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	out, err := h.lane.RemoveSecondFactor(r.Context(), humansession.RemoveSecondFactorInput{
+		Bearer: h.bearer(r), Factor: factor, Source: h.source(r),
+	})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	http.SetCookie(w, h.sessionCookie(out.Bearer))
+	body := map[string]any{"session": sessionJSON(out.View), "assurance": assuranceJSON(out.Assurance)}
+	if out.BackupCodesRemaining != nil {
+		body["backupCodesRemaining"] = *out.BackupCodesRemaining
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+// regenerateBackupCodes — Ф12-25: новый набор один раз, ответ как у церемонии.
+func (h *Handler) regenerateBackupCodes(w http.ResponseWriter, r *http.Request) {
+	var form confirmedForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormSecondFactor, form.CSRFToken) {
+		return
+	}
+	factor, err := parseSecondFactorField("", secondFactorField{Method: form.Method, Code: form.Code})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	out, err := h.lane.RegenerateBackupCodes(r.Context(), humansession.RegenerateBackupCodesInput{
+		Bearer: h.bearer(r), Factor: factor, Source: h.source(r),
+	})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	http.SetCookie(w, h.sessionCookie(out.Bearer))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"backupCodes": out.BackupCodes,
+		"session":     sessionJSON(out.View),
+		"assurance":   assuranceJSON(out.Assurance),
+	})
+}
+
+// stepUp — церемония повышения (Ф11-08, Ф12-15…19): способ называет клиент из
+// словаря Ф11 Р8; поля, не относящиеся к способу, судит глагол.
+func (h *Handler) stepUp(w http.ResponseWriter, r *http.Request) {
+	var form stepUpForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormStepUp, form.CSRFToken) {
+		return
+	}
+	method, err := humansession.ParseStepUpMethod("method", form.Method)
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	in := humansession.StepUpInput{Bearer: h.bearer(r), Method: method, Password: form.Password, Code: form.Code, Source: h.source(r)}
+	if err := humansession.JudgeStepUpForm(in); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	out, err := h.lane.StepUp(r.Context(), in)
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	http.SetCookie(w, h.sessionCookie(out.Bearer))
+	body := map[string]any{"session": sessionJSON(out.View), "assurance": assuranceJSON(out.Assurance)}
+	if out.BackupCodesRemaining != nil {
+		body["backupCodesRemaining"] = *out.BackupCodesRemaining
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
 // source — адрес источника: значение заголовка допущенного вызывающего как
 // есть, цепочка не разбирается (Р10).
 func (h *Handler) source(r *http.Request) string {
@@ -532,13 +822,22 @@ func userJSON(v humansession.SessionView) map[string]any {
 	}
 }
 
+// assuranceJSON — объект `assurance` ответа церемонии (Р4): два поля, два
+// факта; `missingForLevel2` — всегда массив.
+func assuranceJSON(a humansession.AssuranceView) map[string]any {
+	missing := a.MissingForLevel2
+	if missing == nil {
+		missing = []string{}
+	}
+	return map[string]any{"level": a.Level, "level2Reachable": a.Level2Reachable, "missingForLevel2": missing}
+}
+
 func sessionJSON(v humansession.SessionView) map[string]any {
 	return map[string]any{
 		// Срок — до секунды (конвенция); сравнивает его служба, не клиент.
-		"expiresAt":              v.Session.ExpiresAt.UTC().Truncate(time.Second).Format(time.RFC3339),
-		"assuranceLevel":         v.Session.AssuranceLevel,
-		"emailVerified":          v.EmailVerified,
-		"passwordChangeRequired": v.Session.PasswordChangeRequired,
+		"expiresAt":      v.Session.ExpiresAt.UTC().Truncate(time.Second).Format(time.RFC3339),
+		"assuranceLevel": v.Session.AssuranceLevel,
+		"emailVerified":  v.EmailVerified,
 	}
 }
 
@@ -567,6 +866,22 @@ func (h *Handler) writeError(w http.ResponseWriter, err error, unavailableText s
 	case errors.Is(err, humansession.ErrFormTokenRejected):
 		writeRefusal(w, http.StatusForbidden, codePermissionDenied, humansession.TextFormTokenRejected,
 			&errorInfo{Reason: humansession.ReasonFormTokenRejected, Domain: h.cfg.RefusalDomain})
+	// Второй фактор (Ф12 Р4): состояние — 400 с токеном; «уже заведён» —
+	// 409; свежесть — 403 с токеном; материал не открылся — 503 своим текстом.
+	case errors.Is(err, humansession.ErrSecondFactorNotEnrolled):
+		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextSecondFactorNotEnrolled,
+			&errorInfo{Reason: humansession.ReasonSecondFactorNotEnrolled, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, humansession.ErrEnrollmentNotPending):
+		writeRefusal(w, http.StatusBadRequest, codeFailedPrecondition, humansession.TextEnrollmentNotPending,
+			&errorInfo{Reason: humansession.ReasonEnrollmentNotPending, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, humansession.ErrSecondFactorAlreadyEnrolled):
+		writeRefusal(w, http.StatusConflict, codeAlreadyExists, humansession.TextSecondFactorAlreadyEnrolled,
+			&errorInfo{Reason: humansession.ReasonSecondFactorAlreadyEnrolled, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, humansession.ErrSessionNotFresh):
+		writeRefusal(w, http.StatusForbidden, codePermissionDenied, humansession.TextSessionNotFresh,
+			&errorInfo{Reason: humansession.ReasonSessionNotFresh, Domain: h.cfg.RefusalDomain})
+	case errors.Is(err, humansession.ErrSecondFactorUnavailable):
+		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, humansession.TextSecondFactorUnavailable, nil)
 	case errors.Is(err, humansession.ErrStoreUnavailable), errors.Is(err, humansession.ErrBreachAuthorityMisconfigured):
 		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, unavailableText, nil)
 	default:
@@ -591,6 +906,7 @@ func retryAfterSeconds(d time.Duration) int64 {
 // Коды `google.rpc.Code`, которые отдаёт полоса.
 const (
 	codeInvalidArgument    = 3
+	codeAlreadyExists      = 6
 	codePermissionDenied   = 7
 	codeResourceExhausted  = 8
 	codeFailedPrecondition = 9

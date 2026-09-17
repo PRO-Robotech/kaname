@@ -113,6 +113,7 @@ func Load(path string) (Config, error) {
 		"manifests.admission":     "KANAME_MANIFESTS__ADMISSION",
 
 		"authn.domain":                      "KANAME_AUTHN__DOMAIN",
+		"authn.self-service-freshness":      "KANAME_AUTHN__SELF_SERVICE_FRESHNESS",
 		"authn.trusted-forwarder-sans":      "KANAME_AUTHN__TRUSTED_FORWARDER_SANS",
 		"authn.trust-domain":                "KANAME_AUTHN__TRUST_DOMAIN",
 		"authn.trust-any-forwarder":         "KANAME_AUTHN__TRUST_ANY_FORWARDER",
@@ -446,6 +447,17 @@ func (c APIServerConfig) InternalRESTListenAddress() string {
 // HTTP server. Empty endpoint → empty (disabled). Separate internal port from
 // the gRPC public/internal listeners (default :9095).
 func (c APIServerConfig) MetricsListenAddress() string { return listenAddress(c.MetricsEndpoint) }
+
+// LoginLaneListenAddress — нормализованный адрес слушателя полосы входа
+// паролем: та же запись, что у остальных поверхностей (`tcp://0.0.0.0:9100`),
+// тем же правилом. Пустой эндпоинт → пустой адрес — полоса не поднимается.
+//
+// Здесь стояло НИЧЕГО, и композиционный корень брал объявление сырым: под
+// `own` процесс проходил всех стражей и падал на привязке последней
+// поверхности — `listen tcp: address tcp://0.0.0.0:9100: too many colons in
+// address` (задача kaname#21, живой старт 2026-09-17). Второе правило разбора
+// адреса не заводится: полоса читает ту же функцию, что соседи.
+func (c APIServerConfig) LoginLaneListenAddress() string { return listenAddress(c.LoginLaneEndpoint) }
 
 // ListenAddressOf — адрес слушателя из объявленной конечной точки.
 //

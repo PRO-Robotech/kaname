@@ -386,6 +386,20 @@ type AuthNConfig struct {
 	HookSharedSecretEnv     string `mapstructure:"hook-shared-secret-env"`
 	JWKSEncryptionKeyHex    string `mapstructure:"jwks-encryption-key-hex"`
 	JWKSEncryptionKeyHexEnv string `mapstructure:"jwks-encryption-key-hex-env"`
+	// SecondFactorEncryptionKeyHex — перечень ключей ОБЁРТКИ секретов второго
+	// фактора (Ф12 Р2, kacho#1281): первый оборачивает, все открывают. СВОЯ
+	// ручка, а не ручка подписного ключа: предмет другой (секретов много, по
+	// одному на человека; радиус компрометации — вход людей), и смена одного
+	// ключа не обязана останавливать другой. Обе половины повторяют форму
+	// соседней: значением либо именем переменной окружения.
+	SecondFactorEncryptionKeyHex    string `mapstructure:"second-factor-encryption-key-hex"`
+	SecondFactorEncryptionKeyHexEnv string `mapstructure:"second-factor-encryption-key-hex-env"`
+	// SelfServiceFreshness — окно свежести правки своих данных (Ф1 §4.1 «15
+	// мин», Ф11 Р6 — от момента последнего предъявления; Ф12 Р8): заведение и
+	// подтверждение второго фактора требуют, чтобы с последнего предъявления
+	// прошло не больше окна; тем же окном ограничен срок неподтверждённого
+	// заведения. Умолчания нет: величина объявляется профилем.
+	SelfServiceFreshness time.Duration `mapstructure:"self-service-freshness"`
 	// TokenSigning — СВОЯ чеканка токенов (задача #897): издатель, алгоритм,
 	// перечень допустимых алгоритмов приёма, путь нашей записи публикуемого
 	// набора и срок ключа. Пока выключена, её настройки не требуются; будучи

@@ -73,8 +73,26 @@ const publishedObservabilityPage = "docs/content/advanced/observability.mdx"
 const alertRulesToggle = "alertRules.enabled"
 
 // pageAlertBlockRe — блок кода страницы с правилами. Берётся блок, а не строки:
-// имя `alert:` встречается и в прозе вокруг.
-var pageAlertBlockRe = regexp.MustCompile("(?s)```yaml\n(.*?)```")
+// имя `alert:` встречается и в прозе вокруг. Первая группа — ПОМЕТКА ПОСАДКИ
+// на строке перед блоком (`<!-- posture: own -->`), вторая — тело блока.
+//
+// Пометка машинно читаемая намеренно: заголовок прозой распознаватель судил бы
+// словом, а слово «own» стоит на странице и там, где посадка не при чём.
+var pageAlertBlockRe = regexp.MustCompile("(?s)(?:<!-- posture: ([a-z]+) -->\n)?```yaml\n(.*?)```")
+
+// posturedRules — правила страницы, разложенные по посадке: пустой ключ —
+// правила, действующие на ЛЮБОЙ посадке.
+type posturedRules map[string][]alertRule
+
+// forPosture — что страница обещает установке названной посадки: общие
+// правила плюс правила её полосы. Правила чужой посадки в обещание НЕ входят.
+func (p posturedRules) forPosture(posture string) []alertRule {
+	out := append([]alertRule{}, p[""]...)
+	if posture != "" {
+		out = append(out, p[posture]...)
+	}
+	return out
+}
 
 // alertRule — правило в том виде, в каком его сверяют две стороны.
 type alertRule struct {
@@ -104,23 +122,56 @@ func parseAlertRules(text string) ([]alertRule, error) {
 	return out, nil
 }
 
-// pageAlertRules — правила, обещанные опубликованной страницей.
-func pageAlertRules(t *testing.T, root string) []alertRule {
+// pageAlertRules — правила, обещанные опубликованной страницей, по посадке.
+func pageAlertRules(t *testing.T, root string) posturedRules {
 	t.Helper()
 	path := filepath.Join(root, publishedObservabilityPage)
 	raw, err := os.ReadFile(path) // #nosec G304 -- путь из корня службы
 	require.NoErrorf(t, err, "опубликованная страница не читается: %s", path)
 
-	var rules []alertRule
+	rules := posturedRules{}
 	for _, m := range pageAlertBlockRe.FindAllStringSubmatch(string(raw), -1) {
-		if !strings.Contains(m[1], "- alert:") {
+		if !strings.Contains(m[2], "- alert:") {
 			continue
 		}
-		parsed, perr := parseAlertRules(m[1])
+		parsed, perr := parseAlertRules(m[2])
 		require.NoErrorf(t, perr, "блок правил страницы не разбирается как YAML: %s", path)
-		rules = append(rules, parsed...)
+		rules[m[1]] = append(rules[m[1]], parsed...)
 	}
 	return rules
+}
+
+// identityPostureSet — ручка чарта, выбирающая посадку личности.
+const identityPostureSet = "authn.identityProvider"
+
+// postureOfProfiles — посадка, которую объявляет цепочка профилей; пусто —
+// профиль посадки не объявляет.
+func postureOfProfiles(t *testing.T, chain []string) string {
+	t.Helper()
+	v, _ := at(mergeChartProfiles(t, chain), "authn", "identityProvider").(string)
+	return v
+}
+
+// alertRenders — что рендерится и под какой посадкой. ОБЕ полосы личности
+// рендерятся явно, а не только та, что стоит в поставляемом профиле: правило
+// чужой полосы, уехавшее не под свой выключатель, видно только на второй.
+type alertRender struct {
+	name    string
+	chain   []string
+	sets    []string
+	posture string
+}
+
+func alertRenders(t *testing.T) []alertRender {
+	t.Helper()
+	prod := []string{"values.yaml", "values.prod.yaml"}
+	dev := []string{"values.yaml", "values.dev.yaml"}
+	return []alertRender{
+		{name: "values.prod.yaml", chain: prod, posture: postureOfProfiles(t, prod)},
+		{name: "values.dev.yaml", chain: dev, posture: postureOfProfiles(t, dev)},
+		{name: "values.prod.yaml+own", chain: prod, sets: []string{identityPostureSet + "=own"}, posture: "own"},
+		{name: "values.prod.yaml+external", chain: prod, sets: []string{identityPostureSet + "=external"}, posture: "external"},
+	}
 }
 
 // chartAlertRules — правила, которые везёт объект, плюс сколько объектов найдено.
@@ -182,26 +233,45 @@ func diffRuleSets(page, chart []alertRule) (onlyPage, onlyChart []string) {
 	return onlyPage, onlyChart
 }
 
+// TestDeliveredAlertRulesMatchThePublishedPage — Р2 ПО ПОСАДКАМ (задача #210).
+//
+// Правило о хуках поставщика личности под посадкой `own` звонило бы вечно:
+// хуков поставщика там нет by construction, тишина на них штатна, а порог,
+// срабатывающий на штатном состоянии, перестают читать — и вместе с ним
+// теряют настоящую тревогу под `external`. Поэтому набор правил ЗАВИСИТ от
+// посадки: общие правила плюс правила своей полосы, и страница обещает
+// ровно то, что объект везёт установке этой посадки.
+//
+// Сверяется в обе стороны на каждой из четырёх раскладок: два поставляемых
+// профиля как есть и боевой профиль, явно переведённый на каждую из полос.
+// Правило чужой полосы, уехавшее не под свой выключатель, видно только на
+// второй полосе — поэтому обе рендерятся явно.
 func TestDeliveredAlertRulesMatchThePublishedPage(t *testing.T) {
 	root, err := surfaceroster.IAMRoot(".")
 	require.NoError(t, err, "корень дерева службы")
 
-	page := pageAlertRules(t, root)
+	paged := pageAlertRules(t, root)
+	require.NotEmpty(t, paged["own"], "страница не несёт ни одного правила полосы `own` — "+
+		"тревога под этой посадкой не объявлена вовсе")
+	require.NotEmpty(t, paged["external"], "страница не несёт ни одного правила полосы `external`")
 
-	// Оба профиля, а не один: набор правил от профиля не зависит, и ИМЕННО
-	// поэтому расхождение между профилями было бы находкой, а не особенностью.
-	// Форма перечисления взята у соседнего гейта сбора величин дословно.
-	for _, profile := range []string{"values.prod.yaml", "values.dev.yaml"} {
-		t.Run(profile, func(t *testing.T) {
-			rendered := renderStandaloneChart(t, []string{"values.yaml", profile})
+	for _, r := range alertRenders(t) {
+		t.Run(r.name, func(t *testing.T) {
+			rendered := renderStandaloneChart(t, r.chain, r.sets...)
 			chart, objects := chartAlertRules(t, rendered)
+			page := paged.forPosture(r.posture)
+			lane := 0
+			if r.posture != "" {
+				lane = len(paged[r.posture])
+			}
 
 			onlyPage, onlyChart := diffRuleSets(page, chart)
 
-			t.Logf("ПЕРЕПИСЬ правил тревоги (%s):\n"+
-				"  объектов правил %d · правил у объекта %d · правил на странице %d · "+
-				"только на странице %d · только у объекта %d",
-				profile, objects, len(chart), len(page), len(onlyPage), len(onlyChart))
+			t.Logf("ПЕРЕПИСЬ правил тревоги (%s, посадка %q):\n"+
+				"  объектов правил %d · правил у объекта %d · правил на странице для посадки %d "+
+				"(общих %d · полосы %d) · только на странице %d · только у объекта %d",
+				r.name, r.posture, objects, len(chart), len(page), len(paged[""]), lane,
+				len(onlyPage), len(onlyChart))
 
 			// Предпосылка: обе стороны непусты. Пустая страница дала бы
 			// совпадение с пустым объектом, и «расхождений ноль» означало бы

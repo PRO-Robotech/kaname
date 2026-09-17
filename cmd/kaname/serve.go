@@ -538,7 +538,7 @@ func runServe(cfg config.Config) error {
 	// реконсайлер материализации привязки, что путь запроса и полоса первого
 	// входа (`hook_lane_reconciler_test.go`), а не строит свой; и ДО уборки,
 	// потому что её таблицы — предметы той же петли.
-	lane, err := buildLoginLane(cfg, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
+	lane, err := buildLoginLane(ctx, cfg, pool, kanameRepo, svcs.bindingReconciler, metricsReg, logger)
 	if err != nil {
 		return err
 	}
@@ -552,6 +552,11 @@ func runServe(cfg config.Config) error {
 	// `InternalHumanSessionService.Resolve` — внутренний слушатель, только
 	// при поднятой полосе (Ф3-45); под `external` регистрация не происходит.
 	svcs.humanSessionHandler = lane.resolveHandler()
+	// `UserService/ResetSecondFactor` (Ф12 Р10) — теми же хранилищами, что
+	// полоса; под `external` не провязан (Ф12-37): второго фактора у службы там нет.
+	if reset := lane.resetSecondFactorUseCase(kanameRepo, opsRepo); reset != nil {
+		svcs.userHandler.WithResetSecondFactor(reset)
+	}
 
 	// gRPC servers. PrincipalExtract-interceptor читает
 	// x-kacho-principal-* metadata-headers, которые api-gateway auth-interceptor

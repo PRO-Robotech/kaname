@@ -144,41 +144,52 @@ Top-level `List` (Account / Project / User / ServiceAccount / Group / Role) **н
 (SA-principal) освобождены от ACR-floor.
 
 Floor стоит на **узком наборе** RPC, а не на пользовательской поверхности целиком. Критерий —
-**операция меняет posture безопасности**; сегодня под него подпадают:
+**операция меняет posture безопасности**. Перечень ниже **выведен из контракта** — из опции
+`required_acr_min = "2"` у RPC в `proto/kaname/cloud/iam/v1/*.proto` — и сверяется с ним
+пробой в обе стороны: глагол с порогом, которого здесь нет, и глагол здесь, у которого порога
+нет, — обе находки.
 
 <table>
   <thead><tr><th>Что меняется</th><th>Глаголы</th></tr></thead>
   <tbody>
-    <tr><td>выдача и отзыв удостоверений</td><td><code>UserTokenService.Issue</code>/<code>Revoke</code>, <code>SAKeyService.Issue</code>/<code>Revoke</code></td></tr>
-    <tr><td>выдача и отзыв прав</td><td><code>AccessBindingService.Create</code>/<code>Update</code>/<code>Delete</code>/<code>Revoke</code>, <code>RoleService.Update</code>/<code>Delete</code>, <code>GroupService.AddMember</code>/<code>RemoveMember</code>, <code>InternalClusterService.GrantAdmin</code>/<code>RevokeAdmin</code></td></tr>
-    <tr><td>состав арендатора</td><td><code>UserService.Invite</code>/<code>RemoveFromAccount</code>/<code>Block</code>/<code>Unblock</code>, <code>ServiceAccountService.Enable</code>/<code>Disable</code></td></tr>
-    <tr><td>регистрация интерактивного клиента</td><td><code>InternalInteractiveClientService.Create</code>/<code>Update</code>/<code>Delete</code></td></tr>
-    <tr><td>необратимое удаление</td><td><code>AccountService</code> / <code>ProjectService</code> / <code>GroupService</code>.<code>Delete</code></td></tr>
+    <tr><td>выдача и отзыв удостоверений</td><td><code>UserTokenService.Issue</code>, <code>UserTokenService.Revoke</code>, <code>SAKeyService.Issue</code>, <code>SAKeyService.Revoke</code></td></tr>
+    <tr><td>выдача и отзыв прав</td><td><code>AccessBindingService.Create</code>, <code>AccessBindingService.Update</code>, <code>AccessBindingService.Delete</code>, <code>AccessBindingService.Revoke</code>, <code>RoleService.Update</code>, <code>GroupService.AddMember</code>, <code>GroupService.RemoveMember</code>, <code>InternalClusterService.GrantAdmin</code>, <code>InternalClusterService.RevokeAdmin</code></td></tr>
+    <tr><td>состав арендатора и его личностей</td><td><code>UserService.Invite</code>, <code>UserService.ResendInvite</code>, <code>MembershipService.Create</code>, <code>UserService.RemoveFromAccount</code>, <code>UserService.Block</code>, <code>UserService.Unblock</code>, <code>UserService.ResetSecondFactor</code>, <code>ServiceAccountService.Enable</code>, <code>ServiceAccountService.Disable</code></td></tr>
+    <tr><td>регистрация интерактивного клиента</td><td><code>InternalInteractiveClientService.Create</code>, <code>InternalInteractiveClientService.Update</code>, <code>InternalInteractiveClientService.Delete</code></td></tr>
+    <tr><td>применение модели доступов модуля</td><td><code>InternalModuleService.Apply</code></td></tr>
+    <tr><td>необратимое удаление</td><td><code>AccountService.Delete</code>, <code>ProjectService.Delete</code>, <code>GroupService.Delete</code>, <code>RoleService.Delete</code></td></tr>
   </tbody>
 </table>
+
+Приглашение и повторная отправка письма стоят в перечне по той же причине, что и
+`AccessBindingService.Create`: `projectId` + `roleId` заводят привязку атомарно с членством, и
+порог ниже порога привязки был бы обходом step-up через более дешёвую дверь; сброс второго
+фактора — надзор облака над способом входа человека.
 
 Рутинные чтения и обычный CRUD ресурсов floor **не несут**: сплошной step-up превратил бы
 повторную аутентификацию в фоновый шум, на который перестают смотреть, и ничего бы не защитил.
 
-:::note Здесь стояли числа — и они устарели молча
+:::note Здесь стояли числа — и они устарели молча; потом стоял выписанный перечень — и он тоже
 Прежняя редакция называла «из 289 записей каталога прав его несут 24, из них 22 — в IAM».
-Числа были выписаны, а не выведены, поэтому расходились с каталогом при каждой новой записи —
-и разошлись по **всем трём**: записей стало больше, глаголов с порогом больше, а «22 из 24 в
-IAM» неверно и качественно (за пределами IAM таких глаголов нет вовсе).
+Числа были выписаны, а не выведены, поэтому расходились с каталогом при каждой новой записи.
+Следующая редакция заменила числа перечнем — выписанным, и он разошёлся тем же способом: к
+2026-09-17 в нём не было `MembershipService.Create`, `UserService.ResendInvite`,
+`UserService.ResetSecondFactor` и `InternalModuleService.Apply` при живом пороге у всех
+четырёх.
 
-Заметить это чтением нельзя: цифра выглядит замеренной. Поэтому здесь стоит **критерий и
-перечень**, а не счёт. Точные величины на любой ревизии дерева — из самого каталога, одной
-командой:
+Заметить это чтением нельзя: перечень выглядит полным. Поэтому теперь перечень **держит проба**
+(`internal/check`, страница сверяется с контрактом), а точные величины на любой ревизии — из
+самого контракта, одной командой:
 
 ```bash
-# записей в каталоге прав · из них с порогом 2 · их распределение по доменам
-jq 'length' gateway/internal/middleware/embed/permission_catalog.json
-jq '[.[] | select(.required_acr_min == "2")] | length' gateway/internal/middleware/embed/permission_catalog.json
-jq -r '.[] | select(.required_acr_min == "2") | .fqn' gateway/internal/middleware/embed/permission_catalog.json
+# глаголов с порогом 2 в контракте службы
+git grep -c 'required_acr_min) = "2"' -- 'proto/kaname/cloud/iam/v1/*.proto'
+# их перечень
+git grep -B40 'required_acr_min) = "2"' -- 'proto/kaname/cloud/iam/v1/*.proto' | grep -oE '(service [A-Za-z]+|rpc [A-Za-z]+)'
 ```
 
-Каталог — не справочная величина: по нему край принимает решение в рантайме, обе его копии
-байт-идентичны и сверяются гейтом сборки. Число, взятое из него, и есть факт.
+Каталог прав края собирается из тех же опций и сверяется с копией службы гейтом сборки
+(`make check-permission-catalog`): число, взятое из контракта, и есть факт.
 :::
 
 ## Условия на кортежах

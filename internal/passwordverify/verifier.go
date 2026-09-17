@@ -159,6 +159,14 @@ func (v *Verifier) Verify(stored domain.LoginVerifier, presented string) Result 
 	return v.observed(inspectAndCompare(stored.Reveal(), presented, true))
 }
 
+// compute — вычисление против значения БЕЗ ёмкости и БЕЗ приёмника исходов:
+// путь калибровки огибающей (`envelope.go`). Ёмкость калибровка занимает
+// сама, на всё время прогона; исход ей не событие полосы — сосчитанный, он
+// читался бы как поток неверных паролей при каждом старте.
+func (v *Verifier) compute(stored domain.LoginVerifier, presented string) Result {
+	return inspectAndCompare(stored.Reveal(), presented, true)
+}
+
 // MeetsDeclared — отвечает ли хранимое значение объявленному формату и
 // объявленным параметрам (PWV-11, строки 11.2 и 11.4).
 //
@@ -436,4 +444,208 @@ func withinAdmissibility(format domain.PasswordHashFormat, param domain.Password
 		return false
 	}
 	return value >= rng.Min && value <= rng.Max
+}
+
+// --- набор запасных кодов (Ф12 Р6, kacho#1281) ---
+//
+// Материал набора — та же разметка PHC, что у пароля, но тело — ЭЛЕМЕНТЫ между
+// запятыми с запятой по краям (форма — `hasher.go`, `HashSet`). Сверка
+// предъявленного — ОДНО вычисление медленного хеша солью набора (ДО замка
+// строки — `SetCandidate`) и сравнение постоянным временем с КАЖДЫМ элементом,
+// без остановки на первом совпавшем (ПОД замком — `MatchSet`). Кандидат
+// вычислен из предъявленного кода и соли — это НЕ материал строки, поэтому его
+// значение вправе уйти адаптеру как элемент к снятию.
+//
+// Исходы набора в клетки проверяющего ПАРОЛЯ не идут: их считает полоса по
+// способу × исходу (Ф12-43), а не приёмник этого файла.
+
+// setCandidateRedacted — заглушка на общих путях вывода кандидата.
+const setCandidateRedacted = "[redacted lookup candidate]"
+
+// SetCandidate — хеш предъявленного кода солью и параметрами набора, вычисленный
+// до замка строки; либо отказ вычислить (ёмкость, материал).
+type SetCandidate struct {
+	box     *setCandidateBox
+	refusal Outcome
+}
+
+type setCandidateBox struct {
+	element string
+}
+
+// Ready — кандидат вычислен.
+func (c SetCandidate) Ready() bool { return c.box != nil }
+
+// Refusal — почему не вычислен (пусто, когда Ready).
+func (c SetCandidate) Refusal() Outcome { return c.refusal }
+
+// Element — значение элемента набора, совпадающее с хранимым при верном коде;
+// адаптер снимает его из набора по значению. Пусто, когда кандидата нет.
+func (c SetCandidate) Element() string {
+	if c.box == nil {
+		return ""
+	}
+	return c.box.element
+}
+
+// String — заглушка; кандидат в журнал не печатается.
+func (c SetCandidate) String() string { return setCandidateRedacted }
+
+// Format — заглушка на любом глаголе форматирования.
+func (c SetCandidate) Format(f fmt.State, _ rune) { _, _ = fmt.Fprint(f, setCandidateRedacted) }
+
+// SetMatch — исход сравнения кандидата с набором под замком.
+type SetMatch struct {
+	// Outcome — совпал · не совпал · материала нет · наши отказы разбора.
+	Outcome Outcome
+	// Remaining — элементов в наборе ДО потребления (0 у исчерпанного);
+	// осмысленно, когда набор читается.
+	Remaining int
+}
+
+// SetCandidate — см. шапку раздела. Занимает ёмкость проверяющего (та же, что
+// у пароля — PWV-15): «материала нет» платит ту же цену над холостым значением
+// (PWV-06, Ф12-33).
+func (v *Verifier) SetCandidate(stored domain.LoginVerifier, presented string) SetCandidate {
+	release, ok := v.capacity.acquire()
+	if !ok {
+		return SetCandidate{refusal: OutcomeCapacityExhausted}
+	}
+	defer release()
+	if stored.IsZero() {
+		if !v.decoy.IsZero() {
+			_ = inspectAndCompare(v.decoy.Reveal(), presented, true)
+		}
+		return SetCandidate{refusal: OutcomeMaterialMissing}
+	}
+	hdr, res := inspectSet(stored.Reveal())
+	if res.Outcome != OutcomeMismatched {
+		return SetCandidate{refusal: res.Outcome}
+	}
+	// Граница приведения проверена разбором: `inspectSet` отвечает не «читается»
+	// на параллельности выше MaxUint8, и сюда такой заголовок не доходит.
+	key := argon2.IDKey([]byte(normalizeBackupCode(presented)), hdr.salt, hdr.iterations, hdr.memory, uint8(hdr.parallelism), argon2idKeyLen) // #nosec G115 -- см. границу в inspectSet
+	return SetCandidate{box: &setCandidateBox{element: base64.RawStdEncoding.EncodeToString(key)}}
+}
+
+// MatchSet — сравнение кандидата с КАЖДЫМ элементом набора постоянным
+// временем; остаток — число элементов до потребления.
+func (v *Verifier) MatchSet(stored domain.LoginVerifier, c SetCandidate) SetMatch {
+	if !c.Ready() {
+		return SetMatch{Outcome: c.refusal}
+	}
+	if stored.IsZero() {
+		return SetMatch{Outcome: OutcomeMaterialMissing}
+	}
+	hdr, res := inspectSet(stored.Reveal())
+	if res.Outcome != OutcomeMismatched {
+		return SetMatch{Outcome: res.Outcome}
+	}
+	matched := 0
+	for _, e := range hdr.elements {
+		matched |= subtle.ConstantTimeCompare([]byte(e), []byte(c.box.element))
+	}
+	if matched == 1 {
+		return SetMatch{Outcome: OutcomeMatched, Remaining: len(hdr.elements)}
+	}
+	return SetMatch{Outcome: OutcomeMismatched, Remaining: len(hdr.elements)}
+}
+
+// SetSize — элементов в наборе (остаток); ok=false — материал не читается как
+// набор.
+func (v *Verifier) SetSize(stored domain.LoginVerifier) (int, bool) {
+	if stored.IsZero() {
+		return 0, false
+	}
+	hdr, res := inspectSet(stored.Reveal())
+	if res.Outcome != OutcomeMismatched {
+		return 0, false
+	}
+	return len(hdr.elements), true
+}
+
+// InspectSet — разбор материала набора без сверки: формат и параметры (числа);
+// исход «не совпал» означает «читается» (как у MeetsDeclared).
+func (v *Verifier) InspectSet(stored domain.LoginVerifier) Result {
+	if stored.IsZero() {
+		return Result{Outcome: OutcomeMaterialMissing}
+	}
+	_, res := inspectSet(stored.Reveal())
+	return res
+}
+
+// setHeader — разобранный набор: соль, параметры и элементы.
+type setHeader struct {
+	salt                            []byte
+	memory, iterations, parallelism uint32
+	elements                        []string
+}
+
+// inspectSet — разбор материала набора той же дисциплины, что compareArgon2id:
+// область допустимости и потолок сверяются ДО любого вычисления; параметры
+// ниже пола области — «тело не разбирается».
+func inspectSet(material string) (setHeader, Result) {
+	if !strings.HasPrefix(material, argon2idMarkerPrefix) {
+		return setHeader{}, Result{Outcome: OutcomeFormatNotInRegistry}
+	}
+	record, ok := domain.PasswordHashFormatByMarker(string(domain.PasswordHashFormatArgon2id))
+	if !ok {
+		return setHeader{}, Result{Outcome: OutcomeFormatNotInRegistry}
+	}
+	unreadable := Result{Outcome: OutcomeBodyNotParsable, Format: domain.PasswordHashFormatArgon2id}
+	rest := material[len(argon2idMarkerPrefix):]
+	if !strings.HasPrefix(rest, argon2idVersionPrefix) {
+		return setHeader{}, unreadable
+	}
+	rest = rest[len(argon2idVersionPrefix):]
+	paramsPart, saltAndBody, found := strings.Cut(rest, "$")
+	if !found {
+		return setHeader{}, unreadable
+	}
+	saltPart, bodyPart, found := strings.Cut(saltAndBody, "$")
+	if !found || strings.Contains(bodyPart, "$") {
+		return setHeader{}, unreadable
+	}
+	// Тело набора: запятая по краям, элементы между. Одиночный хеш пароля
+	// (без запятых) набором НЕ является — та же строка не годится обоим
+	// читателям.
+	if !strings.HasPrefix(bodyPart, setElementSeparator) || !strings.HasSuffix(bodyPart, setElementSeparator) {
+		return setHeader{}, unreadable
+	}
+	memory, iterations, parallelism, ok := parseArgon2idParams(paramsPart)
+	if !ok {
+		return setHeader{}, unreadable
+	}
+	salt, err := base64.RawStdEncoding.DecodeString(saltPart)
+	if err != nil || len(salt) == 0 {
+		return setHeader{}, unreadable
+	}
+	if !withinAdmissibility(domain.PasswordHashFormatArgon2id, domain.CostParamArgon2Memory, memory) ||
+		!withinAdmissibility(domain.PasswordHashFormatArgon2id, domain.CostParamArgon2Iterations, iterations) ||
+		!withinAdmissibility(domain.PasswordHashFormatArgon2id, domain.CostParamArgon2Parallelism, parallelism) ||
+		uint64(memory) < 8*uint64(parallelism) || parallelism > math.MaxUint8 {
+		return setHeader{}, unreadable
+	}
+	params := map[domain.PasswordHashCostParam]uint32{
+		domain.CostParamArgon2Memory:      memory,
+		domain.CostParamArgon2Iterations:  iterations,
+		domain.CostParamArgon2Parallelism: parallelism,
+	}
+	if memory > record.Ceiling[domain.CostParamArgon2Memory] ||
+		iterations > record.Ceiling[domain.CostParamArgon2Iterations] ||
+		parallelism > record.Ceiling[domain.CostParamArgon2Parallelism] {
+		return setHeader{}, Result{Outcome: OutcomeParamsAboveCeiling, Format: domain.PasswordHashFormatArgon2id, Params: params}
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(bodyPart, setElementSeparator), setElementSeparator)
+	var elements []string
+	if inner != "" {
+		elements = strings.Split(inner, setElementSeparator)
+		for _, e := range elements {
+			if e == "" {
+				return setHeader{}, unreadable
+			}
+		}
+	}
+	return setHeader{salt: salt, memory: memory, iterations: iterations, parallelism: parallelism, elements: elements},
+		Result{Outcome: OutcomeMismatched, Format: domain.PasswordHashFormatArgon2id, Params: params}
 }

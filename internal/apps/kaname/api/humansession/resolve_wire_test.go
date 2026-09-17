@@ -87,7 +87,8 @@ func TestResolveHandler_F3_27_FiveCausesOneWireAnswer(t *testing.T) {
 	require.True(t, resp.GetFound())
 	// Состав Р1 на проводе (Ф3-09, половина службы): личность, момент
 	// аутентификации в МИКРОСЕКУНДАХ (§4.1 п.19), срок, уровень, подтверждённость
-	// адреса, требование смены — каждое поле, и ни одного иного.
+	// адреса — каждое поле, и ни одного иного. Требования сменить пароль в
+	// составе нет (kacho#2697, kaname#201) — это судит проба контракта ниже.
 	sess := resp.GetSession()
 	require.Equal(t, string(u.ID), sess.GetUserId())
 	require.Equal(t, "a@example.invalid", sess.GetEmail())
@@ -97,5 +98,26 @@ func TestResolveHandler_F3_27_FiveCausesOneWireAnswer(t *testing.T) {
 	require.True(t, sess.GetExpiresAt().AsTime().Equal(live.View.Session.ExpiresAt.Truncate(time.Second)), "срок — до секунды (конвенция)")
 	require.Equal(t, "1", sess.GetAssuranceLevel())
 	require.True(t, sess.GetEmailVerified())
-	require.False(t, sess.GetPasswordChangeRequired())
+}
+
+// TestResolveWire_KN201_ContractCarriesNoPasswordChangeRequired — поле сессии
+// `password_change_required` снято с контракта решением kacho#2697 (исход 3
+// `api-conventions.md` §«Принято-и-проигнорировано»): производителя значения
+// `true` в прод-коде не было ни одного, а читатели у поля были — клиент писал
+// обработку состояния, которого не бывает. Снятие — с `reserved` номера И имени:
+// номер 8 не может быть занят другим полем, имя — вернуться под другим номером.
+//
+// Судится ДЕСКРИПТОР сообщения, а не порождённый Go-тип: `reserved` — факт
+// контракта, и на Go-типе он не виден ничем. Положительный контроль — соседнее
+// поле состава на месте, иначе «поля нет» было бы верно и на пустом сообщении.
+func TestResolveWire_KN201_ContractCarriesNoPasswordChangeRequired(t *testing.T) {
+	desc := (&iamv1.HumanSession{}).ProtoReflect().Descriptor()
+
+	require.NotNil(t, desc.Fields().ByName("email_verified"), "положительный контроль: состав Р1 на месте")
+	require.Nil(t, desc.Fields().ByName("password_change_required"),
+		"поле снято с контракта (kacho#2697): читателей у него не осталось, производителя не было")
+	require.True(t, desc.ReservedNames().Has("password_change_required"),
+		"имя зарезервировано — под другим номером оно вернуться не может")
+	require.True(t, desc.ReservedRanges().Has(8),
+		"номер 8 зарезервирован — другое поле его занять не может")
 }

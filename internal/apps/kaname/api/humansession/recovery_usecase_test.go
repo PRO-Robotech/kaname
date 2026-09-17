@@ -123,7 +123,9 @@ func TestRecovery_F5_03_CorrectCodeCompletesInOneOutcome(t *testing.T) {
 	s := out.View.Session
 	require.Equal(t, []string{"recovery_code"}, s.PresentedMethods, "множество предъявленного — код (Ф11 Р8)")
 	require.Equal(t, "1", s.AssuranceLevel, "уровень — нижняя ступень по правилу Ф11")
-	require.False(t, s.PasswordChangeRequired, "пароль задан этим же исходом — требования нет")
+	// «пароль задан этим же исходом — требования нет» держится построением:
+	// поля требования у сессии нет (kacho#2697, kaname#201); Ф5-24 — сессия
+	// восстановления полноправна.
 	require.True(t, s.AuthenticatedAt.After(h.clock), "сессия аутентифицирована ПОЗЖЕ отсечки (Ф5-19, Ф1 §4.2)")
 	require.True(t, s.AuthenticatedAt.Equal(h.clock.Add(time.Microsecond)), "на единицу разрешения позже отсечки")
 	require.True(t, s.ExpiresAt.Equal(s.AuthenticatedAt.Add(ucTTL)))

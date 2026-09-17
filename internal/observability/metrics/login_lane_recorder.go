@@ -9,10 +9,14 @@ package metrics
 // жизнь» обязано быть отличимо от «клетки нет».
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
+	"github.com/PRO-Robotech/kaname/internal/assurance"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 )
 
@@ -31,6 +35,16 @@ const (
 	// запрос кода и один отказ на предъявление; причина — только здесь.
 	RecoveryRequestOutcomesMetric    = Namespace + "_recovery_request_outcomes_total"
 	RecoveryCompletionOutcomesMetric = Namespace + "_recovery_completion_outcomes_total"
+	// Огибающая по потолку (Ф3-31, решение kaname#188): потолок, стоимость
+	// каждого калиброванного класса, калибровки по поводу.
+	LoginTimingEnvelopeFloorMetric = Namespace + "_login_timing_envelope_seconds"
+	LoginTimingClassCostMetric     = Namespace + "_login_timing_class_cost_seconds"
+	LoginTimingCalibrationsMetric  = Namespace + "_login_timing_calibrations_total"
+	// Второй фактор (Ф12, kacho#1281; Ф12-43): предъявления по способу × исходу,
+	// отказы по состоянию/свежести/недоступности, события.
+	SecondFactorPresentationsMetric = Namespace + "_second_factor_presentations_total"
+	SecondFactorRefusalsMetric      = Namespace + "_second_factor_refusals_total"
+	SecondFactorEventsMetric        = Namespace + "_second_factor_events_total"
 )
 
 // LoginLaneRecorder — приёмник событий полосы (`humansession.Observer`) и
@@ -48,6 +62,13 @@ type LoginLaneRecorder struct {
 	register  *prometheus.CounterVec
 	recReq    *prometheus.CounterVec
 	recDone   *prometheus.CounterVec
+	// Огибающая по потолку.
+	envFloor     prometheus.Gauge
+	envClassCost *prometheus.GaugeVec
+	envCalibs    *prometheus.CounterVec
+	sfPresent    *prometheus.CounterVec
+	sfRefuse     *prometheus.CounterVec
+	sfEvent      *prometheus.CounterVec
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -116,9 +137,44 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 					"expired or already used), blocked person, rate limited, new password rejected by the rule, " +
 					"store failed. The caller always sees ONE refusal; the cause is visible only here.",
 			}, []string{"outcome"}),
+			envFloor: prometheus.NewGauge(prometheus.GaugeOpts{
+				Name: LoginTimingEnvelopeFloorMetric,
+				Help: "Timing envelope floor of the password sign-in lane, seconds: no outcome after the rate gate " +
+					"leaves earlier. Calibrated at start as the cost of the dearest stored cost class (or the " +
+					"class the product writes) plus headroom; zero means no class has been calibrated.",
+			}),
+			envClassCost: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Name: LoginTimingClassCostMetric,
+				Help: "Calibrated verification cost per stored cost class, seconds, by format and parameters. " +
+					"The maximum across classes is what the envelope floor is derived from; a class present here " +
+					"is a class present in the store or written by the product.",
+			}, []string{"format", "params"}),
+			envCalibs: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: LoginTimingCalibrationsMetric,
+				Help: "Cost-class calibrations of the timing envelope by trigger: startup (store census and the " +
+					"writing knob), read (the sign-in lane met a class the envelope did not know — a value was " +
+					"stored past this process).",
+			}, []string{"trigger"}),
+			sfPresent: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: SecondFactorPresentationsMetric,
+				Help: "Second-factor code presentations by method (totp, lookup_secret) and outcome: matched, " +
+					"mismatched, replayed (totp only), material-unreadable (our stored material does not open — " +
+					"a finding about the key ring, not the caller), capacity-exhausted (lookup_secret only). " +
+					"Presentations judged after a wrong password are not counted here: the password never opened them.",
+			}, []string{"method", "outcome"}),
+			sfRefuse: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: SecondFactorRefusalsMetric,
+				Help: "Second-factor refusals that are NOT attempts: not enrolled, already enrolled, no pending " +
+					"enrollment, session not fresh, material unavailable.",
+			}, []string{"reason"}),
+			sfEvent: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: SecondFactorEventsMetric,
+				Help: "Second-factor lifecycle events: enrollment started/confirmed, factor removed, backup codes " +
+					"regenerated, a backup code consumed.",
+			}, []string{"event"}),
 		}
 		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource,
-			rec.register, rec.recReq, rec.recDone)
+			rec.register, rec.recReq, rec.recDone, rec.envFloor, rec.envClassCost, rec.envCalibs, rec.sfPresent, rec.sfRefuse, rec.sfEvent)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -152,6 +208,19 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		}
 		for _, o := range humansession.RecoveryCompletionOutcomes() {
 			rec.recDone.WithLabelValues(string(o)).Add(0)
+		}
+		for _, tr := range passwordverify.EnvelopeTriggers() {
+			rec.envCalibs.WithLabelValues(string(tr)).Add(0)
+		}
+		rec.envFloor.Set(0)
+		for _, c := range humansession.PresentationCells() {
+			rec.sfPresent.WithLabelValues(c.Method.String(), string(c.Outcome)).Add(0)
+		}
+		for _, o := range humansession.SecondFactorRefusals() {
+			rec.sfRefuse.WithLabelValues(string(o)).Add(0)
+		}
+		for _, o := range humansession.SecondFactorEvents() {
+			rec.sfEvent.WithLabelValues(string(o)).Add(0)
 		}
 		r.loginLane = rec
 	})
@@ -203,8 +272,32 @@ func (l *LoginLaneRecorder) RecoveryCompletionObserved(o humansession.RecoveryCo
 	l.recDone.WithLabelValues(string(o)).Inc()
 }
 
+// ClassCalibrated — класс калиброван: его стоимость и повод (Ф3-31, kaname#188).
+func (l *LoginLaneRecorder) ClassCalibrated(class domain.PasswordCostClass, cost time.Duration, trigger passwordverify.EnvelopeTrigger) {
+	l.envClassCost.WithLabelValues(string(class.Format), class.ParamsLabel()).Set(cost.Seconds())
+	l.envCalibs.WithLabelValues(string(trigger)).Inc()
+}
+
+// EnvelopeFloorObserved — потолок огибающей сменился.
+func (l *LoginLaneRecorder) EnvelopeFloorObserved(floor time.Duration, _ domain.PasswordCostClass) {
+	l.envFloor.Set(floor.Seconds())
+}
+
+func (l *LoginLaneRecorder) SecondFactorPresentationObserved(m assurance.Method, o humansession.PresentationOutcome) {
+	l.sfPresent.WithLabelValues(m.String(), string(o)).Inc()
+}
+
+func (l *LoginLaneRecorder) SecondFactorRefusalObserved(o humansession.SecondFactorRefusal) {
+	l.sfRefuse.WithLabelValues(string(o)).Inc()
+}
+
+func (l *LoginLaneRecorder) SecondFactorEventObserved(o humansession.SecondFactorEvent) {
+	l.sfEvent.WithLabelValues(string(o)).Inc()
+}
+
 var (
-	_ humansession.Observer   = (*LoginLaneRecorder)(nil)
-	_ passwordverify.Observer = (*LoginLaneRecorder)(nil)
-	_ registration.Observer   = (*LoginLaneRecorder)(nil)
+	_ humansession.Observer           = (*LoginLaneRecorder)(nil)
+	_ passwordverify.Observer         = (*LoginLaneRecorder)(nil)
+	_ passwordverify.EnvelopeObserver = (*LoginLaneRecorder)(nil)
+	_ registration.Observer           = (*LoginLaneRecorder)(nil)
 )

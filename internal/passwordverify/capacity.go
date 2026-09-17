@@ -20,7 +20,10 @@ package passwordverify
 // Захват здесь — одна неблокирующая отправка в канал: занято место или нет,
 // решает сам оператор, и разнести решение с его следствием нечем by construction.
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // capacityGate — ёмкость как набор мест.
 type capacityGate struct {
@@ -61,4 +64,25 @@ func (g *capacityGate) acquire() (func(), bool) {
 	default:
 		return func() {}, false
 	}
+}
+
+// acquireWait — занять место, ДОЖДАВШИСЬ его; срок ожидания — контекст
+// вызывающего. Нужен калибровке огибающей: она считает ту же функцию, что и
+// проверка, и той же памятью, поэтому идёт в бюджете ёмкости, а не мимо него.
+// Полоса входа этим путём не ходит: у неё исчерпание — свой исход, а не
+// очередь.
+func (g *capacityGate) acquireWait(ctx context.Context) (func(), error) {
+	select {
+	case g.slots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	released := false
+	return func() {
+		if released {
+			return
+		}
+		released = true
+		<-g.slots
+	}, nil
 }

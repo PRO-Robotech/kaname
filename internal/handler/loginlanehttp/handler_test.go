@@ -69,6 +69,26 @@ type stubLane struct {
 	completeErr error
 	requestIn   []humansession.RequestRecoveryInput
 	completeIn  []humansession.CompleteRecoveryInput
+
+	// Второй фактор (Ф12) — методы в second_factor_test.go.
+	enrollOut  humansession.EnrollOutput
+	enrollErr  error
+	confirmOut humansession.ConfirmOutput
+	confirmErr error
+	statusOut  humansession.StatusOutput
+	statusErr  error
+	removeOut  humansession.RemoveSecondFactorOutput
+	removeErr  error
+	regenOut   humansession.RegenerateBackupCodesOutput
+	regenErr   error
+	stepUpOut  humansession.StepUpOutput
+	stepUpErr  error
+	enrollIn   []humansession.EnrollInput
+	confirmIn  []humansession.ConfirmInput
+	statusIn   []humansession.StatusInput
+	removeIn   []humansession.RemoveSecondFactorInput
+	regenIn    []humansession.RegenerateBackupCodesInput
+	stepUpIn   []humansession.StepUpInput
 }
 
 func (s *stubLane) Register(_ context.Context, in registration.Input) (registration.Output, error) {
@@ -151,6 +171,15 @@ type lane struct {
 
 func newLane(t *testing.T, stub *stubLane, cookieDomain string) *lane {
 	t.Helper()
+	l := newLaneOver(t, stub, cookieDomain)
+	l.stub = stub
+	return l
+}
+
+// newLaneOver — слушатель над ЛЮБЫМИ глаголами: дублёром либо настоящим
+// вариантом использования (интеграционная проба входа со вторым фактором).
+func newLaneOver(t *testing.T, verbs loginlanehttp.Lane, cookieDomain string) *lane {
+	t.Helper()
 	ca := newCA(t)
 	h, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    24 * time.Hour,
@@ -158,7 +187,7 @@ func newLane(t *testing.T, stub *stubLane, cookieDomain string) *lane {
 		TrustDomain:   grpcsrv.NewTrustDomain(trustDomain),
 		RefusalDomain: "iam.kaname.cloud",
 		Logger:        slog.New(slog.DiscardHandler),
-	}, stub)
+	}, verbs)
 	require.NoError(t, err)
 	srv := httptest.NewUnstartedServer(h)
 	pool := x509.NewCertPool()
@@ -171,7 +200,7 @@ func newLane(t *testing.T, stub *stubLane, cookieDomain string) *lane {
 	}
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
-	return &lane{srv: srv, ca: ca, stub: stub}
+	return &lane{srv: srv, ca: ca}
 }
 
 func (l *lane) client(t *testing.T, san string) *http.Client {
@@ -308,7 +337,8 @@ func TestLane_F3_01_LoginIssuesTheSessionCookieAndANewFormContext(t *testing.T) 
 	sess := body["session"].(map[string]any)
 	require.Equal(t, "1", sess["assuranceLevel"])
 	require.Equal(t, true, sess["emailVerified"])
-	require.Equal(t, false, sess["passwordChangeRequired"])
+	_, carriesRequirement := sess["passwordChangeRequired"]
+	require.False(t, carriesRequirement, "kaname#201: ключа требования сменить пароль в теле сессии нет — поле снято с контракта (kacho#2697)")
 	require.Equal(t, base.Add(24*time.Hour).Format(time.RFC3339), sess["expiresAt"], "expiresAt с точностью до секунды")
 	require.NotContains(t, r.body, bearer.CookieValue(), "носитель не в теле")
 

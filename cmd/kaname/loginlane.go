@@ -34,6 +34,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -44,9 +45,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/servicecontract"
 	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/loginmethod"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	userapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/user"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
@@ -55,11 +58,13 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients/breachcheck"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
+	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
 // knobLoginLane — ручка адреса слушателя полосы формы.
@@ -72,6 +77,17 @@ const breachCheckTimeout = 5 * time.Second
 // пути ответа: запись двух строк одной транзакцией, а не разговор с узлом.
 const recoveryDispatchTimeout = 30 * time.Second
 
+// envelopeCensusTimeout — предел переписи классов стоимости при старте: один
+// последовательный проход по таблице способов (индекса по материалу нет
+// намеренно — шапка её миграции). Калибровка классов в этот срок не входит:
+// у неё свой предел ниже.
+const envelopeCensusTimeout = 60 * time.Second
+
+// envelopeCalibrationTimeout — предел калибровки ОДНОГО класса: пять прогонов
+// плюс построение значения; класс на потолке наследуемого формата (bcrypt 14)
+// стоит около секунды на прогон на машине разработки, на слабом поде — больше.
+const envelopeCalibrationTimeout = 2 * time.Minute
+
 // loginLane — всё, что корень собирает под полосу; nil — полосы нет.
 type loginLane struct {
 	handler    *loginlanehttp.Handler
@@ -80,6 +96,9 @@ type loginLane struct {
 	methods    *kanamepg.LoginMethodRepo
 	limits     humansession.Limits
 	dispatcher *humansession.GoDispatcher
+	// freshness — окно свежести правки своих данных (Ф12 Р8): срок `pending`
+	// и порог уборки заведений — та же величина.
+	freshness time.Duration
 }
 
 // drain — дождаться постановок письма, начатых до гашения (Ф5 Р2): ответ их не
@@ -100,17 +119,36 @@ func loginLaneWanted(cfg config.Config) bool {
 func (l *loginLane) wired() bool { return l != nil && l.sessions != nil && l.methods != nil }
 
 // signInMethods — способы входа человека, чьи проверяющие собраны ЭТИМ корнем:
-// пароль, пока полоса поднята. Второй фактор — Ф12.
+// пароль, код по времени и запасной код (Ф12): проверяющие обоих кодов
+// собираются вместе с полосой, поэтому пока полоса поднята — собраны все три.
 func (l *loginLane) signInMethods() []assurance.Method {
 	if !l.wired() {
 		return nil
 	}
-	return []assurance.Method{assurance.MethodPassword}
+	return []assurance.Method{assurance.MethodPassword, assurance.MethodTOTP, assurance.MethodLookupSecret}
 }
 
 // laneWiringOf — вклад полосы в наблюдение провязки.
 func laneWiringOf(l *loginLane) config.LaneWiring {
 	return config.LaneWiring{HumanCredentialsWired: l.wired(), HumanSessionsWired: l.wired()}
+}
+
+// resetSecondFactorUseCase — сброс второго фактора распорядителем (Ф12 Р10)
+// теми же хранилищами, что полоса: чтение строки способа — хранилище способов,
+// снятие/отсечка/событие — писатель хранилища сессий; nil — полосы нет.
+func (l *loginLane) resetSecondFactorUseCase(repo kanamerepo.Repository, opsRepo operations.Repo) *userapp.ResetSecondFactorUseCase {
+	if !l.wired() {
+		return nil
+	}
+	return userapp.NewResetSecondFactorUseCase(repo, opsRepo, l.methods, secondFactorResetStore{sessions: l.sessions})
+}
+
+// secondFactorResetStore — адаптер хранилища сессий к порту сброса: писатель
+// сессии несёт все четыре операции порта, соответствие закрепляется здесь.
+type secondFactorResetStore struct{ sessions *kanamepg.HumanSessionRepo }
+
+func (s secondFactorResetStore) ResetWriter(ctx context.Context) (userapp.SecondFactorResetWriter, error) {
+	return s.sessions.Writer(ctx)
 }
 
 // resolveHandler — `Resolve` для внутреннего слушателя; nil — полосы нет.
@@ -128,6 +166,7 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 	}
 	return retention.HumanSessionReapers{
 		Sessions: l.sessions, Failures: l.sessions, Codes: l.sessions, LongestWindow: l.limits.LongestWindow(),
+		Enrollments: l.methods, EnrollmentWindow: l.freshness,
 	}
 }
 
@@ -194,10 +233,85 @@ func writeProbeFile(path, body string) error {
 	return os.WriteFile(path, []byte(body), 0o600)
 }
 
+// envelopeReport — самоотчёт калибровки огибающей при старте (Ф3-31, решение
+// kaname#188): что прочитано, что калибровано, что не читается.
+type envelopeReport struct {
+	// RowsCounted — строк способа «пароль» в хранилище, по переписи.
+	RowsCounted int64
+	// ClassesCalibrated — классов, калиброванных этим стартом (перепись ∪
+	// ручка; класс ручки, лежащий и в хранилище, считается один раз).
+	ClassesCalibrated int
+	// UnreadableRows / UnreadablePrefixes — строк и префиксов переписи, чей
+	// класс проверяющий не читает: признак вне перечня, негодная стоимость,
+	// выше потолка записи. Находка о хранилище, не отказ старта: отказ входа
+	// по таким строкам приходит без вычисления (ID-PW-1 Р4, PWV-04/05/14).
+	UnreadableRows     int64
+	UnreadablePrefixes int
+	// Floor — потолок после калибровки; CeilingClass — класс-потолок.
+	Floor        time.Duration
+	CeilingClass string
+}
+
+// calibrateLoginEnvelope — огибающая по потолку ФАКТИЧЕСКОЙ популяции: каждый
+// читаемый класс переписи хранилища и класс ручки «что писать» — калибровкой
+// (повод `startup`). Класс ручки, который проверяющий не читает, — отказ:
+// огибающей, не покрывающей то, что продукт сам пишет, не бывает.
+func calibrateLoginEnvelope(ctx context.Context, envelope *passwordverify.Envelope,
+	census []loginmethod.CostClassCount, declared domain.PasswordCostClass, logger *slog.Logger,
+) (envelopeReport, error) {
+	var report envelopeReport
+	admit := func(class domain.PasswordCostClass) (passwordverify.Admission, error) {
+		cctx, cancel := context.WithTimeout(ctx, envelopeCalibrationTimeout)
+		defer cancel()
+		return envelope.Admit(cctx, class, passwordverify.EnvelopeTriggerStartup)
+	}
+	for _, row := range census {
+		report.RowsCounted += row.Rows
+		class, err := passwordverify.ParseCostClassPrefix(row.Prefix)
+		if err != nil {
+			report.UnreadableRows += row.Rows
+			report.UnreadablePrefixes++
+			logger.Error("sign-in lane timing envelope: stored class is not readable by the verifier — a finding about the store, not a refusal to start",
+				"rows", row.Rows, "err", err.Error())
+			continue
+		}
+		adm, err := admit(class)
+		var unreadable *passwordverify.ClassNotReadableError
+		switch {
+		case errors.As(err, &unreadable):
+			report.UnreadableRows += row.Rows
+			report.UnreadablePrefixes++
+			logger.Error("sign-in lane timing envelope: stored class is not readable by the verifier — a finding about the store, not a refusal to start",
+				"class", class.Key(), "rows", row.Rows, "outcome", string(unreadable.Outcome))
+			continue
+		case err != nil:
+			return envelopeReport{}, fmt.Errorf("sign-in lane timing envelope: class %s from the store: %w", class.Key(), err)
+		}
+		if adm.Calibrated {
+			report.ClassesCalibrated++
+		}
+		logger.Info("sign-in lane timing envelope: class calibrated", "class", class.Key(), "rows", row.Rows, "cost", adm.Cost)
+	}
+	adm, err := admit(declared)
+	if err != nil {
+		return envelopeReport{}, fmt.Errorf("sign-in lane timing envelope: the class the product writes (%s) could not be calibrated: %w", declared.Key(), err)
+	}
+	if adm.Calibrated {
+		report.ClassesCalibrated++
+		logger.Info("sign-in lane timing envelope: class calibrated", "class", declared.Key(), "rows", 0, "cost", adm.Cost)
+	}
+	ceiling, ok := envelope.Ceiling()
+	if !ok {
+		return envelopeReport{}, fmt.Errorf("sign-in lane timing envelope: no class calibrated — the lane would answer with the verification time")
+	}
+	report.Floor, report.CeilingClass = envelope.Floor(), ceiling.Class.Key()
+	return report, nil
+}
+
 // buildLoginLane — полоса под `own`; под `external` — nil без ошибки.
 // reconciler — материализация собственнической выдачи после регистрации: тот
 // же экземпляр, что у пути запроса; nil-safe (уборка доберёт по намерениям).
-func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repository,
+func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repository,
 	reconciler *reconcileapp.Reconciler, reg *metrics.Registry, logger *slog.Logger,
 ) (*loginLane, error) {
 	if !loginLaneWanted(cfg) {
@@ -240,6 +354,34 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 	if err := verifier.SetDecoy(decoy); err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	sessions := kanamepg.NewHumanSessionRepo(pool)
+	methods := kanamepg.NewLoginMethodRepo(pool)
+	// Огибающая по потолку (Ф3-31, решение kaname#188): перепись классов
+	// хранилища ∪ класс ручки, каждый — калибровкой прогоном проверяющего.
+	// Перепись не удалась — отказ старта: огибающая только по классу ручки
+	// оставила бы популяцию переноса отличимой по времени.
+	envelope, err := passwordverify.NewEnvelope(verifier, rec)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	censusCtx, cancelCensus := context.WithTimeout(ctx, envelopeCensusTimeout)
+	census, err := methods.PasswordCostClasses(censusCtx)
+	cancelCensus()
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane timing envelope: cost-class census of the store: %w", err)
+	}
+	report, err := calibrateLoginEnvelope(ctx, envelope,
+		census, domain.PasswordCostClass{Format: login.Declared().Format, Params: login.Declared().Params}, logger)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("sign-in lane timing envelope",
+		"floor", report.Floor,
+		"ceiling_class", report.CeilingClass,
+		"classes_calibrated", report.ClassesCalibrated,
+		"rows_counted", report.RowsCounted,
+		"unreadable_rows", report.UnreadableRows,
+		"unreadable_prefixes", report.UnreadablePrefixes)
 	var breach humansession.BreachChecker
 	if login.BreachCheckOn() {
 		client, berr := breachcheck.New(login.BreachCheckURL, breachCheckTimeout)
@@ -257,11 +399,29 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 		AddressAttempts: login.AddressAttempts, AddressWindow: login.AddressWindow,
 		SourceAttempts: login.SourceAttempts, SourceWindow: login.SourceWindow,
 	}
-	sessions := kanamepg.NewHumanSessionRepo(pool)
-	methods := kanamepg.NewLoginMethodRepo(pool)
+	// Второй фактор (Ф12): своё кольцо ключей обёртки секретов (Р2) — первый
+	// оборачивает, все открывают; число ключей печатается всегда, как у
+	// приватной половины подписи (`signing.go`).
+	sfKeys, err := cfg.AuthN.ResolveSecondFactorEncryptionKeys()
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: second factor wrapping keys: %w", err)
+	}
+	sfWrapper, err := keywrap.New(sfKeys...)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: second factor wrapper: %w", err)
+	}
+	logger.Info("second-factor wrapping keys declared",
+		slog.Int("keys", sfWrapper.KeyCount()),
+		slog.String("knob", "authn.second-factor-encryption-key-hex"),
+		slog.String("env", cfg.AuthN.SecondFactorEncryptionKeyEnvName()))
+	totp, err := totpverify.New(sfWrapper)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: totp verifier: %w", err)
+	}
 	loginUC, err := humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: sessions, Users: kanamepg.NewUserDirectory(repo), Methods: methods, Verifier: verifier,
 		Hasher: hasher, Limits: limits, TTL: login.SessionTTL, Observer: rec, Now: time.Now, Logger: logger,
+		Envelope: envelope, TOTP: totp, Sets: verifier,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
@@ -309,6 +469,42 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Второй фактор (Ф12): шесть глаголов одними зависимостями — те же
+	// хранилища, тот же проверяющий пароля (он же проверяющий набора, Р6), тот
+	// же хешер (он же чеканит набор), окно свежести Р8 и доменное имя посадки
+	// как издатель `otpauth`-адреса (Р5).
+	if err := cfg.AuthN.ValidateSelfServiceFreshness(); err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	sfDeps := humansession.SecondFactorDeps{
+		Store: sessions, Methods: methods, TOTP: totp, Sets: verifier, SetHasher: hasher, Verifier: verifier,
+		Limits: limits, Freshness: cfg.AuthN.SelfServiceFreshness, Domain: cfg.AuthN.ResolveDomain(),
+		Observer: rec, Now: time.Now, Logger: logger,
+	}
+	enrollUC, err := humansession.NewEnrollSecondFactorUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	confirmUC, err := humansession.NewConfirmSecondFactorUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	statusUC, err := humansession.NewSecondFactorStatusUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	removeUC, err := humansession.NewRemoveSecondFactorUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	regenerateUC, err := humansession.NewRegenerateBackupCodesUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	stepUpUC, err := humansession.NewStepUpUseCase(sfDeps)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	handler, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    login.SessionTTL,
 		CookieDomain:  login.ResolvedCookieDomain(),
@@ -316,13 +512,17 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 		RefusalDomain: refusaldomain.For(refusaldomain.ServiceIAM),
 		Logger:        logger,
 		Observer:      rec,
-	}, laneVerbs{login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC})
+	}, laneVerbs{
+		login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC,
+		enroll: enrollUC, confirm: confirmUC, status: statusUC, remove: removeUC, regenerate: regenerateUC, stepUp: stepUpUC,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
 	return &loginLane{
 		handler: handler, resolve: humansession.NewHandler(resolveUC),
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
+		freshness: cfg.AuthN.SelfServiceFreshness,
 	}, nil
 }
 
@@ -365,6 +565,13 @@ type laneVerbs struct {
 	register *registration.RegisterUseCase
 	request  *humansession.RequestRecoveryUseCase
 	complete *humansession.CompleteRecoveryUseCase
+	// Второй фактор (Ф12).
+	enroll     *humansession.EnrollSecondFactorUseCase
+	confirm    *humansession.ConfirmSecondFactorUseCase
+	status     *humansession.SecondFactorStatusUseCase
+	remove     *humansession.RemoveSecondFactorUseCase
+	regenerate *humansession.RegenerateBackupCodesUseCase
+	stepUp     *humansession.StepUpUseCase
 }
 
 func (v laneVerbs) Register(ctx context.Context, in registration.Input) (registration.Output, error) {
@@ -391,6 +598,30 @@ func (v laneVerbs) CompleteRecovery(ctx context.Context, in humansession.Complet
 	return v.complete.Execute(ctx, in)
 }
 
+func (v laneVerbs) EnrollSecondFactor(ctx context.Context, in humansession.EnrollInput) (humansession.EnrollOutput, error) {
+	return v.enroll.Execute(ctx, in)
+}
+
+func (v laneVerbs) ConfirmSecondFactor(ctx context.Context, in humansession.ConfirmInput) (humansession.ConfirmOutput, error) {
+	return v.confirm.Execute(ctx, in)
+}
+
+func (v laneVerbs) SecondFactorStatus(ctx context.Context, in humansession.StatusInput) (humansession.StatusOutput, error) {
+	return v.status.Execute(ctx, in)
+}
+
+func (v laneVerbs) RemoveSecondFactor(ctx context.Context, in humansession.RemoveSecondFactorInput) (humansession.RemoveSecondFactorOutput, error) {
+	return v.remove.Execute(ctx, in)
+}
+
+func (v laneVerbs) RegenerateBackupCodes(ctx context.Context, in humansession.RegenerateBackupCodesInput) (humansession.RegenerateBackupCodesOutput, error) {
+	return v.regenerate.Execute(ctx, in)
+}
+
+func (v laneVerbs) StepUp(ctx context.Context, in humansession.StepUpInput) (humansession.StepUpOutput, error) {
+	return v.stepUp.Execute(ctx, in)
+}
+
 // loginLaneSurface — профиль поверхности слушателя формы. Досягаемость —
 // внутри кластера: до слушателя доходит ровно край, и адрес консоли, на
 // котором живут глаголы полосы, принадлежит краю.
@@ -400,7 +631,13 @@ func loginLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog
 	addr := ""
 	var handler http.Handler
 	if lane != nil {
-		addr = cfg.APIServer.LoginLaneEndpoint
+		// Адрес — НОРМАЛИЗОВАННЫЙ, тем же правилом, что у остальных
+		// поверхностей. Здесь стояло сырое объявление профиля
+		// (`tcp://0.0.0.0:9100`): под `own` процесс проходил всех стражей и
+		// падал на привязке этой поверхности — «too many colons in address»
+		// (задача kaname#21, живой старт 2026-09-17). Держит
+		// `loginlane_addr_test.go`.
+		addr = cfg.APIServer.LoginLaneListenAddress()
 		handler = lane.handler
 	}
 	tlsCfg, err := mtlsCfg.LoginLaneServerTLSConfig()
@@ -411,14 +648,15 @@ func loginLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog
 		tlsCfg = nil
 	}
 	return iamHTTPSurface(servicecontract.Surface{
-		Name:   "полоса входа паролем, регистрации и восстановления доступа (/iam/v1/auth/{login,logout,password,csrf,register,recovery,recovery/complete})",
+		Name: "полоса входа паролем, регистрации, восстановления доступа и второго фактора " +
+			"(/iam/v1/auth/{login,logout,password,csrf,register,recovery,recovery/complete,second-factor,second-factor/{enroll,confirm,remove,backup-codes},step-up})",
 		Mode:   mode,
 		Logger: logger,
 		Addr: addrAxis(addr, "полоса входа паролем поднимается только посадкой authn.identity-provider=own "+
-			"по адресу "+knobLoginLane+"; на этой посадке вход человека, регистрацию, смену пароля, выход "+
-			"и восстановление доступа (/iam/v1/auth/login, /register, /logout, /password, /csrf, /recovery, "+
-			"/recovery/complete) служба не обслуживает — их исполняет "+
-			"внешний поставщик"),
+			"по адресу "+knobLoginLane+"; на этой посадке вход человека, регистрацию, смену пароля, выход, "+
+			"восстановление доступа и второй фактор (/iam/v1/auth/login, /register, /logout, /password, /csrf, /recovery, "+
+			"/recovery/complete, /second-factor, /second-factor/{enroll,confirm,remove,backup-codes}, /step-up) "+
+			"служба не обслуживает — их исполняет внешний поставщик"),
 		Handler: handler,
 		Reach:   servicecontract.ReachClusterInternal,
 		Auth: servicecontract.Value[servicecontract.SurfaceAuthMech](

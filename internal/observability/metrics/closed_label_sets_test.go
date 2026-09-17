@@ -173,6 +173,22 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "переписывание материала, которое не случилось ни разу, обязано быть отличимо от непровязанного",
 	},
+	// ── ВТОРОЙ ФАКТОР (Ф12, kacho#1281) ─────────────────────────────────────
+	SecondFactorPresentationsMetric: {
+		Cells: len(humansession.PresentationCells()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "«материал не открылся» — находка о ключнице, а не отказ человеку: ноль по ней обязан быть виден до первого события",
+	},
+	SecondFactorRefusalsMetric: {
+		Cells: len(humansession.SecondFactorRefusals()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "отказ по состоянию попыткой не считается и в счёт подбора не идёт — виден только здесь",
+	},
+	SecondFactorEventsMetric: {
+		Cells: len(humansession.SecondFactorEvents()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "ноль заведений за всю жизнь и непровязанный глагол выглядят одинаково без клетки",
+	},
 	RegistrationOutcomesMetric: {
 		Cells: len(registration.Lanes) * len(registration.Outcomes()), // полоса × исход
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
@@ -188,6 +204,12 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Cells: len(humansession.RecoveryCompletionOutcomes()),
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "отказ на предъявление один (Ф1-59); заблокированная, истёкший и чужой код различимы только здесь",
+	},
+	// ── ОГИБАЮЩАЯ ПО ПОТОЛКУ (Ф3-31, kaname#188) — тот же конструктор ──────────
+	LoginTimingCalibrationsMetric: {
+		Cells: len(passwordverify.EnvelopeTriggers()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "калибровка по чтению означает значение, положенное мимо этого процесса; «ни разу» обязано быть видно нулём, а не отсутствием",
 	},
 	Namespace + "_invite_activations_total": {
 		Cells: len(InviteActivationOutcomes),
@@ -273,6 +295,11 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 // Запись, которой больше нечего прощать, — находка: послабление обязано истекать
 // само, иначе его унаследует следующая слепая зона.
 var openLabelSetFamilies = map[string]openLabelSet{
+	LoginTimingClassCostMetric: {
+		Reason: "метки `format` и `params` — класс стоимости хранимого значения; перечень классов " +
+			"принадлежит ПОПУЛЯЦИИ хранилища (перепись при старте) и классу ручки, а не сборке: ряд " +
+			"заводится калибровкой класса, и «класса нет в популяции» выражается его отсутствием.",
+	},
 	Namespace + "_list_rows_scanned": {
 		Reason: "метка `resource` — имя ресурса списочной выдачи; перечень принадлежит " +
 			"каталогу модулей и растёт вместе с ним, а не объявляется здесь.",

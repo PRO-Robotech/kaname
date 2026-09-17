@@ -73,7 +73,10 @@ func TestWrapPgErr_LoginMethodOnRealServerRefusals(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	// ── вид вне словаря при непустом материале ───────────────────────────────
-	kindErr := capture(`INSERT INTO user_login_methods (user_id, kind, verifier) VALUES ($1, 'totp', $2)`,
+	// Здесь стоял `totp` — с Ф12 (kacho#1281) это ЗАКОННЫЙ вид, и проба зеленела бы
+	// на вставке, которую сервер принимает; вне словаря — вид, которого нет ни в
+	// одной фазе.
+	kindErr := capture(`INSERT INTO user_login_methods (user_id, kind, verifier) VALUES ($1, 'sms', $2)`,
 		string(user), lmRealMaterial)
 	require.Equal(t, "23514", kindErr.Code)
 	require.Equal(t, "user_login_methods_kind_check", kindErr.ConstraintName)
@@ -81,7 +84,7 @@ func TestWrapPgErr_LoginMethodOnRealServerRefusals(t *testing.T) {
 	require.Contains(t, kindErr.Detail, lmRealMaterial,
 		"ПОСЫЛКА: сервер кладёт строку целиком в Detail — с материалом")
 
-	mapped := wrapPgErr(kindErr, "LoginMethod.Create", loginMethodHint(user, "totp"))
+	mapped := wrapPgErr(kindErr, "LoginMethod.Create", loginMethodHint(user, "sms"))
 	require.True(t, stderrors.Is(mapped, iamerr.ErrInternal), "последний рубеж — наш дефект: %v", mapped)
 	require.NotContains(t, mapped.Error(), lmRealMaterial, "материал не доезжает до текста отказа")
 	require.NotContains(t, mapped.Error(), "Failing row", "строка целиком не доезжает до текста отказа")

@@ -186,6 +186,14 @@ message UnblockUserMetadata {
   string account_id = 2;
 }
 
+message ResetSecondFactorMetadata {
+  // ID of the User whose second factor is being reset.
+  string user_id = 1;
+
+  // ID of the owning Account (denormalized; non-first, see UpdateUserMetadata).
+  string account_id = 2;
+}
+
 // Invite-flow.
 message RemoveUserFromAccountMetadata {
   // ID of the person whose membership is being removed. First field so the

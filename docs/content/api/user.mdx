@@ -98,8 +98,9 @@ import dedent from 'ts-dedent'
 
 `UserService` — чтение (`Get`/`List`), приглашение (`Invite`), исключение из аккаунта
 (`RemoveFromAccount`), обновление меток (`Update`), запрет и разрешение входа
-(`Block`/`Unblock`), удаление личности (`Delete`) и журнал операций. Классического `Create`
-нет — пользователи появляются только через `Invite`.
+(`Block`/`Unblock`), сброс второго фактора (`ResetSecondFactor`), удаление личности
+(`Delete`) и журнал операций. Классического `Create` нет — пользователи появляются только
+через `Invite`.
 
 :::info Что чьё
 
@@ -111,6 +112,7 @@ import dedent from 'ts-dedent'
 | `Invite` / `RemoveFromAccount` | **аккаунта** (`editor` / `member_remover`) | участие человека в **этом** аккаунте |
 | `Update` (метки) | **облака** (`record_writer`) | запись личности — во всех её аккаунтах |
 | `Block` / `Unblock` | **облака** (`identity_suspender`) | вход на платформу целиком |
+| `ResetSecondFactor` | **облака** (`identity_suspender`) | второй фактор личности и все её сессии |
 | `Delete` | **самого человека либо облака** (`identity_remover`) | личность целиком, необратимо |
 
 Распорядителю аккаунта остаётся то, что названо первой строкой, плюс выдача и отзыв прав
@@ -170,7 +172,9 @@ import dedent from 'ts-dedent'
 Приглашает пользователя по email: создаётся `PENDING`-строка. Идемпотентно — повторное
 приглашение уже приглашённого возвращает `Operation` без дублирования. Опционально — сразу
 выдать роль на проекте (`projectId` + `roleId`), тогда AccessBinding создаётся атомарно.
-Требует `editor` на аккаунте. Асинхронно (`response: User`).
+Требует `editor` на аккаунте и **уровень аутентификации `2`** — это поверхность выдачи прав,
+и порог у неё тот же, что у `AccessBindingService.Create` ([step-up](/architecture/authz#step-up)).
+Асинхронно (`response: User`).
 
 :::note У глагола есть преемник на ресурсе членства
 Тот же поток доступен как [`MembershipService.Create`](/api/membership#create) —
@@ -195,9 +199,17 @@ import dedent from 'ts-dedent'
 `Operation.metadata` (`InviteUserMetadata`) несёт `userId` и `accountId`. Ссылки первого входа
 в нём **нет**: поле снято с контракта (номер и имя зарезервированы) — ссылка выдавала бы
 приглашающему предъявителя приглашённого. Письмо приглашения служба составляет и отправляет
-сама, через свою очередь; повторное приглашение того же адреса в тот же аккаунт отправляет
-письмо ещё раз в пределах ограничения частоты. Пока не объявлены `inviteMail.relay` и
-`inviteMail.from`, письмо не уходит, и это видно счётчиком исходов отправки.
+сама, через свою очередь, той же транзакцией, что и строка.
+
+**Когда письмо уходит — одно правило на оба глагола** (`Invite` и
+[`MembershipService.Create`](/api/membership#create) — один поток, измерено по коду
+`internal/apps/kaname/api/user/invite.go`): письмо ставится в очередь, пока личность ещё **ни разу
+не входила** (`inviteStatus = PENDING`), — и на первом приглашении, и на **повторном** того же
+адреса в тот же аккаунт, в пределах ограничения частоты `invite.mailRateLimit`. Вошедшему
+(`ACTIVE`) и заблокированному письмо не уходит: приглашать некуда. Пока не объявлены
+`inviteMail.relay` и `inviteMail.from`, письмо не уходит, и это видно счётчиком исходов
+отправки. Ссылку на страницу входа письмо несёт, если объявлен `inviteMail.loginUrl`;
+одноразового предъявителя оно не несёт — доступ даёт владение почтовым ящиком.
 
 </ApiOperation>
 
@@ -206,7 +218,7 @@ import dedent from 'ts-dedent'
 <ApiOperation method="POST" endpoint="/iam/v1/users/{user_id}:resendInvite" async>
 
 Письмо приглашения уходит ещё раз тому, кто приглашён в названный аккаунт и ещё не выкупил
-приглашение. Требует `editor` на аккаунте — то же право, что у `Invite`. Асинхронно
+приглашение. Требует `editor` на аккаунте и уровень `2` — то же, что у `Invite`. Асинхронно
 (`response: User`, `metadata: ResendInviteMetadata{userId, accountId}`).
 
 <CodeBlock language="bash">
@@ -325,6 +337,28 @@ account/project). Identity-поля (`externalId` и прочие, проеци�
 
 </ApiOperation>
 
+### ResetSecondFactor — сбросить второй фактор {#reset-second-factor}
+
+<ApiOperation method="POST" endpoint="/iam/v1/users/{user_id}:resetSecondFactor" async>
+
+Снимает у человека код по времени и набор запасных кодов и завершает **все** его сессии —
+одной транзакцией. Путь для того, кто утратил и приложение-аутентификатор, и запасные коды:
+сам человек снимает фактор только кодом, а его у него больше нет. После сброса он входит
+паролем (уровень `1`) и заводит фактор заново на своей полосе входа.
+
+Требует `identity_suspender` и уровень сессии `2` — те же, что у `Block`/`Unblock`: это
+надзор облака, а не самообслуживание. Асинхронно; чужой аккаунт получает `NOT_FOUND`,
+неотличимый от несуществующего `user_id`.
+
+Человеку **без заведённого фактора** — строки нет либо заведение начато и не подтверждено —
+`FAILED_PRECONDITION` с `ErrorInfo.reason = SECOND_FACTOR_NOT_ENROLLED`: сбрасывать нечего,
+незавершённое заведение он заменяет сам новым `enroll`, сессии при этом не завершаются.
+
+Событие журнала — `iam.user.second_factor_reset` с обоими акторами. Пароль не сбрасывается,
+запрет не снимается, фактора за человека никто не заводит.
+
+</ApiOperation>
+
 ### Delete — удалить личность
 
 <ApiOperation method="DELETE" endpoint="/iam/v1/users/{user_id}" async>
@@ -352,6 +386,8 @@ account/project). Identity-поля (`externalId` и прочие, проеци�
     <tr><td>Get/Update/Delete несуществующего пользователя</td><td><code>NOT_FOUND</code></td><td><code>"User &lt;id&gt; not found"</code></td></tr>
     <tr><td>Identity-поле в <code>updateMask</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>"&lt;field&gt; is immutable after User.Create"</code></td></tr>
     <tr><td>Invite без <code>editor</code> на аккаунте</td><td><code>PERMISSION_DENIED</code></td><td>Приглашать может только editor/admin аккаунта</td></tr>
+    <tr><td>Invite без <code>accountId</code></td><td><code>PERMISSION_DENIED</code> через край · <code>INVALID_ARGUMENT</code> на собственном фронте</td><td>Две полосы: край отвергает вызов без области до сервиса; собственный REST-фронт службы (<code>:9098</code>) доводит до сервиса, и тот отвечает синхронно <code>"Illegal argument account_id: required"</code></td></tr>
+    <tr><td>Invite сессией уровня <code>1</code> либо базовым токеном</td><td><code>UNAUTHENTICATED</code></td><td>Порог <code>2</code>; ответ неотличим от негодного удостоверения намеренно</td></tr>
     <tr><td>List без <code>accountId</code> (обычный пользователь)</td><td><code>INVALID_ARGUMENT</code></td><td>Scope-фильтр требует аккаунт</td></tr>
     <tr><td><code>Delete</code> чужой личности распорядителем аккаунта</td><td><code>PERMISSION_DENIED</code></td><td>Строка личности глобальна; используйте <code>RemoveFromAccount</code></td></tr>
     <tr><td><code>RemoveFromAccount</code>, пока у человека есть права в этом аккаунте</td><td><code>FAILED_PRECONDITION</code></td><td><code>"User &lt;id&gt; still has active access bindings in Account &lt;id&gt; and cannot be removed from it"</code></td></tr>
@@ -363,7 +399,8 @@ account/project). Identity-поля (`externalId` и прочие, проеци�
 </table>
 
 :::tip Активация при первом входе
-Приглашённый пользователь становится `ACTIVE` автоматически при первом успешном входе через
-Kratos: hook сопоставляет email и заполняет `externalId`. Механика — на странице
-[Идентичность и токены](/architecture/identity).
+Приглашённый пользователь становится `ACTIVE` автоматически при первом входе тем же адресом:
+под посадкой `external` — через поставщика, чей хук сопоставляет email и заполняет
+`externalId`; под `own` — регистрацией на [полосе входа](/api/auth-lane). Механика — на
+странице [Идентичность и токены](/architecture/identity).
 :::

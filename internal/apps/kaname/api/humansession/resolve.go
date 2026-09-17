@@ -94,13 +94,12 @@ func (h *Handler) Resolve(ctx context.Context, req *iamv1.ResolveHumanSessionReq
 // (§4.1 п.19, названное отступление); срок — по конвенции, до секунды.
 func sessionProto(v SessionView) *iamv1.HumanSession {
 	return &iamv1.HumanSession{
-		UserId:                 string(v.User.ID),
-		Email:                  string(v.User.Email),
-		DisplayName:            string(v.User.DisplayName),
-		AuthenticatedAt:        timestamppb.New(v.Session.AuthenticatedAt),
-		ExpiresAt:              shared.TimestampProto(v.Session.ExpiresAt),
-		AssuranceLevel:         v.Session.AssuranceLevel,
-		EmailVerified:          v.EmailVerified,
-		PasswordChangeRequired: v.Session.PasswordChangeRequired,
+		UserId:          string(v.User.ID),
+		Email:           string(v.User.Email),
+		DisplayName:     string(v.User.DisplayName),
+		AuthenticatedAt: timestamppb.New(v.Session.AuthenticatedAt),
+		ExpiresAt:       shared.TimestampProto(v.Session.ExpiresAt),
+		AssuranceLevel:  v.Session.AssuranceLevel,
+		EmailVerified:   v.EmailVerified,
 	}
 }

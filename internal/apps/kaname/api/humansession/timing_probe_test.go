@@ -24,6 +24,23 @@
 // Печатаются медианы, размахи, N обращений на полосу, T и N предела частоты и
 // сам критерий по парам; отказов по частоте — ноль (Ф3-30).
 //
+// Второе утверждение (Ф3-31 «Тогда», заказ kaname#220 (а)): НИ ОДНА медиана
+// не ниже потолка огибающей — медиана раньше потолка есть красное С ИМЕНЕМ
+// полосы: либо ожидание полосы не настоящее (часы порта вместо монотонных,
+// отсчёт не от ворот), либо числа калибровки выбраны неверно (Р17). Проверка
+// стоит ДО критерия пар: на полосе, ушедшей раньше потолка, пары краснеют
+// следствием, и виновник назывался бы через них, а не по имени.
+//
+// # Огибающая по потолку (решение kaname#188)
+//
+// Полоса получает НАСТОЯЩУЮ огибающую (`passwordverify.Envelope`),
+// откалиброванную на классах мира прогона и на классе ручки — ровно так, как
+// композиционный корень калибрует её по переписи хранилища и ручке «что
+// писать» при старте. Проба печатает калибровку (класс → стоимость) и потолок:
+// критерий выполняется не потому, что полосы одинаково дороги, а потому, что
+// ни один исход не уходит раньше потолка. Стоимости здесь — свойство машины
+// прогона, а не контракт: контракт — критерий.
+//
 // # Три исхода
 //
 // Зелёный — критерий выполнен на всех парах. Красный — не выполнен хотя бы на
@@ -130,7 +147,6 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 	// Предел частоты — выше числа обращений на полосу с запасом: проба не
 	// должна получить ни одного отказа по частоте (Ф3-30).
 	limitN, limitT := timingLaneN*10, 24*time.Hour
-	require.NoError(t, rebuildLoginWithLimits(h, limitN, limitT))
 
 	people := []struct {
 		lane, email string
@@ -148,6 +164,27 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 		h.store.verifiers[u.ID] = p.material
 		lanes = append(lanes, &timingLane{name: p.lane, email: p.email, password: "wrong-" + strconv.Itoa(i)})
 	}
+	// Огибающая — как в композиционном корне: перепись классов хранилища
+	// (здесь она известна пробе) плюс класс ручки, каждый — калибровкой.
+	envelope, err := passwordverify.NewEnvelope(h.verifier, passwordverify.NopEnvelopeObserver{})
+	require.NoError(t, err)
+	population := []domain.PasswordCostClass{
+		costClass(domain.PasswordHashFormatBcrypt, domain.CostParamBcryptCost, uint32(bcrypt.MinCost)),
+		costClass(domain.PasswordHashFormatBcrypt, domain.CostParamBcryptCost, 14),
+		argon2Class(65536, 3, 4), argon2Class(131072, 10, 8), argon2Class(32768, 3, 4),
+		{Format: h.hasher.Declared().Format, Params: h.hasher.Declared().Params},
+	}
+	for _, class := range population {
+		adm, err := envelope.Admit(ctx, class, passwordverify.EnvelopeTriggerStartup)
+		require.NoError(t, err, "калибровка класса %s", class.Key())
+		t.Logf("калибровка %-52s стоимость %10v · калибрована %v", class.Key(), adm.Cost, adm.Calibrated)
+	}
+	ceiling, ok := envelope.Ceiling()
+	require.True(t, ok)
+	t.Logf("огибающая: потолок %v · класс-потолок %s (стоимость %v) · классов %d",
+		envelope.Floor(), ceiling.Class.Key(), ceiling.Cost, len(envelope.Classes()))
+	h.envelopePort = envelope
+	require.NoError(t, rebuildLoginWithLimits(h, limitN, limitT))
 	// Материала нет — личность без строки способа входа.
 	noMat := h.person(t, "usr-nomat", "nomat@example.invalid", "placeholder", true)
 	delete(h.store.verifiers, noMat.ID)
@@ -177,15 +214,21 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 		median, iqr time.Duration
 	}
 	var rows []row
+	floor := envelope.Floor()
+	var belowFloor []string
 	for _, l := range lanes {
 		m, q := l.stats()
 		rows = append(rows, row{l, m, q})
-		t.Logf("полоса %-36s медиана %10v · IQR %10v · n=%d", l.name, m, q, len(l.samples))
+		t.Logf("полоса %-36s медиана %10v · IQR %10v · n=%d · потолок %v", l.name, m, q, len(l.samples), floor)
 		if q > timingIQRCeiling {
 			t.Fatalf("НЕ ВЫПОЛНИЛОСЬ (Ф1-50): размах полосы %q %v выше потолка годности %v — стенд шумит сильнее измеряемого, вердикта нет",
 				l.name, q, timingIQRCeiling)
 		}
+		if m < floor {
+			belowFloor = append(belowFloor, fmt.Sprintf("%s: медиана %v раньше потолка %v", l.name, m, floor))
+		}
 	}
+	require.Empty(t, belowFloor, "Ф3-31: медиана раньше потолка огибающей — исход ушёл до потолка (ожидание не настоящее либо числа калибровки выбраны неверно, Р17)")
 	var failures []string
 	for i := range rows {
 		for j := i + 1; j < len(rows); j++ {
@@ -208,13 +251,24 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 	require.Empty(t, failures, "Ф1-48 нарушен на парах полос: время отказа различает класс стоимости либо наличие материала")
 }
 
+func costClass(format domain.PasswordHashFormat, param domain.PasswordHashCostParam, value uint32) domain.PasswordCostClass {
+	return domain.PasswordCostClass{Format: format, Params: map[domain.PasswordHashCostParam]uint32{param: value}}
+}
+
+func argon2Class(memory, iterations, parallelism uint32) domain.PasswordCostClass {
+	return domain.PasswordCostClass{Format: domain.PasswordHashFormatArgon2id,
+		Params: map[domain.PasswordHashCostParam]uint32{
+			domain.CostParamArgon2Memory: memory, domain.CostParamArgon2Iterations: iterations,
+			domain.CostParamArgon2Parallelism: parallelism}}
+}
+
 // rebuildLoginWithLimits — тот же вход с другим пределом частоты: проба времени
 // не должна упереться в предел (Ф3-30), а умолчание харнесса низкое намеренно.
 func rebuildLoginWithLimits(h *harness, attempts int, window time.Duration) error {
 	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: h.verifier,
 		Hasher: h.hasher, TTL: ucTTL, Observer: h.obs, Now: func() time.Time { return h.clock },
-		Logger: slog.New(slog.DiscardHandler),
+		Logger: slog.New(slog.DiscardHandler), Envelope: h.envelopePort, TOTP: h.totp, Sets: h.verifier,
 		Limits: humansession.Limits{AddressAttempts: attempts, AddressWindow: window, SourceAttempts: attempts * 10, SourceWindow: window},
 	})
 	if err != nil {
