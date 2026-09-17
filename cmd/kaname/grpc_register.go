@@ -95,6 +95,12 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	if svcs != nil && svcs.userTokensHandler != nil {
 		iamv1.RegisterUserTokenServiceServer(srv, svcs.userTokensHandler)
 	}
+	// AccessKeyService (Ф7, kacho#1273): шесть глаголов ключа доступа — четыре
+	// под правом человека и два освобождённых глагола утверждения (Р11).
+	// Регистрируется ТОЛЬКО при поднятой полосе входа (`own`).
+	if svcs != nil && svcs.accessKeyHandler != nil {
+		iamv1.RegisterAccessKeyServiceServer(srv, svcs.accessKeyHandler)
+	}
 	// ЗДЕСЬ РЕГИСТРИРОВАЛАСЬ `LimitService` — административная поверхность
 	// величин на публичном слушателе. Авторитет величин выпилен из службы
 	// доступа целиком решением владельца 2026-09-06

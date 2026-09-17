@@ -54,6 +54,9 @@ var canonNamedTypes = []namedType{
 	{"SvcAccountName", func(v string) error { return SvcAccountName(v).Validate() }},
 	{"OAuthClientName", func(v string) error { return OAuthClientName(v).Validate() }},
 	{"InteractiveClientName", func(v string) error { return InteractiveClientName(v).Validate() }},
+	// Седьмой — имя ключа доступа (Ф7 Р10, kacho#1273): та же форма дерева,
+	// второго валидатора «для ключа» не заводится.
+	{"AccessKeyName", func(v string) error { return AccessKeyName(v).Validate() }},
 }
 
 // canonAccepted / canonRejected — образцы по трём осям расхождения плюс общие
@@ -99,7 +102,7 @@ func TestCanonSamplesAgreeWithTheSingleDeclaration(t *testing.T) {
 		len(canonAccepted), len(canonRejected))
 }
 
-// TestNamedTypesObeyTheSingleNameForm — шесть типов судят имя каноном, а не
+// TestNamedTypesObeyTheSingleNameForm — семь типов судят имя каноном, а не
 // своей формой.
 func TestNamedTypesObeyTheSingleNameForm(t *testing.T) {
 	if len(canonNamedTypes) == 0 {

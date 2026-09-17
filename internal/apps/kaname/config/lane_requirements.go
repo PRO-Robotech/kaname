@@ -314,6 +314,18 @@ var LaneRequirements = []LaneRequirement{
 			return ownScoped(c.AuthN.ValidateSelfServiceFreshness())
 		},
 	},
+	// СТРОКА ПРИВЯЗКИ КЛЮЧЕЙ ДОСТУПА (Ф7, kacho#1273; Р2, Ф7-13): три величины
+	// контракта объявляет профиль; незаданная — отказ старта, называющий СВОЮ
+	// ручку. Под `external` сессии нет, а регистрация и снятие ключа — действия в
+	// окне свежести (Р5), поэтому ключей там нет и величины не требуются.
+	{
+		Lanes:   laneOwn,
+		Element: "привязка ключей доступа объявлена: имя доверяющей стороны, перечень происхождений, перечень алгоритмов",
+		Stage:   LaneStageConfig,
+		Check: func(c Config, _ LaneWiring) error {
+			return ownScoped(c.AuthN.AccessKeys.Validate())
+		},
+	},
 	{
 		Lanes:   laneOwn,
 		Element: "подписант своей чеканки провязан",

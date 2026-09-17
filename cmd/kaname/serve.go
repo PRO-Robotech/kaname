@@ -557,6 +557,12 @@ func runServe(cfg config.Config) error {
 	if reset := lane.resetSecondFactorUseCase(kanameRepo, opsRepo); reset != nil {
 		svcs.userHandler.WithResetSecondFactor(reset)
 	}
+	// `AccessKeyService` (Ф7, kacho#1273) — шесть глаголов ключа доступа теми
+	// же хранилищами, что полоса; под `external` не регистрируется.
+	svcs.accessKeyHandler, err = lane.accessKeyHandler(cfg, opsRepo, metricsReg, logger)
+	if err != nil {
+		return err
+	}
 
 	// gRPC servers. PrincipalExtract-interceptor читает
 	// x-kacho-principal-* metadata-headers, которые api-gateway auth-interceptor

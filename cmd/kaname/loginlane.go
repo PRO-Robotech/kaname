@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/servicecontract"
 	reconcileapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_keys"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/loginmethod"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
@@ -99,6 +100,13 @@ type loginLane struct {
 	// freshness — окно свежести правки своих данных (Ф12 Р8): срок `pending`
 	// и порог уборки заведений — та же величина.
 	freshness time.Duration
+	// keys — хранилище ключей доступа и их испытаний (Ф7, kacho#1273): служба
+	// ключей поднимается вместе с полосой — окно свежести (Р5) и предъявление
+	// судятся о сессии, которой под `external` нет.
+	keys *kanamepg.AccessKeyRepo
+	// keyFreshness — окно свежести вызывающего по его живым сессиям (Ф7 Р5):
+	// читатель того же хранилища сессий, что и полоса.
+	keyFreshness *kanamepg.HumanSessionFreshness
 }
 
 // drain — дождаться постановок письма, начатых до гашения (Ф5 Р2): ответ их не
@@ -167,7 +175,40 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 	return retention.HumanSessionReapers{
 		Sessions: l.sessions, Failures: l.sessions, Codes: l.sessions, LongestWindow: l.limits.LongestWindow(),
 		Enrollments: l.methods, EnrollmentWindow: l.freshness,
+		Challenges: l.keys,
 	}
+}
+
+// accessKeyHandler — шесть глаголов ключа доступа (Ф7, kacho#1273) теми же
+// хранилищами, что полоса: свежесть — по сессиям, «последний способ» — по
+// строкам способов; nil — полосы нет (под `external` служба не регистрируется
+// и привязка фронта ведёт к `Unimplemented`).
+//
+// Привязка (имя доверяющей стороны, происхождения, алгоритмы) — из посадки,
+// прошедшей стража старта (`AccessKeysConfig.Validate` в требованиях полосы);
+// окно свежести — то же, что у правки своих данных (Р5).
+func (l *loginLane) accessKeyHandler(cfg config.Config, opsRepo operations.Repo, reg *metrics.Registry, logger *slog.Logger) (*access_keys.Handler, error) {
+	if !l.wired() || l.keys == nil || l.keyFreshness == nil {
+		return nil, nil
+	}
+	deps := access_keys.Deps{
+		Store:           l.keys,
+		Freshness:       l.keyFreshness,
+		Methods:         l.methods,
+		Binding:         cfg.AuthN.AccessKeys.Binding(),
+		FreshnessWindow: cfg.AuthN.SelfServiceFreshness,
+		Observer:        reg.AccessKeyRecorder(),
+		Now:             time.Now,
+		Logger:          logger,
+	}
+	h, err := access_keys.NewHandler(deps, opsRepo)
+	if err != nil {
+		return nil, fmt.Errorf("access keys: %w", err)
+	}
+	logger.Info("access keys wired",
+		"rp_id", deps.Binding.RPID, "origins", len(deps.Binding.Origins), "nobody", cfg.AuthN.AccessKeys.Nobody(),
+		"algorithms", len(deps.Binding.Algorithms))
+	return h, nil
 }
 
 // requireLoginLaneTLS — страж посадки `own` (Ф3-44 в): адрес объявлен, TLS
@@ -523,6 +564,7 @@ func buildLoginLane(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, 
 		handler: handler, resolve: humansession.NewHandler(resolveUC),
 		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
 		freshness: cfg.AuthN.SelfServiceFreshness,
+		keys:      kanamepg.NewAccessKeyRepo(pool), keyFreshness: kanamepg.NewHumanSessionFreshness(pool),
 	}, nil
 }
 

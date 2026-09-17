@@ -73,6 +73,9 @@ const (
 	whyNeighborEdgeRelay = "край платформы — сосед, ретранслирующий формы полосы входа: перечень " +
 		"ретранслируемых путей живёт у него, и страница называет его репозиторий, ревизию и " +
 		"запрос на слияние, по которым читатель этот перечень проверит (kaname#204)"
+	whyRelyingPartyName = "видимое имя доверяющей стороны церемонии ключа доступа («Kacho Cloud») — " +
+		"литерал контракта, решённый приёмкой (Ф7 Р9): аутентификатор показывает его человеку при " +
+		"выборе удостоверения, и страница называет его дословно, как испытание; токен — первое слово"
 )
 
 // clientSiteStay — ведомость: имя платформы, которое сайт вправе нести.
@@ -88,6 +91,7 @@ var clientSiteStay = []ClientSiteStay{
 	{Page: "docs/content/advanced/observability.mdx", Token: "kacho_grpc_server_handled_total", Count: 7, Why: whyFoundationSeries},
 	{Page: "docs/content/advanced/observability.mdx", Token: "kacho_grpc_server_handling_seconds", Count: 1, Why: whyFoundationSeries},
 	{Page: "docs/content/advanced/observability.mdx", Token: "kacho_grpc_server_stream_seconds", Count: 1, Why: whyFoundationSeries},
+	{Page: "docs/content/api/auth-lane.mdx", Token: "Kacho", Count: 2, Why: whyRelyingPartyName},
 	{Page: "docs/content/api/auth-lane.mdx", Token: "kacho#1272", Count: 1, Why: whyTrackerAddress},
 	{Page: "docs/content/api/auth-lane.mdx", Token: "kacho#2706", Count: 1, Why: whyNeighborEdgeRelay},
 	{Page: "docs/content/api/auth-lane.mdx", Token: "kacho@26206c80f9d", Count: 1, Why: whyNeighborEdgeRelay},

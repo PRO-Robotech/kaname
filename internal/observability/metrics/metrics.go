@@ -135,6 +135,11 @@ type Registry struct {
 	// пароля; второй конструктор уронил бы старт повторной регистрацией.
 	loginLaneOnce sync.Once
 	loginLane     *LoginLaneRecorder
+
+	// accessKeyOnce/accessKey — единственный экземпляр приёмника ключей доступа
+	// (Ф7, kacho#1273), по той же причине, что соседи.
+	accessKeyOnce sync.Once
+	accessKey     *AccessKeyRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

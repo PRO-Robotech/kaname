@@ -2496,6 +2496,66 @@
     "required_acr_min": "2"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.AccessKeyService/BeginAssertion",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "exempt_reason": "SELF_SERVICE"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.AccessKeyService/BeginRegistration",
+    "permission": "iam.access_keys.begin_registration",
+    "required_relation": "token_issuer",
+    "scope_extractor": {
+      "object_type": "iam_user",
+      "from_request_field": "user_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.AccessKeyService/FinishAssertion",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "exempt_reason": "SELF_SERVICE"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.AccessKeyService/FinishRegistration",
+    "permission": "iam.access_keys.register",
+    "required_relation": "token_issuer",
+    "scope_extractor": {
+      "object_type": "iam_user",
+      "from_request_field": "user_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.AccessKeyService/List",
+    "permission": "iam.access_keys.list",
+    "required_relation": "token_reader",
+    "scope_extractor": {
+      "object_type": "iam_user",
+      "from_request_field": "user_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.AccessKeyService/Revoke",
+    "permission": "iam.access_keys.revoke",
+    "required_relation": "token_issuer",
+    "scope_extractor": {
+      "object_type": "iam_user",
+      "from_request_field": "user_id"
+    },
+    "required_acr_min": "1"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.AccountService/Create",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",

@@ -269,6 +269,68 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 выполнит; пуст, когда `2` достигнут либо недостижим. Пароль вместе с кодом по времени или
 запасным кодом — `2`; один пароль либо код восстановления — `1`.
 
+### Ключи доступа (WebAuthn) — `AccessKeyService`
+
+Ключ доступа — **свой ресурс** человека (не строка способа входа): своя таблица, свой `id`
+формы `ak-…`, свои шесть глаголов. Ходят они **не полосой форм**, а обычным REST-фронтом
+службы (тем же, что `UserService`), и существуют только под посадкой `own`: под `external`
+служба не поднята и отвечает `501`. Церемонию ведёт браузер (`navigator.credentials.create` /
+`get`); служба выдаёт испытание, судит результат и хранит открытый ключ. Аттестация ключа не
+требуется, не проверяется и не хранится; модель устройства продукт не судит.
+
+<table>
+  <thead><tr><th>Метод и путь</th><th>Что делает</th><th>Право</th><th>Сессия</th></tr></thead>
+  <tbody>
+    <tr><td><code>POST /iam/v1/users/{userId}/accessKeys:beginRegistration</code></td><td>испытание регистрации в форме <code>PublicKeyCredentialCreationOptions</code></td><td><code>token_issuer</code> на человеке, уровень «1»</td><td>да, свежая</td></tr>
+    <tr><td><code>POST /iam/v1/users/{userId}/accessKeys</code></td><td>приём результата церемонии — <code>Operation</code>, ответ несёт <code>AccessKey</code></td><td>то же</td><td>да, свежая</td></tr>
+    <tr><td><code>GET /iam/v1/users/{userId}/accessKeys</code></td><td>перечень ключей человека, курсором</td><td><code>token_reader</code>, уровень «1»</td><td>да</td></tr>
+    <tr><td><code>DELETE /iam/v1/users/{userId}/accessKeys/{accessKeyId}</code></td><td>снятие ключа — <code>Operation</code></td><td><code>token_issuer</code>, уровень «1»</td><td>да, свежая</td></tr>
+    <tr><td><code>POST /iam/v1/accessKeys:beginAssertion</code></td><td>испытание предъявления вызывающему — <code>PublicKeyCredentialRequestOptions</code></td><td>освобождён (самообслуживание)</td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/accessKeys:finishAssertion</code></td><td>проверка утверждения: человек, ключ, флаги предъявления</td><td>освобождён (самообслуживание)</td><td>да</td></tr>
+  </tbody>
+</table>
+
+Испытание регистрации несёт литералы контракта, одинаковые у всех установок: имя доверяющей
+стороны показывается как `Kacho Cloud`, проверка пользователя `preferred` (на обеих
+церемониях), обнаруживаемое удостоверение `required`, аттестация `none`, расширение
+`credProps` запрошено; `user.id` — байты платформенного `id` человека. Срок испытания —
+**5 минут**, одноразовое, привязано к вызывающему и к церемонии: результат над чужим,
+повторённым, просроченным или невыданным испытанием отвергается.
+
+<CodeBlock language="json">
+  {dedent`
+    { "challenge": "…", "rp": { "id": "access.example.invalid", "name": "Kacho Cloud" },
+      "user": { "id": "…", "name": "alice@example.invalid", "displayName": "Alice" },
+      "pubKeyCredParams": [ { "type": "public-key", "alg": -7 }, { "type": "public-key", "alg": -8 }, { "type": "public-key", "alg": -257 } ],
+      "authenticatorSelection": { "residentKey": "required", "requireResidentKey": true, "userVerification": "preferred" },
+      "attestation": "none", "extensions": { "credProps": true }, "expiresAt": "…" }
+  `}
+</CodeBlock>
+
+Результат церемонии — `{ "name", "description", "credential": { "id", "clientDataJson",
+"attestationObject", "discoverable" } }`: `name` — той же формы, что имя всякого ресурса
+(пустое заменяется `id`), `description` — до 256 знаков, `discoverable` — значение
+`credProps.rk`, если браузер его сообщил (сообщённое `false` отвергается: ключ обязан быть
+обнаруживаемым). Форма имени и описания судится **до** результата церемонии и испытание не
+гасит. Утверждение — `{ "credential": { "id", "clientDataJson", "authenticatorData",
+"signature", "userHandle" } }`; ответ — `{ "userId", "accessKeyId", "flags": { "userPresent",
+"userVerified", "backupEligible", "backupState" } }`, и `userId` всегда равен вызывающему.
+
+Число ключей человека ограничено потолком `own-ceilings.access-keys-per-user` (ноль — «ключей
+не заводить»); последний способ входа человека снять нельзя. Привязку — имя доверяющей стороны,
+перечень происхождений консоли, перечень алгоритмов (`-7` ES256, `-8` EdDSA, `-257` RS256) —
+объявляет посадка ручками `authn.access-keys.*`; их смена делает существующие ключи негодными.
+
+Отказы полосы регистрации и снятия различимы по `reason`: `SESSION_NOT_FRESH` (403),
+`CHALLENGE_NOT_ISSUED` · `CHALLENGE_ALREADY_PRESENTED` · `CHALLENGE_EXPIRED` ·
+`ORIGIN_NOT_ALLOWED` · `RP_ID_MISMATCH` · `USER_NOT_PRESENT` · `ALGORITHM_NOT_ALLOWED` ·
+`CREDENTIAL_NOT_DISCOVERABLE` (400 на приёме результата), `LAST_SIGN_IN_METHOD` (400 на
+снятии), `AlreadyExists` на удостоверении, уже принятом, отказ потолка с действующей величиной
+и следующим шагом. Отказ **утверждения** — один на все причины и без подробностей:
+`400` `access key assertion is not accepted`; какая именно — видно только оператору по
+счётчикам. Малформный `accessKeyId` — `400` `invalid access key id '…'` первым стейтментом;
+чужой и несуществующий ключ на снятии — одинаковое `404`.
+
 ## Отказы — `google.rpc.Status`, тексты фиксированы
 
 Форма — та же, что у края через grpc-gateway: `{code, message, details}`, `details` — всегда
@@ -300,7 +362,8 @@ kaname#211.
 ## Что видит оператор
 
 Исходы, которых клиент не видит в ответе, служба отдаёт счётчиками: входа, регистрации, запроса
-и завершения восстановления, отказов формы, второго фактора — [Наблюдаемость](/advanced/observability).
+и завершения восстановления, отказов формы, второго фактора, ключей доступа —
+[Наблюдаемость](/advanced/observability).
 Величины полосы — срок сессии, домен печенья, окна частоты, правило пароля, стоимость хеша,
 срок кода восстановления, окно свежести, ключи обёртки секретов фактора — обязательны под
 `own` и названы в [Конфигурации](/install/configuration#login-lane) и `INSTALL.md` §3.
