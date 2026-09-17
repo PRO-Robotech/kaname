@@ -68,8 +68,9 @@ reviewed_at: '2026-09-17'
 
 # ─── ОДОБРЕНИЕ ВЫВОДИТСЯ ИЗ ЗАПИСИ И СОБЫТИЯ, А НЕ ИЗ СЛОВА В ШАПКЕ ──────────
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-17T08:06:50Z'
+  ban1_lifted: true
   why: >-
     Вердикт круга 5 — APPROVED: блокирующих ноль. Оба блокирующих круга 4 сняты ровно так, как
     названо (Б5 — одна строка Ф12-25 (в), Б6 — одно слово третьего «И» Ф12-13), пять важных и три
@@ -123,19 +124,34 @@ authority:
   allowlisted_for_role: false
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось», а не «да» и не «нет». Внешнего события, связывающего
-    отпечаток, роль и вердикт, не создавалось: его выпускает владелец ОТДЕЛЬНЫМ коммитом поверх
-    этой записи. До него `issued: false`, ban #1 на редакцию 8 в силе; одобрение редакции 6
-    (событие круга 3) действует и не отозвано.
+  type: issue_comment
+  status: performed
+  database_id: 5711101932
+  node_id: IC_kwDOTZqgWM8AAAABVGh_7A
+  url: https://github.com/PRO-Robotech/kacho/issues/1281#issuecomment-5711101932
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5711101932
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1281
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-17T08:06:50Z'
+  body_sha256: 3f9f7d4af080df731bae0164518765bae4fb7ab6f16ed304571ce921921a9c33
+  subject_sha256: 2582c5e1101c44cda591e7c2745645b8989b595a8f000b32ec8d729927055364
+  subject_revision: d5209448
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; запись рецензента задним числом
+    не правилась. Отпечаток предмета сверен перед публикацией (sha256sum файла на d5209448)
+    и совпал с объявленным. Отпечаток тела снят с сырого ответа API.
 
 attribution:
   reviewer_kind: claude_agent
   publishing_actor: pointpu
   publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
+
 
 scope:
   reviewed: >-
