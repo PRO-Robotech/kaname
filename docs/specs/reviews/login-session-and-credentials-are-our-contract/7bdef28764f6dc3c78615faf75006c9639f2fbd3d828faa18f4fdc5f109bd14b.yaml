@@ -56,8 +56,9 @@ reviewed_at: '2026-09-17'
 
 # ─── ОДОБРЕНИЕ ВЫВОДИТСЯ ИЗ ЗАПИСИ И СОБЫТИЯ, А НЕ ИЗ СЛОВА В ШАПКЕ ──────────
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-17T08:54:07Z'
+  ban1_lifted: true
   why: >-
     Вердикт круга 11 — APPROVED: блокирующих ноль. Решение kacho#1268 исполнено РОВНО: сценарии
     переноса Ф1-44…47, §4.3, инвариант 7, строка §8 и пункт «перенос — до перевода» §4.2 сняты
@@ -109,17 +110,34 @@ authority:
   allowlisted_for_role: false
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    Внешнего события, связывающего отпечаток, роль и вердикт, этим кругом не создавалось —
-    публикует оркестратор. Третья категория, «не выполнилось», а не «да»: заключение роли
-    действительно, полномочие внешним фактом не подтверждено.
+  type: issue_comment
+  status: performed
+  database_id: 5711678709
+  node_id: IC_kwDOTZqgWM8AAAABVHFM9Q
+  url: https://github.com/PRO-Robotech/kacho/issues/1268#issuecomment-5711678709
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5711678709
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1268
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-17T08:54:07Z'
+  body_sha256: 0f2ce856aaee2f0f734ae64058692a9b050db3574922a1099ea1d7f1db515bdd
+  subject_sha256: 7bdef28764f6dc3c78615faf75006c9639f2fbd3d828faa18f4fdc5f109bd14b
+  subject_revision: 7c5ee22cf04648becf45885af33feddf88b65249
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; запись рецензента задним числом
+    не правилась. Отпечаток предмета сверен перед публикацией (sha256sum файла на 7c5ee22c)
+    и совпал с объявленным. Отпечаток тела снят с сырого ответа API.
 
 attribution:
   reviewer_kind: claude_agent
-  publishing_actor: null
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
   personal_review_by_publishing_actor_claimed: false
+
 
 scope:
   reviewed: >-
