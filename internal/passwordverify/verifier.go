@@ -514,7 +514,9 @@ func (v *Verifier) SetCandidate(stored domain.LoginVerifier, presented string) S
 	if res.Outcome != OutcomeMismatched {
 		return SetCandidate{refusal: res.Outcome}
 	}
-	key := argon2.IDKey([]byte(normalizeBackupCode(presented)), hdr.salt, hdr.iterations, hdr.memory, uint8(hdr.parallelism), argon2idKeyLen)
+	// Граница приведения проверена разбором: `inspectSet` отвечает не «читается»
+	// на параллельности выше MaxUint8, и сюда такой заголовок не доходит.
+	key := argon2.IDKey([]byte(normalizeBackupCode(presented)), hdr.salt, hdr.iterations, hdr.memory, uint8(hdr.parallelism), argon2idKeyLen) // #nosec G115 -- см. границу в inspectSet
 	return SetCandidate{box: &setCandidateBox{element: base64.RawStdEncoding.EncodeToString(key)}}
 }
 

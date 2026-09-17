@@ -54,16 +54,14 @@ const (
 
 // preparedPresentation — исход первой половины.
 type preparedPresentation struct {
-	method   assurance.Method
-	userID   domain.UserID
-	verdict  presentVerdict
-	outcome  PresentationOutcome
-	observed bool
+	method  assurance.Method
+	userID  domain.UserID
+	verdict presentVerdict
+	outcome PresentationOutcome
 	// totp
 	step int64
 	// lookup_secret
 	candidate passwordverify.SetCandidate
-	remaining int
 }
 
 // settledPresentation — исход второй половины.

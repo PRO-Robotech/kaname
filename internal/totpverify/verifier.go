@@ -80,7 +80,7 @@ const (
 const digitsModulus = 1000000
 
 // secretRedacted — заглушка на всяком общем пути вывода секрета.
-const secretRedacted = "[redacted totp secret]"
+const secretRedacted = "[redacted totp secret]" // #nosec G101 -- текст заглушки, которым секрет ЗАМЕНЯЕТСЯ в выводе; самим секретом не является
 
 // Secret — секрет кода по времени в памяти процесса. Не печатается, не
 // сериализуется; клиенту уходит ответом заведения через `Base32`.
