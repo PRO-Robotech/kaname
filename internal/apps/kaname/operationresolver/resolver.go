@@ -36,9 +36,17 @@ const (
 	kindDelete
 )
 
+// AccessKeyReader — читатель строки ключа доступа по паре (человек, ключ):
+// ключи живут своим адаптером, не в CQRS-корне `Reader`, поэтому порт свой
+// (Ф7, kacho#1273).
+type AccessKeyReader interface {
+	KeyOwnedByID(ctx context.Context, userID domain.UserID, id domain.AccessKeyID) (domain.AccessKey, bool, error)
+}
+
 // Resolver реализует operations.Resolver поверх IAM-репозитория.
 type Resolver struct {
 	repo kanamerepo.Repository
+	keys AccessKeyReader
 	log  *slog.Logger
 	// cat — ЖИВЫЕ строки каталога: набор глаголов типа для превью роли (#1994).
 	//
@@ -66,8 +74,12 @@ func WithLogger(l *slog.Logger) Option {
 // Каталожный факт приходит ОБЯЗАТЕЛЬНЫМ параметром: роль без набора глаголов
 // проекция отвергает, и опция позволила бы забыть провязку — исход был бы виден
 // только тогда, когда осиротевшая операция над ролью впервые дойдёт до резолва.
-func New(repo kanamerepo.Repository, cat catalog.Source, opts ...Option) *Resolver {
-	r := &Resolver{repo: repo, cat: cat, log: slog.Default()}
+//
+// Читатель ключей доступа — тоже ОБЯЗАТЕЛЬНЫЙ параметр: осиротевшая регистрация
+// или снятие ключа без него ушли бы в ветку по умолчанию и не стали бы
+// терминальными никогда (гейт `TestEveryOperationMetadataIsResolvedOrPinned`).
+func New(repo kanamerepo.Repository, cat catalog.Source, keys AccessKeyReader, opts ...Option) *Resolver {
+	r := &Resolver{repo: repo, cat: cat, keys: keys, log: slog.Default()}
 	for _, o := range opts {
 		o(r)
 	}
@@ -86,6 +98,22 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 		r.log.Warn("operation resolver: undecodable metadata, skipping orphan",
 			"op", op.ID, "type_url", op.Metadata.TypeUrl, "err", err)
 		return skip(), nil
+	}
+
+	// Ключи доступа (Ф7): свой адаптер, CQRS-корень для них не открывается.
+	switch m := msg.(type) {
+	case *iamv1.RegisterAccessKeyMetadata:
+		// Регистрация вставляет строку ключа в той же транзакции, что снимает
+		// испытание: строка есть ⇒ работа закоммичена, ответ — ключ той же
+		// проекцией, что у перечня; строки нет ⇒ до коммита не дошло, и
+		// повтор церемонии начинается заново (испытание одноразово).
+		return resolveAccessKey(ctx, kindCreate,
+			domain.UserID(m.GetUserId()), domain.AccessKeyID(m.GetAccessKeyId()), r.keys)
+	case *iamv1.RevokeAccessKeyMetadata:
+		// Снятие удаляет строку: строки нет ⇒ состоялось, ответ несёт
+		// идентификатор; строка есть ⇒ не состоялось.
+		return resolveAccessKey(ctx, kindDelete,
+			domain.UserID(m.GetUserId()), domain.AccessKeyID(m.GetAccessKeyId()), r.keys)
 	}
 
 	rd, err := r.repo.Reader(ctx)
@@ -255,6 +283,46 @@ func resolveMembershipPair(
 	if err != nil {
 		return operations.ResolverResult{}, fmt.Errorf(
 			"operationresolver: marshal membership %q: %w", m.ID, err)
+	}
+	return done(resp), nil
+}
+
+// resolveAccessKey — «существование строки ключа у человека → терминальный
+// исход» (Ф7). Отдельно от `resolveExistence`: ресурс адресуется парой
+// (человек, ключ), а ответы обоих глаголов — свои сообщения контракта.
+func resolveAccessKey(
+	ctx context.Context,
+	k kind,
+	userID domain.UserID, keyID domain.AccessKeyID,
+	keys AccessKeyReader,
+) (operations.ResolverResult, error) {
+	if keys == nil {
+		return operations.ResolverResult{}, fmt.Errorf("operationresolver: access key %q of %q: reader is not wired", keyID, userID)
+	}
+	key, present, err := keys.KeyOwnedByID(ctx, userID, keyID)
+	if err != nil {
+		return operations.ResolverResult{}, fmt.Errorf("operationresolver: access key %q of %q: %w", keyID, userID, err)
+	}
+	if k == kindDelete {
+		if present {
+			return interrupted(), nil
+		}
+		resp, err := anypb.New(&iamv1.RevokeAccessKeyResponse{AccessKeyId: string(keyID)})
+		if err != nil {
+			return operations.ResolverResult{}, fmt.Errorf("operationresolver: marshal revoke %q: %w", keyID, err)
+		}
+		return done(resp), nil
+	}
+	if !present {
+		return interrupted(), nil
+	}
+	var pb *iamv1.AccessKey
+	if err := dto.Transfer(dto.FromTo(key, &pb)); err != nil {
+		return operations.ResolverResult{}, fmt.Errorf("operationresolver: project access key %q: %w", keyID, err)
+	}
+	resp, err := anypb.New(&iamv1.RegisterAccessKeyResponse{AccessKey: pb})
+	if err != nil {
+		return operations.ResolverResult{}, fmt.Errorf("operationresolver: marshal access key %q: %w", keyID, err)
 	}
 	return done(resp), nil
 }

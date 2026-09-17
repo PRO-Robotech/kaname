@@ -26,14 +26,14 @@
 |---|---:|
 | Apache-2.0 | 13 |
 | BSD-3-Clause | 10 |
-| MIT | 19 |
-| **всего** | **42** |
+| MIT | 21 |
+| **всего** | **44** |
 
 ## Apache-2.0
 
 | Модуль | Версия | Файл лицензии в модуле |
 |---|---|---|
-| `github.com/PRO-Robotech/corelib` | `v1.8.0` | `LICENSE` |
+| `github.com/PRO-Robotech/corelib` | `v1.9.0` | `LICENSE` |
 | `github.com/prometheus/client_golang` | `v1.24.1` | `LICENSE` |
 | `github.com/prometheus/client_model` | `v0.6.2` | `LICENSE` |
 | `github.com/prometheus/common` | `v0.70.1` | `LICENSE` |
@@ -69,6 +69,7 @@
 | `github.com/beorn7/perks` | `v1.0.1` | `LICENSE` |
 | `github.com/cenkalti/backoff/v4` | `v4.3.0` | `LICENSE` |
 | `github.com/cespare/xxhash/v2` | `v2.3.0` | `LICENSE.txt` |
+| `github.com/fxamacker/cbor/v2` | `v2.9.0` | `LICENSE` |
 | `github.com/go-viper/mapstructure/v2` | `v2.5.0` | `LICENSE` |
 | `github.com/golang-jwt/jwt/v5` | `v5.3.1` | `LICENSE` |
 | `github.com/jackc/pgpassfile` | `v1.0.0` | `LICENSE` |
@@ -84,6 +85,7 @@
 | `github.com/spf13/cast` | `v1.10.0` | `LICENSE` |
 | `github.com/spf13/viper` | `v1.21.0` | `LICENSE` |
 | `github.com/subosito/gotenv` | `v1.6.0` | `LICENSE` |
+| `github.com/x448/float16` | `v0.8.4` | `LICENSE` |
 | `go.uber.org/multierr` | `v1.11.0` | `LICENSE.txt` |
 
 ---

@@ -146,7 +146,7 @@ func TestTokenHook_HappyPath_EnrichesClaims(t *testing.T) {
 	assert.Equal(t, "usr_01abcdefghjkmnpqr", claims["kaname_user_id"])
 	assert.Equal(t, "acc_01abcdefghjkmnpqr", claims["kaname_active_account"])
 	assert.Equal(t, "user", claims["kaname_principal_type"])
-	assert.Equal(t, "attested", claims["kaname_device_compliance"]) // webauthn scope
+	assert.Equal(t, "unknown", claims["kaname_device_compliance"]) // область webauthn не выводит «attested» (Ф7-39)
 	assert.Equal(t, "abc-thumbprint", claims["kaname_jkt"])
 	assert.Equal(t, "api.test.cloud", claims["kaname_audience"])
 	assert.Equal(t, "https://hydra.test.cloud", claims["kaname_issuer"])

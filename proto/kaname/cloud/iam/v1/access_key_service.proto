@@ -1,0 +1,376 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "corelib/api/v1/operation.proto";
+import "kaname/cloud/iam/v1/access_key.proto";
+import "corelib/operation/operation.proto";
+import "corelib/authz/v1/authz_options.proto";
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// AccessKeyService — ключи доступа человека: наш сервер церемонии WebAuthn,
+// наше хранилище ключей, наша проверка утверждения (iam Ф7,
+// PRO-Robotech/kacho#1273; приёмка
+// `docs/engineering/acceptance/access-keys-are-ours.md`, Р11).
+//
+// Глаголов шесть — по числу действий, которыми вызывающий обращается к ключу.
+// Форма ответа — по `api-conventions.md`: `FinishRegistration` и `Revoke`
+// меняют ресурс и отвечают `Operation`; `Begin*` и `FinishAssertion` ресурса не
+// заводят — испытание не ресурс, утверждение сверяется — и отвечают синхронно.
+//
+// # Полы, отношения и области — РЕШЕНИЕ приёмки (Р11), а не наследство соседей
+//
+// Регистрация, перечень и снятие стоят на полу «1», хотя выпуск и отзыв
+// удостоверений-соседей стоят на «2». Регистрация на «2» неисполнима by
+// construction: первый ключ заводится из сессии одним паролем, и требовать «2»
+// ради получения «2» нельзя (Р5). Снятие на «2» оставило бы глагол
+// неисполнимым внутри фазы. Компенсация — окно свежести на обоих действиях:
+// не старше 15 минут от последнего предъявления. Цена названа в Р11.
+//
+// Отношения и область — те же, что у токена человека: `token_issuer`
+// (`subject` — ровно сам человек) и `token_reader` (`subject or super_admin
+// from account`) на `iam_user` по `user_id`. Своих отношений ключ не заводит:
+// их определения совпали бы с соседскими дословно.
+//
+// # Два глагола утверждения освобождены и пола не несут
+//
+// Они ПРОИЗВОДЯТ уровень, а не потребляют его: требовать уровень от действия,
+// которым уровень достигается, — класс «два правила об одном поле». Объекта,
+// о котором можно спросить модель, нет — субъект есть тот, кого называет
+// утверждение; решатель освобождения `SELF_SERVICE` — связывание с личностью
+// вызывающего: испытание выдаётся вызывающему, утверждение принимается только
+// ключа, принадлежащего вызывающему (Ф7-51, Ф7-55). Полоса, на которой
+// вызывающий ещё никто, — вход — принадлежит Ф13 вместе с её поверхностью.
+//
+// # Величины контракта — девять, и держат их разные механизмы
+//
+// Три — ручки посадки со стражем старта (Ф7-13): имя доверяющей стороны,
+// перечень происхождений, перечень алгоритмов открытого ключа. Шесть — литералы
+// продукта, у которых «не задана» не бывает (Р9, Р4, врезка Ф7-34): видимое имя
+// доверяющей стороны, проверка пользователя на обеих церемониях
+// («предпочтительна»), обнаруживаемое удостоверение («требуется»), срок
+// испытания, аттестация («нет»). Выданное испытание НАЗЫВАЕТ их (Ф7-40, Ф7-42).
+service AccessKeyService {
+  // BeginRegistration — выдать испытание регистрации ключа (Ф7-40).
+  //
+  // Испытание привязано к вызывающему и однократно; срок — литерал контракта,
+  // строго меньше окна свежести. Отказы: сессия несвежа — FAILED_PRECONDITION
+  // `SESSION_NOT_FRESH` со следующим шагом (Ф7-04).
+  rpc BeginRegistration (BeginAccessKeyRegistrationRequest) returns (AccessKeyRegistrationChallenge) {
+    option (google.api.http) = {
+      post: "/iam/v1/users/{user_id}/accessKeys:beginRegistration"
+      body: "*"
+    };
+    option (corelib.authz.v1.permission)        = "iam.access_keys.begin_registration";
+    option (corelib.authz.v1.required_relation) = "token_issuer";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "1";
+  }
+
+  // FinishRegistration — принять результат церемонии и завести ключ (Ф7-01).
+  //
+  // Результат сверяется по шести осям — испытание, происхождение, хэш имени
+  // доверяющей стороны, алгоритм открытого ключа, идентификатор удостоверения,
+  // бит присутствия — и по расширению свойств удостоверения (Ф7-41); форма
+  // имени и предел описания судятся первым стейтментом и испытания не гасят
+  // (Ф7-46). Ключ ложится строкой своей таблицы, слот потолка списывает
+  // оператор базы в той же транзакции, событие аудита — там же (§4.1 п. 11).
+  rpc FinishRegistration (FinishAccessKeyRegistrationRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/users/{user_id}/accessKeys"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "RegisterAccessKeyMetadata"
+      response: "RegisterAccessKeyResponse"
+    };
+    option (corelib.authz.v1.permission)        = "iam.access_keys.register";
+    option (corelib.authz.v1.required_relation) = "token_issuer";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "1";
+  }
+
+  // List — перечень ключей человека: каждый назван своим `id` (Р10, §3.0).
+  rpc List (ListAccessKeysRequest) returns (ListAccessKeysResponse) {
+    option (google.api.http) = {
+      get: "/iam/v1/users/{user_id}/accessKeys"
+    };
+    option (corelib.authz.v1.permission)        = "iam.access_keys.list";
+    option (corelib.authz.v1.required_relation) = "token_reader";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "1";
+  }
+
+  // Revoke — снять ключ по его `id` (Ф7-25).
+  //
+  // Негодная форма `id` — синхронный отказ первым стейтментом (Ф7-47); чужой
+  // ключ и несуществующий — один отказ (Ф7-27); последний способ входа не
+  // снимается (Ф7-26); окно свежести — как у регистрации (Ф7-36). Снятие
+  // возвращает слот потолка удалением строки в той же транзакции.
+  rpc Revoke (RevokeAccessKeyRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = {
+      delete: "/iam/v1/users/{user_id}/accessKeys/{access_key_id}"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "RevokeAccessKeyMetadata"
+      response: "RevokeAccessKeyResponse"
+    };
+    option (corelib.authz.v1.permission)        = "iam.access_keys.revoke";
+    option (corelib.authz.v1.required_relation) = "token_issuer";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "iam_user"
+      from_request_field: "user_id"
+    };
+    option (corelib.authz.v1.required_acr_min)  = "1";
+  }
+
+  // BeginAssertion — выдать испытание предъявления ВЫЗЫВАЮЩЕМУ (Ф7-42).
+  //
+  // Освобождён: субъект — тот, кто зовёт; испытание находится потом только из
+  // его сессии (Ф7-55). Пола нет — глагол производит уровень, а не потребляет.
+  rpc BeginAssertion (BeginAccessKeyAssertionRequest) returns (AccessKeyAssertionChallenge) {
+    option (google.api.http) = {
+      post: "/iam/v1/accessKeys:beginAssertion"
+      body: "*"
+    };
+    option (corelib.authz.v1.permission)    = "<exempt>";
+    option (corelib.authz.v1.exempt_reason) = "SELF_SERVICE";
+  }
+
+  // FinishAssertion — сверить утверждение ключа вызывающего (Ф7-06).
+  //
+  // Освобождён: ключ, названный утверждением, обязан принадлежать вызывающему —
+  // иначе единый отказ (Ф7-51). Все отказы этой полосы — один текст и один код
+  // (§3.0, четырнадцать полос): подделанная подпись, чужой ключ, неизвестное
+  // удостоверение, происхождение вне перечня, чужое имя доверяющей стороны,
+  // счётчик, снятый бит присутствия, невыданное, повторное, просроченное и
+  // чужое испытание. Ответ называет человека, равного вызывающему, и флаги
+  // ЭТОГО утверждения — в виде, который читает правило уровня Ф11 (§3.8).
+  rpc FinishAssertion (FinishAccessKeyAssertionRequest) returns (FinishAccessKeyAssertionResponse) {
+    option (google.api.http) = {
+      post: "/iam/v1/accessKeys:finishAssertion"
+      body: "*"
+    };
+    option (corelib.authz.v1.permission)    = "<exempt>";
+    option (corelib.authz.v1.exempt_reason) = "SELF_SERVICE";
+  }
+}
+
+// ─── регистрация ────────────────────────────────────────────────────────────
+
+message BeginAccessKeyRegistrationRequest {
+  // Человек, которому заводится ключ; область записи каталога. Отношение
+  // `token_issuer` = `subject`: не равный вызывающему `user_id` отвергает
+  // модель, а не проверка в коде.
+  string user_id = 1;
+}
+
+// AccessKeyRegistrationChallenge — выданное испытание регистрации в форме
+// словаря `PublicKeyCredentialCreationOptions` нормы WebAuthn Level 2; имена
+// полей в JSON края — те же, что у словаря (`rp`, `user`, `pubKeyCredParams`,
+// `authenticatorSelection`, `attestation`, `extensions`). Байты — в base64.
+//
+// Шесть величин контракта названы здесь (Ф7-40): `rp.id` и `pub_key_cred_params`
+// (ручки посадки), `rp.name`, `authenticator_selection.user_verification`,
+// `authenticator_selection.resident_key` и `attestation` (литералы). Перечень
+// происхождений и срок в испытание не входят: первый сверяется с тем, что
+// назвал браузер, второй — свойство самого испытания (`expires_at`).
+message AccessKeyRegistrationChallenge {
+  // Случайное испытание; сверяется с `clientDataJSON.challenge` результата.
+  bytes challenge = 1;
+  RelyingParty rp = 2;
+  // Человек глазами аутентификатора. `id` — платформенный `id` человека как
+  // байты (Ф13 Р3): без адреса и без имени, один у всех ключей человека.
+  CeremonyUser user = 3;
+  // Допустимые алгоритмы открытого ключа — перечень посадки, в порядке
+  // предпочтения; `type` всегда `public-key`.
+  repeated PublicKeyCredentialParameters pub_key_cred_params = 4;
+  AuthenticatorSelection authenticator_selection = 5;
+  // Аттестация: всегда `none` (Р4).
+  string attestation = 6;
+  CeremonyExtensions extensions = 7;
+  // Момент, после которого результат над этим испытанием отвергается (Ф7-34).
+  google.protobuf.Timestamp expires_at = 8;
+}
+
+message RelyingParty {
+  // Имя доверяющей стороны — ручка посадки (Р2); ключ привязан к нему при
+  // регистрации.
+  string id = 1;
+  // Видимое имя доверяющей стороны — литерал контракта (Р9).
+  string name = 2;
+}
+
+message CeremonyUser {
+  bytes id = 1;
+  string name = 2;
+  string display_name = 3;
+}
+
+message PublicKeyCredentialParameters {
+  string type = 1;
+  // Идентификатор алгоритма COSE (`-7` ES256, `-257` RS256, `-8` EdDSA).
+  int64 alg = 2;
+}
+
+message AuthenticatorSelection {
+  // `required` — литерал контракта (Р9): полоса входа без имени без
+  // обнаруживаемого удостоверения невозможна.
+  string resident_key = 1;
+  bool require_resident_key = 2;
+  // `preferred` — литерал контракта (Р9).
+  string user_verification = 3;
+}
+
+message CeremonyExtensions {
+  // Запрос расширения свойств удостоверения: результат, чьё расширение
+  // сообщило «не обнаруживаемое», отвергается (Ф7-41). Величиной контракта не
+  // является.
+  bool cred_props = 1;
+}
+
+message FinishAccessKeyRegistrationRequest {
+  string user_id = 1;
+  // Имя ключа одной формы дерева; пустое замещается `id` (Р10, Ф7-46).
+  string name = 2;
+  // Свободный текст до 256 знаков (Р10, Ф7-46).
+  string description = 3;
+  RegistrationCredential credential = 4;
+}
+
+// RegistrationCredential — результат церемонии в форме `PublicKeyCredential`
+// с `AuthenticatorAttestationResponse`; байты — как их отдал браузер.
+message RegistrationCredential {
+  // `rawId` — идентификатор удостоверения. Уникальность держит база (Ф7-05,
+  // Ф7-15); наружу он не выходит.
+  bytes id = 1;
+  bytes client_data_json = 2;
+  bytes attestation_object = 3;
+  // `clientExtensionResults.credProps.rk` — три состояния (Ф7-41): сообщено
+  // «обнаруживаемое» (true), сообщено «не обнаруживаемое» (false — отказ),
+  // не сообщено (поле отсутствует — принимается).
+  google.protobuf.BoolValue discoverable = 4;
+}
+
+message RegisterAccessKeyResponse {
+  AccessKey access_key = 1;
+}
+
+message RegisterAccessKeyMetadata {
+  string user_id = 1;
+  string access_key_id = 2;
+  // Read by exact field name `account_id` by corelib operations (extractAccountID)
+  // → операция попадает в account-scoped фид `/iam/operations`.
+  string account_id = 3;
+}
+
+// ─── перечень и снятие ──────────────────────────────────────────────────────
+
+message ListAccessKeysRequest {
+  string user_id = 1;
+  // Maximum number of results per page. 0 selects the service default (50);
+  // a value above 1000 is rejected with INVALID_ARGUMENT rather than clamped.
+  int64 page_size = 2;
+  string page_token = 3;
+}
+
+message ListAccessKeysResponse {
+  repeated AccessKey access_keys = 1;
+  string next_page_token = 2;
+}
+
+message RevokeAccessKeyRequest {
+  string user_id = 1;
+  // Платформенный `id` ключа формы `ak-<17>` (Р10).
+  string access_key_id = 2;
+}
+
+// Ответ снятия — идентификатор снятого ключа. Момента снятия здесь нет
+// намеренно: строка удаляется, момент несёт событие аудита, а операция,
+// разрешённая после гибели процесса, узнать его не может — пустое поле
+// означало бы «не знаем», а не «пусто».
+message RevokeAccessKeyResponse {
+  string access_key_id = 1;
+}
+
+message RevokeAccessKeyMetadata {
+  string user_id = 1;
+  string access_key_id = 2;
+  // Read by exact field name `account_id` by corelib operations → операция
+  // попадает в account-scoped фид `/iam/operations`.
+  string account_id = 3;
+}
+
+// ─── утверждение ────────────────────────────────────────────────────────────
+
+// BeginAccessKeyAssertionRequest — полей нет намеренно: человека называет
+// сессия вызывающего, а не тело запроса.
+message BeginAccessKeyAssertionRequest {}
+
+// AccessKeyAssertionChallenge — выданное испытание предъявления в форме словаря
+// `PublicKeyCredentialRequestOptions`. Называет требование проверки
+// пользователя — литерал контракта (Ф7-42).
+message AccessKeyAssertionChallenge {
+  bytes challenge = 1;
+  string rp_id = 2;
+  // `preferred` — литерал контракта (Р9).
+  string user_verification = 3;
+  // Идентификаторы удостоверений ВЫЗЫВАЮЩЕГО: своих ключей, а не чужих.
+  repeated PublicKeyCredentialDescriptor allow_credentials = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+message PublicKeyCredentialDescriptor {
+  string type = 1;
+  bytes id = 2;
+}
+
+message FinishAccessKeyAssertionRequest {
+  AssertionCredential credential = 1;
+}
+
+// AssertionCredential — утверждение в форме `PublicKeyCredential` с
+// `AuthenticatorAssertionResponse`.
+message AssertionCredential {
+  bytes id = 1;
+  bytes client_data_json = 2;
+  bytes authenticator_data = 3;
+  bytes signature = 4;
+  // `userHandle` — рукоятка, сверяется со строкой, когда прислана (норма
+  // §7.2); пустая — не прислана.
+  bytes user_handle = 5;
+}
+
+message FinishAccessKeyAssertionResponse {
+  // Человек, названный утверждением, — равен вызывающему (Ф7-06, Ф7-51).
+  string user_id = 1;
+  string access_key_id = 2;
+  // Флаги ЭТОГО утверждения — то, что читает правило уровня Ф11 Р3 (§3.8).
+  AssertionFlags flags = 3;
+}
+
+// AssertionFlags — биты флагов данных аутентификатора, прочитанные из
+// утверждения: сообщённые нулями отличимы от непрочитанных тем, что
+// непрочитанные — отказ, а не нули (Ф7-30).
+message AssertionFlags {
+  bool user_present = 1;
+  bool user_verified = 2;
+  bool backup_eligible = 3;
+  bool backup_state = 4;
+}

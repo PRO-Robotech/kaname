@@ -187,6 +187,8 @@ func breakRequirement(t *testing.T, cfg config.Config, r config.LaneRequirement)
 		broken.AuthN.SecondFactorEncryptionKeyHex = ""
 	case "окно свежести правки своих данных объявлено":
 		broken.AuthN.SelfServiceFreshness = 0
+	case "привязка ключей доступа объявлена: имя доверяющей стороны, перечень происхождений, перечень алгоритмов":
+		broken.AuthN.AccessKeys.Origins = nil
 	case "каждый уровень доверия каталога предъявим":
 		w.PresentableACRs = nil
 	// Две строки ниже требуют ОТСУТСТВИЯ, поэтому ломаются наличием.

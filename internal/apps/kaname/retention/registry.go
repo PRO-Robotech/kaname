@@ -100,10 +100,15 @@ const (
 	// `confirm` их уже не примет ни при каком коде (Ф12-04). Темп задаёт сам
 	// человек: строку заводит `enroll` под живой сессией.
 	SubjectSecondFactorEnrollments = "second_factor_enrollments"
+	// SubjectAccessKeyChallenges — испытания ключей доступа (Ф7, kacho#1273;
+	// Р5, врезка Ф7-34): истёкшие и снятые — ни приём результата церемонии, ни
+	// проверка утверждения их уже не обслужат. Темп задаёт сам человек: строку
+	// заводит начало церемонии либо предъявления под живой сессией.
+	SubjectAccessKeyChallenges = "access_key_challenges"
 )
 
-// HumanSessionReapers — ЧЕТЫРЕ уборщика полосы входа (Ф3, Ф5, Ф12): порог у
-// второго — самое длинное окно счёта, у четвёртого — окно свежести правки
+// HumanSessionReapers — ПЯТЬ уборщиков полосы входа (Ф3, Ф5, Ф12, Ф7): порог
+// у второго — самое длинное окно счёта, у четвёртого — окно свежести правки
 // своих данных; обе величины посадки и приходят параметром вместе с
 // уборщиком, а не выписываются длительностью.
 type HumanSessionReapers struct {
@@ -111,6 +116,7 @@ type HumanSessionReapers struct {
 	Failures         LoginFailureReaper
 	Codes            RecoveryCodeReaper
 	Enrollments      EnrollmentReaper
+	Challenges       AccessKeyChallengeReaper
 	LongestWindow    time.Duration
 	EnrollmentWindow time.Duration
 }
@@ -136,11 +142,16 @@ type EnrollmentReaper interface {
 	SweepExpiredEnrollments(ctx context.Context, window time.Duration, batch int) (int64, bool, error)
 }
 
+// AccessKeyChallengeReaper — порт уборщика истёкших и снятых испытаний ключей.
+type AccessKeyChallengeReaper interface {
+	SweepUnservableChallenges(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
 // WithHumanSessions — записи реестра полосы входа поверх базовых. Отдельной
 // функцией, а не параметрами `Subjects`: полоса поднимается посадкой `own`, и
 // под `external` записей у неё нет — уборщик без предмета выглядел бы исправным.
 func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
-	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.EnrollmentWindow <= 0 {
+	if r.Sessions == nil || r.Failures == nil || r.Codes == nil || r.Enrollments == nil || r.Challenges == nil || r.EnrollmentWindow <= 0 {
 		return base
 	}
 	return append(base,
@@ -172,6 +183,14 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 			// ровно то, что читатель уже отверг; запаса сверх окна не нужно.
 			Grace: r.EnrollmentWindow,
 			Sweep: r.Enrollments.SweepExpiredEnrollments,
+		},
+		Subject{
+			Name: SubjectAccessKeyChallenges,
+			// Порог — предикат читателя: истёкшее испытание не примет ни
+			// приём результата церемонии, ни проверка утверждения (Ф7-34,
+			// Ф7-54), снятое — тоже (Ф7-03, Ф7-53); граница включающая у обоих.
+			Grace: 0,
+			Sweep: r.Challenges.SweepUnservableChallenges,
 		},
 	)
 }

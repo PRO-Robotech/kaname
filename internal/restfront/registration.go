@@ -121,6 +121,10 @@ func registerPublicRESTServices(
 		{"PermissionCatalogService", iamv1.RegisterPermissionCatalogServiceHandlerFromEndpoint},
 		{"SAKeyService", iamv1.RegisterSAKeyServiceHandlerFromEndpoint},
 		{"UserTokenService", iamv1.RegisterUserTokenServiceHandlerFromEndpoint},
+		// Ключи доступа (Ф7, kacho#1273): шесть глаголов на публичном
+		// слушателе. Под посадкой `external` служба на слушателе не поднята, и
+		// привязка ведёт к `Unimplemented`.
+		{"AccessKeyService", iamv1.RegisterAccessKeyServiceHandlerFromEndpoint},
 	}
 	for _, r := range registrations {
 		if err := r.bind(ctx, mux, endpoint, opts); err != nil {

@@ -73,7 +73,7 @@ type Config struct {
 	// величину платформе значило бы, что на конкретном стенде это окно нельзя ни
 	// сузить, ни даже прочитать в конфигурации.
 	AuthZ AuthZConfig `mapstructure:"authz"`
-	// OwnCeilings — ТРИ СОБСТВЕННЫХ ПОТОЛКА службы доступа: сколько аккаунтов
+	// OwnCeilings — ЧЕТЫРЕ СОБСТВЕННЫХ ПОТОЛКА службы доступа: сколько аккаунтов
 	// заводит одна личность и сколько путей входа держит человек и машина
 	// (приёмка `KAN-QUOTA-1`, `П25`; задача продукта #2117).
 	//
@@ -436,6 +436,10 @@ type AuthNConfig struct {
 	Login LoginLaneConfig `mapstructure:"login"`
 	// Registration — регистрация нашей полосой (Ф4): потолок темпа заведения.
 	Registration RegistrationConfig `mapstructure:"registration"`
+	// AccessKeys — привязка ключей доступа (Ф7, kacho#1273): имя доверяющей
+	// стороны, перечень происхождений, перечень алгоритмов. Величины посадки
+	// `own` без умолчания; пустой перечень происхождений — «никого».
+	AccessKeys AccessKeysConfig `mapstructure:"access-keys"`
 	// TrustedForwarderSANs — EXACT client-certificate SPIFFE SAN URIs allowed to
 	// FORWARD an end-user identity (`x-kacho-principal-*` metadata) to iam. Fed
 	// into grpcsrv.WithTrustedForwarders on BOTH gRPC listeners

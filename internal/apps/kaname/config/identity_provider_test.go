@@ -35,7 +35,19 @@ func laneCfg(p config.IdentityProvider) config.Config {
 	cfg.AuthN.PresentedCredential = presentedCredentialSettings()
 	cfg.AuthN.Login = loginLaneSettings()
 	cfg.AuthN.Registration = registrationSettings()
+	cfg.AuthN.AccessKeys = accessKeySettings()
 	return cfg
+}
+
+// accessKeySettings — годная привязка ключей доступа (Ф7 Р2): имя, одно
+// происхождение под ним, весь словарь алгоритмов; каждое стережёт свой страж
+// под посадкой `own`.
+func accessKeySettings() config.AccessKeysConfig {
+	return config.AccessKeysConfig{
+		RPID:       "access.example.invalid",
+		Origins:    []string{"https://console.access.example.invalid"},
+		Algorithms: []int64{-7, -8, -257},
+	}
 }
 
 // loginLaneSettings — годная настройка полосы входа (Ф3): значения настоящие,

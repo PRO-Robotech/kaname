@@ -43,7 +43,7 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 		// продолжает проходить. Пробы, которые ПРО него, значение
 		// перезаписывают (authz_window_test.go).
 		AuthZ: config.AuthZConfig{CacheTTL: 5 * time.Second},
-		// Три собственных потолка — на тех же основаниях, что величины выше:
+		// Четыре собственных потолка — на тех же основаниях, что величины выше:
 		// страж старта требует их объявленными в ЛЮБОМ режиме (приёмка
 		// `KAN-QUOTA-1`, `П25`), потому что умолчания у них быть не может —
 		// внешнего авторитета в самостоятельной установке нет, и спросить
@@ -53,6 +53,7 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			AccountsPerIdentity:          ptrInt64(5),
 			CredentialsPerUser:           ptrInt64(12),
 			CredentialsPerServiceAccount: ptrInt64(24),
+			AccessKeysPerUser:            ptrInt64(3),
 		},
 		// Ограничение частоты писем на адрес — положительное в ЛЮБОМ режиме
 		// (приёмка ID-MAIL-1, MAIL-43): умолчание объявлено загрузчику, а не
