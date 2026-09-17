@@ -180,6 +180,7 @@ func (uc *RegisterUseCase) Execute(ctx context.Context, in Input) (Output, error
 		case ConsequenceAddress:
 			err = w.InsertLoginMethod(ctx, domain.LoginMethod{
 				UserID: mirror.User.ID, Kind: domain.LoginMethodPassword, Verifier: verifier,
+				State: domain.LoginMethodStateActive,
 			})
 		case ConsequenceSession:
 			session, bearer, err = humansession.IssueSession(ctx, w, humansession.IssueInput{

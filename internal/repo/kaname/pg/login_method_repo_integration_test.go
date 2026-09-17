@@ -122,7 +122,7 @@ func TestLoginMethodRepo_MaterialRoundTripsVerbatim(t *testing.T) {
 
 	for i, material := range materials {
 		created, err := repo.Create(ctx, domain.LoginMethod{
-			UserID: people[i], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, material),
+			UserID: people[i], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, material), State: domain.LoginMethodStateActive,
 		})
 		require.NoError(t, err, "формат %d", i)
 		require.False(t, created.CreatedAt.IsZero(), "момент заведения назначает запись")
@@ -149,7 +149,7 @@ func TestLoginMethodRepo_GetOfAnAbsentMethodIsNotFound(t *testing.T) {
 
 	// Положительный контроль: заведённый — находится.
 	_, err = repo.Create(context.Background(), domain.LoginMethod{
-		UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lmget.present"),
+		UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lmget.present"), State: domain.LoginMethodStateActive,
 	})
 	require.NoError(t, err)
 	_, err = repo.Get(context.Background(), people[0], domain.LoginMethodPassword)
@@ -164,12 +164,12 @@ func TestLoginMethodRepo_SecondMethodOfTheSameKindIsAlreadyExists(t *testing.T) 
 	people := lmPeople(t, pool, "lmdup", 2)
 
 	first, err := repo.Create(ctx, domain.LoginMethod{
-		UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lmdup.first"),
+		UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lmdup.first"), State: domain.LoginMethodStateActive,
 	})
 	require.NoError(t, err)
 
 	_, err = repo.Create(ctx, domain.LoginMethod{
-		UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lmdup.second"),
+		UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lmdup.second"), State: domain.LoginMethodStateActive,
 	})
 	require.ErrorIs(t, err, iamerr.ErrAlreadyExists, "F4d-14: ALREADY_EXISTS, произведённый базой")
 	require.Equal(t, fmt.Sprintf("Login method password of user %s already exists", people[0]),
@@ -183,7 +183,7 @@ func TestLoginMethodRepo_SecondMethodOfTheSameKindIsAlreadyExists(t *testing.T) 
 
 	// Положительный контроль: тот же вид ДРУГОМУ человеку проходит.
 	_, err = repo.Create(ctx, domain.LoginMethod{
-		UserID: people[1], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lmdup.other"),
+		UserID: people[1], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lmdup.other"), State: domain.LoginMethodStateActive,
 	})
 	require.NoError(t, err)
 }
@@ -193,7 +193,7 @@ func TestLoginMethodRepo_MethodOfAMissingPersonIsFailedPrecondition(t *testing.T
 	repo := pg.NewLoginMethodRepo(pool)
 
 	_, err := repo.Create(context.Background(), domain.LoginMethod{
-		UserID: "usr0000000000000nobody", Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lmfk.ghost"),
+		UserID: "usr0000000000000nobody", Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lmfk.ghost"), State: domain.LoginMethodStateActive,
 	})
 	require.ErrorIs(t, err, iamerr.ErrFailedPrecondition)
 	require.ErrorIs(t, err, iamerr.ErrReferenceMissing)
@@ -210,9 +210,9 @@ func TestLoginMethodRepo_InvalidInputIsRefusedBeforeTheBase(t *testing.T) {
 	people := lmPeople(t, pool, "lminv", 1)
 
 	for name, m := range map[string]domain.LoginMethod{
-		"материала нет": {UserID: people[0], Kind: domain.LoginMethodPassword},
-		"вид чужой":     {UserID: people[0], Kind: "totp", Verifier: lmVerifier(t, "$2a$12$lminv.kind")},
-		"человека нет":  {Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lminv.user")},
+		"материала нет": {UserID: people[0], Kind: domain.LoginMethodPassword, State: domain.LoginMethodStateActive},
+		"вид чужой":     {UserID: people[0], Kind: "sms", Verifier: lmVerifier(t, "$2a$12$lminv.kind"), State: domain.LoginMethodStateActive},
+		"человека нет":  {Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, "$2a$12$lminv.user"), State: domain.LoginMethodStateActive},
 	} {
 		_, err := repo.Create(context.Background(), m)
 		require.ErrorIs(t, err, iamerr.ErrInvalidArg, "%s: отказ обязан прийти от типа", name)
@@ -248,7 +248,7 @@ func TestLoginMethodRepo_ConcurrentCreatesOneWins(t *testing.T) {
 				defer wg.Done()
 				<-start
 				_, err := repo.Create(ctx, domain.LoginMethod{
-					UserID: user, Kind: domain.LoginMethodPassword, Verifier: verifier,
+					UserID: user, Kind: domain.LoginMethodPassword, Verifier: verifier, State: domain.LoginMethodStateActive,
 				})
 				mu.Lock()
 				defer mu.Unlock()

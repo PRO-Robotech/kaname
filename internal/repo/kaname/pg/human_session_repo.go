@@ -320,6 +320,36 @@ func (w *humanSessionWriter) ReplaceLoginVerifier(ctx context.Context, m domain.
 	return replaceLoginVerifierTx(ctx, w.tx, m)
 }
 
+// Операторы второго фактора (Ф12) — те же делегации: таблицу секрета называет
+// только её адаптер.
+func (w *humanSessionWriter) UpsertPendingTOTP(ctx context.Context, m domain.LoginMethod) (bool, error) {
+	return upsertPendingTOTPTx(ctx, w.tx, m)
+}
+
+func (w *humanSessionWriter) ActivateTOTP(ctx context.Context, userID domain.UserID, pendingSince time.Time, step int64, at time.Time) (bool, error) {
+	return activateTOTPTx(ctx, w.tx, userID, pendingSince, step, at)
+}
+
+func (w *humanSessionWriter) ReplaceLookupSet(ctx context.Context, m domain.LoginMethod) error {
+	return replaceLookupSetTx(ctx, w.tx, m)
+}
+
+func (w *humanSessionWriter) LockLookupSet(ctx context.Context, userID domain.UserID) (domain.LoginMethod, bool, error) {
+	return lockLookupSetTx(ctx, w.tx, userID)
+}
+
+func (w *humanSessionWriter) ConsumeLookupElement(ctx context.Context, userID domain.UserID, element string) (bool, error) {
+	return consumeLookupElementTx(ctx, w.tx, userID, element)
+}
+
+func (w *humanSessionWriter) RecordAcceptedStep(ctx context.Context, userID domain.UserID, step int64) (bool, error) {
+	return recordAcceptedStepTx(ctx, w.tx, userID, step)
+}
+
+func (w *humanSessionWriter) RemoveSecondFactor(ctx context.Context, userID domain.UserID) (bool, error) {
+	return removeSecondFactorTx(ctx, w.tx, userID)
+}
+
 func (w *humanSessionWriter) RecordFailure(ctx context.Context, scope humansession.FailureScope, key string, at time.Time) error {
 	if key == "" {
 		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument login_failure.key: required")

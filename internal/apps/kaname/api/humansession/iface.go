@@ -170,8 +170,49 @@ type Writer interface {
 	// Ф-а): inserted=false — ключ уже стоит, побочных записей делать нельзя.
 	InsertRecoveryCompletion(ctx context.Context, rc domain.RecoveryCompletion) (inserted bool, err error)
 
+	// --- второй фактор (Ф12, kacho#1281) — операторы над таблицей способов
+	// входа; каждый живёт в адаптере таблицы секрета, писатель сессии их
+	// делегирует. Инварианты держит база (ban #10): ключ «человек, вид»,
+	// условные операторы, замок строки набора.
+
+	// UpsertPendingTOTP — ОДИН оператор заведения под ключом «человек, вид»
+	// (Ф12-05, F4d-14 в части исхода): строки нет — вставка `pending`; строка
+	// `pending` — замена секрета и момента заведения; строка `active` —
+	// accepted=false, ничего не записано. Проверки перед вставкой нет.
+	UpsertPendingTOTP(ctx context.Context, m domain.LoginMethod) (accepted bool, err error)
+	// ActivateTOTP — CAS подтверждения (Ф12-07): строка `pending` с ЭТИМ моментом
+	// заведения (pendingSince — версия строки) становится `active` с принятым
+	// шагом и моментом подтверждения; activated=false — строки `pending` того
+	// заведения нет (уже `active`, заменена, снята).
+	ActivateTOTP(ctx context.Context, userID domain.UserID, pendingSince time.Time, step int64, at time.Time) (activated bool, err error)
+	// ReplaceLookupSet — набор запасных кодов целиком: вставка либо замена
+	// строки `lookup_secret` (Ф12 Р6: перечеканка заменяет набор целиком).
+	ReplaceLookupSet(ctx context.Context, m domain.LoginMethod) error
+	// LockLookupSet — строка набора ПОД ЗАМКОМ до конца транзакции
+	// (сериализация чтения-изменения-записи набора, Ф12-24): сравнение и
+	// потребление идут под ним. found=false — набора нет.
+	LockLookupSet(ctx context.Context, userID domain.UserID) (domain.LoginMethod, bool, error)
+	// ConsumeLookupElement — снятие ОДНОГО элемента набора по его значению
+	// (Ф12-23): consumed=false — такого элемента в наборе нет.
+	ConsumeLookupElement(ctx context.Context, userID domain.UserID, element string) (consumed bool, err error)
+	// RecordAcceptedStep — условная запись принятого шага (Ф12 Р5, Ф12-22):
+	// проходит, когда строка `active` и шаг старше последнего принятого;
+	// recorded=false — повтор либо младший шаг либо строка не `active`.
+	RecordAcceptedStep(ctx context.Context, userID domain.UserID, step int64) (recorded bool, err error)
+	// RemoveSecondFactor — строки `totp` (`active`) и `lookup_secret` сняты
+	// одним оператором (Ф12-28, Ф12-30); removed=false — заведённого фактора
+	// нет, и строка `pending` при этом НЕ тронута (матрица Р4).
+	RemoveSecondFactor(ctx context.Context, userID domain.UserID) (removed bool, err error)
+
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context) error
+}
+
+// EnrollmentSweeper — порт уборки неподтверждённых заведений второго фактора
+// (Ф12-44): строки `pending`, чей срок (окно Р8 от момента заведения) истёк,
+// — `confirm` их уже не примет ни при каком коде.
+type EnrollmentSweeper interface {
+	SweepExpiredEnrollments(ctx context.Context, window time.Duration, batch int) (int64, bool, error)
 }
 
 // FailureSweeper / SessionSweeper — порты уборки (форма Ф-ж): записи, которые

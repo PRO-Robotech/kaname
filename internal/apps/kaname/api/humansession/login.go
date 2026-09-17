@@ -338,7 +338,7 @@ func (uc *LoginUseCase) rewriteIfNeeded(ctx context.Context, user domain.User, s
 		return
 	}
 	defer func() { _ = w.Rollback(ctx) }()
-	replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh})
+	replaced, err := w.ReplaceLoginVerifier(ctx, domain.LoginMethod{UserID: user.ID, Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive})
 	if err != nil || !replaced {
 		uc.observer.RewriteObserved(RewriteWriteFailed)
 		if err != nil {

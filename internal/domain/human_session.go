@@ -225,6 +225,15 @@ func (s HumanSession) Expired(now time.Time) bool { return !now.Before(s.Expires
 const (
 	RevokeReasonLogout         = "logout"
 	RevokeReasonPasswordChange = "password-change"
+	// RevokeReasonSecondFactorRemoved — снятие второго фактора самим человеком
+	// гасит ПРОЧИЕ его сессии (Ф12 Р9, kacho#1281): журнал отличает это от
+	// выхода и от смены пароля. Третье значение словаря
+	// `human_sessions_ended_reason_check`.
+	RevokeReasonSecondFactorRemoved = "second-factor-removed"
+	// RevokeReasonSecondFactorReset — причина отсечки, которую пишет сброс
+	// второго фактора распорядителем (Ф12 Р10): все сессии человека покрыты
+	// отсечкой `now` существующим писателем принудительного выхода.
+	RevokeReasonSecondFactorReset = "second-factor-reset"
 )
 
 // FormKind — вид формы, к которому привязан признак защиты от подделки
