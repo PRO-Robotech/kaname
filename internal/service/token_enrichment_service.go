@@ -137,6 +137,12 @@ type TokenEnrichmentConfig struct {
 // service never depends on the HTTP/Hydra contract.
 type TokenHookContext struct {
 	// GrantedScopes — OAuth2 scopes granted for this token.
+	//
+	// Читателя среди полос выдачи нет с Ф7-39 (kacho#1273): единственный —
+	// деривация «область `webauthn`/`passkey` ⇒ устройство аттестовано» —
+	// снят как утверждение, которого продукт не проверял. Поле остаётся входом
+	// контракта хука: по нему проба Ф7-39 доказывает, что состав утверждений не
+	// зависит от наличия ключа среди выданных областей.
 	GrantedScopes []string
 	// AuthTime — session auth_time (unix seconds); 0 when unknown.
 	AuthTime int64
@@ -494,13 +500,11 @@ func (s *TokenEnrichmentService) userClaims(primary domain.User, subject string,
 		"kaname_issued_at":         s.now().Unix(),
 	}
 
-	// Device compliance: a webauthn/passkey scope ⇒ attested device.
-	for _, sc := range hookCtx.GrantedScopes {
-		if sc == "webauthn" || sc == "passkey" {
-			claims["kaname_device_compliance"] = "attested"
-			break
-		}
-	}
+	// Согласие устройства НЕ выводится из наличия ключа доступа (Ф7-39, Р4;
+	// kacho#1273). Здесь стояла деривация «область `webauthn`/`passkey` среди
+	// выданных ⇒ `attested`» — утверждение об аттестации устройства, которой
+	// продукт не проверял: аттестация ключа не требуется, не проверяется и не
+	// хранится. Значение остаётся `unknown` на всех пяти полосах выдачи.
 	// MFA timestamp: session auth_time when positive.
 	if hookCtx.AuthTime > 0 {
 		claims["kaname_mfa_at"] = hookCtx.AuthTime
