@@ -15,11 +15,17 @@
 //     отличимый кодом, и о личности они не говорят ничего; задержка на них
 //     сделала бы шторм попыток дороже для нас, не для постороннего;
 //  3. класс значения, встреченного на чтении, ДОПУСКАЕТСЯ в огибающую до того,
-//     как полоса отсчитала потолок: запись мимо нашего процесса (перенос П3
-//     иным процессом) приносит класс, которого перепись старта не видела, и
+//     как полоса отсчитала потолок: запись мимо нашего процесса (иным
+//     процессом) приносит класс, которого перепись старта не видела, и
 //     первый же вход по нему поднимает потолок — окно оракула равно одному
 //     обращению, а не времени до перезапуска;
-//  4. полоса без огибающей не собирается.
+//  4. полоса без огибающей не собирается;
+//  5. ёмкость проверяющего на ожидании НЕ занята (Р17; заказ kaname#220 (б)):
+//     при ёмкости 1 второе обращение в окне ожидания первого получает место и
+//     свой исход не раньше потолка, во время вычисления — «ёмкость исчерпана»
+//     и тоже не раньше потолка; отрицательный контроль поимённо — реализация,
+//     держащая место до конца ожидания, краснеет на первой половине и молчит
+//     на второй.
 package humansession_test
 
 import (
@@ -150,13 +156,20 @@ func TestLogin_F3_31_EveryOutcomeAfterTheRateGateHoldsUntilTheFloor(t *testing.T
 	// Ёмкость исчерпана: единственный слот держит подставная проверка.
 	hold := make(chan struct{})
 	held := make(chan struct{})
+	refused := make(chan struct{})
 	go func() {
-		h.verifier.WithCapacity(func() {
+		if !h.verifier.WithCapacity(func() {
 			close(held)
 			<-hold
-		})
+		}) {
+			close(refused)
+		}
 	}()
-	<-held
+	select {
+	case <-held:
+	case <-refused:
+		t.Fatal("подставная проверка не получила место — ёмкость занята кем-то ещё; проба беспредметна")
+	}
 	elapsed, err := timed(t, h, "a@example.invalid", "correct horse battery", "203.0.113.70")
 	close(hold)
 	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
@@ -250,4 +263,198 @@ func TestNewLoginUseCase_RequiresTheTimingEnvelope(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "timing envelope")
+}
+
+// computedSignal — исправный проверяющий полосы, сообщающий пробе о ЗАВЕРШЕНИИ
+// вычисления: сигнал уходит после возврата настоящего `Verify` (с любым его
+// исходом, включая «ёмкость исчерпана»), когда место ёмкости уже отпущено. Так
+// проба подаёт второе обращение ровно в окне ожидания первого — после его
+// вычисления, до истечения потолка.
+type computedSignal struct {
+	inner    *passwordverify.Verifier
+	computed chan struct{}
+}
+
+func (c *computedSignal) Verify(stored domain.LoginVerifier, presented string) passwordverify.Result {
+	res := c.inner.Verify(stored, presented)
+	c.computed <- struct{}{}
+	return res
+}
+
+func (c *computedSignal) MeetsDeclared(stored domain.LoginVerifier, declared passwordverify.Declared) (bool, error) {
+	return c.inner.MeetsDeclared(stored, declared)
+}
+
+// slotHeldThroughTheWait — ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ поимённо (Ф3-31, Р17):
+// реализация, держащая место ёмкости до КОНЦА ОЖИДАНИЯ, а не до конца
+// вычисления. От исправной отличается одним фактом: своё единственное место
+// отпускается после `hold`, ожидания в самом проверяющем. Обязана краснеть на
+// первой половине пары (второе обращение в окне ожидания получает «ёмкость
+// исчерпана» вместо своего исхода) и молчать на второй (во время вычисления
+// «ёмкость исчерпана» законна). Вычисление — настоящим проверяющим.
+type slotHeldThroughTheWait struct {
+	inner    *passwordverify.Verifier
+	slot     chan struct{}
+	hold     time.Duration
+	computed chan struct{}
+}
+
+func (d *slotHeldThroughTheWait) Verify(stored domain.LoginVerifier, presented string) passwordverify.Result {
+	select {
+	case d.slot <- struct{}{}:
+	default:
+		d.computed <- struct{}{}
+		return passwordverify.Result{Outcome: passwordverify.OutcomeCapacityExhausted}
+	}
+	defer func() { <-d.slot }()
+	res := d.inner.Verify(stored, presented)
+	d.computed <- struct{}{}
+	time.Sleep(d.hold) // дефект: место занято и на ожидании
+	return res
+}
+
+func (d *slotHeldThroughTheWait) MeetsDeclared(stored domain.LoginVerifier, declared passwordverify.Declared) (bool, error) {
+	return d.inner.MeetsDeclared(stored, declared)
+}
+
+// capacityPairOutcomes — исходы ПАРЫ обращений при ёмкости 1 против данного
+// проверяющего: первое уходит в горутине; второе подаётся в ОКНЕ ОЖИДАНИЯ
+// первого — после сигнала о вычислении, до его возврата (проба это проверяет,
+// а не полагает). Возвращает счётчики исходов полосы по обоим обращениям и
+// длительность второго.
+func capacityPairOutcomes(t *testing.T, h *harness, verifier humansession.Verifier, computed <-chan struct{}, floor time.Duration) (map[humansession.LoginOutcome]int, time.Duration) {
+	t.Helper()
+	obs := newCountingObserver()
+	login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
+		Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: verifier,
+		Hasher: h.hasher, TTL: ucTTL, Observer: obs, Now: func() time.Time { return h.clock },
+		Logger: slog.New(slog.DiscardHandler), Envelope: h.envelope, TOTP: h.totp, Sets: h.verifier,
+		Limits: humansession.Limits{AddressAttempts: 100, AddressWindow: time.Hour, SourceAttempts: 1000, SourceWindow: time.Hour},
+	})
+	require.NoError(t, err)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = login.Execute(context.Background(), humansession.LoginInput{Email: "a@example.invalid", Password: "wrong-first", Source: "203.0.113.90"})
+	}()
+	select {
+	case <-computed:
+	case <-time.After(floor):
+		t.Fatal("первое обращение не вычислилось за потолок — окна ожидания нет, проба беспредметна")
+	}
+	select {
+	case <-done:
+		t.Fatal("первое обращение уже вернулось — второе подано бы ВНЕ окна ожидания, проба беспредметна")
+	default:
+	}
+	start := time.Now()
+	_, err = login.Execute(context.Background(), humansession.LoginInput{Email: "a@example.invalid", Password: "wrong-second", Source: "203.0.113.91"})
+	elapsed := time.Since(start)
+	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "второе обращение — тот же один отказ")
+	select {
+	case <-done:
+	case <-time.After(2 * floor):
+		t.Fatal("первое обращение не вернулось и за два потолка")
+	}
+	select {
+	case <-computed:
+	case <-time.After(floor):
+		t.Fatal("второе обращение не дошло до проверяющего")
+	}
+	return obs.login, elapsed
+}
+
+// TestLogin_F3_31_TheCapacitySlotIsFreeDuringTheWait — ёмкость проверяющего
+// на ожидании не занята (Ф3-31 «Тогда», Р17; заказ kaname#220 (б)). При
+// ёмкости 1 второе обращение, поданное в окне ОЖИДАНИЯ первого, получает
+// место и СВОЙ исход («пароль не тот»), не раньше потолка — а не «ёмкость
+// исчерпана». Положительный контроль различимости — второе, поданное во
+// время ВЫЧИСЛЕНИЯ первого (единственное место держит подставная проверка),
+// получает «ёмкость исчерпана» (PWV-15), и тоже не раньше потолка.
+// Отрицательный контроль поимённо — `slotHeldThroughTheWait`: реализация,
+// держащая место до конца ожидания, краснеет на первой половине (второе
+// получает «ёмкость исчерпана») и молчит на второй.
+func TestLogin_F3_31_TheCapacitySlotIsFreeDuringTheWait(t *testing.T) {
+	const floor = 500 * time.Millisecond
+	h := newHarness(t, nil)
+	h.envelope.floor = floor
+	var err error
+	h.verifier, err = passwordverify.New(1, nopVerifyObserver{})
+	require.NoError(t, err)
+	decoy, err := h.hasher.Hash("decoy-of-the-harness")
+	require.NoError(t, err)
+	require.NoError(t, h.verifier.SetDecoy(decoy))
+	a := h.person(t, "usr-a", "a@example.invalid", "", true)
+	// Дешёвое значение: вычисление — миллисекунда, окно ожидания — почти весь
+	// потолок; второе обращение заведомо попадает в окно.
+	h.store.verifiers[a.ID] = bcryptVerifier(t, 4, "correct horse battery")
+
+	// Во время ВЫЧИСЛЕНИЯ: единственное место держит подставная проверка —
+	// «ёмкость исчерпана», не раньше потолка. Одна и та же процедура для
+	// исправного проверяющего и для отрицательного контроля.
+	duringCompute := func(verifier humansession.Verifier, slotOwner *passwordverify.Verifier, computed <-chan struct{}) (map[humansession.LoginOutcome]int, time.Duration) {
+		obs := newCountingObserver()
+		login, err := humansession.NewLoginUseCase(humansession.LoginDeps{
+			Store: h.store, Users: fakeUsers{h.store}, Methods: fakeMethods{h.store}, Verifier: verifier,
+			Hasher: h.hasher, TTL: ucTTL, Observer: obs, Now: func() time.Time { return h.clock },
+			Logger: slog.New(slog.DiscardHandler), Envelope: h.envelope, TOTP: h.totp, Sets: h.verifier,
+			Limits: humansession.Limits{AddressAttempts: 100, AddressWindow: time.Hour, SourceAttempts: 1000, SourceWindow: time.Hour},
+		})
+		require.NoError(t, err)
+		hold := make(chan struct{})
+		held := make(chan struct{})
+		refused := make(chan struct{})
+		go func() {
+			if !slotOwner.WithCapacity(func() {
+				close(held)
+				<-hold
+			}) {
+				close(refused)
+			}
+		}()
+		select {
+		case <-held:
+		case <-refused:
+			t.Fatal("подставная проверка не получила место — ёмкость занята кем-то ещё; проба беспредметна")
+		}
+		start := time.Now()
+		_, err = login.Execute(context.Background(), humansession.LoginInput{Email: "a@example.invalid", Password: "wrong", Source: "203.0.113.92"})
+		elapsed := time.Since(start)
+		close(hold)
+		require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
+		select {
+		case <-computed:
+		case <-time.After(floor):
+			t.Fatal("обращение не дошло до проверяющего")
+		}
+		return obs.login, elapsed
+	}
+
+	t.Run("correct verifier", func(t *testing.T) {
+		correct := &computedSignal{inner: h.verifier, computed: make(chan struct{}, 4)}
+		got, elapsed := capacityPairOutcomes(t, h, correct, correct.computed, floor)
+		require.Equal(t, 2, got[humansession.LoginOutcomeMismatched], "оба обращения получили СВОЙ исход: место ёмкости на ожидании первого свободно (Р17)")
+		require.Zero(t, got[humansession.LoginOutcomeCapacity], "второе обращение в окне ожидания первого не получает «ёмкость исчерпана»")
+		require.GreaterOrEqual(t, elapsed, floor, "второе обращение ждёт потолка от своего отсчёта")
+
+		got, elapsed = duringCompute(correct, h.verifier, correct.computed)
+		require.Equal(t, 1, got[humansession.LoginOutcomeCapacity], "во время вычисления — «ёмкость исчерпана» (PWV-15): положительный контроль различимости")
+		require.GreaterOrEqual(t, elapsed, floor, "«ёмкость исчерпана» — не раньше потолка")
+	})
+
+	t.Run("negative control: slot held through the wait", func(t *testing.T) {
+		inner, err := passwordverify.New(1, nopVerifyObserver{})
+		require.NoError(t, err)
+		require.NoError(t, inner.SetDecoy(decoy))
+		defective := &slotHeldThroughTheWait{inner: inner, slot: make(chan struct{}, 1), hold: floor, computed: make(chan struct{}, 4)}
+		got, _ := capacityPairOutcomes(t, h, defective, defective.computed, floor)
+		require.Equal(t, 1, got[humansession.LoginOutcomeCapacity], "первая половина КРАСНЕЕТ на реализации, держащей место до конца ожидания: второе обращение получило «ёмкость исчерпана»")
+		require.Equal(t, 1, got[humansession.LoginOutcomeMismatched])
+
+		// Вторая половина на нём же — молчит: место, занятое вычислением, и
+		// здесь даёт «ёмкость исчерпана».
+		got, elapsed := duringCompute(defective, inner, defective.computed)
+		require.Equal(t, 1, got[humansession.LoginOutcomeCapacity], "вторая половина на отрицательном контроле молчит")
+		require.GreaterOrEqual(t, elapsed, floor)
+	})
 }

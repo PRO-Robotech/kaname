@@ -24,6 +24,13 @@
 // Печатаются медианы, размахи, N обращений на полосу, T и N предела частоты и
 // сам критерий по парам; отказов по частоте — ноль (Ф3-30).
 //
+// Второе утверждение (Ф3-31 «Тогда», заказ kaname#220 (а)): НИ ОДНА медиана
+// не ниже потолка огибающей — медиана раньше потолка есть красное С ИМЕНЕМ
+// полосы: либо ожидание полосы не настоящее (часы порта вместо монотонных,
+// отсчёт не от ворот), либо числа калибровки выбраны неверно (Р17). Проверка
+// стоит ДО критерия пар: на полосе, ушедшей раньше потолка, пары краснеют
+// следствием, и виновник назывался бы через них, а не по имени.
+//
 // # Огибающая по потолку (решение kaname#188)
 //
 // Полоса получает НАСТОЯЩУЮ огибающую (`passwordverify.Envelope`),
@@ -207,15 +214,21 @@ func TestLogin_F3_31_RefusalTimeIsIndistinguishableAcrossCostClasses(t *testing.
 		median, iqr time.Duration
 	}
 	var rows []row
+	floor := envelope.Floor()
+	var belowFloor []string
 	for _, l := range lanes {
 		m, q := l.stats()
 		rows = append(rows, row{l, m, q})
-		t.Logf("полоса %-36s медиана %10v · IQR %10v · n=%d", l.name, m, q, len(l.samples))
+		t.Logf("полоса %-36s медиана %10v · IQR %10v · n=%d · потолок %v", l.name, m, q, len(l.samples), floor)
 		if q > timingIQRCeiling {
 			t.Fatalf("НЕ ВЫПОЛНИЛОСЬ (Ф1-50): размах полосы %q %v выше потолка годности %v — стенд шумит сильнее измеряемого, вердикта нет",
 				l.name, q, timingIQRCeiling)
 		}
+		if m < floor {
+			belowFloor = append(belowFloor, fmt.Sprintf("%s: медиана %v раньше потолка %v", l.name, m, floor))
+		}
 	}
+	require.Empty(t, belowFloor, "Ф3-31: медиана раньше потолка огибающей — исход ушёл до потолка (ожидание не настоящее либо числа калибровки выбраны неверно, Р17)")
 	var failures []string
 	for i := range rows {
 		for j := i + 1; j < len(rows); j++ {
