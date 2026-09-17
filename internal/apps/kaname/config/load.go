@@ -486,6 +486,17 @@ func (c APIServerConfig) InternalRESTListenAddress() string {
 // the gRPC public/internal listeners (default :9095).
 func (c APIServerConfig) MetricsListenAddress() string { return listenAddress(c.MetricsEndpoint) }
 
+// LoginLaneListenAddress — нормализованный адрес слушателя полосы входа
+// паролем: та же запись, что у остальных поверхностей (`tcp://0.0.0.0:9100`),
+// тем же правилом. Пустой эндпоинт → пустой адрес — полоса не поднимается.
+//
+// Здесь стояло НИЧЕГО, и композиционный корень брал объявление сырым: под
+// `own` процесс проходил всех стражей и падал на привязке последней
+// поверхности — `listen tcp: address tcp://0.0.0.0:9100: too many colons in
+// address` (задача kaname#21, живой старт 2026-09-17). Второе правило разбора
+// адреса не заводится: полоса читает ту же функцию, что соседи.
+func (c APIServerConfig) LoginLaneListenAddress() string { return listenAddress(c.LoginLaneEndpoint) }
+
 // ListenAddressOf — адрес слушателя из объявленной конечной точки.
 //
 // Экспортируется затем, чтобы страж старта и проба профиля приводили конечную
