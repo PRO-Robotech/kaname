@@ -245,9 +245,10 @@ func TestLogin_F3_04_MigratedBcryptIsRewrittenAfterMatch(t *testing.T) {
 	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
 	require.True(t, strings.HasPrefix(h.store.verifiers[u.ID].Reveal(), "$2a$"), "PWV-08.7: неверный пароль не переписал")
 
-	out := h.mustLogin(t, "m@example.invalid", "old password 1")
 	// PWV-01.2 «требования смены нет» держится построением: поля требования у
-	// сессии больше нет (kacho#2697, kaname#201), утверждать нечего.
+	// сессии больше нет (kacho#2697, kaname#201), утверждать нечего — вход
+	// обязан пройти, и это судит сам `mustLogin`.
+	h.mustLogin(t, "m@example.invalid", "old password 1")
 	require.True(t, strings.HasPrefix(h.store.verifiers[u.ID].Reveal(), "$argon2id$"), "PWV-08.2: значение несёт объявленный формат")
 	require.Equal(t, 1, h.obs.rewrit[humansession.RewriteDone])
 	h.mustLogin(t, "m@example.invalid", "old password 1")
@@ -268,7 +269,7 @@ func TestLogin_F3_04_MigratedBcryptIsRewrittenAfterMatch(t *testing.T) {
 	// Отказ записи замещения: вход состоялся, значение прежнее, клетка выросла.
 	h.store.verifiers[u.ID] = bcryptOf("old password 1")
 	h.store.failOn = "replace"
-	out = h.mustLogin(t, "m@example.invalid", "old password 1")
+	out := h.mustLogin(t, "m@example.invalid", "old password 1")
 	require.False(t, out.Bearer.IsZero(), "PWV-09.1: вход состоялся при отказе замещения")
 	require.True(t, strings.HasPrefix(h.store.verifiers[u.ID].Reveal(), "$2a$"))
 	require.Equal(t, 1, h.obs.rewrit[humansession.RewriteWriteFailed])
