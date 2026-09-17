@@ -175,18 +175,19 @@ iam не поднимался там, где api-gateway нет вовсе; те
     <tr><td><code>authn.registration.admissions-per-window</code> / <code>admission-window</code></td><td>Потолок темпа заведения личностей с улицы; сверх него регистрация отвечает единым <code>registration refused</code></td></tr>
     <tr><td><code>authn.login.password-min-length</code> · <code>authn.login.breach-check</code> (+ <code>breach-check-url</code>)</td><td>Правило пароля: минимальная длина и состояние проверки по корпусу утечек (<code>enabled</code> требует адреса авторитета)</td></tr>
     <tr><td><code>authn.login.hasher-format</code> · <code>hasher-memory</code> · <code>hasher-iterations</code> · <code>hasher-parallelism</code></td><td>Чем писать новый материал пароля и его стоимость</td></tr>
-    <tr><td><code>authn.login.verifier-capacity</code> · <code>memory-reserve-bytes</code></td><td>Одновременных проверок пароля и резерв памяти процесса сверх них; страж старта сверяет их с пределом памяти контейнера</td></tr>
+    <tr><td><code>authn.login.verifier-capacity</code> · <code>memory-reserve-bytes</code></td><td>Одновременных проверок пароля и резерв памяти процесса сверх них; страж старта сверяет их с пределом памяти контейнера — <b>предел обязан быть наложен средой</b> (cgroup), без него старт под <code>own</code> отказывает. В чарте предел объявляет ключ <code>resources.limits.memory</code> (контейнер службы); боевой профиль несёт <code>1280Mi</code> — ёмкость 8 × 128 МиБ на потолке формата записи + резерв 256 МиБ, и согласие профиля со стражем держит проба <code>deploy/own_lane_memory_ceiling_test.go</code></td></tr>
     <tr><td><code>authn.login.recovery-code-ttl</code> · <code>KANAME_AUTHN&#95;&#95;LOGIN&#95;&#95;RECOVERY_CODE_TTL</code></td><td>Срок кода восстановления доступа</td></tr>
     <tr><td><code>authn.self-service-freshness</code> · <code>KANAME_AUTHN&#95;&#95;SELF_SERVICE_FRESHNESS</code></td><td>Окно свежести правки своих данных: заведение второго фактора требует предъявления не старше окна, и им же ограничен срок неподтверждённого заведения</td></tr>
     <tr><td><code>authn.second-factor-encryption-key-hex</code> · <code>KANAME_SECOND_FACTOR_ENC_KEY</code></td><td>Перечень ключей обёртки секретов второго фактора (см. таблицу идентичности выше)</td></tr>
   </tbody>
 </table>
 
-:::warning Три из этих величин чарт службы сегодня не рендерит
+:::note Здесь стояло «три из этих величин чарт службы сегодня не рендерит» — больше не верно
 `authn.registration.admissions-per-window`, `authn.registration.admission-window` и
-`authn.login.recovery-code-ttl` страж старта под `own` требует, а шаблон карты настроек
-поставляемого чарта их не знает — задать их можно только переменными окружения в карте `env`
-профиля. Предмет — kaname#205.
+`authn.login.recovery-code-ttl` шаблон карты настроек рендерит с kaname#205 (ключи
+`authn.registration.*` и `authn.login.recoveryCodeTtl` профиля); паритет «строка стража ↔
+ключ чарта» в обе стороны держит `deploy/own_lane_knobs_declared_test.go`. Предупреждение
+пережило свой предмет и снято 2026-09-17 при замере живого старта `own` (kaname#21).
 :::
 
 ## Потолок темпа и одновременности запросов

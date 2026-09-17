@@ -97,6 +97,8 @@ var deliveryRoster = []string{
 	"outbound_lane_has_an_operator_knob_test.go",
 	"own_lane_knobs_declared_injection_test.go",
 	"own_lane_knobs_declared_test.go",
+	"own_lane_memory_ceiling_injection_test.go",
+	"own_lane_memory_ceiling_test.go",
 	"provider_anchor_is_its_own_coordinate_injection_test.go",
 	"provider_anchor_is_its_own_coordinate_test.go",
 	"port_knob_moves_its_listener_injection_test.go",
