@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
@@ -216,6 +217,29 @@ func (w *fakeWriter) RotateBearer(_ context.Context, id domain.HumanSessionID, d
 		return iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
 	}
 	w.ops = append(w.ops, func() { r.digest = digest; r.s.LastPresentedAt = presentedAt })
+	return nil
+}
+
+// PresentInSession — предъявление способа внутри сессии (Ф12): множество,
+// уровень, носитель и момент — одной записью на живой строке.
+func (w *fakeWriter) PresentInSession(_ context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error {
+	if err := w.fail("present"); err != nil {
+		return err
+	}
+	w.store.mu.Lock()
+	defer w.store.mu.Unlock()
+	r, ok := w.store.rows[id]
+	if !ok || r.ended != nil {
+		return iamerr.Wrapf(iamerr.ErrNotFound, "HumanSession %s not found", id)
+	}
+	w.ops = append(w.ops, func() {
+		if cur, ok := w.store.rows[id]; ok && cur.ended == nil {
+			cur.s.PresentedMethods = append([]string(nil), methods...)
+			cur.s.AssuranceLevel = level
+			cur.s.LastPresentedAt = presentedAt
+			cur.digest = digest
+		}
+	})
 	return nil
 }
 
@@ -496,6 +520,11 @@ type countingObserver struct {
 	recoveryCompletion map[humansession.RecoveryCompletionOutcome]int
 	// sourceUnknown — вопросов о частоте без адреса источника.
 	sourceUnknown int
+	// Второй фактор (Ф12): предъявления по способу × исходу, отказы по причине,
+	// события.
+	sfPresent  map[string]int
+	sfRefusals map[humansession.SecondFactorRefusal]int
+	sfEvents   map[humansession.SecondFactorEvent]int
 }
 
 func newCountingObserver() *countingObserver {
@@ -505,7 +534,26 @@ func newCountingObserver() *countingObserver {
 		rewrit: map[humansession.RewriteOutcome]int{}, form: map[humansession.FormRefusal]int{},
 		recoveryRequest:    map[humansession.RecoveryRequestOutcome]int{},
 		recoveryCompletion: map[humansession.RecoveryCompletionOutcome]int{},
+		sfPresent:          map[string]int{},
+		sfRefusals:         map[humansession.SecondFactorRefusal]int{},
+		sfEvents:           map[humansession.SecondFactorEvent]int{},
 	}
+}
+
+func (o *countingObserver) SecondFactorPresentationObserved(m assurance.Method, x humansession.PresentationOutcome) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sfPresent[m.String()+"/"+string(x)]++
+}
+func (o *countingObserver) SecondFactorRefusalObserved(x humansession.SecondFactorRefusal) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sfRefusals[x]++
+}
+func (o *countingObserver) SecondFactorEventObserved(x humansession.SecondFactorEvent) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sfEvents[x]++
 }
 
 func (o *countingObserver) LoginObserved(x humansession.LoginOutcome) {

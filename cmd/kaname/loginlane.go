@@ -55,11 +55,13 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients/breachcheck"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
+	"github.com/PRO-Robotech/kaname/internal/keywrap"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	"github.com/PRO-Robotech/kaname/internal/refusaldomain"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/totpverify"
 )
 
 // knobLoginLane — ручка адреса слушателя полосы формы.
@@ -259,9 +261,29 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 	}
 	sessions := kanamepg.NewHumanSessionRepo(pool)
 	methods := kanamepg.NewLoginMethodRepo(pool)
+	// Второй фактор (Ф12): своё кольцо ключей обёртки секретов (Р2) — первый
+	// оборачивает, все открывают; число ключей печатается всегда, как у
+	// приватной половины подписи (`signing.go`).
+	sfKeys, err := cfg.AuthN.ResolveSecondFactorEncryptionKeys()
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: second factor wrapping keys: %w", err)
+	}
+	sfWrapper, err := keywrap.New(sfKeys...)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: second factor wrapper: %w", err)
+	}
+	logger.Info("second-factor wrapping keys declared",
+		slog.Int("keys", sfWrapper.KeyCount()),
+		slog.String("knob", "authn.second-factor-encryption-key-hex"),
+		slog.String("env", cfg.AuthN.SecondFactorEncryptionKeyEnvName()))
+	totp, err := totpverify.New(sfWrapper)
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: totp verifier: %w", err)
+	}
 	loginUC, err := humansession.NewLoginUseCase(humansession.LoginDeps{
 		Store: sessions, Users: kanamepg.NewUserDirectory(repo), Methods: methods, Verifier: verifier,
 		Hasher: hasher, Limits: limits, TTL: login.SessionTTL, Observer: rec, Now: time.Now, Logger: logger,
+		TOTP: totp, Sets: verifier,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)

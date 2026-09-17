@@ -13,6 +13,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
+	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 )
 
@@ -31,6 +32,11 @@ const (
 	// запрос кода и один отказ на предъявление; причина — только здесь.
 	RecoveryRequestOutcomesMetric    = Namespace + "_recovery_request_outcomes_total"
 	RecoveryCompletionOutcomesMetric = Namespace + "_recovery_completion_outcomes_total"
+	// Второй фактор (Ф12, kacho#1281; Ф12-43): предъявления по способу × исходу,
+	// отказы по состоянию/свежести/недоступности, события.
+	SecondFactorPresentationsMetric = Namespace + "_second_factor_presentations_total"
+	SecondFactorRefusalsMetric      = Namespace + "_second_factor_refusals_total"
+	SecondFactorEventsMetric        = Namespace + "_second_factor_events_total"
 )
 
 // LoginLaneRecorder — приёмник событий полосы (`humansession.Observer`) и
@@ -48,6 +54,9 @@ type LoginLaneRecorder struct {
 	register  *prometheus.CounterVec
 	recReq    *prometheus.CounterVec
 	recDone   *prometheus.CounterVec
+	sfPresent *prometheus.CounterVec
+	sfRefuse  *prometheus.CounterVec
+	sfEvent   *prometheus.CounterVec
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -116,9 +125,26 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 					"expired or already used), blocked person, rate limited, new password rejected by the rule, " +
 					"store failed. The caller always sees ONE refusal; the cause is visible only here.",
 			}, []string{"outcome"}),
+			sfPresent: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: SecondFactorPresentationsMetric,
+				Help: "Second-factor code presentations by method (totp, lookup_secret) and outcome: matched, " +
+					"mismatched, replayed (totp only), material-unreadable (our stored material does not open — " +
+					"a finding about the key ring, not the caller), capacity-exhausted (lookup_secret only). " +
+					"Presentations judged after a wrong password are not counted here: the password never opened them.",
+			}, []string{"method", "outcome"}),
+			sfRefuse: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: SecondFactorRefusalsMetric,
+				Help: "Second-factor refusals that are NOT attempts: not enrolled, already enrolled, no pending " +
+					"enrollment, session not fresh, material unavailable.",
+			}, []string{"reason"}),
+			sfEvent: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: SecondFactorEventsMetric,
+				Help: "Second-factor lifecycle events: enrollment started/confirmed, factor removed, backup codes " +
+					"regenerated, a backup code consumed.",
+			}, []string{"event"}),
 		}
 		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource,
-			rec.register, rec.recReq, rec.recDone)
+			rec.register, rec.recReq, rec.recDone, rec.sfPresent, rec.sfRefuse, rec.sfEvent)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -152,6 +178,15 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 		}
 		for _, o := range humansession.RecoveryCompletionOutcomes() {
 			rec.recDone.WithLabelValues(string(o)).Add(0)
+		}
+		for _, c := range humansession.PresentationCells() {
+			rec.sfPresent.WithLabelValues(c.Method.String(), string(c.Outcome)).Add(0)
+		}
+		for _, o := range humansession.SecondFactorRefusals() {
+			rec.sfRefuse.WithLabelValues(string(o)).Add(0)
+		}
+		for _, o := range humansession.SecondFactorEvents() {
+			rec.sfEvent.WithLabelValues(string(o)).Add(0)
 		}
 		r.loginLane = rec
 	})
@@ -201,6 +236,18 @@ func (l *LoginLaneRecorder) RecoveryRequestObserved(o humansession.RecoveryReque
 
 func (l *LoginLaneRecorder) RecoveryCompletionObserved(o humansession.RecoveryCompletionOutcome) {
 	l.recDone.WithLabelValues(string(o)).Inc()
+}
+
+func (l *LoginLaneRecorder) SecondFactorPresentationObserved(m assurance.Method, o humansession.PresentationOutcome) {
+	l.sfPresent.WithLabelValues(m.String(), string(o)).Inc()
+}
+
+func (l *LoginLaneRecorder) SecondFactorRefusalObserved(o humansession.SecondFactorRefusal) {
+	l.sfRefuse.WithLabelValues(string(o)).Inc()
+}
+
+func (l *LoginLaneRecorder) SecondFactorEventObserved(o humansession.SecondFactorEvent) {
+	l.sfEvent.WithLabelValues(string(o)).Inc()
 }
 
 var (

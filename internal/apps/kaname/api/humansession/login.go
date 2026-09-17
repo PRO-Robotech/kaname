@@ -15,6 +15,15 @@ package humansession
 // Отказ — ОДИН на все причины (Ф1 Р3): «адреса нет», «пароль не тот»,
 // «заблокирована», исходы проверяющего — наружу уходит один и тот же
 // ErrAuthenticationFailed; причина различима только приёмником (Ф3-48).
+//
+// # Второй фактор во входе (Ф12 Р5, Ф12-11…14, Ф12-13)
+//
+// Поле `secondFactor` необязательно: без него вход даёт «1». С ним код
+// сверяется ВСЕГДА после пароля — тем же путём и при несошедшемся пароле, и
+// у личности без фактора (холостая сверка), — а исход поля различим только
+// после совпавшего пароля: «не заведён» отвечает 400 лишь тому, кто пароль
+// знает; всё прочее — тот же один отказ. Запись (принятый шаг, потреблённый
+// код) — только при ПОЛНОМ успехе, в транзакции выдачи сессии.
 
 import (
 	"context"
@@ -56,6 +65,9 @@ type LoginInput struct {
 	Password string
 	// Source — адрес источника, как его прислал допущенный вызывающий (Р10).
 	Source string
+	// SecondFactor — предъявление кода второго фактора (Ф12 Р5); nil — без
+	// него, сессия уровня «1».
+	SecondFactor *SecondFactorPresentation
 }
 
 // SessionView — то, что глагол отдаёт транспорту для ответа (Ф3-01).
@@ -85,6 +97,8 @@ type LoginUseCase struct {
 	logger    *slog.Logger
 	gate      attemptGate
 	rewriteOn bool
+	// factor — сверка кода второго фактора теми же портами, что глаголы Ф12.
+	factor presenter
 }
 
 // LoginDeps — зависимости входа; все обязательны, кроме наблюдателя и журнала.
@@ -99,6 +113,10 @@ type LoginDeps struct {
 	Observer Observer
 	Now      func() time.Time
 	Logger   *slog.Logger
+	// TOTP и Sets — проверяющие второго фактора (Ф12 Р5, Р6): поле
+	// `secondFactor` без них не судится, поэтому оба обязательны.
+	TOTP TOTPVerifier
+	Sets SetVerifier
 }
 
 // NewLoginUseCase — построение с проверкой зависимостей: полоса без любой из
@@ -117,6 +135,10 @@ func NewLoginUseCase(d LoginDeps) (*LoginUseCase, error) {
 		return nil, fmt.Errorf("login: password hasher required")
 	case d.TTL <= 0:
 		return nil, fmt.Errorf("login: session ttl must be positive")
+	case d.TOTP == nil:
+		return nil, fmt.Errorf("login: totp verifier required")
+	case d.Sets == nil:
+		return nil, fmt.Errorf("login: backup code set verifier required")
 	}
 	if err := d.Limits.Validate(); err != nil {
 		return nil, err
@@ -134,6 +156,9 @@ func NewLoginUseCase(d LoginDeps) (*LoginUseCase, error) {
 		store: d.Store, users: d.Users, methods: d.Methods, verifier: d.Verifier, hasher: d.Hasher,
 		limits: d.Limits, ttl: d.TTL, observer: d.Observer, now: d.Now, logger: d.Logger,
 		gate: attemptGate{store: d.Store, limits: d.Limits, now: d.Now, observer: d.Observer}, rewriteOn: true,
+		factor: presenter{deps: SecondFactorDeps{
+			Store: d.Store, Methods: d.Methods, TOTP: d.TOTP, Sets: d.Sets, Observer: d.Observer, Now: d.Now, Logger: d.Logger,
+		}},
 	}, nil
 }
 
@@ -182,6 +207,23 @@ func (uc *LoginUseCase) Execute(ctx context.Context, in LoginInput) (LoginOutput
 	// (3) Проверка — всегда.
 	res := uc.verifier.Verify(stored, in.Password)
 	now := uc.now().UTC()
+
+	// (3а) Второй фактор — тоже всегда, тем же путём (Ф12-13 «б», «ж»; Ф12-33):
+	// у отсутствующей личности и у личности без фактора сверка холостая.
+	var factor *preparedPresentation
+	if in.SecondFactor != nil {
+		pr, perr := uc.factor.prepare(ctx, user.ID, *in.SecondFactor)
+		if perr != nil {
+			var fe *FieldError
+			if errors.As(perr, &fe) {
+				return LoginOutput{}, perr
+			}
+			uc.observer.LoginObserved(LoginOutcomeStoreFailed)
+			return LoginOutput{}, ErrStoreUnavailable
+		}
+		factor = &pr
+	}
+
 	switch res.Outcome {
 	case passwordverify.OutcomeMatched:
 		// проходим дальше
@@ -191,7 +233,7 @@ func (uc *LoginUseCase) Execute(ctx context.Context, in LoginInput) (LoginOutput
 		uc.observer.LoginObserved(LoginOutcomeCapacity)
 		return LoginOutput{}, ErrAuthenticationFailed
 	default:
-		return LoginOutput{}, uc.refuse(ctx, res.Outcome, found, addressKey, in.Source, now)
+		return LoginOutput{}, uc.refuse(ctx, res.Outcome, found, addressKey, in.Source, now, factor)
 	}
 
 	// (4) Блокировка — после проверки, чтобы полоса «заблокирована» стоила то
@@ -201,14 +243,28 @@ func (uc *LoginUseCase) Execute(ctx context.Context, in LoginInput) (LoginOutput
 		if found {
 			outcome = LoginOutcomeBlocked
 		}
-		return LoginOutput{}, uc.refuseWith(ctx, outcome, addressKey, in.Source, now)
+		return LoginOutput{}, uc.refuseWith(ctx, outcome, addressKey, in.Source, now, factor)
+	}
+
+	// (4а) Пароль сошёлся — исход поля `secondFactor` теперь различим (Р5):
+	// состояние и недоступность — своим отказом и не попыткой; несовпадение
+	// — тот же один отказ и попытка; совпадение решается ПОД транзакцией выдачи.
+	if factor != nil && factor.verdict != verdictMatched {
+		return LoginOutput{}, uc.refuseSecondFactor(ctx, *factor, settledPresentation{verdict: factor.verdict, outcome: factor.outcome}, addressKey, in.Source, now)
 	}
 
 	// (5) Выдача — одним исходом: запись, память, сброс счёта, событие.
-	out, err := uc.issue(ctx, user, now)
+	out, settled, err := uc.issue(ctx, user, now, factor)
 	if err != nil {
 		uc.observer.LoginObserved(LoginOutcomeStoreFailed)
 		return LoginOutput{}, ErrStoreUnavailable
+	}
+	if factor != nil && settled.verdict != verdictMatched {
+		// Второй из двух одновременных (повтор) либо набор не открылся под замком.
+		return LoginOutput{}, uc.refuseSecondFactor(ctx, *factor, settled, addressKey, in.Source, now)
+	}
+	if factor != nil {
+		uc.factor.observe(*factor, settled)
 	}
 	uc.observer.LoginObserved(LoginOutcomeIssued)
 
@@ -231,7 +287,7 @@ func (uc *LoginUseCase) lookup(ctx context.Context, addressKey string) (domain.U
 
 // refuse — отказ по исходу проверяющего: попытка считается на всех исходах,
 // кроме преходящего.
-func (uc *LoginUseCase) refuse(ctx context.Context, outcome passwordverify.Outcome, found bool, addressKey, source string, now time.Time) error {
+func (uc *LoginUseCase) refuse(ctx context.Context, outcome passwordverify.Outcome, found bool, addressKey, source string, now time.Time, factor *preparedPresentation) error {
 	observed := LoginOutcomeMismatched
 	switch {
 	case outcome == passwordverify.OutcomeMaterialMissing && !found:
@@ -243,10 +299,13 @@ func (uc *LoginUseCase) refuse(ctx context.Context, outcome passwordverify.Outco
 		uc.logger.Error("login: stored password material could not be checked — our data, not the caller's input",
 			"outcome", string(outcome))
 	}
-	return uc.refuseWith(ctx, observed, addressKey, source, now)
+	return uc.refuseWith(ctx, observed, addressKey, source, now, factor)
 }
 
-func (uc *LoginUseCase) refuseWith(ctx context.Context, observed LoginOutcome, addressKey, source string, now time.Time) error {
+// refuseWith — отказ с записью попытки. Предъявленный код при несошедшемся
+// пароле проходит вторую половину сверки БЕЗ записи (Ф12-13 «б», «ж»): исход
+// наружу не выходит и в клетки предъявления не идёт — пароль его не открыл.
+func (uc *LoginUseCase) refuseWith(ctx context.Context, observed LoginOutcome, addressKey, source string, now time.Time, factor *preparedPresentation) error {
 	uc.observer.LoginObserved(observed)
 	w, err := uc.store.Writer(ctx)
 	if err != nil {
@@ -254,6 +313,12 @@ func (uc *LoginUseCase) refuseWith(ctx context.Context, observed LoginOutcome, a
 		return ErrAuthenticationFailed
 	}
 	defer func() { _ = w.Rollback(ctx) }()
+	if factor != nil {
+		if _, serr := uc.factor.settle(ctx, w, *factor, false); serr != nil {
+			uc.observer.LoginObserved(LoginOutcomeStoreFailed)
+			return ErrAuthenticationFailed
+		}
+	}
 	if err := recordFailure(ctx, w, addressKey, source, now); err != nil {
 		uc.observer.LoginObserved(LoginOutcomeStoreFailed)
 		return ErrAuthenticationFailed
@@ -264,27 +329,54 @@ func (uc *LoginUseCase) refuseWith(ctx context.Context, observed LoginOutcome, a
 	return ErrAuthenticationFailed
 }
 
-func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Time) (LoginOutput, error) {
+// refuseSecondFactor — отказ по полю `secondFactor` после совпавшего пароля
+// (Р5, Р7): «не сошёлся» и «повторён» — попытка и тот же один отказ; «не
+// заведён», «недоступен», «ёмкость» — своим исходом, без попытки.
+func (uc *LoginUseCase) refuseSecondFactor(ctx context.Context, pr preparedPresentation, st settledPresentation, addressKey, source string, now time.Time) error {
+	uc.factor.observe(pr, st)
+	if !countsAsAttempt(st.verdict) {
+		uc.observer.LoginObserved(LoginOutcomeSecondFactorRefused)
+		return refusalOf(st.verdict)
+	}
+	return uc.refuseWith(ctx, LoginOutcomeSecondFactorRefused, addressKey, source, now, nil)
+}
+
+// issue — выдача одним исходом; с кодом второго фактора — его запись (Р5:
+// принятый шаг, потреблённый элемент) в той же транзакции, ДО выдачи, и
+// проигравший гонку повтор выдачи не получает.
+func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Time, factor *preparedPresentation) (LoginOutput, settledPresentation, error) {
+	var settled settledPresentation
 	w, err := uc.store.Writer(ctx)
 	if err != nil {
-		return LoginOutput{}, err
+		return LoginOutput{}, settled, err
 	}
 	defer func() { _ = w.Rollback(ctx) }()
+	presented := []assurance.Presentation{assurance.PasswordPresented()}
+	if factor != nil {
+		settled, err = uc.factor.settle(ctx, w, *factor, true)
+		if err != nil {
+			return LoginOutput{}, settled, err
+		}
+		if settled.verdict != verdictMatched {
+			return LoginOutput{}, settled, nil
+		}
+		presented = presentationsOf(withMethod([]string{assurance.MethodPassword.String()}, factor.method))
+	}
 	s, bearer, err := IssueSession(ctx, w, IssueInput{
 		User:      user,
-		Presented: []assurance.Presentation{assurance.PasswordPresented()},
+		Presented: presented,
 		At:        now,
 		TTL:       uc.ttl,
 		EmitAudit: true,
 	})
 	if err != nil {
-		return LoginOutput{}, err
+		return LoginOutput{}, settled, err
 	}
 	if err := w.ResetFailures(ctx, FailureByAddress, AddressKey(string(user.Email))); err != nil {
-		return LoginOutput{}, err
+		return LoginOutput{}, settled, err
 	}
 	if err := w.Commit(ctx); err != nil {
-		return LoginOutput{}, err
+		return LoginOutput{}, settled, err
 	}
 	_, verified, err := uc.methods.EmailVerification(ctx, user.ID)
 	if err != nil {
@@ -293,7 +385,7 @@ func (uc *LoginUseCase) issue(ctx context.Context, user domain.User, now time.Ti
 		uc.logger.Error("login: e-mail verification state unreadable after issue", "err", err.Error())
 		verified = false
 	}
-	return LoginOutput{View: SessionView{User: user, Session: s, EmailVerified: verified}, Bearer: bearer}, nil
+	return LoginOutput{View: SessionView{User: user, Session: s, EmailVerified: verified}, Bearer: bearer}, settled, nil
 }
 
 // rewriteIfNeeded — Ф3-43 / ID-PW-1 PWV-08…11, 18, 19. Не смена пароля:

@@ -137,6 +137,11 @@ type Writer interface {
 	// ClearPasswordChangeRequired снимает требование сменить пароль с записи
 	// (Ф5-24): исход смены пароля из сессии восстановления.
 	ClearPasswordChangeRequired(ctx context.Context, id domain.HumanSessionID) error
+	// PresentInSession — предъявление способа ВНУТРИ сессии (Ф11 Р5, Ф12):
+	// множество предъявленного, уровень (по правилу, вычислен вызывающим),
+	// новый дайджест носителя и момент последнего предъявления — одной записью
+	// на живой строке; момент аутентификации и срок не трогаются.
+	PresentInSession(ctx context.Context, id domain.HumanSessionID, methods []string, level string, digest domain.BearerDigest, presentedAt time.Time) error
 	// UpsertCutoff — операция записи отсечки (§4.1 п.17): момент монотонен;
 	// причина и актор идут за ПРИНЯТЫМ моментом, на равных стоит последняя.
 	UpsertCutoff(ctx context.Context, u domain.UserTokenRevocation, revokedBy domain.UserID) error
