@@ -1,14 +1,16 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package invite_mail_outbox — writer намерения отправить письмо приглашения в
-// `kaname.invite_mail_outbox`.
+// Package invite_mail_outbox — writer намерения отправить письмо в
+// `kaname.invite_mail_outbox`: приглашение (ID-MAIL-1) и, с фазы Ф5, код
+// восстановления доступа (`kacho#1271`, Р3 — второй вид в ТОЙ ЖЕ очереди).
 //
-// Намерение пишется В ТОЙ ЖЕ транзакции, что строка приглашения, и это несущее
-// свойство, а не оптимизация: при откате приглашения намерения нет ВОВСЕ, а при
-// состоявшемся приглашении оно переживает смерть процесса. Утверждать надо
-// именно это — «событие эмитировано» есть утверждение о ВЫЗОВЕ, а не о свойстве,
-// и остаётся зелёным на отправке письма о приглашении, которого не случилось.
+// Намерение пишется В ТОЙ ЖЕ транзакции, что строка предмета (приглашения либо
+// кода), и это несущее свойство, а не оптимизация: при откате предмета
+// намерения нет ВОВСЕ, а при состоявшемся предмете оно переживает смерть
+// процесса. Утверждать надо именно это — «событие эмитировано» есть утверждение
+// о ВЫЗОВЕ, а не о свойстве, и остаётся зелёным на отправке письма о том, чего
+// не случилось.
 //
 // # ВРЕМЯ СДАЧИ ПИСЬМА НА КОНТРАКТ НЕ ВЫХОДИТ, И ЭТО РЕШЕНИЕ
 //
@@ -27,6 +29,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -38,10 +41,15 @@ const (
 	// (clients.InviteMailTable); совпадение держит проба
 	// TestInviteMailTableIsNamedOnce, а не соглашение.
 	Table = "kaname.invite_mail_outbox"
-	// EventSend — единственный вид события; словарь закрыт CHECK'ом миграции.
+	// EventSend — вид события приглашения; словарь закрыт CHECK'ом миграции.
 	EventSend = "mail.invite.send"
-	// kind — resource_kind денормализованной колонки.
+	// EventRecoverySend — вид события письма восстановления (Ф5 Р3); заведён
+	// миграцией `20260917015400_recovery_code_is_our_record`.
+	EventRecoverySend = "mail.recovery.send"
+	// kind — resource_kind денормализованной колонки приглашения.
 	kind = "InviteMail"
+	// recoveryKind — resource_kind письма восстановления.
+	recoveryKind = "RecoveryMail"
 )
 
 // EmitTx кладёт намерение отправить письмо приглашения на транзакцию
@@ -74,6 +82,46 @@ func EmitTx(ctx context.Context, tx pgx.Tx, userID, accountID, to, loginURL stri
 	}
 	if err := outbox.Emit(ctx, tx, Table, kind, userID, EventSend, payload); err != nil {
 		return fmt.Errorf("invite_mail_outbox: emit %s: %w", EventSend, err)
+	}
+	return nil
+}
+
+// EmitRecoveryTx кладёт намерение отправить письмо восстановления на
+// транзакцию вызывающего — ту же, что пишет строку кода (Ф5-09).
+//
+// Письмо НЕСЁТ предъявителя — код в форме для человека — потому что
+// предъявитель и есть его предмет (Ф5 Р1). В строке очереди он лежит открытым до
+// сдачи письма узлу; сданную строку снимает уборка. Срок называется письму в
+// минутах: письмо говорит человеку, сколько код действует.
+//
+// userID — ключ партиции порядка, как у приглашения: письма одному человеку
+// уходят в том порядке, в котором их поставили.
+func EmitRecoveryTx(ctx context.Context, tx pgx.Tx, userID, accountID, to, code string, validFor time.Duration) error {
+	if tx == nil {
+		return fmt.Errorf("invite_mail_outbox: tx must not be nil")
+	}
+	if strings.TrimSpace(to) == "" {
+		return fmt.Errorf("invite_mail_outbox: recipient required — a letter to nobody has no subject")
+	}
+	if strings.TrimSpace(userID) == "" {
+		return fmt.Errorf("invite_mail_outbox: user id required — it is the ordering partition key")
+	}
+	if strings.TrimSpace(code) == "" {
+		return fmt.Errorf("invite_mail_outbox: recovery code required — a recovery letter without a bearer recovers nothing")
+	}
+	minutes := int(validFor / time.Minute)
+	if minutes <= 0 && validFor > 0 {
+		minutes = 1
+	}
+	payload := map[string]any{
+		"to":                 to,
+		"account_id":         accountID,
+		"user_id":            userID,
+		"code":               code,
+		"code_valid_minutes": minutes,
+	}
+	if err := outbox.Emit(ctx, tx, Table, recoveryKind, userID, EventRecoverySend, payload); err != nil {
+		return fmt.Errorf("invite_mail_outbox: emit %s: %w", EventRecoverySend, err)
 	}
 	return nil
 }

@@ -204,3 +204,32 @@ func TestDevOptInIsStillIgnoredInProduction(t *testing.T) {
 			"отказы: %v", refusals(cfg))
 	}
 }
+
+// ЯКОРЬ ДОВЕРИЯ ПОЧТОВОГО УЗЛА приезжает переменной РАБОЧЕГО ОБЪЕКТА, а не
+// строкой карты настроек (задача #142, посадка MAIL-05 приёмки ID-MAIL-1):
+// подчарт службы в дереве платформы отдаёт процессу
+// `KANAME_INVITE_MAIL__CA_BUNDLE_FILE` из ручки `inviteMail.trustAnchorFile`.
+// Имя ВЫВОДИТСЯ из ключа `invite-mail.ca-bundle-file` и в коде службы не
+// встречается ни одной строкой — значит переименование ключа молча отвязало бы
+// чужой чарт, и ни сборка, ни тесты этого не заметили бы. Проба закрепляет
+// ИСХОД: переменная под этим именем меняет загруженную конфигурацию.
+func TestDocumentedEnvName_InviteMailCABundleFile(t *testing.T) {
+	t.Setenv("KANAME_INVITE_MAIL__CA_BUNDLE_FILE", "/etc/kaname/tls/server/ca.crt")
+	cfg, err := config.Load("")
+	require.NoError(t, err)
+	require.Equal(t, "/etc/kaname/tls/server/ca.crt", cfg.InviteMail.CABundleFile,
+		"ENV KANAME_INVITE_MAIL__CA_BUNDLE_FILE отдаёт подчарт службы (kacho, "+
+			"charts/kaname/templates/deployment.yaml) — она обязана менять исход загрузки, "+
+			"иначе якорь объявлен посадкой и не читается процессом")
+}
+
+// Положительный контроль отрицания: плоская форма (без `__`) ручкой НЕ является
+// — у значения ровно один вход.
+func TestFlatEnvName_InviteMailCABundleFile_IsNotAKnob(t *testing.T) {
+	t.Setenv("KANAME_INVITE_MAIL_CA_BUNDLE_FILE", "/etc/kaname/tls/server/ca.crt")
+	cfg, err := config.Load("")
+	require.NoError(t, err)
+	require.Equal(t, "", cfg.InviteMail.CABundleFile,
+		"плоское имя без `__` ручкой не является: путь ключа invite-mail.ca-bundle-file "+
+			"выводит имя с двойным подчёркиванием, и второго входа у значения нет")
+}

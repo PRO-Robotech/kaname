@@ -420,6 +420,8 @@ type AuthNConfig struct {
 	// печенья, частота, политика пароля, ручка «что писать», ёмкость. Ни одна
 	// величина не подставляется молча; требуются под посадкой `own`.
 	Login LoginLaneConfig `mapstructure:"login"`
+	// Registration — регистрация нашей полосой (Ф4): потолок темпа заведения.
+	Registration RegistrationConfig `mapstructure:"registration"`
 	// TrustedForwarderSANs — EXACT client-certificate SPIFFE SAN URIs allowed to
 	// FORWARD an end-user identity (`x-kacho-principal-*` metadata) to iam. Fed
 	// into grpcsrv.WithTrustedForwarders on BOTH gRPC listeners

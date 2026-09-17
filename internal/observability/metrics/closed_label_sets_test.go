@@ -66,6 +66,7 @@ import (
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/registration"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
@@ -172,10 +173,31 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.LoginLaneRecorder() },
 		Why:   "переписывание материала, которое не случилось ни разу, обязано быть отличимо от непровязанного",
 	},
+	RegistrationOutcomesMetric: {
+		Cells: len(registration.Lanes) * len(registration.Outcomes()), // полоса × исход
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "вызывающий видит ОДИН отказ регистрации (Ф4 Р3); занятость и потолок темпа различимы только клеткой, и клетка обязана быть с нулём до первого события",
+	},
+	// ── ВОССТАНОВЛЕНИЕ ДОСТУПА (Ф5, kacho#1271) — тот же конструктор ─────────
+	RecoveryRequestOutcomesMetric: {
+		Cells: len(humansession.RecoveryRequestOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "ответ на запрос кода один при любом исходе (Ф5-02); «ноль по причине» видно до первого запроса",
+	},
+	RecoveryCompletionOutcomesMetric: {
+		Cells: len(humansession.RecoveryCompletionOutcomes()),
+		Build: func(r *Registry) { r.LoginLaneRecorder() },
+		Why:   "отказ на предъявление один (Ф1-59); заблокированная, истёкший и чужой код различимы только здесь",
+	},
 	Namespace + "_invite_activations_total": {
 		Cells: len(InviteActivationOutcomes),
 		Build: func(r *Registry) { r.NewInviteActivationRecorder() },
 		Why:   "путь первого входа, умерший целиком, выглядел бы здоровее всех",
+	},
+	Namespace + "_invite_mail_intents_total": {
+		Cells: len(InviteMailIntentOutcomes),
+		Build: func(r *Registry) { r.NewInviteMailIntentRecorder() },
+		Why:   "ограничение частоты для вызывающего невидимо by construction (Р9); незасеянная клетка rate_limited означала бы «сюда никто не приходил» там, где письма молча не уходят",
 	},
 	Namespace + "_module_catalog_applies_total": {
 		Cells: len(ModuleCatalogApplyOutcomes),

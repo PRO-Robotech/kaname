@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
@@ -386,7 +387,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// читается ЗДЕСЬ и передаётся use-case'у: настройки читает
 		// композиционный корень, а не бизнес-логика. Умолчание живёт у ручки,
 		// поэтому молчащая посадка получает его, а не «без срока».
-		WithInviteTTL(cfg.Invite.TTLOrDefault())
+		WithInviteTTL(cfg.Invite.TTLOrDefault()).
+		// Ограничение частоты писем на адрес (приёмка ID-MAIL-1, Р14/Р22,
+		// MAIL-25) — одно на оба глагола, отправляющих письмо; счётчик исходов
+		// намерения — тоже один. Величину судит страж старта: непозитивную он
+		// не пропускает, поэтому здесь читается уже проверенное.
+		WithInviteMailRateLimit(inviteMailRateLimit(cfg), metricsReg.InviteMailIntentRecorder())
 	userOnRecovery := userapp.NewOnRecoveryCompletedUseCase(kanameRepo, opsRepo).
 		WithLogger(logger)
 	// Block/Unblock — административный запрет участию и его снятие. Два РАЗНЫХ
@@ -397,8 +403,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// Исключение из аккаунта — пара к приглашению: тот вводит человека в
 	// аккаунт, этот выводит (#1127). Строку личности не трогает.
 	userRemoveFromAccount := userapp.NewRemoveFromAccountUseCase(kanameRepo, opsRepo)
+	// Повторная отправка письма приглашения — то, что приходит взамен снятого
+	// поля ссылки (ID-MAIL-1, §10 п. 9). Право приглашать спрашивается у того
+	// же клиента, что у Invite; ограничение частоты и счётчик — те же.
+	userResendInvite := userapp.NewResendInviteUseCase(kanameRepo, opsRepo, relationStore,
+		inviteMailRateLimit(cfg), metricsReg.InviteMailIntentRecorder())
 	userHandler := userapp.NewHandler(userGet, userList, userUpdate, userDelete, userInvite,
 		userBlock, userUnblock, userRemoveFromAccount).
+		WithResendInvite(userResendInvite).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 	internalUserHandler := userapp.NewInternalHandler(userUpsert, userGet, userOnRecovery)
 
@@ -454,16 +466,24 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		groupAdd, groupRemove, groupListMembers).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 
-	// MembershipService — чтение членства на аккаунт-скоупных путях.
+	// MembershipService — чтение членства на аккаунт-скоупных путях и создание
+	// на плоской коллекции (kaname#181, IAM-ID-1 §4 S3.2).
 	//
-	// Ни клиента модели прав, ни фильтра страницы здесь НЕТ, и это утверждение,
-	// а не пропуск: единственный гейт этих чтений — пообъектная проверка КРАЯ по
-	// аккаунту из пути, а строки отбираются тем же аккаунтом в условии запроса.
-	// Провязать сюда второй замок значило бы заменить проверку края кодом,
-	// который можно забыть в следующей ветке.
+	// У ЧТЕНИЙ ни клиента модели прав, ни фильтра страницы здесь НЕТ, и это
+	// утверждение, а не пропуск: единственный гейт этих чтений — пообъектная
+	// проверка КРАЯ по аккаунту из пути, а строки отбираются тем же аккаунтом в
+	// условии запроса. Провязать сюда второй замок значило бы заменить проверку
+	// края кодом, который можно забыть в следующей ветке.
+	//
+	// СОЗДАНИЕ — тот же поток, что `UserService.Invite`, и провязывается ТЕМ ЖЕ
+	// экземпляром use-case'а (`userInvite`): реконсайлер, срок приглашения и
+	// клиент модели прав у обоих глаголов одни. Второй экземпляр разошёлся бы с
+	// первым в провязке молча — и разошёлся бы на самом чувствительном: на том,
+	// что материализуется после коммита.
 	membershipHandler := membershipapp.NewHandler(
 		membershipapp.NewGetMembershipUseCase(membershipRepo),
 		membershipapp.NewListMembershipsUseCase(membershipRepo),
+		userInvite,
 	)
 
 	// RoleService.
@@ -1254,4 +1274,13 @@ func (r *forceLogoutSubjectResolver) ExternalIDOf(ctx context.Context, id domain
 		return "", err
 	}
 	return string(u.ExternalID), nil
+}
+
+// inviteMailRateLimit — ограничение частоты писем на адрес из настройки, в
+// форме порта. Страж старта уже отверг непозитивное; здесь только перенос.
+func inviteMailRateLimit(cfg config.Config) outboxtypes.InviteMailRateLimit {
+	return outboxtypes.InviteMailRateLimit{
+		MaxPerWindow: cfg.Invite.MailRateLimit.MaxPerWindow,
+		Window:       cfg.Invite.MailRateLimit.Window,
+	}
 }

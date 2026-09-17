@@ -21,6 +21,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/dto"
+	_ "github.com/PRO-Robotech/kaname/internal/dto/toproto" // переводы реестра: резолвер зависит от них сам, а не через соседа
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -122,6 +123,16 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
 	case *iamv1.UnblockUserMetadata:
 		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
+	case *iamv1.ResendInviteMetadata:
+		// Повторная отправка письма приглашения (ID-MAIL-1, §10 п. 9) НЕ меняет
+		// строку человека: её предмет — намерение в очереди писем, поставленное
+		// либо не поставленное (окно частоты). Осиротевшая операция —
+		// процесс умер между чеканкой операции и коммитом намерения — разрешается
+		// как Update: строка есть ⇒ ответ — она же, ровно тот ответ, что даёт и
+		// состоявшийся вызов (в норме и сверх нормы он один by construction, Р9).
+		// Строки нет ⇒ операция прервана. Сказать «письмо ушло» резолвер не
+		// может и не говорит: письмо у приёмника наблюдает стенд, а не операция.
+		return resolveExistence(ctx, kindUpdate, m.GetUserId(), rd.Users().Get, marshalUser)
 
 	case *iamv1.CreateServiceAccountMetadata:
 		return resolveExistence(ctx, kindCreate, m.GetServiceAccountId(), rd.ServiceAccounts().Get, marshalServiceAccount)
@@ -194,10 +205,49 @@ func (r *Resolver) Resolve(ctx context.Context, op operations.Operation) (operat
 		}
 		return done(nil), nil
 
+	case *iamv1.CreateMembershipMetadata:
+		// Создание членства (kaname#181). Ресурс — ПАРА (человек, аккаунт), как
+		// и у исключения выше, только полярность создания: пара есть → работа
+		// закоммичена, ответ — членство; пары нет → до коммита не дошло.
+		//
+		// `user_id` метаданных — тот, что назначила приёмка: у известной почты
+		// это её строка, у неизвестной — кандидат для новой. Если между приёмкой
+		// и транзакцией человека завёл кто-то ещё (конкурентный первый вход),
+		// строка получила ДРУГОЙ идентификатор, пары по кандидату нет, и исход
+		// «прервана» велит повторить — повтор идемпотентен по построению: пара
+		// уникальна, идентификатор членства вычислим из неё.
+		return resolveMembershipPair(ctx,
+			domain.UserID(m.GetUserId()), domain.AccountID(m.GetAccountId()), rd.Users().Membership)
+
 	default:
 		// Condition / прочие типы метаданных — не разрешаются этим resolver'ом.
 		return skip(), nil
 	}
+}
+
+// resolveMembershipPair — «существование пары → терминальный исход» для
+// создания членства. Отдельно от `resolveExistence`, потому что ресурс
+// адресуется двумя идентификаторами, а не одним.
+func resolveMembershipPair(
+	ctx context.Context,
+	userID domain.UserID, accountID domain.AccountID,
+	get func(context.Context, domain.UserID, domain.AccountID) (domain.Membership, error),
+) (operations.ResolverResult, error) {
+	m, err := get(ctx, userID, accountID)
+	switch {
+	case err == nil:
+	case errors.Is(err, iamerr.ErrNotFound):
+		return interrupted(), nil
+	default:
+		return operations.ResolverResult{}, fmt.Errorf(
+			"operationresolver: membership %q in %q: %w", userID, accountID, err)
+	}
+	resp, err := marshalMembership(m)
+	if err != nil {
+		return operations.ResolverResult{}, fmt.Errorf(
+			"operationresolver: marshal membership %q: %w", m.ID, err)
+	}
+	return done(resp), nil
 }
 
 // resolveExistence — общая логика «существование ресурса → терминальный исход».
@@ -254,6 +304,14 @@ func interrupted() operations.ResolverResult {
 }
 
 // ---- domain → Any маршалеры (через DTO-реестр) ----
+
+func marshalMembership(m domain.Membership) (*anypb.Any, error) {
+	var dst *iamv1.Membership
+	if err := dto.Transfer(dto.FromTo(m, &dst)); err != nil {
+		return nil, err
+	}
+	return anypb.New(dst)
+}
 
 func marshalAccount(a domain.Account) (*anypb.Any, error) {
 	var dst *iamv1.Account

@@ -155,6 +155,8 @@ YAML-манифестом на установку, см. [MODEL-MANIFEST.md](MOD
 | `authn.login.address-window` | переменная `KANAME_AUTHN__LOGIN__ADDRESS_WINDOW` | посадка `own` | окно счёта неверных предъявлений по адресу |
 | `authn.login.source-attempts` | переменная `KANAME_AUTHN__LOGIN__SOURCE_ATTEMPTS` | посадка `own` | сколько неверных предъявлений с одного источника (адрес из X-Forwarded-For края) допускается в окне |
 | `authn.login.source-window` | переменная `KANAME_AUTHN__LOGIN__SOURCE_WINDOW` | посадка `own` | окно счёта неверных предъявлений по источнику |
+| `authn.registration.admissions-per-window` | переменная `KANAME_AUTHN__REGISTRATION__ADMISSIONS_PER_WINDOW` | посадка `own` | потолок ТЕМПА заведения аккаунтов одной личностью: сколько за окно СВЕРХ первого. Первое заведение — регистрация — проходит безусловно; величина ограничивает повторную регистрацию адресом и последующие заведения аккаунтов того же человека. Носитель ключа на этой посадке — адрес, которым человек представился (Ф4 Р5). 0 законен: сверх первого — ни одного. Служба проецирует величину в схему на старте; под `external` строку авторитета правит администратор |
+| `authn.registration.admission-window` | переменная `KANAME_AUTHN__REGISTRATION__ADMISSION_WINDOW` | посадка `own` | окно счёта заведений аккаунтов одной личностью |
 | `authn.login.password-min-length` | переменная `KANAME_AUTHN__LOGIN__PASSWORD_MIN_LENGTH` | посадка `own` | минимальная длина пароля в знаках — одно правило на вход, регистрацию и восстановление; перенос прежней величины (8) объявляется профилем |
 | `authn.login.breach-check` | переменная `KANAME_AUTHN__LOGIN__BREACH_CHECK` | посадка `own` | проверка нового пароля по базе утечек: «enabled» с адресом авторитета либо «disabled» словом; необъявленное — отказ старта, потому что выключенная молча проверка неотличима от настроенной |
 | `authn.login.hasher-format` | переменная `KANAME_AUTHN__LOGIN__HASHER_FORMAT` | посадка `own` | формат вновь заводимых значений пароля из перечня записываемых; параметры стоимости — hasher-memory, hasher-iterations, hasher-parallelism, между полом и потолком перечня |
@@ -163,6 +165,7 @@ YAML-манифестом на установку, см. [MODEL-MANIFEST.md](MOD
 | `authn.login.hasher-parallelism` | переменная `KANAME_AUTHN__LOGIN__HASHER_PARALLELISM` | посадка `own` | параметр стоимости argon2id: параллелизм |
 | `authn.login.verifier-capacity` | переменная `KANAME_AUTHN__LOGIN__VERIFIER_CAPACITY` | посадка `own` | сколько проверок пароля идут одновременно; ёмкость × память на потолке + резерв обязаны помещаться в предел памяти контейнера — страж старта сверяет числа |
 | `authn.login.memory-reserve-bytes` | переменная `KANAME_AUTHN__LOGIN__MEMORY_RESERVE_BYTES` | посадка `own` | резерв памяти процесса сверх проверок пароля, байт |
+| `authn.login.recovery-code-ttl` | переменная `KANAME_AUTHN__LOGIN__RECOVERY_CODE_TTL` | посадка `own` | срок кода восстановления доступа, от чеканки; код однократен и после срока не оживает. Умолчания нет: перенос прежней величины (5 мин) объявляется профилем, а не построением |
 | `authn.hook-shared-secret` | переменная `KANAME_HOOK_TOKEN` | на любой посадке | предъявитель, которым поставщик удостоверений аутентифицируется на хуках выдачи и обновления токена. Без него хуки принимали бы вызов без всякой проверки |
 | `authn.jwks-encryption-key-hex` | переменная `KANAME_JWKS_ENC_KEY` | на любой посадке | ключ ОБЁРТКИ приватной половины подписного ключа: 32 байта в hex (64 знака). Принимает перечень через запятую — первый оборачивает, все открывают; так ключ обёртки и меняется, без простоя и без переписывания хранилища |
 | `api-server.registry-token.service` | переменная `KANAME_API_SERVER__REGISTRY_TOKEN__SERVICE` | на любой посадке | имя службы реестра, которое обе стороны докерной полосы обязаны называть одинаково: мы чеканим его в адресата токена, реестр объявляет его докер-клиенту. Умолчания нет намеренно — это чужое имя, и совпадение подставленного с настоящим не выбирал бы никто |
@@ -295,6 +298,8 @@ KANAME_REPOSITORY__POSTGRES__URL=postgres://iam:...@pg:5432/kaname?sslmode=requi
 | `inviteMail.tlsMode` | `KANAME_INVITE_MAIL__TLS_MODE` | `starttls` (умолчание) либо `implicit` |
 | `inviteMail.caBundleFile` | `KANAME_INVITE_MAIL__CA_BUNDLE_FILE` | якорь доверия к сертификату узла; пусто — системные корни |
 | `inviteMail.loginUrl` | `KANAME_INVITE_MAIL__LOGIN_URL` | адрес страницы входа, который несёт письмо |
+| `invite.mailRateLimit.maxPerWindow` | `KANAME_INVITE__MAIL_RATE_LIMIT__MAX_PER_WINDOW` | сколько писем приглашения уходит одному адресу за окно — на приглашении и на повторной отправке вместе. Умолчание 3; положительное, «без ограничения» не бывает |
+| `invite.mailRateLimit.window` | `KANAME_INVITE__MAIL_RATE_LIMIT__WINDOW` | длина окна. Умолчание `1h`; положительная |
 
 **Адрес узла принимается в двух формах, и у каждой свой смысл.** Голая форма
 `host:port` — посадку полосы называет `inviteMail.tlsMode`, логин — переменная

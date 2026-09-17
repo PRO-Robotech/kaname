@@ -6,7 +6,7 @@ package pg_test
 // role_rule_selectors_maperr_integration_test.go — db#2: ReplaceRuleSelectors must
 // route a Postgres CHECK violation (23514) through mapErr → ErrInvalidArg, not bare
 // fmt.Errorf(%w) which surfaces as INTERNAL. A selector whose match_labels fails the
-// role_rule_selectors_labels_valid CHECK (kacho_labels_valid: bad key format) is the
+// role_rule_selectors_labels_valid CHECK (labels_valid: bad key format) is the
 // 23514 path. RED before the fix (bare-wrapped pgx error is not ErrInvalidArg), GREEN
 // after.
 //
@@ -46,7 +46,7 @@ func TestDB2_ReplaceRuleSelectors_CheckViolation_MapsInvalidArgument(t *testing.
 	defer func() { _ = w.Rollback(ctx) }()
 
 	// match_labels with an illegal key ("BAD KEY": uppercase + space) marshals to
-	// valid JSON but fails kacho_labels_valid → CHECK role_rule_selectors_labels_valid
+	// valid JSON but fails labels_valid → CHECK role_rule_selectors_labels_valid
 	// → SQLSTATE 23514. The repo must translate that to ErrInvalidArg.
 	bad := []domain.RuleSelector{{
 		RuleFP:      "fp_db2",

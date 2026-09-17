@@ -11,7 +11,7 @@ package pg_test
 // Покрыто:
 //   - SA name+labels persist на Insert → возвращаются Get + List.
 //   - User name+labels persist на Insert → возвращаются Get + List.
-//   - CHECK kacho_labels_valid: невалидные labels (>64 пар) → 23514 → ErrInvalidArg.
+//   - CHECK labels_valid: невалидные labels (>64 пар) → 23514 → ErrInvalidArg.
 //
 // Запуск: `go test ./internal/repo/kaname/pg/... -run OAuthClientNameLabels`. Skip с -short.
 
@@ -201,7 +201,7 @@ func TestOAuthClientNameLabels_User_InvalidLabels_CheckViolation(t *testing.T) {
 	repo := kanamepg.NewUserOAuthClientRepo(pool)
 	txb := kanamepg.NewPoolTxBeginner(pool)
 
-	// >64 label pairs → kacho_labels_valid CHECK violation (23514 → ErrInvalidArg).
+	// >64 label pairs → labels_valid CHECK violation (23514 → ErrInvalidArg).
 	tooMany := domain.Labels{}
 	for i := 0; i < 65; i++ {
 		tooMany[domain.LabelKey(fmt.Sprintf("k%d", i))] = domain.LabelVal("v")
@@ -225,5 +225,5 @@ func TestOAuthClientNameLabels_User_InvalidLabels_CheckViolation(t *testing.T) {
 	_, err = repo.Insert(ctx, tx, row)
 	require.Error(t, err)
 	assert.True(t, stderrors.Is(err, iamerr.ErrInvalidArg),
-		"CHECK kacho_labels_valid SQLSTATE 23514 → ErrInvalidArg, got %v", err)
+		"CHECK labels_valid SQLSTATE 23514 → ErrInvalidArg, got %v", err)
 }

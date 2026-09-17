@@ -54,6 +54,15 @@ func goodEndpoints(mode config.Mode, sslMode string) config.Config {
 			CredentialsPerUser:           ptrInt64(12),
 			CredentialsPerServiceAccount: ptrInt64(24),
 		},
+		// Ограничение частоты писем на адрес — положительное в ЛЮБОМ режиме
+		// (приёмка ID-MAIL-1, MAIL-43): умолчание объявлено загрузчику, а не
+		// ручке, поэтому голая структура его не несёт и ноль здесь есть
+		// попытка снять ограничение. Пробы, которые ПРО него, значение
+		// перезаписывают (invite_mail_rate_limit_test.go).
+		Invite: config.InviteConfig{MailRateLimit: config.InviteMailRateLimitConfig{
+			MaxPerWindow: config.DefaultInviteMailPerWindow,
+			Window:       config.DefaultInviteMailWindow,
+		}},
 		APIServer: config.APIServerConfig{
 			Endpoint:         "tcp://0.0.0.0:9090",
 			InternalEndpoint: "tcp://0.0.0.0:9091",

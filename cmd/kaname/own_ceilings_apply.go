@@ -39,6 +39,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -72,6 +73,43 @@ func projectOwnCeilings(
 		slog.Any("kinds", census.Kinds))
 	if err != nil {
 		return fmt.Errorf("собственные потолки: проекция посадки в схему: %w", err)
+	}
+	return nil
+}
+
+// admissionRateProjector — писатель проекции величины темпа заведения.
+type admissionRateProjector interface {
+	ApplyAdmissionRate(ctx context.Context, maxEvents int64, window time.Duration) (kanamepg.AdmissionRateProjection, error)
+}
+
+// projectAdmissionRate переносит величину темпа заведения (Ф4 Р5, Ф4-18/19;
+// задача kacho#1270) из посадки в строку авторитета — ТОЛЬКО под `own`: там
+// носитель ключа — адрес, а величину объявляет профиль. Под `external` строку
+// правит администратор облака, и проекция сообщает об этом строкой переписи,
+// а не молчит.
+//
+// Перепись печатается всегда: «записано 1» на живой строке и «записано 1» на
+// заведённой заново — разные события, и обе названы; отказ проекции — отказ
+// пуска, по той же причине, что у трёх потолков.
+func projectAdmissionRate(
+	ctx context.Context,
+	logger *slog.Logger,
+	projector admissionRateProjector,
+	cfg config.Config,
+) error {
+	if !loginLaneWanted(cfg) {
+		logger.Info("проекция темпа заведения не исполняется: посадка не `own` — строку авторитета правит администратор",
+			slog.String("identity_provider", cfg.AuthN.IdentityProvider.String()))
+		return nil
+	}
+	maxEvents, window := cfg.AuthN.Registration.AdmissionRate()
+	census, err := projector.ApplyAdmissionRate(ctx, maxEvents, window)
+	logger.Info("перепись проекции темпа заведения",
+		slog.Int64("admissions_per_window", census.MaxEvents),
+		slog.Int64("window_seconds", census.WindowSeconds),
+		slog.Int("written", census.Written))
+	if err != nil {
+		return fmt.Errorf("темп заведения: проекция посадки в схему: %w", err)
 	}
 	return nil
 }

@@ -157,10 +157,10 @@ import "context"
 
 const EventInviteMailSend = "mail.invite.send"
 
-type InviteMailEvent struct{ To string }
+type MailEvent struct{ To string }
 
-func NewInviteMailApplier() func(ctx context.Context, eventType string, ev InviteMailEvent) error {
-	return func(ctx context.Context, eventType string, ev InviteMailEvent) error {
+func NewInviteMailApplier() func(ctx context.Context, eventType string, ev MailEvent) error {
+	return func(ctx context.Context, eventType string, ev MailEvent) error {
 		if eventType != EventInviteMailSend {
 			return nil
 		}
@@ -351,7 +351,7 @@ func TestMailKindInventory_TwoSendersOfOneKindIsAFinding(t *testing.T) {
 	t.Parallel()
 	second := strings.Replace(mailInjApplierIf, "NewInviteMailApplier", "NewSecondApplier", 1)
 	second = strings.Replace(second, "const EventInviteMailSend = \"mail.invite.send\"\n", "", 1)
-	second = strings.Replace(second, "type InviteMailEvent struct{ To string }\n", "", 1)
+	second = strings.Replace(second, "type MailEvent struct{ To string }\n", "", 1)
 	inv, err := check.MailKindInventoryOf(
 		check.TreeCorpus{"internal/migrations/0001_initial.sql": mailInjSchemaCreate},
 		check.TreeCorpus{

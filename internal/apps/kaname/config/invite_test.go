@@ -17,13 +17,20 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 )
 
+// legalMailLimit — законное ограничение частоты для проб, чей предмет — СРОК.
+// Секция одна на обе величины, а страж судит обе: проба о сроке обязана
+// принести законное соседнее, иначе она красна о чужом предмете. Умолчание
+// частоты живёт у ЗАГРУЗЧИКА (invite_mail_rate_limit_test.go), поэтому голая
+// структура его не несёт — и это намеренно: явный ноль отвергается.
+var legalMailLimit = config.InviteMailRateLimitConfig{MaxPerWindow: 3, Window: time.Hour}
+
 // TestInviteTTL_SilentPostureKeepsTheDeadline — молчащий профиль ограничение НЕ
 // снимает: умолчание непустое и положительное.
 //
 // Отрицание без этого контроля зеленело бы на конфигурации, где срока нет вовсе.
 func TestInviteTTL_SilentPostureKeepsTheDeadline(t *testing.T) {
 	t.Parallel()
-	var c config.InviteConfig // профиль о сроке не высказался
+	c := config.InviteConfig{MailRateLimit: legalMailLimit} // профиль о сроке не высказался
 	got := c.TTLOrDefault()
 	if got <= 0 {
 		t.Fatalf("молчащий профиль дал срок %s — приглашение стало бы выкупаемым навсегда", got)
@@ -37,7 +44,7 @@ func TestInviteTTL_SilentPostureKeepsTheDeadline(t *testing.T) {
 // применяется, а не подменяется умолчанием.
 func TestInviteTTL_DeclaredValueWins(t *testing.T) {
 	t.Parallel()
-	c := config.InviteConfig{TTL: 36 * time.Hour}
+	c := config.InviteConfig{TTL: 36 * time.Hour, MailRateLimit: legalMailLimit}
 	if got := c.TTLOrDefault(); got != 36*time.Hour {
 		t.Fatalf("объявленная величина не применилась: %s", got)
 	}
@@ -50,7 +57,7 @@ func TestInviteTTL_DeclaredValueWins(t *testing.T) {
 // и отказ называет РУЧКУ: без имени ручки оператор не знает, что править.
 func TestInviteTTL_NegativeIsRefusedAtStart(t *testing.T) {
 	t.Parallel()
-	err := config.InviteConfig{TTL: -time.Second}.Validate()
+	err := config.InviteConfig{TTL: -time.Second, MailRateLimit: legalMailLimit}.Validate()
 	if err == nil {
 		t.Fatal("отрицательный срок принят — страж зелен при любом входе")
 	}
@@ -66,7 +73,7 @@ func TestInviteTTL_NegativeIsRefusedAtStart(t *testing.T) {
 // не существует вовсе, поэтому снять срок профиль не может ничем.
 func TestInviteTTL_ZeroReadsAsUnsetAndNotAsUnlimited(t *testing.T) {
 	t.Parallel()
-	c := config.InviteConfig{TTL: 0}
+	c := config.InviteConfig{TTL: 0, MailRateLimit: legalMailLimit}
 	if got := c.TTLOrDefault(); got <= 0 {
 		t.Fatalf("ноль прочитан как «без срока»: %s", got)
 	}

@@ -57,7 +57,7 @@ type userReader struct {
 
 // userCols — полный набор колонок. `labels` (D-3) — tenant-facing метки,
 // делающие User label-selectable наравне с account/project (iam-direct ARM_LABELS).
-const userCols = "id, account_id, external_id, email, display_name, invite_status, invited_by, created_at, labels"
+const userCols = "id, account_id, external_id, email, display_name, invite_status, invited_by, created_at, labels, invite_expires_at"
 
 func (r *userReader) Get(ctx context.Context, id domain.UserID) (domain.User, error) {
 	row := r.tx.QueryRow(ctx, fmt.Sprintf(`SELECT %s FROM users WHERE id = $1`, userCols), string(id))
@@ -140,6 +140,28 @@ func (r *userReader) MembershipExists(ctx context.Context, userID domain.UserID,
 		return false, mapErr(err, "", string(userID))
 	}
 	return exists, nil
+}
+
+// Membership — членство пары «человек × аккаунт» проекцией `membershipCols`:
+// колонки объявлены ОДИН раз (`membership_repo.go`), и эта дорога к строке
+// разойтись с аккаунт-скоупными чтениями не может — она их же проекцию и читает.
+func (r *userReader) Membership(ctx context.Context, userID domain.UserID, accountID domain.AccountID) (domain.Membership, error) {
+	if userID == "" || accountID == "" {
+		// Пустая половина пары означала бы «любой», то есть строку, которую
+		// вызывающий не называл. До запроса пустое значение доходить не должно.
+		return domain.Membership{}, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument membership pair")
+	}
+	q := fmt.Sprintf(`SELECT %s %s WHERE m.user_id = $1 AND m.account_id = $2`,
+		membershipCols, membershipFrom)
+	m, err := scanMembership(r.tx.QueryRow(ctx, q, string(userID), string(accountID)))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Membership{}, iamerr.Wrapf(iamerr.ErrNotFound,
+				"Membership of user %s in account %s not found", userID, accountID)
+		}
+		return domain.Membership{}, mapErr(err, "", string(userID))
+	}
+	return m, nil
 }
 
 // FindPendingByEmail — приглашённые строки по адресу.
@@ -886,11 +908,11 @@ func (w *userWriter) SetInviteStatus(ctx context.Context, id domain.UserID, st d
 			   SET invite_status = $2
 			 WHERE id = $1 AND invite_status <> 'PENDING'
 			RETURNING id, account_id, external_id, email, display_name,
-			          invite_status, invited_by, created_at, labels
+			          invite_status, invited_by, created_at, labels, invite_expires_at
 		)
 		SELECT EXISTS(SELECT 1 FROM users WHERE id = $1) AS row_exists,
 		       u.id, u.account_id, u.external_id, u.email, u.display_name,
-		       u.invite_status, u.invited_by, u.created_at, u.labels
+		       u.invite_status, u.invited_by, u.created_at, u.labels, u.invite_expires_at
 		  FROM (SELECT 1) AS one
 		  LEFT JOIN upd u ON true`
 	row := w.tx.QueryRow(ctx, q, string(id), string(st))
@@ -927,9 +949,10 @@ func scanUserStateWrite(row scanner) (domain.User, bool /*updated*/, bool /*rowE
 		invitedBy    sql.NullString
 		createdAt    sql.NullTime
 		labelsJSON   []byte
+		expiresAt    sql.NullTime
 	)
 	if err := row.Scan(&rowExists, &userID, &accountID, &externalID, &email,
-		&displayName, &inviteStatus, &invitedBy, &createdAt, &labelsJSON); err != nil {
+		&displayName, &inviteStatus, &invitedBy, &createdAt, &labelsJSON, &expiresAt); err != nil {
 		return domain.User{}, false, false, err
 	}
 	if !userID.Valid {
@@ -944,6 +967,9 @@ func scanUserStateWrite(row scanner) (domain.User, bool /*updated*/, bool /*rowE
 		InviteStatus: domain.InviteStatus(inviteStatus.String),
 		InvitedBy:    domain.UserID(invitedBy.String),
 		CreatedAt:    createdAt.Time,
+	}
+	if expiresAt.Valid {
+		u.InviteExpiresAt = expiresAt.Time
 	}
 	labels, err := unmarshalLabels(labelsJSON)
 	if err != nil {
@@ -978,6 +1004,7 @@ func scanUserInto(row scanner, out *domain.User, extra ...any) error {
 		inviteStatus sql.NullString
 		invitedBy    sql.NullString
 		labelsJSON   []byte
+		expiresAt    sql.NullTime
 	)
 	dest := append([]any{
 		(*string)(&out.ID),
@@ -989,9 +1016,13 @@ func scanUserInto(row scanner, out *domain.User, extra ...any) error {
 		&invitedBy,
 		&out.CreatedAt,
 		&labelsJSON,
+		&expiresAt,
 	}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return err
+	}
+	if expiresAt.Valid {
+		out.InviteExpiresAt = expiresAt.Time
 	}
 	if accountID.Valid {
 		out.AccountID = domain.AccountID(accountID.String)
