@@ -173,12 +173,16 @@ func TestF12_01_EnrollMintsAPendingRowAndShowsTheSecretOnce(t *testing.T) {
 	require.Nil(t, st.BackupCodes, "ключа backupCodes нет: заведён — только active")
 	require.Equal(t, 1, h.obs.sfEvents[humansession.SecondFactorEnrollmentStarted])
 
-	// Вход с кодом от pending — «не заведён»; без кода — «1», как до заведения.
+	// Вход с кодом от pending — строка `pending` не способ: тот же отказ
+	// входа, что на неверный пароль, и попытка (Ф12-13 «е» редакции 8 —
+	// состояние наружу не выходит); без кода — «1», как до заведения.
 	_, err = h.login.Execute(context.Background(), humansession.LoginInput{
 		Email: "e1@example.invalid", Password: "correct horse battery", Source: "203.0.113.7",
 		SecondFactor: &humansession.SecondFactorPresentation{Method: assurance.MethodTOTP, Code: probeTOTP(t, en.Secret, h.step())},
 	})
-	require.ErrorIs(t, err, humansession.ErrSecondFactorNotEnrolled)
+	require.ErrorIs(t, err, humansession.ErrAuthenticationFailed)
+	require.Equal(t, 1, h.failures(humansession.FailureByAddress, "e1@example.invalid"), "попытка")
+	require.Equal(t, 1, h.obs.login[humansession.LoginOutcomeSecondFactorNotEnrolled])
 	plain := h.mustLogin(t, "e1@example.invalid", "correct horse battery")
 	require.Equal(t, "1", plain.View.Session.AssuranceLevel)
 }
