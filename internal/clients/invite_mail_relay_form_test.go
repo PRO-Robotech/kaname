@@ -60,7 +60,7 @@ func Test_InviteMailSender_UnparsedURIAddressIsASettingNotADial(t *testing.T) {
 			AttemptTimeout: 2 * time.Second,
 			TLSMode:        clients.MailTLSDisabledForTest,
 		})
-		err := sender.Send(context.Background(), clients.InviteMailEvent{To: "invitee@example.invalid"})
+		err := sender.Send(context.Background(), clients.MailEvent{To: "invitee@example.invalid"})
 		require.Error(t, err, "адрес %q доехал до транспорта неразобранным — это отказ", raw)
 		assert.True(t, errors.Is(err, clients.ErrMailMisconfigured),
 			"неразобранный адрес — НАСТРОЙКА, а не временный сбой: повтор его не вылечит (%q: %v)", raw, err)
@@ -74,7 +74,7 @@ func Test_InviteMailSender_UnparsedURIAddressIsASettingNotADial(t *testing.T) {
 		Addr: addr, From: "kacho@example.invalid", AttemptTimeout: 2 * time.Second,
 		TLSMode: clients.MailTLSDisabledForTest,
 	})
-	_ = sender.Send(context.Background(), clients.InviteMailEvent{To: "invitee@example.invalid"})
+	_ = sender.Send(context.Background(), clients.MailEvent{To: "invitee@example.invalid"})
 	assert.Eventually(t, func() bool { return accepted.Load() >= 1 }, 2*time.Second, 10*time.Millisecond,
 		"голый адрес узла обязан набираться")
 }

@@ -17,8 +17,24 @@ import (
 )
 
 // mailLawfulSender — ЗАКОННЫЙ БЛИЗНЕЦ оси транспорта: единственный путь,
-// отправляющий приглашение. Дословная форма сегодняшнего дерева.
+// отправляющий оба наших вида — приглашение и восстановление (с Ф5). Дословная
+// форма сегодняшнего дерева.
 const mailLawfulSender = `package clients
+
+import (
+	"net/smtp"
+)
+
+const EventInviteMailSend = "mail.invite.send"
+const EventRecoveryMailSend = "mail.recovery.send"
+
+func send(c *smtp.Client) error { return nil }
+`
+
+// mailLawfulInviteOnlySender — путь, отправляющий ТОЛЬКО приглашение: до Ф5 это
+// было всё дерево; с Ф5 такой путь оставляет вид восстановления без
+// производителя, и это судится отдельной пробой ниже.
+const mailLawfulInviteOnlySender = `package clients
 
 import (
 	"net/smtp"
@@ -171,27 +187,57 @@ func TestMAIL47Injection_ForeignKindIsNamed(t *testing.T) {
 
 // TestMAIL47Injection_VocabularyAxisSeesASenderWithoutTransport — ось 2
 // отдельно: чужой вид в словаре очереди — находка ДАЖЕ без транспорта рядом.
-// Законный близнец — то же хранилище с видом `invite` (проверен выше).
+// Чужой здесь — подтверждение адреса (за поставщиком до Ф6); законный близнец —
+// то же хранилище с видом `invite` (проверен выше) и с видом `recovery`, который
+// наш с Ф5 (ниже).
 func TestMAIL47Injection_VocabularyAxisSeesASenderWithoutTransport(t *testing.T) {
 	t.Parallel()
 	got := findingsFor(t, map[string]string{
 		"internal/clients/invite_mail.go": mailLawfulSender,
-		"internal/repo/kaname/pg/recovery_mail_outbox/store.go": `package recovery_mail_outbox
+		"internal/repo/kaname/pg/verification_mail_outbox/store.go": `package verification_mail_outbox
 
-const EventSend = "mail.recovery.send"
+const EventSend = "mail.verification.send"
 `,
 	})
 	var found bool
 	for _, f := range got {
-		if f.Axis == "vocabulary" && strings.Contains(f.What, "recovery") {
+		if f.Axis == "vocabulary" && strings.Contains(f.What, "verification") {
 			found = true
-			if !strings.Contains(f.Where, "recovery_mail_outbox/store.go") {
+			if !strings.Contains(f.Where, "verification_mail_outbox/store.go") {
 				t.Errorf("находка словаря без координаты: %q", f.Where)
 			}
 		}
 	}
 	if !found {
-		t.Fatalf("вид `recovery` в словаре очереди НЕ найден: %+v", got)
+		t.Fatalf("вид `verification` в словаре очереди НЕ найден: %+v", got)
+	}
+
+	// Законный близнец Ф5: вид восстановления в словаре очереди рядом с
+	// единственным путём, отправляющим оба наших вида, — молчание.
+	twin := findingsFor(t, map[string]string{
+		"internal/clients/invite_mail.go": mailLawfulSender,
+		"internal/repo/kaname/pg/invite_mail_outbox/store.go": `package invite_mail_outbox
+
+const EventSend = "mail.invite.send"
+const EventRecoverySend = "mail.recovery.send"
+`,
+	})
+	if len(twin) != 0 {
+		t.Fatalf("законный близнец (оба наших вида, один путь) дал находки: %+v", twin)
+	}
+	// И обратная сторона перечня: путь, отправляющий ТОЛЬКО приглашение, при
+	// живом виде восстановления в словаре — «путей отправки вида recovery — ноль».
+	half := findingsFor(t, map[string]string{
+		"internal/clients/invite_mail.go": mailLawfulInviteOnlySender,
+	})
+	var missing bool
+	for _, f := range half {
+		if strings.Contains(f.What, "путей отправки вида `recovery` — ноль") {
+			missing = true
+		}
+	}
+	if !missing {
+		t.Fatalf("вид восстановления без пути НЕ назван находкой: %+v", half)
 	}
 }
 

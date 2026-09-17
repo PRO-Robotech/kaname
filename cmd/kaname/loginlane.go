@@ -6,9 +6,13 @@ package main
 // loginlane.go — КОМПОЗИЦИЯ полосы входа паролем и нашей сессии (фаза Ф3,
 // задача PRO-Robotech/kacho#1269; приёмка
 // `docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md`,
-// Р15, Ф3-44, Ф3-45) и регистрации той же полосой (фаза Ф4, kacho#1270): глагол
-// регистрации собирается здесь же, для полосы из объявления `registration.Lanes`,
-// с тем же правилом пароля, хешером, сроком сессии и наблюдателем.
+// Р15, Ф3-44, Ф3-45), регистрации той же полосой (фаза Ф4, kacho#1270) и
+// восстановления доступа на ней же (фаза Ф5, задача PRO-Robotech/kacho#1271).
+// Глагол регистрации собирается здесь же, для полосы из объявления
+// `registration.Lanes`, с тем же правилом пароля, хешером, сроком сессии и
+// наблюдателем; восстановление берёт те же хранилища, хешер и правило пароля,
+// те же величины частоты, а своё у него — срок кода и диспетчер постановки
+// письма вне пути ответа (Ф5 Р2).
 //
 // # Поднимается ПОСАДКОЙ
 //
@@ -64,13 +68,27 @@ const knobLoginLane = "KANAME_API_SERVER__LOGIN_LANE_ENDPOINT"
 // breachCheckTimeout — потолок одного обращения к авторитету утечек.
 const breachCheckTimeout = 5 * time.Second
 
+// recoveryDispatchTimeout — предел одной постановки письма восстановления вне
+// пути ответа: запись двух строк одной транзакцией, а не разговор с узлом.
+const recoveryDispatchTimeout = 30 * time.Second
+
 // loginLane — всё, что корень собирает под полосу; nil — полосы нет.
 type loginLane struct {
-	handler  *loginlanehttp.Handler
-	resolve  *humansession.Handler
-	sessions *kanamepg.HumanSessionRepo
-	methods  *kanamepg.LoginMethodRepo
-	limits   humansession.Limits
+	handler    *loginlanehttp.Handler
+	resolve    *humansession.Handler
+	sessions   *kanamepg.HumanSessionRepo
+	methods    *kanamepg.LoginMethodRepo
+	limits     humansession.Limits
+	dispatcher *humansession.GoDispatcher
+}
+
+// drain — дождаться постановок письма, начатых до гашения (Ф5 Р2): ответ их не
+// ждал, гашение — ждёт. nil-полоса — нечего ждать.
+func (l *loginLane) drain() {
+	if l == nil || l.dispatcher == nil {
+		return
+	}
+	l.dispatcher.Wait()
 }
 
 // loginLaneWanted — поднимается ли полоса на этой посадке: ровно под `own`.
@@ -108,7 +126,9 @@ func (l *loginLane) retentionReapers() retention.HumanSessionReapers {
 	if !l.wired() {
 		return retention.HumanSessionReapers{}
 	}
-	return retention.HumanSessionReapers{Sessions: l.sessions, Failures: l.sessions, LongestWindow: l.limits.LongestWindow()}
+	return retention.HumanSessionReapers{
+		Sessions: l.sessions, Failures: l.sessions, Codes: l.sessions, LongestWindow: l.limits.LongestWindow(),
+	}
 }
 
 // requireLoginLaneTLS — страж посадки `own` (Ф3-44 в): адрес объявлен, TLS
@@ -274,6 +294,21 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
+	// Восстановление доступа (Ф5): постановка письма — вне пути ответа (Р2).
+	dispatcher := humansession.NewGoDispatcher(recoveryDispatchTimeout)
+	requestUC, err := humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
+		Store: sessions, CodeTTL: login.RecoveryCodeTTL, Dispatcher: dispatcher, Observer: rec, Now: time.Now, Logger: logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
+	completeUC, err := humansession.NewCompleteRecoveryUseCase(humansession.CompleteRecoveryDeps{
+		Store: sessions, Hasher: hasher, Rule: rule, Limits: limits, TTL: login.SessionTTL,
+		Observer: rec, Now: time.Now, Logger: logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sign-in lane: %w", err)
+	}
 	handler, err := loginlanehttp.New(loginlanehttp.Config{
 		SessionTTL:    login.SessionTTL,
 		CookieDomain:  login.ResolvedCookieDomain(),
@@ -281,13 +316,13 @@ func buildLoginLane(cfg config.Config, pool *pgxpool.Pool, repo kanamerepo.Repos
 		RefusalDomain: refusaldomain.For(refusaldomain.ServiceIAM),
 		Logger:        logger,
 		Observer:      rec,
-	}, laneVerbs{login: loginUC, logout: logoutUC, change: changeUC, register: registerUC})
+	}, laneVerbs{login: loginUC, logout: logoutUC, change: changeUC, register: registerUC, request: requestUC, complete: completeUC})
 	if err != nil {
 		return nil, fmt.Errorf("sign-in lane: %w", err)
 	}
 	return &loginLane{
 		handler: handler, resolve: humansession.NewHandler(resolveUC),
-		sessions: sessions, methods: methods, limits: limits,
+		sessions: sessions, methods: methods, limits: limits, dispatcher: dispatcher,
 	}, nil
 }
 
@@ -328,6 +363,8 @@ type laneVerbs struct {
 	logout   *humansession.LogoutUseCase
 	change   *humansession.ChangePasswordUseCase
 	register *registration.RegisterUseCase
+	request  *humansession.RequestRecoveryUseCase
+	complete *humansession.CompleteRecoveryUseCase
 }
 
 func (v laneVerbs) Register(ctx context.Context, in registration.Input) (registration.Output, error) {
@@ -346,9 +383,17 @@ func (v laneVerbs) ChangePassword(ctx context.Context, in humansession.ChangePas
 	return v.change.Execute(ctx, in)
 }
 
+func (v laneVerbs) RequestRecovery(ctx context.Context, in humansession.RequestRecoveryInput) error {
+	return v.request.Execute(ctx, in)
+}
+
+func (v laneVerbs) CompleteRecovery(ctx context.Context, in humansession.CompleteRecoveryInput) (humansession.CompleteRecoveryOutput, error) {
+	return v.complete.Execute(ctx, in)
+}
+
 // loginLaneSurface — профиль поверхности слушателя формы. Досягаемость —
 // внутри кластера: до слушателя доходит ровно край, и адрес консоли, на
-// котором живут четыре глагола, принадлежит краю.
+// котором живут глаголы полосы, принадлежит краю.
 func loginLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog.Logger,
 	lane *loginLane, mtlsCfg config.MTLSConfig,
 ) (servicecontract.SurfaceDescriptor, error) {
@@ -366,12 +411,13 @@ func loginLaneSurface(cfg config.Config, mode servicecontract.Mode, logger *slog
 		tlsCfg = nil
 	}
 	return iamHTTPSurface(servicecontract.Surface{
-		Name:   "полоса входа паролем и регистрации (/iam/v1/auth/{login,logout,password,csrf,register})",
+		Name:   "полоса входа паролем, регистрации и восстановления доступа (/iam/v1/auth/{login,logout,password,csrf,register,recovery,recovery/complete})",
 		Mode:   mode,
 		Logger: logger,
 		Addr: addrAxis(addr, "полоса входа паролем поднимается только посадкой authn.identity-provider=own "+
-			"по адресу "+knobLoginLane+"; на этой посадке вход человека, регистрацию, смену пароля и выход "+
-			"(/iam/v1/auth/login, /register, /logout, /password, /csrf) служба не обслуживает — их исполняет "+
+			"по адресу "+knobLoginLane+"; на этой посадке вход человека, регистрацию, смену пароля, выход "+
+			"и восстановление доступа (/iam/v1/auth/login, /register, /logout, /password, /csrf, /recovery, "+
+			"/recovery/complete) служба не обслуживает — их исполняет "+
 			"внешний поставщик"),
 		Handler: handler,
 		Reach:   servicecontract.ReachClusterInternal,

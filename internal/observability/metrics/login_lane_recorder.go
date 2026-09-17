@@ -27,6 +27,10 @@ const (
 	LoginSourceUnknownMetric           = Namespace + "_login_source_unknown_total"
 	PasswordMaterialRewriteMetric      = Namespace + "_password_material_rewrite_total"
 	RegistrationOutcomesMetric         = Namespace + "_registration_outcomes_total"
+	// Восстановление доступа (Ф5, kacho#1271): вызывающий видит один ответ на
+	// запрос кода и один отказ на предъявление; причина — только здесь.
+	RecoveryRequestOutcomesMetric    = Namespace + "_recovery_request_outcomes_total"
+	RecoveryCompletionOutcomesMetric = Namespace + "_recovery_completion_outcomes_total"
 )
 
 // LoginLaneRecorder — приёмник событий полосы (`humansession.Observer`) и
@@ -42,6 +46,8 @@ type LoginLaneRecorder struct {
 	rewrite   *prometheus.CounterVec
 	noSource  prometheus.Counter
 	register  *prometheus.CounterVec
+	recReq    *prometheus.CounterVec
+	recDone   *prometheus.CounterVec
 }
 
 // LoginLaneRecorder — единственный экземпляр на реестр.
@@ -98,8 +104,21 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 					"(registration refused) for an occupied address and for the admission-rate ceiling; " +
 					"the cause is visible only here and in the journal (Ф4 Р3).",
 			}, []string{"lane", "outcome"}),
+			recReq: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: RecoveryRequestOutcomesMetric,
+				Help: "Outcomes of recovery-code requests by cause: queued (code minted, letter queued), no row " +
+					"(address belongs to nobody), unverified (address not confirmed), store failed. The caller " +
+					"always gets the same answer; the cause is visible only here.",
+			}, []string{"outcome"}),
+			recDone: prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name: RecoveryCompletionOutcomesMetric,
+				Help: "Outcomes of recovery-code presentations by cause: issued, no row, code rejected (wrong, " +
+					"expired or already used), blocked person, rate limited, new password rejected by the rule, " +
+					"store failed. The caller always sees ONE refusal; the cause is visible only here.",
+			}, []string{"outcome"}),
 		}
-		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource, rec.register)
+		r.reg.MustRegister(rec.login, rec.verify, rec.noSession, rec.form, rec.rate, rec.breach, rec.logout, rec.rewrite, rec.noSource,
+			rec.register, rec.recReq, rec.recDone)
 		for _, o := range humansession.LoginOutcomes() {
 			rec.login.WithLabelValues(string(o)).Add(0)
 		}
@@ -127,6 +146,12 @@ func (r *Registry) LoginLaneRecorder() *LoginLaneRecorder {
 			for _, o := range registration.Outcomes() {
 				rec.register.WithLabelValues(lane.Name, string(o)).Add(0)
 			}
+		}
+		for _, o := range humansession.RecoveryRequestOutcomes() {
+			rec.recReq.WithLabelValues(string(o)).Add(0)
+		}
+		for _, o := range humansession.RecoveryCompletionOutcomes() {
+			rec.recDone.WithLabelValues(string(o)).Add(0)
 		}
 		r.loginLane = rec
 	})
@@ -168,6 +193,14 @@ func (l *LoginLaneRecorder) RewriteObserved(o humansession.RewriteOutcome) {
 // RegistrationObserved — исход регистрации по полосе и причине (Ф4 Р3).
 func (l *LoginLaneRecorder) RegistrationObserved(lane string, o registration.Outcome) {
 	l.register.WithLabelValues(lane, string(o)).Inc()
+}
+
+func (l *LoginLaneRecorder) RecoveryRequestObserved(o humansession.RecoveryRequestOutcome) {
+	l.recReq.WithLabelValues(string(o)).Inc()
+}
+
+func (l *LoginLaneRecorder) RecoveryCompletionObserved(o humansession.RecoveryCompletionOutcome) {
+	l.recDone.WithLabelValues(string(o)).Inc()
 }
 
 var (

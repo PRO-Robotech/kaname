@@ -91,14 +91,19 @@ const (
 	// SubjectLoginFailures — следы неверных предъявлений пароля старше самого
 	// длинного окна счёта (Ф3 Р10).
 	SubjectLoginFailures = "login_failures"
+	// SubjectRecoveryCodes — коды восстановления, которые оператор применения
+	// уже не обслужит: применённые и истёкшие (Ф5 Р1). Темп задаёт внешний:
+	// строку заводит запрос восстановления по любому подтверждённому адресу.
+	SubjectRecoveryCodes = "recovery_codes"
 )
 
-// HumanSessionReapers — ДВА уборщика полосы входа (Ф3): порог у второго —
+// HumanSessionReapers — ТРИ уборщика полосы входа (Ф3, Ф5): порог у второго —
 // самое длинное окно счёта, величина посадки, поэтому он приходит параметром
 // вместе с окном, а не выписывается длительностью.
 type HumanSessionReapers struct {
 	Sessions      HumanSessionReaper
 	Failures      LoginFailureReaper
+	Codes         RecoveryCodeReaper
 	LongestWindow time.Duration
 }
 
@@ -112,11 +117,16 @@ type LoginFailureReaper interface {
 	SweepAgedFailures(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
 }
 
+// RecoveryCodeReaper — порт уборщика применённых и истёкших кодов восстановления.
+type RecoveryCodeReaper interface {
+	SweepUnservableRecoveryCodes(ctx context.Context, grace time.Duration, batch int) (int64, bool, error)
+}
+
 // WithHumanSessions — записи реестра полосы входа поверх базовых. Отдельной
 // функцией, а не параметрами `Subjects`: полоса поднимается посадкой `own`, и
 // под `external` записей у неё нет — уборщик без предмета выглядел бы исправным.
 func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
-	if r.Sessions == nil || r.Failures == nil {
+	if r.Sessions == nil || r.Failures == nil || r.Codes == nil {
 		return base
 	}
 	return append(base,
@@ -132,6 +142,14 @@ func WithHumanSessions(base []Subject, r HumanSessionReapers) []Subject {
 			Name:  SubjectLoginFailures,
 			Grace: r.LongestWindow,
 			Sweep: r.Failures.SweepAgedFailures,
+		},
+		Subject{
+			Name: SubjectRecoveryCodes,
+			// Порог — предикат читателя: оператор применения не обслужит ни
+			// истёкшую, ни применённую строку, и запаса сверх срока не нужно —
+			// граница срока включающая и у оператора, и у уборки.
+			Grace: 0,
+			Sweep: r.Codes.SweepUnservableRecoveryCodes,
 		},
 	)
 }

@@ -69,6 +69,7 @@
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
 | `cases/kaname-login-lane.py` | 4 |
+| `cases/kaname-recovery-lane.py` | 3 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/label-revoke-nlb.py` | 1 |
@@ -1019,6 +1020,18 @@
 - `IAM-LOGINLANE-NEG-WRONG-PASSWORD`
 - `IAM-LOGINLANE-OK-LOGIN-LOGOUT-REPRESENT`
 - `IAM-LOGINLANE-NEG-CSRF-MISSING`
+
+## `cases/kaname-recovery-lane.py` — 3 кейса
+
+> Восстановление доступа кодом по почте (Ф5, kacho#1271): два глагола на том же
+> слушателе формы, что вход. Адресуется `loginLaneBaseUrl`; на автономном стенде
+> посадки `external` переменная пуста ПО ПОСАДКЕ — «условие не создано». Счастливого
+> завершения с настоящим кодом здесь нет: код уходит письмом, и через край его не
+> прочитать — предмет Ф5-14 (`kacho#1773`).
+
+- `IAM-RECOVERY-OK-REQUEST-SAME-ANSWER`
+- `IAM-RECOVERY-NEG-WRONG-CODE`
+- `IAM-RECOVERY-NEG-CSRF-MISSING`
 
 ## `cases/kaname-own-rest-front.py` — 14 кейсов
 

@@ -1,23 +1,32 @@
 // Copyright (c) PRO-Robotech
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// invite_mail.go — НАШ отправитель письма приглашения.
+// invite_mail.go — НАШ отправитель писем: приглашение и восстановление доступа.
 //
 // # Почему отправитель здесь, а не у поставщика личности
 //
-// Писем в продукте три вида, и производители у них РАЗНЫЕ (приёмка ID-MAIL-1,
-// Р23): подтверждение адреса и восстановление доступа отправляет почтовый
-// процесс поставщика — их предъявители принадлежат ему; приглашение отправляем
-// МЫ, потому что предмет приглашения — наша строка в нашей базе, и о ней
-// поставщик не знает ничего.
+// Писем в продукте три вида. Приглашение отправляем МЫ (приёмка ID-MAIL-1,
+// Р23): его предмет — наша строка в нашей базе, и о ней поставщик не знает
+// ничего. Восстановление доступа с фазы Ф5 (`kacho#1271`, приёмка
+// `recovery-of-access.md`, Р3, Д5) — тоже наше: код чеканим мы, поток
+// поставщика истёк вместе с поставщиком, и у письма не осталось бы ни одного
+// отправителя. Подтверждение адреса остаётся за поставщиком до своей фазы (Ф6).
+//
+// Второй вид живёт в ТОЙ ЖЕ полосе, а не во второй (Р3): отправитель,
+// настройка, закрытый набор клеток исхода, ограниченный повтор и предел времени
+// на попытку — общие; различается только тело письма, выбираемое по виду
+// события. Две стороны словаря видов — ограничение схемы и ветви применителя —
+// сверяет гейт `TestEveryMailKindHasExactlyOneSender`. Имя полосы, очереди и
+// клеток осталось от приглашения: переименование не меняет ни одного
+// предмета, а разошлось бы с историей.
 //
 // # Что здесь лежит — три части одной цепочки
 //
 //   - InviteMailSender — транспорт: один разговор с почтовым узлом, СВОИМ
-//     пределом времени ограниченный;
-//   - DecodeInviteMail — Decoder[T] для общего дренажа;
-//   - NewInviteMailApplier — Applier[T]: зовёт транспорт и раскладывает исход по
-//     ЗАКРЫТОМУ набору клеток счётчика.
+//     пределом времени ограниченный; тело письма выбирает по виду события;
+//   - DecodeMailEvent — Decoder[T] для общего дренажа;
+//   - NewInviteMailApplier — Applier[T]: ветвится на ВИДЕ события, зовёт
+//     транспорт и раскладывает исход по ЗАКРЫТОМУ набору клеток счётчика.
 //
 // # Две величины, и они РАЗНЫЕ
 //
@@ -62,9 +71,12 @@ const (
 	InviteMailTable = "kaname.invite_mail_outbox"
 	// InviteMailChannel — LISTEN-канал (триггер миграции).
 	InviteMailChannel = "kaname_invite_mail_outbox"
-	// EventInviteMailSend — единственный вид события очереди. Словарь закрыт
-	// CHECK'ом миграции: расширение требует и кода, и миграции.
+	// EventInviteMailSend — вид события приглашения. Словарь закрыт CHECK'ом
+	// миграции: расширение требует и кода, и миграции.
 	EventInviteMailSend = "mail.invite.send"
+	// EventRecoveryMailSend — вид события письма восстановления доступа (Ф5 Р3);
+	// заведён миграцией `20260917015400_recovery_code_is_our_record`.
+	EventRecoveryMailSend = "mail.recovery.send"
 )
 
 // Клетки счётчика исходов отправки. Набор ЗАКРЫТ (Р25): форма взята у зеркала
@@ -181,21 +193,34 @@ type MailRelay struct {
 	LoginURL string
 }
 
-// InviteMailEvent — расшифрованная нагрузка одной строки очереди.
+// MailEvent — расшифрованная нагрузка одной строки очереди: письмо любого из
+// двух видов. Вид в нагрузке НЕ хранится — он в колонке события; применитель
+// проставляет его в `Kind` перед сдачей транспорту.
 //
-// Предъявителя здесь НЕТ и быть не должно (Р24): письмо приглашения несёт призыв
-// и адрес страницы входа, а доступ даёт владение почтовым ящиком, доказанное
-// подтверждением адреса у поставщика.
-type InviteMailEvent struct {
-	// To — адрес приглашённого. Единственная координата, без которой письмо
+// Приглашение предъявителя НЕ несёт (Р24): письмо несёт призыв и адрес страницы
+// входа, а доступ даёт владение почтовым ящиком. Письмо восстановления
+// предъявителя НЕСЁТ — код — потому что предъявитель и есть его предмет (Ф5 Р1);
+// в строке очереди он лежит открытым до сдачи письма узлу, и сданную строку
+// снимает уборка.
+type MailEvent struct {
+	// To — адрес получателя. Единственная координата, без которой письмо
 	// отправить некому.
 	To string `json:"to"`
-	// AccountID — аккаунт, в который приглашают. Атрибуция и тело письма.
+	// AccountID — аккаунт. Атрибуция и тело письма приглашения.
 	AccountID string `json:"account_id"`
-	// UserID — строка приглашения. Атрибуция; отправка от неё не зависит.
+	// UserID — строка человека. Атрибуция; отправка от неё не зависит.
 	UserID string `json:"user_id"`
 	// LoginURL — адрес страницы входа. Пусто → берётся из настройки установки.
 	LoginURL string `json:"login_url,omitempty"`
+	// Code — код восстановления в форме для человека; только у вида
+	// восстановления. Строка этого вида без кода нерастолковываема.
+	Code string `json:"code,omitempty"`
+	// CodeValidMinutes — срок кода в минутах, как его называет письмо (Ф1-25:
+	// «код с объявленным сроком»). Только у вида восстановления.
+	CodeValidMinutes int `json:"code_valid_minutes,omitempty"`
+	// Kind — вид события строки; проставляется применителем, в нагрузке не
+	// хранится.
+	Kind string `json:"-"`
 }
 
 // InviteMailObserver — писатель счётчика исходов отправки.
@@ -211,9 +236,9 @@ type InviteMailObserver interface {
 
 // InviteMailTransport — порт: то, что умеет сдать письмо почтовому узлу.
 // Реализуется InviteMailSender; в пробах — подставным транспортом, который
-// снисходительнее настоящего быть не вправе.
+// снисходительнее настоящего быть не вправе. Вид письма приходит в `ev.Kind`.
 type InviteMailTransport interface {
-	Send(ctx context.Context, ev InviteMailEvent) error
+	Send(ctx context.Context, ev MailEvent) error
 }
 
 // InviteMailSender — транспорт поверх SMTP.
@@ -244,7 +269,7 @@ const defaultAttemptTimeout = 20 * time.Second
 // соединения) и абсолютным сроком на самом соединении (он обрывает узел, который
 // СОЕДИНЕНИЕ ПРИНЯЛ и молчит). Одного контекста мало: после того как соединение
 // установлено, чтения и записи по нему контекст уже не сторожит.
-func (s *InviteMailSender) Send(ctx context.Context, ev InviteMailEvent) error {
+func (s *InviteMailSender) Send(ctx context.Context, ev MailEvent) error {
 	relay := s.relay
 
 	addr, ok := normalizedHostPort(relay.Addr)
@@ -370,8 +395,8 @@ func (s *InviteMailSender) Send(ctx context.Context, ev InviteMailEvent) error {
 	if err != nil {
 		return classifySMTPErr(addr, "DATA", err)
 	}
-	if _, werr := w.Write(RenderInviteMail(relay, ev)); werr != nil {
-		return fmt.Errorf("%w: write invite mail body to %s: %w", ErrMailTransient, addr, werr)
+	if _, werr := w.Write(RenderMail(relay, ev)); werr != nil {
+		return fmt.Errorf("%w: write mail body to %s: %w", ErrMailTransient, addr, werr)
 	}
 	if cerr := w.Close(); cerr != nil {
 		return classifySMTPErr(addr, "end of DATA", cerr)
@@ -544,6 +569,74 @@ func addressOnly(s string) string {
 	return s
 }
 
+// RenderMail — тело письма по виду события. Вид неизвестный применитель до
+// транспорта не доводит (постоянный отказ), поэтому здесь исходов два.
+func RenderMail(relay MailRelay, ev MailEvent) []byte {
+	if ev.Kind == EventRecoveryMailSend {
+		return RenderRecoveryMail(relay, ev)
+	}
+	return RenderInviteMail(relay, ev)
+}
+
+// mailHeaders — общая шапка обоих видов: отправитель, получатель, тема,
+// кодировка. Заголовки код не несут — он только в теле.
+func mailHeaders(relay MailRelay, ev MailEvent, subject string) *strings.Builder {
+	from := addressOnly(relay.From)
+	displayFrom := from
+	if relay.FromName != "" {
+		displayFrom = fmt.Sprintf("%s <%s>", relay.FromName, from)
+	}
+	var b strings.Builder
+	b.WriteString("From: " + displayFrom + "\r\n")
+	b.WriteString("To: " + addressOnly(ev.To) + "\r\n")
+	b.WriteString("Subject: " + mimeEncodedHeader(subject) + "\r\n")
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	b.WriteString("Content-Transfer-Encoding: 8bit\r\n")
+	b.WriteString("\r\n")
+	return &b
+}
+
+// RenderRecoveryMail собирает тело письма восстановления доступа (Ф5 Р3).
+//
+// Письмо несёт КОД и его срок — и ничего сверх: ни ссылки-предъявителя (полоса
+// кодовая, Ф5 §1.2), ни утверждения «доставлено» (Р15 ID-MAIL-1 — продукт видит
+// сдачу узлу, а не получение). Адрес консоли, если объявлен, стоит отдельной
+// строкой и кода не несёт.
+func RenderRecoveryMail(relay MailRelay, ev MailEvent) []byte {
+	loginURL := ev.LoginURL
+	if loginURL == "" {
+		loginURL = relay.LoginURL
+	}
+	subject := "Код восстановления доступа"
+	product := "облаку"
+	if relay.FromName != "" {
+		subject = "Код восстановления доступа — " + relay.FromName
+		product = relay.FromName
+	}
+	b := mailHeaders(relay, ev, subject)
+	b.WriteString("Кто-то — возможно, вы — запросил восстановление доступа к " + product + ".\r\n")
+	b.WriteString("\r\n")
+	b.WriteString("Код восстановления:\r\n")
+	b.WriteString("\r\n")
+	b.WriteString("    " + ev.Code + "\r\n")
+	b.WriteString("\r\n")
+	if ev.CodeValidMinutes > 0 {
+		fmt.Fprintf(b, "Код действует %d мин. с момента отправки и применяется один раз.\r\n", ev.CodeValidMinutes)
+	} else {
+		b.WriteString("Код применяется один раз.\r\n")
+	}
+	b.WriteString("Введите его вместе с новым паролем на странице восстановления.\r\n")
+	if loginURL != "" {
+		b.WriteString("\r\n")
+		b.WriteString("Страница входа: " + loginURL + "\r\n")
+	}
+	b.WriteString("\r\n")
+	b.WriteString("Если вы не запрашивали восстановление — не вводите код нигде и не отвечайте\r\n")
+	b.WriteString("на это письмо: без кода доступ к учётной записи не изменится.\r\n")
+	return []byte(b.String())
+}
+
 // RenderInviteMail собирает тело письма.
 //
 // Письмо говорит об ОТПРАВКЕ и НИГДЕ не говорит «доставлено»: продукт видит
@@ -552,20 +645,11 @@ func addressOnly(s string) string {
 //
 // Предъявителя письмо НЕ несёт (Р24): в нём призыв и адрес страницы входа, а
 // доступ даёт владение почтовым ящиком, доказанное подтверждением адреса.
-func RenderInviteMail(relay MailRelay, ev InviteMailEvent) []byte {
+func RenderInviteMail(relay MailRelay, ev MailEvent) []byte {
 	loginURL := ev.LoginURL
 	if loginURL == "" {
 		loginURL = relay.LoginURL
 	}
-	from := addressOnly(relay.From)
-	displayFrom := from
-	if relay.FromName != "" {
-		displayFrom = fmt.Sprintf("%s <%s>", relay.FromName, from)
-	}
-
-	var b strings.Builder
-	b.WriteString("From: " + displayFrom + "\r\n")
-	b.WriteString("To: " + addressOnly(ev.To) + "\r\n")
 	// ИМЯ ПРИГЛАШАЮЩЕГО — отображаемое имя отправителя, и другого источника у
 	// письма нет. Литерал с именем платформы стоял здесь, пока служба была её
 	// частью; отдельным продуктом в ЧУЖОМ облаке он сообщает приглашённому имя,
@@ -582,11 +666,7 @@ func RenderInviteMail(relay MailRelay, ev InviteMailEvent) []byte {
 		invitedTo = "Вас пригласили работать в " + relay.FromName + "."
 	}
 
-	b.WriteString("Subject: " + mimeEncodedHeader(subject) + "\r\n")
-	b.WriteString("MIME-Version: 1.0\r\n")
-	b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
-	b.WriteString("Content-Transfer-Encoding: 8bit\r\n")
-	b.WriteString("\r\n")
+	b := mailHeaders(relay, ev, subject)
 	b.WriteString(invitedTo + "\r\n")
 	b.WriteString("\r\n")
 	if loginURL != "" {
@@ -616,19 +696,20 @@ func mimeEncodedHeader(s string) string {
 	return s
 }
 
-// DecodeInviteMail — drainer.Decoder.
+// DecodeMailEvent — drainer.Decoder, общий для обоих видов.
 //
 // Строка, не назвавшая адресата, нерастолковываема и повтором таковой не станет
 // — это ПОСТОЯННЫЙ отказ, а не вечный ретрай. Условие закрыто и ограничением
 // миграции, поэтому записать такую строку НЕЛЬЗЯ; проверка остаётся вторым
-// рубежом, а не единственным.
-func DecodeInviteMail(payload []byte) (InviteMailEvent, error) {
-	var ev InviteMailEvent
+// рубежом, а не единственным. Требования ВИДА (код у письма восстановления)
+// судит применитель: декодер вида не знает.
+func DecodeMailEvent(payload []byte) (MailEvent, error) {
+	var ev MailEvent
 	if err := json.Unmarshal(payload, &ev); err != nil {
-		return InviteMailEvent{}, fmt.Errorf("%w: decode invite mail payload: %w", drainer.ErrPermanent, err)
+		return MailEvent{}, fmt.Errorf("%w: decode invite mail payload: %w", drainer.ErrPermanent, err)
 	}
 	if strings.TrimSpace(ev.To) == "" {
-		return InviteMailEvent{}, fmt.Errorf(
+		return MailEvent{}, fmt.Errorf(
 			"%w: invite mail payload names no recipient (no to)", drainer.ErrPermanent)
 	}
 	return ev, nil
@@ -647,14 +728,24 @@ func DecodeInviteMail(payload []byte) (InviteMailEvent, error) {
 // (§Hardening п. 8: настройка — громко, никогда тихим Warn).
 func NewInviteMailApplier(
 	transport InviteMailTransport, obs InviteMailObserver, logger *slog.Logger,
-) drainer.Applier[InviteMailEvent] {
-	return func(ctx context.Context, eventType string, ev InviteMailEvent) error {
+) drainer.Applier[MailEvent] {
+	return func(ctx context.Context, eventType string, ev MailEvent) error {
 		// Развилка по ВИДУ события, а не по «какое поле непусто»: вид — то, что
 		// записал автор намерения. Неизвестный вид — постоянный отказ; корзины
-		// «прочее» здесь нет.
-		if eventType != EventInviteMailSend {
-			return fmt.Errorf("%w: unknown invite mail event type %q", drainer.ErrPermanent, eventType)
+		// «прочее» здесь нет. Каждая ветвь — принятый вид; гейт
+		// `TestEveryMailKindHasExactlyOneSender` сверяет их со словарём схемы.
+		switch eventType {
+		case EventInviteMailSend:
+		case EventRecoveryMailSend:
+			if strings.TrimSpace(ev.Code) == "" {
+				// Письмо восстановления без кода не восстанавливает ничего, и
+				// повтор этого не изменит: постоянный отказ, транспорт не зовётся.
+				return fmt.Errorf("%w: recovery mail row carries no code", drainer.ErrPermanent)
+			}
+		default:
+			return fmt.Errorf("%w: unknown mail event type %q", drainer.ErrPermanent, eventType)
 		}
+		ev.Kind = eventType
 
 		err := transport.Send(ctx, ev)
 		outcome := ClassifyInviteMailOutcome(err)
@@ -669,11 +760,11 @@ func NewInviteMailApplier(
 			// Различие здесь то же, что и в клетке счётчика: недоступность
 			// проходит со временем, неверный адрес — никогда.
 			if outcome == InviteMailOutcomeMisconfigured {
-				logger.Error("invite mail is not deliverable: the mail lane is misconfigured",
-					"err", err, "outcome", outcome, "account_id", ev.AccountID)
+				logger.Error("mail is not deliverable: the mail lane is misconfigured",
+					"err", err, "outcome", outcome, "kind", eventType, "account_id", ev.AccountID)
 			} else {
-				logger.Warn("invite mail delivery attempt failed",
-					"err", err, "outcome", outcome, "account_id", ev.AccountID)
+				logger.Warn("mail delivery attempt failed",
+					"err", err, "outcome", outcome, "kind", eventType, "account_id", ev.AccountID)
 			}
 		}
 		if outcome == InviteMailOutcomeMisconfigured {

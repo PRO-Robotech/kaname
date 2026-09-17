@@ -5,9 +5,12 @@
 // адресе консоли, ретранслируемые краем (фаза Ф3, задача
 // PRO-Robotech/kacho#1269; приёмка
 // `docs/engineering/acceptance/login-lane-issues-our-session-and-logout-ends-it-server-side.md`,
-// решения Р2, Р3, Р10, Р12, Р16), и пятый — регистрация (фаза Ф4,
+// решения Р2, Р3, Р10, Р12, Р16), пятый — регистрация (фаза Ф4,
 // PRO-Robotech/kacho#1270): та же форма ответа, то же печенье, свой вид
-// признака формы и ОДИН отказ на занятость и потолок темпа (Ф4 Р3).
+// признака формы и ОДИН отказ на занятость и потолок темпа (Ф4 Р3), — и два
+// глагола восстановления доступа на той же полосе (фаза Ф5, задача
+// PRO-Robotech/kacho#1271; приёмка `docs/engineering/acceptance/recovery-of-access.md`):
+// запрос кода и его предъявление с новым паролем.
 //
 // # Кто вправе звать — РОВНО край, и это судится здесь, до тела запроса
 //
@@ -66,11 +69,17 @@ const (
 	PathCSRF     = "/iam/v1/auth/csrf"
 	// PathRegister — регистрация паролем (Ф4): подпутём, как остальные.
 	PathRegister = "/iam/v1/auth/register"
+	// Восстановление доступа (Ф5): запрос кода и его предъявление с новым
+	// паролем — два глагола, две формы, два вида признака.
+	PathRecovery         = "/iam/v1/auth/recovery"
+	PathRecoveryComplete = "/iam/v1/auth/recovery/complete"
 )
 
-// Paths — пять глаголов, ОДНИМ объявлением: край читает тот же перечень для
+// Paths — семь глаголов, ОДНИМ объявлением: край читает тот же перечень для
 // ретрансляции (§8 инв. 7).
-func Paths() []string { return []string{PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister} }
+func Paths() []string {
+	return []string{PathLogin, PathLogout, PathPassword, PathCSRF, PathRegister, PathRecovery, PathRecoveryComplete}
+}
 
 // Имена печений (Р3). Имя носителя отлично от имени носителя поставщика
 // (F4d-26) — перечень гасимых имён у края читает и это имя.
@@ -98,6 +107,11 @@ type Lane interface {
 	ChangePassword(ctx context.Context, in humansession.ChangePasswordInput) (humansession.ChangePasswordOutput, error)
 	// Register — регистрация паролем (Ф4): три следствия одним исходом.
 	Register(ctx context.Context, in registration.Input) (registration.Output, error)
+	// RequestRecovery — запрос кода (Ф5-01/02): исход наружу не выходит.
+	RequestRecovery(ctx context.Context, in humansession.RequestRecoveryInput) error
+	// CompleteRecovery — предъявление кода с новым паролем (Ф5-03): выдаёт
+	// сессию, как вход.
+	CompleteRecovery(ctx context.Context, in humansession.CompleteRecoveryInput) (humansession.CompleteRecoveryOutput, error)
 }
 
 // Config — настройка слушателя. Срок и домен — величины профиля (Р3): срок без
@@ -142,6 +156,8 @@ func New(cfg Config, lane Lane) (*Handler, error) {
 	h.mux.HandleFunc(PathPassword, h.method(http.MethodPost, h.changePassword))
 	h.mux.HandleFunc(PathCSRF, h.method(http.MethodGet, h.csrf))
 	h.mux.HandleFunc(PathRegister, h.method(http.MethodPost, h.register))
+	h.mux.HandleFunc(PathRecovery, h.method(http.MethodPost, h.requestRecovery))
+	h.mux.HandleFunc(PathRecoveryComplete, h.method(http.MethodPost, h.completeRecovery))
 	return h, nil
 }
 
@@ -206,6 +222,21 @@ type registerForm struct {
 	CSRFToken string `json:"csrfToken"`
 }
 
+// recoveryRequestForm — запрос кода: только адрес.
+type recoveryRequestForm struct {
+	Email     string `json:"email"`
+	CSRFToken string `json:"csrfToken"`
+}
+
+// recoveryCompleteForm — предъявление: адрес, код и новый пароль. Текущего
+// пароля здесь НЕТ by construction — код и есть доказательство (Ф5 Р1).
+type recoveryCompleteForm struct {
+	Email       string `json:"email"`
+	Code        string `json:"code"`
+	NewPassword string `json:"newPassword"`
+	CSRFToken   string `json:"csrfToken"`
+}
+
 // decodeForm — строгий разбор: неизвестное поле называется, а не глотается
 // (конвенция платформы «принято-и-проигнорировано — запрещено»: поле запроса без читателя не принимается молча).
 func decodeForm(r *http.Request, into any) error {
@@ -227,7 +258,7 @@ func decodeForm(r *http.Request, into any) error {
 
 // requireFields — первое незаполненное поле в порядке формы называется отказом.
 func requireFields(fields map[string]string) error {
-	for _, name := range []string{"email", "password", "currentPassword", "newPassword"} {
+	for _, name := range []string{"email", "password", "code", "currentPassword", "newPassword"} {
 		if v, present := fields[name]; present && v == "" {
 			return humansession.FieldRequired(name)
 		}
@@ -399,6 +430,67 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, h.sessionCookie(out.Bearer))
 	writeJSON(w, http.StatusOK, map[string]any{"session": sessionJSON(out.View)})
+}
+
+// requestRecovery — запрос кода восстановления (Ф5-01, Ф5-02). Ответ ОДИН при
+// любом исходе — `200 {}` без печений: сессии нет, контекст формы прежний;
+// исход глагол не сообщает и постановки письма не ждёт (Р2).
+func (h *Handler) requestRecovery(w http.ResponseWriter, r *http.Request) {
+	var form recoveryRequestForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormRecovery, form.CSRFToken) {
+		return
+	}
+	if err := requireFields(map[string]string{"email": form.Email}); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if err := h.lane.RequestRecovery(r.Context(), humansession.RequestRecoveryInput{
+		Email: form.Email, Source: h.source(r),
+	}); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{})
+}
+
+// completeRecovery — предъявление кода с новым паролем (Ф5-03…08, Ф5-17):
+// успех отвечает как вход — тело Ф3-01, носитель сессии и НОВЫЙ контекст формы
+// (Р12); отказ — фиксированным текстом без Set-Cookie.
+func (h *Handler) completeRecovery(w http.ResponseWriter, r *http.Request) {
+	var form recoveryCompleteForm
+	if err := decodeForm(r, &form); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	if !h.judgeForm(w, r, domain.FormRecoveryComplete, form.CSRFToken) {
+		return
+	}
+	if err := requireFields(map[string]string{"email": form.Email, "code": form.Code, "newPassword": form.NewPassword}); err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	out, err := h.lane.CompleteRecovery(r.Context(), humansession.CompleteRecoveryInput{
+		Email: form.Email, Code: form.Code, NewPassword: form.NewPassword, Source: h.source(r),
+	})
+	if err != nil {
+		h.writeError(w, err, humansession.TextRequestNotPerformed)
+		return
+	}
+	fresh, ferr := humansession.NewFormContext()
+	if ferr != nil {
+		writeRefusal(w, http.StatusServiceUnavailable, codeUnavailable, humansession.TextRequestNotPerformed, nil)
+		return
+	}
+	http.SetCookie(w, h.sessionCookie(out.Bearer))
+	http.SetCookie(w, h.formCookie(fresh))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user":    userJSON(out.View),
+		"session": sessionJSON(out.View),
+	})
 }
 
 // source — адрес источника: значение заголовка допущенного вызывающего как

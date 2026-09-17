@@ -5,15 +5,17 @@ package config
 
 // login_lane.go — НАСТРОЙКА полосы входа паролем (фаза Ф3, задача
 // PRO-Robotech/kacho#1269; решения Р3, Р10, Р11, Р13; сценарии Ф3-06, Ф3-28,
-// Ф3-33, Ф3-41, Ф3-42, Ф3-44).
+// Ф3-33, Ф3-41, Ф3-42, Ф3-44) и восстановления доступа на той же полосе (фаза
+// Ф5, задача PRO-Robotech/kacho#1271; Р1, сценарий Ф5-06).
 //
 // # Ни одна величина не подставляется молча (Ф1 §7 инв. 4)
 //
 // Срок сессии, домен печенья, четыре величины частоты, длина пароля, состояние
-// и адрес проверки утечек, ручка «что писать», ёмкость и резерв — всё объявляет
-// профиль; незаданное — отказ старта с именем ручки. Дословный перенос Ф1 §4.1
-// (24 ч, 8 знаков) живёт в ПРОФИЛЯХ чартов, а не здесь: величина в построении
-// невидима читающему и не отказывает никогда.
+// и адрес проверки утечек, ручка «что писать», ёмкость и резерв, срок кода
+// восстановления — всё объявляет профиль; незаданное — отказ старта с именем
+// ручки. Дословный перенос Ф1 §4.1 (24 ч, 8 знаков, 5 минут) живёт в ПРОФИЛЯХ
+// чартов, а не здесь: величина в построении невидима читающему и не отказывает
+// никогда.
 //
 // Требования предъявляются ПОСАДКЕ `own` строками таблицы полос: под
 // `external` вход человека проверяет поставщик, и полосы у нас нет.
@@ -56,6 +58,10 @@ type LoginLaneConfig struct {
 
 	VerifierCapacity   int    `mapstructure:"verifier-capacity"`
 	MemoryReserveBytes uint64 `mapstructure:"memory-reserve-bytes"`
+
+	// RecoveryCodeTTL — срок кода восстановления доступа (Ф5 Р1; перенос Ф1
+	// §4.1 — 5 минут — объявляется профилем).
+	RecoveryCodeTTL time.Duration `mapstructure:"recovery-code-ttl"`
 }
 
 // loginLaneKnob — пара «ключ настройки ↔ переменная среды» одной ручки полосы.
@@ -84,6 +90,7 @@ var LoginLaneKnobs = []loginLaneKnob{
 	{loginLaneKeyPrefix + "hasher-parallelism", "KANAME_AUTHN__LOGIN__HASHER_PARALLELISM"},
 	{loginLaneKeyPrefix + "verifier-capacity", "KANAME_AUTHN__LOGIN__VERIFIER_CAPACITY"},
 	{loginLaneKeyPrefix + "memory-reserve-bytes", "KANAME_AUTHN__LOGIN__MEMORY_RESERVE_BYTES"},
+	{loginLaneKeyPrefix + "recovery-code-ttl", "KANAME_AUTHN__LOGIN__RECOVERY_CODE_TTL"},
 }
 
 func loginLaneEnv(key string) string {
@@ -303,6 +310,17 @@ func (l LoginLaneConfig) ValidateMemoryBudget(limitBytes uint64, limited bool) e
 	return nil
 }
 
+// ValidateRecovery — срок кода восстановления (Ф5-06): незаданный — отказ с
+// именем ручки; положительный близнец Ф5-07 — объявленный срок поднимает
+// процесс.
+func (l LoginLaneConfig) ValidateRecovery() error {
+	if l.RecoveryCodeTTL <= 0 {
+		return loginLaneMissing(loginLaneKeyPrefix+"recovery-code-ttl",
+			"срок кода восстановления — величина посадки без умолчания в коде; перенос Ф1 §4.1 (5m) объявляется профилем")
+	}
+	return nil
+}
+
 // ValidateAll — все стражи настройки полосы разом (страж старта посадки `own`).
 func (l LoginLaneConfig) ValidateAll() error {
 	return multierr.Combine(
@@ -311,5 +329,6 @@ func (l LoginLaneConfig) ValidateAll() error {
 		l.ValidatePasswordPolicy(),
 		l.ValidateHasher(),
 		l.ValidateCapacity(),
+		l.ValidateRecovery(),
 	)
 }

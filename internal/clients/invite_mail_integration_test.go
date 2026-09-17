@@ -222,7 +222,7 @@ func Test_InviteMailQueue_MisconfiguredLaneIsPoisonedNotRetriedForever(t *testin
 	require.NoError(t, tx.Commit(ctx))
 
 	obs := newRecordingObserver()
-	startInviteMailDrainer(t, pool, sendFunc(func(context.Context, clients.InviteMailEvent) error {
+	startInviteMailDrainer(t, pool, sendFunc(func(context.Context, clients.MailEvent) error {
 		return clients.ErrMailMisconfigured
 	}), obs)
 
@@ -252,7 +252,7 @@ func startInviteMailDrainer(
 ) {
 	t.Helper()
 	logger := observability.NewSlogger(testLoggerWriter{t})
-	d, err := drainer.New[clients.InviteMailEvent](
+	d, err := drainer.New[clients.MailEvent](
 		pool,
 		drainer.Config{
 			Table:           clients.InviteMailTable,
@@ -266,7 +266,7 @@ func startInviteMailDrainer(
 			PartitionColumn: "resource_id",
 			PermanentPolicy: drainer.PoisonPermanent,
 		},
-		clients.DecodeInviteMail,
+		clients.DecodeMailEvent,
 		clients.NewInviteMailApplier(transport, obs, logger),
 		logger,
 	)
@@ -289,12 +289,12 @@ func startInviteMailDrainer(
 // sentRecorder — транспорт, запоминающий сданные письма.
 type sentRecorder struct {
 	mu   sync.Mutex
-	sent []clients.InviteMailEvent
+	sent []clients.MailEvent
 }
 
 func newSentRecorder() *sentRecorder { return &sentRecorder{} }
 
-func (r *sentRecorder) Send(_ context.Context, ev clients.InviteMailEvent) error {
+func (r *sentRecorder) Send(_ context.Context, ev clients.MailEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.sent = append(r.sent, ev)
@@ -307,7 +307,7 @@ func (r *sentRecorder) count() int {
 	return len(r.sent)
 }
 
-func (r *sentRecorder) first() clients.InviteMailEvent {
+func (r *sentRecorder) first() clients.MailEvent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.sent[0]

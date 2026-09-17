@@ -62,6 +62,13 @@ type stubLane struct {
 	changeIn   []humansession.ChangePasswordInput
 	registerIn []registration.Input
 	logoutHit  int
+
+	// Восстановление доступа (Ф5) — методы в recovery_test.go.
+	requestErr  error
+	completeOut humansession.CompleteRecoveryOutput
+	completeErr error
+	requestIn   []humansession.RequestRecoveryInput
+	completeIn  []humansession.CompleteRecoveryInput
 }
 
 func (s *stubLane) Register(_ context.Context, in registration.Input) (registration.Output, error) {
