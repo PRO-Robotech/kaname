@@ -57,17 +57,20 @@ title: Идентичность и токены
 ```mermaid
 flowchart LR
   admin["Админ аккаунта"] -->|"1. Invite(email)"| iam["kaname"]
-  iam -->|"2. PENDING User-row + magic-link"| admin
-  admin -->|"3. передаёт ссылку"| user["Приглашённый"]
+  iam -->|"2. PENDING User-row"| admin
+  iam -->|"3. письмо приглашения (своя очередь)"| user["Приглашённый"]
   user -->|"4. вход через Kratos"| kratos["Ory Kratos"]
   kratos -->|"5. identity hook (:9092)"| iam
   iam -->|"6. match email → ACTIVE + externalId"| pg[("kaname")]
 ```
 
 1. Админ вызывает `UserService.Invite(email)` — backend создаёт `PENDING`-строку.
-2. `Operation.metadata` несёт `magicLinkUrl` (recovery/magic-link Kratos). Автоотправка письма
-   со ссылкой существует; пока почтовый узел не объявлен (`inviteMail.relay`,
-   `inviteMail.from`), письмо не уходит и ссылку передаёт админ.
+2. Письмо приглашения составляет и отправляет сама служба — намерение ставится в очередь
+   `invite_mail_outbox` той же транзакцией, что и строка. Ссылки первого входа письмо и ответ
+   **не несут**: доступ даёт владение почтовым ящиком. Не дошло — `UserService.ResendInvite`;
+   писем одному адресу за окно уходит не больше `invite.mailRateLimit`. Пока почтовый узел не
+   объявлен (`inviteMail.relay`, `inviteMail.from`), письмо не уходит, и это видно счётчиком
+   исходов отправки.
 3. Приглашённый входит через Kratos.
 4. При успешном входе Kratos дёргает **identity-hook** IAM (listener `:9092`, mTLS): IAM
    сопоставляет email с `PENDING`-строкой, переводит её в `ACTIVE` и заполняет `externalId`.

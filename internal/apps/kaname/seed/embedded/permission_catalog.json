@@ -3381,6 +3381,16 @@
     "required_acr_min": "2"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.UserService/ResendInvite",
+    "permission": "iam.users.resendInvite",
+    "required_relation": "editor",
+    "scope_extractor": {
+      "object_type": "account",
+      "from_request_field": "account_id"
+    },
+    "required_acr_min": "2"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.UserService/Unblock",
     "permission": "iam.users.unblock",
     "required_relation": "identity_suspender",

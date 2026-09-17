@@ -43,11 +43,50 @@ import (
 // истёкших за квартал — что велико и класс оно не закрывает.
 const defaultInviteTTL = 7 * 24 * time.Hour
 
+// Умолчание ограничения частоты писем НА АДРЕС за окно (Р14, MAIL-42).
+//
+// ВЕЛИЧИНА НАЗНАЧЕНА РЕШЕНИЕМ, А НЕ ЗАМЕРОМ, и это сказано прямо: замера нет
+// и не будет до эксплуатации — сегодня писем не уходит ни одного. Три письма в
+// час одному адресу покрывают штатный ход администратора («не дошло —
+// отправлю ещё раз, и ещё раз через десять минут») и не дают обладателю права
+// приглашать сделать из продукта средство рассылки (§4.6 приёмки).
+//
+// ПРЕДИКАТ ПЕРЕСМОТРА: доля исходов `rate_limited` счётчика намерений отправки
+// среди законных обращений выше доли, объявленной профилем, ⇒ величина мала;
+// ноль таких исходов за квартал при живой доставке ⇒ ограничение не сужает
+// ничего и может быть тесней.
+//
+// УМОЛЧАНИЕ ОБЪЯВЛЕНО ЗАГРУЗЧИКУ (`defaults.go`), а не подставлено у ручки — в
+// отличие от срока выше. Различие несущее: у срока ноль читается как «не
+// объявлено», потому что умолчание живёт у ручки и загрузчик отдаёт ноль и
+// молчащему профилю, и написавшему ноль. Здесь молчащий профиль получает
+// умолчание от загрузчика, а ноль до поля доезжает ТОЛЬКО написанным рукой —
+// и это попытка снять ограничение, которую страж обязан отвергнуть (MAIL-43).
+const (
+	DefaultInviteMailPerWindow = 3
+	DefaultInviteMailWindow    = time.Hour
+)
+
+// InviteMailRateLimitConfig — секция `invite.mail-rate-limit`.
+//
+//	MaxPerWindow — сколько писем одному адресу за окно; положительное.
+//	Window       — длина окна; положительная.
+//
+// Ограничение действует на КАЖДЫЙ наш глагол, отправляющий письмо (Р22):
+// его списывает писатель очереди перед постановкой намерения, поэтому глагол,
+// минующий ограничитель, невыразим — у него нет другого пути к письму.
+type InviteMailRateLimitConfig struct {
+	MaxPerWindow int           `mapstructure:"max-per-window"`
+	Window       time.Duration `mapstructure:"window"`
+}
+
 // InviteConfig — секция `invite`.
 //
-//	TTL — срок строки приглашения: после него активация отвергается.
+//	TTL           — срок строки приглашения: после него активация отвергается.
+//	MailRateLimit — ограничение частоты писем на адрес.
 type InviteConfig struct {
-	TTL time.Duration `mapstructure:"ttl"`
+	TTL           time.Duration             `mapstructure:"ttl"`
+	MailRateLimit InviteMailRateLimitConfig `mapstructure:"mail-rate-limit"`
 }
 
 // TTLOrDefault — срок, под которым выдаётся приглашение.
@@ -77,6 +116,22 @@ func (c InviteConfig) Validate() error {
 			"invite.ttl must not be negative (got %s) — it is the deadline of an invite row, "+
 				"and there is no value meaning «no deadline»: an invite redeemable forever is "+
 				"the very defect this knob removes", c.TTL)
+	}
+	// ОГРАНИЧЕНИЕ ЧАСТОТЫ: НЕПОЗИТИВНОЕ — ОТКАЗ, включая явный ноль (MAIL-43).
+	// Значения «без ограничения» в словаре ручки не существует; умолчание
+	// объявлено загрузчику, поэтому ноль здесь всегда написан рукой.
+	if c.MailRateLimit.MaxPerWindow <= 0 {
+		return fmt.Errorf(
+			"invite.mail-rate-limit.max-per-window must be positive (got %d) — it caps the "+
+				"letters one address receives per window, and there is no value meaning "+
+				"«unlimited»: the profile may change the cap, never remove it",
+			c.MailRateLimit.MaxPerWindow)
+	}
+	if c.MailRateLimit.Window <= 0 {
+		return fmt.Errorf(
+			"invite.mail-rate-limit.window must be positive (got %s) — it is the window the "+
+				"per-address cap is counted over, and a zero window would count nothing",
+			c.MailRateLimit.Window)
 	}
 	return nil
 }
