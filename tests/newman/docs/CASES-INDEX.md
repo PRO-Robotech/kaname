@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 751
+Всего кейсов: 754
 
 ## Перепись по модулям
 
@@ -53,6 +53,7 @@
 | `cases/iam-invite-resend.py` | 4 |
 | `cases/iam-list-visibility.py` | 3 |
 | `cases/iam-membership-create.py` | 3 |
+| `cases/iam-membership-mine.py` | 3 |
 | `cases/iam-membership-read.py` | 7 |
 | `cases/iam-permission-catalog.py` | 3 |
 | `cases/iam-project-edge-format.py` | 1 |
@@ -671,6 +672,14 @@
 - `IAM-ID1-MBR-CREATE-OK`
 - `IAM-ID1-MBR-CREATE-SECOND-ACCOUNT`
 - `IAM-ID1-MBR-CREATE-NEG-AUTHZ`
+
+## `cases/iam-membership-mine.py` — 3 кейсов
+
+> Case-set СВОЕГО списка членств (IAM-ID-2, стадия S2; kaname#206).
+
+- `IAM-ID2-MINE-INVITED-OK`
+- `IAM-ID2-MINE-PAGINATION`
+- `IAM-ID2-MINE-NEG-ANON`
 
 ## `cases/iam-membership-read.py` — 7 кейсов
 

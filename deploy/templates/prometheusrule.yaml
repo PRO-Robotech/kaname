@@ -136,6 +136,14 @@ spec:
           annotations:
             summary: "готовность не оценивалась ни разу за 15 минут — пробу никто не спрашивает"
 
+{{- $authn := .Values.authn | default dict }}
+{{- if eq $authn.identityProvider "external" }}
+        # ПРАВИЛА ПОЛОСЫ ВНЕШНЕГО ПОСТАВЩИКА — ТОЛЬКО ПОД `authn.identityProvider:
+        # external` (задача #210). Под `own` хуков поставщика нет by construction:
+        # тишина на них штатна, и правило о тишине звонило бы ВЕЧНО. Порог,
+        # срабатывающий на штатном состоянии, перестают читать — и вместе с ним
+        # теряют настоящую тревогу там, где она нужна. Посадка выбирает полосу,
+        # полоса — правила; профиль без посадки не получает ни тех, ни других.
         - alert: KanameAuthnHooksSilent
           # Отсутствие обращений невидимо в журнале by construction: строк нет вовсе.
           expr: sum(increase(kaname_authn_hook_requests_total[1h])) == 0
@@ -153,6 +161,29 @@ spec:
           expr: increase(kaname_authn_hook_requests_total{outcome="failed"}[10m]) > 0
           annotations:
             summary: "хук {{ "{{ $labels.route }}" }} не смог ответить — вход человека отказывает"
+{{- end }}
+{{- if eq $authn.identityProvider "own" }}
+        # ПРАВИЛА СОБСТВЕННОЙ ПОЛОСЫ ВХОДА — ТОЛЬКО ПОД `own` (задача #210).
+        # Правила о ТИШИНЕ здесь нет намеренно: час без единого входа у небольшой
+        # установки ночью — штатное состояние, и порог на нём перестали бы читать.
+        # Звонят отказы НАШЕЙ стороны, у которых производитель есть только на этой
+        # посадке: человек получает один и тот же отказ, причина видна лишь здесь.
+        - alert: KanameLoginLaneFailing
+          expr: |
+            sum(increase(kaname_login_outcomes_total{outcome=~"store-failed|verifier-issue"}[10m]))
+              + sum(increase(kaname_registration_outcomes_total{outcome="store-failed"}[10m]))
+              + sum(increase(kaname_recovery_request_outcomes_total{outcome="store-failed"}[10m]))
+              + sum(increase(kaname_recovery_completion_outcomes_total{outcome="store-failed"}[10m])) > 0
+          for: 5m
+          annotations:
+            summary: "полоса входа отказывает на НАШЕЙ стороне — хранилище либо проверяющий пароля; человек видит один отказ, причина в outcome"
+
+        - alert: KanameLoginVerifierCapacityExhausted
+          expr: increase(kaname_login_outcomes_total{outcome="capacity-exhausted"}[10m]) > 0
+          for: 5m
+          annotations:
+            summary: "ёмкость проверяющего пароля исчерпана — людям отказано по нагрузке; величина authn.login.verifier-capacity"
+{{- end }}
 
         - alert: KanameExpiredCredentialReclaimStalled
           # Включён и не крутится. Выключенный НЕ звонит: это решение оператора, а не отказ.

@@ -87,7 +87,9 @@ func TestAlertRulesInjection_TheRealChartStopsCarryingWhatThePagePromises(t *tes
 	root, err := surfaceroster.IAMRoot(".")
 	require.NoError(t, err, "корень дерева службы")
 
-	page := pageAlertRules(t, root)
+	// Обещание берётся для посадки поставляемого профиля: правила чужой полосы
+	// установке этой посадки не обещаны и недоставленными не считаются.
+	page := pageAlertRules(t, root).forPosture(postureOfProfiles(t, chartProfiles))
 	require.NotEmpty(t, page, "инъекция беспредметна: страница не несёт правил")
 
 	off := renderStandaloneChart(t, chartProfiles, alertRulesToggle+"=false")
@@ -194,4 +196,35 @@ func TestAlertRulesInjection_RenderWithoutAnyObjectIsNotSilentlyEqual(t *testing
 	require.Empty(t, onlyPage)
 	require.Empty(t, onlyChart, "две пустоты совпали — значит «расхождений ноль» само по себе "+
 		"вердиктом не является, и непустоту обеих сторон обязана требовать проба дерева")
+}
+
+// TestAlertRulesInjection_PostureMarkerSplitsThePage — пометка посадки перед
+// блоком относит его правила к полосе; блок без пометки — общий. Обе стороны:
+// правило полосы НЕ обещано установке чужой посадки, общее обещано каждой.
+func TestAlertRulesInjection_PostureMarkerSplitsThePage(t *testing.T) {
+	t.Parallel()
+	text := "текст\n```yaml\n" + syntheticPageBody + "```\n" +
+		"<!-- posture: own -->\n```yaml\n- alert: LaneOnly\n  expr: kaname_lane_total > 1\n  annotations:\n    summary: \"полоса\"\n```\n"
+	rules := posturedRules{}
+	for _, m := range pageAlertBlockRe.FindAllStringSubmatch(text, -1) {
+		parsed, err := parseAlertRules(m[2])
+		require.NoError(t, err)
+		rules[m[1]] = append(rules[m[1]], parsed...)
+	}
+	require.Len(t, rules[""], 1, "блок без пометки не прочитан общим")
+	require.Len(t, rules["own"], 1, "блок с пометкой не отнесён к полосе")
+
+	names := func(rs []alertRule) []string {
+		out := []string{}
+		for _, r := range rs {
+			out = append(out, r.Alert)
+		}
+		return out
+	}
+	require.ElementsMatch(t, []string{"SampleStuck", "LaneOnly"}, names(rules.forPosture("own")),
+		"установке `own` обещаны общие правила И правила её полосы")
+	require.ElementsMatch(t, []string{"SampleStuck"}, names(rules.forPosture("external")),
+		"правило полосы `own` уехало в обещание установке `external` — под ней оно звонило бы вечно")
+	require.ElementsMatch(t, []string{"SampleStuck"}, names(rules.forPosture("")),
+		"профиль без посадки получает только общие правила")
 }
