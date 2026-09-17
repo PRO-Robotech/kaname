@@ -32,14 +32,26 @@ func NewUserTokenRevocationRepo(pool *pgxpool.Pool) *UserTokenRevocationRepo {
 
 // upsertRevokeAllSQL — the canonical monotonic cutoff upsert, shared by the
 // pool-scoped UpsertRevokeAll and the tx-scoped UpsertRevokeAllTx.
+// upsertRevokeAllSQL — ОДНА операция записи отсечки на всё дерево (Ф3 §4.1
+// п.17, замок Ф1-63/67). Момент монотонен (`GREATEST`); причина и актор
+// принадлежат записи, ЧЕЙ МОМЕНТ СТОИТ: они переписываются только вместе с
+// принятым моментом, на равных стоит последняя запись. Отброшенный момент не
+// переносит на стоящую запись ничего — ни причины, ни актора, ни `updated_at`.
+//
+// Прежняя редакция переписывала причину и актора БЕЗУСЛОВНО (`= EXCLUDED.`),
+// и это был отрицательный контроль замка, а не форма: выход с моментом ниже
+// стоящей отсечки администратора подменял бы её причину своей.
 const upsertRevokeAllSQL = `
 	INSERT INTO user_token_revocations (user_id, revoke_before, reason, revoked_by_user_id, updated_at)
 	VALUES ($1, $2, $3, NULLIF($4, ''), now())
 	ON CONFLICT (user_id) DO UPDATE
 	    SET revoke_before      = GREATEST(user_token_revocations.revoke_before, EXCLUDED.revoke_before),
-	        reason             = EXCLUDED.reason,
-	        revoked_by_user_id = EXCLUDED.revoked_by_user_id,
-	        updated_at         = now()`
+	        reason             = CASE WHEN EXCLUDED.revoke_before >= user_token_revocations.revoke_before
+	                                  THEN EXCLUDED.reason ELSE user_token_revocations.reason END,
+	        revoked_by_user_id = CASE WHEN EXCLUDED.revoke_before >= user_token_revocations.revoke_before
+	                                  THEN EXCLUDED.revoked_by_user_id ELSE user_token_revocations.revoked_by_user_id END,
+	        updated_at         = CASE WHEN EXCLUDED.revoke_before >= user_token_revocations.revoke_before
+	                                  THEN now() ELSE user_token_revocations.updated_at END`
 
 // UpsertRevokeAll — idempotent, monotonic upsert of a user-level cutoff.
 //

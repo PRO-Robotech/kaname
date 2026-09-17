@@ -30,7 +30,8 @@
 //     ОБЪЯВЛЕННЫМ именем, и число зависимых сходится с графом свода;
 //   - KAN-FN-03 — Дано: то же. Когда: переименованные функции зовутся —
 //     проверкой меток через CHECK, отказом темпа напрямую. Тогда: они решают
-//     как прежде, и тело счётчика темпа зовёт отказ ОБЪЯВЛЕННЫМ именем;
+//     как прежде, тело счётчика темпа зовёт отказ ОБЪЯВЛЕННЫМ именем и остаётся
+//     телом Ф4 (носитель ключа нашей полосы — голова `own:`), а не свода;
 //   - KAN-FN-04 — Дано: цепочка применена. Когда: откат до версии ниже
 //     переименования и повторный накат. Тогда: откат возвращает прежние имена,
 //     накат снова сходится.
@@ -225,12 +226,20 @@ func TestSchemaFunctions_RenamedFunctionsStillDecide(t *testing.T) {
 		  WHERE n.nspname = 'kaname' AND p.proname = 'admission_rate_count'`).Scan(&src))
 	require.Contains(t, src, "kaname.rate_refuse(")
 	require.NotContains(t, src, "kacho_rate_refuse")
+
+	// И тело — тело Ф4 (`20260917120000`), а не свода: переименование идёт
+	// ПОСЛЕ замещения тела по имени и переписывает его заново, поэтому обязано
+	// нести носитель ключа нашей полосы. Без этого утверждения переименование,
+	// вернувшее тело свода, зеленело бы: отказ зовётся верным именем, а ключ
+	// носителя потерян молча.
+	require.Contains(t, src, "external_id LIKE 'own:%'",
+		"тело счётчика темпа после цепочки не несёт головы нашей полосы — переименование вернуло тело свода")
 }
 
 // schemaFunctionsVersion — версия миграции переименования. Названа ЧИСЛОМ, а не
 // выведена из положения в каталоге: положение — допущение, которое уже ломалось
 // (`own_ceilings_down_roundtrip_integration_test.go`).
-const schemaFunctionsVersion int64 = 20260916184500
+const schemaFunctionsVersion int64 = 20260917130000
 
 // TestSchemaFunctions_DownRestoresThePlatformNamesAndReapplyConverges — KAN-FN-04.
 func TestSchemaFunctions_DownRestoresThePlatformNamesAndReapplyConverges(t *testing.T) {

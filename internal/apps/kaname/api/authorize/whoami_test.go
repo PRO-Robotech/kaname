@@ -434,3 +434,9 @@ func (r *fakeWhoAmIReader) Visibility() visibility.ReaderIface { return nil }
 func (*fakeUserRdr) MembershipExists(context.Context, domain.UserID, domain.AccountID) (bool, error) {
 	return false, nil
 }
+
+// Membership — дублёр членства ПАРОЙ не читает: предмет этих проб другой, и
+// подставная строка была бы утверждением, которого никто не делал (kaname#181).
+func (*fakeUserRdr) Membership(context.Context, domain.UserID, domain.AccountID) (domain.Membership, error) {
+	return domain.Membership{}, iamerr.ErrNotFound
+}

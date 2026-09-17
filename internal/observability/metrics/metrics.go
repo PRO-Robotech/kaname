@@ -125,6 +125,12 @@ type Registry struct {
 	// регистрации семейства с тем же именем.
 	providerRoadOnce sync.Once
 	providerRoad     *ProviderRoadRecorder
+
+	// loginLaneOnce/loginLane — единственный экземпляр приёмника полосы входа
+	// (Ф3): его делят слушатель формы, варианты использования и проверяющий
+	// пароля; второй конструктор уронил бы старт повторной регистрацией.
+	loginLaneOnce sync.Once
+	loginLane     *LoginLaneRecorder
 }
 
 // NewRegistry constructs the registry, registers the Go + process runtime

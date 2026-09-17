@@ -224,6 +224,32 @@ var configBridge = []bridged{
 	// (задача #2334). Класс держит `TestConfigBridge_CoversEveryKeyTheChartRenders`.
 	{configKey: "api-server.rest-endpoint", valuePath: []string{"apiServer", "restEndpoint"}, omitEmpty: true},
 	{configKey: "api-server.internal-rest-endpoint", valuePath: []string{"apiServer", "internalRestEndpoint"}, omitEmpty: true},
+	// ПОЛОСА ВХОДА ПАРОЛЕМ (Ф3, kacho#1269). Адрес слушателя — та же форма, что у
+	// фронтов: умолчания нет, незаданный не рендерится. Величины полосы — блок
+	// `authn.login`, каждая рендерится своей ветвью только объявленной, поэтому
+	// `omitEmpty` у всех; целые ноль — не значение (страж отвергает ноль у каждой).
+	// Боевой профиль объявляет их на посадке `external` по приёмке Ф3 (Р3, Р11,
+	// Ф3-42): страж читает их только под `own`, поэтому каждая стоит и в
+	// ведомости восстановленных намеренно.
+	{configKey: "api-server.login-lane-endpoint", valuePath: []string{"apiServer", "loginLaneEndpoint"}, omitEmpty: true},
+	{configKey: "authn.login.session-ttl", valuePath: []string{"authn", "login", "sessionTtl"}, omitEmpty: true},
+	{configKey: "authn.login.cookie-domain", valuePath: []string{"authn", "login", "cookieDomain"}, omitEmpty: true},
+	{configKey: "authn.login.address-attempts", valuePath: []string{"authn", "login", "addressAttempts"}, omitEmpty: true},
+	{configKey: "authn.login.address-window", valuePath: []string{"authn", "login", "addressWindow"}, omitEmpty: true},
+	{configKey: "authn.login.source-attempts", valuePath: []string{"authn", "login", "sourceAttempts"}, omitEmpty: true},
+	{configKey: "authn.login.source-window", valuePath: []string{"authn", "login", "sourceWindow"}, omitEmpty: true},
+	{configKey: "authn.login.password-min-length", valuePath: []string{"authn", "login", "passwordMinLength"}, omitEmpty: true},
+	{configKey: "authn.login.breach-check", valuePath: []string{"authn", "login", "breachCheck"}, omitEmpty: true},
+	// `authn.login.breach-check-url` здесь НЕТ намеренно: боевой профиль объявляет
+	// проверку утечек словом `disabled`, адреса при ней не бывает, и шаблон ключ
+	// не рендерит. Профиль с `enabled` заведёт запись вместе с адресом — гейт
+	// сверки в обе стороны это потребует.
+	{configKey: "authn.login.hasher-format", valuePath: []string{"authn", "login", "hasherFormat"}, omitEmpty: true},
+	{configKey: "authn.login.hasher-memory", valuePath: []string{"authn", "login", "hasherMemory"}, omitEmpty: true},
+	{configKey: "authn.login.hasher-iterations", valuePath: []string{"authn", "login", "hasherIterations"}, omitEmpty: true},
+	{configKey: "authn.login.hasher-parallelism", valuePath: []string{"authn", "login", "hasherParallelism"}, omitEmpty: true},
+	{configKey: "authn.login.verifier-capacity", valuePath: []string{"authn", "login", "verifierCapacity"}, omitEmpty: true},
+	{configKey: "authn.login.memory-reserve-bytes", valuePath: []string{"authn", "login", "memoryReserveBytes"}, omitEmpty: true},
 	// СВОЯ ЧЕКАНКА ТОКЕНОВ. Блок целиком за выключателем: шаблон не рендерит его
 	// ни одним ключом, пока чеканка выключена.
 	{configKey: "authn.token-signing.enabled", gate: tokenSigningGate, derive: func(*valueReader) any { return true }},
@@ -252,6 +278,93 @@ var (
 // становится находкой и подлежит удалению. Иначе послабление переживает свой
 // предмет и начинает прощать ту ручку, которая в него следующей провалится.
 var restatedDeliberately = map[string]string{
+	// ПОЛОСА ВХОДА ПАРОЛЕМ — одна причина на все записи, и она названа у каждой:
+	// ведомость сверяется по ключу, а не по блоку.
+	"apiServer.loginLaneEndpoint": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.sessionTtl": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.cookieDomain": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.addressAttempts": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.addressWindow": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.sourceAttempts": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.sourceWindow": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.passwordMinLength": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.breachCheck": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.hasherFormat": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.hasherMemory": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.hasherIterations": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.hasherParallelism": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.verifierCapacity": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"authn.login.memoryReserveBytes": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"env.KANAME_LOGINLANE_SERVER_MTLS_ENABLE": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
+	"env.KANAME_LOGINLANE_SERVER_MTLS_CLIENTAUTHMODE": "величина ПОЛОСЫ ВХОДА ПАРОЛЕМ (Ф3, kacho#1269): страж читает её только под посадкой " +
+		"`own` (config.ValidateLaneRequirements, requireLoginLaneTLS в cmd/kaname), а боевой профиль стоит " +
+		"на `external`. Объявлена по приёмке Ф3 (Р3, Р11, Ф3-42): дословный перенос величин живёт в " +
+		"профилях обоих чартов, где его видит читающий, и перевод на `own` не заводит полосу с нуля. " +
+		"Запись истекает с первым профилем на `own`: там снятие ручки роняет СТАРТ",
 	"authMode": "базовые значения чарта уже несут production, поэтому снятие этой строки " +
 		"посадку не роняет. Строка стоит затем, чтобы будущая правка умолчания чарта не " +
 		"уронила посадку МОЛЧА: профиль называет её сам",

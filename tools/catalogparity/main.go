@@ -87,6 +87,7 @@ func main() {
 	fmt.Printf("  край: %s\n", edgePath)
 	fmt.Printf("  своя: %s\n", ownPath)
 	printDeclaredRenames(census)
+	printPendingEntries(census)
 
 	if len(findings) == 0 {
 		if census.BytesEqual {
@@ -94,7 +95,8 @@ func main() {
 			return
 		}
 		fmt.Println("ЗЕЛЁНЫЙ: копии — один порождённый артефакт; всё расхождение объяснено " +
-			"объявленными переименованиями фундамента (см. перечень выше).")
+			"объявленными окнами — переименованиями фундамента и записями, ждущими края " +
+			"(см. перечни выше).")
 		return
 	}
 
@@ -119,7 +121,7 @@ func printFindings(findings []check.CatalogParityFinding) {
 	}
 
 	if len(ledger) > 0 {
-		fmt.Println("НАХОДКА: ведомость объявленных переименований пережила свой предмет.")
+		fmt.Println("НАХОДКА: ведомость объявленных окон пережила свой предмет.")
 		for _, f := range ledger {
 			fmt.Printf("  · %s\n", f.Text)
 		}
@@ -131,7 +133,7 @@ func printFindings(findings []check.CatalogParityFinding) {
 		for _, f := range copies {
 			fmt.Printf("  · %s\n", f.Text)
 		}
-		fmt.Println("Разошлось НЕ объявленным переименованием фундамента. Исходов два, третьего нет:")
+		fmt.Println("Разошлось НЕ объявленным окном (переименованием фундамента либо записью, ждущей края). Исходов два, третьего нет:")
 		fmt.Println("  · наша копия отстала → позвать в полном чекауте монорепо: make sync-permission-catalog;")
 		fmt.Println("  · отстала копия края → предмет у платформы, а не здесь: синхронизация ЗАПРЕЩЕНА,")
 		fmt.Println("    она вписала бы сюда имя метода, которого этот двоичный файл не служит.")
@@ -154,6 +156,24 @@ func printDeclaredRenames(census check.CatalogParityCensus) {
 		fmt.Printf("      почему: %s\n", r.Why)
 		fmt.Printf("      снятие: %s\n", r.Removal)
 		fmt.Printf("      предмет: %s\n", r.Refs)
+	}
+}
+
+// printPendingEntries — вторая ведомость печатается по той же причине, что и
+// первая: окно, которого не видно в журнале зелёного прогона, не снимет никто.
+func printPendingEntries(census check.CatalogParityCensus) {
+	pending := check.CatalogPendingEntries()
+	if len(pending) == 0 {
+		fmt.Println("  записей службы, ждущих края, нет")
+		return
+	}
+	fmt.Printf("  записи службы, ждущие края (%d, применено %d):\n",
+		len(pending), census.PendingApplied)
+	for _, e := range pending {
+		fmt.Printf("    · %s\n", e.OwnFQN)
+		fmt.Printf("      почему: %s\n", e.Why)
+		fmt.Printf("      снятие: %s\n", e.Removal)
+		fmt.Printf("      предмет: %s\n", e.Refs)
 	}
 }
 

@@ -2770,6 +2770,16 @@
     "required_acr_min": "2"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.InternalHumanSessionService/Resolve",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "exempt_reason": "INTERNAL_LISTENER"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.InternalIAMService/Check",
     "permission": "\u003cexempt\u003e",
     "required_relation": "",
@@ -3029,6 +3039,16 @@
       "from_request_field": ""
     },
     "exempt_reason": "INTERNAL_LISTENER"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.MembershipService/Create",
+    "permission": "iam.memberships.create",
+    "required_relation": "editor",
+    "scope_extractor": {
+      "object_type": "account",
+      "from_request_field": "account_id"
+    },
+    "required_acr_min": "2"
   },
   {
     "fqn": "kaname.cloud.iam.v1.MembershipService/Get",

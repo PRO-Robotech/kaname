@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 733
+Всего кейсов: 740
 
 ## Перепись по модулям
 
@@ -51,6 +51,7 @@
 | `cases/iam-internal-only-check.py` | 13 |
 | `cases/iam-invite-grant-fga.py` | 4 |
 | `cases/iam-list-visibility.py` | 3 |
+| `cases/iam-membership-create.py` | 3 |
 | `cases/iam-membership-read.py` | 7 |
 | `cases/iam-permission-catalog.py` | 3 |
 | `cases/iam-project-edge-format.py` | 1 |
@@ -67,6 +68,7 @@
 | `cases/iam-token-facade-conformance.py` | 7 |
 | `cases/iam-user.py` | 43 |
 | `cases/iam-whoami.py` | 3 |
+| `cases/kaname-login-lane.py` | 4 |
 | `cases/kaname-own-rest-front.py` | 14 |
 | `cases/label-revoke-iam.py` | 2 |
 | `cases/label-revoke-nlb.py` | 1 |
@@ -649,6 +651,14 @@
 - `IAM-645-LIST-VISIBLE-PAGE-ACCOUNTS`
 - `IAM-645-LIST-VISIBLE-PAGE-USERS`
 
+## `cases/iam-membership-create.py` — 3 кейсов
+
+> Case-set создания членства (kaname#181; IAM-ID-1 §4 S3.2, сценарии -01/-02/-05).
+
+- `IAM-ID1-MBR-CREATE-OK`
+- `IAM-ID1-MBR-CREATE-SECOND-ACCOUNT`
+- `IAM-ID1-MBR-CREATE-NEG-AUTHZ`
+
 ## `cases/iam-membership-read.py` — 7 кейсов
 
 > Case-set чтения принадлежности человека аккаунту (IAM-ID-2, стадия S1).
@@ -996,6 +1006,19 @@
 - `IAM-SET-GRP-LABEL-EXACT-OK`
 - `IAM-SET-SVA-LIST-READ-PARITY`
 - `IAM-SET-GRP-LIST-READ-PARITY`
+
+## `cases/kaname-login-lane.py` — 4 кейса
+
+> Полоса входа паролем и наша сессия (Ф3, kacho#1269): собственный слушатель
+> формы службы, поднимается только посадкой `own` и допускает ровно край по SAN
+> клиентского листа. Адресуется `loginLaneBaseUrl`; на автономном стенде посадки
+> `external` переменная пуста ПО ПОСАДКЕ, и каждый шаг уходит в «условие не
+> создано» помеченным утверждением — не в зелёное и не в красное.
+
+- `IAM-LOGINLANE-OK-CSRF-ISSUED`
+- `IAM-LOGINLANE-NEG-WRONG-PASSWORD`
+- `IAM-LOGINLANE-OK-LOGIN-LOGOUT-REPRESENT`
+- `IAM-LOGINLANE-NEG-CSRF-MISSING`
 
 ## `cases/kaname-own-rest-front.py` — 14 кейсов
 

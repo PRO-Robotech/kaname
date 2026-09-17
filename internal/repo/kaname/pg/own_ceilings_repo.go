@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -143,4 +144,61 @@ func statedOwnCeiling(
 	default:
 		return 0, false, fmt.Errorf("read stated own ceiling for %s: %w", kind, err)
 	}
+}
+
+// AdmissionRateProjection — перепись проекции величины темпа заведения.
+type AdmissionRateProjection struct {
+	// Written — строк авторитета переписано (1 — правка действующей строки
+	// либо заведение заново, если действующей не было).
+	Written int
+	// MaxEvents / WindowSeconds — что записано.
+	MaxEvents     int64
+	WindowSeconds int64
+}
+
+// ApplyAdmissionRate — ПРОЕКЦИЯ величины темпа заведения из посадки в строку
+// авторитета `account_admission_rate_limits` вида `iam.account` (Ф4 Р5,
+// Ф4-18/19; задача kacho#1270).
+//
+// Триггер темпа читает величину из этой строки тем же оператором, что списывает
+// (0001), и настройку процесса не видит ни при каком построении — поэтому
+// объявленное посадкой обязано доехать до схемы, и перевозчик один: этот.
+// Действующая строка ПРАВИТСЯ (в ней живёт история окон), а не снимается и не
+// заводится второй; если действующей нет — заводится.
+//
+// Под `external` проекция не зовётся: там строку правит администратор облака.
+func (r *OwnCeilingRepo) ApplyAdmissionRate(ctx context.Context, maxEvents int64, window time.Duration) (AdmissionRateProjection, error) {
+	seconds := int64(window / time.Second)
+	census := AdmissionRateProjection{MaxEvents: maxEvents, WindowSeconds: seconds}
+	if maxEvents < 0 || seconds <= 0 {
+		return census, fmt.Errorf("проекция темпа заведения: величина негодна (предел %d, окно %d с) — страж посадки её не допускает",
+			maxEvents, seconds)
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return census, fmt.Errorf("проекция темпа заведения: начать транзакцию: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE kaname.account_admission_rate_limits
+		   SET max_events = $1, window_seconds = $2
+		 WHERE kind = 'iam.account' AND withdrawn_at IS NULL`, maxEvents, seconds)
+	if err != nil {
+		return census, fmt.Errorf("проекция темпа заведения: правка строки авторитета: %w", err)
+	}
+	census.Written = int(tag.RowsAffected())
+	if census.Written == 0 {
+		tag, err = tx.Exec(ctx, `
+			INSERT INTO kaname.account_admission_rate_limits (kind, max_events, window_seconds)
+			VALUES ('iam.account', $1, $2)`, maxEvents, seconds)
+		if err != nil {
+			return census, fmt.Errorf("проекция темпа заведения: заведение строки авторитета: %w", err)
+		}
+		census.Written = int(tag.RowsAffected())
+	}
+	if cerr := tx.Commit(ctx); cerr != nil {
+		return census, fmt.Errorf("проекция темпа заведения: фиксация: %w", cerr)
+	}
+	return census, nil
 }

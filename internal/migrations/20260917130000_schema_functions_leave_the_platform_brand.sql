@@ -44,9 +44,24 @@
 -- идентификатору: счётчик темпа зовёт отказ темпа строкой `kacho_rate_refuse`,
 -- и после переименования отказа эта строка означала бы «функции нет» на первом
 -- же входе, который окно отвергает. Поэтому тело счётчика переписывается тем же
--- изменением; всё прочее в нём — дословно свод. Тела остальных четырёх зовут
--- только функции, чьё имя не меняется (`kacho_quota_refuse` — см. ниже), и не
--- трогаются.
+-- изменением; всё прочее в нём — дословно Ф4 (`20260917120000`, kacho#1270):
+-- носитель ключа нашей полосы — адрес в нижнем регистре, полосы поставщика —
+-- его идентификатор. Тела остальных четырёх зовут только функции, чьё имя не
+-- меняется (`kacho_quota_refuse` — см. ниже), и не трогаются.
+--
+-- ─────────────────────────────────────────────────────────────────────────────
+-- ПОЧЕМУ НОМЕР СТОИТ ПОСЛЕ Ф4, А НЕ ПО ЧАСАМ ЗАВЕДЕНИЯ
+--
+-- Ф4 замещает тело счётчика темпа ПО ИМЕНИ (`CREATE OR REPLACE FUNCTION
+-- kaname.kacho_admission_rate_count()`). Переименование, идущее РАНЬШЕ Ф4,
+-- оставило бы триггеру функцию с прежним телом (он держит её идентификатором),
+-- а Ф4 завела бы под именем платформы вторую, осиротевшую, зовущую отказ по
+-- имени, которого уже нет. Ключ носителя терялся бы МОЛЧА — ни один накат не
+-- отказал бы. Поэтому переименование обязано идти последним из тех, что
+-- замещают эти тела, и его тело — тело Ф4. Держит это KAN-FN-03 (тело
+-- счётчика после цепочки несёт голову нашей полосы) и
+-- `TestOwnLaneSubjectHeadAgreesWithTheSchema` (голова в этом накате — та же,
+-- что чеканит производитель).
 --
 -- ─────────────────────────────────────────────────────────────────────────────
 -- ЧЕГО ЭТА МИГРАЦИЯ НЕ ДЕЛАЕТ — НАЗВАНО, ЧТОБЫ НЕ ИСКАЛИ
@@ -89,23 +104,23 @@ DECLARE
     v_max      bigint;
     v_window   bigint;
 BEGIN
-    SELECT u.external_id INTO v_identity
+    -- Носитель ключа: у нашей полосы (голова `own:`) — адрес в нижнем регистре,
+    -- у полосы поставщика — его идентификатор (Ф4 Р5).
+    SELECT CASE WHEN u.external_id LIKE 'own:%' THEN lower(u.email) ELSE u.external_id END
+      INTO v_identity
       FROM kaname.users u
      WHERE u.id = NEW.owner_user_id;
 
     -- Владелец БЕЗ личности — законное состояние схемы (строка в состоянии
     -- приглашения внешнего идентификатора не несёт), и такой аккаунт не считается
     -- ни объёмом, ни темпом. Решение здесь то же и по той же причине: счётчик не
-    -- вправе запрещать состояния, которых схема не запрещает. Молчаливым оно не
-    -- является — предупреждение об этом уже производит триггер объёма, и второе
-    -- на то же событие было бы шумом.
+    -- вправе запрещать состояния, которых схема не запрещает.
     IF v_identity IS NULL OR v_identity = '' THEN
         RETURN NULL;
     END IF;
 
     -- Авторитет читается ПЕРВЫМ: его отсутствие — отдельный исход, а не «сколько
-    -- угодно». Не названная величина означает отказ, как и у объёма: «не сказано»
-    -- на пути безопасности читается закрыто.
+    -- угодно». Не названная величина означает отказ, как и у объёма.
     SELECT max_events, window_seconds INTO v_max, v_window
       FROM kaname.account_admission_rate_limits
      WHERE withdrawn_at IS NULL AND kind = v_kind;
@@ -115,15 +130,9 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    -- ЕДИНСТВЕННЫЙ оператор, принимающий решение.
-    --
-    -- Ветвь ВСТАВКИ — первое заведение этой личности: проходит безусловно, до
-    -- всякого сравнения с величиной. Это и есть «первый вход не ломается».
-    --
-    -- Ветвь ПРАВКИ берёт блокировку строки, поэтому второй писатель ждёт коммита
-    -- первого и видит его результат: гонку разрешает база, а не порядок. Переход
-    -- в следующее окно и списание считаются ОДНИМ выражением — посчитать «истекло
-    -- ли окно» отдельно значило бы вернуть check-then-act через границу оператора.
+    -- ЕДИНСТВЕННЫЙ оператор, принимающий решение (см. 0001): ветвь ВСТАВКИ —
+    -- первое заведение носителя — проходит безусловно; ветвь ПРАВКИ берёт
+    -- блокировку строки, переход окна и списание считаются одним выражением.
     INSERT INTO kaname.identity_admission_windows AS w
         (carrier_id, kind, window_started_at, admitted)
     VALUES (v_identity, v_kind, now(), 1)
@@ -139,30 +148,25 @@ BEGIN
                WHEN now() >= w.window_started_at + make_interval(secs => v_window)
                THEN 1 ELSE w.admitted + 1 END <= v_max;
 
-    -- `FOUND` после INSERT истинно, когда затронута хотя бы одна строка: и на
-    -- ветви вставки, и на ветви правки, чьё условие выполнилось. Ноль строк
-    -- означает ровно одно — правка отвергнута условием, то есть окно полно.
     IF FOUND THEN
         RETURN NULL;
     END IF;
 
-    -- Ноль строк означает ровно одно: окно полно. Это не check-then-act —
-    -- решение уже принято атомарным оператором выше, а производитель отказа лишь
-    -- облекает случившееся в контракт.
+    -- Ноль строк означает ровно одно: окно полно.
     PERFORM kaname.rate_refuse(v_identity, v_kind);
     RETURN NULL;
 END;
 $$;
-
-
---
 -- +goose StatementEnd
 
-COMMENT ON FUNCTION kaname.admission_rate_count() IS 'charges one admission of the current window, in the same transaction as the account row. The first ever admission of an identity goes through the INSERT branch and is therefore unconditional: a rate refusal on first login would be a refusal to log in. Refusals come from rate_refuse';
+COMMENT ON FUNCTION kaname.admission_rate_count() IS
+  'charges one admission of the current window, in the same transaction as the account row. The carrier is what the person presented: the provider subject on the provider lane, the lower-cased address on our own lane (external_id with the own: head). The first ever admission of a carrier goes through the INSERT branch and is therefore unconditional: a rate refusal on first registration would be a refusal to register. Refusals come from rate_refuse';
 
 -- +goose Down
 -- Обратный ход возвращает ИМЕННО то, что завёл прямой: прежние имена и прежнее
--- тело счётчика темпа — дословно свод, включая вызов отказа под прежним именем.
+-- тело счётчика темпа — дословно Ф4 (`20260917120000`), включая вызов отказа под
+-- прежним именем; ключ носителя нашей полосы откат НЕ снимает — он предмет Ф4,
+-- а не этой миграции.
 ALTER FUNCTION kaname.admission_rate_count() RENAME TO kacho_admission_rate_count;
 ALTER FUNCTION kaname.rate_refuse(text, text) RENAME TO kacho_rate_refuse;
 ALTER FUNCTION kaname.quota_carrier_lifecycle() RENAME TO kacho_quota_carrier_lifecycle;
@@ -179,23 +183,23 @@ DECLARE
     v_max      bigint;
     v_window   bigint;
 BEGIN
-    SELECT u.external_id INTO v_identity
+    -- Носитель ключа: у нашей полосы (голова `own:`) — адрес в нижнем регистре,
+    -- у полосы поставщика — его идентификатор (Ф4 Р5).
+    SELECT CASE WHEN u.external_id LIKE 'own:%' THEN lower(u.email) ELSE u.external_id END
+      INTO v_identity
       FROM kaname.users u
      WHERE u.id = NEW.owner_user_id;
 
     -- Владелец БЕЗ личности — законное состояние схемы (строка в состоянии
     -- приглашения внешнего идентификатора не несёт), и такой аккаунт не считается
     -- ни объёмом, ни темпом. Решение здесь то же и по той же причине: счётчик не
-    -- вправе запрещать состояния, которых схема не запрещает. Молчаливым оно не
-    -- является — предупреждение об этом уже производит триггер объёма, и второе
-    -- на то же событие было бы шумом.
+    -- вправе запрещать состояния, которых схема не запрещает.
     IF v_identity IS NULL OR v_identity = '' THEN
         RETURN NULL;
     END IF;
 
     -- Авторитет читается ПЕРВЫМ: его отсутствие — отдельный исход, а не «сколько
-    -- угодно». Не названная величина означает отказ, как и у объёма: «не сказано»
-    -- на пути безопасности читается закрыто.
+    -- угодно». Не названная величина означает отказ, как и у объёма.
     SELECT max_events, window_seconds INTO v_max, v_window
       FROM kaname.account_admission_rate_limits
      WHERE withdrawn_at IS NULL AND kind = v_kind;
@@ -205,15 +209,9 @@ BEGIN
         RETURN NULL;
     END IF;
 
-    -- ЕДИНСТВЕННЫЙ оператор, принимающий решение.
-    --
-    -- Ветвь ВСТАВКИ — первое заведение этой личности: проходит безусловно, до
-    -- всякого сравнения с величиной. Это и есть «первый вход не ломается».
-    --
-    -- Ветвь ПРАВКИ берёт блокировку строки, поэтому второй писатель ждёт коммита
-    -- первого и видит его результат: гонку разрешает база, а не порядок. Переход
-    -- в следующее окно и списание считаются ОДНИМ выражением — посчитать «истекло
-    -- ли окно» отдельно значило бы вернуть check-then-act через границу оператора.
+    -- ЕДИНСТВЕННЫЙ оператор, принимающий решение (см. 0001): ветвь ВСТАВКИ —
+    -- первое заведение носителя — проходит безусловно; ветвь ПРАВКИ берёт
+    -- блокировку строки, переход окна и списание считаются одним выражением.
     INSERT INTO kaname.identity_admission_windows AS w
         (carrier_id, kind, window_started_at, admitted)
     VALUES (v_identity, v_kind, now(), 1)
@@ -229,23 +227,16 @@ BEGIN
                WHEN now() >= w.window_started_at + make_interval(secs => v_window)
                THEN 1 ELSE w.admitted + 1 END <= v_max;
 
-    -- `FOUND` после INSERT истинно, когда затронута хотя бы одна строка: и на
-    -- ветви вставки, и на ветви правки, чьё условие выполнилось. Ноль строк
-    -- означает ровно одно — правка отвергнута условием, то есть окно полно.
     IF FOUND THEN
         RETURN NULL;
     END IF;
 
-    -- Ноль строк означает ровно одно: окно полно. Это не check-then-act —
-    -- решение уже принято атомарным оператором выше, а производитель отказа лишь
-    -- облекает случившееся в контракт.
+    -- Ноль строк означает ровно одно: окно полно.
     PERFORM kaname.kacho_rate_refuse(v_identity, v_kind);
     RETURN NULL;
 END;
 $$;
-
-
---
 -- +goose StatementEnd
 
-COMMENT ON FUNCTION kaname.kacho_admission_rate_count() IS 'charges one admission of the current window, in the same transaction as the account row. The first ever admission of an identity goes through the INSERT branch and is therefore unconditional: a rate refusal on first login would be a refusal to log in. Refusals come from kacho_rate_refuse';
+COMMENT ON FUNCTION kaname.kacho_admission_rate_count() IS
+  'charges one admission of the current window, in the same transaction as the account row. The carrier is what the person presented: the provider subject on the provider lane, the lower-cased address on our own lane (external_id with the own: head). The first ever admission of a carrier goes through the INSERT branch and is therefore unconditional: a rate refusal on first registration would be a refusal to register. Refusals come from kacho_rate_refuse';
