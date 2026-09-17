@@ -358,6 +358,13 @@ func RegisterDefaults(v *viper.Viper) {
 	// Ключ объявлен ЗДЕСЬ, потому что без объявления переменная окружения
 	// `KANAME_INVITE__TTL` не связывается вовсе: viper связывает то, что знает.
 	v.SetDefault("invite.ttl", time.Duration(0))
+	// invite.mail-rate-limit — ограничение частоты писем на адрес (ID-MAIL-1,
+	// Р14, MAIL-42/43). Умолчание объявлено ЗДЕСЬ и положительно: молчащий
+	// профиль ограничение не снимает, а явный ноль доезжает до поля нулём и
+	// отвергается стражем — значения «без ограничения» у ручки нет.
+	// Override: KANAME_INVITE__MAIL_RATE_LIMIT__MAX_PER_WINDOW, __WINDOW.
+	v.SetDefault("invite.mail-rate-limit.max-per-window", DefaultInviteMailPerWindow)
+	v.SetDefault("invite.mail-rate-limit.window", DefaultInviteMailWindow)
 
 	v.SetDefault("invite-mail.relay", "")
 	v.SetDefault("invite-mail.from", "")

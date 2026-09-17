@@ -88,6 +88,47 @@ service UserService {
     option (corelib.authz.v1.required_acr_min) = "2";
   }
 
+  // ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
+  // не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).
+  //
+  // Что приходит взамен снятого поля ссылки (InviteUserMetadata): ссылки
+  // администратор не получает ни в каком ответе, а получает способ повторить
+  // письмо, если оно не дошло. Предъявителя письмо не несёт — доступ даёт
+  // владение почтовым ящиком, и повтор письма ничего не выдаёт заново.
+  //
+  // Исходы: строки приглашения в этом аккаунте нет — NOT_FOUND тем же текстом,
+  // что и у человека, которого нет нигде (hide-existence: чужой аккаунт
+  // неотличим от отсутствия); приглашение уже выкуплено либо человек
+  // заблокирован — FAILED_PRECONDITION; срок приглашения истёк —
+  // FAILED_PRECONDITION с указанием пригласить заново (срок есть свойство
+  // ВЫДАЧИ, и повтор письма его не двигает).
+  //
+  // ОГРАНИЧЕНИЕ ЧАСТОТЫ СТОИТ НА ПУТИ ЭТОГО ГЛАГОЛА (Р22): писем на один адрес
+  // за окно уходит не больше объявленного, сверхнормативные не отправляются,
+  // а ответ при этом НЕОТЛИЧИМ от ответа в пределах нормы — отказ по частоте
+  // не вправе становиться оракулом (Р9, MAIL-25).
+  //
+  // Permission: то же отношение, что у Invite — `editor` на account_id; тот же
+  // пол step-up (acr=2): это та же поверхность допуска в аккаунт, и более
+  // дешёвая дверь к письму от имени платформы заводиться не должна.
+  rpc ResendInvite (ResendInviteRequest) returns (corelib.operation.Operation) {
+    option (google.api.http) = {
+      post: "/iam/v1/users/{user_id}:resendInvite"
+      body: "*"
+    };
+    option (corelib.api.v1.operation) = {
+      metadata: "ResendInviteMetadata"
+      response: "User"
+    };
+    option (corelib.authz.v1.permission)        = "iam.users.resendInvite";
+    option (corelib.authz.v1.required_relation) = "editor";
+    option (corelib.authz.v1.scope_extractor)   = {
+      object_type:        "account"
+      from_request_field: "account_id"
+    };
+    option (corelib.authz.v1.required_acr_min) = "2";
+  }
+
   // Updates the specified User. Единственное mutable-поле — `labels` (User —
   // label-selectable наравне с account/project). Identity-поля (`external_id`
   // — IdP `sub`, и иные IdP-projected identity-ключи) hard-immutable: их наличие
@@ -480,6 +521,17 @@ message InviteUserRequest {
   string project_id = 4;
   // ID of the Role granted to the invited user on acceptance. Empty grants nothing.
   string role_id = 5;
+}
+
+// ResendInviteRequest — повторная отправка письма приглашения.
+message ResendInviteRequest {
+  // ID строки приглашения (человека). Обязателен; путь запроса.
+  string user_id = 1;
+
+  // Аккаунт, куда человек приглашён. Обязателен: по нему край извлекает
+  // область права (scope_extractor), и по нему же служба ищет членство —
+  // приглашение есть пара «человек + аккаунт», и вызов называет обе половины.
+  string account_id = 2;
 }
 
 message UpdateUserRequest {

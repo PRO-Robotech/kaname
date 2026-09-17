@@ -26,6 +26,7 @@ const (
 	UserService_Get_FullMethodName               = "/kaname.cloud.iam.v1.UserService/Get"
 	UserService_List_FullMethodName              = "/kaname.cloud.iam.v1.UserService/List"
 	UserService_Invite_FullMethodName            = "/kaname.cloud.iam.v1.UserService/Invite"
+	UserService_ResendInvite_FullMethodName      = "/kaname.cloud.iam.v1.UserService/ResendInvite"
 	UserService_Update_FullMethodName            = "/kaname.cloud.iam.v1.UserService/Update"
 	UserService_Delete_FullMethodName            = "/kaname.cloud.iam.v1.UserService/Delete"
 	UserService_RemoveFromAccount_FullMethodName = "/kaname.cloud.iam.v1.UserService/RemoveFromAccount"
@@ -56,6 +57,30 @@ type UserServiceClient interface {
 	// (idempotent re-invite) — Operation возвращается, AB опционально создается.
 	// Permission: requires `admin` OR `editor` relation на account_id.
 	Invite(ctx context.Context, in *InviteUserRequest, opts ...grpc.CallOption) (*operation.Operation, error)
+	// ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
+	// не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).
+	//
+	// Что приходит взамен снятого поля ссылки (InviteUserMetadata): ссылки
+	// администратор не получает ни в каком ответе, а получает способ повторить
+	// письмо, если оно не дошло. Предъявителя письмо не несёт — доступ даёт
+	// владение почтовым ящиком, и повтор письма ничего не выдаёт заново.
+	//
+	// Исходы: строки приглашения в этом аккаунте нет — NOT_FOUND тем же текстом,
+	// что и у человека, которого нет нигде (hide-existence: чужой аккаунт
+	// неотличим от отсутствия); приглашение уже выкуплено либо человек
+	// заблокирован — FAILED_PRECONDITION; срок приглашения истёк —
+	// FAILED_PRECONDITION с указанием пригласить заново (срок есть свойство
+	// ВЫДАЧИ, и повтор письма его не двигает).
+	//
+	// ОГРАНИЧЕНИЕ ЧАСТОТЫ СТОИТ НА ПУТИ ЭТОГО ГЛАГОЛА (Р22): писем на один адрес
+	// за окно уходит не больше объявленного, сверхнормативные не отправляются,
+	// а ответ при этом НЕОТЛИЧИМ от ответа в пределах нормы — отказ по частоте
+	// не вправе становиться оракулом (Р9, MAIL-25).
+	//
+	// Permission: то же отношение, что у Invite — `editor` на account_id; тот же
+	// пол step-up (acr=2): это та же поверхность допуска в аккаунт, и более
+	// дешёвая дверь к письму от имени платформы заводиться не должна.
+	ResendInvite(ctx context.Context, in *ResendInviteRequest, opts ...grpc.CallOption) (*operation.Operation, error)
 	// Updates the specified User. Единственное mutable-поле — `labels` (User —
 	// label-selectable наравне с account/project). Identity-поля (`external_id`
 	// — IdP `sub`, и иные IdP-projected identity-ключи) hard-immutable: их наличие
@@ -335,6 +360,16 @@ func (c *userServiceClient) Invite(ctx context.Context, in *InviteUserRequest, o
 	return out, nil
 }
 
+func (c *userServiceClient) ResendInvite(ctx context.Context, in *ResendInviteRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(operation.Operation)
+	err := c.cc.Invoke(ctx, UserService_ResendInvite_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *userServiceClient) Update(ctx context.Context, in *UpdateUserRequest, opts ...grpc.CallOption) (*operation.Operation, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(operation.Operation)
@@ -426,6 +461,30 @@ type UserServiceServer interface {
 	// (idempotent re-invite) — Operation возвращается, AB опционально создается.
 	// Permission: requires `admin` OR `editor` relation на account_id.
 	Invite(context.Context, *InviteUserRequest) (*operation.Operation, error)
+	// ResendInvite — письмо приглашения уходит ЕЩЁ РАЗ тому, кто приглашён и ещё
+	// не выкупил приглашение (приёмка ID-MAIL-1, §10 п. 9, MAIL-38).
+	//
+	// Что приходит взамен снятого поля ссылки (InviteUserMetadata): ссылки
+	// администратор не получает ни в каком ответе, а получает способ повторить
+	// письмо, если оно не дошло. Предъявителя письмо не несёт — доступ даёт
+	// владение почтовым ящиком, и повтор письма ничего не выдаёт заново.
+	//
+	// Исходы: строки приглашения в этом аккаунте нет — NOT_FOUND тем же текстом,
+	// что и у человека, которого нет нигде (hide-existence: чужой аккаунт
+	// неотличим от отсутствия); приглашение уже выкуплено либо человек
+	// заблокирован — FAILED_PRECONDITION; срок приглашения истёк —
+	// FAILED_PRECONDITION с указанием пригласить заново (срок есть свойство
+	// ВЫДАЧИ, и повтор письма его не двигает).
+	//
+	// ОГРАНИЧЕНИЕ ЧАСТОТЫ СТОИТ НА ПУТИ ЭТОГО ГЛАГОЛА (Р22): писем на один адрес
+	// за окно уходит не больше объявленного, сверхнормативные не отправляются,
+	// а ответ при этом НЕОТЛИЧИМ от ответа в пределах нормы — отказ по частоте
+	// не вправе становиться оракулом (Р9, MAIL-25).
+	//
+	// Permission: то же отношение, что у Invite — `editor` на account_id; тот же
+	// пол step-up (acr=2): это та же поверхность допуска в аккаунт, и более
+	// дешёвая дверь к письму от имени платформы заводиться не должна.
+	ResendInvite(context.Context, *ResendInviteRequest) (*operation.Operation, error)
 	// Updates the specified User. Единственное mutable-поле — `labels` (User —
 	// label-selectable наравне с account/project). Identity-поля (`external_id`
 	// — IdP `sub`, и иные IdP-projected identity-ключи) hard-immutable: их наличие
@@ -684,6 +743,9 @@ func (UnimplementedUserServiceServer) List(context.Context, *ListUsersRequest) (
 func (UnimplementedUserServiceServer) Invite(context.Context, *InviteUserRequest) (*operation.Operation, error) {
 	return nil, status.Error(codes.Unimplemented, "method Invite not implemented")
 }
+func (UnimplementedUserServiceServer) ResendInvite(context.Context, *ResendInviteRequest) (*operation.Operation, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResendInvite not implemented")
+}
 func (UnimplementedUserServiceServer) Update(context.Context, *UpdateUserRequest) (*operation.Operation, error) {
 	return nil, status.Error(codes.Unimplemented, "method Update not implemented")
 }
@@ -776,6 +838,24 @@ func _UserService_Invite_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UserServiceServer).Invite(ctx, req.(*InviteUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_ResendInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResendInviteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ResendInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ResendInvite_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ResendInvite(ctx, req.(*ResendInviteRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -924,6 +1004,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Invite",
 			Handler:    _UserService_Invite_Handler,
+		},
+		{
+			MethodName: "ResendInvite",
+			Handler:    _UserService_ResendInvite_Handler,
 		},
 		{
 			MethodName: "Update",

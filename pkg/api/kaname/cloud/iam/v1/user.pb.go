@@ -610,31 +610,9 @@ func (x *RemoveUserFromAccountMetadata) GetAccountId() string {
 }
 
 type InviteUserMetadata struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	UserId    string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	AccountId string                 `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// ВСЕГДА ПУСТО — производителя у поля нет НИ ОДНОГО.
-	//
-	// Предикат: `git grep -n MagicLinkUrl -- services/` → пусто. Use-case,
-	// строящий это сообщение, заполняет только `user_id` и `account_id`:
-	// шаг выпуска ссылки снят вместе с клиентом провайдера входа.
-	//
-	// Пустая строка здесь означает «ссылки НЕ БУДЕТ», а НЕ «ссылки пока
-	// нет»: ветвиться на значении нельзя ни при каком входе.
-	//
-	// Письмо приглашения отправляет НАШ код через очередь
-	// `kaname.invite_mail_outbox`, и ссылки-предъявителя оно не несёт
-	// намеренно: письмо даёт призыв и адрес страницы входа, а не доступ.
-	//
-	// Здесь стояло «админ копирует и отправляет вручную, email-sending не
-	// интегрирован» — неверно обеими половинами и по-разному: отправитель
-	// посажен, а копировать было нечего и до него. Клиент, поверивший первой
-	// половине, строил бы обходной путь на значении, которого не бывает.
-	//
-	// Поле снимается с контракта с резервированием НОМЕРА И ИМЕНИ — решение
-	// владельца, записанное лентой приёмки почты (задача продукта #1774).
-	// До того момента комментарий называет то, что верно СЕГОДНЯ.
-	MagicLinkUrl  string `protobuf:"bytes,3,opt,name=magic_link_url,json=magicLinkUrl,proto3" json:"magic_link_url,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AccountId     string                 `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -683,9 +661,58 @@ func (x *InviteUserMetadata) GetAccountId() string {
 	return ""
 }
 
-func (x *InviteUserMetadata) GetMagicLinkUrl() string {
+// ResendInviteMetadata — метаданные операции повторной отправки письма
+// приглашения. Форма та же, что у InviteUserMetadata: человек и аккаунт;
+// `user_id` первым — извлекатель resource_id фундамента берёт первое поле с
+// суффиксом `_id`.
+type ResendInviteMetadata struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AccountId     string                 `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResendInviteMetadata) Reset() {
+	*x = ResendInviteMetadata{}
+	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResendInviteMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResendInviteMetadata) ProtoMessage() {}
+
+func (x *ResendInviteMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_user_proto_msgTypes[8]
 	if x != nil {
-		return x.MagicLinkUrl
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResendInviteMetadata.ProtoReflect.Descriptor instead.
+func (*ResendInviteMetadata) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_user_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ResendInviteMetadata) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ResendInviteMetadata) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
 	}
 	return ""
 }
@@ -740,12 +767,15 @@ const file_kaname_cloud_iam_v1_user_proto_rawDesc = "" +
 	"\x1dRemoveUserFromAccountMetadata\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x02 \x01(\tR\taccountId\"r\n" +
+	"account_id\x18\x02 \x01(\tR\taccountId\"b\n" +
 	"\x12InviteUserMetadata\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x02 \x01(\tR\taccountId\x12$\n" +
-	"\x0emagic_link_url\x18\x03 \x01(\tR\fmagicLinkUrlBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
+	"account_id\x18\x02 \x01(\tR\taccountIdJ\x04\b\x03\x10\x04R\x0emagic_link_url\"N\n" +
+	"\x14ResendInviteMetadata\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x02 \x01(\tR\taccountIdBBZ@github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1b\x06proto3"
 
 var (
 	file_kaname_cloud_iam_v1_user_proto_rawDescOnce sync.Once
@@ -760,7 +790,7 @@ func file_kaname_cloud_iam_v1_user_proto_rawDescGZIP() []byte {
 }
 
 var file_kaname_cloud_iam_v1_user_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_kaname_cloud_iam_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_kaname_cloud_iam_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_kaname_cloud_iam_v1_user_proto_goTypes = []any{
 	(User_InviteStatus)(0),                // 0: kaname.cloud.iam.v1.User.InviteStatus
 	(*User)(nil),                          // 1: kaname.cloud.iam.v1.User
@@ -771,13 +801,14 @@ var file_kaname_cloud_iam_v1_user_proto_goTypes = []any{
 	(*ResetSecondFactorMetadata)(nil),     // 6: kaname.cloud.iam.v1.ResetSecondFactorMetadata
 	(*RemoveUserFromAccountMetadata)(nil), // 7: kaname.cloud.iam.v1.RemoveUserFromAccountMetadata
 	(*InviteUserMetadata)(nil),            // 8: kaname.cloud.iam.v1.InviteUserMetadata
-	nil,                                   // 9: kaname.cloud.iam.v1.User.LabelsEntry
-	(*timestamppb.Timestamp)(nil),         // 10: google.protobuf.Timestamp
+	(*ResendInviteMetadata)(nil),          // 9: kaname.cloud.iam.v1.ResendInviteMetadata
+	nil,                                   // 10: kaname.cloud.iam.v1.User.LabelsEntry
+	(*timestamppb.Timestamp)(nil),         // 11: google.protobuf.Timestamp
 }
 var file_kaname_cloud_iam_v1_user_proto_depIdxs = []int32{
-	10, // 0: kaname.cloud.iam.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	11, // 0: kaname.cloud.iam.v1.User.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 1: kaname.cloud.iam.v1.User.invite_status:type_name -> kaname.cloud.iam.v1.User.InviteStatus
-	9,  // 2: kaname.cloud.iam.v1.User.labels:type_name -> kaname.cloud.iam.v1.User.LabelsEntry
+	10, // 2: kaname.cloud.iam.v1.User.labels:type_name -> kaname.cloud.iam.v1.User.LabelsEntry
 	3,  // [3:3] is the sub-list for method output_type
 	3,  // [3:3] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
@@ -796,7 +827,7 @@ func file_kaname_cloud_iam_v1_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_user_proto_rawDesc), len(file_kaname_cloud_iam_v1_user_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

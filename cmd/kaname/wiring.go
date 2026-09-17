@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/observability/metrics"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
@@ -386,7 +387,12 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		// читается ЗДЕСЬ и передаётся use-case'у: настройки читает
 		// композиционный корень, а не бизнес-логика. Умолчание живёт у ручки,
 		// поэтому молчащая посадка получает его, а не «без срока».
-		WithInviteTTL(cfg.Invite.TTLOrDefault())
+		WithInviteTTL(cfg.Invite.TTLOrDefault()).
+		// Ограничение частоты писем на адрес (приёмка ID-MAIL-1, Р14/Р22,
+		// MAIL-25) — одно на оба глагола, отправляющих письмо; счётчик исходов
+		// намерения — тоже один. Величину судит страж старта: непозитивную он
+		// не пропускает, поэтому здесь читается уже проверенное.
+		WithInviteMailRateLimit(inviteMailRateLimit(cfg), metricsReg.InviteMailIntentRecorder())
 	userOnRecovery := userapp.NewOnRecoveryCompletedUseCase(kanameRepo, opsRepo).
 		WithLogger(logger)
 	// Block/Unblock — административный запрет участию и его снятие. Два РАЗНЫХ
@@ -397,8 +403,14 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 	// Исключение из аккаунта — пара к приглашению: тот вводит человека в
 	// аккаунт, этот выводит (#1127). Строку личности не трогает.
 	userRemoveFromAccount := userapp.NewRemoveFromAccountUseCase(kanameRepo, opsRepo)
+	// Повторная отправка письма приглашения — то, что приходит взамен снятого
+	// поля ссылки (ID-MAIL-1, §10 п. 9). Право приглашать спрашивается у того
+	// же клиента, что у Invite; ограничение частоты и счётчик — те же.
+	userResendInvite := userapp.NewResendInviteUseCase(kanameRepo, opsRepo, relationStore,
+		inviteMailRateLimit(cfg), metricsReg.InviteMailIntentRecorder())
 	userHandler := userapp.NewHandler(userGet, userList, userUpdate, userDelete, userInvite,
 		userBlock, userUnblock, userRemoveFromAccount).
+		WithResendInvite(userResendInvite).
 		WithListOperations(shared.NewListOperationsUseCase(opsRepo))
 	internalUserHandler := userapp.NewInternalHandler(userUpsert, userGet, userOnRecovery)
 
@@ -1262,4 +1274,13 @@ func (r *forceLogoutSubjectResolver) ExternalIDOf(ctx context.Context, id domain
 		return "", err
 	}
 	return string(u.ExternalID), nil
+}
+
+// inviteMailRateLimit — ограничение частоты писем на адрес из настройки, в
+// форме порта. Страж старта уже отверг непозитивное; здесь только перенос.
+func inviteMailRateLimit(cfg config.Config) outboxtypes.InviteMailRateLimit {
+	return outboxtypes.InviteMailRateLimit{
+		MaxPerWindow: cfg.Invite.MailRateLimit.MaxPerWindow,
+		Window:       cfg.Invite.MailRateLimit.Window,
+	}
 }

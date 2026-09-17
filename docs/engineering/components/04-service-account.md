@@ -217,7 +217,7 @@ go test -short -count=1 -timeout 120s -run TestServiceAccount \
   IssueSAKey (см. [`05-sa-keys.md`](05-sa-keys.md)). Сам SA — просто запись в БД.
 - **DB:** `service_accounts(id, account_id, name, description, labels, enabled, created_at)`.
 - **Indexes:** PK, UNIQUE `service_accounts_account_name_unique`, INDEX по account/project.
-- **CHECK:** имя через `kacho_labels_valid`-style helper.
+- **CHECK:** имя через `labels_valid`-style helper.
 
 ## Gotchas / известные ограничения
 

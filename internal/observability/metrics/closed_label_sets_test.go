@@ -210,6 +210,11 @@ var closedLabelSetFamilies = map[string]closedLabelSet{
 		Build: func(r *Registry) { r.NewInviteActivationRecorder() },
 		Why:   "путь первого входа, умерший целиком, выглядел бы здоровее всех",
 	},
+	Namespace + "_invite_mail_intents_total": {
+		Cells: len(InviteMailIntentOutcomes),
+		Build: func(r *Registry) { r.NewInviteMailIntentRecorder() },
+		Why:   "ограничение частоты для вызывающего невидимо by construction (Р9); незасеянная клетка rate_limited означала бы «сюда никто не приходил» там, где письма молча не уходят",
+	},
 	Namespace + "_module_catalog_applies_total": {
 		Cells: len(ModuleCatalogApplyOutcomes),
 		Build: func(r *Registry) { r.NewModuleCatalogRecorder() },

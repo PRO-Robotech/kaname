@@ -57,6 +57,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -131,7 +132,29 @@ type InviteUserUseCase struct {
 	// «срок не назначен» и едет в строку как NULL — ровно так выглядят строки,
 	// заведённые до появления колонки.
 	inviteTTL time.Duration
+	// mailLimit — ограничение частоты писем на адрес (Р14/Р22, MAIL-25).
+	// Подставляет композиционный корень из настройки; писатель очереди
+	// списывает окно перед постановкой намерения, и нулевое ограничение он
+	// отвергает — значения «без ограничения» не существует.
+	mailLimit outboxtypes.InviteMailRateLimit
+	// mailIntents — счётчик исходов намерения отправки (queued ·
+	// rate_limited). nil-safe: без наблюдателя исход не считается, но и не
+	// меняется.
+	mailIntents InviteMailIntentObserver
 }
+
+// InviteMailIntentObserver — узкий порт наблюдаемости намерения отправки.
+// Реализует metrics.InviteMailIntentRecorder.
+type InviteMailIntentObserver interface {
+	IncInviteMailIntent(outcome string)
+}
+
+// Клетки счётчика намерений. Набор закрыт; имена совпадают с
+// metrics.InviteMailIntentOutcomes дословно, и совпадение держит проба.
+const (
+	MailIntentQueued      = "queued"
+	MailIntentRateLimited = "rate_limited"
+)
 
 func NewInviteUserUseCase(
 	r Repo,
@@ -154,6 +177,17 @@ func NewInviteUserUseCase(
 // (`config.InviteConfig.TTLOrDefault`), где его судит страж старта.
 func (uc *InviteUserUseCase) WithInviteTTL(ttl time.Duration) *InviteUserUseCase {
 	uc.inviteTTL = ttl
+	return uc
+}
+
+// WithInviteMailRateLimit задаёт ограничение частоты писем на адрес и
+// наблюдателя исходов намерения. Величину читает КОМПОЗИЦИОННЫЙ КОРЕНЬ из
+// настройки (`invite.mail-rate-limit`); use-case её не читает и не судит —
+// непозитивную отвергает страж старта, а если она доедет мимо него, откажет
+// писатель очереди.
+func (uc *InviteUserUseCase) WithInviteMailRateLimit(limit outboxtypes.InviteMailRateLimit, obs InviteMailIntentObserver) *InviteUserUseCase {
+	uc.mailLimit = limit
+	uc.mailIntents = obs
 	return uc
 }
 
@@ -498,6 +532,10 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 		membership domain.Membership
 		createdAB  domain.AccessBinding
 		haveAB     bool
+		// mailAsked/mailQueued — просили ли поставить письмо и поставлено ли
+		// оно; расходятся ровно тогда, когда окно адресата полно.
+		mailAsked  bool
+		mailQueued bool
 	}
 	res, err := shared.DoWithWriteTx(ctx, uc.repo,
 		func(ctx context.Context, w Writer) (inviteTxResult, error) {
@@ -639,32 +677,42 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 				}}); ferr != nil {
 					return inviteTxResult{}, ferr
 				}
-				// ПИСЬМО ПРИГЛАШЕНИЯ — намерение в очередь, В ЭТОЙ ЖЕ транзакции
-				// (Р23/Р25 приёмки ID-MAIL-1). Атомарность несущая: при откате
-				// приглашения намерения нет ВОВСЕ, поэтому письма о приглашении,
-				// которого не случилось, не бывает by construction. Прямой вызов
-				// ретранслятора отсюда не дал бы ни этого, ни переживания
-				// намерением смерти процесса.
-				//
-				// ПОЧЕМУ ТОЛЬКО НА ЗАВЕДЕНИИ СТРОКИ, а не на каждом вызове.
-				// Повторное приглашение того же адреса в тот же аккаунт
-				// идемпотентно и сюда не доходит (быстрый путь выше отдаёт
-				// существующую строку) — значит письмо уходит РОВНО ОДНО на
-				// (аккаунт, адрес), и предел этот держится построением, а не
-				// ручкой. Эмиссия на каждом вызове сделала бы приглашение
-				// средством рассылки: обладатель права приглашать слал бы на
-				// произвольный адрес со скоростью вызовов API. Повторная отправка
-				// — предмет СВОЕГО глагола со своим ограничением частоты (§10
-				// пп. 9 и 17 приёмки), и она не заводится здесь молча.
-				//
-				// Адрес страницы входа намеренно НЕ передаётся: он величина
-				// установки, а не сведение use-case'а, и подставляет его
-				// отправитель из своей настройки.
-				if merr := w.EmitInviteMail(ctx,
-					string(out.user.ID), string(out.user.AccountID), string(in.Email), "",
-				); merr != nil {
+			}
+			// ПИСЬМО ПРИГЛАШЕНИЯ — намерение в очередь, В ЭТОЙ ЖЕ транзакции
+			// (Р23/Р25 приёмки ID-MAIL-1). Атомарность несущая: при откате
+			// приглашения намерения нет ВОВСЕ, поэтому письма о приглашении,
+			// которого не случилось, не бывает by construction. Прямой вызов
+			// ретранслятора отсюда не дал бы ни этого, ни переживания
+			// намерением смерти процесса.
+			//
+			// ПИСЬМО УХОДИТ, ПОКА ПРИГЛАШЕНИЕ НЕ ВЫКУПЛЕНО, — и на заведении
+			// строки, и на повторном приглашении того же адреса в тот же аккаунт
+			// (MAIL-36: повтор идемпотентен, письмо отправляется повторно В
+			// ПРЕДЕЛАХ ограничения частоты). Здесь стояло «только на заведении
+			// строки», и предел держался построением, потому что ограничителя
+			// ещё не было; теперь предел держит ОКНО АДРЕСАТА, которое писатель
+			// очереди списывает перед постановкой (MAIL-25), и обладатель права
+			// приглашать не сделает из глагола средство рассылки.
+			//
+			// Выкупленному (ACTIVE) и заблокированному письмо не уходит:
+			// приглашать некуда, а писать «вы приглашены» тому, кто уже в
+			// аккаунте, значит слать письмо без предмета.
+			//
+			// Адрес страницы входа намеренно НЕ передаётся: он величина
+			// установки, а не сведение use-case'а, и подставляет его
+			// отправитель из своей настройки.
+			if out.user.InviteStatus == domain.InviteStatusPending {
+				queued, merr := w.EmitInviteMail(ctx, outboxtypes.InviteMailIntent{
+					UserID:    string(out.user.ID),
+					AccountID: string(in.AccountID),
+					To:        string(in.Email),
+					Limit:     uc.mailLimit,
+				})
+				if merr != nil {
 					return inviteTxResult{}, merr
 				}
+				out.mailQueued = queued
+				out.mailAsked = true
 			}
 			// ЧЛЕНСТВО ЧИТАЕТСЯ ЗДЕСЬ — ЭТОЙ ЖЕ ТРАНЗАКЦИЕЙ, ДО ФИКСАЦИИ. Строка
 			// заведена (или уже была) вставкой выше, и ответ операции создания
@@ -689,6 +737,12 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 	userIsNew := res.userIsNew
 	createdAB := res.createdAB
 	haveAB := res.haveAB
+	// Исход намерения считается ПОСЛЕ коммита: до него намерение ещё может
+	// откатиться вместе с приглашением, и счётчик утверждал бы о письме,
+	// которого не поставили.
+	if res.mailAsked {
+		uc.observeMailIntent(res.mailQueued)
+	}
 
 	// Указатели на предков (привязка→проект, пользователь→аккаунт) СО-КОММИЧЕНЫ
 	// строкой журнала в транзакции выше — здесь их больше не пишут. Членство
@@ -718,6 +772,20 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 	}
 
 	return inviteOutcome{user: user, membership: res.membership}, nil
+}
+
+// observeMailIntent — исход намерения отправки в счётчик. Ответ глагола от
+// исхода не зависит (Р9): сверхнормативное письмо не отправляется молча для
+// вызывающего и ГРОМКО для оператора — только здесь это различие и существует.
+func (uc *InviteUserUseCase) observeMailIntent(queued bool) {
+	if uc.mailIntents == nil {
+		return
+	}
+	if queued {
+		uc.mailIntents.IncInviteMailIntent(MailIntentQueued)
+		return
+	}
+	uc.mailIntents.IncInviteMailIntent(MailIntentRateLimited)
 }
 
 // inviteDeadline — момент, после которого выданное сейчас приглашение перестанет

@@ -47,9 +47,19 @@ import (
 )
 
 var (
-	reCreateTable  = regexp.MustCompile(`(?i)CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)`)
-	reCountTrigger = regexp.MustCompile(`(?is)CREATE\s+TRIGGER\s+\w+\s+AFTER[^;]*?\sON\s+([a-z_][a-z0-9_.]*)[^;]*?kacho_quota_count\(\s*'([a-zA-Z0-9.]+)'`)
+	reCreateTable = regexp.MustCompile(`(?i)CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)`)
+	// Списание записывается в дереве ДВУМЯ именами, и оба обязаны быть известны
+	// распознавателю: свод и две ранние миграции зовут функцию под именем
+	// платформы (`kacho_quota_count`), миграция `20260917130000` переименовала её
+	// в `quota_count`, и всякий следующий триггер будет написан новым именем.
+	// Распознаватель, знающий одно, замолчал бы на другом (`testing.md` §«Гейт на
+	// класс» п. 7) — доказано инъекцией по обеим формам,
+	// `TestCredentialCeilingAnchor_ChargerRecognizerKnowsBothNames`.
+	reCountTrigger = regexp.MustCompile(`(?is)CREATE\s+TRIGGER\s+\w+\s+AFTER[^;]*?\sON\s+([a-z_][a-z0-9_.]*)[^;]*?\b(?:kacho_)?quota_count\(\s*'([a-zA-Z0-9.]+)'`)
 	reAccountArm   = regexp.MustCompile(`v_kind\s+IN\s*\(([^)]*)\)`)
+	// reChargerKind — вид, названный первым аргументом вызова списания; обе
+	// формы имени функции, см. reCountTrigger.
+	reChargerKind = regexp.MustCompile(`\b(?:kacho_)?quota_count\(\s*'([a-zA-Z0-9.]+)'`)
 
 	// Ограничение носителя записывается в дереве ДВУМЯ законными формами, и обе
 	// обязаны быть известны распознавателю: форма, о которой он не знает, даёт
@@ -237,7 +247,8 @@ func TestCredentialCeilingAnchor_AccountArmAgreesWithTheCatalogue(t *testing.T) 
 	inSQL := map[string]bool{}
 	files := 0
 	for name, body := range bodies {
-		if !strings.Contains(body, "kacho_quota_count()") {
+		// Обе формы имени функции: `kacho_quota_count()` содержит `quota_count()`.
+		if !strings.Contains(body, "quota_count()") {
 			continue
 		}
 		flat := reSpace.ReplaceAllString(body, " ")
@@ -325,7 +336,7 @@ func TestCredentialCeilingAnchor_CarrierIsNamedTheSameEverywhere(t *testing.T) {
 	// он выводится из вида (его родительская часть), а строка в кавычках рядом с
 	// видом неотличима от вида для гейтов дерева, читающих аргументы списания, —
 	// два таких гейта на этом и споткнулись.
-	reTriggerKind := regexp.MustCompile(`kacho_quota_count\(\s*'([a-zA-Z0-9.]+)'`)
+	reTriggerKind := reChargerKind
 	chargedKinds := map[string]bool{}
 	for _, name := range names {
 		flat := reSpace.ReplaceAllString(bodies[name], " ")
@@ -504,5 +515,37 @@ func TestCredentialCeilingAnchor_CarrierRecognizerKnowsBothForms(t *testing.T) {
 			"выиграло объявление с МЕНЬШЕЙ версией: строковый порядок ставит "+
 				"`20260824230000` раньше `484002`, и гейт объявил бы находкой значение, "+
 				"которое схема принимает")
+	})
+}
+
+// TestCredentialCeilingAnchor_ChargerRecognizerKnowsBothNames — инъекция по
+// обеим формам имени списания: прежнее имя платформы и объявленное имя службы
+// узнаются оба, а соседнее имя той же формы — нет.
+func TestCredentialCeilingAnchor_ChargerRecognizerKnowsBothNames(t *testing.T) {
+	t.Parallel()
+
+	const platformForm = "CREATE TRIGGER accounts_quota_count AFTER INSERT OR DELETE ON kaname.accounts " +
+		"FOR EACH ROW EXECUTE FUNCTION kaname.kacho_quota_count('iam.account');"
+	const serviceForm = "CREATE TRIGGER accounts_quota_count AFTER INSERT OR DELETE ON kaname.accounts " +
+		"FOR EACH ROW EXECUTE FUNCTION kaname.quota_count('iam.account');"
+	const twin = "CREATE TRIGGER accounts_quota_count AFTER INSERT OR DELETE ON kaname.accounts " +
+		"FOR EACH ROW EXECUTE FUNCTION kaname.other_quota_count('iam.account');"
+
+	for name, body := range map[string]string{"имя платформы": platformForm, "имя службы": serviceForm} {
+		t.Run(name, func(t *testing.T) {
+			m := reCountTrigger.FindStringSubmatch(body)
+			require.Len(t, m, 3, "триггер списания не узнан: форма ушла из-под наблюдения")
+			require.Equal(t, "kaname.accounts", m[1])
+			require.Equal(t, "iam.account", m[2])
+			k := reChargerKind.FindStringSubmatch(body)
+			require.Len(t, k, 2)
+			require.Equal(t, "iam.account", k[1])
+		})
+	}
+
+	t.Run("законный близнец: соседняя функция той же формы не читается", func(t *testing.T) {
+		require.Nil(t, reCountTrigger.FindStringSubmatch(twin),
+			"распознаватель прочитал чужую функцию: он мерит подстроку, а не имя")
+		require.Nil(t, reChargerKind.FindStringSubmatch(twin))
 	})
 }

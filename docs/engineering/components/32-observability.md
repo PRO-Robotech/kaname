@@ -130,7 +130,7 @@ Registry приватный (`prometheus.NewRegistry()`, не глобальны
 (`cmd/kaname/buildstamp.go`), которые подставляет компоновщик:
 
 ```
-go build -ldflags "-X main.buildVersion=$KACHO_IMAGE_VERSION -X main.buildRevision=$KACHO_IMAGE_REVISION"
+go build -ldflags "-X main.buildVersion=$OCI_IMAGE_VERSION -X main.buildRevision=$OCI_IMAGE_REVISION"
 ```
 
 Обе величины сборка берёт из ТЕХ ЖЕ аргументов, из которых делает клеймо образа

@@ -27,7 +27,7 @@
 свёртки. Паттерн остаётся доступен как escape (`*-<СУФФИКС>`, отрезаются два
 сегмента), но каталог на нём не строится.
 
-Всего кейсов: 747
+Всего кейсов: 751
 
 ## Перепись по модулям
 
@@ -50,6 +50,7 @@
 | `cases/iam-interactive-client.py` | 8 |
 | `cases/iam-internal-only-check.py` | 13 |
 | `cases/iam-invite-grant-fga.py` | 4 |
+| `cases/iam-invite-resend.py` | 4 |
 | `cases/iam-list-visibility.py` | 3 |
 | `cases/iam-membership-create.py` | 3 |
 | `cases/iam-membership-read.py` | 7 |
@@ -643,6 +644,16 @@
 - `INVGRANT-TE2-CROSS-ACCOUNT-PROJECT-INVISIBLE`
 - `INVGRANT-TE3-ARMNAMES-ACCOUNT-PARITY`
 - `INVGRANT-TE4-PROJECT-ANCHOR-VIEWER-RC1`
+
+
+## `cases/iam-invite-resend.py` — 4 кейсов
+
+> Повторная отправка письма приглашения — UserService.ResendInvite (приёмка ID-MAIL-1, §10 п. 9; MAIL-36, MAIL-37, MAIL-38, MAIL-25).
+
+- `IAM-USR-RESEND-OK`
+- `IAM-USR-RESEND-SAME-OUTCOME`
+- `IAM-USR-RESEND-NEG-NOT-IN-ACCOUNT`
+- `IAM-USR-RESEND-NEG-MALFORMED-ID`
 
 
 ## `cases/iam-list-visibility.py` — 3 кейсов
