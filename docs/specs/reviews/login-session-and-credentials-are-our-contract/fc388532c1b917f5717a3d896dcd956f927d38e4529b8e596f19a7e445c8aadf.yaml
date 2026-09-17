@@ -1,0 +1,201 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/login-session-and-credentials-are-our-contract.md
+  sha256: fc388532c1b917f5717a3d896dcd956f927d38e4529b8e596f19a7e445c8aadf
+  static_status: DRAFT
+  base_commit: 6acf8f19351141fdcabd56284bd8bf78bf66d9d2
+  content_commit: 3d346ddd
+  branch: acceptance/w14-decisions
+  pull_request: PRO-Robotech/kaname#214
+  task: PRO-Robotech/kacho#1269
+  decisions_recorded: [PRO-Robotech/kacho#2697]
+  lines: 3696
+  round: 9
+  predecessor_record: docs/specs/reviews/login-session-and-credentials-are-our-contract/b30ee2960ad2c228915b25593d0393c8bf24795c33ca2eea3e1f2b88ffaa9ae2.yaml
+  fingerprint_predicate: >-
+    git show c6a3c12efbb68df540445b9633795cacb2f5d008:docs/engineering/acceptance/login-session-and-credentials-are-our-contract.md
+    | sha256sum
+  fingerprint_note: >-
+    Отпечаток снят своим замером в рабочей копии круга и сверен с головой ветки на origin
+    (`git ls-remote` — c6a3c12e, до чтения и перед записью); документ на ветке правил один
+    коммит 3d346ddd. Шапка не тронута; прежние восемь записей не редактировались.
+  brief_premise_corrected: >-
+    Посылки задания подтвердились. Посылка ДОКУМЕНТА (§10.18: «перепись по имени механизма дала
+    ТРИ живых места») ОПРОВЕРГНУТА предикатом, знающим словоформы: живых копий отозванной
+    посылки — семь, из них четыре вне записей кругов — Б1.
+  measurement_revisions: >-
+    Дом службы: ветка c6a3c12e (база 6acf8f19); origin/release/iam-lines на момент круга —
+    ed547967. Дом платформы: PRO-Robotech/kacho@275240efdc = origin/main.
+
+verdict: CHANGES_REQUESTED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-17'
+
+effective_approval:
+  issued: false
+  ban1_lifted: false
+  why: >-
+    Вердикт круга 9 — CHANGES_REQUESTED, одно блокирующее. Отказу внешнее полномочие не нужно.
+    Вердикт круга 8 (APPROVED, редакция 11, влита #104) на редакцию 12 не переносится.
+  publication_pending:
+    required_for_sanction: false
+    expected_from: оркестратор волны
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    note: Для отказа событие санкцию не выдаёт и не отзывает.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (исполнено этим кругом); `docs/changes/policy.yaml`
+    строка 41: `acceptance-reviewer: [pointpu]`.
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: none
+  status: not_performed
+  reason: ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось»; для CHANGES_REQUESTED безвредно.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: null
+  publication_mode: record_only
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Дифф 6acf8f19..c6a3c12e документа целиком (81 вставка, 9 снятий) против решения
+    `kacho#2697` (дословно); word-diff строки Ф1-67; перепись §5 (67 строк); обход документа
+    по словоформам отозванной посылки; производитель (recovery_complete.go на линии) прочитан.
+  method: experiment_not_reading
+  neighbouring_acceptances_reviewed: >-
+    Ф5 редакции 3 (Р5, Ф5-03) и Ф3 редакции 8 (Р8, Ф3-21 вторая половина, Ф3-19, Р6) — тот же
+    PR; строки, на которые ссылается §10.18, на месте и говорят то, что он им приписывает.
+  document_edited_by_reviewer: false
+
+questions:
+  - q: новая редакция исполняет РОВНО решение — ни шире, ни уже
+    answer: >-
+      Решение велело правку одной фразы §4.2 («этот шаг — глагол Р4»); автор перемерил и нашёл
+      три копии — расширение законно и названо (§10.18). Но обход был по образцу
+      `глагол Р4|обязателен|иного действия` — без словоформ «обязательная/обязательной/
+      Обязательный», — и четыре живых копии той же посылки остались; редакция УЖЕ своего
+      предмета — Б1. Факты «Тогда» не тронуты — подтверждено word-diff'ом Ф1-67 (правлено одно
+      пояснение); перепись §5 — 67.
+  - q: у каждого нового/изменённого «Тогда» есть производитель
+    answer: >-
+      Изменено одно пояснение в «Тогда» Ф1-67 — производитель прежний (замок §8, Ф1-67); §4.2:
+      «новый пароль пишет само завершение одной транзакцией с отсечкой now» —
+      `recovery_complete.go` `complete`: `ReplaceLoginVerifier` → `EndOtherSessions` →
+      `UpsertCutoff(RevokeReasonPasswordChange)` → … → `IssueSession` в одной `Writer`-транзакции
+      — есть на 6acf8f19 и ed547967. «Путь остаётся возможным» — Ф3-19/Р6 (смена по текущему
+      паролю из живой сессии) — есть.
+  - q: отрицания с положительным близнецом
+    answer: Новых отрицаний нет; замки §8 не тронуты.
+  - q: прежние записи ревью не тронуты
+    answer: ДА — `git diff 6acf8f19..c6a3c12e -- docs/specs/reviews/` пуст.
+  - q: соседи согласны
+    answer: >-
+      ДА по строкам, которые §10.18 называет (Ф5 §13 «ведомость с Ф3/Ф1 обновлена» — сходится с
+      §5 строкой Ф5 и §4.2). Внутри документа — НЕТ: §8 (строка Ф1-66) и «Дано» Ф1-63 по-прежнему
+      называют смену пароля из сессии восстановления обязательной — Б1.
+
+predicates_run:
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "grep -oE '\\| \\*\\*Ф1-[0-9]+\\*\\* \\|' \"$D\" | sort -u | wc -l"
+    expected: 67
+    got: 67
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "git diff --word-diff=plain 6acf8f19..c6a3c12e -- \"$D\" | awk '/\\| \\*\\*Ф1-67\\*\\*/' | grep -oE '\\[-[^]]*-\\]|\\{\\+[^}]*\\+\\}'"
+    expected: правлено одно пояснение, факты «Тогда» не тронуты
+    got: три замены в одном предложении («а он для смены … обязателен, Ф1-27 требует задать … до любого иного действия» → «из сессии восстановления смена … глаголом Р4 возможна, но не обязательна … пишет само завершение»)
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "grep -n -iE 'обязательн(ый|ая|ой|ым) (путь|смен)' \"$D\""
+    expected: по §10.18 — 0 вне §10.16/§10.17 и шапки
+    got: >-
+      9 строк; вне записей кругов (§10.16 3448/3462, §10.17 3577, §10.18 3679) и шапки (26) —
+      ЧЕТЫРЕ: 800 (Ф1-63, «Дано»), 803 (Ф1-67, «Тогда»), 1214 (§4.2), 2030 (§8) — Б1
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "sed -n 210,290p internal/apps/kaname/api/humansession/recovery_complete.go"
+    expected: одна транзакция, отсечка password-change актором-человеком, сессия после записи
+    got: совпало (ReplaceLoginVerifier → EndOtherSessions → UpsertCutoff → InsertRecoveryCompletion → IssueSession, если не blocked → EmitAudit → Commit)
+  - where: PRO-Robotech/kaname@c6a3c12e
+    command: "go test ./internal/check/ -run TestAcceptance -count=1"
+    expected: PASS
+    got: PASS
+
+blocking:
+  - id: Б1
+    class: распознаватель не знал словоформы — отозванная посылка живёт в четырёх местах, из них два — в «Дано»/«Тогда» сценариев
+    where: строки 800 (Ф1-63, «Дано»), 803 (Ф1-67, «Тогда», предложение после правленого), 1214 (§4.2, пункт «оставшиеся две», абзац о «Дано» Ф1-63), 2030 (§8, строка «Ф1-52, Ф1-60, Ф1-61, Ф1-66 перевод стенда и откат»)
+    what: >-
+      Редакция 12 отзывает обязательность пути «новый пароль — глаголом Р4 из сессии
+      восстановления» и в §10.18 объявляет перепись полной («ТРИ живых места»). Перепись шла
+      образцом `глагол Р4|обязателен|иного действия` и не знала форм «обязательная смена»,
+      «обязательной смены», «Обязательный путь». Остались: (800) «Дано» Ф1-63 — «поэтому
+      обязательная смена пароля (Ф1-27) отсечки не сдвинула» — «Дано» называет шаг, которого в
+      контракте больше нет; (803) в той же ячейке Ф1-67, через одно предложение после
+      правленного «возможна, но не обязательна», — «Обязательный путь при этом покрыт обеими
+      своими половинами»: ячейка утверждает оба и противоречит себе; (1214) «„Дано“ Ф1-63 —
+      … после обязательной смены пароля»; (2030) §8 — «восстановление (Ф1-27) с обязательной
+      сменой пароля из его сессии» — тест-план второй половины замка Ф1-66 строит «Дано» шагом,
+      который §10.18 в том же документе называет «возможным, не обязательным».
+    why_blocking: >-
+      Два места об одном предмете внутри ОДНОЙ ячейки «Тогда» — читатель не может установить,
+      какое действует; «Дано» Ф1-63 и §8 описывают устройство завершения редакций 10…11 —
+      следующий исполнитель построит замок Ф1-66 обязательным шагом, которого нет
+      (`recovery_complete.go` пишет пароль сам). Класс — `testing-verdict.md` §14 (свой
+      разборщик молчит на неизвестной форме) и `writing.md` §1 (заявление шире сделанного:
+      «три» при семи).
+    how_to_close: >-
+      Четыре правки словом (обязательная → выполненная/сделанная; «Обязательный путь» →
+      «Путь через восстановление»; §8 — «с последующей сменой пароля из его сессии
+      (возможной, Ф3-19)»); §10.18 — перепись заново предикатом со словоформами и число «семь,
+      из них четыре вне записей кругов»; предикат снятия —
+      `grep -n -iE 'обязательн(ый|ая|ой|ым) (путь|смен)' "$D"` вне §10.16…§10.18 и шапки → 0.
+
+non_blocking:
+  - id: В1
+    where: §10.18, предикат переписи
+    what: >-
+      Предикат цитируется как `grep -n 'глагол Р4\|обязателен\|иного действия'` — форма
+      экранирования `\|` годна для GNU grep без `-E`, но она же и есть причина Б1: образец
+      знал одну словоформу из четырёх. Закрывается вместе с Б1.
+
+decisions:
+  - subject: расширение правки с одного места (§4.2) до трёх — законно
+    verdict: принято — одна посылка, и «Дано»/«Тогда» не тронуты; недобор — Б1
+
+verification:
+  what_was_done: >-
+    word-diff Ф1-67; перепись §5; обход по словоформам с чтением каждой найденной строки в
+    контексте; чтение производителя завершения на линии; гейты приёмок.
+  subject_digest_matches_current_document: true
+  header_left_untouched: true
+  document_edited_by_reviewer: false
+
+reviewer_errors_named_first:
+  - >-
+    Первый обход я сделал тем же образцом, что автор («обязателен»), и получил его же три; Б1
+    нашлась вторым обходом с окончаниями — тот же класс, что у автора, пойман только
+    расхождением двух своих чисел.
+
+limits:
+  - Стенд не поднимался; сквозные Ф1 не исполнялись — круг о тексте контракта.
+
+cycle:
+  round_cost_note: >-
+    Класс Б1 — «перепись по одной словоформе» — в форму задания следующего круга: перепись
+    посылки по корню слова с перечислением окончаний, число до и после в §10.N.
+  next_step: >-
+    `acceptance-author` правит четыре места и §10.18; редакция 13 получает соседнюю запись по
+    новому отпечатку.
