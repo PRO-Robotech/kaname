@@ -46,6 +46,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/loginmethod"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 )
@@ -171,6 +172,51 @@ func scanLoginMethod(row pgx.Row, userID domain.UserID, kind domain.LoginMethodK
 		return domain.LoginMethod{}, iamerr.Wrapf(iamerr.ErrInternal, "stored login method is malformed")
 	}
 	return m, nil
+}
+
+// PasswordCostClasses — перепись классов стоимости (порт
+// `loginmethod.CostClassCensus`; решение kaname#188).
+//
+// Класс вычисляет БАЗА: наружу уходит значение без соли и тела — у
+// наследуемого формата два сегмента (признак, стоимость), у объявленного три
+// (признак, версия, параметры). Значение с признаком вне перечня отдаётся
+// ПУСТЫМ префиксом: его сегменты могли бы нести что угодно, а перепись выносит
+// из колонки только то, что читатель класса разберёт как числа. Читатель —
+// `passwordverify.ParseCostClassPrefix`; сходимость производителя и читателя
+// держит `TestLoginMethodRepo_CostClassPrefixRoundTripsThroughTheParser`.
+//
+// Один последовательный проход по таблице, без индекса по материалу (шапка
+// миграции запрещает его намеренно); зовётся один раз при старте.
+func (r *LoginMethodRepo) PasswordCostClasses(ctx context.Context) ([]loginmethod.CostClassCount, error) {
+	q := `SELECT
+	        CASE
+	          WHEN verifier LIKE $2 THEN array_to_string((string_to_array(verifier, '$'))[1:3], '$')
+	          WHEN verifier LIKE $3 THEN array_to_string((string_to_array(verifier, '$'))[1:4], '$')
+	          ELSE ''
+	        END AS prefix,
+	        count(*)
+	      FROM ` + loginMethodsTable + `
+	      WHERE kind = $1
+	      GROUP BY 1
+	      ORDER BY 1`
+	rows, err := r.pool.Query(ctx, q, string(domain.LoginMethodPassword),
+		"$"+string(domain.PasswordHashFormatBcrypt)+"$%", "$"+string(domain.PasswordHashFormatArgon2id)+"$%")
+	if err != nil {
+		return nil, mapErr(err, "LoginMethod.CostClassCensus", "")
+	}
+	defer rows.Close()
+	var out []loginmethod.CostClassCount
+	for rows.Next() {
+		var c loginmethod.CostClassCount
+		if err := rows.Scan(&c.Prefix, &c.Rows); err != nil {
+			return nil, mapErr(err, "LoginMethod.CostClassCensus", "")
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapErr(err, "LoginMethod.CostClassCensus", "")
+	}
+	return out, nil
 }
 
 // MarkEmailVerified записывает момент подтверждения ТОЛЬКО на подтверждённое
