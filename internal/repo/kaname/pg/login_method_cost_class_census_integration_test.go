@@ -57,7 +57,7 @@ func TestLoginMethodRepo_CostClassCensusCountsClassesNotValues(t *testing.T) {
 	}
 	people := lmPeople(t, pool, "cens", len(materials))
 	for i, m := range materials {
-		_, err := repo.Create(ctx, domain.LoginMethod{UserID: people[i], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, m)})
+		_, err := repo.Create(ctx, domain.LoginMethod{UserID: people[i], Kind: domain.LoginMethodPassword, Verifier: lmVerifier(t, m), State: domain.LoginMethodStateActive})
 		require.NoError(t, err, "посев %d", i)
 	}
 
@@ -107,9 +107,9 @@ func TestLoginMethodRepo_CostClassPrefixRoundTripsThroughTheParser(t *testing.T)
 	legacy := lmVerifier(t, "$2a$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquzi.Ss7KIUgO2t0jWMUW")
 
 	people := lmPeople(t, pool, "cert", 2)
-	_, err = repo.Create(ctx, domain.LoginMethod{UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: fresh})
+	_, err = repo.Create(ctx, domain.LoginMethod{UserID: people[0], Kind: domain.LoginMethodPassword, Verifier: fresh, State: domain.LoginMethodStateActive})
 	require.NoError(t, err)
-	_, err = repo.Create(ctx, domain.LoginMethod{UserID: people[1], Kind: domain.LoginMethodPassword, Verifier: legacy})
+	_, err = repo.Create(ctx, domain.LoginMethod{UserID: people[1], Kind: domain.LoginMethodPassword, Verifier: legacy, State: domain.LoginMethodStateActive})
 	require.NoError(t, err)
 
 	verifier, err := passwordverify.New(1, censusVerifyObserver{})
