@@ -6,8 +6,14 @@
 // церемония повышения, запрос и завершение восстановления) с настоящими
 // адаптерами базы плюс ответ службы краю о сессии
 // (`InternalHumanSessionService.Resolve`) через gRPC-соединение. Пробы —
-// `step_up_integration_test.go` (Ф11-09, -10, -12, -13, -31) и
+// `step_up_integration_test.go` (Ф11-09, -10, -12, -13, -31),
+// `step_up_journal_integration_test.go` (Ф11-14) и
 // `recovery_session_integration_test.go` (Ф5-24).
+//
+// Зависимости второго фактора, из которых собрана церемония, стенд отдаёт
+// пробам (`secondFactor`): «Дано: у личности заведён второй фактор» заводится
+// настоящими глаголами заведения и подтверждения над ТЕМ ЖЕ проверяющим кода —
+// секрет, обёрнутый иным ключом, церемония не открыла бы.
 //
 // # Почему настоящие глаголы, а не дублёр
 //
@@ -119,6 +125,8 @@ type sessionLane struct {
 	lane     *lane
 	c        *http.Client
 	resolver iamv1.InternalHumanSessionServiceClient
+	// secondFactor — зависимости, из которых собрана церемония.
+	secondFactor humansession.SecondFactorDeps
 }
 
 // laneSession — сессия, как её держит браузер: носитель и контекст формы,
@@ -194,10 +202,11 @@ func newSessionLane(t *testing.T) *sessionLane {
 		Limits: limits, Observer: nop, Now: time.Now, Logger: logger,
 	})
 	require.NoError(t, err)
-	stepUp, err := humansession.NewStepUpUseCase(humansession.SecondFactorDeps{
+	secondFactor := humansession.SecondFactorDeps{
 		Store: sessions, Methods: methods, TOTP: totp, Sets: verifier, SetHasher: hasher, Verifier: verifier,
 		Limits: limits, Freshness: laneFreshness, Domain: laneProbeDomain, Observer: nop, Now: time.Now, Logger: logger,
-	})
+	}
+	stepUp, err := humansession.NewStepUpUseCase(secondFactor)
 	require.NoError(t, err)
 	request, err := humansession.NewRequestRecoveryUseCase(humansession.RequestRecoveryDeps{
 		Store: sessions, CodeTTL: laneRecoveryTTL, Dispatcher: humansession.SyncDispatcher{}, Observer: nop, Now: time.Now, Logger: logger,
@@ -215,6 +224,7 @@ func newSessionLane(t *testing.T) *sessionLane {
 	return &sessionLane{
 		ctx: ctx, pool: pool, email: email, user: reg.View.User, sessions: sessions, users: users,
 		lane: l, c: l.client(t, gatewaySAN), resolver: serveResolve(t, humansession.NewHandler(resolveUC)),
+		secondFactor: secondFactor,
 	}
 }
 
