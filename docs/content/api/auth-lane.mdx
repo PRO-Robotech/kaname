@@ -238,9 +238,16 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 
 `POST …/remove` и `POST …/backup-codes` подтверждаются кодом — `{ "method", "code",
 "csrfToken" }` (`method`: `totp` либо `lookup_secret`), как смена пароля подтверждается текущим.
-Ответ — `{ "session", "assurance" }` (у перечеканки ещё `backupCodes`, у ответа, потребившего
-запасной код, — `backupCodesRemaining`) и новый носитель. Без заведённого фактора — `400`
-`SECOND_FACTOR_NOT_ENROLLED`.
+Ответ — `200 { "session", "assurance" }` и новый носитель. У перечеканки к нему добавлен
+`backupCodes` (новый набор). Снятие несёт ещё `backupCodesRemaining: 0` — **всегда** и любым годным
+кодом, а не только потребившим запасной. Поле означает «второй фактор снят, резервных кодов не
+осталось»: снятие убирает фактор, набора запасных кодов после него нет. Успешность снятия
+подтверждают через `GET …/second-factor` по `totp.enrolled: false`, **а не** по счётчику остатка.
+Поле `backupCodesRemaining` в ответе снятия (плоское, всегда `0`) — это **не** то же, что
+`backupCodes.remaining` из `GET` заведённого фактора (вложенное, «сколько кодов ещё у живого
+фактора»): два разных нуля — у снятия `0` значит «фактора больше нет», у живого фактора
+`backupCodes.remaining: 0` значит «фактор жив, но коды исчерпаны». Без заведённого фактора —
+`400` `SECOND_FACTOR_NOT_ENROLLED`.
 
 Утративший и приложение, и запасные коды сам фактор не снимет: за него это делает надзор облака
 глаголом [`UserService.ResetSecondFactor`](/api/user#reset-second-factor).

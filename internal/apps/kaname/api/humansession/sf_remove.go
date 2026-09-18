@@ -33,8 +33,10 @@ type RemoveSecondFactorOutput struct {
 	View      SessionView
 	Bearer    domain.SessionBearer
 	Assurance AssuranceView
-	// BackupCodesRemaining — только когда подтверждали запасным кодом (Р4);
-	// набор при этом уже снят, и величина — остаток на момент сверки.
+	// BackupCodesRemaining — всегда `0` (Р4 ред. 10, kaname#275): снятие любым
+	// годным кодом убирает фактор, набора запасных кодов больше нет; согласовано
+	// с `GET` того же человека («не заведён»). Стоит на выдаче всегда, а не
+	// только у ответа, потребившего запасной код.
 	BackupCodesRemaining *int
 }
 
@@ -146,10 +148,13 @@ func (uc *RemoveSecondFactorUseCase) Execute(ctx context.Context, in RemoveSecon
 		Bearer:    bearer,
 		Assurance: assuranceAfter(ctx, uc.deps, user.ID, methods),
 	}
-	if st.consumed {
-		remaining := st.remaining
-		out.BackupCodesRemaining = &remaining
-	}
+	// Снятие убирает фактор целиком: набора запасных кодов больше нет, поэтому
+	// ответ несёт `backupCodesRemaining: 0` ВСЕГДА — и при снятии запасным кодом,
+	// и при снятии кодом по времени (Р4 ред. 10, Ф12-28, Ф12-45 «а», kaname#275).
+	// Остаток `st.remaining` потреблённого набора наружу не выходит: он был бы
+	// остатком уже снятого набора и расходился бы с `GET` («не заведён»).
+	zero := 0
+	out.BackupCodesRemaining = &zero
 	return out, nil
 }
 
