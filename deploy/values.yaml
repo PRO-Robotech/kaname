@@ -475,8 +475,10 @@ authn:
   #     recoveryCodeTtl: 5m           # срок кода восстановления доступа от чеканки
   #                                   # (Ф5 Р1; KANAME_AUTHN__LOGIN__RECOVERY_CODE_TTL)
   #   registration:                   # регистрация нашей полосой (Ф4 Р5, Ф4-18/19)
-  #     admissionsPerWindow: 3        # заведений аккаунтов одной личностью за окно
-  #                                   # СВЕРХ первого; ноль законен — «ни одного»
+  #     admissionsPerWindow: 3        # заведений аккаунтов одной личностью за окно,
+  #                                   # СЧИТАЯ первое; первое заведение носителя
+  #                                   # проходит при любой величине, ноль —
+  #                                   # «после первого ни одного»
   #                                   # (KANAME_AUTHN__REGISTRATION__ADMISSIONS_PER_WINDOW)
   #     admissionWindow: 1h           # окно счёта (KANAME_AUTHN__REGISTRATION__ADMISSION_WINDOW)
   #   selfServiceFreshness: 15m       # окно свежести правки своих данных (Ф12 Р8):
