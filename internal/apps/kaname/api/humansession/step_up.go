@@ -31,6 +31,7 @@ package humansession
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/assurance"
@@ -229,34 +230,54 @@ func (uc *StepUpUseCase) refuse(ctx context.Context, v presentVerdict, j judgedP
 	return refusalOf(v)
 }
 
+// refusalWriteBudget — срок записей об отказе, отвязанных от отмены запроса.
+// Вердикт вынесен, и уход клиента после него не вправе стереть ни след
+// попытки, ни запись журнала. Отвязка снимает отмену, но не время: повисшая
+// база иначе держала бы горутину без предела. Величина — та же, что у других
+// отвязанных записей службы (`providerReleaseTimeout`): одна транзакция из
+// трёх вставок и, при её сбое, одна транзакция из двух.
+const refusalWriteBudget = 5 * time.Second
+
 // recordRefusal — суждённое предъявление отклонено: след попытки и запись
-// журнала повышения с исходом `refused` — ОДНОЙ транзакцией (Р7, Ф11-14).
-// Отказ наружу уходит в любом исходе записи. Не сложилась транзакция — след
-// попытки пишется своей: счёт неверных предъявлений есть контроль частоты, и
-// сбой записи журнала не вправе его выключить; потеря записи журнала звучит
-// ошибкой в журнале процесса.
+// журнала повышения с исходом `refused` — ОДНОЙ транзакцией (Р7, Ф11-14), на
+// контексте, отвязанном от отмены запроса. Отказ наружу уходит в любом исходе
+// записи. Не сложилась транзакция — след попытки пишется своей: счёт неверных
+// предъявлений есть контроль частоты, и сбой записи журнала не вправе его
+// выключить; потеря записи журнала звучит ошибкой в журнале процесса.
 func (uc *StepUpUseCase) recordRefusal(ctx context.Context, j judgedPresentation) {
-	err := uc.writeRefusal(ctx, j)
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refusalWriteBudget)
+	defer cancel()
+	err := uc.writeRefusal(wctx, j)
 	if err == nil {
 		return
 	}
-	uc.deps.Logger.Error("step-up: refused presentation not journaled", "err", err.Error())
-	if werr := recordFailureTx(ctx, uc.deps.Store, j.addressKey, j.source, j.at); werr != nil {
-		uc.deps.Logger.Error("step-up: failed attempt not recorded", "err", werr.Error())
+	uc.deps.Logger.ErrorContext(ctx, "step-up: refused presentation not journaled", j.logAttrs(err)...)
+	if werr := recordFailureTx(wctx, uc.deps.Store, j.addressKey, j.source, j.at); werr != nil {
+		uc.deps.Logger.ErrorContext(ctx, "step-up: failed attempt not recorded", j.logAttrs(werr)...)
 	}
 }
 
 func (uc *StepUpUseCase) writeRefusal(ctx context.Context, j judgedPresentation) error {
 	w, err := uc.deps.Store.Writer(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("step-up refusal: open writer: %w", err)
 	}
 	defer func() { _ = w.Rollback(ctx) }()
 	if err := recordFailure(ctx, w, j.addressKey, j.source, j.at); err != nil {
-		return err
+		return fmt.Errorf("step-up refusal: record attempt: %w", err)
 	}
 	if err := emitStepUpRefusal(ctx, w, j.user, j.session, j.method); err != nil {
-		return err
+		return fmt.Errorf("step-up refusal: journal record: %w", err)
 	}
-	return w.Commit(ctx)
+	if err := w.Commit(ctx); err != nil {
+		return fmt.Errorf("step-up refusal: commit: %w", err)
+	}
+	return nil
+}
+
+// logAttrs — чья запись не легла: идентификаторы личности и сессии и способ.
+// Ни адреса почты, ни секрета предъявления, ни носителя.
+func (j judgedPresentation) logAttrs(err error) []any {
+	return []any{"user_id", string(j.user.ID), "session_id", string(j.session.ID),
+		"method", j.method.String(), "err", err.Error()}
 }
