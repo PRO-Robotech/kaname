@@ -55,8 +55,9 @@ reviewed_at: '2026-09-18'
 
 # ─── ОДОБРЕНИЕ ВЫВОДИТСЯ ИЗ ЗАПИСИ И СОБЫТИЯ, А НЕ ИЗ СЛОВА В ШАПКЕ ──────────
 effective_approval:
-  issued: false
-  ban1_lifted: false
+  issued: true
+  issued_at: '2026-09-18T13:42:12Z'
+  ban1_lifted: true
   why: >-
     Вердикт круга 7 — APPROVED: блокирующих ноль. Б7 и Б8 круга 6 сняты ровно так, как названо, и
     проверены опытом, а не чтением; Н23…Н27 закрыты; решение по kaname#275 внесено в Р4 с честно
@@ -109,11 +110,33 @@ authority:
   allowlisted_for_role: false
 
 event:
-  type: none
-  status: not_performed
-  reason: >-
-    ТРЕТЬЯ КАТЕГОРИЯ — «не выполнилось», а не «да». Событие выпускает оркестратор под
-    `pointpu` отдельным коммитом поверх записи; до него ban #1 на редакции 9 и 10 в силе.
+  type: issue_comment
+  status: performed
+  database_id: 5730853026
+  node_id: IC_kwDOTZqgWM8AAAABVZXgog
+  url: https://github.com/PRO-Robotech/kacho/issues/1281#issuecomment-5730853026
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5730853026
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1281
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-18T13:42:12Z'
+  body_sha256: 8409dfc336b88bd3586e81a87d2fcf43cf4b8dca9dbe7ea8dc0e72be8e633b4e
+  subject_sha256: 423f7233ee3fec3e79150823dcbbef0a5c277c4b443478d464497196095d105b
+  subject_revision: 2a401287
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; вердикт, разбор и числа задним числом
+    не правились — тронуты только поля issued/issued_at/ban1_lifted и этот блок, как у записи
+    круга 5. Перемерено рецензентом: поля комментария — `gh api
+    repos/PRO-Robotech/kacho/issues/comments/5730853026` (id, node_id, user pointpu, MEMBER,
+    created_at); пять строк тела дословно, каждая ровно одна (`grep -cxF` → 1); отпечаток тела
+    — `gh api … | jq -j .body | sha256sum` → 8409dfc3…; форма команды проверена контролем на
+    событии круга 5 (→ 3f9f7d4a…, как в его записи), вариант `jq -r` добавляет перевод строки и
+    даёт c6b8caac… — другое число о другом входе. Отпечаток предмета на subject_revision —
+    `git show 2a401287:<документ> | sha256sum` → 423f7233…, совпал с объявленным.
 
 attribution:
   reviewer_kind: claude_agent
