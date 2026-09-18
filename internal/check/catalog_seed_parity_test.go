@@ -3,9 +3,12 @@
 
 package check
 
-// catalog_seed_parity_test.go — гейты каталога модуля (kacho#1030, приёмка
+// catalog_seed_parity_test.go — гейты посева каталога модуля (kacho#1030, приёмка
 // `services/iam/docs/engineering/acceptance/rule-segments-have-a-referent.md`,
-// требования Т1, Т2, Т6).
+// требование Т6). Требования Т1 и Т2 — форму ключа — держит
+// `TestIAMCT113_CatalogKeysCarryTheDeclaredForm` по ДЕЙСТВУЮЩЕЙ схеме
+// (`internal/repo/kaname/pg/catalog_key_form_test.go`, kaname#278): текст одной
+// базовой миграции неявного снятия ключа не видит.
 //
 // # Почему гейт дерева, а не проба сервиса
 //
@@ -15,7 +18,7 @@ package check
 // миграция правке не подлежит (запрет #5) — значит расхождение неизбежно, и
 // вопрос не «как его не допустить», а «как сделать его ВИДИМЫМ».
 //
-// Проверок здесь ДВЕ, и предметы у них разные: паритет посева и форма ключа.
+// Предмет здесь один — посев, — и сверяется он двумя половинами словаря.
 
 import (
 	"os"
@@ -141,39 +144,6 @@ func catalogSeedCorpus(t *testing.T) []catalogSeedMigration {
 	return corpus
 }
 
-// restrictDeferrableExempt — ключи, которым форма `RESTRICT … DEFERRABLE`
-// прощена ПОИМЁННО, с причиной и предикатом снятия.
-//
-// # Почему ведомость появилась вместе со сводом
-//
-// Пока телом гейта была одна миграция, он видел семь объявлений ключа и объявлял
-// `RESTRICT … DEFERRABLE` запрещённым «везде в этом дереве», ни разу этого не
-// измерив. Свод сделал телом всю схему — объявлений стало 42, — и обнажил два
-// объявления этой формы, оба СТАРШЕ гейта: они стояли в дереве и до свода, в
-// миграциях, которых гейт не читал (предикат:
-// `git grep -h RESTRICT <до-свода> -- 'services/iam/internal/migrations/*.sql' | grep DEFERRABLE`).
-//
-// # Почему прощены, а не объявлены находкой
-//
-// `accounts.owner_user_id → users.id` и `users.account_id → accounts.id` — цикл,
-// и отложенность на нём НЕСУЩАЯ: заведение личного аккаунта вставляет строку
-// пользователя первой, а сам аккаунт — следом, в той же транзакции. Это записано
-// решением в дереве и цитирует оба ключа поимённо (снятая миграция
-// 470001_memberships_expand.sql, комментарий у ключа членства).
-//
-// Опасность, которую называет запрет, к ним не относится: `ON DELETE RESTRICT`
-// не откладывается никогда, но откладывается ПРОВЕРКА СО СТОРОНЫ ССЫЛАЮЩЕГОСЯ —
-// ровно та половина, ради которой цикл и объявлен отложенным. Запрет остаётся
-// верным там, где автор ждёт отложенности от самого действия удаления.
-//
-// # Предикат снятия
-//
-// Запись держится, пока объявление существует; исчезнет — гейт назовёт её
-// потерявшей предмет и упадёт (проверено инъекцией). Правильность самой формы
-// для этих двух ключей ЗДЕСЬ НЕ РЕШАЕТСЯ: ведомость фиксирует, что вопрос не
-// рассматривался вместе с этим гейтом, а не что он решён.
-var restrictDeferrableExempt = []string{"accounts_owner_fk", "users_account_fk"}
-
 // literalCatalog — перечень, ВЫВЕДЕННЫЙ единственным производителем
 // (`authzmap.CatalogSeed*`), а не выписанный здесь. Второй производитель того же
 // перечня разошёлся бы с первым молча — ровно в тот момент, когда расхождение и
@@ -243,45 +213,6 @@ func TestIAMCT114_CatalogSeedMatchesTheLiteral(t *testing.T) {
 	for _, f := range findings {
 		t.Error(f)
 	}
-}
-
-// TestIAMCT113_CatalogKeysCarryTheDeclaredForm — Т1 и Т2.
-func TestIAMCT113_CatalogKeysCarryTheDeclaredForm(t *testing.T) {
-	body, err := os.ReadFile(platformtree.RequirePath(t, catalogMigrationPath))
-	if err != nil {
-		t.Fatalf("прочитать миграцию каталога: %v", err)
-	}
-
-	immediateOnly := []string{"role_rule_ref_res_fk", "role_rule_ref_verb_fk", "role_verb_type_fk"}
-	scanned, findings := auditKeyForm(string(body), immediateOnly, restrictDeferrableExempt)
-	t.Logf("осмотрено объявлений ключа: %d; проверено на немедленность: %d; "+
-		"прощено на форме RESTRICT рядом с DEFERRABLE: %d",
-		scanned, len(immediateOnly), len(restrictDeferrableExempt))
-	if scanned == 0 {
-		t.Fatal("объявлений ключа не прочитано ни одного — обход пуст, вердикт беспредметен")
-	}
-	for _, name := range immediateOnly {
-		if !containsDeclaration(string(body), name) {
-			t.Errorf("ключ %s не объявлен миграцией: гейт судил бы имя, которого в дереве нет", name)
-		}
-	}
-	for _, f := range findings {
-		t.Error(f)
-	}
-}
-
-func containsDeclaration(body, name string) bool {
-	return len(body) > 0 && len(name) > 0 &&
-		indexOf(stripSQLComments(body), "ADD CONSTRAINT "+name) >= 0
-}
-
-func indexOf(hay, needle string) int {
-	for i := 0; i+len(needle) <= len(hay); i++ {
-		if hay[i:i+len(needle)] == needle {
-			return i
-		}
-	}
-	return -1
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
