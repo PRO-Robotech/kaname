@@ -40,6 +40,14 @@
 // Не покрыто здесь и не записывается реализацией: отказ при исчерпанной
 // ёмкости проверяющего (не судился и попыткой не считается).
 //
+// # Запись отказа не принадлежит запросу
+//
+// Вердикт вынесен — след попытки и запись журнала обязаны лечь, даже если
+// клиент ушёл раньше, чем они записаны. Отдельная проба отменяет контекст
+// запроса сразу после вердикта проверяющего и ищет обе записи в базе.
+// Настоящая база здесь обязательна: подставное хранилище контекста не читает,
+// и отмена на нём не видна.
+//
 // # Близнец (§7 инв. 2)
 //
 // В каждой пробе в той же сессии исполняется успешное предъявление тем же
@@ -52,6 +60,7 @@
 package loginlanehttp_test
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha1" // #nosec G505 -- RFC 6238 задаёт HMAC-SHA1; оракул кода, не защита
 	"encoding/base32"
@@ -66,6 +75,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/humansession"
+	"github.com/PRO-Robotech/kaname/internal/assurance"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/loginlanehttp"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
@@ -215,6 +225,82 @@ func TestLaneIntegration_F11_14_RefusedSecondFactorLeavesAJournalRecordWithoutSe
 			},
 			append(append([]string{wrong}, codes...), bearerSecrets(s.bearer, fresh)...))
 	})
+}
+
+// TestLaneIntegration_F11_14_RefusalIsRecordedWhenTheCallerLeavesAfterTheVerdict
+// — отказ Ф11-13, у которого клиент ушёл после вердикта: контекст запроса
+// отменён проверяющим сразу после того, как тот вынес «не сошёлся», и ДО
+// записей об отказе. След попытки по адресу и по источнику и запись журнала
+// `refused` обязаны лежать в базе. Близнец — тот же отказ без отмены; от него
+// случай ухода отличается одним фактом.
+//
+// Церемония здесь собрана из тех же зависимостей, что у слушателя, с одной
+// заменой — проверяющий пароля, отменяющий контекст. Через слушатель момент
+// отмены не выбрать: клиент не знает, когда вынесен вердикт.
+func TestLaneIntegration_F11_14_RefusalIsRecordedWhenTheCallerLeavesAfterTheVerdict(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		leaves bool
+	}{
+		{name: "клиент ушёл после вердикта", leaves: true},
+		{name: "близнец: клиент дождался ответа", leaves: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newSessionLane(t)
+			s, sessionID := h.levelOneSession(t)
+			ctx, cancel := context.WithCancel(h.ctx)
+			defer cancel()
+			deps := h.secondFactor
+			if tc.leaves {
+				deps.Verifier = cancellingVerifier{Verifier: deps.Verifier, cancel: cancel}
+			}
+			stepUp, err := humansession.NewStepUpUseCase(deps)
+			require.NoError(t, err)
+			source := fwd()[loginlanehttp.HeaderForwardedFor]
+			byAddress, bySource := h.failureCounts(t, source)
+
+			_, err = stepUp.Execute(ctx, humansession.StepUpInput{
+				Bearer: domain.PresentedSessionBearer(s.bearer.Value), Method: assurance.MethodPassword,
+				Password: laneWrongPassword, Source: source,
+			})
+			require.ErrorIs(t, err, humansession.ErrAuthenticationFailed, "Дано: отказ предъявления Ф11-13")
+			require.Equal(t, tc.leaves, ctx.Err() != nil, "Дано: контекст запроса отменён ровно в случае ухода")
+
+			address, src := h.failureCounts(t, source)
+			require.Equal(t, byAddress+1, address, "след попытки по адресу лёг")
+			require.Equal(t, bySource+1, src, "след попытки по источнику лёг")
+			requireJournal(t, "отказ (Ф11-13)", h.presentationRecords(t, sessionID),
+				[]journalEntry{{method: "password", before: "1", after: "1", outcome: "refused"}},
+				append([]string{laneWrongPassword}, bearerSecrets(s.bearer)...))
+		})
+	}
+}
+
+// cancellingVerifier — проверяющий пароля, который выносит вердикт и сразу
+// отменяет контекст запроса: так выглядит клиент, ушедший после вердикта, но
+// до записей об отказе.
+type cancellingVerifier struct {
+	humansession.Verifier
+	cancel context.CancelFunc
+}
+
+func (v cancellingVerifier) Verify(stored domain.LoginVerifier, presented string) passwordverify.Result {
+	res := v.Verifier.Verify(stored, presented)
+	v.cancel()
+	return res
+}
+
+// failureCounts — следов неверных предъявлений в базе по адресу личности и по
+// источнику.
+func (h *sessionLane) failureCounts(t *testing.T, source string) (byAddress, bySource int) {
+	t.Helper()
+	require.NoError(t, h.pool.QueryRow(h.ctx, `
+		SELECT count(*) FILTER (WHERE scope = $1 AND key = $2),
+		       count(*) FILTER (WHERE scope = $3 AND key = $4)
+		  FROM login_failures`,
+		string(humansession.FailureByAddress), humansession.AddressKey(h.email),
+		string(humansession.FailureBySource), source).Scan(&byAddress, &bySource))
+	return byAddress, bySource
 }
 
 // enrolledSecondFactor — «Дано: у личности заведён второй фактор» (Ф11-30):
