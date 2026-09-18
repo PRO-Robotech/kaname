@@ -95,7 +95,8 @@ type liveRaise struct {
 	// triggerFunction — функция возвращает `trigger`, то есть исполнить её
 	// способен только триггер, и достижимость читается каталогом.
 	triggerFunction bool
-	// executed — функцию исполняет хотя бы один живой (не выключенный) триггер.
+	// executed — функцию исполняет хотя бы один триггер, срабатывающий в обычной
+	// сессии (tgenabled 'O' либо 'A'); выключенный и реплика-триггер не в счёт.
 	executed bool
 }
 
@@ -141,11 +142,16 @@ JOIN pg_catalog.pg_class t ON t.oid = x.indrelid
 JOIN pg_catalog.pg_namespace n ON n.oid = i.relnamespace
 WHERE ` + userSchemaFilter
 
+// tgenabled: 'O' — обычный (origin/local), 'A' — ALWAYS, 'R' — только в режиме
+// реплики, 'D' — выключен. В ОБЫЧНОЙ сессии (session_replication_role='origin')
+// срабатывают только 'O' и 'A'; 'R' и 'D' — нет. Поэтому имя, поднимаемое
+// функцией, живо лишь когда её исполняет триггер 'O' либо 'A': реплика-триггер в
+// обычной сессии молчит, и его имя сервер не назовёт.
 const liveFunctionsSQL = `
 SELECT n.nspname || '.' || p.proname, p.prosrc,
        p.prorettype = 'pg_catalog.trigger'::pg_catalog.regtype,
        EXISTS (SELECT 1 FROM pg_catalog.pg_trigger tg
-               WHERE tg.tgfoid = p.oid AND tg.tgenabled <> 'D')
+               WHERE tg.tgfoid = p.oid AND tg.tgenabled IN ('O', 'A'))
 FROM pg_catalog.pg_proc p
 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
 JOIN pg_catalog.pg_language l ON l.oid = p.prolang
@@ -301,6 +307,20 @@ func (s liveSchema) foreignKeysNamed(name string) []liveConstraint {
 	return out
 }
 
+// foreignKeysByRef — внешние ключи с этой парой «таблица + имя». Имя ограничения
+// уникально лишь В ПРЕДЕЛАХ ТАБЛИЦЫ, поэтому ведомость послаблений сопоставляется
+// парой, а не именем: тот же ключ на другой таблице — чужой предмет, и прощать
+// его вместе с названным значило бы открыть ему слепую зону.
+func (s liveSchema) foreignKeysByRef(table, name string) []liveConstraint {
+	var out []liveConstraint
+	for _, c := range s.foreignKeysNamed(name) {
+		if c.relation == table {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func (s liveSchema) foreignKeys() []liveConstraint {
 	var out []liveConstraint
 	for _, c := range s.constraints {
@@ -348,8 +368,9 @@ func (s liveSchema) absenceOf(name string) string {
 	}
 	if len(orphans) > 0 {
 		sort.Strings(orphans)
-		return "имя поднимает функция " + strings.Join(orphans, ", ") + ", но ни один живой " +
-			"триггер её не исполняет — триггер снят (явно либо неявно: DROP COLUMN/DROP TABLE … CASCADE)"
+		return "имя поднимает функция " + strings.Join(orphans, ", ") + ", но ни один срабатывающий " +
+			"в обычной сессии триггер её не исполняет — триггер снят (явно либо неявно: " +
+			"DROP COLUMN/DROP TABLE … CASCADE), выключен либо включён только для реплики"
 	}
 	for _, ix := range s.indexes {
 		if ix.name == name && !ix.unique {

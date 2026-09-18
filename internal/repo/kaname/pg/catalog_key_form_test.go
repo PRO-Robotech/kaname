@@ -48,11 +48,20 @@ import (
 	"testing"
 )
 
+// keyRef — пара «таблица + имя ключа». Имя ограничения уникально лишь в пределах
+// таблицы, поэтому и перечень немедленных, и ведомость послаблений адресуют ключ
+// парой: тот же ключ на другой таблице — иной предмет.
+type keyRef struct{ table, name string }
+
 // catalogImmediateOnlyKeys — ключи проекции правила, обязанные проверяться
 // немедленно: отложенный отказ всплывает на коммите, где подсказка одна на
 // транзакцию, а сегментов в правиле много — сценарии отказа теряют своего
 // производителя (`fkText`, ветви `role_rule_ref_*`, `role_verb_type_fk`).
-var catalogImmediateOnlyKeys = []string{"role_rule_ref_res_fk", "role_rule_ref_verb_fk", "role_verb_type_fk"}
+var catalogImmediateOnlyKeys = []keyRef{
+	{"kaname.role_rule_ref", "role_rule_ref_res_fk"},
+	{"kaname.role_rule_ref", "role_rule_ref_verb_fk"},
+	{"kaname.role_verb", "role_verb_type_fk"},
+}
 
 // restrictDeferrableExempt — ключи, которым форма `RESTRICT … DEFERRABLE`
 // прощена ПОИМЁННО, с причиной и предикатом снятия.
@@ -72,14 +81,21 @@ var catalogImmediateOnlyKeys = []string{"role_rule_ref_res_fk", "role_rule_ref_v
 //
 // # Предикат снятия — внешний факт, а не текст
 //
-// Запись держится, пока ключ с этим именем ЕСТЬ в действующей схеме и НЕСЁТ
-// прощённую форму. Снят ключ — явно либо неявно (снятие колонки
+// Запись держится, пока ключ этой ПАРЫ «таблица + имя» ЕСТЬ в действующей схеме и
+// НЕСЁТ прощённую форму. Снят ключ — явно либо неявно (снятие колонки
 // `users.account_id` по kacho#1351 унесёт `users_account_fk` без единой строки
 // о нём), — либо ключ сменил форму, и гейт назовёт запись потерявшей предмет:
 // «снимите запись». Правильность самой формы для этих двух ключей ЗДЕСЬ НЕ
 // РЕШАЕТСЯ: ведомость фиксирует, что вопрос не рассматривался вместе с этим
 // гейтом, а не что он решён.
-var restrictDeferrableExempt = []string{"accounts_owner_fk", "users_account_fk"}
+//
+// Ведомость адресует ключ ПАРОЙ, а не именем: имя уникально лишь в пределах
+// таблицы, и по-именное прощение открыло бы слепую зону всякому одноимённому
+// ключу на ЛЮБОЙ другой таблице (проверено инъекцией «чужая таблица»).
+var restrictDeferrableExempt = []keyRef{
+	{"kaname.accounts", "accounts_owner_fk"},
+	{"kaname.users", "users_account_fk"},
+}
 
 // TestIAMCT113_CatalogKeysCarryTheDeclaredForm — Т1 и Т2.
 func TestIAMCT113_CatalogKeysCarryTheDeclaredForm(t *testing.T) {
@@ -97,10 +113,14 @@ func TestIAMCT113_CatalogKeysCarryTheDeclaredForm(t *testing.T) {
 
 // auditLiveKeyForm — ЧИСТЫЙ предикат гейта над действующей схемой. Вынесен,
 // чтобы инъекция гоняла ровно его на схеме, которую строит настоящий сервер.
-func auditLiveKeyForm(s liveSchema, immediateOnly, exempt []string) (census string, findings []string) {
-	exempted := map[string]bool{}
-	for _, n := range exempt {
-		exempted[n] = true
+//
+// И перечень немедленных, и ведомость послаблений адресуют ключ ПАРОЙ «таблица +
+// имя»: имя уникально лишь в пределах таблицы (`live_schema_test.go`
+// §foreignKeysByRef).
+func auditLiveKeyForm(s liveSchema, immediateOnly, exempt []keyRef) (census string, findings []string) {
+	exempted := map[keyRef]bool{}
+	for _, r := range exempt {
+		exempted[r] = true
 	}
 	keys := s.foreignKeys()
 	restrictDeferrable, forgiven := 0, 0
@@ -109,7 +129,7 @@ func auditLiveKeyForm(s liveSchema, immediateOnly, exempt []string) (census stri
 			continue
 		}
 		restrictDeferrable++
-		if exempted[k.name] {
+		if exempted[keyRef{k.relation, k.name}] {
 			forgiven++
 			continue
 		}
@@ -119,17 +139,17 @@ func auditLiveKeyForm(s liveSchema, immediateOnly, exempt []string) (census stri
 	}
 
 	immediateFound := 0
-	for _, name := range immediateOnly {
-		named := s.foreignKeysNamed(name)
+	for _, ref := range immediateOnly {
+		named := s.foreignKeysByRef(ref.table, ref.name)
 		if len(named) == 0 {
-			findings = append(findings, "ключ "+name+" в действующей схеме не существует: гейт судил бы "+
-				"имя, которого нет, — снят явно либо унесён неявно (DROP COLUMN, DROP TABLE, CASCADE)")
+			findings = append(findings, "ключ "+ref.name+" на "+ref.table+" в действующей схеме не существует: "+
+				"гейт судил бы имя, которого нет, — снят явно либо унесён неявно (DROP COLUMN, DROP TABLE, CASCADE)")
 			continue
 		}
 		immediateFound++
 		for _, c := range named {
 			if c.initiallyDeferred {
-				findings = append(findings, "ключ "+name+" на "+c.relation+" объявлен INITIALLY DEFERRED: "+
+				findings = append(findings, "ключ "+ref.name+" на "+c.relation+" объявлен INITIALLY DEFERRED: "+
 					"отказ всплывёт на коммите, где подсказка одна на транзакцию, а сегментов "+
 					"в правиле много — сценарии отказа теряют своего производителя")
 			}
@@ -138,14 +158,14 @@ func auditLiveKeyForm(s liveSchema, immediateOnly, exempt []string) (census stri
 
 	// Самоистечение: запись, у которой в ДЕЙСТВУЮЩЕЙ схеме нет предмета, —
 	// находка. Без этого ведомость пережила бы снятие ключа и осталась бы слепой
-	// зоной, выданной вперёд следующему ключу того же имени.
-	for _, name := range exempt {
-		named := s.foreignKeysNamed(name)
+	// зоной, выданной вперёд следующему ключу той же пары.
+	for _, ref := range exempt {
+		named := s.foreignKeysByRef(ref.table, ref.name)
 		if len(named) == 0 {
-			findings = append(findings, "послабление на RESTRICT рядом с DEFERRABLE названо для ключа "+name+
-				", а в действующей схеме такого ключа нет (снят явно либо унесён неявно — DROP COLUMN, "+
-				"DROP TABLE, CASCADE): исключению нечего исключать — снимите запись, иначе следующий "+
-				"ключ того же имени уедет под него незамеченным")
+			findings = append(findings, "послабление на RESTRICT рядом с DEFERRABLE названо для ключа "+ref.name+
+				" на "+ref.table+", а в действующей схеме такого ключа нет (снят явно либо унесён неявно — "+
+				"DROP COLUMN, DROP TABLE, CASCADE): исключению нечего исключать — снимите запись, иначе следующий "+
+				"ключ той же пары уедет под него незамеченным")
 			continue
 		}
 		carries := false
@@ -155,8 +175,8 @@ func auditLiveKeyForm(s liveSchema, immediateOnly, exempt []string) (census stri
 			}
 		}
 		if !carries {
-			findings = append(findings, "послабление на RESTRICT рядом с DEFERRABLE названо для ключа "+name+
-				", а ключ этой формы больше не несёт: исключению нечего исключать — снимите запись")
+			findings = append(findings, "послабление на RESTRICT рядом с DEFERRABLE названо для ключа "+ref.name+
+				" на "+ref.table+", а ключ этой формы больше не несёт: исключению нечего исключать — снимите запись")
 		}
 	}
 	sort.Strings(findings)

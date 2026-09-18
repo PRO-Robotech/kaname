@@ -35,8 +35,8 @@ var keyFormSchema = []string{
 }
 
 var (
-	keyFormImmediate = []string{"members_ref_fk"}
-	keyFormExempt    = []string{"members_owner_fk", "owners_member_fk"}
+	keyFormImmediate = []keyRef{{"public.members", "members_ref_fk"}}
+	keyFormExempt    = []keyRef{{"public.members", "members_owner_fk"}, {"public.owners", "owners_member_fk"}}
 )
 
 func keyFormAfter(extra ...string) []string {
@@ -71,7 +71,7 @@ func TestIAMCT113_Injection_LiveSchema(t *testing.T) {
 	t.Run("инъекция: исключение, чей ключ НЕЯВНО унёс DROP COLUMN, — «снимите запись» (kaname#278)", func(t *testing.T) {
 		s := liveSchemaAfter(t, keyFormAfter(`ALTER TABLE owners DROP COLUMN member_id`)...)
 		_, findings := auditLiveKeyForm(s, keyFormImmediate, keyFormExempt)
-		requireFindings(t, findings, "owners_member_fk, а в действующей схеме такого ключа нет")
+		requireFindings(t, findings, "owners_member_fk на public.owners, а в действующей схеме такого ключа нет")
 		if !strings.Contains(findings[0], "снимите запись") {
 			t.Errorf("находка обязана назвать исход: %q", findings[0])
 		}
@@ -81,8 +81,23 @@ func TestIAMCT113_Injection_LiveSchema(t *testing.T) {
 		s := liveSchemaAfter(t, keyFormAfter(
 			`ALTER TABLE owners DROP CONSTRAINT owners_member_fk`,
 			`ALTER TABLE owners DROP COLUMN member_id`)...)
-		_, findings := auditLiveKeyForm(s, keyFormImmediate, []string{"members_owner_fk"})
+		_, findings := auditLiveKeyForm(s, keyFormImmediate, []keyRef{{"public.members", "members_owner_fk"}})
 		requireFindings(t, findings)
+	})
+
+	// МАСКА-2 (check-verifier ⛔): по-именное прощение открывало бы слепую зону
+	// одноимённому ключу на ЛЮБОЙ другой таблице. Здесь `owners_member_fk` живёт
+	// и на своей прощённой таблице (молчит), и на чужой (обязан быть находкой).
+	// На по-именной ведомости оба прощались бы — 0 находок; на по-парной чужой
+	// краснеет, свой прощён.
+	t.Run("инъекция МАСКА-2: тот же ключ на ЧУЖОЙ таблице не прощается по имени", func(t *testing.T) {
+		s := liveSchemaAfter(t, keyFormAfter(
+			`CREATE TABLE zz_probe_holders (id text PRIMARY KEY, owner_id text)`,
+			`ALTER TABLE zz_probe_holders ADD CONSTRAINT owners_member_fk FOREIGN KEY (owner_id)
+			   REFERENCES owners(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED`)...)
+		_, findings := auditLiveKeyForm(s, keyFormImmediate, keyFormExempt)
+		requireFindings(t, findings,
+			"ключ owners_member_fk на public.zz_probe_holders несёт RESTRICT рядом с DEFERRABLE")
 	})
 
 	t.Run("инъекция: исключение, чей ключ сменил форму, — «снимите запись»", func(t *testing.T) {
@@ -91,12 +106,12 @@ func TestIAMCT113_Injection_LiveSchema(t *testing.T) {
 			`ALTER TABLE owners ADD CONSTRAINT owners_member_fk FOREIGN KEY (member_id)
 			   REFERENCES members(id) ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED`)...)
 		_, findings := auditLiveKeyForm(s, keyFormImmediate, keyFormExempt)
-		requireFindings(t, findings, "owners_member_fk, а ключ этой формы больше не несёт")
+		requireFindings(t, findings, "owners_member_fk на public.owners, а ключ этой формы больше не несёт")
 	})
 
 	t.Run("инъекция: та же форма у НЕпрощённого ключа — находка", func(t *testing.T) {
 		s := liveSchemaAfter(t, keyFormSchema...)
-		_, findings := auditLiveKeyForm(s, keyFormImmediate, []string{"members_owner_fk"})
+		_, findings := auditLiveKeyForm(s, keyFormImmediate, []keyRef{{"public.members", "members_owner_fk"}})
 		requireFindings(t, findings, "ключ owners_member_fk на public.owners несёт RESTRICT рядом с DEFERRABLE")
 	})
 
@@ -128,6 +143,6 @@ func TestIAMCT113_Injection_LiveSchema(t *testing.T) {
 	t.Run("инъекция: немедленный ключ неявно унесён DROP COLUMN", func(t *testing.T) {
 		s := liveSchemaAfter(t, keyFormAfter(`ALTER TABLE members DROP COLUMN ref_id`)...)
 		_, findings := auditLiveKeyForm(s, keyFormImmediate, keyFormExempt)
-		requireFindings(t, findings, "ключ members_ref_fk в действующей схеме не существует")
+		requireFindings(t, findings, "ключ members_ref_fk на public.members в действующей схеме не существует")
 	})
 }

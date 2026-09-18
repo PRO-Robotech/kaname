@@ -72,10 +72,15 @@ import (
 type mappedNames struct {
 	names map[string]token.Position
 	// reads — всех чтений `ConstraintName` в файле; bySwitch / byComparison —
-	// из них опознанных как ветвь отображения; unclassified — позиции чтений,
-	// чью форму распознаватель не знает.
+	// из них опознанных как ветвь отображения.
 	reads, bySwitch, byComparison int
-	unclassified                  []string
+	// unclassified — позиции ФОРМ, в которых имя ветви могло бы стоять, но
+	// распознаватель прочитать его не может: чтение `ConstraintName` ни ветвью
+	// switch, ни сравнением с литералом · значение `case` в switch по
+	// `ConstraintName`, не являющееся строковым литералом (именованная
+	// константа, склейка строк). Обе формы дают ОТКАЗ, а не молчание: имя,
+	// которого разбор не видит, — слепая зона, а не отсутствие предмета.
+	unclassified []string
 }
 
 func isConstraintNameRead(e ast.Expr) (*ast.SelectorExpr, bool) {
@@ -116,10 +121,18 @@ func mappedConstraintNamesIn(fset *token.FileSet, f *ast.File) mappedNames {
 				if !ok {
 					continue
 				}
+				// cc.List пуст у `default:` — законно, пропускается. Непустое
+				// значение `case`, не являющееся строковым литералом, — форма,
+				// которую разбор не читает: за именованной константой либо
+				// склейкой строк может стоять имя снятого ограничения, и молча
+				// пропустить его значило бы вернуть ровно ту слепоту, которую
+				// закрывает симметричная ветвь сравнения ниже.
 				for _, e := range cc.List {
 					if v, ok := stringLiteral(e); ok {
 						out.names[v] = fset.Position(e.Pos())
+						continue
 					}
+					out.unclassified = append(out.unclassified, fset.Position(e.Pos()).String())
 				}
 			}
 		case *ast.BinaryExpr:
@@ -185,8 +198,9 @@ func TestRefusalTextNeverNamesARetiredConstraint(t *testing.T) {
 		len(mapped.names), len(dead))
 
 	if len(mapped.unclassified) > 0 {
-		t.Errorf("ПРЕДПОСЫЛКА распознавателя нарушена: %d чтений ConstraintName ни ветвь switch, ни "+
-			"сравнение с литералом — отображение ли это, разбор решить не может:\n  %s\n"+
+		t.Errorf("ПРЕДПОСЫЛКА распознавателя нарушена: %d форм, где имя ветви могло бы стоять, разбор "+
+			"прочитать не может (чтение ConstraintName не в ветви switch и не в сравнении с литералом, "+
+			"либо значение case не строковым литералом) — отображение ли это, разбор решить не может:\n  %s\n"+
 			"Научите распознаватель этой форме (с инъекцией), прежде чем судить.",
 			len(mapped.unclassified), strings.Join(mapped.unclassified, "\n  "))
 	}

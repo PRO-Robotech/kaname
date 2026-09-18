@@ -116,7 +116,7 @@ func TestConstraintLivenessGateInjection(t *testing.T) {
 		dead := deadMappedConstraints(s, mappedFrom(liveNames...))
 		requireDead(t, dead, "widgets_guard_raise", "widgets_name_check", "widgets_owner_fk",
 			"widgets_owner_name_uniq", "widgets_pkey")
-		if !strings.Contains(dead[0], "ни один живой триггер") {
+		if !strings.Contains(dead[0], "ни один срабатывающий в обычной сессии триггер") {
 			t.Errorf("имя сироты обязано называть функцию и снятый триггер: %q", dead[0])
 		}
 	})
@@ -129,6 +129,20 @@ func TestConstraintLivenessGateInjection(t *testing.T) {
 	t.Run("инъекция: выключенный триггер имени не поднимает", func(t *testing.T) {
 		s := liveSchemaAfter(t, widgetsAfter(`ALTER TABLE widgets DISABLE TRIGGER widgets_guard_trg`)...)
 		requireDead(t, deadMappedConstraints(s, mappedFrom(liveNames...)), "widgets_guard_raise")
+	})
+
+	t.Run("инъекция МИНОР: реплика-триггер в обычной сессии имени не поднимает", func(t *testing.T) {
+		s := liveSchemaAfter(t, widgetsAfter(`ALTER TABLE widgets ENABLE REPLICA TRIGGER widgets_guard_trg`)...)
+		dead := deadMappedConstraints(s, mappedFrom(liveNames...))
+		requireDead(t, dead, "widgets_guard_raise")
+		if !strings.Contains(dead[0], "только для реплики") {
+			t.Errorf("находка обязана назвать реплика-режим триггера: %q", dead[0])
+		}
+	})
+
+	t.Run("законный близнец: триггер ALWAYS имя поднимает — молчание", func(t *testing.T) {
+		s := liveSchemaAfter(t, widgetsAfter(`ALTER TABLE widgets ENABLE ALWAYS TRIGGER widgets_guard_trg`)...)
+		requireDead(t, deadMappedConstraints(s, mappedFrom("widgets_guard_raise")))
 	})
 
 	t.Run("инъекция: снятие ПО ИМЕНИ — ограничение и индекс", func(t *testing.T) {
@@ -189,7 +203,9 @@ END $$`)...)
 }
 
 // TestConstraintLivenessRecognizerForms — разбор Go знает ОБЕ законные формы
-// ветви и называет чтение в третьей, а не молчит о нём.
+// ветви (switch по ConstraintName и сравнение с литералом), называет чтение в
+// третьей форме, а НЕ-литеральное значение `case` называет так же — молча его
+// не пропускает.
 func TestConstraintLivenessRecognizerForms(t *testing.T) {
 	const src = `package x
 
@@ -211,6 +227,22 @@ func a(e *E) string {
 	log(e.ConstraintName)
 	return ""
 }
+
+func b(e *E) string {
+	// именованная константа значением case — форма, которой разбор не знает:
+	// за ней может стоять имя снятого ограничения, и молчать о ней нельзя
+	switch e.ConstraintName {
+	case retiredProbeName:
+		return "x"
+	case "b_literal_ok":
+		return "y"
+	}
+	// default в switch по ConstraintName законен и не является формой имени
+	switch e.ConstraintName {
+	default:
+		return "z"
+	}
+}
 `
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "synthetic.go", src, parser.ParseComments)
@@ -224,7 +256,7 @@ func a(e *E) string {
 		names = append(names, n)
 	}
 	want := map[string]bool{"by_switch_one": true, "by_switch_two": true, "by_equality": true,
-		"by_reversed": true, "by_inequality": true}
+		"by_reversed": true, "by_inequality": true, "b_literal_ok": true}
 	if len(names) != len(want) {
 		t.Fatalf("имена ветвей: ждали %d, прочитано %v", len(want), names)
 	}
@@ -233,11 +265,22 @@ func a(e *E) string {
 			t.Fatalf("прочитано не имя ветви: %q (все: %v)", n, names)
 		}
 	}
-	if got.reads != 5 || got.bySwitch != 1 || got.byComparison != 3 {
-		t.Fatalf("перепись разбора: чтений %d, switch %d, сравнений %d — ждали 5, 1, 3",
+	if got.reads != 7 || got.bySwitch != 3 || got.byComparison != 3 {
+		t.Fatalf("перепись разбора: чтений %d, switch %d, сравнений %d — ждали 7, 3, 3",
 			got.reads, got.bySwitch, got.byComparison)
 	}
-	if len(got.unclassified) != 1 || !strings.HasPrefix(got.unclassified[0], "synthetic.go:18:") {
+	// Две формы, которых разбор прочитать не может: чтение в третьей форме
+	// (`log(e.ConstraintName)`, строка 18) и значение case не-литералом
+	// (`case retiredProbeName`, строка 26). `default:` в счёт НЕ идёт.
+	if len(got.unclassified) != 2 {
+		t.Fatalf("нечитаемых форм ждали 2 (чтение вне форм + не-литеральный case), получено %v",
+			got.unclassified)
+	}
+	joined := strings.Join(got.unclassified, " ")
+	if !strings.Contains(joined, "synthetic.go:18:") {
 		t.Fatalf("чтение вне обеих форм обязано быть названо позицией, получено %v", got.unclassified)
+	}
+	if !strings.Contains(joined, "synthetic.go:26:") {
+		t.Fatalf("не-литеральное значение case обязано быть названо позицией, получено %v", got.unclassified)
 	}
 }
