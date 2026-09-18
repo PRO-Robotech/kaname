@@ -26,7 +26,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -256,25 +255,41 @@ func (u *WhoAmIUseCase) collectAccounts(ctx context.Context, userID domain.UserI
 	return out, nil
 }
 
-// classifyRoleID maps a role id to a coarse role tag (admin / editor /
-// viewer). Mirrors UserService.Invite::resolveRoleRelation: looks at the
-// trailing segment of the role id, falls back to `viewer` (least
-// privilege) for anything unrecognised. Avoids a per-binding Roles().Get
-// round-trip — the role id is the source of truth for the UI tag.
+// systemRoleTag maps a SEEDED system-role id to its coarse UI tag. Role ids in
+// this tree are `rol`+suffix with NO dot — either name-derived (domain.SystemRoleID:
+// `rol` || substr(md5(name),1,17)) or a hand-rolled pinned constant — so the tag
+// is recovered from the id's identity, not from a trailing name segment (there is
+// none). Built once from the canonical role NAMES (view/edit/admin/owner —
+// domain/role_catalog.go) via the same derivation the seed uses, plus the two
+// hand-rolled pinned system roles. SystemRoleID("owner") == OwnerRoleID and
+// SystemRoleID("admin") == ClusterAdminRoleID; the pinned aliases are listed too
+// so the map does not depend on that equality holding.
+var systemRoleTag = map[domain.RoleID]string{
+	// canonical system roles — id derived from the role name (view/edit map to
+	// the viewer/editor tiers; the extant names are `view`/`edit`).
+	domain.SystemRoleID("view"):  "viewer",
+	domain.SystemRoleID("edit"):  "editor",
+	domain.SystemRoleID("admin"): "admin",
+	domain.SystemRoleID("owner"): "owner",
+	// pinned system-role ids (owner/cluster-admin name-derived, sysadmin/
+	// sysviewer hand-rolled — see domain.constants_extended).
+	domain.RoleID(domain.OwnerRoleID):        "owner",
+	domain.RoleID(domain.ClusterAdminRoleID): "admin",
+	domain.RoleID(domain.SystemAdminRoleID):  "admin",
+	domain.RoleID(domain.SystemViewerRoleID): "viewer",
+}
+
+// classifyRoleID maps a role id to a coarse role tag (owner / admin / editor /
+// viewer) for the WhoAmI UI snapshot. It matches the id against the seeded
+// system-role ids (systemRoleTag); every other id — including a tenant's custom
+// role (random id) or an unknown seed — falls back to `viewer` (least
+// privilege). The tag is derived from the role id alone, avoiding a per-binding
+// Roles().Get round-trip. The field is a coarse UI hint that gates nothing
+// (per-RPC authz lives at the api-gateway), so under-claiming privilege on an
+// unrecognised id is the safe default.
 func classifyRoleID(roleID domain.RoleID) string {
-	v := strings.ToLower(string(roleID))
-	if i := strings.LastIndexByte(v, '.'); i >= 0 {
-		v = v[i+1:]
-	}
-	switch v {
-	case "admin":
-		return "admin"
-	case "edit", "editor":
-		return "editor"
-	case "view", "viewer":
-		return "viewer"
-	case "owner":
-		return "owner"
+	if tag, ok := systemRoleTag[roleID]; ok {
+		return tag
 	}
 	return "viewer"
 }

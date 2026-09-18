@@ -242,13 +242,15 @@ func TestWhoAmI_User_FullSnapshot(t *testing.T) {
 			acc2: {ID: acc2, Name: "Second", OwnerUserID: "usr000000000000other"},
 		},
 		bindings: []domain.AccessBinding{
-			// editor binding on acc2 — should produce "editor" tag.
+			// editor binding on acc2 — should produce "editor" tag. Uses the
+			// SEEDED `edit` system-role id (rol+derived, no dot), the form the
+			// tree actually stores — not the vacuous `iam.editor` (whoami#279).
 			{
 				SubjectType:  "user",
 				SubjectID:    uid,
 				ResourceType: "account",
 				ResourceID:   acc2,
-				RoleID:       "iam.editor",
+				RoleID:       domain.SystemRoleID("edit"),
 				Status:       domain.AccessBindingStatusActive,
 			},
 			// REVOKED binding on acc1 — must NOT contribute a tag.
@@ -257,7 +259,7 @@ func TestWhoAmI_User_FullSnapshot(t *testing.T) {
 				SubjectID:    uid,
 				ResourceType: "account",
 				ResourceID:   acc1,
-				RoleID:       "iam.admin",
+				RoleID:       domain.RoleID(domain.ClusterAdminRoleID),
 				Status:       domain.AccessBindingStatusRevoked,
 			},
 		},
@@ -313,6 +315,77 @@ func TestWhoAmI_User_FullSnapshot(t *testing.T) {
 	}
 	if time.Since(res.CheckedAt) > time.Minute {
 		t.Errorf("CheckedAt unrealistic: %v", res.CheckedAt)
+	}
+}
+
+// TestWhoAmI_OwnerAccount_TagsOwnerOnly reproduces whoami#279: the owner of
+// their own account carries an ACTIVE account-scoped binding to OwnerRoleID
+// (auto-bound at account create). classifyRoleID must tag that id "owner", so
+// the account membership is exactly ["owner"] — NOT ["owner","viewer"], which is
+// what the dead dotted-segment classifier produced (OwnerRoleID has no dot →
+// fell through to the viewer fallback, then merged with the owner-implicit tag).
+func TestWhoAmI_OwnerAccount_TagsOwnerOnly(t *testing.T) {
+	const uid = "usr0000000000000ownr"
+	const acc = "acc0000000000000ownd"
+	repo := &fakeWhoAmIRepo{
+		users:      map[domain.UserID]domain.User{uid: {ID: uid, Email: "o@x", DisplayName: "O"}},
+		accountsBy: map[domain.UserID][]domain.AccountID{uid: {acc}},
+		accounts:   map[domain.AccountID]domain.Account{acc: {ID: acc, Name: "Own", OwnerUserID: uid}},
+		bindings: []domain.AccessBinding{{
+			SubjectType:  "user",
+			SubjectID:    uid,
+			ResourceType: "account",
+			ResourceID:   acc,
+			RoleID:       domain.RoleID(domain.OwnerRoleID),
+			Status:       domain.AccessBindingStatusActive,
+		}},
+	}
+	uc := NewWhoAmIUseCase(repo, nil)
+	ctx := operations.WithPrincipal(context.Background(),
+		operations.Principal{Type: "user", ID: uid})
+	res, err := uc.Execute(ctx)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(res.Accounts) != 1 {
+		t.Fatalf("expected 1 account; got %d", len(res.Accounts))
+	}
+	if got := res.Accounts[0].Roles; len(got) != 1 || got[0] != "owner" {
+		t.Errorf("owner account roles = %v; want [owner]", got)
+	}
+}
+
+// TestWhoAmI_AdminMember_NotDemotedToViewer reproduces the other half of
+// whoami#279: an account MEMBER (not the owner) bound to the admin system-role
+// must be tagged "admin", not silently demoted to "viewer" by the fallback.
+func TestWhoAmI_AdminMember_NotDemotedToViewer(t *testing.T) {
+	const uid = "usr0000000000000mbr1"
+	const acc = "acc0000000000000org1"
+	repo := &fakeWhoAmIRepo{
+		users:      map[domain.UserID]domain.User{uid: {ID: uid, Email: "m@x"}},
+		accountsBy: map[domain.UserID][]domain.AccountID{uid: {acc}},
+		accounts:   map[domain.AccountID]domain.Account{acc: {ID: acc, Name: "Org", OwnerUserID: "usr000000000000other"}},
+		bindings: []domain.AccessBinding{{
+			SubjectType:  "user",
+			SubjectID:    uid,
+			ResourceType: "account",
+			ResourceID:   acc,
+			RoleID:       domain.SystemRoleID("admin"),
+			Status:       domain.AccessBindingStatusActive,
+		}},
+	}
+	uc := NewWhoAmIUseCase(repo, nil)
+	ctx := operations.WithPrincipal(context.Background(),
+		operations.Principal{Type: "user", ID: uid})
+	res, err := uc.Execute(ctx)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(res.Accounts) != 1 {
+		t.Fatalf("expected 1 account; got %d", len(res.Accounts))
+	}
+	if got := res.Accounts[0].Roles; len(got) != 1 || got[0] != "admin" {
+		t.Errorf("admin member roles = %v; want [admin]", got)
 	}
 }
 
@@ -399,23 +472,34 @@ func TestWhoAmI_ServiceAccount_NoAccountListing(t *testing.T) {
 	}
 }
 
-func TestClassifyRoleID_HappyPath(t *testing.T) {
+// TestClassifyRoleID_SeededIDs pins the tag on the role ids the tree ACTUALLY
+// produces: `rol`+derived/pinned suffix, no dot. The prior HappyPath fixed the
+// answer on `iam.<tag>` dotted ids that no seed emits (whoami#279) — a vacuous
+// test that held while every real binding fell through to `viewer`.
+//
+// Legal twin: `view` → "viewer" (an id that already tagged viewer and MUST keep
+// doing so). Injection axis: `owner` → "owner" (returning the fallback for
+// OwnerRoleID reddens the probe).
+func TestClassifyRoleID_SeededIDs(t *testing.T) {
 	cases := []struct {
-		id, want string
+		name string
+		id   domain.RoleID
+		want string
 	}{
-		{"iam.admin", "admin"},
-		{"iam.editor", "editor"},
-		{"iam.viewer", "viewer"},
-		{"iam.edit", "editor"},
-		{"iam.view", "viewer"},
-		{"iam.owner", "owner"},
-		{"customRole", "viewer"},   // unknown → viewer (least privilege)
-		{"", "viewer"},             // empty → viewer
-		{"compute.admin", "admin"}, // dotted ids: last segment classified
+		{"owner (personal-account auto-binding, pinned)", domain.RoleID(domain.OwnerRoleID), "owner"},
+		{"cluster-admin (pinned)", domain.RoleID(domain.ClusterAdminRoleID), "admin"},
+		{"system.admin (pinned)", domain.RoleID(domain.SystemAdminRoleID), "admin"},
+		{"system.viewer (pinned)", domain.RoleID(domain.SystemViewerRoleID), "viewer"},
+		{"admin (name-derived == cluster-admin)", domain.SystemRoleID("admin"), "admin"},
+		{"edit (name-derived)", domain.SystemRoleID("edit"), "editor"},
+		{"view (name-derived, legal twin)", domain.SystemRoleID("view"), "viewer"},
+		{"owner (name-derived == pinned)", domain.SystemRoleID("owner"), "owner"},
+		{"unknown custom role → viewer (least privilege)", domain.RoleID("rol0123456789abcdef0"), "viewer"},
+		{"empty → viewer", domain.RoleID(""), "viewer"},
 	}
 	for _, c := range cases {
-		if got := classifyRoleID(domain.RoleID(c.id)); got != c.want {
-			t.Errorf("classifyRoleID(%q) = %q; want %q", c.id, got, c.want)
+		if got := classifyRoleID(c.id); got != c.want {
+			t.Errorf("%s: classifyRoleID(%q) = %q; want %q", c.name, c.id, got, c.want)
 		}
 	}
 }
