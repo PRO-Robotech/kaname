@@ -17,9 +17,21 @@ package humansession
 // носитель перевыпускается, момент последнего предъявления сдвигается; момент
 // аутентификации не двигает ничто. Неудачное предъявление сессию не гасит и не
 // понижает (Ф11-30). Ответ называет достигнутый уровень и чего не хватает.
+//
+// # Журнал повышения — на каждом СУЖДЁННОМ предъявлении (Ф11-14)
+//
+// Принятое и отклонённое предъявление оставляют по записи журнала одного вида;
+// исход — её поле (`accepted` / `refused`). Отказ суждённый ровно там, где он
+// считается попыткой (Р7), поэтому запись об отказе и след попытки пишутся
+// одним условием и одной транзакцией. У пароля это всякий окончательный
+// несовпавший исход проверяющего — наружу он неотличим от неверного пароля;
+// у кода — «не сошёлся» и «повторён». Попыткой не считаются и записи не
+// оставляют: исчерпание ёмкости проверяющего (преходящий исход), фактор не
+// заведён (сверка холостая), материал кода не открывается (сверять нечем).
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/assurance"
@@ -62,7 +74,8 @@ func NewStepUpUseCase(d SecondFactorDeps) (*StepUpUseCase, error) {
 }
 
 // Execute — порядок: форма → сессия → частота → (у кода) состояние → сверка →
-// предъявление одним исходом с журналом повышения.
+// предъявление одним исходом с журналом повышения; суждённый отказ — след
+// попытки одним исходом с журналом повышения.
 func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOutput, error) {
 	if err := JudgeStepUpForm(in); err != nil {
 		return StepUpOutput{}, err
@@ -85,6 +98,8 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOut
 		p          = presenter{deps: uc.deps}
 		pr         preparedPresentation
 		passwordOK bool
+		judged     = judgedPresentation{user: user, session: resolved.Session, method: in.Method,
+			addressKey: addressKey, source: in.Source, at: now}
 	)
 	if in.Method == assurance.MethodPassword {
 		outcome, err := uc.verifyPassword(ctx, user.ID, in.Password)
@@ -95,12 +110,11 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOut
 		case passwordverify.OutcomeMatched:
 			passwordOK = true
 		case passwordverify.OutcomeCapacityExhausted:
-			// Преходящий исход: попыткой не считается (PWV-15.3), наружу — тот же отказ.
+			// Преходящий исход: попыткой не считается (PWV-15.3) и предъявлением
+			// не судился — ни следа попытки, ни записи журнала; наружу — тот же отказ.
 			return StepUpOutput{}, ErrAuthenticationFailed
 		default:
-			if werr := recordFailureTx(ctx, uc.deps.Store, addressKey, in.Source, now); werr != nil {
-				uc.deps.Logger.Error("step-up: failed attempt not recorded", "err", werr.Error())
-			}
+			uc.recordRefusal(ctx, judged)
 			return StepUpOutput{}, ErrAuthenticationFailed
 		}
 	} else {
@@ -111,7 +125,7 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOut
 		if pr.verdict != verdictMatched {
 			st, _ := p.settle(ctx, nil, pr, false)
 			p.observe(pr, st)
-			return StepUpOutput{}, uc.refuse(ctx, pr.verdict, addressKey, in.Source, now)
+			return StepUpOutput{}, uc.refuse(ctx, pr.verdict, judged)
 		}
 	}
 
@@ -138,9 +152,11 @@ func (uc *StepUpUseCase) Execute(ctx context.Context, in StepUpInput) (StepUpOut
 			return StepUpOutput{}, ErrStoreUnavailable
 		}
 		if st.verdict != verdictMatched {
+			// Транзакция предъявления откатывается целиком; запись об отказе
+			// ложится своей транзакцией в refuse, а не в эту.
 			_ = w.Rollback(ctx)
 			p.observe(pr, st)
-			return StepUpOutput{}, uc.refuse(ctx, st.verdict, addressKey, in.Source, now)
+			return StepUpOutput{}, uc.refuse(ctx, st.verdict, judged)
 		}
 	}
 	if err := w.PresentInSession(ctx, resolved.Session.ID, methods, level, bearer.Digest(), now); err != nil {
@@ -193,11 +209,91 @@ func (uc *StepUpUseCase) verifyPassword(ctx context.Context, userID domain.UserI
 	return res.Outcome, nil
 }
 
-func (uc *StepUpUseCase) refuse(ctx context.Context, v presentVerdict, addressKey, source string, at time.Time) error {
+// judgedPresentation — кто, в какой сессии, каким способом и откуда предъявил:
+// предмет следа попытки и записи журнала об отказе.
+type judgedPresentation struct {
+	user       domain.User
+	session    domain.HumanSession
+	method     assurance.Method
+	addressKey string
+	source     string
+	at         time.Time
+}
+
+// refuse — отказ по вердикту сверки кода. Суждённый отказ (он же попытка, Р7)
+// оставляет след и запись журнала; отказ по состоянию, недоступности или
+// ёмкости не оставляет ни того ни другого.
+func (uc *StepUpUseCase) refuse(ctx context.Context, v presentVerdict, j judgedPresentation) error {
 	if countsAsAttempt(v) {
-		if werr := recordFailureTx(ctx, uc.deps.Store, addressKey, source, at); werr != nil {
-			uc.deps.Logger.Error("step-up: failed attempt not recorded", "err", werr.Error())
-		}
+		uc.recordRefusal(ctx, j)
 	}
 	return refusalOf(v)
+}
+
+// refusalWriteBudget — срок записей об отказе, отвязанных от отмены запроса.
+// Вердикт вынесен, и уход клиента после него не вправе стереть ни след
+// попытки, ни запись журнала. Отвязка снимает отмену, но не время: повисшая
+// база иначе держала бы горутину без предела. Величина — та же, что у других
+// отвязанных записей службы (`providerReleaseTimeout`), и её получает КАЖДАЯ из
+// двух записей отдельно, а не пополам: транзакция из трёх вставок и, при её
+// сбое, транзакция из двух — каждой свой полный срок (С2).
+const refusalWriteBudget = 5 * time.Second
+
+// recordRefusal — суждённое предъявление отклонено: след попытки и запись
+// журнала повышения с исходом `refused` — ОДНОЙ транзакцией (Р7, Ф11-14),
+// отвязанной от отмены запроса. Отказ наружу уходит в любом исходе записи. Не
+// сложилась транзакция — след попытки пишется СВОЕЙ, со СВОИМ сроком: счёт
+// неверных предъявлений есть контроль частоты, и сбой записи журнала не вправе
+// его выключить; потеря записи журнала звучит ошибкой в журнале процесса.
+//
+// Срок каждой записи — свой, не общий (С2). Общий срок на насыщенном пуле
+// доставался бы запасной уже истёкшим: основная транзакция ждёт соединения и
+// выбирает его целиком, а `pgxpool.Acquire` запасной падает сразу на истёкшем
+// контексте — след попытки не лёг бы, неверное предъявление осталось бы
+// несосчитанным.
+func (uc *StepUpUseCase) recordRefusal(ctx context.Context, j judgedPresentation) {
+	base := context.WithoutCancel(ctx)
+	if err := uc.writeRefusal(base, j); err != nil {
+		uc.deps.Logger.ErrorContext(ctx, "step-up: refused presentation not journaled", j.logAttrs(err)...)
+		if werr := uc.recordRefusalAttempt(base, j); werr != nil {
+			uc.deps.Logger.ErrorContext(ctx, "step-up: failed attempt not recorded", j.logAttrs(werr)...)
+		}
+	}
+}
+
+// writeRefusal — след попытки и запись журнала `refused` одной транзакцией,
+// под собственным сроком, отсчитанным от base.
+func (uc *StepUpUseCase) writeRefusal(base context.Context, j judgedPresentation) error {
+	ctx, cancel := context.WithTimeout(base, refusalWriteBudget)
+	defer cancel()
+	w, err := uc.deps.Store.Writer(ctx)
+	if err != nil {
+		return fmt.Errorf("step-up refusal: open writer: %w", err)
+	}
+	defer func() { _ = w.Rollback(ctx) }()
+	if err := recordFailure(ctx, w, j.addressKey, j.source, j.at); err != nil {
+		return fmt.Errorf("step-up refusal: record attempt: %w", err)
+	}
+	if err := emitStepUpRefusal(ctx, w, j.user, j.session, j.method); err != nil {
+		return fmt.Errorf("step-up refusal: journal record: %w", err)
+	}
+	if err := w.Commit(ctx); err != nil {
+		return fmt.Errorf("step-up refusal: commit: %w", err)
+	}
+	return nil
+}
+
+// recordRefusalAttempt — только след попытки, под СВОИМ сроком от base:
+// запасная запись, когда общая транзакция не сложилась.
+func (uc *StepUpUseCase) recordRefusalAttempt(base context.Context, j judgedPresentation) error {
+	ctx, cancel := context.WithTimeout(base, refusalWriteBudget)
+	defer cancel()
+	return recordFailureTx(ctx, uc.deps.Store, j.addressKey, j.source, j.at)
+}
+
+// logAttrs — чья запись не легла: идентификаторы личности и сессии и способ.
+// Ни адреса почты, ни секрета предъявления, ни носителя.
+func (j judgedPresentation) logAttrs(err error) []any {
+	return []any{"user_id", string(j.user.ID), "session_id", string(j.session.ID),
+		"method", j.method.String(), "err", err.Error()}
 }
