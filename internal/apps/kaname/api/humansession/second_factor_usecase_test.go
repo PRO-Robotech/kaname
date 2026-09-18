@@ -771,6 +771,8 @@ func TestF12_28_29_RemoveEndsOtherSessionsAndKeepsTheCurrentAtTwo(t *testing.T) 
 	// Ф12-28: снятие кодом.
 	out, err := h.remove.Execute(context.Background(), humansession.RemoveSecondFactorInput{Bearer: s1.Bearer, Factor: humansession.SecondFactorPresentation{Method: assurance.MethodLookupSecret, Code: codes[0]}, Source: "203.0.113.7"})
 	require.NoError(t, err)
+	require.NotNil(t, out.BackupCodesRemaining, "ответ remove несёт backupCodesRemaining всегда (Р4)")
+	require.Equal(t, 0, *out.BackupCodesRemaining, "снятие убрало фактор — набора нет, остаток 0 (Р4 ред. 10, kaname#275)")
 	require.Equal(t, "2", out.View.Session.AssuranceLevel, "сверка кода — предъявление")
 	require.NotEqual(t, s1.Bearer.Digest(), out.Bearer.Digest())
 	_, ok = h.sfRow(u, domain.LoginMethodTOTP)
