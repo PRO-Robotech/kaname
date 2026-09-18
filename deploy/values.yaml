@@ -480,8 +480,8 @@ authn:
   #                                   # (KANAME_AUTHN__REGISTRATION__ADMISSIONS_PER_WINDOW)
   #     admissionWindow: 1h           # окно счёта (KANAME_AUTHN__REGISTRATION__ADMISSION_WINDOW)
   #   selfServiceFreshness: 15m       # окно свежести правки своих данных (Ф12 Р8):
-  #                                   # заведение второго фактора и срок его
-  #                                   # неподтверждённого заведения
+  #                                   # заведение и подтверждение второго фактора
+  #                                   # и срок его неподтверждённого заведения
   #   accessKeys:                     # привязка ключей доступа WebAuthn (Ф7 Р2, Ф7-13)
   #     rpId: access.example.invalid  # имя доверяющей стороны — доменное имя установки
   #                                   # строчными, без схемы и порта (KANAME_AUTHN__ACCESS_KEYS__RP_ID)
