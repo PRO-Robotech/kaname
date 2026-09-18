@@ -39,12 +39,14 @@ package loginlanehttp_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -338,9 +340,10 @@ func (h *sessionLane) rowWhere(t *testing.T, cond, arg string) (sessionRow, bool
 	)
 	err := h.pool.QueryRow(h.ctx, `SELECT id, bearer_digest, assurance_level, presented_methods, last_presented_at, ended_at
 		  FROM human_sessions WHERE `+cond, arg).Scan(&r.id, &r.digest, &r.level, &r.methods, &r.lastSeen, &ended)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return sessionRow{}, false
 	}
+	require.NoError(t, err, "чтение записи сессии")
 	r.ended = ended != nil
 	return r, true
 }
@@ -384,6 +387,7 @@ func (h *sessionLane) setInviteStatus(t *testing.T, st domain.InviteStatus) {
 	t.Helper()
 	w, err := h.users.Writer(h.ctx)
 	require.NoError(t, err)
+	defer func() { _ = w.Rollback(h.ctx) }()
 	_, err = w.UsersW().SetInviteStatus(h.ctx, h.user.ID, st)
 	require.NoError(t, err, "состояние членства %s не записано", st)
 	require.NoError(t, w.Commit(h.ctx))

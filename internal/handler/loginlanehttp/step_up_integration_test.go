@@ -134,6 +134,7 @@ func TestLaneIntegration_F11_10_PasswordAgainInALevelTwoSessionKeepsLevelTwo(t *
 
 	w, err := h.sessions.Writer(h.ctx)
 	require.NoError(t, err)
+	defer func() { _ = w.Rollback(h.ctx) }()
 	issued, bearer, err := humansession.IssueSession(h.ctx, w, humansession.IssueInput{
 		User: h.user, Presented: presented, At: time.Now().UTC(), TTL: laneSessionTTL, EmitAudit: true,
 	})

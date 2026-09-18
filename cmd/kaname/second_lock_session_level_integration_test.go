@@ -31,9 +31,15 @@ package main
 // метаданные личности и уровня. Цепочка — внутреннего слушателя `serve.go` в
 // боевом режиме, собранная ТЕМИ ЖЕ конструкторами: сборщик личности
 // `identityUnary` (круг отправителей — край), политика вызывающего, пол уровня
-// над встроенным каталогом прав, звено причины отказа. Не собраны два звена, у
-// которых на этом глаголе нет предмета: измеритель задержки и пол
-// `system_viewer` (он стоит только на читающих глаголах, `ReadFloorRPCs`).
+// над встроенным каталогом прав, звено причины отказа. Против цепочки
+// `serve.go` не собраны три звена, и ни одно не решает судьбу этого вызова:
+// измеритель задержки (только считает), `UnaryPanicRecovery` (действует лишь
+// на панике) и пол `system_viewer` (стоит только на читающих глаголах,
+// `ReadFloorRPCs`, а `GrantAdmin` — мутация). У политики вызывающего не
+// заданы два уточнения боевой сборки: `WithSANAllowlist` — рукав с перечнем
+// сертификатов, он стоит только на чеканке токена начальной загрузки, — и
+// `WithOwnFrontHop` — допуск хопа собственного фронта, а вызывающий пробы —
+// край, не фронт.
 // Обработчик — дублёр, отмечающий, что до него дошли: предмет пробы — пол, а не
 // выдача прав (её держат пробы `internal/apps/kaname/api/cluster`).
 //
@@ -123,6 +129,7 @@ func TestSecondLockIntegration_F11_20_ForwardedSessionLevelPassesAndABypassingOn
 	sessions := kanamepg.NewHumanSessionRepo(pool)
 	w, err := sessions.Writer(ctx)
 	require.NoError(t, err)
+	defer func() { _ = w.Rollback(ctx) }()
 	issued, bearer, err := humansession.IssueSession(ctx, w, humansession.IssueInput{
 		User: user, Presented: []assurance.Presentation{assurance.PasswordPresented(), assurance.TOTPPresented()},
 		At: time.Now().UTC(), TTL: 24 * time.Hour, EmitAudit: true,
@@ -193,8 +200,11 @@ func TestSecondLockIntegration_F11_20_ForwardedSessionLevelPassesAndABypassingOn
 }
 
 // secondLockReached — обработчик-дублёр: отмечает, что вызов прошёл цепочку.
-// Отметка атомарна: обработчик и проба — разные горрутины, а соединение здесь
-// настоящее (TCP), и порядок через ядро детектор гонок не видит.
+// Отметка атомарна не ради детектора гонок: он размечает «произошло-до» на
+// `syscall.Read` / `syscall.Write`, и ответ по TCP сам упорядочивает запись
+// обработчика и чтение пробы. Атомарность нужна, чтобы корректность пробы не
+// держалась на этой разметке транспорта: обработчик и проба — разные
+// горутины, и отметка упорядочена сама.
 type secondLockReached struct {
 	iamv1.UnimplementedInternalClusterServiceServer
 	reached atomic.Bool
