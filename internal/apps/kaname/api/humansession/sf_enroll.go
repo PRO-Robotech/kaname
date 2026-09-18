@@ -344,9 +344,37 @@ func emitSecondFactorAudit(ctx context.Context, w Writer, eventType string, user
 	})
 }
 
-// emitStepUpJournal — запись журнала повышения (Ф11-14): способ, уровень до и
-// после — той же транзакцией, что предъявление.
+// stepUpOutcome — исход предъявления в записи журнала повышения (Ф11-14):
+// поле `outcome` записи ОДНОГО вида `iam.session.step_up`, закрытый перечень
+// из двух значений. Второго вида события на отказ не заводится: потребитель
+// журнала читал бы два вида об одном предмете.
+type stepUpOutcome string
+
+const (
+	// stepUpAccepted — предъявление принято и записано вместе с записью журнала.
+	stepUpAccepted stepUpOutcome = "accepted"
+	// stepUpRefused — суждённое предъявление отклонено; уровень не менялся.
+	stepUpRefused stepUpOutcome = "refused"
+)
+
+// emitStepUpJournal — запись журнала повышения о ПРИНЯТОМ предъявлении
+// (Ф11-14): способ, уровень до и после, исход `accepted` — той же
+// транзакцией, что предъявление.
 func emitStepUpJournal(ctx context.Context, w Writer, user domain.User, before domain.HumanSession, method assurance.Method, after string) error {
+	return emitStepUpRecord(ctx, w, user, before, method, after, stepUpAccepted)
+}
+
+// emitStepUpRefusal — запись журнала повышения об ОТКЛОНЁННОМ суждённом
+// предъявлении (Ф11-14): отказ сессию не понижает и не повышает (Ф11-13,
+// Ф11-30), поэтому уровень до и после — уровень сессии; исход `refused`.
+func emitStepUpRefusal(ctx context.Context, w Writer, user domain.User, session domain.HumanSession, method assurance.Method) error {
+	return emitStepUpRecord(ctx, w, user, session, method, session.AssuranceLevel, stepUpRefused)
+}
+
+// emitStepUpRecord — одна форма записи журнала повышения на оба исхода:
+// субъект, сессия, способ из словаря Р8, уровень до и после, исход. Ни
+// секрета предъявления, ни значения носителя, ни его дайджеста.
+func emitStepUpRecord(ctx context.Context, w Writer, user domain.User, before domain.HumanSession, method assurance.Method, after string, outcome stepUpOutcome) error {
 	return w.EmitAudit(ctx, outboxtypes.AuditEvent{
 		EventType:       AuditSessionStepUp,
 		TenantAccountID: string(user.AccountID),
@@ -356,6 +384,7 @@ func emitStepUpJournal(ctx context.Context, w Writer, user domain.User, before d
 			"method":       method.String(),
 			"level_before": before.AssuranceLevel,
 			"level_after":  after,
+			"outcome":      string(outcome),
 		},
 	})
 }

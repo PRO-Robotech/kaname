@@ -1,0 +1,331 @@
+schema_version: 1
+kind: acceptance_review
+subject:
+  repository: PRO-Robotech/kaname
+  path: docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+  sha256: 423f7233ee3fec3e79150823dcbbef0a5c277c4b443478d464497196095d105b
+  static_status: DRAFT
+  static_status_note: >-
+    Шапка документа намеренно не правлена: DRAFT — статическая форма объявления, а не вердикт
+    (`change-graph.md` §2). Одобрение этой редакции выводится из этой записи и внешнего события,
+    которого ещё нет.
+  base_commit: 39628487099fe44990e9e03b09b725f3d7e37abb
+  content_commit: 2a401287950bf634a102228f87ac1d9a97df045a
+  branch: issue-254-f12-reset-owner
+  pull_request: pending
+  pull_request_note: >-
+    PR нет; ветка на origin стоит на базе 39628487, коммиты редакций 9, 10 и записей кругов 6, 7
+    живут в рабочей копии tmp/w-254-f12. Толкать — не момент рецензента.
+  task: PRO-Robotech/kacho#1281
+  edition_task: PRO-Robotech/kaname#254
+  lines: 2510
+  round: 7
+  predecessor_record: docs/specs/reviews/second-factor-totp-and-recovery-codes/696d27c4f878f2610db97d9977a236e5374898a8223590a55e778c77a90027f2.yaml
+  fingerprint_predicate: >-
+    sha256sum docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md
+    (рабочая копия tmp/w-254-f12, HEAD 2a401287, `git status --porcelain` → пусто)
+  fingerprint_note: >-
+    Отпечаток снят СВОИМ замером — 423f7233…, 2510 строк; равен объявленному. Родитель 2a401287 —
+    bba757e7 (запись круга 6 на 696d27c4…, редакция 9). Коммит редакции 10 трогает ТОЛЬКО
+    документ: `git diff --stat bba757e7 2a401287` → один файл, +142/−52. Вне документа и
+    каталога записей дерево побайтово равно стволу: `git diff --quiet 39628487 2a401287 --
+    ':!docs/engineering/acceptance' ':!docs/specs/reviews'` → 0.
+  measurement_revisions: >-
+    Дом службы: kaname `origin/main` 39628487 (дерево HEAD вне документа ему равно). Край: kacho
+    `origin/main` b5fa093341f — пробы края гонялись в отдельном рабочем каталоге на этой ревизии
+    (общая копия платформы стоит на чужой ревизии 8d70f599834 и не трогалась). Воркспейс:
+    `origin/main` 870e3132e5.
+  task_premise_remeasured: >-
+    (1) sha256 редакции 10 = 423f7233…, 2510 строк — ПОДТВЕРДИЛОСЬ. (2) коммит 2a401287, родитель
+    bba757e7 — ПОДТВЕРДИЛОСЬ. (3) «вне документа дерево равно 39628487» — ПОДТВЕРДИЛОСЬ (см.
+    fingerprint_note). (4) «разделы, не тронутые редакцией 10, побайтово равны редакции 9» —
+    ПОДТВЕРДИЛОСЬ: 35 ломтей, ни один не лежит в разделах из перечня «не тронуты»
+    (delta_vs_declared). (5) Б7 «17 строк в 11 файлах, на одну больше: login.go:432» —
+    ПОДТВЕРДИЛОСЬ предикатом автора, построчно совпадает с моими 16 плюс эта строка. (6) Б8 «край
+    отвечает 400 на кривой id до проверки права, одинаково держателю и не держателю» —
+    ПОДТВЕРДИЛОСЬ чтением (`authz.go`, шаг 5b до `phaseCheck`) и прогоном пробы края. (7) Н27 —
+    задачи есть: kacho-workspace#679 OPEN, kaname#275 OPEN (bug, P1). (8) «решение диспетчера по
+    kaname#275 внесено» — внесено в Р4; в самой задаче решения нет (комментариев 0), тело задачи
+    велит записать выбор строкой Р4 — так и сделано (Н30). (9) «предикат пробы eql(8) → eql(0)» —
+    сегодня `eql(8)` — ПОДТВЕРДИЛОСЬ.
+
+verdict: APPROVED
+reviewer_role: acceptance-reviewer
+reviewed_at: '2026-09-18'
+
+# ─── ОДОБРЕНИЕ ВЫВОДИТСЯ ИЗ ЗАПИСИ И СОБЫТИЯ, А НЕ ИЗ СЛОВА В ШАПКЕ ──────────
+effective_approval:
+  issued: true
+  issued_at: '2026-09-18T13:42:12Z'
+  ban1_lifted: true
+  why: >-
+    Вердикт круга 7 — APPROVED: блокирующих ноль. Б7 и Б8 круга 6 сняты ровно так, как названо, и
+    проверены опытом, а не чтением; Н23…Н27 закрыты; решение по kaname#275 внесено в Р4 с честно
+    названным сегодняшним красным. Но САНКЦИЯ этим не выдана: эпоха post-cutover, выпускающий
+    одобрение приёмки по политике — `pointpu`; роль без внешнего события полномочия не даёт
+    (`change-graph.md` §3). До события действующим остаётся одобрение редакции 8 (2582c5e1…),
+    которое отдаёт сброс распорядителю аккаунта вопреки решению владельца 2026-09-18.
+  what_the_event_would_lift: >-
+    То же, что событие круга 5, на новом отпечатке, плюс объём редакций 9 и 10: держатель
+    ResetSecondFactor — администратор облака (сам человек — своим кодом через remove); не
+    держателю — 403 края, держателю на несуществующем id — 404 службы, кривой id — 400 края;
+    ResetSecondFactor в закрытом перечне гейта «распоряжение строкой личности»; правка 17 строк
+    описаний держателя по дереву (предикат §9); ответ remove — `backupCodesRemaining: 0` всегда
+    (починка kaname#275 и кейса IAM-2FA-OK-REMOVE-BY-CODE). Не шире: §0.2 «не разрешает» не тронут.
+  what_the_owner_sees_in_the_event: >-
+    (1) Держателей сброса два — сам человек (код) и администратор облака; распорядитель аккаунта
+    держателем не является ни в одном виде. (2) Два отступления от F4d (Д5, Д6), у Д6 — актор и
+    форма отказа (403 вместо 404). (3) Ответ remove меняется: остаток после снятия — 0, сегодня 9
+    либо поля нет — дефект kaname#275. (4) Неблокирующие Н28…Н30 и перенесённое Н22 — следующей
+    редакцией либо ревью реализации; санкции не мешают.
+  publication_pending:
+    required_for_sanction: true
+    expected_from: оркестратор волны
+    expected_actor: pointpu
+    expected_mode: courier_of_agent_verdict
+    expected_form: >-
+      issue_comment в PRO-Robotech/kacho#1281, в начале тела дословно пять строк — `role:
+      acceptance-reviewer`, `verdict: APPROVED`, `subject:
+      PRO-Robotech/kaname:docs/engineering/acceptance/second-factor-totp-and-recovery-codes.md`,
+      `subject_revision: 2a401287`, `subject_sha256:
+      423f7233ee3fec3e79150823dcbbef0a5c277c4b443478d464497196095d105b`; ниже — разбор круга и
+      строка «Личная рецензия публикующим актором не заявляется». Блок `event` (database_id,
+      node_id, url, api_url, actor, author_association, created_at, body_sha256 с сырого ответа
+      API, subject_sha256, subject_revision, verdict, published_by_orchestrator) дописывается
+      ОТДЕЛЬНЫМ коммитом поверх этой записи — форма записи круга 5 этого каталога (событие
+      5711101932); вердикт, разбор и числа задним числом не правятся.
+
+authority:
+  mode: versioned_policy_authority
+  epoch: post-cutover
+  epoch_derivation: >-
+    git merge-base --is-ancestor 1202e3cf5f6cb4600294ceb2e30fa72b61630eac origin/main в
+    PRO-Robotech/kacho-workspace → 0 (исполнено кругом 6 той же сессии; origin/main воркспейса
+    870e3132e5 за круг не двигался)
+  repository: PRO-Robotech/kacho-workspace
+  cutover_commit: 1202e3cf5f6cb4600294ceb2e30fa72b61630eac
+  policy_document: docs/changes/policy.yaml
+  policy_field: review_authority.acceptance-reviewer
+  authorized_actors: [pointpu]
+  allowlisted_for_role: false
+
+event:
+  type: issue_comment
+  status: performed
+  database_id: 5730853026
+  node_id: IC_kwDOTZqgWM8AAAABVZXgog
+  url: https://github.com/PRO-Robotech/kacho/issues/1281#issuecomment-5730853026
+  api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/comments/5730853026
+  issue_api_url: https://api.github.com/repos/PRO-Robotech/kacho/issues/1281
+  actor: pointpu
+  role: acceptance-reviewer
+  author_association: MEMBER
+  created_at: '2026-09-18T13:42:12Z'
+  body_sha256: 8409dfc336b88bd3586e81a87d2fcf43cf4b8dca9dbe7ea8dc0e72be8e633b4e
+  subject_sha256: 423f7233ee3fec3e79150823dcbbef0a5c277c4b443478d464497196095d105b
+  subject_revision: 2a401287
+  verdict: APPROVED
+  published_by_orchestrator: true
+  required_body_fields_present_verbatim: role, verdict, subject, subject_revision, subject_sha256
+  publication_note: >-
+    Дописано ОТДЕЛЬНЫМ коммитом поверх записи рецензента; вердикт, разбор и числа задним числом
+    не правились — тронуты только поля issued/issued_at/ban1_lifted и этот блок, как у записи
+    круга 5. Перемерено рецензентом: поля комментария — `gh api
+    repos/PRO-Robotech/kacho/issues/comments/5730853026` (id, node_id, user pointpu, MEMBER,
+    created_at); пять строк тела дословно, каждая ровно одна (`grep -cxF` → 1); отпечаток тела
+    — `gh api … | jq -j .body | sha256sum` → 8409dfc3…; форма команды проверена контролем на
+    событии круга 5 (→ 3f9f7d4a…, как в его записи), вариант `jq -r` добавляет перевод строки и
+    даёт c6b8caac… — другое число о другом входе. Отпечаток предмета на subject_revision —
+    `git show 2a401287:<документ> | sha256sum` → 423f7233…, совпал с объявленным.
+
+attribution:
+  reviewer_kind: claude_agent
+  publishing_actor: pointpu
+  publication_mode: courier_of_agent_verdict
+  personal_review_by_publishing_actor_claimed: false
+
+scope:
+  reviewed: >-
+    Редакция 10 против записи круга 6 (Б7, Б8, Н23…Н27) и решения по kaname#275. Предмет круга —
+    ДЕЛЬТА 9 → 10 (35 ломтей) плюс всё, на что она опирается: предикат DoD прогнан и проверен на
+    слепое пятно независимым обходом; линия держателя Ф12-30 проверена посевом двери, пробой службы
+    и пробой края; решение Р4 — кодом remove, пробой и сквозным кейсом. Разделы, не тронутые
+    редакцией 10, заново не перечитывались — их вердикт — записи кругов 2…6.
+  method: experiment_not_reading
+  document_edited_by_reviewer: false
+
+delta_vs_declared:
+  predicate: >-
+    git diff -U0 bba757e7 2a401287 -- <документ> — 35 ломтей, каждый положен на ближайший
+    заголовок раздела либо сценария редакции 10.
+  declared: >-
+    строка состояния · строка редакции 9 (Н23) · новая строка «Редакция 10» · §0.4 (Н24) · §1.2
+    Ф-м (Н23) · Р3 (Н24) · Р4 (kaname#275) · Р10 (Б8, Н23, Н25) · §3 Д6, Д27 · Ф12-28 (#275) ·
+    Ф12-30 (Б8) · Ф12-34 (Н24) · Ф12-45 (Н25, Н26, #275) · §6 · §7 инв. 2 · §8 · §9 DoD (Б7, Н24,
+    #275) · §11 (Б7, Н27, #275); не тронуты Р1, Р2, Р5…Р9, Р11, Р12, §1.1, §1.3, §4, прочие
+    сценарии, §6.1, §6.2, §10, §12, строки редакций 1…8.
+  got: >-
+    Статус 2 · строка ред. 9 1 · строка ред. 10 1 · §0.4 1 · §1.2 1 · Р3 1 · Р4 1 · Р10 4 · §3 2
+    · Ф12-28 1 · Ф12-30 3 · Ф12-34 1 · Ф12-45 4 · §6 3 · §7 1 · §8 1 · §9 5 · §11 2. Сверх
+    объявленного — ничего; разделы из «не тронуты» ломтей не несут.
+  verdict: СОВПАДАЕТ
+
+closure_of_round_6:
+  - id: Б7
+    kind: DoD
+    predicate: >-
+      Предикат автора (§9) на HEAD: `git grep -c -E "$P" -- ':!docs/engineering/acceptance'
+      ':!docs/specs/reviews' ':!*_test.go' ':!*.pb.go' ':!internal/migrations'` → «17 строк в 11
+      файлах»; построчно — мои 16 круга 6 плюс `humansession/login.go:432` (форма «у сброса
+      распорядителем», которой не знало моё выражение). Контроль: комментарий модели у
+      `identity_suspender` → пусто; файл из перечня → попадания есть. Независимая проверка
+      слепого пятна: обход Python по 28 файлам, называющим сброс, окно ±1 строка, признак
+      держателя (распорядитель/владелец/администратор аккаунта, steward, account admin) — вне
+      выражения автора в прод-коде и страницах 0 строк; только в пробах.
+    verdict: СНЯТ
+  - id: Б8
+    kind: NEGATIVE
+    predicate: >-
+      «И» Ф12-30 называет: A на N → 404 `User <N> not found` службы раньше состояния строки; A и O
+      на K → 400 `invalid resource id '<K>'` края до права; служба мимо края → `invalid user id
+      '<K>'`; пары «A на N ↔ A на U» и «A на N ↔ O на N» — в §7 инв. 2; род 404/400 — в §6; линия
+      держателя — в Р10. Производители проверены: дверь — A на N «да», O на N «нет» (посев круга
+      6); служба — `reset_second_factor.go` (ValidateResourceID → Users().Get → enrolled),
+      `shared/ids.go` («invalid %s id '%s'»), проба `TestResetSecondFactor_F12_30_SyncRefusals` —
+      PASS; край — `authz.go` шаг 5b до `phaseCheck`, пробы `TestAuthz_{GRPC,HTTP}_
+      MalformedResourceId_*` (проверка права не вызывается ни разу) и `…_WellFormedDeny_*` (403,
+      проверка вызывается) — 4 PASS на b5fa093341f.
+    verdict: СНЯТ
+  - id: Н23
+    verdict: >-
+      ЗАКРЫТ — «только на чтениях» осталось в двух строках, обе — надгробия (строки редакций 9 и
+      10, объясняющие замену); Ф-м, Р10, Д6 говорят о записи каталога.
+  - id: Н24
+    verdict: >-
+      ЗАКРЫТ — «→ 28» вне истории нет; «27 → 28» — только сумма строк §3 (другая единица) и §12;
+      пункт DoD меряет запись ResetSecondFactor → `[('identity_suspender', '2', False)]` сегодня.
+  - id: Н25
+    verdict: >-
+      ЗАКРЫТ — Р10 и Ф12-45 «б» оговаривают администратора облака; одно-фактный близнец посеян:
+      та же личность с system_admin на своей записи — «да», без — «нет»; самоотказа у службы нет.
+  - id: Н26
+    verdict: ЗАКРЫТ — сессия L названа несвежей так же, как S1.
+  - id: Н27
+    verdict: ЗАКРЫТ — kacho-workspace#679 и kaname#275 заведены и названы в §3 Д6 и §11.
+
+constructibility:
+  isolation: >-
+    tmp/w-254-f12 (задание), TMPDIR=/var/tmp/f12-r6; пробы края — отдельный рабочий каталог
+    kacho-workspace/tmp/r7-kacho-edge на b5fa093341f, снят после прогона (`git worktree list` →
+    0 вхождений). Одноразовые пробы удалены, `git status --porcelain` перед записью → пусто.
+  seeded:
+    - given: близнец Ф12-45 (б) — W с system_admin на своей записи; W без него
+      got: дверь `CheckRelation` по отношению из каталога ResetSecondFactor — «да» / «нет»
+      verdict: ПОСТРОЕНО, пара одно-фактна
+    - given: Ф12-28 сегодня — remove кодом по времени
+      got: >-
+        `BackupCodesRemaining` = nil (поля нет); запасным кодом — 9 (посев круга 6). Новое
+        «Тогда» (`0`) сегодня КРАСНОЕ ПО СУЩЕСТВУ — как §8 и называет; производитель — починка
+        kaname#275
+      verdict: ПОСТРОЕНО; красное честное
+    - given: Ф12-30 A на N и A/O на K
+      got: >-
+        дверь (круг 6) + проба службы (PASS) + пробы края на b5fa093341f (4 PASS); сквозной
+        прогон через край — «не выполнилось»: пин службы у края без глагола
+      verdict: ПОСТРОЕНО по частям; сквозная половина — третья категория, названа документом
+  counts: >-
+    нетривиальных «Дано» дельты 3; посеяно 3 (частично — сквозной прогон края в третьей
+    категории, как и в круге 6).
+
+blocking: []
+
+non_blocking:
+  - id: Н28
+    where: §9 DoD, исключение «пробы (*_test.go)»
+    what: >-
+      Причина исключения — «довод пробы меряется своей строкой ниже», но строка ниже меряет одну
+      фразу (`сокрытию существования`), а вне обхода остаются ещё четыре строки проб с прежним
+      держателем: `cmd/kaname/loginlane_test.go:143`, `api/user/reset_second_factor_test.go:6`,
+      `:12`, `:235`. Исключение объявлено, поэтому это не слепое пятно, а неполный довод:
+      включить `*_test.go` в выражение P либо назвать четыре строки.
+  - id: Н29
+    where: Ф12-18 «Тогда» (:1521–1522), редакцией 10 не тронут
+    what: >-
+      «поле backupCodesRemaining есть ТОЛЬКО в ответе, потребившем код (Р4)» — после исключения Р4
+      ответ remove кодом по времени несёт его, код не потребив. «Тогда» Ф12-18 (ответ step-up) не
+      меняется; уточнить «(кроме remove — Р4)».
+  - id: Н30
+    where: Р4, шапка редакции 10, §11
+    what: >-
+      «Решение диспетчера по kaname#275» в самой задаче не записано (комментариев 0); тело задачи
+      велит записать выбор строкой Р4, и Р4 его несёт — источник решения есть. Ссылке нужен
+      след в задаче: комментарий с выбором «0 всегда» и отсылкой к Р4.
+non_blocking_carried_over: >-
+  Н22 круга 5 (перечень причин клетки `second-factor-refused` в Р11) — Р11 не тронут, открыт.
+  Н9, Н10, Н12…Н16 круга 2 — как в кругах 3…6.
+
+repeat_kind_rule: >-
+  По заданию правило о повторе рода применяется к DoD и NEGATIVE (роды блокирующих круга 6).
+  Блокирующих этого рода в круге 7 нет — ни одного блокирующего нет вовсе; класс в форму задания
+  переносить не требуется. Н28 — о том же пункте DoD, но исключение объявлено с причиной, и
+  утверждение пункта предикатом покрыто; блокирующим не является.
+
+decisions:
+  Р4:
+    verdict: ПРИНИМАЮ
+    basis: >-
+      Исключение для remove — «0 всегда» — одна из двух форм, которые kaname#275 допускает, и оно
+      согласовано с GET по смыслу (набора нет). Сегодняшнее расхождение (9 / поля нет) названо
+      дефектом с задачей P1, красное честное, предикат кейса IAM-2FA-OK-REMOVE-BY-CODE назван.
+  Р10:
+    verdict: ПРИНИМАЮ
+    basis: >-
+      Держатели, 403 не держателю, 404 держателю, 400 на кривом id до права — каждое звено имеет
+      производителя в дереве и проверено опытом.
+  Р1…Р3, Р5…Р9, Р11, Р12:
+    verdict: КАК В КРУГАХ 2…6
+    basis: Р3 тронут только числом (Н24); прочие редакцией 10 не тронуты.
+
+gates_run:
+  - name: go test -count=1 ./internal/authzmap/ -run TestGoverningTheIdentityHasNoAccountLevelSource -v
+    result: PASS — «записей каталога прочитано 349 · RPC «распоряжение строкой» сверено 3»
+  - name: go test -count=1 ./internal/apps/kaname/api/user/ -run TestResetSecondFactor_F12_30_SyncRefusals
+    result: PASS
+  - name: >-
+      go test -count=1 ./internal/middleware/ -run 'TestAuthz_(GRPC|HTTP)_(MalformedResourceId|WellFormedDeny)'
+      (kacho gateway @ b5fa093341f)
+    result: ok — 4 PASS
+  - name: go test -count=1 -short ./internal/check/ — ДО записи, на 2a401287
+    result: ok (16.40 s)
+  - name: предикаты документа
+    result: >-
+      сценариев §5 — 45, строк §6 — 45, латиницей 0; строк Д — 29, сумма категорий 29; сверка §4.3
+      ↔ §6 — пусто; `23505|23514` в §5 — 0; `ENROLLMENT_EXPIRED` — 0
+
+verification:
+  method: >-
+    дифф против объявленного состава; предикат DoD автора плюс независимый обход на слепое пятно;
+    посев близнеца и сегодняшнего ответа remove; пробы службы и края; чтение порядка проверок края
+    и службы; перепись остатков Н23/Н24; гейты.
+  subject_digest_matches_current_document: true
+  throwaway_probe: >-
+    Две одноразовые пробы (`internal/service/zz_r7_probe_integration_test.go`,
+    `internal/apps/kaname/api/humansession/zz_r7_probe_test.go`) удалены после прогона.
+  header_left_untouched: true
+
+reviewer_errors_named_first:
+  - >-
+    Коммит записи круга 6 (bba757e7) несёт трейлеры `Co-Authored-By` и `Claude-Session`, а
+    `.claude/rules/git-issues.md:20` их запрещает. Я пошёл за системной подсказкой об атрибуции, не
+    сверившись с правилом проекта. Коммит — родитель редакции 10, переписывать его нельзя; этот
+    коммит трейлеров не несёт.
+  - >-
+    Выражение моей переписи круга 6 не знало формы «у сброса распорядителем»: реальное число — 17,
+    а не 16. Два прохода с контролем закрыли перенос строк, но не синонимы; автор нашёл строку,
+    которую я пропустил.
+
+limits:
+  - >-
+    Сквозной прогон Ф12-30 и Ф12-45 (б) через край не исполнялся — пин службы у края без глагола;
+    части края и службы проверены раздельно.
+  - Разделы, не тронутые редакцией 10, заново не перечитывались.

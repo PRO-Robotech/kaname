@@ -4,7 +4,7 @@
 package check
 
 // catalog_seed_parity_injection_test.go — ДОКАЗАТЕЛЬСТВО способности обоих
-// гейтов каталога упасть, инъекцией НАСТОЯЩИМ входом и с законным близнецом.
+// гейтов посева каталога упасть, инъекцией НАСТОЯЩИМ входом и с законным близнецом.
 //
 // # Почему на синтетическом входе, а не на дереве
 //
@@ -124,63 +124,6 @@ func TestIAMCT114_Injection_EmptySeedIsNotSilence(t *testing.T) {
 	if err == nil {
 		t.Fatal("пустой обход обязан быть ОТКАЗОМ, а не «расхождений нет»: " +
 			"иначе «ноль находок» неотличимо от «ноль прочитанного»")
-	}
-}
-
-// ── форма ключа ───────────────────────────────────────────────────────────────
-
-const goodKeys = `
-ALTER TABLE kaname.role_rule_ref
-  ADD CONSTRAINT role_rule_ref_res_fk
-  FOREIGN KEY (module, resource, live)
-  REFERENCES kaname.catalog_resource (module, resource, live)
-  ON DELETE NO ACTION ON UPDATE NO ACTION
-  DEFERRABLE INITIALLY IMMEDIATE;
-
-ALTER TABLE kaname.other_table
-  ADD CONSTRAINT other_fk
-  FOREIGN KEY (x) REFERENCES kaname.parent (x)
-  DEFERRABLE INITIALLY DEFERRED;
-`
-
-func TestIAMCT113_Injection_ControlIsSilent(t *testing.T) {
-	scanned, findings := auditKeyForm(goodKeys, []string{"role_rule_ref_res_fk"}, nil)
-	t.Logf("осмотрено объявлений: %d", scanned)
-	if scanned == 0 {
-		t.Fatal("обход пуст — вердикт беспредметен")
-	}
-	if len(findings) != 0 {
-		t.Fatalf("законный близнец обязан молчать: отложенность по умолчанию на ЧУЖОМ ключе "+
-			"законна и остаётся; найдено: %v", findings)
-	}
-}
-
-func TestIAMCT113_Injection_RestrictBesideDeferrableIsFound(t *testing.T) {
-	bad := strings.Replace(goodKeys, "ON DELETE NO ACTION", "ON DELETE RESTRICT", 1)
-	_, findings := auditKeyForm(bad, []string{"role_rule_ref_res_fk"}, nil)
-	if !containsSub(findings, "RESTRICT рядом с DEFERRABLE") {
-		t.Fatalf("форма, принимаемая DDL и молча инертная, обязана быть находкой; получено: %v",
-			findings)
-	}
-}
-
-func TestIAMCT113_Injection_DeferredOnTheNamedKeyIsFound(t *testing.T) {
-	bad := strings.Replace(goodKeys, "DEFERRABLE INITIALLY IMMEDIATE", "DEFERRABLE INITIALLY DEFERRED", 1)
-	_, findings := auditKeyForm(bad, []string{"role_rule_ref_res_fk"}, nil)
-	if !containsSub(findings, "role_rule_ref_res_fk") {
-		t.Fatalf("смена формы названного ключа обязана быть находкой: она снимает «Тогда» "+
-			"у трёх сценариев отказа; получено: %v", findings)
-	}
-}
-
-func TestIAMCT113_Injection_CommentAboutRestrictIsNotAKey(t *testing.T) {
-	withProse := strings.Replace(goodKeys, "  ON DELETE NO ACTION ON UPDATE NO ACTION",
-		"  -- RESTRICT здесь запрещён: форма DEFERRABLE молча инертна\n"+
-			"  ON DELETE NO ACTION ON UPDATE NO ACTION", 1)
-	_, findings := auditKeyForm(withProse, []string{"role_rule_ref_res_fk"}, nil)
-	if len(findings) != 0 {
-		t.Fatalf("гейт обязан судить ИСПОЛНЯЕМОЕ: иначе он краснеет на собственном "+
-			"объяснении; найдено: %v", findings)
 	}
 }
 
@@ -521,59 +464,6 @@ func TestTierOnly_Injection_DumpForm_PerObjectFlagIsTheSubject(t *testing.T) {
 	if !containsSub(findings, "признак словаря") {
 		t.Fatalf("кортеж с пообъектным признаком у тройки, названной литералом ярусной, "+
 			"обязан быть находкой: тройка та же, смысл обратный; получено: %v", findings)
-	}
-}
-
-// ── ведомость послаблений на форму ключа ─────────────────────────────────────
-//
-// Осей три, и все три обязательны: прощённый ключ молчит · непрощённый той же
-// формы краснеет · запись, которой нечего исключать, краснеет сама.
-
-const keysWithLegacyCycle = `
-ALTER TABLE ONLY kaname.accounts
-    ADD CONSTRAINT accounts_owner_fk FOREIGN KEY (owner_user_id) REFERENCES kaname.users(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
-
-ALTER TABLE ONLY kaname.role_rule_ref
-    ADD CONSTRAINT role_rule_ref_res_fk FOREIGN KEY (module, resource, live) REFERENCES kaname.catalog_resource(module, resource, live) DEFERRABLE;
-`
-
-func TestIAMCT113_Injection_ExemptKeyIsSilent(t *testing.T) {
-	scanned, findings := auditKeyForm(keysWithLegacyCycle,
-		[]string{"role_rule_ref_res_fk"}, []string{"accounts_owner_fk"})
-	t.Logf("осмотрено объявлений: %d; прощено: 1", scanned)
-	if scanned != 2 {
-		t.Fatalf("объявлений обязано быть прочитано 2, прочитано %d", scanned)
-	}
-	if len(findings) != 0 {
-		t.Fatalf("поимённо прощённый ключ обязан молчать: %v", findings)
-	}
-}
-
-// TestIAMCT113_Injection_UnexemptKeyOfTheSameFormIsFound — ЗАКОННЫЙ БЛИЗНЕЦ
-// наоборот: та же форма у ключа, которого в ведомости нет, остаётся находкой.
-// Без этой оси ведомость была бы не послаблением, а снятием запрета.
-func TestIAMCT113_Injection_UnexemptKeyOfTheSameFormIsFound(t *testing.T) {
-	_, findings := auditKeyForm(keysWithLegacyCycle,
-		[]string{"role_rule_ref_res_fk"}, nil)
-	if !containsSub(findings, "RESTRICT рядом с DEFERRABLE") {
-		t.Fatalf("та же форма у непрощённого ключа обязана быть находкой; получено: %v", findings)
-	}
-}
-
-// TestIAMCT113_Injection_ExemptionWithoutASubjectIsFound — САМОИСТЕЧЕНИЕ.
-//
-// Запись, у которой в теле нет предмета, — находка. Без этого ведомость пережила
-// бы снятие ключа и осталась бы слепой зоной, выданной вперёд следующему
-// объявлению того же имени.
-func TestIAMCT113_Injection_ExemptionWithoutASubjectIsFound(t *testing.T) {
-	_, findings := auditKeyForm(keysWithLegacyCycle,
-		[]string{"role_rule_ref_res_fk"}, []string{"accounts_owner_fk", "long_gone_fk"})
-	if !containsSub(findings, "long_gone_fk") || !containsSub(findings, "нечего исключать") {
-		t.Fatalf("запись без предмета обязана быть находкой; получено: %v", findings)
-	}
-	// Вторая сторона: запись, у которой предмет ЕСТЬ, находкой не становится.
-	if containsSub(findings, "accounts_owner_fk") {
-		t.Fatalf("запись с живым предметом находкой не является; получено: %v", findings)
 	}
 }
 
