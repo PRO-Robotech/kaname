@@ -283,10 +283,10 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 <table>
   <thead><tr><th>Метод и путь</th><th>Что делает</th><th>Право</th><th>Сессия</th></tr></thead>
   <tbody>
-    <tr><td><code>POST /iam/v1/users/{userId}/accessKeys:beginRegistration</code></td><td>испытание регистрации в форме <code>PublicKeyCredentialCreationOptions</code></td><td><code>token_issuer</code> на человеке, уровень «1»</td><td>да, свежая</td></tr>
-    <tr><td><code>POST /iam/v1/users/{userId}/accessKeys</code></td><td>приём результата церемонии — <code>Operation</code>, ответ несёт <code>AccessKey</code></td><td>то же</td><td>да, свежая</td></tr>
-    <tr><td><code>GET /iam/v1/users/{userId}/accessKeys</code></td><td>перечень ключей человека, курсором</td><td><code>token_reader</code>, уровень «1»</td><td>да</td></tr>
-    <tr><td><code>DELETE /iam/v1/users/{userId}/accessKeys/{accessKeyId}</code></td><td>снятие ключа — <code>Operation</code></td><td><code>token_issuer</code>, уровень «1»</td><td>да, свежая</td></tr>
+    <tr><td><code>POST /iam/v1/users/&#123;user_id&#125;/accessKeys:beginRegistration</code></td><td>испытание регистрации в форме <code>PublicKeyCredentialCreationOptions</code></td><td><code>token_issuer</code> на человеке, уровень «1»</td><td>да, свежая</td></tr>
+    <tr><td><code>POST /iam/v1/users/&#123;user_id&#125;/accessKeys</code></td><td>приём результата церемонии — <code>Operation</code>, ответ несёт <code>AccessKey</code></td><td>то же</td><td>да, свежая</td></tr>
+    <tr><td><code>GET /iam/v1/users/&#123;user_id&#125;/accessKeys</code></td><td>перечень ключей человека, курсором</td><td><code>token_reader</code>, уровень «1»</td><td>да</td></tr>
+    <tr><td><code>DELETE /iam/v1/users/&#123;user_id&#125;/accessKeys/&#123;access_key_id&#125;</code></td><td>снятие ключа — <code>Operation</code></td><td><code>token_issuer</code>, уровень «1»</td><td>да, свежая</td></tr>
     <tr><td><code>POST /iam/v1/accessKeys:beginAssertion</code></td><td>испытание предъявления вызывающему — <code>PublicKeyCredentialRequestOptions</code></td><td>освобождён (самообслуживание)</td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/accessKeys:finishAssertion</code></td><td>проверка утверждения: человек, ключ, флаги предъявления</td><td>освобождён (самообслуживание)</td><td>да</td></tr>
   </tbody>
