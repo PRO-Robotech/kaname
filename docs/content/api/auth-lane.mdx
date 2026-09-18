@@ -144,7 +144,7 @@ argument <поле>: unknown field`, у вложенного — `secondFactor.<
     {
       "user":    { "id": "usrbr69ze0ftz3jf7396", "email": "dev@acme.example", "displayName": "dev" },
       "session": { "expiresAt": "2026-09-18T10:00:00Z", "assuranceLevel": "1",
-                   "emailVerified": false, "passwordChangeRequired": false }
+                   "emailVerified": false }
     }
   `}
 </CodeBlock>
@@ -259,7 +259,7 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 
 <CodeBlock language="json">
   {dedent`
-    { "session": { "expiresAt": "…", "assuranceLevel": "2", "emailVerified": true, "passwordChangeRequired": false },
+    { "session": { "expiresAt": "…", "assuranceLevel": "2", "emailVerified": true },
       "assurance": { "level": "2", "level2Reachable": true, "missingForLevel2": [] } }
   `}
 </CodeBlock>
