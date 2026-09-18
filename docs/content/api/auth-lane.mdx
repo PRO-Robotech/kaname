@@ -32,7 +32,7 @@ import dedent from 'ts-dedent'
     <tr><td><code>POST /iam/v1/auth/recovery/complete</code></td><td>предъявление кода с новым паролем; отвечает как вход</td><td><code>recovery-complete</code></td><td>нет</td></tr>
     <tr><td><code>GET /iam/v1/auth/second-factor</code></td><td>состояние второго фактора</td><td>—</td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/second-factor/enroll</code></td><td>заведение кода по времени: секрет показывается один раз</td><td><code>second-factor</code></td><td>да, свежая</td></tr>
-    <tr><td><code>POST /iam/v1/auth/second-factor/confirm</code></td><td>подтверждение первым кодом; запасные коды показываются один раз</td><td><code>second-factor</code></td><td>да</td></tr>
+    <tr><td><code>POST /iam/v1/auth/second-factor/confirm</code></td><td>подтверждение первым кодом; запасные коды показываются один раз</td><td><code>second-factor</code></td><td>да, свежая</td></tr>
     <tr><td><code>POST /iam/v1/auth/second-factor/remove</code></td><td>снятие фактора, подтверждённое кодом</td><td><code>second-factor</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/second-factor/backup-codes</code></td><td>перечеканка запасных кодов, подтверждённая кодом</td><td><code>second-factor</code></td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/auth/step-up</code></td><td>церемония повышения уровня внутри живой сессии</td><td><code>step-up</code></td><td>да</td></tr>
@@ -144,7 +144,7 @@ argument <поле>: unknown field`, у вложенного — `secondFactor.<
     {
       "user":    { "id": "usrbr69ze0ftz3jf7396", "email": "dev@acme.example", "displayName": "dev" },
       "session": { "expiresAt": "2026-09-18T10:00:00Z", "assuranceLevel": "1",
-                   "emailVerified": false, "passwordChangeRequired": false }
+                   "emailVerified": false }
     }
   `}
 </CodeBlock>
@@ -232,7 +232,9 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 `POST …/confirm` (`{ "code", "csrfToken" }`) — первым кодом с приложения; ответ
 `{ "backupCodes": [десять кодов], "session", "assurance" }` и **новый** `kaname_session`:
 подтверждение — предъявление, сессия получает уровень `2`. Запасные коды показываются один раз.
-Без начатого заведения — `400` `ENROLLMENT_NOT_PENDING`; неверный код — `401`.
+Требует **свежего** предъявления, как и заведение: иначе `403` `SESSION_NOT_FRESH`, и при
+истёкших обоих окнах — свежести и заведения — первой отвечает свежесть. Без начатого либо
+истёкшего заведения — `400` `ENROLLMENT_NOT_PENDING`; неверный код — `401`.
 
 `POST …/remove` и `POST …/backup-codes` подтверждаются кодом — `{ "method", "code",
 "csrfToken" }` (`method`: `totp` либо `lookup_secret`), как смена пароля подтверждается текущим.
@@ -259,7 +261,7 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 
 <CodeBlock language="json">
   {dedent`
-    { "session": { "expiresAt": "…", "assuranceLevel": "2", "emailVerified": true, "passwordChangeRequired": false },
+    { "session": { "expiresAt": "…", "assuranceLevel": "2", "emailVerified": true },
       "assurance": { "level": "2", "level2Reachable": true, "missingForLevel2": [] } }
   `}
 </CodeBlock>
@@ -281,10 +283,10 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
 <table>
   <thead><tr><th>Метод и путь</th><th>Что делает</th><th>Право</th><th>Сессия</th></tr></thead>
   <tbody>
-    <tr><td><code>POST /iam/v1/users/{userId}/accessKeys:beginRegistration</code></td><td>испытание регистрации в форме <code>PublicKeyCredentialCreationOptions</code></td><td><code>token_issuer</code> на человеке, уровень «1»</td><td>да, свежая</td></tr>
-    <tr><td><code>POST /iam/v1/users/{userId}/accessKeys</code></td><td>приём результата церемонии — <code>Operation</code>, ответ несёт <code>AccessKey</code></td><td>то же</td><td>да, свежая</td></tr>
-    <tr><td><code>GET /iam/v1/users/{userId}/accessKeys</code></td><td>перечень ключей человека, курсором</td><td><code>token_reader</code>, уровень «1»</td><td>да</td></tr>
-    <tr><td><code>DELETE /iam/v1/users/{userId}/accessKeys/{accessKeyId}</code></td><td>снятие ключа — <code>Operation</code></td><td><code>token_issuer</code>, уровень «1»</td><td>да, свежая</td></tr>
+    <tr><td><code>POST /iam/v1/users/&#123;user_id&#125;/accessKeys:beginRegistration</code></td><td>испытание регистрации в форме <code>PublicKeyCredentialCreationOptions</code></td><td><code>token_issuer</code> на человеке, уровень «1»</td><td>да, свежая</td></tr>
+    <tr><td><code>POST /iam/v1/users/&#123;user_id&#125;/accessKeys</code></td><td>приём результата церемонии — <code>Operation</code>, ответ несёт <code>AccessKey</code></td><td>то же</td><td>да, свежая</td></tr>
+    <tr><td><code>GET /iam/v1/users/&#123;user_id&#125;/accessKeys</code></td><td>перечень ключей человека, курсором</td><td><code>token_reader</code>, уровень «1»</td><td>да</td></tr>
+    <tr><td><code>DELETE /iam/v1/users/&#123;user_id&#125;/accessKeys/&#123;access_key_id&#125;</code></td><td>снятие ключа — <code>Operation</code></td><td><code>token_issuer</code>, уровень «1»</td><td>да, свежая</td></tr>
     <tr><td><code>POST /iam/v1/accessKeys:beginAssertion</code></td><td>испытание предъявления вызывающему — <code>PublicKeyCredentialRequestOptions</code></td><td>освобождён (самообслуживание)</td><td>да</td></tr>
     <tr><td><code>POST /iam/v1/accessKeys:finishAssertion</code></td><td>проверка утверждения: человек, ключ, флаги предъявления</td><td>освобождён (самообслуживание)</td><td>да</td></tr>
   </tbody>
@@ -346,7 +348,7 @@ than the declared minimum length` (`authn.login.password-min-length`) ·
     <tr><td>400</td><td>9</td><td><code>no pending enrollment: begin with enroll</code></td><td><code>ENROLLMENT_NOT_PENDING</code></td><td>подтверждение без начатого либо истёкшего заведения</td></tr>
     <tr><td>401</td><td>16</td><td><code>authentication failed</code></td><td>—</td><td><strong>один</strong> отказ на все причины: адреса нет · пароль не тот · личность заблокирована или ни разу не входила · код не тот · код истёк или применён · код приложен при незаведённом факторе (на входе) · сессии нет (у глаголов под сессией) · текущий пароль не тот</td></tr>
     <tr><td>403</td><td>7</td><td><code>form token rejected</code></td><td><code>FORM_TOKEN_REJECTED</code></td><td>признак есть и не подошёл: чужой контекст либо чужой вид, неразличимо</td></tr>
-    <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>заведение фактора при предъявлении старше окна свежести</td></tr>
+    <tr><td>403</td><td>7</td><td><code>re-authentication required: present a credential again</code></td><td><code>SESSION_NOT_FRESH</code></td><td>заведение либо подтверждение фактора при предъявлении старше окна свежести</td></tr>
     <tr><td>403</td><td>7</td><td><code>permission denied</code></td><td>—</td><td>вызывающий — не край: тело не читалось</td></tr>
     <tr><td>405</td><td>3</td><td><code>method not allowed</code></td><td>—</td><td>путь есть, метод не тот; заголовок <code>Allow</code> называет допустимый</td></tr>
     <tr><td>409</td><td>6</td><td><code>second factor is already enrolled</code></td><td><code>SECOND_FACTOR_ALREADY_ENROLLED</code></td><td>повторное заведение</td></tr>

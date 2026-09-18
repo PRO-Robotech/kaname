@@ -557,7 +557,7 @@ func TestLane_F3_23_CSRFIsIssuedWithoutASession(t *testing.T) {
 	require.Equal(t, http.StatusOK, r.status)
 }
 
-// TestLane_UnknownPathAndMethod — путь семейства вне четырёх глаголов — 404;
+// TestLane_UnknownPathAndMethod — путь семейства вне перечня `Paths()` — 404;
 // метод не тот — 405.
 func TestLane_UnknownPathAndMethod(t *testing.T) {
 	l := newLane(t, &stubLane{}, "")

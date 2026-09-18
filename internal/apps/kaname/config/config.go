@@ -208,9 +208,9 @@ type APIServerConfig struct {
 	// стартом с именем слушателя.
 	RateLimit RateLimitConfig `mapstructure:"rate-limit"`
 	// LoginLaneEndpoint — адрес HTTP-слушателя полосы входа паролем (Ф3,
-	// kacho#1269): четыре глагола формы, ретранслируемые краем; TLS
-	// взаимный, допуск — ровно край. Пустой — слушатель не поднимается; под
-	// посадкой `own` пустой — отказ старта.
+	// kacho#1269): глаголы формы (перечень — `loginlanehttp.Paths()`),
+	// ретранслируемые краем; TLS взаимный, допуск — ровно край. Пустой —
+	// слушатель не поднимается; под посадкой `own` пустой — отказ старта.
 	LoginLaneEndpoint string `mapstructure:"login-lane-endpoint"`
 }
 
