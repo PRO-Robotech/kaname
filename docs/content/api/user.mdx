@@ -346,7 +346,13 @@ account/project). Identity-поля (`externalId` и прочие, проеци�
 Снимает у человека код по времени и набор запасных кодов и завершает **все** его сессии —
 одной транзакцией. Путь для того, кто утратил и приложение-аутентификатор, и запасные коды:
 сам человек снимает фактор только кодом, а его у него больше нет. После сброса он входит
-паролем (уровень `1`) и заводит фактор заново на своей полосе входа.
+паролем (уровень `1`) и заводит фактор заново на полосе входа —
+[`POST /iam/v1/auth/second-factor/enroll`](/api/auth-lane#second-factor).
+
+Глагол исполняется **только под посадкой `own`**: второй фактор служба хранит лишь там. Под
+`external` второго фактора у службы нет — если он заведён, его держит внешний поставщик, — и
+допущенному вызывающему глагол отвечает `UNIMPLEMENTED` (HTTP `501`) с текстом
+`second factor is not served on this posture`.
 
 Требует `identity_suspender` и уровень сессии `2` — те же, что у `Block`/`Unblock`: это
 надзор облака, а не самообслуживание. Асинхронно; чужой аккаунт получает `NOT_FOUND`,
@@ -397,6 +403,7 @@ account/project). Identity-поля (`externalId` и прочие, проеци�
     <tr><td><code>Block</code> приглашённого (<code>PENDING</code>)</td><td><code>FAILED_PRECONDITION</code></td><td>Внешней личности ещё нет — запрещать нечего; снимите членство</td></tr>
     <tr><td><code>Block</code> / <code>Unblock</code> распорядителем аккаунта</td><td><code>PERMISSION_DENIED</code></td><td><code>identity_suspender</code> — отношение надзора облака; аккаунту служит <code>RemoveFromAccount</code></td></tr>
     <tr><td><code>Update</code> меток распорядителем аккаунта</td><td><code>PERMISSION_DENIED</code></td><td>Метки человека пишет только надзор облака (<code>record_writer</code>)</td></tr>
+    <tr><td><code>ResetSecondFactor</code> под посадкой <code>external</code></td><td><code>UNIMPLEMENTED</code></td><td><code>"second factor is not served on this posture"</code>: второго фактора у службы на этой посадке нет</td></tr>
   </tbody>
 </table>
 
