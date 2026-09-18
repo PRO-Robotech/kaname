@@ -125,7 +125,6 @@ var clientSiteStay = []ClientSiteStay{
 	{Page: "docs/content/terraform/module-iam-machine-identity.mdx", Token: "github.com/PRO-Robotech/kacho//terraform/modules/iam-machine-identity", Count: 1, Why: whyNeighborModuleRepo},
 	{Page: "docs/content/terraform/module-iam-project.mdx", Token: "github.com/PRO-Robotech/kacho//terraform/modules/iam-project", Count: 1, Why: whyNeighborModuleRepo},
 	{Page: "docs/content/terraform/provider.mdx", Token: "https://api.kacho.example", Count: 1, Why: whyPlatformProvider},
-	{Page: "docs/content/terraform/provider.mdx", Token: "kacho", Count: 2, Why: whyPlatformProvider},
 	{Page: "docs/content/terraform/provider.mdx", Token: "KACHO_ENDPOINT", Count: 1, Why: whyPlatformProvider},
 	{Page: "docs/content/terraform/provider.mdx", Token: "kacho_iam_", Count: 2, Why: whyPlatformProvider},
 	{Page: "docs/content/terraform/provider.mdx", Token: "kacho_iam_project.prod", Count: 1, Why: whyPlatformProvider},
