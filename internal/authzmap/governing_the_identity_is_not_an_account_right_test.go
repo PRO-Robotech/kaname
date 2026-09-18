@@ -79,6 +79,12 @@ var governingRPCs = []string{
 	"kaname.cloud.iam.v1.UserService/Update",
 	"kaname.cloud.iam.v1.UserService/Block",
 	"kaname.cloud.iam.v1.UserService/Unblock",
+	// ResetSecondFactor — распорядительный сброс второго фактора (Ф12 Р9,
+	// kaname#254): надзорное действие над строкой ГЛОБАЛЬНОЙ личности, поэтому не
+	// вправе выводиться от аккаунта. Гейтится тем же `identity_suspender`, что
+	// Block/Unblock (каталог), — у него источников уровня аккаунта нет; запись
+	// закрепляет, что каталожное отношение этого RPC останется без них.
+	"kaname.cloud.iam.v1.UserService/ResetSecondFactor",
 }
 
 // accountScopedReadRPC — чтение записи. Положительный контроль: именно у него
